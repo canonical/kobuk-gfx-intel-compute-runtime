@@ -1,0 +1,2 @@
+# filed as https://github.com/intel/compute-runtime/issues/157
+source-is-missing unit_tests/test_files/copybuffer.elf
