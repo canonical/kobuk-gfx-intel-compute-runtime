@@ -6,11 +6,11 @@ Files: *
 Copyright: 2018 Intel Corporation
 License: MIT
 
-Files: third_party/gtest
+Files: third_party/gtest/*
 Copyright: 2005-2008 Google Inc.
-License: BSD
+License: BSD-3-clause
 
-Files: third_party/opencl_headers
+Files: third_party/opencl_headers/*
        third_party/opengl_headers/GL/glext.h
 Copyright: 2008-2015 The Khronos Group Inc.
            2008-2018 Intel Corporation
@@ -20,9 +20,9 @@ Files: third_party/opengl_headers/GL/gl.h
 Copyright: 1991-2000 Silicon Graphics, Inc.
 License: SGI
 
-Files: third_party/source_level_debugger
+Files: third_party/source_level_debugger/*
 Copyright: 2014-2016 Intel Corporationq
-License: BSD
+License: BSD-3-clause
 
 Files: third_party/uapi/*
 Copyright: 1999 Precision Insight, Inc.
@@ -58,7 +58,7 @@ License: MIT
  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-License: BSD
+License: BSD-3-clause
  Redistribution and use in source and binary forms, with or without
  modification, are permitted provided that the following conditions
  are met:
