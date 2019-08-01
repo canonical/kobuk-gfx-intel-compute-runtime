@@ -1,4 +1,4 @@
-intel-compute-runtime (19.13.12717-1) UNRELEASED; urgency=medium
+intel-compute-runtime (19.29.13530-1) UNRELEASED; urgency=medium
 
   * Initial release (Closes: #926706)
 
