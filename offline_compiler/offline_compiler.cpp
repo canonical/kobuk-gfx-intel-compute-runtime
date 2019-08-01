@@ -55,6 +55,12 @@ bool stringsAreEqual(const char *string1, const char *string2) {
     return (strcmp(string1, string2) == 0);
 }
 
+bool stringsAreEqual(std::string string1, std::string string2) {
+    if (string2.empty())
+        return false;
+    return (string1 == string2);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // convertToPascalCase
 ////////////////////////////////////////////////////////////////////////////////
@@ -91,12 +97,12 @@ OfflineCompiler::~OfflineCompiler() {
 ////////////////////////////////////////////////////////////////////////////////
 // Create
 ////////////////////////////////////////////////////////////////////////////////
-OfflineCompiler *OfflineCompiler::create(size_t numArgs, const char *const *argv, int &retVal) {
+OfflineCompiler *OfflineCompiler::create(size_t numArgs, const std::vector<std::string> &allArgs, int &retVal) {
     retVal = CL_SUCCESS;
     auto pOffCompiler = new OfflineCompiler();
 
     if (pOffCompiler) {
-        retVal = pOffCompiler->initialize(numArgs, argv);
+        retVal = pOffCompiler->initialize(numArgs, allArgs);
     }
 
     if (retVal != CL_SUCCESS) {
@@ -118,12 +124,12 @@ int OfflineCompiler::buildSourceCode() {
             retVal = CL_INVALID_PROGRAM;
             break;
         }
-        UNRECOVERABLE_IF(fclDeviceCtx == nullptr);
         UNRECOVERABLE_IF(igcDeviceCtx == nullptr);
 
         CIF::RAII::UPtr_t<IGC::OclTranslationOutputTagOCL> igcOutput;
         bool inputIsIntermediateRepresentation = inputFileLlvm || inputFileSpirV;
         if (false == inputIsIntermediateRepresentation) {
+            UNRECOVERABLE_IF(fclDeviceCtx == nullptr);
             IGC::CodeType::CodeType_t intermediateRepresentation = useLlvmText ? IGC::CodeType::llvmLl : preferredIntermediateRepresentation;
             // sourceCode.size() returns the number of characters without null terminated char
             auto fclSrc = CIF::Builtins::CreateConstBuffer(fclMain.get(), sourceCode.c_str(), sourceCode.size() + 1);
@@ -166,7 +172,7 @@ int OfflineCompiler::buildSourceCode() {
 
         } else {
             auto igcSrc = CIF::Builtins::CreateConstBuffer(igcMain.get(), sourceCode.c_str(), sourceCode.size());
-            auto igcOptions = CIF::Builtins::CreateConstBuffer(igcMain.get(), nullptr, 0);
+            auto igcOptions = CIF::Builtins::CreateConstBuffer(igcMain.get(), options.c_str(), options.size());
             auto igcInternalOptions = CIF::Builtins::CreateConstBuffer(igcMain.get(), internalOptions.c_str(), internalOptions.size());
             auto igcTranslationCtx = igcDeviceCtx->CreateTranslationCtx(inputFileSpirV ? IGC::CodeType::spirV : IGC::CodeType::llvmBc, IGC::CodeType::oclGenBin);
             igcOutput = igcTranslationCtx->Translate(igcSrc.get(), igcOptions.get(), igcInternalOptions.get(), nullptr, 0);
@@ -237,7 +243,7 @@ int OfflineCompiler::getHardwareInfo(const char *pDeviceName) {
             if (hardwareInfoTable[productId]) {
                 hwInfo = hardwareInfoTable[productId];
                 familyNameWithType.clear();
-                familyNameWithType.append(familyName[hwInfo->pPlatform->eRenderCoreFamily]);
+                familyNameWithType.append(familyName[hwInfo->platform.eRenderCoreFamily]);
                 familyNameWithType.append(getPlatformType(*hwInfo));
                 retVal = CL_SUCCESS;
                 break;
@@ -270,13 +276,13 @@ std::string OfflineCompiler::getStringWithinDelimiters(const std::string &src) {
 ////////////////////////////////////////////////////////////////////////////////
 // Initialize
 ////////////////////////////////////////////////////////////////////////////////
-int OfflineCompiler::initialize(size_t numArgs, const char *const *argv) {
+int OfflineCompiler::initialize(size_t numArgs, const std::vector<std::string> &allArgs) {
     int retVal = CL_SUCCESS;
     const char *pSource = nullptr;
     void *pSourceFromFile = nullptr;
     size_t sourceFromFileSize = 0;
 
-    retVal = parseCommandLine(numArgs, argv);
+    retVal = parseCommandLine(numArgs, allArgs);
     if (retVal != CL_SUCCESS) {
         return retVal;
     }
@@ -327,40 +333,47 @@ int OfflineCompiler::initialize(size_t numArgs, const char *const *argv) {
         sourceCode = (pSource != nullptr) ? getStringWithinDelimiters((char *)pSourceFromFile) : (char *)pSourceFromFile;
     }
 
-    auto fclLibFile = OsLibrary::load(Os::frontEndDllName);
-    if (fclLibFile == nullptr) {
-        printf("Error: Failed to load %s\n", Os::frontEndDllName);
-        return CL_OUT_OF_HOST_MEMORY;
-    }
+    if ((inputFileSpirV == false) && (inputFileLlvm == false)) {
+        auto fclLibFile = OsLibrary::load(Os::frontEndDllName);
+        if (fclLibFile == nullptr) {
+            printf("Error: Failed to load %s\n", Os::frontEndDllName);
+            return CL_OUT_OF_HOST_MEMORY;
+        }
 
-    this->fclLib.reset(fclLibFile);
-    if (this->fclLib == nullptr) {
-        return CL_OUT_OF_HOST_MEMORY;
-    }
+        this->fclLib.reset(fclLibFile);
+        if (this->fclLib == nullptr) {
+            return CL_OUT_OF_HOST_MEMORY;
+        }
 
-    auto fclCreateMain = reinterpret_cast<CIF::CreateCIFMainFunc_t>(this->fclLib->getProcAddress(CIF::CreateCIFMainFuncName));
-    if (fclCreateMain == nullptr) {
-        return CL_OUT_OF_HOST_MEMORY;
-    }
+        auto fclCreateMain = reinterpret_cast<CIF::CreateCIFMainFunc_t>(this->fclLib->getProcAddress(CIF::CreateCIFMainFuncName));
+        if (fclCreateMain == nullptr) {
+            return CL_OUT_OF_HOST_MEMORY;
+        }
 
-    this->fclMain = CIF::RAII::UPtr(createMainNoSanitize(fclCreateMain));
-    if (this->fclMain == nullptr) {
-        return CL_OUT_OF_HOST_MEMORY;
-    }
+        this->fclMain = CIF::RAII::UPtr(createMainNoSanitize(fclCreateMain));
+        if (this->fclMain == nullptr) {
+            return CL_OUT_OF_HOST_MEMORY;
+        }
 
-    if (false == this->fclMain->IsCompatible<IGC::FclOclDeviceCtx>()) {
-        // given FCL is not compatible
-        DEBUG_BREAK_IF(true);
-        return CL_OUT_OF_HOST_MEMORY;
-    }
+        if (false == this->fclMain->IsCompatible<IGC::FclOclDeviceCtx>()) {
+            printf("Incompatible interface in FCL : %s\n", CIF::InterfaceIdCoder::Dec(this->fclMain->FindIncompatible<IGC::FclOclDeviceCtx>()).c_str());
+            DEBUG_BREAK_IF(true);
+            return CL_OUT_OF_HOST_MEMORY;
+        }
 
-    this->fclDeviceCtx = this->fclMain->CreateInterface<IGC::FclOclDeviceCtxTagOCL>();
-    if (this->fclDeviceCtx == nullptr) {
-        return CL_OUT_OF_HOST_MEMORY;
-    }
+        this->fclDeviceCtx = this->fclMain->CreateInterface<IGC::FclOclDeviceCtxTagOCL>();
+        if (this->fclDeviceCtx == nullptr) {
+            return CL_OUT_OF_HOST_MEMORY;
+        }
 
-    fclDeviceCtx->SetOclApiVersion(hwInfo->capabilityTable.clVersionSupport * 10);
-    preferredIntermediateRepresentation = fclDeviceCtx->GetPreferredIntermediateRepresentation();
+        fclDeviceCtx->SetOclApiVersion(hwInfo->capabilityTable.clVersionSupport * 10);
+        preferredIntermediateRepresentation = fclDeviceCtx->GetPreferredIntermediateRepresentation();
+    } else {
+        if (!isQuiet()) {
+            printf("Compilation from IR - skipping loading of FCL\n");
+        }
+        preferredIntermediateRepresentation = IGC::CodeType::spirV;
+    }
 
     this->igcLib.reset(OsLibrary::load(Os::igcDllName));
     if (this->igcLib == nullptr) {
@@ -377,9 +390,16 @@ int OfflineCompiler::initialize(size_t numArgs, const char *const *argv) {
         return CL_OUT_OF_HOST_MEMORY;
     }
 
-    if (false == this->igcMain->IsCompatible<IGC::IgcOclDeviceCtx>()) {
-        // given IGC is not compatible
+    std::vector<CIF::InterfaceId_t> interfacesToIgnore = {IGC::OclGenBinaryBase::GetInterfaceId()};
+    if (false == this->igcMain->IsCompatible<IGC::IgcOclDeviceCtx>(&interfacesToIgnore)) {
+        printf("Incompatible interface in IGC : %s\n", CIF::InterfaceIdCoder::Dec(this->igcMain->FindIncompatible<IGC::IgcOclDeviceCtx>(&interfacesToIgnore)).c_str());
         DEBUG_BREAK_IF(true);
+        return CL_OUT_OF_HOST_MEMORY;
+    }
+
+    CIF::Version_t verMin = 0, verMax = 0;
+    if (false == this->igcMain->FindSupportedVersions<IGC::IgcOclDeviceCtx>(IGC::OclGenBinaryBase::GetInterfaceId(), verMin, verMax)) {
+        printf("Patchtoken interface is missing");
         return CL_OUT_OF_HOST_MEMORY;
     }
 
@@ -394,39 +414,39 @@ int OfflineCompiler::initialize(size_t numArgs, const char *const *argv) {
     if ((igcPlatform == nullptr) || (igcGtSystemInfo == nullptr) || (igcFeWa == nullptr)) {
         return CL_OUT_OF_HOST_MEMORY;
     }
-    IGC::PlatformHelper::PopulateInterfaceWith(*igcPlatform.get(), *hwInfo->pPlatform);
-    IGC::GtSysInfoHelper::PopulateInterfaceWith(*igcGtSystemInfo.get(), *hwInfo->pSysInfo);
+    IGC::PlatformHelper::PopulateInterfaceWith(*igcPlatform.get(), hwInfo->platform);
+    IGC::GtSysInfoHelper::PopulateInterfaceWith(*igcGtSystemInfo.get(), hwInfo->gtSystemInfo);
     // populate with features
-    igcFeWa.get()->SetFtrDesktop(hwInfo->pSkuTable->ftrDesktop);
-    igcFeWa.get()->SetFtrChannelSwizzlingXOREnabled(hwInfo->pSkuTable->ftrChannelSwizzlingXOREnabled);
+    igcFeWa.get()->SetFtrDesktop(hwInfo->featureTable.ftrDesktop);
+    igcFeWa.get()->SetFtrChannelSwizzlingXOREnabled(hwInfo->featureTable.ftrChannelSwizzlingXOREnabled);
 
-    igcFeWa.get()->SetFtrGtBigDie(hwInfo->pSkuTable->ftrGtBigDie);
-    igcFeWa.get()->SetFtrGtMediumDie(hwInfo->pSkuTable->ftrGtMediumDie);
-    igcFeWa.get()->SetFtrGtSmallDie(hwInfo->pSkuTable->ftrGtSmallDie);
+    igcFeWa.get()->SetFtrGtBigDie(hwInfo->featureTable.ftrGtBigDie);
+    igcFeWa.get()->SetFtrGtMediumDie(hwInfo->featureTable.ftrGtMediumDie);
+    igcFeWa.get()->SetFtrGtSmallDie(hwInfo->featureTable.ftrGtSmallDie);
 
-    igcFeWa.get()->SetFtrGT1(hwInfo->pSkuTable->ftrGT1);
-    igcFeWa.get()->SetFtrGT1_5(hwInfo->pSkuTable->ftrGT1_5);
-    igcFeWa.get()->SetFtrGT2(hwInfo->pSkuTable->ftrGT2);
-    igcFeWa.get()->SetFtrGT3(hwInfo->pSkuTable->ftrGT3);
-    igcFeWa.get()->SetFtrGT4(hwInfo->pSkuTable->ftrGT4);
+    igcFeWa.get()->SetFtrGT1(hwInfo->featureTable.ftrGT1);
+    igcFeWa.get()->SetFtrGT1_5(hwInfo->featureTable.ftrGT1_5);
+    igcFeWa.get()->SetFtrGT2(hwInfo->featureTable.ftrGT2);
+    igcFeWa.get()->SetFtrGT3(hwInfo->featureTable.ftrGT3);
+    igcFeWa.get()->SetFtrGT4(hwInfo->featureTable.ftrGT4);
 
-    igcFeWa.get()->SetFtrIVBM0M1Platform(hwInfo->pSkuTable->ftrIVBM0M1Platform);
-    igcFeWa.get()->SetFtrGTL(hwInfo->pSkuTable->ftrGT1);
-    igcFeWa.get()->SetFtrGTM(hwInfo->pSkuTable->ftrGT2);
-    igcFeWa.get()->SetFtrGTH(hwInfo->pSkuTable->ftrGT3);
+    igcFeWa.get()->SetFtrIVBM0M1Platform(hwInfo->featureTable.ftrIVBM0M1Platform);
+    igcFeWa.get()->SetFtrGTL(hwInfo->featureTable.ftrGT1);
+    igcFeWa.get()->SetFtrGTM(hwInfo->featureTable.ftrGT2);
+    igcFeWa.get()->SetFtrGTH(hwInfo->featureTable.ftrGT3);
 
-    igcFeWa.get()->SetFtrSGTPVSKUStrapPresent(hwInfo->pSkuTable->ftrSGTPVSKUStrapPresent);
-    igcFeWa.get()->SetFtrGTA(hwInfo->pSkuTable->ftrGTA);
-    igcFeWa.get()->SetFtrGTC(hwInfo->pSkuTable->ftrGTC);
-    igcFeWa.get()->SetFtrGTX(hwInfo->pSkuTable->ftrGTX);
-    igcFeWa.get()->SetFtr5Slice(hwInfo->pSkuTable->ftr5Slice);
+    igcFeWa.get()->SetFtrSGTPVSKUStrapPresent(hwInfo->featureTable.ftrSGTPVSKUStrapPresent);
+    igcFeWa.get()->SetFtrGTA(hwInfo->featureTable.ftrGTA);
+    igcFeWa.get()->SetFtrGTC(hwInfo->featureTable.ftrGTC);
+    igcFeWa.get()->SetFtrGTX(hwInfo->featureTable.ftrGTX);
+    igcFeWa.get()->SetFtr5Slice(hwInfo->featureTable.ftr5Slice);
 
-    igcFeWa.get()->SetFtrGpGpuMidThreadLevelPreempt(hwInfo->pSkuTable->ftrGpGpuMidThreadLevelPreempt);
-    igcFeWa.get()->SetFtrIoMmuPageFaulting(hwInfo->pSkuTable->ftrIoMmuPageFaulting);
-    igcFeWa.get()->SetFtrWddm2Svm(hwInfo->pSkuTable->ftrWddm2Svm);
-    igcFeWa.get()->SetFtrPooledEuEnabled(hwInfo->pSkuTable->ftrPooledEuEnabled);
+    igcFeWa.get()->SetFtrGpGpuMidThreadLevelPreempt(hwInfo->featureTable.ftrGpGpuMidThreadLevelPreempt);
+    igcFeWa.get()->SetFtrIoMmuPageFaulting(hwInfo->featureTable.ftrIoMmuPageFaulting);
+    igcFeWa.get()->SetFtrWddm2Svm(hwInfo->featureTable.ftrWddm2Svm);
+    igcFeWa.get()->SetFtrPooledEuEnabled(hwInfo->featureTable.ftrPooledEuEnabled);
 
-    igcFeWa.get()->SetFtrResourceStreamer(hwInfo->pSkuTable->ftrResourceStreamer);
+    igcFeWa.get()->SetFtrResourceStreamer(hwInfo->featureTable.ftrResourceStreamer);
 
     return retVal;
 }
@@ -434,7 +454,7 @@ int OfflineCompiler::initialize(size_t numArgs, const char *const *argv) {
 ////////////////////////////////////////////////////////////////////////////////
 // ParseCommandLine
 ////////////////////////////////////////////////////////////////////////////////
-int OfflineCompiler::parseCommandLine(size_t numArgs, const char *const *argv) {
+int OfflineCompiler::parseCommandLine(size_t numArgs, const std::vector<std::string> &argv) {
     int retVal = CL_SUCCESS;
     bool compile32 = false;
     bool compile64 = false;
@@ -445,8 +465,10 @@ int OfflineCompiler::parseCommandLine(size_t numArgs, const char *const *argv) {
     }
 
     for (uint32_t argIndex = 1; argIndex < numArgs; argIndex++) {
-        if ((stringsAreEqual(argv[argIndex], "-file")) &&
-            (argIndex + 1 < numArgs)) {
+        if (stringsAreEqual(argv[argIndex], "compile")) {
+            //skip it
+        } else if ((stringsAreEqual(argv[argIndex], "-file")) &&
+                   (argIndex + 1 < numArgs)) {
             inputFile = argv[argIndex + 1];
             argIndex++;
         } else if ((stringsAreEqual(argv[argIndex], "-output")) &&
@@ -489,11 +511,11 @@ int OfflineCompiler::parseCommandLine(size_t numArgs, const char *const *argv) {
             argIndex++;
         } else if (stringsAreEqual(argv[argIndex], "-q")) {
             quiet = true;
-        } else if (stringsAreEqual(argv[argIndex], "-?")) {
+        } else if (stringsAreEqual(argv[argIndex], "--help")) {
             printUsage();
             retVal = PRINT_USAGE;
         } else {
-            printf("Invalid option (arg %d): %s\n", argIndex, argv[argIndex]);
+            printf("Invalid option (arg %d): %s\n", argIndex, argv[argIndex].c_str());
             retVal = INVALID_COMMAND_LINE;
             break;
         }
@@ -635,29 +657,88 @@ std::string getDevicesTypes() {
 // PrintUsage
 ////////////////////////////////////////////////////////////////////////////////
 void OfflineCompiler::printUsage() {
+    printf(R"===(Compiles input file to Intel OpenCL GPU device binary (*.bin).
+Additionally, outputs intermediate representation (e.g. spirV).
+Different input and intermediate file formats are available.
 
-    printf("Compiles CL files into llvm (.bc or .ll), gen isa (.gen), and binary files (.bin)\n\n");
-    printf("ocloc -file <filename> -device <device_type> [OPTIONS]\n\n");
-    printf("  -file <filename>             Indicates the CL kernel file to be compiled.\n");
-    printf("  -device <device_type>        Indicates which device for which we will compile.\n");
-    printf("                               <device_type> can be: %s\n", getDevicesTypes().c_str());
-    printf("\n");
-    printf("  -output <filename>           Indicates output files core name.\n");
-    printf("  -out_dir <output_dir>        Indicates the directory into which the compiled files\n");
-    printf("                               will be placed.\n");
-    printf("  -cpp_file                    Cpp file with scheduler program binary will be generated.\n");
-    printf("\n");
-    printf("  -32                          Force compile to 32-bit binary.\n");
-    printf("  -64                          Force compile to 64-bit binary.\n");
-    printf("  -internal_options <options>  Compiler internal options.\n");
-    printf("  -llvm_text                   Readable LLVM text will be output in a .ll file instead of\n");
-    printf("                               through the default lllvm binary (.bc) file.\n");
-    printf("  -llvm_input                  Indicates input file is llvm source\n");
-    printf("  -spirv_input                  Indicates input file is a SpirV binary\n");
-    printf("  -options <options>           Compiler options.\n");
-    printf("  -options_name                Add suffix with compile options to filename\n");
-    printf("  -q                           Be more quiet. print only warnings and errors.\n");
-    printf("  -?                           Print this usage message.\n");
+Usage: ocloc [compile] -file <filename> -device <device_type> [-output <filename>] [-out_dir <output_dir>] [-options <options>] [-32|-64] [-internal_options <options>] [-llvm_text|-llvm_input|-spirv_input] [-options_name] [-q] [-cpp_file] [--help]
+
+  -file <filename>              The input file to be compiled
+                                (by default input source format is
+                                OpenCL C kernel language).
+                                
+  -device <device_type>         Target device.
+                                <device_type> can be: %s
+
+  -output <filename>            Optional output file base name.
+                                Default is input file's base name.
+                                This base name will be used for all output
+                                files. Proper sufixes (describing file formats)
+                                will be added automatically.
+
+  -out_dir <output_dir>         Optional output directory.
+                                Default is current working directory.
+
+  -options <options>            Optional OpenCL C compilation options
+                                as defined by OpenCL specification.
+
+  -32                           Forces target architecture to 32-bit pointers.
+                                Default pointer size is inherited from
+                                ocloc's pointer size.         
+                                This option is exclusive with -64.
+
+  -64                           Forces target architecture to 64-bit pointers.
+                                Default pointer size is inherited from
+                                ocloc's pointer size.
+                                This option is exclusive with -32.
+
+  -internal_options <options>   Optional compiler internal options
+                                as defined by compilers used underneath.
+                                Check intel-graphics-compiler (IGC) project
+                                for details on available internal options.
+
+  -llvm_text                    Forces intermediate representation (IR) format
+                                to human-readable LLVM IR (.ll).
+                                This option affects only output files
+                                and should not be used in combination with
+                                '-llvm_input' option.
+                                Default IR is spirV.
+                                This option is exclusive with -spirv_input.
+                                This option is exclusive with -llvm_input.
+
+  -llvm_input                   Indicates that input file is an llvm binary.
+                                Default is OpenCL C kernel language.
+                                This option is exclusive with -spirv_input.
+                                This option is exclusive with -llvm_text.
+
+  -spirv_input                  Indicates that input file is a spirV binary.
+                                Default is OpenCL C kernel language format.
+                                This option is exclusive with -llvm_input.
+                                This option is exclusive with -llvm_text.
+
+  -options_name                 Will add suffix to output files.
+                                This suffix will be generated based on input
+                                options (useful when rebuilding with different 
+                                set of options so that results won't get
+                                overwritten).
+                                This suffix is added always as the last part
+                                of the filename (even after file's extension).
+                                It does not affect '--output' parameter and can
+                                be used along with it ('--output' parameter
+                                defines the base name - i.e. prefix).
+
+  -q                            Will silence most of output messages.
+
+  -cpp_file                     Will generate c++ file with C-array
+                                containing Intel OpenCL device binary.
+
+  --help                        Print this usage message.
+
+Examples :
+  Compile file to Intel OpenCL GPU device binary (out = source_file_Gen9core.bin)
+    ocloc -file source_file.cl -device skl
+)===",
+           NEO::getDevicesTypes().c_str());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

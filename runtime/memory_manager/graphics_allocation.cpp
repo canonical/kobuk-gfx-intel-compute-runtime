@@ -13,8 +13,8 @@
 namespace NEO {
 
 void GraphicsAllocation::setAllocationType(AllocationType allocationType) {
-    DebugManager.logAllocation(this);
     this->allocationType = allocationType;
+    DebugManager.logAllocation(this);
 }
 
 GraphicsAllocation::GraphicsAllocation(AllocationType allocationType, void *cpuPtrIn, uint64_t gpuAddress, uint64_t baseAddress,
@@ -53,6 +53,17 @@ void GraphicsAllocation::updateTaskCount(uint32_t newTaskCount, uint32_t context
 
 std::string GraphicsAllocation::getAllocationInfoString() const {
     return "";
+}
+
+uint32_t GraphicsAllocation::getUsedPageSize() const {
+    switch (this->memoryPool) {
+    case MemoryPool::System64KBPages:
+    case MemoryPool::System64KBPagesWith32BitGpuAddressing:
+    case MemoryPool::LocalMemory:
+        return MemoryConstants::pageSize64k;
+    default:
+        return MemoryConstants::pageSize;
+    }
 }
 
 constexpr uint32_t GraphicsAllocation::objectNotUsed;

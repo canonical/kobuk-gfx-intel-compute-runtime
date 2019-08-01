@@ -1,184 +1,233 @@
 /*
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2017-2019 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include "runtime/command_queue/command_queue.h"
 #include "runtime/command_queue/gpgpu_walker.h"
+#include "runtime/command_queue/local_id_gen.h"
+#include "runtime/command_stream/command_stream_receiver.h"
+#include "runtime/device/device_info.h"
+#include "runtime/event/perf_counter.h"
+#include "runtime/event/user_event.h"
+#include "runtime/helpers/aligned_memory.h"
+#include "runtime/helpers/debug_helpers.h"
+#include "runtime/helpers/hardware_commands_helper.h"
+#include "runtime/helpers/hw_helper.h"
+#include "runtime/helpers/queue_helpers.h"
+#include "runtime/helpers/validators.h"
+#include "runtime/indirect_heap/indirect_heap.h"
+#include "runtime/mem_obj/mem_obj.h"
+#include "runtime/memory_manager/graphics_allocation.h"
+#include "runtime/utilities/tag_allocator.h"
+
+#include <algorithm>
+#include <cmath>
 
 namespace NEO {
 
+// Performs ReadModifyWrite operation on value of a register: Register = Register Operation Mask
 template <typename GfxFamily>
-inline size_t GpgpuWalkerHelper<GfxFamily>::setGpgpuWalkerThreadData(
-    WALKER_TYPE<GfxFamily> *walkerCmd,
-    const size_t globalOffsets[3],
-    const size_t startWorkGroups[3],
-    const size_t numWorkGroups[3],
-    const size_t localWorkSizesIn[3],
-    uint32_t simd,
-    uint32_t workDim,
-    bool localIdsGenerationByRuntime,
-    bool inlineDataProgrammingRequired,
-    const iOpenCL::SPatchThreadPayload &threadPayload) {
-    auto localWorkSize = localWorkSizesIn[0] * localWorkSizesIn[1] * localWorkSizesIn[2];
+void GpgpuWalkerHelper<GfxFamily>::addAluReadModifyWriteRegister(
+    NEO::LinearStream *pCommandStream,
+    uint32_t aluRegister,
+    uint32_t operation,
+    uint32_t mask) {
+    // Load "Register" value into CS_GPR_R0
+    typedef typename GfxFamily::MI_LOAD_REGISTER_REG MI_LOAD_REGISTER_REG;
+    typedef typename GfxFamily::MI_MATH MI_MATH;
+    typedef typename GfxFamily::MI_MATH_ALU_INST_INLINE MI_MATH_ALU_INST_INLINE;
+    auto pCmd = pCommandStream->getSpaceForCmd<MI_LOAD_REGISTER_REG>();
+    *pCmd = GfxFamily::cmdInitLoadRegisterReg;
+    pCmd->setSourceRegisterAddress(aluRegister);
+    pCmd->setDestinationRegisterAddress(CS_GPR_R0);
 
-    auto threadsPerWorkGroup = getThreadsPerWG(simd, localWorkSize);
-    walkerCmd->setThreadWidthCounterMaximum(static_cast<uint32_t>(threadsPerWorkGroup));
+    // Load "Mask" into CS_GPR_R1
+    typedef typename GfxFamily::MI_LOAD_REGISTER_IMM MI_LOAD_REGISTER_IMM;
+    auto pCmd2 = pCommandStream->getSpaceForCmd<MI_LOAD_REGISTER_IMM>();
+    *pCmd2 = GfxFamily::cmdInitLoadRegisterImm;
+    pCmd2->setRegisterOffset(CS_GPR_R1);
+    pCmd2->setDataDword(mask);
 
-    walkerCmd->setThreadGroupIdXDimension(static_cast<uint32_t>(numWorkGroups[0]));
-    walkerCmd->setThreadGroupIdYDimension(static_cast<uint32_t>(numWorkGroups[1]));
-    walkerCmd->setThreadGroupIdZDimension(static_cast<uint32_t>(numWorkGroups[2]));
+    // Add instruction MI_MATH with 4 MI_MATH_ALU_INST_INLINE operands
+    auto pCmd3 = reinterpret_cast<uint32_t *>(pCommandStream->getSpace(sizeof(MI_MATH) + NUM_ALU_INST_FOR_READ_MODIFY_WRITE * sizeof(MI_MATH_ALU_INST_INLINE)));
+    reinterpret_cast<MI_MATH *>(pCmd3)->DW0.Value = 0x0;
+    reinterpret_cast<MI_MATH *>(pCmd3)->DW0.BitField.InstructionType = MI_MATH::COMMAND_TYPE_MI_COMMAND;
+    reinterpret_cast<MI_MATH *>(pCmd3)->DW0.BitField.InstructionOpcode = MI_MATH::MI_COMMAND_OPCODE_MI_MATH;
+    // 0x3 - 5 Dwords length cmd (-2): 1 for MI_MATH, 4 for MI_MATH_ALU_INST_INLINE
+    reinterpret_cast<MI_MATH *>(pCmd3)->DW0.BitField.DwordLength = NUM_ALU_INST_FOR_READ_MODIFY_WRITE - 1;
+    pCmd3++;
+    MI_MATH_ALU_INST_INLINE *pAluParam = reinterpret_cast<MI_MATH_ALU_INST_INLINE *>(pCmd3);
 
-    // compute executionMask - to tell which SIMD lines are active within thread
-    auto remainderSimdLanes = localWorkSize & (simd - 1);
-    uint64_t executionMask = (1ull << remainderSimdLanes) - 1;
-    if (!executionMask)
-        executionMask = ~executionMask;
+    // Setup first operand of MI_MATH - load CS_GPR_R0 into register A
+    pAluParam->DW0.BitField.ALUOpcode = ALU_OPCODE_LOAD;
+    pAluParam->DW0.BitField.Operand1 = ALU_REGISTER_R_SRCA;
+    pAluParam->DW0.BitField.Operand2 = ALU_REGISTER_R_0;
+    pAluParam++;
 
-    using SIMD_SIZE = typename WALKER_TYPE<GfxFamily>::SIMD_SIZE;
+    // Setup second operand of MI_MATH - load CS_GPR_R1 into register B
+    pAluParam->DW0.BitField.ALUOpcode = ALU_OPCODE_LOAD;
+    pAluParam->DW0.BitField.Operand1 = ALU_REGISTER_R_SRCB;
+    pAluParam->DW0.BitField.Operand2 = ALU_REGISTER_R_1;
+    pAluParam++;
 
-    walkerCmd->setRightExecutionMask(static_cast<uint32_t>(executionMask));
-    walkerCmd->setBottomExecutionMask(static_cast<uint32_t>(0xffffffff));
-    walkerCmd->setSimdSize(static_cast<SIMD_SIZE>(simd >> 4));
+    // Setup third operand of MI_MATH - "Operation" on registers A and B
+    pAluParam->DW0.BitField.ALUOpcode = operation;
+    pAluParam->DW0.BitField.Operand1 = 0;
+    pAluParam->DW0.BitField.Operand2 = 0;
+    pAluParam++;
 
-    walkerCmd->setThreadGroupIdStartingX(static_cast<uint32_t>(startWorkGroups[0]));
-    walkerCmd->setThreadGroupIdStartingY(static_cast<uint32_t>(startWorkGroups[1]));
-    walkerCmd->setThreadGroupIdStartingResumeZ(static_cast<uint32_t>(startWorkGroups[2]));
+    // Setup fourth operand of MI_MATH - store result into CS_GPR_R0
+    pAluParam->DW0.BitField.ALUOpcode = ALU_OPCODE_STORE;
+    pAluParam->DW0.BitField.Operand1 = ALU_REGISTER_R_0;
+    pAluParam->DW0.BitField.Operand2 = ALU_REGISTER_R_ACCU;
 
-    return localWorkSize;
+    // LOAD value of CS_GPR_R0 into "Register"
+    auto pCmd4 = pCommandStream->getSpaceForCmd<MI_LOAD_REGISTER_REG>();
+    *pCmd4 = GfxFamily::cmdInitLoadRegisterReg;
+    pCmd4->setSourceRegisterAddress(CS_GPR_R0);
+    pCmd4->setDestinationRegisterAddress(aluRegister);
+
+    // Add PIPE_CONTROL to flush caches
+    auto pCmd5 = pCommandStream->getSpaceForCmd<PIPE_CONTROL>();
+    *pCmd5 = GfxFamily::cmdInitPipeControl;
+    pCmd5->setCommandStreamerStallEnable(true);
+    pCmd5->setDcFlushEnable(true);
+    pCmd5->setTextureCacheInvalidationEnable(true);
+    pCmd5->setPipeControlFlushEnable(true);
+    pCmd5->setStateCacheInvalidationEnable(true);
 }
 
 template <typename GfxFamily>
-void GpgpuWalkerHelper<GfxFamily>::dispatchScheduler(
+void GpgpuWalkerHelper<GfxFamily>::dispatchProfilingCommandsStart(
+    TagNode<HwTimeStamps> &hwTimeStamps,
+    LinearStream *commandStream) {
+
+    using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
+
+    // PIPE_CONTROL for global timestamp
+    uint64_t timeStampAddress = hwTimeStamps.getGpuAddress() + offsetof(HwTimeStamps, GlobalStartTS);
+
+    PipeControlHelper<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(*commandStream,
+                                                                               PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP,
+                                                                               timeStampAddress, 0llu, false);
+
+    //MI_STORE_REGISTER_MEM for context local timestamp
+    timeStampAddress = hwTimeStamps.getGpuAddress() + offsetof(HwTimeStamps, ContextStartTS);
+
+    //low part
+    auto pMICmdLow = commandStream->getSpaceForCmd<MI_STORE_REGISTER_MEM>();
+    *pMICmdLow = GfxFamily::cmdInitStoreRegisterMem;
+    adjustMiStoreRegMemMode(pMICmdLow);
+    pMICmdLow->setRegisterAddress(GP_THREAD_TIME_REG_ADDRESS_OFFSET_LOW);
+    pMICmdLow->setMemoryAddress(timeStampAddress);
+}
+
+template <typename GfxFamily>
+void GpgpuWalkerHelper<GfxFamily>::dispatchProfilingCommandsEnd(
+    TagNode<HwTimeStamps> &hwTimeStamps,
+    LinearStream *commandStream) {
+
+    using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
+
+    // PIPE_CONTROL for global timestamp
+    auto pPipeControlCmd = commandStream->getSpaceForCmd<PIPE_CONTROL>();
+    *pPipeControlCmd = GfxFamily::cmdInitPipeControl;
+    pPipeControlCmd->setCommandStreamerStallEnable(true);
+
+    //MI_STORE_REGISTER_MEM for context local timestamp
+    uint64_t timeStampAddress = hwTimeStamps.getGpuAddress() + offsetof(HwTimeStamps, ContextEndTS);
+
+    //low part
+    auto pMICmdLow = commandStream->getSpaceForCmd<MI_STORE_REGISTER_MEM>();
+    *pMICmdLow = GfxFamily::cmdInitStoreRegisterMem;
+    adjustMiStoreRegMemMode(pMICmdLow);
+    pMICmdLow->setRegisterAddress(GP_THREAD_TIME_REG_ADDRESS_OFFSET_LOW);
+    pMICmdLow->setMemoryAddress(timeStampAddress);
+}
+
+template <typename GfxFamily>
+void GpgpuWalkerHelper<GfxFamily>::dispatchPerfCountersCommandsStart(
     CommandQueue &commandQueue,
-    LinearStream &commandStream,
-    DeviceQueueHw<GfxFamily> &devQueueHw,
-    PreemptionMode preemptionMode,
-    SchedulerKernel &scheduler,
-    IndirectHeap *ssh,
-    IndirectHeap *dsh) {
+    TagNode<HwPerfCounter> &hwPerfCounter,
+    LinearStream *commandStream) {
 
-    using INTERFACE_DESCRIPTOR_DATA = typename GfxFamily::INTERFACE_DESCRIPTOR_DATA;
-    using GPGPU_WALKER = typename GfxFamily::GPGPU_WALKER;
-    using MI_BATCH_BUFFER_START = typename GfxFamily::MI_BATCH_BUFFER_START;
+    auto pPerformanceCounters = commandQueue.getPerfCounters();
+    const uint32_t size = pPerformanceCounters->getGpuCommandsSize(true);
+    void *pBuffer = commandStream->getSpace(size);
 
-    bool dcFlush = false;
-    commandQueue.getCommandStreamReceiver().addPipeControl(commandStream, dcFlush);
+    pPerformanceCounters->getGpuCommands(hwPerfCounter, true, size, pBuffer);
+}
 
-    uint32_t interfaceDescriptorIndex = devQueueHw.schedulerIDIndex;
-    const size_t offsetInterfaceDescriptorTable = devQueueHw.colorCalcStateSize;
-    const size_t offsetInterfaceDescriptor = offsetInterfaceDescriptorTable;
-    const size_t totalInterfaceDescriptorTableSize = devQueueHw.interfaceDescriptorEntries * sizeof(INTERFACE_DESCRIPTOR_DATA);
+template <typename GfxFamily>
+void GpgpuWalkerHelper<GfxFamily>::dispatchPerfCountersCommandsEnd(
+    CommandQueue &commandQueue,
+    TagNode<HwPerfCounter> &hwPerfCounter,
+    LinearStream *commandStream) {
 
-    // Program media interface descriptor load
-    KernelCommandsHelper<GfxFamily>::sendMediaInterfaceDescriptorLoad(
-        commandStream,
-        offsetInterfaceDescriptor,
-        totalInterfaceDescriptorTableSize);
+    auto pPerformanceCounters = commandQueue.getPerfCounters();
+    const uint32_t size = pPerformanceCounters->getGpuCommandsSize(false);
+    void *pBuffer = commandStream->getSpace(size);
 
-    DEBUG_BREAK_IF(offsetInterfaceDescriptorTable % 64 != 0);
+    pPerformanceCounters->getGpuCommands(hwPerfCounter, false, size, pBuffer);
+}
 
-    // Determine SIMD size
-    uint32_t simd = scheduler.getKernelInfo().getMaxSimdSize();
-    DEBUG_BREAK_IF(simd != PARALLEL_SCHEDULER_COMPILATION_SIZE_20);
+template <typename GfxFamily>
+void GpgpuWalkerHelper<GfxFamily>::applyWADisableLSQCROPERFforOCL(NEO::LinearStream *pCommandStream, const Kernel &kernel, bool disablePerfMode) {
+}
 
-    // Patch our kernel constants
-    *scheduler.globalWorkOffsetX = 0;
-    *scheduler.globalWorkOffsetY = 0;
-    *scheduler.globalWorkOffsetZ = 0;
+template <typename GfxFamily>
+size_t GpgpuWalkerHelper<GfxFamily>::getSizeForWADisableLSQCROPERFforOCL(const Kernel *pKernel) {
+    return (size_t)0;
+}
 
-    *scheduler.globalWorkSizeX = (uint32_t)scheduler.getGws();
-    *scheduler.globalWorkSizeY = 1;
-    *scheduler.globalWorkSizeZ = 1;
+template <typename GfxFamily>
+void GpgpuWalkerHelper<GfxFamily>::adjustMiStoreRegMemMode(MI_STORE_REG_MEM<GfxFamily> *storeCmd) {
+}
 
-    *scheduler.localWorkSizeX = (uint32_t)scheduler.getLws();
-    *scheduler.localWorkSizeY = 1;
-    *scheduler.localWorkSizeZ = 1;
+template <typename GfxFamily>
+size_t EnqueueOperation<GfxFamily>::getTotalSizeRequiredCS(uint32_t eventType, const CsrDependencies &csrDeps, bool reserveProfilingCmdsSpace, bool reservePerfCounters, bool blitEnqueue, CommandQueue &commandQueue, const MultiDispatchInfo &multiDispatchInfo) {
+    if (blitEnqueue) {
+        return TimestampPacketHelper::getRequiredCmdStreamSizeForNodeDependency<GfxFamily>();
+    }
 
-    *scheduler.localWorkSizeX2 = (uint32_t)scheduler.getLws();
-    *scheduler.localWorkSizeY2 = 1;
-    *scheduler.localWorkSizeZ2 = 1;
+    size_t expectedSizeCS = 0;
+    Kernel *parentKernel = multiDispatchInfo.peekParentKernel();
+    for (auto &dispatchInfo : multiDispatchInfo) {
+        expectedSizeCS += EnqueueOperation<GfxFamily>::getSizeRequiredCS(eventType, reserveProfilingCmdsSpace, reservePerfCounters, commandQueue, dispatchInfo.getKernel());
+        expectedSizeCS += dispatchInfo.dispatchInitCommands.estimateCommandsSize();
+        expectedSizeCS += dispatchInfo.dispatchEpilogueCommands.estimateCommandsSize();
+    }
+    if (parentKernel) {
+        SchedulerKernel &scheduler = commandQueue.getDevice().getExecutionEnvironment()->getBuiltIns()->getSchedulerKernel(parentKernel->getContext());
+        expectedSizeCS += EnqueueOperation<GfxFamily>::getSizeRequiredCS(eventType, reserveProfilingCmdsSpace, reservePerfCounters, commandQueue, &scheduler);
+    }
+    if (commandQueue.getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
+        expectedSizeCS += TimestampPacketHelper::getRequiredCmdStreamSize<GfxFamily>(csrDeps);
+        expectedSizeCS += EnqueueOperation<GfxFamily>::getSizeRequiredForTimestampPacketWrite();
+    }
+    return expectedSizeCS;
+}
 
-    *scheduler.enqueuedLocalWorkSizeX = (uint32_t)scheduler.getLws();
-    *scheduler.enqueuedLocalWorkSizeY = 1;
-    *scheduler.enqueuedLocalWorkSizeZ = 1;
-
-    *scheduler.numWorkGroupsX = (uint32_t)(scheduler.getGws() / scheduler.getLws());
-    *scheduler.numWorkGroupsY = 0;
-    *scheduler.numWorkGroupsZ = 0;
-
-    *scheduler.workDim = 1;
-
-    // Send our indirect object data
-    size_t localWorkSizes[3] = {scheduler.getLws(), 1, 1};
-    size_t globalWorkSizes[3] = {scheduler.getGws(), 1, 1};
-
-    // Create indirectHeap for IOH that is located at the end of device enqueue DSH
-    size_t curbeOffset = devQueueHw.setSchedulerCrossThreadData(scheduler);
-    IndirectHeap indirectObjectHeap(dsh->getCpuBase(), dsh->getMaxAvailableSpace());
-    indirectObjectHeap.getSpace(curbeOffset);
-    IndirectHeap *ioh = &indirectObjectHeap;
-
-    // Program the walker.  Invokes execution so all state should already be programmed
-    auto pGpGpuWalkerCmd = static_cast<GPGPU_WALKER *>(commandStream.getSpace(sizeof(GPGPU_WALKER)));
-    *pGpGpuWalkerCmd = GfxFamily::cmdInitGpgpuWalker;
-
-    bool localIdsGenerationByRuntime = KernelCommandsHelper<GfxFamily>::isRuntimeLocalIdsGenerationRequired(1, globalWorkSizes, localWorkSizes);
-    bool inlineDataProgrammingRequired = KernelCommandsHelper<GfxFamily>::inlineDataProgrammingRequired(scheduler);
-    KernelCommandsHelper<GfxFamily>::sendIndirectState(
-        commandStream,
-        *dsh,
-        *ioh,
-        *ssh,
-        scheduler,
-        simd,
-        localWorkSizes,
-        offsetInterfaceDescriptorTable,
-        interfaceDescriptorIndex,
-        preemptionMode,
-        pGpGpuWalkerCmd,
-        nullptr,
-        localIdsGenerationByRuntime);
-
-    // Implement enabling special WA DisableLSQCROPERFforOCL if needed
-    GpgpuWalkerHelper<GfxFamily>::applyWADisableLSQCROPERFforOCL(&commandStream, scheduler, true);
-
-    size_t globalOffsets[3] = {0, 0, 0};
-    size_t workGroups[3] = {(scheduler.getGws() / scheduler.getLws()), 1, 1};
-    GpgpuWalkerHelper<GfxFamily>::setGpgpuWalkerThreadData(pGpGpuWalkerCmd, globalOffsets, globalOffsets, workGroups, localWorkSizes,
-                                                           simd, 1, localIdsGenerationByRuntime, inlineDataProgrammingRequired,
-                                                           *scheduler.getKernelInfo().patchInfo.threadPayload);
-
-    // Implement disabling special WA DisableLSQCROPERFforOCL if needed
-    GpgpuWalkerHelper<GfxFamily>::applyWADisableLSQCROPERFforOCL(&commandStream, scheduler, false);
-
-    // Do not put BB_START only when returning in first Scheduler run
-    if (devQueueHw.getSchedulerReturnInstance() != 1) {
-
-        commandQueue.getCommandStreamReceiver().addPipeControl(commandStream, true);
-
-        // Add BB Start Cmd to the SLB in the Primary Batch Buffer
-        auto *bbStart = static_cast<MI_BATCH_BUFFER_START *>(commandStream.getSpace(sizeof(MI_BATCH_BUFFER_START)));
-        *bbStart = GfxFamily::cmdInitBatchBufferStart;
-        bbStart->setSecondLevelBatchBuffer(MI_BATCH_BUFFER_START::SECOND_LEVEL_BATCH_BUFFER_FIRST_LEVEL_BATCH);
-        uint64_t slbAddress = devQueueHw.getSlbBuffer()->getGpuAddress();
-        bbStart->setBatchBufferStartAddressGraphicsaddress472(slbAddress);
+template <typename GfxFamily>
+size_t EnqueueOperation<GfxFamily>::getSizeRequiredCS(uint32_t cmdType, bool reserveProfilingCmdsSpace, bool reservePerfCounters, CommandQueue &commandQueue, const Kernel *pKernel) {
+    if (isCommandWithoutKernel(cmdType)) {
+        return EnqueueOperation<GfxFamily>::getSizeRequiredCSNonKernel(reserveProfilingCmdsSpace, reservePerfCounters, commandQueue);
+    } else {
+        return EnqueueOperation<GfxFamily>::getSizeRequiredCSKernel(reserveProfilingCmdsSpace, reservePerfCounters, commandQueue, pKernel);
     }
 }
 
 template <typename GfxFamily>
-void GpgpuWalkerHelper<GfxFamily>::setupTimestampPacket(
-    LinearStream *cmdStream,
-    WALKER_TYPE<GfxFamily> *walkerCmd,
-    TagNode<TimestampPacket> *timestampPacketNode,
-    TimestampPacket::WriteOperationType writeOperationType) {
-
-    if (TimestampPacket::WriteOperationType::AfterWalker == writeOperationType) {
-        uint64_t address = TimestampPacketHelper::getGpuAddressForDataWrite(*timestampPacketNode, TimestampPacket::DataIndex::ContextEnd);
-        PipeControlHelper<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(cmdStream, PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, address, 0, false);
+size_t EnqueueOperation<GfxFamily>::getSizeRequiredCSNonKernel(bool reserveProfilingCmdsSpace, bool reservePerfCounters, CommandQueue &commandQueue) {
+    size_t size = 0;
+    if (reserveProfilingCmdsSpace) {
+        size += 2 * sizeof(PIPE_CONTROL) + 4 * sizeof(typename GfxFamily::MI_STORE_REGISTER_MEM);
     }
+    return size;
 }
 
 } // namespace NEO

@@ -10,8 +10,10 @@ set(IGDRCL_SRCS_tests_fixtures
   ${CMAKE_CURRENT_SOURCE_DIR}/buffer_enqueue_fixture.h
   ${CMAKE_CURRENT_SOURCE_DIR}/context_fixture.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/context_fixture.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/d3d_test_fixture.h
   ${CMAKE_CURRENT_SOURCE_DIR}/device_host_queue_fixture.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/device_host_queue_fixture.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/device_info_fixture.h
   ${CMAKE_CURRENT_SOURCE_DIR}/device_instrumentation_fixture.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/device_instrumentation_fixture.h
   ${CMAKE_CURRENT_SOURCE_DIR}/enqueue_handler_fixture.h
@@ -43,3 +45,4 @@ set(IGDRCL_SRCS_tests_fixtures
 )
 target_sources(igdrcl_tests PRIVATE ${IGDRCL_SRCS_tests_fixtures})
 set_property(GLOBAL PROPERTY IGDRCL_SRCS_tests_fixtures ${IGDRCL_SRCS_tests_fixtures})
+add_subdirectories()

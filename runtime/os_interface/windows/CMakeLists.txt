@@ -35,6 +35,8 @@ set(RUNTIME_SRCS_OS_INTERFACE_WINDOWS
   ${CMAKE_CURRENT_SOURCE_DIR}/os_interface.h
   ${CMAKE_CURRENT_SOURCE_DIR}/os_library.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_library.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/os_memory_win.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/os_metrics_library.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_socket.h
   ${CMAKE_CURRENT_SOURCE_DIR}/os_thread_win.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_thread_win.h
@@ -46,7 +48,6 @@ set(RUNTIME_SRCS_OS_INTERFACE_WINDOWS
   ${CMAKE_CURRENT_SOURCE_DIR}/registry_reader.h
   ${CMAKE_CURRENT_SOURCE_DIR}/sys_calls.h
   ${CMAKE_CURRENT_SOURCE_DIR}/thk_wrapper.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/wddm_32bit_memory.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/wddm_allocation.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wddm_allocation.h
   ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/wddm_additional_context_flags.cpp
@@ -65,6 +66,7 @@ set(RUNTIME_SRCS_OS_INTERFACE_WINDOWS
   ${CMAKE_CURRENT_SOURCE_DIR}/hw_info_config.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wddm/wddm.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wddm/wddm.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/wddm${BRANCH_DIR_SUFFIX}/wddm_configure_device.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wddm/wddm_interface.h
   ${CMAKE_CURRENT_SOURCE_DIR}/wddm/wddm_interface.cpp
 )

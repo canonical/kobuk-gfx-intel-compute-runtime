@@ -5,11 +5,12 @@
  *
  */
 
+#include "core/helpers/basic_math.h"
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_queue/command_queue_hw.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/event/event.h"
-#include "runtime/helpers/basic_math.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/options.h"
 #include "runtime/helpers/timestamp_packet.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
@@ -22,7 +23,6 @@
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/fixtures/image_fixture.h"
 #include "unit_tests/fixtures/memory_management_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/libult/ult_command_stream_receiver.h"
 #include "unit_tests/mocks/mock_command_queue.h"
@@ -94,7 +94,7 @@ TEST_P(CommandQueueTest, createDeleteCommandQueue_Properties) {
             nullptr,
             retVal);
 
-        if (nonfailingAllocation == failureIndex) {
+        if (MemoryManagement::nonfailingAllocation == failureIndex) {
             EXPECT_EQ(CL_SUCCESS, retVal);
             EXPECT_NE(nullptr, pCmdQ);
         } else {
@@ -204,7 +204,7 @@ TEST(CommandQueue, givenDeviceWhenCreatingCommandQueueThenPickCsrFromDefaultEngi
     CommandQueue cmdQ(nullptr, mockDevice.get(), 0);
 
     auto defaultCsr = mockDevice->getDefaultEngine().commandStreamReceiver;
-    EXPECT_EQ(defaultCsr, &cmdQ.getCommandStreamReceiver());
+    EXPECT_EQ(defaultCsr, &cmdQ.getGpgpuCommandStreamReceiver());
 }
 
 TEST(CommandQueue, givenCmdQueueBlockedByReadyVirtualEventWhenUnblockingThenUpdateFlushTaskFromEvent) {
@@ -334,7 +334,7 @@ TEST_F(CommandQueueCommandStreamTest, givenCommandStreamReceiverWithReusableAllo
     auto memoryManager = pDevice->getMemoryManager();
     size_t requiredSize = alignUp(100 + CSRequirements::minCommandQueueCommandStreamSize + CSRequirements::csOverfetchSize, MemoryConstants::pageSize64k);
     auto allocation = memoryManager->allocateGraphicsMemoryWithProperties({requiredSize, GraphicsAllocation::AllocationType::COMMAND_BUFFER});
-    auto &commandStreamReceiver = cmdQ.getCommandStreamReceiver();
+    auto &commandStreamReceiver = cmdQ.getGpgpuCommandStreamReceiver();
     commandStreamReceiver.getInternalAllocationStorage()->storeAllocation(std::unique_ptr<GraphicsAllocation>(allocation), REUSABLE_ALLOCATION);
 
     EXPECT_FALSE(commandStreamReceiver.getAllocationsForReuse().peekIsEmpty());
@@ -391,7 +391,6 @@ TEST_F(CommandQueueCommandStreamTest, givenCommandQueueWhenGetCSIsCalledThenComm
 HWTEST_F(CommandQueueCommandStreamTest, givenMultiDispatchInfoWithSingleKernelWithFlushAllocationsDisabledWhenEstimatingNodesCountEqualMultiDispatchInfoSize) {
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.EnableCacheFlushAfterWalker.set(0);
-    DebugManager.flags.EnableCacheFlushAfterWalkerForAllQueues.set(1);
 
     MockCommandQueueHw<FamilyType> cmdQ(context.get(), pDevice, nullptr);
     cmdQ.multiEngineQueue = true;
@@ -410,7 +409,6 @@ HWTEST_F(CommandQueueCommandStreamTest, givenMultiDispatchInfoWithSingleKernelWi
 HWTEST_F(CommandQueueCommandStreamTest, givenMultiDispatchInfoWithSingleKernelWithFlushAllocationsEnabledWhenEstimatingNodesCountEqualMultiDispatchInfoSizePlusOne) {
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.EnableCacheFlushAfterWalker.set(1);
-    DebugManager.flags.EnableCacheFlushAfterWalkerForAllQueues.set(1);
 
     MockCommandQueueHw<FamilyType> cmdQ(context.get(), pDevice, nullptr);
     MockKernelWithInternals mockKernelWithInternals(*pDevice, context.get());
@@ -465,7 +463,7 @@ HWTEST_P(CommandQueueIndirectHeapTest, IndirectHeapContainsAtLeast64KB) {
 
     auto &indirectHeap = cmdQ.getIndirectHeap(this->GetParam(), sizeof(uint32_t));
     if (this->GetParam() == IndirectHeap::SURFACE_STATE) {
-        size_t expectedSshUse = cmdQ.getCommandStreamReceiver().defaultSshSize - MemoryConstants::pageSize - UnitTestHelper<FamilyType>::getDefaultSshUsage();
+        size_t expectedSshUse = cmdQ.getGpgpuCommandStreamReceiver().defaultSshSize - MemoryConstants::pageSize - UnitTestHelper<FamilyType>::getDefaultSshUsage();
         EXPECT_EQ(expectedSshUse, indirectHeap.getAvailableSpace());
     } else {
         EXPECT_EQ(64 * KB, indirectHeap.getAvailableSpace());
@@ -493,7 +491,7 @@ TEST_P(CommandQueueIndirectHeapTest, getIndirectHeapCanRecycle) {
     ASSERT_NE(nullptr, &indirectHeap);
     if (this->GetParam() == IndirectHeap::SURFACE_STATE) {
         //no matter what SSH is always capped
-        EXPECT_EQ(cmdQ.getCommandStreamReceiver().defaultSshSize - MemoryConstants::pageSize,
+        EXPECT_EQ(cmdQ.getGpgpuCommandStreamReceiver().defaultSshSize - MemoryConstants::pageSize,
                   indirectHeap.getMaxAvailableSpace());
     } else {
         EXPECT_LE(requiredSize, indirectHeap.getMaxAvailableSpace());
@@ -527,7 +525,7 @@ TEST_P(CommandQueueIndirectHeapTest, givenCommandStreamReceiverWithReusableAlloc
 
     GraphicsAllocation *allocation = nullptr;
 
-    auto &commandStreamReceiver = cmdQ.getCommandStreamReceiver();
+    auto &commandStreamReceiver = cmdQ.getGpgpuCommandStreamReceiver();
     auto allocationType = GraphicsAllocation::AllocationType::LINEAR_STREAM;
     if (this->GetParam() == IndirectHeap::INDIRECT_OBJECT) {
         allocationType = GraphicsAllocation::AllocationType::INTERNAL_HEAP;
@@ -557,11 +555,14 @@ TEST_P(CommandQueueIndirectHeapTest, givenCommandStreamReceiverWithReusableAlloc
     EXPECT_TRUE(commandStreamReceiver.getAllocationsForReuse().peekIsEmpty());
 }
 
-TEST_P(CommandQueueIndirectHeapTest, CommandQueueWhenAskedForNewHeapStoresOldHeapForReuse) {
+HWTEST_P(CommandQueueIndirectHeapTest, CommandQueueWhenAskedForNewHeapStoresOldHeapForReuse) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue cmdQ(context.get(), pDevice, props);
 
-    EXPECT_TRUE(pDevice->getDefaultEngine().commandStreamReceiver->getAllocationsForReuse().peekIsEmpty());
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    EXPECT_TRUE(commandStreamReceiver.getAllocationsForReuse().peekIsEmpty());
+    *commandStreamReceiver.getTagAddress() = 1u;
+    commandStreamReceiver.taskCount = 2u;
 
     const auto &indirectHeap = cmdQ.getIndirectHeap(this->GetParam(), 100);
     auto heapSize = indirectHeap.getAvailableSpace();
@@ -571,9 +572,10 @@ TEST_P(CommandQueueIndirectHeapTest, CommandQueueWhenAskedForNewHeapStoresOldHea
     // Request a larger heap than the first.
     cmdQ.getIndirectHeap(this->GetParam(), heapSize + 6000);
 
-    EXPECT_FALSE(pDevice->getDefaultEngine().commandStreamReceiver->getAllocationsForReuse().peekIsEmpty());
+    EXPECT_FALSE(commandStreamReceiver.getAllocationsForReuse().peekIsEmpty());
 
-    EXPECT_TRUE(pDevice->getDefaultEngine().commandStreamReceiver->getAllocationsForReuse().peekContains(*graphicsAllocation));
+    EXPECT_TRUE(commandStreamReceiver.getAllocationsForReuse().peekContains(*graphicsAllocation));
+    *commandStreamReceiver.getTagAddress() = 2u;
 }
 
 TEST_P(CommandQueueIndirectHeapTest, GivenCommandQueueWithoutHeapAllocationWhenAskedForNewHeapReturnsAcquiresNewAllocationWithoutStoring) {
@@ -760,7 +762,7 @@ HWTEST_F(WaitForQueueCompletionTests, givenBlockingCallAndUnblockedQueueWhenEnqu
     std::unique_ptr<MyCmdQueue<FamilyType>> cmdQ(new MyCmdQueue<FamilyType>(context.get(), device.get()));
     uint32_t tmpPtr = 0;
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create(context.get()));
-    cmdQ->enqueueReadBuffer(buffer.get(), CL_TRUE, 0, 1, &tmpPtr, 0, nullptr, nullptr);
+    cmdQ->enqueueReadBuffer(buffer.get(), CL_TRUE, 0, 1, &tmpPtr, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(1u, cmdQ->waitUntilCompleteCounter);
     EXPECT_FALSE(cmdQ->requestedUseQuickKmdSleep);
 }
@@ -771,7 +773,7 @@ HWTEST_F(WaitForQueueCompletionTests, givenBlockingCallAndBlockedQueueWhenEnqueu
     cl_event clBlockingEvent = blockingEvent.get();
     uint32_t tmpPtr = 0;
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create(context.get()));
-    cmdQ->enqueueReadBuffer(buffer.get(), CL_TRUE, 0, 1, &tmpPtr, 1, &clBlockingEvent, nullptr);
+    cmdQ->enqueueReadBuffer(buffer.get(), CL_TRUE, 0, 1, &tmpPtr, nullptr, 1, &clBlockingEvent, nullptr);
     EXPECT_EQ(1u, cmdQ->waitUntilCompleteCounter);
     EXPECT_FALSE(cmdQ->requestedUseQuickKmdSleep);
 }
@@ -966,7 +968,7 @@ HWTEST_F(CommandQueueCommandStreamTest, givenDebugKernelWhenSetupDebugSurfaceIsC
 
     kernel->setSshLocal(nullptr, sizeof(RENDER_SURFACE_STATE) + kernel->getAllocatedKernelInfo()->patchInfo.pAllocateSystemThreadSurface->Offset);
     kernel->getAllocatedKernelInfo()->usesSsh = true;
-    auto &commandStreamReceiver = cmdQ.getCommandStreamReceiver();
+    auto &commandStreamReceiver = cmdQ.getGpgpuCommandStreamReceiver();
 
     cmdQ.setupDebugSurface(kernel.get());
 
@@ -985,7 +987,7 @@ HWTEST_F(CommandQueueCommandStreamTest, givenCsrWithDebugSurfaceAllocatedWhenSet
 
     kernel->setSshLocal(nullptr, sizeof(RENDER_SURFACE_STATE) + kernel->getAllocatedKernelInfo()->patchInfo.pAllocateSystemThreadSurface->Offset);
     kernel->getAllocatedKernelInfo()->usesSsh = true;
-    auto &commandStreamReceiver = cmdQ.getCommandStreamReceiver();
+    auto &commandStreamReceiver = cmdQ.getGpgpuCommandStreamReceiver();
     commandStreamReceiver.allocateDebugSurface(SipKernel::maxDbgSurfaceSize);
     auto debugSurface = commandStreamReceiver.getDebugSurfaceAllocation();
     ASSERT_NE(nullptr, debugSurface);
@@ -1027,6 +1029,24 @@ TEST(CommandQueuePropertiesTests, whenDefaultCommandQueueIsCreatedThenItIsNotMul
 TEST(CommandQueuePropertiesTests, whenGetEngineIsCalledThenQueueEngineIsReturned) {
     MockCommandQueue queue;
     EngineControl engineControl;
-    queue.engine = &engineControl;
-    EXPECT_EQ(queue.engine, &queue.getEngine());
+    queue.gpgpuEngine = &engineControl;
+    EXPECT_EQ(queue.gpgpuEngine, &queue.getGpgpuEngine());
+}
+TEST(CommandQueue, GivenCommandQueueWhenEnqueueResourceBarrierCalledThenSuccessReturned) {
+    MockContext context;
+    CommandQueue cmdQ(&context, nullptr, 0);
+
+    cl_int result = cmdQ.enqueueResourceBarrier(
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    EXPECT_EQ(CL_SUCCESS, result);
+}
+TEST(CommandQueue, GivenCommandQueueWhenCheckingIfIsCacheFlushCommandCalledThenFalseReturned) {
+    MockContext context;
+    CommandQueue cmdQ(&context, nullptr, 0);
+
+    bool isCommandCacheFlush = cmdQ.isCacheFlushCommand(0u);
+    EXPECT_FALSE(isCommandCacheFlush);
 }

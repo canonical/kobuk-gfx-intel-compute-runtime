@@ -13,7 +13,6 @@
 #include "runtime/os_interface/os_library.h"
 #include "test.h"
 #include "unit_tests/fixtures/memory_management_fixture.h"
-#include "unit_tests/helpers/memory_management.h"
 
 #include "gtest/gtest.h"
 
@@ -82,7 +81,7 @@ TEST_F(OSLibraryTest, testFailNew) {
         // System under test
         OsLibrary *library = OsLibrary::load(libName);
 
-        if (nonfailingAllocation == failureIndex) {
+        if (MemoryManagement::nonfailingAllocation == failureIndex) {
             EXPECT_NE(nullptr, library);
         } else {
             EXPECT_EQ(nullptr, library);

@@ -10,7 +10,7 @@
 #include "runtime/helpers/sampler_helpers.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/mem_obj/pipe.h"
-#include "runtime/memory_manager/svm_memory_manager.h"
+#include "runtime/memory_manager/unified_memory_manager.h"
 #include "test.h"
 #include "unit_tests/fixtures/context_fixture.h"
 #include "unit_tests/fixtures/device_fixture.h"
@@ -509,21 +509,26 @@ TEST_F(CloneKernelTest, cloneKernelWithArgImmediate) {
 }
 
 TEST_F(CloneKernelTest, cloneKernelWithExecInfo) {
-    void *ptrSVM = pContext->getSVMAllocsManager()->createSVMAlloc(256, false, false);
+    if (!pDevice->getHardwareInfo().capabilityTable.ftrSvm) {
+        GTEST_SKIP();
+    }
+    void *ptrSVM = pContext->getSVMAllocsManager()->createSVMAlloc(256, {});
     ASSERT_NE(nullptr, ptrSVM);
 
-    GraphicsAllocation *pSvmAlloc = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSVM);
+    auto svmData = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSVM);
+    ASSERT_NE(nullptr, svmData);
+    GraphicsAllocation *pSvmAlloc = svmData->gpuAllocation;
     ASSERT_NE(nullptr, pSvmAlloc);
 
-    pSourceKernel->setKernelExecInfo(pSvmAlloc);
+    pSourceKernel->setSvmKernelExecInfo(pSvmAlloc);
 
-    EXPECT_EQ(1u, pSourceKernel->getKernelSvmGfxAllocations().size());
+    EXPECT_EQ(1u, pSourceKernel->kernelSvmGfxAllocations.size());
 
     retVal = pClonedKernel->cloneKernel(pSourceKernel);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    EXPECT_EQ(pSourceKernel->getKernelSvmGfxAllocations().size(), pClonedKernel->getKernelSvmGfxAllocations().size());
-    EXPECT_EQ(pSourceKernel->getKernelSvmGfxAllocations().at(0), pClonedKernel->getKernelSvmGfxAllocations().at(0));
+    EXPECT_EQ(pSourceKernel->kernelSvmGfxAllocations.size(), pClonedKernel->kernelSvmGfxAllocations.size());
+    EXPECT_EQ(pSourceKernel->kernelSvmGfxAllocations.at(0), pClonedKernel->kernelSvmGfxAllocations.at(0));
 
     pContext->getSVMAllocsManager()->freeSVMAlloc(ptrSVM);
 }

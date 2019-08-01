@@ -6,14 +6,20 @@
  */
 
 #include "runtime/helpers/aligned_memory.h"
+#include "runtime/helpers/hw_helper.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/mem_obj/image.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
+#include "unit_tests/helpers/raii_hw_helper.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_gmm.h"
 
 using namespace NEO;
+
+namespace NEO {
+extern HwHelper *hwHelperFactory[IGFX_MAX_CORE];
+}
 
 // Tests for cl_khr_image2d_from_buffer
 class Image2dFromBufferTest : public DeviceFixture, public ::testing::Test {
@@ -130,11 +136,14 @@ TEST_F(Image2dFromBufferTest, InvalidHostPtrAlignment) {
     imageDesc.mem_object = origBuffer;
 }
 
-TEST_F(Image2dFromBufferTest, InvalidFlags) {
-    cl_mem_flags flags = CL_MEM_USE_HOST_PTR;
-    auto surfaceFormat = (SurfaceFormatInfo *)Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    retVal = Image::validate(&context, flags, surfaceFormat, &imageDesc, reinterpret_cast<void *>(0x12345));
-    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+TEST_F(Image2dFromBufferTest, givenInvalidFlagsWhenValidateIsCalledThenReturnError) {
+    cl_mem_flags flags[] = {CL_MEM_USE_HOST_PTR, CL_MEM_COPY_HOST_PTR};
+
+    for (auto flag : flags) {
+        const auto surfaceFormat = Image::getSurfaceFormatFromTable(flag, &imageFormat);
+        retVal = Image::validate(&context, flag, surfaceFormat, &imageDesc, reinterpret_cast<void *>(0x12345));
+        EXPECT_EQ(CL_INVALID_VALUE, retVal);
+    }
 }
 
 TEST_F(Image2dFromBufferTest, givenOneChannel8BitColorsNoRowPitchSpecifiedAndTooLargeImageWhenValidatingSurfaceFormatThenReturnError) {
@@ -387,6 +396,31 @@ TEST_F(Image2dFromBufferTest, givenBufferWhenImageFromBufferThenIsImageFromBuffe
 
     EXPECT_TRUE(imageFromBuffer.get()->isImageFromBuffer());
     EXPECT_TRUE(GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY == imageFromBuffer.get()->getGraphicsAllocation()->getAllocationType());
+
+    buffer->release();
+    imageDesc.mem_object = memObj;
+}
+
+HWTEST_F(Image2dFromBufferTest, givenBufferWhenImageFromBufferThenIsImageFromBufferSetAndAllocationTypeIsBufferNullptr) {
+    class MockHwHelperHw : public HwHelperHw<FamilyType> {
+      public:
+        void checkResourceCompatibility(Buffer *buffer, cl_int &errorCode) override {
+            errorCode = CL_INVALID_MEM_OBJECT;
+        }
+    };
+
+    auto raiiFactory = RAIIHwHelperFactory<MockHwHelperHw>(context.getDevice(0)->getHardwareInfo().platform.eRenderCoreFamily);
+
+    cl_int errCode = CL_SUCCESS;
+    auto buffer = Buffer::create(&context, 0, 1, nullptr, errCode);
+    imageDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
+    auto memObj = imageDesc.mem_object;
+    imageDesc.mem_object = buffer;
+
+    Image *imageFromBuffer = createImage();
+    EXPECT_EQ(CL_INVALID_MEM_OBJECT, retVal);
+
+    EXPECT_EQ(imageFromBuffer, nullptr);
 
     buffer->release();
     imageDesc.mem_object = memObj;

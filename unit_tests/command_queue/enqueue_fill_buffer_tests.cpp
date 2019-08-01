@@ -5,13 +5,13 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/dispatch_info.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/memory_manager/allocations_list.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/os_interface/os_context.h"
@@ -99,7 +99,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, addsIndirectData) {
                                                            pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     MemObj patternMemObj(&this->context, 0, 0, alignUp(EnqueueFillBufferTraits::patternSize, 4), patternAllocation->getUnderlyingBuffer(),
                          patternAllocation->getUnderlyingBuffer(), patternAllocation, false, false, true);
     dc.srcMemObj = &patternMemObj;
@@ -131,7 +131,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, FillBufferRightLeftover) {
                                                            pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     MemObj patternMemObj(&this->context, 0, 0, alignUp(EnqueueFillBufferTraits::patternSize, 4), patternAllocation->getUnderlyingBuffer(),
                          patternAllocation->getUnderlyingBuffer(), patternAllocation, false, false, true);
     dc.srcMemObj = &patternMemObj;
@@ -158,7 +158,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, FillBufferMiddle) {
                                                            pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     MemObj patternMemObj(&this->context, 0, 0, alignUp(EnqueueFillBufferTraits::patternSize, 4), patternAllocation->getUnderlyingBuffer(),
                          patternAllocation->getUnderlyingBuffer(), patternAllocation, false, false, true);
     dc.srcMemObj = &patternMemObj;
@@ -185,7 +185,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, FillBufferLeftLeftover) {
                                                            pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     MemObj patternMemObj(&this->context, 0, 0, alignUp(EnqueueFillBufferTraits::patternSize, 4), patternAllocation->getUnderlyingBuffer(),
                          patternAllocation->getUnderlyingBuffer(), patternAllocation, false, false, true);
     dc.srcMemObj = &patternMemObj;
@@ -208,7 +208,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, LoadRegisterImmediateL3CNTLREG) {
 
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueFillBufferCmdTests, WhenEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueFillBuffer<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 
@@ -278,7 +278,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, argumentZeroShouldMatchDestAddress) {
                                                            pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     MemObj patternMemObj(&this->context, 0, 0, alignUp(EnqueueFillBufferTraits::patternSize, 4), patternAllocation->getUnderlyingBuffer(),
                          patternAllocation->getUnderlyingBuffer(), patternAllocation, false, false, true);
     dc.srcMemObj = &patternMemObj;
@@ -314,7 +314,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, DISABLED_argumentOneShouldMatchOffset) {
                                                            pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     MemObj patternMemObj(&this->context, 0, 0, alignUp(EnqueueFillBufferTraits::patternSize, 4), patternAllocation->getUnderlyingBuffer(),
                          patternAllocation->getUnderlyingBuffer(), patternAllocation, false, false, true);
     dc.srcMemObj = &patternMemObj;
@@ -347,7 +347,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, argumentTwoShouldMatchPatternPtr) {
                                                            pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     MemObj patternMemObj(&this->context, 0, 0, alignUp(EnqueueFillBufferTraits::patternSize, 4), patternAllocation->getUnderlyingBuffer(),
                          patternAllocation->getUnderlyingBuffer(), patternAllocation, false, false, true);
     dc.srcMemObj = &patternMemObj;
@@ -368,7 +368,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, argumentTwoShouldMatchPatternPtr) {
 }
 
 HWTEST_F(EnqueueFillBufferCmdTests, patternShouldBeCopied) {
-    auto &csr = pCmdQ->getCommandStreamReceiver();
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
     ASSERT_TRUE(csr.getTemporaryAllocations().peekIsEmpty());
     EnqueueFillBufferHelper<>::enqueueFillBuffer(pCmdQ, buffer);
     ASSERT_FALSE(csr.getTemporaryAllocations().peekIsEmpty());
@@ -389,7 +389,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, patternShouldBeCopied) {
 }
 
 HWTEST_F(EnqueueFillBufferCmdTests, patternShouldBeAligned) {
-    auto &csr = pCmdQ->getCommandStreamReceiver();
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
     ASSERT_TRUE(csr.getTemporaryAllocations().peekIsEmpty());
     EnqueueFillBufferHelper<>::enqueueFillBuffer(pCmdQ, buffer);
     ASSERT_FALSE(csr.getTemporaryAllocations().peekIsEmpty());
@@ -411,7 +411,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, patternShouldBeAligned) {
 }
 
 HWTEST_F(EnqueueFillBufferCmdTests, patternOfSizeOneByteShouldGetPreparedForMiddleKernel) {
-    auto &csr = pCmdQ->getCommandStreamReceiver();
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
     ASSERT_TRUE(csr.getAllocationsForReuse().peekIsEmpty());
     ASSERT_TRUE(csr.getTemporaryAllocations().peekIsEmpty());
 
@@ -444,7 +444,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, patternOfSizeOneByteShouldGetPreparedForMidd
 }
 
 HWTEST_F(EnqueueFillBufferCmdTests, patternOfSizeTwoBytesShouldGetPreparedForMiddleKernel) {
-    auto &csr = pCmdQ->getCommandStreamReceiver();
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
     ASSERT_TRUE(csr.getAllocationsForReuse().peekIsEmpty());
     ASSERT_TRUE(csr.getTemporaryAllocations().peekIsEmpty());
 
@@ -477,7 +477,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, patternOfSizeTwoBytesShouldGetPreparedForMid
 }
 
 HWTEST_F(EnqueueFillBufferCmdTests, givenEnqueueFillBufferWhenPatternAllocationIsObtainedThenItsTypeShouldBeSetToFillPattern) {
-    auto &csr = pCmdQ->getCommandStreamReceiver();
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
     ASSERT_TRUE(csr.getTemporaryAllocations().peekIsEmpty());
 
     auto dstBuffer = std::unique_ptr<Buffer>(BufferHelper<>::create());

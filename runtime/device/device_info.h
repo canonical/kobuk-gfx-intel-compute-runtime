@@ -6,6 +6,8 @@
  */
 
 #pragma once
+#include "public/cl_ext_private.h"
+
 #include "CL/cl.h"
 #include "CL/cl_ext.h"
 
@@ -118,6 +120,7 @@ struct DeviceInfo {
     cl_uint                      preferredLocalAtomicAlignment;
     cl_bool                      hostUnifiedMemory;
     uint32_t                     computeUnitsUsedForScratch;
+    uint32_t                     maxFrontEndThreads;
     cl_bool                      vmeAvcSupportsPreemption;
     cl_bool                      vmeAvcSupportsTextureSampler;
     cl_uint                      vmeAvcVersion;
@@ -129,8 +132,13 @@ struct DeviceInfo {
     bool                         nv12Extension;
     bool                         vmeExtension;
     bool                         platformLP;
-    bool                         cpuCopyAllowed;
     bool                         packedYuvExtension;
     bool                         sourceLevelDebuggerActive;
+    /*Unified Shared Memory Capabilites*/
+    cl_unified_shared_memory_capabilities_intel hostMemCapabilities;
+    cl_unified_shared_memory_capabilities_intel deviceMemCapabilities;
+    cl_unified_shared_memory_capabilities_intel singleDeviceSharedMemCapabilities;
+    cl_unified_shared_memory_capabilities_intel crossDeviceSharedMemCapabilities;
+    cl_unified_shared_memory_capabilities_intel sharedSystemMemCapabilities;
 };
 // clang-format on

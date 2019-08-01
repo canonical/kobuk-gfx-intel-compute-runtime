@@ -12,6 +12,7 @@
 #include <functional>
 
 namespace NEO {
+
 class VASharingFunctions : public SharingFunctions {
   public:
     VASharingFunctions(VADisplay vaDisplay);
@@ -22,24 +23,35 @@ class VASharingFunctions : public SharingFunctions {
     }
     static const uint32_t sharingId;
 
-    bool isValidVaDisplay() {
+    MOCKABLE_VIRTUAL bool isValidVaDisplay() {
         return vaDisplayIsValidPFN(vaDisplay) == 1;
     }
 
-    VAStatus deriveImage(VASurfaceID vaSurface, VAImage *vaImage) {
+    MOCKABLE_VIRTUAL VAStatus deriveImage(VASurfaceID vaSurface, VAImage *vaImage) {
         return vaDeriveImagePFN(vaDisplay, vaSurface, vaImage);
     }
 
-    VAStatus destroyImage(VAImageID vaImageId) {
+    MOCKABLE_VIRTUAL VAStatus destroyImage(VAImageID vaImageId) {
         return vaDestroyImagePFN(vaDisplay, vaImageId);
     }
 
-    VAStatus extGetSurfaceHandle(VASurfaceID *vaSurface, unsigned int *handleId) {
+    MOCKABLE_VIRTUAL VAStatus extGetSurfaceHandle(VASurfaceID *vaSurface, unsigned int *handleId) {
         return vaExtGetSurfaceHandlePFN(vaDisplay, vaSurface, handleId);
     }
 
-    VAStatus syncSurface(VASurfaceID vaSurface) {
+    MOCKABLE_VIRTUAL VAStatus syncSurface(VASurfaceID vaSurface) {
         return vaSyncSurfacePFN(vaDisplay, vaSurface);
+    }
+
+    MOCKABLE_VIRTUAL VAStatus queryImageFormats(VADisplay vaDisplay, VAImageFormat *formatList, int *numFormats) {
+        return vaQueryImageFormatsPFN(vaDisplay, formatList, numFormats);
+    }
+
+    MOCKABLE_VIRTUAL int maxNumImageFormats(VADisplay vaDisplay) {
+        if (vaMaxNumImageFormatsPFN) {
+            return vaMaxNumImageFormatsPFN(vaDisplay);
+        }
+        return 0;
     }
 
     void *getLibFunc(const char *func) {
@@ -50,6 +62,14 @@ class VASharingFunctions : public SharingFunctions {
     }
 
     void initFunctions();
+    void querySupportedVaImageFormats(VADisplay vaDisplay);
+
+    cl_int getSupportedFormats(cl_mem_flags flags,
+                               cl_mem_object_type imageType,
+                               cl_uint numEntries,
+                               VAImageFormat *formats,
+                               cl_uint *numImageFormats);
+
     static std::function<void *(const char *, int)> fdlopen;
     static std::function<void *(void *handle, const char *symbol)> fdlsym;
     static std::function<int(void *handle)> fdlclose;
@@ -65,5 +85,9 @@ class VASharingFunctions : public SharingFunctions {
     VASyncSurfacePFN vaSyncSurfacePFN;
     VAExtGetSurfaceHandlePFN vaExtGetSurfaceHandlePFN;
     VAGetLibFuncPFN vaGetLibFuncPFN;
+    VAQueryImageFormatsPFN vaQueryImageFormatsPFN;
+    VAMaxNumImageFormatsPFN vaMaxNumImageFormatsPFN;
+
+    std::vector<VAImageFormat> supportedFormats;
 };
 } // namespace NEO

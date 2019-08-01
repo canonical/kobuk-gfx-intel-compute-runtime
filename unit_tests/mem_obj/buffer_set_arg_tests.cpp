@@ -5,16 +5,16 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/gmm_helper/gmm.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/memory_manager/surface.h"
-#include "runtime/memory_manager/svm_memory_manager.h"
+#include "runtime/memory_manager/unified_memory_manager.h"
 #include "test.h"
 #include "unit_tests/fixtures/buffer_fixture.h"
 #include "unit_tests/fixtures/context_fixture.h"
 #include "unit_tests/fixtures/device_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_kernel.h"
 #include "unit_tests/mocks/mock_program.h"
 
@@ -261,10 +261,15 @@ TEST_F(BufferSetArgTest, clSetKernelArgBuffer) {
 }
 
 TEST_F(BufferSetArgTest, clSetKernelArgSVMPointer) {
-    void *ptrSVM = pContext->getSVMAllocsManager()->createSVMAlloc(256, false, false);
+    if (!pDevice->getHardwareInfo().capabilityTable.ftrSvm) {
+        GTEST_SKIP();
+    }
+    void *ptrSVM = pContext->getSVMAllocsManager()->createSVMAlloc(256, {});
     EXPECT_NE(nullptr, ptrSVM);
 
-    GraphicsAllocation *pSvmAlloc = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSVM);
+    auto svmData = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSVM);
+    ASSERT_NE(nullptr, svmData);
+    GraphicsAllocation *pSvmAlloc = svmData->gpuAllocation;
     EXPECT_NE(nullptr, pSvmAlloc);
 
     retVal = pKernel->setArgSvmAlloc(

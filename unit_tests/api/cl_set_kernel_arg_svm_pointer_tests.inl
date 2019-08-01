@@ -5,7 +5,7 @@
  *
  */
 
-#include "runtime/memory_manager/svm_memory_manager.h"
+#include "runtime/memory_manager/unified_memory_manager.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/mocks/mock_kernel.h"
@@ -113,12 +113,15 @@ TEST_F(clSetKernelArgSVMPointer_, SetKernelArgSVMPointer_invalidArgValue) {
 }
 
 TEST_F(clSetKernelArgSVMPointer_, SetKernelArgSVMPointerWithNullArgValue_success) {
-    auto retVal = clSetKernelArgSVMPointer(
-        pMockKernel, // cl_kernel kernel
-        0,           // cl_uint arg_index
-        nullptr      // const void *arg_value
-    );
-    EXPECT_EQ(CL_SUCCESS, retVal);
+    const DeviceInfo &devInfo = pDevice->getDeviceInfo();
+    if (devInfo.svmCapabilities != 0) {
+        auto retVal = clSetKernelArgSVMPointer(
+            pMockKernel, // cl_kernel kernel
+            0,           // cl_uint arg_index
+            nullptr      // const void *arg_value
+        );
+        EXPECT_EQ(CL_SUCCESS, retVal);
+    }
 }
 
 TEST_F(clSetKernelArgSVMPointer_, SetKernelArgSVMPointer_success) {
@@ -179,7 +182,9 @@ TEST_F(clSetKernelArgSVMPointer_, SetKernelArgSVMPointerWithOffset_invalidArgVal
     const DeviceInfo &devInfo = pDevice->getDeviceInfo();
     if (devInfo.svmCapabilities != 0) {
         void *ptrSvm = clSVMAlloc(pContext, CL_MEM_READ_WRITE, 256, 4);
-        auto svmAlloc = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSvm);
+        auto svmData = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSvm);
+        ASSERT_NE(nullptr, svmData);
+        auto svmAlloc = svmData->gpuAllocation;
         EXPECT_NE(nullptr, svmAlloc);
 
         size_t offset = svmAlloc->getUnderlyingBufferSize() + 1;

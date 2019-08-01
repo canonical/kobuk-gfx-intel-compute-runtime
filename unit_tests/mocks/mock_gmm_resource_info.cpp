@@ -14,6 +14,9 @@ using namespace ::testing;
 
 namespace NEO {
 GmmResourceInfo *GmmResourceInfo::create(GMM_RESCREATE_PARAMS *resourceCreateParams) {
+    if (resourceCreateParams->Type == GMM_RESOURCE_TYPE::RESOURCE_INVALID) {
+        return nullptr;
+    }
     return new ::testing::NiceMock<MockGmmResourceInfo>(resourceCreateParams);
 }
 
@@ -90,6 +93,10 @@ void MockGmmResourceInfo::setSurfaceFormat() {
 
     if (mockResourceCreateParams.Format == GMM_RESOURCE_FORMAT::GMM_FORMAT_P010) {
         tempSurface.GMMSurfaceFormat = GMM_RESOURCE_FORMAT::GMM_FORMAT_P010;
+        tempSurface.NumChannels = 1;
+        tempSurface.ImageElementSizeInBytes = 16;
+        tempSurface.PerChannelSizeInBytes = 16;
+
         surfaceFormatInfo = &tempSurface;
     }
 

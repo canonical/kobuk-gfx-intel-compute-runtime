@@ -22,14 +22,18 @@ struct HardwareInfo;
 
 class ScratchSpaceController {
   public:
-    ScratchSpaceController(const HardwareInfo &info, ExecutionEnvironment &environment, InternalAllocationStorage &allocationStorage);
+    ScratchSpaceController(ExecutionEnvironment &environment, InternalAllocationStorage &allocationStorage);
     virtual ~ScratchSpaceController();
 
     GraphicsAllocation *getScratchSpaceAllocation() {
         return scratchAllocation;
     }
+    GraphicsAllocation *getPrivateScratchSpaceAllocation() {
+        return privateScratchAllocation;
+    }
     virtual void setRequiredScratchSpace(void *sshBaseAddress,
                                          uint32_t requiredPerThreadScratchSize,
+                                         uint32_t requiredPerThreadPrivateScratchSize,
                                          uint32_t currentTaskCount,
                                          uint32_t deviceIdx,
                                          bool &stateBaseAddressDirty,
@@ -42,11 +46,12 @@ class ScratchSpaceController {
   protected:
     MemoryManager *getMemoryManager() const;
 
-    const HardwareInfo &hwInfo;
     ExecutionEnvironment &executionEnvironment;
     GraphicsAllocation *scratchAllocation = nullptr;
+    GraphicsAllocation *privateScratchAllocation = nullptr;
     InternalAllocationStorage &csrAllocationStorage;
     size_t scratchSizeBytes = 0;
+    size_t privateScratchSizeBytes = 0;
     bool force32BitAllocation = false;
     uint32_t computeUnitsUsedForScratch = 0;
 };

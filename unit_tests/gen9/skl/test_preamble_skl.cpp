@@ -5,12 +5,12 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_stream/preemption.h"
 #include "runtime/command_stream/thread_arbitration_policy.h"
 #include "runtime/gen9/reg_configs.h"
 #include "runtime/helpers/preamble.h"
 #include "unit_tests/gen_common/gen_cmd_parse.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/preamble/preamble_fixture.h"
 
 using namespace NEO;
@@ -77,7 +77,7 @@ SKLTEST_F(ThreadArbitration, givenPreambleWhenItIsProgrammedThenThreadArbitratio
     typedef SKLFamily::PIPE_CONTROL PIPE_CONTROL;
     LinearStream &cs = linearStream;
     uint32_t l3Config = PreambleHelper<FamilyType>::getL3Config(**platformDevices, true);
-    MockDevice mockDevice(**platformDevices);
+    MockDevice mockDevice;
     PreambleHelper<SKLFamily>::programPreamble(&linearStream, mockDevice, l3Config,
                                                ThreadArbitrationPolicy::RoundRobin,
                                                nullptr);
@@ -94,7 +94,8 @@ SKLTEST_F(ThreadArbitration, givenPreambleWhenItIsProgrammedThenThreadArbitratio
     EXPECT_EQ(0xE404u, lri.getRegisterOffset());
     EXPECT_EQ(0x100u, lri.getDataDword());
 
-    EXPECT_EQ(0u, PreambleHelper<SKLFamily>::getAdditionalCommandsSize(MockDevice(*platformDevices[0])));
+    MockDevice device;
+    EXPECT_EQ(0u, PreambleHelper<SKLFamily>::getAdditionalCommandsSize(device));
     EXPECT_EQ(sizeof(MI_LOAD_REGISTER_IMM) + sizeof(PIPE_CONTROL), PreambleHelper<SKLFamily>::getThreadArbitrationCommandsSize());
 }
 
@@ -104,9 +105,9 @@ SKLTEST_F(ThreadArbitration, defaultArbitrationPolicy) {
 
 GEN9TEST_F(PreambleVfeState, WaOff) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
-    testWaTable.waSendMIFLUSHBeforeVFE = 0;
+    testWaTable->waSendMIFLUSHBeforeVFE = 0;
     LinearStream &cs = linearStream;
-    PreambleHelper<FamilyType>::programVFEState(&linearStream, **platformDevices, 0, 0);
+    PreambleHelper<FamilyType>::programVFEState(&linearStream, pPlatform->getDevice(0)->getHardwareInfo(), 0, 0, 168u);
 
     parseCommands<FamilyType>(cs);
 
@@ -122,9 +123,9 @@ GEN9TEST_F(PreambleVfeState, WaOff) {
 
 GEN9TEST_F(PreambleVfeState, WaOn) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
-    testWaTable.waSendMIFLUSHBeforeVFE = 1;
+    testWaTable->waSendMIFLUSHBeforeVFE = 1;
     LinearStream &cs = linearStream;
-    PreambleHelper<FamilyType>::programVFEState(&linearStream, **platformDevices, 0, 0);
+    PreambleHelper<FamilyType>::programVFEState(&linearStream, pPlatform->getDevice(0)->getHardwareInfo(), 0, 0, 168u);
 
     parseCommands<FamilyType>(cs);
 

@@ -21,7 +21,7 @@ static SurfaceFormatInfo mockSurfaceFormat;
 class MockGmm : public Gmm {
   public:
     static std::unique_ptr<Gmm> queryImgParams(ImageInfo &imgInfo) {
-        return std::unique_ptr<Gmm>(new Gmm(imgInfo));
+        return std::unique_ptr<Gmm>(new Gmm(imgInfo, {}));
     }
 
     static ImageInfo initImgInfo(cl_image_desc &imgDesc, int baseMipLevel, const SurfaceFormatInfo *surfaceFormat) {
@@ -44,7 +44,7 @@ class MockGmm : public Gmm {
         imgDesc.image_width = 5;
         imgDesc.image_height = 5;
         auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-        return memoryManager.allocateGraphicsMemoryWithProperties(AllocationProperties{&imgInfo, true});
+        return memoryManager.allocateGraphicsMemoryWithProperties({true, imgInfo, GraphicsAllocation::AllocationType::IMAGE});
     }
 };
 } // namespace NEO

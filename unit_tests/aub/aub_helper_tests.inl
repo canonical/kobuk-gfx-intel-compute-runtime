@@ -5,15 +5,15 @@
  *
  */
 
+#include "core/helpers/basic_math.h"
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/aub/aub_helper.h"
 #include "runtime/aub_mem_dump/aub_mem_dump.h"
 #include "runtime/aub_mem_dump/page_table_entry_bits.h"
 #include "runtime/command_stream/aub_command_stream_receiver_hw.h"
-#include "runtime/helpers/basic_math.h"
 #include "runtime/helpers/device_helpers.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_lrca_helper.h"
 
 #include "gtest/gtest.h"
@@ -35,12 +35,12 @@ TEST(AubHelper, WhenGetPTEntryBitsIsCalledThenEntryBitsAreNotMasked) {
 
 TEST(AubHelper, WhenCreateMultipleDevicesIsSetThenGetDevicesCountReturnedCorrectValue) {
     DebugManagerStateRestore stateRestore;
-    FeatureTable skuTable = {};
-    WorkaroundTable waTable = {};
+    FeatureTable featureTable = {};
+    WorkaroundTable workaroundTable = {};
     RuntimeCapabilityTable capTable = {};
     GT_SYSTEM_INFO sysInfo = {};
     PLATFORM platform = {};
-    HardwareInfo hwInfo{&platform, &skuTable, &waTable, &sysInfo, capTable};
+    HardwareInfo hwInfo{&platform, &featureTable, &workaroundTable, &sysInfo, capTable};
     DebugManager.flags.CreateMultipleDevices.set(2);
 
     uint32_t devicesCount = DeviceHelper::getDevicesCount(&hwInfo);

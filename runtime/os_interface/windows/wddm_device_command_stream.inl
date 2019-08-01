@@ -9,12 +9,12 @@
 // Current order must be preserved due to two versions of igfxfmid.h
 #pragma warning(push)
 #pragma warning(disable : 4005)
+#include "core/helpers/ptr_math.h"
 #include "runtime/command_stream/linear_stream.h"
 #include "runtime/command_stream/preemption.h"
 #include "runtime/device/device.h"
 #include "runtime/gmm_helper/page_table_mngr.h"
 #include "runtime/helpers/gmm_callbacks.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/mem_obj/mem_obj.h"
 #include "runtime/os_interface/windows/wddm/wddm.h"
 #include "runtime/os_interface/windows/wddm_device_command_stream.h"
@@ -35,6 +35,7 @@ template <typename GfxFamily>
 WddmCommandStreamReceiver<GfxFamily>::WddmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment)
     : BaseClass(executionEnvironment) {
 
+    notifyAubCaptureImpl = DeviceCallbacks<GfxFamily>::notifyAubCapture;
     this->wddm = executionEnvironment.osInterface->get()->getWddm();
     this->osInterface = executionEnvironment.osInterface.get();
 
@@ -82,8 +83,6 @@ FlushStamp WddmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer,
     const uint32_t maxRequestedSubsliceCount = 7;
     switch (batchBuffer.throttle) {
     case QueueThrottle::LOW:
-        pHeader->UmdRequestedSubsliceCount = 1;
-        break;
     case QueueThrottle::MEDIUM:
         pHeader->UmdRequestedSubsliceCount = 0;
         break;
@@ -141,34 +140,11 @@ bool WddmCommandStreamReceiver<GfxFamily>::waitForFlushStamp(FlushStamp &flushSt
 
 template <typename GfxFamily>
 GmmPageTableMngr *WddmCommandStreamReceiver<GfxFamily>::createPageTableManager() {
-    GMM_DEVICE_CALLBACKS_INT deviceCallbacks = {};
     GMM_TRANSLATIONTABLE_CALLBACKS ttCallbacks = {};
-    auto gdi = wddm->getGdi();
+    ttCallbacks.pfWriteL3Adr = TTCallbacks<GfxFamily>::writeL3Address;
 
-    // clang-format off
-    deviceCallbacks.Adapter.KmtHandle         = wddm->getAdapter();
-    deviceCallbacks.hDevice.KmtHandle         = wddm->getDevice();
-    deviceCallbacks.hCsr            = static_cast<CommandStreamReceiverHw<GfxFamily> *>(this);
-    deviceCallbacks.PagingQueue     = wddm->getPagingQueue();
-    deviceCallbacks.PagingFence     = wddm->getPagingQueueSyncObject();
-
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnAllocate     = gdi->createAllocation;
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnDeallocate   = gdi->destroyAllocation;
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnMapGPUVA     = gdi->mapGpuVirtualAddress;
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnMakeResident = gdi->makeResident;
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnEvict        = gdi->evict;
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnReserveGPUVA = gdi->reserveGpuVirtualAddress;
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnUpdateGPUVA  = gdi->updateGpuVirtualAddress;
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnWaitFromCpu  = gdi->waitForSynchronizationObjectFromCpu;
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnLock         = gdi->lock2;
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnUnLock       = gdi->unlock2;
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnEscape       = gdi->escape;
-    deviceCallbacks.DevCbPtrs.KmtCbPtrs.pfnNotifyAubCapture = DeviceCallbacks<GfxFamily>::notifyAubCapture;
-
-    ttCallbacks.pfWriteL3Adr        = TTCallbacks<GfxFamily>::writeL3Address;
-    // clang-format on
-
-    GmmPageTableMngr *gmmPageTableMngr = GmmPageTableMngr::create(&deviceCallbacks, TT_TYPE::TRTT | TT_TYPE::AUXTT, &ttCallbacks);
+    GmmPageTableMngr *gmmPageTableMngr = GmmPageTableMngr::create(TT_TYPE::TRTT | TT_TYPE::AUXTT, &ttCallbacks);
+    gmmPageTableMngr->setCsrHandle(this);
     this->wddm->resetPageTableManager(gmmPageTableMngr);
     return gmmPageTableMngr;
 }

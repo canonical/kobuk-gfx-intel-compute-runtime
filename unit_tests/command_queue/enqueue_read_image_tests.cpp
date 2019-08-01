@@ -5,12 +5,12 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/memory_manager/allocations_list.h"
 #include "test.h"
 #include "unit_tests/command_queue/enqueue_read_image_fixture.h"
 #include "unit_tests/gen_common/gen_commands_common_validation.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_builtin_dispatch_info_builder.h"
 #include "unit_tests/mocks/mock_command_queue.h"
@@ -105,7 +105,7 @@ HWTEST_F(EnqueueReadImageTest, loadRegisterImmediateL3CNTLREG) {
 
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, WhenEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueReadImage<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 
@@ -228,13 +228,53 @@ HWTEST_F(EnqueueReadImageTest, GivenImage1DarrayWhenReadImageIsCalledThenHostPtr
 
     EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage, CL_FALSE, origin, region);
 
-    auto &csr = pCmdQ->getCommandStreamReceiver();
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
 
     auto temporaryAllocation = csr.getTemporaryAllocations().peekHead();
     ASSERT_NE(nullptr, temporaryAllocation);
 
     EXPECT_EQ(temporaryAllocation->getUnderlyingBufferSize(), imageSize);
 
+    delete srcImage;
+}
+
+HWTEST_F(EnqueueReadImageTest, GivenImage1DarrayWhenReadImageIsCalledThenRowPitchIsSetToSlicePitch) {
+    auto &builtIns = *pCmdQ->getDevice().getExecutionEnvironment()->getBuiltIns();
+    EBuiltInOps::Type copyBuiltIn = EBuiltInOps::CopyImage3dToBuffer;
+    auto &origBuilder = builtIns.getBuiltinDispatchInfoBuilder(
+        copyBuiltIn,
+        pCmdQ->getContext(),
+        pCmdQ->getDevice());
+
+    // substitute original builder with mock builder
+    auto oldBuilder = builtIns.setBuiltinDispatchInfoBuilder(
+        copyBuiltIn,
+        pCmdQ->getContext(),
+        pCmdQ->getDevice(),
+        std::unique_ptr<NEO::BuiltinDispatchInfoBuilder>(new MockBuiltinDispatchInfoBuilder(builtIns, &origBuilder)));
+
+    auto srcImage = Image1dArrayHelper<>::create(context);
+    auto imageDesc = srcImage->getImageDesc();
+    size_t origin[] = {0, 0, 0};
+    size_t region[] = {imageDesc.image_width, imageDesc.image_array_size, 1};
+    size_t rowPitch = 64;
+    size_t slicePitch = 128;
+
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage, CL_TRUE, origin, region, rowPitch, slicePitch);
+
+    auto &mockBuilder = static_cast<MockBuiltinDispatchInfoBuilder &>(builtIns.getBuiltinDispatchInfoBuilder(copyBuiltIn,
+                                                                                                             pCmdQ->getContext(),
+                                                                                                             pCmdQ->getDevice()));
+    auto params = mockBuilder.getBuiltinOpParams();
+    EXPECT_EQ(params->srcRowPitch, slicePitch);
+
+    // restore original builder and retrieve mock builder
+    auto newBuilder = builtIns.setBuiltinDispatchInfoBuilder(
+        copyBuiltIn,
+        pCmdQ->getContext(),
+        pCmdQ->getDevice(),
+        std::move(oldBuilder));
+    EXPECT_NE(nullptr, newBuilder);
     delete srcImage;
 }
 
@@ -247,7 +287,7 @@ HWTEST_F(EnqueueReadImageTest, GivenImage2DarrayWhenReadImageIsCalledThenHostPtr
 
     EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage, CL_FALSE, origin, region);
 
-    auto &csr = pCmdQ->getCommandStreamReceiver();
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
 
     auto temporaryAllocation = csr.getTemporaryAllocations().peekHead();
     ASSERT_NE(nullptr, temporaryAllocation);
@@ -275,6 +315,7 @@ HWTEST_F(EnqueueReadImageTest, GivenImage1DAndImageShareTheSameStorageWithHostPt
                                        rowPitch,
                                        slicePitch,
                                        ptr,
+                                       nullptr,
                                        0,
                                        nullptr,
                                        nullptr);
@@ -304,6 +345,7 @@ HWTEST_F(EnqueueReadImageTest, GivenImage1DArrayAndImageShareTheSameStorageWithH
                                      rowPitch,
                                      slicePitch,
                                      ptrStorage,
+                                     nullptr,
                                      0,
                                      nullptr,
                                      nullptr);
@@ -335,6 +377,7 @@ HWTEST_F(EnqueueReadImageTest, GivenSharedContextZeroCopy2DImageWhenEnqueueReadI
                                      rowPitch,
                                      slicePitch,
                                      ptr,
+                                     nullptr,
                                      0,
                                      nullptr,
                                      nullptr);
@@ -365,6 +408,7 @@ HWTEST_F(EnqueueReadImageTest, GivenImage1DThatIsZeroCopyWhenReadImageWithTheSam
                                      rowPitch,
                                      slicePitch,
                                      ptr,
+                                     nullptr,
                                      numEventsInWaitList,
                                      nullptr,
                                      &event);
@@ -390,6 +434,21 @@ HWTEST_F(EnqueueReadImageTest, givenCommandQueueWhenEnqueueReadImageIsCalledThen
     EnqueueReadImageHelper<>::enqueueReadImage(mockCmdQ.get(), srcImage.get(), CL_TRUE, origin, region);
 
     EXPECT_TRUE(mockCmdQ->notifyEnqueueReadImageCalled);
+}
+
+HWTEST_F(EnqueueReadImageTest, givenCommandQueueWhenEnqueueReadImageWithMapAllocationIsCalledThenItDoesntCallNotifyFunction) {
+    auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pDevice, nullptr);
+    std::unique_ptr<Image> srcImage(Image2dArrayHelper<>::create(context));
+    auto imageDesc = srcImage->getImageDesc();
+    size_t origin[] = {0, 0, 0};
+    size_t region[] = {imageDesc.image_width, imageDesc.image_height, imageDesc.image_array_size};
+    size_t rowPitch = srcImage->getHostPtrRowPitch();
+    size_t slicePitch = srcImage->getHostPtrSlicePitch();
+    GraphicsAllocation mapAllocation{GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0, 0, 0, MemoryPool::MemoryNull, false};
+
+    EnqueueReadImageHelper<>::enqueueReadImage(mockCmdQ.get(), srcImage.get(), CL_TRUE, origin, region, rowPitch, slicePitch, dstPtr, &mapAllocation);
+
+    EXPECT_FALSE(mockCmdQ->notifyEnqueueReadImageCalled);
 }
 
 HWTEST_F(EnqueueReadImageTest, givenEnqueueReadImageBlockingWhenAUBDumpAllocsOnEnqueueReadOnlyIsOnThenImageShouldBeSetDumpable) {
@@ -487,6 +546,7 @@ HWTEST_P(MipMapReadImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalled
                                      0,
                                      0,
                                      ptr.get(),
+                                     nullptr,
                                      0,
                                      nullptr,
                                      nullptr);
@@ -531,6 +591,7 @@ HWTEST_F(NegativeFailAllocationTest, givenEnqueueWriteImageWhenHostPtrAllocation
                                       rowPitch,
                                       slicePitch,
                                       ptr,
+                                      nullptr,
                                       0,
                                       nullptr,
                                       nullptr);

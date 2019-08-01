@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/api/api.h"
 #include "runtime/helpers/options.h"
 #include "runtime/mem_obj/image.h"
@@ -14,7 +15,6 @@
 #include "runtime/sharings/d3d/d3d_surface.h"
 #include "test.h"
 #include "unit_tests/fixtures/platform_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_command_queue.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_d3d_objects.h"
@@ -41,15 +41,16 @@ class D3D9Tests : public PlatformFixture, public ::testing::Test {
     class MockMM : public OsAgnosticMemoryManager {
       public:
         MockMM(const ExecutionEnvironment &executionEnvironment) : OsAgnosticMemoryManager(const_cast<ExecutionEnvironment &>(executionEnvironment)){};
-        GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, bool requireSpecificBitness) override {
-            auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle(handle, requireSpecificBitness);
+        GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness) override {
+            auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle(handle, properties, requireSpecificBitness);
             alloc->setDefaultGmm(forceGmm);
             gmmOwnershipPassed = true;
             return alloc;
         }
         GraphicsAllocation *allocateGraphicsMemoryForImage(const AllocationData &allocationData) override {
-            auto gmm = std::make_unique<Gmm>(*allocationData.imgInfo);
-            auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle(1, false);
+            auto gmm = std::make_unique<Gmm>(*allocationData.imgInfo, StorageInfo{});
+            AllocationProperties properties(nullptr, false, GraphicsAllocation::AllocationType::SHARED_IMAGE, false);
+            auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle(1, properties, false);
             alloc->setDefaultGmm(forceGmm);
             gmmOwnershipPassed = true;
             return alloc;
@@ -232,6 +233,18 @@ TEST_F(D3D9Tests, createSurfaceIntel) {
     EXPECT_EQ(mockSharingFcns->mockTexture2dDesc.Height, image->getImageDesc().image_height);
 
     clReleaseMemObject(memObj);
+}
+
+TEST_F(D3D9Tests, givenD3DHandleWhenCreatingSharedSurfaceThenAllocationTypeImageIsSet) {
+    mockSharingFcns->mockTexture2dDesc.Format = (D3DFORMAT)MAKEFOURCC('Y', 'V', '1', '2');
+    surfaceInfo.shared_handle = reinterpret_cast<HANDLE>(1);
+
+    EXPECT_CALL(*mockSharingFcns, getTexture2dDesc(_, _)).Times(1).WillOnce(SetArgPointee<0>(mockSharingFcns->mockTexture2dDesc));
+
+    auto sharedImg = std::unique_ptr<Image>(D3DSurface::create(context, &surfaceInfo, CL_MEM_READ_WRITE, 0, 2, nullptr));
+    ASSERT_NE(nullptr, sharedImg.get());
+    ASSERT_NE(nullptr, sharedImg->getGraphicsAllocation());
+    EXPECT_EQ(GraphicsAllocation::AllocationType::SHARED_IMAGE, sharedImg->getGraphicsAllocation()->getAllocationType());
 }
 
 TEST_F(D3D9Tests, givenUPlaneWhenCreateSurfaceThenChangeWidthHeightAndPitch) {

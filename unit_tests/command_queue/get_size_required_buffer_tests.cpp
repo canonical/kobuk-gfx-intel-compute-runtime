@@ -12,7 +12,7 @@
 #include "runtime/command_queue/enqueue_write_buffer.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/event/event.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/kernel/kernel.h"
 #include "test.h"
 #include "unit_tests/command_queue/command_enqueue_fixture.h"
@@ -80,7 +80,7 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueFillBuffer) {
                                                                                                                pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     MemObj patternMemObj(this->context, 0, 0, alignUp(EnqueueFillBufferTraits::patternSize, 4), patternAllocation->getUnderlyingBuffer(),
                          patternAllocation->getUnderlyingBuffer(), patternAllocation, false, false, true);
     dc.srcMemObj = &patternMemObj;
@@ -95,10 +95,11 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueFillBuffer) {
     auto usedAfterIOH = ioh.getUsed();
     auto usedAfterSSH = ssh.getUsed();
 
-    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_FILL_BUFFER, CsrDependencies(), false, false, *pCmdQ, multiDispatchInfo);
-    auto expectedSizeDSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
-    auto expectedSizeIOH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
-    auto expectedSizeSSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
+    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_FILL_BUFFER, CsrDependencies(), false, false,
+                                                                               false, *pCmdQ, multiDispatchInfo);
+    auto expectedSizeDSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
+    auto expectedSizeIOH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
+    auto expectedSizeSSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
 
     EXPECT_EQ(0u, expectedSizeIOH % GPGPU_WALKER::INDIRECTDATASTARTADDRESS_ALIGN_SIZE);
     EXPECT_EQ(0u, expectedSizeDSH % 64);
@@ -132,7 +133,7 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueCopyBuffer) {
                                                                                                                pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.srcMemObj = srcBuffer;
     dc.srcMemObj = dstBuffer;
     dc.srcOffset = {EnqueueCopyBufferTraits::srcOffset, 0, 0};
@@ -146,10 +147,11 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueCopyBuffer) {
     auto usedAfterIOH = ioh.getUsed();
     auto usedAfterSSH = ssh.getUsed();
 
-    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_COPY_BUFFER, CsrDependencies(), false, false, *pCmdQ, multiDispatchInfo);
-    auto expectedSizeDSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
-    auto expectedSizeIOH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
-    auto expectedSizeSSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
+    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_COPY_BUFFER, CsrDependencies(), false, false,
+                                                                               false, *pCmdQ, multiDispatchInfo);
+    auto expectedSizeDSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
+    auto expectedSizeIOH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
+    auto expectedSizeSSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
 
     EXPECT_EQ(0u, expectedSizeIOH % GPGPU_WALKER::INDIRECTDATASTARTADDRESS_ALIGN_SIZE);
     EXPECT_EQ(0u, expectedSizeDSH % 64);
@@ -185,7 +187,7 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueReadBufferNonBlocking) {
                                                                                                                pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.dstPtr = EnqueueReadBufferTraits::hostPtr;
     dc.srcMemObj = srcBuffer;
     dc.srcOffset = {EnqueueReadBufferTraits::offset, 0, 0};
@@ -198,10 +200,11 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueReadBufferNonBlocking) {
     auto usedAfterIOH = ioh.getUsed();
     auto usedAfterSSH = ssh.getUsed();
 
-    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_READ_BUFFER, CsrDependencies(), false, false, *pCmdQ, multiDispatchInfo);
-    auto expectedSizeDSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
-    auto expectedSizeIOH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
-    auto expectedSizeSSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
+    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_READ_BUFFER, CsrDependencies(), false, false,
+                                                                               false, *pCmdQ, multiDispatchInfo);
+    auto expectedSizeDSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
+    auto expectedSizeIOH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
+    auto expectedSizeSSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
 
     EXPECT_EQ(0u, expectedSizeIOH % GPGPU_WALKER::INDIRECTDATASTARTADDRESS_ALIGN_SIZE);
     EXPECT_EQ(0u, expectedSizeDSH % 64);
@@ -238,7 +241,7 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueReadBufferBlocking) {
                                                                                                                pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.dstPtr = EnqueueReadBufferTraits::hostPtr;
     dc.srcMemObj = srcBuffer;
     dc.srcOffset = {EnqueueReadBufferTraits::offset, 0, 0};
@@ -251,10 +254,11 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueReadBufferBlocking) {
     auto usedAfterIOH = ioh.getUsed();
     auto usedAfterSSH = ssh.getUsed();
 
-    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_READ_BUFFER, CsrDependencies(), false, false, *pCmdQ, multiDispatchInfo);
-    auto expectedSizeDSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
-    auto expectedSizeIOH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
-    auto expectedSizeSSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
+    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_READ_BUFFER, CsrDependencies(), false, false,
+                                                                               false, *pCmdQ, multiDispatchInfo);
+    auto expectedSizeDSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
+    auto expectedSizeIOH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
+    auto expectedSizeSSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
 
     EXPECT_EQ(0u, expectedSizeIOH % GPGPU_WALKER::INDIRECTDATASTARTADDRESS_ALIGN_SIZE);
     EXPECT_EQ(0u, expectedSizeDSH % 64);
@@ -291,7 +295,7 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueWriteBufferNonBlocking) {
                                                                                                                pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.srcPtr = EnqueueWriteBufferTraits::hostPtr;
     dc.dstMemObj = dstBuffer;
     dc.dstOffset = {EnqueueWriteBufferTraits::offset, 0, 0};
@@ -304,10 +308,11 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueWriteBufferNonBlocking) {
     auto usedAfterIOH = ioh.getUsed();
     auto usedAfterSSH = ssh.getUsed();
 
-    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_WRITE_BUFFER, CsrDependencies(), false, false, *pCmdQ, multiDispatchInfo);
-    auto expectedSizeDSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
-    auto expectedSizeIOH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
-    auto expectedSizeSSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
+    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_WRITE_BUFFER, CsrDependencies(), false, false,
+                                                                               false, *pCmdQ, multiDispatchInfo);
+    auto expectedSizeDSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
+    auto expectedSizeIOH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
+    auto expectedSizeSSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
 
     // Since each enqueue* may flush, we may see a MI_BATCH_BUFFER_END appended.
     expectedSizeCS += sizeof(typename FamilyType::MI_BATCH_BUFFER_END);
@@ -341,7 +346,7 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueWriteBufferBlocking) {
                                                                                                                pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.srcPtr = EnqueueWriteBufferTraits::hostPtr;
     dc.dstMemObj = dstBuffer;
     dc.dstOffset = {EnqueueWriteBufferTraits::offset, 0, 0};
@@ -354,10 +359,11 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueWriteBufferBlocking) {
     auto usedAfterIOH = ioh.getUsed();
     auto usedAfterSSH = ssh.getUsed();
 
-    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_WRITE_BUFFER, CsrDependencies(), false, false, *pCmdQ, multiDispatchInfo);
-    auto expectedSizeDSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
-    auto expectedSizeIOH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
-    auto expectedSizeSSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
+    auto expectedSizeCS = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_WRITE_BUFFER, CsrDependencies(), false, false,
+                                                                               false, *pCmdQ, multiDispatchInfo);
+    auto expectedSizeDSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
+    auto expectedSizeIOH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
+    auto expectedSizeSSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
 
     // Since each enqueue* may flush, we may see a MI_BATCH_BUFFER_END appended.
     expectedSizeCS += sizeof(typename FamilyType::MI_BATCH_BUFFER_END);
@@ -367,6 +373,35 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueWriteBufferBlocking) {
     EXPECT_GE(expectedSizeDSH, usedAfterDSH - usedBeforeDSH);
     EXPECT_GE(expectedSizeIOH, usedAfterIOH - usedBeforeIOH);
     EXPECT_GE(expectedSizeSSH, usedAfterSSH - usedBeforeSSH);
+}
+
+HWTEST_F(GetSizeRequiredBufferTest, givenMultipleKernelRequiringSshWhenTotalSizeIsComputedThenItIsProperlyAligned) {
+    MultiDispatchInfo multiDispatchInfo;
+    auto &builder = pCmdQ->getDevice().getExecutionEnvironment()->getBuiltIns()->getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyBufferToBuffer,
+                                                                                                               pCmdQ->getContext(), pCmdQ->getDevice());
+    ASSERT_NE(nullptr, &builder);
+
+    BuiltinOpParams dc;
+    dc.srcPtr = EnqueueWriteBufferTraits::hostPtr;
+    dc.dstMemObj = dstBuffer;
+    dc.dstOffset = {EnqueueWriteBufferTraits::offset, 0, 0};
+    dc.size = {dstBuffer->getSize(), 0, 0};
+    builder.buildDispatchInfos(multiDispatchInfo, dc);
+    builder.buildDispatchInfos(multiDispatchInfo, dc);
+    builder.buildDispatchInfos(multiDispatchInfo, dc);
+    builder.buildDispatchInfos(multiDispatchInfo, dc);
+
+    auto sizeSSH = multiDispatchInfo.begin()->getKernel()->getSurfaceStateHeapSize();
+    sizeSSH += sizeSSH ? FamilyType::BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE : 0;
+
+    sizeSSH = alignUp(sizeSSH, MemoryConstants::cacheLineSize);
+
+    sizeSSH *= 4u;
+    sizeSSH = alignUp(sizeSSH, MemoryConstants::pageSize);
+
+    EXPECT_EQ(4u, multiDispatchInfo.size());
+    auto expectedSizeSSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
+    EXPECT_EQ(sizeSSH, expectedSizeSSH);
 }
 
 HWTEST_F(GetSizeRequiredBufferTest, enqueueKernelHelloWorld) {
@@ -393,9 +428,9 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueKernelHelloWorld) {
     auto sshAfter = pSSH->getUsed();
 
     auto expectedSizeCS = EnqueueOperation<FamilyType>::getSizeRequiredCS(CL_COMMAND_NDRANGE_KERNEL, false, false, *pCmdQ, KernelFixture::pKernel);
-    auto expectedSizeDSH = KernelCommandsHelper<FamilyType>::getSizeRequiredDSH(*KernelFixture::pKernel);
-    auto expectedSizeIOH = KernelCommandsHelper<FamilyType>::getSizeRequiredIOH(*KernelFixture::pKernel, workSize[0]);
-    auto expectedSizeSSH = KernelCommandsHelper<FamilyType>::getSizeRequiredSSH(*KernelFixture::pKernel);
+    auto expectedSizeDSH = HardwareCommandsHelper<FamilyType>::getSizeRequiredDSH(*KernelFixture::pKernel);
+    auto expectedSizeIOH = HardwareCommandsHelper<FamilyType>::getSizeRequiredIOH(*KernelFixture::pKernel, workSize[0]);
+    auto expectedSizeSSH = HardwareCommandsHelper<FamilyType>::getSizeRequiredSSH(*KernelFixture::pKernel);
 
     // Since each enqueue* may flush, we may see a MI_BATCH_BUFFER_END appended.
     expectedSizeCS += sizeof(typename FamilyType::MI_BATCH_BUFFER_END);
@@ -432,9 +467,9 @@ HWTEST_F(GetSizeRequiredBufferTest, enqueueKernelSimpleArg) {
     auto sshAfter = pSSH->getUsed();
 
     auto expectedSizeCS = EnqueueOperation<FamilyType>::getSizeRequiredCS(CL_COMMAND_NDRANGE_KERNEL, false, false, *pCmdQ, KernelFixture::pKernel);
-    auto expectedSizeDSH = KernelCommandsHelper<FamilyType>::getSizeRequiredDSH(*KernelFixture::pKernel);
-    auto expectedSizeIOH = KernelCommandsHelper<FamilyType>::getSizeRequiredIOH(*KernelFixture::pKernel, workSize[0]);
-    auto expectedSizeSSH = KernelCommandsHelper<FamilyType>::getSizeRequiredSSH(*KernelFixture::pKernel);
+    auto expectedSizeDSH = HardwareCommandsHelper<FamilyType>::getSizeRequiredDSH(*KernelFixture::pKernel);
+    auto expectedSizeIOH = HardwareCommandsHelper<FamilyType>::getSizeRequiredIOH(*KernelFixture::pKernel, workSize[0]);
+    auto expectedSizeSSH = HardwareCommandsHelper<FamilyType>::getSizeRequiredSSH(*KernelFixture::pKernel);
 
     EXPECT_EQ(0u, expectedSizeIOH % GPGPU_WALKER::INDIRECTDATASTARTADDRESS_ALIGN_SIZE);
     EXPECT_EQ(0u, expectedSizeDSH % 64);

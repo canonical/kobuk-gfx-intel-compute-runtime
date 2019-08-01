@@ -12,10 +12,9 @@
 #ifdef SUPPORT_GEN9
 #include "runtime/gen9/reg_configs.h"
 #endif
-#ifdef SUPPORT_GEN10
-#include "runtime/gen10/reg_configs.h"
+#ifdef SUPPORT_GEN11
+#include "runtime/gen11/reg_configs.h"
 #endif
-
 #include <cstdint>
 
 namespace NEO {

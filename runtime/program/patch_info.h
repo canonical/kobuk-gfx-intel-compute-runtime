@@ -10,6 +10,8 @@
 #include "patch_list.h"
 
 #include <map>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace NEO {
@@ -44,15 +46,11 @@ using iOpenCL::SPatchString;
 using iOpenCL::SPatchThreadPayload;
 using iOpenCL::SProgramBinaryHeader;
 
-typedef struct TagPrintfStringInfo {
-    size_t SizeInBytes;
-    char *pStringData;
-} PrintfStringInfo, *PPrintfStringInfo;
-
 struct PatchInfo {
     const SPatchMediaInterfaceDescriptorLoad *interfaceDescriptorDataLoad = nullptr;
     const SPatchAllocateLocalSurface *localsurface = nullptr;
     const SPatchMediaVFEState *mediavfestate = nullptr;
+    const SPatchMediaVFEState *mediaVfeStateSlot1 = nullptr;
     const SPatchInterfaceDescriptorData *interfaceDescriptorData = nullptr;
     const SPatchSamplerStateArray *samplerStateArray = nullptr;
     const SPatchBindingTableState *bindingTableState = nullptr;
@@ -74,7 +72,7 @@ struct PatchInfo {
     const SPatchAllocateStatelessEventPoolSurface *pAllocateStatelessEventPoolSurface = nullptr;
     const SPatchAllocateStatelessDefaultDeviceQueueSurface *pAllocateStatelessDefaultDeviceQueueSurface = nullptr;
     const SPatchAllocateSystemThreadSurface *pAllocateSystemThreadSurface = nullptr;
-    ::std::map<uint32_t, PrintfStringInfo> stringDataMap;
+    ::std::unordered_map<uint32_t, std::string> stringDataMap;
     ::std::vector<const SPatchKernelArgumentInfo *> kernelArgumentInfo;
 
     PatchInfo() {

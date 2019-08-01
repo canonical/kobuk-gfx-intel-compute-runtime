@@ -10,7 +10,7 @@
 #include "runtime/command_queue/command_queue_hw.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/task_information.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/surface.h"
@@ -64,6 +64,9 @@ cl_int CommandQueueHw<GfxFamily>::enqueueKernel(
 
     for (auto i = 0u; i < workDim; i++) {
         region[i] = globalWorkSizeIn ? globalWorkSizeIn[i] : 0;
+        if (region[i] == 0 && (kernel.getDevice().getEnabledClVersion() < 21)) {
+            return CL_INVALID_GLOBAL_WORK_SIZE;
+        }
         globalWorkOffset[i] = globalWorkOffsetIn
                                   ? globalWorkOffsetIn[i]
                                   : 0;
@@ -78,7 +81,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueKernel(
                 return CL_INVALID_WORK_GROUP_SIZE;
             }
             if (kernel.getAllowNonUniform()) {
-                workGroupSize[i] = std::min(localWorkSizeIn[i], globalWorkSizeIn[i]);
+                workGroupSize[i] = std::min(localWorkSizeIn[i], std::max(static_cast<size_t>(1), globalWorkSizeIn[i]));
             } else {
                 workGroupSize[i] = localWorkSizeIn[i];
             }

@@ -6,7 +6,6 @@
 
 set(IGDRCL_SRCS_tests_mocks
   ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
-  ${CMAKE_CURRENT_SOURCE_DIR}/mock_32bitAllocator.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_allocation_properties.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_async_event_handler.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_async_event_handler.h
@@ -46,7 +45,6 @@ set(IGDRCL_SRCS_tests_mocks
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_gmm_resource_info.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_gmm_resource_info.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_graphics_allocation.h
-  ${CMAKE_CURRENT_SOURCE_DIR}${IGDRCL__INSTRUMENTATION_DIR_SUFFIX}/mock_instrumentation.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/mock_gmm_client_context.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/mock_gmm_client_context.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_host_ptr_manager.h
@@ -63,6 +61,7 @@ set(IGDRCL_SRCS_tests_mocks
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_program.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_program.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_sampler.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/mock_sharing_factory.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_sip.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_sip.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_source_level_debugger.h
@@ -70,6 +69,7 @@ set(IGDRCL_SRCS_tests_mocks
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_svm_manager.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_tbx_csr.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_tbx_stream.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/mock_timestamp_container.h
 )
 
 if(WIN32)
@@ -97,7 +97,7 @@ endif()
 
 add_subdirectories()
 
-add_library(igdrcl_mocks STATIC ${IGDRCL_SRCS_tests_mocks})
+add_library(igdrcl_mocks STATIC EXCLUDE_FROM_ALL ${IGDRCL_SRCS_tests_mocks})
 
 if(WIN32)
   target_include_directories(igdrcl_mocks PUBLIC

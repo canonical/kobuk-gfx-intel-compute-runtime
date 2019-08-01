@@ -25,8 +25,8 @@ class GlSharingTextureTests : public ::testing::Test {
     class TempMM : public MockMemoryManager {
       public:
         using MockMemoryManager::MockMemoryManager;
-        GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, bool requireSpecificBitness) override {
-            auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle(handle, requireSpecificBitness);
+        GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness) override {
+            auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle(handle, properties, requireSpecificBitness);
             if (useForcedGmm) {
                 alloc->setDefaultGmm(forceGmm.get());
             }
@@ -57,7 +57,7 @@ class GlSharingTextureTests : public ::testing::Test {
 
         tempMM = new TempMM(*executionEnvironment);
         executionEnvironment->memoryManager.reset(tempMM);
-        device.reset(MockDevice::create<MockDevice>(*platformDevices, executionEnvironment, 0));
+        device.reset(MockDevice::create<MockDevice>(executionEnvironment, 0));
         clContext = std::make_unique<MockContext>(device.get());
 
         mockGlSharingFunctions = glSharing->sharingFunctions.release();
@@ -115,7 +115,7 @@ TEST_F(GlSharingTextureTests, givenMockGlWhen1dGlTextureIsCreatedThenMemObjectHa
 
 class FailingMemoryManager : public MockMemoryManager {
   public:
-    GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, bool requireSpecificBitness) override {
+    GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness) override {
         return nullptr;
     }
 };

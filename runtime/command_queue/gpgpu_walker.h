@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "core/helpers/vec.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/command_stream/linear_stream.h"
@@ -16,14 +17,13 @@
 #include "runtime/event/hw_timestamps.h"
 #include "runtime/event/perf_counter.h"
 #include "runtime/helpers/dispatch_info.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/task_information.h"
 #include "runtime/helpers/timestamp_packet.h"
 #include "runtime/indirect_heap/indirect_heap.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/program/kernel_info.h"
 #include "runtime/utilities/tag_allocator.h"
-#include "runtime/utilities/vec.h"
 
 namespace NEO {
 
@@ -114,15 +114,6 @@ inline cl_uint computeDimensions(const size_t workItems[3]) {
 template <typename GfxFamily>
 class GpgpuWalkerHelper {
   public:
-    using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
-    using INTERFACE_DESCRIPTOR_DATA = typename GfxFamily::INTERFACE_DESCRIPTOR_DATA;
-
-    static void addAluReadModifyWriteRegister(
-        LinearStream *pCommandStream,
-        uint32_t aluRegister,
-        uint32_t operation,
-        uint32_t mask);
-
     static void applyWADisableLSQCROPERFforOCL(LinearStream *pCommandStream,
                                                const Kernel &kernel,
                                                bool disablePerfMode);
@@ -139,63 +130,34 @@ class GpgpuWalkerHelper {
         uint32_t workDim,
         bool localIdsGenerationByRuntime,
         bool inlineDataProgrammingRequired,
-        const iOpenCL::SPatchThreadPayload &threadPayload);
+        const iOpenCL::SPatchThreadPayload &threadPayload,
+        uint32_t requiredWorkgroupOrder);
 
     static void dispatchProfilingCommandsStart(
         TagNode<HwTimeStamps> &hwTimeStamps,
-        NEO::LinearStream *commandStream);
+        LinearStream *commandStream);
 
     static void dispatchProfilingCommandsEnd(
         TagNode<HwTimeStamps> &hwTimeStamps,
-        NEO::LinearStream *commandStream);
-
-    static void dispatchPerfCountersNoopidRegisterCommands(
-        CommandQueue &commandQueue,
-        NEO::HwPerfCounter &hwPerfCounter,
-        NEO::LinearStream *commandStream,
-        bool start);
-
-    static void dispatchPerfCountersReadFreqRegisterCommands(
-        CommandQueue &commandQueue,
-        NEO::HwPerfCounter &hwPerfCounter,
-        NEO::LinearStream *commandStream,
-        bool start);
-
-    static void dispatchPerfCountersGeneralPurposeCounterCommands(
-        CommandQueue &commandQueue,
-        NEO::HwPerfCounter &hwPerfCounter,
-        NEO::LinearStream *commandStream,
-        bool start);
-
-    static void dispatchPerfCountersUserCounterCommands(
-        CommandQueue &commandQueue,
-        NEO::HwPerfCounter &hwPerfCounter,
-        NEO::LinearStream *commandStream,
-        bool start);
-
-    static void dispatchPerfCountersOABufferStateCommands(
-        CommandQueue &commandQueue,
-        NEO::HwPerfCounter &hwPerfCounter,
-        NEO::LinearStream *commandStream);
+        LinearStream *commandStream);
 
     static void dispatchPerfCountersCommandsStart(
         CommandQueue &commandQueue,
-        NEO::HwPerfCounter &hwPerfCounter,
-        NEO::LinearStream *commandStream);
+        TagNode<HwPerfCounter> &hwPerfCounter,
+        LinearStream *commandStream);
 
     static void dispatchPerfCountersCommandsEnd(
         CommandQueue &commandQueue,
-        NEO::HwPerfCounter &hwPerfCounter,
-        NEO::LinearStream *commandStream);
+        TagNode<HwPerfCounter> &hwPerfCounter,
+        LinearStream *commandStream);
 
     static void setupTimestampPacket(
         LinearStream *cmdStream,
         WALKER_TYPE<GfxFamily> *walkerCmd,
-        TagNode<TimestampPacket> *timestampPacketNode,
-        TimestampPacket::WriteOperationType writeOperationType);
+        TagNode<TimestampPacketStorage> *timestampPacketNode,
+        TimestampPacketStorage::WriteOperationType writeOperationType);
 
     static void dispatchScheduler(
-        CommandQueue &commandQueue,
         LinearStream &commandStream,
         DeviceQueueHw<GfxFamily> &devQueueHw,
         PreemptionMode preemptionMode,
@@ -204,12 +166,21 @@ class GpgpuWalkerHelper {
         IndirectHeap *dsh);
 
     static void adjustMiStoreRegMemMode(MI_STORE_REG_MEM<GfxFamily> *storeCmd);
+
+  private:
+    using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
+
+    static void addAluReadModifyWriteRegister(
+        LinearStream *pCommandStream,
+        uint32_t aluRegister,
+        uint32_t operation,
+        uint32_t mask);
 };
 
 template <typename GfxFamily>
 struct EnqueueOperation {
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
-    static size_t getTotalSizeRequiredCS(uint32_t eventType, const CsrDependencies &csrDeps, bool reserveProfilingCmdsSpace, bool reservePerfCounters, CommandQueue &commandQueue, const MultiDispatchInfo &multiDispatchInfo);
+    static size_t getTotalSizeRequiredCS(uint32_t eventType, const CsrDependencies &csrDeps, bool reserveProfilingCmdsSpace, bool reservePerfCounters, bool blitEnqueue, CommandQueue &commandQueue, const MultiDispatchInfo &multiDispatchInfo);
     static size_t getSizeRequiredCS(uint32_t cmdType, bool reserveProfilingCmdsSpace, bool reservePerfCounters, CommandQueue &commandQueue, const Kernel *pKernel);
     static size_t getSizeRequiredForTimestampPacketWrite();
 
@@ -225,8 +196,8 @@ LinearStream &getCommandStream(CommandQueue &commandQueue, bool reserveProfiling
 }
 
 template <typename GfxFamily, uint32_t eventType>
-LinearStream &getCommandStream(CommandQueue &commandQueue, const CsrDependencies &csrDeps, bool reserveProfilingCmdsSpace, bool reservePerfCounterCmdsSpace, const MultiDispatchInfo &multiDispatchInfo) {
-    size_t expectedSizeCS = EnqueueOperation<GfxFamily>::getTotalSizeRequiredCS(eventType, csrDeps, reserveProfilingCmdsSpace, reservePerfCounterCmdsSpace, commandQueue, multiDispatchInfo);
+LinearStream &getCommandStream(CommandQueue &commandQueue, const CsrDependencies &csrDeps, bool reserveProfilingCmdsSpace, bool reservePerfCounterCmdsSpace, bool blitEnqueue, const MultiDispatchInfo &multiDispatchInfo, Surface **surfaces, size_t numSurfaces) {
+    size_t expectedSizeCS = EnqueueOperation<GfxFamily>::getTotalSizeRequiredCS(eventType, csrDeps, reserveProfilingCmdsSpace, reservePerfCounterCmdsSpace, blitEnqueue, commandQueue, multiDispatchInfo);
     return commandQueue.getCS(expectedSizeCS);
 }
 
@@ -237,15 +208,15 @@ IndirectHeap &getIndirectHeap(CommandQueue &commandQueue, const MultiDispatchInf
 
     // clang-format off
     switch (heapType) {
-    case IndirectHeap::DYNAMIC_STATE:   expectedSize = KernelCommandsHelper<GfxFamily>::getTotalSizeRequiredDSH(multiDispatchInfo); break;
-    case IndirectHeap::INDIRECT_OBJECT: expectedSize = KernelCommandsHelper<GfxFamily>::getTotalSizeRequiredIOH(multiDispatchInfo); break;
-    case IndirectHeap::SURFACE_STATE:   expectedSize = KernelCommandsHelper<GfxFamily>::getTotalSizeRequiredSSH(multiDispatchInfo); break;
+    case IndirectHeap::DYNAMIC_STATE:   expectedSize = HardwareCommandsHelper<GfxFamily>::getTotalSizeRequiredDSH(multiDispatchInfo); break;
+    case IndirectHeap::INDIRECT_OBJECT: expectedSize = HardwareCommandsHelper<GfxFamily>::getTotalSizeRequiredIOH(multiDispatchInfo); break;
+    case IndirectHeap::SURFACE_STATE:   expectedSize = HardwareCommandsHelper<GfxFamily>::getTotalSizeRequiredSSH(multiDispatchInfo); break;
     }
     // clang-format on
 
     if (Kernel *parentKernel = multiDispatchInfo.peekParentKernel()) {
         if (heapType == IndirectHeap::SURFACE_STATE) {
-            expectedSize += KernelCommandsHelper<GfxFamily>::template getSizeRequiredForExecutionModel<heapType>(*parentKernel);
+            expectedSize += HardwareCommandsHelper<GfxFamily>::template getSizeRequiredForExecutionModel<heapType>(*parentKernel);
         } else //if (heapType == IndirectHeap::DYNAMIC_STATE || heapType == IndirectHeap::INDIRECT_OBJECT)
         {
             DeviceQueueHw<GfxFamily> *pDevQueue = castToObject<DeviceQueueHw<GfxFamily>>(commandQueue.getContext().getDefaultDeviceQueue());

@@ -8,11 +8,10 @@
 #pragma once
 
 #include "runtime/helpers/csr_deps.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/properties_helper.h"
 #include "runtime/utilities/tag_allocator.h"
 
-#include <array>
 #include <atomic>
 #include <cstdint>
 #include <vector>
@@ -22,22 +21,16 @@ class CommandStreamReceiver;
 class LinearStream;
 
 namespace TimestampPacketSizeControl {
-constexpr uint32_t preferedChunkCount = 16u;
+constexpr uint32_t preferredPacketCount = 16u;
 }
 
 #pragma pack(1)
-class TimestampPacket {
-  public:
-    TimestampPacket() {
-        initialize();
-    }
-
-    enum class DataIndex : uint32_t {
-        ContextStart = 0,
-        GlobalStart,
-        ContextEnd,
-        GlobalEnd,
-        Max
+struct TimestampPacketStorage {
+    struct Packet {
+        uint32_t contextStart = 1u;
+        uint32_t globalStart = 1u;
+        uint32_t contextEnd = 1u;
+        uint32_t globalEnd = 1u;
     };
 
     enum class WriteOperationType : uint32_t {
@@ -50,36 +43,37 @@ class TimestampPacket {
     }
 
     bool canBeReleased() const {
-        return data[static_cast<uint32_t>(DataIndex::ContextEnd)] != 1 &&
-               data[static_cast<uint32_t>(DataIndex::GlobalEnd)] != 1 &&
-               implicitDependenciesCount.load() == 0;
+        return isCompleted() && implicitDependenciesCount.load() == 0;
     }
 
-    uint32_t getData(DataIndex operationType) const {
-        return data[static_cast<uint32_t>(operationType)];
+    bool isCompleted() const {
+        return packets[0].contextEnd != 1 &&
+               packets[0].globalEnd != 1;
     }
 
     void initialize() {
-        for (auto index = 0u; index < data.size(); index++) {
-            data[index] = 1;
+        for (auto &packet : packets) {
+            packet.contextStart = 1u;
+            packet.globalStart = 1u;
+            packet.contextEnd = 1u;
+            packet.globalEnd = 1u;
         }
         implicitDependenciesCount.store(0);
     }
 
     void incImplicitDependenciesCount() { implicitDependenciesCount++; }
 
-  protected:
-    std::array<uint32_t, static_cast<uint32_t>(DataIndex::Max) * TimestampPacketSizeControl::preferedChunkCount> data;
-    std::atomic<uint32_t> implicitDependenciesCount;
+    Packet packets[TimestampPacketSizeControl::preferredPacketCount];
+    std::atomic<uint32_t> implicitDependenciesCount{0u};
 };
 #pragma pack()
 
-static_assert(((static_cast<uint32_t>(TimestampPacket::DataIndex::Max) * TimestampPacketSizeControl::preferedChunkCount + 1) * sizeof(uint32_t)) == sizeof(TimestampPacket),
+static_assert(((4 * TimestampPacketSizeControl::preferredPacketCount + 1) * sizeof(uint32_t)) == sizeof(TimestampPacketStorage),
               "This structure is consumed by GPU and has to follow specific restrictions for padding and size");
 
 class TimestampPacketContainer : public NonCopyableOrMovableClass {
   public:
-    using Node = TagNode<TimestampPacket>;
+    using Node = TagNode<TimestampPacketStorage>;
     TimestampPacketContainer() = default;
     MOCKABLE_VIRTUAL ~TimestampPacketContainer();
 
@@ -89,6 +83,7 @@ class TimestampPacketContainer : public NonCopyableOrMovableClass {
     void assignAndIncrementNodesRefCounts(const TimestampPacketContainer &inputTimestampPacketContainer);
     void resolveDependencies(bool clearAllDependencies);
     void makeResident(CommandStreamReceiver &commandStreamReceiver);
+    bool isCompleted() const;
 
   protected:
     std::vector<Node *> timestampPacketNodes;
@@ -96,30 +91,18 @@ class TimestampPacketContainer : public NonCopyableOrMovableClass {
 
 struct TimestampPacketHelper {
     template <typename GfxFamily>
-    static void programSemaphoreWithImplicitDependency(LinearStream &cmdStream, TagNode<TimestampPacket> &timestampPacketNode) {
+    static void programSemaphoreWithImplicitDependency(LinearStream &cmdStream, TagNode<TimestampPacketStorage> &timestampPacketNode) {
         using MI_ATOMIC = typename GfxFamily::MI_ATOMIC;
-        auto compareAddress = getGpuAddressForDataWrite(timestampPacketNode, TimestampPacket::DataIndex::ContextEnd);
-        auto dependenciesCountAddress = getImplicitDependenciesCounGpuWriteAddress(timestampPacketNode);
+        auto compareAddress = timestampPacketNode.getGpuAddress() + offsetof(TimestampPacketStorage, packets[0].contextEnd);
+        auto dependenciesCountAddress = timestampPacketNode.getGpuAddress() + offsetof(TimestampPacketStorage, implicitDependenciesCount);
 
-        KernelCommandsHelper<GfxFamily>::programMiSemaphoreWait(cmdStream, compareAddress, 1);
+        HardwareCommandsHelper<GfxFamily>::programMiSemaphoreWait(cmdStream, compareAddress, 1);
 
         timestampPacketNode.tagForCpuAccess->incImplicitDependenciesCount();
 
-        KernelCommandsHelper<GfxFamily>::programMiAtomic(cmdStream, dependenciesCountAddress,
-                                                         MI_ATOMIC::ATOMIC_OPCODES::ATOMIC_4B_DECREMENT,
-                                                         MI_ATOMIC::DATA_SIZE::DATA_SIZE_DWORD);
-    }
-
-    static uint64_t getGpuAddressForDataWrite(TagNode<TimestampPacket> &timestampPacketNodes, TimestampPacket::DataIndex dataIndex) {
-        auto offset = static_cast<uint32_t>(dataIndex) * sizeof(uint32_t);
-        return timestampPacketNodes.getGpuAddress() + offset;
-    }
-
-    static uint64_t getImplicitDependenciesCounGpuWriteAddress(TagNode<TimestampPacket> &timestampPacketNodes) {
-        auto offset = static_cast<uint32_t>(TimestampPacket::DataIndex::Max) *
-                      TimestampPacketSizeControl::preferedChunkCount *
-                      sizeof(uint32_t);
-        return timestampPacketNodes.getGpuAddress() + offset;
+        HardwareCommandsHelper<GfxFamily>::programMiAtomic(cmdStream, dependenciesCountAddress,
+                                                           MI_ATOMIC::ATOMIC_OPCODES::ATOMIC_4B_DECREMENT,
+                                                           MI_ATOMIC::DATA_SIZE::DATA_SIZE_DWORD);
     }
 
     template <typename GfxFamily>
@@ -132,13 +115,18 @@ struct TimestampPacketHelper {
     }
 
     template <typename GfxFamily>
+    static size_t getRequiredCmdStreamSizeForNodeDependency() {
+        return sizeof(typename GfxFamily::MI_SEMAPHORE_WAIT) + sizeof(typename GfxFamily::MI_ATOMIC);
+    }
+
+    template <typename GfxFamily>
     static size_t getRequiredCmdStreamSize(const CsrDependencies &csrDependencies) {
         size_t totalNodesCount = 0;
         for (auto timestampPacketContainer : csrDependencies) {
             totalNodesCount += timestampPacketContainer->peekNodes().size();
         }
 
-        return totalNodesCount * (sizeof(typename GfxFamily::MI_SEMAPHORE_WAIT) + sizeof(typename GfxFamily::MI_ATOMIC));
+        return totalNodesCount * getRequiredCmdStreamSizeForNodeDependency<GfxFamily>();
     }
 };
 } // namespace NEO

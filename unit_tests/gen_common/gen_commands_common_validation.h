@@ -39,10 +39,10 @@ void validateStateBaseAddress(uint64_t internalHeapBase, IndirectHeap *pDSH,
     EXPECT_TRUE(cmd->getIndirectObjectBaseAddressModifyEnable());
     EXPECT_TRUE(cmd->getInstructionBaseAddressModifyEnable());
 
-    EXPECT_EQ(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pDSH->getCpuBase())), cmd->getDynamicStateBaseAddress());
+    EXPECT_EQ(pDSH->getGraphicsAllocation()->getGpuAddress(), cmd->getDynamicStateBaseAddress());
     // Stateless accesses require GSH.base to be 0.
     EXPECT_EQ(expectedGeneralStateHeapBaseAddress, cmd->getGeneralStateBaseAddress());
-    EXPECT_EQ(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pSSH->getCpuBase())), cmd->getSurfaceStateBaseAddress());
+    EXPECT_EQ(pSSH->getGraphicsAllocation()->getGpuAddress(), cmd->getSurfaceStateBaseAddress());
     EXPECT_EQ(pIOH->getGraphicsAllocation()->getGpuBaseAddress(), cmd->getIndirectObjectBaseAddress());
     EXPECT_EQ(internalHeapBase, cmd->getInstructionBaseAddress());
 
@@ -93,9 +93,9 @@ void validateMediaVFEState(const HardwareInfo *hwInfo, void *cmdMediaVfeState, G
     auto *cmd = (MEDIA_VFE_STATE *)cmdMediaVfeState;
     ASSERT_NE(nullptr, cmd);
 
-    uint32_t threadPerEU = (hwInfo->pSysInfo->ThreadCount / hwInfo->pSysInfo->EUCount) + hwInfo->capabilityTable.extraQuantityThreadsPerEU;
+    uint32_t threadPerEU = (hwInfo->gtSystemInfo.ThreadCount / hwInfo->gtSystemInfo.EUCount) + hwInfo->capabilityTable.extraQuantityThreadsPerEU;
 
-    uint32_t expected = hwInfo->pSysInfo->EUCount * threadPerEU;
+    uint32_t expected = hwInfo->gtSystemInfo.EUCount * threadPerEU;
     EXPECT_EQ(expected, cmd->getMaximumNumberOfThreads());
     EXPECT_NE(0u, cmd->getNumberOfUrbEntries());
     EXPECT_NE(0u, cmd->getUrbEntryAllocationSize());

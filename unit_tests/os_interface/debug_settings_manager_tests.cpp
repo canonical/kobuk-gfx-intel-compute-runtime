@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
+#include "runtime/utilities/debug_file_reader.h"
 #include "unit_tests/fixtures/buffer_fixture.h"
 #include "unit_tests/fixtures/image_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
-#include "unit_tests/helpers/memory_management.h"
 #include "unit_tests/mocks/mock_buffer.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_kernel.h"
@@ -864,36 +864,76 @@ TEST(DebugSettingsManager, givenReaderImplInDebugManagerWhenSettingDifferentRead
     EXPECT_EQ(readerImpl2, debugManager.getReaderImpl());
 }
 
+TEST(DebugSettingsManager, givenPrintDebugSettingsEnabledWhenCallingDumpFlagsThenFlagsAreWrittenToDumpFile) {
+    testing::internal::CaptureStdout();
+    FullyEnabledTestDebugManager debugManager;
+    debugManager.flags.PrintDebugSettings.set(true);
+    debugManager.flags.LoopAtPlatformInitialize.set(true);
+    debugManager.flags.Enable64kbpages.set(1);
+    debugManager.flags.TbxServer.set("192.168.0.1");
+
+    // Clear dump files and generate new
+    std::remove(FullyEnabledTestDebugManager::settingsDumpFileName);
+    debugManager.dumpFlags();
+
+    // Validate allSettingsDumpFile
+    SettingsFileReader allSettingsReader{FullyEnabledTestDebugManager::settingsDumpFileName};
+#define DECLARE_DEBUG_VARIABLE(dataType, varName, defaultValue, description) \
+    EXPECT_EQ(debugManager.flags.varName.get(), allSettingsReader.getSetting(#varName, defaultValue));
+
+#include "debug_variables.inl"
+#undef DECLARE_DEBUG_VARIABLE
+    std::remove(FullyEnabledTestDebugManager::settingsDumpFileName);
+    std::string output = testing::internal::GetCapturedStdout();
+    ASSERT_NE(0u, output.size());
+
+    EXPECT_NE(std::string::npos, output.find("Non-default value of debug variable: TbxServer = 192.168.0.1"));
+    EXPECT_NE(std::string::npos, output.find("Non-default value of debug variable: LoopAtPlatformInitialize = 1"));
+    EXPECT_NE(std::string::npos, output.find("Non-default value of debug variable: PrintDebugSettings = 1"));
+    EXPECT_NE(std::string::npos, output.find("Non-default value of debug variable: Enable64kbpages = 1"));
+}
+
 struct AllocationTypeTestCase {
     GraphicsAllocation::AllocationType type;
     const char *str;
 };
 
 AllocationTypeTestCase allocationTypeValues[] = {
-    {GraphicsAllocation::AllocationType::UNKNOWN, "UNKNOWN"},
+    {GraphicsAllocation::AllocationType::BUFFER, "BUFFER"},
     {GraphicsAllocation::AllocationType::BUFFER_COMPRESSED, "BUFFER_COMPRESSED"},
     {GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY, "BUFFER_HOST_MEMORY"},
-    {GraphicsAllocation::AllocationType::BUFFER, "BUFFER"},
-    {GraphicsAllocation::AllocationType::IMAGE, "IMAGE"},
-    {GraphicsAllocation::AllocationType::TAG_BUFFER, "TAG_BUFFER"},
-    {GraphicsAllocation::AllocationType::LINEAR_STREAM, "LINEAR_STREAM"},
-    {GraphicsAllocation::AllocationType::FILL_PATTERN, "FILL_PATTERN"},
-    {GraphicsAllocation::AllocationType::PIPE, "PIPE"},
-    {GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER, "TIMESTAMP_PACKET_TAG_BUFFER"},
-    {GraphicsAllocation::AllocationType::PROFILING_TAG_BUFFER, "PROFILING_TAG_BUFFER"},
     {GraphicsAllocation::AllocationType::COMMAND_BUFFER, "COMMAND_BUFFER"},
-    {GraphicsAllocation::AllocationType::PRINTF_SURFACE, "PRINTF_SURFACE"},
-    {GraphicsAllocation::AllocationType::GLOBAL_SURFACE, "GLOBAL_SURFACE"},
-    {GraphicsAllocation::AllocationType::PRIVATE_SURFACE, "PRIVATE_SURFACE"},
     {GraphicsAllocation::AllocationType::CONSTANT_SURFACE, "CONSTANT_SURFACE"},
-    {GraphicsAllocation::AllocationType::SCRATCH_SURFACE, "SCRATCH_SURFACE"},
-    {GraphicsAllocation::AllocationType::INSTRUCTION_HEAP, "INSTRUCTION_HEAP"},
-    {GraphicsAllocation::AllocationType::INDIRECT_OBJECT_HEAP, "INDIRECT_OBJECT_HEAP"},
-    {GraphicsAllocation::AllocationType::SURFACE_STATE_HEAP, "SURFACE_STATE_HEAP"},
-    {GraphicsAllocation::AllocationType::SHARED_RESOURCE_COPY, "SHARED_RESOURCE_COPY"},
-    {GraphicsAllocation::AllocationType::SVM, "SVM"},
+    {GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER, "DEVICE_QUEUE_BUFFER"},
     {GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, "EXTERNAL_HOST_PTR"},
-    {GraphicsAllocation::AllocationType::UNDECIDED, "UNDECIDED"}};
+    {GraphicsAllocation::AllocationType::FILL_PATTERN, "FILL_PATTERN"},
+    {GraphicsAllocation::AllocationType::GLOBAL_SURFACE, "GLOBAL_SURFACE"},
+    {GraphicsAllocation::AllocationType::IMAGE, "IMAGE"},
+    {GraphicsAllocation::AllocationType::INDIRECT_OBJECT_HEAP, "INDIRECT_OBJECT_HEAP"},
+    {GraphicsAllocation::AllocationType::INSTRUCTION_HEAP, "INSTRUCTION_HEAP"},
+    {GraphicsAllocation::AllocationType::INTERNAL_HEAP, "INTERNAL_HEAP"},
+    {GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY, "INTERNAL_HOST_MEMORY"},
+    {GraphicsAllocation::AllocationType::KERNEL_ISA, "KERNEL_ISA"},
+    {GraphicsAllocation::AllocationType::LINEAR_STREAM, "LINEAR_STREAM"},
+    {GraphicsAllocation::AllocationType::MCS, "MCS"},
+    {GraphicsAllocation::AllocationType::PIPE, "PIPE"},
+    {GraphicsAllocation::AllocationType::PREEMPTION, "PREEMPTION"},
+    {GraphicsAllocation::AllocationType::PRINTF_SURFACE, "PRINTF_SURFACE"},
+    {GraphicsAllocation::AllocationType::PRIVATE_SURFACE, "PRIVATE_SURFACE"},
+    {GraphicsAllocation::AllocationType::PROFILING_TAG_BUFFER, "PROFILING_TAG_BUFFER"},
+    {GraphicsAllocation::AllocationType::SCRATCH_SURFACE, "SCRATCH_SURFACE"},
+    {GraphicsAllocation::AllocationType::SHARED_BUFFER, "SHARED_BUFFER"},
+    {GraphicsAllocation::AllocationType::SHARED_CONTEXT_IMAGE, "SHARED_CONTEXT_IMAGE"},
+    {GraphicsAllocation::AllocationType::SHARED_IMAGE, "SHARED_IMAGE"},
+    {GraphicsAllocation::AllocationType::SHARED_RESOURCE_COPY, "SHARED_RESOURCE_COPY"},
+    {GraphicsAllocation::AllocationType::SURFACE_STATE_HEAP, "SURFACE_STATE_HEAP"},
+    {GraphicsAllocation::AllocationType::SVM_CPU, "SVM_CPU"},
+    {GraphicsAllocation::AllocationType::SVM_GPU, "SVM_GPU"},
+    {GraphicsAllocation::AllocationType::SVM_ZERO_COPY, "SVM_ZERO_COPY"},
+    {GraphicsAllocation::AllocationType::TAG_BUFFER, "TAG_BUFFER"},
+    {GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER, "TIMESTAMP_PACKET_TAG_BUFFER"},
+    {GraphicsAllocation::AllocationType::UNKNOWN, "UNKNOWN"},
+    {GraphicsAllocation::AllocationType::WRITE_COMBINED, "WRITE_COMBINED"}};
 
 class AllocationTypeLogging : public ::testing::TestWithParam<AllocationTypeTestCase> {};
 

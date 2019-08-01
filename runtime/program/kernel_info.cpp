@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/device/device.h"
 #include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/dispatch_info.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/helpers/string.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/mem_obj/buffer.h"
@@ -159,7 +159,7 @@ WorkSizeInfo::WorkSizeInfo(const DispatchInfo &dispatchInfo) {
     this->hasBarriers = !!dispatchInfo.getKernel()->getKernelInfo().patchInfo.executionEnvironment->HasBarriers;
     this->simdSize = (uint32_t)dispatchInfo.getKernel()->getKernelInfo().getMaxSimdSize();
     this->slmTotalSize = (uint32_t)dispatchInfo.getKernel()->slmTotalSize;
-    this->coreFamily = dispatchInfo.getKernel()->getDevice().getHardwareInfo().pPlatform->eRenderCoreFamily;
+    this->coreFamily = dispatchInfo.getKernel()->getDevice().getHardwareInfo().platform.eRenderCoreFamily;
     this->numThreadsPerSubSlice = (uint32_t)dispatchInfo.getKernel()->getDevice().getDeviceInfo().maxNumEUsPerSubSlice * dispatchInfo.getKernel()->getDevice().getDeviceInfo().numThreadsPerEU;
     this->localMemSize = (uint32_t)dispatchInfo.getKernel()->getDevice().getDeviceInfo().localMemSize;
     setIfUseImg(dispatchInfo.getKernel());
@@ -199,9 +199,6 @@ void WorkSizeInfo::checkRatio(const size_t workItems[3]) {
 KernelInfo::~KernelInfo() {
     kernelArgInfo.clear();
 
-    for (auto &stringData : patchInfo.stringDataMap) {
-        delete[] stringData.second.pStringData;
-    }
     patchInfo.stringDataMap.clear();
     delete[] crossThreadData;
 }
@@ -376,14 +373,9 @@ void KernelInfo::storePatchToken(const SPatchAllocateStatelessDefaultDeviceQueue
 
 void KernelInfo::storePatchToken(const SPatchString *pStringArg) {
     uint32_t stringIndex = pStringArg->Index;
-    PrintfStringInfo printfStringInfo;
-    printfStringInfo.SizeInBytes = pStringArg->StringSize;
-    if (printfStringInfo.SizeInBytes) {
-        printfStringInfo.pStringData = new char[printfStringInfo.SizeInBytes];
-        if (printfStringInfo.pStringData != nullptr) {
-            memcpy_s(printfStringInfo.pStringData, printfStringInfo.SizeInBytes, (cl_char *)pStringArg + sizeof(SPatchString), printfStringInfo.SizeInBytes);
-            patchInfo.stringDataMap.insert(std::pair<uint32_t, PrintfStringInfo>(stringIndex, printfStringInfo));
-        }
+    if (pStringArg->StringSize > 0) {
+        const char *stringData = reinterpret_cast<const char *>(pStringArg + 1);
+        patchInfo.stringDataMap.emplace(stringIndex, std::string(stringData, stringData + pStringArg->StringSize));
     }
 }
 
@@ -402,11 +394,6 @@ void KernelInfo::storePatchToken(const SPatchKernelAttributesInfo *pKernelAttrib
 void KernelInfo::storePatchToken(const SPatchAllocateSystemThreadSurface *pSystemThreadSurface) {
     usesSsh |= true;
     patchInfo.pAllocateSystemThreadSurface = pSystemThreadSurface;
-}
-
-const char *KernelInfo::queryPrintfString(uint32_t index) const {
-    auto printfInfo = patchInfo.stringDataMap.find(index);
-    return printfInfo == patchInfo.stringDataMap.end() ? nullptr : printfInfo->second.pStringData;
 }
 
 cl_int KernelInfo::resolveKernelInfo() {

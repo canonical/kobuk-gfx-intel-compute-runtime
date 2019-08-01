@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/gmm_helper/gmm_helper.h"
@@ -19,7 +20,6 @@
 #include "runtime/os_interface/windows/wddm_allocation.h"
 #include "runtime/os_interface/windows/wddm_engine_mapper.h"
 #include "runtime/os_interface/windows/wddm_memory_manager.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_gfx_partition.h"
 #include "unit_tests/mocks/mock_gmm_resource_info.h"
 #include "unit_tests/mocks/mock_memory_manager.h"
@@ -64,11 +64,9 @@ TEST_F(Wddm20Tests, givenMinWindowsAddressWhenWddmIsInitializedThenWddmUseThisAd
 
 TEST_F(Wddm20Tests, doubleCreation) {
     EXPECT_EQ(1u, wddm->createContextResult.called);
-    auto error = wddm->init(PreemptionHelper::getDefaultPreemptionMode(*platformDevices[0]));
+    auto hwInfo = *platformDevices[0];
+    wddm->init(hwInfo);
     EXPECT_EQ(1u, wddm->createContextResult.called);
-
-    EXPECT_TRUE(error);
-    EXPECT_TRUE(wddm->isInitialized());
 }
 
 TEST_F(Wddm20Tests, givenNullPageTableManagerAndRenderCompressedResourceWhenMappingGpuVaThenDontUpdateAuxTable) {
@@ -79,7 +77,7 @@ TEST_F(Wddm20Tests, givenNullPageTableManagerAndRenderCompressedResourceWhenMapp
     mockGmmRes->setUnifiedAuxTranslationCapable();
 
     void *fakePtr = reinterpret_cast<void *>(0x100);
-    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNDECIDED, fakePtr, 0x2100, nullptr, MemoryPool::MemoryNull, false);
+    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNKNOWN, fakePtr, 0x2100, nullptr, MemoryPool::MemoryNull, false);
     allocation.setDefaultGmm(gmm.get());
     allocation.getHandleToModify(0u) = ALLOCATION_HANDLE;
 
@@ -89,81 +87,59 @@ TEST_F(Wddm20Tests, givenNullPageTableManagerAndRenderCompressedResourceWhenMapp
 TEST(Wddm20EnumAdaptersTest, expectTrue) {
     HardwareInfo outHwInfo;
 
-    const HardwareInfo hwInfo = *platformDevices[0];
-    OsLibrary *mockGdiDll = setAdapterInfo(hwInfo.pPlatform, hwInfo.pSysInfo, hwInfo.capabilityTable.gpuAddressSpace);
+    const HardwareInfo *hwInfo = platformDevices[0];
+    std::unique_ptr<OsLibrary> mockGdiDll(setAdapterInfo(&hwInfo->platform,
+                                                         &hwInfo->gtSystemInfo,
+                                                         hwInfo->capabilityTable.gpuAddressSpace));
 
     std::unique_ptr<Wddm> wddm(Wddm::createWddm());
-    bool success = wddm->enumAdapters(outHwInfo);
+    bool success = wddm->init(outHwInfo);
 
     EXPECT_TRUE(success);
 
-    const HardwareInfo *hwinfo = *platformDevices;
-
-    ASSERT_NE(nullptr, outHwInfo.pPlatform);
-    EXPECT_EQ(outHwInfo.pPlatform->eDisplayCoreFamily, hwinfo->pPlatform->eDisplayCoreFamily);
-    delete mockGdiDll;
-
-    delete outHwInfo.pPlatform;
-    delete outHwInfo.pSkuTable;
-    delete outHwInfo.pSysInfo;
-    delete outHwInfo.pWaTable;
+    EXPECT_EQ(outHwInfo.platform.eDisplayCoreFamily, hwInfo->platform.eDisplayCoreFamily);
 }
 
 TEST(Wddm20EnumAdaptersTest, givenEmptyHardwareInfoWhenEnumAdapterIsCalledThenCapabilityTableIsSet) {
     HardwareInfo outHwInfo = {};
 
-    auto hwInfo = *platformDevices[0];
-    std::unique_ptr<OsLibrary> mockGdiDll(setAdapterInfo(hwInfo.pPlatform, hwInfo.pSysInfo, hwInfo.capabilityTable.gpuAddressSpace));
+    const HardwareInfo *hwInfo = platformDevices[0];
+    std::unique_ptr<OsLibrary> mockGdiDll(setAdapterInfo(&hwInfo->platform,
+                                                         &hwInfo->gtSystemInfo,
+                                                         hwInfo->capabilityTable.gpuAddressSpace));
 
     std::unique_ptr<Wddm> wddm(Wddm::createWddm());
-    bool success = wddm->enumAdapters(outHwInfo);
+    bool success = wddm->init(outHwInfo);
     EXPECT_TRUE(success);
 
-    const HardwareInfo *hwinfo = *platformDevices;
+    EXPECT_EQ(outHwInfo.platform.eDisplayCoreFamily, hwInfo->platform.eDisplayCoreFamily);
 
-    ASSERT_NE(nullptr, outHwInfo.pPlatform);
-    EXPECT_EQ(outHwInfo.pPlatform->eDisplayCoreFamily, hwinfo->pPlatform->eDisplayCoreFamily);
-
-    EXPECT_EQ(outHwInfo.capabilityTable.defaultProfilingTimerResolution, hwInfo.capabilityTable.defaultProfilingTimerResolution);
-    EXPECT_EQ(outHwInfo.capabilityTable.clVersionSupport, hwInfo.capabilityTable.clVersionSupport);
-    EXPECT_EQ(outHwInfo.capabilityTable.kmdNotifyProperties.enableKmdNotify, hwInfo.capabilityTable.kmdNotifyProperties.enableKmdNotify);
-    EXPECT_EQ(outHwInfo.capabilityTable.kmdNotifyProperties.delayKmdNotifyMicroseconds, hwInfo.capabilityTable.kmdNotifyProperties.delayKmdNotifyMicroseconds);
-    EXPECT_EQ(outHwInfo.capabilityTable.kmdNotifyProperties.enableQuickKmdSleep, hwInfo.capabilityTable.kmdNotifyProperties.enableQuickKmdSleep);
-    EXPECT_EQ(outHwInfo.capabilityTable.kmdNotifyProperties.delayQuickKmdSleepMicroseconds, hwInfo.capabilityTable.kmdNotifyProperties.delayQuickKmdSleepMicroseconds);
-
-    delete outHwInfo.pPlatform;
-    delete outHwInfo.pSkuTable;
-    delete outHwInfo.pSysInfo;
-    delete outHwInfo.pWaTable;
+    EXPECT_EQ(outHwInfo.capabilityTable.defaultProfilingTimerResolution, hwInfo->capabilityTable.defaultProfilingTimerResolution);
+    EXPECT_EQ(outHwInfo.capabilityTable.clVersionSupport, hwInfo->capabilityTable.clVersionSupport);
+    EXPECT_EQ(outHwInfo.capabilityTable.kmdNotifyProperties.enableKmdNotify, hwInfo->capabilityTable.kmdNotifyProperties.enableKmdNotify);
+    EXPECT_EQ(outHwInfo.capabilityTable.kmdNotifyProperties.delayKmdNotifyMicroseconds, hwInfo->capabilityTable.kmdNotifyProperties.delayKmdNotifyMicroseconds);
+    EXPECT_EQ(outHwInfo.capabilityTable.kmdNotifyProperties.enableQuickKmdSleep, hwInfo->capabilityTable.kmdNotifyProperties.enableQuickKmdSleep);
+    EXPECT_EQ(outHwInfo.capabilityTable.kmdNotifyProperties.delayQuickKmdSleepMicroseconds, hwInfo->capabilityTable.kmdNotifyProperties.delayQuickKmdSleepMicroseconds);
 }
 
 TEST(Wddm20EnumAdaptersTest, givenUnknownPlatformWhenEnumAdapterIsCalledThenFalseIsReturnedAndOutputIsEmpty) {
-    HardwareInfo outHwInfo;
-
-    memset(&outHwInfo, 0, sizeof(outHwInfo));
+    HardwareInfo outHwInfo = {};
 
     HardwareInfo hwInfo = *platformDevices[0];
-    auto bkp = hwInfo.pPlatform->eProductFamily;
-    PLATFORM platform = *(hwInfo.pPlatform);
-    platform.eProductFamily = IGFX_UNKNOWN;
+    hwInfo.platform.eProductFamily = IGFX_UNKNOWN;
+    std::unique_ptr<OsLibrary> mockGdiDll(setAdapterInfo(&hwInfo.platform,
+                                                         &hwInfo.gtSystemInfo,
+                                                         hwInfo.capabilityTable.gpuAddressSpace));
 
-    std::unique_ptr<OsLibrary, std::function<void(OsLibrary *)>> mockGdiDll(
-        setAdapterInfo(&platform, hwInfo.pSysInfo, hwInfo.capabilityTable.gpuAddressSpace),
-        [&](OsLibrary *ptr) {
-            platform.eProductFamily = bkp;
-            typedef void(__stdcall * pfSetAdapterInfo)(const void *, const void *, uint64_t);
-            pfSetAdapterInfo fSetAdpaterInfo = reinterpret_cast<pfSetAdapterInfo>(ptr->getProcAddress("MockSetAdapterInfo"));
-
-            fSetAdpaterInfo(&platform, hwInfo.pSysInfo, hwInfo.capabilityTable.gpuAddressSpace);
-            delete ptr;
-        });
     std::unique_ptr<Wddm> wddm(Wddm::createWddm());
-    auto ret = wddm->enumAdapters(outHwInfo);
+    auto ret = wddm->init(outHwInfo);
     EXPECT_FALSE(ret);
-    EXPECT_EQ(nullptr, outHwInfo.pPlatform);
-    EXPECT_EQ(nullptr, outHwInfo.pSkuTable);
-    EXPECT_EQ(nullptr, outHwInfo.pSysInfo);
-    EXPECT_EQ(nullptr, outHwInfo.pWaTable);
+
+    // reset mock gdi
+    hwInfo = *platformDevices[0];
+    mockGdiDll.reset(setAdapterInfo(&hwInfo.platform,
+                                    &hwInfo.gtSystemInfo,
+                                    hwInfo.capabilityTable.gpuAddressSpace));
 }
 
 TEST_F(Wddm20Tests, whenInitializeWddmThenContextIsCreated) {
@@ -173,7 +149,7 @@ TEST_F(Wddm20Tests, whenInitializeWddmThenContextIsCreated) {
 
 TEST_F(Wddm20Tests, allocation) {
     OsAgnosticMemoryManager mm(*executionEnvironment);
-    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNDECIDED, mm.allocateSystemMemory(100, 0), 100, nullptr, MemoryPool::MemoryNull, false);
+    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNKNOWN, mm.allocateSystemMemory(100, 0), 100, nullptr, MemoryPool::MemoryNull, false);
     Gmm *gmm = GmmHelperFunctions::getGmm(allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize());
 
     allocation.setDefaultGmm(gmm);
@@ -197,7 +173,7 @@ TEST_F(Wddm20WithMockGdiDllTests, givenAllocationSmallerUnderlyingThanAlignedSiz
     size_t underlyingPages = underlyingSize / MemoryConstants::pageSize;
     size_t alignedPages = alignedSize / MemoryConstants::pageSize;
 
-    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNDECIDED, ptr, 0x2100, nullptr, MemoryPool::MemoryNull, false);
+    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNKNOWN, ptr, 0x2100, nullptr, MemoryPool::MemoryNull, false);
     Gmm *gmm = GmmHelperFunctions::getGmm(allocation.getAlignedCpuPtr(), allocation.getAlignedSize());
 
     allocation.setDefaultGmm(gmm);
@@ -238,7 +214,7 @@ TEST_F(Wddm20WithMockGdiDllTests, givenReserveCallWhenItIsCalledWithProperParamt
 
 TEST_F(Wddm20WithMockGdiDllTests, givenWddmAllocationWhenMappingGpuVaThenUseGmmSize) {
     void *fakePtr = reinterpret_cast<void *>(0x123);
-    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNDECIDED, fakePtr, 100, nullptr, MemoryPool::MemoryNull, false);
+    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNKNOWN, fakePtr, 100, nullptr, MemoryPool::MemoryNull, false);
     std::unique_ptr<Gmm> gmm(GmmHelperFunctions::getGmm(allocation.getAlignedCpuPtr(), allocation.getAlignedSize()));
 
     allocation.setDefaultGmm(gmm.get());
@@ -305,7 +281,7 @@ TEST_F(Wddm20WithMockGdiDllTests, GivenThreeOsHandlesWhenAskedForDestroyAllocati
 
 TEST_F(Wddm20Tests, mapAndFreeGpuVa) {
     OsAgnosticMemoryManager mm(*executionEnvironment);
-    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNDECIDED, mm.allocateSystemMemory(100, 0), 100, nullptr, MemoryPool::MemoryNull, false);
+    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNKNOWN, mm.allocateSystemMemory(100, 0), 100, nullptr, MemoryPool::MemoryNull, false);
     Gmm *gmm = GmmHelperFunctions::getGmm(allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize());
 
     allocation.setDefaultGmm(gmm);
@@ -331,7 +307,7 @@ TEST_F(Wddm20Tests, mapAndFreeGpuVa) {
 TEST_F(Wddm20Tests, givenNullAllocationWhenCreateThenAllocateAndMap) {
     OsAgnosticMemoryManager mm(*executionEnvironment);
 
-    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNDECIDED, nullptr, 100, nullptr, MemoryPool::MemoryNull, false);
+    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 100, nullptr, MemoryPool::MemoryNull, false);
     Gmm *gmm = GmmHelperFunctions::getGmm(allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize());
 
     allocation.setDefaultGmm(gmm);
@@ -350,7 +326,7 @@ TEST_F(Wddm20Tests, givenNullAllocationWhenCreateThenAllocateAndMap) {
 
 TEST_F(Wddm20Tests, makeResidentNonResident) {
     OsAgnosticMemoryManager mm(*executionEnvironment);
-    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNDECIDED, mm.allocateSystemMemory(100, 0), 100, nullptr, MemoryPool::MemoryNull, false);
+    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNKNOWN, mm.allocateSystemMemory(100, 0), 100, nullptr, MemoryPool::MemoryNull, false);
     Gmm *gmm = GmmHelperFunctions::getGmm(allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize());
 
     allocation.setDefaultGmm(gmm);
@@ -389,8 +365,9 @@ TEST_F(Wddm20WithMockGdiDllTests, givenSharedHandleWhenCreateGraphicsAllocationF
     EXPECT_EQ(0u, status);
 
     MemoryManagerCreate<WddmMemoryManager> mm(false, false, *executionEnvironment);
+    AllocationProperties properties(false, 4096u, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
 
-    auto graphicsAllocation = mm.createGraphicsAllocationFromSharedHandle(ALLOCATION_HANDLE, false);
+    auto graphicsAllocation = mm.createGraphicsAllocationFromSharedHandle(ALLOCATION_HANDLE, properties, false);
     auto wddmAllocation = (WddmAllocation *)graphicsAllocation;
     ASSERT_NE(nullptr, wddmAllocation);
 
@@ -425,8 +402,9 @@ TEST_F(Wddm20WithMockGdiDllTests, givenSharedHandleWhenCreateGraphicsAllocationF
     EXPECT_EQ(0u, status);
 
     MemoryManagerCreate<WddmMemoryManager> mm(false, false, *executionEnvironment);
+    AllocationProperties properties(false, 4096, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
 
-    auto graphicsAllocation = mm.createGraphicsAllocationFromSharedHandle(ALLOCATION_HANDLE, false);
+    auto graphicsAllocation = mm.createGraphicsAllocationFromSharedHandle(ALLOCATION_HANDLE, properties, false);
     auto wddmAllocation = (WddmAllocation *)graphicsAllocation;
     ASSERT_NE(nullptr, wddmAllocation);
 
@@ -452,7 +430,7 @@ HWTEST_F(Wddm20InstrumentationTest, configureDeviceAddressSpaceOnInit) {
     D3DKMT_HANDLE adapterHandle = ADAPTER_HANDLE;
     D3DKMT_HANDLE deviceHandle = DEVICE_HANDLE;
     const HardwareInfo hwInfo = *platformDevices[0];
-    BOOLEAN FtrL3IACoherency = hwInfo.pSkuTable->ftrL3IACoherency ? 1 : 0;
+    BOOLEAN FtrL3IACoherency = hwInfo.featureTable.ftrL3IACoherency ? 1 : 0;
     uintptr_t maxAddr = hwInfo.capabilityTable.gpuAddressSpace == MemoryConstants::max48BitAddress
                             ? reinterpret_cast<uintptr_t>(sysInfo.lpMaximumApplicationAddress) + 1
                             : 0;
@@ -463,9 +441,8 @@ HWTEST_F(Wddm20InstrumentationTest, configureDeviceAddressSpaceOnInit) {
                                                      FtrL3IACoherency))
         .Times(1)
         .WillRepeatedly(::testing::Return(true));
-    wddm->init(PreemptionHelper::getDefaultPreemptionMode(hwInfo));
-
-    EXPECT_TRUE(wddm->isInitialized());
+    auto hwInfoMock = *platformDevices[0];
+    wddm->init(hwInfoMock);
 }
 
 TEST_F(Wddm20InstrumentationTest, configureDeviceAddressSpaceNoAdapter) {
@@ -528,7 +505,7 @@ TEST_F(Wddm20WithMockGdiDllTestsWithoutWddmInit, givenUseNoRingFlushesKmdModeDeb
 TEST_F(Wddm20WithMockGdiDllTestsWithoutWddmInit, givenEngineTypeWhenCreatingContextThenPassCorrectNodeOrdinal) {
     init();
     auto createContextParams = this->getCreateContextDataFcn();
-    UINT expected = WddmEngineMapper::engineNodeMap(HwHelper::get(platformDevices[0]->pPlatform->eRenderCoreFamily).getGpgpuEngineInstances()[0]);
+    UINT expected = WddmEngineMapper::engineNodeMap(HwHelper::get(platformDevices[0]->platform.eRenderCoreFamily).getGpgpuEngineInstances()[0]);
     EXPECT_EQ(expected, createContextParams->NodeOrdinal);
 }
 
@@ -703,7 +680,7 @@ TEST_F(Wddm20Tests, whenCreateAllocation64kFailsThenReturnFalse) {
 
     void *fakePtr = reinterpret_cast<void *>(0x123);
     auto gmm = std::make_unique<Gmm>(fakePtr, 100, false);
-    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNDECIDED, fakePtr, 100, nullptr, MemoryPool::MemoryNull, false);
+    WddmAllocation allocation(GraphicsAllocation::AllocationType::UNKNOWN, fakePtr, 100, nullptr, MemoryPool::MemoryNull, false);
     allocation.setDefaultGmm(gmm.get());
 
     EXPECT_FALSE(wddm->createAllocation64k(&allocation));
@@ -738,7 +715,8 @@ TEST_F(Wddm20Tests, givenReadOnlyMemoryWhenCreateAllocationFailsWithNoVideoMemor
 }
 
 TEST_F(Wddm20Tests, whenContextIsInitializedThenApplyAdditionalContextFlagsIsCalled) {
-    auto result = wddm->init(PreemptionHelper::getDefaultPreemptionMode(*platformDevices[0]));
+    auto hwInfo = *platformDevices[0];
+    auto result = wddm->init(hwInfo);
     EXPECT_TRUE(result);
     EXPECT_EQ(1u, wddm->applyAdditionalContextFlagsResult.called);
 }

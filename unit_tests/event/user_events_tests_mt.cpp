@@ -23,7 +23,7 @@ TEST_F(MockEventTests, eventCreatedFromUserEventsThatIsNotSignaledDoesntFlushToC
     //call NDR
     auto retVal = callOneWorkItemNDRKernel(eventWaitList, sizeOfWaitList, &retEvent);
 
-    auto &csr = pCmdQ->getCommandStreamReceiver();
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
     *csr.getTagAddress() = (unsigned int)-1;
     auto taskLevelBeforeWaitForEvents = csr.peekTaskLevel();
 
@@ -74,7 +74,7 @@ TEST_F(EventTests, givenUserEventBlockingEnqueueWithBlockingFlagWhenUserEventIsC
             uEvent.setStatus(CL_COMPLETE);
         });
 
-        auto retVal = pCmdQ->enqueueReadBuffer(srcBuffer.get(), CL_TRUE, 0, srcBuffer->getSize(), dst.get(), sizeOfWaitList, eventWaitList, nullptr);
+        auto retVal = pCmdQ->enqueueReadBuffer(srcBuffer.get(), CL_TRUE, 0, srcBuffer->getSize(), dst.get(), nullptr, sizeOfWaitList, eventWaitList, nullptr);
         EXPECT_EQ(CL_SUCCESS, retVal);
 
         t.join();
@@ -92,7 +92,7 @@ TEST_F(EventTests, givenUserEventBlockingEnqueueWithBlockingFlagWhenUserEventIsC
 
     std::thread t([&]() {
         while (true) {
-            pCmdQ->takeOwnership(true);
+            pCmdQ->takeOwnership();
 
             if (pCmdQ->taskLevel == Event::eventNotReady) {
                 pCmdQ->releaseOwnership();
@@ -103,7 +103,49 @@ TEST_F(EventTests, givenUserEventBlockingEnqueueWithBlockingFlagWhenUserEventIsC
         uEvent.setStatus(CL_COMPLETE);
     });
 
-    auto retVal = pCmdQ->enqueueReadBuffer(srcBuffer.get(), CL_TRUE, 0, srcBuffer->getSize(), dst.get(), sizeOfWaitList, eventWaitList, nullptr);
+    auto retVal = pCmdQ->enqueueReadBuffer(srcBuffer.get(), CL_TRUE, 0, srcBuffer->getSize(), dst.get(), nullptr, sizeOfWaitList, eventWaitList, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     t.join();
+}
+
+TEST_F(EventTests, givenoneThreadUpdatingUserEventAnotherWaitingOnFinishWhenFinishIsCalledThenItWaitsForCorrectTaskCount) {
+
+    std::unique_ptr<Buffer> srcBuffer(BufferHelper<>::create());
+    std::unique_ptr<char[]> dst(new char[srcBuffer->getSize()]);
+    for (uint32_t i = 0; i < 100; i++) {
+
+        UserEvent uEvent;
+        cl_event eventWaitList[] = {&uEvent};
+        int sizeOfWaitList = sizeof(eventWaitList) / sizeof(cl_event);
+        cl_event returnedEvent = nullptr;
+
+        std::atomic_bool go{false};
+        std::atomic_bool updateEvent{true};
+
+        std::thread t([&]() {
+            while (!go)
+                ;
+
+            uEvent.setStatus(CL_COMPLETE);
+        });
+
+        auto retVal = pCmdQ->enqueueReadBuffer(srcBuffer.get(), CL_FALSE, 0, srcBuffer->getSize(), dst.get(), nullptr, sizeOfWaitList, eventWaitList, &returnedEvent);
+        EXPECT_EQ(CL_SUCCESS, retVal);
+
+        std::thread t2([&]() {
+            while (updateEvent) {
+                castToObject<Event>(returnedEvent)->updateExecutionStatus();
+            }
+        });
+
+        go = true;
+
+        clFinish(pCmdQ);
+        EXPECT_EQ(pCmdQ->latestTaskCountWaited, i + 1);
+
+        t.join();
+        updateEvent = false;
+        t2.join();
+        clReleaseEvent(returnedEvent);
+    }
 }

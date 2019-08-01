@@ -7,7 +7,11 @@
 
 #include "driver_diagnostics_tests.h"
 
-#include "unit_tests/helpers/debug_manager_state_restore.h"
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
+#include "runtime/mem_obj/mem_obj_helper.h"
+#include "unit_tests/mocks/mock_gmm.h"
+
+#include <tuple>
 
 using namespace NEO;
 
@@ -117,7 +121,7 @@ TEST_P(PerformanceHintCommandQueueTest, GivenProfilingFlagAndPreemptionFlagWhenC
     EXPECT_EQ(profilingEnabled, containsHint(expectedHint, userData));
 
     snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[PROFILING_ENABLED_WITH_DISABLED_PREEMPTION], 0);
-    if (device->getHardwareInfo().pPlatform->eProductFamily < IGFX_SKYLAKE && preemptionSupported && profilingEnabled) {
+    if (device->getHardwareInfo().platform.eProductFamily < IGFX_SKYLAKE && preemptionSupported && profilingEnabled) {
         EXPECT_TRUE(containsHint(expectedHint, userData));
     } else {
         EXPECT_FALSE(containsHint(expectedHint, userData));
@@ -142,7 +146,7 @@ TEST_P(PerformanceHintCommandQueueTest, GivenEnabledProfilingFlagAndSupportedPre
     EXPECT_EQ(profilingEnabled, containsHint(expectedHint, userData));
 
     snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[PROFILING_ENABLED_WITH_DISABLED_PREEMPTION], 0);
-    if (device->getHardwareInfo().pPlatform->eProductFamily < IGFX_SKYLAKE && preemptionSupported && profilingEnabled) {
+    if (device->getHardwareInfo().platform.eProductFamily < IGFX_SKYLAKE && preemptionSupported && profilingEnabled) {
         EXPECT_TRUE(containsHint(expectedHint, userData));
     } else {
         EXPECT_FALSE(containsHint(expectedHint, userData));
@@ -424,6 +428,267 @@ TEST_F(PerformanceHintTest, givenPrintDriverDiagnosticsDebugModeEnabledWhenConte
     context->release();
 }
 
+TEST_F(PerformanceHintTest, givenPrintDriverDiagnosticsDebugModeEnabledWhenCallFillWithBuffersForAuxTranslationThenContextProvidesProperHint) {
+    DebugManagerStateRestore dbgRestore;
+    DebugManager.flags.PrintDriverDiagnostics.set(1);
+
+    auto pDevice = castToObject<Device>(devices[0]);
+    MockKernelWithInternals mockKernel(*pDevice, context);
+    MockBuffer buffer;
+    cl_mem clMem = &buffer;
+
+    buffer.getGraphicsAllocation()->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
+    mockKernel.kernelInfo.kernelArgInfo.resize(1);
+    mockKernel.kernelInfo.kernelArgInfo.at(0).kernelArgPatchInfoVector.resize(1);
+    mockKernel.kernelInfo.kernelArgInfo.at(0).pureStatefulBufferAccess = false;
+    mockKernel.mockKernel->initialize();
+    mockKernel.mockKernel->auxTranslationRequired = true;
+    mockKernel.mockKernel->setArgBuffer(0, sizeof(cl_mem *), &clMem);
+
+    testing::internal::CaptureStdout();
+    MemObjsForAuxTranslation memObjects;
+    mockKernel.mockKernel->fillWithBuffersForAuxTranslation(memObjects);
+
+    snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[KERNEL_ARGUMENT_AUX_TRANSLATION],
+             mockKernel.mockKernel->getKernelInfo().name.c_str(), 0, mockKernel.mockKernel->getKernelInfo().kernelArgInfo.at(0).name.c_str());
+
+    std::string output = testing::internal::GetCapturedStdout();
+    EXPECT_NE(0u, output.size());
+    EXPECT_TRUE(containsHint(expectedHint, userData));
+}
+
+TEST_F(PerformanceHintTest, given64bitCompressedBufferWhenItsCreatedThenProperPerformanceHintIsProvided) {
+    cl_int retVal;
+    HardwareInfo hwInfo = context->getDevice(0)->getHardwareInfo();
+    hwInfo.capabilityTable.ftrRenderCompressedBuffers = true;
+
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
+    cl_device_id deviceId = static_cast<cl_device_id>(device.get());
+    const MemoryProperties properties(1 << 21);
+    size_t size = 8192u;
+
+    cl_context_properties validProperties[3] = {CL_CONTEXT_SHOW_DIAGNOSTICS_INTEL, CL_CONTEXT_DIAGNOSTICS_LEVEL_ALL_INTEL, 0};
+    auto context = std::unique_ptr<MockContext>(Context::create<NEO::MockContext>(validProperties, DeviceVector(&deviceId, 1), callbackFunction, static_cast<void *>(userData), retVal));
+    context->isSharedContext = false;
+    auto buffer = std::unique_ptr<Buffer>(Buffer::create(context.get(), properties, size, static_cast<void *>(NULL), retVal));
+    snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[BUFFER_IS_COMPRESSED], buffer.get());
+    if (!is32bit && HwHelper::renderCompressedBuffersSupported(hwInfo)) {
+        EXPECT_TRUE(containsHint(expectedHint, userData));
+    } else {
+        EXPECT_FALSE(containsHint(expectedHint, userData));
+    }
+}
+
+TEST_F(PerformanceHintTest, givenUncompressedBufferWhenItsCreatedThenProperPerformanceHintIsProvided) {
+    cl_int retVal;
+    HardwareInfo hwInfo = context->getDevice(0)->getHardwareInfo();
+    hwInfo.capabilityTable.ftrRenderCompressedBuffers = true;
+
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
+    cl_device_id deviceId = static_cast<cl_device_id>(device.get());
+    const MemoryProperties properties(CL_MEM_READ_WRITE);
+    size_t size = 0u;
+
+    cl_context_properties validProperties[3] = {CL_CONTEXT_SHOW_DIAGNOSTICS_INTEL, CL_CONTEXT_DIAGNOSTICS_LEVEL_ALL_INTEL, 0};
+    auto context = std::unique_ptr<MockContext>(Context::create<NEO::MockContext>(validProperties, DeviceVector(&deviceId, 1), callbackFunction, static_cast<void *>(userData), retVal));
+    std::unique_ptr<Buffer> buffer;
+    bool isCompressed = true;
+    if (context->getMemoryManager()) {
+        isCompressed = MemObjHelper::isSuitableForRenderCompression(
+                           HwHelper::renderCompressedBuffersSupported(hwInfo),
+                           properties, context->peekContextType(),
+                           HwHelper::get(hwInfo.platform.eRenderCoreFamily).obtainRenderBufferCompressionPreference(size)) &&
+                       !is32bit && !context->isSharedContext &&
+                       (!isValueSet(properties.flags, CL_MEM_USE_HOST_PTR) || context->getMemoryManager()->isLocalMemorySupported()) &&
+                       !isValueSet(properties.flags, CL_MEM_FORCE_SHARED_PHYSICAL_MEMORY_INTEL);
+
+        buffer = std::unique_ptr<Buffer>(Buffer::create(context.get(), properties, size, static_cast<void *>(NULL), retVal));
+    }
+    snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[BUFFER_IS_NOT_COMPRESSED], buffer.get());
+
+    if (isCompressed) {
+        Buffer::provideCompressionHint(GraphicsAllocation::AllocationType::BUFFER, context.get(), buffer.get());
+    }
+    EXPECT_TRUE(containsHint(expectedHint, userData));
+}
+
+TEST_F(PerformanceHintTest, givenCompressedImageWhenItsCreatedThenProperPerformanceHintIsProvided) {
+    HardwareInfo hwInfo = context->getDevice(0)->getHardwareInfo();
+    hwInfo.capabilityTable.ftrRenderCompressedImages = true;
+
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
+    cl_device_id deviceId = static_cast<cl_device_id>(device.get());
+
+    cl_context_properties validProperties[3] = {CL_CONTEXT_SHOW_DIAGNOSTICS_INTEL, CL_CONTEXT_DIAGNOSTICS_LEVEL_ALL_INTEL, 0};
+    auto context = std::unique_ptr<MockContext>(Context::create<NEO::MockContext>(validProperties, DeviceVector(&deviceId, 1), callbackFunction, static_cast<void *>(userData), retVal));
+
+    const size_t width = 5;
+    const size_t height = 3;
+    const size_t depth = 2;
+    cl_int retVal = CL_SUCCESS;
+    auto const elementSize = 4;
+    char *hostPtr = static_cast<char *>(alignedMalloc(width * height * depth * elementSize * 2, 64));
+
+    cl_image_format imageFormat;
+    cl_image_desc imageDesc;
+    auto mockBuffer = std::unique_ptr<MockBuffer>(new MockBuffer());
+    StorageInfo info;
+    size_t t = 4;
+    auto gmm = std::unique_ptr<Gmm>(new Gmm(static_cast<const void *>(nullptr), t, false, true, true, info));
+    gmm->isRenderCompressed = true;
+
+    mockBuffer->getGraphicsAllocation()->setDefaultGmm(gmm.get());
+    cl_mem mem = mockBuffer.get();
+    imageFormat.image_channel_data_type = CL_UNORM_INT8;
+    imageFormat.image_channel_order = CL_RGBA;
+    imageDesc.num_mip_levels = 0;
+    imageDesc.num_samples = 0;
+    imageDesc.mem_object = mem;
+    imageDesc.image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER;
+    imageDesc.image_width = width;
+    imageDesc.image_height = 0;
+    imageDesc.image_depth = 0;
+    imageDesc.image_array_size = 0;
+    imageDesc.image_row_pitch = 0;
+    imageDesc.image_slice_pitch = 0;
+
+    cl_mem_flags flags = CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR;
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
+
+    auto image = std::unique_ptr<Image>(Image::create(
+        context.get(),
+        flags,
+        surfaceFormat,
+        &imageDesc,
+        hostPtr,
+        retVal));
+
+    snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[IMAGE_IS_COMPRESSED], image.get());
+    alignedFree(hostPtr);
+
+    if (HwHelper::renderCompressedImagesSupported(hwInfo)) {
+        EXPECT_TRUE(containsHint(expectedHint, userData));
+    } else {
+        EXPECT_FALSE(containsHint(expectedHint, userData));
+    }
+}
+
+TEST_F(PerformanceHintTest, givenImageWithNoGmmWhenItsCreatedThenNoPerformanceHintIsProvided) {
+    HardwareInfo hwInfo = context->getDevice(0)->getHardwareInfo();
+    hwInfo.capabilityTable.ftrRenderCompressedImages = true;
+
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
+    cl_device_id deviceId = static_cast<cl_device_id>(device.get());
+
+    cl_context_properties validProperties[3] = {CL_CONTEXT_SHOW_DIAGNOSTICS_INTEL, CL_CONTEXT_DIAGNOSTICS_LEVEL_ALL_INTEL, 0};
+    auto context = std::unique_ptr<MockContext>(Context::create<NEO::MockContext>(validProperties, DeviceVector(&deviceId, 1), callbackFunction, static_cast<void *>(userData), retVal));
+
+    const size_t width = 5;
+    const size_t height = 3;
+    const size_t depth = 2;
+    cl_int retVal = CL_SUCCESS;
+    auto const elementSize = 4;
+    char *hostPtr = static_cast<char *>(alignedMalloc(width * height * depth * elementSize * 2, 64));
+
+    cl_image_format imageFormat;
+    cl_image_desc imageDesc;
+
+    auto mockBuffer = std::unique_ptr<MockBuffer>(new MockBuffer());
+    cl_mem mem = mockBuffer.get();
+
+    imageFormat.image_channel_data_type = CL_UNORM_INT8;
+    imageFormat.image_channel_order = CL_RGBA;
+    imageDesc.num_mip_levels = 0;
+    imageDesc.num_samples = 0;
+    imageDesc.mem_object = mem;
+    imageDesc.image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER;
+    imageDesc.image_width = width;
+    imageDesc.image_height = 0;
+    imageDesc.image_depth = 0;
+    imageDesc.image_array_size = 0;
+    imageDesc.image_row_pitch = 0;
+    imageDesc.image_slice_pitch = 0;
+
+    cl_mem_flags flags = CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR;
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
+
+    auto image = std::unique_ptr<Image>(Image::create(
+        context.get(),
+        flags,
+        surfaceFormat,
+        &imageDesc,
+        hostPtr,
+        retVal));
+
+    snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[IMAGE_IS_COMPRESSED], image.get());
+    EXPECT_FALSE(containsHint(expectedHint, userData));
+    snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[IMAGE_IS_NOT_COMPRESSED], image.get());
+    EXPECT_FALSE(containsHint(expectedHint, userData));
+
+    alignedFree(hostPtr);
+}
+
+TEST_F(PerformanceHintTest, givenUncompressedImageWhenItsCreatedThenProperPerformanceHintIsProvided) {
+    HardwareInfo hwInfo = context->getDevice(0)->getHardwareInfo();
+    hwInfo.capabilityTable.ftrRenderCompressedImages = true;
+
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
+    cl_device_id deviceId = static_cast<cl_device_id>(device.get());
+
+    cl_context_properties validProperties[3] = {CL_CONTEXT_SHOW_DIAGNOSTICS_INTEL, CL_CONTEXT_DIAGNOSTICS_LEVEL_ALL_INTEL, 0};
+    auto context = std::unique_ptr<MockContext>(Context::create<NEO::MockContext>(validProperties, DeviceVector(&deviceId, 1), callbackFunction, static_cast<void *>(userData), retVal));
+
+    const size_t width = 5;
+    const size_t height = 3;
+    const size_t depth = 2;
+    cl_int retVal = CL_SUCCESS;
+    auto const elementSize = 4;
+    char *hostPtr = static_cast<char *>(alignedMalloc(width * height * depth * elementSize * 2, 64));
+
+    cl_image_format imageFormat;
+    cl_image_desc imageDesc;
+    auto mockBuffer = std::unique_ptr<MockBuffer>(new MockBuffer());
+    StorageInfo info;
+    size_t t = 4;
+    auto gmm = std::unique_ptr<Gmm>(new Gmm((const void *)nullptr, t, false, true, true, info));
+    gmm->isRenderCompressed = false;
+
+    mockBuffer->getGraphicsAllocation()->setDefaultGmm(gmm.get());
+    cl_mem mem = mockBuffer.get();
+    imageFormat.image_channel_data_type = CL_UNORM_INT8;
+    imageFormat.image_channel_order = CL_RGBA;
+    imageDesc.num_mip_levels = 0;
+    imageDesc.num_samples = 0;
+    imageDesc.mem_object = mem;
+    imageDesc.image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER;
+    imageDesc.image_width = width;
+    imageDesc.image_height = 0;
+    imageDesc.image_depth = 0;
+    imageDesc.image_array_size = 0;
+    imageDesc.image_row_pitch = 0;
+    imageDesc.image_slice_pitch = 0;
+
+    cl_mem_flags flags = CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR;
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
+
+    auto image = std::unique_ptr<Image>(Image::create(
+        context.get(),
+        flags,
+        surfaceFormat,
+        &imageDesc,
+        hostPtr,
+        retVal));
+
+    snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[IMAGE_IS_NOT_COMPRESSED], image.get());
+    alignedFree(hostPtr);
+
+    if (HwHelper::renderCompressedImagesSupported(hwInfo)) {
+        EXPECT_TRUE(containsHint(expectedHint, userData));
+    } else {
+        EXPECT_FALSE(containsHint(expectedHint, userData));
+    }
+}
+
 TEST_P(PerformanceHintKernelTest, GivenSpillFillWhenKernelIsInitializedThenContextProvidesProperHint) {
 
     auto pDevice = castToObject<Device>(devices[0]);
@@ -491,4 +756,43 @@ INSTANTIATE_TEST_CASE_P(
 
 TEST(PerformanceHintsDebugVariables, givenDefaultDebugManagerWhenPrintDriverDiagnosticsIsCalledThenMinusOneIsReturned) {
     EXPECT_EQ(-1, DebugManager.flags.PrintDriverDiagnostics.get());
+}
+
+TEST(PerformanceHintsTransferTest, givenCommandTypeAndMemoryTransferRequiredWhenAskingForHintThenReturnCorrectValue) {
+    DriverDiagnostics driverDiagnostics(0);
+    const uint32_t numHints = 8;
+    std::tuple<uint32_t, PerformanceHints, PerformanceHints> commandHints[numHints] = {
+        // commandType, transfer required, transfer not required
+        std::make_tuple(CL_COMMAND_MAP_BUFFER, CL_ENQUEUE_MAP_BUFFER_REQUIRES_COPY_DATA, CL_ENQUEUE_MAP_BUFFER_DOESNT_REQUIRE_COPY_DATA),
+        std::make_tuple(CL_COMMAND_MAP_IMAGE, CL_ENQUEUE_MAP_IMAGE_REQUIRES_COPY_DATA, CL_ENQUEUE_MAP_IMAGE_DOESNT_REQUIRE_COPY_DATA),
+        std::make_tuple(CL_COMMAND_UNMAP_MEM_OBJECT, CL_ENQUEUE_UNMAP_MEM_OBJ_REQUIRES_COPY_DATA, CL_ENQUEUE_UNMAP_MEM_OBJ_DOESNT_REQUIRE_COPY_DATA),
+        std::make_tuple(CL_COMMAND_WRITE_BUFFER, CL_ENQUEUE_WRITE_BUFFER_REQUIRES_COPY_DATA, CL_ENQUEUE_WRITE_BUFFER_DOESNT_REQUIRE_COPY_DATA),
+        std::make_tuple(CL_COMMAND_READ_BUFFER, CL_ENQUEUE_READ_BUFFER_REQUIRES_COPY_DATA, CL_ENQUEUE_READ_BUFFER_DOESNT_REQUIRE_COPY_DATA),
+        std::make_tuple(CL_COMMAND_WRITE_BUFFER_RECT, CL_ENQUEUE_WRITE_BUFFER_RECT_REQUIRES_COPY_DATA, CL_ENQUEUE_WRITE_BUFFER_RECT_DOESNT_REQUIRE_COPY_DATA),
+        std::make_tuple(CL_COMMAND_READ_BUFFER_RECT, CL_ENQUEUE_READ_BUFFER_RECT_REQUIRES_COPY_DATA, CL_ENQUEUE_READ_BUFFER_RECT_DOESNT_REQUIRES_COPY_DATA),
+        std::make_tuple(CL_COMMAND_WRITE_IMAGE, CL_ENQUEUE_WRITE_IMAGE_REQUIRES_COPY_DATA, CL_ENQUEUE_WRITE_IMAGE_DOESNT_REQUIRES_COPY_DATA),
+    };
+
+    for (uint32_t i = 0; i < numHints; i++) {
+        auto hintWithTransferRequired = driverDiagnostics.obtainHintForTransferOperation(std::get<0>(commandHints[i]), true);
+        auto hintWithoutTransferRequired = driverDiagnostics.obtainHintForTransferOperation(std::get<0>(commandHints[i]), false);
+
+        EXPECT_EQ(std::get<1>(commandHints[i]), hintWithTransferRequired);
+        EXPECT_EQ(std::get<2>(commandHints[i]), hintWithoutTransferRequired);
+    }
+
+    EXPECT_THROW(driverDiagnostics.obtainHintForTransferOperation(CL_COMMAND_READ_IMAGE, true), std::exception); // no hint for this scenario
+    EXPECT_EQ(CL_ENQUEUE_READ_IMAGE_DOESNT_REQUIRES_COPY_DATA,
+              driverDiagnostics.obtainHintForTransferOperation(CL_COMMAND_READ_IMAGE, false));
+}
+
+TEST_F(DriverDiagnosticsTest, givenInvalidCommandTypeWhenAskingForZeroCopyOperatonThenAbort) {
+    cl_device_id deviceId = devices[0];
+    cl_context_properties validProperties[3] = {CL_CONTEXT_SHOW_DIAGNOSTICS_INTEL, CL_CONTEXT_DIAGNOSTICS_LEVEL_ALL_INTEL, 0};
+    auto context = std::unique_ptr<MockContext>(Context::create<MockContext>(validProperties, DeviceVector(&deviceId, 1),
+                                                                             callbackFunction, (void *)userData, retVal));
+
+    auto buffer = std::unique_ptr<Buffer>(Buffer::create(context.get(), CL_MEM_READ_WRITE, 1, nullptr, retVal));
+    auto address = reinterpret_cast<void *>(0x12345);
+    EXPECT_THROW(context->providePerformanceHintForMemoryTransfer(CL_COMMAND_BARRIER, true, buffer.get(), address), std::exception);
 }

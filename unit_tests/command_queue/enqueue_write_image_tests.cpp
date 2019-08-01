@@ -104,7 +104,7 @@ HWTEST_F(EnqueueWriteImageTest, loadRegisterImmediateL3CNTLREG) {
 
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueWriteImageTest, WhenEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueWriteImage<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 
@@ -201,7 +201,7 @@ HWTEST_F(EnqueueWriteImageTest, GivenImage1DarrayWhenReadWriteImageIsCalledThenH
 
     EnqueueWriteImageHelper<>::enqueueWriteImage(pCmdQ, dstImage2, CL_FALSE, origin, region);
 
-    auto &csr = pCmdQ->getCommandStreamReceiver();
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
 
     auto temporaryAllocation1 = csr.getTemporaryAllocations().peekHead();
     ASSERT_NE(nullptr, temporaryAllocation1);
@@ -216,6 +216,48 @@ HWTEST_F(EnqueueWriteImageTest, GivenImage1DarrayWhenReadWriteImageIsCalledThenH
     delete dstImage2;
 }
 
+HWTEST_F(EnqueueWriteImageTest, GivenImage1DarrayWhenWriteImageIsCalledThenRowPitchIsSetToSlicePitch) {
+    auto &builtIns = *pCmdQ->getDevice().getExecutionEnvironment()->getBuiltIns();
+    EBuiltInOps::Type copyBuiltIn = EBuiltInOps::CopyBufferToImage3d;
+    auto &origBuilder = builtIns.getBuiltinDispatchInfoBuilder(
+        copyBuiltIn,
+        pCmdQ->getContext(),
+        pCmdQ->getDevice());
+
+    // substitute original builder with mock builder
+    auto oldBuilder = builtIns.setBuiltinDispatchInfoBuilder(
+        copyBuiltIn,
+        pCmdQ->getContext(),
+        pCmdQ->getDevice(),
+        std::unique_ptr<NEO::BuiltinDispatchInfoBuilder>(new MockBuiltinDispatchInfoBuilder(builtIns, &origBuilder)));
+
+    std::unique_ptr<Image> image;
+    auto destImage = Image1dArrayHelper<>::create(context);
+    auto imageDesc = destImage->getImageDesc();
+    size_t origin[] = {0, 0, 0};
+    size_t region[] = {imageDesc.image_width, imageDesc.image_array_size, 1};
+    size_t rowPitch = 64;
+    size_t slicePitch = 128;
+
+    EnqueueWriteImageHelper<>::enqueueWriteImage(pCmdQ, destImage, CL_FALSE, origin, region, rowPitch, slicePitch);
+
+    auto &mockBuilder = static_cast<MockBuiltinDispatchInfoBuilder &>(builtIns.getBuiltinDispatchInfoBuilder(copyBuiltIn,
+                                                                                                             pCmdQ->getContext(),
+                                                                                                             pCmdQ->getDevice()));
+    auto params = mockBuilder.getBuiltinOpParams();
+    EXPECT_EQ(params->dstRowPitch, slicePitch);
+
+    // restore original builder and retrieve mock builder
+    auto newBuilder = builtIns.setBuiltinDispatchInfoBuilder(
+        copyBuiltIn,
+        pCmdQ->getContext(),
+        pCmdQ->getDevice(),
+        std::move(oldBuilder));
+    EXPECT_NE(nullptr, newBuilder);
+
+    delete destImage;
+}
+
 HWTEST_F(EnqueueWriteImageTest, GivenImage2DarrayWhenReadWriteImageIsCalledThenHostPtrSizeIsCalculatedProperly) {
     auto dstImage2 = Image2dArrayHelper<>::create(context);
     auto imageDesc = dstImage2->getImageDesc();
@@ -225,7 +267,7 @@ HWTEST_F(EnqueueWriteImageTest, GivenImage2DarrayWhenReadWriteImageIsCalledThenH
 
     EnqueueWriteImageHelper<>::enqueueWriteImage(pCmdQ, dstImage2, CL_FALSE, origin, region);
 
-    auto &csr = pCmdQ->getCommandStreamReceiver();
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
 
     auto temporaryAllocation1 = csr.getTemporaryAllocations().peekHead();
     ASSERT_NE(nullptr, temporaryAllocation1);
@@ -258,6 +300,7 @@ HWTEST_F(EnqueueWriteImageTest, GivenImage1DAndImageShareTheSameStorageWithHostP
                                         rowPitch,
                                         slicePitch,
                                         ptr,
+                                        nullptr,
                                         0,
                                         nullptr,
                                         nullptr);
@@ -287,6 +330,7 @@ HWTEST_F(EnqueueWriteImageTest, GivenImage1DArrayAndImageShareTheSameStorageWith
                                       rowPitch,
                                       slicePitch,
                                       ptrStorage,
+                                      nullptr,
                                       0,
                                       nullptr,
                                       nullptr);
@@ -318,6 +362,7 @@ HWTEST_F(EnqueueWriteImageTest, GivenSharedContextZeroCopy2DImageWhenEnqueueWrit
                                      rowPitch,
                                      slicePitch,
                                      ptr,
+                                     nullptr,
                                      0,
                                      nullptr,
                                      nullptr);
@@ -348,6 +393,7 @@ HWTEST_F(EnqueueWriteImageTest, GivenImage1DThatIsZeroCopyWhenWriteImageWithTheS
                                       rowPitch,
                                       slicePitch,
                                       ptr,
+                                      nullptr,
                                       numEventsInWaitList,
                                       nullptr,
                                       &event);
@@ -428,6 +474,7 @@ HWTEST_P(MipMapWriteImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalle
                                       0,
                                       0,
                                       ptr.get(),
+                                      nullptr,
                                       0,
                                       nullptr,
                                       nullptr);
@@ -472,6 +519,7 @@ HWTEST_F(NegativeFailAllocationTest, givenEnqueueReadImageWhenHostPtrAllocationC
                                      rowPitch,
                                      slicePitch,
                                      ptr,
+                                     nullptr,
                                      0,
                                      nullptr,
                                      nullptr);

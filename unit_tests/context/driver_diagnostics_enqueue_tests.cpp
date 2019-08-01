@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/event/user_event.h"
-#include "runtime/memory_manager/svm_memory_manager.h"
+#include "runtime/memory_manager/unified_memory_manager.h"
 #include "unit_tests/context/driver_diagnostics_tests.h"
 #include "unit_tests/fixtures/buffer_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 
 using namespace NEO;
 
@@ -23,6 +23,7 @@ TEST_F(PerformanceHintEnqueueBufferTest, GivenBlockingReadWhenEnqueueReadBufferI
         0,
         MemoryConstants::cacheLineSize,
         ptr,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -46,6 +47,7 @@ TEST_P(PerformanceHintEnqueueReadBufferTest, GivenHostPtrAndSizeAlignmentsWhenEn
                              0,
                              sizeForReadBuffer,
                              (void *)addressForReadBuffer,
+                             nullptr,
                              0,
                              nullptr,
                              nullptr);
@@ -154,6 +156,7 @@ TEST_F(PerformanceHintEnqueueBufferTest, GivenNonBlockingWriteAndBufferDoesntSha
         0,
         MemoryConstants::cacheLineSize,
         ptr,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -171,6 +174,7 @@ TEST_F(PerformanceHintEnqueueBufferTest, GivenNonBlockingWriteAndBufferSharesMem
         0,
         MemoryConstants::cacheLineSize,
         address,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -188,6 +192,7 @@ TEST_F(PerformanceHintEnqueueBufferTest, GivenBlockingWriteAndBufferDoesntShareM
         0,
         MemoryConstants::cacheLineSize,
         ptr,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -205,6 +210,7 @@ TEST_F(PerformanceHintEnqueueBufferTest, GivenBlockingWriteAndBufferSharesMemWit
         0,
         MemoryConstants::cacheLineSize,
         address,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -222,6 +228,7 @@ TEST_F(PerformanceHintEnqueueBufferTest, GivenNonBlockingReadAndBufferDoesntShar
         0,
         MemoryConstants::cacheLineSize,
         ptr,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -239,6 +246,7 @@ TEST_F(PerformanceHintEnqueueBufferTest, GivenNonBlockingReadAndBufferSharesMemW
         0,
         MemoryConstants::cacheLineSize,
         address,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -256,6 +264,7 @@ TEST_F(PerformanceHintEnqueueBufferTest, GivenBlockingReadAndBufferDoesntShareMe
         0,
         MemoryConstants::cacheLineSize,
         ptr,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -273,6 +282,7 @@ TEST_F(PerformanceHintEnqueueBufferTest, GivenBlockingReadAndBufferSharesMemWith
         0,
         MemoryConstants::cacheLineSize,
         address,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -353,6 +363,7 @@ TEST_P(PerformanceHintEnqueueReadImageTest, GivenHostPtrAndSizeAlignmentsWhenEnq
                             0,
                             0,
                             (void *)addressForReadImage,
+                            nullptr,
                             0,
                             nullptr,
                             nullptr);
@@ -377,6 +388,7 @@ TEST_F(PerformanceHintEnqueueImageTest, GivenNonBlockingWriteWhenEnqueueWriteIma
         MemoryConstants::cacheLineSize,
         MemoryConstants::cacheLineSize,
         address,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -399,6 +411,7 @@ TEST_F(PerformanceHintEnqueueImageTest, GivenNonBlockingWriteImageSharesStorageW
         MemoryConstants::cacheLineSize,
         MemoryConstants::cacheLineSize,
         ptr,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -421,6 +434,7 @@ TEST_F(PerformanceHintEnqueueImageTest, GivenNonBlockingReadImageSharesStorageWi
         MemoryConstants::cacheLineSize,
         MemoryConstants::cacheLineSize,
         ptr,
+        nullptr,
         0,
         nullptr,
         nullptr);
@@ -647,8 +661,10 @@ TEST_P(PerformanceHintEnqueueMapTest, GivenZeroCopyFlagWhenEnqueueUnmapIsCalling
 }
 
 TEST_F(PerformanceHintEnqueueTest, GivenSVMPointerWhenEnqueueSVMMapIsCallingThenContextProvidesProperHint) {
-
-    void *svmPtr = context->getSVMAllocsManager()->createSVMAlloc(256, false, false);
+    if (!pPlatform->peekExecutionEnvironment()->getHardwareInfo()->capabilityTable.ftrSvm) {
+        GTEST_SKIP();
+    }
+    void *svmPtr = context->getSVMAllocsManager()->createSVMAlloc(256, {});
 
     pCmdQ->enqueueSVMMap(CL_FALSE, 0, svmPtr, 256, 0, nullptr, nullptr);
 

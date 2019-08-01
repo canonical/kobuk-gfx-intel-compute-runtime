@@ -10,7 +10,7 @@
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/command_stream/linear_stream.h"
 #include "runtime/event/event.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/utilities/tag_allocator.h"
 
 using namespace NEO;
@@ -56,4 +56,13 @@ void TimestampPacketContainer::makeResident(CommandStreamReceiver &commandStream
     for (auto node : timestampPacketNodes) {
         commandStreamReceiver.makeResident(*node->getBaseGraphicsAllocation());
     }
+}
+
+bool TimestampPacketContainer::isCompleted() const {
+    for (auto node : timestampPacketNodes) {
+        if (!node->tagForCpuAccess->isCompleted()) {
+            return false;
+        }
+    }
+    return true;
 }

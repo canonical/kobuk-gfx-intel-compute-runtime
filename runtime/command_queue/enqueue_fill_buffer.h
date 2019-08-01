@@ -9,7 +9,7 @@
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/command_queue/command_queue_hw.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
 #include "runtime/memory_manager/memory_manager.h"
@@ -53,7 +53,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueFillBuffer(
 
     BuiltInOwnershipWrapper builtInLock(builder, this->context);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     MemObj patternMemObj(this->context, 0, 0, alignUp(patternSize, 4), patternAllocation->getUnderlyingBuffer(),
                          patternAllocation->getUnderlyingBuffer(), patternAllocation, false, false, true);
     dc.srcMemObj = &patternMemObj;
@@ -74,7 +74,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueFillBuffer(
         eventWaitList,
         event);
 
-    auto storageForAllocation = getCommandStreamReceiver().getInternalAllocationStorage();
+    auto storageForAllocation = getGpgpuCommandStreamReceiver().getInternalAllocationStorage();
     storageForAllocation->storeAllocationWithTaskCount(std::unique_ptr<GraphicsAllocation>(patternAllocation), TEMPORARY_ALLOCATION, taskCount);
 
     return CL_SUCCESS;

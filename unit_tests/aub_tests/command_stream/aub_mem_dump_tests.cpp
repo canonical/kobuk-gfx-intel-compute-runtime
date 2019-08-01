@@ -7,10 +7,10 @@
 
 #include "aub_mem_dump_tests.h"
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/aub/aub_helper.h"
 #include "runtime/helpers/hw_helper.h"
 #include "unit_tests/fixtures/device_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_aub_csr.h"
 
 using NEO::AUBCommandStreamReceiver;
@@ -20,7 +20,7 @@ using NEO::DeviceFixture;
 using NEO::folderAUB;
 
 std::string getAubFileName(const NEO::Device *pDevice, const std::string baseName) {
-    const auto pGtSystemInfo = pDevice->getHardwareInfo().pSysInfo;
+    const auto pGtSystemInfo = &pDevice->getHardwareInfo().gtSystemInfo;
     std::stringstream strfilename;
     uint32_t subSlicesPerSlice = pGtSystemInfo->SubSliceCount / pGtSystemInfo->SliceCount;
     strfilename << pDevice->getProductAbbrev() << "_" << pGtSystemInfo->SliceCount << "x" << subSlicesPerSlice << "x" << pGtSystemInfo->MaxEuPerSubSlice << "_" << baseName;
@@ -84,7 +84,7 @@ HWTEST_F(AubMemDumpTests, reserveMaxAddress) {
     auto gAddress = static_cast<uintptr_t>(-1) - 4096;
     auto pAddress = static_cast<uint64_t>(gAddress) & 0xFFFFFFFF;
 
-    auto enableLocalMemory = HwHelper::get(hwInfo.pPlatform->eRenderCoreFamily).getEnableLocalMemory(hwInfo);
+    auto enableLocalMemory = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getEnableLocalMemory(hwInfo);
     NEO::AubHelperHw<FamilyType> aubHelperHw(enableLocalMemory);
     AUB::reserveAddressPPGTT(aubFile, gAddress, 4096, pAddress, 7, aubHelperHw);
 

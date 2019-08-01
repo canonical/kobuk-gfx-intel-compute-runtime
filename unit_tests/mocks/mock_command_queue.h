@@ -7,6 +7,7 @@
 
 #pragma once
 #include "runtime/command_queue/command_queue_hw.h"
+#include "runtime/memory_manager/graphics_allocation.h"
 #include "unit_tests/libult/ult_command_stream_receiver.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -17,7 +18,7 @@ namespace NEO {
 class MockCommandQueue : public CommandQueue {
   public:
     using CommandQueue::device;
-    using CommandQueue::engine;
+    using CommandQueue::gpgpuEngine;
     using CommandQueue::multiEngineQueue;
     using CommandQueue::obtainNewTimestampPacketNodes;
     using CommandQueue::requiresCacheFlushAfterWalker;
@@ -46,7 +47,8 @@ class MockCommandQueue : public CommandQueue {
     }
 
     cl_int enqueueWriteBuffer(Buffer *buffer, cl_bool blockingWrite, size_t offset, size_t size, const void *ptr,
-                              cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event) override {
+                              GraphicsAllocation *mapAllocation, cl_uint numEventsInWaitList, const cl_event *eventWaitList,
+                              cl_event *event) override {
         writeBufferCounter++;
         writeBufferBlocking = (CL_TRUE == blockingWrite);
         writeBufferOffset = offset;
@@ -72,7 +74,7 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
 
   public:
     using BaseClass::commandStream;
-    using BaseClass::engine;
+    using BaseClass::gpgpuEngine;
     using BaseClass::multiEngineQueue;
     using BaseClass::obtainNewTimestampPacketNodes;
     using BaseClass::requiresCacheFlushAfterWalker;
@@ -84,7 +86,7 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     }
 
     UltCommandStreamReceiver<GfxFamily> &getUltCommandStreamReceiver() {
-        return reinterpret_cast<UltCommandStreamReceiver<GfxFamily> &>(*BaseClass::engine->commandStreamReceiver);
+        return reinterpret_cast<UltCommandStreamReceiver<GfxFamily> &>(*BaseClass::gpgpuEngine->commandStreamReceiver);
     }
 
     cl_int enqueueWriteImage(Image *dstImage,
@@ -94,6 +96,7 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
                              size_t inputRowPitch,
                              size_t inputSlicePitch,
                              const void *ptr,
+                             GraphicsAllocation *mapAllocation,
                              cl_uint numEventsInWaitList,
                              const cl_event *eventWaitList,
                              cl_event *event) override {
@@ -105,16 +108,20 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
                                             inputRowPitch,
                                             inputSlicePitch,
                                             ptr,
+                                            mapAllocation,
                                             numEventsInWaitList,
                                             eventWaitList,
                                             event);
     }
-
+    void *cpuDataTransferHandler(TransferProperties &transferProperties, EventsRequest &eventsRequest, cl_int &retVal) override {
+        cpuDataTransferHandlerCalled = true;
+        return BaseClass::cpuDataTransferHandler(transferProperties, eventsRequest, retVal);
+    }
     cl_int enqueueWriteBuffer(Buffer *buffer, cl_bool blockingWrite, size_t offset, size_t size,
-                              const void *ptr, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event) override {
+                              const void *ptr, GraphicsAllocation *mapAllocation, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event) override {
         EnqueueWriteBufferCounter++;
         blockingWriteBuffer = blockingWrite == CL_TRUE;
-        return BaseClass::enqueueWriteBuffer(buffer, blockingWrite, offset, size, ptr, numEventsInWaitList, eventWaitList, event);
+        return BaseClass::enqueueWriteBuffer(buffer, blockingWrite, offset, size, ptr, mapAllocation, numEventsInWaitList, eventWaitList, event);
     }
 
     void enqueueHandlerHook(const unsigned int commandType, const MultiDispatchInfo &dispatchInfo) override {
@@ -138,19 +145,10 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     bool blockingWriteBuffer = false;
     bool notifyEnqueueReadBufferCalled = false;
     bool notifyEnqueueReadImageCalled = false;
-    uint32_t completionStampTaskCount = 0;
-    uint32_t deltaTaskCount = 0;
+    bool cpuDataTransferHandlerCalled = false;
 
     LinearStream *peekCommandStream() {
         return this->commandStream;
-    }
-
-    void updateFromCompletionStamp(const CompletionStamp &completionStamp) override {
-        BaseClass::updateFromCompletionStamp(completionStamp);
-        const uint32_t &referenceToCompletionStampTaskCount = completionStamp.taskCount;
-        uint32_t &nonConstReferenceToCompletionStampTaskCount = const_cast<uint32_t &>(referenceToCompletionStampTaskCount);
-        nonConstReferenceToCompletionStampTaskCount += deltaTaskCount;
-        completionStampTaskCount = referenceToCompletionStampTaskCount;
     }
 };
 } // namespace NEO

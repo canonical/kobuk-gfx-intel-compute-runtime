@@ -7,15 +7,16 @@
 
 #include "unit_tests/helpers/hw_helper_tests.h"
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/gmm_helper/resource_info.h"
 #include "runtime/helpers/aligned_memory.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/options.h"
 #include "runtime/helpers/string.h"
 #include "runtime/memory_manager/graphics_allocation.h"
 #include "runtime/os_interface/os_interface.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/helpers/variable_backup.h"
 
@@ -24,12 +25,7 @@
 #include <numeric>
 #include <vector>
 
-void HwHelperFixture::SetUp() {
-    DeviceFixture::SetUp();
-}
-void HwHelperFixture::TearDown() {
-    DeviceFixture::TearDown();
-}
+using namespace NEO;
 
 TEST(HwHelperSimpleTest, givenDebugVariableWhenAskingForRenderCompressionThenReturnCorrectValue) {
     DebugManagerStateRestore restore;
@@ -118,7 +114,7 @@ TEST_F(HwHelperTest, givenEngineTypeRcsWhenCsTraitsAreQueiredThenCorrectNameInTr
 
 HWTEST_F(HwHelperTest, givenHwHelperWhenAskedForPageTableManagerSupportThenReturnCorrectValue) {
     auto &helper = HwHelper::get(renderCoreFamily);
-    EXPECT_EQ(helper.isPageTableManagerSupported(hwInfoHelper.hwInfo), UnitTestHelper<FamilyType>::isPageTableManagerSupported(hwInfoHelper.hwInfo));
+    EXPECT_EQ(helper.isPageTableManagerSupported(hardwareInfo), UnitTestHelper<FamilyType>::isPageTableManagerSupported(hardwareInfo));
 }
 
 TEST(DwordBuilderTest, setNonMaskedBits) {
@@ -201,10 +197,11 @@ HWTEST_F(PipeControlHelperTests, givenPostSyncWriteTimestampModeWhenHelperIsUsed
     expectedPipeControl.setAddress(static_cast<uint32_t>(address & 0x0000FFFFFFFFULL));
     expectedPipeControl.setAddressHigh(static_cast<uint32_t>(address >> 32));
 
-    auto pipeControl = PipeControlHelper<FamilyType>::obtainPipeControlAndProgramPostSyncOperation(&stream, PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, address, immediateData, false);
+    auto pipeControl = PipeControlHelper<FamilyType>::obtainPipeControlAndProgramPostSyncOperation(stream, PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, address, immediateData, false);
+    auto additionalPcSize = HardwareCommandsHelper<FamilyType>::isPipeControlWArequired() ? sizeof(PIPE_CONTROL) : 0u;
 
-    EXPECT_EQ(sizeof(PIPE_CONTROL), stream.getUsed());
-    EXPECT_EQ(pipeControl, stream.getCpuBase());
+    EXPECT_EQ(sizeof(PIPE_CONTROL) + additionalPcSize, stream.getUsed());
+    EXPECT_EQ(pipeControl, ptrOffset(stream.getCpuBase(), additionalPcSize));
     EXPECT_TRUE(memcmp(pipeControl, &expectedPipeControl, sizeof(PIPE_CONTROL)) == 0);
 }
 
@@ -223,10 +220,12 @@ HWTEST_F(PipeControlHelperTests, givenPostSyncWriteImmediateDataModeWhenHelperIs
     expectedPipeControl.setAddressHigh(static_cast<uint32_t>(address >> 32));
     expectedPipeControl.setImmediateData(immediateData);
 
-    auto pipeControl = PipeControlHelper<FamilyType>::obtainPipeControlAndProgramPostSyncOperation(&stream, PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, address, immediateData, false);
+    auto pipeControl = PipeControlHelper<FamilyType>::obtainPipeControlAndProgramPostSyncOperation(stream, PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, address, immediateData, false);
 
-    EXPECT_EQ(sizeof(PIPE_CONTROL), stream.getUsed());
-    EXPECT_EQ(pipeControl, stream.getCpuBase());
+    auto additionalPcSize = HardwareCommandsHelper<FamilyType>::isPipeControlWArequired() ? sizeof(PIPE_CONTROL) : 0u;
+
+    EXPECT_EQ(sizeof(PIPE_CONTROL) + additionalPcSize, stream.getUsed());
+    EXPECT_EQ(pipeControl, ptrOffset(stream.getCpuBase(), additionalPcSize));
     EXPECT_TRUE(memcmp(pipeControl, &expectedPipeControl, sizeof(PIPE_CONTROL)) == 0);
 }
 
@@ -635,25 +634,25 @@ TEST_F(HwHelperTest, givenEnableLocalMemoryDebugVarAndOsEnableLocalMemoryWhenSet
     auto &helper = HwHelper::get(renderCoreFamily);
 
     DebugManager.flags.EnableLocalMemory.set(0);
-    EXPECT_FALSE(helper.getEnableLocalMemory(hwInfoHelper.hwInfo));
+    EXPECT_FALSE(helper.getEnableLocalMemory(hardwareInfo));
 
     DebugManager.flags.EnableLocalMemory.set(1);
-    EXPECT_TRUE(helper.getEnableLocalMemory(hwInfoHelper.hwInfo));
+    EXPECT_TRUE(helper.getEnableLocalMemory(hardwareInfo));
 
     DebugManager.flags.EnableLocalMemory.set(-1);
 
     OSInterface::osEnableLocalMemory = false;
-    EXPECT_FALSE(helper.getEnableLocalMemory(hwInfoHelper.hwInfo));
+    EXPECT_FALSE(helper.getEnableLocalMemory(hardwareInfo));
 
     OSInterface::osEnableLocalMemory = true;
-    EXPECT_EQ(helper.isLocalMemoryEnabled(hwInfoHelper.hwInfo), helper.getEnableLocalMemory(hwInfoHelper.hwInfo));
+    EXPECT_EQ(helper.isLocalMemoryEnabled(hardwareInfo), helper.getEnableLocalMemory(hardwareInfo));
 }
 
 TEST_F(HwHelperTest, givenAUBDumpForceAllToLocalMemoryDebugVarWhenSetThenGetEnableLocalMemoryReturnsCorrectValue) {
     DebugManagerStateRestore dbgRestore;
-    std::unique_ptr<MockDevice> device(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfoHelper.hwInfo));
+    std::unique_ptr<MockDevice> device(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hardwareInfo));
     auto &helper = HwHelper::get(renderCoreFamily);
 
     DebugManager.flags.AUBDumpForceAllToLocalMemory.set(true);
-    EXPECT_TRUE(helper.getEnableLocalMemory(hwInfoHelper.hwInfo));
+    EXPECT_TRUE(helper.getEnableLocalMemory(hardwareInfo));
 }

@@ -6,12 +6,13 @@
  */
 
 #pragma once
-#include "runtime/memory_manager/svm_memory_manager.h"
+#include "runtime/memory_manager/unified_memory_manager.h"
 namespace NEO {
 struct MockSVMAllocsManager : SVMAllocsManager {
 
     using SVMAllocsManager::memoryManager;
     using SVMAllocsManager::SVMAllocs;
     using SVMAllocsManager::SVMAllocsManager;
+    using SVMAllocsManager::svmMapOperations;
 };
 } // namespace NEO

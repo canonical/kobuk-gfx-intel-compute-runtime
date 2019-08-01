@@ -71,7 +71,7 @@ TEST_F(PipeTest, FailedAllocationInjection) {
         auto retVal = CL_INVALID_VALUE;
         auto pipe = Pipe::create(&context, CL_MEM_READ_ONLY, 1, 20, nullptr, retVal);
 
-        if (nonfailingAllocation == failureIndex) {
+        if (MemoryManagement::nonfailingAllocation == failureIndex) {
             EXPECT_EQ(CL_SUCCESS, retVal);
             EXPECT_NE(nullptr, pipe);
             delete pipe;
@@ -92,4 +92,24 @@ TEST_F(PipeTest, givenPipeWhenEnqueueWriteForUnmapIsCalledThenReturnError) {
     CommandQueue cmdQ;
     errCode = clEnqueueUnmapMemObject(&cmdQ, pipe.get(), nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_MEM_OBJECT, errCode);
+}
+
+TEST_F(PipeTest, givenPipeWithDifferentCpuAndGpuAddressesWhenSetArgPipeThenUseGpuAddress) {
+    int errCode = CL_SUCCESS;
+
+    auto pipe = Pipe::create(&context, CL_MEM_READ_ONLY, 1, 20, nullptr, errCode);
+
+    ASSERT_NE(nullptr, pipe);
+    EXPECT_EQ(CL_SUCCESS, errCode);
+
+    EXPECT_EQ(21u, *reinterpret_cast<unsigned int *>(pipe->getCpuAddress()));
+    uint64_t gpuAddress = 0x12345;
+    auto pipeAllocation = pipe->getGraphicsAllocation();
+    pipeAllocation->setCpuPtrAndGpuAddress(pipeAllocation->getUnderlyingBuffer(), gpuAddress);
+    EXPECT_NE(reinterpret_cast<uint64_t>(pipeAllocation->getUnderlyingBuffer()), pipeAllocation->getGpuAddress());
+    uint64_t valueToPatch;
+    pipe->setPipeArg(&valueToPatch, sizeof(valueToPatch));
+    EXPECT_EQ(valueToPatch, pipeAllocation->getGpuAddressToPatch());
+
+    delete pipe;
 }

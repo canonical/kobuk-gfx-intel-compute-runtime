@@ -5,7 +5,7 @@
  *
  */
 
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "test.h"
 #include "unit_tests/fixtures/two_walker_fixture.h"
 
@@ -40,7 +40,7 @@ HWTEST_F(IOQWithTwoWalkers, shouldHaveAPipecontrolBetweenWalkers2) {
 
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
 
-    auto WaNeeded = KernelCommandsHelper<FamilyType>::isPipeControlWArequired();
+    auto WaNeeded = HardwareCommandsHelper<FamilyType>::isPipeControlWArequired();
 
     auto itorCmd = find<PIPE_CONTROL *>(itorWalker1, itorWalker2);
     ASSERT_NE(itorWalker2, itorCmd);
@@ -61,6 +61,6 @@ HWTEST_F(IOQWithTwoWalkers, shouldHaveAPipecontrolBetweenWalkers2) {
     uint64_t addressPC = ((uint64_t)pipeControl->getAddressHigh() << 32) | pipeControl->getAddress();
 
     // The PC address should match the CS tag address
-    EXPECT_EQ((uint64_t)commandStreamReceiver.getTagAddress(), addressPC);
+    EXPECT_EQ(commandStreamReceiver.getTagAllocation()->getGpuAddress(), addressPC);
     EXPECT_EQ(1u, pipeControl->getImmediateData());
 }

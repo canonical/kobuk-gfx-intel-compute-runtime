@@ -144,6 +144,14 @@ cl_mem CL_API_CALL clCreateImage(
     void *hostPtr,
     cl_int *errcodeRet);
 
+cl_mem CL_API_CALL clCreateImageWithPropertiesINTEL(
+    cl_context context,
+    cl_mem_properties_intel *properties,
+    const cl_image_format *imageFormat,
+    const cl_image_desc *imageDesc,
+    void *hostPtr,
+    cl_int *errcodeRet);
+
 // deprecated OpenCL 1.1
 cl_mem CL_API_CALL clCreateImage2D(
     cl_context context,
@@ -243,6 +251,11 @@ cl_program CL_API_CALL clCreateProgramWithBinary(
     const unsigned char **binaries,
     cl_int *binaryStatus,
     cl_int *errcodeRet);
+
+cl_program CL_API_CALL clCreateProgramWithIL(cl_context context,
+                                             const void *il,
+                                             size_t length,
+                                             cl_int *errcodeRet);
 
 cl_program CL_API_CALL clCreateProgramWithBuiltInKernels(
     cl_context context,
@@ -841,12 +854,14 @@ cl_sampler CL_API_CALL clCreateSamplerWithProperties(
     const cl_sampler_properties *samplerProperties,
     cl_int *errcodeRet);
 
-cl_int CL_API_CALL clEnqueueVerifyMemory(
+cl_int CL_API_CALL clEnqueueVerifyMemoryINTEL(
     cl_command_queue commandQueue,
     const void *allocationPtr,
     const void *expectedData,
     size_t sizeOfComparison,
     cl_uint comparisonMode);
+
+cl_int CL_API_CALL clAddCommentINTEL(cl_platform_id platform, const char *comment);
 
 // OpenCL 2.1
 
@@ -856,6 +871,31 @@ cl_int CL_API_CALL clGetDeviceAndHostTimer(cl_device_id device,
 
 cl_int CL_API_CALL clGetHostTimer(cl_device_id device,
                                   cl_ulong *hostTimestamp);
+
+cl_int CL_API_CALL clGetKernelSubGroupInfo(cl_kernel kernel,
+                                           cl_device_id device,
+                                           cl_kernel_sub_group_info paramName,
+                                           size_t inputValueSize,
+                                           const void *inputValue,
+                                           size_t paramValueSize,
+                                           void *paramValue,
+                                           size_t *paramValueSizeRet);
+
+cl_int CL_API_CALL clSetDefaultDeviceCommandQueue(cl_context context,
+                                                  cl_device_id device,
+                                                  cl_command_queue commandQueue);
+
+cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue commandQueue,
+                                          cl_uint numSvmPointers,
+                                          const void **svmPointers,
+                                          const size_t *sizes,
+                                          const cl_mem_migration_flags flags,
+                                          cl_uint numEventsInWaitList,
+                                          const cl_event *eventWaitList,
+                                          cl_event *event);
+
+cl_kernel CL_API_CALL clCloneKernel(cl_kernel sourceKernel,
+                                    cl_int *errcodeRet);
 
 extern CL_API_ENTRY cl_command_queue CL_API_CALL
 clCreatePerfCountersCommandQueueINTEL(
@@ -883,4 +923,89 @@ extern CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithILKHR(
     const void *il,
     size_t length,
     cl_int *errcodeRet) CL_API_SUFFIX__VERSION_1_2;
+
+void *clHostMemAllocINTEL(
+    cl_context context,
+    cl_mem_properties_intel *properties,
+    size_t size,
+    cl_uint alignment,
+    cl_int *errcodeRet);
+
+void *clDeviceMemAllocINTEL(
+    cl_context context,
+    cl_device_id device,
+    cl_mem_properties_intel *properties,
+    size_t size,
+    cl_uint alignment,
+    cl_int *errcodeRet);
+
+void *clSharedMemAllocINTEL(
+    cl_context context,
+    cl_device_id device,
+    cl_mem_properties_intel *properties,
+    size_t size,
+    cl_uint alignment,
+    cl_int *errcodeRet);
+
+cl_int clMemFreeINTEL(
+    cl_context context,
+    const void *ptr);
+
+cl_int clGetMemAllocInfoINTEL(
+    cl_context context,
+    const void *ptr,
+    cl_mem_info_intel paramName,
+    size_t paramValueSize,
+    void *paramValue,
+    size_t *paramValueSizeRet);
+
+cl_int clSetKernelArgMemPointerINTEL(
+    cl_kernel kernel,
+    cl_uint argIndex,
+    const void *argValue);
+
+cl_int clEnqueueMemsetINTEL(
+    cl_command_queue commandQueue,
+    void *dstPtr,
+    cl_int value,
+    size_t size,
+    cl_uint numEventsInWaitList,
+    const cl_event *eventWaitList,
+    cl_event *event);
+
+cl_int clEnqueueMemcpyINTEL(
+    cl_command_queue commandQueue,
+    cl_bool blocking,
+    void *dstPtr,
+    const void *srcPtr,
+    size_t size,
+    cl_uint numEventsInWaitList,
+    const cl_event *eventWaitList,
+    cl_event *event);
+
+cl_int clEnqueueMigrateMemINTEL(
+    cl_command_queue commandQueue,
+    const void *ptr,
+    size_t size,
+    cl_mem_migration_flags flags,
+    cl_uint numEventsInWaitList,
+    const cl_event *eventWaitList,
+    cl_event *event);
+
+cl_int clEnqueueMemAdviseINTEL(
+    cl_command_queue commandQueue,
+    const void *ptr,
+    size_t size,
+    cl_mem_advice_intel advice,
+    cl_uint numEventsInWaitList,
+    const cl_event *eventWaitList,
+    cl_event *event);
 }
+
+// OpenCL 2.2
+
+cl_int CL_API_CALL clSetProgramSpecializationConstant(
+    cl_program program,
+    cl_uint specId,
+    size_t specSize,
+    const void *specValue);

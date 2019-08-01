@@ -11,15 +11,15 @@
 
 namespace NEO {
 void DeviceFixture::SetUp() {
-    hwInfoHelper = *platformDevices[0];
-    SetUpImpl(&hwInfoHelper);
+    hardwareInfo = *platformDevices[0];
+    SetUpImpl(&hardwareInfo);
 }
 
 void DeviceFixture::SetUpImpl(const NEO::HardwareInfo *hardwareInfo) {
     pDevice = MockDevice::createWithNewExecutionEnvironment<MockDevice>(hardwareInfo);
     ASSERT_NE(nullptr, pDevice);
 
-    auto &commandStreamReceiver = pDevice->getCommandStreamReceiver();
+    auto &commandStreamReceiver = pDevice->getGpgpuCommandStreamReceiver();
     pTagMemory = commandStreamReceiver.getTagAddress();
     ASSERT_NE(nullptr, const_cast<uint32_t *>(pTagMemory));
 }
@@ -30,10 +30,8 @@ void DeviceFixture::TearDown() {
 }
 
 MockDevice *DeviceFixture::createWithUsDeviceId(unsigned short usDeviceId) {
-    hwInfoHelper = *platformDevices[0];
-    platformHelper = *platformDevices[0]->pPlatform;
-    platformHelper.usDeviceID = usDeviceId;
-    hwInfoHelper.pPlatform = &platformHelper;
-    return MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfoHelper);
+    hardwareInfo = *platformDevices[0];
+    hardwareInfo.platform.usDeviceID = usDeviceId;
+    return MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hardwareInfo);
 }
 } // namespace NEO

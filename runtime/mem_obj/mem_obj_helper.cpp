@@ -31,19 +31,11 @@ bool MemObjHelper::parseMemoryProperties(const cl_mem_properties_intel *properti
     return true;
 }
 
-AllocationProperties MemObjHelper::getAllocationProperties(cl_mem_flags_intel flags, bool allocateMemory,
-                                                           size_t size, GraphicsAllocation::AllocationType type) {
-    AllocationProperties allocationProperties(allocateMemory, size, type);
-    allocationProperties.flags.uncacheable = isValueSet(flags, CL_MEM_LOCALLY_UNCACHED_RESOURCE);
-    return allocationProperties;
-}
-
-AllocationProperties MemObjHelper::getAllocationProperties(ImageInfo *imgInfo, bool allocateMemory) {
-    return AllocationProperties(imgInfo, allocateMemory);
-}
-
-StorageInfo MemObjHelper::getStorageInfo(const MemoryProperties &properties) {
-    return {};
+void MemObjHelper::fillPoliciesInProperties(AllocationProperties &allocationProperties, const MemoryProperties &memoryProperties) {
+    fillCachePolicyInProperties(allocationProperties,
+                                isValueSet(memoryProperties.flags_intel, CL_MEM_LOCALLY_UNCACHED_RESOURCE),
+                                isValueSet(memoryProperties.flags, CL_MEM_READ_ONLY),
+                                false);
 }
 
 bool MemObjHelper::isSuitableForRenderCompression(bool renderCompressed, const MemoryProperties &properties, ContextType contextType, bool preferCompression) {

@@ -7,7 +7,6 @@
 
 #ifdef _WIN32
 
-#include "runtime/command_stream/preemption.h"
 #include "runtime/device/device.h"
 #include "runtime/helpers/device_helpers.h"
 #include "runtime/os_interface/debug_settings_manager.h"
@@ -21,50 +20,28 @@ namespace NEO {
 extern const HardwareInfo *hardwareInfoTable[IGFX_MAX_PRODUCT];
 
 size_t DeviceFactory::numDevices = 0;
-HardwareInfo *DeviceFactory::hwInfo = nullptr;
 
-bool DeviceFactory::getDevices(HardwareInfo **pHWInfos, size_t &numDevices, ExecutionEnvironment &executionEnvironment) {
+bool DeviceFactory::getDevices(size_t &numDevices, ExecutionEnvironment &executionEnvironment) {
     numDevices = 0;
 
-    auto hardwareInfo = std::make_unique<HardwareInfo>();
-    std::unique_ptr<Wddm> wddm(Wddm ::createWddm());
-    if (!wddm->enumAdapters(*hardwareInfo)) {
+    auto hardwareInfo = executionEnvironment.getMutableHardwareInfo();
+    std::unique_ptr<Wddm> wddm(Wddm::createWddm());
+    if (!wddm->init(*hardwareInfo)) {
         return false;
     }
 
-    auto totalDeviceCount = DeviceHelper::getDevicesCount(hardwareInfo.get());
+    auto totalDeviceCount = DeviceHelper::getDevicesCount(hardwareInfo);
 
     executionEnvironment.osInterface.reset(new OSInterface());
     executionEnvironment.osInterface->get()->setWddm(wddm.release());
 
-    HwInfoConfig *hwConfig = HwInfoConfig::get(hardwareInfo->pPlatform->eProductFamily);
-    if (hwConfig->configureHwInfo(hardwareInfo.get(), hardwareInfo.get(), nullptr)) {
-        return false;
-    }
-
-    *pHWInfos = hardwareInfo.release();
     numDevices = totalDeviceCount;
     DeviceFactory::numDevices = numDevices;
-    DeviceFactory::hwInfo = *pHWInfos;
-
-    executionEnvironment.setHwInfo(*pHWInfos);
-    executionEnvironment.initGmm();
-    auto preemptionMode = PreemptionHelper::getDefaultPreemptionMode(**pHWInfos);
-    bool success = executionEnvironment.osInterface->get()->getWddm()->init(preemptionMode);
-    DEBUG_BREAK_IF(!success);
 
     return true;
 }
 
 void DeviceFactory::releaseDevices() {
-    if (DeviceFactory::numDevices > 0) {
-        delete hwInfo->pPlatform;
-        delete hwInfo->pSkuTable;
-        delete hwInfo->pWaTable;
-        delete hwInfo->pSysInfo;
-        delete hwInfo;
-    }
-    DeviceFactory::hwInfo = nullptr;
     DeviceFactory::numDevices = 0;
 }
 

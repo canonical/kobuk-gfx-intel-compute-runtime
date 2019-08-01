@@ -5,16 +5,15 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/options.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "runtime/platform/platform.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/variable_backup.h"
-#include "unit_tests/libult/mock_gfx_family.h"
 #include "unit_tests/mocks/mock_device.h"
 #include "unit_tests/mocks/mock_gmm.h"
 #include "unit_tests/mocks/mock_graphics_allocation.h"
@@ -136,9 +135,7 @@ TEST_F(GmmTests, invalidImageTypeQuery) {
     imgDesc.image_type = 0; // invalid
     auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
 
-    auto queryGmm = MockGmm::queryImgParams(imgInfo);
-
-    EXPECT_EQ(0u, imgInfo.size);
+    EXPECT_THROW(MockGmm::queryImgParams(imgInfo), std::exception);
 }
 
 TEST_F(GmmTests, validImageTypeQuery) {
@@ -158,7 +155,7 @@ TEST_F(GmmTests, validImageTypeQuery) {
     EXPECT_GT(imgInfo.size, minSize);
     EXPECT_GT(imgInfo.rowPitch, 0u);
     EXPECT_GT(imgInfo.slicePitch, 0u);
-    if (hwinfo->pPlatform->eRenderCoreFamily == IGFX_GEN8_CORE) {
+    if (hwinfo->platform.eRenderCoreFamily == IGFX_GEN8_CORE) {
         EXPECT_EQ(imgInfo.qPitch, 0u);
     } else {
         EXPECT_GT(imgInfo.qPitch, 0u);
@@ -254,7 +251,7 @@ TEST_F(GmmTests, givenTilableImageWhenEnableForceLinearImagesThenYTilingIsDisabl
 
     auto queryGmm = MockGmm::queryImgParams(imgInfo);
 
-    auto &hwHelper = HwHelper::get(GmmHelper::getInstance()->getHardwareInfo()->pPlatform->eRenderCoreFamily);
+    auto &hwHelper = HwHelper::get(GmmHelper::getInstance()->getHardwareInfo()->platform.eRenderCoreFamily);
     bool supportsYTiling = hwHelper.supportsYTiling();
 
     if (!supportsYTiling) {
@@ -273,6 +270,80 @@ TEST_F(GmmTests, givenTilableImageWhenEnableForceLinearImagesThenYTilingIsDisabl
 
     EXPECT_EQ(queryGmm->resourceParams.Flags.Info.Linear, 1u);
     EXPECT_EQ(queryGmm->resourceParams.Flags.Info.TiledY, 0u);
+}
+
+TEST_F(GmmTests, givenPlanarFormatsWhenQueryingImageParamsThenUVOffsetIsQueried) {
+    cl_image_desc imgDesc{};
+    imgDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
+    imgDesc.image_width = 4;
+    imgDesc.image_height = 4;
+    imgDesc.image_depth = 1;
+
+    SurfaceFormatInfo surfaceFormatNV12 = {{CL_NV12_INTEL, CL_UNORM_INT8}, GMM_FORMAT_NV12, GFX3DSTATE_SURFACEFORMAT_NV12, 0, 1, 1, 1};
+    SurfaceFormatInfo surfaceFormatP010 = {{CL_R, CL_UNORM_INT16}, GMM_FORMAT_P010, GFX3DSTATE_SURFACEFORMAT_NV12, 0, 1, 2, 2};
+
+    auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, &surfaceFormatNV12);
+    imgInfo.yOffsetForUVPlane = 0;
+    MockGmm::queryImgParams(imgInfo);
+
+    EXPECT_NE(0u, imgInfo.yOffsetForUVPlane);
+
+    imgInfo = MockGmm::initImgInfo(imgDesc, 0, &surfaceFormatP010);
+    imgInfo.yOffsetForUVPlane = 0;
+
+    MockGmm::queryImgParams(imgInfo);
+    EXPECT_NE(0u, imgInfo.yOffsetForUVPlane);
+}
+
+TEST_F(GmmTests, givenTilingModeSetToTileYWhenHwSupportsTilingThenTileYFlagIsSet) {
+    cl_image_desc imgDesc{};
+    imgDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
+    imgDesc.image_width = 4;
+    imgDesc.image_height = 4;
+    imgDesc.image_depth = 1;
+
+    auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
+    imgInfo.tilingMode = TilingMode::TILE_Y;
+    auto gmm = std::make_unique<Gmm>(imgInfo, StorageInfo{});
+
+    auto &hwHelper = HwHelper::get(GmmHelper::getInstance()->getHardwareInfo()->platform.eRenderCoreFamily);
+    bool supportsYTiling = hwHelper.supportsYTiling();
+
+    if (!supportsYTiling) {
+        EXPECT_EQ(gmm->resourceParams.Flags.Info.Linear, 0u);
+        EXPECT_EQ(gmm->resourceParams.Flags.Info.TiledY, 0u);
+    } else {
+        EXPECT_EQ(gmm->resourceParams.Flags.Info.Linear, 1u);
+        EXPECT_EQ(gmm->resourceParams.Flags.Info.TiledY, 1u);
+    }
+}
+
+TEST_F(GmmTests, givenTilingModeSetToNonTiledWhenCreatingGmmThenLinearFlagIsSet) {
+    cl_image_desc imgDesc{};
+    imgDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
+    imgDesc.image_width = 4;
+    imgDesc.image_height = 4;
+    imgDesc.image_depth = 1;
+
+    auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
+    imgInfo.tilingMode = TilingMode::NON_TILED;
+    auto gmm = std::make_unique<Gmm>(imgInfo, StorageInfo{});
+
+    EXPECT_EQ(gmm->resourceParams.Flags.Info.Linear, 1u);
+    EXPECT_EQ(gmm->resourceParams.Flags.Info.TiledY, 0u);
+}
+
+TEST_F(GmmTests, givenTilingModeSetToTileXWhenCreatingGmmThenUnrecoverableIfIsCalled) {
+    cl_image_desc imgDesc{};
+    imgDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
+    imgDesc.image_width = 4;
+    imgDesc.image_height = 4;
+    imgDesc.image_depth = 1;
+
+    auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
+    imgInfo.tilingMode = TilingMode::TILE_X;
+
+    EXPECT_THROW(new Gmm(imgInfo, {}), std::exception);
 }
 
 TEST_F(GmmTests, givenZeroRowPitchWhenQueryImgFromBufferParamsThenCalculate) {
@@ -629,9 +700,8 @@ TEST(GmmTest, givenInvalidFlagsSetWhenAskedForUnifiedAuxTranslationCapabilityThe
 }
 
 TEST(GmmTest, givenHwInfoWhenDeviceIsCreatedTheSetThisHwInfoToGmmHelper) {
-    HardwareInfo localHwInfo = **platformDevices;
-    std::unique_ptr<MockDevice> device(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&localHwInfo));
-    EXPECT_EQ(&localHwInfo, device->getGmmHelper()->getHardwareInfo());
+    std::unique_ptr<MockDevice> device(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
+    EXPECT_EQ(device->getExecutionEnvironment()->getHardwareInfo(), device->getGmmHelper()->getHardwareInfo());
 }
 
 TEST(GmmTest, whenResourceIsCreatedThenHandleItsOwnership) {
@@ -695,39 +765,4 @@ TEST(GmmHelperTest, whenGmmHelperIsInitializedThenClientContextIsSet) {
     EXPECT_NE(nullptr, GmmHelper::getClientContext()->getHandle());
 }
 
-struct GmmQueryInfoWithoutYTilingTest : public ::testing::Test {
-    GmmQueryInfoWithoutYTilingTest() : enabledYTilingBackup(&GENX::enabledYTiling, false),
-                                       renderCoreFamilyBackup(const_cast<GFXCORE_FAMILY *>(&platformDevices[0]->pPlatform->eRenderCoreFamily), IGFX_UNKNOWN_CORE) {}
-
-    VariableBackup<bool> enabledYTilingBackup;
-    VariableBackup<GFXCORE_FAMILY> renderCoreFamilyBackup;
-};
-TEST_F(GmmQueryInfoWithoutYTilingTest, givenPlatformThatDoesntSupportYTilingWhenQueryImageParamsForTilableImageThenTilingIsDisabled) {
-
-    cl_image_desc imgDesc{};
-    imgDesc.image_type = CL_MEM_OBJECT_IMAGE3D;
-    imgDesc.image_width = 17;
-    imgDesc.image_height = 17;
-    imgDesc.image_depth = 17;
-
-    auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-
-    auto queryGmm = MockGmm::queryImgParams(imgInfo);
-
-    EXPECT_EQ(queryGmm->resourceParams.Flags.Info.Linear, 0u);
-    EXPECT_EQ(queryGmm->resourceParams.Flags.Info.TiledY, 0u);
-}
-TEST_F(GmmQueryInfoWithoutYTilingTest, givenPlatformThatDoesntSupportYTilingWhenQueryImageParamsForUntilableImageThenLinearPropertyRemains) {
-
-    cl_image_desc imgDesc{};
-    imgDesc.image_type = CL_MEM_OBJECT_IMAGE1D;
-    imgDesc.image_width = 17;
-
-    auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-
-    auto queryGmm = MockGmm::queryImgParams(imgInfo);
-
-    EXPECT_EQ(queryGmm->resourceParams.Flags.Info.Linear, 1u);
-    EXPECT_EQ(queryGmm->resourceParams.Flags.Info.TiledY, 0u);
-}
 } // namespace NEO

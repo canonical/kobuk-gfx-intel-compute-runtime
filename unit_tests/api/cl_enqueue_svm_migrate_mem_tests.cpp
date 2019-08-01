@@ -9,7 +9,7 @@
 #include "runtime/device/device.h"
 #include "runtime/event/user_event.h"
 #include "runtime/memory_manager/graphics_allocation.h"
-#include "runtime/memory_manager/svm_memory_manager.h"
+#include "runtime/memory_manager/unified_memory_manager.h"
 #include "unit_tests/mocks/mock_context.h"
 
 #include "cl_api_tests.h"
@@ -97,7 +97,9 @@ TEST_F(clEnqueueSVMMigrateMemTests, GivenNonZeroSizeIsNotContainedWithinAllocati
         void *ptrSvm = clSVMAlloc(pContext, CL_MEM_READ_WRITE, 256, 4);
         ASSERT_NE(nullptr, ptrSvm);
 
-        auto svmAlloc = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSvm);
+        auto svmData = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSvm);
+        ASSERT_NE(nullptr, svmData);
+        auto svmAlloc = svmData->gpuAllocation;
         EXPECT_NE(nullptr, svmAlloc);
         size_t allocSize = svmAlloc->getUnderlyingBufferSize();
 

@@ -6,9 +6,11 @@
 
 set(IGDRCL_SRCS_tests_api
   ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+  ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/additional_extensions_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/api_tests_wrapper1.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/api_tests_wrapper2.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/api_tests_wrapper3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cl_add_comment_to_aub_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_api_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_api_tests.h
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_build_program_tests.inl
@@ -90,6 +92,7 @@ set(IGDRCL_SRCS_tests_api
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_supported_image_formats_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_icd_get_platform_ids_khr_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_intel_accelerator_tests.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/cl_intel_tracing_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_intel_motion_estimation.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_link_program_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_mem_locally_uncached_resource_tests.cpp
@@ -111,6 +114,7 @@ set(IGDRCL_SRCS_tests_api
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_set_mem_object_destructor_callback_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_set_mem_object_destructor_callback_tests_mt.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_set_performance_configuration_tests.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/cl_set_program_specialization_constant_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_svm_alloc_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_svm_free_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_unload_compiler_tests.inl

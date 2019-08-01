@@ -6,7 +6,7 @@
  */
 
 #include "runtime/event/event.h"
-#include "runtime/memory_manager/svm_memory_manager.h"
+#include "runtime/memory_manager/unified_memory_manager.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/fixtures/image_fixture.h"
@@ -17,83 +17,106 @@
 
 using namespace NEO;
 
-class ZeroSizeEnqueueHandlerTest : public DeviceFixture,
-                                   public testing::Test {
+class ZeroSizeEnqueueHandlerTest : public Test<DeviceFixture> {
   public:
-    void SetUp() override {
-        DeviceFixture::SetUp();
-    }
-
-    void TearDown() override {
-        DeviceFixture::TearDown();
-    }
     MockContext context;
     cl_int retVal;
 };
 
-HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueKernelWhenZeroSizeEnqueueIsDetectedThenCommandMarkerShouldBeEnqueued) {
+class ZeroSizeEnqueueHandlerTestZeroGws : public ZeroSizeEnqueueHandlerTest {
+  public:
+    void SetUp() override {
+        ZeroSizeEnqueueHandlerTest::SetUp();
+
+        testGwsInputs[0] = std::make_tuple(1, nullptr);
+        testGwsInputs[1] = std::make_tuple(2, nullptr);
+        testGwsInputs[2] = std::make_tuple(3, nullptr);
+        testGwsInputs[3] = std::make_tuple(1, zeroGWS0);
+        testGwsInputs[4] = std::make_tuple(2, zeroGWS00);
+        testGwsInputs[5] = std::make_tuple(2, zeroGWS01);
+        testGwsInputs[6] = std::make_tuple(2, zeroGWS10);
+        testGwsInputs[7] = std::make_tuple(3, zeroGWS000);
+        testGwsInputs[8] = std::make_tuple(3, zeroGWS011);
+        testGwsInputs[9] = std::make_tuple(3, zeroGWS101);
+        testGwsInputs[10] = std::make_tuple(3, zeroGWS110);
+        testGwsInputs[11] = std::make_tuple(3, zeroGWS001);
+        testGwsInputs[12] = std::make_tuple(3, zeroGWS010);
+        testGwsInputs[13] = std::make_tuple(3, zeroGWS100);
+    }
+
+    size_t zeroGWS0[1] = {0};
+    size_t zeroGWS00[2] = {0, 0};
+    size_t zeroGWS01[2] = {0, 1};
+    size_t zeroGWS10[2] = {1, 0};
+    size_t zeroGWS000[3] = {0, 0, 0};
+    size_t zeroGWS011[3] = {0, 1, 1};
+    size_t zeroGWS101[3] = {1, 0, 1};
+    size_t zeroGWS110[3] = {1, 1, 0};
+    size_t zeroGWS001[3] = {0, 0, 1};
+    size_t zeroGWS010[3] = {0, 1, 0};
+    size_t zeroGWS100[3] = {1, 0, 0};
+
+    std::tuple<unsigned int, size_t *> testGwsInputs[14];
+};
+
+HWTEST_F(ZeroSizeEnqueueHandlerTestZeroGws, enqueueKernelWhenZeroSizeEnqueueIsDetectedAndOpenCLAtLeast21ThenCommandMarkerShouldBeEnqueued) {
+    pDevice->enabledClVersion = 21;
+
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pDevice, 0));
 
     MockKernelWithInternals mockKernel(*pDevice);
 
-    size_t *nullGWS1 = nullptr;
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 1, nullptr, nullGWS1, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+    for (auto testInput : testGwsInputs) {
+        auto workDim = std::get<0>(testInput);
+        auto gws = std::get<1>(testInput);
+        mockCmdQ->lastCommandType = static_cast<cl_command_type>(CL_COMMAND_COPY_BUFFER);
 
-    size_t *nullGWS2 = nullptr;
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 2, nullptr, nullGWS2, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+        retVal = mockCmdQ->enqueueKernel(mockKernel.mockKernel, workDim, nullptr, gws, nullptr, 0, nullptr, nullptr);
+        EXPECT_EQ(CL_SUCCESS, retVal);
+        EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+    }
+}
 
-    size_t *nullGWS3 = nullptr;
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 3, nullptr, nullGWS3, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+HWTEST_F(ZeroSizeEnqueueHandlerTestZeroGws, enqueueKernelWhenZeroSizeEnqueueIsDetectedAndOpenCLIs20OrOlderThenErrorIsReturned) {
+    int oclVersionsToTest[] = {12, 20};
+    for (auto oclVersion : oclVersionsToTest) {
+        pDevice->enabledClVersion = oclVersion;
 
-    size_t zeroGWS0 = 0;
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 1, nullptr, &zeroGWS0, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+        auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pDevice, 0));
 
-    size_t zeroGWS00[] = {0, 0};
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 2, nullptr, zeroGWS00, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+        MockKernelWithInternals mockKernel(*pDevice);
 
-    size_t zeroGWS01[] = {0, 1};
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 2, nullptr, zeroGWS01, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+        for (auto testInput : testGwsInputs) {
+            auto workDim = std::get<0>(testInput);
+            auto gws = std::get<1>(testInput);
+            mockCmdQ->lastCommandType = static_cast<cl_command_type>(CL_COMMAND_COPY_BUFFER);
 
-    size_t zeroGWS10[] = {1, 0};
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 2, nullptr, zeroGWS10, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+            retVal = mockCmdQ->enqueueKernel(mockKernel.mockKernel, workDim, nullptr, gws, nullptr, 0, nullptr, nullptr);
+            EXPECT_EQ(CL_INVALID_GLOBAL_WORK_SIZE, retVal);
+            EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_COPY_BUFFER), mockCmdQ->lastCommandType);
+        }
+    }
+}
 
-    size_t zeroGWS000[] = {0, 0, 0};
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 3, nullptr, zeroGWS000, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+HWTEST_F(ZeroSizeEnqueueHandlerTestZeroGws, enqueueKernelWhenZeroSizeEnqueueIsDetectedAndLocalWorkSizeIsSetThenNoExceptionIsThrown) {
+    auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pDevice, 0));
 
-    size_t zeroGWS011[] = {0, 1, 1};
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 3, nullptr, zeroGWS011, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+    MockKernelWithInternals mockKernel(*pDevice);
+    mockKernel.mockProgram->setAllowNonUniform(true);
 
-    size_t zeroGWS101[] = {1, 0, 1};
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 3, nullptr, zeroGWS101, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+    auto workDim = 1;
+    auto gws = zeroGWS0;
+    size_t lws[1] = {1};
 
-    size_t zeroGWS110[] = {1, 1, 0};
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 3, nullptr, zeroGWS110, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
-
-    size_t zeroGWS001[] = {0, 0, 1};
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 3, nullptr, zeroGWS001, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
-
-    size_t zeroGWS010[] = {0, 1, 0};
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 3, nullptr, zeroGWS010, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
-
-    size_t zeroGWS100[] = {1, 0, 0};
-    mockCmdQ->enqueueKernel(mockKernel.mockKernel, 3, nullptr, zeroGWS100, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
+    EXPECT_NO_THROW(retVal = mockCmdQ->enqueueKernel(mockKernel.mockKernel, workDim, nullptr, gws, lws, 0, nullptr, nullptr));
+    auto expected = (pDevice->getEnabledClVersion() < 21 ? CL_INVALID_GLOBAL_WORK_SIZE : CL_SUCCESS);
+    EXPECT_EQ(expected, retVal);
 }
 
 HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueKernelWhenZeroSizeEnqueueIsDetectedThenEventCommandTypeShoudBeUnchanged) {
+    if (pDevice->getEnabledClVersion() < 21) {
+        return;
+    }
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pDevice, 0));
 
     cl_event event;
@@ -118,7 +141,7 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueReadBufferWhenZeroSizeEnqueueIsDetec
     MockBuffer buffer;
     size_t memory[1];
     size_t zeroSize = 0;
-    mockCmdQ->enqueueReadBuffer(&buffer, CL_FALSE, 0, zeroSize, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueReadBuffer(&buffer, CL_FALSE, 0, zeroSize, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 }
 
@@ -129,7 +152,7 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueReadBufferWhenZeroSizeEnqueueIsDetec
     MockBuffer buffer;
     size_t memory[1];
     size_t zeroSize = 0;
-    mockCmdQ->enqueueReadBuffer(&buffer, CL_FALSE, 0, zeroSize, memory, 0, nullptr, &event);
+    mockCmdQ->enqueueReadBuffer(&buffer, CL_FALSE, 0, zeroSize, memory, nullptr, 0, nullptr, &event);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     auto pEvent = (Event *)event;
@@ -207,7 +230,7 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueWriteBufferWhenZeroSizeEnqueueIsDete
     MockBuffer buffer;
     size_t memory[1];
     size_t zeroSize = 0;
-    mockCmdQ->enqueueWriteBuffer(&buffer, CL_FALSE, 0, zeroSize, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueWriteBuffer(&buffer, CL_FALSE, 0, zeroSize, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 }
 
@@ -218,7 +241,7 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueWriteBufferWhenZeroSizeEnqueueIsDete
     MockBuffer buffer;
     size_t memory[1];
     size_t zeroSize = 0;
-    mockCmdQ->enqueueWriteBuffer(&buffer, CL_FALSE, 0, zeroSize, memory, 0, nullptr, &event);
+    mockCmdQ->enqueueWriteBuffer(&buffer, CL_FALSE, 0, zeroSize, memory, nullptr, 0, nullptr, &event);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     auto pEvent = (Event *)event;
@@ -417,31 +440,31 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueReadImageWhenZeroSizeEnqueueIsDetect
     size_t origin[3] = {1024u, 1, 0};
 
     size_t zeroRegion000[3] = {0, 0, 0};
-    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion000, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion000, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion011[3] = {0, 1, 1};
-    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion011, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion011, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion101[3] = {1, 0, 1};
-    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion101, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion101, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion110[3] = {1, 1, 0};
-    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion110, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion110, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion001[3] = {0, 0, 1};
-    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion001, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion001, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion010[3] = {0, 1, 0};
-    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion010, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion010, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion100[3] = {1, 0, 0};
-    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion100, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion100, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 }
 
@@ -453,7 +476,7 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueReadImageWhenZeroSizeEnqueueIsDetect
     size_t memory[1];
     size_t origin[3] = {1024u, 1, 0};
     size_t zeroRegion[3] = {0, 0, 0};
-    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion, 0, 0, memory, 0, nullptr, &event);
+    mockCmdQ->enqueueReadImage(image.get(), CL_FALSE, origin, zeroRegion, 0, 0, memory, nullptr, 0, nullptr, &event);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     auto pEvent = (Event *)event;
@@ -474,31 +497,31 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueWriteImageWhenZeroSizeEnqueueIsDetec
     size_t origin[3] = {1024u, 1, 0};
 
     size_t zeroRegion000[3] = {0, 0, 0};
-    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion000, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion000, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion011[3] = {0, 1, 1};
-    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion011, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion011, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion101[3] = {1, 0, 1};
-    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion101, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion101, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion110[3] = {1, 1, 0};
-    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion110, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion110, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion001[3] = {0, 0, 1};
-    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion001, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion001, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion010[3] = {0, 1, 0};
-    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion010, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion010, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     size_t zeroRegion100[3] = {1, 0, 0};
-    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion100, 0, 0, memory, 0, nullptr, nullptr);
+    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion100, 0, 0, memory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 }
 
@@ -510,7 +533,7 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueWriteImageWhenZeroSizeEnqueueIsDetec
     size_t memory[1];
     size_t origin[3] = {1024u, 1, 0};
     size_t zeroRegion[3] = {0, 0, 0};
-    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion, 0, 0, memory, 0, nullptr, &event);
+    mockCmdQ->enqueueWriteImage(image.get(), CL_FALSE, origin, zeroRegion, 0, 0, memory, nullptr, 0, nullptr, &event);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
 
     auto pEvent = (Event *)event;
@@ -754,10 +777,13 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueFillImageWhenZeroSizeEnqueueIsDetect
 }
 
 HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueSVMMemcpyWhenZeroSizeEnqueueIsDetectedThenCommandMarkerShouldBeEnqueued) {
+    if (pDevice->getHardwareInfo().capabilityTable.ftrSvm == false) {
+        GTEST_SKIP();
+    }
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pDevice, 0));
 
-    void *pSrcSVM = context.getSVMAllocsManager()->createSVMAlloc(256, false, false);
-    void *pDstSVM = context.getSVMAllocsManager()->createSVMAlloc(256, false, false);
+    void *pSrcSVM = context.getSVMAllocsManager()->createSVMAlloc(256, {});
+    void *pDstSVM = context.getSVMAllocsManager()->createSVMAlloc(256, {});
     size_t zeroSize = 0;
     mockCmdQ->enqueueSVMMemcpy(false, pSrcSVM, pDstSVM, zeroSize, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
@@ -767,11 +793,14 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueSVMMemcpyWhenZeroSizeEnqueueIsDetect
 }
 
 HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueSVMMemcpyWhenZeroSizeEnqueueIsDetectedThenEventCommandTypeShouldBeUnchanged) {
+    if (pDevice->getHardwareInfo().capabilityTable.ftrSvm == false) {
+        GTEST_SKIP();
+    }
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pDevice, 0));
 
     cl_event event;
-    void *pSrcSVM = context.getSVMAllocsManager()->createSVMAlloc(256, false, false);
-    void *pDstSVM = context.getSVMAllocsManager()->createSVMAlloc(256, false, false);
+    void *pSrcSVM = context.getSVMAllocsManager()->createSVMAlloc(256, {});
+    void *pDstSVM = context.getSVMAllocsManager()->createSVMAlloc(256, {});
     size_t zeroSize = 0;
     mockCmdQ->enqueueSVMMemcpy(false, pSrcSVM, pDstSVM, zeroSize, 0, nullptr, &event);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
@@ -790,9 +819,12 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueSVMMemcpyWhenZeroSizeEnqueueIsDetect
 }
 
 HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueSVMMemFillWhenZeroSizeEnqueueIsDetectedThenCommandMarkerShouldBeEnqueued) {
+    if (pDevice->getHardwareInfo().capabilityTable.ftrSvm == false) {
+        GTEST_SKIP();
+    }
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pDevice, 0));
 
-    void *pSVM = context.getSVMAllocsManager()->createSVMAlloc(256, false, false);
+    void *pSVM = context.getSVMAllocsManager()->createSVMAlloc(256, {});
     const float pattern[1] = {1.2345f};
     size_t zeroSize = 0;
     mockCmdQ->enqueueSVMMemFill(pSVM, &pattern, sizeof(pattern), zeroSize, 0, nullptr, nullptr);
@@ -802,10 +834,13 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueSVMMemFillWhenZeroSizeEnqueueIsDetec
 }
 
 HWTEST_F(ZeroSizeEnqueueHandlerTest, enqueueSVMMemFillWhenZeroSizeEnqueueIsDetectedThenEventCommandTypeShouldBeUnchanged) {
+    if (pDevice->getHardwareInfo().capabilityTable.ftrSvm == false) {
+        GTEST_SKIP();
+    }
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pDevice, 0));
 
     cl_event event;
-    void *pSVM = context.getSVMAllocsManager()->createSVMAlloc(256, false, false);
+    void *pSVM = context.getSVMAllocsManager()->createSVMAlloc(256, {});
     const float pattern[1] = {1.2345f};
     size_t zeroSize = 0;
     mockCmdQ->enqueueSVMMemFill(pSVM, &pattern, sizeof(pattern), zeroSize, 0, nullptr, &event);

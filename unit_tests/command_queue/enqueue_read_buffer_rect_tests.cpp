@@ -175,7 +175,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, 2D_addsIndirectData) {
                                                                                                                pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.srcMemObj = buffer.get();
     dc.dstPtr = hostPtr;
     dc.srcOffset = {0, 0, 0};
@@ -205,7 +205,7 @@ HWTEST_F(EnqueueReadBufferRectTest, 2D_LoadRegisterImmediateL3CNTLREG) {
 
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, When2DEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueReadBufferRect2D<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 

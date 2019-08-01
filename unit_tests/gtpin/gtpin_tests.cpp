@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/helpers/basic_math.h"
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
 #include "runtime/gtpin/gtpin_defs.h"
@@ -12,7 +13,6 @@
 #include "runtime/gtpin/gtpin_hw_helper.h"
 #include "runtime/gtpin/gtpin_init.h"
 #include "runtime/gtpin/gtpin_notify.h"
-#include "runtime/helpers/basic_math.h"
 #include "runtime/helpers/file_io.h"
 #include "runtime/helpers/hash.h"
 #include "runtime/helpers/options.h"
@@ -143,6 +143,7 @@ class GTPinFixture : public ContextFixture, public MemoryManagementFixture {
         constructPlatform();
         pPlatform = platform();
         auto executionEnvironment = pPlatform->peekExecutionEnvironment();
+        executionEnvironment->setHwInfo(*platformDevices);
         memoryManager = new MockMemoryManagerWithFailures(*executionEnvironment);
         executionEnvironment->memoryManager.reset(memoryManager);
         pPlatform->initialize();
@@ -398,7 +399,7 @@ TEST_F(GTPinTests, givenValidRequestForHugeMemoryAllocationThenBufferAllocateFai
         cl_context ctxt = (cl_context)((Context *)pContext);
         uint32_t hugeSize = 400u; // Will be handled as huge memory allocation
         retFromGtPin = (*driverServices.bufferAllocate)((gtpin::context_handle_t)ctxt, hugeSize, &res);
-        if (nonfailingAllocation != failureIndex) {
+        if (MemoryManagement::nonfailingAllocation != failureIndex) {
             EXPECT_EQ(GTPIN_DI_ERROR_ALLOCATION_FAILED, retFromGtPin);
         } else {
             EXPECT_EQ(GTPIN_DI_SUCCESS, retFromGtPin);
@@ -839,7 +840,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithoutSSHIsUsedThenK
     SProgramBinaryHeader *pBHdr = (SProgramBinaryHeader *)pBin;
     pBHdr->Magic = iOpenCL::MAGIC_CL;
     pBHdr->Version = iOpenCL::CURRENT_ICBE_VERSION;
-    pBHdr->Device = pDevice->getHardwareInfo().pPlatform->eRenderCoreFamily;
+    pBHdr->Device = pDevice->getHardwareInfo().platform.eRenderCoreFamily;
     pBHdr->GPUPointerSizeInBytes = 8;
     pBHdr->NumberOfKernels = 1;
     pBHdr->SteppingId = 0;
@@ -927,7 +928,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithExecEnvIsUsedThen
     SProgramBinaryHeader *pBHdr = (SProgramBinaryHeader *)pBin;
     pBHdr->Magic = iOpenCL::MAGIC_CL;
     pBHdr->Version = iOpenCL::CURRENT_ICBE_VERSION;
-    pBHdr->Device = pDevice->getHardwareInfo().pPlatform->eRenderCoreFamily;
+    pBHdr->Device = pDevice->getHardwareInfo().platform.eRenderCoreFamily;
     pBHdr->GPUPointerSizeInBytes = 8;
     pBHdr->NumberOfKernels = 1;
     pBHdr->SteppingId = 0;
@@ -1486,7 +1487,7 @@ TEST_F(GTPinTests, givenMultipleKernelSubmissionsWhenOneOfGtpinSurfacesIsNullThe
     gtpinNotifyKernelSubmit(pKernel1, pCmdQueue);
     EXPECT_EQ(nullptr, kernelExecQueue[0].gtpinResource);
 
-    CommandStreamReceiver &csr = pCmdQueue->getCommandStreamReceiver();
+    CommandStreamReceiver &csr = pCmdQueue->getGpgpuCommandStreamReceiver();
     gtpinNotifyMakeResident(pKernel1, &csr);
     EXPECT_FALSE(kernelExecQueue[0].isResourceResident);
 
@@ -1670,7 +1671,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsCreatedThenAllKerne
     cl_mem gtpinBuffer1 = kernelExecQueue[1].gtpinResource;
     auto pBuffer1 = castToObject<Buffer>(gtpinBuffer1);
     GraphicsAllocation *pGfxAlloc1 = pBuffer1->getGraphicsAllocation();
-    CommandStreamReceiver &csr = pCmdQueue->getCommandStreamReceiver();
+    CommandStreamReceiver &csr = pCmdQueue->getGpgpuCommandStreamReceiver();
     EXPECT_FALSE(pGfxAlloc0->isResident(csr.getOsContext().getContextId()));
     EXPECT_FALSE(pGfxAlloc1->isResident(csr.getOsContext().getContextId()));
     gtpinNotifyMakeResident(pKernel, &csr);
@@ -1840,7 +1841,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenOneKernelIsSubmittedSeveral
     cl_mem gtpinBuffer1 = kernelExecQueue[1].gtpinResource;
     auto pBuffer1 = castToObject<Buffer>(gtpinBuffer1);
     GraphicsAllocation *pGfxAlloc1 = pBuffer1->getGraphicsAllocation();
-    CommandStreamReceiver &csr = pCmdQueue->getCommandStreamReceiver();
+    CommandStreamReceiver &csr = pCmdQueue->getGpgpuCommandStreamReceiver();
     // Make resident resource of first submitted kernel
     EXPECT_FALSE(pGfxAlloc0->isResident(csr.getOsContext().getContextId()));
     EXPECT_FALSE(pGfxAlloc1->isResident(csr.getOsContext().getContextId()));
@@ -1933,7 +1934,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenLowMemoryConditionOccursThe
         SProgramBinaryHeader *pBHdr = (SProgramBinaryHeader *)pBin;
         pBHdr->Magic = iOpenCL::MAGIC_CL;
         pBHdr->Version = iOpenCL::CURRENT_ICBE_VERSION;
-        pBHdr->Device = pDevice->getHardwareInfo().pPlatform->eRenderCoreFamily;
+        pBHdr->Device = pDevice->getHardwareInfo().platform.eRenderCoreFamily;
         pBHdr->GPUPointerSizeInBytes = 8;
         pBHdr->NumberOfKernels = 1;
         pBHdr->SteppingId = 0;
@@ -1985,7 +1986,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenLowMemoryConditionOccursThe
         pProgram->storeGenBinary(&binary[0], binSize);
         retVal = pProgram->processGenBinary();
         if (retVal == CL_OUT_OF_HOST_MEMORY) {
-            auto nonFailingAlloc = nonfailingAllocation;
+            auto nonFailingAlloc = MemoryManagement::nonfailingAllocation;
             EXPECT_NE(nonFailingAlloc, failureIndex);
         } else {
             EXPECT_EQ(CL_SUCCESS, retVal);
@@ -1993,12 +1994,12 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenLowMemoryConditionOccursThe
             cl_kernel kernels[2] = {0};
             cl_uint numCreatedKernels = 0;
 
-            if (nonfailingAllocation != failureIndex) {
+            if (MemoryManagement::nonfailingAllocation != failureIndex) {
                 memoryManager->failAllAllocationsInDevicePool = true;
             }
             retVal = clCreateKernelsInProgram(pProgram, 2, kernels, &numCreatedKernels);
 
-            if (nonfailingAllocation != failureIndex) {
+            if (MemoryManagement::nonfailingAllocation != failureIndex) {
                 if (retVal != CL_SUCCESS) {
                     EXPECT_EQ(nullptr, kernels[0]);
                     EXPECT_EQ(1u, numCreatedKernels);
@@ -2082,7 +2083,7 @@ TEST_F(GTPinTests, givenKernelWithSSHThenVerifyThatSSHResizeWorksWell) {
     size_t offsetBTS1 = pKernel->getBindingTableOffset();
     EXPECT_NE(0u, offsetBTS1);
 
-    GFXCORE_FAMILY genFamily = pDevice->getHardwareInfo().pPlatform->eRenderCoreFamily;
+    GFXCORE_FAMILY genFamily = pDevice->getHardwareInfo().platform.eRenderCoreFamily;
     GTPinHwHelper &gtpinHelper = GTPinHwHelper::get(genFamily);
     void *pSS1 = gtpinHelper.getSurfaceState(pKernel, 0);
     EXPECT_NE(nullptr, pSS1);
@@ -2209,7 +2210,7 @@ TEST_F(GTPinTests, givenKernelThenVerifyThatKernelCodeSubstitutionWorksWell) {
 }
 
 TEST_F(GTPinTests, checkWhetherGTPinHwHelperGetterWorksWell) {
-    GFXCORE_FAMILY genFamily = pDevice->getHardwareInfo().pPlatform->eRenderCoreFamily;
+    GFXCORE_FAMILY genFamily = pDevice->getHardwareInfo().platform.eRenderCoreFamily;
     GTPinHwHelper *pGTPinHelper = &GTPinHwHelper::get(genFamily);
     EXPECT_NE(nullptr, pGTPinHelper);
 }
@@ -2301,7 +2302,7 @@ TEST_F(ProgramTests, givenGenBinaryWithGtpinInfoWhenProcessGenBinaryCalledThenGt
     SProgramBinaryHeader *pBHdr = (SProgramBinaryHeader *)pBin;
     pBHdr->Magic = iOpenCL::MAGIC_CL;
     pBHdr->Version = iOpenCL::CURRENT_ICBE_VERSION;
-    pBHdr->Device = pDevice->getHardwareInfo().pPlatform->eRenderCoreFamily;
+    pBHdr->Device = pDevice->getHardwareInfo().platform.eRenderCoreFamily;
     pBHdr->GPUPointerSizeInBytes = 8;
     pBHdr->NumberOfKernels = 1;
     pBHdr->SteppingId = 0;

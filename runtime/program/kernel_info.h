@@ -163,8 +163,6 @@ struct KernelInfo {
 
     void storeKernelArgPatchInfo(uint32_t argNum, uint32_t dataSize, uint32_t crossthreadOffset, uint32_t sourceOffset, uint32_t offsetSSH);
 
-    const char *queryPrintfString(uint32_t index) const;
-
     size_t getSamplerStateArrayCount() const;
     size_t getSamplerStateArraySize(const HardwareInfo &hwInfo) const;
     size_t getBorderColorStateSize() const;
@@ -233,6 +231,7 @@ struct KernelInfo {
     size_t requiredSubGroupSize = 0;
     std::array<uint8_t, 3> workgroupWalkOrder = {{0, 1, 2}};
     std::array<uint8_t, 3> workgroupDimensionsOrder = {{0, 1, 2}};
+    bool requiresWorkGroupOrder = false;
     uint32_t gpuPointerSize = 0;
     const BuiltinDispatchInfoBuilder *builtinDispatchBuilder = nullptr;
     uint32_t argumentsToPatchNum = 0;

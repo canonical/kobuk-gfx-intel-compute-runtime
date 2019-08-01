@@ -33,12 +33,12 @@ class DriverInfoDeviceTest : public ::testing::Test {
   public:
     void SetUp() {
         hwInfo = platformDevices[0];
-        commandStreamReceiverCreateFunc = commandStreamReceiverFactory[hwInfo->pPlatform->eRenderCoreFamily];
-        commandStreamReceiverFactory[hwInfo->pPlatform->eRenderCoreFamily] = createMockCommandStreamReceiver;
+        commandStreamReceiverCreateFunc = commandStreamReceiverFactory[hwInfo->platform.eRenderCoreFamily];
+        commandStreamReceiverFactory[hwInfo->platform.eRenderCoreFamily] = createMockCommandStreamReceiver;
     }
 
     void TearDown() {
-        commandStreamReceiverFactory[hwInfo->pPlatform->eRenderCoreFamily] = commandStreamReceiverCreateFunc;
+        commandStreamReceiverFactory[hwInfo->platform.eRenderCoreFamily] = commandStreamReceiverCreateFunc;
     }
 
     CommandStreamReceiverCreateFunc commandStreamReceiverCreateFunc;
@@ -50,7 +50,8 @@ CommandStreamReceiver *createMockCommandStreamReceiver(bool withAubDump, Executi
     if (!executionEnvironment.osInterface) {
         executionEnvironment.osInterface = std::make_unique<OSInterface>();
         auto wddm = new WddmMock();
-        wddm->init(PreemptionHelper::getDefaultPreemptionMode(*executionEnvironment.getHardwareInfo()));
+        auto hwInfo = *executionEnvironment.getHardwareInfo();
+        wddm->init(hwInfo);
         executionEnvironment.osInterface->get()->setWddm(wddm);
     }
 

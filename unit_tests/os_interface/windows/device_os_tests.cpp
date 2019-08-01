@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/device/device.h"
 #include "runtime/helpers/get_info.h"
 #include "runtime/helpers/options.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_device.h"
 
 #include "gmock/gmock.h"
@@ -62,7 +62,7 @@ TEST(DeviceOsTest, DeviceCreationFail) {
 TEST(DeviceOsTest, DeviceCreationFailMidThreadPreemption) {
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.ForcePreemptionMode.set(static_cast<int32_t>(PreemptionMode::MidThread));
-    auto pDevice = MockDevice::createWithNewExecutionEnvironment<FailDeviceAfterOne>(nullptr);
+    auto pDevice = MockDevice::createWithNewExecutionEnvironment<FailDeviceAfterOne>(*platformDevices);
 
     EXPECT_THAT(pDevice, nullptr);
 }

@@ -5,11 +5,11 @@
  *
  */
 
-#include "runtime/helpers/basic_math.h"
+#include "core/helpers/basic_math.h"
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/options.h"
 #include "runtime/os_interface/debug_settings_manager.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_aub_center.h"
 #include "unit_tests/mocks/mock_aub_manager.h"
 
@@ -30,11 +30,11 @@ TEST(AubCenter, GivenUseAubStreamDebugVariableSetWhenAubCenterIsCreatedThenCreat
     DebugManagerStateRestore restorer;
     DebugManager.flags.UseAubStream.set(false);
 
-    MockAubManager *mockAubManager = new MockAubManager(platformDevices[0]->pPlatform->eProductFamily, 4, 8 * MB, true, aub_stream::mode::aubFile);
+    MockAubManager *mockAubManager = new MockAubManager(platformDevices[0]->platform.eProductFamily, 4, 8 * MB, true, aub_stream::mode::aubFile);
     MockAubCenter mockAubCenter(platformDevices[0], false, "", CommandStreamReceiverType::CSR_AUB);
     mockAubCenter.aubManager = std::unique_ptr<MockAubManager>(mockAubManager);
 
-    EXPECT_EQ(platformDevices[0]->pPlatform->eProductFamily, mockAubManager->mockAubManagerParams.productFamily);
+    EXPECT_EQ(platformDevices[0]->platform.eProductFamily, mockAubManager->mockAubManagerParams.productFamily);
     EXPECT_EQ(4, mockAubManager->mockAubManagerParams.devicesCount);
     EXPECT_EQ(8 * MB, mockAubManager->mockAubManagerParams.memoryBankSize);
     EXPECT_EQ(true, mockAubManager->mockAubManagerParams.localMemorySupported);
@@ -128,12 +128,12 @@ TEST(AubCenter, GivenAubCenterInSubCaptureModeWhenItIsCreatedWithoutDebugFilterS
     DebugManager.flags.AUBDumpSubCaptureMode.set(static_cast<int32_t>(AubSubCaptureManager::SubCaptureMode::Filter));
 
     MockAubCenter aubCenter(platformDevices[0], false, "", CommandStreamReceiverType::CSR_AUB);
-    auto subCaptureManager = aubCenter.getSubCaptureManager();
-    EXPECT_NE(nullptr, subCaptureManager);
+    auto subCaptureCommon = aubCenter.getSubCaptureCommon();
+    EXPECT_NE(nullptr, subCaptureCommon);
 
-    EXPECT_EQ(0u, subCaptureManager->subCaptureFilter.dumpKernelStartIdx);
-    EXPECT_EQ(static_cast<uint32_t>(-1), subCaptureManager->subCaptureFilter.dumpKernelEndIdx);
-    EXPECT_STREQ("", subCaptureManager->subCaptureFilter.dumpKernelName.c_str());
+    EXPECT_EQ(0u, subCaptureCommon->subCaptureFilter.dumpKernelStartIdx);
+    EXPECT_EQ(static_cast<uint32_t>(-1), subCaptureCommon->subCaptureFilter.dumpKernelEndIdx);
+    EXPECT_STREQ("", subCaptureCommon->subCaptureFilter.dumpKernelName.c_str());
 }
 
 TEST(AubCenter, GivenAubCenterInSubCaptureModeWhenItIsCreatedWithDebugFilterSettingsThenItInitializesSubCaptureFiltersWithDebugFilterSettings) {
@@ -144,10 +144,10 @@ TEST(AubCenter, GivenAubCenterInSubCaptureModeWhenItIsCreatedWithDebugFilterSett
     DebugManager.flags.AUBDumpFilterKernelName.set("kernel_name");
 
     MockAubCenter aubCenter(platformDevices[0], false, "", CommandStreamReceiverType::CSR_AUB);
-    auto subCaptureManager = aubCenter.getSubCaptureManager();
-    EXPECT_NE(nullptr, subCaptureManager);
+    auto subCaptureCommon = aubCenter.getSubCaptureCommon();
+    EXPECT_NE(nullptr, subCaptureCommon);
 
-    EXPECT_EQ(static_cast<uint32_t>(DebugManager.flags.AUBDumpFilterKernelStartIdx.get()), subCaptureManager->subCaptureFilter.dumpKernelStartIdx);
-    EXPECT_EQ(static_cast<uint32_t>(DebugManager.flags.AUBDumpFilterKernelEndIdx.get()), subCaptureManager->subCaptureFilter.dumpKernelEndIdx);
-    EXPECT_STREQ(DebugManager.flags.AUBDumpFilterKernelName.get().c_str(), subCaptureManager->subCaptureFilter.dumpKernelName.c_str());
+    EXPECT_EQ(static_cast<uint32_t>(DebugManager.flags.AUBDumpFilterKernelStartIdx.get()), subCaptureCommon->subCaptureFilter.dumpKernelStartIdx);
+    EXPECT_EQ(static_cast<uint32_t>(DebugManager.flags.AUBDumpFilterKernelEndIdx.get()), subCaptureCommon->subCaptureFilter.dumpKernelEndIdx);
+    EXPECT_STREQ(DebugManager.flags.AUBDumpFilterKernelName.get().c_str(), subCaptureCommon->subCaptureFilter.dumpKernelName.c_str());
 }

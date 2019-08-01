@@ -32,17 +32,21 @@ struct PreambleHelper {
     static void programThreadArbitration(LinearStream *pCommandStream, uint32_t requiredThreadArbitrationPolicy);
     static void programPreemption(LinearStream *pCommandStream, Device &device, GraphicsAllocation *preemptionCsr);
     static void addPipeControlBeforeVfeCmd(LinearStream *pCommandStream, const HardwareInfo *hwInfo);
-    static void programVFEState(LinearStream *pCommandStream, const HardwareInfo &hwInfo, int scratchSize, uint64_t scratchAddress);
+    static void programVFEState(LinearStream *pCommandStream,
+                                const HardwareInfo &hwInfo,
+                                int scratchSize,
+                                uint64_t scratchAddress,
+                                uint32_t maxFrontEndThreads);
     static void programPreamble(LinearStream *pCommandStream, Device &device, uint32_t l3Config,
                                 uint32_t requiredThreadArbitrationPolicy, GraphicsAllocation *preemptionCsr);
     static void programKernelDebugging(LinearStream *pCommandStream);
     static uint32_t getL3Config(const HardwareInfo &hwInfo, bool useSLM);
     static size_t getAdditionalCommandsSize(const Device &device);
     static size_t getThreadArbitrationCommandsSize();
+    static size_t getVFECommandsSize();
     static size_t getKernelDebuggingCommandsSize(bool debuggingActive);
     static void programGenSpecificPreambleWorkArounds(LinearStream *pCommandStream, const HardwareInfo &hwInfo);
     static uint32_t getUrbEntryAllocationSize();
-    static uint32_t getMaxThreadsForVfe(const HardwareInfo &hwInfo);
 };
 
 template <PRODUCT_FAMILY ProductFamily>

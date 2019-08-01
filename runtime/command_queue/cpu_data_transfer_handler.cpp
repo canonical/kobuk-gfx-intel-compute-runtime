@@ -51,7 +51,7 @@ void *CommandQueue::cpuDataTransferHandler(TransferProperties &transferPropertie
         *eventsRequest.outEvent = outEventObj;
     }
 
-    auto commandStreamReceieverOwnership = getCommandStreamReceiver().obtainUniqueOwnership();
+    auto commandStreamReceieverOwnership = getGpgpuCommandStreamReceiver().obtainUniqueOwnership();
     TakeOwnershipWrapper<CommandQueue> queueOwnership(*this);
 
     auto blockQueue = false;
@@ -125,6 +125,7 @@ void *CommandQueue::cpuDataTransferHandler(TransferProperties &transferPropertie
             if (!unmapInfo.readOnly) {
                 auto graphicsAllocation = transferProperties.memObj->getGraphicsAllocation();
                 graphicsAllocation->setAubWritable(true);
+                graphicsAllocation->setTbxWritable(true);
             }
             break;
         case CL_COMMAND_READ_BUFFER:
@@ -144,7 +145,7 @@ void *CommandQueue::cpuDataTransferHandler(TransferProperties &transferPropertie
         if (outEventObj) {
             outEventObj->setEndTimeStamp();
             outEventObj->updateTaskCount(this->taskCount);
-            outEventObj->flushStamp->setStamp(this->flushStamp->peekStamp());
+            outEventObj->flushStamp->replaceStampObject(this->flushStamp->getStampReference());
             if (eventCompleted) {
                 outEventObj->setStatus(CL_COMPLETE);
             } else {
@@ -163,31 +164,23 @@ void *CommandQueue::cpuDataTransferHandler(TransferProperties &transferPropertie
 void CommandQueue::providePerformanceHint(TransferProperties &transferProperties) {
     switch (transferProperties.cmdType) {
     case CL_COMMAND_MAP_BUFFER:
-        if (!transferProperties.memObj->isMemObjZeroCopy()) {
-            context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, CL_ENQUEUE_MAP_BUFFER_REQUIRES_COPY_DATA, static_cast<cl_mem>(transferProperties.memObj));
-            break;
-        }
-        context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_GOOD_INTEL, CL_ENQUEUE_MAP_BUFFER_DOESNT_REQUIRE_COPY_DATA, static_cast<cl_mem>(transferProperties.memObj));
-        break;
     case CL_COMMAND_MAP_IMAGE:
-        if (!transferProperties.memObj->isMemObjZeroCopy()) {
-            context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, CL_ENQUEUE_MAP_IMAGE_REQUIRES_COPY_DATA, static_cast<cl_mem>(transferProperties.memObj));
-            break;
-        }
-        context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_GOOD_INTEL, CL_ENQUEUE_MAP_IMAGE_DOESNT_REQUIRE_COPY_DATA, static_cast<cl_mem>(transferProperties.memObj));
+        context->providePerformanceHintForMemoryTransfer(transferProperties.cmdType, !transferProperties.memObj->isMemObjZeroCopy(),
+                                                         static_cast<cl_mem>(transferProperties.memObj));
         break;
     case CL_COMMAND_UNMAP_MEM_OBJECT:
         if (!transferProperties.memObj->isMemObjZeroCopy()) {
-            context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, CL_ENQUEUE_UNMAP_MEM_OBJ_REQUIRES_COPY_DATA, transferProperties.ptr, static_cast<cl_mem>(transferProperties.memObj));
+            context->providePerformanceHintForMemoryTransfer(transferProperties.cmdType, true,
+                                                             transferProperties.ptr, static_cast<cl_mem>(transferProperties.memObj));
             break;
         }
-        context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_GOOD_INTEL, CL_ENQUEUE_UNMAP_MEM_OBJ_DOESNT_REQUIRE_COPY_DATA, transferProperties.ptr);
+        context->providePerformanceHintForMemoryTransfer(transferProperties.cmdType, false, transferProperties.ptr);
         break;
     case CL_COMMAND_READ_BUFFER:
-        context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, CL_ENQUEUE_READ_BUFFER_REQUIRES_COPY_DATA, static_cast<cl_mem>(transferProperties.memObj), transferProperties.ptr);
-        break;
     case CL_COMMAND_WRITE_BUFFER:
-        context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, CL_ENQUEUE_WRITE_BUFFER_REQUIRES_COPY_DATA, static_cast<cl_mem>(transferProperties.memObj), transferProperties.ptr);
+        context->providePerformanceHintForMemoryTransfer(transferProperties.cmdType, true,
+                                                         static_cast<cl_mem>(transferProperties.memObj), transferProperties.ptr);
+        break;
     }
 }
 } // namespace NEO

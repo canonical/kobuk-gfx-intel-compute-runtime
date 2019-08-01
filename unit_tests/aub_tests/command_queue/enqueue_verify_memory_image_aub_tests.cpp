@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/api/api.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "test.h"
@@ -121,12 +121,12 @@ HWTEST_P(VerifyMemoryImageHw, givenDifferentImagesWhenValidatingMemoryThenSucces
                     std::swap(validData, invalidData);
                 }
 
-                retVal = clEnqueueVerifyMemory(pCmdQ, &pImageData[x * elementSize], validData, elementSize, CL_MEM_COMPARE_EQUAL);
+                retVal = clEnqueueVerifyMemoryINTEL(pCmdQ, &pImageData[x * elementSize], validData, elementSize, CL_MEM_COMPARE_EQUAL);
                 EXPECT_EQ(CL_SUCCESS, retVal);
 
                 if (UnitTestHelper<FamilyType>::isExpectMemoryNotEqualSupported()) {
-                    retVal = clEnqueueVerifyMemory(pCmdQ, &pImageData[x * elementSize], invalidData, elementSize,
-                                                   CL_MEM_COMPARE_NOT_EQUAL);
+                    retVal = clEnqueueVerifyMemoryINTEL(pCmdQ, &pImageData[x * elementSize], invalidData, elementSize,
+                                                        CL_MEM_COMPARE_NOT_EQUAL);
                     EXPECT_EQ(CL_SUCCESS, retVal);
                 }
             }

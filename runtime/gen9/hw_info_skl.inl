@@ -54,6 +54,7 @@ const RuntimeCapabilityTable SKL::capabilityTable{
     CmdServicesMemTraceVersion::DeviceValues::Skl, // aubDeviceId
     0,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
+    false,                                         // blitterOperationsSupported
     true,                                          // ftrSupportsFP64
     true,                                          // ftrSupports64BitMath
     true,                                          // ftrSvm
@@ -68,18 +69,72 @@ const RuntimeCapabilityTable SKL::capabilityTable{
     true,                                          // isCore
     true,                                          // sourceLevelDebuggerSupported
     true,                                          // supportsVme
-    false                                          // supportCacheFlushAfterWalker
+    false,                                         // supportCacheFlushAfterWalker
+    true                                           // supportsImages
 };
+WorkaroundTable SKL::workaroundTable = {};
+FeatureTable SKL::featureTable = {};
+void SKL::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo) {
+    FeatureTable *featureTable = &hwInfo->featureTable;
+    WorkaroundTable *workaroundTable = &hwInfo->workaroundTable;
 
+    featureTable->ftrGpGpuMidBatchPreempt = true;
+    featureTable->ftrGpGpuThreadGroupLevelPreempt = true;
+    featureTable->ftrL3IACoherency = true;
+    featureTable->ftrGpGpuMidThreadLevelPreempt = true;
+    featureTable->ftr3dMidBatchPreempt = true;
+    featureTable->ftr3dObjectLevelPreempt = true;
+    featureTable->ftrPerCtxtPreemptionGranularityControl = true;
+    featureTable->ftrPPGTT = true;
+    featureTable->ftrSVM = true;
+    featureTable->ftrIA32eGfxPTEs = true;
+    featureTable->ftrDisplayYTiling = true;
+    featureTable->ftrTranslationTable = true;
+    featureTable->ftrUserModeTranslationTable = true;
+    featureTable->ftrEnableGuC = true;
+    featureTable->ftrFbc = true;
+    featureTable->ftrFbc2AddressTranslation = true;
+    featureTable->ftrFbcBlitterTracking = true;
+    featureTable->ftrFbcCpuTracking = true;
+    featureTable->ftrVcs2 = featureTable->ftrGT3 || featureTable->ftrGT4;
+    featureTable->ftrVEBOX = true;
+    featureTable->ftrSingleVeboxSlice = featureTable->ftrGT1 || featureTable->ftrGT2;
+    featureTable->ftrTileY = true;
+
+    workaroundTable->waEnablePreemptionGranularityControlByUMD = true;
+    workaroundTable->waSendMIFLUSHBeforeVFE = true;
+    workaroundTable->waReportPerfCountUseGlobalContextID = true;
+    workaroundTable->waDisableLSQCROPERFforOCL = true;
+    workaroundTable->waMsaa8xTileYDepthPitchAlignment = true;
+    workaroundTable->waLosslessCompressionSurfaceStride = true;
+    workaroundTable->waFbcLinearSurfaceStride = true;
+    workaroundTable->wa4kAlignUVOffsetNV12LinearSurface = true;
+    workaroundTable->waEncryptedEdramOnlyPartials = true;
+    workaroundTable->waDisableEdramForDisplayRT = true;
+    workaroundTable->waForcePcBbFullCfgRestore = true;
+    workaroundTable->waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
+
+    if ((1 << hwInfo->platform.usRevId) & 0x0eu) {
+        workaroundTable->waCompressedResourceRequiresConstVA21 = true;
+    }
+    if ((1 << hwInfo->platform.usRevId) & 0x0fu) {
+        workaroundTable->waDisablePerCtxtPreemptionGranularityControl = true;
+        workaroundTable->waModifyVFEStateAfterGPGPUPreemption = true;
+    }
+    if ((1 << hwInfo->platform.usRevId) & 0x3f) {
+        workaroundTable->waCSRUncachable = true;
+    }
+}
 const HardwareInfo SKL_1x2x6::hwInfo = {
     &SKL::platform,
-    &emptySkuTable,
-    &emptyWaTable,
+    &SKL::featureTable,
+    &SKL::workaroundTable,
     &SKL_1x2x6::gtSystemInfo,
     SKL::capabilityTable,
 };
 GT_SYSTEM_INFO SKL_1x2x6::gtSystemInfo = {0};
-void SKL_1x2x6::setupHardwareInfo(GT_SYSTEM_INFO *gtSysInfo, FeatureTable *featureTable, bool setupFeatureTable) {
+void SKL_1x2x6::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable) {
+    GT_SYSTEM_INFO *gtSysInfo = &hwInfo->gtSystemInfo;
     gtSysInfo->EUCount = 11;
     gtSysInfo->ThreadCount = 11 * SKL::threadsPerEu;
     gtSysInfo->SliceCount = 1;
@@ -98,17 +153,21 @@ void SKL_1x2x6::setupHardwareInfo(GT_SYSTEM_INFO *gtSysInfo, FeatureTable *featu
     gtSysInfo->MaxSubSlicesSupported = SKL::maxSubslicesSupported;
     gtSysInfo->IsL3HashModeEnabled = false;
     gtSysInfo->IsDynamicallyPopulated = false;
+    if (setupFeatureTableAndWorkaroundTable) {
+        setupFeatureAndWorkaroundTable(hwInfo);
+    }
 };
 
 const HardwareInfo SKL_1x3x6::hwInfo = {
     &SKL::platform,
-    &emptySkuTable,
-    &emptyWaTable,
+    &SKL::featureTable,
+    &SKL::workaroundTable,
     &SKL_1x3x6::gtSystemInfo,
     SKL::capabilityTable,
 };
 GT_SYSTEM_INFO SKL_1x3x6::gtSystemInfo = {0};
-void SKL_1x3x6::setupHardwareInfo(GT_SYSTEM_INFO *gtSysInfo, FeatureTable *featureTable, bool setupFeatureTable) {
+void SKL_1x3x6::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable) {
+    GT_SYSTEM_INFO *gtSysInfo = &hwInfo->gtSystemInfo;
     gtSysInfo->EUCount = 17;
     gtSysInfo->ThreadCount = 17 * SKL::threadsPerEu;
     gtSysInfo->SliceCount = 1;
@@ -127,17 +186,21 @@ void SKL_1x3x6::setupHardwareInfo(GT_SYSTEM_INFO *gtSysInfo, FeatureTable *featu
     gtSysInfo->MaxSubSlicesSupported = SKL::maxSubslicesSupported;
     gtSysInfo->IsL3HashModeEnabled = false;
     gtSysInfo->IsDynamicallyPopulated = false;
+    if (setupFeatureTableAndWorkaroundTable) {
+        setupFeatureAndWorkaroundTable(hwInfo);
+    }
 };
 
 const HardwareInfo SKL_1x3x8::hwInfo = {
     &SKL::platform,
-    &emptySkuTable,
-    &emptyWaTable,
+    &SKL::featureTable,
+    &SKL::workaroundTable,
     &SKL_1x3x8::gtSystemInfo,
     SKL::capabilityTable,
 };
 GT_SYSTEM_INFO SKL_1x3x8::gtSystemInfo = {0};
-void SKL_1x3x8::setupHardwareInfo(GT_SYSTEM_INFO *gtSysInfo, FeatureTable *featureTable, bool setupFeatureTable) {
+void SKL_1x3x8::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable) {
+    GT_SYSTEM_INFO *gtSysInfo = &hwInfo->gtSystemInfo;
     gtSysInfo->EUCount = 23;
     gtSysInfo->ThreadCount = 23 * SKL::threadsPerEu;
     gtSysInfo->SliceCount = 1;
@@ -156,17 +219,21 @@ void SKL_1x3x8::setupHardwareInfo(GT_SYSTEM_INFO *gtSysInfo, FeatureTable *featu
     gtSysInfo->MaxSubSlicesSupported = SKL::maxSubslicesSupported;
     gtSysInfo->IsL3HashModeEnabled = false;
     gtSysInfo->IsDynamicallyPopulated = false;
+    if (setupFeatureTableAndWorkaroundTable) {
+        setupFeatureAndWorkaroundTable(hwInfo);
+    }
 };
 
 const HardwareInfo SKL_2x3x8::hwInfo = {
     &SKL::platform,
-    &emptySkuTable,
-    &emptyWaTable,
+    &SKL::featureTable,
+    &SKL::workaroundTable,
     &SKL_2x3x8::gtSystemInfo,
     SKL::capabilityTable,
 };
 GT_SYSTEM_INFO SKL_2x3x8::gtSystemInfo = {0};
-void SKL_2x3x8::setupHardwareInfo(GT_SYSTEM_INFO *gtSysInfo, FeatureTable *featureTable, bool setupFeatureTable) {
+void SKL_2x3x8::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable) {
+    GT_SYSTEM_INFO *gtSysInfo = &hwInfo->gtSystemInfo;
     gtSysInfo->EUCount = 47;
     gtSysInfo->ThreadCount = 47 * SKL::threadsPerEu;
     gtSysInfo->SliceCount = 2;
@@ -185,17 +252,21 @@ void SKL_2x3x8::setupHardwareInfo(GT_SYSTEM_INFO *gtSysInfo, FeatureTable *featu
     gtSysInfo->MaxSubSlicesSupported = SKL::maxSubslicesSupported;
     gtSysInfo->IsL3HashModeEnabled = false;
     gtSysInfo->IsDynamicallyPopulated = false;
+    if (setupFeatureTableAndWorkaroundTable) {
+        setupFeatureAndWorkaroundTable(hwInfo);
+    }
 };
 
 const HardwareInfo SKL_3x3x8::hwInfo = {
     &SKL::platform,
-    &emptySkuTable,
-    &emptyWaTable,
+    &SKL::featureTable,
+    &SKL::workaroundTable,
     &SKL_3x3x8::gtSystemInfo,
     SKL::capabilityTable,
 };
 GT_SYSTEM_INFO SKL_3x3x8::gtSystemInfo = {0};
-void SKL_3x3x8::setupHardwareInfo(GT_SYSTEM_INFO *gtSysInfo, FeatureTable *featureTable, bool setupFeatureTable) {
+void SKL_3x3x8::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable) {
+    GT_SYSTEM_INFO *gtSysInfo = &hwInfo->gtSystemInfo;
     gtSysInfo->EUCount = 71;
     gtSysInfo->ThreadCount = 71 * SKL::threadsPerEu;
     gtSysInfo->SliceCount = 3;
@@ -214,28 +285,31 @@ void SKL_3x3x8::setupHardwareInfo(GT_SYSTEM_INFO *gtSysInfo, FeatureTable *featu
     gtSysInfo->MaxSubSlicesSupported = SKL::maxSubslicesSupported;
     gtSysInfo->IsL3HashModeEnabled = false;
     gtSysInfo->IsDynamicallyPopulated = false;
+    if (setupFeatureTableAndWorkaroundTable) {
+        setupFeatureAndWorkaroundTable(hwInfo);
+    }
 };
 
 const HardwareInfo SKL::hwInfo = SKL_1x3x8::hwInfo;
 
-void setupSKLHardwareInfoImpl(GT_SYSTEM_INFO *gtSysInfo, FeatureTable *featureTable, bool setupFeatureTable, const std::string &hwInfoConfig) {
+void setupSKLHardwareInfoImpl(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable, const std::string &hwInfoConfig) {
     if (hwInfoConfig == "1x3x8") {
-        SKL_1x3x8::setupHardwareInfo(gtSysInfo, featureTable, setupFeatureTable);
+        SKL_1x3x8::setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable);
     } else if (hwInfoConfig == "2x3x8") {
-        SKL_2x3x8::setupHardwareInfo(gtSysInfo, featureTable, setupFeatureTable);
+        SKL_2x3x8::setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable);
     } else if (hwInfoConfig == "3x3x8") {
-        SKL_3x3x8::setupHardwareInfo(gtSysInfo, featureTable, setupFeatureTable);
+        SKL_3x3x8::setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable);
     } else if (hwInfoConfig == "1x2x6") {
-        SKL_1x2x6::setupHardwareInfo(gtSysInfo, featureTable, setupFeatureTable);
+        SKL_1x2x6::setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable);
     } else if (hwInfoConfig == "1x3x6") {
-        SKL_1x3x6::setupHardwareInfo(gtSysInfo, featureTable, setupFeatureTable);
+        SKL_1x3x6::setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable);
     } else if (hwInfoConfig == "default") {
         // Default config
-        SKL_1x3x8::setupHardwareInfo(gtSysInfo, featureTable, setupFeatureTable);
+        SKL_1x3x8::setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable);
     } else {
         UNRECOVERABLE_IF(true);
     }
 }
 
-void (*SKL::setupHardwareInfo)(GT_SYSTEM_INFO *, FeatureTable *, bool, const std::string &) = setupSKLHardwareInfoImpl;
+void (*SKL::setupHardwareInfo)(HardwareInfo *, bool, const std::string &) = setupSKLHardwareInfoImpl;
 } // namespace NEO

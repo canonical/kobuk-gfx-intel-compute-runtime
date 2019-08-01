@@ -7,10 +7,11 @@
 
 #include "unit_tests/command_queue/enqueue_fixture.h"
 
-#include "runtime/helpers/ptr_math.h"
+#include "core/helpers/ptr_math.h"
 
 // clang-format off
 // EnqueueTraits
+using namespace NEO;
 cl_uint EnqueueTraits::numEventsInWaitList   = 0;
 const cl_event *EnqueueTraits::eventWaitList = nullptr;
 cl_event *EnqueueTraits::event               = nullptr;
@@ -77,11 +78,12 @@ cl_int *EnqueueMapBufferTraits::errcodeRet       = nullptr;
 cl_command_type EnqueueMapBufferTraits::cmdType = CL_COMMAND_MAP_BUFFER;
 
 // EnqueueReadBufferTraits
-const cl_bool EnqueueReadBufferTraits::blocking   = CL_TRUE;
-const size_t EnqueueReadBufferTraits::offset      = 0;
-const size_t EnqueueReadBufferTraits::sizeInBytes = negOne;
-void *EnqueueReadBufferTraits::hostPtr            = ptrOutput;
-cl_command_type EnqueueReadBufferTraits::cmdType = CL_COMMAND_READ_BUFFER;
+const cl_bool EnqueueReadBufferTraits::blocking             = CL_TRUE;
+const size_t EnqueueReadBufferTraits::offset                = 0;
+const size_t EnqueueReadBufferTraits::sizeInBytes           = negOne;
+void *EnqueueReadBufferTraits::hostPtr                      = ptrOutput;
+cl_command_type EnqueueReadBufferTraits::cmdType            = CL_COMMAND_READ_BUFFER;
+GraphicsAllocation *EnqueueReadBufferTraits::mapAllocation  = nullptr;
 
 // EnqueueReadImageTraits
 const cl_bool EnqueueReadImageTraits::blocking  = CL_TRUE;
@@ -91,14 +93,16 @@ const size_t EnqueueReadImageTraits::rowPitch   = 0;
 const size_t EnqueueReadImageTraits::slicePitch = 0;
 void *EnqueueReadImageTraits::hostPtr           = ptrOutput;
 cl_command_type EnqueueReadImageTraits::cmdType = CL_COMMAND_READ_IMAGE;
+GraphicsAllocation *EnqueueReadImageTraits::mapAllocation  = nullptr;
 
 // EnqueueWriteBufferTraits
-const bool EnqueueWriteBufferTraits::zeroCopy      = true;
-const cl_bool EnqueueWriteBufferTraits::blocking   = CL_TRUE;
-const size_t EnqueueWriteBufferTraits::offset      = 0;
-const size_t EnqueueWriteBufferTraits::sizeInBytes = negOne;
-void *EnqueueWriteBufferTraits::hostPtr            = ptrGarbage;
-cl_command_type EnqueueWriteBufferTraits::cmdType  = CL_COMMAND_WRITE_BUFFER;
+const bool EnqueueWriteBufferTraits::zeroCopy               = true;
+const cl_bool EnqueueWriteBufferTraits::blocking            = CL_TRUE;
+const size_t EnqueueWriteBufferTraits::offset               = 0;
+const size_t EnqueueWriteBufferTraits::sizeInBytes          = negOne;
+void *EnqueueWriteBufferTraits::hostPtr                     = ptrGarbage;
+cl_command_type EnqueueWriteBufferTraits::cmdType           = CL_COMMAND_WRITE_BUFFER;
+GraphicsAllocation *EnqueueWriteBufferTraits::mapAllocation = nullptr;
 
 // EnqueueWriteBufferRectTraits
 const bool EnqueueWriteBufferRectTraits::zeroCopy          = true;
@@ -121,4 +125,5 @@ const size_t EnqueueWriteImageTraits::rowPitch   = 0;
 const size_t EnqueueWriteImageTraits::slicePitch = 0;
 void *EnqueueWriteImageTraits::hostPtr           = ptrGarbage;
 cl_command_type EnqueueWriteImageTraits::cmdType = CL_COMMAND_WRITE_IMAGE;
+GraphicsAllocation *EnqueueWriteImageTraits::mapAllocation  = nullptr;
 // clang-format on

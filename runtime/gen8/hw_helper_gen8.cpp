@@ -5,11 +5,9 @@
  *
  */
 
-#include "runtime/aub/aub_helper.h"
-#include "runtime/aub/aub_helper.inl"
+#include "runtime/aub/aub_helper_bdw_plus.inl"
 #include "runtime/helpers/flat_batch_buffer_helper_hw.inl"
-#include "runtime/helpers/hw_helper.h"
-#include "runtime/helpers/hw_helper_common.inl"
+#include "runtime/helpers/hw_helper_bdw_plus.inl"
 #include "runtime/memory_manager/memory_constants.h"
 
 namespace NEO {
@@ -26,6 +24,11 @@ void HwHelperHw<Family>::setupHardwareCapabilities(HardwareCapabilities *caps, c
     caps->image3DMaxWidth = 2048;
     caps->maxMemAllocSize = 2 * MemoryConstants::gigaByte - 8 * MemoryConstants::megaByte;
     caps->isStatelesToStatefullWithOffsetSupported = false;
+}
+
+template <>
+typename Family::PIPE_CONTROL *PipeControlHelper<Family>::addPipeControl(LinearStream &commandStream, bool dcFlush) {
+    return PipeControlHelper<Family>::obtainPipeControl(commandStream, true);
 }
 
 template class AubHelperHw<Family>;

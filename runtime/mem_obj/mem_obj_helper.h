@@ -11,6 +11,7 @@
 #include "runtime/context/context_type.h"
 #include "runtime/mem_obj/mem_obj.h"
 #include "runtime/memory_manager/memory_manager.h"
+#include "runtime/memory_manager/unified_memory_manager.h"
 
 #include "CL/cl.h"
 #include "mem_obj_types.h"
@@ -87,11 +88,28 @@ class MemObjHelper {
         return validateExtraMemoryProperties(properties);
     }
 
-    static AllocationProperties getAllocationProperties(cl_mem_flags_intel flags, bool allocateMemory,
-                                                        size_t size, GraphicsAllocation::AllocationType type);
-    static AllocationProperties getAllocationProperties(ImageInfo *imgInfo, bool allocateMemory);
+    static AllocationProperties getAllocationProperties(MemoryProperties memoryProperties, bool allocateMemory,
+                                                        size_t size, GraphicsAllocation::AllocationType type, bool multiStorageResource) {
+        AllocationProperties allocationProperties(allocateMemory, size, type, multiStorageResource);
+        fillPoliciesInProperties(allocationProperties, memoryProperties);
+        return allocationProperties;
+    }
 
-    static StorageInfo getStorageInfo(const MemoryProperties &properties);
+    static AllocationProperties getAllocationProperties(ImageInfo &imgInfo, bool allocateMemory, const MemoryProperties &memoryProperties) {
+        AllocationProperties allocationProperties{allocateMemory, imgInfo, GraphicsAllocation::AllocationType::IMAGE};
+        fillPoliciesInProperties(allocationProperties, memoryProperties);
+        return allocationProperties;
+    }
+
+    static void fillPoliciesInProperties(AllocationProperties &allocationProperties, const MemoryProperties &memoryProperties);
+
+    static void fillCachePolicyInProperties(AllocationProperties &allocationProperties, bool uncached, bool readOnly,
+                                            bool deviceOnlyVisibilty) {
+        allocationProperties.flags.uncacheable = uncached;
+        auto cacheFlushRequired = !uncached && !readOnly && !deviceOnlyVisibilty;
+        allocationProperties.flags.flushL3RequiredForRead = cacheFlushRequired;
+        allocationProperties.flags.flushL3RequiredForWrite = cacheFlushRequired;
+    }
 
     static bool checkMemFlagsForSubBuffer(cl_mem_flags flags) {
         const cl_mem_flags allValidFlags =
@@ -99,6 +117,19 @@ class MemObjHelper {
             CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS;
 
         return isFieldValid(flags, allValidFlags);
+    }
+
+    static SVMAllocsManager::SvmAllocationProperties getSvmAllocationProperties(cl_mem_flags flags) {
+        SVMAllocsManager::SvmAllocationProperties svmProperties;
+        svmProperties.coherent = isValueSet(flags, CL_MEM_SVM_FINE_GRAIN_BUFFER);
+        svmProperties.hostPtrReadOnly = isValueSet(flags, CL_MEM_HOST_READ_ONLY) || isValueSet(flags, CL_MEM_HOST_NO_ACCESS);
+        svmProperties.readOnly = isValueSet(flags, CL_MEM_READ_ONLY);
+        return svmProperties;
+    }
+
+    static bool isLinearStorageForced(const MemoryProperties &memoryProperties) {
+        return isValueSet(memoryProperties.flags, CL_MEM_FORCE_LINEAR_STORAGE_INTEL) ||
+               isValueSet(memoryProperties.flags_intel, CL_MEM_FORCE_LINEAR_STORAGE_INTEL);
     }
 
     static bool isSuitableForRenderCompression(bool renderCompressed, const MemoryProperties &properties, ContextType contextType, bool preferCompression);

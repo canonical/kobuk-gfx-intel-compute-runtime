@@ -9,6 +9,7 @@
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/event/user_event.h"
 #include "runtime/kernel/kernel.h"
+#include "runtime/memory_manager/graphics_allocation.h"
 #include "unit_tests/fixtures/buffer_fixture.h"
 #include "unit_tests/fixtures/image_fixture.h"
 
@@ -390,6 +391,7 @@ struct EnqueueReadBufferTraits : public EnqueueTraits {
     static const size_t sizeInBytes;
     static void *hostPtr;
     static cl_command_type cmdType;
+    static NEO::GraphicsAllocation *mapAllocation;
 };
 
 template <typename T = EnqueueReadBufferTraits>
@@ -404,6 +406,7 @@ struct EnqueueReadBufferHelper {
                                     size_t offset = Traits::offset,
                                     size_t size = Traits::sizeInBytes,
                                     void *ptr = Traits::hostPtr,
+                                    NEO::GraphicsAllocation *mapAllocation = Traits::mapAllocation,
                                     cl_uint numEventsInWaitList = Traits::numEventsInWaitList,
                                     const cl_event *eventWaitList = Traits::eventWaitList,
                                     cl_event *event = Traits::event) {
@@ -415,6 +418,7 @@ struct EnqueueReadBufferHelper {
                                                  offset,
                                                  size,
                                                  ptr,
+                                                 mapAllocation,
                                                  numEventsInWaitList,
                                                  eventWaitList,
                                                  event);
@@ -438,6 +442,7 @@ struct EnqueueReadImageTraits : public EnqueueTraits {
     static const size_t slicePitch;
     static void *hostPtr;
     static cl_command_type cmdType;
+    static NEO::GraphicsAllocation *mapAllocation;
 };
 
 template <typename T = EnqueueReadImageTraits>
@@ -454,6 +459,7 @@ struct EnqueueReadImageHelper {
                                    size_t rowPitch = Traits::rowPitch,
                                    size_t slicePitch = Traits::slicePitch,
                                    void *ptr = Traits::hostPtr,
+                                   NEO::GraphicsAllocation *mapAllocation = Traits::mapAllocation,
                                    cl_uint numEventsInWaitList = Traits::numEventsInWaitList,
                                    const cl_event *eventWaitList = Traits::eventWaitList,
                                    cl_event *event = Traits::event) {
@@ -473,6 +479,7 @@ struct EnqueueReadImageHelper {
                                        rowPitch,
                                        slicePitch,
                                        ptr,
+                                       mapAllocation,
                                        numEventsInWaitList,
                                        eventWaitList,
                                        event);
@@ -490,6 +497,7 @@ struct EnqueueWriteBufferTraits : public EnqueueTraits {
     static const size_t sizeInBytes;
     static void *hostPtr;
     static cl_command_type cmdType;
+    static NEO::GraphicsAllocation *mapAllocation;
 };
 
 template <typename T = EnqueueWriteBufferTraits>
@@ -504,6 +512,7 @@ struct EnqueueWriteBufferHelper {
                                      size_t offset = Traits::offset,
                                      size_t size = Traits::sizeInBytes,
                                      void *ptr = Traits::hostPtr,
+                                     NEO::GraphicsAllocation *mapAllocation = Traits::mapAllocation,
                                      cl_uint numEventsInWaitList = Traits::numEventsInWaitList,
                                      const cl_event *eventWaitList = Traits::eventWaitList,
                                      cl_event *event = Traits::event) {
@@ -515,6 +524,7 @@ struct EnqueueWriteBufferHelper {
                                                   offset,
                                                   size,
                                                   ptr,
+                                                  mapAllocation,
                                                   numEventsInWaitList,
                                                   eventWaitList,
                                                   event);
@@ -594,6 +604,7 @@ struct EnqueueWriteImageTraits : public EnqueueTraits {
     static const size_t slicePitch;
     static void *hostPtr;
     static cl_command_type cmdType;
+    static NEO::GraphicsAllocation *mapAllocation;
 };
 
 template <typename T = EnqueueWriteImageTraits>
@@ -610,6 +621,7 @@ struct EnqueueWriteImageHelper {
                                     size_t rowPitch = Traits::rowPitch,
                                     size_t slicePitch = Traits::slicePitch,
                                     const void *ptr = Traits::hostPtr,
+                                    NEO::GraphicsAllocation *mapAllocation = Traits::mapAllocation,
                                     cl_uint numEventsInWaitList = Traits::numEventsInWaitList,
                                     const cl_event *eventWaitList = Traits::eventWaitList,
                                     cl_event *event = Traits::event) {
@@ -629,6 +641,7 @@ struct EnqueueWriteImageHelper {
                                         rowPitch,
                                         slicePitch,
                                         ptr,
+                                        mapAllocation,
                                         numEventsInWaitList,
                                         eventWaitList,
                                         event);

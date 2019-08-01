@@ -29,6 +29,9 @@ void MockMemoryManager::overrideAsyncDeleterFlag(bool newValue) {
 }
 
 void *MockMemoryManager::allocateSystemMemory(size_t size, size_t alignment) {
+    if (failAllocateSystemMemory) {
+        return nullptr;
+    }
     return OsAgnosticMemoryManager::allocateSystemMemory(redundancyRatio * size, alignment);
 }
 
@@ -72,6 +75,9 @@ GraphicsAllocation *MockMemoryManager::allocateGraphicsMemoryInDevicePool(const 
     auto allocation = OsAgnosticMemoryManager::allocateGraphicsMemoryInDevicePool(allocationData, status);
     if (allocation) {
         allocationInDevicePoolCreated = true;
+        if (localMemorySupported) {
+            static_cast<MemoryAllocation *>(allocation)->overrideMemoryPool(MemoryPool::LocalMemory);
+        }
     }
     return allocation;
 }
@@ -87,11 +93,17 @@ GraphicsAllocation *MockMemoryManager::allocateGraphicsMemoryWithAlignment(const
 GraphicsAllocation *MockMemoryManager::allocate32BitGraphicsMemory(size_t size, const void *ptr, GraphicsAllocation::AllocationType allocationType) {
     bool allocateMemory = ptr == nullptr;
     AllocationData allocationData;
-    getAllocationData(allocationData, MockAllocationProperties(allocateMemory, size, allocationType), {}, ptr);
+    MockAllocationProperties properties(allocateMemory, size, allocationType);
+    getAllocationData(allocationData, properties, ptr, createStorageInfoFromProperties(properties));
     return allocate32BitGraphicsMemoryImpl(allocationData);
 }
 
-FailMemoryManager::FailMemoryManager(int32_t failedAllocationsCount) {
+FailMemoryManager::FailMemoryManager(int32_t failedAllocationsCount, ExecutionEnvironment &executionEnvironment) : MockMemoryManager(executionEnvironment) {
+    this->failedAllocationsCount = failedAllocationsCount;
+}
+
+FailMemoryManager::FailMemoryManager(int32_t failedAllocationsCount, ExecutionEnvironment &executionEnvironment, bool enableLocalMemory)
+    : MockMemoryManager(enableLocalMemory, executionEnvironment) {
     this->failedAllocationsCount = failedAllocationsCount;
 }
 

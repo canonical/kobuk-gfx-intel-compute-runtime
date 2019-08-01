@@ -54,7 +54,7 @@ class Wddm {
     virtual ~Wddm();
 
     static Wddm *createWddm();
-    bool enumAdapters(HardwareInfo &outHardwareInfo);
+    bool init(HardwareInfo &outHardwareInfo);
 
     MOCKABLE_VIRTUAL bool evict(const D3DKMT_HANDLE *handleList, uint32_t numOfHandles, uint64_t &sizeToTrim);
     MOCKABLE_VIRTUAL bool makeResident(const D3DKMT_HANDLE *handles, uint32_t count, bool cantTrimFurther, uint64_t *numberOfBytesToTrim);
@@ -92,12 +92,6 @@ class Wddm {
 
     bool configureDeviceAddressSpace();
 
-    bool init(PreemptionMode preemptionMode);
-
-    bool isInitialized() const {
-        return initialized;
-    }
-
     GT_SYSTEM_INFO *getGtSysInfo() const {
         DEBUG_BREAK_IF(!gtSystemInfo);
         return gtSystemInfo.get();
@@ -129,9 +123,6 @@ class Wddm {
         return static_cast<uint32_t>(hwContextId);
     }
 
-    uint64_t getExternalHeapBase() const;
-    uint64_t getExternalHeapSize() const;
-
     std::unique_ptr<SettingsReader> registryReader;
 
     GmmPageTableMngr *getPageTableManager() const { return pageTableManager.get(); }
@@ -154,9 +145,12 @@ class Wddm {
     MOCKABLE_VIRTUAL void applyBlockingMakeResident(const D3DKMT_HANDLE &handle);
     MOCKABLE_VIRTUAL std::unique_lock<SpinLock> acquireLock(SpinLock &lock);
     MOCKABLE_VIRTUAL void removeTemporaryResource(const D3DKMT_HANDLE &handle);
+    void updatePagingFenceValue(uint64_t newPagingFenceValue);
+    GmmMemory *getGmmMemory() const {
+        return gmmMemory.get();
+    }
 
   protected:
-    bool initialized = false;
     std::unique_ptr<Gdi> gdi;
     D3DKMT_HANDLE adapter = 0;
     D3DKMT_HANDLE device = 0;
@@ -170,7 +164,7 @@ class Wddm {
     std::unique_ptr<PLATFORM> gfxPlatform;
     std::unique_ptr<GT_SYSTEM_INFO> gtSystemInfo;
     std::unique_ptr<FeatureTable> featureTable;
-    std::unique_ptr<WorkaroundTable> waTable;
+    std::unique_ptr<WorkaroundTable> workaroundTable;
     GMM_GFX_PARTITIONING gfxPartition;
     uint64_t systemSharedMemory = 0;
     uint32_t maxRenderFrequency = 0;
@@ -193,6 +187,7 @@ class Wddm {
     bool closeAdapter();
     void getDeviceState();
     void handleCompletion(OsContextWin &osContext);
+    bool configureDeviceAddressSpaceImpl();
 
     static CreateDXGIFactoryFcn createDxgiFactory;
     static GetSystemInfoFcn getSystemInfo;

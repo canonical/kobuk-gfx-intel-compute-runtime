@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "unit_tests/command_queue/enqueue_fixture.h"
 #include "unit_tests/fixtures/hello_world_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_csr.h"
@@ -294,7 +294,7 @@ TEST_F(EnqueueKernelTest, GivenKernelWithBuiltinDispatchInfoBuilderWhenBeingDisp
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueKernelTest, givenSecondEnqueueWithTheSameScratchRequirementWhenPreemptionIsEnabledThenDontProgramMVSAgain) {
     typedef typename FamilyType::MEDIA_VFE_STATE MEDIA_VFE_STATE;
     pDevice->setPreemptionMode(PreemptionMode::ThreadGroup);
-    auto &csr = pDevice->getCommandStreamReceiver();
+    auto &csr = pDevice->getGpgpuCommandStreamReceiver();
     csr.getMemoryManager()->setForce32BitAllocations(false);
     HardwareParse hwParser;
     size_t off[3] = {0, 0, 0};
@@ -334,11 +334,32 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueKernelTest, givenSecondEnqueueWithTheSameScra
     EXPECT_EQ(csr.getScratchAllocation(), scratchAlloc);
 }
 
+HWTEST_F(EnqueueKernelTest, whenEnqueueingKernelThatRequirePrivateScratchThenPrivateScratchIsSetInCommandStreamReceviver) {
+    pDevice->setPreemptionMode(PreemptionMode::ThreadGroup);
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    csr.getMemoryManager()->setForce32BitAllocations(false);
+    size_t off[3] = {0, 0, 0};
+    size_t gws[3] = {1, 1, 1};
+
+    SPatchMediaVFEState mediaVFEstate;
+    uint32_t privateScratchSize = 4096u;
+
+    mediaVFEstate.PerThreadScratchSpace = privateScratchSize;
+
+    MockKernelWithInternals mockKernel(*pDevice);
+    mockKernel.kernelInfo.patchInfo.mediaVfeStateSlot1 = &mediaVFEstate;
+
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+
+    EXPECT_EQ(privateScratchSize, csr.requiredPrivateScratchSize);
+}
+
 HWTEST_F(EnqueueKernelTest, givenEnqueueWithGlobalWorkSizeWhenZeroValueIsPassedInDimensionThenTheKernelCommandWillTriviallySucceed) {
     size_t gws[3] = {0, 0, 0};
     MockKernelWithInternals mockKernel(*pDevice);
     auto ret = pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(CL_SUCCESS, ret);
+    auto expected = (pDevice->getEnabledClVersion() < 21 ? CL_INVALID_GLOBAL_WORK_SIZE : CL_SUCCESS);
+    EXPECT_EQ(expected, ret);
 }
 
 HWTEST_F(EnqueueKernelTest, givenCommandStreamReceiverInBatchingModeWhenEnqueueKernelIsCalledThenKernelIsRecorded) {
@@ -369,14 +390,14 @@ HWTEST_F(EnqueueKernelTest, givenReducedAddressSpaceGraphicsAllocationForHostPtr
     std::unique_ptr<MockDevice> device;
     std::unique_ptr<CommandQueue> cmdQ;
     auto hwInfoToModify = *platformDevices[0];
-    hwInfoToModify.capabilityTable.gpuAddressSpace = MemoryConstants::max32BitAddress;
+    hwInfoToModify.capabilityTable.gpuAddressSpace = MemoryConstants::max36BitAddress;
     device.reset(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfoToModify));
     auto mockCsr = new MockCsrHw2<FamilyType>(*device->executionEnvironment);
     device->resetCommandStreamReceiver(mockCsr);
     auto memoryManager = mockCsr->getMemoryManager();
     uint32_t hostPtr[10]{};
 
-    AllocationProperties properties{false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR};
+    AllocationProperties properties{false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = true;
     auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
     MockKernelWithInternals mockKernel(*device, context);
@@ -393,14 +414,14 @@ HWTEST_F(EnqueueKernelTest, givenReducedAddressSpaceGraphicsAllocationForHostPtr
     std::unique_ptr<MockDevice> device;
     std::unique_ptr<CommandQueue> cmdQ;
     auto hwInfoToModify = *platformDevices[0];
-    hwInfoToModify.capabilityTable.gpuAddressSpace = MemoryConstants::max32BitAddress;
+    hwInfoToModify.capabilityTable.gpuAddressSpace = MemoryConstants::max36BitAddress;
     device.reset(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfoToModify));
     auto mockCsr = new MockCsrHw2<FamilyType>(*device->executionEnvironment);
     device->resetCommandStreamReceiver(mockCsr);
     auto memoryManager = mockCsr->getMemoryManager();
     uint32_t hostPtr[10]{};
 
-    AllocationProperties properties{false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR};
+    AllocationProperties properties{false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = false;
     auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
     MockKernelWithInternals mockKernel(*device, context);
@@ -425,7 +446,7 @@ HWTEST_F(EnqueueKernelTest, givenFullAddressSpaceGraphicsAllocationWhenEnqueueKe
     auto memoryManager = mockCsr->getMemoryManager();
     uint32_t hostPtr[10]{};
 
-    AllocationProperties properties{false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR};
+    AllocationProperties properties{false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = false;
     auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
     MockKernelWithInternals mockKernel(*device, context);
@@ -634,6 +655,24 @@ HWTEST_F(EnqueueKernelTest, givenCsrInBatchingModeWhenCommandIsFlushedThenFlushS
     EXPECT_EQ(1u, pCmdQ->flushStamp->peekStamp());
 
     status = clReleaseEvent(event);
+}
+
+HWTEST_F(EnqueueKernelTest, givenCsrInBatchingModeWhenNonBlockingMapFollowsNdrCallThenFlushStampIsUpdatedProperly) {
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
+    pDevice->resetCommandStreamReceiver(mockCsr);
+
+    EXPECT_TRUE(this->destBuffer->isMemObjZeroCopy());
+    MockKernelWithInternals mockKernel(*pDevice);
+    size_t gws[3] = {1, 0, 0};
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    cl_event event;
+    pCmdQ->enqueueMapBuffer(this->destBuffer, false, CL_MAP_READ, 0u, 1u, 0, nullptr, &event, this->retVal);
+
+    pCmdQ->flush();
+    auto neoEvent = castToObject<Event>(event);
+    EXPECT_EQ(1u, neoEvent->flushStamp->peekStamp());
+    clReleaseEvent(event);
 }
 
 HWTEST_F(EnqueueKernelTest, givenCsrInBatchingModeWhenCommandWithEventIsFollowedByCommandWithoutEventThenFlushStampIsUpdatedInCommandQueueCsrAndEvent) {

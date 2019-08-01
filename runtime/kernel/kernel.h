@@ -6,6 +6,7 @@
  */
 
 #pragma once
+#include "core/unified_memory/unified_memory.h"
 #include "runtime/api/cl_types.h"
 #include "runtime/command_stream/thread_arbitration_policy.h"
 #include "runtime/device_queue/device_queue.h"
@@ -126,8 +127,8 @@ class Kernel : public BaseObject<_cl_kernel> {
     cl_int setArgSvm(uint32_t argIndex, size_t svmAllocSize, void *svmPtr, GraphicsAllocation *svmAlloc, cl_mem_flags svmFlags);
     cl_int setArgSvmAlloc(uint32_t argIndex, void *svmPtr, GraphicsAllocation *svmAlloc);
 
-    void setKernelExecInfo(GraphicsAllocation *argValue);
-    void clearKernelExecInfo();
+    void setSvmKernelExecInfo(GraphicsAllocation *argValue);
+    void clearSvmKernelExecInfo();
 
     cl_int getInfo(cl_kernel_info paramName, size_t paramValueSize,
                    void *paramValue, size_t *paramValueSizeRet) const;
@@ -170,10 +171,6 @@ class Kernel : public BaseObject<_cl_kernel> {
         return kernelArguments;
     }
 
-    const std::vector<GraphicsAllocation *> &getKernelSvmGfxAllocations() const {
-        return kernelSvmGfxAllocations;
-    }
-
     size_t getKernelArgsNumber() const {
         return kernelInfo.kernelArgInfo.size();
     }
@@ -207,6 +204,10 @@ class Kernel : public BaseObject<_cl_kernel> {
     static uint32_t getScratchSizeValueToProgramMediaVfeState(int scratchSize);
     uint32_t getScratchSize() {
         return kernelInfo.patchInfo.mediavfestate ? kernelInfo.patchInfo.mediavfestate->PerThreadScratchSpace : 0;
+    }
+
+    uint32_t getPrivateScratchSize() {
+        return kernelInfo.patchInfo.mediaVfeStateSlot1 ? kernelInfo.patchInfo.mediaVfeStateSlot1->PerThreadScratchSpace : 0;
     }
 
     void createReflectionSurface();
@@ -385,9 +386,12 @@ class Kernel : public BaseObject<_cl_kernel> {
     using CacheFlushAllocationsVec = StackVec<GraphicsAllocation *, 32>;
     void getAllocationsForCacheFlush(CacheFlushAllocationsVec &out) const;
 
-    void setDisableL3forStatefulBuffers(bool disableL3forStatefulBuffers) {
-        this->disableL3forStatefulBuffers = disableL3forStatefulBuffers;
+    void setAuxTranslationFlag(bool auxTranslationFlag) {
+        this->auxTranslationKernel = auxTranslationFlag;
     }
+    void setUnifiedMemoryProperty(cl_kernel_exec_info infoType, bool infoValue);
+    void setUnifiedMemoryExecInfo(GraphicsAllocation *argValue);
+    void clearUnifiedMemoryExecInfo();
 
   protected:
     struct ObjectCounts {
@@ -457,8 +461,8 @@ class Kernel : public BaseObject<_cl_kernel> {
                                                        uint64_t privateMemoryCurbeOffset, uint32_t privateMemoryPatchSize, uint64_t privateMemoryGpuAddress);
     };
 
-  protected:
-    void makeArgsResident(CommandStreamReceiver &commandStreamReceiver);
+    void
+    makeArgsResident(CommandStreamReceiver &commandStreamReceiver);
 
     void *patchBufferOffset(const KernelArgInfo &argInfo, void *svmPtr, GraphicsAllocation *svmAlloc);
 
@@ -486,8 +490,9 @@ class Kernel : public BaseObject<_cl_kernel> {
     std::vector<SimpleKernelArgInfo> kernelArguments;
     std::vector<KernelArgHandler> kernelArgHandlers;
     std::vector<GraphicsAllocation *> kernelSvmGfxAllocations;
+    std::vector<GraphicsAllocation *> kernelUnifiedMemoryGfxAllocations;
 
-    bool disableL3forStatefulBuffers = false;
+    bool auxTranslationKernel = false;
 
     size_t numberOfBindingTableStates;
     size_t localBindingTableOffset;
@@ -515,5 +520,6 @@ class Kernel : public BaseObject<_cl_kernel> {
     bool specialPipelineSelectMode = false;
     bool svmAllocationsRequireCacheFlush = false;
     std::vector<GraphicsAllocation *> kernelArgRequiresCacheFlush;
+    UnifiedMemoryControls unifiedMemoryControls;
 };
 } // namespace NEO

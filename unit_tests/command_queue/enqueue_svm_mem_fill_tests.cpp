@@ -6,7 +6,7 @@
  */
 
 #include "runtime/built_ins/builtins_dispatch_builder.h"
-#include "runtime/memory_manager/svm_memory_manager.h"
+#include "runtime/memory_manager/unified_memory_manager.h"
 #include "test.h"
 #include "unit_tests/command_queue/command_queue_fixture.h"
 #include "unit_tests/fixtures/device_fixture.h"
@@ -25,16 +25,26 @@ struct EnqueueSvmMemFillTest : public DeviceFixture,
     void SetUp() override {
         DeviceFixture::SetUp();
         CommandQueueFixture::SetUp(pDevice, 0);
+        const HardwareInfo &hwInfo = pDevice->getHardwareInfo();
+        if (!hwInfo.capabilityTable.ftrSvm) {
+            GTEST_SKIP();
+        }
         patternSize = (size_t)GetParam();
         ASSERT_TRUE((0 < patternSize) && (patternSize <= 128));
-        svmPtr = context->getSVMAllocsManager()->createSVMAlloc(256, true, false);
+        SVMAllocsManager::SvmAllocationProperties svmProperties;
+        svmProperties.coherent = true;
+        svmPtr = context->getSVMAllocsManager()->createSVMAlloc(256, svmProperties);
         ASSERT_NE(nullptr, svmPtr);
-        svmAlloc = context->getSVMAllocsManager()->getSVMAlloc(svmPtr);
+        auto svmData = context->getSVMAllocsManager()->getSVMAlloc(svmPtr);
+        ASSERT_NE(nullptr, svmData);
+        svmAlloc = svmData->gpuAllocation;
         ASSERT_NE(nullptr, svmAlloc);
     }
 
     void TearDown() override {
-        context->getSVMAllocsManager()->freeSVMAlloc(svmPtr);
+        if (svmPtr) {
+            context->getSVMAllocsManager()->freeSVMAlloc(svmPtr);
+        }
         CommandQueueFixture::TearDown();
         DeviceFixture::TearDown();
     }

@@ -55,7 +55,8 @@ class AUBCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     void expectMMIO(uint32_t mmioRegister, uint32_t expectedValue);
     cl_int expectMemory(const void *gfxAddress, const void *srcAddress, size_t length, uint32_t compareOperation) override;
 
-    void activateAubSubCapture(const MultiDispatchInfo &dispatchInfo) override;
+    AubSubCaptureStatus checkAndActivateAubSubCapture(const MultiDispatchInfo &dispatchInfo) override;
+    void addAubComment(const char *message) override;
 
     // Family specific version
     MOCKABLE_VIRTUAL void submitBatchBuffer(uint64_t batchBufferGpuAddress, const void *batchBuffer, size_t batchBufferSize, uint32_t memoryBank, uint64_t entryBits);
@@ -65,7 +66,7 @@ class AUBCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
 
     uint32_t getDumpHandle();
     MOCKABLE_VIRTUAL void addContextToken(uint32_t dumpHandle);
-    void dumpAllocation(GraphicsAllocation &gfxAllocation);
+    MOCKABLE_VIRTUAL void dumpAllocation(GraphicsAllocation &gfxAllocation);
 
     static CommandStreamReceiver *create(const std::string &fileName, bool standalone, ExecutionEnvironment &executionEnvironment);
 
@@ -83,7 +84,7 @@ class AUBCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     MOCKABLE_VIRTUAL const std::string getFileName();
 
     MOCKABLE_VIRTUAL void initializeEngine();
-    AubSubCaptureManager *subCaptureManager = nullptr;
+    std::unique_ptr<AubSubCaptureManager> subCaptureManager;
     uint32_t aubDeviceId;
     bool standalone;
 
@@ -101,8 +102,6 @@ class AUBCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     }
 
     int getAddressSpaceFromPTEBits(uint64_t entryBits) const;
-
-    size_t getPreferredTagPoolSize() const override { return 1; }
 
   protected:
     constexpr static uint32_t getMaskAndValueForPollForCompletion();

@@ -5,8 +5,10 @@
  *
  */
 
+#include "core/helpers/basic_math.h"
+#include "core/helpers/ptr_math.h"
 #include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/ptr_math.h"
+#include "runtime/os_interface/os_memory.h"
 #include "unit_tests/mocks/mock_gfx_partition.h"
 
 #include "gtest/gtest.h"
@@ -15,18 +17,26 @@ using namespace NEO;
 
 void testGfxPartition(uint64_t gpuAddressSpace) {
     MockGfxPartition gfxPartition;
-    gfxPartition.init(gpuAddressSpace);
+    size_t reservedCpuAddressRangeSize = is64bit ? (6 * 4 * GB) : 0;
+    gfxPartition.init(gpuAddressSpace, reservedCpuAddressRangeSize);
 
     uint64_t gfxTop = gpuAddressSpace + 1;
     uint64_t gfxBase = MemoryConstants::maxSvmAddress + 1;
     const uint64_t sizeHeap32 = 4 * MemoryConstants::gigaByte;
-    const uint64_t gfxGranularity = 2 * MemoryConstants::megaByte;
 
-    if (MemoryConstants::max48BitAddress == gpuAddressSpace) {
-        // Full range SVM
+    if (is32bit || maxNBitValue<48> == gpuAddressSpace) {
+        // Full range SVM 48/32-bit
         EXPECT_TRUE(gfxPartition.heapInitialized(HeapIndex::HEAP_SVM));
-        EXPECT_EQ(gfxPartition.getHeapBase(HeapIndex::HEAP_SVM), gfxGranularity);
-        EXPECT_EQ(gfxPartition.getHeapSize(HeapIndex::HEAP_SVM), gfxBase - gfxGranularity);
+        EXPECT_EQ(gfxPartition.getHeapBase(HeapIndex::HEAP_SVM), 0ull);
+        EXPECT_EQ(gfxPartition.getHeapSize(HeapIndex::HEAP_SVM), gfxBase);
+        EXPECT_EQ(gfxPartition.getHeapLimit(HeapIndex::HEAP_SVM), MemoryConstants::maxSvmAddress);
+    } else if (maxNBitValue<47> == gpuAddressSpace) {
+        // Full range SVM 47-bit
+        gfxBase = (uint64_t)gfxPartition.getReservedCpuAddressRange();
+        gfxTop = gfxBase + gfxPartition.getReservedCpuAddressRangeSize();
+        EXPECT_TRUE(gfxPartition.heapInitialized(HeapIndex::HEAP_SVM));
+        EXPECT_EQ(gfxPartition.getHeapBase(HeapIndex::HEAP_SVM), 0ull);
+        EXPECT_EQ(gfxPartition.getHeapSize(HeapIndex::HEAP_SVM), is64bit ? gpuAddressSpace + 1 : gfxBase);
         EXPECT_EQ(gfxPartition.getHeapLimit(HeapIndex::HEAP_SVM), MemoryConstants::maxSvmAddress);
     } else {
         // Limited range
@@ -36,9 +46,9 @@ void testGfxPartition(uint64_t gpuAddressSpace) {
 
     for (auto heap32 : GfxPartition::heap32Names) {
         EXPECT_TRUE(gfxPartition.heapInitialized(heap32));
-        EXPECT_TRUE(isAligned<gfxGranularity>(gfxPartition.getHeapBase(heap32)));
-        EXPECT_EQ(gfxPartition.getHeapBase(heap32), gfxBase ? gfxBase : gfxGranularity);
-        EXPECT_EQ(gfxPartition.getHeapSize(heap32), gfxBase ? sizeHeap32 : sizeHeap32 - gfxGranularity);
+        EXPECT_TRUE(isAligned<GfxPartition::heapGranularity>(gfxPartition.getHeapBase(heap32)));
+        EXPECT_EQ(gfxPartition.getHeapBase(heap32), gfxBase);
+        EXPECT_EQ(gfxPartition.getHeapSize(heap32), sizeHeap32);
         gfxBase += sizeHeap32;
     }
 
@@ -47,7 +57,7 @@ void testGfxPartition(uint64_t gpuAddressSpace) {
     EXPECT_TRUE(gfxPartition.heapInitialized(HeapIndex::HEAP_STANDARD));
     auto heapStandardBase = gfxPartition.getHeapBase(HeapIndex::HEAP_STANDARD);
     auto heapStandardSize = gfxPartition.getHeapSize(HeapIndex::HEAP_STANDARD);
-    EXPECT_TRUE(isAligned<gfxGranularity>(heapStandardBase));
+    EXPECT_TRUE(isAligned<GfxPartition::heapGranularity>(heapStandardBase));
     EXPECT_EQ(heapStandardBase, gfxBase);
     EXPECT_EQ(heapStandardSize, sizeStandard);
 
@@ -55,16 +65,10 @@ void testGfxPartition(uint64_t gpuAddressSpace) {
     EXPECT_TRUE(gfxPartition.heapInitialized(HeapIndex::HEAP_STANDARD64KB));
     auto heapStandard64KbBase = gfxPartition.getHeapBase(HeapIndex::HEAP_STANDARD64KB);
     auto heapStandard64KbSize = gfxPartition.getHeapSize(HeapIndex::HEAP_STANDARD64KB);
-    EXPECT_TRUE(isAligned<gfxGranularity>(heapStandard64KbBase));
+    EXPECT_TRUE(isAligned<GfxPartition::heapGranularity>(heapStandard64KbBase));
 
-    uint64_t heapStandard64KbBaseOffset = 0;
-    if (gfxBase != heapStandard64KbBase) {
-        EXPECT_TRUE(gfxBase < heapStandard64KbBase);
-        heapStandard64KbBaseOffset = ptrDiff(heapStandard64KbBase, gfxBase);
-    }
-
-    EXPECT_EQ(heapStandard64KbBase, heapStandardBase + heapStandardSize + heapStandard64KbBaseOffset);
-    EXPECT_EQ(heapStandard64KbSize, heapStandardSize - heapStandard64KbBaseOffset);
+    EXPECT_EQ(heapStandard64KbBase, heapStandardBase + heapStandardSize);
+    EXPECT_EQ(heapStandard64KbSize, heapStandardSize);
     EXPECT_EQ(heapStandard64KbBase + heapStandard64KbSize, gfxTop);
     EXPECT_EQ(gfxBase + sizeStandard, gfxTop);
 
@@ -76,22 +80,32 @@ void testGfxPartition(uint64_t gpuAddressSpace) {
             continue;
         }
 
+        EXPECT_GT(gfxPartition.getHeapMinimalAddress(heap), gfxPartition.getHeapBase(heap));
+        EXPECT_EQ(gfxPartition.getHeapMinimalAddress(heap), gfxPartition.getHeapBase(heap) + GfxPartition::heapGranularity);
+
         auto ptrBig = gfxPartition.heapAllocate(heap, sizeBig);
         EXPECT_NE(ptrBig, 0ull);
-        EXPECT_EQ(ptrBig, gfxPartition.getHeapBase(heap));
+        EXPECT_LT(gfxPartition.getHeapBase(heap), ptrBig);
+        EXPECT_EQ(ptrBig, gfxPartition.getHeapBase(heap) + GfxPartition::heapGranularity);
         gfxPartition.heapFree(heap, ptrBig, sizeBig);
 
         auto ptrSmall = gfxPartition.heapAllocate(heap, sizeSmall);
         EXPECT_NE(ptrSmall, 0ull);
-        EXPECT_EQ(ptrSmall, gfxPartition.getHeapBase(heap) + gfxPartition.getHeapSize(heap) - sizeSmall);
+        EXPECT_LT(gfxPartition.getHeapBase(heap), ptrSmall);
+        EXPECT_GT(gfxPartition.getHeapLimit(heap), ptrSmall);
+        EXPECT_EQ(ptrSmall, gfxPartition.getHeapBase(heap) + gfxPartition.getHeapSize(heap) - GfxPartition::heapGranularity - sizeSmall);
         gfxPartition.heapFree(heap, ptrSmall, sizeSmall);
     }
 }
 
-TEST(GfxPartitionTest, testGfxPartitionFullRangeSVM) {
-    testGfxPartition(MemoryConstants::max48BitAddress);
+TEST(GfxPartitionTest, testGfxPartitionFullRange48BitSVM) {
+    testGfxPartition(maxNBitValue<48>);
+}
+
+TEST(GfxPartitionTest, testGfxPartitionFullRange47BitSVM) {
+    testGfxPartition(maxNBitValue<47>);
 }
 
 TEST(GfxPartitionTest, testGfxPartitionLimitedRange) {
-    testGfxPartition(maxNBitValue<48 - 1>);
+    testGfxPartition(maxNBitValue<47 - 1>);
 }

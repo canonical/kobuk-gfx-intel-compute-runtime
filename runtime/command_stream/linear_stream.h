@@ -6,8 +6,8 @@
  */
 
 #pragma once
+#include "core/helpers/ptr_math.h"
 #include "runtime/helpers/debug_helpers.h"
-#include "runtime/helpers/ptr_math.h"
 
 #include <atomic>
 #include <cstddef>
@@ -22,6 +22,7 @@ class LinearStream {
     LinearStream();
     LinearStream(void *buffer, size_t bufferSize);
     LinearStream(GraphicsAllocation *buffer);
+    LinearStream(GraphicsAllocation *gfxAllocation, void *buffer, size_t bufferSize);
     void *getCpuBase() const;
     void *getSpace(size_t size);
     size_t getMaxAvailableSpace() const;

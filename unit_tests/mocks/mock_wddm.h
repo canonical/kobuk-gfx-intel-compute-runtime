@@ -41,6 +41,9 @@ struct KmDafLockCall : CallResult {
 struct WaitFromCpuResult : CallResult {
     const MonitoredFence *monitoredFence = nullptr;
 };
+struct FreeGpuVirtualAddressCall : CallResult {
+    uint64_t sizePassed = -1;
+};
 } // namespace WddmMockHelpers
 
 class WddmMock : public Wddm {
@@ -102,7 +105,6 @@ class WddmMock : public Wddm {
     std::unique_lock<SpinLock> acquireLock(SpinLock &lock) override;
     D3DGPU_VIRTUAL_ADDRESS reserveGpuVirtualAddress(D3DGPU_VIRTUAL_ADDRESS minimumAddress, D3DGPU_VIRTUAL_ADDRESS maximumAddress, D3DGPU_SIZE_T size) override;
     bool reserveValidAddressRange(size_t size, void *&reservedMem);
-    GmmMemory *getGmmMemory() const;
     PLATFORM *getGfxPlatform() { return gfxPlatform.get(); }
     uint64_t *getPagingFenceAddress() override;
 
@@ -119,7 +121,7 @@ class WddmMock : public Wddm {
     WddmMockHelpers::MakeResidentCall makeResidentResult;
     WddmMockHelpers::CallResult makeNonResidentResult;
     WddmMockHelpers::CallResult mapGpuVirtualAddressResult;
-    WddmMockHelpers::CallResult freeGpuVirtualAddressResult;
+    WddmMockHelpers::FreeGpuVirtualAddressCall freeGpuVirtualAddressResult;
     WddmMockHelpers::CallResult createAllocationResult;
     WddmMockHelpers::CallResult destroyAllocationResult;
     WddmMockHelpers::CallResult destroyContextResult;

@@ -23,12 +23,12 @@ using namespace NEO;
 #define I915_PARAM_HAS_PREEMPTION 0x806
 #endif
 
-static const int mockFd = 33;
 // Mock DRM class that responds to DRM_IOCTL_I915_GETPARAMs
 class DrmMock : public Drm {
   public:
     using Drm::memoryInfo;
     using Drm::preemptionSupported;
+    using Drm::query;
 
     DrmMock() : Drm(mockFd) {
         sysFsDefaultGpuPathToRestore = nullptr;
@@ -111,10 +111,6 @@ class DrmMock : public Drm {
                 *((int *)(gp->value)) = this->StoredPreemptionSupport;
                 return this->StoredRetVal;
             }
-            if (gp->param == I915_PARAM_HAS_ALIASING_PPGTT) {
-                *((int *)(gp->value)) = this->StoredPPGTT;
-                return this->StoredRetVal;
-            }
             if (gp->param == I915_PARAM_HAS_EXEC_SOFTPIN) {
                 *((int *)(gp->value)) = this->StoredExecSoftPin;
                 return this->StoredRetVal;
@@ -140,6 +136,15 @@ class DrmMock : public Drm {
                 return this->StoredRetVal;
             }
             if ((receivedContextParamRequest.param == I915_CONTEXT_PRIVATE_PARAM_BOOST) && (receivedContextParamRequest.value == 1)) {
+                return this->StoredRetVal;
+            }
+        }
+
+        if ((request == DRM_IOCTL_I915_GEM_CONTEXT_GETPARAM) && (arg != nullptr)) {
+            receivedContextParamRequestCount++;
+            receivedContextParamRequest = *reinterpret_cast<drm_i915_gem_context_param *>(arg);
+            if (receivedContextParamRequest.param == I915_CONTEXT_PARAM_GTT_SIZE) {
+                reinterpret_cast<drm_i915_gem_context_param *>(arg)->value = this->storedGTTSize;
                 return this->StoredRetVal;
             }
         }
@@ -222,6 +227,8 @@ class DrmMock : public Drm {
     void setDeviceID(int deviceId) { this->deviceId = deviceId; }
     void setDeviceRevID(int revisionId) { this->revisionId = revisionId; }
 
+    static const int mockFd = 33;
+
     int StoredEUVal = -1;
     int StoredSSVal = -1;
     int StoredDeviceID = 1;
@@ -235,7 +242,6 @@ class DrmMock : public Drm {
     int StoredRetValForDeviceRevID = 0;
     int StoredRetValForPooledEU = 0;
     int StoredRetValForMinEUinPool = 0;
-    int StoredPPGTT = 3;
     int StoredPreemptionSupport =
         I915_SCHEDULER_CAP_ENABLED |
         I915_SCHEDULER_CAP_PRIORITY |
@@ -266,6 +272,8 @@ class DrmMock : public Drm {
     __u64 gpuMemSize = 3u * MemoryConstants::gigaByte;
     //DRM_IOCTL_I915_GEM_MMAP
     uint64_t lockedPtr[4];
+
+    uint64_t storedGTTSize = 1ull << 47;
 
     virtual int handleRemainingRequests(unsigned long request, void *arg);
 

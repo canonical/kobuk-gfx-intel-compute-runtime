@@ -8,10 +8,11 @@
 #include "runtime/device/device.h"
 #include "runtime/helpers/options.h"
 #include "runtime/os_interface/debug_settings_manager.h"
+#include "runtime/os_interface/hw_info_config.h"
 
 namespace NEO {
 
-bool DeviceFactory::getDevicesForProductFamilyOverride(HardwareInfo **pHWInfos, size_t &numDevices, ExecutionEnvironment &executionEnvironment) {
+bool DeviceFactory::getDevicesForProductFamilyOverride(size_t &numDevices, ExecutionEnvironment &executionEnvironment) {
     auto totalDeviceCount = 1u;
     if (DebugManager.flags.CreateMultipleDevices.get()) {
         totalDeviceCount = DebugManager.flags.CreateMultipleDevices.get();
@@ -23,21 +24,16 @@ bool DeviceFactory::getDevicesForProductFamilyOverride(HardwareInfo **pHWInfos, 
     std::string hwInfoConfig;
     DebugManager.getHardwareInfoOverride(hwInfoConfig);
 
-    auto hardwareInfo = std::make_unique<HardwareInfo>();
-    hardwareInfo->pPlatform = new PLATFORM(*hwInfoConst->pPlatform);
-    hardwareInfo->pSkuTable = new FeatureTable(*hwInfoConst->pSkuTable);
-    hardwareInfo->pWaTable = new WorkaroundTable(*hwInfoConst->pWaTable);
-    hardwareInfo->pSysInfo = new GT_SYSTEM_INFO(*hwInfoConst->pSysInfo);
-    hardwareInfo->capabilityTable = hwInfoConst->capabilityTable;
-    hardwareInfoSetup[hwInfoConst->pPlatform->eProductFamily](const_cast<GT_SYSTEM_INFO *>(hardwareInfo->pSysInfo),
-                                                              const_cast<FeatureTable *>(hardwareInfo->pSkuTable),
-                                                              true, hwInfoConfig);
+    auto hardwareInfo = executionEnvironment.getMutableHardwareInfo();
+    *hardwareInfo = *hwInfoConst;
 
-    *pHWInfos = hardwareInfo.release();
-    executionEnvironment.setHwInfo(*pHWInfos);
+    hardwareInfoSetup[hwInfoConst->platform.eProductFamily](hardwareInfo, true, hwInfoConfig);
+
+    HwInfoConfig *hwConfig = HwInfoConfig::get(hardwareInfo->platform.eProductFamily);
+    hwConfig->configureHardwareCustom(hardwareInfo, nullptr);
+
     numDevices = totalDeviceCount;
     DeviceFactory::numDevices = numDevices;
-    DeviceFactory::hwInfo = *pHWInfos;
 
     return true;
 }

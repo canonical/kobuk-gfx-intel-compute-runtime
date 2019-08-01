@@ -46,7 +46,12 @@ enum PerformanceHints {
     BAD_LOCAL_WORKGROUP_SIZE,
     REGISTER_PRESSURE_TOO_HIGH,
     PRIVATE_MEMORY_USAGE_TOO_HIGH,
-    KERNEL_REQUIRES_COHERENCY
+    KERNEL_REQUIRES_COHERENCY,
+    KERNEL_ARGUMENT_AUX_TRANSLATION,
+    BUFFER_IS_COMPRESSED,
+    BUFFER_IS_NOT_COMPRESSED,
+    IMAGE_IS_COMPRESSED,
+    IMAGE_IS_NOT_COMPRESSED
 };
 
 class DriverDiagnostics {
@@ -54,8 +59,9 @@ class DriverDiagnostics {
     DriverDiagnostics(cl_diagnostics_verbose_level level);
     bool validFlags(cl_diagnostics_verbose_level flags) const;
     ~DriverDiagnostics() = default;
-    static const char *hintFormat[];
+    static const char *const hintFormat[];
     static const cl_int maxHintStringSize = 1024;
+    PerformanceHints obtainHintForTransferOperation(cl_command_type commandType, bool transferRequired);
 
   protected:
     cl_diagnostics_verbose_level verboseLevel;

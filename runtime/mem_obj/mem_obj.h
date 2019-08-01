@@ -38,7 +38,7 @@ class MemObj : public BaseObject<_cl_mem> {
 
     MemObj(Context *context,
            cl_mem_object_type memObjectType,
-           MemoryProperties properties,
+           const MemoryProperties &properties,
            size_t size,
            void *memoryStorage,
            void *hostPtr,
@@ -63,7 +63,7 @@ class MemObj : public BaseObject<_cl_mem> {
 
     bool addMappedPtr(void *ptr, size_t ptrLength, cl_map_flags &mapFlags, MemObjSizeArray &size, MemObjOffsetArray &offset, uint32_t mipLevel);
     bool findMappedPtr(void *mappedPtr, MapInfo &outMapInfo) { return mapOperationsHandler.find(mappedPtr, outMapInfo); }
-    void removeMappedPtr(void *mappedPtr) { return mapOperationsHandler.remove(mappedPtr); }
+    void removeMappedPtr(void *mappedPtr) { mapOperationsHandler.remove(mappedPtr); }
     void *getBasePtrForMap();
 
     MOCKABLE_VIRTUAL void setAllocatedMapPtr(void *allocatedMapPtr);
@@ -71,6 +71,7 @@ class MemObj : public BaseObject<_cl_mem> {
 
     void setHostPtrMinSize(size_t size);
     void releaseAllocatedMapPtr();
+    void releaseMapAllocation();
 
     bool isMemObjZeroCopy() const;
     bool isMemObjWithHostPtrSVM() const;
@@ -78,7 +79,7 @@ class MemObj : public BaseObject<_cl_mem> {
     virtual void transferDataToHostPtr(MemObjSizeArray &copySize, MemObjOffsetArray &copyOffset) { UNRECOVERABLE_IF(true); };
     virtual void transferDataFromHostPtr(MemObjSizeArray &copySize, MemObjOffsetArray &copyOffset) { UNRECOVERABLE_IF(true); };
 
-    GraphicsAllocation *getGraphicsAllocation();
+    GraphicsAllocation *getGraphicsAllocation() const;
     void resetGraphicsAllocation(GraphicsAllocation *newGraphicsAllocation);
     GraphicsAllocation *getMcsAllocation() { return mcsAllocation; }
     void setMcsAllocation(GraphicsAllocation *alloc) { mcsAllocation = alloc; }
@@ -109,6 +110,17 @@ class MemObj : public BaseObject<_cl_mem> {
     MemoryManager *getMemoryManager() const {
         return memoryManager;
     }
+    void setMapAllocation(GraphicsAllocation *allocation) {
+        mapAllocation = allocation;
+    }
+    GraphicsAllocation *getMapAllocation() const {
+        if (associatedMemObject) {
+            return associatedMemObject->getMapAllocation();
+        }
+        return mapAllocation;
+    }
+
+    const MemoryProperties &getProperties() const { return properties; }
 
   protected:
     void getOsSpecificMemObjectInfo(const cl_mem_info &paramName, size_t *srcParamSize, void **srcParam);
@@ -132,6 +144,7 @@ class MemObj : public BaseObject<_cl_mem> {
     MemoryManager *memoryManager = nullptr;
     GraphicsAllocation *graphicsAllocation;
     GraphicsAllocation *mcsAllocation = nullptr;
+    GraphicsAllocation *mapAllocation = nullptr;
     std::shared_ptr<SharingHandler> sharingHandler;
 
     class DestructorCallback {

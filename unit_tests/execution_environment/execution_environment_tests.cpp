@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/aub/aub_center.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/command_stream/preemption.h"
@@ -19,7 +20,6 @@
 #include "runtime/platform/platform.h"
 #include "runtime/source_level_debugger/source_level_debugger.h"
 #include "test.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_csr.h"
 #include "unit_tests/mocks/mock_device.h"
@@ -104,7 +104,7 @@ TEST(ExecutionEnvironment, givenPlatformWhenItIsCreatedThenItCreatesMemoryManage
 TEST(ExecutionEnvironment, givenDeviceWhenItIsDestroyedThenMemoryManagerIsStillAvailable) {
     ExecutionEnvironment *executionEnvironment = platformImpl->peekExecutionEnvironment();
     executionEnvironment->initializeMemoryManager();
-    std::unique_ptr<Device> device(Device::create<NEO::Device>(nullptr, executionEnvironment, 0u));
+    std::unique_ptr<Device> device(Device::create<Device>(executionEnvironment, 0u));
     device.reset(nullptr);
     EXPECT_NE(nullptr, executionEnvironment->memoryManager);
 }
@@ -178,7 +178,7 @@ TEST(ExecutionEnvironment, givenExecutionEnvironmentWhenInitializeMemoryManagerI
     auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(hwInfo));
     auto executionEnvironment = device->getExecutionEnvironment();
     executionEnvironment->initializeCommandStreamReceiver(0, 0);
-    auto enableLocalMemory = HwHelper::get(hwInfo->pPlatform->eRenderCoreFamily).getEnableLocalMemory(*hwInfo);
+    auto enableLocalMemory = HwHelper::get(hwInfo->platform.eRenderCoreFamily).getEnableLocalMemory(*hwInfo);
     executionEnvironment->initializeMemoryManager();
     EXPECT_EQ(enableLocalMemory, executionEnvironment->memoryManager->isLocalMemorySupported());
 }
@@ -192,7 +192,7 @@ TEST(ExecutionEnvironment, givenExecutionEnvironmentWhenInitializeMemoryManagerI
 static_assert(sizeof(ExecutionEnvironment) == sizeof(std::vector<std::unique_ptr<CommandStreamReceiver>>) +
                                                   sizeof(std::unique_ptr<CommandStreamReceiver>) +
                                                   sizeof(std::mutex) +
-                                                  sizeof(HardwareInfo *) +
+                                                  sizeof(std::unique_ptr<HardwareInfo>) +
                                                   (is64bit ? 80 : 44),
               "New members detected in ExecutionEnvironment, please ensure that destruction sequence of objects is correct");
 
@@ -209,7 +209,7 @@ TEST(ExecutionEnvironment, givenExecutionEnvironmentWithVariousMembersWhenItIsDe
         OsInterfaceMock(uint32_t &destructorId) : DestructorCounted(destructorId) {}
     };
     struct MemoryMangerMock : public DestructorCounted<MockMemoryManager, 6> {
-        MemoryMangerMock(uint32_t &destructorId) : DestructorCounted(destructorId) {}
+        MemoryMangerMock(uint32_t &destructorId, ExecutionEnvironment &executionEnvironment) : DestructorCounted(destructorId, executionEnvironment) {}
     };
     struct AubCenterMock : public DestructorCounted<AubCenter, 5> {
         AubCenterMock(uint32_t &destructorId) : DestructorCounted(destructorId, platformDevices[0], false, "", CommandStreamReceiverType::CSR_AUB) {}
@@ -231,10 +231,11 @@ TEST(ExecutionEnvironment, givenExecutionEnvironmentWithVariousMembersWhenItIsDe
     };
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    executionEnvironment->setHwInfo(*platformDevices);
     executionEnvironment->commandStreamReceivers.resize(1);
     executionEnvironment->gmmHelper = std::make_unique<GmmHelperMock>(destructorId, platformDevices[0]);
     executionEnvironment->osInterface = std::make_unique<OsInterfaceMock>(destructorId);
-    executionEnvironment->memoryManager = std::make_unique<MemoryMangerMock>(destructorId);
+    executionEnvironment->memoryManager = std::make_unique<MemoryMangerMock>(destructorId, *executionEnvironment);
     executionEnvironment->aubCenter = std::make_unique<AubCenterMock>(destructorId);
     executionEnvironment->commandStreamReceivers[0].push_back(std::make_unique<CommandStreamReceiverMock>(destructorId, *executionEnvironment));
     executionEnvironment->specialCommandStreamReceiver = std::make_unique<SpecialCommandStreamReceiverMock>(destructorId, *executionEnvironment);
@@ -248,12 +249,12 @@ TEST(ExecutionEnvironment, givenExecutionEnvironmentWithVariousMembersWhenItIsDe
 
 TEST(ExecutionEnvironment, givenMultipleDevicesWhenTheyAreCreatedTheyAllReuseTheSameMemoryManagerAndCommandStreamReceiver) {
     ExecutionEnvironment *executionEnvironment = platformImpl->peekExecutionEnvironment();
-    std::unique_ptr<MockDevice> device(Device::create<NEO::MockDevice>(nullptr, executionEnvironment, 0u));
-    auto &commandStreamReceiver = device->getCommandStreamReceiver();
+    std::unique_ptr<MockDevice> device(Device::create<MockDevice>(executionEnvironment, 0u));
+    auto &commandStreamReceiver = device->getGpgpuCommandStreamReceiver();
     auto memoryManager = device->getMemoryManager();
 
-    std::unique_ptr<MockDevice> device2(Device::create<NEO::MockDevice>(nullptr, executionEnvironment, 1u));
-    EXPECT_NE(&commandStreamReceiver, &device2->getCommandStreamReceiver());
+    std::unique_ptr<MockDevice> device2(Device::create<MockDevice>(executionEnvironment, 1u));
+    EXPECT_NE(&commandStreamReceiver, &device2->getGpgpuCommandStreamReceiver());
     EXPECT_EQ(memoryManager, device2->getMemoryManager());
 }
 
@@ -270,17 +271,18 @@ HWTEST_F(ExecutionEnvironmentHw, givenHwHelperInputWhenInitializingCsrThenCreate
     auto csr0 = static_cast<UltCommandStreamReceiver<FamilyType> *>(executionEnvironment.commandStreamReceivers[0][0].get());
     EXPECT_FALSE(csr0->createPageTableManagerCalled);
 
-    localHwInfo.capabilityTable.ftrRenderCompressedBuffers = true;
-    localHwInfo.capabilityTable.ftrRenderCompressedImages = false;
+    auto hwInfo = executionEnvironment.getMutableHardwareInfo();
+    hwInfo->capabilityTable.ftrRenderCompressedBuffers = true;
+    hwInfo->capabilityTable.ftrRenderCompressedImages = false;
     executionEnvironment.initializeCommandStreamReceiver(1, 0);
     auto csr1 = static_cast<UltCommandStreamReceiver<FamilyType> *>(executionEnvironment.commandStreamReceivers[1][0].get());
-    EXPECT_EQ(UnitTestHelper<FamilyType>::isPageTableManagerSupported(localHwInfo), csr1->createPageTableManagerCalled);
+    EXPECT_EQ(UnitTestHelper<FamilyType>::isPageTableManagerSupported(*hwInfo), csr1->createPageTableManagerCalled);
 
-    localHwInfo.capabilityTable.ftrRenderCompressedBuffers = false;
-    localHwInfo.capabilityTable.ftrRenderCompressedImages = true;
+    hwInfo->capabilityTable.ftrRenderCompressedBuffers = false;
+    hwInfo->capabilityTable.ftrRenderCompressedImages = true;
     executionEnvironment.initializeCommandStreamReceiver(2, 0);
     auto csr2 = static_cast<UltCommandStreamReceiver<FamilyType> *>(executionEnvironment.commandStreamReceivers[2][0].get());
-    EXPECT_EQ(UnitTestHelper<FamilyType>::isPageTableManagerSupported(localHwInfo), csr2->createPageTableManagerCalled);
+    EXPECT_EQ(UnitTestHelper<FamilyType>::isPageTableManagerSupported(*hwInfo), csr2->createPageTableManagerCalled);
 }
 
 TEST(ExecutionEnvironment, whenSpecialCsrNotExistThenReturnNullSpecialEngineControl) {
@@ -299,7 +301,7 @@ TEST(ExecutionEnvironment, whenSpecialCsrExistsThenReturnSpecialEngineControl) {
     EXPECT_NE(nullptr, executionEnvironment->memoryManager);
 
     executionEnvironment->specialCommandStreamReceiver.reset(createCommandStream(*executionEnvironment));
-    auto engineType = HwHelper::get(platformDevices[0]->pPlatform->eRenderCoreFamily).getGpgpuEngineInstances()[0];
+    auto engineType = HwHelper::get(platformDevices[0]->platform.eRenderCoreFamily).getGpgpuEngineInstances()[0];
     auto osContext = executionEnvironment->memoryManager->createAndRegisterOsContext(executionEnvironment->specialCommandStreamReceiver.get(),
                                                                                      engineType, 1,
                                                                                      PreemptionHelper::getDefaultPreemptionMode(*platformDevices[0]), false);
@@ -314,7 +316,7 @@ TEST(ExecutionEnvironment, givenUnproperSetCsrFlagValueWhenInitializingMemoryMan
     DebugManagerStateRestore restorer;
     DebugManager.flags.SetCommandStreamReceiver.set(10);
 
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>(*platformDevices);
     executionEnvironment->initializeMemoryManager();
     EXPECT_NE(nullptr, executionEnvironment->memoryManager);
 }

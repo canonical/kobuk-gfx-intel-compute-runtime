@@ -6,9 +6,11 @@
  */
 
 #pragma once
+#include "runtime/os_interface/linux/engine_info.h"
 #include "runtime/os_interface/linux/memory_info.h"
 #include "runtime/utilities/api_intercept.h"
 
+#include "engine_node.h"
 #include "igfxfmid.h"
 
 #include <cerrno>
@@ -25,12 +27,11 @@ namespace NEO {
 
 class DeviceFactory;
 struct HardwareInfo;
-struct FeatureTable;
 
 struct DeviceDescriptor {
     unsigned short deviceId;
     const HardwareInfo *pHwInfo;
-    void (*setupHardwareInfo)(GT_SYSTEM_INFO *, FeatureTable *, bool);
+    void (*setupHardwareInfo)(HardwareInfo *, bool);
     GTTYPE eGtType;
 };
 
@@ -64,22 +65,29 @@ class Drm {
     uint32_t createDrmContext();
     void destroyDrmContext(uint32_t drmContextId);
     void setLowPriorityContextParam(uint32_t drmContextId);
+    unsigned int bindDrmContext(uint32_t drmContextId, uint32_t deviceIndex, aub_stream::EngineType engineType);
 
     void setGtType(GTTYPE eGtType) { this->eGtType = eGtType; }
     GTTYPE getGtType() const { return this->eGtType; }
     MOCKABLE_VIRTUAL int getErrno();
     void setSimplifiedMocsTableUsage(bool value);
     bool getSimplifiedMocsTableUsage() const;
+    void queryEngineInfo();
     void queryMemoryInfo();
+
+    MemoryInfo *getMemoryInfo() const {
+        return memoryInfo.get();
+    }
 
   protected:
     bool useSimplifiedMocsTable = false;
     bool preemptionSupported = false;
     int fd;
-    int deviceId;
-    int revisionId;
-    GTTYPE eGtType;
-    Drm(int fd) : fd(fd), deviceId(0), revisionId(0), eGtType(GTTYPE_UNDEFINED) {}
+    int deviceId = 0;
+    int revisionId = 0;
+    GTTYPE eGtType = GTTYPE_UNDEFINED;
+    Drm(int fd) : fd(fd) {}
+    std::unique_ptr<EngineInfo> engineInfo;
     std::unique_ptr<MemoryInfo> memoryInfo;
 
     static bool isi915Version(int fd);
@@ -89,6 +97,7 @@ class Drm {
     static void closeDevice(int32_t deviceOrdinal);
 
     std::string getSysFsPciPath(int deviceID);
+    void *query(uint32_t queryId);
 
 #pragma pack(1)
     struct PCIConfig {

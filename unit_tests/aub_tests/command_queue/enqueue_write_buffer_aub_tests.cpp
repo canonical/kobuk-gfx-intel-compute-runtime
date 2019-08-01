@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/device/device.h"
 #include "runtime/helpers/options.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/mem_obj/buffer.h"
 #include "test.h"
 #include "unit_tests/aub_tests/command_queue/command_enqueue_fixture.h"
@@ -70,6 +70,7 @@ HWTEST_P(AUBWriteBuffer, simple) {
         offset,
         sizeWritten,
         pSrcMemory,
+        nullptr,
         numEventsInWaitList,
         eventWaitList,
         event);
@@ -148,6 +149,7 @@ struct AUBWriteBufferUnaligned
             offset,
             size,
             ptrOffset(srcMemory, offset),
+            nullptr,
             0,
             nullptr,
             nullptr);

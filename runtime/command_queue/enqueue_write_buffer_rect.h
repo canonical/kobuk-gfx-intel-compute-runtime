@@ -9,7 +9,7 @@
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/command_queue/command_queue_hw.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/surface.h"
 
@@ -42,25 +42,8 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBufferRect(
         isMemTransferNeeded = buffer->checkIfMemoryTransferIsRequired(bufferOffset, hostOffset, ptr, CL_COMMAND_WRITE_BUFFER_RECT);
     }
     if (!isMemTransferNeeded) {
-        NullSurface s;
-        Surface *surfaces[] = {&s};
-        enqueueHandler<CL_COMMAND_MARKER>(
-            surfaces,
-            blockingWrite == CL_TRUE,
-            dispatchInfo,
-            numEventsInWaitList,
-            eventWaitList,
-            event);
-        if (event) {
-            auto pEvent = castToObjectOrAbort<Event>(*event);
-            pEvent->setCmdType(CL_COMMAND_WRITE_BUFFER_RECT);
-        }
-
-        if (context->isProvidingPerformanceHints()) {
-            context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_GOOD_INTEL, CL_ENQUEUE_WRITE_BUFFER_RECT_DOESNT_REQUIRE_COPY_DATA, static_cast<cl_mem>(buffer), ptr);
-        }
-
-        return CL_SUCCESS;
+        return enqueueMarkerForReadWriteOperation(buffer, const_cast<void *>(ptr), CL_COMMAND_WRITE_BUFFER_RECT, blockingWrite,
+                                                  numEventsInWaitList, eventWaitList, event);
     }
     auto &builder = getDevice().getExecutionEnvironment()->getBuiltIns()->getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyBufferRect,
                                                                                                         this->getContext(), this->getDevice());
@@ -76,7 +59,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBufferRect(
     if (region[0] != 0 &&
         region[1] != 0 &&
         region[2] != 0) {
-        bool status = getCommandStreamReceiver().createAllocationForHostSurface(hostPtrSurf, false);
+        bool status = getGpgpuCommandStreamReceiver().createAllocationForHostSurface(hostPtrSurf, false);
         if (!status) {
             return CL_OUT_OF_RESOURCES;
         }
@@ -86,7 +69,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBufferRect(
     void *alignedSrcPtr = alignDown(srcPtr, 4);
     size_t srcPtrOffset = ptrDiff(srcPtr, alignedSrcPtr);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.srcPtr = alignedSrcPtr;
     dc.dstMemObj = buffer;
     dc.srcOffset = hostOrigin;

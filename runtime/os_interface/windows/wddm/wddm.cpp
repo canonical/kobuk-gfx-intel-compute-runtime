@@ -7,11 +7,13 @@
 
 #include "runtime/os_interface/windows/wddm/wddm.h"
 
+#include "core/helpers/interlocked_max.h"
+#include "runtime/command_stream/preemption.h"
+#include "runtime/execution_environment/execution_environment.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/gmm_helper/page_table_mngr.h"
 #include "runtime/gmm_helper/resource_info.h"
-#include "runtime/helpers/wddm_helper.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/os_interface/hw_info_config.h"
 #include "runtime/os_interface/windows/gdi_interface.h"
@@ -21,6 +23,7 @@
 #include "runtime/os_interface/windows/wddm/wddm_interface.h"
 #include "runtime/os_interface/windows/wddm_allocation.h"
 #include "runtime/os_interface/windows/wddm_engine_mapper.h"
+#include "runtime/platform/platform.h"
 #include "runtime/sku_info/operations/sku_info_receiver.h"
 
 #include "gmm_memory.h"
@@ -38,7 +41,7 @@ Wddm::VirtualFreeFcn Wddm::virtualFreeFnc = getVirtualFree();
 
 Wddm::Wddm() {
     featureTable.reset(new FeatureTable());
-    waTable.reset(new WorkaroundTable());
+    workaroundTable.reset(new WorkaroundTable());
     gtSystemInfo.reset(new GT_SYSTEM_INFO);
     gfxPlatform.reset(new PLATFORM);
     memset(gtSystemInfo.get(), 0, sizeof(*gtSystemInfo));
@@ -58,7 +61,7 @@ Wddm::~Wddm() {
     closeAdapter();
 }
 
-bool Wddm::enumAdapters(HardwareInfo &outHardwareInfo) {
+bool Wddm::init(HardwareInfo &outHardwareInfo) {
     if (!gdi->isInitialized()) {
         return false;
     }
@@ -74,19 +77,43 @@ bool Wddm::enumAdapters(HardwareInfo &outHardwareInfo) {
         return false;
     }
 
-    outHardwareInfo.pPlatform = new PLATFORM(*gfxPlatform);
-    outHardwareInfo.pSkuTable = new FeatureTable(*featureTable);
-    outHardwareInfo.pWaTable = new WorkaroundTable(*waTable);
-    outHardwareInfo.pSysInfo = new GT_SYSTEM_INFO(*gtSystemInfo);
+    outHardwareInfo.platform = *gfxPlatform;
+    outHardwareInfo.featureTable = *featureTable;
+    outHardwareInfo.workaroundTable = *workaroundTable;
+    outHardwareInfo.gtSystemInfo = *gtSystemInfo;
 
     outHardwareInfo.capabilityTable = hardwareInfoTable[productFamily]->capabilityTable;
     outHardwareInfo.capabilityTable.maxRenderFrequency = maxRenderFrequency;
     outHardwareInfo.capabilityTable.instrumentationEnabled &= instrumentationEnabled;
 
     HwInfoConfig *hwConfig = HwInfoConfig::get(productFamily);
-    hwConfig->adjustPlatformForProductFamily(&outHardwareInfo);
 
-    return true;
+    hwConfig->adjustPlatformForProductFamily(&outHardwareInfo);
+    if (hwConfig->configureHwInfo(&outHardwareInfo, &outHardwareInfo, nullptr)) {
+        return false;
+    }
+
+    platform()->peekExecutionEnvironment()->initGmm();
+
+    auto preemptionMode = PreemptionHelper::getDefaultPreemptionMode(outHardwareInfo);
+
+    if (featureTable->ftrWddmHwQueues) {
+        wddmInterface = std::make_unique<WddmInterface23>(*this);
+    } else {
+        wddmInterface = std::make_unique<WddmInterface20>(*this);
+    }
+
+    if (!createDevice(preemptionMode)) {
+        return false;
+    }
+    if (!createPagingQueue()) {
+        return false;
+    }
+    if (!gmmMemory) {
+        gmmMemory.reset(GmmMemory::create());
+    }
+
+    return configureDeviceAddressSpace();
 }
 
 bool Wddm::queryAdapterInfo() {
@@ -107,7 +134,7 @@ bool Wddm::queryAdapterInfo() {
         memcpy_s(gfxPlatform.get(), sizeof(PLATFORM), &adapterInfo.GfxPlatform, sizeof(PLATFORM));
 
         SkuInfoReceiver::receiveFtrTableFromAdapterInfo(featureTable.get(), &adapterInfo);
-        SkuInfoReceiver::receiveWaTableFromAdapterInfo(waTable.get(), &adapterInfo);
+        SkuInfoReceiver::receiveWaTableFromAdapterInfo(workaroundTable.get(), &adapterInfo);
 
         memcpy_s(&gfxPartition, sizeof(gfxPartition), &adapterInfo.GfxPartition, sizeof(GMM_GFX_PARTITIONING));
 
@@ -272,7 +299,7 @@ bool Wddm::makeResident(const D3DKMT_HANDLE *handles, uint32_t count, bool cantT
     status = gdi->makeResident(&makeResident);
 
     if (status == STATUS_PENDING) {
-        interlockedMax(currentPagingFenceValue, makeResident.PagingFenceValue);
+        updatePagingFenceValue(makeResident.PagingFenceValue);
         success = true;
     } else if (status == STATUS_SUCCESS) {
         success = true;
@@ -316,7 +343,7 @@ bool Wddm::mapGpuVirtualAddress(Gmm *gmm, D3DKMT_HANDLE handle, D3DGPU_VIRTUAL_A
     gpuPtr = GmmHelper::canonize(MapGPUVA.VirtualAddress);
 
     if (status == STATUS_PENDING) {
-        interlockedMax(currentPagingFenceValue, MapGPUVA.PagingFenceValue);
+        updatePagingFenceValue(MapGPUVA.PagingFenceValue);
         status = STATUS_SUCCESS;
     }
 
@@ -487,13 +514,15 @@ NTSTATUS Wddm::createAllocationsAndMapGpuVa(OsHandleStorage &osHandles) {
             }
             osHandles.fragmentStorageData[allocationIndex].osHandleStorage->handle = AllocationInfo[i].hAllocation;
             bool success = mapGpuVirtualAddress(&osHandles.fragmentStorageData[allocationIndex]);
-            allocationIndex++;
 
             if (!success) {
+                osHandles.fragmentStorageData[allocationIndex].freeTheFragment = true;
                 DBG_LOG(PrintDebugMessages, __FUNCTION__, "mapGpuVirtualAddress: ", success);
                 DEBUG_BREAK_IF(true);
-                break;
+                return STATUS_GRAPHICS_NO_VIDEO_MEMORY;
             }
+
+            allocationIndex++;
 
             kmDafListener->notifyWriteTarget(featureTable->ftrKmdDaf, adapter, device, AllocationInfo[i].hAllocation, gdi->escape);
         }
@@ -769,7 +798,7 @@ void Wddm::initGfxPartition(GfxPartition &outGfxPartition) const {
     outGfxPartition.heapInit(HeapIndex::HEAP_STANDARD64KB, gfxPartition.Standard64KB.Base, gfxPartition.Standard64KB.Limit - gfxPartition.Standard64KB.Base + 1);
 
     for (auto heap : GfxPartition::heap32Names) {
-        outGfxPartition.heapInit(heap, gfxPartition.Heap32[static_cast<uint32_t>(heap)].Base + MemoryConstants::pageSize,
+        outGfxPartition.heapInit(heap, gfxPartition.Heap32[static_cast<uint32_t>(heap)].Base,
                                  gfxPartition.Heap32[static_cast<uint32_t>(heap)].Limit - gfxPartition.Heap32[static_cast<uint32_t>(heap)].Base + 1);
     }
 }
@@ -789,14 +818,6 @@ NTSTATUS Wddm::escape(D3DKMT_ESCAPE &escapeCommand) {
 
 PFND3DKMT_ESCAPE Wddm::getEscapeHandle() const {
     return gdi->escape;
-}
-
-uint64_t Wddm::getExternalHeapBase() const {
-    return alignUp(gfxPartition.Heap32[static_cast<uint32_t>(HeapIndex::HEAP_EXTERNAL)].Base, MemoryConstants::pageSize);
-}
-
-uint64_t Wddm::getExternalHeapSize() const {
-    return alignDown(gfxPartition.Heap32[static_cast<uint32_t>(HeapIndex::HEAP_EXTERNAL)].Limit - gfxPartition.Heap32[static_cast<uint32_t>(HeapIndex::HEAP_EXTERNAL)].Base, MemoryConstants::pageSize);
 }
 
 VOID *Wddm::registerTrimCallback(PFND3DKMT_TRIMNOTIFICATIONCALLBACK callback, WddmResidencyController &residencyController) {
@@ -883,7 +904,7 @@ int Wddm::virtualFree(void *ptr, size_t size, unsigned long flags) {
     return virtualFreeFnc(ptr, size, flags);
 }
 
-bool Wddm::configureDeviceAddressSpace() {
+bool Wddm::configureDeviceAddressSpaceImpl() {
     SYSTEM_INFO sysInfo;
     Wddm::getSystemInfo(&sysInfo);
     maximumApplicationAddress = reinterpret_cast<uintptr_t>(sysInfo.lpMaximumApplicationAddress);
@@ -896,37 +917,6 @@ bool Wddm::configureDeviceAddressSpace() {
                        : 0u;
 
     return gmmMemory->configureDevice(adapter, device, gdi->escape, svmSize, featureTable->ftrL3IACoherency, gfxPartition, minAddress);
-}
-
-bool Wddm::init(PreemptionMode preemptionMode) {
-    if (gdi != nullptr && gdi->isInitialized() && !initialized) {
-        if (!openAdapter()) {
-            return false;
-        }
-        if (!queryAdapterInfo()) {
-            return false;
-        }
-
-        if (!wddmInterface) {
-            if (featureTable->ftrWddmHwQueues) {
-                wddmInterface = std::make_unique<WddmInterface23>(*this);
-            } else {
-                wddmInterface = std::make_unique<WddmInterface20>(*this);
-            }
-        }
-
-        if (!createDevice(preemptionMode)) {
-            return false;
-        }
-        if (!createPagingQueue()) {
-            return false;
-        }
-        if (!gmmMemory) {
-            gmmMemory.reset(GmmMemory::create());
-        }
-        initialized = configureDeviceAddressSpace();
-    }
-    return initialized;
 }
 
 EvictionStatus Wddm::evictAllTemporaryResources() {
@@ -990,6 +980,10 @@ void Wddm::removeTemporaryResource(const D3DKMT_HANDLE &handle) {
 }
 std::unique_lock<SpinLock> Wddm::acquireLock(SpinLock &lock) {
     return std::unique_lock<SpinLock>{lock};
+}
+
+void Wddm::updatePagingFenceValue(uint64_t newPagingFenceValue) {
+    interlockedMax(currentPagingFenceValue, newPagingFenceValue);
 }
 
 } // namespace NEO

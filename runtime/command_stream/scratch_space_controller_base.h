@@ -12,10 +12,11 @@ namespace NEO {
 
 class ScratchSpaceControllerBase : public ScratchSpaceController {
   public:
-    ScratchSpaceControllerBase(const HardwareInfo &info, ExecutionEnvironment &environment, InternalAllocationStorage &allocationStorage);
+    ScratchSpaceControllerBase(ExecutionEnvironment &environment, InternalAllocationStorage &allocationStorage);
 
     void setRequiredScratchSpace(void *sshBaseAddress,
                                  uint32_t requiredPerThreadScratchSize,
+                                 uint32_t requiredPerThreadPrivateScratchSize,
                                  uint32_t currentTaskCount,
                                  uint32_t contextId,
                                  bool &stateBaseAddressDirty,

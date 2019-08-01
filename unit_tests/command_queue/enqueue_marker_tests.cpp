@@ -10,6 +10,7 @@
 #include "test.h"
 #include "unit_tests/command_queue/command_enqueue_fixture.h"
 #include "unit_tests/gen_common/gen_cmd_parse.h"
+#include "unit_tests/mocks/mock_kernel.h"
 
 using namespace NEO;
 
@@ -181,6 +182,8 @@ TEST_F(MarkerTest, givenMultipleEventWhenTheyArePassedToMarkerThenOutputEventHas
             &event3};
     cl_uint numEventsInWaitList = sizeof(eventWaitList) / sizeof(eventWaitList[0]);
     cl_event event = nullptr;
+    auto initialTaskCount = pCmdQ->taskCount;
+
     pCmdQ->enqueueMarkerWithWaitList(
         numEventsInWaitList,
         eventWaitList,
@@ -188,8 +191,13 @@ TEST_F(MarkerTest, givenMultipleEventWhenTheyArePassedToMarkerThenOutputEventHas
 
     std::unique_ptr<Event> pEvent((Event *)(event));
 
-    EXPECT_EQ(16u, pCmdQ->taskCount);
-    EXPECT_EQ(16u, pEvent->peekTaskCount());
+    if (pCmdQ->getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
+        EXPECT_EQ(initialTaskCount + 1, pCmdQ->taskCount);
+        EXPECT_EQ(initialTaskCount + 1, pEvent->peekTaskCount());
+    } else {
+        EXPECT_EQ(16u, pCmdQ->taskCount);
+        EXPECT_EQ(16u, pEvent->peekTaskCount());
+    }
 }
 
 TEST_F(MarkerTest, givenMultipleEventsAndCompletedUserEventWhenTheyArePassedToMarkerThenOutputEventHasHighestTaskCount) {
@@ -208,6 +216,8 @@ TEST_F(MarkerTest, givenMultipleEventsAndCompletedUserEventWhenTheyArePassedToMa
             &userEvent};
     cl_uint numEventsInWaitList = sizeof(eventWaitList) / sizeof(eventWaitList[0]);
     cl_event event = nullptr;
+    auto initialTaskCount = pCmdQ->taskCount;
+
     pCmdQ->enqueueMarkerWithWaitList(
         numEventsInWaitList,
         eventWaitList,
@@ -215,6 +225,35 @@ TEST_F(MarkerTest, givenMultipleEventsAndCompletedUserEventWhenTheyArePassedToMa
 
     std::unique_ptr<Event> pEvent((Event *)(event));
 
-    EXPECT_EQ(16u, pCmdQ->taskCount);
-    EXPECT_EQ(16u, pEvent->peekTaskCount());
+    if (pCmdQ->getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
+        EXPECT_EQ(initialTaskCount + 1, pCmdQ->taskCount);
+        EXPECT_EQ(initialTaskCount + 1, pEvent->peekTaskCount());
+    } else {
+        EXPECT_EQ(16u, pCmdQ->taskCount);
+        EXPECT_EQ(16u, pEvent->peekTaskCount());
+    }
+}
+
+HWTEST_F(MarkerTest, givenMarkerCallFollowingNdrangeCallInBatchedModeWhenWaitForEventsIsCalledThenFlushStampIsProperlyUpdated) {
+    MockKernelWithInternals mockKernel(*this->pDevice, this->context);
+
+    auto &ultCommandStreamReceiver = this->pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    ultCommandStreamReceiver.overrideDispatchPolicy(DispatchMode::BatchedDispatch);
+
+    cl_event eventFromNdr = nullptr;
+    size_t gws[] = {1};
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, &eventFromNdr);
+    cl_event eventFromMarker = nullptr;
+    pCmdQ->enqueueMarkerWithWaitList(1u, &eventFromNdr, &eventFromMarker);
+
+    ultCommandStreamReceiver.flushStamp->setStamp(1u);
+
+    clEnqueueWaitForEvents(pCmdQ, 1u, &eventFromMarker);
+
+    auto neoEvent = castToObject<Event>(eventFromMarker);
+    EXPECT_EQ(1u, neoEvent->flushStamp->peekStamp());
+
+    clReleaseEvent(eventFromMarker);
+    clReleaseEvent(eventFromNdr);
 }

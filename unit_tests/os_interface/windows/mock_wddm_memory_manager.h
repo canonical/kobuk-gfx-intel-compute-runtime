@@ -22,6 +22,9 @@ class MockWddmMemoryManager : public MemoryManagerCreate<WddmMemoryManager> {
     using BaseClass::allocateGraphicsMemoryWithProperties;
     using BaseClass::createGraphicsAllocation;
     using BaseClass::createWddmAllocation;
+    using BaseClass::gfxPartition;
+    using BaseClass::localMemorySupported;
+    using BaseClass::supportsMultiStorageResources;
     using MemoryManagerCreate<WddmMemoryManager>::MemoryManagerCreate;
 
     MockWddmMemoryManager(ExecutionEnvironment &executionEnvironment) : MemoryManagerCreate(false, false, executionEnvironment) {
@@ -39,7 +42,8 @@ class MockWddmMemoryManager : public MemoryManagerCreate<WddmMemoryManager> {
     GraphicsAllocation *allocate32BitGraphicsMemory(size_t size, const void *ptr, GraphicsAllocation::AllocationType allocationType) {
         bool allocateMemory = ptr == nullptr;
         AllocationData allocationData;
-        getAllocationData(allocationData, MockAllocationProperties(allocateMemory, size, allocationType), {}, ptr);
+        MockAllocationProperties properties(allocateMemory, size, allocationType);
+        getAllocationData(allocationData, properties, ptr, createStorageInfoFromProperties(properties));
         return allocate32BitGraphicsMemoryImpl(allocationData);
     }
 

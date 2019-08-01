@@ -5,18 +5,19 @@
  *
  */
 
+#include "core/helpers/basic_math.h"
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/basic_math.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/os_interface/linux/allocator_helper.h"
 #include "runtime/os_interface/linux/os_interface.h"
 #include "test.h"
 #include "unit_tests/custom_event_listener.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/variable_backup.h"
 #include "unit_tests/linux/drm_wrap.h"
 #include "unit_tests/linux/mock_os_layer.h"
+#include "unit_tests/mocks/mock_execution_environment.h"
 #include "unit_tests/os_interface/linux/device_command_stream_fixture.h"
 
 #include "gmock/gmock.h"
@@ -40,7 +41,7 @@ typedef Test<DrmTestsFixture> DrmTests;
 
 void initializeTestedDevice() {
     for (uint32_t i = 0; deviceDescriptorTable[i].eGtType != GTTYPE::GTTYPE_UNDEFINED; i++) {
-        if (platformDevices[0]->pPlatform->eProductFamily == deviceDescriptorTable[i].pHwInfo->pPlatform->eProductFamily) {
+        if (platformDevices[0]->platform.eProductFamily == deviceDescriptorTable[i].pHwInfo->platform.eProductFamily) {
             deviceId = deviceDescriptorTable[i].deviceId;
             break;
         }
@@ -356,19 +357,23 @@ TEST_F(DrmTests, failOnInvalidDeviceName) {
     EXPECT_EQ(drm, nullptr);
 }
 
-TEST(AllocatorHelper, givenExpectedSizeToMapWhenGetSizetoMapCalledThenExpectedValueReturned) {
-    EXPECT_EQ((alignUp(4 * GB - 8096, 4096)), NEO::getSizeToMap());
+TEST(AllocatorHelper, givenExpectedSizeToReserveWhenGetSizeToReserveCalledThenExpectedValueReturned) {
+    EXPECT_EQ((maxNBitValue<47> + 1) / 4, NEO::getSizeToReserve());
 }
 
 TEST(DrmMemoryManagerCreate, whenCallCreateMemoryManagerThenDrmMemoryManagerIsCreated) {
     DrmMockSuccess mock;
-    ExecutionEnvironment executionEnvironment;
+    MockExecutionEnvironment executionEnvironment(*platformDevices);
 
     executionEnvironment.osInterface = std::make_unique<OSInterface>();
     executionEnvironment.osInterface->get()->setDrm(&mock);
     auto drmMemoryManager = MemoryManager::createMemoryManager(executionEnvironment);
     EXPECT_NE(nullptr, drmMemoryManager.get());
     executionEnvironment.memoryManager = std::move(drmMemoryManager);
+}
+
+TEST(OsInterfaceTests, givenOsInterfaceWhenEnableLocalMemoryIsSpecifiedThenItIsSetToTrueOn64Bit) {
+    EXPECT_TRUE(OSInterface::osEnableLocalMemory);
 }
 
 int main(int argc, char **argv) {

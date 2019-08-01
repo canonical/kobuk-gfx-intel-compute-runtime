@@ -6,6 +6,7 @@
  */
 
 #pragma once
+#include "runtime/os_interface/linux/allocator_helper.h"
 #include "runtime/os_interface/linux/drm_memory_manager.h"
 #include "unit_tests/mocks/mock_allocation_properties.h"
 #include "unit_tests/mocks/mock_host_ptr_manager.h"
@@ -49,11 +50,11 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     using DrmMemoryManager::AllocationData;
     using DrmMemoryManager::allocUserptr;
     using DrmMemoryManager::createGraphicsAllocation;
-    using DrmMemoryManager::internal32bitAllocator;
-    using DrmMemoryManager::limitedGpuAddressRangeAllocator;
+    using DrmMemoryManager::gfxPartition;
     using DrmMemoryManager::pinThreshold;
     using DrmMemoryManager::setDomainCpu;
     using DrmMemoryManager::sharingBufferObjects;
+    using DrmMemoryManager::supportsMultiStorageResources;
     using MemoryManager::allocateGraphicsMemoryInDevicePool;
 
     TestedDrmMemoryManager(ExecutionEnvironment &executionEnvironment) : MemoryManagerCreate(gemCloseWorkerMode::gemCloseWorkerInactive,
@@ -100,14 +101,13 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     }
 
     DrmGemCloseWorker *getgemCloseWorker() { return this->gemCloseWorker.get(); }
-    void forceLimitedRangeAllocator(uint64_t range) { initInternalRangeAllocator(range); }
+    void forceLimitedRangeAllocator(uint64_t range) { gfxPartition.init(range, getSizeToReserve()); }
 
-    Allocator32bit *getDrmInternal32BitAllocator() const { return internal32bitAllocator.get(); }
-    AllocatorLimitedRange *getDrmLimitedRangeAllocator() const { return limitedGpuAddressRangeAllocator.get(); }
     DrmAllocation *allocate32BitGraphicsMemory(size_t size, const void *ptr, GraphicsAllocation::AllocationType allocationType) {
         bool allocateMemory = ptr == nullptr;
         AllocationData allocationData;
-        getAllocationData(allocationData, MockAllocationProperties(allocateMemory, size, allocationType), {}, ptr);
+        MockAllocationProperties properties(allocateMemory, size, allocationType);
+        getAllocationData(allocationData, properties, ptr, createStorageInfoFromProperties(properties));
         return allocate32BitGraphicsMemoryImpl(allocationData);
     }
 };

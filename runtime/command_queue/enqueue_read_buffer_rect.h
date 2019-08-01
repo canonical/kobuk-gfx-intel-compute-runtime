@@ -10,7 +10,7 @@
 #include "runtime/command_queue/command_queue_hw.h"
 #include "runtime/command_queue/enqueue_common.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/surface.h"
 
@@ -43,25 +43,8 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadBufferRect(
         isMemTransferNeeded = buffer->checkIfMemoryTransferIsRequired(bufferOffset, hostOffset, ptr, CL_COMMAND_READ_BUFFER_RECT);
     }
     if (!isMemTransferNeeded) {
-        NullSurface s;
-        Surface *surfaces[] = {&s};
-        enqueueHandler<CL_COMMAND_MARKER>(
-            surfaces,
-            blockingRead == CL_TRUE,
-            dispatchInfo,
-            numEventsInWaitList,
-            eventWaitList,
-            event);
-        if (event) {
-            auto pEvent = castToObjectOrAbort<Event>(*event);
-            pEvent->setCmdType(CL_COMMAND_READ_BUFFER_RECT);
-        }
-
-        if (context->isProvidingPerformanceHints()) {
-            context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_GOOD_INTEL, CL_ENQUEUE_READ_BUFFER_RECT_DOESNT_REQUIRES_COPY_DATA, static_cast<cl_mem>(buffer), ptr);
-        }
-
-        return CL_SUCCESS;
+        return enqueueMarkerForReadWriteOperation(buffer, ptr, CL_COMMAND_READ_BUFFER_RECT, blockingRead,
+                                                  numEventsInWaitList, eventWaitList, event);
     }
     auto &builder = getDevice().getExecutionEnvironment()->getBuiltIns()->getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyBufferRect,
                                                                                                         this->getContext(), this->getDevice());
@@ -77,7 +60,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadBufferRect(
     if (region[0] != 0 &&
         region[1] != 0 &&
         region[2] != 0) {
-        bool status = getCommandStreamReceiver().createAllocationForHostSurface(hostPtrSurf, true);
+        bool status = getGpgpuCommandStreamReceiver().createAllocationForHostSurface(hostPtrSurf, true);
         if (!status) {
             return CL_OUT_OF_RESOURCES;
         }
@@ -87,7 +70,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadBufferRect(
     void *alignedDstPtr = alignDown(dstPtr, 4);
     size_t dstPtrOffset = ptrDiff(dstPtr, alignedDstPtr);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.srcMemObj = buffer;
     dc.dstPtr = alignedDstPtr;
     dc.srcOffset = bufferOrigin;
@@ -109,7 +92,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadBufferRect(
         event);
 
     if (context->isProvidingPerformanceHints()) {
-        context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, CL_ENQUEUE_READ_BUFFER_RECT_REQUIRES_COPY_DATA, static_cast<cl_mem>(buffer), ptr);
+        context->providePerformanceHintForMemoryTransfer(CL_COMMAND_READ_BUFFER_RECT, true, static_cast<cl_mem>(buffer), ptr);
         if (!isL3Capable(ptr, hostPtrSize)) {
             context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, CL_ENQUEUE_READ_BUFFER_RECT_DOESNT_MEET_ALIGNMENT_RESTRICTIONS, ptr, hostPtrSize, MemoryConstants::pageSize, MemoryConstants::pageSize);
         }

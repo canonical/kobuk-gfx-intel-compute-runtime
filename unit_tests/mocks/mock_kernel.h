@@ -31,8 +31,10 @@ class MockKernel : public Kernel {
     using Kernel::kernelArgRequiresCacheFlush;
     using Kernel::kernelArguments;
     using Kernel::kernelSvmGfxAllocations;
+    using Kernel::kernelUnifiedMemoryGfxAllocations;
     using Kernel::numberOfBindingTableStates;
     using Kernel::svmAllocationsRequireCacheFlush;
+    using Kernel::unifiedMemoryControls;
 
     struct BlockPatchValues {
         uint64_t offset;
@@ -225,10 +227,9 @@ class MockKernel : public Kernel {
 
     void makeResident(CommandStreamReceiver &commandStreamReceiver) override;
     void getResidency(std::vector<Surface *> &dst) override;
-    bool takeOwnership(bool lock) const override {
-        auto retVal = Kernel::takeOwnership(lock);
+    void takeOwnership() const override {
+        Kernel::takeOwnership();
         takeOwnershipCalls++;
-        return retVal;
     }
 
     void releaseOwnership() const override {
@@ -261,6 +262,7 @@ class MockKernelWithInternals {
         memset(&executionEnvironmentBlock, 0, sizeof(SPatchExecutionEnvironment));
         memset(&dataParameterStream, 0, sizeof(SPatchDataParameterStream));
         memset(&mediaVfeState, 0, sizeof(SPatchMediaVFEState));
+        memset(&mediaVfeStateSlot1, 0, sizeof(SPatchMediaVFEState));
         executionEnvironment.NumGRFRequired = GrfConfig::DefaultGrfNumber;
         executionEnvironmentBlock.NumGRFRequired = GrfConfig::DefaultGrfNumber;
         kernelHeader.SurfaceStateHeapSize = sizeof(sshLocal);
@@ -275,6 +277,7 @@ class MockKernelWithInternals {
         kernelInfo.patchInfo.executionEnvironment = &executionEnvironment;
         kernelInfo.patchInfo.threadPayload = &threadPayload;
         kernelInfo.patchInfo.mediavfestate = &mediaVfeState;
+        kernelInfo.patchInfo.mediaVfeStateSlot1 = &mediaVfeStateSlot1;
 
         if (context == nullptr) {
             mockContext = new MockContext;
@@ -298,6 +301,7 @@ class MockKernelWithInternals {
             kernelInfo.kernelArgInfo[0].kernelArgPatchInfoVector[0].crossthreadOffset = 0;
             kernelInfo.kernelArgInfo[0].kernelArgPatchInfoVector[0].size = sizeof(uintptr_t);
             mockKernel->setKernelArguments(defaultKernelArguments);
+            mockKernel->kernelArgRequiresCacheFlush.resize(1);
         }
     }
     ~MockKernelWithInternals() {
@@ -317,6 +321,7 @@ class MockKernelWithInternals {
     SKernelBinaryHeaderCommon kernelHeader = {};
     SPatchThreadPayload threadPayload = {};
     SPatchMediaVFEState mediaVfeState = {};
+    SPatchMediaVFEState mediaVfeStateSlot1 = {};
     SPatchDataParameterStream dataParameterStream = {};
     SPatchExecutionEnvironment executionEnvironment = {};
     SPatchExecutionEnvironment executionEnvironmentBlock = {};

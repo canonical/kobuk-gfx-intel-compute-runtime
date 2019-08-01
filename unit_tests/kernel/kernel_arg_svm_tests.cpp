@@ -414,7 +414,7 @@ HWTEST_TYPED_TEST(KernelArgSvmTestTyped, GivenBufferKernelArgWhenBufferOffsetIsN
     alignedFree(svmPtr);
 }
 
-TEST_F(KernelArgSvmTest, givenWritebleSvmAllocationWhenSettingAsArgThenExpectAllocationInCacheFlushVector) {
+TEST_F(KernelArgSvmTest, givenWritableSvmAllocationWhenSettingAsArgThenDoNotExpectAllocationInCacheFlushVector) {
     size_t svmSize = 4096;
     void *svmPtr = alignedMalloc(svmSize, MemoryConstants::pageSize);
     MockGraphicsAllocation svmAlloc(svmPtr, svmSize);
@@ -424,7 +424,7 @@ TEST_F(KernelArgSvmTest, givenWritebleSvmAllocationWhenSettingAsArgThenExpectAll
 
     auto retVal = pKernel->setArgSvmAlloc(0, svmPtr, &svmAlloc);
     EXPECT_EQ(CL_SUCCESS, retVal);
-    EXPECT_EQ(&svmAlloc, pKernel->kernelArgRequiresCacheFlush[0]);
+    EXPECT_EQ(nullptr, pKernel->kernelArgRequiresCacheFlush[0]);
 
     alignedFree(svmPtr);
 }
@@ -459,7 +459,7 @@ TEST_F(KernelArgSvmTest, givenNoCacheFlushSvmAllocationWhenSettingAsArgThenNotEx
     alignedFree(svmPtr);
 }
 
-TEST_F(KernelArgSvmTest, givenWritableSvmAllocationWhenSettingKernelExecInfoThenExpectSvmFlushFlagTrue) {
+TEST_F(KernelArgSvmTest, givenWritableSvmAllocationWhenSettingKernelExecInfoThenDoNotExpectSvmFlushFlagTrue) {
     size_t svmSize = 4096;
     void *svmPtr = alignedMalloc(svmSize, MemoryConstants::pageSize);
     MockGraphicsAllocation svmAlloc(svmPtr, svmSize);
@@ -467,8 +467,8 @@ TEST_F(KernelArgSvmTest, givenWritableSvmAllocationWhenSettingKernelExecInfoThen
     svmAlloc.setMemObjectsAllocationWithWritableFlags(true);
     svmAlloc.setFlushL3Required(false);
 
-    pKernel->setKernelExecInfo(&svmAlloc);
-    EXPECT_TRUE(pKernel->svmAllocationsRequireCacheFlush);
+    pKernel->setSvmKernelExecInfo(&svmAlloc);
+    EXPECT_FALSE(pKernel->svmAllocationsRequireCacheFlush);
 
     alignedFree(svmPtr);
 }
@@ -481,7 +481,7 @@ TEST_F(KernelArgSvmTest, givenCacheFlushSvmAllocationWhenSettingKernelExecInfoTh
     svmAlloc.setMemObjectsAllocationWithWritableFlags(false);
     svmAlloc.setFlushL3Required(true);
 
-    pKernel->setKernelExecInfo(&svmAlloc);
+    pKernel->setSvmKernelExecInfo(&svmAlloc);
     EXPECT_TRUE(pKernel->svmAllocationsRequireCacheFlush);
 
     alignedFree(svmPtr);
@@ -495,7 +495,7 @@ TEST_F(KernelArgSvmTest, givenNoCacheFlushReadOnlySvmAllocationWhenSettingKernel
     svmAlloc.setMemObjectsAllocationWithWritableFlags(false);
     svmAlloc.setFlushL3Required(false);
 
-    pKernel->setKernelExecInfo(&svmAlloc);
+    pKernel->setSvmKernelExecInfo(&svmAlloc);
     EXPECT_FALSE(pKernel->svmAllocationsRequireCacheFlush);
 
     alignedFree(svmPtr);

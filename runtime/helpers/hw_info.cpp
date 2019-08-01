@@ -12,18 +12,15 @@
 #include "hw_cmds.h"
 
 namespace NEO {
-HardwareInfo::HardwareInfo(const PLATFORM *platform, const FeatureTable *skuTable, const WorkaroundTable *waTable,
-                           const GT_SYSTEM_INFO *sysInfo, const RuntimeCapabilityTable &capabilityTable)
-    : pPlatform(platform), pSkuTable(skuTable), pWaTable(waTable), pSysInfo(sysInfo), capabilityTable(capabilityTable) {
+HardwareInfo::HardwareInfo(const PLATFORM *platform, const FeatureTable *featureTable, const WorkaroundTable *workaroundTable,
+                           const GT_SYSTEM_INFO *gtSystemInfo, const RuntimeCapabilityTable &capabilityTable)
+    : platform(*platform), featureTable(*featureTable), workaroundTable(*workaroundTable), gtSystemInfo(*gtSystemInfo), capabilityTable(capabilityTable) {
 }
 
 const HardwareInfo *hardwareInfoTable[IGFX_MAX_PRODUCT] = {};
-void (*hardwareInfoSetup[IGFX_MAX_PRODUCT])(GT_SYSTEM_INFO *, FeatureTable *, bool, const std::string &) = {
+void (*hardwareInfoSetup[IGFX_MAX_PRODUCT])(HardwareInfo *, bool, const std::string &) = {
     nullptr,
 };
-
-const FeatureTable emptySkuTable = {};
-const WorkaroundTable emptyWaTable = {};
 
 const char *getPlatformType(const HardwareInfo &hwInfo) {
     if (hwInfo.capabilityTable.isCore) {

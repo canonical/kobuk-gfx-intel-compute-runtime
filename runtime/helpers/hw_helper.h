@@ -10,6 +10,7 @@
 #include "runtime/command_stream/linear_stream.h"
 #include "runtime/gen_common/aub_mapper.h"
 #include "runtime/gen_common/hw_cmds.h"
+#include "runtime/mem_obj/buffer.h"
 
 #include "CL/cl.h"
 
@@ -41,7 +42,8 @@ class HwHelper {
     virtual bool isPageTableManagerSupported(const HardwareInfo &hwInfo) const = 0;
     virtual const AubMemDump::LrcaHelper &getCsTraits(aub_stream::EngineType engineType) const = 0;
     virtual bool supportsYTiling() const = 0;
-    virtual bool obtainRenderBufferCompressionPreference(const HardwareInfo &hwInfo) const = 0;
+    virtual bool obtainRenderBufferCompressionPreference(const size_t size) const = 0;
+    virtual void checkResourceCompatibility(Buffer *buffer, cl_int &errorCode) = 0;
     static bool renderCompressedBuffersSupported(const HardwareInfo &hwInfo);
     static bool renderCompressedImagesSupported(const HardwareInfo &hwInfo);
     static bool cacheFlushAfterWalkerSupported(const HardwareInfo &hwInfo);
@@ -61,6 +63,8 @@ class HwHelper {
     virtual const std::vector<aub_stream::EngineType> getGpgpuEngineInstances() const = 0;
     virtual bool getEnableLocalMemory(const HardwareInfo &hwInfo) const = 0;
     virtual std::string getExtensions() const = 0;
+    static uint32_t getMaxThreadsForVfe(const HardwareInfo &hwInfo);
+    virtual uint32_t getMetricsLibraryGenId() const = 0;
 
     static constexpr uint32_t lowPriorityGpgpuEngineIndex = 1;
 
@@ -125,7 +129,9 @@ class HwHelperHw : public HwHelper {
 
     bool supportsYTiling() const override;
 
-    bool obtainRenderBufferCompressionPreference(const HardwareInfo &hwInfo) const override;
+    bool obtainRenderBufferCompressionPreference(const size_t size) const override;
+
+    void checkResourceCompatibility(Buffer *buffer, cl_int &errorCode) override;
 
     bool timestampPacketWriteSupported() const override;
 
@@ -149,6 +155,8 @@ class HwHelperHw : public HwHelper {
     bool getEnableLocalMemory(const HardwareInfo &hwInfo) const override;
 
     std::string getExtensions() const override;
+
+    uint32_t getMetricsLibraryGenId() const override;
 
   protected:
     HwHelperHw() = default;
@@ -184,11 +192,18 @@ template <typename GfxFamily>
 struct PipeControlHelper {
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
     using POST_SYNC_OPERATION = typename GfxFamily::PIPE_CONTROL::POST_SYNC_OPERATION;
-    static PIPE_CONTROL *obtainPipeControlAndProgramPostSyncOperation(LinearStream *commandStream,
+    static PIPE_CONTROL *obtainPipeControlAndProgramPostSyncOperation(LinearStream &commandStream,
                                                                       POST_SYNC_OPERATION operation,
                                                                       uint64_t gpuAddress,
                                                                       uint64_t immediateData,
                                                                       bool dcFlush);
+    static void addPipeControlWA(LinearStream &commandStream);
+    static PIPE_CONTROL *addPipeControl(LinearStream &commandStream, bool dcFlush);
+    static size_t getSizeForPipeControlWithPostSyncOperation();
+    static size_t getSizeForSinglePipeControl();
+
+  protected:
+    static PIPE_CONTROL *obtainPipeControl(LinearStream &commandStream, bool dcFlush);
 };
 
 union SURFACE_STATE_BUFFER_LENGTH {

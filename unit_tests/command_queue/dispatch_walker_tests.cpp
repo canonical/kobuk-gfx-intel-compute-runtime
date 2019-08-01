@@ -5,20 +5,21 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
+#include "runtime/built_ins/aux_translation_builtin.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/command_queue/hardware_interface.h"
 #include "runtime/event/perf_counter.h"
 #include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/task_information.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
 #include "runtime/utilities/tag_allocator.h"
 #include "test.h"
 #include "unit_tests/command_queue/command_queue_fixture.h"
 #include "unit_tests/fixtures/device_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/hw_parse.h"
-#include "unit_tests/libult/mock_gfx_family.h"
+#include "unit_tests/mocks/mock_buffer.h"
 #include "unit_tests/mocks/mock_command_queue.h"
 #include "unit_tests/mocks/mock_graphics_allocation.h"
 #include "unit_tests/mocks/mock_kernel.h"
@@ -119,7 +120,7 @@ HWTEST_F(DispatchWalkerTest, shouldntChangeCommandStreamMemory) {
 
     // Consume all memory except what is needed for this enqueue
     auto sizeDispatchWalkerNeeds = sizeof(typename FamilyType::WALKER_TYPE) +
-                                   KernelCommandsHelper<FamilyType>::getSizeRequiredCS(&kernel);
+                                   HardwareCommandsHelper<FamilyType>::getSizeRequiredCS(&kernel);
 
     //cs has a minimum required size
     auto sizeThatNeedsToBeSubstracted = sizeDispatchWalkerNeeds + CSRequirements::minCommandQueueCommandStreamSize;
@@ -167,7 +168,7 @@ HWTEST_F(DispatchWalkerTest, noLocalIdsShouldntCrash) {
 
     // Consume all memory except what is needed for this enqueue
     auto sizeDispatchWalkerNeeds = sizeof(typename FamilyType::WALKER_TYPE) +
-                                   KernelCommandsHelper<FamilyType>::getSizeRequiredCS(&kernel);
+                                   HardwareCommandsHelper<FamilyType>::getSizeRequiredCS(&kernel);
 
     //cs has a minimum required size
     auto sizeThatNeedsToBeSubstracted = sizeDispatchWalkerNeeds + CSRequirements::minCommandQueueCommandStreamSize;
@@ -724,9 +725,9 @@ HWTEST_F(DispatchWalkerTest, dispatchWalkerShouldGetRequiredHeapSizesFromKernelW
 
     auto expectedSizeCSAllocation = MemoryConstants::pageSize64k;
     auto expectedSizeCS = MemoryConstants::pageSize64k - CSRequirements::csOverfetchSize;
-    auto expectedSizeDSH = KernelCommandsHelper<FamilyType>::getSizeRequiredDSH(kernel);
-    auto expectedSizeIOH = KernelCommandsHelper<FamilyType>::getSizeRequiredIOH(kernel, Math::computeTotalElementsCount(localWorkgroupSize));
-    auto expectedSizeSSH = KernelCommandsHelper<FamilyType>::getSizeRequiredSSH(kernel);
+    auto expectedSizeDSH = HardwareCommandsHelper<FamilyType>::getSizeRequiredDSH(kernel);
+    auto expectedSizeIOH = HardwareCommandsHelper<FamilyType>::getSizeRequiredIOH(kernel, Math::computeTotalElementsCount(localWorkgroupSize));
+    auto expectedSizeSSH = HardwareCommandsHelper<FamilyType>::getSizeRequiredSSH(kernel);
 
     EXPECT_EQ(expectedSizeCSAllocation, blockedCommandsData->commandStream->getGraphicsAllocation()->getUnderlyingBufferSize());
     EXPECT_EQ(expectedSizeCS, blockedCommandsData->commandStream->getMaxAvailableSpace());
@@ -762,9 +763,9 @@ HWTEST_F(DispatchWalkerTest, dispatchWalkerShouldGetRequiredHeapSizesFromMdiWhen
 
     auto expectedSizeCSAllocation = MemoryConstants::pageSize64k;
     auto expectedSizeCS = MemoryConstants::pageSize64k - CSRequirements::csOverfetchSize;
-    auto expectedSizeDSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
-    auto expectedSizeIOH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
-    auto expectedSizeSSH = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
+    auto expectedSizeDSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredDSH(multiDispatchInfo);
+    auto expectedSizeIOH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredIOH(multiDispatchInfo);
+    auto expectedSizeSSH = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
 
     EXPECT_EQ(expectedSizeCSAllocation, blockedCommandsData->commandStream->getGraphicsAllocation()->getUnderlyingBufferSize());
     EXPECT_EQ(expectedSizeCS, blockedCommandsData->commandStream->getMaxAvailableSpace());
@@ -805,7 +806,7 @@ HWTEST_F(DispatchWalkerTest, givenThereAreAllocationsForReuseWhenDispatchWalkerI
     ASSERT_EQ(CL_SUCCESS, kernel.initialize());
     MockMultiDispatchInfo multiDispatchInfo(&kernel);
 
-    auto &csr = pCmdQ->getCommandStreamReceiver();
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
     auto allocation = csr.getMemoryManager()->allocateGraphicsMemoryWithProperties({MemoryConstants::pageSize64k + CSRequirements::csOverfetchSize,
                                                                                     GraphicsAllocation::AllocationType::COMMAND_BUFFER});
     csr.getInternalAllocationStorage()->storeAllocation(std::unique_ptr<GraphicsAllocation>{allocation}, REUSABLE_ALLOCATION);
@@ -878,7 +879,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, DispatchWalkerTest, dispatchWalkerWithMultipleDispat
     // create Indirect DSH heap
     auto &indirectHeap = pCmdQ->getIndirectHeap(IndirectHeap::DYNAMIC_STATE, 8192);
 
-    indirectHeap.align(KernelCommandsHelper<FamilyType>::alignInterfaceDescriptorData);
+    indirectHeap.align(HardwareCommandsHelper<FamilyType>::alignInterfaceDescriptorData);
     auto dshBeforeMultiDisptach = indirectHeap.getUsed();
 
     HardwareInterface<FamilyType>::dispatchWalker(
@@ -1105,7 +1106,6 @@ HWTEST_F(DispatchWalkerTest, GivenCacheFlushAfterWalkerDisabledWhenAllocationReq
 
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.EnableCacheFlushAfterWalker.set(0);
-    DebugManager.flags.EnableCacheFlushAfterWalkerForAllQueues.set(1);
 
     MockKernel kernel1(program.get(), kernelInfo, *pDevice);
     ASSERT_EQ(CL_SUCCESS, kernel1.initialize());
@@ -1140,7 +1140,6 @@ HWTEST_F(DispatchWalkerTest, GivenCacheFlushAfterWalkerEnabledWhenWalkerWithTwoK
 
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.EnableCacheFlushAfterWalker.set(1);
-    DebugManager.flags.EnableCacheFlushAfterWalkerForAllQueues.set(1);
 
     MockKernel kernel1(program.get(), kernelInfo, *pDevice);
     ASSERT_EQ(CL_SUCCESS, kernel1.initialize());
@@ -1180,7 +1179,6 @@ HWTEST_F(DispatchWalkerTest, GivenCacheFlushAfterWalkerEnabledWhenTwoWalkersForQ
 
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.EnableCacheFlushAfterWalker.set(1);
-    DebugManager.flags.EnableCacheFlushAfterWalkerForAllQueues.set(1);
 
     MockKernel kernel1(program.get(), kernelInfo, *pDevice);
     ASSERT_EQ(CL_SUCCESS, kernel1.initialize());
@@ -1270,19 +1268,13 @@ TEST(DispatchWalker, calculateDispatchDim) {
     }
 }
 
-HWTEST_F(DispatchWalkerTest, WhenCallingDefaultWaMethodsThenExpectNothing) {
-    auto &cmdStream = pCmdQ->getCS(0);
-    MockKernel kernel(program.get(), kernelInfo, *pDevice);
-    EXPECT_EQ(CL_SUCCESS, kernel.initialize());
+HWTEST_F(DispatchWalkerTest, givenKernelWhenAuxToNonAuxWhenTranslationRequiredThenPipeControlWithStallAndDCFlushAdded) {
+    MockContext context;
+    auto executionEnvironment = pDevice->getExecutionEnvironment();
+    auto builtIns = executionEnvironment->getBuiltIns();
+    BuiltinDispatchInfoBuilder &baseBuilder = builtIns->getBuiltinDispatchInfoBuilder(EBuiltInOps::AuxTranslation, context, *pDevice);
+    auto &builder = static_cast<BuiltInOp<EBuiltInOps::AuxTranslation> &>(baseBuilder);
 
-    GpgpuWalkerHelper<GENX>::applyWADisableLSQCROPERFforOCL(&cmdStream, kernel, false);
-
-    size_t expectedSize = 0;
-    size_t actualSize = GpgpuWalkerHelper<GENX>::getSizeForWADisableLSQCROPERFforOCL(&kernel);
-    EXPECT_EQ(expectedSize, actualSize);
-}
-
-HWTEST_F(DispatchWalkerTest, givenKernelWhenAuxTranslationRequiredThenPipeControlWithStallAndDCFlushAdded) {
     MockKernel kernel(program.get(), kernelInfo, *pDevice);
     kernelInfo.workloadInfo.workDimOffset = 0;
     ASSERT_EQ(CL_SUCCESS, kernel.initialize());
@@ -1290,11 +1282,18 @@ HWTEST_F(DispatchWalkerTest, givenKernelWhenAuxTranslationRequiredThenPipeContro
     auto &cmdStream = pCmdQ->getCS(0);
     void *buffer = cmdStream.getCpuBase();
     kernel.auxTranslationRequired = true;
+    MockBuffer mockBuffer[2];
 
-    MockMultiDispatchInfo multiDispatchInfo(&kernel);
-    DispatchInfo di1(&kernel, 1, Vec3<size_t>(1, 1, 1), Vec3<size_t>(1, 1, 1), Vec3<size_t>(0, 0, 0));
-    di1.setPipeControlRequired(true);
-    multiDispatchInfo.push(di1);
+    MultiDispatchInfo multiDispatchInfo;
+    MemObjsForAuxTranslation memObjsForAuxTranslation;
+    memObjsForAuxTranslation.insert(&mockBuffer[0]);
+    memObjsForAuxTranslation.insert(&mockBuffer[1]);
+
+    BuiltinOpParams builtinOpsParams;
+    builtinOpsParams.memObjsForAuxTranslation = &memObjsForAuxTranslation;
+    builtinOpsParams.auxTranslationDirection = AuxTranslationDirection::AuxToNonAux;
+
+    builder.buildDispatchInfosForAuxTranslation<FamilyType>(multiDispatchInfo, builtinOpsParams);
 
     HardwareInterface<FamilyType>::dispatchWalker(
         *pCmdQ,
@@ -1321,7 +1320,66 @@ HWTEST_F(DispatchWalkerTest, givenKernelWhenAuxTranslationRequiredThenPipeContro
     EXPECT_TRUE(beginPipeControl->getCommandStreamerStallEnable());
 
     auto endPipeControl = genCmdCast<typename FamilyType::PIPE_CONTROL *>(*(pipeControls[1]));
-    EXPECT_FALSE(endPipeControl->getDcFlushEnable());
+    bool dcFlushRequired = (executionEnvironment->getHardwareInfo()->platform.eRenderCoreFamily == IGFX_GEN8_CORE);
+    EXPECT_EQ(dcFlushRequired, endPipeControl->getDcFlushEnable());
+    EXPECT_TRUE(endPipeControl->getCommandStreamerStallEnable());
+}
+
+HWTEST_F(DispatchWalkerTest, givenKernelWhenNonAuxToAuxWhenTranslationRequiredThenPipeControlWithStallAdded) {
+    MockContext context;
+    auto executionEnvironment = pDevice->getExecutionEnvironment();
+    auto builtIns = executionEnvironment->getBuiltIns();
+    BuiltinDispatchInfoBuilder &baseBuilder = builtIns->getBuiltinDispatchInfoBuilder(EBuiltInOps::AuxTranslation, context, *pDevice);
+    auto &builder = static_cast<BuiltInOp<EBuiltInOps::AuxTranslation> &>(baseBuilder);
+
+    MockKernel kernel(program.get(), kernelInfo, *pDevice);
+    kernelInfo.workloadInfo.workDimOffset = 0;
+    ASSERT_EQ(CL_SUCCESS, kernel.initialize());
+
+    auto &cmdStream = pCmdQ->getCS(0);
+    void *buffer = cmdStream.getCpuBase();
+    kernel.auxTranslationRequired = true;
+    MockBuffer mockBuffer[2];
+
+    MultiDispatchInfo multiDispatchInfo;
+    MemObjsForAuxTranslation memObjsForAuxTranslation;
+    memObjsForAuxTranslation.insert(&mockBuffer[0]);
+    memObjsForAuxTranslation.insert(&mockBuffer[1]);
+
+    BuiltinOpParams builtinOpsParams;
+    builtinOpsParams.memObjsForAuxTranslation = &memObjsForAuxTranslation;
+    builtinOpsParams.auxTranslationDirection = AuxTranslationDirection::NonAuxToAux;
+
+    builder.buildDispatchInfosForAuxTranslation<FamilyType>(multiDispatchInfo, builtinOpsParams);
+
+    HardwareInterface<FamilyType>::dispatchWalker(
+        *pCmdQ,
+        multiDispatchInfo,
+        CsrDependencies(),
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        pDevice->getPreemptionMode(),
+        false);
+
+    auto sizeUsed = cmdStream.getUsed();
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(cmdList, buffer, sizeUsed));
+
+    auto pipeControls = findAll<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+
+    ASSERT_EQ(2u, pipeControls.size());
+
+    bool dcFlushRequired = (executionEnvironment->getHardwareInfo()->platform.eRenderCoreFamily == IGFX_GEN8_CORE);
+
+    auto beginPipeControl = genCmdCast<typename FamilyType::PIPE_CONTROL *>(*(pipeControls[0]));
+    EXPECT_EQ(dcFlushRequired, beginPipeControl->getDcFlushEnable());
+    EXPECT_TRUE(beginPipeControl->getCommandStreamerStallEnable());
+
+    auto endPipeControl = genCmdCast<typename FamilyType::PIPE_CONTROL *>(*(pipeControls[1]));
+    EXPECT_EQ(dcFlushRequired, endPipeControl->getDcFlushEnable());
     EXPECT_TRUE(endPipeControl->getCommandStreamerStallEnable());
 }
 
@@ -1367,8 +1425,8 @@ HWTEST_P(ProfilingCommandsTest, givenKernelWhenProfilingCommandStartIsTakenThenT
     ASSERT_NE(nullptr, storeReg);
 
     uint64_t gpuAddress = storeReg->getMemoryAddress();
-    auto timestampFieldAddress = checkForStart ? &hwTimeStamp1->tagForCpuAccess->ContextStartTS : &hwTimeStamp1->tagForCpuAccess->ContextEndTS;
-    uint64_t expectedAddress = hwTimeStamp1->getBaseGraphicsAllocation()->getGpuAddress() + ptrDiff(timestampFieldAddress, hwTimeStamp1->getBaseGraphicsAllocation()->getUnderlyingBuffer());
+    auto contextTimestampFieldOffset = checkForStart ? offsetof(HwTimeStamps, ContextStartTS) : offsetof(HwTimeStamps, ContextEndTS);
+    uint64_t expectedAddress = hwTimeStamp1->getGpuAddress() + contextTimestampFieldOffset;
     EXPECT_EQ(expectedAddress, gpuAddress);
 
     itorStoreReg++;
@@ -1378,30 +1436,33 @@ HWTEST_P(ProfilingCommandsTest, givenKernelWhenProfilingCommandStartIsTakenThenT
     ASSERT_NE(nullptr, storeReg);
 
     gpuAddress = storeReg->getMemoryAddress();
-    timestampFieldAddress = checkForStart ? &hwTimeStamp2->tagForCpuAccess->ContextStartTS : &hwTimeStamp2->tagForCpuAccess->ContextEndTS;
-    expectedAddress = hwTimeStamp2->getBaseGraphicsAllocation()->getGpuAddress() + ptrDiff(timestampFieldAddress, hwTimeStamp2->getBaseGraphicsAllocation()->getUnderlyingBuffer());
+    expectedAddress = hwTimeStamp2->getGpuAddress() + contextTimestampFieldOffset;
     EXPECT_EQ(expectedAddress, gpuAddress);
 
     if (checkForStart) {
         auto itorPipeCtrl = find<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
         ASSERT_NE(cmdList.end(), itorPipeCtrl);
+        if (HardwareCommandsHelper<FamilyType>::isPipeControlWArequired()) {
+            itorPipeCtrl++;
+        }
         auto pipeControl = genCmdCast<PIPE_CONTROL *>(*itorPipeCtrl);
         ASSERT_NE(nullptr, pipeControl);
 
         gpuAddress = static_cast<uint64_t>(pipeControl->getAddress()) | (static_cast<uint64_t>(pipeControl->getAddressHigh()) << 32);
-        timestampFieldAddress = checkForStart ? &hwTimeStamp1->tagForCpuAccess->GlobalStartTS : &hwTimeStamp1->tagForCpuAccess->GlobalEndTS;
-        expectedAddress = hwTimeStamp1->getBaseGraphicsAllocation()->getGpuAddress() + ptrDiff(timestampFieldAddress, hwTimeStamp1->getBaseGraphicsAllocation()->getUnderlyingBuffer());
+        expectedAddress = hwTimeStamp1->getGpuAddress() + offsetof(HwTimeStamps, GlobalStartTS);
         EXPECT_EQ(expectedAddress, gpuAddress);
 
         itorPipeCtrl++;
         itorPipeCtrl = find<typename FamilyType::PIPE_CONTROL *>(itorPipeCtrl, cmdList.end());
+        if (HardwareCommandsHelper<FamilyType>::isPipeControlWArequired()) {
+            itorPipeCtrl++;
+        }
         ASSERT_NE(cmdList.end(), itorPipeCtrl);
         pipeControl = genCmdCast<PIPE_CONTROL *>(*itorPipeCtrl);
         ASSERT_NE(nullptr, pipeControl);
 
         gpuAddress = static_cast<uint64_t>(pipeControl->getAddress()) | static_cast<uint64_t>(pipeControl->getAddressHigh()) << 32;
-        timestampFieldAddress = checkForStart ? &hwTimeStamp2->tagForCpuAccess->GlobalStartTS : &hwTimeStamp2->tagForCpuAccess->GlobalEndTS;
-        expectedAddress = hwTimeStamp2->getBaseGraphicsAllocation()->getGpuAddress() + ptrDiff(timestampFieldAddress, hwTimeStamp2->getBaseGraphicsAllocation()->getUnderlyingBuffer());
+        expectedAddress = hwTimeStamp2->getGpuAddress() + offsetof(HwTimeStamps, GlobalStartTS);
         EXPECT_EQ(expectedAddress, gpuAddress);
     }
 }

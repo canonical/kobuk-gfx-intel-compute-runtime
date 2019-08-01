@@ -11,7 +11,6 @@
 #include "test.h"
 #include "unit_tests/fixtures/buffer_fixture.h"
 #include "unit_tests/helpers/execution_environment_helper.h"
-#include "unit_tests/helpers/hw_info_helper.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/mocks/mock_command_queue.h"
 #include "unit_tests/mocks/mock_device.h"
@@ -43,7 +42,7 @@ struct EnqueueBufferWindowsTest : public HardwareParse,
         memoryManager = new MockWddmMemoryManager(*executionEnvironment);
         executionEnvironment->memoryManager.reset(memoryManager);
 
-        device = std::unique_ptr<MockDevice>(Device::create<MockDevice>(hwInfo, executionEnvironment, 0));
+        device = std::unique_ptr<MockDevice>(Device::create<MockDevice>(executionEnvironment, 0));
 
         context = std::make_unique<MockContext>(device.get());
 
@@ -62,7 +61,7 @@ struct EnqueueBufferWindowsTest : public HardwareParse,
     }
 
   protected:
-    HwInfoHelper hwInfoHelper;
+    HardwareInfo hardwareInfo;
     HardwareInfo *hwInfo = nullptr;
     ExecutionEnvironment *executionEnvironment;
     cl_queue_properties properties = {};
@@ -81,12 +80,12 @@ HWTEST_F(EnqueueBufferWindowsTest, givenMisalignedHostPtrWhenEnqueueReadBufferCa
     char *misalignedPtr = reinterpret_cast<char *>(memory) + 1;
 
     buffer->forceDisallowCPUCopy = true;
-    auto retVal = cmdQ->enqueueReadBuffer(buffer.get(), CL_FALSE, 0, 4, misalignedPtr, 0, nullptr, nullptr);
+    auto retVal = cmdQ->enqueueReadBuffer(buffer.get(), CL_FALSE, 0, 4, misalignedPtr, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(0, cmdQ->lastEnqueuedKernels.size());
     Kernel *kernel = cmdQ->lastEnqueuedKernels[0];
 
-    auto hostPtrAllcoation = cmdQ->getCommandStreamReceiver().getInternalAllocationStorage()->getTemporaryAllocations().peekHead();
+    auto hostPtrAllcoation = cmdQ->getGpgpuCommandStreamReceiver().getInternalAllocationStorage()->getTemporaryAllocations().peekHead();
 
     while (hostPtrAllcoation != nullptr) {
         if (hostPtrAllcoation->getUnderlyingBuffer() == misalignedPtr) {

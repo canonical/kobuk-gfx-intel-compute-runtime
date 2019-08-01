@@ -38,9 +38,9 @@ void ImageHw<GfxFamily>::setImageArg(void *memory, bool setAsMediaBlockImage, ui
         imageCount = 1;
     }
 
-    const auto arraySize = getImageDesc().image_array_size;
-    const bool isNv12 = IsNV12Image(&getImageFormat());
-    bool isImageArray = (arraySize > 1u || (isNv12 && arraySize == 1u));
+    bool isImageArray = getImageDesc().image_array_size > 1 &&
+                        (getImageDesc().image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY ||
+                         getImageDesc().image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY);
 
     uint32_t renderTargetViewExtent = static_cast<uint32_t>(imageCount);
     uint32_t minimumArrayElement = 0;
@@ -262,5 +262,13 @@ void ImageHw<GfxFamily>::transformImage3dTo2dArray(void *memory) {
     auto surfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(memory);
     surfaceState->setSurfaceType(SURFACE_TYPE::SURFACE_TYPE_SURFTYPE_2D);
     surfaceState->setSurfaceArray(true);
+}
+
+template <typename GfxFamily>
+void ImageHw<GfxFamily>::setClearColorParams(RENDER_SURFACE_STATE *surfaceState, const Gmm *gmm) {
+}
+
+template <typename GfxFamily>
+void ImageHw<GfxFamily>::setAuxParamsForMCSCCS(RENDER_SURFACE_STATE *surfaceState, Gmm *gmm) {
 }
 } // namespace NEO

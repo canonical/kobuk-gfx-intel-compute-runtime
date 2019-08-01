@@ -36,7 +36,7 @@ class CommandQueueHw : public CommandQueue {
 
         if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_LOW_KHR)) {
             priority = QueuePriority::LOW;
-            this->engine = &device->getEngine(aub_stream::ENGINE_RCS, true);
+            this->gpgpuEngine = &device->getEngine(aub_stream::ENGINE_RCS, true);
         } else if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_MED_KHR)) {
             priority = QueuePriority::MEDIUM;
         } else if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_HIGH_KHR)) {
@@ -54,14 +54,10 @@ class CommandQueueHw : public CommandQueue {
         }
 
         if (getCmdQueueProperties<cl_queue_properties>(properties, CL_QUEUE_PROPERTIES) & static_cast<cl_queue_properties>(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE)) {
-            getCommandStreamReceiver().overrideDispatchPolicy(DispatchMode::BatchedDispatch);
-            getCommandStreamReceiver().enableNTo1SubmissionModel();
+            getGpgpuCommandStreamReceiver().overrideDispatchPolicy(DispatchMode::BatchedDispatch);
+            getGpgpuCommandStreamReceiver().enableNTo1SubmissionModel();
         }
-
-        this->requiresCacheFlushAfterWalker = CommandQueueHw<GfxFamily>::requiresCacheFlushAfterWalkerBasedOnProperties(properties);
     }
-
-    static bool requiresCacheFlushAfterWalkerBasedOnProperties(const cl_queue_properties *properties);
 
     static CommandQueue *create(Context *context,
                                 Device *device,
@@ -197,6 +193,7 @@ class CommandQueueHw : public CommandQueue {
                              size_t offset,
                              size_t size,
                              void *ptr,
+                             GraphicsAllocation *mapAllocation,
                              cl_uint numEventsInWaitList,
                              const cl_event *eventWaitList,
                              cl_event *event) override;
@@ -222,6 +219,7 @@ class CommandQueueHw : public CommandQueue {
                             size_t rowPitch,
                             size_t slicePitch,
                             void *ptr,
+                            GraphicsAllocation *mapAllocation,
                             cl_uint numEventsInWaitList,
                             const cl_event *eventWaitList,
                             cl_event *event) override;
@@ -231,6 +229,7 @@ class CommandQueueHw : public CommandQueue {
                               size_t offset,
                               size_t cb,
                               const void *ptr,
+                              GraphicsAllocation *mapAllocation,
                               cl_uint numEventsInWaitList,
                               const cl_event *eventWaitList,
                               cl_event *event) override;
@@ -256,6 +255,7 @@ class CommandQueueHw : public CommandQueue {
                              size_t inputRowPitch,
                              size_t inputSlicePitch,
                              const void *ptr,
+                             GraphicsAllocation *mapAllocation,
                              cl_uint numEventsInWaitList,
                              const cl_event *eventWaitList,
                              cl_event *event) override;
@@ -277,6 +277,11 @@ class CommandQueueHw : public CommandQueue {
                                     cl_uint numEventsInWaitList,
                                     const cl_event *eventWaitList,
                                     cl_event *event) override;
+    cl_int enqueueResourceBarrier(BarrierCommand *resourceBarrier,
+                                  cl_uint numEventsInWaitList,
+                                  const cl_event *eventWaitList,
+                                  cl_event *event) override;
+
     cl_int finish(bool dcFlush) override;
     cl_int flush() override;
 
@@ -338,13 +343,51 @@ class CommandQueueHw : public CommandQueue {
                         EventBuilder &externalEventBuilder,
                         std::unique_ptr<PrintfHandler> printfHandler);
 
+    CompletionStamp enqueueCommandWithoutKernel(Surface **surfaces,
+                                                size_t surfaceCount,
+                                                LinearStream &commandStream,
+                                                size_t commandStreamStart,
+                                                bool &blocking,
+                                                TimestampPacketContainer *previousTimestampPacketNodes,
+                                                EventsRequest &eventsRequest,
+                                                EventBuilder &eventBuilder,
+                                                uint32_t taskLevel);
+    void processDispatchForCacheFlush(Surface **surfaces,
+                                      size_t numSurfaces,
+                                      LinearStream *commandStream,
+                                      CsrDependencies &csrDeps);
+    void processDispatchForBlitEnqueue(const MultiDispatchInfo &multiDispatchInfo,
+                                       TimestampPacketContainer &previousTimestampPacketNodes,
+                                       const EventsRequest &eventsRequest,
+                                       LinearStream &commandStream,
+                                       uint32_t commandType,
+                                       bool blocking);
+    void submitCacheFlush(Surface **surfaces,
+                          size_t numSurfaces,
+                          LinearStream *commandStream,
+                          uint64_t postSyncAddress);
+
+    bool isCacheFlushCommand(uint32_t commandType) override;
+
   protected:
     MOCKABLE_VIRTUAL void enqueueHandlerHook(const unsigned int commandType, const MultiDispatchInfo &dispatchInfo){};
     size_t calculateHostPtrSizeForImage(const size_t *region, size_t rowPitch, size_t slicePitch, Image *image);
 
+    cl_int enqueueReadWriteBufferOnCpuWithMemoryTransfer(cl_command_type commandType, Buffer *buffer,
+                                                         size_t offset, size_t size, void *ptr, cl_uint numEventsInWaitList,
+                                                         const cl_event *eventWaitList, cl_event *event);
+    cl_int enqueueReadWriteBufferOnCpuWithoutMemoryTransfer(cl_command_type commandType, Buffer *buffer,
+                                                            size_t offset, size_t size, void *ptr, cl_uint numEventsInWaitList,
+                                                            const cl_event *eventWaitList, cl_event *event);
+    cl_int enqueueMarkerForReadWriteOperation(MemObj *memObj, void *ptr, cl_command_type commandType, cl_bool blocking, cl_uint numEventsInWaitList,
+                                              const cl_event *eventWaitList, cl_event *event);
+
+    MOCKABLE_VIRTUAL void dispatchAuxTranslation(MultiDispatchInfo &multiDispatchInfo, MemObjsForAuxTranslation &memObjsForAuxTranslation,
+                                                 AuxTranslationDirection auxTranslationDirection);
+
   private:
     bool isTaskLevelUpdateRequired(const uint32_t &taskLevel, const cl_event *eventWaitList, const cl_uint &numEventsInWaitList, unsigned int commandType);
-    void obtainTaskLevelAndBlockedStatus(unsigned int &taskLevel, cl_uint &numEventsInWaitList, const cl_event *&eventWaitList, bool &blockQueue, unsigned int commandType) override;
+    void obtainTaskLevelAndBlockedStatus(unsigned int &taskLevel, cl_uint &numEventsInWaitList, const cl_event *&eventWaitList, bool &blockQueueStatus, unsigned int commandType) override;
     void forceDispatchScheduler(NEO::MultiDispatchInfo &multiDispatchInfo);
     static void computeOffsetsValueForRectCommands(size_t *bufferOffset,
                                                    size_t *hostOffset,

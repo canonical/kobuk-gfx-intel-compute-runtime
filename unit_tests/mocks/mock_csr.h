@@ -95,6 +95,15 @@ template <typename GfxFamily>
 using MockCsrHw = MockCsrBase<GfxFamily>;
 
 template <typename GfxFamily>
+class MockCsrAub : public MockCsrBase<GfxFamily> {
+  public:
+    MockCsrAub(int32_t &execStamp, ExecutionEnvironment &executionEnvironment) : MockCsrBase<GfxFamily>(execStamp, executionEnvironment) {}
+    CommandStreamReceiverType getType() override {
+        return CommandStreamReceiverType::CSR_AUB;
+    }
+};
+
+template <typename GfxFamily>
 class MockCsr : public MockCsrBase<GfxFamily> {
   public:
     using BaseClass = MockCsrBase<GfxFamily>;
@@ -215,10 +224,15 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
     using CommandStreamReceiver::tagAddress;
     std::vector<char> instructionHeapReserveredData;
     int *flushBatchedSubmissionsCallCounter = nullptr;
+    uint32_t waitForCompletionWithTimeoutCalled = 0;
 
     ~MockCommandStreamReceiver() {
     }
 
+    bool waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) override {
+        waitForCompletionWithTimeoutCalled++;
+        return true;
+    }
     FlushStamp flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
 
     CompletionStamp flushTask(
@@ -240,8 +254,7 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
     void waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool quickKmdSleep, bool forcePowerSavingMode) override {
     }
 
-    void addPipeControl(LinearStream &commandStream, bool dcFlush) override {
-    }
+    void blitBuffer(const BlitProperties &blitProperites) override{};
 
     void setOSInterface(OSInterface *osInterface);
 

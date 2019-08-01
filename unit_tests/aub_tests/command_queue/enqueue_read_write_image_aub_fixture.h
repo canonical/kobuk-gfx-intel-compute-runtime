@@ -5,12 +5,12 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/mem_obj/image.h"
 #include "test.h"
 #include "unit_tests/aub_tests/command_queue/command_enqueue_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_context.h"
 
 using namespace NEO;
@@ -72,9 +72,6 @@ struct AUBImageUnaligned
         imageDesc.num_samples = 0;
         imageDesc.mem_object = NULL;
 
-        auto graphicsAllocation = createResidentAllocationAndStoreItInCsr(dstMemory, bufferSize);
-        auto dstMemoryGPUPtr = reinterpret_cast<char *>(graphicsAllocation->getGpuAddress());
-
         cl_mem_flags flags = CL_MEM_USE_HOST_PTR | CL_MEM_READ_WRITE;
         auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
         auto retVal = CL_INVALID_VALUE;
@@ -89,6 +86,9 @@ struct AUBImageUnaligned
         ASSERT_NE(nullptr, image);
         EXPECT_FALSE(image->isMemObjZeroCopy());
 
+        auto graphicsAllocation = createResidentAllocationAndStoreItInCsr(dstMemory, bufferSize);
+        auto dstMemoryGPUPtr = reinterpret_cast<char *>(graphicsAllocation->getGpuAddress());
+
         const size_t origin[3] = {0, 1, 0};
         const size_t region[3] = {size, 1, 1};
 
@@ -97,22 +97,25 @@ struct AUBImageUnaligned
 
         retVal = pCmdQ->enqueueReadImage(
             image.get(),
-            CL_TRUE,
+            CL_FALSE,
             origin,
             region,
             inputRowPitch,
             inputSlicePitch,
             ptrOffset(dstMemory, offset),
+            nullptr,
             0,
             nullptr,
             nullptr);
         EXPECT_EQ(CL_SUCCESS, retVal);
 
-        pCmdQ->finish(true);
+        retVal = pCmdQ->flush();
+        EXPECT_EQ(CL_SUCCESS, retVal);
 
         AUBCommandStreamFixture::expectMemory<FamilyType>(dstMemoryGPUPtr, referenceMemory, offset);
         AUBCommandStreamFixture::expectMemory<FamilyType>(ptrOffset(dstMemoryGPUPtr, offset), &imageMemory[inputRowPitch * origin[1] * pixelSize], size * pixelSize);
         AUBCommandStreamFixture::expectMemory<FamilyType>(ptrOffset(dstMemoryGPUPtr, size * pixelSize + offset), referenceMemory, bufferSize - offset - size * pixelSize);
+        pCmdQ->finish(true);
         alignedFree(dstMemory);
     }
 
@@ -192,6 +195,7 @@ struct AUBImageUnaligned
             inputRowPitch,
             inputSlicePitch,
             ptrOffset(srcMemory, offset),
+            nullptr,
             0,
             nullptr,
             nullptr);

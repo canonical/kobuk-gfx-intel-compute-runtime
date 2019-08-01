@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Intel Corporation
+ * Copyright (C) 2018-2019 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -15,6 +15,7 @@
 #include "unit_tests/api/cl_get_supported_image_formats_tests.inl"
 #include "unit_tests/api/cl_icd_get_platform_ids_khr_tests.inl"
 #include "unit_tests/api/cl_intel_accelerator_tests.inl"
+#include "unit_tests/api/cl_intel_tracing_tests.inl"
 #include "unit_tests/api/cl_link_program_tests.inl"
 #include "unit_tests/api/cl_release_command_queue_tests.inl"
 #include "unit_tests/api/cl_release_context_tests.inl"
@@ -33,6 +34,7 @@
 #include "unit_tests/api/cl_set_kernel_exec_info_tests.inl"
 #include "unit_tests/api/cl_set_mem_object_destructor_callback_tests.inl"
 #include "unit_tests/api/cl_set_performance_configuration_tests.inl"
+#include "unit_tests/api/cl_set_program_specialization_constant_tests.inl"
 #include "unit_tests/api/cl_svm_alloc_tests.inl"
 #include "unit_tests/api/cl_svm_free_tests.inl"
 #include "unit_tests/api/cl_unload_compiler_tests.inl"

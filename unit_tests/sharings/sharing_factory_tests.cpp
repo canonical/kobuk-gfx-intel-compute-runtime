@@ -5,16 +5,19 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
 #include "runtime/helpers/string.h"
+#include "runtime/platform/extensions.h"
 #include "runtime/platform/platform.h"
 #include "runtime/sharings/sharing.h"
 #include "runtime/sharings/sharing_factory.h"
 #include "unit_tests/fixtures/memory_management_fixture.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_device.h"
+#include "unit_tests/mocks/mock_sharing_factory.h"
 
 #include "gtest/gtest.h"
 
@@ -213,7 +216,7 @@ TEST(Context, givenMockSharingBuilderWhenContextWithInvalidPropertiesThenContext
     stateRestore.clearCurrentState();
     stateRestore.registerSharing<MockSharingBuilderFactory>(SharingType::CLGL_SHARING);
 
-    auto device = std::make_unique<MockDevice>(*platformDevices[0]);
+    auto device = std::make_unique<MockDevice>();
     cl_device_id clDevice = static_cast<cl_device_id>(device.get());
     auto deviceVector = DeviceVector(&clDevice, 1);
     cl_int retVal;
@@ -236,58 +239,38 @@ TEST(Context, givenMockSharingBuilderWhenContextWithInvalidPropertiesThenContext
     EXPECT_NE(nullptr, context.get());
 };
 
-TEST(Context, GivenVaContextWhenItIsCreatedItInitializesPowerSavingMode) {
-    SharingFactoryStateRestore stateRestore;
-    stateRestore.clearCurrentState();
-    stateRestore.registerSharing<VAMockSharingBuilderFactory>(SharingType::VA_SHARING);
+TEST(SharingFactoryTests, givenDisabledFormatQueryAndFactoryWithSharingWhenAskedForExtensionThenFormatQueryExtensionIsNotReturned) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.EnableFormatQuery.set(false);
 
-    auto device = std::make_unique<MockDevice>(*platformDevices[0]);
-    cl_device_id clDevice = static_cast<cl_device_id>(device.get());
-    cl_int retVal;
-
-    cl_platform_id platformId[] = {platform()};
-
-    auto &commandStreamReceiver = device->getCommandStreamReceiver();
-    auto kmdNotifyHelper = commandStreamReceiver.peekKmdNotifyHelper();
-
-    int64_t timeout = 0;
-    kmdNotifyHelper->obtainTimeoutParams(timeout, true, 1, 10, 2, false);
-    EXPECT_NE(1, timeout);
-
-    cl_context_properties validProperties[5] = {CL_CONTEXT_PLATFORM, (cl_context_properties)platformId[0],
-                                                clContextPropertyMock, mockContextPassFinalize, 0};
-
-    std::unique_ptr<MockContext> ctx(Context::create<MockContext>(validProperties, DeviceVector(&clDevice, 1), nullptr, nullptr, retVal));
-    EXPECT_EQ(CL_SUCCESS, retVal);
-    EXPECT_NE(nullptr, ctx);
-    kmdNotifyHelper->obtainTimeoutParams(timeout, true, 1, 10, 2, false);
-    EXPECT_EQ(1, timeout);
-}
-
-TEST(Context, GivenNonVaContextWhenItIsCreatedItInitializesPowerSavingMode) {
     SharingFactoryStateRestore stateRestore;
     stateRestore.clearCurrentState();
     stateRestore.registerSharing<MockSharingBuilderFactory>(SharingType::CLGL_SHARING);
 
-    auto device = std::make_unique<MockDevice>(*platformDevices[0]);
-    cl_device_id clDevice = static_cast<cl_device_id>(device.get());
-    cl_int retVal;
+    auto extensionsList = sharingFactory.getExtensions();
+    EXPECT_THAT(extensionsList, ::testing::Not(::testing::HasSubstr(Extensions::sharingFormatQuery)));
+}
 
-    cl_platform_id platformId[] = {platform()};
+TEST(SharingFactoryTests, givenEnabledFormatQueryAndFactoryWithSharingWhenAskedForExtensionThenFormatQueryExtensionIsReturned) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.EnableFormatQuery.set(true);
 
-    auto &commandStreamReceiver = device->getCommandStreamReceiver();
-    auto kmdNotifyHelper = commandStreamReceiver.peekKmdNotifyHelper();
+    SharingFactoryStateRestore stateRestore;
+    stateRestore.clearCurrentState();
+    stateRestore.registerSharing<MockSharingBuilderFactory>(SharingType::CLGL_SHARING);
 
-    int64_t timeout = 0;
-    kmdNotifyHelper->obtainTimeoutParams(timeout, true, 1, 10, 2, false);
-    EXPECT_NE(1, timeout);
+    auto extensionsList = sharingFactory.getExtensions();
+    EXPECT_THAT(extensionsList, ::testing::HasSubstr(Extensions::sharingFormatQuery));
+}
 
-    cl_context_properties validProperties[5] = {CL_CONTEXT_PLATFORM, (cl_context_properties)platformId[0],
-                                                clContextPropertyMock, mockContextPassFinalize, 0};
+TEST(SharingFactoryTests, givenEnabledFormatQueryAndFactoryWithNoSharingsWhenAskedForExtensionThenNoExtensionIsReturned) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.EnableFormatQuery.set(true);
 
-    std::unique_ptr<MockContext> ctx(Context::create<MockContext>(validProperties, DeviceVector(&clDevice, 1), nullptr, nullptr, retVal));
-    EXPECT_EQ(CL_SUCCESS, retVal);
-    EXPECT_NE(nullptr, ctx);
-    kmdNotifyHelper->obtainTimeoutParams(timeout, true, 1, 10, 2, false);
-    EXPECT_NE(1, timeout);
+    SharingFactoryStateRestore sharingFactory;
+
+    sharingFactory.clearCurrentState();
+
+    auto extensionsList = sharingFactory.getExtensions();
+    EXPECT_THAT(extensionsList, ::testing::Not(::testing::HasSubstr(Extensions::sharingFormatQuery)));
 }

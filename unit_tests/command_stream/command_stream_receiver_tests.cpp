@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/aub_mem_dump/aub_services.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/command_stream/linear_stream.h"
@@ -21,12 +22,12 @@
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/gen_common/matchers.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_buffer.h"
 #include "unit_tests/mocks/mock_builtins.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_csr.h"
+#include "unit_tests/mocks/mock_execution_environment.h"
 #include "unit_tests/mocks/mock_graphics_allocation.h"
 #include "unit_tests/mocks/mock_memory_manager.h"
 #include "unit_tests/mocks/mock_program.h"
@@ -40,7 +41,7 @@ struct CommandStreamReceiverTest : public DeviceFixture,
     void SetUp() override {
         DeviceFixture::SetUp();
 
-        commandStreamReceiver = &pDevice->getCommandStreamReceiver();
+        commandStreamReceiver = &pDevice->getGpgpuCommandStreamReceiver();
         ASSERT_NE(nullptr, commandStreamReceiver);
         memoryManager = commandStreamReceiver->getMemoryManager();
         internalAllocationStorage = commandStreamReceiver->getInternalAllocationStorage();
@@ -300,9 +301,10 @@ TEST_F(CommandStreamReceiverTest, whenGetEventTsAllocatorIsCalledItReturnsSameTa
 }
 
 TEST_F(CommandStreamReceiverTest, whenGetEventPerfCountAllocatorIsCalledItReturnsSameTagAllocator) {
-    TagAllocator<HwPerfCounter> *allocator = commandStreamReceiver->getEventPerfCountAllocator();
+    const uint32_t gpuReportSize = 100;
+    TagAllocator<HwPerfCounter> *allocator = commandStreamReceiver->getEventPerfCountAllocator(gpuReportSize);
     EXPECT_NE(nullptr, allocator);
-    TagAllocator<HwPerfCounter> *allocator2 = commandStreamReceiver->getEventPerfCountAllocator();
+    TagAllocator<HwPerfCounter> *allocator2 = commandStreamReceiver->getEventPerfCountAllocator(gpuReportSize);
     EXPECT_EQ(allocator2, allocator);
 }
 
@@ -310,11 +312,11 @@ HWTEST_F(CommandStreamReceiverTest, givenTimestampPacketAllocatorWhenAskingForTa
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     EXPECT_EQ(nullptr, csr.timestampPacketAllocator.get());
 
-    TagAllocator<TimestampPacket> *allocator = csr.getTimestampPacketAllocator();
+    TagAllocator<TimestampPacketStorage> *allocator = csr.getTimestampPacketAllocator();
     EXPECT_NE(nullptr, csr.timestampPacketAllocator.get());
     EXPECT_EQ(allocator, csr.timestampPacketAllocator.get());
 
-    TagAllocator<TimestampPacket> *allocator2 = csr.getTimestampPacketAllocator();
+    TagAllocator<TimestampPacketStorage> *allocator2 = csr.getTimestampPacketAllocator();
     EXPECT_EQ(allocator, allocator2);
 
     auto node1 = allocator->getTag();
@@ -322,6 +324,12 @@ HWTEST_F(CommandStreamReceiverTest, givenTimestampPacketAllocatorWhenAskingForTa
     EXPECT_NE(nullptr, node1);
     EXPECT_NE(nullptr, node2);
     EXPECT_NE(node1, node2);
+}
+
+HWTEST_F(CommandStreamReceiverTest, givenUltCommandStreamReceiverWhenAddAubCommentIsCalledThenCallAddAubCommentOnCsr) {
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    csr.addAubComment("message");
+    EXPECT_TRUE(csr.addAubCommentCalled);
 }
 
 TEST(CommandStreamReceiverSimpleTest, givenCSRWithTagAllocationSetWhenGetTagAllocationIsCalledThenCorrectAllocationIsReturned) {
@@ -333,8 +341,8 @@ TEST(CommandStreamReceiverSimpleTest, givenCSRWithTagAllocationSetWhenGetTagAllo
 }
 
 TEST(CommandStreamReceiverSimpleTest, givenCommandStreamReceiverWhenItIsDestroyedThenItDestroysTagAllocation) {
-    struct MockGraphicsAllocationWithDestructorTracing : public GraphicsAllocation {
-        using GraphicsAllocation::GraphicsAllocation;
+    struct MockGraphicsAllocationWithDestructorTracing : public MockGraphicsAllocation {
+        using MockGraphicsAllocation::MockGraphicsAllocation;
         ~MockGraphicsAllocationWithDestructorTracing() override { *destructorCalled = true; }
         bool *destructorCalled = nullptr;
     };
@@ -343,7 +351,7 @@ TEST(CommandStreamReceiverSimpleTest, givenCommandStreamReceiverWhenItIsDestroye
 
     auto mockGraphicsAllocation = new MockGraphicsAllocationWithDestructorTracing(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0llu, 0llu, 1u, MemoryPool::MemoryNull, false);
     mockGraphicsAllocation->destructorCalled = &destructorCalled;
-    ExecutionEnvironment executionEnvironment;
+    MockExecutionEnvironment executionEnvironment(*platformDevices);
     executionEnvironment.commandStreamReceivers.resize(1);
     executionEnvironment.commandStreamReceivers[0].push_back(std::make_unique<MockCommandStreamReceiver>(executionEnvironment));
     auto csr = executionEnvironment.commandStreamReceivers[0][0].get();
@@ -355,7 +363,7 @@ TEST(CommandStreamReceiverSimpleTest, givenCommandStreamReceiverWhenItIsDestroye
 }
 
 TEST(CommandStreamReceiverSimpleTest, givenCommandStreamReceiverWhenInitializeTagAllocationIsCalledThenTagAllocationIsBeingAllocated) {
-    ExecutionEnvironment executionEnvironment;
+    MockExecutionEnvironment executionEnvironment(*platformDevices);
     auto csr = new MockCommandStreamReceiver(executionEnvironment);
     executionEnvironment.commandStreamReceivers.resize(1);
     executionEnvironment.commandStreamReceivers[0].push_back(std::unique_ptr<CommandStreamReceiver>(csr));
@@ -364,6 +372,7 @@ TEST(CommandStreamReceiverSimpleTest, givenCommandStreamReceiverWhenInitializeTa
     EXPECT_TRUE(csr->getTagAddress() == nullptr);
     csr->initializeTagAllocation();
     EXPECT_NE(nullptr, csr->getTagAllocation());
+    EXPECT_EQ(GraphicsAllocation::AllocationType::TAG_BUFFER, csr->getTagAllocation()->getAllocationType());
     EXPECT_TRUE(csr->getTagAddress() != nullptr);
     EXPECT_EQ(*csr->getTagAddress(), initialHardwareTag);
 }
@@ -371,7 +380,7 @@ TEST(CommandStreamReceiverSimpleTest, givenCommandStreamReceiverWhenInitializeTa
 TEST(CommandStreamReceiverSimpleTest, givenNullHardwareDebugModeWhenInitializeTagAllocationIsCalledThenTagAllocationIsBeingAllocatedAndinitialValueIsMinusOne) {
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.EnableNullHardware.set(true);
-    ExecutionEnvironment executionEnvironment;
+    MockExecutionEnvironment executionEnvironment(*platformDevices);
     executionEnvironment.commandStreamReceivers.resize(1);
     auto csr = new MockCommandStreamReceiver(executionEnvironment);
     executionEnvironment.commandStreamReceivers[0].push_back(std::unique_ptr<CommandStreamReceiver>(csr));
@@ -382,18 +391,6 @@ TEST(CommandStreamReceiverSimpleTest, givenNullHardwareDebugModeWhenInitializeTa
     EXPECT_NE(nullptr, csr->getTagAllocation());
     EXPECT_TRUE(csr->getTagAddress() != nullptr);
     EXPECT_EQ(*csr->getTagAddress(), static_cast<uint32_t>(-1));
-}
-
-TEST(CommandStreamReceiverSimpleTest, givenCSRWhenWaitBeforeMakingNonResidentWhenRequiredIsCalledWithBlockingFlagSetThenItReturnsImmediately) {
-    ExecutionEnvironment executionEnvironment;
-    MockCommandStreamReceiver csr(executionEnvironment);
-    uint32_t tag = 0;
-    MockGraphicsAllocation allocation(&tag, sizeof(tag));
-    csr.latestFlushedTaskCount = 3;
-    csr.setTagAllocation(&allocation);
-    csr.waitBeforeMakingNonResidentWhenRequired();
-
-    EXPECT_EQ(0u, tag);
 }
 
 TEST(CommandStreamReceiverSimpleTest, givenVariousDataSetsWhenVerifyingMemoryThenCorrectValueIsReturned) {
@@ -423,7 +420,7 @@ TEST(CommandStreamReceiverSimpleTest, givenVariousDataSetsWhenVerifyingMemoryThe
 TEST(CommandStreamReceiverMultiContextTests, givenMultipleCsrsWhenSameResourcesAreUsedThenResidencyIsProperlyHandled) {
     auto executionEnvironment = platformImpl->peekExecutionEnvironment();
 
-    std::unique_ptr<MockDevice> device(Device::create<MockDevice>(nullptr, executionEnvironment, 0u));
+    std::unique_ptr<MockDevice> device(Device::create<MockDevice>(executionEnvironment, 0u));
 
     auto &commandStreamReceiver0 = *executionEnvironment->commandStreamReceivers[0][0];
     auto &commandStreamReceiver1 = *executionEnvironment->commandStreamReceivers[0][1];
@@ -462,8 +459,8 @@ struct CreateAllocationForHostSurfaceTest : public ::testing::Test {
         executionEnvironment->setHwInfo(&hwInfo);
         gmockMemoryManager = new ::testing::NiceMock<GMockMemoryManager>(*executionEnvironment);
         executionEnvironment->memoryManager.reset(gmockMemoryManager);
-        device.reset(MockDevice::create<MockDevice>(&hwInfo, executionEnvironment, 0u));
-        commandStreamReceiver = &device->getCommandStreamReceiver();
+        device.reset(MockDevice::create<MockDevice>(executionEnvironment, 0u));
+        commandStreamReceiver = &device->getGpgpuCommandStreamReceiver();
     }
     HardwareInfo hwInfo = *platformDevices[0];
     ExecutionEnvironment *executionEnvironment = nullptr;
@@ -629,3 +626,46 @@ TEST_F(CommandStreamReceiverTest, givenMinimumSizeExceedsCurrentAndNoSuitableReu
 
     memoryManager->freeGraphicsMemory(commandStream.getGraphicsAllocation());
 }
+
+class CommandStreamReceiverWithAubSubCaptureTest : public CommandStreamReceiverTest,
+                                                   public ::testing::WithParamInterface<std::pair<bool, bool>> {};
+
+HWTEST_P(CommandStreamReceiverWithAubSubCaptureTest, givenCommandStreamReceiverWhenProgramForAubSubCaptureIsCalledThenProgramCsrDependsOnAubSubCaptureStatus) {
+    class MyMockCsr : public MockCommandStreamReceiver {
+      public:
+        using MockCommandStreamReceiver::MockCommandStreamReceiver;
+
+        void initProgrammingFlags() override {
+            initProgrammingFlagsCalled = true;
+        }
+        void flushBatchedSubmissions() override {
+            flushBatchedSubmissionsCalled = true;
+        }
+        bool initProgrammingFlagsCalled = false;
+        bool flushBatchedSubmissionsCalled = false;
+    };
+
+    auto status = GetParam();
+    bool wasActiveInPreviousEnqueue = status.first;
+    bool isActive = status.second;
+
+    ExecutionEnvironment executionEnvironment;
+    MyMockCsr mockCsr(executionEnvironment);
+
+    mockCsr.programForAubSubCapture(wasActiveInPreviousEnqueue, isActive);
+
+    EXPECT_EQ(!wasActiveInPreviousEnqueue && isActive, mockCsr.initProgrammingFlagsCalled);
+    EXPECT_EQ(wasActiveInPreviousEnqueue && !isActive, mockCsr.flushBatchedSubmissionsCalled);
+}
+
+std::pair<bool, bool> aubSubCaptureStatus[] = {
+    {false, false},
+    {false, true},
+    {true, false},
+    {true, true},
+};
+
+INSTANTIATE_TEST_CASE_P(
+    CommandStreamReceiverWithAubSubCaptureTest_program,
+    CommandStreamReceiverWithAubSubCaptureTest,
+    testing::ValuesIn(aubSubCaptureStatus));

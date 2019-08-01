@@ -21,6 +21,9 @@ class clSVMAllocTemplateTests : public api_fixture,
   public:
     void SetUp() override {
         api_fixture::SetUp();
+        if (!pPlatform->peekExecutionEnvironment()->getHardwareInfo()->capabilityTable.ftrSvm) {
+            GTEST_SKIP();
+        }
     }
 
     void TearDown() override {
@@ -85,24 +88,7 @@ INSTANTIATE_TEST_CASE_P(
     clSVMAllocValidFlagsTests,
     testing::ValuesIn(SVMAllocValidFlags));
 
-struct clSVMAllocFtrFlagsTests : public clSVMAllocTemplateTests {
-  public:
-    void SetUp() override {
-        clSVMAllocTemplateTests::SetUp();
-        const HardwareInfo &hwInfo = pPlatform->getDevice(0)->getHardwareInfo();
-        oldFtrSvm = hwInfo.capabilityTable.ftrSvm;
-        oldFtrCoherency = hwInfo.capabilityTable.ftrSupportsCoherency;
-    }
-    void TearDown() override {
-        const HardwareInfo &hwInfo = pPlatform->getDevice(0)->getHardwareInfo();
-        HardwareInfo *pHwInfo = const_cast<HardwareInfo *>(&hwInfo);
-        pHwInfo->capabilityTable.ftrSvm = oldFtrSvm;
-        pHwInfo->capabilityTable.ftrSupportsCoherency = oldFtrCoherency;
-        clSVMAllocTemplateTests::TearDown();
-    }
-    bool oldFtrSvm;
-    bool oldFtrCoherency;
-};
+using clSVMAllocFtrFlagsTests = clSVMAllocTemplateTests;
 
 INSTANTIATE_TEST_CASE_P(
     SVMAllocCheckFlagsFtrFlags,
@@ -110,8 +96,7 @@ INSTANTIATE_TEST_CASE_P(
     testing::ValuesIn(SVMAllocValidFlags));
 
 TEST_P(clSVMAllocFtrFlagsTests, SVMAllocValidFlags) {
-    const HardwareInfo &hwInfo = pPlatform->getDevice(0)->getHardwareInfo();
-    HardwareInfo *pHwInfo = const_cast<HardwareInfo *>(&hwInfo);
+    HardwareInfo *pHwInfo = pPlatform->peekExecutionEnvironment()->getMutableHardwareInfo();
 
     cl_mem_flags flags = GetParam();
     void *SVMPtr = nullptr;

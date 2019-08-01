@@ -7,8 +7,8 @@
 
 #pragma once
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/helpers/debug_helpers.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/memory_manager/host_ptr_defines.h"
 #include "runtime/memory_manager/memory_banks.h"
 #include "runtime/memory_manager/memory_constants.h"
@@ -34,6 +34,7 @@ constexpr auto nonSharedResource = 0u;
 }
 
 class Gmm;
+class MemoryManager;
 struct AllocationProperties;
 
 class GraphicsAllocation : public IDNode<GraphicsAllocation> {
@@ -45,6 +46,7 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
         BUFFER_HOST_MEMORY,
         COMMAND_BUFFER,
         CONSTANT_SURFACE,
+        DEVICE_QUEUE_BUFFER,
         EXTERNAL_HOST_PTR,
         FILL_PATTERN,
         GLOBAL_SURFACE,
@@ -52,19 +54,27 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
         INDIRECT_OBJECT_HEAP,
         INSTRUCTION_HEAP,
         INTERNAL_HEAP,
+        INTERNAL_HOST_MEMORY,
         KERNEL_ISA,
         LINEAR_STREAM,
+        MCS,
         PIPE,
+        PREEMPTION,
         PRINTF_SURFACE,
         PRIVATE_SURFACE,
         PROFILING_TAG_BUFFER,
         SCRATCH_SURFACE,
+        SHARED_BUFFER,
+        SHARED_CONTEXT_IMAGE,
+        SHARED_IMAGE,
         SHARED_RESOURCE_COPY,
         SURFACE_STATE_HEAP,
-        SVM,
+        SVM_CPU,
+        SVM_GPU,
+        SVM_ZERO_COPY,
         TAG_BUFFER,
         TIMESTAMP_PACKET_TAG_BUFFER,
-        UNDECIDED,
+        WRITE_COMBINED
     };
 
     virtual ~GraphicsAllocation();
@@ -125,6 +135,8 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
 
     void setAubWritable(bool writable) { aubInfo.aubWritable = writable; }
     bool isAubWritable() const { return aubInfo.aubWritable; }
+    void setTbxWritable(bool writable) { aubInfo.tbxWritable = writable; }
+    bool isTbxWritable() const { return aubInfo.tbxWritable; }
     void setAllocDumpable(bool dumpable) { aubInfo.allocDumpable = dumpable; }
     bool isAllocDumpable() const { return aubInfo.allocDumpable; }
     bool isMemObjectsAllocationWithWritableFlags() const { return aubInfo.memObjectsAllocationWithWritableFlags; }
@@ -156,14 +168,17 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     bool isResidencyTaskCountBelow(uint32_t taskCount, uint32_t contextId) const { return !isResident(contextId) || getResidencyTaskCount(contextId) < taskCount; }
 
     virtual std::string getAllocationInfoString() const;
+    virtual uint64_t peekInternalHandle(MemoryManager *memoryManager) { return 0llu; }
 
     static bool isCpuAccessRequired(AllocationType allocationType) {
-        return allocationType == AllocationType::LINEAR_STREAM ||
+        return allocationType == AllocationType::COMMAND_BUFFER ||
+               allocationType == AllocationType::CONSTANT_SURFACE ||
+               allocationType == AllocationType::GLOBAL_SURFACE ||
                allocationType == AllocationType::INTERNAL_HEAP ||
-               allocationType == AllocationType::TIMESTAMP_PACKET_TAG_BUFFER ||
-               allocationType == AllocationType::COMMAND_BUFFER;
+               allocationType == AllocationType::LINEAR_STREAM ||
+               allocationType == AllocationType::PIPE ||
+               allocationType == AllocationType::TIMESTAMP_PACKET_TAG_BUFFER;
     }
-    static StorageInfo createStorageInfoFromProperties(const AllocationProperties &properties);
     void *getReservedAddressPtr() const {
         return this->reservedAddressRangeInfo.addressPtr;
     }
@@ -182,12 +197,13 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
         return gmms[handleId];
     }
     void setDefaultGmm(Gmm *gmm) {
-        return setGmm(gmm, 0u);
+        setGmm(gmm, 0u);
     }
     void setGmm(Gmm *gmm, uint32_t handleId) {
         gmms[handleId] = gmm;
     }
     uint32_t getNumHandles() const { return storageInfo.getNumHandles(); }
+    uint32_t getUsedPageSize() const;
 
     OsHandleStorage fragmentsStorage;
     StorageInfo storageInfo = {};
@@ -203,6 +219,7 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     };
     struct AubInfo {
         bool aubWritable = true;
+        bool tbxWritable = true;
         bool allocDumpable = false;
         bool memObjectsAllocationWithWritableFlags = false;
     };

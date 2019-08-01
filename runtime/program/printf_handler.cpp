@@ -7,9 +7,9 @@
 
 #include "printf_handler.h"
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/dispatch_info.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/memory_manager.h"
@@ -58,7 +58,8 @@ void PrintfHandler::makeResident(CommandStreamReceiver &commandStreamReceiver) {
 }
 
 void PrintfHandler::printEnqueueOutput() {
-    PrintFormatter printFormatter(*kernel, *printfSurface);
+    PrintFormatter printFormatter(reinterpret_cast<const uint8_t *>(printfSurface->getUnderlyingBuffer()), static_cast<uint32_t>(printfSurface->getUnderlyingBufferSize()),
+                                  kernel->is32Bit(), kernel->getKernelInfo().patchInfo.stringDataMap);
     printFormatter.printKernelOutput();
 }
 } // namespace NEO

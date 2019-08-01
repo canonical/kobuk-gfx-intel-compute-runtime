@@ -63,7 +63,7 @@ GEN9TEST_F(Gen9PreemptionTests, whenMidThreadPreemptionIsAvailableThenStateSipIs
     device->setPreemptionMode(PreemptionMode::MidThread);
     executionEnvironment->DisableMidThreadPreemption = 0;
 
-    size_t minCsrSize = device->getHardwareInfo().pSysInfo->CsrSizeInMb * MemoryConstants::megaByte;
+    size_t minCsrSize = device->getHardwareInfo().gtSystemInfo.CsrSizeInMb * MemoryConstants::megaByte;
     uint64_t minCsrAlignment = 2 * 256 * MemoryConstants::kiloByte;
     MockGraphicsAllocation csrSurface((void *)minCsrAlignment, minCsrSize);
 
@@ -94,7 +94,7 @@ GEN9TEST_F(Gen9ThreadGroupPreemptionEnqueueKernelTest, givenSecondEnqueueWithThe
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.getMemoryManager()->setForce32BitAllocations(false);
     csr.setMediaVFEStateDirty(false);
-    auto csrSurface = csr.getPreemptionCsrAllocation();
+    auto csrSurface = csr.getPreemptionAllocation();
     EXPECT_EQ(nullptr, csrSurface);
     size_t off[3] = {0, 0, 0};
     size_t gws[3] = {1, 1, 1};
@@ -128,7 +128,7 @@ GEN9TEST_F(Gen9ThreadGroupPreemptionEnqueueKernelTest, givenSecondEnqueueWithThe
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.getMemoryManager()->setForce32BitAllocations(false);
     csr.setMediaVFEStateDirty(false);
-    auto csrSurface = csr.getPreemptionCsrAllocation();
+    auto csrSurface = csr.getPreemptionAllocation();
     EXPECT_EQ(nullptr, csrSurface);
     HardwareParse hwCsrParser;
     HardwareParse hwCmdQParser;
@@ -265,7 +265,7 @@ GEN9TEST_F(Gen9MidThreadPreemptionEnqueueKernelTest, givenSecondEnqueueWithTheSa
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.getMemoryManager()->setForce32BitAllocations(false);
     csr.setMediaVFEStateDirty(false);
-    auto csrSurface = csr.getPreemptionCsrAllocation();
+    auto csrSurface = csr.getPreemptionAllocation();
     ASSERT_NE(nullptr, csrSurface);
     HardwareParse hwCsrParser;
     HardwareParse hwCmdQParser;
@@ -345,7 +345,7 @@ GEN9TEST_F(Gen9MidThreadPreemptionEnqueueKernelTest, givenSecondEnqueueWithTheSa
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.getMemoryManager()->setForce32BitAllocations(false);
     csr.setMediaVFEStateDirty(false);
-    auto csrSurface = csr.getPreemptionCsrAllocation();
+    auto csrSurface = csr.getPreemptionAllocation();
     ASSERT_NE(nullptr, csrSurface);
     HardwareParse hwCsrParser;
     HardwareParse hwCmdQParser;
@@ -541,6 +541,6 @@ GEN9TEST_F(Gen9PreemptionTests, givenMidThreadPreemptionModeWhenStateSipIsProgra
     auto cmd = hwParserOnlyPreemption.getCommand<STATE_SIP>();
     EXPECT_NE(nullptr, cmd);
 
-    auto sipType = SipKernel::getSipKernelType(mockDevice->getHardwareInfo().pPlatform->eRenderCoreFamily, mockDevice->isSourceLevelDebuggerActive());
+    auto sipType = SipKernel::getSipKernelType(mockDevice->getHardwareInfo().platform.eRenderCoreFamily, mockDevice->isSourceLevelDebuggerActive());
     EXPECT_EQ(mockDevice->getExecutionEnvironment()->getBuiltIns()->getSipKernel(sipType, *mockDevice).getSipAllocation()->getGpuAddressToPatch(), cmd->getSystemInstructionPointer());
 }

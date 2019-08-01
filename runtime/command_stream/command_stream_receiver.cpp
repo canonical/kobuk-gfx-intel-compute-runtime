@@ -12,6 +12,8 @@
 #include "runtime/command_stream/experimental_command_buffer.h"
 #include "runtime/command_stream/preemption.h"
 #include "runtime/command_stream/scratch_space_controller.h"
+#include "runtime/context/context.h"
+#include "runtime/device/device.h"
 #include "runtime/event/event.h"
 #include "runtime/gtpin/gtpin_notify.h"
 #include "runtime/helpers/array_count.h"
@@ -19,11 +21,13 @@
 #include "runtime/helpers/flush_stamp.h"
 #include "runtime/helpers/string.h"
 #include "runtime/helpers/timestamp_packet.h"
+#include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/memory_manager/surface.h"
 #include "runtime/os_interface/os_context.h"
 #include "runtime/os_interface/os_interface.h"
+#include "runtime/platform/platform.h"
 #include "runtime/utilities/tag_allocator.h"
 
 namespace NEO {
@@ -80,7 +84,6 @@ void CommandStreamReceiver::processEviction() {
 
 void CommandStreamReceiver::makeNonResident(GraphicsAllocation &gfxAllocation) {
     if (gfxAllocation.isResident(osContext->getContextId())) {
-        makeCoherent(gfxAllocation);
         if (gfxAllocation.peekEvictable()) {
             this->getEvictionAllocations().push_back(&gfxAllocation);
         } else {
@@ -92,8 +95,6 @@ void CommandStreamReceiver::makeNonResident(GraphicsAllocation &gfxAllocation) {
 }
 
 void CommandStreamReceiver::makeSurfacePackNonResident(ResidencyContainer &allocationsForResidency) {
-    this->waitBeforeMakingNonResidentWhenRequired();
-
     for (auto &surface : allocationsForResidency) {
         this->makeNonResident(*surface);
     }
@@ -126,7 +127,8 @@ void CommandStreamReceiver::ensureCommandBufferAllocation(LinearStream &commandS
     constexpr static auto allocationType = GraphicsAllocation::AllocationType::COMMAND_BUFFER;
     auto allocation = this->getInternalAllocationStorage()->obtainReusableAllocation(allocationSize, allocationType).release();
     if (allocation == nullptr) {
-        const AllocationProperties commandStreamAllocationProperties{true, allocationSize, allocationType, this->isMultiOsContextCapable()};
+        const AllocationProperties commandStreamAllocationProperties{true, allocationSize, allocationType,
+                                                                     isMultiOsContextCapable(), deviceIndex};
         allocation = this->getMemoryManager()->allocateGraphicsMemoryWithProperties(commandStreamAllocationProperties);
     }
     DEBUG_BREAK_IF(allocation == nullptr);
@@ -177,6 +179,11 @@ void CommandStreamReceiver::cleanupResources() {
         tagAllocation = nullptr;
         tagAddress = nullptr;
     }
+
+    if (preemptionAllocation) {
+        getMemoryManager()->freeGraphicsMemory(preemptionAllocation);
+        preemptionAllocation = nullptr;
+    }
 }
 
 bool CommandStreamReceiver::waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) {
@@ -212,9 +219,16 @@ void CommandStreamReceiver::setTagAllocation(GraphicsAllocation *allocation) {
     this->tagAddress = allocation ? reinterpret_cast<uint32_t *>(allocation->getUnderlyingBuffer()) : nullptr;
 }
 
-void CommandStreamReceiver::setRequiredScratchSize(uint32_t newRequiredScratchSize) {
+FlushStamp CommandStreamReceiver::obtainCurrentFlushStamp() const {
+    return flushStamp->peekStamp();
+}
+
+void CommandStreamReceiver::setRequiredScratchSizes(uint32_t newRequiredScratchSize, uint32_t newRequiredPrivateScratchSize) {
     if (newRequiredScratchSize > requiredScratchSize) {
         requiredScratchSize = newRequiredScratchSize;
+    }
+    if (newRequiredPrivateScratchSize > requiredPrivateScratchSize) {
+        requiredPrivateScratchSize = newRequiredPrivateScratchSize;
     }
 }
 
@@ -225,6 +239,7 @@ GraphicsAllocation *CommandStreamReceiver::getScratchAllocation() {
 void CommandStreamReceiver::initProgrammingFlags() {
     isPreambleSent = false;
     GSBAFor32BitProgrammed = false;
+    bindingTableBaseAddressRequired = true;
     mediaVfeStateDirty = true;
     lastVmeSubslicesConfig = false;
 
@@ -235,6 +250,17 @@ void CommandStreamReceiver::initProgrammingFlags() {
     latestSentStatelessMocsConfig = 0;
 }
 
+void CommandStreamReceiver::programForAubSubCapture(bool wasActiveInPreviousEnqueue, bool isActive) {
+    if (!wasActiveInPreviousEnqueue && isActive) {
+        // force CSR reprogramming upon subcapture activation
+        this->initProgrammingFlags();
+    }
+    if (wasActiveInPreviousEnqueue && !isActive) {
+        // flush BB upon subcapture deactivation
+        this->flushBatchedSubmissions();
+    }
+}
+
 ResidencyContainer &CommandStreamReceiver::getResidencyAllocations() {
     return this->residencyAllocations;
 }
@@ -243,11 +269,13 @@ ResidencyContainer &CommandStreamReceiver::getEvictionAllocations() {
     return this->evictionAllocations;
 }
 
-void CommandStreamReceiver::activateAubSubCapture(const MultiDispatchInfo &dispatchInfo) {}
+AubSubCaptureStatus CommandStreamReceiver::checkAndActivateAubSubCapture(const MultiDispatchInfo &dispatchInfo) { return {false, false}; }
+
+void CommandStreamReceiver::addAubComment(const char *comment) {}
 
 GraphicsAllocation *CommandStreamReceiver::allocateDebugSurface(size_t size) {
     UNRECOVERABLE_IF(debugSurface != nullptr);
-    debugSurface = getMemoryManager()->allocateGraphicsMemoryWithProperties({size, GraphicsAllocation::AllocationType::UNDECIDED});
+    debugSurface = getMemoryManager()->allocateGraphicsMemoryWithProperties({size, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY});
     return debugSurface;
 }
 
@@ -295,7 +323,8 @@ void CommandStreamReceiver::allocateHeapMemory(IndirectHeap::Type heapType,
     auto heapMemory = internalAllocationStorage->obtainReusableAllocation(finalHeapSize, allocationType).release();
 
     if (!heapMemory) {
-        heapMemory = getMemoryManager()->allocateGraphicsMemoryWithProperties({finalHeapSize, allocationType});
+        heapMemory = getMemoryManager()->allocateGraphicsMemoryWithProperties({true, finalHeapSize, allocationType,
+                                                                               isMultiOsContextCapable(), deviceIndex});
     } else {
         finalHeapSize = std::max(heapMemory->getUnderlyingBufferSize(), finalHeapSize);
     }
@@ -333,7 +362,7 @@ void CommandStreamReceiver::setExperimentalCmdBuffer(std::unique_ptr<Experimenta
 }
 
 bool CommandStreamReceiver::initializeTagAllocation() {
-    auto tagAllocation = getMemoryManager()->allocateGraphicsMemoryWithProperties({MemoryConstants::pageSize, GraphicsAllocation::AllocationType::UNDECIDED});
+    auto tagAllocation = getMemoryManager()->allocateGraphicsMemoryWithProperties({MemoryConstants::pageSize, GraphicsAllocation::AllocationType::TAG_BUFFER});
     if (!tagAllocation) {
         return false;
     }
@@ -344,6 +373,15 @@ bool CommandStreamReceiver::initializeTagAllocation() {
     return true;
 }
 
+bool CommandStreamReceiver::createPreemptionAllocation() {
+    auto hwInfo = executionEnvironment.getHardwareInfo();
+    AllocationProperties properties{true, hwInfo->capabilityTable.requiredPreemptionSurfaceSize, GraphicsAllocation::AllocationType::PREEMPTION, false};
+    properties.flags.uncacheable = hwInfo->workaroundTable.waCSRUncachable;
+    properties.alignment = 256 * MemoryConstants::kiloByte;
+    this->preemptionAllocation = getMemoryManager()->allocateGraphicsMemoryWithProperties(properties);
+    return this->preemptionAllocation != nullptr;
+}
+
 std::unique_lock<CommandStreamReceiver::MutexType> CommandStreamReceiver::obtainUniqueOwnership() {
     return std::unique_lock<CommandStreamReceiver::MutexType>(this->ownershipMutex);
 }
@@ -352,13 +390,13 @@ AllocationsList &CommandStreamReceiver::getAllocationsForReuse() { return intern
 
 bool CommandStreamReceiver::createAllocationForHostSurface(HostPtrSurface &surface, bool requiresL3Flush) {
     auto memoryManager = getMemoryManager();
-    AllocationProperties properties{false, surface.getSurfaceSize(), GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR};
+    AllocationProperties properties{false, surface.getSurfaceSize(), GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = requiresL3Flush;
     auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, surface.getMemoryPointer());
     if (allocation == nullptr && surface.peekIsPtrCopyAllowed()) {
         // Try with no host pointer allocation and copy
-        AllocationProperties copyProperties{surface.getSurfaceSize(), GraphicsAllocation::AllocationType::UNDECIDED};
-        properties.alignment = MemoryConstants::pageSize;
+        AllocationProperties copyProperties{surface.getSurfaceSize(), GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY};
+        copyProperties.alignment = MemoryConstants::pageSize;
         allocation = memoryManager->allocateGraphicsMemoryWithProperties(copyProperties);
         if (allocation) {
             memcpy_s(allocation->getUnderlyingBuffer(), allocation->getUnderlyingBufferSize(), surface.getMemoryPointer(), surface.getSurfaceSize());
@@ -380,16 +418,16 @@ TagAllocator<HwTimeStamps> *CommandStreamReceiver::getEventTsAllocator() {
     return profilingTimeStampAllocator.get();
 }
 
-TagAllocator<HwPerfCounter> *CommandStreamReceiver::getEventPerfCountAllocator() {
+TagAllocator<HwPerfCounter> *CommandStreamReceiver::getEventPerfCountAllocator(const uint32_t tagSize) {
     if (perfCounterAllocator.get() == nullptr) {
-        perfCounterAllocator = std::make_unique<TagAllocator<HwPerfCounter>>(getMemoryManager(), getPreferredTagPoolSize(), MemoryConstants::cacheLineSize);
+        perfCounterAllocator = std::make_unique<TagAllocator<HwPerfCounter>>(getMemoryManager(), getPreferredTagPoolSize(), MemoryConstants::cacheLineSize, tagSize);
     }
     return perfCounterAllocator.get();
 }
 
-TagAllocator<TimestampPacket> *CommandStreamReceiver::getTimestampPacketAllocator() {
+TagAllocator<TimestampPacketStorage> *CommandStreamReceiver::getTimestampPacketAllocator() {
     if (timestampPacketAllocator.get() == nullptr) {
-        timestampPacketAllocator = std::make_unique<TagAllocator<TimestampPacket>>(getMemoryManager(), getPreferredTagPoolSize(), MemoryConstants::cacheLineSize);
+        timestampPacketAllocator = std::make_unique<TagAllocator<TimestampPacketStorage>>(getMemoryManager(), getPreferredTagPoolSize(), MemoryConstants::cacheLineSize);
     }
     return timestampPacketAllocator.get();
 }

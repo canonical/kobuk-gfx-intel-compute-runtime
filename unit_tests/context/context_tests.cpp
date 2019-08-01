@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/context/context.inl"
 #include "runtime/device/device.h"
@@ -12,7 +13,6 @@
 #include "runtime/helpers/options.h"
 #include "runtime/sharings/sharing.h"
 #include "unit_tests/fixtures/platform_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_deferred_deleter.h"
 #include "unit_tests/mocks/mock_device.h"
@@ -299,12 +299,27 @@ TEST_F(ContextTest, givenContextWhenSharingTableIsNotEmptyThenReturnsSharingFunc
     EXPECT_EQ(sharingF, sharingFunctions);
 }
 
+TEST(Context, givenFtrSvmFalseWhenContextIsCreatedThenSVMAllocsManagerIsNotCreated) {
+    ExecutionEnvironment *executionEnvironment = platformImpl->peekExecutionEnvironment();
+    auto hwInfo = executionEnvironment->getMutableHardwareInfo();
+    hwInfo->capabilityTable.ftrSvm = false;
+
+    std::unique_ptr<MockDevice> device(MockDevice::createWithExecutionEnvironment<MockDevice>(hwInfo, executionEnvironment, 0));
+
+    cl_device_id clDevice = device.get();
+    cl_int retVal = CL_SUCCESS;
+    auto context = std::unique_ptr<MockContext>(Context::create<MockContext>(nullptr, DeviceVector(&clDevice, 1), nullptr, nullptr, retVal));
+    ASSERT_NE(nullptr, context);
+    auto svmManager = context->getSVMAllocsManager();
+    EXPECT_EQ(nullptr, svmManager);
+}
+
 class ContextWithAsyncDeleterTest : public ::testing::WithParamInterface<bool>,
                                     public ::testing::Test {
   public:
     void SetUp() override {
         memoryManager = new MockMemoryManager();
-        device = new MockDevice(*platformDevices[0]);
+        device = new MockDevice;
         deleter = new MockDeferredDeleter();
         device->injectMemoryManager(memoryManager);
         memoryManager->setDeferredDeleter(deleter);
@@ -345,4 +360,15 @@ INSTANTIATE_TEST_CASE_P(ContextTests,
 TEST(DefaultContext, givenDefaultContextWhenItIsQueriedForTypeThenDefaultTypeIsReturned) {
     MockContext context;
     EXPECT_EQ(ContextType::CONTEXT_TYPE_DEFAULT, context.peekContextType());
+}
+
+TEST(Context, givenContextWhenCheckIfAllocationsAreMultiStorageThenReturnProperValueAccordingToContextType) {
+    MockContext context;
+    EXPECT_TRUE(context.areMultiStorageAllocationsPreffered());
+
+    context.setContextType(ContextType::CONTEXT_TYPE_SPECIALIZED);
+    EXPECT_FALSE(context.areMultiStorageAllocationsPreffered());
+
+    context.setContextType(ContextType::CONTEXT_TYPE_UNRESTRICTIVE);
+    EXPECT_TRUE(context.areMultiStorageAllocationsPreffered());
 }

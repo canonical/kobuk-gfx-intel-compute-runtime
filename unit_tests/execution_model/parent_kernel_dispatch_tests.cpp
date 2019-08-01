@@ -5,13 +5,13 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_queue/enqueue_kernel.h"
 #include "runtime/command_queue/hardware_interface.h"
 #include "runtime/event/perf_counter.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/sampler/sampler.h"
 #include "unit_tests/fixtures/execution_model_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_context.h"
@@ -142,8 +142,8 @@ HWTEST_P(ParentKernelDispatchTest, givenParentKernelWhenQueueIsNotBlockedThenSSH
 
         EXPECT_LE(pKernel->getKernelInfo().heapInfo.pKernelHeader->SurfaceStateHeapSize, ssh.getMaxAvailableSpace());
 
-        size_t minRequiredSize = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
-        size_t minRequiredSizeForEM = KernelCommandsHelper<FamilyType>::template getSizeRequiredForExecutionModel<IndirectHeap::SURFACE_STATE>(*pKernel);
+        size_t minRequiredSize = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo);
+        size_t minRequiredSizeForEM = HardwareCommandsHelper<FamilyType>::template getSizeRequiredForExecutionModel<IndirectHeap::SURFACE_STATE>(*pKernel);
 
         EXPECT_LE(minRequiredSize + minRequiredSizeForEM, ssh.getMaxAvailableSpace());
     }
@@ -175,8 +175,8 @@ HWTEST_P(ParentKernelDispatchTest, givenParentKernelWhenQueueIsBlockedThenSSHSiz
             true);
         ASSERT_NE(nullptr, blockedCommandsData);
 
-        size_t minRequiredSize = KernelCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo) + UnitTestHelper<FamilyType>::getDefaultSshUsage();
-        size_t minRequiredSizeForEM = KernelCommandsHelper<FamilyType>::template getSizeRequiredForExecutionModel<IndirectHeap::SURFACE_STATE>(*pKernel);
+        size_t minRequiredSize = HardwareCommandsHelper<FamilyType>::getTotalSizeRequiredSSH(multiDispatchInfo) + UnitTestHelper<FamilyType>::getDefaultSshUsage();
+        size_t minRequiredSizeForEM = HardwareCommandsHelper<FamilyType>::template getSizeRequiredForExecutionModel<IndirectHeap::SURFACE_STATE>(*pKernel);
 
         size_t sshUsed = blockedCommandsData->ssh->getUsed();
 
@@ -231,7 +231,8 @@ HWTEST_F(ParentKernelCommandStreamFixture, GivenDispatchInfoWithParentKernelWhen
 
         size_t totalKernelSize = alignUp(numOfKernels * size, MemoryConstants::pageSize);
 
-        LinearStream &commandStream = getCommandStream<FamilyType, CL_COMMAND_NDRANGE_KERNEL>(*pCmdQ, CsrDependencies(), false, false, multiDispatchInfo);
+        LinearStream &commandStream = getCommandStream<FamilyType, CL_COMMAND_NDRANGE_KERNEL>(*pCmdQ, CsrDependencies(), false, false,
+                                                                                              false, multiDispatchInfo, nullptr, 0);
 
         EXPECT_LT(totalKernelSize, commandStream.getMaxAvailableSpace());
 

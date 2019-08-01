@@ -46,13 +46,19 @@ GEN9TEST_F(Gen9DeviceCaps, compression) {
 
 GEN9TEST_F(Gen9DeviceCaps, givenHwInfoWhenRequestedComputeUnitsUsedForScratchThenReturnValidValue) {
     const auto &hwInfo = pDevice->getHardwareInfo();
-    auto &hwHelper = HwHelper::get(hwInfo.pPlatform->eRenderCoreFamily);
+    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
 
-    uint32_t expectedValue = hwInfo.pSysInfo->MaxSubSlicesSupported * hwInfo.pSysInfo->MaxEuPerSubSlice *
-                             hwInfo.pSysInfo->ThreadCount / hwInfo.pSysInfo->EUCount;
+    uint32_t expectedValue = hwInfo.gtSystemInfo.MaxSubSlicesSupported * hwInfo.gtSystemInfo.MaxEuPerSubSlice *
+                             hwInfo.gtSystemInfo.ThreadCount / hwInfo.gtSystemInfo.EUCount;
 
     EXPECT_EQ(expectedValue, hwHelper.getComputeUnitsUsedForScratch(&hwInfo));
     EXPECT_EQ(expectedValue, pDevice->getDeviceInfo().computeUnitsUsedForScratch);
+}
+
+GEN9TEST_F(Gen9DeviceCaps, givenHwInfoWhenRequestedMaxFrontEndThreadsThenReturnValidValue) {
+    const auto &hwInfo = pDevice->getHardwareInfo();
+
+    EXPECT_EQ(HwHelper::getMaxThreadsForVfe(hwInfo), pDevice->getDeviceInfo().maxFrontEndThreads);
 }
 
 GEN9TEST_F(Gen9DeviceCaps, givenHwInfoWhenSlmSizeIsRequiredThenReturnCorrectValue) {
@@ -61,4 +67,8 @@ GEN9TEST_F(Gen9DeviceCaps, givenHwInfoWhenSlmSizeIsRequiredThenReturnCorrectValu
 
 GEN9TEST_F(Gen9DeviceCaps, givenGen9WhenCheckSupportCacheFlushAfterWalkerThenFalse) {
     EXPECT_FALSE(pDevice->getHardwareInfo().capabilityTable.supportCacheFlushAfterWalker);
+}
+
+GEN9TEST_F(Gen9DeviceCaps, givenGen9WhenCheckBlitterOperationsSupportThenReturnFalse) {
+    EXPECT_FALSE(pDevice->getHardwareInfo().capabilityTable.blitterOperationsSupported);
 }

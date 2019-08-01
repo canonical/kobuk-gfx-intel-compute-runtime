@@ -5,14 +5,15 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/helpers/options.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/mem_obj/buffer.h"
 #include "test.h"
 #include "unit_tests/aub_tests/aub_tests_configuration.h"
 #include "unit_tests/aub_tests/command_queue/command_enqueue_fixture.h"
 #include "unit_tests/mocks/mock_context.h"
+#include "unit_tests/mocks/mock_graphics_allocation.h"
 
 #include <memory>
 
@@ -67,6 +68,7 @@ HWTEST_P(AUBReadBuffer, simple) {
         offset,
         sizeWritten,
         pDestMemory,
+        nullptr,
         numEventsInWaitList,
         eventWaitList,
         event);
@@ -114,13 +116,13 @@ HWTEST_F(AUBReadBuffer, reserveCanonicalGpuAddress) {
 
     cl_float srcMemory[] = {1.0f, 2.0f, 3.0f, 4.0f};
     cl_float dstMemory[] = {0.0f, 0.0f, 0.0f, 0.0f};
-    GraphicsAllocation *srcAlocation = new GraphicsAllocation(GraphicsAllocation::AllocationType::UNKNOWN,
-                                                              srcMemory,
-                                                              0xFFFF800400001000,
-                                                              0xFFFF800400001000,
-                                                              sizeof(srcMemory),
-                                                              MemoryPool::MemoryNull,
-                                                              false);
+    GraphicsAllocation *srcAlocation = new MockGraphicsAllocation(GraphicsAllocation::AllocationType::UNKNOWN,
+                                                                  srcMemory,
+                                                                  0xFFFF800400001000,
+                                                                  0xFFFF800400001000,
+                                                                  sizeof(srcMemory),
+                                                                  MemoryPool::MemoryNull,
+                                                                  false);
 
     std::unique_ptr<Buffer> srcBuffer(Buffer::createBufferHw(&context,
                                                              CL_MEM_USE_HOST_PTR,
@@ -135,13 +137,17 @@ HWTEST_F(AUBReadBuffer, reserveCanonicalGpuAddress) {
 
     srcBuffer->forceDisallowCPUCopy = true;
     auto retVal = pCmdQ->enqueueReadBuffer(srcBuffer.get(),
-                                           CL_TRUE,
+                                           CL_FALSE,
                                            0,
                                            sizeof(dstMemory),
                                            dstMemory,
+                                           nullptr,
                                            0,
                                            nullptr,
                                            nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = pCmdQ->flush();
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     GraphicsAllocation *dstAllocation = createResidentAllocationAndStoreItInCsr(dstMemory, sizeof(dstMemory));
@@ -189,13 +195,17 @@ struct AUBReadBufferUnaligned
         // Do unaligned read
         retVal = pCmdQ->enqueueReadBuffer(
             buffer.get(),
-            CL_TRUE,
+            CL_FALSE,
             offset,
             size,
             ptrOffset(dstMemory, offset),
+            nullptr,
             0,
             nullptr,
             nullptr);
+        EXPECT_EQ(CL_SUCCESS, retVal);
+
+        retVal = pCmdQ->flush();
         EXPECT_EQ(CL_SUCCESS, retVal);
 
         // Check the memory

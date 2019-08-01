@@ -28,7 +28,7 @@ class AUBFixture : public CommandQueueHwFixture {
         const HardwareInfo &hwInfo = hardwareInfo ? *hardwareInfo : *platformDevices[0];
         uint32_t deviceIndex = 0;
 
-        auto &hwHelper = HwHelper::get(hwInfo.pPlatform->eRenderCoreFamily);
+        auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
         auto engineType = getChosenEngineType(hwInfo);
 
         const ::testing::TestInfo *const testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
@@ -36,6 +36,7 @@ class AUBFixture : public CommandQueueHwFixture {
         strfilename << testInfo->test_case_name() << "_" << testInfo->name() << "_" << hwHelper.getCsTraits(engineType).name;
 
         executionEnvironment = platformImpl->peekExecutionEnvironment();
+        executionEnvironment->setHwInfo(&hwInfo);
         if (testMode == TestMode::AubTestsWithTbx) {
             this->csr = TbxCommandStreamReceiver::create(strfilename.str(), true, *executionEnvironment);
         } else {
@@ -44,7 +45,7 @@ class AUBFixture : public CommandQueueHwFixture {
 
         executionEnvironment->commandStreamReceivers.resize(deviceIndex + 1);
 
-        device.reset(MockDevice::create<MockDevice>(&hwInfo, executionEnvironment, deviceIndex));
+        device.reset(MockDevice::create<MockDevice>(executionEnvironment, deviceIndex));
         device->resetCommandStreamReceiver(this->csr);
 
         CommandQueueHwFixture::SetUp(AUBFixture::device.get(), cl_command_queue_properties(0));
@@ -56,10 +57,8 @@ class AUBFixture : public CommandQueueHwFixture {
     GraphicsAllocation *createHostPtrAllocationFromSvmPtr(void *svmPtr, size_t size);
 
     template <typename FamilyType>
-    CommandStreamReceiverSimulatedCommonHw<FamilyType> *getSimulatedCsr() {
-        CommandStreamReceiverSimulatedCommonHw<FamilyType> *simulatedCsr = nullptr;
-        simulatedCsr = reinterpret_cast<CommandStreamReceiverSimulatedCommonHw<FamilyType> *>(csr);
-        return simulatedCsr;
+    CommandStreamReceiverSimulatedCommonHw<FamilyType> *getSimulatedCsr() const {
+        return static_cast<CommandStreamReceiverSimulatedCommonHw<FamilyType> *>(csr);
     }
 
     template <typename FamilyType>

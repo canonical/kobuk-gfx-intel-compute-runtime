@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/helpers/options.h"
 #include "runtime/scheduler/scheduler_kernel.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_device.h"
 #include "unit_tests/mocks/mock_graphics_allocation.h"
@@ -77,7 +77,7 @@ TEST(SchedulerKernelTest, getGws) {
     const size_t hwThreads = 3;
     const size_t simdSize = 8;
 
-    size_t maxGws = platformDevices[0]->pSysInfo->EUCount * hwThreads * simdSize;
+    size_t maxGws = platformDevices[0]->gtSystemInfo.EUCount * hwThreads * simdSize;
 
     size_t gws = kernel.getGws();
     EXPECT_GE(maxGws, gws);
@@ -301,10 +301,8 @@ TEST(SchedulerKernelTest, givenForcedSchedulerGwsByDebugVariableWhenSchedulerKer
 }
 
 TEST(SchedulerKernelTest, givenSimulationModeWhenSchedulerKernelIsCreatedThenGwsIsSetToOneWorkgroup) {
-    FeatureTable skuTable = *platformDevices[0]->pSkuTable;
-    skuTable.ftrSimulationMode = true;
-    HardwareInfo hwInfo = {platformDevices[0]->pPlatform, &skuTable, platformDevices[0]->pWaTable,
-                           platformDevices[0]->pSysInfo, platformDevices[0]->capabilityTable};
+    HardwareInfo hwInfo = *platformDevices[0];
+    hwInfo.featureTable.ftrSimulationMode = true;
 
     auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<Device>(&hwInfo));
     MockProgram program(*device->getExecutionEnvironment());
@@ -319,10 +317,8 @@ TEST(SchedulerKernelTest, givenForcedSchedulerGwsByDebugVariableAndSimulationMod
     DebugManagerStateRestore dbgRestorer;
     DebugManager.flags.SchedulerGWS.set(48);
 
-    FeatureTable skuTable = *platformDevices[0]->pSkuTable;
-    skuTable.ftrSimulationMode = true;
-    HardwareInfo hwInfo = {platformDevices[0]->pPlatform, &skuTable, platformDevices[0]->pWaTable,
-                           platformDevices[0]->pSysInfo, platformDevices[0]->capabilityTable};
+    HardwareInfo hwInfo = *platformDevices[0];
+    hwInfo.featureTable.ftrSimulationMode = true;
 
     auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<Device>(&hwInfo));
     MockProgram program(*device->getExecutionEnvironment());

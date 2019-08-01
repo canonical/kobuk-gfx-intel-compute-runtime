@@ -8,6 +8,7 @@
 #pragma once
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
+#include "unit_tests/mocks/mock_execution_environment.h"
 #include "unit_tests/mocks/mock_host_ptr_manager.h"
 
 #include "gmock/gmock.h"
@@ -33,9 +34,13 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     using MemoryManager::allocateGraphicsMemoryWithProperties;
     using MemoryManager::AllocationData;
     using MemoryManager::createGraphicsAllocation;
+    using MemoryManager::createStorageInfoFromProperties;
     using MemoryManager::getAllocationData;
+    using MemoryManager::getBanksCount;
+    using MemoryManager::localMemoryUsageBankSelector;
     using MemoryManager::multiContextResourceDestructor;
     using MemoryManager::registeredEngines;
+    using MemoryManager::supportsMultiStorageResources;
     using MemoryManager::useInternal32BitAllocator;
     using OsAgnosticMemoryManager::allocateGraphicsMemoryForImageFromHostPtr;
     using MemoryManagerCreate<OsAgnosticMemoryManager>::MemoryManagerCreate;
@@ -46,10 +51,10 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
         hostPtrManager.reset(new MockHostPtrManager);
     };
 
-    MockMemoryManager() : MockMemoryManager(*(new ExecutionEnvironment)) {
+    MockMemoryManager() : MockMemoryManager(*(new MockExecutionEnvironment(*platformDevices))) {
         mockExecutionEnvironment.reset(&executionEnvironment);
     };
-    MockMemoryManager(bool enable64pages, bool enableLocalMemory) : MemoryManagerCreate(enable64pages, enableLocalMemory, *(new ExecutionEnvironment)) {
+    MockMemoryManager(bool enable64pages, bool enableLocalMemory) : MemoryManagerCreate(enable64pages, enableLocalMemory, *(new MockExecutionEnvironment(*platformDevices))) {
         mockExecutionEnvironment.reset(&executionEnvironment);
     }
     GraphicsAllocation *allocateGraphicsMemory64kb(const AllocationData &allocationData) override;
@@ -84,6 +89,13 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
         OsAgnosticMemoryManager::handleFenceCompletion(graphicsAllocation);
     }
 
+    void *reserveCpuAddressRange(size_t size) override {
+        if (failReserveAddress) {
+            return nullptr;
+        }
+        return OsAgnosticMemoryManager::reserveCpuAddressRange(size);
+    }
+
     GraphicsAllocation *allocate32BitGraphicsMemory(size_t size, const void *ptr, GraphicsAllocation::AllocationType allocationType);
 
     uint32_t freeGraphicsMemoryCalled = 0u;
@@ -98,6 +110,8 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     bool failInAllocateWithSizeAndAlignment = false;
     bool preferRenderCompressedFlagPassed = false;
     bool allocateForImageCalled = false;
+    bool failReserveAddress = false;
+    bool failAllocateSystemMemory = false;
     std::unique_ptr<ExecutionEnvironment> mockExecutionEnvironment;
 };
 
@@ -137,7 +151,8 @@ class FailMemoryManager : public MockMemoryManager {
   public:
     using MemoryManager::allocateGraphicsMemoryWithProperties;
     using MockMemoryManager::MockMemoryManager;
-    FailMemoryManager(int32_t failedAllocationsCount);
+    FailMemoryManager(int32_t failedAllocationsCount, ExecutionEnvironment &executionEnvironment);
+    FailMemoryManager(int32_t failedAllocationsCount, ExecutionEnvironment &executionEnvironment, bool localMemory);
 
     GraphicsAllocation *allocateGraphicsMemoryWithAlignment(const AllocationData &allocationData) override {
         if (failedAllocationsCount <= 0) {
@@ -158,7 +173,7 @@ class FailMemoryManager : public MockMemoryManager {
     GraphicsAllocation *allocate32BitGraphicsMemoryImpl(const AllocationData &allocationData) override {
         return nullptr;
     }
-    GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, bool requireSpecificBitness) override {
+    GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness) override {
         return nullptr;
     }
     GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle) override {
@@ -175,10 +190,6 @@ class FailMemoryManager : public MockMemoryManager {
 
     uint64_t getSystemSharedMemory() override {
         return 0;
-    };
-
-    uint64_t getMaxApplicationAddress() override {
-        return MemoryConstants::max32BitAppAddress;
     };
 
     GraphicsAllocation *createGraphicsAllocation(OsHandleStorage &handleStorage, const AllocationData &allocationData) override {

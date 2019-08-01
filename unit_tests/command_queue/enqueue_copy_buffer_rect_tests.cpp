@@ -161,7 +161,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferRectTest, 2D_addsIndirectData) {
                                                                                                                pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.srcMemObj = srcBuffer;
     dc.dstMemObj = dstBuffer;
     dc.srcOffset = {0, 0, 0};
@@ -191,7 +191,7 @@ HWTEST_F(EnqueueCopyBufferRectTest, 2D_LoadRegisterImmediateL3CNTLREG) {
 
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferRectTest, When2DEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueCopyBufferRect2D<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 
@@ -313,7 +313,7 @@ HWTEST_F(EnqueueCopyBufferRectTest, 3D_LoadRegisterImmediateL3CNTLREG) {
 
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferRectTest, When3DEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueCopyBufferRect3D<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 

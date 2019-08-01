@@ -8,7 +8,6 @@
 #include "test.h"
 #include "unit_tests/fixtures/buffer_fixture.h"
 #include "unit_tests/fixtures/memory_management_fixture.h"
-#include "unit_tests/helpers/memory_management.h"
 
 #include "gtest/gtest.h"
 
@@ -91,7 +90,7 @@ TEST_F(DestructorCallbackTest, doFailAllocations) {
 
             retVal = buffer->setDestructorCallback(callBack1, nullptr);
 
-            if (nonfailingAllocation == failureIndex) {
+            if (MemoryManagement::nonfailingAllocation == failureIndex) {
                 EXPECT_EQ(CL_SUCCESS, retVal);
             } else {
                 EXPECT_EQ(CL_OUT_OF_HOST_MEMORY, retVal) << "for allocation " << failureIndex;
@@ -99,7 +98,7 @@ TEST_F(DestructorCallbackTest, doFailAllocations) {
 
             delete buffer;
 
-            if (nonfailingAllocation == failureIndex) {
+            if (MemoryManagement::nonfailingAllocation == failureIndex) {
                 EXPECT_EQ(1u, calls.size());
             } else {
                 EXPECT_EQ(0u, calls.size());

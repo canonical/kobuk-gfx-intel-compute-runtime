@@ -79,7 +79,8 @@ Image *D3DSurface::create(Context *context, cl_dx9_surface_info_khr *surfaceInfo
     GraphicsAllocation *alloc = nullptr;
     if (surfaceInfo->shared_handle) {
         isSharedResource = true;
-        alloc = context->getMemoryManager()->createGraphicsAllocationFromSharedHandle((osHandle)((UINT_PTR)surfaceInfo->shared_handle),
+        AllocationProperties allocProperties(false, 0u, GraphicsAllocation::AllocationType::SHARED_IMAGE, false);
+        alloc = context->getMemoryManager()->createGraphicsAllocationFromSharedHandle((osHandle)((UINT_PTR)surfaceInfo->shared_handle), allocProperties,
                                                                                       false);
         updateImgInfo(alloc->getDefaultGmm(), imgInfo, imgDesc, oclPlane, 0u);
     } else {
@@ -92,10 +93,10 @@ Image *D3DSurface::create(Context *context, cl_dx9_surface_info_khr *surfaceInfo
             imgDesc.image_height /= 2;
         }
 
-        AllocationProperties allocProperties = MemObjHelper::getAllocationProperties(&imgInfo, true);
+        AllocationProperties allocProperties = MemObjHelper::getAllocationProperties(imgInfo, true, flags);
         allocProperties.allocationType = GraphicsAllocation::AllocationType::SHARED_RESOURCE_COPY;
 
-        alloc = context->getMemoryManager()->allocateGraphicsMemoryInPreferredPool(allocProperties, {}, nullptr);
+        alloc = context->getMemoryManager()->allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
 
         imgDesc.image_row_pitch = imgInfo.rowPitch;
         imgDesc.image_slice_pitch = imgInfo.slicePitch;
@@ -199,6 +200,13 @@ const std::map<const D3DFORMAT, const cl_image_format> D3DSurface::D3DtoClFormat
     {static_cast<D3DFORMAT>(MAKEFOURCC('Y', 'V', '1', '2')), {CL_R, CL_UNORM_INT8}},
     {static_cast<D3DFORMAT>(MAKEFOURCC('Y', 'V', 'Y', 'U')), {CL_YVYU_INTEL, CL_UNORM_INT8}},
     {static_cast<D3DFORMAT>(MAKEFOURCC('V', 'Y', 'U', 'Y')), {CL_VYUY_INTEL, CL_UNORM_INT8}}};
+
+const std::vector<D3DFORMAT> D3DSurface::D3DPlane1Formats = {
+    static_cast<D3DFORMAT>(MAKEFOURCC('N', 'V', '1', '2')),
+    static_cast<D3DFORMAT>(MAKEFOURCC('Y', 'V', '1', '2'))};
+
+const std::vector<D3DFORMAT> D3DSurface::D3DPlane2Formats =
+    {static_cast<D3DFORMAT>(MAKEFOURCC('Y', 'V', '1', '2'))};
 
 cl_int D3DSurface::findImgFormat(D3DFORMAT d3dFormat, cl_image_format &imgFormat, cl_uint plane, OCLPlane &oclPlane) {
     oclPlane = OCLPlane::NO_PLANE;

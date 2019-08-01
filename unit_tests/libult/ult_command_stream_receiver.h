@@ -26,11 +26,13 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::deviceIndex;
     using BaseClass::dshState;
     using BaseClass::getScratchPatchAddress;
+    using BaseClass::getScratchSpaceController;
     using BaseClass::indirectHeap;
     using BaseClass::iohState;
     using BaseClass::programPreamble;
     using BaseClass::programStateSip;
     using BaseClass::sshState;
+    using BaseClass::CommandStreamReceiver::bindingTableBaseAddressRequired;
     using BaseClass::CommandStreamReceiver::cleanupResources;
     using BaseClass::CommandStreamReceiver::commandStream;
     using BaseClass::CommandStreamReceiver::disableL3Cache;
@@ -39,6 +41,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::experimentalCmdBuffer;
     using BaseClass::CommandStreamReceiver::flushStamp;
     using BaseClass::CommandStreamReceiver::GSBAFor32BitProgrammed;
+    using BaseClass::CommandStreamReceiver::internalAllocationStorage;
     using BaseClass::CommandStreamReceiver::isPreambleSent;
     using BaseClass::CommandStreamReceiver::isStateSipSent;
     using BaseClass::CommandStreamReceiver::lastMediaSamplerConfig;
@@ -49,7 +52,11 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::lastVmeSubslicesConfig;
     using BaseClass::CommandStreamReceiver::latestFlushedTaskCount;
     using BaseClass::CommandStreamReceiver::latestSentStatelessMocsConfig;
+    using BaseClass::CommandStreamReceiver::latestSentTaskCount;
     using BaseClass::CommandStreamReceiver::mediaVfeStateDirty;
+    using BaseClass::CommandStreamReceiver::perfCounterAllocator;
+    using BaseClass::CommandStreamReceiver::profilingTimeStampAllocator;
+    using BaseClass::CommandStreamReceiver::requiredPrivateScratchSize;
     using BaseClass::CommandStreamReceiver::requiredScratchSize;
     using BaseClass::CommandStreamReceiver::requiredThreadArbitrationPolicy;
     using BaseClass::CommandStreamReceiver::samplerCacheFlushRequired;
@@ -63,18 +70,10 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::waitForTaskCountAndCleanAllocationList;
 
     virtual ~UltCommandStreamReceiver() override {
-        if (tempPreemptionLocation) {
-            this->setPreemptionCsrAllocation(nullptr);
-        }
     }
 
     UltCommandStreamReceiver(ExecutionEnvironment &executionEnvironment) : BaseClass(executionEnvironment), recursiveLockCounter(0) {
-        if (executionEnvironment.getHardwareInfo()->capabilityTable.defaultPreemptionMode == PreemptionMode::MidThread) {
-            tempPreemptionLocation = std::make_unique<GraphicsAllocation>(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0, 0, 0, MemoryPool::MemoryNull, false);
-            this->preemptionCsrAllocation = tempPreemptionLocation.get();
-        }
     }
-
     static CommandStreamReceiver *create(bool withAubDump, ExecutionEnvironment &executionEnvironment) {
         return new UltCommandStreamReceiver<GfxFamily>(executionEnvironment);
     }
@@ -82,6 +81,19 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     virtual GmmPageTableMngr *createPageTableManager() override {
         createPageTableManagerCalled = true;
         return nullptr;
+    }
+
+    void makeSurfacePackNonResident(ResidencyContainer &allocationsForResidency) override {
+        makeSurfacePackNonResidentCalled++;
+        BaseClass::makeSurfacePackNonResident(allocationsForResidency);
+    }
+
+    FlushStamp flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
+        if (recordFlusheBatchBuffer) {
+            latestFlushedBatchBuffer = batchBuffer;
+        }
+        latestSentTaskCountValueDuringFlush = latestSentTaskCount;
+        return BaseClass::flush(batchBuffer, allocationsForResidency);
     }
 
     CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
@@ -94,9 +106,15 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     size_t getPreferredTagPoolSize() const override {
         return BaseClass::getPreferredTagPoolSize() + 1;
     }
+    void setPreemptionAllocation(GraphicsAllocation *allocation) { this->preemptionAllocation = allocation; }
+
+    bool waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) override {
+        latestWaitForCompletionWithTimeoutTaskCount.store(taskCountToWait);
+        return BaseClass::waitForCompletionWithTimeout(enableTimeout, timeoutMicroseconds, taskCountToWait);
+    }
 
     void overrideCsrSizeReqFlags(CsrSizeRequestFlags &flags) { this->csrSizeRequestFlags = flags; }
-    GraphicsAllocation *getPreemptionCsrAllocation() const { return this->preemptionCsrAllocation; }
+    GraphicsAllocation *getPreemptionAllocation() const { return this->preemptionAllocation; }
 
     void makeResident(GraphicsAllocation &gfxAllocation) override {
         if (storeMakeResidentAllocations) {
@@ -119,9 +137,15 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     std::map<GraphicsAllocation *, uint32_t> makeResidentAllocations;
     bool storeMakeResidentAllocations = false;
 
-    void activateAubSubCapture(const MultiDispatchInfo &dispatchInfo) override {
-        CommandStreamReceiverHw<GfxFamily>::activateAubSubCapture(dispatchInfo);
-        activateAubSubCaptureCalled = true;
+    AubSubCaptureStatus checkAndActivateAubSubCapture(const MultiDispatchInfo &dispatchInfo) override {
+        auto status = CommandStreamReceiverHw<GfxFamily>::checkAndActivateAubSubCapture(dispatchInfo);
+        checkAndActivateAubSubCaptureCalled = true;
+        return status;
+    }
+    void addAubComment(const char *message) override {
+        CommandStreamReceiverHw<GfxFamily>::addAubComment(message);
+        aubCommentMessages.push_back(message);
+        addAubCommentCalled = true;
     }
     void flushBatchedSubmissions() override {
         CommandStreamReceiverHw<GfxFamily>::flushBatchedSubmissions();
@@ -137,15 +161,24 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         return CommandStreamReceiverHw<GfxFamily>::obtainUniqueOwnership();
     }
 
+    void blitBuffer(const BlitProperties &blitProperites) override {
+        blitBufferCalled++;
+        CommandStreamReceiverHw<GfxFamily>::blitBuffer(blitProperites);
+    }
+
     std::atomic<uint32_t> recursiveLockCounter;
     bool createPageTableManagerCalled = false;
-    bool activateAubSubCaptureCalled = false;
+    bool recordFlusheBatchBuffer = false;
+    bool checkAndActivateAubSubCaptureCalled = false;
+    bool addAubCommentCalled = false;
+    std::vector<std::string> aubCommentMessages;
     bool flushBatchedSubmissionsCalled = false;
+    uint32_t makeSurfacePackNonResidentCalled = false;
     bool initProgrammingFlagsCalled = false;
     LinearStream *lastFlushedCommandStream = nullptr;
-
-  protected:
-    std::unique_ptr<GraphicsAllocation> tempPreemptionLocation;
+    BatchBuffer latestFlushedBatchBuffer = {};
+    uint32_t latestSentTaskCountValueDuringFlush = 0;
+    uint32_t blitBufferCalled = 0;
+    std::atomic<uint32_t> latestWaitForCompletionWithTimeoutTaskCount{0};
 };
-
 } // namespace NEO

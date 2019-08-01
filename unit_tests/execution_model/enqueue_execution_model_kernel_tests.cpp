@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/builtin_kernels_simulation/scheduler_simulation.h"
 #include "runtime/command_queue/gpgpu_walker.h"
@@ -15,7 +16,6 @@
 #include "runtime/kernel/kernel.h"
 #include "unit_tests/fixtures/device_host_queue_fixture.h"
 #include "unit_tests/fixtures/execution_model_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/gtest_helpers.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/mocks/mock_csr.h"
@@ -62,9 +62,6 @@ HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, givenParentKernelWhenEnqueu
         auto graphicsAllocation = pKernel->getKernelInfo().getGraphicsAllocation();
         auto kernelIsaAddress = graphicsAllocation->getGpuAddressToPatch();
 
-        uint64_t lowPart = kernelIsaAddress & 0xffffffff;
-        uint64_t hightPart = (kernelIsaAddress & 0xffffffff00000000) >> 32;
-
         pCmdQ->enqueueKernel(pKernel, 1, globalOffsets, workItems, workItems, 0, nullptr, nullptr);
 
         if (pKernel->getKernelInfo().name == "kernel_reflection") {
@@ -75,8 +72,8 @@ HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, givenParentKernelWhenEnqueu
         EXPECT_NE(0u, idData[0].getConstantIndirectUrbEntryReadLength());
         EXPECT_NE(0u, idData[0].getCrossThreadConstantDataReadLength());
         EXPECT_EQ(INTERFACE_DESCRIPTOR_DATA::DENORM_MODE_SETBYKERNEL, idData[0].getDenormMode());
-        EXPECT_EQ((uint32_t)lowPart, idData[0].getKernelStartPointer());
-        EXPECT_EQ((uint32_t)hightPart, idData[0].getKernelStartPointerHigh());
+        EXPECT_EQ(static_cast<uint32_t>(kernelIsaAddress), idData[0].getKernelStartPointer());
+        EXPECT_EQ(static_cast<uint32_t>(kernelIsaAddress >> 32), idData[0].getKernelStartPointerHigh());
 
         const uint32_t blockFirstIndex = 1;
 
@@ -105,16 +102,20 @@ HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, givenParentKernelWhenEnqueu
     }
 }
 
-HWTEST_P(ParentKernelEnqueueTest, GivenParentKernelWithPrivateSurfaceWhenEnqueueKernelCalledThenResidencyCountIncreased) {
+HWTEST_P(ParentKernelEnqueueTest, GivenBlockKernelWithPrivateSurfaceWhenParentKernelIsEnqueuedThenPrivateSurfaceIsMadeResident) {
     if (pDevice->getSupportedClVersion() >= 20) {
         size_t offset[3] = {0, 0, 0};
         size_t gws[3] = {1, 1, 1};
         int32_t executionStamp = 0;
         auto mockCSR = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment);
         pDevice->resetCommandStreamReceiver(mockCSR);
-        GraphicsAllocation *privateSurface = mockCSR->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
+        GraphicsAllocation *privateSurface = pKernel->getProgram()->getBlockKernelManager()->getPrivateSurface(0);
 
-        pKernel->getProgram()->getBlockKernelManager()->pushPrivateSurface(privateSurface, 0);
+        if (privateSurface == nullptr) {
+            privateSurface = mockCSR->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
+            pKernel->getProgram()->getBlockKernelManager()->pushPrivateSurface(privateSurface, 0);
+        }
+
         pCmdQ->enqueueKernel(pKernel, 1, offset, gws, gws, 0, nullptr, nullptr);
 
         EXPECT_TRUE(privateSurface->isResident(mockCSR->getOsContext().getContextId()));
@@ -130,8 +131,12 @@ HWTEST_P(ParentKernelEnqueueTest, GivenBlocksWithPrivateMemoryWhenEnqueueKernelT
         auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
         csr.storeMakeResidentAllocations = true;
 
-        auto privateAllocation = csr.getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
-        blockKernelManager->pushPrivateSurface(privateAllocation, 0);
+        auto privateAllocation = pKernel->getProgram()->getBlockKernelManager()->getPrivateSurface(0);
+
+        if (privateAllocation == nullptr) {
+            privateAllocation = csr.getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
+            blockKernelManager->pushPrivateSurface(privateAllocation, 0);
+        }
 
         auto uEvent = make_releaseable<UserEvent>(pContext);
         auto clEvent = static_cast<cl_event>(uEvent.get());
@@ -420,14 +425,14 @@ TEST_F(ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedTheDefaultDevice
             auto patchLocation = ptrOffset(reinterpret_cast<uint64_t *>(parentKernel->getCrossThreadData()),
                                            patchInfo.pAllocateStatelessDefaultDeviceQueueSurface->DataParamOffset);
 
-            EXPECT_EQ(pDevQueue->getQueueBuffer()->getGpuAddress(), *patchLocation);
+            EXPECT_EQ(pDevQueue->getQueueBuffer()->getGpuAddressToPatch(), *patchLocation);
         }
 
         if (patchInfo.pAllocateStatelessEventPoolSurface) {
             auto patchLocation = ptrOffset(reinterpret_cast<uint64_t *>(parentKernel->getCrossThreadData()),
                                            patchInfo.pAllocateStatelessEventPoolSurface->DataParamOffset);
 
-            EXPECT_EQ(pDevQueue->getEventPoolBuffer()->getGpuAddress(), *patchLocation);
+            EXPECT_EQ(pDevQueue->getEventPoolBuffer()->getGpuAddressToPatch(), *patchLocation);
         }
     }
 }
@@ -458,15 +463,15 @@ HWTEST_F(ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedThenBlocksDSHO
             uint32_t offset = MockKernel::ReflectionSurfaceHelperPublic::getConstantBufferOffset(reflectionSurface, i);
 
             if (defaultQueueSize == sizeof(uint64_t)) {
-                EXPECT_EQ_VAL(pDevQueueHw->getQueueBuffer()->getGpuAddressToPatch(), *(uint64_t *)ptrOffset(reflectionSurface, offset + defaultQueueOffset));
+                EXPECT_EQ_VAL(pDevQueueHw->getQueueBuffer()->getGpuAddress(), *(uint64_t *)ptrOffset(reflectionSurface, offset + defaultQueueOffset));
             } else {
-                EXPECT_EQ((uint32_t)pDevQueueHw->getQueueBuffer()->getGpuAddressToPatch(), *(uint32_t *)ptrOffset(reflectionSurface, offset + defaultQueueOffset));
+                EXPECT_EQ((uint32_t)pDevQueueHw->getQueueBuffer()->getGpuAddress(), *(uint32_t *)ptrOffset(reflectionSurface, offset + defaultQueueOffset));
             }
 
             if (eventPoolSize == sizeof(uint64_t)) {
-                EXPECT_EQ_VAL(pDevQueueHw->getEventPoolBuffer()->getGpuAddressToPatch(), *(uint64_t *)ptrOffset(reflectionSurface, offset + eventPoolOffset));
+                EXPECT_EQ_VAL(pDevQueueHw->getEventPoolBuffer()->getGpuAddress(), *(uint64_t *)ptrOffset(reflectionSurface, offset + eventPoolOffset));
             } else {
-                EXPECT_EQ((uint32_t)pDevQueueHw->getEventPoolBuffer()->getGpuAddressToPatch(), *(uint32_t *)ptrOffset(reflectionSurface, offset + eventPoolOffset));
+                EXPECT_EQ((uint32_t)pDevQueueHw->getEventPoolBuffer()->getGpuAddress(), *(uint32_t *)ptrOffset(reflectionSurface, offset + eventPoolOffset));
             }
         }
     }

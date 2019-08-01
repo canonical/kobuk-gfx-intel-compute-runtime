@@ -23,7 +23,7 @@ using namespace iOpenCL;
 // -------------------- Base Fixture ------------------------
 class PrintFormatterTest : public testing::Test {
   public:
-    PrintFormatter *printFormatter;
+    std::unique_ptr<PrintFormatter> printFormatter;
 
     std::string format;
     uint8_t buffer;
@@ -50,7 +50,7 @@ class PrintFormatterTest : public testing::Test {
         program = std::make_unique<MockProgram>(*device->getExecutionEnvironment());
         kernel = new MockKernel(program.get(), *kernelInfo, *device);
 
-        printFormatter = new PrintFormatter(*kernel, *data);
+        printFormatter = std::unique_ptr<PrintFormatter>(new PrintFormatter(static_cast<uint8_t *>(data->getUnderlyingBuffer()), PrintFormatter::maxPrintfOutputLength, is32bit, kernelInfo->patchInfo.stringDataMap));
 
         underlyingBuffer[0] = 0;
         underlyingBuffer[1] = 0;
@@ -59,7 +59,6 @@ class PrintFormatterTest : public testing::Test {
     }
 
     void TearDown() override {
-        delete printFormatter;
         delete data;
         delete kernel;
         delete device;
@@ -320,7 +319,6 @@ DoubleParams doubleToFloatValues[] = {
     {"%08.2f", 10.3456},
     {"%-8.2f", 10.3456},
     {"%+8.2f", -10.3456},
-    {"%.0f", 0.6},
     {"%.0f", 0.1},
     {"%0f", 0.6},
     {"%4g", 12345.6789},
@@ -752,6 +750,7 @@ TEST_F(PrintFormatterTest, GivenPrintfFormatWhenPointerThenInsertAddress) {
 }
 
 TEST_F(PrintFormatterTest, GivenPrintfFormatWhenPointerWith32BitKernelThenPrint32BitPointer) {
+    printFormatter.reset(new PrintFormatter(static_cast<uint8_t *>(data->getUnderlyingBuffer()), PrintFormatter::maxPrintfOutputLength, true, kernelInfo->patchInfo.stringDataMap));
     auto stringIndex = injectFormatString("%p");
     storeData(stringIndex);
     kernelInfo->gpuPointerSize = 4;

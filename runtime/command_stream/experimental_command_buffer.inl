@@ -16,8 +16,8 @@ namespace NEO {
 template <typename GfxFamily>
 void ExperimentalCommandBuffer::injectBufferStart(LinearStream &parentStream, size_t cmdBufferOffset) {
     using MI_BATCH_BUFFER_START = typename GfxFamily::MI_BATCH_BUFFER_START;
-    auto pCmd = static_cast<MI_BATCH_BUFFER_START *>(parentStream.getSpace(sizeof(MI_BATCH_BUFFER_START)));
-    auto commandStreamReceiverHw = reinterpret_cast<CommandStreamReceiverHw<GfxFamily> *>(commandStreamReceiver);
+    auto pCmd = parentStream.getSpaceForCmd<MI_BATCH_BUFFER_START>();
+    auto commandStreamReceiverHw = static_cast<CommandStreamReceiverHw<GfxFamily> *>(commandStreamReceiver);
     commandStreamReceiverHw->addBatchBufferStart(pCmd, currentStream->getGraphicsAllocation()->getGpuAddress() + cmdBufferOffset, true);
 }
 
@@ -44,7 +44,7 @@ size_t ExperimentalCommandBuffer::programExperimentalCommandBuffer() {
     addTimeStampPipeControl<GfxFamily>();
 
     //end
-    auto pCmd = static_cast<MI_BATCH_BUFFER_END *>(currentStream->getSpace(sizeof(MI_BATCH_BUFFER_END)));
+    auto pCmd = currentStream->getSpaceForCmd<MI_BATCH_BUFFER_END>();
     *pCmd = GfxFamily::cmdInitBatchBufferEnd;
 
     return returnOffset;
@@ -62,21 +62,18 @@ template <typename GfxFamily>
 size_t ExperimentalCommandBuffer::getTimeStampPipeControlSize() noexcept {
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
 
-    //two P_C for timestamps, two prior them for WA - Enable CS Stall
-    return 4 * sizeof(PIPE_CONTROL);
+    // Two P_C for timestamps
+    return 2 * PipeControlHelper<GfxFamily>::getSizeForPipeControlWithPostSyncOperation();
 }
 
 template <typename GfxFamily>
 void ExperimentalCommandBuffer::addTimeStampPipeControl() {
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
 
-    auto pCmd = static_cast<PIPE_CONTROL *>(currentStream->getSpace(sizeof(PIPE_CONTROL)));
-    *pCmd = GfxFamily::cmdInitPipeControl;
-    pCmd->setCommandStreamerStallEnable(true);
-
     uint64_t timeStampAddress = timestamps->getGpuAddress() + timestampsOffset;
 
-    PipeControlHelper<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(currentStream.get(), PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, timeStampAddress, 0llu, false);
+    PipeControlHelper<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(*currentStream,
+                                                                               PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, timeStampAddress, 0llu, false);
 
     //moving to next chunk
     timestampsOffset += sizeof(uint64_t);
@@ -88,12 +85,11 @@ template <typename GfxFamily>
 void ExperimentalCommandBuffer::addExperimentalCommands() {
     using MI_SEMAPHORE_WAIT = typename GfxFamily::MI_SEMAPHORE_WAIT;
 
-    uintptr_t semaphoreAddr = reinterpret_cast<uintptr_t>(experimentalAllocation->getUnderlyingBuffer()) + experimentalAllocationOffset;
-    uint32_t *semaphoreData = reinterpret_cast<uint32_t *>(semaphoreAddr);
+    uint32_t *semaphoreData = reinterpret_cast<uint32_t *>(ptrOffset(experimentalAllocation->getUnderlyingBuffer(), experimentalAllocationOffset));
     *semaphoreData = 1;
     uint64_t gpuAddr = experimentalAllocation->getGpuAddress() + experimentalAllocationOffset;
 
-    auto semaphoreCmd = reinterpret_cast<MI_SEMAPHORE_WAIT *>(currentStream->getSpace(sizeof(MI_SEMAPHORE_WAIT)));
+    auto semaphoreCmd = currentStream->getSpaceForCmd<MI_SEMAPHORE_WAIT>();
     *semaphoreCmd = GfxFamily::cmdInitMiSemaphoreWait;
     semaphoreCmd->setCompareOperation(MI_SEMAPHORE_WAIT::COMPARE_OPERATION_SAD_EQUAL_SDD);
     semaphoreCmd->setSemaphoreDataDword(*semaphoreData);

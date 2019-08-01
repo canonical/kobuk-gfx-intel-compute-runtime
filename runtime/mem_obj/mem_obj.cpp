@@ -26,7 +26,7 @@ namespace NEO {
 
 MemObj::MemObj(Context *context,
                cl_mem_object_type memObjectType,
-               MemoryProperties properties,
+               const MemoryProperties &properties,
                size_t size,
                void *memoryStorage,
                void *hostPtr,
@@ -75,7 +75,10 @@ MemObj::~MemObj() {
             graphicsAllocation = nullptr;
         }
 
-        releaseAllocatedMapPtr();
+        if (!associatedMemObject) {
+            releaseMapAllocation();
+            releaseAllocatedMapPtr();
+        }
         if (mcsAllocation) {
             destroyGraphicsAllocation(mcsAllocation, false);
         }
@@ -115,6 +118,7 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
     cl_uint mapCount = 0;
     cl_mem clAssociatedMemObject = static_cast<cl_mem>(this->associatedMemObject);
     cl_context ctx = nullptr;
+    uint64_t internalHandle = 0llu;
 
     switch (paramName) {
     case CL_MEM_TYPE:
@@ -170,6 +174,11 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
         srcParamSize = sizeof(refCnt);
         srcParam = &refCnt;
         break;
+    case CL_MEM_ALLOCATION_HANDLE_INTEL:
+        internalHandle = this->getGraphicsAllocation()->peekInternalHandle(this->memoryManager);
+        srcParamSize = sizeof(internalHandle);
+        srcParam = &internalHandle;
+        break;
 
     default:
         getOsSpecificMemObjectInfo(paramName, &srcParamSize, &srcParam);
@@ -211,7 +220,7 @@ void MemObj::setAllocatedMapPtr(void *allocatedMapPtr) {
 }
 
 cl_mem_flags MemObj::getFlags() const {
-    return properties.flags;
+    return getProperties().flags;
 }
 
 bool MemObj::isMemObjZeroCopy() const {
@@ -226,7 +235,7 @@ bool MemObj::isMemObjUncacheable() const {
     return isValueSet(properties.flags_intel, CL_MEM_LOCALLY_UNCACHED_RESOURCE);
 }
 
-GraphicsAllocation *MemObj::getGraphicsAllocation() {
+GraphicsAllocation *MemObj::getGraphicsAllocation() const {
     return graphicsAllocation;
 }
 
@@ -283,6 +292,12 @@ void MemObj::releaseAllocatedMapPtr() {
     allocatedMapPtr = nullptr;
 }
 
+void MemObj::releaseMapAllocation() {
+    if (mapAllocation && !isHostPtrSVM) {
+        destroyGraphicsAllocation(mapAllocation, false);
+    }
+}
+
 void MemObj::destroyGraphicsAllocation(GraphicsAllocation *allocation, bool asyncDestroy) {
     if (asyncDestroy) {
         memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(allocation);
@@ -302,15 +317,23 @@ bool MemObj::checkIfMemoryTransferIsRequired(size_t offsetInMemObjest, size_t of
 }
 
 void *MemObj::getBasePtrForMap() {
+    if (associatedMemObject) {
+        return associatedMemObject->getBasePtrForMap();
+    }
     if (getFlags() & CL_MEM_USE_HOST_PTR) {
         return getHostPtr();
     } else {
         TakeOwnershipWrapper<MemObj> memObjOwnership(*this);
-        if (!getAllocatedMapPtr()) {
+        if (getMapAllocation()) {
+            return getMapAllocation()->getUnderlyingBuffer();
+        } else {
             auto memory = memoryManager->allocateSystemMemory(getSize(), MemoryConstants::pageSize);
             setAllocatedMapPtr(memory);
+            AllocationProperties properties{false, getSize(), GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
+            auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, memory);
+            setMapAllocation(allocation);
+            return getAllocatedMapPtr();
         }
-        return getAllocatedMapPtr();
     }
 }
 

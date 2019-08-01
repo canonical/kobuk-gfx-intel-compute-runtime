@@ -10,7 +10,6 @@
 #include "runtime/utilities/stackvec.h"
 #include "test.h"
 #include "unit_tests/helpers/hw_parse.h"
-#include "unit_tests/libult/mock_gfx_family.h"
 #include "unit_tests/mocks/mock_device.h"
 #include "unit_tests/mocks/mock_graphics_allocation.h"
 
@@ -150,13 +149,12 @@ HWTEST_F(PreambleTest, givenKernelDebuggingActiveWhenPreambleIsProgrammedThenPro
     auto miLoadRegImmCountWithoutDebugging = cmdList.size();
 
     mockDevice->setSourceLevelDebuggerActive(true);
-    mockDevice->allocatePreemptionAllocationIfNotPresent();
+    auto preemptionAllocation = mockDevice->getGpgpuCommandStreamReceiver().getPreemptionAllocation();
 
     StackVec<char, 8192> preambleBuffer2(8192);
     preambleStream.replaceBuffer(&*preambleBuffer2.begin(), preambleBuffer2.size());
     PreambleHelper<FamilyType>::programPreamble(&preambleStream, *mockDevice, 0U,
-                                                ThreadArbitrationPolicy::RoundRobin, mockDevice->getPreemptionAllocation());
-
+                                                ThreadArbitrationPolicy::RoundRobin, preemptionAllocation);
     HardwareParse hwParser2;
     hwParser2.parseCommands<FamilyType>(preambleStream);
     cmdList = hwParser2.getCommandsList<MI_LOAD_REGISTER_IMM>();
@@ -183,23 +181,9 @@ HWTEST_F(PreambleTest, givenKernelDebuggingActiveAndMidThreadPreemptionWhenGetAd
 
 HWTEST_F(PreambleTest, givenDefaultPreambleWhenGetThreadsMaxNumberIsCalledThenMaximumNumberOfThreadsIsReturned) {
     const HardwareInfo &hwInfo = **platformDevices;
-    uint32_t threadsPerEU = (hwInfo.pSysInfo->ThreadCount / hwInfo.pSysInfo->EUCount) + hwInfo.capabilityTable.extraQuantityThreadsPerEU;
-    uint32_t value = PreambleHelper<FamilyType>::getMaxThreadsForVfe(hwInfo);
+    uint32_t threadsPerEU = (hwInfo.gtSystemInfo.ThreadCount / hwInfo.gtSystemInfo.EUCount) + hwInfo.capabilityTable.extraQuantityThreadsPerEU;
+    uint32_t value = HwHelper::getMaxThreadsForVfe(hwInfo);
 
-    uint32_t expected = hwInfo.pSysInfo->EUCount * threadsPerEU;
+    uint32_t expected = hwInfo.gtSystemInfo.EUCount * threadsPerEU;
     EXPECT_EQ(expected, value);
-}
-
-TEST(DefaultPreambleHelperTest, givenDefaultPreambleHelperWhenGetAdditionalCommandsSizeThenZeroIsReturned) {
-    auto size = PreambleHelper<GENX>::getAdditionalCommandsSize(MockDevice(**platformDevices));
-    EXPECT_EQ(0u, size);
-}
-
-TEST(DefaultPreambleHelperTest, givenDefaultPreambleHelperWhenProgramGenSpecificPreambleWorkAroundsThenDoNothing) {
-    char preambleBuffer[4096];
-    LinearStream preambleStream(preambleBuffer, 4096);
-    size_t size = preambleStream.getUsed();
-
-    PreambleHelper<GENX>::programGenSpecificPreambleWorkArounds(&preambleStream, **platformDevices);
-    EXPECT_EQ(size, preambleStream.getUsed());
 }

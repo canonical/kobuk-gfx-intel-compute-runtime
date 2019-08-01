@@ -5,8 +5,6 @@
 #
 
 if(UNIX)
-  include(GNUInstallDirs)
-
   set(package_input_dir ${IGDRCL_BINARY_DIR}/packageinput)
   set(package_output_dir ${IGDRCL_BINARY_DIR}/packages)
 
@@ -22,7 +20,7 @@ if(UNIX)
 
   include("os_release_info.cmake")
 
-  get_os_release_info(os_name os_version)
+  get_os_release_info(os_name os_version os_codename)
 
   if("${os_name}" STREQUAL "clear-linux-os")
     # clear-linux-os distribution avoids /etc for distribution defaults.
@@ -31,15 +29,8 @@ if(UNIX)
     set(_dir_etc "/etc")
   endif()
 
-  install(FILES
-    $<TARGET_FILE:${NEO_DYNAMIC_LIB_NAME}>
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/intel-opencl
-    COMPONENT opencl
-  )
-
   set(OCL_ICD_RUNTIME_NAME ${CMAKE_SHARED_LIBRARY_PREFIX}${NEO_DLL_NAME_BASE}${CMAKE_SHARED_LIBRARY_SUFFIX})
   install(
-    CODE "file( WRITE ${IGDRCL_BINARY_DIR}/libintelopencl.conf \"${CMAKE_INSTALL_FULL_LIBDIR}\n\" )"
     CODE "file( WRITE ${IGDRCL_BINARY_DIR}/intel.icd \"${CMAKE_INSTALL_FULL_LIBDIR}/intel-opencl/${OCL_ICD_RUNTIME_NAME}\n\" )"
     CODE "file( WRITE ${IGDRCL_BINARY_DIR}/tmp/postinst \"/sbin/ldconfig\n\" )"
     CODE "file( WRITE ${IGDRCL_BINARY_DIR}/tmp/postrm \"/sbin/ldconfig\n\" )"
@@ -47,13 +38,7 @@ if(UNIX)
     CODE "file( COPY ${IGDRCL_BINARY_DIR}/tmp/postrm DESTINATION ${IGDRCL_BINARY_DIR} FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )"
     COMPONENT opencl
   )
-  install(FILES ${IGDRCL_BINARY_DIR}/libintelopencl.conf DESTINATION ${_dir_etc}/ld.so.conf.d COMPONENT opencl)
   install(FILES ${IGDRCL_BINARY_DIR}/intel.icd DESTINATION ${_dir_etc}/OpenCL/vendors/ COMPONENT opencl)
-
-  install(FILES $<TARGET_FILE:ocloc>
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-    COMPONENT ocloc)
 
   if(NEO_CPACK_GENERATOR)
     set(CPACK_GENERATOR "${NEO_CPACK_GENERATOR}")
@@ -97,16 +82,17 @@ if(UNIX)
   set(CPACK_DEB_COMPONENT_INSTALL ON)
   set(CPACK_RPM_COMPONENT_INSTALL ON)
   set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-  set(CPACK_COMPONENTS_ALL opencl ocloc)
+  get_property(CPACK_COMPONENTS_ALL GLOBAL PROPERTY NEO_COMPONENTS_LIST)
   set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     /etc/ld.so.conf.d
     /usr/local
     /usr/local/lib64
+    /usr/local/bin
   )
 
   if(CMAKE_VERSION VERSION_GREATER 3.6 OR CMAKE_VERSION VERSION_EQUAL 3.6)
-    set(CPACK_DEBIAN_OPENCL_FILE_NAME "intel-opencl_${NEO_VERSION_MAJOR}.${NEO_VERSION_MINOR}.${NEO_VERSION_BUILD}-1_${CPACK_DEBIAN_PACKAGE_ARCHITECTURE}.deb")
-    set(CPACK_DEBIAN_OCLOC_FILE_NAME "intel-opencl-ocloc_${NEO_VERSION_MAJOR}.${NEO_VERSION_MINOR}.${NEO_VERSION_BUILD}-1_${CPACK_DEBIAN_PACKAGE_ARCHITECTURE}.deb")
+    set(CPACK_DEBIAN_OPENCL_FILE_NAME "intel-opencl_${NEO_VERSION_MAJOR}.${NEO_VERSION_MINOR}.${NEO_VERSION_BUILD}-1~${os_codename}_${CPACK_DEBIAN_PACKAGE_ARCHITECTURE}.deb")
+    set(CPACK_DEBIAN_OCLOC_FILE_NAME "intel-opencl-ocloc_${NEO_VERSION_MAJOR}.${NEO_VERSION_MINOR}.${NEO_VERSION_BUILD}-1~${os_codename}_${CPACK_DEBIAN_PACKAGE_ARCHITECTURE}.deb")
     set(CPACK_RPM_OPENCL_FILE_NAME "intel-opencl-${NEO_VERSION_MAJOR}.${NEO_VERSION_MINOR}.${NEO_VERSION_BUILD}-${CPACK_RPM_PACKAGE_RELEASE}%{?dist}.${CPACK_RPM_PACKAGE_ARCHITECTURE}.rpm")
     set(CPACK_RPM_OCLOC_FILE_NAME "intel-opencl-ocloc-${NEO_VERSION_MAJOR}.${NEO_VERSION_MINOR}.${NEO_VERSION_BUILD}-${CPACK_RPM_PACKAGE_RELEASE}%{?dist}.${CPACK_RPM_PACKAGE_ARCHITECTURE}.rpm")
     set(CPACK_ARCHIVE_OPENCL_FILE_NAME "intel-opencl-${NEO_VERSION_MAJOR}.${NEO_VERSION_MINOR}.${NEO_VERSION_BUILD}-${CPACK_PACKAGE_ARCHITECTURE}")
@@ -122,23 +108,29 @@ if(UNIX)
   endif()
 
   if(IGDRCL__GMM_FOUND)
-    list(APPEND _external_package_dependencies "intel-gmmlib(=${IGDRCL__GMM_VERSION})")
+    list(APPEND _external_package_dependencies_debian "intel-gmmlib(=${IGDRCL__GMM_VERSION})")
+    list(APPEND _external_package_dependencies_rpm "intel-gmmlib = ${IGDRCL__GMM_VERSION}")
   else()
-    list(APPEND _external_package_dependencies "intel-gmmlib")
+    list(APPEND _external_package_dependencies_debian "intel-gmmlib")
+    list(APPEND _external_package_dependencies_rpm "intel-gmmlib")
   endif()
 
   if(IGDRCL__IGC_FOUND)
-    list(APPEND _external_package_dependencies "intel-igc-opencl(=${IGDRCL__IGC_VERSION})")
-    list(APPEND _igc_package_dependencies "intel-igc-opencl(=${IGDRCL__IGC_VERSION})")
+    list(APPEND _external_package_dependencies_debian "intel-igc-opencl(=${IGDRCL__IGC_VERSION})")
+    list(APPEND _external_package_dependencies_rpm "intel-igc-opencl = ${IGDRCL__IGC_VERSION}")
+    list(APPEND _igc_package_dependencies_debian "intel-igc-opencl(=${IGDRCL__IGC_VERSION})")
+    list(APPEND _igc_package_dependencies_rpm "intel-igc-opencl = ${IGDRCL__IGC_VERSION}")
   else()
-    list(APPEND _external_package_dependencies "intel-igc-opencl")
-    list(APPEND _igc_package_dependencies "intel-igc-opencl")
+    list(APPEND _external_package_dependencies_debian "intel-igc-opencl")
+    list(APPEND _external_package_dependencies_rpm "intel-igc-opencl")
+    list(APPEND _igc_package_dependencies_debian "intel-igc-opencl")
+    list(APPEND _igc_package_dependencies_rpm "intel-igc-opencl")
   endif()
 
-  string(REPLACE ";" ", " CPACK_DEBIAN_OPENCL_PACKAGE_DEPENDS "${_external_package_dependencies}")
-  string(REPLACE ";" ", " CPACK_DEBIAN_OCLOC_PACKAGE_DEPENDS "${_igc_package_dependencies}")
-  string(REPLACE ";" ", " CPACK_RPM_OPENCL_PACKAGE_REQUIRES "${_external_package_dependencies}")
-  string(REPLACE ";" ", " CPACK_RPM_OCLOC_PACKAGE_REQUIRES "${_igc_package_dependencies}")
+  string(REPLACE ";" ", " CPACK_DEBIAN_OPENCL_PACKAGE_DEPENDS "${_external_package_dependencies_debian}")
+  string(REPLACE ";" ", " CPACK_DEBIAN_OCLOC_PACKAGE_DEPENDS "${_igc_package_dependencies_debian}")
+  string(REPLACE ";" ", " CPACK_RPM_OPENCL_PACKAGE_REQUIRES "${_external_package_dependencies_rpm}")
+  string(REPLACE ";" ", " CPACK_RPM_OCLOC_PACKAGE_REQUIRES "${_igc_package_dependencies_rpm}")
 
   include(CPack)
 

@@ -15,8 +15,10 @@ The Intel(R) Graphics Compute Runtime for OpenCL(TM) is distributed under the MI
 
 You may obtain a copy of the License at: https://opensource.org/licenses/MIT
 
-## Install
-Compiled .deb packages are provided on the release page: https://github.com/intel/compute-runtime/releases
+## Installation
+Compiled .deb packages (for Ubuntu 16.04) are provided on the [release page](https://github.com/intel/compute-runtime/releases)
+
+Other installation procedures are described [here](https://github.com/intel/compute-runtime/blob/master/documentation/Neo_in_distributions.md)
 
 ## Dependencies
 
@@ -35,6 +37,8 @@ Below packages are needed to enable [cl_intel_va_api_media_sharing](https://www.
 * Intel Core Processors with Gen8 graphics devices (formerly Broadwell) - OpenCL 2.1
 * Intel Core Processors with Gen9 graphics devices (formerly Skylake, Kaby Lake, Coffee Lake) - OpenCL 2.1
 * Intel Atom Processors with Gen9 graphics devices (formerly Apollo Lake, Gemini Lake) - OpenCL 1.2
+* Intel Core Processors with Gen11 graphics devices (formerly Ice Lake) - OpenCL 2.1
+
 
 ## Linking applications
 
@@ -52,9 +56,7 @@ A maintainer will contact you if there are questions or concerns.
 See [contribution guidelines](https://github.com/intel/compute-runtime/blob/master/documentation/CONTRIB.md) for more details.
 
 ## See also
-* Building and installation:
-  * [Ubuntu 16.04](https://github.com/intel/compute-runtime/blob/master/documentation/BUILD_Ubuntu.md)
-  * [Centos 7](https://github.com/intel/compute-runtime/blob/master/documentation/BUILD_Centos.md)
+
 * [OpenCL on Linux guide](https://github.com/bashbaug/OpenCLPapers/blob/markdown/OpenCLOnLinux.md)
 * Interoperability with Intel Tools: [TOOLS.md](https://github.com/intel/compute-runtime/blob/master/documentation/TOOLS.md)
 * Contribution guidelines: [CONTRIB.md](https://github.com/intel/compute-runtime/blob/master/documentation/CONTRIB.md)

@@ -5,13 +5,13 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_queue/command_queue_hw.h"
 #include "runtime/command_stream/preemption.h"
 #include "runtime/helpers/dispatch_info.h"
 #include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/options.h"
 #include "unit_tests/fixtures/preemption_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/mocks/mock_builtins.h"
 #include "unit_tests/mocks/mock_device.h"
@@ -337,7 +337,7 @@ HWTEST_P(PreemptionHwTest, getRequiredCmdStreamSizeReturnsSizeOfMiLoadRegisterIm
 
     auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
 
-    size_t minCsrSize = mockDevice->getHardwareInfo().pSysInfo->CsrSizeInMb * MemoryConstants::megaByte;
+    size_t minCsrSize = mockDevice->getHardwareInfo().gtSystemInfo.CsrSizeInMb * MemoryConstants::megaByte;
     uint64_t minCsrAlignment = 2 * 256 * MemoryConstants::kiloByte;
     MockGraphicsAllocation csrSurface((void *)minCsrAlignment, minCsrSize);
 
@@ -372,7 +372,7 @@ HWTEST_P(PreemptionHwTest, programCmdStreamAddsProperMiLoadRegisterImmCommandToT
     StackVec<char, 4096> buffer(requiredSize);
     LinearStream cmdStream(buffer.begin(), buffer.size());
 
-    size_t minCsrSize = mockDevice->getHardwareInfo().pSysInfo->CsrSizeInMb * MemoryConstants::megaByte;
+    size_t minCsrSize = mockDevice->getHardwareInfo().gtSystemInfo.CsrSizeInMb * MemoryConstants::megaByte;
     uint64_t minCsrAlignment = 2 * 256 * MemoryConstants::kiloByte;
     MockGraphicsAllocation csrSurface((void *)minCsrAlignment, minCsrSize);
 
@@ -439,38 +439,68 @@ HWTEST_P(PreemptionTest, whenInNonMidThreadModeThenCsrBaseAddressIsNotProgrammed
     EXPECT_EQ(0u, cmdStream.getUsed());
 }
 
+HWTEST_P(PreemptionTest, whenFailToCreatePreemptionAllocationThenFailToCreateDevice) {
+
+    class MockUltCsr : public UltCommandStreamReceiver<FamilyType> {
+
+      public:
+        MockUltCsr(ExecutionEnvironment &executionEnvironment) : UltCommandStreamReceiver<FamilyType>(executionEnvironment) {
+        }
+
+        bool createPreemptionAllocation() override {
+            return false;
+        }
+    };
+
+    class MockDeviceReturnedDebuggerActive : public MockDevice {
+      public:
+        MockDeviceReturnedDebuggerActive(ExecutionEnvironment *executionEnvironment, uint32_t deviceIndex)
+            : MockDevice(executionEnvironment, deviceIndex) {}
+        bool isSourceLevelDebuggerActive() const override {
+            return true;
+        }
+    };
+
+    ExecutionEnvironment *executionEnvironment = platformImpl->peekExecutionEnvironment();
+
+    platformImpl->peekExecutionEnvironment()->commandStreamReceivers.resize(1);
+    platformImpl->peekExecutionEnvironment()->commandStreamReceivers[0].resize(2);
+    executionEnvironment->commandStreamReceivers[0][1].reset(new MockUltCsr(*executionEnvironment));
+    executionEnvironment->commandStreamReceivers[0][0].reset(new MockUltCsr(*executionEnvironment));
+
+    std::unique_ptr<MockDevice> mockDevice(MockDevice::create<MockDeviceReturnedDebuggerActive>(executionEnvironment, 0));
+    EXPECT_EQ(nullptr, mockDevice);
+}
+
 INSTANTIATE_TEST_CASE_P(
     NonMidThread,
     PreemptionTest,
     ::testing::Values(PreemptionMode::Disabled, PreemptionMode::MidBatch, PreemptionMode::ThreadGroup));
 
 HWTEST_F(MidThreadPreemptionTests, createCsrSurfaceNoWa) {
-    const WorkaroundTable *waTable = platformDevices[0]->pWaTable;
-    WorkaroundTable tmpWaTable;
-    tmpWaTable.waCSRUncachable = false;
-    const_cast<HardwareInfo *>(platformDevices[0])->pWaTable = &tmpWaTable;
+    HardwareInfo hwInfo = *platformDevices[0];
+    hwInfo.workaroundTable.waCSRUncachable = false;
 
-    std::unique_ptr<MockDevice> mockDevice(MockDevice::createWithNewExecutionEnvironment<MockDevice>(platformDevices[0]));
+    std::unique_ptr<MockDevice> mockDevice(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
     ASSERT_NE(nullptr, mockDevice.get());
 
     auto &csr = mockDevice->getUltCommandStreamReceiver<FamilyType>();
-    MemoryAllocation *csrSurface = static_cast<MemoryAllocation *>(csr.getPreemptionCsrAllocation());
+    MemoryAllocation *csrSurface = static_cast<MemoryAllocation *>(csr.getPreemptionAllocation());
     ASSERT_NE(nullptr, csrSurface);
     EXPECT_FALSE(csrSurface->uncacheable);
 
-    GraphicsAllocation *devCsrSurface = mockDevice->getPreemptionAllocation();
+    GraphicsAllocation *devCsrSurface = csr.getPreemptionAllocation();
     EXPECT_EQ(csrSurface, devCsrSurface);
-
-    const_cast<HardwareInfo *>(platformDevices[0])->pWaTable = waTable;
 }
 
 HWTEST_F(MidThreadPreemptionTests, givenMidThreadPreemptionWhenFailingOnCsrSurfaceAllocationThenFailToCreateDevice) {
+
     class FailingMemoryManager : public OsAgnosticMemoryManager {
       public:
         FailingMemoryManager(ExecutionEnvironment &executionEnvironment) : OsAgnosticMemoryManager(executionEnvironment) {}
 
         GraphicsAllocation *allocateGraphicsMemoryWithAlignment(const AllocationData &allocationData) override {
-            if (++allocateGraphicsMemoryCount > HwHelper::get(platformDevices[0]->pPlatform->eRenderCoreFamily).getGpgpuEngineInstances().size()) {
+            if (++allocateGraphicsMemoryCount > HwHelper::get(platformDevices[0]->platform.eRenderCoreFamily).getGpgpuEngineInstances().size() - 1) {
                 return nullptr;
             }
             return OsAgnosticMemoryManager::allocateGraphicsMemoryWithAlignment(allocationData);
@@ -481,28 +511,24 @@ HWTEST_F(MidThreadPreemptionTests, givenMidThreadPreemptionWhenFailingOnCsrSurfa
     ExecutionEnvironment *executionEnvironment = platformImpl->peekExecutionEnvironment();
     executionEnvironment->memoryManager = std::make_unique<FailingMemoryManager>(*executionEnvironment);
 
-    std::unique_ptr<MockDevice> mockDevice(MockDevice::create<MockDevice>(platformDevices[0], executionEnvironment, 0));
+    std::unique_ptr<MockDevice> mockDevice(MockDevice::create<MockDevice>(executionEnvironment, 0));
     EXPECT_EQ(nullptr, mockDevice.get());
 }
 
 HWTEST_F(MidThreadPreemptionTests, createCsrSurfaceWa) {
-    const WorkaroundTable *waTable = platformDevices[0]->pWaTable;
-    WorkaroundTable tmpWaTable;
-    tmpWaTable.waCSRUncachable = true;
-    const_cast<HardwareInfo *>(platformDevices[0])->pWaTable = &tmpWaTable;
+    HardwareInfo hwInfo = *platformDevices[0];
+    hwInfo.workaroundTable.waCSRUncachable = true;
 
-    std::unique_ptr<MockDevice> mockDevice(MockDevice::createWithNewExecutionEnvironment<MockDevice>(platformDevices[0]));
+    std::unique_ptr<MockDevice> mockDevice(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
     ASSERT_NE(nullptr, mockDevice.get());
 
     auto &csr = mockDevice->getUltCommandStreamReceiver<FamilyType>();
-    MemoryAllocation *csrSurface = static_cast<MemoryAllocation *>(csr.getPreemptionCsrAllocation());
+    MemoryAllocation *csrSurface = static_cast<MemoryAllocation *>(csr.getPreemptionAllocation());
     ASSERT_NE(nullptr, csrSurface);
     EXPECT_TRUE(csrSurface->uncacheable);
 
-    GraphicsAllocation *devCsrSurface = mockDevice->getPreemptionAllocation();
+    GraphicsAllocation *devCsrSurface = csr.getPreemptionAllocation();
     EXPECT_EQ(csrSurface, devCsrSurface);
-
-    const_cast<HardwareInfo *>(platformDevices[0])->pWaTable = waTable;
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, MidThreadPreemptionTests, givenDirtyCsrStateWhenStateBaseAddressIsProgrammedThenStateSipIsAdded) {

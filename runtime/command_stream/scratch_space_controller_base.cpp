@@ -7,6 +7,7 @@
 
 #include "runtime/command_stream/scratch_space_controller_base.h"
 
+#include "runtime/execution_environment/execution_environment.h"
 #include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/preamble.h"
@@ -16,12 +17,13 @@
 #include "runtime/memory_manager/memory_manager.h"
 
 namespace NEO {
-ScratchSpaceControllerBase::ScratchSpaceControllerBase(const HardwareInfo &info, ExecutionEnvironment &environment, InternalAllocationStorage &allocationStorage)
-    : ScratchSpaceController(info, environment, allocationStorage) {
+ScratchSpaceControllerBase::ScratchSpaceControllerBase(ExecutionEnvironment &environment, InternalAllocationStorage &allocationStorage)
+    : ScratchSpaceController(environment, allocationStorage) {
 }
 
 void ScratchSpaceControllerBase::setRequiredScratchSpace(void *sshBaseAddress,
                                                          uint32_t requiredPerThreadScratchSize,
+                                                         uint32_t requiredPerThreadPrivateScratchSize,
                                                          uint32_t currentTaskCount,
                                                          uint32_t contextId,
                                                          bool &stateBaseAddressDirty,
@@ -48,9 +50,13 @@ void ScratchSpaceControllerBase::createScratchSpaceAllocation() {
 }
 
 uint64_t ScratchSpaceControllerBase::calculateNewGSH() {
-    auto &hwHelper = HwHelper::get(hwInfo.pPlatform->eRenderCoreFamily);
-    auto scratchSpaceOffsetFor64bit = hwHelper.getScratchSpaceOffsetFor64bit();
-    return scratchAllocation->getGpuAddress() - scratchSpaceOffsetFor64bit;
+    uint64_t gsh = 0;
+    if (scratchAllocation) {
+        auto &hwHelper = HwHelper::get(executionEnvironment.getHardwareInfo()->platform.eRenderCoreFamily);
+        auto scratchSpaceOffsetFor64bit = hwHelper.getScratchSpaceOffsetFor64bit();
+        gsh = scratchAllocation->getGpuAddress() - scratchSpaceOffsetFor64bit;
+    }
+    return gsh;
 }
 uint64_t ScratchSpaceControllerBase::getScratchPatchAddress() {
     //for 32 bit scratch space pointer is being programmed in Media VFE State and is relative to 0 as General State Base Address
@@ -60,7 +66,7 @@ uint64_t ScratchSpaceControllerBase::getScratchPatchAddress() {
     if (scratchAllocation) {
         scratchAddress = scratchAllocation->getGpuAddressToPatch();
         if (is64bit && !getMemoryManager()->peekForce32BitAllocations()) {
-            auto &hwHelper = HwHelper::get(hwInfo.pPlatform->eRenderCoreFamily);
+            auto &hwHelper = HwHelper::get(executionEnvironment.getHardwareInfo()->platform.eRenderCoreFamily);
             auto scratchSpaceOffsetFor64bit = hwHelper.getScratchSpaceOffsetFor64bit();
             //this is to avoid scractch allocation offset "0"
             scratchAddress = scratchSpaceOffsetFor64bit;

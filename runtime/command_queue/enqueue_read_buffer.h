@@ -11,7 +11,7 @@
 #include "runtime/command_queue/enqueue_common.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/helpers/cache_policy.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/surface.h"
 
@@ -28,80 +28,65 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadBuffer(
     size_t offset,
     size_t size,
     void *ptr,
+    GraphicsAllocation *mapAllocation,
     cl_uint numEventsInWaitList,
     const cl_event *eventWaitList,
     cl_event *event) {
 
-    notifyEnqueueReadBuffer(buffer, !!blockingRead);
-
-    cl_int retVal = CL_SUCCESS;
-    bool isMemTransferNeeded = buffer->isMemObjZeroCopy() ? buffer->checkIfMemoryTransferIsRequired(offset, 0, ptr, CL_COMMAND_READ_BUFFER) : true;
-    if (((DebugManager.flags.DoCpuCopyOnReadBuffer.get() && !Event::checkUserEventDependencies(numEventsInWaitList, eventWaitList)) ||
-         buffer->isReadWriteOnCpuAllowed(blockingRead, numEventsInWaitList, ptr, size)) &&
-        context->getDevice(0)->getDeviceInfo().cpuCopyAllowed) {
-        if (!isMemTransferNeeded) {
-            TransferProperties transferProperties(buffer, CL_COMMAND_MARKER, 0, true, &offset, &size, ptr);
-            EventsRequest eventsRequest(numEventsInWaitList, eventWaitList, event);
-            cpuDataTransferHandler(transferProperties, eventsRequest, retVal);
-            if (event) {
-                auto pEvent = castToObjectOrAbort<Event>(*event);
-                pEvent->setCmdType(CL_COMMAND_READ_BUFFER);
-            }
-
-            if (context->isProvidingPerformanceHints()) {
-                context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_GOOD_INTEL, CL_ENQUEUE_READ_BUFFER_DOESNT_REQUIRE_COPY_DATA, static_cast<cl_mem>(buffer), ptr);
-            }
-            return retVal;
-        }
-        TransferProperties transferProperties(buffer, CL_COMMAND_READ_BUFFER, 0, true, &offset, &size, ptr);
-        EventsRequest eventsRequest(numEventsInWaitList, eventWaitList, event);
-        cpuDataTransferHandler(transferProperties, eventsRequest, retVal);
-        return retVal;
+    if (nullptr == mapAllocation) {
+        notifyEnqueueReadBuffer(buffer, !!blockingRead);
     }
-    MultiDispatchInfo dispatchInfo;
-    if (!isMemTransferNeeded) {
-        NullSurface s;
-        Surface *surfaces[] = {&s};
-        enqueueHandler<CL_COMMAND_MARKER>(
-            surfaces,
-            blockingRead == CL_TRUE,
-            dispatchInfo,
-            numEventsInWaitList,
-            eventWaitList,
-            event);
-        if (event) {
-            auto pEvent = castToObjectOrAbort<Event>(*event);
-            pEvent->setCmdType(CL_COMMAND_READ_BUFFER);
-        }
 
-        if (context->isProvidingPerformanceHints()) {
-            context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_GOOD_INTEL, CL_ENQUEUE_READ_BUFFER_DOESNT_REQUIRE_COPY_DATA, static_cast<cl_mem>(buffer), ptr);
-        }
+    const cl_command_type cmdType = CL_COMMAND_READ_BUFFER;
+    bool isMemTransferNeeded = buffer->isMemObjZeroCopy() ? buffer->checkIfMemoryTransferIsRequired(offset, 0, ptr, cmdType) : true;
+    bool isCpuCopyAllowed = bufferCpuCopyAllowed(buffer, cmdType, blockingRead, size, ptr,
+                                                 numEventsInWaitList, eventWaitList);
 
-        return CL_SUCCESS;
+    if (isCpuCopyAllowed) {
+        if (isMemTransferNeeded) {
+            return enqueueReadWriteBufferOnCpuWithMemoryTransfer(cmdType, buffer, offset, size, ptr,
+                                                                 numEventsInWaitList, eventWaitList, event);
+        } else {
+            return enqueueReadWriteBufferOnCpuWithoutMemoryTransfer(cmdType, buffer, offset, size, ptr,
+                                                                    numEventsInWaitList, eventWaitList, event);
+        }
+    } else if (!isMemTransferNeeded) {
+        return enqueueMarkerForReadWriteOperation(buffer, ptr, cmdType, blockingRead,
+                                                  numEventsInWaitList, eventWaitList, event);
     }
+
     auto &builder = getDevice().getExecutionEnvironment()->getBuiltIns()->getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyBufferToBuffer,
                                                                                                         this->getContext(), this->getDevice());
     BuiltInOwnershipWrapper builtInLock(builder, this->context);
+    MultiDispatchInfo dispatchInfo;
 
     void *dstPtr = ptr;
 
     MemObjSurface bufferSurf(buffer);
     HostPtrSurface hostPtrSurf(dstPtr, size);
-    Surface *surfaces[] = {&bufferSurf, &hostPtrSurf};
+    GeneralSurface mapSurface;
+    Surface *surfaces[] = {&bufferSurf, nullptr};
 
-    if (size != 0) {
-        bool status = getCommandStreamReceiver().createAllocationForHostSurface(hostPtrSurf, true);
-        if (!status) {
-            return CL_OUT_OF_RESOURCES;
+    if (mapAllocation) {
+        surfaces[1] = &mapSurface;
+        mapSurface.setGraphicsAllocation(mapAllocation);
+        //get offset between base cpu ptr of map allocation and dst ptr
+        size_t dstOffset = ptrDiff(dstPtr, mapAllocation->getUnderlyingBuffer());
+        dstPtr = reinterpret_cast<void *>(mapAllocation->getGpuAddress() + dstOffset);
+    } else {
+        surfaces[1] = &hostPtrSurf;
+        if (size != 0) {
+            bool status = getGpgpuCommandStreamReceiver().createAllocationForHostSurface(hostPtrSurf, true);
+            if (!status) {
+                return CL_OUT_OF_RESOURCES;
+            }
+            dstPtr = reinterpret_cast<void *>(hostPtrSurf.getAllocation()->getGpuAddress());
         }
-        dstPtr = reinterpret_cast<void *>(hostPtrSurf.getAllocation()->getGpuAddress());
     }
-
     void *alignedDstPtr = alignDown(dstPtr, 4);
     size_t dstPtrOffset = ptrDiff(dstPtr, alignedDstPtr);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.dstPtr = alignedDstPtr;
     dc.dstOffset = {dstPtrOffset, 0, 0};
     dc.srcMemObj = buffer;
@@ -110,7 +95,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadBuffer(
     builder.buildDispatchInfos(dispatchInfo, dc);
 
     if (context->isProvidingPerformanceHints()) {
-        context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, CL_ENQUEUE_READ_BUFFER_REQUIRES_COPY_DATA, static_cast<cl_mem>(buffer), ptr);
+        context->providePerformanceHintForMemoryTransfer(CL_COMMAND_READ_BUFFER, true, static_cast<cl_mem>(buffer), ptr);
         if (!isL3Capable(ptr, size)) {
             context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, CL_ENQUEUE_READ_BUFFER_DOESNT_MEET_ALIGNMENT_RESTRICTIONS, ptr, size, MemoryConstants::pageSize, MemoryConstants::pageSize);
         }

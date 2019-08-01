@@ -9,9 +9,13 @@
 
 namespace NEO {
 GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemoryInDevicePool(const AllocationData &allocationData, AllocationStatus &status) {
-    return MemoryManager::allocateGraphicsMemoryInDevicePool(allocationData, status);
+    status = AllocationStatus::RetryInNonDevicePool;
+    return nullptr;
 }
-bool WddmMemoryManager::copyMemoryToAllocation(GraphicsAllocation *graphicsAllocation, const void *memoryToCopy, uint32_t sizeToCopy) const {
+bool WddmMemoryManager::copyMemoryToAllocation(GraphicsAllocation *graphicsAllocation, const void *memoryToCopy, size_t sizeToCopy) {
     return MemoryManager::copyMemoryToAllocation(graphicsAllocation, memoryToCopy, sizeToCopy);
+}
+bool WddmMemoryManager::mapGpuVirtualAddress(WddmAllocation *allocation, const void *requiredPtr) {
+    return mapGpuVaForOneHandleAllocation(allocation, requiredPtr);
 }
 } // namespace NEO

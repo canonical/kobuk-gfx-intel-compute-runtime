@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/device/device.h"
 #include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "test.h"
@@ -158,15 +158,19 @@ HWTEST_P(AUBReadImage, simpleUnalignedMemory) {
 
     retVal = pCmdQ->enqueueReadImage(
         srcImage,
-        CL_TRUE,
+        CL_FALSE,
         origin,
         region,
         inputRowPitch,
         inputSlicePitch,
         dstMemoryUnaligned,
+        nullptr,
         0,
         nullptr,
         nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = pCmdQ->flush();
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     auto imageMemory = srcMemory;
@@ -206,6 +210,9 @@ HWTEST_P(AUBReadImage, simpleUnalignedMemory) {
         pDstMemory =
             ptrOffset(dstMemoryUnaligned, testWidth * testHeight * elementSize);
     }
+
+    retVal = pCmdQ->finish(true); //FixMe - not all test cases verified with expects
+    EXPECT_EQ(CL_SUCCESS, retVal);
 
     alignedFree(dstMemoryAligned);
     delete[] srcMemory;

@@ -5,12 +5,12 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/api/api.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/mem_obj/buffer.h"
 #include "test.h"
 #include "unit_tests/aub_tests/command_queue/command_enqueue_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_context.h"
 
@@ -43,9 +43,9 @@ HWTEST_P(VerifyMemoryBufferHw, givenDifferentBuffersWhenValidatingMemoryThenSucc
     cl_uint testItemWrong2 = 6;
     auto testItemSize = sizeof(testItem);
 
-    const auto &testDataSize = std::get<0>(GetParam());
+    const auto testDataSize = std::get<0>(GetParam());
     EXPECT_FALSE(testDataSize < testItemSize);
-    const auto &flags = std::get<1>(GetParam());
+    const auto flags = std::get<1>(GetParam());
     const auto usesHostPointer = ((flags & CL_MEM_USE_HOST_PTR) ||
                                   (flags & CL_MEM_COPY_HOST_PTR));
 
@@ -100,17 +100,20 @@ HWTEST_P(VerifyMemoryBufferHw, givenDifferentBuffersWhenValidatingMemoryThenSucc
         EXPECT_EQ(CL_SUCCESS, retVal);
     }
 
-    auto mappedAddress = clEnqueueMapBuffer(pCmdQ, buffer.get(), CL_TRUE, CL_MAP_READ, 0, testDataSize, 0, nullptr, nullptr, nullptr);
+    auto mappedAddress = clEnqueueMapBuffer(pCmdQ, buffer.get(), CL_FALSE, CL_MAP_READ, 0, testDataSize, 0, nullptr, nullptr, nullptr);
+    clFlush(pCmdQ);
 
-    retVal = clEnqueueVerifyMemory(pCmdQ, mappedAddress, validContent.get(), testDataSize, CL_MEM_COMPARE_EQUAL);
+    retVal = clEnqueueVerifyMemoryINTEL(pCmdQ, mappedAddress, validContent.get(), testDataSize, CL_MEM_COMPARE_EQUAL);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     if (UnitTestHelper<FamilyType>::isExpectMemoryNotEqualSupported()) {
-        retVal = clEnqueueVerifyMemory(pCmdQ, mappedAddress, invalidContent1.get(), testDataSize, CL_MEM_COMPARE_NOT_EQUAL);
+        retVal = clEnqueueVerifyMemoryINTEL(pCmdQ, mappedAddress, invalidContent1.get(), testDataSize, CL_MEM_COMPARE_NOT_EQUAL);
         EXPECT_EQ(CL_SUCCESS, retVal);
-        retVal = clEnqueueVerifyMemory(pCmdQ, mappedAddress, invalidContent2.get(), testDataSize, CL_MEM_COMPARE_NOT_EQUAL);
+        retVal = clEnqueueVerifyMemoryINTEL(pCmdQ, mappedAddress, invalidContent2.get(), testDataSize, CL_MEM_COMPARE_NOT_EQUAL);
         EXPECT_EQ(CL_SUCCESS, retVal);
     }
+
+    clFinish(pCmdQ);
 }
 
 INSTANTIATE_TEST_CASE_P(VerifyMemoryBuffer,

@@ -67,7 +67,6 @@ bool Drm::isi915Version(int fd) {
 }
 
 int Drm::getDeviceFd(const int devType) {
-    int fd = -1;
     char fullPath[PATH_MAX];
     const char *pathPrefix;
     unsigned int startNum;
@@ -85,22 +84,21 @@ int Drm::getDeviceFd(const int devType) {
     }
 
     for (unsigned int i = 0; i < maxDrmDevices; i++) {
-        snprintf(fullPath, PATH_MAX, "%s%d", pathPrefix, i + startNum);
-        if ((fd = ::open(fullPath, O_RDWR)) >= 0) {
+        snprintf(fullPath, PATH_MAX, "%s%u", pathPrefix, i + startNum);
+        int fd = ::open(fullPath, O_RDWR);
+        if (fd >= 0) {
             if (isi915Version(fd)) {
-                break;
+                return fd;
             }
             ::close(fd);
-            fd = -1;
         }
     }
 
-    return fd;
+    return -1;
 }
 
 int Drm::openDevice() {
-    int fd = -1;
-    fd = getDeviceFd(0);
+    int fd = getDeviceFd(0);
     if (fd < 0) {
         fd = getDeviceFd(1);
     }
@@ -155,8 +153,7 @@ Drm *Drm::create(int32_t deviceOrdinal) {
     }
     if (device) {
         platformDevices[0] = device->pHwInfo;
-        device->setupHardwareInfo(const_cast<GT_SYSTEM_INFO *>(platformDevices[0]->pSysInfo),
-                                  const_cast<FeatureTable *>(platformDevices[0]->pSkuTable), true);
+        device->setupHardwareInfo(const_cast<HardwareInfo *>(platformDevices[0]), true);
         drmObject->setGtType(eGtType);
     } else {
         printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr,
@@ -183,13 +180,14 @@ Drm *Drm::create(int32_t deviceOrdinal) {
     if (ret != 0) {
         // turbo patch not present, we are not on custom Kernel, switch to simplified Mocs selection
         // do this only for GEN9+
-        if (device->pHwInfo->pPlatform->eRenderCoreFamily >= IGFX_GEN9_CORE) {
+        if (device->pHwInfo->platform.eRenderCoreFamily >= IGFX_GEN9_CORE) {
             drmObject->setSimplifiedMocsTableUsage(true);
         }
         printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "WARNING: Failed to request OCL Turbo Boost\n");
     }
 
-    if (HwHelper::get(device->pHwInfo->pPlatform->eRenderCoreFamily).getEnableLocalMemory(*device->pHwInfo)) {
+    drmObject->queryEngineInfo();
+    if (HwHelper::get(device->pHwInfo->platform.eRenderCoreFamily).getEnableLocalMemory(*device->pHwInfo)) {
         drmObject->queryMemoryInfo();
     }
 

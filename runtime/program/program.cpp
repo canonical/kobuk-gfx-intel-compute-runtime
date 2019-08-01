@@ -14,6 +14,7 @@
 #include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/string.h"
 #include "runtime/memory_manager/memory_manager.h"
+#include "runtime/memory_manager/unified_memory_manager.h"
 
 #include <sstream>
 
@@ -108,14 +109,23 @@ Program::~Program() {
     delete blockKernelManager;
 
     if (constantSurface) {
-        this->executionEnvironment.memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(constantSurface);
+        if ((nullptr != context) && (nullptr != context->getSVMAllocsManager()) && (context->getSVMAllocsManager()->getSVMAlloc(reinterpret_cast<const void *>(constantSurface->getGpuAddress())))) {
+            context->getSVMAllocsManager()->freeSVMAlloc(reinterpret_cast<void *>(constantSurface->getGpuAddress()));
+        } else {
+            this->executionEnvironment.memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(constantSurface);
+        }
         constantSurface = nullptr;
     }
 
     if (globalSurface) {
-        this->executionEnvironment.memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(globalSurface);
+        if ((nullptr != context) && (nullptr != context->getSVMAllocsManager()) && (context->getSVMAllocsManager()->getSVMAlloc(reinterpret_cast<const void *>(globalSurface->getGpuAddress())))) {
+            context->getSVMAllocsManager()->freeSVMAlloc(reinterpret_cast<void *>(globalSurface->getGpuAddress()));
+        } else {
+            this->executionEnvironment.memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(globalSurface);
+        }
         globalSurface = nullptr;
     }
+
     if (context && !isBuiltIn) {
         context->decRefInternal();
     }
@@ -125,7 +135,7 @@ cl_int Program::createProgramFromBinary(
     const void *pBinary,
     size_t binarySize) {
 
-    cl_int retVal = CL_SUCCESS;
+    cl_int retVal = CL_INVALID_PROGRAM;
     uint32_t binaryVersion = iOpenCL::CURRENT_ICBE_VERSION;
 
     if (Program::isValidLlvmBinary(pBinary, binarySize)) {
@@ -133,6 +143,7 @@ cl_int Program::createProgramFromBinary(
     } else if (Program::isValidSpirvBinary(pBinary, binarySize)) {
         retVal = processSpirBinary(pBinary, binarySize, true);
     } else {
+        bool rebuildRequired = DebugManager.flags.RebuildPrecompiledKernels.get();
         retVal = processElfBinary(pBinary, binarySize, binaryVersion);
         if (retVal == CL_SUCCESS) {
             isCreatedFromBinary = true;
@@ -140,7 +151,11 @@ cl_int Program::createProgramFromBinary(
             // Version of compiler used to create program binary is invalid,
             // needs to recompile program binary from its IR (if available).
             // if recompile fails propagate error retVal from previous function
-            if (!rebuildProgramFromIr()) {
+            rebuildRequired = true;
+        }
+
+        if (rebuildRequired) {
+            if (rebuildProgramFromIr() == CL_SUCCESS) {
                 retVal = CL_SUCCESS;
             }
         }
@@ -203,6 +218,56 @@ cl_int Program::rebuildProgramFromIr() {
     } while (false);
 
     return retVal;
+}
+
+cl_int Program::setProgramSpecializationConstant(cl_uint specId, size_t specSize, const void *specValue) {
+    if (!isSpirV) {
+        return CL_INVALID_PROGRAM;
+    }
+
+    static std::mutex mutex;
+    std::lock_guard<std::mutex> lock(mutex);
+
+    if (!areSpecializationConstantsInitialized) {
+        auto pCompilerInterface = this->executionEnvironment.getCompilerInterface();
+        if (nullptr == pCompilerInterface) {
+            return CL_OUT_OF_HOST_MEMORY;
+        }
+
+        TranslationArgs inputArgs = {};
+        inputArgs.pInput = const_cast<char *>(sourceCode.c_str());
+        inputArgs.InputSize = static_cast<uint32_t>(sourceCode.size());
+        inputArgs.pOptions = options.c_str();
+        inputArgs.OptionsSize = static_cast<uint32_t>(options.length());
+        inputArgs.pInternalOptions = internalOptions.c_str();
+        inputArgs.InternalOptionsSize = static_cast<uint32_t>(internalOptions.length());
+        inputArgs.pTracingOptions = nullptr;
+        inputArgs.TracingOptionsCount = 0;
+
+        auto retVal = pCompilerInterface->getSpecConstantsInfo(*this, inputArgs);
+
+        if (retVal != CL_SUCCESS) {
+            return retVal;
+        }
+
+        areSpecializationConstantsInitialized = true;
+    }
+
+    return updateSpecializationConstant(specId, specSize, specValue);
+}
+
+cl_int Program::updateSpecializationConstant(cl_uint specId, size_t specSize, const void *specValue) {
+    for (uint32_t i = 0; i < specConstantsIds->GetSize<cl_uint>(); i++) {
+        if (specConstantsIds->GetMemory<cl_uint>()[i] == specId) {
+            if (specConstantsSizes->GetMemory<size_t>()[i] == specSize) {
+                specConstantsValues->GetMemoryWriteable<const void *>()[i] = specValue;
+                return CL_SUCCESS;
+            } else {
+                return CL_INVALID_VALUE;
+            }
+        }
+    }
+    return CL_INVALID_SPEC_ID;
 }
 
 void Program::getProgramCompilerVersion(
@@ -437,5 +502,11 @@ void Program::updateNonUniformFlag(const Program **inputPrograms, size_t numInpu
         allowNonUniform = allowNonUniform && inputPrograms[i]->getAllowNonUniform();
     }
     this->allowNonUniform = allowNonUniform;
+}
+
+void Program::prepareLinkerInputStorage() {
+    if (this->linkerInput == nullptr) {
+        this->linkerInput = std::make_unique<LinkerInput>();
+    }
 }
 } // namespace NEO

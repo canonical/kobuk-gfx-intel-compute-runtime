@@ -34,7 +34,7 @@ class EnqueueDebugKernelTest : public ProgramSimpleFixture,
         device = pDevice;
         pDevice->executionEnvironment->sourceLevelDebugger.reset(new SourceLevelDebugger(nullptr));
 
-        if (pDevice->getHardwareInfo().pPlatform->eRenderCoreFamily >= IGFX_GEN9_CORE) {
+        if (pDevice->getHardwareInfo().platform.eRenderCoreFamily >= IGFX_GEN9_CORE) {
             pDevice->getMutableDeviceInfo()->sourceLevelDebuggerActive = true;
             std::string filename;
             std::string kernelOption(CompilerOptions::debugKernelEnable);
@@ -73,7 +73,7 @@ class EnqueueDebugKernelTest : public ProgramSimpleFixture,
     }
 
     void TearDown() override {
-        if (pDevice->getHardwareInfo().pPlatform->eRenderCoreFamily >= IGFX_GEN9_CORE) {
+        if (pDevice->getHardwareInfo().platform.eRenderCoreFamily >= IGFX_GEN9_CORE) {
             delete kbHelper;
             debugKernel->release();
         }
@@ -104,7 +104,7 @@ HWTEST_F(EnqueueDebugKernelTest, givenDebugKernelWhenEnqueuedThenSSHAndBtiAreCor
 
         auto debugSurfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(ptrOffset(ssh.getCpuBase(), surfaceStateOffset));
 
-        auto &commandStreamReceiver = mockCmdQ->getCommandStreamReceiver();
+        auto &commandStreamReceiver = mockCmdQ->getGpgpuCommandStreamReceiver();
         auto debugSurface = commandStreamReceiver.getDebugSurfaceAllocation();
         EXPECT_EQ(1u, debugSurface->getTaskCount(commandStreamReceiver.getOsContext().getContextId()));
 

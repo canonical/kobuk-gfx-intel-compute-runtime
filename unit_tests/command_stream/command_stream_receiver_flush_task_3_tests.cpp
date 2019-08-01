@@ -5,14 +5,14 @@
  *
  */
 
-#include "runtime/helpers/kernel_commands.h"
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/platform/platform.h"
 #include "test.h"
 #include "unit_tests/fixtures/ult_command_stream_receiver_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_command_queue.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_csr.h"
@@ -509,7 +509,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInDefaultModeWhenFlushTask
     DispatchFlags dispatchFlags;
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
-    auto &csr = commandQueue.getCommandStreamReceiver();
+    auto &csr = commandQueue.getGpgpuCommandStreamReceiver();
 
     csr.flushTask(commandStream,
                   0,
@@ -669,8 +669,12 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenTotalRes
     auto mockCsr = new MockCsrHw2<FamilyType>(*executionEnvironment);
     executionEnvironment->commandStreamReceivers.resize(1);
     executionEnvironment->commandStreamReceivers[0].push_back(std::unique_ptr<CommandStreamReceiver>(mockCsr));
+
+    if (pDevice->getPreemptionMode() == PreemptionMode::MidThread || pDevice->isSourceLevelDebuggerActive()) {
+        mockCsr->createPreemptionAllocation();
+    }
+
     mockCsr->initializeTagAllocation();
-    mockCsr->setPreemptionCsrAllocation(pDevice->getPreemptionAllocation());
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
     mockCsr->setupContext(*pDevice->getDefaultEngine().osContext);
 
@@ -1374,7 +1378,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCommandQueueWithThrottleHintW
     buffer->forceDisallowCPUCopy = true;
 
     uint32_t outPtr;
-    commandQueue.enqueueReadBuffer(buffer.get(), CL_TRUE, 0, 1, &outPtr, 0, nullptr, nullptr);
+    commandQueue.enqueueReadBuffer(buffer.get(), CL_TRUE, 0, 1, &outPtr, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(QueueThrottle::LOW, mockCsr->passedDispatchFlags.throttle);
 }
 
@@ -1448,7 +1452,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelWhenItIsUnblocke
     using UniqueIH = std::unique_ptr<IndirectHeap>;
 
     auto blockedCommandsData = new KernelOperation(std::unique_ptr<LinearStream>(cmdStream), UniqueIH(dsh),
-                                                   UniqueIH(ioh), UniqueIH(ssh), *pCmdQ->getCommandStreamReceiver().getInternalAllocationStorage());
+                                                   UniqueIH(ioh), UniqueIH(ssh), *pCmdQ->getGpgpuCommandStreamReceiver().getInternalAllocationStorage());
 
     std::vector<Surface *> surfaces;
     event->setCommand(std::make_unique<CommandComputeKernel>(*pCmdQ, std::unique_ptr<KernelOperation>(blockedCommandsData), surfaces, false, false, false, nullptr, pDevice->getPreemptionMode(), pKernel.get(), 1));
@@ -1462,10 +1466,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDcFlushArgumentIsTrueWhenCall
     std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
     LinearStream commandStream(buffer.get(), 128);
 
-    pDevice->getCommandStreamReceiver().addPipeControl(commandStream, true);
-    auto pipeControlOffset = KernelCommandsHelper<FamilyType>::isPipeControlWArequired() ? sizeof(PIPE_CONTROL) : 0u;
-    auto pipeControlAddress = buffer.get() + pipeControlOffset;
-    auto pipeControl = genCmdCast<PIPE_CONTROL *>(pipeControlAddress);
+    auto pipeControl = PipeControlHelper<FamilyType>::addPipeControl(commandStream, true);
 
     EXPECT_TRUE(pipeControl->getDcFlushEnable());
     EXPECT_TRUE(pipeControl->getCommandStreamerStallEnable());
@@ -1476,10 +1477,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDcFlushArgumentIsFalseWhenCal
     std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
     LinearStream commandStream(buffer.get(), 128);
 
-    pDevice->getCommandStreamReceiver().addPipeControl(commandStream, false);
-    auto pipeControlOffset = KernelCommandsHelper<FamilyType>::isPipeControlWArequired() ? sizeof(PIPE_CONTROL) : 0u;
-    auto pipeControlAddress = buffer.get() + pipeControlOffset;
-    auto pipeControl = genCmdCast<PIPE_CONTROL *>(pipeControlAddress);
+    auto pipeControl = PipeControlHelper<FamilyType>::addPipeControl(commandStream, false);
 
     const bool expectedDcFlush = ::renderCoreFamily == IGFX_GEN8_CORE;
     EXPECT_EQ(expectedDcFlush, pipeControl->getDcFlushEnable());

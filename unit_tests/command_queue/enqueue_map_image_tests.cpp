@@ -5,14 +5,15 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/event/user_event.h"
+#include "runtime/os_interface/os_context.h"
 #include "test.h"
 #include "unit_tests/command_queue/command_enqueue_fixture.h"
 #include "unit_tests/command_queue/command_queue_fixture.h"
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/fixtures/image_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_kernel.h"
 
@@ -58,11 +59,17 @@ TEST_F(EnqueueMapImageTest, reuseMappedPtrForTiledImg) {
     const size_t origin[3] = {0, 0, 0};
     const size_t region[3] = {1, 1, 1};
 
+    auto mapAllocation = image->getMapAllocation();
+    EXPECT_NE(nullptr, mapAllocation);
+
     auto ptr1 = pCmdQ->enqueueMapImage(
         image, true, mapFlags, origin,
         region, nullptr, nullptr, 0,
         nullptr, nullptr, retVal);
     EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, image->getHostPtr());
+    mapAllocation = image->getMapAllocation();
+    EXPECT_NE(nullptr, mapAllocation);
 
     auto ptr2 = pCmdQ->enqueueMapImage(
         image, true, mapFlags, origin,
@@ -177,7 +184,6 @@ struct mockedImage : public ImageHw<GfxFamily> {
 };
 
 HWTEST_F(EnqueueMapImageTest, givenTiledImageWhenMapImageIsCalledThenStorageIsSetWithImageMutexTaken) {
-
     auto imageFormat = image->getImageFormat();
     auto imageDesc = image->getImageDesc();
     auto graphicsAllocation = image->getGraphicsAllocation();
@@ -200,15 +206,32 @@ HWTEST_F(EnqueueMapImageTest, givenTiledImageWhenMapImageIsCalledThenStorageIsSe
 
     mockImage.createFunction = image->createFunction;
 
+    auto mapAllocation = mockImage.getMapAllocation();
+    EXPECT_EQ(nullptr, mapAllocation);
+    EXPECT_EQ(nullptr, mockImage.getHostPtr());
+
     auto mapFlags = CL_MAP_READ;
     const size_t origin[3] = {0, 0, 0};
     const size_t region[3] = {1, 1, 1};
 
-    pCmdQ->enqueueMapImage(
+    auto apiMapPtr = pCmdQ->enqueueMapImage(
         &mockImage, true, mapFlags, origin,
         region, nullptr, nullptr, 0,
         nullptr, nullptr, retVal);
     EXPECT_TRUE(mockImage.ownershipTaken);
+
+    auto mapPtr = mockImage.getAllocatedMapPtr();
+    EXPECT_EQ(apiMapPtr, mapPtr);
+    mapAllocation = mockImage.getMapAllocation();
+    EXPECT_NE(nullptr, mapAllocation);
+    EXPECT_EQ(apiMapPtr, mapAllocation->getUnderlyingBuffer());
+
+    auto osContextId = pCmdQ->getGpgpuCommandStreamReceiver().getOsContext().getContextId();
+    auto expectedTaskCount = pCmdQ->getGpgpuCommandStreamReceiver().peekTaskCount();
+    auto actualMapAllocationTaskCount = mapAllocation->getTaskCount(osContextId);
+    EXPECT_EQ(expectedTaskCount, actualMapAllocationTaskCount);
+
+    pDevice->getMemoryManager()->freeGraphicsMemory(mockImage.getMapAllocation());
     mockImage.releaseAllocatedMapPtr();
 }
 
@@ -289,7 +312,7 @@ TEST_F(EnqueueMapImageTest, givenNonReadOnlyMapWithOutEventWhenMappedThenSetEven
 
     MockKernelWithInternals kernel(*pDevice);
     *pTagMemory = tagHW;
-    auto &commandStreamReceiver = pCmdQ->getCommandStreamReceiver();
+    auto &commandStreamReceiver = pCmdQ->getGpgpuCommandStreamReceiver();
     auto tag_address = commandStreamReceiver.getTagAddress();
     EXPECT_TRUE(pTagMemory == tag_address);
 
@@ -368,7 +391,7 @@ TEST_F(EnqueueMapImageTest, givenReadOnlyMapWithOutEventWhenMappedThenSetEventAn
     const size_t region[3] = {1, 1, 1};
     *pTagMemory = 5;
 
-    auto &commandStreamReceiver = pCmdQ->getCommandStreamReceiver();
+    auto &commandStreamReceiver = pCmdQ->getGpgpuCommandStreamReceiver();
 
     EXPECT_EQ(1u, commandStreamReceiver.peekTaskCount());
 

@@ -5,14 +5,14 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/event/event.h"
-#include "runtime/helpers/kernel_commands.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/timestamp_packet.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/utilities/tag_allocator.h"
 #include "test.h"
 #include "unit_tests/aub_tests/command_queue/command_enqueue_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 
 using namespace NEO;
 
@@ -44,23 +44,23 @@ HWTEST_F(TimestampPacketAubTests, givenTwoBatchedEnqueuesWhenDependencyIsResolve
     buffer->forceDisallowCPUCopy = true;
     cl_event outEvent1, outEvent2;
 
-    pCmdQ->enqueueWriteBuffer(buffer.get(), CL_FALSE, 0, bufferSize, writePattern1, 0, nullptr, &outEvent1);
+    pCmdQ->enqueueWriteBuffer(buffer.get(), CL_FALSE, 0, bufferSize, writePattern1, nullptr, 0, nullptr, &outEvent1);
     auto node1 = castToObject<Event>(outEvent1)->getTimestampPacketNodes()->peekNodes().at(0);
     node1->getBaseGraphicsAllocation()->setAubWritable(true); // allow to write again after Buffer::create
 
-    pCmdQ->enqueueWriteBuffer(buffer.get(), CL_TRUE, 0, bufferSize, writePattern2, 0, nullptr, &outEvent2);
+    pCmdQ->enqueueWriteBuffer(buffer.get(), CL_TRUE, 0, bufferSize, writePattern2, nullptr, 0, nullptr, &outEvent2);
     auto node2 = castToObject<Event>(outEvent2)->getTimestampPacketNodes()->peekNodes().at(0);
 
     expectMemory<FamilyType>(reinterpret_cast<void *>(buffer->getGraphicsAllocation()->getGpuAddress()), writePattern2, bufferSize);
 
     uint32_t expectedDepsCount = 0;
-    auto dependenciesGpuAddress = TimestampPacketHelper::getImplicitDependenciesCounGpuWriteAddress(*node1);
+    auto dependenciesGpuAddress = node1->getGpuAddress() + offsetof(TimestampPacketStorage, implicitDependenciesCount);
     expectMemory<FamilyType>(reinterpret_cast<void *>(dependenciesGpuAddress),
                              &expectedDepsCount, sizeof(uint32_t));
 
     uint32_t expectedEndTimestamp[2] = {0, 0};
-    auto endTimestampAddress1 = TimestampPacketHelper::getGpuAddressForDataWrite(*node1, TimestampPacket::DataIndex::ContextEnd);
-    auto endTimestampAddress2 = TimestampPacketHelper::getGpuAddressForDataWrite(*node2, TimestampPacket::DataIndex::ContextEnd);
+    auto endTimestampAddress1 = node1->getGpuAddress() + offsetof(TimestampPacketStorage, packets[0].contextEnd);
+    auto endTimestampAddress2 = node2->getGpuAddress() + offsetof(TimestampPacketStorage, packets[0].contextEnd);
     expectMemory<FamilyType>(reinterpret_cast<void *>(endTimestampAddress1), expectedEndTimestamp, 2 * sizeof(uint32_t));
     expectMemory<FamilyType>(reinterpret_cast<void *>(endTimestampAddress2), expectedEndTimestamp, 2 * sizeof(uint32_t));
 
@@ -79,15 +79,15 @@ HWTEST_F(TimestampPacketAubTests, givenMultipleWalkersWhenEnqueueingThenWriteAll
     auto buffer = std::unique_ptr<Buffer>(Buffer::create(&context, CL_MEM_READ_WRITE, bufferSize, nullptr, retVal));
     buffer->forceDisallowCPUCopy = true;
 
-    pCmdQ->enqueueWriteBuffer(buffer.get(), CL_TRUE, 1, writeSize, writeData, 0, nullptr, &outEvent);
+    pCmdQ->enqueueWriteBuffer(buffer.get(), CL_TRUE, 1, writeSize, writeData, nullptr, 0, nullptr, &outEvent);
 
     auto &timestampNodes = castToObject<Event>(outEvent)->getTimestampPacketNodes()->peekNodes();
 
     EXPECT_EQ(2u, timestampNodes.size());
 
     uint32_t expectedEndTimestamp[2] = {0, 0};
-    auto endTimestampAddress1 = TimestampPacketHelper::getGpuAddressForDataWrite(*timestampNodes.at(0), TimestampPacket::DataIndex::ContextEnd);
-    auto endTimestampAddress2 = TimestampPacketHelper::getGpuAddressForDataWrite(*timestampNodes.at(1), TimestampPacket::DataIndex::ContextEnd);
+    auto endTimestampAddress1 = timestampNodes.at(0)->getGpuAddress() + offsetof(TimestampPacketStorage, packets[0].contextEnd);
+    auto endTimestampAddress2 = timestampNodes.at(1)->getGpuAddress() + offsetof(TimestampPacketStorage, packets[0].contextEnd);
     expectMemory<FamilyType>(reinterpret_cast<void *>(endTimestampAddress1), expectedEndTimestamp, 2 * sizeof(uint32_t));
     expectMemory<FamilyType>(reinterpret_cast<void *>(endTimestampAddress2), expectedEndTimestamp, 2 * sizeof(uint32_t));
 

@@ -5,13 +5,13 @@
  *
  */
 
+#include "core/unit_tests/helpers/memory_leak_listener.h"
 #include "runtime/gmm_helper/resource_info.h"
 #include "runtime/helpers/options.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/os_interface/hw_info_config.h"
 #include "runtime/utilities/debug_settings_reader.h"
 #include "unit_tests/custom_event_listener.h"
-#include "unit_tests/memory_leak_listener.h"
 #include "unit_tests/mocks/mock_gmm.h"
 #include "unit_tests/mocks/mock_program.h"
 #include "unit_tests/mocks/mock_sip.h"
@@ -61,7 +61,6 @@ PRODUCT_FAMILY productFamily = IGFX_SKYLAKE;
 GFXCORE_FAMILY renderCoreFamily = IGFX_GEN9_CORE;
 PRODUCT_FAMILY defaultProductFamily = productFamily;
 
-extern bool printMemoryOpCallStack;
 extern std::string lastTest;
 bool generateRandomInput = false;
 
@@ -147,7 +146,7 @@ void cleanTestHelpers() {
 }
 
 std::string getHardwarePrefix() {
-    std::string s = hardwarePrefix[platformDevices[0]->pPlatform->eProductFamily];
+    std::string s = hardwarePrefix[platformDevices[0]->platform.eProductFamily];
     return s;
 }
 
@@ -173,7 +172,7 @@ int main(int argc, char **argv) {
     int retVal = 0;
     bool useDefaultListener = false;
     bool enable_alarm = true;
-    bool setupFeatureTable = testMode == TestMode::AubTests ? true : false;
+    bool setupFeatureTableAndWorkaroundTable = testMode == TestMode::AubTests ? true : false;
 
     applyWorkarounds();
 
@@ -195,16 +194,17 @@ int main(int argc, char **argv) {
     std::string hwInfoConfig = "default";
     auto numDevices = numPlatformDevices;
     HardwareInfo device = DEFAULT_TEST_PLATFORM::hwInfo;
-    hardwareInfoSetup[device.pPlatform->eProductFamily](const_cast<GT_SYSTEM_INFO *>(device.pSysInfo), const_cast<FeatureTable *>(device.pSkuTable), setupFeatureTable, hwInfoConfig);
-    GT_SYSTEM_INFO gtSystemInfo = *device.pSysInfo;
-    FeatureTable featureTable = *device.pSkuTable;
+    hardwareInfoSetup[device.platform.eProductFamily](&device, setupFeatureTableAndWorkaroundTable, hwInfoConfig);
+    GT_SYSTEM_INFO gtSystemInfo = device.gtSystemInfo;
+    FeatureTable featureTable = device.featureTable;
+    WorkaroundTable workaroundTable = device.workaroundTable;
 
-    size_t revisionId = device.pPlatform->usRevId;
+    size_t revisionId = device.platform.usRevId;
     uint32_t euPerSubSlice = 0;
     uint32_t sliceCount = 0;
     uint32_t subSlicePerSliceCount = 0;
     int dieRecovery = 0;
-    ::productFamily = device.pPlatform->eProductFamily;
+    ::productFamily = device.platform.eProductFamily;
 
     for (int i = 1; i < argc; ++i) {
         if (!strcmp("--disable_default_listener", argv[i])) {
@@ -213,8 +213,6 @@ int main(int argc, char **argv) {
             useDefaultListener = true;
         } else if (!strcmp("--disable_alarm", argv[i])) {
             enable_alarm = false;
-        } else if (!strcmp("--print_memory_op_cs", argv[i])) {
-            printMemoryOpCallStack = true;
         } else if (!strcmp("--tbx", argv[i])) {
             if (testMode == TestMode::AubTests) {
                 testMode = TestMode::AubTestsWithTbx;
@@ -285,6 +283,16 @@ int main(int argc, char **argv) {
                 DebugManager.setReaderImpl(SettingsReader::create());
                 DebugManager.injectSettingsFromReader();
             }
+        } else if (!strcmp("--dump_buffer_format", argv[i]) && testMode == TestMode::AubTests) {
+            ++i;
+            std::string dumpBufferFormat(argv[i]);
+            std::transform(dumpBufferFormat.begin(), dumpBufferFormat.end(), dumpBufferFormat.begin(), ::toupper);
+            DebugManager.flags.AUBDumpBufferFormat.set(dumpBufferFormat);
+        } else if (!strcmp("--dump_image_format", argv[i]) && testMode == TestMode::AubTests) {
+            ++i;
+            std::string dumpImageFormat(argv[i]);
+            std::transform(dumpImageFormat.begin(), dumpImageFormat.end(), dumpImageFormat.begin(), ::toupper);
+            DebugManager.flags.AUBDumpImageFormat.set(dumpImageFormat);
         }
     }
 
@@ -298,14 +306,16 @@ int main(int argc, char **argv) {
     if (!hardwareInfo) {
         return -1;
     }
-    platform = *hardwareInfo->pPlatform;
-    featureTable = *hardwareInfo->pSkuTable;
-    gtSystemInfo = *hardwareInfo->pSysInfo;
+    platform = hardwareInfo->platform;
 
     platform.usRevId = (uint16_t)revisionId;
-
+    HardwareInfo hwInfo = *hardwareInfo;
     // set Gt and FeatureTable to initial state
-    hardwareInfoSetup[productFamily](&gtSystemInfo, &featureTable, setupFeatureTable, hwInfoConfig);
+    hardwareInfoSetup[productFamily](&hwInfo, setupFeatureTableAndWorkaroundTable, hwInfoConfig);
+    featureTable = hwInfo.featureTable;
+    gtSystemInfo = hwInfo.gtSystemInfo;
+    workaroundTable = hwInfo.workaroundTable;
+
     // and adjust dynamic values if not secified
     sliceCount = sliceCount > 0 ? sliceCount : gtSystemInfo.SliceCount;
     subSlicePerSliceCount = subSlicePerSliceCount > 0 ? subSlicePerSliceCount : (gtSystemInfo.SubSliceCount / sliceCount);
@@ -324,12 +334,15 @@ int main(int argc, char **argv) {
     ::productFamily = platform.eProductFamily;
     ::renderCoreFamily = platform.eRenderCoreFamily;
 
-    device.pPlatform = &platform;
-    device.pSysInfo = &gtSystemInfo;
-    device.pSkuTable = &featureTable;
+    device.platform = platform;
+    device.gtSystemInfo = gtSystemInfo;
+    device.featureTable = featureTable;
+    device.workaroundTable = workaroundTable;
     device.capabilityTable = hardwareInfo->capabilityTable;
 
-    binaryNameSuffix.append(familyName[device.pPlatform->eRenderCoreFamily]);
+    device.capabilityTable.supportsImages = true;
+
+    binaryNameSuffix.append(familyName[device.platform.eRenderCoreFamily]);
     binaryNameSuffix.append(getPlatformType(device));
 
     std::string nBinaryKernelFiles = getRunPath(argv[0]);

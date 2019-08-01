@@ -114,6 +114,14 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
     bool waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) {
         return true;
     }
+    void addAubComment(const char *message) {
+        AUBCommandStreamReceiverHw<GfxFamily>::addAubComment(message);
+        addAubCommentCalled = true;
+    }
+    void dumpAllocation(GraphicsAllocation &gfxAllocation) override {
+        AUBCommandStreamReceiverHw<GfxFamily>::dumpAllocation(gfxAllocation);
+        dumpAllocationCalled = true;
+    }
     bool flushBatchedSubmissionsCalled = false;
     bool initProgrammingFlagsCalled = false;
     bool initializeEngineCalled = false;
@@ -123,6 +131,8 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
     bool pollForCompletionCalled = false;
     bool expectMemoryEqualCalled = false;
     bool expectMemoryNotEqualCalled = false;
+    bool addAubCommentCalled = false;
+    bool dumpAllocationCalled = false;
 
     void initFile(const std::string &fileName) override {
         fileIsOpen = true;

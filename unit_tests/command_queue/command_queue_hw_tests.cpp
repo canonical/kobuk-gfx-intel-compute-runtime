@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/helpers/dispatch_info_builder.h"
 #include "test.h"
@@ -12,7 +13,6 @@
 #include "unit_tests/fixtures/buffer_fixture.h"
 #include "unit_tests/fixtures/context_fixture.h"
 #include "unit_tests/fixtures/device_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_buffer.h"
 #include "unit_tests/mocks/mock_command_queue.h"
@@ -177,8 +177,30 @@ HWTEST_F(CommandQueueHwTest, addMapUnmapToWaitlistEventsDoesntAddDependenciesInt
     buffer->decRefInternal();
 }
 
-HWTEST_F(CommandQueueHwTest, givenMapCommandWhenZeroStateCommandIsSubmittedThenTaskCountIsBeingWaited) {
+HWTEST_F(CommandQueueHwTest, givenMapCommandWhenZeroStateCommandIsSubmittedThenTaskCountIsNotBeingWaited) {
     auto buffer = new MockBuffer;
+    CommandQueueHw<FamilyType> *pHwQ = reinterpret_cast<CommandQueueHw<FamilyType> *>(pCmdQ);
+
+    MockEventBuilder eventBuilder;
+    MemObjSizeArray size = {{1, 1, 1}};
+    MemObjOffsetArray offset = {{0, 0, 0}};
+    pHwQ->enqueueBlockedMapUnmapOperation(nullptr,
+                                          0,
+                                          MAP,
+                                          buffer,
+                                          size, offset, false,
+                                          eventBuilder);
+
+    EXPECT_NE(nullptr, pHwQ->virtualEvent);
+    pHwQ->virtualEvent->setStatus(CL_COMPLETE);
+
+    EXPECT_EQ(std::numeric_limits<uint32_t>::max(), pHwQ->latestTaskCountWaited);
+    buffer->decRefInternal();
+}
+
+HWTEST_F(CommandQueueHwTest, givenMapCommandWhenZeroStateCommandIsSubmittedOnNonZeroCopyBufferThenTaskCountIsBeingWaited) {
+    auto buffer = new MockBuffer;
+    buffer->isZeroCopy = false;
     CommandQueueHw<FamilyType> *pHwQ = reinterpret_cast<CommandQueueHw<FamilyType> *>(pCmdQ);
 
     MockEventBuilder eventBuilder;
@@ -660,7 +682,7 @@ HWTEST_F(CommandQueueHwTest, GivenEventThatIsNotCompletedWhenFinishIsCalledAndIt
     auto ev = new Event(this->pCmdQ, CL_COMMAND_COPY_BUFFER, 3, Event::eventNotReady + 1);
     clSetEventCallback(ev, CL_COMPLETE, ClbFuncTempStruct::ClbFuncT, &Value);
 
-    auto &csr = this->pCmdQ->getCommandStreamReceiver();
+    auto &csr = this->pCmdQ->getGpgpuCommandStreamReceiver();
     EXPECT_GT(3u, csr.peekTaskCount());
     *csr.getTagAddress() = Event::eventNotReady + 1;
     ret = clFinish(this->pCmdQ);
@@ -723,7 +745,7 @@ HWTEST_F(CommandQueueHwTest, givenCommandQueueThatIsBlockedAndUsesCpuCopyWhenEve
     cmdQHw->taskLevel = Event::eventNotReady;
     size_t offset = 0;
     size_t size = 4096u;
-    TransferProperties transferProperties(&buffer, CL_COMMAND_READ_BUFFER, 0, false, &offset, &size, nullptr);
+    TransferProperties transferProperties(&buffer, CL_COMMAND_READ_BUFFER, 0, false, &offset, &size, nullptr, false);
     EventsRequest eventsRequest(0, nullptr, &returnEvent);
     cmdQHw->cpuDataTransferHandler(transferProperties, eventsRequest, retVal);
     EXPECT_EQ(CL_SUCCESS, retVal);
@@ -731,19 +753,38 @@ HWTEST_F(CommandQueueHwTest, givenCommandQueueThatIsBlockedAndUsesCpuCopyWhenEve
     clReleaseEvent(returnEvent);
 }
 
-HWTEST_F(CommandQueueHwTest, givenEventWithRecordedCommandWhenSubmitCommandIsCalledThenTaskCountIsNotUpdated) {
+HWTEST_F(CommandQueueHwTest, givenEventWithRecordedCommandWhenSubmitCommandIsCalledThenTaskCountMustBeUpdatedFromOtherThread) {
+    std::atomic_bool go{false};
+
     struct mockEvent : public Event {
         using Event::Event;
         using Event::eventWithoutCommand;
         using Event::submitCommand;
+        void synchronizeTaskCount() override {
+            *atomicFence = true;
+            Event::synchronizeTaskCount();
+        }
+        uint32_t synchronizeCallCount = 0u;
+        std::atomic_bool *atomicFence = nullptr;
     };
 
     mockEvent neoEvent(this->pCmdQ, CL_COMMAND_MAP_BUFFER, Event::eventNotReady, Event::eventNotReady);
+    neoEvent.atomicFence = &go;
     EXPECT_TRUE(neoEvent.eventWithoutCommand);
     neoEvent.eventWithoutCommand = false;
 
-    neoEvent.submitCommand(false);
     EXPECT_EQ(Event::eventNotReady, neoEvent.peekTaskCount());
+
+    std::thread t([&]() {
+        while (!go)
+            ;
+        neoEvent.updateTaskCount(77u);
+    });
+
+    neoEvent.submitCommand(false);
+
+    EXPECT_EQ(77u, neoEvent.peekTaskCount());
+    t.join();
 }
 
 HWTEST_F(CommandQueueHwTest, GivenBuiltinKernelWhenBuiltinDispatchInfoBuilderIsProvidedThenThisBuilderIsUsedForCreatingDispatchInfo) {
@@ -842,22 +883,11 @@ HWTEST_F(CommandQueueHwTest, givenBlockedInOrderCmdQueueAndAsynchronouslyComplet
     size_t offset = 0;
     size_t size = 1;
 
-    class MockEventWithSetCompleteOnUpdate : public Event {
-      public:
-        MockEventWithSetCompleteOnUpdate(CommandQueue *cmdQueue, cl_command_type cmdType,
-                                         uint32_t taskLevel, uint32_t taskCount) : Event(cmdQueue, cmdType, taskLevel, taskCount) {
-        }
-        void updateExecutionStatus() override {
-            setStatus(CL_COMPLETE);
-        }
-    };
-
     auto event = new Event(cmdQHw, CL_COMMAND_NDRANGE_KERNEL, 10, 0);
 
     uint32_t virtualEventTaskLevel = 77;
     uint32_t virtualEventTaskCount = 80;
-    auto virtualEvent = new MockEventWithSetCompleteOnUpdate(cmdQHw, CL_COMMAND_NDRANGE_KERNEL, virtualEventTaskLevel, virtualEventTaskCount);
-    virtualEvent->setStatus(CL_SUBMITTED);
+    auto virtualEvent = new Event(cmdQHw, CL_COMMAND_NDRANGE_KERNEL, virtualEventTaskLevel, virtualEventTaskCount);
 
     cl_event blockedEvent = event;
 
@@ -866,22 +896,58 @@ HWTEST_F(CommandQueueHwTest, givenBlockedInOrderCmdQueueAndAsynchronouslyComplet
     virtualEvent->incRefInternal();
     cmdQHw->virtualEvent = virtualEvent;
 
+    *mockCSR->getTagAddress() = 0u;
     cmdQHw->taskLevel = 23;
     cmdQHw->enqueueKernel(mockKernel, 1, &offset, &size, &size, 1, &blockedEvent, nullptr);
     //new virtual event is created on enqueue, bind it to the created virtual event
     EXPECT_NE(cmdQHw->virtualEvent, virtualEvent);
 
+    EXPECT_EQ(virtualEvent->peekExecutionStatus(), CL_QUEUED);
     event->setStatus(CL_SUBMITTED);
+    EXPECT_EQ(virtualEvent->peekExecutionStatus(), CL_SUBMITTED);
 
-    virtualEvent->Event::updateExecutionStatus();
     EXPECT_FALSE(cmdQHw->isQueueBlocked());
     // +1 for next level after virtualEvent is unblocked
     // +1 as virtualEvent was a parent for event with actual command that is being submitted
     EXPECT_EQ(virtualEventTaskLevel + 2, cmdQHw->taskLevel);
     //command being submitted was dependant only on virtual event hence only +1
     EXPECT_EQ(virtualEventTaskLevel + 1, mockCSR->lastTaskLevelToFlushTask);
+    *mockCSR->getTagAddress() = initialHardwareTag;
     virtualEvent->decRefInternal();
     event->decRefInternal();
+}
+
+HWTEST_F(CommandQueueHwTest, givenBlockedOutOfOrderQueueWhenUserEventIsSubmittedThenNDREventIsSubmittedAsWell) {
+    CommandQueueHw<FamilyType> *cmdQHw = static_cast<CommandQueueHw<FamilyType> *>(this->pCmdQ);
+    auto &mockCsr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    MockKernelWithInternals mockKernelWithInternals(*pDevice);
+    auto mockKernel = mockKernelWithInternals.mockKernel;
+    size_t offset = 0;
+    size_t size = 1;
+
+    cl_event userEvent = clCreateUserEvent(this->pContext, nullptr);
+    cl_event blockedEvent = nullptr;
+
+    *mockCsr.getTagAddress() = 0u;
+    cmdQHw->enqueueKernel(mockKernel, 1, &offset, &size, &size, 1, &userEvent, &blockedEvent);
+
+    auto neoEvent = castToObject<Event>(blockedEvent);
+    EXPECT_EQ(neoEvent->peekExecutionStatus(), CL_QUEUED);
+
+    neoEvent->updateExecutionStatus();
+
+    EXPECT_EQ(neoEvent->peekExecutionStatus(), CL_QUEUED);
+    EXPECT_EQ(neoEvent->peekTaskCount(), Event::eventNotReady);
+
+    clSetUserEventStatus(userEvent, 0u);
+
+    EXPECT_EQ(neoEvent->peekExecutionStatus(), CL_SUBMITTED);
+    EXPECT_EQ(neoEvent->peekTaskCount(), 1u);
+
+    *mockCsr.getTagAddress() = initialHardwareTag;
+    clReleaseEvent(blockedEvent);
+    clReleaseEvent(userEvent);
 }
 
 HWTEST_F(OOQueueHwTest, givenBlockedOutOfOrderCmdQueueAndAsynchronouslyCompletedEventWhenEnqueueCompletesVirtualEventThenUpdatedTaskLevelIsPassedToEnqueueAndFlushTask) {
@@ -911,7 +977,6 @@ HWTEST_F(OOQueueHwTest, givenBlockedOutOfOrderCmdQueueAndAsynchronouslyCompleted
     uint32_t virtualEventTaskLevel = 77;
     uint32_t virtualEventTaskCount = 80;
     MockEventWithSetCompleteOnUpdate virtualEvent(cmdQHw, CL_COMMAND_NDRANGE_KERNEL, virtualEventTaskLevel, virtualEventTaskCount);
-    virtualEvent.setStatus(CL_SUBMITTED);
 
     cl_event blockedEvent = &event;
 
@@ -994,7 +1059,7 @@ HWTEST_F(CommandQueueHwTest, givenKernelSplitEnqueueReadBufferWhenBlockedThenEnq
 
     cl_event blockedEvent = &userEvent;
 
-    cl_int status = pCmdQ->enqueueReadBuffer(buffer.get(), CL_FALSE, 0, MemoryConstants::cacheLineSize, ptr, 1, &blockedEvent, nullptr);
+    cl_int status = pCmdQ->enqueueReadBuffer(buffer.get(), CL_FALSE, 0, MemoryConstants::cacheLineSize, ptr, nullptr, 1, &blockedEvent, nullptr);
     EXPECT_EQ(CL_SUCCESS, status);
 
     userEvent.setStatus(CL_COMPLETE);

@@ -5,11 +5,9 @@
  *
  */
 
-#include "runtime/aub/aub_helper.h"
-#include "runtime/aub/aub_helper.inl"
+#include "runtime/aub/aub_helper_bdw_plus.inl"
 #include "runtime/helpers/flat_batch_buffer_helper_hw.inl"
-#include "runtime/helpers/hw_helper.h"
-#include "runtime/helpers/hw_helper_common.inl"
+#include "runtime/helpers/hw_helper_bdw_plus.inl"
 
 namespace NEO {
 typedef SKLFamily Family;
@@ -26,6 +24,18 @@ SipKernelType HwHelperHw<Family>::getSipKernelType(bool debuggingActive) {
         return SipKernelType::Csr;
     }
     return SipKernelType::DbgCsrLocal;
+}
+
+template <>
+void PipeControlHelper<Family>::addPipeControlWA(LinearStream &commandStream) {
+    auto pCmd = static_cast<Family::PIPE_CONTROL *>(commandStream.getSpace(sizeof(Family::PIPE_CONTROL)));
+    *pCmd = Family::cmdInitPipeControl;
+    pCmd->setCommandStreamerStallEnable(true);
+}
+
+template <>
+uint32_t HwHelperHw<Family>::getMetricsLibraryGenId() const {
+    return static_cast<uint32_t>(MetricsLibraryApi::ClientGen::Gen9);
 }
 
 template class AubHelperHw<Family>;

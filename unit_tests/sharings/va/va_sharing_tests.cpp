@@ -5,9 +5,14 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/api/api.h"
 #include "runtime/device/device.h"
+#include "runtime/gmm_helper/gmm.h"
+#include "runtime/helpers/array_count.h"
+#include "runtime/memory_manager/graphics_allocation.h"
 #include "runtime/platform/platform.h"
+#include "runtime/sharings/va/cl_va_api.h"
 #include "runtime/sharings/va/va_sharing.h"
 #include "runtime/sharings/va/va_surface.h"
 #include "unit_tests/fixtures/platform_fixture.h"
@@ -25,7 +30,8 @@ class VaSharingTests : public ::testing::Test, public PlatformFixture {
     void SetUp() override {
         PlatformFixture::SetUp();
         vaSharing = new MockVaSharing;
-        context.setSharingFunctions(&vaSharing->m_sharingFunctions);
+        context.setSharingFunctions(&vaSharing->sharingFunctions);
+        vaSharing->sharingFunctions.querySupportedVaImageFormats(VADisplay(1));
         vaSharing->updateAcquiredHandle(sharingHandle);
         sharedImg = nullptr;
         sharedClMem = nullptr;
@@ -63,32 +69,115 @@ class VaSharingTests : public ::testing::Test, public PlatformFixture {
     unsigned int sharingHandle = 1u;
 };
 
-TEST_F(VaSharingTests, givenMockVAWhenFunctionsAreCalledThenCallsAreReceived) {
+TEST(VaSharingTest, givenVASharingFunctionsObjectWhenFunctionsAreCalledThenCallsAreRedirectedToVaFunctionPointers) {
     unsigned int handle = 0u;
+    VASurfaceID vaSurfaceId = 0u;
+    VAImage vaImage = {};
 
-    EXPECT_TRUE(vaSharing->m_sharingFunctions.isValidVaDisplay());
-    EXPECT_EQ(0, vaSharing->m_sharingFunctions.deriveImage(vaSurfaceId, &vaImage));
-    EXPECT_EQ(0, vaSharing->m_sharingFunctions.destroyImage(vaImage.image_id));
-    EXPECT_EQ(0, vaSharing->m_sharingFunctions.syncSurface(vaSurfaceId));
-    EXPECT_TRUE(nullptr == vaSharing->m_sharingFunctions.getLibFunc("funcName"));
-    EXPECT_EQ(0, vaSharing->m_sharingFunctions.extGetSurfaceHandle(&vaSurfaceId, &handle));
+    class VASharingFunctionsGlobalFunctionPointersMock : public VASharingFunctions {
+      public:
+        VASharingFunctionsGlobalFunctionPointersMock() : VASharingFunctions(nullptr) {
+            initMembers();
+        }
 
-    EXPECT_EQ(sharingHandle, handle);
+        bool vaDisplayIsValidCalled = false;
+        bool vaDeriveImageCalled = false;
+        bool vaDestroyImageCalled = false;
+        bool vaSyncSurfaceCalled = false;
+        bool vaGetLibFuncCalled = false;
+        bool vaExtGetSurfaceHandleCalled = false;
+        bool vaQueryImageFormatsCalled = false;
+        bool vaMaxNumImageFormatsCalled = false;
 
-    EXPECT_EQ(1, vaDisplayIsValidCalled);
-    EXPECT_EQ(1, vaDeriveImageCalled);
-    EXPECT_EQ(1, vaDestroyImageCalled);
-    EXPECT_EQ(1, vaSyncSurfaceCalled);
-    EXPECT_EQ(1, vaGetLibFuncCalled);
-    EXPECT_EQ(1, vaExtGetSurfaceHandleCalled);
+        void initMembers() {
+            vaDisplayIsValidPFN = mockVaDisplayIsValid;
+            vaDeriveImagePFN = mockVaDeriveImage;
+            vaDestroyImagePFN = mockVaDestroyImage;
+            vaSyncSurfacePFN = mockVaSyncSurface;
+            vaGetLibFuncPFN = mockVaGetLibFunc;
+            vaExtGetSurfaceHandlePFN = mockExtGetSurfaceHandle;
+            vaQueryImageFormatsPFN = mockVaQueryImageFormats;
+            vaMaxNumImageFormatsPFN = mockVaMaxNumImageFormats;
+        }
+
+        static VASharingFunctionsGlobalFunctionPointersMock *getInstance(bool release) {
+            static VASharingFunctionsGlobalFunctionPointersMock *vaSharingFunctions = nullptr;
+            if (!vaSharingFunctions) {
+                vaSharingFunctions = new VASharingFunctionsGlobalFunctionPointersMock;
+            } else if (release) {
+                delete vaSharingFunctions;
+                vaSharingFunctions = nullptr;
+            }
+            return vaSharingFunctions;
+        }
+
+        static int mockVaDisplayIsValid(VADisplay vaDisplay) {
+            getInstance(false)->vaDisplayIsValidCalled = true;
+            return 1;
+        };
+
+        static VAStatus mockVaDeriveImage(VADisplay vaDisplay, VASurfaceID vaSurface, VAImage *vaImage) {
+            getInstance(false)->vaDeriveImageCalled = true;
+            return VA_STATUS_SUCCESS;
+        };
+
+        static VAStatus mockVaDestroyImage(VADisplay vaDisplay, VAImageID vaImageId) {
+            getInstance(false)->vaDestroyImageCalled = true;
+            return VA_STATUS_SUCCESS;
+        };
+
+        static VAStatus mockVaSyncSurface(VADisplay vaDisplay, VASurfaceID vaSurface) {
+            getInstance(false)->vaSyncSurfaceCalled = true;
+            return VA_STATUS_SUCCESS;
+        };
+
+        static void *mockVaGetLibFunc(VADisplay vaDisplay, const char *func) {
+            getInstance(false)->vaGetLibFuncCalled = true;
+            return nullptr;
+        };
+
+        static VAStatus mockExtGetSurfaceHandle(VADisplay vaDisplay, VASurfaceID *vaSurface, unsigned int *handleId) {
+            getInstance(false)->vaExtGetSurfaceHandleCalled = true;
+            return VA_STATUS_SUCCESS;
+        };
+
+        static VAStatus mockVaQueryImageFormats(VADisplay vaDisplay, VAImageFormat *formatList, int *numFormats) {
+            getInstance(false)->vaQueryImageFormatsCalled = true;
+            return VA_STATUS_SUCCESS;
+        };
+
+        static int mockVaMaxNumImageFormats(VADisplay vaDisplay) {
+            getInstance(false)->vaMaxNumImageFormatsCalled = true;
+            return 0;
+        };
+    };
+    auto vaSharingFunctions = VASharingFunctionsGlobalFunctionPointersMock::getInstance(false);
+    EXPECT_TRUE(vaSharingFunctions->isValidVaDisplay());
+    EXPECT_EQ(0, vaSharingFunctions->deriveImage(vaSurfaceId, &vaImage));
+    EXPECT_EQ(0, vaSharingFunctions->destroyImage(vaImage.image_id));
+    EXPECT_EQ(0, vaSharingFunctions->syncSurface(vaSurfaceId));
+    EXPECT_TRUE(nullptr == vaSharingFunctions->getLibFunc("funcName"));
+    EXPECT_EQ(0, vaSharingFunctions->extGetSurfaceHandle(&vaSurfaceId, &handle));
+    int numFormats = 0;
+    EXPECT_EQ(0, vaSharingFunctions->queryImageFormats(VADisplay(1), nullptr, &numFormats));
+    EXPECT_EQ(0, vaSharingFunctions->maxNumImageFormats(VADisplay(1)));
+
+    EXPECT_EQ(0u, handle);
+
+    EXPECT_TRUE(VASharingFunctionsGlobalFunctionPointersMock::getInstance(false)->vaDisplayIsValidCalled);
+    EXPECT_TRUE(VASharingFunctionsGlobalFunctionPointersMock::getInstance(false)->vaDeriveImageCalled);
+    EXPECT_TRUE(VASharingFunctionsGlobalFunctionPointersMock::getInstance(false)->vaDestroyImageCalled);
+    EXPECT_TRUE(VASharingFunctionsGlobalFunctionPointersMock::getInstance(false)->vaSyncSurfaceCalled);
+    EXPECT_TRUE(VASharingFunctionsGlobalFunctionPointersMock::getInstance(false)->vaGetLibFuncCalled);
+    EXPECT_TRUE(VASharingFunctionsGlobalFunctionPointersMock::getInstance(false)->vaExtGetSurfaceHandleCalled);
+    EXPECT_TRUE(VASharingFunctionsGlobalFunctionPointersMock::getInstance(false)->vaQueryImageFormatsCalled);
+    EXPECT_TRUE(VASharingFunctionsGlobalFunctionPointersMock::getInstance(false)->vaMaxNumImageFormatsCalled);
+
+    VASharingFunctionsGlobalFunctionPointersMock::getInstance(true);
 }
 
 TEST_F(VaSharingTests, givenMockVaWhenVaSurfaceIsCreatedThenMemObjectHasVaHandler) {
-    // this will create OS specific memory Manager
-    //overrideCommandStreamReceiverCreation = true;
-    ASSERT_FALSE(overrideCommandStreamReceiverCreation);
-
-    auto vaSurface = VASurface::createSharedVaSurface(&context, &vaSharing->m_sharingFunctions,
+    auto vaSurface = VASurface::createSharedVaSurface(&context, &vaSharing->sharingFunctions,
                                                       CL_MEM_READ_WRITE, &vaSurfaceId, 0, &errCode);
     EXPECT_NE(nullptr, vaSurface);
     EXPECT_NE(nullptr, vaSurface->getGraphicsAllocation());
@@ -101,13 +190,13 @@ TEST_F(VaSharingTests, givenMockVaWhenVaSurfaceIsCreatedThenMemObjectHasVaHandle
     ASSERT_NE(nullptr, handler);
 
     auto vaHandler = static_cast<VASharing *>(handler);
-    EXPECT_EQ(vaHandler->peekFunctionsHandler(), &vaSharing->m_sharingFunctions);
+    EXPECT_EQ(vaHandler->peekFunctionsHandler(), &vaSharing->sharingFunctions);
 
-    EXPECT_EQ(1u, acquiredVaHandle);
+    EXPECT_EQ(1u, vaSharing->sharingFunctions.acquiredVaHandle);
 
-    EXPECT_EQ(1, vaDeriveImageCalled);
-    EXPECT_EQ(1, vaDestroyImageCalled);
-    EXPECT_EQ(1, vaExtGetSurfaceHandleCalled);
+    EXPECT_TRUE(vaSharing->sharingFunctions.deriveImageCalled);
+    EXPECT_TRUE(vaSharing->sharingFunctions.destroyImageCalled);
+    EXPECT_TRUE(vaSharing->sharingFunctions.extGetSurfaceHandleCalled);
 
     size_t paramSize = 0;
     void *paramValue = nullptr;
@@ -119,13 +208,22 @@ TEST_F(VaSharingTests, givenMockVaWhenVaSurfaceIsCreatedThenMemObjectHasVaHandle
     delete vaSurface;
 }
 
+TEST_F(VaSharingTests, givenInvalidPlaneWhenVaSurfaceIsCreatedThenUnrecoverableIsCalled) {
+    EXPECT_THROW(VASurface::createSharedVaSurface(&context, &vaSharing->sharingFunctions,
+                                                  CL_MEM_READ_WRITE, &vaSurfaceId, 2, &errCode),
+                 std::exception);
+}
+
+TEST_F(VaSharingTests, givenInvalidPlaneInputWhenVaSurfaceIsCreatedThenInvalidValueErrorIsReturned) {
+    sharedClMem = clCreateFromVA_APIMediaSurfaceINTEL(&context, CL_MEM_READ_WRITE, &vaSurfaceId, 2, &errCode);
+    EXPECT_EQ(nullptr, sharedClMem);
+    EXPECT_EQ(CL_INVALID_VALUE, errCode);
+}
+
 TEST_F(VaSharingTests, givenMockVaWhenVaSurfaceIsCreatedWithNotAlignedWidthAndHeightThenSurfaceOffsetsUseAlignedValues) {
-    // this will create OS specific memory Manager
-    //overrideCommandStreamReceiverCreation = true;
-    ASSERT_FALSE(overrideCommandStreamReceiverCreation);
-    vaSharingFunctionsMockWidth = 256 + 16;
-    vaSharingFunctionsMockHeight = 512 + 16;
-    auto vaSurface = VASurface::createSharedVaSurface(&context, &vaSharing->m_sharingFunctions,
+    vaSharing->sharingFunctions.derivedImageWidth = 256 + 16;
+    vaSharing->sharingFunctions.derivedImageHeight = 512 + 16;
+    auto vaSurface = VASurface::createSharedVaSurface(&context, &vaSharing->sharingFunctions,
                                                       CL_MEM_READ_WRITE, &vaSurfaceId, 1, &errCode);
     EXPECT_NE(nullptr, vaSurface);
     EXPECT_NE(nullptr, vaSurface->getGraphicsAllocation());
@@ -138,17 +236,17 @@ TEST_F(VaSharingTests, givenMockVaWhenVaSurfaceIsCreatedWithNotAlignedWidthAndHe
     ASSERT_NE(nullptr, handler);
 
     auto vaHandler = static_cast<VASharing *>(handler);
-    EXPECT_EQ(vaHandler->peekFunctionsHandler(), &vaSharing->m_sharingFunctions);
+    EXPECT_EQ(vaHandler->peekFunctionsHandler(), &vaSharing->sharingFunctions);
 
-    EXPECT_EQ(1u, acquiredVaHandle);
+    EXPECT_EQ(1u, vaSharing->sharingFunctions.acquiredVaHandle);
 
-    EXPECT_EQ(1, vaDeriveImageCalled);
-    EXPECT_EQ(1, vaDestroyImageCalled);
-    EXPECT_EQ(1, vaExtGetSurfaceHandleCalled);
+    EXPECT_TRUE(vaSharing->sharingFunctions.deriveImageCalled);
+    EXPECT_TRUE(vaSharing->sharingFunctions.destroyImageCalled);
+    EXPECT_TRUE(vaSharing->sharingFunctions.extGetSurfaceHandleCalled);
 
     SurfaceOffsets surfaceOffsets;
-    uint16_t alignedWidth = alignUp(vaSharingFunctionsMockWidth, 128);
-    uint16_t alignedHeight = alignUp(vaSharingFunctionsMockHeight, 32);
+    uint16_t alignedWidth = alignUp(vaSharing->sharingFunctions.derivedImageWidth, 128);
+    uint16_t alignedHeight = alignUp(vaSharing->sharingFunctions.derivedImageHeight, 32);
     uint64_t alignedOffset = alignedWidth * alignedHeight;
 
     vaSurface->getSurfaceOffsets(surfaceOffsets);
@@ -173,29 +271,32 @@ TEST_F(VaSharingTests, givenVASurfaceWhenItIsAcquiredTwiceThenAcquireIsNotCalled
     createMediaSurface();
 
     sharedImg->peekSharingHandler()->acquire(sharedImg);
-    EXPECT_EQ(1, vaExtGetSurfaceHandleCalled);
+    EXPECT_TRUE(vaSharing->sharingFunctions.extGetSurfaceHandleCalled);
 
+    vaSharing->sharingFunctions.extGetSurfaceHandleCalled = false;
     sharedImg->peekSharingHandler()->acquire(sharedImg);
-    EXPECT_EQ(1, vaExtGetSurfaceHandleCalled);
+    EXPECT_FALSE(vaSharing->sharingFunctions.extGetSurfaceHandleCalled);
 }
 
-TEST_F(VaSharingTests, givenHwCommandQueueWhenAcquireIsCalledThenAcquireCountIsNotIncremented) {
+TEST_F(VaSharingTests, givenHwCommandQueueWhenEnqueueAcquireIsCalledMultipleTimesThenSharingFunctionAcquireIsNotCalledMultipleTimes) {
     auto commandQueue = clCreateCommandQueue(&context, context.getDevice(0), 0, &errCode);
     ASSERT_EQ(CL_SUCCESS, errCode);
 
     createMediaSurface();
 
-    EXPECT_EQ(1, vaExtGetSurfaceHandleCalled);
+    EXPECT_TRUE(vaSharing->sharingFunctions.extGetSurfaceHandleCalled);
+
+    vaSharing->sharingFunctions.extGetSurfaceHandleCalled = false;
     errCode = clEnqueueAcquireVA_APIMediaSurfacesINTEL(commandQueue, 1, &sharedClMem, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, errCode);
-    EXPECT_EQ(1, vaExtGetSurfaceHandleCalled);
+    EXPECT_FALSE(vaSharing->sharingFunctions.extGetSurfaceHandleCalled);
 
     errCode = clEnqueueReleaseVA_APIMediaSurfacesINTEL(commandQueue, 1, &sharedClMem, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, errCode);
 
     errCode = clEnqueueAcquireVA_APIMediaSurfacesINTEL(commandQueue, 1, &sharedClMem, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, errCode);
-    EXPECT_EQ(1, vaExtGetSurfaceHandleCalled);
+    EXPECT_FALSE(vaSharing->sharingFunctions.extGetSurfaceHandleCalled);
 
     errCode = clReleaseCommandQueue(commandQueue);
     EXPECT_EQ(CL_SUCCESS, errCode);
@@ -262,10 +363,10 @@ TEST_F(VaSharingTests, givenVaMediaSurfaceWhenGetImageInfoIsCalledThenPlaneIsRet
 }
 
 TEST_F(VaSharingTests, givenPlaneWhenCreateSurfaceIsCalledThenSetPlaneFields) {
-    cl_uint planes[4] = {0, 1, 2, 3};
+    cl_uint planes[2] = {0, 1};
     updateAcquiredHandle(2);
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 2; i++) {
         createMediaSurface(planes[i]);
 
         EXPECT_TRUE(sharedImg->getSurfaceFormatInfo().OCLImageFormat.image_channel_data_type == CL_UNORM_INT8);
@@ -275,8 +376,6 @@ TEST_F(VaSharingTests, givenPlaneWhenCreateSurfaceIsCalledThenSetPlaneFields) {
             EXPECT_TRUE(sharedImg->getSurfaceFormatInfo().OCLImageFormat.image_channel_order == CL_R);
         } else if (planes[i] == 1) {
             EXPECT_TRUE(sharedImg->getSurfaceFormatInfo().OCLImageFormat.image_channel_order == CL_RG);
-        } else {
-            EXPECT_TRUE(sharedImg->getSurfaceFormatInfo().OCLImageFormat.image_channel_order == CL_NV12_INTEL);
         }
 
         delete sharedImg;
@@ -287,13 +386,13 @@ TEST_F(VaSharingTests, givenPlaneWhenCreateSurfaceIsCalledThenSetPlaneFields) {
 TEST_F(VaSharingTests, givenSimpleParamsWhenCreateSurfaceIsCalledThenSetImgObject) {
     updateAcquiredHandle(2);
 
-    createMediaSurface(3u);
+    createMediaSurface(0u);
 
     EXPECT_TRUE(sharedImg->getImageDesc().buffer == nullptr);
     EXPECT_EQ(0u, sharedImg->getImageDesc().image_array_size);
     EXPECT_EQ(0u, sharedImg->getImageDesc().image_depth);
-    EXPECT_EQ(mockVaImage.height, static_cast<unsigned short>(sharedImg->getImageDesc().image_height));
-    EXPECT_EQ(mockVaImage.width, static_cast<unsigned short>(sharedImg->getImageDesc().image_width));
+    EXPECT_EQ(vaSharing->sharingFunctions.mockVaImage.height, static_cast<unsigned short>(sharedImg->getImageDesc().image_height));
+    EXPECT_EQ(vaSharing->sharingFunctions.mockVaImage.width, static_cast<unsigned short>(sharedImg->getImageDesc().image_width));
     EXPECT_TRUE(CL_MEM_OBJECT_IMAGE2D == sharedImg->getImageDesc().image_type);
     EXPECT_EQ(0u, sharedImg->getImageDesc().image_slice_pitch);
     EXPECT_NE(0u, sharedImg->getImageDesc().image_row_pitch);
@@ -312,9 +411,9 @@ TEST_F(VaSharingTests, givenNonInteropUserSyncContextWhenAcquireIsCalledThenSync
 
     auto memObj = castToObject<MemObj>(sharedClMem);
 
-    EXPECT_EQ(0, vaSyncSurfaceCalled);
+    EXPECT_FALSE(vaSharing->sharingFunctions.syncSurfaceCalled);
     memObj->peekSharingHandler()->acquire(sharedImg);
-    EXPECT_EQ(1, vaSyncSurfaceCalled);
+    EXPECT_TRUE(vaSharing->sharingFunctions.syncSurfaceCalled);
 }
 
 TEST_F(VaSharingTests, givenInteropUserSyncContextWhenAcquireIsCalledThenDontSyncSurface) {
@@ -322,21 +421,20 @@ TEST_F(VaSharingTests, givenInteropUserSyncContextWhenAcquireIsCalledThenDontSyn
 
     createMediaSurface();
 
-    EXPECT_EQ(0, vaSyncSurfaceCalled);
+    EXPECT_FALSE(vaSharing->sharingFunctions.syncSurfaceCalled);
     sharedImg->peekSharingHandler()->acquire(sharedImg);
-    EXPECT_EQ(0, vaSyncSurfaceCalled);
+    EXPECT_FALSE(vaSharing->sharingFunctions.syncSurfaceCalled);
 }
 
 TEST_F(VaSharingTests, givenYuvPlaneWhenCreateIsCalledThenChangeWidthAndHeight) {
-    cl_uint planeTypes[4] = {
+    cl_uint planeTypes[] = {
         0, //Y
-        1, //U
-        2, //no-plane
+        1  //U
     };
 
     context.setInteropUserSyncEnabled(true);
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 2; i++) {
         createMediaSurface(planeTypes[i]);
         size_t retParam;
 
@@ -358,70 +456,6 @@ TEST_F(VaSharingTests, givenYuvPlaneWhenCreateIsCalledThenChangeWidthAndHeight) 
         delete sharedImg;
         sharedImg = nullptr;
     }
-}
-
-TEST_F(VaSharingTests, givenVaSurfaceWhenCreateImageFromParentThenShareHandler) {
-    context.setInteropUserSyncEnabled(true);
-
-    createMediaSurface(2u);
-    EXPECT_TRUE(sharedImg->getSurfaceFormatInfo().OCLImageFormat.image_channel_order == CL_NV12_INTEL);
-
-    cl_image_desc imgDesc = {};
-    imgDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
-    imgDesc.image_width = 256;
-    imgDesc.image_height = 256;
-    imgDesc.mem_object = sharedClMem;
-
-    cl_image_format imgFormat = {CL_R, CL_UNORM_INT8};
-
-    auto childImg = clCreateImage(&context, CL_MEM_READ_WRITE, &imgFormat, &imgDesc, nullptr, &errCode);
-    EXPECT_EQ(CL_SUCCESS, errCode);
-
-    auto childImgObj = castToObject<Image>(childImg);
-    EXPECT_FALSE(childImgObj->getIsObjectRedescribed());
-
-    EXPECT_EQ(sharedImg->peekSharingHandler(), childImgObj->peekSharingHandler());
-
-    errCode = clReleaseMemObject(childImg);
-    EXPECT_EQ(CL_SUCCESS, errCode);
-}
-
-TEST_F(VaSharingTests, givenVaSurfaceWhenCreateImageFromParentThenSetMediaPlaneType) {
-    context.setInteropUserSyncEnabled(true);
-
-    createMediaSurface(2u);
-    EXPECT_TRUE(sharedImg->getSurfaceFormatInfo().OCLImageFormat.image_channel_order == CL_NV12_INTEL);
-
-    cl_image_desc imgDesc = {};
-    imgDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
-    imgDesc.image_width = 256;
-    imgDesc.image_height = 256;
-    imgDesc.image_depth = 0; // Y plane
-    imgDesc.mem_object = sharedClMem;
-
-    cl_image_format imgFormat = {CL_R, CL_UNORM_INT8};
-
-    auto childImg = clCreateImage(&context, CL_MEM_READ_WRITE, &imgFormat, &imgDesc, nullptr, &errCode);
-    EXPECT_EQ(CL_SUCCESS, errCode);
-
-    auto childImgObj = castToObject<Image>(childImg);
-
-    EXPECT_EQ(childImgObj->getMediaPlaneType(), 0u);
-
-    errCode = clReleaseMemObject(childImg);
-    EXPECT_EQ(CL_SUCCESS, errCode);
-
-    imgDesc.image_depth = 1; // U plane
-    imgFormat.image_channel_order = CL_RG;
-    childImg = clCreateImage(&context, CL_MEM_READ_WRITE, &imgFormat, &imgDesc, nullptr, &errCode);
-    EXPECT_EQ(CL_SUCCESS, errCode);
-
-    childImgObj = castToObject<Image>(childImg);
-
-    EXPECT_EQ(childImgObj->getMediaPlaneType(), 1u);
-
-    errCode = clReleaseMemObject(childImg);
-    EXPECT_EQ(CL_SUCCESS, errCode);
 }
 
 TEST_F(VaSharingTests, givenContextWhenSharingTableEmptyThenReturnsNullptr) {
@@ -452,4 +486,248 @@ TEST_F(VaSharingTests, givenInValidPlatformWhenGetDeviceIdsFromVaApiMediaAdapter
     EXPECT_EQ(CL_INVALID_PLATFORM, errCode);
     EXPECT_EQ(0u, numDevices);
     EXPECT_EQ(0u, devices);
+}
+
+TEST_F(VaSharingTests, givenEnabledExtendedVaFormatsAndP010FormatWhenCreatingSharedVaSurfaceForPlane0ThenCorrectFormatIsUsedByImageAndGMM) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.EnableExtendedVaFormats.set(true);
+
+    vaSharing->sharingFunctions.derivedImageFormatBpp = 16;
+    vaSharing->sharingFunctions.derivedImageFormatFourCC = VA_FOURCC_P010;
+
+    auto vaSurface = std::unique_ptr<Image>(VASurface::createSharedVaSurface(&context, &vaSharing->sharingFunctions,
+                                                                             CL_MEM_READ_WRITE, &vaSurfaceId, 0, &errCode));
+    EXPECT_EQ(static_cast<cl_channel_type>(CL_UNORM_INT16), vaSurface->getImageFormat().image_channel_data_type);
+    EXPECT_EQ(static_cast<cl_channel_order>(CL_R), vaSurface->getImageFormat().image_channel_order);
+    EXPECT_EQ(GMM_RESOURCE_FORMAT::GMM_FORMAT_R16_UNORM, vaSurface->getSurfaceFormatInfo().GMMSurfaceFormat);
+    EXPECT_EQ(GMM_RESOURCE_FORMAT::GMM_FORMAT_P010, vaSurface->getGraphicsAllocation()->getDefaultGmm()->resourceParams.Format);
+    EXPECT_EQ(CL_SUCCESS, errCode);
+}
+
+TEST_F(VaSharingTests, givenEnabledExtendedVaFormatsAndP010FormatWhenCreatingSharedVaSurfaceForPlane1ThenCorrectFormatIsUsedByImageAndGMM) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.EnableExtendedVaFormats.set(true);
+
+    vaSharing->sharingFunctions.derivedImageFormatBpp = 16;
+    vaSharing->sharingFunctions.derivedImageFormatFourCC = VA_FOURCC_P010;
+
+    auto vaSurface = std::unique_ptr<Image>(VASurface::createSharedVaSurface(&context, &vaSharing->sharingFunctions,
+                                                                             CL_MEM_READ_WRITE, &vaSurfaceId, 1, &errCode));
+    EXPECT_EQ(static_cast<cl_channel_type>(CL_UNORM_INT16), vaSurface->getImageFormat().image_channel_data_type);
+    EXPECT_EQ(static_cast<cl_channel_order>(CL_RG), vaSurface->getImageFormat().image_channel_order);
+    EXPECT_EQ(GMM_RESOURCE_FORMAT::GMM_FORMAT_R16G16_UNORM, vaSurface->getSurfaceFormatInfo().GMMSurfaceFormat);
+    EXPECT_EQ(GMM_RESOURCE_FORMAT::GMM_FORMAT_P010, vaSurface->getGraphicsAllocation()->getDefaultGmm()->resourceParams.Format);
+    EXPECT_EQ(CL_SUCCESS, errCode);
+}
+
+TEST_F(VaSharingTests, givenEnabledExtendedVaFormatsAndNV12FormatWhenCreatingSharedVaSurfaceForPlane0ThenCorrectFormatIsUsedByImageAndGMM) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.EnableExtendedVaFormats.set(true);
+
+    vaSharing->sharingFunctions.derivedImageFormatBpp = 12;
+    vaSharing->sharingFunctions.derivedImageFormatFourCC = VA_FOURCC_NV12;
+
+    auto vaSurface = std::unique_ptr<Image>(VASurface::createSharedVaSurface(&context, &vaSharing->sharingFunctions,
+                                                                             CL_MEM_READ_WRITE, &vaSurfaceId, 0, &errCode));
+    EXPECT_EQ(static_cast<cl_channel_type>(CL_UNORM_INT8), vaSurface->getImageFormat().image_channel_data_type);
+    EXPECT_EQ(static_cast<cl_channel_order>(CL_R), vaSurface->getImageFormat().image_channel_order);
+    EXPECT_EQ(GMM_RESOURCE_FORMAT::GMM_FORMAT_R8_UNORM, vaSurface->getSurfaceFormatInfo().GMMSurfaceFormat);
+    EXPECT_EQ(GMM_RESOURCE_FORMAT::GMM_FORMAT_NV12, vaSurface->getGraphicsAllocation()->getDefaultGmm()->resourceParams.Format);
+    EXPECT_EQ(CL_SUCCESS, errCode);
+}
+
+using ApiVaSharingTests = VaSharingTests;
+
+TEST_F(ApiVaSharingTests, givenSupportedImageTypeWhenGettingSupportedVAApiFormatsThenCorrectListIsReturned) {
+    cl_mem_flags flags[] = {CL_MEM_READ_ONLY, CL_MEM_WRITE_ONLY, CL_MEM_READ_WRITE};
+    cl_mem_object_type image_type = CL_MEM_OBJECT_IMAGE2D;
+    VAImageFormat vaApiFormats[10] = {};
+    cl_uint numImageFormats = 0;
+
+    VAImageFormat supportedFormat = {VA_FOURCC_NV12, VA_LSB_FIRST, 8, 0, 0, 0, 0, 0};
+
+    for (size_t i = 0; i < arrayCount(flags); i++) {
+
+        cl_int result = clGetSupportedVA_APIMediaSurfaceFormatsINTEL(
+            &context,
+            flags[i],
+            image_type,
+            arrayCount(vaApiFormats),
+            vaApiFormats,
+            &numImageFormats);
+
+        EXPECT_EQ(CL_SUCCESS, result);
+        EXPECT_EQ(1u, numImageFormats);
+
+        EXPECT_EQ(supportedFormat.fourcc, vaApiFormats[0].fourcc);
+    }
+}
+
+TEST_F(ApiVaSharingTests, givenZeroNumEntriesWhenGettingSupportedVAApiFormatsThenNumFormatsIsReturned) {
+    cl_mem_flags flags = CL_MEM_READ_WRITE;
+    cl_mem_object_type image_type = CL_MEM_OBJECT_IMAGE2D;
+    cl_uint numImageFormats = 0;
+
+    cl_int result = clGetSupportedVA_APIMediaSurfaceFormatsINTEL(
+        &context,
+        flags,
+        image_type,
+        0,
+        nullptr,
+        &numImageFormats);
+
+    EXPECT_EQ(CL_SUCCESS, result);
+    EXPECT_EQ(1u, numImageFormats);
+}
+
+TEST_F(ApiVaSharingTests, givenNullNumImageFormatsWhenGettingSupportedVAApiFormatsThenNumFormatsIsNotDereferenced) {
+    cl_mem_flags flags = CL_MEM_READ_WRITE;
+    cl_mem_object_type image_type = CL_MEM_OBJECT_IMAGE2D;
+
+    cl_int result = clGetSupportedVA_APIMediaSurfaceFormatsINTEL(
+        &context,
+        flags,
+        image_type,
+        0,
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_SUCCESS, result);
+}
+
+TEST_F(ApiVaSharingTests, givenInvalidImageTypeWhenGettingSupportedVAApiFormatsThenIvalidValueErrorIsReturned) {
+    cl_mem_flags flags = CL_MEM_READ_WRITE;
+    cl_mem_object_type image_type = CL_MEM_OBJECT_IMAGE3D;
+    VAImageFormat vaApiFormats[10] = {};
+    cl_uint numImageFormats = 0;
+
+    cl_int result = clGetSupportedVA_APIMediaSurfaceFormatsINTEL(
+        &context,
+        flags,
+        image_type,
+        arrayCount(vaApiFormats),
+        vaApiFormats,
+        &numImageFormats);
+
+    EXPECT_EQ(CL_INVALID_VALUE, result);
+    EXPECT_EQ(0u, numImageFormats);
+}
+
+TEST_F(ApiVaSharingTests, givenInvalidFlagsWhenGettingSupportedVAApiFormatsThenIvalidValueErrorIsReturned) {
+    cl_mem_flags flags = CL_MEM_NO_ACCESS_INTEL;
+    cl_mem_object_type image_type = CL_MEM_OBJECT_IMAGE2D;
+    VAImageFormat vaApiFormats[10] = {};
+    cl_uint numImageFormats = 0;
+
+    cl_int result = clGetSupportedVA_APIMediaSurfaceFormatsINTEL(
+        &context,
+        flags,
+        image_type,
+        arrayCount(vaApiFormats),
+        vaApiFormats,
+        &numImageFormats);
+
+    EXPECT_EQ(CL_INVALID_VALUE, result);
+    EXPECT_EQ(0u, numImageFormats);
+}
+
+TEST_F(ApiVaSharingTests, givenInvalidContextWhenGettingSupportedVAApiFormatsThenIvalidContextErrorIsReturned) {
+    cl_mem_flags flags = CL_MEM_READ_WRITE;
+    cl_mem_object_type image_type = CL_MEM_OBJECT_IMAGE2D;
+    VAImageFormat vaApiFormats[10] = {};
+    cl_uint numImageFormats = 0;
+
+    MockContext contextWihtoutVASharing;
+    cl_int result = clGetSupportedVA_APIMediaSurfaceFormatsINTEL(
+        &contextWihtoutVASharing,
+        flags,
+        image_type,
+        arrayCount(vaApiFormats),
+        vaApiFormats,
+        &numImageFormats);
+
+    EXPECT_EQ(CL_INVALID_CONTEXT, result);
+    EXPECT_EQ(0u, numImageFormats);
+}
+
+TEST(VaSurface, givenValidPlaneAndFlagsWhenValidatingInputsThenTrueIsReturned) {
+    for (cl_uint plane = 0; plane <= 1; plane++) {
+        EXPECT_TRUE(VASurface::validate(CL_MEM_READ_ONLY, plane));
+        EXPECT_TRUE(VASurface::validate(CL_MEM_WRITE_ONLY, plane));
+        EXPECT_TRUE(VASurface::validate(CL_MEM_READ_WRITE, plane));
+    }
+}
+
+TEST(VaSurface, givenInValidPlaneOrFlagsWhenValidatingInputsThenTrueIsReturned) {
+    cl_uint plane = 2;
+    EXPECT_FALSE(VASurface::validate(CL_MEM_READ_ONLY, plane));
+    EXPECT_FALSE(VASurface::validate(CL_MEM_USE_HOST_PTR, 0));
+}
+
+TEST(VaSurface, givenEnabledExtendedVaFormatsWhenGettingUnsupportedSurfaceFormatInfoThenNullptrIsReturned) {
+    auto formatInfo = VASurface::getExtendedSurfaceFormatInfo(VA_FOURCC_P016);
+    EXPECT_EQ(nullptr, formatInfo);
+}
+
+TEST(VaSurface, givenNotSupportedVaFormatsWhenCheckingIfSupportedThenFalseIsReturned) {
+    EXPECT_FALSE(VASurface::isSupportedFourCC(VA_FOURCC_NV11));
+
+    DebugManagerStateRestore restore;
+    DebugManager.flags.EnableExtendedVaFormats.set(true);
+    EXPECT_FALSE(VASurface::isSupportedFourCC(VA_FOURCC_P016));
+}
+
+TEST(VaSharingFunctions, givenErrorReturnedFromVaLibWhenQuerySupportedVaImageFormatsThenSupportedFormatsAreNotSet) {
+    VASharingFunctionsMock sharingFunctions;
+    sharingFunctions.queryImageFormatsReturnStatus = VA_STATUS_ERROR_INVALID_VALUE;
+
+    sharingFunctions.querySupportedVaImageFormats(VADisplay(1));
+
+    EXPECT_EQ(0u, sharingFunctions.supportedFormats.size());
+}
+
+TEST(VaSharingFunctions, givenNoSupportedFormatsWhenQuerySupportedVaImageFormatsThenSupportedFormatsAreNotSet) {
+    VASharingFunctionsMock sharingFunctions;
+    EXPECT_EQ(0u, sharingFunctions.supportedFormats.size());
+
+    cl_mem_flags flags = CL_MEM_READ_WRITE;
+    cl_mem_object_type image_type = CL_MEM_OBJECT_IMAGE2D;
+    cl_uint numImageFormats = 0;
+    VAImageFormat vaApiFormats[10] = {};
+
+    sharingFunctions.getSupportedFormats(
+        flags,
+        image_type,
+        10,
+        vaApiFormats,
+        &numImageFormats);
+
+    EXPECT_EQ(0u, numImageFormats);
+}
+
+TEST(VaSharingFunctions, givenNumEntriesLowerThanSupportedFormatsWhenGettingSupportedFormatsThenOnlyNumEntiresAreReturned) {
+    VASharingFunctionsMock sharingFunctions;
+    VAImageFormat imageFormat = {VA_FOURCC_NV12, 1, 12};
+    sharingFunctions.supportedFormats.emplace_back(imageFormat);
+    imageFormat.fourcc = VA_FOURCC_NV21;
+    sharingFunctions.supportedFormats.emplace_back(imageFormat);
+
+    EXPECT_EQ(2u, sharingFunctions.supportedFormats.size());
+
+    cl_mem_flags flags = CL_MEM_READ_WRITE;
+    cl_mem_object_type image_type = CL_MEM_OBJECT_IMAGE2D;
+    cl_uint numImageFormats = 0;
+    VAImageFormat vaApiFormats[3] = {};
+
+    sharingFunctions.getSupportedFormats(
+        flags,
+        image_type,
+        1,
+        vaApiFormats,
+        &numImageFormats);
+
+    EXPECT_EQ(2u, numImageFormats);
+    EXPECT_EQ(static_cast<uint32_t>(VA_FOURCC_NV12), vaApiFormats[0].fourcc);
+    EXPECT_EQ(0u, vaApiFormats[1].fourcc);
+    EXPECT_EQ(0u, vaApiFormats[2].fourcc);
 }

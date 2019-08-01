@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/helpers/dispatch_info.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/kernel/kernel.h"
 #include "test.h"
 #include "unit_tests/command_queue/enqueue_copy_buffer_fixture.h"
@@ -136,7 +136,7 @@ HWTEST_F(EnqueueCopyBufferTest, addsIndirectData) {
                                                                                                      pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.srcMemObj = srcBuffer;
     dc.srcMemObj = dstBuffer;
     dc.srcOffset = {EnqueueCopyBufferTraits::srcOffset, 0, 0};
@@ -161,7 +161,7 @@ HWTEST_F(EnqueueCopyBufferTest, LoadRegisterImmediateL3CNTLREG) {
 
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferTest, WhenEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueCopyBufferAndParse<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 
@@ -229,7 +229,7 @@ HWTEST_F(EnqueueCopyBufferTest, argumentZeroShouldMatchSourceAddress) {
                                                                                                      pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.srcMemObj = srcBuffer;
     dc.dstMemObj = dstBuffer;
     dc.srcOffset = {EnqueueCopyBufferTraits::srcOffset, 0, 0};
@@ -256,7 +256,7 @@ HWTEST_F(EnqueueCopyBufferTest, argumentOneShouldMatchDestAddress) {
                                                                                                      pCmdQ->getContext(), pCmdQ->getDevice());
     ASSERT_NE(nullptr, &builder);
 
-    BuiltinDispatchInfoBuilder::BuiltinOpParams dc;
+    BuiltinOpParams dc;
     dc.srcMemObj = srcBuffer;
     dc.dstMemObj = dstBuffer;
     dc.srcOffset = {EnqueueCopyBufferTraits::srcOffset, 0, 0};

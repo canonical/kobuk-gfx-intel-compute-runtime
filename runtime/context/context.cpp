@@ -7,6 +7,7 @@
 
 #include "runtime/context/context.h"
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/command_stream/command_stream_receiver.h"
@@ -15,13 +16,12 @@
 #include "runtime/device_queue/device_queue.h"
 #include "runtime/gtpin/gtpin_notify.h"
 #include "runtime/helpers/get_info.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/helpers/string.h"
 #include "runtime/helpers/surface_formats.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/memory_manager/deferred_deleter.h"
 #include "runtime/memory_manager/memory_manager.h"
-#include "runtime/memory_manager/svm_memory_manager.h"
+#include "runtime/memory_manager/unified_memory_manager.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/platform/platform.h"
 #include "runtime/sharings/sharing.h"
@@ -89,6 +89,10 @@ void Context::overrideSpecialQueueAndDecrementRefCount(CommandQueue *commandQueu
     //decrement ref count that special queue added
     this->decRefInternal();
 };
+
+bool Context::areMultiStorageAllocationsPreffered() {
+    return this->contextType != ContextType::CONTEXT_TYPE_SPECIALIZED;
+}
 
 bool Context::createImpl(const cl_context_properties *properties,
                          const DeviceVector &inputDevices,
@@ -166,12 +170,11 @@ bool Context::createImpl(const cl_context_properties *properties,
     if (devices.size() > 0) {
         auto device = this->getDevice(0);
         this->memoryManager = device->getMemoryManager();
-        this->svmAllocsManager = new SVMAllocsManager(this->memoryManager);
+        if (device->getHardwareInfo().capabilityTable.ftrSvm) {
+            this->svmAllocsManager = new SVMAllocsManager(this->memoryManager);
+        }
         if (memoryManager->isAsyncDeleterEnabled()) {
             memoryManager->getDeferredDeleter()->addClient();
-        }
-        if (this->sharingFunctions[SharingType::VA_SHARING]) {
-            device->initMaxPowerSavingMode();
         }
     }
 

@@ -12,8 +12,10 @@ set(RUNTIME_SRCS_HELPERS_BASE
   ${CMAKE_CURRENT_SOURCE_DIR}/array_count.h
   ${CMAKE_CURRENT_SOURCE_DIR}/base_object.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/base_object.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/base_object_allocator.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/basic_math.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper_base.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper_bdw_plus.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper.h
   ${CMAKE_CURRENT_SOURCE_DIR}/built_ins_helper.h
   ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy.h
@@ -43,16 +45,17 @@ set(RUNTIME_SRCS_HELPERS_BASE
   ${CMAKE_CURRENT_SOURCE_DIR}/flush_stamp.h
   ${CMAKE_CURRENT_SOURCE_DIR}/get_info.h
   ${CMAKE_CURRENT_SOURCE_DIR}/hash.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/hardware_commands_helper.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/hardware_commands_helper.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/hardware_commands_helper_base.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/hardware_context_controller.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hardware_context_controller.h
   ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_common.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_base.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_bdw_plus.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/hw_info.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hw_info.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/kernel_commands.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/kernel_commands.inl
-  ${CMAKE_CURRENT_SOURCE_DIR}/kernel_commands_base.inl
   ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/kernel_helpers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/kmd_notify_properties.h
   ${CMAKE_CURRENT_SOURCE_DIR}/kmd_notify_properties.cpp
@@ -64,15 +67,17 @@ set(RUNTIME_SRCS_HELPERS_BASE
   ${CMAKE_CURRENT_SOURCE_DIR}/per_thread_data.h
   ${CMAKE_CURRENT_SOURCE_DIR}/pipeline_select_helper.h
   ${CMAKE_CURRENT_SOURCE_DIR}/preamble.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/preamble.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/preamble_base.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/preamble_bdw_plus.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/properties_helper.h
   ${CMAKE_CURRENT_SOURCE_DIR}/properties_helper.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/ptr_math.h
   ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/queue_helpers.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/queue_helpers.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/registered_method_dispatcher.h
   ${CMAKE_CURRENT_SOURCE_DIR}/sampler_helpers.h
   ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_base.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_bdw_plus.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/stdio.h
   ${CMAKE_CURRENT_SOURCE_DIR}/string.h
   ${CMAKE_CURRENT_SOURCE_DIR}/string_helpers.h
@@ -87,11 +92,14 @@ set(RUNTIME_SRCS_HELPERS_BASE
   ${CMAKE_CURRENT_SOURCE_DIR}/validators.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/validators.h
 )
+
+get_property(NEO_CORE_HELPERS GLOBAL PROPERTY NEO_CORE_HELPERS)
+list(APPEND RUNTIME_SRCS_HELPERS_BASE ${NEO_CORE_HELPERS})
+
 set(RUNTIME_SRCS_HELPERS_WINDOWS
   ${CMAKE_CURRENT_SOURCE_DIR}/gmm_callbacks.h
   ${CMAKE_CURRENT_SOURCE_DIR}/gmm_callbacks.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/windows/kmd_notify_properties_windows.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/wddm_helper.h
   ${CMAKE_CURRENT_SOURCE_DIR}/windows/gl_helper.h
 )
 set(RUNTIME_SRCS_HELPERS_LINUX

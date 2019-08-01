@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 
 #include "hw_cmds.h"
 #include "patch_shared.h"
@@ -88,7 +88,7 @@ struct WorkGroupSizeBase {
             (workItems[2] + workGroupSize[2] - 1) / workGroupSize[2]};
         const iOpenCL::SPatchThreadPayload threadPayload = {};
         GpgpuWalkerHelper<FamilyType>::setGpgpuWalkerThreadData(&pCmd, globalOffsets, workGroupsStart, workGroupsNum,
-                                                                workGroupSize, simdSize, dims, true, false, threadPayload);
+                                                                workGroupSize, simdSize, dims, true, false, threadPayload, 0u);
 
         //And check if it is programmed correctly
         auto numWorkItems = computeWalkerWorkItems<FamilyType>(pCmd);

@@ -5,6 +5,8 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/command_queue/command_queue_hw.h"
 #include "runtime/command_queue/gpgpu_walker.h"
@@ -15,7 +17,6 @@
 #include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/cache_policy.h"
 #include "runtime/helpers/preamble.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/graphics_allocation.h"
 #include "runtime/memory_manager/memory_manager.h"
@@ -25,7 +26,6 @@
 #include "unit_tests/fixtures/built_in_fixture.h"
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/fixtures/ult_command_stream_receiver_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/libult/create_command_stream.h"
 #include "unit_tests/libult/ult_command_stream_receiver.h"
@@ -75,7 +75,8 @@ HWTEST_F(CommandStreamReceiverFlushTaskGmockTests, givenCsrInBatchingModeThreeRe
     dispatchFlags.outOfOrderExecutionAllowed = true;
 
     EXPECT_CALL(*mockHelper, setPatchInfoData(::testing::_)).Times(10);
-    EXPECT_CALL(*mockHelper, removePatchInfoData(::testing::_)).Times(4 * mockCsr->getRequiredPipeControlSize() / sizeof(PIPE_CONTROL));
+    size_t removePatchInfoDataCount = 4 * PipeControlHelper<FamilyType>::getSizeForPipeControlWithPostSyncOperation() / sizeof(PIPE_CONTROL);
+    EXPECT_CALL(*mockHelper, removePatchInfoData(::testing::_)).Times(static_cast<int>(removePatchInfoDataCount));
     EXPECT_CALL(*mockHelper, registerCommandChunk(::testing::_)).Times(4);
     EXPECT_CALL(*mockHelper, registerBatchBufferStartAddress(::testing::_, ::testing::_)).Times(3);
 

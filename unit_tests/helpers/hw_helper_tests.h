@@ -11,17 +11,9 @@
 #include "runtime/helpers/hw_helper.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
-#include "unit_tests/helpers/hw_info_helper.h"
 
 using namespace NEO;
 
-class HwHelperFixture : public DeviceFixture {
-  protected:
-    void SetUp();
-    void TearDown();
-    HwInfoHelper hwInfoHelper;
-};
-
-using HwHelperTest = Test<HwHelperFixture>;
+using HwHelperTest = Test<DeviceFixture>;
 
 void testDefaultImplementationOfSetupHardwareCapabilities(HwHelper &hwHelper, const HardwareInfo &hwInfo);

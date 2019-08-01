@@ -8,6 +8,7 @@
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/event/user_event.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "test.h"
 #include "unit_tests/command_queue/command_enqueue_fixture.h"
 #include "unit_tests/gen_common/gen_cmd_parse.h"
@@ -185,11 +186,16 @@ HWTEST_F(BarrierTest, eventWithWaitDependenciesShouldSync) {
         &event);
     ASSERT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, event);
-    auto pEvent = (Event *)event;
+    auto pEvent = castToObject<Event>(event);
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
 
     // in this case only cmdQ raises the taskLevel why csr stay intact
     EXPECT_EQ(8u, pCmdQ->taskLevel);
-    EXPECT_EQ(7u, commandStreamReceiver.peekTaskLevel());
+    if (csr.peekTimestampPacketWriteEnabled()) {
+        EXPECT_EQ(8u, commandStreamReceiver.peekTaskLevel());
+    } else {
+        EXPECT_EQ(7u, commandStreamReceiver.peekTaskLevel());
+    }
     EXPECT_EQ(pCmdQ->taskLevel, pEvent->taskLevel);
     EXPECT_EQ(8u, pEvent->taskLevel);
 
@@ -214,10 +220,17 @@ HWTEST_F(BarrierTest, givenNotBlockedCommandQueueAndEnqueueBarrierWithWaitlistRe
         eventWaitList,
         &event);
 
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
+
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(latestTaskCountWaitedBeforeEnqueue, this->pCmdQ->latestTaskCountWaited);
-    auto pEvent = (Event *)event;
-    EXPECT_EQ(17u, pEvent->peekTaskCount());
+    auto pEvent = castToObject<Event>(event);
+
+    if (csr.peekTimestampPacketWriteEnabled()) {
+        EXPECT_EQ(csr.peekTaskCount(), pEvent->peekTaskCount());
+    } else {
+        EXPECT_EQ(17u, pEvent->peekTaskCount());
+    }
     EXPECT_TRUE(pEvent->updateStatusAndCheckCompletion());
     delete pEvent;
 }
@@ -241,9 +254,8 @@ HWTEST_F(BarrierTest, givenBlockedCommandQueueAndEnqueueBarrierWithWaitlistRetur
     event2.setStatus(CL_COMPLETE);
     clReleaseEvent(event);
 }
-#include "runtime/helpers/kernel_commands.h"
 
-HWTEST_F(BarrierTest, givenEmptyCommandStreamAndBlockedBarrierCommandWhenUserEventIsSignaledThenNewCommandStreamIsAcquired) {
+HWTEST_F(BarrierTest, givenEmptyCommandStreamAndBlockedBarrierCommandWhenUserEventIsSignaledThenNewCommandStreamIsNotAcquired) {
     UserEvent event2(&pCmdQ->getContext());
     cl_event eventWaitList[] =
         {
@@ -276,7 +288,7 @@ HWTEST_F(BarrierTest, givenEmptyCommandStreamAndBlockedBarrierCommandWhenUserEve
 
     EXPECT_EQ(0u, commandStreamStart);
     EXPECT_GT(commandStreamStart2, 0u);
-    EXPECT_NE(commandStreamBuffer2, commandStreamBuffer);
+    EXPECT_EQ(commandStreamBuffer2, commandStreamBuffer);
     EXPECT_GE(commandStream.getMaxAvailableSpace(), commandStream.getMaxAvailableSpace());
 
     clReleaseEvent(event);

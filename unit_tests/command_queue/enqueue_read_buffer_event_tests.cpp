@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/event/event.h"
 #include "unit_tests/fixtures/buffer_fixture.h"
 #include "unit_tests/fixtures/hello_world_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 
 #include "gtest/gtest.h"
 
@@ -35,6 +35,7 @@ TEST_F(EnqueueReadBuffer, eventShouldBeReturned) {
         offset,
         size,
         pDestMemory,
+        nullptr,
         numEventsInWaitList,
         eventWaitList,
         &event);
@@ -85,6 +86,7 @@ TEST_F(EnqueueReadBuffer, eventReturnedShouldBeMaxOfInputEventsAndCmdQPlus1) {
         offset,
         size,
         pDestMemory,
+        nullptr,
         numEventsInWaitList,
         eventWaitList,
         &event);
@@ -123,6 +125,7 @@ TEST_F(EnqueueReadBuffer, givenInOrderQueueAndForcedCpuCopyOnReadBufferAndDstPtr
                                       0,
                                       size,
                                       ptr,
+                                      nullptr,
                                       numEventsInWaitList,
                                       eventWaitList,
                                       &event);
@@ -155,6 +158,7 @@ TEST_F(EnqueueReadBuffer, givenInOrderQueueAndForcedCpuCopyOnReadBufferAndDstPtr
                                       0,
                                       size,
                                       ptr,
+                                      nullptr,
                                       0,
                                       nullptr,
                                       &event);
@@ -197,6 +201,7 @@ TEST_F(EnqueueReadBuffer, givenOutOfOrderQueueAndForcedCpuCopyOnReadBufferAndDst
                                         0,
                                         size,
                                         ptr,
+                                        nullptr,
                                         numEventsInWaitList,
                                         eventWaitList,
                                         &event);
@@ -233,6 +238,7 @@ TEST_F(EnqueueReadBuffer, givenInOrderQueueAndForcedCpuCopyOnReadBufferAndEventN
                                       0,
                                       size,
                                       mem,
+                                      nullptr,
                                       numEventsInWaitList,
                                       eventWaitList,
                                       &event);
@@ -277,6 +283,7 @@ TEST_F(EnqueueReadBuffer, givenInOrderQueueAndDisabledSupportCpuCopiesAndDstPtrE
                                       0,
                                       size,
                                       ptr,
+                                      nullptr,
                                       numEventsInWaitList,
                                       eventWaitList,
                                       &event);
@@ -313,11 +320,13 @@ TEST_F(EnqueueReadBuffer, givenOutOfOrderQueueAndDisabledSupportCpuCopiesAndDstP
     cl_event event = nullptr;
     auto srcBuffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
     void *ptr = srcBuffer->getCpuAddressForMemoryTransfer();
+
     retVal = pCmdOOQ->enqueueReadBuffer(srcBuffer.get(),
                                         blockingRead,
                                         0,
                                         size,
                                         ptr,
+                                        nullptr,
                                         numEventsInWaitList,
                                         eventWaitList,
                                         &event);
@@ -325,9 +334,14 @@ TEST_F(EnqueueReadBuffer, givenOutOfOrderQueueAndDisabledSupportCpuCopiesAndDstP
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, event);
 
-    auto pEvent = (Event *)event;
-    EXPECT_EQ(19u, pEvent->taskLevel);
-    EXPECT_EQ(19u, pCmdOOQ->taskLevel);
+    auto pEvent = castToObject<Event>(event);
+    if (pCmdOOQ->getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
+        EXPECT_EQ(taskLevelEvent2 + 1, pCmdOOQ->taskLevel);
+        EXPECT_EQ(taskLevelEvent2 + 1, pEvent->taskLevel);
+    } else {
+        EXPECT_EQ(19u, pCmdOOQ->taskLevel);
+        EXPECT_EQ(19u, pEvent->taskLevel);
+    }
 
     pEvent->release();
 }

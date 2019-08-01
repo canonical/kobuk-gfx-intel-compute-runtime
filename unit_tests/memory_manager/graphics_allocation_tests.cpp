@@ -5,6 +5,7 @@
  *
  */
 
+#include "runtime/helpers/array_count.h"
 #include "unit_tests/mocks/mock_graphics_allocation.h"
 
 #include "gtest/gtest.h"
@@ -114,27 +115,68 @@ TEST(GraphicsAllocationTest, givenResidentGraphicsAllocationWhenCheckIfResidency
     EXPECT_TRUE(graphicsAllocation.isResidencyTaskCountBelow(currentResidencyTaskCount + 1u, 0u));
 }
 
-TEST(GraphicsAllocationTest, whenAllocationTypeIsLinearStreamThenCpuAccessIsRequired) {
-    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::LINEAR_STREAM));
+TEST(GraphicsAllocationTest, whenAllocationTypeIsCommandBufferThenCpuAccessIsRequired) {
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::COMMAND_BUFFER));
 }
 
-TEST(GraphicsAllocationTest, whenAllocationTypeIsKernelIsaThenCpuAccessIsNotRequired) {
-    EXPECT_FALSE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::KERNEL_ISA));
+TEST(GraphicsAllocationTest, whenAllocationTypeIsConstantSurfaceThenCpuAccessIsRequired) {
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::CONSTANT_SURFACE));
+}
+
+TEST(GraphicsAllocationTest, whenAllocationTypeIsGlobalSurfaceThenCpuAccessIsRequired) {
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::GLOBAL_SURFACE));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsInternalHeapThenCpuAccessIsRequired) {
     EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::INTERNAL_HEAP));
 }
 
-TEST(GraphicsAllocationTest, whenAllocationTypeIsTimestampPacketThenCpuAccessIsRequired) {
-    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER));
+TEST(GraphicsAllocationTest, whenAllocationTypeIsKernelIsaThenCpuAccessIsNotRequired) {
+    EXPECT_FALSE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::KERNEL_ISA));
 }
 
-TEST(GraphicsAllocationTest, whenAllocationTypeIsCommandBufferThenCpuAccessIsRequired) {
-    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::COMMAND_BUFFER));
+TEST(GraphicsAllocationTest, whenAllocationTypeIsLinearStreamThenCpuAccessIsRequired) {
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::LINEAR_STREAM));
+}
+
+TEST(GraphicsAllocationTest, whenAllocationTypeIsPipeThenCpuAccessIsRequired) {
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::PIPE));
+}
+
+TEST(GraphicsAllocationTest, whenAllocationTypeIsTimestampPacketThenCpuAccessIsRequired) {
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER));
 }
 
 TEST(GraphicsAllocationTest, givenDefaultAllocationWhenGettingNumHandlesThenOneIsReturned) {
     MockGraphicsAllocation graphicsAllocation;
     EXPECT_EQ(1u, graphicsAllocation.getNumHandles());
+}
+
+TEST(GraphicsAllocationTest, givenDefaultGraphicsAllocationWhenInternalHandleIsBeingObtainedThenZeroIsReturned) {
+    MockGraphicsAllocation graphicsAllocation;
+    EXPECT_EQ(0llu, graphicsAllocation.peekInternalHandle(nullptr));
+}
+
+TEST(GraphicsAllocationTest, givenGraphicsAllocationWhenQueryingUsedPageSizeThenCorrectSizeForMemoryPoolUsedIsReturned) {
+
+    MemoryPool::Type page4kPools[] = {MemoryPool::MemoryNull,
+                                      MemoryPool::System4KBPages,
+                                      MemoryPool::System4KBPagesWith32BitGpuAddressing,
+                                      MemoryPool::SystemCpuInaccessible};
+
+    for (size_t i = 0; i < arrayCount(page4kPools); i++) {
+        MockGraphicsAllocation graphicsAllocation(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0u, 0u, 1, page4kPools[i], false);
+
+        EXPECT_EQ(MemoryConstants::pageSize, graphicsAllocation.getUsedPageSize());
+    }
+
+    MemoryPool::Type page64kPools[] = {MemoryPool::System64KBPages,
+                                       MemoryPool::System64KBPagesWith32BitGpuAddressing,
+                                       MemoryPool::LocalMemory};
+
+    for (size_t i = 0; i < arrayCount(page64kPools); i++) {
+        MockGraphicsAllocation graphicsAllocation(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0u, 0u, 1, page64kPools[i], false);
+
+        EXPECT_EQ(MemoryConstants::pageSize64k, graphicsAllocation.getUsedPageSize());
+    }
 }

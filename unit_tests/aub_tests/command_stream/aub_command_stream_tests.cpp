@@ -5,9 +5,9 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/command_stream/aub_command_stream_receiver_hw.h"
 #include "runtime/command_stream/command_stream_receiver_hw.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/os_interface/os_context.h"
 #include "test.h"
 #include "unit_tests/command_queue/command_queue_fixture.h"
@@ -102,7 +102,7 @@ HWTEST_F(AUBcommandstreamTests, testNoopIdVecs) {
 TEST_F(AUBcommandstreamTests, makeResident) {
     uint8_t buffer[0x10000];
     size_t size = sizeof(buffer);
-    auto &commandStreamReceiver = pDevice->getCommandStreamReceiver();
+    auto &commandStreamReceiver = pDevice->getGpgpuCommandStreamReceiver();
     auto graphicsAllocation = createResidentAllocationAndStoreItInCsr(buffer, size);
     ResidencyContainer allocationsForResidency = {graphicsAllocation};
     commandStreamReceiver.processResidency(allocationsForResidency);

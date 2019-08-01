@@ -5,9 +5,9 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "test.h"
@@ -207,7 +207,10 @@ HWTEST_P(AubFillImage, simple) {
     size_t imgRegion[] = {testWidth, testHeight, testDepth};
 
     auto dstMemory = new uint8_t[sizeMemory];
-    pCmdQ->enqueueReadImage(image, CL_TRUE, imgOrigin, imgRegion, 0, 0, dstMemory, 0, nullptr, nullptr);
+    retVal = pCmdQ->enqueueReadImage(image, CL_FALSE, imgOrigin, imgRegion, 0, 0, dstMemory, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = pCmdQ->flush();
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     size_t slicePitch = image->getHostPtrSlicePitch();

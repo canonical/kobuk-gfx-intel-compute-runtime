@@ -5,9 +5,9 @@
  *
  */
 
+#include "core/helpers/ptr_math.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/ptr_math.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "test.h"
@@ -182,7 +182,10 @@ HWTEST_P(AUBMapImage, MapUpdateUnmapVerify) {
     uint8_t *readMemory = new uint8_t[srcImage->getSize()];
     size_t imgOrigin[] = {0, 0, 0};
     size_t imgRegion[] = {testWidth, testHeight, testDepth};
-    retVal = pCmdQ->enqueueReadImage(srcImage, CL_TRUE, imgOrigin, imgRegion, inputRowPitch, inputSlicePitch, readMemory, 0, nullptr, nullptr);
+    retVal = pCmdQ->enqueueReadImage(srcImage, CL_FALSE, imgOrigin, imgRegion, inputRowPitch, inputSlicePitch, readMemory, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = pCmdQ->flush();
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     srcMemoryStart = srcMemory;

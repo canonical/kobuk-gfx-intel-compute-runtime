@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/compiler_interface/compiler_interface.h"
 #include "runtime/helpers/aligned_memory.h"
@@ -17,9 +18,7 @@
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/fixtures/image_fixture.h"
 #include "unit_tests/fixtures/memory_management_fixture.h"
-#include "unit_tests/helpers/debug_manager_state_restore.h"
 #include "unit_tests/helpers/kernel_binary_helper.h"
-#include "unit_tests/helpers/memory_management.h"
 #include "unit_tests/mem_obj/image_compression_fixture.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_gmm.h"
@@ -371,10 +370,10 @@ TEST(TestCreateImageUseHostPtr, CheckMemoryAllocationForDifferenHostPtrAlignment
     imageDesc.image_slice_pitch = 0;
 
     void *pageAlignedPointer = alignedMalloc(imageDesc.image_row_pitch * height * 1 * 4 + 256, 4096);
-    void *hostPtr[] = {reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pageAlignedPointer) + 16),   // 16 - byte alignment
-                       reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pageAlignedPointer) + 32),   // 32 - byte alignment
-                       reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pageAlignedPointer) + 64),   // 64 - byte alignment
-                       reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pageAlignedPointer) + 128)}; // 128 - byte alignment
+    void *hostPtr[] = {ptrOffset(pageAlignedPointer, 16),   // 16 - byte alignment
+                       ptrOffset(pageAlignedPointer, 32),   // 32 - byte alignment
+                       ptrOffset(pageAlignedPointer, 64),   // 64 - byte alignment
+                       ptrOffset(pageAlignedPointer, 128)}; // 128 - byte alignment
 
     bool result[] = {false,
                      false,
@@ -432,6 +431,7 @@ TEST(TestCreateImageUseHostPtr, givenZeroCopyImageValuesWhenUsingHostPtrThenZero
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_TRUE(image->isMemObjZeroCopy());
     EXPECT_EQ(hostPtr, image->getGraphicsAllocation()->getUnderlyingBuffer());
+    EXPECT_NE(nullptr, image->getMapAllocation());
 
     alignedFree(hostPtr);
 }
@@ -473,6 +473,16 @@ TEST_P(CreateImageNoHostPtr, withImageGraphicsAllocationReportsImageType) {
     EXPECT_EQ(isImageWritable, allocation->isMemObjectsAllocationWithWritableFlags());
 
     delete image;
+}
+
+TEST_P(CreateImageNoHostPtr, whenImageIsReadOnlyThenFlushL3IsNotRequired) {
+    auto image = clUniquePtr(createImageWithFlags(flags));
+
+    EXPECT_NE(nullptr, image);
+
+    auto allocation = image->getGraphicsAllocation();
+    auto isReadOnly = isValueSet(flags, CL_MEM_READ_ONLY);
+    EXPECT_NE(isReadOnly, allocation->isFlushL3Required());
 }
 
 // Parameterized test that tests image creation with all flags that should be
@@ -620,7 +630,7 @@ TEST_P(CreateImageHostPtr, failedAllocationInjection) {
         // System under test
         image = createImage(retVal);
 
-        if (nonfailingAllocation == failureIndex) {
+        if (MemoryManagement::nonfailingAllocation == failureIndex) {
             EXPECT_EQ(CL_SUCCESS, retVal);
             EXPECT_NE(nullptr, image);
         } else {
@@ -1103,6 +1113,35 @@ TEST(ImageTest, givenNullHostPtrWhenIsCopyRequiredIsCalledThenFalseIsReturned) {
     EXPECT_FALSE(Image::isCopyRequired(imgInfo, nullptr));
 }
 
+TEST(ImageTest, givenClMemForceLinearStorageSetWhenCreateImageThenDisallowTiling) {
+    cl_int retVal = CL_SUCCESS;
+    MockContext context;
+    cl_image_desc imageDesc = {};
+    imageDesc.image_width = 4096;
+    imageDesc.image_height = 1;
+    imageDesc.image_depth = 1;
+    imageDesc.image_type = CL_MEM_OBJECT_IMAGE3D;
+
+    cl_image_format imageFormat = {};
+    imageFormat.image_channel_data_type = CL_UNSIGNED_INT8;
+    imageFormat.image_channel_order = CL_R;
+
+    cl_mem_flags flags = CL_MEM_READ_WRITE | CL_MEM_FORCE_LINEAR_STORAGE_INTEL;
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
+
+    auto image = std::unique_ptr<Image>(Image::create(
+        &context,
+        flags,
+        surfaceFormat,
+        &imageDesc,
+        nullptr,
+        retVal));
+
+    EXPECT_FALSE(image->isTiledImage);
+    EXPECT_NE(nullptr, image);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
 TEST(ImageTest, givenAllowedTilingWhenIsCopyRequiredIsCalledThenTrueIsReturned) {
     ImageInfo imgInfo{};
     cl_image_desc imageDesc{};
@@ -1270,7 +1309,7 @@ TEST(ImageTest, givenClMemCopyHostPointerPassedToImageCreateWhenAllocationIsNotI
     EXPECT_CALL(*memoryManager, allocateGraphicsMemoryInDevicePool(::testing::_, ::testing::_))
         .WillRepeatedly(::testing::Invoke(memoryManager, &GMockMemoryManagerFailFirstAllocation::baseAllocateGraphicsMemoryInDevicePool));
 
-    std::unique_ptr<MockDevice> device(MockDevice::create<MockDevice>(*platformDevices, executionEnvironment, 0));
+    std::unique_ptr<MockDevice> device(MockDevice::create<MockDevice>(executionEnvironment, 0));
 
     MockContext ctx(device.get());
     EXPECT_CALL(*memoryManager, allocateGraphicsMemoryInDevicePool(::testing::_, ::testing::_))
@@ -1278,7 +1317,7 @@ TEST(ImageTest, givenClMemCopyHostPointerPassedToImageCreateWhenAllocationIsNotI
         .WillRepeatedly(::testing::Invoke(memoryManager, &GMockMemoryManagerFailFirstAllocation::baseAllocateGraphicsMemoryInDevicePool));
 
     char memory[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-    auto taskCount = device->getCommandStreamReceiver().peekLatestFlushedTaskCount();
+    auto taskCount = device->getGpgpuCommandStreamReceiver().peekLatestFlushedTaskCount();
 
     cl_int retVal = 0;
     cl_mem_flags flags = CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR;
@@ -1298,7 +1337,7 @@ TEST(ImageTest, givenClMemCopyHostPointerPassedToImageCreateWhenAllocationIsNotI
     std::unique_ptr<Image> image(Image::create(&ctx, flags, surfaceFormat, &imageDesc, memory, retVal));
     EXPECT_NE(nullptr, image);
 
-    auto taskCountSent = device->getCommandStreamReceiver().peekLatestFlushedTaskCount();
+    auto taskCountSent = device->getGpgpuCommandStreamReceiver().peekLatestFlushedTaskCount();
     EXPECT_LT(taskCount, taskCountSent);
 }
 
@@ -1427,9 +1466,9 @@ HWTEST_F(HwImageTest, givenImageHwWhenSettingCCSParamsThenSetClearColorParamsIsC
     format.image_channel_order = CL_RGBA;
 
     auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-    AllocationProperties allocProperties = MemObjHelper::getAllocationProperties(&imgInfo, true);
+    AllocationProperties allocProperties = MemObjHelper::getAllocationProperties(imgInfo, true, 0);
 
-    auto graphicsAllocation = memoryManager.allocateGraphicsMemoryInPreferredPool(allocProperties, {}, nullptr);
+    auto graphicsAllocation = memoryManager.allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
 
     SurfaceFormatInfo formatInfo = {};
     std::unique_ptr<MockImageHw<FamilyType>> mockImage(new MockImageHw<FamilyType>(&context, format, imgDesc, formatInfo, graphicsAllocation));
@@ -1450,13 +1489,17 @@ HWTEST_F(HwImageTest, givenImageHwWithUnifiedSurfaceAndMcsWhenSettingParamsForMu
     context.setMemoryManager(&memoryManager);
 
     cl_image_desc imgDesc = {};
+    imgDesc.image_height = 1;
+    imgDesc.image_width = 4;
+    imgDesc.image_depth = 1;
+    imgDesc.image_type = CL_MEM_OBJECT_IMAGE1D;
     imgDesc.num_samples = 8;
     cl_image_format format = {};
 
     auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-    AllocationProperties allocProperties = MemObjHelper::getAllocationProperties(&imgInfo, true);
+    AllocationProperties allocProperties = MemObjHelper::getAllocationProperties(imgInfo, true, 0);
 
-    auto graphicsAllocation = memoryManager.allocateGraphicsMemoryInPreferredPool(allocProperties, {}, nullptr);
+    auto graphicsAllocation = memoryManager.allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
 
     SurfaceFormatInfo formatInfo = {};
     std::unique_ptr<MockImageHw<FamilyType>> mockImage(new MockImageHw<FamilyType>(&context, format, imgDesc, formatInfo, graphicsAllocation));

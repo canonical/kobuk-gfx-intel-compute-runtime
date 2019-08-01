@@ -48,13 +48,12 @@ Pipe *Pipe::create(Context *context,
     MemoryManager *memoryManager = context->getMemoryManager();
     DEBUG_BREAK_IF(!memoryManager);
 
-    MemoryProperties memoryProperties;
-    memoryProperties.flags = flags;
+    MemoryProperties memoryProperties{flags};
     while (true) {
         auto size = static_cast<size_t>(packetSize * (maxPackets + 1) + intelPipeHeaderReservedSpace);
-        AllocationProperties allocProperties = MemObjHelper::getAllocationProperties(flags, true, size, GraphicsAllocation::AllocationType::PIPE);
-        StorageInfo storageInfo = MemObjHelper::getStorageInfo(memoryProperties);
-        GraphicsAllocation *memory = memoryManager->allocateGraphicsMemoryInPreferredPool(allocProperties, storageInfo, nullptr);
+        AllocationProperties allocProperties =
+            MemObjHelper::getAllocationProperties(memoryProperties, true, size, GraphicsAllocation::AllocationType::PIPE, false);
+        GraphicsAllocation *memory = memoryManager->allocateGraphicsMemoryWithProperties(allocProperties);
         if (!memory) {
             errcodeRet = CL_OUT_OF_HOST_MEMORY;
             break;
@@ -110,7 +109,7 @@ cl_int Pipe::getPipeInfo(cl_image_info paramName,
 }
 
 void Pipe::setPipeArg(void *memory, uint32_t patchSize) {
-    patchWithRequiredSize(memory, patchSize, (uintptr_t)getCpuAddress());
+    patchWithRequiredSize(memory, patchSize, static_cast<uintptr_t>(getGraphicsAllocation()->getGpuAddressToPatch()));
 }
 
 Pipe::~Pipe() = default;

@@ -31,7 +31,7 @@ OSTimeLinux::OSTimeLinux(OSInterface *osInterface) {
 OSTimeLinux::~OSTimeLinux(){};
 
 void OSTimeLinux::timestampTypeDetect() {
-    struct drm_i915_reg_read reg;
+    struct drm_i915_reg_read reg = {};
     int err;
 
     if (pDrm == nullptr)
@@ -68,7 +68,8 @@ bool OSTimeLinux::getCpuTime(uint64_t *timestamp) {
 }
 
 bool OSTimeLinux::getGpuTime32(uint64_t *timestamp) {
-    struct drm_i915_reg_read reg;
+    struct drm_i915_reg_read reg = {};
+
     reg.offset = TIMESTAMP_LOW_REG;
 
     if (pDrm->ioctl(DRM_IOCTL_I915_REG_READ, &reg)) {
@@ -79,7 +80,8 @@ bool OSTimeLinux::getGpuTime32(uint64_t *timestamp) {
 }
 
 bool OSTimeLinux::getGpuTime36(uint64_t *timestamp) {
-    struct drm_i915_reg_read reg;
+    struct drm_i915_reg_read reg = {};
+
     reg.offset = TIMESTAMP_LOW_REG | 1;
 
     if (pDrm->ioctl(DRM_IOCTL_I915_REG_READ, &reg)) {
@@ -90,7 +92,8 @@ bool OSTimeLinux::getGpuTime36(uint64_t *timestamp) {
 }
 
 bool OSTimeLinux::getGpuTimeSplitted(uint64_t *timestamp) {
-    struct drm_i915_reg_read reg_hi, reg_lo;
+    struct drm_i915_reg_read reg_hi = {};
+    struct drm_i915_reg_read reg_lo = {};
     uint64_t tmp_hi;
     int err = 0, loop = 3;
 
@@ -139,6 +142,18 @@ double OSTimeLinux::getHostTimerResolution() const {
 }
 
 double OSTimeLinux::getDynamicDeviceTimerResolution(HardwareInfo const &hwInfo) const {
+    if (pDrm) {
+        drm_i915_getparam_t getParam = {};
+        int frequency = 0;
+
+        getParam.param = I915_PARAM_CS_TIMESTAMP_FREQUENCY;
+        getParam.value = &frequency;
+        auto error = pDrm->ioctl(DRM_IOCTL_I915_GETPARAM, &getParam);
+
+        if (!error) {
+            return 1000000000.0 / frequency;
+        }
+    }
     return OSTime::getDeviceTimerResolution(hwInfo);
 }
 

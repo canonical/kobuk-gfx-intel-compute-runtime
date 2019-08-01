@@ -23,7 +23,7 @@ hide_subdir(builtin_kernels_simulation)
 hide_subdir(dll)
 hide_subdir(instrumentation)
 
-add_library(${NEO_STATIC_LIB_NAME} STATIC
+add_library(${NEO_STATIC_LIB_NAME} STATIC EXCLUDE_FROM_ALL
   ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
   ${CMAKE_CURRENT_SOURCE_DIR}/enable_gens.cmake
   $<TARGET_OBJECTS:${BIKSIM_LIB_NAME}>
@@ -65,6 +65,7 @@ target_include_directories(${NEO_STATIC_LIB_NAME} PUBLIC
   ${GMM_INCLUDE_PATHS}
   ${HW_SRC_INCLUDE_PATH}
   ${IGC_OCL_ADAPTOR_DIR}
+  ${VISA_INCLUDE_DIR}
   ${IGDRCL__IGC_INCLUDE_DIR}
   ${THIRD_PARTY_DIR}
   ${UMKM_SHAREDDATA_INCLUDE_PATHS}
@@ -87,10 +88,6 @@ else()
 endif()
 
 target_compile_definitions(${NEO_STATIC_LIB_NAME} PUBLIC GMM_LIB_DLL DEFAULT_PLATFORM=${DEFAULT_SUPPORTED_PLATFORM})
-
-if(INSTRUMENTATION_LIB_NAME)
-  add_dependencies(${NEO_STATIC_LIB_NAME} ${INSTRUMENTATION_LIB_NAME})
-endif()
 
 list(APPEND LIB_FLAGS_DEFINITIONS -DCIF_HEADERS_ONLY_BUILD ${SUPPORTED_GEN_FLAGS_DEFINITONS})
 
@@ -127,6 +124,15 @@ if(${GENERATE_EXECUTABLE})
     ${IGDRCL_SOURCE_DIR}/runtime/aub/aub_stream_interface.cpp
   )
 
+  if(UNIX)
+    install(FILES
+      $<TARGET_FILE:${NEO_DYNAMIC_LIB_NAME}>
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/intel-opencl
+      COMPONENT opencl
+    )
+    set_property(GLOBAL APPEND PROPERTY NEO_COMPONENTS_LIST "opencl")
+  endif()
+
   if(TARGET ${GMMUMD_LIB_NAME})
     add_dependencies(${NEO_DYNAMIC_LIB_NAME} ${GMMUMD_LIB_NAME})
   endif()
@@ -140,15 +146,10 @@ if(${GENERATE_EXECUTABLE})
 
   add_subdirectory(dll)
 
-  if(HAVE_INSTRUMENTATION)
-    target_link_libraries(${NEO_DYNAMIC_LIB_NAME} ${INSTRUMENTATION_LIB_NAME})
-  endif()
-
   target_link_libraries(${NEO_DYNAMIC_LIB_NAME} ${NEO_STATIC_LIB_NAME} ${IGDRCL_EXTRA_LIBS})
 
   target_include_directories(${NEO_DYNAMIC_LIB_NAME} BEFORE PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
-    ${INSTRUMENTATION_INCLUDE_PATH}
     ${AUB_STREAM_DIR}/..
   )
 
@@ -177,7 +178,7 @@ if(${GENERATE_EXECUTABLE})
   create_project_source_tree_with_exports(${NEO_DYNAMIC_LIB_NAME} "${EXPORTS_FILENAME}")
 endif(${GENERATE_EXECUTABLE})
 
-create_project_source_tree(${NEO_STATIC_LIB_NAME})
+create_project_source_tree(${NEO_STATIC_LIB_NAME} ${IGDRCL_SOURCE_DIR})
 
 if(UNIX AND NOT (TARGET clang-tidy))
   add_custom_target(clang-tidy

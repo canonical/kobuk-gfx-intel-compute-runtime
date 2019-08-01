@@ -15,7 +15,9 @@ if(UNIX)
   #disable fortify source as this requires optimization to be on
   string(REPLACE "-D_FORTIFY_SOURCE=2" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O0")
+  set(CMAKE_CXX_FLAGS_RELEASEINTERNAL "${CMAKE_CXX_FLAGS_RELEASEINTERNAL} -O0")
   set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O0")
+  set(CMAKE_C_FLAGS_RELEASEINTERNAL "${CMAKE_C_FLAGS_RELEASEINTERNAL} -O0")
 endif()
 
 if(WIN32)
@@ -79,7 +81,7 @@ set(NEO_IGDRCL_TESTS__TARGET_OBJECTS
 )
 
 if(DEFINED AUB_STREAM_DIR)
-  add_library (aub_stream_mock_lib OBJECT
+  add_library (aub_stream_mock_lib OBJECT EXCLUDE_FROM_ALL
     ${IGDRCL_SOURCE_DIR}/unit_tests/aub_stream_mocks/aub_stream_interface_mock.cpp
   )
   list(APPEND NEO_IGDRCL_TESTS__TARGET_OBJECTS
@@ -102,6 +104,11 @@ if(NOT GTEST_REPEAT)
   set(GTEST_REPEAT 1 CACHE STRING "Google test iterations")
 endif()
 set(GTEST_REPEAT ${GTEST_REPEAT} CACHE STRING "Google test iterations")
+
+if(NOT DEFINED GTEST_XML_OUTPUT_DIR)
+  set(GTEST_XML_OUTPUT_DIR "test_logs")
+endif()
+set(GTEST_XML_OUTPUT_DIR ${GTEST_XML_OUTPUT_DIR} CACHE STRING "Google Test xml output file location")
 
 message(STATUS "GTest repeat count set to ${GTEST_REPEAT}")
 if(NOT GTEST_SHUFFLE)
@@ -138,6 +145,7 @@ target_include_directories(igdrcl_tests PRIVATE
   ${IGDRCL_SOURCE_DIR}/unit_tests/mocks${BRANCH_DIR_SUFFIX}
   ${ENGINE_NODE_DIR}
   ${KHRONOS_GL_HEADERS_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_link_libraries(igdrcl_tests gmock-gtest ${IGDRCL_EXTRA_LIBS})
@@ -372,7 +380,7 @@ function(gen_run_unit_tests product slices subslices eu_per_ss)
     POST_BUILD
     COMMAND WORKING_DIRECTORY ${TargetDir}
     COMMAND echo Running igdrcl_tests ${target} ${slices}x${subslices}x${eu_per_ss} in ${TargetDir}/${product}
-    COMMAND igdrcl_tests --product ${product} --slices ${slices} --subslices ${subslices} --eu_per_ss ${eu_per_ss} ${GTEST_EXCEPTION_OPTIONS} --gtest_repeat=${GTEST_REPEAT} ${GTEST_SHUFFLE} ${IGDRCL_TESTS_LISTENER_OPTION} ${GTEST_FILTER_OPTION}
+    COMMAND ${CMAKE_COMMAND} -E env GTEST_OUTPUT=xml:${GTEST_XML_OUTPUT_DIR}/test_details_${product}_${slices}_${subslices}_${eu_per_ss}.xml $<TARGET_FILE:igdrcl_tests> --product ${product} --slices ${slices} --subslices ${subslices} --eu_per_ss ${eu_per_ss} ${GTEST_EXCEPTION_OPTIONS} --gtest_repeat=${GTEST_REPEAT} ${GTEST_SHUFFLE} ${IGDRCL_TESTS_LISTENER_OPTION} ${GTEST_FILTER_OPTION}
   )
   add_dependencies(run_unit_tests run_${product}_unit_tests)
 endfunction()
@@ -448,16 +456,19 @@ macro(macro_for_each_gen)
 endmacro()
 apply_macro_for_each_gen("TESTED")
 add_subdirectories()
-create_project_source_tree(igdrcl_tests ${IGDRCL_SOURCE_DIR}/runtime)
+add_dependencies(unit_tests mock_gmm)
+add_dependencies(igdrcl_tests mock_gmm)
+create_project_source_tree(igdrcl_tests ${IGDRCL_SOURCE_DIR}/runtime ${IGDRCL_SOURCE_DIR})
 
-if(MSVC)
-  set(UltPchHeader "${CMAKE_CURRENT_SOURCE_DIR}/igdrcl_tests_pch.h")
-  set(UltPchSource "${CMAKE_CURRENT_SOURCE_DIR}/igdrcl_tests_pch.cpp")
+set(UltPchHeader "${CMAKE_CURRENT_SOURCE_DIR}/igdrcl_tests_pch.h")
+set(UltPchSource "${CMAKE_CURRENT_SOURCE_DIR}/igdrcl_tests_pch.cpp")
+get_target_property(UltSources igdrcl_tests SOURCES)
+
+if(MSVC AND NOT DISABLE_ULT_PCH_WIN)
   set(UltPchBinary "${CMAKE_CURRENT_BINARY_DIR}/igdrcl_tests_pch.pch")
 
   set(IGDRCL_SRCS_ult_pch ${UltPchSource} ${UltPchHeader})
-
-  get_target_property(UltSources igdrcl_tests SOURCES)
+  target_sources(igdrcl_tests PRIVATE ${IGDRCL_SRCS_ult_pch})
 
   set_source_files_properties(${UltSources}
     PROPERTIES COMPILE_FLAGS "/Yu${UltPchHeader} /FI${UltPchHeader} /Fp${UltPchBinary}"
@@ -466,8 +477,36 @@ if(MSVC)
   set_source_files_properties(${UltPchSource}
     PROPERTIES COMPILE_FLAGS "/Yc${UltPchHeader} /FI${UltPchHeader} /Fp${UltPchBinary}"
     OBJECT_OUTPUTS "${UltPchBinary}")
+elseif(USE_ULT_PCH)
+  set(UltPchHeaderInBuildDir "${CMAKE_CURRENT_BINARY_DIR}/igdrcl_tests_pch.h")
+  set(UltPchBinaryGch "${UltPchHeaderInBuildDir}.gch")
+  set(UltPchBinary "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/igdrcl_ult_pch.dir/igdrcl_tests_pch.h.o")
 
-  target_sources(igdrcl_tests PRIVATE ${IGDRCL_SRCS_ult_pch})
+  add_library(igdrcl_ult_pch STATIC EXCLUDE_FROM_ALL ${UltPchHeader})
+  add_dependencies(igdrcl_tests igdrcl_ult_pch)
+
+  target_include_directories(igdrcl_ult_pch PRIVATE
+    $<TARGET_PROPERTY:${NEO_MOCKABLE_LIB_NAME},INTERFACE_INCLUDE_DIRECTORIES>
+    $<TARGET_PROPERTY:igdrcl_tests,INCLUDE_DIRECTORIES>)
+  target_compile_definitions(igdrcl_ult_pch PRIVATE $<TARGET_PROPERTY:${NEO_MOCKABLE_LIB_NAME},INTERFACE_COMPILE_DEFINITIONS>)
+
+  target_include_directories(igdrcl_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+
+  if(NOT USE_ASAN)
+    set_source_files_properties(${UltSources}
+      PROPERTIES COMPILE_FLAGS "-include ${UltPchHeaderInBuildDir} -msse4"
+      OBJECT_DEPENDS ${UltPchBinaryGch})
+  endif()
+
+  set_source_files_properties(${UltPchHeader}
+    PROPERTIES LANGUAGE "CXX"
+    COMPILE_FLAGS "-x c++-header -msse4 -gdwarf-2")
+
+  add_custom_command(
+    OUTPUT ${UltPchBinaryGch}
+    COMMAND cp "${UltPchHeader}" "${UltPchHeaderInBuildDir}"
+    COMMAND cp "${UltPchBinary}" "${UltPchBinaryGch}"
+    DEPENDS ${UltPchBinary})
 endif()
 
 # Dont add any sources below PCH logic. This is to keep PCH dependencies correctly without creating new target
