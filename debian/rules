@@ -10,4 +10,3 @@ override_dh_auto_configure:
 
 override_dh_install:
 	dh_install
-	rm -r debian/intel-opencl-icd/etc/ld.so.conf.d
