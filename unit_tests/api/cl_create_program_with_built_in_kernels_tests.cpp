@@ -8,6 +8,7 @@
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/compiler_interface/compiler_interface.h"
 #include "runtime/context/context.h"
+#include "runtime/device/device.h"
 #include "runtime/helpers/base_object.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/program/program.h"
@@ -18,6 +19,15 @@
 using namespace NEO;
 
 typedef api_tests clCreateProgramWithBuiltInKernelsTests;
+
+struct clCreateProgramWithBuiltInVmeKernelsTests : clCreateProgramWithBuiltInKernelsTests {
+    void SetUp() override {
+        clCreateProgramWithBuiltInKernelsTests::SetUp();
+        if (!castToObject<Device>(devices[0])->getHardwareInfo().capabilityTable.supportsVme) {
+            GTEST_SKIP();
+        }
+    }
+};
 
 namespace ULT {
 
@@ -67,7 +77,7 @@ TEST_F(clCreateProgramWithBuiltInKernelsTests, GivenNoKernelsAndNoReturnWhenCrea
     EXPECT_EQ(nullptr, program);
 }
 
-TEST_F(clCreateProgramWithBuiltInKernelsTests, GivenValidMediaKernelsWhenCreatingProgramWithBuiltInKernelsThenProgramIsSuccessfullyCreated) {
+TEST_F(clCreateProgramWithBuiltInVmeKernelsTests, GivenValidMediaKernelsWhenCreatingProgramWithBuiltInKernelsThenProgramIsSuccessfullyCreated) {
     cl_int retVal = CL_SUCCESS;
 
     auto pDev = castToObject<Device>(*devices);
@@ -111,7 +121,7 @@ TEST_F(clCreateProgramWithBuiltInKernelsTests, GivenValidMediaKernelsWhenCreatin
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
-TEST_F(clCreateProgramWithBuiltInKernelsTests, GivenValidMediaKernelsWithOptionsWhenCreatingProgramWithBuiltInKernelsThenProgramIsSuccessfullyCreatedWithThoseOptions) {
+TEST_F(clCreateProgramWithBuiltInVmeKernelsTests, GivenValidMediaKernelsWithOptionsWhenCreatingProgramWithBuiltInKernelsThenProgramIsSuccessfullyCreatedWithThoseOptions) {
     cl_int retVal = CL_SUCCESS;
 
     auto pDev = castToObject<Device>(*devices);
@@ -137,7 +147,7 @@ TEST_F(clCreateProgramWithBuiltInKernelsTests, GivenValidMediaKernelsWithOptions
     clReleaseProgram(program);
 }
 
-TEST_F(clCreateProgramWithBuiltInKernelsTests, GivenVmeBlockMotionEstimateKernelWhenCreatingProgramWithBuiltInKernelsThenCorrectDispatchBuilderAndFrontendKernelIsCreated) {
+TEST_F(clCreateProgramWithBuiltInVmeKernelsTests, GivenVmeBlockMotionEstimateKernelWhenCreatingProgramWithBuiltInKernelsThenCorrectDispatchBuilderAndFrontendKernelIsCreated) {
     cl_int retVal = CL_SUCCESS;
 
     auto pDev = castToObject<Device>(*devices);
@@ -176,7 +186,7 @@ TEST_F(clCreateProgramWithBuiltInKernelsTests, GivenVmeBlockMotionEstimateKernel
     clReleaseProgram(program);
 }
 
-TEST_F(clCreateProgramWithBuiltInKernelsTests, GivenVmeBlockAdvancedMotionEstimateKernelWhenCreatingProgramWithBuiltInKernelsThenCorrectDispatchBuilderAndFrontendKernelIsCreated) {
+TEST_F(clCreateProgramWithBuiltInVmeKernelsTests, GivenVmeBlockAdvancedMotionEstimateKernelWhenCreatingProgramWithBuiltInKernelsThenCorrectDispatchBuilderAndFrontendKernelIsCreated) {
     cl_int retVal = CL_SUCCESS;
 
     auto pDev = castToObject<Device>(*devices);
@@ -215,7 +225,7 @@ TEST_F(clCreateProgramWithBuiltInKernelsTests, GivenVmeBlockAdvancedMotionEstima
     clReleaseProgram(program);
 }
 
-TEST_F(clCreateProgramWithBuiltInKernelsTests, GivenVmeBlockAdvancedMotionEstimateBidirectionalCheckKernelWhenCreatingProgramWithBuiltInKernelsThenCorrectDispatchBuilderAndFrontendKernelIsCreated) {
+TEST_F(clCreateProgramWithBuiltInVmeKernelsTests, GivenVmeBlockAdvancedMotionEstimateBidirectionalCheckKernelWhenCreatingProgramWithBuiltInKernelsThenCorrectDispatchBuilderAndFrontendKernelIsCreated) {
     cl_int retVal = CL_SUCCESS;
 
     auto pDev = castToObject<Device>(*devices);

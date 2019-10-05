@@ -9,6 +9,7 @@
 
 #include "core/helpers/basic_math.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
+#include "core/unit_tests/utilities/base_object_utils.h"
 #include "runtime/api/api.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/command_queue/command_queue_hw.h"
@@ -20,7 +21,6 @@
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/indirect_heap/indirect_heap_fixture.h"
 #include "unit_tests/mocks/mock_graphics_allocation.h"
-#include "unit_tests/utilities/base_object_utils.h"
 
 #include "hw_cmds.h"
 
@@ -89,7 +89,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, programInterfaceDescriptorData
 
     size_t crossThreadDataSize = kernel->getCrossThreadDataSize();
     HardwareCommandsHelper<FamilyType>::sendInterfaceDescriptorData(
-        indirectHeap, 0, 0, crossThreadDataSize, 64, 0, 0, 0, 1, 0 * KB, 0, false, pDevice->getPreemptionMode(), nullptr);
+        indirectHeap, 0, 0, crossThreadDataSize, 64, 0, 0, 0, 1, *kernel, 0, pDevice->getPreemptionMode(), nullptr);
 
     auto usedIndirectHeapAfter = indirectHeap.getUsed();
     EXPECT_EQ(sizeof(INTERFACE_DESCRIPTOR_DATA), usedIndirectHeapAfter - usedIndirectHeapBefore);
@@ -681,12 +681,12 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, usedBindingTableStatePointersF
 
     // setup global memory
     char globalBuffer[16];
-    GraphicsAllocation gfxGlobalAlloc(GraphicsAllocation::AllocationType::UNKNOWN, globalBuffer, castToUint64(globalBuffer), 0llu, sizeof(globalBuffer), MemoryPool::MemoryNull, false);
+    GraphicsAllocation gfxGlobalAlloc(GraphicsAllocation::AllocationType::UNKNOWN, globalBuffer, castToUint64(globalBuffer), 0llu, sizeof(globalBuffer), MemoryPool::MemoryNull);
     program.setGlobalSurface(&gfxGlobalAlloc);
 
     // setup constant memory
     char constBuffer[16];
-    GraphicsAllocation gfxConstAlloc(GraphicsAllocation::AllocationType::UNKNOWN, constBuffer, castToUint64(constBuffer), 0llu, sizeof(constBuffer), MemoryPool::MemoryNull, false);
+    GraphicsAllocation gfxConstAlloc(GraphicsAllocation::AllocationType::UNKNOWN, constBuffer, castToUint64(constBuffer), 0llu, sizeof(constBuffer), MemoryPool::MemoryNull);
     program.setConstantSurface(&gfxConstAlloc);
 
     // create kernel
@@ -1090,10 +1090,7 @@ HWTEST_F(HardwareCommandsHelperTests, whenProgrammingMiAtomicThenSetupAllFields)
     LinearStream cmdStream(buffer, 1024);
 
     MI_ATOMIC referenceCommand = FamilyType::cmdInitAtomic;
-    referenceCommand.setAtomicOpcode(opcode);
-    referenceCommand.setDataSize(dataSize);
-    referenceCommand.setMemoryAddress(static_cast<uint32_t>(writeAddress & 0x0000FFFFFFFFULL));
-    referenceCommand.setMemoryAddressHigh(static_cast<uint32_t>(writeAddress >> 32));
+    HardwareCommandsHelper<FamilyType>::programMiAtomic(referenceCommand, writeAddress, opcode, dataSize);
 
     auto miAtomic = HardwareCommandsHelper<FamilyType>::programMiAtomic(cmdStream, writeAddress, opcode, dataSize);
     EXPECT_EQ(sizeof(MI_ATOMIC), cmdStream.getUsed());
@@ -1103,7 +1100,7 @@ HWTEST_F(HardwareCommandsHelperTests, whenProgrammingMiAtomicThenSetupAllFields)
 
 typedef ExecutionModelKernelFixture ParentKernelCommandsFromBinaryTest;
 
-HWTEST_P(ParentKernelCommandsFromBinaryTest, getSizeRequiredForExecutionModelForSurfaceStatesReturnsSizeOfBlocksPlusMaxBindingTableSizeForAllIDTEntriesAndSchedulerSSHSize) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelCommandsFromBinaryTest, getSizeRequiredForExecutionModelForSurfaceStatesReturnsSizeOfBlocksPlusMaxBindingTableSizeForAllIDTEntriesAndSchedulerSSHSize) {
     using BINDING_TABLE_STATE = typename FamilyType::BINDING_TABLE_STATE;
 
     if (std::string(pPlatform->getDevice(0)->getDeviceInfo().clVersion).find("OpenCL 2.") != std::string::npos) {
@@ -1136,11 +1133,11 @@ HWTEST_P(ParentKernelCommandsFromBinaryTest, getSizeRequiredForExecutionModelFor
 
         totalSize = alignUp(totalSize, BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE);
 
-        EXPECT_EQ(totalSize, HardwareCommandsHelper<FamilyType>::template getSizeRequiredForExecutionModel<IndirectHeap::SURFACE_STATE>(*pKernel));
+        EXPECT_EQ(totalSize, HardwareCommandsHelper<FamilyType>::getSizeRequiredForExecutionModel(IndirectHeap::SURFACE_STATE, *pKernel));
     }
 }
 
-HWTEST_P(ParentKernelCommandsFromBinaryTest, getSizeRequiredForExecutionModelForIOHReturnsSchedulerSize) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelCommandsFromBinaryTest, getSizeRequiredForExecutionModelForIOHReturnsSchedulerSize) {
     using BINDING_TABLE_STATE = typename FamilyType::BINDING_TABLE_STATE;
 
     if (std::string(pPlatform->getDevice(0)->getDeviceInfo().clVersion).find("OpenCL 2.") != std::string::npos) {
@@ -1150,11 +1147,11 @@ HWTEST_P(ParentKernelCommandsFromBinaryTest, getSizeRequiredForExecutionModelFor
         auto &scheduler = builtIns.getSchedulerKernel(*pContext);
         size_t totalSize = HardwareCommandsHelper<FamilyType>::getSizeRequiredIOH(scheduler);
 
-        EXPECT_EQ(totalSize, HardwareCommandsHelper<FamilyType>::template getSizeRequiredForExecutionModel<IndirectHeap::INDIRECT_OBJECT>(*pKernel));
+        EXPECT_EQ(totalSize, HardwareCommandsHelper<FamilyType>::getSizeRequiredForExecutionModel(IndirectHeap::INDIRECT_OBJECT, *pKernel));
     }
 }
 
-HWTEST_P(ParentKernelCommandsFromBinaryTest, getSizeRequiredForExecutionModelForGSH) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelCommandsFromBinaryTest, getSizeRequiredForExecutionModelForGSH) {
     using BINDING_TABLE_STATE = typename FamilyType::BINDING_TABLE_STATE;
 
     if (std::string(pPlatform->getDevice(0)->getDeviceInfo().clVersion).find("OpenCL 2.") != std::string::npos) {
@@ -1162,7 +1159,7 @@ HWTEST_P(ParentKernelCommandsFromBinaryTest, getSizeRequiredForExecutionModelFor
 
         size_t totalSize = 0;
 
-        EXPECT_EQ(totalSize, HardwareCommandsHelper<FamilyType>::template getSizeRequiredForExecutionModel<IndirectHeap::GENERAL_STATE>(*pKernel));
+        EXPECT_EQ(totalSize, HardwareCommandsHelper<FamilyType>::getSizeRequiredForExecutionModel(IndirectHeap::GENERAL_STATE, *pKernel));
     }
 }
 
@@ -1278,9 +1275,9 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, givenCacheFlushAfterWalkerEnab
 
     char buff[MemoryConstants::pageSize * 2];
     MockGraphicsAllocation svmAllocation1{alignUp(buff, MemoryConstants::pageSize), MemoryConstants::pageSize};
-    svmAllocation1.setFlushL3Required(true);
     mockKernelWithInternal->mockKernel->kernelSvmGfxAllocations.push_back(&svmAllocation1);
     MockGraphicsAllocation svmAllocation2{alignUp(buff, MemoryConstants::pageSize), MemoryConstants::pageSize};
+    svmAllocation2.setFlushL3Required(false);
     mockKernelWithInternal->mockKernel->kernelSvmGfxAllocations.push_back(&svmAllocation2);
     mockKernelWithInternal->mockKernel->svmAllocationsRequireCacheFlush = true;
 

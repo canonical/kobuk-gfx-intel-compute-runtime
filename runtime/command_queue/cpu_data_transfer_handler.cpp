@@ -92,7 +92,7 @@ void *CommandQueue::cpuDataTransferHandler(TransferProperties &transferPropertie
         //wait for the completness of previous commands
         if (transferProperties.cmdType != CL_COMMAND_UNMAP_MEM_OBJECT) {
             if (!transferProperties.memObj->isMemObjZeroCopy() || transferProperties.blocking) {
-                finish(true);
+                finish();
                 eventCompleted = true;
             }
         }
@@ -124,8 +124,8 @@ void *CommandQueue::cpuDataTransferHandler(TransferProperties &transferPropertie
             }
             if (!unmapInfo.readOnly) {
                 auto graphicsAllocation = transferProperties.memObj->getGraphicsAllocation();
-                graphicsAllocation->setAubWritable(true);
-                graphicsAllocation->setTbxWritable(true);
+                graphicsAllocation->setAubWritable(true, GraphicsAllocation::defaultBank);
+                graphicsAllocation->setTbxWritable(true, GraphicsAllocation::defaultBank);
             }
             break;
         case CL_COMMAND_READ_BUFFER:

@@ -6,12 +6,12 @@
  */
 
 #pragma once
+#include "core/helpers/string.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/device_queue/device_queue_hw.h"
 #include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/preamble.h"
-#include "runtime/helpers/string.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/utilities/tag_allocator.h"
 
@@ -99,7 +99,7 @@ void DeviceQueueHw<GfxFamily>::initPipeControl(PIPE_CONTROL *pc) {
 }
 
 template <typename GfxFamily>
-void DeviceQueueHw<GfxFamily>::addExecutionModelCleanUpSection(Kernel *parentKernel, TagNode<HwTimeStamps> *hwTimeStamp, uint32_t taskCount) {
+void DeviceQueueHw<GfxFamily>::addExecutionModelCleanUpSection(Kernel *parentKernel, TagNode<HwTimeStamps> *hwTimeStamp, uint64_t tagAddress, uint32_t taskCount) {
     // CleanUp Section
     auto offset = slbCS.getUsed();
     auto alignmentSize = alignUp(offset, MemoryConstants::pageSize) - offset;
@@ -125,13 +125,11 @@ void DeviceQueueHw<GfxFamily>::addExecutionModelCleanUpSection(Kernel *parentKer
 
     PipeControlHelper<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(slbCS,
                                                                                PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA,
-                                                                               criticalSectionAddress, ExecutionModelCriticalSection::Free, false);
-
-    uint64_t tagAddress = reinterpret_cast<uint64_t>(device->getDefaultEngine().commandStreamReceiver->getTagAddress());
+                                                                               criticalSectionAddress, ExecutionModelCriticalSection::Free, false, device->getHardwareInfo());
 
     PipeControlHelper<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(slbCS,
                                                                                PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA,
-                                                                               tagAddress, taskCount, false);
+                                                                               tagAddress, taskCount, false, device->getHardwareInfo());
 
     addMediaStateClearCmds();
 

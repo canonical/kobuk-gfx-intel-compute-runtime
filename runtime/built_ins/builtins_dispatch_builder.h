@@ -37,8 +37,10 @@ struct BuiltinOpParams {
     MemObj *dstMemObj = nullptr;
     GraphicsAllocation *srcSvmAlloc = nullptr;
     GraphicsAllocation *dstSvmAlloc = nullptr;
+    GraphicsAllocation *mapAllocation = nullptr;
     const MemObjsForAuxTranslation *memObjsForAuxTranslation = nullptr;
     AuxTranslationDirection auxTranslationDirection = AuxTranslationDirection::None;
+    bool unifiedMemoryArgsRequireMemSync = true;
     Vec3<size_t> srcOffset = {0, 0, 0};
     Vec3<size_t> dstOffset = {0, 0, 0};
     Vec3<size_t> size = {0, 0, 0};

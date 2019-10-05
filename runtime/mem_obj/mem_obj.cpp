@@ -8,12 +8,13 @@
 #include "runtime/mem_obj/mem_obj.h"
 
 #include "common/helpers/bit_helpers.h"
+#include "core/helpers/aligned_memory.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
 #include "runtime/gmm_helper/gmm.h"
-#include "runtime/helpers/aligned_memory.h"
+#include "runtime/gmm_helper/resource_info.h"
 #include "runtime/helpers/get_info.h"
 #include "runtime/memory_manager/deferred_deleter.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
@@ -235,6 +236,10 @@ bool MemObj::isMemObjUncacheable() const {
     return isValueSet(properties.flags_intel, CL_MEM_LOCALLY_UNCACHED_RESOURCE);
 }
 
+bool MemObj::isMemObjUncacheableForSurfaceState() const {
+    return isAnyBitSet(properties.flags_intel, CL_MEM_LOCALLY_UNCACHED_SURFACE_STATE_RESOURCE | CL_MEM_LOCALLY_UNCACHED_RESOURCE);
+}
+
 GraphicsAllocation *MemObj::getGraphicsAllocation() const {
     return graphicsAllocation;
 }
@@ -306,8 +311,8 @@ void MemObj::destroyGraphicsAllocation(GraphicsAllocation *allocation, bool asyn
     }
 }
 
-bool MemObj::checkIfMemoryTransferIsRequired(size_t offsetInMemObjest, size_t offsetInHostPtr, const void *hostPtr, cl_command_type cmdType) {
-    auto bufferStorage = ptrOffset(this->getCpuAddressForMemoryTransfer(), offsetInMemObjest);
+bool MemObj::checkIfMemoryTransferIsRequired(size_t offsetInMemObject, size_t offsetInHostPtr, const void *hostPtr, cl_command_type cmdType) {
+    auto bufferStorage = ptrOffset(this->getCpuAddressForMemoryTransfer(), offsetInMemObject);
     auto hostStorage = ptrOffset(hostPtr, offsetInHostPtr);
     auto isMemTransferNeeded = !((bufferStorage == hostStorage) &&
                                  (cmdType == CL_COMMAND_WRITE_BUFFER || cmdType == CL_COMMAND_READ_BUFFER ||
@@ -344,8 +349,13 @@ bool MemObj::addMappedPtr(void *ptr, size_t ptrLength, cl_map_flags &mapFlags,
                                     mipLevel);
 }
 
+bool MemObj::isTiledAllocation() const {
+    auto gmm = graphicsAllocation->getDefaultGmm();
+    return gmm && (gmm->gmmResourceInfo->getTileModeSurfaceState() != 0);
+}
+
 bool MemObj::mappingOnCpuAllowed() const {
-    return !allowTiling() && !peekSharingHandler() && !isMipMapped(this) && !DebugManager.flags.DisableZeroCopyForBuffers.get() &&
+    return !isTiledAllocation() && !peekSharingHandler() && !isMipMapped(this) && !DebugManager.flags.DisableZeroCopyForBuffers.get() &&
            !(graphicsAllocation->getDefaultGmm() && graphicsAllocation->getDefaultGmm()->isRenderCompressed) &&
            MemoryPool::isSystemMemoryPool(graphicsAllocation->getMemoryPool());
 }

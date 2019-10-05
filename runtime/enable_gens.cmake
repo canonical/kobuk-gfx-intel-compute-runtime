@@ -15,13 +15,9 @@ set(RUNTIME_SRCS_GENX_CPP_LINUX
 
 set(RUNTIME_SRCS_GENX_H_BASE
   aub_mapper.h
-  device_enqueue.h
   hw_cmds.h
-  hw_cmds_generated.h
   hw_info.h
   reg_configs.h
-  scheduler_definitions.h
-  scheduler_igdrcl_built_in.inl
 )
 
 set(RUNTIME_SRCS_GENX_CPP_BASE
@@ -68,18 +64,31 @@ endmacro()
 
 macro(macro_for_each_gen)
   set(GENX_PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/${GEN_TYPE_LOWER})
+  set(CORE_GENX_PREFIX "${CMAKE_SOURCE_DIR}/core/${GEN_TYPE_LOWER}")
   # Add default GEN files
   foreach(SRC_IT ${RUNTIME_SRCS_GENX_H_BASE})
     list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE ${GENX_PREFIX}/${SRC_IT})
   endforeach()
-  if(EXISTS "${GENX_PREFIX}/hw_cmds_generated_patched.h")
-    list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE "${GENX_PREFIX}/hw_cmds_generated_patched.h")
+  if(EXISTS "${CORE_GENX_PREFIX}/hw_cmds_generated.inl")
+    list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE "${CORE_GENX_PREFIX}/hw_cmds_generated.inl")
+  endif()
+  if(EXISTS "${CORE_GENX_PREFIX}/hw_cmds_generated_patched.inl")
+    list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE "${CORE_GENX_PREFIX}/hw_cmds_generated_patched.inl")
   endif()
   if(EXISTS "${GENX_PREFIX}/hw_cmds_base.h")
     list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE "${GENX_PREFIX}/hw_cmds_base.h")
   endif()
   if(EXISTS "${GENX_PREFIX}/hw_info_${GEN_TYPE_LOWER}.h")
     list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE "${GENX_PREFIX}/hw_info_${GEN_TYPE_LOWER}.h")
+  endif()
+  if(EXISTS "${GENX_PREFIX}/additional_files_${GEN_TYPE_LOWER}.cmake")
+    include("${GENX_PREFIX}/additional_files_${GEN_TYPE_LOWER}.cmake")
+  endif()
+
+  if(${SUPPORT_DEVICE_ENQUEUE_${GEN_TYPE}})
+    list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE ${GENX_PREFIX}/device_enqueue.h)
+    list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE ${GENX_PREFIX}/scheduler_definitions.h)
+    list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE ${GENX_PREFIX}/scheduler_igdrcl_built_in.inl)
   endif()
 
   foreach(OS_IT "BASE" "WINDOWS" "LINUX")

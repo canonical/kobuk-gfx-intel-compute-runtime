@@ -21,32 +21,42 @@ extern PRODUCT_FAMILY productFamily;
 extern GFXCORE_FAMILY renderCoreFamily;
 
 #ifdef TESTS_GEN8
-#define BDW_TYPED_TEST_BODY testBodyHw<typename NEO::GfxFamilyMapper<IGFX_GEN8_CORE>::GfxFamily>();
-#define BDW_TYPED_CMDTEST_BODY runCmdTestHwIfSupported<typename NEO::GfxFamilyMapper<IGFX_GEN8_CORE>::GfxFamily>();
+#define BDW_TYPED_TEST(method) method<typename NEO::GfxFamilyMapper<IGFX_GEN8_CORE>::GfxFamily>();
 #define BDW_SUPPORTED_TEST(cmdSetBase) NEO::GfxFamilyMapper<IGFX_GEN8_CORE>::GfxFamily::supportsCmdSet(cmdSetBase)
 #else
-#define BDW_TYPED_TEST_BODY
-#define BDW_TYPED_CMDTEST_BODY
+#define BDW_TYPED_TEST(method)
 #define BDW_SUPPORTED_TEST(cmdSetBase) false
 #endif
 #ifdef TESTS_GEN9
-#define SKL_TYPED_TEST_BODY testBodyHw<typename NEO::GfxFamilyMapper<IGFX_GEN9_CORE>::GfxFamily>();
-#define SKL_TYPED_CMDTEST_BODY runCmdTestHwIfSupported<typename NEO::GfxFamilyMapper<IGFX_GEN9_CORE>::GfxFamily>();
+#define SKL_TYPED_TEST(method) method<typename NEO::GfxFamilyMapper<IGFX_GEN9_CORE>::GfxFamily>();
 #define SKL_SUPPORTED_TEST(cmdSetBase) NEO::GfxFamilyMapper<IGFX_GEN9_CORE>::GfxFamily::supportsCmdSet(cmdSetBase)
 #else
-#define SKL_TYPED_TEST_BODY
-#define SKL_TYPED_CMDTEST_BODY
+#define SKL_TYPED_TEST(method)
 #define SKL_SUPPORTED_TEST(cmdSetBase) false
 #endif
 #ifdef TESTS_GEN11
-#define ICL_TYPED_TEST_BODY testBodyHw<typename NEO::GfxFamilyMapper<IGFX_GEN11_CORE>::GfxFamily>();
-#define ICL_TYPED_CMDTEST_BODY runCmdTestHwIfSupported<typename NEO::GfxFamilyMapper<IGFX_GEN11_CORE>::GfxFamily>();
+#define ICL_TYPED_TEST(method) method<typename NEO::GfxFamilyMapper<IGFX_GEN11_CORE>::GfxFamily>();
 #define ICL_SUPPORTED_TEST(cmdSetBase) NEO::GfxFamilyMapper<IGFX_GEN11_CORE>::GfxFamily::supportsCmdSet(cmdSetBase)
 #else
-#define ICL_TYPED_TEST_BODY
-#define ICL_TYPED_CMDTEST_BODY
+#define ICL_TYPED_TEST(method)
 #define ICL_SUPPORTED_TEST(cmdSetBase) false
 #endif
+
+#define FAMILY_SELECTOR(family, methodName)                \
+    switch (family) {                                      \
+    case IGFX_GEN8_CORE:                                   \
+        BDW_TYPED_TEST(methodName)                         \
+        break;                                             \
+    case IGFX_GEN9_CORE:                                   \
+        SKL_TYPED_TEST(methodName)                         \
+        break;                                             \
+    case IGFX_GEN11_CORE:                                  \
+        ICL_TYPED_TEST(methodName)                         \
+        break;                                             \
+    default:                                               \
+        ASSERT_TRUE((false && "Unknown hardware family")); \
+        break;                                             \
+    }
 
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
@@ -103,90 +113,85 @@ extern GFXCORE_FAMILY renderCoreFamily;
 
 // Macros to provide template based testing.
 // Test can use FamilyType in the test -- equivalent to SKLFamily
-#define HWTEST_TEST_(test_suite_name, test_name, parent_class, parent_id)                       \
-    CHECK_TEST_NAME_LENGTH(test_suite_name, test_name)                                          \
-    class PLATFORM_EXCLUDES_CLASS_NAME(test_suite_name, test_name) {                            \
-      public:                                                                                   \
-        static std::unique_ptr<std::unordered_set<uint32_t>> &getExcludes() {                   \
-            static std::unique_ptr<std::unordered_set<uint32_t>> excludes;                      \
-            return excludes;                                                                    \
-        }                                                                                       \
-        static void addExclude(uint32_t product) {                                              \
-            auto &excludes = getExcludes();                                                     \
-            if (excludes == nullptr) {                                                          \
-                excludes = std::make_unique<std::unordered_set<uint32_t>>();                    \
-            }                                                                                   \
-            excludes->insert(product);                                                          \
-        }                                                                                       \
-    };                                                                                          \
-                                                                                                \
-    class GTEST_TEST_CLASS_NAME_(test_suite_name, test_name) : public parent_class {            \
-                                                                                                \
-      public:                                                                                   \
-        GTEST_TEST_CLASS_NAME_(test_suite_name, test_name)                                      \
-        () {}                                                                                   \
-                                                                                                \
-      private:                                                                                  \
-        template <typename FamilyType>                                                          \
-        void testBodyHw();                                                                      \
-        bool notExcluded() const {                                                              \
-            using ExcludesT = PLATFORM_EXCLUDES_CLASS_NAME(test_suite_name, test_name);         \
-            auto &excludes = ExcludesT::getExcludes();                                          \
-            if (excludes == nullptr) {                                                          \
-                return true;                                                                    \
-            }                                                                                   \
-            return excludes->count(::productFamily) == 0;                                       \
-        }                                                                                       \
-        void SetUp() override {                                                                 \
-            if (notExcluded()) {                                                                \
-                parent_class::SetUp();                                                          \
-            }                                                                                   \
-        }                                                                                       \
-        void TearDown() override {                                                              \
-            if (notExcluded()) {                                                                \
-                parent_class::TearDown();                                                       \
-            }                                                                                   \
-        }                                                                                       \
-                                                                                                \
-        void TestBody() override {                                                              \
-            if (notExcluded()) {                                                                \
-                switch (::renderCoreFamily) {                                                   \
-                case IGFX_GEN8_CORE:                                                            \
-                    BDW_TYPED_TEST_BODY                                                         \
-                    break;                                                                      \
-                case IGFX_GEN9_CORE:                                                            \
-                    SKL_TYPED_TEST_BODY                                                         \
-                    break;                                                                      \
-                case IGFX_GEN11_CORE:                                                           \
-                    ICL_TYPED_TEST_BODY                                                         \
-                    break;                                                                      \
-                default:                                                                        \
-                    ASSERT_TRUE((false && "Unknown hardware family"));                          \
-                    break;                                                                      \
-                }                                                                               \
-            }                                                                                   \
-        }                                                                                       \
-        static ::testing::TestInfo *const test_info_ GTEST_ATTRIBUTE_UNUSED_;                   \
-        GTEST_DISALLOW_COPY_AND_ASSIGN_(                                                        \
-            GTEST_TEST_CLASS_NAME_(test_suite_name, test_name));                                \
-    };                                                                                          \
-                                                                                                \
-    ::testing::TestInfo *const GTEST_TEST_CLASS_NAME_(test_suite_name, test_name)::test_info_ = \
-        ::testing::internal::MakeAndRegisterTestInfo(                                           \
-            #test_suite_name, #test_name, nullptr, nullptr,                                     \
-            ::testing::internal::CodeLocation(__FILE__, __LINE__), (parent_id),                 \
-            ::testing::internal::SuiteApiResolver<                                              \
-                parent_class>::GetSetUpCaseOrSuite(),                                           \
-            ::testing::internal::SuiteApiResolver<                                              \
-                parent_class>::GetTearDownCaseOrSuite(),                                        \
-            new ::testing::internal::TestFactoryImpl<GTEST_TEST_CLASS_NAME_(                    \
-                test_suite_name, test_name)>);                                                  \
-    template <typename FamilyType>                                                              \
+#define HWTEST_TEST_(test_suite_name, test_name, parent_class, parent_id, SetUpT_name, TearDownT_name) \
+    CHECK_TEST_NAME_LENGTH(test_suite_name, test_name)                                                 \
+    class PLATFORM_EXCLUDES_CLASS_NAME(test_suite_name, test_name) {                                   \
+      public:                                                                                          \
+        static std::unique_ptr<std::unordered_set<uint32_t>> &getExcludes() {                          \
+            static std::unique_ptr<std::unordered_set<uint32_t>> excludes;                             \
+            return excludes;                                                                           \
+        }                                                                                              \
+        static void addExclude(uint32_t product) {                                                     \
+            auto &excludes = getExcludes();                                                            \
+            if (excludes == nullptr) {                                                                 \
+                excludes = std::make_unique<std::unordered_set<uint32_t>>();                           \
+            }                                                                                          \
+            excludes->insert(product);                                                                 \
+        }                                                                                              \
+    };                                                                                                 \
+                                                                                                       \
+    class GTEST_TEST_CLASS_NAME_(test_suite_name, test_name) : public parent_class {                   \
+                                                                                                       \
+      public:                                                                                          \
+        GTEST_TEST_CLASS_NAME_(test_suite_name, test_name)                                             \
+        () {}                                                                                          \
+                                                                                                       \
+      private:                                                                                         \
+        template <typename FamilyType>                                                                 \
+        void testBodyHw();                                                                             \
+        bool notExcluded() const {                                                                     \
+            using ExcludesT = PLATFORM_EXCLUDES_CLASS_NAME(test_suite_name, test_name);                \
+            auto &excludes = ExcludesT::getExcludes();                                                 \
+            if (excludes == nullptr) {                                                                 \
+                return true;                                                                           \
+            }                                                                                          \
+            return excludes->count(::productFamily) == 0;                                              \
+        }                                                                                              \
+        template <typename T>                                                                          \
+        void emptyFcn() {}                                                                             \
+        void SetUp() override {                                                                        \
+            if (notExcluded()) {                                                                       \
+                parent_class::SetUp();                                                                 \
+                FAMILY_SELECTOR(::renderCoreFamily, SetUpT_name)                                       \
+            }                                                                                          \
+        }                                                                                              \
+        void TearDown() override {                                                                     \
+            if (notExcluded()) {                                                                       \
+                FAMILY_SELECTOR(::renderCoreFamily, TearDownT_name)                                    \
+                parent_class::TearDown();                                                              \
+            }                                                                                          \
+        }                                                                                              \
+                                                                                                       \
+        void TestBody() override {                                                                     \
+            if (notExcluded()) {                                                                       \
+                FAMILY_SELECTOR(::renderCoreFamily, testBodyHw)                                        \
+            }                                                                                          \
+        }                                                                                              \
+        static ::testing::TestInfo *const test_info_ GTEST_ATTRIBUTE_UNUSED_;                          \
+        GTEST_DISALLOW_COPY_AND_ASSIGN_(                                                               \
+            GTEST_TEST_CLASS_NAME_(test_suite_name, test_name));                                       \
+    };                                                                                                 \
+                                                                                                       \
+    ::testing::TestInfo *const GTEST_TEST_CLASS_NAME_(test_suite_name, test_name)::test_info_ =        \
+        ::testing::internal::MakeAndRegisterTestInfo(                                                  \
+            #test_suite_name, #test_name, nullptr, nullptr,                                            \
+            ::testing::internal::CodeLocation(__FILE__, __LINE__), (parent_id),                        \
+            ::testing::internal::SuiteApiResolver<                                                     \
+                parent_class>::GetSetUpCaseOrSuite(),                                                  \
+            ::testing::internal::SuiteApiResolver<                                                     \
+                parent_class>::GetTearDownCaseOrSuite(),                                               \
+            new ::testing::internal::TestFactoryImpl<GTEST_TEST_CLASS_NAME_(                           \
+                test_suite_name, test_name)>);                                                         \
+    template <typename FamilyType>                                                                     \
     void GTEST_TEST_CLASS_NAME_(test_suite_name, test_name)::testBodyHw()
 
 #define HWTEST_F(test_fixture, test_name)               \
     HWTEST_TEST_(test_fixture, test_name, test_fixture, \
-                 ::testing::internal::GetTypeId<test_fixture>())
+                 ::testing::internal::GetTypeId<test_fixture>(), emptyFcn, emptyFcn)
+
+#define HWTEST_TEMPLATED_F(test_fixture, test_name)     \
+    HWTEST_TEST_(test_fixture, test_name, test_fixture, \
+                 ::testing::internal::GetTypeId<test_fixture>(), SetUpT, TearDownT)
 
 #define PLATFORM_EXCLUDES_CLASS_NAME(test_suite_name, test_name) \
     PLATFORM_EXCLUDES_##test_suite_name##test_name
@@ -263,20 +268,7 @@ extern GFXCORE_FAMILY renderCoreFamily;
         }                                                                                                 \
                                                                                                           \
         void TestBody() override {                                                                        \
-            switch (::renderCoreFamily) {                                                                 \
-            case IGFX_GEN8_CORE:                                                                          \
-                BDW_TYPED_CMDTEST_BODY                                                                    \
-                break;                                                                                    \
-            case IGFX_GEN9_CORE:                                                                          \
-                SKL_TYPED_CMDTEST_BODY                                                                    \
-                break;                                                                                    \
-            case IGFX_GEN11_CORE:                                                                         \
-                ICL_TYPED_CMDTEST_BODY                                                                    \
-                break;                                                                                    \
-            default:                                                                                      \
-                ASSERT_TRUE((false && "Unknown hardware family"));                                        \
-                break;                                                                                    \
-            }                                                                                             \
+            FAMILY_SELECTOR(::renderCoreFamily, runCmdTestHwIfSupported)                                  \
         }                                                                                                 \
         void SetUp() override {                                                                           \
             if (notExcluded()) {                                                                          \
@@ -392,20 +384,7 @@ extern GFXCORE_FAMILY renderCoreFamily;
         void testBodyHw();                                                                                                                                \
                                                                                                                                                           \
         virtual void TestBody() override {                                                                                                                \
-            switch (::renderCoreFamily) {                                                                                                                 \
-            case IGFX_GEN8_CORE:                                                                                                                          \
-                BDW_TYPED_TEST_BODY                                                                                                                       \
-                break;                                                                                                                                    \
-            case IGFX_GEN9_CORE:                                                                                                                          \
-                SKL_TYPED_TEST_BODY                                                                                                                       \
-                break;                                                                                                                                    \
-            case IGFX_GEN11_CORE:                                                                                                                         \
-                ICL_TYPED_TEST_BODY                                                                                                                       \
-                break;                                                                                                                                    \
-            default:                                                                                                                                      \
-                ASSERT_TRUE((false && "Unknown hardware family"));                                                                                        \
-                break;                                                                                                                                    \
-            }                                                                                                                                             \
+            FAMILY_SELECTOR(::renderCoreFamily, testBodyHw)                                                                                               \
         }                                                                                                                                                 \
                                                                                                                                                           \
       private:                                                                                                                                            \
@@ -448,21 +427,8 @@ extern GFXCORE_FAMILY renderCoreFamily;
             /* do nothing */                                                                                                                              \
         }                                                                                                                                                 \
                                                                                                                                                           \
-        virtual void TestBody() override {                                                                                                                \
-            switch (::renderCoreFamily) {                                                                                                                 \
-            case IGFX_GEN8_CORE:                                                                                                                          \
-                BDW_TYPED_CMDTEST_BODY                                                                                                                    \
-                break;                                                                                                                                    \
-            case IGFX_GEN9_CORE:                                                                                                                          \
-                SKL_TYPED_CMDTEST_BODY                                                                                                                    \
-                break;                                                                                                                                    \
-            case IGFX_GEN11_CORE:                                                                                                                         \
-                ICL_TYPED_CMDTEST_BODY                                                                                                                    \
-                break;                                                                                                                                    \
-            default:                                                                                                                                      \
-                ASSERT_TRUE((false && "Unknown hardware family"));                                                                                        \
-                break;                                                                                                                                    \
-            }                                                                                                                                             \
+        void TestBody() override {                                                                                                                        \
+            FAMILY_SELECTOR(::renderCoreFamily, runCmdTestHwIfSupported)                                                                                  \
         }                                                                                                                                                 \
         void SetUp() override {                                                                                                                           \
             CALL_IF_SUPPORTED(cmdset_gen_base, test_suite_name::SetUp());                                                                                 \
@@ -631,6 +597,14 @@ extern GFXCORE_FAMILY renderCoreFamily;
     FAMILYTEST_TEST_P(test_suite_name, test_name, \
                       IGFX_GEN11_CORE,            \
                       IGFX_LAKEFIELD)
+#define EHLTEST_F(test_fixture, test_name)                           \
+    FAMILYTEST_TEST_(test_fixture, test_name, test_fixture,          \
+                     ::testing::internal::GetTypeId<test_fixture>(), \
+                     IGFX_GEN11_CORE, IGFX_ELKHARTLAKE)
+#define EHLTEST_P(test_suite_name, test_name)     \
+    FAMILYTEST_TEST_P(test_suite_name, test_name, \
+                      IGFX_GEN11_CORE,            \
+                      IGFX_ELKHARTLAKE)
 #endif
 #define HWTEST_TYPED_TEST(CaseName, TestName)                                                                  \
     CHECK_TEST_NAME_LENGTH(CaseName, TestName)                                                                 \
@@ -643,20 +617,7 @@ extern GFXCORE_FAMILY renderCoreFamily;
         void testBodyHw();                                                                                     \
                                                                                                                \
         void TestBody() override {                                                                             \
-            switch (::renderCoreFamily) {                                                                      \
-            case IGFX_GEN8_CORE:                                                                               \
-                BDW_TYPED_TEST_BODY                                                                            \
-                break;                                                                                         \
-            case IGFX_GEN9_CORE:                                                                               \
-                SKL_TYPED_TEST_BODY                                                                            \
-                break;                                                                                         \
-            case IGFX_GEN11_CORE:                                                                              \
-                ICL_TYPED_TEST_BODY                                                                            \
-                break;                                                                                         \
-            default:                                                                                           \
-                ASSERT_TRUE((false && "Unknown hardware family"));                                             \
-                break;                                                                                         \
-            }                                                                                                  \
+            FAMILY_SELECTOR(::renderCoreFamily, testBodyHw)                                                    \
         }                                                                                                      \
     };                                                                                                         \
     bool gtest_##CaseName##_##TestName##_registered_ GTEST_ATTRIBUTE_UNUSED_ =                                 \

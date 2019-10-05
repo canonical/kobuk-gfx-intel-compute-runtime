@@ -153,6 +153,7 @@ TEST(TbxCommandStreamReceiverTest, givenTbxCommandStreamReceiverWhenItIsCreatedW
 
 TEST(TbxCommandStreamReceiverTest, givenTbxCommandStreamReceiverWhenTypeIsCheckedThenTbxCsrIsReturned) {
     ExecutionEnvironment *executionEnvironment = platformImpl->peekExecutionEnvironment();
+    executionEnvironment->initializeMemoryManager();
     std::unique_ptr<CommandStreamReceiver> csr(TbxCommandStreamReceiver::create("", false, *executionEnvironment));
     EXPECT_NE(nullptr, csr);
     EXPECT_EQ(CommandStreamReceiverType::CSR_TBX, csr->getType());
@@ -217,9 +218,9 @@ HWTEST_F(TbxCommandStreamTests, givenTbxCommandStreamReceiverWhenWriteMemoryIsCa
     auto graphicsAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER});
     ASSERT_NE(nullptr, graphicsAllocation);
 
-    EXPECT_TRUE(graphicsAllocation->isTbxWritable());
+    EXPECT_TRUE(tbxCsr->isTbxWritable(*graphicsAllocation));
     EXPECT_TRUE(tbxCsr->writeMemory(*graphicsAllocation));
-    EXPECT_FALSE(graphicsAllocation->isTbxWritable());
+    EXPECT_FALSE(tbxCsr->isTbxWritable(*graphicsAllocation));
 
     memoryManager->freeGraphicsMemory(graphicsAllocation);
 }
@@ -232,9 +233,9 @@ HWTEST_F(TbxCommandStreamTests, givenTbxCommandStreamReceiverWhenWriteMemoryIsCa
     auto graphicsAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER});
     ASSERT_NE(nullptr, graphicsAllocation);
 
-    graphicsAllocation->setTbxWritable(false);
+    tbxCsr->setTbxWritable(false, *graphicsAllocation);
     EXPECT_FALSE(tbxCsr->writeMemory(*graphicsAllocation));
-    EXPECT_FALSE(graphicsAllocation->isTbxWritable());
+    EXPECT_FALSE(tbxCsr->isTbxWritable(*graphicsAllocation));
 
     memoryManager->freeGraphicsMemory(graphicsAllocation);
 }
@@ -433,6 +434,7 @@ HWTEST_F(TbxCommandStreamTests, givenTbxCommandStreamReceiverWhenItIsCreatedWith
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.UseAubStream.set(false);
     MockExecutionEnvironment executionEnvironment(platformDevices[0], false);
+    executionEnvironment.initializeMemoryManager();
 
     auto tbxCsr = std::make_unique<TbxCommandStreamReceiverHw<FamilyType>>(executionEnvironment);
     EXPECT_EQ(nullptr, executionEnvironment.aubCenter->getAubManager());
@@ -567,6 +569,7 @@ HWTEST_F(TbxCommandStreamTests, givenTbxCsrWhenItIsQueriedForPreferredTagPoolSiz
 HWTEST_F(TbxCommandStreamTests, givenTbxCsrWhenCreatedWithAubDumpThenFileNameIsExtendedWithSystemInfo) {
     MockExecutionEnvironment executionEnvironment;
     executionEnvironment.setHwInfo(*platformDevices);
+    executionEnvironment.initializeMemoryManager();
 
     setMockAubCenter(&executionEnvironment, CommandStreamReceiverType::CSR_TBX);
 
@@ -579,6 +582,7 @@ HWTEST_F(TbxCommandStreamTests, givenTbxCsrWhenCreatedWithAubDumpThenFileNameIsE
 HWTEST_F(TbxCommandStreamTests, givenTbxCsrWhenCreatedWithAubDumpThenOpenIsCalledOnAubManagerToOpenFileStream) {
     MockExecutionEnvironment executionEnvironment;
     executionEnvironment.setHwInfo(*platformDevices);
+    executionEnvironment.initializeMemoryManager();
 
     std::unique_ptr<TbxCommandStreamReceiverHw<FamilyType>> tbxCsrWithAubDump(reinterpret_cast<TbxCommandStreamReceiverHw<FamilyType> *>(
         TbxCommandStreamReceiver::create("aubfile", true, executionEnvironment)));
@@ -588,6 +592,7 @@ HWTEST_F(TbxCommandStreamTests, givenTbxCsrWhenCreatedWithAubDumpThenOpenIsCalle
 HWTEST_F(TbxCommandStreamTests, givenTbxCsrWhenCreatedWithAubDumpSeveralTimesThenOpenIsCalledOnAubManagerOnceOnly) {
     MockExecutionEnvironment executionEnvironment(*platformDevices, true);
     executionEnvironment.setHwInfo(*platformDevices);
+    executionEnvironment.initializeMemoryManager();
 
     auto tbxCsrWithAubDump1 = std::unique_ptr<TbxCommandStreamReceiverHw<FamilyType>>(reinterpret_cast<TbxCommandStreamReceiverHw<FamilyType> *>(
         TbxCommandStreamReceiverHw<FamilyType>::create("aubfile", true, executionEnvironment)));

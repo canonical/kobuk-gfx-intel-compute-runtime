@@ -5,12 +5,13 @@
  *
  */
 
-#include "runtime/command_stream/linear_stream.h"
+#include "core/command_stream/linear_stream.h"
+#include "core/helpers/aligned_memory.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/preamble.h"
 #include "runtime/mem_obj/buffer.h"
+#include "runtime/os_interface/linux/drm_allocation.h"
 #include "runtime/os_interface/linux/drm_buffer_object.h"
 #include "runtime/os_interface/linux/drm_command_stream.h"
 #include "runtime/os_interface/linux/drm_engine_mapper.h"
@@ -38,23 +39,25 @@ DrmCommandStreamReceiver<GfxFamily>::DrmCommandStreamReceiver(ExecutionEnvironme
 
     executionEnvironment.osInterface->get()->setDrm(this->drm);
     CommandStreamReceiver::osInterface = executionEnvironment.osInterface.get();
-    auto gmmHelper = platform()->peekExecutionEnvironment()->getGmmHelper();
-    gmmHelper->setSimplifiedMocsTableUsage(this->drm->getSimplifiedMocsTableUsage());
+
+    if (platform()->peekExecutionEnvironment()->getHardwareInfo()->platform.eRenderCoreFamily == GFXCORE_FAMILY::IGFX_GEN9_CORE &&
+        strcmp(platform()->peekExecutionEnvironment()->getHardwareInfo()->capabilityTable.platformType, "lp") == 0) {
+        auto gmmHelper = platform()->peekExecutionEnvironment()->getGmmHelper();
+        gmmHelper->setSimplifiedMocsTableUsage(this->drm->getSimplifiedMocsTableUsage());
+    }
 }
 
 template <typename GfxFamily>
 FlushStamp DrmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
-    unsigned int engineFlag = static_cast<OsContextLinux *>(osContext)->getEngineFlag();
-
     DrmAllocation *alloc = static_cast<DrmAllocation *>(batchBuffer.commandBufferAllocation);
     DEBUG_BREAK_IF(!alloc);
 
-    size_t alignedStart = (reinterpret_cast<uintptr_t>(batchBuffer.commandBufferAllocation->getUnderlyingBuffer()) & (MemoryConstants::allocationAlignment - 1)) + batchBuffer.startOffset;
     BufferObject *bb = alloc->getBO();
     FlushStamp flushStamp = 0;
 
     if (bb) {
         flushStamp = bb->peekHandle();
+        unsigned int engineFlag = static_cast<OsContextLinux *>(osContext)->getEngineFlag();
         this->processResidency(allocationsForResidency);
         // Residency hold all allocation except command buffer, hence + 1
         auto requiredSize = this->residency.size() + 1;
@@ -62,12 +65,13 @@ FlushStamp DrmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer, 
             this->execObjectsStorage.resize(requiredSize);
         }
 
-        bb->exec(static_cast<uint32_t>(alignUp(batchBuffer.usedSize - batchBuffer.startOffset, 8)),
-                 alignedStart, engineFlag | I915_EXEC_NO_RELOC,
-                 batchBuffer.requiresCoherency,
-                 static_cast<OsContextLinux *>(osContext)->getDrmContextId(),
-                 this->residency,
-                 this->execObjectsStorage.data());
+        int err = bb->exec(static_cast<uint32_t>(alignUp(batchBuffer.usedSize - batchBuffer.startOffset, 8)),
+                           batchBuffer.startOffset, engineFlag | I915_EXEC_NO_RELOC,
+                           batchBuffer.requiresCoherency,
+                           static_cast<OsContextLinux *>(osContext)->getDrmContextIds()[0],
+                           this->residency.data(), this->residency.size(),
+                           this->execObjectsStorage.data());
+        UNRECOVERABLE_IF(err != 0);
 
         this->residency.clear();
 
@@ -105,9 +109,9 @@ void DrmCommandStreamReceiver<GfxFamily>::makeResident(BufferObject *bo) {
 }
 
 template <typename GfxFamily>
-void DrmCommandStreamReceiver<GfxFamily>::processResidency(ResidencyContainer &inputAllocationsForResidency) {
+void DrmCommandStreamReceiver<GfxFamily>::processResidency(const ResidencyContainer &inputAllocationsForResidency) {
     for (auto &alloc : inputAllocationsForResidency) {
-        auto drmAlloc = static_cast<DrmAllocation *>(alloc);
+        auto drmAlloc = static_cast<const DrmAllocation *>(alloc);
         if (drmAlloc->fragmentsStorage.fragmentCount) {
             for (unsigned int f = 0; f < drmAlloc->fragmentsStorage.fragmentCount; f++) {
                 const auto osContextId = osContext->getContextId();
@@ -117,8 +121,7 @@ void DrmCommandStreamReceiver<GfxFamily>::processResidency(ResidencyContainer &i
                 }
             }
         } else {
-            BufferObject *bo = drmAlloc->getBO();
-            makeResident(bo);
+            makeResidentBufferObjects(drmAlloc);
         }
     }
 }
@@ -132,18 +135,16 @@ void DrmCommandStreamReceiver<GfxFamily>::makeNonResident(GraphicsAllocation &gf
         if (this->residency.size() != 0) {
             this->residency.clear();
         }
-        if (gfxAllocation.fragmentsStorage.fragmentCount) {
-            for (auto fragmentId = 0u; fragmentId < gfxAllocation.fragmentsStorage.fragmentCount; fragmentId++) {
-                gfxAllocation.fragmentsStorage.fragmentStorageData[fragmentId].residency->resident[osContext->getContextId()] = false;
-            }
+        for (auto fragmentId = 0u; fragmentId < gfxAllocation.fragmentsStorage.fragmentCount; fragmentId++) {
+            gfxAllocation.fragmentsStorage.fragmentStorageData[fragmentId].residency->resident[osContext->getContextId()] = false;
         }
     }
     gfxAllocation.releaseResidencyInOsContext(this->osContext->getContextId());
 }
 
 template <typename GfxFamily>
-DrmMemoryManager *DrmCommandStreamReceiver<GfxFamily>::getMemoryManager() {
-    return (DrmMemoryManager *)CommandStreamReceiver::getMemoryManager();
+DrmMemoryManager *DrmCommandStreamReceiver<GfxFamily>::getMemoryManager() const {
+    return static_cast<DrmMemoryManager *>(CommandStreamReceiver::getMemoryManager());
 }
 
 template <typename GfxFamily>

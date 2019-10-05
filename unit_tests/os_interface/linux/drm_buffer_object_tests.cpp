@@ -17,7 +17,7 @@ using namespace NEO;
 
 class TestedBufferObject : public BufferObject {
   public:
-    TestedBufferObject(Drm *drm) : BufferObject(drm, 1, true) {
+    TestedBufferObject(Drm *drm) : BufferObject(drm, 1) {
     }
 
     void tileBy(uint32_t mode) {
@@ -66,9 +66,8 @@ TEST_F(DrmBufferObjectTest, exec) {
     mock->ioctl_expected.total = 1;
     mock->ioctl_res = 0;
 
-    BufferObject::ResidencyVector residency;
     drm_i915_gem_exec_object2 execObjectsStorage = {};
-    auto ret = bo->exec(0, 0, 0, false, 1, residency, &execObjectsStorage);
+    auto ret = bo->exec(0, 0, 0, false, 1, nullptr, 0u, &execObjectsStorage);
     EXPECT_EQ(mock->ioctl_res, ret);
     EXPECT_EQ(0u, mock->execBuffer.flags);
 }
@@ -76,9 +75,9 @@ TEST_F(DrmBufferObjectTest, exec) {
 TEST_F(DrmBufferObjectTest, exec_ioctlFailed) {
     mock->ioctl_expected.total = 1;
     mock->ioctl_res = -1;
-    BufferObject::ResidencyVector residency;
+    mock->errnoValue = EFAULT;
     drm_i915_gem_exec_object2 execObjectsStorage = {};
-    EXPECT_THROW(bo->exec(0, 0, 0, false, 1, residency, &execObjectsStorage), std::exception);
+    EXPECT_EQ(EFAULT, bo->exec(0, 0, 0, false, 1, nullptr, 0u, &execObjectsStorage));
 }
 
 TEST_F(DrmBufferObjectTest, setTiling_success) {
@@ -112,7 +111,7 @@ TEST_F(DrmBufferObjectTest, givenAddressThatWhenSizeIsAddedCrosses32BitBoundaryW
     EXPECT_TRUE(execObject.flags & EXEC_OBJECT_SUPPORTS_48B_ADDRESS);
 }
 
-TEST_F(DrmBufferObjectTest, givenAddressThatWhenSizeIsAddedWithin32BitBoundaryWhenExecIsCalledThen48BitFlagIsNotSet) {
+TEST_F(DrmBufferObjectTest, givenAddressThatWhenSizeIsAddedWithin32BitBoundaryWhenExecIsCalledThen48BitFlagSet) {
     drm_i915_gem_exec_object2 execObject;
 
     memset(&execObject, 0, sizeof(execObject));
@@ -120,7 +119,7 @@ TEST_F(DrmBufferObjectTest, givenAddressThatWhenSizeIsAddedWithin32BitBoundaryWh
     bo->setSize(0xFFF);
     bo->fillExecObject(execObject, 1);
     //base address + size < size of 32bit address space
-    EXPECT_FALSE(execObject.flags & EXEC_OBJECT_SUPPORTS_48B_ADDRESS);
+    EXPECT_TRUE(execObject.flags & EXEC_OBJECT_SUPPORTS_48B_ADDRESS);
 }
 
 TEST_F(DrmBufferObjectTest, onPinIoctlFailed) {
@@ -158,6 +157,13 @@ TEST(DrmBufferObjectSimpleTest, givenInvalidBoWhenPinIsCalledThenErrorIsReturned
     BufferObject *boArray[1] = {boToPin.get()};
     auto ret = bo->pin(boArray, 1, 1);
     EXPECT_EQ(EFAULT, ret);
+}
+
+TEST(DrmBufferObjectSimpleTest, givenBufferObjectWhenConstructedWithASizeThenTheSizeIsInitialized) {
+    std::unique_ptr<DrmMockCustom> drmMock(new DrmMockCustom);
+    std::unique_ptr<BufferObject> bo(new BufferObject(drmMock.get(), 1, 0x1000));
+
+    EXPECT_EQ(0x1000u, bo->peekSize());
 }
 
 TEST(DrmBufferObjectSimpleTest, givenArrayOfBosWhenPinnedThenAllBosArePinned) {

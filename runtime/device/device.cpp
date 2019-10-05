@@ -7,28 +7,18 @@
 
 #include "runtime/device/device.h"
 
-#include "runtime/built_ins/built_ins.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/command_stream/device_command_stream.h"
 #include "runtime/command_stream/experimental_command_buffer.h"
 #include "runtime/command_stream/preemption.h"
-#include "runtime/compiler_interface/compiler_interface.h"
 #include "runtime/device/device_vector.h"
 #include "runtime/device/driver_info.h"
 #include "runtime/execution_environment/execution_environment.h"
-#include "runtime/helpers/debug_helpers.h"
 #include "runtime/helpers/hw_helper.h"
-#include "runtime/helpers/options.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/os_interface/os_context.h"
 #include "runtime/os_interface/os_interface.h"
 #include "runtime/os_interface/os_time.h"
 #include "runtime/source_level_debugger/source_level_debugger.h"
-
-#include "hw_cmds.h"
-
-#include <cstring>
-#include <map>
 
 namespace NEO {
 
@@ -50,21 +40,6 @@ void DeviceVector::toDeviceIDs(std::vector<cl_device_id> &devIDs) {
         i++;
     }
 }
-
-CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executionEnvironment);
-
-// Global table of hardware prefixes
-const char *hardwarePrefix[IGFX_MAX_PRODUCT] = {
-    nullptr,
-};
-// Global table of family names
-const char *familyName[IGFX_MAX_CORE] = {
-    nullptr,
-};
-// Global table of family names
-bool familyEnabled[IGFX_MAX_CORE] = {
-    false,
-};
 
 Device::Device(ExecutionEnvironment *executionEnvironment, uint32_t deviceIndex)
     : executionEnvironment(executionEnvironment), deviceIndex(deviceIndex) {
@@ -97,8 +72,6 @@ Device::~Device() {
     }
 
     executionEnvironment->memoryManager->waitForDeletions();
-    alignedFree(this->slmWindowStartAddress);
-
     executionEnvironment->decRefInternal();
 }
 
@@ -148,73 +121,56 @@ bool Device::createDeviceImpl() {
 }
 
 bool Device::createEngines() {
-
     auto &hwInfo = getHardwareInfo();
-    auto defaultEngineType = getChosenEngineType(hwInfo);
     auto &gpgpuEngines = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getGpgpuEngineInstances();
 
     for (uint32_t deviceCsrIndex = 0; deviceCsrIndex < gpgpuEngines.size(); deviceCsrIndex++) {
-        if (!executionEnvironment->initializeCommandStreamReceiver(getDeviceIndex(), deviceCsrIndex)) {
+        if (!createEngine(getDeviceIndex(), deviceCsrIndex, gpgpuEngines[deviceCsrIndex])) {
             return false;
         }
-
-        auto commandStreamReceiver = executionEnvironment->commandStreamReceivers[getDeviceIndex()][deviceCsrIndex].get();
-
-        DeviceBitfield deviceBitfield;
-        deviceBitfield.set(getDeviceIndex());
-        bool lowPriority = deviceCsrIndex == HwHelper::lowPriorityGpgpuEngineIndex;
-        auto osContext = executionEnvironment->memoryManager->createAndRegisterOsContext(commandStreamReceiver, gpgpuEngines[deviceCsrIndex],
-                                                                                         deviceBitfield, preemptionMode, lowPriority);
-        commandStreamReceiver->setupContext(*osContext);
-
-        if (!commandStreamReceiver->initializeTagAllocation()) {
-            return false;
-        }
-        if (gpgpuEngines[deviceCsrIndex] == defaultEngineType && !lowPriority) {
-            defaultEngineIndex = deviceCsrIndex;
-        }
-
-        if ((preemptionMode == PreemptionMode::MidThread || isSourceLevelDebuggerActive()) && !commandStreamReceiver->createPreemptionAllocation()) {
-            return false;
-        }
-
-        engines.push_back({commandStreamReceiver, osContext});
     }
+    return true;
+}
+
+bool Device::createEngine(uint32_t deviceIndex, uint32_t deviceCsrIndex, aub_stream::EngineType engineType) {
+    auto &hwInfo = getHardwareInfo();
+    auto defaultEngineType = getChosenEngineType(hwInfo);
+
+    if (!executionEnvironment->initializeCommandStreamReceiver(deviceIndex, deviceCsrIndex)) {
+        return false;
+    }
+
+    auto commandStreamReceiver = executionEnvironment->commandStreamReceivers[deviceIndex][deviceCsrIndex].get();
+
+    bool lowPriority = (deviceCsrIndex == HwHelper::lowPriorityGpgpuEngineIndex);
+    auto osContext = executionEnvironment->memoryManager->createAndRegisterOsContext(commandStreamReceiver, engineType,
+                                                                                     getDeviceBitfieldForOsContext(), preemptionMode, lowPriority);
+    commandStreamReceiver->setupContext(*osContext);
+
+    if (!commandStreamReceiver->initializeTagAllocation()) {
+        return false;
+    }
+    if (engineType == defaultEngineType && !lowPriority) {
+        defaultEngineIndex = deviceCsrIndex;
+    }
+
+    if ((preemptionMode == PreemptionMode::MidThread || isSourceLevelDebuggerActive()) && !commandStreamReceiver->createPreemptionAllocation()) {
+        return false;
+    }
+
+    engines.push_back({commandStreamReceiver, osContext});
+
     return true;
 }
 
 const HardwareInfo &Device::getHardwareInfo() const { return *executionEnvironment->getHardwareInfo(); }
 
-const WorkaroundTable *Device::getWaTable() const { return &getHardwareInfo().workaroundTable; }
-
 const DeviceInfo &Device::getDeviceInfo() const {
     return deviceInfo;
 }
 
-DeviceInfo *Device::getMutableDeviceInfo() {
-    return &deviceInfo;
-}
-
-void *Device::getSLMWindowStartAddress() {
-    prepareSLMWindow();
-    return this->slmWindowStartAddress;
-}
-
-void Device::prepareSLMWindow() {
-    if (this->slmWindowStartAddress == nullptr) {
-        this->slmWindowStartAddress = executionEnvironment->memoryManager->allocateSystemMemory(MemoryConstants::slmWindowSize, MemoryConstants::slmWindowAlignment);
-    }
-}
-
 const char *Device::getProductAbbrev() const {
-    return hardwarePrefix[executionEnvironment->getHardwareInfo()->platform.eProductFamily];
-}
-
-const std::string Device::getFamilyNameWithType() const {
-    auto &hwInfo = getHardwareInfo();
-    std::string platformName = familyName[hwInfo.platform.eRenderCoreFamily];
-    platformName.append(getPlatformType(hwInfo));
-    return platformName;
+    return hardwarePrefix[getHardwareInfo().platform.eProductFamily];
 }
 
 double Device::getProfilingTimerResolution() {
@@ -223,16 +179,6 @@ double Device::getProfilingTimerResolution() {
 
 unsigned int Device::getSupportedClVersion() const {
     return getHardwareInfo().capabilityTable.clVersionSupport;
-}
-
-/* We hide the retain and release function of BaseObject. */
-void Device::retain() {
-    DEBUG_BREAK_IF(!isValid());
-}
-
-unique_ptr_if_unused<Device> Device::release() {
-    DEBUG_BREAK_IF(!isValid());
-    return unique_ptr_if_unused<Device>(this, false);
 }
 
 bool Device::isSimulation() const {

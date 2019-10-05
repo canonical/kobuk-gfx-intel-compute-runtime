@@ -88,7 +88,7 @@ TEST_F(EventTests, eventWaitShouldntSendPC) {
     // no more tasks after WFE, no need to write PC
     EXPECT_EQ(pEvent->taskLevel + 1, csr.peekTaskLevel());
 
-    pCmdQ->finish(false);
+    pCmdQ->finish();
 
     // Check CL_EVENT_COMMAND_TYPE
     {
@@ -132,7 +132,7 @@ TEST_F(EventTests, waitForArray) {
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(pEvent1->taskLevel + 1, csr.peekTaskLevel());
 
-    pCmdQ->finish(false);
+    pCmdQ->finish();
     EXPECT_EQ(pEvent1->taskLevel + 1, csr.peekTaskLevel());
     // Check CL_EVENT_COMMAND_TYPE
     {
@@ -172,7 +172,7 @@ TEST_F(EventTests, event_NDR_Wait_NDR_Finish) {
     ASSERT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(pEvent->taskLevel + 2, csr.peekTaskLevel());
 
-    pCmdQ->finish(false);
+    pCmdQ->finish();
     EXPECT_EQ(pEvent->taskLevel + 2, csr.peekTaskLevel());
 
     // Check CL_EVENT_COMMAND_TYPE
@@ -222,7 +222,7 @@ TEST_F(EventTests, eventPassedToEnqueueMarkerHasTheSameLevelAsPreviousCommand) {
     ASSERT_EQ(CL_SUCCESS, retVal);
 
     if (csr.peekTimestampPacketWriteEnabled()) {
-        EXPECT_EQ(csr.peekTaskLevel(), pEvent2->taskLevel);
+        EXPECT_EQ(csr.peekTaskLevel(), pCmdQ->taskLevel + 1);
     } else {
         EXPECT_EQ(csr.peekTaskLevel(), pEvent->taskLevel + 1);
     }

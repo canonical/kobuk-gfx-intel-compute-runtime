@@ -19,6 +19,11 @@ class GraphicsAllocation;
 class InternalAllocationStorage;
 class MemoryManager;
 struct HardwareInfo;
+class OsContext;
+
+namespace ScratchSpaceConstants {
+constexpr size_t scratchSpaceOffsetFor64Bit = 4096u;
+}
 
 class ScratchSpaceController {
   public:
@@ -35,7 +40,7 @@ class ScratchSpaceController {
                                          uint32_t requiredPerThreadScratchSize,
                                          uint32_t requiredPerThreadPrivateScratchSize,
                                          uint32_t currentTaskCount,
-                                         uint32_t deviceIdx,
+                                         OsContext &osContext,
                                          bool &stateBaseAddressDirty,
                                          bool &vfeStateDirty) = 0;
     virtual uint64_t calculateNewGSH() = 0;

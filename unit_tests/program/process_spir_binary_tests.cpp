@@ -5,8 +5,8 @@
  *
  */
 
-#include "runtime/helpers/string.h"
-#include "runtime/program/program.h"
+#include "core/helpers/string.h"
+#include "runtime/device/device.h"
 #include "unit_tests/mocks/mock_program.h"
 
 #include "gtest/gtest.h"

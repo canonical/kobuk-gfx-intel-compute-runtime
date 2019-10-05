@@ -5,8 +5,8 @@
  *
  */
 
+#include "core/helpers/aligned_memory.h"
 #include "core/helpers/ptr_math.h"
-#include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/surface_formats.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/mem_obj/image.h"
@@ -126,7 +126,7 @@ HWTEST_F(MediaImageSetArgTest, clSetKernelArgImage) {
 
     typename FamilyType::MEDIA_SURFACE_STATE::TILE_MODE tileMode;
 
-    if (srcImage->allowTiling()) {
+    if (srcImage->isTiledAllocation()) {
         tileMode = FamilyType::MEDIA_SURFACE_STATE::TILE_MODE_TILEMODE_YMAJOR;
     } else {
         tileMode = FamilyType::MEDIA_SURFACE_STATE::TILE_MODE_TILEMODE_LINEAR;

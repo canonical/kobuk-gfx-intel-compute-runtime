@@ -9,8 +9,8 @@
 // Current order must be preserved due to two versions of igfxfmid.h
 #pragma warning(push)
 #pragma warning(disable : 4005)
+#include "core/command_stream/linear_stream.h"
 #include "core/helpers/ptr_math.h"
-#include "runtime/command_stream/linear_stream.h"
 #include "runtime/command_stream/preemption.h"
 #include "runtime/device/device.h"
 #include "runtime/gmm_helper/page_table_mngr.h"
@@ -103,13 +103,13 @@ FlushStamp WddmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer,
 
 template <typename GfxFamily>
 void WddmCommandStreamReceiver<GfxFamily>::makeResident(GraphicsAllocation &gfxAllocation) {
-    DBG_LOG(ResidencyDebugEnable, "Residency:", __FUNCTION__, "allocation =", static_cast<WddmAllocation *>(&gfxAllocation));
+    DBG_LOG(ResidencyDebugEnable, "Residency:", __FUNCTION__, "allocation =", &gfxAllocation);
 
     if (gfxAllocation.fragmentsStorage.fragmentCount == 0) {
-        DBG_LOG(ResidencyDebugEnable, "Residency:", __FUNCTION__, "allocation default handle =", static_cast<WddmAllocation *>(&gfxAllocation)->getDefaultHandle());
+        DBG_LOG(ResidencyDebugEnable, "Residency:", __FUNCTION__, "allocation default handle =", static_cast<WddmAllocation &>(gfxAllocation).getDefaultHandle());
     } else {
-        for (uint32_t allocationId = 0; allocationId < static_cast<WddmAllocation *>(&gfxAllocation)->fragmentsStorage.fragmentCount; allocationId++) {
-            DBG_LOG(ResidencyDebugEnable, "Residency:", __FUNCTION__, "fragment handle =", static_cast<WddmAllocation *>(&gfxAllocation)->fragmentsStorage.fragmentStorageData[allocationId].osHandleStorage->handle);
+        for (uint32_t allocationId = 0; allocationId < gfxAllocation.fragmentsStorage.fragmentCount; allocationId++) {
+            DBG_LOG(ResidencyDebugEnable, "Residency:", __FUNCTION__, "fragment handle =", gfxAllocation.fragmentsStorage.fragmentStorageData[allocationId].osHandleStorage->handle);
         }
     }
 
@@ -117,7 +117,7 @@ void WddmCommandStreamReceiver<GfxFamily>::makeResident(GraphicsAllocation &gfxA
 }
 
 template <typename GfxFamily>
-void WddmCommandStreamReceiver<GfxFamily>::processResidency(ResidencyContainer &allocationsForResidency) {
+void WddmCommandStreamReceiver<GfxFamily>::processResidency(const ResidencyContainer &allocationsForResidency) {
     bool success = static_cast<OsContextWin *>(osContext)->getResidencyController().makeResidentResidencyAllocations(allocationsForResidency);
     DEBUG_BREAK_IF(!success);
 }
@@ -129,7 +129,7 @@ void WddmCommandStreamReceiver<GfxFamily>::processEviction() {
 }
 
 template <typename GfxFamily>
-WddmMemoryManager *WddmCommandStreamReceiver<GfxFamily>::getMemoryManager() {
+WddmMemoryManager *WddmCommandStreamReceiver<GfxFamily>::getMemoryManager() const {
     return static_cast<WddmMemoryManager *>(CommandStreamReceiver::getMemoryManager());
 }
 

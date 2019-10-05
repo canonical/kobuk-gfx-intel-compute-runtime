@@ -40,7 +40,9 @@ class GmmResourceInfo {
 
     MOCKABLE_VIRTUAL uint32_t getHAlign() { return resourceInfo->GetHAlign(); }
 
-    MOCKABLE_VIRTUAL uint32_t getVAlign() { return resourceInfo->GetVAlign(); }
+    MOCKABLE_VIRTUAL uint32_t getHAlignSurfaceState() { return resourceInfo->GetHAlignSurfaceState(); }
+
+    MOCKABLE_VIRTUAL uint32_t getVAlignSurfaceState() { return resourceInfo->GetVAlignSurfaceState(); }
 
     MOCKABLE_VIRTUAL uint32_t getMaxLod() { return resourceInfo->GetMaxLod(); }
 
@@ -71,7 +73,6 @@ class GmmResourceInfo {
     MOCKABLE_VIRTUAL GMM_RESOURCE_INFO *peekHandle() const { return resourceInfo.get(); }
 
   protected:
-    static void customDeleter(GMM_RESOURCE_INFO *gmmResourceInfoHandle);
     using UniquePtrType = std::unique_ptr<GMM_RESOURCE_INFO, std::function<void(GMM_RESOURCE_INFO *)>>;
 
     GmmResourceInfo() = default;
@@ -79,6 +80,8 @@ class GmmResourceInfo {
     GmmResourceInfo(GMM_RESCREATE_PARAMS *resourceCreateParams);
 
     GmmResourceInfo(GMM_RESOURCE_INFO *inputGmmResourceInfo);
+
+    void createResourceInfo(GMM_RESOURCE_INFO *resourceInfoPtr);
 
     UniquePtrType resourceInfo;
 };

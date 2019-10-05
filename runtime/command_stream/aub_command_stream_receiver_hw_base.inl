@@ -5,7 +5,12 @@
  *
  */
 
+#include "core/helpers/aligned_memory.h"
+#include "core/helpers/debug_helpers.h"
 #include "core/helpers/ptr_math.h"
+#include "core/helpers/string.h"
+#include "core/memory_manager/graphics_allocation.h"
+#include "core/memory_manager/memory_constants.h"
 #include "runtime/aub/aub_helper.h"
 #include "runtime/aub_mem_dump/aub_alloc_dump.h"
 #include "runtime/aub_mem_dump/aub_alloc_dump.inl"
@@ -14,15 +19,10 @@
 #include "runtime/command_stream/aub_subcapture.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/execution_environment/execution_environment.h"
-#include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/debug_helpers.h"
 #include "runtime/helpers/hardware_context_controller.h"
 #include "runtime/helpers/hash.h"
 #include "runtime/helpers/neo_driver_version.h"
-#include "runtime/helpers/string.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 #include "runtime/memory_manager/memory_banks.h"
-#include "runtime/memory_manager/memory_constants.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/os_interface/os_context.h"
@@ -43,7 +43,7 @@ AUBCommandStreamReceiverHw<GfxFamily>::AUBCommandStreamReceiverHw(const std::str
     : BaseClass(executionEnvironment),
       standalone(standalone) {
 
-    executionEnvironment.initAubCenter(this->localMemoryEnabled, fileName, this->getType());
+    executionEnvironment.initAubCenter(this->isLocalMemoryEnabled(), fileName, this->getType());
     auto aubCenter = executionEnvironment.aubCenter.get();
     UNRECOVERABLE_IF(nullptr == aubCenter);
 
@@ -407,7 +407,7 @@ void AUBCommandStreamReceiverHw<GfxFamily>::submitBatchBuffer(uint64_t batchBuff
         }
 
         auto physBatchBuffer = ppgtt->map(static_cast<uintptr_t>(batchBufferGpuAddress), batchBufferSize, entryBits, memoryBank);
-        AubHelperHw<GfxFamily> aubHelperHw(this->localMemoryEnabled);
+        AubHelperHw<GfxFamily> aubHelperHw(this->isLocalMemoryEnabled());
         AUB::reserveAddressPPGTT(*stream, static_cast<uintptr_t>(batchBufferGpuAddress), batchBufferSize, physBatchBuffer,
                                  entryBits, aubHelperHw);
 
@@ -612,7 +612,7 @@ void AUBCommandStreamReceiverHw<GfxFamily>::writeMemory(uint64_t gpuAddress, voi
         getAubStream()->addComment(str.str().c_str());
     }
 
-    AubHelperHw<GfxFamily> aubHelperHw(this->localMemoryEnabled);
+    AubHelperHw<GfxFamily> aubHelperHw(this->isLocalMemoryEnabled());
 
     PageWalker walker = [&](uint64_t physAddress, size_t size, size_t offset, uint64_t entryBits) {
         AUB::reserveAddressGGTTAndWriteMmeory(*stream, static_cast<uintptr_t>(gpuAddress), cpuAddress, physAddress, size, offset, entryBits,
@@ -624,7 +624,7 @@ void AUBCommandStreamReceiverHw<GfxFamily>::writeMemory(uint64_t gpuAddress, voi
 
 template <typename GfxFamily>
 bool AUBCommandStreamReceiverHw<GfxFamily>::writeMemory(GraphicsAllocation &gfxAllocation) {
-    if (!gfxAllocation.isAubWritable()) {
+    if (!this->isAubWritable(gfxAllocation)) {
         return false;
     }
 
@@ -651,7 +651,7 @@ bool AUBCommandStreamReceiverHw<GfxFamily>::writeMemory(GraphicsAllocation &gfxA
     }
 
     if (AubHelper::isOneTimeAubWritableAllocationType(gfxAllocation.getAllocationType())) {
-        gfxAllocation.setAubWritable(false);
+        this->setAubWritable(false, gfxAllocation);
     }
 
     return true;
@@ -659,7 +659,7 @@ bool AUBCommandStreamReceiverHw<GfxFamily>::writeMemory(GraphicsAllocation &gfxA
 
 template <typename GfxFamily>
 bool AUBCommandStreamReceiverHw<GfxFamily>::writeMemory(AllocationView &allocationView) {
-    GraphicsAllocation gfxAllocation(GraphicsAllocation::AllocationType::UNKNOWN, reinterpret_cast<void *>(allocationView.first), allocationView.first, 0llu, allocationView.second, MemoryPool::MemoryNull, false);
+    GraphicsAllocation gfxAllocation(GraphicsAllocation::AllocationType::UNKNOWN, reinterpret_cast<void *>(allocationView.first), allocationView.first, 0llu, allocationView.second, MemoryPool::MemoryNull);
     return writeMemory(gfxAllocation);
 }
 
@@ -699,7 +699,7 @@ cl_int AUBCommandStreamReceiverHw<GfxFamily>::expectMemory(const void *gfxAddres
 }
 
 template <typename GfxFamily>
-void AUBCommandStreamReceiverHw<GfxFamily>::processResidency(ResidencyContainer &allocationsForResidency) {
+void AUBCommandStreamReceiverHw<GfxFamily>::processResidency(const ResidencyContainer &allocationsForResidency) {
     if (subCaptureManager->isSubCaptureMode()) {
         if (!subCaptureManager->isSubCaptureEnabled()) {
             return;
@@ -714,10 +714,11 @@ void AUBCommandStreamReceiverHw<GfxFamily>::processResidency(ResidencyContainer 
 
     for (auto &gfxAllocation : allocationsForResidency) {
         if (dumpAubNonWritable) {
-            gfxAllocation->setAubWritable(true);
+            this->setAubWritable(true, *gfxAllocation);
         }
         if (!writeMemory(*gfxAllocation)) {
-            DEBUG_BREAK_IF(!((gfxAllocation->getUnderlyingBufferSize() == 0) || !gfxAllocation->isAubWritable()));
+            DEBUG_BREAK_IF(!((gfxAllocation->getUnderlyingBufferSize() == 0) ||
+                             !this->isAubWritable(*gfxAllocation)));
         }
         gfxAllocation->updateResidencyTaskCount(this->taskCount + 1, this->osContext->getContextId());
     }
@@ -797,7 +798,7 @@ void AUBCommandStreamReceiverHw<GfxFamily>::addGUCStartMessage(uint64_t batchBuf
     typedef typename GfxFamily::MI_BATCH_BUFFER_START MI_BATCH_BUFFER_START;
 
     auto bufferSize = sizeof(uint32_t) + sizeof(MI_BATCH_BUFFER_START);
-    AubHelperHw<GfxFamily> aubHelperHw(this->localMemoryEnabled);
+    AubHelperHw<GfxFamily> aubHelperHw(this->isLocalMemoryEnabled());
 
     std::unique_ptr<void, std::function<void(void *)>> buffer(this->getMemoryManager()->alignedMallocWrapper(bufferSize, MemoryConstants::pageSize), [&](void *ptr) { this->getMemoryManager()->alignedFreeWrapper(ptr); });
     LinearStream linearStream(buffer.get(), bufferSize);

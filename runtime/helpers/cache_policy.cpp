@@ -7,8 +7,8 @@
 
 #include "runtime/helpers/cache_policy.h"
 
-#include "runtime/helpers/aligned_memory.h"
-#include "runtime/memory_manager/graphics_allocation.h"
+#include "core/helpers/aligned_memory.h"
+#include "core/memory_manager/graphics_allocation.h"
 
 namespace NEO {
 
@@ -18,8 +18,7 @@ bool isL3Capable(void *ptr, size_t size) {
 }
 
 bool isL3Capable(const NEO::GraphicsAllocation &graphicsAllocation) {
-    auto ptr = ptrOffset(graphicsAllocation.getUnderlyingBuffer(), static_cast<size_t>(graphicsAllocation.getAllocationOffset()));
-    return isL3Capable(ptr, graphicsAllocation.getUnderlyingBufferSize());
+    return isL3Capable(graphicsAllocation.getUnderlyingBuffer(), graphicsAllocation.getUnderlyingBufferSize());
 }
 
 } // namespace NEO

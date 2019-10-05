@@ -6,9 +6,10 @@
  */
 
 #pragma once
+#include "core/memory_manager/graphics_allocation.h"
 #include "runtime/command_stream/command_stream_receiver.h"
+#include "runtime/helpers/cache_policy.h"
 #include "runtime/mem_obj/mem_obj.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 
 namespace NEO {
 class CommandQueue;
@@ -18,6 +19,7 @@ class Surface {
     virtual ~Surface() = default;
     virtual void makeResident(CommandStreamReceiver &csr) = 0;
     virtual Surface *duplicate() = 0;
+    virtual bool allowsL3Caching() { return true; }
     bool IsCoherent;
 };
 
@@ -73,6 +75,10 @@ class HostPtrSurface : public Surface {
         return isPtrCopyAllowed;
     }
 
+    bool allowsL3Caching() override {
+        return isL3Capable(*gfxAllocation);
+    }
+
   protected:
     void *memoryPointer;
     size_t surfaceSize;
@@ -83,10 +89,10 @@ class HostPtrSurface : public Surface {
 class MemObjSurface : public Surface {
   public:
     MemObjSurface(MemObj *memObj) : Surface(memObj->getGraphicsAllocation()->isCoherent()), memObj(memObj) {
-        memObj->retain();
+        memObj->incRefInternal();
     }
     ~MemObjSurface() override {
-        memObj->release();
+        memObj->decRefInternal();
         memObj = nullptr;
     };
 

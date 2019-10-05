@@ -15,22 +15,7 @@
 
 using namespace NEO;
 
-struct BarrierTest : public CommandEnqueueFixture,
-                     public ::testing::Test {
-
-    void SetUp() override {
-        CommandEnqueueFixture::SetUp();
-        WhitelistedRegisters forceRegs = {false};
-        if (pDevice->getPreemptionMode() != PreemptionMode::Disabled) {
-            forceRegs.csChicken1_0x2580 = true;
-        }
-        pDevice->setForceWhitelistedRegs(true, &forceRegs);
-    }
-
-    void TearDown() override {
-        CommandEnqueueFixture::TearDown();
-    }
-};
+using BarrierTest = Test<CommandEnqueueFixture>;
 
 HWTEST_F(BarrierTest, givenCsrWithHigherLevelThenCommandQueueWhenEnqueueBarrierIsCalledThenCommandQueueAlignsToCsrWithoutSendingAnyCommands) {
     auto pCmdQ = this->pCmdQ;
@@ -72,7 +57,7 @@ HWTEST_F(BarrierTest, givenCsrWithHigherLevelThenCommandQueueWhenEnqueueBarrierI
     EXPECT_EQ(&csrCommandStream, &commandStreamReceiver.commandStream);
 }
 
-HWTEST_F(BarrierTest, CS_GT_CQ_ShouldNotAddPipeControl) {
+HWTEST_F(BarrierTest, GivenCsrTaskLevelGreaterThenCmdqTaskLevelWhenEnqueingBarrierWithWaitListThenAddPipeControlIsNotAdded) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
     auto pCS = this->pCS;
     auto pCmdQ = this->pCmdQ;
@@ -106,7 +91,7 @@ HWTEST_F(BarrierTest, CS_GT_CQ_ShouldNotAddPipeControl) {
     ASSERT_EQ(cmdList.end(), itorCmd);
 }
 
-HWTEST_F(BarrierTest, returnsEvent) {
+HWTEST_F(BarrierTest, GivenEventWhenEnqueingBarrierWithWaitListThenEventIsSetupCorrectly) {
     auto pCmdQ = this->pCmdQ;
 
     cl_uint numEventsInWaitList = 0;
@@ -133,7 +118,7 @@ HWTEST_F(BarrierTest, returnsEvent) {
     }
 }
 
-HWTEST_F(BarrierTest, returnedEventShouldHaveEqualDepth) {
+HWTEST_F(BarrierTest, WhenEnqueingBarrierWithWaitListThenReturnedEventShouldHaveEqualDepth) {
     auto pCmdQ = this->pCmdQ;
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
 
@@ -159,7 +144,7 @@ HWTEST_F(BarrierTest, returnedEventShouldHaveEqualDepth) {
     delete pEvent;
 }
 
-HWTEST_F(BarrierTest, eventWithWaitDependenciesShouldSync) {
+HWTEST_F(BarrierTest, WhenEnqueingBarrierWithWaitListThenDependenciesShouldSync) {
     auto pCmdQ = this->pCmdQ;
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
 
@@ -192,7 +177,7 @@ HWTEST_F(BarrierTest, eventWithWaitDependenciesShouldSync) {
     // in this case only cmdQ raises the taskLevel why csr stay intact
     EXPECT_EQ(8u, pCmdQ->taskLevel);
     if (csr.peekTimestampPacketWriteEnabled()) {
-        EXPECT_EQ(8u, commandStreamReceiver.peekTaskLevel());
+        EXPECT_EQ(pCmdQ->taskLevel + 1, commandStreamReceiver.peekTaskLevel());
     } else {
         EXPECT_EQ(7u, commandStreamReceiver.peekTaskLevel());
     }

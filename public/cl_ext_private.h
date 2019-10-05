@@ -54,6 +54,7 @@ using cl_unified_shared_memory_capabilities_intel = cl_bitfield;
 
 #define CL_MEM_FLAGS_INTEL 0x10001
 #define CL_MEM_LOCALLY_UNCACHED_RESOURCE (1 << 18)
+#define CL_MEM_LOCALLY_UNCACHED_SURFACE_STATE_RESOURCE (1 << 21)
 
 // Used with clEnqueueVerifyMemory
 #define CL_MEM_COMPARE_EQUAL 0u
@@ -63,6 +64,9 @@ using cl_unified_shared_memory_capabilities_intel = cl_bitfield;
 #define CL_MEM_FORCE_SHARED_PHYSICAL_MEMORY_INTEL (1 << 20)
 
 #define CL_MEM_ALLOCATION_HANDLE_INTEL 0x10050
+
+//Used with createBuffer
+#define CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL (1 << 23)
 
 /******************************
 *        UNIFIED MEMORY       *
@@ -110,3 +114,13 @@ using cl_unified_shared_memory_capabilities_intel = cl_bitfield;
 #define CL_COMMAND_MEMCPY_INTEL 0x4205
 #define CL_COMMAND_MIGRATEMEM_INTEL 0x4206
 #define CL_COMMAND_MEMADVISE_INTEL 0x4207
+
+/******************************
+*    SLICE COUNT SELECTING    *
+*******************************/
+
+/* cl_device_info */
+#define CL_DEVICE_SLICE_COUNT_INTEL 0x10020
+
+/* cl_queue_properties */
+#define CL_QUEUE_SLICE_COUNT_INTEL 0x10021

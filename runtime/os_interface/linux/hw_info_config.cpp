@@ -7,15 +7,17 @@
 
 #include "runtime/os_interface/hw_info_config.h"
 
+#include "core/memory_manager/memory_constants.h"
+#include "core/utilities/cpu_info.h"
 #include "runtime/command_stream/preemption.h"
 #include "runtime/gen_common/hw_cmds.h"
 #include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/hw_info.h"
-#include "runtime/memory_manager/memory_constants.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/os_interface/linux/drm_neo.h"
 #include "runtime/os_interface/linux/os_interface.h"
-#include "runtime/utilities/cpu_info.h"
+
+#include "instrumentation.h"
 
 #include <cstring>
 
@@ -145,13 +147,13 @@ int HwInfoConfig::configureHwInfo(const HardwareInfo *inHwInfo, HardwareInfo *ou
     hwHelper.adjustDefaultEngineType(outHwInfo);
     outHwInfo->capabilityTable.defaultEngineType = getChosenEngineType(*outHwInfo);
 
-    outHwInfo->capabilityTable.instrumentationEnabled = false;
+    outHwInfo->capabilityTable.instrumentationEnabled =
+        (outHwInfo->capabilityTable.instrumentationEnabled && haveInstrumentation);
     outHwInfo->capabilityTable.ftrRenderCompressedBuffers = false;
     outHwInfo->capabilityTable.ftrRenderCompressedImages = false;
 
     drm->checkPreemptionSupport();
     bool preemption = drm->isPreemptionSupported();
-    preemption = hwHelper.setupPreemptionRegisters(outHwInfo, preemption);
     PreemptionHelper::adjustDefaultPreemptionMode(outHwInfo->capabilityTable,
                                                   static_cast<bool>(outHwInfo->featureTable.ftrGpGpuMidThreadLevelPreempt) && preemption,
                                                   static_cast<bool>(outHwInfo->featureTable.ftrGpGpuThreadGroupLevelPreempt) && preemption,

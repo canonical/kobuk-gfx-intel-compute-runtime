@@ -6,6 +6,7 @@
  */
 
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
+#include "core/unit_tests/utilities/base_object_utils.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/helpers/dispatch_info_builder.h"
 #include "test.h"
@@ -13,13 +14,14 @@
 #include "unit_tests/fixtures/buffer_fixture.h"
 #include "unit_tests/fixtures/context_fixture.h"
 #include "unit_tests/fixtures/device_fixture.h"
+#include "unit_tests/fixtures/image_fixture.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_buffer.h"
+#include "unit_tests/mocks/mock_builtins.h"
 #include "unit_tests/mocks/mock_command_queue.h"
 #include "unit_tests/mocks/mock_csr.h"
 #include "unit_tests/mocks/mock_event.h"
 #include "unit_tests/mocks/mock_kernel.h"
-#include "unit_tests/utilities/base_object_utils.h"
 
 using namespace NEO;
 
@@ -74,7 +76,7 @@ struct OOQueueHwTest : public DeviceFixture,
     }
 };
 
-HWTEST_F(CommandQueueHwTest, enqueueBlockedMapUnmapOperationCreatesVirtualEvent) {
+HWTEST_F(CommandQueueHwTest, WhenEnqueuingBlockedMapUnmapOperationThenVirtualEventIsCreated) {
 
     CommandQueueHw<FamilyType> *pHwQ = reinterpret_cast<CommandQueueHw<FamilyType> *>(pCmdQ);
 
@@ -148,7 +150,7 @@ HWTEST_F(CommandQueueHwTest, givenNoReturnEventWhenCallingEnqueueBlockedMapUnmap
     pHwQ->virtualEvent = nullptr;
 }
 
-HWTEST_F(CommandQueueHwTest, addMapUnmapToWaitlistEventsDoesntAddDependenciesIntoChild) {
+HWTEST_F(CommandQueueHwTest, WhenAddMapUnmapToWaitlistEventsThenDependenciesAreNotAddedIntoChild) {
     auto buffer = new MockBuffer;
     CommandQueueHw<FamilyType> *pHwQ = reinterpret_cast<CommandQueueHw<FamilyType> *>(pCmdQ);
     auto returnEvent = new Event(pHwQ, CL_COMMAND_MAP_BUFFER, 0, 0);
@@ -220,7 +222,7 @@ HWTEST_F(CommandQueueHwTest, givenMapCommandWhenZeroStateCommandIsSubmittedOnNon
     buffer->decRefInternal();
 }
 
-HWTEST_F(CommandQueueHwTest, enqueueBlockedMapUnmapOperationInjectedCommand) {
+HWTEST_F(CommandQueueHwTest, GivenEventWhenEnqueuingBlockedMapUnmapOperationThenEventIsRetained) {
     CommandQueueHw<FamilyType> *pHwQ = reinterpret_cast<CommandQueueHw<FamilyType> *>(pCmdQ);
     Event *returnEvent = new Event(pHwQ, CL_COMMAND_MAP_BUFFER, 0, 0);
     auto buffer = new MockBuffer;
@@ -242,12 +244,11 @@ HWTEST_F(CommandQueueHwTest, enqueueBlockedMapUnmapOperationInjectedCommand) {
     // CommandQueue has retained this event, release it
     returnEvent->release();
     pHwQ->virtualEvent = nullptr;
-    // now delete
     delete returnEvent;
     buffer->decRefInternal();
 }
 
-HWTEST_F(CommandQueueHwTest, enqueueBlockedMapUnmapOperationPreviousEventHasNotInjectedChild) {
+HWTEST_F(CommandQueueHwTest, GivenEventWhenEnqueuingBlockedMapUnmapOperationThenChildIsUnaffected) {
     auto buffer = new MockBuffer;
     CommandQueueHw<FamilyType> *pHwQ = reinterpret_cast<CommandQueueHw<FamilyType> *>(pCmdQ);
     Event *returnEvent = new Event(pHwQ, CL_COMMAND_MAP_BUFFER, 0, 0);
@@ -282,7 +283,7 @@ HWTEST_F(CommandQueueHwTest, GivenNonEmptyQueueOnBlockingMapBufferWillWaitForPre
             : CommandQueueHw<FamilyType>(context, device, 0) {
             finishWasCalled = false;
         }
-        cl_int finish(bool dcFlush) override {
+        cl_int finish() override {
             finishWasCalled = true;
             return 0;
         }
@@ -704,6 +705,7 @@ struct MockBuilder : BuiltinDispatchInfoBuilder {
     }
     bool buildDispatchInfos(MultiDispatchInfo &d, const BuiltinOpParams &conf) const override {
         wasBuildDispatchInfosWithBuiltinOpParamsCalled = true;
+        paramsReceived.multiDispatchInfo.setBuiltinOpParams(conf);
         return true;
     }
     bool buildDispatchInfos(MultiDispatchInfo &d, Kernel *kernel,
@@ -737,6 +739,178 @@ struct MockBuilder : BuiltinDispatchInfoBuilder {
     Params paramsToUse;
 };
 
+struct BuiltinParamsCommandQueueHwTests : public CommandQueueHwTest {
+
+    void SetUpImpl(EBuiltInOps::Type operation) {
+        auto builtIns = new MockBuiltins();
+        pCmdQ->getDevice().getExecutionEnvironment()->builtins.reset(builtIns);
+
+        auto swapBuilder = builtIns->setBuiltinDispatchInfoBuilder(
+            operation,
+            *pContext,
+            *pDevice,
+            std::unique_ptr<NEO::BuiltinDispatchInfoBuilder>(new MockBuilder(*builtIns)));
+
+        mockBuilder = static_cast<MockBuilder *>(&builtIns->getBuiltinDispatchInfoBuilder(
+            operation,
+            *pContext,
+            *pDevice));
+    }
+
+    MockBuilder *mockBuilder;
+};
+
+HWTEST_F(BuiltinParamsCommandQueueHwTests, givenEnqueueReadWriteBufferCallWhenBuiltinParamsArePassedThenCheckValuesCorectness) {
+
+    SetUpImpl(EBuiltInOps::CopyBufferToBuffer);
+    BufferDefaults::context = context;
+    auto buffer = clUniquePtr(BufferHelper<>::create());
+
+    char array[3 * MemoryConstants::cacheLineSize];
+    char *ptr = &array[MemoryConstants::cacheLineSize];
+    ptr = alignUp(ptr, MemoryConstants::cacheLineSize);
+    ptr -= 1;
+
+    cl_int status = pCmdQ->enqueueReadBuffer(buffer.get(), CL_FALSE, 0, 0, ptr, nullptr, 0, 0, nullptr);
+    EXPECT_EQ(CL_SUCCESS, status);
+
+    void *alignedPtr = alignDown(ptr, 4);
+    size_t ptrOffset = ptrDiff(ptr, alignedPtr);
+    Vec3<size_t> offset = {0, 0, 0};
+
+    auto builtinParams = mockBuilder->paramsReceived.multiDispatchInfo.peekBuiltinOpParams();
+
+    EXPECT_EQ(alignedPtr, builtinParams.dstPtr);
+    EXPECT_EQ(ptrOffset, builtinParams.dstOffset.x);
+    EXPECT_EQ(offset, builtinParams.srcOffset);
+
+    status = pCmdQ->enqueueWriteBuffer(buffer.get(), CL_FALSE, 0, 0, ptr, nullptr, 0, 0, nullptr);
+    EXPECT_EQ(CL_SUCCESS, status);
+
+    builtinParams = mockBuilder->paramsReceived.multiDispatchInfo.peekBuiltinOpParams();
+
+    EXPECT_EQ(alignedPtr, builtinParams.srcPtr);
+    EXPECT_EQ(ptrOffset, builtinParams.srcOffset.x);
+    EXPECT_EQ(offset, builtinParams.dstOffset);
+}
+
+HWTEST_F(BuiltinParamsCommandQueueHwTests, givenEnqueueWriteImageCallWhenBuiltinParamsArePassedThenCheckValuesCorectness) {
+
+    SetUpImpl(EBuiltInOps::CopyBufferToImage3d);
+
+    std::unique_ptr<Image> dstImage(ImageHelper<ImageUseHostPtr<Image2dDefaults>>::create(context));
+
+    auto imageDesc = dstImage->getImageDesc();
+    size_t origin[] = {0, 0, 0};
+    size_t region[] = {imageDesc.image_width, imageDesc.image_height, 0};
+
+    size_t rowPitch = dstImage->getHostPtrRowPitch();
+    size_t slicePitch = dstImage->getHostPtrSlicePitch();
+
+    char array[3 * MemoryConstants::cacheLineSize];
+    char *ptr = &array[MemoryConstants::cacheLineSize];
+    ptr = alignUp(ptr, MemoryConstants::cacheLineSize);
+    ptr -= 1;
+
+    void *alignedPtr = alignDown(ptr, 4);
+    size_t ptrOffset = ptrDiff(ptr, alignedPtr);
+    Vec3<size_t> offset = {0, 0, 0};
+
+    cl_int status = pCmdQ->enqueueWriteImage(dstImage.get(),
+                                             CL_FALSE,
+                                             origin,
+                                             region,
+                                             rowPitch,
+                                             slicePitch,
+                                             ptr,
+                                             nullptr,
+                                             0,
+                                             0,
+                                             nullptr);
+    EXPECT_EQ(CL_SUCCESS, status);
+
+    auto builtinParams = mockBuilder->paramsReceived.multiDispatchInfo.peekBuiltinOpParams();
+    EXPECT_EQ(alignedPtr, builtinParams.srcPtr);
+    EXPECT_EQ(ptrOffset, builtinParams.srcOffset.x);
+    EXPECT_EQ(offset, builtinParams.dstOffset);
+}
+
+HWTEST_F(BuiltinParamsCommandQueueHwTests, givenEnqueueReadImageCallWhenBuiltinParamsArePassedThenCheckValuesCorectness) {
+
+    SetUpImpl(EBuiltInOps::CopyImage3dToBuffer);
+
+    std::unique_ptr<Image> dstImage(ImageHelper<ImageUseHostPtr<Image2dDefaults>>::create(context));
+
+    auto imageDesc = dstImage->getImageDesc();
+    size_t origin[] = {0, 0, 0};
+    size_t region[] = {imageDesc.image_width, imageDesc.image_height, 0};
+
+    size_t rowPitch = dstImage->getHostPtrRowPitch();
+    size_t slicePitch = dstImage->getHostPtrSlicePitch();
+
+    char array[3 * MemoryConstants::cacheLineSize];
+    char *ptr = &array[MemoryConstants::cacheLineSize];
+    ptr = alignUp(ptr, MemoryConstants::cacheLineSize);
+    ptr -= 1;
+
+    void *alignedPtr = alignDown(ptr, 4);
+    size_t ptrOffset = ptrDiff(ptr, alignedPtr);
+    Vec3<size_t> offset = {0, 0, 0};
+
+    cl_int status = pCmdQ->enqueueReadImage(dstImage.get(),
+                                            CL_FALSE,
+                                            origin,
+                                            region,
+                                            rowPitch,
+                                            slicePitch,
+                                            ptr,
+                                            nullptr,
+                                            0,
+                                            0,
+                                            nullptr);
+    EXPECT_EQ(CL_SUCCESS, status);
+
+    auto builtinParams = mockBuilder->paramsReceived.multiDispatchInfo.peekBuiltinOpParams();
+    EXPECT_EQ(alignedPtr, builtinParams.dstPtr);
+    EXPECT_EQ(ptrOffset, builtinParams.dstOffset.x);
+    EXPECT_EQ(offset, builtinParams.srcOffset);
+}
+
+HWTEST_F(BuiltinParamsCommandQueueHwTests, givenEnqueueReadWriteBufferRectCallWhenBuiltinParamsArePassedThenCheckValuesCorectness) {
+
+    SetUpImpl(EBuiltInOps::CopyBufferRect);
+
+    BufferDefaults::context = context;
+    auto buffer = clUniquePtr(BufferHelper<>::create());
+
+    size_t bufferOrigin[3] = {0, 0, 0};
+    size_t hostOrigin[3] = {0, 0, 0};
+    size_t region[3] = {0, 0, 0};
+
+    char array[3 * MemoryConstants::cacheLineSize];
+    char *ptr = &array[MemoryConstants::cacheLineSize];
+    ptr = alignUp(ptr, MemoryConstants::cacheLineSize);
+    ptr -= 1;
+
+    cl_int status = pCmdQ->enqueueReadBufferRect(buffer.get(), CL_FALSE, bufferOrigin, hostOrigin, region, 0, 0, 0, 0, ptr, 0, 0, nullptr);
+
+    void *alignedPtr = alignDown(ptr, 4);
+    size_t ptrOffset = ptrDiff(ptr, alignedPtr);
+    Vec3<size_t> offset = {0, 0, 0};
+    auto builtinParams = mockBuilder->paramsReceived.multiDispatchInfo.peekBuiltinOpParams();
+
+    EXPECT_EQ(alignedPtr, builtinParams.dstPtr);
+    EXPECT_EQ(ptrOffset, builtinParams.dstOffset.x);
+    EXPECT_EQ(offset, builtinParams.srcOffset);
+
+    status = pCmdQ->enqueueWriteBufferRect(buffer.get(), CL_FALSE, bufferOrigin, hostOrigin, region, 0, 0, 0, 0, ptr, 0, 0, nullptr);
+    EXPECT_EQ(CL_SUCCESS, status);
+
+    builtinParams = mockBuilder->paramsReceived.multiDispatchInfo.peekBuiltinOpParams();
+    EXPECT_EQ(alignedPtr, builtinParams.srcPtr);
+    EXPECT_EQ(offset, builtinParams.dstOffset);
+    EXPECT_EQ(ptrOffset, builtinParams.srcOffset.x);
+}
 HWTEST_F(CommandQueueHwTest, givenCommandQueueThatIsBlockedAndUsesCpuCopyWhenEventIsReturnedItIsNotReady) {
     CommandQueueHw<FamilyType> *cmdQHw = static_cast<CommandQueueHw<FamilyType> *>(this->pCmdQ);
     MockBuffer buffer;

@@ -21,7 +21,7 @@ TEST_F(OsInterfaceTest, GivenWindowsWhenCreateEentIsCalledThenValidEventHandleIs
     EXPECT_EQ(TRUE, ret);
 }
 
-TEST(OsContextTest, givenWddmWhenCreateOsContextAfterInitWddmThenOsContextIsInitializedAndTrimCallbackIsRegistered) {
+TEST(OsContextTest, givenWddmWhenCreateOsContextAfterInitWddmThenOsContextIsInitializedTrimCallbackIsRegisteredMemoryOperationsHandlerCreated) {
     auto wddm = new WddmMock;
     OSInterface osInterface;
     osInterface.get()->setWddm(wddm);

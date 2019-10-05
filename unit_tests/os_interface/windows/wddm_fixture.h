@@ -13,9 +13,11 @@
 #include "runtime/os_interface/windows/gdi_interface.h"
 #include "runtime/os_interface/windows/os_context_win.h"
 #include "runtime/os_interface/windows/os_interface.h"
+#include "runtime/os_interface/windows/wddm_memory_operations_handler.h"
 #include "runtime/platform/platform.h"
 #include "test.h"
 #include "unit_tests/mocks/mock_wddm.h"
+#include "unit_tests/mocks/mock_wddm_residency_allocations_container.h"
 #include "unit_tests/os_interface/windows/gdi_dll_fixture.h"
 #include "unit_tests/os_interface/windows/mock_gdi_interface.h"
 
@@ -23,11 +25,12 @@
 
 namespace NEO {
 struct WddmFixture : ::testing::Test {
-    void SetUp() {
+    void SetUp() override {
         executionEnvironment = platformImpl->peekExecutionEnvironment();
         wddm = static_cast<WddmMock *>(Wddm::createWddm());
         executionEnvironment->osInterface = std::make_unique<OSInterface>();
         executionEnvironment->osInterface->get()->setWddm(wddm);
+        executionEnvironment->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
         osInterface = executionEnvironment->osInterface.get();
         gdi = new MockGdi();
         wddm->gdi.reset(gdi);
@@ -35,6 +38,7 @@ struct WddmFixture : ::testing::Test {
         auto hwInfo = *platformDevices[0];
         wddm->init(hwInfo);
         osContext = std::make_unique<OsContextWin>(*osInterface->get()->getWddm(), 0u, 1u, HwHelper::get(platformDevices[0]->platform.eRenderCoreFamily).getGpgpuEngineInstances()[0], preemptionMode, false);
+        mockTemporaryResources = static_cast<MockWddmResidentAllocationsContainer *>(wddm->temporaryResources.get());
     }
 
     WddmMock *wddm = nullptr;
@@ -43,6 +47,7 @@ struct WddmFixture : ::testing::Test {
     ExecutionEnvironment *executionEnvironment;
 
     MockGdi *gdi = nullptr;
+    MockWddmResidentAllocationsContainer *mockTemporaryResources;
 };
 
 struct WddmFixtureWithMockGdiDll : public GdiDllFixture {
@@ -52,6 +57,7 @@ struct WddmFixtureWithMockGdiDll : public GdiDllFixture {
         wddm = static_cast<WddmMock *>(Wddm::createWddm());
         executionEnvironment->osInterface = std::make_unique<OSInterface>();
         executionEnvironment->osInterface->get()->setWddm(wddm);
+        executionEnvironment->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
         osInterface = executionEnvironment->osInterface.get();
     }
 

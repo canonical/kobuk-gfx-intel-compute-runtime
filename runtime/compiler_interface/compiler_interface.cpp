@@ -9,6 +9,7 @@
 
 #include "runtime/compiler_interface/binary_cache.h"
 #include "runtime/compiler_interface/compiler_interface.inl"
+#include "runtime/device/device.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/os_interface/os_inc_base.h"
@@ -460,7 +461,7 @@ CIF::RAII::UPtr_t<IGC::IgcOclTranslationCtxTagOCL> CompilerInterface::createIgcT
         const HardwareInfo *hwInfo = &device.getHardwareInfo();
         auto productFamily = DebugManager.flags.ForceCompilerUsePlatform.get();
         if (productFamily != "unk") {
-            getHwInfoForPlatformString(productFamily.c_str(), hwInfo);
+            getHwInfoForPlatformString(productFamily, hwInfo);
         }
         IGC::PlatformHelper::PopulateInterfaceWith(*igcPlatform, hwInfo->platform);
         IGC::GtSysInfoHelper::PopulateInterfaceWith(*igcGtSystemInfo, hwInfo->gtSystemInfo);

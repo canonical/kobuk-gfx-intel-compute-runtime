@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/helpers/string.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
-#include "runtime/helpers/string.h"
 #include "runtime/platform/extensions.h"
 #include "runtime/platform/platform.h"
 #include "runtime/sharings/sharing.h"
@@ -33,14 +33,14 @@ class SharingFactoryStateRestore : public SharingFactory {
     }
 
     void clearCurrentState() {
-        for (size_t i = 0; i < sizeof(sharingContextBuilder) / sizeof(*sharingContextBuilder); i++) {
-            sharingContextBuilder[i] = nullptr;
+        for (auto &builder : sharingContextBuilder) {
+            builder = nullptr;
         }
     }
 
     template <typename F>
     void registerSharing(SharingType type) {
-        auto object = std::unique_ptr<F>(new F);
+        auto object = std::make_unique<F>();
         sharingContextBuilder[type] = object.get();
         sharings.push_back(std::move(object));
     }

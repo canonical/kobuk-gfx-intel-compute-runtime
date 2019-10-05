@@ -14,6 +14,7 @@
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "runtime/platform/platform.h"
 #include "unit_tests/helpers/variable_backup.h"
+#include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_device.h"
 #include "unit_tests/mocks/mock_gmm.h"
 #include "unit_tests/mocks/mock_graphics_allocation.h"
@@ -161,6 +162,8 @@ TEST_F(GmmTests, validImageTypeQuery) {
         EXPECT_GT(imgInfo.qPitch, 0u);
     }
 
+    auto &hwHelper = HwHelper::get(GmmHelper::getInstance()->getHardwareInfo()->platform.eRenderCoreFamily);
+
     EXPECT_EQ(queryGmm->resourceParams.Type, GMM_RESOURCE_TYPE::RESOURCE_3D);
     EXPECT_EQ(queryGmm->resourceParams.NoGfxMemory, 1u);
 
@@ -172,7 +175,7 @@ TEST_F(GmmTests, validImageTypeQuery) {
     EXPECT_EQ(queryGmm->resourceParams.BaseHeight, 17u);
     EXPECT_EQ(queryGmm->resourceParams.Depth, 17u);
     EXPECT_EQ(queryGmm->resourceParams.ArraySize, 1u);
-    EXPECT_EQ(queryGmm->resourceParams.Flags.Wa.__ForceOtherHVALIGN4, 1u);
+    EXPECT_EQ(!!queryGmm->resourceParams.Flags.Wa.__ForceOtherHVALIGN4, hwHelper.hvAlign4Required());
 }
 
 TEST_F(GmmTests, givenWidthWhenCreatingResourceThenSetWidth64Field) {
@@ -237,41 +240,6 @@ TEST_F(GmmTests, given2DimageFromBufferParametersWhenGmmResourceIsCreatedAndPitc
     EXPECT_EQ(imgDesc.image_row_pitch, queryGmm->gmmResourceInfo->getRenderPitch());
 }
 
-TEST_F(GmmTests, givenTilableImageWhenEnableForceLinearImagesThenYTilingIsDisabled) {
-    DebugManagerStateRestore debugStateBackup;
-    cl_image_desc imgDesc{};
-    imgDesc.image_type = CL_MEM_OBJECT_IMAGE3D;
-    imgDesc.image_width = 17;
-    imgDesc.image_height = 17;
-    imgDesc.image_depth = 17;
-
-    DebugManager.flags.ForceLinearImages.set(false);
-
-    auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-
-    auto queryGmm = MockGmm::queryImgParams(imgInfo);
-
-    auto &hwHelper = HwHelper::get(GmmHelper::getInstance()->getHardwareInfo()->platform.eRenderCoreFamily);
-    bool supportsYTiling = hwHelper.supportsYTiling();
-
-    if (!supportsYTiling) {
-        EXPECT_EQ(queryGmm->resourceParams.Flags.Info.Linear, 0u);
-        EXPECT_EQ(queryGmm->resourceParams.Flags.Info.TiledY, 0u);
-    } else {
-        EXPECT_EQ(queryGmm->resourceParams.Flags.Info.Linear, 1u);
-        EXPECT_EQ(queryGmm->resourceParams.Flags.Info.TiledY, 1u);
-    }
-
-    DebugManager.flags.ForceLinearImages.set(true);
-
-    delete queryGmm.get();
-    queryGmm.release();
-    queryGmm = MockGmm::queryImgParams(imgInfo);
-
-    EXPECT_EQ(queryGmm->resourceParams.Flags.Info.Linear, 1u);
-    EXPECT_EQ(queryGmm->resourceParams.Flags.Info.TiledY, 0u);
-}
-
 TEST_F(GmmTests, givenPlanarFormatsWhenQueryingImageParamsThenUVOffsetIsQueried) {
     cl_image_desc imgDesc{};
     imgDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
@@ -303,19 +271,11 @@ TEST_F(GmmTests, givenTilingModeSetToTileYWhenHwSupportsTilingThenTileYFlagIsSet
     imgDesc.image_depth = 1;
 
     auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-    imgInfo.tilingMode = TilingMode::TILE_Y;
+    imgInfo.linearStorage = false;
     auto gmm = std::make_unique<Gmm>(imgInfo, StorageInfo{});
 
-    auto &hwHelper = HwHelper::get(GmmHelper::getInstance()->getHardwareInfo()->platform.eRenderCoreFamily);
-    bool supportsYTiling = hwHelper.supportsYTiling();
-
-    if (!supportsYTiling) {
-        EXPECT_EQ(gmm->resourceParams.Flags.Info.Linear, 0u);
-        EXPECT_EQ(gmm->resourceParams.Flags.Info.TiledY, 0u);
-    } else {
-        EXPECT_EQ(gmm->resourceParams.Flags.Info.Linear, 1u);
-        EXPECT_EQ(gmm->resourceParams.Flags.Info.TiledY, 1u);
-    }
+    EXPECT_EQ(gmm->resourceParams.Flags.Info.Linear, 0u);
+    EXPECT_EQ(gmm->resourceParams.Flags.Info.TiledY, 0u);
 }
 
 TEST_F(GmmTests, givenTilingModeSetToNonTiledWhenCreatingGmmThenLinearFlagIsSet) {
@@ -326,24 +286,11 @@ TEST_F(GmmTests, givenTilingModeSetToNonTiledWhenCreatingGmmThenLinearFlagIsSet)
     imgDesc.image_depth = 1;
 
     auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-    imgInfo.tilingMode = TilingMode::NON_TILED;
+    imgInfo.linearStorage = true;
     auto gmm = std::make_unique<Gmm>(imgInfo, StorageInfo{});
 
     EXPECT_EQ(gmm->resourceParams.Flags.Info.Linear, 1u);
     EXPECT_EQ(gmm->resourceParams.Flags.Info.TiledY, 0u);
-}
-
-TEST_F(GmmTests, givenTilingModeSetToTileXWhenCreatingGmmThenUnrecoverableIfIsCalled) {
-    cl_image_desc imgDesc{};
-    imgDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
-    imgDesc.image_width = 4;
-    imgDesc.image_height = 4;
-    imgDesc.image_depth = 1;
-
-    auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-    imgInfo.tilingMode = TilingMode::TILE_X;
-
-    EXPECT_THROW(new Gmm(imgInfo, {}), std::exception);
 }
 
 TEST_F(GmmTests, givenZeroRowPitchWhenQueryImgFromBufferParamsThenCalculate) {
@@ -386,6 +333,14 @@ TEST_F(GmmTests, canonize) {
     uint64_t addr2 = 0x7FFFFFFFFFFFFFFF;
     uint64_t addrExpected2 = 0xFFFFFFFFFFFFFFFF;
     EXPECT_EQ(GmmHelper::canonize(addr2), addrExpected2);
+
+    uint64_t addr3 = 0x7777777777777777;
+    uint64_t addrExpected3 = 0x0000000077777777;
+    EXPECT_EQ(GmmHelper::canonize<32>(addr3), addrExpected3);
+
+    uint64_t addr4 = 0x77777777FFFFFFFF;
+    uint64_t addrExpected4 = 0xFFFFFFFFFFFFFFFF;
+    EXPECT_EQ(GmmHelper::canonize<32>(addr4), addrExpected4);
 }
 
 TEST_F(GmmTests, decanonize) {
@@ -396,13 +351,14 @@ TEST_F(GmmTests, decanonize) {
     uint64_t addr2 = 0x7FFFFFFFFFFFFFFF;
     uint64_t addrExpected2 = 0x0000FFFFFFFFFFFF;
     EXPECT_EQ(GmmHelper::decanonize(addr2), addrExpected2);
-}
 
-TEST_F(GmmTests, returnRenderTileMode) {
-    uint32_t alignments[5][2] = {{0, 1}, {4, 1}, {8, 2}, {16, 3}, {20, 1}}; // {given, expected}
-    for (uint32_t i = 0; i < 5; i++) {
-        EXPECT_EQ(GmmHelper::getRenderAlignment(alignments[i][0]), alignments[i][1]);
-    }
+    uint64_t addr3 = 0x7777777777777777;
+    uint64_t addrExpected3 = 0x0000000077777777;
+    EXPECT_EQ(GmmHelper::decanonize<32>(addr3), addrExpected3);
+
+    uint64_t addr4 = 0x7FFFFFFFFFFFFFFF;
+    uint64_t addrExpected4 = 0x00000000FFFFFFFF;
+    EXPECT_EQ(GmmHelper::decanonize<32>(addr4), addrExpected4);
 }
 
 TEST_F(GmmTests, givenMipmapedInputWhenAskedForHalingThenNonDefaultValueIsReturned) {
@@ -428,6 +384,47 @@ TEST_F(GmmTests, givenNumSamplesWhenAskedForMultisamplesCountThenReturnValue) {
     }
 }
 
+struct GmmMediaCompressedTests : public GmmTests {
+    void SetUp() override {
+        GmmTests::SetUp();
+        StorageInfo info;
+        gmm = std::make_unique<Gmm>(nullptr, 4, false, true, true, info);
+        flags = gmm->gmmResourceInfo->getResourceFlags();
+        flags->Gpu.CCS = true;
+        flags->Gpu.UnifiedAuxSurface = true;
+    }
+    std::unique_ptr<Gmm> gmm;
+    GMM_RESOURCE_FLAG *flags;
+};
+
+TEST_F(GmmMediaCompressedTests, givenMediaCompressedGmmUnifiedAuxTranslationCapableReturnsTrue) {
+    flags->Info.MediaCompressed = true;
+    flags->Info.RenderCompressed = false;
+
+    EXPECT_TRUE(gmm->unifiedAuxTranslationCapable());
+}
+
+TEST_F(GmmMediaCompressedTests, givenRenderCompressedGmmUnifiedAuxTranslationCapableReturnsTrue) {
+    flags->Info.MediaCompressed = false;
+    flags->Info.RenderCompressed = true;
+
+    EXPECT_TRUE(gmm->unifiedAuxTranslationCapable());
+}
+
+TEST_F(GmmMediaCompressedTests, givenMediaAndRenderCompressedGmmUnifiedAuxTranslationCapableThrowsException) {
+    flags->Info.MediaCompressed = true;
+    flags->Info.RenderCompressed = true;
+
+    EXPECT_THROW(gmm->unifiedAuxTranslationCapable(), std::exception);
+}
+
+TEST_F(GmmMediaCompressedTests, givenNotMediaAndNotRenderCompressedGmmUnifiedAuxTranslationCapableReturnsFalse) {
+    flags->Info.MediaCompressed = false;
+    flags->Info.RenderCompressed = false;
+
+    EXPECT_FALSE(gmm->unifiedAuxTranslationCapable());
+}
+
 namespace GmmTestConst {
 static const cl_mem_object_type imgTypes[6] = {
     CL_MEM_OBJECT_IMAGE1D,
@@ -436,75 +433,7 @@ static const cl_mem_object_type imgTypes[6] = {
     CL_MEM_OBJECT_IMAGE2D,
     CL_MEM_OBJECT_IMAGE2D_ARRAY,
     CL_MEM_OBJECT_IMAGE3D};
-
-static const cl_mem_object_type imgFromBufferTypes[2] = {
-    CL_MEM_OBJECT_IMAGE1D_BUFFER,
-    CL_MEM_OBJECT_IMAGE2D};
 } // namespace GmmTestConst
-
-class GmmTiling : public GmmTests,
-                  public ::testing::WithParamInterface<uint32_t /*cl_mem_object_type*/> {
-  public:
-    void checkTiling(cl_image_desc &imgDesc, bool forceLinear) {
-        bool allowTiling = GmmHelper::allowTiling(imgDesc);
-        if (forceLinear) {
-            EXPECT_FALSE(allowTiling);
-        } else {
-            if (imgDesc.image_type == CL_MEM_OBJECT_IMAGE1D ||
-                imgDesc.image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ||
-                imgDesc.image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER ||
-                imgDesc.buffer != nullptr) {
-                EXPECT_FALSE(allowTiling);
-            } else {
-                EXPECT_TRUE(allowTiling);
-            }
-        }
-    };
-};
-
-class GmmImgTilingTests : public GmmTiling {};
-
-INSTANTIATE_TEST_CASE_P(
-    GmmTiledTests,
-    GmmImgTilingTests,
-    testing::ValuesIn(GmmTestConst::imgTypes));
-
-TEST_P(GmmImgTilingTests, allowTiling) {
-    bool defaultTilingType = DebugManager.flags.ForceLinearImages.get();
-
-    cl_image_desc imgDesc = {};
-    imgDesc.image_type = GetParam();
-
-    checkTiling(imgDesc, defaultTilingType);
-
-    DebugManager.flags.ForceLinearImages.set(!defaultTilingType);
-
-    checkTiling(imgDesc, !defaultTilingType);
-
-    DebugManager.flags.ForceLinearImages.set(defaultTilingType);
-}
-
-class GmmImgFromBufferTilingTests : public GmmTiling {};
-INSTANTIATE_TEST_CASE_P(
-    GmmTiledTests,
-    GmmImgFromBufferTilingTests,
-    testing::ValuesIn(GmmTestConst::imgFromBufferTypes));
-
-TEST_P(GmmImgFromBufferTilingTests, disallowImgFromBufferTiling) {
-    bool defaultTilingType = DebugManager.flags.ForceLinearImages.get();
-    if (defaultTilingType) {
-        DebugManager.flags.ForceLinearImages.set(false);
-    }
-
-    cl_image_desc imgDesc = {};
-    imgDesc.image_type = GetParam();
-    _cl_mem clMem = {};
-    imgDesc.buffer = &clMem;
-
-    checkTiling(imgDesc, false);
-
-    DebugManager.flags.ForceLinearImages.set(defaultTilingType);
-}
 
 TEST_F(GmmTests, converOclPlaneToGmmPlane) {
     std::vector<std::pair<OCLPlane, GMM_YUV_PLANE>> v = {{OCLPlane::NO_PLANE, GMM_YUV_PLANE::GMM_NO_PLANE},
@@ -518,7 +447,8 @@ TEST_F(GmmTests, converOclPlaneToGmmPlane) {
     }
 }
 
-class GmmImgTest : public GmmTiling {};
+class GmmImgTest : public GmmTests,
+                   public ::testing::WithParamInterface<uint32_t /*cl_mem_object_type*/> {};
 
 INSTANTIATE_TEST_CASE_P(
     GmmImgTests,
@@ -763,6 +693,35 @@ TEST(GmmSimplifiedCacheSelectionPolicy, givenGmmInSimplifiedCacheSelectionPolicy
 TEST(GmmHelperTest, whenGmmHelperIsInitializedThenClientContextIsSet) {
     ASSERT_NE(nullptr, GmmHelper::getClientContext());
     EXPECT_NE(nullptr, GmmHelper::getClientContext()->getHandle());
+}
+
+TEST(GmmHelperTest, givenPlatformAlreadyDestroyedWhenResourceIsBeingDestroyedThenObserveNoExceptions) {
+    struct MockGmmResourecInfo : public GmmResourceInfo {
+        using GmmResourceInfo::resourceInfo;
+        MockGmmResourecInfo(GMM_RESCREATE_PARAMS *inputParams) : GmmResourceInfo(inputParams){};
+    };
+
+    GMM_RESCREATE_PARAMS gmmParams = {};
+    gmmParams.Type = RESOURCE_BUFFER;
+    gmmParams.Format = GMM_FORMAT_GENERIC_8BIT;
+    gmmParams.BaseWidth64 = 1;
+    gmmParams.BaseHeight = 1;
+    gmmParams.Depth = 1;
+    gmmParams.Flags.Info.Linear = 1;
+    gmmParams.Flags.Info.Cacheable = 1;
+    gmmParams.Flags.Gpu.Texture = 1;
+    gmmParams.Usage = GMM_RESOURCE_USAGE_OCL_BUFFER;
+
+    auto gmmResourceInfo = new MockGmmResourecInfo(&gmmParams);
+
+    auto executionEnvironment = platform()->peekExecutionEnvironment();
+    executionEnvironment->incRefInternal();
+    platformImpl.reset();
+    EXPECT_EQ(nullptr, platform());
+
+    EXPECT_NO_THROW(delete gmmResourceInfo);
+
+    executionEnvironment->decRefInternal();
 }
 
 } // namespace NEO

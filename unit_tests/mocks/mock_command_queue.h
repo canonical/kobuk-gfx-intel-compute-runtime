@@ -6,8 +6,8 @@
  */
 
 #pragma once
+#include "core/memory_manager/graphics_allocation.h"
 #include "runtime/command_queue/command_queue_hw.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 #include "unit_tests/libult/ult_command_stream_receiver.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -73,9 +73,11 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     typedef CommandQueueHw<GfxFamily> BaseClass;
 
   public:
+    using BaseClass::bcsEngine;
     using BaseClass::commandStream;
     using BaseClass::gpgpuEngine;
     using BaseClass::multiEngineQueue;
+    using BaseClass::obtainCommandStream;
     using BaseClass::obtainNewTimestampPacketNodes;
     using BaseClass::requiresCacheFlushAfterWalker;
     using BaseClass::timestampPacketContainer;
@@ -125,6 +127,7 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     }
 
     void enqueueHandlerHook(const unsigned int commandType, const MultiDispatchInfo &dispatchInfo) override {
+        kernelParams = dispatchInfo.peekBuiltinOpParams();
         lastCommandType = commandType;
         for (auto &di : dispatchInfo) {
             lastEnqueuedKernels.push_back(di.getKernel());
@@ -146,6 +149,7 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     bool notifyEnqueueReadBufferCalled = false;
     bool notifyEnqueueReadImageCalled = false;
     bool cpuDataTransferHandlerCalled = false;
+    BuiltinOpParams kernelParams;
 
     LinearStream *peekCommandStream() {
         return this->commandStream;

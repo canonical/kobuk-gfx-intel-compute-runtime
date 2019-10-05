@@ -23,5 +23,4 @@ TEST(OsInterfaceTest, GivenLinuxOsInterfaceWhenDeviceHandleQueriedthenZeroIsRetu
     OSInterface osInterface;
     EXPECT_EQ(0u, osInterface.getDeviceHandle());
 }
-
 } // namespace NEO

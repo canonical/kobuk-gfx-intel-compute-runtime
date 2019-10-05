@@ -7,11 +7,12 @@
 
 #include "runtime/os_interface/windows/wddm_residency_controller.h"
 
+#include "core/utilities/spinlock.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/os_interface/windows/wddm/wddm.h"
 #include "runtime/os_interface/windows/wddm_allocation.h"
 #include "runtime/os_interface/windows/wddm_memory_manager.h"
-#include "runtime/utilities/spinlock.h"
+#include "runtime/os_interface/windows/wddm_residency_allocations_container.h"
 
 namespace NEO {
 
@@ -124,8 +125,8 @@ void WddmResidencyController::removeFromTrimCandidateListIfUsed(WddmAllocation *
 void WddmResidencyController::checkTrimCandidateCount() {
     if (DebugManager.flags.ResidencyDebugEnable.get()) {
         uint32_t sum = 0;
-        for (size_t i = 0; i < trimCandidateList.size(); i++) {
-            if (trimCandidateList[i] != nullptr) {
+        for (auto trimCandidate : trimCandidateList) {
+            if (trimCandidate != nullptr) {
                 sum++;
             }
         }
@@ -297,7 +298,7 @@ bool WddmResidencyController::trimResidencyToBudget(uint64_t bytes) {
     return numberOfBytesToTrim == 0;
 }
 
-bool WddmResidencyController::makeResidentResidencyAllocations(ResidencyContainer &allocationsForResidency) {
+bool WddmResidencyController::makeResidentResidencyAllocations(const ResidencyContainer &allocationsForResidency) {
     const size_t residencyCount = allocationsForResidency.size();
     std::unique_ptr<D3DKMT_HANDLE[]> handlesForResidency(new D3DKMT_HANDLE[residencyCount * maxFragmentsCount]);
     uint32_t totalHandlesCount = 0;
@@ -341,11 +342,11 @@ bool WddmResidencyController::makeResidentResidencyAllocations(ResidencyContaine
             this->setMemoryBudgetExhausted();
             const bool trimmingDone = this->trimResidencyToBudget(bytesToTrim);
             if (!trimmingDone) {
-                auto evictionStatus = wddm.evictAllTemporaryResources();
-                if (evictionStatus == EvictionStatus::SUCCESS) {
+                auto evictionStatus = wddm.getTemporaryResourcesContainer()->evictAllResources();
+                if (evictionStatus == MemoryOperationsStatus::SUCCESS) {
                     continue;
                 }
-                DEBUG_BREAK_IF(evictionStatus != EvictionStatus::NOT_APPLIED);
+                DEBUG_BREAK_IF(evictionStatus != MemoryOperationsStatus::MEMORY_NOT_FOUND);
                 result = wddm.makeResident(handlesForResidency.get(), totalHandlesCount, true, &bytesToTrim);
                 break;
             }
@@ -372,7 +373,7 @@ bool WddmResidencyController::makeResidentResidencyAllocations(ResidencyContaine
     return result;
 }
 
-void WddmResidencyController::makeNonResidentEvictionAllocations(ResidencyContainer &evictionAllocations) {
+void WddmResidencyController::makeNonResidentEvictionAllocations(const ResidencyContainer &evictionAllocations) {
     auto lock = this->acquireLock();
     const size_t residencyCount = evictionAllocations.size();
 

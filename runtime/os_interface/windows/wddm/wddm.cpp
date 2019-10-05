@@ -8,6 +8,8 @@
 #include "runtime/os_interface/windows/wddm/wddm.h"
 
 #include "core/helpers/interlocked_max.h"
+#include "core/os_interface/windows/debug_registry_reader.h"
+#include "core/utilities/stackvec.h"
 #include "runtime/command_stream/preemption.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/gmm_helper/gmm.h"
@@ -19,10 +21,10 @@
 #include "runtime/os_interface/windows/gdi_interface.h"
 #include "runtime/os_interface/windows/kmdaf_listener.h"
 #include "runtime/os_interface/windows/os_context_win.h"
-#include "runtime/os_interface/windows/registry_reader.h"
 #include "runtime/os_interface/windows/wddm/wddm_interface.h"
 #include "runtime/os_interface/windows/wddm_allocation.h"
 #include "runtime/os_interface/windows/wddm_engine_mapper.h"
+#include "runtime/os_interface/windows/wddm_residency_allocations_container.h"
 #include "runtime/platform/platform.h"
 #include "runtime/sku_info/operations/sku_info_receiver.h"
 
@@ -47,11 +49,12 @@ Wddm::Wddm() {
     memset(gtSystemInfo.get(), 0, sizeof(*gtSystemInfo));
     memset(gfxPlatform.get(), 0, sizeof(*gfxPlatform));
 
-    registryReader.reset(new RegistryReader("System\\CurrentControlSet\\Control\\GraphicsDrivers\\Scheduler"));
+    registryReader.reset(new RegistryReader(false, "System\\CurrentControlSet\\Control\\GraphicsDrivers\\Scheduler"));
     adapterLuid.HighPart = 0;
     adapterLuid.LowPart = 0;
     kmDafListener = std::unique_ptr<KmDafListener>(new KmDafListener);
     gdi = std::unique_ptr<Gdi>(new Gdi());
+    temporaryResources = std::make_unique<WddmResidentAllocationsContainer>(this);
 }
 
 Wddm::~Wddm() {
@@ -84,7 +87,8 @@ bool Wddm::init(HardwareInfo &outHardwareInfo) {
 
     outHardwareInfo.capabilityTable = hardwareInfoTable[productFamily]->capabilityTable;
     outHardwareInfo.capabilityTable.maxRenderFrequency = maxRenderFrequency;
-    outHardwareInfo.capabilityTable.instrumentationEnabled &= instrumentationEnabled;
+    outHardwareInfo.capabilityTable.instrumentationEnabled =
+        (outHardwareInfo.capabilityTable.instrumentationEnabled && instrumentationEnabled);
 
     HwInfoConfig *hwConfig = HwInfoConfig::get(productFamily);
 
@@ -141,6 +145,7 @@ bool Wddm::queryAdapterInfo() {
         deviceRegistryPath = adapterInfo.DeviceRegistryPath;
 
         systemSharedMemory = adapterInfo.SystemSharedMemory;
+        dedicatedVideoMemory = adapterInfo.DedicatedVideoMemory;
         maxRenderFrequency = adapterInfo.MaxRenderFreq;
         instrumentationEnabled = adapterInfo.Caps.InstrumentationIsEnabled != 0;
     }
@@ -630,7 +635,7 @@ bool Wddm::openNTHandle(HANDLE handle, WddmAllocation *alloc) {
 void *Wddm::lockResource(const D3DKMT_HANDLE &handle, bool applyMakeResidentPriorToLock) {
 
     if (applyMakeResidentPriorToLock) {
-        applyBlockingMakeResident(handle);
+        temporaryResources->makeResidentResource(handle);
     }
 
     NTSTATUS status = STATUS_UNSUCCESSFUL;
@@ -791,6 +796,8 @@ bool Wddm::waitFromCpu(uint64_t lastFenceValue, const MonitoredFence &monitoredF
 void Wddm::initGfxPartition(GfxPartition &outGfxPartition) const {
     if (gfxPartition.SVM.Limit != 0) {
         outGfxPartition.heapInit(HeapIndex::HEAP_SVM, gfxPartition.SVM.Base, gfxPartition.SVM.Limit - gfxPartition.SVM.Base + 1);
+    } else if (is32bit) {
+        outGfxPartition.heapInit(HeapIndex::HEAP_SVM, 0x0ull, 4 * MemoryConstants::gigaByte);
     }
 
     outGfxPartition.heapInit(HeapIndex::HEAP_STANDARD, gfxPartition.Standard.Base, gfxPartition.Standard.Limit - gfxPartition.Standard.Base + 1);
@@ -805,6 +812,10 @@ void Wddm::initGfxPartition(GfxPartition &outGfxPartition) const {
 
 uint64_t Wddm::getSystemSharedMemory() const {
     return systemSharedMemory;
+}
+
+uint64_t Wddm::getDedicatedVideoMemory() const {
+    return dedicatedVideoMemory;
 }
 
 uint64_t Wddm::getMaxApplicationAddress() const {
@@ -919,67 +930,9 @@ bool Wddm::configureDeviceAddressSpaceImpl() {
     return gmmMemory->configureDevice(adapter, device, gdi->escape, svmSize, featureTable->ftrL3IACoherency, gfxPartition, minAddress);
 }
 
-EvictionStatus Wddm::evictAllTemporaryResources() {
-    decltype(temporaryResources) resourcesToEvict;
-    auto lock = acquireLock(temporaryResourcesLock);
-    temporaryResources.swap(resourcesToEvict);
-    if (resourcesToEvict.empty()) {
-        return EvictionStatus::NOT_APPLIED;
-    }
-    uint64_t sizeToTrim = 0;
-    bool error = false;
-    for (auto &handle : resourcesToEvict) {
-        if (!evict(&handle, 1, sizeToTrim)) {
-            error = true;
-        }
-    }
-    return error ? EvictionStatus::FAILED : EvictionStatus::SUCCESS;
-}
-
-EvictionStatus Wddm::evictTemporaryResource(const D3DKMT_HANDLE &handle) {
-    auto lock = acquireLock(temporaryResourcesLock);
-    auto position = std::find(temporaryResources.begin(), temporaryResources.end(), handle);
-    if (position == temporaryResources.end()) {
-        return EvictionStatus::NOT_APPLIED;
-    }
-    *position = temporaryResources.back();
-    temporaryResources.pop_back();
-    uint64_t sizeToTrim = 0;
-    if (!evict(&handle, 1, sizeToTrim)) {
-        return EvictionStatus::FAILED;
-    }
-    return EvictionStatus::SUCCESS;
-}
-void Wddm::applyBlockingMakeResident(const D3DKMT_HANDLE &handle) {
-    bool madeResident = false;
-    while (!(madeResident = makeResident(&handle, 1, false, nullptr))) {
-        if (evictAllTemporaryResources() == EvictionStatus::SUCCESS) {
-            continue;
-        }
-        if (!makeResident(&handle, 1, false, nullptr)) {
-            DEBUG_BREAK_IF(true);
-            return;
-        };
-        break;
-    }
-    DEBUG_BREAK_IF(!madeResident);
-    auto lock = acquireLock(temporaryResourcesLock);
-    temporaryResources.push_back(handle);
-    lock.unlock();
+void Wddm::waitOnPagingFenceFromCpu() {
     while (currentPagingFenceValue > *getPagingFenceAddress())
         ;
-}
-void Wddm::removeTemporaryResource(const D3DKMT_HANDLE &handle) {
-    auto lock = acquireLock(temporaryResourcesLock);
-    auto position = std::find(temporaryResources.begin(), temporaryResources.end(), handle);
-    if (position == temporaryResources.end()) {
-        return;
-    }
-    *position = temporaryResources.back();
-    temporaryResources.pop_back();
-}
-std::unique_lock<SpinLock> Wddm::acquireLock(SpinLock &lock) {
-    return std::unique_lock<SpinLock>{lock};
 }
 
 void Wddm::updatePagingFenceValue(uint64_t newPagingFenceValue) {

@@ -48,8 +48,8 @@ void DevicePreemptionTests::SetUp() {
     ASSERT_NE(nullptr, device);
     ASSERT_NE(nullptr, context);
     ASSERT_NE(nullptr, cmdQ);
-    forceWhitelistedRegs(true);
-    waTable = const_cast<WorkaroundTable *>(device->getWaTable());
+
+    waTable = &device->getExecutionEnvironment()->getMutableHardwareInfo()->workaroundTable;
 }
 
 void DevicePreemptionTests::TearDown() {
@@ -60,11 +60,6 @@ void DevicePreemptionTests::TearDown() {
     cmdQ.reset();
     context.reset();
     device.reset();
-}
-
-void DevicePreemptionTests::forceWhitelistedRegs(bool whitelisted) {
-    WhitelistedRegisters forceRegs = {whitelisted};
-    device->setForceWhitelistedRegs(true, &forceRegs);
 }
 
 void ThreadGroupPreemptionEnqueueKernelTest::SetUp() {

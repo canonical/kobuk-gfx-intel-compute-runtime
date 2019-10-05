@@ -16,6 +16,7 @@
 #include "unit_tests/mocks/mock_command_queue.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_csr.h"
+#include "unit_tests/mocks/mock_device.h"
 #include "unit_tests/mocks/mock_event.h"
 #include "unit_tests/mocks/mock_kernel.h"
 #include "unit_tests/mocks/mock_program.h"
@@ -1413,6 +1414,55 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWithThrottleSetT
 
     EXPECT_EQ(cmdBuffer->batchBuffer.throttle, QueueThrottle::HIGH);
 }
+HWTEST_F(CommandStreamReceiverFlushTaskTests, givenEpilogueRequiredFlagWhenTaskIsSubmittedDirectlyThenItPointsBackToCsr) {
+    configureCSRtoNonDirtyState<FamilyType>();
+    auto &commandStreamReceiver = this->pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    DispatchFlags dispatchFlags;
+
+    EXPECT_EQ(0u, commandStreamReceiver.getCmdSizeForEpilogue(dispatchFlags));
+
+    dispatchFlags.epilogueRequired = true;
+    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+
+    EXPECT_EQ(MemoryConstants::cacheLineSize, commandStreamReceiver.getCmdSizeForEpilogue(dispatchFlags));
+
+    auto data = commandStream.getSpace(MemoryConstants::cacheLineSize);
+    memset(data, 0, MemoryConstants::cacheLineSize);
+    commandStreamReceiver.storeMakeResidentAllocations = true;
+    commandStreamReceiver.flushTask(commandStream,
+                                    0,
+                                    dsh,
+                                    ioh,
+                                    ssh,
+                                    taskLevel,
+                                    dispatchFlags,
+                                    *pDevice);
+    auto &commandStreamReceiverStream = commandStreamReceiver.getCS(0u);
+
+    EXPECT_EQ(MemoryConstants::cacheLineSize * 2, commandStream.getUsed());
+    EXPECT_EQ(MemoryConstants::cacheLineSize, commandStreamReceiverStream.getUsed());
+
+    parseCommands<FamilyType>(commandStream, 0);
+
+    auto itBBend = find<typename FamilyType::MI_BATCH_BUFFER_END *>(cmdList.begin(), cmdList.end());
+    EXPECT_EQ(itBBend, cmdList.end());
+
+    auto itBatchBufferStart = find<typename FamilyType::MI_BATCH_BUFFER_START *>(cmdList.begin(), cmdList.end());
+    EXPECT_NE(itBatchBufferStart, cmdList.end());
+
+    auto batchBufferStart = genCmdCast<typename FamilyType::MI_BATCH_BUFFER_START *>(*itBatchBufferStart);
+    EXPECT_EQ(batchBufferStart->getBatchBufferStartAddressGraphicsaddress472(), commandStreamReceiverStream.getGraphicsAllocation()->getGpuAddress());
+
+    parseCommands<FamilyType>(commandStreamReceiverStream, 0);
+
+    itBBend = find<typename FamilyType::MI_BATCH_BUFFER_END *>(cmdList.begin(), cmdList.end());
+    void *bbEndAddress = *itBBend;
+
+    EXPECT_EQ(commandStreamReceiverStream.getCpuBase(), bbEndAddress);
+
+    EXPECT_TRUE(commandStreamReceiver.isMadeResident(commandStreamReceiverStream.getGraphicsAllocation()));
+}
 
 template <typename GfxFamily>
 class UltCommandStreamReceiverForDispatchFlags : public UltCommandStreamReceiver<GfxFamily> {
@@ -1449,13 +1499,12 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelWhenItIsUnblocke
     pCmdQ->allocateHeapMemory(IndirectHeap::DYNAMIC_STATE, 4096u, dsh);
     pCmdQ->allocateHeapMemory(IndirectHeap::INDIRECT_OBJECT, 4096u, ioh);
     pCmdQ->allocateHeapMemory(IndirectHeap::SURFACE_STATE, 4096u, ssh);
-    using UniqueIH = std::unique_ptr<IndirectHeap>;
 
-    auto blockedCommandsData = new KernelOperation(std::unique_ptr<LinearStream>(cmdStream), UniqueIH(dsh),
-                                                   UniqueIH(ioh), UniqueIH(ssh), *pCmdQ->getGpgpuCommandStreamReceiver().getInternalAllocationStorage());
+    auto blockedCommandsData = std::make_unique<KernelOperation>(cmdStream, *pCmdQ->getGpgpuCommandStreamReceiver().getInternalAllocationStorage());
+    blockedCommandsData->setHeaps(dsh, ioh, ssh);
 
     std::vector<Surface *> surfaces;
-    event->setCommand(std::make_unique<CommandComputeKernel>(*pCmdQ, std::unique_ptr<KernelOperation>(blockedCommandsData), surfaces, false, false, false, nullptr, pDevice->getPreemptionMode(), pKernel.get(), 1));
+    event->setCommand(std::make_unique<CommandComputeKernel>(*pCmdQ, blockedCommandsData, surfaces, false, false, false, nullptr, pDevice->getPreemptionMode(), pKernel.get(), 1));
     event->submitCommand(false);
 
     EXPECT_EQ(numGrfRequired, csr->savedDispatchFlags.numGrfRequired);
@@ -1482,4 +1531,53 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDcFlushArgumentIsFalseWhenCal
     const bool expectedDcFlush = ::renderCoreFamily == IGFX_GEN8_CORE;
     EXPECT_EQ(expectedDcFlush, pipeControl->getDcFlushEnable());
     EXPECT_TRUE(pipeControl->getCommandStreamerStallEnable());
+}
+
+HWTEST_F(CommandStreamReceiverFlushTaskTests, whenPerDssBackBufferIsAllocatedItIsClearedInCleanupResources) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    ASSERT_NE(nullptr, pDevice);
+    commandStreamReceiver.createPerDssBackedBuffer(*pDevice);
+    EXPECT_NE(nullptr, commandStreamReceiver.perDssBackedBuffer);
+    commandStreamReceiver.cleanupResources();
+    EXPECT_EQ(nullptr, commandStreamReceiver.perDssBackedBuffer);
+}
+
+HWTEST_F(CommandStreamReceiverFlushTaskTests, whenPerDssBackBufferProgrammingEnabledThenAllocationIsCreated) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.ForcePerDssBackedBufferProgramming.set(true);
+
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    DispatchFlags dispatchFlags;
+    commandStreamReceiver.flushTask(commandStream,
+                                    0,
+                                    dsh,
+                                    ioh,
+                                    ssh,
+                                    taskLevel,
+                                    dispatchFlags,
+                                    *pDevice);
+
+    EXPECT_EQ(1u, commandStreamReceiver.createPerDssBackedBufferCalled);
+    EXPECT_NE(nullptr, commandStreamReceiver.perDssBackedBuffer);
+}
+
+HWTEST_F(CommandStreamReceiverFlushTaskTests, whenPerDssBackBufferProgrammingEnabledAndPerDssBackedBufferAlreadyPresentThenNewAllocationIsNotCreated) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.ForcePerDssBackedBufferProgramming.set(true);
+
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto memoryManager = pDevice->getMemoryManager();
+    commandStreamReceiver.perDssBackedBuffer = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
+
+    DispatchFlags dispatchFlags;
+    commandStreamReceiver.flushTask(commandStream,
+                                    0,
+                                    dsh,
+                                    ioh,
+                                    ssh,
+                                    taskLevel,
+                                    dispatchFlags,
+                                    *pDevice);
+
+    EXPECT_EQ(0u, commandStreamReceiver.createPerDssBackedBufferCalled);
 }

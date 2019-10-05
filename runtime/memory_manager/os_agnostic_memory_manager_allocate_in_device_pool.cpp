@@ -23,8 +23,7 @@ GraphicsAllocation *OsAgnosticMemoryManager::allocateGraphicsMemoryInDevicePool(
                     return nullptr;
                 }
                 uint64_t gpuAddress = reinterpret_cast<uint64_t>(allocationData.hostPtr);
-                allocation = new MemoryAllocation(allocationData.type, cpuAllocation, cpuAllocation, gpuAddress, allocationData.size, counter++, MemoryPool::LocalMemory, false, false, false);
-                allocation->setGpuBaseAddress(gpuAddress);
+                allocation = new MemoryAllocation(allocationData.type, cpuAllocation, cpuAllocation, gpuAddress, allocationData.size, counter++, MemoryPool::LocalMemory, false, false);
             } else {
                 allocation = allocateGraphicsMemory(allocationData);
             }
@@ -39,6 +38,10 @@ GraphicsAllocation *OsAgnosticMemoryManager::allocateGraphicsMemoryInDevicePool(
     }
     status = AllocationStatus::RetryInNonDevicePool;
     return nullptr;
+}
+
+uint64_t OsAgnosticMemoryManager::getLocalMemorySize() {
+    return 0 * GB;
 }
 
 void MemoryAllocation::overrideMemoryPool(MemoryPool::Type pool) {

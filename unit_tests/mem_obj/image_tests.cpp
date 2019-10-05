@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/helpers/aligned_memory.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/compiler_interface/compiler_interface.h"
-#include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/mipmap.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/mem_obj/mem_obj_helper.h"
@@ -19,6 +19,7 @@
 #include "unit_tests/fixtures/image_fixture.h"
 #include "unit_tests/fixtures/memory_management_fixture.h"
 #include "unit_tests/helpers/kernel_binary_helper.h"
+#include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mem_obj/image_compression_fixture.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_gmm.h"
@@ -393,7 +394,7 @@ TEST(TestCreateImageUseHostPtr, CheckMemoryAllocationForDifferenHostPtrAlignment
         ASSERT_NE(nullptr, image);
 
         auto address = image->getCpuAddress();
-        if (result[i] && !image->allowTiling()) {
+        if (result[i] && image->isMemObjZeroCopy()) {
             EXPECT_EQ(hostPtr[i], address);
         } else {
             EXPECT_NE(hostPtr[i], address);
@@ -579,9 +580,9 @@ TEST_P(CreateImageHostPtr, getAddress) {
         EXPECT_NE(pHostPtr, address);
     }
 
-    if (flags & CL_MEM_COPY_HOST_PTR && !image->allowTiling()) {
+    if (flags & CL_MEM_COPY_HOST_PTR && image->isMemObjZeroCopy()) {
         // Buffer should contain a copy of host memory
-        EXPECT_EQ(0, memcmp(pHostPtr, address, sizeof(testImageDimensions)));
+        EXPECT_EQ(0, memcmp(pHostPtr, image->getGraphicsAllocation()->getUnderlyingBuffer(), sizeof(testImageDimensions)));
     }
 }
 
@@ -626,6 +627,28 @@ TEST_P(CreateImageHostPtr, getImageDesc) {
 }
 
 TEST_P(CreateImageHostPtr, failedAllocationInjection) {
+    InjectedFunction method = [this](size_t failureIndex) {
+        // System under test
+        image = createImage(retVal);
+
+        if (MemoryManagement::nonfailingAllocation == failureIndex) {
+            EXPECT_EQ(CL_SUCCESS, retVal);
+            EXPECT_NE(nullptr, image);
+        } else {
+            EXPECT_EQ(CL_OUT_OF_HOST_MEMORY, retVal) << "for allocation " << failureIndex;
+            EXPECT_EQ(nullptr, image);
+        }
+
+        delete image;
+        image = nullptr;
+    };
+    injectFailures(method, 4); // check only first 5 allocations - avoid checks on writeImg call allocations for tiled imgs
+}
+
+TEST_P(CreateImageHostPtr, givenLinearImageWhenFailedAtCreationThenReturnError) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.ForceLinearImages.set(true);
+
     InjectedFunction method = [this](size_t failureIndex) {
         // System under test
         image = createImage(retVal);
@@ -914,7 +937,7 @@ TEST(ImageGetSurfaceFormatInfoTest, givenNullptrFormatWhenGetSurfaceFormatInfoIs
     EXPECT_EQ(nullptr, surfaceFormat);
 }
 
-TEST_F(ImageCompressionTests, givenTiledImageWhenCreatingAllocationThenPreferRenderCompression) {
+HWTEST_F(ImageCompressionTests, givenTiledImageWhenCreatingAllocationThenPreferRenderCompression) {
     imageDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
     imageDesc.image_width = 5;
     imageDesc.image_height = 5;
@@ -923,9 +946,9 @@ TEST_F(ImageCompressionTests, givenTiledImageWhenCreatingAllocationThenPreferRen
 
     auto image = std::unique_ptr<Image>(Image::create(mockContext.get(), flags, surfaceFormat, &imageDesc, nullptr, retVal));
     ASSERT_NE(nullptr, image);
-    EXPECT_TRUE(image->isTiledImage);
+    EXPECT_EQ(UnitTestHelper<FamilyType>::tiledImagesSupported, image->isTiledAllocation());
     EXPECT_TRUE(myMemoryManager->mockMethodCalled);
-    EXPECT_TRUE(myMemoryManager->capturedImgInfo.preferRenderCompression);
+    EXPECT_EQ(UnitTestHelper<FamilyType>::tiledImagesSupported, myMemoryManager->capturedImgInfo.preferRenderCompression);
 }
 
 TEST_F(ImageCompressionTests, givenNonTiledImageWhenCreatingAllocationThenDontPreferRenderCompression) {
@@ -936,12 +959,16 @@ TEST_F(ImageCompressionTests, givenNonTiledImageWhenCreatingAllocationThenDontPr
 
     auto image = std::unique_ptr<Image>(Image::create(mockContext.get(), flags, surfaceFormat, &imageDesc, nullptr, retVal));
     ASSERT_NE(nullptr, image);
-    EXPECT_FALSE(image->isTiledImage);
+    EXPECT_FALSE(image->isTiledAllocation());
     EXPECT_TRUE(myMemoryManager->mockMethodCalled);
     EXPECT_FALSE(myMemoryManager->capturedImgInfo.preferRenderCompression);
 }
 
-TEST(ImageTest, givenImageWhenAskedForPtrOffsetForGpuMappingThenReturnCorrectValue) {
+using ImageTests = ::testing::Test;
+HWTEST_F(ImageTests, givenImageWhenAskedForPtrOffsetForGpuMappingThenReturnCorrectValue) {
+    if (!UnitTestHelper<FamilyType>::tiledImagesSupported) {
+        GTEST_SKIP();
+    }
     MockContext ctx;
     std::unique_ptr<Image> image(ImageHelper<Image3dDefaults>::create(&ctx));
     EXPECT_FALSE(image->mappingOnCpuAllowed());
@@ -995,7 +1022,10 @@ TEST(ImageTest, given1DArrayImageWhenAskedForPtrOffsetForMappingThenReturnCorrec
     EXPECT_EQ(expectedOffset, retOffset);
 }
 
-TEST(ImageTest, givenImageWhenAskedForPtrLengthForGpuMappingThenReturnCorrectValue) {
+HWTEST_F(ImageTests, givenImageWhenAskedForPtrLengthForGpuMappingThenReturnCorrectValue) {
+    if (!UnitTestHelper<FamilyType>::tiledImagesSupported) {
+        GTEST_SKIP();
+    }
     MockContext ctx;
     std::unique_ptr<Image> image(ImageHelper<Image3dDefaults>::create(&ctx));
     EXPECT_FALSE(image->mappingOnCpuAllowed());
@@ -1137,7 +1167,7 @@ TEST(ImageTest, givenClMemForceLinearStorageSetWhenCreateImageThenDisallowTiling
         nullptr,
         retVal));
 
-    EXPECT_FALSE(image->isTiledImage);
+    EXPECT_FALSE(image->isTiledAllocation());
     EXPECT_NE(nullptr, image);
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
@@ -1264,6 +1294,7 @@ TEST(ImageTest, givenCachelineAlignedPointerAndProperDescriptorValuesWhenIsCopyR
     imgInfo.rowPitch = imageDesc.image_width * surfaceFormat->ImageElementSizeInBytes;
     imgInfo.slicePitch = imgInfo.rowPitch * imageDesc.image_height;
     imgInfo.size = imgInfo.slicePitch;
+    imgInfo.linearStorage = true;
 
     auto hostPtr = alignedMalloc(imgInfo.size, MemoryConstants::cacheLineSize);
 
@@ -1274,6 +1305,7 @@ TEST(ImageTest, givenCachelineAlignedPointerAndProperDescriptorValuesWhenIsCopyR
 TEST(ImageTest, givenForcedLinearImages3DImageAndProperDescriptorValuesWhenIsCopyRequiredIsCalledThenFalseIsReturned) {
     DebugManagerStateRestore dbgRestorer;
     DebugManager.flags.ForceLinearImages.set(true);
+    auto &hwHelper = HwHelper::get(platformDevices[0]->platform.eRenderCoreFamily);
 
     ImageInfo imgInfo{};
 
@@ -1295,6 +1327,7 @@ TEST(ImageTest, givenForcedLinearImages3DImageAndProperDescriptorValuesWhenIsCop
     imgInfo.rowPitch = imageDesc.image_width * surfaceFormat->ImageElementSizeInBytes;
     imgInfo.slicePitch = imgInfo.rowPitch * imageDesc.image_height;
     imgInfo.size = imgInfo.slicePitch;
+    imgInfo.linearStorage = !hwHelper.tilingAllowed(false, *imgInfo.imgDesc, false);
 
     auto hostPtr = alignedMalloc(imgInfo.size, MemoryConstants::cacheLineSize);
 
@@ -1430,7 +1463,7 @@ HWTEST_F(ImageTransformTest, givenSurfaceBaseAddressAndUnifiedSurfaceWhenSetUnif
 template <typename FamilyName>
 class MockImageHw : public ImageHw<FamilyName> {
   public:
-    MockImageHw(Context *context, const cl_image_format &format, const cl_image_desc &desc, SurfaceFormatInfo &surfaceFormatInfo, GraphicsAllocation *graphicsAllocation) : ImageHw<FamilyName>(context, 0, 0, nullptr, format, desc, false, graphicsAllocation, false, false, 0, 0, surfaceFormatInfo) {
+    MockImageHw(Context *context, const cl_image_format &format, const cl_image_desc &desc, SurfaceFormatInfo &surfaceFormatInfo, GraphicsAllocation *graphicsAllocation) : ImageHw<FamilyName>(context, 0, 0, nullptr, format, desc, false, graphicsAllocation, false, 0, 0, surfaceFormatInfo) {
     }
 
     void setClearColorParams(typename FamilyName::RENDER_SURFACE_STATE *surfaceState, const Gmm *gmm) override;
@@ -1466,7 +1499,7 @@ HWTEST_F(HwImageTest, givenImageHwWhenSettingCCSParamsThenSetClearColorParamsIsC
     format.image_channel_order = CL_RGBA;
 
     auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-    AllocationProperties allocProperties = MemObjHelper::getAllocationProperties(imgInfo, true, 0);
+    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(imgInfo, true, {});
 
     auto graphicsAllocation = memoryManager.allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
 
@@ -1497,7 +1530,7 @@ HWTEST_F(HwImageTest, givenImageHwWithUnifiedSurfaceAndMcsWhenSettingParamsForMu
     cl_image_format format = {};
 
     auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-    AllocationProperties allocProperties = MemObjHelper::getAllocationProperties(imgInfo, true, 0);
+    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(imgInfo, true, {});
 
     auto graphicsAllocation = memoryManager.allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
 

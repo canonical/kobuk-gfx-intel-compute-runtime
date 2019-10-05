@@ -7,6 +7,7 @@
 
 #include "runtime/command_stream/command_stream_receiver.h"
 
+#include "core/helpers/string.h"
 #include "runtime/aub_mem_dump/aub_services.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/command_stream/experimental_command_buffer.h"
@@ -19,7 +20,6 @@
 #include "runtime/helpers/array_count.h"
 #include "runtime/helpers/cache_policy.h"
 #include "runtime/helpers/flush_stamp.h"
-#include "runtime/helpers/string.h"
 #include "runtime/helpers/timestamp_packet.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
@@ -64,6 +64,7 @@ CommandStreamReceiver::~CommandStreamReceiver() {
 
     internalAllocationStorage->cleanAllocationList(-1, REUSABLE_ALLOCATION);
     internalAllocationStorage->cleanAllocationList(-1, TEMPORARY_ALLOCATION);
+    getMemoryManager()->unregisterEngineForCsr(this);
 }
 
 void CommandStreamReceiver::makeResident(GraphicsAllocation &gfxAllocation) {
@@ -104,9 +105,6 @@ void CommandStreamReceiver::makeSurfacePackNonResident(ResidencyContainer &alloc
 
 void CommandStreamReceiver::makeResidentHostPtrAllocation(GraphicsAllocation *gfxAllocation) {
     makeResident(*gfxAllocation);
-    if (!isL3Capable(*gfxAllocation)) {
-        setDisableL3Cache(true);
-    }
 }
 
 void CommandStreamReceiver::waitForTaskCountAndCleanAllocationList(uint32_t requiredTaskCount, uint32_t allocationUsage) {
@@ -146,10 +144,6 @@ MemoryManager *CommandStreamReceiver::getMemoryManager() const {
     return executionEnvironment.memoryManager.get();
 }
 
-bool CommandStreamReceiver::isMultiOsContextCapable() const {
-    return executionEnvironment.specialCommandStreamReceiver.get() == this;
-}
-
 LinearStream &CommandStreamReceiver::getCS(size_t minRequiredSize) {
     constexpr static auto additionalAllocationSize = MemoryConstants::cacheLineSize + CSRequirements::csOverfetchSize;
     ensureCommandBufferAllocation(this->commandStream, minRequiredSize, additionalAllocationSize);
@@ -157,9 +151,6 @@ LinearStream &CommandStreamReceiver::getCS(size_t minRequiredSize) {
 }
 
 void CommandStreamReceiver::cleanupResources() {
-    if (!getMemoryManager())
-        return;
-
     waitForTaskCountAndCleanAllocationList(this->latestFlushedTaskCount, TEMPORARY_ALLOCATION);
     waitForTaskCountAndCleanAllocationList(this->latestFlushedTaskCount, REUSABLE_ALLOCATION);
 
@@ -183,6 +174,11 @@ void CommandStreamReceiver::cleanupResources() {
     if (preemptionAllocation) {
         getMemoryManager()->freeGraphicsMemory(preemptionAllocation);
         preemptionAllocation = nullptr;
+    }
+
+    if (perDssBackedBuffer) {
+        getMemoryManager()->freeGraphicsMemory(perDssBackedBuffer);
+        perDssBackedBuffer = nullptr;
     }
 }
 
@@ -216,7 +212,8 @@ bool CommandStreamReceiver::waitForCompletionWithTimeout(bool enableTimeout, int
 
 void CommandStreamReceiver::setTagAllocation(GraphicsAllocation *allocation) {
     this->tagAllocation = allocation;
-    this->tagAddress = allocation ? reinterpret_cast<uint32_t *>(allocation->getUnderlyingBuffer()) : nullptr;
+    UNRECOVERABLE_IF(allocation == nullptr);
+    this->tagAddress = reinterpret_cast<uint32_t *>(allocation->getUnderlyingBuffer());
 }
 
 FlushStamp CommandStreamReceiver::obtainCurrentFlushStamp() const {

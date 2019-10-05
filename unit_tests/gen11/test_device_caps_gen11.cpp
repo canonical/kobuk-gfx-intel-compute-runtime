@@ -40,6 +40,7 @@ LKFTEST_F(Gen11DeviceCaps, givenLkfWhenExtensionStringIsCheckedThenFP64IsNotRepo
 LKFTEST_F(Gen11DeviceCaps, givenLkfWhenSlmSizeIsRequiredThenReturnCorrectValue) {
     EXPECT_EQ(64u, pDevice->getHardwareInfo().capabilityTable.slmSize);
 }
+
 ICLLPTEST_F(Gen11DeviceCaps, lpSkusDontSupportFP64) {
     const auto &caps = pDevice->getDeviceInfo();
     std::string extensionString = caps.deviceExtensions;
@@ -59,11 +60,6 @@ ICLLPTEST_F(Gen11DeviceCaps, givenIclLpWhenSlmSizeIsRequiredThenReturnCorrectVal
 
 GEN11TEST_F(Gen11DeviceCaps, defaultPreemptionMode) {
     EXPECT_TRUE(PreemptionMode::MidThread == pDevice->getHardwareInfo().capabilityTable.defaultPreemptionMode);
-}
-
-GEN11TEST_F(Gen11DeviceCaps, whitelistedRegisters) {
-    EXPECT_TRUE(pDevice->getHardwareInfo().capabilityTable.whitelistedRegisters.csChicken1_0x2580);
-    EXPECT_FALSE(pDevice->getHardwareInfo().capabilityTable.whitelistedRegisters.chicken0hdc_0xE5F0);
 }
 
 GEN11TEST_F(Gen11DeviceCaps, profilingTimerResolution) {

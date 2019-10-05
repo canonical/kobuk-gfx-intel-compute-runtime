@@ -469,7 +469,7 @@ HWTEST_F(AubCommandStreamReceiverNoHostPtrTests, givenAubCommandStreamReceiverWh
 
     auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
 
-    AllocationProperties allocProperties = MemObjHelper::getAllocationProperties(imgInfo, true, 0);
+    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(imgInfo, true, {});
 
     auto imageAllocation = memoryManager->allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
     ASSERT_NE(nullptr, imageAllocation);
@@ -664,7 +664,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenWriteMe
     aubCsr->ppgtt.reset(ppgttMock);
 
     auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
-    gfxAllocation->setAubWritable(true);
+    aubCsr->setAubWritable(true, *gfxAllocation);
 
     auto gmm = new Gmm(nullptr, 1, false);
     gfxAllocation->setDefaultGmm(gmm);
@@ -701,6 +701,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenEngineI
     auto engineInstance = HwHelper::get(platformDevices[0]->platform.eRenderCoreFamily).getGpgpuEngineInstances()[0];
     MockOsContext osContext(0, 1, engineInstance, PreemptionMode::Disabled, false);
     MockExecutionEnvironment executionEnvironment(platformDevices[0]);
+    executionEnvironment.initializeMemoryManager();
 
     auto aubCsr = std::make_unique<MockAubCsrToTestDumpContext<FamilyType>>("", true, executionEnvironment);
     EXPECT_NE(nullptr, aubCsr);

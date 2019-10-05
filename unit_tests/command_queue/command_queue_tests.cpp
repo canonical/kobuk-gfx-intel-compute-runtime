@@ -85,7 +85,7 @@ struct CommandQueueTest
     const HardwareInfo *pHwInfo = nullptr;
 };
 
-TEST_P(CommandQueueTest, createDeleteCommandQueue_Properties) {
+TEST_P(CommandQueueTest, GivenNonFailingAllocationWhenCreatingCommandQueueThenCommandQueueIsCreated) {
     InjectedFunction method = [this](size_t failureIndex) {
         auto retVal = CL_INVALID_VALUE;
         auto pCmdQ = CommandQueue::create(
@@ -110,7 +110,7 @@ INSTANTIATE_TEST_CASE_P(CommandQueue,
                         CommandQueueTest,
                         ::testing::ValuesIn(AllCommandQueueProperties));
 
-TEST(CommandQueue, taskLevelInitializesTo0) {
+TEST(CommandQueue, WhenConstructingCommandQueueThenTaskLevelAndTaskCountAreZero) {
     CommandQueue cmdQ(nullptr, nullptr, 0);
     EXPECT_EQ(0u, cmdQ.taskLevel);
     EXPECT_EQ(0u, cmdQ.taskCount);
@@ -136,20 +136,20 @@ struct GetTagTest : public DeviceFixture,
     }
 };
 
-TEST_F(GetTagTest, shouldReturnValue) {
+TEST_F(GetTagTest, GivenSetHwTagWhenGettingHwTagThenCorrectTagIsReturned) {
     uint32_t tagValue = 0xdeadbeef;
     *pTagMemory = tagValue;
     EXPECT_EQ(tagValue, pCmdQ->getHwTag());
 }
 
-TEST_F(GetTagTest, getHwTagInitialValue) {
+TEST_F(GetTagTest, GivenInitialValueWhenGettingHwTagThenCorrectTagIsReturned) {
     MockContext context;
     CommandQueue commandQueue(&context, pDevice, 0);
 
     EXPECT_EQ(initialHardwareTag, commandQueue.getHwTag());
 }
 
-TEST(CommandQueue, IOQ_taskLevelFromCompletionStamp) {
+TEST(CommandQueue, GivenUpdatedCompletionStampWhenGettingCompletionStampThenUpdatedValueIsReturned) {
     MockContext context;
 
     CommandQueue cmdQ(&context, nullptr, 0);
@@ -205,6 +205,15 @@ TEST(CommandQueue, givenDeviceWhenCreatingCommandQueueThenPickCsrFromDefaultEngi
 
     auto defaultCsr = mockDevice->getDefaultEngine().commandStreamReceiver;
     EXPECT_EQ(defaultCsr, &cmdQ.getGpgpuCommandStreamReceiver());
+}
+
+TEST(CommandQueue, givenDeviceNotSupportingBlitOperationsWhenQueueIsCreatedThenDontRegisterBcsCsr) {
+    HardwareInfo hwInfo = *platformDevices[0];
+    hwInfo.capabilityTable.blitterOperationsSupported = false;
+    std::unique_ptr<MockDevice> mockDevice(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
+    CommandQueue cmdQ(nullptr, mockDevice.get(), 0);
+
+    EXPECT_EQ(nullptr, cmdQ.getBcsCommandStreamReceiver());
 }
 
 TEST(CommandQueue, givenCmdQueueBlockedByReadyVirtualEventWhenUnblockingThenUpdateFlushTaskFromEvent) {
@@ -280,7 +289,7 @@ HWTEST_F(CommandQueueCommandStreamTest, givenCommandQueueThatWaitsOnAbortedUserE
     EXPECT_EQ(100u, cmdQ.taskLevel);
 }
 
-TEST_F(CommandQueueCommandStreamTest, GetCommandStreamReturnsValidObject) {
+TEST_F(CommandQueueCommandStreamTest, GivenValidCommandQueueWhenGettingCommandStreamThenValidObjectIsReturned) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue commandQueue(context.get(), pDevice, props);
 
@@ -288,7 +297,7 @@ TEST_F(CommandQueueCommandStreamTest, GetCommandStreamReturnsValidObject) {
     EXPECT_NE(nullptr, &cs);
 }
 
-TEST_F(CommandQueueCommandStreamTest, GetCommandStreamReturnsCsWithCsOverfetchSizeIncludedInGraphicsAllocation) {
+TEST_F(CommandQueueCommandStreamTest, GivenValidCommandStreamWhenGettingGraphicsAllocationThenMaxAvailableSpaceAndUnderlyingBufferSizeAreCorrect) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue commandQueue(context.get(), pDevice, props);
     size_t minSizeRequested = 20;
@@ -305,7 +314,7 @@ TEST_F(CommandQueueCommandStreamTest, GetCommandStreamReturnsCsWithCsOverfetchSi
     EXPECT_EQ(expectedTotalSize, allocation->getUnderlyingBufferSize());
 }
 
-TEST_F(CommandQueueCommandStreamTest, getCommandStreamContainsMemoryForRequest) {
+TEST_F(CommandQueueCommandStreamTest, GivenRequiredSizeWhenGettingCommandStreamThenMaxAvailableSpaceIsEqualOrGreaterThanRequiredSize) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue commandQueue(context.get(), pDevice, props);
 
@@ -315,7 +324,7 @@ TEST_F(CommandQueueCommandStreamTest, getCommandStreamContainsMemoryForRequest) 
     EXPECT_GE(commandStream.getMaxAvailableSpace(), requiredSize);
 }
 
-TEST_F(CommandQueueCommandStreamTest, getCommandStreamCanRecycle) {
+TEST_F(CommandQueueCommandStreamTest, WhenGettingCommandStreamWithNewSizeThenMaxAvailableSpaceIsEqualOrGreaterThanNewSize) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue commandQueue(context.get(), pDevice, props);
 
@@ -327,7 +336,7 @@ TEST_F(CommandQueueCommandStreamTest, getCommandStreamCanRecycle) {
     EXPECT_GE(commandStream.getMaxAvailableSpace(), requiredSize);
 }
 
-TEST_F(CommandQueueCommandStreamTest, givenCommandStreamReceiverWithReusableAllocationsWhenAskedForCommandStreamReturnsAllocationFromReusablePool) {
+TEST_F(CommandQueueCommandStreamTest, givenCommandStreamReceiverWithReusableAllocationsWhenAskedForCommandStreamThenReturnsAllocationFromReusablePool) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue cmdQ(context.get(), pDevice, props);
 
@@ -346,6 +355,7 @@ TEST_F(CommandQueueCommandStreamTest, givenCommandStreamReceiverWithReusableAllo
 
     EXPECT_TRUE(commandStreamReceiver.getAllocationsForReuse().peekIsEmpty());
 }
+
 TEST_F(CommandQueueCommandStreamTest, givenCommandQueueWhenItIsDestroyedThenCommandStreamIsPutOnTheReusabeList) {
     auto cmdQ = new CommandQueue(context.get(), pDevice, 0);
     const auto &commandStream = cmdQ->getCS(100);
@@ -358,7 +368,7 @@ TEST_F(CommandQueueCommandStreamTest, givenCommandQueueWhenItIsDestroyedThenComm
     EXPECT_TRUE(pDevice->getDefaultEngine().commandStreamReceiver->getAllocationsForReuse().peekContains(*graphicsAllocation));
 }
 
-TEST_F(CommandQueueCommandStreamTest, CommandQueueWhenAskedForNewCommandStreamStoresOldHeapForReuse) {
+TEST_F(CommandQueueCommandStreamTest, WhenAskedForNewCommandStreamThenOldHeapIsStoredForReuse) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue cmdQ(context.get(), pDevice, props);
 
@@ -388,7 +398,7 @@ TEST_F(CommandQueueCommandStreamTest, givenCommandQueueWhenGetCSIsCalledThenComm
     EXPECT_EQ(GraphicsAllocation::AllocationType::COMMAND_BUFFER, commandStreamAllocation->getAllocationType());
 }
 
-HWTEST_F(CommandQueueCommandStreamTest, givenMultiDispatchInfoWithSingleKernelWithFlushAllocationsDisabledWhenEstimatingNodesCountEqualMultiDispatchInfoSize) {
+HWTEST_F(CommandQueueCommandStreamTest, givenMultiDispatchInfoWithSingleKernelWithFlushAllocationsDisabledWhenEstimatingNodesCountThenItEqualsMultiDispatchInfoSize) {
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.EnableCacheFlushAfterWalker.set(0);
 
@@ -406,7 +416,7 @@ HWTEST_F(CommandQueueCommandStreamTest, givenMultiDispatchInfoWithSingleKernelWi
     EXPECT_EQ(estimatedNodesCount, multiDispatchInfo.size());
 }
 
-HWTEST_F(CommandQueueCommandStreamTest, givenMultiDispatchInfoWithSingleKernelWithFlushAllocationsEnabledWhenEstimatingNodesCountEqualMultiDispatchInfoSizePlusOne) {
+HWTEST_F(CommandQueueCommandStreamTest, givenMultiDispatchInfoWithSingleKernelWithFlushAllocationsEnabledWhenEstimatingNodesCountThenItEqualsMultiDispatchInfoSizePlusOne) {
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.EnableCacheFlushAfterWalker.set(1);
 
@@ -437,7 +447,7 @@ struct CommandQueueIndirectHeapTest : public CommandQueueMemoryDevice,
     std::unique_ptr<MockContext> context;
 };
 
-TEST_P(CommandQueueIndirectHeapTest, IndirectHeapIsProvidedByDevice) {
+TEST_P(CommandQueueIndirectHeapTest, WhenGettingIndirectHeapThenValidObjectIsReturned) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue cmdQ(context.get(), pDevice, props);
 
@@ -457,7 +467,7 @@ TEST_P(CommandQueueIndirectHeapTest, givenIndirectObjectHeapWhenItIsQueriedForIn
     }
 }
 
-HWTEST_P(CommandQueueIndirectHeapTest, IndirectHeapContainsAtLeast64KB) {
+HWTEST_P(CommandQueueIndirectHeapTest, GivenIndirectHeapWhenGettingAvailableSpaceThenCorrectSizeIsReturned) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue cmdQ(context.get(), pDevice, props);
 
@@ -470,7 +480,7 @@ HWTEST_P(CommandQueueIndirectHeapTest, IndirectHeapContainsAtLeast64KB) {
     }
 }
 
-TEST_P(CommandQueueIndirectHeapTest, getIndirectHeapContainsMemoryForRequest) {
+TEST_P(CommandQueueIndirectHeapTest, GivenRequiredSizeWhenGettingIndirectHeapThenIndirectHeapHasRequiredSize) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue cmdQ(context.get(), pDevice, props);
 
@@ -480,7 +490,7 @@ TEST_P(CommandQueueIndirectHeapTest, getIndirectHeapContainsMemoryForRequest) {
     EXPECT_GE(indirectHeap.getMaxAvailableSpace(), requiredSize);
 }
 
-TEST_P(CommandQueueIndirectHeapTest, getIndirectHeapCanRecycle) {
+TEST_P(CommandQueueIndirectHeapTest, WhenGettingIndirectHeapWithNewSizeThenMaxAvailableSpaceIsEqualOrGreaterThanNewSize) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue cmdQ(context.get(), pDevice, props);
 
@@ -498,7 +508,7 @@ TEST_P(CommandQueueIndirectHeapTest, getIndirectHeapCanRecycle) {
     }
 }
 
-TEST_P(CommandQueueIndirectHeapTest, alignSizeToCacheLine) {
+TEST_P(CommandQueueIndirectHeapTest, WhenGettingIndirectHeapThenSizeIsAlignedToCacheLine) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue cmdQ(context.get(), pDevice, props);
     size_t minHeapSize = 64 * KB;
@@ -515,7 +525,7 @@ TEST_P(CommandQueueIndirectHeapTest, alignSizeToCacheLine) {
     EXPECT_TRUE(isAligned<MemoryConstants::cacheLineSize>(indirectHeap.getAvailableSpace()));
 }
 
-TEST_P(CommandQueueIndirectHeapTest, givenCommandStreamReceiverWithReusableAllocationsWhenAskedForHeapAllocationReturnsAllocationFromReusablePool) {
+TEST_P(CommandQueueIndirectHeapTest, givenCommandStreamReceiverWithReusableAllocationsWhenAskedForHeapAllocationThenAllocationFromReusablePoolIsReturned) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue cmdQ(context.get(), pDevice, props);
 
@@ -555,7 +565,7 @@ TEST_P(CommandQueueIndirectHeapTest, givenCommandStreamReceiverWithReusableAlloc
     EXPECT_TRUE(commandStreamReceiver.getAllocationsForReuse().peekIsEmpty());
 }
 
-HWTEST_P(CommandQueueIndirectHeapTest, CommandQueueWhenAskedForNewHeapStoresOldHeapForReuse) {
+HWTEST_P(CommandQueueIndirectHeapTest, WhenAskedForNewHeapThenOldHeapIsStoredForReuse) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     CommandQueue cmdQ(context.get(), pDevice, props);
 
@@ -578,7 +588,7 @@ HWTEST_P(CommandQueueIndirectHeapTest, CommandQueueWhenAskedForNewHeapStoresOldH
     *commandStreamReceiver.getTagAddress() = 2u;
 }
 
-TEST_P(CommandQueueIndirectHeapTest, GivenCommandQueueWithoutHeapAllocationWhenAskedForNewHeapReturnsAcquiresNewAllocationWithoutStoring) {
+TEST_P(CommandQueueIndirectHeapTest, GivenCommandQueueWithoutHeapAllocationWhenAskedForNewHeapThenNewAllocationIsAcquiredWithoutStoring) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     MockCommandQueue cmdQ(context.get(), pDevice, props);
 
@@ -780,7 +790,7 @@ HWTEST_F(WaitForQueueCompletionTests, givenBlockingCallAndBlockedQueueWhenEnqueu
 
 HWTEST_F(WaitForQueueCompletionTests, whenFinishIsCalledThenCallWaitWithoutQuickKmdSleepRequest) {
     std::unique_ptr<MyCmdQueue<FamilyType>> cmdQ(new MyCmdQueue<FamilyType>(context.get(), device.get()));
-    cmdQ->finish(false);
+    cmdQ->finish();
     EXPECT_EQ(1u, cmdQ->waitUntilCompleteCounter);
     EXPECT_FALSE(cmdQ->requestedUseQuickKmdSleep);
 }
@@ -803,7 +813,7 @@ class MockSharingHandler : public SharingHandler {
     }
 };
 
-TEST(CommandQueue, givenEnqueuesForSharedObjectsWithImageUsingSharingHandlerThenReturnSuccess) {
+TEST(CommandQueue, givenEnqueuesForSharedObjectsWithImageWhenUsingSharingHandlerThenReturnSuccess) {
     MockContext context;
     CommandQueue cmdQ(&context, nullptr, 0);
     MockSharingHandler *mockSharingHandler = new MockSharingHandler;
@@ -822,7 +832,7 @@ TEST(CommandQueue, givenEnqueuesForSharedObjectsWithImageUsingSharingHandlerThen
     EXPECT_EQ(result, CL_SUCCESS);
 }
 
-TEST(CommandQueue, givenEnqueuesForSharedObjectsWithImageUsingSharingHandlerWithEventThenReturnSuccess) {
+TEST(CommandQueue, givenEnqueuesForSharedObjectsWithImageWhenUsingSharingHandlerWithEventThenReturnSuccess) {
     std::unique_ptr<MockDevice> mockDevice(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
     MockContext context;
     CommandQueue cmdQ(&context, mockDevice.get(), 0);
@@ -1032,6 +1042,7 @@ TEST(CommandQueuePropertiesTests, whenGetEngineIsCalledThenQueueEngineIsReturned
     queue.gpgpuEngine = &engineControl;
     EXPECT_EQ(queue.gpgpuEngine, &queue.getGpgpuEngine());
 }
+
 TEST(CommandQueue, GivenCommandQueueWhenEnqueueResourceBarrierCalledThenSuccessReturned) {
     MockContext context;
     CommandQueue cmdQ(&context, nullptr, 0);
@@ -1043,6 +1054,7 @@ TEST(CommandQueue, GivenCommandQueueWhenEnqueueResourceBarrierCalledThenSuccessR
         nullptr);
     EXPECT_EQ(CL_SUCCESS, result);
 }
+
 TEST(CommandQueue, GivenCommandQueueWhenCheckingIfIsCacheFlushCommandCalledThenFalseReturned) {
     MockContext context;
     CommandQueue cmdQ(&context, nullptr, 0);

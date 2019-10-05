@@ -7,15 +7,16 @@
 
 #include "runtime/gmm_helper/gmm_helper.h"
 
+#include "core/helpers/aligned_memory.h"
+#include "core/helpers/debug_helpers.h"
+#include "core/memory_manager/graphics_allocation.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/gmm_helper/resource_info.h"
-#include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/debug_helpers.h"
 #include "runtime/helpers/get_info.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/surface_formats.h"
-#include "runtime/memory_manager/graphics_allocation.h"
+#include "runtime/mem_obj/buffer.h"
 #include "runtime/os_interface/os_library.h"
 #include "runtime/platform/platform.h"
 #include "runtime/sku_info/operations/sku_info_transfer.h"
@@ -78,44 +79,6 @@ void GmmHelper::queryImgFromBufferParams(ImageInfo &imgInfo, GraphicsAllocation 
     imgInfo.slicePitch = imgInfo.rowPitch * getValidParam(imgInfo.imgDesc->image_height);
     imgInfo.size = gfxAlloc->getUnderlyingBufferSize();
     imgInfo.qPitch = 0;
-}
-
-bool GmmHelper::allowTiling(const cl_image_desc &imageDesc) {
-    // consider returning tiling type instead of bool
-    if (DebugManager.flags.ForceLinearImages.get()) {
-        return false;
-    } else {
-        auto imageType = imageDesc.image_type;
-
-        if (imageType == CL_MEM_OBJECT_IMAGE1D ||
-            imageType == CL_MEM_OBJECT_IMAGE1D_ARRAY ||
-            imageType == CL_MEM_OBJECT_IMAGE1D_BUFFER ||
-            ((imageType == CL_MEM_OBJECT_IMAGE2D && imageDesc.buffer))) {
-            return false;
-        } else {
-            return true;
-        }
-    }
-}
-
-uint64_t GmmHelper::canonize(uint64_t address) {
-    return ((int64_t)((address & 0xFFFFFFFFFFFF) << (64 - 48))) >> (64 - 48);
-}
-
-uint64_t GmmHelper::decanonize(uint64_t address) {
-    return (uint64_t)(address & 0xFFFFFFFFFFFF);
-}
-
-uint32_t GmmHelper::getRenderAlignment(uint32_t alignment) {
-    uint32_t returnAlign = 0;
-    if (alignment == 8) {
-        returnAlign = 2;
-    } else if (alignment == 16) {
-        returnAlign = 3;
-    } else {
-        returnAlign = 1;
-    }
-    return returnAlign;
 }
 
 uint32_t GmmHelper::getRenderMultisamplesCount(uint32_t numSamples) {

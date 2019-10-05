@@ -9,6 +9,7 @@
 
 #include "runtime/os_interface/windows/sys_calls.h"
 #include "runtime/os_interface/windows/wddm/wddm.h"
+#include "runtime/os_interface/windows/wddm_memory_operations_handler.h"
 
 namespace NEO {
 

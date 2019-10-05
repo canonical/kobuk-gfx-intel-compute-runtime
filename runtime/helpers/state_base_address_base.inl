@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/memory_manager/memory_constants.h"
 #include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/helpers/cache_policy.h"
 #include "runtime/helpers/state_base_address.h"
 #include "runtime/indirect_heap/indirect_heap.h"
-#include "runtime/memory_manager/memory_constants.h"
 
 #include "hw_cmds.h"
 
@@ -48,15 +48,20 @@ void StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(
     pCmd->setInstructionBufferSizeModifyEnable(true);
 
     pCmd->setDynamicStateBufferSize(static_cast<uint32_t>((dsh.getMaxAvailableSpace() + MemoryConstants::pageMask) / MemoryConstants::pageSize));
-    pCmd->setGeneralStateBufferSize(static_cast<uint32_t>(-1));
+    pCmd->setGeneralStateBufferSize(0xfffff);
 
     pCmd->setIndirectObjectBaseAddress(ioh.getHeapGpuBase());
     pCmd->setIndirectObjectBufferSize(ioh.getHeapSizeInPages());
 
     pCmd->setInstructionBufferSize(MemoryConstants::sizeOf4GBinPageEntities);
 
-    //set cache settings
-    pCmd->setStatelessDataPortAccessMemoryObjectControlState(gmmHelper->getMOCS(statelessMocsIndex));
+    if (DebugManager.flags.OverrideStatelessMocsIndex.get() != -1) {
+        statelessMocsIndex = DebugManager.flags.OverrideStatelessMocsIndex.get();
+    }
+
+    statelessMocsIndex = statelessMocsIndex << 1;
+
+    pCmd->setStatelessDataPortAccessMemoryObjectControlState(statelessMocsIndex);
     pCmd->setInstructionMemoryObjectControlState(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_STATE_HEAP_BUFFER));
 
     appendStateBaseAddressParameters(pCmd, dsh, ioh, ssh, generalStateBase, internalHeapBase, gmmHelper, dispatchFlags);

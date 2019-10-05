@@ -487,7 +487,7 @@ TEST(MemoryManagerTest, givenProfilingTagBufferTypeWhenGetAllocationDataIsCalled
     EXPECT_FALSE(allocData.flags.requiresCpuAccess);
 }
 
-TEST(MemoryManagerTest, givenAllocationPropertiesWithMultiOsContextCapableFlagEnabledWhenAllocateMemoryThenAllocationIsMultiOsContextCapable) {
+TEST(MemoryManagerTest, givenAllocationPropertiesWithMultiOsContextCapableFlagEnabledWhenAllocateMemoryThenAllocationDataIsMultiOsContextCapable) {
     MockExecutionEnvironment executionEnvironment(*platformDevices);
     MockMemoryManager memoryManager(false, false, executionEnvironment);
     AllocationProperties properties{MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER};
@@ -496,13 +496,9 @@ TEST(MemoryManagerTest, givenAllocationPropertiesWithMultiOsContextCapableFlagEn
     AllocationData allocData;
     MockMemoryManager::getAllocationData(allocData, properties, nullptr, memoryManager.createStorageInfoFromProperties(properties));
     EXPECT_TRUE(allocData.flags.multiOsContextCapable);
-
-    auto allocation = memoryManager.allocateGraphicsMemoryWithProperties(properties);
-    EXPECT_TRUE(allocation->isMultiOsContextCapable());
-    memoryManager.freeGraphicsMemory(allocation);
 }
 
-TEST(MemoryManagerTest, givenAllocationPropertiesWithMultiOsContextCapableFlagDisabledWhenAllocateMemoryThenAllocationIsNotMultiOsContextCapable) {
+TEST(MemoryManagerTest, givenAllocationPropertiesWithMultiOsContextCapableFlagDisabledWhenAllocateMemoryThenAllocationDataIsNotMultiOsContextCapable) {
     MockExecutionEnvironment executionEnvironment(*platformDevices);
     MockMemoryManager memoryManager(false, false, executionEnvironment);
     AllocationProperties properties{MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER};
@@ -511,10 +507,6 @@ TEST(MemoryManagerTest, givenAllocationPropertiesWithMultiOsContextCapableFlagDi
     AllocationData allocData;
     MockMemoryManager::getAllocationData(allocData, properties, nullptr, memoryManager.createStorageInfoFromProperties(properties));
     EXPECT_FALSE(allocData.flags.multiOsContextCapable);
-
-    auto allocation = memoryManager.allocateGraphicsMemoryWithProperties(properties);
-    EXPECT_FALSE(allocation->isMultiOsContextCapable());
-    memoryManager.freeGraphicsMemory(allocation);
 }
 
 TEST(MemoryManagerTest, givenConstantSurfaceTypeWhenGetAllocationDataIsCalledThenSystemMemoryIsNotRequested) {
@@ -550,6 +542,15 @@ TEST(MemoryManagerTest, givenLinearStreamWhenGetAllocationDataIsCalledThenSystem
     AllocationData allocData;
     MockMemoryManager mockMemoryManager;
     AllocationProperties properties{1, GraphicsAllocation::AllocationType::LINEAR_STREAM};
+    MockMemoryManager::getAllocationData(allocData, properties, nullptr, mockMemoryManager.createStorageInfoFromProperties(properties));
+    EXPECT_FALSE(allocData.flags.useSystemMemory);
+    EXPECT_TRUE(allocData.flags.requiresCpuAccess);
+}
+
+TEST(MemoryManagerTest, givenPrintfAllocationWhenGetAllocationDataIsCalledThenDontUseSystemMemoryAndRequireCpuAccess) {
+    AllocationData allocData;
+    MockMemoryManager mockMemoryManager;
+    AllocationProperties properties{1, GraphicsAllocation::AllocationType::PRINTF_SURFACE};
     MockMemoryManager::getAllocationData(allocData, properties, nullptr, mockMemoryManager.createStorageInfoFromProperties(properties));
     EXPECT_FALSE(allocData.flags.useSystemMemory);
     EXPECT_TRUE(allocData.flags.requiresCpuAccess);

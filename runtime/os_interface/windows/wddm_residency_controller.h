@@ -7,10 +7,10 @@
 
 #pragma once
 
+#include "core/os_interface/windows/windows_wrapper.h"
+#include "core/utilities/spinlock.h"
 #include "runtime/memory_manager/residency_container.h"
 #include "runtime/os_interface/windows/windows_defs.h"
-#include "runtime/os_interface/windows/windows_wrapper.h"
-#include "runtime/utilities/spinlock.h"
 
 #include <atomic>
 #include <mutex>
@@ -56,8 +56,8 @@ class WddmResidencyController {
     bool isMemoryBudgetExhausted() const { return memoryBudgetExhausted; }
     void setMemoryBudgetExhausted() { memoryBudgetExhausted = true; }
 
-    bool makeResidentResidencyAllocations(ResidencyContainer &allocationsForResidency);
-    void makeNonResidentEvictionAllocations(ResidencyContainer &evictionAllocations);
+    bool makeResidentResidencyAllocations(const ResidencyContainer &allocationsForResidency);
+    void makeNonResidentEvictionAllocations(const ResidencyContainer &evictionAllocations);
 
   protected:
     Wddm &wddm;

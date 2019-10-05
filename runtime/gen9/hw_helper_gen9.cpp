@@ -13,12 +13,6 @@ namespace NEO {
 typedef SKLFamily Family;
 
 template <>
-bool HwHelperHw<Family>::setupPreemptionRegisters(HardwareInfo *pHwInfo, bool enable) {
-    pHwInfo->capabilityTable.whitelistedRegisters.csChicken1_0x2580 = enable;
-    return pHwInfo->capabilityTable.whitelistedRegisters.csChicken1_0x2580;
-}
-
-template <>
 SipKernelType HwHelperHw<Family>::getSipKernelType(bool debuggingActive) {
     if (!debuggingActive) {
         return SipKernelType::Csr;
@@ -27,7 +21,7 @@ SipKernelType HwHelperHw<Family>::getSipKernelType(bool debuggingActive) {
 }
 
 template <>
-void PipeControlHelper<Family>::addPipeControlWA(LinearStream &commandStream) {
+void PipeControlHelper<Family>::addPipeControlWA(LinearStream &commandStream, const HardwareInfo &hwInfo) {
     auto pCmd = static_cast<Family::PIPE_CONTROL *>(commandStream.getSpace(sizeof(Family::PIPE_CONTROL)));
     *pCmd = Family::cmdInitPipeControl;
     pCmd->setCommandStreamerStallEnable(true);

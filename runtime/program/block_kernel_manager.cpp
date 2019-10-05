@@ -7,8 +7,8 @@
 
 #include "runtime/program/block_kernel_manager.h"
 
+#include "core/helpers/debug_helpers.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/helpers/debug_helpers.h"
 #include "runtime/program/kernel_info.h"
 
 namespace NEO {
@@ -29,11 +29,7 @@ BlockKernelManager::~BlockKernelManager() {
 }
 void BlockKernelManager::pushPrivateSurface(GraphicsAllocation *allocation, size_t ordinal) {
     if (blockPrivateSurfaceArray.size() < blockKernelInfoArray.size()) {
-        blockPrivateSurfaceArray.resize(blockKernelInfoArray.size());
-
-        for (uint32_t i = 0; i < blockPrivateSurfaceArray.size(); i++) {
-            blockPrivateSurfaceArray[i] = nullptr;
-        }
+        blockPrivateSurfaceArray.resize(blockKernelInfoArray.size(), nullptr);
     }
 
     DEBUG_BREAK_IF(ordinal >= blockPrivateSurfaceArray.size());

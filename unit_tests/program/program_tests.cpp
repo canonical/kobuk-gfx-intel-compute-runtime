@@ -7,21 +7,22 @@
 
 #include "unit_tests/program/program_tests.h"
 
+#include "core/helpers/aligned_memory.h"
 #include "core/helpers/ptr_math.h"
+#include "core/helpers/string.h"
+#include "core/memory_manager/graphics_allocation.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
+#include "core/unit_tests/utilities/base_object_utils.h"
 #include "elf/reader.h"
 #include "runtime/command_stream/command_stream_receiver_hw.h"
 #include "runtime/compiler_interface/compiler_options.h"
 #include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/hash.h"
 #include "runtime/helpers/hw_helper.h"
-#include "runtime/helpers/string.h"
 #include "runtime/indirect_heap/indirect_heap.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/memory_manager/allocations_list.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 #include "runtime/memory_manager/surface.h"
 #include "runtime/os_interface/os_context.h"
 #include "runtime/program/create.inl"
@@ -35,7 +36,6 @@
 #include "unit_tests/mocks/mock_program.h"
 #include "unit_tests/program/program_from_binary.h"
 #include "unit_tests/program/program_with_source.h"
-#include "unit_tests/utilities/base_object_utils.h"
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -657,7 +657,7 @@ TEST_P(ProgramFromBinaryTest, givenProgramWhenCleanKernelInfoIsCalledThenKernelA
     EXPECT_EQ(0u, pProgram->getNumKernels());
 }
 
-TEST_P(ProgramFromBinaryTest, givenProgramWhenCleanCurrentKernelInfoIsCalledButGpuIsNotYetDoneThenKernelAllocationIsPutOnDefferedFreeList) {
+HWTEST_P(ProgramFromBinaryTest, givenProgramWhenCleanCurrentKernelInfoIsCalledButGpuIsNotYetDoneThenKernelAllocationIsPutOnDefferedFreeListAndCsrRegistersCacheFlush) {
     cl_device_id device = pDevice;
     auto &csr = pDevice->getGpgpuCommandStreamReceiver();
     EXPECT_TRUE(csr.getTemporaryAllocations().peekIsEmpty());
@@ -668,6 +668,34 @@ TEST_P(ProgramFromBinaryTest, givenProgramWhenCleanCurrentKernelInfoIsCalledButG
     pProgram->cleanCurrentKernelInfo();
     EXPECT_FALSE(csr.getTemporaryAllocations().peekIsEmpty());
     EXPECT_EQ(csr.getTemporaryAllocations().peekHead(), kernelAllocation);
+    EXPECT_TRUE(this->pDevice->getUltCommandStreamReceiver<FamilyType>().requiresInstructionCacheFlush);
+}
+
+HWTEST_P(ProgramFromBinaryTest, givenIsaAllocationUsedByMultipleCsrsWhenItIsDeletedItRegistersCacheFlushInEveryCsrThatUsedIt) {
+    auto &csr0 = this->pDevice->getUltCommandStreamReceiverFromIndex<FamilyType>(0u);
+    auto &csr1 = this->pDevice->getUltCommandStreamReceiverFromIndex<FamilyType>(1u);
+
+    cl_device_id device = pDevice;
+
+    pProgram->build(1, &device, nullptr, nullptr, nullptr, true);
+
+    auto kernelAllocation = pProgram->getKernelInfo(size_t(0))->getGraphicsAllocation();
+
+    csr0.makeResident(*kernelAllocation);
+    csr1.makeResident(*kernelAllocation);
+
+    csr0.processResidency(csr0.getResidencyAllocations());
+    csr1.processResidency(csr1.getResidencyAllocations());
+
+    csr0.makeNonResident(*kernelAllocation);
+    csr1.makeNonResident(*kernelAllocation);
+
+    EXPECT_FALSE(csr0.requiresInstructionCacheFlush);
+    EXPECT_FALSE(csr1.requiresInstructionCacheFlush);
+
+    pProgram->cleanCurrentKernelInfo();
+    EXPECT_TRUE(csr0.requiresInstructionCacheFlush);
+    EXPECT_TRUE(csr1.requiresInstructionCacheFlush);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1014,7 +1042,7 @@ TEST_P(ProgramFromSourceTest, CreateWithSource_Compile) {
     delete[](char *) pSourceBuffer;
 }
 
-TEST_P(ProgramFromSourceTest, CompileProgramWithReraFlag) {
+TEST_P(ProgramFromSourceTest, CompileProgramWithInternalFlags) {
     class MyCompilerInterface : public CompilerInterface {
       public:
         MyCompilerInterface() { buildOptions[0] = buildInternalOptions[0] = '\0'; };
@@ -1048,16 +1076,21 @@ TEST_P(ProgramFromSourceTest, CompileProgramWithReraFlag) {
     // Check default build options
     std::string s1;
     std::string s2;
+    std::string s3;
     cip->getBuildOptions(s1);
     size_t pos = s1.find("-cl-fast-relaxed-math");
     EXPECT_EQ(pos, std::string::npos);
     cip->getBuildInternalOptions(s2);
     pos = s2.find("-cl-intel-gtpin-rera");
     EXPECT_EQ(pos, std::string::npos);
+    cip->getBuildInternalOptions(s3);
+    pos = s3.find("-cl-intel-greater-than-4GB-buffer-required");
+    EXPECT_EQ(pos, std::string::npos);
 
-    // Ask to build created program without "-cl-intel-gtpin-rera" flag.
+    // Ask to build created program without "-cl-intel-gtpin-rera" and "-cl-intel-greater-than-4GB-buffer-required" flags.
     s1.assign("");
     s2.assign("");
+    s3.assign("");
     cl_int retVal = program->compile(0, nullptr, "-cl-fast-relaxed-math", 0, nullptr, nullptr, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -1068,11 +1101,16 @@ TEST_P(ProgramFromSourceTest, CompileProgramWithReraFlag) {
     cip->getBuildInternalOptions(s2);
     pos = s2.find("-cl-intel-gtpin-rera");
     EXPECT_EQ(pos, std::string::npos);
+    cip->getBuildInternalOptions(s3);
+    pos = s3.find("-cl-intel-greater-than-4GB-buffer-required");
+    EXPECT_EQ(pos, std::string::npos);
 
-    // Ask to build created program with "-cl-intel-gtpin-rera" flag.
+    // Ask to build created program with "-cl-intel-gtpin-rera" and "-cl-intel-greater-than-4GB-buffer-required" flags.
     s1.assign("");
     s2.assign("");
-    retVal = program->compile(0, nullptr, "-cl-intel-gtpin-rera -cl-finite-math-only", 0, nullptr, nullptr, nullptr, nullptr);
+    s3.assign("");
+    retVal = program->compile(0, nullptr, "-cl-intel-greater-than-4GB-buffer-required -cl-intel-gtpin-rera -cl-finite-math-only",
+                              0, nullptr, nullptr, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     // Check build options that were applied
@@ -1083,6 +1121,9 @@ TEST_P(ProgramFromSourceTest, CompileProgramWithReraFlag) {
     EXPECT_NE(pos, std::string::npos);
     cip->getBuildInternalOptions(s2);
     pos = s2.find("-cl-intel-gtpin-rera");
+    EXPECT_NE(pos, std::string::npos);
+    cip->getBuildInternalOptions(s3);
+    pos = s3.find("-cl-intel-greater-than-4GB-buffer-required");
     EXPECT_NE(pos, std::string::npos);
 }
 
@@ -1472,6 +1513,9 @@ TEST_F(PatchTokenTests, ConstantMemoryObjectKernelArg) {
 }
 
 TEST_F(PatchTokenTests, VmeKernelArg) {
+    if (!pDevice->getExecutionEnvironment()->getHardwareInfo()->capabilityTable.supportsVme) {
+        GTEST_SKIP();
+    }
     // PATCH_TOKEN_INLINE_VME_SAMPLER_INFO token indicates a VME kernel.
     cl_device_id device = pDevice;
 
@@ -1686,9 +1730,9 @@ TEST_F(ProgramTests, ProgramCtorSetsProperInternalOptions) {
 }
 
 TEST_F(ProgramTests, ProgramCtorSetsProperInternalOptionsForced20) {
-    auto defaultVersion = pDevice->getMutableDeviceInfo()->clVersion;
+    auto defaultVersion = pDevice->deviceInfo.clVersion;
 
-    pDevice->getMutableDeviceInfo()->clVersion = "OpenCL 2.0 ";
+    pDevice->deviceInfo.clVersion = "OpenCL 2.0 ";
     if (pDevice) {
         MockProgram program(*pDevice->getExecutionEnvironment(), pContext, false);
         char paramValue[32];
@@ -1696,12 +1740,12 @@ TEST_F(ProgramTests, ProgramCtorSetsProperInternalOptionsForced20) {
         ASSERT_EQ(std::string(paramValue), "OpenCL 2.0 ");
         EXPECT_THAT(program.getInternalOptions(), testing::HasSubstr(std::string("-ocl-version=200")));
     }
-    pDevice->getMutableDeviceInfo()->clVersion = defaultVersion;
+    pDevice->deviceInfo.clVersion = defaultVersion;
 }
 
 TEST_F(ProgramTests, ProgramCtorSetsProperInternalOptionsWhenStatelessToStatefulIsDisabled) {
     cl_int retVal = CL_DEVICE_NOT_FOUND;
-    auto defaultSetting = DebugManager.flags.DisableStatelessToStatefulOptimization.get();
+    DebugManagerStateRestore restorer;
 
     DebugManager.flags.DisableStatelessToStatefulOptimization.set(true);
     if (pDevice) {
@@ -1724,7 +1768,12 @@ TEST_F(ProgramTests, ProgramCtorSetsProperInternalOptionsWhenStatelessToStateful
     } else {
         EXPECT_NE(CL_DEVICE_NOT_FOUND, retVal);
     }
-    DebugManager.flags.DisableStatelessToStatefulOptimization.set(defaultSetting);
+}
+
+TEST_F(ProgramTests, givenDeviceThatSupportsSharedSystemMemoryAllocationWhenProgramIsCompiledThenItForcesStatelessCompilation) {
+    pDevice->deviceInfo.sharedSystemMemCapabilities = CL_UNIFIED_SHARED_MEMORY_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS_INTEL;
+    MockProgram program(*pDevice->getExecutionEnvironment(), pContext, false);
+    EXPECT_THAT(program.getInternalOptions(), testing::HasSubstr(std::string("-cl-intel-greater-than-4GB-buffer-required")));
 }
 
 TEST_F(ProgramTests, ProgramCtorSetsProperInternalOptionsWhenForcing32BitAddressess) {
@@ -1746,7 +1795,11 @@ TEST_F(ProgramTests, ProgramCtorSetsProperInternalOptionsWhenForcing32BitAddress
         } else {
             EXPECT_THAT(program.getInternalOptions(), testing::HasSubstr(std::string("-ocl-version=000")));
         }
-        EXPECT_THAT(program.getInternalOptions(), testing::Not(testing::HasSubstr(std::string("-cl-intel-greater-than-4GB-buffer-required"))));
+        if (pDevice->areSharedSystemAllocationsAllowed()) {
+            EXPECT_THAT(program.getInternalOptions(), testing::HasSubstr(std::string("-cl-intel-greater-than-4GB-buffer-required")));
+        } else {
+            EXPECT_THAT(program.getInternalOptions(), testing::Not(testing::HasSubstr(std::string("-cl-intel-greater-than-4GB-buffer-required"))));
+        }
     } else {
         EXPECT_NE(CL_DEVICE_NOT_FOUND, retVal);
     }
@@ -2045,6 +2098,67 @@ TEST_F(ProgramTests, ProgramFromGenBinaryWithPATCH_TOKEN_GLOBAL_MEMORY_OBJECT_KE
     ASSERT_EQ(CL_SUCCESS, retVal);
 
     delete pProgram;
+}
+
+TEST_F(ProgramTests, givenProgramFromGenBinaryWhenSLMSizeIsBiggerThenDeviceLimitThenReturnError) {
+    cl_int retVal = CL_INVALID_BINARY;
+    char genBin[1024] = {1, 2, 3, 4, 5, 6, 7, 8, 9, '\0'};
+    size_t binSize = 10;
+
+    auto program = std::unique_ptr<Program>(Program::createFromGenBinary(*pDevice->getExecutionEnvironment(), nullptr, &genBin[0], binSize, false, &retVal));
+
+    EXPECT_NE(nullptr, program.get());
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ((uint32_t)CL_PROGRAM_BINARY_TYPE_EXECUTABLE, (uint32_t)program->getProgramBinaryType());
+
+    cl_device_id deviceId = pContext->getDevice(0);
+    Device *pDevice = castToObject<Device>(deviceId);
+    program->setDevice(pDevice);
+    char *pBin = &genBin[0];
+    retVal = CL_INVALID_BINARY;
+    binSize = 0;
+
+    // Prepare simple program binary containing patch token PATCH_TOKEN_ALLOCATE_LOCAL_SURFACE
+    SProgramBinaryHeader *pBHdr = (SProgramBinaryHeader *)pBin;
+    pBHdr->Magic = iOpenCL::MAGIC_CL;
+    pBHdr->Version = iOpenCL::CURRENT_ICBE_VERSION;
+    pBHdr->Device = pDevice->getHardwareInfo().platform.eRenderCoreFamily;
+    pBHdr->GPUPointerSizeInBytes = 8;
+    pBHdr->NumberOfKernels = 1;
+    pBHdr->SteppingId = 0;
+    pBHdr->PatchListSize = 0;
+    pBin += sizeof(SProgramBinaryHeader);
+    binSize += sizeof(SProgramBinaryHeader);
+
+    SKernelBinaryHeaderCommon *pKHdr = (SKernelBinaryHeaderCommon *)pBin;
+    pKHdr->CheckSum = 0;
+    pKHdr->ShaderHashCode = 0;
+    pKHdr->KernelNameSize = 8;
+    pKHdr->PatchListSize = sizeof(iOpenCL::SPatchAllocateLocalSurface);
+    pKHdr->KernelHeapSize = 0;
+    pKHdr->GeneralStateHeapSize = 0;
+    pKHdr->DynamicStateHeapSize = 0;
+    pKHdr->SurfaceStateHeapSize = 0;
+    pKHdr->KernelUnpaddedSize = 0;
+    pBin += sizeof(SKernelBinaryHeaderCommon);
+    binSize += sizeof(SKernelBinaryHeaderCommon);
+
+    strcpy(pBin, "TstCopy");
+    pBin += pKHdr->KernelNameSize;
+    binSize += pKHdr->KernelNameSize;
+
+    SPatchAllocateLocalSurface *pPatch = (SPatchAllocateLocalSurface *)pBin;
+    pPatch->Token = iOpenCL::PATCH_TOKEN_ALLOCATE_LOCAL_SURFACE;
+    pPatch->Size = sizeof(iOpenCL::SPatchAllocateLocalSurface);
+    pPatch->TotalInlineLocalMemorySize = static_cast<uint32_t>(pDevice->getDeviceInfo().localMemSize * 2);
+
+    binSize += sizeof(SPatchAllocateLocalSurface);
+
+    // Decode prepared program binary
+    program->storeGenBinary(&genBin[0], binSize);
+    retVal = program->processGenBinary();
+
+    EXPECT_EQ(CL_OUT_OF_RESOURCES, retVal);
 }
 
 TEST_F(ProgramTests, ProgramFromGenBinaryWithPATCH_TOKEN_GTPIN_FREE_GRF_INFO) {

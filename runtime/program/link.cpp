@@ -8,11 +8,11 @@
 #include "elf/writer.h"
 #include "runtime/compiler_interface/compiler_interface.h"
 #include "runtime/compiler_interface/compiler_options.h"
+#include "runtime/device/device.h"
 #include "runtime/helpers/validators.h"
 #include "runtime/platform/platform.h"
+#include "runtime/program/program.h"
 #include "runtime/source_level_debugger/source_level_debugger.h"
-
-#include "program.h"
 
 #include <cstring>
 
@@ -132,8 +132,8 @@ cl_int Program::link(
 
             if (isKernelDebugEnabled()) {
                 processDebugData();
-                for (size_t i = 0; i < kernelInfoArray.size(); i++) {
-                    pDevice->getSourceLevelDebugger()->notifyKernelDebugData(kernelInfoArray[i]);
+                for (auto kernelInfo : kernelInfoArray) {
+                    pDevice->getSourceLevelDebugger()->notifyKernelDebugData(kernelInfo);
                 }
             }
         } else {

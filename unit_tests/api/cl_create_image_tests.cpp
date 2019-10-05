@@ -7,6 +7,7 @@
 
 #include "runtime/context/context.h"
 #include "runtime/helpers/hw_info.h"
+#include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_device.h"
 
 #include "cl_api_tests.h"
@@ -64,9 +65,9 @@ TEST_F(clCreateImageTest, GivenNullHostPtrWhenCreatingImageThenImageIsCreatedAnd
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
-TEST_F(clCreateImageTest, GivenDeviceThatDoesntSupportImagesWhenCreatingImageThenInvalidOperationErrorIsReturned) {
+HWTEST_F(clCreateImageTest, GivenDeviceThatDoesntSupportImagesWhenCreatingTiledImageThenInvalidOperationErrorIsReturned) {
     auto device = static_cast<MockDevice *>(pContext->getDevice(0));
-    device->getDeviceInfoToModify()->imageSupport = CL_FALSE;
+    device->deviceInfo.imageSupport = CL_FALSE;
     cl_bool imageSupportInfo = CL_TRUE;
     auto status = clGetDeviceInfo(devices[0], CL_DEVICE_IMAGE_SUPPORT, sizeof(imageSupportInfo), &imageSupportInfo, nullptr);
     EXPECT_EQ(CL_SUCCESS, status);
@@ -79,8 +80,43 @@ TEST_F(clCreateImageTest, GivenDeviceThatDoesntSupportImagesWhenCreatingImageThe
         &imageDesc,
         nullptr,
         &retVal);
-    EXPECT_EQ(CL_INVALID_OPERATION, retVal);
-    EXPECT_EQ(nullptr, image);
+    if (UnitTestHelper<FamilyType>::tiledImagesSupported) {
+        EXPECT_EQ(CL_INVALID_OPERATION, retVal);
+        EXPECT_EQ(nullptr, image);
+    } else {
+        EXPECT_EQ(CL_SUCCESS, retVal);
+        EXPECT_NE(nullptr, image);
+
+        retVal = clReleaseMemObject(image);
+        EXPECT_EQ(CL_SUCCESS, retVal);
+    }
+}
+
+HWTEST_F(clCreateImageTest, GivenDeviceThatDoesntSupportImagesWhenCreatingNonTiledImageThenCreate) {
+    auto device = static_cast<MockDevice *>(pContext->getDevice(0));
+    device->deviceInfo.imageSupport = CL_FALSE;
+    cl_bool imageSupportInfo = CL_TRUE;
+    auto status = clGetDeviceInfo(devices[0], CL_DEVICE_IMAGE_SUPPORT, sizeof(imageSupportInfo), &imageSupportInfo, nullptr);
+    EXPECT_EQ(CL_SUCCESS, status);
+    cl_bool expectedValue = CL_FALSE;
+    EXPECT_EQ(expectedValue, imageSupportInfo);
+
+    imageDesc.image_type = CL_MEM_OBJECT_IMAGE1D;
+    imageDesc.image_height = 1;
+
+    auto image = clCreateImage(
+        pContext,
+        CL_MEM_READ_WRITE,
+        &imageFormat,
+        &imageDesc,
+        nullptr,
+        &retVal);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, image);
+
+    retVal = clReleaseMemObject(image);
+    EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
 TEST_F(clCreateImageTest, GivenNonNullHostPtrAndAlignedRowPitchWhenCreatingImageThenImageIsCreatedAndSuccessReturned) {
@@ -269,12 +305,14 @@ TEST_F(clCreateImageTest, GivenNullHostPtrAndNonZeroRowPitchWhenCreatingImageThe
 TEST_F(clCreateImageTest, GivenNonZeroPitchWhenCreatingImageFromBufferThenImageIsCreatedAndSuccessReturned) {
 
     auto buffer = clCreateBuffer(pContext, CL_MEM_READ_WRITE, 4096 * 9, nullptr, nullptr);
+    auto &helper = HwHelper::get(renderCoreFamily);
+    HardwareInfo hardwareInfo = *platformDevices[0];
 
     imageDesc.mem_object = buffer;
     imageDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
     imageDesc.image_width = 17;
     imageDesc.image_height = 17;
-    imageDesc.image_row_pitch = 4 * 17;
+    imageDesc.image_row_pitch = helper.getPitchAlignmentForImage(&hardwareInfo) * 17;
 
     auto image = clCreateImage(
         pContext,
@@ -380,12 +418,13 @@ INSTANTIATE_TEST_CASE_P(CreateImageWithFlags,
 
 TEST_P(clCreateImageValidFlags, GivenValidFlagsWhenCreatingImageThenImageIsCreatedAndSuccessReturned) {
     cl_mem_flags flags = GetParam();
-    char ptr[10];
+    std::unique_ptr<char[]> ptr;
     char *hostPtr = nullptr;
 
     if (flags & CL_MEM_USE_HOST_PTR ||
         flags & CL_MEM_COPY_HOST_PTR) {
-        hostPtr = ptr;
+        ptr = std::make_unique<char[]>(alignUp(imageDesc.image_width * imageDesc.image_height * 4, MemoryConstants::pageSize));
+        hostPtr = ptr.get();
     }
 
     auto image = clCreateImage(

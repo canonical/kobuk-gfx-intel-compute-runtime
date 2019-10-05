@@ -127,13 +127,13 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     virtual cl_int enqueueSVMMap(cl_bool blockingMap, cl_map_flags mapFlags,
                                  void *svmPtr, size_t size,
                                  cl_uint numEventsInWaitList, const cl_event *eventWaitList,
-                                 cl_event *event) {
+                                 cl_event *event, bool externalAppCall) {
         return CL_SUCCESS;
     }
 
     virtual cl_int enqueueSVMUnmap(void *svmPtr,
                                    cl_uint numEventsInWaitList, const cl_event *eventWaitList,
-                                   cl_event *event) {
+                                   cl_event *event, bool externalAppCall) {
         return CL_SUCCESS;
     }
 
@@ -308,13 +308,13 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
         return CL_SUCCESS;
     }
 
-    virtual cl_int finish(bool dcFlush) { return CL_SUCCESS; }
+    virtual cl_int finish() { return CL_SUCCESS; }
 
     virtual cl_int flush() { return CL_SUCCESS; }
 
     MOCKABLE_VIRTUAL void updateFromCompletionStamp(const CompletionStamp &completionStamp);
 
-    virtual bool isCacheFlushCommand(uint32_t commandType) { return false; }
+    virtual bool isCacheFlushCommand(uint32_t commandType) const { return false; }
 
     cl_int getCommandQueueInfo(cl_command_queue_info paramName,
                                size_t paramValueSize, void *paramValue,
@@ -335,6 +335,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
                                              const cl_event *eventWaitList);
 
     CommandStreamReceiver &getGpgpuCommandStreamReceiver() const;
+    CommandStreamReceiver *getBcsCommandStreamReceiver() const;
     Device &getDevice() const { return *device; }
     Context &getContext() const { return *context; }
     Context *getContextPtr() const { return context; }
@@ -428,6 +429,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     cl_int enqueueUnmapMemObject(TransferProperties &transferProperties, EventsRequest &eventsRequest);
 
     virtual void obtainTaskLevelAndBlockedStatus(unsigned int &taskLevel, cl_uint &numEventsInWaitList, const cl_event *&eventWaitList, bool &blockQueueStatus, unsigned int commandType){};
+    bool isBlockedCommandStreamRequired(uint32_t commandType, const EventsRequest &eventsRequest, bool blockedQueue) const;
 
     MOCKABLE_VIRTUAL void obtainNewTimestampPacketNodes(size_t numberOfNodes, TimestampPacketContainer &previousNodes, bool clearAllDependencies);
     void processProperties(const cl_queue_properties *properties);
@@ -435,11 +437,13 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
                               cl_uint numEventsInWaitList, const cl_event *eventWaitList);
     void providePerformanceHint(TransferProperties &transferProperties);
     bool queueDependenciesClearRequired() const;
-    bool blitEnqueueAllowed(bool queueBlocked, cl_command_type cmdType);
+    bool blitEnqueueAllowed(cl_command_type cmdType) const;
+    void aubCaptureHook(bool &blocking, bool &clearAllDependencies, const MultiDispatchInfo &multiDispatchInfo);
 
     Context *context = nullptr;
     Device *device = nullptr;
     EngineControl *gpgpuEngine = nullptr;
+    EngineControl *bcsEngine = nullptr;
 
     cl_command_queue_properties commandQueueProperties = 0;
 
@@ -461,12 +465,4 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 typedef CommandQueue *(*CommandQueueCreateFunc)(
     Context *context, Device *device, const cl_queue_properties *properties);
 
-template <typename GfxFamily, unsigned int eventType>
-LinearStream &getCommandStream(CommandQueue &commandQueue,
-                               bool reserveProfilingCmdsSpace,
-                               bool reservePerfCounterCmdsSpace,
-                               const Kernel *pKernel);
-
-template <typename GfxFamily, IndirectHeap::Type heapType>
-IndirectHeap &getIndirectHeap(CommandQueue &commandQueue, const Kernel &kernel);
 } // namespace NEO

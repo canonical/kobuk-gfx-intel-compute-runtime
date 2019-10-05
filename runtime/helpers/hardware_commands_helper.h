@@ -7,6 +7,7 @@
 
 #pragma once
 #include "runtime/built_ins/built_ins.h"
+#include "runtime/device/device.h"
 #include "runtime/device_queue/device_queue.h"
 #include "runtime/helpers/per_thread_data.h"
 #include "runtime/indirect_heap/indirect_heap.h"
@@ -43,6 +44,7 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
 
     static void setAdditionalInfo(
         INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor,
+        const Kernel &kernel,
         const size_t &sizeCrossThreadData,
         const size_t &sizePerThreadData);
 
@@ -58,9 +60,8 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         size_t offsetSamplerState,
         uint32_t numSamplers,
         uint32_t threadsPerThreadGroup,
-        uint32_t sizeSlm,
+        const Kernel &kernel,
         uint32_t bindingTablePrefetchSize,
-        bool barrierEnable,
         PreemptionMode preemptionMode,
         INTERFACE_DESCRIPTOR_DATA *inlineInterfaceDescriptor);
 
@@ -142,7 +143,8 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
 
     static size_t getSizeRequiredCS(const Kernel *kernel);
     static size_t getSizeRequiredForCacheFlush(const CommandQueue &commandQueue, const Kernel *kernel, uint64_t postSyncAddress);
-    static bool isPipeControlWArequired();
+    static bool isPipeControlWArequired(const HardwareInfo &hwInfo);
+    static bool isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo);
     static size_t getSizeRequiredDSH(
         const Kernel &kernel);
     static size_t getSizeRequiredIOH(
@@ -158,8 +160,7 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
     static size_t getTotalSizeRequiredSSH(
         const MultiDispatchInfo &multiDispatchInfo);
 
-    template <IndirectHeap::Type heapType>
-    static size_t getSizeRequiredForExecutionModel(const Kernel &kernel) {
+    static size_t getSizeRequiredForExecutionModel(IndirectHeap::Type heapType, const Kernel &kernel) {
         typedef typename GfxFamily::BINDING_TABLE_STATE BINDING_TABLE_STATE;
 
         size_t totalSize = 0;
@@ -203,6 +204,7 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
     static void programMiFlushDw(LinearStream &commandStream, uint64_t immediateDataGpuAddress, uint64_t immediateData);
     static void appendMiFlushDw(typename GfxFamily::MI_FLUSH_DW *miFlushDwCmd);
     static MI_ATOMIC *programMiAtomic(LinearStream &commandStream, uint64_t writeAddress, typename MI_ATOMIC::ATOMIC_OPCODES opcode, typename MI_ATOMIC::DATA_SIZE dataSize);
+    static void programMiAtomic(MI_ATOMIC &atomic, uint64_t writeAddress, typename MI_ATOMIC::ATOMIC_OPCODES opcode, typename MI_ATOMIC::DATA_SIZE dataSize);
     static void programCacheFlushAfterWalkerCommand(LinearStream *commandStream, const CommandQueue &commandQueue, const Kernel *kernel, uint64_t postSyncAddress);
 
     static const size_t alignInterfaceDescriptorData = 64 * sizeof(uint8_t);

@@ -6,6 +6,9 @@
  */
 
 #pragma once
+#include "core/helpers/aligned_memory.h"
+#include "core/helpers/debug_helpers.h"
+#include "core/memory_manager/graphics_allocation.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/command_queue/local_id_gen.h"
@@ -13,15 +16,12 @@
 #include "runtime/device/device_info.h"
 #include "runtime/event/perf_counter.h"
 #include "runtime/event/user_event.h"
-#include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/debug_helpers.h"
 #include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/queue_helpers.h"
 #include "runtime/helpers/validators.h"
 #include "runtime/indirect_heap/indirect_heap.h"
 #include "runtime/mem_obj/mem_obj.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 #include "runtime/utilities/tag_allocator.h"
 
 #include <algorithm>
@@ -32,7 +32,7 @@ namespace NEO {
 // Performs ReadModifyWrite operation on value of a register: Register = Register Operation Mask
 template <typename GfxFamily>
 void GpgpuWalkerHelper<GfxFamily>::addAluReadModifyWriteRegister(
-    NEO::LinearStream *pCommandStream,
+    LinearStream *pCommandStream,
     uint32_t aluRegister,
     uint32_t operation,
     uint32_t mask) {
@@ -104,7 +104,8 @@ void GpgpuWalkerHelper<GfxFamily>::addAluReadModifyWriteRegister(
 template <typename GfxFamily>
 void GpgpuWalkerHelper<GfxFamily>::dispatchProfilingCommandsStart(
     TagNode<HwTimeStamps> &hwTimeStamps,
-    LinearStream *commandStream) {
+    LinearStream *commandStream,
+    const HardwareInfo &hwInfo) {
 
     using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
 
@@ -113,7 +114,7 @@ void GpgpuWalkerHelper<GfxFamily>::dispatchProfilingCommandsStart(
 
     PipeControlHelper<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(*commandStream,
                                                                                PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP,
-                                                                               timeStampAddress, 0llu, false);
+                                                                               timeStampAddress, 0llu, false, hwInfo);
 
     //MI_STORE_REGISTER_MEM for context local timestamp
     timeStampAddress = hwTimeStamps.getGpuAddress() + offsetof(HwTimeStamps, ContextStartTS);

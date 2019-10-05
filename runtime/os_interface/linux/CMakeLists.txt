@@ -9,7 +9,6 @@ set(RUNTIME_SRCS_OS_INTERFACE_LINUX
   ${CMAKE_CURRENT_SOURCE_DIR}/allocator_helper.h
   ${CMAKE_CURRENT_SOURCE_DIR}/api_linux.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/d3d_sharing_functions.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/debug_env_reader.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/device_command_stream.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/device_factory_linux.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/driver_info.cpp
@@ -19,6 +18,7 @@ set(RUNTIME_SRCS_OS_INTERFACE_LINUX
   ${CMAKE_CURRENT_SOURCE_DIR}/drm_buffer_object.h
   ${CMAKE_CURRENT_SOURCE_DIR}/drm_command_stream.h
   ${CMAKE_CURRENT_SOURCE_DIR}/drm_command_stream.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/drm_command_stream_bdw_plus.inl
   ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/drm_engine_mapper.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/drm_engine_mapper.h
   ${CMAKE_CURRENT_SOURCE_DIR}/drm_gem_close_worker.cpp
@@ -29,12 +29,15 @@ set(RUNTIME_SRCS_OS_INTERFACE_LINUX
   ${CMAKE_CURRENT_SOURCE_DIR}/drm_neo.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/drm_neo.h
   ${CMAKE_CURRENT_SOURCE_DIR}/drm_neo_create.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/drm_query.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/drm_null_device.h
+  ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/drm_query.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/drm_memory_operations_handler.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/drm_memory_operations_handler.h
   ${CMAKE_CURRENT_SOURCE_DIR}/engine_info.h
   ${CMAKE_CURRENT_SOURCE_DIR}/hw_info_config.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/linux_inc.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_info.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/ocl_reg_path.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_context_linux.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_context_linux.h
   ${CMAKE_CURRENT_SOURCE_DIR}/os_inc.h
@@ -42,7 +45,6 @@ set(RUNTIME_SRCS_OS_INTERFACE_LINUX
   ${CMAKE_CURRENT_SOURCE_DIR}/os_interface.h
   ${CMAKE_CURRENT_SOURCE_DIR}/os_library.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_library.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/os_memory_linux.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_metrics_library.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_thread_linux.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_thread_linux.h
@@ -51,11 +53,14 @@ set(RUNTIME_SRCS_OS_INTERFACE_LINUX
   ${CMAKE_CURRENT_SOURCE_DIR}/performance_counters_linux.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/performance_counters_linux.h
   ${CMAKE_CURRENT_SOURCE_DIR}/print.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/tiling_mode_helper.h
 )
+
+get_property(NEO_CORE_OS_INTERFACE_LINUX GLOBAL PROPERTY NEO_CORE_OS_INTERFACE_LINUX)
+list(APPEND RUNTIME_SRCS_OS_INTERFACE_LINUX ${NEO_CORE_OS_INTERFACE_LINUX})
 
 if(UNIX)
   target_sources(${NEO_STATIC_LIB_NAME} PRIVATE ${RUNTIME_SRCS_OS_INTERFACE_LINUX})
 endif()
+
 set_property(GLOBAL PROPERTY RUNTIME_SRCS_OS_INTERFACE_LINUX ${RUNTIME_SRCS_OS_INTERFACE_LINUX})
 add_subdirectories()

@@ -25,6 +25,12 @@ class MemoryManager;
 class SharingFunctions;
 class SVMAllocsManager;
 
+enum class BlitOperationResult {
+    Unsupported,
+    Fail,
+    Success
+};
+
 template <>
 struct OpenCLObjectMapper<_cl_context> {
     typedef class Context DerivedType;
@@ -122,11 +128,12 @@ class Context : public BaseObject<_cl_context> {
 
     bool getInteropUserSyncEnabled() { return interopUserSync; }
     void setInteropUserSyncEnabled(bool enabled) { interopUserSync = enabled; }
-    bool areMultiStorageAllocationsPreffered();
+    bool areMultiStorageAllocationsPreferred();
 
     ContextType peekContextType() { return this->contextType; }
 
     MOCKABLE_VIRTUAL CommandStreamReceiver *getCommandStreamReceiverForBlitOperation(MemObj &memObj) const;
+    MOCKABLE_VIRTUAL BlitOperationResult blitMemoryToAllocation(MemObj &memObj, GraphicsAllocation *memory, void *hostPtr, size_t size) const;
 
   protected:
     Context(void(CL_CALLBACK *pfnNotify)(const char *, const void *, size_t, void *) = nullptr,

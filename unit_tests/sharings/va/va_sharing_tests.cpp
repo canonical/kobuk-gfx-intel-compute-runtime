@@ -5,12 +5,12 @@
  *
  */
 
+#include "core/memory_manager/graphics_allocation.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/api/api.h"
 #include "runtime/device/device.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/helpers/array_count.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 #include "runtime/platform/platform.h"
 #include "runtime/sharings/va/cl_va_api.h"
 #include "runtime/sharings/va/va_sharing.h"
@@ -546,11 +546,11 @@ TEST_F(ApiVaSharingTests, givenSupportedImageTypeWhenGettingSupportedVAApiFormat
 
     VAImageFormat supportedFormat = {VA_FOURCC_NV12, VA_LSB_FIRST, 8, 0, 0, 0, 0, 0};
 
-    for (size_t i = 0; i < arrayCount(flags); i++) {
+    for (auto flag : flags) {
 
         cl_int result = clGetSupportedVA_APIMediaSurfaceFormatsINTEL(
             &context,
-            flags[i],
+            flag,
             image_type,
             arrayCount(vaApiFormats),
             vaApiFormats,

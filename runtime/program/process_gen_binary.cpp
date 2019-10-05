@@ -5,19 +5,20 @@
  *
  */
 
+#include "core/helpers/aligned_memory.h"
+#include "core/helpers/debug_helpers.h"
 #include "core/helpers/ptr_math.h"
+#include "core/helpers/string.h"
 #include "runtime/context/context.h"
+#include "runtime/device/device.h"
 #include "runtime/gtpin/gtpin_notify.h"
-#include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/debug_helpers.h"
 #include "runtime/helpers/hash.h"
-#include "runtime/helpers/string.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/memory_manager/unified_memory_manager.h"
+#include "runtime/program/program.h"
 
 #include "patch_list.h"
 #include "patch_shared.h"
-#include "program.h"
 #include "program_debug_data.h"
 
 #include <algorithm>
@@ -51,11 +52,11 @@ const KernelInfo *Program::getKernelInfo(size_t ordinal) const {
 std::string Program::getKernelNamesString() const {
     std::string semiColonDelimitedKernelNameStr;
 
-    for (uint32_t i = 0; i < kernelInfoArray.size(); i++) {
-        semiColonDelimitedKernelNameStr += kernelInfoArray[i]->name;
-        if ((i + 1) != kernelInfoArray.size()) {
-            semiColonDelimitedKernelNameStr += ";";
+    for (auto kernelInfo : kernelInfoArray) {
+        if (!semiColonDelimitedKernelNameStr.empty()) {
+            semiColonDelimitedKernelNameStr += ';';
         }
+        semiColonDelimitedKernelNameStr += kernelInfo->name;
     }
 
     return semiColonDelimitedKernelNameStr;
@@ -379,11 +380,10 @@ cl_int Program::parsePatchList(KernelInfo &kernelInfo, uint32_t kernelNum) {
             case DATA_PARAMETER_LOCAL_MEMORY_STATELESS_WINDOW_START_ADDRESS:
                 DBG_LOG(LogPatchTokens, "\n  .Type", "LOCAL_MEMORY_STATELESS_WINDOW_START_ADDRESS");
                 LocalMemoryStatelessWindowStartAddressOffset = pDataParameterBuffer->Offset;
-                pDevice->prepareSLMWindow();
                 break;
             case DATA_PARAMETER_PREFERRED_WORKGROUP_MULTIPLE:
                 DBG_LOG(LogPatchTokens, "\n  .Type", "PREFERRED_WORKGROUP_MULTIPLE");
-                kernelInfo.workloadInfo.prefferedWkgMultipleOffset = pDataParameterBuffer->Offset;
+                kernelInfo.workloadInfo.preferredWkgMultipleOffset = pDataParameterBuffer->Offset;
                 break;
             case DATA_PARAMETER_BUFFER_OFFSET:
                 DBG_LOG(LogPatchTokens, "\n  .Type", "DATA_PARAMETER_BUFFER_OFFSET");
@@ -844,7 +844,7 @@ cl_int Program::parsePatchList(KernelInfo &kernelInfo, uint32_t kernelNum) {
         memset(kernelInfo.crossThreadData, 0x00, crossThreadDataSize);
 
         if (LocalMemoryStatelessWindowStartAddressOffset != 0xFFffFFff) {
-            *(uintptr_t *)&(kernelInfo.crossThreadData[LocalMemoryStatelessWindowStartAddressOffset]) = reinterpret_cast<uintptr_t>(this->pDevice->getSLMWindowStartAddress());
+            *(uintptr_t *)&(kernelInfo.crossThreadData[LocalMemoryStatelessWindowStartAddressOffset]) = reinterpret_cast<uintptr_t>(this->executionEnvironment.memoryManager->getReservedMemory(MemoryConstants::slmWindowSize, MemoryConstants::slmWindowAlignment));
         }
 
         if (LocalMemoryStatelessWindowSizeOffset != 0xFFffFFff) {
@@ -862,6 +862,10 @@ cl_int Program::parsePatchList(KernelInfo &kernelInfo, uint32_t kernelNum) {
 
     if (kernelInfo.heapInfo.pKernelHeader->KernelHeapSize && this->pDevice) {
         retVal = kernelInfo.createKernelAllocation(this->pDevice->getMemoryManager()) ? CL_SUCCESS : CL_OUT_OF_HOST_MEMORY;
+    }
+
+    if (this->pDevice && kernelInfo.workloadInfo.slmStaticSize > this->pDevice->getDeviceInfo().localMemSize) {
+        retVal = CL_OUT_OF_RESOURCES;
     }
 
     DEBUG_BREAK_IF(kernelInfo.heapInfo.pKernelHeader->KernelHeapSize && !this->pDevice);
@@ -882,7 +886,9 @@ GraphicsAllocation *allocateGlobalsSurface(NEO::Context *ctx, NEO::Device *devic
         svmProps.hostPtrReadOnly = constant;
         auto ptr = ctx->getSVMAllocsManager()->createSVMAlloc(size, svmProps);
         UNRECOVERABLE_IF(ptr == nullptr);
-        auto gpuAlloc = ctx->getSVMAllocsManager()->getSVMAlloc(ptr)->gpuAllocation;
+        auto svmAlloc = ctx->getSVMAllocsManager()->getSVMAlloc(ptr);
+        UNRECOVERABLE_IF(svmAlloc == nullptr);
+        auto gpuAlloc = svmAlloc->gpuAllocation;
         UNRECOVERABLE_IF(gpuAlloc == nullptr);
         UNRECOVERABLE_IF(device == nullptr);
         device->getMemoryManager()->copyMemoryToAllocation(gpuAlloc, initData, static_cast<uint32_t>(size));
@@ -1049,58 +1055,59 @@ cl_int Program::parseProgramScopePatchList() {
 }
 
 cl_int Program::linkBinary() {
-    if (linkerInput != nullptr) {
-        Linker linker(*linkerInput);
-        Linker::Segment globals;
-        Linker::Segment constants;
-        Linker::Segment exportedFunctions;
-        if (this->globalSurface != nullptr) {
-            globals.gpuAddress = static_cast<uintptr_t>(this->globalSurface->getGpuAddress());
-            globals.segmentSize = this->globalSurface->getUnderlyingBufferSize();
+    if (linkerInput == nullptr) {
+        return CL_SUCCESS;
+    }
+    Linker linker(*linkerInput);
+    Linker::Segment globals;
+    Linker::Segment constants;
+    Linker::Segment exportedFunctions;
+    if (this->globalSurface != nullptr) {
+        globals.gpuAddress = static_cast<uintptr_t>(this->globalSurface->getGpuAddress());
+        globals.segmentSize = this->globalSurface->getUnderlyingBufferSize();
+    }
+    if (this->constantSurface != nullptr) {
+        constants.gpuAddress = static_cast<uintptr_t>(this->constantSurface->getGpuAddress());
+        constants.segmentSize = this->constantSurface->getUnderlyingBufferSize();
+    }
+    if (this->linkerInput->getExportedFunctionsSegmentId() >= 0) {
+        // Exported functions reside in instruction heap of one of kernels
+        auto exportedFunctionHeapId = this->linkerInput->getExportedFunctionsSegmentId();
+        this->exportedFunctionsSurface = this->kernelInfoArray[exportedFunctionHeapId]->getGraphicsAllocation();
+        exportedFunctions.gpuAddress = static_cast<uintptr_t>(exportedFunctionsSurface->getGpuAddressToPatch());
+        exportedFunctions.segmentSize = exportedFunctionsSurface->getUnderlyingBufferSize();
+    }
+    Linker::PatchableSegments isaSegmentsForPatching;
+    std::vector<std::vector<char>> patchedIsaTempStorage;
+    if (linkerInput->getTraits().requiresPatchingOfInstructionSegments) {
+        patchedIsaTempStorage.reserve(this->kernelInfoArray.size());
+        for (const auto &kernelInfo : this->kernelInfoArray) {
+            auto &kernHeapInfo = kernelInfo->heapInfo;
+            const char *originalIsa = reinterpret_cast<const char *>(kernHeapInfo.pKernelHeap);
+            patchedIsaTempStorage.push_back(std::vector<char>(originalIsa, originalIsa + kernHeapInfo.pKernelHeader->KernelHeapSize));
+            isaSegmentsForPatching.push_back(Linker::PatchableSegment{patchedIsaTempStorage.rbegin()->data(), kernHeapInfo.pKernelHeader->KernelHeapSize});
         }
-        if (this->constantSurface != nullptr) {
-            constants.gpuAddress = static_cast<uintptr_t>(this->constantSurface->getGpuAddress());
-            constants.segmentSize = this->constantSurface->getUnderlyingBufferSize();
-        }
-        if (this->linkerInput->getExportedFunctionsSegmentId() >= 0) {
-            // Exported functions reside in instruction heap of one of kernels
-            auto exportedFunctionHeapId = this->linkerInput->getExportedFunctionsSegmentId();
-            this->exportedFunctionsSurface = this->kernelInfoArray[exportedFunctionHeapId]->getGraphicsAllocation();
-            exportedFunctions.gpuAddress = static_cast<uintptr_t>(exportedFunctionsSurface->getGpuAddressToPatch());
-            exportedFunctions.segmentSize = exportedFunctionsSurface->getUnderlyingBufferSize();
-        }
-        Linker::PatchableSegments isaSegmentsForPatching;
-        std::vector<std::vector<char>> patchedIsaTempStorage;
-        if (linkerInput->getTraits().requiresPatchingOfInstructionSegments) {
-            patchedIsaTempStorage.reserve(this->kernelInfoArray.size());
-            for (const auto &kernelInfo : this->kernelInfoArray) {
-                auto &kernHeapInfo = kernelInfo->heapInfo;
-                const char *originalIsa = reinterpret_cast<const char *>(kernHeapInfo.pKernelHeap);
-                patchedIsaTempStorage.push_back(std::vector<char>(originalIsa, originalIsa + kernHeapInfo.pKernelHeader->KernelHeapSize));
-                isaSegmentsForPatching.push_back(Linker::PatchableSegment{patchedIsaTempStorage.rbegin()->data(), kernHeapInfo.pKernelHeader->KernelHeapSize});
-            }
-        }
+    }
 
-        Linker::UnresolvedExternals unresolvedExternalsInfo;
-        bool linkSuccess = linker.link(globals, constants, exportedFunctions,
-                                       isaSegmentsForPatching, unresolvedExternalsInfo);
-        this->symbols = linker.extractRelocatedSymbols();
-        if (false == linkSuccess) {
-            std::vector<std::string> kernelNames;
-            for (const auto &kernelInfo : this->kernelInfoArray) {
-                kernelNames.push_back("kernel : " + kernelInfo->name);
-            }
-            auto error = constructLinkerErrorMessage(unresolvedExternalsInfo, kernelNames);
-            updateBuildLog(pDevice, error.c_str(), error.size());
-            return CL_INVALID_BINARY;
-        } else {
-            for (const auto &kernelInfo : this->kernelInfoArray) {
-                auto &kernHeapInfo = kernelInfo->heapInfo;
-                auto segmentId = &kernelInfo - &this->kernelInfoArray[0];
-                this->pDevice->getMemoryManager()->copyMemoryToAllocation(kernelInfo->getGraphicsAllocation(),
-                                                                          isaSegmentsForPatching[segmentId].hostPointer,
-                                                                          kernHeapInfo.pKernelHeader->KernelHeapSize);
-            }
+    Linker::UnresolvedExternals unresolvedExternalsInfo;
+    bool linkSuccess = linker.link(globals, constants, exportedFunctions,
+                                   isaSegmentsForPatching, unresolvedExternalsInfo);
+    this->symbols = linker.extractRelocatedSymbols();
+    if (false == linkSuccess) {
+        std::vector<std::string> kernelNames;
+        for (const auto &kernelInfo : this->kernelInfoArray) {
+            kernelNames.push_back("kernel : " + kernelInfo->name);
+        }
+        auto error = constructLinkerErrorMessage(unresolvedExternalsInfo, kernelNames);
+        updateBuildLog(pDevice, error.c_str(), error.size());
+        return CL_INVALID_BINARY;
+    } else if (linkerInput->getTraits().requiresPatchingOfInstructionSegments) {
+        for (const auto &kernelInfo : this->kernelInfoArray) {
+            auto &kernHeapInfo = kernelInfo->heapInfo;
+            auto segmentId = &kernelInfo - &this->kernelInfoArray[0];
+            this->pDevice->getMemoryManager()->copyMemoryToAllocation(kernelInfo->getGraphicsAllocation(),
+                                                                      isaSegmentsForPatching[segmentId].hostPointer,
+                                                                      kernHeapInfo.pKernelHeader->KernelHeapSize);
         }
     }
     return CL_SUCCESS;

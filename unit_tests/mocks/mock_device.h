@@ -6,7 +6,7 @@
  */
 
 #pragma once
-#include "runtime/device/device.h"
+#include "runtime/device/root_device.h"
 #include "runtime/helpers/hw_helper.h"
 #include "unit_tests/fixtures/mock_aub_center_fixture.h"
 #include "unit_tests/libult/ult_command_stream_receiver.h"
@@ -18,50 +18,27 @@ class FailMemoryManager;
 
 extern CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executionEnvironment);
 
-class MockDevice : public Device {
+class MockDevice : public RootDevice {
   public:
+    using Device::createDeviceInternals;
+    using Device::createEngine;
+    using Device::deviceInfo;
     using Device::enabledClVersion;
     using Device::engines;
     using Device::executionEnvironment;
     using Device::initializeCaps;
+    using RootDevice::subdevices;
 
     void setOSTime(OSTime *osTime);
     void setDriverInfo(DriverInfo *driverInfo);
     bool hasDriverInfo();
 
     bool getCpuTime(uint64_t *timeStamp) { return true; };
-    void *peekSlmWindowStartAddress() const {
-        return this->slmWindowStartAddress;
-    }
     MockDevice();
     MockDevice(ExecutionEnvironment *executionEnvironment, uint32_t deviceIndex);
 
-    DeviceInfo *getDeviceInfoToModify() {
-        return &this->deviceInfo;
-    }
-
-    void initializeCaps() override {
-        Device::initializeCaps();
-    }
-
     void setPreemptionMode(PreemptionMode mode) {
         preemptionMode = mode;
-    }
-
-    const WhitelistedRegisters &getWhitelistedRegisters() override {
-        if (forceWhitelistedRegs) {
-            return mockWhitelistedRegs;
-        }
-        return Device::getWhitelistedRegisters();
-    }
-
-    const WorkaroundTable *getWaTable() const override { return &mockWaTable; }
-
-    void setForceWhitelistedRegs(bool force, WhitelistedRegisters *mockRegs = nullptr) {
-        forceWhitelistedRegs = force;
-        if (mockRegs) {
-            mockWhitelistedRegs = *mockRegs;
-        }
     }
 
     void injectMemoryManager(MemoryManager *);
@@ -79,8 +56,11 @@ class MockDevice : public Device {
         return reinterpret_cast<UltCommandStreamReceiver<T> &>(*engines[defaultEngineIndex].commandStreamReceiver);
     }
 
+    template <typename T>
+    UltCommandStreamReceiver<T> &getUltCommandStreamReceiverFromIndex(uint32_t index) {
+        return reinterpret_cast<UltCommandStreamReceiver<T> &>(*engines[index].commandStreamReceiver);
+    }
     CommandStreamReceiver &getGpgpuCommandStreamReceiver() const { return *engines[defaultEngineIndex].commandStreamReceiver; }
-
     void resetCommandStreamReceiver(CommandStreamReceiver *newCsr);
     void resetCommandStreamReceiver(CommandStreamReceiver *newCsr, uint32_t engineIndex);
 
@@ -106,11 +86,6 @@ class MockDevice : public Device {
     }
 
     std::unique_ptr<MemoryManager> mockMemoryManager;
-
-  private:
-    bool forceWhitelistedRegs = false;
-    WhitelistedRegisters mockWhitelistedRegs = {0};
-    WorkaroundTable mockWaTable = {};
 };
 
 template <>
@@ -120,7 +95,7 @@ inline Device *MockDevice::createWithNewExecutionEnvironment<Device>(const Hardw
     auto hwInfo = pHwInfo ? pHwInfo : *platformDevices;
     executionEnvironment->setHwInfo(hwInfo);
     executionEnvironment->initializeMemoryManager();
-    return Device::create<Device>(executionEnvironment, 0u);
+    return Device::create<RootDevice>(executionEnvironment, 0u);
 }
 
 class FailDevice : public MockDevice {

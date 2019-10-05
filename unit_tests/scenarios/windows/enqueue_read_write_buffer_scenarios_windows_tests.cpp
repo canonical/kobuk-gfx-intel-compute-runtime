@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
 #include "runtime/os_interface/windows/os_interface.h"
 #include "runtime/os_interface/windows/wddm_device_command_stream.h"
@@ -25,6 +26,7 @@ struct EnqueueBufferWindowsTest : public HardwareParse,
     }
 
     void SetUp() override {
+        DebugManager.flags.EnableBlitterOperationsForReadWriteBuffers.set(0);
         executionEnvironment = getExecutionEnvironmentImpl(hwInfo);
     }
 
@@ -61,6 +63,7 @@ struct EnqueueBufferWindowsTest : public HardwareParse,
     }
 
   protected:
+    DebugManagerStateRestore restore;
     HardwareInfo hardwareInfo;
     HardwareInfo *hwInfo = nullptr;
     ExecutionEnvironment *executionEnvironment;
@@ -75,6 +78,9 @@ struct EnqueueBufferWindowsTest : public HardwareParse,
 
 HWTEST_F(EnqueueBufferWindowsTest, givenMisalignedHostPtrWhenEnqueueReadBufferCalledThenStateBaseAddressAddressIsAlignedAndMatchesKernelDispatchInfoParams) {
     initializeFixture<FamilyType>();
+    if (device->areSharedSystemAllocationsAllowed()) {
+        GTEST_SKIP();
+    }
     auto cmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context.get(), device.get(), &properties);
     uint32_t memory[2] = {};
     char *misalignedPtr = reinterpret_cast<char *>(memory) + 1;
@@ -96,7 +102,7 @@ HWTEST_F(EnqueueBufferWindowsTest, givenMisalignedHostPtrWhenEnqueueReadBufferCa
     ASSERT_NE(nullptr, hostPtrAllcoation);
 
     uint64_t gpuVa = hostPtrAllcoation->getGpuAddress();
-    cmdQ->finish(true);
+    cmdQ->finish();
 
     parseCommands<FamilyType>(*cmdQ);
 

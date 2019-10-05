@@ -6,7 +6,7 @@
  */
 
 #pragma once
-#include "runtime/os_interface/windows/windows_wrapper.h"
+#include "core/os_interface/windows/windows_wrapper.h"
 
 #include "sku_info.h"
 #include "umKmInc/sharedata.h"
@@ -94,6 +94,12 @@ class SkuInfoReceiver {
 
         RECEIVE_FTR(KmdDaf);
         RECEIVE_FTR(SimulationMode);
+
+        RECEIVE_FTR(E2ECompression);
+        RECEIVE_FTR(LinearCCS);
+        RECEIVE_FTR(CCSRing);
+        RECEIVE_FTR(CCSNode);
+        RECEIVE_FTR(MemTypeMocsDeferPAT);
 #undef RECEIVE_FTR
     }
 
@@ -119,6 +125,10 @@ class SkuInfoReceiver {
         RECEIVE_WA(ModifyVFEStateAfterGPGPUPreemption);
         RECEIVE_WA(CSRUncachable);
         RECEIVE_WA(SamplerCacheFlushBetweenRedescribedSurfaceReads);
+        RECEIVE_WA(RestrictPitch128KB);
+        RECEIVE_WA(AuxTable16KGranular);
+        RECEIVE_WA(Limit128BMediaCompr);
+        RECEIVE_WA(UntypedBufferCompression);
 #undef RECEIVE_WA
     }
 };

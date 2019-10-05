@@ -12,6 +12,7 @@
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/platform/platform.h"
+#include "unit_tests/mocks/mock_allocation_properties.h"
 
 #include "gmock/gmock.h"
 
@@ -122,6 +123,10 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
         AUBCommandStreamReceiverHw<GfxFamily>::dumpAllocation(gfxAllocation);
         dumpAllocationCalled = true;
     }
+    bool isMultiOsContextCapable() const override {
+        return multiOsContextCapable;
+    }
+    bool multiOsContextCapable = false;
     bool flushBatchedSubmissionsCalled = false;
     bool initProgrammingFlagsCalled = false;
     bool initializeEngineCalled = false;

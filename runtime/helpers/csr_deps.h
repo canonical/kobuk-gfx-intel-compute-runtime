@@ -6,7 +6,7 @@
  */
 
 #pragma once
-#include "runtime/utilities/stackvec.h"
+#include "core/utilities/stackvec.h"
 
 namespace NEO {
 
@@ -22,8 +22,9 @@ class CsrDependencies : public StackVec<TimestampPacketContainer *, 32> {
         All
     };
 
-    void fillFromEventsRequestAndMakeResident(const EventsRequest &eventsRequest,
-                                              CommandStreamReceiver &currentCsr,
-                                              DependenciesType depsType);
+    void fillFromEventsRequest(const EventsRequest &eventsRequest, CommandStreamReceiver &currentCsr,
+                               DependenciesType depsType);
+
+    void makeResident(CommandStreamReceiver &commandStreamReceiver) const;
 };
 } // namespace NEO

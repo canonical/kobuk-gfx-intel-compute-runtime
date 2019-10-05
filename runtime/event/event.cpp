@@ -7,6 +7,9 @@
 
 #include "runtime/event/event.h"
 
+#include "core/helpers/aligned_memory.h"
+#include "core/utilities/range.h"
+#include "core/utilities/stackvec.h"
 #include "public/cl_ext_private.h"
 #include "runtime/api/cl_types.h"
 #include "runtime/command_queue/command_queue.h"
@@ -15,15 +18,12 @@
 #include "runtime/device/device.h"
 #include "runtime/event/async_events_handler.h"
 #include "runtime/event/event_tracker.h"
-#include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/get_info.h"
 #include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/timestamp_packet.h"
 #include "runtime/mem_obj/mem_obj.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
 #include "runtime/platform/platform.h"
-#include "runtime/utilities/range.h"
-#include "runtime/utilities/stackvec.h"
 #include "runtime/utilities/tag_allocator.h"
 
 #define OCLRT_NUM_TIMESTAMP_BITS (32)

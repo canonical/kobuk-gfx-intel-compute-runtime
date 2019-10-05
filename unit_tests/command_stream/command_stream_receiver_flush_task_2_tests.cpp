@@ -9,12 +9,14 @@
 #include "runtime/command_stream/csr_definitions.h"
 #include "runtime/command_stream/scratch_space_controller.h"
 #include "runtime/gmm_helper/gmm_helper.h"
+#include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/state_base_address.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
 #include "runtime/os_interface/os_context.h"
 #include "test.h"
 #include "unit_tests/fixtures/ult_command_stream_receiver_fixture.h"
+#include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_allocation_properties.h"
 #include "unit_tests/mocks/mock_buffer.h"
 #include "unit_tests/mocks/mock_command_queue.h"
@@ -61,7 +63,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelNotRequiringDCFl
 
     auto itorPC = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
     EXPECT_NE(cmdList.end(), itorPC);
-    if (::renderCoreFamily == IGFX_GEN9_CORE) {
+    if (UnitTestHelper<FamilyType>::isPipeControlWArequired(pDevice->getHardwareInfo())) {
         itorPC++;
         itorPC = find<PIPE_CONTROL *>(itorPC, cmdList.end());
         EXPECT_NE(cmdList.end(), itorPC);
@@ -110,9 +112,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, TrackSentTagsWhenEmptyQueue) {
     commandStreamReceiver.taskCount = taskCount;
 
     EXPECT_EQ(0u, commandStreamReceiver.peekLatestSentTaskCount());
-    commandQueue.finish(false);
+    commandQueue.finish();
     EXPECT_EQ(0u, commandStreamReceiver.peekLatestSentTaskCount());
-    commandQueue.finish(true);
+    commandQueue.finish();
     //nothings sent to the HW, no need to bump tags
     EXPECT_EQ(0u, commandStreamReceiver.peekLatestSentTaskCount());
     EXPECT_EQ(0u, commandQueue.latestTaskCountWaited);
@@ -135,13 +137,13 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, TrackSentTagsWhenNonDcFlushWithIni
 
     // finish after enqueued kernel(cmdq task count = 1)
     commandQueue.enqueueKernel(kernel, 1, nullptr, &GWS, nullptr, 0, nullptr, nullptr);
-    commandQueue.finish(false);
+    commandQueue.finish();
     EXPECT_EQ(1u, commandStreamReceiver.peekLatestSentTaskCount());
     EXPECT_EQ(1u, commandQueue.latestTaskCountWaited);
     EXPECT_EQ(1u, commandStreamReceiver.peekTaskCount());
 
     // finish again - dont call flush task
-    commandQueue.finish(false);
+    commandQueue.finish();
     EXPECT_EQ(1u, commandStreamReceiver.peekLatestSentTaskCount());
     EXPECT_EQ(1u, commandQueue.latestTaskCountWaited);
     EXPECT_EQ(1u, commandStreamReceiver.peekTaskCount());
@@ -176,13 +178,13 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, TrackSentTagsWhenDcFlush) {
     EXPECT_EQ(1u, commandStreamReceiver.peekLatestSentTaskCount());
 
     // cmdQ task count = 2, finish again
-    commandQueue.finish(false);
+    commandQueue.finish();
 
     EXPECT_EQ(1u, commandStreamReceiver.peekLatestSentTaskCount());
     EXPECT_EQ(1u, commandQueue.latestTaskCountWaited);
 
     // finish again - dont flush task again
-    commandQueue.finish(false);
+    commandQueue.finish();
 
     EXPECT_EQ(1u, commandStreamReceiver.peekLatestSentTaskCount());
     EXPECT_EQ(1u, commandQueue.latestTaskCountWaited);
@@ -282,7 +284,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenNonBlockingMapWhenFinishIsCal
 
     EXPECT_EQ(0u, commandStreamReceiver.peekLatestSentTaskCount());
 
-    commandQueue.finish(false);
+    commandQueue.finish();
 
     EXPECT_EQ(0u, commandStreamReceiver.peekLatestSentTaskCount());
 
@@ -338,7 +340,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests,
     auto cmdPC = genCmdCast<PIPE_CONTROL *>(*itorCmd);
     ASSERT_NE(nullptr, cmdPC);
 
-    if (::renderCoreFamily == IGFX_GEN9_CORE) {
+    if (UnitTestHelper<FamilyType>::isPipeControlWArequired(pDevice->getHardwareInfo())) {
         // SKL: two PIPE_CONTROLs following GPGPU_WALKER: first has DcFlush and second has Write HwTag
         EXPECT_FALSE(cmdPC->getDcFlushEnable());
         auto itorCmdP = ++((GenCmdList::iterator)itorCmd);
@@ -452,7 +454,7 @@ struct MockScratchController : public ScratchSpaceController {
                                  uint32_t requiredPerThreadScratchSize,
                                  uint32_t requiredPerThreadPrivateScratchSize,
                                  uint32_t currentTaskCount,
-                                 uint32_t deviceIdx,
+                                 OsContext &osContext,
                                  bool &stateBaseAddressDirty,
                                  bool &vfeStateDirty) override {
         if (requiredPerThreadScratchSize > scratchSizeBytes) {
@@ -593,8 +595,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, givenTwoConsecu
         EXPECT_TRUE(graphicsAllocationScratch->is32BitAllocation());
         EXPECT_EQ(GmmHelper::decanonize(graphicsAllocationScratch->getGpuAddress()) - GSHaddress, graphicsAddress);
     } else if (!deviceInfo.svmCapabilities && is64bit) {
-        EXPECT_EQ(HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit(), mediaVfeState->getScratchSpaceBasePointer());
-        EXPECT_EQ(GSHaddress + HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit(), graphicsAllocationScratch->getGpuAddressToPatch());
+        EXPECT_EQ(ScratchSpaceConstants::scratchSpaceOffsetFor64Bit, mediaVfeState->getScratchSpaceBasePointer());
+        EXPECT_EQ(GSHaddress + ScratchSpaceConstants::scratchSpaceOffsetFor64Bit, graphicsAllocationScratch->getGpuAddressToPatch());
     } else {
         EXPECT_EQ((uint64_t)graphicsAllocationScratch->getUnderlyingBuffer(), graphicsAddress);
     }
@@ -606,7 +608,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, givenTwoConsecu
     uint64_t scratchBaseHighPart = (uint64_t)mediaVfeState->getScratchSpaceBasePointerHigh();
 
     if (is64bit && !deviceInfo.force32BitAddressess) {
-        uint64_t expectedAddress = HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit();
+        uint64_t expectedAddress = ScratchSpaceConstants::scratchSpaceOffsetFor64Bit;
         EXPECT_EQ(expectedAddress, scratchBaseLowPart);
         EXPECT_EQ(0u, scratchBaseHighPart);
     } else {
@@ -618,7 +620,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, givenTwoConsecu
         EXPECT_EQ(pDevice->getMemoryManager()->getExternalHeapBaseAddress(), GSHaddress);
     } else {
         if (is64bit) {
-            EXPECT_EQ(graphicsAddress - HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit(), GSHaddress);
+            EXPECT_EQ(graphicsAddress - ScratchSpaceConstants::scratchSpaceOffsetFor64Bit, GSHaddress);
         } else {
             EXPECT_EQ(0u, GSHaddress);
         }
@@ -707,8 +709,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, givenNDRangeKer
         EXPECT_TRUE(graphicsAllocationScratch->is32BitAllocation());
         EXPECT_EQ(GmmHelper::decanonize(graphicsAllocationScratch->getGpuAddress()) - GSHaddress, graphicsAddress);
     } else if (!deviceInfo.svmCapabilities && is64bit) {
-        EXPECT_EQ(HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit(), mediaVfeState->getScratchSpaceBasePointer());
-        EXPECT_EQ(GSHaddress + HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit(), graphicsAllocationScratch->getGpuAddressToPatch());
+        EXPECT_EQ(ScratchSpaceConstants::scratchSpaceOffsetFor64Bit, mediaVfeState->getScratchSpaceBasePointer());
+        EXPECT_EQ(GSHaddress + ScratchSpaceConstants::scratchSpaceOffsetFor64Bit, graphicsAllocationScratch->getGpuAddressToPatch());
     } else {
         EXPECT_EQ((uint64_t)graphicsAllocationScratch->getUnderlyingBuffer(), graphicsAddress);
     }
@@ -720,7 +722,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, givenNDRangeKer
     uint64_t scratchBaseHighPart = (uint64_t)mediaVfeState->getScratchSpaceBasePointerHigh();
 
     if (is64bit && !deviceInfo.force32BitAddressess) {
-        lowPartGraphicsAddress = HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit();
+        lowPartGraphicsAddress = ScratchSpaceConstants::scratchSpaceOffsetFor64Bit;
         highPartGraphicsAddress = 0u;
     }
 
@@ -731,7 +733,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, givenNDRangeKer
         EXPECT_EQ(pDevice->getMemoryManager()->getExternalHeapBaseAddress(), GSHaddress);
     } else {
         if (is64bit) {
-            EXPECT_EQ(graphicsAddress - HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit(), GSHaddress);
+            EXPECT_EQ(graphicsAddress - ScratchSpaceConstants::scratchSpaceOffsetFor64Bit, GSHaddress);
         } else {
             EXPECT_EQ(0u, GSHaddress);
         }
@@ -836,11 +838,6 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, InForced32BitAllocationsModeStore3
         EXPECT_EQ(scratchAllocation, allocationTemporary.get());
         pDevice->getMemoryManager()->freeGraphicsMemory(allocationTemporary.release());
     }
-}
-
-TEST(CacheSettings, GivenCacheSettingWhenCheckedForValuesThenProperValuesAreSelected) {
-    EXPECT_EQ(static_cast<uint32_t>(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED), CacheSettings::l3CacheOff);
-    EXPECT_EQ(static_cast<uint32_t>(GMM_RESOURCE_USAGE_OCL_BUFFER), CacheSettings::l3CacheOn);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, addPipeControlWithFlushAllCaches) {
@@ -982,8 +979,29 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrWhenPreambleNotSentThenReq
     EXPECT_EQ(mediaSamplerConfigChangedSize, mediaSamplerConfigNotChangedSize);
 }
 
+HWTEST_F(CommandStreamReceiverFlushTaskTests, givenSpecialPipelineSelectModeChangedWhenGetCmdSizeForPielineSelectIsCalledThenCorrectSizeIsReturned) {
+    using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+
+    UltCommandStreamReceiver<FamilyType> &commandStreamReceiver = (UltCommandStreamReceiver<FamilyType> &)pDevice->getGpgpuCommandStreamReceiver();
+
+    CsrSizeRequestFlags csrSizeRequest = {};
+    DispatchFlags flags;
+    csrSizeRequest.specialPipelineSelectModeChanged = true;
+    commandStreamReceiver.overrideCsrSizeReqFlags(csrSizeRequest);
+    size_t size = commandStreamReceiver.getCmdSizeForPipelineSelect();
+
+    size_t expectedSize = sizeof(PIPELINE_SELECT);
+    if (HardwareCommandsHelper<FamilyType>::isPipeControlPriorToPipelineSelectWArequired(pDevice->getHardwareInfo())) {
+        expectedSize += sizeof(PIPE_CONTROL);
+    }
+    EXPECT_EQ(expectedSize, size);
+}
+
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrWhenPreambleSentThenRequiredCsrSizeDependsOnmediaSamplerConfigChanged) {
-    typedef typename FamilyType::PIPELINE_SELECT PIPELINE_SELECT;
+    using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+
     UltCommandStreamReceiver<FamilyType> &commandStreamReceiver = (UltCommandStreamReceiver<FamilyType> &)pDevice->getGpgpuCommandStreamReceiver();
     CsrSizeRequestFlags csrSizeRequest = {};
     DispatchFlags flags;
@@ -999,7 +1017,13 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrWhenPreambleSentThenRequir
 
     EXPECT_NE(mediaSamplerConfigChangedSize, mediaSamplerConfigNotChangedSize);
     auto difference = mediaSamplerConfigChangedSize - mediaSamplerConfigNotChangedSize;
-    EXPECT_EQ(sizeof(PIPELINE_SELECT), difference);
+
+    size_t expectedDifference = sizeof(PIPELINE_SELECT);
+    if (HardwareCommandsHelper<FamilyType>::isPipeControlPriorToPipelineSelectWArequired(pDevice->getHardwareInfo())) {
+        expectedDifference += sizeof(PIPE_CONTROL);
+    }
+
+    EXPECT_EQ(expectedDifference, difference);
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrWhenSamplerCacheFlushSentThenRequiredCsrSizeContainsPipecontrolSize) {
@@ -1016,15 +1040,13 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrWhenSamplerCacheFlushSentT
     auto samplerCacheFlushBeforeSize = commandStreamReceiver.getRequiredCmdStreamSize(flags, *pDevice);
     EXPECT_EQ(samplerCacheNotFlushedSize, samplerCacheFlushBeforeSize);
 
-    NEO::WorkaroundTable *waTable = const_cast<WorkaroundTable *>(pDevice->getWaTable());
-    bool tmp = waTable->waSamplerCacheFlushBetweenRedescribedSurfaceReads;
+    NEO::WorkaroundTable *waTable = &pDevice->getExecutionEnvironment()->getMutableHardwareInfo()->workaroundTable;
     waTable->waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
 
     samplerCacheFlushBeforeSize = commandStreamReceiver.getRequiredCmdStreamSize(flags, *pDevice);
 
     auto difference = samplerCacheFlushBeforeSize - samplerCacheNotFlushedSize;
     EXPECT_EQ(sizeof(typename FamilyType::PIPE_CONTROL), difference);
-    waTable->waSamplerCacheFlushBetweenRedescribedSurfaceReads = tmp;
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInNonDirtyStateWhenflushTaskIsCalledThenNoFlushIsCalled) {

@@ -7,7 +7,7 @@
 
 #pragma once
 #include "core/unified_memory/unified_memory.h"
-#include "runtime/utilities/spinlock.h"
+#include "core/utilities/spinlock.h"
 
 #include <cstdint>
 #include <map>
@@ -76,9 +76,11 @@ class SVMAllocsManager {
     SVMAllocsManager(MemoryManager *memoryManager);
     void *createSVMAlloc(size_t size, const SvmAllocationProperties svmProperties);
     void *createUnifiedMemoryAllocation(size_t size, const UnifiedMemoryProperties svmProperties);
+    void *createSharedUnifiedMemoryAllocation(size_t size, const UnifiedMemoryProperties svmProperties, void *cmdQ);
     SvmAllocationData *getSVMAlloc(const void *ptr);
     bool freeSVMAlloc(void *ptr);
     size_t getNumAllocs() const { return SVMAllocs.getNumAllocs(); }
+    MapBasedAllocationTracker *getSVMAllocs() { return &SVMAllocs; }
 
     void insertSvmMapOperation(void *regionSvmPtr, size_t regionSize, void *baseSvmPtr, size_t offset, bool readOnlyMap);
     void removeSvmMapOperation(const void *regionSvmPtr);

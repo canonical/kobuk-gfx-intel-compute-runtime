@@ -6,8 +6,8 @@
  */
 
 #pragma once
+#include "core/helpers/debug_helpers.h"
 #include "runtime/commands/bxml_generator_glue.h"
-#include "runtime/helpers/debug_helpers.h"
 
 #include "hw_info.h"
 #include "igfxfmid.h"
@@ -18,8 +18,8 @@ struct CmdParse;
 namespace NEO {
 
 struct GEN11 {
-#include "runtime/gen11/hw_cmds_generated.h"
-#include "runtime/gen11/hw_cmds_generated_patched.h"
+#include "core/gen11/hw_cmds_generated.inl"
+#include "core/gen11/hw_cmds_generated_patched.inl"
 };
 struct ICLFamily : public GEN11 {
     using PARSE = CmdParse<ICLFamily>;

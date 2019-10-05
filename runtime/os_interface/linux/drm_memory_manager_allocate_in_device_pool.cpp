@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/helpers/basic_math.h"
 #include "runtime/os_interface/linux/drm_memory_manager.h"
 
 namespace NEO {
@@ -17,7 +18,18 @@ void *DrmMemoryManager::lockResourceInLocalMemoryImpl(GraphicsAllocation &graphi
     return nullptr;
 }
 
+void *DrmMemoryManager::lockResourceInLocalMemoryImpl(BufferObject *bo) {
+    return nullptr;
+}
+
+void DrmMemoryManager::unlockResourceInLocalMemoryImpl(BufferObject *bo) {
+}
+
 bool DrmMemoryManager::copyMemoryToAllocation(GraphicsAllocation *graphicsAllocation, const void *memoryToCopy, size_t sizeToCopy) {
     return MemoryManager::copyMemoryToAllocation(graphicsAllocation, memoryToCopy, sizeToCopy);
+}
+
+uint64_t DrmMemoryManager::getLocalMemorySize() {
+    return 0 * GB;
 }
 } // namespace NEO

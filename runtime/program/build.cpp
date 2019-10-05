@@ -7,6 +7,7 @@
 
 #include "runtime/compiler_interface/compiler_interface.h"
 #include "runtime/compiler_interface/compiler_options.h"
+#include "runtime/device/device.h"
 #include "runtime/gtpin/gtpin_notify.h"
 #include "runtime/helpers/validators.h"
 #include "runtime/os_interface/debug_settings_manager.h"
@@ -117,8 +118,8 @@ cl_int Program::build(
         if (isKernelDebugEnabled()) {
             processDebugData();
             if (pDevice->getSourceLevelDebugger()) {
-                for (size_t i = 0; i < kernelInfoArray.size(); i++) {
-                    pDevice->getSourceLevelDebugger()->notifyKernelDebugData(kernelInfoArray[i]);
+                for (auto kernelInfo : kernelInfoArray) {
+                    pDevice->getSourceLevelDebugger()->notifyKernelDebugData(kernelInfo);
                 }
             }
         }

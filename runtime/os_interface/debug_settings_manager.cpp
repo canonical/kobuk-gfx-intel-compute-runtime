@@ -8,14 +8,15 @@
 #include "debug_settings_manager.h"
 
 #include "core/helpers/ptr_math.h"
+#include "core/helpers/string.h"
+#include "core/utilities/debug_settings_reader_creator.h"
 #include "runtime/event/event.h"
 #include "runtime/helpers/dispatch_info.h"
-#include "runtime/helpers/string.h"
 #include "runtime/helpers/timestamp_packet.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/mem_obj/mem_obj.h"
 #include "runtime/os_interface/definitions/translate_debug_settings.h"
-#include "runtime/utilities/debug_settings_reader_creator.h"
+#include "runtime/os_interface/ocl_reg_path.h"
 
 #include "CL/cl.h"
 
@@ -37,7 +38,7 @@ DebugSettingsManager<DebugLevel>::DebugSettingsManager() {
 
     logFileName = "igdrcl.log";
     if (registryReadAvailable()) {
-        readerImpl = SettingsReaderCreator::create();
+        readerImpl = SettingsReaderCreator::create(oclRegPath);
         injectSettingsFromReader();
         dumpFlags();
     }

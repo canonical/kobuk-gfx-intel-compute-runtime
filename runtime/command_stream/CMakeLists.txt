@@ -32,12 +32,10 @@ set(RUNTIME_SRCS_COMMAND_STREAM
   ${CMAKE_CURRENT_SOURCE_DIR}/experimental_command_buffer.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/experimental_command_buffer.h
   ${CMAKE_CURRENT_SOURCE_DIR}/experimental_command_buffer.inl
-  ${CMAKE_CURRENT_SOURCE_DIR}/linear_stream.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/linear_stream.h
+  ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/per_dss_backed_buffer.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/preemption.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/preemption.h
   ${CMAKE_CURRENT_SOURCE_DIR}/preemption.inl
-  ${CMAKE_CURRENT_SOURCE_DIR}/preemption_mode.h
   ${CMAKE_CURRENT_SOURCE_DIR}/scratch_space_controller.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/scratch_space_controller.h
   ${CMAKE_CURRENT_SOURCE_DIR}/scratch_space_controller_base.cpp
@@ -51,6 +49,10 @@ set(RUNTIME_SRCS_COMMAND_STREAM
   ${CMAKE_CURRENT_SOURCE_DIR}/tbx_stream.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/thread_arbitration_policy.h
 )
+
+get_property(NEO_CORE_COMMAND_STREAM GLOBAL PROPERTY NEO_CORE_COMMAND_STREAM)
+list(APPEND RUNTIME_SRCS_COMMAND_STREAM ${NEO_CORE_COMMAND_STREAM})
+
 target_sources(${NEO_STATIC_LIB_NAME} PRIVATE ${RUNTIME_SRCS_COMMAND_STREAM})
 set_property(GLOBAL PROPERTY RUNTIME_SRCS_COMMAND_STREAM ${RUNTIME_SRCS_COMMAND_STREAM})
 add_subdirectories()

@@ -8,6 +8,7 @@
 #include "elf/writer.h"
 #include "runtime/compiler_interface/compiler_interface.h"
 #include "runtime/compiler_interface/compiler_options.h"
+#include "runtime/device/device.h"
 #include "runtime/helpers/validators.h"
 #include "runtime/platform/platform.h"
 #include "runtime/source_level_debugger/source_level_debugger.h"
@@ -72,14 +73,16 @@ cl_int Program::compile(
         buildStatus = CL_BUILD_IN_PROGRESS;
 
         options = (buildOptions != nullptr) ? buildOptions : "";
-        std::string reraStr = "-cl-intel-gtpin-rera";
-        size_t pos = options.find(reraStr);
-        if (pos != std::string::npos) {
-            // compile option "-cl-intel-gtpin-rera" is present, move it to internalOptions
-            size_t reraLen = reraStr.length();
-            options.erase(pos, reraLen);
-            internalOptions.append(reraStr);
-            internalOptions.append(" ");
+
+        const std::vector<std::string> optionsToExtract{"-cl-intel-gtpin-rera", "-cl-intel-greater-than-4GB-buffer-required"};
+
+        for (const auto &optionString : optionsToExtract) {
+            size_t pos = options.find(optionString);
+            if (pos != std::string::npos) {
+                options.erase(pos, optionString.length());
+                internalOptions.append(optionString);
+                internalOptions.append(" ");
+            }
         }
 
         // create ELF writer to process all sources to be compiled

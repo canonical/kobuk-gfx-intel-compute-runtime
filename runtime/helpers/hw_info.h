@@ -6,7 +6,7 @@
  */
 
 #pragma once
-#include "runtime/command_stream/preemption_mode.h"
+#include "core/command_stream/preemption_mode.h"
 #include "runtime/helpers/kmd_notify_properties.h"
 
 #include "engine_node.h"
@@ -19,14 +19,8 @@
 
 namespace NEO {
 
-struct WhitelistedRegisters {
-    bool csChicken1_0x2580;
-    bool chicken0hdc_0xE5F0;
-};
-
 struct RuntimeCapabilityTable {
     KmdNotifyProperties kmdNotifyProperties;
-    WhitelistedRegisters whitelistedRegisters;
     uint64_t gpuAddressSpace;
     double defaultProfilingTimerResolution;
     size_t requiredPreemptionSurfaceSize;
@@ -39,6 +33,7 @@ struct RuntimeCapabilityTable {
     uint32_t extraQuantityThreadsPerEU;
     uint32_t slmSize;
     bool blitterOperationsSupported;
+    bool ftrSupportsInteger64BitAtomics;
     bool ftrSupportsFP64;
     bool ftrSupports64BitMath;
     bool ftrSvm;
@@ -50,11 +45,12 @@ struct RuntimeCapabilityTable {
     bool ftr64KBpages;
     bool instrumentationEnabled;
     bool forceStatelessCompilationFor32Bit;
-    bool isCore;
+    const char *platformType;
     bool sourceLevelDebuggerSupported;
     bool supportsVme;
     bool supportCacheFlushAfterWalker;
     bool supportsImages;
+    bool supportsDeviceEnqueue;
 };
 
 struct HardwareCapabilities {
@@ -98,7 +94,7 @@ struct EnableGfxFamilyHw {
     }
 };
 
-const char *getPlatformType(const HardwareInfo &hwInfo);
-bool getHwInfoForPlatformString(const char *str, const HardwareInfo *&hwInfoIn);
+bool getHwInfoForPlatformString(std::string &platform, const HardwareInfo *&hwInfoIn);
 aub_stream::EngineType getChosenEngineType(const HardwareInfo &hwInfo);
+const std::string getFamilyNameWithType(const HardwareInfo &hwInfo);
 } // namespace NEO

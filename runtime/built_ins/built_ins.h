@@ -6,10 +6,10 @@
  */
 
 #pragma once
+#include "core/helpers/debug_helpers.h"
+#include "core/helpers/non_copyable_or_moveable.h"
 #include "core/helpers/vec.h"
 #include "runtime/built_ins/sip.h"
-#include "runtime/helpers/debug_helpers.h"
-#include "runtime/helpers/properties_helper.h"
 
 #include "CL/cl.h"
 #include "built_in_ops.h"
@@ -159,8 +159,7 @@ class BuiltIns {
     std::pair<std::unique_ptr<BuiltinDispatchInfoBuilder>, std::once_flag> BuiltinOpsBuilders[static_cast<uint32_t>(EBuiltInOps::COUNT)];
 
     BuiltinDispatchInfoBuilder &getBuiltinDispatchInfoBuilder(EBuiltInOps::Type op, Context &context, Device &device);
-    std::unique_ptr<BuiltinDispatchInfoBuilder> setBuiltinDispatchInfoBuilder(EBuiltInOps::Type op, Context &context, Device &device,
-                                                                              std::unique_ptr<BuiltinDispatchInfoBuilder> newBuilder);
+
     BuiltIns();
     virtual ~BuiltIns();
 

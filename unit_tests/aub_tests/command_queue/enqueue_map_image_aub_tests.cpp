@@ -5,9 +5,9 @@
  *
  */
 
+#include "core/helpers/aligned_memory.h"
 #include "core/helpers/ptr_math.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/helpers/aligned_memory.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "test.h"
@@ -148,7 +148,8 @@ HWTEST_P(AUBMapImage, MapUpdateUnmapVerify) {
     uint8_t *mappedPtrStart;
     uint8_t *srcMemoryStart;
 
-    if (srcImage->allowTiling()) {
+    bool isGpuCopy = srcImage->isTiledAllocation() || !MemoryPool::isSystemMemoryPool(srcImage->getGraphicsAllocation()->getMemoryPool());
+    if (isGpuCopy) {
         mappedPtrStart = static_cast<uint8_t *>(mappedPtr);
         srcMemoryStart = srcMemory;
 

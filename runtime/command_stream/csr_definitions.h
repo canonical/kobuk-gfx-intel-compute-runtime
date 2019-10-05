@@ -6,11 +6,12 @@
  */
 
 #pragma once
+#include "core/helpers/pipeline_select_args.h"
+#include "core/memory_manager/memory_constants.h"
 #include "runtime/helpers/csr_deps.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/properties_helper.h"
 #include "runtime/kernel/grf_config.h"
-#include "runtime/memory_manager/memory_constants.h"
 
 #include <limits>
 
@@ -30,25 +31,31 @@ constexpr auto csOverfetchSize = MemoryConstants::pageSize;
 namespace TimeoutControls {
 constexpr int64_t maxTimeout = std::numeric_limits<int64_t>::max();
 }
+namespace L3CachingSettings {
+constexpr uint32_t l3CacheOn = 0u;
+constexpr uint32_t l3CacheOff = 1u;
+constexpr uint32_t l3AndL1On = 2u;
+} // namespace L3CachingSettings
 
 struct DispatchFlags {
     CsrDependencies csrDependencies;
+    PipelineSelectArgs pipelineSelectArgs;
     FlushStampTrackingObj *flushStampReference = nullptr;
     QueueThrottle throttle = QueueThrottle::MEDIUM;
     PreemptionMode preemptionMode = PreemptionMode::Disabled;
     uint32_t numGrfRequired = GrfConfig::DefaultGrfNumber;
+    uint32_t l3CacheSettings = L3CachingSettings::l3CacheOn;
     bool blocking = false;
     bool dcFlush = false;
     bool useSLM = false;
     bool guardCommandBufferWithPipeControl = false;
     bool GSBA32BitRequired = false;
-    bool mediaSamplerRequired = false;
     bool requiresCoherency = false;
     bool lowPriority = false;
     bool implicitFlush = false;
     bool outOfOrderExecutionAllowed = false;
-    bool specialPipelineSelectMode = false;
     bool multiEngineQueue = false;
+    bool epilogueRequired = false;
 };
 
 struct CsrSizeRequestFlags {

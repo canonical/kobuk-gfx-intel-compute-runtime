@@ -6,6 +6,7 @@
  */
 
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
+#include "core/unit_tests/utilities/base_object_utils.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/builtin_kernels_simulation/scheduler_simulation.h"
 #include "runtime/command_queue/gpgpu_walker.h"
@@ -23,7 +24,6 @@
 #include "unit_tests/mocks/mock_event.h"
 #include "unit_tests/mocks/mock_mdi.h"
 #include "unit_tests/mocks/mock_submissions_aggregator.h"
-#include "unit_tests/utilities/base_object_utils.h"
 
 using namespace NEO;
 
@@ -102,18 +102,29 @@ HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, givenParentKernelWhenEnqueu
     }
 }
 
-HWTEST_P(ParentKernelEnqueueTest, GivenBlockKernelWithPrivateSurfaceWhenParentKernelIsEnqueuedThenPrivateSurfaceIsMadeResident) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, GivenBlockKernelWithPrivateSurfaceWhenParentKernelIsEnqueuedThenPrivateSurfaceIsMadeResident) {
     if (pDevice->getSupportedClVersion() >= 20) {
         size_t offset[3] = {0, 0, 0};
         size_t gws[3] = {1, 1, 1};
         int32_t executionStamp = 0;
         auto mockCSR = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment);
         pDevice->resetCommandStreamReceiver(mockCSR);
-        GraphicsAllocation *privateSurface = pKernel->getProgram()->getBlockKernelManager()->getPrivateSurface(0);
+
+        size_t kernelRequiringPrivateSurface = pKernel->getProgram()->getBlockKernelManager()->getCount();
+        for (size_t i = 0; i < pKernel->getProgram()->getBlockKernelManager()->getCount(); ++i) {
+            if (nullptr != pKernel->getProgram()->getBlockKernelManager()->getBlockKernelInfo(i)->patchInfo.pAllocateStatelessPrivateSurface) {
+                kernelRequiringPrivateSurface = i;
+                break;
+            }
+        }
+
+        ASSERT_NE(kernelRequiringPrivateSurface, pKernel->getProgram()->getBlockKernelManager()->getCount());
+
+        GraphicsAllocation *privateSurface = pKernel->getProgram()->getBlockKernelManager()->getPrivateSurface(kernelRequiringPrivateSurface);
 
         if (privateSurface == nullptr) {
             privateSurface = mockCSR->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
-            pKernel->getProgram()->getBlockKernelManager()->pushPrivateSurface(privateSurface, 0);
+            pKernel->getProgram()->getBlockKernelManager()->pushPrivateSurface(privateSurface, kernelRequiringPrivateSurface);
         }
 
         pCmdQ->enqueueKernel(pKernel, 1, offset, gws, gws, 0, nullptr, nullptr);
@@ -122,7 +133,7 @@ HWTEST_P(ParentKernelEnqueueTest, GivenBlockKernelWithPrivateSurfaceWhenParentKe
     }
 }
 
-HWTEST_P(ParentKernelEnqueueTest, GivenBlocksWithPrivateMemoryWhenEnqueueKernelThatIsBlockedByUserEventIsCalledThenPrivateAllocationIsMadeResidentWhenEventUnblocks) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, GivenBlocksWithPrivateMemoryWhenEnqueueKernelThatIsBlockedByUserEventIsCalledThenPrivateAllocationIsMadeResidentWhenEventUnblocks) {
     if (pDevice->getSupportedClVersion() >= 20) {
         size_t offset[3] = {0, 0, 0};
         size_t gws[3] = {1, 1, 1};
@@ -131,11 +142,21 @@ HWTEST_P(ParentKernelEnqueueTest, GivenBlocksWithPrivateMemoryWhenEnqueueKernelT
         auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
         csr.storeMakeResidentAllocations = true;
 
-        auto privateAllocation = pKernel->getProgram()->getBlockKernelManager()->getPrivateSurface(0);
+        size_t kernelRequiringPrivateSurface = pKernel->getProgram()->getBlockKernelManager()->getCount();
+        for (size_t i = 0; i < pKernel->getProgram()->getBlockKernelManager()->getCount(); ++i) {
+            if (nullptr != pKernel->getProgram()->getBlockKernelManager()->getBlockKernelInfo(i)->patchInfo.pAllocateStatelessPrivateSurface) {
+                kernelRequiringPrivateSurface = i;
+                break;
+            }
+        }
+
+        ASSERT_NE(kernelRequiringPrivateSurface, pKernel->getProgram()->getBlockKernelManager()->getCount());
+
+        auto privateAllocation = pKernel->getProgram()->getBlockKernelManager()->getPrivateSurface(kernelRequiringPrivateSurface);
 
         if (privateAllocation == nullptr) {
             privateAllocation = csr.getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
-            blockKernelManager->pushPrivateSurface(privateAllocation, 0);
+            blockKernelManager->pushPrivateSurface(privateAllocation, kernelRequiringPrivateSurface);
         }
 
         auto uEvent = make_releaseable<UserEvent>(pContext);
@@ -149,7 +170,7 @@ HWTEST_P(ParentKernelEnqueueTest, GivenBlocksWithPrivateMemoryWhenEnqueueKernelT
     }
 }
 
-HWTEST_P(ParentKernelEnqueueTest, GivenParentKernelWithBlocksWhenEnqueueKernelIsCalledThenBlockKernelIsaAllocationIsMadeResident) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, GivenParentKernelWithBlocksWhenEnqueueKernelIsCalledThenBlockKernelIsaAllocationIsMadeResident) {
     if (pDevice->getSupportedClVersion() >= 20) {
         size_t offset[3] = {0, 0, 0};
         size_t gws[3] = {1, 1, 1};
@@ -167,7 +188,7 @@ HWTEST_P(ParentKernelEnqueueTest, GivenParentKernelWithBlocksWhenEnqueueKernelIs
     }
 }
 
-HWTEST_P(ParentKernelEnqueueTest, GivenBlockKernelManagerFilledWithBlocksWhenMakeInternalAllocationsResidentIsCalledThenAllSurfacesAreMadeResident) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, GivenBlockKernelManagerFilledWithBlocksWhenMakeInternalAllocationsResidentIsCalledThenAllSurfacesAreMadeResident) {
     if (pDevice->getSupportedClVersion() >= 20) {
         auto blockKernelManager = pKernel->getProgram()->getBlockKernelManager();
         auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
@@ -182,7 +203,7 @@ HWTEST_P(ParentKernelEnqueueTest, GivenBlockKernelManagerFilledWithBlocksWhenMak
     }
 }
 
-HWTEST_P(ParentKernelEnqueueTest, GivenParentKernelWithBlocksWhenEnqueueKernelThatIsBlockedByUserEventIsCalledThenBlockKernelIsaAllocationIsMadeResidentWhenEventUnblocks) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, GivenParentKernelWithBlocksWhenEnqueueKernelThatIsBlockedByUserEventIsCalledThenBlockKernelIsaAllocationIsMadeResidentWhenEventUnblocks) {
     if (pDevice->getSupportedClVersion() >= 20) {
         size_t offset[3] = {0, 0, 0};
         size_t gws[3] = {1, 1, 1};
@@ -209,7 +230,7 @@ HWTEST_P(ParentKernelEnqueueTest, GivenParentKernelWithBlocksWhenEnqueueKernelTh
     }
 }
 
-HWTEST_P(ParentKernelEnqueueTest, givenParentKernelWhenEnqueuedSecondTimeThenDeviceQueueDSHIsResetToInitialOffset) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, givenParentKernelWhenEnqueuedSecondTimeThenDeviceQueueDSHIsResetToInitialOffset) {
     using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
 
     if (std::string(pPlatform->getDevice(0)->getDeviceInfo().clVersion).find("OpenCL 2.") != std::string::npos) {
@@ -240,7 +261,7 @@ HWTEST_P(ParentKernelEnqueueTest, givenParentKernelWhenEnqueuedSecondTimeThenDev
     }
 }
 
-HWTEST_P(ParentKernelEnqueueTest, givenParentKernelWhenEnqueuedThenBlocksSurfaceStatesAreCopied) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, givenParentKernelWhenEnqueuedThenBlocksSurfaceStatesAreCopied) {
     using BINDING_TABLE_STATE = typename FamilyType::BINDING_TABLE_STATE;
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
@@ -306,7 +327,7 @@ HWTEST_P(ParentKernelEnqueueTest, givenParentKernelWhenEnqueuedThenBlocksSurface
     }
 }
 
-HWTEST_P(ParentKernelEnqueueTest, givenParentKernelWhenEnqueuedThenReflectionSurfaceIsCreated) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, givenParentKernelWhenEnqueuedThenReflectionSurfaceIsCreated) {
     using BINDING_TABLE_STATE = typename FamilyType::BINDING_TABLE_STATE;
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
@@ -383,8 +404,8 @@ HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, givenNonBlockedQueueWhenPar
 
         bool dshAllocationResident = false;
 
-        for (uint32_t i = 0; i < mockCSR->madeResidentGfxAllocations.size(); i++) {
-            if (mockCSR->madeResidentGfxAllocations[i] == pDevQueue->getDshBuffer()) {
+        for (auto allocation : mockCSR->madeResidentGfxAllocations) {
+            if (allocation == pDevQueue->getDshBuffer()) {
                 dshAllocationResident = true;
                 break;
             }
@@ -411,7 +432,7 @@ class ParentKernelEnqueueFixture : public ExecutionModelSchedulerTest,
     }
 };
 
-TEST_F(ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedTheDefaultDeviceQueueAndEventPoolIsPatched) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedTheDefaultDeviceQueueAndEventPoolIsPatched) {
 
     if (pDevice->getSupportedClVersion() >= 20) {
         size_t offset[3] = {0, 0, 0};
@@ -437,7 +458,7 @@ TEST_F(ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedTheDefaultDevice
     }
 }
 
-HWTEST_F(ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedThenBlocksDSHOnReflectionSurfaceArePatchedWithDeviceQueueAndEventPoolAddresses) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedThenBlocksDSHOnReflectionSurfaceArePatchedWithDeviceQueueAndEventPoolAddresses) {
 
     if (pDevice->getSupportedClVersion() >= 20) {
         size_t offset[3] = {0, 0, 0};
@@ -477,7 +498,7 @@ HWTEST_F(ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedThenBlocksDSHO
     }
 }
 
-HWTEST_F(ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedToNonBlockedQueueThenDeviceQueueCriticalSetionIsAcquired) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedToNonBlockedQueueThenDeviceQueueCriticalSetionIsAcquired) {
 
     if (pDevice->getSupportedClVersion() >= 20) {
         size_t offset[3] = {0, 0, 0};
@@ -492,7 +513,7 @@ HWTEST_F(ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedToNonBlockedQu
     }
 }
 
-HWTEST_F(ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedToBlockedQueueThenDeviceQueueCriticalSetionIsNotAcquired) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedToBlockedQueueThenDeviceQueueCriticalSetionIsNotAcquired) {
 
     if (pDevice->getSupportedClVersion() >= 20) {
         size_t offset[3] = {0, 0, 0};
@@ -511,7 +532,7 @@ HWTEST_F(ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedToBlockedQueue
     }
 }
 
-HWTEST_F(ParentKernelEnqueueFixture, ParentKernelEnqueuedToNonBlockedQueueFlushesCSRWithSLM) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, ParentKernelEnqueuedToNonBlockedQueueFlushesCSRWithSLM) {
 
     if (pDevice->getSupportedClVersion() >= 20) {
         size_t offset[3] = {0, 0, 0};
@@ -556,7 +577,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, ParentKernelEnqueuedWith
     }
 }
 
-HWTEST_F(ParentKernelEnqueueFixture, givenCsrInBatchingModeWhenExecutionModelKernelIsSubmittedThenItIsFlushed) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, givenCsrInBatchingModeWhenExecutionModelKernelIsSubmittedThenItIsFlushed) {
     if (pDevice->getSupportedClVersion() >= 20) {
         auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
         mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -578,7 +599,7 @@ HWTEST_F(ParentKernelEnqueueFixture, givenCsrInBatchingModeWhenExecutionModelKer
     }
 }
 
-HWTEST_F(ParentKernelEnqueueFixture, ParentKernelEnqueueMarksCSRMediaVFEStateDirty) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, ParentKernelEnqueueMarksCSRMediaVFEStateDirty) {
 
     if (pDevice->getSupportedClVersion() >= 20) {
         size_t offset[3] = {0, 0, 0};

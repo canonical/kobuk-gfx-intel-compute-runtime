@@ -6,13 +6,11 @@
  */
 
 #pragma once
-#include "runtime/helpers/hw_info.h"
+#include "core/memory_manager/memory_constants.h"
+#include "core/utilities/reference_tracked_object.h"
+#include "runtime/helpers/common_types.h"
 #include "runtime/helpers/options.h"
-#include "runtime/memory_manager/memory_constants.h"
 #include "runtime/os_interface/device_factory.h"
-#include "runtime/utilities/reference_tracked_object.h"
-
-#include "engine_node.h"
 
 #include <mutex>
 #include <vector>
@@ -26,10 +24,9 @@ class GmmHelper;
 class MemoryManager;
 class SourceLevelDebugger;
 class OSInterface;
+class MemoryOperationsHandler;
 struct EngineControl;
 struct HardwareInfo;
-
-using CsrContainer = std::vector<std::vector<std::unique_ptr<CommandStreamReceiver>>>;
 
 class ExecutionEnvironment : public ReferenceTrackedObject<ExecutionEnvironment> {
   private:
@@ -53,9 +50,7 @@ class ExecutionEnvironment : public ReferenceTrackedObject<ExecutionEnvironment>
     void setHwInfo(const HardwareInfo *hwInfo);
     const HardwareInfo *getHardwareInfo() const { return hwInfo.get(); }
     HardwareInfo *getMutableHardwareInfo() const { return hwInfo.get(); }
-    bool isFullRangeSvm() const {
-        return hwInfo->capabilityTable.gpuAddressSpace >= maxNBitValue<47>;
-    }
+    bool isFullRangeSvm() const;
 
     GmmHelper *getGmmHelper() const;
     MOCKABLE_VIRTUAL CompilerInterface *getCompilerInterface();
@@ -63,6 +58,7 @@ class ExecutionEnvironment : public ReferenceTrackedObject<ExecutionEnvironment>
     EngineControl *getEngineControlForSpecialCsr();
 
     std::unique_ptr<OSInterface> osInterface;
+    std::unique_ptr<MemoryOperationsHandler> memoryOperationsInterface;
     std::unique_ptr<MemoryManager> memoryManager;
     std::unique_ptr<AubCenter> aubCenter;
     CsrContainer commandStreamReceivers;

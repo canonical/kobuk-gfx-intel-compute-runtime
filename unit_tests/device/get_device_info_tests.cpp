@@ -45,7 +45,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, GetDeviceInfoMemCapabilitiesTest, GivenValidParamete
 TEST(GetDeviceInfo, devicePlanarYuvMaxWidthHeightReturnsErrorWhenPlanarYuvExtensionDisabled) {
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
 
-    device->getDeviceInfoToModify()->nv12Extension = false;
+    device->deviceInfo.nv12Extension = false;
     uint32_t value;
 
     auto retVal = device->getDeviceInfo(
@@ -68,7 +68,7 @@ TEST(GetDeviceInfo, devicePlanarYuvMaxWidthHeightReturnsErrorWhenPlanarYuvExtens
 TEST(GetDeviceInfo, devicePlanarYuvMaxWidthHeightReturnsCorrectValuesWhenPlanarYuvExtensionEnabled) {
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
 
-    device->getDeviceInfoToModify()->nv12Extension = true;
+    device->deviceInfo.nv12Extension = true;
     size_t value = 0;
 
     auto retVal = device->getDeviceInfo(
@@ -126,7 +126,7 @@ TEST(GetDeviceInfo, simultaneousInterops) {
     EXPECT_TRUE(memcmp(value, &device->simultaneousInterops[0], 4u * sizeof(cl_uint)) == 0);
 }
 
-TEST(GetDeviceInfo, prefferedInteropUserSync) {
+TEST(GetDeviceInfo, preferredInteropUserSync) {
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
 
     cl_bool value = 0;

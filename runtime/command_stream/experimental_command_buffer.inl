@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/command_stream/linear_stream.h"
+#include "core/memory_manager/graphics_allocation.h"
 #include "runtime/command_stream/command_stream_receiver_hw.h"
 #include "runtime/command_stream/experimental_command_buffer.h"
-#include "runtime/command_stream/linear_stream.h"
 #include "runtime/helpers/hw_helper.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 
 namespace NEO {
 
@@ -63,7 +63,7 @@ size_t ExperimentalCommandBuffer::getTimeStampPipeControlSize() noexcept {
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
 
     // Two P_C for timestamps
-    return 2 * PipeControlHelper<GfxFamily>::getSizeForPipeControlWithPostSyncOperation();
+    return 2 * PipeControlHelper<GfxFamily>::getSizeForPipeControlWithPostSyncOperation(*commandStreamReceiver->peekExecutionEnvironment().getHardwareInfo());
 }
 
 template <typename GfxFamily>
@@ -73,7 +73,7 @@ void ExperimentalCommandBuffer::addTimeStampPipeControl() {
     uint64_t timeStampAddress = timestamps->getGpuAddress() + timestampsOffset;
 
     PipeControlHelper<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(*currentStream,
-                                                                               PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, timeStampAddress, 0llu, false);
+                                                                               PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, timeStampAddress, 0llu, false, *commandStreamReceiver->peekExecutionEnvironment().getHardwareInfo());
 
     //moving to next chunk
     timestampsOffset += sizeof(uint64_t);

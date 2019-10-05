@@ -5,9 +5,9 @@
  *
  */
 
+#include "core/memory_manager/graphics_allocation.h"
 #include "runtime/command_stream/preemption.h"
 #include "runtime/command_stream/preemption.inl"
-#include "runtime/memory_manager/graphics_allocation.h"
 
 namespace NEO {
 
@@ -38,9 +38,8 @@ template <>
 void PreemptionHelper::applyPreemptionWaCmdsEnd<GfxFamily>(LinearStream *pCommandStream, const Device &device) {
 }
 
-template void PreemptionHelper::programCmdStream<GfxFamily>(LinearStream &cmdStream,
-                                                            PreemptionMode newPreemptionMode, PreemptionMode oldPreemptionMode,
-                                                            GraphicsAllocation *preemptionCsr, Device &device);
+template void PreemptionHelper::programCmdStream<GfxFamily>(LinearStream &cmdStream, PreemptionMode newPreemptionMode,
+                                                            PreemptionMode oldPreemptionMode, GraphicsAllocation *preemptionCsr);
 template size_t PreemptionHelper::getRequiredPreambleSize<GfxFamily>(const Device &device);
 template void PreemptionHelper::programCsrBaseAddress<GfxFamily>(LinearStream &preambleCmdStream, Device &device, const GraphicsAllocation *preemptionCsr);
 template void PreemptionHelper::programStateSip<GfxFamily>(LinearStream &preambleCmdStream, Device &device);

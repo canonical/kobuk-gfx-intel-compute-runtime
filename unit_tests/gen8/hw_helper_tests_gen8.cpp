@@ -5,7 +5,7 @@
  *
  */
 
-#include "runtime/memory_manager/memory_constants.h"
+#include "core/memory_manager/memory_constants.h"
 #include "unit_tests/helpers/get_gpgpu_engines_tests.inl"
 #include "unit_tests/helpers/hw_helper_tests.h"
 
@@ -25,16 +25,9 @@ GEN8TEST_F(HwHelperTestGen8, setCapabilityCoherencyFlag) {
     EXPECT_TRUE(coherency);
 }
 
-GEN8TEST_F(HwHelperTestGen8, setupPreemptionRegisters) {
+GEN8TEST_F(HwHelperTestGen8, getPitchAlignmentForImage) {
     auto &helper = HwHelper::get(renderCoreFamily);
-
-    bool preemption = false;
-    preemption = helper.setupPreemptionRegisters(&hardwareInfo, preemption);
-    EXPECT_FALSE(preemption);
-
-    preemption = true;
-    preemption = helper.setupPreemptionRegisters(&hardwareInfo, preemption);
-    EXPECT_TRUE(preemption);
+    EXPECT_EQ(4u, helper.getPitchAlignmentForImage(&hardwareInfo));
 }
 
 GEN8TEST_F(HwHelperTestGen8, adjustDefaultEngineType) {

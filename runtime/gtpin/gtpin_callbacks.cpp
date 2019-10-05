@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/utilities/spinlock.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/context/context.h"
@@ -18,7 +19,6 @@
 #include "runtime/memory_manager/surface.h"
 #include "runtime/platform/platform.h"
 #include "runtime/program/program.h"
-#include "runtime/utilities/spinlock.h"
 
 #include "CL/cl.h"
 #include "ocl_igc_shared/gtpin/gtpin_ocl_interface.h"
@@ -138,7 +138,7 @@ void gtpinNotifyKernelSubmit(cl_kernel kernel, void *pCmdQueue) {
         void *pSurfaceState = gtpinHelper.getSurfaceState(pKernel, gtpinBTI);
         cl_mem buffer = (cl_mem)resource;
         auto pBuffer = castToObjectOrAbort<Buffer>(buffer);
-        pBuffer->setArgStateful(pSurfaceState, false, false);
+        pBuffer->setArgStateful(pSurfaceState, false, false, false, false);
     }
 }
 

@@ -7,7 +7,7 @@
 
 #include "runtime/os_interface/linux/drm_gem_close_worker.h"
 
-#include "runtime/helpers/aligned_memory.h"
+#include "core/helpers/aligned_memory.h"
 #include "runtime/os_interface/linux/drm_buffer_object.h"
 #include "runtime/os_interface/linux/drm_command_stream.h"
 #include "runtime/os_interface/linux/drm_memory_manager.h"
@@ -62,7 +62,7 @@ bool DrmGemCloseWorker::isEmpty() {
 
 inline void DrmGemCloseWorker::close(BufferObject *bo) {
     bo->wait(-1);
-    memoryManager.unreference(bo);
+    memoryManager.unreference(bo, false);
     workCount--;
 }
 

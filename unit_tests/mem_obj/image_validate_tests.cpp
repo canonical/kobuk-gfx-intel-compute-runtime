@@ -5,8 +5,7 @@
  *
  */
 
-#include "runtime/helpers/aligned_memory.h"
-#include "runtime/helpers/array_count.h"
+#include "core/helpers/aligned_memory.h"
 #include "runtime/helpers/convert_color.h"
 #include "runtime/helpers/surface_formats.h"
 #include "runtime/mem_obj/image.h"
@@ -48,19 +47,19 @@ typedef ImageValidateTest InvalidSize;
 
 TEST_P(ValidDescriptor, validSizePassedToValidateReturnsSuccess) {
     imageDesc = GetParam();
-    retVal = Image::validate(&context, 0, &surfaceFormat, &imageDesc, nullptr);
+    retVal = Image::validate(&context, {}, &surfaceFormat, &imageDesc, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
 TEST_P(InvalidDescriptor, zeroSizePassedToValidateReturnsError) {
     imageDesc = GetParam();
-    retVal = Image::validate(&context, 0, &surfaceFormat, &imageDesc, nullptr);
+    retVal = Image::validate(&context, {}, &surfaceFormat, &imageDesc, nullptr);
     EXPECT_EQ(CL_INVALID_IMAGE_DESCRIPTOR, retVal);
 }
 
 TEST_P(InvalidSize, invalidSizePassedToValidateReturnsError) {
     imageDesc = GetParam();
-    retVal = Image::validate(&context, 0, &surfaceFormat, &imageDesc, nullptr);
+    retVal = Image::validate(&context, {}, &surfaceFormat, &imageDesc, nullptr);
     EXPECT_EQ(CL_INVALID_IMAGE_SIZE, retVal);
 }
 
@@ -759,7 +758,7 @@ struct NullImage : public Image {
     using Image::imageFormat;
 
     NullImage() : Image(nullptr, cl_mem_flags{}, 0, nullptr, cl_image_format{},
-                        cl_image_desc{}, false, new MockGraphicsAllocation(nullptr, 0), false, false,
+                        cl_image_desc{}, false, new MockGraphicsAllocation(nullptr, 0), false,
                         0, 0, SurfaceFormatInfo{}, nullptr) {
     }
     ~NullImage() override {
@@ -783,10 +782,9 @@ TEST_P(ValidParentImageFormatTest, givenParentChannelOrderWhenTestWithAllChannel
     imageFormat.image_channel_data_type = CL_UNORM_INT8;
     image.imageFormat = parentImageFormat;
 
-    bool retVal;
-    for (unsigned int i = 0; i < arrayCount(allChannelOrders); i++) {
-        imageFormat.image_channel_order = allChannelOrders[i];
-        retVal = image.hasValidParentImageFormat(imageFormat);
+    for (auto channelOrder : allChannelOrders) {
+        imageFormat.image_channel_order = channelOrder;
+        bool retVal = image.hasValidParentImageFormat(imageFormat);
         EXPECT_EQ(imageFormat.image_channel_order == validChannelOrder, retVal);
     }
 };
@@ -880,11 +878,11 @@ TEST(ImageValidatorTest, givenInvalidImage2dSizesWithoutParentObjectWhenValidate
     descriptor.image_height = 1;
     descriptor.image_width = 0;
     descriptor.mem_object = nullptr;
-    EXPECT_EQ(CL_INVALID_IMAGE_DESCRIPTOR, Image::validate(&context, 0, &surfaceFormat, &descriptor, dummyPtr));
+    EXPECT_EQ(CL_INVALID_IMAGE_DESCRIPTOR, Image::validate(&context, {}, &surfaceFormat, &descriptor, dummyPtr));
 
     descriptor.image_height = 0;
     descriptor.image_width = 1;
-    EXPECT_EQ(CL_INVALID_IMAGE_DESCRIPTOR, Image::validate(&context, 0, &surfaceFormat, &descriptor, dummyPtr));
+    EXPECT_EQ(CL_INVALID_IMAGE_DESCRIPTOR, Image::validate(&context, {}, &surfaceFormat, &descriptor, dummyPtr));
 };
 TEST(ImageValidatorTest, givenNV12Image2dAsParentImageWhenValidateImageZeroSizedThenReturnsSuccess) {
     NullImage image;
@@ -900,7 +898,7 @@ TEST(ImageValidatorTest, givenNV12Image2dAsParentImageWhenValidateImageZeroSized
     descriptor.image_row_pitch = 0;
     descriptor.mem_object = &image;
 
-    EXPECT_EQ(CL_SUCCESS, Image::validate(&context, 0, &surfaceFormat, &descriptor, dummyPtr));
+    EXPECT_EQ(CL_SUCCESS, Image::validate(&context, {}, &surfaceFormat, &descriptor, dummyPtr));
 };
 TEST(ImageValidatorTest, givenNonNV12Image2dAsParentImageWhenValidateImageZeroSizedThenReturnsError) {
     NullImage image;
@@ -921,5 +919,5 @@ TEST(ImageValidatorTest, givenNonNV12Image2dAsParentImageWhenValidateImageZeroSi
     image.imageDesc = descriptor;
     descriptor.mem_object = &image;
 
-    EXPECT_EQ(CL_INVALID_IMAGE_DESCRIPTOR, Image::validate(&context, 0, &surfaceFormat, &descriptor, dummyPtr));
+    EXPECT_EQ(CL_INVALID_IMAGE_DESCRIPTOR, Image::validate(&context, {}, &surfaceFormat, &descriptor, dummyPtr));
 };

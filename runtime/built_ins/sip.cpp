@@ -7,12 +7,12 @@
 
 #include "runtime/built_ins/sip.h"
 
+#include "core/helpers/debug_helpers.h"
 #include "core/helpers/ptr_math.h"
+#include "core/helpers/string.h"
+#include "core/memory_manager/graphics_allocation.h"
 #include "runtime/device/device.h"
-#include "runtime/helpers/debug_helpers.h"
 #include "runtime/helpers/hw_helper.h"
-#include "runtime/helpers/string.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 #include "runtime/program/program.h"
 
 namespace NEO {

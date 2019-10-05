@@ -8,6 +8,7 @@
 #include "driver_diagnostics_tests.h"
 
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
+#include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/mem_obj/mem_obj_helper.h"
 #include "unit_tests/mocks/mock_gmm.h"
 
@@ -198,14 +199,14 @@ TEST_F(PerformanceHintTest, GivenContextWhenSVMAllocIsCreatingThenContextProvide
 TEST_F(PerformanceHintTest, GivenNullContextAndEmptyDispatchinfoAndEnableComputeWorkSizeNDIsDefaultWhenProvideLocalWorkGroupSizeIsCalledThenItDoesntCrash) {
 
     DispatchInfo emptyDispatchInfo;
-    provideLocalWorkGroupSizeHints(nullptr, 0, emptyDispatchInfo);
+    provideLocalWorkGroupSizeHints(nullptr, emptyDispatchInfo);
 }
 TEST_F(PerformanceHintTest, GivenNullContextAndEmptyDispatchinfoAndEnableComputeWorkSizeNDIsTrueWhenProvideLocalWorkGroupSizeIsCalledThenItDoesntCrash) {
 
     bool isWorkGroupSizeEnabled = DebugManager.flags.EnableComputeWorkSizeND.get();
     DebugManager.flags.EnableComputeWorkSizeND.set(true);
     DispatchInfo emptyDispatchInfo;
-    provideLocalWorkGroupSizeHints(nullptr, 0, emptyDispatchInfo);
+    provideLocalWorkGroupSizeHints(nullptr, emptyDispatchInfo);
     DebugManager.flags.EnableComputeWorkSizeND.set(isWorkGroupSizeEnabled);
 }
 TEST_F(PerformanceHintTest, GivenNullContextAndEmptyDispatchinfoAndEnableComputeWorkSizeNDIsFalseWhenProvideLocalWorkGroupSizeIsCalledThenItDoesntCrash) {
@@ -213,14 +214,14 @@ TEST_F(PerformanceHintTest, GivenNullContextAndEmptyDispatchinfoAndEnableCompute
     bool isWorkGroupSizeEnabled = DebugManager.flags.EnableComputeWorkSizeND.get();
     DebugManager.flags.EnableComputeWorkSizeND.set(false);
     DispatchInfo emptyDispatchInfo;
-    provideLocalWorkGroupSizeHints(nullptr, 0, emptyDispatchInfo);
+    provideLocalWorkGroupSizeHints(nullptr, emptyDispatchInfo);
     DebugManager.flags.EnableComputeWorkSizeND.set(isWorkGroupSizeEnabled);
 }
 
 TEST_F(PerformanceHintTest, GivenNullContextAndEmptyDispatchinfoAndEnableComputeWorkSizeSquaredIsDefaultWhenProvideLocalWorkGroupSizeIsCalledThenItDoesntCrash) {
 
     DispatchInfo emptyDispatchInfo;
-    provideLocalWorkGroupSizeHints(nullptr, 0, emptyDispatchInfo);
+    provideLocalWorkGroupSizeHints(nullptr, emptyDispatchInfo);
 }
 TEST_F(PerformanceHintTest, GivenNullContextAndEmptyDispatchinfoAndEnableComputeWorkSizeSquaredIsTrueWhenProvideLocalWorkGroupSizeIsCalledThenItDoesntCrash) {
 
@@ -228,7 +229,7 @@ TEST_F(PerformanceHintTest, GivenNullContextAndEmptyDispatchinfoAndEnableCompute
     DebugManager.flags.EnableComputeWorkSizeSquared.set(true);
     DebugManager.flags.EnableComputeWorkSizeND.set(false);
     DispatchInfo emptyDispatchInfo;
-    provideLocalWorkGroupSizeHints(nullptr, 0, emptyDispatchInfo);
+    provideLocalWorkGroupSizeHints(nullptr, emptyDispatchInfo);
 }
 TEST_F(PerformanceHintTest, GivenNullContextAndEmptyDispatchinfoAndEnableComputeWorkSizeSquaredIsFalseWhenProvideLocalWorkGroupSizeIsCalledThenItDoesntCrash) {
 
@@ -236,7 +237,7 @@ TEST_F(PerformanceHintTest, GivenNullContextAndEmptyDispatchinfoAndEnableCompute
     DebugManager.flags.EnableComputeWorkSizeSquared.set(false);
     DebugManager.flags.EnableComputeWorkSizeND.set(false);
     DispatchInfo emptyDispatchInfo;
-    provideLocalWorkGroupSizeHints(nullptr, 0, emptyDispatchInfo);
+    provideLocalWorkGroupSizeHints(nullptr, emptyDispatchInfo);
 }
 
 TEST_F(PerformanceHintTest, GivenNullContextAndInvalidDispatchinfoAndEnableComputeWorkSizeNDIsDefaultWhenProvideLocalWorkGroupSizeIsCalledThenItDoesntCrash) {
@@ -244,7 +245,7 @@ TEST_F(PerformanceHintTest, GivenNullContextAndInvalidDispatchinfoAndEnableCompu
     auto pDevice = castToObject<Device>(devices[0]);
     MockKernelWithInternals mockKernel(*pDevice, context);
     DispatchInfo invalidDispatchInfo(mockKernel, 100, {32, 32, 32}, {1, 1, 1}, {0, 0, 0});
-    provideLocalWorkGroupSizeHints(context, 0, invalidDispatchInfo);
+    provideLocalWorkGroupSizeHints(context, invalidDispatchInfo);
 }
 TEST_F(PerformanceHintTest, GivenNullContextAndInvalidDispatchinfoAndEnableComputeWorkSizeNDIsTrueWhenProvideLocalWorkGroupSizeIsCalledThenItDoesntCrash) {
 
@@ -253,7 +254,7 @@ TEST_F(PerformanceHintTest, GivenNullContextAndInvalidDispatchinfoAndEnableCompu
     auto pDevice = castToObject<Device>(devices[0]);
     MockKernelWithInternals mockKernel(*pDevice, context);
     DispatchInfo invalidDispatchInfo(mockKernel, 100, {32, 32, 32}, {1, 1, 1}, {0, 0, 0});
-    provideLocalWorkGroupSizeHints(context, 0, invalidDispatchInfo);
+    provideLocalWorkGroupSizeHints(context, invalidDispatchInfo);
     DebugManager.flags.EnableComputeWorkSizeND.set(isWorkGroupSizeEnabled);
 }
 TEST_F(PerformanceHintTest, GivenNullContextAndInvalidDispatchinfoAndEnableComputeWorkSizeNDIsFalseWhenProvideLocalWorkGroupSizeIsCalledThenItDoesntCrash) {
@@ -263,7 +264,7 @@ TEST_F(PerformanceHintTest, GivenNullContextAndInvalidDispatchinfoAndEnableCompu
     auto pDevice = castToObject<Device>(devices[0]);
     MockKernelWithInternals mockKernel(*pDevice, context);
     DispatchInfo invalidDispatchInfo(mockKernel, 100, {32, 32, 32}, {1, 1, 1}, {0, 0, 0});
-    provideLocalWorkGroupSizeHints(context, 0, invalidDispatchInfo);
+    provideLocalWorkGroupSizeHints(context, invalidDispatchInfo);
     DebugManager.flags.EnableComputeWorkSizeND.set(isWorkGroupSizeEnabled);
 }
 
@@ -272,7 +273,7 @@ TEST_F(PerformanceHintTest, GivenNullContextAndInvalidDispatchinfoAndEnableCompu
     auto pDevice = castToObject<Device>(devices[0]);
     MockKernelWithInternals mockKernel(*pDevice, context);
     DispatchInfo invalidDispatchInfo(mockKernel, 100, {32, 32, 32}, {1, 1, 1}, {0, 0, 0});
-    provideLocalWorkGroupSizeHints(context, 0, invalidDispatchInfo);
+    provideLocalWorkGroupSizeHints(context, invalidDispatchInfo);
 }
 TEST_F(PerformanceHintTest, GivenNullContextAndInvalidDispatchinfoAndEnableComputeWorkSizeSquaredIsTrueWhenProvideLocalWorkGroupSizeIsCalledThenItDoesntCrash) {
 
@@ -282,7 +283,7 @@ TEST_F(PerformanceHintTest, GivenNullContextAndInvalidDispatchinfoAndEnableCompu
     auto pDevice = castToObject<Device>(devices[0]);
     MockKernelWithInternals mockKernel(*pDevice, context);
     DispatchInfo invalidDispatchInfo(mockKernel, 100, {32, 32, 32}, {1, 1, 1}, {0, 0, 0});
-    provideLocalWorkGroupSizeHints(context, 0, invalidDispatchInfo);
+    provideLocalWorkGroupSizeHints(context, invalidDispatchInfo);
 }
 TEST_F(PerformanceHintTest, GivenNullContextAndInvalidDispatchinfoAndEnableComputeWorkSizeSquaredIsFalseWhenProvideLocalWorkGroupSizeIsCalledThenItDoesntCrash) {
 
@@ -292,7 +293,7 @@ TEST_F(PerformanceHintTest, GivenNullContextAndInvalidDispatchinfoAndEnableCompu
     auto pDevice = castToObject<Device>(devices[0]);
     MockKernelWithInternals mockKernel(*pDevice, context);
     DispatchInfo invalidDispatchInfo(mockKernel, 100, {32, 32, 32}, {1, 1, 1}, {0, 0, 0});
-    provideLocalWorkGroupSizeHints(context, 0, invalidDispatchInfo);
+    provideLocalWorkGroupSizeHints(context, invalidDispatchInfo);
 }
 
 TEST_F(PerformanceHintTest, GivenContextAndDispatchinfoAndEnableComputeWorkSizeSquaredIsDefaultWhenProvideLocalWorkGroupSizeIsCalledReturnValue) {
@@ -300,7 +301,7 @@ TEST_F(PerformanceHintTest, GivenContextAndDispatchinfoAndEnableComputeWorkSizeS
     auto pDevice = castToObject<Device>(devices[0]);
     MockKernelWithInternals mockKernel(*pDevice, context);
     DispatchInfo invalidDispatchInfo(mockKernel, 100, {32, 32, 32}, {1, 1, 1}, {0, 0, 0});
-    provideLocalWorkGroupSizeHints(context, 0, invalidDispatchInfo);
+    provideLocalWorkGroupSizeHints(context, invalidDispatchInfo);
 }
 TEST_F(PerformanceHintTest, GivenContextAndDispatchinfoAndEnableComputeWorkSizeSquaredIsTrueWhenProvideLocalWorkGroupSizeIsCalledReturnValue) {
 
@@ -310,7 +311,7 @@ TEST_F(PerformanceHintTest, GivenContextAndDispatchinfoAndEnableComputeWorkSizeS
     auto pDevice = castToObject<Device>(devices[0]);
     MockKernelWithInternals mockKernel(*pDevice, context);
     DispatchInfo invalidDispatchInfo(mockKernel, 2, {32, 32, 1}, {1, 1, 1}, {0, 0, 0});
-    provideLocalWorkGroupSizeHints(context, 0, invalidDispatchInfo);
+    provideLocalWorkGroupSizeHints(context, invalidDispatchInfo);
 }
 TEST_F(PerformanceHintTest, GivenContextAndDispatchinfoAndEnableComputeWorkSizeSquaredIsFalseWhenProvideLocalWorkGroupSizeIsCalledReturnValue) {
 
@@ -320,7 +321,7 @@ TEST_F(PerformanceHintTest, GivenContextAndDispatchinfoAndEnableComputeWorkSizeS
     auto pDevice = castToObject<Device>(devices[0]);
     MockKernelWithInternals mockKernel(*pDevice, context);
     DispatchInfo invalidDispatchInfo(mockKernel, 2, {32, 32, 1}, {1, 1, 1}, {0, 0, 0});
-    provideLocalWorkGroupSizeHints(context, 0, invalidDispatchInfo);
+    provideLocalWorkGroupSizeHints(context, invalidDispatchInfo);
 }
 
 TEST_F(PerformanceHintTest, GivenZeroCopyImageAndContextWhenCreateImageThenContextProvidesHintAboutAlignment) {
@@ -487,6 +488,8 @@ TEST_F(PerformanceHintTest, givenUncompressedBufferWhenItsCreatedThenProperPerfo
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
     cl_device_id deviceId = static_cast<cl_device_id>(device.get());
     const MemoryProperties properties(CL_MEM_READ_WRITE);
+    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(properties);
+
     size_t size = 0u;
 
     cl_context_properties validProperties[3] = {CL_CONTEXT_SHOW_DIAGNOSTICS_INTEL, CL_CONTEXT_DIAGNOSTICS_LEVEL_ALL_INTEL, 0};
@@ -496,7 +499,7 @@ TEST_F(PerformanceHintTest, givenUncompressedBufferWhenItsCreatedThenProperPerfo
     if (context->getMemoryManager()) {
         isCompressed = MemObjHelper::isSuitableForRenderCompression(
                            HwHelper::renderCompressedBuffersSupported(hwInfo),
-                           properties, context->peekContextType(),
+                           memoryProperties, context->peekContextType(),
                            HwHelper::get(hwInfo.platform.eRenderCoreFamily).obtainRenderBufferCompressionPreference(size)) &&
                        !is32bit && !context->isSharedContext &&
                        (!isValueSet(properties.flags, CL_MEM_USE_HOST_PTR) || context->getMemoryManager()->isLocalMemorySupported()) &&

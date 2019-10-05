@@ -6,15 +6,17 @@
  */
 
 #pragma once
+#include "core/memory_manager/graphics_allocation.h"
 #include "runtime/command_queue/command_queue.h"
+#include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/command_stream/preemption.h"
 #include "runtime/device_queue/device_queue_hw.h"
 #include "runtime/helpers/dispatch_info.h"
 #include "runtime/helpers/engine_control.h"
+#include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/queue_helpers.h"
 #include "runtime/mem_obj/mem_obj.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 #include "runtime/program/printf_handler.h"
 
 #include <memory>
@@ -36,7 +38,7 @@ class CommandQueueHw : public CommandQueue {
 
         if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_LOW_KHR)) {
             priority = QueuePriority::LOW;
-            this->gpgpuEngine = &device->getEngine(aub_stream::ENGINE_RCS, true);
+            this->gpgpuEngine = &device->getEngine(HwHelperHw<GfxFamily>::lowPriorityEngineType, true);
         } else if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_MED_KHR)) {
             priority = QueuePriority::MEDIUM;
         } else if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_HIGH_KHR)) {
@@ -135,12 +137,14 @@ class CommandQueueHw : public CommandQueue {
                          size_t size,
                          cl_uint numEventsInWaitList,
                          const cl_event *eventWaitList,
-                         cl_event *event) override;
+                         cl_event *event,
+                         bool externalAppCall) override;
 
     cl_int enqueueSVMUnmap(void *svmPtr,
                            cl_uint numEventsInWaitList,
                            const cl_event *eventWaitList,
-                           cl_event *event) override;
+                           cl_event *event,
+                           bool externalAppCall) override;
 
     cl_int enqueueSVMFree(cl_uint numSvmPointers,
                           void *svmPointers[],
@@ -282,7 +286,7 @@ class CommandQueueHw : public CommandQueue {
                                   const cl_event *eventWaitList,
                                   cl_event *event) override;
 
-    cl_int finish(bool dcFlush) override;
+    cl_int finish() override;
     cl_int flush() override;
 
     template <uint32_t enqueueType>
@@ -328,18 +332,16 @@ class CommandQueueHw : public CommandQueue {
                                       EventsRequest &eventsRequest,
                                       EventBuilder &eventBuilder,
                                       uint32_t taskLevel,
-                                      bool slmUsed,
                                       PrintfHandler *printfHandler);
 
-    template <uint32_t commandType>
-    void enqueueBlocked(Surface **surfacesForResidency,
+    void enqueueBlocked(uint32_t commandType,
+                        Surface **surfacesForResidency,
                         size_t surfacesCount,
-                        bool &blocking,
                         const MultiDispatchInfo &multiDispatchInfo,
                         TimestampPacketContainer *previousTimestampPacketNodes,
-                        KernelOperation *blockedCommandsData,
+                        std::unique_ptr<KernelOperation> &blockedCommandsData,
+                        const EnqueueProperties &enqueueProperties,
                         EventsRequest &eventsRequest,
-                        bool slmUsed,
                         EventBuilder &externalEventBuilder,
                         std::unique_ptr<PrintfHandler> printfHandler);
 
@@ -348,6 +350,7 @@ class CommandQueueHw : public CommandQueue {
                                                 LinearStream &commandStream,
                                                 size_t commandStreamStart,
                                                 bool &blocking,
+                                                const EnqueueProperties &enqueueProperties,
                                                 TimestampPacketContainer *previousTimestampPacketNodes,
                                                 EventsRequest &eventsRequest,
                                                 EventBuilder &eventBuilder,
@@ -356,18 +359,17 @@ class CommandQueueHw : public CommandQueue {
                                       size_t numSurfaces,
                                       LinearStream *commandStream,
                                       CsrDependencies &csrDeps);
-    void processDispatchForBlitEnqueue(const MultiDispatchInfo &multiDispatchInfo,
-                                       TimestampPacketContainer &previousTimestampPacketNodes,
-                                       const EventsRequest &eventsRequest,
-                                       LinearStream &commandStream,
-                                       uint32_t commandType,
-                                       bool blocking);
+    BlitProperties processDispatchForBlitEnqueue(const MultiDispatchInfo &multiDispatchInfo,
+                                                 TimestampPacketContainer &previousTimestampPacketNodes,
+                                                 const EventsRequest &eventsRequest,
+                                                 LinearStream &commandStream,
+                                                 uint32_t commandType, bool queueBlocked);
     void submitCacheFlush(Surface **surfaces,
                           size_t numSurfaces,
                           LinearStream *commandStream,
                           uint64_t postSyncAddress);
 
-    bool isCacheFlushCommand(uint32_t commandType) override;
+    bool isCacheFlushCommand(uint32_t commandType) const override;
 
   protected:
     MOCKABLE_VIRTUAL void enqueueHandlerHook(const unsigned int commandType, const MultiDispatchInfo &dispatchInfo){};
@@ -385,6 +387,32 @@ class CommandQueueHw : public CommandQueue {
     MOCKABLE_VIRTUAL void dispatchAuxTranslation(MultiDispatchInfo &multiDispatchInfo, MemObjsForAuxTranslation &memObjsForAuxTranslation,
                                                  AuxTranslationDirection auxTranslationDirection);
 
+    template <uint32_t commandType>
+    LinearStream *obtainCommandStream(const CsrDependencies &csrDependencies, bool blitEnqueue, bool blockedQueue,
+                                      const MultiDispatchInfo &multiDispatchInfo, const EventsRequest &eventsRequest,
+                                      std::unique_ptr<KernelOperation> &blockedCommandsData,
+                                      Surface **surfaces, size_t numSurfaces) {
+        LinearStream *commandStream = nullptr;
+
+        bool profilingRequired = (this->isProfilingEnabled() && eventsRequest.outEvent);
+        bool perfCountersRequired = (this->isPerfCountersEnabled() && eventsRequest.outEvent);
+
+        if (isBlockedCommandStreamRequired(commandType, eventsRequest, blockedQueue)) {
+            constexpr size_t additionalAllocationSize = CSRequirements::csOverfetchSize;
+            constexpr size_t allocationSize = MemoryConstants::pageSize64k - CSRequirements::csOverfetchSize;
+            commandStream = new LinearStream();
+
+            auto &gpgpuCsr = getGpgpuCommandStreamReceiver();
+            gpgpuCsr.ensureCommandBufferAllocation(*commandStream, allocationSize, additionalAllocationSize);
+
+            blockedCommandsData = std::make_unique<KernelOperation>(commandStream, *gpgpuCsr.getInternalAllocationStorage());
+        } else {
+            commandStream = &getCommandStream<GfxFamily, commandType>(*this, csrDependencies, profilingRequired, perfCountersRequired,
+                                                                      blitEnqueue, multiDispatchInfo, surfaces, numSurfaces);
+        }
+        return commandStream;
+    }
+
   private:
     bool isTaskLevelUpdateRequired(const uint32_t &taskLevel, const cl_event *eventWaitList, const cl_uint &numEventsInWaitList, unsigned int commandType);
     void obtainTaskLevelAndBlockedStatus(unsigned int &taskLevel, cl_uint &numEventsInWaitList, const cl_event *&eventWaitList, bool &blockQueueStatus, unsigned int commandType) override;
@@ -398,11 +426,9 @@ class CommandQueueHw : public CommandQueue {
                                                    size_t bufferSlicePitch,
                                                    size_t hostRowPitch,
                                                    size_t hostSlicePitch);
-    void processDeviceEnqueue(Kernel *parentKernel,
-                              DeviceQueueHw<GfxFamily> *devQueueHw,
+    void processDeviceEnqueue(DeviceQueueHw<GfxFamily> *devQueueHw,
                               const MultiDispatchInfo &multiDispatchInfo,
                               TagNode<HwTimeStamps> *hwTimeStamps,
-                              PreemptionMode preemption,
                               bool &blocking);
 
     template <uint32_t commandType>
@@ -410,12 +436,10 @@ class CommandQueueHw : public CommandQueue {
                                    std::unique_ptr<PrintfHandler> &printfHandler,
                                    Event *event,
                                    TagNode<NEO::HwTimeStamps> *&hwTimeStamps,
-                                   Kernel *parentKernel,
                                    bool blockQueue,
                                    DeviceQueueHw<GfxFamily> *devQueueHw,
                                    CsrDependencies &csrDeps,
-                                   KernelOperation *&blockedCommandsData,
-                                   TimestampPacketContainer &previousTimestampPacketNodes,
-                                   PreemptionMode preemption);
+                                   KernelOperation *blockedCommandsData,
+                                   TimestampPacketContainer &previousTimestampPacketNodes);
 };
 } // namespace NEO

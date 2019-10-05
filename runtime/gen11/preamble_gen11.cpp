@@ -28,17 +28,23 @@ uint32_t PreambleHelper<ICLFamily>::getL3Config(const HardwareInfo &hwInfo, bool
 }
 
 template <>
-void PreambleHelper<ICLFamily>::programPipelineSelect(LinearStream *pCommandStream, const DispatchFlags &dispatchFlags) {
+void PreambleHelper<ICLFamily>::programPipelineSelect(LinearStream *pCommandStream,
+                                                      const PipelineSelectArgs &pipelineSelectArgs,
+                                                      const HardwareInfo &hwInfo) {
+
     typedef typename ICLFamily::PIPELINE_SELECT PIPELINE_SELECT;
 
     auto pCmd = (PIPELINE_SELECT *)pCommandStream->getSpace(sizeof(PIPELINE_SELECT));
     *pCmd = ICLFamily::cmdInitPipelineSelect;
 
-    auto mask = pipelineSelectEnablePipelineSelectMaskBits | pipelineSelectMediaSamplerDopClockGateMaskBits | pipelineSelectMediaSamplerPowerClockGateMaskBits;
+    auto mask = pipelineSelectEnablePipelineSelectMaskBits |
+                pipelineSelectMediaSamplerDopClockGateMaskBits |
+                pipelineSelectMediaSamplerPowerClockGateMaskBits;
+
     pCmd->setMaskBits(mask);
     pCmd->setPipelineSelection(PIPELINE_SELECT::PIPELINE_SELECTION_GPGPU);
-    pCmd->setMediaSamplerDopClockGateEnable(!dispatchFlags.mediaSamplerRequired);
-    pCmd->setMediaSamplerPowerClockGateDisable(dispatchFlags.mediaSamplerRequired);
+    pCmd->setMediaSamplerDopClockGateEnable(!pipelineSelectArgs.mediaSamplerRequired);
+    pCmd->setMediaSamplerPowerClockGateDisable(pipelineSelectArgs.mediaSamplerRequired);
 }
 
 template <>

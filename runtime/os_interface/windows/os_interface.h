@@ -7,8 +7,9 @@
 
 #pragma once
 
+#include "core/os_interface/windows/windows_wrapper.h"
 #include "runtime/os_interface/os_interface.h"
-#include "runtime/os_interface/windows/windows_wrapper.h"
+#include "runtime/os_interface/windows/wddm/wddm.h"
 
 #include "profileapi.h"
 #include "umKmInc/sharedata.h"
@@ -18,6 +19,7 @@
 
 namespace NEO {
 class Wddm;
+class WddmMemoryOperationsHandler;
 
 class OSInterface::OSInterfaceImpl {
   public:

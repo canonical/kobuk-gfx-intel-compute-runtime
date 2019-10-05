@@ -17,26 +17,26 @@ endmacro()
 apply_macro_for_each_gen("TESTED")
 
 set(IGDRCL_SRCS_LIB_ULT
+  ${IGDRCL_SOURCE_DIR}/core/unit_tests/utilities/clflush.cpp
   ${IGDRCL_SOURCE_DIR}/unit_tests/abort.cpp
   ${IGDRCL_SOURCE_DIR}/unit_tests/helpers/built_ins_helper.cpp
+  ${IGDRCL_SOURCE_DIR}/unit_tests/helpers/debug_helpers.cpp
   ${IGDRCL_SOURCE_DIR}/unit_tests/helpers/execution_environment_helper.cpp
   ${IGDRCL_SOURCE_DIR}/unit_tests/helpers/execution_environment_helper.h
-  ${IGDRCL_SOURCE_DIR}/unit_tests/libult/create_tbx_sockets.cpp
-  ${IGDRCL_SOURCE_DIR}/unit_tests/libult/ult_command_stream_receiver.h
-  ${IGDRCL_SOURCE_DIR}/unit_tests/helpers/debug_helpers.cpp
   ${IGDRCL_SOURCE_DIR}/unit_tests/helpers/test_files.cpp
   ${IGDRCL_SOURCE_DIR}/unit_tests/helpers/test_files.h
   ${IGDRCL_SOURCE_DIR}/unit_tests/libult/create_tbx_sockets.cpp
-  ${IGDRCL_SOURCE_DIR}/unit_tests/libult/ult_command_stream_receiver.h
   ${IGDRCL_SOURCE_DIR}/unit_tests/libult/source_level_debugger.cpp
   ${IGDRCL_SOURCE_DIR}/unit_tests/libult/source_level_debugger_library.cpp
   ${IGDRCL_SOURCE_DIR}/unit_tests/libult/source_level_debugger_library.h
+  ${IGDRCL_SOURCE_DIR}/unit_tests/libult/ult_aub_command_stream_receiver.h
+  ${IGDRCL_SOURCE_DIR}/unit_tests/libult/ult_command_stream_receiver.h
   ${IGDRCL_SOURCE_DIR}/unit_tests/program/evaluate_unhandled_token_ult.cpp
   ${IGDRCL_SOURCE_DIR}/unit_tests/utilities/debug_settings_reader_creator.cpp
-  ${NEO_CORE_DIRECTORY}/unit_tests/helpers/memory_management.h
-  ${NEO_CORE_DIRECTORY}/unit_tests/helpers/memory_management.cpp
   ${NEO_CORE_DIRECTORY}/unit_tests/helpers/memory_leak_listener.cpp
   ${NEO_CORE_DIRECTORY}/unit_tests/helpers/memory_leak_listener.h
+  ${NEO_CORE_DIRECTORY}/unit_tests/helpers/memory_management.cpp
+  ${NEO_CORE_DIRECTORY}/unit_tests/helpers/memory_management.h
 )
 
 set(IGDRCL_SRCS_LIB_ULT_WINDOWS
@@ -131,5 +131,5 @@ foreach(target_name igdrcl_libult igdrcl_libult_cs igdrcl_libult_env)
   set_property(TARGET ${target_name} APPEND_STRING PROPERTY COMPILE_FLAGS ${ASAN_FLAGS} ${TSAN_FLAGS})
   target_include_directories(${target_name} PRIVATE $<TARGET_PROPERTY:${NEO_MOCKABLE_LIB_NAME},INTERFACE_INCLUDE_DIRECTORIES>)
   target_compile_definitions(${target_name} PRIVATE $<TARGET_PROPERTY:${NEO_MOCKABLE_LIB_NAME},INTERFACE_COMPILE_DEFINITIONS>)
-  create_project_source_tree(${target_name} ${IGDRCL_SOURCE_DIR}/runtime ${IGDRCL_SOURCE_DIR}/unit_tests)
+  create_project_source_tree(${target_name} ${IGDRCL_SOURCE_DIR})
 endforeach()

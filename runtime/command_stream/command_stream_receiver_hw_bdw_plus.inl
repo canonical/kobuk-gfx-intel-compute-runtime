@@ -46,24 +46,28 @@ inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForL3Config() const 
 }
 
 template <typename GfxFamily>
-void CommandStreamReceiverHw<GfxFamily>::programPipelineSelect(LinearStream &commandStream, DispatchFlags &dispatchFlags) {
+void CommandStreamReceiverHw<GfxFamily>::programPipelineSelect(LinearStream &commandStream, PipelineSelectArgs &pipelineSelectArgs) {
     if (csrSizeRequestFlags.mediaSamplerConfigChanged || !isPreambleSent) {
-        PreambleHelper<GfxFamily>::programPipelineSelect(&commandStream, dispatchFlags);
-        this->lastMediaSamplerConfig = dispatchFlags.mediaSamplerRequired;
+        PreambleHelper<GfxFamily>::programPipelineSelect(&commandStream, pipelineSelectArgs, peekHwInfo());
+        this->lastMediaSamplerConfig = pipelineSelectArgs.mediaSamplerRequired;
     }
-}
-
-template <typename GfxFamily>
-inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForPipelineSelect() const {
-    if (csrSizeRequestFlags.mediaSamplerConfigChanged || !isPreambleSent) {
-        return sizeof(typename GfxFamily::PIPELINE_SELECT);
-    }
-    return 0;
 }
 
 template <typename GfxFamily>
 void CommandStreamReceiverHw<GfxFamily>::createScratchSpaceController() {
     scratchSpaceController = std::make_unique<ScratchSpaceControllerBase>(executionEnvironment, *internalAllocationStorage.get());
+}
+template <typename GfxFamily>
+void CommandStreamReceiverHw<GfxFamily>::programEpliogueCommands(LinearStream &csr, const DispatchFlags &dispatchFlags) {
+}
+template <typename GfxFamily>
+size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForEpilogueCommands(const DispatchFlags &dispatchFlags) const {
+    return 0u;
+}
+
+template <typename GfxFamily>
+bool CommandStreamReceiverHw<GfxFamily>::isMultiOsContextCapable() const {
+    return false;
 }
 
 } // namespace NEO

@@ -273,7 +273,7 @@ cl_int CL_API_CALL clEnqueueReleaseGLObjects(cl_command_queue commandQueue, cl_u
             return retVal;
         }
 
-        pCommandQueue->finish(false);
+        pCommandQueue->finish();
         retVal = pCommandQueue->enqueueReleaseSharedObjects(numObjects, memObjects, numEventsInWaitList, eventWaitList, event,
                                                             CL_COMMAND_RELEASE_GL_OBJECTS);
     }
@@ -337,7 +337,7 @@ cl_int CL_API_CALL clGetGLContextInfoKHR(const cl_context_properties *properties
         return retVal;
     }
 
-    std::unique_ptr<GLSharingFunctions> glSharing(new GLSharingFunctions);
+    auto glSharing = std::make_unique<GLSharingFunctions>();
     glSharing->initGLFunctions();
     if (glSharing->isOpenGlSharingSupported() == false) {
         retVal = CL_INVALID_CONTEXT;

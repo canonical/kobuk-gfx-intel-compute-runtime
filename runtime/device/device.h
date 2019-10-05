@@ -10,24 +10,16 @@
 #include "runtime/device/device_info_map.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/helpers/base_object.h"
+#include "runtime/helpers/common_types.h"
 #include "runtime/helpers/engine_control.h"
 #include "runtime/helpers/hw_info.h"
-#include "runtime/memory_manager/memory_constants.h"
 #include "runtime/os_interface/performance_counters.h"
 
 #include "engine_node.h"
 
-#include <vector>
-
 namespace NEO {
-
-class GraphicsAllocation;
-class MemoryManager;
 class OSTime;
 class DriverInfo;
-struct HardwareInfo;
-class SourceLevelDebugger;
-class OsContext;
 
 template <>
 struct OpenCLObjectMapper<_cl_device_id> {
@@ -38,9 +30,9 @@ class Device : public BaseObject<_cl_device_id> {
   public:
     static const cl_ulong objectMagic = 0x8055832341AC8D08LL;
 
-    template <typename T>
-    static T *create(ExecutionEnvironment *execEnv, uint32_t deviceIndex) {
-        T *device = new T(execEnv, deviceIndex);
+    template <typename DeviceT, typename... ArgsT>
+    static DeviceT *create(ArgsT &&... args) {
+        DeviceT *device = new DeviceT(std::forward<ArgsT>(args)...);
         return createDeviceInternals(device);
     }
 
@@ -61,20 +53,11 @@ class Device : public BaseObject<_cl_device_id> {
     // Helper functions
     const HardwareInfo &getHardwareInfo() const;
     const DeviceInfo &getDeviceInfo() const;
-    DeviceInfo *getMutableDeviceInfo();
-    MOCKABLE_VIRTUAL const WorkaroundTable *getWaTable() const;
-
-    void *getSLMWindowStartAddress();
-    void prepareSLMWindow();
-    void setForce32BitAddressing(bool value) {
-        deviceInfo.force32BitAddressess = value;
-    }
 
     EngineControl &getEngine(aub_stream::EngineType engineType, bool lowPriority);
     EngineControl &getDefaultEngine();
 
     const char *getProductAbbrev() const;
-    const std::string getFamilyNameWithType() const;
 
     // This helper template is meant to simplify getDeviceInfo
     template <cl_device_info Param>
@@ -90,21 +73,16 @@ class Device : public BaseObject<_cl_device_id> {
     MemoryManager *getMemoryManager() const;
     GmmHelper *getGmmHelper() const;
 
-    /* We hide the retain and release function of BaseObject. */
-    void retain() override;
-    unique_ptr_if_unused<Device> release() override;
     OSTime *getOSTime() const { return osTime.get(); };
     double getProfilingTimerResolution();
     unsigned int getEnabledClVersion() const { return enabledClVersion; };
     unsigned int getSupportedClVersion() const;
     double getPlatformHostTimerResolution() const;
     bool isSimulation() const;
-    void checkPriorityHints();
     GFXCORE_FAMILY getRenderCoreFamily() const;
     PerformanceCounters *getPerformanceCounters() { return performanceCounters.get(); }
     static decltype(&PerformanceCounters::create) createPerformanceCountersFunc;
     PreemptionMode getPreemptionMode() const { return preemptionMode; }
-    MOCKABLE_VIRTUAL const WhitelistedRegisters &getWhitelistedRegisters() { return getHardwareInfo().capabilityTable.whitelistedRegisters; }
     std::vector<unsigned int> simultaneousInterops;
     std::string deviceExtensions;
     std::string name;
@@ -115,6 +93,9 @@ class Device : public BaseObject<_cl_device_id> {
     uint32_t getDeviceIndex() const { return deviceIndex; }
     bool isFullRangeSvm() const {
         return executionEnvironment->isFullRangeSvm();
+    }
+    bool areSharedSystemAllocationsAllowed() const {
+        return this->deviceInfo.sharedSystemMemCapabilities != 0u;
     }
 
   protected:
@@ -130,8 +111,10 @@ class Device : public BaseObject<_cl_device_id> {
         return device;
     }
 
-    bool createDeviceImpl();
+    virtual bool createDeviceImpl();
+    virtual DeviceBitfield getDeviceBitfieldForOsContext() const = 0;
     bool createEngines();
+    bool createEngine(uint32_t deviceIndex, uint32_t deviceCsrIndex, aub_stream::EngineType engineType);
 
     MOCKABLE_VIRTUAL void initializeCaps();
     void setupFp64Flags();
@@ -145,8 +128,6 @@ class Device : public BaseObject<_cl_device_id> {
     std::unique_ptr<PerformanceCounters> performanceCounters;
 
     std::vector<EngineControl> engines;
-
-    void *slmWindowStartAddress = nullptr;
 
     std::string exposedBuiltinKernels = "";
 

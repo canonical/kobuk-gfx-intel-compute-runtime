@@ -5,14 +5,15 @@
  *
  */
 
+#include <core/helpers/aligned_memory.h>
+#include <core/utilities/debug_settings_reader.h>
 #include <runtime/compiler_interface/binary_cache.h>
-#include <runtime/helpers/aligned_memory.h>
 #include <runtime/helpers/file_io.h>
 #include <runtime/helpers/hash.h>
 #include <runtime/helpers/hw_info.h>
+#include <runtime/os_interface/ocl_reg_path.h>
 #include <runtime/os_interface/os_inc_base.h>
 #include <runtime/program/program.h>
-#include <runtime/utilities/debug_settings_reader.h>
 
 #include "config.h"
 #include "os_inc.h"
@@ -53,8 +54,9 @@ const std::string BinaryCache::getCachedFileName(const HardwareInfo &hwInfo, con
 }
 
 BinaryCache::BinaryCache() {
-    std::string keyName = "cl_cache_dir";
-    std::unique_ptr<SettingsReader> settingsReader(SettingsReader::createOsReader(keyName));
+    std::string keyName = oclRegPath;
+    keyName += "cl_cache_dir";
+    std::unique_ptr<SettingsReader> settingsReader(SettingsReader::createOsReader(false, keyName));
     clCacheLocation = settingsReader->getSetting(settingsReader->appSpecificLocation(keyName), static_cast<std::string>(CL_CACHE_LOCATION));
 };
 

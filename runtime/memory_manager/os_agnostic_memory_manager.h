@@ -21,17 +21,17 @@ class MemoryAllocation : public GraphicsAllocation {
     void setSharedHandle(osHandle handle) { sharingInfo.sharedHandle = handle; }
 
     MemoryAllocation(AllocationType allocationType, void *cpuPtrIn, uint64_t gpuAddress, uint64_t baseAddress, size_t sizeIn,
-                     MemoryPool::Type pool, bool multiOsContextCapable)
-        : GraphicsAllocation(allocationType, cpuPtrIn, gpuAddress, baseAddress, sizeIn, pool, multiOsContextCapable),
+                     MemoryPool::Type pool)
+        : GraphicsAllocation(allocationType, cpuPtrIn, gpuAddress, baseAddress, sizeIn, pool),
           id(0), uncacheable(false) {}
 
-    MemoryAllocation(AllocationType allocationType, void *cpuPtrIn, size_t sizeIn, osHandle sharedHandleIn, MemoryPool::Type pool, bool multiOsContextCapable)
-        : GraphicsAllocation(allocationType, cpuPtrIn, sizeIn, sharedHandleIn, pool, multiOsContextCapable),
+    MemoryAllocation(AllocationType allocationType, void *cpuPtrIn, size_t sizeIn, osHandle sharedHandleIn, MemoryPool::Type pool)
+        : GraphicsAllocation(allocationType, cpuPtrIn, sizeIn, sharedHandleIn, pool),
           id(0), uncacheable(false) {}
 
     MemoryAllocation(AllocationType allocationType, void *driverAllocatedCpuPointer, void *pMem, uint64_t gpuAddress, size_t memSize,
-                     uint64_t count, MemoryPool::Type pool, bool multiOsContextCapable, bool uncacheable, bool flushL3Required)
-        : GraphicsAllocation(allocationType, pMem, gpuAddress, 0u, memSize, pool, multiOsContextCapable),
+                     uint64_t count, MemoryPool::Type pool, bool uncacheable, bool flushL3Required)
+        : GraphicsAllocation(allocationType, pMem, gpuAddress, 0u, memSize, pool),
           id(count), uncacheable(uncacheable) {
 
         this->driverAllocatedCpuPointer = driverAllocatedCpuPointer;
@@ -60,6 +60,7 @@ class OsAgnosticMemoryManager : public MemoryManager {
     void cleanOsHandles(OsHandleStorage &handleStorage) override;
 
     uint64_t getSystemSharedMemory() override;
+    uint64_t getLocalMemorySize() override;
 
     void turnOnFakingBigAllocations();
 
@@ -73,12 +74,12 @@ class OsAgnosticMemoryManager : public MemoryManager {
     GraphicsAllocation *allocateGraphicsMemory64kb(const AllocationData &allocationData) override;
     GraphicsAllocation *allocateGraphicsMemoryForImageImpl(const AllocationData &allocationData, std::unique_ptr<Gmm> gmm) override;
 
-    void *lockResourceImpl(GraphicsAllocation &graphicsAllocation) override { return ptrOffset(graphicsAllocation.getUnderlyingBuffer(), static_cast<size_t>(graphicsAllocation.getAllocationOffset())); }
+    void *lockResourceImpl(GraphicsAllocation &graphicsAllocation) override { return graphicsAllocation.getUnderlyingBuffer(); }
     void unlockResourceImpl(GraphicsAllocation &graphicsAllocation) override {}
     GraphicsAllocation *allocate32BitGraphicsMemoryImpl(const AllocationData &allocationData) override;
     GraphicsAllocation *allocateGraphicsMemoryInDevicePool(const AllocationData &allocationData, AllocationStatus &status) override;
     MemoryAllocation *createMemoryAllocation(GraphicsAllocation::AllocationType allocationType, void *driverAllocatedCpuPointer, void *pMem, uint64_t gpuAddress, size_t memSize,
-                                             uint64_t count, MemoryPool::Type pool, bool multiOsContextCapable, bool uncacheable, bool flushL3Required, bool requireSpecificBitness);
+                                             uint64_t count, MemoryPool::Type pool, bool uncacheable, bool flushL3Required, bool requireSpecificBitness);
 
   private:
     unsigned long long counter = 0;

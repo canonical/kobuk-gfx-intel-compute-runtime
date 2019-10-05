@@ -33,6 +33,14 @@ struct SkuInfoBaseReference {
 
         refFtrTable.FtrTranslationTable = 1;
         refFtrTable.FtrUserModeTranslationTable = 1;
+        refFtrTable.FtrLLCBypass = 1;
+        refFtrTable.FtrWddm2Svm = 1;
+
+        refFtrTable.FtrE2ECompression = 1;
+        refFtrTable.FtrLinearCCS = 1;
+        refFtrTable.FtrCCSRing = 1;
+        refFtrTable.FtrCCSNode = 1;
+        refFtrTable.FtrMemTypeMocsDeferPAT = 1;
     }
 
     static void fillReferenceWaForTransfer(_WA_TABLE &refWaTable) {
@@ -41,6 +49,10 @@ struct SkuInfoBaseReference {
         refWaTable.WaDisableEdramForDisplayRT = 1;
         refWaTable.WaEncryptedEdramOnlyPartials = 1;
         refWaTable.WaLosslessCompressionSurfaceStride = 1;
+        refWaTable.WaRestrictPitch128KB = 1;
+        refWaTable.WaLimit128BMediaCompr = 1;
+        refWaTable.WaUntypedBufferCompression = 1;
+        refWaTable.WaAuxTable16KGranular = 1;
     }
 
     static void fillReferenceFtrToReceive(FeatureTable &refFtrTable) {
@@ -119,6 +131,12 @@ struct SkuInfoBaseReference {
 
         refFtrTable.ftrKmdDaf = true;
         refFtrTable.ftrSimulationMode = true;
+
+        refFtrTable.ftrE2ECompression = 1;
+        refFtrTable.ftrLinearCCS = 1;
+        refFtrTable.ftrCCSRing = 1;
+        refFtrTable.ftrCCSNode = 1;
+        refFtrTable.ftrMemTypeMocsDeferPAT = 1;
     }
 
     static void fillReferenceWaToReceive(WorkaroundTable &refWaTable) {
@@ -143,6 +161,10 @@ struct SkuInfoBaseReference {
         refWaTable.waModifyVFEStateAfterGPGPUPreemption = true;
         refWaTable.waCSRUncachable = true;
         refWaTable.waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
+        refWaTable.waRestrictPitch128KB = true;
+        refWaTable.waLimit128BMediaCompr = 1;
+        refWaTable.waUntypedBufferCompression = 1;
+        refWaTable.waAuxTable16KGranular = 1;
     }
 }; // namespace SkuInfoBaseReference
 } // namespace NEO

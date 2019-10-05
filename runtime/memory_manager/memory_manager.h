@@ -7,15 +7,17 @@
 
 #pragma once
 #include "common/helpers/bit_helpers.h"
+#include "core/command_stream/preemption_mode.h"
+#include "core/helpers/aligned_memory.h"
+#include "core/memory_manager/gfx_partition.h"
+#include "core/memory_manager/graphics_allocation.h"
+#include "core/memory_manager/host_ptr_defines.h"
+#include "core/memory_manager/local_memory_usage.h"
+#include "core/page_fault_manager/cpu_page_fault_manager.h"
 #include "public/cl_ext_private.h"
-#include "runtime/command_stream/preemption_mode.h"
-#include "runtime/helpers/aligned_memory.h"
+#include "runtime/helpers/common_types.h"
 #include "runtime/helpers/engine_control.h"
 #include "runtime/memory_manager/allocation_properties.h"
-#include "runtime/memory_manager/gfx_partition.h"
-#include "runtime/memory_manager/graphics_allocation.h"
-#include "runtime/memory_manager/host_ptr_defines.h"
-#include "runtime/memory_manager/local_memory_usage.h"
 
 #include "engine_node.h"
 
@@ -25,16 +27,11 @@
 #include <vector>
 
 namespace NEO {
-class CommandStreamReceiver;
 class DeferredDeleter;
 class ExecutionEnvironment;
 class Gmm;
 class HostPtrManager;
 class OsContext;
-
-using CsrContainer = std::vector<std::vector<std::unique_ptr<CommandStreamReceiver>>>;
-using EngineControlContainer = std::vector<EngineControl>;
-using DeviceBitfield = std::bitset<32>;
 
 inline DeviceBitfield getDeviceBitfieldForNDevices(uint32_t numDevices) {
     return DeviceBitfield((1u << numDevices) - 1u);
@@ -103,12 +100,13 @@ class MemoryManager {
     void checkGpuUsageAndDestroyGraphicsAllocations(GraphicsAllocation *gfxAllocation);
 
     virtual uint64_t getSystemSharedMemory() = 0;
+    virtual uint64_t getLocalMemorySize() = 0;
 
     uint64_t getMaxApplicationAddress() { return is64bit ? MemoryConstants::max64BitAppAddress : MemoryConstants::max32BitAppAddress; };
-    uint64_t getInternalHeapBaseAddress() { return gfxPartition.getHeapBase(internalHeapIndex); }
-    uint64_t getExternalHeapBaseAddress() { return gfxPartition.getHeapBase(HeapIndex::HEAP_EXTERNAL); }
+    uint64_t getInternalHeapBaseAddress() { return gfxPartition->getHeapBase(internalHeapIndex); }
+    uint64_t getExternalHeapBaseAddress() { return gfxPartition->getHeapBase(HeapIndex::HEAP_EXTERNAL); }
 
-    bool isLimitedRange() { return gfxPartition.isLimitedRange(); }
+    bool isLimitedRange() { return gfxPartition->isLimitedRange(); }
 
     bool peek64kbPagesEnabled() const { return enable64kbpages; }
     bool peekForce32BitAllocations() const { return force32bitAllocations; }
@@ -120,6 +118,10 @@ class MemoryManager {
 
     DeferredDeleter *getDeferredDeleter() const {
         return deferredDeleter.get();
+    }
+
+    PageFaultManager *getPageFaultManager() const {
+        return pageFaultManager.get();
     }
 
     void waitForDeletions();
@@ -142,19 +144,23 @@ class MemoryManager {
         ::alignedFree(ptr);
     }
 
+    const ExecutionEnvironment &peekExecutionEnvironment() const { return executionEnvironment; }
+
     OsContext *createAndRegisterOsContext(CommandStreamReceiver *commandStreamReceiver, aub_stream::EngineType engineType,
                                           DeviceBitfield deviceBitfield, PreemptionMode preemptionMode, bool lowPriority);
     uint32_t getRegisteredEnginesCount() const { return static_cast<uint32_t>(registeredEngines.size()); }
     CommandStreamReceiver *getDefaultCommandStreamReceiver(uint32_t deviceId) const;
     EngineControlContainer &getRegisteredEngines();
     EngineControl *getRegisteredEngineForCsr(CommandStreamReceiver *commandStreamReceiver);
+    void unregisterEngineForCsr(CommandStreamReceiver *commandStreamReceiver);
     HostPtrManager *getHostPtrManager() const { return hostPtrManager.get(); }
     void setDefaultEngineIndex(uint32_t index) { defaultEngineIndex = index; }
     virtual bool copyMemoryToAllocation(GraphicsAllocation *graphicsAllocation, const void *memoryToCopy, size_t sizeToCopy);
     static HeapIndex selectHeap(const GraphicsAllocation *allocation, bool hasPointer, bool isFullRangeSVM);
     static std::unique_ptr<MemoryManager> createMemoryManager(ExecutionEnvironment &executionEnvironment);
-    virtual void *reserveCpuAddressRange(size_t size) = 0;
-    virtual void releaseReservedCpuAddressRange(void *reserved, size_t size) = 0;
+    virtual void *reserveCpuAddressRange(size_t size) { return nullptr; };
+    virtual void releaseReservedCpuAddressRange(void *reserved, size_t size){};
+    void *getReservedMemory(size_t size, size_t alignment);
 
   protected:
     struct AllocationData {
@@ -221,8 +227,10 @@ class MemoryManager {
     uint32_t latestContextId = std::numeric_limits<uint32_t>::max();
     uint32_t defaultEngineIndex = 0;
     std::unique_ptr<DeferredDeleter> multiContextResourceDestructor;
-    GfxPartition gfxPartition;
+    std::unique_ptr<GfxPartition> gfxPartition;
     std::unique_ptr<LocalMemoryUsageBankSelector> localMemoryUsageBankSelector;
+    void *reservedMemory = nullptr;
+    std::unique_ptr<PageFaultManager> pageFaultManager;
 };
 
 std::unique_ptr<DeferredDeleter> createDeferredDeleter();

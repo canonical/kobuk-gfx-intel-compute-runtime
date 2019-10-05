@@ -5,9 +5,11 @@
  *
  */
 
+#include "core/unit_tests/helpers/debug_manager_state_restore.h"
+#include "core/utilities/stackvec.h"
 #include "runtime/command_stream/preemption.h"
+#include "runtime/helpers/flat_batch_buffer_helper_hw.h"
 #include "runtime/helpers/preamble.h"
-#include "runtime/utilities/stackvec.h"
 #include "test.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/mocks/mock_device.h"
@@ -69,7 +71,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, PreambleTest, givenMidThreadPreemptionWhenPreambleIs
         MockGraphicsAllocation csrSurface(reinterpret_cast<void *>(minCsrAlignment), 1024);
 
         PreambleHelper<FamilyType>::programPreamble(&preambleStream, *mockDevice, 0U,
-                                                    ThreadArbitrationPolicy::RoundRobin, &csrSurface);
+                                                    ThreadArbitrationPolicy::RoundRobin, &csrSurface, nullptr);
 
         PreemptionHelper::programStateSip<FamilyType>(preemptionStream, *mockDevice);
 
@@ -140,7 +142,7 @@ HWTEST_F(PreambleTest, givenKernelDebuggingActiveWhenPreambleIsProgrammedThenPro
     LinearStream preambleStream(&*preambleBuffer.begin(), preambleBuffer.size());
 
     PreambleHelper<FamilyType>::programPreamble(&preambleStream, *mockDevice, 0U,
-                                                ThreadArbitrationPolicy::RoundRobin, nullptr);
+                                                ThreadArbitrationPolicy::RoundRobin, nullptr, nullptr);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(preambleStream);
@@ -154,7 +156,7 @@ HWTEST_F(PreambleTest, givenKernelDebuggingActiveWhenPreambleIsProgrammedThenPro
     StackVec<char, 8192> preambleBuffer2(8192);
     preambleStream.replaceBuffer(&*preambleBuffer2.begin(), preambleBuffer2.size());
     PreambleHelper<FamilyType>::programPreamble(&preambleStream, *mockDevice, 0U,
-                                                ThreadArbitrationPolicy::RoundRobin, preemptionAllocation);
+                                                ThreadArbitrationPolicy::RoundRobin, preemptionAllocation, nullptr);
     HardwareParse hwParser2;
     hwParser2.parseCommands<FamilyType>(preambleStream);
     cmdList = hwParser2.getCommandsList<MI_LOAD_REGISTER_IMM>();
@@ -186,4 +188,16 @@ HWTEST_F(PreambleTest, givenDefaultPreambleWhenGetThreadsMaxNumberIsCalledThenMa
 
     uint32_t expected = hwInfo.gtSystemInfo.EUCount * threadsPerEU;
     EXPECT_EQ(expected, value);
+}
+
+HWCMDTEST_F(IGFX_GEN8_CORE, PreambleTest, givenPreambleHelperWhenMediaVfeStateIsProgrammedThenOffsetToCommandIsReturned) {
+    char buffer[64];
+    MockGraphicsAllocation graphicsAllocation(buffer, sizeof(buffer));
+    LinearStream preambleStream(&graphicsAllocation, graphicsAllocation.getUnderlyingBuffer(), graphicsAllocation.getUnderlyingBufferSize());
+    auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
+    FlatBatchBufferHelperHw<FamilyType> helper(*mockDevice->getExecutionEnvironment());
+    uint64_t addressToPatch = 0xC0DEC0DE;
+
+    auto offset = PreambleHelper<FamilyType>::programVFEState(&preambleStream, mockDevice->getHardwareInfo(), 1024u, addressToPatch, 10u);
+    EXPECT_NE(0u, offset);
 }

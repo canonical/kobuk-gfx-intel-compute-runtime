@@ -6,7 +6,7 @@
  */
 
 #pragma once
-#include "runtime/command_stream/preemption_mode.h"
+#include "core/command_stream/preemption_mode.h"
 
 #include "CL/cl.h"
 
@@ -39,14 +39,12 @@ class HardwareInterface {
         CommandQueue &commandQueue,
         const MultiDispatchInfo &multiDispatchInfo,
         const CsrDependencies &csrDependencies,
-        KernelOperation **blockedCommandsData,
+        KernelOperation *blockedCommandsData,
         TagNode<HwTimeStamps> *hwTimeStamps,
         TagNode<HwPerfCounter> *hwPerfCounter,
         TimestampPacketContainer *previousTimestampPacketNodes,
         TimestampPacketContainer *currentTimestampPacketNodes,
-        PreemptionMode preemptionMode,
-        bool blockQueue,
-        uint32_t commandType = 0);
+        uint32_t commandType);
 
     static void getDefaultDshSpace(
         const size_t &offsetInterfaceDescriptorTable,
@@ -95,6 +93,15 @@ class HardwareInterface {
 
     static WALKER_TYPE<GfxFamily> *allocateWalkerSpace(LinearStream &commandStream,
                                                        const Kernel &kernel);
+
+    static void obtainIndirectHeaps(CommandQueue &commandQueue, const MultiDispatchInfo &multiDispatchInfo,
+                                    bool blockedQueue, IndirectHeap *&dsh, IndirectHeap *&ioh, IndirectHeap *&ssh);
+
+    static void dispatchKernelCommands(CommandQueue &commandQueue, const DispatchInfo &dispatchInfo, uint32_t commandType,
+                                       LinearStream &commandStream, bool isMainKernel, size_t currentDispatchIndex,
+                                       TimestampPacketContainer *currentTimestampPacketNodes, PreemptionMode preemptionMode,
+                                       uint32_t &interfaceDescriptorIndex, size_t offsetInterfaceDescriptorTable,
+                                       IndirectHeap &dsh, IndirectHeap &ioh, IndirectHeap &ssh);
 };
 
 } // namespace NEO

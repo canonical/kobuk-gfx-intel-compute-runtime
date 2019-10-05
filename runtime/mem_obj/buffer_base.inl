@@ -6,11 +6,11 @@
  */
 
 #include "common/helpers/bit_helpers.h"
+#include "core/helpers/aligned_memory.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/gmm_helper/resource_info.h"
-#include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/surface_formats.h"
 #include "runtime/mem_obj/buffer.h"
 
@@ -28,7 +28,7 @@ union SURFACE_STATE_BUFFER_LENGTH {
 };
 
 template <typename GfxFamily>
-void BufferHw<GfxFamily>::setArgStateful(void *memory, bool forceNonAuxMode, bool programForAuxTranslation) {
+void BufferHw<GfxFamily>::setArgStateful(void *memory, bool forceNonAuxMode, bool disableL3, bool alignSizeForAuxTranslation, bool isReadOnlyArgument) {
     using RENDER_SURFACE_STATE = typename GfxFamily::RENDER_SURFACE_STATE;
     using SURFACE_FORMAT = typename RENDER_SURFACE_STATE::SURFACE_FORMAT;
     using AUXILIARY_SURFACE_MODE = typename RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
@@ -41,7 +41,7 @@ void BufferHw<GfxFamily>::setArgStateful(void *memory, bool forceNonAuxMode, boo
     auto bufferAddressAligned = alignDown(bufferAddress, 4);
     auto bufferOffset = ptrDiff(bufferAddress, bufferAddressAligned);
 
-    auto surfaceSize = alignUp(getSize() + bufferOffset, programForAuxTranslation ? 512 : 4);
+    auto surfaceSize = alignUp(getSize() + bufferOffset, alignSizeForAuxTranslation ? 512 : 4);
 
     SURFACE_STATE_BUFFER_LENGTH Length = {0};
     Length.Length = static_cast<uint32_t>(surfaceSize - 1);
@@ -62,7 +62,8 @@ void BufferHw<GfxFamily>::setArgStateful(void *memory, bool forceNonAuxMode, boo
     surfaceState->setTileMode(RENDER_SURFACE_STATE::TILE_MODE_LINEAR);
     surfaceState->setVerticalLineStride(0);
     surfaceState->setVerticalLineStrideOffset(0);
-    surfaceState->setMemoryObjectControlState(getMocsValue(programForAuxTranslation));
+
+    surfaceState->setMemoryObjectControlState(getMocsValue(disableL3, isReadOnlyArgument));
     surfaceState->setSurfaceBaseAddress(bufferAddressAligned);
 
     Gmm *gmm = graphicsAllocation ? graphicsAllocation->getDefaultGmm() : nullptr;
@@ -77,7 +78,7 @@ void BufferHw<GfxFamily>::setArgStateful(void *memory, bool forceNonAuxMode, boo
         surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE);
     }
 
-    appendBufferState(memory, context, getGraphicsAllocation());
+    appendBufferState(memory, context, getGraphicsAllocation(), isReadOnlyArgument);
 }
 
 } // namespace NEO

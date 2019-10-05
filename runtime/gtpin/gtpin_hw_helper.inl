@@ -5,8 +5,8 @@
  *
  */
 
+#include "core/helpers/string.h"
 #include "runtime/gtpin/gtpin_hw_helper.h"
-#include "runtime/helpers/string.h"
 #include "runtime/kernel/kernel.h"
 
 #include "hw_cmds.h"
@@ -28,7 +28,7 @@ bool GTPinHwHelperHw<GfxFamily>::addSurfaceState(Kernel *pKernel) {
     size_t sizeToEnlarge = ssSize + btsSize;
     size_t currBTOffset = pKernel->getBindingTableOffset();
     size_t currSurfaceStateSize = currBTOffset;
-    char *pSsh = reinterpret_cast<char *>(pKernel->getSurfaceStateHeap());
+    char *pSsh = static_cast<char *>(pKernel->getSurfaceStateHeap());
     char *pNewSsh = new char[sshSize + sizeToEnlarge];
     memcpy_s(pNewSsh, sshSize + sizeToEnlarge, pSsh, currSurfaceStateSize);
     RENDER_SURFACE_STATE *pSS = reinterpret_cast<RENDER_SURFACE_STATE *>(pNewSsh + currSurfaceStateSize);

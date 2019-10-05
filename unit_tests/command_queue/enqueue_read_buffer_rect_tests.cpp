@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/memory_manager/memory_constants.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/event/event.h"
 #include "runtime/helpers/dispatch_info.h"
-#include "runtime/memory_manager/memory_constants.h"
 #include "test.h"
 #include "unit_tests/command_queue/enqueue_read_buffer_rect_fixture.h"
 #include "unit_tests/fixtures/buffer_enqueue_fixture.h"
@@ -298,7 +298,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, blockingRequiresPipeContr
     auto *cmd = (PIPE_CONTROL *)*itorCmd;
     EXPECT_NE(cmdList.end(), itorCmd);
 
-    if (::renderCoreFamily == IGFX_GEN9_CORE) {
+    if (UnitTestHelper<FamilyType>::isPipeControlWArequired(pDevice->getHardwareInfo())) {
         // SKL: two PIPE_CONTROLs following GPGPU_WALKER: first has DcFlush and second has Write HwTag
         EXPECT_FALSE(cmd->getDcFlushEnable());
         // Move to next PPC
@@ -534,6 +534,9 @@ HWTEST_F(EnqueueReadBufferRectTest, givenInOrderQueueAndDstPtrEqualSrcPtrAndNonZ
 
 HWTEST_F(EnqueueReadWriteBufferRectDispatch, givenOffsetResultingInMisalignedPtrWhenEnqueueReadBufferRectForNon3DCaseIsCalledThenAddressInStateBaseAddressIsAlignedAndMatchesKernelDispatchInfoParams) {
     initializeFixture<FamilyType>();
+    if (device->areSharedSystemAllocationsAllowed()) {
+        GTEST_SKIP();
+    }
     auto cmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context.get(), device.get(), &properties);
 
     buffer->forceDisallowCPUCopy = true;
@@ -548,7 +551,7 @@ HWTEST_F(EnqueueReadWriteBufferRectDispatch, givenOffsetResultingInMisalignedPtr
     ASSERT_NE(0u, cmdQ->lastEnqueuedKernels.size());
     Kernel *kernel = cmdQ->lastEnqueuedKernels[0];
 
-    cmdQ->finish(true);
+    cmdQ->finish();
 
     parseCommands<FamilyType>(*cmdQ);
 

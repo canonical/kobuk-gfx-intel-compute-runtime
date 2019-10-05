@@ -5,7 +5,7 @@
  *
  */
 
-#include "runtime/utilities/linux/debug_env_reader.h"
+#include "core/os_interface/linux/debug_env_reader.h"
 
 #include "test.h"
 
@@ -16,7 +16,7 @@ namespace NEO {
 class DebugEnvReaderTests : public ::testing::Test {
   public:
     void SetUp() override {
-        evr = SettingsReader::createOsReader(false);
+        evr = SettingsReader::createOsReader(false, "");
         EXPECT_NE(nullptr, evr);
     }
     void TearDown() override {
@@ -79,7 +79,7 @@ TEST_F(DebugEnvReaderTests, appSpecificLacationReturnClCacheLocation) {
 }
 
 TEST_F(DebugEnvReaderTests, givenEnvironmentVariableReaderWhenCreateOsReaderWithStringThenNotNullPointer) {
-    std::unique_ptr<SettingsReader> evr(SettingsReader::createOsReader(""));
+    std::unique_ptr<SettingsReader> evr(SettingsReader::createOsReader(false, ""));
     EXPECT_NE(nullptr, evr);
 }
 } // namespace NEO

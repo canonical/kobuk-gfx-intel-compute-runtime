@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_services.h"
-#include "runtime/memory_manager/memory_constants.h"
+#include "runtime/gen11/hw_cmds.h"
 
 #include "engine_node.h"
-#include "hw_cmds.h"
 #include "hw_info_icllp.h"
 
 namespace NEO {
@@ -38,7 +38,6 @@ const PLATFORM ICLLP::platform = {
 
 const RuntimeCapabilityTable ICLLP::capabilityTable{
     {0, 0, 0, false, false, false},                  // kmdNotifyProperties
-    {true, false},                                   // whitelistedRegisters
     MemoryConstants::max48BitAddress,                // gpuAddressSpace
     83.333,                                          // defaultProfilingTimerResolution
     MemoryConstants::pageSize,                       // requiredPreemptionSurfaceSize
@@ -51,6 +50,7 @@ const RuntimeCapabilityTable ICLLP::capabilityTable{
     1,                                               // extraQuantityThreadsPerEU
     64,                                              // slmSize
     false,                                           // blitterOperationsSupported
+    false,                                           // ftrSupportsInteger64BitAtomics
     false,                                           // ftrSupportsFP64
     false,                                           // ftrSupports64BitMath
     true,                                            // ftrSvm
@@ -62,11 +62,12 @@ const RuntimeCapabilityTable ICLLP::capabilityTable{
     false,                                           // ftr64KBpages
     true,                                            // instrumentationEnabled
     true,                                            // forceStatelessCompilationFor32Bit
-    false,                                           // isCore
+    "lp",                                            // platformType
     true,                                            // sourceLevelDebuggerSupported
     true,                                            // supportsVme
     false,                                           // supportCacheFlushAfterWalker
-    true                                             // supportsImages
+    true,                                            // supportsImages
+    true                                             // supportsDeviceEnqueue
 };
 
 WorkaroundTable ICLLP::workaroundTable = {};

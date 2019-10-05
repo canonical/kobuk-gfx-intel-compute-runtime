@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_services.h"
-#include "runtime/memory_manager/memory_constants.h"
+#include "runtime/gen9/hw_cmds.h"
 
 #include "engine_node.h"
-#include "hw_cmds.h"
 #include "hw_info_bxt.h"
 
 namespace NEO {
@@ -39,7 +39,6 @@ const PLATFORM BXT::platform = {
 
 const RuntimeCapabilityTable BXT::capabilityTable{
     {0, 0, 0, false, false, false},                // kmdNotifyProperties
-    {true, false},                                 // whitelistedRegisters
     MemoryConstants::max48BitAddress,              // gpuAddressSpace
     52.083,                                        // defaultProfilingTimerResolution
     MemoryConstants::pageSize,                     // requiredPreemptionSurfaceSize
@@ -52,6 +51,7 @@ const RuntimeCapabilityTable BXT::capabilityTable{
     0,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
     false,                                         // blitterOperationsSupported
+    false,                                         // ftrSupportsInteger64BitAtomics
     true,                                          // ftrSupportsFP64
     true,                                          // ftrSupports64BitMath
     false,                                         // ftrSvm
@@ -63,11 +63,12 @@ const RuntimeCapabilityTable BXT::capabilityTable{
     false,                                         // ftr64KBpages
     true,                                          // instrumentationEnabled
     false,                                         // forceStatelessCompilationFor32Bit
-    false,                                         // isCore
+    "lp",                                          // platformType
     true,                                          // sourceLevelDebuggerSupported
     true,                                          // supportsVme
     false,                                         // supportCacheFlushAfterWalker
-    true                                           // supportsImages
+    true,                                          // supportsImages
+    false                                          // supportsDeviceEnqueue
 };
 
 WorkaroundTable BXT::workaroundTable = {};

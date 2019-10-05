@@ -5,10 +5,10 @@
  *
  */
 
-#include "runtime/utilities/debug_settings_reader_creator.h"
+#include "core/utilities/debug_settings_reader_creator.h"
 
 namespace NEO {
-std::unique_ptr<SettingsReader> SettingsReaderCreator::create() {
-    return std::unique_ptr<SettingsReader>(SettingsReader::createOsReader(false));
+std::unique_ptr<SettingsReader> SettingsReaderCreator::create(const std::string &regKey) {
+    return std::unique_ptr<SettingsReader>(SettingsReader::createOsReader(false, regKey));
 }
 } // namespace NEO

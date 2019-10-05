@@ -37,6 +37,14 @@ class SkuInfoTransfer {
         TRANSFER_FTR_TO_GMM(Wddm2_1_64kbPages);
         TRANSFER_FTR_TO_GMM(TranslationTable);
         TRANSFER_FTR_TO_GMM(UserModeTranslationTable);
+        TRANSFER_FTR_TO_GMM(Wddm2Svm);
+        TRANSFER_FTR_TO_GMM(LLCBypass);
+        TRANSFER_FTR_TO_GMM(E2ECompression);
+        TRANSFER_FTR_TO_GMM(LinearCCS);
+        TRANSFER_FTR_TO_GMM(CCSRing);
+        TRANSFER_FTR_TO_GMM(CCSNode);
+        TRANSFER_FTR_TO_GMM(MemTypeMocsDeferPAT);
+
 #undef TRANSFER_FTR_TO_GMM
     }
 
@@ -46,6 +54,10 @@ class SkuInfoTransfer {
         TRANSFER_WA_TO_GMM(DisableEdramForDisplayRT);
         TRANSFER_WA_TO_GMM(EncryptedEdramOnlyPartials);
         TRANSFER_WA_TO_GMM(LosslessCompressionSurfaceStride);
+        TRANSFER_WA_TO_GMM(RestrictPitch128KB);
+        TRANSFER_WA_TO_GMM(AuxTable16KGranular);
+        TRANSFER_WA_TO_GMM(Limit128BMediaCompr);
+        TRANSFER_WA_TO_GMM(UntypedBufferCompression);
 #undef TRANSFER_WA_TO_GMM
     }
 };

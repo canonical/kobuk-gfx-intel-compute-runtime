@@ -176,7 +176,7 @@ TEST(PlatformTestSimple, shutdownClosesAsyncEventHandlerThread) {
 }
 
 namespace NEO {
-extern CommandStreamReceiverCreateFunc commandStreamReceiverFactory[2 * IGFX_MAX_CORE];
+extern CommandStreamReceiverCreateFunc commandStreamReceiverFactory[IGFX_MAX_CORE];
 }
 
 CommandStreamReceiver *createMockCommandStreamReceiver(bool withAubDump, ExecutionEnvironment &executionEnvironment) {
@@ -250,6 +250,21 @@ TEST_F(PlatformTest, givenNotSupportingCl21WhenPlatformNotSupportFp64ThenNotFill
     EXPECT_THAT(compilerExtensions, ::testing::Not(::testing::HasSubstr(std::string("cl_khr_subgroups"))));
 
     EXPECT_THAT(compilerExtensions, ::testing::EndsWith(std::string(" ")));
+}
+
+TEST_F(PlatformTest, givenFtrSupportAtomicsWhenCreateExtentionsListThenGetMatchingSubstrings) {
+    const HardwareInfo *hwInfo;
+    hwInfo = platformDevices[0];
+    std::string extensionsList = getExtensionsList(*hwInfo);
+    std::string compilerExtensions = convertEnabledExtensionsToCompilerInternalOptions(extensionsList.c_str());
+
+    if (hwInfo->capabilityTable.ftrSupportsInteger64BitAtomics) {
+        EXPECT_THAT(compilerExtensions, ::testing::HasSubstr(std::string("cl_khr_int64_base_atomics")));
+        EXPECT_THAT(compilerExtensions, ::testing::HasSubstr(std::string("cl_khr_int64_extended_atomics")));
+    } else {
+        EXPECT_THAT(compilerExtensions, ::testing::Not(::testing::HasSubstr(std::string("cl_khr_int64_base_atomics"))));
+        EXPECT_THAT(compilerExtensions, ::testing::Not(::testing::HasSubstr(std::string("cl_khr_int64_extended_atomics"))));
+    }
 }
 
 TEST_F(PlatformTest, testRemoveLastSpace) {

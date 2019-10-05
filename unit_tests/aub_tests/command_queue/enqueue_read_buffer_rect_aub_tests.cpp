@@ -5,9 +5,9 @@
  *
  */
 
+#include "core/helpers/aligned_memory.h"
 #include "core/helpers/ptr_math.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/options.h"
 #include "runtime/mem_obj/buffer.h"
 #include "test.h"
@@ -181,7 +181,7 @@ struct AUBReadBufferRectUnaligned
         AUBCommandStreamFixture::expectMemory<FamilyType>(dstMemoryGPUPtr, referenceMemory, offset);
         AUBCommandStreamFixture::expectMemory<FamilyType>(ptrOffset(dstMemoryGPUPtr, offset), &srcMemory[rowPitch * bufferOrigin[1]], size);
         AUBCommandStreamFixture::expectMemory<FamilyType>(ptrOffset(dstMemoryGPUPtr, size + offset), referenceMemory, bufferSize - offset - size);
-        pCmdQ->finish(true);
+        pCmdQ->finish();
         alignedFree(dstMemory);
     }
 };

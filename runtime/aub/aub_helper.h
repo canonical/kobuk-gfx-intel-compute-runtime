@@ -6,10 +6,10 @@
  */
 
 #pragma once
+#include "core/helpers/non_copyable_or_moveable.h"
+#include "core/memory_manager/graphics_allocation.h"
 #include "runtime/gen_common/aub_mapper_base.h"
 #include "runtime/helpers/hw_info.h"
-#include "runtime/helpers/properties_helper.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 
 namespace NEO {
 
@@ -17,6 +17,12 @@ class AubHelper : public NonCopyableOrMovableClass {
   public:
     static bool isOneTimeAubWritableAllocationType(const GraphicsAllocation::AllocationType &type) {
         switch (type) {
+        case GraphicsAllocation::AllocationType::PIPE:
+        case GraphicsAllocation::AllocationType::CONSTANT_SURFACE:
+        case GraphicsAllocation::AllocationType::GLOBAL_SURFACE:
+        case GraphicsAllocation::AllocationType::KERNEL_ISA:
+        case GraphicsAllocation::AllocationType::PRIVATE_SURFACE:
+        case GraphicsAllocation::AllocationType::SCRATCH_SURFACE:
         case GraphicsAllocation::AllocationType::BUFFER:
         case GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY:
         case GraphicsAllocation::AllocationType::BUFFER_COMPRESSED:

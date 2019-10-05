@@ -7,6 +7,8 @@
 
 #include "api.h"
 
+#include "core/helpers/aligned_memory.h"
+#include "core/utilities/stackvec.h"
 #include "runtime/accelerators/intel_motion_estimation.h"
 #include "runtime/api/additional_extensions.h"
 #include "runtime/aub/aub_center.h"
@@ -19,9 +21,10 @@
 #include "runtime/device_queue/device_queue.h"
 #include "runtime/event/user_event.h"
 #include "runtime/gtpin/gtpin_notify.h"
-#include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/get_info.h"
 #include "runtime/helpers/hw_info.h"
+#include "runtime/helpers/mem_properties_parser_helper.h"
+#include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/helpers/options.h"
 #include "runtime/helpers/queue_helpers.h"
 #include "runtime/helpers/validators.h"
@@ -39,7 +42,6 @@
 #include "runtime/tracing/tracing_api.h"
 #include "runtime/tracing/tracing_notify.h"
 #include "runtime/utilities/api_intercept.h"
-#include "runtime/utilities/stackvec.h"
 
 #include "CL/cl.h"
 #include "config.h"
@@ -589,7 +591,12 @@ cl_mem CL_API_CALL clCreateBuffer(cl_context context,
 
     MemoryProperties propertiesStruct;
     propertiesStruct.flags = flags;
-    Buffer::validateInputAndCreateBuffer(context, propertiesStruct, size, hostPtr, retVal, buffer);
+
+    if (isFieldValid(propertiesStruct.flags, MemObjHelper::validFlagsForBuffer)) {
+        Buffer::validateInputAndCreateBuffer(context, propertiesStruct, size, hostPtr, retVal, buffer);
+    } else {
+        retVal = CL_INVALID_VALUE;
+    }
 
     err.set(retVal);
     DBG_LOG_INPUTS("buffer", buffer);
@@ -614,10 +621,10 @@ cl_mem CL_API_CALL clCreateBufferWithPropertiesINTEL(cl_context context,
     ErrorCodeHelper err(errcodeRet, CL_SUCCESS);
 
     MemoryProperties propertiesStruct;
-    if (!MemObjHelper::parseMemoryProperties(properties, propertiesStruct)) {
-        retVal = CL_INVALID_VALUE;
-    } else {
+    if (MemoryPropertiesParser::parseMemoryProperties(properties, propertiesStruct, MemoryPropertiesParser::MemoryPropertiesParser::ObjType::BUFFER)) {
         Buffer::validateInputAndCreateBuffer(context, propertiesStruct, size, hostPtr, retVal, buffer);
+    } else {
+        retVal = CL_INVALID_VALUE;
     }
 
     err.set(retVal);
@@ -757,7 +764,11 @@ cl_mem CL_API_CALL clCreateImage(cl_context context,
 
     if (retVal == CL_SUCCESS) {
         MemoryProperties propertiesStruct(flags);
-        image = Image::validateAndCreateImage(pContext, propertiesStruct, imageFormat, imageDesc, hostPtr, retVal);
+        if (isFieldValid(propertiesStruct.flags, MemObjHelper::validFlagsForImage)) {
+            image = Image::validateAndCreateImage(pContext, propertiesStruct, imageFormat, imageDesc, hostPtr, retVal);
+        } else {
+            retVal = CL_INVALID_VALUE;
+        }
     }
 
     ErrorCodeHelper err(errcodeRet, retVal);
@@ -792,7 +803,7 @@ cl_mem CL_API_CALL clCreateImageWithPropertiesINTEL(cl_context context,
     retVal = validateObjects(WithCastToInternal(context, &pContext));
 
     if (retVal == CL_SUCCESS) {
-        if (MemObjHelper::parseMemoryProperties(properties, propertiesStruct)) {
+        if (MemoryPropertiesParser::parseMemoryProperties(properties, propertiesStruct, MemoryPropertiesParser::MemoryPropertiesParser::ObjType::IMAGE)) {
             image = Image::validateAndCreateImage(pContext, propertiesStruct, imageFormat, imageDesc, hostPtr, retVal);
         } else {
             retVal = CL_INVALID_VALUE;
@@ -1051,7 +1062,7 @@ cl_int CL_API_CALL clGetImageParamsINTEL(cl_context context,
     }
     if (CL_SUCCESS == retVal) {
         surfaceFormat = (SurfaceFormatInfo *)Image::getSurfaceFormatFromTable(memFlags, imageFormat);
-        retVal = Image::validate(pContext, memFlags, surfaceFormat, imageDesc, nullptr);
+        retVal = Image::validate(pContext, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags({memFlags}), surfaceFormat, imageDesc, nullptr);
     }
     if (CL_SUCCESS == retVal) {
         retVal = Image::getImageParams(pContext, memFlags, surfaceFormat, imageDesc, imageRowPitch, imageSlicePitch);
@@ -2034,7 +2045,7 @@ cl_int CL_API_CALL clFinish(cl_command_queue commandQueue) {
     auto pCommandQueue = castToObject<CommandQueue>(commandQueue);
 
     retVal = pCommandQueue
-                 ? pCommandQueue->finish(false)
+                 ? pCommandQueue->finish()
                  : CL_INVALID_COMMAND_QUEUE;
     TRACING_EXIT(clFinish, &retVal);
     return retVal;
@@ -3438,7 +3449,7 @@ void *clSharedMemAllocINTEL(
         return nullptr;
     }
 
-    return neoContext->getSVMAllocsManager()->createUnifiedMemoryAllocation(size, SVMAllocsManager::UnifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY));
+    return neoContext->getSVMAllocsManager()->createSharedUnifiedMemoryAllocation(size, SVMAllocsManager::UnifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY), neoContext->getSpecialQueue());
 }
 
 cl_int clMemFreeINTEL(
@@ -3452,8 +3463,12 @@ cl_int clMemFreeINTEL(
         return retVal;
     }
 
-    if (!neoContext->getSVMAllocsManager()->freeSVMAlloc(const_cast<void *>(ptr))) {
+    if (ptr && !neoContext->getSVMAllocsManager()->freeSVMAlloc(const_cast<void *>(ptr))) {
         return CL_INVALID_VALUE;
+    }
+
+    if (neoContext->getSVMAllocsManager()->getSvmMapOperation(ptr)) {
+        neoContext->getSVMAllocsManager()->removeSvmMapOperation(ptr);
     }
 
     return CL_SUCCESS;
@@ -3480,14 +3495,17 @@ cl_int clGetMemAllocInfoINTEL(
     }
 
     auto unifiedMemoryAllocation = allocationsManager->getSVMAlloc(ptr);
-    if (!unifiedMemoryAllocation) {
+    if (!unifiedMemoryAllocation && paramName != CL_MEM_ALLOC_TYPE_INTEL) {
         return CL_INVALID_VALUE;
     }
 
     GetInfoHelper info(paramValue, paramValueSize, paramValueSizeRet);
     switch (paramName) {
     case CL_MEM_ALLOC_TYPE_INTEL: {
-        if (unifiedMemoryAllocation->memoryType == InternalMemoryType::HOST_UNIFIED_MEMORY) {
+        if (!unifiedMemoryAllocation) {
+            retVal = info.set<cl_int>(CL_MEM_TYPE_UNKNOWN_INTEL);
+            return retVal;
+        } else if (unifiedMemoryAllocation->memoryType == InternalMemoryType::HOST_UNIFIED_MEMORY) {
             retVal = info.set<cl_int>(CL_MEM_TYPE_HOST_INTEL);
             return retVal;
         } else if (unifiedMemoryAllocation->memoryType == InternalMemoryType::DEVICE_UNIFIED_MEMORY) {
@@ -3529,14 +3547,20 @@ cl_int clEnqueueMemsetINTEL(
     cl_uint numEventsInWaitList,
     const cl_event *eventWaitList,
     cl_event *event) {
-    return clEnqueueSVMMemFill(commandQueue,
-                               dstPtr,
-                               &value,
-                               1u,
-                               size,
-                               numEventsInWaitList,
-                               eventWaitList,
-                               event);
+    auto retVal = clEnqueueSVMMemFill(commandQueue,
+                                      dstPtr,
+                                      &value,
+                                      1u,
+                                      size,
+                                      numEventsInWaitList,
+                                      eventWaitList,
+                                      event);
+    if (retVal == CL_SUCCESS && event) {
+        auto pEvent = castToObjectOrAbort<Event>(*event);
+        pEvent->setCmdType(CL_COMMAND_MEMSET_INTEL);
+    }
+
+    return retVal;
 }
 
 cl_int clEnqueueMemcpyINTEL(
@@ -3548,14 +3572,20 @@ cl_int clEnqueueMemcpyINTEL(
     cl_uint numEventsInWaitList,
     const cl_event *eventWaitList,
     cl_event *event) {
-    return clEnqueueSVMMemcpy(commandQueue,
-                              blocking,
-                              dstPtr,
-                              srcPtr,
-                              size,
-                              numEventsInWaitList,
-                              eventWaitList,
-                              event);
+    auto retVal = clEnqueueSVMMemcpy(commandQueue,
+                                     blocking,
+                                     dstPtr,
+                                     srcPtr,
+                                     size,
+                                     numEventsInWaitList,
+                                     eventWaitList,
+                                     event);
+    if (retVal == CL_SUCCESS && event) {
+        auto pEvent = castToObjectOrAbort<Event>(*event);
+        pEvent->setCmdType(CL_COMMAND_MEMCPY_INTEL);
+    }
+
+    return retVal;
 }
 
 cl_int clEnqueueMigrateMemINTEL(
@@ -3566,7 +3596,21 @@ cl_int clEnqueueMigrateMemINTEL(
     cl_uint numEventsInWaitList,
     const cl_event *eventWaitList,
     cl_event *event) {
-    return CL_OUT_OF_HOST_MEMORY;
+    cl_int retVal = CL_SUCCESS;
+
+    CommandQueue *pCommandQueue = nullptr;
+    retVal = validateObjects(WithCastToInternal(commandQueue, &pCommandQueue), ptr, EventWaitList(numEventsInWaitList, eventWaitList));
+
+    if (retVal == CL_SUCCESS) {
+        pCommandQueue->enqueueMarkerWithWaitList(numEventsInWaitList, eventWaitList, event);
+
+        if (event) {
+            auto pEvent = castToObjectOrAbort<Event>(*event);
+            pEvent->setCmdType(CL_COMMAND_MIGRATEMEM_INTEL);
+        }
+    }
+
+    return retVal;
 }
 
 cl_int clEnqueueMemAdviseINTEL(
@@ -3577,7 +3621,21 @@ cl_int clEnqueueMemAdviseINTEL(
     cl_uint numEventsInWaitList,
     const cl_event *eventWaitList,
     cl_event *event) {
-    return CL_OUT_OF_HOST_MEMORY;
+    cl_int retVal = CL_SUCCESS;
+
+    CommandQueue *pCommandQueue = nullptr;
+    retVal = validateObjects(WithCastToInternal(commandQueue, &pCommandQueue), ptr, EventWaitList(numEventsInWaitList, eventWaitList));
+
+    if (retVal == CL_SUCCESS) {
+        pCommandQueue->enqueueMarkerWithWaitList(numEventsInWaitList, eventWaitList, event);
+
+        if (event) {
+            auto pEvent = castToObjectOrAbort<Event>(*event);
+            pEvent->setCmdType(CL_COMMAND_MEMADVISE_INTEL);
+        }
+    }
+
+    return retVal;
 }
 
 cl_command_queue CL_API_CALL clCreateCommandQueueWithPropertiesKHR(cl_context context,
@@ -3787,6 +3845,8 @@ void *CL_API_CALL clGetExtensionFunctionAddress(const char *funcName) {
     RETURN_FUNC_PTR_IF_EXIST(clEnqueueMemcpyINTEL);
     RETURN_FUNC_PTR_IF_EXIST(clEnqueueMigrateMemINTEL);
     RETURN_FUNC_PTR_IF_EXIST(clEnqueueMemAdviseINTEL);
+    RETURN_FUNC_PTR_IF_EXIST(clGetDeviceFunctionPointerINTEL);
+    RETURN_FUNC_PTR_IF_EXIST(clGetDeviceGlobalVariablePointerINTEL);
 
     void *ret = sharingFactory.getExtensionFunctionAddress(funcName);
     if (ret != nullptr) {
@@ -4102,7 +4162,8 @@ cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue commandQueue,
         size,
         numEventsInWaitList,
         eventWaitList,
-        event);
+        event,
+        true);
 
     TRACING_EXIT(clEnqueueSVMMap, &retVal);
     return retVal;
@@ -4139,7 +4200,8 @@ cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue commandQueue,
         svmPtr,
         numEventsInWaitList,
         eventWaitList,
-        event);
+        event,
+        true);
 
     TRACING_EXIT(clEnqueueSVMUnmap, &retVal);
     return retVal;
@@ -4186,12 +4248,16 @@ cl_int CL_API_CALL clSetKernelArgSVMPointer(cl_kernel kernel,
     if (argValue != nullptr) {
         auto svmData = svmManager->getSVMAlloc(argValue);
         if (svmData == nullptr) {
-            retVal = CL_INVALID_ARG_VALUE;
-            TRACING_EXIT(clSetKernelArgSVMPointer, &retVal);
-            return retVal;
+            if (!pKernel->getDevice().areSharedSystemAllocationsAllowed()) {
+                retVal = CL_INVALID_ARG_VALUE;
+                TRACING_EXIT(clSetKernelArgSVMPointer, &retVal);
+                return retVal;
+            }
+        } else {
+            pSvmAlloc = svmData->gpuAllocation;
         }
-        pSvmAlloc = svmData->gpuAllocation;
     }
+
     retVal = pKernel->setArgSvmAlloc(argIndex, const_cast<void *>(argValue), pSvmAlloc);
     TRACING_EXIT(clSetKernelArgSVMPointer, &retVal);
     return retVal;
@@ -4439,6 +4505,11 @@ cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_context conte
             TRACING_EXIT(clCreateCommandQueueWithProperties, &commandQueue);
             return commandQueue;
         }
+        if (!pDevice->getHardwareInfo().capabilityTable.supportsDeviceEnqueue) {
+            err.set(CL_INVALID_QUEUE_PROPERTIES);
+            TRACING_EXIT(clCreateCommandQueueWithProperties, &commandQueue);
+            return commandQueue;
+        }
     }
 
     if (commandQueueProperties & static_cast<cl_command_queue_properties>(CL_QUEUE_ON_DEVICE_DEFAULT)) {
@@ -4485,6 +4556,7 @@ cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_context conte
             pDevice,
             *properties,
             retVal);
+
     } else {
         commandQueue = CommandQueue::create(
             pContext,
@@ -4884,6 +4956,68 @@ cl_int CL_API_CALL clAddCommentINTEL(cl_platform_id platform, const char *commen
 
     if (retVal == CL_SUCCESS && aubCenter) {
         aubCenter->getAubManager()->addComment(comment);
+    }
+
+    return retVal;
+}
+
+cl_int CL_API_CALL clGetDeviceGlobalVariablePointerINTEL(
+    cl_device_id device,
+    cl_program program,
+    const char *globalVariableName,
+    size_t *globalVariableSizeRet,
+    void **globalVariablePointerRet) {
+    cl_int retVal = CL_SUCCESS;
+    API_ENTER(&retVal);
+    DBG_LOG_INPUTS("device", device, "program", program,
+                   "globalVariableName", globalVariableName,
+                   "globalVariablePointerRet", globalVariablePointerRet);
+    retVal = validateObjects(device, program);
+    if (globalVariablePointerRet == nullptr) {
+        retVal = CL_INVALID_ARG_VALUE;
+    }
+
+    if (CL_SUCCESS == retVal) {
+        Program *pProgram = (Program *)(program);
+        const auto &symbols = pProgram->getSymbols();
+        auto symbolIt = symbols.find(globalVariableName);
+        if ((symbolIt == symbols.end()) || (symbolIt->second.symbol.type == NEO::SymbolInfo::Function)) {
+            retVal = CL_INVALID_ARG_VALUE;
+        } else {
+            if (globalVariableSizeRet != nullptr) {
+                *globalVariableSizeRet = symbolIt->second.symbol.size;
+            }
+            *globalVariablePointerRet = reinterpret_cast<void *>(symbolIt->second.gpuAddress);
+        }
+    }
+
+    return retVal;
+}
+
+cl_int CL_API_CALL clGetDeviceFunctionPointerINTEL(
+    cl_device_id device,
+    cl_program program,
+    const char *functionName,
+    cl_ulong *functionPointerRet) {
+    cl_int retVal = CL_SUCCESS;
+    API_ENTER(&retVal);
+    DBG_LOG_INPUTS("device", device, "program", program,
+                   "functionName", functionName,
+                   "functionPointerRet", functionPointerRet);
+    retVal = validateObjects(device, program);
+    if ((CL_SUCCESS == retVal) && (functionPointerRet == nullptr)) {
+        retVal = CL_INVALID_ARG_VALUE;
+    }
+
+    if (CL_SUCCESS == retVal) {
+        Program *pProgram = (Program *)(program);
+        const auto &symbols = pProgram->getSymbols();
+        auto symbolIt = symbols.find(functionName);
+        if ((symbolIt == symbols.end()) || (symbolIt->second.symbol.type != NEO::SymbolInfo::Function)) {
+            retVal = CL_INVALID_ARG_VALUE;
+        } else {
+            *functionPointerRet = static_cast<cl_ulong>(symbolIt->second.gpuAddress);
+        }
     }
 
     return retVal;

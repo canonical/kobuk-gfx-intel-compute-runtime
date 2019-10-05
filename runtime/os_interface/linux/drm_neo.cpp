@@ -7,9 +7,9 @@
 
 #include "drm_neo.h"
 
-#include "runtime/memory_manager/memory_constants.h"
+#include "core/memory_manager/memory_constants.h"
+#include "core/utilities/directory.h"
 #include "runtime/os_interface/os_inc_base.h"
-#include "runtime/utilities/directory.h"
 
 #include "drm/i915_drm.h"
 
@@ -42,19 +42,11 @@ int Drm::getParamIoctl(int param, int *dstValue) {
 }
 
 int Drm::getDeviceID(int &devId) {
-#if defined(I915_PARAM_CHIPSET_ID)
     return getParamIoctl(I915_PARAM_CHIPSET_ID, &devId);
-#else
-    return 0;
-#endif
 }
 
 int Drm::getDeviceRevID(int &revId) {
-#if defined(I915_PARAM_REVISION)
     return getParamIoctl(I915_PARAM_REVISION, &revId);
-#else
-    return 0;
-#endif
 }
 
 int Drm::getExecSoftPin(int &execSoftPin) {
@@ -70,11 +62,7 @@ int Drm::enableTurboBoost() {
 }
 
 int Drm::getEnabledPooledEu(int &enabled) {
-#if defined(I915_PARAM_HAS_POOLED_EU)
     return getParamIoctl(I915_PARAM_HAS_POOLED_EU, &enabled);
-#else
-    return 0;
-#endif
 }
 
 int Drm::getMaxGpuFrequency(int &maxGpuFrequency) {
@@ -169,33 +157,15 @@ void Drm::destroyDrmContext(uint32_t drmContextId) {
 }
 
 int Drm::getEuTotal(int &euTotal) {
-#if defined(I915_PARAM_EU_TOTAL) || defined(I915_PARAM_EU_COUNT)
-    int param =
-#if defined(I915_PARAM_EU_TOTAL)
-        I915_PARAM_EU_TOTAL;
-#elif defined(I915_PARAM_EU_COUNT)
-        I915_PARAM_EU_COUNT;
-#endif
-    return getParamIoctl(param, &euTotal);
-#else
-    return 0;
-#endif
+    return getParamIoctl(I915_PARAM_EU_TOTAL, &euTotal);
 }
 
 int Drm::getSubsliceTotal(int &subsliceTotal) {
-#if defined(I915_PARAM_SUBSLICE_TOTAL)
     return getParamIoctl(I915_PARAM_SUBSLICE_TOTAL, &subsliceTotal);
-#else
-    return 0;
-#endif
 }
 
 int Drm::getMinEuInPool(int &minEUinPool) {
-#if defined(I915_PARAM_MIN_EU_IN_POOL)
     return getParamIoctl(I915_PARAM_MIN_EU_IN_POOL, &minEUinPool);
-#else
-    return 0;
-#endif
 }
 
 int Drm::getErrno() {

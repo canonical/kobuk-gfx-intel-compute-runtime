@@ -6,6 +6,8 @@
  */
 
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
+#include "core/unit_tests/utilities/base_object_utils.h"
+#include "runtime/command_stream/scratch_space_controller.h"
 #include "runtime/helpers/hw_helper.h"
 #include "runtime/memory_manager/allocations_list.h"
 #include "unit_tests/command_queue/enqueue_fixture.h"
@@ -17,7 +19,6 @@
 #include "unit_tests/mocks/mock_command_queue.h"
 #include "unit_tests/mocks/mock_csr.h"
 #include "unit_tests/mocks/mock_device_queue.h"
-#include "unit_tests/utilities/base_object_utils.h"
 
 #include "reg_configs_common.h"
 
@@ -252,6 +253,21 @@ HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueWorkItemTestsWithLimitedParamSet, InterfaceDe
     EXPECT_NE(0u, IDD.getConstantIndirectUrbEntryReadLength());
 }
 
+HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueWorkItemTestsWithLimitedParamSet, givenDebugVariableToOverrideMOCSWhenStateBaseAddressIsBeingProgrammedThenItContainsDesiredIndex) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.OverrideStatelessMocsIndex.set(1);
+    typedef typename FamilyType::PARSE PARSE;
+    typedef typename PARSE::STATE_BASE_ADDRESS STATE_BASE_ADDRESS;
+    enqueueKernel<FamilyType>();
+
+    // Extract the SBA command
+    auto itorCmd = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
+    ASSERT_NE(itorWalker, itorCmd);
+    auto *cmdSBA = (STATE_BASE_ADDRESS *)*itorCmd;
+    auto mocsProgrammed = cmdSBA->getStatelessDataPortAccessMemoryObjectControlStateIndexToMocsTables() >> 1;
+    EXPECT_EQ(1u, mocsProgrammed);
+}
+
 HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueWorkItemTestsWithLimitedParamSet, PipelineSelect) {
     enqueueKernel<FamilyType>();
     int numCommands = getNumberOfPipelineSelectsThatEnablePipelineSelect<FamilyType>();
@@ -329,8 +345,8 @@ HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueScratchSpaceTests, GivenKernelRequiringScratc
         EXPECT_NE(0u, cmd->getScratchSpaceBasePointer());
         EXPECT_EQ(0u, GSHaddress);
     } else {
-        EXPECT_EQ(HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit(), cmd->getScratchSpaceBasePointer());
-        EXPECT_EQ(GSHaddress + HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit(), graphicsAllocation->getGpuAddress());
+        EXPECT_EQ(ScratchSpaceConstants::scratchSpaceOffsetFor64Bit, cmd->getScratchSpaceBasePointer());
+        EXPECT_EQ(GSHaddress + ScratchSpaceConstants::scratchSpaceOffsetFor64Bit, graphicsAllocation->getGpuAddress());
     }
 
     auto allocationSize = scratchSize * pDevice->getDeviceInfo().computeUnitsUsedForScratch;
@@ -382,7 +398,7 @@ HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueScratchSpaceTests, GivenKernelRequiringScratc
         auto *sba2 = (STATE_BASE_ADDRESS *)*itorCmdForStateBase;
         auto GSHaddress2 = sba2->getGeneralStateBaseAddress();
         EXPECT_NE(0u, GSHaddress2);
-        EXPECT_EQ(HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit(), cmd2->getScratchSpaceBasePointer());
+        EXPECT_EQ(ScratchSpaceConstants::scratchSpaceOffsetFor64Bit, cmd2->getScratchSpaceBasePointer());
         EXPECT_NE(GSHaddress2, GSHaddress);
     }
     EXPECT_EQ(graphicsAllocation->getUnderlyingBufferSize(), allocationSize);
@@ -403,7 +419,7 @@ HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueScratchSpaceTests, GivenKernelRequiringScratc
     if (is32bit) {
         EXPECT_EQ(0u, GSBaddress);
     } else if (is64bit) {
-        EXPECT_EQ(graphicsAllocation2->getGpuAddress(), GSBaddress + HwHelperHw<FamilyType>::get().getScratchSpaceOffsetFor64bit());
+        EXPECT_EQ(graphicsAllocation2->getGpuAddress(), GSBaddress + ScratchSpaceConstants::scratchSpaceOffsetFor64Bit);
     }
 
     EXPECT_TRUE(csr.getAllocationsForReuse().peekIsEmpty());
@@ -692,6 +708,10 @@ HWTEST_F(EnqueueAuxKernelTests, givenKernelWithRequiredAuxTranslationAndWithoutA
 }
 
 HWTEST_F(EnqueueAuxKernelTests, givenMultipleArgsWhenAuxTranslationIsRequiredThenPickOnlyApplicableBuffers) {
+    if (!HwHelper::get(this->pDevice->getHardwareInfo().platform.eRenderCoreFamily).requiresAuxResolves()) {
+        GTEST_SKIP();
+    }
+
     MyCmdQ<FamilyType> cmdQ(context, pDevice);
     size_t gws[3] = {1, 0, 0};
     MockBuffer buffer0, buffer1, buffer2, buffer3;
@@ -742,7 +762,7 @@ HWTEST_F(EnqueueAuxKernelTests, givenMultipleArgsWhenAuxTranslationIsRequiredThe
 
     auto pipeControls = findAll<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
 
-    auto additionalPcCount = PipeControlHelper<FamilyType>::getSizeForPipeControlWithPostSyncOperation() / sizeof(typename FamilyType::PIPE_CONTROL);
+    auto additionalPcCount = PipeControlHelper<FamilyType>::getSizeForPipeControlWithPostSyncOperation(pDevice->getHardwareInfo()) / sizeof(typename FamilyType::PIPE_CONTROL);
 
     // |AuxToNonAux|NDR|NonAuxToAux|
     ASSERT_EQ(4u + additionalPcCount, pipeControls.size());

@@ -5,8 +5,8 @@
  *
  */
 
+#include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_services.h"
-#include "runtime/memory_manager/memory_constants.h"
 
 #include "engine_node.h"
 #include "hw_cmds_lkf.h"
@@ -37,7 +37,6 @@ const PLATFORM LKF::platform = {
 
 const RuntimeCapabilityTable LKF::capabilityTable{
     {0, 0, 0, false, false, false},                // kmdNotifyProperties
-    {true, false},                                 // whitelistedRegisters
     MemoryConstants::max36BitAddress,              // gpuAddressSpace
     83.333,                                        // defaultProfilingTimerResolution
     MemoryConstants::pageSize,                     // requiredPreemptionSurfaceSize
@@ -50,22 +49,24 @@ const RuntimeCapabilityTable LKF::capabilityTable{
     1,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
     false,                                         // blitterOperationsSupported
+    false,                                         // ftrSupportsInteger64BitAtomics
     false,                                         // ftrSupportsFP64
     false,                                         // ftrSupports64BitMath
     false,                                         // ftrSvm
     true,                                          // ftrSupportsCoherency
-    true,                                          // ftrSupportsVmeAvcTextureSampler
-    true,                                          // ftrSupportsVmeAvcPreemption
+    false,                                         // ftrSupportsVmeAvcTextureSampler
+    false,                                         // ftrSupportsVmeAvcPreemption
     false,                                         // ftrRenderCompressedBuffers
     false,                                         // ftrRenderCompressedImages
     true,                                          // ftr64KBpages
     true,                                          // instrumentationEnabled
     true,                                          // forceStatelessCompilationFor32Bit
-    false,                                         // isCore
+    "lp",                                          // platformType
     true,                                          // sourceLevelDebuggerSupported
     false,                                         // supportsVme
     false,                                         // supportCacheFlushAfterWalker
-    true                                           // supportsImages
+    true,                                          // supportsImages
+    true                                           // supportsDeviceEnqueue
 };
 
 WorkaroundTable LKF::workaroundTable = {};

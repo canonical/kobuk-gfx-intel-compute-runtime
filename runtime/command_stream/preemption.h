@@ -6,8 +6,8 @@
  */
 
 #pragma once
-#include "runtime/command_stream/linear_stream.h"
-#include "runtime/command_stream/preemption_mode.h"
+#include "core/command_stream/linear_stream.h"
+#include "core/command_stream/preemption_mode.h"
 #include "runtime/helpers/hw_info.h"
 
 #include "sku_info.h"
@@ -45,7 +45,7 @@ class PreemptionHelper {
 
     template <typename GfxFamily>
     static void programCmdStream(LinearStream &cmdStream, PreemptionMode newPreemptionMode, PreemptionMode oldPreemptionMode,
-                                 GraphicsAllocation *preemptionCsr, Device &device);
+                                 GraphicsAllocation *preemptionCsr);
 
     template <typename GfxFamily>
     static size_t getPreemptionWaCsSize(const Device &device);

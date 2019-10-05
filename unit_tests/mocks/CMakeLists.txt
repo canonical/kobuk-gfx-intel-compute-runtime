@@ -18,6 +18,7 @@ set(IGDRCL_SRCS_tests_mocks
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_block_kernel_manager.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_buffer.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_builtins.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/mock_builtins.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_cif.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_cif.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_command_queue.h
@@ -55,6 +56,7 @@ set(IGDRCL_SRCS_tests_mocks
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_lrca_helper.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_memory_manager.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_memory_manager.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/mock_memory_operations_handler.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_os_context.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_ostime.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_physical_address_allocator.h
@@ -85,6 +87,8 @@ if(WIN32)
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_wddm_interface23.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_wddm.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_wddm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mock_wddm_residency_allocations_container.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/wddm_mock_helpers.h
     ${IGDRCL_SRC_tests_mock_wddm}
   )
 else()
@@ -115,4 +119,4 @@ target_compile_definitions(igdrcl_mocks PRIVATE MOCKABLE_VIRTUAL=virtual $<TARGE
 
 set_target_properties(igdrcl_mocks PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(igdrcl_mocks PROPERTIES FOLDER "test mocks")
-create_project_source_tree(igdrcl_mocks)
+create_project_source_tree(igdrcl_mocks ${IGDRCL_SOURCE_DIR})

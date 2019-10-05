@@ -5,13 +5,13 @@
  *
  */
 
+#include "core/memory_manager/graphics_allocation.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/built_ins/sip.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/command_stream/preemption.h"
 #include "runtime/device/device.h"
 #include "runtime/helpers/hw_helper.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 
 namespace NEO {
 
@@ -22,7 +22,7 @@ size_t PreemptionHelper::getPreemptionWaCsSize(const Device &device) {
     PreemptionMode preemptionMode = device.getPreemptionMode();
     if (preemptionMode == PreemptionMode::ThreadGroup ||
         preemptionMode == PreemptionMode::MidThread) {
-        if (device.getWaTable()->waModifyVFEStateAfterGPGPUPreemption) {
+        if (device.getHardwareInfo().workaroundTable.waModifyVFEStateAfterGPGPUPreemption) {
             size += 2 * sizeof(MI_LOAD_REGISTER_IMM);
         }
     }
@@ -35,7 +35,7 @@ void PreemptionHelper::applyPreemptionWaCmdsBegin(LinearStream *pCommandStream, 
     PreemptionMode preemptionMode = device.getPreemptionMode();
     if (preemptionMode == PreemptionMode::ThreadGroup ||
         preemptionMode == PreemptionMode::MidThread) {
-        if (device.getWaTable()->waModifyVFEStateAfterGPGPUPreemption) {
+        if (device.getHardwareInfo().workaroundTable.waModifyVFEStateAfterGPGPUPreemption) {
             auto pCmd = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(pCommandStream->getSpace(sizeof(MI_LOAD_REGISTER_IMM)));
             *pCmd = GfxFamily::cmdInitLoadRegisterImm;
             pCmd->setRegisterOffset(CS_GPR_R0);
@@ -50,7 +50,7 @@ void PreemptionHelper::applyPreemptionWaCmdsEnd(LinearStream *pCommandStream, co
     PreemptionMode preemptionMode = device.getPreemptionMode();
     if (preemptionMode == PreemptionMode::ThreadGroup ||
         preemptionMode == PreemptionMode::MidThread) {
-        if (device.getWaTable()->waModifyVFEStateAfterGPGPUPreemption) {
+        if (device.getHardwareInfo().workaroundTable.waModifyVFEStateAfterGPGPUPreemption) {
             auto pCmd = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(pCommandStream->getSpace(sizeof(MI_LOAD_REGISTER_IMM)));
             *pCmd = GfxFamily::cmdInitLoadRegisterImm;
             pCmd->setRegisterOffset(CS_GPR_R0);
@@ -87,9 +87,8 @@ void PreemptionHelper::programStateSip(LinearStream &preambleCmdStream, Device &
 }
 
 template <typename GfxFamily>
-void PreemptionHelper::programCmdStream(LinearStream &cmdStream,
-                                        PreemptionMode newPreemptionMode, PreemptionMode oldPreemptionMode,
-                                        GraphicsAllocation *preemptionCsr, Device &device) {
+void PreemptionHelper::programCmdStream(LinearStream &cmdStream, PreemptionMode newPreemptionMode,
+                                        PreemptionMode oldPreemptionMode, GraphicsAllocation *preemptionCsr) {
     if (oldPreemptionMode == newPreemptionMode) {
         return;
     }

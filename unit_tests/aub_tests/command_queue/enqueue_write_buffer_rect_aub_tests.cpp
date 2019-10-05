@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/helpers/aligned_memory.h"
 #include "core/helpers/ptr_math.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/device/device.h"
-#include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/options.h"
 #include "runtime/mem_obj/buffer.h"
 #include "test.h"
@@ -171,7 +171,7 @@ struct AUBWriteBufferRectUnaligned
             nullptr);
 
         EXPECT_EQ(CL_SUCCESS, retVal);
-        pCmdQ->finish(true);
+        pCmdQ->finish();
 
         AUBCommandStreamFixture::expectMemory<FamilyType>(pDestMemory, referenceMemory, rowPitch);
         AUBCommandStreamFixture::expectMemory<FamilyType>(pDestMemory + rowPitch * bufferOrigin[1], ptrOffset(srcMemory, offset), size);

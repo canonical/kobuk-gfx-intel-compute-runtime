@@ -7,10 +7,10 @@
 
 #include "runtime/command_stream/preemption.h"
 
+#include "core/helpers/string.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/device/device.h"
 #include "runtime/helpers/dispatch_info.h"
-#include "runtime/helpers/string.h"
 #include "runtime/kernel/kernel.h"
 
 namespace NEO {
@@ -55,7 +55,7 @@ PreemptionMode PreemptionHelper::taskPreemptionMode(Device &device, Kernel *kern
     }
 
     if (device.getPreemptionMode() >= PreemptionMode::ThreadGroup &&
-        allowThreadGroupPreemption(kernel, device.getWaTable())) {
+        allowThreadGroupPreemption(kernel, &device.getHardwareInfo().workaroundTable)) {
         return PreemptionMode::ThreadGroup;
     }
 

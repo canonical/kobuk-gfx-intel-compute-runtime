@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/helpers/aligned_memory.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/gmm_helper/resource_info.h"
-#include "runtime/helpers/aligned_memory.h"
 #include "runtime/helpers/surface_formats.h"
 #include "runtime/mem_obj/image.h"
 
@@ -48,8 +48,8 @@ void ImageHw<GfxFamily>::setImageArg(void *memory, bool setAsMediaBlockImage, ui
     auto vAlign = RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT_VALIGN_4;
 
     if (gmm) {
-        hAlign = static_cast<typename RENDER_SURFACE_STATE::SURFACE_HORIZONTAL_ALIGNMENT>(gmm->getRenderHAlignment());
-        vAlign = static_cast<typename RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT>(gmm->getRenderVAlignment());
+        hAlign = static_cast<typename RENDER_SURFACE_STATE::SURFACE_HORIZONTAL_ALIGNMENT>(gmm->gmmResourceInfo->getHAlignSurfaceState());
+        vAlign = static_cast<typename RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT>(gmm->gmmResourceInfo->getVAlignSurfaceState());
     }
 
     if (cubeFaceIndex != __GMM_NO_CUBE_MAP) {
@@ -106,23 +106,23 @@ void ImageHw<GfxFamily>::setImageArg(void *memory, bool setAsMediaBlockImage, ui
     surfaceState->setSurfaceArray(isImageArray);
 
     cl_channel_order imgChannelOrder = getSurfaceFormatInfo().OCLImageFormat.image_channel_order;
-    int shaderChannelValue = ImageHw<GfxFamily>::getShaderChannelValue(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_RED_RED, imgChannelOrder);
-    surfaceState->setShaderChannelSelectRed(static_cast<typename RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_RED>(shaderChannelValue));
+    int shaderChannelValue = ImageHw<GfxFamily>::getShaderChannelValue(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_RED, imgChannelOrder);
+    surfaceState->setShaderChannelSelectRed(static_cast<typename RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT>(shaderChannelValue));
 
     if (imgChannelOrder == CL_LUMINANCE) {
-        surfaceState->setShaderChannelSelectGreen(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_GREEN_RED);
-        surfaceState->setShaderChannelSelectBlue(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_BLUE_RED);
+        surfaceState->setShaderChannelSelectGreen(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_RED);
+        surfaceState->setShaderChannelSelectBlue(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_RED);
     } else {
-        shaderChannelValue = ImageHw<GfxFamily>::getShaderChannelValue(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_GREEN_GREEN, imgChannelOrder);
-        surfaceState->setShaderChannelSelectGreen(static_cast<typename RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_GREEN>(shaderChannelValue));
-        shaderChannelValue = ImageHw<GfxFamily>::getShaderChannelValue(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_BLUE_BLUE, imgChannelOrder);
-        surfaceState->setShaderChannelSelectBlue(static_cast<typename RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_BLUE>(shaderChannelValue));
+        shaderChannelValue = ImageHw<GfxFamily>::getShaderChannelValue(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_GREEN, imgChannelOrder);
+        surfaceState->setShaderChannelSelectGreen(static_cast<typename RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT>(shaderChannelValue));
+        shaderChannelValue = ImageHw<GfxFamily>::getShaderChannelValue(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_BLUE, imgChannelOrder);
+        surfaceState->setShaderChannelSelectBlue(static_cast<typename RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT>(shaderChannelValue));
     }
 
     if (IsNV12Image(&this->getImageFormat())) {
-        surfaceState->setShaderChannelSelectAlpha(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_ALPHA_ONE);
+        surfaceState->setShaderChannelSelectAlpha(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_ONE);
     } else {
-        surfaceState->setShaderChannelSelectAlpha(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_ALPHA_ALPHA);
+        surfaceState->setShaderChannelSelectAlpha(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_ALPHA);
     }
 
     surfaceState->setSurfaceHorizontalAlignment(hAlign);
@@ -187,6 +187,8 @@ template <typename GfxFamily>
 void ImageHw<GfxFamily>::setAuxParamsForCCS(RENDER_SURFACE_STATE *surfaceState, Gmm *gmm) {
     // Its expected to not program pitch/qpitch/baseAddress for Aux surface in CCS scenarios
     surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
+    setFlagsForMediaCompression(surfaceState, gmm);
+
     setClearColorParams(surfaceState, gmm);
     setUnifiedAuxBaseAddress(surfaceState, gmm);
 }
@@ -200,6 +202,13 @@ void ImageHw<GfxFamily>::setUnifiedAuxBaseAddress(RENDER_SURFACE_STATE *surfaceS
 
 template <typename GfxFamily>
 void ImageHw<GfxFamily>::appendSurfaceStateParams(RENDER_SURFACE_STATE *surfaceState) {
+}
+
+template <typename GfxFamily>
+void ImageHw<GfxFamily>::setFlagsForMediaCompression(RENDER_SURFACE_STATE *surfaceState, Gmm *gmm) {
+    if (gmm->gmmResourceInfo->getResourceFlags()->Info.MediaCompressed) {
+        surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE);
+    }
 }
 
 template <typename GfxFamily>
@@ -220,7 +229,10 @@ void ImageHw<GfxFamily>::setMediaImageArg(void *memory) {
     surfaceState->setHeight(static_cast<uint32_t>(getImageDesc().image_height));
     surfaceState->setPictureStructure(MEDIA_SURFACE_STATE::PICTURE_STRUCTURE_FRAME_PICTURE);
 
-    surfaceState->setTileMode(MEDIA_SURFACE_STATE::TILE_MODE_TILEMODE_YMAJOR);
+    auto gmm = getGraphicsAllocation()->getDefaultGmm();
+    auto tileMode = static_cast<typename MEDIA_SURFACE_STATE::TILE_MODE>(gmm->gmmResourceInfo->getTileModeSurfaceState());
+
+    surfaceState->setTileMode(tileMode);
     surfaceState->setSurfacePitch(static_cast<uint32_t>(getImageDesc().image_row_pitch));
 
     surfaceState->setSurfaceFormat(surfaceFormat);

@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/helpers/string.h"
+#include "core/memory_manager/graphics_allocation.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/helpers/flat_batch_buffer_helper_hw.h"
-#include "runtime/helpers/string.h"
-#include "runtime/memory_manager/graphics_allocation.h"
 #include "runtime/memory_manager/memory_manager.h"
 
 namespace NEO {
@@ -28,7 +28,7 @@ GraphicsAllocation *FlatBatchBufferHelperHw<GfxFamily>::flattenBatchBuffer(Batch
 
     if (dispatchMode == DispatchMode::ImmediateDispatch) {
         if (batchBuffer.chainedBatchBuffer) {
-            batchBuffer.chainedBatchBuffer->setAubWritable(false);
+            batchBuffer.chainedBatchBuffer->setAubWritable(false, GraphicsAllocation::defaultBank);
             auto sizeMainBatchBuffer = batchBuffer.chainedBatchBufferStartOffset - batchBuffer.startOffset;
             auto alignedMainBatchBufferSize = alignUp(sizeMainBatchBuffer + indirectPatchCommandsSize + batchBuffer.chainedBatchBuffer->getUnderlyingBufferSize(), MemoryConstants::pageSize);
             AllocationProperties flatBatchBufferProperties(alignedMainBatchBufferSize, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY);
@@ -114,7 +114,7 @@ GraphicsAllocation *FlatBatchBufferHelperHw<GfxFamily>::flattenBatchBuffer(Batch
         flatBatchBuffer = getMemoryManager()->allocateGraphicsMemoryWithProperties(flatBatchBufferProperties);
         UNRECOVERABLE_IF(flatBatchBuffer == nullptr);
 
-        char *ptr = reinterpret_cast<char *>(flatBatchBuffer->getUnderlyingBuffer());
+        char *ptr = static_cast<char *>(flatBatchBuffer->getUnderlyingBuffer());
         memcpy_s(ptr, indirectPatchCommandsSize, indirectPatchCommands.get(), indirectPatchCommandsSize);
         ptr += indirectPatchCommandsSize;
         for (auto &chunk : orderedChunks) {
@@ -187,6 +187,15 @@ void FlatBatchBufferHelperHw<GfxFamily>::removePipeControlData(size_t pipeContro
         PIPE_CONTROL *erasedPipeControl = reinterpret_cast<PIPE_CONTROL *>(pipeControlForNooping);
         removePatchInfoData(reinterpret_cast<uint64_t>(erasedPipeControl) + (i + 1) * sizeof(PIPE_CONTROL) - 2 * sizeof(uint64_t));
         removePatchInfoData(reinterpret_cast<uint64_t>(erasedPipeControl) + (i + 1) * sizeof(PIPE_CONTROL) - sizeof(uint64_t));
+    }
+}
+
+template <typename GfxFamily>
+void FlatBatchBufferHelperHw<GfxFamily>::collectScratchSpacePatchInfo(uint64_t scratchAddress, uint64_t commandOffset, const LinearStream &csr) {
+    if (scratchAddress) {
+        auto scratchOffset = reinterpret_cast<uint32_t *>(reinterpret_cast<uint8_t *>(csr.getCpuBase()) + commandOffset)[0] & 0x3FF;
+        PatchInfoData patchInfoData(scratchAddress, scratchOffset, PatchInfoAllocationType::ScratchSpace, csr.getGraphicsAllocation()->getGpuAddress(), commandOffset, PatchInfoAllocationType::Default);
+        patchInfoCollection.push_back(patchInfoData);
     }
 }
 

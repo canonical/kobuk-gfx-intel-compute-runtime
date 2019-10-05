@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_services.h"
-#include "runtime/memory_manager/memory_constants.h"
+#include "runtime/gen8/hw_cmds.h"
 
 #include "engine_node.h"
-#include "hw_cmds.h"
 #include "hw_info.h"
 
 namespace NEO {
@@ -42,7 +42,6 @@ const PLATFORM BDW::platform = {
 
 const RuntimeCapabilityTable BDW::capabilityTable{
     {50000, 5000, 200000, true, true, true},       // kmdNotifyProperties
-    {false, false},                                // whitelistedRegisters
     MemoryConstants::max48BitAddress,              // gpuAddressSpace
     80,                                            // defaultProfilingTimerResolution
     MemoryConstants::pageSize,                     // requiredPreemptionSurfaceSize
@@ -55,6 +54,7 @@ const RuntimeCapabilityTable BDW::capabilityTable{
     0,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
     false,                                         // blitterOperationsSupported
+    true,                                          // ftrSupportsInteger64BitAtomics
     true,                                          // ftrSupportsFP64
     true,                                          // ftrSupports64BitMath
     true,                                          // ftrSvm
@@ -66,11 +66,12 @@ const RuntimeCapabilityTable BDW::capabilityTable{
     false,                                         // ftr64KBpages
     true,                                          // instrumentationEnabled
     true,                                          // forceStatelessCompilationFor32Bit
-    true,                                          // isCore
+    "core",                                        // platformType
     false,                                         // sourceLevelDebuggerSupported
-    true,                                          // supportsVme
+    false,                                         // supportsVme
     false,                                         // supportCacheFlushAfterWalker
-    true                                           // supportsImages
+    true,                                          // supportsImages
+    true                                           // supportsDeviceEnqueue
 };
 
 WorkaroundTable BDW::workaroundTable = {};

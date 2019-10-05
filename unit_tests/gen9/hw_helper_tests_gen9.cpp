@@ -23,18 +23,9 @@ GEN9TEST_F(HwHelperTestGen9, setCapabilityCoherencyFlag) {
     EXPECT_TRUE(coherency);
 }
 
-GEN9TEST_F(HwHelperTestGen9, setupPreemptionRegisters) {
+GEN9TEST_F(HwHelperTestGen9, getPitchAlignmentForImage) {
     auto &helper = HwHelper::get(renderCoreFamily);
-
-    bool preemption = false;
-    preemption = helper.setupPreemptionRegisters(&hardwareInfo, preemption);
-    EXPECT_FALSE(preemption);
-    EXPECT_FALSE(hardwareInfo.capabilityTable.whitelistedRegisters.csChicken1_0x2580);
-
-    preemption = true;
-    preemption = helper.setupPreemptionRegisters(&hardwareInfo, preemption);
-    EXPECT_TRUE(preemption);
-    EXPECT_TRUE(hardwareInfo.capabilityTable.whitelistedRegisters.csChicken1_0x2580);
+    EXPECT_EQ(4u, helper.getPitchAlignmentForImage(&hardwareInfo));
 }
 
 GEN9TEST_F(HwHelperTestGen9, adjustDefaultEngineType) {

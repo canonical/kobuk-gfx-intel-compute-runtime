@@ -8,11 +8,11 @@
 #pragma once
 
 #include "core/helpers/vec.h"
+#include "core/utilities/stackvec.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/helpers/registered_method_dispatcher.h"
 #include "runtime/mem_obj/mem_obj.h"
 #include "runtime/memory_manager/surface.h"
-#include "runtime/utilities/stackvec.h"
 
 #include <algorithm>
 #include <memory>
@@ -125,6 +125,12 @@ struct MultiDispatchInfo {
             ret = std::max(ret, dispatchInfo.getRequiredPrivateScratchSize());
         }
         return ret;
+    }
+
+    void backupUnifiedMemorySyncRequirement() {
+        for (const auto &dispatchInfo : dispatchInfos) {
+            dispatchInfo.getKernel()->setUnifiedMemorySyncRequirement(true);
+        }
     }
 
     DispatchInfo *begin() {

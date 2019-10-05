@@ -35,10 +35,33 @@ TEST(DrmMemoryManagerSimpleTest, givenDrmMemoryManagerWhenAllocateInDevicePoolIs
     EXPECT_EQ(MemoryManager::AllocationStatus::RetryInNonDevicePool, status);
 }
 
+TEST(DrmMemoryManagerSimpleTest, givenDrmMemoryManagerWhenLockResourceIsCalledOnNullBufferObjectThenReturnNullPtr) {
+    MockExecutionEnvironment executionEnvironment(*platformDevices);
+    executionEnvironment.osInterface = std::make_unique<OSInterface>();
+    TestedDrmMemoryManager memoryManager(executionEnvironment);
+    DrmAllocation drmAllocation(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, nullptr, 0u, 0u, MemoryPool::LocalMemory);
+
+    auto ptr = memoryManager.lockResourceInLocalMemoryImpl(drmAllocation.getBO());
+    EXPECT_EQ(nullptr, ptr);
+
+    memoryManager.unlockResourceInLocalMemoryImpl(drmAllocation.getBO());
+}
+
+TEST(DrmMemoryManagerSimpleTest, givenDrmMemoryManagerWhenFreeGraphicsMemoryIsCalledOnAllocationWithNullBufferObjectThenEarlyReturn) {
+    MockExecutionEnvironment executionEnvironment(*platformDevices);
+    executionEnvironment.osInterface = std::make_unique<OSInterface>();
+    TestedDrmMemoryManager memoryManager(executionEnvironment);
+
+    auto drmAllocation = new DrmAllocation(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, nullptr, 0u, 0u, MemoryPool::LocalMemory);
+    EXPECT_NE(nullptr, drmAllocation);
+
+    memoryManager.freeGraphicsMemoryImpl(drmAllocation);
+}
+
 using DrmMemoryManagerWithLocalMemoryTest = Test<DrmMemoryManagerWithLocalMemoryFixture>;
 
 TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenDrmMemoryManagerWithLocalMemoryWhenLockResourceIsCalledOnAllocationInLocalMemoryThenReturnNullPtr) {
-    DrmAllocation drmAllocation(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, nullptr, 0u, 0u, MemoryPool::LocalMemory, false);
+    DrmAllocation drmAllocation(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, nullptr, 0u, 0u, MemoryPool::LocalMemory);
 
     auto ptr = memoryManager->lockResource(&drmAllocation);
     EXPECT_EQ(nullptr, ptr);
@@ -64,4 +87,8 @@ TEST_F(DrmMemoryManagerTest, givenDrmMemoryManagerWhenCopyMemoryToAllocationThen
     EXPECT_EQ(0, memcmp(allocation->getUnderlyingBuffer(), dataToCopy.data(), dataToCopy.size()));
 
     memoryManager->freeGraphicsMemory(allocation);
+}
+
+TEST_F(DrmMemoryManagerTest, givenDrmMemoryManagerWhenGetLocalMemoryIsCalledThenSizeOfLocalMemoryIsReturned) {
+    EXPECT_EQ(0 * GB, memoryManager->getLocalMemorySize());
 }

@@ -30,10 +30,13 @@ BDWTEST_F(BdwSchedulerTest, givenCallToDispatchSchedulerWhenPipeControlWithCSSta
         DeviceQueueHw<FamilyType> *pDevQueueHw = castToObject<DeviceQueueHw<FamilyType>>(pDevQueue);
         SchedulerKernel &scheduler = pDevice->getExecutionEnvironment()->getBuiltIns()->getSchedulerKernel(*context);
 
-        size_t minRequiredSizeForSchedulerSSH = HardwareCommandsHelper<FamilyType>::template getSizeRequiredForExecutionModel<IndirectHeap::SURFACE_STATE>(*parentKernel);
+        size_t minRequiredSizeForSchedulerSSH = HardwareCommandsHelper<FamilyType>::getSizeRequiredForExecutionModel(IndirectHeap::SURFACE_STATE, *parentKernel);
 
         // Setup heaps in pCmdQ
-        LinearStream &commandStream = getCommandStream<FamilyType, CL_COMMAND_NDRANGE_KERNEL>(*pCmdQ, false, false, &scheduler);
+        MultiDispatchInfo multiDispatchinfo(&scheduler);
+        LinearStream &commandStream = getCommandStream<FamilyType, CL_COMMAND_NDRANGE_KERNEL>(*pCmdQ, CsrDependencies(),
+                                                                                              false, false, false, multiDispatchinfo,
+                                                                                              nullptr, 0);
         pCmdQ->getIndirectHeap(IndirectHeap::SURFACE_STATE, minRequiredSizeForSchedulerSSH);
 
         GpgpuWalkerHelper<FamilyType>::dispatchScheduler(

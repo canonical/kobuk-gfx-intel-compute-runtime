@@ -22,10 +22,6 @@ target_include_directories(igdrcl_mt_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_subdirectories()
 
-#these tests fail because of data race, set '*' after fix problem
-set(GTEST_FILTER "-AsyncGPUoperations.MapBufferAfterWriteBuffer")
-MESSAGE(STATUS "GTest filter for mt tests:" ${GTEST_FILTER} )
-
 target_link_libraries(igdrcl_mt_tests ${TSAN_LIB})
 target_link_libraries(igdrcl_mt_tests ${NEO_MOCKABLE_LIB_NAME})
 target_link_libraries(igdrcl_mt_tests gmock-gtest)
@@ -74,7 +70,7 @@ function(run_mt_tests target slices subslices eu_per_ss)
     POST_BUILD
     COMMAND WORKING_DIRECTORY ${TargetDir}
     COMMAND echo "Running igdrcl_mt_tests ${target} ${slices}x${subslices}x${eu_per_ss}"
-    COMMAND igdrcl_mt_tests --product ${target} --slices ${slices} --subslices ${subslices} --eu_per_ss ${eu_per_ss} --gtest_repeat=${GTEST_REPEAT} ${igdrcl_mt_tests_LISTENER_OPTION} --gtest_filter=${GTEST_FILTER}
+    COMMAND igdrcl_mt_tests --product ${target} --slices ${slices} --subslices ${subslices} --eu_per_ss ${eu_per_ss} --gtest_repeat=${GTEST_REPEAT} ${igdrcl_mt_tests_LISTENER_OPTION}
   )
 endfunction()
 
@@ -83,7 +79,7 @@ target_include_directories(igdrcl_mt_tests BEFORE PRIVATE ${IGDRCL_SOURCE_DIR}/u
 macro(macro_for_each_test_config)
   run_mt_tests(${PLATFORM_IT_LOWER} ${SLICES} ${SUBSLICES} ${EU_PER_SS})
   if(MSVC OR CMAKE_SIZEOF_VOID_P EQUAL 8)
-    foreach(PLATFORM_TYPE "CORE" "LP")
+    foreach(PLATFORM_TYPE ${PLATFORM_TYPES})
       if(${PLATFORM_IT}_IS_${PLATFORM_TYPE})
         get_family_name_with_type(${GEN_TYPE} ${PLATFORM_TYPE})
         add_dependencies(run_${PLATFORM_IT_LOWER}_mt_unit_tests test_kernels_${family_name_with_type})

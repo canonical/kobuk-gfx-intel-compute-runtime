@@ -6,12 +6,14 @@
  */
 
 #pragma once
+#include "runtime/os_interface/linux/drm_memory_operations_handler.h"
 #include "runtime/os_interface/os_interface.h"
 
 #include "drm_neo.h"
 
 namespace NEO {
 class Drm;
+
 class OSInterface::OSInterfaceImpl {
   public:
     OSInterfaceImpl() {

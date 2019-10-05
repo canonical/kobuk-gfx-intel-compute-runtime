@@ -28,8 +28,6 @@ struct GetSizeRequiredTest : public CommandEnqueueFixture,
         usedBeforeDSH = dsh->getUsed();
         usedBeforeIOH = ioh->getUsed();
         usedBeforeSSH = ssh->getUsed();
-        WhitelistedRegisters regs = {0};
-        pDevice->setForceWhitelistedRegs(true, &regs);
     }
 
     void TearDown() override {
@@ -49,7 +47,7 @@ HWTEST_F(GetSizeRequiredTest, finish) {
     auto &commandStream = pCmdQ->getCS(1024);
     auto usedBeforeCS = commandStream.getUsed();
 
-    auto retVal = pCmdQ->finish(false);
+    auto retVal = pCmdQ->finish();
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_EQ(0u, commandStream.getUsed() - usedBeforeCS);
@@ -71,12 +69,17 @@ HWTEST_F(GetSizeRequiredTest, enqueueMarker) {
         &eventReturned);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    EXPECT_EQ(0u, commandStream.getUsed() - usedBeforeCS);
+    size_t expectedStreamSize = 0;
+    if (pCmdQ->getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
+        expectedStreamSize = alignUp(PipeControlHelper<FamilyType>::getSizeForPipeControlWithPostSyncOperation(pDevice->getHardwareInfo()),
+                                     +MemoryConstants::cacheLineSize);
+    }
+    EXPECT_EQ(expectedStreamSize, commandStream.getUsed() - usedBeforeCS);
     EXPECT_EQ(0u, dsh->getUsed() - usedBeforeDSH);
     EXPECT_EQ(0u, ioh->getUsed() - usedBeforeIOH);
     EXPECT_EQ(0u, ssh->getUsed() - usedBeforeSSH);
 
-    delete (Event *)eventReturned;
+    clReleaseEvent(eventReturned);
 }
 
 HWTEST_F(GetSizeRequiredTest, enqueueBarrierDoesntConsumeAnySpace) {
@@ -92,9 +95,13 @@ HWTEST_F(GetSizeRequiredTest, enqueueBarrierDoesntConsumeAnySpace) {
         &eventReturned);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    size_t expectedSize = 0;
+    size_t expectedStreamSize = 0;
+    if (pCmdQ->getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
+        expectedStreamSize = alignUp(PipeControlHelper<FamilyType>::getSizeForPipeControlWithPostSyncOperation(pDevice->getHardwareInfo()),
+                                     +MemoryConstants::cacheLineSize);
+    }
 
-    EXPECT_EQ(expectedSize, commandStream.getUsed() - usedBeforeCS);
+    EXPECT_EQ(expectedStreamSize, commandStream.getUsed() - usedBeforeCS);
 
-    delete (Event *)eventReturned;
+    clReleaseEvent(eventReturned);
 }

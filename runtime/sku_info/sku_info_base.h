@@ -81,9 +81,15 @@ struct FeatureTableBase {
     bool ftrWddm2GpuMmu = false;
     bool ftrWddm2_1_64kbPages = false;
     bool ftrWddmHwQueues = false;
+    bool ftrMemTypeMocsDeferPAT = false;
 
     bool ftrKmdDaf = false;
     bool ftrSimulationMode = false;
+
+    bool ftrE2ECompression = false;
+    bool ftrLinearCCS = false;
+    bool ftrCCSRing = false;
+    bool ftrCCSNode = false;
 };
 
 struct WorkaroundTableBase {
@@ -107,5 +113,9 @@ struct WorkaroundTableBase {
     bool waModifyVFEStateAfterGPGPUPreemption = false;
     bool waCSRUncachable = false;
     bool waSamplerCacheFlushBetweenRedescribedSurfaceReads = false;
+    bool waRestrictPitch128KB = false;
+    bool waLimit128BMediaCompr = false;
+    bool waUntypedBufferCompression = false;
+    bool waAuxTable16KGranular = false;
 };
 } // namespace NEO

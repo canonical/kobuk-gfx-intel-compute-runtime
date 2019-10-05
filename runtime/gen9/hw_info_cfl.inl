@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_services.h"
-#include "runtime/memory_manager/memory_constants.h"
+#include "runtime/gen9/hw_cmds.h"
 
 #include "engine_node.h"
-#include "hw_cmds.h"
 #include "hw_info_cfl.h"
 
 namespace NEO {
@@ -34,7 +34,6 @@ const PLATFORM CFL::platform = {
 
 const RuntimeCapabilityTable CFL::capabilityTable{
     {0, 0, 0, false, false, false},                // kmdNotifyProperties
-    {true, false},                                 // whitelistedRegisters
     MemoryConstants::max48BitAddress,              // gpuAddressSpace
     83.333,                                        // defaultProfilingTimerResolution
     MemoryConstants::pageSize,                     // requiredPreemptionSurfaceSize
@@ -47,6 +46,7 @@ const RuntimeCapabilityTable CFL::capabilityTable{
     0,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
     false,                                         // blitterOperationsSupported
+    true,                                          // ftrSupportsInteger64BitAtomics
     true,                                          // ftrSupportsFP64
     true,                                          // ftrSupports64BitMath
     true,                                          // ftrSvm
@@ -58,11 +58,12 @@ const RuntimeCapabilityTable CFL::capabilityTable{
     true,                                          // ftr64KBpages
     true,                                          // instrumentationEnabled
     true,                                          // forceStatelessCompilationFor32Bit
-    true,                                          // isCore
+    "core",                                        // platformType
     true,                                          // sourceLevelDebuggerSupported
     true,                                          // supportsVme
     false,                                         // supportCacheFlushAfterWalker
-    true                                           // supportsImages
+    true,                                          // supportsImages
+    true                                           // supportsDeviceEnqueue
 };
 
 WorkaroundTable CFL::workaroundTable = {};

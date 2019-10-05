@@ -5,6 +5,8 @@
  *
  */
 
+#pragma once
+
 #include "runtime/os_interface/os_context.h"
 
 #include <vector>
@@ -20,7 +22,7 @@ class OsContextLinux : public OsContext {
                    aub_stream::EngineType engineType, PreemptionMode preemptionMode, bool lowPriority);
 
     unsigned int getEngineFlag() const { return engineFlag; }
-    uint32_t getDrmContextId() const { return drmContextIds[0]; }
+    const std::vector<uint32_t> &getDrmContextIds() const { return drmContextIds; }
 
   protected:
     unsigned int engineFlag = 0;

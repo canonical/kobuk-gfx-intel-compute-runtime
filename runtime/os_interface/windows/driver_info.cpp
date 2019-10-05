@@ -7,9 +7,9 @@
 
 #include "runtime/device/driver_info.h"
 
+#include "core/os_interface/windows/debug_registry_reader.h"
 #include "runtime/os_interface/windows/driver_info.h"
 #include "runtime/os_interface/windows/os_interface.h"
-#include "runtime/os_interface/windows/registry_reader.h"
 #include "runtime/os_interface/windows/wddm/wddm.h"
 
 namespace NEO {
@@ -24,7 +24,7 @@ DriverInfo *DriverInfo::create(OSInterface *osInterface) {
         auto result = new DriverInfoWindows();
         path = result->trimRegistryKey(path);
 
-        result->setRegistryReader(new RegistryReader(path));
+        result->setRegistryReader(new RegistryReader(false, path));
         return result;
     }
 

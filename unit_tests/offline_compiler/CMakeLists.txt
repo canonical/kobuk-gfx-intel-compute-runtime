@@ -48,7 +48,7 @@ set(IGDRCL_SRCS_offline_compiler_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/offline_compiler_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/offline_compiler_tests.h
-  ${IGDRCL_SOURCE_DIR}/runtime/helpers/abort.cpp
+  ${IGDRCL_SOURCE_DIR}/core/helpers/abort.cpp
   ${IGDRCL_SOURCE_DIR}/runtime/helpers/file_io.cpp
   ${IGDRCL_SOURCE_DIR}/runtime/memory_manager/deferred_deleter.cpp
   ${IGDRCL_SOURCE_DIR}/runtime/memory_manager/deferred_deleter.h
@@ -100,7 +100,7 @@ add_custom_target(run_ocloc_tests ALL
 )
 macro(macro_for_each_platform)
   if("${PLATFORM_IT_LOWER}" STREQUAL "${CLOC_DEFAULT_DEVICE}")
-    foreach(PLATFORM_TYPE "CORE" "LP")
+    foreach(PLATFORM_TYPE ${PLATFORM_TYPES})
       if(${PLATFORM_IT}_IS_${PLATFORM_TYPE})
         get_family_name_with_type(${GEN_TYPE} ${PLATFORM_TYPE})
         add_dependencies(run_ocloc_tests test_kernels_${family_name_with_type})
