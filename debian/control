@@ -9,10 +9,10 @@ Build-Depends: debhelper (>= 11),
  cmake,
  flex,
  llvm-9,
- libopencl-clang-dev,
- libigc-dev,
- libigdfcl-dev,
- libigdgmm-dev,
+ libopencl-clang-dev (>= 9.0.0),
+ libigc-dev (>= 1.0.2652),
+ libigdfcl-dev (>= 1.0.2652),
+ libigdgmm-dev (>= 19.3.2),
  libva-dev,
  pkg-config,
 Standards-Version: 4.3.0
@@ -25,9 +25,9 @@ Architecture: amd64
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
- libigc1,
- libigdfcl1,
- libigdgmm5,
+ libigc1 (>= 1.0.2652),
+ libigdfcl1 (>= 1.0.2652),
+ libigdgmm11,
  ocl-icd-libopencl1,
 Breaks:
  intel-opencl
