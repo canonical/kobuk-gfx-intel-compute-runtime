@@ -5,10 +5,10 @@ Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alioth.debian.org>
 Uploaders: Timo Aaltonen <tjaalton@debian.org>
 Build-Depends: debhelper (>= 11),
  bison,
- clang-8,
+ clang-9,
  cmake,
  flex,
- llvm-8,
+ llvm-9,
  libopencl-clang-dev,
  libigc-dev,
  libigdfcl-dev,
