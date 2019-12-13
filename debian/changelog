@@ -1,4 +1,4 @@
-intel-compute-runtime (19.39.14278-1) UNRELEASED; urgency=medium
+intel-compute-runtime (19.48.14977-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * control: Migrate to llvm9.
