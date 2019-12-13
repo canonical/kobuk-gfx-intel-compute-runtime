@@ -20,7 +20,7 @@
 
 using namespace NEO;
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, gpgpuWalker) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, WhenReadingImageThenGpgpuWalkerIsProgrammedCorrectly) {
     typedef typename FamilyType::GPGPU_WALKER GPGPU_WALKER;
     enqueueReadImage<FamilyType>();
 
@@ -40,7 +40,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, gpgpuWalker) {
     // Compute the SIMD lane mask
     size_t simd =
         cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16 : 8;
-    uint64_t simdMask = (1ull << simd) - 1;
+    uint64_t simdMask = maxNBitValue(simd);
 
     // Mask off lanes based on the execution masks
     auto laneMaskRight = cmd->getRightExecutionMask() & simdMask;
@@ -51,7 +51,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, gpgpuWalker) {
     }
 }
 
-HWTEST_F(EnqueueReadImageTest, alignsToCSR_Blocking) {
+HWTEST_F(EnqueueReadImageTest, GivenBlockingEnqueueWhenReadingImageThenTaskLevelIsNotIncremented) {
     //this test case assumes IOQ
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.taskCount = pCmdQ->taskCount + 100;
@@ -63,7 +63,7 @@ HWTEST_F(EnqueueReadImageTest, alignsToCSR_Blocking) {
     EXPECT_EQ(oldCsrTaskLevel, pCmdQ->taskLevel);
 }
 
-HWTEST_F(EnqueueReadImageTest, alignsToCSR_NonBlocking) {
+HWTEST_F(EnqueueReadImageTest, GivenNonBlockingEnqueueWhenReadingImageThenTaskLevelIsIncremented) {
     //this test case assumes IOQ
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.taskCount = pCmdQ->taskCount + 100;
@@ -74,21 +74,21 @@ HWTEST_F(EnqueueReadImageTest, alignsToCSR_NonBlocking) {
     EXPECT_EQ(csr.peekTaskLevel(), pCmdQ->taskLevel + 1);
 }
 
-HWTEST_F(EnqueueReadImageTest, bumpsTaskLevel) {
+HWTEST_F(EnqueueReadImageTest, WhenReadingImageThenTaskLevelIsIncremented) {
     auto taskLevelBefore = pCmdQ->taskLevel;
 
     EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage, EnqueueReadImageTraits::blocking);
     EXPECT_GT(pCmdQ->taskLevel, taskLevelBefore);
 }
 
-HWTEST_F(EnqueueReadImageTest, addsCommands) {
+HWTEST_F(EnqueueReadImageTest, WhenReadingImageThenCommandsAreAdded) {
     auto usedCmdBufferBefore = pCS->getUsed();
 
     EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage, EnqueueReadImageTraits::blocking);
     EXPECT_NE(usedCmdBufferBefore, pCS->getUsed());
 }
 
-HWTEST_F(EnqueueReadImageTest, addsIndirectData) {
+HWTEST_F(EnqueueReadImageTest, WhenReadingImageThenIndirectDataIsAdded) {
     auto dshBefore = pDSH->getUsed();
     auto iohBefore = pIOH->getUsed();
     auto sshBefore = pSSH->getUsed();
@@ -99,18 +99,19 @@ HWTEST_F(EnqueueReadImageTest, addsIndirectData) {
     EXPECT_NE(sshBefore, pSSH->getUsed());
 }
 
-HWTEST_F(EnqueueReadImageTest, loadRegisterImmediateL3CNTLREG) {
+HWTEST_F(EnqueueReadImageTest, WhenReadingImageThenL3ProgrammingIsCorrect) {
     enqueueReadImage<FamilyType>();
     validateL3Programming<FamilyType>(cmdList, itorWalker);
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, WhenEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueReadImage<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    auto &ultCsr = this->pDevice->getUltCommandStreamReceiver<FamilyType>();
+    validateStateBaseAddress<FamilyType>(ultCsr.getMemoryManager()->getInternalHeapBaseAddress(ultCsr.rootDeviceIndex),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, mediaInterfaceDescriptorLoad) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, WhenReadingImageThenMediaInterfaceDescriptorIsCorrect) {
     typedef typename FamilyType::MEDIA_INTERFACE_DESCRIPTOR_LOAD MEDIA_INTERFACE_DESCRIPTOR_LOAD;
     typedef typename FamilyType::INTERFACE_DESCRIPTOR_DATA INTERFACE_DESCRIPTOR_DATA;
 
@@ -136,7 +137,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, mediaInterfaceDescriptorLoad) 
     FamilyType::PARSE::template validateCommand<MEDIA_INTERFACE_DESCRIPTOR_LOAD *>(cmdList.begin(), itorMediaInterfaceDescriptorLoad);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, interfaceDescriptorData) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, WhenReadingImageThenInterfaceDescriptorData) {
     typedef typename FamilyType::STATE_BASE_ADDRESS STATE_BASE_ADDRESS;
     typedef typename FamilyType::INTERFACE_DESCRIPTOR_DATA INTERFACE_DESCRIPTOR_DATA;
 
@@ -152,7 +153,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, interfaceDescriptorData) {
 
     auto localWorkSize = 4u;
     auto simd = 32u;
-    auto threadsPerThreadGroup = (localWorkSize + simd - 1) / simd;
+    auto threadsPerThreadGroup = Math::divideAndRoundUp(localWorkSize, simd);
     EXPECT_EQ(threadsPerThreadGroup, interfaceDescriptorData.getNumberOfThreadsInGpgpuThreadGroup());
     EXPECT_NE(0u, interfaceDescriptorData.getCrossThreadConstantDataReadLength());
     EXPECT_NE(0u, interfaceDescriptorData.getConstantIndirectUrbEntryReadLength());
@@ -161,7 +162,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, interfaceDescriptorData) {
     EXPECT_NE(kernelStartPointer, interfaceDescriptorData.getBindingTablePointer());
 }
 
-HWTEST_F(EnqueueReadImageTest, surfaceState) {
+HWTEST_F(EnqueueReadImageTest, WhenReadingImageThenSurfaceStateIsCorrect) {
     typedef typename FamilyType::RENDER_SURFACE_STATE RENDER_SURFACE_STATE;
 
     enqueueReadImage<FamilyType>();
@@ -182,18 +183,18 @@ HWTEST_F(EnqueueReadImageTest, surfaceState) {
     EXPECT_EQ(srcImage->getGraphicsAllocation()->getGpuAddress(), surfaceState.getSurfaceBaseAddress());
 }
 
-HWTEST_F(EnqueueReadImageTest, pipelineSelect) {
+HWTEST_F(EnqueueReadImageTest, WhenReadingImageThenPipelineSelectIsProgrammed) {
     enqueueReadImage<FamilyType>();
     int numCommands = getNumberOfPipelineSelectsThatEnablePipelineSelect<FamilyType>();
     EXPECT_EQ(1, numCommands);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, mediaVFEState) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, WhenReadingImageThenMediaVfeStateIsCorrect) {
     enqueueReadImage<FamilyType>();
     validateMediaVFEState<FamilyType>(&pDevice->getHardwareInfo(), cmdMediaVfeState, cmdList, itorMediaVfeState);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, blockingEnqueueRequiresPCWithDCFlushSetAfterWalker) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, GivenBlockingEnqueueWhenReadingImageThenPipeControlWithDcFlushIsSetAfterWalker) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
 
     bool blocking = true;
@@ -446,7 +447,7 @@ HWTEST_F(EnqueueReadImageTest, givenCommandQueueWhenEnqueueReadImageWithMapAlloc
     size_t region[] = {imageDesc.image_width, imageDesc.image_height, imageDesc.image_array_size};
     size_t rowPitch = srcImage->getHostPtrRowPitch();
     size_t slicePitch = srcImage->getHostPtrSlicePitch();
-    GraphicsAllocation mapAllocation{GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0, 0, 0, MemoryPool::MemoryNull};
+    GraphicsAllocation mapAllocation{0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0, 0, 0, MemoryPool::MemoryNull};
 
     EnqueueReadImageHelper<>::enqueueReadImage(mockCmdQ.get(), srcImage.get(), CL_TRUE, origin, region, rowPitch, slicePitch, dstPtr, &mapAllocation);
 

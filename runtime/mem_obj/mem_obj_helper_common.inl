@@ -9,66 +9,83 @@
 
 namespace NEO {
 
-bool MemObjHelper::validateMemoryPropertiesForBuffer(const MemoryProperties &properties) {
+bool MemObjHelper::validateMemoryPropertiesForBuffer(const MemoryPropertiesFlags &memoryProperties, cl_mem_flags flags, cl_mem_flags_intel flagsIntel) {
     /* Check all the invalid flags combination. */
-    if ((isValueSet(properties.flags, CL_MEM_READ_WRITE | CL_MEM_READ_ONLY)) ||
-        (isValueSet(properties.flags, CL_MEM_READ_WRITE | CL_MEM_WRITE_ONLY)) ||
-        (isValueSet(properties.flags, CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY)) ||
-        (isValueSet(properties.flags, CL_MEM_ALLOC_HOST_PTR | CL_MEM_USE_HOST_PTR)) ||
-        (isValueSet(properties.flags, CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR)) ||
-        (isValueSet(properties.flags, CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) ||
-        (isValueSet(properties.flags, CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY)) ||
-        (isValueSet(properties.flags, CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS))) {
+    if ((isValueSet(flags, CL_MEM_READ_WRITE | CL_MEM_READ_ONLY)) ||
+        (isValueSet(flags, CL_MEM_READ_WRITE | CL_MEM_WRITE_ONLY)) ||
+        (isValueSet(flags, CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY)) ||
+        (isValueSet(flags, CL_MEM_ALLOC_HOST_PTR | CL_MEM_USE_HOST_PTR)) ||
+        (isValueSet(flags, CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR)) ||
+        (isValueSet(flags, CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)) ||
+        (isValueSet(flags, CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY)) ||
+        (isValueSet(flags, CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS))) {
         return false;
     }
 
-    return validateExtraMemoryProperties(properties);
+    return validateExtraMemoryProperties(memoryProperties, flags, flagsIntel);
 }
 
-bool MemObjHelper::validateMemoryPropertiesForImage(const MemoryProperties &properties, cl_mem parent) {
+bool MemObjHelper::validateMemoryPropertiesForImage(const MemoryPropertiesFlags &memoryProperties, cl_mem_flags flags, cl_mem_flags_intel flagsIntel, cl_mem parent) {
     /* Check all the invalid flags combination. */
-    if ((!isValueSet(properties.flags, CL_MEM_ACCESS_FLAGS_UNRESTRICTED_INTEL)) &&
-        (isValueSet(properties.flags, CL_MEM_READ_WRITE | CL_MEM_WRITE_ONLY) ||
-         isValueSet(properties.flags, CL_MEM_READ_WRITE | CL_MEM_READ_ONLY) ||
-         isValueSet(properties.flags, CL_MEM_WRITE_ONLY | CL_MEM_READ_ONLY) ||
-         isValueSet(properties.flags, CL_MEM_ALLOC_HOST_PTR | CL_MEM_USE_HOST_PTR) ||
-         isValueSet(properties.flags, CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR) ||
-         isValueSet(properties.flags, CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_READ_ONLY) ||
-         isValueSet(properties.flags, CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS) ||
-         isValueSet(properties.flags, CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS) ||
-         isValueSet(properties.flags, CL_MEM_NO_ACCESS_INTEL | CL_MEM_READ_WRITE) ||
-         isValueSet(properties.flags, CL_MEM_NO_ACCESS_INTEL | CL_MEM_WRITE_ONLY) ||
-         isValueSet(properties.flags, CL_MEM_NO_ACCESS_INTEL | CL_MEM_READ_ONLY))) {
+    if ((!isValueSet(flags, CL_MEM_ACCESS_FLAGS_UNRESTRICTED_INTEL)) &&
+        (isValueSet(flags, CL_MEM_READ_WRITE | CL_MEM_WRITE_ONLY) ||
+         isValueSet(flags, CL_MEM_READ_WRITE | CL_MEM_READ_ONLY) ||
+         isValueSet(flags, CL_MEM_WRITE_ONLY | CL_MEM_READ_ONLY) ||
+         isValueSet(flags, CL_MEM_ALLOC_HOST_PTR | CL_MEM_USE_HOST_PTR) ||
+         isValueSet(flags, CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR) ||
+         isValueSet(flags, CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_READ_ONLY) ||
+         isValueSet(flags, CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS) ||
+         isValueSet(flags, CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS) ||
+         isValueSet(flags, CL_MEM_NO_ACCESS_INTEL | CL_MEM_READ_WRITE) ||
+         isValueSet(flags, CL_MEM_NO_ACCESS_INTEL | CL_MEM_WRITE_ONLY) ||
+         isValueSet(flags, CL_MEM_NO_ACCESS_INTEL | CL_MEM_READ_ONLY))) {
         return false;
     }
 
     auto parentMemObj = castToObject<MemObj>(parent);
-    if (parentMemObj != nullptr && properties.flags) {
-        auto parentFlags = parentMemObj->getFlags();
+    if (parentMemObj != nullptr && flags) {
+        auto parentFlags = parentMemObj->getMemoryPropertiesFlags();
         /* Check whether flags are compatible with parent. */
-        if (isValueSet(properties.flags, CL_MEM_ALLOC_HOST_PTR) ||
-            isValueSet(properties.flags, CL_MEM_COPY_HOST_PTR) ||
-            isValueSet(properties.flags, CL_MEM_USE_HOST_PTR) ||
+        if (isValueSet(flags, CL_MEM_ALLOC_HOST_PTR) ||
+            isValueSet(flags, CL_MEM_COPY_HOST_PTR) ||
+            isValueSet(flags, CL_MEM_USE_HOST_PTR) ||
             ((!isValueSet(parentFlags, CL_MEM_ACCESS_FLAGS_UNRESTRICTED_INTEL)) &&
-             (!isValueSet(properties.flags, CL_MEM_ACCESS_FLAGS_UNRESTRICTED_INTEL)) &&
-             ((isValueSet(parentFlags, CL_MEM_WRITE_ONLY) && isValueSet(properties.flags, CL_MEM_READ_WRITE)) ||
-              (isValueSet(parentFlags, CL_MEM_WRITE_ONLY) && isValueSet(properties.flags, CL_MEM_READ_ONLY)) ||
-              (isValueSet(parentFlags, CL_MEM_READ_ONLY) && isValueSet(properties.flags, CL_MEM_READ_WRITE)) ||
-              (isValueSet(parentFlags, CL_MEM_READ_ONLY) && isValueSet(properties.flags, CL_MEM_WRITE_ONLY)) ||
-              (isValueSet(parentFlags, CL_MEM_NO_ACCESS_INTEL) && isValueSet(properties.flags, CL_MEM_READ_WRITE)) ||
-              (isValueSet(parentFlags, CL_MEM_NO_ACCESS_INTEL) && isValueSet(properties.flags, CL_MEM_WRITE_ONLY)) ||
-              (isValueSet(parentFlags, CL_MEM_NO_ACCESS_INTEL) && isValueSet(properties.flags, CL_MEM_READ_ONLY)) ||
-              (isValueSet(parentFlags, CL_MEM_HOST_NO_ACCESS) && isValueSet(properties.flags, CL_MEM_HOST_WRITE_ONLY)) ||
-              (isValueSet(parentFlags, CL_MEM_HOST_NO_ACCESS) && isValueSet(properties.flags, CL_MEM_HOST_READ_ONLY))))) {
+             (!isValueSet(flags, CL_MEM_ACCESS_FLAGS_UNRESTRICTED_INTEL)) &&
+             ((isValueSet(parentFlags, CL_MEM_WRITE_ONLY) && isValueSet(flags, CL_MEM_READ_WRITE)) ||
+              (isValueSet(parentFlags, CL_MEM_WRITE_ONLY) && isValueSet(flags, CL_MEM_READ_ONLY)) ||
+              (isValueSet(parentFlags, CL_MEM_READ_ONLY) && isValueSet(flags, CL_MEM_READ_WRITE)) ||
+              (isValueSet(parentFlags, CL_MEM_READ_ONLY) && isValueSet(flags, CL_MEM_WRITE_ONLY)) ||
+              (isValueSet(parentFlags, CL_MEM_NO_ACCESS_INTEL) && isValueSet(flags, CL_MEM_READ_WRITE)) ||
+              (isValueSet(parentFlags, CL_MEM_NO_ACCESS_INTEL) && isValueSet(flags, CL_MEM_WRITE_ONLY)) ||
+              (isValueSet(parentFlags, CL_MEM_NO_ACCESS_INTEL) && isValueSet(flags, CL_MEM_READ_ONLY)) ||
+              (isValueSet(parentFlags, CL_MEM_HOST_NO_ACCESS) && isValueSet(flags, CL_MEM_HOST_WRITE_ONLY)) ||
+              (isValueSet(parentFlags, CL_MEM_HOST_NO_ACCESS) && isValueSet(flags, CL_MEM_HOST_READ_ONLY))))) {
             return false;
         }
     }
 
-    return validateExtraMemoryProperties(properties);
+    return validateExtraMemoryProperties(memoryProperties, flags, flagsIntel);
 }
 
-AllocationProperties MemObjHelper::getAllocationPropertiesWithImageInfo(ImageInfo &imgInfo, bool allocateMemory, const MemoryPropertiesFlags &memoryProperties) {
-    AllocationProperties allocationProperties{allocateMemory, imgInfo, GraphicsAllocation::AllocationType::IMAGE};
+bool MemObjHelper::parseUnifiedMemoryProperties(cl_mem_properties_intel *properties, SVMAllocsManager::UnifiedMemoryProperties &unifiedMemoryProperties) {
+    uint64_t unifiedMemoryTokenValue = properties ? *properties : 0;
+
+    while (unifiedMemoryTokenValue != 0) {
+        switch (unifiedMemoryTokenValue) {
+        case CL_MEM_ALLOC_FLAGS_INTEL:
+            unifiedMemoryProperties.allocationFlags = properties[1];
+            break;
+        default:
+            return false;
+        }
+        properties += 2;
+        unifiedMemoryTokenValue = *properties;
+    }
+    return true;
+}
+
+AllocationProperties MemObjHelper::getAllocationPropertiesWithImageInfo(uint32_t rootDeviceIndex, ImageInfo &imgInfo, bool allocateMemory, const MemoryPropertiesFlags &memoryProperties) {
+    AllocationProperties allocationProperties{rootDeviceIndex, allocateMemory, imgInfo, GraphicsAllocation::AllocationType::IMAGE};
     MemoryPropertiesParser::fillPoliciesInProperties(allocationProperties, memoryProperties);
     return allocationProperties;
 }

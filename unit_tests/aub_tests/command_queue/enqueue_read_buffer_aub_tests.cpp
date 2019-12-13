@@ -116,7 +116,7 @@ HWTEST_F(AUBReadBuffer, reserveCanonicalGpuAddress) {
 
     cl_float srcMemory[] = {1.0f, 2.0f, 3.0f, 4.0f};
     cl_float dstMemory[] = {0.0f, 0.0f, 0.0f, 0.0f};
-    GraphicsAllocation *srcAlocation = new MockGraphicsAllocation(GraphicsAllocation::AllocationType::UNKNOWN,
+    GraphicsAllocation *srcAlocation = new MockGraphicsAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN,
                                                                   srcMemory,
                                                                   0xFFFF800400001000,
                                                                   0xFFFF800400001000,
@@ -124,7 +124,9 @@ HWTEST_F(AUBReadBuffer, reserveCanonicalGpuAddress) {
                                                                   MemoryPool::MemoryNull);
 
     std::unique_ptr<Buffer> srcBuffer(Buffer::createBufferHw(&context,
+                                                             MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(CL_MEM_USE_HOST_PTR, 0),
                                                              CL_MEM_USE_HOST_PTR,
+                                                             0,
                                                              sizeof(srcMemory),
                                                              srcAlocation->getUnderlyingBuffer(),
                                                              srcMemory,

@@ -6,28 +6,22 @@
  */
 
 #include "core/helpers/debug_helpers.h"
+#include "core/os_interface/os_library.h"
 #include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/os_interface/os_library.h"
 
 namespace Os {
 extern const char *gmmDllName;
-extern const char *gmmEntryName;
+extern const char *gmmInitFuncName;
+extern const char *gmmDestroyFuncName;
 } // namespace Os
 
 namespace NEO {
 
 void GmmHelper::loadLib() {
     gmmLib.reset(OsLibrary::load(Os::gmmDllName));
-    bool isLoaded = false;
     UNRECOVERABLE_IF(!gmmLib);
-    auto openGmmFunc = reinterpret_cast<decltype(&OpenGmm)>(gmmLib->getProcAddress(Os::gmmEntryName));
-    auto status = openGmmFunc(&gmmEntries);
-    if (status == GMM_SUCCESS) {
-        isLoaded = gmmEntries.pfnCreateClientContext &&
-                   gmmEntries.pfnCreateSingletonContext &&
-                   gmmEntries.pfnDeleteClientContext &&
-                   gmmEntries.pfnDestroySingletonContext;
-    }
-    UNRECOVERABLE_IF(!isLoaded);
+    initGmmFunc = reinterpret_cast<decltype(&InitializeGmm)>(gmmLib->getProcAddress(Os::gmmInitFuncName));
+    destroyGmmFunc = reinterpret_cast<decltype(&GmmDestroy)>(gmmLib->getProcAddress(Os::gmmDestroyFuncName));
+    UNRECOVERABLE_IF(!initGmmFunc || !destroyGmmFunc);
 }
 } // namespace NEO

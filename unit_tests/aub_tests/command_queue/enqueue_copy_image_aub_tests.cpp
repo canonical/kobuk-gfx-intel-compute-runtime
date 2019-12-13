@@ -26,22 +26,26 @@ struct AUBCopyImage
     typedef AUBCommandStreamFixture CommandStreamFixture;
 
     void SetUp() override {
+        if (!platformDevices[0]->capabilityTable.supportsImages) {
+            GTEST_SKIP();
+        }
         CommandDeviceFixture::SetUp(cl_command_queue_properties(0));
         CommandStreamFixture::SetUp(pCmdQ);
-        context = new MockContext(pDevice);
+        context = std::make_unique<MockContext>(pDevice);
     }
 
     void TearDown() override {
-        delete srcImage;
-        delete dstImage;
-        delete context;
+        srcImage.reset();
+        dstImage.reset();
+        context.reset();
+
         CommandStreamFixture::TearDown();
         CommandDeviceFixture::TearDown();
     }
 
-    MockContext *context;
-    Image *srcImage = nullptr;
-    Image *dstImage = nullptr;
+    std::unique_ptr<MockContext> context;
+    std::unique_ptr<Image> srcImage;
+    std::unique_ptr<Image> dstImage;
 };
 
 HWTEST_P(AUBCopyImage, simple) {
@@ -80,23 +84,27 @@ HWTEST_P(AUBCopyImage, simple) {
     // clang-format on
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
     auto retVal = CL_INVALID_VALUE;
-    srcImage = Image::create(
-        context,
+    srcImage.reset(Image::create(
+        context.get(),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         srcMemory,
-        retVal);
-    ASSERT_NE(nullptr, srcImage);
+        retVal));
+    ASSERT_NE(nullptr, srcImage.get());
 
-    dstImage = Image::create(
-        context,
+    dstImage.reset(Image::create(
+        context.get(),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         dstMemory,
-        retVal);
-    ASSERT_NE(nullptr, dstImage);
+        retVal));
+    ASSERT_NE(nullptr, dstImage.get());
 
     size_t srcOffset = std::get<0>(GetParam());
     size_t dstOffset = std::get<1>(GetParam());
@@ -109,8 +117,8 @@ HWTEST_P(AUBCopyImage, simple) {
         1};
 
     retVal = pCmdQ->enqueueCopyImage(
-        srcImage,
-        dstImage,
+        srcImage.get(),
+        dstImage.get(),
         srcOrigin,
         dstOrigin,
         region,
@@ -124,7 +132,7 @@ HWTEST_P(AUBCopyImage, simple) {
     size_t imgOrigin[] = {0, 0, 0};
     size_t imgRegion[] = {imageDesc.image_width, imageDesc.image_height, imageDesc.image_depth};
 
-    retVal = pCmdQ->enqueueReadImage(dstImage, CL_FALSE, imgOrigin, imgRegion, 0, 0, dstOutMemory, nullptr, 0, nullptr, nullptr);
+    retVal = pCmdQ->enqueueReadImage(dstImage.get(), CL_FALSE, imgOrigin, imgRegion, 0, 0, dstOutMemory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     retVal = pCmdQ->flush();

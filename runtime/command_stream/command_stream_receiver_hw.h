@@ -24,19 +24,19 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     typedef typename GfxFamily::PIPE_CONTROL PIPE_CONTROL;
 
   public:
-    static CommandStreamReceiver *create(ExecutionEnvironment &executionEnvironment) {
-        return new CommandStreamReceiverHw<GfxFamily>(executionEnvironment);
+    static CommandStreamReceiver *create(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) {
+        return new CommandStreamReceiverHw<GfxFamily>(executionEnvironment, rootDeviceIndex);
     }
 
-    CommandStreamReceiverHw(ExecutionEnvironment &executionEnvironment);
+    CommandStreamReceiverHw(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex);
 
-    FlushStamp flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
+    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
 
     CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
                               const IndirectHeap &dsh, const IndirectHeap &ioh, const IndirectHeap &ssh,
                               uint32_t taskLevel, DispatchFlags &dispatchFlags, Device &device) override;
 
-    void flushBatchedSubmissions() override;
+    bool flushBatchedSubmissions() override;
 
     static void addBatchBufferEnd(LinearStream &commandStream, void **patchLocation);
     void addBatchBufferStart(MI_BATCH_BUFFER_START *commandBufferMemory, uint64_t startAddress, bool secondary);
@@ -53,7 +53,9 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     size_t getCmdSizeForPipelineSelect() const;
     size_t getCmdSizeForComputeMode();
     size_t getCmdSizeForMediaSampler(bool mediaSamplerRequired) const;
+    size_t getCmdSizeForEngineMode(const DispatchFlags &dispatchFlags) const;
     void programComputeMode(LinearStream &csr, DispatchFlags &dispatchFlags);
+    void adjustComputeMode(LinearStream &csr, DispatchFlags &dispatchFlags, void *const stateComputeMode);
 
     void waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) override;
     const HardwareInfo &peekHwInfo() const { return *executionEnvironment.getHardwareInfo(); }
@@ -72,7 +74,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
         return CommandStreamReceiverType::CSR_HW;
     }
 
-    void blitBuffer(const BlitProperties &blitProperites) override;
+    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking) override;
 
     bool isMultiOsContextCapable() const override;
 
@@ -86,7 +88,10 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     void programMediaSampler(LinearStream &csr, DispatchFlags &dispatchFlags);
     void programStateSip(LinearStream &cmdStream, Device &device);
     void programVFEState(LinearStream &csr, DispatchFlags &dispatchFlags, uint32_t maxFrontEndThreads);
+    void programStallingPipeControlForBarrier(LinearStream &cmdStream, DispatchFlags &dispatchFlags);
     virtual void initPageTableManagerRegisters(LinearStream &csr){};
+    void programEngineModeCommands(LinearStream &csr, const DispatchFlags &dispatchFlags);
+    void programEngineModeEpliogue(LinearStream &csr, const DispatchFlags &dispatchFlags);
 
     void addClearSLMWorkAround(typename GfxFamily::PIPE_CONTROL *pCmd);
     PIPE_CONTROL *addPipeControlCmd(LinearStream &commandStream);

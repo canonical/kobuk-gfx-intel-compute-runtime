@@ -6,7 +6,7 @@
  */
 
 #include "common/gtsysinfo.h"
-#include "runtime/os_interface/os_library.h"
+#include "core/os_interface/os_library.h"
 
 #include "igfxfmid.h"
 
@@ -21,7 +21,8 @@ const char *igcDllName = "libmock_igc.so";
 const char *libvaDllName = nullptr;
 const char *testDllName = "libtest_dynamic_lib.so";
 const char *gmmDllName = "libmock_gmm.so";
-const char *gmmEntryName = "openMockGmm";
+const char *gmmInitFuncName = "initMockGmm";
+const char *gmmDestroyFuncName = "destroyMockGmm";
 const char *metricsLibraryDllName = "";
 #endif
 const char *sysFsPciPath = "./test_files";

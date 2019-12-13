@@ -16,19 +16,27 @@
 
 using namespace NEO;
 
+bool MockDevice::createSingleDevice = true;
+decltype(&createCommandStream) MockSubDevice::createCommandStreamReceiverFunc = createCommandStream;
+decltype(&createCommandStream) MockDevice::createCommandStreamReceiverFunc = createCommandStream;
+
 MockDevice::MockDevice()
     : MockDevice(new MockExecutionEnvironment(), 0u) {
-    CommandStreamReceiver *commandStreamReceiver = createCommandStream(*this->executionEnvironment);
-    executionEnvironment->commandStreamReceivers.resize(getDeviceIndex() + 1);
-    executionEnvironment->commandStreamReceivers[getDeviceIndex()].resize(defaultEngineIndex + 1);
-    executionEnvironment->commandStreamReceivers[getDeviceIndex()][defaultEngineIndex].reset(commandStreamReceiver);
+    CommandStreamReceiver *commandStreamReceiver = createCommandStream(*this->executionEnvironment, this->getRootDeviceIndex());
+    commandStreamReceivers.resize(1);
+    commandStreamReceivers[0].reset(commandStreamReceiver);
     this->executionEnvironment->memoryManager = std::move(this->mockMemoryManager);
-    this->engines.resize(defaultEngineIndex + 1);
-    this->engines[defaultEngineIndex] = {commandStreamReceiver, nullptr};
+    this->engines.resize(1);
+    this->engines[0] = {commandStreamReceiver, nullptr};
+    initializeCaps();
 }
 
-MockDevice::MockDevice(ExecutionEnvironment *executionEnvironment, uint32_t deviceIndex)
-    : RootDevice(executionEnvironment, deviceIndex) {
+const char *MockDevice::getProductAbbrev() const {
+    return hardwarePrefix[getHardwareInfo().platform.eProductFamily];
+}
+
+MockDevice::MockDevice(ExecutionEnvironment *executionEnvironment, uint32_t rootDeviceIndex)
+    : RootDevice(executionEnvironment, rootDeviceIndex) {
     auto &hwInfo = getHardwareInfo();
     bool enableLocalMemory = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getEnableLocalMemory(hwInfo);
     bool aubUsage = (testMode == TestMode::AubTests) || (testMode == TestMode::AubTestsWithTbx);
@@ -36,6 +44,14 @@ MockDevice::MockDevice(ExecutionEnvironment *executionEnvironment, uint32_t devi
     this->osTime = MockOSTime::create();
     executionEnvironment->setHwInfo(&hwInfo);
     executionEnvironment->initializeMemoryManager();
+    initializeCaps();
+}
+
+bool MockDevice::createDeviceImpl() {
+    if (MockDevice::createSingleDevice) {
+        return Device::createDeviceImpl();
+    }
+    return RootDevice::createDeviceImpl();
 }
 
 void MockDevice::setOSTime(OSTime *osTime) {
@@ -59,7 +75,6 @@ void MockDevice::resetCommandStreamReceiver(CommandStreamReceiver *newCsr) {
 }
 
 void MockDevice::resetCommandStreamReceiver(CommandStreamReceiver *newCsr, uint32_t engineIndex) {
-    UNRECOVERABLE_IF(getDeviceIndex() != 0u);
 
     auto osContext = this->engines[engineIndex].osContext;
     auto memoryManager = executionEnvironment->memoryManager.get();
@@ -70,15 +85,15 @@ void MockDevice::resetCommandStreamReceiver(CommandStreamReceiver *newCsr, uint3
     memoryManager->getRegisteredEngines().emplace_back(registeredEngine);
     osContext->incRefInternal();
     newCsr->setupContext(*osContext);
-    executionEnvironment->commandStreamReceivers[getDeviceIndex()][engineIndex].reset(newCsr);
-    executionEnvironment->commandStreamReceivers[getDeviceIndex()][engineIndex]->initializeTagAllocation();
+    commandStreamReceivers[engineIndex].reset(newCsr);
+    commandStreamReceivers[engineIndex]->initializeTagAllocation();
 
     if (preemptionMode == PreemptionMode::MidThread || isSourceLevelDebuggerActive()) {
-        executionEnvironment->commandStreamReceivers[getDeviceIndex()][engineIndex]->createPreemptionAllocation();
+        commandStreamReceivers[engineIndex]->createPreemptionAllocation();
     }
 }
 
-MockAlignedMallocManagerDevice::MockAlignedMallocManagerDevice(ExecutionEnvironment *executionEnvironment, uint32_t deviceIndex) : MockDevice(executionEnvironment, deviceIndex) {
+MockAlignedMallocManagerDevice::MockAlignedMallocManagerDevice(ExecutionEnvironment *executionEnvironment, uint32_t internalDeviceIndex) : MockDevice(executionEnvironment, internalDeviceIndex) {
     this->mockMemoryManager.reset(new MockAllocSysMemAgnosticMemoryManager(*executionEnvironment));
 }
 FailDevice::FailDevice(ExecutionEnvironment *executionEnvironment, uint32_t deviceIndex)

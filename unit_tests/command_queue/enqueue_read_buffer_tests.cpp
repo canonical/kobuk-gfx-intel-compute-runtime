@@ -16,6 +16,7 @@
 #include "unit_tests/command_queue/enqueue_read_buffer_fixture.h"
 #include "unit_tests/gen_common/gen_commands_common_validation.h"
 #include "unit_tests/helpers/unit_test_helper.h"
+#include "unit_tests/mocks/mock_buffer.h"
 #include "unit_tests/mocks/mock_command_queue.h"
 #include "unit_tests/mocks/mock_execution_environment.h"
 
@@ -78,7 +79,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferTypeTest, GPGPUWalker) {
     // Compute the SIMD lane mask
     size_t simd =
         cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16 : 8;
-    uint64_t simdMask = (1ull << simd) - 1;
+    uint64_t simdMask = maxNBitValue(simd);
 
     // Mask off lanes based on the execution masks
     auto laneMaskRight = cmd->getRightExecutionMask() & simdMask;
@@ -168,7 +169,8 @@ HWTEST_F(EnqueueReadBufferTypeTest, LoadRegisterImmediateL3CNTLREG) {
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferTypeTest, WhenEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     srcBuffer->forceDisallowCPUCopy = true;
     enqueueReadBuffer<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    auto &ultCsr = this->pDevice->getUltCommandStreamReceiver<FamilyType>();
+    validateStateBaseAddress<FamilyType>(ultCsr.getMemoryManager()->getInternalHeapBaseAddress(ultCsr.rootDeviceIndex),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 
@@ -279,7 +281,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferTypeTest, blockingRequiresPipeContr
     }
 }
 
-HWTEST_F(EnqueueReadBufferTypeTest, givenAlignedPointerAndAlignedSizeWhenReadBufferIsCalledThenRecordedL3IndexIsL3ON) {
+HWTEST_F(EnqueueReadBufferTypeTest, givenAlignedPointerAndAlignedSizeWhenReadBufferIsCalledThenRecordedL3IndexIsL3OrL1ON) {
     void *ptr = (void *)0x1040;
 
     cl_int retVal = pCmdQ->enqueueReadBuffer(srcBuffer.get(),
@@ -296,8 +298,9 @@ HWTEST_F(EnqueueReadBufferTypeTest, givenAlignedPointerAndAlignedSizeWhenReadBuf
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     auto gmmHelper = csr.peekExecutionEnvironment().getGmmHelper();
     auto mocsIndexL3on = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) >> 1;
+    auto mocsIndexL1on = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST) >> 1;
 
-    EXPECT_EQ(mocsIndexL3on, csr.latestSentStatelessMocsConfig);
+    EXPECT_TRUE(mocsIndexL3on == csr.latestSentStatelessMocsConfig || mocsIndexL1on == csr.latestSentStatelessMocsConfig);
 }
 
 HWTEST_F(EnqueueReadBufferTypeTest, givenNotAlignedPointerAndAlignedSizeWhenReadBufferIsCalledThenRecordedL3IndexIsL3Off) {
@@ -319,6 +322,7 @@ HWTEST_F(EnqueueReadBufferTypeTest, givenNotAlignedPointerAndAlignedSizeWhenRead
     auto gmmHelper = csr.peekExecutionEnvironment().getGmmHelper();
     auto mocsIndexL3off = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED) >> 1;
     auto mocsIndexL3on = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) >> 1;
+    auto mocsIndexL1on = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST) >> 1;
 
     EXPECT_EQ(mocsIndexL3off, csr.latestSentStatelessMocsConfig);
 
@@ -334,7 +338,7 @@ HWTEST_F(EnqueueReadBufferTypeTest, givenNotAlignedPointerAndAlignedSizeWhenRead
                                       nullptr,
                                       nullptr);
 
-    EXPECT_EQ(mocsIndexL3on, csr.latestSentStatelessMocsConfig);
+    EXPECT_TRUE(mocsIndexL3on == csr.latestSentStatelessMocsConfig || mocsIndexL1on == csr.latestSentStatelessMocsConfig);
 }
 
 HWTEST_F(EnqueueReadBufferTypeTest, givenNotAlignedPointerAndSizeWhenBlockedReadBufferIsCalledThenRecordedL3IndexIsL3Off) {
@@ -500,7 +504,7 @@ HWTEST_F(EnqueueReadBufferTypeTest, givenCommandQueueWhenEnqueueReadBufferIsCall
 HWTEST_F(EnqueueReadBufferTypeTest, givenCommandQueueWhenEnqueueReadBufferWithMapAllocationIsCalledThenItDoesntCallNotifyFunction) {
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pDevice, nullptr);
     void *ptr = nonZeroCopyBuffer->getCpuAddressForMemoryTransfer();
-    GraphicsAllocation mapAllocation{GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0, 0, 0, MemoryPool::MemoryNull};
+    GraphicsAllocation mapAllocation{0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0, 0, 0, MemoryPool::MemoryNull};
     auto retVal = mockCmdQ->enqueueReadBuffer(srcBuffer.get(),
                                               CL_TRUE,
                                               0,
@@ -523,7 +527,7 @@ HWTEST_F(EnqueueReadBufferTypeTest, givenEnqueueReadBufferCalledWhenLockedPtrInT
     MockMemoryManager memoryManager(false, true, executionEnvironment);
     MockContext ctx;
     cl_int retVal;
-    ctx.setMemoryManager(&memoryManager);
+    ctx.memoryManager = &memoryManager;
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pDevice, nullptr);
     std::unique_ptr<Buffer> buffer(Buffer::create(&ctx, 0, 1, nullptr, retVal));
     static_cast<MemoryAllocation *>(buffer->getGraphicsAllocation())->overrideMemoryPool(MemoryPool::SystemCpuInaccessible);
@@ -551,7 +555,7 @@ HWTEST_F(EnqueueReadBufferTypeTest, givenForcedCpuCopyWhenEnqueueReadCompressedB
     MockMemoryManager memoryManager(false, true, executionEnvironment);
     MockContext ctx;
     cl_int retVal;
-    ctx.setMemoryManager(&memoryManager);
+    ctx.memoryManager = &memoryManager;
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pDevice, nullptr);
     std::unique_ptr<Buffer> buffer(Buffer::create(&ctx, 0, 1, nullptr, retVal));
     static_cast<MemoryAllocation *>(buffer->getGraphicsAllocation())->overrideMemoryPool(MemoryPool::SystemCpuInaccessible);
@@ -597,7 +601,7 @@ HWTEST_F(EnqueueReadBufferTypeTest, gicenEnqueueReadBufferCalledWhenLockedPtrInT
     MockMemoryManager memoryManager(false, true, executionEnvironment);
     MockContext ctx;
     cl_int retVal;
-    ctx.setMemoryManager(&memoryManager);
+    ctx.memoryManager = &memoryManager;
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pDevice, nullptr);
     std::unique_ptr<Buffer> buffer(Buffer::create(&ctx, 0, 1, nullptr, retVal));
     static_cast<MemoryAllocation *>(buffer->getGraphicsAllocation())->overrideMemoryPool(MemoryPool::System4KBPages);
@@ -676,4 +680,61 @@ HWTEST_F(NegativeFailAllocationTest, givenEnqueueReadBufferWhenHostPtrAllocation
                                       nullptr);
 
     EXPECT_EQ(CL_OUT_OF_RESOURCES, retVal);
+}
+
+struct EnqueueReadBufferHw : public ::testing::Test {
+
+    void SetUp() override {
+        if (is32bit) {
+            GTEST_SKIP();
+        }
+        device.reset(MockDevice::createWithNewExecutionEnvironment<MockDevice>(*platformDevices));
+        context.reset(new MockContext(device.get()));
+    }
+
+    std::unique_ptr<MockDevice> device;
+    std::unique_ptr<MockContext> context;
+    MockBuffer srcBuffer;
+    uint64_t bigSize = 4ull * MemoryConstants::gigaByte;
+    uint64_t smallSize = 4ull * MemoryConstants::gigaByte - 1;
+};
+
+using EnqeueReadBufferStatelessTest = EnqueueReadBufferHw;
+
+HWTEST_F(EnqeueReadBufferStatelessTest, WhenReadingBufferStatelessThenSuccessIsReturned) {
+
+    auto pCmdQ = std::make_unique<CommandQueueStateless<FamilyType>>(context.get(), device.get());
+    void *missAlignedPtr = reinterpret_cast<void *>(0x1041);
+    srcBuffer.size = static_cast<size_t>(bigSize);
+    auto retVal = pCmdQ->enqueueReadBuffer(&srcBuffer,
+                                           CL_FALSE,
+                                           0,
+                                           MemoryConstants::cacheLineSize,
+                                           missAlignedPtr,
+                                           nullptr,
+                                           0,
+                                           nullptr,
+                                           nullptr);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+using EnqeueReadBufferStatefulTest = EnqueueReadBufferHw;
+
+HWTEST_F(EnqeueReadBufferStatefulTest, WhenReadingBufferStatefulThenSuccessIsReturned) {
+
+    auto pCmdQ = std::make_unique<CommandQueueStateful<FamilyType>>(context.get(), device.get());
+    void *missAlignedPtr = reinterpret_cast<void *>(0x1041);
+    srcBuffer.size = static_cast<size_t>(smallSize);
+    auto retVal = pCmdQ->enqueueReadBuffer(&srcBuffer,
+                                           CL_FALSE,
+                                           0,
+                                           MemoryConstants::cacheLineSize,
+                                           missAlignedPtr,
+                                           nullptr,
+                                           0,
+                                           nullptr,
+                                           nullptr);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
 }

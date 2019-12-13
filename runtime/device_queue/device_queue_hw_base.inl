@@ -6,12 +6,12 @@
  */
 
 #pragma once
+#include "core/helpers/hw_helper.h"
+#include "core/helpers/preamble.h"
 #include "core/helpers/string.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/device_queue/device_queue_hw.h"
 #include "runtime/helpers/hardware_commands_helper.h"
-#include "runtime/helpers/hw_helper.h"
-#include "runtime/helpers/preamble.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/utilities/tag_allocator.h"
 
@@ -26,7 +26,7 @@ void DeviceQueueHw<GfxFamily>::allocateSlbBuffer() {
     slbSize += (4 * MemoryConstants::pageSize); // +4 pages spec restriction
     slbSize = alignUp(slbSize, MemoryConstants::pageSize);
 
-    slbBuffer = device->getMemoryManager()->allocateGraphicsMemoryWithProperties({slbSize, GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER});
+    slbBuffer = device->getMemoryManager()->allocateGraphicsMemoryWithProperties({device->getRootDeviceIndex(), slbSize, GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER});
 }
 
 template <typename GfxFamily>
@@ -35,6 +35,7 @@ void DeviceQueueHw<GfxFamily>::resetDeviceQueue() {
     auto igilEventPool = reinterpret_cast<IGIL_EventPool *>(eventPoolBuffer->getUnderlyingBuffer());
 
     memset(eventPoolBuffer->getUnderlyingBuffer(), 0x0, eventPoolBuffer->getUnderlyingBufferSize());
+    igilEventPool->m_TimestampResolution = static_cast<float>(device->getProfilingTimerResolution());
     igilEventPool->m_size = caps.maxOnDeviceEvents;
 
     auto igilCmdQueue = reinterpret_cast<IGIL_CommandQueue *>(queueBuffer->getUnderlyingBuffer());
@@ -178,13 +179,14 @@ size_t DeviceQueueHw<GfxFamily>::setSchedulerCrossThreadData(SchedulerKernel &sc
 }
 
 template <typename GfxFamily>
-void DeviceQueueHw<GfxFamily>::dispatchScheduler(LinearStream &commandStream, SchedulerKernel &scheduler, PreemptionMode preemptionMode, IndirectHeap *ssh, IndirectHeap *dsh) {
+void DeviceQueueHw<GfxFamily>::dispatchScheduler(LinearStream &commandStream, SchedulerKernel &scheduler, PreemptionMode preemptionMode, IndirectHeap *ssh, IndirectHeap *dsh, bool isCcsUsed) {
     GpgpuWalkerHelper<GfxFamily>::dispatchScheduler(commandStream,
                                                     *this,
                                                     preemptionMode,
                                                     scheduler,
                                                     ssh,
-                                                    dsh);
+                                                    dsh,
+                                                    isCcsUsed);
     return;
 }
 
@@ -233,5 +235,18 @@ size_t DeviceQueueHw<GfxFamily>::getProfilingEndCmdsSize() {
 
 template <typename GfxFamily>
 void DeviceQueueHw<GfxFamily>::addDcFlushToPipeControlWa(PIPE_CONTROL *pc) {}
+
+template <typename GfxFamily>
+uint64_t DeviceQueueHw<GfxFamily>::getBlockKernelStartPointer(const Device &device, const KernelInfo *blockInfo, bool isCcsUsed) {
+    auto blockAllocation = blockInfo->getGraphicsAllocation();
+    DEBUG_BREAK_IF(!blockAllocation);
+
+    auto blockKernelStartPointer = blockAllocation ? blockAllocation->getGpuAddressToPatch() : 0llu;
+
+    if (blockAllocation && isCcsUsed && device.getHardwareInfo().workaroundTable.waUseOffsetToSkipSetFFIDGP) {
+        blockKernelStartPointer += blockInfo->patchInfo.threadPayload->OffsetToSkipSetFFIDGP;
+    }
+    return blockKernelStartPointer;
+}
 
 } // namespace NEO

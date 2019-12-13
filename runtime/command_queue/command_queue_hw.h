@@ -6,15 +6,15 @@
  */
 
 #pragma once
+#include "core/command_stream/preemption.h"
+#include "core/helpers/hw_helper.h"
 #include "core/memory_manager/graphics_allocation.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/command_stream/preemption.h"
 #include "runtime/device_queue/device_queue_hw.h"
 #include "runtime/helpers/dispatch_info.h"
 #include "runtime/helpers/engine_control.h"
-#include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/queue_helpers.h"
 #include "runtime/mem_obj/mem_obj.h"
 #include "runtime/program/printf_handler.h"
@@ -24,6 +24,7 @@
 namespace NEO {
 
 class EventBuilder;
+struct EnqueueProperties;
 
 template <typename GfxFamily>
 class CommandQueueHw : public CommandQueue {
@@ -38,7 +39,7 @@ class CommandQueueHw : public CommandQueue {
 
         if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_LOW_KHR)) {
             priority = QueuePriority::LOW;
-            this->gpgpuEngine = &device->getEngine(HwHelperHw<GfxFamily>::lowPriorityEngineType, true);
+            this->gpgpuEngine = &device->getDeviceById(0)->getEngine(HwHelperHw<GfxFamily>::lowPriorityEngineType, true);
         } else if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_MED_KHR)) {
             priority = QueuePriority::MEDIUM;
         } else if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_HIGH_KHR)) {
@@ -58,6 +59,11 @@ class CommandQueueHw : public CommandQueue {
         if (getCmdQueueProperties<cl_queue_properties>(properties, CL_QUEUE_PROPERTIES) & static_cast<cl_queue_properties>(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE)) {
             getGpgpuCommandStreamReceiver().overrideDispatchPolicy(DispatchMode::BatchedDispatch);
             getGpgpuCommandStreamReceiver().enableNTo1SubmissionModel();
+        }
+
+        uint64_t requestedSliceCount = getCmdQueueProperties<cl_command_queue_properties>(properties, CL_QUEUE_SLICE_COUNT_INTEL);
+        if (requestedSliceCount > 0) {
+            sliceCount = requestedSliceCount;
         }
     }
 
@@ -328,7 +334,8 @@ class CommandQueueHw : public CommandQueue {
                                       size_t commandStreamStart,
                                       bool &blocking,
                                       const MultiDispatchInfo &multiDispatchInfo,
-                                      TimestampPacketContainer *previousTimestampPacketNodes,
+                                      const EnqueueProperties &enqueueProperties,
+                                      TimestampPacketDependencies &timestampPacketDependencies,
                                       EventsRequest &eventsRequest,
                                       EventBuilder &eventBuilder,
                                       uint32_t taskLevel,
@@ -338,7 +345,7 @@ class CommandQueueHw : public CommandQueue {
                         Surface **surfacesForResidency,
                         size_t surfacesCount,
                         const MultiDispatchInfo &multiDispatchInfo,
-                        TimestampPacketContainer *previousTimestampPacketNodes,
+                        TimestampPacketDependencies &timestampPacketDependencies,
                         std::unique_ptr<KernelOperation> &blockedCommandsData,
                         const EnqueueProperties &enqueueProperties,
                         EventsRequest &eventsRequest,
@@ -351,7 +358,7 @@ class CommandQueueHw : public CommandQueue {
                                                 size_t commandStreamStart,
                                                 bool &blocking,
                                                 const EnqueueProperties &enqueueProperties,
-                                                TimestampPacketContainer *previousTimestampPacketNodes,
+                                                TimestampPacketDependencies &timestampPacketDependencies,
                                                 EventsRequest &eventsRequest,
                                                 EventBuilder &eventBuilder,
                                                 uint32_t taskLevel);
@@ -360,7 +367,7 @@ class CommandQueueHw : public CommandQueue {
                                       LinearStream *commandStream,
                                       CsrDependencies &csrDeps);
     BlitProperties processDispatchForBlitEnqueue(const MultiDispatchInfo &multiDispatchInfo,
-                                                 TimestampPacketContainer &previousTimestampPacketNodes,
+                                                 TimestampPacketDependencies &timestampPacketDependencies,
                                                  const EventsRequest &eventsRequest,
                                                  LinearStream &commandStream,
                                                  uint32_t commandType, bool queueBlocked);
@@ -384,8 +391,10 @@ class CommandQueueHw : public CommandQueue {
     cl_int enqueueMarkerForReadWriteOperation(MemObj *memObj, void *ptr, cl_command_type commandType, cl_bool blocking, cl_uint numEventsInWaitList,
                                               const cl_event *eventWaitList, cl_event *event);
 
-    MOCKABLE_VIRTUAL void dispatchAuxTranslation(MultiDispatchInfo &multiDispatchInfo, MemObjsForAuxTranslation &memObjsForAuxTranslation,
-                                                 AuxTranslationDirection auxTranslationDirection);
+    MOCKABLE_VIRTUAL void dispatchAuxTranslationBuiltin(MultiDispatchInfo &multiDispatchInfo, AuxTranslationDirection auxTranslationDirection);
+    void setupBlitAuxTranslation(MultiDispatchInfo &multiDispatchInfo);
+
+    MOCKABLE_VIRTUAL bool forceStateless(size_t size);
 
     template <uint32_t commandType>
     LinearStream *obtainCommandStream(const CsrDependencies &csrDependencies, bool blitEnqueue, bool blockedQueue,
@@ -413,10 +422,15 @@ class CommandQueueHw : public CommandQueue {
         return commandStream;
     }
 
+    void processDispatchForBlitAuxTranslation(const MultiDispatchInfo &multiDispatchInfo, BlitPropertiesContainer &blitPropertiesContainer,
+                                              TimestampPacketDependencies &timestampPacketDependencies, const EventsRequest &eventsRequest,
+                                              bool queueBlocked);
+
   private:
     bool isTaskLevelUpdateRequired(const uint32_t &taskLevel, const cl_event *eventWaitList, const cl_uint &numEventsInWaitList, unsigned int commandType);
     void obtainTaskLevelAndBlockedStatus(unsigned int &taskLevel, cl_uint &numEventsInWaitList, const cl_event *&eventWaitList, bool &blockQueueStatus, unsigned int commandType) override;
     void forceDispatchScheduler(NEO::MultiDispatchInfo &multiDispatchInfo);
+    void runSchedulerSimulation(DeviceQueueHw<GfxFamily> &devQueueHw, Kernel &parentKernel);
     static void computeOffsetsValueForRectCommands(size_t *bufferOffset,
                                                    size_t *hostOffset,
                                                    const size_t *bufferOrigin,
@@ -440,6 +454,6 @@ class CommandQueueHw : public CommandQueue {
                                    DeviceQueueHw<GfxFamily> *devQueueHw,
                                    CsrDependencies &csrDeps,
                                    KernelOperation *blockedCommandsData,
-                                   TimestampPacketContainer &previousTimestampPacketNodes);
+                                   TimestampPacketDependencies &timestampPacketDependencies);
 };
 } // namespace NEO

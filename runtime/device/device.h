@@ -6,11 +6,11 @@
  */
 
 #pragma once
+#include "core/helpers/common_types.h"
 #include "runtime/api/cl_types.h"
 #include "runtime/device/device_info_map.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/helpers/base_object.h"
-#include "runtime/helpers/common_types.h"
 #include "runtime/helpers/engine_control.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/os_interface/performance_counters.h"
@@ -57,8 +57,6 @@ class Device : public BaseObject<_cl_device_id> {
     EngineControl &getEngine(aub_stream::EngineType engineType, bool lowPriority);
     EngineControl &getDefaultEngine();
 
-    const char *getProductAbbrev() const;
-
     // This helper template is meant to simplify getDeviceInfo
     template <cl_device_info Param>
     void getCap(const void *&src,
@@ -90,17 +88,19 @@ class Device : public BaseObject<_cl_device_id> {
     SourceLevelDebugger *getSourceLevelDebugger() { return executionEnvironment->sourceLevelDebugger.get(); }
     ExecutionEnvironment *getExecutionEnvironment() const { return executionEnvironment; }
     const HardwareCapabilities &getHardwareCapabilities() const { return hardwareCapabilities; }
-    uint32_t getDeviceIndex() const { return deviceIndex; }
+    virtual uint32_t getRootDeviceIndex() const = 0;
     bool isFullRangeSvm() const {
         return executionEnvironment->isFullRangeSvm();
     }
     bool areSharedSystemAllocationsAllowed() const {
         return this->deviceInfo.sharedSystemMemCapabilities != 0u;
     }
+    virtual uint32_t getNumAvailableDevices() const = 0;
+    virtual Device *getDeviceById(uint32_t deviceId) const = 0;
 
   protected:
     Device() = delete;
-    Device(ExecutionEnvironment *executionEnvironment, uint32_t deviceIndex);
+    Device(ExecutionEnvironment *executionEnvironment);
 
     template <typename T>
     static T *createDeviceInternals(T *device) {
@@ -113,9 +113,10 @@ class Device : public BaseObject<_cl_device_id> {
 
     virtual bool createDeviceImpl();
     virtual DeviceBitfield getDeviceBitfieldForOsContext() const = 0;
-    bool createEngines();
-    bool createEngine(uint32_t deviceIndex, uint32_t deviceCsrIndex, aub_stream::EngineType engineType);
+    virtual bool createEngines();
+    bool createEngine(uint32_t deviceCsrIndex, aub_stream::EngineType engineType);
 
+    MOCKABLE_VIRTUAL std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const;
     MOCKABLE_VIRTUAL void initializeCaps();
     void setupFp64Flags();
     void appendOSExtensions(std::string &deviceExtensions);
@@ -127,13 +128,13 @@ class Device : public BaseObject<_cl_device_id> {
     std::unique_ptr<DriverInfo> driverInfo;
     std::unique_ptr<PerformanceCounters> performanceCounters;
 
+    std::vector<std::unique_ptr<CommandStreamReceiver>> commandStreamReceivers;
     std::vector<EngineControl> engines;
 
     std::string exposedBuiltinKernels = "";
 
     PreemptionMode preemptionMode;
     ExecutionEnvironment *executionEnvironment = nullptr;
-    const uint32_t deviceIndex;
     uint32_t defaultEngineIndex = 0;
 };
 

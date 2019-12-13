@@ -41,20 +41,25 @@ struct AUBReadImage
     using AUBCommandStreamFixture::SetUp;
 
     void SetUp() override {
+        if (!(platformDevices[0]->capabilityTable.supportsImages)) {
+            GTEST_SKIP();
+        }
         CommandDeviceFixture::SetUp(cl_command_queue_properties(0));
         CommandStreamFixture::SetUp(pCmdQ);
-        context = new MockContext(pDevice);
+
+        context = std::make_unique<MockContext>(pDevice);
     }
 
     void TearDown() override {
-        delete srcImage;
-        delete context;
+        srcImage.reset();
+        context.reset();
+
         CommandStreamFixture::TearDown();
         CommandDeviceFixture::TearDown();
     }
 
-    MockContext *context;
-    Image *srcImage = nullptr;
+    std::unique_ptr<MockContext> context;
+    std::unique_ptr<Image> srcImage;
 };
 
 HWTEST_P(AUBReadImage, simpleUnalignedMemory) {
@@ -137,14 +142,16 @@ HWTEST_P(AUBReadImage, simpleUnalignedMemory) {
     cl_mem_flags flags = CL_MEM_USE_HOST_PTR;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
     auto retVal = CL_INVALID_VALUE;
-    srcImage = Image::create(
-        context,
+    srcImage.reset(Image::create(
+        context.get(),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         srcMemory,
-        retVal);
-    ASSERT_NE(nullptr, srcImage);
+        retVal));
+    ASSERT_NE(nullptr, srcImage.get());
 
     auto origin = std::get<2>(GetParam()).offsets;
 
@@ -157,7 +164,7 @@ HWTEST_P(AUBReadImage, simpleUnalignedMemory) {
     size_t inputSlicePitch = inputRowPitch * testHeight;
 
     retVal = pCmdQ->enqueueReadImage(
-        srcImage,
+        srcImage.get(),
         CL_FALSE,
         origin,
         region,

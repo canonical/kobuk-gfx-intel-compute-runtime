@@ -8,11 +8,11 @@
 #pragma once
 
 #include "core/command_stream/linear_stream.h"
+#include "core/command_stream/preemption.h"
 #include "core/helpers/register_offsets.h"
 #include "core/helpers/vec.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/command_queue/command_queue.h"
-#include "runtime/command_stream/preemption.h"
 #include "runtime/context/context.h"
 #include "runtime/device_queue/device_queue_hw.h"
 #include "runtime/event/hw_timestamps.h"
@@ -142,7 +142,8 @@ class GpgpuWalkerHelper {
         PreemptionMode preemptionMode,
         SchedulerKernel &scheduler,
         IndirectHeap *ssh,
-        IndirectHeap *dsh);
+        IndirectHeap *dsh,
+        bool isCcsUsed);
 
     static void adjustMiStoreRegMemMode(MI_STORE_REG_MEM<GfxFamily> *storeCmd);
 

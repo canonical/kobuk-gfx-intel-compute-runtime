@@ -25,19 +25,18 @@ HWTEST_P(CreateCommandStreamReceiverTest, givenCreateCommandStreamWhenCsrIsSetTo
     DebugManagerStateRestore stateRestorer;
     HardwareInfo *hwInfo = nullptr;
     ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo);
-    MockAubCenterFixture::setMockAubCenter(executionEnvironment);
+    MockAubCenterFixture::setMockAubCenter(*executionEnvironment->rootDeviceEnvironments[0]);
 
     CommandStreamReceiverType csrType = GetParam();
 
     VariableBackup<bool> backup(&overrideCommandStreamReceiverCreation, true);
     DebugManager.flags.SetCommandStreamReceiver.set(csrType);
-    executionEnvironment->commandStreamReceivers.resize(1);
-    executionEnvironment->commandStreamReceivers[0].push_back(std::unique_ptr<CommandStreamReceiver>(createCommandStream(*executionEnvironment)));
+    auto csr = std::unique_ptr<CommandStreamReceiver>(createCommandStream(*executionEnvironment, 0));
 
     if (csrType < CommandStreamReceiverType::CSR_TYPES_NUM) {
-        EXPECT_NE(nullptr, executionEnvironment->commandStreamReceivers[0][0].get());
+        EXPECT_NE(nullptr, csr.get());
     } else {
-        EXPECT_EQ(nullptr, executionEnvironment->commandStreamReceivers[0][0]);
+        EXPECT_EQ(nullptr, csr.get());
     }
     EXPECT_NE(nullptr, executionEnvironment->memoryManager.get());
 }

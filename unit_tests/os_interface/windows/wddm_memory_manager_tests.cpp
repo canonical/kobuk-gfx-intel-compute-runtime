@@ -8,15 +8,16 @@
 #include "unit_tests/os_interface/windows/wddm_memory_manager_tests.h"
 
 #include "core/helpers/aligned_memory.h"
+#include "core/os_interface/os_library.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "core/unit_tests/utilities/base_object_utils.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/helpers/array_count.h"
+#include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/mem_obj/mem_obj_helper.h"
-#include "runtime/os_interface/os_library.h"
 #include "runtime/os_interface/windows/os_context_win.h"
 #include "runtime/os_interface/windows/wddm_residency_controller.h"
 #include "runtime/platform/platform.h"
@@ -92,15 +93,15 @@ TEST(WddmAllocationTest, givenRequestedContextIdTooLargeWhenGettingTrimCandidate
 }
 
 TEST(WddmAllocationTest, givenAllocationTypeWhenPassedToWddmAllocationConstructorThenAllocationTypeIsStored) {
-    WddmAllocation allocation{GraphicsAllocation::AllocationType::COMMAND_BUFFER, nullptr, 0, nullptr, MemoryPool::MemoryNull};
+    WddmAllocation allocation{0, GraphicsAllocation::AllocationType::COMMAND_BUFFER, nullptr, 0, nullptr, MemoryPool::MemoryNull};
     EXPECT_EQ(GraphicsAllocation::AllocationType::COMMAND_BUFFER, allocation.getAllocationType());
 }
 
 TEST(WddmAllocationTest, givenMemoryPoolWhenPassedToWddmAllocationConstructorThenMemoryPoolIsStored) {
-    WddmAllocation allocation{GraphicsAllocation::AllocationType::COMMAND_BUFFER, nullptr, 0, nullptr, MemoryPool::System64KBPages};
+    WddmAllocation allocation{0, GraphicsAllocation::AllocationType::COMMAND_BUFFER, nullptr, 0, nullptr, MemoryPool::System64KBPages};
     EXPECT_EQ(MemoryPool::System64KBPages, allocation.getMemoryPool());
 
-    WddmAllocation allocation2{GraphicsAllocation::AllocationType::COMMAND_BUFFER, nullptr, 0, 0u, MemoryPool::SystemCpuInaccessible};
+    WddmAllocation allocation2{0, GraphicsAllocation::AllocationType::COMMAND_BUFFER, nullptr, 0, 0u, MemoryPool::SystemCpuInaccessible};
     EXPECT_EQ(MemoryPool::SystemCpuInaccessible, allocation2.getMemoryPool());
 }
 
@@ -115,7 +116,7 @@ TEST(WddmMemoryManagerExternalHeapTest, externalHeapIsCreatedWithCorrectBase) {
 
     std::unique_ptr<WddmMemoryManager> memoryManager = std::unique_ptr<WddmMemoryManager>(new WddmMemoryManager(*executionEnvironment));
 
-    EXPECT_EQ(base, memoryManager->getExternalHeapBaseAddress());
+    EXPECT_EQ(base, memoryManager->getExternalHeapBaseAddress(0));
 }
 
 TEST(WddmMemoryManagerWithDeferredDeleterTest, givenWMMWhenAsyncDeleterIsEnabledAndWaitForDeletionsIsCalledThenDeleterInWddmIsSetToNullptr) {
@@ -184,7 +185,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenMemoryManagerWith64KBPagesDisabledWhenA
     memoryManager.reset(new MockWddmMemoryManager(false, false, *executionEnvironment));
     auto size = MemoryConstants::pageSize;
 
-    auto svmAllocation = memoryManager->allocateGraphicsMemoryWithProperties({size, GraphicsAllocation::AllocationType::SVM_ZERO_COPY});
+    auto svmAllocation = memoryManager->allocateGraphicsMemoryWithProperties({0, size, GraphicsAllocation::AllocationType::SVM_ZERO_COPY});
     EXPECT_NE(nullptr, svmAllocation);
     EXPECT_EQ(MemoryPool::System4KBPages, svmAllocation->getMemoryPool());
     EXPECT_TRUE(svmAllocation->getDefaultGmm()->useSystemMemoryPool);
@@ -195,7 +196,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenMemoryManagerWith64KBPagesEnabledWhenAl
     memoryManager.reset(new MockWddmMemoryManager(true, false, *executionEnvironment));
     auto size = MemoryConstants::pageSize;
 
-    auto svmAllocation = memoryManager->allocateGraphicsMemoryWithProperties({size, GraphicsAllocation::AllocationType::SVM_ZERO_COPY});
+    auto svmAllocation = memoryManager->allocateGraphicsMemoryWithProperties({0, size, GraphicsAllocation::AllocationType::SVM_ZERO_COPY});
     EXPECT_NE(nullptr, svmAllocation);
     EXPECT_EQ(MemoryPool::System64KBPages, svmAllocation->getMemoryPool());
     memoryManager->freeGraphicsMemory(svmAllocation);
@@ -214,7 +215,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenMemoryManagerWhenCreateAllocationFromHa
 
     gdi->getOpenResourceArgOut().pOpenAllocationInfo = &allocationInfo;
 
-    AllocationProperties properties(false, 0, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
+    AllocationProperties properties(0, false, 0, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
     auto allocation = memoryManager->createGraphicsAllocationFromSharedHandle(osHandle, properties, false);
     EXPECT_NE(nullptr, allocation);
     EXPECT_EQ(MemoryPool::SystemCpuInaccessible, allocation->getMemoryPool());
@@ -234,8 +235,8 @@ TEST_F(WddmMemoryManagerSimpleTest, givenAllocationPropertiesWhenCreateAllocatio
 
     gdi->getOpenResourceArgOut().pOpenAllocationInfo = &allocationInfo;
 
-    AllocationProperties propertiesBuffer(false, 0, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
-    AllocationProperties propertiesImage(false, 0, GraphicsAllocation::AllocationType::SHARED_IMAGE, false);
+    AllocationProperties propertiesBuffer(0, false, 0, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
+    AllocationProperties propertiesImage(0, false, 0, GraphicsAllocation::AllocationType::SHARED_IMAGE, false, false, 0);
 
     AllocationProperties *propertiesArray[2] = {&propertiesBuffer, &propertiesImage};
 
@@ -263,7 +264,7 @@ TEST_F(WddmMemoryManagerSimpleTest, whenCreateAllocationFromHandleAndMapCallFail
     gdi->getOpenResourceArgOut().pOpenAllocationInfo = &allocationInfo;
     EXPECT_EQ(0u, memoryManager->freeGraphicsMemoryImplCalled);
 
-    AllocationProperties properties(false, 0, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
+    AllocationProperties properties(0, false, 0, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
 
     auto allocation = memoryManager->createGraphicsAllocationFromSharedHandle(osHandle, properties, false);
     EXPECT_EQ(nullptr, allocation);
@@ -303,7 +304,7 @@ TEST_F(WddmMemoryManagerTest, givenAllocateGraphicsMemoryForNonSvmHostPtrIsCalle
 TEST_F(WddmMemoryManagerSimpleTest, givenZeroFenceValueOnSingleEngineRegisteredWhenHandleFenceCompletionIsCalledThenDoNotWaitOnCpu) {
     ASSERT_EQ(1u, memoryManager->getRegisteredEnginesCount());
 
-    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({32, GraphicsAllocation::AllocationType::BUFFER}));
+    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({0, 32, GraphicsAllocation::AllocationType::BUFFER}));
     allocation->getResidencyData().updateCompletionData(0u, 0u);
 
     memoryManager->handleFenceCompletion(allocation);
@@ -315,7 +316,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenZeroFenceValueOnSingleEngineRegisteredW
 TEST_F(WddmMemoryManagerSimpleTest, givenNonZeroFenceValueOnSingleEngineRegisteredWhenHandleFenceCompletionIsCalledThenWaitOnCpuOnce) {
     ASSERT_EQ(1u, memoryManager->getRegisteredEnginesCount());
 
-    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({32, GraphicsAllocation::AllocationType::BUFFER}));
+    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({0, 32, GraphicsAllocation::AllocationType::BUFFER}));
     auto fence = &static_cast<OsContextWin *>(memoryManager->getRegisteredEngines()[0].osContext)->getResidencyController().getMonitoredFence();
     allocation->getResidencyData().updateCompletionData(129u, 0u);
 
@@ -332,7 +333,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenNonZeroFenceValuesOnMultipleEnginesRegi
                                               2, PreemptionHelper::getDefaultPreemptionMode(*platformDevices[0]), false);
     ASSERT_EQ(2u, memoryManager->getRegisteredEnginesCount());
 
-    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({32, GraphicsAllocation::AllocationType::BUFFER}));
+    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({0, 32, GraphicsAllocation::AllocationType::BUFFER}));
     auto lastEngineFence = &static_cast<OsContextWin *>(memoryManager->getRegisteredEngines()[1].osContext)->getResidencyController().getMonitoredFence();
     allocation->getResidencyData().updateCompletionData(129u, 0u);
     allocation->getResidencyData().updateCompletionData(152u, 1u);
@@ -350,7 +351,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenNonZeroFenceValueOnSomeOfMultipleEngine
                                               2, PreemptionHelper::getDefaultPreemptionMode(*platformDevices[0]), false);
     ASSERT_EQ(2u, memoryManager->getRegisteredEnginesCount());
 
-    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({32, GraphicsAllocation::AllocationType::BUFFER}));
+    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({0, 32, GraphicsAllocation::AllocationType::BUFFER}));
     auto lastEngineFence = &static_cast<OsContextWin *>(memoryManager->getRegisteredEngines()[0].osContext)->getResidencyController().getMonitoredFence();
     allocation->getResidencyData().updateCompletionData(129u, 0u);
     allocation->getResidencyData().updateCompletionData(0, 1u);
@@ -440,7 +441,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenCreateFromSharedHandleIs
     std::unique_ptr<Gmm> gmm(new Gmm(pSysMem, 4096u, false));
     setSizesFcn(gmm->gmmResourceInfo.get(), 1u, 1024u, 1u);
 
-    AllocationProperties properties(false, 4096u, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
+    AllocationProperties properties(0, false, 4096u, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
 
     auto *gpuAllocation = memoryManager->createGraphicsAllocationFromSharedHandle(osHandle, properties, false);
     auto wddmAlloc = static_cast<WddmAllocation *>(gpuAllocation);
@@ -457,7 +458,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenCreateFromNTHandleIsCall
     std::unique_ptr<Gmm> gmm(new Gmm(pSysMem, 4096u, false));
     setSizesFcn(gmm->gmmResourceInfo.get(), 1u, 1024u, 1u);
 
-    auto *gpuAllocation = memoryManager->createGraphicsAllocationFromNTHandle(reinterpret_cast<void *>(1));
+    auto *gpuAllocation = memoryManager->createGraphicsAllocationFromNTHandle(reinterpret_cast<void *>(1), 0);
     auto wddmAlloc = static_cast<WddmAllocation *>(gpuAllocation);
     ASSERT_NE(nullptr, gpuAllocation);
     EXPECT_EQ(NT_RESOURCE_HANDLE, wddmAlloc->resourceHandle);
@@ -491,14 +492,14 @@ TEST_F(WddmMemoryManagerTest, createAllocationFromSharedHandleReturns32BitAllocW
 
     memoryManager->setForce32BitAllocations(true);
 
-    AllocationProperties properties(false, 4096u, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
+    AllocationProperties properties(0, false, 4096u, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
 
     auto *gpuAllocation = memoryManager->createGraphicsAllocationFromSharedHandle(osHandle, properties, true);
     ASSERT_NE(nullptr, gpuAllocation);
     if (is64bit) {
         EXPECT_TRUE(gpuAllocation->is32BitAllocation());
 
-        uint64_t base = memoryManager->getExternalHeapBaseAddress();
+        uint64_t base = memoryManager->getExternalHeapBaseAddress(gpuAllocation->getRootDeviceIndex());
         EXPECT_EQ(GmmHelper::canonize(base), gpuAllocation->getGpuBaseAddress());
     }
 
@@ -514,7 +515,7 @@ TEST_F(WddmMemoryManagerTest, createAllocationFromSharedHandleDoesNotReturn32Bit
 
     memoryManager->setForce32BitAllocations(true);
 
-    AllocationProperties properties(false, 4096u, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
+    AllocationProperties properties(0, false, 4096u, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
     auto *gpuAllocation = memoryManager->createGraphicsAllocationFromSharedHandle(osHandle, properties, false);
     ASSERT_NE(nullptr, gpuAllocation);
 
@@ -534,7 +535,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenFreeAllocFromSharedHandl
     std::unique_ptr<Gmm> gmm(new Gmm(pSysMem, 4096u, false));
     setSizesFcn(gmm->gmmResourceInfo.get(), 1u, 1024u, 1u);
 
-    AllocationProperties properties(false, 4096u, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
+    AllocationProperties properties(0, false, 4096u, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
     auto gpuAllocation = (WddmAllocation *)memoryManager->createGraphicsAllocationFromSharedHandle(osHandle, properties, false);
     EXPECT_NE(nullptr, gpuAllocation);
     auto expectedDestroyHandle = gpuAllocation->resourceHandle;
@@ -556,7 +557,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerSizeZeroWhenCreateFromShared
     std::unique_ptr<Gmm> gmm(new Gmm(pSysMem, size, false));
     setSizesFcn(gmm->gmmResourceInfo.get(), 1u, 1024u, 1u);
 
-    AllocationProperties properties(false, size, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
+    AllocationProperties properties(0, false, size, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
     auto *gpuAllocation = memoryManager->createGraphicsAllocationFromSharedHandle(osHandle, properties, false);
     ASSERT_NE(nullptr, gpuAllocation);
     EXPECT_EQ(size, gpuAllocation->getUnderlyingBufferSize());
@@ -573,7 +574,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenCreateFromSharedHandleFa
 
     wddm->failOpenSharedHandle = true;
 
-    AllocationProperties properties(false, size, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
+    AllocationProperties properties(0, false, size, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
     auto *gpuAllocation = memoryManager->createGraphicsAllocationFromSharedHandle(osHandle, properties, false);
     EXPECT_EQ(nullptr, gpuAllocation);
 }
@@ -583,7 +584,7 @@ HWTEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenTiledImageWithMipCount
         GTEST_SKIP();
     }
     MockContext context;
-    context.setMemoryManager(memoryManager.get());
+    context.memoryManager = memoryManager.get();
 
     cl_image_format imageFormat;
     imageFormat.image_channel_data_type = CL_UNORM_INT8;
@@ -599,7 +600,8 @@ HWTEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenTiledImageWithMipCount
 
     cl_mem_flags flags = CL_MEM_WRITE_ONLY;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    std::unique_ptr<Image> dstImage(Image::create(&context, flags, surfaceFormat, &imageDesc, nullptr, retVal));
+    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+                                                  flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, dstImage);
 
@@ -610,7 +612,7 @@ HWTEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenTiledImageWithMipCount
 
 TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenTiledImageWithMipCountNonZeroIsBeingCreatedThenallocateGraphicsMemoryForImageIsUsed) {
     MockContext context;
-    context.setMemoryManager(memoryManager.get());
+    context.memoryManager = memoryManager.get();
 
     cl_image_format imageFormat;
     imageFormat.image_channel_data_type = CL_UNORM_INT8;
@@ -627,7 +629,8 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenTiledImageWithMipCountNo
 
     cl_mem_flags flags = CL_MEM_WRITE_ONLY;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    std::unique_ptr<Image> dstImage(Image::create(&context, flags, surfaceFormat, &imageDesc, nullptr, retVal));
+    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+                                                  flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, dstImage);
     EXPECT_EQ(static_cast<int>(imageDesc.num_mip_levels), dstImage->peekMipCount());
@@ -643,7 +646,7 @@ HWTEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenTiledImageIsBeingCreat
     }
     std::unique_ptr<Device> device(MockDevice::createWithExecutionEnvironment<MockDevice>(*platformDevices, executionEnvironment, 0u));
     MockContext context(device.get());
-    context.setMemoryManager(memoryManager.get());
+    context.memoryManager = memoryManager.get();
 
     cl_image_format imageFormat;
     imageFormat.image_channel_data_type = CL_UNORM_INT8;
@@ -661,7 +664,8 @@ HWTEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenTiledImageIsBeingCreat
 
     cl_mem_flags flags = CL_MEM_WRITE_ONLY | CL_MEM_USE_HOST_PTR;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    std::unique_ptr<Image> dstImage(Image::create(&context, flags, surfaceFormat, &imageDesc, data, retVal));
+    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+                                                  flags, 0, surfaceFormat, &imageDesc, data, retVal));
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, dstImage);
 
@@ -672,7 +676,7 @@ HWTEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenTiledImageIsBeingCreat
 
 TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenNonTiledImgWithMipCountZeroisBeingCreatedThenAllocateGraphicsMemoryIsUsed) {
     MockContext context;
-    context.setMemoryManager(memoryManager.get());
+    context.memoryManager = memoryManager.get();
 
     cl_image_format imageFormat;
     imageFormat.image_channel_data_type = CL_UNORM_INT8;
@@ -689,7 +693,8 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenNonTiledImgWithMipCountZ
 
     cl_mem_flags flags = CL_MEM_WRITE_ONLY | CL_MEM_USE_HOST_PTR;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    std::unique_ptr<Image> dstImage(Image::create(&context, flags, surfaceFormat, &imageDesc, data, retVal));
+    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+                                                  flags, 0, surfaceFormat, &imageDesc, data, retVal));
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, dstImage);
 
@@ -700,7 +705,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenNonTiledImgWithMipCountZ
 
 TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenNonTiledImgWithMipCountNonZeroisBeingCreatedThenAllocateGraphicsMemoryForImageIsUsed) {
     MockContext context;
-    context.setMemoryManager(memoryManager.get());
+    context.memoryManager = memoryManager.get();
 
     cl_image_format imageFormat;
     imageFormat.image_channel_data_type = CL_UNORM_INT8;
@@ -716,7 +721,8 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenNonTiledImgWithMipCountN
 
     cl_mem_flags flags = CL_MEM_WRITE_ONLY;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    std::unique_ptr<Image> dstImage(Image::create(&context, flags, surfaceFormat, &imageDesc, nullptr, retVal));
+    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+                                                  flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, dstImage);
     EXPECT_EQ(static_cast<int>(imageDesc.num_mip_levels), dstImage->peekMipCount());
@@ -835,8 +841,8 @@ TEST_F(WddmMemoryManagerTest, Allocate32BitMemoryWithNullptr) {
     auto *gpuAllocation = memoryManager->allocate32BitGraphicsMemory(3 * MemoryConstants::pageSize, nullptr, GraphicsAllocation::AllocationType::BUFFER);
 
     ASSERT_NE(nullptr, gpuAllocation);
-    EXPECT_LT(GmmHelper::canonize(memoryManager->gfxPartition->getHeapBase(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress());
-    EXPECT_GT(GmmHelper::canonize(memoryManager->gfxPartition->getHeapLimit(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress() + gpuAllocation->getUnderlyingBufferSize());
+    EXPECT_LT(GmmHelper::canonize(memoryManager->getGfxPartition(0)->getHeapBase(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress());
+    EXPECT_GT(GmmHelper::canonize(memoryManager->getGfxPartition(0)->getHeapLimit(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress() + gpuAllocation->getUnderlyingBufferSize());
 
     EXPECT_EQ(0u, gpuAllocation->fragmentsStorage.fragmentCount);
     memoryManager->freeGraphicsMemory(gpuAllocation);
@@ -847,8 +853,8 @@ TEST_F(WddmMemoryManagerTest, given32BitAllocationWhenItIsCreatedThenItHasNonZer
 
     ASSERT_NE(nullptr, gpuAllocation);
     EXPECT_NE(0llu, gpuAllocation->getGpuAddressToPatch());
-    EXPECT_LT(GmmHelper::canonize(memoryManager->gfxPartition->getHeapBase(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress());
-    EXPECT_GT(GmmHelper::canonize(memoryManager->gfxPartition->getHeapLimit(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress() + gpuAllocation->getUnderlyingBufferSize());
+    EXPECT_LT(GmmHelper::canonize(memoryManager->getGfxPartition(0)->getHeapBase(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress());
+    EXPECT_GT(GmmHelper::canonize(memoryManager->getGfxPartition(0)->getHeapLimit(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress() + gpuAllocation->getUnderlyingBufferSize());
     memoryManager->freeGraphicsMemory(gpuAllocation);
 }
 
@@ -862,8 +868,8 @@ TEST_F(WddmMemoryManagerTest, Allocate32BitMemoryWithMisalignedHostPtrDoesNotDoT
 
     EXPECT_EQ(alignSizeWholePage(misalignedPtr, misalignedSize), gpuAllocation->getUnderlyingBufferSize());
 
-    EXPECT_LT(GmmHelper::canonize(memoryManager->gfxPartition->getHeapBase(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress());
-    EXPECT_GT(GmmHelper::canonize(memoryManager->gfxPartition->getHeapLimit(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress() + gpuAllocation->getUnderlyingBufferSize());
+    EXPECT_LT(GmmHelper::canonize(memoryManager->getGfxPartition(0)->getHeapBase(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress());
+    EXPECT_GT(GmmHelper::canonize(memoryManager->getGfxPartition(0)->getHeapLimit(HeapIndex::HEAP_EXTERNAL)), gpuAllocation->getGpuAddress() + gpuAllocation->getUnderlyingBufferSize());
 
     EXPECT_EQ(0u, gpuAllocation->fragmentsStorage.fragmentCount);
 
@@ -879,7 +885,7 @@ TEST_F(WddmMemoryManagerTest, Allocate32BitMemorySetsCannonizedGpuBaseAddress) {
 
     ASSERT_NE(nullptr, gpuAllocation);
 
-    uint64_t cannonizedAddress = GmmHelper::canonize(memoryManager->gfxPartition->getHeapBase(HeapIndex::HEAP_EXTERNAL));
+    uint64_t cannonizedAddress = GmmHelper::canonize(memoryManager->getGfxPartition(0)->getHeapBase(HeapIndex::HEAP_EXTERNAL));
     EXPECT_EQ(cannonizedAddress, gpuAllocation->getGpuBaseAddress());
 
     memoryManager->freeGraphicsMemory(gpuAllocation);
@@ -908,7 +914,7 @@ TEST_F(WddmMemoryManagerTest, GivenThreeOsHandlesWhenAskedForDestroyAllocationsT
     storage.fragmentStorageData[2].osHandleStorage->gmm = new Gmm(pSysMem, 4096u, false);
     storage.fragmentStorageData[2].residency = new ResidencyData;
 
-    memoryManager->cleanOsHandles(storage);
+    memoryManager->cleanOsHandles(storage, 0);
 
     auto destroyWithResourceHandleCalled = 0u;
     D3DKMT_DESTROYALLOCATION2 *ptrToDestroyAlloc2 = nullptr;
@@ -955,7 +961,7 @@ TEST_F(WddmMemoryManagerTest, givenManagerWithDisabledDeferredDeleterWhenMapGpuV
     memoryManager->setDeferredDeleter(nullptr);
     setMapGpuVaFailConfigFcn(0, 1);
 
-    WddmAllocation allocation(GraphicsAllocation::AllocationType::BUFFER, ptr, size, nullptr, MemoryPool::MemoryNull);
+    WddmAllocation allocation(0, GraphicsAllocation::AllocationType::BUFFER, ptr, size, nullptr, MemoryPool::MemoryNull);
     allocation.setDefaultGmm(gmm.get());
     bool ret = memoryManager->createWddmAllocation(&allocation, allocation.getAlignedCpuPtr());
     EXPECT_FALSE(ret);
@@ -971,7 +977,7 @@ TEST_F(WddmMemoryManagerTest, givenManagerWithEnabledDeferredDeleterWhenFirstMap
 
     setMapGpuVaFailConfigFcn(0, 1);
 
-    WddmAllocation allocation(GraphicsAllocation::AllocationType::BUFFER, ptr, size, nullptr, MemoryPool::MemoryNull);
+    WddmAllocation allocation(0, GraphicsAllocation::AllocationType::BUFFER, ptr, size, nullptr, MemoryPool::MemoryNull);
     allocation.setDefaultGmm(gmm.get());
     bool ret = memoryManager->createWddmAllocation(&allocation, allocation.getAlignedCpuPtr());
     EXPECT_TRUE(ret);
@@ -987,7 +993,7 @@ TEST_F(WddmMemoryManagerTest, givenManagerWithEnabledDeferredDeleterWhenFirstAnd
 
     setMapGpuVaFailConfigFcn(0, 2);
 
-    WddmAllocation allocation(GraphicsAllocation::AllocationType::BUFFER, ptr, size, nullptr, MemoryPool::MemoryNull);
+    WddmAllocation allocation(0, GraphicsAllocation::AllocationType::BUFFER, ptr, size, nullptr, MemoryPool::MemoryNull);
     allocation.setDefaultGmm(gmm.get());
     bool ret = memoryManager->createWddmAllocation(&allocation, allocation.getAlignedCpuPtr());
     EXPECT_FALSE(ret);
@@ -996,12 +1002,13 @@ TEST_F(WddmMemoryManagerTest, givenManagerWithEnabledDeferredDeleterWhenFirstAnd
 TEST_F(WddmMemoryManagerTest, givenNullPtrAndSizePassedToCreateInternalAllocationWhenCallIsMadeThenAllocationIsCreatedIn32BitHeapInternal) {
     auto wddmAllocation = static_cast<WddmAllocation *>(memoryManager->allocate32BitGraphicsMemory(MemoryConstants::pageSize, nullptr, GraphicsAllocation::AllocationType::INTERNAL_HEAP));
     ASSERT_NE(nullptr, wddmAllocation);
-    EXPECT_EQ(wddmAllocation->getGpuBaseAddress(), GmmHelper::canonize(memoryManager->getInternalHeapBaseAddress()));
+    EXPECT_EQ(wddmAllocation->getGpuBaseAddress(), GmmHelper::canonize(memoryManager->getInternalHeapBaseAddress(wddmAllocation->getRootDeviceIndex())));
     EXPECT_NE(nullptr, wddmAllocation->getUnderlyingBuffer());
     EXPECT_EQ(4096u, wddmAllocation->getUnderlyingBufferSize());
     EXPECT_NE((uint64_t)wddmAllocation->getUnderlyingBuffer(), wddmAllocation->getGpuAddress());
-    auto cannonizedHeapBase = GmmHelper::canonize(memoryManager->getInternalHeapBaseAddress());
-    auto cannonizedHeapEnd = GmmHelper::canonize(memoryManager->gfxPartition->getHeapLimit(internalHeapIndex));
+    auto rootDeviceIndex = wddmAllocation->getRootDeviceIndex();
+    auto cannonizedHeapBase = GmmHelper::canonize(memoryManager->getInternalHeapBaseAddress(rootDeviceIndex));
+    auto cannonizedHeapEnd = GmmHelper::canonize(memoryManager->getGfxPartition(rootDeviceIndex)->getHeapLimit(HeapIndex::HEAP_INTERNAL_DEVICE_MEMORY));
 
     EXPECT_GT(wddmAllocation->getGpuAddress(), cannonizedHeapBase);
     EXPECT_LT(wddmAllocation->getGpuAddress() + wddmAllocation->getUnderlyingBufferSize(), cannonizedHeapEnd);
@@ -1015,12 +1022,13 @@ TEST_F(WddmMemoryManagerTest, givenPtrAndSizePassedToCreateInternalAllocationWhe
     auto ptr = reinterpret_cast<void *>(0x1000000);
     auto wddmAllocation = static_cast<WddmAllocation *>(memoryManager->allocate32BitGraphicsMemory(MemoryConstants::pageSize, ptr, GraphicsAllocation::AllocationType::INTERNAL_HEAP));
     ASSERT_NE(nullptr, wddmAllocation);
-    EXPECT_EQ(wddmAllocation->getGpuBaseAddress(), GmmHelper::canonize(memoryManager->getInternalHeapBaseAddress()));
+    auto rootDeviceIndex = wddmAllocation->getRootDeviceIndex();
+    EXPECT_EQ(wddmAllocation->getGpuBaseAddress(), GmmHelper::canonize(memoryManager->getInternalHeapBaseAddress(rootDeviceIndex)));
     EXPECT_EQ(ptr, wddmAllocation->getUnderlyingBuffer());
     EXPECT_EQ(4096u, wddmAllocation->getUnderlyingBufferSize());
     EXPECT_NE((uint64_t)wddmAllocation->getUnderlyingBuffer(), wddmAllocation->getGpuAddress());
-    auto cannonizedHeapBase = GmmHelper::canonize(memoryManager->getInternalHeapBaseAddress());
-    auto cannonizedHeapEnd = GmmHelper::canonize(memoryManager->gfxPartition->getHeapLimit(internalHeapIndex));
+    auto cannonizedHeapBase = GmmHelper::canonize(memoryManager->getInternalHeapBaseAddress(rootDeviceIndex));
+    auto cannonizedHeapEnd = GmmHelper::canonize(memoryManager->getGfxPartition(rootDeviceIndex)->getHeapLimit(HeapIndex::HEAP_INTERNAL_DEVICE_MEMORY));
 
     EXPECT_GT(wddmAllocation->getGpuAddress(), cannonizedHeapBase);
     EXPECT_LT(wddmAllocation->getGpuAddress() + wddmAllocation->getUnderlyingBufferSize(), cannonizedHeapEnd);
@@ -1068,7 +1076,7 @@ TEST_F(BufferWithWddmMemory, NullOsHandleStorageAskedForPopulationReturnsFilledP
     EXPECT_EQ(nullptr, storage.fragmentStorageData[1].osHandleStorage);
     EXPECT_EQ(nullptr, storage.fragmentStorageData[2].osHandleStorage);
     storage.fragmentStorageData[0].freeTheFragment = true;
-    memoryManager->cleanOsHandles(storage);
+    memoryManager->cleanOsHandles(storage, 0);
 }
 
 TEST_F(BufferWithWddmMemory, GivenMisalignedHostPtrAndMultiplePagesSizeWhenAskedForGraphicsAllcoationThenItContainsAllFragmentsWithProperGpuAdrresses) {
@@ -1239,7 +1247,7 @@ TEST_F(WddmMemoryManagerWithAsyncDeleterTest, givenMemoryManagerWithAsyncDeleter
     EXPECT_EQ(0u, wddm->createAllocationResult.called);
     deleter->expectDrainBlockingValue(true);
 
-    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(imgInfo, true, {});
+    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(0, imgInfo, true, {});
 
     memoryManager->allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
     EXPECT_EQ(1, deleter->drainCalled);
@@ -1258,7 +1266,7 @@ TEST_F(WddmMemoryManagerWithAsyncDeleterTest, givenMemoryManagerWithAsyncDeleter
     EXPECT_EQ(0u, wddm->createAllocationResult.called);
     EXPECT_EQ(0u, wddm->mapGpuVirtualAddressResult.called);
 
-    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(imgInfo, true, {});
+    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(0, imgInfo, true, {});
 
     auto allocation = memoryManager->allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
     EXPECT_EQ(0, deleter->drainCalled);
@@ -1276,7 +1284,7 @@ TEST_F(WddmMemoryManagerWithAsyncDeleterTest, givenMemoryManagerWithoutAsyncDele
     wddm->createAllocationStatus = STATUS_GRAPHICS_NO_VIDEO_MEMORY;
     EXPECT_EQ(0u, wddm->createAllocationResult.called);
 
-    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(imgInfo, true, {});
+    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(0, imgInfo, true, {});
 
     memoryManager->allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
     EXPECT_EQ(1u, wddm->createAllocationResult.called);
@@ -1291,8 +1299,8 @@ TEST(WddmMemoryManagerDefaults, givenDefaultWddmMemoryManagerWhenItIsQueriedForI
     auto hwInfoMock = *platformDevices[0];
     wddm->init(hwInfoMock);
     MockWddmMemoryManager memoryManager(*executionEnvironment);
-    auto heapBase = wddm->getGfxPartition().Heap32[static_cast<uint32_t>(internalHeapIndex)].Base;
-    EXPECT_EQ(heapBase, memoryManager.getInternalHeapBaseAddress());
+    auto heapBase = wddm->getGfxPartition().Heap32[static_cast<uint32_t>(HeapIndex::HEAP_INTERNAL_DEVICE_MEMORY)].Base;
+    EXPECT_EQ(heapBase, memoryManager.getInternalHeapBaseAddress(0));
 }
 
 TEST_F(MockWddmMemoryManagerTest, givenValidateAllocationFunctionWhenItIsCalledWithTripleAllocationThenSuccessIsReturned) {
@@ -1377,7 +1385,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWithNoRegisteredOsContextsWh
 
 TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerAnd32bitBuildThenSvmPartitionIsAlwaysInitialized) {
     if (is32bit) {
-        EXPECT_EQ(memoryManager->gfxPartition->getHeapLimit(HeapIndex::HEAP_SVM), MemoryConstants::max32BitAddress);
+        EXPECT_EQ(memoryManager->getGfxPartition(0)->getHeapLimit(HeapIndex::HEAP_SVM), MemoryConstants::max32BitAddress);
     }
 }
 
@@ -1577,7 +1585,7 @@ TEST_F(WddmMemoryManagerTest2, givenReadOnlyMemoryWhenCreateAllocationFailsThenP
 
     EXPECT_EQ(MemoryManager::AllocationStatus::InvalidHostPointer, result);
     handleStorage.fragmentStorageData[0].freeTheFragment = true;
-    memoryManager->cleanOsHandles(handleStorage);
+    memoryManager->cleanOsHandles(handleStorage, 0);
 }
 
 TEST_F(WddmMemoryManagerTest2, givenReadOnlyMemoryPassedToPopulateOsHandlesWhenCreateAllocationFailsThenAllocatedFragmentsAreNotStored) {
@@ -1602,12 +1610,12 @@ TEST_F(WddmMemoryManagerTest2, givenReadOnlyMemoryPassedToPopulateOsHandlesWhenC
     EXPECT_EQ(nullptr, hostPtrManager->getFragment(handleStorage.fragmentStorageData[1].cpuPtr));
 
     handleStorage.fragmentStorageData[1].freeTheFragment = true;
-    memoryManager->cleanOsHandles(handleStorage);
+    memoryManager->cleanOsHandles(handleStorage, 0);
 }
 
 TEST(WddmMemoryManagerCleanupTest, givenUsedTagAllocationInWddmMemoryManagerWhenCleanupMemoryManagerThenDontAccessCsr) {
     ExecutionEnvironment &executionEnvironment = *platform()->peekExecutionEnvironment();
-    auto csr = createCommandStream(executionEnvironment);
+    auto csr = std::unique_ptr<CommandStreamReceiver>(createCommandStream(executionEnvironment, 0));
     auto wddm = new WddmMock();
     auto preemptionMode = PreemptionHelper::getDefaultPreemptionMode(*platformDevices[0]);
     auto hwInfo = *platformDevices[0];
@@ -1616,17 +1624,14 @@ TEST(WddmMemoryManagerCleanupTest, givenUsedTagAllocationInWddmMemoryManagerWhen
     executionEnvironment.osInterface = std::make_unique<OSInterface>();
     executionEnvironment.osInterface->get()->setWddm(wddm);
     executionEnvironment.memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
-    executionEnvironment.commandStreamReceivers.resize(1);
-    executionEnvironment.commandStreamReceivers[0].push_back(std::unique_ptr<CommandStreamReceiver>(csr));
     executionEnvironment.memoryManager = std::make_unique<WddmMemoryManager>(executionEnvironment);
-    auto osContext = executionEnvironment.memoryManager->createAndRegisterOsContext(csr, aub_stream::ENGINE_RCS, 1, preemptionMode, false);
+    auto osContext = executionEnvironment.memoryManager->createAndRegisterOsContext(csr.get(), aub_stream::ENGINE_RCS, 1, preemptionMode, false);
     csr->setupContext(*osContext);
-    EXPECT_EQ(csr, executionEnvironment.memoryManager->getDefaultCommandStreamReceiver(0));
 
     auto tagAllocator = csr->getEventPerfCountAllocator(100);
     auto allocation = tagAllocator->getTag()->getBaseGraphicsAllocation();
     allocation->updateTaskCount(1, csr->getOsContext().getContextId());
-    executionEnvironment.commandStreamReceivers.clear();
+    csr.reset();
     EXPECT_NO_THROW(executionEnvironment.memoryManager.reset());
 }
 
@@ -1711,7 +1716,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenWriteCombinedAllocationThenCpuAddressIs
     }
     memoryManager.reset(new MockWddmMemoryManager(true, true, *executionEnvironment));
     size_t size = 2 * MemoryConstants::megaByte;
-    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({size, GraphicsAllocation::AllocationType::WRITE_COMBINED}));
+    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({0, size, GraphicsAllocation::AllocationType::WRITE_COMBINED}));
     ASSERT_NE(nullptr, allocation);
     EXPECT_EQ(size, allocation->getUnderlyingBufferSize());
     EXPECT_NE(nullptr, allocation->getUnderlyingBuffer());
@@ -1735,7 +1740,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenBufferHostMemoryAllocationAndLimitedRan
 
     memoryManager.reset(new MockWddmMemoryManager(true, true, *executionEnvironment));
     size_t size = 2 * MemoryConstants::megaByte;
-    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({size, GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY}));
+    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({0, size, GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY}));
     ASSERT_NE(nullptr, allocation);
     EXPECT_EQ(size, allocation->getUnderlyingBufferSize());
     EXPECT_NE(nullptr, allocation->getUnderlyingBuffer());
@@ -1743,8 +1748,8 @@ TEST_F(WddmMemoryManagerSimpleTest, givenBufferHostMemoryAllocationAndLimitedRan
 
     auto heap = is32bit ? HeapIndex::HEAP_SVM : HeapIndex::HEAP_STANDARD;
 
-    EXPECT_LT(GmmHelper::canonize(memoryManager->gfxPartition->getHeapBase(heap)), allocation->getGpuAddress());
-    EXPECT_GT(GmmHelper::canonize(memoryManager->gfxPartition->getHeapLimit(heap)), allocation->getGpuAddress());
+    EXPECT_LT(GmmHelper::canonize(memoryManager->getGfxPartition(0)->getHeapBase(heap)), allocation->getGpuAddress());
+    EXPECT_GT(GmmHelper::canonize(memoryManager->getGfxPartition(0)->getHeapLimit(heap)), allocation->getGpuAddress());
 
     memoryManager->freeGraphicsMemory(allocation);
 }

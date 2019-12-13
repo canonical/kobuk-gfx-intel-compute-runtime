@@ -32,6 +32,7 @@ add_library(${NEO_STATIC_LIB_NAME} STATIC EXCLUDE_FROM_ALL
 add_subdirectories()
 add_subdirectory(instrumentation${IGDRCL__INSTRUMENTATION_DIR_SUFFIX})
 include(enable_gens.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/core_files.cmake)
 
 # Enable SSE4/AVX2 options for files that need them
 if(MSVC)
@@ -63,13 +64,17 @@ target_include_directories(${NEO_STATIC_LIB_NAME} PUBLIC
   ${KHRONOS_GL_HEADERS_DIR}
   ${CIF_BASE_DIR}
   ${GMM_INCLUDE_PATHS}
-  ${HW_SRC_INCLUDE_PATH}
   ${IGC_OCL_ADAPTOR_DIR}
   ${VISA_INCLUDE_DIR}
   ${IGDRCL__IGC_INCLUDE_DIR}
   ${THIRD_PARTY_DIR}
   ${UMKM_SHAREDDATA_INCLUDE_PATHS}
   ${SOURCE_LEVEL_DEBUGGER_HEADERS_DIR}
+)
+
+target_compile_definitions(${NEO_STATIC_LIB_NAME} PUBLIC
+  ""
+  ${IGDRCL__IGC_COMPILE_DEFINITIONS}
 )
 
 if(WIN32)
@@ -121,7 +126,7 @@ if(${GENERATE_EXECUTABLE})
 
   add_library(${NEO_DYNAMIC_LIB_NAME} SHARED
     ${NEO_DYNAMIC_LIB__TARGET_OBJECTS}
-    ${IGDRCL_SOURCE_DIR}/runtime/aub/aub_stream_interface.cpp
+    ${NEO_SOURCE_DIR}/runtime/aub/aub_stream_interface.cpp
   )
 
   if(UNIX)
@@ -175,10 +180,10 @@ if(${GENERATE_EXECUTABLE})
     OUTPUT_NAME "${NEO_DLL_NAME_BASE}${IGDRCL_NAME_POSTFIX}${IGDRCL_OPTION__BITS}"
   )
   set_target_properties(${NEO_DYNAMIC_LIB_NAME} PROPERTIES FOLDER "opencl runtime")
-  create_project_source_tree_with_exports(${NEO_DYNAMIC_LIB_NAME} "${EXPORTS_FILENAME}" ${IGDRCL_SOURCE_DIR})
+  create_project_source_tree_with_exports(${NEO_DYNAMIC_LIB_NAME} "${EXPORTS_FILENAME}")
 endif(${GENERATE_EXECUTABLE})
 
-create_project_source_tree(${NEO_STATIC_LIB_NAME} ${IGDRCL_SOURCE_DIR})
+create_project_source_tree(${NEO_STATIC_LIB_NAME})
 
 if(UNIX AND NOT (TARGET clang-tidy))
   add_custom_target(clang-tidy
@@ -188,8 +193,8 @@ if(UNIX AND NOT (TARGET clang-tidy))
     TARGET clang-tidy
     POST_BUILD
     COMMAND echo clang-tidy...
-    COMMAND find ${CMAKE_CURRENT_SOURCE_DIR} -name *.cpp -print0 | xargs -0 -I{} -P`nproc` clang-tidy -p ${IGDRCL_BINARY_DIR} {} | tee ${IGDRCL_BINARY_DIR}/clang-tidy.log
-    WORKING_DIRECTORY ${IGDRCL_SOURCE_DIR}
+    COMMAND find ${CMAKE_CURRENT_SOURCE_DIR} -name *.cpp | xargs --verbose -I{} -P`nproc` clang-tidy-8 -p ${NEO_BINARY_DIR} {} | tee ${NEO_BINARY_DIR}/clang-tidy.log
+    WORKING_DIRECTORY ${NEO_SOURCE_DIR}
   )
 endif()
 

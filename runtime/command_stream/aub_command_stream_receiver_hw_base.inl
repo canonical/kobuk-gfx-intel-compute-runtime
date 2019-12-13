@@ -5,8 +5,10 @@
  *
  */
 
+#include "core/execution_environment/root_device_environment.h"
 #include "core/helpers/aligned_memory.h"
 #include "core/helpers/debug_helpers.h"
+#include "core/helpers/hash.h"
 #include "core/helpers/ptr_math.h"
 #include "core/helpers/string.h"
 #include "core/memory_manager/graphics_allocation.h"
@@ -15,21 +17,20 @@
 #include "runtime/aub_mem_dump/aub_alloc_dump.h"
 #include "runtime/aub_mem_dump/aub_alloc_dump.inl"
 #include "runtime/aub_mem_dump/page_table_entry_bits.h"
+#include "runtime/command_stream/aub_command_stream_receiver_hw.h"
 #include "runtime/command_stream/aub_stream_provider.h"
 #include "runtime/command_stream/aub_subcapture.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/execution_environment/execution_environment.h"
+#include "runtime/helpers/engine_node_helper.h"
 #include "runtime/helpers/hardware_context_controller.h"
-#include "runtime/helpers/hash.h"
 #include "runtime/helpers/neo_driver_version.h"
 #include "runtime/memory_manager/memory_banks.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/os_interface/os_context.h"
 
-#include "aub_command_stream_receiver_hw.h"
 #include "driver_version.h"
-#include "hw_cmds.h"
 #include "third_party/aub_stream/headers/aub_manager.h"
 #include "third_party/aub_stream/headers/aubstream.h"
 
@@ -39,12 +40,12 @@
 namespace NEO {
 
 template <typename GfxFamily>
-AUBCommandStreamReceiverHw<GfxFamily>::AUBCommandStreamReceiverHw(const std::string &fileName, bool standalone, ExecutionEnvironment &executionEnvironment)
-    : BaseClass(executionEnvironment),
+AUBCommandStreamReceiverHw<GfxFamily>::AUBCommandStreamReceiverHw(const std::string &fileName, bool standalone, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex)
+    : BaseClass(executionEnvironment, rootDeviceIndex),
       standalone(standalone) {
 
-    executionEnvironment.initAubCenter(this->isLocalMemoryEnabled(), fileName, this->getType());
-    auto aubCenter = executionEnvironment.aubCenter.get();
+    executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->initAubCenter(this->isLocalMemoryEnabled(), fileName, this->getType());
+    auto aubCenter = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->aubCenter.get();
     UNRECOVERABLE_IF(nullptr == aubCenter);
 
     auto subCaptureCommon = aubCenter->getSubCaptureCommon();
@@ -275,24 +276,24 @@ void AUBCommandStreamReceiverHw<GfxFamily>::initializeEngine() {
 }
 
 template <typename GfxFamily>
-CommandStreamReceiver *AUBCommandStreamReceiverHw<GfxFamily>::create(const std::string &fileName, bool standalone, ExecutionEnvironment &executionEnvironment) {
-    auto csr = new AUBCommandStreamReceiverHw<GfxFamily>(fileName, standalone, executionEnvironment);
+CommandStreamReceiver *AUBCommandStreamReceiverHw<GfxFamily>::create(const std::string &fileName, bool standalone, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) {
+    auto csr = std::make_unique<AUBCommandStreamReceiverHw<GfxFamily>>(fileName, standalone, executionEnvironment, rootDeviceIndex);
 
     if (!csr->subCaptureManager->isSubCaptureMode()) {
         csr->openFile(fileName);
     }
 
-    return csr;
+    return csr.release();
 }
 
 template <typename GfxFamily>
-FlushStamp AUBCommandStreamReceiverHw<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
+bool AUBCommandStreamReceiverHw<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
     if (subCaptureManager->isSubCaptureMode()) {
         if (!subCaptureManager->isSubCaptureEnabled()) {
             if (this->standalone) {
                 *this->tagAddress = this->peekLatestSentTaskCount();
             }
-            return 0;
+            return true;
         }
     }
 
@@ -308,7 +309,7 @@ FlushStamp AUBCommandStreamReceiverHw<GfxFamily>::flush(BatchBuffer &batchBuffer
     std::unique_ptr<GraphicsAllocation, std::function<void(GraphicsAllocation *)>> flatBatchBuffer(
         nullptr, [&](GraphicsAllocation *ptr) { this->getMemoryManager()->freeGraphicsMemory(ptr); });
     if (DebugManager.flags.FlattenBatchBufferForAUBDump.get()) {
-        flatBatchBuffer.reset(this->flatBatchBufferHelper->flattenBatchBuffer(batchBuffer, sizeBatchBuffer, this->dispatchMode));
+        flatBatchBuffer.reset(this->flatBatchBufferHelper->flattenBatchBuffer(this->rootDeviceIndex, batchBuffer, sizeBatchBuffer, this->dispatchMode));
         if (flatBatchBuffer.get() != nullptr) {
             pBatchBuffer = flatBatchBuffer->getUnderlyingBuffer();
             batchBufferGpuAddress = flatBatchBuffer->getGpuAddress();
@@ -340,7 +341,7 @@ FlushStamp AUBCommandStreamReceiverHw<GfxFamily>::flush(BatchBuffer &batchBuffer
     }
 
     getAubStream()->flush();
-    return 0;
+    return true;
 }
 
 template <typename GfxFamily>
@@ -392,7 +393,7 @@ void AUBCommandStreamReceiverHw<GfxFamily>::submitBatchBuffer(uint64_t batchBuff
 
     if (hardwareContextController) {
         if (batchBufferSize) {
-            hardwareContextController->submit(batchBufferGpuAddress, batchBuffer, batchBufferSize, memoryBank, MemoryConstants::pageSize64k);
+            hardwareContextController->submit(batchBufferGpuAddress, batchBuffer, batchBufferSize, memoryBank, MemoryConstants::pageSize64k, false);
         }
         return;
     }
@@ -659,7 +660,7 @@ bool AUBCommandStreamReceiverHw<GfxFamily>::writeMemory(GraphicsAllocation &gfxA
 
 template <typename GfxFamily>
 bool AUBCommandStreamReceiverHw<GfxFamily>::writeMemory(AllocationView &allocationView) {
-    GraphicsAllocation gfxAllocation(GraphicsAllocation::AllocationType::UNKNOWN, reinterpret_cast<void *>(allocationView.first), allocationView.first, 0llu, allocationView.second, MemoryPool::MemoryNull);
+    GraphicsAllocation gfxAllocation(this->rootDeviceIndex, GraphicsAllocation::AllocationType::UNKNOWN, reinterpret_cast<void *>(allocationView.first), allocationView.first, 0llu, allocationView.second, MemoryPool::MemoryNull);
     return writeMemory(gfxAllocation);
 }
 
@@ -728,6 +729,10 @@ void AUBCommandStreamReceiverHw<GfxFamily>::processResidency(const ResidencyCont
 
 template <typename GfxFamily>
 void AUBCommandStreamReceiverHw<GfxFamily>::dumpAllocation(GraphicsAllocation &gfxAllocation) {
+    if (isBcs(this->osContext->getEngineType())) {
+        return;
+    }
+
     if (DebugManager.flags.AUBDumpAllocsOnEnqueueReadOnly.get()) {
         if (!gfxAllocation.isAllocDumpable()) {
             return;

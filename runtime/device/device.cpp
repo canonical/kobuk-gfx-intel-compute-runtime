@@ -7,13 +7,13 @@
 
 #include "runtime/device/device.h"
 
+#include "core/command_stream/preemption.h"
+#include "core/helpers/hw_helper.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/command_stream/experimental_command_buffer.h"
-#include "runtime/command_stream/preemption.h"
 #include "runtime/device/device_vector.h"
 #include "runtime/device/driver_info.h"
 #include "runtime/execution_environment/execution_environment.h"
-#include "runtime/helpers/hw_helper.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/os_interface/os_context.h"
 #include "runtime/os_interface/os_interface.h"
@@ -23,6 +23,7 @@
 namespace NEO {
 
 decltype(&PerformanceCounters::create) Device::createPerformanceCountersFunc = PerformanceCounters::create;
+extern CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex);
 
 DeviceVector::DeviceVector(const cl_device_id *devices,
                            cl_uint numDevices) {
@@ -41,8 +42,8 @@ void DeviceVector::toDeviceIDs(std::vector<cl_device_id> &devIDs) {
     }
 }
 
-Device::Device(ExecutionEnvironment *executionEnvironment, uint32_t deviceIndex)
-    : executionEnvironment(executionEnvironment), deviceIndex(deviceIndex) {
+Device::Device(ExecutionEnvironment *executionEnvironment)
+    : executionEnvironment(executionEnvironment) {
     memset(&deviceInfo, 0, sizeof(deviceInfo));
     deviceExtensions.reserve(1000);
     name.reserve(100);
@@ -70,7 +71,7 @@ Device::~Device() {
     if (deviceInfo.sourceLevelDebuggerActive && executionEnvironment->sourceLevelDebugger) {
         executionEnvironment->sourceLevelDebugger->notifyDeviceDestruction();
     }
-
+    commandStreamReceivers.clear();
     executionEnvironment->memoryManager->waitForDeletions();
     executionEnvironment->decRefInternal();
 }
@@ -125,25 +126,31 @@ bool Device::createEngines() {
     auto &gpgpuEngines = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getGpgpuEngineInstances();
 
     for (uint32_t deviceCsrIndex = 0; deviceCsrIndex < gpgpuEngines.size(); deviceCsrIndex++) {
-        if (!createEngine(getDeviceIndex(), deviceCsrIndex, gpgpuEngines[deviceCsrIndex])) {
+        if (!createEngine(deviceCsrIndex, gpgpuEngines[deviceCsrIndex])) {
             return false;
         }
     }
     return true;
 }
 
-bool Device::createEngine(uint32_t deviceIndex, uint32_t deviceCsrIndex, aub_stream::EngineType engineType) {
+std::unique_ptr<CommandStreamReceiver> Device::createCommandStreamReceiver() const {
+    return std::unique_ptr<CommandStreamReceiver>(createCommandStream(*executionEnvironment, getRootDeviceIndex()));
+}
+
+bool Device::createEngine(uint32_t deviceCsrIndex, aub_stream::EngineType engineType) {
     auto &hwInfo = getHardwareInfo();
     auto defaultEngineType = getChosenEngineType(hwInfo);
 
-    if (!executionEnvironment->initializeCommandStreamReceiver(deviceIndex, deviceCsrIndex)) {
+    std::unique_ptr<CommandStreamReceiver> commandStreamReceiver = createCommandStreamReceiver();
+    if (!commandStreamReceiver) {
         return false;
     }
-
-    auto commandStreamReceiver = executionEnvironment->commandStreamReceivers[deviceIndex][deviceCsrIndex].get();
+    if (HwHelper::get(hwInfo.platform.eRenderCoreFamily).isPageTableManagerSupported(hwInfo)) {
+        commandStreamReceiver->createPageTableManager();
+    }
 
     bool lowPriority = (deviceCsrIndex == HwHelper::lowPriorityGpgpuEngineIndex);
-    auto osContext = executionEnvironment->memoryManager->createAndRegisterOsContext(commandStreamReceiver, engineType,
+    auto osContext = executionEnvironment->memoryManager->createAndRegisterOsContext(commandStreamReceiver.get(), engineType,
                                                                                      getDeviceBitfieldForOsContext(), preemptionMode, lowPriority);
     commandStreamReceiver->setupContext(*osContext);
 
@@ -158,7 +165,8 @@ bool Device::createEngine(uint32_t deviceIndex, uint32_t deviceCsrIndex, aub_str
         return false;
     }
 
-    engines.push_back({commandStreamReceiver, osContext});
+    engines.push_back({commandStreamReceiver.get(), osContext});
+    commandStreamReceivers.push_back(std::move(commandStreamReceiver));
 
     return true;
 }
@@ -167,10 +175,6 @@ const HardwareInfo &Device::getHardwareInfo() const { return *executionEnvironme
 
 const DeviceInfo &Device::getDeviceInfo() const {
     return deviceInfo;
-}
-
-const char *Device::getProductAbbrev() const {
-    return hardwarePrefix[getHardwareInfo().platform.eProductFamily];
 }
 
 double Device::getProfilingTimerResolution() {
@@ -219,4 +223,5 @@ EngineControl &Device::getEngine(aub_stream::EngineType engineType, bool lowPrio
     }
     UNRECOVERABLE_IF(true);
 }
+
 } // namespace NEO

@@ -334,7 +334,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
                                              cl_uint numEventsInWaitList,
                                              const cl_event *eventWaitList);
 
-    CommandStreamReceiver &getGpgpuCommandStreamReceiver() const;
+    MOCKABLE_VIRTUAL CommandStreamReceiver &getGpgpuCommandStreamReceiver() const;
     CommandStreamReceiver *getBcsCommandStreamReceiver() const;
     Device &getDevice() const { return *device; }
     Context &getContext() const { return *context; }
@@ -406,6 +406,8 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     bool isMultiEngineQueue() const { return this->multiEngineQueue; }
 
+    void updateBcsTaskCount(uint32_t newBcsTaskCount) { this->bcsTaskCount = newBcsTaskCount; }
+
     // taskCount of last task
     uint32_t taskCount = 0;
 
@@ -420,6 +422,10 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     Event *virtualEvent = nullptr;
 
     size_t estimateTimestampPacketNodesCount(const MultiDispatchInfo &dispatchInfo) const;
+
+    uint64_t getSliceCount() const { return sliceCount; }
+
+    uint64_t dispatchHints = 0;
 
   protected:
     void *enqueueReadMemObjForMap(TransferProperties &transferProperties, EventsRequest &eventsRequest, cl_int &errcodeRet);
@@ -449,12 +455,13 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     QueuePriority priority = QueuePriority::MEDIUM;
     QueueThrottle throttle = QueueThrottle::MEDIUM;
+    uint64_t sliceCount = QueueSliceCount::defaultSliceCount;
+    uint32_t bcsTaskCount = 0;
 
     bool perfCountersEnabled = false;
 
     LinearStream *commandStream = nullptr;
 
-    bool mapDcFlushRequired = false;
     bool isSpecialCommandQueue = false;
     bool requiresCacheFlushAfterWalker = false;
     bool multiEngineQueue = false;

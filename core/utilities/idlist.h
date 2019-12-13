@@ -23,6 +23,8 @@ struct IDNode {
           next(nullptr) {
     }
 
+    virtual ~IDNode() = default;
+
     void insertOneNext(NodeObjectType &nd) {
         nd.next = next;
         if (next != nullptr) {

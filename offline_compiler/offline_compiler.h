@@ -6,7 +6,7 @@
  */
 
 #pragma once
-#include "elf/writer.h"
+#include "core/elf/writer.h"
 
 #include "cif/common/cif_main.h"
 #include "ocl_igc_interface/fcl_ocl_device_ctx.h"
@@ -89,6 +89,7 @@ class OfflineCompiler {
     std::string buildLog;
 
     bool useLlvmText = false;
+    bool useLlvmBc = false;
     bool useCppFile = false;
     bool useOptionsSuffix = false;
     bool quiet = false;

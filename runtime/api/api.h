@@ -973,6 +973,16 @@ cl_int clEnqueueMemsetINTEL(
     const cl_event *eventWaitList,
     cl_event *event);
 
+cl_int clEnqueueMemFillINTEL(
+    cl_command_queue commandQueue,
+    void *dstPtr,
+    const void *pattern,
+    size_t patternSize,
+    size_t size,
+    cl_uint numEventsInWaitList,
+    const cl_event *eventWaitList,
+    cl_event *event);
+
 cl_int clEnqueueMemcpyINTEL(
     cl_command_queue commandQueue,
     cl_bool blocking,
@@ -1014,6 +1024,17 @@ cl_int CL_API_CALL clGetDeviceGlobalVariablePointerINTEL(
     const char *globalVariableName,
     size_t *globalVariableSizeRet,
     void **globalVariablePointerRet);
+
+cl_int CL_API_CALL clGetExecutionInfoINTEL(
+    cl_command_queue commandQueue,
+    cl_kernel kernel,
+    cl_uint workDim,
+    const size_t *globalWorkOffset,
+    const size_t *localWorkSize,
+    cl_execution_info_intel paramName,
+    size_t paramValueSize,
+    void *paramValue,
+    size_t *paramValueSizeRet);
 
 // OpenCL 2.2
 

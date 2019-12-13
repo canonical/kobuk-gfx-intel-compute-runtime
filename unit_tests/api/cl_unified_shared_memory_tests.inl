@@ -5,9 +5,9 @@
  *
  */
 
+#include "core/memory_manager/unified_memory_manager.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/api/api.h"
-#include "runtime/memory_manager/unified_memory_manager.h"
 #include "unit_tests/command_queue/command_queue_fixture.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_kernel.h"
@@ -78,6 +78,23 @@ TEST(clUnifiedSharedMemoryTests, whenClDeviceMemAllocIntelIsCalledThenItAllocate
 
     retVal = clMemFreeINTEL(&mockContext, unfiedMemoryDeviceAllocation);
     EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+TEST(clUnifiedSharedMemoryTests, whenUnifiedSharedMemoryAllocationCallsAreCalledWithSizeGreaterThenMaxMemAllocSizeThenErrorIsReturned) {
+    MockContext mockContext;
+    cl_int retVal = CL_SUCCESS;
+    auto maxMemAllocSize = mockContext.getDevice(0u)->getDeviceInfo().maxMemAllocSize;
+    size_t requestedSize = static_cast<size_t>(maxMemAllocSize) + 1u;
+
+    auto unfiedMemoryDeviceAllocation = clDeviceMemAllocINTEL(&mockContext, mockContext.getDevice(0u), nullptr, requestedSize, 0, &retVal);
+    EXPECT_EQ(CL_INVALID_BUFFER_SIZE, retVal);
+    EXPECT_EQ(nullptr, unfiedMemoryDeviceAllocation);
+    unfiedMemoryDeviceAllocation = clSharedMemAllocINTEL(&mockContext, mockContext.getDevice(0u), nullptr, requestedSize, 0, &retVal);
+    EXPECT_EQ(CL_INVALID_BUFFER_SIZE, retVal);
+    EXPECT_EQ(nullptr, unfiedMemoryDeviceAllocation);
+    unfiedMemoryDeviceAllocation = clHostMemAllocINTEL(&mockContext, nullptr, requestedSize, 0, &retVal);
+    EXPECT_EQ(CL_INVALID_BUFFER_SIZE, retVal);
+    EXPECT_EQ(nullptr, unfiedMemoryDeviceAllocation);
 }
 
 TEST(clUnifiedSharedMemoryTests, whenClSharedMemAllocINTELisCalledWithWrongContextThenInvalidContextErrorIsReturned) {
@@ -199,6 +216,112 @@ TEST(clUnifiedSharedMemoryTests, whenClGetMemAllocInfoINTELisCalledWithValidUnif
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     retVal = clMemFreeINTEL(&mockContext, unifiedMemoryHostAllocation);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+TEST(clUnifiedSharedMemoryTests, whenHostMemAllocWithInvalidPropertiesTokenThenErrorIsReturned) {
+    MockContext mockContext;
+    cl_int retVal = CL_SUCCESS;
+    cl_mem_properties_intel properties[] = {0x1234, CL_MEM_ALLOC_WRITE_COMBINED_INTEL, 0};
+
+    auto unifiedMemoryHostAllocation = clHostMemAllocINTEL(&mockContext, properties, 4, 0, &retVal);
+
+    EXPECT_EQ(nullptr, unifiedMemoryHostAllocation);
+    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+}
+
+TEST(clUnifiedSharedMemoryTests, whenDeviceMemAllocWithInvalidPropertiesTokenThenErrorIsReturned) {
+    MockContext mockContext;
+    cl_int retVal = CL_SUCCESS;
+    cl_mem_properties_intel properties[] = {0x1234, CL_MEM_ALLOC_WRITE_COMBINED_INTEL, 0};
+
+    auto unifiedMemoryDeviceAllocation = clDeviceMemAllocINTEL(&mockContext, mockContext.getDevice(0u), properties, 4, 0, &retVal);
+
+    EXPECT_EQ(nullptr, unifiedMemoryDeviceAllocation);
+    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+}
+
+TEST(clUnifiedSharedMemoryTests, whenSharedMemAllocWithInvalidPropertiesTokenThenErrorIsReturned) {
+    MockContext mockContext;
+    cl_int retVal = CL_SUCCESS;
+    const uint64_t invalidToken = 0x1234;
+    cl_mem_properties_intel properties[] = {invalidToken, CL_MEM_ALLOC_WRITE_COMBINED_INTEL, 0};
+
+    auto unifiedMemorySharedAllocation = clSharedMemAllocINTEL(&mockContext, mockContext.getDevice(0u), properties, 4, 0, &retVal);
+
+    EXPECT_EQ(nullptr, unifiedMemorySharedAllocation);
+    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+}
+
+TEST(clUnifiedSharedMemoryTests, givenUnifiedMemoryAllocWithoutPropertiesWhenGetMemAllocFlagsThenDefaultValueIsReturned) {
+    uint64_t defaultValue = CL_MEM_ALLOC_DEFAULT_INTEL;
+    MockContext mockContext;
+    cl_int retVal = CL_SUCCESS;
+    size_t paramValueSize = sizeof(cl_mem_properties_intel);
+    cl_mem_properties_intel paramValue = 0;
+    size_t paramValueSizeRet = 0;
+
+    auto unifiedMemoryHostAllocation = clHostMemAllocINTEL(&mockContext, nullptr, 4, 0, &retVal);
+
+    retVal = clGetMemAllocInfoINTEL(&mockContext, unifiedMemoryHostAllocation, CL_MEM_ALLOC_FLAGS_INTEL, paramValueSize, &paramValue, &paramValueSizeRet);
+    EXPECT_EQ(defaultValue, paramValue);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = clMemFreeINTEL(&mockContext, unifiedMemoryHostAllocation);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+TEST(clUnifiedSharedMemoryTests, whenClGetMemAllocTypeIsCalledWithValidUnifiedMemoryHostAllocationThenProperTypeIsReturned) {
+    MockContext mockContext;
+    cl_int retVal = CL_SUCCESS;
+    size_t paramValueSize = sizeof(cl_mem_properties_intel);
+    cl_mem_properties_intel paramValue = 0;
+    size_t paramValueSizeRet = 0;
+    cl_mem_properties_intel properties[] = {CL_MEM_ALLOC_FLAGS_INTEL, CL_MEM_ALLOC_WRITE_COMBINED_INTEL, 0};
+
+    auto unifiedMemoryHostAllocation = clHostMemAllocINTEL(&mockContext, properties, 4, 0, &retVal);
+
+    retVal = clGetMemAllocInfoINTEL(&mockContext, unifiedMemoryHostAllocation, CL_MEM_ALLOC_FLAGS_INTEL, paramValueSize, &paramValue, &paramValueSizeRet);
+    EXPECT_EQ(properties[1], paramValue);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = clMemFreeINTEL(&mockContext, unifiedMemoryHostAllocation);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+TEST(clUnifiedSharedMemoryTests, whenClGetMemAllocTypeIsCalledWithValidUnifiedMemoryDeviceAllocationThenProperTypeIsReturned) {
+    MockContext mockContext;
+    cl_int retVal = CL_SUCCESS;
+    size_t paramValueSize = sizeof(cl_mem_properties_intel);
+    cl_mem_properties_intel paramValue = 0;
+    size_t paramValueSizeRet = 0;
+    cl_mem_properties_intel properties[] = {CL_MEM_ALLOC_FLAGS_INTEL, CL_MEM_ALLOC_WRITE_COMBINED_INTEL, 0};
+
+    auto unifiedMemoryDeviceAllocation = clDeviceMemAllocINTEL(&mockContext, mockContext.getDevice(0u), properties, 4, 0, &retVal);
+
+    retVal = clGetMemAllocInfoINTEL(&mockContext, unifiedMemoryDeviceAllocation, CL_MEM_ALLOC_FLAGS_INTEL, paramValueSize, &paramValue, &paramValueSizeRet);
+    EXPECT_EQ(properties[1], paramValue);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = clMemFreeINTEL(&mockContext, unifiedMemoryDeviceAllocation);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+TEST(clUnifiedSharedMemoryTests, whenClGetMemAllocTypeIsCalledWithValidUnifiedMemorySharedAllocationThenProperTypeIsReturned) {
+    MockContext mockContext;
+    cl_int retVal = CL_SUCCESS;
+    size_t paramValueSize = sizeof(cl_mem_properties_intel);
+    cl_mem_properties_intel paramValue = 0;
+    size_t paramValueSizeRet = 0;
+    cl_mem_properties_intel properties[] = {CL_MEM_ALLOC_FLAGS_INTEL, CL_MEM_ALLOC_WRITE_COMBINED_INTEL, 0};
+
+    auto unifiedMemorySharedAllocation = clSharedMemAllocINTEL(&mockContext, mockContext.getDevice(0u), properties, 4, 0, &retVal);
+
+    retVal = clGetMemAllocInfoINTEL(&mockContext, unifiedMemorySharedAllocation, CL_MEM_ALLOC_FLAGS_INTEL, paramValueSize, &paramValue, &paramValueSizeRet);
+    EXPECT_EQ(properties[1], paramValue);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = clMemFreeINTEL(&mockContext, unifiedMemorySharedAllocation);
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
@@ -387,6 +510,48 @@ TEST(clUnifiedSharedMemoryTests, whenclEnqueueMemsetINTELisCalledWithProperParam
     clMemFreeINTEL(mockContext.get(), unfiedMemoryDeviceAllocation);
 }
 
+TEST(clUnifiedSharedMemoryTests, whenclEnqueueMemFillINTELisCalledWithoutIncorrectCommandQueueThenInvaliQueueErrorIsReturned) {
+    cl_int setValue = 12u;
+    auto retVal = clEnqueueMemFillINTEL(0, nullptr, &setValue, 0u, 0u, 0u, nullptr, nullptr);
+    EXPECT_EQ(CL_INVALID_COMMAND_QUEUE, retVal);
+}
+
+TEST(clUnifiedSharedMemoryTests, whenclEnqueueMemFillINTELisCalledWithProperParametersThenParametersArePassedCorrectly) {
+    auto mockContext = std::make_unique<MockContext>();
+    cl_int retVal = CL_SUCCESS;
+
+    auto unfiedMemoryDeviceAllocation = clDeviceMemAllocINTEL(mockContext.get(), mockContext->getDevice(0u), nullptr, 400, 0, &retVal);
+
+    struct MockedCommandQueue : public CommandQueue {
+        cl_int enqueueSVMMemFill(void *svmPtr,
+                                 const void *pattern,
+                                 size_t patternSize,
+                                 size_t size,
+                                 cl_uint numEventsInWaitList,
+                                 const cl_event *eventWaitList,
+                                 cl_event *event) override {
+
+            EXPECT_EQ(12, *reinterpret_cast<const char *>(pattern));
+            EXPECT_EQ(expectedDstPtr, svmPtr);
+            EXPECT_EQ(400u, size);
+            EXPECT_EQ(4u, patternSize);
+            EXPECT_EQ(0u, numEventsInWaitList);
+            EXPECT_EQ(nullptr, eventWaitList);
+            EXPECT_EQ(nullptr, event);
+            return CL_SUCCESS;
+        }
+        void *expectedDstPtr = nullptr;
+    };
+
+    MockedCommandQueue queue;
+    queue.expectedDstPtr = unfiedMemoryDeviceAllocation;
+    cl_int setValue = 12u;
+
+    retVal = clEnqueueMemFillINTEL(&queue, unfiedMemoryDeviceAllocation, &setValue, sizeof(setValue), 400u, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    clMemFreeINTEL(mockContext.get(), unfiedMemoryDeviceAllocation);
+}
+
 TEST(clUnifiedSharedMemoryTests, whenClEnqueueMemcpyINTELisCalledWithWrongQueueThenInvalidQueueErrorIsReturned) {
     auto retVal = clEnqueueMemcpyINTEL(0, 0, nullptr, nullptr, 0, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_COMMAND_QUEUE, retVal);
@@ -518,6 +683,21 @@ TEST_F(clUnifiedSharedMemoryEventTests, whenClEnqueueMemsetINTELIsCalledWithEven
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     constexpr cl_command_type expectedCmd = CL_COMMAND_MEMSET_INTEL;
+    cl_command_type actualCmd = castToObjectOrAbort<Event>(event)->getCommandType();
+    EXPECT_EQ(expectedCmd, actualCmd);
+    clMemFreeINTEL(this->context, unfiedMemorySharedAllocation);
+}
+
+TEST_F(clUnifiedSharedMemoryEventTests, whenClEnqueueMemFillINTELIsCalledWithEventThenProperCmdTypeIsSet) {
+    cl_int retVal = CL_SUCCESS;
+
+    auto unfiedMemorySharedAllocation = clSharedMemAllocINTEL(this->context, this->context->getDevice(0u), nullptr, 400, 0, &retVal);
+    cl_int setValue = 12u;
+
+    retVal = clEnqueueMemFillINTEL(this->pCmdQ, unfiedMemorySharedAllocation, &setValue, sizeof(setValue), 400u, 0, nullptr, &event);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    constexpr cl_command_type expectedCmd = CL_COMMAND_MEMFILL_INTEL;
     cl_command_type actualCmd = castToObjectOrAbort<Event>(event)->getCommandType();
     EXPECT_EQ(expectedCmd, actualCmd);
     clMemFreeINTEL(this->context, unfiedMemorySharedAllocation);

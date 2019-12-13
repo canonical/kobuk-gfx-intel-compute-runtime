@@ -8,23 +8,23 @@
 #include "runtime/mem_obj/buffer.h"
 
 #include "core/helpers/aligned_memory.h"
+#include "core/helpers/hw_helper.h"
 #include "core/helpers/ptr_math.h"
 #include "core/helpers/string.h"
+#include "core/memory_manager/host_ptr_manager.h"
+#include "core/memory_manager/unified_memory_manager.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/helpers/timestamp_packet.h"
 #include "runtime/helpers/validators.h"
 #include "runtime/mem_obj/mem_obj_helper.h"
-#include "runtime/memory_manager/host_ptr_manager.h"
 #include "runtime/memory_manager/memory_manager.h"
-#include "runtime/memory_manager/unified_memory_manager.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 
 namespace NEO {
@@ -32,7 +32,9 @@ namespace NEO {
 BufferFuncs bufferFactory[IGFX_MAX_CORE] = {};
 
 Buffer::Buffer(Context *context,
-               MemoryProperties properties,
+               MemoryPropertiesFlags memoryProperties,
+               cl_mem_flags flags,
+               cl_mem_flags_intel flagsIntel,
                size_t size,
                void *memoryStorage,
                void *hostPtr,
@@ -42,7 +44,9 @@ Buffer::Buffer(Context *context,
                bool isObjectRedescribed)
     : MemObj(context,
              CL_MEM_OBJECT_BUFFER,
-             properties,
+             memoryProperties,
+             flags,
+             flagsIntel,
              size,
              memoryStorage,
              hostPtr,
@@ -54,7 +58,7 @@ Buffer::Buffer(Context *context,
     setHostPtrMinSize(size);
 }
 
-Buffer::Buffer() : MemObj(nullptr, CL_MEM_OBJECT_BUFFER, 0, 0, nullptr, nullptr, nullptr, false, false, false) {
+Buffer::Buffer() : MemObj(nullptr, CL_MEM_OBJECT_BUFFER, {}, 0, 0, 0, nullptr, nullptr, nullptr, false, false, false) {
 }
 
 Buffer::~Buffer() = default;
@@ -79,7 +83,9 @@ bool Buffer::isValidSubBufferOffset(size_t offset) {
 }
 
 void Buffer::validateInputAndCreateBuffer(cl_context &context,
-                                          MemoryProperties properties,
+                                          MemoryPropertiesFlags memoryProperties,
+                                          cl_mem_flags flags,
+                                          cl_mem_flags_intel flagsIntel,
                                           size_t size,
                                           void *hostPtr,
                                           cl_int &retVal,
@@ -90,14 +96,14 @@ void Buffer::validateInputAndCreateBuffer(cl_context &context,
         return;
     }
 
-    if (!MemObjHelper::validateMemoryPropertiesForBuffer(properties)) {
+    if (!MemObjHelper::validateMemoryPropertiesForBuffer(memoryProperties, flags, flagsIntel)) {
         retVal = CL_INVALID_VALUE;
         return;
     }
 
     auto pDevice = pContext->getDevice(0);
-    bool allowCreateBuffersWithUnrestrictedSize = isValueSet(properties.flags, CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL) ||
-                                                  isValueSet(properties.flags_intel, CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL);
+    bool allowCreateBuffersWithUnrestrictedSize = isValueSet(flags, CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL) ||
+                                                  isValueSet(flagsIntel, CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL);
 
     if (size == 0 || (size > pDevice->getHardwareCapabilities().maxMemAllocSize && !allowCreateBuffersWithUnrestrictedSize)) {
         retVal = CL_INVALID_BUFFER_SIZE;
@@ -105,14 +111,14 @@ void Buffer::validateInputAndCreateBuffer(cl_context &context,
     }
 
     /* Check the host ptr and data */
-    bool expectHostPtr = (properties.flags & (CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR)) != 0;
+    bool expectHostPtr = (flags & (CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR)) != 0;
     if ((hostPtr == nullptr) == expectHostPtr) {
         retVal = CL_INVALID_HOST_PTR;
         return;
     }
 
     // create the buffer
-    buffer = create(pContext, properties, size, hostPtr, retVal);
+    buffer = create(pContext, memoryProperties, flags, flagsIntel, size, hostPtr, retVal);
 }
 
 Buffer *Buffer::create(Context *context,
@@ -120,13 +126,13 @@ Buffer *Buffer::create(Context *context,
                        size_t size,
                        void *hostPtr,
                        cl_int &errcodeRet) {
-    MemoryProperties properties;
-    properties.flags = flags;
-    return create(context, properties, size, hostPtr, errcodeRet);
+    return create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0), flags, 0, size, hostPtr, errcodeRet);
 }
 
 Buffer *Buffer::create(Context *context,
-                       MemoryProperties properties,
+                       MemoryPropertiesFlags memoryProperties,
+                       cl_mem_flags flags,
+                       cl_mem_flags_intel flagsIntel,
                        size_t size,
                        void *hostPtr,
                        cl_int &errcodeRet) {
@@ -144,14 +150,12 @@ Buffer *Buffer::create(Context *context,
     MemoryManager *memoryManager = context->getMemoryManager();
     UNRECOVERABLE_IF(!memoryManager);
 
-    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(properties);
     GraphicsAllocation::AllocationType allocationType = getGraphicsAllocationType(
         memoryProperties,
-        context->isSharedContext,
-        context->peekContextType(),
+        *context,
         HwHelper::renderCompressedBuffersSupported(context->getDevice(0)->getHardwareInfo()),
         memoryManager->isLocalMemorySupported(),
-        HwHelper::get(context->getDevice(0)->getHardwareInfo().platform.eRenderCoreFamily).obtainRenderBufferCompressionPreference(size));
+        HwHelper::get(context->getDevice(0)->getHardwareInfo().platform.eRenderCoreFamily).obtainRenderBufferCompressionPreference(context->getDevice(0)->getHardwareInfo(), size));
 
     checkMemory(memoryProperties, size, hostPtr, errcodeRet, alignementSatisfied, copyMemoryFromHostPtr, memoryManager);
 
@@ -165,7 +169,7 @@ Buffer *Buffer::create(Context *context,
     }
 
     if (allocationType == GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY) {
-        if (properties.flags & CL_MEM_USE_HOST_PTR) {
+        if (memoryProperties.flags.useHostPtr) {
             if (alignementSatisfied) {
                 allocateMemory = false;
                 zeroCopyAllowed = true;
@@ -176,7 +180,7 @@ Buffer *Buffer::create(Context *context,
         }
     }
 
-    if (properties.flags & CL_MEM_USE_HOST_PTR) {
+    if (memoryProperties.flags.useHostPtr) {
         if (DebugManager.flags.DisableZeroCopyForUseHostPtr.get()) {
             zeroCopyAllowed = false;
             allocateMemory = true;
@@ -219,9 +223,9 @@ Buffer *Buffer::create(Context *context,
         context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_GOOD_INTEL, CL_BUFFER_NEEDS_ALLOCATE_MEMORY);
     }
 
+    auto rootDeviceIndex = context->getDevice(0)->getRootDeviceIndex();
     if (!memory) {
-        MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(properties);
-        AllocationProperties allocProperties = MemoryPropertiesParser::getAllocationProperties(memoryProperties, allocateMemory, size, allocationType, context->areMultiStorageAllocationsPreferred());
+        AllocationProperties allocProperties = MemoryPropertiesParser::getAllocationProperties(rootDeviceIndex, memoryProperties, allocateMemory, size, allocationType, context->areMultiStorageAllocationsPreferred());
         memory = memoryManager->allocateGraphicsMemoryWithProperties(allocProperties, hostPtr);
     }
 
@@ -230,12 +234,11 @@ Buffer *Buffer::create(Context *context,
     }
 
     //if allocation failed for CL_MEM_USE_HOST_PTR case retry with non zero copy path
-    if ((properties.flags & CL_MEM_USE_HOST_PTR) && !memory && Buffer::isReadOnlyMemoryPermittedByFlags(memoryProperties)) {
+    if (memoryProperties.flags.useHostPtr && !memory && Buffer::isReadOnlyMemoryPermittedByFlags(memoryProperties)) {
         allocationType = GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY;
         zeroCopyAllowed = false;
         copyMemoryFromHostPtr = true;
-        MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(properties);
-        AllocationProperties allocProperties = MemoryPropertiesParser::getAllocationProperties(memoryProperties, true, size, allocationType, context->areMultiStorageAllocationsPreferred());
+        AllocationProperties allocProperties = MemoryPropertiesParser::getAllocationProperties(rootDeviceIndex, memoryProperties, true, size, allocationType, context->areMultiStorageAllocationsPreferred());
         memory = memoryManager->allocateGraphicsMemoryWithProperties(allocProperties);
     }
 
@@ -256,15 +259,17 @@ Buffer *Buffer::create(Context *context,
     }
 
     memory->setAllocationType(allocationType);
-    memory->setMemObjectsAllocationWithWritableFlags(!(properties.flags & (CL_MEM_READ_ONLY | CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS)));
+    memory->setMemObjectsAllocationWithWritableFlags(!(memoryProperties.flags.readOnly || memoryProperties.flags.hostReadOnly || memoryProperties.flags.hostNoAccess));
 
     DBG_LOG(LogMemoryObject, __FUNCTION__, "hostPtr:", hostPtr, "size:", size, "memoryStorage:", memory->getUnderlyingBuffer(), "GPU address:", std::hex, memory->getGpuAddress());
 
     pBuffer = createBufferHw(context,
-                             properties,
+                             memoryProperties,
+                             flags,
+                             flagsIntel,
                              size,
                              memory->getUnderlyingBuffer(),
-                             (properties.flags & CL_MEM_USE_HOST_PTR) ? hostPtr : nullptr,
+                             (memoryProperties.flags.useHostPtr) ? hostPtr : nullptr,
                              memory,
                              zeroCopyAllowed,
                              isHostPtrSVM,
@@ -276,9 +281,9 @@ Buffer *Buffer::create(Context *context,
         return nullptr;
     }
 
-    if (properties.flags & CL_MEM_USE_HOST_PTR) {
+    if (memoryProperties.flags.useHostPtr) {
         if (!zeroCopyAllowed && !isHostPtrSVM) {
-            AllocationProperties properties{false, size, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
+            AllocationProperties properties{rootDeviceIndex, false, size, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
             properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = true;
             mapAllocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
         }
@@ -317,7 +322,7 @@ Buffer *Buffer::create(Context *context,
 
 Buffer *Buffer::createSharedBuffer(Context *context, cl_mem_flags flags, SharingHandler *sharingHandler,
                                    GraphicsAllocation *graphicsAllocation) {
-    auto sharedBuffer = createBufferHw(context, flags, graphicsAllocation->getUnderlyingBufferSize(), nullptr, nullptr, graphicsAllocation, false, false, false);
+    auto sharedBuffer = createBufferHw(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0), flags, 0, graphicsAllocation->getUnderlyingBufferSize(), nullptr, nullptr, graphicsAllocation, false, false, false);
 
     sharedBuffer->setSharingHandler(sharingHandler);
     return sharedBuffer;
@@ -374,10 +379,10 @@ void Buffer::checkMemory(MemoryPropertiesFlags memoryProperties,
     return;
 }
 
-GraphicsAllocation::AllocationType Buffer::getGraphicsAllocationType(const MemoryPropertiesFlags &properties, bool sharedContext,
-                                                                     ContextType contextType, bool renderCompressedBuffers,
-                                                                     bool isLocalMemoryEnabled, bool preferCompression) {
-    if (is32bit || sharedContext || properties.flags.forceSharedPhysicalMemory) {
+GraphicsAllocation::AllocationType Buffer::getGraphicsAllocationType(const MemoryPropertiesFlags &properties, Context &context,
+                                                                     bool renderCompressedBuffers, bool isLocalMemoryEnabled,
+                                                                     bool preferCompression) {
+    if (context.isSharedContext || properties.flags.forceSharedPhysicalMemory) {
         return GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY;
     }
 
@@ -385,7 +390,7 @@ GraphicsAllocation::AllocationType Buffer::getGraphicsAllocationType(const Memor
         return GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY;
     }
 
-    if (MemObjHelper::isSuitableForRenderCompression(renderCompressedBuffers, properties, contextType, preferCompression)) {
+    if (MemObjHelper::isSuitableForRenderCompression(renderCompressedBuffers, properties, context, preferCompression)) {
         return GraphicsAllocation::AllocationType::BUFFER_COMPRESSED;
     }
     return GraphicsAllocation::AllocationType::BUFFER;
@@ -397,10 +402,12 @@ bool Buffer::isReadOnlyMemoryPermittedByFlags(const MemoryPropertiesFlags &prope
 }
 
 Buffer *Buffer::createSubBuffer(cl_mem_flags flags,
+                                cl_mem_flags_intel flagsIntel,
                                 const cl_buffer_region *region,
                                 cl_int &errcodeRet) {
     DEBUG_BREAK_IF(nullptr == createFunction);
-    auto buffer = createFunction(this->context, flags, region->size,
+    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, flagsIntel);
+    auto buffer = createFunction(this->context, memoryProperties, flags, 0, region->size,
                                  ptrOffset(this->memoryStorage, region->origin),
                                  this->hostPtr ? ptrOffset(this->hostPtr, region->origin) : nullptr,
                                  this->graphicsAllocation,
@@ -492,7 +499,9 @@ bool Buffer::isReadWriteOnCpuAllowed(cl_bool blocking, cl_uint numEventsInWaitLi
 }
 
 Buffer *Buffer::createBufferHw(Context *context,
-                               MemoryProperties properties,
+                               MemoryPropertiesFlags memoryProperties,
+                               cl_mem_flags flags,
+                               cl_mem_flags_intel flagsIntel,
                                size_t size,
                                void *memoryStorage,
                                void *hostPtr,
@@ -505,7 +514,7 @@ Buffer *Buffer::createBufferHw(Context *context,
 
     auto funcCreate = bufferFactory[hwInfo.platform.eRenderCoreFamily].createBufferFunction;
     DEBUG_BREAK_IF(nullptr == funcCreate);
-    auto pBuffer = funcCreate(context, properties, size, memoryStorage, hostPtr, gfxAllocation,
+    auto pBuffer = funcCreate(context, memoryProperties, flags, flagsIntel, size, memoryStorage, hostPtr, gfxAllocation,
                               zeroCopy, isHostPtrSVM, isImageRedescribed);
     DEBUG_BREAK_IF(nullptr == pBuffer);
     if (pBuffer) {
@@ -516,6 +525,7 @@ Buffer *Buffer::createBufferHw(Context *context,
 
 Buffer *Buffer::createBufferHwFromDevice(const Device *device,
                                          cl_mem_flags flags,
+                                         cl_mem_flags_intel flagsIntel,
                                          size_t size,
                                          void *memoryStorage,
                                          void *hostPtr,
@@ -528,7 +538,8 @@ Buffer *Buffer::createBufferHwFromDevice(const Device *device,
 
     auto funcCreate = bufferFactory[hwInfo.platform.eRenderCoreFamily].createBufferFunction;
     DEBUG_BREAK_IF(nullptr == funcCreate);
-    auto pBuffer = funcCreate(nullptr, flags, size, memoryStorage, hostPtr, gfxAllocation,
+    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, flagsIntel);
+    auto pBuffer = funcCreate(nullptr, memoryProperties, flags, flagsIntel, size, memoryStorage, hostPtr, gfxAllocation,
                               zeroCopy, isHostPtrSVM, isImageRedescribed);
     pBuffer->executionEnvironment = device->getExecutionEnvironment();
     return pBuffer;
@@ -546,7 +557,7 @@ uint32_t Buffer::getMocsValue(bool disableL3Cache, bool isReadOnlyArgument) cons
     }
     bufferAddress += this->offset;
 
-    bool readOnlyMemObj = isValueSet(getFlags(), CL_MEM_READ_ONLY) || isReadOnlyArgument;
+    bool readOnlyMemObj = isValueSet(getMemoryPropertiesFlags(), CL_MEM_READ_ONLY) || isReadOnlyArgument;
     bool alignedMemObj = isAligned<MemoryConstants::cacheLineSize>(bufferAddress) &&
                          isAligned<MemoryConstants::cacheLineSize>(bufferSize);
 
@@ -563,8 +574,9 @@ void Buffer::setSurfaceState(const Device *device,
                              size_t svmSize,
                              void *svmPtr,
                              GraphicsAllocation *gfxAlloc,
-                             cl_mem_flags flags) {
-    auto buffer = Buffer::createBufferHwFromDevice(device, flags, svmSize, svmPtr, svmPtr, gfxAlloc, true, false, false);
+                             cl_mem_flags flags,
+                             cl_mem_flags_intel flagsIntel) {
+    auto buffer = Buffer::createBufferHwFromDevice(device, flags, flagsIntel, svmSize, svmPtr, svmPtr, gfxAlloc, true, false, false);
     buffer->setArgStateful(surfaceState, false, false, false, false);
     buffer->graphicsAllocation = nullptr;
     delete buffer;

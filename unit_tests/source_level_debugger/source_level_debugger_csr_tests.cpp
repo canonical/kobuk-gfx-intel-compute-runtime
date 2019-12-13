@@ -9,6 +9,7 @@
 #include "runtime/source_level_debugger/source_level_debugger.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
+#include "unit_tests/helpers/dispatch_flags_helper.h"
 #include "unit_tests/helpers/execution_environment_helper.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/mocks/mock_builtins.h"
@@ -24,21 +25,19 @@ class CommandStreamReceiverWithActiveDebuggerTest : public ::testing::Test {
     template <typename FamilyType>
     auto createCSR() {
         hwInfo = nullptr;
+        EnvironmentWithCsrWrapper environment;
+        environment.setCsrType<MockCsrHw2<FamilyType>>();
         executionEnvironment = getExecutionEnvironmentImpl(hwInfo);
         hwInfo->capabilityTable = platformDevices[0]->capabilityTable;
         hwInfo->capabilityTable.sourceLevelDebuggerSupported = true;
 
-        auto mockCsr = new MockCsrHw2<FamilyType>(*executionEnvironment);
-
-        executionEnvironment->commandStreamReceivers.resize(1);
-        executionEnvironment->commandStreamReceivers[0].push_back(std::unique_ptr<CommandStreamReceiver>(mockCsr));
         auto mockMemoryManager = new MockMemoryManager(*executionEnvironment);
         executionEnvironment->memoryManager.reset(mockMemoryManager);
 
         device.reset(Device::create<MockDevice>(executionEnvironment, 0));
         device->setSourceLevelDebuggerActive(true);
 
-        return mockCsr;
+        return static_cast<MockCsrHw2<FamilyType> *>(device->getDefaultEngine().commandStreamReceiver);
     }
 
     std::unique_ptr<MockDevice> device;
@@ -53,8 +52,7 @@ HWTEST_F(CommandStreamReceiverWithActiveDebuggerTest, givenCsrWithActiveDebugger
     CommandQueueHw<FamilyType> commandQueue(nullptr, device.get(), 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.preemptionMode = PreemptionMode::Disabled;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
 
     void *buffer = alignedMalloc(MemoryConstants::pageSize, MemoryConstants::pageSize64k);
 
@@ -94,8 +92,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverWithActiveDebuggerTest, givenCs
         auto &commandStream = commandQueue.getCS(4096u);
         auto &preambleStream = mockCsr->getCS(0);
 
-        DispatchFlags dispatchFlags;
-        dispatchFlags.preemptionMode = PreemptionMode::Disabled;
+        DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
 
         void *buffer = alignedMalloc(MemoryConstants::pageSize, MemoryConstants::pageSize64k);
 
@@ -146,8 +143,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverWithActiveDebuggerTest, givenCs
         auto &commandStream = commandQueue.getCS(4096u);
         auto &preambleStream = mockCsr->getCS(0);
 
-        DispatchFlags dispatchFlags;
-        dispatchFlags.preemptionMode = PreemptionMode::Disabled;
+        DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
 
         void *buffer = alignedMalloc(MemoryConstants::pageSize, MemoryConstants::pageSize64k);
 

@@ -6,24 +6,18 @@
  */
 
 #pragma once
+#include "core/gmm_helper/gmm_lib.h"
 #include "core/memory_manager/memory_constants.h"
-#include "runtime/api/cl_types.h"
-#include "runtime/gmm_helper/gmm_lib.h"
 
-#include <cstdint>
-#include <cstdlib>
 #include <memory>
 
 namespace NEO {
 enum class OCLPlane;
-struct HardwareInfo;
-struct FeatureTable;
-struct WorkaroundTable;
-struct ImageInfo;
-class GraphicsAllocation;
-class Gmm;
-class OsLibrary;
 class GmmClientContext;
+class GraphicsAllocation;
+class OsLibrary;
+struct HardwareInfo;
+struct ImageInfo;
 
 class GmmHelper {
   public:
@@ -33,10 +27,7 @@ class GmmHelper {
 
     const HardwareInfo *getHardwareInfo();
     uint32_t getMOCS(uint32_t type);
-    void setSimplifiedMocsTableUsage(bool value);
 
-    static constexpr uint32_t cacheDisabledIndex = 0;
-    static constexpr uint32_t cacheEnabledIndex = 4;
     static constexpr uint64_t maxPossiblePitch = 2147483648;
 
     template <uint8_t addressWidth = 48>
@@ -46,7 +37,7 @@ class GmmHelper {
 
     template <uint8_t addressWidth = 48>
     static uint64_t decanonize(uint64_t address) {
-        return (address & maxNBitValue<addressWidth>);
+        return (address & maxNBitValue(addressWidth));
     }
 
     static GmmClientContext *getClientContext();
@@ -57,16 +48,15 @@ class GmmHelper {
     static uint32_t getRenderMultisamplesCount(uint32_t numSamples);
     static GMM_YUV_PLANE convertPlane(OCLPlane oclPlane);
 
-    static std::unique_ptr<GmmClientContext> (*createGmmContextWrapperFunc)(GMM_CLIENT, GmmExportEntries &);
+    static std::unique_ptr<GmmClientContext> (*createGmmContextWrapperFunc)(HardwareInfo *, decltype(&InitializeGmm), decltype(&GmmDestroy));
 
   protected:
     void loadLib();
-    void initContext(const PLATFORM *platform, const FeatureTable *featureTable, const WorkaroundTable *workaroundTable, const GT_SYSTEM_INFO *pGtSysInfo);
 
-    bool useSimplifiedMocsTable = false;
     const HardwareInfo *hwInfo = nullptr;
     std::unique_ptr<OsLibrary> gmmLib;
     std::unique_ptr<GmmClientContext> gmmClientContext;
-    GmmExportEntries gmmEntries = {};
+    decltype(&InitializeGmm) initGmmFunc;
+    decltype(&GmmDestroy) destroyGmmFunc;
 };
 } // namespace NEO

@@ -24,6 +24,7 @@
 #include "unit_tests/fixtures/image_fixture.h"
 #include "unit_tests/fixtures/memory_management_fixture.h"
 #include "unit_tests/helpers/unit_test_helper.h"
+#include "unit_tests/helpers/variable_backup.h"
 #include "unit_tests/libult/ult_command_stream_receiver.h"
 #include "unit_tests/mocks/mock_command_queue.h"
 #include "unit_tests/mocks/mock_context.h"
@@ -216,6 +217,35 @@ TEST(CommandQueue, givenDeviceNotSupportingBlitOperationsWhenQueueIsCreatedThenD
     EXPECT_EQ(nullptr, cmdQ.getBcsCommandStreamReceiver());
 }
 
+using CommandQueueWithSubDevicesTest = ::testing::Test;
+HWTEST_F(CommandQueueWithSubDevicesTest, givenDeviceWithSubDevicesSupportingBlitOperationsWhenQueueIsCreatedThenBcsIsTakenFromFirstSubDevice) {
+    DebugManagerStateRestore restorer;
+    VariableBackup<bool> mockDeviceFlagBackup{&MockDevice::createSingleDevice, false};
+    DebugManager.flags.CreateMultipleSubDevices.set(2);
+    DebugManager.flags.EnableBlitterOperationsForReadWriteBuffers.set(1);
+    HardwareInfo hwInfo = *platformDevices[0];
+    bool createBcsEngine = !hwInfo.capabilityTable.blitterOperationsSupported;
+    hwInfo.capabilityTable.blitterOperationsSupported = true;
+    std::unique_ptr<MockDevice> device(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
+    EXPECT_EQ(2u, device->getNumAvailableDevices());
+    std::unique_ptr<OsContext> bcsOsContext;
+
+    auto subDevice = device->getDeviceById(0);
+    if (createBcsEngine) {
+        auto &engine = subDevice->getEngine(HwHelperHw<FamilyType>::lowPriorityEngineType, true);
+        bcsOsContext.reset(OsContext::create(nullptr, 1, 0, aub_stream::ENGINE_BCS, PreemptionMode::Disabled, false));
+        engine.osContext = bcsOsContext.get();
+        engine.commandStreamReceiver->setupContext(*bcsOsContext);
+    }
+    auto bcsEngine = subDevice->getEngine(aub_stream::EngineType::ENGINE_BCS, false);
+
+    CommandQueue cmdQ(nullptr, device.get(), 0);
+
+    EXPECT_NE(nullptr, cmdQ.getBcsCommandStreamReceiver());
+    EXPECT_EQ(bcsEngine.commandStreamReceiver, cmdQ.getBcsCommandStreamReceiver());
+    EXPECT_EQ(bcsEngine.osContext, &cmdQ.getBcsCommandStreamReceiver()->getOsContext());
+}
+
 TEST(CommandQueue, givenCmdQueueBlockedByReadyVirtualEventWhenUnblockingThenUpdateFlushTaskFromEvent) {
     std::unique_ptr<MockDevice> mockDevice(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
     auto context = new MockContext;
@@ -342,7 +372,7 @@ TEST_F(CommandQueueCommandStreamTest, givenCommandStreamReceiverWithReusableAllo
 
     auto memoryManager = pDevice->getMemoryManager();
     size_t requiredSize = alignUp(100 + CSRequirements::minCommandQueueCommandStreamSize + CSRequirements::csOverfetchSize, MemoryConstants::pageSize64k);
-    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties({requiredSize, GraphicsAllocation::AllocationType::COMMAND_BUFFER});
+    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), requiredSize, GraphicsAllocation::AllocationType::COMMAND_BUFFER});
     auto &commandStreamReceiver = cmdQ.getGpgpuCommandStreamReceiver();
     commandStreamReceiver.getInternalAllocationStorage()->storeAllocation(std::unique_ptr<GraphicsAllocation>(allocation), REUSABLE_ALLOCATION);
 

@@ -18,6 +18,7 @@
 
 namespace NEO {
 
+class AubSubCaptureManager;
 class TbxStream;
 
 class TbxMemoryManager : public OsAgnosticMemoryManager {
@@ -48,7 +49,7 @@ class TbxCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     using CommandStreamReceiverSimulatedCommonHw<GfxFamily>::engineInfo;
     using CommandStreamReceiverSimulatedCommonHw<GfxFamily>::stream;
 
-    FlushStamp flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
+    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
 
     void waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) override;
 
@@ -57,13 +58,15 @@ class TbxCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     void writeMemory(uint64_t gpuAddress, void *cpuAddress, size_t size, uint32_t memoryBank, uint64_t entryBits) override;
     bool writeMemory(GraphicsAllocation &gfxAllocation) override;
 
+    AubSubCaptureStatus checkAndActivateAubSubCapture(const MultiDispatchInfo &dispatchInfo) override;
+
     // Family specific version
-    MOCKABLE_VIRTUAL void submitBatchBuffer(uint64_t batchBufferGpuAddress, const void *batchBuffer, size_t batchBufferSize, uint32_t memoryBank, uint64_t entryBits);
+    MOCKABLE_VIRTUAL void submitBatchBuffer(uint64_t batchBufferGpuAddress, const void *batchBuffer, size_t batchBufferSize, uint32_t memoryBank, uint64_t entryBits, bool overrideRingHead);
     void pollForCompletion() override;
 
-    static CommandStreamReceiver *create(const std::string &baseName, bool withAubDump, ExecutionEnvironment &executionEnvironment);
+    static CommandStreamReceiver *create(const std::string &baseName, bool withAubDump, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex);
 
-    TbxCommandStreamReceiverHw(ExecutionEnvironment &executionEnvironment);
+    TbxCommandStreamReceiverHw(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex);
     ~TbxCommandStreamReceiverHw() override;
 
     void initializeEngine();
@@ -73,7 +76,7 @@ class TbxCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     }
 
     TbxStream tbxStream;
-
+    std::unique_ptr<AubSubCaptureManager> subCaptureManager;
     uint32_t aubDeviceId;
     bool streamInitialized = false;
 
@@ -88,5 +91,7 @@ class TbxCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     CommandStreamReceiverType getType() override {
         return CommandStreamReceiverType::CSR_TBX;
     }
+
+    bool dumpTbxNonWritable = false;
 };
 } // namespace NEO

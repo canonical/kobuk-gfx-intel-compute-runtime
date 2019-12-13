@@ -37,8 +37,7 @@ struct BuiltinOpParams {
     MemObj *dstMemObj = nullptr;
     GraphicsAllocation *srcSvmAlloc = nullptr;
     GraphicsAllocation *dstSvmAlloc = nullptr;
-    GraphicsAllocation *mapAllocation = nullptr;
-    const MemObjsForAuxTranslation *memObjsForAuxTranslation = nullptr;
+    GraphicsAllocation *transferAllocation = nullptr; //mapAllocation or hostPtrAllocation
     AuxTranslationDirection auxTranslationDirection = AuxTranslationDirection::None;
     bool unifiedMemoryArgsRequireMemSync = true;
     Vec3<size_t> srcOffset = {0, 0, 0};
@@ -75,6 +74,7 @@ class BuiltinDispatchInfoBuilder {
 
     // returns true if argument should be updated in kernel exposed to user code
     virtual bool setExplicitArg(uint32_t argIndex, size_t argSize, const void *argVal, cl_int &err) const {
+        err = 0;
         return true;
     }
 

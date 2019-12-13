@@ -5,8 +5,8 @@
  *
  */
 
+#include "core/command_stream/preemption.h"
 #include "core/os_interface/windows/debug_registry_reader.h"
-#include "runtime/command_stream/preemption.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/helpers/options.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
@@ -27,7 +27,7 @@ namespace NEO {
 
 extern CommandStreamReceiverCreateFunc commandStreamReceiverFactory[IGFX_MAX_CORE];
 
-CommandStreamReceiver *createMockCommandStreamReceiver(bool withAubDump, ExecutionEnvironment &executionEnvironment);
+CommandStreamReceiver *createMockCommandStreamReceiver(bool withAubDump, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex);
 
 class DriverInfoDeviceTest : public ::testing::Test {
   public:
@@ -45,8 +45,8 @@ class DriverInfoDeviceTest : public ::testing::Test {
     const HardwareInfo *hwInfo;
 };
 
-CommandStreamReceiver *createMockCommandStreamReceiver(bool withAubDump, ExecutionEnvironment &executionEnvironment) {
-    auto csr = new MockCommandStreamReceiver(executionEnvironment);
+CommandStreamReceiver *createMockCommandStreamReceiver(bool withAubDump, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) {
+    auto csr = new MockCommandStreamReceiver(executionEnvironment, rootDeviceIndex);
     if (!executionEnvironment.osInterface) {
         executionEnvironment.osInterface = std::make_unique<OSInterface>();
         auto wddm = new WddmMock();

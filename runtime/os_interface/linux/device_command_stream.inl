@@ -10,16 +10,15 @@
 #include "runtime/os_interface/linux/drm_command_stream.h"
 
 #include "drm_command_stream.h"
-#include "hw_cmds.h"
 
 namespace NEO {
 
 template <typename GfxFamily>
-CommandStreamReceiver *DeviceCommandStreamReceiver<GfxFamily>::create(bool withAubDump, ExecutionEnvironment &executionEnvironment) {
+CommandStreamReceiver *DeviceCommandStreamReceiver<GfxFamily>::create(bool withAubDump, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) {
     if (withAubDump) {
-        return new CommandStreamReceiverWithAUBDump<DrmCommandStreamReceiver<GfxFamily>>("aubfile", executionEnvironment);
+        return new CommandStreamReceiverWithAUBDump<DrmCommandStreamReceiver<GfxFamily>>("aubfile", executionEnvironment, rootDeviceIndex);
     } else {
-        return new DrmCommandStreamReceiver<GfxFamily>(executionEnvironment);
+        return new DrmCommandStreamReceiver<GfxFamily>(executionEnvironment, rootDeviceIndex);
     }
 };
 } // namespace NEO

@@ -49,7 +49,7 @@ TEST_F(SubBufferTest, createSubBuffer) {
     cl_buffer_region region = {2, 12};
     EXPECT_EQ(1, buffer->getRefInternalCount());
 
-    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_ONLY, &region, retVal);
+    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_ONLY, 0, &region, retVal);
     EXPECT_EQ(2, buffer->getRefInternalCount());
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_NE(nullptr, subBuffer);
@@ -68,7 +68,7 @@ TEST_F(SubBufferTest, GivenUnalignedHostPtrBufferWhenSubBufferIsCreatedThenItIsN
     ASSERT_NE(nullptr, buffer);
     ASSERT_EQ(CL_SUCCESS, retVal);
 
-    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_ONLY, &region, retVal);
+    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_ONLY, 0, &region, retVal);
     EXPECT_NE(nullptr, subBuffer);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_FALSE(subBuffer->isMemObjZeroCopy());
@@ -106,7 +106,7 @@ TEST_F(SubBufferTest, givenSharingHandlerFromParentBufferWhenCreateThenShareHand
     auto handler = new SharingHandler();
     buffer->setSharingHandler(handler);
 
-    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_ONLY, &region, retVal);
+    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_ONLY, 0, &region, retVal);
     ASSERT_NE(nullptr, subBuffer);
     EXPECT_EQ(subBuffer->getSharingHandler().get(), handler);
 
@@ -127,7 +127,7 @@ TEST_F(SubBufferTest, GivenBufferWithAlignedHostPtrAndSameMemoryStorageWhenSubBu
     EXPECT_EQ(alignedPointer, buffer->getHostPtr());
     EXPECT_EQ(alignedPointer, buffer->getCpuAddress());
 
-    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_ONLY, &region, retVal);
+    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_ONLY, 0, &region, retVal);
     EXPECT_NE(nullptr, subBuffer);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -151,7 +151,7 @@ TEST_F(SubBufferTest, GivenBufferWithMemoryStorageAndNullHostPtrWhenSubBufferIsC
     EXPECT_EQ(nullptr, buffer->getHostPtr());
     EXPECT_NE(nullptr, buffer->getCpuAddress());
 
-    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_ONLY, &region, retVal);
+    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_ONLY, 0, &region, retVal);
     EXPECT_NE(nullptr, subBuffer);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -165,13 +165,13 @@ TEST_F(SubBufferTest, GivenBufferWithMemoryStorageAndNullHostPtrWhenSubBufferIsC
 TEST_F(SubBufferTest, givenBufferWithHostPtrWhenSubbufferGetsMapPtrThenExpectBufferHostPtr) {
     cl_buffer_region region = {0, 16};
 
-    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_WRITE, &region, retVal);
+    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_WRITE, 0, &region, retVal);
     ASSERT_NE(nullptr, subBuffer);
     ASSERT_EQ(CL_SUCCESS, retVal);
 
-    void *mapPtr = subBuffer->getBasePtrForMap();
+    void *mapPtr = subBuffer->getBasePtrForMap(0);
     EXPECT_EQ(pHostPtr, mapPtr);
-    mapPtr = subBuffer->getBasePtrForMap();
+    mapPtr = subBuffer->getBasePtrForMap(0);
     EXPECT_EQ(pHostPtr, mapPtr);
 
     subBuffer->release();
@@ -185,12 +185,12 @@ TEST_F(SubBufferTest, givenBufferWithNoHostPtrWhenSubbufferGetsMapPtrThenExpectB
     ASSERT_NE(nullptr, buffer);
     ASSERT_EQ(CL_SUCCESS, retVal);
 
-    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_WRITE, &region, retVal);
+    auto subBuffer = buffer->createSubBuffer(CL_MEM_READ_WRITE, 0, &region, retVal);
     ASSERT_NE(nullptr, subBuffer);
     ASSERT_EQ(CL_SUCCESS, retVal);
 
-    void *mapPtr = subBuffer->getBasePtrForMap();
-    void *bufferMapPtr = buffer->getBasePtrForMap();
+    void *mapPtr = subBuffer->getBasePtrForMap(0);
+    void *bufferMapPtr = buffer->getBasePtrForMap(0);
     EXPECT_EQ(bufferMapPtr, mapPtr);
     auto mapAllocation = subBuffer->getMapAllocation();
     auto bufferMapAllocation = buffer->getMapAllocation();
@@ -198,7 +198,7 @@ TEST_F(SubBufferTest, givenBufferWithNoHostPtrWhenSubbufferGetsMapPtrThenExpectB
     EXPECT_EQ(bufferMapAllocation, mapAllocation);
     EXPECT_EQ(bufferMapPtr, mapAllocation->getUnderlyingBuffer());
 
-    mapPtr = subBuffer->getBasePtrForMap();
+    mapPtr = subBuffer->getBasePtrForMap(0);
     EXPECT_EQ(bufferMapPtr, mapPtr);
 
     subBuffer->release();

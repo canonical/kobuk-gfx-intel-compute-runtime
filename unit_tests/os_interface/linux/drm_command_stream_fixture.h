@@ -6,8 +6,8 @@
  */
 
 #pragma once
+#include "core/command_stream/preemption.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
-#include "runtime/command_stream/preemption.h"
 #include "runtime/os_interface/linux/drm_command_stream.h"
 #include "runtime/os_interface/linux/os_context_linux.h"
 #include "runtime/os_interface/linux/os_interface.h"
@@ -31,22 +31,21 @@ class DrmCommandStreamTest : public ::testing::Test {
         mock = std::make_unique<::testing::NiceMock<DrmMockImpl>>(mockFd);
 
         executionEnvironment.setHwInfo(*platformDevices);
+        executionEnvironment.prepareRootDeviceEnvironments(1);
         executionEnvironment.osInterface = std::make_unique<OSInterface>();
         executionEnvironment.osInterface->get()->setDrm(mock.get());
 
         osContext = std::make_unique<OsContextLinux>(*mock, 0u, 1, HwHelper::get(platformDevices[0]->platform.eRenderCoreFamily).getGpgpuEngineInstances()[0],
                                                      PreemptionHelper::getDefaultPreemptionMode(*platformDevices[0]), false);
 
-        csr = new DrmCommandStreamReceiver<GfxFamily>(executionEnvironment, gemCloseWorkerMode::gemCloseWorkerActive);
+        csr = new DrmCommandStreamReceiver<GfxFamily>(executionEnvironment, 0, gemCloseWorkerMode::gemCloseWorkerActive);
         ASSERT_NE(nullptr, csr);
-        executionEnvironment.commandStreamReceivers.resize(1);
-        executionEnvironment.commandStreamReceivers[0].push_back(std::unique_ptr<CommandStreamReceiver>(csr));
         csr->setupContext(*osContext);
 
         // Memory manager creates pinBB with ioctl, expect one call
         EXPECT_CALL(*mock, ioctl(::testing::_, ::testing::_))
             .Times(1);
-        memoryManager = new DrmMemoryManager(gemCloseWorkerActive,
+        memoryManager = new DrmMemoryManager(gemCloseWorkerMode::gemCloseWorkerActive,
                                              DebugManager.flags.EnableForcePin.get(),
                                              true,
                                              executionEnvironment);
@@ -61,7 +60,7 @@ class DrmCommandStreamTest : public ::testing::Test {
     void TearDownT() {
         memoryManager->waitForDeletions();
         memoryManager->peekGemCloseWorker()->close(true);
-        executionEnvironment.commandStreamReceivers.clear();
+        delete csr;
         ::testing::Mock::VerifyAndClearExpectations(mock.get());
         // Memory manager closes pinBB with ioctl, expect one call
         EXPECT_CALL(*mock, ioctl(::testing::_, ::testing::_))
@@ -93,6 +92,7 @@ class DrmCommandStreamEnhancedTest : public ::testing::Test {
         executionEnvironment = new ExecutionEnvironment;
         executionEnvironment->incRefInternal();
         executionEnvironment->setHwInfo(*platformDevices);
+        executionEnvironment->prepareRootDeviceEnvironments(1);
         executionEnvironment->initGmm();
         this->dbgState = std::make_unique<DebugManagerStateRestore>();
         //make sure this is disabled, we don't want to test this now
@@ -104,7 +104,7 @@ class DrmCommandStreamEnhancedTest : public ::testing::Test {
 
         csr = new TestedDrmCommandStreamReceiver<GfxFamily>(*executionEnvironment);
         ASSERT_NE(nullptr, csr);
-        mm = new DrmMemoryManager(gemCloseWorkerInactive,
+        mm = new DrmMemoryManager(gemCloseWorkerMode::gemCloseWorkerInactive,
                                   DebugManager.flags.EnableForcePin.get(),
                                   true,
                                   *executionEnvironment);
@@ -141,7 +141,7 @@ class DrmCommandStreamEnhancedTest : public ::testing::Test {
         friend DrmCommandStreamEnhancedTest;
 
       protected:
-        MockBufferObject(Drm *drm, size_t size) : BufferObject(drm, 1) {
+        MockBufferObject(Drm *drm, size_t size) : BufferObject(drm, 1, 0) {
             this->size = alignUp(size, 4096);
         }
     };

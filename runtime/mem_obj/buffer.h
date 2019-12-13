@@ -19,10 +19,11 @@ namespace NEO {
 class Buffer;
 class Device;
 class MemoryManager;
-struct MemoryProperties;
 
 typedef Buffer *(*BufferCreatFunc)(Context *context,
-                                   MemoryProperties properties,
+                                   MemoryPropertiesFlags memoryProperties,
+                                   cl_mem_flags flags,
+                                   cl_mem_flags_intel flagsIntel,
                                    size_t size,
                                    void *memoryStorage,
                                    void *hostPtr,
@@ -47,7 +48,9 @@ class Buffer : public MemObj {
     ~Buffer() override;
 
     static void validateInputAndCreateBuffer(cl_context &context,
-                                             MemoryProperties properties,
+                                             MemoryPropertiesFlags memoryProperties,
+                                             cl_mem_flags flags,
+                                             cl_mem_flags_intel flagsIntel,
                                              size_t size,
                                              void *hostPtr,
                                              cl_int &retVal,
@@ -60,7 +63,9 @@ class Buffer : public MemObj {
                           cl_int &errcodeRet);
 
     static Buffer *create(Context *context,
-                          MemoryProperties properties,
+                          MemoryPropertiesFlags properties,
+                          cl_mem_flags flags,
+                          cl_mem_flags_intel flagsIntel,
                           size_t size,
                           void *hostPtr,
                           cl_int &errcodeRet);
@@ -71,7 +76,9 @@ class Buffer : public MemObj {
                                       GraphicsAllocation *graphicsAllocation);
 
     static Buffer *createBufferHw(Context *context,
-                                  MemoryProperties properties,
+                                  MemoryPropertiesFlags memoryProperties,
+                                  cl_mem_flags flags,
+                                  cl_mem_flags_intel flagsIntel,
                                   size_t size,
                                   void *memoryStorage,
                                   void *hostPtr,
@@ -82,6 +89,7 @@ class Buffer : public MemObj {
 
     static Buffer *createBufferHwFromDevice(const Device *device,
                                             cl_mem_flags flags,
+                                            cl_mem_flags_intel flagsIntel,
                                             size_t size,
                                             void *memoryStorage,
                                             void *hostPtr,
@@ -91,6 +99,7 @@ class Buffer : public MemObj {
                                             bool isImageRedescribed);
 
     Buffer *createSubBuffer(cl_mem_flags flags,
+                            cl_mem_flags_intel flagsIntel,
                             const cl_buffer_region *region,
                             cl_int &errcodeRet);
 
@@ -99,7 +108,8 @@ class Buffer : public MemObj {
                                 size_t svmSize,
                                 void *svmPtr,
                                 GraphicsAllocation *gfxAlloc = nullptr,
-                                cl_mem_flags flags = 0);
+                                cl_mem_flags flags = 0,
+                                cl_mem_flags_intel flagsIntel = 0);
 
     static void provideCompressionHint(GraphicsAllocation::AllocationType allocationType,
                                        Context *context,
@@ -129,7 +139,9 @@ class Buffer : public MemObj {
 
   protected:
     Buffer(Context *context,
-           MemoryProperties properties,
+           MemoryPropertiesFlags memoryProperties,
+           cl_mem_flags flags,
+           cl_mem_flags_intel flagsIntel,
            size_t size,
            void *memoryStorage,
            void *hostPtr,
@@ -147,9 +159,9 @@ class Buffer : public MemObj {
                             bool &isZeroCopy,
                             bool &copyMemoryFromHostPtr,
                             MemoryManager *memMngr);
-    static GraphicsAllocation::AllocationType getGraphicsAllocationType(const MemoryPropertiesFlags &properties, bool sharedContext,
-                                                                        ContextType contextType, bool renderCompressedBuffers,
-                                                                        bool localMemoryEnabled, bool preferCompression);
+    static GraphicsAllocation::AllocationType getGraphicsAllocationType(const MemoryPropertiesFlags &properties, Context &context,
+                                                                        bool renderCompressedBuffers, bool localMemoryEnabled,
+                                                                        bool preferCompression);
     static bool isReadOnlyMemoryPermittedByFlags(const MemoryPropertiesFlags &properties);
 
     void transferData(void *dst, void *src, size_t copySize, size_t copyOffset);
@@ -159,7 +171,9 @@ template <typename GfxFamily>
 class BufferHw : public Buffer {
   public:
     BufferHw(Context *context,
-             MemoryProperties properties,
+             MemoryPropertiesFlags memoryProperties,
+             cl_mem_flags flags,
+             cl_mem_flags_intel flagsIntel,
              size_t size,
              void *memoryStorage,
              void *hostPtr,
@@ -167,14 +181,17 @@ class BufferHw : public Buffer {
              bool zeroCopy,
              bool isHostPtrSVM,
              bool isObjectRedescribed)
-        : Buffer(context, properties, size, memoryStorage, hostPtr, gfxAllocation,
+        : Buffer(context, memoryProperties, flags, flagsIntel, size, memoryStorage, hostPtr, gfxAllocation,
                  zeroCopy, isHostPtrSVM, isObjectRedescribed) {}
 
     void setArgStateful(void *memory, bool forceNonAuxMode, bool disableL3, bool alignSizeForAuxTranslation, bool isReadOnlyArgument) override;
     void appendBufferState(void *memory, Context *context, GraphicsAllocation *gfxAllocation, bool isReadOnlyArgument);
+    void appendSurfaceStateExt(void *memory);
 
     static Buffer *create(Context *context,
-                          MemoryProperties properties,
+                          MemoryPropertiesFlags memoryProperties,
+                          cl_mem_flags flags,
+                          cl_mem_flags_intel flagsIntel,
                           size_t size,
                           void *memoryStorage,
                           void *hostPtr,
@@ -183,7 +200,9 @@ class BufferHw : public Buffer {
                           bool isHostPtrSVM,
                           bool isObjectRedescribed) {
         auto buffer = new BufferHw<GfxFamily>(context,
-                                              properties,
+                                              memoryProperties,
+                                              flags,
+                                              flagsIntel,
                                               size,
                                               memoryStorage,
                                               hostPtr,

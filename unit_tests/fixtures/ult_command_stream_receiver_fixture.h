@@ -7,12 +7,13 @@
 
 #pragma once
 #include "core/command_stream/linear_stream.h"
+#include "core/command_stream/preemption.h"
 #include "core/memory_manager/graphics_allocation.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/command_stream/preemption.h"
 #include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/helpers/cache_policy.h"
 #include "unit_tests/fixtures/device_fixture.h"
+#include "unit_tests/helpers/dispatch_flags_helper.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/libult/ult_command_stream_receiver.h"
 #include "unit_tests/mocks/mock_graphics_allocation.h"
@@ -137,7 +138,7 @@ struct UltCommandStreamReceiverTest
         return reinterpret_cast<UltCommandStreamReceiver<GfxFamily> &>(pDevice->getGpgpuCommandStreamReceiver());
     }
 
-    DispatchFlags flushTaskFlags = {};
+    DispatchFlags flushTaskFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     uint32_t taskLevel = 42;
     LinearStream commandStream;
     IndirectHeap dsh = {nullptr};

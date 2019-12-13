@@ -7,17 +7,19 @@
 
 #include "program.h"
 
+#include "core/compiler_interface/compiler_interface.h"
+#include "core/elf/writer.h"
 #include "core/helpers/debug_helpers.h"
+#include "core/helpers/hw_helper.h"
 #include "core/helpers/string.h"
-#include "elf/writer.h"
+#include "core/memory_manager/unified_memory_manager.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/compiler_interface/compiler_interface.h"
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
-#include "runtime/helpers/hw_helper.h"
 #include "runtime/memory_manager/memory_manager.h"
-#include "runtime/memory_manager/unified_memory_manager.h"
 #include "runtime/os_interface/os_context.h"
+#include "runtime/program/block_kernel_manager.h"
+#include "runtime/program/kernel_info.h"
 
 #include <sstream>
 
@@ -53,8 +55,6 @@ Program::Program(ExecutionEnvironment &executionEnvironment, Context *context, b
     constantSurface = nullptr;
     globalSurface = nullptr;
     globalVarTotalSize = 0;
-    programScopePatchListSize = 0;
-    programScopePatchList = nullptr;
     programOptionVersion = 12u;
     allowNonUniform = false;
     char paramValue[32] = {};
@@ -79,6 +79,15 @@ Program::Program(ExecutionEnvironment &executionEnvironment, Context *context, b
             DebugManager.flags.DisableStatelessToStatefulOptimization.get()) {
             internalOptions += "-cl-intel-greater-than-4GB-buffer-required ";
         }
+
+        if (DebugManager.flags.UseBindlessBuffers.get()) {
+            internalOptions += "-cl-intel-use-bindless-buffers ";
+        }
+
+        if (DebugManager.flags.UseBindlessImages.get()) {
+            internalOptions += "-cl-intel-use-bindless-images ";
+        }
+
         kernelDebugEnabled = pDevice->isSourceLevelDebuggerActive();
 
         auto enableStatelessToStatefullWithOffset = pDevice->getHardwareCapabilities().isStatelesToStatefullWithOffsetSupported;
@@ -95,15 +104,6 @@ Program::Program(ExecutionEnvironment &executionEnvironment, Context *context, b
 }
 
 Program::~Program() {
-    delete[] genBinary;
-    genBinary = nullptr;
-
-    delete[] irBinary;
-    irBinary = nullptr;
-
-    delete[] debugData;
-    debugData = nullptr;
-
     elfBinarySize = 0;
 
     cleanCurrentKernelInfo();
@@ -169,59 +169,57 @@ cl_int Program::createProgramFromBinary(
 }
 
 cl_int Program::rebuildProgramFromIr() {
-    cl_int retVal = CL_SUCCESS;
     size_t dataSize;
 
-    do {
-        if (!Program::isValidLlvmBinary(irBinary, irBinarySize)) {
-            if ((!Program::isValidSpirvBinary(irBinary, irBinarySize))) {
-                retVal = CL_INVALID_PROGRAM;
-                break;
-            }
-            isSpirV = true;
-        }
+    isSpirV = false;
+    if (Program::isValidSpirvBinary(irBinary.get(), irBinarySize)) {
+        isSpirV = true;
+    } else if (false == Program::isValidLlvmBinary(irBinary.get(), irBinarySize)) {
+        return CL_INVALID_PROGRAM;
+    }
 
-        CLElfLib::CElfWriter elfWriter(CLElfLib::E_EH_TYPE::EH_TYPE_OPENCL_OBJECTS, CLElfLib::E_EH_MACHINE::EH_MACHINE_NONE, 0);
+    CLElfLib::CElfWriter elfWriter(CLElfLib::E_EH_TYPE::EH_TYPE_OPENCL_OBJECTS, CLElfLib::E_EH_MACHINE::EH_MACHINE_NONE, 0);
 
-        elfWriter.addSection(CLElfLib::SSectionNode(isSpirV ? CLElfLib::E_SH_TYPE::SH_TYPE_SPIRV : CLElfLib::E_SH_TYPE::SH_TYPE_OPENCL_LLVM_BINARY,
-                                                    CLElfLib::E_SH_FLAG::SH_FLAG_NONE, "", std::string(irBinary, irBinarySize), static_cast<uint32_t>(irBinarySize)));
+    elfWriter.addSection(CLElfLib::SSectionNode(isSpirV ? CLElfLib::E_SH_TYPE::SH_TYPE_SPIRV : CLElfLib::E_SH_TYPE::SH_TYPE_OPENCL_LLVM_BINARY,
+                                                CLElfLib::E_SH_FLAG::SH_FLAG_NONE, "", std::string(irBinary.get(), irBinarySize), static_cast<uint32_t>(irBinarySize)));
 
-        dataSize = elfWriter.getTotalBinarySize();
-        CLElfLib::ElfBinaryStorage data(dataSize);
-        elfWriter.resolveBinary(data);
+    dataSize = elfWriter.getTotalBinarySize();
+    CLElfLib::ElfBinaryStorage data(dataSize);
+    elfWriter.resolveBinary(data);
 
-        CompilerInterface *pCompilerInterface = this->executionEnvironment.getCompilerInterface();
-        if (nullptr == pCompilerInterface) {
-            retVal = CL_OUT_OF_HOST_MEMORY;
-            break;
-        }
+    CompilerInterface *pCompilerInterface = this->executionEnvironment.getCompilerInterface();
+    if (nullptr == pCompilerInterface) {
+        return CL_OUT_OF_HOST_MEMORY;
+    }
 
-        TranslationArgs inputArgs = {};
-        inputArgs.pInput = data.data();
-        inputArgs.InputSize = static_cast<uint32_t>(dataSize);
-        inputArgs.pOptions = options.c_str();
-        inputArgs.OptionsSize = static_cast<uint32_t>(options.length());
-        inputArgs.pInternalOptions = internalOptions.c_str();
-        inputArgs.InternalOptionsSize = static_cast<uint32_t>(internalOptions.length());
-        inputArgs.pTracingOptions = nullptr;
-        inputArgs.TracingOptionsCount = 0;
+    TranslationInput inputArgs = {IGC::CodeType::elf, IGC::CodeType::oclGenBin};
+    inputArgs.src = ArrayRef<const char>(data);
+    inputArgs.apiOptions = ArrayRef<const char>(options);
+    inputArgs.internalOptions = ArrayRef<const char>(internalOptions);
 
-        retVal = pCompilerInterface->link(*this, inputArgs);
-        if (retVal != CL_SUCCESS) {
-            break;
-        }
+    TranslationOutput compilerOuput = {};
+    auto err = pCompilerInterface->link(*this->pDevice, inputArgs, compilerOuput);
+    this->updateBuildLog(this->pDevice, compilerOuput.frontendCompilerLog.c_str(), compilerOuput.frontendCompilerLog.size());
+    this->updateBuildLog(this->pDevice, compilerOuput.backendCompilerLog.c_str(), compilerOuput.backendCompilerLog.size());
+    if (TranslationOutput::ErrorCode::Success != err) {
+        return asClError(err);
+    }
 
-        retVal = processGenBinary();
-        if (retVal != CL_SUCCESS) {
-            break;
-        }
+    this->genBinary = std::move(compilerOuput.deviceBinary.mem);
+    this->genBinarySize = compilerOuput.deviceBinary.size;
+    this->debugData = std::move(compilerOuput.debugData.mem);
+    this->debugDataSize = compilerOuput.debugData.size;
 
-        programBinaryType = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
-        isCreatedFromBinary = true;
-        isProgramBinaryResolved = true;
-    } while (false);
+    auto retVal = processGenBinary();
+    if (retVal != CL_SUCCESS) {
+        return retVal;
+    }
 
-    return retVal;
+    programBinaryType = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
+    isCreatedFromBinary = true;
+    isProgramBinaryResolved = true;
+
+    return CL_SUCCESS;
 }
 
 cl_int Program::setProgramSpecializationConstant(cl_uint specId, size_t specSize, const void *specValue) {
@@ -238,20 +236,11 @@ cl_int Program::setProgramSpecializationConstant(cl_uint specId, size_t specSize
             return CL_OUT_OF_HOST_MEMORY;
         }
 
-        TranslationArgs inputArgs = {};
-        inputArgs.pInput = const_cast<char *>(sourceCode.c_str());
-        inputArgs.InputSize = static_cast<uint32_t>(sourceCode.size());
-        inputArgs.pOptions = options.c_str();
-        inputArgs.OptionsSize = static_cast<uint32_t>(options.length());
-        inputArgs.pInternalOptions = internalOptions.c_str();
-        inputArgs.InternalOptionsSize = static_cast<uint32_t>(internalOptions.length());
-        inputArgs.pTracingOptions = nullptr;
-        inputArgs.TracingOptionsCount = 0;
+        SpecConstantInfo specConstInfo;
+        auto retVal = pCompilerInterface->getSpecConstantsInfo(this->getDevice(0), ArrayRef<const char>(sourceCode), specConstInfo);
 
-        auto retVal = pCompilerInterface->getSpecConstantsInfo(*this, inputArgs);
-
-        if (retVal != CL_SUCCESS) {
-            return retVal;
+        if (retVal != TranslationOutput::ErrorCode::Success) {
+            return CL_INVALID_VALUE;
         }
 
         areSpecializationConstantsInitialized = true;
@@ -274,14 +263,6 @@ cl_int Program::updateSpecializationConstant(cl_uint specId, size_t specSize, co
     return CL_INVALID_SPEC_ID;
 }
 
-void Program::getProgramCompilerVersion(
-    SProgramBinaryHeader *pSectionData,
-    uint32_t &binaryVersion) const {
-    if (pSectionData != nullptr) {
-        binaryVersion = pSectionData->Version;
-    }
-}
-
 bool Program::isValidLlvmBinary(
     const void *pBinary,
     size_t binarySize) {
@@ -298,22 +279,6 @@ bool Program::isValidLlvmBinary(
     return retVal;
 }
 
-void Program::setSource(const char *pSourceString) {
-    sourceCode = pSourceString;
-}
-
-cl_int Program::getSource(char *&pBinary, unsigned int &dataSize) const {
-    cl_int retVal = CL_INVALID_PROGRAM;
-    pBinary = nullptr;
-    dataSize = 0;
-    if (!sourceCode.empty()) {
-        pBinary = (char *)(sourceCode.c_str());
-        dataSize = (unsigned int)(sourceCode.size());
-        retVal = CL_SUCCESS;
-    }
-    return retVal;
-}
-
 cl_int Program::getSource(std::string &binary) const {
     cl_int retVal = CL_INVALID_PROGRAM;
     binary = {};
@@ -322,42 +287,6 @@ cl_int Program::getSource(std::string &binary) const {
         retVal = CL_SUCCESS;
     }
     return retVal;
-}
-
-void Program::storeGenBinary(
-    const void *pSrc,
-    const size_t srcSize) {
-    storeBinary(genBinary, genBinarySize, pSrc, srcSize);
-}
-
-void Program::storeIrBinary(
-    const void *pSrc,
-    const size_t srcSize,
-    bool isSpirV) {
-    storeBinary(irBinary, irBinarySize, pSrc, srcSize);
-    this->isSpirV = isSpirV;
-}
-
-void Program::storeDebugData(
-    const void *pSrc,
-    const size_t srcSize) {
-    storeBinary(debugData, debugDataSize, pSrc, srcSize);
-}
-
-void Program::storeBinary(
-    char *&pDst,
-    size_t &dstSize,
-    const void *pSrc,
-    const size_t srcSize) {
-    dstSize = 0;
-
-    DEBUG_BREAK_IF(!(pSrc && srcSize > 0));
-
-    delete[] pDst;
-    pDst = new char[srcSize];
-
-    dstSize = (cl_uint)srcSize;
-    memcpy_s(pDst, dstSize, pSrc, srcSize);
 }
 
 void Program::updateBuildLog(const Device *pDevice, const char *pErrorString,
@@ -433,7 +362,7 @@ void Program::separateBlockKernels() {
     allKernelInfos.clear();
 }
 
-void Program::allocateBlockPrivateSurfaces() {
+void Program::allocateBlockPrivateSurfaces(uint32_t rootDeviceIndex) {
     size_t blockCount = blockKernelManager->getCount();
 
     for (uint32_t i = 0; i < blockCount; i++) {
@@ -444,7 +373,7 @@ void Program::allocateBlockPrivateSurfaces() {
 
             if (privateSize > 0 && blockKernelManager->getPrivateSurface(i) == nullptr) {
                 privateSize *= getDevice(0).getDeviceInfo().computeUnitsUsedForScratch * info->getMaxSimdSize();
-                auto *privateSurface = this->executionEnvironment.memoryManager->allocateGraphicsMemoryWithProperties({privateSize, GraphicsAllocation::AllocationType::PRIVATE_SURFACE});
+                auto *privateSurface = this->executionEnvironment.memoryManager->allocateGraphicsMemoryWithProperties({rootDeviceIndex, privateSize, GraphicsAllocation::AllocationType::PRIVATE_SURFACE});
                 blockKernelManager->pushPrivateSurface(privateSurface, i);
             }
         }

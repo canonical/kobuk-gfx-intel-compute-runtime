@@ -17,22 +17,23 @@ struct MemoryInfoImpl : public NEO::MemoryInfo {
     ~MemoryInfoImpl() override{};
 };
 
-TEST(DrmTest, whenQueryingMemoryInfoThenMemoryInfoIsNotCreatedAndNoIoctlIsCalled) {
+TEST(DrmTest, whenQueryingEngineInfoThenEngineInfoIsNotCreatedAndNoIoctlsAreCalled) {
     std::unique_ptr<DrmMock> drm = std::make_unique<DrmMock>();
     EXPECT_NE(nullptr, drm);
 
-    drm->queryMemoryInfo();
+    EXPECT_TRUE(drm->queryEngineInfo());
 
-    EXPECT_EQ(nullptr, drm->memoryInfo.get());
+    EXPECT_EQ(nullptr, drm->engineInfo.get());
     EXPECT_EQ(0u, drm->ioctlCallsCount);
 }
 
-TEST(DrmTest, whenSettingMemoryRegionsThenNoIoctlIsCalled) {
+TEST(DrmTest, whenQueryingMemoryInfoThenMemoryInfoIsNotCreatedAndNoIoctlsAreCalled) {
     std::unique_ptr<DrmMock> drm = std::make_unique<DrmMock>();
     EXPECT_NE(nullptr, drm);
 
-    drm->setMemoryRegions();
+    EXPECT_TRUE(drm->queryMemoryInfo());
 
+    EXPECT_EQ(nullptr, drm->memoryInfo.get());
     EXPECT_EQ(0u, drm->ioctlCallsCount);
 }
 

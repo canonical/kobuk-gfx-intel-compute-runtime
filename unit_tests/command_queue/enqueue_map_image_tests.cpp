@@ -8,6 +8,7 @@
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/event/user_event.h"
+#include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/os_interface/os_context.h"
 #include "test.h"
 #include "unit_tests/command_queue/command_enqueue_fixture.h"
@@ -52,7 +53,7 @@ struct EnqueueMapImageParamsTest : public EnqueueMapImageTest,
                                    public ::testing::WithParamInterface<uint32_t> {
 };
 
-TEST_F(EnqueueMapImageTest, reuseMappedPtrForTiledImg) {
+TEST_F(EnqueueMapImageTest, GivenTiledImageWhenMappingImageThenPointerIsReused) {
     auto mapFlags = CL_MAP_READ;
     const size_t origin[3] = {0, 0, 0};
     const size_t region[3] = {1, 1, 1};
@@ -194,6 +195,8 @@ HWTEST_F(EnqueueMapImageTest, givenTiledImageWhenMapImageIsCalledThenStorageIsSe
     auto surfaceFormatInfo = image->getSurfaceFormatInfo();
 
     mockedImage<FamilyType> mockImage(context,
+                                      {},
+                                      0,
                                       0,
                                       4096u,
                                       nullptr,
@@ -238,7 +241,7 @@ HWTEST_F(EnqueueMapImageTest, givenTiledImageWhenMapImageIsCalledThenStorageIsSe
     mockImage.releaseAllocatedMapPtr();
 }
 
-TEST_F(EnqueueMapImageTest, checkPointer) {
+TEST_F(EnqueueMapImageTest, WhenMappingImageThenCpuAndGpuAddressAreEqualWhenZeroCopyIsUsed) {
     auto mapFlags = CL_MAP_READ;
     const size_t origin[3] = {0, 0, 0};
     const size_t region[3] = {1, 1, 1};
@@ -270,7 +273,7 @@ TEST_F(EnqueueMapImageTest, checkPointer) {
     EXPECT_EQ(imageSlicePitch, imageSlicePitchRef);
 }
 
-TEST_F(EnqueueMapImageTest, checkRetVal) {
+TEST_F(EnqueueMapImageTest, GivenCmdqAndValidArgsWhenMappingImageThenSuccessIsReturned) {
     auto mapFlags = CL_MAP_READ;
     const size_t origin[3] = {0, 0, 0};
     const size_t region[3] = {1, 1, 1};
@@ -432,7 +435,7 @@ HWTEST_F(EnqueueMapImageTest, givenReadOnlyMapWithOutEventWhenMappedThenSetEvent
     clReleaseEvent(unmapEventReturned);
 }
 
-HWTEST_F(EnqueueMapImageTest, MapImageEventProperties) {
+HWTEST_F(EnqueueMapImageTest, GivenPtrToReturnEventWhenMappingImageThenEventIsNotNull) {
     if (!UnitTestHelper<FamilyType>::tiledImagesSupported) {
         GTEST_SKIP();
     }
@@ -916,7 +919,7 @@ TEST_F(EnqueueMapImageTest, givenImage1DArrayWhenEnqueueMapImageIsCalledThenRetu
     class MockImage : public Image {
       public:
         MockImage(Context *context, cl_mem_flags flags, GraphicsAllocation *allocation, const SurfaceFormatInfo &surfaceFormat,
-                  const cl_image_format &imageFormat, const cl_image_desc &imageDesc) : Image(context, flags,
+                  const cl_image_format &imageFormat, const cl_image_desc &imageDesc) : Image(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0), flags, 0,
                                                                                               0, nullptr,
                                                                                               imageFormat, imageDesc,
                                                                                               true,
@@ -1022,7 +1025,7 @@ struct EnqueueMapImageTypeTest : public CommandEnqueueFixture,
     Image *image = nullptr;
 };
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueMapImageTypeTest, blockingEnqueueRequiresPCWithDCFlushSetAfterWalker) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueMapImageTypeTest, GiveRequirementForPipeControlWorkaroundWhenMappingImageThenAdditionalPipeControlIsProgrammed) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
 
     // Set taskCount to 1 to call finish on map operation

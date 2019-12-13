@@ -49,7 +49,7 @@ class D3D9Tests : public PlatformFixture, public ::testing::Test {
         }
         GraphicsAllocation *allocateGraphicsMemoryForImage(const AllocationData &allocationData) override {
             auto gmm = std::make_unique<Gmm>(*allocationData.imgInfo, StorageInfo{});
-            AllocationProperties properties(nullptr, false, GraphicsAllocation::AllocationType::SHARED_IMAGE, false);
+            AllocationProperties properties(allocationData.rootDeviceIndex, nullptr, false, GraphicsAllocation::AllocationType::SHARED_IMAGE, false);
             auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle(1, properties, false);
             alloc->setDefaultGmm(forceGmm);
             gmmOwnershipPassed = true;
@@ -92,8 +92,8 @@ class D3D9Tests : public PlatformFixture, public ::testing::Test {
         PlatformFixture::SetUp();
         memoryManager = std::make_unique<MockMM>(*pPlatform->peekExecutionEnvironment());
         context = new MockContext(pPlatform->getDevice(0));
-        context->forcePreferD3dSharedResources(true);
-        context->setMemoryManager(memoryManager.get());
+        context->preferD3dSharedResources = true;
+        context->memoryManager = memoryManager.get();
 
         mockSharingFcns = new NiceMock<MockD3DSharingFunctions<D3D9>>();
         context->setSharingFunctions(mockSharingFcns);
@@ -189,7 +189,7 @@ TEST_F(D3D9Tests, createSurface) {
     auto image = castToObject<Image>(memObj);
     EXPECT_NE(nullptr, image->getSharingHandler());
 
-    EXPECT_TRUE(CL_MEM_READ_WRITE == image->getFlags());
+    EXPECT_TRUE(CL_MEM_READ_WRITE == image->getMemoryPropertiesFlags());
 
     EXPECT_TRUE(expectedImgFormat.image_channel_data_type == image->getImageFormat().image_channel_data_type);
     EXPECT_TRUE(expectedImgFormat.image_channel_order == image->getImageFormat().image_channel_order);
@@ -223,7 +223,7 @@ TEST_F(D3D9Tests, createSurfaceIntel) {
     auto image = castToObject<Image>(memObj);
     EXPECT_NE(nullptr, image->getSharingHandler());
 
-    EXPECT_TRUE(CL_MEM_READ_WRITE == image->getFlags());
+    EXPECT_TRUE(CL_MEM_READ_WRITE == image->getMemoryPropertiesFlags());
 
     EXPECT_TRUE(expectedImgFormat.image_channel_data_type == image->getImageFormat().image_channel_data_type);
     EXPECT_TRUE(expectedImgFormat.image_channel_order == image->getImageFormat().image_channel_order);

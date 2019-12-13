@@ -35,7 +35,8 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
     using INTERFACE_DESCRIPTOR_DATA = typename GfxFamily::INTERFACE_DESCRIPTOR_DATA;
     using MI_ATOMIC = typename GfxFamily::MI_ATOMIC;
 
-    static uint32_t computeSlmValues(uint32_t valueIn);
+    static uint32_t alignSlmSize(uint32_t slmSize);
+    static uint32_t computeSlmValues(uint32_t slmSize);
 
     static INTERFACE_DESCRIPTOR_DATA *getInterfaceDescriptor(
         const IndirectHeap &indirectHeap,
@@ -46,7 +47,8 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor,
         const Kernel &kernel,
         const size_t &sizeCrossThreadData,
-        const size_t &sizePerThreadData);
+        const size_t &sizePerThreadData,
+        const uint32_t threadsPerThreadGroup);
 
     inline static uint32_t additionalSizeRequiredDsh();
 
@@ -111,7 +113,8 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         PreemptionMode preemptionMode,
         WALKER_TYPE<GfxFamily> *walkerCmd,
         INTERFACE_DESCRIPTOR_DATA *inlineInterfaceDescriptor,
-        bool localIdsGenerationByRuntime);
+        bool localIdsGenerationByRuntime,
+        bool isCcsUsed);
 
     static void programPerThreadData(
         size_t &sizePerThreadData,
@@ -139,7 +142,8 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         const KernelInfo &kernelInfo,
         const bool &localIdsGenerationByRuntime,
         const bool &kernelUsesLocalIds,
-        Kernel &kernel);
+        Kernel &kernel,
+        bool isCssUsed);
 
     static size_t getSizeRequiredCS(const Kernel *kernel);
     static size_t getSizeRequiredForCacheFlush(const CommandQueue &commandQueue, const Kernel *kernel, uint64_t postSyncAddress);
@@ -160,42 +164,7 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
     static size_t getTotalSizeRequiredSSH(
         const MultiDispatchInfo &multiDispatchInfo);
 
-    static size_t getSizeRequiredForExecutionModel(IndirectHeap::Type heapType, const Kernel &kernel) {
-        typedef typename GfxFamily::BINDING_TABLE_STATE BINDING_TABLE_STATE;
-
-        size_t totalSize = 0;
-        BlockKernelManager *blockManager = kernel.getProgram()->getBlockKernelManager();
-        uint32_t blockCount = static_cast<uint32_t>(blockManager->getCount());
-        uint32_t maxBindingTableCount = 0;
-
-        if (heapType == IndirectHeap::SURFACE_STATE) {
-            totalSize = BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE - 1;
-
-            for (uint32_t i = 0; i < blockCount; i++) {
-                const KernelInfo *pBlockInfo = blockManager->getBlockKernelInfo(i);
-                totalSize += pBlockInfo->heapInfo.pKernelHeader->SurfaceStateHeapSize;
-                totalSize = alignUp(totalSize, BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE);
-
-                maxBindingTableCount = std::max(maxBindingTableCount, pBlockInfo->patchInfo.bindingTableState->Count);
-            }
-        }
-
-        if (heapType == IndirectHeap::INDIRECT_OBJECT || heapType == IndirectHeap::SURFACE_STATE) {
-            BuiltIns &builtIns = *kernel.getDevice().getExecutionEnvironment()->getBuiltIns();
-            SchedulerKernel &scheduler = builtIns.getSchedulerKernel(kernel.getContext());
-
-            if (heapType == IndirectHeap::INDIRECT_OBJECT) {
-                totalSize += getSizeRequiredIOH(scheduler);
-            } else {
-                totalSize += getSizeRequiredSSH(scheduler);
-
-                totalSize += maxBindingTableCount * sizeof(BINDING_TABLE_STATE) * DeviceQueue::interfaceDescriptorEntries;
-                totalSize = alignUp(totalSize, BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE);
-            }
-        }
-        return totalSize;
-    }
-
+    static size_t getSizeRequiredForExecutionModel(IndirectHeap::Type heapType, const Kernel &kernel);
     static void setInterfaceDescriptorOffset(
         WALKER_TYPE<GfxFamily> *walkerCmd,
         uint32_t &interfaceDescriptorIndex);
@@ -206,6 +175,8 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
     static MI_ATOMIC *programMiAtomic(LinearStream &commandStream, uint64_t writeAddress, typename MI_ATOMIC::ATOMIC_OPCODES opcode, typename MI_ATOMIC::DATA_SIZE dataSize);
     static void programMiAtomic(MI_ATOMIC &atomic, uint64_t writeAddress, typename MI_ATOMIC::ATOMIC_OPCODES opcode, typename MI_ATOMIC::DATA_SIZE dataSize);
     static void programCacheFlushAfterWalkerCommand(LinearStream *commandStream, const CommandQueue &commandQueue, const Kernel *kernel, uint64_t postSyncAddress);
+    static void programBarrierEnable(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, uint32_t value, const HardwareInfo &hwInfo);
+    static void adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, const HardwareInfo &hwInfo);
 
     static const size_t alignInterfaceDescriptorData = 64 * sizeof(uint8_t);
     static const uint32_t alignIndirectStatePointer = 64 * sizeof(uint8_t);

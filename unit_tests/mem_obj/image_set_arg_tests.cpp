@@ -25,7 +25,6 @@
 #include "unit_tests/mocks/mock_program.h"
 
 #include "gmock/gmock.h"
-#include "hw_cmds.h"
 
 using namespace NEO;
 using namespace ::testing;
@@ -160,6 +159,33 @@ HWTEST_F(ImageSetArgTest, setKernelArgImageUsingNormalImage) {
 
     EXPECT_EQ(srcImage->getImageDesc().image_width, computedWidth);
     EXPECT_EQ(0u, surfaceState.getMipCountLod());
+}
+
+HWTEST_F(ImageSetArgTest, givenImageWhenSettingMipTailStartLodThenProgramValueFromGmmResourceinfo) {
+    typedef typename FamilyType::RENDER_SURFACE_STATE RENDER_SURFACE_STATE;
+
+    if (pDevice->getHardwareInfo().platform.eRenderCoreFamily == IGFX_GEN8_CORE) {
+        GTEST_SKIP();
+    }
+
+    RENDER_SURFACE_STATE surfaceState = {};
+    const uint32_t mipTailStartLod = 4;
+
+    auto gmm = srcImage->getGraphicsAllocation()->getDefaultGmm();
+    EXPECT_NE(nullptr, gmm);
+    auto mockGmmResourceInfo = static_cast<MockGmmResourceInfo *>(gmm->gmmResourceInfo.get());
+
+    mockGmmResourceInfo->setMipTailStartLod(mipTailStartLod);
+
+    srcImage->setImageArg(&surfaceState, false, 0);
+    EXPECT_EQ(mipTailStartLod, surfaceState.getMipTailStartLod());
+
+    // default value
+    delete gmm;
+    srcImage->getGraphicsAllocation()->setDefaultGmm(nullptr);
+
+    srcImage->setImageArg(&surfaceState, false, 0);
+    EXPECT_EQ(0u, surfaceState.getMipTailStartLod());
 }
 
 HWTEST_F(ImageSetArgTest, givenCubeMapIndexWhenSetKernelArgImageIsCalledThenModifySurfaceState) {
@@ -353,6 +379,7 @@ HWTEST_F(ImageSetArgTest, clSetKernelArgImage) {
     EXPECT_EQ(expectedChannelBlue, surfaceState->getShaderChannelSelectBlue());
     EXPECT_EQ(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_ALPHA, surfaceState->getShaderChannelSelectAlpha());
     EXPECT_EQ(imageMocs, surfaceState->getMemoryObjectControlState());
+    EXPECT_EQ(0u, surfaceState->getCoherencyType());
 
     std::vector<Surface *> surfaces;
     pKernel->getResidency(surfaces);

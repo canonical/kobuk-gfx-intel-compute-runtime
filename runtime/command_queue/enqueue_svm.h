@@ -6,12 +6,12 @@
  */
 
 #pragma once
+#include "core/memory_manager/unified_memory_manager.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/command_queue/command_queue_hw.h"
 #include "runtime/command_queue/enqueue_common.h"
 #include "runtime/event/event.h"
 #include "runtime/memory_manager/surface.h"
-#include "runtime/memory_manager/unified_memory_manager.h"
 
 #include <new>
 
@@ -448,7 +448,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueSVMMemFill(void *svmPtr,
     commandStreamReceieverOwnership.unlock();
 
     if (!patternAllocation) {
-        patternAllocation = memoryManager->allocateGraphicsMemoryWithProperties({patternSize, allocationType});
+        patternAllocation = memoryManager->allocateGraphicsMemoryWithProperties({getDevice().getRootDeviceIndex(), patternSize, allocationType});
     }
 
     if (patternSize == 1) {
@@ -469,7 +469,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueSVMMemFill(void *svmPtr,
     BuiltInOwnershipWrapper builtInLock(builder, this->context);
 
     BuiltinOpParams operationParams;
-    MemObj patternMemObj(this->context, 0, 0, alignUp(patternSize, 4), patternAllocation->getUnderlyingBuffer(),
+    MemObj patternMemObj(this->context, 0, {}, 0, 0, alignUp(patternSize, 4), patternAllocation->getUnderlyingBuffer(),
                          patternAllocation->getUnderlyingBuffer(), patternAllocation, false, false, true);
 
     void *alignedDstPtr = alignDown(svmPtr, 4);

@@ -6,7 +6,7 @@
  */
 
 #pragma once
-#include "runtime/helpers/preamble.h"
+#include "core/helpers/preamble.h"
 
 namespace NEO {
 
@@ -22,6 +22,13 @@ template <>
 struct L3CNTLRegisterOffset<ICLFamily> {
     static const uint32_t registerOffset = 0x7034;
 };
+
+namespace DebugModeRegisterOffset {
+template <>
+constexpr uint32_t registerOffset<ICLFamily> = 0x20d8;
+template <>
+constexpr uint32_t debugEnabledValue<ICLFamily> = (1 << 5) | (1 << 21);
+}; // namespace DebugModeRegisterOffset
 
 namespace gen11HdcModeRegister {
 const uint32_t address = 0xE5F4;

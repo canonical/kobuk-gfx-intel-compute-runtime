@@ -9,6 +9,7 @@
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/platform/platform.h"
 #include "test.h"
+#include "unit_tests/helpers/dispatch_flags_helper.h"
 
 using namespace NEO;
 
@@ -17,9 +18,9 @@ typedef ::testing::Test Gen9CoherencyRequirements;
 GEN9TEST_F(Gen9CoherencyRequirements, noCoherencyProgramming) {
     ExecutionEnvironment *executionEnvironment = platformImpl->peekExecutionEnvironment();
     executionEnvironment->initializeMemoryManager();
-    CommandStreamReceiverHw<SKLFamily> csr(*executionEnvironment);
+    CommandStreamReceiverHw<SKLFamily> csr(*executionEnvironment, 0);
     LinearStream stream;
-    DispatchFlags flags = {};
+    DispatchFlags flags = DispatchFlagsHelper::createDefaultDispatchFlags();
 
     auto retSize = csr.getCmdSizeForComputeMode();
     EXPECT_EQ(0u, retSize);

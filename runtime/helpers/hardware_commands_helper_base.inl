@@ -24,7 +24,8 @@ void HardwareCommandsHelper<GfxFamily>::setAdditionalInfo(
     INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor,
     const Kernel &kernel,
     const size_t &sizeCrossThreadData,
-    const size_t &sizePerThreadData) {
+    const size_t &sizePerThreadData,
+    const uint32_t threadsPerThreadGroup) {
 
     DEBUG_BREAK_IF((sizeCrossThreadData % sizeof(GRF)) != 0);
     auto numGrfCrossThreadData = static_cast<uint32_t>(sizeCrossThreadData / sizeof(GRF));
@@ -94,12 +95,17 @@ void HardwareCommandsHelper<GfxFamily>::setKernelStartOffset(
     const KernelInfo &kernelInfo,
     const bool &localIdsGenerationByRuntime,
     const bool &kernelUsesLocalIds,
-    Kernel &kernel) {
+    Kernel &kernel,
+    bool isCssUsed) {
 
     if (kernelAllocation) {
         kernelStartOffset = kernelInfo.getGraphicsAllocation()->getGpuAddressToPatch();
     }
     kernelStartOffset += kernel.getStartOffset();
+
+    if (isCssUsed && kernel.getDevice().getHardwareInfo().workaroundTable.waUseOffsetToSkipSetFFIDGP) {
+        kernelStartOffset += kernelInfo.patchInfo.threadPayload->OffsetToSkipSetFFIDGP;
+    }
 }
 
 template <typename GfxFamily>
@@ -169,4 +175,12 @@ void HardwareCommandsHelper<GfxFamily>::programCacheFlushAfterWalkerCommand(Line
 
 template <typename GfxFamily>
 void HardwareCommandsHelper<GfxFamily>::appendMiFlushDw(typename GfxFamily::MI_FLUSH_DW *miFlushDwCmd) {}
+
+template <typename GfxFamily>
+void HardwareCommandsHelper<GfxFamily>::programBarrierEnable(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, uint32_t value, const HardwareInfo &hwInfo) {
+    pInterfaceDescriptor->setBarrierEnable(value);
+}
+
+template <typename GfxFamily>
+void HardwareCommandsHelper<GfxFamily>::adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, const HardwareInfo &hwInfo) {}
 } // namespace NEO

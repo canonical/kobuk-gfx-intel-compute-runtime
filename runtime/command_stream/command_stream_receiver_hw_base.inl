@@ -6,11 +6,13 @@
  */
 
 #include "core/command_stream/linear_stream.h"
+#include "core/command_stream/preemption.h"
+#include "core/helpers/hw_helper.h"
+#include "core/helpers/preamble.h"
 #include "core/helpers/ptr_math.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/command_stream/command_stream_receiver_hw.h"
 #include "runtime/command_stream/experimental_command_buffer.h"
-#include "runtime/command_stream/preemption.h"
 #include "runtime/command_stream/scratch_space_controller_base.h"
 #include "runtime/device/device.h"
 #include "runtime/event/event.h"
@@ -19,10 +21,9 @@
 #include "runtime/helpers/cache_policy.h"
 #include "runtime/helpers/flat_batch_buffer_helper_hw.h"
 #include "runtime/helpers/flush_stamp.h"
-#include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/options.h"
-#include "runtime/helpers/preamble.h"
 #include "runtime/helpers/state_base_address.h"
+#include "runtime/helpers/state_compute_mode_helper.h"
 #include "runtime/helpers/timestamp_packet.h"
 #include "runtime/indirect_heap/indirect_heap.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
@@ -31,11 +32,13 @@
 #include "runtime/os_interface/os_context.h"
 #include "runtime/utilities/tag_allocator.h"
 
+#include "command_stream_receiver_hw_ext.inl"
+
 namespace NEO {
 
 template <typename GfxFamily>
-CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiverHw(ExecutionEnvironment &executionEnvironment)
-    : CommandStreamReceiver(executionEnvironment) {
+CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiverHw(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex)
+    : CommandStreamReceiver(executionEnvironment, rootDeviceIndex) {
 
     auto &hwHelper = HwHelper::get(peekHwInfo().platform.eRenderCoreFamily);
     localMemoryEnabled = hwHelper.getEnableLocalMemory(peekHwInfo());
@@ -53,8 +56,8 @@ CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiverHw(ExecutionEnvironment
 }
 
 template <typename GfxFamily>
-FlushStamp CommandStreamReceiverHw<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
-    return flushStamp->peekStamp();
+bool CommandStreamReceiverHw<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
+    return true;
 }
 
 template <typename GfxFamily>
@@ -216,8 +219,9 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
     csrSizeRequestFlags.coherencyRequestChanged = this->lastSentCoherencyRequest != static_cast<int8_t>(dispatchFlags.requiresCoherency);
     csrSizeRequestFlags.preemptionRequestChanged = this->lastPreemptionMode != dispatchFlags.preemptionMode;
     csrSizeRequestFlags.mediaSamplerConfigChanged = this->lastMediaSamplerConfig != static_cast<int8_t>(dispatchFlags.pipelineSelectArgs.mediaSamplerRequired);
-    csrSizeRequestFlags.numGrfRequiredChanged = this->lastSentNumGrfRequired != dispatchFlags.numGrfRequired;
     csrSizeRequestFlags.specialPipelineSelectModeChanged = this->lastSpecialPipelineSelectMode != dispatchFlags.pipelineSelectArgs.specialPipelineSelectMode;
+    csrSizeRequestFlags.numGrfRequiredChanged = this->lastSentNumGrfRequired != dispatchFlags.numGrfRequired;
+    lastSentNumGrfRequired = dispatchFlags.numGrfRequired;
 
     auto force32BitAllocations = getMemoryManager()->peekForce32BitAllocations();
     bool stateBaseAddressDirty = false;
@@ -255,13 +259,11 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
     TimestampPacketHelper::programCsrDependencies<GfxFamily>(commandStreamCSR, dispatchFlags.csrDependencies);
 
     if (stallingPipeControlOnNextFlushRequired) {
-        stallingPipeControlOnNextFlushRequired = false;
-        auto stallingPipeControlCmd = commandStream.getSpaceForCmd<PIPE_CONTROL>();
-        *stallingPipeControlCmd = GfxFamily::cmdInitPipeControl;
-        stallingPipeControlCmd->setCommandStreamerStallEnable(true);
+        programStallingPipeControlForBarrier(commandStreamCSR, dispatchFlags);
     }
+
+    programEngineModeCommands(commandStreamCSR, dispatchFlags);
     initPageTableManagerRegisters(commandStreamCSR);
-    programPreemption(commandStreamCSR, dispatchFlags);
     programComputeMode(commandStreamCSR, dispatchFlags);
     programL3(commandStreamCSR, dispatchFlags, newL3Config);
     programPipelineSelect(commandStreamCSR, dispatchFlags.pipelineSelectArgs);
@@ -273,9 +275,11 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
         this->lastSentThreadArbitrationPolicy = this->requiredThreadArbitrationPolicy;
     }
 
-    stateBaseAddressDirty |= ((GSBAFor32BitProgrammed ^ dispatchFlags.GSBA32BitRequired) && force32BitAllocations);
+    stateBaseAddressDirty |= ((GSBAFor32BitProgrammed ^ dispatchFlags.gsba32BitRequired) && force32BitAllocations);
 
     programVFEState(commandStreamCSR, dispatchFlags, device.getDeviceInfo().maxFrontEndThreads);
+
+    programPreemption(commandStreamCSR, dispatchFlags);
 
     bool dshDirty = dshState.updateAndCheck(&dsh);
     bool iohDirty = iohState.updateAndCheck(&ioh);
@@ -301,8 +305,8 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
         GSBAFor32BitProgrammed = false;
         if (is64bit && scratchSpaceController->getScratchSpaceAllocation() && !force32BitAllocations) {
             newGSHbase = scratchSpaceController->calculateNewGSH();
-        } else if (is64bit && force32BitAllocations && dispatchFlags.GSBA32BitRequired) {
-            newGSHbase = getMemoryManager()->getExternalHeapBaseAddress();
+        } else if (is64bit && force32BitAllocations && dispatchFlags.gsba32BitRequired) {
+            newGSHbase = getMemoryManager()->getExternalHeapBaseAddress(rootDeviceIndex);
             GSBAFor32BitProgrammed = true;
         }
 
@@ -315,7 +319,7 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
             ssh,
             newGSHbase,
             mocsIndex,
-            getMemoryManager()->getInternalHeapBaseAddress(),
+            getMemoryManager()->getInternalHeapBaseAddress(rootDeviceIndex),
             device.getGmmHelper(),
             dispatchFlags);
 
@@ -447,11 +451,11 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
 
     size_t startOffset = submitCommandStreamFromCsr ? commandStreamStartCSR : commandStreamStartTask;
     auto &streamToSubmit = submitCommandStreamFromCsr ? commandStreamCSR : commandStreamTask;
-    BatchBuffer batchBuffer{streamToSubmit.getGraphicsAllocation(), startOffset, chainedBatchBufferStartOffset, chainedBatchBuffer, dispatchFlags.requiresCoherency, dispatchFlags.lowPriority, dispatchFlags.throttle, streamToSubmit.getUsed(), &streamToSubmit};
+    BatchBuffer batchBuffer{streamToSubmit.getGraphicsAllocation(), startOffset, chainedBatchBufferStartOffset, chainedBatchBuffer, dispatchFlags.requiresCoherency, dispatchFlags.lowPriority, dispatchFlags.throttle, dispatchFlags.sliceCount, streamToSubmit.getUsed(), &streamToSubmit};
 
     if (submitCSR | submitTask) {
         if (this->dispatchMode == DispatchMode::ImmediateDispatch) {
-            flushStamp->setStamp(this->flush(batchBuffer, this->getResidencyAllocations()));
+            this->flush(batchBuffer, this->getResidencyAllocations());
             this->latestFlushedTaskCount = this->taskCount + 1;
             this->makeSurfacePackNonResident(this->getResidencyAllocations());
         } else {
@@ -499,13 +503,37 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
 }
 
 template <typename GfxFamily>
-inline void CommandStreamReceiverHw<GfxFamily>::flushBatchedSubmissions() {
+inline void CommandStreamReceiverHw<GfxFamily>::programStallingPipeControlForBarrier(LinearStream &cmdStream, DispatchFlags &dispatchFlags) {
+    stallingPipeControlOnNextFlushRequired = false;
+
+    PIPE_CONTROL *stallingPipeControlCmd;
+    auto barrierTimestampPacketNodes = dispatchFlags.barrierTimestampPacketNodes;
+
+    if (barrierTimestampPacketNodes && barrierTimestampPacketNodes->peekNodes().size() != 0) {
+        auto barrierTimestampPacketGpuAddress = dispatchFlags.barrierTimestampPacketNodes->peekNodes()[0]->getGpuAddress() +
+                                                offsetof(TimestampPacketStorage, packets[0].contextEnd);
+
+        stallingPipeControlCmd = PipeControlHelper<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(
+            cmdStream, PIPE_CONTROL::POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA,
+            barrierTimestampPacketGpuAddress, 0, false, peekHwInfo());
+
+        dispatchFlags.barrierTimestampPacketNodes->makeResident(*this);
+    } else {
+        stallingPipeControlCmd = PipeControlHelper<GfxFamily>::addPipeControl(cmdStream, false);
+    }
+
+    stallingPipeControlCmd->setCommandStreamerStallEnable(true);
+}
+
+template <typename GfxFamily>
+inline bool CommandStreamReceiverHw<GfxFamily>::flushBatchedSubmissions() {
     if (this->dispatchMode == DispatchMode::ImmediateDispatch) {
-        return;
+        return true;
     }
     typedef typename GfxFamily::MI_BATCH_BUFFER_START MI_BATCH_BUFFER_START;
     typedef typename GfxFamily::PIPE_CONTROL PIPE_CONTROL;
     std::unique_lock<MutexType> lockGuard(ownershipMutex);
+    bool submitResult = true;
 
     auto &commandBufferList = this->submissionAggregator->peekCmdBufferList();
     if (!commandBufferList.peekIsEmpty()) {
@@ -573,20 +601,25 @@ inline void CommandStreamReceiverHw<GfxFamily>::flushBatchedSubmissions() {
                 }
                 ((PIPE_CONTROL *)epiloguePipeControlLocation)->setDcFlushEnable(flushDcInEpilogue);
             }
-            auto flushStamp = this->flush(primaryCmdBuffer->batchBuffer, surfacesForSubmit);
+
+            if (!this->flush(primaryCmdBuffer->batchBuffer, surfacesForSubmit)) {
+                submitResult = false;
+                break;
+            }
 
             //after flush task level is closed
             this->taskLevel++;
 
-            flushStampUpdateHelper.updateAll(flushStamp);
+            flushStampUpdateHelper.updateAll(flushStamp->peekStamp());
 
             this->latestFlushedTaskCount = lastTaskCount;
-            this->flushStamp->setStamp(flushStamp);
             this->makeSurfacePackNonResident(surfacesForSubmit);
             resourcePackage.clear();
         }
         this->totalMemoryUsed = 0;
     }
+
+    return submitResult;
 }
 
 template <typename GfxFamily>
@@ -624,8 +657,14 @@ size_t CommandStreamReceiverHw<GfxFamily>::getRequiredCmdStreamSize(const Dispat
     size += TimestampPacketHelper::getRequiredCmdStreamSize<GfxFamily>(dispatchFlags.csrDependencies);
 
     if (stallingPipeControlOnNextFlushRequired) {
-        size += sizeof(typename GfxFamily::PIPE_CONTROL);
+        auto barrierTimestampPacketNodes = dispatchFlags.barrierTimestampPacketNodes;
+        if (barrierTimestampPacketNodes && barrierTimestampPacketNodes->peekNodes().size() > 0) {
+            size += PipeControlHelper<GfxFamily>::getSizeForPipeControlWithPostSyncOperation(peekHwInfo());
+        } else {
+            size += sizeof(typename GfxFamily::PIPE_CONTROL);
+        }
     }
+
     if (requiresInstructionCacheFlush) {
         size += sizeof(typename GfxFamily::PIPE_CONTROL);
     }
@@ -766,45 +805,47 @@ bool CommandStreamReceiverHw<GfxFamily>::detectInitProgrammingFlagsRequired(cons
 }
 
 template <typename GfxFamily>
-void CommandStreamReceiverHw<GfxFamily>::blitBuffer(const BlitProperties &blitProperites) {
+uint32_t CommandStreamReceiverHw<GfxFamily>::blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking) {
     using MI_BATCH_BUFFER_END = typename GfxFamily::MI_BATCH_BUFFER_END;
     using MI_FLUSH_DW = typename GfxFamily::MI_FLUSH_DW;
 
     auto lock = obtainUniqueOwnership();
-    bool updateTimestampPacket = blitProperites.outputTimestampPacket != nullptr;
-    auto &commandStream = getCS(BlitCommandsHelper<GfxFamily>::estimateBlitCommandsSize(blitProperites.copySize,
-                                                                                        blitProperites.csrDependencies,
-                                                                                        updateTimestampPacket));
+
+    auto &commandStream = getCS(BlitCommandsHelper<GfxFamily>::estimateBlitCommandsSize(blitPropertiesContainer));
     auto commandStreamStart = commandStream.getUsed();
     auto newTaskCount = taskCount + 1;
     latestSentTaskCount = newTaskCount;
 
-    TimestampPacketHelper::programCsrDependencies<GfxFamily>(commandStream, blitProperites.csrDependencies);
+    for (auto &blitProperties : blitPropertiesContainer) {
+        TimestampPacketHelper::programCsrDependencies<GfxFamily>(commandStream, blitProperties.csrDependencies);
 
-    BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForBuffer(blitProperites, commandStream);
+        BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForBuffer(blitProperties, commandStream);
+
+        if (blitProperties.outputTimestampPacket) {
+            auto timestampPacketGpuAddress = blitProperties.outputTimestampPacket->getGpuAddress() + offsetof(TimestampPacketStorage, packets[0].contextEnd);
+            HardwareCommandsHelper<GfxFamily>::programMiFlushDw(commandStream, timestampPacketGpuAddress, 0);
+            makeResident(*blitProperties.outputTimestampPacket->getBaseGraphicsAllocation());
+        }
+
+        blitProperties.csrDependencies.makeResident(*this);
+
+        makeResident(*blitProperties.srcAllocation);
+        makeResident(*blitProperties.dstAllocation);
+    }
 
     HardwareCommandsHelper<GfxFamily>::programMiFlushDw(commandStream, tagAllocation->getGpuAddress(), newTaskCount);
-
-    if (updateTimestampPacket) {
-        UNRECOVERABLE_IF(blitProperites.outputTimestampPacket->peekNodes().size() != 1);
-        auto timestampPacketGpuAddress = blitProperites.outputTimestampPacket->peekNodes().at(0)->getGpuAddress() + offsetof(TimestampPacketStorage, packets[0].contextEnd);
-        HardwareCommandsHelper<GfxFamily>::programMiFlushDw(commandStream, timestampPacketGpuAddress, 0);
-    }
 
     auto batchBufferEnd = reinterpret_cast<MI_BATCH_BUFFER_END *>(commandStream.getSpace(sizeof(MI_BATCH_BUFFER_END)));
     *batchBufferEnd = GfxFamily::cmdInitBatchBufferEnd;
 
     alignToCacheLine(commandStream);
 
-    makeResident(*blitProperites.srcAllocation);
-    makeResident(*blitProperites.dstAllocation);
-    makeResident(*commandStream.getGraphicsAllocation());
     makeResident(*tagAllocation);
 
-    BatchBuffer batchBuffer{commandStream.getGraphicsAllocation(), commandStreamStart, 0, nullptr, false, false, QueueThrottle::MEDIUM,
+    BatchBuffer batchBuffer{commandStream.getGraphicsAllocation(), commandStreamStart, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount,
                             commandStream.getUsed(), &commandStream};
 
-    flushStamp->setStamp(flush(batchBuffer, getResidencyAllocations()));
+    flush(batchBuffer, getResidencyAllocations());
     makeSurfacePackNonResident(getResidencyAllocations());
 
     latestFlushedTaskCount = newTaskCount;
@@ -812,10 +853,12 @@ void CommandStreamReceiverHw<GfxFamily>::blitBuffer(const BlitProperties &blitPr
     auto flushStampToWait = flushStamp->peekStamp();
 
     lock.unlock();
-    if (blitProperites.blocking) {
+    if (blocking) {
         waitForTaskCountWithKmdNotifyFallback(newTaskCount, flushStampToWait, false, false);
         internalAllocationStorage->cleanAllocationList(newTaskCount, TEMPORARY_ALLOCATION);
     }
+
+    return newTaskCount;
 }
 
 template <typename GfxFamily>

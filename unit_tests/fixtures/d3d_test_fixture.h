@@ -50,8 +50,8 @@ class D3DTests : public PlatformFixture, public ::testing::Test {
             gmmOwnershipPassed = true;
             return alloc;
         }
-        GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle) override {
-            AllocationProperties properties(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY);
+        GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex) override {
+            AllocationProperties properties(rootDeviceIndex, true, 0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY, false, false, 0);
             auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle((osHandle)((UINT_PTR)handle), properties, false);
             alloc->setDefaultGmm(forceGmm);
             gmmOwnershipPassed = true;
@@ -84,12 +84,12 @@ class D3DTests : public PlatformFixture, public ::testing::Test {
         dbgRestore = new DebugManagerStateRestore();
         PlatformFixture::SetUp();
         context = new MockContext(pPlatform->getDevice(0));
-        context->forcePreferD3dSharedResources(true);
+        context->preferD3dSharedResources = true;
         mockMM = std::make_unique<MockMM>(*context->getDevice(0)->getExecutionEnvironment());
 
         mockSharingFcns = new NiceMock<MockD3DSharingFunctions<T>>();
         context->setSharingFunctions(mockSharingFcns);
-        context->setMemoryManager(mockMM.get());
+        context->memoryManager = mockMM.get();
         cmdQ = new MockCommandQueue(context, context->getDevice(0), 0);
         DebugManager.injectFcn = &mockSharingFcns->mockGetDxgiDesc;
 

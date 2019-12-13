@@ -5,10 +5,11 @@
  *
  */
 
+#include "core/helpers/hw_helper.h"
 #include "runtime/command_stream/command_stream_receiver_hw.h"
 #include "runtime/gen11/reg_configs.h"
-#include "runtime/helpers/hw_helper.h"
 #include "test.h"
+#include "unit_tests/helpers/dispatch_flags_helper.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/mocks/mock_device.h"
 
@@ -19,7 +20,7 @@ struct Gen11CoherencyRequirements : public ::testing::Test {
 
     struct myCsr : public CommandStreamReceiverHw<ICLFamily> {
         using CommandStreamReceiver::commandStream;
-        myCsr(ExecutionEnvironment &executionEnvironment) : CommandStreamReceiverHw<ICLFamily>(executionEnvironment){};
+        myCsr(ExecutionEnvironment &executionEnvironment) : CommandStreamReceiverHw<ICLFamily>(executionEnvironment, 0){};
         CsrSizeRequestFlags *getCsrRequestFlags() { return &csrSizeRequestFlags; }
     };
 
@@ -36,7 +37,7 @@ struct Gen11CoherencyRequirements : public ::testing::Test {
 
     myCsr *csr = nullptr;
     std::unique_ptr<MockDevice> device;
-    DispatchFlags flags = {};
+    DispatchFlags flags = DispatchFlagsHelper::createDefaultDispatchFlags();
 };
 
 GEN11TEST_F(Gen11CoherencyRequirements, coherencyCmdSize) {

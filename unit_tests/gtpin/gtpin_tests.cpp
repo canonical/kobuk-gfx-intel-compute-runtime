@@ -6,6 +6,9 @@
  */
 
 #include "core/helpers/basic_math.h"
+#include "core/helpers/file_io.h"
+#include "core/helpers/hash.h"
+#include "runtime/compiler_interface/patchtokens_decoder.h"
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
 #include "runtime/gtpin/gtpin_defs.h"
@@ -13,8 +16,6 @@
 #include "runtime/gtpin/gtpin_hw_helper.h"
 #include "runtime/gtpin/gtpin_init.h"
 #include "runtime/gtpin/gtpin_notify.h"
-#include "runtime/helpers/file_io.h"
-#include "runtime/helpers/hash.h"
 #include "runtime/helpers/options.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/mem_obj/buffer.h"
@@ -144,6 +145,7 @@ class GTPinFixture : public ContextFixture, public MemoryManagementFixture {
         pPlatform = platform();
         auto executionEnvironment = pPlatform->peekExecutionEnvironment();
         executionEnvironment->setHwInfo(*platformDevices);
+        executionEnvironment->prepareRootDeviceEnvironments(1);
         memoryManager = new MockMemoryManagerWithFailures(*executionEnvironment);
         executionEnvironment->memoryManager.reset(memoryManager);
         pPlatform->initialize();
@@ -621,21 +623,21 @@ TEST_F(GTPinTests, givenUninitializedGTPinInterfaceThenGTPinKernelCreateCallback
     cl_kernel kernel = nullptr;
     cl_program pProgram = nullptr;
     cl_device_id device = (cl_device_id)pDevice;
-    void *pSource = nullptr;
     size_t sourceSize = 0;
     std::string testFile;
 
     KernelBinaryHelper kbHelper("CopyBuffer_simd8", false);
     testFile.append(clFiles);
     testFile.append("CopyBuffer_simd8.cl");
-    sourceSize = loadDataFromFile(testFile.c_str(), pSource);
+    auto pSource = loadDataFromFile(testFile.c_str(), sourceSize);
     EXPECT_NE(0u, sourceSize);
     EXPECT_NE(nullptr, pSource);
 
+    const char *sources[1] = {pSource.get()};
     pProgram = clCreateProgramWithSource(
         (cl_context)((Context *)pContext),
         1,
-        (const char **)&pSource,
+        sources,
         &sourceSize,
         &retVal);
     ASSERT_NE(nullptr, pProgram);
@@ -661,8 +663,6 @@ TEST_F(GTPinTests, givenUninitializedGTPinInterfaceThenGTPinKernelCreateCallback
 
     retVal = clReleaseProgram(pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
-
-    deleteDataReadFromFile(pSource);
 }
 
 TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsExecutedThenGTPinCallbacksAreCalled) {
@@ -679,7 +679,6 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsExecutedThenGTPinCa
     cl_kernel kernel2 = nullptr;
     cl_program pProgram = nullptr;
     cl_device_id device = (cl_device_id)pDevice;
-    void *pSource = nullptr;
     size_t sourceSize = 0;
     std::string testFile;
     cl_command_queue cmdQ = nullptr;
@@ -689,7 +688,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsExecutedThenGTPinCa
     KernelBinaryHelper kbHelper("CopyBuffer_simd8", false);
     testFile.append(clFiles);
     testFile.append("CopyBuffer_simd8.cl");
-    sourceSize = loadDataFromFile(testFile.c_str(), pSource);
+    auto pSource = loadDataFromFile(testFile.c_str(), sourceSize);
     EXPECT_NE(0u, sourceSize);
     EXPECT_NE(nullptr, pSource);
 
@@ -701,10 +700,11 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsExecutedThenGTPinCa
     ASSERT_NE(nullptr, cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
+    const char *sources[1] = {pSource.get()};
     pProgram = clCreateProgramWithSource(
         context,
         1,
-        (const char **)&pSource,
+        sources,
         &sourceSize,
         &retVal);
     ASSERT_NE(nullptr, pProgram);
@@ -795,7 +795,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsExecutedThenGTPinCa
     retVal = clReleaseProgram(pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    deleteDataReadFromFile(pSource);
+    pSource.reset();
 
     retVal = clReleaseMemObject(buff10);
     EXPECT_EQ(CL_SUCCESS, retVal);
@@ -832,7 +832,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithoutSSHIsUsedThenK
     // Prepare a kernel without SSH
     char binary[1024] = {1, 2, 3, 4, 5, 6, 7, 8, 9, '\0'};
     size_t binSize = 10;
-    Program *pProgram = Program::createFromGenBinary(*pDevice->getExecutionEnvironment(), pContext, &binary[0], binSize, false, &retVal);
+    MockProgram *pProgram = Program::createFromGenBinary<MockProgram>(*pDevice->getExecutionEnvironment(), pContext, &binary[0], binSize, false, &retVal);
     ASSERT_NE(nullptr, pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -879,7 +879,8 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithoutSSHIsUsedThenK
     uint64_t hashValue = Hash::hash(reinterpret_cast<const char *>(pKernelBin), kernelBinSize);
     pKHdr->CheckSum = static_cast<uint32_t>(hashValue & 0xFFFFFFFF);
 
-    pProgram->storeGenBinary(&binary[0], binSize);
+    pProgram->genBinary = makeCopy(&binary[0], binSize);
+    pProgram->genBinarySize = binSize;
     retVal = pProgram->processGenBinary();
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -920,7 +921,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithExecEnvIsUsedThen
     // Prepare a kernel with fake Execution Environment
     char binary[1024] = {1, 2, 3, 4, 5, 6, 7, 8, 9, '\0'};
     size_t binSize = 10;
-    Program *pProgram = Program::createFromGenBinary(*pDevice->getExecutionEnvironment(), pContext, &binary[0], binSize, false, &retVal);
+    MockProgram *pProgram = Program::createFromGenBinary<MockProgram>(*pDevice->getExecutionEnvironment(), pContext, &binary[0], binSize, false, &retVal);
     ASSERT_NE(nullptr, pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -1005,7 +1006,8 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithExecEnvIsUsedThen
     uint64_t hashValue = Hash::hash(reinterpret_cast<const char *>(pKernelBin), kernelBinSize);
     pKHdr->CheckSum = static_cast<uint32_t>(hashValue & 0xFFFFFFFF);
 
-    pProgram->storeGenBinary(&binary[0], binSize);
+    pProgram->genBinary = makeCopy(&binary[0], binSize);
+    pProgram->genBinarySize = binSize;
     retVal = pProgram->processGenBinary();
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -1040,7 +1042,6 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithoutSSHIsUsedThenG
     cl_kernel kernel = nullptr;
     cl_program pProgram = nullptr;
     cl_device_id device = (cl_device_id)pDevice;
-    void *pSource = nullptr;
     size_t sourceSize = 0;
     std::string testFile;
     cl_command_queue cmdQ = nullptr;
@@ -1050,7 +1051,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithoutSSHIsUsedThenG
     KernelBinaryHelper kbHelper("CopyBuffer_simd8", false);
     testFile.append(clFiles);
     testFile.append("CopyBuffer_simd8.cl");
-    sourceSize = loadDataFromFile(testFile.c_str(), pSource);
+    auto pSource = loadDataFromFile(testFile.c_str(), sourceSize);
     EXPECT_NE(0u, sourceSize);
     EXPECT_NE(nullptr, pSource);
 
@@ -1062,10 +1063,11 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithoutSSHIsUsedThenG
     ASSERT_NE(nullptr, cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
+    const char *sources[1] = {pSource.get()};
     pProgram = clCreateProgramWithSource(
         context,
         1,
-        (const char **)&pSource,
+        sources,
         &sourceSize,
         &retVal);
     ASSERT_NE(nullptr, pProgram);
@@ -1126,7 +1128,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithoutSSHIsUsedThenG
     retVal = clReleaseProgram(pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    deleteDataReadFromFile(pSource);
+    pSource.reset();
 
     retVal = clReleaseMemObject(buff0);
     EXPECT_EQ(CL_SUCCESS, retVal);
@@ -1153,7 +1155,6 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenBlockedKernelWithoutSSHIsUs
     cl_kernel kernel = nullptr;
     cl_program pProgram = nullptr;
     cl_device_id device = (cl_device_id)pDevice;
-    void *pSource = nullptr;
     size_t sourceSize = 0;
     std::string testFile;
     cl_command_queue cmdQ = nullptr;
@@ -1163,7 +1164,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenBlockedKernelWithoutSSHIsUs
     KernelBinaryHelper kbHelper("CopyBuffer_simd8", false);
     testFile.append(clFiles);
     testFile.append("CopyBuffer_simd8.cl");
-    sourceSize = loadDataFromFile(testFile.c_str(), pSource);
+    auto pSource = loadDataFromFile(testFile.c_str(), sourceSize);
     EXPECT_NE(0u, sourceSize);
     EXPECT_NE(nullptr, pSource);
 
@@ -1175,10 +1176,11 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenBlockedKernelWithoutSSHIsUs
     ASSERT_NE(nullptr, cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
+    const char *sources[1] = {pSource.get()};
     pProgram = clCreateProgramWithSource(
         context,
         1,
-        (const char **)&pSource,
+        sources,
         &sourceSize,
         &retVal);
     ASSERT_NE(nullptr, pProgram);
@@ -1245,7 +1247,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenBlockedKernelWithoutSSHIsUs
     retVal = clReleaseProgram(pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    deleteDataReadFromFile(pSource);
+    pSource.reset();
 
     retVal = clReleaseMemObject(buff0);
     EXPECT_EQ(CL_SUCCESS, retVal);
@@ -1276,7 +1278,6 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenTheSameKerneIsExecutedTwice
     cl_kernel kernel2 = nullptr;
     cl_program pProgram = nullptr;
     cl_device_id device = (cl_device_id)pDevice;
-    void *pSource = nullptr;
     size_t sourceSize = 0;
     std::string testFile;
     cl_command_queue cmdQ = nullptr;
@@ -1286,7 +1287,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenTheSameKerneIsExecutedTwice
     KernelBinaryHelper kbHelper("CopyBuffer_simd8", false);
     testFile.append(clFiles);
     testFile.append("CopyBuffer_simd8.cl");
-    sourceSize = loadDataFromFile(testFile.c_str(), pSource);
+    auto pSource = loadDataFromFile(testFile.c_str(), sourceSize);
     EXPECT_NE(0u, sourceSize);
     EXPECT_NE(nullptr, pSource);
 
@@ -1298,10 +1299,11 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenTheSameKerneIsExecutedTwice
     ASSERT_NE(nullptr, cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
+    const char *sources[1] = {pSource.get()};
     pProgram = clCreateProgramWithSource(
         context,
         1,
-        (const char **)&pSource,
+        sources,
         &sourceSize,
         &retVal);
     ASSERT_NE(nullptr, pProgram);
@@ -1402,7 +1404,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenTheSameKerneIsExecutedTwice
     retVal = clReleaseProgram(pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    deleteDataReadFromFile(pSource);
+    pSource.reset();
 
     retVal = clReleaseMemObject(buff10);
     EXPECT_EQ(CL_SUCCESS, retVal);
@@ -1436,7 +1438,6 @@ TEST_F(GTPinTests, givenMultipleKernelSubmissionsWhenOneOfGtpinSurfacesIsNullThe
     cl_kernel kernel1 = nullptr;
     cl_program pProgram = nullptr;
     cl_device_id device = (cl_device_id)pDevice;
-    void *pSource = nullptr;
     size_t sourceSize = 0;
     std::string testFile;
     cl_command_queue cmdQ = nullptr;
@@ -1446,7 +1447,7 @@ TEST_F(GTPinTests, givenMultipleKernelSubmissionsWhenOneOfGtpinSurfacesIsNullThe
     KernelBinaryHelper kbHelper("CopyBuffer_simd8", false);
     testFile.append(clFiles);
     testFile.append("CopyBuffer_simd8.cl");
-    sourceSize = loadDataFromFile(testFile.c_str(), pSource);
+    auto pSource = loadDataFromFile(testFile.c_str(), sourceSize);
     EXPECT_NE(0u, sourceSize);
     EXPECT_NE(nullptr, pSource);
 
@@ -1458,10 +1459,11 @@ TEST_F(GTPinTests, givenMultipleKernelSubmissionsWhenOneOfGtpinSurfacesIsNullThe
     ASSERT_NE(nullptr, cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
+    const char *sources[1] = {pSource.get()};
     pProgram = clCreateProgramWithSource(
         context,
         1,
-        (const char **)&pSource,
+        sources,
         &sourceSize,
         &retVal);
     ASSERT_NE(nullptr, pProgram);
@@ -1534,7 +1536,7 @@ TEST_F(GTPinTests, givenMultipleKernelSubmissionsWhenOneOfGtpinSurfacesIsNullThe
     retVal = clReleaseProgram(pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    deleteDataReadFromFile(pSource);
+    pSource.reset();
 
     retVal = clReleaseCommandQueue(cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);
@@ -1558,7 +1560,6 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsCreatedThenAllKerne
     cl_kernel kernel = nullptr;
     cl_program pProgram = nullptr;
     cl_device_id device = (cl_device_id)pDevice;
-    void *pSource = nullptr;
     size_t sourceSize = 0;
     std::string testFile;
     cl_command_queue cmdQ = nullptr;
@@ -1568,7 +1569,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsCreatedThenAllKerne
     KernelBinaryHelper kbHelper("CopyBuffer_simd8", false);
     testFile.append(clFiles);
     testFile.append("CopyBuffer_simd8.cl");
-    sourceSize = loadDataFromFile(testFile.c_str(), pSource);
+    auto pSource = loadDataFromFile(testFile.c_str(), sourceSize);
     EXPECT_NE(0u, sourceSize);
     EXPECT_NE(nullptr, pSource);
 
@@ -1580,10 +1581,11 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsCreatedThenAllKerne
     ASSERT_NE(nullptr, cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
+    const char *sources[1] = {pSource.get()};
     pProgram = clCreateProgramWithSource(
         context,
         1,
-        (const char **)&pSource,
+        sources,
         &sourceSize,
         &retVal);
     ASSERT_NE(nullptr, pProgram);
@@ -1727,7 +1729,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsCreatedThenAllKerne
     retVal = clReleaseProgram(pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    deleteDataReadFromFile(pSource);
+    pSource.reset();
 
     retVal = clReleaseCommandQueue(cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);
@@ -1751,7 +1753,6 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenOneKernelIsSubmittedSeveral
     cl_kernel kernel = nullptr;
     cl_program pProgram = nullptr;
     cl_device_id device = (cl_device_id)pDevice;
-    void *pSource = nullptr;
     size_t sourceSize = 0;
     std::string testFile;
     cl_command_queue cmdQ = nullptr;
@@ -1761,7 +1762,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenOneKernelIsSubmittedSeveral
     KernelBinaryHelper kbHelper("CopyBuffer_simd8", false);
     testFile.append(clFiles);
     testFile.append("CopyBuffer_simd8.cl");
-    sourceSize = loadDataFromFile(testFile.c_str(), pSource);
+    auto pSource = loadDataFromFile(testFile.c_str(), sourceSize);
     EXPECT_NE(0u, sourceSize);
     EXPECT_NE(nullptr, pSource);
 
@@ -1773,10 +1774,11 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenOneKernelIsSubmittedSeveral
     ASSERT_NE(nullptr, cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
+    const char *sources[1] = {pSource.get()};
     pProgram = clCreateProgramWithSource(
         context,
         1,
-        (const char **)&pSource,
+        sources,
         &sourceSize,
         &retVal);
     ASSERT_NE(nullptr, pProgram);
@@ -1905,7 +1907,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenOneKernelIsSubmittedSeveral
     retVal = clReleaseProgram(pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    deleteDataReadFromFile(pSource);
+    pSource.reset();
 
     retVal = clReleaseCommandQueue(cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);
@@ -1926,7 +1928,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenLowMemoryConditionOccursThe
         // Prepare a program with one kernel having Stateless Private Surface
         char binary[1024] = {1, 2, 3, 4, 5, 6, 7, 8, 9, '\0'};
         size_t binSize = 10;
-        Program *pProgram = Program::createFromGenBinary(*pDevice->getExecutionEnvironment(), pContext, &binary[0], binSize, false, &retVal);
+        MockProgram *pProgram = Program::createFromGenBinary<MockProgram>(*pDevice->getExecutionEnvironment(), pContext, &binary[0], binSize, false, &retVal);
         ASSERT_NE(nullptr, pProgram);
         EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -1983,7 +1985,8 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenLowMemoryConditionOccursThe
         uint64_t hashValue = Hash::hash(reinterpret_cast<const char *>(pKernelBin), kernelBinSize);
         pKHdr->CheckSum = static_cast<uint32_t>(hashValue & 0xFFFFFFFF);
 
-        pProgram->storeGenBinary(&binary[0], binSize);
+        pProgram->genBinary = makeCopy(&binary[0], binSize);
+        pProgram->genBinarySize = binSize;
         retVal = pProgram->processGenBinary();
         if (retVal == CL_OUT_OF_HOST_MEMORY) {
             auto nonFailingAlloc = MemoryManagement::nonfailingAllocation;
@@ -2036,7 +2039,6 @@ TEST_F(GTPinTests, givenKernelWithSSHThenVerifyThatSSHResizeWorksWell) {
     cl_kernel kernel = nullptr;
     cl_program pProgram = nullptr;
     cl_device_id device = (cl_device_id)pDevice;
-    void *pSource = nullptr;
     size_t sourceSize = 0;
     std::string testFile;
     cl_context context = nullptr;
@@ -2044,7 +2046,7 @@ TEST_F(GTPinTests, givenKernelWithSSHThenVerifyThatSSHResizeWorksWell) {
     KernelBinaryHelper kbHelper("CopyBuffer_simd8", false);
     testFile.append(clFiles);
     testFile.append("CopyBuffer_simd8.cl");
-    sourceSize = loadDataFromFile(testFile.c_str(), pSource);
+    auto pSource = loadDataFromFile(testFile.c_str(), sourceSize);
     EXPECT_NE(0u, sourceSize);
     EXPECT_NE(nullptr, pSource);
 
@@ -2052,10 +2054,11 @@ TEST_F(GTPinTests, givenKernelWithSSHThenVerifyThatSSHResizeWorksWell) {
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_NE(nullptr, context);
 
+    const char *sources[1] = {pSource.get()};
     pProgram = clCreateProgramWithSource(
         context,
         1,
-        (const char **)&pSource,
+        sources,
         &sourceSize,
         &retVal);
     ASSERT_NE(nullptr, pProgram);
@@ -2128,8 +2131,6 @@ TEST_F(GTPinTests, givenKernelWithSSHThenVerifyThatSSHResizeWorksWell) {
     retVal = clReleaseProgram(pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    deleteDataReadFromFile(pSource);
-
     retVal = clReleaseContext(context);
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
@@ -2138,7 +2139,6 @@ TEST_F(GTPinTests, givenKernelThenVerifyThatKernelCodeSubstitutionWorksWell) {
     cl_kernel kernel = nullptr;
     cl_program pProgram = nullptr;
     cl_device_id device = (cl_device_id)pDevice;
-    void *pSource = nullptr;
     size_t sourceSize = 0;
     std::string testFile;
     cl_context context = nullptr;
@@ -2146,7 +2146,7 @@ TEST_F(GTPinTests, givenKernelThenVerifyThatKernelCodeSubstitutionWorksWell) {
     KernelBinaryHelper kbHelper("CopyBuffer_simd8", false);
     testFile.append(clFiles);
     testFile.append("CopyBuffer_simd8.cl");
-    sourceSize = loadDataFromFile(testFile.c_str(), pSource);
+    auto pSource = loadDataFromFile(testFile.c_str(), sourceSize);
     EXPECT_NE(0u, sourceSize);
     EXPECT_NE(nullptr, pSource);
 
@@ -2154,10 +2154,11 @@ TEST_F(GTPinTests, givenKernelThenVerifyThatKernelCodeSubstitutionWorksWell) {
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_NE(nullptr, context);
 
+    const char *sources[1] = {pSource.get()};
     pProgram = clCreateProgramWithSource(
         context,
         1,
-        (const char **)&pSource,
+        sources,
         &sourceSize,
         &retVal);
     ASSERT_NE(nullptr, pProgram);
@@ -2202,8 +2203,6 @@ TEST_F(GTPinTests, givenKernelThenVerifyThatKernelCodeSubstitutionWorksWell) {
 
     retVal = clReleaseProgram(pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
-
-    deleteDataReadFromFile(pSource);
 
     retVal = clReleaseContext(context);
     EXPECT_EQ(CL_SUCCESS, retVal);
@@ -2287,7 +2286,7 @@ TEST_F(ProgramTests, givenGenBinaryWithGtpinInfoWhenProcessGenBinaryCalledThenGt
     char genBin[1024] = {1, 2, 3, 4, 5, 6, 7, 8, 9, '\0'};
     size_t binSize = 10;
 
-    std::unique_ptr<Program> pProgram(Program::createFromGenBinary(*pDevice->getExecutionEnvironment(), nullptr, &genBin[0], binSize, false, &retVal));
+    std::unique_ptr<MockProgram> pProgram(Program::createFromGenBinary<MockProgram>(*pDevice->getExecutionEnvironment(), nullptr, &genBin[0], binSize, false, &retVal));
     EXPECT_NE(nullptr, pProgram.get());
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ((uint32_t)CL_PROGRAM_BINARY_TYPE_EXECUTABLE, (uint32_t)pProgram->getProgramBinaryType());
@@ -2331,8 +2330,12 @@ TEST_F(ProgramTests, givenGenBinaryWithGtpinInfoWhenProcessGenBinaryCalledThenGt
     pPatch->Token = iOpenCL::PATCH_TOKEN_GTPIN_INFO;
     pPatch->Size = sizeof(iOpenCL::SPatchItemHeader);
     binSize += sizeof(iOpenCL::SPatchItemHeader);
+    pBin += sizeof(iOpenCL::SPatchItemHeader);
+
+    pKHdr->CheckSum = PatchTokenBinary::calcKernelChecksum(ArrayRef<const uint8_t>(reinterpret_cast<uint8_t *>(pKHdr), reinterpret_cast<uint8_t *>(pBin)));
     // Decode prepared program binary
-    pProgram->storeGenBinary(&genBin[0], binSize);
+    pProgram->genBinary = makeCopy(&genBin[0], binSize);
+    pProgram->genBinarySize = binSize;
     retVal = pProgram->processGenBinary();
     auto kernelInfo = pProgram->getKernelInfo("TstCopy");
     EXPECT_NE(kernelInfo->igcInfoForGtpin, nullptr);

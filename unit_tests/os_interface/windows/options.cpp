@@ -6,7 +6,7 @@
  */
 
 #include "common/gtsysinfo.h"
-#include "runtime/os_interface/os_library.h"
+#include "core/os_interface/os_library.h"
 
 #include "igfxfmid.h"
 
@@ -19,7 +19,8 @@ const char *frontEndDllName = "";
 const char *igcDllName = "";
 const char *gdiDllName = "gdi32_mock.dll";
 const char *gmmDllName = "mock_gmm.dll";
-const char *gmmEntryName = "openMockGmm";
+const char *gmmInitFuncName = "initMockGmm";
+const char *gmmDestroyFuncName = "destroyMockGmm";
 const char *testDllName = "test_dynamic_lib.dll";
 const char *metricsLibraryDllName = "";
 } // namespace Os

@@ -36,16 +36,13 @@ struct EnqueueBufferWindowsTest : public HardwareParse,
 
     template <typename FamilyType>
     void initializeFixture() {
-        auto wddmCsr = new WddmCommandStreamReceiver<FamilyType>(*executionEnvironment);
-
-        executionEnvironment->commandStreamReceivers.resize(1);
-        executionEnvironment->commandStreamReceivers[0].push_back(std::unique_ptr<CommandStreamReceiver>(wddmCsr));
+        EnvironmentWithCsrWrapper environment;
+        environment.setCsrType<WddmCommandStreamReceiver<FamilyType>>();
 
         memoryManager = new MockWddmMemoryManager(*executionEnvironment);
         executionEnvironment->memoryManager.reset(memoryManager);
 
         device = std::unique_ptr<MockDevice>(Device::create<MockDevice>(executionEnvironment, 0));
-
         context = std::make_unique<MockContext>(device.get());
 
         const size_t bufferMisalignment = 1;
@@ -82,8 +79,7 @@ HWTEST_F(EnqueueBufferWindowsTest, givenMisalignedHostPtrWhenEnqueueReadBufferCa
         GTEST_SKIP();
     }
     auto cmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context.get(), device.get(), &properties);
-    uint32_t memory[2] = {};
-    char *misalignedPtr = reinterpret_cast<char *>(memory) + 1;
+    char *misalignedPtr = reinterpret_cast<char *>(device->getMemoryManager()->getAlignedMallocRestrictions()->minAddress + 1);
 
     buffer->forceDisallowCPUCopy = true;
     auto retVal = cmdQ->enqueueReadBuffer(buffer.get(), CL_FALSE, 0, 4, misalignedPtr, nullptr, 0, nullptr, nullptr);

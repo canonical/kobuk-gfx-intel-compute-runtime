@@ -9,12 +9,12 @@
 
 #include "core/helpers/debug_helpers.h"
 #include "core/helpers/ptr_math.h"
+#include "core/memory_manager/host_ptr_defines.h"
+#include "core/memory_manager/memory_constants.h"
+#include "core/memory_manager/memory_pool.h"
 #include "core/utilities/idlist.h"
 
 #include "engine_limits.h"
-#include "host_ptr_defines.h"
-#include "memory_constants.h"
-#include "memory_pool.h"
 #include "storage_info.h"
 
 #include <array>
@@ -76,14 +76,15 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
         WRITE_COMBINED
     };
 
-    virtual ~GraphicsAllocation();
+    ~GraphicsAllocation() override;
     GraphicsAllocation &operator=(const GraphicsAllocation &) = delete;
     GraphicsAllocation(const GraphicsAllocation &) = delete;
 
-    GraphicsAllocation(AllocationType allocationType, void *cpuPtrIn, uint64_t gpuAddress, uint64_t baseAddress, size_t sizeIn, MemoryPool::Type pool);
+    GraphicsAllocation(uint32_t rootDeviceIndex, AllocationType allocationType, void *cpuPtrIn, uint64_t gpuAddress, uint64_t baseAddress, size_t sizeIn, MemoryPool::Type pool);
 
-    GraphicsAllocation(AllocationType allocationType, void *cpuPtrIn, size_t sizeIn, osHandle sharedHandleIn, MemoryPool::Type pool);
+    GraphicsAllocation(uint32_t rootDeviceIndex, AllocationType allocationType, void *cpuPtrIn, size_t sizeIn, osHandle sharedHandleIn, MemoryPool::Type pool);
 
+    uint32_t getRootDeviceIndex() const { return rootDeviceIndex; }
     void *getUnderlyingBuffer() const { return cpuPtr; }
     void *getDriverAllocatedCpuPtr() const { return driverAllocatedCpuPointer; }
     void setDriverAllocatedCpuPtr(void *allocatedCpuPtr) { driverAllocatedCpuPointer = allocatedCpuPtr; }
@@ -201,6 +202,15 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     void setGmm(Gmm *gmm, uint32_t handleId) {
         gmms[handleId] = gmm;
     }
+
+    void setAdditionalData(void *data) {
+        additionalData = data;
+    }
+
+    void *getAdditionalData() const {
+        return additionalData;
+    }
+
     uint32_t getNumHandles() const { return storageInfo.getNumHandles(); }
     uint32_t getUsedPageSize() const;
 
@@ -208,6 +218,7 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     StorageInfo storageInfo = {};
 
     static constexpr uint32_t defaultBank = 0b1u;
+    static constexpr uint32_t allBanks = 0xffffffff;
 
   protected:
     constexpr static uint32_t objectNotResident = std::numeric_limits<uint32_t>::max();
@@ -219,8 +230,8 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
         uint32_t inspectionId = 0u;
     };
     struct AubInfo {
-        uint32_t aubWritable = maxNBitValue<32>;
-        uint32_t tbxWritable = maxNBitValue<32>;
+        uint32_t aubWritable = std::numeric_limits<uint32_t>::max();
+        uint32_t tbxWritable = std::numeric_limits<uint32_t>::max();
         bool allocDumpable = false;
         bool memObjectsAllocationWithWritableFlags = false;
     };
@@ -255,6 +266,7 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
 
     friend class SubmissionAggregator;
 
+    const uint32_t rootDeviceIndex;
     AllocationInfo allocationInfo;
     AubInfo aubInfo;
     SharingInfo sharingInfo;
@@ -267,6 +279,7 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     size_t size = 0;
     void *cpuPtr = nullptr;
     void *lockedPtr = nullptr;
+    void *additionalData = nullptr;
 
     MemoryPool::Type memoryPool = MemoryPool::MemoryNull;
     AllocationType allocationType = AllocationType::UNKNOWN;

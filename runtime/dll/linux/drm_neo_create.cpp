@@ -5,8 +5,9 @@
  *
  */
 
+#include "core/helpers/hw_helper.h"
+#include "runtime/gen_common/hw_cmds.h"
 #include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/options.h"
 #include "runtime/os_interface/debug_settings_manager.h"
@@ -14,7 +15,6 @@
 #include "runtime/os_interface/linux/drm_null_device.h"
 
 #include "drm/i915_drm.h"
-#include "hw_cmds.h"
 
 #include <array>
 #include <cstdio>
@@ -23,6 +23,8 @@
 
 namespace NEO {
 
+bool (*Drm::pIsi915Version)(int fd) = Drm::isi915Version;
+int (*Drm::pClose)(int fd) = ::close;
 const DeviceDescriptor deviceDescriptorTable[] = {
 #define DEVICE(devId, gt, gtType) {devId, &gt::hwInfo, &gt::setupHardwareInfo, gtType},
 #include "devices.inl"
@@ -71,26 +73,38 @@ int Drm::getDeviceFd(const int devType) {
     const char *pathPrefix;
     unsigned int startNum;
     const unsigned int maxDrmDevices = 64;
-
-    switch (devType) {
-    case 0:
-        startNum = 128;
-        pathPrefix = "/dev/dri/renderD";
-        break;
-    default:
-        startNum = 0;
-        pathPrefix = "/dev/dri/card";
-        break;
-    }
-
-    for (unsigned int i = 0; i < maxDrmDevices; i++) {
-        snprintf(fullPath, PATH_MAX, "%s%u", pathPrefix, i + startNum);
-        int fd = ::open(fullPath, O_RDWR);
-        if (fd >= 0) {
-            if (isi915Version(fd)) {
-                return fd;
+    if (DebugManager.flags.ForceDeviceId.get() == "unk") {
+        switch (devType) {
+        case 0:
+            startNum = 128;
+            pathPrefix = "/dev/dri/renderD";
+            break;
+        default:
+            startNum = 0;
+            pathPrefix = "/dev/dri/card";
+            break;
+        }
+        for (unsigned int i = 0; i < maxDrmDevices; i++) {
+            snprintf(fullPath, PATH_MAX, "%s%u", pathPrefix, i + startNum);
+            int fd = ::open(fullPath, O_RDWR);
+            if (fd >= 0) {
+                if (isi915Version(fd)) {
+                    return fd;
+                }
+                ::close(fd);
             }
-            ::close(fd);
+        }
+    } else {
+        const char *cardType[] = {"-render", "-card"};
+        for (auto param : cardType) {
+            snprintf(fullPath, PATH_MAX, "/dev/dri/by-path/pci-0000:%s%s", DebugManager.flags.ForceDeviceId.get().c_str(), param);
+            int fd = ::open(fullPath, O_RDWR);
+            if (fd >= 0) {
+                if (pIsi915Version(fd)) {
+                    return fd;
+                }
+                pClose(fd);
+            }
         }
     }
 
@@ -153,7 +167,10 @@ Drm *Drm::create(int32_t deviceOrdinal) {
     }
     if (device) {
         platformDevices[0] = device->pHwInfo;
-        device->setupHardwareInfo(const_cast<HardwareInfo *>(platformDevices[0]), true);
+        ret = drmObject->setupHardwareInfo(const_cast<DeviceDescriptor *>(device), true);
+        if (ret != 0) {
+            return nullptr;
+        }
         drmObject->setGtType(eGtType);
     } else {
         printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr,
@@ -178,18 +195,17 @@ Drm *Drm::create(int32_t deviceOrdinal) {
     // Activate the Turbo Boost Frequency feature
     ret = drmObject->enableTurboBoost();
     if (ret != 0) {
-        // turbo patch not present, we are not on custom Kernel, switch to simplified Mocs selection
-        // do this only for GEN9+
-        if (device->pHwInfo->platform.eRenderCoreFamily >= IGFX_GEN9_CORE) {
-            drmObject->setSimplifiedMocsTableUsage(true);
-        }
         printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "WARNING: Failed to request OCL Turbo Boost\n");
     }
 
-    drmObject->queryEngineInfo();
+    if (!drmObject->queryEngineInfo()) {
+        printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "WARNING: Failed to query engine info\n");
+    }
+
     if (HwHelper::get(device->pHwInfo->platform.eRenderCoreFamily).getEnableLocalMemory(*device->pHwInfo)) {
-        drmObject->queryMemoryInfo();
-        drmObject->setMemoryRegions();
+        if (!drmObject->queryMemoryInfo()) {
+            printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "WARNING: Failed to query memory info\n");
+        }
     }
 
     drms[deviceOrdinal % drms.size()] = drmObject.release();

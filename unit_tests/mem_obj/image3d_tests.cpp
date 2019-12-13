@@ -6,14 +6,13 @@
  */
 
 #include "core/helpers/aligned_memory.h"
+#include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/mem_obj/image.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_gmm.h"
-
-#include "hw_cmds.h"
 
 using namespace NEO;
 
@@ -61,7 +60,7 @@ class CreateImage3DTest : public DeviceFixture,
 HWTEST_F(CreateImage3DTest, validTypes) {
     cl_mem_flags flags = CL_MEM_READ_WRITE;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    auto image = Image::create(context, flags, surfaceFormat, &imageDesc, nullptr, retVal);
+    auto image = Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0), flags, 0, surfaceFormat, &imageDesc, nullptr, retVal);
 
     ASSERT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, image);
@@ -94,6 +93,8 @@ HWTEST_F(CreateImage3DTest, calculate3dImageQpitchTiledAndLinear) {
 
     auto image = Image::create(
         context,
+        {},
+        0,
         0,
         surfaceFormat,
         &imageDesc,
@@ -116,6 +117,8 @@ HWTEST_F(CreateImage3DTest, calculate3dImageQpitchTiledAndLinear) {
 
     image = Image::create(
         context,
+        {},
+        0,
         0,
         surfaceFormat,
         &imageDesc,

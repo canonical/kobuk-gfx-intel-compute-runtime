@@ -13,12 +13,14 @@
 #include "runtime/platform/platform.h"
 #include "test.h"
 #include "unit_tests/fixtures/ult_command_stream_receiver_fixture.h"
+#include "unit_tests/helpers/dispatch_flags_helper.h"
 #include "unit_tests/mocks/mock_command_queue.h"
 #include "unit_tests/mocks/mock_context.h"
 #include "unit_tests/mocks/mock_csr.h"
 #include "unit_tests/mocks/mock_device.h"
 #include "unit_tests/mocks/mock_event.h"
 #include "unit_tests/mocks/mock_kernel.h"
+#include "unit_tests/mocks/mock_os_context.h"
 #include "unit_tests/mocks/mock_program.h"
 #include "unit_tests/mocks/mock_submissions_aggregator.h"
 
@@ -31,7 +33,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenFlushTas
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -39,9 +41,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenFlushTas
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.guardCommandBufferWithPipeControl = true;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.guardCommandBufferWithPipeControl = true;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -88,7 +90,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeAndTwoRecord
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -96,7 +98,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeAndTwoRecord
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.guardCommandBufferWithPipeControl = true;
 
     mockCsr->flushTask(commandStream,
@@ -139,7 +141,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeAndThreeReco
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -147,9 +149,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeAndThreeReco
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.guardCommandBufferWithPipeControl = true;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.guardCommandBufferWithPipeControl = true;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -201,7 +203,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeAndThreeReco
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -212,9 +214,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeAndThreeReco
     auto memorySize = (size_t)pDevice->getDeviceInfo().globalMemSize;
     MockGraphicsAllocation largeAllocation(nullptr, memorySize);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.guardCommandBufferWithPipeControl = true;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.guardCommandBufferWithPipeControl = true;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -269,7 +271,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenFlushTas
     auto initialBase = commandStream.getCpuBase();
     auto initialUsed = commandStream.getUsed();
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -277,9 +279,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenFlushTas
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.guardCommandBufferWithPipeControl = true;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.guardCommandBufferWithPipeControl = true;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -342,7 +344,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenRecorded
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -351,10 +353,11 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenRecorded
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
     configureCSRtoNonDirtyState<FamilyType>();
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.requiresCoherency = true;
-    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+
     mockCsr->lastSentCoherencyRequest = 1;
 
     commandStream.getSpace(4);
@@ -410,7 +413,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenRecorded
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrCreatedWithDedicatedDebugFlagWhenItIsCreatedThenItHasProperDispatchMode) {
     DebugManagerStateRestore stateRestore;
     DebugManager.flags.CsrDispatchMode.set(static_cast<uint32_t>(DispatchMode::AdaptiveDispatch));
-    std::unique_ptr<MockCsrHw2<FamilyType>> mockCsr(new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment));
+    std::unique_ptr<MockCsrHw2<FamilyType>> mockCsr(new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex()));
     EXPECT_EQ(DispatchMode::AdaptiveDispatch, mockCsr->dispatchMode);
 }
 
@@ -418,7 +421,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenBlocking
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -428,7 +431,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenBlocking
 
     configureCSRtoNonDirtyState<FamilyType>();
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.blocking = true;
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
 
@@ -446,7 +449,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenBlocking
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenBufferToFlushWhenFlushTaskCalledThenUpdateFlushStamp) {
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     commandStream.getSpace(1);
@@ -459,7 +462,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenBufferToFlushWhenFlushTaskCal
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenNothingToFlushWhenFlushTaskCalledThenDontFlushStamp) {
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     configureCSRtoNonDirtyState<FamilyType>();
@@ -476,14 +479,14 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenFlushTas
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.guardCommandBufferWithPipeControl = true;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.guardCommandBufferWithPipeControl = true;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -507,9 +510,10 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInDefaultModeWhenFlushTask
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.guardCommandBufferWithPipeControl = true;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.guardCommandBufferWithPipeControl = true;
+
     auto &csr = commandQueue.getGpgpuCommandStreamReceiver();
 
     csr.flushTask(commandStream,
@@ -529,7 +533,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenWaitForT
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -537,9 +541,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenWaitForT
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.guardCommandBufferWithPipeControl = true;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.guardCommandBufferWithPipeControl = true;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -569,7 +573,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenEnqueueI
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -577,9 +581,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenEnqueueI
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.guardCommandBufferWithPipeControl = true;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.guardCommandBufferWithPipeControl = true;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -609,7 +613,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenSusbsequ
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -617,9 +621,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenSusbsequ
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.guardCommandBufferWithPipeControl = true;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.guardCommandBufferWithPipeControl = true;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -667,9 +671,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenTotalRes
     ExecutionEnvironment *executionEnvironment = platformImpl->peekExecutionEnvironment();
     auto mockedMemoryManager = new MockedMemoryManager(*executionEnvironment);
     executionEnvironment->memoryManager.reset(mockedMemoryManager);
-    auto mockCsr = new MockCsrHw2<FamilyType>(*executionEnvironment);
-    executionEnvironment->commandStreamReceivers.resize(1);
-    executionEnvironment->commandStreamReceivers[0].push_back(std::unique_ptr<CommandStreamReceiver>(mockCsr));
+    auto mockCsr = std::make_unique<MockCsrHw2<FamilyType>>(*executionEnvironment, 0);
 
     if (pDevice->getPreemptionMode() == PreemptionMode::MidThread || pDevice->isSourceLevelDebuggerActive()) {
         mockCsr->createPreemptionAllocation();
@@ -682,10 +684,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenTotalRes
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.guardCommandBufferWithPipeControl = true;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
-
+    dispatchFlags.guardCommandBufferWithPipeControl = true;
     mockedMemoryManager->budgetExhausted = true;
 
     mockCsr->flushTask(commandStream,
@@ -730,7 +731,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests,
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -738,10 +739,10 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests,
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.outOfOrderExecutionAllowed = true;
-    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
 
     auto taskLevelPriorToSubmission = mockCsr->peekTaskLevel();
 
@@ -811,14 +812,14 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenDcFlushI
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.guardCommandBufferWithPipeControl = true;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.guardCommandBufferWithPipeControl = true;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -839,15 +840,15 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenCommandA
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.outOfOrderExecutionAllowed = true;
-    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -870,15 +871,15 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWithOutOfOrd
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.outOfOrderExecutionAllowed = false;
-    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -901,7 +902,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenDcFlushI
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -909,10 +910,10 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenDcFlushI
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
     dispatchFlags.dcFlush = true;
     dispatchFlags.outOfOrderExecutionAllowed = true;
-    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -934,7 +935,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenEpiloguePipeControlThenDcFlus
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -942,10 +943,11 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenEpiloguePipeControlThenDcFlus
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.outOfOrderExecutionAllowed = false;
-    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+
     mockCsr->flushTask(commandStream,
                        0,
                        dsh,
@@ -972,7 +974,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenEpiloguePipeControlWhendDcFlu
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -980,10 +982,11 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenEpiloguePipeControlWhendDcFlu
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.outOfOrderExecutionAllowed = false;
-    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+
     mockCsr->flushTask(commandStream,
                        0,
                        dsh,
@@ -1006,7 +1009,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests,
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
     mockCsr->timestampPacketWriteEnabled = false;
 
@@ -1015,7 +1018,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests,
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.outOfOrderExecutionAllowed = false;
 
@@ -1065,7 +1068,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeAndOoqFlagSe
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -1073,7 +1076,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeAndOoqFlagSe
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.outOfOrderExecutionAllowed = false;
 
@@ -1104,7 +1107,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenPipeCont
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -1112,10 +1115,10 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenPipeCont
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.outOfOrderExecutionAllowed = true;
-    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
 
     auto taskLevelPriorToSubmission = mockCsr->peekTaskLevel();
 
@@ -1166,7 +1169,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests,
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -1174,10 +1177,10 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests,
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.outOfOrderExecutionAllowed = true;
-    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
 
     auto taskLevelPriorToSubmission = mockCsr->peekTaskLevel();
 
@@ -1307,7 +1310,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWithThrottleSetT
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -1315,9 +1318,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWithThrottleSetT
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.throttle = QueueThrottle::LOW;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.throttle = QueueThrottle::LOW;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -1339,7 +1342,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWithThrottleSetT
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -1347,9 +1350,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWithThrottleSetT
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.throttle = QueueThrottle::MEDIUM;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.throttle = QueueThrottle::MEDIUM;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -1371,7 +1374,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCommandQueueWithThrottleHintW
     cl_queue_properties properties[] = {CL_QUEUE_THROTTLE_KHR, CL_QUEUE_THROTTLE_LOW_KHR, 0};
     CommandQueueHw<FamilyType> commandQueue(&context, pDevice, properties);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     cl_int retVal = CL_SUCCESS;
@@ -1388,7 +1391,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWithThrottleSetT
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -1396,9 +1399,9 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWithThrottleSetT
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.throttle = QueueThrottle::HIGH;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
+    dispatchFlags.throttle = QueueThrottle::HIGH;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -1418,7 +1421,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenEpilogueRequiredFlagWhenTaskI
     configureCSRtoNonDirtyState<FamilyType>();
     auto &commandStreamReceiver = this->pDevice->getUltCommandStreamReceiver<FamilyType>();
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
 
     EXPECT_EQ(0u, commandStreamReceiver.getCmdSizeForEpilogue(dispatchFlags));
 
@@ -1464,13 +1467,44 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenEpilogueRequiredFlagWhenTaskI
     EXPECT_TRUE(commandStreamReceiver.isMadeResident(commandStreamReceiverStream.getGraphicsAllocation()));
 }
 
+HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWithNewSliceCountWhenFlushTaskThenNewSliceCountIsSet) {
+    CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
+    auto &commandStream = commandQueue.getCS(4096u);
+
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
+    pDevice->resetCommandStreamReceiver(mockCsr);
+
+    mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
+
+    auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
+    mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
+
+    uint64_t newSliceCount = 1;
+
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.sliceCount = newSliceCount;
+
+    mockCsr->flushTask(commandStream,
+                       0,
+                       dsh,
+                       ioh,
+                       ssh,
+                       taskLevel,
+                       dispatchFlags,
+                       *pDevice);
+
+    auto &cmdBufferList = mockedSubmissionsAggregator->peekCommandBuffers();
+    auto cmdBuffer = cmdBufferList.peekHead();
+
+    EXPECT_EQ(cmdBuffer->batchBuffer.sliceCount, newSliceCount);
+}
+
 template <typename GfxFamily>
 class UltCommandStreamReceiverForDispatchFlags : public UltCommandStreamReceiver<GfxFamily> {
     using BaseClass = UltCommandStreamReceiver<GfxFamily>;
 
   public:
-    UltCommandStreamReceiverForDispatchFlags(ExecutionEnvironment &executionEnvironment) : BaseClass(executionEnvironment) {
-    }
+    UltCommandStreamReceiverForDispatchFlags(ExecutionEnvironment &executionEnvironment) : BaseClass(executionEnvironment, 0) {}
 
     CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
                               const IndirectHeap &dsh, const IndirectHeap &ioh, const IndirectHeap &ssh,
@@ -1479,7 +1513,7 @@ class UltCommandStreamReceiverForDispatchFlags : public UltCommandStreamReceiver
         return BaseClass::flushTask(commandStream, commandStreamStart,
                                     dsh, ioh, ssh, taskLevel, dispatchFlags, device);
     }
-    DispatchFlags savedDispatchFlags;
+    DispatchFlags savedDispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
 };
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelWhenItIsUnblockedThenDispatchFlagsAreSetCorrectly) {
@@ -1493,7 +1527,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelWhenItIsUnblocke
 
     std::unique_ptr<MockKernel> pKernel(MockKernel::create(*pDevice, mockProgram.get(), numGrfRequired));
     auto event = std::make_unique<MockEvent<Event>>(pCmdQ.get(), CL_COMMAND_MARKER, 0, 0);
-    auto cmdStream = new LinearStream(pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties({4096, GraphicsAllocation::AllocationType::COMMAND_BUFFER}));
+    auto cmdStream = new LinearStream(pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), 4096, GraphicsAllocation::AllocationType::COMMAND_BUFFER}));
 
     IndirectHeap *dsh = nullptr, *ioh = nullptr, *ssh = nullptr;
     pCmdQ->allocateHeapMemory(IndirectHeap::DYNAMIC_STATE, 4096u, dsh);
@@ -1547,7 +1581,8 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, whenPerDssBackBufferProgrammingEna
     DebugManager.flags.ForcePerDssBackedBufferProgramming.set(true);
 
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+
     commandStreamReceiver.flushTask(commandStream,
                                     0,
                                     dsh,
@@ -1569,7 +1604,8 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, whenPerDssBackBufferProgrammingEna
     auto memoryManager = pDevice->getMemoryManager();
     commandStreamReceiver.perDssBackedBuffer = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+
     commandStreamReceiver.flushTask(commandStream,
                                     0,
                                     dsh,
@@ -1580,4 +1616,30 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, whenPerDssBackBufferProgrammingEna
                                     *pDevice);
 
     EXPECT_EQ(0u, commandStreamReceiver.createPerDssBackedBufferCalled);
+}
+
+template <typename GfxFamily>
+class MockCsrWithFailingFlush : public CommandStreamReceiverHw<GfxFamily> {
+  public:
+    using CommandStreamReceiverHw<GfxFamily>::latestSentTaskCount;
+    using CommandStreamReceiverHw<GfxFamily>::submissionAggregator;
+
+    MockCsrWithFailingFlush(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) : CommandStreamReceiverHw<GfxFamily>(executionEnvironment, rootDeviceIndex) {
+        this->dispatchMode = DispatchMode::BatchedDispatch;
+        this->tagAddress = &tag;
+    }
+    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
+        return false;
+    }
+    uint32_t tag = 0;
+};
+
+HWTEST_F(CommandStreamReceiverFlushTaskTests, givenWaitForCompletionWithTimeoutIsCalledWhenFlushBatchedSubmissionsReturnsFailureThenItIsPropagated) {
+    MockCsrWithFailingFlush<FamilyType> mockCsr(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
+    MockOsContext osContext(0, 8, aub_stream::ENGINE_RCS, PreemptionMode::Disabled, false);
+    mockCsr.setupContext(osContext);
+    mockCsr.latestSentTaskCount = 0;
+    auto cmdBuffer = std::make_unique<CommandBuffer>(*pDevice);
+    mockCsr.submissionAggregator->recordCommandBuffer(cmdBuffer.release());
+    EXPECT_FALSE(mockCsr.waitForCompletionWithTimeout(false, 0, 1));
 }

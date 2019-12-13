@@ -5,7 +5,7 @@
  *
  */
 
-#include "runtime/helpers/hw_helper.h"
+#include "core/helpers/hw_helper.h"
 #include "runtime/mem_obj/image.h"
 #include "unit_tests/command_queue/command_queue_fixture.h"
 #include "unit_tests/fixtures/device_fixture.h"
@@ -72,7 +72,9 @@ HWTEST_P(CreateTiledImageTest, isTiledImageIsSetForTiledImages) {
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
     auto image = Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         nullptr,

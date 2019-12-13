@@ -27,14 +27,12 @@ enum class HeapIndex : uint32_t {
     TOTAL_HEAPS
 };
 
-constexpr auto internalHeapIndex = is32bit ? HeapIndex::HEAP_INTERNAL : HeapIndex::HEAP_INTERNAL_DEVICE_MEMORY;
-
 class GfxPartition {
   public:
     GfxPartition();
     MOCKABLE_VIRTUAL ~GfxPartition();
 
-    void init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToReserve);
+    void init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToReserve, uint32_t rootDeviceIndex);
 
     void heapInit(HeapIndex heapIndex, uint64_t base, uint64_t size) {
         getHeap(heapIndex).init(base, size);
@@ -70,7 +68,7 @@ class GfxPartition {
     static const std::array<HeapIndex, 6> heapNonSvmNames;
 
   protected:
-    void initAdditionalRange(uint64_t gpuAddressSpace, uint64_t &gfxBase, uint64_t &gfxTop);
+    void initAdditionalRange(uint64_t gpuAddressSpace, uint64_t &gfxBase, uint64_t &gfxTop, uint32_t rootDeviceIndex);
 
     class Heap {
       public:

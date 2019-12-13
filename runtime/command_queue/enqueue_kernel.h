@@ -15,8 +15,6 @@
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/surface.h"
 
-#include "hw_cmds.h"
-
 #include <new>
 
 namespace NEO {
@@ -39,6 +37,10 @@ cl_int CommandQueueHw<GfxFamily>::enqueueKernel(
 
     auto &kernel = *castToObject<Kernel>(clKernel);
     const auto &kernelInfo = kernel.getKernelInfo();
+
+    if (kernel.isParentKernel && !this->context->getDefaultDeviceQueue()) {
+        return CL_INVALID_OPERATION;
+    }
 
     if (!kernel.isPatched()) {
         if (event) {

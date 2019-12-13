@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/compiler_interface/compiler_interface.h"
 #include "core/helpers/aligned_memory.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/built_ins/built_ins.h"
-#include "runtime/compiler_interface/compiler_interface.h"
 #include "runtime/helpers/mipmap.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/mem_obj/mem_obj_helper.h"
@@ -42,7 +42,8 @@ class CreateImageTest : public DeviceFixture,
     }
     Image *createImageWithFlags(cl_mem_flags flags) {
         auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-        return Image::create(context, flags, surfaceFormat, &imageDesc, nullptr, retVal);
+        return Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+                             flags, 0, surfaceFormat, &imageDesc, nullptr, retVal);
     }
 
   protected:
@@ -117,7 +118,9 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
     auto image = Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         hostPtr,
@@ -140,7 +143,9 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         hostPtr,
@@ -163,7 +168,9 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         hostPtr,
@@ -186,7 +193,9 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         hostPtr,
@@ -209,7 +218,9 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         hostPtr,
@@ -232,7 +243,9 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         hostPtr,
@@ -255,7 +268,9 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         hostPtr,
@@ -278,7 +293,9 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         hostPtr,
@@ -327,7 +344,9 @@ TEST(TestCreateImage, UseSharedContextToCreateImage) {
 
     auto image = Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         hostPtr,
@@ -386,7 +405,9 @@ TEST(TestCreateImageUseHostPtr, CheckMemoryAllocationForDifferenHostPtrAlignment
     for (int i = 0; i < 4; i++) {
         auto image = Image::create(
             &context,
+            MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
             flags,
+            0,
             surfaceFormat,
             &imageDesc,
             hostPtr[i],
@@ -422,7 +443,9 @@ TEST(TestCreateImageUseHostPtr, givenZeroCopyImageValuesWhenUsingHostPtrThenZero
 
     auto image = std::unique_ptr<Image>(Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         hostPtr,
@@ -435,15 +458,6 @@ TEST(TestCreateImageUseHostPtr, givenZeroCopyImageValuesWhenUsingHostPtrThenZero
     EXPECT_NE(nullptr, image->getMapAllocation());
 
     alignedFree(hostPtr);
-}
-
-TEST_P(CreateImageNoHostPtr, validFlags) {
-    auto image = createImageWithFlags(flags);
-
-    ASSERT_EQ(CL_SUCCESS, retVal);
-    ASSERT_NE(nullptr, image);
-
-    delete image;
 }
 
 TEST_P(CreateImageNoHostPtr, getImageDesc) {
@@ -461,7 +475,7 @@ TEST_P(CreateImageNoHostPtr, getImageDesc) {
     delete image;
 }
 
-TEST_P(CreateImageNoHostPtr, withImageGraphicsAllocationReportsImageType) {
+TEST_P(CreateImageNoHostPtr, whenImageIsCreatedThenItHasProperAccessAndCacheProperties) {
     auto image = createImageWithFlags(flags);
 
     ASSERT_EQ(CL_SUCCESS, retVal);
@@ -473,17 +487,10 @@ TEST_P(CreateImageNoHostPtr, withImageGraphicsAllocationReportsImageType) {
     auto isImageWritable = !(flags & (CL_MEM_READ_ONLY | CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS));
     EXPECT_EQ(isImageWritable, allocation->isMemObjectsAllocationWithWritableFlags());
 
-    delete image;
-}
-
-TEST_P(CreateImageNoHostPtr, whenImageIsReadOnlyThenFlushL3IsNotRequired) {
-    auto image = clUniquePtr(createImageWithFlags(flags));
-
-    EXPECT_NE(nullptr, image);
-
-    auto allocation = image->getGraphicsAllocation();
     auto isReadOnly = isValueSet(flags, CL_MEM_READ_ONLY);
     EXPECT_NE(isReadOnly, allocation->isFlushL3Required());
+
+    delete image;
 }
 
 // Parameterized test that tests image creation with all flags that should be
@@ -524,7 +531,9 @@ struct CreateImageHostPtr
         auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
         return Image::create(
             context,
+            MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
             flags,
+            0,
             surfaceFormat,
             &imageDesc,
             pHostPtr,
@@ -548,7 +557,7 @@ TEST_P(CreateImageHostPtr, getAddress) {
     image = createImage(retVal);
     ASSERT_NE(nullptr, image);
 
-    auto address = image->getBasePtrForMap();
+    auto address = image->getBasePtrForMap(0);
     EXPECT_NE(nullptr, address);
 
     if (!(flags & CL_MEM_USE_HOST_PTR)) {
@@ -586,14 +595,6 @@ TEST_P(CreateImageHostPtr, getAddress) {
     }
 }
 
-TEST_P(CreateImageHostPtr, givenImageWhenItIsCreateItHasProperSizeAndGraphicsAllocation) {
-    image = createImage(retVal);
-    ASSERT_NE(nullptr, image);
-
-    EXPECT_NE(0u, image->getSize());
-    EXPECT_NE(nullptr, image->getGraphicsAllocation());
-}
-
 TEST_P(CreateImageHostPtr, getImageDesc) {
     image = createImage(retVal);
     ASSERT_NE(nullptr, image);
@@ -624,6 +625,8 @@ TEST_P(CreateImageHostPtr, getImageDesc) {
 
     EXPECT_EQ(image->getHostPtrSlicePitch(), static_cast<size_t>(imageDesc.image_width * elementSize * imageDesc.image_height) * isArrayOr3DType);
     EXPECT_EQ(image->getImageCount(), 1u);
+    EXPECT_NE(0u, image->getSize());
+    EXPECT_NE(nullptr, image->getGraphicsAllocation());
 }
 
 TEST_P(CreateImageHostPtr, failedAllocationInjection) {
@@ -670,7 +673,7 @@ TEST_P(CreateImageHostPtr, givenLinearImageWhenFailedAtCreationThenReturnError) 
 TEST_P(CreateImageHostPtr, checkWritingOutsideAllocatedMemoryWhileCreatingImage) {
     auto mockMemoryManager = new MockMemoryManager(*pDevice->executionEnvironment);
     pDevice->injectMemoryManager(mockMemoryManager);
-    context->setMemoryManager(mockMemoryManager);
+    context->memoryManager = mockMemoryManager;
     mockMemoryManager->redundancyRatio = 2;
     memset(pHostPtr, 1, testImageDimensions * testImageDimensions * elementSize * 4);
     imageDesc.image_type = CL_MEM_OBJECT_IMAGE1D_ARRAY;
@@ -944,7 +947,8 @@ HWTEST_F(ImageCompressionTests, givenTiledImageWhenCreatingAllocationThenPreferR
 
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
 
-    auto image = std::unique_ptr<Image>(Image::create(mockContext.get(), flags, surfaceFormat, &imageDesc, nullptr, retVal));
+    auto image = std::unique_ptr<Image>(Image::create(mockContext.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+                                                      flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     ASSERT_NE(nullptr, image);
     EXPECT_EQ(UnitTestHelper<FamilyType>::tiledImagesSupported, image->isTiledAllocation());
     EXPECT_TRUE(myMemoryManager->mockMethodCalled);
@@ -957,7 +961,8 @@ TEST_F(ImageCompressionTests, givenNonTiledImageWhenCreatingAllocationThenDontPr
 
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
 
-    auto image = std::unique_ptr<Image>(Image::create(mockContext.get(), flags, surfaceFormat, &imageDesc, nullptr, retVal));
+    auto image = std::unique_ptr<Image>(Image::create(mockContext.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+                                                      flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     ASSERT_NE(nullptr, image);
     EXPECT_FALSE(image->isTiledAllocation());
     EXPECT_TRUE(myMemoryManager->mockMethodCalled);
@@ -1161,7 +1166,9 @@ TEST(ImageTest, givenClMemForceLinearStorageSetWhenCreateImageThenDisallowTiling
 
     auto image = std::unique_ptr<Image>(Image::create(
         &context,
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         nullptr,
@@ -1327,7 +1334,7 @@ TEST(ImageTest, givenForcedLinearImages3DImageAndProperDescriptorValuesWhenIsCop
     imgInfo.rowPitch = imageDesc.image_width * surfaceFormat->ImageElementSizeInBytes;
     imgInfo.slicePitch = imgInfo.rowPitch * imageDesc.image_height;
     imgInfo.size = imgInfo.slicePitch;
-    imgInfo.linearStorage = !hwHelper.tilingAllowed(false, *imgInfo.imgDesc, false);
+    imgInfo.linearStorage = !hwHelper.tilingAllowed(false, Image::isImage1d(*imgInfo.imgDesc), false);
 
     auto hostPtr = alignedMalloc(imgInfo.size, MemoryConstants::cacheLineSize);
 
@@ -1367,7 +1374,7 @@ TEST(ImageTest, givenClMemCopyHostPointerPassedToImageCreateWhenAllocationIsNotI
 
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
 
-    std::unique_ptr<Image> image(Image::create(&ctx, flags, surfaceFormat, &imageDesc, memory, retVal));
+    std::unique_ptr<Image> image(Image::create(&ctx, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0), flags, 0, surfaceFormat, &imageDesc, memory, retVal));
     EXPECT_NE(nullptr, image);
 
     auto taskCountSent = device->getGpgpuCommandStreamReceiver().peekLatestFlushedTaskCount();
@@ -1463,7 +1470,7 @@ HWTEST_F(ImageTransformTest, givenSurfaceBaseAddressAndUnifiedSurfaceWhenSetUnif
 template <typename FamilyName>
 class MockImageHw : public ImageHw<FamilyName> {
   public:
-    MockImageHw(Context *context, const cl_image_format &format, const cl_image_desc &desc, SurfaceFormatInfo &surfaceFormatInfo, GraphicsAllocation *graphicsAllocation) : ImageHw<FamilyName>(context, 0, 0, nullptr, format, desc, false, graphicsAllocation, false, 0, 0, surfaceFormatInfo) {
+    MockImageHw(Context *context, const cl_image_format &format, const cl_image_desc &desc, SurfaceFormatInfo &surfaceFormatInfo, GraphicsAllocation *graphicsAllocation) : ImageHw<FamilyName>(context, {}, 0, 0, 0, nullptr, format, desc, false, graphicsAllocation, false, 0, 0, surfaceFormatInfo) {
     }
 
     void setClearColorParams(typename FamilyName::RENDER_SURFACE_STATE *surfaceState, const Gmm *gmm) override;
@@ -1486,7 +1493,7 @@ HWTEST_F(HwImageTest, givenImageHwWhenSettingCCSParamsThenSetClearColorParamsIsC
 
     MockContext context;
     OsAgnosticMemoryManager memoryManager(*context.getDevice(0)->getExecutionEnvironment());
-    context.setMemoryManager(&memoryManager);
+    context.memoryManager = &memoryManager;
 
     cl_image_desc imgDesc = {};
     imgDesc.image_height = 4;
@@ -1499,7 +1506,7 @@ HWTEST_F(HwImageTest, givenImageHwWhenSettingCCSParamsThenSetClearColorParamsIsC
     format.image_channel_order = CL_RGBA;
 
     auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(imgInfo, true, {});
+    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(0, imgInfo, true, {});
 
     auto graphicsAllocation = memoryManager.allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
 
@@ -1519,7 +1526,7 @@ HWTEST_F(HwImageTest, givenImageHwWithUnifiedSurfaceAndMcsWhenSettingParamsForMu
 
     MockContext context;
     OsAgnosticMemoryManager memoryManager(*context.getDevice(0)->getExecutionEnvironment());
-    context.setMemoryManager(&memoryManager);
+    context.memoryManager = &memoryManager;
 
     cl_image_desc imgDesc = {};
     imgDesc.image_height = 1;
@@ -1530,7 +1537,7 @@ HWTEST_F(HwImageTest, givenImageHwWithUnifiedSurfaceAndMcsWhenSettingParamsForMu
     cl_image_format format = {};
 
     auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(imgInfo, true, {});
+    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(0, imgInfo, true, {});
 
     auto graphicsAllocation = memoryManager.allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
 

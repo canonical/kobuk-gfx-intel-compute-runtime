@@ -9,6 +9,8 @@
 
 #include "core/helpers/aligned_memory.h"
 #include "core/helpers/basic_math.h"
+#include "core/helpers/hw_helper.h"
+#include "core/memory_manager/host_ptr_manager.h"
 #include "core/utilities/stackvec.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/event/event.h"
@@ -18,16 +20,16 @@
 #include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/gmm_helper/resource_info.h"
 #include "runtime/helpers/hardware_commands_helper.h"
-#include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/options.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/memory_manager/deferrable_allocation_deletion.h"
 #include "runtime/memory_manager/deferred_deleter.h"
-#include "runtime/memory_manager/host_ptr_manager.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
+#include "runtime/os_interface/device_factory.h"
 #include "runtime/os_interface/os_context.h"
 #include "runtime/os_interface/os_interface.h"
+#include "runtime/platform/platform.h"
 
 #include <algorithm>
 
@@ -41,7 +43,11 @@ MemoryManager::MemoryManager(ExecutionEnvironment &executionEnvironment) : execu
         this->enable64kbpages = DebugManager.flags.Enable64kbpages.get() != 0;
     }
     localMemoryUsageBankSelector.reset(new LocalMemoryUsageBankSelector(getBanksCount()));
-    gfxPartition = std::make_unique<GfxPartition>();
+
+    for (uint32_t rootDeviceIndex = 0; rootDeviceIndex < executionEnvironment.rootDeviceEnvironments.size(); ++rootDeviceIndex) {
+        gfxPartitions.push_back(std::make_unique<GfxPartition>());
+    }
+
     if (this->localMemorySupported) {
         pageFaultManager = PageFaultManager::create();
     }
@@ -91,7 +97,7 @@ GraphicsAllocation *MemoryManager::allocateGraphicsMemoryWithHostPtr(const Alloc
         deferredDeleter->drain(true);
     }
     GraphicsAllocation *graphicsAllocation = nullptr;
-    auto osStorage = hostPtrManager->prepareOsStorageForAllocation(*this, allocationData.size, allocationData.hostPtr);
+    auto osStorage = hostPtrManager->prepareOsStorageForAllocation(*this, allocationData.size, allocationData.hostPtr, allocationData.rootDeviceIndex);
     if (osStorage.fragmentCount > 0) {
         graphicsAllocation = createGraphicsAllocation(osStorage, allocationData);
     }
@@ -109,18 +115,18 @@ GraphicsAllocation *MemoryManager::allocateGraphicsMemoryForImageFromHostPtr(con
 
 void MemoryManager::cleanGraphicsMemoryCreatedFromHostPtr(GraphicsAllocation *graphicsAllocation) {
     hostPtrManager->releaseHandleStorage(graphicsAllocation->fragmentsStorage);
-    cleanOsHandles(graphicsAllocation->fragmentsStorage);
+    cleanOsHandles(graphicsAllocation->fragmentsStorage, graphicsAllocation->getRootDeviceIndex());
 }
 
 GraphicsAllocation *MemoryManager::createGraphicsAllocationWithPadding(GraphicsAllocation *inputGraphicsAllocation, size_t sizeWithPadding) {
     if (!paddingAllocation) {
-        paddingAllocation = allocateGraphicsMemoryWithProperties({paddingBufferSize, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY});
+        paddingAllocation = allocateGraphicsMemoryWithProperties({inputGraphicsAllocation->getRootDeviceIndex(), paddingBufferSize, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY});
     }
     return createPaddedAllocation(inputGraphicsAllocation, sizeWithPadding);
 }
 
 GraphicsAllocation *MemoryManager::createPaddedAllocation(GraphicsAllocation *inputGraphicsAllocation, size_t sizeWithPadding) {
-    return allocateGraphicsMemoryWithProperties({sizeWithPadding, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY});
+    return allocateGraphicsMemoryWithProperties({inputGraphicsAllocation->getRootDeviceIndex(), sizeWithPadding, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY});
 }
 
 void MemoryManager::freeSystemMemory(void *ptr) {
@@ -307,6 +313,9 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
     if (allocationData.flags.allocateMemory) {
         allocationData.hostPtr = nullptr;
     }
+
+    allocationData.rootDeviceIndex = properties.rootDeviceIndex;
+
     return true;
 }
 
@@ -396,10 +405,6 @@ void MemoryManager::unregisterEngineForCsr(CommandStreamReceiver *commandStreamR
     }
 }
 
-CommandStreamReceiver *MemoryManager::getDefaultCommandStreamReceiver(uint32_t deviceId) const {
-    return peekExecutionEnvironment().commandStreamReceivers[deviceId][defaultEngineIndex].get();
-}
-
 void *MemoryManager::lockResource(GraphicsAllocation *graphicsAllocation) {
     if (!graphicsAllocation) {
         return nullptr;
@@ -424,7 +429,7 @@ void MemoryManager::unlockResource(GraphicsAllocation *graphicsAllocation) {
 HeapIndex MemoryManager::selectHeap(const GraphicsAllocation *allocation, bool hasPointer, bool isFullRangeSVM) {
     if (allocation) {
         if (useInternal32BitAllocator(allocation->getAllocationType())) {
-            return internalHeapIndex;
+            return HeapIndex::HEAP_INTERNAL_DEVICE_MEMORY;
         }
         if (allocation->is32BitAllocation()) {
             return HeapIndex::HEAP_EXTERNAL;

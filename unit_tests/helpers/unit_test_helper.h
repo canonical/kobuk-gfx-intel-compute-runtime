@@ -7,7 +7,8 @@
 
 #pragma once
 
-#include "hw_cmds.h"
+#include "runtime/gen_common/hw_cmds.h"
+#include "runtime/helpers/properties_helper.h"
 
 namespace NEO {
 
@@ -35,5 +36,9 @@ struct UnitTestHelper {
     static uint64_t getMemoryAddress(const typename GfxFamily::MI_ATOMIC &atomic);
 
     static const bool tiledImagesSupported;
+
+    static const uint32_t smallestTestableSimdSize;
+
+    static const AuxTranslationMode requiredAuxTranslationMode;
 };
 } // namespace NEO

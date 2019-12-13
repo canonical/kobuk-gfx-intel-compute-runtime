@@ -7,11 +7,11 @@
 
 #pragma once
 #include "core/memory_manager/graphics_allocation.h"
+#include "runtime/device/sub_device.h"
 
 namespace NEO {
 struct ImageInfo;
 struct AllocationProperties {
-    constexpr static uint32_t noDeviceSpecified = std::numeric_limits<uint32_t>::max();
     union {
         struct {
             uint32_t allocateMemory : 1;
@@ -26,43 +26,45 @@ struct AllocationProperties {
         uint32_t allFlags = 0;
     };
     static_assert(sizeof(AllocationProperties::flags) == sizeof(AllocationProperties::allFlags), "");
+    const uint32_t rootDeviceIndex;
     size_t size = 0;
     size_t alignment = 0;
     GraphicsAllocation::AllocationType allocationType = GraphicsAllocation::AllocationType::UNKNOWN;
     ImageInfo *imgInfo = nullptr;
-    uint32_t deviceIndex = AllocationProperties::noDeviceSpecified;
     bool multiStorageResource = false;
+    uint32_t subDeviceIndex = SubDevice::unspecifiedSubDeviceIndex;
 
-    AllocationProperties(size_t size,
+    AllocationProperties(uint32_t rootDeviceIndex, size_t size,
                          GraphicsAllocation::AllocationType allocationType)
-        : AllocationProperties(true, size, allocationType, false) {}
+        : AllocationProperties(rootDeviceIndex, true, size, allocationType, false) {}
 
-    AllocationProperties(bool allocateMemory,
+    AllocationProperties(uint32_t rootDeviceIndex, bool allocateMemory,
                          ImageInfo &imgInfo,
                          GraphicsAllocation::AllocationType allocationType)
-        : AllocationProperties(allocateMemory, 0u, allocationType, false) {
+        : AllocationProperties(rootDeviceIndex, allocateMemory, 0u, allocationType, false) {
         this->imgInfo = &imgInfo;
     }
 
-    AllocationProperties(bool allocateMemory,
+    AllocationProperties(uint32_t rootDeviceIndex,
+                         bool allocateMemory,
                          size_t size,
                          GraphicsAllocation::AllocationType allocationType,
                          bool isMultiStorageAllocation)
-        : AllocationProperties(allocateMemory, size, allocationType, false, AllocationProperties::noDeviceSpecified) {
-        this->multiStorageResource = isMultiStorageAllocation;
-    }
+        : AllocationProperties(rootDeviceIndex, allocateMemory, size, allocationType, false, isMultiStorageAllocation, SubDevice::unspecifiedSubDeviceIndex) {}
 
-    AllocationProperties(bool allocateMemory,
-                         size_t size,
-                         GraphicsAllocation::AllocationType allocationType,
-                         bool multiOsContextCapable,
-                         uint32_t deviceIndex)
-        : size(size), allocationType(allocationType), deviceIndex(deviceIndex) {
+    AllocationProperties(uint32_t rootDeviceIndexParam,
+                         bool allocateMemoryParam,
+                         size_t sizeParam,
+                         GraphicsAllocation::AllocationType allocationTypeParam,
+                         bool multiOsContextCapableParam,
+                         bool isMultiStorageAllocationParam,
+                         uint32_t subDeviceIndexParam)
+        : rootDeviceIndex(rootDeviceIndexParam), size(sizeParam), allocationType(allocationTypeParam), multiStorageResource(isMultiStorageAllocationParam), subDeviceIndex(subDeviceIndexParam) {
         allFlags = 0;
         flags.flushL3RequiredForRead = 1;
         flags.flushL3RequiredForWrite = 1;
-        flags.allocateMemory = allocateMemory;
-        flags.multiOsContextCapable = multiOsContextCapable;
+        flags.allocateMemory = allocateMemoryParam;
+        flags.multiOsContextCapable = multiOsContextCapableParam;
     }
 };
 } // namespace NEO

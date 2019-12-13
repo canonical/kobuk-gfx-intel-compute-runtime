@@ -7,20 +7,18 @@
 
 #pragma once
 
+#include "core/helpers/hw_helper.h"
 #include "runtime/execution_environment/execution_environment.h"
-#include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/options.h"
 #include "unit_tests/fixtures/mock_aub_center_fixture.h"
 
 namespace NEO {
-struct MockExecutionEnvironment : ExecutionEnvironment {
-    MockExecutionEnvironment() = default;
-    MockExecutionEnvironment(const HardwareInfo *hwInfo) : MockExecutionEnvironment(hwInfo, true) {}
-    MockExecutionEnvironment(const HardwareInfo *hwInfo, bool useMockAubCenter) : useMockAubCenter(useMockAubCenter) {
-        if (hwInfo) {
-            setHwInfo(hwInfo);
-        }
-    }
+
+struct MockRootDeviceEnvironment : public RootDeviceEnvironment {
+    using RootDeviceEnvironment::RootDeviceEnvironment;
+
+    ~MockRootDeviceEnvironment() override = default;
+
     void initAubCenter(bool localMemoryEnabled, const std::string &aubFileName, CommandStreamReceiverType csrType) override {
         if (!initAubCenterCalled) {
             initAubCenterCalled = true;
@@ -28,9 +26,9 @@ struct MockExecutionEnvironment : ExecutionEnvironment {
             aubFileNameReceived = aubFileName;
         }
         if (useMockAubCenter) {
-            MockAubCenterFixture::setMockAubCenter(this);
+            MockAubCenterFixture::setMockAubCenter(*this);
         }
-        ExecutionEnvironment::initAubCenter(localMemoryEnabled, aubFileName, csrType);
+        RootDeviceEnvironment::initAubCenter(localMemoryEnabled, aubFileName, csrType);
     }
     bool initAubCenterCalled = false;
     bool localMemoryEnabledReceived = false;
@@ -38,19 +36,23 @@ struct MockExecutionEnvironment : ExecutionEnvironment {
     bool useMockAubCenter = true;
 };
 
-template <typename CsrType>
-struct MockExecutionEnvironmentWithCsr : public ExecutionEnvironment {
-    MockExecutionEnvironmentWithCsr() = delete;
-    MockExecutionEnvironmentWithCsr(const HardwareInfo &hwInfo, uint32_t devicesCount) {
-        setHwInfo(&hwInfo);
-        auto &gpgpuEngines = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getGpgpuEngineInstances();
-        commandStreamReceivers.resize(devicesCount);
+struct MockExecutionEnvironment : ExecutionEnvironment {
+    ~MockExecutionEnvironment() override = default;
+    MockExecutionEnvironment() : MockExecutionEnvironment(nullptr) {}
+    MockExecutionEnvironment(const HardwareInfo *hwInfo) : MockExecutionEnvironment(hwInfo, true, 1u) {
+    }
+    MockExecutionEnvironment(const HardwareInfo *hwInfo, bool useMockAubCenter, uint32_t numRootDevices) {
+        prepareRootDeviceEnvironments(numRootDevices);
+        for (auto rootDeviceIndex = 0u; rootDeviceIndex < numRootDevices; rootDeviceIndex++) {
+            auto rootDeviceEnvironment = new MockRootDeviceEnvironment(*this);
+            rootDeviceEnvironment->useMockAubCenter = useMockAubCenter;
+            rootDeviceEnvironments[rootDeviceIndex].reset(rootDeviceEnvironment);
+        }
 
-        for (uint32_t csrIndex = 0; csrIndex < gpgpuEngines.size(); csrIndex++) {
-            for (auto &csr : commandStreamReceivers) {
-                csr.push_back(std::unique_ptr<CommandStreamReceiver>(new CsrType(*this)));
-            }
+        if (hwInfo) {
+            setHwInfo(hwInfo);
         }
     }
 };
+
 } // namespace NEO

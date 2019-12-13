@@ -137,7 +137,7 @@ TEST(DeviceGetCapsTest, validate) {
     EXPECT_EQ(64u, caps.preferredLocalAtomicAlignment);
     EXPECT_EQ(64u, caps.preferredPlatformAtomicAlignment);
 
-    EXPECT_EQ(1u, caps.imageSupport);
+    EXPECT_EQ(static_cast<cl_bool>(device->getHardwareInfo().capabilityTable.supportsImages), caps.imageSupport);
     EXPECT_EQ(16384u, caps.image2DMaxWidth);
     EXPECT_EQ(16384u, caps.image2DMaxHeight);
     EXPECT_EQ(2048u, caps.imageMaxArraySize);
@@ -197,6 +197,7 @@ TEST(DeviceGetCapsTest, givenDeviceWithMidThreadPreemptionWhenDeviceIsCreatedThe
         DebugManager.flags.ForcePreemptionMode.set((int32_t)PreemptionMode::MidThread);
 
         auto executionEnvironment = new ExecutionEnvironment();
+        executionEnvironment->prepareRootDeviceEnvironments(1);
         executionEnvironment->builtins.reset(builtIns);
         auto device = std::unique_ptr<Device>(MockDevice::createWithExecutionEnvironment<MockDevice>(platformDevices[0], executionEnvironment, 0u));
         ASSERT_EQ(builtIns, device->getExecutionEnvironment()->getBuiltIns());
@@ -817,6 +818,7 @@ TEST(DeviceGetCapsTest, GivenFlagEnabled64kbPagesWhenSetThenReturnCorrectValue) 
     VariableBackup<bool> OsEnabled64kbPagesBackup(&OSInterface::osEnabled64kbPages);
 
     ExecutionEnvironment executionEnvironment;
+    executionEnvironment.prepareRootDeviceEnvironments(1);
     auto &capabilityTable = executionEnvironment.getMutableHardwareInfo()->capabilityTable;
     std::unique_ptr<MemoryManager> memoryManager;
 

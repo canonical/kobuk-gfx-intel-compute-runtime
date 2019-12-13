@@ -68,11 +68,11 @@ CommandQueue::CommandQueue(Context *context, Device *deviceId, const cl_queue_pr
 
     if (device) {
         gpgpuEngine = &device->getDefaultEngine();
-        if (getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
+        if (gpgpuEngine->commandStreamReceiver->peekTimestampPacketWriteEnabled()) {
             timestampPacketContainer = std::make_unique<TimestampPacketContainer>();
         }
         if (device->getExecutionEnvironment()->getHardwareInfo()->capabilityTable.blitterOperationsSupported) {
-            bcsEngine = &device->getEngine(aub_stream::EngineType::ENGINE_BCS, false);
+            bcsEngine = &device->getDeviceById(0)->getEngine(aub_stream::EngineType::ENGINE_BCS, false);
         }
     }
 
@@ -86,7 +86,7 @@ CommandQueue::~CommandQueue() {
     }
 
     if (device) {
-        auto storageForAllocation = getGpgpuCommandStreamReceiver().getInternalAllocationStorage();
+        auto storageForAllocation = gpgpuEngine->commandStreamReceiver->getInternalAllocationStorage();
 
         if (commandStream) {
             storageForAllocation->storeAllocation(std::unique_ptr<GraphicsAllocation>(commandStream->getGraphicsAllocation()), REUSABLE_ALLOCATION);
@@ -146,12 +146,12 @@ void CommandQueue::waitUntilComplete(uint32_t taskCountToWait, FlushStamp flushS
     DEBUG_BREAK_IF(getHwTag() < taskCountToWait);
     latestTaskCountWaited = taskCountToWait;
 
-    getGpgpuCommandStreamReceiver().waitForTaskCountAndCleanAllocationList(taskCountToWait, TEMPORARY_ALLOCATION);
-
     if (auto bcsCsr = getBcsCommandStreamReceiver()) {
-        auto bcsTaskCount = *bcsCsr->getTagAddress();
+        bcsCsr->waitForTaskCountWithKmdNotifyFallback(bcsTaskCount, 0, false, false);
         bcsCsr->waitForTaskCountAndCleanAllocationList(bcsTaskCount, TEMPORARY_ALLOCATION);
     }
+
+    getGpgpuCommandStreamReceiver().waitForTaskCountAndCleanAllocationList(taskCountToWait, TEMPORARY_ALLOCATION);
 
     WAIT_LEAVE()
 }
@@ -327,8 +327,12 @@ cl_int CommandQueue::enqueueWriteMemObjForUnmap(MemObj *memObj, void *mappedPtr,
     }
 
     if (!unmapInfo.readOnly) {
+        memObj->getMapAllocation()->setAubWritable(true, GraphicsAllocation::defaultBank);
+        memObj->getMapAllocation()->setTbxWritable(true, GraphicsAllocation::defaultBank);
+
         if (memObj->peekClMemObjType() == CL_MEM_OBJECT_BUFFER) {
             auto buffer = castToObject<Buffer>(memObj);
+
             retVal = enqueueWriteBuffer(buffer, CL_TRUE, unmapInfo.offset[0], unmapInfo.size[0], mappedPtr, memObj->getMapAllocation(),
                                         eventsRequest.numEventsInWaitList, eventsRequest.eventWaitList, eventsRequest.outEvent);
         } else {
@@ -341,7 +345,7 @@ cl_int CommandQueue::enqueueWriteMemObjForUnmap(MemObj *memObj, void *mappedPtr,
                                        image->getHostPtrRowPitch(), image->getHostPtrSlicePitch(), mappedPtr, memObj->getMapAllocation(),
                                        eventsRequest.numEventsInWaitList, eventsRequest.eventWaitList, eventsRequest.outEvent);
             bool mustCallFinish = true;
-            if (!(image->getFlags() & CL_MEM_USE_HOST_PTR)) {
+            if (!(image->getMemoryPropertiesFlags() & CL_MEM_USE_HOST_PTR)) {
                 mustCallFinish = true;
             } else {
                 mustCallFinish = (CommandQueue::getTaskLevelFromWaitList(this->taskLevel, eventsRequest.numEventsInWaitList, eventsRequest.eventWaitList) != Event::eventNotReady);
@@ -365,7 +369,7 @@ cl_int CommandQueue::enqueueWriteMemObjForUnmap(MemObj *memObj, void *mappedPtr,
 }
 
 void *CommandQueue::enqueueReadMemObjForMap(TransferProperties &transferProperties, EventsRequest &eventsRequest, cl_int &errcodeRet) {
-    void *basePtr = transferProperties.memObj->getBasePtrForMap();
+    void *basePtr = transferProperties.memObj->getBasePtrForMap(getDevice().getRootDeviceIndex());
     size_t mapPtrOffset = transferProperties.memObj->calculateOffsetForMapping(transferProperties.offset) + transferProperties.mipPtrOffset;
     if (transferProperties.memObj->peekClMemObjType() == CL_MEM_OBJECT_BUFFER) {
         mapPtrOffset += transferProperties.memObj->getOffset();
@@ -578,14 +582,14 @@ bool CommandQueue::queueDependenciesClearRequired() const {
 }
 
 bool CommandQueue::blitEnqueueAllowed(cl_command_type cmdType) const {
-    bool blitAllowed = false;
+    bool blitAllowed = device->getExecutionEnvironment()->getHardwareInfo()->capabilityTable.blitterOperationsSupported;
 
     if (DebugManager.flags.EnableBlitterOperationsForReadWriteBuffers.get() != -1) {
-        blitAllowed = !!DebugManager.flags.EnableBlitterOperationsForReadWriteBuffers.get() &&
-                      device->getExecutionEnvironment()->getHardwareInfo()->capabilityTable.blitterOperationsSupported;
+        blitAllowed &= !!DebugManager.flags.EnableBlitterOperationsForReadWriteBuffers.get();
     }
 
-    bool commandAllowed = (CL_COMMAND_READ_BUFFER == cmdType) || (CL_COMMAND_WRITE_BUFFER == cmdType);
+    bool commandAllowed = (CL_COMMAND_READ_BUFFER == cmdType) || (CL_COMMAND_WRITE_BUFFER == cmdType) ||
+                          (CL_COMMAND_COPY_BUFFER == cmdType);
 
     return commandAllowed && blitAllowed;
 }

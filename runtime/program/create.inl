@@ -7,6 +7,7 @@
 
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
+#include "runtime/helpers/string_helpers.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/program/program.h"
 
@@ -90,7 +91,7 @@ T *Program::create(
 
     if (retVal == CL_SUCCESS) {
         program = new T(*device.getExecutionEnvironment());
-        program->setSource((char *)nullTerminatedString);
+        program->sourceCode = nullTerminatedString;
         program->context = context;
         program->isBuiltIn = isBuiltIn;
         if (program->context && !program->isBuiltIn) {
@@ -128,7 +129,8 @@ T *Program::createFromGenBinary(
     if (CL_SUCCESS == retVal) {
         program = new T(executionEnvironment, context, isBuiltIn);
         program->numDevices = 1;
-        program->storeGenBinary(binary, size);
+        program->genBinary = makeCopy(binary, size);
+        program->genBinarySize = size;
         program->isCreatedFromBinary = true;
         program->programBinaryType = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
         program->isProgramBinaryResolved = true;
@@ -157,7 +159,6 @@ T *Program::createFromIL(Context *ctx,
 
     T *program = new T(*ctx->getDevice(0)->getExecutionEnvironment(), ctx, false);
     errcodeRet = program->createProgramFromBinary(il, length);
-
     program->createdFrom = CreatedFrom::IL;
 
     if (errcodeRet != CL_SUCCESS) {

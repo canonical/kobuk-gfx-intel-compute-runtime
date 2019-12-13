@@ -5,7 +5,7 @@
  *
  */
 
-#include "runtime/helpers/preamble.h"
+#include "core/helpers/preamble.h"
 #include "test.h"
 #include "unit_tests/fixtures/media_kernel_fixture.h"
 
@@ -168,7 +168,7 @@ GEN9TEST_F(MediaKernelTest, givenGen9CsrWhenEnqueueVmeKernelThenVmeSubslicesConf
     EXPECT_FALSE(csr->lastVmeSubslicesConfig);
 }
 
-GEN9TEST_F(MediaKernelTest, gen9CmdSizeForMediaSampler) {
+GEN9TEST_F(MediaKernelTest, GivenGen9WhenGettingCmdSizeForMediaSamplerThenZeroIsReturned) {
     auto csr = static_cast<UltCommandStreamReceiver<FamilyType> *>(&pCmdQ->getGpgpuCommandStreamReceiver());
 
     csr->lastVmeSubslicesConfig = false;

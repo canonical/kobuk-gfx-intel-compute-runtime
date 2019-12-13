@@ -7,6 +7,7 @@
 
 #pragma once
 #include "core/memory_manager/memory_constants.h"
+#include "core/utilities/stackvec.h"
 #include "runtime/helpers/csr_deps.h"
 #include "runtime/helpers/properties_helper.h"
 
@@ -18,7 +19,14 @@ class Context;
 class CommandStreamReceiver;
 class GraphicsAllocation;
 class LinearStream;
-class TimestampPacketContainer;
+struct TimestampPacketStorage;
+
+template <typename TagType>
+struct TagNode;
+
+struct BlitProperties;
+struct TimestampPacketDependencies;
+using BlitPropertiesContainer = StackVec<BlitProperties, 16>;
 
 struct BlitProperties {
     static BlitProperties constructPropertiesForReadWriteBuffer(BlitterConstants::BlitDirection blitDirection,
@@ -26,29 +34,31 @@ struct BlitProperties {
                                                                 GraphicsAllocation *memObjAllocation, size_t memObjOFfset,
                                                                 GraphicsAllocation *mapAllocation,
                                                                 void *hostPtr, size_t hostPtrOffset,
-                                                                bool blocking, size_t copyOffset, uint64_t copySize);
+                                                                size_t copyOffset, uint64_t copySize);
 
-    static BlitProperties constructPropertiesForReadWriteBuffer(BlitterConstants::BlitDirection blitDirection,
-                                                                CommandStreamReceiver &commandStreamReceiver,
-                                                                const BuiltinOpParams &builtinOpParams,
-                                                                bool blocking);
+    static BlitProperties constructProperties(BlitterConstants::BlitDirection blitDirection,
+                                              CommandStreamReceiver &commandStreamReceiver,
+                                              const BuiltinOpParams &builtinOpParams);
 
     static BlitProperties constructPropertiesForCopyBuffer(GraphicsAllocation *dstAllocation, GraphicsAllocation *srcAllocation,
-                                                           bool blocking, size_t dstOffset, size_t srcOffset, uint64_t copySize);
+                                                           size_t dstOffset, size_t srcOffset, uint64_t copySize);
 
     static BlitProperties constructPropertiesForAuxTranslation(AuxTranslationDirection auxTranslationDirection,
                                                                GraphicsAllocation *allocation);
 
+    static void setupDependenciesForAuxTranslation(BlitPropertiesContainer &blitPropertiesContainer, TimestampPacketDependencies &timestampPacketDependencies,
+                                                   TimestampPacketContainer &kernelTimestamps, const EventsRequest &eventsRequest,
+                                                   CommandStreamReceiver &gpguCsr, CommandStreamReceiver &bcsCsr);
+
     static BlitterConstants::BlitDirection obtainBlitDirection(uint32_t commandType);
 
-    TimestampPacketContainer *outputTimestampPacket = nullptr;
+    TagNode<TimestampPacketStorage> *outputTimestampPacket = nullptr;
     BlitterConstants::BlitDirection blitDirection;
     CsrDependencies csrDependencies;
     AuxTranslationDirection auxTranslationDirection = AuxTranslationDirection::None;
 
     GraphicsAllocation *dstAllocation = nullptr;
     GraphicsAllocation *srcAllocation = nullptr;
-    bool blocking = false;
     size_t dstOffset = 0;
     size_t srcOffset = 0;
     uint64_t copySize = 0;
@@ -57,7 +67,8 @@ struct BlitProperties {
 template <typename GfxFamily>
 struct BlitCommandsHelper {
     static size_t estimateBlitCommandsSize(uint64_t copySize, const CsrDependencies &csrDependencies, bool updateTimestampPacket);
-    static void dispatchBlitCommandsForBuffer(const BlitProperties &blitProperites, LinearStream &linearStream);
-    static void appendBlitCommandsForBuffer(const BlitProperties &blitProperites, typename GfxFamily::XY_COPY_BLT &blitCmd);
+    static size_t estimateBlitCommandsSize(const BlitPropertiesContainer &blitPropertiesContainer);
+    static void dispatchBlitCommandsForBuffer(const BlitProperties &blitProperties, LinearStream &linearStream);
+    static void appendBlitCommandsForBuffer(const BlitProperties &blitProperties, typename GfxFamily::XY_COPY_BLT &blitCmd);
 };
 } // namespace NEO

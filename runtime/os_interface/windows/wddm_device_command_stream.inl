@@ -10,30 +10,31 @@
 #pragma warning(push)
 #pragma warning(disable : 4005)
 #include "core/command_stream/linear_stream.h"
+#include "core/command_stream/preemption.h"
 #include "core/helpers/ptr_math.h"
-#include "runtime/command_stream/preemption.h"
 #include "runtime/device/device.h"
+#include "runtime/gen_common/hw_cmds.h"
 #include "runtime/gmm_helper/page_table_mngr.h"
+#include "runtime/helpers/flush_stamp.h"
 #include "runtime/helpers/gmm_callbacks.h"
 #include "runtime/mem_obj/mem_obj.h"
 #include "runtime/os_interface/windows/wddm/wddm.h"
 #include "runtime/os_interface/windows/wddm_device_command_stream.h"
-
-#include "hw_cmds.h"
 #pragma warning(pop)
 
 #include "runtime/os_interface/windows/gdi_interface.h"
 #include "runtime/os_interface/windows/os_context_win.h"
 #include "runtime/os_interface/windows/os_interface.h"
 #include "runtime/os_interface/windows/wddm_memory_manager.h"
+
 namespace NEO {
 
 // Initialize COMMAND_BUFFER_HEADER         Type PatchList  Streamer Perf Tag
 DECLARE_COMMAND_BUFFER(CommandBufferHeader, UMD_OCL, FALSE, FALSE, PERFTAG_OCL);
 
 template <typename GfxFamily>
-WddmCommandStreamReceiver<GfxFamily>::WddmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment)
-    : BaseClass(executionEnvironment) {
+WddmCommandStreamReceiver<GfxFamily>::WddmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex)
+    : BaseClass(executionEnvironment, rootDeviceIndex) {
 
     notifyAubCaptureImpl = DeviceCallbacks<GfxFamily>::notifyAubCapture;
     this->wddm = executionEnvironment.osInterface->get()->getWddm();
@@ -62,7 +63,7 @@ WddmCommandStreamReceiver<GfxFamily>::~WddmCommandStreamReceiver() {
 }
 
 template <typename GfxFamily>
-FlushStamp WddmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
+bool WddmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
     auto commandStreamAddress = ptrOffset(batchBuffer.commandBufferAllocation->getGpuAddress(), batchBuffer.startOffset);
 
     if (this->dispatchMode == DispatchMode::ImmediateDispatch) {
@@ -96,9 +97,10 @@ FlushStamp WddmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer,
     }
 
     auto osContextWin = static_cast<OsContextWin *>(osContext);
-    wddm->submit(commandStreamAddress, batchBuffer.usedSize - batchBuffer.startOffset, commandBufferHeader, *osContextWin);
+    auto status = wddm->submit(commandStreamAddress, batchBuffer.usedSize - batchBuffer.startOffset, commandBufferHeader, *osContextWin);
 
-    return osContextWin->getResidencyController().getMonitoredFence().lastSubmittedFence;
+    flushStamp->setStamp(osContextWin->getResidencyController().getMonitoredFence().lastSubmittedFence);
+    return status;
 }
 
 template <typename GfxFamily>

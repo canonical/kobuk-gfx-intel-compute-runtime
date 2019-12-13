@@ -12,11 +12,18 @@ namespace NEO {
 class RootDevice;
 class SubDevice : public Device {
   public:
-    SubDevice(ExecutionEnvironment *executionEnvironment, uint32_t deviceIndex, uint32_t subDeviceIndex, RootDevice &rootDevice);
+    constexpr static uint32_t unspecifiedSubDeviceIndex = std::numeric_limits<uint32_t>::max();
+
+    SubDevice(ExecutionEnvironment *executionEnvironment, uint32_t subDeviceIndex, RootDevice &rootDevice);
     void retain() override;
     unique_ptr_if_unused<Device> release() override;
     void retainInternal();
     void releaseInternal();
+    uint32_t getNumAvailableDevices() const override;
+    uint32_t getRootDeviceIndex() const override;
+    Device *getDeviceById(uint32_t deviceId) const override;
+
+    uint32_t getSubDeviceIndex() const;
 
   protected:
     DeviceBitfield getDeviceBitfieldForOsContext() const override;

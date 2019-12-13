@@ -36,7 +36,7 @@ struct AppendSurfaceStateParamsTest : public ::testing::Test {
     void createImage() {
         auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
         EXPECT_NE(nullptr, surfaceFormat);
-        image.reset(Image::create(&context, flags, surfaceFormat, &imageDesc, nullptr, retVal));
+        image.reset(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0), flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     }
 
     cl_int retVal = CL_SUCCESS;
@@ -87,4 +87,17 @@ GEN11TEST_F(gen11ImageTests, givenImageForGen11WhenClearColorParametersAreSetThe
     imageHw->setClearColorParams(&surfaceStateAfter, imageHw->getGraphicsAllocation()->getDefaultGmm());
 
     EXPECT_EQ(0, memcmp(&surfaceStateBefore, &surfaceStateAfter, sizeof(RENDER_SURFACE_STATE)));
+}
+
+using Gen11RenderSurfaceStateDataTests = ::testing::Test;
+
+GEN11TEST_F(Gen11RenderSurfaceStateDataTests, WhenMemoryObjectControlStateIndexToMocsTablesIsSetThenValueIsShift) {
+    using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
+    auto surfaceState = FamilyType::cmdInitRenderSurfaceState;
+
+    uint32_t value = 4;
+    surfaceState.setMemoryObjectControlStateIndexToMocsTables(value);
+
+    EXPECT_EQ(surfaceState.TheStructure.Common.MemoryObjectControlState_IndexToMocsTables, value >> 1);
+    EXPECT_EQ(surfaceState.getMemoryObjectControlStateIndexToMocsTables(), value);
 }

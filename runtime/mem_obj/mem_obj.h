@@ -6,6 +6,7 @@
  */
 
 #pragma once
+#include "public/cl_ext_private.h"
 #include "runtime/api/cl_types.h"
 #include "runtime/helpers/base_object.h"
 #include "runtime/helpers/mipmap.h"
@@ -13,7 +14,7 @@
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/sharings/sharing.h"
 
-#include "mem_obj_types.h"
+#include "memory_properties_flags.h"
 
 #include <atomic>
 #include <cstdint>
@@ -38,7 +39,9 @@ class MemObj : public BaseObject<_cl_mem> {
 
     MemObj(Context *context,
            cl_mem_object_type memObjectType,
-           const MemoryProperties &properties,
+           const MemoryPropertiesFlags &memoryProperties,
+           cl_mem_flags flags,
+           cl_mem_flags_intel flagsIntel,
            size_t size,
            void *memoryStorage,
            void *hostPtr,
@@ -59,12 +62,11 @@ class MemObj : public BaseObject<_cl_mem> {
     void *getHostPtr() const;
     bool getIsObjectRedescribed() const { return isObjectRedescribed; };
     size_t getSize() const;
-    cl_mem_flags getFlags() const;
 
     bool addMappedPtr(void *ptr, size_t ptrLength, cl_map_flags &mapFlags, MemObjSizeArray &size, MemObjOffsetArray &offset, uint32_t mipLevel);
     bool findMappedPtr(void *mappedPtr, MapInfo &outMapInfo) { return mapOperationsHandler.find(mappedPtr, outMapInfo); }
     void removeMappedPtr(void *mappedPtr) { mapOperationsHandler.remove(mappedPtr); }
-    void *getBasePtrForMap();
+    void *getBasePtrForMap(uint32_t rootDeviceIndex);
 
     MOCKABLE_VIRTUAL void setAllocatedMapPtr(void *allocatedMapPtr);
     void *getAllocatedMapPtr() const { return allocatedMapPtr; }
@@ -121,14 +123,17 @@ class MemObj : public BaseObject<_cl_mem> {
         return mapAllocation;
     }
 
-    const MemoryProperties &getProperties() const { return properties; }
+    const cl_mem_flags &getMemoryPropertiesFlags() const { return flags; }
+    const cl_mem_flags &getMemoryPropertiesFlagsIntel() const { return flagsIntel; }
 
   protected:
     void getOsSpecificMemObjectInfo(const cl_mem_info &paramName, size_t *srcParamSize, void **srcParam);
 
     Context *context;
     cl_mem_object_type memObjectType;
-    MemoryProperties properties;
+    MemoryPropertiesFlags memoryProperties;
+    cl_mem_flags flags = 0;
+    cl_mem_flags_intel flagsIntel = 0;
     size_t size;
     size_t hostPtrMinSize = 0;
     void *memoryStorage;

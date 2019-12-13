@@ -7,15 +7,15 @@
 
 #include "offline_compiler.h"
 
+#include "core/elf/writer.h"
 #include "core/helpers/debug_helpers.h"
+#include "core/helpers/file_io.h"
 #include "core/helpers/string.h"
-#include "elf/writer.h"
-#include "runtime/helpers/file_io.h"
+#include "core/os_interface/os_library.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/validators.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/os_interface/os_inc_base.h"
-#include "runtime/os_interface/os_library.h"
 #include "runtime/platform/extensions.h"
 
 #include "cif/common/cif_main.h"
@@ -130,7 +130,8 @@ int OfflineCompiler::buildSourceCode() {
         bool inputIsIntermediateRepresentation = inputFileLlvm || inputFileSpirV;
         if (false == inputIsIntermediateRepresentation) {
             UNRECOVERABLE_IF(fclDeviceCtx == nullptr);
-            IGC::CodeType::CodeType_t intermediateRepresentation = useLlvmText ? IGC::CodeType::llvmLl : preferredIntermediateRepresentation;
+            IGC::CodeType::CodeType_t intermediateRepresentation = useLlvmText ? IGC::CodeType::llvmLl
+                                                                               : (useLlvmBc ? IGC::CodeType::llvmBc : preferredIntermediateRepresentation);
             // sourceCode.size() returns the number of characters without null terminated char
             auto fclSrc = CIF::Builtins::CreateConstBuffer(fclMain.get(), sourceCode.c_str(), sourceCode.size() + 1);
             auto fclOptions = CIF::Builtins::CreateConstBuffer(fclMain.get(), options.c_str(), options.size());
@@ -278,8 +279,8 @@ std::string OfflineCompiler::getStringWithinDelimiters(const std::string &src) {
 ////////////////////////////////////////////////////////////////////////////////
 int OfflineCompiler::initialize(size_t numArgs, const std::vector<std::string> &allArgs) {
     int retVal = CL_SUCCESS;
-    const char *pSource = nullptr;
-    void *pSourceFromFile = nullptr;
+    const char *source = nullptr;
+    std::unique_ptr<char[]> sourceFromFile;
     size_t sourceFromFileSize = 0;
 
     retVal = parseCommandLine(numArgs, allArgs);
@@ -314,11 +315,7 @@ int OfflineCompiler::initialize(size_t numArgs, const std::vector<std::string> &
     }
 
     // set up the device inside the program
-    sourceFromFileSize = loadDataFromFile(inputFile.c_str(), pSourceFromFile);
-    struct Helper {
-        static void deleter(void *ptr) { deleteDataReadFromFile(ptr); }
-    };
-    auto sourceRaii = std::unique_ptr<void, decltype(&Helper::deleter)>{pSourceFromFile, Helper::deleter};
+    sourceFromFile = loadDataFromFile(inputFile.c_str(), sourceFromFileSize);
     if (sourceFromFileSize == 0) {
         retVal = INVALID_FILE;
         return retVal;
@@ -326,11 +323,11 @@ int OfflineCompiler::initialize(size_t numArgs, const std::vector<std::string> &
 
     if (inputFileLlvm || inputFileSpirV) {
         // use the binary input "as is"
-        sourceCode.assign(reinterpret_cast<char *>(pSourceFromFile), sourceFromFileSize);
+        sourceCode.assign(sourceFromFile.get(), sourceFromFileSize);
     } else {
         // for text input, we also accept files used as runtime builtins
-        pSource = strstr((const char *)pSourceFromFile, "R\"===(");
-        sourceCode = (pSource != nullptr) ? getStringWithinDelimiters((char *)pSourceFromFile) : (char *)pSourceFromFile;
+        source = strstr((const char *)sourceFromFile.get(), "R\"===(");
+        sourceCode = (source != nullptr) ? getStringWithinDelimiters(sourceFromFile.get()) : sourceFromFile.get();
     }
 
     if ((inputFileSpirV == false) && (inputFileLlvm == false)) {
@@ -489,6 +486,8 @@ int OfflineCompiler::parseCommandLine(size_t numArgs, const std::vector<std::str
             argIndex++;
         } else if (stringsAreEqual(argv[argIndex], "-llvm_text")) {
             useLlvmText = true;
+        } else if (stringsAreEqual(argv[argIndex], "-llvm_bc")) {
+            useLlvmBc = true;
         } else if (stringsAreEqual(argv[argIndex], "-llvm_input")) {
             inputFileLlvm = true;
         } else if (stringsAreEqual(argv[argIndex], "-spirv_input")) {
@@ -884,11 +883,11 @@ bool OfflineCompiler::readOptionsFromFile(std::string &options, const std::strin
     if (!fileExists(file)) {
         return false;
     }
-    void *pOptions = nullptr;
-    size_t optionsSize = loadDataFromFile(file.c_str(), pOptions);
+    size_t optionsSize = 0U;
+    auto optionsFromFile = loadDataFromFile(file.c_str(), optionsSize);
     if (optionsSize > 0) {
         // Remove comment containing copyright header
-        options = (char *)pOptions;
+        options = optionsFromFile.get();
         size_t commentBegin = options.find_first_of("/*");
         size_t commentEnd = options.find_last_of("*/");
         if (commentBegin != std::string::npos && commentEnd != std::string::npos) {
@@ -901,7 +900,6 @@ bool OfflineCompiler::readOptionsFromFile(std::string &options, const std::strin
         auto trimPos = options.find_last_not_of(" \n\r");
         options = options.substr(0, trimPos + 1);
     }
-    deleteDataReadFromFile(pOptions);
     return true;
 }
 

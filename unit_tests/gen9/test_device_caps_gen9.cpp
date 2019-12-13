@@ -5,7 +5,7 @@
  *
  */
 
-#include "runtime/helpers/hw_helper.h"
+#include "core/helpers/hw_helper.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
 
@@ -66,4 +66,8 @@ GEN9TEST_F(Gen9DeviceCaps, givenGen9WhenCheckSupportCacheFlushAfterWalkerThenFal
 
 GEN9TEST_F(Gen9DeviceCaps, givenGen9WhenCheckBlitterOperationsSupportThenReturnFalse) {
     EXPECT_FALSE(pDevice->getHardwareInfo().capabilityTable.blitterOperationsSupported);
+}
+
+GEN9TEST_F(Gen9DeviceCaps, givenGen9WhenCheckingImageSupportThenReturnTrue) {
+    EXPECT_TRUE(pDevice->getHardwareInfo().capabilityTable.supportsImages);
 }

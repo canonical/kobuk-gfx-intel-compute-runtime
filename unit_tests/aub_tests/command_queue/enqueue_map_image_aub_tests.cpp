@@ -38,20 +38,24 @@ struct AUBMapImage
     using AUBCommandStreamFixture::SetUp;
 
     void SetUp() override {
+        if (!(platformDevices[0]->capabilityTable.supportsImages)) {
+            GTEST_SKIP();
+        }
         CommandDeviceFixture::SetUp(cl_command_queue_properties(0));
         CommandStreamFixture::SetUp(pCmdQ);
-        context = new MockContext(pDevice);
+
+        context = std::make_unique<MockContext>(pDevice);
     }
 
     void TearDown() override {
-        delete srcImage;
-        delete context;
+        srcImage.reset();
+        context.reset();
         CommandStreamFixture::TearDown();
         CommandDeviceFixture::TearDown();
     }
 
-    MockContext *context;
-    Image *srcImage = nullptr;
+    std::unique_ptr<MockContext> context;
+    std::unique_ptr<Image> srcImage;
 };
 
 HWTEST_P(AUBMapImage, MapUpdateUnmapVerify) {
@@ -120,14 +124,16 @@ HWTEST_P(AUBMapImage, MapUpdateUnmapVerify) {
     auto retVal = CL_INVALID_VALUE;
     cl_mem_flags flags = CL_MEM_COPY_HOST_PTR;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    srcImage = Image::create(
-        context,
+    srcImage.reset(Image::create(
+        context.get(),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
         flags,
+        0,
         surfaceFormat,
         &imageDesc,
         srcMemory,
-        retVal);
-    ASSERT_NE(nullptr, srcImage);
+        retVal));
+    ASSERT_NE(nullptr, srcImage.get());
 
     auto origin = std::get<2>(GetParam()).offsets;
 
@@ -140,7 +146,7 @@ HWTEST_P(AUBMapImage, MapUpdateUnmapVerify) {
 
     size_t mappedRowPitch;
     size_t mappedSlicePitch;
-    auto mappedPtr = pCmdQ->enqueueMapImage(srcImage, CL_TRUE, CL_MAP_WRITE | CL_MAP_READ,
+    auto mappedPtr = pCmdQ->enqueueMapImage(srcImage.get(), CL_TRUE, CL_MAP_WRITE | CL_MAP_READ,
                                             origin, region, &mappedRowPitch, &mappedSlicePitch,
                                             0, nullptr, nullptr, retVal);
     EXPECT_EQ(CL_SUCCESS, retVal);
@@ -177,13 +183,13 @@ HWTEST_P(AUBMapImage, MapUpdateUnmapVerify) {
         }
         mappedPtrStart = ptrOffset(mappedPtrStart, mappedSlicePitch - (mappedRowPitch * region[1]));
     }
-    pCmdQ->enqueueUnmapMemObject(srcImage, mappedPtr, 0, nullptr, nullptr);
+    pCmdQ->enqueueUnmapMemObject(srcImage.get(), mappedPtr, 0, nullptr, nullptr);
 
     // verify unmap
     uint8_t *readMemory = new uint8_t[srcImage->getSize()];
     size_t imgOrigin[] = {0, 0, 0};
     size_t imgRegion[] = {testWidth, testHeight, testDepth};
-    retVal = pCmdQ->enqueueReadImage(srcImage, CL_FALSE, imgOrigin, imgRegion, inputRowPitch, inputSlicePitch, readMemory, nullptr, 0, nullptr, nullptr);
+    retVal = pCmdQ->enqueueReadImage(srcImage.get(), CL_FALSE, imgOrigin, imgRegion, inputRowPitch, inputSlicePitch, readMemory, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     retVal = pCmdQ->flush();

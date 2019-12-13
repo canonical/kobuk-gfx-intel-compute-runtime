@@ -20,11 +20,13 @@
 namespace NEO {
 
 class Kernel;
+struct TimestampPacketDependencies;
 
 class DispatchInfo {
 
   public:
-    using DispatchCommandMethodT = void(LinearStream &commandStream);
+    using DispatchCommandMethodT = void(LinearStream &commandStream, TimestampPacketDependencies *timestampPacketDependencies);
+    using EstimateCommandsMethodT = size_t(const MemObjsForAuxTranslation *);
 
     DispatchInfo() = default;
     DispatchInfo(Kernel *kernel, uint32_t dim, Vec3<size_t> gws, Vec3<size_t> elws, Vec3<size_t> offset)
@@ -58,8 +60,8 @@ class DispatchInfo {
     bool peekCanBePartitioned() const { return canBePartitioned; }
     void setCanBePartitioned(bool canBePartitioned) { this->canBePartitioned = canBePartitioned; }
 
-    RegisteredMethodDispatcher<DispatchCommandMethodT> dispatchInitCommands;
-    RegisteredMethodDispatcher<DispatchCommandMethodT> dispatchEpilogueCommands;
+    RegisteredMethodDispatcher<DispatchCommandMethodT, EstimateCommandsMethodT> dispatchInitCommands;
+    RegisteredMethodDispatcher<DispatchCommandMethodT, EstimateCommandsMethodT> dispatchEpilogueCommands;
 
   protected:
     bool canBePartitioned = false;
@@ -83,7 +85,7 @@ struct MultiDispatchInfo {
         }
     }
 
-    MultiDispatchInfo(Kernel *mainKernel) : mainKernel(mainKernel) {}
+    explicit MultiDispatchInfo(Kernel *mainKernel) : mainKernel(mainKernel) {}
     MultiDispatchInfo() = default;
 
     MultiDispatchInfo &operator=(const MultiDispatchInfo &) = delete;
@@ -184,7 +186,7 @@ struct MultiDispatchInfo {
     Kernel *peekParentKernel() const;
     Kernel *peekMainKernel() const;
 
-    void setBuiltinOpParams(BuiltinOpParams builtinOpParams) {
+    void setBuiltinOpParams(const BuiltinOpParams &builtinOpParams) {
         this->builtinOpParams = builtinOpParams;
     }
 
@@ -192,10 +194,19 @@ struct MultiDispatchInfo {
         return builtinOpParams;
     }
 
+    void setMemObjsForAuxTranslation(const MemObjsForAuxTranslation &memObjsForAuxTranslation) {
+        this->memObjsForAuxTranslation = &memObjsForAuxTranslation;
+    }
+
+    const MemObjsForAuxTranslation *getMemObjsForAuxTranslation() const {
+        return memObjsForAuxTranslation;
+    }
+
   protected:
     BuiltinOpParams builtinOpParams = {};
     StackVec<DispatchInfo, 9> dispatchInfos;
     StackVec<MemObj *, 2> redescribedSurfaces;
+    const MemObjsForAuxTranslation *memObjsForAuxTranslation = nullptr;
     Kernel *mainKernel = nullptr;
 };
 } // namespace NEO

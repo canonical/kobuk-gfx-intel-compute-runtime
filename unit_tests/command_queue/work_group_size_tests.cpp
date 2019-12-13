@@ -10,7 +10,6 @@
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
 
-#include "hw_cmds.h"
 #include "patch_shared.h"
 
 using namespace NEO;
@@ -23,7 +22,7 @@ struct WorkGroupSizeBase {
         // Compute the SIMD lane mask
         size_t simd =
             pCmd.getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : pCmd.getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16 : 8;
-        uint64_t simdMask = (1ull << simd) - 1;
+        uint64_t simdMask = maxNBitValue(simd);
 
         // Mask off lanes based on the execution masks
         auto laneMaskRight = pCmd.getRightExecutionMask() & simdMask;
@@ -83,9 +82,9 @@ struct WorkGroupSizeBase {
 
         const size_t workGroupsStart[3] = {0, 0, 0};
         const size_t workGroupsNum[3] = {
-            (workItems[0] + workGroupSize[0] - 1) / workGroupSize[0],
-            (workItems[1] + workGroupSize[1] - 1) / workGroupSize[1],
-            (workItems[2] + workGroupSize[2] - 1) / workGroupSize[2]};
+            Math::divideAndRoundUp(workItems[0], workGroupSize[0]),
+            Math::divideAndRoundUp(workItems[1], workGroupSize[1]),
+            Math::divideAndRoundUp(workItems[2], workGroupSize[2])};
         const iOpenCL::SPatchThreadPayload threadPayload = {};
         GpgpuWalkerHelper<FamilyType>::setGpgpuWalkerThreadData(&pCmd, globalOffsets, workGroupsStart, workGroupsNum,
                                                                 workGroupSize, simdSize, dims, true, false, threadPayload, 0u);

@@ -7,10 +7,11 @@
 
 #include "runtime/os_interface/windows/wddm/wddm.h"
 
+#include "core/command_stream/preemption.h"
 #include "core/helpers/interlocked_max.h"
 #include "core/os_interface/windows/debug_registry_reader.h"
+#include "core/sku_info/operations/windows/sku_info_receiver.h"
 #include "core/utilities/stackvec.h"
-#include "runtime/command_stream/preemption.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/gmm_helper/gmm_helper.h"
@@ -21,14 +22,32 @@
 #include "runtime/os_interface/windows/gdi_interface.h"
 #include "runtime/os_interface/windows/kmdaf_listener.h"
 #include "runtime/os_interface/windows/os_context_win.h"
+#include "runtime/os_interface/windows/sys_calls.h"
 #include "runtime/os_interface/windows/wddm/wddm_interface.h"
 #include "runtime/os_interface/windows/wddm_allocation.h"
 #include "runtime/os_interface/windows/wddm_engine_mapper.h"
 #include "runtime/os_interface/windows/wddm_residency_allocations_container.h"
 #include "runtime/platform/platform.h"
-#include "runtime/sku_info/operations/sku_info_receiver.h"
 
 #include "gmm_memory.h"
+
+std::wstring getIgdrclPath() {
+    std::wstring returnValue;
+    WCHAR path[255];
+    HMODULE handle = NULL;
+
+    auto status = NEO::SysCalls::getModuleHandle(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                                     GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                                 reinterpret_cast<LPCWSTR>(&getIgdrclPath), &handle);
+    if (status != 0) {
+
+        status = NEO::SysCalls::getModuleFileName(handle, path, sizeof(path));
+        if (status != 0) {
+            returnValue.append(path);
+        }
+    }
+    return returnValue;
+}
 
 namespace NEO {
 extern Wddm::CreateDXGIFactoryFcn getCreateDxgiFactory();
@@ -58,10 +77,12 @@ Wddm::Wddm() {
 }
 
 Wddm::~Wddm() {
+    temporaryResources.reset();
     resetPageTableManager(nullptr);
     destroyPagingQueue();
     destroyDevice();
     closeAdapter();
+    UNRECOVERABLE_IF(temporaryResources.get())
 }
 
 bool Wddm::init(HardwareInfo &outHardwareInfo) {
@@ -141,6 +162,7 @@ bool Wddm::queryAdapterInfo() {
         SkuInfoReceiver::receiveWaTableFromAdapterInfo(workaroundTable.get(), &adapterInfo);
 
         memcpy_s(&gfxPartition, sizeof(gfxPartition), &adapterInfo.GfxPartition, sizeof(GMM_GFX_PARTITIONING));
+        memcpy_s(&adapterBDF, sizeof(adapterBDF), &adapterInfo.stAdapterBDF, sizeof(ADAPTER_BDF));
 
         deviceRegistryPath = adapterInfo.DeviceRegistryPath;
 
@@ -231,6 +253,8 @@ bool Wddm::openAdapter() {
     IDXGIAdapter1 *pAdapter = nullptr;
     DWORD iDevNum = 0;
 
+    auto igdrclPath = getIgdrclPath();
+
     HRESULT hr = Wddm::createDxgiFactory(__uuidof(IDXGIFactory), (void **)(&pFactory));
     if ((hr != S_OK) || (pFactory == nullptr)) {
         return false;
@@ -243,7 +267,22 @@ bool Wddm::openAdapter() {
             // be virtualizing one of our adapters) in the description
             if ((wcsstr(OpenAdapterDesc.Description, L"Intel") != 0) ||
                 (wcsstr(OpenAdapterDesc.Description, L"Citrix") != 0)) {
-                break;
+                char deviceId[16];
+                sprintf_s(deviceId, "%X", OpenAdapterDesc.DeviceId);
+                bool choosenDevice = (DebugManager.flags.ForceDeviceId.get() == "unk") || (DebugManager.flags.ForceDeviceId.get() == deviceId);
+                if (choosenDevice) {
+                    if (wcsstr(OpenAdapterDesc.Description, L"DCH-D") != 0) {
+                        if (wcsstr(igdrclPath.c_str(), L"_dch_d.inf") != 0) {
+                            break;
+                        }
+                    } else if (wcsstr(OpenAdapterDesc.Description, L"DCH-I") != 0) {
+                        if (wcsstr(igdrclPath.c_str(), L"_dch_i.inf") != 0) {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
             }
         }
         // Release all the non-Intel adapters
@@ -251,10 +290,9 @@ bool Wddm::openAdapter() {
         pAdapter = nullptr;
     }
 
-    OpenAdapterData.AdapterLuid = OpenAdapterDesc.AdapterLuid;
-    status = gdi->openAdapterFromLuid(&OpenAdapterData);
-
     if (pAdapter != nullptr) {
+        OpenAdapterData.AdapterLuid = OpenAdapterDesc.AdapterLuid;
+        status = gdi->openAdapterFromLuid(&OpenAdapterData);
         // If an Intel adapter was found, release it here
         pAdapter->Release();
         pAdapter = nullptr;
@@ -268,6 +306,7 @@ bool Wddm::openAdapter() {
         adapter = OpenAdapterData.hAdapter;
         adapterLuid = OpenAdapterDesc.AdapterLuid;
     }
+
     return status == STATUS_SUCCESS;
 }
 
@@ -693,7 +732,7 @@ bool Wddm::createContext(OsContextWin &osContext) {
     CreateContext.PrivateDriverDataSize = sizeof(PrivateData);
     CreateContext.NodeOrdinal = WddmEngineMapper::engineNodeMap(osContext.getEngineType());
     CreateContext.pPrivateDriverData = &PrivateData;
-    CreateContext.ClientHint = D3DKMT_CLIENTHINT_OPENGL;
+    CreateContext.ClientHint = D3DKMT_CLIENTHINT_OPENCL;
     CreateContext.hDevice = device;
 
     status = gdi->createContext(&CreateContext);
@@ -726,7 +765,6 @@ bool Wddm::submit(uint64_t commandBuffer, size_t size, void *commandHeader, OsCo
         osContext.getResidencyController().getMonitoredFence().currentFenceValue++;
     }
     getDeviceState();
-    UNRECOVERABLE_IF(!status);
 
     return status;
 }
@@ -923,7 +961,7 @@ bool Wddm::configureDeviceAddressSpaceImpl() {
     if (!hardwareInfoTable[productFamily]) {
         return false;
     }
-    auto svmSize = hardwareInfoTable[productFamily]->capabilityTable.gpuAddressSpace == MemoryConstants::max48BitAddress
+    auto svmSize = hardwareInfoTable[productFamily]->capabilityTable.gpuAddressSpace >= MemoryConstants::max64BitAppAddress
                        ? maximumApplicationAddress + 1u
                        : 0u;
 
@@ -933,6 +971,10 @@ bool Wddm::configureDeviceAddressSpaceImpl() {
 void Wddm::waitOnPagingFenceFromCpu() {
     while (currentPagingFenceValue > *getPagingFenceAddress())
         ;
+}
+
+void Wddm::setGmmInputArg(void *args) {
+    reinterpret_cast<GMM_INIT_IN_ARGS *>(args)->stAdapterBDF = this->adapterBDF;
 }
 
 void Wddm::updatePagingFenceValue(uint64_t newPagingFenceValue) {

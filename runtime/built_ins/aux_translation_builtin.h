@@ -6,10 +6,10 @@
  */
 
 #pragma once
+#include "core/helpers/hw_helper.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/helpers/dispatch_info_builder.h"
-#include "runtime/helpers/hw_helper.h"
 
 #include <memory>
 
@@ -21,11 +21,11 @@ class BuiltInOp<EBuiltInOps::AuxTranslation> : public BuiltinDispatchInfoBuilder
     template <typename GfxFamily>
     bool buildDispatchInfosForAuxTranslation(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const {
         size_t kernelInstanceNumber = 0;
-        size_t numMemObjectsToTranslate = operationParams.memObjsForAuxTranslation->size();
+        size_t numMemObjectsToTranslate = multiDispatchInfo.getMemObjsForAuxTranslation()->size();
         resizeKernelInstances(numMemObjectsToTranslate);
         multiDispatchInfo.setBuiltinOpParams(operationParams);
 
-        for (auto &memObj : *operationParams.memObjsForAuxTranslation) {
+        for (auto &memObj : *multiDispatchInfo.getMemObjsForAuxTranslation()) {
             DispatchInfoBuilder<SplitDispatch::Dim::d1D, SplitDispatch::SplitMode::NoSplit> builder;
             size_t allocationSize = alignUp(memObj->getSize(), 512);
 
@@ -60,24 +60,26 @@ class BuiltInOp<EBuiltInOps::AuxTranslation> : public BuiltinDispatchInfoBuilder
     }
 
   protected:
-    template <typename GfxFamily>
-    static void dispatchPipeControlWithDcFlush(LinearStream &linearStream) {
-        PipeControlHelper<GfxFamily>::addPipeControl(linearStream, true);
+    using RegisteredMethodDispatcherT = RegisteredMethodDispatcher<DispatchInfo::DispatchCommandMethodT,
+                                                                   DispatchInfo::EstimateCommandsMethodT>;
+    template <typename GfxFamily, bool dcFlush>
+    static void dispatchPipeControl(LinearStream &linearStream, TimestampPacketDependencies *) {
+        PipeControlHelper<GfxFamily>::addPipeControl(linearStream, dcFlush);
     }
 
     template <typename GfxFamily>
-    static void dispatchPipeControlWithoutDcFlush(LinearStream &linearStream) {
-        PipeControlHelper<GfxFamily>::addPipeControl(linearStream, false);
+    static size_t getSizeForSinglePipeControl(const MemObjsForAuxTranslation *) {
+        return PipeControlHelper<GfxFamily>::getSizeForSinglePipeControl();
     }
 
     template <typename GfxFamily>
-    void registerPipeControlProgramming(RegisteredMethodDispatcher<DispatchInfo::DispatchCommandMethodT> &dispatcher, bool dcFlush) const {
+    void registerPipeControlProgramming(RegisteredMethodDispatcherT &dispatcher, bool dcFlush) const {
         if (dcFlush) {
-            dispatcher.registerMethod(this->dispatchPipeControlWithDcFlush<GfxFamily>);
+            dispatcher.registerMethod(this->dispatchPipeControl<GfxFamily, true>);
         } else {
-            dispatcher.registerMethod(this->dispatchPipeControlWithoutDcFlush<GfxFamily>);
+            dispatcher.registerMethod(this->dispatchPipeControl<GfxFamily, false>);
         }
-        dispatcher.registerCommandsSizeEstimationMethod(PipeControlHelper<GfxFamily>::getSizeForSinglePipeControl);
+        dispatcher.registerCommandsSizeEstimationMethod(this->getSizeForSinglePipeControl<GfxFamily>);
     }
 
     void resizeKernelInstances(size_t size) const;

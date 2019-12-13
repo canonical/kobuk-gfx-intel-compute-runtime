@@ -8,6 +8,7 @@
 #include "core/helpers/ptr_math.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
+#include "runtime/command_queue/command_queue_hw.h"
 #include "runtime/helpers/dispatch_info.h"
 #include "runtime/kernel/kernel.h"
 #include "test.h"
@@ -15,6 +16,7 @@
 #include "unit_tests/command_queue/enqueue_fixture.h"
 #include "unit_tests/gen_common/gen_commands_common_validation.h"
 #include "unit_tests/helpers/unit_test_helper.h"
+#include "unit_tests/mocks/mock_buffer.h"
 
 #include "reg_configs_common.h"
 
@@ -99,7 +101,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferTest, WhenCopyingBufferThenGpgpuWal
     // Compute the SIMD lane mask
     size_t simd =
         cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16 : 8;
-    uint64_t simdMask = (1ull << simd) - 1;
+    uint64_t simdMask = maxNBitValue(simd);
 
     // Mask off lanes based on the execution masks
     auto laneMaskRight = cmd->getRightExecutionMask() & simdMask;
@@ -138,7 +140,7 @@ HWTEST_F(EnqueueCopyBufferTest, WhenCopyingBufferThenIndirectDataGetsAdded) {
 
     BuiltinOpParams dc;
     dc.srcMemObj = srcBuffer;
-    dc.srcMemObj = dstBuffer;
+    dc.dstMemObj = dstBuffer;
     dc.srcOffset = {EnqueueCopyBufferTraits::srcOffset, 0, 0};
     dc.dstOffset = {EnqueueCopyBufferTraits::dstOffset, 0, 0};
     dc.size = {EnqueueCopyBufferTraits::size, 0, 0};
@@ -154,6 +156,30 @@ HWTEST_F(EnqueueCopyBufferTest, WhenCopyingBufferThenIndirectDataGetsAdded) {
     }
 }
 
+HWTEST_F(EnqueueCopyBufferTest, WhenCopyingBufferStatelessThenStatelessKernelIsUsed) {
+
+    auto srcBuffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
+    auto dstBuffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
+
+    MultiDispatchInfo multiDispatchInfo;
+    auto &builder = pDevice->getExecutionEnvironment()->getBuiltIns()->getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyBufferToBufferStateless,
+                                                                                                     pCmdQ->getContext(), pCmdQ->getDevice());
+
+    ASSERT_NE(nullptr, &builder);
+    BuiltinOpParams dc;
+    dc.srcMemObj = srcBuffer.get();
+    dc.dstMemObj = dstBuffer.get();
+    dc.srcOffset = {EnqueueCopyBufferTraits::srcOffset, 0, 0};
+    dc.dstOffset = {EnqueueCopyBufferTraits::dstOffset, 0, 0};
+    dc.size = {EnqueueCopyBufferTraits::size, 0, 0};
+    builder.buildDispatchInfos(multiDispatchInfo, dc);
+    EXPECT_NE(0u, multiDispatchInfo.size());
+
+    auto kernel = multiDispatchInfo.begin()->getKernel();
+    EXPECT_TRUE(kernel->getKernelInfo().patchInfo.executionEnvironment->CompiledForGreaterThan4GBBuffers);
+    EXPECT_FALSE(kernel->getKernelInfo().kernelArgInfo[0].pureStatefulBufferAccess);
+}
+
 HWTEST_F(EnqueueCopyBufferTest, WhenCopyingBufferThenL3ProgrammingIsCorrect) {
     enqueueCopyBufferAndParse<FamilyType>();
     validateL3Programming<FamilyType>(cmdList, itorWalker);
@@ -161,7 +187,8 @@ HWTEST_F(EnqueueCopyBufferTest, WhenCopyingBufferThenL3ProgrammingIsCorrect) {
 
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferTest, WhenEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueCopyBufferAndParse<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    auto &ultCsr = this->pDevice->getUltCommandStreamReceiver<FamilyType>();
+    validateStateBaseAddress<FamilyType>(ultCsr.getMemoryManager()->getInternalHeapBaseAddress(ultCsr.rootDeviceIndex),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 
@@ -272,4 +299,59 @@ HWTEST_F(EnqueueCopyBufferTest, WhenCopyingBufferThenArgumentOneMatchesDestinati
     auto pArgument = (void **)getStatelessArgumentPointer<FamilyType>(*kernel, 1u, pCmdQ->getIndirectHeap(IndirectHeap::INDIRECT_OBJECT, 0));
 
     EXPECT_EQ((void *)((uintptr_t)dstBuffer->getGraphicsAllocation()->getGpuAddress()), *pArgument);
+}
+
+struct EnqueueCopyBufferHw : public ::testing::Test {
+
+    void SetUp() override {
+        if (is32bit) {
+            GTEST_SKIP();
+        }
+        device.reset(MockDevice::createWithNewExecutionEnvironment<MockDevice>(*platformDevices));
+        context.reset(new MockContext(device.get()));
+        dstBuffer = std::unique_ptr<Buffer>(BufferHelper<>::create(context.get()));
+    }
+
+    std::unique_ptr<MockDevice> device;
+    std::unique_ptr<MockContext> context;
+    std::unique_ptr<Buffer> dstBuffer;
+    MockBuffer srcBuffer;
+    uint64_t bigSize = 4ull * MemoryConstants::gigaByte;
+    uint64_t smallSize = 4ull * MemoryConstants::gigaByte - 1;
+};
+
+using EnqueueCopyBufferStatelessTest = EnqueueCopyBufferHw;
+
+HWTEST_F(EnqueueCopyBufferStatelessTest, givenBuffersWhenCopyingBufferStatelessThenSuccessIsReturned) {
+    auto cmdQ = std::make_unique<CommandQueueStateless<FamilyType>>(context.get(), device.get());
+    srcBuffer.size = static_cast<size_t>(bigSize);
+    auto retVal = cmdQ->enqueueCopyBuffer(
+        &srcBuffer,
+        dstBuffer.get(),
+        0,
+        0,
+        sizeof(float),
+        0,
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+using EnqueueCopyBufferStatefulTest = EnqueueCopyBufferHw;
+
+HWTEST_F(EnqueueCopyBufferStatefulTest, givenBuffersWhenCopyingBufferStatefulThenSuccessIsReturned) {
+    auto cmdQ = std::make_unique<CommandQueueStateful<FamilyType>>(context.get(), device.get());
+    srcBuffer.size = static_cast<size_t>(smallSize);
+    auto retVal = cmdQ->enqueueCopyBuffer(
+        &srcBuffer,
+        dstBuffer.get(),
+        0,
+        0,
+        sizeof(float),
+        0,
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
 }

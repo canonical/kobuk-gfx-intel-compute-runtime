@@ -6,12 +6,12 @@
  */
 
 #include "core/command_stream/linear_stream.h"
+#include "core/command_stream/preemption.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_stream/aub_command_stream_receiver.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/command_stream/command_stream_receiver_with_aub_dump.h"
 #include "runtime/command_stream/device_command_stream.h"
-#include "runtime/command_stream/preemption.h"
 #include "runtime/gen_common/hw_cmds.h"
 #include "runtime/helpers/built_ins_helper.h"
 #include "runtime/helpers/flush_stamp.h"
@@ -31,6 +31,7 @@
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/fixtures/memory_management_fixture.h"
 #include "unit_tests/fixtures/mock_aub_center_fixture.h"
+#include "unit_tests/helpers/dispatch_flags_helper.h"
 #include "unit_tests/helpers/execution_environment_helper.h"
 #include "unit_tests/mocks/mock_buffer.h"
 #include "unit_tests/mocks/mock_builtins.h"
@@ -64,7 +65,7 @@ class WddmCommandStreamFixture {
         memoryManager = new MockWddmMemoryManager(*executionEnvironment);
         executionEnvironment->memoryManager.reset(memoryManager);
         wddm = static_cast<WddmMock *>(executionEnvironment->osInterface->get()->getWddm());
-        csr = new WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME>(*executionEnvironment);
+        csr = new WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME>(*executionEnvironment, 0);
         device.reset(MockDevice::create<MockDevice>(executionEnvironment, 0u));
 
         device->resetCommandStreamReceiver(csr);
@@ -122,7 +123,7 @@ class WddmCommandStreamWithMockGdiFixture {
         wddm->gdi.reset(gdi);
         ASSERT_NE(wddm, nullptr);
         DebugManager.flags.CsrDispatchMode.set(static_cast<uint32_t>(DispatchMode::ImmediateDispatch));
-        this->csr = new MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>(*executionEnvironment);
+        this->csr = new MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>(*executionEnvironment, 0);
         memoryManager = new WddmMemoryManager(*executionEnvironment);
         ASSERT_NE(nullptr, memoryManager);
         executionEnvironment->memoryManager.reset(memoryManager);
@@ -148,7 +149,7 @@ TEST_F(DeviceCommandStreamTest, CreateWddmCSR) {
     executionEnvironment->osInterface = std::make_unique<OSInterface>();
     executionEnvironment->osInterface->get()->setWddm(static_cast<WddmMock *>(wddm));
     executionEnvironment->initializeMemoryManager();
-    std::unique_ptr<WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME>> csr(static_cast<WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME> *>(WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME>::create(false, *executionEnvironment)));
+    std::unique_ptr<WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME>> csr(static_cast<WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME> *>(WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME>::create(false, *executionEnvironment, 0)));
     EXPECT_NE(nullptr, csr);
     auto wddmFromCsr = csr->peekWddm();
     EXPECT_NE(nullptr, wddmFromCsr);
@@ -160,7 +161,7 @@ TEST_F(DeviceCommandStreamTest, CreateWddmCSRWithAubDump) {
     executionEnvironment->osInterface = std::make_unique<OSInterface>();
     executionEnvironment->osInterface->get()->setWddm(static_cast<WddmMock *>(wddm));
     executionEnvironment->initializeMemoryManager();
-    std::unique_ptr<WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME>> csr(static_cast<WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME> *>(WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME>::create(true, *executionEnvironment)));
+    std::unique_ptr<WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME>> csr(static_cast<WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME> *>(WddmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME>::create(true, *executionEnvironment, 0)));
     EXPECT_NE(nullptr, csr);
     auto wddmFromCsr = csr->peekWddm();
     EXPECT_NE(nullptr, wddmFromCsr);
@@ -181,12 +182,12 @@ TEST_F(WddmCommandStreamTest, Flush) {
     GraphicsAllocation *commandBuffer = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
-    auto flushStamp = csr->flush(batchBuffer, csr->getResidencyAllocations());
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
+    csr->flush(batchBuffer, csr->getResidencyAllocations());
 
     EXPECT_EQ(1u, wddm->submitResult.called);
     EXPECT_TRUE(wddm->submitResult.success);
-    EXPECT_EQ(flushStamp, static_cast<OsContextWin &>(csr->getOsContext()).getResidencyController().getMonitoredFence().lastSubmittedFence);
+    EXPECT_EQ(csr->obtainCurrentFlushStamp(), static_cast<OsContextWin &>(csr->getOsContext()).getResidencyController().getMonitoredFence().lastSubmittedFence);
 
     memoryManager->freeGraphicsMemory(commandBuffer);
 }
@@ -199,7 +200,7 @@ TEST_F(WddmCommandStreamTest, givenGraphicsAllocationWithDifferentGpuAddressThen
     commandBuffer->setCpuPtrAndGpuAddress(cpuAddress, mockGpuAddres);
 
     LinearStream cs(commandBuffer);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
     csr->flush(batchBuffer, csr->getResidencyAllocations());
     EXPECT_EQ(mockGpuAddres, wddm->submitResult.commandBufferSubmitted);
     memoryManager->freeGraphicsMemory(commandBuffer);
@@ -210,7 +211,7 @@ TEST_F(WddmCommandStreamTest, FlushWithOffset) {
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), offset, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), offset, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
     csr->flush(batchBuffer, csr->getResidencyAllocations());
     EXPECT_EQ(1u, wddm->submitResult.called);
     EXPECT_TRUE(wddm->submitResult.success);
@@ -224,7 +225,7 @@ TEST_F(WddmCommandStreamTest, givenWdmmWhenSubmitIsCalledThenCoherencyRequiredFl
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
     csr->flush(batchBuffer, csr->getResidencyAllocations());
     auto commandHeader = wddm->submitResult.commandHeaderSubmitted;
 
@@ -241,19 +242,18 @@ TEST(WddmPreemptionHeaderTests, givenWddmCommandStreamReceiverWhenPreemptionIsOf
     hwInfo->capabilityTable.defaultPreemptionMode = PreemptionMode::Disabled;
     executionEnvironment->setHwInfo(hwInfo);
     auto wddm = static_cast<WddmMock *>(executionEnvironment->osInterface->get()->getWddm());
-    executionEnvironment->commandStreamReceivers.resize(1);
-    executionEnvironment->commandStreamReceivers[0].push_back(std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment));
+    auto csr = std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment, 0);
     executionEnvironment->memoryManager.reset(new MemoryManagerCreate<WddmMemoryManager>(false, false, *executionEnvironment));
-    executionEnvironment->commandStreamReceivers[0][0]->overrideDispatchPolicy(DispatchMode::ImmediateDispatch);
+    csr->overrideDispatchPolicy(DispatchMode::ImmediateDispatch);
     OsContextWin osContext(*wddm, 0u, 1, HwHelper::get(platformDevices[0]->platform.eRenderCoreFamily).getGpgpuEngineInstances()[0],
                            PreemptionHelper::getDefaultPreemptionMode(*hwInfo), false);
-    executionEnvironment->commandStreamReceivers[0][0]->setupContext(osContext);
+    csr->setupContext(osContext);
 
     auto commandBuffer = executionEnvironment->memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
     LinearStream cs(commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
-    executionEnvironment->commandStreamReceivers[0][0]->flush(batchBuffer, executionEnvironment->commandStreamReceivers[0][0]->getResidencyAllocations());
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
+    csr->flush(batchBuffer, csr->getResidencyAllocations());
     auto commandHeader = wddm->submitResult.commandHeaderSubmitted;
     COMMAND_BUFFER_HEADER *pHeader = reinterpret_cast<COMMAND_BUFFER_HEADER *>(commandHeader);
 
@@ -267,20 +267,19 @@ TEST(WddmPreemptionHeaderTests, givenWddmCommandStreamReceiverWhenPreemptionIsOn
     hwInfo->capabilityTable.defaultPreemptionMode = PreemptionMode::MidThread;
     executionEnvironment->setHwInfo(hwInfo);
     auto wddm = static_cast<WddmMock *>(executionEnvironment->osInterface->get()->getWddm());
-    executionEnvironment->commandStreamReceivers.resize(1);
-    executionEnvironment->commandStreamReceivers[0].push_back(std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment));
+    auto csr = std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment, 0);
     executionEnvironment->memoryManager.reset(new MemoryManagerCreate<WddmMemoryManager>(false, false, *executionEnvironment));
-    executionEnvironment->commandStreamReceivers[0][0]->overrideDispatchPolicy(DispatchMode::ImmediateDispatch);
+    csr->overrideDispatchPolicy(DispatchMode::ImmediateDispatch);
     OsContextWin osContext(*wddm, 0u, 1, HwHelper::get(platformDevices[0]->platform.eRenderCoreFamily).getGpgpuEngineInstances()[0],
                            PreemptionHelper::getDefaultPreemptionMode(*hwInfo), false);
-    executionEnvironment->commandStreamReceivers[0][0]->setupContext(osContext);
+    csr->setupContext(osContext);
 
     auto commandBuffer = executionEnvironment->memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
     LinearStream cs(commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
 
-    executionEnvironment->commandStreamReceivers[0][0]->flush(batchBuffer, executionEnvironment->commandStreamReceivers[0][0]->getResidencyAllocations());
+    csr->flush(batchBuffer, csr->getResidencyAllocations());
     auto commandHeader = wddm->submitResult.commandHeaderSubmitted;
     COMMAND_BUFFER_HEADER *pHeader = reinterpret_cast<COMMAND_BUFFER_HEADER *>(commandHeader);
 
@@ -293,7 +292,7 @@ TEST(WddmPreemptionHeaderTests, givenDeviceSupportingPreemptionWhenCommandStream
     ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo);
     hwInfo->capabilityTable.defaultPreemptionMode = PreemptionMode::MidThread;
     executionEnvironment->setHwInfo(hwInfo);
-    auto commandStreamReceiver = std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment);
+    auto commandStreamReceiver = std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment, 0);
     auto commandHeader = commandStreamReceiver->commandBufferHeader;
     auto header = reinterpret_cast<COMMAND_BUFFER_HEADER *>(commandHeader);
     EXPECT_TRUE(header->NeedsMidBatchPreEmptionSupport);
@@ -304,7 +303,7 @@ TEST(WddmPreemptionHeaderTests, givenDevicenotSupportingPreemptionWhenCommandStr
     ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo);
     hwInfo->capabilityTable.defaultPreemptionMode = PreemptionMode::Disabled;
     executionEnvironment->setHwInfo(hwInfo);
-    auto commandStreamReceiver = std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment);
+    auto commandStreamReceiver = std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment, 0);
     auto commandHeader = commandStreamReceiver->commandBufferHeader;
     auto header = reinterpret_cast<COMMAND_BUFFER_HEADER *>(commandHeader);
     EXPECT_FALSE(header->NeedsMidBatchPreEmptionSupport);
@@ -315,7 +314,7 @@ TEST_F(WddmCommandStreamTest, givenWdmmWhenSubmitIsCalledAndThrottleIsToLowThenS
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::LOW, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::LOW, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
     csr->flush(batchBuffer, csr->getResidencyAllocations());
     auto commandHeader = wddm->submitResult.commandHeaderSubmitted;
 
@@ -333,7 +332,7 @@ TEST_F(WddmCommandStreamTest, givenWdmmWhenSubmitIsCalledAndThrottleIsToMediumTh
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
     csr->flush(batchBuffer, csr->getResidencyAllocations());
     auto commandHeader = wddm->submitResult.commandHeaderSubmitted;
 
@@ -351,7 +350,7 @@ TEST_F(WddmCommandStreamTest, givenWdmmWhenSubmitIsCalledAndThrottleIsToHighThen
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::HIGH, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::HIGH, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
     csr->flush(batchBuffer, csr->getResidencyAllocations());
     auto commandHeader = wddm->submitResult.commandHeaderSubmitted;
 
@@ -368,7 +367,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafDisabledWhenFlushIsCalledWithAll
     GraphicsAllocation *commandBuffer = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
 
     auto linearStreamAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize, GraphicsAllocation::AllocationType::LINEAR_STREAM});
     ASSERT_NE(nullptr, linearStreamAllocation);
@@ -388,7 +387,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafEnabledWhenFlushIsCalledWithoutA
     GraphicsAllocation *commandBuffer = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
 
     wddm->setKmDafEnabled(true);
     csr->flush(batchBuffer, csr->getResidencyAllocations());
@@ -403,7 +402,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafEnabledWhenFlushIsCalledWithResi
     GraphicsAllocation *commandBuffer = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
 
     auto linearStreamAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize, GraphicsAllocation::AllocationType::LINEAR_STREAM}));
     ASSERT_NE(nullptr, linearStreamAllocation);
@@ -427,7 +426,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafEnabledWhenFlushIsCalledWithAllo
     GraphicsAllocation *commandBuffer = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
 
     auto linearStreamAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize, GraphicsAllocation::AllocationType::LINEAR_STREAM}));
     ASSERT_NE(nullptr, linearStreamAllocation);
@@ -448,7 +447,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafEnabledWhenFlushIsCalledWithAllo
     GraphicsAllocation *commandBuffer = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
 
     auto fillPatternAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize, GraphicsAllocation::AllocationType::FILL_PATTERN}));
     ASSERT_NE(nullptr, fillPatternAllocation);
@@ -469,7 +468,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafEnabledWhenFlushIsCalledWithAllo
     GraphicsAllocation *commandBuffer = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
 
     auto commandBufferAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize, GraphicsAllocation::AllocationType::COMMAND_BUFFER}));
     ASSERT_NE(nullptr, commandBufferAllocation);
@@ -490,7 +489,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafEnabledWhenFlushIsCalledWithAllo
     GraphicsAllocation *commandBuffer = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
 
     auto nonLinearStreamAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
     ASSERT_NE(nullptr, nonLinearStreamAllocation);
@@ -679,7 +678,7 @@ TEST_F(WddmCommandStreamMockGdiTest, FlushCallsWddmMakeResidentForResidencyAlloc
 
     gdi->getMakeResidentArg().NumAllocations = 0;
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, cs.getUsed(), &cs};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs};
     csr->flush(batchBuffer, csr->getResidencyAllocations());
 
     EXPECT_NE(0u, gdi->getMakeResidentArg().NumAllocations);
@@ -738,10 +737,11 @@ HWTEST_F(WddmCommandStreamMockGdiTest, givenRecordedCommandBufferWhenItIsSubmitt
     IndirectHeap ioh(iohAlloc);
     IndirectHeap ssh(sshAlloc);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(device->getHardwareInfo());
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.requiresCoherency = true;
-    dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(device->getHardwareInfo());
+
     csr->flushTask(cs, 0u, dsh, ioh, ssh, 0u, dispatchFlags, *device);
 
     auto &cmdBuffers = mockedSubmissionsAggregator->peekCommandBuffers();
@@ -806,7 +806,7 @@ HWTEST_F(WddmSimpleTest, givenDefaultWddmCsrWhenItIsCreatedThenBatchingIsTurnedO
     executionEnvironment->osInterface = std::make_unique<OSInterface>();
     executionEnvironment->osInterface->get()->setWddm(wddm);
     executionEnvironment->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
-    std::unique_ptr<MockWddmCsr<FamilyType>> mockCsr(new MockWddmCsr<FamilyType>(*executionEnvironment));
+    std::unique_ptr<MockWddmCsr<FamilyType>> mockCsr(new MockWddmCsr<FamilyType>(*executionEnvironment, 0));
     EXPECT_EQ(DispatchMode::BatchedDispatch, mockCsr->dispatchMode);
 }
 
@@ -815,7 +815,7 @@ HWTEST_F(WddmDefaultTest, givenFtrWddmHwQueuesFlagWhenCreatingCsrThenPickWddmVer
     pDevice->executionEnvironment->osInterface = std::make_unique<OSInterface>();
     pDevice->executionEnvironment->osInterface->get()->setWddm(wddm);
     pDevice->executionEnvironment->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
-    WddmCommandStreamReceiver<FamilyType> wddmCsr(*pDevice->executionEnvironment);
+    WddmCommandStreamReceiver<FamilyType> wddmCsr(*pDevice->executionEnvironment, 0);
 
     auto wddmFromCsr = wddmCsr.peekWddm();
     EXPECT_EQ(typeid(*wddmFromCsr), typeid(WddmMock));
@@ -848,7 +848,7 @@ HWTEST_P(WddmCsrCompressionParameterizedTest, givenEnabledCompressionWhenInitial
     myMockWddm = static_cast<WddmMock *>(executionEnvironment->osInterface->get()->getWddm());
     EXPECT_EQ(nullptr, myMockWddm->getPageTableManager());
 
-    MockWddmCsr<FamilyType> mockWddmCsr(*executionEnvironment);
+    MockWddmCsr<FamilyType> mockWddmCsr(*executionEnvironment, 0);
     mockWddmCsr.createPageTableManager();
     ASSERT_NE(nullptr, myMockWddm->getPageTableManager());
 
@@ -870,7 +870,7 @@ HWTEST_F(WddmCsrCompressionTests, givenDisabledCompressionWhenInitializedThenDon
     std::unique_ptr<MockDevice> device(Device::create<MockDevice>(executionEnvironment, 0u));
     setCompressionEnabled(false, false);
     myMockWddm = static_cast<WddmMock *>(executionEnvironment->osInterface->get()->getWddm());
-    MockWddmCsr<FamilyType> mockWddmCsr(*executionEnvironment);
+    MockWddmCsr<FamilyType> mockWddmCsr(*executionEnvironment, 0);
     EXPECT_EQ(nullptr, myMockWddm->getPageTableManager());
 }
 
@@ -878,7 +878,7 @@ HWTEST_P(WddmCsrCompressionParameterizedTest, givenEnabledCompressionWhenFlushin
     ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo);
     setCompressionEnabled(compressionEnabled, !compressionEnabled);
     myMockWddm = static_cast<WddmMock *>(executionEnvironment->osInterface->get()->getWddm());
-    auto mockWddmCsr = new MockWddmCsr<FamilyType>(*executionEnvironment);
+    auto mockWddmCsr = new MockWddmCsr<FamilyType>(*executionEnvironment, 0);
     mockWddmCsr->createPageTableManager();
     mockWddmCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
     executionEnvironment->memoryManager.reset(new WddmMemoryManager(*executionEnvironment));
@@ -903,7 +903,8 @@ HWTEST_P(WddmCsrCompressionParameterizedTest, givenEnabledCompressionWhenFlushin
         .Times(1)
         .WillOnce(Return(GMM_SUCCESS));
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+
     mockWddmCsr->flushTask(cs, 0u, cs, cs, cs, 0u, dispatchFlags, *device);
 
     EXPECT_TRUE(mockWddmCsr->pageTableManagerInitialized);
@@ -925,7 +926,7 @@ HWTEST_F(WddmCsrCompressionTests, givenDisabledCompressionWhenFlushingThenDontIn
     setCompressionEnabled(false, false);
     myMockWddm = static_cast<WddmMock *>(executionEnvironment->osInterface->get()->getWddm());
 
-    auto mockWddmCsr = new MockWddmCsr<FamilyType>(*executionEnvironment);
+    auto mockWddmCsr = new MockWddmCsr<FamilyType>(*executionEnvironment, 0);
     mockWddmCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
     executionEnvironment->memoryManager.reset(new WddmMemoryManager(*executionEnvironment));
 
@@ -941,7 +942,8 @@ HWTEST_F(WddmCsrCompressionTests, givenDisabledCompressionWhenFlushingThenDontIn
 
     EXPECT_FALSE(mockWddmCsr->pageTableManagerInitialized);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+
     mockWddmCsr->flushTask(cs, 0u, cs, cs, cs, 0u, dispatchFlags, *device);
 
     EXPECT_FALSE(mockWddmCsr->pageTableManagerInitialized);

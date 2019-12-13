@@ -21,10 +21,10 @@ class WddmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> 
     typedef DeviceCommandStreamReceiver<GfxFamily> BaseClass;
 
   public:
-    WddmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment);
+    WddmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex);
     virtual ~WddmCommandStreamReceiver();
 
-    FlushStamp flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
+    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
     void makeResident(GraphicsAllocation &gfxAllocation) override;
     void processResidency(const ResidencyContainer &allocationsForResidency) override;
     void processEviction() override;

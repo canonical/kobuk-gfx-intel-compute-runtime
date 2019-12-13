@@ -5,8 +5,8 @@
  *
  */
 
+#include "core/helpers/file_io.h"
 #include "core/utilities/debug_file_reader.h"
-#include "runtime/helpers/file_io.h"
 #include "test.h"
 
 #include "gtest/gtest.h"
@@ -25,10 +25,6 @@ class TestSettingsFileReader : public SettingsFileReader {
     }
 
     ~TestSettingsFileReader() override {
-    }
-
-    size_t getValueSettingsCount() {
-        return settingValueMap.size();
     }
 
     size_t getStringSettingsCount() {
@@ -54,7 +50,6 @@ TEST(SettingsFileReader, CreateFileReaderWithoutFile) {
     std::unique_ptr<TestSettingsFileReader> reader = unique_ptr<TestSettingsFileReader>(new TestSettingsFileReader());
     ASSERT_NE(nullptr, reader);
 
-    EXPECT_EQ(0u, reader->getValueSettingsCount());
     EXPECT_EQ(0u, reader->getStringSettingsCount());
 }
 
@@ -130,7 +125,6 @@ TEST(SettingsFileReader, givenHexNumbersSemiColonSeparatedListInInputStreamWhenP
     ASSERT_NE(nullptr, reader);
 
     //No settings should be parsed initially
-    EXPECT_EQ(0u, reader->getValueSettingsCount());
     EXPECT_EQ(0u, reader->getStringSettingsCount());
 
     stringstream inputLineWithSemiColonList("KeyName = 0x1234;0x5555");

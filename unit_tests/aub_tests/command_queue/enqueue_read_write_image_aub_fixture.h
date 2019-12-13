@@ -20,6 +20,9 @@ struct AUBImageUnaligned
       public ::testing::Test {
 
     void SetUp() override {
+        if (!(platformDevices[0]->capabilityTable.supportsImages)) {
+            GTEST_SKIP();
+        }
         CommandEnqueueAUBFixture::SetUp();
     }
 
@@ -78,7 +81,9 @@ struct AUBImageUnaligned
 
         auto image = std::unique_ptr<Image>(Image::create(
             &context,
+            MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
             flags,
+            0,
             surfaceFormat,
             &imageDesc,
             imageMemory,
@@ -171,7 +176,9 @@ struct AUBImageUnaligned
 
         auto image = std::unique_ptr<Image>(Image::create(
             &context,
+            MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
             flags,
+            0,
             surfaceFormat,
             &imageDesc,
             imageMemory,

@@ -7,19 +7,15 @@
 
 #include "runtime/gmm_helper/gmm_helper.h"
 
-#include "core/helpers/aligned_memory.h"
 #include "core/helpers/debug_helpers.h"
 #include "core/memory_manager/graphics_allocation.h"
+#include "core/os_interface/os_library.h"
+#include "core/sku_info/operations/sku_info_transfer.h"
 #include "runtime/execution_environment/execution_environment.h"
-#include "runtime/gmm_helper/gmm.h"
-#include "runtime/gmm_helper/resource_info.h"
 #include "runtime/helpers/get_info.h"
 #include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/surface_formats.h"
-#include "runtime/mem_obj/buffer.h"
-#include "runtime/os_interface/os_library.h"
 #include "runtime/platform/platform.h"
-#include "runtime/sku_info/operations/sku_info_transfer.h"
 
 #include "gmm_client_context.h"
 
@@ -37,33 +33,7 @@ GmmHelper *GmmHelper::getInstance() {
     return platform()->peekExecutionEnvironment()->getGmmHelper();
 }
 
-void GmmHelper::setSimplifiedMocsTableUsage(bool value) {
-    useSimplifiedMocsTable = value;
-}
-
-void GmmHelper::initContext(const PLATFORM *platform,
-                            const FeatureTable *featureTable,
-                            const WorkaroundTable *workaroundTable,
-                            const GT_SYSTEM_INFO *pGtSysInfo) {
-    _SKU_FEATURE_TABLE gmmFtrTable = {};
-    _WA_TABLE gmmWaTable = {};
-    SkuInfoTransfer::transferFtrTableForGmm(&gmmFtrTable, featureTable);
-    SkuInfoTransfer::transferWaTableForGmm(&gmmWaTable, workaroundTable);
-    loadLib();
-    bool success = GMM_SUCCESS == gmmEntries.pfnCreateSingletonContext(*platform, &gmmFtrTable, &gmmWaTable, pGtSysInfo);
-    UNRECOVERABLE_IF(!success);
-    gmmClientContext = GmmHelper::createGmmContextWrapperFunc(GMM_CLIENT::GMM_OCL_VISTA, gmmEntries);
-    UNRECOVERABLE_IF(!gmmClientContext);
-}
-
 uint32_t GmmHelper::getMOCS(uint32_t type) {
-    if (useSimplifiedMocsTable) {
-        if (type == GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED) {
-            return cacheDisabledIndex;
-        } else {
-            return cacheEnabledIndex;
-        }
-    }
     MEMORY_OBJECT_CONTROL_STATE mocs = gmmClientContext->cachePolicyGetMemoryObject(nullptr, static_cast<GMM_RESOURCE_USAGE_TYPE>(type));
 
     return static_cast<uint32_t>(mocs.DwordValue);
@@ -106,10 +76,12 @@ GMM_YUV_PLANE GmmHelper::convertPlane(OCLPlane oclPlane) {
     return GMM_NO_PLANE;
 }
 GmmHelper::GmmHelper(const HardwareInfo *pHwInfo) : hwInfo(pHwInfo) {
-    initContext(&pHwInfo->platform, &pHwInfo->featureTable, &pHwInfo->workaroundTable, &pHwInfo->gtSystemInfo);
+    loadLib();
+    gmmClientContext = GmmHelper::createGmmContextWrapperFunc(const_cast<HardwareInfo *>(pHwInfo), this->initGmmFunc, this->destroyGmmFunc);
+    UNRECOVERABLE_IF(!gmmClientContext);
 }
-GmmHelper::~GmmHelper() {
-    gmmEntries.pfnDestroySingletonContext();
-};
+
+GmmHelper::~GmmHelper() = default;
+
 decltype(GmmHelper::createGmmContextWrapperFunc) GmmHelper::createGmmContextWrapperFunc = GmmClientContextBase::create<GmmClientContext>;
 } // namespace NEO

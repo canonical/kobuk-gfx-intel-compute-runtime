@@ -21,7 +21,6 @@
 #include "drm/i915_drm.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "hw_cmds.h"
 
 #include <iostream>
 #include <memory>
@@ -93,7 +92,7 @@ class DrmGemCloseWorkerFixture {
     class DrmAllocationWrapper : public DrmAllocation {
       public:
         DrmAllocationWrapper(BufferObject *bo)
-            : DrmAllocation(GraphicsAllocation::AllocationType::UNKNOWN, bo, nullptr, 0, MemoryPool::MemoryNull, 1u) {
+            : DrmAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN, bo, nullptr, 0, (osHandle)0u, MemoryPool::MemoryNull) {
         }
     };
     MockExecutionEnvironment executionEnvironment;
@@ -105,7 +104,7 @@ TEST_F(DrmGemCloseWorkerTests, gemClose) {
     this->drmMock->gem_close_expected = 1;
 
     auto worker = new DrmGemCloseWorker(*mm);
-    auto bo = new BufferObject(this->drmMock, 1);
+    auto bo = new BufferObject(this->drmMock, 1, 0);
 
     worker->push(bo);
 
@@ -116,7 +115,7 @@ TEST_F(DrmGemCloseWorkerTests, gemCloseExit) {
     this->drmMock->gem_close_expected = -1;
 
     auto worker = new DrmGemCloseWorker(*mm);
-    auto bo = new BufferObject(this->drmMock, 1);
+    auto bo = new BufferObject(this->drmMock, 1, 0);
 
     worker->push(bo);
 
@@ -136,7 +135,7 @@ TEST_F(DrmGemCloseWorkerTests, close) {
     this->drmMock->gem_close_expected = -1;
 
     auto worker = new DrmGemCloseWorker(*mm);
-    auto bo = new BufferObject(this->drmMock, 1);
+    auto bo = new BufferObject(this->drmMock, 1, 0);
 
     worker->push(bo);
     worker->close(false);
@@ -154,7 +153,7 @@ TEST_F(DrmGemCloseWorkerTests, givenAllocationWhenAskedForUnreferenceWithForceFl
     this->drmMock->gem_close_expected = 1;
 
     auto worker = new DrmGemCloseWorker(*mm);
-    auto bo = new BufferObject(this->drmMock, 1);
+    auto bo = new BufferObject(this->drmMock, 1, 0);
 
     bo->reference();
     worker->push(bo);

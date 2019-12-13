@@ -68,11 +68,13 @@ set(IGDRCL_SRCS_tests_api
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_enqueue_write_image_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_finish_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_flush_tests.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/cl_function_pointers_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_context_info_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_device_and_host_timer.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_device_ids_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_device_info_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_event_profiling_info_tests.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_execution_info_intel_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_extension_function_address_for_platform_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_extension_function_address_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_image_info_tests.inl
@@ -92,8 +94,8 @@ set(IGDRCL_SRCS_tests_api
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_supported_image_formats_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_icd_get_platform_ids_khr_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_intel_accelerator_tests.inl
-  ${CMAKE_CURRENT_SOURCE_DIR}/cl_intel_tracing_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_intel_motion_estimation.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cl_intel_tracing_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_link_program_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_mem_locally_uncached_resource_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_release_command_queue_tests.inl
@@ -117,6 +119,7 @@ set(IGDRCL_SRCS_tests_api
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_set_program_specialization_constant_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_svm_alloc_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_svm_free_tests.inl
+  ${CMAKE_CURRENT_SOURCE_DIR}/cl_unified_shared_memory_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_unload_compiler_tests.inl
   ${CMAKE_CURRENT_SOURCE_DIR}/cl_unload_platform_compiler_tests.inl
 )

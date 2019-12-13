@@ -30,6 +30,10 @@ typedef struct tagBINDING_TABLE_STATE {
         DEBUG_BREAK_IF(index >= 1);
         return TheStructure.RawData[index];
     }
+    inline const uint32_t &getRawData(const uint32_t index) const {
+        DEBUG_BREAK_IF(index >= 1);
+        return TheStructure.RawData[index];
+    }
     typedef enum tagSURFACESTATEPOINTER {
         SURFACESTATEPOINTER_BIT_SHIFT = 0x6,
         SURFACESTATEPOINTER_ALIGN_SIZE = 0x40,
@@ -452,8 +456,8 @@ typedef struct tagINTERFACE_DESCRIPTOR_DATA {
     inline SHARED_LOCAL_MEMORY_SIZE getSharedLocalMemorySize(void) const {
         return static_cast<SHARED_LOCAL_MEMORY_SIZE>(TheStructure.Common.SharedLocalMemorySize);
     }
-    inline void setBarrierEnable(const bool value) {
-        TheStructure.Common.BarrierEnable = value;
+    inline void setBarrierEnable(const uint32_t value) {
+        TheStructure.Common.BarrierEnable = (value > 0u) ? 1u : 0u;
     }
     inline bool getBarrierEnable(void) const {
         return (TheStructure.Common.BarrierEnable);
@@ -2637,6 +2641,13 @@ typedef struct tagRENDER_SURFACE_STATE {
     inline uint32_t getMipCountLod(void) const {
         return (TheStructure.Common.MipCountLod);
     }
+    inline void setMipTailStartLod(const uint32_t value) {
+        UNRECOVERABLE_IF(true);
+    }
+    inline uint32_t getMipTailStartLod(void) const {
+        UNRECOVERABLE_IF(true);
+        return 0;
+    }
     inline void setSurfaceMinLod(const uint32_t value) {
         TheStructure.Common.SurfaceMinLod = value;
     }
@@ -4008,18 +4019,18 @@ typedef struct tagXY_SRC_COPY_BLT {
     inline uint32_t getDestinationY1CoordinateTop(void) const {
         return TheStructure.Common.DestinationY1Coordinate_Top;
     }
-    inline void setDestinationX2CoordinateRight(const uint32_t value) {
+    inline void setTransferWidth(const uint32_t value) {
         UNRECOVERABLE_IF(value > 0xffff);
         TheStructure.Common.DestinationX2Coordinate_Right = value;
     }
-    inline uint32_t getDestinationX2CoordinateRight(void) const {
+    inline uint32_t getTransferWidth(void) const {
         return TheStructure.Common.DestinationX2Coordinate_Right;
     }
-    inline void setDestinationY2CoordinateBottom(const uint32_t value) {
+    inline void setTransferHeight(const uint32_t value) {
         UNRECOVERABLE_IF(value > 0xffff0000);
         TheStructure.Common.DestinationY2Coordinate_Bottom = value;
     }
-    inline uint32_t getDestinationY2CoordinateBottom(void) const {
+    inline uint32_t getTransferHeight(void) const {
         return TheStructure.Common.DestinationY2Coordinate_Bottom;
     }
     inline void setDestinationBaseAddress(const uint64_t value) {

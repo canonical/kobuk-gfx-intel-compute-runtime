@@ -6,7 +6,9 @@
  */
 
 #include "core/command_stream/linear_stream.h"
+#include "core/command_stream/preemption.h"
 #include "core/helpers/aligned_memory.h"
+#include "core/helpers/preamble.h"
 #include "core/helpers/ptr_math.h"
 #include "core/memory_manager/graphics_allocation.h"
 #include "core/os_interface/linux/debug_env_reader.h"
@@ -15,11 +17,9 @@
 #include "runtime/command_queue/command_queue_hw.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/command_stream/preemption.h"
 #include "runtime/command_stream/scratch_space_controller.h"
 #include "runtime/event/user_event.h"
 #include "runtime/helpers/cache_policy.h"
-#include "runtime/helpers/preamble.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/os_interface/debug_settings_manager.h"
@@ -27,6 +27,7 @@
 #include "unit_tests/fixtures/built_in_fixture.h"
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/fixtures/ult_command_stream_receiver_fixture.h"
+#include "unit_tests/helpers/dispatch_flags_helper.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/libult/create_command_stream.h"
 #include "unit_tests/libult/ult_command_stream_receiver.h"
@@ -61,7 +62,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskGmockTests, givenCsrInBatchingModeThreeRe
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     auto mockHelper = new MockFlatBatchBufferHelper<FamilyType>(*pDevice->executionEnvironment);
     mockCsr->overwriteFlatBatchBufferHelper(mockHelper);
     pDevice->resetCommandStreamReceiver(mockCsr);
@@ -71,7 +72,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskGmockTests, givenCsrInBatchingModeThreeRe
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.guardCommandBufferWithPipeControl = true;
     dispatchFlags.outOfOrderExecutionAllowed = true;
 
@@ -128,12 +129,12 @@ HWTEST_F(CommandStreamReceiverFlushTaskGmockTests, givenMockCommandStreamerWhenA
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     auto mockHelper = new MockFlatBatchBufferHelper<FamilyType>(*pDevice->executionEnvironment);
     mockCsr->overwriteFlatBatchBufferHelper(mockHelper);
     pDevice->resetCommandStreamReceiver(mockCsr);
 
-    DispatchFlags dispatchFlags;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.throttle = QueueThrottle::MEDIUM;
 
     EXPECT_CALL(*mockHelper, setPatchInfoData(_)).Times(0);
@@ -155,14 +156,13 @@ HWTEST_F(CommandStreamReceiverFlushTaskGmockTests, givenMockCommandStreamerWhenA
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     auto mockHelper = new MockFlatBatchBufferHelper<FamilyType>(*pDevice->executionEnvironment);
     mockCsr->overwriteFlatBatchBufferHelper(mockHelper);
 
     pDevice->resetCommandStreamReceiver(mockCsr);
 
-    DispatchFlags dispatchFlags;
-    dispatchFlags.throttle = QueueThrottle::MEDIUM;
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
 
     std::vector<PatchInfoData> patchInfoDataVector;
     EXPECT_CALL(*mockHelper, setPatchInfoData(_))
@@ -207,7 +207,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskGmockTests, givenMockCommandStreamerWhenA
 HWTEST_F(CommandStreamReceiverFlushTaskGmockTests, givenMockCsrWhenCollectStateBaseAddresPatchInfoIsCalledThenAppropriateAddressesAreTaken) {
     typedef typename FamilyType::STATE_BASE_ADDRESS STATE_BASE_ADDRESS;
 
-    std::unique_ptr<MockCsrHw2<FamilyType>> mockCsr(new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment));
+    std::unique_ptr<MockCsrHw2<FamilyType>> mockCsr(new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex()));
     auto mockHelper = new MockFlatBatchBufferHelper<FamilyType>(*pDevice->executionEnvironment);
     mockCsr->overwriteFlatBatchBufferHelper(mockHelper);
 
@@ -262,14 +262,14 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskGmockTests, givenPatch
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    std::unique_ptr<MockCsrHw2<FamilyType>> mockCsr(new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment));
+    std::unique_ptr<MockCsrHw2<FamilyType>> mockCsr(new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex()));
     mockCsr->overwriteFlatBatchBufferHelper(new MockFlatBatchBufferHelper<FamilyType>(*pDevice->executionEnvironment));
 
     bool stateBaseAddressDirty;
     bool vfeStateDirty;
     mockCsr->getScratchSpaceController()->setRequiredScratchSpace(nullptr, 10u, 0u, 1u, *pDevice->getDefaultEngine().osContext, stateBaseAddressDirty, vfeStateDirty);
 
-    DispatchFlags flags;
+    DispatchFlags flags = DispatchFlagsHelper::createDefaultDispatchFlags();
     mockCsr->requiredScratchSize = 0x200000;
 
     mockCsr->programVFEState(commandStream, flags, 10);
@@ -281,14 +281,14 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskGmockTests, givenPatch
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    std::unique_ptr<MockCsrHw2<FamilyType>> mockCsr(new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment));
+    std::unique_ptr<MockCsrHw2<FamilyType>> mockCsr(new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex()));
     mockCsr->overwriteFlatBatchBufferHelper(new MockFlatBatchBufferHelper<FamilyType>(*pDevice->executionEnvironment));
 
     bool stateBaseAddressDirty;
     bool vfeStateDirty;
     mockCsr->getScratchSpaceController()->setRequiredScratchSpace(nullptr, 10u, 0u, 1u, *pDevice->getDefaultEngine().osContext, stateBaseAddressDirty, vfeStateDirty);
 
-    DispatchFlags flags;
+    DispatchFlags flags = DispatchFlagsHelper::createDefaultDispatchFlags();
     mockCsr->requiredScratchSize = 0x200000;
 
     mockCsr->programVFEState(commandStream, flags, 10);
@@ -302,10 +302,10 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskGmockTests, givenPatch
     CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
     auto &commandStream = commandQueue.getCS(4096u);
 
-    std::unique_ptr<MockCsrHw2<FamilyType>> mockCsr(new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment));
+    std::unique_ptr<MockCsrHw2<FamilyType>> mockCsr(new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex()));
     mockCsr->overwriteFlatBatchBufferHelper(new MockFlatBatchBufferHelper<FamilyType>(*pDevice->executionEnvironment));
 
-    DispatchFlags flags;
+    DispatchFlags flags = DispatchFlagsHelper::createDefaultDispatchFlags();
     mockCsr->requiredScratchSize = 0x200000;
 
     mockCsr->programVFEState(commandStream, flags, 10);

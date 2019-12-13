@@ -14,12 +14,13 @@
 #include "unit_tests/command_queue/enqueue_read_buffer_rect_fixture.h"
 #include "unit_tests/fixtures/buffer_enqueue_fixture.h"
 #include "unit_tests/gen_common/gen_commands_common_validation.h"
+#include "unit_tests/mocks/mock_buffer.h"
 
 #include "reg_configs_common.h"
 
 using namespace NEO;
 
-HWTEST_F(EnqueueReadBufferRectTest, null_src_mem_object) {
+HWTEST_F(EnqueueReadBufferRectTest, GivenNullBufferWhenReadingBufferThenInvalidMemObjectErrorIsReturned) {
     auto retVal = CL_SUCCESS;
     size_t bufferOrigin[] = {0, 0, 0};
     size_t hostOrigin[] = {0, 0, 0};
@@ -44,7 +45,7 @@ HWTEST_F(EnqueueReadBufferRectTest, null_src_mem_object) {
     EXPECT_EQ(CL_INVALID_MEM_OBJECT, retVal);
 }
 
-HWTEST_F(EnqueueReadBufferRectTest, nullHostPtr) {
+HWTEST_F(EnqueueReadBufferRectTest, GivenNullHostPtrWhenReadingBufferThenInvalidValueErrorIsReturned) {
     auto retVal = CL_SUCCESS;
     size_t bufferOrigin[] = {0, 0, 0};
     size_t hostOrigin[] = {0, 0, 0};
@@ -69,7 +70,7 @@ HWTEST_F(EnqueueReadBufferRectTest, nullHostPtr) {
     EXPECT_EQ(CL_INVALID_VALUE, retVal);
 }
 
-HWTEST_F(EnqueueReadBufferRectTest, returnSuccess) {
+HWTEST_F(EnqueueReadBufferRectTest, GivenValidParamsWhenReadingBufferThenSuccessIsReturned) {
     auto retVal = CL_SUCCESS;
     size_t bufferOrigin[] = {0, 0, 0};
     size_t hostOrigin[] = {0, 0, 0};
@@ -94,7 +95,7 @@ HWTEST_F(EnqueueReadBufferRectTest, returnSuccess) {
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
-HWTEST_F(EnqueueReadBufferRectTest, alignsToCSR_Blocking) {
+HWTEST_F(EnqueueReadBufferRectTest, GivenBlockingEnqueueWhenReadingBufferThenTaskLevelIsNotIncremented) {
     //this test case assumes IOQ
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.taskCount = pCmdQ->taskCount + 100;
@@ -106,7 +107,7 @@ HWTEST_F(EnqueueReadBufferRectTest, alignsToCSR_Blocking) {
     EXPECT_EQ(oldCsrTaskLevel, pCmdQ->taskLevel);
 }
 
-HWTEST_F(EnqueueReadBufferRectTest, alignsToCSR_NonBlocking) {
+HWTEST_F(EnqueueReadBufferRectTest, GivenNonBlockingEnqueueWhenReadingBufferThenTaskLevelIsIncremented) {
     //this test case assumes IOQ
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.taskCount = pCmdQ->taskCount + 100;
@@ -117,7 +118,7 @@ HWTEST_F(EnqueueReadBufferRectTest, alignsToCSR_NonBlocking) {
     EXPECT_EQ(csr.peekTaskLevel(), pCmdQ->taskLevel + 1);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, 2D_GPGPUWalker) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, Given2dRegionWhenReadingBufferThenCommandsAreProgrammedCorrectly) {
     typedef typename FamilyType::GPGPU_WALKER GPGPU_WALKER;
     enqueueReadBufferRect2D<FamilyType>();
 
@@ -137,7 +138,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, 2D_GPGPUWalker) {
     // Compute the SIMD lane mask
     size_t simd =
         cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16 : 8;
-    uint64_t simdMask = (1ull << simd) - 1;
+    uint64_t simdMask = maxNBitValue(simd);
 
     // Mask off lanes based on the execution masks
     auto laneMaskRight = cmd->getRightExecutionMask() & simdMask;
@@ -148,21 +149,21 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, 2D_GPGPUWalker) {
     }
 }
 
-HWTEST_F(EnqueueReadBufferRectTest, 2D_bumpsTaskLevel) {
+HWTEST_F(EnqueueReadBufferRectTest, WhenReadingBufferThenTaskLevelIsIncremented) {
     auto taskLevelBefore = pCmdQ->taskLevel;
 
     enqueueReadBufferRect2D<FamilyType>();
     EXPECT_GT(pCmdQ->taskLevel, taskLevelBefore);
 }
 
-HWTEST_F(EnqueueReadBufferRectTest, 2D_addsCommands) {
+HWTEST_F(EnqueueReadBufferRectTest, WhenReadingBufferThenCommandsAreAdded) {
     auto usedCmdBufferBefore = pCS->getUsed();
 
     enqueueReadBufferRect2D<FamilyType>();
     EXPECT_NE(usedCmdBufferBefore, pCS->getUsed());
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, 2D_addsIndirectData) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, WhenReadingBufferThenIndirectDataIsAdded) {
     auto dshBefore = pDSH->getUsed();
     auto iohBefore = pIOH->getUsed();
     auto sshBefore = pSSH->getUsed();
@@ -198,18 +199,19 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, 2D_addsIndirectData) {
     }
 }
 
-HWTEST_F(EnqueueReadBufferRectTest, 2D_LoadRegisterImmediateL3CNTLREG) {
+HWTEST_F(EnqueueReadBufferRectTest, WhenReadingBufferThenL3ProgrammingIsCorrect) {
     enqueueReadBufferRect2D<FamilyType>();
     validateL3Programming<FamilyType>(cmdList, itorWalker);
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, When2DEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueReadBufferRect2D<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    auto &ultCsr = this->pDevice->getUltCommandStreamReceiver<FamilyType>();
+    validateStateBaseAddress<FamilyType>(ultCsr.getMemoryManager()->getInternalHeapBaseAddress(ultCsr.rootDeviceIndex),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, 2D_MediaInterfaceDescriptorLoad) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, WhenReadingBufferThenMediaInterfaceDescriptorIsCorrect) {
     typedef typename FamilyType::MEDIA_INTERFACE_DESCRIPTOR_LOAD MEDIA_INTERFACE_DESCRIPTOR_LOAD;
     typedef typename FamilyType::INTERFACE_DESCRIPTOR_DATA INTERFACE_DESCRIPTOR_DATA;
 
@@ -237,7 +239,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, 2D_MediaInterfaceDescript
     FamilyType::PARSE::template validateCommand<MEDIA_INTERFACE_DESCRIPTOR_LOAD *>(cmdList.begin(), itorCmd);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, 2D_InterfaceDescriptorData) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, WhenReadingBufferThenInterfaceDescriptorDataIsCorrect) {
     typedef typename FamilyType::MEDIA_INTERFACE_DESCRIPTOR_LOAD MEDIA_INTERFACE_DESCRIPTOR_LOAD;
     typedef typename FamilyType::STATE_BASE_ADDRESS STATE_BASE_ADDRESS;
     typedef typename FamilyType::INTERFACE_DESCRIPTOR_DATA INTERFACE_DESCRIPTOR_DATA;
@@ -274,18 +276,18 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, 2D_InterfaceDescriptorDat
     EXPECT_NE(0u, IDD.getConstantIndirectUrbEntryReadLength());
 }
 
-HWTEST_F(EnqueueReadBufferRectTest, 2D_PipelineSelect) {
+HWTEST_F(EnqueueReadBufferRectTest, WhenReadingBufferThenOnePipelineSelectIsProgrammed) {
     enqueueReadBufferRect2D<FamilyType>();
     int numCommands = getNumberOfPipelineSelectsThatEnablePipelineSelect<FamilyType>();
     EXPECT_EQ(1, numCommands);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, 2D_MediaVFEState) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, WhenReadingBufferThenMediaVfeStateIsCorrect) {
     enqueueReadBufferRect2D<FamilyType>();
     validateMediaVFEState<FamilyType>(&pDevice->getHardwareInfo(), cmdMediaVfeState, cmdList, itorMediaVfeState);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, blockingRequiresPipeControlAfterWalkerWithDCFlushSet) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadBufferRectTest, GivenBlockingEnqueueWhenReadingBufferThenPipeControlIsProgrammedAfterWalkerWithDcFlushSet) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
 
     auto blocking = CL_TRUE;
@@ -607,4 +609,77 @@ HWTEST_F(NegativeFailAllocationTest, givenEnqueueReadBufferRectWhenHostPtrAlloca
         nullptr);
 
     EXPECT_EQ(CL_OUT_OF_RESOURCES, retVal);
+}
+
+struct EnqueueReadBufferRectHw : public ::testing::Test {
+
+    void SetUp() override {
+        if (is32bit) {
+            GTEST_SKIP();
+        }
+        device.reset(MockDevice::createWithNewExecutionEnvironment<MockDevice>(*platformDevices));
+        context.reset(new MockContext(device.get()));
+    }
+
+    std::unique_ptr<MockDevice> device;
+    std::unique_ptr<MockContext> context;
+    MockBuffer srcBuffer;
+
+    size_t bufferOrigin[3] = {0, 0, 0};
+    size_t hostOrigin[3] = {0, 0, 0};
+    size_t region[3] = {1, 1, 1};
+    size_t bufferRowPitch = 10;
+    size_t bufferSlicePitch = 0;
+    size_t hostRowPitch = 10;
+    size_t hostSlicePitch = 10;
+    uint64_t bigSize = 4ull * MemoryConstants::gigaByte;
+    uint64_t smallSize = 4ull * MemoryConstants::gigaByte - 1;
+};
+
+using EnqeueReadBufferRectStatelessTest = EnqueueReadBufferRectHw;
+
+HWTEST_F(EnqeueReadBufferRectStatelessTest, WhenReadingBufferRectStatelessThenSuccessIsReturned) {
+
+    auto pCmdQ = std::make_unique<CommandQueueStateless<FamilyType>>(context.get(), device.get());
+    void *missAlignedPtr = reinterpret_cast<void *>(0x1041);
+    srcBuffer.size = static_cast<size_t>(bigSize);
+    auto retVal = pCmdQ->enqueueReadBufferRect(&srcBuffer,
+                                               CL_FALSE,
+                                               bufferOrigin,
+                                               hostOrigin,
+                                               region,
+                                               bufferRowPitch,
+                                               bufferSlicePitch,
+                                               hostRowPitch,
+                                               hostSlicePitch,
+                                               missAlignedPtr,
+                                               0,
+                                               nullptr,
+                                               nullptr);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+using EnqeueReadBufferRectStatefulTest = EnqueueReadBufferRectHw;
+
+HWTEST_F(EnqeueReadBufferRectStatefulTest, WhenReadingBufferRectStatefulThenSuccessIsReturned) {
+
+    auto pCmdQ = std::make_unique<CommandQueueStateful<FamilyType>>(context.get(), device.get());
+    void *missAlignedPtr = reinterpret_cast<void *>(0x1041);
+    srcBuffer.size = static_cast<size_t>(smallSize);
+    auto retVal = pCmdQ->enqueueReadBufferRect(&srcBuffer,
+                                               CL_FALSE,
+                                               bufferOrigin,
+                                               hostOrigin,
+                                               region,
+                                               bufferRowPitch,
+                                               bufferSlicePitch,
+                                               hostRowPitch,
+                                               hostSlicePitch,
+                                               missAlignedPtr,
+                                               0,
+                                               nullptr,
+                                               nullptr);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
 }

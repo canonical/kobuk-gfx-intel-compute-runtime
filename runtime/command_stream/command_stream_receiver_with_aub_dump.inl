@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/execution_environment/root_device_environment.h"
 #include "runtime/aub/aub_center.h"
 #include "runtime/command_stream/aub_command_stream_receiver.h"
 #include "runtime/command_stream/command_stream_receiver_with_aub_dump.h"
@@ -15,24 +16,23 @@ namespace NEO {
 extern CommandStreamReceiverCreateFunc commandStreamReceiverFactory[IGFX_MAX_CORE];
 
 template <typename BaseCSR>
-CommandStreamReceiverWithAUBDump<BaseCSR>::CommandStreamReceiverWithAUBDump(const std::string &baseName, ExecutionEnvironment &executionEnvironment)
-    : BaseCSR(executionEnvironment) {
-    bool isAubManager = executionEnvironment.aubCenter && executionEnvironment.aubCenter->getAubManager();
+CommandStreamReceiverWithAUBDump<BaseCSR>::CommandStreamReceiverWithAUBDump(const std::string &baseName, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex)
+    : BaseCSR(executionEnvironment, rootDeviceIndex) {
+    bool isAubManager = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->aubCenter && executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->aubCenter->getAubManager();
     bool isTbxMode = CommandStreamReceiverType::CSR_TBX == BaseCSR::getType();
     bool createAubCsr = (isAubManager && isTbxMode) ? false : true;
     if (createAubCsr) {
-        aubCSR.reset(AUBCommandStreamReceiver::create(baseName, false, executionEnvironment));
+        aubCSR.reset(AUBCommandStreamReceiver::create(baseName, false, executionEnvironment, rootDeviceIndex));
     }
 }
 
 template <typename BaseCSR>
-FlushStamp CommandStreamReceiverWithAUBDump<BaseCSR>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
+bool CommandStreamReceiverWithAUBDump<BaseCSR>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
     if (aubCSR) {
         aubCSR->flush(batchBuffer, allocationsForResidency);
         aubCSR->setLatestSentTaskCount(BaseCSR::peekLatestSentTaskCount());
     }
-    FlushStamp flushStamp = BaseCSR::flush(batchBuffer, allocationsForResidency);
-    return flushStamp;
+    return BaseCSR::flush(batchBuffer, allocationsForResidency);
 }
 
 template <typename BaseCSR>

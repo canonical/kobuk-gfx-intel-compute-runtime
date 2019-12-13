@@ -34,10 +34,10 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
   public:
     // When drm is null default implementation is used. In this case DrmCommandStreamReceiver is responsible to free drm.
     // When drm is passed, DCSR will not free it at destruction
-    DrmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment,
+    DrmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex,
                              gemCloseWorkerMode mode = gemCloseWorkerMode::gemCloseWorkerActive);
 
-    FlushStamp flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
+    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
     void makeResident(GraphicsAllocation &gfxAllocation) override;
     void processResidency(const ResidencyContainer &allocationsForResidency) override;
     void makeNonResident(GraphicsAllocation &gfxAllocation) override;
@@ -52,10 +52,13 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
   protected:
     void makeResidentBufferObjects(const DrmAllocation *drmAllocation);
     void makeResident(BufferObject *bo);
+    void flushInternal(const BatchBuffer &batchBuffer, const ResidencyContainer &allocationsForResidency);
+    void exec(const BatchBuffer &batchBuffer, uint32_t drmContextId);
 
     std::vector<BufferObject *> residency;
     std::vector<drm_i915_gem_exec_object2> execObjectsStorage;
     Drm *drm;
     gemCloseWorkerMode gemCloseWorkerOperationMode;
+    uint32_t handleIndex = 0u;
 };
 } // namespace NEO

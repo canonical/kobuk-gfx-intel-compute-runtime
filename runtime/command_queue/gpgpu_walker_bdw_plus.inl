@@ -6,6 +6,7 @@
  */
 
 #pragma once
+#include "core/helpers/simd_helper.h"
 #include "runtime/command_queue/gpgpu_walker_base.inl"
 
 namespace NEO {
@@ -34,7 +35,7 @@ inline size_t GpgpuWalkerHelper<GfxFamily>::setGpgpuWalkerThreadData(
 
     // compute executionMask - to tell which SIMD lines are active within thread
     auto remainderSimdLanes = localWorkSize & (simd - 1);
-    uint64_t executionMask = (1ull << remainderSimdLanes) - 1;
+    uint64_t executionMask = maxNBitValue(remainderSimdLanes);
     if (!executionMask)
         executionMask = ~executionMask;
 
@@ -42,7 +43,7 @@ inline size_t GpgpuWalkerHelper<GfxFamily>::setGpgpuWalkerThreadData(
 
     walkerCmd->setRightExecutionMask(static_cast<uint32_t>(executionMask));
     walkerCmd->setBottomExecutionMask(static_cast<uint32_t>(0xffffffff));
-    walkerCmd->setSimdSize(static_cast<SIMD_SIZE>(simd >> 4));
+    walkerCmd->setSimdSize(getSimdConfig<WALKER_TYPE<GfxFamily>>(simd));
 
     walkerCmd->setThreadGroupIdStartingX(static_cast<uint32_t>(startWorkGroups[0]));
     walkerCmd->setThreadGroupIdStartingY(static_cast<uint32_t>(startWorkGroups[1]));
@@ -58,7 +59,8 @@ void GpgpuWalkerHelper<GfxFamily>::dispatchScheduler(
     PreemptionMode preemptionMode,
     SchedulerKernel &scheduler,
     IndirectHeap *ssh,
-    IndirectHeap *dsh) {
+    IndirectHeap *dsh,
+    bool isCcsUsed) {
 
     using INTERFACE_DESCRIPTOR_DATA = typename GfxFamily::INTERFACE_DESCRIPTOR_DATA;
     using GPGPU_WALKER = typename GfxFamily::GPGPU_WALKER;
@@ -123,7 +125,6 @@ void GpgpuWalkerHelper<GfxFamily>::dispatchScheduler(
     // Program the walker.  Invokes execution so all state should already be programmed
     auto pGpGpuWalkerCmd = static_cast<GPGPU_WALKER *>(commandStream.getSpace(sizeof(GPGPU_WALKER)));
     *pGpGpuWalkerCmd = GfxFamily::cmdInitGpgpuWalker;
-
     bool inlineDataProgrammingRequired = HardwareCommandsHelper<GfxFamily>::inlineDataProgrammingRequired(scheduler);
     HardwareCommandsHelper<GfxFamily>::sendIndirectState(
         commandStream,
@@ -138,7 +139,8 @@ void GpgpuWalkerHelper<GfxFamily>::dispatchScheduler(
         preemptionMode,
         pGpGpuWalkerCmd,
         nullptr,
-        true);
+        true,
+        isCcsUsed);
 
     // Implement enabling special WA DisableLSQCROPERFforOCL if needed
     GpgpuWalkerHelper<GfxFamily>::applyWADisableLSQCROPERFforOCL(&commandStream, scheduler, true);
@@ -191,8 +193,13 @@ size_t EnqueueOperation<GfxFamily>::getSizeRequiredCSKernel(bool reserveProfilin
         size += 2 * sizeof(PIPE_CONTROL) + 2 * sizeof(typename GfxFamily::MI_STORE_REGISTER_MEM);
     }
     if (reservePerfCounters) {
-        size += commandQueue.getPerfCounters()->getGpuCommandsSize(true);
-        size += commandQueue.getPerfCounters()->getGpuCommandsSize(false);
+
+        const auto commandBufferType = isCcs(commandQueue.getDevice().getDefaultEngine().osContext->getEngineType())
+                                           ? MetricsLibraryApi::GpuCommandBufferType::Compute
+                                           : MetricsLibraryApi::GpuCommandBufferType::Render;
+
+        size += commandQueue.getPerfCounters()->getGpuCommandsSize(commandBufferType, true);
+        size += commandQueue.getPerfCounters()->getGpuCommandsSize(commandBufferType, false);
     }
     size += GpgpuWalkerHelper<GfxFamily>::getSizeForWADisableLSQCROPERFforOCL(pKernel);
 

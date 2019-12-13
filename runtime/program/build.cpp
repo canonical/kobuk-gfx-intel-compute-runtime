@@ -5,18 +5,21 @@
  *
  */
 
-#include "runtime/compiler_interface/compiler_interface.h"
+#include "core/compiler_interface/compiler_interface.h"
+#include "core/utilities/time_measure_wrapper.h"
 #include "runtime/compiler_interface/compiler_options.h"
 #include "runtime/device/device.h"
 #include "runtime/gtpin/gtpin_notify.h"
 #include "runtime/helpers/validators.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/platform/platform.h"
+#include "runtime/program/kernel_info.h"
+#include "runtime/program/program.h"
 #include "runtime/source_level_debugger/source_level_debugger.h"
 
-#include "program.h"
-
 #include <cstring>
+#include <iterator>
+#include <sstream>
 
 namespace NEO {
 
@@ -68,9 +71,15 @@ cl_int Program::build(
                 break;
             }
 
-            TranslationArgs inputArgs = {};
+            TranslationInput inputArgs = {IGC::CodeType::oclC, IGC::CodeType::oclGenBin};
+            if ((createdFrom == CreatedFrom::IL) || (this->programBinaryType == CL_PROGRAM_BINARY_TYPE_INTERMEDIATE)) {
+                inputArgs.srcType = isSpirV ? IGC::CodeType::spirV : IGC::CodeType::llvmBc;
+                inputArgs.src = ArrayRef<const char>(irBinary.get(), irBinarySize);
+            } else {
+                inputArgs.src = ArrayRef<const char>(sourceCode.c_str(), sourceCode.size());
+            }
 
-            if (strcmp(sourceCode.c_str(), "") == 0) {
+            if (inputArgs.src.size() == 0) {
                 retVal = CL_INVALID_PROGRAM;
                 break;
             }
@@ -90,27 +99,42 @@ cl_int Program::build(
                 internalOptions.append(compilerExtensionsOptions);
             }
 
-            inputArgs.pInput = (char *)(sourceCode.c_str());
-            inputArgs.InputSize = (uint32_t)sourceCode.size();
-            inputArgs.pOptions = options.c_str();
-            inputArgs.OptionsSize = (uint32_t)options.length();
-            inputArgs.pInternalOptions = internalOptions.c_str();
-            inputArgs.InternalOptionsSize = (uint32_t)internalOptions.length();
-            inputArgs.pTracingOptions = nullptr;
-            inputArgs.TracingOptionsCount = 0;
+            inputArgs.apiOptions = ArrayRef<const char>(options.c_str(), options.length());
+            inputArgs.internalOptions = ArrayRef<const char>(internalOptions.c_str(), internalOptions.length());
             inputArgs.GTPinInput = gtpinGetIgcInit();
+            inputArgs.specConstants.idsBuffer = this->specConstantsIds.get();
+            inputArgs.specConstants.sizesBuffer = this->specConstantsSizes.get();
+            inputArgs.specConstants.valuesBuffer = this->specConstantsValues.get();
             DBG_LOG(LogApiCalls,
-                    "Build Options", inputArgs.pOptions,
-                    "\nBuild Internal Options", inputArgs.pInternalOptions);
-
-            retVal = pCompilerInterface->build(*this, inputArgs, enableCaching);
+                    "Build Options", inputArgs.apiOptions.begin(),
+                    "\nBuild Internal Options", inputArgs.internalOptions.begin());
+            inputArgs.allowCaching = enableCaching;
+            NEO::TranslationOutput compilerOuput = {};
+            auto compilerErr = pCompilerInterface->build(*this->pDevice, inputArgs, compilerOuput);
+            this->updateBuildLog(this->pDevice, compilerOuput.frontendCompilerLog.c_str(), compilerOuput.frontendCompilerLog.size());
+            this->updateBuildLog(this->pDevice, compilerOuput.backendCompilerLog.c_str(), compilerOuput.backendCompilerLog.size());
+            retVal = asClError(compilerErr);
             if (retVal != CL_SUCCESS) {
                 break;
             }
+            if (inputArgs.srcType == IGC::CodeType::oclC) {
+                this->irBinary = std::move(compilerOuput.intermediateRepresentation.mem);
+                this->irBinarySize = compilerOuput.intermediateRepresentation.size;
+                this->isSpirV = compilerOuput.intermediateCodeType == IGC::CodeType::spirV;
+            }
+            this->genBinary = std::move(compilerOuput.deviceBinary.mem);
+            this->genBinarySize = compilerOuput.deviceBinary.size;
+            this->debugData = std::move(compilerOuput.debugData.mem);
+            this->debugDataSize = compilerOuput.debugData.size;
         }
         updateNonUniformFlag();
 
-        retVal = processGenBinary();
+        if (DebugManager.flags.PrintProgramBinaryProcessingTime.get()) {
+            retVal = TimeMeasureWrapper::functionExecution(*this, &Program::processGenBinary);
+        } else {
+            retVal = processGenBinary();
+        }
+
         if (retVal != CL_SUCCESS) {
             break;
         }
@@ -176,23 +200,27 @@ cl_int Program::build(const cl_device_id device, const char *buildOptions, bool 
     return ret;
 }
 
-cl_int Program::build(
-    const char *pKernelData,
-    size_t kernelDataSize) {
-    cl_int retVal = CL_SUCCESS;
-    processKernel(pKernelData, 0U, retVal);
-
-    return retVal;
-}
-
-void Program::extractInternalOptions(std::string &options) {
+void Program::extractInternalOptions(const std::string &options) {
+    std::istringstream inputStringStream(options);
+    std::vector<std::string> optionsVector{std::istream_iterator<std::string>{inputStringStream},
+                                           std::istream_iterator<std::string>{}};
     for (auto &optionString : internalOptionsToExtract) {
-        size_t pos = options.find(optionString);
-        if (pos != std::string::npos) {
-            options.erase(pos, optionString.length());
+        auto element = std::find(optionsVector.begin(), optionsVector.end(), optionString);
+        if (element == optionsVector.end()) {
+            continue;
+        }
+
+        if (isFlagOption(optionString)) {
             internalOptions.append(optionString);
+            internalOptions.append(" ");
+        } else if ((element + 1 != optionsVector.end()) &&
+                   isOptionValueValid(optionString, *(element + 1))) {
+            internalOptions.append(optionString);
+            internalOptions.append(" ");
+            internalOptions.append(*(element + 1));
             internalOptions.append(" ");
         }
     }
 }
+
 } // namespace NEO

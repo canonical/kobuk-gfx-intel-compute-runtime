@@ -232,7 +232,7 @@ void Event::updateCompletionStamp(uint32_t taskCount, uint32_t tasklevel, FlushS
 
 cl_ulong Event::getDelta(cl_ulong startTime,
                          cl_ulong endTime) {
-    cl_ulong Max = (1ULL << OCLRT_NUM_TIMESTAMP_BITS) - 1;
+    cl_ulong Max = maxNBitValue(OCLRT_NUM_TIMESTAMP_BITS);
     cl_ulong Delta = 0;
 
     startTime &= Max;
@@ -402,7 +402,7 @@ void Event::unblockEventsBlockedByThis(int32_t transitionStatus) {
     if (isStatusCompletedByTermination(transitionStatus) == false) {
         //if we are event on top of the tree , obtain taskLevel from CSR
         if (taskLevel == Event::eventNotReady) {
-            this->taskLevel = getTaskLevel();
+            this->taskLevel = getTaskLevel(); // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
             taskLevelToPropagate = this->taskLevel;
         } else {
             taskLevelToPropagate = taskLevel + 1;

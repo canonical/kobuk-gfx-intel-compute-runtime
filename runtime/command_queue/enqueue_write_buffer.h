@@ -14,8 +14,6 @@
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/memory_manager/surface.h"
 
-#include "hw_cmds.h"
-
 #include <new>
 
 namespace NEO {
@@ -50,11 +48,15 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBuffer(
                                                   numEventsInWaitList, eventWaitList, event);
     }
 
-    auto &builder = getDevice().getExecutionEnvironment()->getBuiltIns()->getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyBufferToBuffer,
-                                                                                                        this->getContext(), this->getDevice());
+    auto eBuiltInOps = EBuiltInOps::CopyBufferToBuffer;
+    if (forceStateless(buffer->getSize())) {
+        eBuiltInOps = EBuiltInOps::CopyBufferToBufferStateless;
+    }
+    auto &builder = getDevice().getExecutionEnvironment()->getBuiltIns()->getBuiltinDispatchInfoBuilder(eBuiltInOps,
+                                                                                                        this->getContext(),
+                                                                                                        this->getDevice());
 
     BuiltInOwnershipWrapper builtInLock(builder, this->context);
-    MultiDispatchInfo dispatchInfo;
 
     void *srcPtr = const_cast<void *>(ptr);
 
@@ -72,7 +74,8 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBuffer(
     } else {
         surfaces[1] = &hostPtrSurf;
         if (size != 0) {
-            bool status = getGpgpuCommandStreamReceiver().createAllocationForHostSurface(hostPtrSurf, false);
+            auto &csr = blitEnqueueAllowed(cmdType) ? *getBcsCommandStreamReceiver() : getGpgpuCommandStreamReceiver();
+            bool status = csr.createAllocationForHostSurface(hostPtrSurf, false);
             if (!status) {
                 return CL_OUT_OF_RESOURCES;
             }
@@ -88,7 +91,9 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBuffer(
     dc.dstMemObj = buffer;
     dc.dstOffset = {offset, 0, 0};
     dc.size = {size, 0, 0};
-    dc.mapAllocation = mapAllocation;
+    dc.transferAllocation = mapAllocation ? mapAllocation : hostPtrSurf.getAllocation();
+
+    MultiDispatchInfo dispatchInfo;
     builder.buildDispatchInfos(dispatchInfo, dc);
 
     enqueueHandler<CL_COMMAND_WRITE_BUFFER>(

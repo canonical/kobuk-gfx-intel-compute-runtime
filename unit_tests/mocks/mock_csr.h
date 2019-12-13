@@ -37,8 +37,8 @@ class MockCsrBase : public UltCommandStreamReceiver<GfxFamily> {
 
     MockCsrBase() = delete;
 
-    MockCsrBase(int32_t &execStamp, ExecutionEnvironment &executionEnvironment)
-        : BaseUltCsrClass(executionEnvironment), executionStamp(&execStamp), flushTaskStamp(-1) {
+    MockCsrBase(int32_t &execStamp, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex)
+        : BaseUltCsrClass(executionEnvironment, rootDeviceIndex), executionStamp(&execStamp), flushTaskStamp(-1) {
     }
 
     void makeResident(GraphicsAllocation &gfxAllocation) override {
@@ -97,7 +97,7 @@ using MockCsrHw = MockCsrBase<GfxFamily>;
 template <typename GfxFamily>
 class MockCsrAub : public MockCsrBase<GfxFamily> {
   public:
-    MockCsrAub(int32_t &execStamp, ExecutionEnvironment &executionEnvironment) : MockCsrBase<GfxFamily>(execStamp, executionEnvironment) {}
+    MockCsrAub(int32_t &execStamp, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) : MockCsrBase<GfxFamily>(execStamp, executionEnvironment, rootDeviceIndex) {}
     CommandStreamReceiverType getType() override {
         return CommandStreamReceiverType::CSR_AUB;
     }
@@ -111,11 +111,11 @@ class MockCsr : public MockCsrBase<GfxFamily> {
 
     MockCsr() = delete;
     MockCsr(const HardwareInfo &hwInfoIn) = delete;
-    MockCsr(int32_t &execStamp, ExecutionEnvironment &executionEnvironment) : BaseClass(execStamp, executionEnvironment) {
+    MockCsr(int32_t &execStamp, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) : BaseClass(execStamp, executionEnvironment, rootDeviceIndex) {
     }
 
-    FlushStamp flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
-        return 0;
+    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
+        return true;
     }
 
     CompletionStamp flushTask(
@@ -153,11 +153,11 @@ class MockCsr : public MockCsrBase<GfxFamily> {
 template <typename GfxFamily>
 class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
   public:
-    using CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiverHw;
     using CommandStreamReceiverHw<GfxFamily>::flushStamp;
     using CommandStreamReceiverHw<GfxFamily>::programL3;
     using CommandStreamReceiverHw<GfxFamily>::csrSizeRequestFlags;
     using CommandStreamReceiverHw<GfxFamily>::programVFEState;
+    using CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiverHw;
     using CommandStreamReceiver::commandStream;
     using CommandStreamReceiver::dispatchMode;
     using CommandStreamReceiver::isPreambleSent;
@@ -168,6 +168,8 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
     using CommandStreamReceiver::taskCount;
     using CommandStreamReceiver::taskLevel;
     using CommandStreamReceiver::timestampPacketWriteEnabled;
+
+    MockCsrHw2(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) : CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiverHw(executionEnvironment, rootDeviceIndex) {}
 
     SubmissionAggregator *peekSubmissionAggregator() {
         return this->submissionAggregator.get();
@@ -183,12 +185,12 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
 
     bool peekMediaVfeStateDirty() const { return mediaVfeStateDirty; }
 
-    FlushStamp flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
+    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
         flushCalledCount++;
         recordedCommandBuffer->batchBuffer = batchBuffer;
         copyOfAllocations = allocationsForResidency;
         flushStamp->setStamp(flushStamp->peekStamp() + 1);
-        return flushStamp->peekStamp();
+        return true;
     }
 
     CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
@@ -213,10 +215,11 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
         return completionStamp;
     }
 
-    void blitBuffer(const BlitProperties &blitProperites) override {
+    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking) override {
         if (!skipBlitCalls) {
-            CommandStreamReceiverHw<GfxFamily>::blitBuffer(blitProperites);
+            return CommandStreamReceiverHw<GfxFamily>::blitBuffer(blitPropertiesContainer, blocking);
         }
+        return taskCount;
     }
 
     bool skipBlitCalls = false;
@@ -227,7 +230,7 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
     int flushCalledCount = 0;
     std::unique_ptr<CommandBuffer> recordedCommandBuffer = nullptr;
     ResidencyContainer copyOfAllocations;
-    DispatchFlags passedDispatchFlags = {};
+    DispatchFlags passedDispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
 };
 
 template <typename GfxFamily>
@@ -238,13 +241,14 @@ class MockFlatBatchBufferHelper : public FlatBatchBufferHelperHw<GfxFamily> {
     MOCK_METHOD1(removePatchInfoData, bool(uint64_t));
     MOCK_METHOD1(registerCommandChunk, bool(CommandChunk &));
     MOCK_METHOD2(registerBatchBufferStartAddress, bool(uint64_t, uint64_t));
-    MOCK_METHOD3(flattenBatchBuffer,
-                 GraphicsAllocation *(BatchBuffer &batchBuffer, size_t &sizeBatchBuffer, DispatchMode dispatchMode));
+    MOCK_METHOD4(flattenBatchBuffer,
+                 GraphicsAllocation *(uint32_t rootDeviceIndex, BatchBuffer &batchBuffer, size_t &sizeBatchBuffer, DispatchMode dispatchMode));
 };
 
 class MockCommandStreamReceiver : public CommandStreamReceiver {
   public:
     using CommandStreamReceiver::CommandStreamReceiver;
+    using CommandStreamReceiver::getDeviceIndex;
     using CommandStreamReceiver::internalAllocationStorage;
     using CommandStreamReceiver::latestFlushedTaskCount;
     using CommandStreamReceiver::latestSentTaskCount;
@@ -261,7 +265,7 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
         waitForCompletionWithTimeoutCalled++;
         return true;
     }
-    FlushStamp flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
+    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
 
     bool isMultiOsContextCapable() const { return multiOsContextCapable; }
 
@@ -275,16 +279,17 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
         DispatchFlags &dispatchFlags,
         Device &device) override;
 
-    void flushBatchedSubmissions() override {
+    bool flushBatchedSubmissions() override {
         if (flushBatchedSubmissionsCallCounter) {
             (*flushBatchedSubmissionsCallCounter)++;
         }
+        return true;
     }
 
     void waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool quickKmdSleep, bool forcePowerSavingMode) override {
     }
 
-    void blitBuffer(const BlitProperties &blitProperites) override{};
+    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking) override { return taskCount; };
 
     void setOSInterface(OSInterface *osInterface);
 

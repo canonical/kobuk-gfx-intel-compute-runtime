@@ -6,6 +6,7 @@
  */
 
 #include "core/helpers/aligned_memory.h"
+#include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/helpers/surface_formats.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
@@ -51,7 +52,9 @@ class ImageRedescribeTest : public testing::TestWithParam<std::tuple<size_t, uin
         auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
         image.reset(Image::create(
             &context,
+            MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
             flags,
+            0,
             surfaceFormat,
             &imageDesc,
             nullptr,
@@ -72,7 +75,7 @@ TEST_P(ImageRedescribeTest, givenImageWhenItIsRedescribedThenItContainsProperFor
     ASSERT_NE(nullptr, imageNew);
     ASSERT_NE(image, imageNew);
 
-    EXPECT_EQ(static_cast<cl_mem_flags>(CL_MEM_USE_HOST_PTR), imageNew->getFlags() & CL_MEM_USE_HOST_PTR);
+    EXPECT_EQ(static_cast<cl_mem_flags>(CL_MEM_USE_HOST_PTR), imageNew->getMemoryPropertiesFlags() & CL_MEM_USE_HOST_PTR);
     EXPECT_EQ(image->getCpuAddress(), imageNew->getCpuAddress());
     EXPECT_NE(static_cast<cl_channel_type>(CL_FLOAT), imageNew->getSurfaceFormatInfo().OCLImageFormat.image_channel_data_type);
     EXPECT_NE(static_cast<cl_channel_type>(CL_HALF_FLOAT), imageNew->getSurfaceFormatInfo().OCLImageFormat.image_channel_data_type);
@@ -189,7 +192,9 @@ TEST_P(ImageRedescribeTest, givenImageWithMaxSizesWhenItIsRedescribedThenNewImag
     cl_mem_flags flags = CL_MEM_READ_WRITE;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
     auto bigImage = std::unique_ptr<Image>(Image::create(&context,
+                                                         MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
                                                          flags,
+                                                         0,
                                                          surfaceFormat,
                                                          &imageDesc,
                                                          nullptr,

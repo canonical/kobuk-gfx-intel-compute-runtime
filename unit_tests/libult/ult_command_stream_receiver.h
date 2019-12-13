@@ -7,9 +7,11 @@
 
 #pragma once
 #include "runtime/command_stream/command_stream_receiver_hw.h"
+#include "runtime/device/device.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "runtime/os_interface/os_context.h"
+#include "unit_tests/helpers/dispatch_flags_helper.h"
 #include "unit_tests/mocks/mock_experimental_command_buffer.h"
 
 #include <map>
@@ -24,7 +26,6 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass = CommandStreamReceiverHw<GfxFamily>;
 
   public:
-    using BaseClass::deviceIndex;
     using BaseClass::dshState;
     using BaseClass::getScratchPatchAddress;
     using BaseClass::getScratchSpaceController;
@@ -34,6 +35,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::programPreamble;
     using BaseClass::programStateSip;
     using BaseClass::requiresInstructionCacheFlush;
+    using BaseClass::rootDeviceIndex;
     using BaseClass::sshState;
     using BaseClass::CommandStreamReceiver::bindingTableBaseAddressRequired;
     using BaseClass::CommandStreamReceiver::cleanupResources;
@@ -75,10 +77,10 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     virtual ~UltCommandStreamReceiver() override {
     }
 
-    UltCommandStreamReceiver(ExecutionEnvironment &executionEnvironment) : BaseClass(executionEnvironment), recursiveLockCounter(0) {
-    }
-    static CommandStreamReceiver *create(bool withAubDump, ExecutionEnvironment &executionEnvironment) {
-        return new UltCommandStreamReceiver<GfxFamily>(executionEnvironment);
+    UltCommandStreamReceiver(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) : BaseClass(executionEnvironment, rootDeviceIndex), recursiveLockCounter(0),
+                                                                                                     recordedDispatchFlags(DispatchFlagsHelper::createDefaultDispatchFlags()) {}
+    static CommandStreamReceiver *create(bool withAubDump, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) {
+        return new UltCommandStreamReceiver<GfxFamily>(executionEnvironment, rootDeviceIndex);
     }
 
     virtual GmmPageTableMngr *createPageTableManager() override {
@@ -91,7 +93,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         BaseClass::makeSurfacePackNonResident(allocationsForResidency);
     }
 
-    FlushStamp flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
+    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
         if (recordFlusheBatchBuffer) {
             latestFlushedBatchBuffer = batchBuffer;
         }
@@ -159,9 +161,9 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         aubCommentMessages.push_back(message);
         addAubCommentCalled = true;
     }
-    void flushBatchedSubmissions() override {
-        CommandStreamReceiverHw<GfxFamily>::flushBatchedSubmissions();
+    bool flushBatchedSubmissions() override {
         flushBatchedSubmissionsCalled = true;
+        return CommandStreamReceiverHw<GfxFamily>::flushBatchedSubmissions();
     }
     void initProgrammingFlags() override {
         CommandStreamReceiverHw<GfxFamily>::initProgrammingFlags();
@@ -173,16 +175,16 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         return CommandStreamReceiverHw<GfxFamily>::obtainUniqueOwnership();
     }
 
-    void blitBuffer(const BlitProperties &blitProperites) override {
+    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking) override {
         blitBufferCalled++;
-        CommandStreamReceiverHw<GfxFamily>::blitBuffer(blitProperites);
+        return CommandStreamReceiverHw<GfxFamily>::blitBuffer(blitPropertiesContainer, blocking);
     }
 
     bool createPerDssBackedBuffer(Device &device) override {
         createPerDssBackedBufferCalled++;
         bool result = BaseClass::createPerDssBackedBuffer(device);
         if (!perDssBackedBuffer) {
-            AllocationProperties properties{MemoryConstants::pageSize, GraphicsAllocation::AllocationType::INTERNAL_HEAP};
+            AllocationProperties properties{device.getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::INTERNAL_HEAP};
             perDssBackedBuffer = executionEnvironment.memoryManager->allocateGraphicsMemoryWithProperties(properties);
         }
         return result;

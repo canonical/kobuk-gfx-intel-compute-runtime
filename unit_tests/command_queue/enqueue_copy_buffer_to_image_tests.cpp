@@ -10,6 +10,7 @@
 #include "unit_tests/command_queue/enqueue_copy_buffer_to_image_fixture.h"
 #include "unit_tests/gen_common/gen_commands_common_validation.h"
 #include "unit_tests/helpers/unit_test_helper.h"
+#include "unit_tests/mocks/mock_buffer.h"
 #include "unit_tests/mocks/mock_builtin_dispatch_info_builder.h"
 #include "unit_tests/mocks/mock_builtins.h"
 
@@ -19,7 +20,7 @@
 
 using namespace NEO;
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, gpgpuWalker) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, WhenCopyingBufferToImageThenGpgpuWalkerIsCorrect) {
     typedef typename FamilyType::GPGPU_WALKER GPGPU_WALKER;
     enqueueCopyBufferToImage<FamilyType>();
 
@@ -39,7 +40,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, gpgpuWalker) {
     // Compute the SIMD lane mask
     size_t simd =
         cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16 : 8;
-    uint64_t simdMask = (1ull << simd) - 1;
+    uint64_t simdMask = maxNBitValue(simd);
 
     // Mask off lanes based on the execution masks
     auto laneMaskRight = cmd->getRightExecutionMask() & simdMask;
@@ -50,7 +51,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, gpgpuWalker) {
     }
 }
 
-HWTEST_F(EnqueueCopyBufferToImageTest, alignsToCSR) {
+HWTEST_F(EnqueueCopyBufferToImageTest, WhenCopyingBufferToImageThenTaskCountIsAlignedWithCsr) {
     //this test case assumes IOQ
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.taskCount = pCmdQ->taskCount + 100;
@@ -61,21 +62,21 @@ HWTEST_F(EnqueueCopyBufferToImageTest, alignsToCSR) {
     EXPECT_EQ(csr.peekTaskLevel(), pCmdQ->taskLevel + 1);
 }
 
-HWTEST_F(EnqueueCopyBufferToImageTest, bumpsTaskLevel) {
+HWTEST_F(EnqueueCopyBufferToImageTest, WhenCopyingBufferToImageThenTaskLevelIsIncremented) {
     auto taskLevelBefore = pCmdQ->taskLevel;
 
     EnqueueCopyBufferToImageHelper<>::enqueueCopyBufferToImage(pCmdQ, srcBuffer, dstImage);
     EXPECT_GT(pCmdQ->taskLevel, taskLevelBefore);
 }
 
-HWTEST_F(EnqueueCopyBufferToImageTest, addsCommands) {
+HWTEST_F(EnqueueCopyBufferToImageTest, WhenCopyingBufferToImageThenCommandsAreAdded) {
     auto usedCmdBufferBefore = pCS->getUsed();
 
     EnqueueCopyBufferToImageHelper<>::enqueueCopyBufferToImage(pCmdQ, srcBuffer, dstImage);
     EXPECT_NE(usedCmdBufferBefore, pCS->getUsed());
 }
 
-HWTEST_F(EnqueueCopyBufferToImageTest, addsIndirectData) {
+HWTEST_F(EnqueueCopyBufferToImageTest, WhenCopyingBufferToImageThenIndirectDataGetsAdded) {
     auto dshBefore = pDSH->getUsed();
     auto iohBefore = pIOH->getUsed();
     auto sshBefore = pSSH->getUsed();
@@ -86,18 +87,19 @@ HWTEST_F(EnqueueCopyBufferToImageTest, addsIndirectData) {
     EXPECT_NE(sshBefore, pSSH->getUsed());
 }
 
-HWTEST_F(EnqueueCopyBufferToImageTest, loadRegisterImmediateL3CNTLREG) {
+HWTEST_F(EnqueueCopyBufferToImageTest, WhenCopyingBufferToImageThenL3ProgrammingIsCorrect) {
     enqueueCopyBufferToImage<FamilyType>();
     validateL3Programming<FamilyType>(cmdList, itorWalker);
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, WhenEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueCopyBufferToImage<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pCmdQ->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    auto &ultCsr = this->pDevice->getUltCommandStreamReceiver<FamilyType>();
+    validateStateBaseAddress<FamilyType>(ultCsr.getMemoryManager()->getInternalHeapBaseAddress(ultCsr.rootDeviceIndex),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList, 0llu);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, mediaInterfaceDescriptorLoad) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, WhenCopyingBufferToImageThenMediaInterfaceDescriptorLoadIsCorrect) {
     typedef typename FamilyType::MEDIA_INTERFACE_DESCRIPTOR_LOAD MEDIA_INTERFACE_DESCRIPTOR_LOAD;
     typedef typename FamilyType::INTERFACE_DESCRIPTOR_DATA INTERFACE_DESCRIPTOR_DATA;
 
@@ -123,7 +125,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, mediaInterfaceDescript
     FamilyType::PARSE::template validateCommand<MEDIA_INTERFACE_DESCRIPTOR_LOAD *>(cmdList.begin(), itorMediaInterfaceDescriptorLoad);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, interfaceDescriptorData) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, WhenCopyingBufferToImageThenInterfaceDescriptorDataIsCorrect) {
     typedef typename FamilyType::STATE_BASE_ADDRESS STATE_BASE_ADDRESS;
     typedef typename FamilyType::INTERFACE_DESCRIPTOR_DATA INTERFACE_DESCRIPTOR_DATA;
 
@@ -141,7 +143,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, interfaceDescriptorDat
     auto localWorkSize = std::min(
         maxLocalSize, Image2dDefaults::imageDesc.image_width * Image2dDefaults::imageDesc.image_height);
     auto simd = 32u;
-    auto threadsPerThreadGroup = (localWorkSize + simd - 1) / simd;
+    auto threadsPerThreadGroup = Math::divideAndRoundUp(localWorkSize, simd);
     EXPECT_EQ(threadsPerThreadGroup, interfaceDescriptorData.getNumberOfThreadsInGpgpuThreadGroup());
     EXPECT_NE(0u, interfaceDescriptorData.getCrossThreadConstantDataReadLength());
     EXPECT_NE(0u, interfaceDescriptorData.getConstantIndirectUrbEntryReadLength());
@@ -150,7 +152,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, interfaceDescriptorDat
     EXPECT_NE(kernelStartPointer, interfaceDescriptorData.getBindingTablePointer());
 }
 
-HWTEST_F(EnqueueCopyBufferToImageTest, surfaceState) {
+HWTEST_F(EnqueueCopyBufferToImageTest, WhenCopyingBufferToImageThenSurfaceStateIsCorrect) {
     typedef typename FamilyType::RENDER_SURFACE_STATE RENDER_SURFACE_STATE;
 
     enqueueCopyBufferToImage<FamilyType>();
@@ -175,13 +177,13 @@ HWTEST_F(EnqueueCopyBufferToImageTest, surfaceState) {
     EXPECT_EQ(dstImage->getGraphicsAllocation()->getGpuAddress(), surfaceState.getSurfaceBaseAddress());
 }
 
-HWTEST_F(EnqueueCopyBufferToImageTest, pipelineSelect) {
+HWTEST_F(EnqueueCopyBufferToImageTest, WhenCopyingBufferToImageThenNumberOfPipelineSelectsIsOne) {
     enqueueCopyBufferToImage<FamilyType>();
     int numCommands = getNumberOfPipelineSelectsThatEnablePipelineSelect<FamilyType>();
     EXPECT_EQ(1, numCommands);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, mediaVFEState) {
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferToImageTest, WhenCopyingBufferToImageThenMediaVfeStateIsSetCorrectly) {
     enqueueCopyBufferToImage<FamilyType>();
     validateMediaVFEState<FamilyType>(&pDevice->getHardwareInfo(), cmdMediaVfeState, cmdList, itorMediaVfeState);
 }
@@ -271,3 +273,62 @@ HWTEST_P(MipMapCopyBufferToImageTest, GivenImageWithMipLevelNonZeroWhenCopyBuffe
 
 INSTANTIATE_TEST_CASE_P(MipMapCopyBufferToImageTest_GivenImageWithMipLevelNonZeroWhenCopyBufferToImageIsCalledThenProperMipLevelIsSet,
                         MipMapCopyBufferToImageTest, ::testing::Values(CL_MEM_OBJECT_IMAGE1D, CL_MEM_OBJECT_IMAGE1D_ARRAY, CL_MEM_OBJECT_IMAGE2D, CL_MEM_OBJECT_IMAGE2D_ARRAY, CL_MEM_OBJECT_IMAGE3D));
+
+struct EnqueueCopyBufferToImageHw : public ::testing::Test {
+
+    void SetUp() override {
+        if (is32bit) {
+            GTEST_SKIP();
+        }
+        device.reset(MockDevice::createWithNewExecutionEnvironment<MockDevice>(*platformDevices));
+        context = std::make_unique<MockContext>(device.get());
+        dstImage = std::unique_ptr<Image>(Image2dHelper<>::create(context.get()));
+    }
+
+    std::unique_ptr<MockDevice> device;
+    std::unique_ptr<MockContext> context;
+    std::unique_ptr<Image> dstImage;
+    MockBuffer srcBuffer;
+    uint64_t bigSize = 5ull * MemoryConstants::gigaByte;
+    uint64_t smallSize = 4ull * MemoryConstants::gigaByte - 1;
+    uint64_t bigOffset = 4ull * MemoryConstants::gigaByte;
+
+    const size_t dstOrigin[3] = {0, 0, 0};
+    const size_t region[3] = {4, 1, 1};
+};
+
+using EnqueueCopyBufferToImageStatelessTest = EnqueueCopyBufferToImageHw;
+
+HWTEST_F(EnqueueCopyBufferToImageStatelessTest, givenBigBufferWhenCopyingBufferToImageStatelessThenSuccessIsReturned) {
+    auto cmdQ = std::make_unique<CommandQueueStateless<FamilyType>>(context.get(), device.get());
+    srcBuffer.size = static_cast<size_t>(bigSize);
+    auto retVal = cmdQ->enqueueCopyBufferToImage(
+        &srcBuffer,
+        dstImage.get(),
+        static_cast<size_t>(bigOffset),
+        dstOrigin,
+        region,
+        0,
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+using EnqueueCopyBufferToImageStatefulTest = EnqueueCopyBufferToImageHw;
+
+HWTEST_F(EnqueueCopyBufferToImageStatefulTest, givenBigBufferWhenCopyingBufferToImageStatefulThenSuccessIsReturned) {
+    auto cmdQ = std::make_unique<CommandQueueStateful<FamilyType>>(context.get(), device.get());
+    srcBuffer.size = static_cast<size_t>(smallSize);
+    auto retVal = cmdQ->enqueueCopyBufferToImage(
+        &srcBuffer,
+        dstImage.get(),
+        0,
+        dstOrigin,
+        region,
+        0,
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}

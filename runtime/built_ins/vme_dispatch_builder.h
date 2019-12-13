@@ -38,8 +38,8 @@ class VmeBuiltinDispatchInfoBuilder : public BuiltinDispatchInfoBuilder {
     void getBlkTraits(const Vec3<size_t> &inGws, size_t &gwWidthInBlk, size_t &gwHeightInBlk) const {
         const size_t vmeMacroBlockWidth = 16;
         const size_t vmeMacroBlockHeight = 16;
-        gwWidthInBlk = (inGws.x + vmeMacroBlockWidth - 1) / vmeMacroBlockWidth;
-        gwHeightInBlk = (inGws.y + vmeMacroBlockHeight - 1) / vmeMacroBlockHeight;
+        gwWidthInBlk = Math::divideAndRoundUp(inGws.x, vmeMacroBlockWidth);
+        gwHeightInBlk = Math::divideAndRoundUp(inGws.y, vmeMacroBlockHeight);
     }
 
     bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, Kernel *kern,
@@ -57,7 +57,7 @@ class VmeBuiltinDispatchInfoBuilder : public BuiltinDispatchInfoBuilder {
         cl_int stride = height;
         size_t numThreadsX = gwWidthInBlk;
         const size_t simdWidth = vmeKernel->getKernelInfo().getMaxSimdSize();
-        stride = (height * width + (cl_int)numThreadsX - 1) / (cl_int)numThreadsX;
+        stride = static_cast<cl_int>(Math::divideAndRoundUp(height * width, numThreadsX));
 
         // update implicit args
         vmeKernel->setArg(heightArgNum, sizeof(height), &height);

@@ -7,7 +7,7 @@
 
 #include "runtime/os_interface/metrics_library.h"
 
-#include "runtime/helpers/hw_helper.h"
+#include "core/helpers/hw_helper.h"
 #include "runtime/os_interface/os_inc_base.h"
 
 namespace NEO {
@@ -53,6 +53,12 @@ bool MetricsLibrary::contextCreate(
     ClientData_1_0 &clientData,
     ContextCreateData_1_0 &createData,
     ContextHandle_1_0 &handle) {
+
+    MetricsLibraryApi::ClientOptionsData_1_0 clientOptions[1] = {};
+    clientOptions[0].Type = MetricsLibraryApi::ClientOptionsType::Compute;
+    clientOptions[0].Compute.Asynchronous = true;
+    clientData.ClientOptionsCount = 1;
+    clientData.ClientOptions = clientOptions;
 
     createData.Api = &api->functions;
     createData.ClientCallbacks = &api->callbacks;

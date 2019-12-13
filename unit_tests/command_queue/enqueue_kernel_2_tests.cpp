@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/helpers/hw_helper.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "core/unit_tests/utilities/base_object_utils.h"
 #include "runtime/command_stream/scratch_space_controller.h"
-#include "runtime/helpers/hw_helper.h"
 #include "runtime/memory_manager/allocations_list.h"
 #include "unit_tests/command_queue/enqueue_fixture.h"
 #include "unit_tests/fixtures/hello_world_fixture.h"
@@ -162,7 +162,7 @@ HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueWorkItemTests, GPGPUWalker) {
     // Compute the SIMD lane mask
     size_t simd =
         cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16 : 8;
-    uint64_t simdMask = (1ull << simd) - 1;
+    uint64_t simdMask = maxNBitValue(simd);
 
     // Mask off lanes based on the execution masks
     auto laneMaskRight = cmd->getRightExecutionMask() & simdMask;
@@ -183,9 +183,10 @@ HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueWorkItemTestsWithLimitedParamSet, LoadRegiste
 
 HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueWorkItemTestsWithLimitedParamSet, WhenEnqueueIsDoneThenStateBaseAddressIsProperlyProgrammed) {
     enqueueKernel<FamilyType>();
-    validateStateBaseAddress<FamilyType>(this->pDevice->getGpgpuCommandStreamReceiver().getMemoryManager()->getInternalHeapBaseAddress(),
+    auto &ultCsr = this->pDevice->getUltCommandStreamReceiver<FamilyType>();
+    validateStateBaseAddress<FamilyType>(ultCsr.getMemoryManager()->getInternalHeapBaseAddress(ultCsr.rootDeviceIndex),
                                          pDSH, pIOH, pSSH, itorPipelineSelect, itorWalker, cmdList,
-                                         context->getMemoryManager()->peekForce32BitAllocations() ? context->getMemoryManager()->getExternalHeapBaseAddress() : 0llu);
+                                         context->getMemoryManager()->peekForce32BitAllocations() ? context->getMemoryManager()->getExternalHeapBaseAddress(ultCsr.rootDeviceIndex) : 0llu);
 }
 
 HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueWorkItemTestsWithLimitedParamSet, MediaInterfaceDescriptorLoad) {
@@ -432,7 +433,7 @@ INSTANTIATE_TEST_CASE_P(EnqueueKernel,
 typedef EnqueueKernelTypeTest<int> EnqueueKernelWithScratch;
 
 HWTEST_P(EnqueueKernelWithScratch, GivenKernelRequiringScratchWhenItIsEnqueuedWithDifferentScratchSizesThenPreviousScratchAllocationIsMadeNonResidentPriorStoringOnResueList) {
-    auto mockCsr = new MockCsrHw<FamilyType>(*pDevice->executionEnvironment);
+    auto mockCsr = new MockCsrHw<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
     pDevice->resetCommandStreamReceiver(mockCsr);
 
     SPatchMediaVFEState mediaVFEstate;
@@ -507,7 +508,7 @@ HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueKernelWithScratch, givenDeviceForcing32bitAll
 
         auto GSHaddress = sba->getGeneralStateBaseAddress();
 
-        EXPECT_EQ(memoryManager->getExternalHeapBaseAddress(), GSHaddress);
+        EXPECT_EQ(memoryManager->getExternalHeapBaseAddress(graphicsAllocation->getRootDeviceIndex()), GSHaddress);
 
         //now re-try to see if SBA is not programmed
 
@@ -612,7 +613,7 @@ HWTEST_P(EnqueueKernelPrintfTest, GivenKernelWithPrintfBlockedByEventWhenEventUn
     // In scenarios with 32bit allocator and 64 bit tests this code won't work
     // due to inability to retrieve original buffer pointer as it is done in this test.
     auto memoryManager = pDevice->getMemoryManager();
-    if (!memoryManager->peekForce32BitAllocations() && !memoryManager->isLimitedRange()) {
+    if (!memoryManager->peekForce32BitAllocations() && !memoryManager->isLimitedRange(0)) {
         testing::internal::CaptureStdout();
 
         auto userEvent = make_releaseable<UserEvent>(context);
@@ -672,17 +673,19 @@ struct EnqueueAuxKernelTests : public EnqueueKernelTest {
     class MyCmdQ : public CommandQueueHw<FamilyType> {
       public:
         using CommandQueueHw<FamilyType>::commandStream;
+        using CommandQueueHw<FamilyType>::gpgpuEngine;
+        using CommandQueueHw<FamilyType>::bcsEngine;
         MyCmdQ(Context *context, Device *device) : CommandQueueHw<FamilyType>(context, device, nullptr) {}
-        void dispatchAuxTranslation(MultiDispatchInfo &multiDispatchInfo, MemObjsForAuxTranslation &memObjsForAuxTranslation,
-                                    AuxTranslationDirection auxTranslationDirection) override {
-            CommandQueueHw<FamilyType>::dispatchAuxTranslation(multiDispatchInfo, memObjsForAuxTranslation, auxTranslationDirection);
+        void dispatchAuxTranslationBuiltin(MultiDispatchInfo &multiDispatchInfo, AuxTranslationDirection auxTranslationDirection) override {
+            CommandQueueHw<FamilyType>::dispatchAuxTranslationBuiltin(multiDispatchInfo, auxTranslationDirection);
             auxTranslationDirections.push_back(auxTranslationDirection);
             Kernel *lastKernel = nullptr;
             for (const auto &dispatchInfo : multiDispatchInfo) {
                 lastKernel = dispatchInfo.getKernel();
                 dispatchInfos.emplace_back(dispatchInfo);
             }
-            dispatchAuxTranslationInputs.emplace_back(lastKernel, multiDispatchInfo.size(), memObjsForAuxTranslation, auxTranslationDirection);
+            dispatchAuxTranslationInputs.emplace_back(lastKernel, multiDispatchInfo.size(), *multiDispatchInfo.getMemObjsForAuxTranslation(),
+                                                      auxTranslationDirection);
         }
 
         void waitUntilComplete(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) override {
@@ -695,6 +698,13 @@ struct EnqueueAuxKernelTests : public EnqueueKernelTest {
         std::vector<std::tuple<Kernel *, size_t, MemObjsForAuxTranslation, AuxTranslationDirection>> dispatchAuxTranslationInputs;
         uint32_t waitCalled = 0;
     };
+
+    void SetUp() override {
+        DebugManager.flags.ForceAuxTranslationMode.set(static_cast<int32_t>(AuxTranslationMode::Builtin));
+        EnqueueKernelTest::SetUp();
+    }
+
+    DebugManagerStateRestore dbgRestore;
 };
 
 HWTEST_F(EnqueueAuxKernelTests, givenKernelWithRequiredAuxTranslationAndWithoutArgumentsWhenEnqueuedThenNoGuardKernelWithAuxTranslations) {
@@ -803,6 +813,38 @@ HWTEST_F(EnqueueAuxKernelTests, givenKernelWithRequiredAuxTranslationWhenEnqueue
     EXPECT_TRUE(kernelAfter->isBuiltIn);
 }
 
+HWTEST_F(EnqueueAuxKernelTests, givenDebugVariableDisablingBuiltinTranslationWhenDispatchingKernelWithRequiredAuxTranslationThenDontDispatch) {
+    DebugManager.flags.ForceAuxTranslationMode.set(static_cast<int32_t>(AuxTranslationMode::Blit));
+    pDevice->getUltCommandStreamReceiver<FamilyType>().timestampPacketWriteEnabled = true;
+
+    MockKernelWithInternals mockKernel(*pDevice, context);
+    MyCmdQ<FamilyType> cmdQ(context, pDevice);
+    cmdQ.bcsEngine = cmdQ.gpgpuEngine;
+
+    size_t gws[3] = {1, 0, 0};
+    MockBuffer buffer;
+    cl_mem clMem = &buffer;
+
+    buffer.getGraphicsAllocation()->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
+    mockKernel.kernelInfo.kernelArgInfo.resize(1);
+    mockKernel.kernelInfo.kernelArgInfo.at(0).kernelArgPatchInfoVector.resize(1);
+    mockKernel.kernelInfo.kernelArgInfo.at(0).pureStatefulBufferAccess = false;
+    mockKernel.mockKernel->initialize();
+    mockKernel.mockKernel->auxTranslationRequired = true;
+    mockKernel.mockKernel->setArgBuffer(0, sizeof(cl_mem *), &clMem);
+
+    cmdQ.enqueueKernel(mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(2u, cmdQ.dispatchAuxTranslationInputs.size());
+
+    // aux builtin not dispatched before NDR
+    EXPECT_EQ(0u, std::get<size_t>(cmdQ.dispatchAuxTranslationInputs.at(0)));
+
+    // only NDR is dispatched
+    EXPECT_EQ(1u, std::get<size_t>(cmdQ.dispatchAuxTranslationInputs.at(1)));
+    auto kernel = std::get<Kernel *>(cmdQ.dispatchAuxTranslationInputs.at(1));
+    EXPECT_FALSE(kernel->isBuiltIn);
+}
+
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueKernelTest, givenCacheFlushAfterWalkerEnabledWhenAllocationRequiresCacheFlushThenFlushCommandPresentAfterWalker) {
     using GPGPU_WALKER = typename FamilyType::GPGPU_WALKER;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
@@ -849,5 +891,18 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueAuxKernelTests, givenParentKernelWhenAuxTrans
         parentKernel->auxTranslationRequired = true;
         cmdQ.enqueueKernel(parentKernel.get(), 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
         EXPECT_EQ(1u, cmdQ.waitCalled);
+    }
+}
+
+HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueAuxKernelTests, givenParentKernelButNoDeviceQueueWhenEnqueueIsCalledItReturnsInvalidOperation) {
+    if (pDevice->getSupportedClVersion() >= 20) {
+        MyCmdQ<FamilyType> cmdQ(context, pDevice);
+        size_t gws[3] = {1, 0, 0};
+
+        std::unique_ptr<MockParentKernel> parentKernel(MockParentKernel::create(*context, false, false, false, false, false));
+        parentKernel->initialize();
+
+        auto status = cmdQ.enqueueKernel(parentKernel.get(), 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+        EXPECT_EQ(CL_INVALID_OPERATION, status);
     }
 }

@@ -543,6 +543,35 @@ TEST(SubmissionsAggregator, givenMultipleOsContextsWhenAggregatingGraphicsAlloca
     }
 }
 
+TEST(SubmissionsAggregator, givenCommandBuffersRequiringDifferentSliceCountSettingWhenAggregateIsCalledThenTheyAreNotAgggregated) {
+    MockSubmissionAggregator submissionsAggregator;
+
+    std::unique_ptr<Device> device(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
+    CommandBuffer *cmdBuffer = new CommandBuffer(*device);
+    CommandBuffer *cmdBuffer2 = new CommandBuffer(*device);
+
+    MockGraphicsAllocation alloc1(nullptr, 1);
+    MockGraphicsAllocation alloc7(nullptr, 7);
+
+    cmdBuffer->batchBuffer.sliceCount = 1;
+    cmdBuffer2->batchBuffer.sliceCount = 2;
+
+    cmdBuffer->surfaces.push_back(&alloc1);
+    cmdBuffer2->surfaces.push_back(&alloc7);
+
+    submissionsAggregator.recordCommandBuffer(cmdBuffer);
+    submissionsAggregator.recordCommandBuffer(cmdBuffer2);
+
+    ResourcePackage resourcePackage;
+    size_t totalUsedSize = 0;
+    size_t totalMemoryBudget = 200;
+    submissionsAggregator.aggregateCommandBuffers(resourcePackage, totalUsedSize, totalMemoryBudget, 0u);
+    EXPECT_EQ(1u, totalUsedSize);
+    EXPECT_EQ(1u, resourcePackage.size());
+    EXPECT_NE(cmdBuffer->inspectionId, cmdBuffer2->inspectionId);
+    EXPECT_EQ(1u, cmdBuffer->inspectionId);
+}
+
 struct SubmissionsAggregatorTests : public ::testing::Test {
     void SetUp() override {
         device.reset(MockDevice::createWithNewExecutionEnvironment<MockDevice>(platformDevices[0]));
@@ -562,7 +591,7 @@ HWTEST_F(SubmissionsAggregatorTests, givenMultipleQueuesWhenCmdBuffersAreRecorde
     MockKernelWithInternals kernel(*device.get());
     CommandQueueHw<FamilyType> cmdQ1(context.get(), device.get(), 0);
     CommandQueueHw<FamilyType> cmdQ2(context.get(), device.get(), 0);
-    auto mockCsr = new MockCsrHw2<FamilyType>(*device->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*device->executionEnvironment, device->getRootDeviceIndex());
     size_t GWS = 1;
 
     overrideCsr(mockCsr);
@@ -594,7 +623,7 @@ HWTEST_F(SubmissionsAggregatorTests, givenMultipleQueuesWhenCmdBuffersAreRecorde
 HWTEST_F(SubmissionsAggregatorTests, givenCmdQueueWhenCmdBufferWithEventIsRecordedThenAssignFlushStampObjForEveryone) {
     MockKernelWithInternals kernel(*device.get());
     CommandQueueHw<FamilyType> cmdQ1(context.get(), device.get(), 0);
-    auto mockCsr = new MockCsrHw2<FamilyType>(*device->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*device->executionEnvironment, device->getRootDeviceIndex());
     size_t GWS = 1;
 
     overrideCsr(mockCsr);
@@ -620,7 +649,7 @@ HWTEST_F(SubmissionsAggregatorTests, givenMultipleCmdBuffersWhenFlushThenUpdateA
     MockKernelWithInternals kernel(*device.get());
     CommandQueueHw<FamilyType> cmdQ1(context.get(), device.get(), 0);
     CommandQueueHw<FamilyType> cmdQ2(context.get(), device.get(), 0);
-    auto mockCsr = new MockCsrHw2<FamilyType>(*device->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*device->executionEnvironment, device->getRootDeviceIndex());
     size_t GWS = 1;
 
     overrideCsr(mockCsr);
@@ -647,7 +676,7 @@ HWTEST_F(SubmissionsAggregatorTests, givenMultipleCmdBuffersWhenNotAggregatedDur
     MockKernelWithInternals kernel(*device.get());
     CommandQueueHw<FamilyType> cmdQ1(context.get(), device.get(), 0);
     CommandQueueHw<FamilyType> cmdQ2(context.get(), device.get(), 0);
-    auto mockCsr = new MockCsrHw2<FamilyType>(*device->executionEnvironment);
+    auto mockCsr = new MockCsrHw2<FamilyType>(*device->executionEnvironment, device->getRootDeviceIndex());
     size_t GWS = 1;
 
     overrideCsr(mockCsr);

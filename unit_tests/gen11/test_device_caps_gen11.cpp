@@ -5,7 +5,7 @@
  *
  */
 
-#include "runtime/helpers/hw_helper.h"
+#include "core/helpers/hw_helper.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
 
@@ -103,6 +103,10 @@ GEN11TEST_F(Gen11DeviceCaps, givenGen11WhenCheckSupportCacheFlushAfterWalkerThen
 
 GEN11TEST_F(Gen11DeviceCaps, givenGen11WhenCheckBlitterOperationsSupportThenReturnFalse) {
     EXPECT_FALSE(pDevice->getHardwareInfo().capabilityTable.blitterOperationsSupported);
+}
+
+GEN11TEST_F(Gen11DeviceCaps, givenGen11WhenCheckingImageSupportThenReturnTrue) {
+    EXPECT_TRUE(pDevice->getHardwareInfo().capabilityTable.supportsImages);
 }
 
 typedef Test<DeviceFixture> IclLpUsDeviceIdTest;

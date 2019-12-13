@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "runtime/gmm_helper/gmm_lib.h"
+#include "core/gmm_helper/gmm_lib.h"
 
 #include "sku_info.h"
 
@@ -165,6 +165,7 @@ struct SkuInfoBaseReference {
         refWaTable.waLimit128BMediaCompr = 1;
         refWaTable.waUntypedBufferCompression = 1;
         refWaTable.waAuxTable16KGranular = 1;
+        refWaTable.waDisableFusedThreadScheduling = true;
     }
 }; // namespace SkuInfoBaseReference
 } // namespace NEO

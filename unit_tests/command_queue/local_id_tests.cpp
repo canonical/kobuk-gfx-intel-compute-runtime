@@ -6,6 +6,7 @@
  */
 
 #include "core/helpers/aligned_memory.h"
+#include "core/helpers/basic_math.h"
 #include "core/helpers/ptr_math.h"
 #include "runtime/command_queue/local_id_gen.h"
 
@@ -56,6 +57,12 @@ TEST(LocalID, PerThreadSizeLocalIDs_SIMD32) {
 
     // 3 channels (x,y,z) * 2 GRFs per thread (@SIMD32)
     EXPECT_EQ(6 * sizeof(GRF), getPerThreadSizeLocalIDs(simd));
+}
+
+TEST(LocalID, PerThreadSizeLocalIDs_SIMD1) {
+    uint32_t simd = 1;
+
+    EXPECT_EQ(sizeof(GRF), getPerThreadSizeLocalIDs(simd));
 }
 
 struct LocalIDFixture : public ::testing::TestWithParam<std::tuple<int, int, int, int>> {
@@ -197,7 +204,7 @@ struct LocalIDFixture : public ::testing::TestWithParam<std::tuple<int, int, int
 
     void dumpBuffer(uint32_t simd, uint32_t lwsX, uint32_t lwsY, uint32_t lwsZ) {
         auto workSize = lwsX * lwsY * lwsZ;
-        auto threads = (workSize + simd - 1) / simd;
+        auto threads = Math::divideAndRoundUp(workSize, simd);
 
         auto pBuffer = buffer;
 
@@ -278,7 +285,7 @@ TEST_P(LocalIDFixture, sizeCalculationLocalIDs) {
     EXPECT_EQ(0u, sizeTotalPerThreadData % sizeGRF);
 
     auto numGRFsPerThread = (simd == 32) ? 2 : 1;
-    auto numThreadsExpected = (workItems + simd - 1) / simd;
+    auto numThreadsExpected = Math::divideAndRoundUp(workItems, simd);
     auto numGRFsExpected = 3 * numGRFsPerThread * numThreadsExpected;
     EXPECT_EQ(numGRFsExpected * sizeGRF, sizeTotalPerThreadData);
 }

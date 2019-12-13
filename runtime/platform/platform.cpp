@@ -7,11 +7,13 @@
 
 #include "platform.h"
 
+#include "core/compiler_interface/compiler_interface.h"
+#include "core/execution_environment/root_device_environment.h"
 #include "core/helpers/debug_helpers.h"
+#include "core/helpers/hw_helper.h"
 #include "core/helpers/string.h"
 #include "runtime/api/api.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/compiler_interface/compiler_interface.h"
 #include "runtime/device/root_device.h"
 #include "runtime/event/async_events_handler.h"
 #include "runtime/execution_environment/execution_environment.h"
@@ -19,7 +21,6 @@
 #include "runtime/gtpin/gtpin_notify.h"
 #include "runtime/helpers/built_ins_helper.h"
 #include "runtime/helpers/get_info.h"
-#include "runtime/helpers/hw_helper.h"
 #include "runtime/helpers/options.h"
 #include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/os_interface/device_factory.h"
@@ -146,12 +147,10 @@ bool Platform::initialize() {
     this->platformInfo.reset(new PlatformInfo);
 
     this->devices.resize(numDevicesReturned);
-    auto deviceIndex = 0u;
     for (uint32_t deviceOrdinal = 0; deviceOrdinal < numDevicesReturned; ++deviceOrdinal) {
-        auto pDevice = Device::create<RootDevice>(executionEnvironment, deviceIndex++);
+        auto pDevice = createRootDevice(deviceOrdinal);
         DEBUG_BREAK_IF(!pDevice);
         if (pDevice) {
-            deviceIndex += pDevice->getNumSubDevices();
             this->devices[deviceOrdinal] = pDevice;
 
             this->platformInfo->extensions = pDevice->getDeviceInfo().deviceExtensions;
@@ -173,7 +172,6 @@ bool Platform::initialize() {
             return false;
         }
     }
-    executionEnvironment->initializeSpecialCommandStreamReceiver();
 
     auto hwInfo = executionEnvironment->getHardwareInfo();
 
@@ -186,11 +184,11 @@ bool Platform::initialize() {
     CommandStreamReceiverType csrType = this->devices[0]->getDefaultEngine().commandStreamReceiver->getType();
     if (csrType != CommandStreamReceiverType::CSR_HW) {
         auto enableLocalMemory = HwHelper::get(hwInfo->platform.eRenderCoreFamily).getEnableLocalMemory(*hwInfo);
-        executionEnvironment->initAubCenter(enableLocalMemory, "aubfile", csrType);
+        executionEnvironment->rootDeviceEnvironments[0]->initAubCenter(enableLocalMemory, "aubfile", csrType);
     }
 
     this->fillGlobalDispatchTable();
-    DEBUG_BREAK_IF(DebugManager.flags.CreateMultipleDevices.get() > 1 && !this->devices[0]->getDefaultEngine().commandStreamReceiver->peekTimestampPacketWriteEnabled());
+    DEBUG_BREAK_IF(DebugManager.flags.CreateMultipleRootDevices.get() > 1 && !this->devices[0]->getDefaultEngine().commandStreamReceiver->peekTimestampPacketWriteEnabled());
     state = StateInited;
     return true;
 }
@@ -250,6 +248,10 @@ AsyncEventsHandler *Platform::getAsyncEventsHandler() {
 std::unique_ptr<AsyncEventsHandler> Platform::setAsyncEventsHandler(std::unique_ptr<AsyncEventsHandler> handler) {
     asyncEventsHandler.swap(handler);
     return handler;
+}
+
+RootDevice *Platform::createRootDevice(uint32_t rootDeviceIndex) const {
+    return Device::create<RootDevice>(executionEnvironment, rootDeviceIndex);
 }
 
 } // namespace NEO

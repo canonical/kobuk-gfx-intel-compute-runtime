@@ -48,6 +48,55 @@ void initializeTestedDevice() {
     }
 }
 
+int openRetVal = 0;
+int testOpen(const char *fullPath, int, ...) {
+    return openRetVal;
+};
+
+TEST(DrmTest, GivenSelectedNotExistingDeviceWhenGetDeviceFdThenFail) {
+    DebugManagerStateRestore stateRestore;
+    DebugManager.flags.ForceDeviceId.set("1234");
+    struct DrmTest : public NEO::Drm {
+        using NEO::Drm::getDeviceFd;
+    };
+    VariableBackup<decltype(openFull)> backupOpenFull(&openFull);
+    openFull = testOpen;
+    openRetVal = -1;
+    int fd = DrmTest::getDeviceFd(0);
+    EXPECT_EQ(fd, -1);
+}
+
+TEST(DrmTest, GivenSelectedExistingDeviceWhenGetDeviceFdThenReturnFd) {
+    DebugManagerStateRestore stateRestore;
+    DebugManager.flags.ForceDeviceId.set("1234");
+    struct DrmTest : public NEO::Drm {
+        using NEO::Drm::getDeviceFd;
+    };
+    VariableBackup<decltype(openFull)> backupOpenFull(&openFull);
+    openRetVal = 1023; // fakeFd
+    openFull = testOpen;
+    int fd = DrmTest::getDeviceFd(0);
+    EXPECT_NE(fd, -1);
+}
+
+TEST(DrmTest, GivenSelectedIncorectDeviceWhenGetDeviceFdThenFail) {
+    DebugManagerStateRestore stateRestore;
+    DebugManager.flags.ForceDeviceId.set("1234");
+    struct DrmTest : public NEO::Drm {
+        using NEO::Drm::getDeviceFd;
+    };
+    VariableBackup<decltype(openFull)> backupOpenFull(&openFull);
+    VariableBackup<decltype(Drm::pIsi915Version)> backupIsi915Version(&Drm::pIsi915Version);
+    VariableBackup<decltype(Drm::pClose)> backupClose(&Drm::pClose);
+    openFull = testOpen;
+    openRetVal = 1023;
+    Drm::pIsi915Version = [](int x) -> bool { return false; };
+    Drm::pClose = [](int x) -> int { return 0; };
+
+    int fd = DrmTest::getDeviceFd(0);
+    EXPECT_EQ(fd, -1);
+}
+
 TEST_F(DrmTests, getReturnsNull) {
     auto drm = Drm::get(0);
     EXPECT_EQ(drm, nullptr);
@@ -194,6 +243,22 @@ TEST_F(DrmTests, failOnDeviceId) {
     EXPECT_EQ(drm, nullptr);
 }
 
+TEST_F(DrmTests, failOnEuTotal) {
+    VariableBackup<decltype(failOnEuTotal)> backupfailOnEuTotal(&failOnEuTotal);
+    failOnEuTotal = -1;
+
+    auto drm = DrmWrap::createDrm(0);
+    EXPECT_EQ(drm, nullptr);
+}
+
+TEST_F(DrmTests, failOnSubsliceTotal) {
+    VariableBackup<decltype(failOnSubsliceTotal)> backupfailOnSubsliceTotal(&failOnSubsliceTotal);
+    failOnSubsliceTotal = -1;
+
+    auto drm = DrmWrap::createDrm(0);
+    EXPECT_EQ(drm, nullptr);
+}
+
 TEST_F(DrmTests, failOnRevisionId) {
     VariableBackup<decltype(failOnRevisionId)> backupFailOnRevisionId(&failOnRevisionId);
     failOnRevisionId = -1;
@@ -217,86 +282,6 @@ TEST_F(DrmTests, failOnParamBoost) {
     auto drm = DrmWrap::createDrm(0);
     //non-fatal error - issue warning only
     EXPECT_NE(drm, nullptr);
-}
-
-#ifdef TESTS_BDW
-TEST_F(DrmTests, givenKernelNotSupportingTurboPatchWhenBdwDeviceIsCreatedThenSimplifiedMocsSelectionIsFalse) {
-    VariableBackup<decltype(deviceId)> backupDeviceId(&deviceId);
-    VariableBackup<decltype(failOnParamBoost)> backupFailOnParamBoost(&failOnParamBoost);
-
-    deviceId = IBDW_GT3_WRK_DEVICE_F0_ID;
-    failOnParamBoost = -1;
-    auto drm = DrmWrap::createDrm(0);
-    EXPECT_NE(drm, nullptr);
-    EXPECT_FALSE(drm->getSimplifiedMocsTableUsage());
-}
-#endif
-
-#ifdef TESTS_SKL
-TEST_F(DrmTests, givenKernelNotSupportingTurboPatchWhenSklDeviceIsCreatedThenSimplifiedMocsSelectionIsTrue) {
-    VariableBackup<decltype(deviceId)> backupDeviceId(&deviceId);
-    VariableBackup<decltype(failOnParamBoost)> backupFailOnParamBoost(&failOnParamBoost);
-
-    deviceId = ISKL_GT2_DT_DEVICE_F0_ID;
-    failOnParamBoost = -1;
-    auto drm = DrmWrap::createDrm(0);
-    EXPECT_NE(drm, nullptr);
-    EXPECT_TRUE(drm->getSimplifiedMocsTableUsage());
-}
-#endif
-#ifdef TESTS_KBL
-TEST_F(DrmTests, givenKernelNotSupportingTurboPatchWhenKblDeviceIsCreatedThenSimplifiedMocsSelectionIsTrue) {
-    VariableBackup<decltype(deviceId)> backupDeviceId(&deviceId);
-    VariableBackup<decltype(failOnParamBoost)> backupFailOnParamBoost(&failOnParamBoost);
-
-    deviceId = IKBL_GT1_ULT_DEVICE_F0_ID;
-    failOnParamBoost = -1;
-    auto drm = DrmWrap::createDrm(0);
-    EXPECT_NE(drm, nullptr);
-    EXPECT_TRUE(drm->getSimplifiedMocsTableUsage());
-}
-#endif
-#ifdef TESTS_BXT
-TEST_F(DrmTests, givenKernelNotSupportingTurboPatchWhenBxtDeviceIsCreatedThenSimplifiedMocsSelectionIsTrue) {
-    VariableBackup<decltype(deviceId)> backupDeviceId(&deviceId);
-    VariableBackup<decltype(failOnParamBoost)> backupFailOnParamBoost(&failOnParamBoost);
-
-    deviceId = IBXT_X_DEVICE_F0_ID;
-    failOnParamBoost = -1;
-    auto drm = DrmWrap::createDrm(0);
-    EXPECT_NE(drm, nullptr);
-    EXPECT_TRUE(drm->getSimplifiedMocsTableUsage());
-}
-#endif
-#ifdef TESTS_GLK
-TEST_F(DrmTests, givenKernelNotSupportingTurboPatchWhenGlkDeviceIsCreatedThenSimplifiedMocsSelectionIsTrue) {
-    VariableBackup<decltype(deviceId)> backupDeviceId(&deviceId);
-    VariableBackup<decltype(failOnParamBoost)> backupFailOnParamBoost(&failOnParamBoost);
-
-    deviceId = IGLK_GT2_ULT_18EU_DEVICE_F0_ID;
-    failOnParamBoost = -1;
-    auto drm = DrmWrap::createDrm(0);
-    EXPECT_NE(drm, nullptr);
-    EXPECT_TRUE(drm->getSimplifiedMocsTableUsage());
-}
-#endif
-#ifdef TESTS_CFL
-TEST_F(DrmTests, givenKernelNotSupportingTurboPatchWhenCflDeviceIsCreatedThenSimplifiedMocsSelectionIsTrue) {
-    VariableBackup<decltype(deviceId)> backupDeviceId(&deviceId);
-    VariableBackup<decltype(failOnParamBoost)> backupFailOnParamBoost(&failOnParamBoost);
-
-    deviceId = ICFL_GT1_S61_DT_DEVICE_F0_ID;
-    failOnParamBoost = -1;
-    auto drm = DrmWrap::createDrm(0);
-    EXPECT_NE(drm, nullptr);
-    EXPECT_TRUE(drm->getSimplifiedMocsTableUsage());
-}
-#endif
-
-TEST_F(DrmTests, givenKernelSupportingTurboPatchWhenDeviceIsCreatedThenSimplifiedMocsSelectionIsFalse) {
-    auto drm = DrmWrap::createDrm(0);
-    EXPECT_NE(drm, nullptr);
-    EXPECT_FALSE(drm->getSimplifiedMocsTableUsage());
 }
 
 TEST_F(DrmTests, failOnContextCreate) {
@@ -357,8 +342,18 @@ TEST_F(DrmTests, failOnInvalidDeviceName) {
     EXPECT_EQ(drm, nullptr);
 }
 
+TEST_F(DrmTests, whenDrmIsCreatedThenSetMemoryRegionsDoesntFailAndDrmObjectIsReturned) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.EnableLocalMemory.set(1);
+
+    auto drm = DrmWrap::createDrm(0);
+    EXPECT_NE(drm, nullptr);
+
+    DrmWrap::closeDevice(0);
+}
+
 TEST(AllocatorHelper, givenExpectedSizeToReserveWhenGetSizeToReserveCalledThenExpectedValueReturned) {
-    EXPECT_EQ((maxNBitValue<47> + 1) / 4, NEO::getSizeToReserve());
+    EXPECT_EQ((maxNBitValue(47) + 1) / 4, NEO::getSizeToReserve());
 }
 
 TEST(DrmMemoryManagerCreate, whenCallCreateMemoryManagerThenDrmMemoryManagerIsCreated) {

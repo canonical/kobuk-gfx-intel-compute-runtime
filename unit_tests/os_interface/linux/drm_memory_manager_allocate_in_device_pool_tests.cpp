@@ -39,7 +39,7 @@ TEST(DrmMemoryManagerSimpleTest, givenDrmMemoryManagerWhenLockResourceIsCalledOn
     MockExecutionEnvironment executionEnvironment(*platformDevices);
     executionEnvironment.osInterface = std::make_unique<OSInterface>();
     TestedDrmMemoryManager memoryManager(executionEnvironment);
-    DrmAllocation drmAllocation(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, nullptr, 0u, 0u, MemoryPool::LocalMemory);
+    DrmAllocation drmAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, nullptr, 0u, 0u, MemoryPool::LocalMemory);
 
     auto ptr = memoryManager.lockResourceInLocalMemoryImpl(drmAllocation.getBO());
     EXPECT_EQ(nullptr, ptr);
@@ -52,7 +52,7 @@ TEST(DrmMemoryManagerSimpleTest, givenDrmMemoryManagerWhenFreeGraphicsMemoryIsCa
     executionEnvironment.osInterface = std::make_unique<OSInterface>();
     TestedDrmMemoryManager memoryManager(executionEnvironment);
 
-    auto drmAllocation = new DrmAllocation(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, nullptr, 0u, 0u, MemoryPool::LocalMemory);
+    auto drmAllocation = new DrmAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, nullptr, 0u, 0u, MemoryPool::LocalMemory);
     EXPECT_NE(nullptr, drmAllocation);
 
     memoryManager.freeGraphicsMemoryImpl(drmAllocation);
@@ -61,7 +61,7 @@ TEST(DrmMemoryManagerSimpleTest, givenDrmMemoryManagerWhenFreeGraphicsMemoryIsCa
 using DrmMemoryManagerWithLocalMemoryTest = Test<DrmMemoryManagerWithLocalMemoryFixture>;
 
 TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenDrmMemoryManagerWithLocalMemoryWhenLockResourceIsCalledOnAllocationInLocalMemoryThenReturnNullPtr) {
-    DrmAllocation drmAllocation(GraphicsAllocation::AllocationType::UNKNOWN, nullptr, nullptr, 0u, 0u, MemoryPool::LocalMemory);
+    DrmAllocation drmAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, nullptr, 0u, 0u, MemoryPool::LocalMemory);
 
     auto ptr = memoryManager->lockResource(&drmAllocation);
     EXPECT_EQ(nullptr, ptr);
@@ -78,7 +78,7 @@ TEST_F(DrmMemoryManagerTest, givenDrmMemoryManagerWhenCopyMemoryToAllocationThen
 
     std::vector<uint8_t> dataToCopy(MemoryConstants::pageSize, 1u);
 
-    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties({dataToCopy.size(), GraphicsAllocation::AllocationType::BUFFER});
+    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties({0, dataToCopy.size(), GraphicsAllocation::AllocationType::BUFFER});
     ASSERT_NE(nullptr, allocation);
 
     auto ret = memoryManager->copyMemoryToAllocation(allocation, dataToCopy.data(), dataToCopy.size());

@@ -39,7 +39,7 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     using DrmMemoryManager::createGraphicsAllocation;
     using DrmMemoryManager::drm;
     using DrmMemoryManager::getDefaultDrmContextId;
-    using DrmMemoryManager::gfxPartition;
+    using DrmMemoryManager::gfxPartitions;
     using DrmMemoryManager::lockResourceInLocalMemoryImpl;
     using DrmMemoryManager::pinThreshold;
     using DrmMemoryManager::releaseGpuRange;
@@ -48,6 +48,7 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     using DrmMemoryManager::supportsMultiStorageResources;
     using DrmMemoryManager::unlockResourceInLocalMemoryImpl;
     using MemoryManager::allocateGraphicsMemoryInDevicePool;
+    using MemoryManager::registeredEngines;
     using MemoryManager::useInternal32BitAllocator;
 
     TestedDrmMemoryManager(ExecutionEnvironment &executionEnvironment) : MemoryManagerCreate(gemCloseWorkerMode::gemCloseWorkerInactive,
@@ -83,8 +84,8 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     }
 
     DrmGemCloseWorker *getgemCloseWorker() { return this->gemCloseWorker.get(); }
-    void forceLimitedRangeAllocator(uint64_t range) { gfxPartition->init(range, getSizeToReserve()); }
-    void overrideGfxPartition(GfxPartition *newGfxPartition) { gfxPartition.reset(newGfxPartition); }
+    void forceLimitedRangeAllocator(uint64_t range) { getGfxPartition(0)->init(range, getSizeToReserve(), 0); }
+    void overrideGfxPartition(GfxPartition *newGfxPartition) { gfxPartitions[0].reset(newGfxPartition); }
 
     DrmAllocation *allocate32BitGraphicsMemory(size_t size, const void *ptr, GraphicsAllocation::AllocationType allocationType) {
         bool allocateMemory = ptr == nullptr;

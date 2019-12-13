@@ -6,12 +6,12 @@
  */
 
 #include "core/helpers/ptr_math.h"
+#include "core/memory_manager/unified_memory_manager.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/memory_manager/surface.h"
-#include "runtime/memory_manager/unified_memory_manager.h"
 #include "test.h"
 #include "unit_tests/fixtures/buffer_fixture.h"
 #include "unit_tests/fixtures/context_fixture.h"
@@ -221,7 +221,7 @@ TEST_F(BufferSetArgTest, givenBufferWhenOffsetedSubbufferIsPassedToSetKernelArgT
     region.origin = 0xc0;
     region.size = 32;
     cl_int error = 0;
-    auto subBuffer = buffer->createSubBuffer(buffer->getFlags(), &region, error);
+    auto subBuffer = buffer->createSubBuffer(buffer->getMemoryPropertiesFlags(), buffer->getMemoryPropertiesFlagsIntel(), &region, error);
 
     ASSERT_NE(nullptr, subBuffer);
 
@@ -291,7 +291,7 @@ TEST_F(BufferSetArgTest, clSetKernelArgSVMPointer) {
     if (!pDevice->getHardwareInfo().capabilityTable.ftrSvm) {
         GTEST_SKIP();
     }
-    void *ptrSVM = pContext->getSVMAllocsManager()->createSVMAlloc(256, {});
+    void *ptrSVM = pContext->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {});
     EXPECT_NE(nullptr, ptrSVM);
 
     auto svmData = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSVM);

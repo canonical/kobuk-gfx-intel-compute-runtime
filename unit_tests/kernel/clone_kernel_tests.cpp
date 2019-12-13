@@ -5,12 +5,12 @@
  *
  */
 
+#include "core/memory_manager/unified_memory_manager.h"
 #include "runtime/accelerators/intel_accelerator.h"
 #include "runtime/accelerators/intel_motion_estimation.h"
 #include "runtime/helpers/sampler_helpers.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/mem_obj/pipe.h"
-#include "runtime/memory_manager/unified_memory_manager.h"
 #include "test.h"
 #include "unit_tests/fixtures/context_fixture.h"
 #include "unit_tests/fixtures/device_fixture.h"
@@ -512,7 +512,7 @@ TEST_F(CloneKernelTest, cloneKernelWithExecInfo) {
     if (!pDevice->getHardwareInfo().capabilityTable.ftrSvm) {
         GTEST_SKIP();
     }
-    void *ptrSVM = pContext->getSVMAllocsManager()->createSVMAlloc(256, {});
+    void *ptrSVM = pContext->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {});
     ASSERT_NE(nullptr, ptrSVM);
 
     auto svmData = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSVM);

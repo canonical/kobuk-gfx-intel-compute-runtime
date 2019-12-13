@@ -11,6 +11,7 @@
 #include <iostream>
 
 int (*c_open)(const char *pathname, int flags, ...) = nullptr;
+int (*openFull)(const char *pathname, int flags, ...) = nullptr;
 int (*c_ioctl)(int fd, unsigned long int request, ...) = nullptr;
 
 int fakeFd = 1023;
@@ -21,9 +22,13 @@ int havePreemption = I915_SCHEDULER_CAP_ENABLED |
                      I915_SCHEDULER_CAP_PRIORITY |
                      I915_SCHEDULER_CAP_PREEMPTION;
 int failOnDeviceId = 0;
+int failOnEuTotal = 0;
+int failOnSubsliceTotal = 0;
 int failOnRevisionId = 0;
 int failOnSoftPin = 0;
 int failOnParamBoost = 0;
+int failOnSetParamSseu = 0;
+int failOnGetParamSseu = 0;
 int failOnContextCreate = 0;
 int failOnSetPriority = 0;
 int failOnPreemption = 0;
@@ -34,6 +39,9 @@ int ioctlSeq[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 size_t ioctlCnt = 0;
 
 int open(const char *pathname, int flags, ...) {
+    if (openFull != nullptr) {
+        return openFull(pathname, flags);
+    }
     if (c_open == nullptr) {
         c_open = (int (*)(const char *, int, ...))dlsym(RTLD_NEXT, "open");
     }
@@ -57,6 +65,14 @@ int drmGetParam(drm_i915_getparam_t *param) {
     case I915_PARAM_CHIPSET_ID:
         *param->value = deviceId;
         ret = failOnDeviceId;
+        break;
+    case I915_PARAM_EU_TOTAL:
+        *param->value = 0;
+        ret = failOnEuTotal;
+        break;
+    case I915_PARAM_SUBSLICE_TOTAL:
+        *param->value = 0;
+        ret = failOnSubsliceTotal;
         break;
     case I915_PARAM_REVISION:
         *param->value = 0x0;
@@ -93,9 +109,34 @@ int drmSetContextParam(drm_i915_gem_context_param *param) {
         ret = failOnSetPriority;
         break;
 #endif
+    case I915_CONTEXT_PARAM_SSEU:
+        if (param->size == sizeof(struct drm_i915_gem_context_param_sseu) && param->value != 0 && param->ctx_id == 0) {
+            ret = failOnSetParamSseu;
+        } else {
+            ret = -1;
+        }
+        break;
     default:
         ret = -1;
         std::cerr << "drm.setContextParam: " << std::dec << param->param << std::endl;
+        break;
+    }
+    return ret;
+}
+int drmGetContextParam(drm_i915_gem_context_param *param) {
+    int ret = 0;
+
+    switch (param->param) {
+    case I915_CONTEXT_PARAM_SSEU:
+        if (param->size == sizeof(struct drm_i915_gem_context_param_sseu) && param->value != 0 && param->ctx_id == 0) {
+            ret = failOnGetParamSseu;
+        } else {
+            ret = -1;
+        }
+        break;
+    default:
+        ret = -1;
+        std::cerr << "drm.getContextParam: " << std::dec << param->param << std::endl;
         break;
     }
     return ret;
@@ -141,6 +182,9 @@ int ioctl(int fd, unsigned long int request, ...) throw() {
             case DRM_IOCTL_I915_GEM_CONTEXT_SETPARAM:
                 res = drmSetContextParam(va_arg(vl, drm_i915_gem_context_param *));
                 break;
+            case DRM_IOCTL_I915_GEM_CONTEXT_GETPARAM:
+                res = drmGetContextParam(va_arg(vl, drm_i915_gem_context_param *));
+                break;
             case DRM_IOCTL_I915_GEM_CONTEXT_CREATE:
                 res = drmContextCreate(va_arg(vl, drm_i915_gem_context_create *));
                 break;
@@ -149,6 +193,9 @@ int ioctl(int fd, unsigned long int request, ...) throw() {
                 break;
             case DRM_IOCTL_VERSION:
                 res = drmVersion(va_arg(vl, drm_version_t *));
+                break;
+            default:
+                res = drmOtherRequests(request, vl);
                 break;
             }
         }

@@ -7,9 +7,10 @@
 
 #include "core/command_stream/linear_stream.h"
 #include "core/helpers/aligned_memory.h"
+#include "core/helpers/preamble.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/helpers/preamble.h"
+#include "runtime/helpers/flush_stamp.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/os_interface/linux/drm_allocation.h"
 #include "runtime/os_interface/linux/drm_buffer_object.h"
@@ -21,16 +22,14 @@
 #include "runtime/os_interface/linux/os_interface.h"
 #include "runtime/platform/platform.h"
 
-#include "hw_cmds.h"
-
 #include <cstdlib>
 #include <cstring>
 
 namespace NEO {
 
 template <typename GfxFamily>
-DrmCommandStreamReceiver<GfxFamily>::DrmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment, gemCloseWorkerMode mode)
-    : BaseClass(executionEnvironment), gemCloseWorkerOperationMode(mode) {
+DrmCommandStreamReceiver<GfxFamily>::DrmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex, gemCloseWorkerMode mode)
+    : BaseClass(executionEnvironment, rootDeviceIndex), gemCloseWorkerOperationMode(mode) {
 
     this->drm = executionEnvironment.osInterface->get()->getDrm();
 
@@ -39,49 +38,59 @@ DrmCommandStreamReceiver<GfxFamily>::DrmCommandStreamReceiver(ExecutionEnvironme
 
     executionEnvironment.osInterface->get()->setDrm(this->drm);
     CommandStreamReceiver::osInterface = executionEnvironment.osInterface.get();
-
-    if (platform()->peekExecutionEnvironment()->getHardwareInfo()->platform.eRenderCoreFamily == GFXCORE_FAMILY::IGFX_GEN9_CORE &&
-        strcmp(platform()->peekExecutionEnvironment()->getHardwareInfo()->capabilityTable.platformType, "lp") == 0) {
-        auto gmmHelper = platform()->peekExecutionEnvironment()->getGmmHelper();
-        gmmHelper->setSimplifiedMocsTableUsage(this->drm->getSimplifiedMocsTableUsage());
-    }
 }
 
 template <typename GfxFamily>
-FlushStamp DrmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
+bool DrmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
     DrmAllocation *alloc = static_cast<DrmAllocation *>(batchBuffer.commandBufferAllocation);
     DEBUG_BREAK_IF(!alloc);
 
     BufferObject *bb = alloc->getBO();
-    FlushStamp flushStamp = 0;
+    if (bb == nullptr) {
+        return false;
+    }
 
-    if (bb) {
-        flushStamp = bb->peekHandle();
-        unsigned int engineFlag = static_cast<OsContextLinux *>(osContext)->getEngineFlag();
-        this->processResidency(allocationsForResidency);
-        // Residency hold all allocation except command buffer, hence + 1
-        auto requiredSize = this->residency.size() + 1;
-        if (requiredSize > this->execObjectsStorage.size()) {
-            this->execObjectsStorage.resize(requiredSize);
-        }
-
-        int err = bb->exec(static_cast<uint32_t>(alignUp(batchBuffer.usedSize - batchBuffer.startOffset, 8)),
-                           batchBuffer.startOffset, engineFlag | I915_EXEC_NO_RELOC,
-                           batchBuffer.requiresCoherency,
-                           static_cast<OsContextLinux *>(osContext)->getDrmContextIds()[0],
-                           this->residency.data(), this->residency.size(),
-                           this->execObjectsStorage.data());
-        UNRECOVERABLE_IF(err != 0);
-
-        this->residency.clear();
-
-        if (this->gemCloseWorkerOperationMode == gemCloseWorkerActive) {
-            bb->reference();
-            this->getMemoryManager()->peekGemCloseWorker()->push(bb);
+    if (this->lastSentSliceCount != batchBuffer.sliceCount) {
+        if (drm->setQueueSliceCount(batchBuffer.sliceCount)) {
+            this->lastSentSliceCount = batchBuffer.sliceCount;
         }
     }
 
-    return flushStamp;
+    this->flushStamp->setStamp(bb->peekHandle());
+    this->flushInternal(batchBuffer, allocationsForResidency);
+
+    if (this->gemCloseWorkerOperationMode == gemCloseWorkerMode::gemCloseWorkerActive) {
+        bb->reference();
+        this->getMemoryManager()->peekGemCloseWorker()->push(bb);
+    }
+
+    return true;
+}
+
+template <typename GfxFamily>
+void DrmCommandStreamReceiver<GfxFamily>::exec(const BatchBuffer &batchBuffer, uint32_t drmContextId) {
+    DrmAllocation *alloc = static_cast<DrmAllocation *>(batchBuffer.commandBufferAllocation);
+    DEBUG_BREAK_IF(!alloc);
+    BufferObject *bb = alloc->getBO();
+    DEBUG_BREAK_IF(!bb);
+
+    auto engineFlag = static_cast<OsContextLinux *>(osContext)->getEngineFlag();
+
+    // Residency hold all allocation except command buffer, hence + 1
+    auto requiredSize = this->residency.size() + 1;
+    if (requiredSize > this->execObjectsStorage.size()) {
+        this->execObjectsStorage.resize(requiredSize);
+    }
+
+    int err = bb->exec(static_cast<uint32_t>(alignUp(batchBuffer.usedSize - batchBuffer.startOffset, 8)),
+                       batchBuffer.startOffset, engineFlag | I915_EXEC_NO_RELOC,
+                       batchBuffer.requiresCoherency,
+                       drmContextId,
+                       this->residency.data(), this->residency.size(),
+                       this->execObjectsStorage.data());
+    UNRECOVERABLE_IF(err != 0);
+
+    this->residency.clear();
 }
 
 template <typename GfxFamily>
