@@ -1,9 +1,9 @@
-intel-compute-runtime (19.48.14977-1) UNRELEASED; urgency=medium
+intel-compute-runtime (20.02.15268-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * control: Migrate to llvm9.
   * control: Bump depends on opencl-clang, intel-graphics-compiler,
-    intel-gmmlib.
+    intel-gmmlib. (Closes: #946752)
 
  -- Timo Aaltonen <tjaalton@debian.org>  Sat, 05 Oct 2019 16:47:31 +0300
 
