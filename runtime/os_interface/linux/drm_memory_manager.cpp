@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2019 Intel Corporation
+ * Copyright (C) 2017-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,16 +7,17 @@
 
 #include "runtime/os_interface/linux/drm_memory_manager.h"
 
+#include "core/gmm_helper/gmm_helper.h"
+#include "core/gmm_helper/resource_info.h"
+#include "core/helpers/hw_info.h"
+#include "core/helpers/options.h"
 #include "core/helpers/ptr_math.h"
 #include "core/memory_manager/host_ptr_manager.h"
+#include "core/memory_manager/residency.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/device/device.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/gmm_helper/gmm.h"
-#include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/gmm_helper/resource_info.h"
-#include "runtime/helpers/hw_info.h"
-#include "runtime/helpers/options.h"
 #include "runtime/helpers/surface_formats.h"
 #include "runtime/os_interface/linux/allocator_helper.h"
 #include "runtime/os_interface/linux/os_context_linux.h"
@@ -36,7 +37,6 @@ DrmMemoryManager::DrmMemoryManager(gemCloseWorkerMode mode,
                                                                                  drm(executionEnvironment.osInterface->get()->getDrm()),
                                                                                  forcePinEnabled(forcePinAllowed),
                                                                                  validateHostPtrMemory(validateHostPtrMemory) {
-    supportsMultiStorageResources = false;
     for (uint32_t rootDeviceIndex = 0; rootDeviceIndex < gfxPartitions.size(); ++rootDeviceIndex) {
         getGfxPartition(rootDeviceIndex)->init(platformDevices[0]->capabilityTable.gpuAddressSpace, getSizeToReserve(), rootDeviceIndex);
     }
@@ -61,7 +61,6 @@ DrmMemoryManager::DrmMemoryManager(gemCloseWorkerMode mode,
 }
 
 DrmMemoryManager::~DrmMemoryManager() {
-    applyCommonCleanup();
     if (gemCloseWorker) {
         gemCloseWorker->close(false);
     }
@@ -251,6 +250,14 @@ DrmAllocation *DrmMemoryManager::allocateGraphicsMemoryForNonSvmHostPtr(const Al
         return nullptr;
     }
 
+    if (validateHostPtrMemory) {
+        int result = pinBB->pin(&bo, 1, getDefaultDrmContextId());
+        if (result != SUCCESS) {
+            unreference(bo, true);
+            return nullptr;
+        }
+    }
+
     bo->gpuAddress = gpuVirtualAddress;
 
     auto allocation = new DrmAllocation(allocationData.rootDeviceIndex, allocationData.type, bo, const_cast<void *>(allocationData.hostPtr),
@@ -264,6 +271,30 @@ DrmAllocation *DrmMemoryManager::allocateGraphicsMemoryForNonSvmHostPtr(const Al
 
 DrmAllocation *DrmMemoryManager::allocateGraphicsMemory64kb(const AllocationData &allocationData) {
     return nullptr;
+}
+
+GraphicsAllocation *DrmMemoryManager::allocateShareableMemory(const AllocationData &allocationData) {
+    auto gmm = std::make_unique<Gmm>(executionEnvironment.getGmmClientContext(), allocationData.hostPtr, allocationData.size, false);
+    size_t bufferSize = allocationData.size;
+    uint64_t gpuRange = acquireGpuRange(bufferSize, false, allocationData.rootDeviceIndex);
+
+    drm_i915_gem_create create = {0, 0, 0};
+    create.size = bufferSize;
+
+    auto ret = this->drm->ioctl(DRM_IOCTL_I915_GEM_CREATE, &create);
+    DEBUG_BREAK_IF(ret != 0);
+    ((void)(ret));
+
+    auto bo = new BufferObject(this->drm, create.handle, allocationData.rootDeviceIndex);
+    bo->size = bufferSize;
+    bo->gpuAddress = gpuRange;
+
+    auto allocation = new DrmAllocation(allocationData.rootDeviceIndex, allocationData.type, bo, nullptr, gpuRange, bufferSize, MemoryPool::SystemCpuInaccessible);
+    allocation->setDefaultGmm(gmm.release());
+
+    allocation->setReservedAddressRange(reinterpret_cast<void *>(gpuRange), bufferSize);
+
+    return allocation;
 }
 
 GraphicsAllocation *DrmMemoryManager::allocateGraphicsMemoryForImageImpl(const AllocationData &allocationData, std::unique_ptr<Gmm> gmm) {
@@ -452,7 +483,7 @@ GraphicsAllocation *DrmMemoryManager::createGraphicsAllocationFromSharedHandle(o
             properties.imgInfo->linearStorage = true;
         }
 
-        Gmm *gmm = new Gmm(*properties.imgInfo, createStorageInfoFromProperties(properties));
+        Gmm *gmm = new Gmm(executionEnvironment.getGmmClientContext(), *properties.imgInfo, createStorageInfoFromProperties(properties));
         drmAllocation->setDefaultGmm(gmm);
     }
     return drmAllocation;
@@ -508,7 +539,7 @@ void DrmMemoryManager::removeAllocationFromHostPtrManager(GraphicsAllocation *gf
 }
 
 void DrmMemoryManager::freeGraphicsMemoryImpl(GraphicsAllocation *gfxAllocation) {
-    for (auto handleId = 0u; handleId < maxHandleCount; handleId++) {
+    for (auto handleId = 0u; handleId < EngineLimits::maxHandleCount; handleId++) {
         if (gfxAllocation->getGmm(handleId)) {
             delete gfxAllocation->getGmm(handleId);
         }

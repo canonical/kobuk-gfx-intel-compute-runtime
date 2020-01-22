@@ -5,6 +5,8 @@
  *
  */
 
+#include "core/debug_settings/debug_settings_manager.h"
+#include "core/gmm_helper/gmm_helper.h"
 #include "core/helpers/file_io.h"
 #include "core/helpers/hash.h"
 #include "core/helpers/string.h"
@@ -17,7 +19,6 @@
 #include "runtime/gmm_helper/gmm.h"
 #include "runtime/helpers/dispatch_info_builder.h"
 #include "runtime/kernel/kernel.h"
-#include "runtime/os_interface/debug_settings_manager.h"
 #include "test.h"
 #include "unit_tests/fixtures/built_in_fixture.h"
 #include "unit_tests/fixtures/context_fixture.h"
@@ -31,6 +32,7 @@
 #include "unit_tests/mocks/mock_compilers.h"
 #include "unit_tests/mocks/mock_kernel.h"
 
+#include "compiler_options.h"
 #include "gtest/gtest.h"
 #include "os_inc.h"
 
@@ -567,7 +569,7 @@ HWTEST_F(BuiltInTests, givenAuxToNonAuxTranslationWhenSettingSurfaceStateThenSet
     cl_int retVal = CL_SUCCESS;
     auto buffer = std::unique_ptr<Buffer>(Buffer::create(pContext, 0, MemoryConstants::pageSize, nullptr, retVal));
     buffer->getGraphicsAllocation()->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
-    auto gmm = new Gmm(nullptr, 1, false);
+    auto gmm = new Gmm(pDevice->getExecutionEnvironment()->getGmmClientContext(), nullptr, 1, false);
     gmm->isRenderCompressed = true;
     buffer->getGraphicsAllocation()->setDefaultGmm(gmm);
 
@@ -613,7 +615,7 @@ HWTEST_F(BuiltInTests, givenNonAuxToAuxTranslationWhenSettingSurfaceStateThenSet
     cl_int retVal = CL_SUCCESS;
     auto buffer = std::unique_ptr<Buffer>(Buffer::create(pContext, 0, MemoryConstants::pageSize, nullptr, retVal));
     buffer->getGraphicsAllocation()->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
-    auto gmm = new Gmm(nullptr, 1, false);
+    auto gmm = new Gmm(pDevice->getExecutionEnvironment()->getGmmClientContext(), nullptr, 1, false);
     gmm->isRenderCompressed = true;
     buffer->getGraphicsAllocation()->setDefaultGmm(gmm);
     memObjsForAuxTranslation.insert(buffer.get());
@@ -1421,7 +1423,7 @@ TEST_F(BuiltInTests, givenCreateProgramFromSourceWhenDeviceSupportSharedSystemAl
     EXPECT_NE(0u, bc.resource.size());
     auto program = std::unique_ptr<Program>(BuiltinsLib::createProgramFromCode(bc, *pContext, *pDevice));
     EXPECT_NE(nullptr, program.get());
-    EXPECT_THAT(program->getInternalOptions(), testing::HasSubstr(std::string("-cl-intel-greater-than-4GB-buffer-required")));
+    EXPECT_THAT(program->getInternalOptions(), testing::HasSubstr(std::string(CompilerOptions::greaterThan4gbBuffersRequired)));
 }
 
 TEST_F(BuiltInTests, createProgramFromCodeForTypeIntermediate) {
@@ -1467,10 +1469,10 @@ TEST_F(BuiltInTests, createProgramFromCodeInternalOptionsFor32Bit) {
     ASSERT_NE(nullptr, program.get());
 
     auto builtinInternalOptions = program->getInternalOptions();
-    auto it = builtinInternalOptions.find("-m32");
+    auto it = builtinInternalOptions.find(NEO::CompilerOptions::arch32bit);
     EXPECT_EQ(std::string::npos, it);
 
-    it = builtinInternalOptions.find("-cl-intel-greater-than-4GB-buffer-required");
+    it = builtinInternalOptions.find(NEO::CompilerOptions::greaterThan4gbBuffersRequired);
     if (is32bit || pDevice->areSharedSystemAllocationsAllowed()) {
         EXPECT_NE(std::string::npos, it);
     } else {

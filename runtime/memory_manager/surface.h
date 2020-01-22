@@ -6,9 +6,9 @@
  */
 
 #pragma once
+#include "core/helpers/cache_policy.h"
 #include "core/memory_manager/graphics_allocation.h"
 #include "runtime/command_stream/command_stream_receiver.h"
-#include "runtime/helpers/cache_policy.h"
 #include "runtime/mem_obj/mem_obj.h"
 
 namespace NEO {
@@ -35,7 +35,7 @@ class NullSurface : public Surface {
 class HostPtrSurface : public Surface {
   public:
     HostPtrSurface(void *ptr, size_t size) : memoryPointer(ptr), surfaceSize(size) {
-        DEBUG_BREAK_IF(!ptr);
+        UNRECOVERABLE_IF(!ptr);
         gfxAllocation = nullptr;
     }
 

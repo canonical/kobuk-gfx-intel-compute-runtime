@@ -5,9 +5,9 @@
  *
  */
 
-#include "runtime/helpers/kmd_notify_properties.h"
-#include "runtime/helpers/options.h"
-#include "runtime/os_interface/windows/sys_calls.h"
+#include "core/helpers/kmd_notify_properties.h"
+#include "core/helpers/options.h"
+#include "core/os_interface/windows/sys_calls.h"
 #include "test.h"
 #include "unit_tests/helpers/variable_backup.h"
 

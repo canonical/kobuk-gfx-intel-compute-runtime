@@ -7,13 +7,14 @@
 
 #include "core/compiler_interface/compiler_interface.h"
 #include "core/helpers/file_io.h"
+#include "core/helpers/options.h"
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
-#include "runtime/helpers/options.h"
 #include "unit_tests/helpers/kernel_binary_helper.h"
 #include "unit_tests/helpers/test_files.h"
 
 #include "cl_api_tests.h"
+#include "compiler_options.h"
 
 using namespace NEO;
 
@@ -53,7 +54,7 @@ TEST_F(clGetKernelArgInfoTests, GivenValidParamsWhenGettingKernelArgInfoThenSucc
         pProgram,
         num_devices,
         devices,
-        "-cl-kernel-arg-info",
+        CompilerOptions::argInfo,
         nullptr,
         nullptr);
 

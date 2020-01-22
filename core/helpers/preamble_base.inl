@@ -8,9 +8,9 @@
 #include "core/command_stream/linear_stream.h"
 #include "core/command_stream/preemption.h"
 #include "core/helpers/aligned_memory.h"
+#include "core/helpers/hw_cmds.h"
 #include "core/helpers/preamble.h"
 #include "runtime/device/device.h"
-#include "runtime/gen_common/hw_cmds.h"
 #include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/kernel/kernel.h"
 
@@ -89,8 +89,8 @@ template <typename GfxFamily>
 void PreambleHelper<GfxFamily>::programKernelDebugging(LinearStream *pCommandStream) {
     auto pCmd = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(pCommandStream->getSpace(sizeof(MI_LOAD_REGISTER_IMM)));
     *pCmd = GfxFamily::cmdInitLoadRegisterImm;
-    pCmd->setRegisterOffset(DebugModeRegisterOffset::registerOffset<GfxFamily>);
-    pCmd->setDataDword(DebugModeRegisterOffset::debugEnabledValue<GfxFamily>);
+    pCmd->setRegisterOffset(DebugModeRegisterOffset<GfxFamily>::registerOffset);
+    pCmd->setDataDword(DebugModeRegisterOffset<GfxFamily>::debugEnabledValue);
 
     auto pCmd2 = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(pCommandStream->getSpace(sizeof(MI_LOAD_REGISTER_IMM)));
     *pCmd2 = GfxFamily::cmdInitLoadRegisterImm;

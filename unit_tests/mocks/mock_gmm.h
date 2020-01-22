@@ -6,9 +6,8 @@
  */
 
 #pragma once
+#include "core/helpers/options.h"
 #include "runtime/gmm_helper/gmm.h"
-#include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/helpers/options.h"
 #include "runtime/helpers/surface_formats.h"
 #include "unit_tests/mocks/mock_device.h"
 #include "unit_tests/mocks/mock_gmm_resource_info.h"
@@ -23,10 +22,10 @@ class MockGmm : public Gmm {
     using Gmm::Gmm;
     using Gmm::setupImageResourceParams;
 
-    MockGmm() : Gmm(nullptr, 1, false){};
+    MockGmm() : Gmm(nullptr, nullptr, 1, false){};
 
-    static std::unique_ptr<Gmm> queryImgParams(ImageInfo &imgInfo) {
-        return std::unique_ptr<Gmm>(new Gmm(imgInfo, {}));
+    static std::unique_ptr<Gmm> queryImgParams(GmmClientContext *clientContext, ImageInfo &imgInfo) {
+        return std::unique_ptr<Gmm>(new Gmm(clientContext, imgInfo, {}));
     }
 
     static ImageInfo initImgInfo(cl_image_desc &imgDesc, int baseMipLevel, const SurfaceFormatInfo *surfaceFormat) {

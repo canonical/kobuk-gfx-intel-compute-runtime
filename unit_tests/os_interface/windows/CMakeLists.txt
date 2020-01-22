@@ -6,11 +6,11 @@
 
 set(IGDRCL_SRCS_tests_os_interface_windows
   ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
-  ${CMAKE_CURRENT_SOURCE_DIR}/debug_settings_manager_win_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/deferrable_deletion_win_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/device_command_stream_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/device_os_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/driver_info_tests.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/file_logger_win_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/gdi_dll_fixture.h
   ${CMAKE_CURRENT_SOURCE_DIR}/gdi_interface_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/gmm_memory_tests.cpp
@@ -23,6 +23,7 @@ set(IGDRCL_SRCS_tests_os_interface_windows
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_performance_counters_win.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_performance_counters_win.h
   ${CMAKE_CURRENT_SOURCE_DIR}/mock_wddm_memory_manager.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/os_context_win_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_interface_win_tests.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_interface_win_tests.h
   ${CMAKE_CURRENT_SOURCE_DIR}/os_library_win_tests.cpp

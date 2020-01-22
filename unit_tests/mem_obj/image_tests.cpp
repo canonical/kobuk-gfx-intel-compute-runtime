@@ -18,6 +18,7 @@
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/fixtures/image_fixture.h"
 #include "unit_tests/fixtures/memory_management_fixture.h"
+#include "unit_tests/fixtures/multi_root_device_fixture.h"
 #include "unit_tests/helpers/kernel_binary_helper.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mem_obj/image_compression_fixture.h"
@@ -42,7 +43,7 @@ class CreateImageTest : public DeviceFixture,
     }
     Image *createImageWithFlags(cl_mem_flags flags) {
         auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-        return Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        return Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                              flags, 0, surfaceFormat, &imageDesc, nullptr, retVal);
     }
 
@@ -118,7 +119,7 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
     auto image = Image::create(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -143,7 +144,7 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -168,7 +169,7 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -193,7 +194,7 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -218,7 +219,7 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -243,7 +244,7 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -268,7 +269,7 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -293,7 +294,7 @@ TEST(TestSliceAndRowPitch, ForDifferentDescriptorsGetHostPtrSlicePitchAndRowPitc
 
     image = Image::create(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -344,7 +345,7 @@ TEST(TestCreateImage, UseSharedContextToCreateImage) {
 
     auto image = Image::create(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -405,7 +406,7 @@ TEST(TestCreateImageUseHostPtr, CheckMemoryAllocationForDifferenHostPtrAlignment
     for (int i = 0; i < 4; i++) {
         auto image = Image::create(
             &context,
-            MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+            MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
             flags,
             0,
             surfaceFormat,
@@ -443,7 +444,7 @@ TEST(TestCreateImageUseHostPtr, givenZeroCopyImageValuesWhenUsingHostPtrThenZero
 
     auto image = std::unique_ptr<Image>(Image::create(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -531,7 +532,7 @@ struct CreateImageHostPtr
         auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
         return Image::create(
             context,
-            MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+            MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
             flags,
             0,
             surfaceFormat,
@@ -947,7 +948,7 @@ HWTEST_F(ImageCompressionTests, givenTiledImageWhenCreatingAllocationThenPreferR
 
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
 
-    auto image = std::unique_ptr<Image>(Image::create(mockContext.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+    auto image = std::unique_ptr<Image>(Image::create(mockContext.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                                                       flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     ASSERT_NE(nullptr, image);
     EXPECT_EQ(UnitTestHelper<FamilyType>::tiledImagesSupported, image->isTiledAllocation());
@@ -961,7 +962,7 @@ TEST_F(ImageCompressionTests, givenNonTiledImageWhenCreatingAllocationThenDontPr
 
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
 
-    auto image = std::unique_ptr<Image>(Image::create(mockContext.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+    auto image = std::unique_ptr<Image>(Image::create(mockContext.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                                                       flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     ASSERT_NE(nullptr, image);
     EXPECT_FALSE(image->isTiledAllocation());
@@ -1166,7 +1167,7 @@ TEST(ImageTest, givenClMemForceLinearStorageSetWhenCreateImageThenDisallowTiling
 
     auto image = std::unique_ptr<Image>(Image::create(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -1374,7 +1375,7 @@ TEST(ImageTest, givenClMemCopyHostPointerPassedToImageCreateWhenAllocationIsNotI
 
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
 
-    std::unique_ptr<Image> image(Image::create(&ctx, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0), flags, 0, surfaceFormat, &imageDesc, memory, retVal));
+    std::unique_ptr<Image> image(Image::create(&ctx, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, surfaceFormat, &imageDesc, memory, retVal));
     EXPECT_NE(nullptr, image);
 
     auto taskCountSent = device->getGpgpuCommandStreamReceiver().peekLatestFlushedTaskCount();
@@ -1453,7 +1454,7 @@ HWTEST_F(ImageTransformTest, givenSurfaceBaseAddressAndUnifiedSurfaceWhenSetUnif
     auto image = std::unique_ptr<Image>(ImageHelper<Image3dDefaults>::create(&context));
     auto surfaceState = FamilyType::cmdInitRenderSurfaceState;
     auto imageHw = static_cast<ImageHw<FamilyType> *>(image.get());
-    auto gmm = std::unique_ptr<Gmm>(new Gmm(nullptr, 1, false));
+    auto gmm = std::unique_ptr<Gmm>(new Gmm(context.getDevice(0)->getExecutionEnvironment()->getGmmClientContext(), nullptr, 1, false));
     uint64_t surfBsaseAddress = 0xABCDEF1000;
     surfaceState.setSurfaceBaseAddress(surfBsaseAddress);
     auto mockResource = reinterpret_cast<MockGmmResourceInfo *>(gmm->gmmResourceInfo.get());
@@ -1546,7 +1547,7 @@ HWTEST_F(HwImageTest, givenImageHwWithUnifiedSurfaceAndMcsWhenSettingParamsForMu
 
     McsSurfaceInfo msi = {10, 20, 3};
     auto mcsAlloc = context.getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
-    mcsAlloc->setDefaultGmm(new Gmm(nullptr, 1, false));
+    mcsAlloc->setDefaultGmm(new Gmm(context.getDevice(0)->getExecutionEnvironment()->getGmmClientContext(), nullptr, 1, false));
 
     auto mockMcsGmmResInfo = reinterpret_cast<::testing::NiceMock<MockGmmResourceInfo> *>(mcsAlloc->getDefaultGmm()->gmmResourceInfo.get());
     mockMcsGmmResInfo->setUnifiedAuxTranslationCapable();
@@ -1564,4 +1565,14 @@ HWTEST_F(HwImageTest, givenImageHwWithUnifiedSurfaceAndMcsWhenSettingParamsForMu
     mockImage->setAuxParamsForMultisamples(&surfaceState);
 
     EXPECT_TRUE(mockImage->setAuxParamsForMCSCCSCalled);
+}
+
+using ImageMultiRootDeviceTests = MultiRootDeviceFixture;
+
+TEST_F(ImageMultiRootDeviceTests, imageAllocationHasCorrectRootDeviceIndex) {
+    std::unique_ptr<Image> image(ImageHelper<Image3dDefaults>::create(context.get()));
+
+    auto graphicsAllocation = image->getGraphicsAllocation();
+    ASSERT_NE(nullptr, graphicsAllocation);
+    EXPECT_EQ(expectedRootDeviceIndex, graphicsAllocation->getRootDeviceIndex());
 }

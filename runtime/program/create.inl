@@ -5,11 +5,13 @@
  *
  */
 
+#include "core/debug_settings/debug_settings_manager.h"
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
 #include "runtime/helpers/string_helpers.h"
-#include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/program/program.h"
+
+#include "compiler_options.h"
 
 namespace NEO {
 
@@ -100,7 +102,7 @@ T *Program::create(
         program->pDevice = &device;
         program->numDevices = 1;
         if (is32bit || DebugManager.flags.DisableStatelessToStatefulOptimization.get() || device.areSharedSystemAllocationsAllowed()) {
-            program->internalOptions += "-cl-intel-greater-than-4GB-buffer-required";
+            CompilerOptions::concatenateAppend(program->internalOptions, CompilerOptions::greaterThan4gbBuffersRequired);
         }
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,26 +8,26 @@
 #include "runtime/mem_obj/image.h"
 
 #include "common/compiler_support.h"
+#include "core/debug_settings/debug_settings_manager.h"
+#include "core/gmm_helper/resource_info.h"
 #include "core/helpers/aligned_memory.h"
 #include "core/helpers/basic_math.h"
 #include "core/helpers/hw_helper.h"
+#include "core/helpers/hw_info.h"
 #include "core/helpers/ptr_math.h"
 #include "core/helpers/string.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
 #include "runtime/gmm_helper/gmm.h"
-#include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/gmm_helper/resource_info.h"
+#include "runtime/gmm_helper/gmm_types_converter.h"
 #include "runtime/helpers/get_info.h"
-#include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/helpers/mipmap.h"
 #include "runtime/helpers/surface_formats.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/mem_obj/mem_obj_helper.h"
 #include "runtime/memory_manager/memory_manager.h"
-#include "runtime/os_interface/debug_settings_manager.h"
 
 #include "igfxfmid.h"
 
@@ -127,6 +127,7 @@ Image *Image::create(Context *context,
     Image *parentImage = castToObject<Image>(imageDesc->mem_object);
     auto &hwHelper = HwHelper::get(context->getDevice(0)->getHardwareInfo().platform.eRenderCoreFamily);
     auto rootDeviceIndex = context->getDevice(0)->getRootDeviceIndex();
+    auto clientContext = context->getDevice(0)->getExecutionEnvironment()->getGmmClientContext();
 
     do {
         size_t imageWidth = imageDesc->image_width;
@@ -240,7 +241,7 @@ Image *Image::create(Context *context,
             hostPtr = parentBuffer->getHostPtr();
             hostPtrToSet = const_cast<void *>(hostPtr);
             parentBuffer->incRefInternal();
-            GmmHelper::queryImgFromBufferParams(imgInfo, memory);
+            GmmTypesConverter::queryImgFromBufferParams(imgInfo, memory);
 
             UNRECOVERABLE_IF(imgInfo.offset != 0);
             imgInfo.offset = parentBuffer->getOffset();
@@ -248,7 +249,7 @@ Image *Image::create(Context *context,
             if (memoryManager->peekVirtualPaddingSupport() && (imageDesc->image_type == CL_MEM_OBJECT_IMAGE2D)) {
                 // Retrieve sizes from GMM and apply virtual padding if buffer storage is not big enough
                 auto queryGmmImgInfo(imgInfo);
-                auto gmm = std::make_unique<Gmm>(queryGmmImgInfo, StorageInfo{});
+                auto gmm = std::make_unique<Gmm>(clientContext, queryGmmImgInfo, StorageInfo{});
                 auto gmmAllocationSize = gmm->gmmResourceInfo->getSizeAllocation();
                 if (gmmAllocationSize > memory->getUnderlyingBufferSize()) {
                     memory = memoryManager->createGraphicsAllocationWithPadding(memory, gmmAllocationSize);
@@ -275,13 +276,13 @@ Image *Image::create(Context *context,
                         }
                     }
                 } else {
-                    gmm = new Gmm(imgInfo, StorageInfo{});
+                    gmm = new Gmm(clientContext, imgInfo, StorageInfo{});
                     memory = memoryManager->allocateGraphicsMemoryWithProperties({rootDeviceIndex, false, imgInfo.size, GraphicsAllocation::AllocationType::SHARED_CONTEXT_IMAGE, false}, hostPtr);
                     memory->setDefaultGmm(gmm);
                     zeroCopy = true;
                 }
                 if (memory) {
-                    AllocationProperties properties{rootDeviceIndex, false, hostPtrMinSize, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
+                    AllocationProperties properties{rootDeviceIndex, false, hostPtrMinSize, GraphicsAllocation::AllocationType::MAP_ALLOCATION, false};
                     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = true;
                     mapAllocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
                 }
@@ -380,7 +381,7 @@ Image *Image::create(Context *context,
                 } else {
                     errcodeRet = cmdQ->enqueueWriteImage(image, CL_TRUE, &copyOrigin[0], &copyRegion[0],
                                                          hostPtrRowPitch, hostPtrSlicePitch,
-                                                         hostPtr, nullptr, 0, nullptr, nullptr);
+                                                         hostPtr, mapAllocation, 0, nullptr, nullptr);
                 }
             } else {
                 image->transferData(memory->getUnderlyingBuffer(), imgInfo.rowPitch, imgInfo.slicePitch,
@@ -419,10 +420,10 @@ Image *Image::createImageHw(Context *context, const MemoryPropertiesFlags &memor
     return image;
 }
 
-Image *Image::createSharedImage(Context *context, SharingHandler *sharingHandler, McsSurfaceInfo &mcsSurfaceInfo,
+Image *Image::createSharedImage(Context *context, SharingHandler *sharingHandler, const McsSurfaceInfo &mcsSurfaceInfo,
                                 GraphicsAllocation *graphicsAllocation, GraphicsAllocation *mcsAllocation,
                                 cl_mem_flags flags, ImageInfo &imgInfo, uint32_t cubeFaceIndex, uint32_t baseMipLevel, uint32_t mipCount) {
-    auto sharedImage = createImageHw(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0), flags, 0, graphicsAllocation->getUnderlyingBufferSize(),
+    auto sharedImage = createImageHw(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, graphicsAllocation->getUnderlyingBufferSize(),
                                      nullptr, imgInfo.surfaceFormat->OCLImageFormat, *imgInfo.imgDesc, false, graphicsAllocation, false, baseMipLevel, mipCount, imgInfo.surfaceFormat);
     sharedImage->setSharingHandler(sharingHandler);
     sharedImage->setMcsAllocation(mcsAllocation);
@@ -670,13 +671,14 @@ cl_int Image::getImageParams(Context *context,
                              size_t *imageRowPitch,
                              size_t *imageSlicePitch) {
     cl_int retVal = CL_SUCCESS;
+    auto clientContext = context->getDevice(0)->getExecutionEnvironment()->getGmmClientContext();
 
     ImageInfo imgInfo = {0};
     cl_image_desc imageDescriptor = *imageDesc;
     imgInfo.imgDesc = &imageDescriptor;
     imgInfo.surfaceFormat = surfaceFormat;
 
-    auto gmm = std::make_unique<Gmm>(imgInfo, StorageInfo{});
+    auto gmm = std::make_unique<Gmm>(clientContext, imgInfo, StorageInfo{});
 
     *imageRowPitch = imgInfo.rowPitch;
     *imageSlicePitch = imgInfo.slicePitch;
@@ -860,7 +862,7 @@ Image *Image::redescribeFillImage() {
     imageFormatNew.image_channel_data_type = surfaceFormat->OCLImageFormat.image_channel_data_type;
 
     DEBUG_BREAK_IF(nullptr == createFunction);
-    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags | CL_MEM_USE_HOST_PTR, flagsIntel);
+    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags | CL_MEM_USE_HOST_PTR, flagsIntel, 0);
     auto image = createFunction(context,
                                 memoryProperties,
                                 flags | CL_MEM_USE_HOST_PTR,
@@ -892,25 +894,19 @@ Image *Image::redescribe() {
         7   // {CL_RGBA, CL_UNSIGNED_INT32}    16 byte
     };
 
+    const uint32_t bytesPerPixel = this->surfaceFormatInfo.NumChannels * surfaceFormatInfo.PerChannelSizeInBytes;
+    const uint32_t exponent = Math::log2(bytesPerPixel);
+    DEBUG_BREAK_IF(exponent >= 5u);
+    const uint32_t surfaceFormatIdx = redescribeTableBytes[exponent % 5];
+    const ArrayRef<const SurfaceFormatInfo> readWriteSurfaceFormats = SurfaceFormats::readWrite();
+    const SurfaceFormatInfo *surfaceFormat = &readWriteSurfaceFormats[surfaceFormatIdx];
+
     auto imageFormatNew = this->imageFormat;
-    auto imageDescNew = this->imageDesc;
-    const SurfaceFormatInfo *surfaceFormat = nullptr;
-    auto bytesPerPixel = this->surfaceFormatInfo.NumChannels * surfaceFormatInfo.PerChannelSizeInBytes;
-    uint32_t exponent = 0;
-
-    exponent = Math::log2(bytesPerPixel);
-    DEBUG_BREAK_IF(exponent >= 32);
-
-    uint32_t surfaceFormatIdx = redescribeTableBytes[exponent % 5];
-    ArrayRef<const SurfaceFormatInfo> readWriteSurfaceFormats = SurfaceFormats::readWrite();
-
-    surfaceFormat = &readWriteSurfaceFormats[surfaceFormatIdx];
-
     imageFormatNew.image_channel_order = surfaceFormat->OCLImageFormat.image_channel_order;
     imageFormatNew.image_channel_data_type = surfaceFormat->OCLImageFormat.image_channel_data_type;
 
     DEBUG_BREAK_IF(nullptr == createFunction);
-    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags | CL_MEM_USE_HOST_PTR, flagsIntel);
+    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags | CL_MEM_USE_HOST_PTR, flagsIntel, 0);
     auto image = createFunction(context,
                                 memoryProperties,
                                 flags | CL_MEM_USE_HOST_PTR,
@@ -918,7 +914,7 @@ Image *Image::redescribe() {
                                 this->getSize(),
                                 this->getCpuAddress(),
                                 imageFormatNew,
-                                imageDescNew,
+                                this->imageDesc,
                                 this->isMemObjZeroCopy(),
                                 this->getGraphicsAllocation(),
                                 true,
@@ -972,7 +968,7 @@ cl_int Image::writeNV12Planes(const void *hostPtr, size_t hostPtrRowPitch) {
     // Create NV12 UV Plane image
     std::unique_ptr<Image> imageYPlane(Image::create(
         context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -996,7 +992,7 @@ cl_int Image::writeNV12Planes(const void *hostPtr, size_t hostPtrRowPitch) {
     // Create NV12 UV Plane image
     std::unique_ptr<Image> imageUVPlane(Image::create(
         context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,

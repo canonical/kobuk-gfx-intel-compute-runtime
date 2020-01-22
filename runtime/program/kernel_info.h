@@ -6,11 +6,11 @@
  */
 
 #pragma once
-#include "runtime/helpers/hw_info.h"
+#include "core/helpers/hw_info.h"
+#include "runtime/program/heap_info.h"
+#include "runtime/program/kernel_arg_info.h"
 
 #include "CL/cl.h"
-#include "heap_info.h"
-#include "kernel_arg_info.h"
 #include "ocl_igc_shared/gtpin/gtpin_driver_common.h"
 #include "patch_info.h"
 
@@ -115,6 +115,7 @@ struct KernelInfo {
     void storePatchToken(const SPatchString *pStringArg);
     void storePatchToken(const SPatchKernelAttributesInfo *pKernelAttributesInfo);
     void storePatchToken(const SPatchAllocateSystemThreadSurface *pSystemThreadSurface);
+    void storePatchToken(const SPatchAllocateSyncBuffer *pAllocateSyncBuffer);
     GraphicsAllocation *getGraphicsAllocation() const { return this->kernelAllocation; }
     cl_int resolveKernelInfo();
     void resizeKernelArgInfoAndRegisterParameter(uint32_t argCount) {

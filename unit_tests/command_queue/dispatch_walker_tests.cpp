@@ -712,7 +712,6 @@ HWTEST_F(DispatchWalkerTest, GivenBlockedQueueWhenDispatchingWalkerThenRequiredH
     cl_uint dimensions = 1;
 
     auto blockedCommandsData = createBlockedCommandsData(*pCmdQ);
-
     DispatchInfo dispatchInfo(const_cast<MockKernel *>(&kernel), dimensions, workItems, workGroupSize, globalOffsets);
     MultiDispatchInfo multiDispatchInfo(&kernel);
     multiDispatchInfo.push(dispatchInfo);
@@ -1367,7 +1366,8 @@ HWTEST_P(ProfilingCommandsTest, givenKernelWhenProfilingCommandStartIsTakenThenT
     bool checkForStart = GetParam();
 
     auto &cmdStream = pCmdQ->getCS(0);
-    TagAllocator<HwTimeStamps> timeStampAllocator(pDevice->getRootDeviceIndex(), this->pDevice->getMemoryManager(), 10, MemoryConstants::cacheLineSize);
+    TagAllocator<HwTimeStamps> timeStampAllocator(pDevice->getRootDeviceIndex(), this->pDevice->getMemoryManager(), 10,
+                                                  MemoryConstants::cacheLineSize, sizeof(HwTimeStamps), false);
 
     auto hwTimeStamp1 = timeStampAllocator.getTag();
     ASSERT_NE(nullptr, hwTimeStamp1);

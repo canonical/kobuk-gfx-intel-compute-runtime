@@ -5,10 +5,10 @@
  *
  */
 
+#include "core/helpers/options.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/device/device.h"
 #include "runtime/helpers/get_info.h"
-#include "runtime/helpers/options.h"
 #include "unit_tests/mocks/mock_device.h"
 
 #include "gmock/gmock.h"
@@ -35,7 +35,7 @@ TEST(DeviceOsTest, osSpecificExtensions) {
 }
 
 TEST(DeviceOsTest, supportedSimultaneousInterops) {
-    auto pDevice = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<Device>(*platformDevices));
+    auto pDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(*platformDevices));
 
     std::vector<unsigned int> expected = {CL_GL_CONTEXT_KHR,
                                           CL_WGL_HDC_KHR,

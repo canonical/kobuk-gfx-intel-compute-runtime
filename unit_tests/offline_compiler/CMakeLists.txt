@@ -18,10 +18,12 @@ ${CMAKE_CURRENT_SOURCE_DIR}/decoder/mock/mock_decoder.h
 ${CMAKE_CURRENT_SOURCE_DIR}/decoder/mock/mock_encoder.h
 ${CMAKE_CURRENT_SOURCE_DIR}/decoder/mock/mock_iga_wrapper.h
 ${CMAKE_CURRENT_SOURCE_DIR}/mock/mock_offline_compiler.h
+${CMAKE_CURRENT_SOURCE_DIR}/mock/mock_sip_ocloc_tests.cpp
 )
 
 set(CLOC_SRCS_UTILITIES
   ${NEO_SOURCE_DIR}/offline_compiler/utilities/safety_caller.h
+  ${NEO_SOURCE_DIR}/offline_compiler/utilities//get_current_dir.h
 )
 
 if(WIN32)
@@ -30,15 +32,15 @@ if(WIN32)
     ${NEO_SOURCE_DIR}/offline_compiler/utilities/windows/safety_guard_windows.h
     ${NEO_SOURCE_DIR}/offline_compiler/utilities/windows/seh_exception.cpp
     ${NEO_SOURCE_DIR}/offline_compiler/utilities/windows/seh_exception.h
+    ${NEO_SOURCE_DIR}/offline_compiler/utilities/windows/get_current_dir_windows.cpp
   )
 else()
   list(APPEND CLOC_SRCS_UTILITIES
     ${NEO_SOURCE_DIR}/offline_compiler/utilities/linux/safety_caller_linux.cpp
     ${NEO_SOURCE_DIR}/offline_compiler/utilities/linux/safety_guard_linux.h
+    ${NEO_SOURCE_DIR}/offline_compiler/utilities/linux/get_current_dir_linux.cpp
   )
 endif()
-
-
 
 set(IGDRCL_SRCS_offline_compiler_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
@@ -53,6 +55,10 @@ set(IGDRCL_SRCS_offline_compiler_tests
   ${NEO_SOURCE_DIR}/runtime/memory_manager/deferred_deleter.cpp
   ${NEO_SOURCE_DIR}/runtime/memory_manager/deferred_deleter.h
   ${NEO_SOURCE_DIR}/unit_tests/helpers/test_files.cpp
+  ${NEO_SOURCE_DIR}/unit_tests/mocks/mock_cif.cpp
+  ${NEO_SOURCE_DIR}/unit_tests/mocks/mock_cif.h
+  ${NEO_SOURCE_DIR}/unit_tests/mocks/mock_compilers.cpp
+  ${NEO_SOURCE_DIR}/unit_tests/mocks/mock_compilers.h
   ${IGDRCL_SRCS_cloc}
   ${IGDRCL_SRCS_offline_compiler_mock}
   ${CLOC_SRCS_LIB}
@@ -78,7 +84,7 @@ target_include_directories(ocloc_tests PRIVATE
 )
 target_compile_definitions(ocloc_tests PUBLIC MOCKABLE_VIRTUAL=virtual $<TARGET_PROPERTY:ocloc,INTERFACE_COMPILE_DEFINITIONS>)
 
-target_link_libraries(ocloc_tests igdrcl_mocks gmock-gtest elflib)
+target_link_libraries(ocloc_tests gmock-gtest elflib)
 
 if(WIN32)
     target_link_libraries(ocloc_tests dbghelp)
@@ -104,7 +110,7 @@ macro(macro_for_each_platform)
       if(${PLATFORM_IT}_IS_${PLATFORM_TYPE})
         get_family_name_with_type(${GEN_TYPE} ${PLATFORM_TYPE})
         add_dependencies(run_ocloc_tests prepare_test_kernels_${family_name_with_type})
-        neo_copy_test_files(copy_test_files_${family_name_with_type} ${family_name_with_type})	
+        neo_copy_test_files(copy_test_files_${family_name_with_type} ${family_name_with_type})
         add_dependencies(run_ocloc_tests copy_test_files_${family_name_with_type})
         set(run_tests_cmd ocloc_tests --device ${CLOC_DEFAULT_DEVICE} --family_type ${family_name_with_type})
       endif()

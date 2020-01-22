@@ -7,8 +7,8 @@
 
 #pragma once
 #include "core/command_stream/preemption_mode.h"
+#include "core/helpers/common_types.h"
 #include "core/utilities/reference_tracked_object.h"
-#include "runtime/memory_manager/memory_manager.h"
 
 #include "engine_node.h"
 
@@ -29,6 +29,7 @@ class OsContext : public ReferenceTrackedObject<OsContext> {
     PreemptionMode getPreemptionMode() const { return preemptionMode; }
     aub_stream::EngineType &getEngineType() { return engineType; }
     bool isLowPriority() const { return lowPriority; }
+    virtual bool isInitialized() const { return true; }
 
   protected:
     OsContext(uint32_t contextId, DeviceBitfield deviceBitfield, aub_stream::EngineType engineType, PreemptionMode preemptionMode, bool lowPriority)

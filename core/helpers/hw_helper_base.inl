@@ -5,18 +5,18 @@
  *
  */
 
+#include "core/gmm_helper/gmm_helper.h"
 #include "core/helpers/aligned_memory.h"
 #include "core/helpers/hw_helper.h"
+#include "core/helpers/hw_info.h"
 #include "core/helpers/preamble.h"
 #include "core/memory_manager/graphics_allocation.h"
 #include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_mem_dump.h"
 #include "runtime/execution_environment/execution_environment.h"
 #include "runtime/gmm_helper/gmm.h"
-#include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/helpers/dispatch_info.h"
 #include "runtime/helpers/hardware_commands_helper.h"
-#include "runtime/helpers/hw_info.h"
 #include "runtime/os_interface/os_interface.h"
 
 namespace NEO {
@@ -260,6 +260,21 @@ uint32_t HwHelperHw<GfxFamily>::alignSlmSize(uint32_t slmSize) {
 template <typename GfxFamily>
 uint32_t HwHelperHw<GfxFamily>::getBarriersCountFromHasBarriers(uint32_t hasBarriers) {
     return hasBarriers;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isOffsetToSkipSetFFIDGPWARequired(const HardwareInfo &hwInfo) {
+    return false;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isForceDefaultRCSEngineWARequired(const HardwareInfo &hwInfo) {
+    return false;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isForceEmuInt32DivRemSPWARequired(const HardwareInfo &hwInfo) {
+    return false;
 }
 
 } // namespace NEO

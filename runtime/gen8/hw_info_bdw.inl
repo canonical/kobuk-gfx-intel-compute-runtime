@@ -5,12 +5,11 @@
  *
  */
 
+#include "core/gen8/hw_cmds.h"
 #include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_services.h"
-#include "runtime/gen8/hw_cmds.h"
 
 #include "engine_node.h"
-#include "hw_info.h"
 
 namespace NEO {
 
@@ -53,6 +52,7 @@ const RuntimeCapabilityTable BDW::capabilityTable{
     CmdServicesMemTraceVersion::DeviceValues::Bdw, // aubDeviceId
     0,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
+    sizeof(BDW::GRF),                              // grfSize
     false,                                         // blitterOperationsSupported
     true,                                          // ftrSupportsInteger64BitAtomics
     true,                                          // ftrSupportsFP64
@@ -71,7 +71,8 @@ const RuntimeCapabilityTable BDW::capabilityTable{
     false,                                         // supportsVme
     false,                                         // supportCacheFlushAfterWalker
     true,                                          // supportsImages
-    true                                           // supportsDeviceEnqueue
+    true,                                          // supportsDeviceEnqueue
+    true                                           // hostPtrTrackingEnabled
 };
 
 WorkaroundTable BDW::workaroundTable = {};

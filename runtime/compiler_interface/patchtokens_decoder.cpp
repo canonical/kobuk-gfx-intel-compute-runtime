@@ -7,10 +7,10 @@
 
 #include "patchtokens_decoder.h"
 
+#include "core/debug_settings/debug_settings_manager.h"
 #include "core/helpers/debug_helpers.h"
 #include "core/helpers/hash.h"
 #include "core/helpers/ptr_math.h"
-#include "runtime/os_interface/debug_settings_manager.h"
 
 #include <algorithm>
 
@@ -245,6 +245,18 @@ inline void decodeKernelDataParameterToken(const SPatchDataParameterBuffer *toke
     case DATA_PARAMETER_IMAGE_NUM_MIP_LEVELS:
         getKernelArg(out, argNum, ArgObjectType::Image).metadata.image.numMipLevels = token;
         break;
+    case DATA_PARAMETER_FLAT_IMAGE_BASEOFFSET:
+        getKernelArg(out, argNum, ArgObjectType::Image).metadata.image.flatBaseOffset = token;
+        break;
+    case DATA_PARAMETER_FLAT_IMAGE_WIDTH:
+        getKernelArg(out, argNum, ArgObjectType::Image).metadata.image.flatWidth = token;
+        break;
+    case DATA_PARAMETER_FLAT_IMAGE_HEIGHT:
+        getKernelArg(out, argNum, ArgObjectType::Image).metadata.image.flatHeight = token;
+        break;
+    case DATA_PARAMETER_FLAT_IMAGE_PITCH:
+        getKernelArg(out, argNum, ArgObjectType::Image).metadata.image.flatPitch = token;
+        break;
 
     case DATA_PARAMETER_SAMPLER_COORDINATE_SNAP_WA_REQUIRED:
         getKernelArg(out, argNum, ArgObjectType::Sampler).metadata.sampler.coordinateSnapWaRequired = token;
@@ -406,6 +418,10 @@ inline bool decodeToken(const SPatchItemHeader *token, KernelFromPatchtokens &ou
     case PATCH_TOKEN_DATA_PARAMETER_BUFFER: {
         auto tokDataP = reinterpret_cast<const SPatchDataParameterBuffer *>(token);
         decodeKernelDataParameterToken(tokDataP, out);
+    } break;
+
+    case PATCH_TOKEN_ALLOCATE_SYNC_BUFFER: {
+        assignToken(out.tokens.allocateSyncBuffer, token);
     } break;
     }
 

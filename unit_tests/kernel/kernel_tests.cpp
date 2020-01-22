@@ -5,29 +5,30 @@
  *
  */
 
+#include "core/debug_settings/debug_settings_manager.h"
+#include "core/gmm_helper/gmm_helper.h"
 #include "core/helpers/hw_helper.h"
+#include "core/helpers/options.h"
 #include "core/memory_manager/unified_memory_manager.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "core/unit_tests/page_fault_manager/mock_cpu_page_fault_manager.h"
 #include "core/unit_tests/utilities/base_object_utils.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
 #include "runtime/command_stream/command_stream_receiver_hw.h"
-#include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/helpers/flush_stamp.h"
 #include "runtime/helpers/memory_properties_flags_helpers.h"
-#include "runtime/helpers/options.h"
 #include "runtime/helpers/surface_formats.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/memory_manager/allocations_list.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
-#include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/os_interface/os_context.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/fixtures/device_host_queue_fixture.h"
 #include "unit_tests/fixtures/execution_model_fixture.h"
 #include "unit_tests/fixtures/memory_management_fixture.h"
+#include "unit_tests/fixtures/multi_root_device_fixture.h"
 #include "unit_tests/helpers/gtest_helpers.h"
 #include "unit_tests/libult/ult_command_stream_receiver.h"
 #include "unit_tests/mocks/mock_command_queue.h"
@@ -2052,7 +2053,7 @@ HWTEST_F(KernelResidencyTest, test_MakeArgsResidentCheckImageFromImage) {
 
     cl_int retVal;
     MockContext context;
-    std::unique_ptr<NEO::Image> imageNV12(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+    std::unique_ptr<NEO::Image> imageNV12(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                                                         flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     EXPECT_EQ(imageNV12->getMediaPlaneType(), 0u);
 
@@ -2066,7 +2067,7 @@ HWTEST_F(KernelResidencyTest, test_MakeArgsResidentCheckImageFromImage) {
     imageDesc.image_depth = 0;
     imageDesc.mem_object = imageNV12.get();
 
-    std::unique_ptr<NEO::Image> imageY(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+    std::unique_ptr<NEO::Image> imageY(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                                                      flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     EXPECT_EQ(imageY->getMediaPlaneType(), 0u);
 
@@ -2947,4 +2948,26 @@ HWCMDTEST_F(IGFX_GEN8_CORE, DeviceQueueHwTest, whenSlbEndOffsetGreaterThanZeroTh
     EXPECT_EQ(0, memcmp(slb->getUnderlyingBuffer(), slbCopy, commandsSize * 128)); // dont touch memory for enqueues
 
     free(slbCopy);
+}
+
+using KernelMultiRootDeviceTest = MultiRootDeviceFixture;
+
+TEST_F(KernelMultiRootDeviceTest, privateSurfaceHasCorrectRootDeviceIndex) {
+    auto kernelInfo = std::make_unique<KernelInfo>();
+
+    // setup private memory
+    SPatchAllocateStatelessPrivateSurface tokenSPS;
+    tokenSPS.SurfaceStateHeapOffset = 64;
+    tokenSPS.DataParamOffset = 40;
+    tokenSPS.DataParamSize = 8;
+    tokenSPS.PerThreadPrivateMemorySize = 112;
+    kernelInfo->patchInfo.pAllocateStatelessPrivateSurface = &tokenSPS;
+
+    MockProgram program(*device->getExecutionEnvironment(), context.get(), false);
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *kernelInfo, *device.get()));
+    kernel->initialize();
+
+    auto privateSurface = kernel->getPrivateSurface();
+    ASSERT_NE(nullptr, privateSurface);
+    EXPECT_EQ(expectedRootDeviceIndex, privateSurface->getRootDeviceIndex());
 }

@@ -38,12 +38,12 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
                              gemCloseWorkerMode mode = gemCloseWorkerMode::gemCloseWorkerActive);
 
     bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
-    void makeResident(GraphicsAllocation &gfxAllocation) override;
     void processResidency(const ResidencyContainer &allocationsForResidency) override;
     void makeNonResident(GraphicsAllocation &gfxAllocation) override;
     bool waitForFlushStamp(FlushStamp &flushStampToWait) override;
 
     DrmMemoryManager *getMemoryManager() const;
+    GmmPageTableMngr *createPageTableManager() override;
 
     gemCloseWorkerMode peekGemCloseWorkerOperationMode() const {
         return this->gemCloseWorkerOperationMode;

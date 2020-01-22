@@ -6,13 +6,13 @@
  */
 
 #pragma once
+#include "core/helpers/hw_cmds.h"
+#include "core/helpers/hw_info.h"
+#include "core/helpers/options.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/execution_environment/execution_environment.h"
-#include "runtime/gen_common/hw_cmds.h"
 #include "runtime/helpers/csr_deps.h"
 #include "runtime/helpers/dirty_state_helpers.h"
-#include "runtime/helpers/hw_info.h"
-#include "runtime/helpers/options.h"
 
 namespace NEO {
 template <typename GfxFamily>
@@ -54,6 +54,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     size_t getCmdSizeForComputeMode();
     size_t getCmdSizeForMediaSampler(bool mediaSamplerRequired) const;
     size_t getCmdSizeForEngineMode(const DispatchFlags &dispatchFlags) const;
+
     void programComputeMode(LinearStream &csr, DispatchFlags &dispatchFlags);
     void adjustComputeMode(LinearStream &csr, DispatchFlags &dispatchFlags, void *const stateComputeMode);
 
@@ -89,7 +90,6 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     void programStateSip(LinearStream &cmdStream, Device &device);
     void programVFEState(LinearStream &csr, DispatchFlags &dispatchFlags, uint32_t maxFrontEndThreads);
     void programStallingPipeControlForBarrier(LinearStream &cmdStream, DispatchFlags &dispatchFlags);
-    virtual void initPageTableManagerRegisters(LinearStream &csr){};
     void programEngineModeCommands(LinearStream &csr, const DispatchFlags &dispatchFlags);
     void programEngineModeEpliogue(LinearStream &csr, const DispatchFlags &dispatchFlags);
 

@@ -1,13 +1,17 @@
 /*
- * Copyright (C) 2017-2019 Intel Corporation
+ * Copyright (C) 2017-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "core/command_stream/preemption.h"
+#include "core/gmm_helper/gmm_helper.h"
+#include "core/gmm_helper/page_table_mngr.h"
+#include "core/gmm_helper/resource_info.h"
+#include "core/memory_manager/graphics_allocation.h"
+#include "core/memory_manager/residency.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
-#include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/helpers/flush_stamp.h"
 #include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/mem_obj/buffer.h"
@@ -23,6 +27,8 @@
 #include "unit_tests/helpers/execution_environment_helper.h"
 #include "unit_tests/helpers/hw_parse.h"
 #include "unit_tests/mocks/linux/mock_drm_command_stream_receiver.h"
+#include "unit_tests/mocks/mock_gmm.h"
+#include "unit_tests/mocks/mock_gmm_page_table_mngr.h"
 #include "unit_tests/mocks/mock_host_ptr_manager.h"
 #include "unit_tests/mocks/mock_program.h"
 #include "unit_tests/mocks/mock_submissions_aggregator.h"
@@ -813,15 +819,15 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenDrmAllocationWhenGetBuffer
     auto allocation = new DrmAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, nullptr, size, (osHandle)0u, MemoryPool::MemoryNull);
 
     auto &bos = allocation->getBOs();
-    for (auto handleId = 0u; handleId < maxHandleCount; handleId++) {
+    for (auto handleId = 0u; handleId < EngineLimits::maxHandleCount; handleId++) {
         EXPECT_EQ(nullptr, bos[handleId]);
     }
 
-    for (auto handleId = 0u; handleId < maxHandleCount; handleId++) {
+    for (auto handleId = 0u; handleId < EngineLimits::maxHandleCount; handleId++) {
         allocation->getBufferObjectToModify(handleId) = this->createBO(size);
     }
 
-    for (auto handleId = 0u; handleId < maxHandleCount; handleId++) {
+    for (auto handleId = 0u; handleId < EngineLimits::maxHandleCount; handleId++) {
         EXPECT_NE(nullptr, bos[handleId]);
     }
 
@@ -1096,18 +1102,6 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, GivenTwoAllocationsWhenBackingS
     csr->getResidencyAllocations().clear();
 }
 
-HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, makeResidentSizeZero) {
-    std::unique_ptr<BufferObject> buffer(this->createBO(0));
-    DrmAllocation allocation(0, GraphicsAllocation::AllocationType::UNKNOWN, buffer.get(), nullptr, buffer->peekSize(), (osHandle)0u, MemoryPool::MemoryNull);
-    EXPECT_EQ(nullptr, allocation.getUnderlyingBuffer());
-    EXPECT_EQ(buffer->peekSize(), allocation.getUnderlyingBufferSize());
-
-    csr->makeResident(allocation);
-    csr->processResidency(csr->getResidencyAllocations());
-
-    EXPECT_FALSE(isResident<FamilyType>(buffer.get()));
-}
-
 HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, Flush) {
     auto &cs = csr->getCS();
     auto commandBuffer = static_cast<DrmAllocation *>(cs.getGraphicsAllocation());
@@ -1331,7 +1325,7 @@ class DrmMockBuffer : public Buffer {
         delete gfxAllocation;
     }
 
-    DrmMockBuffer(char *data, size_t size, DrmAllocation *alloc) : Buffer(nullptr, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(CL_MEM_USE_HOST_PTR, 0), CL_MEM_USE_HOST_PTR, 0, size, data, data, alloc, true, false, false),
+    DrmMockBuffer(char *data, size_t size, DrmAllocation *alloc) : Buffer(nullptr, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(CL_MEM_USE_HOST_PTR, 0, 0), CL_MEM_USE_HOST_PTR, 0, size, data, data, alloc, true, false, false),
                                                                    data(data),
                                                                    gfxAllocation(alloc) {
     }
@@ -1382,4 +1376,46 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenAllocationWithSingleBuffer
     EXPECT_TRUE(isResident<FamilyType>(bo));
 
     mm->freeGraphicsMemory(allocation);
+}
+
+template <typename GfxFamily>
+struct MockDrmCsr : public DrmCommandStreamReceiver<GfxFamily> {
+    using DrmCommandStreamReceiver<GfxFamily>::DrmCommandStreamReceiver;
+};
+
+HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenDrmCommandStreamReceiverWhenCreatePageTableMngrIsCalledThenCreatePageTableManager) {
+    executionEnvironment.prepareRootDeviceEnvironments(2);
+    auto csr = std::make_unique<MockDrmCsr<FamilyType>>(executionEnvironment, 1, gemCloseWorkerMode::gemCloseWorkerActive);
+    auto pageTableManager = csr->createPageTableManager();
+    EXPECT_EQ(executionEnvironment.rootDeviceEnvironments[1]->pageTableManager.get(), pageTableManager);
+}
+
+HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenPageTableManagerAndMapTrueWhenUpdateAuxTableIsCalledThenItReturnsTrue) {
+    auto mockMngr = new MockGmmPageTableMngr();
+    executionEnvironment.rootDeviceEnvironments[0]->pageTableManager.reset(mockMngr);
+    auto gmm = std::make_unique<MockGmm>();
+    GMM_DDI_UPDATEAUXTABLE ddiUpdateAuxTable = {};
+    EXPECT_CALL(*mockMngr, updateAuxTable(::testing::_)).Times(1).WillOnce(::testing::Invoke([&](const GMM_DDI_UPDATEAUXTABLE *arg) {ddiUpdateAuxTable = *arg; return GMM_SUCCESS; }));
+    auto result = executionEnvironment.rootDeviceEnvironments[0]->pageTableManager->updateAuxTable(0, gmm.get(), true);
+    EXPECT_EQ(ddiUpdateAuxTable.BaseGpuVA, 0ull);
+    EXPECT_EQ(ddiUpdateAuxTable.BaseResInfo, gmm->gmmResourceInfo->peekHandle());
+    EXPECT_EQ(ddiUpdateAuxTable.DoNotWait, true);
+    EXPECT_EQ(ddiUpdateAuxTable.Map, 1u);
+
+    EXPECT_TRUE(result);
+}
+
+HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenPageTableManagerAndMapFalseWhenUpdateAuxTableIsCalledThenItReturnsTrue) {
+    auto mockMngr = new MockGmmPageTableMngr();
+    executionEnvironment.rootDeviceEnvironments[0]->pageTableManager.reset(mockMngr);
+    auto gmm = std::make_unique<MockGmm>();
+    GMM_DDI_UPDATEAUXTABLE ddiUpdateAuxTable = {};
+    EXPECT_CALL(*mockMngr, updateAuxTable(::testing::_)).Times(1).WillOnce(::testing::Invoke([&](const GMM_DDI_UPDATEAUXTABLE *arg) {ddiUpdateAuxTable = *arg; return GMM_SUCCESS; }));
+    auto result = executionEnvironment.rootDeviceEnvironments[0]->pageTableManager->updateAuxTable(0, gmm.get(), false);
+    EXPECT_EQ(ddiUpdateAuxTable.BaseGpuVA, 0ull);
+    EXPECT_EQ(ddiUpdateAuxTable.BaseResInfo, gmm->gmmResourceInfo->peekHandle());
+    EXPECT_EQ(ddiUpdateAuxTable.DoNotWait, true);
+    EXPECT_EQ(ddiUpdateAuxTable.Map, 0u);
+
+    EXPECT_TRUE(result);
 }

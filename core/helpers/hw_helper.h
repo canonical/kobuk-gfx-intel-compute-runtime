@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2019 Intel Corporation
+ * Copyright (C) 2017-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,9 +7,9 @@
 
 #pragma once
 #include "core/command_stream/linear_stream.h"
+#include "core/helpers/hw_cmds.h"
 #include "runtime/built_ins/sip.h"
 #include "runtime/gen_common/aub_mapper.h"
-#include "runtime/gen_common/hw_cmds.h"
 #include "runtime/mem_obj/buffer.h"
 
 #include <cstdint>
@@ -37,7 +37,6 @@ class HwHelper {
     virtual void setupHardwareCapabilities(HardwareCapabilities *caps, const HardwareInfo &hwInfo) = 0;
     virtual bool isL3Configurable(const HardwareInfo &hwInfo) = 0;
     virtual SipKernelType getSipKernelType(bool debuggingActive) = 0;
-    virtual uint32_t getConfigureAddressSpaceMode() = 0;
     virtual bool isLocalMemoryEnabled(const HardwareInfo &hwInfo) const = 0;
     virtual bool isPageTableManagerSupported(const HardwareInfo &hwInfo) const = 0;
     virtual const AubMemDump::LrcaHelper &getCsTraits(aub_stream::EngineType engineType) const = 0;
@@ -71,6 +70,7 @@ class HwHelper {
     virtual uint32_t calculateAvailableThreadCount(PRODUCT_FAMILY family, uint32_t grfCount, uint32_t euCount,
                                                    uint32_t threadsPerEu) = 0;
     virtual uint32_t alignSlmSize(uint32_t slmSize) = 0;
+    virtual bool isForceEmuInt32DivRemSPWARequired(const HardwareInfo &hwInfo) = 0;
 
     static constexpr uint32_t lowPriorityGpgpuEngineIndex = 1;
 
@@ -133,8 +133,6 @@ class HwHelperHw : public HwHelper {
 
     SipKernelType getSipKernelType(bool debuggingActive) override;
 
-    uint32_t getConfigureAddressSpaceMode() override;
-
     bool isLocalMemoryEnabled(const HardwareInfo &hwInfo) const override;
 
     bool hvAlign4Required() const override;
@@ -181,6 +179,12 @@ class HwHelperHw : public HwHelper {
     static AuxTranslationMode getAuxTranslationMode();
 
     static bool isBlitAuxTranslationRequired(const HardwareInfo &hwInfo, const MultiDispatchInfo &multiDispatchInfo);
+
+    static bool isOffsetToSkipSetFFIDGPWARequired(const HardwareInfo &hwInfo);
+
+    static bool isForceDefaultRCSEngineWARequired(const HardwareInfo &hwInfo);
+
+    bool isForceEmuInt32DivRemSPWARequired(const HardwareInfo &hwInfo) override;
 
   protected:
     static const AuxTranslationMode defaultAuxTranslationMode;

@@ -1,15 +1,17 @@
 /*
- * Copyright (C) 2017-2019 Intel Corporation
+ * Copyright (C) 2017-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "core/command_stream/linear_stream.h"
+#include "core/gmm_helper/gmm_helper.h"
+#include "core/gmm_helper/page_table_mngr.h"
 #include "core/helpers/aligned_memory.h"
 #include "core/helpers/preamble.h"
+#include "core/memory_manager/residency.h"
 #include "runtime/execution_environment/execution_environment.h"
-#include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/helpers/flush_stamp.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/os_interface/linux/drm_allocation.h"
@@ -94,15 +96,6 @@ void DrmCommandStreamReceiver<GfxFamily>::exec(const BatchBuffer &batchBuffer, u
 }
 
 template <typename GfxFamily>
-void DrmCommandStreamReceiver<GfxFamily>::makeResident(GraphicsAllocation &gfxAllocation) {
-
-    if (gfxAllocation.getUnderlyingBufferSize() == 0)
-        return;
-
-    CommandStreamReceiver::makeResident(gfxAllocation);
-}
-
-template <typename GfxFamily>
 void DrmCommandStreamReceiver<GfxFamily>::makeResident(BufferObject *bo) {
     if (bo) {
         if (bo->peekIsReusableAllocation()) {
@@ -154,6 +147,14 @@ void DrmCommandStreamReceiver<GfxFamily>::makeNonResident(GraphicsAllocation &gf
 template <typename GfxFamily>
 DrmMemoryManager *DrmCommandStreamReceiver<GfxFamily>::getMemoryManager() const {
     return static_cast<DrmMemoryManager *>(CommandStreamReceiver::getMemoryManager());
+}
+
+template <typename GfxFamily>
+GmmPageTableMngr *DrmCommandStreamReceiver<GfxFamily>::createPageTableManager() {
+    GmmPageTableMngr *gmmPageTableMngr = GmmPageTableMngr::create(TT_TYPE::AUXTT, nullptr);
+    gmmPageTableMngr->setCsrHandle(this);
+    this->executionEnvironment.rootDeviceEnvironments[this->rootDeviceIndex]->pageTableManager.reset(gmmPageTableMngr);
+    return gmmPageTableMngr;
 }
 
 template <typename GfxFamily>

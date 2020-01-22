@@ -5,17 +5,17 @@
  *
  */
 
+#include "core/gen12lp/hw_cmds.h"
+
+using Family = NEO::TGLLPFamily;
+
 #include "runtime/command_stream/command_stream_receiver_hw_bdw_plus.inl"
 #include "runtime/command_stream/command_stream_receiver_hw_tgllp_plus.inl"
 #include "runtime/command_stream/device_command_stream.h"
 #include "runtime/gen12lp/helpers_gen12lp.h"
-#include "runtime/gen12lp/hw_cmds.h"
 #include "runtime/helpers/blit_commands_helper_bdw_plus.inl"
 
-#include "hw_info.h"
-
 namespace NEO {
-typedef TGLLPFamily Family;
 static auto gfxCore = IGFX_GEN12LP_CORE;
 
 template <>
@@ -52,18 +52,6 @@ template <>
 void populateFactoryTable<CommandStreamReceiverHw<Family>>() {
     extern CommandStreamReceiverCreateFunc commandStreamReceiverFactory[IGFX_MAX_CORE];
     commandStreamReceiverFactory[gfxCore] = DeviceCommandStreamReceiver<Family>::create;
-}
-
-template <>
-inline typename Family::PIPE_CONTROL *CommandStreamReceiverHw<Family>::addPipeControlBeforeStateBaseAddress(LinearStream &commandStream) {
-    auto pCmd = addPipeControlCmd(commandStream);
-    pCmd->setTextureCacheInvalidationEnable(true);
-    pCmd->setDcFlushEnable(true);
-
-    if (Gen12LPHelpers::hdcFlushForPipeControlBeforeStateBaseAddressRequired(executionEnvironment.getHardwareInfo()->platform.eProductFamily)) {
-        pCmd->setHdcPipelineFlush(true);
-    }
-    return pCmd;
 }
 
 template class CommandStreamReceiverHw<Family>;

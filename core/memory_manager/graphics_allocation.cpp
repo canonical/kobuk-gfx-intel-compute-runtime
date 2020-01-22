@@ -8,13 +8,13 @@
 #include "graphics_allocation.h"
 
 #include "core/helpers/aligned_memory.h"
-#include "runtime/os_interface/debug_settings_manager.h"
+#include "runtime/memory_manager/memory_manager.h"
+#include "runtime/utilities/logger.h"
 
 namespace NEO {
-
 void GraphicsAllocation::setAllocationType(AllocationType allocationType) {
     this->allocationType = allocationType;
-    DebugManager.logAllocation(this);
+    FileLoggerInstance().logAllocation(this);
 }
 
 GraphicsAllocation::GraphicsAllocation(uint32_t rootDeviceIndex, AllocationType allocationType, void *cpuPtrIn, uint64_t gpuAddress, uint64_t baseAddress,
@@ -25,7 +25,8 @@ GraphicsAllocation::GraphicsAllocation(uint32_t rootDeviceIndex, AllocationType 
       size(sizeIn),
       cpuPtr(cpuPtrIn),
       memoryPool(pool),
-      allocationType(allocationType) {
+      allocationType(allocationType),
+      usageInfos(MemoryManager::maxOsContextCount) {
 }
 
 GraphicsAllocation::GraphicsAllocation(uint32_t rootDeviceIndex, AllocationType allocationType, void *cpuPtrIn, size_t sizeIn, osHandle sharedHandleIn,
@@ -35,7 +36,8 @@ GraphicsAllocation::GraphicsAllocation(uint32_t rootDeviceIndex, AllocationType 
       size(sizeIn),
       cpuPtr(cpuPtrIn),
       memoryPool(pool),
-      allocationType(allocationType) {
+      allocationType(allocationType),
+      usageInfos(MemoryManager::maxOsContextCount) {
     sharingInfo.sharedHandle = sharedHandleIn;
 }
 

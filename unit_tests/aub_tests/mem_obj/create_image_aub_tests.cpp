@@ -97,7 +97,7 @@ HWTEST_P(AUBCreateImageArray, CheckArrayImages) {
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
     auto imgInfo = MockGmm::initImgInfo(imageDesc, 0, surfaceFormat);
     imgInfo.linearStorage = !hwHelper.tilingAllowed(false, Image::isImage1d(imageDesc), false);
-    auto queryGmm = MockGmm::queryImgParams(imgInfo);
+    auto queryGmm = MockGmm::queryImgParams(pDevice->getExecutionEnvironment()->getGmmClientContext(), imgInfo);
 
     //allocate host_ptr
     auto pixelSize = 4;
@@ -111,7 +111,7 @@ HWTEST_P(AUBCreateImageArray, CheckArrayImages) {
 
     image.reset(Image::create(
         context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -223,7 +223,7 @@ HWTEST_P(CopyHostPtrTest, imageWithDoubledRowPitchThatIsCreatedWithCopyHostPtrFl
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
     auto imgInfo = MockGmm::initImgInfo(imageDesc, 0, surfaceFormat);
 
-    MockGmm::queryImgParams(imgInfo);
+    MockGmm::queryImgParams(pDevice->getExecutionEnvironment()->getGmmClientContext(), imgInfo);
     auto lineWidth = imageDesc.image_width * elementSize;
     auto passedRowPitch = imgInfo.rowPitch * 2;
     imageDesc.image_row_pitch = passedRowPitch;
@@ -241,7 +241,7 @@ HWTEST_P(CopyHostPtrTest, imageWithDoubledRowPitchThatIsCreatedWithCopyHostPtrFl
         data += passedRowPitch;
     }
 
-    image.reset(Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+    image.reset(Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                               flags, 0, surfaceFormat, &imageDesc, pHostPtr, retVal));
     ASSERT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(image->getImageDesc().image_row_pitch, imgInfo.rowPitch);
@@ -292,7 +292,7 @@ HWTEST_P(UseHostPtrTest, imageWithRowPitchCreatedWithUseHostPtrFlagCopiedActuall
     imageDesc.image_height = 1;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
     auto imgInfo = MockGmm::initImgInfo(imageDesc, 0, surfaceFormat);
-    MockGmm::queryImgParams(imgInfo);
+    MockGmm::queryImgParams(pDevice->getExecutionEnvironment()->getGmmClientContext(), imgInfo);
     auto passedRowPitch = imgInfo.rowPitch + 32;
     imageDesc.image_row_pitch = passedRowPitch;
     unsigned char *pUseHostPtr = new unsigned char[passedRowPitch * imageDesc.image_height * elementSize];
@@ -311,7 +311,7 @@ HWTEST_P(UseHostPtrTest, imageWithRowPitchCreatedWithUseHostPtrFlagCopiedActuall
     }
     image.reset(Image::create(
         context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
         flags,
         0,
         surfaceFormat,
@@ -407,7 +407,7 @@ HWTEST_F(AUBCreateImage, image3DCreatedWithDoubledSlicePitchWhenQueriedForDataRe
     }
     cl_mem_flags flags = CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    image.reset(Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+    image.reset(Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                               flags, 0, surfaceFormat, &imageDesc, host_ptr, retVal));
 
     depthToCopy = imageDesc.image_depth;

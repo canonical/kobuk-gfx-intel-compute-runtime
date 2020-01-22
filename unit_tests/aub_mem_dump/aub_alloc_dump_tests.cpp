@@ -5,6 +5,7 @@
  *
  */
 
+#include "core/gmm_helper/gmm_helper.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/aub_mem_dump/aub_alloc_dump.h"
 #include "runtime/gmm_helper/gmm.h"
@@ -435,7 +436,7 @@ HWTEST_P(AubSurfaceDumpTests, givenGraphicsAllocationWhenGetDumpSurfaceIsCalledA
         imgDesc.image_height = 1;
         imgDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
         auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-        MockGmm::queryImgParams(imgInfo);
+        MockGmm::queryImgParams(pDevice->getExecutionEnvironment()->getGmmClientContext(), imgInfo);
         MockMemoryManager::AllocationData allocationData;
         allocationData.imgInfo = &imgInfo;
         auto imageAllocation = memoryManager.allocateGraphicsMemoryForImage(allocationData);

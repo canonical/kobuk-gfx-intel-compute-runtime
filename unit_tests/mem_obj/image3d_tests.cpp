@@ -60,7 +60,7 @@ class CreateImage3DTest : public DeviceFixture,
 HWTEST_F(CreateImage3DTest, validTypes) {
     cl_mem_flags flags = CL_MEM_READ_WRITE;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    auto image = Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0), flags, 0, surfaceFormat, &imageDesc, nullptr, retVal);
+    auto image = Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, surfaceFormat, &imageDesc, nullptr, retVal);
 
     ASSERT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, image);
@@ -89,7 +89,7 @@ HWTEST_F(CreateImage3DTest, calculate3dImageQpitchTiledAndLinear) {
     imageDesc.image_height = 1;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imageFormat);
     auto imgInfo = MockGmm::initImgInfo(imageDesc, 0, surfaceFormat);
-    MockGmm::queryImgParams(imgInfo);
+    MockGmm::queryImgParams(context->getDevice(0)->getExecutionEnvironment()->getGmmClientContext(), imgInfo);
 
     auto image = Image::create(
         context,
@@ -113,7 +113,7 @@ HWTEST_F(CreateImage3DTest, calculate3dImageQpitchTiledAndLinear) {
 
     // query again
     surfaceFormat = Image::getSurfaceFormatFromTable(0, &imageFormat);
-    MockGmm::queryImgParams(imgInfo);
+    MockGmm::queryImgParams(context->getDevice(0)->getExecutionEnvironment()->getGmmClientContext(), imgInfo);
 
     image = Image::create(
         context,

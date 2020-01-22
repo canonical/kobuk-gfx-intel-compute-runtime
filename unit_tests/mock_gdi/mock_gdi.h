@@ -26,7 +26,6 @@
     FUNCTION(Unlock, IN CONST D3DKMT_UNLOCK *)                                                           \
     FUNCTION(Render, IN OUT D3DKMT_RENDER *)                                                             \
     FUNCTION(CreateSynchronizationObject, IN OUT D3DKMT_CREATESYNCHRONIZATIONOBJECT *)                   \
-    FUNCTION(DestroySynchronizationObject, IN CONST D3DKMT_DESTROYSYNCHRONIZATIONOBJECT *)               \
     FUNCTION(SignalSynchronizationObject, IN CONST D3DKMT_SIGNALSYNCHRONIZATIONOBJECT *)                 \
     FUNCTION(WaitForSynchronizationObject, IN OUT CONST D3DKMT_WAITFORSYNCHRONIZATIONOBJECT *)           \
     FUNCTION(WaitForSynchronizationObjectFromCpu, IN CONST D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU *) \
@@ -38,7 +37,6 @@
     FUNCTION(SubmitCommand, IN CONST D3DKMT_SUBMITCOMMAND *)                                             \
     FUNCTION(Evict, IN OUT D3DKMT_EVICT *)                                                               \
     FUNCTION(GetDeviceState, IN OUT D3DKMT_GETDEVICESTATE *)                                             \
-    FUNCTION(RegisterTrimNotification, IN D3DKMT_REGISTERTRIMNOTIFICATION *)                             \
     FUNCTION(UnregisterTrimNotification, IN D3DKMT_UNREGISTERTRIMNOTIFICATION *)
 
 #define STR(X) #X
@@ -60,6 +58,7 @@
 
 #define NT_RESOURCE_HANDLE (static_cast<D3DKMT_HANDLE>(0x80000001))
 #define NT_ALLOCATION_HANDLE (static_cast<D3DKMT_HANDLE>(0x80000009))
+#define TRIM_CALLBACK_HANDLE (reinterpret_cast<VOID *>(0x80123000010))
 
 #define GPUVA (static_cast<D3DGPU_VIRTUAL_ADDRESS>(0x80123000000))
 
@@ -78,4 +77,8 @@ D3DKMT_CREATECONTEXTVIRTUAL *getCreateContextData();
 D3DKMT_CREATEHWQUEUE *getCreateHwQueueData();
 D3DKMT_DESTROYHWQUEUE *getDestroyHwQueueData();
 D3DKMT_SUBMITCOMMANDTOHWQUEUE *getSubmitCommandToHwQueueData();
+D3DKMT_DESTROYSYNCHRONIZATIONOBJECT *getDestroySynchronizationObjectData();
 void InitGfxPartition();
+VOID *getMonitorFenceCpuFenceAddress();
+bool *getCreateSynchronizationObject2FailCall();
+bool *getRegisterTrimNotificationFailCall();

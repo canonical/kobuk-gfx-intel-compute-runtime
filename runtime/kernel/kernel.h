@@ -6,16 +6,18 @@
  */
 
 #pragma once
+#include "core/debug_settings/debug_settings_manager.h"
+#include "core/helpers/address_patch.h"
 #include "core/helpers/preamble.h"
 #include "core/unified_memory/unified_memory.h"
 #include "core/utilities/stackvec.h"
+#include "public/cl_ext_private.h"
 #include "runtime/api/cl_types.h"
+#include "runtime/command_stream/command_stream_receiver_hw.h"
 #include "runtime/command_stream/thread_arbitration_policy.h"
 #include "runtime/device_queue/device_queue.h"
-#include "runtime/helpers/address_patch.h"
 #include "runtime/helpers/base_object.h"
 #include "runtime/helpers/properties_helper.h"
-#include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/program/kernel_info.h"
 #include "runtime/program/program.h"
 
@@ -88,10 +90,10 @@ class Kernel : public BaseObject<_cl_kernel> {
             *errcodeRet = retVal;
         }
 
-        if (DebugManager.debugKernelDumpingAvailable()) {
+        if (FileLoggerInstance().enabled()) {
             std::string source;
             program->getSource(source);
-            DebugManager.dumpKernel(kernelInfo.name, source);
+            FileLoggerInstance().dumpKernel(kernelInfo.name, source);
         }
 
         return pKernel;
@@ -218,6 +220,8 @@ class Kernel : public BaseObject<_cl_kernel> {
     void patchDefaultDeviceQueue(DeviceQueue *devQueue);
     void patchEventPool(DeviceQueue *devQueue);
     void patchBlocksSimdSize();
+    bool usesSyncBuffer();
+    void patchSyncBuffer(Device &device, GraphicsAllocation *gfxAllocation, size_t bufferOffset);
 
     GraphicsAllocation *getKernelReflectionSurface() const {
         return kernelReflectionSurface;
@@ -344,14 +348,10 @@ class Kernel : public BaseObject<_cl_kernel> {
     const bool isParentKernel;
     const bool isSchedulerKernel;
 
-    template <typename GfxFamily>
-    uint32_t getThreadArbitrationPolicy() {
-        if (kernelInfo.patchInfo.executionEnvironment->SubgroupIndependentForwardProgressRequired) {
-            return PreambleHelper<GfxFamily>::getDefaultThreadArbitrationPolicy();
-        } else {
-            return ThreadArbitrationPolicy::AgeBased;
-        }
+    uint32_t getThreadArbitrationPolicy() const {
+        return threadArbitrationPolicy;
     }
+
     bool checkIfIsParentKernelAndBlocksUsesPrintf();
 
     bool is32Bit() const {
@@ -395,6 +395,9 @@ class Kernel : public BaseObject<_cl_kernel> {
     void clearUnifiedMemoryExecInfo();
 
     bool areStatelessWritesUsed() { return containsStatelessWrites; }
+    void setThreadArbitrationPolicy(uint32_t propertyValue) {
+        this->threadArbitrationPolicy = propertyValue;
+    }
 
     uint32_t getMaxWorkGroupCount(const cl_uint workDim, const size_t *localWorkSize) const;
 
@@ -519,6 +522,7 @@ class Kernel : public BaseObject<_cl_kernel> {
     uint32_t patchedArgumentsNum = 0;
     uint32_t startOffset = 0;
     uint32_t statelessUncacheableArgsCount = 0;
+    uint32_t threadArbitrationPolicy = ThreadArbitrationPolicy::NotPresent;
 
     std::vector<PatchInfoData> patchInfoDataList;
     std::unique_ptr<ImageTransformer> imageTransformer;

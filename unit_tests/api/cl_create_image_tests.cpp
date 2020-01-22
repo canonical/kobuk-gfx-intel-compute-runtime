@@ -5,8 +5,8 @@
  *
  */
 
+#include "core/helpers/hw_info.h"
 #include "runtime/context/context.h"
-#include "runtime/helpers/hw_info.h"
 #include "unit_tests/helpers/unit_test_helper.h"
 #include "unit_tests/mocks/mock_device.h"
 
@@ -17,11 +17,11 @@ using namespace NEO;
 namespace ClCreateImageTests {
 
 template <typename T>
-struct clCreateImageTests : public api_fixture,
+struct clCreateImageTests : public ApiFixture,
                             public T {
 
     void SetUp() override {
-        api_fixture::SetUp();
+        ApiFixture::SetUp();
 
         // clang-format off
         imageFormat.image_channel_order     = CL_RGBA;
@@ -41,7 +41,7 @@ struct clCreateImageTests : public api_fixture,
     }
 
     void TearDown() override {
-        api_fixture::TearDown();
+        ApiFixture::TearDown();
     }
 
     cl_image_format imageFormat;
@@ -69,7 +69,7 @@ HWTEST_F(clCreateImageTest, GivenDeviceThatDoesntSupportImagesWhenCreatingTiledI
     auto device = static_cast<MockDevice *>(pContext->getDevice(0));
     device->deviceInfo.imageSupport = CL_FALSE;
     cl_bool imageSupportInfo = CL_TRUE;
-    auto status = clGetDeviceInfo(devices[0], CL_DEVICE_IMAGE_SUPPORT, sizeof(imageSupportInfo), &imageSupportInfo, nullptr);
+    auto status = clGetDeviceInfo(devices[testedRootDeviceIndex], CL_DEVICE_IMAGE_SUPPORT, sizeof(imageSupportInfo), &imageSupportInfo, nullptr);
     EXPECT_EQ(CL_SUCCESS, status);
     cl_bool expectedValue = CL_FALSE;
     EXPECT_EQ(expectedValue, imageSupportInfo);
@@ -96,7 +96,7 @@ HWTEST_F(clCreateImageTest, GivenDeviceThatDoesntSupportImagesWhenCreatingNonTil
     auto device = static_cast<MockDevice *>(pContext->getDevice(0));
     device->deviceInfo.imageSupport = CL_FALSE;
     cl_bool imageSupportInfo = CL_TRUE;
-    auto status = clGetDeviceInfo(devices[0], CL_DEVICE_IMAGE_SUPPORT, sizeof(imageSupportInfo), &imageSupportInfo, nullptr);
+    auto status = clGetDeviceInfo(devices[testedRootDeviceIndex], CL_DEVICE_IMAGE_SUPPORT, sizeof(imageSupportInfo), &imageSupportInfo, nullptr);
     EXPECT_EQ(CL_SUCCESS, status);
     cl_bool expectedValue = CL_FALSE;
     EXPECT_EQ(expectedValue, imageSupportInfo);
@@ -409,6 +409,7 @@ static cl_mem_flags validFlags[] = {
     CL_MEM_HOST_READ_ONLY,
     CL_MEM_HOST_NO_ACCESS,
     CL_MEM_NO_ACCESS_INTEL,
+    CL_MEM_FORCE_LINEAR_STORAGE_INTEL,
     CL_MEM_ACCESS_FLAGS_UNRESTRICTED_INTEL,
 };
 

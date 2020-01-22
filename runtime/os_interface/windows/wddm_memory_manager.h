@@ -54,8 +54,6 @@ class WddmMemoryManager : public MemoryManager {
 
     bool isMemoryBudgetExhausted() const override;
 
-    bool mapAuxGpuVA(GraphicsAllocation *graphicsAllocation) override;
-
     AlignedMallocRestrictions *getAlignedMallocRestrictions() override;
 
     bool copyMemoryToAllocation(GraphicsAllocation *graphicsAllocation, const void *memoryToCopy, size_t sizeToCopy) override;
@@ -68,6 +66,7 @@ class WddmMemoryManager : public MemoryManager {
     GraphicsAllocation *allocateGraphicsMemoryWithAlignment(const AllocationData &allocationData) override;
     GraphicsAllocation *allocateGraphicsMemoryWithHostPtr(const AllocationData &allocationData) override;
     GraphicsAllocation *allocateGraphicsMemory64kb(const AllocationData &allocationData) override;
+    GraphicsAllocation *allocateShareableMemory(const AllocationData &allocationData) override;
     GraphicsAllocation *allocateGraphicsMemoryForImageImpl(const AllocationData &allocationData, std::unique_ptr<Gmm> gmm) override;
 
     void *lockResourceImpl(GraphicsAllocation &graphicsAllocation) override;
@@ -82,7 +81,6 @@ class WddmMemoryManager : public MemoryManager {
     bool mapGpuVirtualAddress(WddmAllocation *graphicsAllocation, const void *requiredGpuPtr);
     bool mapGpuVaForOneHandleAllocation(WddmAllocation *graphicsAllocation, const void *requiredGpuPtr);
     bool createGpuAllocationsWithRetry(WddmAllocation *graphicsAllocation);
-    void obtainGpuAddressIfNeeded(WddmAllocation *graphicsAllocation);
     AlignedMallocRestrictions mallocRestrictions;
 
   private:

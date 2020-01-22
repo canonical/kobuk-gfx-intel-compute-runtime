@@ -9,8 +9,6 @@
 #include "runtime/aub_mem_dump/aub_services.h"
 
 #include "engine_node.h"
-#include "hw_cmds_ehl.h"
-#include "hw_info_ehl.h"
 
 namespace NEO {
 
@@ -48,6 +46,7 @@ const RuntimeCapabilityTable EHL::capabilityTable{
     CmdServicesMemTraceVersion::DeviceValues::Ehl, // aubDeviceId
     1,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
+    sizeof(EHL::GRF),                              // grfSize
     false,                                         // blitterOperationsSupported
     false,                                         // ftrSupportsInteger64BitAtomics
     false,                                         // ftrSupportsFP64
@@ -66,7 +65,8 @@ const RuntimeCapabilityTable EHL::capabilityTable{
     false,                                         // supportsVme
     false,                                         // supportCacheFlushAfterWalker
     true,                                          // supportsImages
-    true                                           // supportsDeviceEnqueue
+    true,                                          // supportsDeviceEnqueue
+    true                                           // hostPtrTrackingEnabled
 };
 
 WorkaroundTable EHL::workaroundTable = {};

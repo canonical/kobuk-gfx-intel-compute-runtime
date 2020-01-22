@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/helpers/options.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/command_stream/command_stream_receiver_with_aub_dump.h"
 #include "runtime/execution_environment/execution_environment.h"
-#include "runtime/helpers/options.h"
 #include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "test.h"
 #include "unit_tests/fixtures/mock_aub_center_fixture.h"
@@ -24,7 +24,7 @@ struct CreateCommandStreamReceiverTest : public ::testing::TestWithParam<Command
 HWTEST_P(CreateCommandStreamReceiverTest, givenCreateCommandStreamWhenCsrIsSetToValidTypeThenTheFuntionReturnsCommandStreamReceiver) {
     DebugManagerStateRestore stateRestorer;
     HardwareInfo *hwInfo = nullptr;
-    ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo);
+    ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
     MockAubCenterFixture::setMockAubCenter(*executionEnvironment->rootDeviceEnvironments[0]);
 
     CommandStreamReceiverType csrType = GetParam();

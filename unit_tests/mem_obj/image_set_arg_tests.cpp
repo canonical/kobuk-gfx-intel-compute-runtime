@@ -5,12 +5,12 @@
  *
  */
 
+#include "core/gmm_helper/gmm_helper.h"
 #include "core/helpers/aligned_memory.h"
 #include "core/helpers/basic_math.h"
 #include "core/helpers/ptr_math.h"
 #include "core/memory_manager/graphics_allocation.h"
 #include "runtime/gmm_helper/gmm.h"
-#include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/helpers/surface_formats.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/mem_obj/image.h"
@@ -275,7 +275,7 @@ HWTEST_F(ImageSetArgTest, givenImageArraySizeGreaterThanOneButTypeIsNotImageArra
     imageInfo.imgDesc = &imageDesc;
     imageInfo.plane = GMM_NO_PLANE;
 
-    auto gmm = MockGmm::queryImgParams(imageInfo);
+    auto gmm = MockGmm::queryImgParams(context.getDevice(0)->getExecutionEnvironment()->getGmmClientContext(), imageInfo);
     allocation->setDefaultGmm(gmm.release());
 
     auto image = std::unique_ptr<Image>{Image::createSharedImage(
@@ -512,7 +512,7 @@ HWTEST_F(ImageSetArgTest, givenMcsAllocationWhenSetArgIsCalledWithoutUnifiedAuxC
     typedef typename FamilyType::RENDER_SURFACE_STATE RENDER_SURFACE_STATE;
     McsSurfaceInfo msi = {10, 20, 3};
     auto mcsAlloc = context->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
-    mcsAlloc->setDefaultGmm(new Gmm(nullptr, 1, false));
+    mcsAlloc->setDefaultGmm(new Gmm(pDevice->getExecutionEnvironment()->getGmmClientContext(), nullptr, 1, false));
     cl_image_desc imgDesc = Image2dDefaults::imageDesc;
     imgDesc.num_samples = 8;
 
@@ -611,7 +611,7 @@ HWTEST_F(ImageSetArgTest, givenMcsAllocationAndRenderCompressionWhenSetArgOnMult
     typedef typename FamilyType::RENDER_SURFACE_STATE RENDER_SURFACE_STATE;
     McsSurfaceInfo msi = {10, 20, 3};
     auto mcsAlloc = context->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
-    mcsAlloc->setDefaultGmm(new Gmm(nullptr, 1, false));
+    mcsAlloc->setDefaultGmm(new Gmm(pDevice->getExecutionEnvironment()->getGmmClientContext(), nullptr, 1, false));
     cl_image_desc imgDesc = Image2dDefaults::imageDesc;
     imgDesc.num_samples = 8;
 
@@ -672,7 +672,7 @@ HWTEST_F(ImageSetArgTest, givenMcsAllocationWhenSetArgIsCalledWithUnifiedAuxCapa
 
     McsSurfaceInfo msi = {10, 20, 3};
     auto mcsAlloc = context->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
-    mcsAlloc->setDefaultGmm(new Gmm(nullptr, 1, false));
+    mcsAlloc->setDefaultGmm(new Gmm(pDevice->getExecutionEnvironment()->getGmmClientContext(), nullptr, 1, false));
     cl_image_desc imgDesc = Image2dDefaults::imageDesc;
     imgDesc.num_samples = 8;
 
@@ -702,7 +702,7 @@ HWTEST_F(ImageSetArgTest, givenMcsAllocationWhenSetArgIsCalledWithUnifiedAuxCapa
 
     McsSurfaceInfo msi = {10, 20, 3};
     auto mcsAlloc = context->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
-    mcsAlloc->setDefaultGmm(new Gmm(nullptr, 1, false));
+    mcsAlloc->setDefaultGmm(new Gmm(pDevice->getExecutionEnvironment()->getGmmClientContext(), nullptr, 1, false));
     cl_image_desc imgDesc = Image2dDefaults::imageDesc;
     imgDesc.num_samples = 8;
 
@@ -731,7 +731,7 @@ HWTEST_F(ImageSetArgTest, givenMcsAllocationWhenSetArgIsCalledWithUnifiedAuxCapa
 
     McsSurfaceInfo msi = {10, 20, 3};
     auto mcsAlloc = context->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
-    mcsAlloc->setDefaultGmm(new Gmm(nullptr, 1, false));
+    mcsAlloc->setDefaultGmm(new Gmm(pDevice->getExecutionEnvironment()->getGmmClientContext(), nullptr, 1, false));
     cl_image_desc imgDesc = Image2dDefaults::imageDesc;
     imgDesc.num_samples = 8;
 

@@ -5,12 +5,11 @@
  *
  */
 
+#include "core/gen11/hw_cmds_lkf.h"
 #include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_services.h"
 
 #include "engine_node.h"
-#include "hw_cmds_lkf.h"
-#include "hw_info_lkf.h"
 
 namespace NEO {
 
@@ -48,6 +47,7 @@ const RuntimeCapabilityTable LKF::capabilityTable{
     CmdServicesMemTraceVersion::DeviceValues::Lkf, // aubDeviceId
     1,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
+    sizeof(LKF::GRF),                              // grfSize
     false,                                         // blitterOperationsSupported
     false,                                         // ftrSupportsInteger64BitAtomics
     false,                                         // ftrSupportsFP64
@@ -66,7 +66,8 @@ const RuntimeCapabilityTable LKF::capabilityTable{
     false,                                         // supportsVme
     false,                                         // supportCacheFlushAfterWalker
     true,                                          // supportsImages
-    true                                           // supportsDeviceEnqueue
+    true,                                          // supportsDeviceEnqueue
+    true                                           // hostPtrTrackingEnabled
 };
 
 WorkaroundTable LKF::workaroundTable = {};

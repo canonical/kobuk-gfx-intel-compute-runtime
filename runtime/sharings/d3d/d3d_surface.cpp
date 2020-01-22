@@ -10,7 +10,7 @@
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
 #include "runtime/gmm_helper/gmm.h"
-#include "runtime/gmm_helper/gmm_helper.h"
+#include "runtime/gmm_helper/gmm_types_converter.h"
 #include "runtime/helpers/get_info.h"
 #include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/mem_obj/image.h"
@@ -71,7 +71,7 @@ Image *D3DSurface::create(Context *context, cl_dx9_surface_info_khr *surfaceInfo
         return nullptr;
     }
 
-    imgInfo.plane = GmmHelper::convertPlane(oclPlane);
+    imgInfo.plane = GmmTypesConverter::convertPlane(oclPlane);
     imgInfo.surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imgFormat);
 
     bool isSharedResource = false;
@@ -84,7 +84,7 @@ Image *D3DSurface::create(Context *context, cl_dx9_surface_info_khr *surfaceInfo
         AllocationProperties allocProperties(rootDeviceIndex, false, 0u, GraphicsAllocation::AllocationType::SHARED_IMAGE, false);
         alloc = context->getMemoryManager()->createGraphicsAllocationFromSharedHandle((osHandle)((UINT_PTR)surfaceInfo->shared_handle), allocProperties,
                                                                                       false);
-        updateImgInfo(alloc->getDefaultGmm(), imgInfo, imgDesc, oclPlane, 0u);
+        updateImgInfoAndDesc(alloc->getDefaultGmm(), imgInfo, imgDesc, oclPlane, 0u);
     } else {
         lockable = !(surfaceDesc.Usage & D3DResourceFlags::USAGE_RENDERTARGET) || oclPlane != OCLPlane::NO_PLANE;
         if (!lockable) {
@@ -94,7 +94,7 @@ Image *D3DSurface::create(Context *context, cl_dx9_surface_info_khr *surfaceInfo
             imgDesc.image_width /= 2;
             imgDesc.image_height /= 2;
         }
-        MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0);
+        MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0);
         AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(rootDeviceIndex, imgInfo, true, memoryProperties);
         allocProperties.allocationType = GraphicsAllocation::AllocationType::SHARED_RESOURCE_COPY;
 

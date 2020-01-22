@@ -7,9 +7,12 @@
 
 #include "api.h"
 
+#include "core/debug_settings/debug_settings_manager.h"
 #include "core/execution_environment/root_device_environment.h"
 #include "core/helpers/aligned_memory.h"
+#include "core/helpers/hw_info.h"
 #include "core/helpers/kernel_helpers.h"
+#include "core/helpers/options.h"
 #include "core/memory_manager/unified_memory_manager.h"
 #include "core/utilities/stackvec.h"
 #include "runtime/accelerators/intel_motion_estimation.h"
@@ -25,10 +28,8 @@
 #include "runtime/event/user_event.h"
 #include "runtime/gtpin/gtpin_notify.h"
 #include "runtime/helpers/get_info.h"
-#include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/mem_properties_parser_helper.h"
 #include "runtime/helpers/memory_properties_flags_helpers.h"
-#include "runtime/helpers/options.h"
 #include "runtime/helpers/queue_helpers.h"
 #include "runtime/helpers/validators.h"
 #include "runtime/kernel/kernel.h"
@@ -36,7 +37,7 @@
 #include "runtime/mem_obj/image.h"
 #include "runtime/mem_obj/mem_obj_helper.h"
 #include "runtime/mem_obj/pipe.h"
-#include "runtime/os_interface/debug_settings_manager.h"
+#include "runtime/os_interface/os_context.h"
 #include "runtime/platform/platform.h"
 #include "runtime/program/program.h"
 #include "runtime/sampler/sampler.h"
@@ -124,7 +125,7 @@ cl_int CL_API_CALL clGetPlatformInfo(cl_platform_id platform,
     DBG_LOG_INPUTS("platform", platform,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
     auto pPlatform = castToObject<Platform>(platform);
     if (pPlatform) {
@@ -190,8 +191,9 @@ cl_int CL_API_CALL clGetDeviceIDs(cl_platform_id platform,
             break;
         }
 
-        Device *device = pPlatform->getDevice(0);
-        DEBUG_BREAK_IF(device == nullptr);
+        if (DebugManager.flags.LimitAmountOfReturnedDevices.get()) {
+            numDev = std::min(static_cast<cl_uint>(DebugManager.flags.LimitAmountOfReturnedDevices.get()), numDev);
+        }
 
         if (deviceType == CL_DEVICE_TYPE_ALL) {
             /* According to Spec, set it to all except TYPE_CUSTOM. */
@@ -203,16 +205,20 @@ cl_int CL_API_CALL clGetDeviceIDs(cl_platform_id platform,
         }
 
         cl_uint retNum = 0;
+        for (auto rootDeviceIndex = 0u; rootDeviceIndex < numDev; rootDeviceIndex++) {
 
-        if (deviceType & device->getDeviceInfo().deviceType) {
-            if (devices) {
-                devices[retNum] = device;
+            Device *device = pPlatform->getDevice(rootDeviceIndex);
+            DEBUG_BREAK_IF(device == nullptr);
+
+            if (deviceType & device->getDeviceInfo().deviceType) {
+                if (devices) {
+                    if (retNum >= numEntries) {
+                        break;
+                    }
+                    devices[retNum] = device;
+                }
+                retNum++;
             }
-            retNum++;
-        }
-
-        if (DebugManager.flags.LimitAmountOfReturnedDevices.get()) {
-            retNum = std::min(static_cast<uint32_t>(DebugManager.flags.LimitAmountOfReturnedDevices.get()), retNum);
         }
 
         if (numDevices) {
@@ -235,7 +241,7 @@ cl_int CL_API_CALL clGetDeviceInfo(cl_device_id device,
     TRACING_ENTER(clGetDeviceInfo, &device, &paramName, &paramValueSize, &paramValue, &paramValueSizeRet);
     cl_int retVal = CL_INVALID_DEVICE;
     API_ENTER(&retVal);
-    DBG_LOG_INPUTS("clDevice", device, "paramName", paramName, "paramValueSize", paramValueSize, "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize), "paramValueSizeRet", paramValueSizeRet);
+    DBG_LOG_INPUTS("clDevice", device, "paramName", paramName, "paramValueSize", paramValueSize, "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize), "paramValueSizeRet", paramValueSizeRet);
 
     Device *pDevice = castToObject<Device>(device);
     if (pDevice != nullptr) {
@@ -251,17 +257,37 @@ cl_int CL_API_CALL clCreateSubDevices(cl_device_id inDevice,
                                       cl_uint numDevices,
                                       cl_device_id *outDevices,
                                       cl_uint *numDevicesRet) {
-    TRACING_ENTER(clCreateSubDevices, &inDevice, &properties, &numDevices, &outDevices, &numDevicesRet);
-    cl_int retVal = CL_INVALID_DEVICE;
-    API_ENTER(&retVal);
-    DBG_LOG_INPUTS("inDevice", inDevice,
-                   "properties", properties,
-                   "numDevices", numDevices,
-                   "outDevices:", outDevices,
-                   "numDevicesRet", numDevicesRet);
 
-    TRACING_EXIT(clCreateSubDevices, &retVal);
-    return retVal;
+    Device *pInDevice = castToObject<Device>(inDevice);
+    if (pInDevice == nullptr) {
+        return CL_INVALID_DEVICE;
+    }
+    auto subDevicesCount = pInDevice->getNumAvailableDevices();
+    if (subDevicesCount <= 1) {
+        return CL_INVALID_DEVICE;
+    }
+    if (properties == nullptr || properties[0] != CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN ||
+        properties[1] != CL_DEVICE_AFFINITY_DOMAIN_NUMA || properties[2] != 0) {
+        return CL_INVALID_VALUE;
+    }
+
+    if (numDevicesRet != nullptr) {
+        *numDevicesRet = subDevicesCount;
+    }
+
+    if (outDevices == nullptr) {
+        return CL_SUCCESS;
+    }
+
+    if (numDevices < subDevicesCount) {
+        return CL_INVALID_VALUE;
+    }
+
+    for (uint32_t i = 0; i < subDevicesCount; i++) {
+        outDevices[i] = pInDevice->getDeviceById(i);
+    }
+
+    return CL_SUCCESS;
 }
 
 cl_int CL_API_CALL clRetainDevice(cl_device_id device) {
@@ -428,7 +454,7 @@ cl_int CL_API_CALL clGetContextInfo(cl_context context,
     DBG_LOG_INPUTS("context", context,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
     auto pContext = castToObject<Context>(context);
 
@@ -544,7 +570,7 @@ cl_int CL_API_CALL clGetCommandQueueInfo(cl_command_queue commandQueue,
     DBG_LOG_INPUTS("commandQueue", commandQueue,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
 
     getQueueInfo<CommandQueue>(commandQueue, paramName, paramValueSize, paramValue, paramValueSizeRet, retVal);
@@ -584,14 +610,14 @@ cl_mem CL_API_CALL clCreateBuffer(cl_context context,
     DBG_LOG_INPUTS("cl_context", context,
                    "cl_mem_flags", flags,
                    "size", size,
-                   "hostPtr", DebugManager.infoPointerToString(hostPtr, size));
+                   "hostPtr", NEO::FileLoggerInstance().infoPointerToString(hostPtr, size));
 
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
     cl_mem buffer = nullptr;
     ErrorCodeHelper err(errcodeRet, CL_SUCCESS);
 
-    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0);
+    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0);
     if (isFieldValid(flags, MemObjHelper::validFlagsForBuffer)) {
         Buffer::validateInputAndCreateBuffer(context, memoryProperties, flags, 0, size, hostPtr, retVal, buffer);
     } else {
@@ -613,7 +639,7 @@ cl_mem CL_API_CALL clCreateBufferWithPropertiesINTEL(cl_context context,
     DBG_LOG_INPUTS("cl_context", context,
                    "cl_mem_properties_intel", properties,
                    "size", size,
-                   "hostPtr", DebugManager.infoPointerToString(hostPtr, size));
+                   "hostPtr", NEO::FileLoggerInstance().infoPointerToString(hostPtr, size));
 
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
@@ -623,7 +649,8 @@ cl_mem CL_API_CALL clCreateBufferWithPropertiesINTEL(cl_context context,
     MemoryPropertiesFlags memoryProperties;
     cl_mem_flags flags = 0;
     cl_mem_flags_intel flagsIntel = 0;
-    if (MemoryPropertiesParser::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, MemoryPropertiesParser::MemoryPropertiesParser::ObjType::BUFFER)) {
+    cl_mem_alloc_flags_intel allocflags = 0;
+    if (MemoryPropertiesParser::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags, MemoryPropertiesParser::MemoryPropertiesParser::ObjType::BUFFER)) {
         Buffer::validateInputAndCreateBuffer(context, memoryProperties, flags, flagsIntel, size, hostPtr, retVal, buffer);
     } else {
         retVal = CL_INVALID_VALUE;
@@ -766,7 +793,7 @@ cl_mem CL_API_CALL clCreateImage(cl_context context,
     retVal = validateObjects(WithCastToInternal(context, &pContext));
 
     if (retVal == CL_SUCCESS) {
-        MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0);
+        MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0);
         if (isFieldValid(flags, MemObjHelper::validFlagsForImage)) {
             image = Image::validateAndCreateImage(pContext, memoryProperties, flags, 0, imageFormat, imageDesc, hostPtr, retVal);
         } else {
@@ -805,10 +832,11 @@ cl_mem CL_API_CALL clCreateImageWithPropertiesINTEL(cl_context context,
     MemoryPropertiesFlags memoryProperties;
     cl_mem_flags flags = 0;
     cl_mem_flags_intel flagsIntel = 0;
+    cl_mem_alloc_flags_intel allocflags = 0;
     retVal = validateObjects(WithCastToInternal(context, &pContext));
 
     if (retVal == CL_SUCCESS) {
-        if (MemoryPropertiesParser::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, MemoryPropertiesParser::MemoryPropertiesParser::ObjType::IMAGE)) {
+        if (MemoryPropertiesParser::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags, MemoryPropertiesParser::MemoryPropertiesParser::ObjType::IMAGE)) {
             image = Image::validateAndCreateImage(pContext, memoryProperties, flags, flagsIntel, imageFormat, imageDesc, hostPtr, retVal);
         } else {
             retVal = CL_INVALID_VALUE;
@@ -855,7 +883,7 @@ cl_mem CL_API_CALL clCreateImage2D(cl_context context,
     retVal = validateObjects(WithCastToInternal(context, &pContext));
 
     if (retVal == CL_SUCCESS) {
-        MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0);
+        MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0);
         image2D = Image::validateAndCreateImage(pContext, memoryProperties, flags, 0, imageFormat, &imageDesc, hostPtr, retVal);
     }
 
@@ -906,7 +934,7 @@ cl_mem CL_API_CALL clCreateImage3D(cl_context context,
     retVal = validateObjects(WithCastToInternal(context, &pContext));
 
     if (retVal == CL_SUCCESS) {
-        MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0);
+        MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0);
         image3D = Image::validateAndCreateImage(pContext, memoryProperties, flags, 0, imageFormat, &imageDesc, hostPtr, retVal);
     }
 
@@ -995,7 +1023,7 @@ cl_int CL_API_CALL clGetMemObjectInfo(cl_mem memobj,
     DBG_LOG_INPUTS("memobj", memobj,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
     MemObj *pMemObj = nullptr;
     retVal = validateObjects(WithCastToInternal(memobj, &pMemObj));
@@ -1021,7 +1049,7 @@ cl_int CL_API_CALL clGetImageInfo(cl_mem image,
     DBG_LOG_INPUTS("image", image,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
     retVal = validateObjects(image);
     if (CL_SUCCESS != retVal) {
@@ -1068,7 +1096,7 @@ cl_int CL_API_CALL clGetImageParamsINTEL(cl_context context,
     }
     if (CL_SUCCESS == retVal) {
         surfaceFormat = (SurfaceFormatInfo *)Image::getSurfaceFormatFromTable(memFlags, imageFormat);
-        retVal = Image::validate(pContext, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(memFlags, 0), surfaceFormat, imageDesc, nullptr);
+        retVal = Image::validate(pContext, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(memFlags, 0, 0), surfaceFormat, imageDesc, nullptr);
     }
     if (CL_SUCCESS == retVal) {
         retVal = Image::getImageParams(pContext, memFlags, surfaceFormat, imageDesc, imageRowPitch, imageSlicePitch);
@@ -1175,7 +1203,7 @@ cl_int CL_API_CALL clGetSamplerInfo(cl_sampler sampler,
     DBG_LOG_INPUTS("sampler", sampler,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
 
     auto pSampler = castToObject<Sampler>(sampler);
@@ -1240,7 +1268,7 @@ cl_program CL_API_CALL clCreateProgramWithBinary(cl_context context,
     retVal = validateObjects(context, deviceList, *deviceList, binaries, *binaries, lengths, *lengths);
     cl_program program = nullptr;
 
-    DebugManager.dumpBinaryProgram(numDevices, lengths, binaries);
+    NEO::FileLoggerInstance().dumpBinaryProgram(numDevices, lengths, binaries);
 
     if (CL_SUCCESS == retVal) {
         program = Program::create(
@@ -1469,7 +1497,7 @@ cl_int CL_API_CALL clGetProgramInfo(cl_program program,
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("clProgram", program, "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
     retVal = validateObjects(program);
 
@@ -1496,7 +1524,7 @@ cl_int CL_API_CALL clGetProgramBuildInfo(cl_program program,
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("clProgram", program, "cl_device_id", device,
-                   "paramName", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramName", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSize", paramValueSize, "paramValue", paramValue,
                    "paramValueSizeRet", paramValueSizeRet);
     retVal = validateObjects(program);
@@ -1660,7 +1688,7 @@ cl_int CL_API_CALL clSetKernelArg(cl_kernel kernel,
 
     auto pKernel = castToObject<Kernel>(kernel);
     DBG_LOG_INPUTS("kernel", kernel, "argIndex", argIndex,
-                   "argSize", argSize, "argValue", DebugManager.infoPointerToString(argValue, argSize));
+                   "argSize", argSize, "argValue", NEO::FileLoggerInstance().infoPointerToString(argValue, argSize));
     do {
         if (!pKernel) {
             retVal = CL_INVALID_KERNEL;
@@ -1696,7 +1724,7 @@ cl_int CL_API_CALL clGetKernelInfo(cl_kernel kernel,
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("kernel", kernel, "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
     auto pKernel = castToObject<Kernel>(kernel);
     retVal = pKernel
@@ -1724,7 +1752,7 @@ cl_int CL_API_CALL clGetKernelArgInfo(cl_kernel kernel,
                    "argIndx", argIndx,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
 
     auto pKernel = castToObject<Kernel>(kernel);
@@ -1754,7 +1782,7 @@ cl_int CL_API_CALL clGetKernelWorkGroupInfo(cl_kernel kernel,
                    "device", device,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
 
     auto pKernel = castToObject<Kernel>(kernel);
@@ -1776,7 +1804,7 @@ cl_int CL_API_CALL clWaitForEvents(cl_uint numEvents,
 
     auto retVal = CL_SUCCESS;
     API_ENTER(&retVal);
-    DBG_LOG_INPUTS("eventList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventList), numEvents));
+    DBG_LOG_INPUTS("eventList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventList), numEvents));
 
     for (unsigned int i = 0; i < numEvents && retVal == CL_SUCCESS; i++)
         retVal = validateObjects(eventList[i]);
@@ -1803,7 +1831,7 @@ cl_int CL_API_CALL clGetEventInfo(cl_event event,
     DBG_LOG_INPUTS("event", event,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
 
     Event *neoEvent = castToObject<Event>(event);
@@ -1887,7 +1915,7 @@ cl_event CL_API_CALL clCreateUserEvent(cl_context context,
 
     Event *userEvent = new UserEvent(ctx);
     cl_event userClEvent = userEvent;
-    DebugManager.logInputs("cl_event", userClEvent, "UserEvent", userEvent);
+    DBG_LOG_INPUTS("cl_event", userClEvent, "UserEvent", userEvent);
 
     TRACING_EXIT(clCreateUserEvent, &userClEvent);
     return userClEvent;
@@ -1898,10 +1926,8 @@ cl_int CL_API_CALL clRetainEvent(cl_event event) {
     auto retVal = CL_SUCCESS;
     API_ENTER(&retVal);
 
-    DBG_LOG_INPUTS("event", event);
-
     auto pEvent = castToObject<Event>(event);
-    DebugManager.logInputs("cl_event", event, "Event", pEvent);
+    DBG_LOG_INPUTS("cl_event", event, "Event", pEvent);
 
     if (pEvent) {
         pEvent->retain();
@@ -1917,9 +1943,8 @@ cl_int CL_API_CALL clReleaseEvent(cl_event event) {
     TRACING_ENTER(clReleaseEvent, &event);
     auto retVal = CL_SUCCESS;
     API_ENTER(&retVal);
-    DBG_LOG_INPUTS("cl_event", event);
     auto pEvent = castToObject<Event>(event);
-    DebugManager.logInputs("cl_event", event, "Event", pEvent);
+    DBG_LOG_INPUTS("cl_event", event, "Event", pEvent);
 
     if (pEvent) {
         pEvent->release();
@@ -2011,7 +2036,7 @@ cl_int CL_API_CALL clGetEventProfilingInfo(cl_event event,
     DBG_LOG_INPUTS("event", event,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
     auto eventObject = castToObject<Event>(event);
 
@@ -2080,8 +2105,8 @@ cl_int CL_API_CALL clEnqueueReadBuffer(cl_command_queue commandQueue,
     DBG_LOG_INPUTS("commandQueue", commandQueue, "buffer", buffer, "blockingRead", blockingRead,
                    "offset", offset, "cb", cb, "ptr", ptr,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (CL_SUCCESS == retVal) {
 
@@ -2103,7 +2128,7 @@ cl_int CL_API_CALL clEnqueueReadBuffer(cl_command_queue commandQueue,
             event);
     }
 
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueReadBuffer, &retVal);
     return retVal;
 }
@@ -2128,23 +2153,23 @@ cl_int CL_API_CALL clEnqueueReadBufferRect(cl_command_queue commandQueue,
     DBG_LOG_INPUTS("commandQueue", commandQueue,
                    "buffer", buffer,
                    "blockingRead", blockingRead,
-                   "bufferOrigin[0]", DebugManager.getInput(bufferOrigin, 0),
-                   "bufferOrigin[1]", DebugManager.getInput(bufferOrigin, 1),
-                   "bufferOrigin[2]", DebugManager.getInput(bufferOrigin, 2),
-                   "hostOrigin[0]", DebugManager.getInput(hostOrigin, 0),
-                   "hostOrigin[1]", DebugManager.getInput(hostOrigin, 1),
-                   "hostOrigin[2]", DebugManager.getInput(hostOrigin, 2),
-                   "region[0]", DebugManager.getInput(region, 0),
-                   "region[1]", DebugManager.getInput(region, 1),
-                   "region[2]", DebugManager.getInput(region, 2),
+                   "bufferOrigin[0]", NEO::FileLoggerInstance().getInput(bufferOrigin, 0),
+                   "bufferOrigin[1]", NEO::FileLoggerInstance().getInput(bufferOrigin, 1),
+                   "bufferOrigin[2]", NEO::FileLoggerInstance().getInput(bufferOrigin, 2),
+                   "hostOrigin[0]", NEO::FileLoggerInstance().getInput(hostOrigin, 0),
+                   "hostOrigin[1]", NEO::FileLoggerInstance().getInput(hostOrigin, 1),
+                   "hostOrigin[2]", NEO::FileLoggerInstance().getInput(hostOrigin, 2),
+                   "region[0]", NEO::FileLoggerInstance().getInput(region, 0),
+                   "region[1]", NEO::FileLoggerInstance().getInput(region, 1),
+                   "region[2]", NEO::FileLoggerInstance().getInput(region, 2),
                    "bufferRowPitch", bufferRowPitch,
                    "bufferSlicePitch", bufferSlicePitch,
                    "hostRowPitch", hostRowPitch,
                    "hostSlicePitch", hostSlicePitch,
                    "ptr", ptr,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
     Buffer *pBuffer = nullptr;
@@ -2210,8 +2235,8 @@ cl_int CL_API_CALL clEnqueueWriteBuffer(cl_command_queue commandQueue,
     DBG_LOG_INPUTS("commandQueue", commandQueue, "buffer", buffer, "blockingWrite", blockingWrite,
                    "offset", offset, "cb", cb, "ptr", ptr,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
     Buffer *pBuffer = nullptr;
@@ -2241,7 +2266,7 @@ cl_int CL_API_CALL clEnqueueWriteBuffer(cl_command_queue commandQueue,
             event);
     }
 
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueWriteBuffer, &retVal);
     return retVal;
 }
@@ -2265,14 +2290,14 @@ cl_int CL_API_CALL clEnqueueWriteBufferRect(cl_command_queue commandQueue,
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("commandQueue", commandQueue, "buffer", buffer, "blockingWrite", blockingWrite,
-                   "bufferOrigin[0]", DebugManager.getInput(bufferOrigin, 0), "bufferOrigin[1]", DebugManager.getInput(bufferOrigin, 1), "bufferOrigin[2]", DebugManager.getInput(bufferOrigin, 2),
-                   "hostOrigin[0]", DebugManager.getInput(hostOrigin, 0), "hostOrigin[1]", DebugManager.getInput(hostOrigin, 1), "hostOrigin[2]", DebugManager.getInput(hostOrigin, 2),
-                   "region[0]", DebugManager.getInput(region, 0), "region[1]", DebugManager.getInput(region, 1), "region[2]", DebugManager.getInput(region, 2),
+                   "bufferOrigin[0]", NEO::FileLoggerInstance().getInput(bufferOrigin, 0), "bufferOrigin[1]", NEO::FileLoggerInstance().getInput(bufferOrigin, 1), "bufferOrigin[2]", NEO::FileLoggerInstance().getInput(bufferOrigin, 2),
+                   "hostOrigin[0]", NEO::FileLoggerInstance().getInput(hostOrigin, 0), "hostOrigin[1]", NEO::FileLoggerInstance().getInput(hostOrigin, 1), "hostOrigin[2]", NEO::FileLoggerInstance().getInput(hostOrigin, 2),
+                   "region[0]", NEO::FileLoggerInstance().getInput(region, 0), "region[1]", NEO::FileLoggerInstance().getInput(region, 1), "region[2]", NEO::FileLoggerInstance().getInput(region, 2),
                    "bufferRowPitch", bufferRowPitch, "bufferSlicePitch", bufferSlicePitch,
                    "hostRowPitch", hostRowPitch, "hostSlicePitch", hostSlicePitch, "ptr", ptr,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
     Buffer *pBuffer = nullptr;
@@ -2337,11 +2362,11 @@ cl_int CL_API_CALL clEnqueueFillBuffer(cl_command_queue commandQueue,
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("commandQueue", commandQueue, "buffer", buffer,
-                   "pattern", DebugManager.infoPointerToString(pattern, patternSize), "patternSize", patternSize,
+                   "pattern", NEO::FileLoggerInstance().infoPointerToString(pattern, patternSize), "patternSize", patternSize,
                    "offset", offset, "size", size,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
     Buffer *pBuffer = nullptr;
@@ -2384,8 +2409,8 @@ cl_int CL_API_CALL clEnqueueCopyBuffer(cl_command_queue commandQueue,
     DBG_LOG_INPUTS("commandQueue", commandQueue, "srcBuffer", srcBuffer, "dstBuffer", dstBuffer,
                    "srcOffset", srcOffset, "dstOffset", dstOffset, "cb", cb,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
     Buffer *pSrcBuffer = nullptr;
@@ -2415,7 +2440,7 @@ cl_int CL_API_CALL clEnqueueCopyBuffer(cl_command_queue commandQueue,
             eventWaitList,
             event);
     }
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueCopyBuffer, &retVal);
     return retVal;
 }
@@ -2438,14 +2463,14 @@ cl_int CL_API_CALL clEnqueueCopyBufferRect(cl_command_queue commandQueue,
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("commandQueue", commandQueue, "srcBuffer", srcBuffer, "dstBuffer", dstBuffer,
-                   "srcOrigin[0]", DebugManager.getInput(srcOrigin, 0), "srcOrigin[1]", DebugManager.getInput(srcOrigin, 1), "srcOrigin[2]", DebugManager.getInput(srcOrigin, 2),
-                   "dstOrigin[0]", DebugManager.getInput(dstOrigin, 0), "dstOrigin[1]", DebugManager.getInput(dstOrigin, 1), "dstOrigin[2]", DebugManager.getInput(dstOrigin, 2),
-                   "region[0]", DebugManager.getInput(region, 0), "region[1]", DebugManager.getInput(region, 1), "region[2]", DebugManager.getInput(region, 2),
+                   "srcOrigin[0]", NEO::FileLoggerInstance().getInput(srcOrigin, 0), "srcOrigin[1]", NEO::FileLoggerInstance().getInput(srcOrigin, 1), "srcOrigin[2]", NEO::FileLoggerInstance().getInput(srcOrigin, 2),
+                   "dstOrigin[0]", NEO::FileLoggerInstance().getInput(dstOrigin, 0), "dstOrigin[1]", NEO::FileLoggerInstance().getInput(dstOrigin, 1), "dstOrigin[2]", NEO::FileLoggerInstance().getInput(dstOrigin, 2),
+                   "region[0]", NEO::FileLoggerInstance().getInput(region, 0), "region[1]", NEO::FileLoggerInstance().getInput(region, 1), "region[2]", NEO::FileLoggerInstance().getInput(region, 2),
                    "srcRowPitch", srcRowPitch, "srcSlicePitch", srcSlicePitch,
                    "dstRowPitch", dstRowPitch, "dstSlicePitch", dstSlicePitch,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
     Buffer *pSrcBuffer = nullptr;
@@ -2471,7 +2496,7 @@ cl_int CL_API_CALL clEnqueueCopyBufferRect(cl_command_queue commandQueue,
             eventWaitList,
             event);
     }
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueCopyBufferRect, &retVal);
     return retVal;
 }
@@ -2499,12 +2524,12 @@ cl_int CL_API_CALL clEnqueueReadImage(cl_command_queue commandQueue,
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("commandQueue", commandQueue, "image", image, "blockingRead", blockingRead,
-                   "origin[0]", DebugManager.getInput(origin, 0), "origin[1]", DebugManager.getInput(origin, 1), "origin[2]", DebugManager.getInput(origin, 2),
-                   "region[0]", DebugManager.getInput(region, 0), "region[1]", DebugManager.getInput(region, 1), "region[2]", DebugManager.getInput(region, 2),
+                   "origin[0]", NEO::FileLoggerInstance().getInput(origin, 0), "origin[1]", NEO::FileLoggerInstance().getInput(origin, 1), "origin[2]", NEO::FileLoggerInstance().getInput(origin, 2),
+                   "region[0]", NEO::FileLoggerInstance().getInput(region, 0), "region[1]", NEO::FileLoggerInstance().getInput(region, 1), "region[2]", NEO::FileLoggerInstance().getInput(region, 2),
                    "rowPitch", rowPitch, "slicePitch", slicePitch, "ptr", ptr,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (CL_SUCCESS == retVal) {
 
@@ -2539,7 +2564,7 @@ cl_int CL_API_CALL clEnqueueReadImage(cl_command_queue commandQueue,
             eventWaitList,
             event);
     }
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueReadImage, &retVal);
     return retVal;
 }
@@ -2567,12 +2592,12 @@ cl_int CL_API_CALL clEnqueueWriteImage(cl_command_queue commandQueue,
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("commandQueue", commandQueue, "image", image, "blockingWrite", blockingWrite,
-                   "origin[0]", DebugManager.getInput(origin, 0), "origin[1]", DebugManager.getInput(origin, 1), "origin[2]", DebugManager.getInput(origin, 2),
-                   "region[0]", DebugManager.getInput(region, 0), "region[1]", DebugManager.getInput(region, 1), "region[2]", DebugManager.getInput(region, 2),
+                   "origin[0]", NEO::FileLoggerInstance().getInput(origin, 0), "origin[1]", NEO::FileLoggerInstance().getInput(origin, 1), "origin[2]", NEO::FileLoggerInstance().getInput(origin, 2),
+                   "region[0]", NEO::FileLoggerInstance().getInput(region, 0), "region[1]", NEO::FileLoggerInstance().getInput(region, 1), "region[2]", NEO::FileLoggerInstance().getInput(region, 2),
                    "inputRowPitch", inputRowPitch, "inputSlicePitch", inputSlicePitch, "ptr", ptr,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (CL_SUCCESS == retVal) {
         if (pImage->writeMemObjFlagsInvalid()) {
@@ -2606,7 +2631,7 @@ cl_int CL_API_CALL clEnqueueWriteImage(cl_command_queue commandQueue,
             eventWaitList,
             event);
     }
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueWriteImage, &retVal);
     return retVal;
 }
@@ -2633,11 +2658,11 @@ cl_int CL_API_CALL clEnqueueFillImage(cl_command_queue commandQueue,
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("commandQueue", commandQueue, "image", image, "fillColor", fillColor,
-                   "origin[0]", DebugManager.getInput(origin, 0), "origin[1]", DebugManager.getInput(origin, 1), "origin[2]", DebugManager.getInput(origin, 2),
-                   "region[0]", DebugManager.getInput(region, 0), "region[1]", DebugManager.getInput(region, 1), "region[2]", DebugManager.getInput(region, 2),
+                   "origin[0]", NEO::FileLoggerInstance().getInput(origin, 0), "origin[1]", NEO::FileLoggerInstance().getInput(origin, 1), "origin[2]", NEO::FileLoggerInstance().getInput(origin, 2),
+                   "region[0]", NEO::FileLoggerInstance().getInput(region, 0), "region[1]", NEO::FileLoggerInstance().getInput(region, 1), "region[2]", NEO::FileLoggerInstance().getInput(region, 2),
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (CL_SUCCESS == retVal) {
         retVal = Image::validateRegionAndOrigin(origin, region, dstImage->getImageDesc());
@@ -2655,7 +2680,7 @@ cl_int CL_API_CALL clEnqueueFillImage(cl_command_queue commandQueue,
             eventWaitList,
             event);
     }
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueFillImage, &retVal);
     return retVal;
 }
@@ -2682,12 +2707,12 @@ cl_int CL_API_CALL clEnqueueCopyImage(cl_command_queue commandQueue,
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("commandQueue", commandQueue, "srcImage", srcImage, "dstImage", dstImage,
-                   "srcOrigin[0]", DebugManager.getInput(srcOrigin, 0), "srcOrigin[1]", DebugManager.getInput(srcOrigin, 1), "srcOrigin[2]", DebugManager.getInput(srcOrigin, 2),
-                   "dstOrigin[0]", DebugManager.getInput(dstOrigin, 0), "dstOrigin[1]", DebugManager.getInput(dstOrigin, 1), "dstOrigin[2]", DebugManager.getInput(dstOrigin, 2),
+                   "srcOrigin[0]", NEO::FileLoggerInstance().getInput(srcOrigin, 0), "srcOrigin[1]", NEO::FileLoggerInstance().getInput(srcOrigin, 1), "srcOrigin[2]", NEO::FileLoggerInstance().getInput(srcOrigin, 2),
+                   "dstOrigin[0]", NEO::FileLoggerInstance().getInput(dstOrigin, 0), "dstOrigin[1]", NEO::FileLoggerInstance().getInput(dstOrigin, 1), "dstOrigin[2]", NEO::FileLoggerInstance().getInput(dstOrigin, 2),
                    "region[0]", region ? region[0] : 0, "region[1]", region ? region[1] : 0, "region[2]", region ? region[2] : 0,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (CL_SUCCESS == retVal) {
         if (memcmp(&pSrcImage->getImageFormat(), &pDstImage->getImageFormat(), sizeof(cl_image_format))) {
@@ -2736,7 +2761,7 @@ cl_int CL_API_CALL clEnqueueCopyImage(cl_command_queue commandQueue,
             eventWaitList,
             event);
     }
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueCopyImage, &retVal);
     return retVal;
 }
@@ -2755,12 +2780,12 @@ cl_int CL_API_CALL clEnqueueCopyImageToBuffer(cl_command_queue commandQueue,
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("commandQueue", commandQueue, "srcImage", srcImage, "dstBuffer", dstBuffer,
-                   "srcOrigin[0]", DebugManager.getInput(srcOrigin, 0), "srcOrigin[1]", DebugManager.getInput(srcOrigin, 1), "srcOrigin[2]", DebugManager.getInput(srcOrigin, 2),
-                   "region[0]", DebugManager.getInput(region, 0), "region[1]", DebugManager.getInput(region, 1), "region[2]", DebugManager.getInput(region, 2),
+                   "srcOrigin[0]", NEO::FileLoggerInstance().getInput(srcOrigin, 0), "srcOrigin[1]", NEO::FileLoggerInstance().getInput(srcOrigin, 1), "srcOrigin[2]", NEO::FileLoggerInstance().getInput(srcOrigin, 2),
+                   "region[0]", NEO::FileLoggerInstance().getInput(region, 0), "region[1]", NEO::FileLoggerInstance().getInput(region, 1), "region[2]", NEO::FileLoggerInstance().getInput(region, 2),
                    "dstOffset", dstOffset,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
     Image *pSrcImage = nullptr;
@@ -2796,7 +2821,7 @@ cl_int CL_API_CALL clEnqueueCopyImageToBuffer(cl_command_queue commandQueue,
             event);
     }
 
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueCopyImageToBuffer, &retVal);
     return retVal;
 }
@@ -2815,11 +2840,11 @@ cl_int CL_API_CALL clEnqueueCopyBufferToImage(cl_command_queue commandQueue,
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("commandQueue", commandQueue, "srcBuffer", srcBuffer, "dstImage", dstImage, "srcOffset", srcOffset,
-                   "dstOrigin[0]", DebugManager.getInput(dstOrigin, 0), "dstOrigin[1]", DebugManager.getInput(dstOrigin, 1), "dstOrigin[2]", DebugManager.getInput(dstOrigin, 2),
-                   "region[0]", DebugManager.getInput(region, 0), "region[1]", DebugManager.getInput(region, 1), "region[2]", DebugManager.getInput(region, 2),
+                   "dstOrigin[0]", NEO::FileLoggerInstance().getInput(dstOrigin, 0), "dstOrigin[1]", NEO::FileLoggerInstance().getInput(dstOrigin, 1), "dstOrigin[2]", NEO::FileLoggerInstance().getInput(dstOrigin, 2),
+                   "region[0]", NEO::FileLoggerInstance().getInput(region, 0), "region[1]", NEO::FileLoggerInstance().getInput(region, 1), "region[2]", NEO::FileLoggerInstance().getInput(region, 2),
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
     Buffer *pSrcBuffer = nullptr;
@@ -2855,7 +2880,7 @@ cl_int CL_API_CALL clEnqueueCopyBufferToImage(cl_command_queue commandQueue,
             event);
     }
 
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueCopyBufferToImage, &retVal);
     return retVal;
 }
@@ -2878,8 +2903,8 @@ void *CL_API_CALL clEnqueueMapBuffer(cl_command_queue commandQueue,
     DBG_LOG_INPUTS("commandQueue", commandQueue, "buffer", buffer, "blockingMap", blockingMap,
                    "mapFlags", mapFlags, "offset", offset, "cb", cb,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     do {
         auto pCommandQueue = castToObject<CommandQueue>(commandQueue);
@@ -2913,7 +2938,7 @@ void *CL_API_CALL clEnqueueMapBuffer(cl_command_queue commandQueue,
     } while (false);
 
     err.set(retVal);
-    DBG_LOG_INPUTS("retPtr", retPtr, "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("retPtr", retPtr, "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
 
     TRACING_EXIT(clEnqueueMapBuffer, &retPtr);
     return retPtr;
@@ -2941,14 +2966,14 @@ void *CL_API_CALL clEnqueueMapImage(cl_command_queue commandQueue,
 
     DBG_LOG_INPUTS("commandQueue", commandQueue, "image", image,
                    "blockingMap", blockingMap, "mapFlags", mapFlags,
-                   "origin[0]", DebugManager.getInput(origin, 0), "origin[1]", DebugManager.getInput(origin, 1),
-                   "origin[2]", DebugManager.getInput(origin, 2), "region[0]", DebugManager.getInput(region, 0),
-                   "region[1]", DebugManager.getInput(region, 1), "region[2]", DebugManager.getInput(region, 2),
-                   "imageRowPitch", DebugManager.getInput(imageRowPitch, 0),
-                   "imageSlicePitch", DebugManager.getInput(imageSlicePitch, 0),
+                   "origin[0]", NEO::FileLoggerInstance().getInput(origin, 0), "origin[1]", NEO::FileLoggerInstance().getInput(origin, 1),
+                   "origin[2]", NEO::FileLoggerInstance().getInput(origin, 2), "region[0]", NEO::FileLoggerInstance().getInput(region, 0),
+                   "region[1]", NEO::FileLoggerInstance().getInput(region, 1), "region[2]", NEO::FileLoggerInstance().getInput(region, 2),
+                   "imageRowPitch", NEO::FileLoggerInstance().getInput(imageRowPitch, 0),
+                   "imageSlicePitch", NEO::FileLoggerInstance().getInput(imageSlicePitch, 0),
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     do {
         Image *pImage = nullptr;
@@ -2993,7 +3018,7 @@ void *CL_API_CALL clEnqueueMapImage(cl_command_queue commandQueue,
     } while (false);
 
     err.set(retVal);
-    DBG_LOG_INPUTS("retPtr", retPtr, "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("retPtr", retPtr, "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
 
     TRACING_EXIT(clEnqueueMapImage, &retPtr);
     return retPtr;
@@ -3020,8 +3045,8 @@ cl_int CL_API_CALL clEnqueueUnmapMemObject(cl_command_queue commandQueue,
                    "memObj", memObj,
                    "mappedPtr", mappedPtr,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (retVal == CL_SUCCESS) {
         if (pMemObj->peekClMemObjType() == CL_MEM_OBJECT_PIPE) {
@@ -3033,7 +3058,7 @@ cl_int CL_API_CALL clEnqueueUnmapMemObject(cl_command_queue commandQueue,
         retVal = pCommandQueue->enqueueUnmapMemObject(pMemObj, mappedPtr, numEventsInWaitList, eventWaitList, event);
     }
 
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueUnmapMemObject, &retVal);
     return retVal;
 }
@@ -3054,8 +3079,8 @@ cl_int CL_API_CALL clEnqueueMigrateMemObjects(cl_command_queue commandQueue,
                    "memObjects", memObjects,
                    "flags", flags,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
     retVal = validateObjects(
@@ -3087,7 +3112,7 @@ cl_int CL_API_CALL clEnqueueMigrateMemObjects(cl_command_queue commandQueue,
                                                      numEventsInWaitList,
                                                      eventWaitList,
                                                      event);
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueMigrateMemObjects, &retVal);
     return retVal;
 }
@@ -3105,20 +3130,21 @@ cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue commandQueue,
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("commandQueue", commandQueue, "cl_kernel", kernel,
-                   "globalWorkOffset[0]", DebugManager.getInput(globalWorkOffset, 0),
-                   "globalWorkOffset[1]", DebugManager.getInput(globalWorkOffset, 1),
-                   "globalWorkOffset[2]", DebugManager.getInput(globalWorkOffset, 2),
-                   "globalWorkSize", DebugManager.getSizes(globalWorkSize, workDim, false),
-                   "localWorkSize", DebugManager.getSizes(localWorkSize, workDim, true),
+                   "globalWorkOffset[0]", NEO::FileLoggerInstance().getInput(globalWorkOffset, 0),
+                   "globalWorkOffset[1]", NEO::FileLoggerInstance().getInput(globalWorkOffset, 1),
+                   "globalWorkOffset[2]", NEO::FileLoggerInstance().getInput(globalWorkOffset, 2),
+                   "globalWorkSize", NEO::FileLoggerInstance().getSizes(globalWorkSize, workDim, false),
+                   "localWorkSize", NEO::FileLoggerInstance().getSizes(localWorkSize, workDim, true),
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
+    Kernel *pKernel = nullptr;
 
     retVal = validateObjects(
         WithCastToInternal(commandQueue, &pCommandQueue),
-        kernel,
+        WithCastToInternal(kernel, &pKernel),
         EventWaitList(numEventsInWaitList, eventWaitList));
 
     if (CL_SUCCESS != retVal) {
@@ -3126,7 +3152,12 @@ cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue commandQueue,
         return retVal;
     }
 
-    auto pKernel = castToObjectOrAbort<Kernel>(kernel);
+    if (pKernel->getKernelInfo().patchInfo.pAllocateSyncBuffer != nullptr) {
+        retVal = CL_INVALID_KERNEL;
+        TRACING_EXIT(clEnqueueNDRangeKernel, &retVal);
+        return retVal;
+    }
+
     TakeOwnershipWrapper<Kernel> kernelOwnership(*pKernel, gtpinIsGTPinInitialized());
     if (gtpinIsGTPinInitialized()) {
         gtpinNotifyKernelSubmit(kernel, pCommandQueue);
@@ -3142,7 +3173,7 @@ cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue commandQueue,
         eventWaitList,
         event);
 
-    DBG_LOG_INPUTS("event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(clEnqueueNDRangeKernel, &retVal);
     return retVal;
 }
@@ -3157,8 +3188,8 @@ cl_int CL_API_CALL clEnqueueTask(cl_command_queue commandQueue,
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("commandQueue", commandQueue, "kernel", kernel,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
     cl_uint workDim = 3;
     size_t *globalWorkOffset = nullptr;
     size_t globalWorkSize[3] = {1, 1, 1};
@@ -3193,8 +3224,8 @@ cl_int CL_API_CALL clEnqueueNativeKernel(cl_command_queue commandQueue,
     DBG_LOG_INPUTS("commandQueue", commandQueue, "userFunc", userFunc, "args", args,
                    "cbArgs", cbArgs, "numMemObjects", numMemObjects, "memList", memList, "argsMemLoc", argsMemLoc,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     TRACING_EXIT(clEnqueueNativeKernel, &retVal);
     return retVal;
@@ -3229,7 +3260,7 @@ cl_int CL_API_CALL clEnqueueWaitForEvents(cl_command_queue commandQueue,
     TRACING_ENTER(clEnqueueWaitForEvents, &commandQueue, &numEvents, &eventList);
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
-    DBG_LOG_INPUTS("commandQueue", commandQueue, "eventList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventList), numEvents));
+    DBG_LOG_INPUTS("commandQueue", commandQueue, "eventList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventList), numEvents));
 
     auto pCommandQueue = castToObject<CommandQueue>(commandQueue);
     if (!pCommandQueue) {
@@ -3279,10 +3310,10 @@ cl_int CL_API_CALL clEnqueueMarkerWithWaitList(cl_command_queue commandQueue,
     TRACING_ENTER(clEnqueueMarkerWithWaitList, &commandQueue, &numEventsInWaitList, &eventWaitList, &event);
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
-    DebugManager.logInputs("cl_command_queue", commandQueue,
-                           "numEventsInWaitList", numEventsInWaitList,
-                           "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                           "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+    DBG_LOG_INPUTS("cl_command_queue", commandQueue,
+                   "numEventsInWaitList", numEventsInWaitList,
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
     retVal = validateObjects(
@@ -3311,8 +3342,8 @@ cl_int CL_API_CALL clEnqueueBarrierWithWaitList(cl_command_queue commandQueue,
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("cl_command_queue", commandQueue,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
 
@@ -3372,11 +3403,17 @@ clCreatePerfCountersCommandQueueINTEL(
         err.set(CL_INVALID_QUEUE_PROPERTIES);
         return commandQueue;
     }
+
+    if (configuration != 0) {
+        err.set(CL_INVALID_OPERATION);
+        return commandQueue;
+    }
+
     commandQueue = clCreateCommandQueue(context, device, properties, errcodeRet);
     if (commandQueue != nullptr) {
         auto commandQueueObject = castToObjectOrAbort<CommandQueue>(commandQueue);
-        bool ret = commandQueueObject->setPerfCountersEnabled(true, configuration);
-        if (!ret) {
+
+        if (!commandQueueObject->setPerfCountersEnabled()) {
             clReleaseCommandQueue(commandQueue);
             commandQueue = nullptr;
             err.set(CL_OUT_OF_RESOURCES);
@@ -3413,13 +3450,21 @@ void *clHostMemAllocINTEL(
         return nullptr;
     }
 
-    if (size > neoContext->getDevice(0u)->getDeviceInfo().maxMemAllocSize) {
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::HOST_UNIFIED_MEMORY);
+    cl_mem_flags flags = 0;
+    cl_mem_flags_intel flagsIntel = 0;
+    cl_mem_alloc_flags_intel allocflags = 0;
+    if (!MemoryPropertiesParser::parseMemoryProperties(properties, unifiedMemoryProperties.allocationFlags, flags, flagsIntel, allocflags, MemoryPropertiesParser::MemoryPropertiesParser::ObjType::UNKNOWN)) {
+        err.set(CL_INVALID_VALUE);
+        return nullptr;
+    }
+
+    if (size > neoContext->getDevice(0u)->getDeviceInfo().maxMemAllocSize && !unifiedMemoryProperties.allocationFlags.flags.allowUnrestrictedSize) {
         err.set(CL_INVALID_BUFFER_SIZE);
         return nullptr;
     }
 
-    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::HOST_UNIFIED_MEMORY);
-    if (!MemObjHelper::parseUnifiedMemoryProperties(properties, unifiedMemoryProperties)) {
+    if (isValueSet(unifiedMemoryProperties.allocationFlags.allAllocFlags, CL_MEM_ALLOC_WRITE_COMBINED_INTEL)) {
         err.set(CL_INVALID_VALUE);
         return nullptr;
     }
@@ -3446,16 +3491,22 @@ void *clDeviceMemAllocINTEL(
         return nullptr;
     }
 
-    if (size > neoDevice->getDeviceInfo().maxMemAllocSize) {
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::DEVICE_UNIFIED_MEMORY);
+    cl_mem_flags flags = 0;
+    cl_mem_flags_intel flagsIntel = 0;
+    cl_mem_alloc_flags_intel allocflags = 0;
+    if (!MemoryPropertiesParser::parseMemoryProperties(properties, unifiedMemoryProperties.allocationFlags, flags, flagsIntel, allocflags, MemoryPropertiesParser::MemoryPropertiesParser::ObjType::UNKNOWN)) {
+        err.set(CL_INVALID_VALUE);
+        return nullptr;
+    }
+
+    if (size > neoContext->getDevice(0u)->getDeviceInfo().maxMemAllocSize && !unifiedMemoryProperties.allocationFlags.flags.allowUnrestrictedSize) {
         err.set(CL_INVALID_BUFFER_SIZE);
         return nullptr;
     }
 
-    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::DEVICE_UNIFIED_MEMORY);
-    if (!MemObjHelper::parseUnifiedMemoryProperties(properties, unifiedMemoryProperties)) {
-        err.set(CL_INVALID_VALUE);
-        return nullptr;
-    }
+    unifiedMemoryProperties.device = device;
+    unifiedMemoryProperties.subdeviceBitfield = neoDevice->getDefaultEngine().osContext->getDeviceBitfield();
 
     return neoContext->getSVMAllocsManager()->createUnifiedMemoryAllocation(neoDevice->getRootDeviceIndex(), size, unifiedMemoryProperties);
 }
@@ -3479,16 +3530,27 @@ void *clSharedMemAllocINTEL(
         return nullptr;
     }
 
-    if (size > neoDevice->getDeviceInfo().maxMemAllocSize) {
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY);
+    cl_mem_flags flags = 0;
+    cl_mem_flags_intel flagsIntel = 0;
+    cl_mem_alloc_flags_intel allocflags = 0;
+    if (!MemoryPropertiesParser::parseMemoryProperties(properties, unifiedMemoryProperties.allocationFlags, flags, flagsIntel, allocflags, MemoryPropertiesParser::MemoryPropertiesParser::ObjType::UNKNOWN)) {
+        err.set(CL_INVALID_VALUE);
+        return nullptr;
+    }
+
+    if (size > neoContext->getDevice(0u)->getDeviceInfo().maxMemAllocSize && !unifiedMemoryProperties.allocationFlags.flags.allowUnrestrictedSize) {
         err.set(CL_INVALID_BUFFER_SIZE);
         return nullptr;
     }
 
-    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY);
-    if (!MemObjHelper::parseUnifiedMemoryProperties(properties, unifiedMemoryProperties)) {
+    if (isValueSet(unifiedMemoryProperties.allocationFlags.allAllocFlags, CL_MEM_ALLOC_WRITE_COMBINED_INTEL)) {
         err.set(CL_INVALID_VALUE);
         return nullptr;
     }
+
+    unifiedMemoryProperties.device = device;
+    unifiedMemoryProperties.subdeviceBitfield = neoDevice->getDefaultEngine().osContext->getDeviceBitfield();
 
     return neoContext->getSVMAllocsManager()->createSharedUnifiedMemoryAllocation(neoContext->getDevice(0)->getRootDeviceIndex(), size, unifiedMemoryProperties, neoContext->getSpecialQueue());
 }
@@ -3567,9 +3629,14 @@ cl_int clGetMemAllocInfoINTEL(
         return retVal;
     }
     case CL_MEM_ALLOC_FLAGS_INTEL: {
-        retVal = info.set<uint64_t>(unifiedMemoryAllocation->allocationFlagsProperty);
+        retVal = info.set<uint32_t>(unifiedMemoryAllocation->allocationFlagsProperty.allAllocFlags);
         return retVal;
     }
+    case CL_MEM_ALLOC_DEVICE_INTEL: {
+        retVal = info.set<cl_device_id>(static_cast<cl_device_id>(unifiedMemoryAllocation->device));
+        return retVal;
+    }
+
     default: {
     }
     }
@@ -3733,7 +3800,7 @@ cl_accelerator_intel CL_API_CALL clCreateAcceleratorINTEL(
     DBG_LOG_INPUTS("context", context,
                    "acceleratorType", acceleratorType,
                    "descriptorSize", descriptorSize,
-                   "descriptor", DebugManager.infoPointerToString(descriptor, descriptorSize));
+                   "descriptor", NEO::FileLoggerInstance().infoPointerToString(descriptor, descriptorSize));
     cl_accelerator_intel accelerator = nullptr;
 
     do {
@@ -3803,7 +3870,7 @@ cl_int CL_API_CALL clGetAcceleratorInfoINTEL(
     DBG_LOG_INPUTS("accelerator", accelerator,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
     IntelAccelerator *pAccelerator = nullptr;
 
@@ -3852,7 +3919,7 @@ cl_program CL_API_CALL clCreateProgramWithILKHR(cl_context context,
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("context", context,
-                   "il", DebugManager.infoPointerToString(il, length),
+                   "il", NEO::FileLoggerInstance().infoPointerToString(il, length),
                    "length", length);
 
     cl_program program = nullptr;
@@ -3920,6 +3987,7 @@ void *CL_API_CALL clGetExtensionFunctionAddress(const char *funcName) {
     RETURN_FUNC_PTR_IF_EXIST(clGetDeviceFunctionPointerINTEL);
     RETURN_FUNC_PTR_IF_EXIST(clGetDeviceGlobalVariablePointerINTEL);
     RETURN_FUNC_PTR_IF_EXIST(clGetExecutionInfoINTEL);
+    RETURN_FUNC_PTR_IF_EXIST(clEnqueueNDRangeKernelINTEL);
 
     void *ret = sharingFactory.getExtensionFunctionAddress(funcName);
     if (ret != nullptr) {
@@ -3964,15 +4032,13 @@ void *CL_API_CALL clSVMAlloc(cl_context context,
                    "size", size,
                    "alignment", alignment);
     void *pAlloc = nullptr;
-    auto pPlatform = platform();
-    auto pDevice = pPlatform->getDevice(0);
-
     Context *pContext = nullptr;
 
-    if (validateObjects(WithCastToInternal(context, &pContext), pDevice) != CL_SUCCESS) {
+    if (validateObjects(WithCastToInternal(context, &pContext)) != CL_SUCCESS) {
         TRACING_EXIT(clSVMAlloc, &pAlloc);
         return pAlloc;
     }
+    auto pDevice = pContext->getDevice(0);
 
     if (flags == 0) {
         flags = CL_MEM_READ_WRITE;
@@ -4062,8 +4128,8 @@ cl_int CL_API_CALL clEnqueueSVMFree(cl_command_queue commandQueue,
                    "pfnFreeFunc", pfnFreeFunc,
                    "userData", userData,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (retVal != CL_SUCCESS) {
         TRACING_EXIT(clEnqueueSVMFree, &retVal);
@@ -4114,8 +4180,8 @@ cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue commandQueue,
                    "srcPtr", srcPtr,
                    "size", size,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (retVal != CL_SUCCESS) {
         TRACING_EXIT(clEnqueueSVMMemcpy, &retVal);
@@ -4160,13 +4226,13 @@ cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue commandQueue,
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("commandQueue", commandQueue,
-                   "svmPtr", DebugManager.infoPointerToString(svmPtr, size),
-                   "pattern", DebugManager.infoPointerToString(pattern, patternSize),
+                   "svmPtr", NEO::FileLoggerInstance().infoPointerToString(svmPtr, size),
+                   "pattern", NEO::FileLoggerInstance().infoPointerToString(pattern, patternSize),
                    "patternSize", patternSize,
                    "size", size,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (retVal != CL_SUCCESS) {
         TRACING_EXIT(clEnqueueSVMMemFill, &retVal);
@@ -4211,11 +4277,11 @@ cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue commandQueue,
     DBG_LOG_INPUTS("commandQueue", commandQueue,
                    "blockingMap", blockingMap,
                    "mapFlags", mapFlags,
-                   "svmPtr", DebugManager.infoPointerToString(svmPtr, size),
+                   "svmPtr", NEO::FileLoggerInstance().infoPointerToString(svmPtr, size),
                    "size", size,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (CL_SUCCESS != retVal) {
         TRACING_EXIT(clEnqueueSVMMap, &retVal);
@@ -4261,8 +4327,8 @@ cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue commandQueue,
     DBG_LOG_INPUTS("commandQueue", commandQueue,
                    "svmPtr", svmPtr,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (retVal != CL_SUCCESS) {
         TRACING_EXIT(clEnqueueSVMUnmap, &retVal);
@@ -4347,7 +4413,7 @@ cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel kernel,
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("kernel", kernel, "paramName", paramName,
-                   "paramValueSize", paramValueSize, "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize));
+                   "paramValueSize", paramValueSize, "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize));
 
     if (CL_SUCCESS != retVal) {
         TRACING_EXIT(clSetKernelExecInfo, &retVal);
@@ -4400,6 +4466,11 @@ cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel kernel,
             }
         }
         break;
+    }
+    case CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_INTEL: {
+        auto propertyValue = *static_cast<const uint32_t *>(paramValue);
+        pKernel->setThreadArbitrationPolicy(ThreadArbitrationPolicy::getNewKernelArbitrationPolicy(propertyValue));
+        return retVal;
     }
     case CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM: {
         retVal = CL_INVALID_OPERATION;
@@ -4494,7 +4565,7 @@ cl_int CL_API_CALL clGetPipeInfo(cl_mem pipe,
     DBG_LOG_INPUTS("cl_mem", pipe,
                    "cl_pipe_info", paramName,
                    "size_t", paramValueSize,
-                   "void *", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "void *", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "size_t*", paramValueSizeRet);
 
     retVal = validateObjects(pipe);
@@ -4714,9 +4785,9 @@ cl_int CL_API_CALL clGetKernelSubGroupInfoKHR(cl_kernel kernel,
                    "device", device,
                    "paramName", paramName,
                    "inputValueSize", inputValueSize,
-                   "inputValue", DebugManager.infoPointerToString(inputValue, inputValueSize),
+                   "inputValue", NEO::FileLoggerInstance().infoPointerToString(inputValue, inputValueSize),
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
 
     Kernel *pKernel = nullptr;
@@ -4814,9 +4885,9 @@ cl_int CL_API_CALL clGetKernelSubGroupInfo(cl_kernel kernel,
                    "device", device,
                    "paramName", paramName,
                    "inputValueSize", inputValueSize,
-                   "inputValue", DebugManager.infoPointerToString(inputValue, inputValueSize),
+                   "inputValue", NEO::FileLoggerInstance().infoPointerToString(inputValue, inputValueSize),
                    "paramValueSize", paramValueSize,
-                   "paramValue", DebugManager.infoPointerToString(paramValue, paramValueSize),
+                   "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
 
     Kernel *pKernel = nullptr;
@@ -4890,12 +4961,12 @@ cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue commandQueue,
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("commandQueue", commandQueue,
                    "numSvmPointers", numSvmPointers,
-                   "svmPointers", DebugManager.infoPointerToString(svmPointers ? svmPointers[0] : 0, DebugManager.getInput(sizes, 0)),
-                   "sizes", DebugManager.getInput(sizes, 0),
+                   "svmPointers", NEO::FileLoggerInstance().infoPointerToString(svmPointers ? svmPointers[0] : 0, NEO::FileLoggerInstance().getInput(sizes, 0)),
+                   "sizes", NEO::FileLoggerInstance().getInput(sizes, 0),
                    "flags", flags,
                    "numEventsInWaitList", numEventsInWaitList,
-                   "eventWaitList", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
-                   "event", DebugManager.getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
     retVal = validateObjects(
@@ -5023,13 +5094,17 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueVerifyMemoryINTEL(cl_command_queue comm
     return retVal;
 }
 
-cl_int CL_API_CALL clAddCommentINTEL(cl_platform_id platform, const char *comment) {
+cl_int CL_API_CALL clAddCommentINTEL(cl_device_id device, const char *comment) {
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
-    DBG_LOG_INPUTS("platform", platform, "comment", comment);
+    DBG_LOG_INPUTS("device", device, "comment", comment);
 
-    auto executionEnvironment = ::platform()->peekExecutionEnvironment();
-    auto aubCenter = executionEnvironment->rootDeviceEnvironments[0]->aubCenter.get();
+    Device *pDevice = nullptr;
+    retVal = validateObjects(WithCastToInternal(device, &pDevice));
+    if (retVal != CL_SUCCESS) {
+        return retVal;
+    }
+    auto aubCenter = pDevice->getRootDeviceEnvironment().aubCenter.get();
 
     if (!comment || (aubCenter && !aubCenter->getAubManager())) {
         retVal = CL_INVALID_VALUE;
@@ -5135,10 +5210,10 @@ cl_int CL_API_CALL clGetExecutionInfoINTEL(cl_command_queue commandQueue,
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("commandQueue", commandQueue, "cl_kernel", kernel,
-                   "globalWorkOffset[0]", DebugManager.getInput(globalWorkOffset, 0),
-                   "globalWorkOffset[1]", DebugManager.getInput(globalWorkOffset, 1),
-                   "globalWorkOffset[2]", DebugManager.getInput(globalWorkOffset, 2),
-                   "localWorkSize", DebugManager.getSizes(localWorkSize, workDim, true),
+                   "globalWorkOffset[0]", NEO::FileLoggerInstance().getInput(globalWorkOffset, 0),
+                   "globalWorkOffset[1]", NEO::FileLoggerInstance().getInput(globalWorkOffset, 1),
+                   "globalWorkOffset[2]", NEO::FileLoggerInstance().getInput(globalWorkOffset, 2),
+                   "localWorkSize", NEO::FileLoggerInstance().getSizes(localWorkSize, workDim, true),
                    "paramName", paramName, "paramValueSize", paramValueSize,
                    "paramValue", paramValue, "paramValueSizeRet", paramValueSizeRet);
 
@@ -5170,5 +5245,72 @@ cl_int CL_API_CALL clGetExecutionInfoINTEL(cl_command_queue commandQueue,
         retVal = CL_INVALID_VALUE;
     }
 
+    return retVal;
+}
+
+cl_int CL_API_CALL clEnqueueNDRangeKernelINTEL(cl_command_queue commandQueue,
+                                               cl_kernel kernel,
+                                               cl_uint workDim,
+                                               const size_t *globalWorkOffset,
+                                               const size_t *workgroupCount,
+                                               const size_t *localWorkSize,
+                                               cl_uint numEventsInWaitList,
+                                               const cl_event *eventWaitList,
+                                               cl_event *event) {
+    cl_int retVal = CL_SUCCESS;
+    API_ENTER(&retVal);
+    DBG_LOG_INPUTS("commandQueue", commandQueue, "cl_kernel", kernel,
+                   "globalWorkOffset[0]", NEO::FileLoggerInstance().getInput(globalWorkOffset, 0),
+                   "globalWorkOffset[1]", NEO::FileLoggerInstance().getInput(globalWorkOffset, 1),
+                   "globalWorkOffset[2]", NEO::FileLoggerInstance().getInput(globalWorkOffset, 2),
+                   "workgroupCount", NEO::FileLoggerInstance().getSizes(workgroupCount, workDim, false),
+                   "localWorkSize", NEO::FileLoggerInstance().getSizes(localWorkSize, workDim, true),
+                   "numEventsInWaitList", numEventsInWaitList,
+                   "eventWaitList", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(eventWaitList), numEventsInWaitList),
+                   "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
+
+    CommandQueue *pCommandQueue = nullptr;
+    Kernel *pKernel = nullptr;
+
+    retVal = validateObjects(
+        WithCastToInternal(commandQueue, &pCommandQueue),
+        WithCastToInternal(kernel, &pKernel),
+        EventWaitList(numEventsInWaitList, eventWaitList));
+
+    if (CL_SUCCESS != retVal) {
+        return retVal;
+    }
+
+    size_t globalWorkSize[3];
+    size_t requestedNumberOfWorkgroups = 1;
+    for (size_t i = 0; i < workDim; i++) {
+        globalWorkSize[i] = workgroupCount[i] * localWorkSize[i];
+        requestedNumberOfWorkgroups *= workgroupCount[i];
+    }
+
+    size_t maximalNumberOfWorkgroupsAllowed = pKernel->getMaxWorkGroupCount(workDim, localWorkSize);
+    if (requestedNumberOfWorkgroups > maximalNumberOfWorkgroupsAllowed) {
+        retVal = CL_INVALID_VALUE;
+        return retVal;
+    }
+
+    TakeOwnershipWrapper<Kernel> kernelOwnership(*pKernel, gtpinIsGTPinInitialized());
+    if (gtpinIsGTPinInitialized()) {
+        gtpinNotifyKernelSubmit(kernel, pCommandQueue);
+    }
+
+    pCommandQueue->getDevice().allocateSyncBufferHandler();
+
+    retVal = pCommandQueue->enqueueKernel(
+        kernel,
+        workDim,
+        globalWorkOffset,
+        globalWorkSize,
+        localWorkSize,
+        numEventsInWaitList,
+        eventWaitList,
+        event);
+
+    DBG_LOG_INPUTS("event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     return retVal;
 }

@@ -7,6 +7,7 @@
 
 #include "unit_tests/mocks/mock_wddm.h"
 
+#include "core/execution_environment/root_device_environment.h"
 #include "core/helpers/aligned_memory.h"
 #include "runtime/os_interface/windows/gdi_interface.h"
 #include "runtime/os_interface/windows/wddm_allocation.h"
@@ -17,7 +18,7 @@
 
 using namespace NEO;
 
-WddmMock::WddmMock() : Wddm() {
+WddmMock::WddmMock(RootDeviceEnvironment &rootDeviceEnvironment) : Wddm(rootDeviceEnvironment) {
     this->temporaryResources = std::make_unique<MockWddmResidentAllocationsContainer>(this);
 }
 
@@ -69,14 +70,14 @@ bool WddmMock::freeGpuVirtualAddress(D3DGPU_VIRTUAL_ADDRESS &gpuPtr, uint64_t si
 }
 NTSTATUS WddmMock::createAllocation(WddmAllocation *wddmAllocation) {
     if (wddmAllocation) {
-        return createAllocation(wddmAllocation->getAlignedCpuPtr(), wddmAllocation->getDefaultGmm(), wddmAllocation->getHandleToModify(0u));
+        return createAllocation(wddmAllocation->getAlignedCpuPtr(), wddmAllocation->getDefaultGmm(), wddmAllocation->getHandleToModify(0u), false);
     }
     return false;
 }
-NTSTATUS WddmMock::createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKMT_HANDLE &outHandle) {
+NTSTATUS WddmMock::createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKMT_HANDLE &outHandle, uint32_t shareable) {
     createAllocationResult.called++;
     if (callBaseDestroyAllocations) {
-        createAllocationStatus = Wddm::createAllocation(alignedCpuPtr, gmm, outHandle);
+        createAllocationStatus = Wddm::createAllocation(alignedCpuPtr, gmm, outHandle, shareable);
         createAllocationResult.success = createAllocationStatus == STATUS_SUCCESS;
     } else {
         createAllocationResult.success = true;
@@ -151,11 +152,11 @@ bool WddmMock::queryAdapterInfo() {
     return queryAdapterInfoResult.success = Wddm::queryAdapterInfo();
 }
 
-bool WddmMock::submit(uint64_t commandBuffer, size_t size, void *commandHeader, OsContextWin &osContext) {
+bool WddmMock::submit(uint64_t commandBuffer, size_t size, void *commandHeader, WddmSubmitArguments &submitArguments) {
     submitResult.called++;
     submitResult.commandBufferSubmitted = commandBuffer;
     submitResult.commandHeaderSubmitted = commandHeader;
-    return submitResult.success = Wddm::submit(commandBuffer, size, commandHeader, osContext);
+    return submitResult.success = Wddm::submit(commandBuffer, size, commandHeader, submitArguments);
 }
 
 bool WddmMock::waitOnGPU(D3DKMT_HANDLE context) {
@@ -272,4 +273,8 @@ void *GmockWddm::virtualAllocWrapper(void *inPtr, size_t size, uint32_t flags, u
     size -= size % MemoryConstants::pageSize;
     virtualAllocAddress += size;
     return tmp;
+}
+
+GmockWddm::GmockWddm(RootDeviceEnvironment &rootDeviceEnvironment) : WddmMock(rootDeviceEnvironment) {
+    virtualAllocAddress = NEO::windowsMinAddress;
 }

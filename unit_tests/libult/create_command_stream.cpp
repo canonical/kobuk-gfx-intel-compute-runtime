@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/helpers/options.h"
 #include "runtime/command_stream/aub_command_stream_receiver.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/command_stream/create_command_stream_impl.h"
 #include "runtime/command_stream/tbx_command_stream_receiver.h"
-#include "runtime/helpers/options.h"
 #include "unit_tests/libult/ult_command_stream_receiver.h"
 
 #include <cassert>
@@ -40,6 +40,7 @@ bool getDevices(size_t &numDevicesReturned, ExecutionEnvironment &executionEnvir
     if (overrideDeviceWithDefaultHardwareInfo) {
         numDevicesReturned = numPlatformDevices;
         executionEnvironment.prepareRootDeviceEnvironments(static_cast<uint32_t>(numDevicesReturned));
+        executionEnvironment.calculateMaxOsContextCount();
         return getDevicesResult;
     }
 

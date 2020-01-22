@@ -5,12 +5,11 @@
  *
  */
 
+#include "core/gen9/hw_cmds.h"
 #include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_services.h"
-#include "runtime/gen9/hw_cmds.h"
 
 #include "engine_node.h"
-#include "hw_info_bxt.h"
 
 namespace NEO {
 
@@ -50,6 +49,7 @@ const RuntimeCapabilityTable BXT::capabilityTable{
     CmdServicesMemTraceVersion::DeviceValues::Bxt, // aubDeviceId
     0,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
+    sizeof(BXT::GRF),                              // grfSize
     false,                                         // blitterOperationsSupported
     false,                                         // ftrSupportsInteger64BitAtomics
     true,                                          // ftrSupportsFP64
@@ -68,7 +68,8 @@ const RuntimeCapabilityTable BXT::capabilityTable{
     true,                                          // supportsVme
     false,                                         // supportCacheFlushAfterWalker
     true,                                          // supportsImages
-    false                                          // supportsDeviceEnqueue
+    false,                                         // supportsDeviceEnqueue
+    true                                           // hostPtrTrackingEnabled
 };
 
 WorkaroundTable BXT::workaroundTable = {};

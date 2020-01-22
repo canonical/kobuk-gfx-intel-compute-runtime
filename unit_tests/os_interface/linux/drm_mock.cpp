@@ -85,6 +85,9 @@ int DrmMock::ioctl(unsigned long request, void *arg) {
             }
             return this->StoredRetValForSetSSEU;
         }
+        if (receivedContextParamRequest.param == I915_CONTEXT_PARAM_PERSISTENCE) {
+            return this->StoredRetValForPersistant;
+        }
     }
 
     if ((request == DRM_IOCTL_I915_GEM_CONTEXT_GETPARAM) && (arg != nullptr)) {
@@ -92,13 +95,17 @@ int DrmMock::ioctl(unsigned long request, void *arg) {
         receivedContextParamRequest = *static_cast<drm_i915_gem_context_param *>(arg);
         if (receivedContextParamRequest.param == I915_CONTEXT_PARAM_GTT_SIZE) {
             static_cast<drm_i915_gem_context_param *>(arg)->value = this->storedGTTSize;
-            return this->StoredRetVal;
+            return this->StoredRetValForGetGttSize;
         }
         if (receivedContextParamRequest.param == I915_CONTEXT_PARAM_SSEU) {
             if (StoredRetValForGetSSEU == 0) {
                 (*static_cast<drm_i915_gem_context_param_sseu *>(reinterpret_cast<void *>(receivedContextParamRequest.value))).slice_mask = storedParamSseu;
             }
             return this->StoredRetValForGetSSEU;
+        }
+        if (receivedContextParamRequest.param == I915_CONTEXT_PARAM_PERSISTENCE) {
+            static_cast<drm_i915_gem_context_param *>(arg)->value = this->StoredPersistentContextsSupport;
+            return this->StoredRetValForPersistant;
         }
     }
 

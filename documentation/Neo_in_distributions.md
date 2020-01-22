@@ -34,7 +34,7 @@ dnf copr enable jdanecki/intel-opencl
 dnf install intel-opencl
 ```
 
-## Gentoo*
+## Gentoo*, Funtoo*
 
 ```
 emerge intel-neo
@@ -76,7 +76,7 @@ apt-get update
 apt-get install intel-opencl-icd
 ```
 
-## Ubuntu* 19.04, 19.10
+## Ubuntu* 19.04, 19.10, 20.04
 
 ```
 apt-get install intel-opencl-icd
@@ -98,19 +98,18 @@ Example for Fedora* 30
 docker run -it --device /dev/dri:/dev/dri --rm docker.io/intelopencl/intel-opencl:fedora-30-copr clinfo
 ```
 
-## Additional configuration
-
-To allow Neo accessing GPU device make sure user has permissions to files in /dev/dri directory.
-In first step /dev/dri/renderD* files are opened, if it fails, /dev/dri/card* files are used.
-
-Under Ubuntu* or Centos* user must be in video group.
-In Fedora* all users by default have access to /dev/dri/renderD* files,
-but have to be in video group to access /dev/dri/card* files.
- 
 ## Building and installation
 
 * [Ubuntu*](https://github.com/intel/compute-runtime/blob/master/documentation/BUILD_Ubuntu.md)
 * [Centos* 8](https://github.com/intel/compute-runtime/blob/master/documentation/BUILD_Centos.md)
 * Scripts to build or download rpm (copr) and deb (github and ppa) packages are available in [neo-specs](https://github.com/JacekDanecki/neo-specs) repository.
+
+# NEO in other distributions
+
+## FreeBSD*
+
+```
+pkg install intel-compute-runtime
+```
 
 (*) Other names and brands may be claimed as property of others.

@@ -6,11 +6,10 @@
  */
 
 #pragma once
+#include "core/helpers/hw_info.h"
+#include "core/helpers/options.h"
 #include "runtime/execution_environment/execution_environment.h"
-#include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/memory_properties_flags_helpers.h"
-#include "runtime/helpers/options.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/platform/platform.h"
 #include "test.h"
@@ -76,7 +75,7 @@ struct ImageHelper {
         auto surfaceFormat = Image::getSurfaceFormatFromTable(Traits::flags, imgFormat);
         auto image = Image::create(
             context,
-            NEO::MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(Traits::flags, 0),
+            NEO::MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(Traits::flags, 0, 0),
             Traits::flags,
             0,
             surfaceFormat,
@@ -110,7 +109,6 @@ struct Image1dArrayHelper : public ImageHelper<Traits> {
 };
 
 struct ImageClearColorFixture : ::testing::Test {
-    using GmmHelper = NEO::GmmHelper;
     using MockContext = NEO::MockContext;
     using Image = NEO::Image;
 

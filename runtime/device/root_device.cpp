@@ -7,9 +7,9 @@
 
 #include "runtime/device/root_device.h"
 
+#include "core/debug_settings/debug_settings_manager.h"
 #include "runtime/device/sub_device.h"
 #include "runtime/helpers/device_helpers.h"
-#include "runtime/os_interface/debug_settings_manager.h"
 
 namespace NEO {
 RootDevice::RootDevice(ExecutionEnvironment *executionEnvironment, uint32_t rootDeviceIndex) : Device(executionEnvironment), rootDeviceIndex(rootDeviceIndex) {}
@@ -73,9 +73,8 @@ unique_ptr_if_unused<Device> RootDevice::release() {
     DEBUG_BREAK_IF(!isValid());
     return unique_ptr_if_unused<Device>(this, false);
 }
-DeviceBitfield RootDevice::getDeviceBitfieldForOsContext() const {
-    DeviceBitfield deviceBitfield;
-    deviceBitfield.set(0);
+DeviceBitfield RootDevice::getDeviceBitfield() const {
+    DeviceBitfield deviceBitfield{static_cast<uint32_t>(maxNBitValue(getNumAvailableDevices()))};
     return deviceBitfield;
 }
 

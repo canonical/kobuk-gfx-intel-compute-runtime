@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,17 +8,16 @@
 #pragma once
 #include "core/command_stream/linear_stream.h"
 #include "core/helpers/aligned_memory.h"
+#include "core/helpers/completion_stamp.h"
+#include "core/helpers/options.h"
+#include "core/indirect_heap/indirect_heap.h"
+#include "core/kernel/grf_config.h"
 #include "runtime/command_stream/aub_subcapture.h"
 #include "runtime/command_stream/csr_definitions.h"
 #include "runtime/command_stream/submissions_aggregator.h"
 #include "runtime/command_stream/thread_arbitration_policy.h"
-#include "runtime/helpers/address_patch.h"
 #include "runtime/helpers/blit_commands_helper.h"
-#include "runtime/helpers/completion_stamp.h"
 #include "runtime/helpers/flat_batch_buffer_helper.h"
-#include "runtime/helpers/options.h"
-#include "runtime/indirect_heap/indirect_heap.h"
-#include "runtime/kernel/grf_config.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -73,7 +72,7 @@ class CommandStreamReceiver {
 
     virtual bool flushBatchedSubmissions() = 0;
 
-    virtual void makeResident(GraphicsAllocation &gfxAllocation);
+    MOCKABLE_VIRTUAL void makeResident(GraphicsAllocation &gfxAllocation);
     virtual void makeNonResident(GraphicsAllocation &gfxAllocation);
     MOCKABLE_VIRTUAL void makeSurfacePackNonResident(ResidencyContainer &allocationsForResidency);
     virtual void processResidency(const ResidencyContainer &allocationsForResidency) {}
@@ -88,8 +87,10 @@ class CommandStreamReceiver {
     ResidencyContainer &getEvictionAllocations();
 
     virtual GmmPageTableMngr *createPageTableManager() { return nullptr; }
+    bool needsPageTableManager(aub_stream::EngineType engineType) const;
 
-    MOCKABLE_VIRTUAL void waitForTaskCountAndCleanAllocationList(uint32_t requiredTaskCount, uint32_t allocationUsage);
+    void waitForTaskCountAndCleanAllocationList(uint32_t requiredTaskCount, uint32_t allocationUsage);
+    MOCKABLE_VIRTUAL void waitForTaskCountAndCleanTemporaryAllocationList(uint32_t requiredTaskCount);
 
     LinearStream &getCS(size_t minRequiredSize = 1024u);
     OSInterface *getOSInterface() const { return osInterface; };
@@ -123,12 +124,13 @@ class CommandStreamReceiver {
     GraphicsAllocation *getDebugSurfaceAllocation() const { return debugSurface; }
     GraphicsAllocation *allocateDebugSurface(size_t size);
     GraphicsAllocation *getPreemptionAllocation() const { return preemptionAllocation; }
-    void requestThreadArbitrationPolicy(uint32_t requiredPolicy) { this->requiredThreadArbitrationPolicy = requiredPolicy; }
+
     void requestStallingPipeControlOnNextFlush() { stallingPipeControlOnNextFlushRequired = true; }
     bool isStallingPipeControlOnNextFlushRequired() const { return stallingPipeControlOnNextFlushRequired; }
 
     virtual void waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) = 0;
     MOCKABLE_VIRTUAL bool waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait);
+    virtual void downloadAllocation(GraphicsAllocation &gfxAllocation){};
 
     void setSamplerCacheFlushRequired(SamplerCacheFlushState value) { this->samplerCacheFlushRequired = value; }
 
@@ -193,7 +195,6 @@ class CommandStreamReceiver {
 
   protected:
     void cleanupResources();
-    MOCKABLE_VIRTUAL uint32_t getDeviceIndex() const;
 
     std::unique_ptr<FlushStampTracker> flushStamp;
     std::unique_ptr<SubmissionAggregator> submissionAggregator;
@@ -264,6 +265,7 @@ class CommandStreamReceiver {
     bool requiresInstructionCacheFlush = false;
 
     bool localMemoryEnabled = false;
+    bool pageTableManagerInitialized = false;
 };
 
 typedef CommandStreamReceiver *(*CommandStreamReceiverCreateFunc)(bool withAubDump, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex);

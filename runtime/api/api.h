@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2017-2019 Intel Corporation
+ * Copyright (C) 2017-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "public/cl_ext_private.h"
+#include "runtime/api/api_enter.h"
 #include "runtime/api/dispatch.h"
 
 #include "CL/cl.h"
@@ -861,7 +862,7 @@ cl_int CL_API_CALL clEnqueueVerifyMemoryINTEL(
     size_t sizeOfComparison,
     cl_uint comparisonMode);
 
-cl_int CL_API_CALL clAddCommentINTEL(cl_platform_id platform, const char *comment);
+cl_int CL_API_CALL clAddCommentINTEL(cl_device_id device, const char *comment);
 
 // OpenCL 2.1
 
@@ -1035,6 +1036,16 @@ cl_int CL_API_CALL clGetExecutionInfoINTEL(
     size_t paramValueSize,
     void *paramValue,
     size_t *paramValueSizeRet);
+
+cl_int CL_API_CALL clEnqueueNDRangeKernelINTEL(cl_command_queue commandQueue,
+                                               cl_kernel kernel,
+                                               cl_uint workDim,
+                                               const size_t *globalWorkOffset,
+                                               const size_t *workgroupCount,
+                                               const size_t *localWorkSize,
+                                               cl_uint numEventsInWaitList,
+                                               const cl_event *eventWaitList,
+                                               cl_event *event);
 
 // OpenCL 2.2
 

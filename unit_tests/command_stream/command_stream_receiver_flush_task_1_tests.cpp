@@ -5,9 +5,9 @@
  *
  */
 
+#include "core/gmm_helper/gmm_helper.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/command_queue/gpgpu_walker.h"
-#include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/os_interface/os_context.h"
 #include "test.h"
 #include "unit_tests/fixtures/ult_command_stream_receiver_fixture.h"
@@ -745,7 +745,6 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, flushTaskWithOnlyEnoughMemoryForPr
 
     auto l3Config = PreambleHelper<FamilyType>::getL3Config(pDevice->getHardwareInfo(), false);
     commandStreamReceiver.lastSentL3Config = l3Config;
-    commandStreamReceiver.lastSentThreadArbitrationPolicy = commandStreamReceiver.requiredThreadArbitrationPolicy;
 
     auto &csrCS = commandStreamReceiver.getCS();
     size_t sizeNeeded = commandStreamReceiver.getRequiredCmdStreamSizeAligned(flushTaskFlags, *pDevice);
@@ -1013,4 +1012,41 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelRequiringDCFlush
     EXPECT_TRUE(pCmdWA->getDcFlushEnable());
 
     buffer->release();
+}
+
+HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWhenCallFlushTaskThenThreadArbitrationPolicyIsSetProperly) {
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
+    pDevice->resetCommandStreamReceiver(mockCsr);
+
+    CommandQueueHw<FamilyType> commandQueue(nullptr, pDevice, 0);
+    auto &commandStream = commandQueue.getCS(4096u);
+
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+
+    uint32_t beforeFlushRequiredThreadArbitrationPolicy = mockCsr->requiredThreadArbitrationPolicy;
+
+    mockCsr->flushTask(commandStream,
+                       0,
+                       dsh,
+                       ioh,
+                       ssh,
+                       taskLevel,
+                       dispatchFlags,
+                       *pDevice);
+
+    EXPECT_EQ(UnitTestHelper<FamilyType>::getAppropriateThreadArbitrationPolicy(beforeFlushRequiredThreadArbitrationPolicy), mockCsr->requiredThreadArbitrationPolicy);
+
+    dispatchFlags.threadArbitrationPolicy = ThreadArbitrationPolicy::RoundRobin;
+    mockCsr->requiredThreadArbitrationPolicy = ThreadArbitrationPolicy::NotPresent;
+
+    mockCsr->flushTask(commandStream,
+                       0,
+                       dsh,
+                       ioh,
+                       ssh,
+                       taskLevel,
+                       dispatchFlags,
+                       *pDevice);
+
+    EXPECT_EQ(UnitTestHelper<FamilyType>::getAppropriateThreadArbitrationPolicy(dispatchFlags.threadArbitrationPolicy), mockCsr->requiredThreadArbitrationPolicy);
 }

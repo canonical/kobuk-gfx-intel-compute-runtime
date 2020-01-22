@@ -7,9 +7,14 @@
 
 #include "unit_tests/os_interface/windows/hw_info_config_win_tests.h"
 
+#include "core/execution_environment/root_device_environment.h"
+#include "core/helpers/hw_helper.h"
+#include "core/helpers/options.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/os_interface/windows/os_interface.h"
 #include "runtime/os_interface/windows/wddm/wddm.h"
+#include "test.h"
+#include "unit_tests/mocks/mock_execution_environment.h"
 
 #include "instrumentation.h"
 
@@ -49,12 +54,20 @@ template <>
 void HwInfoConfigHw<IGFX_UNKNOWN>::adjustPlatformForProductFamily(HardwareInfo *hwInfo) {
 }
 
+HwInfoConfigTestWindows::HwInfoConfigTestWindows() {
+    this->executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    this->rootDeviceEnvironment = std::make_unique<RootDeviceEnvironment>(*executionEnvironment);
+}
+
+HwInfoConfigTestWindows::~HwInfoConfigTestWindows() {
+}
+
 void HwInfoConfigTestWindows::SetUp() {
     HwInfoConfigTest::SetUp();
 
     osInterface.reset(new OSInterface());
 
-    std::unique_ptr<Wddm> wddm(Wddm::createWddm());
+    std::unique_ptr<Wddm> wddm(Wddm::createWddm(*rootDeviceEnvironment));
     wddm->init(outHwInfo);
 }
 
@@ -88,6 +101,23 @@ TEST_F(HwInfoConfigTestWindows, givenInstrumentationForHardwareIsEnabledOrDisabl
     ret = hwConfig.configureHwInfo(&pInHwInfo, &outHwInfo, osInterface.get());
     ASSERT_EQ(0, ret);
     EXPECT_TRUE(outHwInfo.capabilityTable.instrumentationEnabled == haveInstrumentation);
+}
+
+HWTEST_F(HwInfoConfigTestWindows, givenFtrIaCoherencyFlagWhenConfiguringHwInfoThenSetCoherencySupportCorrectly) {
+    HardwareInfo initialHwInfo = **platformDevices;
+    auto &hwHelper = HwHelper::get(initialHwInfo.platform.eRenderCoreFamily);
+    auto hwInfoConfig = HwInfoConfig::get(initialHwInfo.platform.eProductFamily);
+
+    bool initialCoherencyStatus = false;
+    hwHelper.setCapabilityCoherencyFlag(&outHwInfo, initialCoherencyStatus);
+
+    initialHwInfo.featureTable.ftrL3IACoherency = false;
+    hwInfoConfig->configureHwInfo(&initialHwInfo, &outHwInfo, osInterface.get());
+    EXPECT_FALSE(outHwInfo.capabilityTable.ftrSupportsCoherency);
+
+    initialHwInfo.featureTable.ftrL3IACoherency = true;
+    hwInfoConfig->configureHwInfo(&initialHwInfo, &outHwInfo, osInterface.get());
+    EXPECT_EQ(initialCoherencyStatus, outHwInfo.capabilityTable.ftrSupportsCoherency);
 }
 
 } // namespace NEO

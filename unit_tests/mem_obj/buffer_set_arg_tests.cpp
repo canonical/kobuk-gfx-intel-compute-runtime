@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/gmm_helper/gmm_helper.h"
 #include "core/helpers/ptr_math.h"
 #include "core/memory_manager/unified_memory_manager.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/gmm_helper/gmm.h"
-#include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/memory_manager/surface.h"
 #include "test.h"
@@ -187,7 +187,7 @@ HWTEST_F(BufferSetArgTest, givenNonPureStatefulArgWhenRenderCompressedBufferIsSe
 
     auto surfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(ptrOffset(pKernel->getSurfaceStateHeap(), pKernelInfo->kernelArgInfo[0].offsetHeap));
     buffer->getGraphicsAllocation()->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
-    buffer->getGraphicsAllocation()->setDefaultGmm(new Gmm(buffer->getGraphicsAllocation()->getUnderlyingBuffer(), buffer->getSize(), false));
+    buffer->getGraphicsAllocation()->setDefaultGmm(new Gmm(pDevice->getExecutionEnvironment()->getGmmClientContext(), buffer->getGraphicsAllocation()->getUnderlyingBuffer(), buffer->getSize(), false));
     buffer->getGraphicsAllocation()->getDefaultGmm()->isRenderCompressed = true;
     pKernelInfo->requiresSshForBuffers = true;
     cl_mem clMem = buffer;

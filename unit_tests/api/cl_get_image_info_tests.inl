@@ -5,8 +5,8 @@
  *
  */
 
+#include "core/helpers/hw_info.h"
 #include "runtime/context/context.h"
-#include "runtime/helpers/hw_info.h"
 #include "runtime/mem_obj/image.h"
 #include "unit_tests/mocks/mock_device.h"
 
@@ -16,11 +16,11 @@ using namespace NEO;
 
 namespace ULT {
 
-struct clGetImageInfoTests : public api_fixture,
+struct clGetImageInfoTests : public ApiFixture,
                              public ::testing::Test {
 
     void SetUp() override {
-        api_fixture::SetUp();
+        ApiFixture::SetUp();
 
         imageFormat.image_channel_order = CL_RGBA;
         imageFormat.image_channel_data_type = CL_UNORM_INT8;
@@ -46,7 +46,7 @@ struct clGetImageInfoTests : public api_fixture,
         retVal = clReleaseMemObject(image);
         EXPECT_EQ(CL_SUCCESS, retVal);
 
-        api_fixture::TearDown();
+        ApiFixture::TearDown();
     }
 
     cl_image_format imageFormat;

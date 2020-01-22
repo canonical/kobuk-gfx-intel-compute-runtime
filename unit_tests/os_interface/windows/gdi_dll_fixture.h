@@ -6,9 +6,9 @@
  */
 
 #pragma once
+#include "core/helpers/hw_info.h"
+#include "core/helpers/options.h"
 #include "core/os_interface/os_library.h"
-#include "runtime/helpers/hw_info.h"
-#include "runtime/helpers/options.h"
 #include "unit_tests/mock_gdi/mock_gdi.h"
 
 using namespace NEO;
@@ -41,14 +41,28 @@ struct GdiDllFixture {
         getDestroyHwQueueDataFcn = reinterpret_cast<decltype(&getDestroyHwQueueData)>(mockGdiDll->getProcAddress("getDestroyHwQueueData"));
         getSubmitCommandToHwQueueDataFcn =
             reinterpret_cast<decltype(&getSubmitCommandToHwQueueData)>(mockGdiDll->getProcAddress("getSubmitCommandToHwQueueData"));
+        getDestroySynchronizationObjectDataFcn =
+            reinterpret_cast<decltype(&getDestroySynchronizationObjectData)>(mockGdiDll->getProcAddress("getDestroySynchronizationObjectData"));
+        getMonitorFenceCpuFenceAddressFcn =
+            reinterpret_cast<decltype(&getMonitorFenceCpuFenceAddress)>(mockGdiDll->getProcAddress("getMonitorFenceCpuFenceAddress"));
+        getCreateSynchronizationObject2FailCallFcn =
+            reinterpret_cast<decltype(&getCreateSynchronizationObject2FailCall)>(mockGdiDll->getProcAddress("getCreateSynchronizationObject2FailCall"));
+        getRegisterTrimNotificationFailCallFcn =
+            reinterpret_cast<decltype(&getRegisterTrimNotificationFailCall)>(mockGdiDll->getProcAddress("getRegisterTrimNotificationFailCall"));
         setMockLastDestroyedResHandleFcn((D3DKMT_HANDLE)0);
+        *getDestroySynchronizationObjectDataFcn() = {};
+        *getCreateSynchronizationObject2FailCallFcn() = false;
+        *getRegisterTrimNotificationFailCallFcn() = false;
     }
 
     virtual void TearDown() {
         *getCreateHwQueueDataFcn() = {};
         *getDestroyHwQueueDataFcn() = {};
         *getSubmitCommandToHwQueueDataFcn() = {};
+        *getDestroySynchronizationObjectDataFcn() = {};
         setMapGpuVaFailConfigFcn(0, 0);
+        *getCreateSynchronizationObject2FailCallFcn() = false;
+        *getRegisterTrimNotificationFailCallFcn() = false;
     }
 
     std::unique_ptr<OsLibrary> mockGdiDll;
@@ -68,4 +82,8 @@ struct GdiDllFixture {
     decltype(&getCreateHwQueueData) getCreateHwQueueDataFcn = nullptr;
     decltype(&getDestroyHwQueueData) getDestroyHwQueueDataFcn = nullptr;
     decltype(&getSubmitCommandToHwQueueData) getSubmitCommandToHwQueueDataFcn = nullptr;
+    decltype(&getDestroySynchronizationObjectData) getDestroySynchronizationObjectDataFcn = nullptr;
+    decltype(&getMonitorFenceCpuFenceAddress) getMonitorFenceCpuFenceAddressFcn = nullptr;
+    decltype(&getCreateSynchronizationObject2FailCall) getCreateSynchronizationObject2FailCallFcn = nullptr;
+    decltype(&getRegisterTrimNotificationFailCall) getRegisterTrimNotificationFailCallFcn = nullptr;
 };

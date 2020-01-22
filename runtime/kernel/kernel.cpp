@@ -7,6 +7,8 @@
 
 #include "runtime/kernel/kernel.h"
 
+#include "core/debug_settings/debug_settings_manager.h"
+#include "core/gmm_helper/gmm_helper.h"
 #include "core/helpers/aligned_memory.h"
 #include "core/helpers/basic_math.h"
 #include "core/helpers/debug_helpers.h"
@@ -23,7 +25,6 @@
 #include "runtime/context/context.h"
 #include "runtime/device_queue/device_queue.h"
 #include "runtime/execution_model/device_enqueue.h"
-#include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/gtpin/gtpin_notify.h"
 #include "runtime/helpers/get_info.h"
 #include "runtime/helpers/per_thread_data.h"
@@ -36,7 +37,6 @@
 #include "runtime/mem_obj/pipe.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/memory_manager/surface.h"
-#include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/platform/platform.h"
 #include "runtime/program/block_kernel_manager.h"
 #include "runtime/program/kernel_info.h"
@@ -310,7 +310,11 @@ cl_int Kernel::initialize() {
                 Buffer::setSurfaceState(&getDevice(), surfaceState, 0, nullptr);
             }
         }
-
+        if (kernelInfo.patchInfo.executionEnvironment) {
+            if (!kernelInfo.patchInfo.executionEnvironment->SubgroupIndependentForwardProgressRequired) {
+                setThreadArbitrationPolicy(ThreadArbitrationPolicy::AgeBased);
+            }
+        }
         patchBlocksSimdSize();
 
         provideInitializationHints();
@@ -1387,6 +1391,13 @@ cl_int Kernel::setArgImageWithMipLevel(uint32_t argIndex,
         patch<uint32_t, cl_channel_order>(imageFormat.image_channel_order, crossThreadData, kernelArgInfo.offsetChannelOrder);
         patch<uint32_t, uint32_t>(kernelArgInfo.offsetHeap, crossThreadData, kernelArgInfo.offsetObjectId);
         patch<uint32_t, cl_uint>(imageDesc.num_mip_levels, crossThreadData, kernelArgInfo.offsetNumMipLevels);
+
+        auto pixelSize = pImage->getSurfaceFormatInfo().ImageElementSizeInBytes;
+        patch<uint64_t, uint64_t>(pImage->getGraphicsAllocation()->getGpuAddress(), crossThreadData, kernelArgInfo.offsetFlatBaseOffset);
+        patch<uint32_t, size_t>((imageDesc.image_width * pixelSize) - 1, crossThreadData, kernelArgInfo.offsetFlatWidth);
+        patch<uint32_t, size_t>((imageDesc.image_height * pixelSize) - 1, crossThreadData, kernelArgInfo.offsetFlatHeight);
+        patch<uint32_t, size_t>(imageDesc.image_row_pitch - 1, crossThreadData, kernelArgInfo.offsetFlatPitch);
+
         addAllocationToCacheFlushVector(argIndex, pImage->getGraphicsAllocation());
         retVal = CL_SUCCESS;
     }
@@ -1948,7 +1959,7 @@ uint32_t Kernel::ReflectionSurfaceHelper::setKernelData(void *reflectionSurface,
             kernelInfo.patchInfo.threadPayload->LocalIDZPresent) {
             localIdRequired = true;
         }
-        kernelData->m_PayloadSize = PerThreadDataHelper::getThreadPayloadSize(*kernelInfo.patchInfo.threadPayload, kernelData->m_SIMDSize);
+        kernelData->m_PayloadSize = PerThreadDataHelper::getThreadPayloadSize(*kernelInfo.patchInfo.threadPayload, kernelData->m_SIMDSize, hwInfo.capabilityTable.grfSize);
     }
 
     kernelData->m_NeedLocalIDS = localIdRequired ? 1 : 0;
@@ -2202,6 +2213,25 @@ void Kernel::patchBlocksSimdSize() {
         const KernelInfo *blockInfo = blockManager->getBlockKernelInfo(idOffset.first);
         uint32_t *simdSize = reinterpret_cast<uint32_t *>(&crossThreadData[idOffset.second]);
         *simdSize = blockInfo->getMaxSimdSize();
+    }
+}
+
+bool Kernel::usesSyncBuffer() {
+    return (kernelInfo.patchInfo.pAllocateSyncBuffer != nullptr);
+}
+
+void Kernel::patchSyncBuffer(Device &device, GraphicsAllocation *gfxAllocation, size_t bufferOffset) {
+    auto &patchInfo = kernelInfo.patchInfo;
+    auto bufferPatchAddress = ptrOffset(getCrossThreadData(), patchInfo.pAllocateSyncBuffer->DataParamOffset);
+    patchWithRequiredSize(bufferPatchAddress, patchInfo.pAllocateSyncBuffer->DataParamSize,
+                          ptrOffset(gfxAllocation->getGpuAddressToPatch(), bufferOffset));
+
+    if (requiresSshForBuffers()) {
+        auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(getSurfaceStateHeap()),
+                                      patchInfo.pAllocateSyncBuffer->SurfaceStateHeapOffset);
+        auto addressToPatch = gfxAllocation->getUnderlyingBuffer();
+        auto sizeToPatch = gfxAllocation->getUnderlyingBufferSize();
+        Buffer::setSurfaceState(&device, surfaceState, sizeToPatch, addressToPatch, gfxAllocation);
     }
 }
 

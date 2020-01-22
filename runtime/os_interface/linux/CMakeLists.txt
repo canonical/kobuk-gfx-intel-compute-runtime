@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2019 Intel Corporation
+# Copyright (C) 2018-2020 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -33,14 +33,11 @@ set(RUNTIME_SRCS_OS_INTERFACE_LINUX
   ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/drm_query.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/drm_memory_operations_handler.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/drm_memory_operations_handler.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/engine_info.h
   ${CMAKE_CURRENT_SOURCE_DIR}/hw_info_config.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/linux_inc.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/memory_info.h
   ${CMAKE_CURRENT_SOURCE_DIR}/ocl_reg_path.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_context_linux.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_context_linux.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/os_inc.h
   ${CMAKE_CURRENT_SOURCE_DIR}/os_interface.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/os_interface.h
   ${CMAKE_CURRENT_SOURCE_DIR}/os_metrics_library.cpp
@@ -50,7 +47,6 @@ set(RUNTIME_SRCS_OS_INTERFACE_LINUX
   ${CMAKE_CURRENT_SOURCE_DIR}/os_time_linux.h
   ${CMAKE_CURRENT_SOURCE_DIR}/performance_counters_linux.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/performance_counters_linux.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/print.cpp
 )
 if(UNIX)
   target_sources(${NEO_STATIC_LIB_NAME} PRIVATE ${RUNTIME_SRCS_OS_INTERFACE_LINUX})

@@ -25,7 +25,6 @@ class WddmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> 
     virtual ~WddmCommandStreamReceiver();
 
     bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
-    void makeResident(GraphicsAllocation &gfxAllocation) override;
     void processResidency(const ResidencyContainer &allocationsForResidency) override;
     void processEviction() override;
     bool waitForFlushStamp(FlushStamp &flushStampToWait) override;
@@ -37,11 +36,9 @@ class WddmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> 
     GmmPageTableMngr *createPageTableManager() override;
 
   protected:
-    void initPageTableManagerRegisters(LinearStream &csr) override;
     void kmDafLockAllocations(ResidencyContainer &allocationsForResidency);
 
     Wddm *wddm;
     COMMAND_BUFFER_HEADER_REC *commandBufferHeader;
-    bool pageTableManagerInitialized = false;
 };
 } // namespace NEO

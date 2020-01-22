@@ -7,8 +7,8 @@
 
 #include "runtime/os_interface/windows/wddm_residency_controller.h"
 
+#include "core/debug_settings/debug_settings_manager.h"
 #include "core/utilities/spinlock.h"
-#include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/os_interface/windows/wddm/wddm.h"
 #include "runtime/os_interface/windows/wddm_allocation.h"
 #include "runtime/os_interface/windows/wddm_memory_manager.h"
@@ -300,7 +300,7 @@ bool WddmResidencyController::trimResidencyToBudget(uint64_t bytes) {
 
 bool WddmResidencyController::makeResidentResidencyAllocations(const ResidencyContainer &allocationsForResidency) {
     const size_t residencyCount = allocationsForResidency.size();
-    std::unique_ptr<D3DKMT_HANDLE[]> handlesForResidency(new D3DKMT_HANDLE[residencyCount * maxFragmentsCount * maxHandleCount]);
+    std::unique_ptr<D3DKMT_HANDLE[]> handlesForResidency(new D3DKMT_HANDLE[residencyCount * maxFragmentsCount * EngineLimits::maxHandleCount]);
     uint32_t totalHandlesCount = 0;
 
     auto lock = this->acquireLock();
@@ -381,6 +381,13 @@ void WddmResidencyController::makeNonResidentEvictionAllocations(const Residency
         WddmAllocation *allocation = static_cast<WddmAllocation *>(evictionAllocations[i]);
         this->addToTrimCandidateList(allocation);
     }
+}
+
+bool WddmResidencyController::isInitialized() const {
+    if (!DebugManager.flags.DoNotRegisterTrimCallback.get()) {
+        return trimCallbackHandle != nullptr;
+    }
+    return true;
 }
 
 } // namespace NEO

@@ -5,12 +5,11 @@
  *
  */
 
+#include "core/gen12lp/hw_cmds.h"
 #include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_services.h"
-#include "runtime/gen12lp/hw_cmds.h"
 
 #include "engine_node.h"
-#include "hw_info_tgllp.h"
 
 namespace NEO {
 
@@ -49,6 +48,7 @@ const RuntimeCapabilityTable TGLLP::capabilityTable{
     CmdServicesMemTraceVersion::DeviceValues::Tgllp, // aubDeviceId
     1,                                               // extraQuantityThreadsPerEU
     64,                                              // slmSize
+    sizeof(TGLLP::GRF),                              // grfSize
     false,                                           // blitterOperationsSupported
     true,                                            // ftrSupportsInteger64BitAtomics
     false,                                           // ftrSupportsFP64
@@ -67,7 +67,8 @@ const RuntimeCapabilityTable TGLLP::capabilityTable{
     false,                                           // supportsVme
     false,                                           // supportCacheFlushAfterWalker
     true,                                            // supportsImages
-    true                                             // supportsDeviceEnqueue
+    true,                                            // supportsDeviceEnqueue
+    false                                            // hostPtrTrackingEnabled
 };
 
 WorkaroundTable TGLLP::workaroundTable = {};
@@ -100,10 +101,6 @@ void TGLLP::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo) {
     workaroundTable->wa4kAlignUVOffsetNV12LinearSurface = true;
     workaroundTable->waEnablePreemptionGranularityControlByUMD = true;
     workaroundTable->waUntypedBufferCompression = true;
-    if (hwInfo->platform.usRevId < REVISION_B) {
-        workaroundTable->waUseOffsetToSkipSetFFIDGP = true;
-        workaroundTable->waForceDefaultRCSEngine = true;
-    }
 };
 
 const HardwareInfo TGLLP_1x6x16::hwInfo = {

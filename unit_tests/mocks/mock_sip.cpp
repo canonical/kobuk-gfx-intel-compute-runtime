@@ -8,11 +8,13 @@
 #include "unit_tests/mocks/mock_sip.h"
 
 #include "core/helpers/file_io.h"
-#include "runtime/helpers/hw_info.h"
-#include "runtime/helpers/options.h"
+#include "core/helpers/hw_info.h"
+#include "core/helpers/options.h"
+#include "runtime/memory_manager/os_agnostic_memory_manager.h"
 #include "runtime/os_interface/os_inc_base.h"
 #include "unit_tests/helpers/test_files.h"
 #include "unit_tests/mocks/mock_compilers.h"
+#include "unit_tests/mocks/mock_program.h"
 
 #include "cif/macros/enable.h"
 #include "ocl_igc_interface/igc_ocl_device_ctx.h"
@@ -21,6 +23,31 @@
 #include <map>
 
 namespace NEO {
+MockSipKernel::MockSipKernel(SipKernelType type, Program *sipProgram) : SipKernel(type, sipProgram) {
+    this->mockSipMemoryAllocation =
+        std::make_unique<MemoryAllocation>(0u,
+                                           GraphicsAllocation::AllocationType::KERNEL_ISA,
+                                           nullptr,
+                                           MemoryConstants::pageSize * 10u,
+                                           0u,
+                                           MemoryConstants::pageSize,
+                                           MemoryPool::System4KBPages);
+}
+
+MockSipKernel::MockSipKernel() : SipKernel(SipKernelType::Csr, nullptr) {
+    this->mockSipMemoryAllocation =
+        std::make_unique<MemoryAllocation>(0u,
+                                           GraphicsAllocation::AllocationType::KERNEL_ISA,
+                                           nullptr,
+                                           MemoryConstants::pageSize * 10u,
+                                           0u,
+                                           MemoryConstants::pageSize,
+                                           MemoryPool::System4KBPages);
+    this->program = new MockProgram(this->executionEnvironment, nullptr, false);
+}
+
+MockSipKernel::~MockSipKernel() = default;
+
 std::vector<char> MockSipKernel::dummyBinaryForSip;
 std::vector<char> MockSipKernel::getDummyGenBinary() {
     if (dummyBinaryForSip.empty()) {
@@ -45,5 +72,9 @@ void MockSipKernel::initDummyBinary() {
 }
 void MockSipKernel::shutDown() {
     MockSipKernel::dummyBinaryForSip.clear();
+}
+
+GraphicsAllocation *MockSipKernel::getSipAllocation() const {
+    return mockSipMemoryAllocation.get();
 }
 } // namespace NEO

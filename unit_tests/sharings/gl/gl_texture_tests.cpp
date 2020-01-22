@@ -5,6 +5,7 @@
  *
  */
 
+#include "runtime/gmm_helper/gmm_types_converter.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/platform/platform.h"
 #include "runtime/sharings/gl/gl_texture.h"
@@ -64,7 +65,7 @@ class GlSharingTextureTests : public ::testing::Test {
         clContext->setSharingFunctions(mockGlSharingFunctions);
         ASSERT_FALSE(overrideCommandStreamReceiverCreation);
 
-        tempMM->forceGmm = MockGmm::queryImgParams(imgInfo);
+        tempMM->forceGmm = MockGmm::queryImgParams(executionEnvironment->getGmmClientContext(), imgInfo);
         tempMM->forceAllocationSize = textureSize;
         textureSize = imgInfo.size;
         textureId = 1;
@@ -612,7 +613,7 @@ TEST_P(GetGlTextureInfoTests, givenApiTargetTypeWhenAskedForBaseTypeThenConvertO
 TEST_P(GetGlTextureInfoTests, givenApiTargetTypeWhenAskedForGmmCubeFaceIndexThenReturnValidOnlyForCubeType) {
     tempMM->useForcedGmm = false;
     auto apiTarget = GetParam();
-    auto gmmCubeFaceIndex = static_cast<unsigned int>(GmmHelper::getCubeFaceIndex(apiTarget));
+    auto gmmCubeFaceIndex = static_cast<unsigned int>(GmmTypesConverter::getCubeFaceIndex(apiTarget));
 
     switch (apiTarget) {
     case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:

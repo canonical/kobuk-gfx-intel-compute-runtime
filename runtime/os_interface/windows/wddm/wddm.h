@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2019 Intel Corporation
+ * Copyright (C) 2017-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -22,7 +22,6 @@ namespace NEO {
 class Gdi;
 class Gmm;
 class GmmMemory;
-class GmmPageTableMngr;
 class OsContextWin;
 class SettingsReader;
 class WddmAllocation;
@@ -33,10 +32,22 @@ class WddmResidentAllocationsContainer;
 struct AllocationStorageData;
 struct HardwareInfo;
 struct KmDafListener;
+struct RootDeviceEnvironment;
 struct MonitoredFence;
 struct OsHandleStorage;
 
 enum class HeapIndex : uint32_t;
+
+struct WddmSubmitArguments {
+    MonitoredFence *monitorFence;
+    D3DKMT_HANDLE contextHandle;
+    D3DKMT_HANDLE hwQueueHandle;
+};
+
+enum class WddmVersion : uint32_t {
+    WDDM_2_0 = 0,
+    WDDM_2_3
+};
 
 class Wddm {
   public:
@@ -47,7 +58,7 @@ class Wddm {
 
     virtual ~Wddm();
 
-    static Wddm *createWddm();
+    static Wddm *createWddm(RootDeviceEnvironment &rootDeviceEnvironment);
     bool init(HardwareInfo &outHardwareInfo);
 
     MOCKABLE_VIRTUAL bool evict(const D3DKMT_HANDLE *handleList, uint32_t numOfHandles, uint64_t &sizeToTrim);
@@ -58,7 +69,7 @@ class Wddm {
     MOCKABLE_VIRTUAL bool createContext(OsContextWin &osContext);
     MOCKABLE_VIRTUAL void applyAdditionalContextFlags(CREATECONTEXT_PVTDATA &privateData, OsContextWin &osContext);
     MOCKABLE_VIRTUAL bool freeGpuVirtualAddress(D3DGPU_VIRTUAL_ADDRESS &gpuPtr, uint64_t size);
-    MOCKABLE_VIRTUAL NTSTATUS createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKMT_HANDLE &outHandle);
+    MOCKABLE_VIRTUAL NTSTATUS createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKMT_HANDLE &outHandle, uint32_t shareable);
     MOCKABLE_VIRTUAL bool createAllocation64k(const Gmm *gmm, D3DKMT_HANDLE &outHandle);
     MOCKABLE_VIRTUAL NTSTATUS createAllocationsAndMapGpuVa(OsHandleStorage &osHandles);
     MOCKABLE_VIRTUAL bool destroyAllocations(const D3DKMT_HANDLE *handles, uint32_t allocationCount, D3DKMT_HANDLE resourceHandle);
@@ -72,7 +83,7 @@ class Wddm {
     MOCKABLE_VIRTUAL bool destroyContext(D3DKMT_HANDLE context);
     MOCKABLE_VIRTUAL bool queryAdapterInfo();
 
-    MOCKABLE_VIRTUAL bool submit(uint64_t commandBuffer, size_t size, void *commandHeader, OsContextWin &osContext);
+    MOCKABLE_VIRTUAL bool submit(uint64_t commandBuffer, size_t size, void *commandHeader, WddmSubmitArguments &submitArguments);
     MOCKABLE_VIRTUAL bool waitFromCpu(uint64_t lastFenceValue, const MonitoredFence &monitoredFence);
 
     NTSTATUS escape(D3DKMT_ESCAPE &escapeCommand);
@@ -120,10 +131,6 @@ class Wddm {
 
     std::unique_ptr<SettingsReader> registryReader;
 
-    GmmPageTableMngr *getPageTableManager() const { return pageTableManager.get(); }
-    void resetPageTableManager(GmmPageTableMngr *newPageTableManager);
-    bool updateAuxTable(D3DGPU_VIRTUAL_ADDRESS gpuVa, Gmm *gmm, bool map);
-
     uintptr_t getWddmMinAddress() const {
         return this->minAddress;
     }
@@ -145,6 +152,8 @@ class Wddm {
     void waitOnPagingFenceFromCpu();
 
     void setGmmInputArg(void *args);
+
+    WddmVersion getWddmVersion();
 
   protected:
     std::unique_ptr<Gdi> gdi;
@@ -168,6 +177,7 @@ class Wddm {
     uint32_t maxRenderFrequency = 0;
     bool instrumentationEnabled = false;
     std::string deviceRegistryPath;
+    RootDeviceEnvironment &rootDeviceEnvironment;
 
     unsigned long hwContextId = 0;
     LUID adapterLuid;
@@ -175,7 +185,7 @@ class Wddm {
     std::unique_ptr<GmmMemory> gmmMemory;
     uintptr_t minAddress = 0;
 
-    Wddm();
+    Wddm(RootDeviceEnvironment &rootDeviceEnvironment);
     MOCKABLE_VIRTUAL bool openAdapter();
     MOCKABLE_VIRTUAL bool waitOnGPU(D3DKMT_HANDLE context);
     bool createDevice(PreemptionMode preemptionMode);
@@ -185,14 +195,11 @@ class Wddm {
     bool closeAdapter();
     void getDeviceState();
     void handleCompletion(OsContextWin &osContext);
-    bool configureDeviceAddressSpaceImpl();
 
     static CreateDXGIFactoryFcn createDxgiFactory;
     static GetSystemInfoFcn getSystemInfo;
     static VirtualFreeFcn virtualFreeFnc;
     static VirtualAllocFcn virtualAllocFnc;
-
-    std::unique_ptr<GmmPageTableMngr> pageTableManager;
 
     std::unique_ptr<KmDafListener> kmDafListener;
     std::unique_ptr<WddmInterface> wddmInterface;

@@ -6,6 +6,9 @@
  */
 
 #pragma once
+#include "core/helpers/engine_node_helper.h"
+#include "core/helpers/options.h"
+#include "core/program/sync_buffer_handler.h"
 #include "core/utilities/range.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
@@ -19,10 +22,8 @@
 #include "runtime/gtpin/gtpin_notify.h"
 #include "runtime/helpers/array_count.h"
 #include "runtime/helpers/dispatch_info_builder.h"
-#include "runtime/helpers/engine_node_helper.h"
 #include "runtime/helpers/enqueue_properties.h"
 #include "runtime/helpers/hardware_commands_helper.h"
-#include "runtime/helpers/options.h"
 #include "runtime/helpers/task_information.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/mem_obj/image.h"
@@ -104,7 +105,7 @@ void CommandQueueHw<GfxFamily>::forceDispatchScheduler(NEO::MultiDispatchInfo &m
     DispatchInfo dispatchInfo(&scheduler, 1, Vec3<size_t>(scheduler.getGws(), 1, 1), Vec3<size_t>(scheduler.getLws(), 1, 1), Vec3<size_t>(0, 0, 0));
 
     auto devQueue = this->getContext().getDefaultDeviceQueue();
-    DeviceQueueHw<GfxFamily> *devQueueHw = castToObject<DeviceQueueHw<GfxFamily>>(devQueue);
+    DeviceQueueHw<GfxFamily> *devQueueHw = castToObjectOrAbort<DeviceQueueHw<GfxFamily>>(devQueue);
 
     scheduler.createReflectionSurface();
     GraphicsAllocation *reflectionSurface = scheduler.getKernelReflectionSurface();
@@ -340,12 +341,12 @@ void CommandQueueHw<GfxFamily>::enqueueHandler(Surface **surfacesForResidency,
 
     if (eventBuilder.getEvent()) {
         eventBuilder.getEvent()->updateCompletionStamp(completionStamp.taskCount, completionStamp.taskLevel, completionStamp.flushStamp);
-        DebugManager.log(DebugManager.flags.EventsDebugEnable.get(), "updateCompletionStamp Event", eventBuilder.getEvent(), "taskLevel", eventBuilder.getEvent()->taskLevel.load());
+        FileLoggerInstance().log(DebugManager.flags.EventsDebugEnable.get(), "updateCompletionStamp Event", eventBuilder.getEvent(), "taskLevel", eventBuilder.getEvent()->taskLevel.load());
     }
 
     if (blockQueue) {
         if (parentKernel) {
-            size_t minSizeSSHForEM = HardwareCommandsHelper<GfxFamily>::getSizeRequiredForExecutionModel(IndirectHeap::SURFACE_STATE, *parentKernel);
+            size_t minSizeSSHForEM = HardwareCommandsHelper<GfxFamily>::getSshSizeForExecutionModel(*parentKernel);
             blockedCommandsData->surfaceStateHeapSizeEM = minSizeSSHForEM;
         }
 
@@ -390,7 +391,7 @@ void CommandQueueHw<GfxFamily>::processDispatchForKernels(const MultiDispatchInf
                                                           KernelOperation *blockedCommandsData,
                                                           TimestampPacketDependencies &timestampPacketDependencies) {
     TagNode<HwPerfCounter> *hwPerfCounter = nullptr;
-    DebugManager.dumpKernelArgs(&multiDispatchInfo);
+    FileLoggerInstance().dumpKernelArgs(&multiDispatchInfo);
 
     printfHandler.reset(PrintfHandler::create(multiDispatchInfo, *device));
     if (printfHandler) {
@@ -530,7 +531,7 @@ void CommandQueueHw<GfxFamily>::processDeviceEnqueue(DeviceQueueHw<GfxFamily> *d
                                                      TagNode<HwTimeStamps> *hwTimeStamps,
                                                      bool &blocking) {
     auto parentKernel = multiDispatchInfo.peekParentKernel();
-    size_t minSizeSSHForEM = HardwareCommandsHelper<GfxFamily>::getSizeRequiredForExecutionModel(IndirectHeap::SURFACE_STATE, *parentKernel);
+    size_t minSizeSSHForEM = HardwareCommandsHelper<GfxFamily>::getSshSizeForExecutionModel(*parentKernel);
     bool isCcsUsed = isCcs(gpgpuEngine->osContext->getEngineType());
 
     uint32_t taskCount = getGpgpuCommandStreamReceiver().peekTaskCount() + 1;
@@ -642,6 +643,15 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
         blocking = true;
         printfHandler->makeResident(getGpgpuCommandStreamReceiver());
     }
+
+    if (multiDispatchInfo.peekMainKernel()->usesSyncBuffer()) {
+        auto &gws = multiDispatchInfo.begin()->getGWS();
+        auto &lws = multiDispatchInfo.begin()->getLocalWorkgroupSize();
+        size_t workGroupsCount = (gws.x * gws.y * gws.z) /
+                                 (lws.x * lws.y * lws.z);
+        device->syncBufferHandler->prepareForEnqueue(workGroupsCount, *multiDispatchInfo.peekMainKernel(), getGpgpuCommandStreamReceiver());
+    }
+
     if (timestampPacketContainer) {
         timestampPacketContainer->makeResident(getGpgpuCommandStreamReceiver());
         timestampPacketDependencies.previousEnqueueNodes.makeResident(getGpgpuCommandStreamReceiver());
@@ -708,8 +718,6 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
         ioh = &getIndirectHeap(IndirectHeap::INDIRECT_OBJECT, 0u);
     }
 
-    getGpgpuCommandStreamReceiver().requestThreadArbitrationPolicy(multiDispatchInfo.peekMainKernel()->getThreadArbitrationPolicy<GfxFamily>());
-
     auto allocNeedsFlushDC = false;
     if (!device->isFullRangeSvm()) {
         if (std::any_of(getGpgpuCommandStreamReceiver().getResidencyAllocations().begin(), getGpgpuCommandStreamReceiver().getResidencyAllocations().end(), [](const auto allocation) { return allocation->isFlushL3Required(); })) {
@@ -726,6 +734,7 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
         PreemptionHelper::taskPreemptionMode(*device, multiDispatchInfo),                           //preemptionMode
         numGrfRequired,                                                                             //numGrfRequired
         L3CachingSettings::l3CacheOn,                                                               //l3CacheSettings
+        kernel->getThreadArbitrationPolicy(),                                                       //threadArbitrationPolicy
         getSliceCount(),                                                                            //sliceCount
         blocking,                                                                                   //blocking
         shouldFlushDC(commandType, printfHandler) || allocNeedsFlushDC,                             //dcFlush
@@ -736,7 +745,6 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
         (QueuePriority::LOW == priority),                                                           //lowPriority
         implicitFlush,                                                                              //implicitFlush
         !eventBuilder.getEvent() || getGpgpuCommandStreamReceiver().isNTo1SubmissionModelEnabled(), //outOfOrderExecutionAllowed
-        this->multiEngineQueue,                                                                     //multiEngineQueue
         false                                                                                       //epilogueRequired
     );
 
@@ -850,6 +858,7 @@ void CommandQueueHw<GfxFamily>::enqueueBlocked(
         for (auto &surface : CreateRange(surfaces, surfaceCount)) {
             allSurfaces.push_back(surface->duplicate());
         }
+
         PreemptionMode preemptionMode = PreemptionHelper::taskPreemptionMode(*device, multiDispatchInfo);
         bool slmUsed = multiDispatchInfo.usesSlm() || multiDispatchInfo.peekParentKernel();
         command = std::make_unique<CommandComputeKernel>(*this,
@@ -902,13 +911,13 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueCommandWithoutKernel(
         timestampPacketDependencies.previousEnqueueNodes.makeResident(getGpgpuCommandStreamReceiver());
     }
 
+    for (auto surface : CreateRange(surfaces, surfaceCount)) {
+        surface->makeResident(getGpgpuCommandStreamReceiver());
+    }
+
     if (enqueueProperties.operation == EnqueueProperties::Operation::Blit) {
         UNRECOVERABLE_IF(!enqueueProperties.blitPropertiesContainer);
         this->bcsTaskCount = getBcsCommandStreamReceiver()->blitBuffer(*enqueueProperties.blitPropertiesContainer, false);
-    } else {
-        for (auto surface : CreateRange(surfaces, surfaceCount)) {
-            surface->makeResident(getGpgpuCommandStreamReceiver());
-        }
     }
 
     DispatchFlags dispatchFlags(
@@ -920,6 +929,7 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueCommandWithoutKernel(
         device->getPreemptionMode(),                                         //preemptionMode
         GrfConfig::DefaultGrfNumber,                                         //numGrfRequired
         L3CachingSettings::l3CacheOn,                                        //l3CacheSettings
+        ThreadArbitrationPolicy::NotPresent,                                 //threadArbitrationPolicy
         getSliceCount(),                                                     //sliceCount
         blocking,                                                            //blocking
         false,                                                               //dcFlush
@@ -930,7 +940,6 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueCommandWithoutKernel(
         false,                                                               //lowPriority
         (enqueueProperties.operation == EnqueueProperties::Operation::Blit), //implicitFlush
         getGpgpuCommandStreamReceiver().isNTo1SubmissionModelEnabled(),      //outOfOrderExecutionAllowed
-        multiEngineQueue,                                                    //multiEngineQueue
         false                                                                //epilogueRequired
     );
 

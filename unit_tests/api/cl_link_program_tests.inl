@@ -7,11 +7,12 @@
 
 #include "core/compiler_interface/compiler_interface.h"
 #include "core/helpers/file_io.h"
+#include "core/helpers/options.h"
 #include "runtime/context/context.h"
-#include "runtime/helpers/options.h"
 #include "unit_tests/helpers/test_files.h"
 
 #include "cl_api_tests.h"
+#include "compiler_options.h"
 
 using namespace NEO;
 
@@ -123,7 +124,7 @@ TEST_F(clLinkProgramTests, GivenCreateLibraryOptionWhenLinkingProgramThenSuccess
         pContext,
         num_devices,
         devices,
-        "-create-library",
+        CompilerOptions::createLibrary,
         1,
         &program,
         nullptr,

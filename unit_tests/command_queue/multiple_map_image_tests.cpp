@@ -7,7 +7,6 @@
 
 #include "runtime/command_queue/command_queue_hw.h"
 #include "runtime/event/user_event.h"
-#include "runtime/gmm_helper/gmm_helper.h"
 #include "test.h"
 #include "unit_tests/fixtures/device_fixture.h"
 #include "unit_tests/fixtures/image_fixture.h"
@@ -115,7 +114,7 @@ struct MultipleMapImageTest : public DeviceFixture, public ::testing::Test {
         auto surfaceFormat = Image::getSurfaceFormatFromTable(Traits::flags, &Traits::imageFormat);
 
         cl_int retVal = CL_SUCCESS;
-        auto img = Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(Traits::flags, 0), Traits::flags, 0, surfaceFormat, &Traits::imageDesc, Traits::hostPtr, retVal);
+        auto img = Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(Traits::flags, 0, 0), Traits::flags, 0, surfaceFormat, &Traits::imageDesc, Traits::hostPtr, retVal);
         auto mockImage = static_cast<MockImage<FamilyType> *>(img);
 
         return std::unique_ptr<MockImage<FamilyType>>(mockImage);

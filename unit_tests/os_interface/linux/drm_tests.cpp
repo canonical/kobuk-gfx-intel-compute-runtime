@@ -6,7 +6,7 @@
  */
 
 #include "core/helpers/file_io.h"
-#include "runtime/helpers/options.h"
+#include "core/helpers/options.h"
 #include "runtime/os_interface/device_factory.h"
 #include "runtime/os_interface/linux/os_context_linux.h"
 #include "runtime/os_interface/linux/os_interface.h"
@@ -119,18 +119,19 @@ TEST(DrmTest, GetRevisionID) {
     delete pDrm;
 }
 
-TEST(DrmTest, GivenDrmWhenAskedFor48BitAddressCorrectValueReturned) {
+TEST(DrmTest, GivenDrmWhenAskedForGttSizeThenReturnCorrectValue) {
     auto drm = make_unique<DrmMock>();
-    EXPECT_TRUE(drm->is48BitAddressRangeSupported());
-    drm->StoredRetVal = -1;
-    EXPECT_TRUE(drm->is48BitAddressRangeSupported());
-    drm->StoredRetVal = 0;
+    uint64_t queryGttSize = 0;
+
+    drm->StoredRetValForGetGttSize = 0;
     drm->storedGTTSize = 1ull << 31;
-    EXPECT_FALSE(drm->is48BitAddressRangeSupported());
-    drm->storedGTTSize = MemoryConstants::max64BitAppAddress + 1;
-    EXPECT_TRUE(drm->is48BitAddressRangeSupported());
-    drm->storedGTTSize = MemoryConstants::max64BitAppAddress;
-    EXPECT_FALSE(drm->is48BitAddressRangeSupported());
+    EXPECT_EQ(0, drm->queryGttSize(queryGttSize));
+    EXPECT_EQ(drm->storedGTTSize, queryGttSize);
+
+    queryGttSize = 0;
+    drm->StoredRetValForGetGttSize = -1;
+    EXPECT_NE(0, drm->queryGttSize(queryGttSize));
+    EXPECT_EQ(0u, queryGttSize);
 }
 
 TEST(DrmTest, GivenDrmWhenAskedForPreemptionCorrectValueReturned) {
@@ -172,7 +173,6 @@ TEST(DrmTest, GivenDrmWhenAskedForContextThatFailsThenFalseIsReturned) {
 
 TEST(DrmTest, givenDrmWhenOsContextIsCreatedThenCreateAndDestroyNewDrmOsContext) {
     DrmMock drmMock;
-
     uint32_t drmContextId1 = 123;
     uint32_t drmContextId2 = 456;
 
@@ -196,6 +196,30 @@ TEST(DrmTest, givenDrmWhenOsContextIsCreatedThenCreateAndDestroyNewDrmOsContext)
 
     EXPECT_EQ(drmContextId1, drmMock.receivedDestroyContextId);
     EXPECT_EQ(0u, drmMock.receivedContextParamRequestCount);
+}
+
+TEST(DrmTest, givenDrmAndNegativeCheckNonPersistentContextsSupportWhenOsContextIsCreatedThenReceivedContextParamRequestCountReturnsCorrectValue) {
+
+    DrmMock drmMock;
+    uint32_t drmContextId1 = 123;
+    drmMock.StoredCtxId = drmContextId1;
+    auto expectedCount = 0u;
+
+    {
+        drmMock.StoredRetValForPersistant = -1;
+        drmMock.checkNonPersistentContextsSupport();
+        ++expectedCount;
+        OsContextLinux osContext(drmMock, 0u, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled, false);
+        EXPECT_EQ(expectedCount, drmMock.receivedContextParamRequestCount);
+    }
+    {
+        drmMock.StoredRetValForPersistant = 0;
+        drmMock.checkNonPersistentContextsSupport();
+        ++expectedCount;
+        OsContextLinux osContext(drmMock, 0u, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled, false);
+        ++expectedCount;
+        EXPECT_EQ(expectedCount, drmMock.receivedContextParamRequestCount);
+    }
 }
 
 TEST(DrmTest, givenDrmPreemptionEnabledAndLowPriorityEngineWhenCreatingOsContextThenCallSetContextPriorityIoctl) {
@@ -329,6 +353,16 @@ TEST(DrmTest, givenPlatformWhereGetSseuRetFailureWhenCallSetQueueSliceCountThenS
     EXPECT_FALSE(drm->sliceCountChangeSupported);
     EXPECT_FALSE(drm->setQueueSliceCount(newSliceCount));
     EXPECT_NE(drm->getSliceMask(newSliceCount), drm->storedParamSseu);
+}
+
+TEST(DrmTest, whenCheckNonPeristentSupportIsCalledThenAreNonPersistentContextsSupportedReturnsCorrectValues) {
+    std::unique_ptr<DrmMock> drm = std::make_unique<DrmMock>();
+    drm->StoredRetValForPersistant = -1;
+    drm->checkNonPersistentContextsSupport();
+    EXPECT_FALSE(drm->areNonPersistentContextsSupported());
+    drm->StoredRetValForPersistant = 0;
+    drm->checkNonPersistentContextsSupport();
+    EXPECT_TRUE(drm->areNonPersistentContextsSupported());
 }
 
 TEST(DrmTest, givenPlatformWhereSetSseuRetFailureWhenCallSetQueueSliceCountThenReturnFalse) {

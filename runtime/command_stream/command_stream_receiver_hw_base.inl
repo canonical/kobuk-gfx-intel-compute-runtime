@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Intel Corporation
+ * Copyright (C) 2019-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,9 +7,16 @@
 
 #include "core/command_stream/linear_stream.h"
 #include "core/command_stream/preemption.h"
+#include "core/debug_settings/debug_settings_manager.h"
+#include "core/execution_environment/root_device_environment.h"
+#include "core/gmm_helper/page_table_mngr.h"
+#include "core/helpers/cache_policy.h"
 #include "core/helpers/hw_helper.h"
+#include "core/helpers/options.h"
 #include "core/helpers/preamble.h"
 #include "core/helpers/ptr_math.h"
+#include "core/helpers/state_base_address.h"
+#include "core/indirect_heap/indirect_heap.h"
 #include "runtime/command_queue/gpgpu_walker.h"
 #include "runtime/command_stream/command_stream_receiver_hw.h"
 #include "runtime/command_stream/experimental_command_buffer.h"
@@ -18,17 +25,12 @@
 #include "runtime/event/event.h"
 #include "runtime/gtpin/gtpin_notify.h"
 #include "runtime/helpers/blit_commands_helper.h"
-#include "runtime/helpers/cache_policy.h"
 #include "runtime/helpers/flat_batch_buffer_helper_hw.h"
 #include "runtime/helpers/flush_stamp.h"
-#include "runtime/helpers/options.h"
-#include "runtime/helpers/state_base_address.h"
 #include "runtime/helpers/state_compute_mode_helper.h"
 #include "runtime/helpers/timestamp_packet.h"
-#include "runtime/indirect_heap/indirect_heap.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
 #include "runtime/memory_manager/memory_manager.h"
-#include "runtime/os_interface/debug_settings_manager.h"
 #include "runtime/os_interface/os_context.h"
 #include "runtime/utilities/tag_allocator.h"
 
@@ -128,14 +130,6 @@ inline typename GfxFamily::PIPE_CONTROL *CommandStreamReceiverHw<GfxFamily>::add
 }
 
 template <typename GfxFamily>
-inline typename GfxFamily::PIPE_CONTROL *CommandStreamReceiverHw<GfxFamily>::addPipeControlBeforeStateBaseAddress(LinearStream &commandStream) {
-    auto pCmd = addPipeControlCmd(commandStream);
-    pCmd->setTextureCacheInvalidationEnable(true);
-    pCmd->setDcFlushEnable(true);
-    return pCmd;
-}
-
-template <typename GfxFamily>
 CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
     LinearStream &commandStreamTask,
     size_t commandStreamStartTask,
@@ -210,7 +204,7 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
         dispatchFlags.useSLM = true;
     }
     if (DebugManager.flags.OverrideThreadArbitrationPolicy.get() != -1) {
-        requestThreadArbitrationPolicy(static_cast<uint32_t>(DebugManager.flags.OverrideThreadArbitrationPolicy.get()));
+        dispatchFlags.threadArbitrationPolicy = static_cast<uint32_t>(DebugManager.flags.OverrideThreadArbitrationPolicy.get());
     }
 
     auto newL3Config = PreambleHelper<GfxFamily>::getL3Config(peekHwInfo(), dispatchFlags.useSLM);
@@ -222,6 +216,10 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
     csrSizeRequestFlags.specialPipelineSelectModeChanged = this->lastSpecialPipelineSelectMode != dispatchFlags.pipelineSelectArgs.specialPipelineSelectMode;
     csrSizeRequestFlags.numGrfRequiredChanged = this->lastSentNumGrfRequired != dispatchFlags.numGrfRequired;
     lastSentNumGrfRequired = dispatchFlags.numGrfRequired;
+
+    if (dispatchFlags.threadArbitrationPolicy != ThreadArbitrationPolicy::NotPresent) {
+        this->requiredThreadArbitrationPolicy = dispatchFlags.threadArbitrationPolicy;
+    }
 
     auto force32BitAllocations = getMemoryManager()->peekForce32BitAllocations();
     bool stateBaseAddressDirty = false;
@@ -263,7 +261,9 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
     }
 
     programEngineModeCommands(commandStreamCSR, dispatchFlags);
-    initPageTableManagerRegisters(commandStreamCSR);
+    if (executionEnvironment.rootDeviceEnvironments[device.getRootDeviceIndex()]->pageTableManager.get() && !pageTableManagerInitialized) {
+        pageTableManagerInitialized = executionEnvironment.rootDeviceEnvironments[device.getRootDeviceIndex()]->pageTableManager->initPageTableManagerRegisters(this);
+    }
     programComputeMode(commandStreamCSR, dispatchFlags);
     programL3(commandStreamCSR, dispatchFlags, newL3Config);
     programPipelineSelect(commandStreamCSR, dispatchFlags.pipelineSelectArgs);
@@ -314,22 +314,21 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
 
         StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(
             commandStreamCSR,
-            dsh,
-            ioh,
-            ssh,
+            &dsh,
+            &ioh,
+            &ssh,
             newGSHbase,
             mocsIndex,
             getMemoryManager()->getInternalHeapBaseAddress(rootDeviceIndex),
             device.getGmmHelper(),
-            dispatchFlags);
+            isMultiOsContextCapable());
 
         if (sshDirty) {
             bindingTableBaseAddressRequired = true;
         }
 
         if (bindingTableBaseAddressRequired) {
-            StateBaseAddressHelper<GfxFamily>::programBindingTableBaseAddress(commandStreamCSR, ssh, stateBaseAddressCmdOffset,
-                                                                              device.getGmmHelper());
+            StateBaseAddressHelper<GfxFamily>::programBindingTableBaseAddress(commandStreamCSR, ssh, device.getGmmHelper());
             bindingTableBaseAddressRequired = false;
         }
 
@@ -882,5 +881,4 @@ inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForEpilogue(const Di
     }
     return 0u;
 }
-
 } // namespace NEO

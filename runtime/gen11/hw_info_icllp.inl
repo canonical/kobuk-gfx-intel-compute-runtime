@@ -5,12 +5,11 @@
  *
  */
 
+#include "core/gen11/hw_cmds.h"
 #include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_services.h"
-#include "runtime/gen11/hw_cmds.h"
 
 #include "engine_node.h"
-#include "hw_info_icllp.h"
 
 namespace NEO {
 
@@ -49,6 +48,7 @@ const RuntimeCapabilityTable ICLLP::capabilityTable{
     CmdServicesMemTraceVersion::DeviceValues::Icllp, // aubDeviceId
     1,                                               // extraQuantityThreadsPerEU
     64,                                              // slmSize
+    sizeof(ICLLP::GRF),                              // grfSize
     false,                                           // blitterOperationsSupported
     true,                                            // ftrSupportsInteger64BitAtomics
     false,                                           // ftrSupportsFP64
@@ -67,7 +67,8 @@ const RuntimeCapabilityTable ICLLP::capabilityTable{
     true,                                            // supportsVme
     false,                                           // supportCacheFlushAfterWalker
     true,                                            // supportsImages
-    true                                             // supportsDeviceEnqueue
+    true,                                            // supportsDeviceEnqueue
+    true                                             // hostPtrTrackingEnabled
 };
 
 WorkaroundTable ICLLP::workaroundTable = {};

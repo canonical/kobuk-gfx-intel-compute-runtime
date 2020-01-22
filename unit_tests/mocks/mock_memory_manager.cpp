@@ -50,13 +50,18 @@ GraphicsAllocation *MockMemoryManager::allocateGraphicsMemoryForImage(const Allo
     return allocation;
 }
 
+GraphicsAllocation *MockMemoryManager::allocateShareableMemory(const AllocationData &allocationData) {
+    allocateForShareableCalled = true;
+    return OsAgnosticMemoryManager::allocateShareableMemory(allocationData);
+}
+
 GraphicsAllocation *MockMemoryManager::allocateGraphicsMemory64kb(const AllocationData &allocationData) {
     allocation64kbPageCreated = true;
     preferRenderCompressedFlagPassed = allocationData.flags.preferRenderCompressed;
 
     auto allocation = OsAgnosticMemoryManager::allocateGraphicsMemory64kb(allocationData);
     if (allocation) {
-        allocation->setDefaultGmm(new Gmm(allocation->getUnderlyingBuffer(), allocationData.size, false, preferRenderCompressedFlagPassed, true, {}));
+        allocation->setDefaultGmm(new Gmm(executionEnvironment.getGmmClientContext(), allocation->getUnderlyingBuffer(), allocationData.size, false, preferRenderCompressedFlagPassed, true, {}));
         allocation->getDefaultGmm()->isRenderCompressed = preferRenderCompressedFlagPassed;
     }
     return allocation;

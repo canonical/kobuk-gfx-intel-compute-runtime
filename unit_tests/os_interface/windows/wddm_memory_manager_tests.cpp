@@ -7,12 +7,12 @@
 
 #include "unit_tests/os_interface/windows/wddm_memory_manager_tests.h"
 
+#include "core/gmm_helper/gmm_helper.h"
 #include "core/helpers/aligned_memory.h"
 #include "core/os_interface/os_library.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "core/unit_tests/utilities/base_object_utils.h"
 #include "runtime/gmm_helper/gmm.h"
-#include "runtime/gmm_helper/gmm_helper.h"
 #include "runtime/helpers/array_count.h"
 #include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/mem_obj/buffer.h"
@@ -36,27 +36,27 @@ using namespace ::testing;
 void WddmMemoryManagerFixture::SetUp() {
     GdiDllFixture::SetUp();
 
-    wddm = static_cast<WddmMock *>(Wddm::createWddm());
+    executionEnvironment = platformImpl->peekExecutionEnvironment();
+    wddm = static_cast<WddmMock *>(Wddm::createWddm(*executionEnvironment->rootDeviceEnvironments[0].get()));
     if (platformDevices[0]->capabilityTable.ftrRenderCompressedBuffers || platformDevices[0]->capabilityTable.ftrRenderCompressedImages) {
         GMM_TRANSLATIONTABLE_CALLBACKS dummyTTCallbacks = {};
-        wddm->resetPageTableManager(GmmPageTableMngr::create(0, &dummyTTCallbacks));
+        executionEnvironment->rootDeviceEnvironments[0]->pageTableManager.reset(GmmPageTableMngr::create(0, &dummyTTCallbacks));
     }
     auto hwInfo = *platformDevices[0];
     wddm->init(hwInfo);
     constexpr uint64_t heap32Base = (is32bit) ? 0x1000 : 0x800000000000;
     wddm->setHeap32(heap32Base, 1000 * MemoryConstants::pageSize - 1);
 
-    executionEnvironment = platformImpl->peekExecutionEnvironment();
     executionEnvironment->osInterface = std::make_unique<OSInterface>();
     executionEnvironment->osInterface->get()->setWddm(wddm);
-    executionEnvironment->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
+    executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
 
     memoryManager = std::make_unique<MockWddmMemoryManager>(*executionEnvironment);
 }
 
 TEST(ResidencyData, givenNewlyConstructedResidencyDataThenItIsNotResidentOnAnyOsContext) {
     ResidencyData residencyData;
-    for (auto contextId = 0u; contextId < maxOsContextCount; contextId++) {
+    for (auto contextId = 0u; contextId < MemoryManager::maxOsContextCount; contextId++) {
         EXPECT_EQ(false, residencyData.resident[contextId]);
     }
 }
@@ -107,8 +107,8 @@ TEST(WddmAllocationTest, givenMemoryPoolWhenPassedToWddmAllocationConstructorThe
 
 TEST(WddmMemoryManagerExternalHeapTest, externalHeapIsCreatedWithCorrectBase) {
     HardwareInfo *hwInfo;
-    auto executionEnvironment = getExecutionEnvironmentImpl(hwInfo);
-    std::unique_ptr<WddmMock> wddm(static_cast<WddmMock *>(Wddm::createWddm()));
+    auto executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
+    std::unique_ptr<WddmMock> wddm(static_cast<WddmMock *>(Wddm::createWddm(*executionEnvironment->rootDeviceEnvironments[0].get())));
     uint64_t base = 0x56000;
     uint64_t size = 0x9000;
     wddm->setHeap32(base, size);
@@ -121,8 +121,8 @@ TEST(WddmMemoryManagerExternalHeapTest, externalHeapIsCreatedWithCorrectBase) {
 
 TEST(WddmMemoryManagerWithDeferredDeleterTest, givenWMMWhenAsyncDeleterIsEnabledAndWaitForDeletionsIsCalledThenDeleterInWddmIsSetToNullptr) {
     HardwareInfo *hwInfo;
-    auto executionEnvironment = getExecutionEnvironmentImpl(hwInfo);
-    auto wddm = std::make_unique<WddmMock>();
+    auto executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
+    auto wddm = std::make_unique<WddmMock>(*executionEnvironment->rootDeviceEnvironments[0].get());
     executionEnvironment->osInterface->get()->setWddm(wddm.release());
     bool actualDeleterFlag = DebugManager.flags.EnableDeferredDeleter.get();
     DebugManager.flags.EnableDeferredDeleter.set(true);
@@ -206,7 +206,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenMemoryManagerWhenCreateAllocationFromHa
     memoryManager.reset(new MockWddmMemoryManager(false, false, *executionEnvironment));
     auto osHandle = 1u;
     gdi->getQueryResourceInfoArgOut().NumAllocations = 1;
-    std::unique_ptr<Gmm> gmm(new Gmm(nullptr, 0, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), nullptr, 0, false));
 
     D3DDDI_OPENALLOCATIONINFO allocationInfo;
     allocationInfo.pPrivateDriverData = gmm->gmmResourceInfo->peekHandle();
@@ -226,7 +226,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenAllocationPropertiesWhenCreateAllocatio
     memoryManager.reset(new MockWddmMemoryManager(false, false, *executionEnvironment));
     auto osHandle = 1u;
     gdi->getQueryResourceInfoArgOut().NumAllocations = 1;
-    std::unique_ptr<Gmm> gmm(new Gmm(nullptr, 0, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), nullptr, 0, false));
 
     D3DDDI_OPENALLOCATIONINFO allocationInfo;
     allocationInfo.pPrivateDriverData = gmm->gmmResourceInfo->peekHandle();
@@ -252,7 +252,7 @@ TEST_F(WddmMemoryManagerSimpleTest, whenCreateAllocationFromHandleAndMapCallFail
     memoryManager.reset(new MockWddmMemoryManager(false, false, *executionEnvironment));
     auto osHandle = 1u;
     gdi->getQueryResourceInfoArgOut().NumAllocations = 1;
-    auto gmm = std::make_unique<Gmm>(nullptr, 0, false);
+    auto gmm = std::make_unique<Gmm>(executionEnvironment->getGmmClientContext(), nullptr, 0, false);
 
     D3DDDI_OPENALLOCATIONINFO allocationInfo;
     allocationInfo.pPrivateDriverData = gmm->gmmResourceInfo->peekHandle();
@@ -298,6 +298,16 @@ TEST_F(WddmMemoryManagerTest, givenAllocateGraphicsMemoryForNonSvmHostPtrIsCalle
     allocationData.hostPtr = hostPtr;
     auto allocation = memoryManager->allocateGraphicsMemoryForNonSvmHostPtr(allocationData);
     EXPECT_EQ(nullptr, allocation);
+    memoryManager->freeGraphicsMemory(allocation);
+}
+
+TEST_F(WddmMemoryManagerSimpleTest, GivenShareableEnabledWhenAskedToCreateGrahicsAllocationThenValidAllocationIsReturned) {
+    memoryManager.reset(new MockWddmMemoryManager(false, false, *executionEnvironment));
+    AllocationData allocationData;
+    allocationData.size = 4096u;
+    allocationData.flags.shareable = true;
+    auto allocation = memoryManager->allocateShareableMemory(allocationData);
+    EXPECT_NE(nullptr, allocation);
     memoryManager->freeGraphicsMemory(allocation);
 }
 
@@ -438,7 +448,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenCreateFromSharedHandleIs
     auto osHandle = 1u;
     void *pSysMem = reinterpret_cast<void *>(0x1000);
 
-    std::unique_ptr<Gmm> gmm(new Gmm(pSysMem, 4096u, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), pSysMem, 4096u, false));
     setSizesFcn(gmm->gmmResourceInfo.get(), 1u, 1024u, 1u);
 
     AllocationProperties properties(0, false, 4096u, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
@@ -455,7 +465,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenCreateFromSharedHandleIs
 TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenCreateFromNTHandleIsCalledThenNonNullGraphicsAllocationIsReturned) {
     void *pSysMem = reinterpret_cast<void *>(0x1000);
 
-    std::unique_ptr<Gmm> gmm(new Gmm(pSysMem, 4096u, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), pSysMem, 4096u, false));
     setSizesFcn(gmm->gmmResourceInfo.get(), 1u, 1024u, 1u);
 
     auto *gpuAllocation = memoryManager->createGraphicsAllocationFromNTHandle(reinterpret_cast<void *>(1), 0);
@@ -487,7 +497,7 @@ TEST_F(WddmMemoryManagerTest, createAllocationFromSharedHandleReturns32BitAllocW
     auto osHandle = 1u;
     void *pSysMem = reinterpret_cast<void *>(0x1000);
 
-    std::unique_ptr<Gmm> gmm(new Gmm(pSysMem, 4096u, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), pSysMem, 4096u, false));
     setSizesFcn(gmm->gmmResourceInfo.get(), 1u, 1024u, 1u);
 
     memoryManager->setForce32BitAllocations(true);
@@ -510,7 +520,7 @@ TEST_F(WddmMemoryManagerTest, createAllocationFromSharedHandleDoesNotReturn32Bit
     auto osHandle = 1u;
     void *pSysMem = reinterpret_cast<void *>(0x1000);
 
-    std::unique_ptr<Gmm> gmm(new Gmm(pSysMem, 4096u, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), pSysMem, 4096u, false));
     setSizesFcn(gmm->gmmResourceInfo.get(), 1u, 1024u, 1u);
 
     memoryManager->setForce32BitAllocations(true);
@@ -532,7 +542,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenFreeAllocFromSharedHandl
     auto osHandle = 1u;
     void *pSysMem = reinterpret_cast<void *>(0x1000);
 
-    std::unique_ptr<Gmm> gmm(new Gmm(pSysMem, 4096u, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), pSysMem, 4096u, false));
     setSizesFcn(gmm->gmmResourceInfo.get(), 1u, 1024u, 1u);
 
     AllocationProperties properties(0, false, 4096u, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
@@ -554,7 +564,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerSizeZeroWhenCreateFromShared
     auto size = 4096u;
     void *pSysMem = reinterpret_cast<void *>(0x1000);
 
-    std::unique_ptr<Gmm> gmm(new Gmm(pSysMem, size, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), pSysMem, size, false));
     setSizesFcn(gmm->gmmResourceInfo.get(), 1u, 1024u, 1u);
 
     AllocationProperties properties(0, false, size, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, false, 0);
@@ -569,7 +579,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenCreateFromSharedHandleFa
     auto size = 4096u;
     void *pSysMem = reinterpret_cast<void *>(0x1000);
 
-    std::unique_ptr<Gmm> gmm(new Gmm(pSysMem, size, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), pSysMem, size, false));
     setSizesFcn(gmm->gmmResourceInfo.get(), 1u, 1024u, 1u);
 
     wddm->failOpenSharedHandle = true;
@@ -600,7 +610,7 @@ HWTEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenTiledImageWithMipCount
 
     cl_mem_flags flags = CL_MEM_WRITE_ONLY;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                                                   flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, dstImage);
@@ -629,7 +639,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenTiledImageWithMipCountNo
 
     cl_mem_flags flags = CL_MEM_WRITE_ONLY;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                                                   flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, dstImage);
@@ -664,7 +674,7 @@ HWTEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenTiledImageIsBeingCreat
 
     cl_mem_flags flags = CL_MEM_WRITE_ONLY | CL_MEM_USE_HOST_PTR;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                                                   flags, 0, surfaceFormat, &imageDesc, data, retVal));
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, dstImage);
@@ -693,7 +703,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenNonTiledImgWithMipCountZ
 
     cl_mem_flags flags = CL_MEM_WRITE_ONLY | CL_MEM_USE_HOST_PTR;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                                                   flags, 0, surfaceFormat, &imageDesc, data, retVal));
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, dstImage);
@@ -721,7 +731,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenNonTiledImgWithMipCountN
 
     cl_mem_flags flags = CL_MEM_WRITE_ONLY;
     auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat);
-    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0),
+    std::unique_ptr<Image> dstImage(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
                                                   flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, dstImage);
@@ -900,7 +910,7 @@ TEST_F(WddmMemoryManagerTest, GivenThreeOsHandlesWhenAskedForDestroyAllocationsT
 
     storage.fragmentStorageData[0].osHandleStorage->handle = ALLOCATION_HANDLE;
     storage.fragmentStorageData[0].freeTheFragment = true;
-    storage.fragmentStorageData[0].osHandleStorage->gmm = new Gmm(pSysMem, 4096u, false);
+    storage.fragmentStorageData[0].osHandleStorage->gmm = new Gmm(executionEnvironment->getGmmClientContext(), pSysMem, 4096u, false);
 
     storage.fragmentStorageData[1].osHandleStorage = new OsHandle;
     storage.fragmentStorageData[1].osHandleStorage->handle = ALLOCATION_HANDLE;
@@ -911,7 +921,7 @@ TEST_F(WddmMemoryManagerTest, GivenThreeOsHandlesWhenAskedForDestroyAllocationsT
     storage.fragmentStorageData[2].osHandleStorage = new OsHandle;
     storage.fragmentStorageData[2].osHandleStorage->handle = ALLOCATION_HANDLE;
     storage.fragmentStorageData[2].freeTheFragment = true;
-    storage.fragmentStorageData[2].osHandleStorage->gmm = new Gmm(pSysMem, 4096u, false);
+    storage.fragmentStorageData[2].osHandleStorage->gmm = new Gmm(executionEnvironment->getGmmClientContext(), pSysMem, 4096u, false);
     storage.fragmentStorageData[2].residency = new ResidencyData;
 
     memoryManager->cleanOsHandles(storage, 0);
@@ -956,7 +966,7 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenCpuMemNotMeetRestriction
 TEST_F(WddmMemoryManagerTest, givenManagerWithDisabledDeferredDeleterWhenMapGpuVaFailThenFailToCreateAllocation) {
     void *ptr = reinterpret_cast<void *>(0x1000);
     size_t size = 0x1000;
-    std::unique_ptr<Gmm> gmm(new Gmm(ptr, size, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), ptr, size, false));
 
     memoryManager->setDeferredDeleter(nullptr);
     setMapGpuVaFailConfigFcn(0, 1);
@@ -970,7 +980,7 @@ TEST_F(WddmMemoryManagerTest, givenManagerWithDisabledDeferredDeleterWhenMapGpuV
 TEST_F(WddmMemoryManagerTest, givenManagerWithEnabledDeferredDeleterWhenFirstMapGpuVaFailSecondAfterDrainSuccessThenCreateAllocation) {
     void *ptr = reinterpret_cast<void *>(0x10000);
     size_t size = 0x1000;
-    std::unique_ptr<Gmm> gmm(new Gmm(ptr, size, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), ptr, size, false));
 
     MockDeferredDeleter *deleter = new MockDeferredDeleter;
     memoryManager->setDeferredDeleter(deleter);
@@ -986,7 +996,7 @@ TEST_F(WddmMemoryManagerTest, givenManagerWithEnabledDeferredDeleterWhenFirstMap
 TEST_F(WddmMemoryManagerTest, givenManagerWithEnabledDeferredDeleterWhenFirstAndMapGpuVaFailSecondAfterDrainFailThenFailToCreateAllocation) {
     void *ptr = reinterpret_cast<void *>(0x1000);
     size_t size = 0x1000;
-    std::unique_ptr<Gmm> gmm(new Gmm(ptr, size, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), ptr, size, false));
 
     MockDeferredDeleter *deleter = new MockDeferredDeleter;
     memoryManager->setDeferredDeleter(deleter);
@@ -1150,7 +1160,7 @@ TEST_F(BufferWithWddmMemory, givenFragmentsThatAreNotInOrderWhenGraphicsAllocati
     handleStorage.fragmentStorageData[0].osHandleStorage = new OsHandle();
     handleStorage.fragmentStorageData[0].residency = new ResidencyData();
     handleStorage.fragmentStorageData[0].freeTheFragment = true;
-    handleStorage.fragmentStorageData[0].osHandleStorage->gmm = new Gmm(ptr, size, false);
+    handleStorage.fragmentStorageData[0].osHandleStorage->gmm = new Gmm(executionEnvironment->getGmmClientContext(), ptr, size, false);
     handleStorage.fragmentCount = 1;
 
     FragmentStorage fragment = {};
@@ -1184,7 +1194,7 @@ TEST_F(BufferWithWddmMemory, givenFragmentsThatAreNotInOrderWhenGraphicsAllocati
     handleStorage.fragmentStorageData[0].osHandleStorage = new OsHandle();
     handleStorage.fragmentStorageData[0].residency = new ResidencyData();
     handleStorage.fragmentStorageData[0].freeTheFragment = true;
-    handleStorage.fragmentStorageData[0].osHandleStorage->gmm = new Gmm(ptr, size, false);
+    handleStorage.fragmentStorageData[0].osHandleStorage->gmm = new Gmm(executionEnvironment->getGmmClientContext(), ptr, size, false);
     handleStorage.fragmentCount = 1;
 
     FragmentStorage fragment = {};
@@ -1292,10 +1302,10 @@ TEST_F(WddmMemoryManagerWithAsyncDeleterTest, givenMemoryManagerWithoutAsyncDele
 
 TEST(WddmMemoryManagerDefaults, givenDefaultWddmMemoryManagerWhenItIsQueriedForInternalHeapBaseThenHeapInternalBaseIsReturned) {
     HardwareInfo *hwInfo;
-    auto executionEnvironment = getExecutionEnvironmentImpl(hwInfo);
-    auto wddm = new WddmMock();
+    auto executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
+    auto wddm = new WddmMock(*executionEnvironment->rootDeviceEnvironments[0].get());
     executionEnvironment->osInterface->get()->setWddm(wddm);
-    executionEnvironment->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
+    executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
     auto hwInfoMock = *platformDevices[0];
     wddm->init(hwInfoMock);
     MockWddmMemoryManager memoryManager(*executionEnvironment);
@@ -1429,9 +1439,9 @@ TEST_F(MockWddmMemoryManagerTest, givenPageTableManagerWhenMapAuxGpuVaCalledThen
     WddmMemoryManager memoryManager(*executionEnvironment);
 
     auto mockMngr = new NiceMock<MockGmmPageTableMngr>();
-    wddm->resetPageTableManager(mockMngr);
+    executionEnvironment->rootDeviceEnvironments[1]->pageTableManager.reset(mockMngr);
 
-    auto allocation = memoryManager.allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize});
+    auto allocation = memoryManager.allocateGraphicsMemoryWithProperties(AllocationProperties(1, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY));
 
     GMM_DDI_UPDATEAUXTABLE givenDdiUpdateAuxTable = {};
     GMM_DDI_UPDATEAUXTABLE expectedDdiUpdateAuxTable = {};
@@ -1449,15 +1459,15 @@ TEST_F(MockWddmMemoryManagerTest, givenPageTableManagerWhenMapAuxGpuVaCalledThen
 }
 
 TEST_F(MockWddmMemoryManagerTest, givenRenderCompressedAllocationWhenMappedGpuVaThenMapAuxVa) {
-    std::unique_ptr<Gmm> gmm(new Gmm(reinterpret_cast<void *>(123), 4096u, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), reinterpret_cast<void *>(123), 4096u, false));
     gmm->isRenderCompressed = true;
     D3DGPU_VIRTUAL_ADDRESS gpuVa = 0;
-    WddmMock wddm;
+    WddmMock wddm(*executionEnvironment->rootDeviceEnvironments[1].get());
     auto hwInfo = *platformDevices[0];
     wddm.init(hwInfo);
 
     auto mockMngr = new NiceMock<MockGmmPageTableMngr>();
-    wddm.resetPageTableManager(mockMngr);
+    executionEnvironment->rootDeviceEnvironments[1]->pageTableManager.reset(mockMngr);
 
     GMM_DDI_UPDATEAUXTABLE givenDdiUpdateAuxTable = {};
     GMM_DDI_UPDATEAUXTABLE expectedDdiUpdateAuxTable = {};
@@ -1484,9 +1494,9 @@ TEST_F(MockWddmMemoryManagerTest, givenRenderCompressedAllocationWhenReleaseingT
     D3DGPU_VIRTUAL_ADDRESS gpuVa = 123;
 
     auto mockMngr = new NiceMock<MockGmmPageTableMngr>();
-    wddm->resetPageTableManager(mockMngr);
+    executionEnvironment->rootDeviceEnvironments[1]->pageTableManager.reset(mockMngr);
 
-    auto wddmAlloc = static_cast<WddmAllocation *>(memoryManager.allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize}));
+    auto wddmAlloc = static_cast<WddmAllocation *>(memoryManager.allocateGraphicsMemoryWithProperties(AllocationProperties(1, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY)));
     wddmAlloc->setGpuAddress(gpuVa);
     wddmAlloc->getDefaultGmm()->isRenderCompressed = true;
 
@@ -1509,7 +1519,7 @@ TEST_F(MockWddmMemoryManagerTest, givenNonRenderCompressedAllocationWhenReleasei
     WddmMemoryManager memoryManager(*executionEnvironment);
 
     auto mockMngr = new NiceMock<MockGmmPageTableMngr>();
-    wddm->resetPageTableManager(mockMngr);
+    executionEnvironment->rootDeviceEnvironments[1]->pageTableManager.reset(mockMngr);
 
     auto wddmAlloc = static_cast<WddmAllocation *>(memoryManager.allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize}));
     wddmAlloc->getDefaultGmm()->isRenderCompressed = false;
@@ -1520,15 +1530,15 @@ TEST_F(MockWddmMemoryManagerTest, givenNonRenderCompressedAllocationWhenReleasei
 }
 
 TEST_F(MockWddmMemoryManagerTest, givenNonRenderCompressedAllocationWhenMappedGpuVaThenDontMapAuxVa) {
-    std::unique_ptr<Gmm> gmm(new Gmm(reinterpret_cast<void *>(123), 4096u, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), reinterpret_cast<void *>(123), 4096u, false));
     gmm->isRenderCompressed = false;
     D3DGPU_VIRTUAL_ADDRESS gpuVa = 0;
-    WddmMock wddm;
+    WddmMock wddm(*executionEnvironment->rootDeviceEnvironments[0].get());
     auto hwInfo = *platformDevices[0];
     wddm.init(hwInfo);
 
     auto mockMngr = new NiceMock<MockGmmPageTableMngr>();
-    wddm.resetPageTableManager(mockMngr);
+    executionEnvironment->rootDeviceEnvironments[1]->pageTableManager.reset(mockMngr);
 
     EXPECT_CALL(*mockMngr, updateAuxTable(_)).Times(0);
 
@@ -1537,10 +1547,10 @@ TEST_F(MockWddmMemoryManagerTest, givenNonRenderCompressedAllocationWhenMappedGp
 }
 
 TEST_F(MockWddmMemoryManagerTest, givenFailingAllocationWhenMappedGpuVaThenReturnFalse) {
-    std::unique_ptr<Gmm> gmm(new Gmm(reinterpret_cast<void *>(123), 4096u, false));
+    std::unique_ptr<Gmm> gmm(new Gmm(executionEnvironment->getGmmClientContext(), reinterpret_cast<void *>(123), 4096u, false));
     gmm->isRenderCompressed = false;
     D3DGPU_VIRTUAL_ADDRESS gpuVa = 0;
-    WddmMock wddm;
+    WddmMock wddm(*executionEnvironment->rootDeviceEnvironments[1].get());
     auto hwInfo = *platformDevices[0];
     wddm.init(hwInfo);
 
@@ -1555,9 +1565,9 @@ TEST_F(MockWddmMemoryManagerTest, givenRenderCompressedFlagSetWhenInternalIsUnse
     WddmMemoryManager memoryManager(*executionEnvironment);
 
     auto mockMngr = new NiceMock<MockGmmPageTableMngr>();
-    wddm->resetPageTableManager(mockMngr);
+    executionEnvironment->rootDeviceEnvironments[1]->pageTableManager.reset(mockMngr);
 
-    auto myGmm = new Gmm(reinterpret_cast<void *>(123), 4096u, false);
+    auto myGmm = new Gmm(executionEnvironment->getGmmClientContext(), reinterpret_cast<void *>(123), 4096u, false);
     myGmm->isRenderCompressed = false;
     myGmm->gmmResourceInfo->getResourceFlags()->Info.RenderCompressed = 1;
 
@@ -1566,6 +1576,30 @@ TEST_F(MockWddmMemoryManagerTest, givenRenderCompressedFlagSetWhenInternalIsUnse
     wddmAlloc->setDefaultGmm(myGmm);
 
     EXPECT_CALL(*mockMngr, updateAuxTable(_)).Times(0);
+
+    auto result = wddm->mapGpuVirtualAddress(myGmm, ALLOCATION_HANDLE, wddm->getGfxPartition().Standard.Base, wddm->getGfxPartition().Standard.Limit, 0u, gpuVa);
+    EXPECT_TRUE(result);
+    memoryManager.freeGraphicsMemory(wddmAlloc);
+}
+
+TEST_F(MockWddmMemoryManagerTest, givenRenderCompressedFlagSetWhenInternalIsSetThenUpdateAuxTable) {
+    D3DGPU_VIRTUAL_ADDRESS gpuVa = 0;
+    auto hwInfo = *platformDevices[0];
+    wddm->init(hwInfo);
+    WddmMemoryManager memoryManager(*executionEnvironment);
+
+    auto mockMngr = new NiceMock<MockGmmPageTableMngr>();
+    executionEnvironment->rootDeviceEnvironments[1]->pageTableManager.reset(mockMngr);
+
+    auto myGmm = new Gmm(executionEnvironment->getGmmClientContext(), reinterpret_cast<void *>(123), 4096u, false);
+    myGmm->isRenderCompressed = true;
+    myGmm->gmmResourceInfo->getResourceFlags()->Info.RenderCompressed = 1;
+
+    auto wddmAlloc = static_cast<WddmAllocation *>(memoryManager.allocateGraphicsMemoryWithProperties(MockAllocationProperties{MemoryConstants::pageSize}));
+    delete wddmAlloc->getDefaultGmm();
+    wddmAlloc->setDefaultGmm(myGmm);
+
+    EXPECT_CALL(*mockMngr, updateAuxTable(_)).Times(1);
 
     auto result = wddm->mapGpuVirtualAddress(myGmm, ALLOCATION_HANDLE, wddm->getGfxPartition().Standard.Base, wddm->getGfxPartition().Standard.Limit, 0u, gpuVa);
     EXPECT_TRUE(result);
@@ -1616,14 +1650,14 @@ TEST_F(WddmMemoryManagerTest2, givenReadOnlyMemoryPassedToPopulateOsHandlesWhenC
 TEST(WddmMemoryManagerCleanupTest, givenUsedTagAllocationInWddmMemoryManagerWhenCleanupMemoryManagerThenDontAccessCsr) {
     ExecutionEnvironment &executionEnvironment = *platform()->peekExecutionEnvironment();
     auto csr = std::unique_ptr<CommandStreamReceiver>(createCommandStream(executionEnvironment, 0));
-    auto wddm = new WddmMock();
+    auto wddm = new WddmMock(*executionEnvironment.rootDeviceEnvironments[0].get());
     auto preemptionMode = PreemptionHelper::getDefaultPreemptionMode(*platformDevices[0]);
     auto hwInfo = *platformDevices[0];
     wddm->init(hwInfo);
 
     executionEnvironment.osInterface = std::make_unique<OSInterface>();
     executionEnvironment.osInterface->get()->setWddm(wddm);
-    executionEnvironment.memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
+    executionEnvironment.rootDeviceEnvironments[0]->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
     executionEnvironment.memoryManager = std::make_unique<WddmMemoryManager>(executionEnvironment);
     auto osContext = executionEnvironment.memoryManager->createAndRegisterOsContext(csr.get(), aub_stream::ENGINE_RCS, 1, preemptionMode, false);
     csr->setupContext(*osContext);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2019 Intel Corporation
+ * Copyright (C) 2017-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,8 +7,8 @@
 
 #pragma once
 #include "core/helpers/hash.h"
+#include "core/helpers/options.h"
 #include "core/helpers/string.h"
-#include "runtime/helpers/options.h"
 #include "runtime/program/kernel_info.h"
 #include "runtime/program/program.h"
 
@@ -27,6 +27,7 @@ class MockProgram : public Program {
   public:
     using Program::createProgramFromBinary;
     using Program::getKernelNamesString;
+    using Program::internalOptionsToExtract;
     using Program::isKernelDebugEnabled;
     using Program::linkBinary;
     using Program::populateKernelInfo;
@@ -36,6 +37,7 @@ class MockProgram : public Program {
     using Program::separateBlockKernels;
     using Program::updateNonUniformFlag;
 
+    using Program::applyAdditionalOptions;
     using Program::areSpecializationConstantsInitialized;
     using Program::blockKernelManager;
     using Program::constantSurface;
@@ -45,17 +47,18 @@ class MockProgram : public Program {
     using Program::elfBinary;
     using Program::elfBinarySize;
     using Program::exportedFunctionsSurface;
+    using Program::extractInternalOptions;
     using Program::genBinary;
     using Program::genBinarySize;
     using Program::getKernelInfo;
     using Program::globalSurface;
-    using Program::internalOptionsToExtract;
     using Program::irBinary;
     using Program::irBinarySize;
     using Program::isProgramBinaryResolved;
     using Program::isSpirV;
     using Program::linkerInput;
     using Program::pDevice;
+    using Program::processProgramScopeMetadata;
     using Program::programBinaryType;
     using Program::sourceCode;
     using Program::specConstantsIds;
@@ -126,18 +129,14 @@ class MockProgram : public Program {
 
     Device *getDevicePtr() { return this->pDevice; }
 
-    void extractInternalOptionsForward(std::string &buildOptions) {
-        extractInternalOptions(buildOptions);
-    }
-
-    bool isFlagOption(const std::string &option) override {
+    bool isFlagOption(ConstStringRef option) override {
         if (isFlagOptionOverride != -1) {
             return (isFlagOptionOverride > 0);
         }
         return Program::isFlagOption(option);
     }
 
-    bool isOptionValueValid(const std::string &option, const std::string &value) override {
+    bool isOptionValueValid(ConstStringRef option, ConstStringRef value) override {
         if (isOptionValueValidOverride != -1) {
             return (isOptionValueValidOverride > 0);
         }

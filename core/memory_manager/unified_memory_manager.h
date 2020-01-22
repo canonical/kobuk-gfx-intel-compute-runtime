@@ -6,8 +6,11 @@
  */
 
 #pragma once
+#include "core/helpers/common_types.h"
 #include "core/unified_memory/unified_memory.h"
 #include "core/utilities/spinlock.h"
+
+#include "memory_properties_flags.h"
 
 #include <cstdint>
 #include <map>
@@ -23,7 +26,8 @@ struct SvmAllocationData {
     GraphicsAllocation *gpuAllocation = nullptr;
     size_t size = 0;
     InternalMemoryType memoryType = InternalMemoryType::SVM;
-    uint64_t allocationFlagsProperty;
+    MemoryPropertiesFlags allocationFlagsProperty;
+    void *device = nullptr;
 };
 
 struct SvmMapOperation {
@@ -71,7 +75,9 @@ class SVMAllocsManager {
         UnifiedMemoryProperties() = default;
         UnifiedMemoryProperties(InternalMemoryType memoryType) : memoryType(memoryType){};
         InternalMemoryType memoryType = InternalMemoryType::NOT_SPECIFIED;
-        uint64_t allocationFlags = 0;
+        MemoryPropertiesFlags allocationFlags;
+        void *device = nullptr;
+        DeviceBitfield subdeviceBitfield;
     };
 
     SVMAllocsManager(MemoryManager *memoryManager);
@@ -87,13 +93,13 @@ class SVMAllocsManager {
     void removeSvmMapOperation(const void *regionSvmPtr);
     SvmMapOperation *getSvmMapOperation(const void *regionPtr);
     void makeInternalAllocationsResident(CommandStreamReceiver &commandStreamReceiver, uint32_t requestedTypesMask);
+    void *createUnifiedAllocationWithDeviceStorage(uint32_t rootDeviceIndex, size_t size, const SvmAllocationProperties &svmProperties, const UnifiedMemoryProperties &unifiedMemoryProperties);
+    void freeSvmAllocationWithDeviceStorage(SvmAllocationData *svmData);
 
   protected:
     void *createZeroCopySvmAllocation(uint32_t rootDeviceIndex, size_t size, const SvmAllocationProperties &svmProperties);
-    void *createUnifiedAllocationWithDeviceStorage(uint32_t rootDeviceIndex, size_t size, const SvmAllocationProperties &svmProperties);
 
     void freeZeroCopySvmAllocation(SvmAllocationData *svmData);
-    void freeSvmAllocationWithDeviceStorage(SvmAllocationData *svmData);
 
     MapBasedAllocationTracker SVMAllocs;
     MapOperationsTracker svmMapOperations;

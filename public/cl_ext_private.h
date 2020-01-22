@@ -41,6 +41,7 @@
  * Internal only cl types *
  **************************/
 
+using cl_mem_alloc_flags_intel = cl_bitfield;
 using cl_mem_properties_intel = cl_bitfield;
 using cl_mem_flags_intel = cl_mem_flags;
 using cl_mem_info_intel = cl_uint;
@@ -99,6 +100,7 @@ typedef cl_uint cl_execution_info_intel;
 #define CL_MEM_ALLOC_TYPE_INTEL 0x419A
 #define CL_MEM_ALLOC_BASE_PTR_INTEL 0x419B
 #define CL_MEM_ALLOC_SIZE_INTEL 0x419C
+#define CL_MEM_ALLOC_DEVICE_INTEL 0x419D
 
 /* cl_unified_shared_memory_type_intel */
 #define CL_MEM_TYPE_UNKNOWN_INTEL 0x4196
@@ -111,6 +113,11 @@ typedef cl_uint cl_execution_info_intel;
 #define CL_KERNEL_EXEC_INFO_INDIRECT_DEVICE_ACCESS_INTEL 0x4201
 #define CL_KERNEL_EXEC_INFO_INDIRECT_SHARED_ACCESS_INTEL 0x4202
 #define CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL 0x4203
+
+#define CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_OLDEST_FIRST_INTEL 0x10022
+#define CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_ROUND_ROBIN_INTEL 0x10023
+#define CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_AFTER_DEPENDENCY_ROUND_ROBIN_INTEL 0x10024
+#define CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_INTEL 0x10025
 
 /* cl_command_type */
 #define CL_COMMAND_MEMSET_INTEL 0x4204

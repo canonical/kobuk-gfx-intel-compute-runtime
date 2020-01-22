@@ -167,6 +167,25 @@ TEST_F(KernelDataTest, WhenMediaVFEStateSlot1TokenIsParsedThenCorrectValuesAreSe
     EXPECT_EQ_VAL(MediaVFEState.ScratchSpaceOffset, pKernelInfo->patchInfo.mediaVfeStateSlot1->ScratchSpaceOffset);
 }
 
+TEST_F(KernelDataTest, GivenSyncBufferTokenWhenParsingProgramThenTokenIsFound) {
+    SPatchAllocateSyncBuffer token;
+    token.Token = PATCH_TOKEN_ALLOCATE_SYNC_BUFFER;
+    token.Size = static_cast<uint32_t>(sizeof(SPatchAllocateSyncBuffer));
+    token.SurfaceStateHeapOffset = 32;
+    token.DataParamOffset = 1024;
+    token.DataParamSize = 2;
+
+    pPatchList = &token;
+    patchListSize = token.Size;
+
+    buildAndDecode();
+
+    EXPECT_EQ(token.Token, pKernelInfo->patchInfo.pAllocateSyncBuffer->Token);
+    EXPECT_EQ(token.SurfaceStateHeapOffset, pKernelInfo->patchInfo.pAllocateSyncBuffer->SurfaceStateHeapOffset);
+    EXPECT_EQ(token.DataParamOffset, pKernelInfo->patchInfo.pAllocateSyncBuffer->DataParamOffset);
+    EXPECT_EQ(token.DataParamSize, pKernelInfo->patchInfo.pAllocateSyncBuffer->DataParamSize);
+}
+
 TEST_F(KernelDataTest, MediaIDData) {
     iOpenCL::SPatchInterfaceDescriptorData idData;
     idData.Token = PATCH_TOKEN_INTERFACE_DESCRIPTOR_DATA;
@@ -763,6 +782,52 @@ TEST_F(KernelDataTest, DATA_PARAMETER_IMAGE_NUM_MIP_LEVELS) {
     ASSERT_EQ(2U, pKernelInfo->kernelArgInfo.size());
 
     EXPECT_EQ(offsetNumMipLevels, pKernelInfo->kernelArgInfo[argumentNumber].offsetNumMipLevels);
+}
+
+TEST_F(KernelDataTest, givenFlatImageDataParamTokenWhenDecodingThenSetAllOffsets) {
+    uint32_t argumentNumber = 1;
+    uint32_t alignment = 16;
+
+    auto testToken = [&](iOpenCL::DATA_PARAMETER_TOKEN token, uint32_t offsetToken) {
+        {
+            // reset program
+            if (pKernelData) {
+                alignedFree(pKernelData);
+            }
+            program = std::make_unique<MockProgram>(*pContext->getDevice(0)->getExecutionEnvironment(), pContext, false);
+        }
+
+        SPatchDataParameterBuffer dataParameterToken;
+        dataParameterToken.Token = PATCH_TOKEN_DATA_PARAMETER_BUFFER;
+        dataParameterToken.Size = sizeof(SPatchDataParameterBuffer);
+        dataParameterToken.Type = token;
+        dataParameterToken.ArgumentNumber = argumentNumber;
+        dataParameterToken.Offset = offsetToken;
+        dataParameterToken.DataSize = sizeof(uint32_t);
+        dataParameterToken.SourceOffset = alignment;
+        dataParameterToken.LocationIndex = 0x0;
+        dataParameterToken.LocationIndex2 = 0x0;
+
+        pPatchList = &dataParameterToken;
+        patchListSize = dataParameterToken.Size;
+
+        buildAndDecode();
+
+        EXPECT_EQ(0U, pKernelInfo->patchInfo.dataParameterBuffersKernelArgs.size());
+        ASSERT_EQ(2U, pKernelInfo->kernelArgInfo.size());
+    };
+
+    testToken(iOpenCL::DATA_PARAMETER_TOKEN::DATA_PARAMETER_FLAT_IMAGE_BASEOFFSET, 10u);
+    EXPECT_EQ(10u, pKernelInfo->kernelArgInfo[argumentNumber].offsetFlatBaseOffset);
+
+    testToken(iOpenCL::DATA_PARAMETER_TOKEN::DATA_PARAMETER_FLAT_IMAGE_WIDTH, 14u);
+    EXPECT_EQ(14u, pKernelInfo->kernelArgInfo[argumentNumber].offsetFlatWidth);
+
+    testToken(iOpenCL::DATA_PARAMETER_TOKEN::DATA_PARAMETER_FLAT_IMAGE_HEIGHT, 16u);
+    EXPECT_EQ(16u, pKernelInfo->kernelArgInfo[argumentNumber].offsetFlatHeight);
+
+    testToken(iOpenCL::DATA_PARAMETER_TOKEN::DATA_PARAMETER_FLAT_IMAGE_PITCH, 18u);
+    EXPECT_EQ(18u, pKernelInfo->kernelArgInfo[argumentNumber].offsetFlatPitch);
 }
 
 TEST_F(KernelDataTest, DATA_PARAMETER_IMAGE_DATA_TYPE) {

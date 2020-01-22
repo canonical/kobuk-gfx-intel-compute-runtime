@@ -7,9 +7,7 @@
 
 #pragma once
 
-#include "runtime/gen12lp/hw_cmds_base.h"
-
-#include "hw_info.h"
+#include "core/gen12lp/hw_cmds_base.h"
 
 namespace AubMemDump {
 struct AubStream;
@@ -23,7 +21,6 @@ struct PipelineSelectArgs;
 class Image;
 
 namespace Gen12LPHelpers {
-bool hdcFlushForPipeControlBeforeStateBaseAddressRequired(PRODUCT_FAMILY productFamily);
 bool pipeControlWaRequired(PRODUCT_FAMILY productFamily);
 bool imagePitchAlignmentWaRequired(PRODUCT_FAMILY productFamily);
 void adjustCoherencyFlag(PRODUCT_FAMILY productFamily, bool &coherencyFlag);

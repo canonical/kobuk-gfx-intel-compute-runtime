@@ -15,6 +15,9 @@ set(RUNTIME_SRCS_GENX_CPP_LINUX
 
 set(RUNTIME_SRCS_GENX_H_BASE
   aub_mapper.h
+)
+
+set(CORE_SRCS_GENX_H_BASE
   hw_cmds.h
   hw_info.h
 )
@@ -45,7 +48,13 @@ set(CORE_RUNTIME_SRCS_GENX_CPP_BASE
 macro(macro_for_each_platform)
   string(TOLOWER ${PLATFORM_IT} PLATFORM_IT_LOWER)
 
-  foreach(PLATFORM_FILE "hw_cmds_${PLATFORM_IT_LOWER}.h" "hw_info_${PLATFORM_IT_LOWER}.h" "reg_configs.h")
+  foreach(PLATFORM_FILE "hw_cmds_${PLATFORM_IT_LOWER}.h" "hw_info_${PLATFORM_IT_LOWER}.h")
+    if(EXISTS ${CORE_GENX_PREFIX}/${PLATFORM_FILE})
+      list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE ${CORE_GENX_PREFIX}/${PLATFORM_FILE})
+    endif()
+  endforeach()
+
+  foreach(PLATFORM_FILE "reg_configs.h")
     if(EXISTS ${GENX_PREFIX}/${PLATFORM_FILE})
       list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE ${GENX_PREFIX}/${PLATFORM_FILE})
     endif()
@@ -61,20 +70,21 @@ endmacro()
 macro(macro_for_each_gen)
   set(GENX_PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/${GEN_TYPE_LOWER})
   set(CORE_GENX_PREFIX "${NEO_SOURCE_DIR}/core/${GEN_TYPE_LOWER}")
+  set(GENERATED_GENX_PREFIX "${NEO_SOURCE_DIR}/core/generated/${GEN_TYPE_LOWER}")
   # Add default GEN files
   foreach(SRC_IT ${RUNTIME_SRCS_GENX_H_BASE})
     list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE ${GENX_PREFIX}/${SRC_IT})
+  endforeach()
+  foreach(SRC_IT ${CORE_SRCS_GENX_H_BASE})
+    list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE ${CORE_GENX_PREFIX}/${SRC_IT})
   endforeach()
   foreach(SRC_IT "state_compute_mode_helper_${GEN_TYPE_LOWER}.cpp")
     if(EXISTS ${GENX_PREFIX}/${SRC_IT})
       list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE ${GENX_PREFIX}/${SRC_IT})
     endif()
   endforeach()
-  if(EXISTS "${CORE_GENX_PREFIX}/hw_cmds_generated.inl")
-    list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE "${CORE_GENX_PREFIX}/hw_cmds_generated.inl")
-  endif()
-  if(EXISTS "${CORE_GENX_PREFIX}/hw_cmds_generated_patched.inl")
-    list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE "${CORE_GENX_PREFIX}/hw_cmds_generated_patched.inl")
+  if(EXISTS "${GENERATED_GENX_PREFIX}/hw_cmds_generated_${GEN_TYPE_LOWER}.inl")
+    list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE "${GENERATED_GENX_PREFIX}/hw_cmds_generated_${GEN_TYPE_LOWER}.inl")
   endif()
   if(EXISTS "${GENX_PREFIX}/hw_cmds_base.h")
     list(APPEND RUNTIME_SRCS_${GEN_TYPE}_H_BASE "${GENX_PREFIX}/hw_cmds_base.h")

@@ -5,9 +5,9 @@
  *
  */
 
-#include "runtime/gen11/hw_cmds.h"
-#include "runtime/helpers/gmm_callbacks.h"
-#include "runtime/helpers/gmm_callbacks.inl"
+#include "core/gen11/hw_cmds.h"
+#include "runtime/helpers/windows/gmm_callbacks.h"
+#include "runtime/helpers/windows/gmm_callbacks.inl"
 
 using namespace NEO;
 

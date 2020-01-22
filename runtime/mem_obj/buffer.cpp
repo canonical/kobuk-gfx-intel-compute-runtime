@@ -7,8 +7,11 @@
 
 #include "runtime/mem_obj/buffer.h"
 
+#include "core/debug_settings/debug_settings_manager.h"
+#include "core/gmm_helper/gmm_helper.h"
 #include "core/helpers/aligned_memory.h"
 #include "core/helpers/hw_helper.h"
+#include "core/helpers/hw_info.h"
 #include "core/helpers/ptr_math.h"
 #include "core/helpers/string.h"
 #include "core/memory_manager/host_ptr_manager.h"
@@ -18,14 +21,11 @@
 #include "runtime/context/context.h"
 #include "runtime/device/device.h"
 #include "runtime/gmm_helper/gmm.h"
-#include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/helpers/hw_info.h"
 #include "runtime/helpers/memory_properties_flags_helpers.h"
 #include "runtime/helpers/timestamp_packet.h"
 #include "runtime/helpers/validators.h"
 #include "runtime/mem_obj/mem_obj_helper.h"
 #include "runtime/memory_manager/memory_manager.h"
-#include "runtime/os_interface/debug_settings_manager.h"
 
 namespace NEO {
 
@@ -126,7 +126,7 @@ Buffer *Buffer::create(Context *context,
                        size_t size,
                        void *hostPtr,
                        cl_int &errcodeRet) {
-    return create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0), flags, 0, size, hostPtr, errcodeRet);
+    return create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, size, hostPtr, errcodeRet);
 }
 
 Buffer *Buffer::create(Context *context,
@@ -283,7 +283,7 @@ Buffer *Buffer::create(Context *context,
 
     if (memoryProperties.flags.useHostPtr) {
         if (!zeroCopyAllowed && !isHostPtrSVM) {
-            AllocationProperties properties{rootDeviceIndex, false, size, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
+            AllocationProperties properties{rootDeviceIndex, false, size, GraphicsAllocation::AllocationType::MAP_ALLOCATION, false};
             properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = true;
             mapAllocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
         }
@@ -322,7 +322,7 @@ Buffer *Buffer::create(Context *context,
 
 Buffer *Buffer::createSharedBuffer(Context *context, cl_mem_flags flags, SharingHandler *sharingHandler,
                                    GraphicsAllocation *graphicsAllocation) {
-    auto sharedBuffer = createBufferHw(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0), flags, 0, graphicsAllocation->getUnderlyingBufferSize(), nullptr, nullptr, graphicsAllocation, false, false, false);
+    auto sharedBuffer = createBufferHw(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, graphicsAllocation->getUnderlyingBufferSize(), nullptr, nullptr, graphicsAllocation, false, false, false);
 
     sharedBuffer->setSharingHandler(sharingHandler);
     return sharedBuffer;
@@ -406,7 +406,7 @@ Buffer *Buffer::createSubBuffer(cl_mem_flags flags,
                                 const cl_buffer_region *region,
                                 cl_int &errcodeRet) {
     DEBUG_BREAK_IF(nullptr == createFunction);
-    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, flagsIntel);
+    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, flagsIntel, 0);
     auto buffer = createFunction(this->context, memoryProperties, flags, 0, region->size,
                                  ptrOffset(this->memoryStorage, region->origin),
                                  this->hostPtr ? ptrOffset(this->hostPtr, region->origin) : nullptr,
@@ -538,7 +538,7 @@ Buffer *Buffer::createBufferHwFromDevice(const Device *device,
 
     auto funcCreate = bufferFactory[hwInfo.platform.eRenderCoreFamily].createBufferFunction;
     DEBUG_BREAK_IF(nullptr == funcCreate);
-    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, flagsIntel);
+    MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, flagsIntel, 0);
     auto pBuffer = funcCreate(nullptr, memoryProperties, flags, flagsIntel, size, memoryStorage, hostPtr, gfxAllocation,
                               zeroCopy, isHostPtrSVM, isImageRedescribed);
     pBuffer->executionEnvironment = device->getExecutionEnvironment();

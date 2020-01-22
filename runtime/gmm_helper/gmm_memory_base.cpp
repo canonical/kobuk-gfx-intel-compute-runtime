@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,14 +7,15 @@
 
 #include "runtime/gmm_helper/gmm_memory_base.h"
 
-#include "runtime/gmm_helper/gmm_helper.h"
-#include "runtime/os_interface/windows/windows_defs.h"
+#include "core/gmm_helper/gmm_helper.h"
+#include "core/os_interface/windows/windows_defs.h"
+#include "runtime/platform/platform.h"
 
 #include "gmm_client_context.h"
 
 namespace NEO {
 GmmMemoryBase::GmmMemoryBase() {
-    clientContext = GmmHelper::getClientContext()->getHandle();
+    clientContext = platform()->peekGmmHelper()->getClientContext()->getHandle();
 }
 bool GmmMemoryBase::configureDeviceAddressSpace(GMM_ESCAPE_HANDLE hAdapter,
                                                 GMM_ESCAPE_HANDLE hDevice,
@@ -38,9 +39,22 @@ bool GmmMemoryBase::configureDevice(GMM_ESCAPE_HANDLE hAdapter,
                                     GMM_ESCAPE_FUNC_TYPE pfnEscape,
                                     GMM_GFX_SIZE_T SvmSize,
                                     BOOLEAN BDWL3Coherency,
-                                    GMM_GFX_PARTITIONING &gfxPartition,
-                                    uintptr_t &minAddress) {
+                                    uintptr_t &minAddress,
+                                    bool obtainMinAddress) {
     minAddress = windowsMinAddress;
-    return configureDeviceAddressSpace(hAdapter, hDevice, pfnEscape, SvmSize, BDWL3Coherency);
+    auto retVal = configureDeviceAddressSpace(hAdapter, hDevice, pfnEscape, SvmSize, BDWL3Coherency);
+    if (obtainMinAddress) {
+        minAddress = getInternalGpuVaRangeLimit();
+    }
+    return retVal;
+}
+uintptr_t GmmMemoryBase::getInternalGpuVaRangeLimit() {
+    return static_cast<uintptr_t>(clientContext->GetInternalGpuVaRangeLimit());
+}
+
+bool GmmMemoryBase::setDeviceInfo(GMM_DEVICE_INFO *deviceInfo) {
+    auto status = clientContext->GmmSetDeviceInfo(deviceInfo);
+    DEBUG_BREAK_IF(status != GMM_SUCCESS);
+    return GMM_SUCCESS == status;
 }
 }; // namespace NEO

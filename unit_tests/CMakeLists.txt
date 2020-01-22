@@ -28,6 +28,13 @@ if(WIN32)
   string(REPLACE "/O2" "/Od" CMAKE_C_FLAGS_RELEASEINTERNAL ${CMAKE_C_FLAGS_RELEASEINTERNAL})
 endif()
 
+function(ADD_SUPPORTED_TEST_PRODUCT_FAMILIES_DEFINITION)
+  set(NEO_SUPPORTED_PRODUCT_FAMILIES ${ALL_PRODUCT_FAMILY_LIST})
+  string(REPLACE ";" "," NEO_SUPPORTED_PRODUCT_FAMILIES "${NEO_SUPPORTED_PRODUCT_FAMILIES}")
+  add_definitions(-DSUPPORTED_TEST_PRODUCT_FAMILIES=${NEO_SUPPORTED_PRODUCT_FAMILIES})
+endfunction()
+
+ADD_SUPPORTED_TEST_PRODUCT_FAMILIES_DEFINITION()
 link_libraries(${ASAN_LIBS} ${TSAN_LIBS})
 
 add_custom_target(unit_tests)
@@ -97,6 +104,8 @@ add_executable(igdrcl_tests
   ${NEO_IGDRCL_TESTS__TARGET_OBJECTS}
   ${IGDRCL_SRCS_tests_local}
 )
+
+include(${NEO_SOURCE_DIR}/unit_tests/core_unit_tests_files.cmake)
 
 hide_subdir(gen_common)
 add_subdirectory(gen_common)
@@ -555,8 +564,11 @@ elseif(USE_ULT_PCH)
     COMMAND cp "${UltPchBinary}" "${UltPchBinaryGch}"
     DEPENDS ${UltPchBinary})
 endif()
-
-get_property(NEO_COMMAND_CONTAINER_TESTS GLOBAL PROPERTY NEO_COMMAND_CONTAINER_TESTS)
-target_sources(igdrcl_tests PRIVATE ${NEO_COMMAND_CONTAINER_TESTS})
-
-# Dont add any sources below PCH logic. This is to keep PCH dependencies correctly without creating new target
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# !!                                                                             !!
+# !!              DONT ADD ANY SOURCES HERE!                                     !!
+# !!                                                                             !!
+# !!      You are below PCH logic!                                               !!
+# !!      This is to keep PCH dependencies correctly without creating new target !!
+# !!                                                                             !!
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

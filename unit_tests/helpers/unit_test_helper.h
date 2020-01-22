@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "runtime/gen_common/hw_cmds.h"
+#include "core/helpers/hw_cmds.h"
 #include "runtime/helpers/properties_helper.h"
 
 namespace NEO {
@@ -28,6 +28,8 @@ struct UnitTestHelper {
     static bool isExpectMemoryNotEqualSupported();
 
     static uint32_t getDefaultSshUsage();
+
+    static uint32_t getAppropriateThreadArbitrationPolicy(uint32_t policy);
 
     static bool evaluateGshAddressForScratchSpace(uint64_t usedScratchGpuAddress, uint64_t retrievedGshAddress);
 

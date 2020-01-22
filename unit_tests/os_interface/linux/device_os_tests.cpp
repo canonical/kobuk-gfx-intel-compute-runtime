@@ -5,11 +5,11 @@
  *
  */
 
+#include "core/helpers/options.h"
 #include "core/unit_tests/helpers/debug_manager_state_restore.h"
 #include "runtime/api/api.h"
 #include "runtime/device/device.h"
 #include "runtime/helpers/get_info.h"
-#include "runtime/helpers/options.h"
 #include "runtime/platform/platform.h"
 #include "unit_tests/mocks/mock_buffer.h"
 #include "unit_tests/mocks/mock_command_queue.h"
@@ -39,7 +39,7 @@ TEST(DeviceOsTest, osSpecificExtensions) {
 }
 
 TEST(DeviceOsTest, supportedSimultaneousInterops) {
-    auto pDevice = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<Device>(*platformDevices));
+    auto pDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(*platformDevices));
 
     std::vector<unsigned int> expected = {0};
 

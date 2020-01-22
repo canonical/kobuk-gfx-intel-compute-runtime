@@ -5,8 +5,8 @@
  *
  */
 
+#include "core/helpers/hw_info.h"
 #include "runtime/device/device.h"
-#include "runtime/helpers/hw_info.h"
 #include "unit_tests/api/cl_api_tests.h"
 
 #include <cstring>
@@ -16,13 +16,13 @@ using namespace NEO;
 namespace ULT {
 
 //------------------------------------------------------------------------------
-struct GetDeviceInfoP : public api_fixture, public ::testing::TestWithParam<uint32_t /*cl_device_info*/> {
+struct GetDeviceInfoP : public ApiFixture, public ::testing::TestWithParam<uint32_t /*cl_device_info*/> {
     void SetUp() override {
         param = GetParam();
-        api_fixture::SetUp();
+        ApiFixture::SetUp();
     }
 
-    void TearDown() override { api_fixture::TearDown(); }
+    void TearDown() override { ApiFixture::TearDown(); }
 
     cl_device_info param;
 };

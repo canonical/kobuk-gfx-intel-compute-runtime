@@ -11,6 +11,7 @@
 #include "core/command_stream/preemption.h"
 #include "core/helpers/register_offsets.h"
 #include "core/helpers/vec.h"
+#include "core/indirect_heap/indirect_heap.h"
 #include "runtime/built_ins/built_ins.h"
 #include "runtime/command_queue/command_queue.h"
 #include "runtime/context/context.h"
@@ -21,7 +22,6 @@
 #include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/task_information.h"
 #include "runtime/helpers/timestamp_packet.h"
-#include "runtime/indirect_heap/indirect_heap.h"
 #include "runtime/kernel/kernel.h"
 #include "runtime/program/kernel_info.h"
 #include "runtime/utilities/tag_allocator.h"
@@ -192,7 +192,7 @@ IndirectHeap &getIndirectHeap(CommandQueue &commandQueue, const MultiDispatchInf
 
     if (Kernel *parentKernel = multiDispatchInfo.peekParentKernel()) {
         if (heapType == IndirectHeap::SURFACE_STATE) {
-            expectedSize += HardwareCommandsHelper<GfxFamily>::getSizeRequiredForExecutionModel(heapType, *parentKernel);
+            expectedSize += HardwareCommandsHelper<GfxFamily>::getSshSizeForExecutionModel(*parentKernel);
         } else //if (heapType == IndirectHeap::DYNAMIC_STATE || heapType == IndirectHeap::INDIRECT_OBJECT)
         {
             DeviceQueueHw<GfxFamily> *pDevQueue = castToObject<DeviceQueueHw<GfxFamily>>(commandQueue.getContext().getDefaultDeviceQueue());

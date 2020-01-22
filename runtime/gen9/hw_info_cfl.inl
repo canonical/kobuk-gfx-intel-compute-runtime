@@ -5,12 +5,11 @@
  *
  */
 
+#include "core/gen9/hw_cmds.h"
 #include "core/memory_manager/memory_constants.h"
 #include "runtime/aub_mem_dump/aub_services.h"
-#include "runtime/gen9/hw_cmds.h"
 
 #include "engine_node.h"
-#include "hw_info_cfl.h"
 
 namespace NEO {
 
@@ -45,6 +44,7 @@ const RuntimeCapabilityTable CFL::capabilityTable{
     CmdServicesMemTraceVersion::DeviceValues::Cfl, // aubDeviceId
     0,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
+    sizeof(CFL::GRF),                              // grfSize
     false,                                         // blitterOperationsSupported
     true,                                          // ftrSupportsInteger64BitAtomics
     true,                                          // ftrSupportsFP64
@@ -63,7 +63,8 @@ const RuntimeCapabilityTable CFL::capabilityTable{
     true,                                          // supportsVme
     false,                                         // supportCacheFlushAfterWalker
     true,                                          // supportsImages
-    true                                           // supportsDeviceEnqueue
+    true,                                          // supportsDeviceEnqueue
+    true                                           // hostPtrTrackingEnabled
 };
 
 WorkaroundTable CFL::workaroundTable = {};

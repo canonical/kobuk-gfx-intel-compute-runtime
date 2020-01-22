@@ -8,6 +8,8 @@
 #include "runtime/command_queue/command_queue.h"
 
 #include "core/helpers/aligned_memory.h"
+#include "core/helpers/engine_node_helper.h"
+#include "core/helpers/options.h"
 #include "core/helpers/ptr_math.h"
 #include "core/helpers/string.h"
 #include "runtime/built_ins/builtins_dispatch_builder.h"
@@ -23,13 +25,13 @@
 #include "runtime/helpers/get_info.h"
 #include "runtime/helpers/hardware_commands_helper.h"
 #include "runtime/helpers/mipmap.h"
-#include "runtime/helpers/options.h"
 #include "runtime/helpers/queue_helpers.h"
 #include "runtime/helpers/surface_formats.h"
 #include "runtime/helpers/timestamp_packet.h"
 #include "runtime/mem_obj/buffer.h"
 #include "runtime/mem_obj/image.h"
 #include "runtime/memory_manager/internal_allocation_storage.h"
+#include "runtime/os_interface/os_context.h"
 #include "runtime/utilities/api_intercept.h"
 #include "runtime/utilities/tag_allocator.h"
 
@@ -148,10 +150,10 @@ void CommandQueue::waitUntilComplete(uint32_t taskCountToWait, FlushStamp flushS
 
     if (auto bcsCsr = getBcsCommandStreamReceiver()) {
         bcsCsr->waitForTaskCountWithKmdNotifyFallback(bcsTaskCount, 0, false, false);
-        bcsCsr->waitForTaskCountAndCleanAllocationList(bcsTaskCount, TEMPORARY_ALLOCATION);
+        bcsCsr->waitForTaskCountAndCleanTemporaryAllocationList(bcsTaskCount);
     }
 
-    getGpgpuCommandStreamReceiver().waitForTaskCountAndCleanAllocationList(taskCountToWait, TEMPORARY_ALLOCATION);
+    getGpgpuCommandStreamReceiver().waitForTaskCountAndCleanTemporaryAllocationList(taskCountToWait);
 
     WAIT_LEAVE()
 }
@@ -179,7 +181,7 @@ bool CommandQueue::isQueueBlocked() {
                 taskLevel = getGpgpuCommandStreamReceiver().peekTaskLevel();
             }
 
-            DebugManager.log(DebugManager.flags.EventsDebugEnable.get(), "isQueueBlocked taskLevel change from", taskLevel, "to new from virtualEvent", this->virtualEvent, "new tasklevel", this->virtualEvent->taskLevel.load());
+            FileLoggerInstance().log(DebugManager.flags.EventsDebugEnable.get(), "isQueueBlocked taskLevel change from", taskLevel, "to new from virtualEvent", this->virtualEvent, "new tasklevel", this->virtualEvent->taskLevel.load());
 
             //close the access to virtual event, driver added only 1 ref count.
             this->virtualEvent->decRefInternal();
@@ -287,32 +289,20 @@ void CommandQueue::updateFromCompletionStamp(const CompletionStamp &completionSt
     this->taskLevel = completionStamp.taskLevel;
 }
 
-bool CommandQueue::setPerfCountersEnabled(bool perfCountersEnabled, cl_uint configuration) {
+bool CommandQueue::setPerfCountersEnabled() {
     DEBUG_BREAK_IF(device == nullptr);
-    if (perfCountersEnabled == this->perfCountersEnabled) {
-        return true;
-    }
-    // Only dynamic configuration (set 0) is supported.
-    const uint32_t dynamicSet = 0;
-    if (configuration != dynamicSet) {
-        return false;
-    }
-    auto perfCounters = device->getPerformanceCounters();
 
-    if (perfCountersEnabled) {
-        perfCounters->enable();
-        if (!perfCounters->isAvailable()) {
-            perfCounters->shutdown();
-            return false;
-        }
-    } else {
+    auto perfCounters = device->getPerformanceCounters();
+    bool isCcsEngine = isCcs(getGpgpuEngine().osContext->getEngineType());
+
+    perfCountersEnabled = perfCounters->enable(isCcsEngine);
+
+    if (!perfCountersEnabled) {
         perfCounters->shutdown();
     }
 
-    this->perfCountersEnabled = perfCountersEnabled;
-
-    return true;
-} // namespace NEO
+    return perfCountersEnabled;
+}
 
 PerformanceCounters *CommandQueue::getPerfCounters() {
     return device->getPerformanceCounters();

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Intel Corporation
+ * Copyright (C) 2019-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -29,7 +29,7 @@ inline uint32_t getOffset(T *token) {
     return WorkloadInfo::undefinedOffset;
 }
 
-void populateKernelInfoArg(KernelInfo &dstKernelInfo, KernelArgInfo &dstKernelInfoArg, const PatchTokenBinary::KernelArgFromPatchtokens src) {
+void populateKernelInfoArg(KernelInfo &dstKernelInfo, KernelArgInfo &dstKernelInfoArg, const PatchTokenBinary::KernelArgFromPatchtokens &src) {
     dstKernelInfoArg.needPatch = true;
     dstKernelInfo.storeArgInfo(src.argInfo);
     if (src.objectArg != nullptr) {
@@ -74,6 +74,10 @@ void populateKernelInfoArg(KernelInfo &dstKernelInfo, KernelArgInfo &dstKernelIn
         dstKernelInfoArg.offsetArraySize = getOffset(src.metadata.image.arraySize);
         dstKernelInfoArg.offsetNumSamples = getOffset(src.metadata.image.numSamples);
         dstKernelInfoArg.offsetNumMipLevels = getOffset(src.metadata.image.numMipLevels);
+        dstKernelInfoArg.offsetFlatBaseOffset = getOffset(src.metadata.image.flatBaseOffset);
+        dstKernelInfoArg.offsetFlatWidth = getOffset(src.metadata.image.flatWidth);
+        dstKernelInfoArg.offsetFlatHeight = getOffset(src.metadata.image.flatHeight);
+        dstKernelInfoArg.offsetFlatPitch = getOffset(src.metadata.image.flatPitch);
         break;
     case PatchTokenBinary::ArgObjectType::Sampler:
         dstKernelInfoArg.offsetSamplerSnapWa = getOffset(src.metadata.sampler.coordinateSnapWaRequired);
@@ -145,6 +149,7 @@ void populateKernelInfo(KernelInfo &dst, const PatchTokenBinary::KernelFromPatch
     storeTokenIfNotNull(dst, src.tokens.allocateStatelessPrintfSurface);
     storeTokenIfNotNull(dst, src.tokens.allocateStatelessEventPoolSurface);
     storeTokenIfNotNull(dst, src.tokens.allocateStatelessDefaultDeviceQueueSurface);
+    storeTokenIfNotNull(dst, src.tokens.allocateSyncBuffer);
 
     for (auto &str : src.tokens.strings) {
         dst.storePatchToken(str);

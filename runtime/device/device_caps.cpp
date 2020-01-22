@@ -7,10 +7,10 @@
 
 #include "core/helpers/basic_math.h"
 #include "core/helpers/hw_helper.h"
+#include "core/helpers/options.h"
 #include "runtime/command_stream/command_stream_receiver.h"
 #include "runtime/device/device.h"
 #include "runtime/device/driver_info.h"
-#include "runtime/helpers/options.h"
 #include "runtime/memory_manager/memory_manager.h"
 #include "runtime/os_interface/hw_info_config.h"
 #include "runtime/os_interface/os_interface.h"
@@ -127,7 +127,9 @@ void Device::initializeCaps() {
         deviceInfo.independentForwardProgress = true;
         deviceExtensions += "cl_khr_subgroups ";
         deviceExtensions += "cl_khr_il_program ";
-        deviceExtensions += "cl_intel_spirv_device_side_avc_motion_estimation ";
+        if (supportsVme) {
+            deviceExtensions += "cl_intel_spirv_device_side_avc_motion_estimation ";
+        }
         deviceExtensions += "cl_intel_spirv_media_block_io ";
         deviceExtensions += "cl_intel_spirv_subgroups ";
         deviceExtensions += "cl_khr_spirv_no_integer_wrap_decoration ";
@@ -192,7 +194,7 @@ void Device::initializeCaps() {
     deviceInfo.deviceType = CL_DEVICE_TYPE_GPU;
     deviceInfo.vendorId = 0x8086;
     deviceInfo.endianLittle = 1;
-    deviceInfo.hostUnifiedMemory = CL_TRUE;
+    deviceInfo.hostUnifiedMemory = (false == hwHelper.isLocalMemoryEnabled(hwInfo));
     deviceInfo.deviceAvailable = CL_TRUE;
     deviceInfo.compilerAvailable = CL_TRUE;
     deviceInfo.preferredVectorWidthChar = 16;
@@ -222,6 +224,7 @@ void Device::initializeCaps() {
 
     deviceInfo.globalMemCachelineSize = 64;
     deviceInfo.globalMemCacheSize = systemInfo.L3BankCount * 128 * KB;
+    deviceInfo.grfSize = hwInfo.capabilityTable.grfSize;
 
     deviceInfo.globalMemSize = getMemoryManager()->isLocalMemorySupported()
                                    ? getMemoryManager()->getLocalMemorySize()
