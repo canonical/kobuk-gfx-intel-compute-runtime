@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright (C) 2018-2019 Intel Corporation
+# Copyright (C) 2018-2020 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -24,12 +24,23 @@ def is_banned(path):
         'third_party'
     ]
 
+    banned_files = [
+        'scripts/lint/set_copyright.sh'
+    ]
+
     path_banned = False
-    dirname = os.path.dirname(path)
-    for banned_path in banned_paths:
-        if dirname.startswith(banned_path):
+
+    for banned_file in banned_files:
+        if os.path.normpath(path) == os.path.normpath(banned_file):
             path_banned = True
             break
+
+    if not path_banned:
+        dirname = os.path.dirname(path)
+        for banned_path in banned_paths:
+            if dirname.startswith(banned_path):
+                path_banned = True
+                break
 
     return path_banned
 
@@ -59,7 +70,7 @@ def can_be_scanned(path):
     filename = os.path.basename(path)
 
     if not os.path.isfile(path):
-        print('Cannot find file {}, skipping'.format(path))
+        print(f'Cannot find file {path}, skipping')
         path_ok = False
 
     elif is_banned(path):
@@ -75,12 +86,21 @@ def can_be_scanned(path):
         path_ok = True
 
     if not path_ok:
-        print('[MIT] Ignoring file: {}'.format(path))
+        print(f'[MIT] Ignoring file: {path}')
 
     return path_ok
 
 
-def _main():
+def _parse_args():
+    parser = argparse.ArgumentParser(description='Usage: ./scripts/lint/set_copyright.py <files>')
+    parser.add_argument('-c', '--check', action='store_true', help='Checks only, not changing files, fails if wrong copyright')
+    parser.add_argument('files', nargs='*')
+    args = parser.parse_args()
+
+    return vars(args)
+
+
+def main(args):
     header_cpp = """/*
  * Copyright (C) {} Intel Corporation
  *
@@ -101,13 +121,9 @@ def _main():
         '#include'
     ]
 
-    parser = argparse.ArgumentParser(
-        description='Usage: ./scripts/lint/set_copyright.py <files>')
+    status = 0
 
-    parser.add_argument('files', nargs='*')
-    args = parser.parse_args()
-
-    for path in args.files:
+    for path in args['files']:
 
         # avoid self scan
         if os.path.abspath(path) == os.path.abspath(sys.argv[0]):
@@ -116,9 +132,10 @@ def _main():
         if not can_be_scanned(path):
             continue
 
-        print('[MIT] Processing file: {}'.format(path))
+        print(f'[MIT] Processing file: {path}')
 
         gathered_lines = []
+        gathered_header = []
         start_year = None
         header = header_cpp
         header_start = '/*'
@@ -126,7 +143,7 @@ def _main():
         comment_char = r'\*'
 
         # now read line by line
-        with open(path, 'r') as fin:
+        with open(path) as fin:
 
             # take care of hashbang
             first_line = fin.readline()
@@ -141,7 +158,7 @@ def _main():
             # check whether comment type is '#'
             if first_line or line.startswith('#'):
                 for i in cpp_sharp_lines:
-                    print('a: {} ~ {}'.format(i, line))
+                    print(f'a: {i} ~ {line}')
                     if line.startswith(i):
                         is_cpp = True
                         break
@@ -176,8 +193,7 @@ def _main():
                         is_header = False
                         is_header_end = True
                     elif 'Copyright' in line:
-                        expr = (
-                            r'^{} Copyright \([Cc]\) (\d+)( *- *\d+)?'.format(comment_char))
+                        expr = (rf'^{comment_char} Copyright \([Cc]\) (\d+)( *- *\d+)?')
                         match = re.match(expr, line.strip())
                         if match:
                             start_year = match.groups()[0]
@@ -185,10 +201,14 @@ def _main():
                             is_copyright = True
                     if not is_copyright:
                         curr_comment.append(line)
+                    gathered_header.append(line)
+
                 elif is_copyright and is_header_end:
                     if len(line.strip()) > 0:
                         gathered_lines.append(line)
                         is_header_end = False
+                    else:
+                        gathered_header.append(line)
                 else:
                     gathered_lines.append(line)
 
@@ -201,29 +221,34 @@ def _main():
             start_year += '-'
             start_year += str(year)
 
-        # store file mode because we want to preserve this
-        old_mode = os.stat(path)[stat.ST_MODE]
+        written_header = [header.format(start_year)]
 
-        os.remove(path)
-        with open(path, 'w') as fout:
+        if len(curr_comment) > 0 or len(gathered_lines) > 0:
+            written_header.append('\n')
 
-            if first_line:
-                fout.write(first_line)
+        if len(curr_comment) > 0:
+            written_header.append(''.join(curr_comment))
 
-            fout.write(header.format(start_year))
+        if not args['check']:
+            # store file mode because we want to preserve this
+            old_mode = os.stat(path)[stat.ST_MODE]
+            os.remove(path)
+            with open(path, 'w') as fout:
+                if first_line:
+                    fout.write(first_line)
 
-            if len(curr_comment) > 0 or len(gathered_lines) > 0:
-                fout.write('\n')
+                fout.write(''.join(written_header))
+                contents = ''.join(gathered_lines)
+                fout.write(contents)
 
-            if len(curr_comment) > 0:
-                fout.write(''.join(curr_comment))
+                # chmod to original value
+                os.chmod(path, old_mode)
 
-            contents = ''.join(gathered_lines)
-            fout.write(contents)
+        if args['check'] and ''.join(gathered_header) != ''.join(written_header):
+            status = 1
 
-        # chmod to original value
-        os.chmod(path, old_mode)
+    return status
 
 
 if __name__ == '__main__':
-    sys.exit(_main())
+    sys.exit(main(_parse_args()))
