@@ -3,6 +3,7 @@ intel-compute-runtime (20.13.16352-1) UNRELEASED; urgency=medium
   * New upstream release.
   * control: Use debhelper-compat, bump to 12.
   * control: Bump policy to 4.5.0.
+  * Build with llvm-10, bump dependencies. (LP: #1871345)
 
  -- Timo Aaltonen <tjaalton@debian.org>  Mon, 06 Apr 2020 12:27:10 +0300
 

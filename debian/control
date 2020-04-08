@@ -5,14 +5,14 @@ Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alioth.debian.org>
 Uploaders: Timo Aaltonen <tjaalton@debian.org>
 Build-Depends: debhelper-compat (= 12),
  bison,
- clang-9,
+ clang-10,
  cmake,
  flex,
- llvm-9,
- libopencl-clang-dev (>= 9.0.0),
- libigc-dev (>= 1.0.2652),
- libigdfcl-dev (>= 1.0.2652),
- libigdgmm-dev (>= 19.3.2),
+ llvm-10,
+ libopencl-clang-dev (>= 10.0.0),
+ libigc-dev (>= 1.0.3627),
+ libigdfcl-dev (>= 1.0.3627),
+ libigdgmm-dev (>= 20.1.1),
  libva-dev,
  pkg-config,
 Standards-Version: 4.5.0
@@ -25,8 +25,8 @@ Architecture: amd64
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
- libigc1 (>= 1.0.2652),
- libigdfcl1 (>= 1.0.2652),
+ libigc1 (>= 1.0.3627),
+ libigdfcl1 (>= 1.0.3627),
  libigdgmm11,
  ocl-icd-libopencl1,
 Breaks:
