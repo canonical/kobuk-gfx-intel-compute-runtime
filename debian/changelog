@@ -1,6 +1,7 @@
 intel-compute-runtime (20.37.17906-1) UNRELEASED; urgency=medium
 
   * New upstream release.
+  * control: Bump libigc-dev/libigdfcl-dev build-depends.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Tue, 22 Sep 2020 11:48:19 +0300
 
