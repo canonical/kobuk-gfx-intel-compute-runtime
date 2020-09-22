@@ -67,6 +67,7 @@ struct DebugVariables {
 #define DECLARE_DEBUG_VARIABLE(dataType, variableName, defaultValue, description) \
     DebugVarBase<dataType> variableName{defaultValue};
 #include "debug_variables.inl"
+#include "release_variables.inl"
 #undef DECLARE_DEBUG_VARIABLE
 };
 
@@ -106,6 +107,10 @@ class DebugSettingsManager {
     std::mutex mtx;
     std::string logFileName;
 
+    bool isLoopAtDriverInitEnabled() const {
+        auto loopingEnabled = flags.LoopAtDriverInit.get();
+        return loopingEnabled;
+    }
     template <typename DataType>
     static void dumpNonDefaultFlag(const char *variableName, const DataType &variableValue, const DataType &defaultValue);
     void dumpFlags() const;

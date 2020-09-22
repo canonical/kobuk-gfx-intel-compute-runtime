@@ -7,6 +7,7 @@
 
 #pragma once
 #include "shared/source/command_stream/preemption_mode.h"
+#include "shared/source/helpers/common_types.h"
 #include "shared/source/utilities/reference_tracked_object.h"
 
 #include "opencl/source/api/cl_types.h"
@@ -51,8 +52,12 @@ class ClDevice : public BaseObject<_cl_device_id> {
     explicit ClDevice(Device &device, Platform *platformId);
     ~ClDevice() override;
 
+    void incRefInternal();
+    unique_ptr_if_unused<ClDevice> decRefInternal();
+
     unsigned int getEnabledClVersion() const { return enabledClVersion; };
-    unsigned int getSupportedClVersion() const;
+    bool areOcl21FeaturesEnabled() const { return ocl21FeaturesEnabled; };
+    bool isOcl21Conformant() const;
 
     void retainApi();
     unique_ptr_if_unused<ClDevice> releaseApi();
@@ -112,11 +117,17 @@ class ClDevice : public BaseObject<_cl_device_id> {
     const DeviceInfo &getSharedDeviceInfo() const;
     ClDevice *getDeviceById(uint32_t deviceId);
     const std::string &peekCompilerExtensions() const;
+    const std::string &peekCompilerFeatures() const;
     std::unique_ptr<SyncBufferHandler> syncBufferHandler;
+    DeviceBitfield getDeviceBitfield() const;
+    bool isDeviceEnqueueSupported() const;
+    bool arePipesSupported() const;
 
   protected:
     void initializeCaps();
-    void initializeExtraCaps();
+    void initializeExtensionsWithVersion();
+    void initializeOpenclCAllVersions();
+    void initializeOsSpecificCaps();
     void setupFp64Flags();
 
     Device &device;
@@ -126,13 +137,16 @@ class ClDevice : public BaseObject<_cl_device_id> {
     std::string name;
     std::unique_ptr<DriverInfo> driverInfo;
     unsigned int enabledClVersion = 0u;
+    bool ocl21FeaturesEnabled = false;
     std::string deviceExtensions;
     std::string exposedBuiltinKernels = "";
 
     ClDeviceInfo deviceInfo = {};
+    std::once_flag initializeExtensionsWithVersionOnce;
 
     std::vector<unsigned int> simultaneousInterops = {0};
     std::string compilerExtensions;
+    std::string compilerFeatures;
 };
 
 } // namespace NEO

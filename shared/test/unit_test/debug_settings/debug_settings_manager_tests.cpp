@@ -38,15 +38,15 @@ TEST(DebugSettingsManager, WithoutDebugFunctionality) {
 
     // Should not be enabled without debug functionality
     EXPECT_TRUE(debugManager.disabled());
-    // SettingsReader not created
-    EXPECT_EQ(nullptr, debugManager.getSettingsReader());
 
 // debug variables / flags set to default
-#define DECLARE_DEBUG_VARIABLE(dataType, variableName, defaultValue, description)                           \
-    {                                                                                                       \
-        bool isEqual = TestDebugFlagsChecker::isEqual(debugManager.flags.variableName.get(), defaultValue); \
-        EXPECT_TRUE(isEqual);                                                                               \
+#define DECLARE_DEBUG_VARIABLE(dataType, variableName, defaultValue, description)                                                  \
+    {                                                                                                                              \
+        bool isEqual = TestDebugFlagsChecker::isEqual(debugManager.flags.variableName.get(), static_cast<dataType>(defaultValue)); \
+        EXPECT_TRUE(isEqual);                                                                                                      \
     }
+#include "shared/source/debug_settings/release_variables.inl"
+
 #include "debug_variables.inl"
 #undef DECLARE_DEBUG_VARIABLE
 }
@@ -116,7 +116,7 @@ TEST(DebugSettingsManager, givenPrintDebugSettingsEnabledWhenCallingDumpFlagsThe
     testing::internal::CaptureStdout();
     FullyEnabledTestDebugManager debugManager;
     debugManager.flags.PrintDebugSettings.set(true);
-    debugManager.flags.LoopAtPlatformInitialize.set(true);
+    debugManager.flags.LoopAtDriverInit.set(true);
     debugManager.flags.Enable64kbpages.set(1);
     debugManager.flags.TbxServer.set("192.168.0.1");
 
@@ -136,12 +136,69 @@ TEST(DebugSettingsManager, givenPrintDebugSettingsEnabledWhenCallingDumpFlagsThe
     ASSERT_NE(0u, output.size());
 
     EXPECT_NE(std::string::npos, output.find("Non-default value of debug variable: TbxServer = 192.168.0.1"));
-    EXPECT_NE(std::string::npos, output.find("Non-default value of debug variable: LoopAtPlatformInitialize = 1"));
+    EXPECT_NE(std::string::npos, output.find("Non-default value of debug variable: LoopAtDriverInit = 1"));
     EXPECT_NE(std::string::npos, output.find("Non-default value of debug variable: PrintDebugSettings = 1"));
     EXPECT_NE(std::string::npos, output.find("Non-default value of debug variable: Enable64kbpages = 1"));
+}
+
+TEST(DebugSettingsManager, givenPrintDebugSettingsEnabledOnDisabledDebugManagerWhenCallingDumpFlagsThenFlagsAreNotWrittenToDumpFile) {
+    testing::internal::CaptureStdout();
+    FullyDisabledTestDebugManager debugManager;
+    debugManager.flags.PrintDebugSettings.set(true);
+
+    std::remove(FullyDisabledTestDebugManager::settingsDumpFileName);
+    debugManager.dumpFlags();
+    std::remove(FullyDisabledTestDebugManager::settingsDumpFileName);
+
+    std::string output = testing::internal::GetCapturedStdout();
+    ASSERT_EQ(0u, output.size());
 }
 
 TEST(AllocationInfoLogging, givenBaseGraphicsAllocationWhenGettingImplementationSpecificAllocationInfoThenReturnEmptyInfoString) {
     GraphicsAllocation graphicsAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0ull, 0ull, 0, MemoryPool::MemoryNull);
     EXPECT_STREQ(graphicsAllocation.getAllocationInfoString().c_str(), "");
+}
+
+TEST(DebugSettingsManager, givenDisabledDebugManagerWhenCreateThenOnlyReleaseVariablesAreRead) {
+    bool settingsFileExists = fileExists(SettingsReader::settingsFileName);
+    if (!settingsFileExists) {
+        const char data[] = "LogApiCalls = 1\nMakeAllBuffersResident = 1";
+        writeDataToFile(SettingsReader::settingsFileName, &data, sizeof(data));
+    }
+
+    SettingsReader *reader = SettingsReader::createFileReader();
+    EXPECT_NE(nullptr, reader);
+
+    FullyDisabledTestDebugManager debugManager;
+    debugManager.setReaderImpl(reader);
+    debugManager.injectSettingsFromReader();
+
+    EXPECT_EQ(1, debugManager.flags.MakeAllBuffersResident.get());
+    EXPECT_EQ(0, debugManager.flags.LogApiCalls.get());
+
+    if (!settingsFileExists) {
+        remove(SettingsReader::settingsFileName);
+    }
+}
+
+TEST(DebugSettingsManager, givenEnabledDebugManagerWhenCreateThenAllVariablesAreRead) {
+    bool settingsFileExists = fileExists(SettingsReader::settingsFileName);
+    if (!settingsFileExists) {
+        const char data[] = "LogApiCalls = 1\nMakeAllBuffersResident = 1";
+        writeDataToFile(SettingsReader::settingsFileName, &data, sizeof(data));
+    }
+
+    SettingsReader *reader = SettingsReader::createFileReader();
+    EXPECT_NE(nullptr, reader);
+
+    FullyEnabledTestDebugManager debugManager;
+    debugManager.setReaderImpl(reader);
+    debugManager.injectSettingsFromReader();
+
+    EXPECT_EQ(1, debugManager.flags.MakeAllBuffersResident.get());
+    EXPECT_EQ(1, debugManager.flags.LogApiCalls.get());
+
+    if (!settingsFileExists) {
+        remove(SettingsReader::settingsFileName);
+    }
 }

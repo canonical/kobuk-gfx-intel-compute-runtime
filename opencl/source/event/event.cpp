@@ -26,7 +26,6 @@
 #include "opencl/source/helpers/get_info_status_mapper.h"
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/mem_obj/mem_obj.h"
-#include "opencl/source/platform/platform.h"
 
 #define OCLRT_NUM_TIMESTAMP_BITS (32)
 
@@ -130,6 +129,8 @@ Event::~Event() {
             timeStampNode->returnTag();
         }
         if (perfCounterNode != nullptr) {
+            cmdQueue->getPerfCounters()->deleteQuery(perfCounterNode->tagForCpuAccess->query.handle);
+            perfCounterNode->tagForCpuAccess->query.handle = {};
             perfCounterNode->returnTag();
         }
         cmdQueue->decRefInternal();
@@ -149,7 +150,7 @@ cl_int Event::getEventProfilingInfo(cl_profiling_info paramName,
                                     size_t *paramValueSizeRet) {
     cl_int retVal;
     const void *src = nullptr;
-    size_t srcSize = 0;
+    size_t srcSize = GetInfo::invalidSourceSize;
 
     // CL_PROFILING_INFO_NOT_AVAILABLE if event refers to the clEnqueueSVMFree command
     if (isUserEvent() != CL_FALSE ||         // or is a user event object.
@@ -166,7 +167,6 @@ cl_int Event::getEventProfilingInfo(cl_profiling_info paramName,
         if (DebugManager.flags.ReturnRawGpuTimestamps.get()) {
             src = &queueTimeStamp.GPUTimeStamp;
         }
-
         srcSize = sizeof(cl_ulong);
         break;
 
@@ -200,7 +200,9 @@ cl_int Event::getEventProfilingInfo(cl_profiling_info paramName,
         if (!perfCountersEnabled) {
             return CL_INVALID_VALUE;
         }
-        if (!cmdQueue->getPerfCounters()->getApiReport(paramValueSize,
+
+        if (!cmdQueue->getPerfCounters()->getApiReport(perfCounterNode,
+                                                       paramValueSize,
                                                        paramValue,
                                                        paramValueSizeRet,
                                                        updateStatusAndCheckCompletion())) {
@@ -211,11 +213,9 @@ cl_int Event::getEventProfilingInfo(cl_profiling_info paramName,
         return CL_INVALID_VALUE;
     }
 
-    retVal = changeGetInfoStatusToCLResultType(::getInfo(paramValue, paramValueSize, src, srcSize));
-
-    if (paramValueSizeRet) {
-        *paramValueSizeRet = srcSize;
-    }
+    auto getInfoStatus = GetInfo::getInfo(paramValue, paramValueSize, src, srcSize);
+    retVal = changeGetInfoStatusToCLResultType(getInfoStatus);
+    GetInfo::setParamValueReturnSize(paramValueSizeRet, srcSize, getInfoStatus);
 
     return retVal;
 } // namespace NEO
@@ -224,8 +224,9 @@ uint32_t Event::getCompletionStamp() const {
     return this->taskCount;
 }
 
-void Event::updateCompletionStamp(uint32_t taskCount, uint32_t tasklevel, FlushStamp flushStamp) {
-    this->taskCount = taskCount;
+void Event::updateCompletionStamp(uint32_t gpgpuTaskCount, uint32_t bcsTaskCount, uint32_t tasklevel, FlushStamp flushStamp) {
+    this->taskCount = gpgpuTaskCount;
+    this->bcsTaskCount = bcsTaskCount;
     this->taskLevel = tasklevel;
     this->flushStamp->setStamp(flushStamp);
 }
@@ -253,29 +254,49 @@ bool Event::calcProfilingData() {
         if (timestampPacketContainer && timestampPacketContainer->peekNodes().size() > 0) {
             const auto timestamps = timestampPacketContainer->peekNodes();
 
-            auto contextStartTS = timestamps[0]->tagForCpuAccess->packets[0].contextStart;
-            uint64_t contextEndTS = timestamps[0]->tagForCpuAccess->packets[0].contextEnd;
-            auto globalStartTS = timestamps[0]->tagForCpuAccess->packets[0].globalStart;
-
-            for (const auto &timestamp : timestamps) {
-                const auto &packet = timestamp->tagForCpuAccess->packets[0];
-                if (contextStartTS > packet.contextStart) {
-                    contextStartTS = packet.contextStart;
-                }
-                if (contextEndTS < packet.contextEnd) {
-                    contextEndTS = packet.contextEnd;
-                }
-                if (globalStartTS > packet.globalStart) {
-                    globalStartTS = packet.globalStart;
+            if (DebugManager.flags.PrintTimestampPacketContents.get()) {
+                for (auto i = 0u; i < timestamps.size(); i++) {
+                    for (auto j = 0u; j < timestamps[i]->tagForCpuAccess->packetsUsed; j++) {
+                        const auto &packet = timestamps[i]->tagForCpuAccess->packets[j];
+                        std::cout << "Timestamp " << i << ", packet " << j << ": "
+                                  << "global start: " << packet.globalStart << ", "
+                                  << "global end: " << packet.globalEnd << ", "
+                                  << "context start: " << packet.contextStart << ", "
+                                  << "context end: " << packet.contextEnd << std::endl;
+                    }
                 }
             }
-            calculateProfilingDataInternal(contextStartTS, contextEndTS, &contextEndTS, globalStartTS);
+
+            uint64_t globalStartTS = timestamps[0]->tagForCpuAccess->packets[0].globalStart;
+            uint64_t globalEndTS = timestamps[0]->tagForCpuAccess->packets[0].globalEnd;
+
+            for (const auto &timestamp : timestamps) {
+                for (auto i = 0u; i < timestamp->tagForCpuAccess->packetsUsed; ++i) {
+                    const auto &packet = timestamp->tagForCpuAccess->packets[i];
+                    if (globalStartTS > packet.globalStart) {
+                        globalStartTS = packet.globalStart;
+                    }
+                    if (globalEndTS < packet.globalEnd) {
+                        globalEndTS = packet.globalEnd;
+                    }
+                }
+            }
+            calculateProfilingDataInternal(globalStartTS, globalEndTS, &globalEndTS, globalStartTS);
+
         } else if (timeStampNode) {
-            calculateProfilingDataInternal(
-                timeStampNode->tagForCpuAccess->ContextStartTS,
-                timeStampNode->tagForCpuAccess->ContextEndTS,
-                &timeStampNode->tagForCpuAccess->ContextCompleteTS,
-                timeStampNode->tagForCpuAccess->GlobalStartTS);
+            if (HwHelper::get(this->cmdQueue->getDevice().getHardwareInfo().platform.eRenderCoreFamily).useOnlyGlobalTimestamps()) {
+                calculateProfilingDataInternal(
+                    timeStampNode->tagForCpuAccess->GlobalStartTS,
+                    timeStampNode->tagForCpuAccess->GlobalEndTS,
+                    &timeStampNode->tagForCpuAccess->GlobalEndTS,
+                    timeStampNode->tagForCpuAccess->GlobalStartTS);
+            } else {
+                calculateProfilingDataInternal(
+                    timeStampNode->tagForCpuAccess->ContextStartTS,
+                    timeStampNode->tagForCpuAccess->ContextEndTS,
+                    &timeStampNode->tagForCpuAccess->ContextCompleteTS,
+                    timeStampNode->tagForCpuAccess->GlobalStartTS);
+            }
         }
     }
     return dataCalculated;
@@ -289,8 +310,18 @@ void Event::calculateProfilingDataInternal(uint64_t contextStartTS, uint64_t con
     uint64_t gpuCompleteDuration = 0;
     uint64_t cpuCompleteDuration = 0;
 
-    double frequency = cmdQueue->getDevice().getDeviceInfo().profilingTimerResolution;
-    int64_t c0 = queueTimeStamp.CPUTimeinNS - static_cast<uint64_t>(queueTimeStamp.GPUTimeStamp * frequency);
+    auto &hwHelper = HwHelper::get(this->cmdQueue->getDevice().getHardwareInfo().platform.eRenderCoreFamily);
+    auto frequency = cmdQueue->getDevice().getDeviceInfo().profilingTimerResolution;
+    auto gpuTimeStamp = queueTimeStamp.GPUTimeStamp;
+
+    int64_t c0 = queueTimeStamp.CPUTimeinNS - hwHelper.getGpuTimeStampInNS(gpuTimeStamp, frequency);
+
+    startTimeStamp = static_cast<uint64_t>(globalStartTS * frequency) + c0;
+    if (startTimeStamp < queueTimeStamp.CPUTimeinNS) {
+        c0 += static_cast<uint64_t>((1ULL << (hwHelper.getGlobalTimeStampBits())) * frequency);
+        startTimeStamp = static_cast<uint64_t>(globalStartTS * frequency) + c0;
+    }
+
     /* calculation based on equation
        CpuTime = GpuTime * scalar + const( == c0)
        scalar = DeltaCpu( == dCpu) / DeltaGpu( == dGpu)
@@ -309,7 +340,6 @@ void Event::calculateProfilingDataInternal(uint64_t contextStartTS, uint64_t con
     cpuDuration = static_cast<uint64_t>(gpuDuration * frequency);
     cpuCompleteDuration = static_cast<uint64_t>(gpuCompleteDuration * frequency);
 
-    startTimeStamp = static_cast<uint64_t>(globalStartTS * frequency) + c0;
     endTimeStamp = startTimeStamp + cpuDuration;
     completeTimeStamp = startTimeStamp + cpuCompleteDuration;
 
@@ -323,16 +353,16 @@ void Event::calculateProfilingDataInternal(uint64_t contextStartTS, uint64_t con
 }
 
 inline bool Event::wait(bool blocking, bool useQuickKmdSleep) {
-    while (this->taskCount == CompletionStamp::levelNotReady) {
+    while (this->taskCount == CompletionStamp::notReady) {
         if (blocking == false) {
             return false;
         }
     }
 
-    cmdQueue->waitUntilComplete(taskCount.load(), flushStamp->peekStamp(), useQuickKmdSleep);
+    cmdQueue->waitUntilComplete(taskCount.load(), this->bcsTaskCount, flushStamp->peekStamp(), useQuickKmdSleep);
     updateExecutionStatus();
 
-    DEBUG_BREAK_IF(this->taskLevel == CompletionStamp::levelNotReady && this->executionStatus >= 0);
+    DEBUG_BREAK_IF(this->taskLevel == CompletionStamp::notReady && this->executionStatus >= 0);
 
     auto *allocationStorage = cmdQueue->getGpgpuCommandStreamReceiver().getInternalAllocationStorage();
     allocationStorage->cleanAllocationList(this->taskCount, TEMPORARY_ALLOCATION);
@@ -341,7 +371,7 @@ inline bool Event::wait(bool blocking, bool useQuickKmdSleep) {
 }
 
 void Event::updateExecutionStatus() {
-    if (taskLevel == CompletionStamp::levelNotReady) {
+    if (taskLevel == CompletionStamp::notReady) {
         return;
     }
 
@@ -366,7 +396,7 @@ void Event::updateExecutionStatus() {
         // Note : Intentional fallthrough (no return) to check for CL_COMPLETE
     }
 
-    if ((cmdQueue != nullptr) && (cmdQueue->isCompleted(getCompletionStamp()))) {
+    if ((cmdQueue != nullptr) && (cmdQueue->isCompleted(getCompletionStamp(), this->bcsTaskCount))) {
         transitionExecutionStatus(CL_COMPLETE);
         executeCallbacks(CL_COMPLETE);
         unblockEventsBlockedByThis(CL_COMPLETE);
@@ -397,11 +427,11 @@ void Event::unblockEventsBlockedByThis(int32_t transitionStatus) {
     (void)status;
     DEBUG_BREAK_IF(!(isStatusCompleted(status) || (peekIsSubmitted(status))));
 
-    uint32_t taskLevelToPropagate = CompletionStamp::levelNotReady;
+    uint32_t taskLevelToPropagate = CompletionStamp::notReady;
 
     if (isStatusCompletedByTermination(transitionStatus) == false) {
         //if we are event on top of the tree , obtain taskLevel from CSR
-        if (taskLevel == CompletionStamp::levelNotReady) {
+        if (taskLevel == CompletionStamp::notReady) {
             this->taskLevel = getTaskLevel(); // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
             taskLevelToPropagate = this->taskLevel;
         } else {
@@ -469,11 +499,9 @@ void Event::transitionExecutionStatus(int32_t newExecutionStatus) const {
 void Event::submitCommand(bool abortTasks) {
     std::unique_ptr<Command> cmdToProcess(cmdToSubmit.exchange(nullptr));
     if (cmdToProcess.get() != nullptr) {
-        std::unique_lock<CommandStreamReceiver::MutexType> lockCSR;
-        if (this->cmdQueue) {
-            lockCSR = this->getCommandQueue()->getGpgpuCommandStreamReceiver().obtainUniqueOwnership();
-        }
-        if ((this->isProfilingEnabled()) && (this->cmdQueue != nullptr)) {
+        auto lockCSR = getCommandQueue()->getGpgpuCommandStreamReceiver().obtainUniqueOwnership();
+
+        if (this->isProfilingEnabled()) {
             if (timeStampNode) {
                 this->cmdQueue->getGpgpuCommandStreamReceiver().makeResident(*timeStampNode->getBaseGraphicsAllocation());
                 cmdToProcess->timestamp = timeStampNode;
@@ -489,20 +517,20 @@ void Event::submitCommand(bool abortTasks) {
             }
         }
         auto &complStamp = cmdToProcess->submit(taskLevel, abortTasks);
-        if (profilingCpuPath && this->isProfilingEnabled() && (this->cmdQueue != nullptr)) {
+        if (profilingCpuPath && this->isProfilingEnabled()) {
             setEndTimeStamp();
         }
-        updateTaskCount(complStamp.taskCount);
+        updateTaskCount(complStamp.taskCount, cmdQueue->peekBcsTaskCount());
         flushStamp->setStamp(complStamp.flushStamp);
         submittedCmd.exchange(cmdToProcess.release());
     } else if (profilingCpuPath && endTimeStamp == 0) {
         setEndTimeStamp();
     }
-    if (this->taskCount == CompletionStamp::levelNotReady) {
+    if (this->taskCount == CompletionStamp::notReady) {
         if (!this->isUserEvent() && this->eventWithoutCommand) {
             if (this->cmdQueue) {
                 auto lockCSR = this->getCommandQueue()->getGpgpuCommandStreamReceiver().obtainUniqueOwnership();
-                updateTaskCount(this->cmdQueue->getGpgpuCommandStreamReceiver().peekTaskCount());
+                updateTaskCount(this->cmdQueue->getGpgpuCommandStreamReceiver().peekTaskCount(), cmdQueue->peekBcsTaskCount());
             }
         }
         //make sure that task count is synchronized for events with kernels
@@ -522,7 +550,7 @@ cl_int Event::waitForEvents(cl_uint numEvents,
     for (const cl_event *it = eventList, *end = eventList + numEvents; it != end; ++it) {
         Event *event = castToObjectOrAbort<Event>(*it);
         if (event->cmdQueue) {
-            if (event->taskLevel != CompletionStamp::levelNotReady) {
+            if (event->taskLevel != CompletionStamp::notReady) {
                 event->cmdQueue->flush();
             }
         }
@@ -572,7 +600,7 @@ inline void Event::unblockEventBy(Event &event, uint32_t taskLevel, int32_t tran
     }
     DBG_LOG(EventsDebugEnable, "Event", this, "is unblocked by", &event);
 
-    if (this->taskLevel == CompletionStamp::levelNotReady) {
+    if (this->taskLevel == CompletionStamp::notReady) {
         this->taskLevel = std::max(cmdQueue->getGpgpuCommandStreamReceiver().peekTaskLevel(), taskLevel);
     } else {
         this->taskLevel = std::max(this->taskLevel.load(), taskLevel);
@@ -594,7 +622,7 @@ bool Event::updateStatusAndCheckCompletion() {
 }
 
 bool Event::isReadyForSubmission() {
-    return taskLevel != CompletionStamp::levelNotReady ? true : false;
+    return taskLevel != CompletionStamp::notReady ? true : false;
 }
 
 void Event::addCallback(Callback::ClbFuncT fn, cl_int type, void *data) {
@@ -621,7 +649,7 @@ void Event::addCallback(Callback::ClbFuncT fn, cl_int type, void *data) {
     }
 
     if (peekHasCallbacks() && !isUserEvent() && DebugManager.flags.EnableAsyncEventsHandler.get()) {
-        platformsImpl[0]->getAsyncEventsHandler()->registerEvent(this);
+        ctx->getAsyncEventsHandler().registerEvent(this);
     }
 
     decRefInternal();
@@ -663,7 +691,7 @@ void Event::tryFlushEvent() {
     //only if event is not completed, completed event has already been flushed
     if (cmdQueue && updateStatusAndCheckCompletion() == false) {
         //flush the command queue only if it is not blocked event
-        if (taskLevel != CompletionStamp::levelNotReady) {
+        if (taskLevel != CompletionStamp::notReady) {
             cmdQueue->getGpgpuCommandStreamReceiver().flushBatchedSubmissions();
         }
     }
@@ -704,7 +732,7 @@ TagNode<HwTimeStamps> *Event::getHwTimeStampNode() {
 TagNode<HwPerfCounter> *Event::getHwPerfCounterNode() {
 
     if (!perfCounterNode && cmdQueue->getPerfCounters()) {
-        const uint32_t gpuReportSize = cmdQueue->getPerfCounters()->getGpuReportSize();
+        const uint32_t gpuReportSize = HwPerfCounter::getSize(*(cmdQueue->getPerfCounters()));
         perfCounterNode = cmdQueue->getGpgpuCommandStreamReceiver().getEventPerfCountAllocator(gpuReportSize)->getTag();
     }
     return perfCounterNode;

@@ -16,6 +16,7 @@
 #include "shared/source/gmm_helper/resource_info.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/basic_math.h"
+#include "shared/source/helpers/heap_assigner.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/string.h"
@@ -48,13 +49,17 @@ MemoryManager::MemoryManager(ExecutionEnvironment &executionEnvironment) : execu
             this->enable64kbpages[rootDeviceIndex] = DebugManager.flags.Enable64kbpages.get() != 0;
         }
 
-        gfxPartitions.push_back(std::make_unique<GfxPartition>());
+        gfxPartitions.push_back(std::make_unique<GfxPartition>(reservedCpuAddressRange));
 
         anyLocalMemorySupported |= this->localMemorySupported[rootDeviceIndex];
     }
 
     if (anyLocalMemorySupported) {
         pageFaultManager = PageFaultManager::create();
+    }
+
+    if (DebugManager.flags.EnableMultiStorageResources.get() != -1) {
+        supportsMultiStorageResources = !!DebugManager.flags.EnableMultiStorageResources.get();
     }
 }
 
@@ -119,7 +124,7 @@ GraphicsAllocation *MemoryManager::allocateGraphicsMemoryForImageFromHostPtr(con
 }
 
 void MemoryManager::cleanGraphicsMemoryCreatedFromHostPtr(GraphicsAllocation *graphicsAllocation) {
-    hostPtrManager->releaseHandleStorage(graphicsAllocation->fragmentsStorage);
+    hostPtrManager->releaseHandleStorage(graphicsAllocation->getRootDeviceIndex(), graphicsAllocation->fragmentsStorage);
     cleanOsHandles(graphicsAllocation->fragmentsStorage, graphicsAllocation->getRootDeviceIndex());
 }
 
@@ -128,7 +133,38 @@ GraphicsAllocation *MemoryManager::createGraphicsAllocationWithPadding(GraphicsA
 }
 
 GraphicsAllocation *MemoryManager::createPaddedAllocation(GraphicsAllocation *inputGraphicsAllocation, size_t sizeWithPadding) {
-    return allocateGraphicsMemoryWithProperties({inputGraphicsAllocation->getRootDeviceIndex(), sizeWithPadding, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY});
+    return allocateGraphicsMemoryWithProperties({inputGraphicsAllocation->getRootDeviceIndex(), sizeWithPadding, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY, systemMemoryBitfield});
+}
+
+void *MemoryManager::createMultiGraphicsAllocation(std::vector<uint32_t> &rootDeviceIndices, AllocationProperties &properties, MultiGraphicsAllocation &multiGraphicsAllocation) {
+    void *ptr = nullptr;
+
+    for (auto &rootDeviceIndex : rootDeviceIndices) {
+        properties.rootDeviceIndex = rootDeviceIndex;
+
+        if (!ptr) {
+            auto graphicsAllocation = allocateGraphicsMemoryWithProperties(properties);
+            if (!graphicsAllocation) {
+                return nullptr;
+            }
+            multiGraphicsAllocation.addAllocation(graphicsAllocation);
+            ptr = reinterpret_cast<void *>(graphicsAllocation->getGpuAddress());
+        } else {
+            properties.flags.allocateMemory = false;
+            properties.flags.isUSMHostAllocation = true;
+
+            auto graphicsAllocation = allocateGraphicsMemoryWithProperties(properties, ptr);
+            if (!graphicsAllocation) {
+                for (auto gpuAllocation : multiGraphicsAllocation.getGraphicsAllocations()) {
+                    freeGraphicsMemory(gpuAllocation);
+                }
+                return nullptr;
+            }
+            multiGraphicsAllocation.addAllocation(graphicsAllocation);
+        }
+    }
+
+    return ptr;
 }
 
 void MemoryManager::freeSystemMemory(void *ptr) {
@@ -280,6 +316,7 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
     }
 
     switch (properties.allocationType) {
+    case GraphicsAllocation::AllocationType::COMMAND_BUFFER:
     case GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY:
     case GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER:
     case GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR:
@@ -294,6 +331,8 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
     case GraphicsAllocation::AllocationType::TAG_BUFFER:
     case GraphicsAllocation::AllocationType::GLOBAL_FENCE:
     case GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY:
+    case GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER:
+    case GraphicsAllocation::AllocationType::DEBUG_CONTEXT_SAVE_AREA:
         allocationData.flags.useSystemMemory = true;
     default:
         break;
@@ -344,7 +383,12 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
         allocationData.hostPtr = nullptr;
     }
 
+    allocationData.gpuAddress = properties.gpuAddress;
+    allocationData.osContext = properties.osContext;
     allocationData.rootDeviceIndex = properties.rootDeviceIndex;
+
+    auto hwInfo = executionEnvironment.rootDeviceEnvironments[properties.rootDeviceIndex]->getHardwareInfo();
+    HwHelper::get(hwInfo->platform.eRenderCoreFamily).setExtraAllocationData(allocationData, properties, *hwInfo);
 
     return true;
 }
@@ -353,6 +397,7 @@ GraphicsAllocation *MemoryManager::allocateGraphicsMemoryInPreferredPool(const A
     AllocationData allocationData;
     getAllocationData(allocationData, properties, hostPtr, createStorageInfoFromProperties(properties));
     overrideAllocationData(allocationData, properties);
+    allocationData.flags.isUSMHostAllocation = properties.flags.isUSMHostAllocation;
 
     AllocationStatus status = AllocationStatus::Error;
     GraphicsAllocation *allocation = allocateGraphicsMemoryInDevicePool(allocationData, status);
@@ -389,12 +434,21 @@ GraphicsAllocation *MemoryManager::allocateGraphicsMemory(const AllocationData &
         }
         return allocation;
     }
-    if (useInternal32BitAllocator(allocationData.type) ||
+    bool use32Allocator = heapAssigner.use32BitHeap(allocationData.type);
+    if (use32Allocator ||
         (force32bitAllocations && allocationData.flags.allow32Bit && is64bit)) {
-        return allocate32BitGraphicsMemoryImpl(allocationData);
+        auto hwInfo = executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getHardwareInfo();
+        bool useLocalMem = heapAssigner.useExternal32BitHeap(allocationData.type) ? HwHelper::get(hwInfo->platform.eRenderCoreFamily).heapInLocalMem(*hwInfo) : false;
+        return allocate32BitGraphicsMemoryImpl(allocationData, useLocalMem);
+    }
+    if (allocationData.flags.isUSMHostAllocation) {
+        return allocateUSMHostGraphicsMemory(allocationData);
     }
     if (allocationData.hostPtr) {
         return allocateGraphicsMemoryWithHostPtr(allocationData);
+    }
+    if (allocationData.gpuAddress) {
+        return allocateGraphicsMemoryWithGpuVa(allocationData);
     }
     if (peek64kbPagesEnabled(allocationData.rootDeviceIndex) && allocationData.flags.allow64kbPages) {
         return allocateGraphicsMemory64kb(allocationData);
@@ -469,11 +523,11 @@ void MemoryManager::unlockResource(GraphicsAllocation *graphicsAllocation) {
 
 HeapIndex MemoryManager::selectHeap(const GraphicsAllocation *allocation, bool hasPointer, bool isFullRangeSVM) {
     if (allocation) {
-        if (useInternal32BitAllocator(allocation->getAllocationType())) {
-            return HeapIndex::HEAP_INTERNAL_DEVICE_MEMORY;
+        if (heapAssigner.useInternal32BitHeap(allocation->getAllocationType())) {
+            return selectInternalHeap(allocation->isAllocatedInLocalMemoryPool());
         }
-        if (allocation->is32BitAllocation()) {
-            return HeapIndex::HEAP_EXTERNAL;
+        if (allocation->is32BitAllocation() || heapAssigner.useExternal32BitHeap(allocation->getAllocationType())) {
+            return selectExternalHeap(allocation->isAllocatedInLocalMemoryPool());
         }
     }
     if (isFullRangeSVM) {
@@ -587,6 +641,18 @@ bool MemoryManager::isCopyRequired(ImageInfo &imgInfo, const void *hostPtr) {
 }
 
 void MemoryManager::overrideAllocationData(AllocationData &allocationData, const AllocationProperties &properties) {
+    if (DebugManager.flags.ForceSystemMemoryPlacement.get()) {
+        if ((1llu << (static_cast<int64_t>(properties.allocationType) - 1)) & DebugManager.flags.ForceSystemMemoryPlacement.get()) {
+            allocationData.flags.useSystemMemory = true;
+        }
+    }
+
+    if (DebugManager.flags.ForceNonSystemMemoryPlacement.get()) {
+        if ((1llu << (static_cast<int64_t>(properties.allocationType) - 1)) & DebugManager.flags.ForceNonSystemMemoryPlacement.get()) {
+            allocationData.flags.useSystemMemory = false;
+        }
+    }
+
     int32_t directRingPlacement = DebugManager.flags.DirectSubmissionBufferPlacement.get();
     int32_t directRingAddressing = DebugManager.flags.DirectSubmissionBufferAddressing.get();
     if (properties.allocationType == GraphicsAllocation::AllocationType::RING_BUFFER) {

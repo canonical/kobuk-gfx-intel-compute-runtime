@@ -10,10 +10,10 @@
 #include "shared/source/helpers/hw_info.h"
 #include "shared/test/unit_test/helpers/default_hw_info.h"
 
-#include "opencl/source/helpers/memory_properties_flags_helpers.h"
+#include "opencl/source/helpers/memory_properties_helpers.h"
 #include "opencl/source/mem_obj/image.h"
 #include "opencl/source/platform/platform.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 #include "test.h"
@@ -75,10 +75,10 @@ struct ImageHelper {
     static Image *create(Context *context = Traits::context, const cl_image_desc *imgDesc = &Traits::imageDesc,
                          const cl_image_format *imgFormat = &Traits::imageFormat) {
         auto retVal = CL_INVALID_VALUE;
-        auto surfaceFormat = Image::getSurfaceFormatFromTable(Traits::flags, imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+        auto surfaceFormat = Image::getSurfaceFormatFromTable(Traits::flags, imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
         auto image = Image::create(
             context,
-            NEO::MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(Traits::flags, 0, 0),
+            NEO::MemoryPropertiesHelper::createMemoryProperties(Traits::flags, 0, 0, &context->getDevice(0)->getDevice()),
             Traits::flags,
             0,
             surfaceFormat,
@@ -119,7 +119,7 @@ struct ImageClearColorFixture : ::testing::Test {
     void setUpImpl() {
         hardwareInfo.capabilityTable.ftrRenderCompressedImages = true;
 
-        NEO::platformsImpl.clear();
+        NEO::platformsImpl->clear();
         NEO::constructPlatform()->peekExecutionEnvironment()->prepareRootDeviceEnvironments(1u);
         NEO::platform()->peekExecutionEnvironment()->rootDeviceEnvironments[0]->setHwInfo(&hardwareInfo);
         NEO::platform()->peekExecutionEnvironment()->rootDeviceEnvironments[0]->initGmm();

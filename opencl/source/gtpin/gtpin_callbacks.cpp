@@ -68,7 +68,7 @@ void gtpinNotifyKernelCreate(cl_kernel kernel) {
         auto &device = pKernel->getDevice();
         GFXCORE_FAMILY genFamily = device.getHardwareInfo().platform.eRenderCoreFamily;
         GTPinHwHelper &gtpinHelper = GTPinHwHelper::get(genFamily);
-        if (!gtpinHelper.addSurfaceState(pKernel)) {
+        if (pKernel->isParentKernel || !gtpinHelper.addSurfaceState(pKernel)) {
             // Kernel with no SSH or Kernel EM, not supported
             return;
         }
@@ -88,7 +88,7 @@ void gtpinNotifyKernelCreate(cl_kernel kernel) {
         paramsIn.orig_kernel_size = static_cast<uint32_t>(pKernel->getKernelHeapSize());
         paramsIn.buffer_type = GTPIN_BUFFER_BINDFULL;
         paramsIn.buffer_desc.BTI = static_cast<uint32_t>(gtpinBTI);
-        paramsIn.igc_hash_id = kernelInfo.heapInfo.pKernelHeader->ShaderHashCode;
+        paramsIn.igc_hash_id = kernelInfo.shaderHashCode;
         paramsIn.kernel_name = (char *)kernelInfo.name.c_str();
         paramsIn.igc_info = kernelInfo.igcInfoForGtpin;
         paramsIn.debug_data = pKernel->getProgram()->getDebugData();
@@ -104,7 +104,7 @@ void gtpinNotifyKernelCreate(cl_kernel kernel) {
 void gtpinNotifyKernelSubmit(cl_kernel kernel, void *pCmdQueue) {
     if (isGTPinInitialized) {
         auto pKernel = castToObjectOrAbort<Kernel>(kernel);
-        if (pKernel->getSurfaceStateHeapSize() == 0) {
+        if (pKernel->isParentKernel || pKernel->getSurfaceStateHeapSize() == 0) {
             // Kernel with no SSH, not supported
             return;
         }
@@ -139,7 +139,7 @@ void gtpinNotifyKernelSubmit(cl_kernel kernel, void *pCmdQueue) {
         void *pSurfaceState = gtpinHelper.getSurfaceState(pKernel, gtpinBTI);
         cl_mem buffer = (cl_mem)resource;
         auto pBuffer = castToObjectOrAbort<Buffer>(buffer);
-        pBuffer->setArgStateful(pSurfaceState, false, false, false, false);
+        pBuffer->setArgStateful(pSurfaceState, false, false, false, false, device.getDevice());
     }
 }
 
@@ -193,7 +193,7 @@ void gtpinNotifyMakeResident(void *pKernel, void *pCSR) {
                 CommandStreamReceiver *pCommandStreamReceiver = reinterpret_cast<CommandStreamReceiver *>(pCSR);
                 cl_mem gtpinBuffer = kernelExecQueue[n].gtpinResource;
                 auto pBuffer = castToObjectOrAbort<Buffer>(gtpinBuffer);
-                GraphicsAllocation *pGfxAlloc = pBuffer->getGraphicsAllocation();
+                GraphicsAllocation *pGfxAlloc = pBuffer->getGraphicsAllocation(pCommandStreamReceiver->getRootDeviceIndex());
                 pCommandStreamReceiver->makeResident(*pGfxAlloc);
                 kernelExecQueue[n].isResourceResident = true;
                 break;
@@ -212,7 +212,8 @@ void gtpinNotifyUpdateResidencyList(void *pKernel, void *pResVec) {
                 std::vector<Surface *> *pResidencyVector = (std::vector<Surface *> *)pResVec;
                 cl_mem gtpinBuffer = kernelExecQueue[n].gtpinResource;
                 auto pBuffer = castToObjectOrAbort<Buffer>(gtpinBuffer);
-                GraphicsAllocation *pGfxAlloc = pBuffer->getGraphicsAllocation();
+                auto rootDeviceIndex = kernelExecQueue[n].pCommandQueue->getDevice().getRootDeviceIndex();
+                GraphicsAllocation *pGfxAlloc = pBuffer->getGraphicsAllocation(rootDeviceIndex);
                 GeneralSurface *pSurface = new GeneralSurface(pGfxAlloc);
                 pResidencyVector->push_back(pSurface);
                 kernelExecQueue[n].isResourceResident = true;

@@ -9,9 +9,10 @@
 #include "shared/source/utilities/stackvec.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/helpers/ult_hw_config.h"
+#include "shared/test/unit_test/helpers/variable_backup.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 #include "opencl/source/cl_device/cl_device.h"
-#include "opencl/test/unit_test/helpers/variable_backup.h"
 #include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
@@ -53,48 +54,49 @@ struct WddmMemoryOperationsHandlerTest : public WddmTest {
 };
 
 TEST_F(WddmMemoryOperationsHandlerTest, givenRegularAllocatioWhenMakingResidentAllocaionExpectMakeResidentCalled) {
-    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(ArrayRef<GraphicsAllocation *>(&allocationPtr, 1)), MemoryOperationsStatus::SUCCESS);
-    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(wddmAllocation), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(nullptr, ArrayRef<GraphicsAllocation *>(&allocationPtr, 1)), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(nullptr, wddmAllocation), MemoryOperationsStatus::SUCCESS);
 }
 
 TEST_F(WddmMemoryOperationsHandlerTest, givenFragmentedAllocationWhenMakingResidentAllocaionExpectMakeResidentCalled) {
     allocationPtr = &wddmFragmentedAllocation;
 
-    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(ArrayRef<GraphicsAllocation *>(&allocationPtr, 1)), MemoryOperationsStatus::SUCCESS);
-    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(wddmFragmentedAllocation), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(nullptr, ArrayRef<GraphicsAllocation *>(&allocationPtr, 1)), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(nullptr, wddmFragmentedAllocation), MemoryOperationsStatus::SUCCESS);
 }
 
 TEST_F(WddmMemoryOperationsHandlerTest, givenVariousAllocationsWhenMakingResidentAllocaionExpectMakeResidentCalled) {
-    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(ArrayRef<GraphicsAllocation *>(allocationData)), MemoryOperationsStatus::SUCCESS);
-    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(wddmAllocation), MemoryOperationsStatus::SUCCESS);
-    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(wddmFragmentedAllocation), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(nullptr, ArrayRef<GraphicsAllocation *>(allocationData)), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(nullptr, wddmAllocation), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(nullptr, wddmFragmentedAllocation), MemoryOperationsStatus::SUCCESS);
 }
 
 TEST_F(WddmMemoryOperationsHandlerTest, givenRegularAllocatioWhenEvictingResidentAllocationExpectEvictCalled) {
-    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(ArrayRef<GraphicsAllocation *>(&allocationPtr, 1)), MemoryOperationsStatus::SUCCESS);
-    EXPECT_EQ(wddmMemoryOperationsHandler->evict(wddmAllocation), MemoryOperationsStatus::SUCCESS);
-    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(wddmAllocation), MemoryOperationsStatus::MEMORY_NOT_FOUND);
+    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(nullptr, ArrayRef<GraphicsAllocation *>(&allocationPtr, 1)), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->evict(nullptr, wddmAllocation), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(nullptr, wddmAllocation), MemoryOperationsStatus::MEMORY_NOT_FOUND);
 }
 
 TEST_F(WddmMemoryOperationsHandlerTest, givenFragmentedAllocationWhenEvictingResidentAllocationExpectEvictCalled) {
     allocationPtr = &wddmFragmentedAllocation;
 
-    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(ArrayRef<GraphicsAllocation *>(&allocationPtr, 1)), MemoryOperationsStatus::SUCCESS);
-    EXPECT_EQ(wddmMemoryOperationsHandler->evict(wddmFragmentedAllocation), MemoryOperationsStatus::SUCCESS);
-    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(wddmFragmentedAllocation), MemoryOperationsStatus::MEMORY_NOT_FOUND);
+    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(nullptr, ArrayRef<GraphicsAllocation *>(&allocationPtr, 1)), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->evict(nullptr, wddmFragmentedAllocation), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(nullptr, wddmFragmentedAllocation), MemoryOperationsStatus::MEMORY_NOT_FOUND);
 }
 
 TEST_F(WddmMemoryOperationsHandlerTest, givenVariousAllocationsWhenEvictingResidentAllocationExpectEvictCalled) {
-    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(ArrayRef<GraphicsAllocation *>(allocationData)), MemoryOperationsStatus::SUCCESS);
-    EXPECT_EQ(wddmMemoryOperationsHandler->evict(wddmAllocation), MemoryOperationsStatus::SUCCESS);
-    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(wddmAllocation), MemoryOperationsStatus::MEMORY_NOT_FOUND);
-    EXPECT_EQ(wddmMemoryOperationsHandler->evict(wddmFragmentedAllocation), MemoryOperationsStatus::SUCCESS);
-    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(wddmFragmentedAllocation), MemoryOperationsStatus::MEMORY_NOT_FOUND);
+    EXPECT_EQ(wddmMemoryOperationsHandler->makeResident(nullptr, ArrayRef<GraphicsAllocation *>(allocationData)), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->evict(nullptr, wddmAllocation), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(nullptr, wddmAllocation), MemoryOperationsStatus::MEMORY_NOT_FOUND);
+    EXPECT_EQ(wddmMemoryOperationsHandler->evict(nullptr, wddmFragmentedAllocation), MemoryOperationsStatus::SUCCESS);
+    EXPECT_EQ(wddmMemoryOperationsHandler->isResident(nullptr, wddmFragmentedAllocation), MemoryOperationsStatus::MEMORY_NOT_FOUND);
 }
 
 TEST(WddmResidentBufferTests, whenBuffersIsCreatedWithMakeResidentFlagSetThenItIsMadeResidentUponCreation) {
     VariableBackup<UltHwConfig> backup(&ultHwConfig);
     ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc = false;
+    ultHwConfig.forceOsAgnosticMemoryManager = false;
     DebugManagerStateRestore restorer;
     DebugManager.flags.MakeAllBuffersResident.set(true);
 
@@ -106,10 +108,10 @@ TEST(WddmResidentBufferTests, whenBuffersIsCreatedWithMakeResidentFlagSetThenItI
     auto clBuffer = clCreateBuffer(&context, 0u, 4096u, nullptr, &retValue);
     ASSERT_EQ(retValue, CL_SUCCESS);
 
-    auto memoryOperationsHandler = context.getDevice(0)->getRootDeviceEnvironment().memoryOperationsInterface.get();
+    auto memoryOperationsHandler = device->getRootDeviceEnvironment().memoryOperationsInterface.get();
     auto neoBuffer = castToObject<MemObj>(clBuffer);
-    auto bufferAllocation = neoBuffer->getGraphicsAllocation();
-    auto status = memoryOperationsHandler->isResident(*bufferAllocation);
+    auto bufferAllocation = neoBuffer->getGraphicsAllocation(device->getRootDeviceIndex());
+    auto status = memoryOperationsHandler->isResident(nullptr, *bufferAllocation);
 
     EXPECT_EQ(status, MemoryOperationsStatus::SUCCESS);
 

@@ -32,16 +32,23 @@
 
 namespace NEO {
 template <typename Family>
-void CommandQueueHw<Family>::notifyEnqueueReadBuffer(Buffer *buffer, bool blockingRead) {
+void CommandQueueHw<Family>::notifyEnqueueReadBuffer(Buffer *buffer, bool blockingRead, bool notifyBcsCsr) {
     if (DebugManager.flags.AUBDumpAllocsOnEnqueueReadOnly.get()) {
-        buffer->getGraphicsAllocation()->setAllocDumpable(blockingRead);
+        buffer->getGraphicsAllocation(getDevice().getRootDeviceIndex())->setAllocDumpable(blockingRead, notifyBcsCsr);
         buffer->forceDisallowCPUCopy = blockingRead;
     }
 }
 template <typename Family>
-void CommandQueueHw<Family>::notifyEnqueueReadImage(Image *image, bool blockingRead) {
+void CommandQueueHw<Family>::notifyEnqueueReadImage(Image *image, bool blockingRead, bool notifyBcsCsr) {
     if (DebugManager.flags.AUBDumpAllocsOnEnqueueReadOnly.get()) {
-        image->getGraphicsAllocation()->setAllocDumpable(blockingRead);
+        image->getGraphicsAllocation(getDevice().getRootDeviceIndex())->setAllocDumpable(blockingRead, notifyBcsCsr);
+    }
+}
+
+template <typename Family>
+void CommandQueueHw<Family>::notifyEnqueueSVMMemcpy(GraphicsAllocation *gfxAllocation, bool blockingCopy, bool notifyBcsCsr) {
+    if (DebugManager.flags.AUBDumpAllocsOnEnqueueSVMMemcpyOnly.get()) {
+        gfxAllocation->setAllocDumpable(blockingCopy, notifyBcsCsr);
     }
 }
 
@@ -52,7 +59,7 @@ cl_int CommandQueueHw<Family>::enqueueReadWriteBufferOnCpuWithMemoryTransfer(cl_
     cl_int retVal = CL_SUCCESS;
     EventsRequest eventsRequest(numEventsInWaitList, eventWaitList, event);
 
-    TransferProperties transferProperties(buffer, commandType, 0, true, &offset, &size, ptr, true);
+    TransferProperties transferProperties(buffer, commandType, 0, true, &offset, &size, ptr, true, getDevice().getRootDeviceIndex());
     cpuDataTransferHandler(transferProperties, eventsRequest, retVal);
     return retVal;
 }
@@ -64,7 +71,7 @@ cl_int CommandQueueHw<Family>::enqueueReadWriteBufferOnCpuWithoutMemoryTransfer(
     cl_int retVal = CL_SUCCESS;
     EventsRequest eventsRequest(numEventsInWaitList, eventWaitList, event);
 
-    TransferProperties transferProperties(buffer, CL_COMMAND_MARKER, 0, true, &offset, &size, ptr, false);
+    TransferProperties transferProperties(buffer, CL_COMMAND_MARKER, 0, true, &offset, &size, ptr, false, getDevice().getRootDeviceIndex());
     cpuDataTransferHandler(transferProperties, eventsRequest, retVal);
     if (event) {
         auto pEvent = castToObjectOrAbort<Event>(*event);
@@ -125,6 +132,9 @@ bool CommandQueueHw<Family>::forceStateless(size_t size) {
 
 template <typename Family>
 bool CommandQueueHw<Family>::isCacheFlushForBcsRequired() const {
+    if (DebugManager.flags.ForceCacheFlushForBcs.get() != -1) {
+        return !!DebugManager.flags.ForceCacheFlushForBcs.get();
+    }
     return true;
 }
 
@@ -148,4 +158,40 @@ bool CommandQueueHw<Family>::obtainTimestampPacketForCacheFlush(bool isCacheFlus
     return isCacheFlushRequired;
 }
 
+template <typename Family>
+bool CommandQueueHw<Family>::isGpgpuSubmissionForBcsRequired(bool queueBlocked) const {
+    if (queueBlocked) {
+        return true;
+    }
+
+    bool required = (latestSentEnqueueType != EnqueueProperties::Operation::Blit) && (latestSentEnqueueType != EnqueueProperties::Operation::None);
+
+    if (DebugManager.flags.ForceGpgpuSubmissionForBcsEnqueue.get() == 1) {
+        required = true;
+    }
+
+    return required;
+}
+
+template <typename Family>
+void CommandQueueHw<Family>::setupEvent(EventBuilder &eventBuilder, cl_event *outEvent, uint32_t cmdType) {
+    if (outEvent) {
+        eventBuilder.create<Event>(this, cmdType, CompletionStamp::notReady, 0);
+        auto eventObj = eventBuilder.getEvent();
+        *outEvent = eventObj;
+
+        if (eventObj->isProfilingEnabled()) {
+            TimeStampData queueTimeStamp;
+
+            getDevice().getOSTime()->getCpuGpuTime(&queueTimeStamp);
+            eventObj->setQueueTimeStamp(&queueTimeStamp);
+
+            if (isCommandWithoutKernel(cmdType)) {
+                eventObj->setCPUProfilingPath(true);
+                eventObj->setQueueTimeStamp();
+            }
+        }
+        DBG_LOG(EventsDebugEnable, "enqueueHandler commandType", cmdType, "output Event", eventObj);
+    }
+}
 } // namespace NEO

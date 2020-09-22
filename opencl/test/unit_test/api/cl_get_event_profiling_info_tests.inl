@@ -58,6 +58,24 @@ TEST_F(clEventProfilingTests, GivenInvalidParamNameWhenGettingEventProfilingInfo
     delete pEvent;
 }
 
+TEST_F(clEventProfilingTests, GivenInvalidParametersWhenGettingEventProfilingInfoThenValueSizeRetIsNotUpdated) {
+    Event event{nullptr, 0, 0, 0};
+    event.setStatus(CL_COMPLETE);
+    size_t paramValueSize = sizeof(cl_ulong);
+    cl_ulong paramValue;
+    size_t paramValueSizeRet = 0x1234;
+    cl_int retVal = CL_PROFILING_INFO_NOT_AVAILABLE;
+
+    event.setProfilingEnabled(true);
+    retVal = clGetEventProfilingInfo(&event,
+                                     0,
+                                     paramValueSize,
+                                     &paramValue,
+                                     &paramValueSizeRet);
+    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+    EXPECT_EQ(0x1234u, paramValueSizeRet);
+}
+
 TEST_F(clEventProfilingTests, GivenInvalidParamValueSizeWhenGettingEventProfilingInfoThenInvalidValueErrorIsReturned) {
     Event *pEvent = new Event(nullptr, 0, 0, 0);
     pEvent->setStatus(CL_COMPLETE);
@@ -265,8 +283,8 @@ class clEventProfilingWithPerfCountersTests : public DeviceInstrumentationFixtur
         commandQueue = std::make_unique<MockCommandQueue>(context.get(), device.get(), nullptr);
         event = std::make_unique<Event>(commandQueue.get(), 0, 0, 0);
         event->setStatus(CL_COMPLETE);
-        commandQueue->getPerfCounters()->getApiReport(0, nullptr, &param_value_size, true);
         event->setProfilingEnabled(true);
+        commandQueue->getPerfCounters()->getApiReport(event->getHwPerfCounterNode(), 0, nullptr, &param_value_size, true);
 
         eventCl = static_cast<cl_event>(event.get());
     }

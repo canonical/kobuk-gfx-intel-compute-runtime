@@ -7,23 +7,25 @@
 
 #include "shared/source/device/device.h"
 #include "shared/source/helpers/hw_info.h"
+#include "shared/source/helpers/string.h"
 #include "shared/source/os_interface/device_factory.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/helpers/ult_hw_config.h"
+#include "shared/test/unit_test/helpers/variable_backup.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/platform/extensions.h"
 #include "opencl/source/sharings/sharing_factory.h"
 #include "opencl/test/unit_test/fixtures/mock_aub_center_fixture.h"
 #include "opencl/test/unit_test/fixtures/platform_fixture.h"
-#include "opencl/test/unit_test/helpers/variable_backup.h"
-#include "opencl/test/unit_test/mocks/mock_async_event_handler.h"
 #include "opencl/test/unit_test/mocks/mock_builtins.h"
+#include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 #include "opencl/test/unit_test/mocks/mock_source_level_debugger.h"
+#include "opencl/test/unit_test/mocks/ult_cl_device_factory.h"
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -93,18 +95,17 @@ TEST_F(PlatformTest, WhenGetClDevicesIsCalledThenExpectedValuesAreReturned) {
     EXPECT_NE(nullptr, pPlatform->getClDevices());
 }
 
-TEST_F(PlatformTest, PlatformgetAsCompilerEnabledExtensionsString) {
+TEST_F(PlatformTest, givenSupportingCl21WhenGettingExtensionsStringThenSubgroupsIsEnabled) {
     pPlatform->initializeWithNewDevices();
     auto compilerExtensions = pPlatform->getClDevice(0)->peekCompilerExtensions();
 
+    auto isIndependentForwardProgressSupported = pPlatform->getClDevice(0)->getDeviceInfo().independentForwardProgress;
+
     EXPECT_THAT(compilerExtensions, ::testing::HasSubstr(std::string(" -cl-ext=-all,+cl")));
-    if (std::string(pPlatform->getClDevice(0)->getDeviceInfo().clVersion).find("OpenCL 2.1") != std::string::npos) {
+    if ((std::string(pPlatform->getClDevice(0)->getDeviceInfo().clVersion).find("OpenCL 2.1") != std::string::npos) &&
+        isIndependentForwardProgressSupported) {
         EXPECT_THAT(compilerExtensions, ::testing::HasSubstr(std::string("cl_khr_subgroups")));
     }
-}
-
-TEST_F(PlatformTest, hasAsyncEventsHandler) {
-    EXPECT_NE(nullptr, pPlatform->getAsyncEventsHandler());
 }
 
 TEST_F(PlatformTest, givenMidThreadPreemptionWhenInitializingPlatformThenCallGetSipKernel) {
@@ -199,17 +200,36 @@ TEST(PlatformTestSimple, givenNotCsrHwTypeWhenPlatformIsInitializedThenInitAubCe
     EXPECT_TRUE(rootDeviceEnvironment->initAubCenterCalled);
 }
 
-TEST(PlatformTestSimple, shutdownClosesAsyncEventHandlerThread) {
-    Platform *platform = new MockPlatform();
+TEST(PlatformTestSimple, WhenConvertingCustomOclCFeaturesToCompilerInternalOptionsThenResultIsCorrect) {
+    StackVec<cl_name_version, 15> customOpenclCFeatures;
 
-    MockHandler *mockAsyncHandler = new MockHandler();
+    cl_name_version feature;
+    strcpy_s(feature.name, CL_NAME_VERSION_MAX_NAME_SIZE, "custom_feature");
+    customOpenclCFeatures.push_back(feature);
+    auto compilerOption = convertEnabledOclCFeaturesToCompilerInternalOptions(customOpenclCFeatures);
+    EXPECT_STREQ(" -cl-feature=+custom_feature ", compilerOption.c_str());
 
-    auto oldHandler = platform->setAsyncEventsHandler(std::unique_ptr<AsyncEventsHandler>(mockAsyncHandler));
-    EXPECT_EQ(mockAsyncHandler, platform->getAsyncEventsHandler());
+    strcpy_s(feature.name, CL_NAME_VERSION_MAX_NAME_SIZE, "other_extra_feature");
+    customOpenclCFeatures.push_back(feature);
+    compilerOption = convertEnabledOclCFeaturesToCompilerInternalOptions(customOpenclCFeatures);
+    EXPECT_STREQ(" -cl-feature=+custom_feature,+other_extra_feature ", compilerOption.c_str());
+}
 
-    mockAsyncHandler->openThread();
-    delete platform;
-    EXPECT_TRUE(MockAsyncEventHandlerGlobals::destructorCalled);
+TEST(PlatformTestSimple, WhenConvertingOclCFeaturesToCompilerInternalOptionsThenResultIsCorrect) {
+    UltClDeviceFactory deviceFactory{1, 0};
+    auto pClDevice = deviceFactory.rootDevices[0];
+
+    std::string expectedCompilerOption = " -cl-feature=";
+    for (auto &openclCFeature : pClDevice->deviceInfo.openclCFeatures) {
+        expectedCompilerOption += "+";
+        expectedCompilerOption += openclCFeature.name;
+        expectedCompilerOption += ",";
+    }
+    expectedCompilerOption.erase(expectedCompilerOption.size() - 1, 1);
+    expectedCompilerOption += " ";
+
+    auto compilerOption = convertEnabledOclCFeaturesToCompilerInternalOptions(pClDevice->deviceInfo.openclCFeatures);
+    EXPECT_STREQ(expectedCompilerOption.c_str(), compilerOption.c_str());
 }
 
 namespace NEO {
@@ -258,9 +278,8 @@ TEST_F(PlatformTest, givenSupportingCl21WhenPlatformSupportsFp64ThenFillMatching
     std::string compilerExtensions = convertEnabledExtensionsToCompilerInternalOptions(extensionsList.c_str());
     EXPECT_THAT(compilerExtensions, ::testing::HasSubstr(std::string(" -cl-ext=-all,+cl")));
 
-    if (hwInfo->capabilityTable.clVersionSupport > 20) {
+    if (hwInfo->capabilityTable.supportsOcl21Features) {
         EXPECT_THAT(compilerExtensions, ::testing::HasSubstr(std::string("cl_khr_subgroups")));
-        EXPECT_THAT(compilerExtensions, ::testing::HasSubstr(std::string("cl_khr_il_program")));
         if (hwInfo->capabilityTable.supportsVme) {
             EXPECT_THAT(compilerExtensions, ::testing::HasSubstr(std::string("cl_intel_spirv_device_side_avc_motion_estimation")));
         } else {
@@ -290,6 +309,7 @@ TEST_F(PlatformTest, givenNotSupportingCl21WhenPlatformNotSupportFp64ThenNotFill
     HardwareInfo TesthwInfo = *defaultHwInfo;
     TesthwInfo.capabilityTable.ftrSupportsFP64 = false;
     TesthwInfo.capabilityTable.clVersionSupport = 10;
+    TesthwInfo.capabilityTable.supportsOcl21Features = false;
 
     std::string extensionsList = getExtensionsList(TesthwInfo);
     if (TesthwInfo.capabilityTable.supportsImages) {
@@ -324,6 +344,7 @@ TEST_F(PlatformTest, givenSupporteImagesAndClVersion21WhenCreateExtentionsListTh
     HardwareInfo hwInfo = *defaultHwInfo;
     hwInfo.capabilityTable.supportsImages = true;
     hwInfo.capabilityTable.clVersionSupport = 21;
+    hwInfo.capabilityTable.supportsOcl21Features = true;
     std::string extensionsList = getExtensionsList(hwInfo);
     std::string compilerExtensions = convertEnabledExtensionsToCompilerInternalOptions(extensionsList.c_str());
 
@@ -340,7 +361,7 @@ TEST_F(PlatformTest, givenNotSupporteImagesAndClVersion21WhenCreateExtentionsLis
     EXPECT_THAT(compilerExtensions, testing::Not(testing::HasSubstr(std::string("cl_intel_spirv_media_block_io"))));
 }
 
-TEST_F(PlatformTest, testRemoveLastSpace) {
+TEST_F(PlatformTest, WhenRemovingLastSpaceThenStringDoesNotEndWithSpace) {
     std::string emptyString = "";
     removeLastSpace(emptyString);
     EXPECT_EQ(std::string(""), emptyString);
@@ -354,7 +375,7 @@ TEST_F(PlatformTest, testRemoveLastSpace) {
     EXPECT_EQ(std::string("x"), xSpaceString);
 }
 TEST(PlatformConstructionTest, givenPlatformConstructorWhenItIsCalledTwiceThenTheSamePlatformIsReturned) {
-    platformsImpl.clear();
+    platformsImpl->clear();
     auto platform1 = constructPlatform();
     EXPECT_EQ(platform1, platform());
     auto platform2 = constructPlatform();
@@ -363,20 +384,15 @@ TEST(PlatformConstructionTest, givenPlatformConstructorWhenItIsCalledTwiceThenTh
 }
 
 TEST(PlatformConstructionTest, givenPlatformConstructorWhenItIsCalledAfterResetThenNewPlatformIsConstructed) {
-    platformsImpl.clear();
+    platformsImpl->clear();
     auto platform = constructPlatform();
-    std::unique_ptr<Platform> temporaryOwnership(std::move(platformsImpl[0]));
-    platformsImpl.clear();
+    std::unique_ptr<Platform> temporaryOwnership(std::move((*platformsImpl)[0]));
+    platformsImpl->clear();
     auto platform2 = constructPlatform();
     EXPECT_NE(platform2, platform);
     EXPECT_NE(platform, nullptr);
     EXPECT_NE(platform2, nullptr);
-    platformsImpl.clear();
-}
-
-TEST(PlatformInitLoopTests, givenPlatformWhenInitLoopHelperIsCalledThenItDoesNothing) {
-    MockPlatform platform;
-    platform.initializationLoopHelper();
+    platformsImpl->clear();
 }
 
 TEST(PlatformInitTest, givenNullptrDeviceInPassedDeviceVectorWhenInitializePlatformThenExceptionIsThrown) {
@@ -402,23 +418,6 @@ TEST(PlatformInitTest, givenSingleDeviceWithNonZeroRootDeviceIndexInPassedDevice
     size_t expectedNumDevices = 1u;
     EXPECT_EQ(expectedNumDevices, platform()->getNumDevices());
     EXPECT_EQ(2u, platform()->getClDevice(0)->getRootDeviceIndex());
-}
-
-TEST(PlatformInitLoopTests, givenPlatformWithDebugSettingWhenInitIsCalledThenItEntersEndlessLoop) {
-    DebugManagerStateRestore stateRestore;
-    DebugManager.flags.LoopAtPlatformInitialize.set(true);
-    bool called = false;
-    struct mockPlatform : public MockPlatform {
-        mockPlatform(bool &called) : called(called){};
-        void initializationLoopHelper() override {
-            DebugManager.flags.LoopAtPlatformInitialize.set(false);
-            called = true;
-        }
-        bool &called;
-    };
-    mockPlatform platform(called);
-    platform.initializeWithNewDevices();
-    EXPECT_TRUE(called);
 }
 
 TEST(PlatformGroupDevicesTest, whenMultipleDevicesAreCreatedThenGroupDevicesCreatesVectorPerEachProductFamily) {

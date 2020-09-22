@@ -22,7 +22,7 @@
 
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/platform/platform.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/multi_root_device_fixture.h"
 #include "opencl/test/unit_test/gen_common/matchers.h"
 #include "opencl/test/unit_test/helpers/raii_hw_helper.h"
@@ -45,10 +45,10 @@
 
 using namespace NEO;
 
-struct CommandStreamReceiverTest : public DeviceFixture,
+struct CommandStreamReceiverTest : public ClDeviceFixture,
                                    public ::testing::Test {
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
 
         commandStreamReceiver = &pDevice->getGpgpuCommandStreamReceiver();
         ASSERT_NE(nullptr, commandStreamReceiver);
@@ -57,7 +57,7 @@ struct CommandStreamReceiverTest : public DeviceFixture,
     }
 
     void TearDown() override {
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     CommandStreamReceiver *commandStreamReceiver;
@@ -98,11 +98,13 @@ TEST_F(CommandStreamReceiverTest, WhenMakingResidentThenBufferResidencyFlagIsSet
         srcMemory,
         retVal);
     ASSERT_NE(nullptr, buffer);
-    EXPECT_FALSE(buffer->getGraphicsAllocation()->isResident(commandStreamReceiver->getOsContext().getContextId()));
 
-    commandStreamReceiver->makeResident(*buffer->getGraphicsAllocation());
+    auto graphicsAllocation = buffer->getGraphicsAllocation(context.getDevice(0)->getRootDeviceIndex());
+    EXPECT_FALSE(graphicsAllocation->isResident(commandStreamReceiver->getOsContext().getContextId()));
 
-    EXPECT_TRUE(buffer->getGraphicsAllocation()->isResident(commandStreamReceiver->getOsContext().getContextId()));
+    commandStreamReceiver->makeResident(*graphicsAllocation);
+
+    EXPECT_TRUE(graphicsAllocation->isResident(commandStreamReceiver->getOsContext().getContextId()));
 
     delete buffer;
 }
@@ -114,9 +116,10 @@ TEST_F(CommandStreamReceiverTest, givenBaseDownloadAllocationCalledThenDoesNotCh
 
     ASSERT_NE(nullptr, graphicsAllocation);
     auto numEvictionAllocsBefore = commandStreamReceiver->getEvictionAllocations().size();
-    commandStreamReceiver->CommandStreamReceiver::downloadAllocation(*graphicsAllocation);
+    commandStreamReceiver->CommandStreamReceiver::downloadAllocations();
     auto numEvictionAllocsAfter = commandStreamReceiver->getEvictionAllocations().size();
     EXPECT_EQ(numEvictionAllocsBefore, numEvictionAllocsAfter);
+    EXPECT_EQ(0u, numEvictionAllocsAfter);
 
     memoryManager->freeGraphicsMemory(graphicsAllocation);
 }
@@ -248,6 +251,20 @@ HWTEST_F(CommandStreamReceiverTest, givenCsrWhenAllocateHeapMemoryIsCalledThenHe
     delete dsh;
 }
 
+HWTEST_F(CommandStreamReceiverTest, givenSurfaceStateHeapTypeWhenAllocateHeapMemoryIsCalledThenSSHHasInitialSpaceReserevedForBindlessOffsets) {
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    IndirectHeap *ssh = nullptr;
+    csr.allocateHeapMemory(IndirectHeap::SURFACE_STATE, 4096u, ssh);
+    EXPECT_NE(nullptr, ssh);
+    ASSERT_NE(nullptr, ssh->getGraphicsAllocation());
+
+    auto sshReservedSize = UnitTestHelper<FamilyType>::getDefaultSshUsage();
+    EXPECT_EQ(sshReservedSize, ssh->getUsed());
+
+    csr.getMemoryManager()->freeGraphicsMemory(ssh->getGraphicsAllocation());
+    delete ssh;
+}
+
 TEST(CommandStreamReceiverSimpleTest, givenCsrWithoutTagAllocationWhenGetTagAllocationIsCalledThenNullptrIsReturned) {
     MockExecutionEnvironment executionEnvironment;
     executionEnvironment.prepareRootDeviceEnvironments(1);
@@ -327,35 +344,17 @@ HWTEST_F(CommandStreamReceiverTest, givenTimestampPacketAllocatorWhenAskingForTa
     EXPECT_NE(nullptr, node1);
     EXPECT_NE(nullptr, node2);
     EXPECT_NE(node1, node2);
+
+    constexpr auto tagAlignment = MemoryConstants::cacheLineSize * 4;
+
+    EXPECT_TRUE(isAligned(node1->getGpuAddress(), tagAlignment));
+    EXPECT_TRUE(isAligned(node2->getGpuAddress(), tagAlignment));
 }
 
 HWTEST_F(CommandStreamReceiverTest, givenUltCommandStreamReceiverWhenAddAubCommentIsCalledThenCallAddAubCommentOnCsr) {
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.addAubComment("message");
     EXPECT_TRUE(csr.addAubCommentCalled);
-}
-
-TEST(CommandStreamReceiverSimpleTest, givenCsrWhenDownloadAllocationCalledVerifyCallOccurs) {
-    MockExecutionEnvironment executionEnvironment;
-    executionEnvironment.prepareRootDeviceEnvironments(1);
-    executionEnvironment.initializeMemoryManager();
-    MockCommandStreamReceiver csr(executionEnvironment, 0);
-    MockGraphicsAllocation graphicsAllocation;
-
-    csr.downloadAllocation(graphicsAllocation);
-    EXPECT_TRUE(csr.downloadAllocationCalled);
-}
-
-HWTEST_F(CommandStreamReceiverTest, givenUltCommandStreamReceiverWhenDownloadAllocationIsCalledThenVerifyCallOccurs) {
-    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
-    auto *memoryManager = commandStreamReceiver->getMemoryManager();
-
-    GraphicsAllocation *graphicsAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{pDevice->getRootDeviceIndex(), MemoryConstants::pageSize});
-
-    ASSERT_NE(nullptr, graphicsAllocation);
-    csr.downloadAllocation(*graphicsAllocation);
-    EXPECT_TRUE(csr.downloadAllocationCalled);
-    memoryManager->freeGraphicsMemory(graphicsAllocation);
 }
 
 TEST(CommandStreamReceiverSimpleTest, givenCommandStreamReceiverWhenItIsDestroyedThenItDestroysTagAllocation) {
@@ -366,8 +365,9 @@ TEST(CommandStreamReceiverSimpleTest, givenCommandStreamReceiverWhenItIsDestroye
     };
 
     bool destructorCalled = false;
+    int gpuTag = 0;
 
-    auto mockGraphicsAllocation = new MockGraphicsAllocationWithDestructorTracing(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0llu, 0llu, 1u, MemoryPool::MemoryNull);
+    auto mockGraphicsAllocation = new MockGraphicsAllocationWithDestructorTracing(0, GraphicsAllocation::AllocationType::UNKNOWN, &gpuTag, 0llu, 0llu, 1u, MemoryPool::MemoryNull);
     mockGraphicsAllocation->destructorCalled = &destructorCalled;
     MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
     auto csr = std::make_unique<MockCommandStreamReceiver>(executionEnvironment, 0);
@@ -395,12 +395,26 @@ HWTEST_F(CommandStreamReceiverTest, givenCommandStreamReceiverWhenFenceAllocatio
     RAIIHwHelperFactory<MockHwHelperWithFenceAllocation<FamilyType>> hwHelperBackup{pDevice->getHardwareInfo().platform.eRenderCoreFamily};
 
     MockCsrHw<FamilyType> csr(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
+    csr.setupContext(*pDevice->getDefaultEngine().osContext);
     EXPECT_EQ(nullptr, csr.globalFenceAllocation);
 
     EXPECT_TRUE(csr.createGlobalFenceAllocation());
 
     ASSERT_NE(nullptr, csr.globalFenceAllocation);
     EXPECT_EQ(GraphicsAllocation::AllocationType::GLOBAL_FENCE, csr.globalFenceAllocation->getAllocationType());
+}
+
+HWTEST_F(CommandStreamReceiverTest, givenCommandStreamReceiverWhenGettingFenceAllocationThenCorrectFenceAllocationIsReturned) {
+    RAIIHwHelperFactory<MockHwHelperWithFenceAllocation<FamilyType>> hwHelperBackup{pDevice->getHardwareInfo().platform.eRenderCoreFamily};
+
+    CommandStreamReceiverHw<FamilyType> csr(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
+    csr.setupContext(*pDevice->getDefaultEngine().osContext);
+    EXPECT_EQ(nullptr, csr.getGlobalFenceAllocation());
+
+    EXPECT_TRUE(csr.createGlobalFenceAllocation());
+
+    ASSERT_NE(nullptr, csr.getGlobalFenceAllocation());
+    EXPECT_EQ(GraphicsAllocation::AllocationType::GLOBAL_FENCE, csr.getGlobalFenceAllocation()->getAllocationType());
 }
 
 TEST(CommandStreamReceiverSimpleTest, givenNullHardwareDebugModeWhenInitializeTagAllocationIsCalledThenTagAllocationIsBeingAllocatedAndinitialValueIsMinusOne) {
@@ -496,6 +510,23 @@ struct CreateAllocationForHostSurfaceTest : public ::testing::Test {
     CommandStreamReceiver *commandStreamReceiver = nullptr;
 };
 
+TEST_F(CreateAllocationForHostSurfaceTest, givenTemporaryAllocationWhenCreateAllocationForHostSurfaceThenReuseTemporaryAllocationWhenSizeAndAddressMatch) {
+    auto hostPtr = reinterpret_cast<void *>(0x1234);
+    size_t size = 100;
+    auto temporaryAllocation = std::make_unique<MemoryAllocation>(0,
+                                                                  GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, hostPtr, size, 0, MemoryPool::System4KBPages, mockMaxOsContextCount);
+    auto allocationPtr = temporaryAllocation.get();
+    temporaryAllocation->updateTaskCount(0u, 0u);
+    commandStreamReceiver->getInternalAllocationStorage()->storeAllocation(std::move(temporaryAllocation), TEMPORARY_ALLOCATION);
+    *commandStreamReceiver->getTagAddress() = 1u;
+    HostPtrSurface hostSurface(hostPtr, size);
+
+    commandStreamReceiver->createAllocationForHostSurface(hostSurface, false);
+
+    auto hostSurfaceAllocationPtr = hostSurface.getAllocation();
+    EXPECT_EQ(allocationPtr, hostSurfaceAllocationPtr);
+}
+
 TEST_F(CreateAllocationForHostSurfaceTest, givenReadOnlyHostPointerWhenAllocationForHostSurfaceWithPtrCopyAllowedIsCreatedThenCopyAllocationIsCreatedAndMemoryCopied) {
     const char memory[8] = {1, 2, 3, 4, 5, 6, 7, 8};
     size_t size = sizeof(memory);
@@ -570,7 +601,7 @@ TEST_F(ReducedAddrSpaceCommandStreamReceiverTest,
 }
 
 TEST_F(CommandStreamReceiverTest, givenMinimumSizeDoesNotExceedCurrentWhenCallingEnsureCommandBufferAllocationThenDoNotReallocate) {
-    GraphicsAllocation *allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER});
+    GraphicsAllocation *allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()});
     LinearStream commandStream{allocation};
 
     commandStreamReceiver->ensureCommandBufferAllocation(commandStream, 100u, 0u);
@@ -585,7 +616,7 @@ TEST_F(CommandStreamReceiverTest, givenMinimumSizeDoesNotExceedCurrentWhenCallin
 }
 
 TEST_F(CommandStreamReceiverTest, givenMinimumSizeExceedsCurrentWhenCallingEnsureCommandBufferAllocationThenReallocate) {
-    GraphicsAllocation *allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER});
+    GraphicsAllocation *allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()});
     LinearStream commandStream{allocation};
 
     commandStreamReceiver->ensureCommandBufferAllocation(commandStream, 129u, 0u);
@@ -594,7 +625,7 @@ TEST_F(CommandStreamReceiverTest, givenMinimumSizeExceedsCurrentWhenCallingEnsur
 }
 
 TEST_F(CommandStreamReceiverTest, givenMinimumSizeExceedsCurrentWhenCallingEnsureCommandBufferAllocationThenReallocateAndAlignSizeTo64kb) {
-    GraphicsAllocation *allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER});
+    GraphicsAllocation *allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()});
     LinearStream commandStream{allocation};
 
     commandStreamReceiver->ensureCommandBufferAllocation(commandStream, 129u, 0u);
@@ -609,7 +640,7 @@ TEST_F(CommandStreamReceiverTest, givenMinimumSizeExceedsCurrentWhenCallingEnsur
 }
 
 TEST_F(CommandStreamReceiverTest, givenAdditionalAllocationSizeWhenCallingEnsureCommandBufferAllocationThenSizesOfAllocationAndCommandBufferAreCorrect) {
-    GraphicsAllocation *allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER});
+    GraphicsAllocation *allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()});
     LinearStream commandStream{allocation};
 
     commandStreamReceiver->ensureCommandBufferAllocation(commandStream, 129u, 350u);
@@ -631,7 +662,7 @@ TEST_F(CommandStreamReceiverTest, givenMinimumSizeExceedsCurrentAndNoAllocations
 }
 
 TEST_F(CommandStreamReceiverTest, givenMinimumSizeExceedsCurrentAndAllocationsForReuseWhenCallingEnsureCommandBufferAllocationThenObtainAllocationFromInternalAllocationStorage) {
-    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), MemoryConstants::pageSize64k, GraphicsAllocation::AllocationType::COMMAND_BUFFER});
+    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), MemoryConstants::pageSize64k, GraphicsAllocation::AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()});
     internalAllocationStorage->storeAllocation(std::unique_ptr<GraphicsAllocation>{allocation}, REUSABLE_ALLOCATION);
     LinearStream commandStream;
 
@@ -644,7 +675,7 @@ TEST_F(CommandStreamReceiverTest, givenMinimumSizeExceedsCurrentAndAllocationsFo
 }
 
 TEST_F(CommandStreamReceiverTest, givenMinimumSizeExceedsCurrentAndNoSuitableReusableAllocationWhenCallingEnsureCommandBufferAllocationThenObtainAllocationMemoryManager) {
-    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), MemoryConstants::pageSize64k, GraphicsAllocation::AllocationType::COMMAND_BUFFER});
+    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties({commandStreamReceiver->getRootDeviceIndex(), MemoryConstants::pageSize64k, GraphicsAllocation::AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()});
     internalAllocationStorage->storeAllocation(std::unique_ptr<GraphicsAllocation>{allocation}, REUSABLE_ALLOCATION);
     LinearStream commandStream;
 
@@ -655,6 +686,94 @@ TEST_F(CommandStreamReceiverTest, givenMinimumSizeExceedsCurrentAndNoSuitableReu
     EXPECT_FALSE(internalAllocationStorage->getAllocationsForReuse().peekIsEmpty());
 
     memoryManager->freeGraphicsMemory(commandStream.getGraphicsAllocation());
+}
+
+HWTEST_F(CommandStreamReceiverTest, givenDebugPauseThreadWhenSettingFlagProgressThenFunctionAsksTwiceForConfirmation) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.PauseOnEnqueue.set(0);
+    testing::internal::CaptureStdout();
+    int32_t executionStamp = 0;
+    auto mockCSR = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
+
+    uint32_t confirmationCounter = 0;
+
+    mockCSR->debugConfirmationFunction = [&confirmationCounter, &mockCSR]() {
+        if (confirmationCounter == 0) {
+            EXPECT_TRUE(DebugPauseState::waitingForUserStartConfirmation == *mockCSR->debugPauseStateAddress);
+            confirmationCounter++;
+        } else if (confirmationCounter == 1) {
+            EXPECT_TRUE(DebugPauseState::waitingForUserEndConfirmation == *mockCSR->debugPauseStateAddress);
+            confirmationCounter++;
+        }
+    };
+
+    pDevice->resetCommandStreamReceiver(mockCSR);
+
+    *mockCSR->debugPauseStateAddress = DebugPauseState::waitingForUserStartConfirmation;
+
+    while (*mockCSR->debugPauseStateAddress != DebugPauseState::hasUserStartConfirmation)
+        ;
+
+    *mockCSR->debugPauseStateAddress = DebugPauseState::waitingForUserEndConfirmation;
+
+    while (*mockCSR->debugPauseStateAddress != DebugPauseState::hasUserEndConfirmation)
+        ;
+
+    EXPECT_EQ(2u, confirmationCounter);
+
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_THAT(output, testing::HasSubstr(std::string("Debug break: Press enter to start workload")));
+    EXPECT_THAT(output, testing::HasSubstr(std::string("Debug break: Workload ended, press enter to continue")));
+}
+
+HWTEST_F(CommandStreamReceiverTest, givenDebugPauseThreadWhenTerminatingAtFirstStageThenFunctionEndsCorrectly) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.PauseOnEnqueue.set(0);
+    testing::internal::CaptureStdout();
+    int32_t executionStamp = 0;
+    auto mockCSR = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
+
+    uint32_t confirmationCounter = 0;
+
+    mockCSR->debugConfirmationFunction = [&confirmationCounter]() {
+        confirmationCounter++;
+    };
+
+    pDevice->resetCommandStreamReceiver(mockCSR);
+
+    *mockCSR->debugPauseStateAddress = DebugPauseState::terminate;
+
+    EXPECT_EQ(0u, confirmationCounter);
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(0u, output.length());
+}
+
+HWTEST_F(CommandStreamReceiverTest, givenDebugPauseThreadWhenTerminatingAtSecondStageThenFunctionEndsCorrectly) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.PauseOnEnqueue.set(0);
+    testing::internal::CaptureStdout();
+    int32_t executionStamp = 0;
+    auto mockCSR = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex());
+
+    uint32_t confirmationCounter = 0;
+
+    mockCSR->debugConfirmationFunction = [&confirmationCounter]() {
+        confirmationCounter++;
+    };
+
+    pDevice->resetCommandStreamReceiver(mockCSR);
+
+    *mockCSR->debugPauseStateAddress = DebugPauseState::waitingForUserStartConfirmation;
+
+    while (*mockCSR->debugPauseStateAddress != DebugPauseState::hasUserStartConfirmation)
+        ;
+
+    *mockCSR->debugPauseStateAddress = DebugPauseState::terminate;
+
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_THAT(output, testing::HasSubstr(std::string("Debug break: Press enter to start workload")));
+    EXPECT_THAT(output, testing::Not(testing::HasSubstr(std::string("Debug break: Workload ended, press enter to continue"))));
+    EXPECT_EQ(1u, confirmationCounter);
 }
 
 class CommandStreamReceiverWithAubSubCaptureTest : public CommandStreamReceiverTest,
@@ -712,6 +831,7 @@ struct MockSimulatedCsrHw : public CommandStreamReceiverSimulatedHw<FamilyType> 
     void pollForCompletion() override {}
     bool writeMemory(GraphicsAllocation &gfxAllocation) override { return true; }
     void writeMemory(uint64_t gpuAddress, void *cpuAddress, size_t size, uint32_t memoryBank, uint64_t entryBits) override {}
+    void dumpAllocation(GraphicsAllocation &gfxAllocation) override {}
 };
 
 HWTEST_F(SimulatedCommandStreamReceiverTest, givenCsrWithOsContextWhenGetDeviceIndexThenGetHighestEnabledBitInDeviceBitfield) {
@@ -749,7 +869,7 @@ TEST_F(CommandStreamReceiverMultiRootDeviceTest, WhenCreatingCommandStreamGraphi
     EXPECT_EQ(expectedRootDeviceIndex, commandStreamReceiver->getRootDeviceIndex());
 
     // Linear stream / Command buffer
-    GraphicsAllocation *allocation = mockMemoryManager->allocateGraphicsMemoryWithProperties({expectedRootDeviceIndex, 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER});
+    GraphicsAllocation *allocation = mockMemoryManager->allocateGraphicsMemoryWithProperties({expectedRootDeviceIndex, 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER, device->getDeviceBitfield()});
     LinearStream commandStream{allocation};
 
     commandStreamReceiver->ensureCommandBufferAllocation(commandStream, 100u, 0u);

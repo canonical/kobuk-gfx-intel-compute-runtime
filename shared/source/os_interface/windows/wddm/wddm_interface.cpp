@@ -7,7 +7,7 @@
 
 #include "shared/source/os_interface/windows/wddm/wddm_interface.h"
 
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/helpers/constants.h"
 #include "shared/source/os_interface/windows/gdi_interface.h"
 #include "shared/source/os_interface/windows/os_context_win.h"
 #include "shared/source/os_interface/windows/wddm/wddm.h"
@@ -139,7 +139,11 @@ bool WddmInterface23::submit(uint64_t commandBuffer, size_t size, void *commandH
     submitCommand.CommandLength = static_cast<UINT>(size);
 
     submitCommand.pPrivateDriverData = commandHeader;
-    submitCommand.PrivateDriverDataSize = MemoryConstants::pageSize;
+    submitCommand.PrivateDriverDataSize = sizeof(COMMAND_BUFFER_HEADER);
+
+    if (!DebugManager.flags.UseCommandBufferHeaderSizeForWddmQueueSubmission.get()) {
+        submitCommand.PrivateDriverDataSize = MemoryConstants::pageSize;
+    }
 
     auto status = wddm.getGdi()->submitCommandToHwQueue(&submitCommand);
     UNRECOVERABLE_IF(status != STATUS_SUCCESS);

@@ -6,7 +6,7 @@
  */
 
 #pragma once
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/helpers/constants.h"
 #include "shared/source/os_interface/os_memory.h"
 #include "shared/source/utilities/heap_allocator.h"
 
@@ -30,7 +30,7 @@ enum class HeapIndex : uint32_t {
 
 class GfxPartition {
   public:
-    GfxPartition();
+    GfxPartition(OSMemory::ReservedCpuAddressRange &sharedReservedCpuAddressRange);
     MOCKABLE_VIRTUAL ~GfxPartition();
 
     void init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToReserve, uint32_t rootDeviceIndex, size_t numRootDevices);
@@ -92,8 +92,7 @@ class GfxPartition {
 
     std::array<Heap, static_cast<uint32_t>(HeapIndex::TOTAL_HEAPS)> heaps;
 
-    void *reservedCpuAddressRange = nullptr;
-    size_t reservedCpuAddressRangeSize = 0;
+    OSMemory::ReservedCpuAddressRange &reservedCpuAddressRange;
     std::unique_ptr<OSMemory> osMemory;
 };
 

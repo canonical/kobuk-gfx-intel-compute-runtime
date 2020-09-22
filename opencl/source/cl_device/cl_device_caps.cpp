@@ -8,6 +8,7 @@
 #include "shared/source/device/device_info.h"
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/source/helpers/string.h"
 #include "shared/source/os_interface/driver_info.h"
 #include "shared/source/os_interface/hw_info_config.h"
 
@@ -25,11 +26,11 @@ extern const char *familyName[];
 static std::string vendor = "Intel(R) Corporation";
 static std::string profile = "FULL_PROFILE";
 static std::string spirVersions = "1.2 ";
+static std::string spirvName = "SPIR-V";
+const char *latestConformanceVersionPassed = "1.0";
 #define QTR(a) #a
 #define TOSTR(b) QTR(b)
 static std::string driverVersion = TOSTR(NEO_OCL_DRIVER_VERSION);
-
-const char *builtInKernels = ""; // the "always available" (extension-independent) builtin kernels
 
 static constexpr cl_device_fp_config defaultFpFlags = static_cast<cl_device_fp_config>(CL_FP_ROUND_TO_NEAREST |
                                                                                        CL_FP_ROUND_TO_ZERO |
@@ -38,12 +39,10 @@ static constexpr cl_device_fp_config defaultFpFlags = static_cast<cl_device_fp_c
                                                                                        CL_FP_DENORM |
                                                                                        CL_FP_FMA);
 
-bool releaseFP64Override();
-
 void ClDevice::setupFp64Flags() {
     auto &hwInfo = getHardwareInfo();
 
-    if (releaseFP64Override() || DebugManager.flags.OverrideDefaultFP64Settings.get() == 1) {
+    if (DebugManager.flags.OverrideDefaultFP64Settings.get() == 1) {
         deviceExtensions += "cl_khr_fp64 ";
         deviceInfo.singleFpConfig = static_cast<cl_device_fp_config>(CL_FP_CORRECTLY_ROUNDED_DIVIDE_SQRT);
         deviceInfo.doubleFpConfig = defaultFpFlags;
@@ -93,33 +92,51 @@ void ClDevice::initializeCaps() {
     deviceInfo.vendor = vendor.c_str();
     deviceInfo.profile = profile.c_str();
     enabledClVersion = hwInfo.capabilityTable.clVersionSupport;
+    ocl21FeaturesEnabled = hwInfo.capabilityTable.supportsOcl21Features;
     if (DebugManager.flags.ForceOCLVersion.get() != 0) {
         enabledClVersion = DebugManager.flags.ForceOCLVersion.get();
+        ocl21FeaturesEnabled = (enabledClVersion == 21);
+    }
+    if (DebugManager.flags.ForceOCL21FeaturesSupport.get() != -1) {
+        ocl21FeaturesEnabled = DebugManager.flags.ForceOCL21FeaturesSupport.get();
     }
     switch (enabledClVersion) {
+    case 30:
+        deviceInfo.clVersion = "OpenCL 3.0 NEO ";
+        deviceInfo.clCVersion = "OpenCL C 3.0 ";
+        deviceInfo.numericClVersion = CL_MAKE_VERSION(3, 0, 0);
+        break;
     case 21:
         deviceInfo.clVersion = "OpenCL 2.1 NEO ";
         deviceInfo.clCVersion = "OpenCL C 2.0 ";
-        break;
-    case 20:
-        deviceInfo.clVersion = "OpenCL 2.0 NEO ";
-        deviceInfo.clCVersion = "OpenCL C 2.0 ";
+        deviceInfo.numericClVersion = CL_MAKE_VERSION(2, 1, 0);
         break;
     case 12:
     default:
         deviceInfo.clVersion = "OpenCL 1.2 NEO ";
         deviceInfo.clCVersion = "OpenCL C 1.2 ";
+        deviceInfo.numericClVersion = CL_MAKE_VERSION(1, 2, 0);
         break;
     }
-    deviceInfo.platformLP = (hwInfo.capabilityTable.clVersionSupport == 12) ? true : false;
+    deviceInfo.latestConformanceVersionPassed = latestConformanceVersionPassed;
+    initializeOpenclCAllVersions();
+    deviceInfo.platformLP = (hwInfo.capabilityTable.supportsOcl21Features == false);
     deviceInfo.spirVersions = spirVersions.c_str();
     auto supportsVme = hwInfo.capabilityTable.supportsVme;
     auto supportsAdvancedVme = hwInfo.capabilityTable.supportsVme;
 
-    if (enabledClVersion >= 21) {
-        deviceInfo.independentForwardProgress = true;
-        deviceExtensions += "cl_khr_subgroups ";
-        deviceExtensions += "cl_khr_il_program ";
+    deviceInfo.independentForwardProgress = hwInfo.capabilityTable.supportsIndependentForwardProgress;
+    deviceInfo.ilsWithVersion[0].name[0] = 0;
+    deviceInfo.ilsWithVersion[0].version = 0;
+
+    if (ocl21FeaturesEnabled) {
+        if (deviceInfo.independentForwardProgress) {
+            deviceExtensions += "cl_khr_subgroups ";
+        }
+
+        deviceInfo.ilsWithVersion[0].version = CL_MAKE_VERSION(1, 2, 0);
+        strcpy_s(deviceInfo.ilsWithVersion[0].name, CL_NAME_VERSION_MAX_NAME_SIZE, spirvName.c_str());
+
         if (supportsVme) {
             deviceExtensions += "cl_intel_spirv_device_side_avc_motion_estimation ";
         }
@@ -128,11 +145,7 @@ void ClDevice::initializeCaps() {
         }
         deviceExtensions += "cl_intel_spirv_subgroups ";
         deviceExtensions += "cl_khr_spirv_no_integer_wrap_decoration ";
-    } else {
-        deviceInfo.independentForwardProgress = false;
-    }
 
-    if (enabledClVersion >= 20) {
         deviceExtensions += "cl_intel_unified_shared_memory_preview ";
         if (hwInfo.capabilityTable.supportsImages) {
             deviceExtensions += "cl_khr_mipmap_image cl_khr_mipmap_image_writes ";
@@ -175,25 +188,32 @@ void ClDevice::initializeCaps() {
         deviceExtensions += "cl_khr_3d_image_writes ";
     }
 
-    auto sharingAllowed = (HwHelper::getSubDevicesCount(&hwInfo) == 1u);
+    auto sharingAllowed = (getNumAvailableDevices() == 1u);
     if (sharingAllowed) {
-        deviceExtensions += sharingFactory.getExtensions();
+        deviceExtensions += sharingFactory.getExtensions(driverInfo.get());
     }
 
     deviceExtensions += hwHelper.getExtensions();
 
     deviceInfo.deviceExtensions = deviceExtensions.c_str();
 
-    exposedBuiltinKernels = builtInKernels;
-
+    std::vector<std::string> exposedBuiltinKernelsVector;
     if (supportsVme) {
-        exposedBuiltinKernels.append("block_motion_estimate_intel;");
+        exposedBuiltinKernelsVector.push_back("block_motion_estimate_intel");
     }
     if (supportsAdvancedVme) {
-        auto advVmeKernels = "block_advanced_motion_estimate_check_intel;block_advanced_motion_estimate_bidirectional_check_intel;";
-        exposedBuiltinKernels.append(advVmeKernels);
+        exposedBuiltinKernelsVector.push_back("block_advanced_motion_estimate_check_intel");
+        exposedBuiltinKernelsVector.push_back("block_advanced_motion_estimate_bidirectional_check_intel");
     }
+    for (auto builtInKernel : exposedBuiltinKernelsVector) {
+        exposedBuiltinKernels.append(builtInKernel);
+        exposedBuiltinKernels.append(";");
 
+        cl_name_version kernelNameVersion;
+        kernelNameVersion.version = CL_MAKE_VERSION(1, 0, 0);
+        strcpy_s(kernelNameVersion.name, CL_NAME_VERSION_MAX_NAME_SIZE, builtInKernel.c_str());
+        deviceInfo.builtInKernelsWithVersion.push_back(kernelNameVersion);
+    }
     deviceInfo.builtInKernels = exposedBuiltinKernels.c_str();
 
     deviceInfo.deviceType = CL_DEVICE_TYPE_GPU;
@@ -227,7 +247,7 @@ void ClDevice::initializeCaps() {
     deviceInfo.nativeVectorWidthFloat = 1;
     deviceInfo.nativeVectorWidthDouble = 1;
     deviceInfo.nativeVectorWidthHalf = 8;
-    deviceInfo.maxReadWriteImageArgs = 128;
+    deviceInfo.maxReadWriteImageArgs = ocl21FeaturesEnabled ? 128 : 0;
     deviceInfo.executionCapabilities = CL_EXEC_KERNEL;
 
     //copy system info to prevent misaligned reads
@@ -240,10 +260,22 @@ void ClDevice::initializeCaps() {
     deviceInfo.memBaseAddressAlign = 1024;
     deviceInfo.minDataTypeAlignSize = 128;
 
-    deviceInfo.maxOnDeviceEvents = 1024;
-    deviceInfo.queueOnDeviceMaxSize = 64 * MB;
-    deviceInfo.queueOnDevicePreferredSize = 128 * KB;
-    deviceInfo.queueOnDeviceProperties = CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
+    deviceInfo.deviceEnqueueSupport = isDeviceEnqueueSupported()
+                                          ? CL_DEVICE_QUEUE_SUPPORTED | CL_DEVICE_QUEUE_REPLACEABLE_DEFAULT
+                                          : 0u;
+    if (isDeviceEnqueueSupported()) {
+        deviceInfo.maxOnDeviceQueues = 1;
+        deviceInfo.maxOnDeviceEvents = 1024;
+        deviceInfo.queueOnDeviceMaxSize = 64 * MB;
+        deviceInfo.queueOnDevicePreferredSize = 128 * KB;
+        deviceInfo.queueOnDeviceProperties = CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
+    } else {
+        deviceInfo.maxOnDeviceQueues = 0;
+        deviceInfo.maxOnDeviceEvents = 0;
+        deviceInfo.queueOnDeviceMaxSize = 0;
+        deviceInfo.queueOnDevicePreferredSize = 0;
+        deviceInfo.queueOnDeviceProperties = 0;
+    }
 
     deviceInfo.preferredInteropUserSync = 1u;
 
@@ -253,10 +285,12 @@ void ClDevice::initializeCaps() {
 
     deviceInfo.maxWorkItemDimensions = 3;
 
-    deviceInfo.maxComputUnits = systemInfo.EUCount;
+    deviceInfo.maxComputUnits = systemInfo.EUCount * getNumAvailableDevices();
     deviceInfo.maxConstantArgs = 8;
     deviceInfo.maxSliceCount = systemInfo.SliceCount;
-    auto simdSizeUsed = DebugManager.flags.UseMaxSimdSizeToDeduceMaxWorkgroupSize.get() ? 32u : hwHelper.getMinimalSIMDSize();
+    auto simdSizeUsed = DebugManager.flags.UseMaxSimdSizeToDeduceMaxWorkgroupSize.get()
+                            ? CommonConstants::maximalSimdSize
+                            : hwHelper.getMinimalSIMDSize();
 
     // calculate a maximum number of subgroups in a workgroup (for the required SIMD size)
     deviceInfo.maxNumOfSubGroups = static_cast<uint32_t>(sharedDeviceInfo.maxWorkGroupSize / simdSizeUsed);
@@ -282,10 +316,35 @@ void ClDevice::initializeCaps() {
     // cl_khr_image2d_from_buffer
     deviceInfo.imagePitchAlignment = hwHelper.getPitchAlignmentForImage(&hwInfo);
     deviceInfo.imageBaseAddressAlignment = 4;
-    deviceInfo.maxPipeArgs = 16;
-    deviceInfo.pipeMaxPacketSize = 1024;
-    deviceInfo.pipeMaxActiveReservations = 1;
     deviceInfo.queueOnHostProperties = CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
+
+    deviceInfo.pipeSupport = arePipesSupported();
+    if (arePipesSupported()) {
+        deviceInfo.maxPipeArgs = 16;
+        deviceInfo.pipeMaxPacketSize = 1024;
+        deviceInfo.pipeMaxActiveReservations = 1;
+    } else {
+        deviceInfo.maxPipeArgs = 0;
+        deviceInfo.pipeMaxPacketSize = 0;
+        deviceInfo.pipeMaxActiveReservations = 0;
+    }
+
+    deviceInfo.atomicMemoryCapabilities = CL_DEVICE_ATOMIC_ORDER_RELAXED | CL_DEVICE_ATOMIC_SCOPE_WORK_GROUP;
+    if (ocl21FeaturesEnabled) {
+        deviceInfo.atomicMemoryCapabilities |= CL_DEVICE_ATOMIC_ORDER_ACQ_REL | CL_DEVICE_ATOMIC_ORDER_SEQ_CST |
+                                               CL_DEVICE_ATOMIC_SCOPE_ALL_DEVICES | CL_DEVICE_ATOMIC_SCOPE_DEVICE;
+    }
+
+    deviceInfo.atomicFenceCapabilities = CL_DEVICE_ATOMIC_ORDER_RELAXED | CL_DEVICE_ATOMIC_ORDER_ACQ_REL |
+                                         CL_DEVICE_ATOMIC_SCOPE_WORK_GROUP;
+    if (ocl21FeaturesEnabled) {
+        deviceInfo.atomicFenceCapabilities |= CL_DEVICE_ATOMIC_ORDER_SEQ_CST | CL_DEVICE_ATOMIC_SCOPE_ALL_DEVICES |
+                                              CL_DEVICE_ATOMIC_SCOPE_DEVICE | CL_DEVICE_ATOMIC_SCOPE_WORK_ITEM;
+    }
+
+    deviceInfo.nonUniformWorkGroupSupport = ocl21FeaturesEnabled;
+    deviceInfo.workGroupCollectiveFunctionsSupport = ocl21FeaturesEnabled;
+    deviceInfo.genericAddressSpaceSupport = ocl21FeaturesEnabled;
 
     deviceInfo.linkerAvailable = true;
     deviceInfo.svmCapabilities = hwInfo.capabilityTable.ftrSvm * CL_DEVICE_SVM_COARSE_GRAIN_BUFFER;
@@ -300,8 +359,8 @@ void ClDevice::initializeCaps() {
     }
 
     deviceInfo.preemptionSupported = false;
-    deviceInfo.maxGlobalVariableSize = 64 * KB;
-    deviceInfo.globalVariablePreferredTotalSize = static_cast<size_t>(sharedDeviceInfo.maxMemAllocSize);
+    deviceInfo.maxGlobalVariableSize = ocl21FeaturesEnabled ? 64 * KB : 0;
+    deviceInfo.globalVariablePreferredTotalSize = ocl21FeaturesEnabled ? static_cast<size_t>(sharedDeviceInfo.maxMemAllocSize) : 0;
 
     deviceInfo.planarYuvMaxWidth = 16384;
     deviceInfo.planarYuvMaxHeight = 16352;
@@ -319,7 +378,11 @@ void ClDevice::initializeCaps() {
     deviceInfo.preferredLocalAtomicAlignment = MemoryConstants::cacheLineSize;
     deviceInfo.preferredPlatformAtomicAlignment = MemoryConstants::cacheLineSize;
 
-    deviceInfo.hostMemCapabilities = hwInfoConfig->getHostMemCapabilities();
+    deviceInfo.preferredWorkGroupSizeMultiple = hwHelper.isFusedEuDispatchEnabled(hwInfo)
+                                                    ? CommonConstants::maximalSimdSize * 2
+                                                    : CommonConstants::maximalSimdSize;
+
+    deviceInfo.hostMemCapabilities = hwInfoConfig->getHostMemCapabilities(&hwInfo);
     deviceInfo.deviceMemCapabilities = hwInfoConfig->getDeviceMemCapabilities();
     deviceInfo.singleDeviceSharedMemCapabilities = hwInfoConfig->getSingleDeviceSharedMemCapabilities();
     deviceInfo.crossDeviceSharedMemCapabilities = hwInfoConfig->getCrossDeviceSharedMemCapabilities();
@@ -332,7 +395,43 @@ void ClDevice::initializeCaps() {
         }
     }
 
-    initializeExtraCaps();
+    initializeOsSpecificCaps();
+    getOpenclCFeaturesList(hwInfo, deviceInfo.openclCFeatures);
+}
+
+void ClDevice::initializeExtensionsWithVersion() {
+    std::stringstream deviceExtensionsStringStream{deviceExtensions};
+    std::vector<std::string> deviceExtensionsVector{
+        std::istream_iterator<std::string>{deviceExtensionsStringStream}, std::istream_iterator<std::string>{}};
+    deviceInfo.extensionsWithVersion.reserve(deviceExtensionsVector.size());
+    for (auto deviceExtension : deviceExtensionsVector) {
+        cl_name_version deviceExtensionWithVersion;
+        deviceExtensionWithVersion.version = CL_MAKE_VERSION(1, 0, 0);
+        strcpy_s(deviceExtensionWithVersion.name, CL_NAME_VERSION_MAX_NAME_SIZE, deviceExtension.c_str());
+        deviceInfo.extensionsWithVersion.push_back(deviceExtensionWithVersion);
+    }
+}
+
+void ClDevice::initializeOpenclCAllVersions() {
+    cl_name_version openClCVersion;
+    strcpy_s(openClCVersion.name, CL_NAME_VERSION_MAX_NAME_SIZE, "OpenCL C");
+
+    openClCVersion.version = CL_MAKE_VERSION(1, 0, 0);
+    deviceInfo.openclCAllVersions.push_back(openClCVersion);
+    openClCVersion.version = CL_MAKE_VERSION(1, 1, 0);
+    deviceInfo.openclCAllVersions.push_back(openClCVersion);
+    openClCVersion.version = CL_MAKE_VERSION(1, 2, 0);
+    deviceInfo.openclCAllVersions.push_back(openClCVersion);
+
+    if (isOcl21Conformant()) {
+        openClCVersion.version = CL_MAKE_VERSION(2, 0, 0);
+        deviceInfo.openclCAllVersions.push_back(openClCVersion);
+    }
+
+    if (enabledClVersion == 30) {
+        openClCVersion.version = CL_MAKE_VERSION(3, 0, 0);
+        deviceInfo.openclCAllVersions.push_back(openClCVersion);
+    }
 }
 
 } // namespace NEO

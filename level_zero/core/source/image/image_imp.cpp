@@ -15,9 +15,13 @@ namespace L0 {
 
 ImageAllocatorFn imageFactory[IGFX_MAX_PRODUCT] = {};
 
-ze_result_t ImageImp::destroy() {
-    this->device->getDriverHandle()->getMemoryManager()->freeGraphicsMemory(this->allocation);
+ImageImp::~ImageImp() {
+    if (this->device != nullptr) {
+        this->device->getNEODevice()->getMemoryManager()->freeGraphicsMemory(this->allocation);
+    }
+}
 
+ze_result_t ImageImp::destroy() {
     delete this;
     return ZE_RESULT_SUCCESS;
 }
@@ -31,7 +35,10 @@ Image *Image::create(uint32_t productFamily, Device *device, const ze_image_desc
     ImageImp *image = nullptr;
     if (allocator) {
         image = static_cast<ImageImp *>((*allocator)());
-        image->initialize(device, desc);
+        if (!image->initialize(device, desc)) {
+            image->destroy();
+            image = nullptr;
+        }
     }
 
     return image;
@@ -40,5 +47,4 @@ Image *Image::create(uint32_t productFamily, Device *device, const ze_image_desc
 bool ImageImp::initialize(Device *device, const ze_image_desc_t *desc) {
     return true;
 }
-
 } // namespace L0

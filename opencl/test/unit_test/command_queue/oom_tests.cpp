@@ -10,7 +10,7 @@
 
 #include "opencl/source/event/event.h"
 #include "opencl/test/unit_test/command_queue/command_queue_fixture.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "test.h"
 
@@ -26,7 +26,7 @@ static OOMSetting oomSettings[] = {
     {false, true},
     {true, true}};
 
-struct OOMCommandQueueTest : public DeviceFixture,
+struct OOMCommandQueueTest : public ClDeviceFixture,
                              public CommandQueueFixture,
                              public ::testing::TestWithParam<OOMSetting> {
 
@@ -36,7 +36,7 @@ struct OOMCommandQueueTest : public DeviceFixture,
     }
 
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
         context = new MockContext(pClDevice);
         CommandQueueFixture::SetUp(context, pClDevice, 0);
 
@@ -62,13 +62,13 @@ struct OOMCommandQueueTest : public DeviceFixture,
     void TearDown() override {
         CommandQueueFixture::TearDown();
         context->release();
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     MockContext *context;
 };
 
-HWTEST_P(OOMCommandQueueTest, finish) {
+HWTEST_P(OOMCommandQueueTest, WhenFinishingThenMaxAvailableSpaceIsNotExceeded) {
     auto &commandStream = pCmdQ->getCS(1024);
     auto &indirectHeap = pCmdQ->getIndirectHeap(IndirectHeap::DYNAMIC_STATE, 10);
     auto usedBeforeCS = commandStream.getUsed();
@@ -84,7 +84,7 @@ HWTEST_P(OOMCommandQueueTest, finish) {
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
-HWTEST_P(OOMCommandQueueTest, enqueueMarker) {
+HWTEST_P(OOMCommandQueueTest, WhenEnqueingMarkerThenMaxAvailableSpaceIsNotExceeded) {
     auto &commandStream = pCmdQ->getCS(1024);
     auto &indirectHeap = pCmdQ->getIndirectHeap(IndirectHeap::DYNAMIC_STATE, 10);
     auto usedBeforeCS = commandStream.getUsed();
@@ -107,7 +107,7 @@ HWTEST_P(OOMCommandQueueTest, enqueueMarker) {
     delete (Event *)eventReturned;
 }
 
-HWTEST_P(OOMCommandQueueTest, enqueueBarrier) {
+HWTEST_P(OOMCommandQueueTest, WhenEnqueingBarrierThenMaxAvailableSpaceIsNotExceeded) {
     auto &commandStream = pCmdQ->getCS(1024);
     auto &indirectHeap = pCmdQ->getIndirectHeap(IndirectHeap::DYNAMIC_STATE, 10);
     auto usedBeforeCS = commandStream.getUsed();

@@ -16,17 +16,17 @@
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/source_level_debugger/source_level_debugger.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 #include "shared/test/unit_test/utilities/destructor_counted.h"
 
 #include "opencl/source/aub/aub_center.h"
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/memory_manager/os_agnostic_memory_manager.h"
-#include "opencl/source/platform/platform.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
+#include "opencl/test/unit_test/mocks/mock_async_event_handler.h"
+#include "opencl/test/unit_test/mocks/mock_cl_execution_environment.h"
 #include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_memory_operations_handler.h"
-#include "opencl/test/unit_test/mocks/mock_platform.h"
 #include "test.h"
 
 using namespace NEO;
@@ -154,7 +154,8 @@ TEST(ExecutionEnvironment, givenExecutionEnvironmentWhenInitializeMemoryManagerI
 static_assert(sizeof(ExecutionEnvironment) == sizeof(std::unique_ptr<HardwareInfo>) +
                                                   sizeof(std::vector<RootDeviceEnvironment>) +
                                                   sizeof(std::unique_ptr<OsEnvironment>) +
-                                                  (is64bit ? 16 : 12),
+                                                  sizeof(bool) +
+                                                  (is64bit ? 23 : 15),
               "New members detected in ExecutionEnvironment, please ensure that destruction sequence of objects is correct");
 
 TEST(ExecutionEnvironment, givenExecutionEnvironmentWithVariousMembersWhenItIsDestroyedThenDeleteSequenceIsSpecified) {
@@ -241,4 +242,21 @@ TEST(ExecutionEnvironment, whenCalculateMaxOsContexCountThenGlobalVariableHasPro
     }
 
     EXPECT_EQ(expectedOsContextCount, MemoryManager::maxOsContextCount);
+}
+
+TEST(ClExecutionEnvironment, WhenExecutionEnvironmentIsDeletedThenAsyncEventHandlerThreadIsDestroyed) {
+    auto executionEnvironment = new MockClExecutionEnvironment();
+    MockHandler *mockAsyncHandler = new MockHandler();
+
+    executionEnvironment->asyncEventsHandler.reset(mockAsyncHandler);
+    EXPECT_EQ(mockAsyncHandler, executionEnvironment->getAsyncEventsHandler());
+
+    mockAsyncHandler->openThread();
+    delete executionEnvironment;
+    EXPECT_TRUE(MockAsyncEventHandlerGlobals::destructorCalled);
+}
+
+TEST(ClExecutionEnvironment, WhenExecutionEnvironmentIsCreatedThenAsyncEventHandlerIsCreated) {
+    auto executionEnvironment = std::make_unique<ClExecutionEnvironment>();
+    EXPECT_NE(nullptr, executionEnvironment->getAsyncEventsHandler());
 }

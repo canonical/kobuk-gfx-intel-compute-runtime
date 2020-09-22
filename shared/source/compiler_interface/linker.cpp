@@ -7,8 +7,13 @@
 
 #include "linker.h"
 
+#include "shared/source/device/device.h"
+#include "shared/source/helpers/blit_commands_helper.h"
 #include "shared/source/helpers/debug_helpers.h"
+#include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/ptr_math.h"
+#include "shared/source/memory_manager/graphics_allocation.h"
+#include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/utilities/compiler_support.h"
 
 #include "RelocationInfo.h"
@@ -107,6 +112,9 @@ bool LinkerInput::decodeRelocationTable(const void *data, uint32_t numEntries, u
         case vISA::R_SYM_ADDR_32_HI:
             relocInfo.type = RelocationInfo::Type::AddressHigh;
             break;
+        case vISA::R_PER_THREAD_PAYLOAD_OFFSET_32:
+            relocInfo.type = RelocationInfo::Type::PerThreadPayloadOffset;
+            break;
         }
         outRelocInfo.push_back(std::move(relocInfo));
     }
@@ -153,19 +161,36 @@ bool Linker::processRelocations(const SegmentInfo &globalVariables, const Segmen
 uint32_t addressSizeInBytes(LinkerInput::RelocationInfo::Type relocationtype) {
     return (relocationtype == LinkerInput::RelocationInfo::Type::Address) ? sizeof(uintptr_t) : sizeof(uint32_t);
 }
+void Linker::patchAddress(void *relocAddress, const Linker::RelocatedSymbol &symbol, const Linker::RelocationInfo &relocation) {
+    uint64_t gpuAddressAs64bit = static_cast<uint64_t>(symbol.gpuAddress);
+    switch (relocation.type) {
+    default:
+        UNRECOVERABLE_IF(RelocationInfo::Type::Address != relocation.type);
+        *reinterpret_cast<uintptr_t *>(relocAddress) = symbol.gpuAddress;
+        break;
+    case RelocationInfo::Type::AddressLow:
+        *reinterpret_cast<uint32_t *>(relocAddress) = static_cast<uint32_t>(gpuAddressAs64bit & 0xffffffff);
+        break;
+    case RelocationInfo::Type::AddressHigh:
+        *reinterpret_cast<uint32_t *>(relocAddress) = static_cast<uint32_t>((gpuAddressAs64bit >> 32) & 0xffffffff);
+        break;
+    }
+}
 
-bool Linker::patchInstructionsSegments(const std::vector<PatchableSegment> &instructionsSegments, std::vector<UnresolvedExternal> &outUnresolvedExternals) {
+void Linker::patchInstructionsSegments(const std::vector<PatchableSegment> &instructionsSegments, std::vector<UnresolvedExternal> &outUnresolvedExternals) {
     if (false == data.getTraits().requiresPatchingOfInstructionSegments) {
-        return true;
+        return;
     }
     UNRECOVERABLE_IF(data.getRelocationsInInstructionSegments().size() > instructionsSegments.size());
-    auto unresolvedExternalsPrev = outUnresolvedExternals.size();
     auto segIt = instructionsSegments.begin();
     for (auto relocsIt = data.getRelocationsInInstructionSegments().begin(), relocsEnd = data.getRelocationsInInstructionSegments().end();
          relocsIt != relocsEnd; ++relocsIt, ++segIt) {
         auto &thisSegmentRelocs = *relocsIt;
         const PatchableSegment &instSeg = *segIt;
         for (const auto &relocation : thisSegmentRelocs) {
+            if (shouldIgnoreRelocation(relocation)) {
+                continue;
+            }
             UNRECOVERABLE_IF(nullptr == instSeg.hostPointer);
             auto relocAddress = ptrOffset(instSeg.hostPointer, static_cast<uintptr_t>(relocation.offset));
             auto symbolIt = relocatedSymbols.find(relocation.symbolName);
@@ -180,35 +205,23 @@ bool Linker::patchInstructionsSegments(const std::vector<PatchableSegment> &inst
                 continue;
             }
 
-            uint64_t gpuAddressAs64bit = static_cast<uint64_t>(symbolIt->second.gpuAddress);
-            switch (relocation.type) {
-            default:
-                UNRECOVERABLE_IF(RelocationInfo::Type::Address != relocation.type);
-                *reinterpret_cast<uintptr_t *>(relocAddress) = symbolIt->second.gpuAddress;
-                break;
-            case RelocationInfo::Type::AddressLow:
-                *reinterpret_cast<uint32_t *>(relocAddress) = static_cast<uint32_t>(gpuAddressAs64bit & 0xffffffff);
-                break;
-            case RelocationInfo::Type::AddressHigh:
-                *reinterpret_cast<uint32_t *>(relocAddress) = static_cast<uint32_t>((gpuAddressAs64bit >> 32) & 0xffffffff);
-                break;
-            }
+            patchAddress(relocAddress, symbolIt->second, relocation);
         }
     }
-    return outUnresolvedExternals.size() == unresolvedExternalsPrev;
 }
 
-bool Linker::patchDataSegments(const SegmentInfo &globalVariablesSegInfo, const SegmentInfo &globalConstantsSegInfo,
-                               PatchableSegment &globalVariablesSeg, PatchableSegment &globalConstantsSeg,
-                               std::vector<UnresolvedExternal> &outUnresolvedExternals) {
+void Linker::patchDataSegments(const SegmentInfo &globalVariablesSegInfo, const SegmentInfo &globalConstantsSegInfo,
+                               GraphicsAllocation *globalVariablesSeg, GraphicsAllocation *globalConstantsSeg,
+                               std::vector<UnresolvedExternal> &outUnresolvedExternals, Device *pDevice,
+                               const void *constantsInitData, const void *variablesInitData) {
     if (false == (data.getTraits().requiresPatchingOfGlobalConstantsBuffer || data.getTraits().requiresPatchingOfGlobalVariablesBuffer)) {
-        return true;
+        return;
     }
 
-    auto unresolvedExternalsPrev = outUnresolvedExternals.size();
     for (const auto &relocation : data.getDataRelocations()) {
         const SegmentInfo *src = nullptr;
-        const PatchableSegment *dst = nullptr;
+        GraphicsAllocation *dst = nullptr;
+        const void *initData = nullptr;
         switch (relocation.symbolSegment) {
         default:
             outUnresolvedExternals.push_back(UnresolvedExternal{relocation});
@@ -225,14 +238,16 @@ bool Linker::patchDataSegments(const SegmentInfo &globalVariablesSegInfo, const 
             outUnresolvedExternals.push_back(UnresolvedExternal{relocation});
             continue;
         case SegmentType::GlobalVariables:
-            dst = &globalVariablesSeg;
+            dst = globalVariablesSeg;
+            initData = variablesInitData;
             break;
         case SegmentType::GlobalConstants:
-            dst = &globalConstantsSeg;
+            dst = globalConstantsSeg;
+            initData = constantsInitData;
             break;
         }
 
-        UNRECOVERABLE_IF(nullptr == dst->hostPointer);
+        UNRECOVERABLE_IF(nullptr == dst);
 
         if (RelocationInfo::Type::AddressHigh == relocation.type) {
             outUnresolvedExternals.push_back(UnresolvedExternal{relocation});
@@ -240,26 +255,45 @@ bool Linker::patchDataSegments(const SegmentInfo &globalVariablesSegInfo, const 
         }
 
         auto relocType = (LinkerInput::Traits::PointerSize::Ptr32bit == data.getTraits().pointerSize) ? RelocationInfo::Type::AddressLow : relocation.type;
-        bool invalidOffset = relocation.offset + addressSizeInBytes(relocType) > dst->segmentSize;
+        bool invalidOffset = relocation.offset + addressSizeInBytes(relocType) > dst->getUnderlyingBufferSize();
         DEBUG_BREAK_IF(invalidOffset);
         if (invalidOffset) {
             outUnresolvedExternals.push_back(UnresolvedExternal{relocation});
             continue;
         }
 
+        UNRECOVERABLE_IF((RelocationInfo::Type::Address != relocType) && (RelocationInfo::Type::AddressLow != relocType));
         uint64_t gpuAddressAs64bit = src->gpuAddress;
-        auto relocAddress = ptrOffset(dst->hostPointer, static_cast<uintptr_t>(relocation.offset));
-        switch (relocType) {
-        default:
-            UNRECOVERABLE_IF(RelocationInfo::Type::Address != relocType);
-            patchIncrement(relocAddress, sizeof(uintptr_t), gpuAddressAs64bit);
-            break;
-        case RelocationInfo::Type::AddressLow:
-            patchIncrement(relocAddress, 4, static_cast<uint32_t>(gpuAddressAs64bit & 0xffffffff));
-            break;
+        uint32_t patchSize = (RelocationInfo::Type::AddressLow == relocType) ? 4 : sizeof(uintptr_t);
+        uint64_t incrementValue = (RelocationInfo::Type::AddressLow == relocType)
+                                      ? static_cast<uint32_t>(gpuAddressAs64bit & 0xffffffff)
+                                      : gpuAddressAs64bit;
+
+        bool useBlitter = false;
+        if (pDevice && initData) {
+            auto &hwInfo = pDevice->getHardwareInfo();
+            auto &helper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+            if (dst->isAllocatedInLocalMemoryPool() && (helper.isBlitCopyRequiredForLocalMemory(hwInfo) || helper.forceBlitterUseForGlobalBuffers(hwInfo, dst))) {
+                useBlitter = true;
+            }
+        }
+
+        if (useBlitter) {
+            auto initValue = ptrOffset(initData, static_cast<uintptr_t>(relocation.offset));
+            if (patchSize == sizeof(uint64_t)) {
+                uint64_t value = *reinterpret_cast<const uint64_t *>(initValue) + incrementValue;
+                BlitHelperFunctions::blitMemoryToAllocation(*pDevice, dst, static_cast<size_t>(relocation.offset),
+                                                            &value, {sizeof(value), 1, 1});
+            } else {
+                uint32_t value = *reinterpret_cast<const uint32_t *>(initValue) + static_cast<uint32_t>(incrementValue);
+                BlitHelperFunctions::blitMemoryToAllocation(*pDevice, dst, static_cast<size_t>(relocation.offset),
+                                                            &value, {sizeof(value), 1, 1});
+            }
+        } else {
+            auto relocAddress = ptrOffset(dst->getUnderlyingBuffer(), static_cast<uintptr_t>(relocation.offset));
+            patchIncrement(relocAddress, patchSize, incrementValue);
         }
     }
-    return outUnresolvedExternals.size() == unresolvedExternalsPrev;
 }
 
 std::string constructLinkerErrorMessage(const Linker::UnresolvedExternals &unresolvedExternals, const std::vector<std::string> &instructionsSegmentsNames) {
@@ -288,6 +322,21 @@ std::string constructLinkerErrorMessage(const Linker::UnresolvedExternals &unres
         }
     }
     return errorStream.str();
+}
+
+std::string constructRelocationsDebugMessage(const Linker::RelocatedSymbolsMap &relocatedSymbols) {
+    if (relocatedSymbols.empty()) {
+        return "";
+    }
+    std::stringstream stream;
+    stream << "Relocations debug informations :\n";
+    for (const auto &symbol : relocatedSymbols) {
+        stream << " * \"" << symbol.first << "\" [" << symbol.second.symbol.size << " bytes]";
+        stream << " " << asString(symbol.second.symbol.segment) << "_SEGMENT@" << symbol.second.symbol.offset;
+        stream << " -> " << std::hex << std::showbase << symbol.second.gpuAddress << " GPUVA" << std::dec;
+        stream << "\n";
+    }
+    return stream.str();
 }
 
 } // namespace NEO

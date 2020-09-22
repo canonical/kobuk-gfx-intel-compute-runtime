@@ -11,11 +11,16 @@
 #include "shared/source/memory_manager/surface.h"
 
 namespace NEO {
+
+namespace BlitHelperFunctions {
+BlitMemoryToAllocationFunc blitMemoryToAllocation = BlitHelper::blitMemoryToAllocation;
+} // namespace BlitHelperFunctions
+
 BlitProperties BlitProperties::constructPropertiesForReadWriteBuffer(BlitterConstants::BlitDirection blitDirection,
                                                                      CommandStreamReceiver &commandStreamReceiver,
                                                                      GraphicsAllocation *memObjAllocation,
                                                                      GraphicsAllocation *preallocatedHostAllocation,
-                                                                     void *hostPtr, uint64_t memObjGpuVa,
+                                                                     const void *hostPtr, uint64_t memObjGpuVa,
                                                                      uint64_t hostAllocGpuVa, Vec3<size_t> hostPtrOffset,
                                                                      Vec3<size_t> copyOffset, Vec3<size_t> copySize,
                                                                      size_t hostRowPitch, size_t hostSlicePitch,
@@ -48,7 +53,12 @@ BlitProperties BlitProperties::constructPropertiesForReadWriteBuffer(BlitterCons
             hostAllocGpuVa,                // srcGpuAddress
             copySize,                      // copySize
             copyOffset,                    // dstOffset
-            hostPtrOffset};                // srcOffset
+            hostPtrOffset,                 // srcOffset
+            gpuRowPitch,                   //dstRowPitch
+            gpuSlicePitch,                 //dstSlicePitch
+            hostRowPitch,                  //srcRowPitch
+            hostSlicePitch};               //srcSlicePitch
+
     } else {
         return {
             nullptr,                       // outputTimestampPacket
@@ -70,7 +80,11 @@ BlitProperties BlitProperties::constructPropertiesForReadWriteBuffer(BlitterCons
 }
 
 BlitProperties BlitProperties::constructPropertiesForCopyBuffer(GraphicsAllocation *dstAllocation, GraphicsAllocation *srcAllocation,
-                                                                size_t dstOffset, size_t srcOffset, size_t copySize) {
+                                                                Vec3<size_t> dstOffset, Vec3<size_t> srcOffset, Vec3<size_t> copySize,
+                                                                size_t srcRowPitch, size_t srcSlicePitch,
+                                                                size_t dstRowPitch, size_t dstSlicePitch) {
+    copySize.y = copySize.y ? copySize.y : 1;
+    copySize.z = copySize.z ? copySize.z : 1;
 
     return {
         nullptr,                                         // outputTimestampPacket
@@ -81,9 +95,13 @@ BlitProperties BlitProperties::constructPropertiesForCopyBuffer(GraphicsAllocati
         srcAllocation,                                   // srcAllocation
         dstAllocation->getGpuAddress(),                  // dstGpuAddress
         srcAllocation->getGpuAddress(),                  // srcGpuAddress
-        {copySize, 1, 1},                                // copySize
-        {dstOffset, 0, 0},                               // dstOffset
-        {srcOffset, 0, 0}};                              // srcOffset
+        copySize,                                        // copySize
+        dstOffset,                                       // dstOffset
+        srcOffset,                                       // srcOffset
+        dstRowPitch,                                     // dstRowPitch
+        dstSlicePitch,                                   // dstSlicePitch
+        srcRowPitch,                                     // srcRowPitch
+        srcSlicePitch};                                  // srcSlicePitch
 }
 
 BlitProperties BlitProperties::constructPropertiesForAuxTranslation(AuxTranslationDirection auxTranslationDirection,

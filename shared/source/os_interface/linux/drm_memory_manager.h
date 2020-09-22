@@ -20,7 +20,6 @@
 namespace NEO {
 class BufferObject;
 class Drm;
-constexpr uint32_t invalidRootDeviceIndex = std::numeric_limits<uint32_t>::max();
 
 class DrmMemoryManager : public MemoryManager {
   public:
@@ -56,6 +55,9 @@ class DrmMemoryManager : public MemoryManager {
     bool copyMemoryToAllocation(GraphicsAllocation *graphicsAllocation, const void *memoryToCopy, size_t sizeToCopy) override;
 
     int obtainFdFromHandle(int boHandle, uint32_t rootDeviceindex);
+    AddressRange reserveGpuAddress(size_t size, uint32_t rootDeviceIndex) override;
+    void freeGpuAddress(AddressRange addressRange, uint32_t rootDeviceIndex) override;
+    MOCKABLE_VIRTUAL BufferObject *createBufferObjectInMemoryRegion(Drm *drm, uint64_t gpuAddress, size_t size, uint32_t memoryBanks, size_t maxOsContextCount);
 
   protected:
     BufferObject *findAndReferenceSharedBufferObject(int boHandle);
@@ -68,22 +70,26 @@ class DrmMemoryManager : public MemoryManager {
     MOCKABLE_VIRTUAL void releaseGpuRange(void *address, size_t size, uint32_t rootDeviceIndex);
     void emitPinningRequest(BufferObject *bo, const AllocationData &allocationData) const;
     uint32_t getDefaultDrmContextId() const;
+    size_t getUserptrAlignment();
 
     DrmAllocation *createGraphicsAllocation(OsHandleStorage &handleStorage, const AllocationData &allocationData) override;
     DrmAllocation *allocateGraphicsMemoryForNonSvmHostPtr(const AllocationData &allocationData) override;
     DrmAllocation *allocateGraphicsMemoryWithAlignment(const AllocationData &allocationData) override;
+    DrmAllocation *allocateUSMHostGraphicsMemory(const AllocationData &allocationData) override;
     DrmAllocation *allocateGraphicsMemoryWithHostPtr(const AllocationData &allocationData) override;
     DrmAllocation *allocateGraphicsMemory64kb(const AllocationData &allocationData) override;
     GraphicsAllocation *allocateShareableMemory(const AllocationData &allocationData) override;
     GraphicsAllocation *allocateGraphicsMemoryForImageImpl(const AllocationData &allocationData, std::unique_ptr<Gmm> gmm) override;
+    GraphicsAllocation *allocateGraphicsMemoryWithGpuVa(const AllocationData &allocationData) override;
 
     void *lockResourceImpl(GraphicsAllocation &graphicsAllocation) override;
     void *lockResourceInLocalMemoryImpl(GraphicsAllocation &graphicsAllocation);
     MOCKABLE_VIRTUAL void *lockResourceInLocalMemoryImpl(BufferObject *bo);
     MOCKABLE_VIRTUAL void unlockResourceInLocalMemoryImpl(BufferObject *bo);
     void unlockResourceImpl(GraphicsAllocation &graphicsAllocation) override;
-    DrmAllocation *allocate32BitGraphicsMemoryImpl(const AllocationData &allocationData) override;
+    DrmAllocation *allocate32BitGraphicsMemoryImpl(const AllocationData &allocationData, bool useLocalMemory) override;
     GraphicsAllocation *allocateGraphicsMemoryInDevicePool(const AllocationData &allocationData, AllocationStatus &status) override;
+    bool createDrmAllocation(Drm *drm, DrmAllocation *allocation, uint64_t gpuAddress, size_t maxOsContextCount);
 
     Drm &getDrm(uint32_t rootDeviceIndex) const;
     uint32_t getRootDeviceIndex(const Drm *drm);
@@ -92,8 +98,10 @@ class DrmMemoryManager : public MemoryManager {
     std::vector<void *> memoryForPinBBs;
     size_t pinThreshold = 8 * 1024 * 1024;
     bool forcePinEnabled = false;
-    const bool validateHostPtrMemory;
+    bool validateHostPtrMemory;
     std::unique_ptr<DrmGemCloseWorker> gemCloseWorker;
+    decltype(&mmap) mmapFunction = mmap;
+    decltype(&munmap) munmapFunction = munmap;
     decltype(&lseek) lseekFunction = lseek;
     decltype(&close) closeFunction = close;
     std::vector<BufferObject *> sharingBufferObjects;

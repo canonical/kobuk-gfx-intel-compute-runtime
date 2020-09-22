@@ -6,17 +6,20 @@
  */
 
 #include "shared/source/command_stream/linear_stream.h"
+#include "shared/source/direct_submission/linux/drm_direct_submission.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/gmm_helper/page_table_mngr.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/flush_stamp.h"
+#include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/preamble.h"
 #include "shared/source/memory_manager/residency.h"
 #include "shared/source/os_interface/linux/drm_allocation.h"
 #include "shared/source/os_interface/linux/drm_buffer_object.h"
 #include "shared/source/os_interface/linux/drm_engine_mapper.h"
 #include "shared/source/os_interface/linux/drm_memory_manager.h"
+#include "shared/source/os_interface/linux/drm_memory_operations_handler.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
 #include "shared/source/os_interface/linux/os_interface.h"
@@ -32,13 +35,25 @@ template <typename GfxFamily>
 DrmCommandStreamReceiver<GfxFamily>::DrmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex, gemCloseWorkerMode mode)
     : BaseClass(executionEnvironment, rootDeviceIndex), gemCloseWorkerOperationMode(mode) {
 
-    this->drm = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->osInterface->get()->getDrm();
+    auto rootDeviceEnvironment = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex].get();
+
+    this->drm = rootDeviceEnvironment->osInterface->get()->getDrm();
     residency.reserve(512);
     execObjectsStorage.reserve(512);
+
+    auto hwInfo = rootDeviceEnvironment->getHardwareInfo();
+    auto localMemoryEnabled = HwHelper::get(hwInfo->platform.eRenderCoreFamily).getEnableLocalMemory(*hwInfo);
+
+    this->dispatchMode = localMemoryEnabled ? DispatchMode::BatchedDispatch : DispatchMode::ImmediateDispatch;
+
+    if (DebugManager.flags.CsrDispatchMode.get()) {
+        this->dispatchMode = static_cast<DispatchMode>(DebugManager.flags.CsrDispatchMode.get());
+    }
 }
 
 template <typename GfxFamily>
 bool DrmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
+    this->printDeviceIndex();
     DrmAllocation *alloc = static_cast<DrmAllocation *>(batchBuffer.commandBufferAllocation);
     DEBUG_BREAK_IF(!alloc);
 
@@ -53,6 +68,16 @@ bool DrmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer, Reside
         }
     }
 
+    auto memoryOperationsInterface = static_cast<DrmMemoryOperationsHandler *>(this->executionEnvironment.rootDeviceEnvironments[this->rootDeviceIndex]->memoryOperationsInterface.get());
+
+    auto lock = memoryOperationsInterface->lockHandlerForExecWA();
+    memoryOperationsInterface->mergeWithResidencyContainer(this->osContext, allocationsForResidency);
+
+    if (this->directSubmission.get()) {
+        memoryOperationsInterface->makeResidentWithinOsContext(this->osContext, ArrayRef<GraphicsAllocation *>(&batchBuffer.commandBufferAllocation, 1), true);
+        return this->directSubmission->dispatchCommandBuffer(batchBuffer, *this->flushStamp.get());
+    }
+
     this->flushStamp->setStamp(bb->peekHandle());
     this->flushInternal(batchBuffer, allocationsForResidency);
 
@@ -65,13 +90,16 @@ bool DrmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer, Reside
 }
 
 template <typename GfxFamily>
-void DrmCommandStreamReceiver<GfxFamily>::exec(const BatchBuffer &batchBuffer, uint32_t drmContextId) {
+void DrmCommandStreamReceiver<GfxFamily>::exec(const BatchBuffer &batchBuffer, uint32_t vmHandleId, uint32_t drmContextId) {
     DrmAllocation *alloc = static_cast<DrmAllocation *>(batchBuffer.commandBufferAllocation);
     DEBUG_BREAK_IF(!alloc);
     BufferObject *bb = alloc->getBO();
     DEBUG_BREAK_IF(!bb);
 
-    auto engineFlag = static_cast<OsContextLinux *>(osContext)->getEngineFlag();
+    auto execFlags = static_cast<OsContextLinux *>(osContext)->getEngineFlag() | I915_EXEC_NO_RELOC;
+    if (DebugManager.flags.UseAsyncDrmExec.get() != -1) {
+        execFlags |= (EXEC_OBJECT_ASYNC * DebugManager.flags.UseAsyncDrmExec.get());
+    }
 
     // Residency hold all allocation except command buffer, hence + 1
     auto requiredSize = this->residency.size() + 1;
@@ -80,8 +108,10 @@ void DrmCommandStreamReceiver<GfxFamily>::exec(const BatchBuffer &batchBuffer, u
     }
 
     int err = bb->exec(static_cast<uint32_t>(alignUp(batchBuffer.usedSize - batchBuffer.startOffset, 8)),
-                       batchBuffer.startOffset, engineFlag | I915_EXEC_NO_RELOC,
+                       batchBuffer.startOffset, execFlags,
                        batchBuffer.requiresCoherency,
+                       this->osContext,
+                       vmHandleId,
                        drmContextId,
                        this->residency.data(), this->residency.size(),
                        this->execObjectsStorage.data());
@@ -91,35 +121,10 @@ void DrmCommandStreamReceiver<GfxFamily>::exec(const BatchBuffer &batchBuffer, u
 }
 
 template <typename GfxFamily>
-void DrmCommandStreamReceiver<GfxFamily>::makeResident(BufferObject *bo) {
-    if (bo) {
-        if (bo->peekIsReusableAllocation()) {
-            for (auto bufferObject : this->residency) {
-                if (bufferObject == bo) {
-                    return;
-                }
-            }
-        }
-
-        residency.push_back(bo);
-    }
-}
-
-template <typename GfxFamily>
 void DrmCommandStreamReceiver<GfxFamily>::processResidency(const ResidencyContainer &inputAllocationsForResidency, uint32_t handleId) {
     for (auto &alloc : inputAllocationsForResidency) {
-        auto drmAlloc = static_cast<const DrmAllocation *>(alloc);
-        if (drmAlloc->fragmentsStorage.fragmentCount) {
-            for (unsigned int f = 0; f < drmAlloc->fragmentsStorage.fragmentCount; f++) {
-                const auto osContextId = osContext->getContextId();
-                if (!drmAlloc->fragmentsStorage.fragmentStorageData[f].residency->resident[osContextId]) {
-                    makeResident(drmAlloc->fragmentsStorage.fragmentStorageData[f].osHandleStorage->bo);
-                    drmAlloc->fragmentsStorage.fragmentStorageData[f].residency->resident[osContextId] = true;
-                }
-            }
-        } else {
-            makeResidentBufferObjects(drmAlloc, handleId);
-        }
+        auto drmAlloc = static_cast<DrmAllocation *>(alloc);
+        drmAlloc->makeBOsResident(osContext, handleId, &this->residency, false);
     }
 }
 

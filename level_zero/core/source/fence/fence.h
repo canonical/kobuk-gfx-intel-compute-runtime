@@ -11,7 +11,7 @@
 
 #include "level_zero/core/source/cmdqueue/cmdqueue.h"
 #include "level_zero/core/source/cmdqueue/cmdqueue_imp.h"
-#include <level_zero/ze_fence.h>
+#include <level_zero/ze_api.h>
 
 #include <limits>
 
@@ -23,7 +23,7 @@ struct Fence : _ze_fence_handle_t {
     static Fence *create(CommandQueueImp *cmdQueue, const ze_fence_desc_t *desc);
     virtual ~Fence() = default;
     virtual ze_result_t destroy() = 0;
-    virtual ze_result_t hostSynchronize(uint32_t timeout) = 0;
+    virtual ze_result_t hostSynchronize(uint64_t timeout) = 0;
     virtual ze_result_t queryStatus() = 0;
     virtual ze_result_t reset() = 0;
 
@@ -51,4 +51,29 @@ struct Fence : _ze_fence_handle_t {
     NEO::GraphicsAllocation *allocation = nullptr;
 };
 
+struct FenceImp : public Fence {
+    FenceImp(CommandQueueImp *cmdQueueImp) : cmdQueue(cmdQueueImp) {}
+
+    ~FenceImp() override;
+
+    ze_result_t destroy() override {
+        delete this;
+        return ZE_RESULT_SUCCESS;
+    }
+
+    ze_result_t hostSynchronize(uint64_t timeout) override;
+
+    ze_result_t queryStatus() override;
+
+    ze_result_t reset() override;
+
+    static Fence *fromHandle(ze_fence_handle_t handle) { return static_cast<Fence *>(handle); }
+
+    inline ze_fence_handle_t toHandle() { return this; }
+
+    bool initialize();
+
+  protected:
+    CommandQueueImp *cmdQueue;
+};
 } // namespace L0

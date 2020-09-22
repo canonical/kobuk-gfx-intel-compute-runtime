@@ -7,6 +7,7 @@
 
 #include "debug_settings_manager.h"
 
+#include "shared/source/debug_settings/debug_variables_helper.h"
 #include "shared/source/debug_settings/definitions/translate_debug_settings.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/ptr_math.h"
@@ -14,6 +15,7 @@
 #include "shared/source/utilities/debug_settings_reader_creator.h"
 
 #include <cstdio>
+#include <iostream>
 #include <sstream>
 
 namespace std {
@@ -26,16 +28,19 @@ namespace NEO {
 
 template <DebugFunctionalityLevel DebugLevel>
 DebugSettingsManager<DebugLevel>::DebugSettingsManager(const char *registryPath) {
-    if (registryReadAvailable()) {
-        readerImpl = SettingsReaderCreator::create(std::string(registryPath));
-        injectSettingsFromReader();
-        dumpFlags();
-    }
+    readerImpl = SettingsReaderCreator::create(std::string(registryPath));
+    injectSettingsFromReader();
+    dumpFlags();
     translateDebugSettings(flags);
+
+    while (isLoopAtDriverInitEnabled())
+        ;
 }
 
 template <DebugFunctionalityLevel DebugLevel>
-DebugSettingsManager<DebugLevel>::~DebugSettingsManager() = default;
+DebugSettingsManager<DebugLevel>::~DebugSettingsManager() {
+    readerImpl.reset();
+};
 
 template <DebugFunctionalityLevel DebugLevel>
 void DebugSettingsManager<DebugLevel>::getHardwareInfoOverride(std::string &hwInfoConfig) {
@@ -68,8 +73,11 @@ void DebugSettingsManager<DebugLevel>::dumpFlags() const {
 
 #define DECLARE_DEBUG_VARIABLE(dataType, variableName, defaultValue, description)   \
     settingsDumpFile << #variableName << " = " << flags.variableName.get() << '\n'; \
-    dumpNonDefaultFlag(#variableName, flags.variableName.get(), defaultValue);
+    dumpNonDefaultFlag<dataType>(#variableName, flags.variableName.get(), defaultValue);
+    if (registryReadAvailable() || isDebugKeysReadEnabled()) {
 #include "debug_variables.inl"
+    }
+#include "release_variables.inl"
 #undef DECLARE_DEBUG_VARIABLE
 }
 
@@ -81,7 +89,11 @@ void DebugSettingsManager<DebugLevel>::injectSettingsFromReader() {
         dataType tempData = readerImpl->getSetting(#variableName, flags.variableName.get()); \
         flags.variableName.set(tempData);                                                    \
     }
+
+    if (registryReadAvailable() || isDebugKeysReadEnabled()) {
 #include "debug_variables.inl"
+    }
+#include "release_variables.inl"
 #undef DECLARE_DEBUG_VARIABLE
 }
 

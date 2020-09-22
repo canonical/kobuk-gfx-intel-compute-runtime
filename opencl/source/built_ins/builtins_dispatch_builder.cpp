@@ -43,9 +43,10 @@ class BuiltInOp<EBuiltInOps::CopyBufferToBuffer> : public BuiltinDispatchInfoBui
                  "CopyBufferToBufferRightLeftover", kernRightLeftover);
     }
     template <typename OffsetType>
-    bool buildDispatchInfosTyped(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const {
+    bool buildDispatchInfosTyped(MultiDispatchInfo &multiDispatchInfo) const {
         DispatchInfoBuilder<SplitDispatch::Dim::d1D, SplitDispatch::SplitMode::KernelSplit> kernelSplit1DBuilder;
-        multiDispatchInfo.setBuiltinOpParams(operationParams);
+        auto &operationParams = multiDispatchInfo.peekBuiltinOpParams();
+
         uintptr_t start = reinterpret_cast<uintptr_t>(operationParams.dstPtr) + operationParams.dstOffset.x;
 
         size_t middleAlignment = MemoryConstants::cacheLineSize;
@@ -111,8 +112,8 @@ class BuiltInOp<EBuiltInOps::CopyBufferToBuffer> : public BuiltinDispatchInfoBui
         return true;
     }
 
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
-        return buildDispatchInfosTyped<uint32_t>(multiDispatchInfo, operationParams);
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo) const override {
+        return buildDispatchInfosTyped<uint32_t>(multiDispatchInfo);
     }
 
   protected:
@@ -137,8 +138,8 @@ class BuiltInOp<EBuiltInOps::CopyBufferToBufferStateless> : public BuiltInOp<EBu
                  "CopyBufferToBufferRightLeftover", kernRightLeftover);
     }
 
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
-        return buildDispatchInfosTyped<uint64_t>(multiDispatchInfo, operationParams);
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo) const override {
+        return buildDispatchInfosTyped<uint64_t>(multiDispatchInfo);
     }
 };
 
@@ -156,9 +157,10 @@ class BuiltInOp<EBuiltInOps::CopyBufferRect> : public BuiltinDispatchInfoBuilder
     }
 
     template <typename OffsetType>
-    bool buildDispatchInfosTyped(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const {
+    bool buildDispatchInfosTyped(MultiDispatchInfo &multiDispatchInfo) const {
         DispatchInfoBuilder<SplitDispatch::Dim::d3D, SplitDispatch::SplitMode::NoSplit> kernelNoSplit3DBuilder;
-        multiDispatchInfo.setBuiltinOpParams(operationParams);
+        auto &operationParams = multiDispatchInfo.peekBuiltinOpParams();
+
         size_t hostPtrSize = 0;
         bool is3D = false;
 
@@ -237,8 +239,8 @@ class BuiltInOp<EBuiltInOps::CopyBufferRect> : public BuiltinDispatchInfoBuilder
         return true;
     }
 
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
-        return buildDispatchInfosTyped<uint32_t>(multiDispatchInfo, operationParams);
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo) const override {
+        return buildDispatchInfosTyped<uint32_t>(multiDispatchInfo);
     }
 
   protected:
@@ -258,8 +260,8 @@ class BuiltInOp<EBuiltInOps::CopyBufferRectStateless> : public BuiltInOp<EBuiltI
                  "CopyBufferRectBytes2d", kernelBytes[1],
                  "CopyBufferRectBytes3d", kernelBytes[2]);
     }
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
-        return buildDispatchInfosTyped<uint64_t>(multiDispatchInfo, operationParams);
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo) const override {
+        return buildDispatchInfosTyped<uint64_t>(multiDispatchInfo);
     }
 };
 
@@ -277,9 +279,10 @@ class BuiltInOp<EBuiltInOps::FillBuffer> : public BuiltinDispatchInfoBuilder {
     }
 
     template <typename OffsetType>
-    bool buildDispatchInfosTyped(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const {
+    bool buildDispatchInfosTyped(MultiDispatchInfo &multiDispatchInfo) const {
         DispatchInfoBuilder<SplitDispatch::Dim::d1D, SplitDispatch::SplitMode::KernelSplit> kernelSplit1DBuilder;
-        multiDispatchInfo.setBuiltinOpParams(operationParams);
+        auto &operationParams = multiDispatchInfo.peekBuiltinOpParams();
+
         uintptr_t start = reinterpret_cast<uintptr_t>(operationParams.dstPtr) + operationParams.dstOffset.x;
 
         size_t middleAlignment = MemoryConstants::cacheLineSize;
@@ -317,7 +320,8 @@ class BuiltInOp<EBuiltInOps::FillBuffer> : public BuiltinDispatchInfoBuilder {
         kernelSplit1DBuilder.setArg(SplitDispatch::RegionCoordX::Right, 1, static_cast<OffsetType>(operationParams.dstOffset.x + leftSize + middleSizeBytes));
 
         // Set-up srcMemObj with pattern
-        kernelSplit1DBuilder.setArgSvm(2, operationParams.srcMemObj->getSize(), operationParams.srcMemObj->getGraphicsAllocation()->getUnderlyingBuffer(), operationParams.srcMemObj->getGraphicsAllocation(), CL_MEM_READ_ONLY);
+        auto graphicsAllocation = operationParams.srcMemObj->getMultiGraphicsAllocation().getDefaultGraphicsAllocation();
+        kernelSplit1DBuilder.setArgSvm(2, operationParams.srcMemObj->getSize(), graphicsAllocation->getUnderlyingBuffer(), graphicsAllocation, CL_MEM_READ_ONLY);
 
         // Set-up patternSizeInEls
         kernelSplit1DBuilder.setArg(SplitDispatch::RegionCoordX::Left, 3, static_cast<OffsetType>(operationParams.srcMemObj->getSize()));
@@ -334,8 +338,8 @@ class BuiltInOp<EBuiltInOps::FillBuffer> : public BuiltinDispatchInfoBuilder {
         return true;
     }
 
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
-        return buildDispatchInfosTyped<uint32_t>(multiDispatchInfo, operationParams);
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo) const override {
+        return buildDispatchInfosTyped<uint32_t>(multiDispatchInfo);
     }
 
   protected:
@@ -357,8 +361,8 @@ class BuiltInOp<EBuiltInOps::FillBufferStateless> : public BuiltInOp<EBuiltInOps
                  "FillBufferMiddle", kernMiddle,
                  "FillBufferRightLeftover", kernRightLeftover);
     }
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
-        return buildDispatchInfosTyped<uint64_t>(multiDispatchInfo, operationParams);
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfos) const override {
+        return buildDispatchInfosTyped<uint64_t>(multiDispatchInfos);
     }
 };
 
@@ -377,8 +381,8 @@ class BuiltInOp<EBuiltInOps::CopyBufferToImage3d> : public BuiltinDispatchInfoBu
                  "CopyBufferToImage3d16Bytes", kernelBytes[4]);
     }
 
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
-        return buildDispatchInfosTyped<uint32_t>(multiDispatchInfo, operationParams);
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo) const override {
+        return buildDispatchInfosTyped<uint32_t>(multiDispatchInfo);
     }
 
   protected:
@@ -386,9 +390,10 @@ class BuiltInOp<EBuiltInOps::CopyBufferToImage3d> : public BuiltinDispatchInfoBu
     BuiltInOp(BuiltIns &kernelsLib) : BuiltinDispatchInfoBuilder(kernelsLib){};
 
     template <typename OffsetType>
-    bool buildDispatchInfosTyped(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const {
+    bool buildDispatchInfosTyped(MultiDispatchInfo &multiDispatchInfo) const {
         DispatchInfoBuilder<SplitDispatch::Dim::d3D, SplitDispatch::SplitMode::NoSplit> kernelNoSplit3DBuilder;
-        multiDispatchInfo.setBuiltinOpParams(operationParams);
+        auto &operationParams = multiDispatchInfo.peekBuiltinOpParams();
+
         DEBUG_BREAK_IF(!(((operationParams.srcPtr != nullptr) || (operationParams.srcMemObj != nullptr)) && (operationParams.dstPtr == nullptr)));
 
         auto dstImage = castToObjectOrAbort<Image>(operationParams.dstMemObj);
@@ -470,8 +475,8 @@ class BuiltInOp<EBuiltInOps::CopyBufferToImage3dStateless> : public BuiltInOp<EB
                  "CopyBufferToImage3d16Bytes", kernelBytes[4]);
     }
 
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
-        return buildDispatchInfosTyped<uint64_t>(multiDispatchInfo, operationParams);
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo) const override {
+        return buildDispatchInfosTyped<uint64_t>(multiDispatchInfo);
     }
 };
 
@@ -490,8 +495,8 @@ class BuiltInOp<EBuiltInOps::CopyImage3dToBuffer> : public BuiltinDispatchInfoBu
                  "CopyImage3dToBuffer16Bytes", kernelBytes[4]);
     }
 
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
-        return buildDispatchInfosTyped<uint32_t>(multiDispatchInfo, operationParams);
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo) const override {
+        return buildDispatchInfosTyped<uint32_t>(multiDispatchInfo);
     }
 
   protected:
@@ -500,9 +505,10 @@ class BuiltInOp<EBuiltInOps::CopyImage3dToBuffer> : public BuiltinDispatchInfoBu
     BuiltInOp(BuiltIns &kernelsLib) : BuiltinDispatchInfoBuilder(kernelsLib) {}
 
     template <typename OffsetType>
-    bool buildDispatchInfosTyped(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const {
+    bool buildDispatchInfosTyped(MultiDispatchInfo &multiDispatchInfo) const {
         DispatchInfoBuilder<SplitDispatch::Dim::d3D, SplitDispatch::SplitMode::NoSplit> kernelNoSplit3DBuilder;
-        multiDispatchInfo.setBuiltinOpParams(operationParams);
+        auto &operationParams = multiDispatchInfo.peekBuiltinOpParams();
+
         DEBUG_BREAK_IF(!((operationParams.srcPtr == nullptr) && ((operationParams.dstPtr != nullptr) || (operationParams.dstMemObj != nullptr))));
 
         auto srcImage = castToObjectOrAbort<Image>(operationParams.srcMemObj);
@@ -584,8 +590,8 @@ class BuiltInOp<EBuiltInOps::CopyImage3dToBufferStateless> : public BuiltInOp<EB
                  "CopyImage3dToBuffer16Bytes", kernelBytes[4]);
     }
 
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
-        return buildDispatchInfosTyped<uint64_t>(multiDispatchInfo, operationParams);
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo) const override {
+        return buildDispatchInfosTyped<uint64_t>(multiDispatchInfo);
     }
 };
 
@@ -600,9 +606,10 @@ class BuiltInOp<EBuiltInOps::CopyImageToImage3d> : public BuiltinDispatchInfoBui
                  "CopyImageToImage3d", kernel);
     }
 
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo) const override {
         DispatchInfoBuilder<SplitDispatch::Dim::d3D, SplitDispatch::SplitMode::NoSplit> kernelNoSplit3DBuilder;
-        multiDispatchInfo.setBuiltinOpParams(operationParams);
+        auto &operationParams = multiDispatchInfo.peekBuiltinOpParams();
+
         DEBUG_BREAK_IF(!((operationParams.srcPtr == nullptr) && (operationParams.dstPtr == nullptr)));
 
         auto srcImage = castToObjectOrAbort<Image>(operationParams.srcMemObj);
@@ -665,9 +672,9 @@ class BuiltInOp<EBuiltInOps::FillImage3d> : public BuiltinDispatchInfoBuilder {
                  "FillImage3d", kernel);
     }
 
-    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo, const BuiltinOpParams &operationParams) const override {
+    bool buildDispatchInfos(MultiDispatchInfo &multiDispatchInfo) const override {
         DispatchInfoBuilder<SplitDispatch::Dim::d3D, SplitDispatch::SplitMode::NoSplit> kernelNoSplit3DBuilder;
-        multiDispatchInfo.setBuiltinOpParams(operationParams);
+        auto &operationParams = multiDispatchInfo.peekBuiltinOpParams();
         DEBUG_BREAK_IF(!((operationParams.srcMemObj == nullptr) && (operationParams.srcPtr != nullptr) && (operationParams.dstPtr == nullptr)));
 
         auto image = castToObjectOrAbort<Image>(operationParams.dstMemObj);

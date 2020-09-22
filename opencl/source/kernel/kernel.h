@@ -138,6 +138,7 @@ class Kernel : public BaseObject<_cl_kernel> {
     cl_int getInfo(cl_kernel_info paramName, size_t paramValueSize,
                    void *paramValue, size_t *paramValueSizeRet) const;
     void getAdditionalInfo(cl_kernel_info paramName, const void *&paramValue, size_t &paramValueSizeRet) const;
+    void getAdditionalWorkGroupInfo(cl_kernel_work_group_info paramName, const void *&paramValue, size_t &paramValueSizeRet) const;
 
     cl_int getArgInfo(cl_uint argIndx, cl_kernel_arg_info paramName,
                       size_t paramValueSize, void *paramValue, size_t *paramValueSizeRet) const;
@@ -219,6 +220,7 @@ class Kernel : public BaseObject<_cl_kernel> {
     void patchBlocksSimdSize();
     bool usesSyncBuffer();
     void patchSyncBuffer(Device &device, GraphicsAllocation *gfxAllocation, size_t bufferOffset);
+    void patchBindlessSurfaceStateOffsets(const size_t sshOffset);
 
     GraphicsAllocation *getKernelReflectionSurface() const {
         return kernelReflectionSurface;
@@ -413,6 +415,8 @@ class Kernel : public BaseObject<_cl_kernel> {
         const bool isCssUsed) const;
 
     bool requiresPerDssBackedBuffer() const;
+    bool requiresLimitedWorkgroupSize() const;
+    bool isKernelDebugEnabled() const { return debugEnabled; }
 
   protected:
     struct ObjectCounts {
@@ -546,5 +550,6 @@ class Kernel : public BaseObject<_cl_kernel> {
     std::vector<GraphicsAllocation *> kernelArgRequiresCacheFlush;
     UnifiedMemoryControls unifiedMemoryControls;
     bool isUnifiedMemorySyncRequired = true;
+    bool debugEnabled = false;
 };
 } // namespace NEO

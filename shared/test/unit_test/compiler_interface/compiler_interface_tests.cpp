@@ -8,17 +8,18 @@
 #include "shared/source/compiler_interface/compiler_interface.h"
 #include "shared/source/compiler_interface/compiler_interface.inl"
 #include "shared/source/helpers/file_io.h"
-#include "shared/source/helpers/hw_cmds.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/unit_test/helpers/test_files.h"
+#include "shared/test/unit_test/mocks/mock_compiler_interface.h"
 
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/global_environment.h"
-#include "opencl/test/unit_test/helpers/test_files.h"
 #include "opencl/test/unit_test/mocks/mock_cif.h"
 #include "opencl/test/unit_test/mocks/mock_compilers.h"
 
 #include "gmock/gmock.h"
+#include "hw_cmds.h"
 
 #include <memory>
 
@@ -32,11 +33,11 @@ const char *gCBadDompilerDllName = "libbad_compiler.so";
 #error "Unknown OS!"
 #endif
 
-class CompilerInterfaceTest : public DeviceFixture,
+class CompilerInterfaceTest : public ClDeviceFixture,
                               public ::testing::Test {
   public:
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
 
         // create the compiler interface
         this->pCompilerInterface = new MockCompilerInterface();
@@ -63,7 +64,7 @@ class CompilerInterfaceTest : public DeviceFixture,
     void TearDown() override {
         pSource.reset();
 
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     MockCompilerInterface *pCompilerInterface;
@@ -150,7 +151,7 @@ TEST_F(CompilerInterfaceTest, WhenCompilingToIsaThenSuccessIsReturned) {
     EXPECT_EQ(TranslationOutput::ErrorCode::Success, err);
 }
 
-TEST_F(CompilerInterfaceTest, WhenPrefferedIntermediateRepresentationSpecifiedThenPreserveIt) {
+TEST_F(CompilerInterfaceTest, WhenPreferredIntermediateRepresentationSpecifiedThenPreserveIt) {
     TranslationOutput translationOutput;
     inputArgs.preferredIntermediateType = IGC::CodeType::llvmLl;
     auto err = pCompilerInterface->build(*pDevice, inputArgs, translationOutput);
@@ -266,7 +267,7 @@ TEST_F(CompilerInterfaceTest, whenCompilerIsNotAvailableThenCompileFailsGraceful
     fclDebugVars.fileName = clFiles + "copybuffer.elf";
     gEnvironment->fclPushDebugVars(fclDebugVars);
     pCompilerInterface->igcMain->Release();
-    pCompilerInterface->SetIgcMain(nullptr);
+    pCompilerInterface->setIgcMain(nullptr);
     TranslationOutput translationOutput = {};
     auto err = pCompilerInterface->compile(*pDevice, inputArgs, translationOutput);
     EXPECT_EQ(TranslationOutput::ErrorCode::CompilerNotAvailable, err);
@@ -333,7 +334,7 @@ TEST_F(CompilerInterfaceTest, whenCompilerIsNotAvailableThenLinkFailsGracefully)
     igcDebugVars.fileName = clFiles + "copybuffer.ll";
     gEnvironment->igcPushDebugVars(igcDebugVars);
     pCompilerInterface->igcMain->Release();
-    pCompilerInterface->SetIgcMain(nullptr);
+    pCompilerInterface->setIgcMain(nullptr);
     TranslationOutput translationOutput = {};
     auto err = pCompilerInterface->link(*pDevice, inputArgs, translationOutput);
     EXPECT_EQ(TranslationOutput::ErrorCode::CompilerNotAvailable, err);
@@ -399,7 +400,7 @@ TEST_F(CompilerInterfaceTest, whenCompilerIsNotAvailableThenCreateLibraryFailsGr
     igcDebugVars.fileName = clFiles + "copybuffer.ll";
     gEnvironment->igcPushDebugVars(igcDebugVars);
     pCompilerInterface->igcMain->Release();
-    pCompilerInterface->SetIgcMain(nullptr);
+    pCompilerInterface->setIgcMain(nullptr);
     TranslationOutput translationOutput = {};
     auto err = pCompilerInterface->createLibrary(*pDevice, inputArgs, translationOutput);
     EXPECT_EQ(TranslationOutput::ErrorCode::CompilerNotAvailable, err);
@@ -686,6 +687,19 @@ TEST(LoadCompilerTest, whenEntrypointInterfaceIsNotCompatibleThenReturnFalseAndN
     EXPECT_FALSE(retVal);
     EXPECT_EQ(nullptr, retLib.get());
     EXPECT_EQ(nullptr, retMain.get());
+}
+
+TEST(LoadCompilerTest, GivenZebinIgnoreIcbeVersionDebugFlagThenIgnoreIgcsIcbeVersion) {
+    DebugManagerStateRestore dbgRestore;
+    DebugManager.flags.ZebinIgnoreIcbeVersion.set(true);
+
+    MockCompilerEnableGuard mock;
+    std::unique_ptr<NEO::OsLibrary> retLib;
+    CIF::RAII::UPtr_t<CIF::CIFMain> retMain;
+    bool retVal = loadCompiler<IGC::IgcOclDeviceCtx>("", retLib, retMain);
+    EXPECT_TRUE(retVal);
+    EXPECT_NE(nullptr, retLib.get());
+    EXPECT_NE(nullptr, retMain.get());
 }
 
 template <typename DeviceCtxBase, typename TranslationCtx>

@@ -37,7 +37,7 @@ bool UnitTestHelper<GfxFamily>::isExpectMemoryNotEqualSupported() {
 
 template <typename GfxFamily>
 uint32_t UnitTestHelper<GfxFamily>::getDefaultSshUsage() {
-    return 0;
+    return sizeof(typename GfxFamily::RENDER_SURFACE_STATE);
 }
 
 template <typename GfxFamily>
@@ -61,6 +61,11 @@ bool UnitTestHelper<GfxFamily>::isPipeControlWArequired(const HardwareInfo &hwIn
 }
 
 template <typename GfxFamily>
+bool UnitTestHelper<GfxFamily>::isAdditionalSynchronizationRequired(const HardwareInfo &hwInfo) {
+    return false;
+}
+
+template <typename GfxFamily>
 bool UnitTestHelper<GfxFamily>::isAdditionalMiSemaphoreWaitRequired(const HardwareInfo &hwInfo) {
     return false;
 }
@@ -73,6 +78,11 @@ bool UnitTestHelper<GfxFamily>::isAdditionalMiSemaphoreWait(const typename GfxFa
 template <typename GfxFamily>
 inline uint64_t UnitTestHelper<GfxFamily>::getMemoryAddress(const typename GfxFamily::MI_ATOMIC &atomic) {
     return atomic.getMemoryAddress() | ((static_cast<uint64_t>(atomic.getMemoryAddressHigh())) << 32);
+}
+
+template <typename GfxFamily>
+inline bool UnitTestHelper<GfxFamily>::requiresTimestampPacketsInSystemMemory() {
+    return true;
 }
 
 template <typename GfxFamily>

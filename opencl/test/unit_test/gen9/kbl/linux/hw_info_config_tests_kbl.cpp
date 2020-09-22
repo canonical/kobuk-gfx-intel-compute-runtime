@@ -9,7 +9,6 @@
 #include "opencl/test/unit_test/os_interface/linux/hw_info_config_linux_tests.h"
 
 using namespace NEO;
-using namespace std;
 
 struct HwInfoConfigTestLinuxKbl : HwInfoConfigTestLinux {
     void SetUp() override {
@@ -160,6 +159,7 @@ KBLTEST_F(HwInfoConfigTestLinuxKbl, negativeFailedIoctlDevRevId) {
 }
 
 KBLTEST_F(HwInfoConfigTestLinuxKbl, negativeFailedIoctlEuCount) {
+    drm->failRetTopology = true;
     drm->StoredRetValForEUVal = -4;
     auto hwInfoConfig = HwInfoConfig::get(productFamily);
     int ret = hwInfoConfig->configureHwInfo(&pInHwInfo, &outHwInfo, osInterface);
@@ -167,6 +167,7 @@ KBLTEST_F(HwInfoConfigTestLinuxKbl, negativeFailedIoctlEuCount) {
 }
 
 KBLTEST_F(HwInfoConfigTestLinuxKbl, negativeFailedIoctlSsCount) {
+    drm->failRetTopology = true;
     drm->StoredRetValForSSVal = -5;
     auto hwInfoConfig = HwInfoConfig::get(productFamily);
     int ret = hwInfoConfig->configureHwInfo(&pInHwInfo, &outHwInfo, osInterface);

@@ -45,7 +45,7 @@ void *CommandQueue::cpuDataTransferHandler(TransferProperties &transferPropertie
     }
 
     if (eventsRequest.outEvent) {
-        eventBuilder.create<Event>(this, transferProperties.cmdType, CompletionStamp::levelNotReady, CompletionStamp::levelNotReady);
+        eventBuilder.create<Event>(this, transferProperties.cmdType, CompletionStamp::notReady, CompletionStamp::notReady);
         outEventObj = eventBuilder.getEvent();
         outEventObj->setQueueTimeStamp();
         outEventObj->setCPUProfilingPath(true);
@@ -145,7 +145,7 @@ void *CommandQueue::cpuDataTransferHandler(TransferProperties &transferPropertie
 
         if (outEventObj) {
             outEventObj->setEndTimeStamp();
-            outEventObj->updateTaskCount(this->taskCount);
+            outEventObj->updateTaskCount(this->taskCount, this->bcsTaskCount);
             outEventObj->flushStamp->replaceStampObject(this->flushStamp->getStampReference());
             if (eventCompleted) {
                 outEventObj->setStatus(CL_COMPLETE);
@@ -154,7 +154,7 @@ void *CommandQueue::cpuDataTransferHandler(TransferProperties &transferPropertie
             }
         }
         if (modifySimulationFlags) {
-            auto graphicsAllocation = transferProperties.memObj->getGraphicsAllocation();
+            auto graphicsAllocation = transferProperties.memObj->getGraphicsAllocation(getDevice().getRootDeviceIndex());
             graphicsAllocation->setAubWritable(true, GraphicsAllocation::defaultBank);
             graphicsAllocation->setTbxWritable(true, GraphicsAllocation::defaultBank);
         }

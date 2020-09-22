@@ -81,8 +81,8 @@ cl_int Program::compile(
 
         options = (buildOptions != nullptr) ? buildOptions : "";
 
-        for (const auto optionString : {CompilerOptions::gtpinRera, CompilerOptions::greaterThan4gbBuffersRequired}) {
-            size_t pos = options.find(optionString);
+        for (const auto &optionString : {CompilerOptions::gtpinRera, CompilerOptions::greaterThan4gbBuffersRequired}) {
+            size_t pos = options.find(optionString.data());
             if (pos != std::string::npos) {
                 options.erase(pos, optionString.length());
                 CompilerOptions::concatenateAppend(internalOptions, optionString);
@@ -133,6 +133,8 @@ cl_int Program::compile(
         UNRECOVERABLE_IF(clDevice == nullptr);
         auto compilerExtensionsOptions = clDevice->peekCompilerExtensions();
         CompilerOptions::concatenateAppend(internalOptions, compilerExtensionsOptions);
+        auto compilerFeaturesOptions = clDevice->peekCompilerFeatures();
+        CompilerOptions::concatenateAppend(internalOptions, compilerFeaturesOptions);
 
         if (isKernelDebugEnabled()) {
             std::string filename;
@@ -149,8 +151,8 @@ cl_int Program::compile(
 
         TranslationOutput compilerOuput;
         auto compilerErr = pCompilerInterface->compile(*this->pDevice, inputArgs, compilerOuput);
-        this->updateBuildLog(this->pDevice, compilerOuput.frontendCompilerLog.c_str(), compilerOuput.frontendCompilerLog.size());
-        this->updateBuildLog(this->pDevice, compilerOuput.backendCompilerLog.c_str(), compilerOuput.backendCompilerLog.size());
+        this->updateBuildLog(this->pDevice->getRootDeviceIndex(), compilerOuput.frontendCompilerLog.c_str(), compilerOuput.frontendCompilerLog.size());
+        this->updateBuildLog(this->pDevice->getRootDeviceIndex(), compilerOuput.backendCompilerLog.c_str(), compilerOuput.backendCompilerLog.size());
         retVal = asClError(compilerErr);
         if (retVal != CL_SUCCESS) {
             break;

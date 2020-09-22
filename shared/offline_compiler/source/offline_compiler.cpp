@@ -29,6 +29,8 @@
 #include "ocl_igc_interface/code_type.h"
 #include "ocl_igc_interface/fcl_ocl_device_ctx.h"
 #include "ocl_igc_interface/igc_ocl_device_ctx.h"
+
+#undef IGC_CLEANUP
 #include "ocl_igc_interface/platform_helper.h"
 
 #include <algorithm>
@@ -69,8 +71,10 @@ std::string convertToPascalCase(const std::string &inString) {
 
 OfflineCompiler::OfflineCompiler() = default;
 OfflineCompiler::~OfflineCompiler() {
+    pBuildInfo.reset();
     delete[] irBinary;
     delete[] genBinary;
+    delete[] debugDataBinary;
 }
 
 OfflineCompiler *OfflineCompiler::create(size_t numArgs, const std::vector<std::string> &allArgs, bool dumpFiles, int &retVal, OclocArgHelper *helper) {
@@ -90,6 +94,64 @@ OfflineCompiler *OfflineCompiler::create(size_t numArgs, const std::vector<std::
     return pOffCompiler;
 }
 
+struct OfflineCompiler::buildInfo {
+    std::unique_ptr<CIF::Builtins::BufferLatest, CIF::RAII::ReleaseHelper<CIF::Builtins::BufferLatest>> fclOptions;
+    std::unique_ptr<CIF::Builtins::BufferLatest, CIF::RAII::ReleaseHelper<CIF::Builtins::BufferLatest>> fclInternalOptions;
+    std::unique_ptr<IGC::OclTranslationOutputTagOCL, CIF::RAII::ReleaseHelper<IGC::OclTranslationOutputTagOCL>> fclOutput;
+    IGC::CodeType::CodeType_t intermediateRepresentation;
+};
+
+int OfflineCompiler::buildIrBinary() {
+    int retVal = SUCCESS;
+    UNRECOVERABLE_IF(fclDeviceCtx == nullptr);
+    pBuildInfo->intermediateRepresentation = useLlvmText ? IGC::CodeType::llvmLl
+                                                         : (useLlvmBc ? IGC::CodeType::llvmBc : preferredIntermediateRepresentation);
+
+    //sourceCode.size() returns the number of characters without null terminated char
+    auto fclSrc = CIF::Builtins::CreateConstBuffer(fclMain.get(), sourceCode.c_str(), sourceCode.size() + 1);
+    pBuildInfo->fclOptions = CIF::Builtins::CreateConstBuffer(fclMain.get(), options.c_str(), options.size());
+    pBuildInfo->fclInternalOptions = CIF::Builtins::CreateConstBuffer(fclMain.get(), internalOptions.c_str(), internalOptions.size());
+    auto err = CIF::Builtins::CreateConstBuffer(fclMain.get(), nullptr, 0);
+
+    auto fclTranslationCtx = fclDeviceCtx->CreateTranslationCtx(IGC::CodeType::oclC, pBuildInfo->intermediateRepresentation, err.get());
+
+    if (true == NEO::areNotNullptr(err->GetMemory<char>())) {
+        updateBuildLog(err->GetMemory<char>(), err->GetSizeRaw());
+        retVal = CL_BUILD_PROGRAM_FAILURE;
+        return retVal;
+    }
+
+    if (false == NEO::areNotNullptr(fclSrc.get(), pBuildInfo->fclOptions.get(), pBuildInfo->fclInternalOptions.get(),
+                                    fclTranslationCtx.get())) {
+        retVal = OUT_OF_HOST_MEMORY;
+        return retVal;
+    }
+
+    pBuildInfo->fclOutput = fclTranslationCtx->Translate(fclSrc.get(), pBuildInfo->fclOptions.get(),
+                                                         pBuildInfo->fclInternalOptions.get(), nullptr, 0);
+
+    if (pBuildInfo->fclOutput == nullptr) {
+        retVal = OUT_OF_HOST_MEMORY;
+        return retVal;
+    }
+
+    UNRECOVERABLE_IF(pBuildInfo->fclOutput->GetBuildLog() == nullptr);
+    UNRECOVERABLE_IF(pBuildInfo->fclOutput->GetOutput() == nullptr);
+
+    if (pBuildInfo->fclOutput->Successful() == false) {
+        updateBuildLog(pBuildInfo->fclOutput->GetBuildLog()->GetMemory<char>(), pBuildInfo->fclOutput->GetBuildLog()->GetSizeRaw());
+        retVal = BUILD_PROGRAM_FAILURE;
+        return retVal;
+    }
+
+    storeBinary(irBinary, irBinarySize, pBuildInfo->fclOutput->GetOutput()->GetMemory<char>(), pBuildInfo->fclOutput->GetOutput()->GetSizeRaw());
+    isSpirV = pBuildInfo->intermediateRepresentation == IGC::CodeType::spirV;
+
+    updateBuildLog(pBuildInfo->fclOutput->GetBuildLog()->GetMemory<char>(), pBuildInfo->fclOutput->GetBuildLog()->GetSizeRaw());
+
+    return retVal;
+}
+
 int OfflineCompiler::buildSourceCode() {
     int retVal = SUCCESS;
 
@@ -103,46 +165,13 @@ int OfflineCompiler::buildSourceCode() {
         CIF::RAII::UPtr_t<IGC::OclTranslationOutputTagOCL> igcOutput;
         bool inputIsIntermediateRepresentation = inputFileLlvm || inputFileSpirV;
         if (false == inputIsIntermediateRepresentation) {
-            UNRECOVERABLE_IF(fclDeviceCtx == nullptr);
-            IGC::CodeType::CodeType_t intermediateRepresentation = useLlvmText ? IGC::CodeType::llvmLl
-                                                                               : (useLlvmBc ? IGC::CodeType::llvmBc : preferredIntermediateRepresentation);
-            // sourceCode.size() returns the number of characters without null terminated char
-            auto fclSrc = CIF::Builtins::CreateConstBuffer(fclMain.get(), sourceCode.c_str(), sourceCode.size() + 1);
-            auto fclOptions = CIF::Builtins::CreateConstBuffer(fclMain.get(), options.c_str(), options.size());
-            auto fclInternalOptions = CIF::Builtins::CreateConstBuffer(fclMain.get(), internalOptions.c_str(), internalOptions.size());
-
-            auto fclTranslationCtx = fclDeviceCtx->CreateTranslationCtx(IGC::CodeType::oclC, intermediateRepresentation);
-            auto igcTranslationCtx = igcDeviceCtx->CreateTranslationCtx(intermediateRepresentation, IGC::CodeType::oclGenBin);
-
-            if (false == NEO::areNotNullptr(fclSrc.get(), fclOptions.get(), fclInternalOptions.get(),
-                                            fclTranslationCtx.get(), igcTranslationCtx.get())) {
-                retVal = OUT_OF_HOST_MEMORY;
+            retVal = buildIrBinary();
+            if (retVal != SUCCESS)
                 break;
-            }
 
-            auto fclOutput = fclTranslationCtx->Translate(fclSrc.get(), fclOptions.get(),
-                                                          fclInternalOptions.get(), nullptr, 0);
-
-            if (fclOutput == nullptr) {
-                retVal = OUT_OF_HOST_MEMORY;
-                break;
-            }
-
-            UNRECOVERABLE_IF(fclOutput->GetBuildLog() == nullptr);
-            UNRECOVERABLE_IF(fclOutput->GetOutput() == nullptr);
-
-            if (fclOutput->Successful() == false) {
-                updateBuildLog(fclOutput->GetBuildLog()->GetMemory<char>(), fclOutput->GetBuildLog()->GetSizeRaw());
-                retVal = BUILD_PROGRAM_FAILURE;
-                break;
-            }
-
-            storeBinary(irBinary, irBinarySize, fclOutput->GetOutput()->GetMemory<char>(), fclOutput->GetOutput()->GetSizeRaw());
-            isSpirV = intermediateRepresentation == IGC::CodeType::spirV;
-            updateBuildLog(fclOutput->GetBuildLog()->GetMemory<char>(), fclOutput->GetBuildLog()->GetSizeRaw());
-
-            igcOutput = igcTranslationCtx->Translate(fclOutput->GetOutput(), fclOptions.get(),
-                                                     fclInternalOptions.get(),
+            auto igcTranslationCtx = igcDeviceCtx->CreateTranslationCtx(pBuildInfo->intermediateRepresentation, IGC::CodeType::oclGenBin);
+            igcOutput = igcTranslationCtx->Translate(pBuildInfo->fclOutput->GetOutput(), pBuildInfo->fclOptions.get(),
+                                                     pBuildInfo->fclInternalOptions.get(),
                                                      nullptr, 0);
 
         } else {
@@ -174,14 +203,14 @@ int OfflineCompiler::buildSourceCode() {
 
 int OfflineCompiler::build() {
     int retVal = SUCCESS;
-
-    retVal = buildSourceCode();
-
-    if (retVal == SUCCESS) {
-        generateElfBinary();
-        if (dumpFiles) {
-            writeOutAllFiles();
-        }
+    if (isOnlySpirV()) {
+        retVal = buildIrBinary();
+    } else {
+        retVal = buildSourceCode();
+    }
+    generateElfBinary();
+    if (dumpFiles) {
+        writeOutAllFiles();
     }
 
     return retVal;
@@ -208,10 +237,14 @@ int OfflineCompiler::getHardwareInfo(const char *pDeviceName) {
     for (unsigned int productId = 0; productId < IGFX_MAX_PRODUCT; ++productId) {
         if (hardwarePrefix[productId] && (0 == strcmp(pDeviceName, hardwarePrefix[productId]))) {
             if (hardwareInfoTable[productId]) {
-                hwInfo = hardwareInfoTable[productId];
+                hwInfo = *hardwareInfoTable[productId];
+                if (revisionId != -1) {
+                    hwInfo.platform.usRevId = revisionId;
+                }
+                hardwareInfoSetup[hwInfo.platform.eProductFamily](&hwInfo, true, 0x0);
                 familyNameWithType.clear();
-                familyNameWithType.append(familyName[hwInfo->platform.eRenderCoreFamily]);
-                familyNameWithType.append(hwInfo->capabilityTable.platformType);
+                familyNameWithType.append(familyName[hwInfo.platform.eRenderCoreFamily]);
+                familyNameWithType.append(hwInfo.capabilityTable.platformType);
                 retVal = SUCCESS;
                 break;
             }
@@ -243,7 +276,7 @@ int OfflineCompiler::initialize(size_t numArgs, const std::vector<std::string> &
     const char *source = nullptr;
     std::unique_ptr<char[]> sourceFromFile;
     size_t sourceFromFileSize = 0;
-
+    this->pBuildInfo = std::make_unique<buildInfo>();
     retVal = parseCommandLine(numArgs, allArgs);
     if (retVal != SUCCESS) {
         return retVal;
@@ -251,7 +284,7 @@ int OfflineCompiler::initialize(size_t numArgs, const std::vector<std::string> &
 
     if (options.empty()) {
         // try to read options from file if not provided by commandline
-        size_t ext_start = inputFile.find(".cl");
+        size_t ext_start = inputFile.find_last_of(".");
         if (ext_start != std::string::npos) {
             std::string oclocOptionsFileName = inputFile.substr(0, ext_start);
             oclocOptionsFileName.append("_ocloc_options.txt");
@@ -344,7 +377,7 @@ int OfflineCompiler::initialize(size_t numArgs, const std::vector<std::string> &
             return OUT_OF_HOST_MEMORY;
         }
 
-        fclDeviceCtx->SetOclApiVersion(hwInfo->capabilityTable.clVersionSupport * 10);
+        fclDeviceCtx->SetOclApiVersion(hwInfo.capabilityTable.clVersionSupport * 10);
         preferredIntermediateRepresentation = fclDeviceCtx->GetPreferredIntermediateRepresentation();
     } else {
         if (!isQuiet()) {
@@ -385,46 +418,46 @@ int OfflineCompiler::initialize(size_t numArgs, const std::vector<std::string> &
     if (this->igcDeviceCtx == nullptr) {
         return OUT_OF_HOST_MEMORY;
     }
-    this->igcDeviceCtx->SetProfilingTimerResolution(static_cast<float>(hwInfo->capabilityTable.defaultProfilingTimerResolution));
+    this->igcDeviceCtx->SetProfilingTimerResolution(static_cast<float>(hwInfo.capabilityTable.defaultProfilingTimerResolution));
     auto igcPlatform = this->igcDeviceCtx->GetPlatformHandle();
     auto igcGtSystemInfo = this->igcDeviceCtx->GetGTSystemInfoHandle();
     auto igcFeWa = this->igcDeviceCtx->GetIgcFeaturesAndWorkaroundsHandle();
     if ((igcPlatform == nullptr) || (igcGtSystemInfo == nullptr) || (igcFeWa == nullptr)) {
         return OUT_OF_HOST_MEMORY;
     }
-    IGC::PlatformHelper::PopulateInterfaceWith(*igcPlatform.get(), hwInfo->platform);
-    IGC::GtSysInfoHelper::PopulateInterfaceWith(*igcGtSystemInfo.get(), hwInfo->gtSystemInfo);
+    IGC::PlatformHelper::PopulateInterfaceWith(*igcPlatform.get(), hwInfo.platform);
+    IGC::GtSysInfoHelper::PopulateInterfaceWith(*igcGtSystemInfo.get(), hwInfo.gtSystemInfo);
     // populate with features
-    igcFeWa.get()->SetFtrDesktop(hwInfo->featureTable.ftrDesktop);
-    igcFeWa.get()->SetFtrChannelSwizzlingXOREnabled(hwInfo->featureTable.ftrChannelSwizzlingXOREnabled);
+    igcFeWa.get()->SetFtrDesktop(hwInfo.featureTable.ftrDesktop);
+    igcFeWa.get()->SetFtrChannelSwizzlingXOREnabled(hwInfo.featureTable.ftrChannelSwizzlingXOREnabled);
 
-    igcFeWa.get()->SetFtrGtBigDie(hwInfo->featureTable.ftrGtBigDie);
-    igcFeWa.get()->SetFtrGtMediumDie(hwInfo->featureTable.ftrGtMediumDie);
-    igcFeWa.get()->SetFtrGtSmallDie(hwInfo->featureTable.ftrGtSmallDie);
+    igcFeWa.get()->SetFtrGtBigDie(hwInfo.featureTable.ftrGtBigDie);
+    igcFeWa.get()->SetFtrGtMediumDie(hwInfo.featureTable.ftrGtMediumDie);
+    igcFeWa.get()->SetFtrGtSmallDie(hwInfo.featureTable.ftrGtSmallDie);
 
-    igcFeWa.get()->SetFtrGT1(hwInfo->featureTable.ftrGT1);
-    igcFeWa.get()->SetFtrGT1_5(hwInfo->featureTable.ftrGT1_5);
-    igcFeWa.get()->SetFtrGT2(hwInfo->featureTable.ftrGT2);
-    igcFeWa.get()->SetFtrGT3(hwInfo->featureTable.ftrGT3);
-    igcFeWa.get()->SetFtrGT4(hwInfo->featureTable.ftrGT4);
+    igcFeWa.get()->SetFtrGT1(hwInfo.featureTable.ftrGT1);
+    igcFeWa.get()->SetFtrGT1_5(hwInfo.featureTable.ftrGT1_5);
+    igcFeWa.get()->SetFtrGT2(hwInfo.featureTable.ftrGT2);
+    igcFeWa.get()->SetFtrGT3(hwInfo.featureTable.ftrGT3);
+    igcFeWa.get()->SetFtrGT4(hwInfo.featureTable.ftrGT4);
 
-    igcFeWa.get()->SetFtrIVBM0M1Platform(hwInfo->featureTable.ftrIVBM0M1Platform);
-    igcFeWa.get()->SetFtrGTL(hwInfo->featureTable.ftrGT1);
-    igcFeWa.get()->SetFtrGTM(hwInfo->featureTable.ftrGT2);
-    igcFeWa.get()->SetFtrGTH(hwInfo->featureTable.ftrGT3);
+    igcFeWa.get()->SetFtrIVBM0M1Platform(hwInfo.featureTable.ftrIVBM0M1Platform);
+    igcFeWa.get()->SetFtrGTL(hwInfo.featureTable.ftrGT1);
+    igcFeWa.get()->SetFtrGTM(hwInfo.featureTable.ftrGT2);
+    igcFeWa.get()->SetFtrGTH(hwInfo.featureTable.ftrGT3);
 
-    igcFeWa.get()->SetFtrSGTPVSKUStrapPresent(hwInfo->featureTable.ftrSGTPVSKUStrapPresent);
-    igcFeWa.get()->SetFtrGTA(hwInfo->featureTable.ftrGTA);
-    igcFeWa.get()->SetFtrGTC(hwInfo->featureTable.ftrGTC);
-    igcFeWa.get()->SetFtrGTX(hwInfo->featureTable.ftrGTX);
-    igcFeWa.get()->SetFtr5Slice(hwInfo->featureTable.ftr5Slice);
+    igcFeWa.get()->SetFtrSGTPVSKUStrapPresent(hwInfo.featureTable.ftrSGTPVSKUStrapPresent);
+    igcFeWa.get()->SetFtrGTA(hwInfo.featureTable.ftrGTA);
+    igcFeWa.get()->SetFtrGTC(hwInfo.featureTable.ftrGTC);
+    igcFeWa.get()->SetFtrGTX(hwInfo.featureTable.ftrGTX);
+    igcFeWa.get()->SetFtr5Slice(hwInfo.featureTable.ftr5Slice);
 
-    igcFeWa.get()->SetFtrGpGpuMidThreadLevelPreempt(hwInfo->featureTable.ftrGpGpuMidThreadLevelPreempt);
-    igcFeWa.get()->SetFtrIoMmuPageFaulting(hwInfo->featureTable.ftrIoMmuPageFaulting);
-    igcFeWa.get()->SetFtrWddm2Svm(hwInfo->featureTable.ftrWddm2Svm);
-    igcFeWa.get()->SetFtrPooledEuEnabled(hwInfo->featureTable.ftrPooledEuEnabled);
+    igcFeWa.get()->SetFtrGpGpuMidThreadLevelPreempt(hwInfo.featureTable.ftrGpGpuMidThreadLevelPreempt);
+    igcFeWa.get()->SetFtrIoMmuPageFaulting(hwInfo.featureTable.ftrIoMmuPageFaulting);
+    igcFeWa.get()->SetFtrWddm2Svm(hwInfo.featureTable.ftrWddm2Svm);
+    igcFeWa.get()->SetFtrPooledEuEnabled(hwInfo.featureTable.ftrPooledEuEnabled);
 
-    igcFeWa.get()->SetFtrResourceStreamer(hwInfo->featureTable.ftrResourceStreamer);
+    igcFeWa.get()->SetFtrResourceStreamer(hwInfo.featureTable.ftrResourceStreamer);
 
     return retVal;
 }
@@ -487,11 +520,16 @@ int OfflineCompiler::parseCommandLine(size_t numArgs, const std::vector<std::str
         } else if ("-q" == currArg) {
             argHelper->getPrinterRef() = MessagePrinter(true);
             quiet = true;
+        } else if ("-spv_only" == currArg) {
+            onlySpirV = true;
         } else if ("-output_no_suffix" == currArg) {
             outputNoSuffix = true;
         } else if ("--help" == currArg) {
             printUsage();
             retVal = PRINT_USAGE;
+        } else if (("-revision_id" == currArg) && hasMoreArgs) {
+            revisionId = std::stoi(argv[argIndex + 1]);
+            argIndex++;
         } else {
             argHelper->printf("Invalid option (arg %d): %s\n", argIndex, argv[argIndex].c_str());
             retVal = INVALID_COMMAND_LINE;
@@ -517,8 +555,12 @@ int OfflineCompiler::parseCommandLine(size_t numArgs, const std::vector<std::str
             if (retVal != SUCCESS) {
                 argHelper->printf("Error: Cannot get HW Info for device %s.\n", deviceName.c_str());
             } else {
-                std::string extensionsList = getExtensionsList(*hwInfo);
+                std::string extensionsList = getExtensionsList(hwInfo);
                 CompilerOptions::concatenateAppend(internalOptions, convertEnabledExtensionsToCompilerInternalOptions(extensionsList.c_str()));
+
+                StackVec<cl_name_version, 15> openclCFeatures;
+                getOpenclCFeaturesList(hwInfo, openclCFeatures);
+                CompilerOptions::concatenateAppend(internalOptions, convertEnabledOclCFeaturesToCompilerInternalOptions(openclCFeatures));
             }
         }
     }
@@ -615,7 +657,25 @@ std::string getDevicesTypes() {
     std::ostringstream os;
     for (auto it = prefixes.begin(); it != prefixes.end(); it++) {
         if (it != prefixes.begin())
-            os << ",";
+            os << ", ";
+        os << *it;
+    }
+
+    return os.str();
+}
+
+std::string getDevicesFamilies() {
+    std::list<std::string> prefixes;
+    for (unsigned int i = 0; i < IGFX_MAX_CORE; ++i) {
+        if (familyName[i] == nullptr)
+            continue;
+        prefixes.push_back(familyName[i]);
+    }
+
+    std::ostringstream os;
+    for (auto it = prefixes.begin(); it != prefixes.end(); it++) {
+        if (it != prefixes.begin())
+            os << ", ";
         os << *it;
     }
 
@@ -634,12 +694,12 @@ Usage: ocloc [compile] -file <filename> -device <device_type> [-output <filename
                                 OpenCL C kernel language).
 
   -device <device_type>         Target device.
-                                <device_type> can be: %s
+                                <device_type> can be: %s, %s - can be single or multiple target devices.
                                 If multiple target devices are provided, ocloc
                                 will compile for each of these targets and will
                                 create a fatbinary archive that contains all of
                                 device binaries produced this way.
-                                Supported -device patterns examples :
+                                Supported -device patterns examples:
                                 -device skl        ; will compile 1 target
                                 -device skl,icllp  ; will compile 2 targets
                                 -device skl-icllp  ; will compile all targets
@@ -721,6 +781,8 @@ Usage: ocloc [compile] -file <filename> -device <device_type> [-output <filename
 
   -q                            Will silence most of output messages.
 
+  -spv_only                     Will generate only spirV file.
+
   -cpp_file                     Will generate c++ file with C-array
                                 containing Intel Compute device binary.
 
@@ -728,11 +790,14 @@ Usage: ocloc [compile] -file <filename> -device <device_type> [-output <filename
 
   --help                        Print this usage message.
 
+  -revision_id <revision_id>    Target stepping.
+
 Examples :
   Compile file to Intel Compute GPU device binary (out = source_file_Gen9core.bin)
     ocloc -file source_file.cl -device skl
 )===",
-                      NEO::getDevicesTypes().c_str());
+                      NEO::getDevicesTypes().c_str(),
+                      NEO::getDevicesFamilies().c_str());
 }
 
 void OfflineCompiler::storeBinary(

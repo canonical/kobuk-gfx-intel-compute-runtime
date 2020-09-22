@@ -6,8 +6,8 @@
  */
 
 #include "shared/source/os_interface/windows/os_library_win.h"
+#include "shared/test/unit_test/helpers/variable_backup.h"
 
-#include "opencl/test/unit_test/helpers/variable_backup.h"
 #include "test.h"
 
 #include "gtest/gtest.h"
@@ -69,14 +69,14 @@ HMODULE WINAPI LoadLibraryExAMock(LPCSTR lpFileName, HANDLE hFile, DWORD dwFlags
     return (HMODULE)1;
 }
 
-TEST(OSLibraryWinTest, gitOsLibraryWinWhenLoadDependencyFailsThenFallbackToNonDriverStore) {
+TEST(OSLibraryWinTest, WhenLoadDependencyFailsThenFallbackToNonDriverStore) {
     auto bkp = OsLibraryBackup::backup(LoadLibraryExAMock, GetModuleFileNameAMock);
 
     std::unique_ptr<OsLibrary> library(OsLibrary::load(Os::testDllName));
     EXPECT_NE(nullptr, library);
 }
 
-TEST(OSLibraryWinTest, gitOsLibraryWinWhenLoadDependencyThenProperPathIsConstructed) {
+TEST(OSLibraryWinTest, WhenDependencyLoadsThenProperPathIsConstructed) {
     auto bkp = OsLibraryBackup::backup(LoadLibraryExAMock, GetModuleFileNameAMock);
     VariableBackup<bool> bkpM(&mockWillFail, false);
 

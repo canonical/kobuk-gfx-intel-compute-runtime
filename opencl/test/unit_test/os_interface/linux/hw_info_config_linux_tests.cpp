@@ -48,7 +48,7 @@ void HwInfoConfigHw<IGFX_UNKNOWN>::adjustPlatformForProductFamily(HardwareInfo *
 }
 
 template <>
-cl_unified_shared_memory_capabilities_intel HwInfoConfigHw<IGFX_UNKNOWN>::getHostMemCapabilities() {
+cl_unified_shared_memory_capabilities_intel HwInfoConfigHw<IGFX_UNKNOWN>::getHostMemCapabilities(const HardwareInfo * /*hwInfo*/) {
     return 0;
 }
 
@@ -72,13 +72,17 @@ cl_unified_shared_memory_capabilities_intel HwInfoConfigHw<IGFX_UNKNOWN>::getSha
     return 0;
 }
 
+template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isEvenContextCountRequired() {
+    return false;
+}
+
 } // namespace NEO
 
 struct DummyHwConfig : HwInfoConfigHw<IGFX_UNKNOWN> {
 };
 
 using namespace NEO;
-using namespace std;
 
 void mockCpuidex(int *cpuInfo, int functionId, int subfunctionId);
 
@@ -236,18 +240,63 @@ TEST_F(HwInfoConfigTestLinuxDummy, dummydummyNegativeFailGetDevRevId) {
     EXPECT_EQ(-3, ret);
 }
 
-TEST_F(HwInfoConfigTestLinuxDummy, dummydummyNegativeFailGetEuCount) {
+TEST_F(HwInfoConfigTestLinuxDummy, dummyNegativeFailGetEuCount) {
     drm->StoredRetValForEUVal = -4;
+    drm->failRetTopology = true;
 
     int ret = hwConfig.configureHwInfo(&pInHwInfo, &outHwInfo, osInterface);
     EXPECT_EQ(-4, ret);
 }
 
-TEST_F(HwInfoConfigTestLinuxDummy, dummydummyNegativeFailGetSsCount) {
+TEST_F(HwInfoConfigTestLinuxDummy, dummyNegativeFailGetSsCount) {
     drm->StoredRetValForSSVal = -5;
+    drm->failRetTopology = true;
 
     int ret = hwConfig.configureHwInfo(&pInHwInfo, &outHwInfo, osInterface);
     EXPECT_EQ(-5, ret);
+}
+
+TEST_F(HwInfoConfigTestLinuxDummy, whenFailGettingTopologyThenFallbackToEuCountIoctl) {
+    drm->failRetTopology = true;
+
+    int ret = hwConfig.configureHwInfo(&pInHwInfo, &outHwInfo, osInterface);
+    EXPECT_NE(-1, ret);
+}
+
+TEST_F(HwInfoConfigTestLinuxDummy, givenInvalidTopologyDataWhenConfiguringThenReturnError) {
+    auto storedSVal = drm->StoredSVal;
+    auto storedSSVal = drm->StoredSSVal;
+    auto storedEUVal = drm->StoredEUVal;
+
+    {
+        // 0 euCount
+        drm->StoredSVal = storedSVal;
+        drm->StoredSSVal = storedSSVal;
+        drm->StoredEUVal = 0;
+
+        int sliceCount, subSliceCount, euCount;
+        EXPECT_FALSE(drm->queryTopology(sliceCount, subSliceCount, euCount));
+    }
+
+    {
+        // 0 subSliceCount
+        drm->StoredSVal = storedSVal;
+        drm->StoredSSVal = 0;
+        drm->StoredEUVal = storedEUVal;
+
+        int sliceCount, subSliceCount, euCount;
+        EXPECT_FALSE(drm->queryTopology(sliceCount, subSliceCount, euCount));
+    }
+
+    {
+        // 0 sliceCount
+        drm->StoredSVal = 0;
+        drm->StoredSSVal = storedSSVal;
+        drm->StoredEUVal = storedEUVal;
+
+        int sliceCount, subSliceCount, euCount;
+        EXPECT_FALSE(drm->queryTopology(sliceCount, subSliceCount, euCount));
+    }
 }
 
 TEST_F(HwInfoConfigTestLinuxDummy, dummyNegativeFailingConfigureCustom) {
@@ -313,20 +362,14 @@ TEST_F(HwInfoConfigTestLinuxDummy, givenDebugFlagSetWhenConfiguringHwInfoThenPri
     int ret = hwConfig.configureHwInfo(&pInHwInfo, &outHwInfo, osInterface);
     EXPECT_EQ(0, ret);
 
-    std::string euCount = std::to_string(outHwInfo.gtSystemInfo.EUCount);
-    std::string subSliceCount = std::to_string(outHwInfo.gtSystemInfo.SubSliceCount);
-
     std::array<std::string, 6> expectedStrings = {{"DRM_IOCTL_I915_GETPARAM: param: I915_PARAM_CHIPSET_ID, output value: 1, retCode: 0",
                                                    "DRM_IOCTL_I915_GETPARAM: param: I915_PARAM_REVISION, output value: 0, retCode: 0",
-                                                   "DRM_IOCTL_I915_GETPARAM: param: I915_PARAM_EU_TOTAL, output value: " + euCount + ", retCode: 0",
-                                                   "DRM_IOCTL_I915_GETPARAM: param: I915_PARAM_SUBSLICE_TOTAL, output value: " + subSliceCount + ", retCode: 0",
                                                    "DRM_IOCTL_I915_GETPARAM: param: I915_PARAM_CHIPSET_ID, output value: 1, retCode: 0",
                                                    "DRM_IOCTL_I915_GETPARAM: param: I915_PARAM_HAS_SCHEDULER, output value: 7, retCode: 0"
 
     }};
 
     std::string output = testing::internal::GetCapturedStdout(); // stop capturing
-
     for (const auto &expectedString : expectedStrings) {
         EXPECT_NE(std::string::npos, output.find(expectedString));
     }
@@ -409,13 +452,13 @@ TEST_F(HwInfoConfigTestLinuxDummy, dummyConfigPreemptionDrmEnabledAllPreemptionD
     EXPECT_TRUE(drm->isPreemptionSupported());
 }
 
-TEST_F(HwInfoConfigTestLinuxDummy, givenPlatformEnabledFtrCompressionWhenInitializingThenForceDisable) {
-    pInHwInfo.capabilityTable.ftrRenderCompressedBuffers = true;
+TEST_F(HwInfoConfigTestLinuxDummy, givenPlatformEnabledFtrCompressionWhenInitializingThenFlagsAreSet) {
     pInHwInfo.capabilityTable.ftrRenderCompressedImages = true;
+    pInHwInfo.capabilityTable.ftrRenderCompressedBuffers = true;
     int ret = hwConfig.configureHwInfo(&pInHwInfo, &outHwInfo, osInterface);
     EXPECT_EQ(0, ret);
-    EXPECT_FALSE(outHwInfo.capabilityTable.ftrRenderCompressedBuffers);
-    EXPECT_FALSE(outHwInfo.capabilityTable.ftrRenderCompressedImages);
+    EXPECT_TRUE(outHwInfo.capabilityTable.ftrRenderCompressedImages);
+    EXPECT_TRUE(outHwInfo.capabilityTable.ftrRenderCompressedBuffers);
 }
 
 TEST_F(HwInfoConfigTestLinuxDummy, givenPointerToHwInfoWhenConfigureHwInfoCalledThenRequiedSurfaceSizeIsSettedProperly) {
@@ -436,7 +479,7 @@ TEST_F(HwInfoConfigTestLinuxDummy, givenInstrumentationForHardwareIsEnabledOrDis
     pInHwInfo.capabilityTable.instrumentationEnabled = true;
     ret = hwConfig.configureHwInfo(&pInHwInfo, &outHwInfo, osInterface);
     ASSERT_EQ(0, ret);
-    EXPECT_TRUE(outHwInfo.capabilityTable.instrumentationEnabled == haveInstrumentation);
+    EXPECT_TRUE(outHwInfo.capabilityTable.instrumentationEnabled);
 }
 
 TEST_F(HwInfoConfigTestLinuxDummy, givenGttSizeReturnedWhenInitializingHwInfoThenSetSvmFtr) {

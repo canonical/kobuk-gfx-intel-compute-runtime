@@ -5,13 +5,14 @@
  *
  */
 
+#include "shared/source/gen11/aub_mapper.h"
 #include "shared/source/helpers/completion_stamp.h"
 #include "shared/source/helpers/hw_helper.h"
 
+#include "opencl/source/aub/aub_helper_bdw_plus.inl"
 #include "opencl/source/aub_mem_dump/aub_alloc_dump.inl"
 #include "opencl/source/aub_mem_dump/aub_mem_dump.inl"
 
-#include "aub_mapper.h"
 #include "config.h"
 
 namespace AubMemDump {
@@ -80,6 +81,8 @@ const MMIOList *AUBFamilyMapper<Family>::perEngineMMIO[aub_stream::NUM_ENGINES] 
     &mmioListBCS,
     &mmioListVCS,
     &mmioListVECS};
+
+template class AubHelperHw<Family>;
 } // namespace NEO
 
 namespace AubAllocDump {

@@ -34,20 +34,16 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
     using MI_ATOMIC = typename GfxFamily::MI_ATOMIC;
     using COMPARE_OPERATION = typename GfxFamily::MI_SEMAPHORE_WAIT::COMPARE_OPERATION;
 
-    static uint32_t alignSlmSize(uint32_t slmSize);
-    static uint32_t computeSlmValues(uint32_t slmSize);
-
     static INTERFACE_DESCRIPTOR_DATA *getInterfaceDescriptor(
         const IndirectHeap &indirectHeap,
         uint64_t offsetInterfaceDescriptor,
         INTERFACE_DESCRIPTOR_DATA *inlineInterfaceDescriptor);
 
-    static void setAdditionalInfo(
+    static void setGrfInfo(
         INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor,
         const Kernel &kernel,
         const size_t &sizeCrossThreadData,
-        const size_t &sizePerThreadData,
-        const uint32_t threadsPerThreadGroup);
+        const size_t &sizePerThreadData);
 
     inline static uint32_t additionalSizeRequiredDsh();
 
@@ -60,7 +56,7 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         size_t bindingTablePointer,
         size_t offsetSamplerState,
         uint32_t numSamplers,
-        uint32_t threadsPerThreadGroup,
+        uint32_t numThreadsPerThreadGroup,
         const Kernel &kernel,
         uint32_t bindingTablePrefetchSize,
         PreemptionMode preemptionMode,
@@ -151,11 +147,9 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
                                        uint32_t compareData,
                                        COMPARE_OPERATION compareMode);
 
-    static MI_ATOMIC *programMiAtomic(LinearStream &commandStream, uint64_t writeAddress, typename MI_ATOMIC::ATOMIC_OPCODES opcode, typename MI_ATOMIC::DATA_SIZE dataSize);
+    static void programMiAtomic(LinearStream &commandStream, uint64_t writeAddress, typename MI_ATOMIC::ATOMIC_OPCODES opcode, typename MI_ATOMIC::DATA_SIZE dataSize);
     static void programMiAtomic(MI_ATOMIC &atomic, uint64_t writeAddress, typename MI_ATOMIC::ATOMIC_OPCODES opcode, typename MI_ATOMIC::DATA_SIZE dataSize);
     static void programCacheFlushAfterWalkerCommand(LinearStream *commandStream, const CommandQueue &commandQueue, const Kernel *kernel, uint64_t postSyncAddress);
-    static void programBarrierEnable(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, uint32_t value, const HardwareInfo &hwInfo);
-    static void adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, const HardwareInfo &hwInfo);
 
     static const size_t alignInterfaceDescriptorData = 64 * sizeof(uint8_t);
     static const uint32_t alignIndirectStatePointer = 64 * sizeof(uint8_t);

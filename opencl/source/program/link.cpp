@@ -68,6 +68,14 @@ cl_int Program::link(
 
         options = (buildOptions != nullptr) ? buildOptions : "";
 
+        for (const auto &optionString : {CompilerOptions::gtpinRera, CompilerOptions::greaterThan4gbBuffersRequired}) {
+            size_t pos = options.find(optionString.data());
+            if (pos != std::string::npos) {
+                options.erase(pos, optionString.length());
+                CompilerOptions::concatenateAppend(internalOptions, optionString);
+            }
+        }
+
         if (isKernelDebugEnabled()) {
             appendKernelDebugOptions();
         }
@@ -80,6 +88,8 @@ cl_int Program::link(
         elfEncoder.getElfFileHeader().type = NEO::Elf::ET_OPENCL_OBJECTS;
 
         StackVec<const Program *, 16> inputProgramsInternal;
+        StackVec<uint32_t, 64> specConstIds;
+        StackVec<uint64_t, 64> specConstValues;
         for (cl_uint i = 0; i < numInputPrograms; i++) {
             auto program = inputPrograms[i];
             if (program == nullptr) {
@@ -95,6 +105,21 @@ cl_int Program::link(
             if ((pInputProgObj->irBinary == nullptr) || (pInputProgObj->irBinarySize == 0)) {
                 retVal = CL_INVALID_PROGRAM;
                 break;
+            }
+
+            if (pInputProgObj->areSpecializationConstantsInitialized) {
+                specConstIds.clear();
+                specConstValues.clear();
+                specConstIds.reserve(pInputProgObj->specConstantsValues.size());
+                specConstValues.reserve(pInputProgObj->specConstantsValues.size());
+                for (const auto &specConst : pInputProgObj->specConstantsValues) {
+                    specConstIds.push_back(specConst.first);
+                    specConstValues.push_back(specConst.second);
+                }
+                elfEncoder.appendSection(NEO::Elf::SHT_OPENCL_SPIRV_SC_IDS, NEO::Elf::SectionNamesOpenCl::spirvSpecConstIds,
+                                         ArrayRef<const uint8_t>::fromAny(specConstIds.begin(), specConstIds.size()));
+                elfEncoder.appendSection(NEO::Elf::SHT_OPENCL_SPIRV_SC_VALUES, NEO::Elf::SectionNamesOpenCl::spirvSpecConstValues,
+                                         ArrayRef<const uint8_t>::fromAny(specConstValues.begin(), specConstValues.size()));
             }
 
             auto sectionType = pInputProgObj->getIsSpirV() ? NEO::Elf::SHT_OPENCL_SPIRV : NEO::Elf::SHT_OPENCL_LLVM_BINARY;
@@ -124,8 +149,8 @@ cl_int Program::link(
             inputArgs.outType = IGC::CodeType::oclGenBin;
             NEO::TranslationOutput compilerOuput = {};
             auto compilerErr = pCompilerInterface->link(this->getDevice(), inputArgs, compilerOuput);
-            this->updateBuildLog(this->pDevice, compilerOuput.frontendCompilerLog.c_str(), compilerOuput.frontendCompilerLog.size());
-            this->updateBuildLog(this->pDevice, compilerOuput.backendCompilerLog.c_str(), compilerOuput.backendCompilerLog.size());
+            this->updateBuildLog(this->pDevice->getRootDeviceIndex(), compilerOuput.frontendCompilerLog.c_str(), compilerOuput.frontendCompilerLog.size());
+            this->updateBuildLog(this->pDevice->getRootDeviceIndex(), compilerOuput.backendCompilerLog.c_str(), compilerOuput.backendCompilerLog.size());
             retVal = asClError(compilerErr);
             if (retVal != CL_SUCCESS) {
                 break;
@@ -149,15 +174,15 @@ cl_int Program::link(
                     clDevice->getSourceLevelDebugger()->notifyKernelDebugData(&kernelInfo->debugData,
                                                                               kernelInfo->name,
                                                                               kernelInfo->heapInfo.pKernelHeap,
-                                                                              kernelInfo->heapInfo.pKernelHeader->KernelHeapSize);
+                                                                              kernelInfo->heapInfo.KernelHeapSize);
                 }
             }
         } else {
             inputArgs.outType = IGC::CodeType::llvmBc;
             NEO::TranslationOutput compilerOuput = {};
             auto compilerErr = pCompilerInterface->createLibrary(*this->pDevice, inputArgs, compilerOuput);
-            this->updateBuildLog(this->pDevice, compilerOuput.frontendCompilerLog.c_str(), compilerOuput.frontendCompilerLog.size());
-            this->updateBuildLog(this->pDevice, compilerOuput.backendCompilerLog.c_str(), compilerOuput.backendCompilerLog.size());
+            this->updateBuildLog(this->pDevice->getRootDeviceIndex(), compilerOuput.frontendCompilerLog.c_str(), compilerOuput.frontendCompilerLog.size());
+            this->updateBuildLog(this->pDevice->getRootDeviceIndex(), compilerOuput.backendCompilerLog.c_str(), compilerOuput.backendCompilerLog.size());
             retVal = asClError(compilerErr);
             if (retVal != CL_SUCCESS) {
                 break;

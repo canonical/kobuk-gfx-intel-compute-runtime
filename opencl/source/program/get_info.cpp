@@ -24,13 +24,14 @@ cl_int Program::getInfo(cl_program_info paramName, size_t paramValueSize,
                         void *paramValue, size_t *paramValueSizeRet) {
     cl_int retVal = CL_SUCCESS;
     const void *pSrc = nullptr;
-    size_t srcSize = 0;
+    size_t srcSize = GetInfo::invalidSourceSize;
     size_t retSize = 0;
     std::string kernelNamesString;
     cl_device_id device_id = pDevice->getSpecializedDevice<ClDevice>();
     cl_uint refCount = 0;
     size_t numKernels;
     cl_context clContext = context;
+    cl_uint clFalse = CL_FALSE;
 
     switch (paramName) {
     case CL_PROGRAM_CONTEXT:
@@ -137,17 +138,23 @@ cl_int Program::getInfo(cl_program_info paramName, size_t paramValueSize,
         }
         break;
 
+    case CL_PROGRAM_SCOPE_GLOBAL_CTORS_PRESENT:
+    case CL_PROGRAM_SCOPE_GLOBAL_DTORS_PRESENT:
+        retSize = srcSize = sizeof(clFalse);
+        pSrc = &clFalse;
+        break;
+
     default:
         retVal = CL_INVALID_VALUE;
         break;
     }
 
-    retVal = (retVal == CL_SUCCESS)
-                 ? changeGetInfoStatusToCLResultType(::getInfo(paramValue, paramValueSize, pSrc, srcSize))
-                 : retVal;
-    if (paramValueSizeRet) {
-        *paramValueSizeRet = retSize;
+    auto getInfoStatus = GetInfoStatus::INVALID_VALUE;
+    if (retVal == CL_SUCCESS) {
+        getInfoStatus = GetInfo::getInfo(paramValue, paramValueSize, pSrc, srcSize);
+        retVal = changeGetInfoStatusToCLResultType(getInfoStatus);
     }
+    GetInfo::setParamValueReturnSize(paramValueSizeRet, retSize, getInfoStatus);
     return retVal;
 }
 
@@ -155,7 +162,7 @@ cl_int Program::getBuildInfo(cl_device_id device, cl_program_build_info paramNam
                              size_t paramValueSize, void *paramValue, size_t *paramValueSizeRet) const {
     cl_int retVal = CL_SUCCESS;
     const void *pSrc = nullptr;
-    size_t srcSize = 0;
+    size_t srcSize = GetInfo::invalidSourceSize;
     size_t retSize = 0;
     cl_device_id device_id = pDevice->getSpecializedDevice<ClDevice>();
 
@@ -177,15 +184,10 @@ cl_int Program::getBuildInfo(cl_device_id device, cl_program_build_info paramNam
         break;
 
     case CL_PROGRAM_BUILD_LOG: {
-        const char *pBuildLog = getBuildLog(&pClDev->getDevice());
+        const char *pBuildLog = getBuildLog(pClDev->getRootDeviceIndex());
 
-        if (pBuildLog != nullptr) {
-            pSrc = pBuildLog;
-            srcSize = retSize = strlen(pBuildLog) + 1;
-        } else {
-            pSrc = "";
-            srcSize = retSize = 1;
-        }
+        pSrc = pBuildLog;
+        srcSize = retSize = strlen(pBuildLog) + 1;
     } break;
 
     case CL_PROGRAM_BINARY_TYPE:
@@ -203,13 +205,12 @@ cl_int Program::getBuildInfo(cl_device_id device, cl_program_build_info paramNam
         break;
     }
 
-    retVal = (retVal == CL_SUCCESS)
-                 ? changeGetInfoStatusToCLResultType(::getInfo(paramValue, paramValueSize, pSrc, srcSize))
-                 : retVal;
-
-    if (paramValueSizeRet) {
-        *paramValueSizeRet = retSize;
+    auto getInfoStatus = GetInfoStatus::INVALID_VALUE;
+    if (retVal == CL_SUCCESS) {
+        getInfoStatus = GetInfo::getInfo(paramValue, paramValueSize, pSrc, srcSize);
+        retVal = changeGetInfoStatusToCLResultType(getInfoStatus);
     }
+    GetInfo::setParamValueReturnSize(paramValueSizeRet, retSize, getInfoStatus);
 
     return retVal;
 }

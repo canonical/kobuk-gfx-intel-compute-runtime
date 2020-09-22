@@ -57,8 +57,8 @@ CompletionStamp &CommandMapUnmap::submit(uint32_t taskLevel, bool terminated) {
         commandQueue.flushStamp->getStampReference(),                                //flushStampReference
         commandQueue.getThrottle(),                                                  //throttle
         PreemptionHelper::taskPreemptionMode(device, multiDispatch),                 //preemptionMode
-        GrfConfig::DefaultGrfNumber,                                                 //numGrfRequired
-        L3CachingSettings::l3CacheOn,                                                //l3CacheSettings
+        GrfConfig::NotApplicable,                                                    //numGrfRequired
+        L3CachingSettings::NotApplicable,                                            //l3CacheSettings
         ThreadArbitrationPolicy::NotPresent,                                         //threadArbitrationPolicy
         commandQueue.getSliceCount(),                                                //sliceCount
         true,                                                                        //blocking
@@ -74,7 +74,7 @@ CompletionStamp &CommandMapUnmap::submit(uint32_t taskLevel, bool terminated) {
         false                                                                        //usePerDssBackedBuffer
     );
 
-    DEBUG_BREAK_IF(taskLevel >= CompletionStamp::levelNotReady);
+    DEBUG_BREAK_IF(taskLevel >= CompletionStamp::notReady);
 
     gtpinNotifyPreFlushTask(&commandQueue);
 
@@ -87,8 +87,10 @@ CompletionStamp &CommandMapUnmap::submit(uint32_t taskLevel, bool terminated) {
                                                       dispatchFlags,
                                                       commandQueue.getDevice());
 
+    commandQueue.updateLatestSentEnqueueType(EnqueueProperties::Operation::DependencyResolveOnGpu);
+
     if (!memObj.isMemObjZeroCopy()) {
-        commandQueue.waitUntilComplete(completionStamp.taskCount, completionStamp.flushStamp, false);
+        commandQueue.waitUntilComplete(completionStamp.taskCount, commandQueue.peekBcsTaskCount(), completionStamp.flushStamp, false);
         if (operationType == MAP) {
             memObj.transferDataToHostPtr(copySize, copyOffset);
         } else if (!readOnly) {
@@ -203,9 +205,6 @@ CompletionStamp &CommandComputeKernel::submit(uint32_t taskLevel, bool terminate
         BlitProperties::setupDependenciesForAuxTranslation(kernelOperation->blitPropertiesContainer, *timestampPacketDependencies,
                                                            *currentTimestampPacketNodes, csrDeps,
                                                            commandQueue.getGpgpuCommandStreamReceiver(), bcsCsr);
-
-        auto bcsTaskCount = bcsCsr.blitBuffer(kernelOperation->blitPropertiesContainer, false);
-        commandQueue.updateBcsTaskCount(bcsTaskCount);
     }
 
     DispatchFlags dispatchFlags(
@@ -248,7 +247,7 @@ CompletionStamp &CommandComputeKernel::submit(uint32_t taskLevel, bool terminate
         dispatchFlags.epilogueRequired = true;
     }
 
-    DEBUG_BREAK_IF(taskLevel >= CompletionStamp::levelNotReady);
+    DEBUG_BREAK_IF(taskLevel >= CompletionStamp::notReady);
 
     gtpinNotifyPreFlushTask(&commandQueue);
 
@@ -261,12 +260,18 @@ CompletionStamp &CommandComputeKernel::submit(uint32_t taskLevel, bool terminate
                                                       dispatchFlags,
                                                       commandQueue.getDevice());
 
+    if (kernelOperation->blitPropertiesContainer.size() > 0) {
+        auto bcsTaskCount = commandQueue.getBcsCommandStreamReceiver()->blitBuffer(kernelOperation->blitPropertiesContainer, false, commandQueue.isProfilingEnabled());
+        commandQueue.updateBcsTaskCount(bcsTaskCount);
+    }
+    commandQueue.updateLatestSentEnqueueType(EnqueueProperties::Operation::GpuKernel);
+
     if (gtpinIsGTPinInitialized()) {
         gtpinNotifyFlushTask(completionStamp.taskCount);
     }
 
     if (printfHandler) {
-        commandQueue.waitUntilComplete(completionStamp.taskCount, completionStamp.flushStamp, false);
+        commandQueue.waitUntilComplete(completionStamp.taskCount, commandQueue.peekBcsTaskCount(), completionStamp.flushStamp, false);
         printfHandler.get()->printEnqueueOutput();
     }
 
@@ -290,7 +295,7 @@ void CommandWithoutKernel::dispatchBlitOperation() {
     blitProperties.csrDependencies.push_back(&timestampPacketDependencies->barrierNodes);
     blitProperties.outputTimestampPacket = currentTimestampPacketNodes->peekNodes()[0];
 
-    auto bcsTaskCount = bcsCsr->blitBuffer(kernelOperation->blitPropertiesContainer, false);
+    auto bcsTaskCount = bcsCsr->blitBuffer(kernelOperation->blitPropertiesContainer, false, commandQueue.isProfilingEnabled());
 
     commandQueue.updateBcsTaskCount(bcsTaskCount);
 }
@@ -312,11 +317,14 @@ CompletionStamp &CommandWithoutKernel::submit(uint32_t taskLevel, bool terminate
 
     auto lockCSR = commandStreamReceiver.obtainUniqueOwnership();
 
+    auto enqueueOperationType = EnqueueProperties::Operation::DependencyResolveOnGpu;
+
     if (kernelOperation->blitEnqueue) {
+        enqueueOperationType = EnqueueProperties::Operation::Blit;
+
         if (commandStreamReceiver.isStallingPipeControlOnNextFlushRequired()) {
             timestampPacketDependencies->barrierNodes.add(commandStreamReceiver.getTimestampPacketAllocator()->getTag());
         }
-        dispatchBlitOperation();
     }
 
     DispatchFlags dispatchFlags(
@@ -326,8 +334,8 @@ CompletionStamp &CommandWithoutKernel::submit(uint32_t taskLevel, bool terminate
         commandQueue.flushStamp->getStampReference(),         //flushStampReference
         commandQueue.getThrottle(),                           //throttle
         commandQueue.getDevice().getPreemptionMode(),         //preemptionMode
-        GrfConfig::DefaultGrfNumber,                          //numGrfRequired
-        L3CachingSettings::l3CacheOn,                         //l3CacheSettings
+        GrfConfig::NotApplicable,                             //numGrfRequired
+        L3CachingSettings::NotApplicable,                     //l3CacheSettings
         ThreadArbitrationPolicy::NotPresent,                  //threadArbitrationPolicy
         commandQueue.getSliceCount(),                         //sliceCount
         true,                                                 //blocking
@@ -343,7 +351,7 @@ CompletionStamp &CommandWithoutKernel::submit(uint32_t taskLevel, bool terminate
         false                                                 //usePerDssBackedBuffer
     );
 
-    UNRECOVERABLE_IF(!commandStreamReceiver.peekTimestampPacketWriteEnabled());
+    UNRECOVERABLE_IF(!kernelOperation->blitEnqueue && !commandStreamReceiver.peekTimestampPacketWriteEnabled());
 
     eventsRequest.fillCsrDependencies(dispatchFlags.csrDependencies, commandStreamReceiver, CsrDependencies::DependenciesType::OutOfCsr);
     makeTimestampPacketsResident(commandStreamReceiver);
@@ -358,6 +366,12 @@ CompletionStamp &CommandWithoutKernel::submit(uint32_t taskLevel, bool terminate
                                                       taskLevel,
                                                       dispatchFlags,
                                                       commandQueue.getDevice());
+
+    if (kernelOperation->blitEnqueue) {
+        dispatchBlitOperation();
+    }
+
+    commandQueue.updateLatestSentEnqueueType(enqueueOperationType);
 
     return completionStamp;
 }

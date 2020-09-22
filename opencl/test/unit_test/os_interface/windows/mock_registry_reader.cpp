@@ -9,6 +9,7 @@
 
 uint32_t regOpenKeySuccessCount = 0u;
 uint32_t regQueryValueSuccessCount = 0u;
+uint64_t regQueryValueExpectedData = 0ull;
 const HKEY validHkey = reinterpret_cast<HKEY>(0);
 
 LSTATUS APIENTRY RegOpenKeyExA(
@@ -54,6 +55,12 @@ LSTATUS APIENTRY RegQueryValueExA(
                 } else {
                     *lpcbData = sizeof(DWORD);
                 }
+            } else if (strcmp(lpValueName, "settingSourceInt64") == 0) {
+                if (lpData) {
+                    *reinterpret_cast<INT64 *>(lpData) = 0xffffffffeeeeeeee;
+                } else {
+                    *lpcbData = sizeof(INT64);
+                }
             } else if (strcmp(lpValueName, "settingSourceBinary") == 0) {
                 const auto settingSource = L"registry";
                 auto size = wcslen(settingSource) * sizeof(wchar_t);
@@ -63,6 +70,12 @@ LSTATUS APIENTRY RegQueryValueExA(
                     *lpcbData = static_cast<DWORD>(size);
                     if (lpType) {
                         *lpType = REG_BINARY;
+                    }
+                }
+            } else if (strcmp(lpValueName, "boolRegistryKey") == 0) {
+                if (*lpcbData == sizeof(int64_t)) {
+                    if (lpData) {
+                        *reinterpret_cast<uint64_t *>(lpData) = regQueryValueExpectedData;
                     }
                 }
             }

@@ -9,58 +9,82 @@
 
 #include "gtest/gtest.h"
 
-TEST(getInfo, valid_params_returnsSuccess) {
+TEST(getInfo, GivenSrcSizeLessThanOrEqualDstSizeWhenGettingInfoThenSrcCopiedToDst) {
     float dest = 0.0f;
     float src = 1.0f;
 
-    auto retVal = getInfo(&dest, sizeof(dest), &src, sizeof(src));
+    auto retVal = GetInfo::getInfo(&dest, sizeof(dest), &src, sizeof(src));
     EXPECT_EQ(GetInfoStatus::SUCCESS, retVal);
     EXPECT_EQ(src, dest);
 }
 
-TEST(getInfo, null_param_and_param_size_too_small_returnsSuccess) {
+TEST(getInfo, GivenSrcSizeGreaterThanEqualDstSizeAndDstNullPtrWhenGettingInfoThenSrcNotCopiedToDstAndSuccessReturned) {
     float dest = 0.0f;
     float src = 1.0f;
 
-    auto retVal = getInfo(nullptr, 0, &src, sizeof(src));
+    auto retVal = GetInfo::getInfo(nullptr, 0, &src, sizeof(src));
     EXPECT_EQ(GetInfoStatus::SUCCESS, retVal);
     EXPECT_NE(src, dest);
 }
 
-TEST(getInfo, GivenNullPtrAsValueAndNonZeroSizeWhenAskedForGetInfoThenSuccessIsReturned) {
+TEST(getInfo, GivenSrcSizeLessThanOrEqualDstSizeAndDstIsNullPtrWhenGettingInfoThenSuccessIsReturned) {
     float dest = 0.0f;
     float src = 1.0f;
 
-    auto retVal = getInfo(nullptr, sizeof(dest), &src, sizeof(src));
+    auto retVal = GetInfo::getInfo(nullptr, sizeof(dest), &src, sizeof(src));
     EXPECT_EQ(GetInfoStatus::SUCCESS, retVal);
     EXPECT_NE(src, dest);
 }
 
-TEST(getInfo, param_size_too_small_returnsError) {
+TEST(getInfo, GivenSrcSizeGreaterThanDstSizeAndDstIsNotNullPtrWhenGettingInfoThenInvalidValueIsReturned) {
     float dest = 0.0f;
     float src = 1.0f;
 
-    auto retVal = getInfo(&dest, 0, &src, sizeof(src));
+    auto retVal = GetInfo::getInfo(&dest, 0, &src, sizeof(src));
     EXPECT_EQ(GetInfoStatus::INVALID_VALUE, retVal);
     EXPECT_NE(src, dest);
 }
 
-TEST(getInfo, null_src_param_returnsError) {
+TEST(getInfo, GivenNullSrcPtrWhenGettingInfoThenInvalidValueErrorIsReturned) {
     float dest = 0.0f;
     float src = 1.0f;
 
-    auto retVal = getInfo(&dest, sizeof(dest), nullptr, sizeof(src));
+    auto retVal = GetInfo::getInfo(&dest, sizeof(dest), nullptr, sizeof(src));
     EXPECT_EQ(GetInfoStatus::INVALID_VALUE, retVal);
     EXPECT_NE(src, dest);
 }
 
-TEST(getInfo, zero_src_param_size_returnsError) {
+TEST(getInfo, GivenZeroSrcSizeWhenGettingInfoThenSuccessIsReturned) {
     float dest = 0.0f;
     float src = 1.0f;
 
-    auto retVal = getInfo(&dest, sizeof(dest), &src, 0);
+    auto retVal = GetInfo::getInfo(&dest, sizeof(dest), &src, 0);
+    EXPECT_EQ(GetInfoStatus::SUCCESS, retVal);
+    EXPECT_NE(src, dest);
+}
+
+TEST(getInfo, GivenInvalidSrcSizeWhenGettingInfoThenInvalidValueErrorIsReturned) {
+    float dest = 0.0f;
+    float src = 1.0f;
+
+    auto retVal = GetInfo::getInfo(&dest, sizeof(dest), &src, GetInfo::invalidSourceSize);
     EXPECT_EQ(GetInfoStatus::INVALID_VALUE, retVal);
     EXPECT_NE(src, dest);
+}
+
+TEST(getInfo, GivenInvalidInputWhenSettingParamValueReturnSizeThenNothingHappens) {
+    size_t paramValueReturnSize = 0u;
+
+    GetInfo::setParamValueReturnSize(nullptr, 1, GetInfoStatus::SUCCESS);
+    GetInfo::setParamValueReturnSize(&paramValueReturnSize, 1, GetInfoStatus::INVALID_VALUE);
+    EXPECT_EQ(0u, paramValueReturnSize);
+}
+
+TEST(getInfo, GivenValidInputWhenSettingParamValueReturnSizeThenValueIsUpdated) {
+    size_t paramValueReturnSize = 0u;
+
+    GetInfo::setParamValueReturnSize(&paramValueReturnSize, 1, GetInfoStatus::SUCCESS);
+    EXPECT_EQ(1u, paramValueReturnSize);
 }
 
 TEST(getInfoHelper, GivenInstanceOfGetInfoHelperAndNullPtrParamsSuccessIsReturned) {
@@ -71,7 +95,7 @@ TEST(getInfoHelper, GivenInstanceOfGetInfoHelperAndNullPtrParamsSuccessIsReturne
     EXPECT_EQ(GetInfoStatus::SUCCESS, retVal);
 }
 
-TEST(getInfoHelper, staticSetter) {
+TEST(getInfoHelper, GivenPointerWhenSettingValueThenValueIsSetCorrectly) {
     uint32_t *getValue = nullptr;
     uint32_t expectedValue = 1;
 
@@ -86,7 +110,7 @@ TEST(getInfoHelper, staticSetter) {
     delete getValue;
 }
 
-TEST(errorCodeHelper, localVariable) {
+TEST(errorCodeHelper, GivenLocalVariableWhenSettingValueThenValueIsSetCorrectly) {
     int errCode = 0;
     ErrorCodeHelper err(&errCode, 1);
     EXPECT_EQ(1, errCode);

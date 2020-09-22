@@ -5,13 +5,14 @@
  *
  */
 
+#include "shared/test/unit_test/mocks/mock_device.h"
+
 #include "opencl/source/helpers/surface_formats.h"
 #include "opencl/source/mem_obj/image.h"
 #include "opencl/test/unit_test/fixtures/context_fixture.h"
 #include "opencl/test/unit_test/fixtures/platform_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 
 #include "gtest/gtest.h"
 
@@ -42,7 +43,7 @@ struct GetSupportedImageFormatsTest : public PlatformFixture,
     cl_int retVal = CL_SUCCESS;
 };
 
-TEST_P(GetSupportedImageFormatsTest, checkNumImageFormats) {
+TEST_P(GetSupportedImageFormatsTest, WhenGettingNumImageFormatsThenGreaterThanZeroIsReturned) {
     cl_uint numImageFormats = 0;
     uint64_t imageFormatsFlags;
     uint32_t imageFormats;
@@ -59,7 +60,7 @@ TEST_P(GetSupportedImageFormatsTest, checkNumImageFormats) {
     EXPECT_GT(numImageFormats, 0u);
 }
 
-TEST_P(GetSupportedImageFormatsTest, retrieveImageFormats) {
+TEST_P(GetSupportedImageFormatsTest, WhenRetrievingImageFormatsThenListIsNonEmpty) {
     cl_uint numImageFormats = 0;
     uint64_t imageFormatsFlags;
     uint32_t imageFormats;
@@ -90,10 +91,19 @@ TEST_P(GetSupportedImageFormatsTest, retrieveImageFormats) {
         EXPECT_NE(0u, imageFormatList[entry].image_channel_data_type);
     }
 
+    retVal = pContext->getSupportedImageFormats(
+        &castToObject<ClDevice>(devices[0])->getDevice(),
+        CL_MEM_KERNEL_READ_AND_WRITE,
+        imageFormats,
+        numImageFormats,
+        imageFormatList,
+        nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
     delete[] imageFormatList;
 }
 
-TEST_P(GetSupportedImageFormatsTest, retrieveImageFormatsSRGB) {
+TEST_P(GetSupportedImageFormatsTest, WhenRetrievingImageFormatsSRGBThenListIsNonEmpty) {
     cl_uint numImageFormats = 0;
     uint64_t imageFormatsFlags;
     uint32_t imageFormats;
@@ -137,7 +147,7 @@ TEST_P(GetSupportedImageFormatsTest, retrieveImageFormatsSRGB) {
         }
     }
 
-    if (isReadOnly && ((&castToObject<ClDevice>(devices[0])->getDevice())->getHardwareInfo().capabilityTable.clVersionSupport >= 20)) {
+    if (isReadOnly && ((&castToObject<ClDevice>(devices[0])->getDevice())->getHardwareInfo().capabilityTable.supportsOcl21Features)) {
         EXPECT_TRUE(sRGBAFormatFound & sBGRAFormatFound);
     } else {
         EXPECT_FALSE(sRGBAFormatFound | sBGRAFormatFound);
@@ -146,7 +156,7 @@ TEST_P(GetSupportedImageFormatsTest, retrieveImageFormatsSRGB) {
     delete[] imageFormatList;
 }
 
-TEST(ImageFormats, isDepthFormat) {
+TEST(ImageFormats, WhenCheckingIsDepthFormatThenCorrectValueReturned) {
     for (auto &format : SurfaceFormats::readOnly20()) {
         EXPECT_FALSE(Image::isDepthFormat(format.OCLImageFormat));
     }
@@ -170,7 +180,7 @@ struct PackedYuvExtensionSupportedImageFormatsTest : public ::testing::TestWithP
     cl_int retVal;
 };
 
-TEST_P(PackedYuvExtensionSupportedImageFormatsTest, retrieveImageFormatsPackedYUV) {
+TEST_P(PackedYuvExtensionSupportedImageFormatsTest, WhenRetrievingImageFormatsPackedYUVThenListIsNonEmpty) {
     cl_uint numImageFormats = 0;
     uint64_t imageFormatsFlags;
     uint32_t imageFormats;
@@ -277,8 +287,8 @@ TEST_P(NV12ExtensionSupportedImageFormatsTest, givenNV12ExtensionWhenQueriedForI
         nullptr,
         &numImageFormats);
 
-    unsigned int clVersionSupport = device.get()->getHardwareInfo().capabilityTable.clVersionSupport;
-    size_t expectedNumReadOnlyFormats = (clVersionSupport >= 20) ? SurfaceFormats::readOnly20().size() : SurfaceFormats::readOnly12().size();
+    auto supportsOcl20Features = device.get()->getHardwareInfo().capabilityTable.supportsOcl21Features;
+    size_t expectedNumReadOnlyFormats = (supportsOcl20Features) ? SurfaceFormats::readOnly20().size() : SurfaceFormats::readOnly12().size();
 
     if (Image::isImage2dOr2dArray(imageFormats) && imageFormatsFlags == CL_MEM_READ_ONLY) {
         expectedNumReadOnlyFormats += SurfaceFormats::readOnlyDepth().size();
@@ -391,7 +401,7 @@ TEST_P(NV12ExtensionUnsupportedImageFormatsTest, givenNV12ExtensionWhenQueriedFo
     delete[] imageFormatList;
 }
 
-TEST_P(NV12ExtensionSupportedImageFormatsTest, retrieveLessImageFormatsThanAvailable) {
+TEST_P(NV12ExtensionSupportedImageFormatsTest, WhenRetrievingLessImageFormatsThanAvailableThenListIsNonEmpty) {
     cl_uint numImageFormats = 0;
     uint64_t imageFormatsFlags;
     uint32_t imageFormats;

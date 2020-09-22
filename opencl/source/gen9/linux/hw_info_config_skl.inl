@@ -5,9 +5,10 @@
  *
  */
 
-#include "shared/source/helpers/hw_cmds.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/os_interface/hw_info_config.h"
+
+#include "hw_cmds.h"
 
 namespace NEO {
 
@@ -17,12 +18,6 @@ int HwInfoConfigHw<IGFX_SKYLAKE>::configureHardwareCustom(HardwareInfo *hwInfo, 
         return 0;
     }
     GT_SYSTEM_INFO *gtSystemInfo = &hwInfo->gtSystemInfo;
-
-    if (gtSystemInfo->SubSliceCount > 3) {
-        gtSystemInfo->SliceCount = 2;
-    } else {
-        gtSystemInfo->SliceCount = 1;
-    }
 
     gtSystemInfo->VEBoxInfo.Instances.Bits.VEBox0Enabled = 1;
     gtSystemInfo->VDBoxInfo.Instances.Bits.VDBox0Enabled = 1;

@@ -11,7 +11,7 @@
 #include "opencl/source/event/event.h"
 #include "opencl/test/unit_test/command_queue/command_queue_fixture.h"
 #include "opencl/test/unit_test/command_queue/enqueue_fixture.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "test.h"
 
 using namespace NEO;
@@ -26,7 +26,7 @@ static OOMSetting oomSettings[] = {
     {false, true},
     {true, true}};
 
-struct OOMCommandQueueImageTest : public DeviceFixture,
+struct OOMCommandQueueImageTest : public ClDeviceFixture,
                                   public CommandQueueFixture,
                                   public ::testing::TestWithParam<OOMSetting> {
 
@@ -36,7 +36,7 @@ struct OOMCommandQueueImageTest : public DeviceFixture,
     }
 
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
         context = new MockContext(pClDevice);
         CommandQueueFixture::SetUp(context, pClDevice, 0);
 
@@ -68,7 +68,7 @@ struct OOMCommandQueueImageTest : public DeviceFixture,
         context->release();
 
         CommandQueueFixture::TearDown();
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     MockContext *context;
@@ -76,7 +76,7 @@ struct OOMCommandQueueImageTest : public DeviceFixture,
     Image *dstImage = nullptr;
 };
 
-HWTEST_P(OOMCommandQueueImageTest, enqueueCopyImage) {
+HWTEST_P(OOMCommandQueueImageTest, WhenCopyingImageThenMaxAvailableSpaceIsNotExceeded) {
     CommandQueueHw<FamilyType> cmdQ(context, pClDevice, 0, false);
 
     auto &commandStream = pCmdQ->getCS(1024);
@@ -100,7 +100,7 @@ HWTEST_P(OOMCommandQueueImageTest, enqueueCopyImage) {
     EXPECT_EQ(CL_SUCCESS, retVal2);
 }
 
-HWTEST_P(OOMCommandQueueImageTest, enqueueFillImage) {
+HWTEST_P(OOMCommandQueueImageTest, WhenFillingImageThenMaxAvailableSpaceIsNotExceeded) {
     CommandQueueHw<FamilyType> cmdQ(context, pClDevice, 0, false);
 
     auto &commandStream = pCmdQ->getCS(1024);
@@ -124,7 +124,7 @@ HWTEST_P(OOMCommandQueueImageTest, enqueueFillImage) {
     EXPECT_EQ(CL_SUCCESS, retVal2);
 }
 
-HWTEST_P(OOMCommandQueueImageTest, enqueueReadImage) {
+HWTEST_P(OOMCommandQueueImageTest, WhenReadingImageThenMaxAvailableSpaceIsNotExceeded) {
     CommandQueueHw<FamilyType> cmdQ(context, pClDevice, 0, false);
 
     auto &commandStream = pCmdQ->getCS(1024);
@@ -148,7 +148,7 @@ HWTEST_P(OOMCommandQueueImageTest, enqueueReadImage) {
     EXPECT_EQ(CL_SUCCESS, retVal2);
 }
 
-HWTEST_P(OOMCommandQueueImageTest, enqueueWriteImage) {
+HWTEST_P(OOMCommandQueueImageTest, WhenWritingImageThenMaxAvailableSpaceIsNotExceeded) {
     CommandQueueHw<FamilyType> cmdQ(context, pClDevice, 0, false);
 
     auto &commandStream = pCmdQ->getCS(1024);

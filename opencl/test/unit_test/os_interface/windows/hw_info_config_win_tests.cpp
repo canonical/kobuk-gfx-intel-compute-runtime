@@ -16,12 +16,10 @@
 #include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "test.h"
 
-#include "instrumentation.h"
-
 namespace NEO {
 
 template <>
-uint64_t HwInfoConfigHw<IGFX_UNKNOWN>::getHostMemCapabilities() {
+uint64_t HwInfoConfigHw<IGFX_UNKNOWN>::getHostMemCapabilities(const HardwareInfo * /*hwInfo*/) {
     return 0;
 }
 
@@ -54,6 +52,11 @@ template <>
 void HwInfoConfigHw<IGFX_UNKNOWN>::adjustPlatformForProductFamily(HardwareInfo *hwInfo) {
 }
 
+template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isEvenContextCountRequired() {
+    return false;
+}
+
 HwInfoConfigTestWindows::HwInfoConfigTestWindows() {
     this->executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     this->rootDeviceEnvironment = std::make_unique<RootDeviceEnvironment>(*executionEnvironment);
@@ -67,7 +70,7 @@ void HwInfoConfigTestWindows::SetUp() {
 
     osInterface.reset(new OSInterface());
 
-    std::unique_ptr<Wddm> wddm(Wddm::createWddm(nullptr, *rootDeviceEnvironment));
+    auto wddm = Wddm::createWddm(nullptr, *rootDeviceEnvironment);
     wddm->init();
     outHwInfo = *rootDeviceEnvironment->getHardwareInfo();
 }
@@ -101,7 +104,7 @@ TEST_F(HwInfoConfigTestWindows, givenInstrumentationForHardwareIsEnabledOrDisabl
     outHwInfo.capabilityTable.instrumentationEnabled = true;
     ret = hwConfig.configureHwInfo(&pInHwInfo, &outHwInfo, osInterface.get());
     ASSERT_EQ(0, ret);
-    EXPECT_TRUE(outHwInfo.capabilityTable.instrumentationEnabled == haveInstrumentation);
+    EXPECT_TRUE(outHwInfo.capabilityTable.instrumentationEnabled);
 }
 
 HWTEST_F(HwInfoConfigTestWindows, givenFtrIaCoherencyFlagWhenConfiguringHwInfoThenSetCoherencySupportCorrectly) {

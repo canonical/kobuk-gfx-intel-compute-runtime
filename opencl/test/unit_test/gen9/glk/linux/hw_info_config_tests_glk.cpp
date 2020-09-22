@@ -9,7 +9,6 @@
 #include "opencl/test/unit_test/os_interface/linux/hw_info_config_linux_tests.h"
 
 using namespace NEO;
-using namespace std;
 
 struct HwInfoConfigTestLinuxGlk : HwInfoConfigTestLinux {
     void SetUp() override {
@@ -118,6 +117,7 @@ GLKTEST_F(HwInfoConfigTestLinuxGlk, negative) {
     EXPECT_EQ(-1, ret);
 
     drm->StoredRetValForDeviceRevID = 0;
+    drm->failRetTopology = true;
     drm->StoredRetValForEUVal = -1;
     ret = hwInfoConfig->configureHwInfo(&pInHwInfo, &outHwInfo, osInterface);
     EXPECT_EQ(-1, ret);

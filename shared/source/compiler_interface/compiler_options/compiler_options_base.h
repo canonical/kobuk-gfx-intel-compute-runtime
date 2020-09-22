@@ -31,6 +31,7 @@ static constexpr ConstStringRef bindlessImages = "-cl-intel-use-bindless-images"
 static constexpr ConstStringRef uniformWorkgroupSize = "-cl-uniform-work-group-size";
 static constexpr ConstStringRef forceEmuInt32DivRem = "-cl-intel-force-emu-int32divrem";
 static constexpr ConstStringRef forceEmuInt32DivRemSP = "-cl-intel-force-emu-sp-int32divrem";
+static constexpr ConstStringRef allowZebin = "-allow-zebin";
 
 constexpr size_t nullterminateSize = 1U;
 constexpr size_t spaceSeparatorSize = 1U;
@@ -136,6 +137,16 @@ class ConstConcatenation {
     char storage[MaxLength + nullterminateSize] = {};
     size_t length = 0U;
 };
+
+template <size_t MaxLength>
+bool operator==(const ConstStringRef &lhs, const ConstConcatenation<MaxLength> &rhs) {
+    return lhs == rhs.operator ConstStringRef();
+}
+
+template <size_t MaxLength>
+bool operator==(const ConstConcatenation<MaxLength> &lhs, const ConstStringRef &rhs) {
+    return rhs == lhs;
+}
 
 bool contains(const char *options, ConstStringRef optionToFind);
 

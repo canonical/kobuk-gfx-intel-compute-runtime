@@ -11,9 +11,10 @@
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/platform_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
+#include "opencl/test/unit_test/mocks/mock_gmm.h"
 
 #include "gtest/gtest.h"
 
@@ -21,25 +22,25 @@
 
 using namespace NEO;
 
-class GetMemObjectInfo : public ::testing::Test, public PlatformFixture, public DeviceFixture {
-    using DeviceFixture::SetUp;
+class GetMemObjectInfo : public ::testing::Test, public PlatformFixture, public ClDeviceFixture {
+    using ClDeviceFixture::SetUp;
     using PlatformFixture::SetUp;
 
   public:
     void SetUp() override {
         PlatformFixture::SetUp();
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
         BufferDefaults::context = new MockContext;
     }
 
     void TearDown() override {
         delete BufferDefaults::context;
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
         PlatformFixture::TearDown();
     }
 };
 
-TEST_F(GetMemObjectInfo, InvalidFlags_returnsError) {
+TEST_F(GetMemObjectInfo, GivenInvalidParamsWhenGettingMemObjectInfoThenInvalidValueErrorIsReturned) {
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
 
     size_t sizeReturned = 0;
@@ -51,7 +52,20 @@ TEST_F(GetMemObjectInfo, InvalidFlags_returnsError) {
     EXPECT_EQ(CL_INVALID_VALUE, retVal);
 }
 
-TEST_F(GetMemObjectInfo, MEM_TYPE) {
+TEST_F(GetMemObjectInfo, GivenInvalidParametersWhenGettingMemObjectInfoThenValueSizeRetIsNotUpdated) {
+    auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
+
+    size_t sizeReturned = 0x1234;
+    auto retVal = buffer->getMemObjectInfo(
+        0,
+        0,
+        nullptr,
+        &sizeReturned);
+    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+    EXPECT_EQ(0x1234u, sizeReturned);
+}
+
+TEST_F(GetMemObjectInfo, GivenMemTypeWhenGettingMemObjectInfoThenCorrectValueIsReturned) {
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
 
     size_t sizeReturned = 0;
@@ -73,7 +87,7 @@ TEST_F(GetMemObjectInfo, MEM_TYPE) {
     EXPECT_EQ(static_cast<cl_mem_object_type>(CL_MEM_OBJECT_BUFFER), object_type);
 }
 
-TEST_F(GetMemObjectInfo, MEM_FLAGS) {
+TEST_F(GetMemObjectInfo, GivenMemFlagsWhenGettingMemObjectInfoThenCorrectValueIsReturned) {
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
 
     size_t sizeReturned = 0;
@@ -95,7 +109,7 @@ TEST_F(GetMemObjectInfo, MEM_FLAGS) {
     EXPECT_EQ(static_cast<cl_mem_flags>(CL_MEM_READ_WRITE), mem_flags);
 }
 
-TEST_F(GetMemObjectInfo, MEM_SIZE) {
+TEST_F(GetMemObjectInfo, GivenMemSizeWhenGettingMemObjectInfoThenCorrectValueIsReturned) {
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
 
     size_t sizeReturned = 0;
@@ -117,7 +131,7 @@ TEST_F(GetMemObjectInfo, MEM_SIZE) {
     EXPECT_EQ(buffer->getSize(), mem_size);
 }
 
-TEST_F(GetMemObjectInfo, MEM_HOST_PTR) {
+TEST_F(GetMemObjectInfo, GivenMemHostPtrWhenGettingMemObjectInfoThenCorrectValueIsReturned) {
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
 
     size_t sizeReturned = 0;
@@ -139,7 +153,7 @@ TEST_F(GetMemObjectInfo, MEM_HOST_PTR) {
     EXPECT_EQ(buffer->getHostPtr(), host_ptr);
 }
 
-TEST_F(GetMemObjectInfo, MEM_CONTEXT) {
+TEST_F(GetMemObjectInfo, GivenMemContextWhenGettingMemObjectInfoThenCorrectValueIsReturned) {
     MockContext context;
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create(&context));
 
@@ -162,7 +176,7 @@ TEST_F(GetMemObjectInfo, MEM_CONTEXT) {
     EXPECT_EQ(&context, contextReturned);
 }
 
-TEST_F(GetMemObjectInfo, MEM_USES_SVM_POINTER_FALSE) {
+TEST_F(GetMemObjectInfo, GivenMemUsesSvmPointerWhenGettingMemObjectInfoThenCorrectValueIsReturned) {
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<BufferUseHostPtr<>>::create());
 
     size_t sizeReturned = 0;
@@ -184,7 +198,7 @@ TEST_F(GetMemObjectInfo, MEM_USES_SVM_POINTER_FALSE) {
     EXPECT_EQ(static_cast<cl_bool>(CL_FALSE), usesSVMPointer);
 }
 
-TEST_F(GetMemObjectInfo, MEM_USES_SVM_POINTER_TRUE) {
+TEST_F(GetMemObjectInfo, GivenBufferWithMemUseHostPtrAndMemTypeWhenGettingMemObjectInfoThenCorrectValueIsReturned) {
     const ClDeviceInfo &devInfo = pClDevice->getDeviceInfo();
     if (devInfo.svmCapabilities != 0) {
         auto hostPtr = clSVMAlloc(BufferDefaults::context, CL_MEM_READ_WRITE, BufferUseHostPtr<>::sizeInBytes, 64);
@@ -223,7 +237,7 @@ TEST_F(GetMemObjectInfo, MEM_USES_SVM_POINTER_TRUE) {
     }
 }
 
-TEST_F(GetMemObjectInfo, MEM_OFFSET) {
+TEST_F(GetMemObjectInfo, GivenMemOffsetWhenGettingMemObjectInfoThenCorrectValueIsReturned) {
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
 
     size_t sizeReturned = 0;
@@ -245,7 +259,7 @@ TEST_F(GetMemObjectInfo, MEM_OFFSET) {
     EXPECT_EQ(0u, offset);
 }
 
-TEST_F(GetMemObjectInfo, MEM_ASSOCIATED_MEMOBJECT) {
+TEST_F(GetMemObjectInfo, GivenMemAssociatedMemobjectWhenGettingMemObjectInfoThenCorrectValueIsReturned) {
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
 
     size_t sizeReturned = 0;
@@ -267,7 +281,7 @@ TEST_F(GetMemObjectInfo, MEM_ASSOCIATED_MEMOBJECT) {
     EXPECT_EQ(nullptr, object);
 }
 
-TEST_F(GetMemObjectInfo, MEM_MAP_COUNT) {
+TEST_F(GetMemObjectInfo, GivenMemMapCountWhenGettingMemObjectInfoThenCorrectValueIsReturned) {
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
 
     size_t sizeReturned = 0;
@@ -289,7 +303,7 @@ TEST_F(GetMemObjectInfo, MEM_MAP_COUNT) {
     EXPECT_EQ(sizeof(mapCount), sizeReturned);
 }
 
-TEST_F(GetMemObjectInfo, MEM_REFERENCE_COUNT) {
+TEST_F(GetMemObjectInfo, GivenMemReferenceCountWhenGettingMemObjectInfoThenCorrectValueIsReturned) {
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
 
     size_t sizeReturned = 0;
@@ -309,6 +323,40 @@ TEST_F(GetMemObjectInfo, MEM_REFERENCE_COUNT) {
         &sizeReturned);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(sizeof(refCount), sizeReturned);
+}
+
+TEST_F(GetMemObjectInfo, GivenValidBufferWhenGettingCompressionOfMemObjectThenCorrectValueIsReturned) {
+    auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
+    auto graphicsAllocation = buffer->getMultiGraphicsAllocation().getDefaultGraphicsAllocation();
+
+    size_t sizeReturned = 0;
+    cl_bool usesCompression{};
+    cl_int retVal{};
+    retVal = buffer->getMemObjectInfo(
+        CL_MEM_USES_COMPRESSION_INTEL,
+        0,
+        nullptr,
+        &sizeReturned);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    ASSERT_EQ(sizeof(cl_bool), sizeReturned);
+
+    graphicsAllocation->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
+    retVal = buffer->getMemObjectInfo(
+        CL_MEM_USES_COMPRESSION_INTEL,
+        sizeReturned,
+        &usesCompression,
+        nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(cl_bool{CL_TRUE}, usesCompression);
+
+    graphicsAllocation->setAllocationType(GraphicsAllocation::AllocationType::BUFFER);
+    retVal = buffer->getMemObjectInfo(
+        CL_MEM_USES_COMPRESSION_INTEL,
+        sizeReturned,
+        &usesCompression,
+        nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(cl_bool{CL_FALSE}, usesCompression);
 }
 
 class GetMemObjectInfoLocalMemory : public GetMemObjectInfo {

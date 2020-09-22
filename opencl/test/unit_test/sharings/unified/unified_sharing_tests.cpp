@@ -5,13 +5,14 @@
  *
  */
 
+#include "shared/test/unit_test/helpers/variable_backup.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
+
 #include "opencl/source/sharings/unified/enable_unified.h"
 #include "opencl/source/sharings/unified/unified_buffer.h"
 #include "opencl/source/sharings/unified/unified_sharing.h"
-#include "opencl/test/unit_test/helpers/variable_backup.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/sharings/unified/unified_sharing_fixtures.h"
 #include "test.h"
@@ -131,8 +132,8 @@ TEST_F(UnifiedSharingTestsWithMemoryManager, givenUnifiedSharingHandlerWhenAcqui
             UnifiedSharing::synchronizeObject(updateData);
             synchronizeObjectCalled++;
         }
-        void releaseResource(MemObj *memObject) override {
-            UnifiedSharing::releaseResource(memObject);
+        void releaseResource(MemObj *memObject, uint32_t rootDeviceIndex) override {
+            UnifiedSharing::releaseResource(memObject, rootDeviceIndex);
             releaseResourceCalled++;
         };
     };
@@ -151,16 +152,16 @@ TEST_F(UnifiedSharingTestsWithMemoryManager, givenUnifiedSharingHandlerWhenAcqui
 
     ASSERT_EQ(0u, sharingHandler->synchronizeObjectCalled);
 
-    ASSERT_EQ(CL_SUCCESS, sharingHandler->acquire(buffer.get()));
+    ASSERT_EQ(CL_SUCCESS, sharingHandler->acquire(buffer.get(), context->getDevice(0)->getRootDeviceIndex()));
     EXPECT_EQ(1u, sharingHandler->synchronizeObjectCalled);
 
-    ASSERT_EQ(CL_SUCCESS, sharingHandler->acquire(buffer.get()));
+    ASSERT_EQ(CL_SUCCESS, sharingHandler->acquire(buffer.get(), context->getDevice(0)->getRootDeviceIndex()));
     EXPECT_EQ(1u, sharingHandler->synchronizeObjectCalled);
 
     ASSERT_EQ(0u, sharingHandler->releaseResourceCalled);
-    sharingHandler->release(buffer.get());
+    sharingHandler->release(buffer.get(), context->getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(0u, sharingHandler->releaseResourceCalled);
-    sharingHandler->release(buffer.get());
+    sharingHandler->release(buffer.get(), context->getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(1u, sharingHandler->releaseResourceCalled);
 }
 
@@ -222,7 +223,7 @@ TEST_F(UnifiedSharingCreateAllocationTests, givenWindowsSharedHandleWhenCreateGr
     EXPECT_FALSE(memoryManager->createFromNTHandleCalled);
     EXPECT_TRUE(memoryManager->createFromSharedHandleCalled);
     EXPECT_EQ(toOsHandle(desc.handle), memoryManager->handle);
-    const AllocationProperties expectedProperties{0u, false, 0u, allocationType, false};
+    const AllocationProperties expectedProperties{0u, false, 0u, allocationType, false, {}};
     EXPECT_EQ(expectedProperties.allFlags, memoryManager->properties->allFlags);
 }
 
@@ -236,6 +237,6 @@ TEST_F(UnifiedSharingCreateAllocationTests, givenLinuxSharedHandleWhenCreateGrap
     EXPECT_FALSE(memoryManager->createFromNTHandleCalled);
     EXPECT_TRUE(memoryManager->createFromSharedHandleCalled);
     EXPECT_EQ(toOsHandle(desc.handle), memoryManager->handle);
-    const AllocationProperties expectedProperties{0u, false, 0u, allocationType, false};
+    const AllocationProperties expectedProperties{0u, false, 0u, allocationType, false, {}};
     EXPECT_EQ(expectedProperties.allFlags, memoryManager->properties->allFlags);
 }

@@ -8,6 +8,7 @@
 #include "shared/source/os_interface/windows/wddm/wddm.h"
 
 #include "shared/source/command_stream/preemption.h"
+#include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
@@ -67,6 +68,10 @@ Wddm::~Wddm() {
 }
 
 bool Wddm::init() {
+    if (!rootDeviceEnvironment.osInterface) {
+        rootDeviceEnvironment.osInterface = std::make_unique<OSInterface>();
+        rootDeviceEnvironment.osInterface->get()->setWddm(this);
+    }
     if (!queryAdapterInfo()) {
         return false;
     }
@@ -139,7 +144,7 @@ bool Wddm::queryAdapterInfo() {
         memcpy_s(&gfxPartition, sizeof(gfxPartition), &adapterInfo.GfxPartition, sizeof(GMM_GFX_PARTITIONING));
         memcpy_s(&adapterBDF, sizeof(adapterBDF), &adapterInfo.stAdapterBDF, sizeof(ADAPTER_BDF));
 
-        deviceRegistryPath = adapterInfo.DeviceRegistryPath;
+        deviceRegistryPath = std::string(adapterInfo.DeviceRegistryPath, sizeof(adapterInfo.DeviceRegistryPath)).c_str();
 
         systemSharedMemory = adapterInfo.SystemSharedMemory;
         dedicatedVideoMemory = adapterInfo.DedicatedVideoMemory;
@@ -240,6 +245,20 @@ std::unique_ptr<HwDeviceId> createHwDeviceIdFromAdapterLuid(OsEnvironmentWin &os
         return nullptr;
     }
 
+    D3DKMT_ADAPTERTYPE queryAdapterType = {};
+    QueryAdapterInfo.hAdapter = OpenAdapterData.hAdapter;
+    QueryAdapterInfo.Type = KMTQAITYPE_ADAPTERTYPE;
+    QueryAdapterInfo.pPrivateDriverData = &queryAdapterType;
+    QueryAdapterInfo.PrivateDriverDataSize = sizeof(queryAdapterType);
+    status = osEnvironment.gdi->queryAdapterInfo(&QueryAdapterInfo);
+    if (status != STATUS_SUCCESS) {
+        DEBUG_BREAK_IF("queryAdapterInfo failed");
+        return nullptr;
+    }
+    if (0 == queryAdapterType.RenderSupported) {
+        return nullptr;
+    }
+
     return std::make_unique<HwDeviceId>(OpenAdapterData.hAdapter, adapterLuid, &osEnvironment);
 }
 
@@ -258,58 +277,55 @@ std::vector<std::unique_ptr<HwDeviceId>> OSInterface::discoverDevices(ExecutionE
 
     IDXGIFactory1 *pFactory = nullptr;
     IDXGIAdapter1 *pAdapter = nullptr;
-    DWORD iDevNum = 0;
 
     HRESULT hr = Wddm::createDxgiFactory(__uuidof(IDXGIFactory), (void **)(&pFactory));
     if ((hr != S_OK) || (pFactory == nullptr)) {
         return hwDeviceIds;
     }
 
-    while (pFactory->EnumAdapters1(iDevNum++, &pAdapter) != DXGI_ERROR_NOT_FOUND) {
-        hr = pAdapter->GetDesc1(&OpenAdapterDesc);
-        if (hr == S_OK) {
-            bool createHwDeviceId = false;
-            // Check for adapters that include either "Intel" or "Citrix" (which may
-            // be virtualizing one of our adapters) in the description
-            if ((wcsstr(OpenAdapterDesc.Description, L"Intel") != 0) ||
-                (wcsstr(OpenAdapterDesc.Description, L"Citrix") != 0) ||
-                (wcsstr(OpenAdapterDesc.Description, L"Virtual Render") != 0)) {
-                char deviceId[16];
-                sprintf_s(deviceId, "%X", OpenAdapterDesc.DeviceId);
-                createHwDeviceId = (DebugManager.flags.ForceDeviceId.get() == "unk") || (DebugManager.flags.ForceDeviceId.get() == deviceId);
-            }
-            if (createHwDeviceId) {
-                auto hwDeviceId = createHwDeviceIdFromAdapterLuid(*osEnvironment, OpenAdapterDesc.AdapterLuid);
-                if (hwDeviceId) {
-                    hwDeviceIds.push_back(std::move(hwDeviceId));
-                }
-            }
-        }
-        // Release all the non-Intel adapters
-        pAdapter->Release();
-        pAdapter = nullptr;
+    size_t numRootDevices = 0u;
+    if (DebugManager.flags.CreateMultipleRootDevices.get()) {
+        numRootDevices = DebugManager.flags.CreateMultipleRootDevices.get();
     }
 
-    if (pAdapter != nullptr) {
-        pAdapter->Release();
-        pAdapter = nullptr;
-    }
+    do {
+        DWORD iDevNum = 0;
+        while (pFactory->EnumAdapters1(iDevNum++, &pAdapter) != DXGI_ERROR_NOT_FOUND) {
+            hr = pAdapter->GetDesc1(&OpenAdapterDesc);
+            if (hr == S_OK) {
+                bool createHwDeviceId = false;
+                // Check for adapters that include either "Intel" or "Citrix" (which may
+                // be virtualizing one of our adapters) in the description
+                if ((wcsstr(OpenAdapterDesc.Description, L"Intel") != 0) ||
+                    (wcsstr(OpenAdapterDesc.Description, L"Citrix") != 0) ||
+                    (wcsstr(OpenAdapterDesc.Description, L"Virtual Render") != 0)) {
+                    char deviceId[16];
+                    sprintf_s(deviceId, "%X", OpenAdapterDesc.DeviceId);
+                    createHwDeviceId = (DebugManager.flags.ForceDeviceId.get() == "unk") || (DebugManager.flags.ForceDeviceId.get() == deviceId);
+                }
+                if (createHwDeviceId) {
+                    auto hwDeviceId = createHwDeviceIdFromAdapterLuid(*osEnvironment, OpenAdapterDesc.AdapterLuid);
+                    if (hwDeviceId) {
+                        hwDeviceIds.push_back(std::move(hwDeviceId));
+                    }
+                }
+            }
+            // Release all the non-Intel adapters
+            pAdapter->Release();
+            pAdapter = nullptr;
+            if (!hwDeviceIds.empty() && hwDeviceIds.size() == numRootDevices) {
+                break;
+            }
+        }
+        if (hwDeviceIds.empty()) {
+            break;
+        }
+    } while (hwDeviceIds.size() < numRootDevices);
+
     if (pFactory != nullptr) {
         pFactory->Release();
         pFactory = nullptr;
     }
-    size_t numRootDevices = 1u;
-    if (DebugManager.flags.CreateMultipleRootDevices.get()) {
-        numRootDevices = DebugManager.flags.CreateMultipleRootDevices.get();
-    }
-    if (hwDeviceIds.empty()) {
-        return hwDeviceIds;
-    }
-
-    while (hwDeviceIds.size() < numRootDevices) {
-        hwDeviceIds.push_back(std::make_unique<HwDeviceId>(hwDeviceIds[0]->getAdapter(), hwDeviceIds[0]->getAdapterLuid(), osEnvironment));
-    }
-
     return hwDeviceIds;
 }
 
@@ -498,7 +514,7 @@ bool Wddm::createAllocation64k(const Gmm *gmm, D3DKMT_HANDLE &outHandle) {
     CreateAllocation.NumAllocations = 1;
     CreateAllocation.pPrivateRuntimeData = NULL;
     CreateAllocation.pPrivateDriverData = NULL;
-    CreateAllocation.Flags.CreateResource = TRUE;
+    CreateAllocation.Flags.CreateResource = FALSE;
     CreateAllocation.pAllocationInfo = &AllocationInfo;
     CreateAllocation.hDevice = device;
 
@@ -603,6 +619,13 @@ bool Wddm::destroyAllocations(const D3DKMT_HANDLE *handles, uint32_t allocationC
 
     return status == STATUS_SUCCESS;
 }
+bool Wddm::verifySharedHandle(D3DKMT_HANDLE osHandle) {
+    D3DKMT_QUERYRESOURCEINFO QueryResourceInfo = {0};
+    QueryResourceInfo.hDevice = device;
+    QueryResourceInfo.hGlobalShare = osHandle;
+    auto status = getGdi()->queryResourceInfo(&QueryResourceInfo);
+    return status == STATUS_SUCCESS;
+}
 
 bool Wddm::openSharedHandle(D3DKMT_HANDLE handle, WddmAllocation *alloc) {
     D3DKMT_QUERYRESOURCEINFO QueryResourceInfo = {0};
@@ -643,6 +666,14 @@ bool Wddm::openSharedHandle(D3DKMT_HANDLE handle, WddmAllocation *alloc) {
     alloc->setDefaultGmm(new Gmm(rootDeviceEnvironment.getGmmClientContext(), static_cast<GMM_RESOURCE_INFO *>(resourceInfo)));
 
     return true;
+}
+
+bool Wddm::verifyNTHandle(HANDLE handle) {
+    D3DKMT_QUERYRESOURCEINFOFROMNTHANDLE queryResourceInfoFromNtHandle = {};
+    queryResourceInfoFromNtHandle.hDevice = device;
+    queryResourceInfoFromNtHandle.hNtHandle = handle;
+    auto status = getGdi()->queryResourceInfoFromNtHandle(&queryResourceInfoFromNtHandle);
+    return status == STATUS_SUCCESS;
 }
 
 bool Wddm::openNTHandle(HANDLE handle, WddmAllocation *alloc) {
@@ -748,6 +779,10 @@ bool Wddm::createContext(OsContextWin &osContext) {
 
     status = getGdi()->createContext(&CreateContext);
     osContext.setWddmContextHandle(CreateContext.hContext);
+
+    printDebugString(DebugManager.flags.PrintDebugMessages.get(), stdout,
+                     "\nCreated Wddm context. Status: :%lu, engine: %u, contextId: %u, deviceBitfield: %lu \n",
+                     status, osContext.getEngineType(), osContext.getContextId(), osContext.getDeviceBitfield().to_ulong());
 
     return status == STATUS_SUCCESS;
 }
@@ -882,6 +917,10 @@ PFND3DKMT_ESCAPE Wddm::getEscapeHandle() const {
     return getGdi()->escape;
 }
 
+bool Wddm::verifyAdapterLuid(LUID adapterLuid) const {
+    return adapterLuid.HighPart == hwDeviceId->getAdapterLuid().HighPart && adapterLuid.LowPart == hwDeviceId->getAdapterLuid().LowPart;
+}
+
 VOID *Wddm::registerTrimCallback(PFND3DKMT_TRIMNOTIFICATIONCALLBACK callback, WddmResidencyController &residencyController) {
     if (DebugManager.flags.DoNotRegisterTrimCallback.get()) {
         return nullptr;
@@ -995,7 +1034,7 @@ bool Wddm::configureDeviceAddressSpace() {
                        ? maximumApplicationAddress + 1u
                        : 0u;
 
-    bool obtainMinAddress = gfxPlatform->eRenderCoreFamily == IGFX_GEN12LP_CORE;
+    bool obtainMinAddress = rootDeviceEnvironment.getHardwareInfo()->platform.eRenderCoreFamily == IGFX_GEN12LP_CORE;
     return gmmMemory->configureDevice(getAdapter(), device, getGdi()->escape, svmSize, featureTable->ftrL3IACoherency, minAddress, obtainMinAddress);
 }
 
@@ -1008,7 +1047,11 @@ void Wddm::waitOnPagingFenceFromCpu() {
 }
 
 void Wddm::setGmmInputArg(void *args) {
-    reinterpret_cast<GMM_INIT_IN_ARGS *>(args)->stAdapterBDF = this->adapterBDF;
+    auto gmmInArgs = reinterpret_cast<GMM_INIT_IN_ARGS *>(args);
+
+    gmmInArgs->stAdapterBDF = this->adapterBDF;
+    gmmInArgs->ClientType = GMM_CLIENT::GMM_OCL_VISTA;
+    gmmInArgs->DeviceRegistryPath = const_cast<char *>(deviceRegistryPath.c_str());
 }
 
 void Wddm::updatePagingFenceValue(uint64_t newPagingFenceValue) {
@@ -1034,5 +1077,4 @@ void Wddm::createPagingFenceLogger() {
         residencyLogger = std::make_unique<WddmResidencyLogger>(device, pagingFenceAddress);
     }
 }
-
 } // namespace NEO

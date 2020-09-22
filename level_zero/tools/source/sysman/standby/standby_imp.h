@@ -6,33 +6,30 @@
  */
 
 #pragma once
+#include "shared/source/helpers/non_copyable_or_moveable.h"
 
-#include <level_zero/zet_api.h>
+#include <level_zero/zes_api.h>
 
 #include "os_standby.h"
 #include "standby.h"
 
 namespace L0 {
 
-class StandbyImp : public Standby {
+class StandbyImp : public Standby, NEO::NonCopyableOrMovableClass {
   public:
-    ze_result_t standbyGetProperties(zet_standby_properties_t *pProperties) override;
-    ze_result_t standbyGetMode(zet_standby_promo_mode_t *pMode) override;
-    ze_result_t standbySetMode(const zet_standby_promo_mode_t mode) override;
+    ze_result_t standbyGetProperties(zes_standby_properties_t *pProperties) override;
+    ze_result_t standbyGetMode(zes_standby_promo_mode_t *pMode) override;
+    ze_result_t standbySetMode(const zes_standby_promo_mode_t mode) override;
 
+    StandbyImp() = default;
     StandbyImp(OsSysman *pOsSysman);
     ~StandbyImp() override;
+    OsStandby *pOsStandby = nullptr;
 
-    StandbyImp(OsStandby *pOsStandby) : pOsStandby(pOsStandby) { init(); };
-
-    // Don't allow copies of the StandbyImp object
-    StandbyImp(const StandbyImp &obj) = delete;
-    StandbyImp &operator=(const StandbyImp &obj) = delete;
+    void init();
 
   private:
-    OsStandby *pOsStandby;
-    zet_standby_properties_t standbyProperties;
-    void init();
+    zes_standby_properties_t standbyProperties = {};
 };
 
 } // namespace L0

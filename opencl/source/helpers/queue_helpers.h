@@ -84,8 +84,17 @@ cl_int getQueueInfo(QueueType *queue,
             retVal = changeGetInfoStatusToCLResultType(getInfoHelper.set<cl_uint>(devQ->getQueueSize()));
             break;
         }
-        retVal = CL_INVALID_VALUE;
+        retVal = CL_INVALID_COMMAND_QUEUE;
         break;
+    case CL_QUEUE_PROPERTIES_ARRAY: {
+        auto &propertiesVector = queue->getPropertiesVector();
+        auto source = propertiesVector.data();
+        auto sourceSize = propertiesVector.size() * sizeof(cl_queue_properties);
+        auto getInfoStatus = GetInfo::getInfo(paramValue, paramValueSize, source, sourceSize);
+        retVal = changeGetInfoStatusToCLResultType(getInfoStatus);
+        GetInfo::setParamValueReturnSize(paramValueSizeRet, sourceSize, getInfoStatus);
+        break;
+    }
     default:
         if (std::is_same<QueueType, class CommandQueue>::value) {
             auto cmdQ = reinterpret_cast<CommandQueue *>(queue);
@@ -116,17 +125,16 @@ void getQueueInfo(cl_command_queue commandQueue,
 template <typename returnType>
 returnType getCmdQueueProperties(const cl_queue_properties *properties,
                                  cl_queue_properties propertyName = CL_QUEUE_PROPERTIES) {
-    returnType retVal = 0;
-
-    while (properties != nullptr && *properties != 0) {
-        if (*properties == propertyName) {
-            ++properties;
-            retVal = static_cast<returnType>(*properties);
-            return retVal;
+    if (properties != nullptr) {
+        while (*properties != 0) {
+            if (*properties == propertyName) {
+                return static_cast<returnType>(*(properties + 1));
+            }
+            properties += 2;
         }
-        ++properties;
     }
-    return retVal;
+
+    return 0;
 }
 bool isExtraToken(const cl_queue_properties *property);
 bool verifyExtraTokens(ClDevice *&device, Context &context, const cl_queue_properties *properties);

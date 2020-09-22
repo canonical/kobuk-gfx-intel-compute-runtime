@@ -5,13 +5,13 @@
  *
  */
 
+#include "shared/test/unit_test/cmd_parse/hw_parse.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 
 #include "opencl/source/api/api.h"
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/test/unit_test/command_queue/enqueue_fixture.h"
 #include "opencl/test/unit_test/fixtures/hello_world_fixture.h"
-#include "opencl/test/unit_test/helpers/hw_parse.h"
 #include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
 #include "opencl/test/unit_test/mocks/mock_submissions_aggregator.h"
@@ -552,7 +552,7 @@ HWTEST_F(EnqueueKernelTest, givenEnqueueWithGlobalWorkSizeWhenZeroValueIsPassedI
     size_t gws[3] = {0, 0, 0};
     MockKernelWithInternals mockKernel(*pClDevice);
     auto ret = pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
-    auto expected = (pClDevice->getEnabledClVersion() < 21 ? CL_INVALID_GLOBAL_WORK_SIZE : CL_SUCCESS);
+    auto expected = (pClDevice->areOcl21FeaturesEnabled() == false ? CL_INVALID_GLOBAL_WORK_SIZE : CL_SUCCESS);
     EXPECT_EQ(expected, ret);
 }
 
@@ -575,9 +575,10 @@ HWTEST_F(EnqueueKernelTest, givenCommandStreamReceiverInBatchingModeWhenEnqueueK
     //Two more surfaces from preemptionAllocation and SipKernel
     size_t csrSurfaceCount = (pDevice->getPreemptionMode() == PreemptionMode::MidThread) ? 2 : 0;
     size_t timestampPacketSurfacesCount = mockCsr->peekTimestampPacketWriteEnabled() ? 1 : 0;
+    size_t fenceSurfaceCount = mockCsr->globalFenceAllocation ? 1 : 0;
 
     EXPECT_EQ(0, mockCsr->flushCalledCount);
-    EXPECT_EQ(5u + csrSurfaceCount + timestampPacketSurfacesCount, cmdBuffer->surfaces.size());
+    EXPECT_EQ(5u + csrSurfaceCount + timestampPacketSurfacesCount + fenceSurfaceCount, cmdBuffer->surfaces.size());
 }
 
 HWTEST_F(EnqueueKernelTest, givenReducedAddressSpaceGraphicsAllocationForHostPtrWithL3FlushRequiredWhenEnqueueKernelIsCalledThenFlushIsCalledForReducedAddressSpacePlatforms) {
@@ -591,7 +592,7 @@ HWTEST_F(EnqueueKernelTest, givenReducedAddressSpaceGraphicsAllocationForHostPtr
     auto memoryManager = mockCsr->getMemoryManager();
     uint32_t hostPtr[10]{};
 
-    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
+    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false, device->getDeviceBitfield()};
     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = true;
     auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
     MockKernelWithInternals mockKernel(*device, context);
@@ -615,7 +616,7 @@ HWTEST_F(EnqueueKernelTest, givenReducedAddressSpaceGraphicsAllocationForHostPtr
     auto memoryManager = mockCsr->getMemoryManager();
     uint32_t hostPtr[10]{};
 
-    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
+    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false, device->getDeviceBitfield()};
     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = false;
     auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
     MockKernelWithInternals mockKernel(*device, context);
@@ -640,7 +641,7 @@ HWTEST_F(EnqueueKernelTest, givenFullAddressSpaceGraphicsAllocationWhenEnqueueKe
     auto memoryManager = mockCsr->getMemoryManager();
     uint32_t hostPtr[10]{};
 
-    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false};
+    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false, device->getDeviceBitfield()};
     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = false;
     auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
     MockKernelWithInternals mockKernel(*device, context);
@@ -1256,4 +1257,153 @@ HWTEST_F(EnqueueKernelTest, whenEnqueueKernelWithEngineHintsThenEpilogRequiredIs
 
     EXPECT_EQ(csr.recordedDispatchFlags.epilogueRequired, true);
     EXPECT_EQ(csr.recordedDispatchFlags.engineHints, 1u);
+}
+
+HWTEST_F(EnqueueKernelTest, givenPauseOnEnqueueFlagSetWhenDispatchWalkersThenInsertPauseCommandsAroundSpecifiedEnqueue) {
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+    DebugManagerStateRestore restore;
+    DebugManager.flags.PauseOnEnqueue.set(1);
+
+    auto &csr = pDevice->getGpgpuCommandStreamReceiver();
+    auto debugPauseStateAddress = csr.getDebugPauseStateGPUAddress();
+
+    MockKernelWithInternals mockKernel(*pClDevice);
+
+    size_t off[3] = {0, 0, 0};
+    size_t gws[3] = {1, 1, 1};
+
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(*pCmdQ);
+    auto &cmdList = hwParser.cmdList;
+
+    auto semaphore = find<MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
+    bool semaphoreBeforeWalkerFound = false;
+    bool semaphoreAfterWalkerFound = false;
+    while (semaphore != cmdList.end()) {
+        auto semaphoreCmd = genCmdCast<MI_SEMAPHORE_WAIT *>(*semaphore);
+        if (static_cast<uint32_t>(DebugPauseState::hasUserStartConfirmation) == semaphoreCmd->getSemaphoreDataDword()) {
+            EXPECT_EQ(debugPauseStateAddress, semaphoreCmd->getSemaphoreGraphicsAddress());
+            EXPECT_EQ(MI_SEMAPHORE_WAIT::COMPARE_OPERATION::COMPARE_OPERATION_SAD_EQUAL_SDD, semaphoreCmd->getCompareOperation());
+            EXPECT_EQ(MI_SEMAPHORE_WAIT::WAIT_MODE::WAIT_MODE_POLLING_MODE, semaphoreCmd->getWaitMode());
+
+            semaphoreBeforeWalkerFound = true;
+        }
+
+        if (static_cast<uint32_t>(DebugPauseState::hasUserEndConfirmation) == semaphoreCmd->getSemaphoreDataDword()) {
+            EXPECT_TRUE(semaphoreBeforeWalkerFound);
+            EXPECT_EQ(debugPauseStateAddress, semaphoreCmd->getSemaphoreGraphicsAddress());
+            EXPECT_EQ(MI_SEMAPHORE_WAIT::COMPARE_OPERATION::COMPARE_OPERATION_SAD_EQUAL_SDD, semaphoreCmd->getCompareOperation());
+            EXPECT_EQ(MI_SEMAPHORE_WAIT::WAIT_MODE::WAIT_MODE_POLLING_MODE, semaphoreCmd->getWaitMode());
+
+            semaphoreAfterWalkerFound = true;
+            break;
+        }
+
+        semaphore = find<MI_SEMAPHORE_WAIT *>(++semaphore, cmdList.end());
+    }
+
+    EXPECT_TRUE(semaphoreAfterWalkerFound);
+
+    auto pipeControl = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+    bool pipeControlBeforeWalkerFound = false;
+    bool pipeControlAfterWalkerFound = false;
+    while (pipeControl != cmdList.end()) {
+        auto pipeControlCmd = genCmdCast<PIPE_CONTROL *>(*pipeControl);
+        if (static_cast<uint32_t>(DebugPauseState::waitingForUserStartConfirmation) == pipeControlCmd->getImmediateData()) {
+            EXPECT_TRUE(pipeControlCmd->getCommandStreamerStallEnable());
+            EXPECT_TRUE(pipeControlCmd->getDcFlushEnable());
+            EXPECT_EQ(static_cast<uint32_t>(debugPauseStateAddress & 0x0000FFFFFFFFULL), pipeControlCmd->getAddress());
+            EXPECT_EQ(static_cast<uint32_t>(debugPauseStateAddress >> 32), pipeControlCmd->getAddressHigh());
+            EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, pipeControlCmd->getPostSyncOperation());
+
+            pipeControlBeforeWalkerFound = true;
+        }
+
+        if (static_cast<uint32_t>(DebugPauseState::waitingForUserEndConfirmation) == pipeControlCmd->getImmediateData()) {
+            EXPECT_TRUE(pipeControlBeforeWalkerFound);
+            EXPECT_TRUE(pipeControlCmd->getCommandStreamerStallEnable());
+            EXPECT_TRUE(pipeControlCmd->getDcFlushEnable());
+            EXPECT_EQ(static_cast<uint32_t>(debugPauseStateAddress & 0x0000FFFFFFFFULL), pipeControlCmd->getAddress());
+            EXPECT_EQ(static_cast<uint32_t>(debugPauseStateAddress >> 32), pipeControlCmd->getAddressHigh());
+            EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, pipeControlCmd->getPostSyncOperation());
+
+            pipeControlAfterWalkerFound = true;
+            break;
+        }
+
+        pipeControl = find<PIPE_CONTROL *>(++pipeControl, cmdList.end());
+    }
+
+    EXPECT_TRUE(pipeControlAfterWalkerFound);
+}
+
+HWTEST_F(EnqueueKernelTest, givenPauseOnEnqueueFlagSetWhenDispatchWalkersThenDontInsertPauseCommandsWhenUsingSpecialQueue) {
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+    DebugManagerStateRestore restore;
+    DebugManager.flags.PauseOnEnqueue.set(0);
+
+    auto &csr = pDevice->getGpgpuCommandStreamReceiver();
+    auto debugPauseStateAddress = csr.getDebugPauseStateGPUAddress();
+
+    pCmdQ->setIsSpecialCommandQueue(true);
+
+    MockKernelWithInternals mockKernel(*pClDevice);
+
+    size_t off[3] = {0, 0, 0};
+    size_t gws[3] = {1, 1, 1};
+
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(*pCmdQ);
+    auto &cmdList = hwParser.cmdList;
+
+    auto semaphore = find<MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
+    bool semaphoreBeforeWalkerFound = false;
+    bool semaphoreAfterWalkerFound = false;
+    while (semaphore != cmdList.end()) {
+        auto semaphoreCmd = genCmdCast<MI_SEMAPHORE_WAIT *>(*semaphore);
+        if (static_cast<uint32_t>(DebugPauseState::hasUserStartConfirmation) == semaphoreCmd->getSemaphoreDataDword() &&
+            debugPauseStateAddress == semaphoreCmd->getSemaphoreGraphicsAddress()) {
+            semaphoreBeforeWalkerFound = true;
+        }
+
+        if (static_cast<uint32_t>(DebugPauseState::hasUserEndConfirmation) == semaphoreCmd->getSemaphoreDataDword() &&
+            debugPauseStateAddress == semaphoreCmd->getSemaphoreGraphicsAddress()) {
+            semaphoreAfterWalkerFound = true;
+        }
+
+        semaphore = find<MI_SEMAPHORE_WAIT *>(++semaphore, cmdList.end());
+    }
+
+    EXPECT_FALSE(semaphoreBeforeWalkerFound);
+    EXPECT_FALSE(semaphoreAfterWalkerFound);
+
+    auto pipeControl = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+    bool pipeControlBeforeWalkerFound = false;
+    bool pipeControlAfterWalkerFound = false;
+    while (pipeControl != cmdList.end()) {
+        auto pipeControlCmd = genCmdCast<PIPE_CONTROL *>(*pipeControl);
+        if (static_cast<uint32_t>(DebugPauseState::waitingForUserStartConfirmation) == pipeControlCmd->getImmediateData()) {
+            pipeControlBeforeWalkerFound = true;
+        }
+
+        if (static_cast<uint32_t>(DebugPauseState::waitingForUserEndConfirmation) == pipeControlCmd->getImmediateData()) {
+            pipeControlAfterWalkerFound = true;
+        }
+
+        pipeControl = find<PIPE_CONTROL *>(++pipeControl, cmdList.end());
+    }
+
+    EXPECT_FALSE(pipeControlBeforeWalkerFound);
+    EXPECT_FALSE(pipeControlAfterWalkerFound);
+
+    pCmdQ->setIsSpecialCommandQueue(false);
 }

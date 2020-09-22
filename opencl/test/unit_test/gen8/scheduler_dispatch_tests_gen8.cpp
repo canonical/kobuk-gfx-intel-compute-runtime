@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/built_ins/built_ins.h"
+#include "shared/test/unit_test/cmd_parse/hw_parse.h"
 
 #include "opencl/source/command_queue/enqueue_kernel.h"
 #include "opencl/source/command_queue/gpgpu_walker.h"
@@ -14,7 +15,6 @@
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/scheduler/scheduler_kernel.h"
 #include "opencl/test/unit_test/fixtures/execution_model_fixture.h"
-#include "opencl/test/unit_test/helpers/hw_parse.h"
 #include "test.h"
 
 #include "gtest/gtest.h"
@@ -27,7 +27,7 @@ BDWTEST_F(BdwSchedulerTest, givenCallToDispatchSchedulerWhenPipeControlWithCSSta
 
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
-    if (pClDevice->getSupportedClVersion() >= 20) {
+    if (pClDevice->areOcl21FeaturesSupported()) {
         DeviceQueueHw<FamilyType> *pDevQueueHw = castToObject<DeviceQueueHw<FamilyType>>(pDevQueue);
         SchedulerKernel &scheduler = context->getSchedulerKernel();
 

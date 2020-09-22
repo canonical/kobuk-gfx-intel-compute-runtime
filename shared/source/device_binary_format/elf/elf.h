@@ -76,7 +76,7 @@ enum SECTION_HEADER_TYPE : uint32_t {
     SHT_NUM = 19,                           // number of defined types
     SHT_LOOS = 0x60000000,                  // start of os-specifc
     SHT_OPENCL_RESERVED_START = 0xff000000, // start of Intel OCL SHT_TYPES
-    SHT_OPENCL_RESERVED_END = 0xff00000a    // end of Intel OCL SHT_TYPES
+    SHT_OPENCL_RESERVED_END = 0xff00000c    // end of Intel OCL SHT_TYPES
 };
 
 enum SPECIAL_SECTION_HEADER_NUMBER : uint16_t {
@@ -302,6 +302,55 @@ struct ElfFileHeader {
 
 static_assert(sizeof(ElfFileHeader<EI_CLASS_32>) == 0x34, "");
 static_assert(sizeof(ElfFileHeader<EI_CLASS_64>) == 0x40, "");
+
+template <int NumBits>
+struct ElfSymbolEntryTypes;
+
+template <>
+struct ElfSymbolEntryTypes<EI_CLASS_32> {
+    using Name = uint32_t;
+    using Info = uint8_t;
+    using Other = uint8_t;
+    using Shndx = uint16_t;
+    using Value = uint32_t;
+    using Size = uint32_t;
+};
+
+template <>
+struct ElfSymbolEntryTypes<EI_CLASS_64> {
+    using Name = uint32_t;
+    using Info = uint8_t;
+    using Other = uint8_t;
+    using Shndx = uint16_t;
+    using Value = uint64_t;
+    using Size = uint64_t;
+};
+
+template <ELF_IDENTIFIER_CLASS NumBits>
+struct ElfSymbolEntry;
+
+template <>
+struct ElfSymbolEntry<EI_CLASS_32> {
+    ElfSymbolEntryTypes<EI_CLASS_32>::Name name;
+    ElfSymbolEntryTypes<EI_CLASS_32>::Value value;
+    ElfSymbolEntryTypes<EI_CLASS_32>::Size size;
+    ElfSymbolEntryTypes<EI_CLASS_32>::Info info;
+    ElfSymbolEntryTypes<EI_CLASS_32>::Other other;
+    ElfSymbolEntryTypes<EI_CLASS_32>::Shndx shndx;
+};
+
+template <>
+struct ElfSymbolEntry<EI_CLASS_64> {
+    ElfSymbolEntryTypes<EI_CLASS_64>::Name name;
+    ElfSymbolEntryTypes<EI_CLASS_64>::Info info;
+    ElfSymbolEntryTypes<EI_CLASS_64>::Other other;
+    ElfSymbolEntryTypes<EI_CLASS_64>::Shndx shndx;
+    ElfSymbolEntryTypes<EI_CLASS_64>::Value value;
+    ElfSymbolEntryTypes<EI_CLASS_64>::Size size;
+};
+
+static_assert(sizeof(ElfSymbolEntry<EI_CLASS_32>) == 0x10, "");
+static_assert(sizeof(ElfSymbolEntry<EI_CLASS_64>) == 0x18, "");
 
 namespace SpecialSectionNames {
 static constexpr ConstStringRef bss = ".bss";                    // uninitialized memory

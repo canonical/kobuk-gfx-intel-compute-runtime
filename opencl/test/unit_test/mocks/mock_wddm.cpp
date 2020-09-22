@@ -7,6 +7,7 @@
 
 #include "opencl/test/unit_test/mocks/mock_wddm.h"
 
+#include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/os_interface/windows/gdi_interface.h"
@@ -130,7 +131,7 @@ bool WddmMock::destroyAllocation(WddmAllocation *alloc, OsContextWin *osContext)
     if (alloc->peekSharedHandle()) {
         resourceHandle = alloc->resourceHandle;
     } else {
-        allocationHandles = alloc->getHandles().data();
+        allocationHandles = &alloc->getHandles()[0];
         allocationCount = 1;
     }
     auto success = destroyAllocations(allocationHandles, allocationCount, resourceHandle);
@@ -278,7 +279,7 @@ D3DGPU_VIRTUAL_ADDRESS WddmMock::reserveGpuVirtualAddress(D3DGPU_VIRTUAL_ADDRESS
 }
 
 uint64_t *WddmMock::getPagingFenceAddress() {
-    if (NEO::residencyLoggingAvailable) {
+    if (NEO::wddmResidencyLoggingAvailable) {
         getPagingFenceAddressResult.called++;
     }
     mockPagingFence++;

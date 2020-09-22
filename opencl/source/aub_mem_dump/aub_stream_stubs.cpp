@@ -11,11 +11,12 @@
 namespace aub_stream_stubs {
 uint16_t tbxServerPort = 4321;
 std::string tbxServerIp = "127.0.0.1";
+bool tbxFrontdoorMode = false;
 } // namespace aub_stream_stubs
 
 namespace aub_stream {
 
-AubManager *AubManager::create(uint32_t productFamily, uint32_t devicesCount, uint64_t memoryBankSizeInGB, bool localMemorySupported, uint32_t streamMode, uint64_t gpuAddressSpace) {
+AubManager *AubManager::create(uint32_t productFamily, uint32_t devicesCount, uint64_t memoryBankSizeInGB, uint32_t stepping, bool localMemorySupported, uint32_t streamMode, uint64_t gpuAddressSpace) {
     return nullptr;
 }
 
@@ -28,6 +29,7 @@ void setTbxServerIp(std::string server) {
     if (aub_stream_stubs::tbxServerIp != server)
         aub_stream_stubs::tbxServerIp = server;
 };
+void setTbxFrontdoorMode(bool frontdoor) { aub_stream_stubs::tbxFrontdoorMode = frontdoor; }
 }
 
 } // namespace aub_stream

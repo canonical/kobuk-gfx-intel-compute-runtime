@@ -11,6 +11,7 @@
 #include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/os_interface/os_context.h"
+#include "shared/test/unit_test/cmd_parse/hw_parse.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
@@ -21,14 +22,13 @@
 #include "opencl/test/unit_test/fixtures/execution_model_kernel_fixture.h"
 #include "opencl/test/unit_test/fixtures/hello_world_fixture.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
-#include "opencl/test/unit_test/helpers/hw_parse.h"
 #include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
 #include "opencl/test/unit_test/mocks/mock_graphics_allocation.h"
 
 using namespace NEO;
 
 void HardwareCommandsTest::SetUp() {
-    DeviceFixture::SetUp();
+    ClDeviceFixture::SetUp();
     ASSERT_NE(nullptr, pClDevice);
     cl_device_id device = pClDevice;
     ContextFixture::SetUp(1, &device);
@@ -43,7 +43,7 @@ void HardwareCommandsTest::TearDown() {
     mockKernelWithInternal.reset(nullptr);
     BuiltInFixture::TearDown();
     ContextFixture::TearDown();
-    DeviceFixture::TearDown();
+    ClDeviceFixture::TearDown();
 }
 
 void HardwareCommandsTest::addSpaceForSingleKernelArg() {
@@ -58,7 +58,7 @@ void HardwareCommandsTest::addSpaceForSingleKernelArg() {
     mockKernelWithInternal->mockKernel->kernelArgRequiresCacheFlush.resize(1);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, programInterfaceDescriptorDataResourceUsage) {
+HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenProgramInterfaceDescriptorDataIsCreatedThenOnlyRequiredSpaceOnIndirectHeapIsAllocated) {
     CommandQueueHw<FamilyType> cmdQ(pContext, pClDevice, 0, false);
 
     std::unique_ptr<Image> srcImage(Image2dHelper<>::create(pContext));
@@ -66,7 +66,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, programInterfaceDescriptorData
     std::unique_ptr<Image> dstImage(Image2dHelper<>::create(pContext));
     ASSERT_NE(nullptr, dstImage.get());
 
-    MultiDispatchInfo multiDispatchInfo;
     auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyImageToImage3d,
                                                                             cmdQ.getDevice());
     ASSERT_NE(nullptr, &builder);
@@ -77,7 +76,9 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, programInterfaceDescriptorData
     dc.srcOffset = {0, 0, 0};
     dc.dstOffset = {0, 0, 0};
     dc.size = {1, 1, 1};
-    builder.buildDispatchInfos(multiDispatchInfo, dc);
+
+    MultiDispatchInfo multiDispatchInfo(dc);
+    builder.buildDispatchInfos(multiDispatchInfo);
     EXPECT_NE(0u, multiDispatchInfo.size());
 
     auto kernel = multiDispatchInfo.begin()->getKernel();
@@ -96,7 +97,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, programInterfaceDescriptorData
     EXPECT_EQ(sizeof(INTERFACE_DESCRIPTOR_DATA), usedIndirectHeapAfter - usedIndirectHeapBefore);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, programMediaInterfaceDescriptorLoadResourceUsage) {
+HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenMediaInterfaceDescriptorIsCreatedThenOnlyRequiredSpaceInCommandStreamIsAllocated) {
     CommandQueueHw<FamilyType> cmdQ(nullptr, pClDevice, 0, false);
 
     typedef typename FamilyType::INTERFACE_DESCRIPTOR_DATA INTERFACE_DESCRIPTOR_DATA;
@@ -114,7 +115,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, programMediaInterfaceDescripto
     EXPECT_EQ(sizeof(MEDIA_INTERFACE_DESCRIPTOR_LOAD) + sizeof(MEDIA_STATE_FLUSH), usedAfter - usedBefore);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, programMediaStateFlushResourceUsage) {
+HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenMediaStateFlushIsCreatedThenOnlyRequiredSpaceInCommandStreamIsAllocated) {
     CommandQueueHw<FamilyType> cmdQ(nullptr, pClDevice, 0, false);
 
     typedef typename FamilyType::INTERFACE_DESCRIPTOR_DATA INTERFACE_DESCRIPTOR_DATA;
@@ -130,7 +131,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, programMediaStateFlushResource
     EXPECT_EQ(sizeof(MEDIA_STATE_FLUSH), usedAfter - usedBefore);
 }
 
-HWTEST_F(HardwareCommandsTest, sendCrossThreadDataResourceUsage) {
+HWTEST_F(HardwareCommandsTest, WhenCrossThreadDataIsCreatedThenOnlyRequiredSpaceOnIndirectHeapIsAllocated) {
     CommandQueueHw<FamilyType> cmdQ(pContext, pClDevice, 0, false);
 
     std::unique_ptr<Image> srcImage(Image2dHelper<>::create(pContext));
@@ -138,7 +139,6 @@ HWTEST_F(HardwareCommandsTest, sendCrossThreadDataResourceUsage) {
     std::unique_ptr<Image> dstImage(Image2dHelper<>::create(pContext));
     ASSERT_NE(nullptr, dstImage.get());
 
-    MultiDispatchInfo multiDispatchInfo;
     auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyImageToImage3d,
                                                                             cmdQ.getDevice());
     ASSERT_NE(nullptr, &builder);
@@ -149,7 +149,9 @@ HWTEST_F(HardwareCommandsTest, sendCrossThreadDataResourceUsage) {
     dc.srcOffset = {0, 0, 0};
     dc.dstOffset = {0, 0, 0};
     dc.size = {1, 1, 1};
-    builder.buildDispatchInfos(multiDispatchInfo, dc);
+
+    MultiDispatchInfo multiDispatchInfo(dc);
+    builder.buildDispatchInfos(multiDispatchInfo);
     EXPECT_NE(0u, multiDispatchInfo.size());
 
     auto kernel = multiDispatchInfo.begin()->getKernel();
@@ -216,7 +218,7 @@ HWTEST_F(HardwareCommandsTest, givenIndirectHeapNotAllocatedFromInternalPoolWhen
 }
 
 HWTEST_F(HardwareCommandsTest, givenIndirectHeapAllocatedFromInternalPoolWhenSendCrossThreadDataIsCalledThenHeapBaseOffsetIsReturned) {
-    auto internalAllocation = pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties(pDevice->getRootDeviceIndex(), true, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::INTERNAL_HEAP));
+    auto internalAllocation = pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties(pDevice->getRootDeviceIndex(), true, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::INTERNAL_HEAP, pDevice->getDeviceBitfield()));
     IndirectHeap indirectHeap(internalAllocation, true);
     auto expectedOffset = internalAllocation->getGpuAddressToPatch();
 
@@ -275,7 +277,7 @@ HWTEST_F(HardwareCommandsTest, givenSendCrossThreadDataWhenWhenAddPatchInfoComme
     EXPECT_EQ(PatchInfoAllocationType::IndirectObjectHeap, kernel->getPatchInfoDataList()[0].targetType);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, sendIndirectStateResourceUsage) {
+HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenAllocatingIndirectStateResourceThenCorrectSizeIsAllocated) {
     using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
     using GPGPU_WALKER = typename FamilyType::GPGPU_WALKER;
 
@@ -286,7 +288,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, sendIndirectStateResourceUsage
     std::unique_ptr<Image> dstImage(Image2dHelper<>::create(pContext));
     ASSERT_NE(nullptr, dstImage.get());
 
-    MultiDispatchInfo multiDispatchInfo;
     auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyImageToImage3d,
                                                                             cmdQ.getDevice());
     ASSERT_NE(nullptr, &builder);
@@ -297,7 +298,9 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, sendIndirectStateResourceUsage
     dc.srcOffset = {0, 0, 0};
     dc.dstOffset = {0, 0, 0};
     dc.size = {1, 1, 1};
-    builder.buildDispatchInfos(multiDispatchInfo, dc);
+
+    MultiDispatchInfo multiDispatchInfo(dc);
+    builder.buildDispatchInfos(multiDispatchInfo);
     EXPECT_NE(0u, multiDispatchInfo.size());
 
     auto kernel = multiDispatchInfo.begin()->getKernel();
@@ -504,7 +507,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, whenSendingIndirectStateThenKe
 
     std::unique_ptr<Image> img(Image2dHelper<>::create(pContext));
 
-    MultiDispatchInfo multiDispatchInfo;
     auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyImageToImage3d,
                                                                             cmdQ.getDevice());
 
@@ -512,7 +514,9 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, whenSendingIndirectStateThenKe
     dc.srcMemObj = img.get();
     dc.dstMemObj = img.get();
     dc.size = {1, 1, 1};
-    builder.buildDispatchInfos(multiDispatchInfo, dc);
+
+    MultiDispatchInfo multiDispatchInfo(dc);
+    builder.buildDispatchInfos(multiDispatchInfo);
     ASSERT_NE(0u, multiDispatchInfo.size());
 
     auto kernel = multiDispatchInfo.begin()->getKernel();
@@ -577,7 +581,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, whenSendingIndirectStateThenKe
     alignedFree(expectedLocalIds);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, usedBindingTableStatePointer) {
+HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenSendingIndirectStateThenBindingTableStatesPointersAreCorrect) {
     typedef typename FamilyType::BINDING_TABLE_STATE BINDING_TABLE_STATE;
     typedef typename FamilyType::RENDER_SURFACE_STATE RENDER_SURFACE_STATE;
     using GPGPU_WALKER = typename FamilyType::GPGPU_WALKER;
@@ -586,7 +590,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, usedBindingTableStatePointer) 
     std::unique_ptr<Image> dstImage(Image2dHelper<>::create(pContext));
     ASSERT_NE(nullptr, dstImage.get());
 
-    MultiDispatchInfo multiDispatchInfo;
     auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyBufferToImage3d,
                                                                             cmdQ.getDevice());
     ASSERT_NE(nullptr, &builder);
@@ -598,7 +601,9 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, usedBindingTableStatePointer) 
     dc.size = {1, 1, 1};
     dc.dstRowPitch = 0;
     dc.dstSlicePitch = 0;
-    builder.buildDispatchInfos(multiDispatchInfo, dc);
+
+    MultiDispatchInfo multiDispatchInfo(dc);
+    builder.buildDispatchInfos(multiDispatchInfo);
     EXPECT_NE(0u, multiDispatchInfo.size());
 
     auto kernel = multiDispatchInfo.begin()->getKernel();
@@ -613,6 +618,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, usedBindingTableStatePointer) 
     auto &dsh = cmdQ.getIndirectHeap(IndirectHeap::DYNAMIC_STATE, 8192);
     auto &ioh = cmdQ.getIndirectHeap(IndirectHeap::INDIRECT_OBJECT, 8192);
     auto &ssh = cmdQ.getIndirectHeap(IndirectHeap::SURFACE_STATE, 8192);
+
+    auto sshUsed = ssh.getUsed();
 
     // Obtain where the pointers will be stored
     const auto &kernelInfo = kernel->getKernelInfo();
@@ -648,11 +655,11 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, usedBindingTableStatePointer) 
         nullptr,
         true);
 
-    EXPECT_EQ(0x00000000u, *(&bindingTableStatesPointers[0]));
-    EXPECT_EQ(0x00000040u, *(&bindingTableStatesPointers[1]));
+    EXPECT_EQ(sshUsed + 0x00000000u, *(&bindingTableStatesPointers[0]));
+    EXPECT_EQ(sshUsed + 0x00000040u, *(&bindingTableStatesPointers[1]));
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, usedBindingTableStatePointersForGlobalAndConstantAndPrivateAndEventPoolAndDefaultCommandQueueSurfaces) {
+HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenGettingBindingTableStateThenSurfaceStatePointersAreCorrect) {
     using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
     using GPGPU_WALKER = typename FamilyType::GPGPU_WALKER;
 
@@ -707,18 +714,16 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, usedBindingTableStatePointersF
 
     // setup global memory
     char globalBuffer[16];
-    GraphicsAllocation gfxGlobalAlloc(0, GraphicsAllocation::AllocationType::UNKNOWN, globalBuffer, castToUint64(globalBuffer), 0llu, sizeof(globalBuffer), MemoryPool::MemoryNull);
+    GraphicsAllocation gfxGlobalAlloc(0, GraphicsAllocation::AllocationType::UNKNOWN, globalBuffer, castToUint64(globalBuffer), 0llu, sizeof(globalBuffer), MemoryPool::MemoryNull, mockMaxOsContextCount);
     program.setGlobalSurface(&gfxGlobalAlloc);
 
     // setup constant memory
     char constBuffer[16];
-    GraphicsAllocation gfxConstAlloc(0, GraphicsAllocation::AllocationType::UNKNOWN, constBuffer, castToUint64(constBuffer), 0llu, sizeof(constBuffer), MemoryPool::MemoryNull);
+    GraphicsAllocation gfxConstAlloc(0, GraphicsAllocation::AllocationType::UNKNOWN, constBuffer, castToUint64(constBuffer), 0llu, sizeof(constBuffer), MemoryPool::MemoryNull, mockMaxOsContextCount);
     program.setConstantSurface(&gfxConstAlloc);
 
     // create kernel
     MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
-
-    SKernelBinaryHeaderCommon kernelHeader;
 
     // setup surface state heap
     constexpr uint32_t numSurfaces = 5;
@@ -730,16 +735,13 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, usedBindingTableStatePointersF
     for (uint32_t i = 0; i < numSurfaces; ++i) {
         bti[i].setSurfaceStatePointer(i * sizeof(typename FamilyType::RENDER_SURFACE_STATE));
     }
-
-    kernelHeader.SurfaceStateHeapSize = sshSize;
+    pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
+    pKernelInfo->heapInfo.SurfaceStateHeapSize = sshSize;
 
     // setup kernel heap
     uint32_t kernelIsa[32];
-    kernelHeader.KernelHeapSize = sizeof(kernelIsa);
-
-    pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
     pKernelInfo->heapInfo.pKernelHeap = kernelIsa;
-    pKernelInfo->heapInfo.pKernelHeader = &kernelHeader;
+    pKernelInfo->heapInfo.KernelHeapSize = sizeof(kernelIsa);
 
     // setup binding table state
     SPatchBindingTableState bindingTableState;
@@ -829,7 +831,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, usedBindingTableStatePointersF
     delete pKernel;
 }
 
-HWTEST_F(HardwareCommandsTest, setBindingTableStatesForKernelWithBuffersNotRequiringSSHDoesNotTouchSSH) {
+HWTEST_F(HardwareCommandsTest, GivenBuffersNotRequiringSshWhenSettingBindingTableStatesForKernelThenSshIsNotUsed) {
 
     // define kernel info
     auto pKernelInfo = std::make_unique<KernelInfo>();
@@ -843,10 +845,8 @@ HWTEST_F(HardwareCommandsTest, setBindingTableStatesForKernelWithBuffersNotRequi
 
     // setup surface state heap
     char surfaceStateHeap[256];
-    SKernelBinaryHeaderCommon kernelHeader;
-    kernelHeader.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
     pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
-    pKernelInfo->heapInfo.pKernelHeader = &kernelHeader;
+    pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
 
     // define stateful path
     pKernelInfo->usesSsh = true;
@@ -887,7 +887,7 @@ HWTEST_F(HardwareCommandsTest, setBindingTableStatesForKernelWithBuffersNotRequi
     delete pKernel;
 }
 
-HWTEST_F(HardwareCommandsTest, setBindingTableStatesForNoSurfaces) {
+HWTEST_F(HardwareCommandsTest, GivenZeroSurfaceStatesWhenSettingBindingTableStatesThenPointerIsZero) {
 
     // define kernel info
     auto pKernelInfo = std::make_unique<KernelInfo>();
@@ -901,10 +901,8 @@ HWTEST_F(HardwareCommandsTest, setBindingTableStatesForNoSurfaces) {
 
     // setup surface state heap
     char surfaceStateHeap[256];
-    SKernelBinaryHeaderCommon kernelHeader;
-    kernelHeader.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
     pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
-    pKernelInfo->heapInfo.pKernelHeader = &kernelHeader;
+    pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
 
     // define stateful path
     pKernelInfo->usesSsh = true;
@@ -940,86 +938,6 @@ HWTEST_F(HardwareCommandsTest, setBindingTableStatesForNoSurfaces) {
     pKernelInfo->patchInfo.bindingTableState = nullptr;
 
     delete pKernel;
-}
-
-HWTEST_F(HardwareCommandsTest, GivenVariousValuesWhenAlignSlmSizeIsCalledThenCorrectValueIsReturned) {
-    if (::renderCoreFamily == IGFX_GEN8_CORE) {
-        EXPECT_EQ(0u, HardwareCommandsHelper<FamilyType>::alignSlmSize(0));
-        EXPECT_EQ(4096u, HardwareCommandsHelper<FamilyType>::alignSlmSize(1));
-        EXPECT_EQ(4096u, HardwareCommandsHelper<FamilyType>::alignSlmSize(1024));
-        EXPECT_EQ(4096u, HardwareCommandsHelper<FamilyType>::alignSlmSize(1025));
-        EXPECT_EQ(4096u, HardwareCommandsHelper<FamilyType>::alignSlmSize(2048));
-        EXPECT_EQ(4096u, HardwareCommandsHelper<FamilyType>::alignSlmSize(2049));
-        EXPECT_EQ(4096u, HardwareCommandsHelper<FamilyType>::alignSlmSize(4096));
-        EXPECT_EQ(8192u, HardwareCommandsHelper<FamilyType>::alignSlmSize(4097));
-        EXPECT_EQ(8192u, HardwareCommandsHelper<FamilyType>::alignSlmSize(8192));
-        EXPECT_EQ(16384u, HardwareCommandsHelper<FamilyType>::alignSlmSize(8193));
-        EXPECT_EQ(16384u, HardwareCommandsHelper<FamilyType>::alignSlmSize(12288));
-        EXPECT_EQ(16384u, HardwareCommandsHelper<FamilyType>::alignSlmSize(16384));
-        EXPECT_EQ(32768u, HardwareCommandsHelper<FamilyType>::alignSlmSize(16385));
-        EXPECT_EQ(32768u, HardwareCommandsHelper<FamilyType>::alignSlmSize(24576));
-        EXPECT_EQ(32768u, HardwareCommandsHelper<FamilyType>::alignSlmSize(32768));
-        EXPECT_EQ(65536u, HardwareCommandsHelper<FamilyType>::alignSlmSize(32769));
-        EXPECT_EQ(65536u, HardwareCommandsHelper<FamilyType>::alignSlmSize(49152));
-        EXPECT_EQ(65536u, HardwareCommandsHelper<FamilyType>::alignSlmSize(65535));
-        EXPECT_EQ(65536u, HardwareCommandsHelper<FamilyType>::alignSlmSize(65536));
-    } else {
-        EXPECT_EQ(0u, HardwareCommandsHelper<FamilyType>::alignSlmSize(0));
-        EXPECT_EQ(1024u, HardwareCommandsHelper<FamilyType>::alignSlmSize(1));
-        EXPECT_EQ(1024u, HardwareCommandsHelper<FamilyType>::alignSlmSize(1024));
-        EXPECT_EQ(2048u, HardwareCommandsHelper<FamilyType>::alignSlmSize(1025));
-        EXPECT_EQ(2048u, HardwareCommandsHelper<FamilyType>::alignSlmSize(2048));
-        EXPECT_EQ(4096u, HardwareCommandsHelper<FamilyType>::alignSlmSize(2049));
-        EXPECT_EQ(4096u, HardwareCommandsHelper<FamilyType>::alignSlmSize(4096));
-        EXPECT_EQ(8192u, HardwareCommandsHelper<FamilyType>::alignSlmSize(4097));
-        EXPECT_EQ(8192u, HardwareCommandsHelper<FamilyType>::alignSlmSize(8192));
-        EXPECT_EQ(16384u, HardwareCommandsHelper<FamilyType>::alignSlmSize(8193));
-        EXPECT_EQ(16384u, HardwareCommandsHelper<FamilyType>::alignSlmSize(16384));
-        EXPECT_EQ(32768u, HardwareCommandsHelper<FamilyType>::alignSlmSize(16385));
-        EXPECT_EQ(32768u, HardwareCommandsHelper<FamilyType>::alignSlmSize(32768));
-        EXPECT_EQ(65536u, HardwareCommandsHelper<FamilyType>::alignSlmSize(32769));
-        EXPECT_EQ(65536u, HardwareCommandsHelper<FamilyType>::alignSlmSize(65536));
-    }
-}
-
-HWTEST_F(HardwareCommandsTest, GivenVariousValuesWhenComputeSlmSizeIsCalledThenCorrectValueIsReturned) {
-    if (::renderCoreFamily == IGFX_GEN8_CORE) {
-        EXPECT_EQ(0u, HardwareCommandsHelper<FamilyType>::computeSlmValues(0));
-        EXPECT_EQ(1u, HardwareCommandsHelper<FamilyType>::computeSlmValues(1));
-        EXPECT_EQ(1u, HardwareCommandsHelper<FamilyType>::computeSlmValues(1024));
-        EXPECT_EQ(1u, HardwareCommandsHelper<FamilyType>::computeSlmValues(1025));
-        EXPECT_EQ(1u, HardwareCommandsHelper<FamilyType>::computeSlmValues(2048));
-        EXPECT_EQ(1u, HardwareCommandsHelper<FamilyType>::computeSlmValues(2049));
-        EXPECT_EQ(1u, HardwareCommandsHelper<FamilyType>::computeSlmValues(4096));
-        EXPECT_EQ(2u, HardwareCommandsHelper<FamilyType>::computeSlmValues(4097));
-        EXPECT_EQ(2u, HardwareCommandsHelper<FamilyType>::computeSlmValues(8192));
-        EXPECT_EQ(4u, HardwareCommandsHelper<FamilyType>::computeSlmValues(8193));
-        EXPECT_EQ(4u, HardwareCommandsHelper<FamilyType>::computeSlmValues(12288));
-        EXPECT_EQ(4u, HardwareCommandsHelper<FamilyType>::computeSlmValues(16384));
-        EXPECT_EQ(8u, HardwareCommandsHelper<FamilyType>::computeSlmValues(16385));
-        EXPECT_EQ(8u, HardwareCommandsHelper<FamilyType>::computeSlmValues(24576));
-        EXPECT_EQ(8u, HardwareCommandsHelper<FamilyType>::computeSlmValues(32768));
-        EXPECT_EQ(16u, HardwareCommandsHelper<FamilyType>::computeSlmValues(32769));
-        EXPECT_EQ(16u, HardwareCommandsHelper<FamilyType>::computeSlmValues(49152));
-        EXPECT_EQ(16u, HardwareCommandsHelper<FamilyType>::computeSlmValues(65535));
-        EXPECT_EQ(16u, HardwareCommandsHelper<FamilyType>::computeSlmValues(65536));
-    } else {
-        EXPECT_EQ(0u, HardwareCommandsHelper<FamilyType>::computeSlmValues(0));
-        EXPECT_EQ(1u, HardwareCommandsHelper<FamilyType>::computeSlmValues(1));
-        EXPECT_EQ(1u, HardwareCommandsHelper<FamilyType>::computeSlmValues(1024));
-        EXPECT_EQ(2u, HardwareCommandsHelper<FamilyType>::computeSlmValues(1025));
-        EXPECT_EQ(2u, HardwareCommandsHelper<FamilyType>::computeSlmValues(2048));
-        EXPECT_EQ(3u, HardwareCommandsHelper<FamilyType>::computeSlmValues(2049));
-        EXPECT_EQ(3u, HardwareCommandsHelper<FamilyType>::computeSlmValues(4096));
-        EXPECT_EQ(4u, HardwareCommandsHelper<FamilyType>::computeSlmValues(4097));
-        EXPECT_EQ(4u, HardwareCommandsHelper<FamilyType>::computeSlmValues(8192));
-        EXPECT_EQ(5u, HardwareCommandsHelper<FamilyType>::computeSlmValues(8193));
-        EXPECT_EQ(5u, HardwareCommandsHelper<FamilyType>::computeSlmValues(16384));
-        EXPECT_EQ(6u, HardwareCommandsHelper<FamilyType>::computeSlmValues(16385));
-        EXPECT_EQ(6u, HardwareCommandsHelper<FamilyType>::computeSlmValues(32768));
-        EXPECT_EQ(7u, HardwareCommandsHelper<FamilyType>::computeSlmValues(32769));
-        EXPECT_EQ(7u, HardwareCommandsHelper<FamilyType>::computeSlmValues(65536));
-    }
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, GivenKernelWithSamplersWhenIndirectStateIsProgrammedThenBorderColorIsCorrectlyCopiedToDshAndSamplerStatesAreProgrammedWithPointer) {
@@ -1169,15 +1087,17 @@ HWTEST_F(HardwareCommandsHelperTests, whenProgrammingMiAtomicThenSetupAllFields)
     MI_ATOMIC referenceCommand = FamilyType::cmdInitAtomic;
     HardwareCommandsHelper<FamilyType>::programMiAtomic(referenceCommand, writeAddress, opcode, dataSize);
 
-    auto miAtomic = HardwareCommandsHelper<FamilyType>::programMiAtomic(cmdStream, writeAddress, opcode, dataSize);
+    HardwareCommandsHelper<FamilyType>::programMiAtomic(cmdStream, writeAddress, opcode, dataSize);
+    auto miAtomic = genCmdCast<MI_ATOMIC *>(cmdStream.getCpuBase());
+    ASSERT_NE(nullptr, miAtomic);
+
     EXPECT_EQ(sizeof(MI_ATOMIC), cmdStream.getUsed());
-    EXPECT_EQ(miAtomic, cmdStream.getCpuBase());
     EXPECT_EQ(0, memcmp(&referenceCommand, miAtomic, sizeof(MI_ATOMIC)));
 }
 
 typedef ExecutionModelKernelFixture ParentKernelCommandsFromBinaryTest;
 
-HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelCommandsFromBinaryTest, getSizeRequiredForExecutionModelForSurfaceStatesReturnsSizeOfBlocksPlusMaxBindingTableSizeForAllIDTEntriesAndSchedulerSSHSize) {
+HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelCommandsFromBinaryTest, WhenGettingSizeRequiredForExecutionModelForSurfaceStatesThenReturnSizeOfBlocksPlusMaxBindingTableSizeForAllIdtEntriesAndSchedulerSshSize) {
     using BINDING_TABLE_STATE = typename FamilyType::BINDING_TABLE_STATE;
 
     if (std::string(pPlatform->getClDevice(0)->getDeviceInfo().clVersion).find("OpenCL 2.") != std::string::npos) {
@@ -1195,7 +1115,7 @@ HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelCommandsFromBinaryTest, getSizeRequiredF
         for (uint32_t i = 0; i < blockCount; i++) {
             const KernelInfo *pBlockInfo = blockManager->getBlockKernelInfo(i);
 
-            totalSize += pBlockInfo->heapInfo.pKernelHeader->SurfaceStateHeapSize;
+            totalSize += pBlockInfo->heapInfo.SurfaceStateHeapSize;
             totalSize = alignUp(totalSize, BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE);
 
             maxBindingTableCount = std::max(maxBindingTableCount, pBlockInfo->patchInfo.bindingTableState ? pBlockInfo->patchInfo.bindingTableState->Count : 0);
@@ -1395,6 +1315,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, givenCacheFlushAfterWalkerEnab
     EXPECT_TRUE(pipeControl->getCommandStreamerStallEnable());
     EXPECT_TRUE(pipeControl->getDcFlushEnable());
 }
+
 HWTEST_F(HardwareCommandsTest, givenCacheFlushAfterWalkerDisabledWhenGettingRequiredCacheFlushSizeThenReturnZero) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 

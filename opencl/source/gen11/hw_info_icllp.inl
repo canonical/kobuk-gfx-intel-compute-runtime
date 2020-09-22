@@ -6,7 +6,7 @@
  */
 
 #include "shared/source/gen11/hw_cmds.h"
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/helpers/constants.h"
 
 #include "opencl/source/aub_mem_dump/aub_services.h"
 
@@ -57,7 +57,7 @@ const RuntimeCapabilityTable ICLLP::capabilityTable{
     false,                                           // ftrSupportsFP64
     false,                                           // ftrSupports64BitMath
     true,                                            // ftrSvm
-    true,                                            // ftrSupportsCoherency
+    false,                                           // ftrSupportsCoherency
     true,                                            // ftrSupportsVmeAvcTextureSampler
     true,                                            // ftrSupportsVmeAvcPreemption
     false,                                           // ftrRenderCompressedBuffers
@@ -71,7 +71,13 @@ const RuntimeCapabilityTable ICLLP::capabilityTable{
     false,                                           // supportCacheFlushAfterWalker
     true,                                            // supportsImages
     true,                                            // supportsDeviceEnqueue
-    true                                             // hostPtrTrackingEnabled
+    true,                                            // supportsPipes
+    true,                                            // supportsOcl21Features
+    false,                                           // supportsOnDemandPageFaults
+    true,                                            // supportsIndependentForwardProgress
+    true,                                            // hostPtrTrackingEnabled
+    true,                                            // levelZeroSupported
+    true                                             // isIntegratedDevice
 };
 
 WorkaroundTable ICLLP::workaroundTable = {};

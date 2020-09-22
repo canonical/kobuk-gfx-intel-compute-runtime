@@ -5,19 +5,20 @@
  *
  */
 
+#include "shared/test/unit_test/helpers/variable_backup.h"
+
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/event/user_event.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
 #include "opencl/test/unit_test/helpers/unit_test_helper.h"
-#include "opencl/test/unit_test/helpers/variable_backup.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "test.h"
 
 namespace NEO {
-extern ImageFuncs imageFactory[IGFX_MAX_CORE];
+extern ImageFactoryFuncs imageFactory[IGFX_MAX_CORE];
 
-struct MultipleMapImageTest : public DeviceFixture, public ::testing::Test {
+struct MultipleMapImageTest : public ClDeviceFixture, public ::testing::Test {
     template <typename T>
     struct MockImage : public ImageHw<T> {
         using Image::mapOperationsHandler;
@@ -25,7 +26,7 @@ struct MultipleMapImageTest : public DeviceFixture, public ::testing::Test {
         using ImageHw<T>::ImageHw;
 
         static Image *createMockImage(Context *context,
-                                      const MemoryPropertiesFlags &memoryProperties,
+                                      const MemoryProperties &memoryProperties,
                                       uint64_t flags,
                                       uint64_t flagsIntel,
                                       size_t size,
@@ -33,13 +34,14 @@ struct MultipleMapImageTest : public DeviceFixture, public ::testing::Test {
                                       const cl_image_format &imageFormat,
                                       const cl_image_desc &imageDesc,
                                       bool zeroCopy,
-                                      GraphicsAllocation *graphicsAllocation,
+                                      MultiGraphicsAllocation multiGraphicsAllocation,
                                       bool isObjectRedescribed,
                                       uint32_t baseMipLevel,
                                       uint32_t mipCount,
                                       const ClSurfaceFormatInfo *surfaceFormatInfo,
                                       const SurfaceOffsets *surfaceOffsets) {
-            return new MockImage<T>(context, memoryProperties, flags, flagsIntel, size, hostPtr, imageFormat, imageDesc, zeroCopy, graphicsAllocation,
+            auto memoryStorage = multiGraphicsAllocation.getDefaultGraphicsAllocation()->getUnderlyingBuffer();
+            return new MockImage<T>(context, memoryProperties, flags, flagsIntel, size, memoryStorage, hostPtr, imageFormat, imageDesc, zeroCopy, multiGraphicsAllocation,
                                     isObjectRedescribed, baseMipLevel, mipCount, *surfaceFormatInfo, surfaceOffsets);
         };
 
@@ -111,10 +113,12 @@ struct MultipleMapImageTest : public DeviceFixture, public ::testing::Test {
         VariableBackup<ImageCreatFunc> backup(&imageFactory[eRenderCoreFamily].createImageFunction);
         imageFactory[eRenderCoreFamily].createImageFunction = MockImage<FamilyType>::createMockImage;
 
-        auto surfaceFormat = Image::getSurfaceFormatFromTable(Traits::flags, &Traits::imageFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+        auto surfaceFormat = Image::getSurfaceFormatFromTable(Traits::flags, &Traits::imageFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
 
         cl_int retVal = CL_SUCCESS;
-        auto img = Image::create(context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(Traits::flags, 0, 0), Traits::flags, 0, surfaceFormat, &Traits::imageDesc, Traits::hostPtr, retVal);
+        auto img = Image::create(
+            context, MemoryPropertiesHelper::createMemoryProperties(Traits::flags, 0, 0, &context->getDevice(0)->getDevice()),
+            Traits::flags, 0, surfaceFormat, &Traits::imageDesc, Traits::hostPtr, retVal);
         auto mockImage = static_cast<MockImage<FamilyType> *>(img);
 
         return std::unique_ptr<MockImage<FamilyType>>(mockImage);
@@ -126,13 +130,13 @@ struct MultipleMapImageTest : public DeviceFixture, public ::testing::Test {
     }
 
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
         context = new MockContext(pClDevice);
     }
 
     void TearDown() override {
         delete context;
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     MockContext *context = nullptr;

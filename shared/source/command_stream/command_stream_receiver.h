@@ -18,6 +18,7 @@
 #include "shared/source/helpers/options.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
 #include "shared/source/kernel/grf_config.h"
+#include "shared/source/os_interface/os_thread.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -59,6 +60,7 @@ class CommandStreamReceiver {
         samplerCacheFlushBefore, //add sampler cache flush before Walker with redescribed image
         samplerCacheFlushAfter   //add sampler cache flush after Walker with redescribed image
     };
+
     using MutexType = std::recursive_mutex;
     CommandStreamReceiver(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex);
     virtual ~CommandStreamReceiver();
@@ -71,6 +73,8 @@ class CommandStreamReceiver {
 
     virtual bool flushBatchedSubmissions() = 0;
     bool submitBatchBuffer(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency);
+    virtual void programHardwareContext(LinearStream &cmdStream) = 0;
+    virtual size_t getCmdsSizeForHardwareContext() const = 0;
 
     MOCKABLE_VIRTUAL void makeResident(GraphicsAllocation &gfxAllocation);
     virtual void makeNonResident(GraphicsAllocation &gfxAllocation);
@@ -100,7 +104,8 @@ class CommandStreamReceiver {
     GraphicsAllocation *getTagAllocation() const {
         return tagAllocation;
     }
-    volatile uint32_t *getTagAddress() const { return tagAddress; }
+    MOCKABLE_VIRTUAL volatile uint32_t *getTagAddress() const { return tagAddress; }
+    uint64_t getDebugPauseStateGPUAddress() const { return tagAllocation->getGpuAddress() + debugPauseStateAddressOffset; }
 
     virtual bool waitForFlushStamp(FlushStamp &flushStampToWait) { return true; };
 
@@ -124,13 +129,14 @@ class CommandStreamReceiver {
     GraphicsAllocation *getDebugSurfaceAllocation() const { return debugSurface; }
     GraphicsAllocation *allocateDebugSurface(size_t size);
     GraphicsAllocation *getPreemptionAllocation() const { return preemptionAllocation; }
+    GraphicsAllocation *getGlobalFenceAllocation() const { return globalFenceAllocation; }
 
     void requestStallingPipeControlOnNextFlush() { stallingPipeControlOnNextFlushRequired = true; }
     bool isStallingPipeControlOnNextFlushRequired() const { return stallingPipeControlOnNextFlushRequired; }
 
     virtual void waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) = 0;
-    MOCKABLE_VIRTUAL bool waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait);
-    virtual void downloadAllocation(GraphicsAllocation &gfxAllocation){};
+    virtual bool waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait);
+    virtual void downloadAllocations(){};
 
     void setSamplerCacheFlushRequired(SamplerCacheFlushState value) { this->samplerCacheFlushRequired = value; }
 
@@ -179,7 +185,7 @@ class CommandStreamReceiver {
         this->latestSentTaskCount = latestSentTaskCount;
     }
 
-    virtual uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking) = 0;
+    virtual uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled) = 0;
 
     ScratchSpaceController *getScratchSpaceController() const {
         return scratchSpaceController.get();
@@ -202,10 +208,17 @@ class CommandStreamReceiver {
         return false;
     }
 
+    virtual bool isBlitterDirectSubmissionEnabled() const {
+        return false;
+    }
+
     bool isRcs() const;
+
+    virtual void initializeDefaultsForInternalEngine(){};
 
   protected:
     void cleanupResources();
+    void printDeviceIndex();
 
     std::unique_ptr<FlushStampTracker> flushStamp;
     std::unique_ptr<SubmissionAggregator> submissionAggregator;
@@ -226,6 +239,14 @@ class CommandStreamReceiver {
     LinearStream commandStream;
 
     volatile uint32_t *tagAddress = nullptr;
+    volatile DebugPauseState *debugPauseStateAddress = nullptr;
+
+    // offset for debug state must be 8 bytes, if only 4 bytes are used tag writes overwrite it
+    const uint64_t debugPauseStateAddressOffset = 8;
+
+    static void *asyncDebugBreakConfirmation(void *arg);
+    std::unique_ptr<Thread> userPauseConfirmation;
+    std::function<void()> debugConfirmationFunction = []() { std::cin.get(); };
 
     GraphicsAllocation *tagAllocation = nullptr;
     GraphicsAllocation *globalFenceAllocation = nullptr;
@@ -247,7 +268,8 @@ class CommandStreamReceiver {
     uint64_t totalMemoryUsed = 0u;
 
     // taskCount - # of tasks submitted
-    uint32_t taskCount = 0;
+    std::atomic<uint32_t> taskCount{0};
+
     uint32_t lastSentL3Config = 0;
     uint32_t latestSentStatelessMocsConfig = 0;
     uint32_t lastSentNumGrfRequired = GrfConfig::DefaultGrfNumber;

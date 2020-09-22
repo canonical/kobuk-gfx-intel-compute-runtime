@@ -16,6 +16,21 @@ namespace NEO {
 extern off_t lseekReturn;
 extern std::atomic<int> lseekCalledCount;
 
+inline void *mmapMock(void *addr, size_t length, int prot, int flags, int fd, off_t offset) noexcept {
+    void *ptr = nullptr;
+    if (length > 0) {
+        ptr = alignedMalloc(length, MemoryConstants::pageSize64k);
+    }
+    return ptr;
+}
+
+inline int munmapMock(void *addr, size_t length) noexcept {
+    if (length > 0) {
+        alignedFree(addr);
+    }
+    return 0;
+}
+
 inline off_t lseekMock(int fd, off_t offset, int whence) noexcept {
     lseekCalledCount++;
     return lseekReturn;
@@ -38,16 +53,18 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     using DrmMemoryManager::allocateGraphicsMemoryWithAlignment;
     using DrmMemoryManager::allocateGraphicsMemoryWithHostPtr;
     using DrmMemoryManager::allocateShareableMemory;
-    using DrmMemoryManager::AllocationData;
     using DrmMemoryManager::allocUserptr;
     using DrmMemoryManager::createGraphicsAllocation;
     using DrmMemoryManager::createSharedBufferObject;
     using DrmMemoryManager::eraseSharedBufferObject;
+    using DrmMemoryManager::forcePinEnabled;
     using DrmMemoryManager::getDefaultDrmContextId;
     using DrmMemoryManager::getDrm;
     using DrmMemoryManager::getRootDeviceIndex;
+    using DrmMemoryManager::getUserptrAlignment;
     using DrmMemoryManager::gfxPartitions;
     using DrmMemoryManager::lockResourceInLocalMemoryImpl;
+    using DrmMemoryManager::memoryForPinBBs;
     using DrmMemoryManager::pinBBs;
     using DrmMemoryManager::pinThreshold;
     using DrmMemoryManager::pushSharedBufferObject;
@@ -57,15 +74,15 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     using DrmMemoryManager::supportsMultiStorageResources;
     using DrmMemoryManager::unlockResourceInLocalMemoryImpl;
     using MemoryManager::allocateGraphicsMemoryInDevicePool;
+    using MemoryManager::heapAssigner;
     using MemoryManager::registeredEngines;
-    using MemoryManager::useInternal32BitAllocator;
 
     TestedDrmMemoryManager(ExecutionEnvironment &executionEnvironment);
     TestedDrmMemoryManager(bool enableLocalMemory,
                            bool allowForcePin,
                            bool validateHostPtrMemory,
                            ExecutionEnvironment &executionEnvironment);
-    void injectPinBB(BufferObject *newPinBB);
+    void injectPinBB(BufferObject *newPinBB, uint32_t rootDeviceIndex);
 
     DrmGemCloseWorker *getgemCloseWorker();
     void forceLimitedRangeAllocator(uint64_t range);

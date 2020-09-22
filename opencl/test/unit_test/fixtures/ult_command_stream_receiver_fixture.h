@@ -12,9 +12,9 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/cache_policy.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
+#include "shared/test/unit_test/cmd_parse/hw_parse.h"
 
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
-#include "opencl/test/unit_test/helpers/hw_parse.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
 #include "opencl/test/unit_test/mocks/mock_graphics_allocation.h"
@@ -22,11 +22,11 @@
 namespace NEO {
 
 struct UltCommandStreamReceiverTest
-    : public DeviceFixture,
+    : public ClDeviceFixture,
       public HardwareParse,
       ::testing::Test {
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
         HardwareParse::SetUp();
 
         size_t sizeStream = 512;
@@ -73,7 +73,7 @@ struct UltCommandStreamReceiverTest
         alignedFree(dshBuffer);
         alignedFree(cmdBuffer);
         HardwareParse::TearDown();
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     template <typename CommandStreamReceiverType>
@@ -108,7 +108,7 @@ struct UltCommandStreamReceiverTest
     }
 
     template <typename GfxFamily>
-    void configureCSRtoNonDirtyState() {
+    void configureCSRtoNonDirtyState(bool isL1CacheEnabled) {
         bool slmUsed = false;
         if (DebugManager.flags.ForceSLML3Config.get()) {
             slmUsed = true;
@@ -118,10 +118,11 @@ struct UltCommandStreamReceiverTest
 
         auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<GfxFamily>();
         commandStreamReceiver.isPreambleSent = true;
+        commandStreamReceiver.isEnginePrologueSent = true;
         commandStreamReceiver.lastPreemptionMode = pDevice->getPreemptionMode();
         commandStreamReceiver.setMediaVFEStateDirty(false);
         auto gmmHelper = pDevice->getGmmHelper();
-        auto mocsIndex = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
+        auto mocsIndex = isL1CacheEnabled ? gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST) : gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
 
         commandStreamReceiver.latestSentStatelessMocsConfig = mocsIndex >> 1;
         commandStreamReceiver.lastSentL3Config = L3Config;

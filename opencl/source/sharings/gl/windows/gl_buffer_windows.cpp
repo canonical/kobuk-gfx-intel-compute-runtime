@@ -38,7 +38,11 @@ Buffer *GlBuffer::createSharedGlBuffer(Context *context, cl_mem_flags flags, uns
     }
 
     auto glHandler = new GlBuffer(sharingFunctions, bufferId);
-    return Buffer::createSharedBuffer(context, flags, glHandler, graphicsAllocation);
+    auto rootDeviceIndex = graphicsAllocation->getRootDeviceIndex();
+    auto multiGraphicsAllocation = MultiGraphicsAllocation(rootDeviceIndex);
+    multiGraphicsAllocation.addAllocation(graphicsAllocation);
+
+    return Buffer::createSharedBuffer(context, flags, glHandler, std::move(multiGraphicsAllocation));
 }
 
 void GlBuffer::synchronizeObject(UpdateData &updateData) {
@@ -48,11 +52,13 @@ void GlBuffer::synchronizeObject(UpdateData &updateData) {
     bufferInfo.bufferName = this->clGlObjectId;
     sharingFunctions->acquireSharedBufferINTEL(&bufferInfo);
 
+    auto graphicsAllocation = updateData.memObject->getGraphicsAllocation(updateData.rootDeviceIndex);
+
     updateData.sharedHandle = bufferInfo.globalShareHandle;
     updateData.synchronizationStatus = SynchronizeStatus::ACQUIRE_SUCCESFUL;
-    updateData.memObject->getGraphicsAllocation()->setAllocationOffset(bufferInfo.bufferOffset);
+    graphicsAllocation->setAllocationOffset(bufferInfo.bufferOffset);
 
-    const auto currentSharedHandle = updateData.memObject->getGraphicsAllocation()->peekSharedHandle();
+    const auto currentSharedHandle = graphicsAllocation->peekSharedHandle();
     if (currentSharedHandle != updateData.sharedHandle) {
         updateData.updateData = new CL_GL_BUFFER_INFO(bufferInfo);
     }
@@ -63,20 +69,21 @@ void GlBuffer::resolveGraphicsAllocationChange(osHandle currentSharedHandle, Upd
     if (currentSharedHandle != updateData->sharedHandle) {
         const auto bufferInfo = std::unique_ptr<CL_GL_BUFFER_INFO>(static_cast<CL_GL_BUFFER_INFO *>(updateData->updateData));
 
-        auto oldGraphicsAllocation = memObject->getGraphicsAllocation();
+        auto oldGraphicsAllocation = memObject->getGraphicsAllocation(updateData->rootDeviceIndex);
         popGraphicsAllocationFromReuse(oldGraphicsAllocation);
 
         Context *context = memObject->getContext();
         auto newGraphicsAllocation = createGraphicsAllocation(context, clGlObjectId, *bufferInfo);
         if (newGraphicsAllocation == nullptr) {
             updateData->synchronizationStatus = SynchronizeStatus::SYNCHRONIZE_ERROR;
+            memObject->removeGraphicsAllocation(updateData->rootDeviceIndex);
         } else {
             updateData->synchronizationStatus = SynchronizeStatus::ACQUIRE_SUCCESFUL;
+            memObject->resetGraphicsAllocation(newGraphicsAllocation);
         }
-        memObject->resetGraphicsAllocation(newGraphicsAllocation);
 
         if (updateData->synchronizationStatus == SynchronizeStatus::ACQUIRE_SUCCESFUL) {
-            memObject->getGraphicsAllocation()->setAllocationOffset(bufferInfo->bufferOffset);
+            memObject->getGraphicsAllocation(updateData->rootDeviceIndex)->setAllocationOffset(bufferInfo->bufferOffset);
         }
     }
 }
@@ -136,7 +143,12 @@ GraphicsAllocation *GlBuffer::createGraphicsAllocation(Context *context, unsigne
     }
 
     if (!graphicsAllocation) {
-        AllocationProperties properties = {context->getDevice(0)->getRootDeviceIndex(), false, 0, GraphicsAllocation::AllocationType::SHARED_BUFFER, false};
+        AllocationProperties properties = {context->getDevice(0)->getRootDeviceIndex(),
+                                           false, // allocateMemory
+                                           0u,    // size
+                                           GraphicsAllocation::AllocationType::SHARED_BUFFER,
+                                           false, // isMultiStorageAllocation
+                                           context->getDeviceBitfieldForAllocation()};
         // couldn't find allocation for reuse - create new
         graphicsAllocation =
             context->getMemoryManager()->createGraphicsAllocationFromSharedHandle(bufferInfo.globalShareHandle, properties, true);
@@ -159,7 +171,7 @@ GraphicsAllocation *GlBuffer::createGraphicsAllocation(Context *context, unsigne
     return graphicsAllocation;
 }
 
-void GlBuffer::releaseResource(MemObj *memObject) {
+void GlBuffer::releaseResource(MemObj *memObject, uint32_t rootDeviceIndex) {
     auto sharingFunctions = static_cast<GLSharingFunctionsWindows *>(this->sharingFunctions);
     CL_GL_BUFFER_INFO bufferInfo = {};
     bufferInfo.bufferName = this->clGlObjectId;

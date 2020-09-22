@@ -188,7 +188,7 @@ void FileLogger<DebugLevel>::dumpKernelArgs(const Kernel *kernel) {
                 if (memObj != nullptr) {
                     ptr = static_cast<char *>(memObj->getCpuAddress());
                     size = memObj->getSize();
-                    flags = memObj->getMemoryPropertiesFlags();
+                    flags = memObj->getFlags();
                 }
             } else if (argInfo.isSampler) {
                 type = "sampler";
@@ -199,7 +199,7 @@ void FileLogger<DebugLevel>::dumpKernelArgs(const Kernel *kernel) {
                 if (memObj != nullptr) {
                     ptr = static_cast<char *>(memObj->getCpuAddress());
                     size = memObj->getSize();
-                    flags = memObj->getMemoryPropertiesFlags();
+                    flags = memObj->getFlags();
                 }
             } else {
                 type = "immediate";
@@ -324,6 +324,10 @@ const char *FileLogger<DebugLevel>::getAllocationTypeString(GraphicsAllocation c
         return "UNKNOWN";
     case GraphicsAllocation::AllocationType::WRITE_COMBINED:
         return "WRITE_COMBINED";
+    case GraphicsAllocation::AllocationType::DEBUG_CONTEXT_SAVE_AREA:
+        return "DEBUG_CONTEXT_SAVE_AREA";
+    case GraphicsAllocation::AllocationType::DEBUG_SBA_TRACKING_BUFFER:
+        return "DEBUG_SBA_TRACKING_BUFFER";
     default:
         return "ILLEGAL_VALUE";
     }

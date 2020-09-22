@@ -14,10 +14,13 @@ namespace NEO {
 class OSMemoryWindows : public OSMemory {
   public:
     OSMemoryWindows() = default;
-    void *reserveCpuAddressRange(size_t sizeToReserve) override;
-    void releaseCpuAddressRange(void *reservedCpuAddressRange, size_t reservedSize) override;
+
+    void getMemoryMaps(MemoryMaps &memoryMaps) override {}
 
   protected:
+    void *osReserveCpuAddressRange(void *baseAddress, size_t sizeToReserve) override;
+    void osReleaseCpuAddressRange(void *reservedCpuAddressRange, size_t reservedSize) override;
+
     MOCKABLE_VIRTUAL LPVOID virtualAllocWrapper(LPVOID, SIZE_T, DWORD, DWORD);
     MOCKABLE_VIRTUAL BOOL virtualFreeWrapper(LPVOID, SIZE_T, DWORD);
 };

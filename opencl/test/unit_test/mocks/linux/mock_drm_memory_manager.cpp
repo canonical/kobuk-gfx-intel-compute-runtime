@@ -24,6 +24,8 @@ TestedDrmMemoryManager::TestedDrmMemoryManager(ExecutionEnvironment &executionEn
                                                                                                                  false,
                                                                                                                  false,
                                                                                                                  executionEnvironment) {
+    this->mmapFunction = &mmapMock;
+    this->munmapFunction = &munmapMock;
     this->lseekFunction = &lseekMock;
     this->closeFunction = &closeMock;
     lseekReturn = 4096;
@@ -39,21 +41,27 @@ TestedDrmMemoryManager::TestedDrmMemoryManager(bool enableLocalMemory,
                                                                                                                  allowForcePin,
                                                                                                                  validateHostPtrMemory,
                                                                                                                  executionEnvironment) {
+    this->mmapFunction = &mmapMock;
+    this->munmapFunction = &munmapMock;
     this->lseekFunction = &lseekMock;
     this->closeFunction = &closeMock;
     lseekReturn = 4096;
     lseekCalledCount = 0;
 }
 
-void TestedDrmMemoryManager::injectPinBB(BufferObject *newPinBB) {
-    BufferObject *currentPinBB = pinBBs[0u];
-    pinBBs[0u] = nullptr;
+void TestedDrmMemoryManager::injectPinBB(BufferObject *newPinBB, uint32_t rootDeviceIndex) {
+    BufferObject *currentPinBB = pinBBs[rootDeviceIndex];
+    pinBBs[rootDeviceIndex] = nullptr;
     DrmMemoryManager::unreference(currentPinBB, true);
-    pinBBs[0u] = newPinBB;
+    pinBBs[rootDeviceIndex] = newPinBB;
 }
 
 DrmGemCloseWorker *TestedDrmMemoryManager::getgemCloseWorker() { return this->gemCloseWorker.get(); }
-void TestedDrmMemoryManager::forceLimitedRangeAllocator(uint64_t range) { getGfxPartition(0)->init(range, getSizeToReserve(), 0, 1); }
+void TestedDrmMemoryManager::forceLimitedRangeAllocator(uint64_t range) {
+    for (auto &gfxPartition : gfxPartitions) {
+        gfxPartition->init(range, getSizeToReserve(), 0, 1);
+    }
+}
 void TestedDrmMemoryManager::overrideGfxPartition(GfxPartition *newGfxPartition) { gfxPartitions[0].reset(newGfxPartition); }
 
 DrmAllocation *TestedDrmMemoryManager::allocate32BitGraphicsMemory(uint32_t rootDeviceIndex, size_t size, const void *ptr, GraphicsAllocation::AllocationType allocationType) {
@@ -61,7 +69,8 @@ DrmAllocation *TestedDrmMemoryManager::allocate32BitGraphicsMemory(uint32_t root
     AllocationData allocationData;
     MockAllocationProperties properties(rootDeviceIndex, allocateMemory, size, allocationType);
     getAllocationData(allocationData, properties, ptr, createStorageInfoFromProperties(properties));
-    return allocate32BitGraphicsMemoryImpl(allocationData);
+    bool useLocalMemory = !allocationData.flags.useSystemMemory && this->localMemorySupported[rootDeviceIndex];
+    return allocate32BitGraphicsMemoryImpl(allocationData, useLocalMemory);
 }
 TestedDrmMemoryManager::~TestedDrmMemoryManager() {
     DrmMemoryManager::commonCleanup();

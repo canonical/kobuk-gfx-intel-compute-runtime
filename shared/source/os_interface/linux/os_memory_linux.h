@@ -15,10 +15,13 @@ namespace NEO {
 class OSMemoryLinux : public OSMemory {
   public:
     OSMemoryLinux() = default;
-    void *reserveCpuAddressRange(size_t sizeToReserve) override;
-    void releaseCpuAddressRange(void *reservedCpuAddressRange, size_t reservedSize) override;
+
+    void getMemoryMaps(MemoryMaps &memoryMaps) override;
 
   protected:
+    void *osReserveCpuAddressRange(void *baseAddress, size_t sizeToReserve) override;
+    void osReleaseCpuAddressRange(void *reservedCpuAddressRange, size_t reservedSize) override;
+
     MOCKABLE_VIRTUAL void *mmapWrapper(void *, size_t, int, int, int, off_t);
     MOCKABLE_VIRTUAL int munmapWrapper(void *, size_t);
 };

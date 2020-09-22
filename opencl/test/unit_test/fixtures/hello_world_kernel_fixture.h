@@ -8,13 +8,13 @@
 #pragma once
 #include "shared/source/device/device.h"
 #include "shared/source/helpers/file_io.h"
+#include "shared/test/unit_test/helpers/test_files.h"
 
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/source/platform/platform.h"
 #include "opencl/source/program/program.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/program_fixture.h"
-#include "opencl/test/unit_test/helpers/test_files.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
@@ -50,9 +50,8 @@ struct HelloWorldKernelFixture : public ProgramFixture {
 
         if (options) {
             std::string optionsToProgram(options);
-
             if (optionsToProgram.find("-cl-std=CL2.0") != std::string::npos) {
-                ASSERT_TRUE(pDevice->getSupportedClVersion() >= 20u);
+                ASSERT_TRUE(pDevice->areOcl21FeaturesEnabled());
             }
 
             CreateProgramFromBinary(

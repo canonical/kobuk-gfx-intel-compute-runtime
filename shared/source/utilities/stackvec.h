@@ -32,6 +32,7 @@ template <typename DataType, size_t OnStackCapacity,
           typename StackSizeT = typename StackVecSize<OnStackCapacity>::SizeT>
 class StackVec {
   public:
+    using value_type = DataType; // NOLINT
     using SizeT = StackSizeT;
     using iterator = DataType *;
     using const_iterator = const DataType *;
@@ -205,6 +206,18 @@ class StackVec {
         ++onStackSize;
     }
 
+    void pop_back() { // NOLINT
+        if (usesDynamicMem()) {
+            dynamicMem->pop_back();
+            return;
+        }
+
+        UNRECOVERABLE_IF(0 == onStackSize);
+
+        clearStackObjects(onStackSize - 1, 1U);
+        --onStackSize;
+    }
+
     DataType &operator[](std::size_t idx) {
         if (usesDynamicMem()) {
             return (*dynamicMem)[idx];
@@ -277,6 +290,13 @@ class StackVec {
 
     bool usesDynamicMem() const {
         return std::numeric_limits<decltype(onStackSize)>::max() == this->onStackSize;
+    }
+
+    void *data() {
+        if (usesDynamicMem()) {
+            return dynamicMem->data();
+        }
+        return onStackMemRawBytes;
     }
 
   private:

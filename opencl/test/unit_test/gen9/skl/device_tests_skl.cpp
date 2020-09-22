@@ -5,15 +5,15 @@
  *
  */
 
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "test.h"
 
 using namespace NEO;
 
-typedef Test<DeviceFixture> DeviceTest;
+typedef Test<ClDeviceFixture> DeviceTest;
 
-SKLTEST_F(DeviceTest, getSupportedClVersion21Device) {
-    auto version = pClDevice->getSupportedClVersion();
+SKLTEST_F(DeviceTest, getEnabledClVersion21Device) {
+    auto version = pClDevice->getEnabledClVersion();
     EXPECT_EQ(21u, version);
 }
 

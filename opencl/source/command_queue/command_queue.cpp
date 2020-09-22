@@ -33,6 +33,7 @@
 #include "opencl/source/helpers/queue_helpers.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/mem_obj/image.h"
+#include "opencl/source/program/printf_handler.h"
 
 #include "CL/cl_ext.h"
 
@@ -66,17 +67,18 @@ CommandQueue::CommandQueue(Context *context, ClDevice *device, const cl_queue_pr
     flushStamp.reset(new FlushStampTracker(true));
 
     if (device) {
+        auto hwInfo = device->getHardwareInfo();
         gpgpuEngine = &device->getDefaultEngine();
-        if (gpgpuEngine->commandStreamReceiver->peekTimestampPacketWriteEnabled()) {
+        if (hwInfo.capabilityTable.blitterOperationsSupported || gpgpuEngine->commandStreamReceiver->peekTimestampPacketWriteEnabled()) {
             timestampPacketContainer = std::make_unique<TimestampPacketContainer>();
         }
-        auto hwInfo = device->getHardwareInfo();
         if (hwInfo.capabilityTable.blitterOperationsSupported) {
             auto &selectorCopyEngine = device->getDeviceById(0)->getSelectorCopyEngine();
             bcsEngine = &device->getDeviceById(0)->getEngine(EngineHelpers::getBcsEngineType(hwInfo, selectorCopyEngine), false);
         }
     }
 
+    storeProperties(properties);
     processProperties(properties);
 }
 
@@ -118,6 +120,15 @@ CommandStreamReceiver *CommandQueue::getBcsCommandStreamReceiver() const {
     return nullptr;
 }
 
+CommandStreamReceiver &CommandQueue::getCommandStreamReceiverByCommandType(cl_command_type cmdType) const {
+    if (blitEnqueueAllowed(cmdType)) {
+        auto csr = getBcsCommandStreamReceiver();
+        UNRECOVERABLE_IF(!csr);
+        return *csr;
+    }
+    return getGpgpuCommandStreamReceiver();
+}
+
 Device &CommandQueue::getDevice() const noexcept {
     return device->getDevice();
 }
@@ -131,34 +142,43 @@ volatile uint32_t *CommandQueue::getHwTagAddress() const {
     return getGpgpuCommandStreamReceiver().getTagAddress();
 }
 
-bool CommandQueue::isCompleted(uint32_t taskCount) const {
-    uint32_t tag = getHwTag();
-    DEBUG_BREAK_IF(tag == CompletionStamp::levelNotReady);
-    return tag >= taskCount;
+bool CommandQueue::isCompleted(uint32_t gpgpuTaskCount, uint32_t bcsTaskCount) const {
+    uint32_t gpgpuHwTag = getHwTag();
+    DEBUG_BREAK_IF(gpgpuHwTag == CompletionStamp::notReady);
+
+    if (gpgpuHwTag >= gpgpuTaskCount) {
+        if (auto bcsCsr = getBcsCommandStreamReceiver()) {
+            return (*bcsCsr->getTagAddress()) >= bcsTaskCount;
+        }
+
+        return true;
+    }
+
+    return false;
 }
 
-void CommandQueue::waitUntilComplete(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) {
+void CommandQueue::waitUntilComplete(uint32_t gpgpuTaskCountToWait, uint32_t bcsTaskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) {
     WAIT_ENTER()
 
-    DBG_LOG(LogTaskCounts, __FUNCTION__, "Waiting for taskCount:", taskCountToWait);
+    DBG_LOG(LogTaskCounts, __FUNCTION__, "Waiting for taskCount:", gpgpuTaskCountToWait);
     DBG_LOG(LogTaskCounts, __FUNCTION__, "Line: ", __LINE__, "Current taskCount:", getHwTag());
 
     bool forcePowerSavingMode = this->throttle == QueueThrottle::LOW;
 
-    getGpgpuCommandStreamReceiver().waitForTaskCountWithKmdNotifyFallback(taskCountToWait, flushStampToWait,
+    getGpgpuCommandStreamReceiver().waitForTaskCountWithKmdNotifyFallback(gpgpuTaskCountToWait, flushStampToWait,
                                                                           useQuickKmdSleep, forcePowerSavingMode);
-    DEBUG_BREAK_IF(getHwTag() < taskCountToWait);
+    DEBUG_BREAK_IF(getHwTag() < gpgpuTaskCountToWait);
 
     if (gtpinIsGTPinInitialized()) {
-        gtpinNotifyTaskCompletion(taskCountToWait);
+        gtpinNotifyTaskCompletion(gpgpuTaskCountToWait);
     }
 
     if (auto bcsCsr = getBcsCommandStreamReceiver()) {
-        bcsCsr->waitForTaskCountWithKmdNotifyFallback(bcsTaskCount, 0, false, false);
-        bcsCsr->waitForTaskCountAndCleanTemporaryAllocationList(bcsTaskCount);
+        bcsCsr->waitForTaskCountWithKmdNotifyFallback(bcsTaskCountToWait, 0, false, false);
+        bcsCsr->waitForTaskCountAndCleanTemporaryAllocationList(bcsTaskCountToWait);
     }
 
-    getGpgpuCommandStreamReceiver().waitForTaskCountAndCleanTemporaryAllocationList(taskCountToWait);
+    getGpgpuCommandStreamReceiver().waitForTaskCountAndCleanTemporaryAllocationList(gpgpuTaskCountToWait);
 
     WAIT_LEAVE()
 }
@@ -240,7 +260,7 @@ cl_int CommandQueue::enqueueAcquireSharedObjects(cl_uint numObjects, const cl_me
             return CL_INVALID_MEM_OBJECT;
         }
 
-        int result = memObject->peekSharingHandler()->acquire(memObject);
+        int result = memObject->peekSharingHandler()->acquire(memObject, getDevice().getRootDeviceIndex());
         if (result != CL_SUCCESS) {
             return result;
         }
@@ -269,7 +289,7 @@ cl_int CommandQueue::enqueueReleaseSharedObjects(cl_uint numObjects, const cl_me
             return CL_INVALID_MEM_OBJECT;
         }
 
-        memObject->peekSharingHandler()->release(memObject);
+        memObject->peekSharingHandler()->release(memObject, getDevice().getRootDeviceIndex());
         DEBUG_BREAK_IF(memObject->acquireCount <= 0);
         memObject->acquireCount--;
     }
@@ -284,14 +304,19 @@ cl_int CommandQueue::enqueueReleaseSharedObjects(cl_uint numObjects, const cl_me
     return status;
 }
 
-void CommandQueue::updateFromCompletionStamp(const CompletionStamp &completionStamp) {
+void CommandQueue::updateFromCompletionStamp(const CompletionStamp &completionStamp, Event *outEvent) {
     DEBUG_BREAK_IF(this->taskLevel > completionStamp.taskLevel);
     DEBUG_BREAK_IF(this->taskCount > completionStamp.taskCount);
-    if (completionStamp.taskCount != CompletionStamp::levelNotReady) {
+    if (completionStamp.taskCount != CompletionStamp::notReady) {
         taskCount = completionStamp.taskCount;
     }
     flushStamp->setStamp(completionStamp.flushStamp);
     this->taskLevel = completionStamp.taskLevel;
+
+    if (outEvent) {
+        outEvent->updateCompletionStamp(completionStamp.taskCount, bcsTaskCount, completionStamp.taskLevel, completionStamp.flushStamp);
+        FileLoggerInstance().log(DebugManager.flags.EventsDebugEnable.get(), "updateCompletionStamp Event", outEvent, "taskLevel", outEvent->taskLevel.load());
+    }
 }
 
 bool CommandQueue::setPerfCountersEnabled() {
@@ -322,13 +347,13 @@ cl_int CommandQueue::enqueueWriteMemObjForUnmap(MemObj *memObj, void *mappedPtr,
     }
 
     if (!unmapInfo.readOnly) {
-        memObj->getMapAllocation()->setAubWritable(true, GraphicsAllocation::defaultBank);
-        memObj->getMapAllocation()->setTbxWritable(true, GraphicsAllocation::defaultBank);
+        memObj->getMapAllocation(getDevice().getRootDeviceIndex())->setAubWritable(true, GraphicsAllocation::defaultBank);
+        memObj->getMapAllocation(getDevice().getRootDeviceIndex())->setTbxWritable(true, GraphicsAllocation::defaultBank);
 
         if (memObj->peekClMemObjType() == CL_MEM_OBJECT_BUFFER) {
             auto buffer = castToObject<Buffer>(memObj);
 
-            retVal = enqueueWriteBuffer(buffer, CL_FALSE, unmapInfo.offset[0], unmapInfo.size[0], mappedPtr, memObj->getMapAllocation(),
+            retVal = enqueueWriteBuffer(buffer, CL_FALSE, unmapInfo.offset[0], unmapInfo.size[0], mappedPtr, memObj->getMapAllocation(getDevice().getRootDeviceIndex()),
                                         eventsRequest.numEventsInWaitList, eventsRequest.eventWaitList, eventsRequest.outEvent);
         } else {
             auto image = castToObjectOrAbort<Image>(memObj);
@@ -337,7 +362,7 @@ cl_int CommandQueue::enqueueWriteMemObjForUnmap(MemObj *memObj, void *mappedPtr,
             UNRECOVERABLE_IF(mipIdx >= 4);
             writeOrigin[mipIdx] = unmapInfo.mipLevel;
             retVal = enqueueWriteImage(image, CL_FALSE, writeOrigin, &unmapInfo.size[0],
-                                       image->getHostPtrRowPitch(), image->getHostPtrSlicePitch(), mappedPtr, memObj->getMapAllocation(),
+                                       image->getHostPtrRowPitch(), image->getHostPtrSlicePitch(), mappedPtr, memObj->getMapAllocation(getDevice().getRootDeviceIndex()),
                                        eventsRequest.numEventsInWaitList, eventsRequest.eventWaitList, eventsRequest.outEvent);
         }
     } else {
@@ -371,7 +396,7 @@ void *CommandQueue::enqueueReadMemObjForMap(TransferProperties &transferProperti
     if (transferProperties.memObj->peekClMemObjType() == CL_MEM_OBJECT_BUFFER) {
         auto buffer = castToObject<Buffer>(transferProperties.memObj);
         errcodeRet = enqueueReadBuffer(buffer, transferProperties.blocking, transferProperties.offset[0], transferProperties.size[0],
-                                       returnPtr, transferProperties.memObj->getMapAllocation(), eventsRequest.numEventsInWaitList,
+                                       returnPtr, transferProperties.memObj->getMapAllocation(getDevice().getRootDeviceIndex()), eventsRequest.numEventsInWaitList,
                                        eventsRequest.eventWaitList, eventsRequest.outEvent);
     } else {
         auto image = castToObjectOrAbort<Image>(transferProperties.memObj);
@@ -381,7 +406,7 @@ void *CommandQueue::enqueueReadMemObjForMap(TransferProperties &transferProperti
         readOrigin[mipIdx] = transferProperties.mipLevel;
         errcodeRet = enqueueReadImage(image, transferProperties.blocking, readOrigin, &transferProperties.size[0],
                                       image->getHostPtrRowPitch(), image->getHostPtrSlicePitch(),
-                                      returnPtr, transferProperties.memObj->getMapAllocation(), eventsRequest.numEventsInWaitList,
+                                      returnPtr, transferProperties.memObj->getMapAllocation(getDevice().getRootDeviceIndex()), eventsRequest.numEventsInWaitList,
                                       eventsRequest.eventWaitList, eventsRequest.outEvent);
     }
 
@@ -419,7 +444,7 @@ void *CommandQueue::enqueueMapBuffer(Buffer *buffer, cl_bool blockingMap,
                                      size_t size, cl_uint numEventsInWaitList,
                                      const cl_event *eventWaitList, cl_event *event,
                                      cl_int &errcodeRet) {
-    TransferProperties transferProperties(buffer, CL_COMMAND_MAP_BUFFER, mapFlags, blockingMap != CL_FALSE, &offset, &size, nullptr, false);
+    TransferProperties transferProperties(buffer, CL_COMMAND_MAP_BUFFER, mapFlags, blockingMap != CL_FALSE, &offset, &size, nullptr, false, getDevice().getRootDeviceIndex());
     EventsRequest eventsRequest(numEventsInWaitList, eventWaitList, event);
 
     return enqueueMapMemObject(transferProperties, eventsRequest, errcodeRet);
@@ -433,7 +458,7 @@ void *CommandQueue::enqueueMapImage(Image *image, cl_bool blockingMap,
                                     const cl_event *eventWaitList, cl_event *event,
                                     cl_int &errcodeRet) {
     TransferProperties transferProperties(image, CL_COMMAND_MAP_IMAGE, mapFlags, blockingMap != CL_FALSE,
-                                          const_cast<size_t *>(origin), const_cast<size_t *>(region), nullptr, false);
+                                          const_cast<size_t *>(origin), const_cast<size_t *>(region), nullptr, false, getDevice().getRootDeviceIndex());
     EventsRequest eventsRequest(numEventsInWaitList, eventWaitList, event);
 
     if (image->isMemObjZeroCopy() && image->mappingOnCpuAllowed()) {
@@ -458,7 +483,7 @@ void *CommandQueue::enqueueMapImage(Image *image, cl_bool blockingMap,
 }
 
 cl_int CommandQueue::enqueueUnmapMemObject(MemObj *memObj, void *mappedPtr, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event) {
-    TransferProperties transferProperties(memObj, CL_COMMAND_UNMAP_MEM_OBJECT, 0, false, nullptr, nullptr, mappedPtr, false);
+    TransferProperties transferProperties(memObj, CL_COMMAND_UNMAP_MEM_OBJECT, 0, false, nullptr, nullptr, mappedPtr, false, getDevice().getRootDeviceIndex());
     EventsRequest eventsRequest(numEventsInWaitList, eventWaitList, event);
 
     return enqueueUnmapMemObject(transferProperties, eventsRequest);
@@ -502,10 +527,6 @@ void CommandQueue::enqueueBlockedMapUnmapOperation(const cl_event *eventWaitList
 bool CommandQueue::setupDebugSurface(Kernel *kernel) {
     auto debugSurface = getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation();
 
-    if (!debugSurface) {
-        debugSurface = getGpgpuCommandStreamReceiver().allocateDebugSurface(SipKernel::maxDbgSurfaceSize);
-    }
-
     DEBUG_BREAK_IF(!kernel->requiresSshForBuffers());
 
     auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(kernel->getSurfaceStateHeap()),
@@ -528,10 +549,16 @@ void CommandQueue::releaseIndirectHeap(IndirectHeap::Type heapType) {
     getGpgpuCommandStreamReceiver().releaseIndirectHeap(heapType);
 }
 
-void CommandQueue::obtainNewTimestampPacketNodes(size_t numberOfNodes, TimestampPacketContainer &previousNodes, bool clearAllDependencies) {
-    auto allocator = getGpgpuCommandStreamReceiver().getTimestampPacketAllocator();
+void CommandQueue::obtainNewTimestampPacketNodes(size_t numberOfNodes, TimestampPacketContainer &previousNodes, bool clearAllDependencies, bool blitEnqueue) {
+    auto allocator = blitEnqueue ? getBcsCommandStreamReceiver()->getTimestampPacketAllocator()
+                                 : getGpgpuCommandStreamReceiver().getTimestampPacketAllocator();
 
     previousNodes.swapNodes(*timestampPacketContainer);
+
+    if ((previousNodes.peekNodes().size() > 0) && (previousNodes.peekNodes()[0]->getAllocator() != allocator)) {
+        clearAllDependencies = false;
+    }
+
     previousNodes.resolveDependencies(clearAllDependencies);
 
     DEBUG_BREAK_IF(timestampPacketContainer->peekNodes().size() > 0);
@@ -574,7 +601,7 @@ bool CommandQueue::bufferCpuCopyAllowed(Buffer *buffer, cl_command_type commandT
     }
 
     //check if buffer is compatible
-    if (!buffer->isReadWriteOnCpuAllowed()) {
+    if (!buffer->isReadWriteOnCpuAllowed(device->getRootDeviceIndex())) {
         return false;
     }
 
@@ -593,7 +620,7 @@ bool CommandQueue::bufferCpuCopyAllowed(Buffer *buffer, cl_command_type commandT
     }
 
     //check if it is beneficial to do transfer on CPU
-    if (!buffer->isReadWriteOnCpuPreffered(ptr, size)) {
+    if (!buffer->isReadWriteOnCpuPreferred(ptr, size, getDevice())) {
         return false;
     }
 
@@ -617,7 +644,9 @@ bool CommandQueue::blitEnqueueAllowed(cl_command_type cmdType) const {
     }
 
     bool commandAllowed = (CL_COMMAND_READ_BUFFER == cmdType) || (CL_COMMAND_WRITE_BUFFER == cmdType) ||
-                          (CL_COMMAND_COPY_BUFFER == cmdType) || (CL_COMMAND_READ_BUFFER_RECT == cmdType);
+                          (CL_COMMAND_COPY_BUFFER == cmdType) || (CL_COMMAND_READ_BUFFER_RECT == cmdType) ||
+                          (CL_COMMAND_WRITE_BUFFER_RECT == cmdType) || (CL_COMMAND_COPY_BUFFER_RECT == cmdType) ||
+                          (CL_COMMAND_SVM_MEMCPY == cmdType);
 
     return commandAllowed && blitAllowed;
 }
@@ -645,6 +674,16 @@ bool CommandQueue::isBlockedCommandStreamRequired(uint32_t commandType, const Ev
     return false;
 }
 
+void CommandQueue::storeProperties(const cl_queue_properties *properties) {
+    if (properties) {
+        for (size_t i = 0; properties[i] != 0; i += 2) {
+            propertiesVector.push_back(properties[i]);
+            propertiesVector.push_back(properties[i + 1]);
+        }
+        propertiesVector.push_back(0);
+    }
+}
+
 void CommandQueue::aubCaptureHook(bool &blocking, bool &clearAllDependencies, const MultiDispatchInfo &multiDispatchInfo) {
     if (DebugManager.flags.AUBDumpSubCaptureMode.get()) {
         auto status = getGpgpuCommandStreamReceiver().checkAndActivateAubSubCapture(multiDispatchInfo);
@@ -664,4 +703,18 @@ void CommandQueue::aubCaptureHook(bool &blocking, bool &clearAllDependencies, co
         }
     }
 }
+
+void CommandQueue::waitUntilComplete(bool blockedQueue, PrintfHandler *printfHandler) {
+    if (blockedQueue) {
+        while (isQueueBlocked()) {
+        }
+    }
+
+    waitUntilComplete(taskCount, bcsTaskCount, flushStamp->peekStamp(), false);
+
+    if (printfHandler) {
+        printfHandler->printEnqueueOutput();
+    }
+}
+
 } // namespace NEO

@@ -7,7 +7,7 @@
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/mem_obj/pipe.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/memory_management_fixture.h"
 #include "opencl/test/unit_test/fixtures/multi_root_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
@@ -18,21 +18,19 @@ using namespace NEO;
 
 //Tests for pipes
 
-class PipeTest : public DeviceFixture, public ::testing::Test, public MemoryManagementFixture {
+class PipeTest : public ::testing::Test, public MemoryManagementFixture {
   public:
-    PipeTest() {}
-
   protected:
     void SetUp() override {
     }
     void TearDown() override {
     }
-    cl_int retVal = CL_SUCCESS;
+    cl_int retVal = CL_INVALID_PIPE_SIZE;
     MockContext context;
-    size_t size;
+    size_t size = 0u;
 };
 
-TEST_F(PipeTest, CreatePipe) {
+TEST_F(PipeTest, WhenCreatingPipeThenSuccessIsReturned) {
     int errCode = CL_SUCCESS;
 
     auto pipe = Pipe::create(&context, CL_MEM_READ_ONLY, 1, 20, nullptr, errCode);
@@ -43,7 +41,7 @@ TEST_F(PipeTest, CreatePipe) {
     delete pipe;
 }
 
-TEST_F(PipeTest, PipeCheckReservedHeaderSizeAddition) {
+TEST_F(PipeTest, WhenCreatingPipeThenHeaderSizeAdditionIsReserved) {
     int errCode = CL_SUCCESS;
 
     auto pipe = Pipe::create(&context, CL_MEM_READ_ONLY, 1, 20, nullptr, errCode);
@@ -55,7 +53,7 @@ TEST_F(PipeTest, PipeCheckReservedHeaderSizeAddition) {
     delete pipe;
 }
 
-TEST_F(PipeTest, PipeCheckHeaderinitialization) {
+TEST_F(PipeTest, WhenCreatingPipeThenHeaderIsInitialized) {
     int errCode = CL_SUCCESS;
 
     auto pipe = Pipe::create(&context, CL_MEM_READ_ONLY, 1, 20, nullptr, errCode);
@@ -68,7 +66,7 @@ TEST_F(PipeTest, PipeCheckHeaderinitialization) {
     delete pipe;
 }
 
-TEST_F(PipeTest, FailedAllocationInjection) {
+TEST_F(PipeTest, GivenFailedAllocationInjectionWhenCreatingPipeThenOnlyFailingAllocationsAreNull) {
     InjectedFunction method = [this](size_t failureIndex) {
         auto retVal = CL_INVALID_VALUE;
         auto pipe = Pipe::create(&context, CL_MEM_READ_ONLY, 1, 20, nullptr, retVal);
@@ -106,11 +104,11 @@ TEST_F(PipeTest, givenPipeWithDifferentCpuAndGpuAddressesWhenSetArgPipeThenUseGp
 
     EXPECT_EQ(21u, *reinterpret_cast<unsigned int *>(pipe->getCpuAddress()));
     uint64_t gpuAddress = 0x12345;
-    auto pipeAllocation = pipe->getGraphicsAllocation();
+    auto pipeAllocation = pipe->getGraphicsAllocation(context.getDevice(0)->getRootDeviceIndex());
     pipeAllocation->setCpuPtrAndGpuAddress(pipeAllocation->getUnderlyingBuffer(), gpuAddress);
     EXPECT_NE(reinterpret_cast<uint64_t>(pipeAllocation->getUnderlyingBuffer()), pipeAllocation->getGpuAddress());
     uint64_t valueToPatch;
-    pipe->setPipeArg(&valueToPatch, sizeof(valueToPatch));
+    pipe->setPipeArg(&valueToPatch, sizeof(valueToPatch), context.getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(valueToPatch, pipeAllocation->getGpuAddressToPatch());
 
     delete pipe;
@@ -124,7 +122,7 @@ TEST_F(MultiRootDeviceTests, pipeGraphicsAllocationHasCorrectRootDeviceIndex) {
     std::unique_ptr<Pipe> pipe(Pipe::create(context.get(), CL_MEM_READ_ONLY, 1, 20, nullptr, errCode));
     EXPECT_EQ(CL_SUCCESS, errCode);
     ASSERT_NE(nullptr, pipe.get());
-    auto graphicsAllocation = pipe->getGraphicsAllocation();
+    auto graphicsAllocation = pipe->getGraphicsAllocation(expectedRootDeviceIndex);
     ASSERT_NE(nullptr, graphicsAllocation);
     EXPECT_EQ(expectedRootDeviceIndex, graphicsAllocation->getRootDeviceIndex());
 }

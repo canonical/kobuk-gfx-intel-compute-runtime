@@ -23,11 +23,13 @@ struct GlReusedBufferTests : public ::testing::Test {
         glSharingFunctions = new GlSharingFunctionsMock();
 
         context.setSharingFunctions(glSharingFunctions);
+        rootDeviceIndex = context.getDevice(0)->getRootDeviceIndex();
         graphicsAllocationsForGlBufferReuse = &glSharingFunctions->graphicsAllocationsForGlBufferReuse;
     }
 
     GlSharingFunctionsMock *glSharingFunctions = nullptr;
 
+    uint32_t rootDeviceIndex = 0;
     MockContext context;
 
     std::vector<std::pair<unsigned int, GraphicsAllocation *>> *graphicsAllocationsForGlBufferReuse = nullptr;
@@ -49,7 +51,7 @@ TEST_F(GlReusedBufferTests, givenMultipleBuffersWithTheSameIdWhenCreatedThenReus
     for (size_t i = 0; i < 10; i++) {
         glBuffers[i].reset(GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, (i < 5 ? bufferId1 : bufferId2), &retVal));
         EXPECT_NE(nullptr, glBuffers[i].get());
-        EXPECT_NE(nullptr, glBuffers[i]->getGraphicsAllocation());
+        EXPECT_NE(nullptr, glBuffers[i]->getGraphicsAllocation(rootDeviceIndex));
     }
 
     EXPECT_EQ(2u, graphicsAllocationsForGlBufferReuse->size());
@@ -63,7 +65,7 @@ TEST_F(GlReusedBufferTests, givenMultipleBuffersWithTheSameIdWhenCreatedThenReus
 
     for (size_t i = 0; i < 10; i++) {
         EXPECT_EQ(i < 5 ? storedGraphicsAllocation1 : storedGraphicsAllocation2,
-                  glBuffers[i]->getGraphicsAllocation());
+                  glBuffers[i]->getGraphicsAllocation(rootDeviceIndex));
     }
 }
 
@@ -85,34 +87,34 @@ TEST_F(GlReusedBufferTests, givenMultipleBuffersWithReusedAllocationWhenReleasin
 
 TEST_F(GlReusedBufferTests, givenMultipleBuffersWithReusedAllocationWhenCreatingThenReuseGmmResourceToo) {
     std::unique_ptr<Buffer> glBuffer1(GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, bufferId1, &retVal));
-    glBuffer1->getGraphicsAllocation()->setDefaultGmm(new Gmm(context.getDevice(0)->getGmmClientContext(), (void *)0x100, 1, false));
+    glBuffer1->getGraphicsAllocation(rootDeviceIndex)->setDefaultGmm(new Gmm(context.getDevice(0)->getGmmClientContext(), (void *)0x100, 1, false));
 
     std::unique_ptr<Buffer> glBuffer2(GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, bufferId1, &retVal));
 
-    EXPECT_EQ(glBuffer1->getGraphicsAllocation()->getDefaultGmm()->gmmResourceInfo->peekHandle(),
-              glBuffer2->getGraphicsAllocation()->getDefaultGmm()->gmmResourceInfo->peekHandle());
+    EXPECT_EQ(glBuffer1->getGraphicsAllocation(rootDeviceIndex)->getDefaultGmm()->gmmResourceInfo->peekHandle(),
+              glBuffer2->getGraphicsAllocation(rootDeviceIndex)->getDefaultGmm()->gmmResourceInfo->peekHandle());
 }
 
 TEST_F(GlReusedBufferTests, givenGlobalShareHandleChangedWhenAcquiringSharedBufferThenChangeGraphicsAllocation) {
-    std::unique_ptr<glDllHelper> dllParam = std::make_unique<glDllHelper>();
-    CL_GL_BUFFER_INFO bufferInfoOutput = dllParam->getBufferInfo();
+    GlDllHelper dllParam;
+    CL_GL_BUFFER_INFO bufferInfoOutput = dllParam.getBufferInfo();
     bufferInfoOutput.globalShareHandle = 40;
-    dllParam->loadBuffer(bufferInfoOutput);
+    dllParam.loadBuffer(bufferInfoOutput);
     auto clBuffer = std::unique_ptr<Buffer>(GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, bufferId1, &retVal));
     auto glBuffer = clBuffer->peekSharingHandler();
-    auto oldGraphicsAllocation = clBuffer->getGraphicsAllocation();
+    auto oldGraphicsAllocation = clBuffer->getGraphicsAllocation(rootDeviceIndex);
 
     ASSERT_EQ(40, oldGraphicsAllocation->peekSharedHandle());
 
     bufferInfoOutput.globalShareHandle = 41;
-    dllParam->loadBuffer(bufferInfoOutput);
-    glBuffer->acquire(clBuffer.get());
-    auto newGraphicsAllocation = clBuffer->getGraphicsAllocation();
+    dllParam.loadBuffer(bufferInfoOutput);
+    glBuffer->acquire(clBuffer.get(), rootDeviceIndex);
+    auto newGraphicsAllocation = clBuffer->getGraphicsAllocation(rootDeviceIndex);
 
     EXPECT_NE(oldGraphicsAllocation, newGraphicsAllocation);
     EXPECT_EQ(41, newGraphicsAllocation->peekSharedHandle());
 
-    glBuffer->release(clBuffer.get());
+    glBuffer->release(clBuffer.get(), rootDeviceIndex);
 }
 
 TEST_F(GlReusedBufferTests, givenGlobalShareHandleDidNotChangeWhenAcquiringSharedBufferThenDontDynamicallyAllocateBufferInfo) {
@@ -126,18 +128,18 @@ TEST_F(GlReusedBufferTests, givenGlobalShareHandleDidNotChangeWhenAcquiringShare
             GlBuffer::resolveGraphicsAllocationChange(currentSharedHandle, updateData);
         }
     };
-    std::unique_ptr<glDllHelper> dllParam = std::make_unique<glDllHelper>();
-    CL_GL_BUFFER_INFO bufferInfoOutput = dllParam->getBufferInfo();
+    GlDllHelper dllParam;
+    CL_GL_BUFFER_INFO bufferInfoOutput = dllParam.getBufferInfo();
     bufferInfoOutput.globalShareHandle = 40;
 
-    dllParam->loadBuffer(bufferInfoOutput);
+    dllParam.loadBuffer(bufferInfoOutput);
     auto clBuffer = std::unique_ptr<Buffer>(GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, bufferId1, &retVal));
     auto glBuffer = new MyGlBuffer(context.getSharing<GLSharingFunctions>(), bufferId1);
     clBuffer->setSharingHandler(glBuffer);
 
-    glBuffer->acquire(clBuffer.get());
+    glBuffer->acquire(clBuffer.get(), rootDeviceIndex);
 
-    glBuffer->release(clBuffer.get());
+    glBuffer->release(clBuffer.get(), rootDeviceIndex);
 }
 
 TEST_F(GlReusedBufferTests, givenGlobalShareHandleChangedWhenAcquiringSharedBufferThenDynamicallyAllocateBufferInfo) {
@@ -151,69 +153,69 @@ TEST_F(GlReusedBufferTests, givenGlobalShareHandleChangedWhenAcquiringSharedBuff
             GlBuffer::resolveGraphicsAllocationChange(currentSharedHandle, updateData);
         }
     };
-    std::unique_ptr<glDllHelper> dllParam = std::make_unique<glDllHelper>();
-    CL_GL_BUFFER_INFO bufferInfoOutput = dllParam->getBufferInfo();
+    GlDllHelper dllParam;
+    CL_GL_BUFFER_INFO bufferInfoOutput = dllParam.getBufferInfo();
     bufferInfoOutput.globalShareHandle = 40;
-    dllParam->loadBuffer(bufferInfoOutput);
+    dllParam.loadBuffer(bufferInfoOutput);
     auto clBuffer = std::unique_ptr<Buffer>(GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, bufferId1, &retVal));
     auto glBuffer = new MyGlBuffer(context.getSharing<GLSharingFunctions>(), bufferId1);
     clBuffer->setSharingHandler(glBuffer);
 
     bufferInfoOutput.globalShareHandle = 41;
-    dllParam->loadBuffer(bufferInfoOutput);
-    glBuffer->acquire(clBuffer.get());
+    dllParam.loadBuffer(bufferInfoOutput);
+    glBuffer->acquire(clBuffer.get(), rootDeviceIndex);
 
-    glBuffer->release(clBuffer.get());
+    glBuffer->release(clBuffer.get(), rootDeviceIndex);
 }
 
 TEST_F(GlReusedBufferTests, givenMultipleBuffersAndGlobalShareHandleChangedWhenAcquiringSharedBufferDeleteOldGfxAllocationFromReuseVector) {
-    std::unique_ptr<glDllHelper> dllParam = std::make_unique<glDllHelper>();
-    CL_GL_BUFFER_INFO bufferInfoOutput = dllParam->getBufferInfo();
+    GlDllHelper dllParam;
+    CL_GL_BUFFER_INFO bufferInfoOutput = dllParam.getBufferInfo();
     bufferInfoOutput.globalShareHandle = 40;
-    dllParam->loadBuffer(bufferInfoOutput);
+    dllParam.loadBuffer(bufferInfoOutput);
     auto clBuffer1 = std::unique_ptr<Buffer>(GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, bufferId1, &retVal));
     auto clBuffer2 = std::unique_ptr<Buffer>(GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, bufferId1, &retVal));
-    auto graphicsAllocation1 = clBuffer1->getGraphicsAllocation();
-    auto graphicsAllocation2 = clBuffer2->getGraphicsAllocation();
+    auto graphicsAllocation1 = clBuffer1->getGraphicsAllocation(rootDeviceIndex);
+    auto graphicsAllocation2 = clBuffer2->getGraphicsAllocation(rootDeviceIndex);
     ASSERT_EQ(graphicsAllocation1, graphicsAllocation2);
     ASSERT_EQ(2, graphicsAllocation1->peekReuseCount());
     ASSERT_EQ(1, graphicsAllocationsForGlBufferReuse->size());
 
     bufferInfoOutput.globalShareHandle = 41;
-    dllParam->loadBuffer(bufferInfoOutput);
-    clBuffer1->peekSharingHandler()->acquire(clBuffer1.get());
-    auto newGraphicsAllocation = clBuffer1->getGraphicsAllocation();
+    dllParam.loadBuffer(bufferInfoOutput);
+    clBuffer1->peekSharingHandler()->acquire(clBuffer1.get(), rootDeviceIndex);
+    auto newGraphicsAllocation = clBuffer1->getGraphicsAllocation(rootDeviceIndex);
     EXPECT_EQ(1, graphicsAllocationsForGlBufferReuse->size());
     EXPECT_EQ(newGraphicsAllocation, graphicsAllocationsForGlBufferReuse->at(0).second);
 
-    clBuffer2->peekSharingHandler()->acquire(clBuffer2.get());
-    EXPECT_EQ(clBuffer2->getGraphicsAllocation(), newGraphicsAllocation);
+    clBuffer2->peekSharingHandler()->acquire(clBuffer2.get(), rootDeviceIndex);
+    EXPECT_EQ(clBuffer2->getGraphicsAllocation(rootDeviceIndex), newGraphicsAllocation);
     EXPECT_EQ(1, graphicsAllocationsForGlBufferReuse->size());
     EXPECT_EQ(newGraphicsAllocation, graphicsAllocationsForGlBufferReuse->at(0).second);
 
-    clBuffer1->peekSharingHandler()->release(clBuffer1.get());
-    clBuffer2->peekSharingHandler()->release(clBuffer2.get());
+    clBuffer1->peekSharingHandler()->release(clBuffer1.get(), rootDeviceIndex);
+    clBuffer2->peekSharingHandler()->release(clBuffer2.get(), rootDeviceIndex);
 }
 
 TEST_F(GlReusedBufferTests, givenGraphicsAllocationCreationReturnsNullptrWhenAcquiringGlBufferThenReturnOutOfResourcesAndNullifyAllocation) {
     auto suceedingMemoryManager = context.getMemoryManager();
     auto failingMemoryManager = std::unique_ptr<FailingMemoryManager>(new FailingMemoryManager());
 
-    std::unique_ptr<glDllHelper> dllParam = std::make_unique<glDllHelper>();
-    CL_GL_BUFFER_INFO bufferInfoOutput = dllParam->getBufferInfo();
+    GlDllHelper dllParam;
+    CL_GL_BUFFER_INFO bufferInfoOutput = dllParam.getBufferInfo();
     bufferInfoOutput.globalShareHandle = 40;
 
-    dllParam->loadBuffer(bufferInfoOutput);
+    dllParam.loadBuffer(bufferInfoOutput);
     auto clBuffer = std::unique_ptr<Buffer>(GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, bufferId1, &retVal));
     auto glBuffer = clBuffer->peekSharingHandler();
 
     bufferInfoOutput.globalShareHandle = 41;
-    dllParam->loadBuffer(bufferInfoOutput);
+    dllParam.loadBuffer(bufferInfoOutput);
     context.memoryManager = failingMemoryManager.get();
-    auto result = glBuffer->acquire(clBuffer.get());
+    auto result = glBuffer->acquire(clBuffer.get(), rootDeviceIndex);
 
     EXPECT_EQ(CL_OUT_OF_RESOURCES, result);
-    EXPECT_EQ(nullptr, clBuffer->getGraphicsAllocation());
+    EXPECT_EQ(nullptr, clBuffer->getGraphicsAllocation(rootDeviceIndex));
 
     context.memoryManager = suceedingMemoryManager;
 }

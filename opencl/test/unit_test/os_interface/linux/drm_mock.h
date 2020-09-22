@@ -8,13 +8,17 @@
 #pragma once
 
 #include "shared/source/execution_environment/execution_environment.h"
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/execution_environment/root_device_environment.h"
+#include "shared/source/helpers/constants.h"
+#include "shared/source/helpers/hw_helper.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
 
 #include "opencl/source/platform/platform.h"
+#include "opencl/test/unit_test/linux/mock_os_layer.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 
 #include "drm/i915_drm.h"
+#include "gtest/gtest.h"
 
 #include <cstdio>
 #include <fstream>
@@ -27,30 +31,26 @@ class DrmMock : public Drm {
   public:
     using Drm::checkQueueSliceSupport;
     using Drm::engineInfo;
+    using Drm::generateUUID;
     using Drm::getQueueSliceCount;
     using Drm::memoryInfo;
     using Drm::nonPersistentContextsSupported;
     using Drm::preemptionSupported;
     using Drm::query;
+    using Drm::requirePerContextVM;
     using Drm::sliceCountChangeSupported;
+    using Drm::virtualMemoryIds;
 
-    DrmMock(RootDeviceEnvironment &rootDeviceEnvironment) : Drm(std::make_unique<HwDeviceId>(mockFd), rootDeviceEnvironment) {
+    DrmMock(int fd, RootDeviceEnvironment &rootDeviceEnvironment) : Drm(std::make_unique<HwDeviceId>(fd, ""), rootDeviceEnvironment) {
         sliceCountChangeSupported = true;
-    }
-    DrmMock() : DrmMock(*platform()->peekExecutionEnvironment()->rootDeviceEnvironments[0]) {}
-
-    ~DrmMock() override {
-        if (sysFsDefaultGpuPathToRestore != nullptr) {
-            sysFsDefaultGpuPath = sysFsDefaultGpuPathToRestore;
+        if (!rootDeviceEnvironment.executionEnvironment.isPerContextMemorySpaceRequired()) {
+            createVirtualMemoryAddressSpace(HwHelper::getSubDevicesCount(rootDeviceEnvironment.getHardwareInfo()));
         }
     }
+    DrmMock(RootDeviceEnvironment &rootDeviceEnvironment) : DrmMock(mockFd, rootDeviceEnvironment) {}
+    DrmMock() : DrmMock(*platform()->peekExecutionEnvironment()->rootDeviceEnvironments[0]) {}
 
     int ioctl(unsigned long request, void *arg) override;
-
-    void setSysFsDefaultGpuPath(const char *path) {
-        sysFsDefaultGpuPathToRestore = sysFsDefaultGpuPath;
-        sysFsDefaultGpuPath = path;
-    }
 
     void writeConfigFile(const char *name, int deviceID) {
         std::ofstream tempfile(name, std::ios::binary);
@@ -71,23 +71,22 @@ class DrmMock : public Drm {
     }
 
     void setFileDescriptor(int fd) {
-        hwDeviceId = std::make_unique<HwDeviceId>(fd);
+        hwDeviceId = std::make_unique<HwDeviceId>(fd, "");
+    }
+
+    void setPciPath(const char *pciPath) {
+        hwDeviceId = std::make_unique<HwDeviceId>(getFileDescriptor(), pciPath);
     }
 
     void setDeviceID(int deviceId) { this->deviceId = deviceId; }
     void setDeviceRevID(int revisionId) { this->revisionId = revisionId; }
 
-    inline uint32_t createMemoryRegionId(uint16_t type, uint16_t instance) const {
-        return (1u << (type + 16)) | (1u << instance);
-    }
-
-    static inline uint16_t getMemoryTypeFromRegion(uint32_t region) { return Math::log2(region >> 16); };
-    static inline uint16_t getInstanceFromRegion(uint32_t region) { return Math::log2(region & 0xFFFF); };
-
     static const int mockFd = 33;
 
-    int StoredEUVal = -1;
-    int StoredSSVal = -1;
+    bool failRetTopology = false;
+    int StoredEUVal = 8;
+    int StoredSSVal = 2;
+    int StoredSVal = 1;
     int StoredDeviceID = 1;
     int StoredDeviceRevID = 1;
     int StoredHasPooledEU = 1;
@@ -109,7 +108,11 @@ class DrmMock : public Drm {
         I915_SCHEDULER_CAP_PRIORITY |
         I915_SCHEDULER_CAP_PREEMPTION;
     int StoredExecSoftPin = 0;
-    uint32_t StoredCtxId = 1;
+    int StoredRetValForVmId = 1;
+
+    bool disableSomeTopology = false;
+
+    uint32_t receivedCreateContextId = 0;
     uint32_t receivedDestroyContextId = 0;
     uint32_t ioctlCallsCount = 0;
 
@@ -139,7 +142,60 @@ class DrmMock : public Drm {
     uint64_t storedParamSseu = ULONG_MAX;
 
     virtual int handleRemainingRequests(unsigned long request, void *arg) { return -1; }
+};
 
-  private:
-    const char *sysFsDefaultGpuPathToRestore = nullptr;
+class DrmMockNonFailing : public DrmMock {
+  public:
+    using DrmMock::DrmMock;
+    int handleRemainingRequests(unsigned long request, void *arg) override { return 0; }
+};
+
+class DrmMockEngine : public DrmMock {
+  public:
+    uint32_t i915QuerySuccessCount = std::numeric_limits<uint32_t>::max();
+    uint32_t queryEngineInfoSuccessCount = std::numeric_limits<uint32_t>::max();
+
+    virtual int handleRemainingRequests(unsigned long request, void *arg) {
+        if ((request == DRM_IOCTL_I915_QUERY) && (arg != nullptr)) {
+            if (i915QuerySuccessCount == 0) {
+                return EINVAL;
+            }
+            i915QuerySuccessCount--;
+            auto query = static_cast<drm_i915_query *>(arg);
+            if (query->items_ptr == 0) {
+                return EINVAL;
+            }
+            for (auto i = 0u; i < query->num_items; i++) {
+                handleQueryItem(reinterpret_cast<drm_i915_query_item *>(query->items_ptr) + i);
+            }
+            return 0;
+        }
+        return -1;
+    }
+
+    void handleQueryItem(drm_i915_query_item *queryItem) {
+        switch (queryItem->query_id) {
+        case DRM_I915_QUERY_ENGINE_INFO:
+            if (queryEngineInfoSuccessCount == 0) {
+                queryItem->length = -EINVAL;
+            } else {
+                queryEngineInfoSuccessCount--;
+                auto numberOfEngines = 2u;
+                int engineInfoSize = sizeof(drm_i915_query_engine_info) + numberOfEngines * sizeof(drm_i915_engine_info);
+                if (queryItem->length == 0) {
+                    queryItem->length = engineInfoSize;
+                } else {
+                    EXPECT_EQ(engineInfoSize, queryItem->length);
+                    auto queryEnginenInfo = reinterpret_cast<drm_i915_query_engine_info *>(queryItem->data_ptr);
+                    EXPECT_EQ(0u, queryEnginenInfo->num_engines);
+                    queryEnginenInfo->num_engines = numberOfEngines;
+                    queryEnginenInfo->engines[0].engine.engine_class = I915_ENGINE_CLASS_RENDER;
+                    queryEnginenInfo->engines[0].engine.engine_instance = 1;
+                    queryEnginenInfo->engines[1].engine.engine_class = I915_ENGINE_CLASS_COPY;
+                    queryEnginenInfo->engines[1].engine.engine_instance = 1;
+                }
+            }
+            break;
+        }
+    }
 };

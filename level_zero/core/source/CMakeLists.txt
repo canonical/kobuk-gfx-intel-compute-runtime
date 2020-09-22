@@ -7,6 +7,8 @@
 set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
     ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/additional_kernel_properties.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/get_extension_function_lookup_map.h
+    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/get_extension_function_lookup_map.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/builtin/builtin_functions_lib.h
     ${CMAKE_CURRENT_SOURCE_DIR}/builtin/builtin_functions_lib_impl.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/builtin/builtin_functions_lib_impl.h
@@ -27,8 +29,10 @@ set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/cmdqueue/cmdqueue_hw_base.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cmdqueue/cmdqueue_imp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cmdqueue/cmdqueue_extended${BRANCH_DIR_SUFFIX}/cmdqueue_extended.inl
+    ${CMAKE_CURRENT_SOURCE_DIR}/context/context_imp.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/context/context_imp.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/context/context.h
     ${CMAKE_CURRENT_SOURCE_DIR}/debugger/debug_manager.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/debugger/debugger.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device/device.h
     ${CMAKE_CURRENT_SOURCE_DIR}/device/device_imp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device/device_imp.h
@@ -42,6 +46,7 @@ set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/event/event.h
     ${CMAKE_CURRENT_SOURCE_DIR}/fence/fence.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fence/fence.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/helpers/heap_assigner_config_l0.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_helpers${BRANCH_DIR_SUFFIX}/hw_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel/kernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel/kernel.h
@@ -49,6 +54,9 @@ set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel/kernel_imp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel/kernel_imp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/image/image.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/image/image_format_desc_helper.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/image/image_format_desc_helper.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/image/image_formats.h
     ${CMAKE_CURRENT_SOURCE_DIR}/image/image_hw.h
     ${CMAKE_CURRENT_SOURCE_DIR}/image/image_hw.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/image/image_imp.cpp
@@ -72,32 +80,32 @@ set(L0_RUNTIME_SOURCES
 )
 
 target_include_directories(${L0_STATIC_LIB_NAME}
-    PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/
+                           PUBLIC
+                           ${CMAKE_CURRENT_SOURCE_DIR}/
 )
 
 target_include_directories(${TARGET_NAME_L0}
-    PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/
+                           PUBLIC
+                           ${CMAKE_CURRENT_SOURCE_DIR}/
 )
 
 add_subdirectories()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 target_sources(${L0_STATIC_LIB_NAME}
-    PRIVATE
-        ${L0_RUNTIME_SOURCES}
-        ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+               PRIVATE
+               ${L0_RUNTIME_SOURCES}
+               ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
 )
 
 target_sources(${TARGET_NAME_L0}
-    PRIVATE
-        ${L0_SRCS_DLL}
-        ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+               PRIVATE
+               ${L0_SRCS_DLL}
+               ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
 )
 
 if(UNIX)
-    set_source_files_properties(${L0_RUNTIME_SOURCES} PROPERTIES COMPILE_FLAGS -Wall)
+  set_source_files_properties(${L0_RUNTIME_SOURCES} PROPERTIES COMPILE_FLAGS -Wall)
 endif()
 
 if(NOT DEFINED L0_DRIVER_VERSION)

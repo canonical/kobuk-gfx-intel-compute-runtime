@@ -21,6 +21,7 @@
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/device_queue/device_queue.h"
+#include "opencl/source/execution_environment/cl_execution_environment.h"
 #include "opencl/source/gtpin/gtpin_notify.h"
 #include "opencl/source/helpers/get_info_status_mapper.h"
 #include "opencl/source/helpers/surface_formats.h"
@@ -40,14 +41,8 @@ namespace NEO {
 Context::Context(
     void(CL_CALLBACK *funcNotify)(const char *, const void *, size_t, void *),
     void *data) {
-    properties = nullptr;
-    numProperties = 0;
     contextCallback = funcNotify;
     userData = data;
-    memoryManager = nullptr;
-    specialQueue = nullptr;
-    defaultDeviceQueue = nullptr;
-    driverDiagnostics = nullptr;
     sharingFunctions.resize(SharingType::MAX_SHARING_VALUE);
     schedulerBuiltIn = std::make_unique<BuiltInKernel>();
 }
@@ -67,6 +62,10 @@ Context::~Context() {
         memoryManager->getDeferredDeleter()->removeClient();
     }
     gtpinNotifyContextDestroy((cl_context)this);
+    for (auto callback : destructorCallbacks) {
+        callback->invoke(this);
+        delete callback;
+    }
     for (auto &device : devices) {
         device->decRefInternal();
     }
@@ -74,6 +73,23 @@ Context::~Context() {
     delete schedulerBuiltIn->pProgram;
     schedulerBuiltIn->pKernel = nullptr;
     schedulerBuiltIn->pProgram = nullptr;
+}
+
+cl_int Context::setDestructorCallback(void(CL_CALLBACK *funcNotify)(cl_context, void *),
+                                      void *userData) {
+    auto cb = new ContextDestructorCallback(funcNotify, userData);
+
+    std::unique_lock<std::mutex> theLock(mtx);
+    destructorCallbacks.push_front(cb);
+    return CL_SUCCESS;
+}
+
+const std::set<uint32_t> &Context::getRootDeviceIndices() const {
+    return rootDeviceIndices;
+}
+
+uint32_t Context::getMaxRootDeviceIndex() const {
+    return maxRootDeviceIndex;
 }
 
 DeviceQueue *Context::getDefaultDeviceQueue() {
@@ -170,11 +186,21 @@ bool Context::createImpl(const cl_context_properties *properties,
         return false;
     }
 
+    for (const auto &device : inputDevices) {
+        rootDeviceIndices.insert(device->getRootDeviceIndex());
+    }
+
     this->driverDiagnostics = driverDiagnostics.release();
+    if (rootDeviceIndices.size() > 1 && !DebugManager.flags.EnableMultiRootDeviceContexts.get()) {
+        DEBUG_BREAK_IF("No support for context with multiple root devices");
+        errcodeRet = CL_OUT_OF_HOST_MEMORY;
+        return false;
+    }
+
     this->devices = inputDevices;
 
-    // We currently assume each device uses the same MemoryManager
     if (devices.size() > 0) {
+        maxRootDeviceIndex = *std::max_element(rootDeviceIndices.begin(), rootDeviceIndices.end(), std::less<uint32_t const>());
         auto device = this->getDevice(0);
         this->memoryManager = device->getMemoryManager();
         if (memoryManager->isAsyncDeleterEnabled()) {
@@ -190,6 +216,7 @@ bool Context::createImpl(const cl_context_properties *properties,
         if (anySvmSupport) {
             this->svmAllocsManager = new SVMAllocsManager(this->memoryManager);
         }
+        setupContextType();
     }
 
     auto commandQueue = CommandQueue::create(this, devices[0], nullptr, true, errcodeRet);
@@ -202,7 +229,7 @@ bool Context::createImpl(const cl_context_properties *properties,
 cl_int Context::getInfo(cl_context_info paramName, size_t paramValueSize,
                         void *paramValue, size_t *paramValueSizeRet) {
     cl_int retVal;
-    size_t valueSize = 0;
+    size_t valueSize = GetInfo::invalidSourceSize;
     const void *pValue = nullptr;
     cl_uint numDevices;
     cl_uint refCount = 0;
@@ -242,15 +269,13 @@ cl_int Context::getInfo(cl_context_info paramName, size_t paramValueSize,
         break;
     }
 
+    GetInfoStatus getInfoStatus = GetInfoStatus::SUCCESS;
     if (callGetinfo) {
-        retVal = changeGetInfoStatusToCLResultType(::getInfo(paramValue, paramValueSize, pValue, valueSize));
-    } else {
-        retVal = CL_SUCCESS;
+        getInfoStatus = GetInfo::getInfo(paramValue, paramValueSize, pValue, valueSize);
     }
 
-    if (paramValueSizeRet) {
-        *paramValueSizeRet = valueSize;
-    }
+    retVal = changeGetInfoStatusToCLResultType(getInfoStatus);
+    GetInfo::setParamValueReturnSize(paramValueSizeRet, valueSize, getInfoStatus);
 
     return retVal;
 }
@@ -279,6 +304,14 @@ cl_int Context::getSupportedImageFormats(
     cl_image_format *imageFormats,
     cl_uint *numImageFormatsReturned) {
     size_t numImageFormats = 0;
+
+    if (isValueSet(CL_MEM_KERNEL_READ_AND_WRITE, flags) && device->getSpecializedDevice<ClDevice>()->areOcl21FeaturesEnabled() == false) {
+        if (numImageFormatsReturned) {
+            *numImageFormatsReturned = static_cast<cl_uint>(numImageFormats);
+        }
+        return CL_SUCCESS;
+    }
+
     const bool nv12ExtensionEnabled = device->getSpecializedDevice<ClDevice>()->getDeviceInfo().nv12Extension;
     const bool packedYuvExtensionEnabled = device->getSpecializedDevice<ClDevice>()->getDeviceInfo().packedYuvExtension;
 
@@ -293,7 +326,7 @@ cl_int Context::getSupportedImageFormats(
     };
 
     if (flags & CL_MEM_READ_ONLY) {
-        if (this->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport >= 20) {
+        if (this->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features) {
             appendImageFormats(SurfaceFormats::readOnly20());
         } else {
             appendImageFormats(SurfaceFormats::readOnly12());
@@ -313,7 +346,7 @@ cl_int Context::getSupportedImageFormats(
             appendImageFormats(SurfaceFormats::readWriteDepth());
         }
     } else if (nv12ExtensionEnabled && (flags & CL_MEM_NO_ACCESS_INTEL)) {
-        if (this->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport >= 20) {
+        if (this->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features) {
             appendImageFormats(SurfaceFormats::readOnly20());
         } else {
             appendImageFormats(SurfaceFormats::readOnly12());
@@ -377,12 +410,57 @@ SchedulerKernel &Context::getSchedulerKernel() {
 }
 
 bool Context::isDeviceAssociated(const ClDevice &clDevice) const {
-    for (const auto &device : devices) {
-        if (device == &clDevice) {
+    for (const auto &pDevice : devices) {
+        if (pDevice == &clDevice) {
             return true;
         }
     }
     return false;
+}
+
+ClDevice *Context::getSubDeviceByIndex(uint32_t subDeviceIndex) const {
+
+    auto isExpectedSubDevice = [subDeviceIndex](ClDevice *pClDevice) -> bool {
+        bool isSubDevice = (pClDevice->getDeviceInfo().parentDevice != nullptr);
+        if (isSubDevice == false) {
+            return false;
+        }
+
+        auto &subDevice = static_cast<SubDevice &>(pClDevice->getDevice());
+        return (subDevice.getSubDeviceIndex() == subDeviceIndex);
+    };
+
+    auto foundDeviceIterator = std::find_if(devices.begin(), devices.end(), isExpectedSubDevice);
+    return (foundDeviceIterator != devices.end() ? *foundDeviceIterator : nullptr);
+}
+
+AsyncEventsHandler &Context::getAsyncEventsHandler() const {
+    return *static_cast<ClExecutionEnvironment *>(devices[0]->getExecutionEnvironment())->getAsyncEventsHandler();
+}
+
+DeviceBitfield Context::getDeviceBitfieldForAllocation() const {
+    DeviceBitfield deviceBitfield{};
+    for (const auto &pDevice : devices) {
+        deviceBitfield |= pDevice->getDeviceBitfield();
+    }
+
+    return deviceBitfield;
+}
+
+void Context::setupContextType() {
+    if (contextType == ContextType::CONTEXT_TYPE_DEFAULT) {
+        if (devices.size() > 1) {
+            for (const auto &pDevice : devices) {
+                if (!pDevice->getDeviceInfo().parentDevice) {
+                    contextType = ContextType::CONTEXT_TYPE_UNRESTRICTIVE;
+                    return;
+                }
+            }
+        }
+        if (devices[0]->getDeviceInfo().parentDevice) {
+            contextType = ContextType::CONTEXT_TYPE_SPECIALIZED;
+        }
+    }
 }
 
 } // namespace NEO

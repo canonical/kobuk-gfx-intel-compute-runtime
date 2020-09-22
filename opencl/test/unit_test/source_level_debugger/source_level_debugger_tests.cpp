@@ -5,17 +5,18 @@
  *
  */
 
+#include "shared/source/command_container/cmdcontainer.h"
 #include "shared/source/device/device.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/source_level_debugger/source_level_debugger.h"
 #include "shared/test/unit_test/helpers/ult_hw_config.h"
+#include "shared/test/unit_test/helpers/variable_backup.h"
 
 #include "opencl/source/platform/platform.h"
 #include "opencl/source/program/kernel_info.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
 #include "opencl/test/unit_test/helpers/execution_environment_helper.h"
-#include "opencl/test/unit_test/helpers/variable_backup.h"
 #include "opencl/test/unit_test/libult/source_level_debugger_library.h"
+#include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 #include "opencl/test/unit_test/mocks/mock_source_level_debugger.h"
 
@@ -42,6 +43,14 @@ class DebuggerLibraryRestorer {
     bool restoreActiveState = false;
     bool restoreAvailableState = false;
 };
+
+TEST(SourceLevelDebugger, whenSourceLevelDebuggerIsCreatedThenLegacyModeIsTrue) {
+    DebuggerLibraryRestorer restorer;
+    DebuggerLibrary::setLibraryAvailable(true);
+
+    MockSourceLevelDebugger debugger;
+    EXPECT_TRUE(debugger.isLegacy());
+}
 
 TEST(SourceLevelDebugger, givenPlatformWhenItIsCreatedThenSourceLevelDebuggerIsCreatedInExecutionEnvironment) {
     DebuggerLibraryRestorer restorer;
@@ -294,12 +303,10 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryActiveWhenNotifyKernelDebugD
 
     info.name = "debugKernel";
 
-    SKernelBinaryHeaderCommon kernelHeader;
-    kernelHeader.KernelHeapSize = sizeof(isa);
-    info.heapInfo.pKernelHeader = &kernelHeader;
+    info.heapInfo.KernelHeapSize = sizeof(isa);
     info.heapInfo.pKernelHeap = isa;
 
-    debugger.notifyKernelDebugData(&info.debugData, info.name, info.heapInfo.pKernelHeap, info.heapInfo.pKernelHeader->KernelHeapSize);
+    debugger.notifyKernelDebugData(&info.debugData, info.name, info.heapInfo.pKernelHeap, info.heapInfo.KernelHeapSize);
 
     EXPECT_TRUE(interceptor.kernelDebugDataCalled);
 
@@ -312,7 +319,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryActiveWhenNotifyKernelDebugD
     EXPECT_EQ(visa, interceptor.kernelDebugDataArgIn.dbgVisaBuffer);
     EXPECT_EQ(sizeof(visa), interceptor.kernelDebugDataArgIn.dbgVisaSize);
 
-    EXPECT_EQ(kernelHeader.KernelHeapSize, interceptor.kernelDebugDataArgIn.KernelBinSize);
+    EXPECT_EQ(info.heapInfo.KernelHeapSize, interceptor.kernelDebugDataArgIn.KernelBinSize);
     EXPECT_EQ(isa, interceptor.kernelDebugDataArgIn.kernelBinBuffer);
     EXPECT_STREQ(info.name.c_str(), interceptor.kernelDebugDataArgIn.kernelName);
 }
@@ -337,12 +344,10 @@ TEST(SourceLevelDebugger, givenNoVisaWhenNotifyKernelDebugDataIsCalledThenDebugg
 
     info.name = "debugKernel";
 
-    SKernelBinaryHeaderCommon kernelHeader;
-    kernelHeader.KernelHeapSize = sizeof(isa);
-    info.heapInfo.pKernelHeader = &kernelHeader;
+    info.heapInfo.KernelHeapSize = sizeof(isa);
     info.heapInfo.pKernelHeap = isa;
 
-    debugger.notifyKernelDebugData(&info.debugData, info.name, info.heapInfo.pKernelHeap, info.heapInfo.pKernelHeader->KernelHeapSize);
+    debugger.notifyKernelDebugData(&info.debugData, info.name, info.heapInfo.pKernelHeap, info.heapInfo.KernelHeapSize);
     EXPECT_FALSE(interceptor.kernelDebugDataCalled);
 }
 
@@ -366,9 +371,7 @@ TEST(SourceLevelDebugger, givenNoGenIsaWhenNotifyKernelDebugDataIsCalledThenDebu
 
     info.name = "debugKernel";
 
-    SKernelBinaryHeaderCommon kernelHeader;
-    kernelHeader.KernelHeapSize = sizeof(isa);
-    info.heapInfo.pKernelHeader = &kernelHeader;
+    info.heapInfo.KernelHeapSize = sizeof(isa);
     info.heapInfo.pKernelHeap = isa;
 
     debugger.notifyKernelDebugData(&info.debugData, info.name, isa, sizeof(isa));
@@ -527,6 +530,35 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryNotActiveWhenDeviceIsCreated
     EXPECT_FALSE(interceptor.newDeviceCalled);
 }
 
+TEST(SourceLevelDebugger, givenKernelDebuggerLibraryNotActiveWhenGettingSourceLevelDebuggerThenNullptrIsReturned) {
+    DebuggerLibraryRestorer restorer;
+
+    DebuggerLibraryInterceptor interceptor;
+    DebuggerLibrary::setLibraryAvailable(true);
+    DebuggerLibrary::setDebuggerActive(false);
+    DebuggerLibrary::injectDebuggerLibraryInterceptor(&interceptor);
+
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
+
+    EXPECT_EQ(nullptr, device->getSourceLevelDebugger());
+}
+
+TEST(SourceLevelDebugger, givenDeviceWithDebuggerActiveSetWhenSourceLevelDebuggerIsNotCreatedThenNotificationsAreNotCalled) {
+    DebuggerLibraryRestorer restorer;
+
+    DebuggerLibraryInterceptor interceptor;
+    DebuggerLibrary::setLibraryAvailable(false);
+    DebuggerLibrary::setDebuggerActive(false);
+    DebuggerLibrary::injectDebuggerLibraryInterceptor(&interceptor);
+
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDeviceWithDebuggerActive>(nullptr));
+
+    EXPECT_TRUE(device->isDebuggerActive());
+    EXPECT_EQ(nullptr, device->getDebugger());
+    EXPECT_FALSE(interceptor.newDeviceCalled);
+    EXPECT_FALSE(interceptor.deviceDestructionCalled);
+}
+
 TEST(SourceLevelDebugger, givenTwoRootDevicesWhenSecondIsCreatedThenCreatingNewSourceLevelDebugger) {
     DebuggerLibraryRestorer restorer;
 
@@ -569,4 +601,17 @@ TEST(SourceLevelDebugger, givenMultipleRootDevicesWhenTheyAreCreatedTheyUseDedic
         auto device2 = std::make_unique<MockClDevice>(Device::create<MockDevice>(executionEnvironment, 1u));
         EXPECT_NE(sourceLevelDebugger, device2->getDebugger());
     }
+}
+
+TEST(SourceLevelDebugger, whenCaptureSBACalledThenNoCommandsAreAddedToStream) {
+    ExecutionEnvironment *executionEnvironment = platform()->peekExecutionEnvironment();
+    auto device = std::unique_ptr<Device>(Device::create<MockDevice>(executionEnvironment, 0u));
+    MockSourceLevelDebugger debugger;
+
+    CommandContainer container;
+    container.initialize(device.get());
+
+    NEO::Debugger::SbaAddresses sbaAddresses = {};
+    debugger.captureStateBaseAddress(container, sbaAddresses);
+    EXPECT_EQ(0u, container.getCommandStream()->getUsed());
 }

@@ -9,7 +9,7 @@
 #include "shared/source/helpers/ptr_math.h"
 
 #include "opencl/source/kernel/kernel.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
@@ -19,10 +19,10 @@
 
 using namespace NEO;
 
-class KernelSlmArgTest : public Test<DeviceFixture> {
+class KernelSlmArgTest : public Test<ClDeviceFixture> {
   protected:
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
         pKernelInfo = std::make_unique<KernelInfo>();
         KernelArgPatchInfo kernelArgPatchInfo;
 
@@ -55,7 +55,7 @@ class KernelSlmArgTest : public Test<DeviceFixture> {
     void TearDown() override {
         delete pKernel;
 
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     cl_int retVal = CL_SUCCESS;
@@ -67,7 +67,7 @@ class KernelSlmArgTest : public Test<DeviceFixture> {
     static const size_t slmSize2 = 0x30;
 };
 
-TEST_F(KernelSlmArgTest, settingSizeUpdatesAlignmentOfHigherSlmArgs) {
+TEST_F(KernelSlmArgTest, WhenSettingSizeThenAlignmentOfHigherSlmArgsIsUpdated) {
     pKernel->setArg(0, slmSize0, nullptr);
     pKernel->setArg(2, slmSize2, nullptr);
 
@@ -84,7 +84,7 @@ TEST_F(KernelSlmArgTest, settingSizeUpdatesAlignmentOfHigherSlmArgs) {
     EXPECT_EQ(5 * KB, pKernel->slmTotalSize);
 }
 
-TEST_F(KernelSlmArgTest, settingSizeUpdatesAlignmentOfHigherSlmArgsReverseOrder) {
+TEST_F(KernelSlmArgTest, GivenReverseOrderWhenSettingSizeThenAlignmentOfHigherSlmArgsIsUpdated) {
     pKernel->setArg(2, slmSize2, nullptr);
     pKernel->setArg(0, slmSize0, nullptr);
 

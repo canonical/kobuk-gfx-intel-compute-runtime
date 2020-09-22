@@ -7,8 +7,8 @@
 
 #pragma once
 
+#include "shared/source/helpers/constants.h"
 #include "shared/source/memory_manager/host_ptr_defines.h"
-#include "shared/source/memory_manager/memory_constants.h"
 #include "shared/source/os_interface/windows/wddm/wddm.h"
 #include "shared/source/os_interface/windows/wddm_residency_allocations_container.h"
 #include "shared/source/os_interface/windows/windows_defs.h"
@@ -32,6 +32,7 @@ class WddmMock : public Wddm {
     using Wddm::currentPagingFenceValue;
     using Wddm::dedicatedVideoMemory;
     using Wddm::device;
+    using Wddm::deviceRegistryPath;
     using Wddm::featureTable;
     using Wddm::getSystemInfo;
     using Wddm::gmmMemory;
@@ -41,9 +42,11 @@ class WddmMock : public Wddm {
     using Wddm::pagingFenceAddress;
     using Wddm::pagingQueue;
     using Wddm::residencyLogger;
+    using Wddm::rootDeviceEnvironment;
     using Wddm::temporaryResources;
     using Wddm::wddmInterface;
 
+    WddmMock(std::unique_ptr<HwDeviceId> hwDeviceId, RootDeviceEnvironment &rootDeviceEnvironment) : Wddm(std::move(hwDeviceId), rootDeviceEnvironment) {}
     WddmMock(RootDeviceEnvironment &rootDeviceEnvironment);
     ~WddmMock();
 
@@ -85,6 +88,12 @@ class WddmMock : public Wddm {
     uint64_t *getPagingFenceAddress() override;
     void waitOnPagingFenceFromCpu() override;
     void createPagingFenceLogger() override;
+    bool verifyAdapterLuid(LUID adapterLuid) const override {
+        if (callBaseVerifyAdapterLuid) {
+            return Wddm::verifyAdapterLuid(adapterLuid);
+        }
+        return verifyAdapterLuidReturnValue;
+    }
 
     bool configureDeviceAddressSpace() {
         configureDeviceAddressSpaceResult.called++;
@@ -94,6 +103,17 @@ class WddmMock : public Wddm {
         } else {
             return configureDeviceAddressSpaceResult.success = Wddm::configureDeviceAddressSpace();
         }
+    }
+
+    uint32_t counterVerifyNTHandle = 0;
+    uint32_t counterVerifySharedHandle = 0;
+    bool verifyNTHandle(HANDLE handle) override {
+        ++counterVerifyNTHandle;
+        return Wddm::verifyNTHandle(handle);
+    }
+    bool verifySharedHandle(D3DKMT_HANDLE osHandle) override {
+        ++counterVerifySharedHandle;
+        return Wddm::verifySharedHandle(osHandle);
     }
 
     void resetGdi(Gdi *gdi);
@@ -123,6 +143,8 @@ class WddmMock : public Wddm {
     WddmMockHelpers::CallResult waitOnPagingFenceFromCpuResult;
 
     NTSTATUS createAllocationStatus = STATUS_SUCCESS;
+    bool verifyAdapterLuidReturnValue = true;
+    bool callBaseVerifyAdapterLuid = false;
     bool mapGpuVaStatus = true;
     bool callBaseDestroyAllocations = true;
     bool failOpenSharedHandle = false;

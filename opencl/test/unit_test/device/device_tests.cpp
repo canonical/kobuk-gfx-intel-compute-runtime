@@ -11,11 +11,13 @@
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/helpers/ult_hw_config.h"
+#include "shared/test/unit_test/helpers/variable_backup.h"
+#include "shared/test/unit_test/mocks/ult_device_factory.h"
 
+#include "opencl/source/command_stream/tbx_command_stream_receiver.h"
 #include "opencl/source/platform/platform.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/helpers/unit_test_helper.h"
-#include "opencl/test/unit_test/helpers/variable_backup.h"
 #include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
@@ -27,7 +29,7 @@
 
 using namespace NEO;
 
-typedef Test<DeviceFixture> DeviceTest;
+typedef Test<ClDeviceFixture> DeviceTest;
 
 TEST_F(DeviceTest, givenDeviceWhenGetProductAbbrevThenReturnsHardwarePrefix) {
     const auto productAbbrev = pDevice->getProductAbbrev();
@@ -39,11 +41,32 @@ TEST_F(DeviceTest, WhenDeviceIsCreatedThenCommandStreamReceiverIsNotNull) {
     EXPECT_NE(nullptr, &pDevice->getGpgpuCommandStreamReceiver());
 }
 
-TEST_F(DeviceTest, WhenDeviceIsCreatedThenSupportedClVersionMatchesHardwareInfo) {
-    auto version = pClDevice->getSupportedClVersion();
+TEST_F(DeviceTest, WhenDeviceIsCreatedThenEnabledClVersionMatchesHardwareInfo) {
+    auto version = pClDevice->getEnabledClVersion();
     auto version2 = pDevice->getHardwareInfo().capabilityTable.clVersionSupport;
 
     EXPECT_EQ(version, version2);
+}
+
+TEST_F(DeviceTest, WhenDeviceIsCheckedForOcl21ConformanceThenCorrectValueIsReturned) {
+    auto hwInfo = pClDevice->getHardwareInfo();
+    for (auto supportsOcl21Features : ::testing::Bool()) {
+        hwInfo.capabilityTable.supportsOcl21Features = supportsOcl21Features;
+        for (auto supportsIfp : ::testing::Bool()) {
+            hwInfo.capabilityTable.supportsIndependentForwardProgress = supportsIfp;
+            for (auto supportsDeviceEnqueue : ::testing::Bool()) {
+                hwInfo.capabilityTable.supportsDeviceEnqueue = supportsDeviceEnqueue;
+                for (auto supportsPipes : ::testing::Bool()) {
+                    hwInfo.capabilityTable.supportsPipes = supportsPipes;
+
+                    auto pClDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
+
+                    auto expectedOcl21Conformance = (supportsOcl21Features && supportsIfp && supportsDeviceEnqueue && supportsPipes);
+                    EXPECT_EQ(expectedOcl21Conformance, pClDevice->isOcl21Conformant());
+                }
+            }
+        }
+    }
 }
 
 TEST_F(DeviceTest, givenDeviceWhenEngineIsCreatedThenSetInitialValueForTag) {
@@ -54,7 +77,7 @@ TEST_F(DeviceTest, givenDeviceWhenEngineIsCreatedThenSetInitialValueForTag) {
     }
 }
 
-TEST_F(DeviceTest, givenDeviceWhenAskedForSpecificEngineThenRetrunIt) {
+TEST_F(DeviceTest, givenDeviceWhenAskedForSpecificEngineThenReturnIt) {
     auto &engines = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*defaultHwInfo);
     for (uint32_t i = 0; i < engines.size(); i++) {
         bool lowPriority = (HwHelper::lowPriorityGpgpuEngineIndex == i);
@@ -64,6 +87,14 @@ TEST_F(DeviceTest, givenDeviceWhenAskedForSpecificEngineThenRetrunIt) {
     }
 
     EXPECT_THROW(pDevice->getEngine(aub_stream::ENGINE_VCS, false), std::exception);
+}
+
+TEST_F(DeviceTest, givenDeviceWhenAskedForEngineWithValidIndexThenReturnIt) {
+    auto &engines = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*defaultHwInfo);
+    for (uint32_t i = 0; i < engines.size(); i++) {
+        auto &deviceEngine = pDevice->getEngine(i);
+        EXPECT_EQ(deviceEngine.osContext->getEngineType(), engines[i]);
+    }
 }
 
 TEST_F(DeviceTest, givenDebugVariableToAlwaysChooseEngineZeroWhenNotExistingEngineSelectedThenIndexZeroEngineIsReturned) {
@@ -120,6 +151,24 @@ HWTEST_F(DeviceTest, WhenDeviceIsCreatedThenActualEngineTypeIsSameAsDefault) {
 
     EXPECT_EQ(&device->getDefaultEngine().commandStreamReceiver->getOsContext(), device->getDefaultEngine().osContext);
     EXPECT_EQ(defaultEngineType, actualEngineType);
+}
+
+HWTEST_F(DeviceTest, givenNoHwCsrTypeAndModifiedDefaultEngineIndexWhenIsSimulationIsCalledThenTrueIsReturned) {
+    EXPECT_FALSE(pDevice->isSimulation());
+    auto csr = TbxCommandStreamReceiver::create("", false, *pDevice->executionEnvironment, 0);
+    pDevice->defaultEngineIndex = 1;
+    pDevice->resetCommandStreamReceiver(csr);
+
+    EXPECT_TRUE(pDevice->isSimulation());
+
+    std::array<CommandStreamReceiverType, 3> exptectedEngineTypes = {CommandStreamReceiverType::CSR_HW,
+                                                                     CommandStreamReceiverType::CSR_TBX,
+                                                                     CommandStreamReceiverType::CSR_HW};
+
+    for (uint32_t i = 0u; i < 3u; ++i) {
+        auto engineType = pDevice->engines[i].commandStreamReceiver->getType();
+        EXPECT_EQ(exptectedEngineTypes[i], engineType);
+    }
 }
 
 TEST(DeviceCleanup, givenDeviceWhenItIsDestroyedThenFlushBatchedSubmissionsIsCalled) {
@@ -279,6 +328,18 @@ TEST(DeviceCreation, givenFtrSimulationModeFlagTrueWhenNoOtherSimulationFlagsAre
 TEST(DeviceCreation, givenDeviceWhenCheckingEnginesCountThenNumberGreaterThanZeroIsReturned) {
     auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<Device>(nullptr));
     EXPECT_GT(HwHelper::getEnginesCount(device->getHardwareInfo()), 0u);
+}
+
+TEST(DeviceCreation, givenDeviceWhenCheckingParentDeviceThenCorrectValueIsReturned) {
+    UltDeviceFactory deviceFactory{2, 2};
+
+    EXPECT_EQ(nullptr, deviceFactory.rootDevices[0]->getParentDevice());
+    EXPECT_EQ(deviceFactory.rootDevices[0], deviceFactory.subDevices[0]->getParentDevice());
+    EXPECT_EQ(deviceFactory.rootDevices[0], deviceFactory.subDevices[1]->getParentDevice());
+
+    EXPECT_EQ(nullptr, deviceFactory.rootDevices[1]->getParentDevice());
+    EXPECT_EQ(deviceFactory.rootDevices[1], deviceFactory.subDevices[2]->getParentDevice());
+    EXPECT_EQ(deviceFactory.rootDevices[1], deviceFactory.subDevices[3]->getParentDevice());
 }
 
 using DeviceHwTest = ::testing::Test;

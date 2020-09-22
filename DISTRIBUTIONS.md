@@ -1,88 +1,19 @@
 # NEO in Linux distributions
 
-[![Packaging status](https://repology.org/badge/vertical-allrepos/intel-compute-runtime.svg)](https://repology.org/project/intel-compute-runtime/versions)
+## Level Zero specific
 
-## Arch Linux*
+* [distributions](https://github.com/intel/compute-runtime/blob/master/level_zero/doc/DISTRIBUTIONS.md)
 
-```
-pacman -S intel-compute-runtime
-```
+## OpenCL specific
 
-## Centos* 7, 8, Red Hat Enterprise Linux* 7
+* [distributions](https://github.com/intel/compute-runtime/blob/master/opencl/doc/DISTRIBUTIONS.md)
 
-```
-yum install yum-plugin-copr
-yum copr enable jdanecki/intel-opencl
-yum install intel-opencl
-```
+## Intel software for General Purpose GPU capabilities
 
-## Clear Linux
+* Documentation and instructions for installing, deploying, and updating Intel software to enable general purpose GPU (GPGPU) capabilities for Linux*-based operating system distributions can be found on:
+    [https://dgpu-docs.intel.com](https://dgpu-docs.intel.com)
 
-```
-swupd bundle-add computer-vision-basic
-```
-
-## Exherbo Linux*
-
-```
-cave resolve --execute intel-compute-runtime
-```
-
-## Fedora* 30, 31, rawhide, Red Hat Enterprise Linux* 8 Beta, Mageia* 7
-
-```
-dnf install dnf-plugins-core
-dnf copr enable jdanecki/intel-opencl
-dnf install intel-opencl
-```
-
-## Gentoo*, Funtoo*
-
-```
-emerge intel-neo
-```
-
-## NixOS
-
-```
-nix-channel --add https://nixos.org/channels/nixpkgs-unstable
-nix-channel --update
-nix-env -i intel-compute-runtime
-```
-
-## OpenSUSE Leap 15.1
-
-```
-zypper addrepo -r https://copr.fedorainfracloud.org/coprs/jdanecki/intel-opencl/repo/opensuse-leap-15.1/jdanecki-intel-opencl-opensuse-leap-15.1.repo
-zypper install intel-opencl
-```
-
-## OpenSUSE tumbleweed
-
-```
-zypper addrepo -r https://copr.fedorainfracloud.org/coprs/jdanecki/intel-opencl/repo/opensuse-tumbleweed/jdanecki-intel-opencl-opensuse-tumbleweed.repo
-zypper install intel-opencl
-```
-
-## PLD Linux*
-
-```
-ipoldek install intel-gmmlib intel-graphics-compiler intel-compute-runtime
-```
-
-## Ubuntu* ppa for 16.04, 18.04, 19.04, 19.10, 20.04
-
-```
-add-apt-repository ppa:intel-opencl/intel-opencl
-apt-get update
-apt-get install intel-opencl-icd
-```
-
-## Ubuntu* 19.04, 19.10, 20.04
-
-```
-apt-get install intel-opencl-icd
-```
+* An Intel brand integrated and global search accessible Linux graphics landing page [https://intel.com/linux-graphics-drivers](https://intel.com/linux-graphics-drivers)
 
 ## Packages mirror
 
@@ -94,24 +25,9 @@ Starting with [release 19.43.14583](https://github.com/intel/compute-runtime/rel
 
 Docker images are provided in [intel-opencl](https://hub.docker.com/r/intelopencl/intel-opencl) repository.
 
-Example for Fedora* 30
+Example for Fedora* 31
 
 ```
-docker run -it --device /dev/dri:/dev/dri --rm docker.io/intelopencl/intel-opencl:fedora-30-copr clinfo
+docker run -it --device /dev/dri:/dev/dri --rm docker.io/intelopencl/intel-opencl:fedora-31-copr clinfo
 ```
 
-## Building and installation
-
-* [Ubuntu*](https://github.com/intel/compute-runtime/blob/master/BUILD.md)
-* [Centos* 8](https://github.com/intel/compute-runtime/blob/master/BUILD.md)
-* Scripts to build or download rpm (copr) and deb (github and ppa) packages are available in [neo-specs](https://github.com/JacekDanecki/neo-specs) repository.
-
-# NEO in other distributions
-
-## FreeBSD*, DragonFly*
-
-```
-pkg install intel-compute-runtime
-```
-
-(*) Other names and brands may be claimed as property of others.

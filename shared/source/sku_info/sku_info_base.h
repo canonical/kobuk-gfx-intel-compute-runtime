@@ -90,6 +90,8 @@ struct FeatureTableBase {
     bool ftrLinearCCS = false;
     bool ftrCCSRing = false;
     bool ftrCCSNode = false;
+    bool ftrRcsNode = true;
+    bool ftrLocalMemory = false;
 };
 
 struct WorkaroundTableBase {

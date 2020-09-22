@@ -30,7 +30,7 @@ You may obtain a copy of the License at: https://opensource.org/licenses/MIT
 |Intel Core Processors with Gen9 graphics devices (formerly Skylake, Kaby Lake, Coffee Lake)| 2.1 | Y |
 |Intel Atom Processors with Gen9 graphics devices (formerly Apollo Lake, Gemini Lake)| 1.2 | - |
 |Intel Core Processors with Gen11 graphics devices (formerly Ice Lake)| 2.1 | Y |
-|Intel Core Processors with Gen12 graphics devices (formerly Tiger Lake)| 2.1 | Y |
+|Intel Core Processors with Gen12 graphics devices (formerly Tiger Lake)| 3.0 | Y |
 
 ## Release cadence
 
@@ -49,7 +49,7 @@ To allow NEO access to GPU device make sure user has permissions to files /dev/d
 NEO is available for installation on a variety of Linux distributions
 and can be installed via the distro's package manager.
 
-For example on Ubuntu* 19.04, 19.10:
+For example on Ubuntu* 20.04:
 
 ```
 apt-get install intel-opencl-icd
@@ -73,6 +73,10 @@ Directly linking to the runtime library is not supported:
 
 * GmmLib - https://github.com/intel/gmmlib
 * Intel Graphics Compiler - https://github.com/intel/intel-graphics-compiler
+
+In addition, to enable performance counters support, the following packages are needed:
+* Intel Metrics Discovery - https://github.com/intel/metrics-discovery
+* Intel Metrics Library for MDAPI - https://github.com/intel/metrics-library
 
 ## How to provide feedback
 

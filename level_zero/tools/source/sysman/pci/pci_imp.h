@@ -6,6 +6,10 @@
  */
 
 #pragma once
+#include "shared/source/helpers/non_copyable_or_moveable.h"
+#include "shared/source/memory_manager/memory_manager.h"
+
+#include "level_zero/core/source/device/device.h"
 #include <level_zero/zet_api.h>
 
 #include "os_pci.h"
@@ -15,26 +19,22 @@
 
 namespace L0 {
 
-class PciImp : public Pci {
+class PciImp : public Pci, NEO::NonCopyableOrMovableClass {
   public:
     void init() override;
-    ze_result_t pciStaticProperties(zet_pci_properties_t *pProperties) override;
-    ze_result_t pciGetInitializedBars(uint32_t *pCount, zet_pci_bar_properties_t *pProperties) override;
+    ze_result_t pciStaticProperties(zes_pci_properties_t *pProperties) override;
+    ze_result_t pciGetInitializedBars(uint32_t *pCount, zes_pci_bar_properties_t *pProperties) override;
+    ze_result_t pciGetState(zes_pci_state_t *pState) override;
 
-    PciImp(OsSysman *pOsSysman) : pOsSysman(pOsSysman) { pOsPci = nullptr; };
+    PciImp() = default;
+    PciImp(OsSysman *pOsSysman) : pOsSysman(pOsSysman){};
     ~PciImp() override;
-
-    PciImp(OsPci *pOsPci) : pOsPci(pOsPci) { init(); };
-
-    // Don't allow copies of the PciImp object
-    PciImp(const PciImp &obj) = delete;
-    PciImp &operator=(const PciImp &obj) = delete;
+    OsPci *pOsPci = nullptr;
 
   private:
-    OsSysman *pOsSysman;
-    OsPci *pOsPci;
-    zet_pci_properties_t pciProperties;
-    std::vector<zet_pci_bar_properties_t *> pciBarProperties;
+    OsSysman *pOsSysman = nullptr;
+    zes_pci_properties_t pciProperties = {};
+    std::vector<zes_pci_bar_properties_t *> pciBarProperties = {};
 };
 
 } // namespace L0

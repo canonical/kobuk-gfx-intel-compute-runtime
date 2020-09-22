@@ -22,7 +22,7 @@ RootDevice::RootDevice(ExecutionEnvironment *executionEnvironment, uint32_t root
 RootDevice::~RootDevice() {
     for (auto subdevice : subdevices) {
         if (subdevice) {
-            subdevice->decRefInternal();
+            delete subdevice;
         }
     }
 }
@@ -48,7 +48,11 @@ Device *RootDevice::getDeviceById(uint32_t deviceId) const {
         return const_cast<RootDevice *>(this);
     }
     return subdevices[deviceId];
-};
+}
+
+Device *RootDevice::getParentDevice() const {
+    return nullptr;
+}
 
 SubDevice *RootDevice::createSubDevice(uint32_t subDeviceIndex) {
     return Device::create<SubDevice>(executionEnvironment, subDeviceIndex, *this);
@@ -67,7 +71,6 @@ bool RootDevice::createDeviceImpl() {
         if (!subDevice) {
             return false;
         }
-        subDevice->incRefInternal();
         subdevices[i] = subDevice;
     }
     auto status = Device::createDeviceImpl();

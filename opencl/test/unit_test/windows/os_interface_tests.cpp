@@ -5,7 +5,7 @@
  *
  */
 
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/helpers/constants.h"
 #include "shared/source/os_interface/windows/os_interface.h"
 
 #include "opencl/test/unit_test/mocks/mock_execution_environment.h"
@@ -18,14 +18,16 @@ TEST(osInterfaceTests, osInterfaceLocalMemoryEnabledByDefault) {
     EXPECT_TRUE(OSInterface::osEnableLocalMemory);
 }
 
-TEST(osInterfaceTests, whenOsInterfaceSetupGmmInputArgsThenProperAdapterBDFIsSet) {
+TEST(osInterfaceTests, whenOsInterfaceSetupGmmInputArgsThenArgsAreSet) {
     MockExecutionEnvironment executionEnvironment;
     RootDeviceEnvironment rootDeviceEnvironment(executionEnvironment);
     auto wddm = new WddmMock(rootDeviceEnvironment);
-    OSInterface osInterface;
-    osInterface.get()->setWddm(wddm);
+    EXPECT_EQ(nullptr, rootDeviceEnvironment.osInterface.get());
     wddm->init();
+    EXPECT_NE(nullptr, rootDeviceEnvironment.osInterface.get());
 
+    wddm->deviceRegistryPath = "registyPath";
+    auto expectedRegistryPath = wddm->deviceRegistryPath.c_str();
     auto &adapterBDF = wddm->adapterBDF;
     adapterBDF.Bus = 0x12;
     adapterBDF.Device = 0x34;
@@ -33,6 +35,11 @@ TEST(osInterfaceTests, whenOsInterfaceSetupGmmInputArgsThenProperAdapterBDFIsSet
 
     GMM_INIT_IN_ARGS gmmInputArgs = {};
     EXPECT_NE(0, memcmp(&adapterBDF, &gmmInputArgs.stAdapterBDF, sizeof(ADAPTER_BDF)));
-    osInterface.setGmmInputArgs(&gmmInputArgs);
+    EXPECT_STRNE(expectedRegistryPath, gmmInputArgs.DeviceRegistryPath);
+
+    rootDeviceEnvironment.osInterface->setGmmInputArgs(&gmmInputArgs);
+
     EXPECT_EQ(0, memcmp(&adapterBDF, &gmmInputArgs.stAdapterBDF, sizeof(ADAPTER_BDF)));
+    EXPECT_EQ(GMM_CLIENT::GMM_OCL_VISTA, gmmInputArgs.ClientType);
+    EXPECT_STREQ(expectedRegistryPath, gmmInputArgs.DeviceRegistryPath);
 }

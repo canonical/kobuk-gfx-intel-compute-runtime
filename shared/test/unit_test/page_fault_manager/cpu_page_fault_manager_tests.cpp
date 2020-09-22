@@ -9,7 +9,9 @@
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/unified_memory/unified_memory.h"
 #include "shared/test/unit_test/page_fault_manager/cpu_page_fault_manager_tests_fixture.h"
+#include "shared/test/unit_test/test_macros/test_checks_shared.h"
 
+#include "opencl/test/unit_test/mocks/mock_graphics_allocation.h"
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 
 using namespace NEO;
@@ -203,18 +205,18 @@ TEST_F(PageFaultManagerTest, givenTrackedPageFaultAddressWhenVerifyingThenProper
 
 TEST_F(PageFaultManagerTest, givenUnifiedMemoryAllocWhenSetAubWritableIsCalledThenAllocIsAubWritable) {
     MockExecutionEnvironment executionEnvironment;
-    if (!executionEnvironment.rootDeviceEnvironments[0]->getHardwareInfo()->capabilityTable.ftrSvm) {
-        GTEST_SKIP();
-    }
+    REQUIRE_SVM_OR_SKIP(executionEnvironment.rootDeviceEnvironments[0]->getHardwareInfo());
 
     void *cmdQ = reinterpret_cast<void *>(0xFFFF);
     auto memoryManager = std::make_unique<MockMemoryManager>(executionEnvironment);
     auto unifiedMemoryManager = std::make_unique<SVMAllocsManager>(memoryManager.get());
-    void *alloc1 = unifiedMemoryManager->createSharedUnifiedMemoryAllocation(0, 10, SVMAllocsManager::UnifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY), cmdQ);
+    auto properties = SVMAllocsManager::UnifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY);
+    properties.subdeviceBitfield = mockDeviceBitfield;
+    void *alloc1 = unifiedMemoryManager->createSharedUnifiedMemoryAllocation(mockRootDeviceIndex, 10, properties, cmdQ);
 
     pageFaultManager->baseAubWritable(false, alloc1, unifiedMemoryManager.get());
 
-    auto gpuAlloc = unifiedMemoryManager->getSVMAlloc(alloc1)->gpuAllocation;
+    auto gpuAlloc = unifiedMemoryManager->getSVMAlloc(alloc1)->gpuAllocations.getGraphicsAllocation(mockRootDeviceIndex);
     EXPECT_FALSE(gpuAlloc->isAubWritable(GraphicsAllocation::allBanks));
 
     unifiedMemoryManager->freeSVMAlloc(alloc1);

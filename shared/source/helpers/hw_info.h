@@ -54,7 +54,13 @@ struct RuntimeCapabilityTable {
     bool supportCacheFlushAfterWalker;
     bool supportsImages;
     bool supportsDeviceEnqueue;
+    bool supportsPipes;
+    bool supportsOcl21Features;
+    bool supportsOnDemandPageFaults;
+    bool supportsIndependentForwardProgress;
     bool hostPtrTrackingEnabled;
+    bool levelZeroSupported;
+    bool isIntegratedDevice;
 };
 
 struct HardwareCapabilities {

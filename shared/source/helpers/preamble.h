@@ -33,7 +33,6 @@ struct PreambleHelper {
     static void programPipelineSelect(LinearStream *pCommandStream,
                                       const PipelineSelectArgs &pipelineSelectArgs,
                                       const HardwareInfo &hwInfo);
-    static uint32_t getDefaultThreadArbitrationPolicy();
     static void programThreadArbitration(LinearStream *pCommandStream, uint32_t requiredThreadArbitrationPolicy);
     static void programPreemption(LinearStream *pCommandStream, Device &device, GraphicsAllocation *preemptionCsr);
     static void addPipeControlBeforeVfeCmd(LinearStream *pCommandStream, const HardwareInfo *hwInfo, aub_stream::EngineType engineType);
@@ -48,6 +47,7 @@ struct PreambleHelper {
                                 uint32_t requiredThreadArbitrationPolicy, GraphicsAllocation *preemptionCsr, GraphicsAllocation *perDssBackedBuffer);
     static void programKernelDebugging(LinearStream *pCommandStream);
     static void programPerDssBackedBuffer(LinearStream *pCommandStream, const HardwareInfo &hwInfo, GraphicsAllocation *perDssBackBufferOffset);
+    static void programSemaphoreDelay(LinearStream *pCommandStream);
     static uint32_t getL3Config(const HardwareInfo &hwInfo, bool useSLM);
     static bool isL3Configurable(const HardwareInfo &hwInfo);
     static size_t getAdditionalCommandsSize(const Device &device);
@@ -58,6 +58,7 @@ struct PreambleHelper {
     static uint32_t getUrbEntryAllocationSize();
     static size_t getPerDssBackedBufferCommandsSize(const HardwareInfo &hwInfo);
     static size_t getCmdSizeForPipelineSelect(const HardwareInfo &hwInfo);
+    static size_t getSemaphoreDelayCommandSize();
 };
 
 template <PRODUCT_FAMILY ProductFamily>

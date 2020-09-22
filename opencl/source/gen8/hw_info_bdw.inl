@@ -6,7 +6,7 @@
  */
 
 #include "shared/source/gen8/hw_cmds.h"
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/helpers/constants.h"
 
 #include "opencl/source/aub_mem_dump/aub_services.h"
 
@@ -75,7 +75,13 @@ const RuntimeCapabilityTable BDW::capabilityTable{
     false,                                         // supportCacheFlushAfterWalker
     true,                                          // supportsImages
     true,                                          // supportsDeviceEnqueue
-    true                                           // hostPtrTrackingEnabled
+    true,                                          // supportsPipes
+    true,                                          // supportsOcl21Features
+    false,                                         // supportsOnDemandPageFaults
+    true,                                          // supportsIndependentForwardProgress
+    true,                                          // hostPtrTrackingEnabled
+    false,                                         // levelZeroSupported
+    true                                           // isIntegratedDevice
 };
 
 WorkaroundTable BDW::workaroundTable = {};

@@ -8,6 +8,7 @@
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/source/utilities/tag_allocator.h"
+#include "shared/test/unit_test/cmd_parse/hw_parse.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 
 #include "opencl/source/built_ins/aux_translation_builtin.h"
@@ -17,8 +18,7 @@
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/helpers/task_information.h"
 #include "opencl/test/unit_test/command_queue/command_queue_fixture.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
-#include "opencl/test/unit_test/helpers/hw_parse.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
@@ -30,13 +30,13 @@
 
 using namespace NEO;
 
-struct DispatchWalkerTest : public CommandQueueFixture, public DeviceFixture, public ::testing::Test {
+struct DispatchWalkerTest : public CommandQueueFixture, public ClDeviceFixture, public ::testing::Test {
 
     using CommandQueueFixture::SetUp;
 
     void SetUp() override {
         DebugManager.flags.EnableTimestampPacket.set(0);
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
         context = std::make_unique<MockContext>(pClDevice);
         CommandQueueFixture::SetUp(context.get(), pClDevice, 0);
 
@@ -65,13 +65,13 @@ struct DispatchWalkerTest : public CommandQueueFixture, public DeviceFixture, pu
         samplerArray.Token = 0;
 
         kernelInfo.heapInfo.pKernelHeap = kernelIsa;
-        kernelInfo.heapInfo.pKernelHeader = &kernelHeader;
+        kernelInfo.heapInfo.KernelHeapSize = sizeof(kernelIsa);
         kernelInfo.patchInfo.dataParameterStream = &dataParameterStream;
         kernelInfo.patchInfo.executionEnvironment = &executionEnvironment;
         kernelInfo.patchInfo.threadPayload = &threadPayload;
 
         kernelInfoWithSampler.heapInfo.pKernelHeap = kernelIsa;
-        kernelInfoWithSampler.heapInfo.pKernelHeader = &kernelHeader;
+        kernelInfoWithSampler.heapInfo.KernelHeapSize = sizeof(kernelIsa);
         kernelInfoWithSampler.patchInfo.dataParameterStream = &dataParameterStream;
         kernelInfoWithSampler.patchInfo.executionEnvironment = &executionEnvironment;
         kernelInfoWithSampler.patchInfo.threadPayload = &threadPayload;
@@ -82,7 +82,7 @@ struct DispatchWalkerTest : public CommandQueueFixture, public DeviceFixture, pu
     void TearDown() override {
         CommandQueueFixture::TearDown();
         context.reset();
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     std::unique_ptr<KernelOperation> createBlockedCommandsData(CommandQueue &commandQueue) {
@@ -126,7 +126,7 @@ HWTEST_F(DispatchWalkerTest, WhenGettingComputeDimensionsThenCorrectNumberOfDime
 
 HWTEST_F(DispatchWalkerTest, givenSimd1WhenSetGpgpuWalkerThreadDataThenSimdInWalkerIsSetTo32Value) {
     uint32_t pCmdBuffer[1024];
-    MockGraphicsAllocation gfxAllocation((void *)pCmdBuffer, sizeof(pCmdBuffer));
+    MockGraphicsAllocation gfxAllocation(static_cast<void *>(pCmdBuffer), sizeof(pCmdBuffer));
     LinearStream linearStream(&gfxAllocation);
 
     using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
@@ -818,7 +818,7 @@ HWTEST_F(DispatchWalkerTest, givenThereAreAllocationsForReuseWhenDispatchWalkerI
 
     auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
     auto allocation = csr.getMemoryManager()->allocateGraphicsMemoryWithProperties({csr.getRootDeviceIndex(), MemoryConstants::pageSize64k + CSRequirements::csOverfetchSize,
-                                                                                    GraphicsAllocation::AllocationType::COMMAND_BUFFER});
+                                                                                    GraphicsAllocation::AllocationType::COMMAND_BUFFER, csr.getOsContext().getDeviceBitfield()});
     csr.getInternalAllocationStorage()->storeAllocation(std::unique_ptr<GraphicsAllocation>{allocation}, REUSABLE_ALLOCATION);
     ASSERT_FALSE(csr.getInternalAllocationStorage()->getAllocationsForReuse().peekIsEmpty());
 
@@ -867,8 +867,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, DispatchWalkerTest, GivenMultipleKernelsWhenDispatch
     using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
 
     auto memoryManager = this->pDevice->getMemoryManager();
-    auto kernelIsaAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::KERNEL_ISA});
-    auto kernelIsaWithSamplerAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::KERNEL_ISA});
+    auto kernelIsaAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::KERNEL_ISA, pDevice->getDeviceBitfield()});
+    auto kernelIsaWithSamplerAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::KERNEL_ISA, pDevice->getDeviceBitfield()});
     kernelInfo.kernelAllocation = kernelIsaAllocation;
     kernelInfoWithSampler.kernelAllocation = kernelIsaWithSamplerAllocation;
     auto gpuAddress1 = kernelIsaAllocation->getGpuAddressToPatch();
@@ -1356,30 +1356,23 @@ struct ProfilingCommandsTest : public DispatchWalkerTest, ::testing::WithParamIn
     }
 };
 
-HWTEST_P(ProfilingCommandsTest, givenKernelWhenProfilingCommandStartIsTakenThenTimeStampAddressIsProgrammedCorrectly) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingCommandsTest, givenKernelWhenProfilingCommandStartIsTakenThenTimeStampAddressIsProgrammedCorrectly) {
     using MI_STORE_REGISTER_MEM = typename FamilyType::MI_STORE_REGISTER_MEM;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    bool checkForStart = GetParam();
 
     auto &cmdStream = pCmdQ->getCS(0);
     TagAllocator<HwTimeStamps> timeStampAllocator(pDevice->getRootDeviceIndex(), this->pDevice->getMemoryManager(), 10,
-                                                  MemoryConstants::cacheLineSize, sizeof(HwTimeStamps), false);
+                                                  MemoryConstants::cacheLineSize, sizeof(HwTimeStamps), false, pDevice->getDeviceBitfield());
 
     auto hwTimeStamp1 = timeStampAllocator.getTag();
     ASSERT_NE(nullptr, hwTimeStamp1);
-    if (checkForStart) {
-        GpgpuWalkerHelper<FamilyType>::dispatchProfilingCommandsStart(*hwTimeStamp1, &cmdStream, pDevice->getHardwareInfo());
-    } else {
-        GpgpuWalkerHelper<FamilyType>::dispatchProfilingCommandsEnd(*hwTimeStamp1, &cmdStream);
-    }
+
+    GpgpuWalkerHelper<FamilyType>::dispatchProfilingCommandsStart(*hwTimeStamp1, &cmdStream, pDevice->getHardwareInfo());
 
     auto hwTimeStamp2 = timeStampAllocator.getTag();
     ASSERT_NE(nullptr, hwTimeStamp2);
-    if (checkForStart) {
-        GpgpuWalkerHelper<FamilyType>::dispatchProfilingCommandsStart(*hwTimeStamp2, &cmdStream, pDevice->getHardwareInfo());
-    } else {
-        GpgpuWalkerHelper<FamilyType>::dispatchProfilingCommandsEnd(*hwTimeStamp2, &cmdStream);
-    }
+
+    GpgpuWalkerHelper<FamilyType>::dispatchProfilingCommandsStart(*hwTimeStamp2, &cmdStream, pDevice->getHardwareInfo());
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(cmdList, cmdStream.getCpuBase(), cmdStream.getUsed()));
@@ -1390,7 +1383,7 @@ HWTEST_P(ProfilingCommandsTest, givenKernelWhenProfilingCommandStartIsTakenThenT
     ASSERT_NE(nullptr, storeReg);
 
     uint64_t gpuAddress = storeReg->getMemoryAddress();
-    auto contextTimestampFieldOffset = checkForStart ? offsetof(HwTimeStamps, ContextStartTS) : offsetof(HwTimeStamps, ContextEndTS);
+    auto contextTimestampFieldOffset = offsetof(HwTimeStamps, ContextStartTS);
     uint64_t expectedAddress = hwTimeStamp1->getGpuAddress() + contextTimestampFieldOffset;
     EXPECT_EQ(expectedAddress, gpuAddress);
 
@@ -1404,39 +1397,74 @@ HWTEST_P(ProfilingCommandsTest, givenKernelWhenProfilingCommandStartIsTakenThenT
     expectedAddress = hwTimeStamp2->getGpuAddress() + contextTimestampFieldOffset;
     EXPECT_EQ(expectedAddress, gpuAddress);
 
-    if (checkForStart) {
-        auto itorPipeCtrl = find<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
-        ASSERT_NE(cmdList.end(), itorPipeCtrl);
-        if (HardwareCommandsHelper<FamilyType>::isPipeControlWArequired(pDevice->getHardwareInfo())) {
-            itorPipeCtrl++;
-        }
-        if (UnitTestHelper<FamilyType>::isAdditionalMiSemaphoreWaitRequired(pDevice->getHardwareInfo())) {
-            itorPipeCtrl++;
-        }
-        auto pipeControl = genCmdCast<PIPE_CONTROL *>(*itorPipeCtrl);
-        ASSERT_NE(nullptr, pipeControl);
-
-        gpuAddress = static_cast<uint64_t>(pipeControl->getAddress()) | (static_cast<uint64_t>(pipeControl->getAddressHigh()) << 32);
-        expectedAddress = hwTimeStamp1->getGpuAddress() + offsetof(HwTimeStamps, GlobalStartTS);
-        EXPECT_EQ(expectedAddress, gpuAddress);
-
+    auto itorPipeCtrl = find<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+    ASSERT_NE(cmdList.end(), itorPipeCtrl);
+    if (HardwareCommandsHelper<FamilyType>::isPipeControlWArequired(pDevice->getHardwareInfo())) {
         itorPipeCtrl++;
-        itorPipeCtrl = find<typename FamilyType::PIPE_CONTROL *>(itorPipeCtrl, cmdList.end());
-        if (HardwareCommandsHelper<FamilyType>::isPipeControlWArequired(pDevice->getHardwareInfo())) {
-            itorPipeCtrl++;
-        }
-        if (UnitTestHelper<FamilyType>::isAdditionalMiSemaphoreWaitRequired(pDevice->getHardwareInfo())) {
-            itorPipeCtrl++;
-        }
-        ASSERT_NE(cmdList.end(), itorPipeCtrl);
-        pipeControl = genCmdCast<PIPE_CONTROL *>(*itorPipeCtrl);
-        ASSERT_NE(nullptr, pipeControl);
-
-        gpuAddress = static_cast<uint64_t>(pipeControl->getAddress()) | static_cast<uint64_t>(pipeControl->getAddressHigh()) << 32;
-        expectedAddress = hwTimeStamp2->getGpuAddress() + offsetof(HwTimeStamps, GlobalStartTS);
-        EXPECT_EQ(expectedAddress, gpuAddress);
     }
+    if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired(pDevice->getHardwareInfo())) {
+        itorPipeCtrl++;
+    }
+    auto pipeControl = genCmdCast<PIPE_CONTROL *>(*itorPipeCtrl);
+    ASSERT_NE(nullptr, pipeControl);
+
+    gpuAddress = static_cast<uint64_t>(pipeControl->getAddress()) | (static_cast<uint64_t>(pipeControl->getAddressHigh()) << 32);
+    expectedAddress = hwTimeStamp1->getGpuAddress() + offsetof(HwTimeStamps, GlobalStartTS);
+    EXPECT_EQ(expectedAddress, gpuAddress);
+
+    itorPipeCtrl++;
+    itorPipeCtrl = find<typename FamilyType::PIPE_CONTROL *>(itorPipeCtrl, cmdList.end());
+    if (HardwareCommandsHelper<FamilyType>::isPipeControlWArequired(pDevice->getHardwareInfo())) {
+        itorPipeCtrl++;
+    }
+    if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired(pDevice->getHardwareInfo())) {
+        itorPipeCtrl++;
+    }
+    ASSERT_NE(cmdList.end(), itorPipeCtrl);
+    pipeControl = genCmdCast<PIPE_CONTROL *>(*itorPipeCtrl);
+    ASSERT_NE(nullptr, pipeControl);
+
+    gpuAddress = static_cast<uint64_t>(pipeControl->getAddress()) | static_cast<uint64_t>(pipeControl->getAddressHigh()) << 32;
+    expectedAddress = hwTimeStamp2->getGpuAddress() + offsetof(HwTimeStamps, GlobalStartTS);
+    EXPECT_EQ(expectedAddress, gpuAddress);
 }
 
-INSTANTIATE_TEST_CASE_P(StartEndFlag,
-                        ProfilingCommandsTest, ::testing::Bool());
+HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingCommandsTest, givenKernelWhenProfilingCommandStartIsNotTakenThenTimeStampAddressIsProgrammedCorrectly) {
+    using MI_STORE_REGISTER_MEM = typename FamilyType::MI_STORE_REGISTER_MEM;
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+
+    auto &cmdStream = pCmdQ->getCS(0);
+    TagAllocator<HwTimeStamps> timeStampAllocator(pDevice->getRootDeviceIndex(), this->pDevice->getMemoryManager(), 10,
+                                                  MemoryConstants::cacheLineSize, sizeof(HwTimeStamps), false, pDevice->getDeviceBitfield());
+
+    auto hwTimeStamp1 = timeStampAllocator.getTag();
+    ASSERT_NE(nullptr, hwTimeStamp1);
+    GpgpuWalkerHelper<FamilyType>::dispatchProfilingCommandsEnd(*hwTimeStamp1, &cmdStream, pDevice->getHardwareInfo());
+
+    auto hwTimeStamp2 = timeStampAllocator.getTag();
+    ASSERT_NE(nullptr, hwTimeStamp2);
+    GpgpuWalkerHelper<FamilyType>::dispatchProfilingCommandsEnd(*hwTimeStamp2, &cmdStream, pDevice->getHardwareInfo());
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(cmdList, cmdStream.getCpuBase(), cmdStream.getUsed()));
+
+    auto itorStoreReg = find<typename FamilyType::MI_STORE_REGISTER_MEM *>(cmdList.begin(), cmdList.end());
+    ASSERT_NE(cmdList.end(), itorStoreReg);
+    auto storeReg = genCmdCast<MI_STORE_REGISTER_MEM *>(*itorStoreReg);
+    ASSERT_NE(nullptr, storeReg);
+
+    uint64_t gpuAddress = storeReg->getMemoryAddress();
+    auto contextTimestampFieldOffset = offsetof(HwTimeStamps, ContextEndTS);
+    uint64_t expectedAddress = hwTimeStamp1->getGpuAddress() + contextTimestampFieldOffset;
+    EXPECT_EQ(expectedAddress, gpuAddress);
+
+    itorStoreReg++;
+    itorStoreReg = find<typename FamilyType::MI_STORE_REGISTER_MEM *>(itorStoreReg, cmdList.end());
+    ASSERT_NE(cmdList.end(), itorStoreReg);
+    storeReg = genCmdCast<MI_STORE_REGISTER_MEM *>(*itorStoreReg);
+    ASSERT_NE(nullptr, storeReg);
+
+    gpuAddress = storeReg->getMemoryAddress();
+    expectedAddress = hwTimeStamp2->getGpuAddress() + contextTimestampFieldOffset;
+    EXPECT_EQ(expectedAddress, gpuAddress);
+}

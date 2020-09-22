@@ -14,6 +14,7 @@
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_graphics_allocation.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 
 #include "gtest/gtest.h"
 
@@ -47,19 +48,19 @@ typedef ImageValidateTest ValidDescriptor;
 typedef ImageValidateTest InvalidDescriptor;
 typedef ImageValidateTest InvalidSize;
 
-TEST_P(ValidDescriptor, validSizePassedToValidateReturnsSuccess) {
+TEST_P(ValidDescriptor, GivenValidSizeWhenValidatingThenSuccessIsReturned) {
     imageDesc = GetParam();
     retVal = Image::validate(&context, {}, &surfaceFormat, &imageDesc, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
-TEST_P(InvalidDescriptor, zeroSizePassedToValidateReturnsError) {
+TEST_P(InvalidDescriptor, GivenZeroSizeWhenValidatingThenInvalidImageDescriptorErrorIsReturned) {
     imageDesc = GetParam();
     retVal = Image::validate(&context, {}, &surfaceFormat, &imageDesc, nullptr);
     EXPECT_EQ(CL_INVALID_IMAGE_DESCRIPTOR, retVal);
 }
 
-TEST_P(InvalidSize, invalidSizePassedToValidateReturnsError) {
+TEST_P(InvalidSize, GivenInvalidSizeWhenValidatingThenInvalidImageSizeErrorIsReturned) {
     imageDesc = GetParam();
     retVal = Image::validate(&context, {}, &surfaceFormat, &imageDesc, nullptr);
     EXPECT_EQ(CL_INVALID_IMAGE_SIZE, retVal);
@@ -106,48 +107,48 @@ TEST_P(ValidDescriptor, given3dImageFormatWhenGetSupportedFormatIsCalledThenDont
     delete[] readWriteOnlyImgFormats;
 }
 
-TEST(ImageDepthFormatTest, returnSurfaceFormatForDepthFormats) {
+TEST(ImageDepthFormatTest, GivenDepthFormatsWhenGettingSurfaceFormatThenCorrectSurfaceFormatIsReturned) {
     cl_image_format imgFormat = {};
     imgFormat.image_channel_order = CL_DEPTH;
     imgFormat.image_channel_data_type = CL_FLOAT;
 
-    auto surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_READ_WRITE, &imgFormat, defaultHwInfo->capabilityTable.clVersionSupport);
+    auto surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_READ_WRITE, &imgFormat, defaultHwInfo->capabilityTable.supportsOcl21Features);
     ASSERT_NE(surfaceFormatInfo, nullptr);
     EXPECT_TRUE(surfaceFormatInfo->surfaceFormat.GMMSurfaceFormat == GMM_FORMAT_R32_FLOAT_TYPE);
 
     imgFormat.image_channel_data_type = CL_UNORM_INT16;
-    surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_READ_WRITE, &imgFormat, defaultHwInfo->capabilityTable.clVersionSupport);
+    surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_READ_WRITE, &imgFormat, defaultHwInfo->capabilityTable.supportsOcl21Features);
     ASSERT_NE(surfaceFormatInfo, nullptr);
     EXPECT_TRUE(surfaceFormatInfo->surfaceFormat.GMMSurfaceFormat == GMM_FORMAT_R16_UNORM_TYPE);
 }
 
-TEST(ImageDepthFormatTest, returnSurfaceFormatForWriteOnlyDepthFormats) {
+TEST(ImageDepthFormatTest, GivenWriteOnlyDepthFormatsWhenGettingSurfaceFormatThenCorrectSurfaceFormatIsReturned) {
     cl_image_format imgFormat = {};
     imgFormat.image_channel_order = CL_DEPTH;
     imgFormat.image_channel_data_type = CL_FLOAT;
 
-    auto surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_WRITE_ONLY, &imgFormat, defaultHwInfo->capabilityTable.clVersionSupport);
+    auto surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_WRITE_ONLY, &imgFormat, defaultHwInfo->capabilityTable.supportsOcl21Features);
     ASSERT_NE(surfaceFormatInfo, nullptr);
     EXPECT_TRUE(surfaceFormatInfo->surfaceFormat.GMMSurfaceFormat == GMM_FORMAT_R32_FLOAT_TYPE);
 
     imgFormat.image_channel_data_type = CL_UNORM_INT16;
-    surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_WRITE_ONLY, &imgFormat, defaultHwInfo->capabilityTable.clVersionSupport);
+    surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_WRITE_ONLY, &imgFormat, defaultHwInfo->capabilityTable.supportsOcl21Features);
     ASSERT_NE(surfaceFormatInfo, nullptr);
     EXPECT_TRUE(surfaceFormatInfo->surfaceFormat.GMMSurfaceFormat == GMM_FORMAT_R16_UNORM_TYPE);
 }
 
-TEST(ImageDepthFormatTest, returnSurfaceFormatForDepthStencilFormats) {
+TEST(ImageDepthFormatTest, GivenDepthStencilFormatsWhenGettingSurfaceFormatThenCorrectSurfaceFormatIsReturned) {
     cl_image_format imgFormat = {};
     imgFormat.image_channel_order = CL_DEPTH_STENCIL;
     imgFormat.image_channel_data_type = CL_UNORM_INT24;
 
-    auto surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_READ_ONLY, &imgFormat, defaultHwInfo->capabilityTable.clVersionSupport);
+    auto surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_READ_ONLY, &imgFormat, defaultHwInfo->capabilityTable.supportsOcl21Features);
     ASSERT_NE(surfaceFormatInfo, nullptr);
     EXPECT_TRUE(surfaceFormatInfo->surfaceFormat.GMMSurfaceFormat == GMM_FORMAT_GENERIC_32BIT);
 
     imgFormat.image_channel_order = CL_DEPTH_STENCIL;
     imgFormat.image_channel_data_type = CL_FLOAT;
-    surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_READ_ONLY, &imgFormat, defaultHwInfo->capabilityTable.clVersionSupport);
+    surfaceFormatInfo = Image::getSurfaceFormatFromTable(CL_MEM_READ_ONLY, &imgFormat, defaultHwInfo->capabilityTable.supportsOcl21Features);
     ASSERT_NE(surfaceFormatInfo, nullptr);
     EXPECT_TRUE(surfaceFormatInfo->surfaceFormat.GMMSurfaceFormat == GMM_FORMAT_R32G32_FLOAT_TYPE);
 }
@@ -668,10 +669,10 @@ TEST(validateAndCreateImage, givenInvalidImageFormatWhenValidateAndCreateImageIs
     MockContext context;
     cl_image_format imageFormat;
     cl_int retVal = CL_SUCCESS;
-    Image *image;
+    cl_mem image;
     imageFormat.image_channel_order = 0;
     imageFormat.image_channel_data_type = 0;
-    image = Image::validateAndCreateImage(&context, {}, 0, 0, &imageFormat, &Image1dDefaults::imageDesc, nullptr, retVal);
+    image = Image::validateAndCreateImage(&context, nullptr, 0, 0, &imageFormat, &Image1dDefaults::imageDesc, nullptr, retVal);
     EXPECT_EQ(nullptr, image);
     EXPECT_EQ(CL_INVALID_IMAGE_FORMAT_DESCRIPTOR, retVal);
 }
@@ -680,9 +681,9 @@ TEST(validateAndCreateImage, givenNotSupportedImageFormatWhenValidateAndCreateIm
     MockContext context;
     cl_image_format imageFormat = {CL_INTENSITY, CL_UNORM_INT8};
     cl_int retVal = CL_SUCCESS;
-    Image *image;
+    cl_mem image;
     cl_mem_flags flags = CL_MEM_READ_WRITE;
-    image = Image::validateAndCreateImage(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, &imageFormat, &Image1dDefaults::imageDesc, nullptr, retVal);
+    image = Image::validateAndCreateImage(&context, nullptr, flags, 0, &imageFormat, &Image1dDefaults::imageDesc, nullptr, retVal);
     EXPECT_EQ(nullptr, image);
     EXPECT_EQ(CL_IMAGE_FORMAT_NOT_SUPPORTED, retVal);
 }
@@ -708,15 +709,15 @@ TEST(validateAndCreateImage, givenValidImageParamsWhenValidateAndCreateImageIsCa
     cl_int retVal = CL_SUCCESS;
 
     std::unique_ptr<Image> image = nullptr;
-    image.reset(Image::validateAndCreateImage(
+    image.reset(static_cast<Image *>(Image::validateAndCreateImage(
         &context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
+        nullptr,
         flags,
         0,
         &imageFormat,
         &imageDesc,
         nullptr,
-        retVal));
+        retVal)));
     EXPECT_NE(nullptr, image);
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
@@ -762,15 +763,15 @@ struct NullImage : public Image {
     using Image::imageDesc;
     using Image::imageFormat;
 
-    NullImage() : Image(nullptr, MemoryPropertiesFlags(), cl_mem_flags{}, 0, 0, nullptr, cl_image_format{},
-                        cl_image_desc{}, false, new MockGraphicsAllocation(nullptr, 0), false,
+    NullImage() : Image(nullptr, MemoryProperties(), cl_mem_flags{}, 0, 0, nullptr, nullptr, cl_image_format{},
+                        cl_image_desc{}, false, GraphicsAllocationHelper::toMultiGraphicsAllocation(new MockGraphicsAllocation(nullptr, 0)), false,
                         0, 0, ClSurfaceFormatInfo{}, nullptr) {
     }
     ~NullImage() override {
-        delete this->graphicsAllocation;
+        delete this->multiGraphicsAllocation.getGraphicsAllocation(0);
     }
-    void setImageArg(void *memory, bool isMediaBlockImage, uint32_t mipLevel) override {}
-    void setMediaImageArg(void *memory) override {}
+    void setImageArg(void *memory, bool isMediaBlockImage, uint32_t mipLevel, uint32_t rootDeviceIndex) override {}
+    void setMediaImageArg(void *memory, uint32_t rootDeviceIndex) override {}
     void setMediaSurfaceRotation(void *memory) override {}
     void setSurfaceMemoryObjectControlStateIndexToMocsTable(void *memory, uint32_t value) override {}
     void transformImage2dArrayTo3d(void *memory) override {}
@@ -893,6 +894,8 @@ TEST(ImageValidatorTest, givenNV12Image2dAsParentImageWhenValidateImageZeroSized
     NullImage image;
     cl_image_desc descriptor;
     MockContext context;
+    REQUIRE_IMAGES_OR_SKIP(&context);
+
     void *dummyPtr = reinterpret_cast<void *>(0x17);
     ClSurfaceFormatInfo surfaceFormat = {};
     image.imageFormat.image_channel_order = CL_NV12_INTEL;
@@ -909,6 +912,8 @@ TEST(ImageValidatorTest, givenNonNV12Image2dAsParentImageWhenValidateImageZeroSi
     NullImage image;
     cl_image_desc descriptor;
     MockContext context;
+    REQUIRE_IMAGES_OR_SKIP(&context);
+
     void *dummyPtr = reinterpret_cast<void *>(0x17);
     ClSurfaceFormatInfo surfaceFormat;
     image.imageFormat.image_channel_order = CL_BGRA;

@@ -10,11 +10,13 @@
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/unit_test/helpers/default_hw_info.inl"
 #include "shared/test/unit_test/helpers/memory_leak_listener.h"
+#include "shared/test/unit_test/helpers/test_files.h"
 #include "shared/test/unit_test/helpers/ult_hw_config.inl"
 
 #include "opencl/source/program/kernel_info.h"
 #include "opencl/source/utilities/logger.h"
 #include "opencl/test/unit_test/custom_event_listener.h"
+#include "opencl/test/unit_test/global_environment.h"
 #include "opencl/test/unit_test/mocks/mock_gmm_client_context.h"
 #include "opencl/test/unit_test/mocks/mock_sip.h"
 
@@ -44,7 +46,7 @@ TEST(Should, pass) { EXPECT_TRUE(true); }
 namespace L0 {
 
 namespace ult {
-::testing::Environment *environment = nullptr;
+TestEnvironment *environment = nullptr;
 }
 } // namespace L0
 
@@ -68,11 +70,14 @@ std::string getRunPath(char *argv0) {
         res = res.substr(0, pos);
 
     if (res == "." || pos == std::string::npos) {
+        char *cwd;
 #if defined(__linux__)
-        res = getcwd(nullptr, 0);
+        cwd = getcwd(nullptr, 0);
 #else
-        res = _getcwd(nullptr, 0);
+        cwd = _getcwd(nullptr, 0);
 #endif
+        res = cwd;
+        free(cwd);
     }
 
     return res;
@@ -81,7 +86,6 @@ std::string getRunPath(char *argv0) {
 std::thread::id tempThreadID;
 
 void applyWorkarounds() {
-    NEO::platformsImpl.reserve(1);
     {
         std::ofstream f;
         const std::string fileName("_tmp_");
@@ -159,14 +163,20 @@ int main(int argc, char **argv) {
                     }
                 }
                 if (productFamily == IGFX_UNKNOWN) {
-                    std::cout << "unknown or unsupported product family has been set: " << argv[i]
+                    std::cout << "unknown product family has been set: " << argv[i]
                               << std::endl;
                     return -1;
-                } else {
-                    std::cout << "product family: " << NEO::hardwarePrefix[productFamily] << " ("
-                              << productFamily << ")" << std::endl;
                 }
+
                 hwInfoForTests = *NEO::hardwareInfoTable[productFamily];
+                if (!hwInfoForTests.capabilityTable.levelZeroSupported) {
+                    std::cout << "unsupported product family has been set: " << argv[i]
+                              << std::endl;
+                    return 0;
+                }
+
+                std::cout << "product family: " << NEO::hardwarePrefix[productFamily] << " ("
+                          << productFamily << ")" << std::endl;
             }
         }
         if (!strcmp("--disable_default_listener", argv[i])) {
@@ -175,6 +185,9 @@ int main(int argc, char **argv) {
             useDefaultListener = true;
         }
     }
+    productFamily = hwInfoForTests.platform.eProductFamily;
+    renderCoreFamily = hwInfoForTests.platform.eRenderCoreFamily;
+
     // Platforms with uninitialized factory are not supported
     if (L0::commandListFactory[productFamily] == nullptr) {
         std::cout << "unsupported product family has been set: " << NEO::hardwarePrefix[::productFamily] << std::endl;
@@ -192,14 +205,20 @@ int main(int argc, char **argv) {
         listeners.Append(customEventListener);
     }
 
+    binaryNameSuffix.append(NEO::familyName[hwInfoForTests.platform.eRenderCoreFamily]);
+    binaryNameSuffix.append(hwInfoForTests.capabilityTable.platformType);
+
+    std::string testBinaryFiles = getRunPath(argv[0]);
+    testBinaryFiles.append("/level_zero/");
+    testBinaryFiles.append(binaryNameSuffix);
+    testBinaryFiles.append("/");
+    testBinaryFiles.append(testFiles);
+    testFiles = testBinaryFiles;
+
     listeners.Append(new NEO::MemoryLeakListener);
 
     NEO::GmmHelper::createGmmContextWrapperFunc =
         NEO::GmmClientContextBase::create<NEO::MockGmmClientContext>;
-
-    if (environment) {
-        ::testing::AddGlobalTestEnvironment(environment);
-    }
 
     uint64_t hwInfoConfig = NEO::defaultHardwareInfoConfigTable[productFamily];
     NEO::setHwInfoValuesFromConfig(hwInfoConfig, hwInfoForTests);
@@ -207,14 +226,18 @@ int main(int argc, char **argv) {
     // set Gt and FeatureTable to initial state
     NEO::hardwareInfoSetup[productFamily](&hwInfoForTests, false, hwInfoConfig);
 
-    productFamily = hwInfoForTests.platform.eProductFamily;
-    renderCoreFamily = hwInfoForTests.platform.eRenderCoreFamily;
-
     NEO::defaultHwInfo = std::make_unique<NEO::HardwareInfo>();
     *NEO::defaultHwInfo = hwInfoForTests;
 
     NEO::useKernelDescriptor = true;
     NEO::MockSipData::mockSipKernel.reset(new NEO::MockSipKernel());
+
+    environment = reinterpret_cast<TestEnvironment *>(::testing::AddGlobalTestEnvironment(new TestEnvironment));
+
+    MockCompilerDebugVars fclDebugVars;
+    MockCompilerDebugVars igcDebugVars;
+
+    environment->setDefaultDebugVars(fclDebugVars, igcDebugVars, hwInfoForTests);
 
     auto retVal = RUN_ALL_TESTS();
 

@@ -28,13 +28,14 @@ ze_result_t CommandQueueImp::destroy() {
     return ZE_RESULT_SUCCESS;
 }
 
-void CommandQueueImp::initialize() {
+void CommandQueueImp::initialize(bool copyOnly) {
     buffers.initialize(device, totalCmdBufferSize);
     NEO::GraphicsAllocation *bufferAllocation = buffers.getCurrentBufferAllocation();
     commandStream = new NEO::LinearStream(bufferAllocation->getUnderlyingBuffer(),
                                           defaultQueueCmdBufferSize);
     UNRECOVERABLE_IF(commandStream == nullptr);
     commandStream->replaceGraphicsAllocation(bufferAllocation);
+    isCopyOnlyCommandQueue = copyOnly;
 }
 
 void CommandQueueImp::reserveLinearStreamSize(size_t size) {
@@ -59,25 +60,32 @@ void CommandQueueImp::submitBatchBuffer(size_t offset, NEO::ResidencyContainer &
     buffers.setCurrentFlushStamp(csr->obtainCurrentFlushStamp());
 }
 
-ze_result_t CommandQueueImp::synchronize(uint32_t timeout) {
+ze_result_t CommandQueueImp::synchronize(uint64_t timeout) {
     return synchronizeByPollingForTaskCount(timeout);
 }
 
-ze_result_t CommandQueueImp::synchronizeByPollingForTaskCount(uint32_t timeout) {
+ze_result_t CommandQueueImp::synchronizeByPollingForTaskCount(uint64_t timeout) {
     UNRECOVERABLE_IF(csr == nullptr);
 
-    auto taskCountToWait = this->taskCount;
+    auto taskCountToWait = getTaskCount();
+    bool enableTimeout = true;
+    int64_t timeoutMicroseconds = static_cast<int64_t>(timeout);
+    if (timeout == std::numeric_limits<uint64_t>::max()) {
+        enableTimeout = false;
+        timeoutMicroseconds = NEO::TimeoutControls::maxTimeout;
+    }
 
-    waitForTaskCountWithKmdNotifyFallbackHelper(csr, this->taskCount, 0, false, false);
-
-    bool enableTimeout = (timeout != std::numeric_limits<uint32_t>::max());
-    csr->waitForCompletionWithTimeout(enableTimeout, timeout, this->taskCount);
+    csr->waitForCompletionWithTimeout(enableTimeout, timeoutMicroseconds, this->taskCount);
 
     if (*csr->getTagAddress() < taskCountToWait) {
         return ZE_RESULT_NOT_READY;
     }
 
     printFunctionsPrintfOutput();
+
+    if (device->getL0Debugger() && NEO::DebugManager.flags.PrintDebugMessages.get()) {
+        device->getL0Debugger()->printTrackedAddresses(csr->getOsContext().getContextId());
+    }
 
     return ZE_RESULT_SUCCESS;
 }
@@ -91,7 +99,7 @@ void CommandQueueImp::printFunctionsPrintfOutput() {
 }
 
 CommandQueue *CommandQueue::create(uint32_t productFamily, Device *device, NEO::CommandStreamReceiver *csr,
-                                   const ze_command_queue_desc_t *desc) {
+                                   const ze_command_queue_desc_t *desc, bool isCopyOnly) {
     CommandQueueAllocatorFn allocator = nullptr;
     if (productFamily < IGFX_MAX_PRODUCT) {
         allocator = commandQueueFactory[productFamily];
@@ -101,7 +109,7 @@ CommandQueue *CommandQueue::create(uint32_t productFamily, Device *device, NEO::
     if (allocator) {
         commandQueue = static_cast<CommandQueueImp *>((*allocator)(device, csr, desc));
 
-        commandQueue->initialize();
+        commandQueue->initialize(isCopyOnly);
     }
     return commandQueue;
 }
@@ -116,14 +124,14 @@ void CommandQueueImp::CommandBufferManager::initialize(Device *device, size_t si
                                          NEO::GraphicsAllocation::AllocationType::COMMAND_BUFFER,
                                          device->isMultiDeviceCapable(),
                                          false,
-                                         NEO::SubDevice::unspecifiedSubDeviceIndex};
+                                         CommonConstants::allDevicesBitfield};
 
-    buffers[BUFFER_ALLOCATION::FIRST] = device->getDriverHandle()->getMemoryManager()->allocateGraphicsMemoryWithProperties(properties);
+    buffers[BUFFER_ALLOCATION::FIRST] = device->getNEODevice()->getMemoryManager()->allocateGraphicsMemoryWithProperties(properties);
 
     UNRECOVERABLE_IF(nullptr == buffers[BUFFER_ALLOCATION::FIRST]);
     memset(buffers[BUFFER_ALLOCATION::FIRST]->getUnderlyingBuffer(), 0, buffers[BUFFER_ALLOCATION::FIRST]->getUnderlyingBufferSize());
 
-    buffers[BUFFER_ALLOCATION::SECOND] = device->getDriverHandle()->getMemoryManager()->allocateGraphicsMemoryWithProperties(properties);
+    buffers[BUFFER_ALLOCATION::SECOND] = device->getNEODevice()->getMemoryManager()->allocateGraphicsMemoryWithProperties(properties);
 
     UNRECOVERABLE_IF(nullptr == buffers[BUFFER_ALLOCATION::SECOND]);
     memset(buffers[BUFFER_ALLOCATION::SECOND]->getUnderlyingBuffer(), 0, buffers[BUFFER_ALLOCATION::SECOND]->getUnderlyingBufferSize());

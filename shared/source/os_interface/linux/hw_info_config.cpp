@@ -9,15 +9,14 @@
 
 #include "shared/source/command_stream/preemption.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
-#include "shared/source/helpers/hw_cmds.h"
+#include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
-#include "shared/source/memory_manager/memory_constants.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
 #include "shared/source/os_interface/linux/os_interface.h"
 #include "shared/source/utilities/cpu_info.h"
 
-#include "instrumentation.h"
+#include "hw_cmds.h"
 
 #include <cstring>
 
@@ -91,23 +90,36 @@ int HwInfoConfig::configureHwInfo(const HardwareInfo *inHwInfo, HardwareInfo *ou
     }
     platform->usRevId = static_cast<unsigned short>(val);
 
-    int euCount;
-    ret = drm->getEuTotal(euCount);
-    if (ret != 0) {
-        *outHwInfo = {};
-        return ret;
-    }
-    gtSystemInfo->EUCount = static_cast<uint32_t>(euCount);
-
-    gtSystemInfo->ThreadCount = this->threadsPerEu * gtSystemInfo->EUCount;
-
+    int sliceCount;
     int subSliceCount;
-    ret = drm->getSubsliceTotal(subSliceCount);
-    if (ret != 0) {
-        *outHwInfo = {};
-        return ret;
+    int euCount;
+
+    bool status = drm->queryTopology(sliceCount, subSliceCount, euCount);
+
+    if (!status) {
+        printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "WARNING: Topology query failed!\n");
+
+        sliceCount = gtSystemInfo->SliceCount;
+
+        ret = drm->getEuTotal(euCount);
+        if (ret != 0) {
+            printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "FATAL: Cannot query EU total parameter!\n");
+            *outHwInfo = {};
+            return ret;
+        }
+
+        ret = drm->getSubsliceTotal(subSliceCount);
+        if (ret != 0) {
+            printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "FATAL: Cannot query subslice total parameter!\n");
+            *outHwInfo = {};
+            return ret;
+        }
     }
+
+    gtSystemInfo->SliceCount = static_cast<uint32_t>(sliceCount);
     gtSystemInfo->SubSliceCount = static_cast<uint32_t>(subSliceCount);
+    gtSystemInfo->EUCount = static_cast<uint32_t>(euCount);
+    gtSystemInfo->ThreadCount = this->threadsPerEu * gtSystemInfo->EUCount;
 
     uint64_t gttSizeQuery = 0;
     featureTable->ftrSVM = true;
@@ -120,7 +132,7 @@ int HwInfoConfig::configureHwInfo(const HardwareInfo *inHwInfo, HardwareInfo *ou
     }
 
     int maxGpuFreq = 0;
-    drm->getMaxGpuFrequency(maxGpuFreq);
+    drm->getMaxGpuFrequency(*outHwInfo, maxGpuFreq);
 
     GTTYPE gtType = drm->getGtType();
     if (gtType == GTTYPE_UNDEFINED) {
@@ -155,11 +167,6 @@ int HwInfoConfig::configureHwInfo(const HardwareInfo *inHwInfo, HardwareInfo *ou
     hwHelper.adjustDefaultEngineType(outHwInfo);
     outHwInfo->capabilityTable.defaultEngineType = getChosenEngineType(*outHwInfo);
 
-    outHwInfo->capabilityTable.instrumentationEnabled =
-        (outHwInfo->capabilityTable.instrumentationEnabled && haveInstrumentation);
-
-    outHwInfo->capabilityTable.ftrRenderCompressedBuffers = false;
-    outHwInfo->capabilityTable.ftrRenderCompressedImages = false;
     drm->checkQueueSliceSupport();
     drm->checkNonPersistentContextsSupport();
     drm->checkPreemptionSupport();

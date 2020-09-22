@@ -5,25 +5,20 @@
  *
  */
 
-#include "shared/source/debug_settings/debug_settings_manager.h"
-#include "shared/source/device/device.h"
-
-#include "opencl/source/platform/platform.h"
+#include "opencl/source/cl_device/cl_device.h"
+#include "opencl/test/unit_test/fixtures/platform_fixture.h"
 #include "test.h"
-
-#include "CL/cl_ext.h"
-#include "cl_api_tests.h"
 
 using namespace NEO;
 
-struct clGetPlatformInfoTests : public api_tests {
+struct clGetPlatformInfoTests : Test<PlatformFixture> {
     void SetUp() override {
-        api_tests::SetUp();
+        Test<PlatformFixture>::SetUp();
     }
 
     void TearDown() override {
         delete[] paramValue;
-        api_tests::TearDown();
+        Test<PlatformFixture>::TearDown();
     }
 
     char *getPlatformInfoString(Platform *pPlatform, cl_platform_info paramName) {
@@ -40,6 +35,7 @@ struct clGetPlatformInfoTests : public api_tests {
         return value;
     }
 
+    size_t retSize = 0;
     char *paramValue = nullptr;
 };
 
@@ -65,25 +61,38 @@ class clGetPlatformInfoParameterizedTests : public clGetPlatformInfoTests,
 
 TEST_P(clGetPlatformInfoParameterizedTests, GivenClPlatformVersionWhenGettingPlatformInfoStringThenCorrectOpenClVersionIsReturned) {
     paramValue = getPlatformInfoString(pPlatform, CL_PLATFORM_VERSION);
-    std::string deviceVer;
+
+    cl_version platformNumericVersion = 0;
+    auto retVal = clGetPlatformInfo(pPlatform, CL_PLATFORM_NUMERIC_VERSION,
+                                    sizeof(platformNumericVersion), &platformNumericVersion, &retSize);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(sizeof(cl_version), retSize);
+
+    std::string expectedPlatformVersion;
+    cl_version expectedNumericPlatformVersion;
     switch (GetParam()) {
-    case 21:
-        deviceVer = "OpenCL 2.1 ";
+    case 30:
+        expectedPlatformVersion = "OpenCL 3.0 ";
+        expectedNumericPlatformVersion = CL_MAKE_VERSION(3, 0, 0);
         break;
-    case 20:
-        deviceVer = "OpenCL 2.0 ";
+    case 21:
+        expectedPlatformVersion = "OpenCL 2.1 ";
+        expectedNumericPlatformVersion = CL_MAKE_VERSION(2, 1, 0);
         break;
     case 12:
     default:
-        deviceVer = "OpenCL 1.2 ";
+        expectedPlatformVersion = "OpenCL 1.2 ";
+        expectedNumericPlatformVersion = CL_MAKE_VERSION(1, 2, 0);
         break;
     }
-    EXPECT_STREQ(paramValue, deviceVer.c_str());
+
+    EXPECT_STREQ(expectedPlatformVersion.c_str(), paramValue);
+    EXPECT_EQ(expectedNumericPlatformVersion, platformNumericVersion);
 }
 
 INSTANTIATE_TEST_CASE_P(OCLVersions,
                         clGetPlatformInfoParameterizedTests,
-                        ::testing::Values(12, 20, 21));
+                        ::testing::Values(12, 21, 30));
 
 TEST_F(clGetPlatformInfoTests, GivenClPlatformNameWhenGettingPlatformInfoStringThenCorrectStringIsReturned) {
     paramValue = getPlatformInfoString(pPlatform, CL_PLATFORM_NAME);
@@ -123,7 +132,7 @@ TEST_F(clGetPlatformInfoTests, GivenClPlatformHostTimerResolutionWhenGettingPlat
 
 TEST_F(clGetPlatformInfoTests, GivenNullPlatformWhenGettingPlatformInfoStringThenClInvalidPlatformErrorIsReturned) {
     char extensions[512];
-    retVal = clGetPlatformInfo(
+    auto retVal = clGetPlatformInfo(
         nullptr, // invalid platform
         CL_PLATFORM_EXTENSIONS,
         sizeof(extensions),
@@ -135,7 +144,7 @@ TEST_F(clGetPlatformInfoTests, GivenNullPlatformWhenGettingPlatformInfoStringThe
 
 TEST_F(clGetPlatformInfoTests, GivenInvalidParamNameWhenGettingPlatformInfoStringThenClInvalidValueErrorIsReturned) {
     char extensions[512];
-    retVal = clGetPlatformInfo(
+    auto retVal = clGetPlatformInfo(
         pPlatform,
         0, // invalid platform info enum
         sizeof(extensions),
@@ -145,9 +154,23 @@ TEST_F(clGetPlatformInfoTests, GivenInvalidParamNameWhenGettingPlatformInfoStrin
     EXPECT_EQ(CL_INVALID_VALUE, retVal);
 }
 
+TEST_F(clGetPlatformInfoTests, GivenInvalidParametersWhenGettingPlatformInfoThenValueSizeRetIsNotUpdated) {
+    char extensions[512];
+    retSize = 0x1234;
+    auto retVal = clGetPlatformInfo(
+        pPlatform,
+        0, // invalid platform info enum
+        sizeof(extensions),
+        extensions,
+        &retSize);
+
+    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+    EXPECT_EQ(0x1234u, retSize);
+}
+
 TEST_F(clGetPlatformInfoTests, GivenInvalidParamSizeWhenGettingPlatformInfoStringThenClInvalidValueErrorIsReturned) {
     char extensions[512];
-    retVal = clGetPlatformInfo(
+    auto retVal = clGetPlatformInfo(
         pPlatform,
         CL_PLATFORM_EXTENSIONS,
         0, // invalid size
@@ -164,6 +187,27 @@ TEST_F(clGetPlatformInfoTests, GivenDeviceWhenGettingIcdDispatchTableThenDeviceA
         ASSERT_NE(nullptr, device);
         EXPECT_EQ(pPlatform->dispatch.icdDispatch, device->dispatch.icdDispatch);
     }
+}
+
+TEST_F(clGetPlatformInfoTests, WhenCheckingPlatformExtensionsWithVersionThenTheyMatchPlatformExtensions) {
+
+    auto retVal = clGetPlatformInfo(pPlatform, CL_PLATFORM_EXTENSIONS_WITH_VERSION, 0, nullptr, &retSize);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    size_t extensionsCount = retSize / sizeof(cl_name_version);
+    auto platformExtensionsWithVersion = std::make_unique<cl_name_version[]>(extensionsCount);
+    retVal = clGetPlatformInfo(pPlatform, CL_PLATFORM_EXTENSIONS_WITH_VERSION,
+                               retSize, platformExtensionsWithVersion.get(), nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    std::string allExtensions;
+    for (size_t i = 0; i < extensionsCount; i++) {
+        EXPECT_EQ(CL_MAKE_VERSION(1u, 0u, 0u), platformExtensionsWithVersion[i].version);
+        allExtensions += platformExtensionsWithVersion[i].name;
+        allExtensions += " ";
+    }
+
+    EXPECT_STREQ(pPlatform->getPlatformInfo().extensions.c_str(), allExtensions.c_str());
 }
 
 class GetPlatformInfoTests : public PlatformFixture,

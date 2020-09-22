@@ -7,12 +7,12 @@
 
 #include "shared/source/helpers/hw_helper.h"
 
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "test.h"
 
 using namespace NEO;
 
-typedef Test<DeviceFixture> Gen9DeviceCaps;
+typedef Test<ClDeviceFixture> Gen9DeviceCaps;
 
 GEN9TEST_F(Gen9DeviceCaps, skuSpecificCaps) {
     const auto &caps = pClDevice->getDeviceInfo();
@@ -23,6 +23,25 @@ GEN9TEST_F(Gen9DeviceCaps, skuSpecificCaps) {
     } else {
         EXPECT_EQ(std::string::npos, extensionString.find(std::string("cl_khr_fp64")));
         EXPECT_EQ(0u, caps.doubleFpConfig);
+    }
+}
+
+GEN9TEST_F(Gen9DeviceCaps, givenGen9WhenCheckExtensionsThenDeviceProperlyReportsClKhrSubgroupsExtension) {
+    const auto &caps = pClDevice->getDeviceInfo();
+    if (pClDevice->areOcl21FeaturesEnabled()) {
+        EXPECT_THAT(caps.deviceExtensions, testing::HasSubstr(std::string("cl_khr_subgroups")));
+    } else {
+        EXPECT_THAT(caps.deviceExtensions, ::testing::Not(testing::HasSubstr(std::string("cl_khr_subgroups"))));
+    }
+}
+
+GEN9TEST_F(Gen9DeviceCaps, givenGen9WhenCheckingCapsThenDeviceDoesProperlyReportsIndependentForwardProgress) {
+    const auto &caps = pClDevice->getDeviceInfo();
+
+    if (pClDevice->areOcl21FeaturesEnabled()) {
+        EXPECT_TRUE(caps.independentForwardProgress != 0);
+    } else {
+        EXPECT_FALSE(caps.independentForwardProgress != 0);
     }
 }
 

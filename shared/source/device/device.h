@@ -6,6 +6,7 @@
  */
 
 #pragma once
+#include "shared/source/debugger/debugger.h"
 #include "shared/source/device/device_info.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/execution_environment/root_device_environment.h"
@@ -17,6 +18,7 @@
 
 namespace NEO {
 class OSTime;
+class SourceLevelDebugger;
 
 class Device : public ReferenceTrackedObject<Device> {
   public:
@@ -30,11 +32,22 @@ class Device : public ReferenceTrackedObject<Device> {
         return createDeviceInternals(device);
     }
 
+    virtual void incRefInternal() {
+        ReferenceTrackedObject<Device>::incRefInternal();
+    }
+    virtual unique_ptr_if_unused<Device> decRefInternal() {
+        return ReferenceTrackedObject<Device>::decRefInternal();
+    }
+
     bool getDeviceAndHostTimer(uint64_t *deviceTimestamp, uint64_t *hostTimestamp) const;
     bool getHostTimer(uint64_t *hostTimestamp) const;
     const HardwareInfo &getHardwareInfo() const;
     const DeviceInfo &getDeviceInfo() const;
     EngineControl &getEngine(aub_stream::EngineType engineType, bool lowPriority);
+    std::vector<std::vector<EngineControl>> &getEngineGroups() {
+        return this->engineGroups;
+    }
+    EngineControl &getEngine(uint32_t index);
     EngineControl &getDefaultEngine();
     EngineControl &getInternalEngine();
     std::atomic<uint32_t> &getSelectorCopyEngine();
@@ -50,6 +63,9 @@ class Device : public ReferenceTrackedObject<Device> {
     PreemptionMode getPreemptionMode() const { return preemptionMode; }
     MOCKABLE_VIRTUAL bool isDebuggerActive() const;
     Debugger *getDebugger() { return getRootDeviceEnvironment().debugger.get(); }
+    NEO::SourceLevelDebugger *getSourceLevelDebugger();
+    const std::vector<EngineControl> &getEngines() const;
+
     ExecutionEnvironment *getExecutionEnvironment() const { return executionEnvironment; }
     const RootDeviceEnvironment &getRootDeviceEnvironment() const { return *executionEnvironment->rootDeviceEnvironments[getRootDeviceIndex()]; }
     const HardwareCapabilities &getHardwareCapabilities() const { return hardwareCapabilities; }
@@ -73,6 +89,7 @@ class Device : public ReferenceTrackedObject<Device> {
     virtual uint32_t getRootDeviceIndex() const = 0;
     virtual uint32_t getNumAvailableDevices() const = 0;
     virtual Device *getDeviceById(uint32_t deviceId) const = 0;
+    virtual Device *getParentDevice() const = 0;
     virtual DeviceBitfield getDeviceBitfield() const = 0;
 
     static decltype(&PerformanceCounters::create) createPerformanceCountersFunc;
@@ -96,6 +113,7 @@ class Device : public ReferenceTrackedObject<Device> {
     virtual bool createEngines();
     bool createEngine(uint32_t deviceCsrIndex, aub_stream::EngineType engineType);
     MOCKABLE_VIRTUAL std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const;
+    virtual uint64_t getGlobalMemorySize() const;
 
     DeviceInfo deviceInfo = {};
 
@@ -104,6 +122,7 @@ class Device : public ReferenceTrackedObject<Device> {
     std::unique_ptr<PerformanceCounters> performanceCounters;
     std::vector<std::unique_ptr<CommandStreamReceiver>> commandStreamReceivers;
     std::vector<EngineControl> engines;
+    std::vector<std::vector<EngineControl>> engineGroups;
     PreemptionMode preemptionMode;
     ExecutionEnvironment *executionEnvironment = nullptr;
     uint32_t defaultEngineIndex = 0;

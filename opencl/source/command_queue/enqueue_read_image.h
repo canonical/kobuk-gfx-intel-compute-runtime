@@ -10,7 +10,9 @@
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/cache_policy.h"
+#include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
+#include "shared/source/os_interface/os_context.h"
 
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/context/context.h"
@@ -39,11 +41,11 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadImage(
     const cl_event *eventWaitList,
     cl_event *event) {
 
+    auto &csr = getGpgpuCommandStreamReceiver();
     if (nullptr == mapAllocation) {
-        notifyEnqueueReadImage(srcImage, !!blockingRead);
+        notifyEnqueueReadImage(srcImage, !!blockingRead, EngineHelpers::isBcs(csr.getOsContext().getEngineType()));
     }
 
-    MultiDispatchInfo di;
     auto isMemTransferNeeded = true;
     if (srcImage->isMemObjZeroCopy()) {
         size_t hostOffset;
@@ -79,7 +81,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadImage(
         if (region[0] != 0 &&
             region[1] != 0 &&
             region[2] != 0) {
-            bool status = getGpgpuCommandStreamReceiver().createAllocationForHostSurface(hostPtrSurf, true);
+            bool status = csr.createAllocationForHostSurface(hostPtrSurf, true);
             if (!status) {
                 return CL_OUT_OF_RESOURCES;
             }
@@ -101,7 +103,10 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadImage(
     if (srcImage->getImageDesc().num_mip_levels > 0) {
         dc.srcMipLevel = findMipLevel(srcImage->getImageDesc().image_type, origin);
     }
-    builder.buildDispatchInfos(di, dc);
+
+    MultiDispatchInfo di(dc);
+
+    builder.buildDispatchInfos(di);
 
     enqueueHandler<CL_COMMAND_READ_IMAGE>(
         surfaces,

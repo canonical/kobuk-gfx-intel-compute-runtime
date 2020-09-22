@@ -13,17 +13,18 @@
 
 namespace L0 {
 struct Driver {
-    virtual ze_result_t driverInit(_ze_init_flag_t) = 0;
-    virtual void initialize(bool *result) = 0;
+    virtual ze_result_t driverInit(ze_init_flags_t flags) = 0;
+    virtual void initialize(ze_result_t *result) = 0;
     static Driver *get() { return driver; }
+    virtual ~Driver() = default;
 
   protected:
     static Driver *driver;
 };
 
-ze_result_t init(_ze_init_flag_t);
+ze_result_t init(ze_init_flags_t);
 ze_result_t driverHandleGet(uint32_t *pCount, ze_driver_handle_t *phDrivers);
 
 extern uint32_t driverCount;
-extern std::unique_ptr<_ze_driver_handle_t> GlobalDriver;
+extern _ze_driver_handle_t *GlobalDriverHandle;
 } // namespace L0

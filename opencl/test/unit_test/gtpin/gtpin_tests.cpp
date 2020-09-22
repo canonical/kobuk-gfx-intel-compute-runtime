@@ -13,6 +13,9 @@
 #include "shared/source/memory_manager/surface.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/unit_test/device_binary_format/patchtokens_tests.h"
+#include "shared/test/unit_test/helpers/test_files.h"
+#include "shared/test/unit_test/helpers/variable_backup.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 #include "opencl/source/api/api.h"
 #include "opencl/source/context/context.h"
@@ -28,15 +31,14 @@
 #include "opencl/test/unit_test/fixtures/memory_management_fixture.h"
 #include "opencl/test/unit_test/fixtures/platform_fixture.h"
 #include "opencl/test/unit_test/helpers/kernel_binary_helper.h"
-#include "opencl/test/unit_test/helpers/test_files.h"
-#include "opencl/test/unit_test/helpers/variable_backup.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
+#include "opencl/test/unit_test/mocks/mock_device_queue.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 #include "opencl/test/unit_test/program/program_tests.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 #include "test.h"
 
 #include "gtest/gtest.h"
@@ -146,7 +148,7 @@ class GTPinFixture : public ContextFixture, public MemoryManagementFixture {
 
   public:
     void SetUp() override {
-        platformsImpl.clear();
+        platformsImpl->clear();
         MemoryManagementFixture::SetUp();
         constructPlatform();
         pPlatform = platform();
@@ -178,7 +180,7 @@ class GTPinFixture : public ContextFixture, public MemoryManagementFixture {
 
     void TearDown() override {
         ContextFixture::TearDown();
-        platformsImpl.clear();
+        platformsImpl->clear();
         MemoryManagementFixture::TearDown();
         NEO::isGTPinInitialized = false;
     }
@@ -759,7 +761,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsExecutedThenGTPinCa
     Kernel *pKernel1 = (Kernel *)kernel1;
     const KernelInfo &kInfo1 = pKernel1->getKernelInfo();
     uint64_t gtpinKernelId1 = pKernel1->getKernelId();
-    EXPECT_EQ(kInfo1.heapInfo.pKernelHeader->ShaderHashCode, gtpinKernelId1);
+    EXPECT_EQ(kInfo1.shaderHashCode, gtpinKernelId1);
 
     constexpr size_t n = 256;
     auto buff10 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
@@ -793,7 +795,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsExecutedThenGTPinCa
     Kernel *pKernel2 = (Kernel *)kernel2;
     const KernelInfo &kInfo2 = pKernel2->getKernelInfo();
     uint64_t gtpinKernelId2 = pKernel2->getKernelId();
-    EXPECT_EQ(kInfo2.heapInfo.pKernelHeader->ShaderHashCode, gtpinKernelId2);
+    EXPECT_EQ(kInfo2.shaderHashCode, gtpinKernelId2);
 
     auto buff20 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
     auto buff21 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
@@ -907,7 +909,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelINTELIsExecutedThenGT
     Kernel *pKernel1 = (Kernel *)kernel1;
     const KernelInfo &kInfo1 = pKernel1->getKernelInfo();
     uint64_t gtpinKernelId1 = pKernel1->getKernelId();
-    EXPECT_EQ(kInfo1.heapInfo.pKernelHeader->ShaderHashCode, gtpinKernelId1);
+    EXPECT_EQ(kInfo1.shaderHashCode, gtpinKernelId1);
 
     cl_uint workDim = 1;
     size_t localWorkSize[3] = {1, 1, 1};
@@ -941,7 +943,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelINTELIsExecutedThenGT
     Kernel *pKernel2 = (Kernel *)kernel2;
     const KernelInfo &kInfo2 = pKernel2->getKernelInfo();
     uint64_t gtpinKernelId2 = pKernel2->getKernelId();
-    EXPECT_EQ(kInfo2.heapInfo.pKernelHeader->ShaderHashCode, gtpinKernelId2);
+    EXPECT_EQ(kInfo2.shaderHashCode, gtpinKernelId2);
 
     auto buff20 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
     auto buff21 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
@@ -1037,7 +1039,9 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithoutSSHIsUsedThenK
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
-TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithExecEnvIsUsedThenKernelCreateCallbacksIsNotCalled) {
+HWCMDTEST_F(IGFX_GEN8_CORE, GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithDeviceEnqueueIsUsedThenKernelCreateAndSubmitCallbacksAreNotCalled) {
+    REQUIRE_DEVICE_ENQUEUE_OR_SKIP(pDevice);
+
     gtpinCallbacks.onContextCreate = OnContextCreate;
     gtpinCallbacks.onContextDestroy = OnContextDestroy;
     gtpinCallbacks.onKernelCreate = OnKernelCreate;
@@ -1052,6 +1056,17 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithExecEnvIsUsedThen
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_NE(nullptr, context);
     auto pContext = castToObject<Context>(context);
+
+    cl_queue_properties devQproperties = 0;
+    auto devQ = std::make_unique<DeviceQueueHw<FamilyType>>(pContext, pDevice, devQproperties);
+    pContext->setDefaultDeviceQueue(devQ.get());
+
+    cl_command_queue cmdQ = nullptr;
+    cl_queue_properties properties = 0;
+
+    cmdQ = clCreateCommandQueue(context, device, properties, &retVal);
+    ASSERT_NE(nullptr, cmdQ);
+    EXPECT_EQ(CL_SUCCESS, retVal);
 
     // Prepare a kernel with fake Execution Environment
     char binary[1024] = {1, 2, 3, 4, 5, 6, 7, 8, 9, '\0'};
@@ -1153,11 +1168,28 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithExecEnvIsUsedThen
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(prevCount, KernelCreateCallbackCount);
 
+    int prevCount2 = KernelSubmitCallbackCount;
+    cl_uint workDim = 1;
+    size_t globalWorkOffset[3] = {0, 0, 0};
+    size_t globalWorkSize[3] = {1, 1, 1};
+    size_t localWorkSize[3] = {1, 1, 1};
+
+    MockParentKernel *parentKernel = MockParentKernel::create(*pContext);
+
+    retVal = clEnqueueNDRangeKernel(cmdQ, parentKernel, workDim, globalWorkOffset, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(prevCount2, KernelSubmitCallbackCount);
+
+    delete parentKernel;
+
     // Cleanup
     retVal = clReleaseKernel(kernel);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     retVal = clReleaseProgram(pProgram);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = clReleaseCommandQueue(cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     retVal = clReleaseContext(context);
@@ -1225,7 +1257,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithoutSSHIsUsedThenG
     Kernel *pKernel = (Kernel *)kernel;
     const KernelInfo &kInfo = pKernel->getKernelInfo();
     uint64_t gtpinKernelId = pKernel->getKernelId();
-    EXPECT_EQ(kInfo.heapInfo.pKernelHeader->ShaderHashCode, gtpinKernelId);
+    EXPECT_EQ(kInfo.shaderHashCode, gtpinKernelId);
 
     constexpr size_t n = 256;
     auto buff0 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
@@ -1338,7 +1370,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenBlockedKernelWithoutSSHIsUs
     Kernel *pKernel = (Kernel *)kernel;
     const KernelInfo &kInfo = pKernel->getKernelInfo();
     uint64_t gtpinKernelId = pKernel->getKernelId();
-    EXPECT_EQ(kInfo.heapInfo.pKernelHeader->ShaderHashCode, gtpinKernelId);
+    EXPECT_EQ(kInfo.shaderHashCode, gtpinKernelId);
 
     constexpr size_t n = 256;
     auto buff0 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
@@ -1462,7 +1494,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenTheSameKerneIsExecutedTwice
     Kernel *pKernel1 = (Kernel *)kernel1;
     const KernelInfo &kInfo1 = pKernel1->getKernelInfo();
     uint64_t gtpinKernelId1 = pKernel1->getKernelId();
-    EXPECT_EQ(kInfo1.heapInfo.pKernelHeader->ShaderHashCode, gtpinKernelId1);
+    EXPECT_EQ(kInfo1.shaderHashCode, gtpinKernelId1);
 
     constexpr size_t n = 256;
     auto buff10 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
@@ -1500,7 +1532,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenTheSameKerneIsExecutedTwice
     Kernel *pKernel2 = (Kernel *)kernel2;
     const KernelInfo &kInfo2 = pKernel2->getKernelInfo();
     uint64_t gtpinKernelId2 = pKernel2->getKernelId();
-    EXPECT_EQ(kInfo2.heapInfo.pKernelHeader->ShaderHashCode, gtpinKernelId2);
+    EXPECT_EQ(kInfo2.shaderHashCode, gtpinKernelId2);
 
     auto buff20 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
     auto buff21 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
@@ -1804,10 +1836,10 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelIsCreatedThenAllKerne
     // Verify that correct GT-Pin resource is made resident
     cl_mem gtpinBuffer0 = kernelExecQueue[0].gtpinResource;
     auto pBuffer0 = castToObject<Buffer>(gtpinBuffer0);
-    GraphicsAllocation *pGfxAlloc0 = pBuffer0->getGraphicsAllocation();
+    GraphicsAllocation *pGfxAlloc0 = pBuffer0->getGraphicsAllocation(pDevice->getRootDeviceIndex());
     cl_mem gtpinBuffer1 = kernelExecQueue[1].gtpinResource;
     auto pBuffer1 = castToObject<Buffer>(gtpinBuffer1);
-    GraphicsAllocation *pGfxAlloc1 = pBuffer1->getGraphicsAllocation();
+    GraphicsAllocation *pGfxAlloc1 = pBuffer1->getGraphicsAllocation(pDevice->getRootDeviceIndex());
     CommandStreamReceiver &csr = pCmdQueue->getGpgpuCommandStreamReceiver();
     EXPECT_FALSE(pGfxAlloc0->isResident(csr.getOsContext().getContextId()));
     EXPECT_FALSE(pGfxAlloc1->isResident(csr.getOsContext().getContextId()));
@@ -1974,10 +2006,10 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenOneKernelIsSubmittedSeveral
     // This simulates enqueuing non-blocked kernels
     cl_mem gtpinBuffer0 = kernelExecQueue[0].gtpinResource;
     auto pBuffer0 = castToObject<Buffer>(gtpinBuffer0);
-    GraphicsAllocation *pGfxAlloc0 = pBuffer0->getGraphicsAllocation();
+    GraphicsAllocation *pGfxAlloc0 = pBuffer0->getGraphicsAllocation(pDevice->getRootDeviceIndex());
     cl_mem gtpinBuffer1 = kernelExecQueue[1].gtpinResource;
     auto pBuffer1 = castToObject<Buffer>(gtpinBuffer1);
-    GraphicsAllocation *pGfxAlloc1 = pBuffer1->getGraphicsAllocation();
+    GraphicsAllocation *pGfxAlloc1 = pBuffer1->getGraphicsAllocation(pDevice->getRootDeviceIndex());
     CommandStreamReceiver &csr = pCmdQueue->getGpgpuCommandStreamReceiver();
     // Make resident resource of first submitted kernel
     EXPECT_FALSE(pGfxAlloc0->isResident(csr.getOsContext().getContextId()));
@@ -2116,6 +2148,24 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenLowMemoryConditionOccursThe
     EXPECT_EQ(&NEO::gtpinUnmapBuffer, driverServices.bufferUnMap);
 
     injectFailures(allocBufferFunc);
+}
+
+TEST_F(GTPinTests, givenParentKernelWhenGtPinAddingSurfaceStateThenItIsNotAddedAndFalseIsReturned) {
+    GFXCORE_FAMILY genFamily = pDevice->getHardwareInfo().platform.eRenderCoreFamily;
+    GTPinHwHelper &gtpinHelper = GTPinHwHelper::get(genFamily);
+    std::unique_ptr<MockParentKernel> parentKernel(MockParentKernel::create(*pContext));
+
+    parentKernel->mockKernelInfo->usesSsh = true;
+    parentKernel->sshLocalSize = 64;
+    parentKernel->pSshLocal.reset(new char[64]);
+
+    size_t sizeSurfaceStates1 = parentKernel->getSurfaceStateHeapSize();
+
+    bool surfaceAdded = gtpinHelper.addSurfaceState(parentKernel.get());
+    EXPECT_FALSE(surfaceAdded);
+
+    size_t sizeSurfaceStates2 = parentKernel->getSurfaceStateHeapSize();
+    EXPECT_EQ(sizeSurfaceStates2, sizeSurfaceStates1);
 }
 
 TEST_F(GTPinTests, givenKernelWithSSHThenVerifyThatSSHResizeWorksWell) {
@@ -2323,14 +2373,12 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenOnKernelSubitIsCalledThenCo
     EXPECT_EQ(GTPIN_DI_SUCCESS, retFromGtPin);
 
     char surfaceStateHeap[0x80];
-    SKernelBinaryHeaderCommon kernelHeader;
     std::unique_ptr<MockContext> context(new MockContext(pDevice));
 
     EXPECT_EQ(CL_SUCCESS, retVal);
     auto pKernelInfo = std::make_unique<KernelInfo>();
-    kernelHeader.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
     pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
-    pKernelInfo->heapInfo.pKernelHeader = &kernelHeader;
+    pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
     pKernelInfo->usesSsh = true;
 
     auto pProgramm = std::make_unique<MockProgram>(*pDevice->getExecutionEnvironment(), context.get(), false, nullptr);
@@ -2397,7 +2445,7 @@ HWTEST_F(GTPinTests, givenGtPinInitializedWhenSubmittingKernelCommandThenFlushed
     mockCmdQ->allocateHeapMemory(IndirectHeap::SURFACE_STATE, 128, ih3);
 
     PreemptionMode preemptionMode = pDevice->getPreemptionMode();
-    auto cmdStream = new LinearStream(pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), 128, GraphicsAllocation::AllocationType::COMMAND_BUFFER}));
+    auto cmdStream = new LinearStream(pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), 128, GraphicsAllocation::AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()}));
 
     std::vector<Surface *> surfaces;
     auto kernelOperation = std::make_unique<KernelOperation>(cmdStream, *mockCmdQ->getGpgpuCommandStreamReceiver().getInternalAllocationStorage());

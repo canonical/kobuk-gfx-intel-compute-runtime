@@ -6,7 +6,7 @@
  */
 
 #include "opencl/source/kernel/kernel.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
@@ -18,14 +18,14 @@
 using namespace NEO;
 
 template <typename T>
-class KernelArgImmediateTest : public Test<DeviceFixture> {
+class KernelArgImmediateTest : public Test<ClDeviceFixture> {
   public:
     KernelArgImmediateTest() {
     }
 
   protected:
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
         memset(pCrossThreadData, 0xfe, sizeof(pCrossThreadData));
         program = std::make_unique<MockProgram>(*pDevice->getExecutionEnvironment());
 
@@ -70,7 +70,7 @@ class KernelArgImmediateTest : public Test<DeviceFixture> {
     void TearDown() override {
         delete pKernel;
 
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     cl_int retVal = CL_SUCCESS;
@@ -94,7 +94,7 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(KernelArgImmediateTest, KernelArgImmediateTypes);
 
-TYPED_TEST(KernelArgImmediateTest, SetKernelArg) {
+TYPED_TEST(KernelArgImmediateTest, WhenSettingKernelArgThenArgIsSetCorrectly) {
     auto val = (TypeParam)0xaaaaaaaaULL;
     auto pVal = &val;
     this->pKernel->setArg(0, sizeof(TypeParam), pVal);
@@ -105,7 +105,7 @@ TYPED_TEST(KernelArgImmediateTest, SetKernelArg) {
     EXPECT_EQ(val, *pKernelArg);
 }
 
-TYPED_TEST(KernelArgImmediateTest, SetKernelArgWithInvalidIndex) {
+TYPED_TEST(KernelArgImmediateTest, GivenInvalidIndexWhenSettingKernelArgThenInvalidArgIndexErrorIsReturned) {
     auto val = (TypeParam)0U;
     auto pVal = &val;
     auto ret = this->pKernel->setArg((uint32_t)-1, sizeof(TypeParam), pVal);
@@ -113,7 +113,7 @@ TYPED_TEST(KernelArgImmediateTest, SetKernelArgWithInvalidIndex) {
     EXPECT_EQ(ret, CL_INVALID_ARG_INDEX);
 }
 
-TYPED_TEST(KernelArgImmediateTest, setKernelArgMultipleArguments) {
+TYPED_TEST(KernelArgImmediateTest, GivenMultipleArgumentsWhenSettingKernelArgThenEachArgIsSetCorrectly) {
     auto val = (TypeParam)0xaaaaaaaaULL;
     auto pVal = &val;
     this->pKernel->setArg(0, sizeof(TypeParam), pVal);
@@ -140,7 +140,7 @@ TYPED_TEST(KernelArgImmediateTest, setKernelArgMultipleArguments) {
     EXPECT_EQ(val, *pKernelArg);
 }
 
-TYPED_TEST(KernelArgImmediateTest, setKernelArgOverwritesCrossThreadData) {
+TYPED_TEST(KernelArgImmediateTest, GivenCrossThreadDataOverwritesWhenSettingKernelArgThenArgsAreSetCorrectly) {
     TypeParam val = (TypeParam)0xaaaaaaaaULL;
     TypeParam *pVal = &val;
     this->pKernel->setArg(0, sizeof(TypeParam), pVal);
@@ -167,7 +167,7 @@ TYPED_TEST(KernelArgImmediateTest, setKernelArgOverwritesCrossThreadData) {
     EXPECT_EQ(val, *pKernelArg);
 }
 
-TYPED_TEST(KernelArgImmediateTest, setSingleKernelArgMultipleStructElements) {
+TYPED_TEST(KernelArgImmediateTest, GivenMultipleStructElementsWhenSettingKernelArgThenArgsAreSetCorrectly) {
     struct ImmediateStruct {
         TypeParam a;
         unsigned char unused[3]; // want to force a gap, ideally unpadded

@@ -13,6 +13,7 @@
 #include "shared/source/device/device.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/heap_helper.h"
+#include "shared/source/helpers/hw_helper.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
 #include "shared/source/memory_manager/memory_manager.h"
 
@@ -50,13 +51,13 @@ bool CommandContainer::initialize(Device *device) {
     heapHelper = std::unique_ptr<HeapHelper>(new HeapHelper(device->getMemoryManager(), device->getDefaultEngine().commandStreamReceiver->getInternalAllocationStorage(), device->getNumAvailableDevices() > 1u));
 
     size_t alignedSize = alignUp<size_t>(totalCmdBufferSize, MemoryConstants::pageSize64k);
-    AllocationProperties properties{0u,
+    AllocationProperties properties{device->getRootDeviceIndex(),
                                     true /* allocateMemory*/,
                                     alignedSize,
-                                    GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+                                    GraphicsAllocation::AllocationType::COMMAND_BUFFER,
                                     (device->getNumAvailableDevices() > 1u) /* multiOsContextCapable */,
                                     false,
-                                    {}};
+                                    device->getDeviceBitfield()};
 
     auto cmdBufferAllocation = device->getMemoryManager()->allocateGraphicsMemoryWithProperties(properties);
     UNRECOVERABLE_IF(!cmdBufferAllocation);
@@ -71,7 +72,10 @@ bool CommandContainer::initialize(Device *device) {
     constexpr size_t heapSize = 65536u;
 
     for (uint32_t i = 0; i < IndirectHeap::Type::NUM_TYPES; i++) {
-        allocationIndirectHeaps[i] = heapHelper->getHeapAllocation(i, heapSize, alignedSize, 0u);
+        allocationIndirectHeaps[i] = heapHelper->getHeapAllocation(i,
+                                                                   heapSize,
+                                                                   alignedSize,
+                                                                   device->getRootDeviceIndex());
         UNRECOVERABLE_IF(!allocationIndirectHeaps[i]);
         residencyContainer.push_back(allocationIndirectHeaps[i]);
 
@@ -79,7 +83,9 @@ bool CommandContainer::initialize(Device *device) {
         indirectHeaps[i] = std::make_unique<IndirectHeap>(allocationIndirectHeaps[i], requireInternalHeap);
     }
 
-    instructionHeapBaseAddress = device->getMemoryManager()->getInternalHeapBaseAddress(0);
+    instructionHeapBaseAddress = device->getMemoryManager()->getInternalHeapBaseAddress(device->getRootDeviceIndex(), allocationIndirectHeaps[IndirectHeap::Type::INDIRECT_OBJECT]->isAllocatedInLocalMemoryPool());
+
+    reserveBindlessOffsets(*indirectHeaps[IndirectHeap::Type::SURFACE_STATE]);
 
     iddBlock = nullptr;
     nextIddInBlock = this->getNumIddPerBlock();
@@ -120,6 +126,8 @@ void CommandContainer::reset() {
                                     indirectHeap->getMaxAvailableSpace());
         addToResidencyContainer(indirectHeap->getGraphicsAllocation());
     }
+
+    reserveBindlessOffsets(*indirectHeaps[HeapType::SURFACE_STATE]);
 }
 
 void *CommandContainer::getHeapSpaceAllowGrow(HeapType heapType,
@@ -169,11 +177,15 @@ IndirectHeap *CommandContainer::getHeapWithRequiredSizeAndAlignment(HeapType hea
         getDeallocationContainer().push_back(oldAlloc);
         setIndirectHeapAllocation(heapType, newAlloc);
         setHeapDirty(heapType);
+        if (heapType == HeapType::SURFACE_STATE) {
+            reserveBindlessOffsets(*indirectHeap);
+        }
     }
 
     if (alignment) {
         indirectHeap->align(alignment);
     }
+
     return indirectHeap;
 }
 
@@ -182,10 +194,10 @@ void CommandContainer::allocateNextCommandBuffer() {
     AllocationProperties properties{0u,
                                     true /* allocateMemory*/,
                                     alignedSize,
-                                    GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+                                    GraphicsAllocation::AllocationType::COMMAND_BUFFER,
                                     (device->getNumAvailableDevices() > 1u) /* multiOsContextCapable */,
                                     false,
-                                    {}};
+                                    device->getDeviceBitfield()};
 
     auto cmdBufferAllocation = device->getMemoryManager()->allocateGraphicsMemoryWithProperties(properties);
     UNRECOVERABLE_IF(!cmdBufferAllocation);
@@ -196,6 +208,13 @@ void CommandContainer::allocateNextCommandBuffer() {
     commandStream->replaceGraphicsAllocation(cmdBufferAllocation);
 
     addToResidencyContainer(cmdBufferAllocation);
+}
+
+void CommandContainer::reserveBindlessOffsets(IndirectHeap &sshHeap) {
+    UNRECOVERABLE_IF(sshHeap.getUsed() > 0);
+    auto &helper = HwHelper::get(getDevice()->getHardwareInfo().platform.eRenderCoreFamily);
+    auto surfaceStateSize = helper.getRenderSurfaceStateSize();
+    sshHeap.getSpace(surfaceStateSize);
 }
 
 } // namespace NEO

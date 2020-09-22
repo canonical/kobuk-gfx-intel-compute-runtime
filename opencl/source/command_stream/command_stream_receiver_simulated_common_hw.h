@@ -8,9 +8,9 @@
 #pragma once
 #include "shared/source/command_stream/command_stream_receiver_hw.h"
 
-#include "opencl/source/gen_common/aub_mapper.h"
 #include "opencl/source/memory_manager/memory_banks.h"
 
+#include "aub_mapper.h"
 #include "third_party/aub_stream/headers/hardware_context.h"
 
 namespace aub_stream {
@@ -48,8 +48,8 @@ class CommandStreamReceiverSimulatedCommonHw : public CommandStreamReceiverHw<Gf
     void initEngineMMIO();
     void submitLRCA(const MiContextDescriptorReg &contextDescriptor);
     void setupContext(OsContext &osContext) override;
-    virtual void expectMemoryEqual(void *gfxAddress, const void *srcAddress, size_t length);
-    virtual void expectMemoryNotEqual(void *gfxAddress, const void *srcAddress, size_t length);
+    virtual bool expectMemoryEqual(void *gfxAddress, const void *srcAddress, size_t length);
+    virtual bool expectMemoryNotEqual(void *gfxAddress, const void *srcAddress, size_t length);
     virtual void pollForCompletion() = 0;
     virtual void pollForCompletionImpl(){};
     virtual bool writeMemory(GraphicsAllocation &gfxAllocation) = 0;
@@ -60,6 +60,10 @@ class CommandStreamReceiverSimulatedCommonHw : public CommandStreamReceiverHw<Gf
     virtual bool isAubWritable(GraphicsAllocation &graphicsAllocation) const = 0;
     virtual void setTbxWritable(bool writable, GraphicsAllocation &graphicsAllocation) = 0;
     virtual bool isTbxWritable(GraphicsAllocation &graphicsAllocation) const = 0;
+
+    virtual void dumpAllocation(GraphicsAllocation &gfxAllocation) = 0;
+
+    void makeNonResident(GraphicsAllocation &gfxAllocation) override;
 
     size_t getPreferredTagPoolSize() const override { return 1; }
 

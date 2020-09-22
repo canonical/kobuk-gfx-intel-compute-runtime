@@ -8,6 +8,7 @@
 #pragma once
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/os_interface/os_interface.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 #include "shared/test/unit_test/tests_configuration.h"
 
 #include "opencl/source/aub_mem_dump/aub_mem_dump.h"
@@ -18,8 +19,9 @@
 #include "opencl/source/platform/platform.h"
 #include "opencl/test/unit_test/command_queue/command_queue_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
+
+#include "gtest/gtest.h"
 
 #include <sstream>
 
@@ -29,7 +31,6 @@ class AUBFixture : public CommandQueueHwFixture {
   public:
     void SetUp(const HardwareInfo *hardwareInfo) {
         const HardwareInfo &hwInfo = hardwareInfo ? *hardwareInfo : *defaultHwInfo;
-        uint32_t deviceIndex = 0;
 
         auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
         auto engineType = getChosenEngineType(hwInfo);
@@ -41,13 +42,15 @@ class AUBFixture : public CommandQueueHwFixture {
         executionEnvironment = platform()->peekExecutionEnvironment();
         executionEnvironment->prepareRootDeviceEnvironments(1u);
         executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(&hwInfo);
+
+        device = std::make_unique<MockClDevice>(MockDevice::create<MockDevice>(executionEnvironment, rootDeviceIndex));
+
         if (testMode == TestMode::AubTestsWithTbx) {
             this->csr = TbxCommandStreamReceiver::create(strfilename.str(), true, *executionEnvironment, 0);
         } else {
             this->csr = AUBCommandStreamReceiver::create(strfilename.str(), true, *executionEnvironment, 0);
         }
 
-        device = std::make_unique<MockClDevice>(MockDevice::create<MockDevice>(executionEnvironment, deviceIndex));
         device->resetCommandStreamReceiver(this->csr);
 
         CommandQueueHwFixture::SetUp(AUBFixture::device.get(), cl_command_queue_properties(0));
@@ -69,7 +72,7 @@ class AUBFixture : public CommandQueueHwFixture {
 
         if (testMode == TestMode::AubTestsWithTbx) {
             auto tbxCsr = csrSimulated;
-            tbxCsr->expectMemoryEqual(gfxAddress, srcAddress, length);
+            EXPECT_TRUE(tbxCsr->expectMemoryEqual(gfxAddress, srcAddress, length));
             csrSimulated = static_cast<CommandStreamReceiverSimulatedCommonHw<FamilyType> *>(
                 static_cast<CommandStreamReceiverWithAUBDump<TbxCommandStreamReceiverHw<FamilyType>> *>(csr)->aubCSR.get());
         }
@@ -85,7 +88,7 @@ class AUBFixture : public CommandQueueHwFixture {
 
         if (testMode == TestMode::AubTestsWithTbx) {
             auto tbxCsr = csrSimulated;
-            tbxCsr->expectMemoryNotEqual(gfxAddress, srcAddress, length);
+            EXPECT_TRUE(tbxCsr->expectMemoryNotEqual(gfxAddress, srcAddress, length));
             csrSimulated = static_cast<CommandStreamReceiverSimulatedCommonHw<FamilyType> *>(
                 static_cast<CommandStreamReceiverWithAUBDump<TbxCommandStreamReceiverHw<FamilyType>> *>(csr)->aubCSR.get());
         }
@@ -99,6 +102,7 @@ class AUBFixture : public CommandQueueHwFixture {
         return reinterpret_cast<void *>(allocation->getGpuAddress());
     }
 
+    const uint32_t rootDeviceIndex = 0;
     CommandStreamReceiver *csr = nullptr;
     volatile uint32_t *pTagMemory = nullptr;
     std::unique_ptr<MockClDevice> device;

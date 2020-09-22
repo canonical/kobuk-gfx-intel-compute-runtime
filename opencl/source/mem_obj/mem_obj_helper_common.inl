@@ -9,7 +9,8 @@
 
 namespace NEO {
 
-bool MemObjHelper::validateMemoryPropertiesForBuffer(const MemoryPropertiesFlags &memoryProperties, cl_mem_flags flags, cl_mem_flags_intel flagsIntel, const Context &context) {
+bool MemObjHelper::validateMemoryPropertiesForBuffer(const MemoryProperties &memoryProperties, cl_mem_flags flags,
+                                                     cl_mem_flags_intel flagsIntel, const Context &context) {
     /* Check all the invalid flags combination. */
     if ((isValueSet(flags, CL_MEM_READ_WRITE | CL_MEM_READ_ONLY)) ||
         (isValueSet(flags, CL_MEM_READ_WRITE | CL_MEM_WRITE_ONLY)) ||
@@ -25,7 +26,8 @@ bool MemObjHelper::validateMemoryPropertiesForBuffer(const MemoryPropertiesFlags
     return validateExtraMemoryProperties(memoryProperties, flags, flagsIntel, context);
 }
 
-bool MemObjHelper::validateMemoryPropertiesForImage(const MemoryPropertiesFlags &memoryProperties, cl_mem_flags flags, cl_mem_flags_intel flagsIntel, cl_mem parent, const Context &context) {
+bool MemObjHelper::validateMemoryPropertiesForImage(const MemoryProperties &memoryProperties, cl_mem_flags flags,
+                                                    cl_mem_flags_intel flagsIntel, cl_mem parent, const Context &context) {
     /* Check all the invalid flags combination. */
     if ((!isValueSet(flags, CL_MEM_ACCESS_FLAGS_UNRESTRICTED_INTEL)) &&
         (isValueSet(flags, CL_MEM_READ_WRITE | CL_MEM_WRITE_ONLY) ||
@@ -44,7 +46,7 @@ bool MemObjHelper::validateMemoryPropertiesForImage(const MemoryPropertiesFlags 
 
     auto parentMemObj = castToObject<MemObj>(parent);
     if (parentMemObj != nullptr && flags) {
-        auto parentFlags = parentMemObj->getMemoryPropertiesFlags();
+        auto parentFlags = parentMemObj->getFlags();
         /* Check whether flags are compatible with parent. */
         if (isValueSet(flags, CL_MEM_ALLOC_HOST_PTR) ||
             isValueSet(flags, CL_MEM_COPY_HOST_PTR) ||
@@ -67,9 +69,11 @@ bool MemObjHelper::validateMemoryPropertiesForImage(const MemoryPropertiesFlags 
     return validateExtraMemoryProperties(memoryProperties, flags, flagsIntel, context);
 }
 
-AllocationProperties MemObjHelper::getAllocationPropertiesWithImageInfo(uint32_t rootDeviceIndex, ImageInfo &imgInfo, bool allocateMemory, const MemoryPropertiesFlags &memoryProperties, const HardwareInfo &hwInfo) {
-    AllocationProperties allocationProperties{rootDeviceIndex, allocateMemory, imgInfo, GraphicsAllocation::AllocationType::IMAGE};
-    MemoryPropertiesParser::fillPoliciesInProperties(allocationProperties, memoryProperties, hwInfo);
+AllocationProperties MemObjHelper::getAllocationPropertiesWithImageInfo(uint32_t rootDeviceIndex, ImageInfo &imgInfo, bool allocateMemory,
+                                                                        const MemoryProperties &memoryProperties, const HardwareInfo &hwInfo, DeviceBitfield subDevicesBitfieldParam) {
+    auto deviceBitfield = MemoryPropertiesHelper::adjustDeviceBitfield(memoryProperties, subDevicesBitfieldParam);
+    AllocationProperties allocationProperties{rootDeviceIndex, allocateMemory, imgInfo, GraphicsAllocation::AllocationType::IMAGE, deviceBitfield};
+    MemoryPropertiesHelper::fillPoliciesInProperties(allocationProperties, memoryProperties, hwInfo);
     return allocationProperties;
 }
 
@@ -96,7 +100,7 @@ const uint64_t MemObjHelper::commonFlags = extraFlags | CL_MEM_READ_WRITE | CL_M
 const uint64_t MemObjHelper::commonFlagsIntel = extraFlagsIntel | CL_MEM_LOCALLY_UNCACHED_RESOURCE |
                                                 CL_MEM_LOCALLY_UNCACHED_SURFACE_STATE_RESOURCE | CL_MEM_48BIT_RESOURCE_INTEL;
 
-const uint64_t MemObjHelper::validFlagsForBuffer = commonFlags | CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL;
+const uint64_t MemObjHelper::validFlagsForBuffer = commonFlags | CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL | CL_MEM_FORCE_SHARED_PHYSICAL_MEMORY_INTEL;
 
 const uint64_t MemObjHelper::validFlagsForBufferIntel = commonFlagsIntel | CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL;
 

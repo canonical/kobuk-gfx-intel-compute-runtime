@@ -5,10 +5,10 @@
  *
  */
 
-#include "opencl/source/helpers/memory_properties_flags_helpers.h"
+#include "opencl/source/helpers/memory_properties_helpers.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/mem_obj/image.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "test.h"
 
@@ -16,7 +16,7 @@ using namespace NEO;
 
 static const unsigned int testImageDimensions = 32;
 
-class CreateImage1DTest : public DeviceFixture,
+class CreateImage1DTest : public ClDeviceFixture,
                           public testing::TestWithParam<uint32_t /*cl_mem_object_type*/> {
   public:
     CreateImage1DTest() {
@@ -24,7 +24,7 @@ class CreateImage1DTest : public DeviceFixture,
 
   protected:
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
         types = GetParam();
 
         // clang-format off
@@ -58,7 +58,7 @@ class CreateImage1DTest : public DeviceFixture,
             clReleaseMemObject(imageDesc.mem_object);
         }
         delete context;
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     cl_image_format imageFormat;
@@ -72,10 +72,10 @@ typedef CreateImage1DTest CreateImage1DType;
 
 HWTEST_P(CreateImage1DType, validTypes) {
     cl_mem_flags flags = CL_MEM_READ_WRITE;
-    auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat, pClDevice->getHardwareInfo().capabilityTable.clVersionSupport);
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat, pClDevice->getHardwareInfo().capabilityTable.supportsOcl21Features);
     auto image = Image::create(
         context,
-        MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0),
+        MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, pDevice),
         flags,
         0,
         surfaceFormat,

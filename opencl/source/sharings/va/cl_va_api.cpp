@@ -49,7 +49,7 @@ clCreateFromVA_APIMediaSurfaceINTEL(cl_context context, cl_mem_flags flags, VASu
         return nullptr;
     }
 
-    image = VASurface::createSharedVaSurface(pContext, pContext->getSharing<VASharingFunctions>(), flags, surface, plane, errcodeRet);
+    image = VASurface::createSharedVaSurface(pContext, pContext->getSharing<VASharingFunctions>(), flags, 0, surface, plane, errcodeRet);
     DBG_LOG_INPUTS("image", image);
     return image;
 }
@@ -128,6 +128,9 @@ clEnqueueReleaseVA_APIMediaSurfacesINTEL(cl_command_queue commandQueue,
     if (status == CL_SUCCESS) {
         status = pCommandQueue->enqueueReleaseSharedObjects(numObjects, memObjects, numEventsInWaitList,
                                                             eventWaitList, event, CL_COMMAND_RELEASE_VA_API_MEDIA_SURFACES_INTEL);
+        if (!pCommandQueue->getContext().getInteropUserSyncEnabled()) {
+            pCommandQueue->finish();
+        }
     }
     return status;
 }

@@ -10,12 +10,12 @@
 #include "shared/source/helpers/array_count.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/event/user_event.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/mem_obj/image.h"
-#include "opencl/source/platform/platform.h"
 #include "opencl/source/sharings/gl/cl_gl_api_intel.h"
 #include "opencl/source/sharings/gl/gl_arb_sync_event.h"
 #include "opencl/source/sharings/gl/gl_buffer.h"
@@ -31,14 +31,16 @@
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/mocks/mock_event.h"
 #include "opencl/test/unit_test/mocks/mock_gmm_resource_info.h"
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
-#include "opencl/test/unit_test/mocks/mock_platform.h"
 #include "test.h"
 
-#include "gl/gl_sharing_os.h"
+#include "gl_types.h"
+
+namespace NEO {
+extern uint32_t numRootDevicesToEnum;
+}
 
 using namespace NEO;
 bool MockGLSharingFunctions::SharingEnabled = false;
@@ -46,6 +48,7 @@ bool MockGLSharingFunctions::SharingEnabled = false;
 class glSharingTests : public ::testing::Test {
   public:
     void SetUp() override {
+        rootDeviceIndex = context.getDevice(0)->getRootDeviceIndex();
         mockGlSharingFunctions = mockGlSharing->sharingFunctions.release();
         context.setSharingFunctions(mockGlSharingFunctions);
 
@@ -54,6 +57,7 @@ class glSharingTests : public ::testing::Test {
         mockGlSharing->uploadDataToBufferInfo();
     }
 
+    uint32_t rootDeviceIndex;
     MockContext context;
     std::unique_ptr<MockGlSharing> mockGlSharing = std::make_unique<MockGlSharing>();
     GlSharingFunctionsMock *mockGlSharingFunctions;
@@ -76,15 +80,15 @@ TEST_F(glSharingTests, givenMockGlWhenGlBufferIsCreatedThenMemObjectHasGlHandler
     auto glBuffer = GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, bufferId, &retVal);
 
     EXPECT_NE(nullptr, glBuffer);
-    EXPECT_NE(nullptr, glBuffer->getGraphicsAllocation());
+    EXPECT_NE(nullptr, glBuffer->getGraphicsAllocation(rootDeviceIndex));
     EXPECT_EQ(CL_SUCCESS, retVal);
-    EXPECT_EQ(4096u, glBuffer->getGraphicsAllocation()->getUnderlyingBufferSize());
+    EXPECT_EQ(4096u, glBuffer->getGraphicsAllocation(rootDeviceIndex)->getUnderlyingBufferSize());
     EXPECT_EQ(1, mockGlSharing->dllParam->getParam("GLAcquireSharedBufferCalled"));
 
     EXPECT_EQ(bufferId, mockGlSharing->dllParam->getBufferInfo().bufferName);
     EXPECT_EQ(4096u, glBuffer->getSize());
     size_t flagsExpected = CL_MEM_READ_WRITE;
-    EXPECT_EQ(flagsExpected, glBuffer->getMemoryPropertiesFlags());
+    EXPECT_EQ(flagsExpected, glBuffer->getFlags());
 
     auto handler = glBuffer->peekSharingHandler();
     ASSERT_NE(nullptr, handler);
@@ -156,7 +160,7 @@ TEST_F(glSharingTests, givenContextAnd32BitAddressingWhenClCreateFromGlBufferIsC
     ASSERT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, glBuffer);
 
-    EXPECT_TRUE(castToObject<Buffer>(glBuffer)->getGraphicsAllocation()->is32BitAllocation());
+    EXPECT_TRUE(castToObject<Buffer>(glBuffer)->getGraphicsAllocation(rootDeviceIndex)->is32BitAllocation());
 
     retVal = clReleaseMemObject(glBuffer);
     EXPECT_EQ(CL_SUCCESS, retVal);
@@ -215,14 +219,14 @@ TEST_F(glSharingTests, givenClGLBufferWhenItIsAcquiredThenAcuqireCountIsIncremen
     auto memObject = castToObject<Buffer>(glBuffer);
     EXPECT_FALSE(memObject->isMemObjZeroCopy());
 
-    EXPECT_FALSE(memObject->isReadWriteOnCpuAllowed());
-    auto currentGraphicsAllocation = memObject->getGraphicsAllocation();
+    EXPECT_FALSE(memObject->isReadWriteOnCpuAllowed(rootDeviceIndex));
+    auto currentGraphicsAllocation = memObject->getGraphicsAllocation(rootDeviceIndex);
 
-    memObject->peekSharingHandler()->acquire(memObject);
+    memObject->peekSharingHandler()->acquire(memObject, rootDeviceIndex);
     EXPECT_EQ(2, mockGlSharing->dllParam->getParam("GLAcquireSharedBufferCalled"));
     EXPECT_EQ(1, mockGlSharing->dllParam->getParam("GLGetCurrentContextCalled"));
 
-    auto currentGraphicsAllocation2 = memObject->getGraphicsAllocation();
+    auto currentGraphicsAllocation2 = memObject->getGraphicsAllocation(rootDeviceIndex);
 
     EXPECT_EQ(currentGraphicsAllocation2, currentGraphicsAllocation);
 
@@ -235,16 +239,16 @@ TEST_F(glSharingTests, givenClGLBufferWhenItIsAcquiredTwiceThenAcuqireIsNotCalle
     auto glBuffer = clCreateFromGLBuffer(&context, 0, bufferId, &retVal);
     auto memObject = castToObject<MemObj>(glBuffer);
 
-    memObject->peekSharingHandler()->acquire(memObject);
+    memObject->peekSharingHandler()->acquire(memObject, context.getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(2, mockGlSharing->dllParam->getParam("GLAcquireSharedBufferCalled"));
     EXPECT_EQ(1, mockGlSharing->dllParam->getParam("GLGetCurrentContextCalled"));
 
-    memObject->peekSharingHandler()->acquire(memObject);
+    memObject->peekSharingHandler()->acquire(memObject, context.getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(2, mockGlSharing->dllParam->getParam("GLAcquireSharedBufferCalled"));
     EXPECT_EQ(1, mockGlSharing->dllParam->getParam("GLGetCurrentContextCalled"));
 
-    memObject->peekSharingHandler()->release(memObject);
-    memObject->peekSharingHandler()->release(memObject);
+    memObject->peekSharingHandler()->release(memObject, context.getDevice(0)->getRootDeviceIndex());
+    memObject->peekSharingHandler()->release(memObject, context.getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(1, mockGlSharing->dllParam->getParam("GLGetCurrentContextCalled"));
 
     retVal = clReleaseMemObject(glBuffer);
@@ -253,6 +257,7 @@ TEST_F(glSharingTests, givenClGLBufferWhenItIsAcquiredTwiceThenAcuqireIsNotCalle
 
 TEST_F(glSharingTests, givenClGLBufferWhenItIsCreatedAndGmmIsAvailableThenItIsUsedInGraphicsAllocation) {
     void *ptr = (void *)0x1000;
+    auto rootDeviceIndex = context.getDevice(0)->getRootDeviceIndex();
     auto gmm = new Gmm(context.getDevice(0)->getGmmClientContext(), ptr, 4096u, false);
 
     mockGlSharing->m_bufferInfoOutput.pGmmResInfo = gmm->gmmResourceInfo->peekHandle();
@@ -262,7 +267,7 @@ TEST_F(glSharingTests, givenClGLBufferWhenItIsCreatedAndGmmIsAvailableThenItIsUs
     auto glBuffer = clCreateFromGLBuffer(&context, 0, bufferId, &retVal);
     auto memObject = castToObject<MemObj>(glBuffer);
 
-    auto graphicsAllocation = memObject->getGraphicsAllocation();
+    auto graphicsAllocation = memObject->getGraphicsAllocation(rootDeviceIndex);
     ASSERT_NE(nullptr, graphicsAllocation->getDefaultGmm());
     EXPECT_NE(nullptr, graphicsAllocation->getDefaultGmm()->gmmResourceInfo->peekHandle());
 
@@ -276,13 +281,13 @@ TEST_F(glSharingTests, givenClGLBufferWhenItIsAcquiredTwiceAfterReleaseThenAcuqi
     auto glBuffer = clCreateFromGLBuffer(&context, 0, bufferId, &retVal);
     auto memObject = castToObject<MemObj>(glBuffer);
 
-    memObject->peekSharingHandler()->acquire(memObject);
+    memObject->peekSharingHandler()->acquire(memObject, context.getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(2, mockGlSharing->dllParam->getParam("GLAcquireSharedBufferCalled"));
     EXPECT_EQ(1, mockGlSharing->dllParam->getParam("GLGetCurrentContextCalled"));
 
-    memObject->peekSharingHandler()->release(memObject);
+    memObject->peekSharingHandler()->release(memObject, context.getDevice(0)->getRootDeviceIndex());
 
-    memObject->peekSharingHandler()->acquire(memObject);
+    memObject->peekSharingHandler()->acquire(memObject, context.getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(3, mockGlSharing->dllParam->getParam("GLAcquireSharedBufferCalled"));
     EXPECT_EQ(2, mockGlSharing->dllParam->getParam("GLGetCurrentContextCalled"));
 
@@ -294,30 +299,31 @@ TEST_F(glSharingTests, givenClGLBufferWhenItIsAcquireCountIsDecrementedToZeroThe
     std::unique_ptr<Buffer> buffer(GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, bufferId, nullptr));
     auto sharingHandler = buffer->peekSharingHandler();
 
-    sharingHandler->acquire(buffer.get());
-    sharingHandler->acquire(buffer.get());
+    sharingHandler->acquire(buffer.get(), context.getDevice(0)->getRootDeviceIndex());
+    sharingHandler->acquire(buffer.get(), context.getDevice(0)->getRootDeviceIndex());
 
-    sharingHandler->release(buffer.get());
+    sharingHandler->release(buffer.get(), context.getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(0, mockGlSharing->dllParam->getParam("GLReleaseSharedBufferCalled"));
 
-    sharingHandler->release(buffer.get());
+    sharingHandler->release(buffer.get(), context.getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(1, mockGlSharing->dllParam->getParam("GLReleaseSharedBufferCalled"));
     EXPECT_EQ(bufferId, mockGlSharing->dllParam->getBufferInfo().bufferName);
 }
 
 TEST_F(glSharingTests, givenClGLBufferWhenItIsAcquiredWithDifferentOffsetThenGraphicsAllocationContainsLatestOffsetValue) {
     auto retVal = CL_SUCCESS;
+    auto rootDeviceIndex = context.getDevice(0)->getRootDeviceIndex();
     auto glBuffer = clCreateFromGLBuffer(&context, 0, bufferId, &retVal);
     auto memObject = castToObject<MemObj>(glBuffer);
 
-    auto graphicsAddress = memObject->getGraphicsAllocation()->getGpuAddress();
+    auto graphicsAddress = memObject->getGraphicsAllocation(rootDeviceIndex)->getGpuAddress();
 
     mockGlSharing->m_bufferInfoOutput.bufferOffset = 50u;
     mockGlSharing->uploadDataToBufferInfo();
 
-    memObject->peekSharingHandler()->acquire(memObject);
+    memObject->peekSharingHandler()->acquire(memObject, rootDeviceIndex);
 
-    auto offsetedGraphicsAddress = memObject->getGraphicsAllocation()->getGpuAddress();
+    auto offsetedGraphicsAddress = memObject->getGraphicsAllocation(rootDeviceIndex)->getGpuAddress();
 
     EXPECT_EQ(offsetedGraphicsAddress, graphicsAddress + mockGlSharing->m_bufferInfoOutput.bufferOffset);
 
@@ -379,11 +385,11 @@ TEST_F(glSharingTests, givenEnabledAsyncEventsHandlerWhenAcquireGlObjectsIsCalle
     DebugManager.flags.EnableAsyncEventsHandler.set(true);
 
     auto handler = new MockHandler(false);
-    auto oldHandler = NEO::platform()->setAsyncEventsHandler(std::unique_ptr<AsyncEventsHandler>(handler));
+    context.getAsyncEventsHandlerUniquePtr().reset(handler);
 
     struct ExternallySynchronizedEvent : Event {
-        ExternallySynchronizedEvent()
-            : Event(nullptr, 0, 0, 0) {
+        ExternallySynchronizedEvent(Context *ctx)
+            : Event(ctx, nullptr, 0, 0, 0) {
         }
 
         bool isExternallySynchronized() const override {
@@ -401,7 +407,7 @@ TEST_F(glSharingTests, givenEnabledAsyncEventsHandlerWhenAcquireGlObjectsIsCalle
         uint32_t updateCount = 0;
     };
 
-    auto *event = new ExternallySynchronizedEvent;
+    auto *event = new ExternallySynchronizedEvent(&context);
     cl_event clEvent = static_cast<cl_event>(event);
 
     auto commandQueue = clCreateCommandQueue(&context, context.getDevice(0), 0, nullptr);
@@ -429,8 +435,6 @@ TEST_F(glSharingTests, givenEnabledAsyncEventsHandlerWhenAcquireGlObjectsIsCalle
     EXPECT_EQ(updateCount, event->updateCount);
 
     event->release();
-
-    NEO::platform()->setAsyncEventsHandler(std::move(oldHandler));
 }
 
 TEST_F(glSharingTests, givenDisabledAsyncEventsHandlerWhenAcquireGlObjectsIsCalledWithIncompleteExternallySynchronizedEventThenItIsNotAddedToAsyncEventsHandler) {
@@ -438,7 +442,7 @@ TEST_F(glSharingTests, givenDisabledAsyncEventsHandlerWhenAcquireGlObjectsIsCall
     DebugManager.flags.EnableAsyncEventsHandler.set(false);
 
     auto handler = new MockHandler(false);
-    auto oldHandler = NEO::platform()->setAsyncEventsHandler(std::unique_ptr<AsyncEventsHandler>(handler));
+    context.getAsyncEventsHandlerUniquePtr().reset(handler);
 
     struct ExternallySynchronizedEvent : Event {
         ExternallySynchronizedEvent()
@@ -464,8 +468,6 @@ TEST_F(glSharingTests, givenDisabledAsyncEventsHandlerWhenAcquireGlObjectsIsCall
     EXPECT_TRUE(handler->peekIsRegisterListEmpty());
 
     event->release();
-
-    NEO::platform()->setAsyncEventsHandler(std::move(oldHandler));
 }
 
 TEST_F(glSharingTests, givenEnabledAsyncEventsHandlerWhenAcquireGlObjectsIsCalledWithIncompleteButNotExternallySynchronizedEventThenItIsNotAddedToAsyncEventsHandler) {
@@ -473,7 +475,7 @@ TEST_F(glSharingTests, givenEnabledAsyncEventsHandlerWhenAcquireGlObjectsIsCalle
     DebugManager.flags.EnableAsyncEventsHandler.set(false);
 
     auto handler = new MockHandler(false);
-    auto oldHandler = NEO::platform()->setAsyncEventsHandler(std::unique_ptr<AsyncEventsHandler>(handler));
+    context.getAsyncEventsHandlerUniquePtr().reset(handler);
 
     auto *event = new UserEvent;
     cl_event clEvent = static_cast<cl_event>(event);
@@ -489,8 +491,6 @@ TEST_F(glSharingTests, givenEnabledAsyncEventsHandlerWhenAcquireGlObjectsIsCalle
     EXPECT_TRUE(handler->peekIsRegisterListEmpty());
 
     event->release();
-
-    NEO::platform()->setAsyncEventsHandler(std::move(oldHandler));
 }
 
 TEST_F(glSharingTests, givenHwCommandQueueWhenReleaseIsCalledWithIncorrectWaitlistThenReturnError) {
@@ -645,7 +645,7 @@ TEST(glSharingBasicTest, GivenSharingFunctionsWhenItIsConstructedThenOglContextF
     GLType GLHDCType = 0;
     GLContext GLHGLRCHandle = 0;
     GLDisplay GLHDCHandle = 0;
-    glDllHelper getDllParam;
+    GlDllHelper getDllParam;
 
     GlSharingFunctionsMock glSharingFunctions(GLHDCType, GLHGLRCHandle, GLHGLRCHandle, GLHDCHandle);
     EXPECT_EQ(1, getDllParam.getGLSetSharedOCLContextStateReturnedValue());
@@ -777,7 +777,7 @@ TEST(glSharingBasicTest, givenNumEntriesLowerThanSupportedFormatsWhenGettingSupp
 
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    EXPECT_EQ(static_cast<uint32_t>(GlSharing::gLToCLFormats.size()), numImageFormats);
+    EXPECT_EQ(static_cast<uint32_t>(GlSharing::glToCLFormats.size()), numImageFormats);
     EXPECT_NE(0u, glFormats[0]);
     EXPECT_EQ(0u, glFormats[1]);
     EXPECT_EQ(0u, glFormats[2]);
@@ -795,10 +795,10 @@ TEST(glSharingBasicTest, givenCorrectFlagsWhenGettingSupportedFormatsThenCorrect
         auto result = glSharingFunctions.getSupportedFormats(flag, image_type, arrayCount(glFormats), glFormats, &numImageFormats);
 
         EXPECT_EQ(CL_SUCCESS, result);
-        EXPECT_EQ(static_cast<uint32_t>(GlSharing::gLToCLFormats.size()), numImageFormats);
+        EXPECT_EQ(static_cast<uint32_t>(GlSharing::glToCLFormats.size()), numImageFormats);
 
         for (uint32_t formatIndex = 0; formatIndex < arrayCount(glFormats); formatIndex++) {
-            EXPECT_NE(GlSharing::gLToCLFormats.end(), GlSharing::gLToCLFormats.find(glFormats[formatIndex]));
+            EXPECT_NE(GlSharing::glToCLFormats.end(), GlSharing::glToCLFormats.find(glFormats[formatIndex]));
         }
     }
 }
@@ -815,10 +815,10 @@ TEST(glSharingBasicTest, givenSupportedImageTypesWhenGettingSupportedFormatsThen
         auto result = glSharingFunctions.getSupportedFormats(flags, image_type, arrayCount(glFormats), glFormats, &numImageFormats);
 
         EXPECT_EQ(CL_SUCCESS, result);
-        EXPECT_EQ(static_cast<uint32_t>(GlSharing::gLToCLFormats.size()), numImageFormats);
+        EXPECT_EQ(static_cast<uint32_t>(GlSharing::glToCLFormats.size()), numImageFormats);
 
         for (auto glFormat : glFormats) {
-            EXPECT_NE(GlSharing::gLToCLFormats.end(), GlSharing::gLToCLFormats.find(glFormat));
+            EXPECT_NE(GlSharing::glToCLFormats.end(), GlSharing::glToCLFormats.find(glFormat));
         }
     }
 }
@@ -832,7 +832,7 @@ TEST(glSharingBasicTest, givenZeroNumEntriesWhenGettingSupportedFormatsThenNumFo
     auto result = glSharingFunctions.getSupportedFormats(flags, image_type, 0, nullptr, &numImageFormats);
 
     EXPECT_EQ(CL_SUCCESS, result);
-    EXPECT_EQ(static_cast<uint32_t>(GlSharing::gLToCLFormats.size()), numImageFormats);
+    EXPECT_EQ(static_cast<uint32_t>(GlSharing::glToCLFormats.size()), numImageFormats);
 }
 
 TEST(glSharingBasicTest, givenNullNumImageFormatsWhenGettingSupportedFormatsThenNumFormatsIsNotDereferenced) {
@@ -877,6 +877,9 @@ TEST_F(glSharingTests, givenContextWhenCreateFromSharedBufferThenSharedImageIsRe
     ASSERT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, glBuffer);
     auto parentbBuffer = castToObject<Buffer>(glBuffer);
+
+    auto hardwareInfo = context.getDevice(0)->getRootDeviceEnvironment().getMutableHardwareInfo();
+    hardwareInfo->capabilityTable.supportsImages = true;
 
     cl_image_format format = {CL_RGBA, CL_FLOAT};
     cl_image_desc image_desc = {CL_MEM_OBJECT_IMAGE1D_BUFFER, 1, 1, 1, 1, 0, 0, 0, 0, {glBuffer}};
@@ -1088,7 +1091,7 @@ TEST(glSharingContextSwitch, givenZeroCurrentContextWhenSwitchAttemptedThenMakeS
 
 TEST(glSharingContextSwitch, givenSharingFunctionsWhenGlDeleteContextIsNotPresentThenItIsNotCalled) {
     auto glSharingFunctions = new GLSharingFunctionsWindows();
-    glDllHelper dllParam;
+    GlDllHelper dllParam;
     auto currentGlDeleteContextCalledCount = dllParam.getParam("GLDeleteContextCalled");
     delete glSharingFunctions;
     EXPECT_EQ(currentGlDeleteContextCalledCount, dllParam.getParam("GLDeleteContextCalled"));
@@ -1106,8 +1109,8 @@ HWTEST_F(glSharingTests, givenSyncObjectWhenCreateEventIsCalledThenCreateGLSyncO
     auto eventObj = castToObject<Event>(event);
     EXPECT_TRUE(eventObj->getCommandType() == CL_COMMAND_GL_FENCE_SYNC_OBJECT_KHR);
     EXPECT_TRUE(eventObj->peekExecutionStatus() == CL_SUBMITTED);
-    EXPECT_EQ(CompletionStamp::levelNotReady, eventObj->taskLevel);
-    EXPECT_EQ(CompletionStamp::levelNotReady, eventObj->getTaskLevel());
+    EXPECT_EQ(CompletionStamp::notReady, eventObj->taskLevel);
+    EXPECT_EQ(CompletionStamp::notReady, eventObj->getTaskLevel());
     EXPECT_EQ(1, mockGlSharing->dllParam->getParam("GLRetainSyncCalled"));
 
     eventObj->setStatus(CL_COMPLETE);
@@ -1287,8 +1290,8 @@ TEST_F(glSharingTests, whenGetGlContextHandleIsCalledThenProperHandleIsReturned)
 
 TEST_F(glSharingTests, givenClGLBufferWhenCreatedThenSharedBufferAllocatoinTypeIsSet) {
     std::unique_ptr<Buffer> buffer(GlBuffer::createSharedGlBuffer(&context, CL_MEM_READ_WRITE, bufferId, nullptr));
-    ASSERT_NE(nullptr, buffer->getGraphicsAllocation());
-    EXPECT_EQ(GraphicsAllocation::AllocationType::SHARED_BUFFER, buffer->getGraphicsAllocation()->getAllocationType());
+    ASSERT_NE(nullptr, buffer->getGraphicsAllocation(rootDeviceIndex));
+    EXPECT_EQ(GraphicsAllocation::AllocationType::SHARED_BUFFER, buffer->getGraphicsAllocation(rootDeviceIndex)->getAllocationType());
 }
 
 using clGetSupportedGLTextureFormatsINTELTests = glSharingTests;
@@ -1312,6 +1315,30 @@ TEST_F(clGetSupportedGLTextureFormatsINTELTests, givenValidInputsWhenGettingForm
     EXPECT_NE(0u, numFormats);
 
     for (uint32_t i = 0; i < glFormatsCount; i++) {
-        EXPECT_NE(GlSharing::gLToCLFormats.end(), GlSharing::gLToCLFormats.find(glFormats[i]));
+        EXPECT_NE(GlSharing::glToCLFormats.end(), GlSharing::glToCLFormats.find(glFormats[i]));
+    }
+}
+
+TEST(GlSharingAdapterLuid, whenInitializingGlSharingThenProperAdapterLuidIsObtained) {
+    LUID expectedLuid;
+    expectedLuid.HighPart = 0x1234;
+    expectedLuid.LowPart = 0x1;
+
+    {
+        VariableBackup<uint32_t> backup{&numRootDevicesToEnum, 0u};
+        MockGLSharingFunctions glSharing;
+        auto luid = glSharing.getAdapterLuid();
+
+        EXPECT_EQ(0u, luid.HighPart);
+        EXPECT_EQ(0u, luid.LowPart);
+    }
+
+    {
+        VariableBackup<uint32_t> backup{&numRootDevicesToEnum, 3u};
+        MockGLSharingFunctions glSharing;
+        auto luid = glSharing.getAdapterLuid();
+
+        EXPECT_EQ(expectedLuid.HighPart, luid.HighPart);
+        EXPECT_EQ(expectedLuid.LowPart, luid.LowPart);
     }
 }

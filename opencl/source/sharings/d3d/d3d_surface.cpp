@@ -14,7 +14,7 @@
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/context/context.h"
 #include "opencl/source/helpers/gmm_types_converter.h"
-#include "opencl/source/helpers/memory_properties_flags_helpers.h"
+#include "opencl/source/helpers/memory_properties_helpers.h"
 #include "opencl/source/mem_obj/image.h"
 #include "opencl/source/mem_obj/mem_obj_helper.h"
 
@@ -71,7 +71,7 @@ Image *D3DSurface::create(Context *context, cl_dx9_surface_info_khr *surfaceInfo
     }
 
     imgInfo.plane = GmmTypesConverter::convertPlane(imagePlane);
-    auto *clSurfaceFormat = Image::getSurfaceFormatFromTable(flags, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+    auto *clSurfaceFormat = Image::getSurfaceFormatFromTable(flags, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
     imgInfo.surfaceFormat = &clSurfaceFormat->surfaceFormat;
 
     bool isSharedResource = false;
@@ -81,7 +81,12 @@ Image *D3DSurface::create(Context *context, cl_dx9_surface_info_khr *surfaceInfo
     GraphicsAllocation *alloc = nullptr;
     if (surfaceInfo->shared_handle) {
         isSharedResource = true;
-        AllocationProperties allocProperties(rootDeviceIndex, false, 0u, GraphicsAllocation::AllocationType::SHARED_IMAGE, false);
+        AllocationProperties allocProperties(rootDeviceIndex,
+                                             false, // allocateMemory
+                                             0u,    // size
+                                             GraphicsAllocation::AllocationType::SHARED_IMAGE,
+                                             false, // isMultiStorageAllocation
+                                             context->getDeviceBitfieldForAllocation());
         alloc = context->getMemoryManager()->createGraphicsAllocationFromSharedHandle(toOsHandle(surfaceInfo->shared_handle), allocProperties,
                                                                                       false);
         updateImgInfoAndDesc(alloc->getDefaultGmm(), imgInfo, imagePlane, 0u);
@@ -94,8 +99,12 @@ Image *D3DSurface::create(Context *context, cl_dx9_surface_info_khr *surfaceInfo
             imgInfo.imgDesc.imageWidth /= 2;
             imgInfo.imgDesc.imageHeight /= 2;
         }
-        MemoryPropertiesFlags memoryProperties = MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0);
-        AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(rootDeviceIndex, imgInfo, true, memoryProperties, context->getDevice(0)->getHardwareInfo());
+        MemoryProperties memoryProperties =
+            MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice());
+        AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(rootDeviceIndex, imgInfo,
+                                                                                                  true, // allocateMemory
+                                                                                                  memoryProperties, context->getDevice(0)->getHardwareInfo(),
+                                                                                                  context->getDeviceBitfieldForAllocation());
         allocProperties.allocationType = GraphicsAllocation::AllocationType::SHARED_RESOURCE_COPY;
 
         alloc = context->getMemoryManager()->allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
@@ -106,8 +115,10 @@ Image *D3DSurface::create(Context *context, cl_dx9_surface_info_khr *surfaceInfo
     DEBUG_BREAK_IF(!alloc);
 
     auto surface = new D3DSurface(context, surfaceInfo, surfaceStaging, plane, imagePlane, adapterType, isSharedResource, lockable);
+    auto multiGraphicsAllocation = MultiGraphicsAllocation(rootDeviceIndex);
+    multiGraphicsAllocation.addAllocation(alloc);
 
-    return Image::createSharedImage(context, surface, mcsSurfaceInfo, alloc, nullptr, flags, clSurfaceFormat, imgInfo, __GMM_NO_CUBE_MAP, 0, 0);
+    return Image::createSharedImage(context, surface, mcsSurfaceInfo, std::move(multiGraphicsAllocation), nullptr, flags, 0, clSurfaceFormat, imgInfo, __GMM_NO_CUBE_MAP, 0, 0);
 }
 
 void D3DSurface::synchronizeObject(UpdateData &updateData) {
@@ -124,14 +135,15 @@ void D3DSurface::synchronizeObject(UpdateData &updateData) {
         }
 
         auto image = castToObjectOrAbort<Image>(updateData.memObject);
+        auto graphicsAllocation = image->getGraphicsAllocation(updateData.rootDeviceIndex);
         auto sys = lockedRect.pBits;
-        auto gpu = context->getMemoryManager()->lockResource(image->getGraphicsAllocation());
+        auto gpu = context->getMemoryManager()->lockResource(graphicsAllocation);
         auto pitch = static_cast<ULONG>(lockedRect.Pitch);
         auto height = static_cast<ULONG>(image->getImageDesc().image_height);
 
-        image->getGraphicsAllocation()->getDefaultGmm()->resourceCopyBlt(sys, gpu, pitch, height, 1u, imagePlane);
+        graphicsAllocation->getDefaultGmm()->resourceCopyBlt(sys, gpu, pitch, height, 1u, imagePlane);
 
-        context->getMemoryManager()->unlockResource(updateData.memObject->getGraphicsAllocation());
+        context->getMemoryManager()->unlockResource(graphicsAllocation);
 
         if (lockable) {
             sharingFunctions->unlockRect(d3d9Surface);
@@ -144,7 +156,7 @@ void D3DSurface::synchronizeObject(UpdateData &updateData) {
     updateData.synchronizationStatus = SynchronizeStatus::ACQUIRE_SUCCESFUL;
 }
 
-void D3DSurface::releaseResource(MemObj *memObject) {
+void D3DSurface::releaseResource(MemObj *memObject, uint32_t rootDeviceIndex) {
     D3DLOCKED_RECT lockedRect = {};
     auto image = castToObject<Image>(memObject);
     if (!image) {
@@ -160,13 +172,14 @@ void D3DSurface::releaseResource(MemObj *memObject) {
         }
 
         auto sys = lockedRect.pBits;
-        auto gpu = context->getMemoryManager()->lockResource(image->getGraphicsAllocation());
+        auto graphicsAllocation = image->getGraphicsAllocation(rootDeviceIndex);
+        auto gpu = context->getMemoryManager()->lockResource(graphicsAllocation);
         auto pitch = static_cast<ULONG>(lockedRect.Pitch);
         auto height = static_cast<ULONG>(image->getImageDesc().image_height);
 
-        image->getGraphicsAllocation()->getDefaultGmm()->resourceCopyBlt(sys, gpu, pitch, height, 0u, imagePlane);
+        graphicsAllocation->getDefaultGmm()->resourceCopyBlt(sys, gpu, pitch, height, 0u, imagePlane);
 
-        context->getMemoryManager()->unlockResource(memObject->getGraphicsAllocation());
+        context->getMemoryManager()->unlockResource(graphicsAllocation);
 
         if (lockable) {
             sharingFunctions->unlockRect(d3d9Surface);

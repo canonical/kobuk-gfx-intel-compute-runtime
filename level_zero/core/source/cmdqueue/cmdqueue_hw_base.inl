@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/csr_definitions.h"
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/device/device.h"
@@ -27,33 +28,54 @@
 namespace L0 {
 
 template <GFXCORE_FAMILY gfxCoreFamily>
-void CommandQueueHw<gfxCoreFamily>::programGeneralStateBaseAddress(uint64_t gsba, NEO::LinearStream &commandStream) {
+void CommandQueueHw<gfxCoreFamily>::programGeneralStateBaseAddress(uint64_t gsba, bool useLocalMemoryForIndirectHeap, NEO::LinearStream &commandStream) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
 
     PIPE_CONTROL *pcCmd = commandStream.getSpaceForCmd<PIPE_CONTROL>();
-    *pcCmd = GfxFamily::cmdInitPipeControl;
+    PIPE_CONTROL cmd = GfxFamily::cmdInitPipeControl;
 
-    pcCmd->setTextureCacheInvalidationEnable(true);
-    pcCmd->setDcFlushEnable(true);
-    pcCmd->setCommandStreamerStallEnable(true);
+    cmd.setTextureCacheInvalidationEnable(true);
+    cmd.setDcFlushEnable(true);
+    cmd.setCommandStreamerStallEnable(true);
 
-    auto gmmHelper = device->getNEODevice()->getGmmHelper();
+    *pcCmd = cmd;
 
-    NEO::StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(commandStream,
+    NEO::Device *neoDevice = device->getNEODevice();
+    NEO::EncodeWA<GfxFamily>::encodeAdditionalPipelineSelect(*neoDevice, commandStream, true);
+
+    auto pSbaCmd = static_cast<STATE_BASE_ADDRESS *>(commandStream.getSpace(sizeof(STATE_BASE_ADDRESS)));
+    STATE_BASE_ADDRESS sbaCmd;
+
+    NEO::StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(&sbaCmd,
                                                                     nullptr,
                                                                     nullptr,
                                                                     nullptr,
                                                                     gsba,
                                                                     true,
                                                                     (device->getMOCS(true, false) >> 1),
-                                                                    device->getDriverHandle()->getMemoryManager()->getInternalHeapBaseAddress(0),
+                                                                    neoDevice->getMemoryManager()->getInternalHeapBaseAddress(device->getRootDeviceIndex(), useLocalMemoryForIndirectHeap),
                                                                     true,
-                                                                    gmmHelper,
+                                                                    neoDevice->getGmmHelper(),
                                                                     false);
-
+    *pSbaCmd = sbaCmd;
     gsbaInit = true;
+
+    if (device->getL0Debugger()) {
+
+        NEO::Debugger::SbaAddresses sbaAddresses = {};
+        sbaAddresses.BindlessSurfaceStateBaseAddress = sbaCmd.getBindlessSurfaceStateBaseAddress();
+        sbaAddresses.DynamicStateBaseAddress = sbaCmd.getDynamicStateBaseAddress();
+        sbaAddresses.GeneralStateBaseAddress = sbaCmd.getGeneralStateBaseAddress();
+        sbaAddresses.IndirectObjectBaseAddress = sbaCmd.getIndirectObjectBaseAddress();
+        sbaAddresses.InstructionBaseAddress = sbaCmd.getInstructionBaseAddress();
+        sbaAddresses.SurfaceStateBaseAddress = sbaCmd.getSurfaceStateBaseAddress();
+
+        device->getL0Debugger()->programSbaTrackingCommands(commandStream, sbaAddresses);
+    }
+
+    NEO::EncodeWA<GfxFamily>::encodeAdditionalPipelineSelect(*device->getNEODevice(), commandStream, false);
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
@@ -62,7 +84,11 @@ size_t CommandQueueHw<gfxCoreFamily>::estimateStateBaseAddressCmdSize() {
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
 
-    constexpr size_t size = sizeof(STATE_BASE_ADDRESS) + sizeof(PIPE_CONTROL);
+    size_t size = sizeof(STATE_BASE_ADDRESS) + sizeof(PIPE_CONTROL) + NEO::EncodeWA<GfxFamily>::getAdditionalPipelineSelectSize(*device->getNEODevice());
+
+    if (device->getL0Debugger() != nullptr) {
+        size += device->getL0Debugger()->getSbaTrackingCommandsSize(1);
+    }
     return size;
 }
 

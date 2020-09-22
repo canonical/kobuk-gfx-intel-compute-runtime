@@ -9,12 +9,13 @@
 #include "shared/source/command_stream/preemption.h"
 #include "shared/source/device/device.h"
 #include "shared/source/helpers/aligned_memory.h"
-#include "shared/source/helpers/hw_cmds.h"
 #include "shared/source/helpers/preamble.h"
+#include "shared/source/helpers/register_offsets.h"
 
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/kernel/kernel.h"
 
+#include "hw_cmds.h"
 #include "reg_configs_common.h"
 
 #include <cstddef>
@@ -31,11 +32,6 @@ size_t PreambleHelper<GfxFamily>::getThreadArbitrationCommandsSize() {
 }
 
 template <typename GfxFamily>
-uint32_t PreambleHelper<GfxFamily>::getDefaultThreadArbitrationPolicy() {
-    return 0;
-}
-
-template <typename GfxFamily>
 void PreambleHelper<GfxFamily>::programGenSpecificPreambleWorkArounds(LinearStream *pCommandStream, const HardwareInfo &hwInfo) {
 }
 
@@ -46,6 +42,22 @@ void PreambleHelper<GfxFamily>::programPerDssBackedBuffer(LinearStream *pCommand
 template <typename GfxFamily>
 size_t PreambleHelper<GfxFamily>::getPerDssBackedBufferCommandsSize(const HardwareInfo &hwInfo) {
     return 0;
+}
+
+template <typename GfxFamily>
+void PreambleHelper<GfxFamily>::programSemaphoreDelay(LinearStream *pCommandStream) {
+    if (DebugManager.flags.ForceSemaphoreDelayBetweenWaits.get() > -1) {
+        uint32_t valueOfNewSemaphoreDelay = DebugManager.flags.ForceSemaphoreDelayBetweenWaits.get();
+        LriHelper<GfxFamily>::program(pCommandStream,
+                                      SEMA_WAIT_POLL,
+                                      valueOfNewSemaphoreDelay,
+                                      true);
+    };
+}
+
+template <typename GfxFamily>
+size_t PreambleHelper<GfxFamily>::getSemaphoreDelayCommandSize() {
+    return sizeof(MI_LOAD_REGISTER_IMM);
 }
 
 template <typename GfxFamily>
@@ -79,6 +91,7 @@ void PreambleHelper<GfxFamily>::programPreamble(LinearStream *pCommandStream, De
     if (perDssBackedBuffer != nullptr) {
         programPerDssBackedBuffer(pCommandStream, device.getHardwareInfo(), perDssBackedBuffer);
     }
+    programSemaphoreDelay(pCommandStream);
 }
 
 template <typename GfxFamily>
@@ -88,10 +101,15 @@ void PreambleHelper<GfxFamily>::programPreemption(LinearStream *pCommandStream, 
 
 template <typename GfxFamily>
 void PreambleHelper<GfxFamily>::programKernelDebugging(LinearStream *pCommandStream) {
-    LriHelper<GfxFamily>::program(pCommandStream, DebugModeRegisterOffset<GfxFamily>::registerOffset,
-                                  DebugModeRegisterOffset<GfxFamily>::debugEnabledValue);
-    LriHelper<GfxFamily>::program(pCommandStream, TdDebugControlRegisterOffset::registerOffset,
-                                  TdDebugControlRegisterOffset::debugEnabledValue);
+    LriHelper<GfxFamily>::program(pCommandStream,
+                                  DebugModeRegisterOffset<GfxFamily>::registerOffset,
+                                  DebugModeRegisterOffset<GfxFamily>::debugEnabledValue,
+                                  false);
+
+    LriHelper<GfxFamily>::program(pCommandStream,
+                                  TdDebugControlRegisterOffset::registerOffset,
+                                  TdDebugControlRegisterOffset::debugEnabledValue,
+                                  false);
 }
 
 template <typename GfxFamily>

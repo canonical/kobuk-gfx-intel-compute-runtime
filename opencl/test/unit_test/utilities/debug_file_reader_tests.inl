@@ -16,7 +16,6 @@
 #include <string>
 
 using namespace NEO;
-using namespace std;
 
 class TestSettingsFileReader : public SettingsFileReader {
   public:
@@ -26,6 +25,11 @@ class TestSettingsFileReader : public SettingsFileReader {
     }
 
     ~TestSettingsFileReader() override {
+    }
+
+    bool hasSetting(const char *settingName) {
+        std::map<std::string, std::string>::iterator it = settingStringMap.find(std::string(settingName));
+        return (it != settingStringMap.end());
     }
 
     size_t getStringSettingsCount() {
@@ -39,7 +43,7 @@ class TestSettingsFileReader : public SettingsFileReader {
 const char *TestSettingsFileReader::testPath = "./test_files/igdrcl.config";
 const char *TestSettingsFileReader::stringTestPath = "./test_files/igdrcl_string.config";
 
-TEST(SettingsFileReader, CreateFileReaderWithoutFile) {
+TEST(SettingsFileReader, GivenFilesDoesNotExistWhenCreatingFileReaderThenCreationSucceeds) {
     bool settingsFileExists = fileExists(SettingsReader::settingsFileName);
 
     // if settings file exists, remove it
@@ -48,20 +52,20 @@ TEST(SettingsFileReader, CreateFileReaderWithoutFile) {
     }
 
     // Use current location for file read
-    std::unique_ptr<TestSettingsFileReader> reader = unique_ptr<TestSettingsFileReader>(new TestSettingsFileReader());
+    auto reader = std::make_unique<TestSettingsFileReader>();
     ASSERT_NE(nullptr, reader);
 
     EXPECT_EQ(0u, reader->getStringSettingsCount());
 }
 
-TEST(SettingsFileReader, GetStringSettingFromFile) {
+TEST(SettingsFileReader, WhenGettingSettingThenCorrectStringValueIsReturned) {
     // Use test settings file
-    std::unique_ptr<TestSettingsFileReader> reader = unique_ptr<TestSettingsFileReader>(new TestSettingsFileReader(TestSettingsFileReader::stringTestPath));
+    auto reader = std::make_unique<TestSettingsFileReader>(TestSettingsFileReader::stringTestPath);
     ASSERT_NE(nullptr, reader);
 
-    string retValue;
+    std::string retValue;
     // StringTestKey is defined in file: unit_tests\helpers\test_debug_variables.inl
-    string returnedStringValue = reader->getSetting("StringTestKey", retValue);
+    std::string returnedStringValue = reader->getSetting("StringTestKey", retValue);
 
     // "Test Value" is a value that should be read from file defined in stringTestPath member
     EXPECT_STREQ(returnedStringValue.c_str(), "TestValue");
@@ -79,7 +83,7 @@ TEST(SettingsFileReader, GetStringSettingFromFile) {
 }
 
 TEST(SettingsFileReader, givenDebugFileSettingInWhichStringIsFollowedByIntegerWhenItIsParsedThenProperValuesAreObtained) {
-    std::unique_ptr<TestSettingsFileReader> reader(new TestSettingsFileReader(TestSettingsFileReader::stringTestPath));
+    auto reader = std::make_unique<TestSettingsFileReader>(TestSettingsFileReader::stringTestPath);
     ASSERT_NE(nullptr, reader.get());
 
     int32_t retValue = 0;
@@ -87,16 +91,16 @@ TEST(SettingsFileReader, givenDebugFileSettingInWhichStringIsFollowedByIntegerWh
 
     EXPECT_EQ(1, returnedIntValue);
 
-    string retValueString;
-    string returnedStringValue = reader->getSetting("StringTestKey", retValueString);
+    std::string retValueString;
+    std::string returnedStringValue = reader->getSetting("StringTestKey", retValueString);
 
     EXPECT_STREQ(returnedStringValue.c_str(), "TestValue");
 }
 
-TEST(SettingsFileReader, GetSettingWhenNotInFile) {
+TEST(SettingsFileReader, GivenSettingNotInFileWhenGettingSettingThenProvidedDefaultIsReturned) {
 
     // Use test settings file
-    std::unique_ptr<TestSettingsFileReader> reader = unique_ptr<TestSettingsFileReader>(new TestSettingsFileReader(TestSettingsFileReader::testPath));
+    auto reader = std::make_unique<TestSettingsFileReader>(TestSettingsFileReader::testPath);
     ASSERT_NE(nullptr, reader);
 
     bool defaultBoolValue = false;
@@ -109,31 +113,147 @@ TEST(SettingsFileReader, GetSettingWhenNotInFile) {
 
     EXPECT_EQ(defaultIntValue, returnedIntValue);
 
-    string defaultStringValue = "ABCD";
-    string returnedStringValue = reader->getSetting("StringSettingNotExistingInFile", defaultStringValue);
+    std::string defaultStringValue = "ABCD";
+    std::string returnedStringValue = reader->getSetting("StringSettingNotExistingInFile", defaultStringValue);
 
     EXPECT_EQ(defaultStringValue, returnedStringValue);
 }
 
-TEST(SettingsFileReader, appSpecificLocation) {
+TEST(SettingsFileReader, WhenGettingAppSpecificLocationTheCorrectLocationIsReturned) {
     std::unique_ptr<TestSettingsFileReader> reader(new TestSettingsFileReader(TestSettingsFileReader::testPath));
     std::string appSpecific = "cl_cache_dir";
     EXPECT_EQ(appSpecific, reader->appSpecificLocation(appSpecific));
 }
 
 TEST(SettingsFileReader, givenHexNumbersSemiColonSeparatedListInInputStreamWhenParsingThenCorrectStringValueIsStored) {
-    std::unique_ptr<TestSettingsFileReader> reader = unique_ptr<TestSettingsFileReader>(new TestSettingsFileReader());
+    auto reader = std::make_unique<TestSettingsFileReader>();
     ASSERT_NE(nullptr, reader);
 
     //No settings should be parsed initially
     EXPECT_EQ(0u, reader->getStringSettingsCount());
 
-    stringstream inputLineWithSemiColonList("KeyName = 0x1234;0x5555");
+    std::stringstream inputLineWithSemiColonList("KeyName = 0x1234;0x5555");
 
     reader->parseStream(inputLineWithSemiColonList);
 
-    string defaultStringValue = "FailedToParse";
-    string returnedStringValue = reader->getSetting("KeyName", defaultStringValue);
+    std::string defaultStringValue = "FailedToParse";
+    std::string returnedStringValue = reader->getSetting("KeyName", defaultStringValue);
 
     EXPECT_STREQ("0x1234;0x5555", returnedStringValue.c_str());
+}
+
+TEST(SettingsFileReader, given64bitKeyValueWhenGetSettingThenValueIsCorrect) {
+    auto reader = std::make_unique<TestSettingsFileReader>();
+    ASSERT_NE(nullptr, reader);
+
+    EXPECT_EQ(0u, reader->getStringSettingsCount());
+    std::stringstream inputLine("Example64BitKey = -18764712120594");
+    reader->parseStream(inputLine);
+
+    int64_t defaultValue = 0;
+    int64_t returnedValue = reader->getSetting("Example64BitKey", defaultValue);
+
+    EXPECT_EQ(-18764712120594, returnedValue);
+}
+
+TEST(SettingsFileReader, givenKeyValueWithoutSpacesWhenGetSettingThenValueIsCorrect) {
+    auto reader = std::make_unique<TestSettingsFileReader>();
+    ASSERT_NE(nullptr, reader);
+    EXPECT_EQ(0u, reader->getStringSettingsCount());
+
+    std::stringstream inputLine("SomeKey=12");
+    reader->parseStream(inputLine);
+
+    int64_t returnedValue = reader->getSetting("SomeKey", 0);
+    EXPECT_EQ(1u, reader->getStringSettingsCount());
+    EXPECT_EQ(12, returnedValue);
+}
+
+TEST(SettingsFileReader, givenKeyValueWithAdditionalWhitespaceCharactersWhenGetSettingThenValueIsCorrect) {
+    auto reader = std::make_unique<TestSettingsFileReader>();
+    ASSERT_NE(nullptr, reader);
+    EXPECT_EQ(0u, reader->getStringSettingsCount());
+
+    std::stringstream inputLine("\t \t SomeKey\t \t =\t \t 12\t \t ");
+    reader->parseStream(inputLine);
+
+    int64_t returnedValue = reader->getSetting("SomeKey", 0);
+    EXPECT_EQ(1u, reader->getStringSettingsCount());
+    EXPECT_EQ(12, returnedValue);
+}
+
+TEST(SettingsFileReader, givenKeyValueWithAdditionalCharactersWhenGetSettingThenValueIsIncorrect) {
+    {
+        auto reader = std::make_unique<TestSettingsFileReader>();
+        ASSERT_NE(nullptr, reader);
+        EXPECT_EQ(0u, reader->getStringSettingsCount());
+
+        std::stringstream inputLine("Some Key = 12");
+        reader->parseStream(inputLine);
+
+        EXPECT_EQ(0u, reader->getStringSettingsCount());
+    }
+    {
+        auto reader = std::make_unique<TestSettingsFileReader>();
+        ASSERT_NE(nullptr, reader);
+        EXPECT_EQ(0u, reader->getStringSettingsCount());
+
+        std::stringstream inputLine("SomeKey = 1 2");
+        reader->parseStream(inputLine);
+
+        EXPECT_EQ(0u, reader->getStringSettingsCount());
+    }
+}
+
+TEST(SettingsFileReader, givenMultipleKeysWhenGetSettingThenInvalidKeysAreSkipped) {
+    auto reader = std::make_unique<TestSettingsFileReader>();
+    ASSERT_NE(nullptr, reader);
+    EXPECT_EQ(0u, reader->getStringSettingsCount());
+
+    std::string testFile;
+    testFile.append("InvalidKey1 = 1 2\n");
+    testFile.append("ValidKey1 = 12\n");
+    testFile.append("InvalidKey2 = - 1\n");
+    testFile.append("ValidKey2 = 128\n");
+    std::stringstream inputFile(testFile);
+    reader->parseStream(inputFile);
+
+    EXPECT_EQ(2u, reader->getStringSettingsCount());
+    EXPECT_EQ(0, reader->getSetting("InvalidKey1", 0));
+    EXPECT_EQ(0, reader->getSetting("InvalidKey2", 0));
+    EXPECT_EQ(12, reader->getSetting("ValidKey1", 0));
+    EXPECT_EQ(128, reader->getSetting("ValidKey2", 0));
+}
+
+TEST(SettingsFileReader, givenNoKeyOrNoValueWhenGetSettingThenExceptionIsNotThrown) {
+    {
+        auto reader = std::make_unique<TestSettingsFileReader>();
+        ASSERT_NE(nullptr, reader);
+        EXPECT_EQ(0u, reader->getStringSettingsCount());
+
+        std::stringstream inputLine("= 12");
+        EXPECT_NO_THROW(reader->parseStream(inputLine));
+
+        EXPECT_EQ(0u, reader->getStringSettingsCount());
+    }
+    {
+        auto reader = std::make_unique<TestSettingsFileReader>();
+        ASSERT_NE(nullptr, reader);
+        EXPECT_EQ(0u, reader->getStringSettingsCount());
+
+        std::stringstream inputLine("SomeKey =");
+        EXPECT_NO_THROW(reader->parseStream(inputLine));
+
+        EXPECT_EQ(0u, reader->getStringSettingsCount());
+    }
+    {
+        auto reader = std::make_unique<TestSettingsFileReader>();
+        ASSERT_NE(nullptr, reader);
+        EXPECT_EQ(0u, reader->getStringSettingsCount());
+
+        std::stringstream inputLine("=");
+        EXPECT_NO_THROW(reader->parseStream(inputLine));
+
+        EXPECT_EQ(0u, reader->getStringSettingsCount());
+    }
 }

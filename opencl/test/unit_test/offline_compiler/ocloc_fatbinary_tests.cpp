@@ -75,7 +75,7 @@ TEST(OclocFatBinaryAsProductId, GivenEnabledPlatformNameThenReturnsProperPlatfor
     auto names = NEO::toProductNames(platforms);
     for (size_t i = 0; i < platforms.size(); ++i) {
         auto idByName = NEO::asProductId(names[i], platforms);
-        EXPECT_EQ(idByName, platforms[i]) << names[i] << " : " << platforms[i] << " != " << idByName;
+        EXPECT_EQ(idByName, platforms[i]) << names[i].data() << " : " << platforms[i] << " != " << idByName;
     }
 }
 
@@ -85,26 +85,26 @@ TEST(OclocFatBinaryAsProductId, GivenDisabledPlatformNameThenReturnsUnknownPlatf
     platforms.clear();
     for (size_t i = 0; i < platforms.size(); ++i) {
         auto idByName = NEO::asProductId(names[i], platforms);
-        EXPECT_EQ(IGFX_UNKNOWN, platforms[i]) << names[i] << " : IGFX_UNKNOWN != " << idByName;
+        EXPECT_EQ(IGFX_UNKNOWN, platforms[i]) << names[i].data() << " : IGFX_UNKNOWN != " << idByName;
     }
 }
 
-TEST(OclocFatBinaryAsGfxCoreId, GivenEnabledGfxCoreNameThenReturnsProperGfxCoreId) {
+TEST(OclocFatBinaryAsGfxCoreIdList, GivenEnabledGfxCoreNameThenReturnsNonEmptyList) {
     for (unsigned int coreId = 0; coreId < IGFX_MAX_CORE; ++coreId) {
         if (nullptr != NEO::familyName[coreId]) {
-            EXPECT_NE(IGFX_UNKNOWN_CORE, NEO::asGfxCoreId(ConstStringRef(NEO::familyName[coreId], strlen(NEO::familyName[coreId]))));
+            EXPECT_FALSE(NEO::asGfxCoreIdList(ConstStringRef(NEO::familyName[coreId], strlen(NEO::familyName[coreId]))).empty());
             std::string caseInsesitive = NEO::familyName[coreId];
             caseInsesitive[0] = 'g';
-            EXPECT_NE(IGFX_UNKNOWN_CORE, NEO::asGfxCoreId(caseInsesitive));
+            EXPECT_FALSE(NEO::asGfxCoreIdList(caseInsesitive).empty());
         }
     }
 }
 
-TEST(OclocFatBinaryAsGfxCoreId, GivenDisabledGfxCoreNameThenReturnsProperGfxCoreId) {
-    EXPECT_EQ(IGFX_UNKNOWN_CORE, NEO::asGfxCoreId(ConstStringRef("genA")));
-    EXPECT_EQ(IGFX_UNKNOWN_CORE, NEO::asGfxCoreId(ConstStringRef("gen0")));
-    EXPECT_EQ(IGFX_UNKNOWN_CORE, NEO::asGfxCoreId(ConstStringRef("gen1")));
-    EXPECT_EQ(IGFX_UNKNOWN_CORE, NEO::asGfxCoreId(ConstStringRef("gen2")));
+TEST(OclocFatBinaryAsGfxCoreIdList, GivenDisabledGfxCoreNameThenReturnsEmptyList) {
+    EXPECT_TRUE(NEO::asGfxCoreIdList(ConstStringRef("genA")).empty());
+    EXPECT_TRUE(NEO::asGfxCoreIdList(ConstStringRef("gen0")).empty());
+    EXPECT_TRUE(NEO::asGfxCoreIdList(ConstStringRef("gen1")).empty());
+    EXPECT_TRUE(NEO::asGfxCoreIdList(ConstStringRef("gen2")).empty());
 }
 
 TEST(OclocFatBinaryAppendPlatformsForGfxCore, GivenCoreIdThenAppendsEnabledProductIdsThatMatch) {

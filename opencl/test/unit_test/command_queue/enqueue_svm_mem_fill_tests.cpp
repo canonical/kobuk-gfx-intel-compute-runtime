@@ -10,14 +10,15 @@
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/test/unit_test/command_queue/command_enqueue_fixture.h"
 #include "opencl/test/unit_test/command_queue/command_queue_fixture.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_builtin_dispatch_info_builder.h"
 #include "opencl/test/unit_test/mocks/mock_builtins.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 #include "test.h"
 
 using namespace NEO;
 
-struct EnqueueSvmMemFillTest : public DeviceFixture,
+struct EnqueueSvmMemFillTest : public ClDeviceFixture,
                                public CommandQueueHwFixture,
                                public ::testing::TestWithParam<size_t> {
     typedef CommandQueueHwFixture CommandQueueFixture;
@@ -26,21 +27,18 @@ struct EnqueueSvmMemFillTest : public DeviceFixture,
     }
 
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
         CommandQueueFixture::SetUp(pClDevice, 0);
-        const HardwareInfo &hwInfo = pDevice->getHardwareInfo();
-        if (!hwInfo.capabilityTable.ftrSvm) {
-            GTEST_SKIP();
-        }
+        REQUIRE_SVM_OR_SKIP(pDevice);
         patternSize = (size_t)GetParam();
         ASSERT_TRUE((0 < patternSize) && (patternSize <= 128));
         SVMAllocsManager::SvmAllocationProperties svmProperties;
         svmProperties.coherent = true;
-        svmPtr = context->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, svmProperties);
+        svmPtr = context->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, svmProperties, pDevice->getDeviceBitfield());
         ASSERT_NE(nullptr, svmPtr);
         auto svmData = context->getSVMAllocsManager()->getSVMAlloc(svmPtr);
         ASSERT_NE(nullptr, svmData);
-        svmAlloc = svmData->gpuAllocation;
+        svmAlloc = svmData->gpuAllocations.getGraphicsAllocation(pDevice->getRootDeviceIndex());
         ASSERT_NE(nullptr, svmAlloc);
     }
 
@@ -49,7 +47,7 @@ struct EnqueueSvmMemFillTest : public DeviceFixture,
             context->getSVMAllocsManager()->freeSVMAlloc(svmPtr);
         }
         CommandQueueFixture::TearDown();
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     const uint64_t pattern[16] = {0x0011223344556677, 0x8899AABBCCDDEEFF, 0xFFEEDDCCBBAA9988, 0x7766554433221100,
@@ -66,7 +64,7 @@ HWTEST_P(EnqueueSvmMemFillTest, givenEnqueueSVMMemFillWhenUsingFillBufferBuilder
               pattern(pattern), patternSize(patternSize) {
         }
         void validateInput(const BuiltinOpParams &conf) const override {
-            auto patternAllocation = conf.srcMemObj->getGraphicsAllocation();
+            auto patternAllocation = conf.srcMemObj->getMultiGraphicsAllocation().getDefaultGraphicsAllocation();
             EXPECT_EQ(patternSize, patternAllocation->getUnderlyingBufferSize());
             EXPECT_EQ(0, memcmp(pattern, patternAllocation->getUnderlyingBuffer(), patternSize));
         };
@@ -158,7 +156,7 @@ struct EnqueueSvmMemFillHw : public ::testing::Test {
         }
 
         context = std::make_unique<MockContext>(device.get());
-        svmPtr = context->getSVMAllocsManager()->createSVMAlloc(device->getRootDeviceIndex(), 256, {});
+        svmPtr = context->getSVMAllocsManager()->createSVMAlloc(device->getRootDeviceIndex(), 256, {}, device->getDeviceBitfield());
         ASSERT_NE(nullptr, svmPtr);
     }
 

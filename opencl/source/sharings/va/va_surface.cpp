@@ -15,14 +15,18 @@
 #include "opencl/source/context/context.h"
 #include "opencl/source/mem_obj/image.h"
 
+#include <drm/drm_fourcc.h>
+#include <va/va_drmcommon.h>
+
 namespace NEO {
 Image *VASurface::createSharedVaSurface(Context *context, VASharingFunctions *sharingFunctions,
-                                        cl_mem_flags flags, VASurfaceID *surface,
+                                        cl_mem_flags flags, cl_mem_flags_intel flagsIntel, VASurfaceID *surface,
                                         cl_uint plane, cl_int *errcodeRet) {
     ErrorCodeHelper errorCode(errcodeRet, CL_SUCCESS);
 
     auto memoryManager = context->getMemoryManager();
     unsigned int sharedHandle = 0;
+    VADRMPRIMESurfaceDescriptor vaDrmPrimeSurfaceDesc = {};
     VAImage vaImage = {};
     cl_image_desc imgDesc = {};
     cl_image_format gmmImgFormat = {CL_NV12_INTEL, CL_UNORM_INT8};
@@ -31,13 +35,49 @@ Image *VASurface::createSharedVaSurface(Context *context, VASharingFunctions *sh
     ImageInfo imgInfo = {};
     VAImageID imageId = 0;
     McsSurfaceInfo mcsSurfaceInfo = {};
+    VAStatus vaStatus;
 
-    sharingFunctions->deriveImage(*surface, &vaImage);
+    uint32_t imageFourcc = 0;
+    size_t imageOffset = 0;
+    size_t imagePitch = 0;
 
-    imageId = vaImage.image_id;
+    vaStatus = sharingFunctions->exportSurfaceHandle(*surface,
+                                                     VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
+                                                     VA_EXPORT_SURFACE_READ_WRITE | VA_EXPORT_SURFACE_SEPARATE_LAYERS,
+                                                     &vaDrmPrimeSurfaceDesc);
+    if (VA_STATUS_SUCCESS == vaStatus) {
+        imageId = VA_INVALID_ID;
+        imgDesc.image_width = vaDrmPrimeSurfaceDesc.width;
+        imgDesc.image_height = vaDrmPrimeSurfaceDesc.height;
+        imageFourcc = vaDrmPrimeSurfaceDesc.fourcc;
+        if (plane == 1) {
+            imageOffset = vaDrmPrimeSurfaceDesc.layers[1].offset[0];
+            imagePitch = vaDrmPrimeSurfaceDesc.layers[1].pitch[0];
+        } else if (plane == 2) {
+            imageOffset = vaDrmPrimeSurfaceDesc.layers[2].offset[0];
+            imagePitch = vaDrmPrimeSurfaceDesc.layers[2].pitch[0];
+        }
+        imgInfo.linearStorage = DRM_FORMAT_MOD_LINEAR == vaDrmPrimeSurfaceDesc.objects[0].drm_format_modifier;
+        sharedHandle = vaDrmPrimeSurfaceDesc.objects[0].fd;
+    } else {
+        sharingFunctions->deriveImage(*surface, &vaImage);
+        imageId = vaImage.image_id;
+        imgDesc.image_width = vaImage.width;
+        imgDesc.image_height = vaImage.height;
+        imageFourcc = vaImage.format.fourcc;
+        if (plane == 1) {
+            imageOffset = vaImage.offsets[1];
+            imagePitch = vaImage.pitches[0];
+        } else if (plane == 2) {
+            imageOffset = vaImage.offsets[2];
+            imagePitch = vaImage.pitches[0];
+        }
+        imgInfo.linearStorage = false;
+        sharingFunctions->extGetSurfaceHandle(surface, &sharedHandle);
+    }
 
-    imgDesc.image_width = vaImage.width;
-    imgDesc.image_height = vaImage.height;
+    bool isRGBPFormat = DebugManager.flags.EnableExtendedVaFormats.get() && imageFourcc == VA_FOURCC_RGBP;
+
     imgDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
     imgInfo.imgDesc = Image::convertDescriptor(imgDesc);
 
@@ -46,24 +86,30 @@ Image *VASurface::createSharedVaSurface(Context *context, VASharingFunctions *sh
         channelOrder = CL_R;
     } else if (plane == 1) {
         imgInfo.plane = GMM_PLANE_U;
-        channelOrder = CL_RG;
+        channelOrder = isRGBPFormat ? CL_R : CL_RG;
+    } else if (plane == 2) {
+        UNRECOVERABLE_IF(!isRGBPFormat);
+        imgInfo.plane = GMM_PLANE_V;
+        channelOrder = CL_R;
     } else {
         UNRECOVERABLE_IF(true);
     }
 
-    auto gmmSurfaceFormat = Image::getSurfaceFormatFromTable(flags, &gmmImgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport); //vaImage.format.fourcc == VA_FOURCC_NV12
+    auto gmmSurfaceFormat = Image::getSurfaceFormatFromTable(flags, &gmmImgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features); //vaImage.format.fourcc == VA_FOURCC_NV12
 
-    if (DebugManager.flags.EnableExtendedVaFormats.get() && vaImage.format.fourcc == VA_FOURCC_P010) {
-        channelType = CL_UNORM_INT16;
-        gmmSurfaceFormat = getExtendedSurfaceFormatInfo(vaImage.format.fourcc);
+    if (DebugManager.flags.EnableExtendedVaFormats.get() && (imageFourcc == VA_FOURCC_P010 || imageFourcc == VA_FOURCC_RGBP)) {
+        channelType = isRGBPFormat ? CL_UNORM_INT8 : CL_UNORM_INT16;
+        gmmSurfaceFormat = getExtendedSurfaceFormatInfo(imageFourcc);
     }
     imgInfo.surfaceFormat = &gmmSurfaceFormat->surfaceFormat;
 
     cl_image_format imgFormat = {channelOrder, channelType};
-    auto imgSurfaceFormat = Image::getSurfaceFormatFromTable(flags, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+    auto imgSurfaceFormat = Image::getSurfaceFormatFromTable(flags, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
 
-    sharingFunctions->extGetSurfaceHandle(surface, &sharedHandle);
-    AllocationProperties properties(context->getDevice(0)->getRootDeviceIndex(), false, imgInfo, GraphicsAllocation::AllocationType::SHARED_IMAGE);
+    AllocationProperties properties(context->getDevice(0)->getRootDeviceIndex(),
+                                    false, // allocateMemory
+                                    imgInfo, GraphicsAllocation::AllocationType::SHARED_IMAGE,
+                                    context->getDeviceBitfieldForAllocation());
 
     auto alloc = memoryManager->createGraphicsAllocationFromSharedHandle(sharedHandle, properties, false);
 
@@ -71,20 +117,29 @@ Image *VASurface::createSharedVaSurface(Context *context, VASharingFunctions *sh
     imgDesc.image_slice_pitch = 0u;
     imgInfo.slicePitch = 0u;
     imgInfo.surfaceFormat = &imgSurfaceFormat->surfaceFormat;
+    imgInfo.yOffset = 0;
+    imgInfo.xOffset = 0;
     if (plane == 1) {
-        imgDesc.image_width /= 2;
-        imgDesc.image_height /= 2;
-        imgInfo.offset = vaImage.offsets[1];
-        imgInfo.yOffset = 0;
-        imgInfo.xOffset = 0;
-        imgInfo.yOffsetForUVPlane = static_cast<uint32_t>(imgInfo.offset / vaImage.pitches[0]);
+        if (!isRGBPFormat) {
+            imgDesc.image_width /= 2;
+            imgDesc.image_height /= 2;
+        }
+        imgInfo.offset = imageOffset;
+        imgInfo.yOffsetForUVPlane = static_cast<uint32_t>(imageOffset / imagePitch);
+    }
+    if (isRGBPFormat && plane == 2) {
+        imgInfo.offset = imageOffset;
     }
     imgInfo.imgDesc = Image::convertDescriptor(imgDesc);
-    sharingFunctions->destroyImage(vaImage.image_id);
+    if (VA_INVALID_ID != imageId) {
+        sharingFunctions->destroyImage(imageId);
+    }
 
     auto vaSurface = new VASurface(sharingFunctions, imageId, plane, surface, context->getInteropUserSyncEnabled());
+    auto multiGraphicsAllocation = MultiGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
+    multiGraphicsAllocation.addAllocation(alloc);
 
-    auto image = Image::createSharedImage(context, vaSurface, mcsSurfaceInfo, alloc, nullptr, flags, imgSurfaceFormat, imgInfo, __GMM_NO_CUBE_MAP, 0, 0);
+    auto image = Image::createSharedImage(context, vaSurface, mcsSurfaceInfo, std::move(multiGraphicsAllocation), nullptr, flags, flagsIntel, imgSurfaceFormat, imgInfo, __GMM_NO_CUBE_MAP, 0, 0);
     image->setMediaPlaneType(plane);
     return image;
 }
@@ -110,7 +165,7 @@ bool VASurface::validate(cl_mem_flags flags, cl_uint plane) {
     default:
         return false;
     }
-    if (plane > 1) {
+    if (plane > 1 && !DebugManager.flags.EnableExtendedVaFormats.get()) {
         return false;
     }
     return true;
@@ -126,6 +181,16 @@ const ClSurfaceFormatInfo *VASurface::getExtendedSurfaceFormatInfo(uint32_t form
                                                         2,
                                                         2}};
         return &formatInfo;
+    }
+    if (formatFourCC == VA_FOURCC_RGBP) {
+        static const ClSurfaceFormatInfo formatInfoRGBP = {{CL_NV12_INTEL, CL_UNORM_INT8},
+                                                           {GMM_RESOURCE_FORMAT::GMM_FORMAT_RGBP,
+                                                            static_cast<GFX3DSTATE_SURFACEFORMAT>(GFX3DSTATE_SURFACEFORMAT_R8_UNORM), // not used for plane images
+                                                            0,
+                                                            1,
+                                                            1,
+                                                            1}};
+        return &formatInfoRGBP;
     }
     return nullptr;
 }

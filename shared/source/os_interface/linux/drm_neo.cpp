@@ -9,9 +9,12 @@
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/execution_environment/execution_environment.h"
+#include "shared/source/execution_environment/root_device_environment.h"
+#include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/debug_helpers.h"
+#include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/helpers/ptr_math.h"
 #include "shared/source/os_interface/linux/hw_device_id.h"
 #include "shared/source/os_interface/linux/os_inc.h"
 #include "shared/source/os_interface/linux/sys_calls.h"
@@ -21,14 +24,9 @@
 
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <linux/limits.h>
 
 namespace NEO {
-
-const char *Drm::sysFsDefaultGpuPath = "/drm/card0";
-const char *Drm::maxGpuFrequencyFile = "/gt_max_freq_mhz";
-const char *Drm::configFileName = "/config";
 
 namespace IoctlHelper {
 constexpr const char *getIoctlParamString(int param) {
@@ -58,12 +56,16 @@ constexpr const char *getIoctlParamString(int param) {
 
 } // namespace IoctlHelper
 
+Drm::Drm(std::unique_ptr<HwDeviceId> hwDeviceIdIn, RootDeviceEnvironment &rootDeviceEnvironment) : hwDeviceId(std::move(hwDeviceIdIn)), rootDeviceEnvironment(rootDeviceEnvironment) {
+    requirePerContextVM = rootDeviceEnvironment.executionEnvironment.isPerContextMemorySpaceRequired();
+}
+
 int Drm::ioctl(unsigned long request, void *arg) {
     int ret;
     SYSTEM_ENTER();
     do {
         ret = SysCalls::ioctl(getFileDescriptor(), request, arg);
-    } while (ret == -1 && (errno == EINTR || errno == EAGAIN));
+    } while (ret == -1 && (errno == EINTR || errno == EAGAIN || errno == EBUSY));
     SYSTEM_LEAVE(request);
     return ret;
 }
@@ -106,53 +108,16 @@ int Drm::getEnabledPooledEu(int &enabled) {
     return getParamIoctl(I915_PARAM_HAS_POOLED_EU, &enabled);
 }
 
-int Drm::getMaxGpuFrequency(int &maxGpuFrequency) {
-    maxGpuFrequency = 0;
-    int deviceID = 0;
-    int ret = getDeviceID(deviceID);
-    if (ret != 0) {
-        return ret;
-    }
-    std::string clockSysFsPath = getSysFsPciPath(deviceID);
-
-    if (clockSysFsPath.size() == 0) {
-        return 0;
-    }
-
-    clockSysFsPath += sysFsDefaultGpuPath;
-    clockSysFsPath += maxGpuFrequencyFile;
-
-    std::ifstream ifs(clockSysFsPath.c_str(), std::ifstream::in);
-    if (ifs.fail()) {
-        return 0;
-    }
-
-    ifs >> maxGpuFrequency;
-    ifs.close();
-    return 0;
-}
-
-std::string Drm::getSysFsPciPath(int deviceID) {
-    std::string nullPath;
-    std::string sysFsPciDirectory = Os::sysFsPciPath;
-    std::vector<std::string> files = Directory::getFiles(sysFsPciDirectory);
-
-    for (std::vector<std::string>::iterator file = files.begin(); file != files.end(); ++file) {
-        PCIConfig config = {};
-        std::string configPath = *file + configFileName;
-        std::string sysfsPath = *file;
-        std::ifstream configFile(configPath, std::ifstream::binary);
-        if (configFile.is_open()) {
-            configFile.read(reinterpret_cast<char *>(&config), sizeof(config));
-
-            if (!configFile.good() || (config.DeviceID != deviceID)) {
-                configFile.close();
-                continue;
-            }
-            return sysfsPath;
+std::string Drm::getSysFsPciPath() {
+    std::string path = std::string(Os::sysFsPciPathPrefix) + hwDeviceId->getPciPath() + "/drm";
+    std::string expectedFilePrefix = path + "/card";
+    auto files = Directory::getFiles(path.c_str());
+    for (auto &file : files) {
+        if (file.find(expectedFilePrefix.c_str()) != std::string::npos) {
+            return file;
         }
     }
-    return nullPath;
+    return {};
 }
 
 int Drm::queryGttSize(uint64_t &gttSizeOutput) {
@@ -238,10 +203,19 @@ void Drm::setNonPersistentContext(uint32_t drmContextId) {
     ioctl(DRM_IOCTL_I915_GEM_CONTEXT_SETPARAM, &contextParam);
 }
 
-uint32_t Drm::createDrmContext() {
+uint32_t Drm::createDrmContext(uint32_t drmVmId) {
     drm_i915_gem_context_create gcc = {};
     auto retVal = ioctl(DRM_IOCTL_I915_GEM_CONTEXT_CREATE, &gcc);
     UNRECOVERABLE_IF(retVal != 0);
+
+    if (drmVmId > 0) {
+        drm_i915_gem_context_param param{};
+        param.ctx_id = gcc.ctx_id;
+        param.value = drmVmId;
+        param.param = I915_CONTEXT_PARAM_VM;
+        retVal = ioctl(DRM_IOCTL_I915_GEM_CONTEXT_SETPARAM, &param);
+        UNRECOVERABLE_IF(retVal != 0);
+    }
 
     return gcc.ctx_id;
 }
@@ -251,6 +225,34 @@ void Drm::destroyDrmContext(uint32_t drmContextId) {
     destroy.ctx_id = drmContextId;
     auto retVal = ioctl(DRM_IOCTL_I915_GEM_CONTEXT_DESTROY, &destroy);
     UNRECOVERABLE_IF(retVal != 0);
+}
+
+int Drm::createDrmVirtualMemory(uint32_t &drmVmId) {
+    drm_i915_gem_vm_control ctl = {};
+    auto ret = SysCalls::ioctl(getFileDescriptor(), DRM_IOCTL_I915_GEM_VM_CREATE, &ctl);
+    if (ret == 0) {
+        drmVmId = ctl.vm_id;
+    }
+    return ret;
+}
+
+void Drm::destroyDrmVirtualMemory(uint32_t drmVmId) {
+    drm_i915_gem_vm_control ctl = {};
+    ctl.vm_id = drmVmId;
+    auto ret = SysCalls::ioctl(getFileDescriptor(), DRM_IOCTL_I915_GEM_VM_DESTROY, &ctl);
+    UNRECOVERABLE_IF(ret != 0);
+}
+
+int Drm::queryVmId(uint32_t drmContextId, uint32_t &vmId) {
+    drm_i915_gem_context_param param{};
+    param.ctx_id = drmContextId;
+    param.value = 0;
+    param.param = I915_CONTEXT_PARAM_VM;
+    auto retVal = this->ioctl(DRM_IOCTL_I915_GEM_CONTEXT_GETPARAM, &param);
+
+    vmId = static_cast<uint32_t>(param.value);
+
+    return retVal;
 }
 
 int Drm::getEuTotal(int &euTotal) {
@@ -272,71 +274,97 @@ int Drm::getErrno() {
 int Drm::setupHardwareInfo(DeviceDescriptor *device, bool setupFeatureTableAndWorkaroundTable) {
     HardwareInfo *hwInfo = const_cast<HardwareInfo *>(device->pHwInfo);
     int ret;
+    int sliceTotal;
+    int subSliceTotal;
     int euTotal;
-    int subsliceTotal;
 
-    ret = getEuTotal(euTotal);
-    if (ret != 0) {
-        printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "FATAL: Cannot query EU total parameter!\n");
-        return ret;
+    bool status = queryTopology(sliceTotal, subSliceTotal, euTotal);
+
+    if (!status) {
+        printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "WARNING: Topology query failed!\n");
+
+        sliceTotal = hwInfo->gtSystemInfo.SliceCount;
+
+        ret = getEuTotal(euTotal);
+        if (ret != 0) {
+            printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "FATAL: Cannot query EU total parameter!\n");
+            return ret;
+        }
+
+        ret = getSubsliceTotal(subSliceTotal);
+        if (ret != 0) {
+            printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "FATAL: Cannot query subslice total parameter!\n");
+            return ret;
+        }
     }
 
-    ret = getSubsliceTotal(subsliceTotal);
-    if (ret != 0) {
-        printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "FATAL: Cannot query subslice total parameter!\n");
-        return ret;
-    }
-
+    hwInfo->gtSystemInfo.SliceCount = static_cast<uint32_t>(sliceTotal);
+    hwInfo->gtSystemInfo.SubSliceCount = static_cast<uint32_t>(subSliceTotal);
     hwInfo->gtSystemInfo.EUCount = static_cast<uint32_t>(euTotal);
-    hwInfo->gtSystemInfo.SubSliceCount = static_cast<uint32_t>(subsliceTotal);
     device->setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable);
     return 0;
+}
+
+void appendHwDeviceId(std::vector<std::unique_ptr<HwDeviceId>> &hwDeviceIds, int fileDescriptor, const char *pciPath) {
+    if (fileDescriptor >= 0) {
+        if (Drm::isi915Version(fileDescriptor)) {
+            hwDeviceIds.push_back(std::make_unique<HwDeviceId>(fileDescriptor, pciPath));
+        } else {
+            SysCalls::close(fileDescriptor);
+        }
+    }
 }
 
 std::vector<std::unique_ptr<HwDeviceId>> OSInterface::discoverDevices(ExecutionEnvironment &executionEnvironment) {
     std::vector<std::unique_ptr<HwDeviceId>> hwDeviceIds;
     executionEnvironment.osEnvironment = std::make_unique<OsEnvironment>();
-    char fullPath[PATH_MAX];
-    size_t numRootDevices = 1u;
+    std::string devicePrefix = std::string(Os::pciDevicesDirectory) + "/pci-0000:";
+    const char *renderDeviceSuffix = "-render";
+    size_t numRootDevices = 0u;
     if (DebugManager.flags.CreateMultipleRootDevices.get()) {
         numRootDevices = DebugManager.flags.CreateMultipleRootDevices.get();
     }
-    if (DebugManager.flags.ForceDeviceId.get() != "unk") {
-        snprintf(fullPath, PATH_MAX, "/dev/dri/by-path/pci-0000:%s-render", DebugManager.flags.ForceDeviceId.get().c_str());
-        int fileDescriptor = SysCalls::open(fullPath, O_RDWR);
-        if (fileDescriptor >= 0) {
-            if (Drm::isi915Version(fileDescriptor)) {
-                while (hwDeviceIds.size() < numRootDevices) {
-                    hwDeviceIds.push_back(std::make_unique<HwDeviceId>(fileDescriptor));
+
+    std::vector<std::string> files = Directory::getFiles(Os::pciDevicesDirectory);
+
+    if (files.size() == 0) {
+        const char *pathPrefix = "/dev/dri/renderD";
+        const unsigned int maxDrmDevices = 64;
+        unsigned int startNum = 128;
+
+        for (unsigned int i = 0; i < maxDrmDevices; i++) {
+            std::string path = std::string(pathPrefix) + std::to_string(i + startNum);
+            int fileDescriptor = SysCalls::open(path.c_str(), O_RDWR);
+            appendHwDeviceId(hwDeviceIds, fileDescriptor, "00:02.0");
+            if (!hwDeviceIds.empty() && hwDeviceIds.size() == numRootDevices) {
+                break;
+            }
+        }
+        return hwDeviceIds;
+    }
+
+    do {
+        for (std::vector<std::string>::iterator file = files.begin(); file != files.end(); ++file) {
+            if (file->find(renderDeviceSuffix) == std::string::npos) {
+                continue;
+            }
+            std::string pciPath = file->substr(devicePrefix.size(), file->size() - devicePrefix.size() - strlen(renderDeviceSuffix));
+
+            if (DebugManager.flags.ForceDeviceId.get() != "unk") {
+                if (file->find(DebugManager.flags.ForceDeviceId.get().c_str()) == std::string::npos) {
+                    continue;
                 }
-            } else {
-                SysCalls::close(fileDescriptor);
+            }
+            int fileDescriptor = SysCalls::open(file->c_str(), O_RDWR);
+            appendHwDeviceId(hwDeviceIds, fileDescriptor, pciPath.c_str());
+            if (!hwDeviceIds.empty() && hwDeviceIds.size() == numRootDevices) {
+                break;
             }
         }
-        return hwDeviceIds;
-    }
-
-    const char *pathPrefix = "/dev/dri/renderD";
-    const unsigned int maxDrmDevices = 64;
-    unsigned int startNum = 128;
-
-    for (unsigned int i = 0; i < maxDrmDevices; i++) {
-        snprintf(fullPath, PATH_MAX, "%s%u", pathPrefix, i + startNum);
-        int fileDescriptor = SysCalls::open(fullPath, O_RDWR);
-        if (fileDescriptor >= 0) {
-            if (Drm::isi915Version(fileDescriptor)) {
-                hwDeviceIds.push_back(std::make_unique<HwDeviceId>(fileDescriptor));
-            } else {
-                SysCalls::close(fileDescriptor);
-            }
+        if (hwDeviceIds.empty()) {
+            return hwDeviceIds;
         }
-    }
-    if (hwDeviceIds.empty()) {
-        return hwDeviceIds;
-    }
-    while (hwDeviceIds.size() < numRootDevices) {
-        hwDeviceIds.push_back(std::make_unique<HwDeviceId>(hwDeviceIds[0]->getFileDescriptor()));
-    }
+    } while (hwDeviceIds.size() < numRootDevices);
     return hwDeviceIds;
 }
 
@@ -355,6 +383,113 @@ bool Drm::isi915Version(int fileDescriptor) {
     return strcmp(name, "i915") == 0;
 }
 
-Drm::~Drm() = default;
+std::unique_ptr<uint8_t[]> Drm::query(uint32_t queryId, int32_t &length) {
+    drm_i915_query query{};
+    drm_i915_query_item queryItem{};
+    queryItem.query_id = queryId;
+    queryItem.length = 0; // query length first
+    query.items_ptr = reinterpret_cast<__u64>(&queryItem);
+    query.num_items = 1;
+    length = 0;
+
+    auto ret = this->ioctl(DRM_IOCTL_I915_QUERY, &query);
+    if (ret != 0 || queryItem.length <= 0) {
+        return nullptr;
+    }
+
+    auto data = std::make_unique<uint8_t[]>(queryItem.length);
+    memset(data.get(), 0, queryItem.length);
+    queryItem.data_ptr = castToUint64(data.get());
+
+    ret = this->ioctl(DRM_IOCTL_I915_QUERY, &query);
+    if (ret != 0 || queryItem.length <= 0) {
+        return nullptr;
+    }
+
+    length = queryItem.length;
+    return data;
+}
+
+bool Drm::queryTopology(int &sliceCount, int &subSliceCount, int &euCount) {
+    int32_t length;
+    auto dataQuery = this->query(DRM_I915_QUERY_TOPOLOGY_INFO, length);
+    auto data = reinterpret_cast<drm_i915_query_topology_info *>(dataQuery.get());
+
+    if (!data) {
+        return false;
+    }
+
+    sliceCount = 0;
+    subSliceCount = 0;
+    euCount = 0;
+
+    for (int x = 0; x < data->max_slices; x++) {
+        bool isSliceEnable = (data->data[x / 8] >> (x % 8)) & 1;
+        if (!isSliceEnable) {
+            continue;
+        }
+        sliceCount++;
+        for (int y = 0; y < data->max_subslices; y++) {
+            bool isSubSliceEnabled = (data->data[data->subslice_offset + x * data->subslice_stride + y / 8] >> (y % 8)) & 1;
+            if (!isSubSliceEnabled) {
+                continue;
+            }
+            subSliceCount++;
+            for (int z = 0; z < data->max_eus_per_subslice; z++) {
+                bool isEUEnabled = (data->data[data->eu_offset + (x * data->max_subslices + y) * data->eu_stride + z / 8] >> (z % 8)) & 1;
+                if (!isEUEnabled) {
+                    continue;
+                }
+                euCount++;
+            }
+        }
+    }
+
+    return (sliceCount && subSliceCount && euCount);
+}
+
+bool Drm::createVirtualMemoryAddressSpace(uint32_t vmCount) {
+    for (auto i = 0u; i < vmCount; i++) {
+        uint32_t id = 0;
+        if (0 != createDrmVirtualMemory(id)) {
+            return false;
+        }
+        virtualMemoryIds.push_back(id);
+    }
+    return true;
+}
+
+void Drm::destroyVirtualMemoryAddressSpace() {
+    for (auto id : virtualMemoryIds) {
+        destroyDrmVirtualMemory(id);
+    }
+    virtualMemoryIds.clear();
+}
+
+uint32_t Drm::getVirtualMemoryAddressSpace(uint32_t vmId) {
+    if (vmId < virtualMemoryIds.size()) {
+        return virtualMemoryIds[vmId];
+    }
+    return 0;
+}
+
+std::string Drm::generateUUID() {
+    const char uuidString[] = "00000000-0000-0000-%04" SCNx64 "-%012" SCNx64;
+    char buffer[36 + 1] = "00000000-0000-0000-0000-000000000000";
+    uuid++;
+
+    UNRECOVERABLE_IF(uuid == 0xFFFFFFFFFFFFFFFF);
+
+    uint64_t parts[2] = {0, 0};
+    parts[0] = uuid & 0xFFFFFFFFFFFF;
+    parts[1] = (uuid & 0xFFFF000000000000) >> 48;
+    snprintf(buffer, sizeof(buffer), uuidString, parts[1], parts[0]);
+
+    return std::string(buffer, 36);
+}
+
+Drm::~Drm() {
+    destroyVirtualMemoryAddressSpace();
+}
 
 } // namespace NEO

@@ -13,6 +13,7 @@
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/os_interface/os_interface.h"
 
+#include "level_zero/core/source/debugger/debugger_l0.h"
 #include "level_zero/core/source/driver/driver.h"
 #include "level_zero/core/source/driver/driver_handle.h"
 #include <level_zero/ze_api.h>
@@ -31,13 +32,11 @@ struct DriverHandle;
 struct BuiltinFunctionsLib;
 struct ExecutionEnvironment;
 struct MetricContext;
+struct SysmanDevice;
 
 struct Device : _ze_device_handle_t {
     virtual uint32_t getRootDeviceIndex() = 0;
     virtual ze_result_t canAccessPeer(ze_device_handle_t hPeerDevice, ze_bool_t *value) = 0;
-    virtual ze_result_t copyCommandList(ze_command_list_handle_t hCommandList,
-                                        ze_command_list_handle_t *phCommandList) = 0;
-
     virtual ze_result_t createCommandList(const ze_command_list_desc_t *desc,
                                           ze_command_list_handle_t *commandList) = 0;
 
@@ -47,33 +46,28 @@ struct Device : _ze_device_handle_t {
     virtual ze_result_t createCommandQueue(const ze_command_queue_desc_t *desc,
                                            ze_command_queue_handle_t *commandQueue) = 0;
 
-    virtual ze_result_t createEventPool(const ze_event_pool_desc_t *desc,
-                                        ze_event_pool_handle_t *phEventPool) = 0;
     virtual ze_result_t createImage(const ze_image_desc_t *desc, ze_image_handle_t *phImage) = 0;
 
     virtual ze_result_t createModule(const ze_module_desc_t *desc, ze_module_handle_t *module,
                                      ze_module_build_log_handle_t *buildLog) = 0;
     virtual ze_result_t createSampler(const ze_sampler_desc_t *pDesc,
                                       ze_sampler_handle_t *phSampler) = 0;
-    virtual ze_result_t evictImage(ze_image_handle_t hImage) = 0;
-    virtual ze_result_t evictMemory(void *ptr, size_t size) = 0;
-    virtual ze_result_t
-    getComputeProperties(ze_device_compute_properties_t *pComputeProperties) = 0;
+    virtual ze_result_t getComputeProperties(ze_device_compute_properties_t *pComputeProperties) = 0;
     virtual ze_result_t getP2PProperties(ze_device_handle_t hPeerDevice,
                                          ze_device_p2p_properties_t *pP2PProperties) = 0;
-    virtual ze_result_t getKernelProperties(ze_device_kernel_properties_t *pKernelProperties) = 0;
+    virtual ze_result_t getKernelProperties(ze_device_module_properties_t *pKernelProperties) = 0;
     virtual ze_result_t getMemoryProperties(uint32_t *pCount, ze_device_memory_properties_t *pMemProperties) = 0;
     virtual ze_result_t getMemoryAccessProperties(ze_device_memory_access_properties_t *pMemAccessProperties) = 0;
     virtual ze_result_t getProperties(ze_device_properties_t *pDeviceProperties) = 0;
     virtual ze_result_t getSubDevices(uint32_t *pCount, ze_device_handle_t *phSubdevices) = 0;
-    virtual ze_result_t makeImageResident(ze_image_handle_t hImage) = 0;
-    virtual ze_result_t makeMemoryResident(void *ptr, size_t size) = 0;
-    virtual ze_result_t setIntermediateCacheConfig(ze_cache_config_t cacheConfig) = 0;
-    virtual ze_result_t setLastLevelCacheConfig(ze_cache_config_t cacheConfig) = 0;
-    virtual ze_result_t getCacheProperties(ze_device_cache_properties_t *pCacheProperties) = 0;
+    virtual ze_result_t setIntermediateCacheConfig(ze_cache_config_flags_t cacheConfig) = 0;
+    virtual ze_result_t setLastLevelCacheConfig(ze_cache_config_flags_t cacheConfig) = 0;
+    virtual ze_result_t getCacheProperties(uint32_t *pCount, ze_device_cache_properties_t *pCacheProperties) = 0;
     virtual ze_result_t imageGetProperties(const ze_image_desc_t *desc, ze_image_properties_t *pImageProperties) = 0;
     virtual ze_result_t getDeviceImageProperties(ze_device_image_properties_t *pDeviceImageProperties) = 0;
 
+    virtual ze_result_t getCommandQueueGroupProperties(uint32_t *pCount,
+                                                       ze_command_queue_group_properties_t *pCommandQueueGroupProperties) = 0;
     virtual ze_result_t systemBarrier() = 0;
 
     virtual ze_result_t registerCLMemory(cl_context context, cl_mem mem, void **ptr) = 0;
@@ -106,16 +100,30 @@ struct Device : _ze_device_handle_t {
 
     inline ze_device_handle_t toHandle() { return this; }
 
-    static Device *create(DriverHandle *driverHandle, NEO::Device *neoDevice);
+    static Device *create(DriverHandle *driverHandle, NEO::Device *neoDevice, uint32_t currentDeviceMask, bool isSubDevice);
 
     virtual NEO::PreemptionMode getDevicePreemptionMode() const = 0;
     virtual const NEO::DeviceInfo &getDeviceInfo() const = 0;
     virtual NEO::Device *getNEODevice() = 0;
-
-    NEO::SourceLevelDebugger *getSourceLevelDebugger() {
-        return getNEODevice() ? reinterpret_cast<NEO::SourceLevelDebugger *>(getNEODevice()->getDebugger()) : nullptr;
+    NEO::SourceLevelDebugger *getSourceLevelDebugger() { return getNEODevice()->getSourceLevelDebugger(); }
+    DebuggerL0 *getL0Debugger() {
+        auto debugger = getNEODevice()->getDebugger();
+        if (debugger) {
+            return !debugger->isLegacy() ? static_cast<DebuggerL0 *>(debugger) : nullptr;
+        }
+        return nullptr;
     }
+
     virtual NEO::GraphicsAllocation *getDebugSurface() const = 0;
+
+    virtual NEO::GraphicsAllocation *allocateManagedMemoryFromHostPtr(void *buffer,
+                                                                      size_t size, struct CommandList *commandList) = 0;
+
+    virtual NEO::GraphicsAllocation *allocateMemoryFromHostPtr(const void *buffer, size_t size) = 0;
+    virtual void setSysmanHandle(SysmanDevice *pSysmanDevice) = 0;
+    virtual SysmanDevice *getSysmanHandle() = 0;
+    virtual ze_result_t getCsrForOrdinalAndIndex(NEO::CommandStreamReceiver **csr, uint32_t ordinal, uint32_t index) = 0;
+    virtual ze_result_t mapOrdinalForAvailableEngineGroup(uint32_t *ordinal) = 0;
 };
 
 } // namespace L0

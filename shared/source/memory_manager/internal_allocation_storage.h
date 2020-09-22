@@ -6,10 +6,10 @@
  */
 
 #pragma once
+#include "shared/source/helpers/common_types.h"
 #include "shared/source/memory_manager/allocations_list.h"
 
 namespace NEO {
-class CommandStreamReceiver;
 
 class InternalAllocationStorage {
   public:
@@ -19,8 +19,10 @@ class InternalAllocationStorage {
     void storeAllocation(std::unique_ptr<GraphicsAllocation> gfxAllocation, uint32_t allocationUsage);
     void storeAllocationWithTaskCount(std::unique_ptr<GraphicsAllocation> gfxAllocation, uint32_t allocationUsage, uint32_t taskCount);
     std::unique_ptr<GraphicsAllocation> obtainReusableAllocation(size_t requiredSize, GraphicsAllocation::AllocationType allocationType);
+    std::unique_ptr<GraphicsAllocation> obtainTemporaryAllocationWithPtr(size_t requiredSize, const void *requiredPtr, GraphicsAllocation::AllocationType allocationType);
     AllocationsList &getTemporaryAllocations() { return temporaryAllocations; }
     AllocationsList &getAllocationsForReuse() { return allocationsForReuse; }
+    DeviceBitfield getDeviceBitfield() const;
 
   protected:
     void freeAllocationsList(uint32_t waitTaskCount, AllocationsList &allocationsList);

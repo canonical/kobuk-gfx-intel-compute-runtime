@@ -11,6 +11,7 @@
 #include "opencl/source/sampler/sampler.h"
 #include "opencl/test/unit_test/aub_tests/fixtures/aub_parent_kernel_fixture.h"
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 #include "test.h"
 
 #include <memory>
@@ -20,6 +21,8 @@ using namespace NEO;
 typedef AUBParentKernelFixture GEN8AUBParentKernelFixture;
 
 GEN8TEST_F(GEN8AUBParentKernelFixture, EnqueueParentKernel) {
+    REQUIRE_DEVICE_ENQUEUE_OR_SKIP(pClDevice);
+
     ASSERT_NE(nullptr, pKernel);
     ASSERT_TRUE(pKernel->isParentKernel);
 
@@ -53,7 +56,7 @@ GEN8TEST_F(GEN8AUBParentKernelFixture, EnqueueParentKernel) {
     desc.image_row_pitch = 0;
     desc.image_slice_pitch = 0;
 
-    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imageFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imageFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
     std::unique_ptr<Image> image(Image::create(
         pContext,
         {},
@@ -104,6 +107,6 @@ GEN8TEST_F(GEN8AUBParentKernelFixture, EnqueueParentKernel) {
     uint32_t expectedNumberOfEnqueues = 1;
     uint64_t gpuAddress = devQueue->getQueueBuffer()->getGpuAddress() + offsetof(IGIL_CommandQueue, m_controls.m_TotalNumberOfQueues);
 
-    AUBCommandStreamFixture::expectMemory<FamilyType>((void *)(uintptr_t)gpuAddress, &expectedNumberOfEnqueues, sizeof(uint32_t));
-    AUBCommandStreamFixture::expectMemory<FamilyType>((void *)(uintptr_t)buffer->getGraphicsAllocation()->getGpuAddress(), &argScalar, sizeof(size_t));
+    AUBCommandStreamFixture::expectMemory<FamilyType>(reinterpret_cast<void *>(gpuAddress), &expectedNumberOfEnqueues, sizeof(uint32_t));
+    AUBCommandStreamFixture::expectMemory<FamilyType>(reinterpret_cast<void *>(buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress()), &argScalar, sizeof(size_t));
 }

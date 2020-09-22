@@ -23,7 +23,7 @@ template <typename TagType>
 class TagAllocator;
 
 template <typename TagType>
-struct TagNode : public IDNode<TagNode<TagType>> {
+struct TagNode : public IDNode<TagNode<TagType>>, NonCopyableOrMovableClass {
   public:
     TagType *tagForCpuAccess;
 
@@ -37,18 +37,32 @@ struct TagNode : public IDNode<TagNode<TagType>> {
     }
 
     bool canBeReleased() const {
-        return !doNotReleaseNodes && tagForCpuAccess->isCompleted();
+        return (!doNotReleaseNodes) &&
+               (tagForCpuAccess->isCompleted()) &&
+               (tagForCpuAccess->getImplicitGpuDependenciesCount() == getImplicitCpuDependenciesCount());
     }
 
     void setDoNotReleaseNodes(bool doNotRelease) {
         doNotReleaseNodes = doNotRelease;
     }
 
+    void incImplicitCpuDependenciesCount() { implicitCpuDependenciesCount++; }
+
+    void initialize() {
+        tagForCpuAccess->initialize();
+        implicitCpuDependenciesCount.store(0);
+    }
+
+    uint32_t getImplicitCpuDependenciesCount() const { return implicitCpuDependenciesCount.load(); }
+
+    const TagAllocator<TagType> *getAllocator() const { return allocator; }
+
   protected:
     TagAllocator<TagType> *allocator = nullptr;
     GraphicsAllocation *gfxAllocation = nullptr;
     uint64_t gpuAddress = 0;
     std::atomic<uint32_t> refCount{0};
+    std::atomic<uint32_t> implicitCpuDependenciesCount{0};
     bool doNotReleaseNodes = false;
 
     template <typename TagType2>
@@ -61,11 +75,12 @@ class TagAllocator {
     using NodeType = TagNode<TagType>;
 
     TagAllocator(uint32_t rootDeviceIndex, MemoryManager *memMngr, size_t tagCount,
-                 size_t tagAlignment, size_t tagSize, bool doNotReleaseNodes) : rootDeviceIndex(rootDeviceIndex),
-                                                                                memoryManager(memMngr),
-                                                                                tagCount(tagCount),
-                                                                                tagAlignment(tagAlignment),
-                                                                                doNotReleaseNodes(doNotReleaseNodes) {
+                 size_t tagAlignment, size_t tagSize, bool doNotReleaseNodes,
+                 DeviceBitfield deviceBitfield) : deviceBitfield(deviceBitfield),
+                                                  rootDeviceIndex(rootDeviceIndex),
+                                                  memoryManager(memMngr),
+                                                  tagCount(tagCount),
+                                                  doNotReleaseNodes(doNotReleaseNodes) {
 
         this->tagSize = alignUp(tagSize, tagAlignment);
         populateFreeTags();
@@ -80,11 +95,6 @@ class TagAllocator {
             memoryManager->freeGraphicsMemory(gfxAllocation);
         }
         gfxAllocations.clear();
-
-        for (auto nodesMemory : tagPoolMemory) {
-            delete[] nodesMemory;
-        }
-        tagPoolMemory.clear();
     }
 
     NodeType *getTag() {
@@ -99,7 +109,7 @@ class TagAllocator {
         }
         usedTags.pushFrontOne(*node);
         node->incRefCount();
-        node->tagForCpuAccess->initialize();
+        node->initialize();
         return node;
     }
 
@@ -118,12 +128,12 @@ class TagAllocator {
     IDList<NodeType> usedTags;
     IDList<NodeType> deferredTags;
     std::vector<GraphicsAllocation *> gfxAllocations;
-    std::vector<NodeType *> tagPoolMemory;
+    std::vector<std::unique_ptr<NodeType[]>> tagPoolMemory;
 
+    const DeviceBitfield deviceBitfield;
     const uint32_t rootDeviceIndex;
     MemoryManager *memoryManager;
     size_t tagCount;
-    size_t tagAlignment;
     size_t tagSize;
     bool doNotReleaseNodes = false;
 
@@ -146,28 +156,25 @@ class TagAllocator {
         size_t allocationSizeRequired = tagCount * tagSize;
 
         auto allocationType = TagType::getAllocationType();
-        GraphicsAllocation *graphicsAllocation = memoryManager->allocateGraphicsMemoryWithProperties({rootDeviceIndex, allocationSizeRequired, allocationType});
+        AllocationProperties allocationProperties{rootDeviceIndex, allocationSizeRequired, allocationType, deviceBitfield};
+        GraphicsAllocation *graphicsAllocation = memoryManager->allocateGraphicsMemoryWithProperties(allocationProperties);
         gfxAllocations.push_back(graphicsAllocation);
 
-        uint64_t gpuBaseAddress = graphicsAllocation->getGpuAddress();
-        uintptr_t Size = graphicsAllocation->getUnderlyingBufferSize();
-        uintptr_t Start = reinterpret_cast<uintptr_t>(graphicsAllocation->getUnderlyingBuffer());
-        uintptr_t End = Start + Size;
-
-        NodeType *nodesMemory = new NodeType[tagCount];
+        auto nodesMemory = std::make_unique<NodeType[]>(tagCount);
 
         for (size_t i = 0; i < tagCount; ++i) {
+            auto tagOffset = i * tagSize;
+
             nodesMemory[i].allocator = this;
             nodesMemory[i].gfxAllocation = graphicsAllocation;
-            nodesMemory[i].tagForCpuAccess = reinterpret_cast<TagType *>(Start);
-            nodesMemory[i].gpuAddress = gpuBaseAddress + (i * tagSize);
+            nodesMemory[i].tagForCpuAccess = reinterpret_cast<TagType *>(ptrOffset(graphicsAllocation->getUnderlyingBuffer(), tagOffset));
+            nodesMemory[i].gpuAddress = graphicsAllocation->getGpuAddress() + tagOffset;
             nodesMemory[i].setDoNotReleaseNodes(doNotReleaseNodes);
+
             freeTags.pushTailOne(nodesMemory[i]);
-            Start += tagSize;
         }
-        DEBUG_BREAK_IF(Start > End);
-        UNUSED_VARIABLE(End);
-        tagPoolMemory.push_back(nodesMemory);
+
+        tagPoolMemory.push_back(std::move(nodesMemory));
     }
 
     void releaseDeferredTags() {

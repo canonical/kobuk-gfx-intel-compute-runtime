@@ -8,8 +8,8 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/os_interface/linux/os_interface.h"
 #include "shared/test/unit_test/helpers/default_hw_info.h"
+#include "shared/test/unit_test/helpers/variable_backup.h"
 
-#include "opencl/test/unit_test/helpers/variable_backup.h"
 #include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/os_interface/linux/drm_mock.h"
 #include "test.h"
@@ -24,7 +24,7 @@ TEST(OsInterfaceTest, whenOsInterfaceSetupsGmmInputArgsThenProperFileDescriptorI
     auto osInterface = new OSInterface();
     rootDeviceEnvironment->osInterface.reset(osInterface);
 
-    auto drm = new DrmMock(*rootDeviceEnvironment);
+    auto drm = new DrmMock(fakeFd, *rootDeviceEnvironment);
     osInterface->get()->setDrm(drm);
 
     GMM_INIT_IN_ARGS gmmInputArgs = {};
@@ -34,6 +34,7 @@ TEST(OsInterfaceTest, whenOsInterfaceSetupsGmmInputArgsThenProperFileDescriptorI
 
     auto expectedFileDescriptor = drm->getFileDescriptor();
     EXPECT_EQ(static_cast<uint32_t>(expectedFileDescriptor), gmmInputArgs.FileDescriptor);
+    EXPECT_EQ(GMM_CLIENT::GMM_OCL_VISTA, gmmInputArgs.ClientType);
 }
 
 TEST(GmmHelperTest, whenCreateGmmHelperWithoutOsInterfaceThenPassedFileDescriptorIsZeroed) {
@@ -45,5 +46,6 @@ TEST(GmmHelperTest, whenCreateGmmHelperWithoutOsInterfaceThenPassedFileDescripto
 
     gmmHelper.reset(new GmmHelper(nullptr, defaultHwInfo.get()));
     EXPECT_EQ(expectedFileDescriptor, passedInputArgs.FileDescriptor);
+    EXPECT_EQ(GMM_CLIENT::GMM_OCL_VISTA, passedInputArgs.ClientType);
 }
 } // namespace NEO

@@ -36,9 +36,12 @@ struct AppendSurfaceStateParamsTest : public ::testing::Test {
     }
 
     void createImage() {
-        auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat, context.getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+        auto surfaceFormat = Image::getSurfaceFormatFromTable(
+            flags, &imageFormat, context.getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
         EXPECT_NE(nullptr, surfaceFormat);
-        image.reset(Image::create(&context, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
+        image.reset(Image::create(
+            &context, MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context.getDevice(0)->getDevice()),
+            flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     }
 
     cl_int retVal = CL_SUCCESS;
@@ -56,7 +59,7 @@ GEN11TEST_F(AppendSurfaceStateParamsTest, givenImageFormatWithoutAlphaChannelWhe
     createImage();
 
     auto imageHw = static_cast<ImageHw<ICLFamily> *>(image.get());
-    imageHw->appendSurfaceStateParams(&surfaceState);
+    imageHw->appendSurfaceStateParams(&surfaceState, context.getDevice(0)->getRootDeviceIndex());
 
     bool tapDiscardConfigChanged = RENDER_SURFACE_STATE::SAMPLE_TAP_DISCARD_DISABLE_DISABLE != surfaceState.getSampleTapDiscardDisable();
     EXPECT_FALSE(tapDiscardConfigChanged);
@@ -68,7 +71,7 @@ GEN11TEST_F(AppendSurfaceStateParamsTest, givenImageFormatWithAlphaChannelWhenAp
     createImage();
 
     auto imageHw = static_cast<ImageHw<ICLFamily> *>(image.get());
-    imageHw->appendSurfaceStateParams(&surfaceState);
+    imageHw->appendSurfaceStateParams(&surfaceState, context.getDevice(0)->getRootDeviceIndex());
 
     bool tapDiscardConfigChanged = RENDER_SURFACE_STATE::SAMPLE_TAP_DISCARD_DISABLE_DISABLE != surfaceState.getSampleTapDiscardDisable();
     EXPECT_TRUE(tapDiscardConfigChanged);
@@ -86,7 +89,7 @@ GEN11TEST_F(gen11ImageTests, givenImageForGen11WhenClearColorParametersAreSetThe
 
     EXPECT_EQ(0, memcmp(&surfaceStateBefore, &surfaceStateAfter, sizeof(RENDER_SURFACE_STATE)));
 
-    setClearColorParams<FamilyType>(&surfaceStateAfter, imageHw->getGraphicsAllocation()->getDefaultGmm());
+    setClearColorParams<FamilyType>(&surfaceStateAfter, imageHw->getGraphicsAllocation(context.getDevice(0)->getRootDeviceIndex())->getDefaultGmm());
 
     EXPECT_EQ(0, memcmp(&surfaceStateBefore, &surfaceStateAfter, sizeof(RENDER_SURFACE_STATE)));
 }

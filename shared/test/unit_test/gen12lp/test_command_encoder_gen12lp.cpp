@@ -7,16 +7,18 @@
 
 #include "shared/source/command_container/cmdcontainer.h"
 #include "shared/source/command_container/command_encoder.h"
+#include "shared/source/helpers/preamble.h"
+#include "shared/source/os_interface/os_context.h"
+#include "shared/test/unit_test/cmd_parse/gen_cmd_parse.h"
 
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
-#include "opencl/test/unit_test/gen_common/gen_cmd_parse.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "test.h"
 
 #include "reg_configs_common.h"
 
 using namespace NEO;
 
-using CommandEncoderTest = Test<DeviceFixture>;
+using CommandEncoderTest = Test<ClDeviceFixture>;
 
 GEN12LPTEST_F(CommandEncoderTest, givenAdjustStateComputeModeStateComputeModeShowsNonCoherencySet) {
     using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
@@ -61,4 +63,57 @@ GEN12LPTEST_F(CommandEncoderTest, givenCommandContainerWhenEncodeL3StateThenSetC
     auto cmd = genCmdCast<MI_LOAD_REGISTER_IMM *>(*itorLRI);
     EXPECT_EQ(cmd->getRegisterOffset(), 0xB134u);
     EXPECT_EQ(cmd->getDataDword(), 0xD0000020u);
+}
+
+struct MockOsContext : public OsContext {
+    using OsContext::engineType;
+};
+
+GEN12LPTEST_F(CommandEncoderTest, givenVariousEngineTypesWhenEncodeSBAThenAdditionalPipelineSelectWAIsAppliedOnlyToRcs) {
+    using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
+    using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
+    using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
+
+    CommandContainer cmdContainer;
+
+    bool ret = cmdContainer.initialize(pDevice);
+    ASSERT_TRUE(ret);
+
+    {
+        STATE_BASE_ADDRESS sba;
+        EncodeStateBaseAddress<FamilyType>::encode(cmdContainer, sba);
+
+        GenCmdList commands;
+        CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer.getCommandStream()->getCpuBase(), 0), cmdContainer.getCommandStream()->getUsed());
+        auto itorLRI = find<PIPELINE_SELECT *>(commands.begin(), commands.end());
+        EXPECT_NE(itorLRI, commands.end());
+    }
+
+    cmdContainer.reset();
+
+    {
+        static_cast<MockOsContext *>(pDevice->getDefaultEngine().osContext)->engineType = aub_stream::ENGINE_CCS;
+
+        STATE_BASE_ADDRESS sba;
+        EncodeStateBaseAddress<FamilyType>::encode(cmdContainer, sba);
+
+        GenCmdList commands;
+        CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer.getCommandStream()->getCpuBase(), 0), cmdContainer.getCommandStream()->getUsed());
+        auto itorLRI = find<PIPELINE_SELECT *>(commands.begin(), commands.end());
+        EXPECT_EQ(itorLRI, commands.end());
+    }
+}
+
+GEN12LPTEST_F(CommandEncoderTest, givenVariousEngineTypesWhenEstimateCommandBufferSizeThenRcsHasAdditionalPipelineSelectWASize) {
+    using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
+    using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
+
+    auto sizeWA = EncodeDispatchKernel<FamilyType>::estimateEncodeDispatchKernelCmdsSize(pDevice);
+    static_cast<MockOsContext *>(pDevice->getDefaultEngine().osContext)->engineType = aub_stream::ENGINE_CCS;
+    auto size = EncodeDispatchKernel<FamilyType>::estimateEncodeDispatchKernelCmdsSize(pDevice);
+
+    auto expectedDiff = 2 * PreambleHelper<FamilyType>::getCmdSizeForPipelineSelect(pDevice->getHardwareInfo());
+    auto diff = sizeWA - size;
+
+    EXPECT_EQ(expectedDiff, diff);
 }

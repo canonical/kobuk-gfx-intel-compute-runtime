@@ -9,22 +9,21 @@
 #include "shared/source/os_interface/os_context.h"
 
 #include "opencl/source/memory_manager/os_agnostic_memory_manager.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "test.h"
 
 using namespace NEO;
 
-typedef Test<DeviceFixture> KernelSubstituteTest;
+typedef Test<ClDeviceFixture> KernelSubstituteTest;
 
 TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithGreaterSizeThenAllocatesNewKernelAllocation) {
     MockKernelWithInternals kernel(*pClDevice);
-    auto pHeader = const_cast<SKernelBinaryHeaderCommon *>(kernel.kernelInfo.heapInfo.pKernelHeader);
     const size_t initialHeapSize = 0x40;
-    pHeader->KernelHeapSize = initialHeapSize;
+    kernel.kernelInfo.heapInfo.KernelHeapSize = initialHeapSize;
 
     EXPECT_EQ(nullptr, kernel.kernelInfo.kernelAllocation);
-    kernel.kernelInfo.createKernelAllocation(pDevice->getRootDeviceIndex(), pDevice->getMemoryManager());
+    kernel.kernelInfo.createKernelAllocation(*pDevice);
     auto firstAllocation = kernel.kernelInfo.kernelAllocation;
     EXPECT_NE(nullptr, firstAllocation);
     auto firstAllocationSize = firstAllocation->getUnderlyingBufferSize();
@@ -50,12 +49,11 @@ TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithGreaterSizeT
 
 TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithSameSizeThenDoesNotAllocateNewKernelAllocation) {
     MockKernelWithInternals kernel(*pClDevice);
-    auto pHeader = const_cast<SKernelBinaryHeaderCommon *>(kernel.kernelInfo.heapInfo.pKernelHeader);
     const size_t initialHeapSize = 0x40;
-    pHeader->KernelHeapSize = initialHeapSize;
+    kernel.kernelInfo.heapInfo.KernelHeapSize = initialHeapSize;
 
     EXPECT_EQ(nullptr, kernel.kernelInfo.kernelAllocation);
-    kernel.kernelInfo.createKernelAllocation(pDevice->getRootDeviceIndex(), pDevice->getMemoryManager());
+    kernel.kernelInfo.createKernelAllocation(*pDevice);
     auto firstAllocation = kernel.kernelInfo.kernelAllocation;
     EXPECT_NE(nullptr, firstAllocation);
     auto firstAllocationSize = firstAllocation->getUnderlyingBufferSize();
@@ -80,12 +78,11 @@ TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithSameSizeThen
 
 TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithSmallerSizeThenDoesNotAllocateNewKernelAllocation) {
     MockKernelWithInternals kernel(*pClDevice);
-    auto pHeader = const_cast<SKernelBinaryHeaderCommon *>(kernel.kernelInfo.heapInfo.pKernelHeader);
     const size_t initialHeapSize = 0x40;
-    pHeader->KernelHeapSize = initialHeapSize;
+    kernel.kernelInfo.heapInfo.KernelHeapSize = initialHeapSize;
 
     EXPECT_EQ(nullptr, kernel.kernelInfo.kernelAllocation);
-    kernel.kernelInfo.createKernelAllocation(pDevice->getRootDeviceIndex(), pDevice->getMemoryManager());
+    kernel.kernelInfo.createKernelAllocation(*pDevice);
     auto firstAllocation = kernel.kernelInfo.kernelAllocation;
     EXPECT_NE(nullptr, firstAllocation);
     auto firstAllocationSize = firstAllocation->getUnderlyingBufferSize();
@@ -110,14 +107,13 @@ TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithSmallerSizeT
 
 TEST_F(KernelSubstituteTest, givenKernelWithUsedKernelAllocationWhenSubstituteKernelHeapAndAllocateNewMemoryThenStoreOldAllocationOnTemporaryList) {
     MockKernelWithInternals kernel(*pClDevice);
-    auto pHeader = const_cast<SKernelBinaryHeaderCommon *>(kernel.kernelInfo.heapInfo.pKernelHeader);
     auto memoryManager = pDevice->getMemoryManager();
     auto &commandStreamReceiver = pDevice->getGpgpuCommandStreamReceiver();
 
     const size_t initialHeapSize = 0x40;
-    pHeader->KernelHeapSize = initialHeapSize;
+    kernel.kernelInfo.heapInfo.KernelHeapSize = initialHeapSize;
 
-    kernel.kernelInfo.createKernelAllocation(pDevice->getRootDeviceIndex(), memoryManager);
+    kernel.kernelInfo.createKernelAllocation(*pDevice);
     auto firstAllocation = kernel.kernelInfo.kernelAllocation;
 
     uint32_t notReadyTaskCount = *commandStreamReceiver.getTagAddress() + 1u;

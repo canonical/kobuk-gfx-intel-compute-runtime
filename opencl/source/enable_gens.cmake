@@ -5,33 +5,28 @@
 #
 
 set(RUNTIME_SRCS_GENX_CPP_WINDOWS
-  windows/command_stream_receiver
-  windows/gmm_callbacks
+    windows/command_stream_receiver
+    windows/gmm_callbacks
 )
 
 set(RUNTIME_SRCS_GENX_CPP_LINUX
-  linux/command_stream_receiver
-)
-
-set(RUNTIME_SRCS_GENX_H_BASE
-  aub_mapper.h
+    linux/command_stream_receiver
 )
 
 set(RUNTIME_SRCS_GENX_CPP_BASE
-  aub_command_stream_receiver
-  aub_mem_dump
-  buffer
-  command_queue
-  command_stream_receiver_simulated_common_hw
-  experimental_command_buffer
-  gpgpu_walker
-  hardware_commands_helper
-  hw_helper
-  hw_info
-  image
-  sampler
-  state_base_address
-  tbx_command_stream_receiver
+    aub_command_stream_receiver
+    aub_mem_dump
+    buffer
+    command_queue
+    command_stream_receiver_simulated_common_hw
+    experimental_command_buffer
+    gpgpu_walker
+    hardware_commands_helper
+    hw_info
+    image
+    sampler
+    state_base_address
+    tbx_command_stream_receiver
 )
 
 macro(macro_for_each_platform)
@@ -50,10 +45,20 @@ macro(macro_for_each_platform)
   endforeach()
 
   foreach(PLATFORM_FILE "hw_info_${PLATFORM_IT_LOWER}.inl")
-    list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_BASE ${GENX_PREFIX}/${PLATFORM_FILE})
+    foreach(BRANCH_DIR ${BRANCH_DIR_LIST})
+      if(EXISTS ${GENX_PREFIX}${BRANCH_DIR}${PLATFORM_FILE})
+        list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_BASE ${GENX_PREFIX}${BRANCH_DIR}${PLATFORM_FILE})
+      endif()
+    endforeach()
   endforeach()
 
-  list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_LINUX ${GENX_PREFIX}/linux/hw_info_config_${PLATFORM_IT_LOWER}.inl)
+  foreach(BRANCH_DIR ${BRANCH_DIR_LIST})
+    string(REGEX REPLACE "/$" "" _BRANCH_FILENAME_SUFFIX "${BRANCH_DIR}")
+    string(REGEX REPLACE "^/" "_" _BRANCH_FILENAME_SUFFIX "${_BRANCH_FILENAME_SUFFIX}")
+    if(EXISTS ${GENX_PREFIX}${BRANCH_DIR}linux/hw_info_config_${PLATFORM_IT_LOWER}${_BRANCH_FILENAME_SUFFIX}.inl)
+      list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_LINUX ${GENX_PREFIX}${BRANCH_DIR}linux/hw_info_config_${PLATFORM_IT_LOWER}${_BRANCH_FILENAME_SUFFIX}.inl)
+    endif()
+  endforeach()
 endmacro()
 
 macro(macro_for_each_gen)
@@ -88,11 +93,21 @@ macro(macro_for_each_gen)
 
   apply_macro_for_each_platform()
 
-  list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_BASE ${NEO_SHARED_DIRECTORY}/${GEN_TYPE_LOWER}/image_core_${GEN_TYPE_LOWER}.cpp)
+  foreach(BRANCH_DIR ${BRANCH_DIR_LIST})
+    string(REGEX REPLACE "/$" "" _BRANCH_FILENAME_SUFFIX "${BRANCH_DIR}")
+    string(REGEX REPLACE "^/" "_" _BRANCH_FILENAME_SUFFIX "${_BRANCH_FILENAME_SUFFIX}")
+    if(EXISTS ${GENX_PREFIX}${BRANCH_DIR}windows/hw_info_config_${GEN_TYPE_LOWER}${_BRANCH_FILENAME_SUFFIX}.cpp)
+      list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_WINDOWS ${GENX_PREFIX}${BRANCH_DIR}windows/hw_info_config_${GEN_TYPE_LOWER}${_BRANCH_FILENAME_SUFFIX}.cpp)
+    endif()
+    if(EXISTS ${GENX_PREFIX}${BRANCH_DIR}linux/hw_info_config_${GEN_TYPE_LOWER}${_BRANCH_FILENAME_SUFFIX}.cpp)
+      list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_LINUX ${GENX_PREFIX}${BRANCH_DIR}linux/hw_info_config_${GEN_TYPE_LOWER}${_BRANCH_FILENAME_SUFFIX}.cpp)
+    endif()
+    set(SRC_FILE ${NEO_SHARED_DIRECTORY}${BRANCH_DIR}${GEN_TYPE_LOWER}/image_core_${GEN_TYPE_LOWER}.cpp)
+    if(EXISTS ${SRC_FILE})
+      list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_BASE ${SRC_FILE})
+    endif()
+  endforeach()
 
-  list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_WINDOWS ${GENX_PREFIX}/windows/hw_info_config_${GEN_TYPE_LOWER}.cpp)
-  list(APPEND RUNTIME_SRCS_${GEN_TYPE}_CPP_LINUX ${GENX_PREFIX}/linux/hw_info_config_${GEN_TYPE_LOWER}.cpp)
-  
   list(APPEND ${GEN_TYPE}_SRC_LINK_BASE ${GENX_PREFIX}/enable_family_full_ocl_${GEN_TYPE_LOWER}.cpp)
 
   list(APPEND RUNTIME_SRCS_GENX_ALL_BASE ${RUNTIME_SRCS_${GEN_TYPE}_H_BASE})

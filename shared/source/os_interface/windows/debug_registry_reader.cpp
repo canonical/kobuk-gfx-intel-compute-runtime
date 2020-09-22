@@ -8,6 +8,7 @@
 #include "shared/source/os_interface/windows/debug_registry_reader.h"
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/os_interface/windows/sys_calls.h"
 #include "shared/source/os_interface/windows/windows_wrapper.h"
 #include "shared/source/utilities/debug_settings_reader.h"
 
@@ -17,6 +18,10 @@ namespace NEO {
 
 SettingsReader *SettingsReader::createOsReader(bool userScope, const std::string &regKey) {
     return new RegistryReader(userScope, regKey);
+}
+
+char *SettingsReader::getenv(const char *settingName) {
+    return SysCalls::getenv(settingName);
 }
 
 RegistryReader::RegistryReader(bool userScope, const std::string &regKey) : registryReadRootKey(regKey) {
@@ -43,8 +48,12 @@ bool RegistryReader::getSetting(const char *settingName, bool defaultValue) {
 }
 
 int32_t RegistryReader::getSetting(const char *settingName, int32_t defaultValue) {
+    return static_cast<int32_t>(getSetting(settingName, static_cast<int64_t>(defaultValue)));
+}
+
+int64_t RegistryReader::getSetting(const char *settingName, int64_t defaultValue) {
     HKEY Key{};
-    DWORD value = defaultValue;
+    int64_t value = defaultValue;
     DWORD success = ERROR_SUCCESS;
     bool readSettingFromEnv = true;
 
@@ -55,14 +64,13 @@ int32_t RegistryReader::getSetting(const char *settingName, int32_t defaultValue
                             &Key);
 
     if (ERROR_SUCCESS == success) {
-        DWORD regType;
-        DWORD size = sizeof(DWORD);
-        DWORD regData;
+        DWORD size = sizeof(int64_t);
+        int64_t regData;
 
         success = RegQueryValueExA(Key,
                                    settingName,
                                    NULL,
-                                   &regType,
+                                   NULL,
                                    reinterpret_cast<LPBYTE>(&regData),
                                    &size);
         if (ERROR_SUCCESS == success) {
@@ -140,7 +148,7 @@ std::string RegistryReader::getSetting(const char *settingName, const std::strin
     }
 
     if (readSettingFromEnv) {
-        const char *envValue = getenv(settingName);
+        const char *envValue = strcmp(processName.c_str(), settingName) ? getenv(settingName) : getenv("cl_cache_dir");
         if (envValue) {
             keyValue.assign(envValue);
         }

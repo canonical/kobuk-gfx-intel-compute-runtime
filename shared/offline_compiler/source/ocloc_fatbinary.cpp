@@ -20,16 +20,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <vector>
 
 namespace NEO {
 
-bool requestedFatBinary(int argc, const char *argv[]) {
-    for (int argIndex = 1; argIndex < argc; argIndex++) {
-        const auto &currArg = argv[argIndex];
-        const bool hasMoreArgs = (argIndex + 1 < argc);
+bool requestedFatBinary(const std::vector<std::string> &args) {
+    for (size_t argIndex = 1; argIndex < args.size(); argIndex++) {
+        const auto &currArg = args[argIndex];
+        const bool hasMoreArgs = (argIndex + 1 < args.size());
         if ((ConstStringRef("-device") == currArg) && hasMoreArgs) {
-            ConstStringRef deviceArg(argv[argIndex + 1], strlen(argv[argIndex + 1]));
+            ConstStringRef deviceArg(args[argIndex + 1]);
             return deviceArg.contains("*") || deviceArg.contains("-") || deviceArg.contains(",") || deviceArg.contains("gen");
         }
     }
@@ -57,18 +56,32 @@ PRODUCT_FAMILY asProductId(ConstStringRef product, const std::vector<PRODUCT_FAM
     return IGFX_UNKNOWN;
 }
 
-GFXCORE_FAMILY asGfxCoreId(ConstStringRef core) {
-    ConstStringRef coreIgnoreG(core.begin() + 1, core.size() - 1);
+std::vector<GFXCORE_FAMILY> asGfxCoreIdList(ConstStringRef core) {
+    std::vector<GFXCORE_FAMILY> result;
+
+    constexpr size_t genPrefixLength = 3;
+    auto coreSuffixBeg = core.begin() + genPrefixLength;
+    size_t coreSuffixLength = core.end() - coreSuffixBeg;
+    ConstStringRef coreSuffix(coreSuffixBeg, coreSuffixLength);
+
     for (unsigned int coreId = 0; coreId < IGFX_MAX_CORE; ++coreId) {
-        if (nullptr == familyName[coreId]) {
+        auto name = familyName[coreId];
+        if (name == nullptr)
             continue;
-        }
-        if (ConstStringRef(familyName[coreId] + 1, strlen(familyName[coreId]) - 1) == coreIgnoreG) {
-            return static_cast<GFXCORE_FAMILY>(coreId);
-        }
+
+        auto nameSuffix = name + genPrefixLength;
+        auto nameNumberEnd = nameSuffix;
+        for (; *nameNumberEnd != '\0' && isdigit(*nameNumberEnd); ++nameNumberEnd)
+            ;
+        size_t nameNumberLength = nameNumberEnd - nameSuffix;
+        if (nameNumberLength > coreSuffixLength)
+            continue;
+
+        if (ConstStringRef(nameSuffix, std::min(coreSuffixLength, strlen(nameSuffix))) == coreSuffix)
+            result.push_back(static_cast<GFXCORE_FAMILY>(coreId));
     }
 
-    return IGFX_UNKNOWN_CORE;
+    return result;
 }
 
 void appendPlatformsForGfxCore(GFXCORE_FAMILY core, const std::vector<PRODUCT_FAMILY> &allSupportedPlatforms, std::vector<PRODUCT_FAMILY> &out) {
@@ -100,13 +113,14 @@ std::vector<ConstStringRef> getTargetPlatformsForFatbinary(ConstStringRef device
             if (range.size() == 1) {
                 // open range , from-max or min-to
                 if (range[0].contains("gen")) {
-                    auto coreId = asGfxCoreId(range[0]);
-                    if (IGFX_UNKNOWN_CORE == coreId) {
+                    auto coreIdList = asGfxCoreIdList(range[0]);
+                    if (coreIdList.empty()) {
                         argHelper->printf("Unknown device : %s\n", set.str().c_str());
                         return {};
                     }
                     if ('-' == set[0]) {
                         // to
+                        auto coreId = coreIdList.back();
                         unsigned int coreIt = IGFX_UNKNOWN_CORE;
                         ++coreIt;
                         while (coreIt <= static_cast<unsigned int>(coreId)) {
@@ -115,7 +129,7 @@ std::vector<ConstStringRef> getTargetPlatformsForFatbinary(ConstStringRef device
                         }
                     } else {
                         // from
-                        unsigned int coreIt = coreId;
+                        unsigned int coreIt = coreIdList.front();
                         while (coreIt < static_cast<unsigned int>(IGFX_MAX_CORE)) {
                             appendPlatformsForGfxCore(static_cast<GFXCORE_FAMILY>(coreIt), allSupportedPlatforms, requestedPlatforms);
                             ++coreIt;
@@ -143,16 +157,19 @@ std::vector<ConstStringRef> getTargetPlatformsForFatbinary(ConstStringRef device
                         argHelper->printf("Ranges mixing platforms and gfxCores is not supported : %s - should be genFrom-genTo or platformFrom-platformTo\n", set.str().c_str());
                         return {};
                     }
-                    auto coreFrom = asGfxCoreId(range[0]);
-                    auto coreTo = asGfxCoreId(range[1]);
-                    if (IGFX_UNKNOWN_CORE == coreFrom) {
+                    auto coreFromList = asGfxCoreIdList(range[0]);
+                    auto coreToList = asGfxCoreIdList(range[1]);
+                    if (coreFromList.empty()) {
                         argHelper->printf("Unknown device : %s\n", set.str().c_str());
                         return {};
                     }
-                    if (IGFX_UNKNOWN_CORE == coreTo) {
+                    if (coreToList.empty()) {
                         argHelper->printf("Unknown device : %s\n", set.str().c_str());
                         return {};
                     }
+
+                    auto coreFrom = coreFromList.front();
+                    auto coreTo = coreToList.back();
                     if (coreFrom > coreTo) {
                         std::swap(coreFrom, coreTo);
                     }
@@ -184,12 +201,13 @@ std::vector<ConstStringRef> getTargetPlatformsForFatbinary(ConstStringRef device
             if (set.size() == genArg.size()) {
                 argHelper->printf("Invalid gen-based device : %s - gen should be followed by a number\n", set.str().c_str());
             } else {
-                auto coreId = asGfxCoreId(set);
-                if (IGFX_UNKNOWN_CORE == coreId) {
+                auto coreIdList = asGfxCoreIdList(set);
+                if (coreIdList.empty()) {
                     argHelper->printf("Unknown device : %s\n", set.str().c_str());
                     return {};
                 }
-                appendPlatformsForGfxCore(coreId, allSupportedPlatforms, requestedPlatforms);
+                for (auto coreId : coreIdList)
+                    appendPlatformsForGfxCore(coreId, allSupportedPlatforms, requestedPlatforms);
             }
         } else {
             auto prodId = asProductId(set, allSupportedPlatforms);
@@ -203,21 +221,17 @@ std::vector<ConstStringRef> getTargetPlatformsForFatbinary(ConstStringRef device
     return toProductNames(requestedPlatforms);
 }
 
-int buildFatbinary(int argc, const char *argv[], OclocArgHelper *argHelper) {
+int buildFatBinary(const std::vector<std::string> &args, OclocArgHelper *argHelper) {
     std::string pointerSizeInBits = (sizeof(void *) == 4) ? "32" : "64";
-    int deviceArgIndex = -1;
+    size_t deviceArgIndex = -1;
     std::string inputFileName = "";
     std::string outputFileName = "";
     std::string outputDirectory = "";
 
-    std::vector<std::string> argsCopy;
-    if (argc > 1) {
-        argsCopy.assign(argv, argv + argc);
-    }
-
-    for (int argIndex = 1; argIndex < argc; argIndex++) {
-        const auto &currArg = argv[argIndex];
-        const bool hasMoreArgs = (argIndex + 1 < argc);
+    std::vector<std::string> argsCopy(args);
+    for (size_t argIndex = 1; argIndex < args.size(); argIndex++) {
+        const auto &currArg = args[argIndex];
+        const bool hasMoreArgs = (argIndex + 1 < args.size());
         if ((ConstStringRef("-device") == currArg) && hasMoreArgs) {
             deviceArgIndex = argIndex + 1;
             ++argIndex;
@@ -226,21 +240,21 @@ int buildFatbinary(int argc, const char *argv[], OclocArgHelper *argHelper) {
         } else if ((CompilerOptions::arch64bit == currArg) || (ConstStringRef("-64") == currArg)) {
             pointerSizeInBits = "64";
         } else if ((ConstStringRef("-file") == currArg) && hasMoreArgs) {
-            inputFileName = argv[argIndex + 1];
+            inputFileName = args[argIndex + 1];
             ++argIndex;
         } else if ((ConstStringRef("-output") == currArg) && hasMoreArgs) {
-            outputFileName = argv[argIndex + 1];
+            outputFileName = args[argIndex + 1];
             ++argIndex;
         } else if ((ConstStringRef("-out_dir") == currArg) && hasMoreArgs) {
-            outputDirectory = argv[argIndex + 1];
+            outputDirectory = args[argIndex + 1];
             ++argIndex;
         }
     }
 
     std::vector<ConstStringRef> targetPlatforms;
-    targetPlatforms = getTargetPlatformsForFatbinary(ConstStringRef(argv[deviceArgIndex], strlen(argv[deviceArgIndex])), argHelper);
+    targetPlatforms = getTargetPlatformsForFatbinary(ConstStringRef(args[deviceArgIndex]), argHelper);
     if (targetPlatforms.empty()) {
-        argHelper->printf("Failed to parse target devices from : %s\n", argv[deviceArgIndex]);
+        argHelper->printf("Failed to parse target devices from : %s\n", args[deviceArgIndex].c_str());
         return 1;
     }
 
@@ -250,7 +264,7 @@ int buildFatbinary(int argc, const char *argv[], OclocArgHelper *argHelper) {
         int retVal = 0;
         argsCopy[deviceArgIndex] = targetPlatform.str();
 
-        std::unique_ptr<OfflineCompiler> pCompiler{OfflineCompiler::create(argc, argsCopy, false, retVal, argHelper)};
+        std::unique_ptr<OfflineCompiler> pCompiler{OfflineCompiler::create(argsCopy.size(), argsCopy, false, retVal, argHelper)};
         if (ErrorCode::SUCCESS != retVal) {
             argHelper->printf("Error! Couldn't create OfflineCompiler. Exiting.\n");
             return retVal;
@@ -271,8 +285,8 @@ int buildFatbinary(int argc, const char *argv[], OclocArgHelper *argHelper) {
             } else {
                 argHelper->printf("Build failed for : %s with error code: %d\n", (targetPlatform.str() + "." + std::to_string(stepping)).c_str(), retVal);
                 argHelper->printf("Command was:");
-                for (auto i = 0; i < argc; ++i)
-                    argHelper->printf(" %s", argv[i]);
+                for (const auto &arg : argsCopy)
+                    argHelper->printf(" %s", arg.c_str());
                 argHelper->printf("\n");
             }
         }

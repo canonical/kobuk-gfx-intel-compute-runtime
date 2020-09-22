@@ -21,11 +21,6 @@
 
 #include <string>
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Winconsistent-missing-override"
-#endif
-
 namespace NEO {
 
 struct MockAubFileStreamMockMmioWrite : public AubMemDump::AubFileStream {
@@ -106,13 +101,13 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
         AUBCommandStreamReceiverHw<GfxFamily>::pollForCompletion();
         pollForCompletionCalled = true;
     }
-    void expectMemoryEqual(void *gfxAddress, const void *srcAddress, size_t length) override {
-        AUBCommandStreamReceiverHw<GfxFamily>::expectMemoryEqual(gfxAddress, srcAddress, length);
+    bool expectMemoryEqual(void *gfxAddress, const void *srcAddress, size_t length) override {
         expectMemoryEqualCalled = true;
+        return AUBCommandStreamReceiverHw<GfxFamily>::expectMemoryEqual(gfxAddress, srcAddress, length);
     }
-    void expectMemoryNotEqual(void *gfxAddress, const void *srcAddress, size_t length) override {
-        AUBCommandStreamReceiverHw<GfxFamily>::expectMemoryNotEqual(gfxAddress, srcAddress, length);
+    bool expectMemoryNotEqual(void *gfxAddress, const void *srcAddress, size_t length) override {
         expectMemoryNotEqualCalled = true;
+        return AUBCommandStreamReceiverHw<GfxFamily>::expectMemoryNotEqual(gfxAddress, srcAddress, length);
     }
     bool waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) override {
         return true;
@@ -158,7 +153,7 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
     bool fileIsOpen = false;
     std::string openFileName = "";
 
-    MOCK_METHOD0(addPatchInfoComments, bool(void));
+    MOCK_METHOD(bool, addPatchInfoComments, (), (override));
 
     using CommandStreamReceiverHw<GfxFamily>::localMemoryEnabled;
 };
@@ -188,15 +183,17 @@ std::unique_ptr<AubExecutionEnvironment> getEnvironment(bool createTagAllocation
 
     executionEnvironment->initializeMemoryManager();
     auto commandStreamReceiver = std::make_unique<CsrType>("", standalone, *executionEnvironment, rootDeviceIndex);
-    if (createTagAllocation) {
-        commandStreamReceiver->initializeTagAllocation();
-    }
 
     auto osContext = executionEnvironment->memoryManager->createAndRegisterOsContext(commandStreamReceiver.get(),
                                                                                      getChosenEngineType(*defaultHwInfo), 1,
                                                                                      PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo),
                                                                                      false, false, false);
     commandStreamReceiver->setupContext(*osContext);
+
+    if (createTagAllocation) {
+        commandStreamReceiver->initializeTagAllocation();
+    }
+    commandStreamReceiver->createGlobalFenceAllocation();
 
     std::unique_ptr<AubExecutionEnvironment> aubExecutionEnvironment(new AubExecutionEnvironment);
     if (allocateCommandBuffer) {
@@ -207,7 +204,3 @@ std::unique_ptr<AubExecutionEnvironment> getEnvironment(bool createTagAllocation
     return aubExecutionEnvironment;
 }
 } // namespace NEO
-
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif

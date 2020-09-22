@@ -6,7 +6,7 @@
  */
 
 #include "shared/source/gen11/hw_cmds_lkf.h"
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/helpers/constants.h"
 
 #include "opencl/source/aub_mem_dump/aub_services.h"
 
@@ -56,7 +56,7 @@ const RuntimeCapabilityTable LKF::capabilityTable{
     false,                                         // ftrSupportsFP64
     false,                                         // ftrSupports64BitMath
     false,                                         // ftrSvm
-    true,                                          // ftrSupportsCoherency
+    false,                                         // ftrSupportsCoherency
     false,                                         // ftrSupportsVmeAvcTextureSampler
     false,                                         // ftrSupportsVmeAvcPreemption
     false,                                         // ftrRenderCompressedBuffers
@@ -69,8 +69,14 @@ const RuntimeCapabilityTable LKF::capabilityTable{
     false,                                         // supportsVme
     false,                                         // supportCacheFlushAfterWalker
     true,                                          // supportsImages
-    true,                                          // supportsDeviceEnqueue
-    true                                           // hostPtrTrackingEnabled
+    false,                                         // supportsDeviceEnqueue
+    false,                                         // supportsPipes
+    false,                                         // supportsOcl21Features
+    false,                                         // supportsOnDemandPageFaults
+    false,                                         // supportsIndependentForwardProgress
+    true,                                          // hostPtrTrackingEnabled
+    false,                                         // levelZeroSupported
+    true                                           // isIntegratedDevice
 };
 
 WorkaroundTable LKF::workaroundTable = {};

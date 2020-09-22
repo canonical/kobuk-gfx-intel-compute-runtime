@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/helpers/ptr_math.h"
+#include "shared/test/unit_test/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 
 #include "opencl/source/command_queue/command_queue.h"
@@ -16,7 +17,6 @@
 #include "opencl/test/unit_test/fixtures/hello_world_fixture.h"
 #include "opencl/test/unit_test/fixtures/simple_arg_fixture.h"
 #include "opencl/test/unit_test/fixtures/two_walker_fixture.h"
-#include "opencl/test/unit_test/gen_common/gen_cmd_parse.h"
 #include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "test.h"
@@ -163,8 +163,8 @@ HWTEST_P(AUBHelloWorldIntegrateTest, simple) {
     cl_event *eventWaitList = nullptr;
     cl_event *event = nullptr;
 
-    writeMemory<FamilyType>(destBuffer->getGraphicsAllocation());
-    writeMemory<FamilyType>(srcBuffer->getGraphicsAllocation());
+    writeMemory<FamilyType>(destBuffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex()));
+    writeMemory<FamilyType>(srcBuffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex()));
 
     auto retVal = this->pCmdQ->enqueueKernel(
         this->pKernel,
@@ -183,7 +183,7 @@ HWTEST_P(AUBHelloWorldIntegrateTest, simple) {
     auto globalWorkItems = globalWorkSize[0] * globalWorkSize[1] * globalWorkSize[2];
     auto sizeWritten = globalWorkItems * sizeof(float);
 
-    auto pDestGpuAddress = reinterpret_cast<void *>((destBuffer->getGraphicsAllocation()->getGpuAddress()));
+    auto pDestGpuAddress = reinterpret_cast<void *>((destBuffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress()));
 
     AUBCommandStreamFixture::expectMemory<FamilyType>(pDestGpuAddress, this->pSrcMemory, sizeWritten);
 
@@ -370,7 +370,7 @@ INSTANTIATE_TEST_CASE_P(
 
 struct AUBSimpleArgNonUniformFixture : public KernelAUBFixture<SimpleArgNonUniformKernelFixture> {
     void SetUp() override {
-        if (NEO::defaultHwInfo->capabilityTable.clVersionSupport < 20) {
+        if (NEO::defaultHwInfo->capabilityTable.supportsOcl21Features == false) {
             GTEST_SKIP();
         }
         KernelAUBFixture<SimpleArgNonUniformKernelFixture>::SetUp();
@@ -411,7 +411,7 @@ struct AUBSimpleArgNonUniformFixture : public KernelAUBFixture<SimpleArgNonUnifo
         *(expectedData + maxId) = maxId;
 
         outBuffer.reset(Buffer::create(context, CL_MEM_COPY_HOST_PTR, alignUp(sizeUserMemory, 4096), destMemory, retVal));
-        bufferGpuAddress = reinterpret_cast<void *>(outBuffer->getGraphicsAllocation()->getGpuAddress());
+        bufferGpuAddress = reinterpret_cast<void *>(outBuffer->getGraphicsAllocation(device->getRootDeviceIndex())->getGpuAddress());
         kernel->setArg(1, outBuffer.get());
 
         sizeWrittenMemory = maxId * typeSize;
@@ -430,7 +430,7 @@ struct AUBSimpleArgNonUniformFixture : public KernelAUBFixture<SimpleArgNonUnifo
     }
 
     void TearDown() override {
-        if (NEO::defaultHwInfo->capabilityTable.clVersionSupport < 20) {
+        if (NEO::defaultHwInfo->capabilityTable.supportsOcl21Features == false) {
             return;
         }
         if (destMemory) {
@@ -514,7 +514,7 @@ HWTEST_F(AUBSimpleKernelStatelessTest, givenSimpleKernelWhenStatelessPathIsUsedT
     EXPECT_TRUE(this->kernel->getKernelInfo().patchInfo.executionEnvironment->CompiledForGreaterThan4GBBuffers);
 
     this->pCmdQ->flush();
-    expectMemory<FamilyType>(reinterpret_cast<void *>(pBuffer->getGraphicsAllocation()->getGpuAddress()),
+    expectMemory<FamilyType>(reinterpret_cast<void *>(pBuffer->getGraphicsAllocation(device->getRootDeviceIndex())->getGpuAddress()),
                              bufferExpected, bufferSize);
 }
 
@@ -869,4 +869,182 @@ HWTEST_F(AUBSimpleArgNonUniformTest, givenOpenCL20SupportWhenProvidingWork3DimNo
     pCmdQ->flush();
     expectMemory<FamilyType>(bufferGpuAddress, this->expectedMemory, sizeWrittenMemory);
     expectMemory<FamilyType>(remainderBufferGpuAddress, this->expectedRemainderMemory, sizeRemainderMemory);
+}
+
+using AUBBindlessKernel = Test<KernelAUBFixture<BindlessKernelFixture>>;
+using IsSklPlus = IsAtLeastProduct<IGFX_SKYLAKE>;
+
+HWTEST2_F(AUBBindlessKernel, givenBindlessCopyKernelWhenEnqueuedThenResultsValidate, IsSklPlus) {
+    constexpr size_t bufferSize = MemoryConstants::pageSize;
+
+    createKernel(std::string("bindless_stateful_copy_buffer"), std::string("StatefulCopyBuffer"));
+
+    cl_uint workDim = 1;
+    size_t globalWorkOffset[3] = {0, 0, 0};
+    size_t globalWorkSize[3] = {bufferSize / 2, 1, 1};
+    size_t localWorkSize[3] = {1, 1, 1};
+    cl_uint numEventsInWaitList = 0;
+    cl_event *eventWaitList = nullptr;
+    cl_event *event = nullptr;
+
+    uint8_t bufferDataSrc[bufferSize];
+    uint8_t bufferDataDst[bufferSize];
+
+    memset(bufferDataSrc, 1, bufferSize);
+    memset(bufferDataDst, 0, bufferSize);
+
+    auto pBufferSrc = std::unique_ptr<Buffer>(Buffer::create(context,
+                                                             CL_MEM_READ_WRITE,
+                                                             bufferSize,
+                                                             nullptr,
+                                                             retVal));
+    ASSERT_NE(nullptr, pBufferSrc);
+
+    auto pBufferDst = std::unique_ptr<Buffer>(Buffer::create(context,
+                                                             CL_MEM_READ_WRITE,
+                                                             bufferSize,
+                                                             nullptr,
+                                                             retVal));
+    ASSERT_NE(nullptr, pBufferDst);
+
+    auto simulatedCsr = AUBFixture::getSimulatedCsr<FamilyType>();
+
+    memcpy(pBufferSrc->getGraphicsAllocation(device->getRootDeviceIndex())->getUnderlyingBuffer(), bufferDataSrc, bufferSize);
+    memcpy(pBufferDst->getGraphicsAllocation(device->getRootDeviceIndex())->getUnderlyingBuffer(), bufferDataDst, bufferSize);
+
+    simulatedCsr->writeMemory(*pBufferSrc->getGraphicsAllocation(device->getRootDeviceIndex()));
+    simulatedCsr->writeMemory(*pBufferDst->getGraphicsAllocation(device->getRootDeviceIndex()));
+
+    //Src
+    kernel->setArg(0, pBufferSrc.get());
+    //Dst
+    kernel->setArg(1, pBufferDst.get());
+
+    retVal = this->pCmdQ->enqueueKernel(
+        kernel.get(),
+        workDim,
+        globalWorkOffset,
+        globalWorkSize,
+        localWorkSize,
+        numEventsInWaitList,
+        eventWaitList,
+        event);
+
+    ASSERT_EQ(CL_SUCCESS, retVal);
+
+    globalWorkOffset[0] = bufferSize / 2;
+    retVal = this->pCmdQ->enqueueKernel(
+        kernel.get(),
+        workDim,
+        globalWorkOffset,
+        globalWorkSize,
+        localWorkSize,
+        numEventsInWaitList,
+        eventWaitList,
+        event);
+
+    ASSERT_EQ(CL_SUCCESS, retVal);
+
+    EXPECT_TRUE(this->kernel->getKernelInfo().kernelArgInfo[0].pureStatefulBufferAccess);
+
+    this->pCmdQ->finish();
+    expectMemory<FamilyType>(reinterpret_cast<void *>(pBufferDst->getGraphicsAllocation(device->getRootDeviceIndex())->getGpuAddress()),
+                             bufferDataSrc, bufferSize);
+}
+
+HWTEST2_F(AUBBindlessKernel, DISABLED_givenBindlessCopyImageKernelWhenEnqueuedThenResultsValidate, IsSklPlus) {
+    constexpr unsigned int testWidth = 5;
+    constexpr unsigned int testHeight = 1;
+    constexpr unsigned int testDepth = 1;
+
+    createKernel(std::string("bindless_copy_buffer_to_image"), std::string("CopyBufferToImage3d"));
+
+    constexpr size_t imageSize = testWidth * testHeight * testDepth;
+    cl_uint workDim = 1;
+    size_t globalWorkOffset[3] = {0, 0, 0};
+    size_t globalWorkSize[3] = {imageSize, 1, 1};
+    size_t localWorkSize[3] = {1, 1, 1};
+    cl_uint numEventsInWaitList = 0;
+    cl_event *eventWaitList = nullptr;
+    cl_event *event = nullptr;
+
+    uint8_t imageDataSrc[imageSize];
+    uint8_t imageDataDst[imageSize + 1];
+
+    memset(imageDataSrc, 1, imageSize);
+    memset(imageDataDst, 0, imageSize + 1);
+
+    cl_image_format imageFormat = {0};
+    cl_image_desc imageDesc = {0};
+
+    imageFormat.image_channel_data_type = CL_UNSIGNED_INT8;
+    imageFormat.image_channel_order = CL_R;
+    imageDesc.image_type = CL_MEM_OBJECT_IMAGE1D;
+    imageDesc.image_width = testWidth;
+    imageDesc.image_height = testHeight;
+    imageDesc.image_depth = testDepth;
+    imageDesc.image_array_size = 1;
+    imageDesc.image_row_pitch = 0;
+    imageDesc.image_slice_pitch = 0;
+    imageDesc.num_mip_levels = 0;
+    imageDesc.num_samples = 0;
+
+    auto retVal = CL_INVALID_VALUE;
+    cl_mem_flags flags = CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR;
+
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(flags, &imageFormat, device->getHardwareInfo().capabilityTable.supportsOcl21Features);
+    auto image = std::unique_ptr<Image>(Image::create(
+        contextCl,
+        MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &contextCl->getDevice(0)->getDevice()),
+        flags,
+        0,
+        surfaceFormat,
+        &imageDesc,
+        imageDataDst,
+        retVal));
+    ASSERT_NE(nullptr, image.get());
+    EXPECT_FALSE(image->isMemObjZeroCopy());
+
+    auto bufferSrc = std::unique_ptr<Buffer>(Buffer::create(context,
+                                                            CL_MEM_READ_WRITE,
+                                                            imageSize,
+                                                            nullptr,
+                                                            retVal));
+    ASSERT_NE(nullptr, bufferSrc);
+
+    memcpy(image->getGraphicsAllocation(device->getRootDeviceIndex())->getUnderlyingBuffer(), imageDataDst, imageSize);
+    memcpy(bufferSrc->getGraphicsAllocation(device->getRootDeviceIndex())->getUnderlyingBuffer(), imageDataSrc, imageSize);
+
+    auto simulatedCsr = AUBFixture::getSimulatedCsr<FamilyType>();
+
+    simulatedCsr->writeMemory(*bufferSrc->getGraphicsAllocation(device->getRootDeviceIndex()));
+    simulatedCsr->writeMemory(*image->getGraphicsAllocation(device->getRootDeviceIndex()));
+
+    kernel->setArg(0, bufferSrc.get());
+    kernel->setArg(1, image.get());
+
+    int srcOffset = 0;
+    int dstOffset[4] = {0, 0, 0, 0};
+    int pitch[2] = {0, 0};
+
+    kernel->setArg(2, sizeof(srcOffset), &srcOffset);
+    kernel->setArg(3, sizeof(dstOffset), &dstOffset);
+    kernel->setArg(4, sizeof(pitch), &pitch);
+
+    retVal = this->pCmdQ->enqueueKernel(
+        kernel.get(),
+        workDim,
+        globalWorkOffset,
+        globalWorkSize,
+        localWorkSize,
+        numEventsInWaitList,
+        eventWaitList,
+        event);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = this->pCmdQ->finish();
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    expectMemory<FamilyType>(reinterpret_cast<void *>(image->getGraphicsAllocation(device->getRootDeviceIndex())->getGpuAddress()),
+                             imageDataSrc, imageSize);
 }

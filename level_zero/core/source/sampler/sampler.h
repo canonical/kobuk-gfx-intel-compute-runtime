@@ -8,7 +8,7 @@
 #pragma once
 
 #include "level_zero/core/source/device/device.h"
-#include <level_zero/ze_sampler.h>
+#include <level_zero/ze_api.h>
 
 struct _ze_sampler_handle_t {};
 
@@ -35,6 +35,12 @@ struct Sampler : _ze_sampler_handle_t {
     }
 
     inline ze_sampler_handle_t toHandle() { return this; }
+    const ze_sampler_desc_t getSamplerDesc() const {
+        return samplerDesc;
+    }
+
+  protected:
+    ze_sampler_desc_t samplerDesc = {};
 };
 
 using SamplerAllocatorFn = Sampler *(*)();

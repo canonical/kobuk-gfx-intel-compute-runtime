@@ -14,9 +14,9 @@
 namespace L0 {
 
 ze_result_t DriverHandleImp::getIpcMemHandle(const void *ptr, ze_ipc_mem_handle_t *pIpcHandle) {
-    NEO::SvmAllocationData *allocData = svmAllocsManager->getSVMAllocs()->get(ptr);
+    NEO::SvmAllocationData *allocData = svmAllocsManager->getSVMAlloc(ptr);
     if (allocData) {
-        uint64_t handle = allocData->gpuAllocation->peekInternalHandle(this->getMemoryManager());
+        uint64_t handle = allocData->gpuAllocations.getDefaultGraphicsAllocation()->peekInternalHandle(this->getMemoryManager());
         memcpy_s(reinterpret_cast<void *>(pIpcHandle->data),
                  sizeof(ze_ipc_mem_handle_t),
                  &handle,
@@ -29,11 +29,13 @@ ze_result_t DriverHandleImp::getIpcMemHandle(const void *ptr, ze_ipc_mem_handle_
 
 ze_result_t DriverHandleImp::openIpcMemHandle(ze_device_handle_t hDevice, ze_ipc_mem_handle_t pIpcHandle,
                                               ze_ipc_memory_flag_t flags, void **ptr) {
+    auto neoDevice = Device::fromHandle(hDevice)->getNEODevice();
     uint64_t handle = *(pIpcHandle.data);
     NEO::osHandle osHandle = static_cast<NEO::osHandle>(handle);
-    NEO::AllocationProperties unifiedMemoryProperties{Device::fromHandle(hDevice)->getRootDeviceIndex(),
+    NEO::AllocationProperties unifiedMemoryProperties{neoDevice->getRootDeviceIndex(),
                                                       MemoryConstants::pageSize,
-                                                      NEO::GraphicsAllocation::AllocationType::BUFFER};
+                                                      NEO::GraphicsAllocation::AllocationType::BUFFER, neoDevice->getDeviceBitfield()};
+    unifiedMemoryProperties.subDevicesBitfield = neoDevice->getDeviceBitfield();
     NEO::GraphicsAllocation *alloc =
         this->getMemoryManager()->createGraphicsAllocationFromSharedHandle(osHandle,
                                                                            unifiedMemoryProperties,
@@ -42,14 +44,14 @@ ze_result_t DriverHandleImp::openIpcMemHandle(ze_device_handle_t hDevice, ze_ipc
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
-    NEO::SvmAllocationData allocData;
-    allocData.gpuAllocation = alloc;
+    NEO::SvmAllocationData allocData(neoDevice->getRootDeviceIndex());
+    allocData.gpuAllocations.addAllocation(alloc);
     allocData.cpuAllocation = nullptr;
     allocData.size = alloc->getUnderlyingBufferSize();
     allocData.memoryType = InternalMemoryType::DEVICE_UNIFIED_MEMORY;
-    allocData.device = Device::fromHandle(hDevice)->getNEODevice();
+    allocData.device = neoDevice;
 
-    this->getSvmAllocsManager()->getSVMAllocs()->insert(allocData);
+    this->getSvmAllocsManager()->insertSVMAlloc(allocData);
 
     *ptr = reinterpret_cast<void *>(alloc->getGpuAddress());
 
@@ -61,7 +63,7 @@ ze_result_t DriverHandleImp::closeIpcMemHandle(const void *ptr) {
 }
 
 ze_result_t DriverHandleImp::checkMemoryAccessFromDevice(Device *device, const void *ptr) {
-    auto allocation = svmAllocsManager->getSVMAllocs()->get(ptr);
+    auto allocation = svmAllocsManager->getSVMAlloc(ptr);
     if (allocation == nullptr) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
@@ -70,20 +72,18 @@ ze_result_t DriverHandleImp::checkMemoryAccessFromDevice(Device *device, const v
         allocation->memoryType == InternalMemoryType::SHARED_UNIFIED_MEMORY)
         return ZE_RESULT_SUCCESS;
 
-    if (allocation->gpuAllocation->getRootDeviceIndex() == device->getRootDeviceIndex())
+    if (allocation->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex()) != nullptr) {
         return ZE_RESULT_SUCCESS;
+    }
 
-    ze_bool_t p2pCapable = true;
-    device->canAccessPeer(devices[allocation->gpuAllocation->getRootDeviceIndex()], &p2pCapable);
-
-    return p2pCapable ? ZE_RESULT_SUCCESS : ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    return ZE_RESULT_ERROR_INVALID_ARGUMENT;
 }
 
 ze_result_t DriverHandleImp::getMemAddressRange(const void *ptr, void **pBase, size_t *pSize) {
-    NEO::SvmAllocationData *allocData = svmAllocsManager->getSVMAllocs()->get(ptr);
+    NEO::SvmAllocationData *allocData = svmAllocsManager->getSVMAlloc(ptr);
     if (allocData) {
         NEO::GraphicsAllocation *alloc;
-        alloc = allocData->gpuAllocation;
+        alloc = allocData->gpuAllocations.getDefaultGraphicsAllocation();
         if (pBase) {
             uint64_t *allocBase = reinterpret_cast<uint64_t *>(pBase);
             *allocBase = alloc->getGpuAddress();
@@ -99,16 +99,18 @@ ze_result_t DriverHandleImp::getMemAddressRange(const void *ptr, void **pBase, s
     return ZE_RESULT_ERROR_UNKNOWN;
 }
 
-ze_result_t DriverHandleImp::allocHostMem(ze_host_mem_alloc_flag_t flags, size_t size, size_t alignment,
+ze_result_t DriverHandleImp::allocHostMem(ze_host_mem_alloc_flags_t flags, size_t size, size_t alignment,
                                           void **ptr) {
     if (size > this->devices[0]->getDeviceInfo().maxMemAllocSize) {
         *ptr = nullptr;
         return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
     }
     NEO::SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::HOST_UNIFIED_MEMORY);
+    unifiedMemoryProperties.subdeviceBitfield = this->devices[0]->getNEODevice()->getDeviceBitfield();
 
-    auto usmPtr = svmAllocsManager->createUnifiedMemoryAllocation(0u, size, unifiedMemoryProperties);
-
+    auto usmPtr = svmAllocsManager->createHostUnifiedMemoryAllocation(static_cast<uint32_t>(this->devices.size() - 1),
+                                                                      size,
+                                                                      unifiedMemoryProperties);
     if (usmPtr == nullptr) {
         return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
     }
@@ -118,14 +120,16 @@ ze_result_t DriverHandleImp::allocHostMem(ze_host_mem_alloc_flag_t flags, size_t
     return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t DriverHandleImp::allocDeviceMem(ze_device_handle_t hDevice, ze_device_mem_alloc_flag_t flags,
+ze_result_t DriverHandleImp::allocDeviceMem(ze_device_handle_t hDevice, ze_device_mem_alloc_flags_t flags,
                                             size_t size, size_t alignment, void **ptr) {
-    if (size > this->devices[0]->getDeviceInfo().maxMemAllocSize) {
+    if (size > this->devices[0]->getNEODevice()->getHardwareCapabilities().maxMemAllocSize) {
         *ptr = nullptr;
         return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
     }
     NEO::SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::DEVICE_UNIFIED_MEMORY);
     unifiedMemoryProperties.allocationFlags.flags.shareable = 1u;
+    unifiedMemoryProperties.device = Device::fromHandle(hDevice)->getNEODevice();
+    unifiedMemoryProperties.subdeviceBitfield = Device::fromHandle(hDevice)->getNEODevice()->getDeviceBitfield();
     void *usmPtr =
         svmAllocsManager->createUnifiedMemoryAllocation(Device::fromHandle(hDevice)->getRootDeviceIndex(),
                                                         size, unifiedMemoryProperties);
@@ -137,20 +141,29 @@ ze_result_t DriverHandleImp::allocDeviceMem(ze_device_handle_t hDevice, ze_devic
     return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t DriverHandleImp::allocSharedMem(ze_device_handle_t hDevice, ze_device_mem_alloc_flag_t deviceFlags,
-                                            ze_host_mem_alloc_flag_t hostFlags, size_t size, size_t alignment,
+ze_result_t DriverHandleImp::allocSharedMem(ze_device_handle_t hDevice, ze_device_mem_alloc_flags_t deviceFlags,
+                                            ze_host_mem_alloc_flags_t hostFlags, size_t size, size_t alignment,
                                             void **ptr) {
+    NEO::SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY);
+    ze_device_handle_t device;
+    if (hDevice == nullptr) {
+        device = this->devices[0];
+        unifiedMemoryProperties.device = nullptr;
+    } else {
+        device = hDevice;
+        unifiedMemoryProperties.device = Device::fromHandle(device)->getNEODevice();
+    }
     if (size > this->devices[0]->getDeviceInfo().maxMemAllocSize) {
         *ptr = nullptr;
         return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
     }
-    NEO::SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY);
+    unifiedMemoryProperties.subdeviceBitfield = Device::fromHandle(device)->getNEODevice()->getDeviceBitfield();
 
     auto usmPtr =
-        svmAllocsManager->createSharedUnifiedMemoryAllocation(Device::fromHandle(hDevice)->getRootDeviceIndex(),
+        svmAllocsManager->createSharedUnifiedMemoryAllocation(Device::fromHandle(device)->getRootDeviceIndex(),
                                                               size,
                                                               unifiedMemoryProperties,
-                                                              static_cast<void *>(L0::Device::fromHandle(hDevice)));
+                                                              static_cast<void *>(L0::Device::fromHandle(device)));
 
     if (usmPtr == nullptr) {
         return ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY;
@@ -161,7 +174,7 @@ ze_result_t DriverHandleImp::allocSharedMem(ze_device_handle_t hDevice, ze_devic
 }
 
 ze_result_t DriverHandleImp::freeMem(const void *ptr) {
-    auto allocation = svmAllocsManager->getSVMAllocs()->get(ptr);
+    auto allocation = svmAllocsManager->getSVMAlloc(ptr);
     if (allocation == nullptr) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }

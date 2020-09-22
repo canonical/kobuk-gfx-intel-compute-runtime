@@ -9,10 +9,10 @@
 
 #include "shared/source/helpers/file_io.h"
 #include "shared/source/helpers/hw_info.h"
+#include "shared/test/unit_test/helpers/test_files.h"
 
 #include "opencl/source/memory_manager/os_agnostic_memory_manager.h"
 #include "opencl/source/os_interface/os_inc_base.h"
-#include "opencl/test/unit_test/helpers/test_files.h"
 #include "opencl/test/unit_test/mocks/mock_compilers.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 
@@ -31,7 +31,7 @@ MockSipKernel::MockSipKernel(SipKernelType type, Program *sipProgram) : SipKerne
                                            MemoryConstants::pageSize * 10u,
                                            0u,
                                            MemoryConstants::pageSize,
-                                           MemoryPool::System4KBPages);
+                                           MemoryPool::System4KBPages, 3u);
 }
 
 MockSipKernel::MockSipKernel() : SipKernel(SipKernelType::Csr, nullptr) {
@@ -42,7 +42,7 @@ MockSipKernel::MockSipKernel() : SipKernel(SipKernelType::Csr, nullptr) {
                                            MemoryConstants::pageSize * 10u,
                                            0u,
                                            MemoryConstants::pageSize,
-                                           MemoryPool::System4KBPages);
+                                           MemoryPool::System4KBPages, 3u);
     this->program = new MockProgram(this->executionEnvironment, nullptr, false, nullptr);
 }
 

@@ -27,12 +27,13 @@ extern int (*c_open)(const char *pathname, int flags, ...);
 extern int (*openFull)(const char *pathname, int flags, ...);
 extern int (*c_ioctl)(int fd, unsigned long int request, ...);
 
-extern int drmOtherRequests(unsigned long int request, va_list vl);
+extern int drmOtherRequests(unsigned long int request, ...);
 
 extern int fakeFd;
 extern int haveDri;  // index of dri to serve, -1 - none
 extern int deviceId; // known DeviceID
 extern int haveSoftPin;
+extern int vmId;
 extern int failOnDeviceId;
 extern int failOnEuTotal;
 extern int failOnSubsliceTotal;
@@ -40,6 +41,7 @@ extern int failOnRevisionId;
 extern int failOnSoftPin;
 extern int failOnParamBoost;
 extern int failOnContextCreate;
+extern int failOnVirtualMemoryCreate;
 extern int failOnSetPriority;
 extern int failOnPreemption;
 extern int havePreemption;
@@ -47,5 +49,5 @@ extern int failOnDrmVersion;
 extern char providedDrmVersion[5];
 extern int ioctlSeq[8];
 extern size_t ioctlCnt;
-
-extern std::array<NEO::Drm *, 1> drms;
+extern bool failOnOpenDir;
+extern uint32_t entryIndex;

@@ -168,11 +168,11 @@ void ProgramDataTestBase::buildAndDecodeProgramPatchList() {
 
 using ProgramDataTest = ProgramDataTestBase;
 
-TEST_F(ProgramDataTest, EmptyProgramBinaryHeader) {
+TEST_F(ProgramDataTest, GivenEmptyProgramBinaryHeaderWhenBuildingAndDecodingThenSucessIsReturned) {
     buildAndDecodeProgramPatchList();
 }
 
-TEST_F(ProgramDataTest, AllocateConstantMemorySurfaceProgramBinaryInfo) {
+TEST_F(ProgramDataTest, WhenAllocatingConstantMemorySurfaceThenUnderlyingBufferIsSetCorrectly) {
 
     auto constSize = setupConstantAllocation();
 
@@ -180,6 +180,20 @@ TEST_F(ProgramDataTest, AllocateConstantMemorySurfaceProgramBinaryInfo) {
 
     EXPECT_NE(nullptr, pProgram->getConstantSurface());
     EXPECT_EQ(0, memcmp(constValue, pProgram->getConstantSurface()->getUnderlyingBuffer(), constSize));
+}
+
+TEST_F(ProgramDataTest, givenProgramWhenAllocatingConstantMemorySurfaceThenProperDeviceBitfieldIsPassed) {
+    auto executionEnvironment = pProgram->getDevice().getExecutionEnvironment();
+    auto memoryManager = new MockMemoryManager(*executionEnvironment);
+
+    std::unique_ptr<MemoryManager> memoryManagerBackup(memoryManager);
+    std::swap(memoryManagerBackup, executionEnvironment->memoryManager);
+    EXPECT_NE(pProgram->getDevice().getDeviceBitfield(), memoryManager->recentlyPassedDeviceBitfield);
+    setupConstantAllocation();
+    buildAndDecodeProgramPatchList();
+    EXPECT_NE(nullptr, pProgram->getConstantSurface());
+    EXPECT_EQ(pProgram->getDevice().getDeviceBitfield(), memoryManager->recentlyPassedDeviceBitfield);
+    std::swap(memoryManagerBackup, executionEnvironment->memoryManager);
 }
 
 TEST_F(ProgramDataTest, whenGlobalConstantsAreExportedThenAllocateSurfacesAsSvm) {
@@ -348,11 +362,25 @@ TEST_F(ProgramDataTest, GivenDeviceForcing32BitMessagesWhenConstAllocationIsPres
     }
 }
 
-TEST_F(ProgramDataTest, AllocateGlobalMemorySurfaceProgramBinaryInfo) {
+TEST_F(ProgramDataTest, WhenAllocatingGlobalMemorySurfaceThenUnderlyingBufferIsSetCorrectly) {
     auto globalSize = setupGlobalAllocation();
     buildAndDecodeProgramPatchList();
     EXPECT_NE(nullptr, pProgram->getGlobalSurface());
     EXPECT_EQ(0, memcmp(globalValue, pProgram->getGlobalSurface()->getUnderlyingBuffer(), globalSize));
+}
+TEST_F(ProgramDataTest, givenProgramWhenAllocatingGlobalMemorySurfaceThenProperDeviceBitfieldIsPassed) {
+    auto executionEnvironment = pProgram->getDevice().getExecutionEnvironment();
+    auto memoryManager = new MockMemoryManager(*executionEnvironment);
+
+    std::unique_ptr<MemoryManager> memoryManagerBackup(memoryManager);
+    std::swap(memoryManagerBackup, executionEnvironment->memoryManager);
+    EXPECT_NE(pProgram->getDevice().getDeviceBitfield(), memoryManager->recentlyPassedDeviceBitfield);
+
+    setupGlobalAllocation();
+    buildAndDecodeProgramPatchList();
+    EXPECT_NE(nullptr, pProgram->getGlobalSurface());
+    EXPECT_EQ(pProgram->getDevice().getDeviceBitfield(), memoryManager->recentlyPassedDeviceBitfield);
+    std::swap(memoryManagerBackup, executionEnvironment->memoryManager);
 }
 
 TEST_F(ProgramDataTest, Given32BitDeviceWhenGlobalMemorySurfaceIsPresentThenItHas32BitStorage) {
@@ -441,9 +469,9 @@ TEST_F(ProgramDataTest, GivenProgramWith32bitPointerOptWhenProgramScopeConstantB
     constantSurfaceStorage[0] = 0U;
     constantSurfaceStorage[1] = sentinel;
 
-    pProgram->linkerInput = std::move(programInfo.linkerInput);
-    pProgram->linkBinary();
-    uint32_t expectedAddr = static_cast<uint32_t>(constantSurface.getGraphicsAllocation()->getGpuAddressToPatch());
+    pProgram->setLinkerInput(pProgram->getDevice().getRootDeviceIndex(), std::move(programInfo.linkerInput));
+    pProgram->linkBinary(pProgram->pDevice, programInfo.globalConstants.initData, programInfo.globalVariables.initData);
+    uint32_t expectedAddr = static_cast<uint32_t>(constantSurface.getGraphicsAllocation(pProgram->getDevice().getRootDeviceIndex())->getGpuAddressToPatch());
     EXPECT_EQ(expectedAddr, constantSurfaceStorage[0]);
     EXPECT_EQ(sentinel, constantSurfaceStorage[1]);
     constantSurface.mockGfxAllocation.set32BitAllocation(false);
@@ -479,9 +507,9 @@ TEST_F(ProgramDataTest, GivenProgramWith32bitPointerOptWhenProgramScopeGlobalPoi
     globalSurfaceStorage[0] = 0U;
     globalSurfaceStorage[1] = sentinel;
 
-    pProgram->linkerInput = std::move(programInfo.linkerInput);
-    pProgram->linkBinary();
-    uint32_t expectedAddr = static_cast<uint32_t>(globalSurface.getGraphicsAllocation()->getGpuAddressToPatch());
+    pProgram->setLinkerInput(pProgram->getDevice().getRootDeviceIndex(), std::move(programInfo.linkerInput));
+    pProgram->linkBinary(pProgram->pDevice, programInfo.globalConstants.initData, programInfo.globalVariables.initData);
+    uint32_t expectedAddr = static_cast<uint32_t>(globalSurface.getGraphicsAllocation(pProgram->getDevice().getRootDeviceIndex())->getGpuAddressToPatch());
     EXPECT_EQ(expectedAddr, globalSurfaceStorage[0]);
     EXPECT_EQ(sentinel, globalSurfaceStorage[1]);
     globalSurface.mockGfxAllocation.set32BitAllocation(false);
@@ -499,15 +527,15 @@ TEST_F(ProgramDataTest, givenSymbolTablePatchTokenThenLinkerInputIsCreated) {
 
     buildAndDecodeProgramPatchList();
 
-    EXPECT_NE(nullptr, pProgram->getLinkerInput());
+    EXPECT_NE(nullptr, pProgram->getLinkerInput(pContext->getDevice(0)->getRootDeviceIndex()));
 }
 
 TEST(ProgramLinkBinaryTest, whenLinkerInputEmptyThenLinkSuccessful) {
     auto linkerInput = std::make_unique<WhiteBox<LinkerInput>>();
-    NEO::ExecutionEnvironment env;
-    MockProgram program{env};
-    program.linkerInput = std::move(linkerInput);
-    auto ret = program.linkBinary();
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    MockProgram program{*device->getExecutionEnvironment(), nullptr, false, device.get()};
+    program.setLinkerInput(device->getRootDeviceIndex(), std::move(linkerInput));
+    auto ret = program.linkBinary(program.pDevice, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, ret);
 }
 
@@ -518,29 +546,28 @@ TEST(ProgramLinkBinaryTest, whenLinkerUnresolvedExternalThenLinkFailedAndBuildLo
     relocation.offset = 0;
     linkerInput->relocations.push_back(NEO::LinkerInput::Relocations{relocation});
     linkerInput->traits.requiresPatchingOfInstructionSegments = true;
-    NEO::ExecutionEnvironment env;
-    MockProgram program{env};
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    MockProgram program{*device->getExecutionEnvironment(), nullptr, false, device.get()};
     KernelInfo kernelInfo = {};
     kernelInfo.name = "onlyKernel";
     std::vector<char> kernelHeap;
     kernelHeap.resize(32, 7);
     kernelInfo.heapInfo.pKernelHeap = kernelHeap.data();
-    iOpenCL::SKernelBinaryHeaderCommon kernelHeader = {};
-    kernelHeader.KernelHeapSize = static_cast<uint32_t>(kernelHeap.size());
-    kernelInfo.heapInfo.pKernelHeader = &kernelHeader;
+    kernelInfo.heapInfo.KernelHeapSize = static_cast<uint32_t>(kernelHeap.size());
     program.getKernelInfoArray().push_back(&kernelInfo);
-    program.linkerInput = std::move(linkerInput);
+    program.setLinkerInput(device->getRootDeviceIndex(), std::move(linkerInput));
 
-    EXPECT_EQ(nullptr, program.getBuildLog(nullptr));
-    auto ret = program.linkBinary();
+    std::string buildLog = program.getBuildLog(device->getRootDeviceIndex());
+    EXPECT_TRUE(buildLog.empty());
+    auto ret = program.linkBinary(program.pDevice, nullptr, nullptr);
     EXPECT_NE(CL_SUCCESS, ret);
     program.getKernelInfoArray().clear();
-    auto buildLog = program.getBuildLog(nullptr);
-    ASSERT_NE(nullptr, buildLog);
+    buildLog = program.getBuildLog(device->getRootDeviceIndex());
+    EXPECT_FALSE(buildLog.empty());
     Linker::UnresolvedExternals expectedUnresolvedExternals;
     expectedUnresolvedExternals.push_back(Linker::UnresolvedExternal{relocation, 0, false});
     auto expectedError = constructLinkerErrorMessage(expectedUnresolvedExternals, std::vector<std::string>{"kernel : " + kernelInfo.name});
-    EXPECT_THAT(buildLog, ::testing::HasSubstr(expectedError));
+    EXPECT_THAT(buildLog.c_str(), ::testing::HasSubstr(expectedError));
 }
 
 TEST_F(ProgramDataTest, whenLinkerInputValidThenIsaIsProperlyPatched) {
@@ -555,35 +582,35 @@ TEST_F(ProgramDataTest, whenLinkerInputValidThenIsaIsProperlyPatched) {
                                         NEO::LinkerInput::RelocationInfo{"C", 24U, relocationType}});
     linkerInput->traits.requiresPatchingOfInstructionSegments = true;
     linkerInput->exportedFunctionsSegmentId = 0;
-    NEO::ExecutionEnvironment env;
-    MockProgram program{env};
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    MockProgram program{*device->getExecutionEnvironment(), nullptr, false, device.get()};
     KernelInfo kernelInfo = {};
     kernelInfo.name = "onlyKernel";
     std::vector<char> kernelHeap;
     kernelHeap.resize(32, 7);
     kernelInfo.heapInfo.pKernelHeap = kernelHeap.data();
-    iOpenCL::SKernelBinaryHeaderCommon kernelHeader = {};
-    kernelHeader.KernelHeapSize = static_cast<uint32_t>(kernelHeap.size());
-    kernelInfo.heapInfo.pKernelHeader = &kernelHeader;
+    kernelInfo.heapInfo.KernelHeapSize = static_cast<uint32_t>(kernelHeap.size());
     MockGraphicsAllocation kernelIsa(kernelHeap.data(), kernelHeap.size());
     kernelInfo.kernelAllocation = &kernelIsa;
     program.getKernelInfoArray().push_back(&kernelInfo);
-    program.linkerInput = std::move(linkerInput);
+    program.setLinkerInput(device->getRootDeviceIndex(), std::move(linkerInput));
 
     program.exportedFunctionsSurface = kernelInfo.kernelAllocation;
     std::vector<char> globalVariablesBuffer;
     globalVariablesBuffer.resize(32, 7);
     std::vector<char> globalConstantsBuffer;
     globalConstantsBuffer.resize(32, 7);
+    std::vector<char> globalVariablesInitData{32, 0};
+    std::vector<char> globalConstantsInitData{32, 0};
     program.globalSurface = new MockGraphicsAllocation(globalVariablesBuffer.data(), globalVariablesBuffer.size());
     program.constantSurface = new MockGraphicsAllocation(globalConstantsBuffer.data(), globalConstantsBuffer.size());
 
     program.pDevice = &this->pContext->getDevice(0)->getDevice();
 
-    auto ret = program.linkBinary();
+    auto ret = program.linkBinary(pProgram->pDevice, globalConstantsInitData.data(), globalVariablesInitData.data());
     EXPECT_EQ(CL_SUCCESS, ret);
 
-    linkerInput.reset(static_cast<WhiteBox<LinkerInput> *>(program.linkerInput.release()));
+    linkerInput.reset(static_cast<WhiteBox<LinkerInput> *>(program.buildInfos[program.pDevice->getRootDeviceIndex()].linkerInput.release()));
 
     for (size_t i = 0; i < linkerInput->relocations.size(); ++i) {
         auto expectedPatch = program.globalSurface->getGpuAddress() + linkerInput->symbols[linkerInput->relocations[0][0].symbolName].offset;
@@ -604,32 +631,32 @@ TEST_F(ProgramDataTest, whenRelocationsAreNotNeededThenIsaIsPreserved) {
     linkerInput->symbols["A"] = NEO::SymbolInfo{4U, 4U, NEO::SegmentType::GlobalVariables};
     linkerInput->symbols["B"] = NEO::SymbolInfo{8U, 4U, NEO::SegmentType::GlobalConstants};
 
-    NEO::ExecutionEnvironment env;
-    MockProgram program{env};
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    MockProgram program{*device->getExecutionEnvironment(), nullptr, false, device.get()};
     KernelInfo kernelInfo = {};
     kernelInfo.name = "onlyKernel";
     std::vector<char> kernelHeapData;
     kernelHeapData.resize(32, 7);
     std::vector<char> kernelHeap(kernelHeapData.begin(), kernelHeapData.end());
     kernelInfo.heapInfo.pKernelHeap = kernelHeap.data();
-    iOpenCL::SKernelBinaryHeaderCommon kernelHeader = {};
-    kernelHeader.KernelHeapSize = static_cast<uint32_t>(kernelHeap.size());
-    kernelInfo.heapInfo.pKernelHeader = &kernelHeader;
+    kernelInfo.heapInfo.KernelHeapSize = static_cast<uint32_t>(kernelHeap.size());
     MockGraphicsAllocation kernelIsa(kernelHeap.data(), kernelHeap.size());
     kernelInfo.kernelAllocation = &kernelIsa;
     program.getKernelInfoArray().push_back(&kernelInfo);
-    program.linkerInput = std::move(linkerInput);
+    program.setLinkerInput(device->getRootDeviceIndex(), std::move(linkerInput));
 
     std::vector<char> globalVariablesBuffer;
     globalVariablesBuffer.resize(32, 7);
     std::vector<char> globalConstantsBuffer;
     globalConstantsBuffer.resize(32, 7);
+    std::vector<char> globalVariablesInitData{32, 0};
+    std::vector<char> globalConstantsInitData{32, 0};
     program.globalSurface = new MockGraphicsAllocation(globalVariablesBuffer.data(), globalVariablesBuffer.size());
     program.constantSurface = new MockGraphicsAllocation(globalConstantsBuffer.data(), globalConstantsBuffer.size());
 
     program.pDevice = &this->pContext->getDevice(0)->getDevice();
 
-    auto ret = program.linkBinary();
+    auto ret = program.linkBinary(pProgram->pDevice, globalConstantsInitData.data(), globalVariablesInitData.data());
     EXPECT_EQ(CL_SUCCESS, ret);
     EXPECT_EQ(kernelHeapData, kernelHeap);
 

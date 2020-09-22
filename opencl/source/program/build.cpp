@@ -105,6 +105,10 @@ cl_int Program::build(
             if (internalOptions.find(compilerExtensionsOptions) == std::string::npos) {
                 CompilerOptions::concatenateAppend(internalOptions, compilerExtensionsOptions);
             }
+            auto compilerFeaturesOptions = clDevice->peekCompilerFeatures();
+            if (internalOptions.find(compilerFeaturesOptions) == std::string::npos) {
+                CompilerOptions::concatenateAppend(internalOptions, compilerFeaturesOptions);
+            }
 
             inputArgs.apiOptions = ArrayRef<const char>(options.c_str(), options.length());
             inputArgs.internalOptions = ArrayRef<const char>(internalOptions.c_str(), internalOptions.length());
@@ -116,8 +120,8 @@ cl_int Program::build(
             inputArgs.allowCaching = enableCaching;
             NEO::TranslationOutput compilerOuput = {};
             auto compilerErr = pCompilerInterface->build(*this->pDevice, inputArgs, compilerOuput);
-            this->updateBuildLog(this->pDevice, compilerOuput.frontendCompilerLog.c_str(), compilerOuput.frontendCompilerLog.size());
-            this->updateBuildLog(this->pDevice, compilerOuput.backendCompilerLog.c_str(), compilerOuput.backendCompilerLog.size());
+            this->updateBuildLog(this->pDevice->getRootDeviceIndex(), compilerOuput.frontendCompilerLog.c_str(), compilerOuput.frontendCompilerLog.size());
+            this->updateBuildLog(this->pDevice->getRootDeviceIndex(), compilerOuput.backendCompilerLog.c_str(), compilerOuput.backendCompilerLog.size());
             retVal = asClError(compilerErr);
             if (retVal != CL_SUCCESS) {
                 break;
@@ -152,7 +156,7 @@ cl_int Program::build(
                     clDevice->getSourceLevelDebugger()->notifyKernelDebugData(&kernelInfo->debugData,
                                                                               kernelInfo->name,
                                                                               kernelInfo->heapInfo.pKernelHeap,
-                                                                              kernelInfo->heapInfo.pKernelHeader->KernelHeapSize);
+                                                                              kernelInfo->heapInfo.KernelHeapSize);
                 }
             }
         }

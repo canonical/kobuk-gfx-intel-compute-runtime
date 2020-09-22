@@ -8,7 +8,7 @@ add_custom_target(scheduler)
 set(SCHEDULER_OUTDIR_WITH_ARCH "${TargetDir}/scheduler/${NEO_ARCH}")
 set_target_properties(scheduler PROPERTIES FOLDER "scheduler")
 
-set (SCHEDULER_KERNEL scheduler.cl)
+set(SCHEDULER_KERNEL scheduler.cl)
 if(DEFINED NEO__IGC_INCLUDE_DIR)
   list(APPEND __cloc__options__ "-I$<JOIN:${NEO__IGC_INCLUDE_DIR}, -I>")
 endif()
@@ -31,28 +31,31 @@ function(compile_kernel target gen_type platform_type kernel)
   set(OUTPUTPATH "${OUTPUTDIR}/${BASENAME}_${family_name_with_type}.bin")
 
   set(SCHEDULER_CPP "${OUTPUTDIR}/${BASENAME}_${family_name_with_type}.cpp")
-  if(WIN32)
-    set(cloc_cmd_prefix ocloc)
-  else()
-    if(DEFINED NEO__IGC_LIBRARY_PATH)
-      set(cloc_cmd_prefix LD_LIBRARY_PATH=${NEO__IGC_LIBRARY_PATH}:$<TARGET_FILE_DIR:ocloc_lib> $<TARGET_FILE:ocloc>)
+
+  if(NOT DEFINED cloc_cmd_prefix)
+    if(WIN32)
+      set(cloc_cmd_prefix ocloc)
     else()
-      set(cloc_cmd_prefix LD_LIBRARY_PATH=$<TARGET_FILE_DIR:ocloc_lib> $<TARGET_FILE:ocloc>)
+      if(DEFINED NEO__IGC_LIBRARY_PATH)
+        set(cloc_cmd_prefix LD_LIBRARY_PATH=${NEO__IGC_LIBRARY_PATH}:$<TARGET_FILE_DIR:ocloc_lib> $<TARGET_FILE:ocloc>)
+      else()
+        set(cloc_cmd_prefix LD_LIBRARY_PATH=$<TARGET_FILE_DIR:ocloc_lib> $<TARGET_FILE:ocloc>)
+      endif()
     endif()
   endif()
   list(APPEND __cloc__options__ "-cl-kernel-arg-info")
   list(APPEND __cloc__options__ "-cl-std=CL2.0")
   list(APPEND __cloc__options__ "-cl-intel-disable-a64WA")
   add_custom_command(
-    OUTPUT ${OUTPUTPATH}
-    COMMAND ${cloc_cmd_prefix} -q -file ${kernel} -device ${DEFAULT_SUPPORTED_${gen_type}_${platform_type}_PLATFORM} -cl-intel-greater-than-4GB-buffer-required -${NEO_BITS} -out_dir ${OUTPUTDIR} -cpp_file -options "$<JOIN:${__cloc__options__}, >"
-    WORKING_DIRECTORY  ${CMAKE_CURRENT_SOURCE_DIR}
-    DEPENDS ${kernel} ocloc copy_compiler_files
+                     OUTPUT ${OUTPUTPATH}
+                     COMMAND ${cloc_cmd_prefix} -q -file ${kernel} -device ${DEFAULT_SUPPORTED_${gen_type}_${platform_type}_PLATFORM} -cl-intel-greater-than-4GB-buffer-required -${NEO_BITS} -out_dir ${OUTPUTDIR} -cpp_file -options "$<JOIN:${__cloc__options__}, >"
+                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                     DEPENDS ${kernel} ocloc copy_compiler_files
   )
   set(SCHEDULER_CPP ${SCHEDULER_CPP} PARENT_SCOPE)
 
   add_custom_target(${target} DEPENDS ${OUTPUTPATH})
-  set_target_properties(${target} PROPERTIES FOLDER "opencl/source/scheduler/${gen_type_lower}")
+  set_target_properties(${target} PROPERTIES FOLDER "${OPENCL_RUNTIME_PROJECTS_FOLDER}/scheduler/${gen_type_lower}")
 endfunction()
 
 macro(macro_for_each_gen)
@@ -81,7 +84,7 @@ if(COMPILE_BUILT_INS)
   foreach(SCHEDULER_TARGET ${SCHEDULER_TARGETS})
     add_dependencies(${SCHEDULER_BINARY_LIB_NAME} ${SCHEDULER_TARGET})
   endforeach()
-endif(COMPILE_BUILT_INS)
+endif()
 
 set_target_properties(${SCHEDULER_BINARY_LIB_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 set_target_properties(${SCHEDULER_BINARY_LIB_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -90,9 +93,9 @@ set_target_properties(${SCHEDULER_BINARY_LIB_NAME} PROPERTIES FOLDER "scheduler"
 add_dependencies(${SCHEDULER_BINARY_LIB_NAME} scheduler)
 
 target_include_directories(${SCHEDULER_BINARY_LIB_NAME} PRIVATE
-  ${ENGINE_NODE_DIR}
-  ${KHRONOS_HEADERS_DIR}
-  ${NEO__GMM_INCLUDE_DIR}
-  ${NEO__IGC_INCLUDE_DIR}
-  ${THIRD_PARTY_DIR}
+                           ${ENGINE_NODE_DIR}
+                           ${KHRONOS_HEADERS_DIR}
+                           ${NEO__GMM_INCLUDE_DIR}
+                           ${NEO__IGC_INCLUDE_DIR}
+                           ${THIRD_PARTY_DIR}
 )

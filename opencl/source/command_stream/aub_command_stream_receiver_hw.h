@@ -11,11 +11,11 @@
 
 #include "opencl/source/aub/aub_center.h"
 #include "opencl/source/command_stream/aub_command_stream_receiver.h"
-#include "opencl/source/gen_common/aub_mapper.h"
 #include "opencl/source/memory_manager/os_agnostic_memory_manager.h"
 #include "opencl/source/memory_manager/page_table.h"
 #include "opencl/source/memory_manager/physical_address_allocator.h"
 
+#include "aub_mapper.h"
 #include "command_stream_receiver_simulated_hw.h"
 
 namespace NEO {
@@ -39,7 +39,6 @@ class AUBCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     using CommandStreamReceiverSimulatedCommonHw<GfxFamily>::stream;
 
     bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
-    void makeNonResident(GraphicsAllocation &gfxAllocation) override;
 
     void processResidency(const ResidencyContainer &allocationsForResidency, uint32_t handleId) override;
 
@@ -67,7 +66,7 @@ class AUBCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
 
     uint32_t getDumpHandle();
     MOCKABLE_VIRTUAL void addContextToken(uint32_t dumpHandle);
-    MOCKABLE_VIRTUAL void dumpAllocation(GraphicsAllocation &gfxAllocation);
+    void dumpAllocation(GraphicsAllocation &gfxAllocation) override;
 
     static CommandStreamReceiver *create(const std::string &fileName, bool standalone, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex);
 

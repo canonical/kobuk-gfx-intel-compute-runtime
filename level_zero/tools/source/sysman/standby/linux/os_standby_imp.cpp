@@ -5,61 +5,46 @@
  *
  */
 
-#include "shared/source/os_interface/linux/drm_neo.h"
-#include "shared/source/os_interface/linux/os_interface.h"
-
-#include "level_zero/core/source/device/device.h"
-
-#include "sysman/linux/os_sysman_imp.h"
-#include "sysman/standby/os_standby.h"
-#include "sysman/standby/standby_imp.h"
+#include "level_zero/tools/source/sysman/standby/linux/os_standby_imp.h"
 
 namespace L0 {
 
-class LinuxStandbyImp : public OsStandby {
-  public:
-    ze_result_t getMode(zet_standby_promo_mode_t &mode) override;
-    ze_result_t setMode(zet_standby_promo_mode_t mode) override;
-
-    LinuxStandbyImp(OsSysman *pOsSysman);
-    ~LinuxStandbyImp() override = default;
-
-    // Don't allow copies of the LinuxStandbyImp object
-    LinuxStandbyImp(const LinuxStandbyImp &obj) = delete;
-    LinuxStandbyImp &operator=(const LinuxStandbyImp &obj) = delete;
-
-  private:
-    SysfsAccess *pSysfsAccess;
-
-    static const std::string standbyModeFile;
-    static const int standbyModeDefault = 1;
-    static const int standbyModeNever = 0;
-};
-
 const std::string LinuxStandbyImp::standbyModeFile("power/rc6_enable");
 
-ze_result_t LinuxStandbyImp::getMode(zet_standby_promo_mode_t &mode) {
-    int currentMode;
+bool LinuxStandbyImp::isStandbySupported(void) {
+    if (ZE_RESULT_SUCCESS == pSysfsAccess->canRead(standbyModeFile)) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+ze_result_t LinuxStandbyImp::getMode(zes_standby_promo_mode_t &mode) {
+    int currentMode = -1;
     ze_result_t result = pSysfsAccess->read(standbyModeFile, currentMode);
     if (ZE_RESULT_SUCCESS != result) {
+        if (result == ZE_RESULT_ERROR_NOT_AVAILABLE) {
+            result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+        }
         return result;
     }
     if (standbyModeDefault == currentMode) {
-        mode = ZET_STANDBY_PROMO_MODE_DEFAULT;
-        return ZE_RESULT_SUCCESS;
+        mode = ZES_STANDBY_PROMO_MODE_DEFAULT;
+    } else if (standbyModeNever == currentMode) {
+        mode = ZES_STANDBY_PROMO_MODE_NEVER;
+    } else {
+        result = ZE_RESULT_ERROR_UNKNOWN;
     }
-    if (standbyModeNever == currentMode) {
-        mode = ZET_STANDBY_PROMO_MODE_NEVER;
-        return ZE_RESULT_SUCCESS;
-    }
-    return ZE_RESULT_ERROR_UNKNOWN;
+    return result;
 }
 
-ze_result_t LinuxStandbyImp::setMode(zet_standby_promo_mode_t mode) {
-    if (ZET_STANDBY_PROMO_MODE_DEFAULT == mode) {
-        return pSysfsAccess->write(standbyModeFile, standbyModeDefault);
-    }
-    return pSysfsAccess->write(standbyModeFile, standbyModeNever);
+ze_result_t LinuxStandbyImp::setMode(zes_standby_promo_mode_t mode) {
+    // standbyModeFile is not writable.
+    // Mode cannot be set from L0.
+    // To set the mode, user must reload
+    // the i915 module and set module parameter
+    // enable_rc6 appropriately.
+    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
 }
 
 LinuxStandbyImp::LinuxStandbyImp(OsSysman *pOsSysman) {

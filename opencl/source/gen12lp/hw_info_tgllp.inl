@@ -6,7 +6,7 @@
  */
 
 #include "shared/source/gen12lp/hw_cmds.h"
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/helpers/constants.h"
 
 #include "opencl/source/aub_mem_dump/aub_services.h"
 
@@ -18,7 +18,7 @@ const char *HwMapper<IGFX_TIGERLAKE_LP>::abbreviation = "tgllp";
 
 bool isSimulationTGLLP(unsigned short deviceId) {
     switch (deviceId) {
-    case IGEN12LP_GT1_MOB_DEVICE_F0_ID:
+    case DEV_ID_FF20:
         return true;
     }
     return false;
@@ -45,10 +45,10 @@ const RuntimeCapabilityTable TGLLP::capabilityTable{
     83.333,                                          // defaultProfilingTimerResolution
     MemoryConstants::pageSize,                       // requiredPreemptionSurfaceSize
     &isSimulationTGLLP,                              // isSimulation
-    PreemptionMode::ThreadGroup,                     // defaultPreemptionMode
-    aub_stream::ENGINE_CCS,                          // defaultEngineType
+    PreemptionMode::MidThread,                       // defaultPreemptionMode
+    aub_stream::ENGINE_RCS,                          // defaultEngineType
     0,                                               // maxRenderFrequency
-    21,                                              // clVersionSupport
+    30,                                              // clVersionSupport
     CmdServicesMemTraceVersion::DeviceValues::Tgllp, // aubDeviceId
     1,                                               // extraQuantityThreadsPerEU
     64,                                              // slmSize
@@ -58,7 +58,7 @@ const RuntimeCapabilityTable TGLLP::capabilityTable{
     false,                                           // ftrSupportsFP64
     false,                                           // ftrSupports64BitMath
     true,                                            // ftrSvm
-    true,                                            // ftrSupportsCoherency
+    false,                                           // ftrSupportsCoherency
     false,                                           // ftrSupportsVmeAvcTextureSampler
     false,                                           // ftrSupportsVmeAvcPreemption
     false,                                           // ftrRenderCompressedBuffers
@@ -71,8 +71,14 @@ const RuntimeCapabilityTable TGLLP::capabilityTable{
     false,                                           // supportsVme
     false,                                           // supportCacheFlushAfterWalker
     true,                                            // supportsImages
-    true,                                            // supportsDeviceEnqueue
-    false                                            // hostPtrTrackingEnabled
+    false,                                           // supportsDeviceEnqueue
+    false,                                           // supportsPipes
+    true,                                            // supportsOcl21Features
+    false,                                           // supportsOnDemandPageFaults
+    false,                                           // supportsIndependentForwardProgress
+    false,                                           // hostPtrTrackingEnabled
+    true,                                            // levelZeroSupported
+    true                                             // isIntegratedDevice
 };
 
 WorkaroundTable TGLLP::workaroundTable = {};

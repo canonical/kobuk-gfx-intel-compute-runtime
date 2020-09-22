@@ -7,8 +7,6 @@
 
 #include "shared/source/utilities/debug_file_reader.h"
 
-using namespace std;
-
 namespace NEO {
 
 SettingsFileReader::SettingsFileReader(const char *filePath) {
@@ -30,23 +28,27 @@ SettingsFileReader::~SettingsFileReader() {
 }
 
 int32_t SettingsFileReader::getSetting(const char *settingName, int32_t defaultValue) {
-    int32_t value = defaultValue;
+    return static_cast<int32_t>(getSetting(settingName, static_cast<int64_t>(defaultValue)));
+}
 
-    map<string, string>::iterator it = settingStringMap.find(string(settingName));
+int64_t SettingsFileReader::getSetting(const char *settingName, int64_t defaultValue) {
+    int64_t value = defaultValue;
+
+    std::map<std::string, std::string>::iterator it = settingStringMap.find(std::string(settingName));
     if (it != settingStringMap.end()) {
-        value = atoi(it->second.c_str());
+        value = atoll(it->second.c_str());
     }
 
     return value;
 }
 
 bool SettingsFileReader::getSetting(const char *settingName, bool defaultValue) {
-    return getSetting(settingName, static_cast<int32_t>(defaultValue)) ? true : false;
+    return getSetting(settingName, static_cast<int64_t>(defaultValue)) ? true : false;
 }
 
 std::string SettingsFileReader::getSetting(const char *settingName, const std::string &value) {
     std::string returnValue = value;
-    map<string, string>::iterator it = settingStringMap.find(string(settingName));
+    std::map<std::string, std::string>::iterator it = settingStringMap.find(std::string(settingName));
     if (it != settingStringMap.end())
         returnValue = it->second;
 
@@ -58,28 +60,39 @@ const char *SettingsFileReader::appSpecificLocation(const std::string &name) {
 }
 
 void SettingsFileReader::parseStream(std::istream &inputStream) {
-    stringstream ss;
-    string key;
-    string value;
-    char temp = 0;
+    std::string key;
+    std::string value;
+    std::string line;
+    std::string tmp;
 
     while (!inputStream.eof()) {
-        string tempString;
-        string tempStringValue;
-        getline(inputStream, tempString);
+        getline(inputStream, line);
 
-        ss << tempString;
-        ss >> key;
-        ss >> temp;
-        ss >> value;
-
-        if (!ss.fail()) {
-            settingStringMap.insert(pair<string, string>(key, value));
+        auto equalsSignPosition = line.find('=');
+        if (equalsSignPosition == std::string::npos) {
+            continue;
         }
 
-        ss.str(string()); // for reset string inside stringstream
-        ss.clear();
-        key.clear();
+        {
+            std::stringstream ss;
+            auto linePartWithKey = line.substr(0, equalsSignPosition);
+            ss << linePartWithKey;
+            ss >> key;
+            if (ss.fail() || (ss >> tmp)) {
+                continue;
+            }
+        }
+        {
+            std::stringstream ss;
+            auto linePartWithValue = line.substr(equalsSignPosition + 1);
+            ss << linePartWithValue;
+            ss >> value;
+            if (ss.fail() || (ss >> tmp)) {
+                continue;
+            }
+        }
+
+        settingStringMap.insert(std::pair<std::string, std::string>(key, value));
     }
 }
 }; // namespace NEO

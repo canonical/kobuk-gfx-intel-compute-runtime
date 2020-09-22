@@ -28,6 +28,13 @@ BOOL getModuleHandle(DWORD dwFlags, LPCWSTR lpModuleName, HMODULE *phModule) {
 DWORD getModuleFileName(HMODULE hModule, LPWSTR lpFilename, DWORD nSize) {
     return GetModuleFileName(hModule, lpFilename, nSize);
 }
+char *getenv(const char *variableName) {
+    return ::getenv(variableName);
+}
+
+BOOL enumDisplayDevices(LPCWSTR lpDevice, DWORD iDevNum, PDISPLAY_DEVICEW lpDisplayDevice, DWORD dwFlags) {
+    return EnumDisplayDevicesW(lpDevice, iDevNum, lpDisplayDevice, dwFlags);
+}
 } // namespace SysCalls
 
 } // namespace NEO

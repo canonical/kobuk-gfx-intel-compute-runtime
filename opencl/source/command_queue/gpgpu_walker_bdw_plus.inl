@@ -12,6 +12,8 @@
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/command_queue/gpgpu_walker_base.inl"
 
+#include "pipe_control_args.h"
+
 namespace NEO {
 
 template <typename GfxFamily>
@@ -69,8 +71,8 @@ void GpgpuWalkerHelper<GfxFamily>::dispatchScheduler(
     using GPGPU_WALKER = typename GfxFamily::GPGPU_WALKER;
     using MI_BATCH_BUFFER_START = typename GfxFamily::MI_BATCH_BUFFER_START;
 
-    bool dcFlush = false;
-    MemorySynchronizationCommands<GfxFamily>::addPipeControl(commandStream, dcFlush);
+    NEO::PipeControlArgs args;
+    MemorySynchronizationCommands<GfxFamily>::addPipeControl(commandStream, args);
 
     uint32_t interfaceDescriptorIndex = devQueueHw.schedulerIDIndex;
     const size_t offsetInterfaceDescriptorTable = devQueueHw.colorCalcStateSize;
@@ -126,8 +128,9 @@ void GpgpuWalkerHelper<GfxFamily>::dispatchScheduler(
     IndirectHeap *ioh = &indirectObjectHeap;
 
     // Program the walker.  Invokes execution so all state should already be programmed
-    auto pGpGpuWalkerCmd = static_cast<GPGPU_WALKER *>(commandStream.getSpace(sizeof(GPGPU_WALKER)));
-    *pGpGpuWalkerCmd = GfxFamily::cmdInitGpgpuWalker;
+    auto pGpGpuWalkerCmd = commandStream.getSpaceForCmd<GPGPU_WALKER>();
+    GPGPU_WALKER cmdWalker = GfxFamily::cmdInitGpgpuWalker;
+
     bool inlineDataProgrammingRequired = HardwareCommandsHelper<GfxFamily>::inlineDataProgrammingRequired(scheduler);
     auto kernelUsesLocalIds = HardwareCommandsHelper<GfxFamily>::kernelUsesLocalIds(scheduler);
 
@@ -143,7 +146,7 @@ void GpgpuWalkerHelper<GfxFamily>::dispatchScheduler(
         offsetInterfaceDescriptorTable,
         interfaceDescriptorIndex,
         preemptionMode,
-        pGpGpuWalkerCmd,
+        &cmdWalker,
         nullptr,
         true);
 
@@ -152,24 +155,26 @@ void GpgpuWalkerHelper<GfxFamily>::dispatchScheduler(
 
     size_t globalOffsets[3] = {0, 0, 0};
     size_t workGroups[3] = {(scheduler.getGws() / scheduler.getLws()), 1, 1};
-    GpgpuWalkerHelper<GfxFamily>::setGpgpuWalkerThreadData(pGpGpuWalkerCmd, globalOffsets, globalOffsets, workGroups, localWorkSizes,
+    GpgpuWalkerHelper<GfxFamily>::setGpgpuWalkerThreadData(&cmdWalker, globalOffsets, globalOffsets, workGroups, localWorkSizes,
                                                            simd, 1, true, inlineDataProgrammingRequired,
                                                            *scheduler.getKernelInfo().patchInfo.threadPayload, 0u);
+    *pGpGpuWalkerCmd = cmdWalker;
 
     // Implement disabling special WA DisableLSQCROPERFforOCL if needed
     GpgpuWalkerHelper<GfxFamily>::applyWADisableLSQCROPERFforOCL(&commandStream, scheduler, false);
 
     // Do not put BB_START only when returning in first Scheduler run
     if (devQueueHw.getSchedulerReturnInstance() != 1) {
-
-        MemorySynchronizationCommands<GfxFamily>::addPipeControl(commandStream, true);
+        args.dcFlushEnable = true;
+        MemorySynchronizationCommands<GfxFamily>::addPipeControl(commandStream, args);
 
         // Add BB Start Cmd to the SLB in the Primary Batch Buffer
-        auto *bbStart = static_cast<MI_BATCH_BUFFER_START *>(commandStream.getSpace(sizeof(MI_BATCH_BUFFER_START)));
-        *bbStart = GfxFamily::cmdInitBatchBufferStart;
-        bbStart->setSecondLevelBatchBuffer(MI_BATCH_BUFFER_START::SECOND_LEVEL_BATCH_BUFFER_FIRST_LEVEL_BATCH);
+        auto bbStart = commandStream.getSpaceForCmd<MI_BATCH_BUFFER_START>();
+        MI_BATCH_BUFFER_START cmdBbStart = GfxFamily::cmdInitBatchBufferStart;
+        cmdBbStart.setSecondLevelBatchBuffer(MI_BATCH_BUFFER_START::SECOND_LEVEL_BATCH_BUFFER_FIRST_LEVEL_BATCH);
         uint64_t slbAddress = devQueueHw.getSlbBuffer()->getGpuAddress();
-        bbStart->setBatchBufferStartAddressGraphicsaddress472(slbAddress);
+        cmdBbStart.setBatchBufferStartAddressGraphicsaddress472(slbAddress);
+        *bbStart = cmdBbStart;
     }
 }
 
@@ -182,9 +187,15 @@ void GpgpuWalkerHelper<GfxFamily>::setupTimestampPacket(
     const RootDeviceEnvironment &rootDeviceEnvironment) {
 
     if (TimestampPacketStorage::WriteOperationType::AfterWalker == writeOperationType) {
-        uint64_t address = timestampPacketNode->getGpuAddress() + offsetof(TimestampPacketStorage, packets[0].contextEnd);
-        MemorySynchronizationCommands<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(
-            *cmdStream, PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, address, 0, false, *rootDeviceEnvironment.getHardwareInfo());
+        uint64_t address = TimestampPacketHelper::getContextEndGpuAddress(*timestampPacketNode);
+        PipeControlArgs args;
+        MemorySynchronizationCommands<GfxFamily>::addPipeControlAndProgramPostSyncOperation(
+            *cmdStream,
+            PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA,
+            address,
+            0,
+            *rootDeviceEnvironment.getHardwareInfo(),
+            args);
     }
 }
 
@@ -197,15 +208,7 @@ size_t EnqueueOperation<GfxFamily>::getSizeRequiredCSKernel(bool reserveProfilin
     if (reserveProfilingCmdsSpace) {
         size += 2 * sizeof(PIPE_CONTROL) + 2 * sizeof(typename GfxFamily::MI_STORE_REGISTER_MEM);
     }
-    if (reservePerfCounters) {
-
-        const auto commandBufferType = EngineHelpers::isCcs(commandQueue.getGpgpuEngine().osContext->getEngineType())
-                                           ? MetricsLibraryApi::GpuCommandBufferType::Compute
-                                           : MetricsLibraryApi::GpuCommandBufferType::Render;
-
-        size += commandQueue.getPerfCounters()->getGpuCommandsSize(commandBufferType, true);
-        size += commandQueue.getPerfCounters()->getGpuCommandsSize(commandBufferType, false);
-    }
+    size += PerformanceCounters::getGpuCommandsSize(commandQueue, reservePerfCounters);
     size += GpgpuWalkerHelper<GfxFamily>::getSizeForWADisableLSQCROPERFforOCL(pKernel);
 
     return size;
@@ -214,6 +217,70 @@ size_t EnqueueOperation<GfxFamily>::getSizeRequiredCSKernel(bool reserveProfilin
 template <typename GfxFamily>
 size_t EnqueueOperation<GfxFamily>::getSizeRequiredForTimestampPacketWrite() {
     return sizeof(PIPE_CONTROL);
+}
+
+template <typename GfxFamily>
+void GpgpuWalkerHelper<GfxFamily>::adjustMiStoreRegMemMode(MI_STORE_REG_MEM<GfxFamily> *storeCmd) {
+}
+
+template <typename GfxFamily>
+void GpgpuWalkerHelper<GfxFamily>::dispatchProfilingCommandsStart(
+    TagNode<HwTimeStamps> &hwTimeStamps,
+    LinearStream *commandStream,
+    const HardwareInfo &hwInfo) {
+    using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
+
+    // PIPE_CONTROL for global timestamp
+    uint64_t timeStampAddress = hwTimeStamps.getGpuAddress() + offsetof(HwTimeStamps, GlobalStartTS);
+    PipeControlArgs args;
+    MemorySynchronizationCommands<GfxFamily>::addPipeControlAndProgramPostSyncOperation(
+        *commandStream,
+        PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP,
+        timeStampAddress,
+        0llu,
+        hwInfo,
+        args);
+
+    //MI_STORE_REGISTER_MEM for context local timestamp
+    timeStampAddress = hwTimeStamps.getGpuAddress() + offsetof(HwTimeStamps, ContextStartTS);
+
+    //low part
+    auto pMICmdLow = commandStream->getSpaceForCmd<MI_STORE_REGISTER_MEM>();
+    MI_STORE_REGISTER_MEM cmd = GfxFamily::cmdInitStoreRegisterMem;
+    adjustMiStoreRegMemMode(&cmd);
+    cmd.setRegisterAddress(GP_THREAD_TIME_REG_ADDRESS_OFFSET_LOW);
+    cmd.setMemoryAddress(timeStampAddress);
+    *pMICmdLow = cmd;
+}
+
+template <typename GfxFamily>
+void GpgpuWalkerHelper<GfxFamily>::dispatchProfilingCommandsEnd(
+    TagNode<HwTimeStamps> &hwTimeStamps,
+    LinearStream *commandStream,
+    const HardwareInfo &hwInfo) {
+    using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
+
+    // PIPE_CONTROL for global timestamp
+    auto pPipeControlCmd = commandStream->getSpaceForCmd<PIPE_CONTROL>();
+    PIPE_CONTROL cmdPipeControl = GfxFamily::cmdInitPipeControl;
+    cmdPipeControl.setCommandStreamerStallEnable(true);
+    *pPipeControlCmd = cmdPipeControl;
+
+    //MI_STORE_REGISTER_MEM for context local timestamp
+    uint64_t timeStampAddress = hwTimeStamps.getGpuAddress() + offsetof(HwTimeStamps, ContextEndTS);
+
+    //low part
+    auto pMICmdLow = commandStream->getSpaceForCmd<MI_STORE_REGISTER_MEM>();
+    MI_STORE_REGISTER_MEM cmd = GfxFamily::cmdInitStoreRegisterMem;
+    adjustMiStoreRegMemMode(&cmd);
+    cmd.setRegisterAddress(GP_THREAD_TIME_REG_ADDRESS_OFFSET_LOW);
+    cmd.setMemoryAddress(timeStampAddress);
+    *pMICmdLow = cmd;
+}
+
+template <typename GfxFamily>
+size_t EnqueueOperation<GfxFamily>::getSizeForCacheFlushAfterWalkerCommands(const Kernel &kernel, const CommandQueue &commandQueue) {
+    return 0;
 }
 
 } // namespace NEO

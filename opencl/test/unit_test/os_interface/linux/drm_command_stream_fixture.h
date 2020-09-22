@@ -7,12 +7,13 @@
 
 #pragma once
 #include "shared/source/command_stream/preemption.h"
+#include "shared/source/os_interface/linux/drm_memory_operations_handler.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
 #include "shared/source/os_interface/linux/os_interface.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 
 #include "opencl/source/os_interface/linux/drm_command_stream.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/linux/mock_drm_command_stream_receiver.h"
 #include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/os_interface/linux/device_command_stream_fixture.h"
@@ -34,8 +35,10 @@ class DrmCommandStreamTest : public ::testing::Test {
 
         executionEnvironment.rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
         executionEnvironment.rootDeviceEnvironments[0]->osInterface->get()->setDrm(mock);
+        executionEnvironment.rootDeviceEnvironments[0]->memoryOperationsInterface = DrmMemoryOperationsHandler::create(*mock);
 
         auto hwInfo = executionEnvironment.rootDeviceEnvironments[0]->getHardwareInfo();
+        mock->createVirtualMemoryAddressSpace(HwHelper::getSubDevicesCount(hwInfo));
         osContext = std::make_unique<OsContextLinux>(*mock, 0u, 1, HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
                                                      PreemptionHelper::getDefaultPreemptionMode(*hwInfo),
                                                      false, false, false);
@@ -79,12 +82,14 @@ class DrmCommandStreamTest : public ::testing::Test {
     std::unique_ptr<OsContextLinux> osContext;
 };
 
-class DrmCommandStreamEnhancedTest : public ::testing::Test {
+template <typename T>
+class DrmCommandStreamEnhancedTemplate : public ::testing::Test {
   public:
     std::unique_ptr<DebugManagerStateRestore> dbgState;
     MockExecutionEnvironment *executionEnvironment;
-    DrmMockCustom *mock;
+    T *mock;
     CommandStreamReceiver *csr = nullptr;
+    const uint32_t rootDeviceIndex = 0u;
 
     DrmMemoryManager *mm = nullptr;
     std::unique_ptr<MockDevice> device;
@@ -98,11 +103,12 @@ class DrmCommandStreamEnhancedTest : public ::testing::Test {
         //make sure this is disabled, we don't want to test this now
         DebugManager.flags.EnableForcePin.set(false);
 
-        mock = new DrmMockCustom();
-        executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
-        executionEnvironment->rootDeviceEnvironments[0]->osInterface->get()->setDrm(mock);
+        mock = new T();
+        executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->osInterface = std::make_unique<OSInterface>();
+        executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->osInterface->get()->setDrm(mock);
+        executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface = DrmMemoryOperationsHandler::create(*mock);
 
-        csr = new TestedDrmCommandStreamReceiver<GfxFamily>(*executionEnvironment);
+        csr = new TestedDrmCommandStreamReceiver<GfxFamily>(*executionEnvironment, rootDeviceIndex);
         ASSERT_NE(nullptr, csr);
         mm = new DrmMemoryManager(gemCloseWorkerMode::gemCloseWorkerInactive,
                                   DebugManager.flags.EnableForcePin.get(),
@@ -110,7 +116,7 @@ class DrmCommandStreamEnhancedTest : public ::testing::Test {
                                   *executionEnvironment);
         ASSERT_NE(nullptr, mm);
         executionEnvironment->memoryManager.reset(mm);
-        device.reset(MockDevice::create<MockDevice>(executionEnvironment, 0u));
+        device.reset(MockDevice::create<MockDevice>(executionEnvironment, rootDeviceIndex));
         device->resetCommandStreamReceiver(csr);
         ASSERT_NE(nullptr, device);
     }
@@ -121,8 +127,8 @@ class DrmCommandStreamEnhancedTest : public ::testing::Test {
     }
 
     template <typename GfxFamily>
-    void makeResidentBufferObjects(const DrmAllocation *drmAllocation) {
-        static_cast<TestedDrmCommandStreamReceiver<GfxFamily> *>(csr)->makeResidentBufferObjects(drmAllocation, 0u);
+    void makeResidentBufferObjects(OsContext *osContext, DrmAllocation *drmAllocation) {
+        drmAllocation->bindBOs(osContext, 0u, &static_cast<TestedDrmCommandStreamReceiver<GfxFamily> *>(csr)->residency, false);
     }
 
     template <typename GfxFamily>
@@ -138,10 +144,10 @@ class DrmCommandStreamEnhancedTest : public ::testing::Test {
 
   protected:
     class MockBufferObject : public BufferObject {
-        friend DrmCommandStreamEnhancedTest;
+        friend DrmCommandStreamEnhancedTemplate<T>;
 
       protected:
-        MockBufferObject(Drm *drm, size_t size) : BufferObject(drm, 1, 0) {
+        MockBufferObject(Drm *drm, size_t size) : BufferObject(drm, 1, 0, 16u) {
             this->size = alignUp(size, 4096);
         }
     };
@@ -150,3 +156,5 @@ class DrmCommandStreamEnhancedTest : public ::testing::Test {
         return new MockBufferObject(this->mock, size);
     }
 };
+
+using DrmCommandStreamEnhancedTest = DrmCommandStreamEnhancedTemplate<DrmMockCustom>;

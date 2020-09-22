@@ -147,7 +147,7 @@ cl_mem CL_API_CALL clCreateImage(
 
 cl_mem CL_API_CALL clCreateImageWithPropertiesINTEL(
     cl_context context,
-    cl_mem_properties_intel *properties,
+    const cl_mem_properties_intel *properties,
     const cl_image_format *imageFormat,
     const cl_image_desc *imageDesc,
     void *hostPtr,
@@ -927,7 +927,7 @@ extern CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithILKHR(
 
 void *clHostMemAllocINTEL(
     cl_context context,
-    cl_mem_properties_intel *properties,
+    const cl_mem_properties_intel *properties,
     size_t size,
     cl_uint alignment,
     cl_int *errcodeRet);
@@ -935,7 +935,7 @@ void *clHostMemAllocINTEL(
 void *clDeviceMemAllocINTEL(
     cl_context context,
     cl_device_id device,
-    cl_mem_properties_intel *properties,
+    const cl_mem_properties_intel *properties,
     size_t size,
     cl_uint alignment,
     cl_int *errcodeRet);
@@ -943,14 +943,14 @@ void *clDeviceMemAllocINTEL(
 void *clSharedMemAllocINTEL(
     cl_context context,
     cl_device_id device,
-    cl_mem_properties_intel *properties,
+    const cl_mem_properties_intel *properties,
     size_t size,
     cl_uint alignment,
     cl_int *errcodeRet);
 
 cl_int clMemFreeINTEL(
     cl_context context,
-    const void *ptr);
+    void *ptr);
 
 cl_int clMemBlockingFreeINTEL(
     cl_context context,
@@ -1059,8 +1059,37 @@ cl_int CL_API_CALL clEnqueueNDCountKernelINTEL(
 
 // OpenCL 2.2
 
+cl_int CL_API_CALL clSetProgramReleaseCallback(
+    cl_program program,
+    void(CL_CALLBACK *pfnNotify)(cl_program /* program */, void * /* user_data */),
+    void *userData);
+
 cl_int CL_API_CALL clSetProgramSpecializationConstant(
     cl_program program,
     cl_uint specId,
     size_t specSize,
     const void *specValue);
+
+// OpenCL 3.0
+
+cl_mem CL_API_CALL clCreateBufferWithProperties(
+    cl_context context,
+    const cl_mem_properties *properties,
+    cl_mem_flags flags,
+    size_t size,
+    void *hostPtr,
+    cl_int *errcodeRet);
+
+cl_mem CL_API_CALL clCreateImageWithProperties(
+    cl_context context,
+    const cl_mem_properties *properties,
+    cl_mem_flags flags,
+    const cl_image_format *imageFormat,
+    const cl_image_desc *imageDesc,
+    void *hostPtr,
+    cl_int *errcodeRet);
+
+cl_int CL_API_CALL clSetContextDestructorCallback(
+    cl_context context,
+    void(CL_CALLBACK *pfn_notify)(cl_context /* context */, void * /* user_data */),
+    void *user_data);

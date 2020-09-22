@@ -13,20 +13,11 @@ notifications:
 matrix:
     include:
         - os: linux
-          compiler: gcc
-          env: BUILD_OS=ubuntu-16.04 COMPILER=gcc GEN=gen-8
-        - os: linux
-          compiler: gcc
-          env: BUILD_OS=ubuntu-16.04 COMPILER=gcc GEN=gen-9
-        - os: linux
-          compiler: gcc
-          env: BUILD_OS=ubuntu-16.04 COMPILER=gcc GEN=gen-11
-        - os: linux
-          compiler: gcc
-          env: BUILD_OS=ubuntu-16.04 COMPILER=gcc GEN=gen-12
-        - os: linux
           compiler: clang
           env: BUILD_OS=ubuntu-18.04 COMPILER=clang-8
+        - os: linux
+          compiler: clang
+          env: BUILD_OS=ubuntu-18.04 COMPILER=clang-8-l0
         - os: linux
           compiler: gcc
           env: BUILD_OS=ubuntu-18.04 COMPILER=gcc GEN=gen-8
@@ -40,23 +31,20 @@ matrix:
           compiler: gcc
           env: BUILD_OS=ubuntu-18.04 COMPILER=gcc GEN=gen-12
         - os: linux
-          compiler: clang
-          env: BUILD_OS=ubuntu-19.10 COMPILER=clang
+          compiler: gcc
+          env: BUILD_OS=ubuntu-18.04 COMPILER=gcc GEN=gen-9-l0
         - os: linux
           compiler: gcc
-          env: BUILD_OS=ubuntu-19.10 COMPILER=gcc GEN=gen-8
+          env: BUILD_OS=ubuntu-18.04 COMPILER=gcc GEN=gen-11-l0
         - os: linux
           compiler: gcc
-          env: BUILD_OS=ubuntu-19.10 COMPILER=gcc GEN=gen-9
-        - os: linux
-          compiler: gcc
-          env: BUILD_OS=ubuntu-19.10 COMPILER=gcc GEN=gen-11
-        - os: linux
-          compiler: gcc
-          env: BUILD_OS=ubuntu-19.10 COMPILER=gcc GEN=gen-12
+          env: BUILD_OS=ubuntu-18.04 COMPILER=gcc GEN=gen-12-l0
         - os: linux
           compiler: clang
           env: BUILD_OS=ubuntu-20.04 COMPILER=clang
+        - os: linux
+          compiler: clang
+          env: BUILD_OS=ubuntu-20.04 COMPILER=clang-l0
         - os: linux
           compiler: gcc
           env: BUILD_OS=ubuntu-20.04 COMPILER=gcc GEN=gen-8
@@ -69,6 +57,16 @@ matrix:
         - os: linux
           compiler: gcc
           env: BUILD_OS=ubuntu-20.04 COMPILER=gcc GEN=gen-12
+        - os: linux
+          compiler: gcc
+          env: BUILD_OS=ubuntu-20.04 COMPILER=gcc GEN=gen-9-l0
+        - os: linux
+          compiler: gcc
+          env: BUILD_OS=ubuntu-20.04 COMPILER=gcc GEN=gen-11-l0
+        - os: linux
+          compiler: gcc
+          env: BUILD_OS=ubuntu-20.04 COMPILER=gcc GEN=gen-12-l0
+
 
 script: ./scripts/run-build.sh
 

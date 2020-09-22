@@ -11,6 +11,7 @@
 #include "shared/offline_compiler/source/decoder/binary_encoder.h"
 #include "shared/offline_compiler/source/multi_command.h"
 #include "shared/offline_compiler/source/ocloc_fatbinary.h"
+#include "shared/offline_compiler/source/ocloc_validator.h"
 #include "shared/offline_compiler/source/offline_compiler.h"
 
 #include <iostream>
@@ -38,6 +39,7 @@ Commands:
   disasm                Disassembles Intel Compute GPU device binary.
   asm                   Assembles Intel Compute GPU device binary.
   multi                 Compiles multiple files using a config file.
+  validate              Validates Intel Compute GPU device binary
 
 Default command (when none provided) is 'compile'.
 
@@ -50,9 +52,19 @@ Examples:
 
   Assemble to Intel Compute GPU device binary (after above disasm)
     ocloc asm -out reassembled.bin
+
+  Validate Intel Compute GPU device binary
+    ocloc validate -file source_file_Gen9core.bin
 )===";
 
 extern "C" {
+void printOclocCmdLine(unsigned int numArgs, const char *argv[], std::unique_ptr<OclocArgHelper> &helper) {
+    helper->printf("Command was:");
+    for (auto i = 0u; i < numArgs; ++i)
+        helper->printf(" %s", argv[i]);
+    helper->printf("\n");
+}
+
 int oclocInvoke(unsigned int numArgs, const char *argv[],
                 const uint32_t numSources, const uint8_t **dataSources, const uint64_t *lenSources, const char **nameSources,
                 const uint32_t numInputHeaders, const uint8_t **dataInputHeaders, const uint64_t *lenInputHeaders, const char **nameInputHeaders,
@@ -86,12 +98,14 @@ int oclocInvoke(unsigned int numArgs, const char *argv[],
             } else {
                 return retVal;
             }
-        } else if (numArgs > 1 && (ConstStringRef("multi") == allArgs[1] || ConstStringRef("-multi") == allArgs[1])) {
+        } else if (numArgs > 1 && ConstStringRef("multi") == allArgs[1]) {
             int retValue = ErrorCode::SUCCESS;
             std::unique_ptr<MultiCommand> pMulti{(MultiCommand::create(allArgs, retValue, helper.get()))};
             return retValue;
-        } else if (requestedFatBinary(numArgs, argv)) {
-            return buildFatbinary(numArgs, argv, helper.get());
+        } else if (requestedFatBinary(allArgs)) {
+            return buildFatBinary(allArgs, helper.get());
+        } else if (numArgs > 1 && ConstStringRef("validate") == allArgs[1]) {
+            return NEO::Ocloc::validate(allArgs, helper.get());
         } else {
             int retVal = ErrorCode::SUCCESS;
 
@@ -111,14 +125,20 @@ int oclocInvoke(unsigned int numArgs, const char *argv[],
                     helper->printf("Build failed with error code: %d\n", retVal);
                 }
             }
+
+            if (retVal != ErrorCode::SUCCESS)
+                printOclocCmdLine(numArgs, argv, helper);
+
             return retVal;
         }
     } catch (const std::exception &e) {
         helper->printf("%s\n", e.what());
+        printOclocCmdLine(numArgs, argv, helper);
         return -1;
     }
     return -1;
 }
+
 int oclocFreeOutput(uint32_t *numOutputs, uint8_t ***dataOutputs, uint64_t **lenOutputs, char ***nameOutputs) {
     for (uint32_t i = 0; i < *numOutputs; i++) {
         delete[](*dataOutputs)[i];

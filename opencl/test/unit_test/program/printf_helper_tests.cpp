@@ -8,9 +8,9 @@
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/program/print_formatter.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/mocks/mock_graphics_allocation.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
@@ -265,6 +265,21 @@ TEST_P(PrintfUint32Test, GivenPrintfFormatWhenConatinsUintThenInstertValueIntoSt
     printFormatter->printKernelOutput([&actualOutput](char *str) { strncpy_s(actualOutput, PrintFormatter::maxPrintfOutputLength, str, PrintFormatter::maxPrintfOutputLength); });
 
     snprintf(referenceOutput, sizeof(referenceOutput), input.format.c_str(), input.value);
+
+    EXPECT_STREQ(referenceOutput, actualOutput);
+}
+
+TEST_P(PrintfUint32Test, GivenPrintfFormatWhenBufferSizeExceedsPrintfBufferCapacityThenUseSmallerValue) {
+    auto input = GetParam();
+    printFormatter = std::unique_ptr<PrintFormatter>(new PrintFormatter(static_cast<uint8_t *>(data->getUnderlyingBuffer()), 0, is32bit, kernelInfo->patchInfo.stringDataMap));
+
+    auto stringIndex = injectFormatString(input.format);
+    storeData(stringIndex);
+    injectValue(input.value);
+
+    char referenceOutput[PrintFormatter::maxPrintfOutputLength] = "";
+    char actualOutput[PrintFormatter::maxPrintfOutputLength] = "";
+    printFormatter->printKernelOutput([&actualOutput](char *str) { strncpy_s(actualOutput, PrintFormatter::maxPrintfOutputLength, str, PrintFormatter::maxPrintfOutputLength); });
 
     EXPECT_STREQ(referenceOutput, actualOutput);
 }

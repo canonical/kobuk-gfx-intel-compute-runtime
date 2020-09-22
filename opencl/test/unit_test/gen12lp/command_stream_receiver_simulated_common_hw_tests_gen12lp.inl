@@ -7,7 +7,7 @@
 
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_aub_stream.h"
 #include "test.h"
 
@@ -15,7 +15,7 @@
 
 using namespace NEO;
 
-using Gen12LPCommandStreamReceiverSimulatedCommonHwTests = Test<DeviceFixture>;
+using Gen12LPCommandStreamReceiverSimulatedCommonHwTests = Test<ClDeviceFixture>;
 
 template <typename FamilyType>
 class MockSimulatedCsrHw : public CommandStreamReceiverSimulatedHw<FamilyType> {
@@ -25,6 +25,7 @@ class MockSimulatedCsrHw : public CommandStreamReceiverSimulatedHw<FamilyType> {
     void pollForCompletion() override {}
     bool writeMemory(GraphicsAllocation &gfxAllocation) override { return true; }
     void writeMemory(uint64_t gpuAddress, void *cpuAddress, size_t size, uint32_t memoryBank, uint64_t entryBits) override {}
+    void dumpAllocation(GraphicsAllocation &gfxAllocation) override {}
 };
 
 GEN12LPTEST_F(Gen12LPCommandStreamReceiverSimulatedCommonHwTests, givenAubCommandStreamReceiverWhewGlobalMmiosAreInitializedThenMOCSRegistersAreConfigured) {

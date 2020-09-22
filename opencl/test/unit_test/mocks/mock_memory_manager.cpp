@@ -37,6 +37,7 @@ void *MockMemoryManager::allocateSystemMemory(size_t size, size_t alignment) {
 }
 
 GraphicsAllocation *MockMemoryManager::allocateGraphicsMemoryWithProperties(const AllocationProperties &properties) {
+    recentlyPassedDeviceBitfield = properties.subDevicesBitfield;
     AllocationProperties adjustedProperties(properties);
     adjustedProperties.size = redundancyRatio * properties.size;
     return OsAgnosticMemoryManager::allocateGraphicsMemoryWithProperties(adjustedProperties);
@@ -58,7 +59,7 @@ GraphicsAllocation *MockMemoryManager::allocateShareableMemory(const AllocationD
 
 GraphicsAllocation *MockMemoryManager::allocateGraphicsMemory64kb(const AllocationData &allocationData) {
     allocation64kbPageCreated = true;
-    preferRenderCompressedFlagPassed = allocationData.flags.preferRenderCompressed;
+    preferRenderCompressedFlagPassed = forceRenderCompressed ? true : allocationData.flags.preferRenderCompressed;
 
     auto allocation = OsAgnosticMemoryManager::allocateGraphicsMemory64kb(allocationData);
     if (allocation) {
@@ -101,14 +102,15 @@ GraphicsAllocation *MockMemoryManager::allocate32BitGraphicsMemory(uint32_t root
     AllocationData allocationData{};
     MockAllocationProperties properties(rootDeviceIndex, allocateMemory, size, allocationType);
     getAllocationData(allocationData, properties, ptr, createStorageInfoFromProperties(properties));
-    return allocate32BitGraphicsMemoryImpl(allocationData);
+    bool useLocalMemory = !allocationData.flags.useSystemMemory && this->localMemorySupported[rootDeviceIndex];
+    return allocate32BitGraphicsMemoryImpl(allocationData, useLocalMemory);
 }
 
-GraphicsAllocation *MockMemoryManager::allocate32BitGraphicsMemoryImpl(const AllocationData &allocationData) {
+GraphicsAllocation *MockMemoryManager::allocate32BitGraphicsMemoryImpl(const AllocationData &allocationData, bool useLocalMemory) {
     if (failAllocate32Bit) {
         return nullptr;
     }
-    return OsAgnosticMemoryManager::allocate32BitGraphicsMemoryImpl(allocationData);
+    return OsAgnosticMemoryManager::allocate32BitGraphicsMemoryImpl(allocationData, useLocalMemory);
 }
 
 FailMemoryManager::FailMemoryManager(int32_t failedAllocationsCount, ExecutionEnvironment &executionEnvironment) : MockMemoryManager(executionEnvironment) {

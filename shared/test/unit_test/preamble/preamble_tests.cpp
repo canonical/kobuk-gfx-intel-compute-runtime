@@ -6,14 +6,15 @@
  */
 
 #include "shared/source/command_stream/preemption.h"
-#include "shared/source/gen_common/reg_configs/reg_configs_common.h"
+#include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/gen_common/reg_configs_common.h"
 #include "shared/source/helpers/flat_batch_buffer_helper_hw.h"
 #include "shared/source/helpers/preamble.h"
 #include "shared/source/utilities/stackvec.h"
+#include "shared/test/unit_test/cmd_parse/hw_parse.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
-#include "opencl/test/unit_test/helpers/hw_parse.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/mocks/mock_graphics_allocation.h"
 #include "test.h"
 
@@ -191,6 +192,28 @@ HWTEST_F(PreambleTest, givenDefaultPreambleWhenGetThreadsMaxNumberIsCalledThenMa
     EXPECT_EQ(expected, value);
 }
 
+HWTEST_F(PreambleTest, givenMaxHwThreadsPercentDebugVariableWhenGetThreadsMaxNumberIsCalledThenMaximumNumberOfThreadsIsCappedToRequestedNumber) {
+    const HardwareInfo &hwInfo = *defaultHwInfo;
+    uint32_t threadsPerEU = (hwInfo.gtSystemInfo.ThreadCount / hwInfo.gtSystemInfo.EUCount) + hwInfo.capabilityTable.extraQuantityThreadsPerEU;
+    DebugManagerStateRestore debugManagerStateRestore;
+    DebugManager.flags.MaxHwThreadsPercent.set(80);
+    uint32_t value = HwHelper::getMaxThreadsForVfe(hwInfo);
+
+    uint32_t expected = int(hwInfo.gtSystemInfo.EUCount * threadsPerEU * 80 / 100.0f);
+    EXPECT_EQ(expected, value);
+}
+
+HWTEST_F(PreambleTest, givenMinHwThreadsUnoccupiedDebugVariableWhenGetThreadsMaxNumberIsCalledThenMaximumNumberOfThreadsIsCappedToMatchRequestedNumber) {
+    const HardwareInfo &hwInfo = *defaultHwInfo;
+    uint32_t threadsPerEU = (hwInfo.gtSystemInfo.ThreadCount / hwInfo.gtSystemInfo.EUCount) + hwInfo.capabilityTable.extraQuantityThreadsPerEU;
+    DebugManagerStateRestore debugManagerStateRestore;
+    DebugManager.flags.MinHwThreadsUnoccupied.set(2);
+    uint32_t value = HwHelper::getMaxThreadsForVfe(hwInfo);
+
+    uint32_t expected = hwInfo.gtSystemInfo.EUCount * threadsPerEU - 2;
+    EXPECT_EQ(expected, value);
+}
+
 HWCMDTEST_F(IGFX_GEN8_CORE, PreambleTest, givenPreambleHelperWhenMediaVfeStateIsProgrammedThenOffsetToCommandIsReturned) {
     char buffer[64];
     MockGraphicsAllocation graphicsAllocation(buffer, sizeof(buffer));
@@ -201,4 +224,47 @@ HWCMDTEST_F(IGFX_GEN8_CORE, PreambleTest, givenPreambleHelperWhenMediaVfeStateIs
 
     auto offset = PreambleHelper<FamilyType>::programVFEState(&preambleStream, mockDevice->getHardwareInfo(), 1024u, addressToPatch, 10u, aub_stream::EngineType::ENGINE_RCS);
     EXPECT_NE(0u, offset);
+}
+
+HWTEST_F(PreambleTest, givenSetForceSemaphoreDelayBetweenWaitsWhenProgramSemaphoreDelayThenSemaWaitPollRegisterIsProgrammed) {
+    using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
+    DebugManagerStateRestore debugManagerStateRestore;
+    uint32_t newDelay = 10u;
+    DebugManager.flags.ForceSemaphoreDelayBetweenWaits.set(newDelay);
+
+    auto bufferSize = PreambleHelper<FamilyType>::getSemaphoreDelayCommandSize();
+    EXPECT_EQ(sizeof(MI_LOAD_REGISTER_IMM), bufferSize);
+    auto buffer = std::unique_ptr<char[]>(new char[bufferSize]);
+
+    LinearStream stream(buffer.get(), bufferSize);
+    PreambleHelper<FamilyType>::programSemaphoreDelay(&stream);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(stream);
+    auto cmdList = hwParser.getCommandsList<MI_LOAD_REGISTER_IMM>();
+    ASSERT_EQ(1u, cmdList.size());
+
+    auto it = cmdList.begin();
+
+    MI_LOAD_REGISTER_IMM *pCmd = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(*it);
+    EXPECT_EQ(static_cast<uint32_t>(0x224c), pCmd->getRegisterOffset());
+    EXPECT_EQ(newDelay, pCmd->getDataDword());
+}
+
+HWTEST_F(PreambleTest, givenNotSetForceSemaphoreDelayBetweenWaitsWhenProgramSemaphoreDelayThenSemaWaitPollRegisterIsNotProgrammed) {
+    using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
+    DebugManagerStateRestore debugManagerStateRestore;
+    DebugManager.flags.ForceSemaphoreDelayBetweenWaits.set(-1);
+
+    auto bufferSize = PreambleHelper<FamilyType>::getSemaphoreDelayCommandSize();
+    EXPECT_EQ(sizeof(MI_LOAD_REGISTER_IMM), bufferSize);
+    auto buffer = std::unique_ptr<char[]>(new char[bufferSize]);
+
+    LinearStream stream(buffer.get(), bufferSize);
+    PreambleHelper<FamilyType>::programSemaphoreDelay(&stream);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(stream);
+    auto cmdList = hwParser.getCommandsList<MI_LOAD_REGISTER_IMM>();
+    ASSERT_EQ(0u, cmdList.size());
 }

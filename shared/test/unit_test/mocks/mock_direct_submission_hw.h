@@ -7,41 +7,46 @@
 
 #pragma once
 #include "shared/source/direct_submission/direct_submission_hw.h"
+#include "shared/source/direct_submission/direct_submission_hw_diagnostic_mode.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 
 namespace NEO {
 
-template <typename GfxFamily>
-struct MockDirectSubmissionHw : public DirectSubmissionHw<GfxFamily> {
-    using BaseClass = DirectSubmissionHw<GfxFamily>;
+template <typename GfxFamily, typename Dispatcher>
+struct MockDirectSubmissionHw : public DirectSubmissionHw<GfxFamily, Dispatcher> {
+    using BaseClass = DirectSubmissionHw<GfxFamily, Dispatcher>;
     using BaseClass::allocateResources;
-    using BaseClass::cmdDispatcher;
     using BaseClass::completionRingBuffers;
     using BaseClass::cpuCachelineFlush;
     using BaseClass::currentQueueWorkCount;
     using BaseClass::currentRingBuffer;
     using BaseClass::deallocateResources;
+    using BaseClass::defaultDisableCacheFlush;
+    using BaseClass::defaultDisableMonitorFence;
     using BaseClass::device;
+    using BaseClass::diagnostic;
+    using BaseClass::DirectSubmissionHw;
+    using BaseClass::disableCacheFlush;
     using BaseClass::disableCpuCacheFlush;
-    using BaseClass::dispatchEndingSection;
-    using BaseClass::dispatchFlushSection;
+    using BaseClass::disableMonitorFence;
+    using BaseClass::dispatchDisablePrefetcher;
+    using BaseClass::dispatchPrefetchMitigation;
     using BaseClass::dispatchSemaphoreSection;
     using BaseClass::dispatchStartSection;
     using BaseClass::dispatchSwitchRingBufferSection;
-    using BaseClass::dispatchTagUpdateSection;
     using BaseClass::dispatchWorkloadSection;
     using BaseClass::getCommandBufferPositionGpuAddress;
+    using BaseClass::getDiagnosticModeSection;
+    using BaseClass::getSizeDisablePrefetcher;
     using BaseClass::getSizeDispatch;
     using BaseClass::getSizeEnd;
-    using BaseClass::getSizeEndingSection;
-    using BaseClass::getSizeFlushSection;
+    using BaseClass::getSizePrefetchMitigation;
     using BaseClass::getSizeSemaphoreSection;
     using BaseClass::getSizeStartSection;
-    using BaseClass::getSizeStoraDataSection;
     using BaseClass::getSizeSwitchRingBufferSection;
-    using BaseClass::getSizeTagUpdateSection;
     using BaseClass::hwInfo;
     using BaseClass::osContext;
+    using BaseClass::performDiagnosticMode;
     using BaseClass::ringBuffer;
     using BaseClass::ringBuffer2;
     using BaseClass::ringCommandStream;
@@ -53,13 +58,10 @@ struct MockDirectSubmissionHw : public DirectSubmissionHw<GfxFamily> {
     using BaseClass::setReturnAddress;
     using BaseClass::stopRingBuffer;
     using BaseClass::switchRingBuffersAllocations;
+    using BaseClass::workloadMode;
+    using BaseClass::workloadModeOneExpectedValue;
+    using BaseClass::workloadModeOneStoreAddress;
     using typename BaseClass::RingBufferUse;
-
-    MockDirectSubmissionHw(Device &device,
-                           std::unique_ptr<Dispatcher> cmdDispatcher,
-                           OsContext &osContext)
-        : DirectSubmissionHw<GfxFamily>(device, std::move(cmdDispatcher), osContext) {
-    }
 
     ~MockDirectSubmissionHw() override {
         if (ringStart) {
@@ -68,8 +70,12 @@ struct MockDirectSubmissionHw : public DirectSubmissionHw<GfxFamily> {
         deallocateResources();
     }
 
-    bool allocateOsResources(DirectSubmissionAllocations &allocations) override {
+    bool allocateOsResources() override {
         return allocateOsResourcesReturn;
+    }
+
+    bool makeResourcesResident(DirectSubmissionAllocations &allocations) override {
+        return true;
     }
 
     bool submit(uint64_t gpuAddress, size_t size) override {
@@ -84,15 +90,7 @@ struct MockDirectSubmissionHw : public DirectSubmissionHw<GfxFamily> {
         return handleResidencyReturn;
     }
 
-    uint64_t switchRingBuffers() override {
-        GraphicsAllocation *nextRingBuffer = switchRingBuffersAllocations();
-        uint64_t currentBufferGpuVa = getCommandBufferPositionGpuAddress(ringCommandStream.getSpace(0));
-
-        ringCommandStream.replaceBuffer(nextRingBuffer->getUnderlyingBuffer(), ringCommandStream.getMaxAvailableSpace());
-        ringCommandStream.replaceGraphicsAllocation(nextRingBuffer);
-
-        return currentBufferGpuVa;
-    }
+    void handleSwitchRingBuffers() override {}
 
     uint64_t updateTagValue() override {
         return updateTagValueReturn;
@@ -103,15 +101,28 @@ struct MockDirectSubmissionHw : public DirectSubmissionHw<GfxFamily> {
         tagData.tagValue = tagValueSetValue;
     }
 
-    bool allocateOsResourcesReturn = true;
-    bool submitReturn = true;
-    bool handleResidencyReturn = true;
-    uint32_t submitCount = 0u;
-    uint32_t handleResidencyCount = 0u;
-    size_t submitSize = 0u;
+    void performDiagnosticMode() override {
+        if (!NEO::directSubmissionDiagnosticAvailable) {
+            disabledDiagnosticCalled++;
+        }
+        uint32_t add = 1;
+        if (diagnostic.get()) {
+            add += diagnostic->getExecutionsCount();
+        }
+        *static_cast<volatile uint32_t *>(workloadModeOneStoreAddress) = workloadModeOneExpectedValue + add;
+        BaseClass::performDiagnosticMode();
+    }
+
     uint64_t updateTagValueReturn = 1ull;
     uint64_t tagAddressSetValue = MemoryConstants::pageSize;
     uint64_t tagValueSetValue = 1ull;
     uint64_t submitGpuAddress = 0ull;
+    size_t submitSize = 0u;
+    uint32_t submitCount = 0u;
+    uint32_t handleResidencyCount = 0u;
+    uint32_t disabledDiagnosticCalled = 0u;
+    bool allocateOsResourcesReturn = true;
+    bool submitReturn = true;
+    bool handleResidencyReturn = true;
 };
 } // namespace NEO

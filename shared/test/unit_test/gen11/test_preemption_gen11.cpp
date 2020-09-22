@@ -6,17 +6,13 @@
  */
 
 #include "shared/source/built_ins/built_ins.h"
+#include "shared/source/command_stream/preemption.h"
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/test/unit_test/cmd_parse/hw_parse.h"
 #include "shared/test/unit_test/fixtures/preemption_fixture.h"
-
-#include "opencl/test/unit_test/helpers/hw_parse.h"
-#include "opencl/test/unit_test/mocks/mock_buffer.h"
-#include "opencl/test/unit_test/mocks/mock_command_queue.h"
-#include "opencl/test/unit_test/mocks/mock_csr.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 using namespace NEO;
-
-using Gen11PreemptionTests = DevicePreemptionTests;
 
 template <>
 PreemptionTestHwDetails GetPreemptionTestHwDetails<ICLFamily>() {
@@ -29,14 +25,16 @@ PreemptionTestHwDetails GetPreemptionTestHwDetails<ICLFamily>() {
     return ret;
 }
 
+using Gen11PreemptionTests = DevicePreemptionTests;
+
 GEN11TEST_F(Gen11PreemptionTests, whenMidThreadPreemptionIsNotAvailableThenDoesNotProgramStateSip) {
     device->setPreemptionMode(PreemptionMode::ThreadGroup);
 
-    size_t requiredSize = PreemptionHelper::getRequiredPreambleSize<FamilyType>(device->getDevice());
+    size_t requiredSize = PreemptionHelper::getRequiredPreambleSize<FamilyType>(*device);
     EXPECT_EQ(0U, requiredSize);
 
     LinearStream cmdStream{nullptr, 0};
-    PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(device->getDevice());
+    PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*device);
     EXPECT_EQ(0U, cmdStream.getUsed());
 }
 
@@ -46,7 +44,7 @@ GEN11TEST_F(Gen11PreemptionTests, whenMidThreadPreemptionIsAvailableThenStateSip
     device->setPreemptionMode(PreemptionMode::MidThread);
     executionEnvironment->DisableMidThreadPreemption = 0;
 
-    size_t requiredCmdStreamSize = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(device->getDevice());
+    size_t requiredCmdStreamSize = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*device);
     size_t expectedPreambleSize = sizeof(STATE_SIP);
     EXPECT_EQ(expectedPreambleSize, requiredCmdStreamSize);
 
@@ -54,28 +52,29 @@ GEN11TEST_F(Gen11PreemptionTests, whenMidThreadPreemptionIsAvailableThenStateSip
     ASSERT_LE(requiredCmdStreamSize, streamStorage.size());
 
     LinearStream cmdStream{streamStorage.begin(), streamStorage.size()};
-    PreemptionHelper::programStateSip<FamilyType>(cmdStream, device->getDevice());
+    PreemptionHelper::programStateSip<FamilyType>(cmdStream, *device);
 
     HardwareParse hwParsePreamble;
     hwParsePreamble.parseCommands<FamilyType>(cmdStream);
 
     auto stateSipCmd = hwParsePreamble.getCommand<STATE_SIP>();
     ASSERT_NE(nullptr, stateSipCmd);
-    EXPECT_EQ(device->getBuiltIns()->getSipKernel(SipKernelType::Csr, device->getDevice()).getSipAllocation()->getGpuAddressToPatch(), stateSipCmd->getSystemInstructionPointer());
+    EXPECT_EQ(device->getBuiltIns()->getSipKernel(SipKernelType::Csr, *device).getSipAllocation()->getGpuAddressToPatch(), stateSipCmd->getSystemInstructionPointer());
 }
 
 GEN11TEST_F(Gen11PreemptionTests, getRequiredCmdQSize) {
     size_t expectedSize = 0;
-    EXPECT_EQ(expectedSize, PreemptionHelper::getPreemptionWaCsSize<FamilyType>(device->getDevice()));
+    EXPECT_EQ(expectedSize, PreemptionHelper::getPreemptionWaCsSize<FamilyType>(*device));
 }
 
 GEN11TEST_F(Gen11PreemptionTests, applyPreemptionWaCmds) {
     size_t usedSize = 0;
-    auto &cmdStream = cmdQ->getCS(0);
+    StackVec<char, 1024> streamStorage(1024);
+    LinearStream cmdStream{streamStorage.begin(), streamStorage.size()};
 
-    PreemptionHelper::applyPreemptionWaCmdsBegin<FamilyType>(&cmdStream, device->getDevice());
+    PreemptionHelper::applyPreemptionWaCmdsBegin<FamilyType>(&cmdStream, *device);
     EXPECT_EQ(usedSize, cmdStream.getUsed());
-    PreemptionHelper::applyPreemptionWaCmdsEnd<FamilyType>(&cmdStream, device->getDevice());
+    PreemptionHelper::applyPreemptionWaCmdsEnd<FamilyType>(&cmdStream, *device);
     EXPECT_EQ(usedSize, cmdStream.getUsed());
 }
 

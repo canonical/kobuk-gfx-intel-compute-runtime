@@ -29,32 +29,36 @@ namespace NEO {
 
 MemObj::MemObj(Context *context,
                cl_mem_object_type memObjectType,
-               const MemoryPropertiesFlags &memoryProperties,
+               const MemoryProperties &memoryProperties,
                cl_mem_flags flags,
                cl_mem_flags_intel flagsIntel,
                size_t size,
                void *memoryStorage,
                void *hostPtr,
-               GraphicsAllocation *gfxAllocation,
+               MultiGraphicsAllocation multiGraphicsAllocation,
                bool zeroCopy,
                bool isHostPtrSVM,
                bool isObjectRedescribed)
     : context(context), memObjectType(memObjectType), memoryProperties(memoryProperties), flags(flags), flagsIntel(flagsIntel), size(size),
       memoryStorage(memoryStorage), hostPtr(hostPtr),
       isZeroCopy(zeroCopy), isHostPtrSVM(isHostPtrSVM), isObjectRedescribed(isObjectRedescribed),
-      graphicsAllocation(gfxAllocation) {
-
+      multiGraphicsAllocation(std::move(multiGraphicsAllocation)),
+      mapAllocations(static_cast<uint32_t>(this->multiGraphicsAllocation.getGraphicsAllocations().size() - 1)) {
     if (context) {
         context->incRefInternal();
         memoryManager = context->getMemoryManager();
         auto device = context->getDevice(0);
         executionEnvironment = device->getExecutionEnvironment();
-        rootDeviceEnvironment = executionEnvironment->rootDeviceEnvironments[device->getRootDeviceIndex()].get();
     }
 }
 
 MemObj::~MemObj() {
+    if (!context) {
+        return;
+    }
+
     bool needWait = false;
+
     if (allocatedMapPtr != nullptr) {
         needWait = true;
     }
@@ -65,52 +69,48 @@ MemObj::~MemObj() {
         needWait = true;
     }
 
-    if (memoryManager && !isObjectRedescribed) {
+    if (!isObjectRedescribed) {
         if (peekSharingHandler()) {
             peekSharingHandler()->releaseReusedGraphicsAllocation();
         }
-        if (graphicsAllocation && !associatedMemObject && !isHostPtrSVM && graphicsAllocation->peekReuseCount() == 0) {
-            memoryManager->removeAllocationFromHostPtrManager(graphicsAllocation);
-            bool doAsyncDestructions = DebugManager.flags.EnableAsyncDestroyAllocations.get();
-            if (!doAsyncDestructions) {
-                needWait = true;
-            }
-            if (needWait && graphicsAllocation->isUsed()) {
-                memoryManager->waitForEnginesCompletion(*graphicsAllocation);
-            }
-            destroyGraphicsAllocation(graphicsAllocation, doAsyncDestructions);
-            graphicsAllocation = nullptr;
-        }
 
+        for (auto graphicsAllocation : multiGraphicsAllocation.getGraphicsAllocations()) {
+            auto rootDeviceIndex = graphicsAllocation ? graphicsAllocation->getRootDeviceIndex() : 0;
+            if (graphicsAllocation && !associatedMemObject && !isHostPtrSVM && graphicsAllocation->peekReuseCount() == 0) {
+                memoryManager->removeAllocationFromHostPtrManager(graphicsAllocation);
+                bool doAsyncDestructions = DebugManager.flags.EnableAsyncDestroyAllocations.get();
+                if (!doAsyncDestructions) {
+                    needWait = true;
+                }
+                if (needWait && graphicsAllocation->isUsed()) {
+                    memoryManager->waitForEnginesCompletion(*graphicsAllocation);
+                }
+                destroyGraphicsAllocation(graphicsAllocation, doAsyncDestructions);
+                graphicsAllocation = nullptr;
+            }
+            if (!associatedMemObject) {
+                releaseMapAllocation(rootDeviceIndex);
+            }
+            if (mcsAllocation) {
+                destroyGraphicsAllocation(mcsAllocation, false);
+            }
+            if (graphicsAllocation && associatedMemObject) {
+                if (associatedMemObject->getGraphicsAllocation(graphicsAllocation->getRootDeviceIndex()) != graphicsAllocation) {
+                    destroyGraphicsAllocation(graphicsAllocation, false);
+                }
+                associatedMemObject->decRefInternal();
+            }
+        }
         if (!associatedMemObject) {
-            releaseMapAllocation();
             releaseAllocatedMapPtr();
         }
-        if (mcsAllocation) {
-            destroyGraphicsAllocation(mcsAllocation, false);
-        }
-
-        if (associatedMemObject) {
-            if (associatedMemObject->getGraphicsAllocation() != this->getGraphicsAllocation()) {
-                destroyGraphicsAllocation(graphicsAllocation, false);
-            }
-            associatedMemObject->decRefInternal();
-        }
     }
-    if (!destructorCallbacks.empty()) {
-        for (auto iter = destructorCallbacks.rbegin(); iter != destructorCallbacks.rend(); iter++) {
-            (*iter)->invoke(this);
-            delete *iter;
-        }
+    for (auto callback : destructorCallbacks) {
+        callback->invoke(this);
+        delete callback;
     }
 
-    if (context) {
-        context->decRefInternal();
-    }
-}
-
-void MemObj::DestructorCallback::invoke(cl_mem memObj) {
-    this->funcNotify(memObj, userData);
+    context->decRefInternal();
 }
 
 cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
@@ -118,7 +118,7 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
                                 void *paramValue,
                                 size_t *paramValueSizeRet) {
     cl_int retVal;
-    size_t srcParamSize = 0;
+    size_t srcParamSize = GetInfo::invalidSourceSize;
     void *srcParam = nullptr;
     cl_bool usesSVMPointer;
     cl_uint refCnt = 0;
@@ -126,6 +126,8 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
     cl_mem clAssociatedMemObject = static_cast<cl_mem>(this->associatedMemObject);
     cl_context ctx = nullptr;
     uint64_t internalHandle = 0llu;
+    auto allocation = getMultiGraphicsAllocation().getDefaultGraphicsAllocation();
+    cl_bool usesCompression = allocation->getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED;
 
     switch (paramName) {
     case CL_MEM_TYPE:
@@ -181,10 +183,21 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
         srcParamSize = sizeof(refCnt);
         srcParam = &refCnt;
         break;
+
     case CL_MEM_ALLOCATION_HANDLE_INTEL:
-        internalHandle = this->getGraphicsAllocation()->peekInternalHandle(this->memoryManager);
+        internalHandle = multiGraphicsAllocation.getDefaultGraphicsAllocation()->peekInternalHandle(this->memoryManager);
         srcParamSize = sizeof(internalHandle);
         srcParam = &internalHandle;
+        break;
+
+    case CL_MEM_USES_COMPRESSION_INTEL:
+        srcParam = &usesCompression;
+        srcParamSize = sizeof(cl_bool);
+        break;
+
+    case CL_MEM_PROPERTIES:
+        srcParamSize = propertiesVector.size() * sizeof(cl_mem_properties);
+        srcParam = propertiesVector.data();
         break;
 
     default:
@@ -192,21 +205,19 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
         break;
     }
 
-    retVal = changeGetInfoStatusToCLResultType(::getInfo(paramValue, paramValueSize, srcParam, srcParamSize));
-
-    if (paramValueSizeRet) {
-        *paramValueSizeRet = srcParamSize;
-    }
+    auto getInfoStatus = GetInfo::getInfo(paramValue, paramValueSize, srcParam, srcParamSize);
+    retVal = changeGetInfoStatusToCLResultType(getInfoStatus);
+    GetInfo::setParamValueReturnSize(paramValueSizeRet, srcParamSize, getInfoStatus);
 
     return retVal;
 }
 
 cl_int MemObj::setDestructorCallback(void(CL_CALLBACK *funcNotify)(cl_mem, void *),
                                      void *userData) {
-    auto cb = new DestructorCallback(funcNotify, userData);
+    auto cb = new MemObjDestructorCallback(funcNotify, userData);
 
     std::unique_lock<std::mutex> theLock(mtx);
-    destructorCallbacks.push_back(cb);
+    destructorCallbacks.push_front(cb);
     return CL_SUCCESS;
 }
 
@@ -242,18 +253,27 @@ bool MemObj::isMemObjUncacheableForSurfaceState() const {
     return isAnyBitSet(flagsIntel, CL_MEM_LOCALLY_UNCACHED_SURFACE_STATE_RESOURCE | CL_MEM_LOCALLY_UNCACHED_RESOURCE);
 }
 
-GraphicsAllocation *MemObj::getGraphicsAllocation() const {
-    return graphicsAllocation;
+GraphicsAllocation *MemObj::getGraphicsAllocation(uint32_t rootDeviceIndex) const {
+    return multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex);
+}
+
+void MemObj::checkUsageAndReleaseOldAllocation(uint32_t rootDeviceIndex) {
+    auto graphicsAllocation = getGraphicsAllocation(rootDeviceIndex);
+    if (graphicsAllocation != nullptr && (peekSharingHandler() == nullptr || graphicsAllocation->peekReuseCount() == 0)) {
+        memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(graphicsAllocation);
+    }
 }
 
 void MemObj::resetGraphicsAllocation(GraphicsAllocation *newGraphicsAllocation) {
     TakeOwnershipWrapper<MemObj> lock(*this);
+    checkUsageAndReleaseOldAllocation(newGraphicsAllocation->getRootDeviceIndex());
+    multiGraphicsAllocation.addAllocation(newGraphicsAllocation);
+}
 
-    if (graphicsAllocation != nullptr && (peekSharingHandler() == nullptr || graphicsAllocation->peekReuseCount() == 0)) {
-        memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(graphicsAllocation);
-    }
-
-    graphicsAllocation = newGraphicsAllocation;
+void MemObj::removeGraphicsAllocation(uint32_t rootDeviceIndex) {
+    TakeOwnershipWrapper<MemObj> lock(*this);
+    checkUsageAndReleaseOldAllocation(rootDeviceIndex);
+    multiGraphicsAllocation.removeAllocation(rootDeviceIndex);
 }
 
 bool MemObj::readMemObjFlagsInvalid() {
@@ -299,9 +319,9 @@ void MemObj::releaseAllocatedMapPtr() {
     allocatedMapPtr = nullptr;
 }
 
-void MemObj::releaseMapAllocation() {
-    if (mapAllocation && !isHostPtrSVM) {
-        destroyGraphicsAllocation(mapAllocation, false);
+void MemObj::releaseMapAllocation(uint32_t rootDeviceIndex) {
+    if (mapAllocations.getGraphicsAllocation(rootDeviceIndex) && !isHostPtrSVM) {
+        destroyGraphicsAllocation(mapAllocations.getGraphicsAllocation(rootDeviceIndex), false);
     }
 }
 
@@ -327,16 +347,23 @@ void *MemObj::getBasePtrForMap(uint32_t rootDeviceIndex) {
     if (associatedMemObject) {
         return associatedMemObject->getBasePtrForMap(rootDeviceIndex);
     }
-    if (getMemoryPropertiesFlags() & CL_MEM_USE_HOST_PTR) {
+    if (getFlags() & CL_MEM_USE_HOST_PTR) {
         return getHostPtr();
     } else {
         TakeOwnershipWrapper<MemObj> memObjOwnership(*this);
-        if (getMapAllocation()) {
-            return getMapAllocation()->getUnderlyingBuffer();
+        if (getMapAllocation(rootDeviceIndex)) {
+            return getMapAllocation(rootDeviceIndex)->getUnderlyingBuffer();
         } else {
-            auto memory = memoryManager->allocateSystemMemory(getSize(), MemoryConstants::pageSize);
-            setAllocatedMapPtr(memory);
-            AllocationProperties properties{rootDeviceIndex, false, getSize(), GraphicsAllocation::AllocationType::MAP_ALLOCATION, false};
+            auto memory = getAllocatedMapPtr();
+            if (!memory) {
+                memory = memoryManager->allocateSystemMemory(getSize(), MemoryConstants::pageSize);
+                setAllocatedMapPtr(memory);
+            }
+            AllocationProperties properties{rootDeviceIndex,
+                                            false, // allocateMemory
+                                            getSize(), GraphicsAllocation::AllocationType::MAP_ALLOCATION,
+                                            false, //isMultiStorageAllocation
+                                            context->getDeviceBitfieldForAllocation()};
 
             auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, memory);
             setMapAllocation(allocation);
@@ -353,13 +380,26 @@ bool MemObj::addMappedPtr(void *ptr, size_t ptrLength, cl_map_flags &mapFlags,
 }
 
 bool MemObj::isTiledAllocation() const {
+    auto graphicsAllocation = multiGraphicsAllocation.getDefaultGraphicsAllocation();
     auto gmm = graphicsAllocation->getDefaultGmm();
     return gmm && (gmm->gmmResourceInfo->getTileModeSurfaceState() != 0);
 }
 
 bool MemObj::mappingOnCpuAllowed() const {
+    auto graphicsAllocation = multiGraphicsAllocation.getDefaultGraphicsAllocation();
     return !isTiledAllocation() && !peekSharingHandler() && !isMipMapped(this) && !DebugManager.flags.DisableZeroCopyForBuffers.get() &&
            !(graphicsAllocation->getDefaultGmm() && graphicsAllocation->getDefaultGmm()->isRenderCompressed) &&
            MemoryPool::isSystemMemoryPool(graphicsAllocation->getMemoryPool());
 }
+
+void MemObj::storeProperties(const cl_mem_properties *properties) {
+    if (properties) {
+        for (size_t i = 0; properties[i] != 0; i += 2) {
+            propertiesVector.push_back(properties[i]);
+            propertiesVector.push_back(properties[i + 1]);
+        }
+        propertiesVector.push_back(0);
+    }
+}
+
 } // namespace NEO

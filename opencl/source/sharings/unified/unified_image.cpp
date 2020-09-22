@@ -26,7 +26,7 @@ Image *UnifiedImage::createSharedUnifiedImage(Context *context, cl_mem_flags fla
     ErrorCodeHelper errorCode(errcodeRet, CL_SUCCESS);
     UnifiedSharingFunctions *sharingFunctions = context->getSharing<UnifiedSharingFunctions>();
 
-    auto *clSurfaceFormat = Image::getSurfaceFormatFromTable(flags, imageFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+    auto *clSurfaceFormat = Image::getSurfaceFormatFromTable(flags, imageFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
     ImageInfo imgInfo = {};
     imgInfo.imgDesc = Image::convertDescriptor(*imageDesc);
     imgInfo.surfaceFormat = &clSurfaceFormat->surfaceFormat;
@@ -49,8 +49,11 @@ Image *UnifiedImage::createSharedUnifiedImage(Context *context, cl_mem_flags fla
     const uint32_t baseMipmapIndex = 0u;
     const uint32_t sharedMipmapsCount = imageDesc->num_mip_levels;
     auto sharingHandler = new UnifiedImage(sharingFunctions, description.type);
-    return Image::createSharedImage(context, sharingHandler, McsSurfaceInfo{}, graphicsAllocation, nullptr,
-                                    flags, clSurfaceFormat, imgInfo, __GMM_NO_CUBE_MAP, baseMipmapIndex, sharedMipmapsCount);
+    auto multiGraphicsAllocation = MultiGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
+    multiGraphicsAllocation.addAllocation(graphicsAllocation);
+
+    return Image::createSharedImage(context, sharingHandler, McsSurfaceInfo{}, std::move(multiGraphicsAllocation), nullptr,
+                                    flags, 0, clSurfaceFormat, imgInfo, __GMM_NO_CUBE_MAP, baseMipmapIndex, sharedMipmapsCount);
 }
 
 } // namespace NEO

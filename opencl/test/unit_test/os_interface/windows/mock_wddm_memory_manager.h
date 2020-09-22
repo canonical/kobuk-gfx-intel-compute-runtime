@@ -21,6 +21,7 @@ class MockWddmMemoryManager : public MemoryManagerCreate<WddmMemoryManager> {
     using BaseClass::allocateGraphicsMemory64kb;
     using BaseClass::allocateGraphicsMemoryForNonSvmHostPtr;
     using BaseClass::allocateGraphicsMemoryInDevicePool;
+    using BaseClass::allocateGraphicsMemoryWithGpuVa;
     using BaseClass::allocateGraphicsMemoryWithProperties;
     using BaseClass::allocateShareableMemory;
     using BaseClass::createGraphicsAllocation;
@@ -30,6 +31,10 @@ class MockWddmMemoryManager : public MemoryManagerCreate<WddmMemoryManager> {
     using BaseClass::localMemorySupported;
     using BaseClass::supportsMultiStorageResources;
     using MemoryManagerCreate<WddmMemoryManager>::MemoryManagerCreate;
+    using BaseClass::getHugeGfxMemoryChunkSize;
+
+    size_t hugeGfxMemoryChunkSize = BaseClass::getHugeGfxMemoryChunkSize();
+    size_t getHugeGfxMemoryChunkSize() const override { return hugeGfxMemoryChunkSize; }
 
     MockWddmMemoryManager(ExecutionEnvironment &executionEnvironment) : MemoryManagerCreate(false, false, executionEnvironment) {
         hostPtrManager.reset(new MockHostPtrManager);
@@ -48,7 +53,8 @@ class MockWddmMemoryManager : public MemoryManagerCreate<WddmMemoryManager> {
         AllocationData allocationData;
         MockAllocationProperties properties(rootDeviceIndex, allocateMemory, size, allocationType);
         getAllocationData(allocationData, properties, ptr, createStorageInfoFromProperties(properties));
-        return allocate32BitGraphicsMemoryImpl(allocationData);
+        bool useLocalMemory = !allocationData.flags.useSystemMemory && this->localMemorySupported[rootDeviceIndex];
+        return allocate32BitGraphicsMemoryImpl(allocationData, useLocalMemory);
     }
 
     void freeGraphicsMemoryImpl(GraphicsAllocation *gfxAllocation) override {

@@ -13,6 +13,7 @@
 #include "shared/source/utilities/debug_settings_reader.h"
 #include "shared/test/unit_test/helpers/default_hw_info.inl"
 #include "shared/test/unit_test/helpers/memory_leak_listener.h"
+#include "shared/test/unit_test/helpers/test_files.h"
 #include "shared/test/unit_test/helpers/ult_hw_config.inl"
 #include "shared/test/unit_test/tests_configuration.h"
 
@@ -20,7 +21,6 @@
 #include "opencl/test/unit_test/custom_event_listener.h"
 #include "opencl/test/unit_test/global_environment.h"
 #include "opencl/test/unit_test/helpers/kernel_binary_helper.h"
-#include "opencl/test/unit_test/helpers/test_files.h"
 #include "opencl/test/unit_test/mocks/mock_gmm.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 #include "opencl/test/unit_test/mocks/mock_sip.h"
@@ -72,7 +72,8 @@ extern std::string lastTest;
 bool generateRandomInput = false;
 
 void applyWorkarounds() {
-    platformsImpl.reserve(1);
+    platformsImpl = new std::vector<std::unique_ptr<Platform>>;
+    platformsImpl->reserve(1);
     {
         std::ofstream f;
         const std::string fileName("_tmp_");
@@ -152,6 +153,7 @@ void initializeTestHelpers() {
 
 void cleanTestHelpers() {
     GlobalMockSipProgram::shutDownSipProgram();
+    delete platformsImpl;
 }
 
 std::string getHardwarePrefix() {
@@ -167,11 +169,14 @@ std::string getRunPath(char *argv0) {
         res = res.substr(0, pos);
 
     if (res == "." || pos == std::string::npos) {
+        char *cwd;
 #if defined(__linux__)
-        res = getcwd(nullptr, 0);
+        cwd = getcwd(nullptr, 0);
 #else
-        res = _getcwd(nullptr, 0);
+        cwd = _getcwd(nullptr, 0);
 #endif
+        res = cwd;
+        free(cwd);
     }
 
     return res;
@@ -278,7 +283,7 @@ int main(int argc, char **argv) {
             }
         } else if (!strcmp("--generate_random_inputs", argv[i])) {
             generateRandomInput = true;
-        } else if (!strcmp("--read-config", argv[i]) && testMode == TestMode::AubTests) {
+        } else if (!strcmp("--read-config", argv[i]) && (testMode == TestMode::AubTests || testMode == TestMode::AubTestsWithTbx)) {
             if (DebugManager.registryReadAvailable()) {
                 DebugManager.setReaderImpl(SettingsReader::create(oclRegPath));
                 DebugManager.injectSettingsFromReader();

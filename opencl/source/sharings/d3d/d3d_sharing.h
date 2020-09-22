@@ -29,14 +29,14 @@ class D3DSharing : public SharingHandler {
     ~D3DSharing() override;
 
     void synchronizeObject(UpdateData &updateData) override;
-    void releaseResource(MemObj *memObject) override;
+    void releaseResource(MemObj *memObject, uint32_t rootDeviceIndex) override;
 
     D3DResource **getResourceHandler() { return &resource; }
     void *getResourceStaging() { return resourceStaging; }
     unsigned int &getSubresource() { return subresource; }
     typename D3DQuery *getQuery() { return d3dQuery; }
     bool isSharedResource() { return sharedResource; }
-    static const ClSurfaceFormatInfo *findSurfaceFormatInfo(GMM_RESOURCE_FORMAT_ENUM gmmFormat, cl_mem_flags flags, unsigned int clVersionSupport);
+    static const ClSurfaceFormatInfo *findSurfaceFormatInfo(GMM_RESOURCE_FORMAT_ENUM gmmFormat, cl_mem_flags flags, bool supportsOcl20Features);
     static bool isFormatWithPlane1(DXGI_FORMAT format);
 
   protected:

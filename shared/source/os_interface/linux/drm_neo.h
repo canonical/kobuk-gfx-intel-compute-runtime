@@ -22,13 +22,16 @@
 #include <string>
 #include <sys/ioctl.h>
 #include <unistd.h>
+#include <vector>
 
 struct GT_SYSTEM_INFO;
 
 namespace NEO {
 #define I915_CONTEXT_PRIVATE_PARAM_BOOST 0x80000000
 
+class BufferObject;
 class DeviceFactory;
+class OsContext;
 struct HardwareInfo;
 struct RootDeviceEnvironment;
 
@@ -56,7 +59,7 @@ class Drm {
     int getEuTotal(int &euTotal);
     int getSubsliceTotal(int &subsliceTotal);
 
-    int getMaxGpuFrequency(int &maxGpuFrequency);
+    int getMaxGpuFrequency(HardwareInfo &hwInfo, int &maxGpuFrequency);
     int getEnabledPooledEu(int &enabled);
     int getMinEuInPool(int &minEUinPool);
 
@@ -65,8 +68,11 @@ class Drm {
 
     MOCKABLE_VIRTUAL void checkPreemptionSupport();
     inline int getFileDescriptor() const { return hwDeviceId->getFileDescriptor(); }
-    uint32_t createDrmContext();
+    int createDrmVirtualMemory(uint32_t &drmVmId);
+    void destroyDrmVirtualMemory(uint32_t drmVmId);
+    uint32_t createDrmContext(uint32_t drmVmId);
     void destroyDrmContext(uint32_t drmContextId);
+    int queryVmId(uint32_t drmContextId, uint32_t &vmId);
     void setLowPriorityContextParam(uint32_t drmContextId);
 
     unsigned int bindDrmContext(uint32_t drmContextId, uint32_t deviceIndex, aub_stream::EngineType engineType);
@@ -77,38 +83,66 @@ class Drm {
     bool setQueueSliceCount(uint64_t sliceCount);
     void checkQueueSliceSupport();
     uint64_t getSliceMask(uint64_t sliceCount);
-    bool queryEngineInfo();
-    bool queryMemoryInfo();
+    MOCKABLE_VIRTUAL bool queryEngineInfo();
+    MOCKABLE_VIRTUAL bool queryMemoryInfo();
+    bool queryTopology(int &sliceCount, int &subSliceCount, int &euCount);
+    bool createVirtualMemoryAddressSpace(uint32_t vmCount);
+    void destroyVirtualMemoryAddressSpace();
+    uint32_t getVirtualMemoryAddressSpace(uint32_t vmId);
+    int bindBufferObject(OsContext *osContext, uint32_t vmHandleId, BufferObject *bo);
+    int unbindBufferObject(OsContext *osContext, uint32_t vmHandleId, BufferObject *bo);
     int setupHardwareInfo(DeviceDescriptor *, bool);
 
     bool areNonPersistentContextsSupported() const { return nonPersistentContextsSupported; }
     void checkNonPersistentContextsSupport();
     void setNonPersistentContext(uint32_t drmContextId);
+    bool isPerContextVMRequired() {
+        return requirePerContextVM;
+    }
 
     MemoryInfo *getMemoryInfo() const {
         return memoryInfo.get();
     }
+
+    EngineInfo *getEngineInfo() const {
+        return engineInfo.get();
+    }
+    RootDeviceEnvironment &getRootDeviceEnvironment() {
+        return rootDeviceEnvironment;
+    }
+
+    static inline uint32_t createMemoryRegionId(uint16_t type, uint16_t instance) {
+        return (1u << (type + 16)) | (1u << instance);
+    }
+    static inline uint16_t getMemoryTypeFromRegion(uint32_t region) { return Math::log2(region >> 16); };
+    static inline uint16_t getMemoryInstanceFromRegion(uint32_t region) { return Math::log2(region & 0xFFFF); };
+
     static bool isi915Version(int fd);
 
     static Drm *create(std::unique_ptr<HwDeviceId> hwDeviceId, RootDeviceEnvironment &rootDeviceEnvironment);
 
   protected:
     int getQueueSliceCount(drm_i915_gem_context_param_sseu *sseu);
+    std::string generateUUID();
     bool sliceCountChangeSupported = false;
     drm_i915_gem_context_param_sseu sseu{};
     bool preemptionSupported = false;
     bool nonPersistentContextsSupported = false;
+    bool requirePerContextVM = false;
     std::unique_ptr<HwDeviceId> hwDeviceId;
     int deviceId = 0;
     int revisionId = 0;
     GTTYPE eGtType = GTTYPE_UNDEFINED;
     RootDeviceEnvironment &rootDeviceEnvironment;
-    Drm(std::unique_ptr<HwDeviceId> hwDeviceIdIn, RootDeviceEnvironment &rootDeviceEnvironment) : hwDeviceId(std::move(hwDeviceIdIn)), rootDeviceEnvironment(rootDeviceEnvironment) {}
+    uint64_t uuid = 0;
+
+    Drm(std::unique_ptr<HwDeviceId> hwDeviceIdIn, RootDeviceEnvironment &rootDeviceEnvironment);
     std::unique_ptr<EngineInfo> engineInfo;
     std::unique_ptr<MemoryInfo> memoryInfo;
+    std::vector<uint32_t> virtualMemoryIds;
 
-    std::string getSysFsPciPath(int deviceID);
-    void *query(uint32_t queryId);
+    std::string getSysFsPciPath();
+    std::unique_ptr<uint8_t[]> query(uint32_t queryId, int32_t &length);
 
 #pragma pack(1)
     struct PCIConfig {
@@ -137,10 +171,6 @@ class Drm {
         uint8_t MaxLatency;
     };
 #pragma pack()
-    static const char *sysFsDefaultGpuPath;
-    static const char *maxGpuFrequencyFile;
-    static const char *configFileName;
-
   private:
     int getParamIoctl(int param, int *dstValue);
 };

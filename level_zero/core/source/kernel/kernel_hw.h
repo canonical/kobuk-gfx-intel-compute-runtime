@@ -25,7 +25,7 @@ struct KernelHw : public KernelImp {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
     void setBufferSurfaceState(uint32_t argIndex, void *address, NEO::GraphicsAllocation *alloc) override {
-        uintptr_t baseAddress = static_cast<uintptr_t>(alloc->getGpuAddress());
+        uint64_t baseAddress = castToUint64(address);
         auto sshAlignmentMask = NEO::EncodeSurfaceState<GfxFamily>::getSurfaceBaseAddressAlignmentMask();
 
         // Remove misalligned bytes, accounted for in in bufferOffset patch token
@@ -44,9 +44,9 @@ struct KernelHw : public KernelImp {
         }
 
         auto surfaceStateAddress = ptrOffset(surfaceStateHeapData.get(), argInfo.bindful);
-        void *bufferAddressForSsh = reinterpret_cast<void *>(baseAddress);
+        uint64_t bufferAddressForSsh = baseAddress;
         auto alignment = NEO::EncodeSurfaceState<GfxFamily>::getSurfaceBaseAddressAlignment();
-        size_t bufferSizeForSsh = ptrDiff(reinterpret_cast<void *>(alloc->getGpuAddress()), bufferAddressForSsh);
+        size_t bufferSizeForSsh = ptrDiff(alloc->getGpuAddress(), bufferAddressForSsh);
         bufferSizeForSsh += sizeTillEndOfSurface; // take address alignment offset into account
         bufferSizeForSsh = alignUp(bufferSizeForSsh, alignment);
 
@@ -77,7 +77,7 @@ struct KernelHw : public KernelImp {
         }
 
         std::copy(this->groupSize, this->groupSize + 3, cloned->groupSize);
-        cloned->threadsPerThreadGroup = this->threadsPerThreadGroup;
+        cloned->numThreadsPerThreadGroup = this->numThreadsPerThreadGroup;
         cloned->threadExecutionMask = this->threadExecutionMask;
 
         if (this->surfaceStateHeapDataSize > 0) {
@@ -118,6 +118,24 @@ struct KernelHw : public KernelImp {
         }
 
         return ret;
+    }
+
+    void evaluateIfRequiresGenerationOfLocalIdsByRuntime(const NEO::KernelDescriptor &kernelDescriptor) override {
+        size_t localWorkSizes[3];
+        localWorkSizes[0] = this->groupSize[0];
+        localWorkSizes[1] = this->groupSize[1];
+        localWorkSizes[2] = this->groupSize[2];
+
+        kernelRequiresGenerationOfLocalIdsByRuntime = NEO::EncodeDispatchKernel<GfxFamily>::isRuntimeLocalIdsGenerationRequired(
+            kernelDescriptor.kernelAttributes.numLocalIdChannels,
+            localWorkSizes,
+            std::array<uint8_t, 3>{
+                {kernelDescriptor.kernelAttributes.workgroupWalkOrder[0],
+                 kernelDescriptor.kernelAttributes.workgroupWalkOrder[1],
+                 kernelDescriptor.kernelAttributes.workgroupWalkOrder[2]}},
+            kernelDescriptor.kernelAttributes.flags.requiresWorkgroupWalkOrder,
+            requiredWorkgroupOrder,
+            kernelDescriptor.kernelAttributes.simdSize);
     }
 };
 

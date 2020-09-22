@@ -5,7 +5,8 @@
  *
  */
 
-#include "opencl/source/helpers/memory_properties_flags_helpers.h"
+#include "opencl/source/cl_device/cl_device.h"
+#include "opencl/source/helpers/memory_properties_helpers.h"
 #include "opencl/source/mem_obj/mem_obj.h"
 #include "opencl/source/sharings/sharing.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
@@ -21,7 +22,8 @@ TEST(sharingHandler, givenBasicSharingHandlerWhenSynchronizeObjectThenErrorIsRet
 
     } sharingHandler;
 
-    UpdateData updateData;
+    const uint32_t rootDeviceIndex = 1u;
+    UpdateData updateData{rootDeviceIndex};
     sharingHandler.synchronizeHandlerMock(updateData);
     EXPECT_EQ(SynchronizeStatus::SYNCHRONIZE_ERROR, updateData.synchronizationStatus);
 
@@ -37,60 +39,57 @@ TEST(sharingHandler, givenMemObjWhenAcquireIncrementCounterThenReleaseShouldDecr
     char buffer[64];
     MockContext context;
     MockGraphicsAllocation *mockAllocation = new MockGraphicsAllocation(buffer, sizeof(buffer));
-    std::unique_ptr<MemObj> memObj(new MemObj(&context, CL_MEM_OBJECT_BUFFER, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(CL_MEM_USE_HOST_PTR, 0, 0), CL_MEM_USE_HOST_PTR, 0,
-                                              sizeof(buffer), buffer, buffer, mockAllocation, true, false, false));
+    std::unique_ptr<MemObj> memObj(
+        new MemObj(&context, CL_MEM_OBJECT_BUFFER,
+                   MemoryPropertiesHelper::createMemoryProperties(CL_MEM_USE_HOST_PTR, 0, 0, &context.getDevice(0)->getDevice()),
+                   CL_MEM_USE_HOST_PTR, 0, sizeof(buffer), buffer, buffer, GraphicsAllocationHelper::toMultiGraphicsAllocation(mockAllocation), true, false, false));
 
     struct MockSharingHandler : SharingHandler {
-        unsigned int acquire(MemObj *memObj) {
-            SharingHandler::acquire(memObj);
-            return acquireCount;
-        }
-        unsigned int release(MemObj *memObj) {
-            SharingHandler::release(memObj);
-            return acquireCount;
-        }
+        using SharingHandler::acquireCount;
+
         void synchronizeObject(UpdateData &updateData) override {
             updateData.synchronizationStatus = ACQUIRE_SUCCESFUL;
         }
     } sharingHandler;
 
-    EXPECT_EQ(sharingHandler.acquire(memObj.get()), 1u);
-    EXPECT_EQ(sharingHandler.release(memObj.get()), 0u);
+    EXPECT_EQ(0u, sharingHandler.acquireCount);
+    sharingHandler.acquire(memObj.get(), mockAllocation->getRootDeviceIndex());
+    EXPECT_EQ(1u, sharingHandler.acquireCount);
+    sharingHandler.release(memObj.get(), mockAllocation->getRootDeviceIndex());
+    EXPECT_EQ(0u, sharingHandler.acquireCount);
 }
 
 TEST(sharingHandler, givenMemObjWhenAcquireTwoTimesThenReleaseShouldBeCalledTwoTimesToReleaseObject) {
     char buffer[64];
     MockContext context;
     MockGraphicsAllocation *mockAllocation = new MockGraphicsAllocation(buffer, sizeof(buffer));
-    std::unique_ptr<MemObj> memObj(new MemObj(&context, CL_MEM_OBJECT_BUFFER, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(CL_MEM_USE_HOST_PTR, 0, 0), CL_MEM_USE_HOST_PTR, 0,
-                                              sizeof(buffer), buffer, buffer, mockAllocation, true, false, false));
+    std::unique_ptr<MemObj> memObj(
+        new MemObj(&context, CL_MEM_OBJECT_BUFFER,
+                   MemoryPropertiesHelper::createMemoryProperties(CL_MEM_USE_HOST_PTR, 0, 0, &context.getDevice(0)->getDevice()),
+                   CL_MEM_USE_HOST_PTR, 0, sizeof(buffer), buffer, buffer, GraphicsAllocationHelper::toMultiGraphicsAllocation(mockAllocation), true, false, false));
 
     struct MockSharingHandler : SharingHandler {
-        MockSharingHandler() {
-            releaseCount = 0;
-        }
-        unsigned int acquire(MemObj *memObj) {
-            SharingHandler::acquire(memObj);
-            return acquireCount;
-        }
-        unsigned int release(MemObj *memObj) {
-            SharingHandler::release(memObj);
-            return acquireCount;
-        }
+        using SharingHandler::acquireCount;
         void synchronizeObject(UpdateData &updateData) override {
             updateData.synchronizationStatus = ACQUIRE_SUCCESFUL;
         }
-        void releaseResource(MemObj *memObject) override {
+        void releaseResource(MemObj *memObject, uint32_t rootDeviceIndex) override {
             releaseCount++;
         };
-        int releaseCount;
+        int releaseCount = 0;
     } sharingHandler;
 
-    EXPECT_EQ(sharingHandler.acquire(memObj.get()), 1u);
-    EXPECT_EQ(sharingHandler.acquire(memObj.get()), 2u);
-    EXPECT_EQ(sharingHandler.release(memObj.get()), 1u);
-    EXPECT_EQ(sharingHandler.release(memObj.get()), 0u);
-    EXPECT_EQ(sharingHandler.releaseCount, 1);
+    EXPECT_EQ(0u, sharingHandler.acquireCount);
+    sharingHandler.acquire(memObj.get(), mockAllocation->getRootDeviceIndex());
+    EXPECT_EQ(1u, sharingHandler.acquireCount);
+    sharingHandler.acquire(memObj.get(), mockAllocation->getRootDeviceIndex());
+    EXPECT_EQ(2u, sharingHandler.acquireCount);
+    sharingHandler.release(memObj.get(), mockAllocation->getRootDeviceIndex());
+    EXPECT_EQ(1u, sharingHandler.acquireCount);
+    EXPECT_EQ(0, sharingHandler.releaseCount);
+    sharingHandler.release(memObj.get(), mockAllocation->getRootDeviceIndex());
+    EXPECT_EQ(0u, sharingHandler.acquireCount);
+    EXPECT_EQ(1, sharingHandler.releaseCount);
 }
 
 TEST(sharingHandler, givenSharingHandlerWhenValidateUpdateDataIsCalledWithNonNullInputThenAbortIsNotCalled) {
@@ -99,7 +98,8 @@ TEST(sharingHandler, givenSharingHandlerWhenValidateUpdateDataIsCalledWithNonNul
         using SharingHandler::validateUpdateData;
     };
     MockSharingHandler sharingHandler;
-    UpdateData updateData;
+    const uint32_t rootDeviceIndex = 1u;
+    UpdateData updateData{rootDeviceIndex};
     sharingHandler.validateUpdateData(updateData);
 }
 
@@ -107,9 +107,10 @@ TEST(sharingHandler, givenSharingHandlerWhenAcquiringThenReturnErrorCode) {
     SharingHandler sharingHandler;
     MockContext context;
     MockGraphicsAllocation *graphicsAllocation = new MockGraphicsAllocation(nullptr, 0);
-    MemObj memObj(&context, CL_MEM_OBJECT_BUFFER, MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(CL_MEM_USE_HOST_PTR, 0, 0), CL_MEM_USE_HOST_PTR, 0,
-                  1, nullptr, nullptr, graphicsAllocation, true, false, false);
+    MemObj memObj(&context, CL_MEM_OBJECT_BUFFER,
+                  MemoryPropertiesHelper::createMemoryProperties(CL_MEM_USE_HOST_PTR, 0, 0, &context.getDevice(0)->getDevice()),
+                  CL_MEM_USE_HOST_PTR, 0, 1, nullptr, nullptr, GraphicsAllocationHelper::toMultiGraphicsAllocation(graphicsAllocation), true, false, false);
 
-    auto result = sharingHandler.acquire(&memObj);
+    auto result = sharingHandler.acquire(&memObj, graphicsAllocation->getRootDeviceIndex());
     EXPECT_NE(CL_SUCCESS, result);
 }

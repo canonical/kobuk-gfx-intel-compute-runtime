@@ -8,11 +8,12 @@
 #pragma once
 #include "shared/source/os_interface/linux/drm_memory_operations_handler.h"
 #include "shared/source/os_interface/linux/os_interface.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 #include "opencl/test/unit_test/fixtures/memory_management_fixture.h"
+#include "opencl/test/unit_test/mocks/linux/mock_drm_command_stream_receiver.h"
 #include "opencl/test/unit_test/mocks/linux/mock_drm_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/os_interface/linux/device_command_stream_fixture.h"
 
@@ -20,26 +21,27 @@
 
 namespace NEO {
 
-using AllocationData = TestedDrmMemoryManager::AllocationData;
-
 class DrmMemoryManagerBasic : public ::testing::Test {
   public:
-    DrmMemoryManagerBasic() : executionEnvironment(defaultHwInfo.get()){};
+    DrmMemoryManagerBasic() : executionEnvironment(defaultHwInfo.get(), false, numRootDevices){};
     void SetUp() override {
-        executionEnvironment.rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
-        executionEnvironment.rootDeviceEnvironments[0]->osInterface->get()->setDrm(Drm::create(nullptr, *executionEnvironment.rootDeviceEnvironments[0]));
-        executionEnvironment.rootDeviceEnvironments[0]->memoryOperationsInterface = std::make_unique<DrmMemoryOperationsHandler>();
+        for (auto i = 0u; i < numRootDevices; i++) {
+            executionEnvironment.rootDeviceEnvironments[i]->osInterface = std::make_unique<OSInterface>();
+            auto drm = Drm::create(nullptr, *executionEnvironment.rootDeviceEnvironments[i]);
+            executionEnvironment.rootDeviceEnvironments[i]->osInterface->get()->setDrm(drm);
+            executionEnvironment.rootDeviceEnvironments[i]->memoryOperationsInterface = DrmMemoryOperationsHandler::create(*drm);
+        }
     }
-    const uint32_t rootDeviceIndex = 0u;
+    const uint32_t rootDeviceIndex = 1u;
+    const uint32_t numRootDevices = 2u;
     MockExecutionEnvironment executionEnvironment;
 };
 
 class DrmMemoryManagerFixture : public MemoryManagementFixture {
   public:
-    DrmMockCustom *mock;
-    DrmMockCustom *nonDefaultDrm = nullptr;
-    const uint32_t nonDefaultRootDeviceIndex = 1u;
-    const uint32_t rootDeviceIndex = 0u;
+    DrmMockCustom *mock = nullptr;
+    const uint32_t rootDeviceIndex = 1u;
+    const uint32_t numRootDevices = 2u;
     TestedDrmMemoryManager *memoryManager = nullptr;
     MockClDevice *device = nullptr;
 
@@ -49,18 +51,20 @@ class DrmMemoryManagerFixture : public MemoryManagementFixture {
     }
 
     void SetUp(DrmMockCustom *mock, bool localMemoryEnabled) {
+        environmentWrapper.setCsrType<TestedDrmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME>>();
         allocationData.rootDeviceIndex = rootDeviceIndex;
         this->mock = mock;
-        executionEnvironment = new MockExecutionEnvironment(defaultHwInfo.get(), false, nonDefaultRootDeviceIndex + 1);
+        executionEnvironment = new MockExecutionEnvironment(defaultHwInfo.get(), false, numRootDevices);
         executionEnvironment->incRefInternal();
-        rootDeviceEnvironment = executionEnvironment->rootDeviceEnvironments[0].get();
-        rootDeviceEnvironment->osInterface = std::make_unique<OSInterface>();
-        rootDeviceEnvironment->osInterface->get()->setDrm(mock);
+        for (auto i = 0u; i < numRootDevices; i++) {
+            auto rootDeviceEnvironment = executionEnvironment->rootDeviceEnvironments[i].get();
+            rootDeviceEnvironment->osInterface = std::make_unique<OSInterface>();
+            rootDeviceEnvironment->osInterface->get()->setDrm(new DrmMockCustom());
+            rootDeviceEnvironment->memoryOperationsInterface = DrmMemoryOperationsHandler::create(*rootDeviceEnvironment->osInterface->get()->getDrm());
+        }
 
-        nonDefaultDrm = new DrmMockCustom();
-        auto nonDefaultRootDeviceEnvironment = executionEnvironment->rootDeviceEnvironments[nonDefaultRootDeviceIndex].get();
-        nonDefaultRootDeviceEnvironment->osInterface = std::make_unique<OSInterface>();
-        nonDefaultRootDeviceEnvironment->osInterface->get()->setDrm(nonDefaultDrm);
+        rootDeviceEnvironment = executionEnvironment->rootDeviceEnvironments[rootDeviceIndex].get();
+        rootDeviceEnvironment->osInterface->get()->setDrm(mock);
 
         memoryManager = new (std::nothrow) TestedDrmMemoryManager(localMemoryEnabled, false, false, *executionEnvironment);
         executionEnvironment->memoryManager.reset(memoryManager);
@@ -69,7 +73,7 @@ class DrmMemoryManagerFixture : public MemoryManagementFixture {
         if (memoryManager->getgemCloseWorker()) {
             memoryManager->getgemCloseWorker()->close(true);
         }
-        device = new MockClDevice{MockDevice::create<MockDevice>(executionEnvironment, 0)};
+        device = new MockClDevice{MockDevice::create<MockDevice>(executionEnvironment, rootDeviceIndex)};
         mock->reset();
     }
 
@@ -80,7 +84,12 @@ class DrmMemoryManagerFixture : public MemoryManagementFixture {
         mock->ioctl_expected.gemClose = static_cast<int>(device->engines.size());
         mock->ioctl_expected.gemWait = static_cast<int>(device->engines.size());
 
-        if (device->getDefaultEngine().commandStreamReceiver->getPreemptionAllocation()) {
+        auto csr = static_cast<TestedDrmCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME> *>(device->getDefaultEngine().commandStreamReceiver);
+        if (csr->globalFenceAllocation) {
+            mock->ioctl_expected.gemClose += static_cast<int>(device->engines.size());
+            mock->ioctl_expected.gemWait += static_cast<int>(device->engines.size());
+        }
+        if (csr->getPreemptionAllocation()) {
             mock->ioctl_expected.gemClose += static_cast<int>(device->engines.size());
             mock->ioctl_expected.gemWait += static_cast<int>(device->engines.size());
         }
@@ -98,6 +107,7 @@ class DrmMemoryManagerFixture : public MemoryManagementFixture {
     DrmMockCustom::IoctlResExt ioctlResExt = {0, 0};
     AllocationData allocationData{};
     DrmMockCustom::Ioctls additionalDestroyDeviceIoctls{};
+    EnvironmentWithCsrWrapper environmentWrapper;
 };
 
 class DrmMemoryManagerWithLocalMemoryFixture : public DrmMemoryManagerFixture {
@@ -118,18 +128,21 @@ class DrmMemoryManagerFixtureWithoutQuietIoctlExpectation {
 
     void SetUp() {
         executionEnvironment = new ExecutionEnvironment;
-        executionEnvironment->prepareRootDeviceEnvironments(1);
-        executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
-        mock = new DrmMockCustom();
-        executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
-        executionEnvironment->rootDeviceEnvironments[0]->osInterface->get()->setDrm(mock);
+        executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
+        for (auto &rootDeviceEnvironment : executionEnvironment->rootDeviceEnvironments) {
+            rootDeviceEnvironment->setHwInfo(defaultHwInfo.get());
+            rootDeviceEnvironment->osInterface = std::make_unique<OSInterface>();
+            rootDeviceEnvironment->osInterface->get()->setDrm(new DrmMockCustom);
+            rootDeviceEnvironment->memoryOperationsInterface = DrmMemoryOperationsHandler::create(*rootDeviceEnvironment->osInterface->get()->getDrm());
+        }
+        mock = static_cast<DrmMockCustom *>(executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->osInterface->get()->getDrm());
         memoryManager.reset(new TestedDrmMemoryManager(*executionEnvironment));
 
         ASSERT_NE(nullptr, memoryManager);
         if (memoryManager->getgemCloseWorker()) {
             memoryManager->getgemCloseWorker()->close(true);
         }
-        device.reset(MockDevice::createWithExecutionEnvironment<MockDevice>(defaultHwInfo.get(), executionEnvironment, 0));
+        device.reset(MockDevice::createWithExecutionEnvironment<MockDevice>(defaultHwInfo.get(), executionEnvironment, rootDeviceIndex));
     }
 
     void TearDown() {
@@ -139,5 +152,7 @@ class DrmMemoryManagerFixtureWithoutQuietIoctlExpectation {
     ExecutionEnvironment *executionEnvironment = nullptr;
     std::unique_ptr<MockDevice> device;
     DrmMockCustom::IoctlResExt ioctlResExt = {0, 0};
+    const uint32_t rootDeviceIndex = 1u;
+    const uint32_t numRootDevices = 2u;
 };
 } // namespace NEO

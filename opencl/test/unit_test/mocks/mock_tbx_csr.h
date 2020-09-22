@@ -55,6 +55,10 @@ class MockTbxCsr : public TbxCommandStreamReceiverHw<GfxFamily> {
         TbxCommandStreamReceiverHw<GfxFamily>::downloadAllocation(gfxAllocation);
         makeCoherentCalled = true;
     }
+    void dumpAllocation(GraphicsAllocation &gfxAllocation) override {
+        TbxCommandStreamReceiverHw<GfxFamily>::dumpAllocation(gfxAllocation);
+        dumpAllocationCalled = true;
+    }
     bool initializeEngineCalled = false;
     bool writeMemoryWithAubManagerCalled = false;
     bool writeMemoryCalled = false;
@@ -64,5 +68,22 @@ class MockTbxCsr : public TbxCommandStreamReceiverHw<GfxFamily> {
     bool expectMemoryEqualCalled = false;
     bool expectMemoryNotEqualCalled = false;
     bool makeCoherentCalled = false;
+    bool dumpAllocationCalled = false;
+};
+
+template <typename GfxFamily>
+struct MockTbxCsrRegisterDownloadedAllocations : TbxCommandStreamReceiverHw<GfxFamily> {
+    using CommandStreamReceiver::latestFlushedTaskCount;
+    using TbxCommandStreamReceiverHw<GfxFamily>::TbxCommandStreamReceiverHw;
+    void downloadAllocation(GraphicsAllocation &gfxAllocation) override {
+        *reinterpret_cast<uint32_t *>(CommandStreamReceiver::getTagAllocation()->getUnderlyingBuffer()) = this->latestFlushedTaskCount;
+        downloadedAllocations.insert(&gfxAllocation);
+    }
+    bool flushBatchedSubmissions() override {
+        flushBatchedSubmissionsCalled = true;
+        return true;
+    }
+    std::set<GraphicsAllocation *> downloadedAllocations;
+    bool flushBatchedSubmissionsCalled = false;
 };
 } // namespace NEO

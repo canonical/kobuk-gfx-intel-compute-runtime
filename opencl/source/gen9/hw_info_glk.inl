@@ -6,7 +6,7 @@
  */
 
 #include "shared/source/gen9/hw_cmds.h"
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/helpers/constants.h"
 
 #include "opencl/source/aub_mem_dump/aub_services.h"
 
@@ -67,7 +67,13 @@ const RuntimeCapabilityTable GLK::capabilityTable{
     false,                                         // supportCacheFlushAfterWalker
     true,                                          // supportsImages
     false,                                         // supportsDeviceEnqueue
-    true                                           // hostPtrTrackingEnabled
+    false,                                         // supportsPipes
+    false,                                         // supportsOcl21Features
+    false,                                         // supportsOnDemandPageFaults
+    false,                                         // supportsIndependentForwardProgress
+    true,                                          // hostPtrTrackingEnabled
+    false,                                         // levelZeroSupported
+    true                                           // isIntegratedDevice
 };
 
 WorkaroundTable GLK::workaroundTable = {};

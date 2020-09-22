@@ -11,6 +11,7 @@
 #include "opencl/source/event/event.h"
 #include "opencl/source/helpers/base_object.h"
 #include "opencl/source/helpers/dispatch_info.h"
+#include "opencl/source/helpers/enqueue_properties.h"
 #include "opencl/source/helpers/task_information.h"
 
 #include <atomic>
@@ -198,7 +199,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     virtual cl_int flush() = 0;
 
-    MOCKABLE_VIRTUAL void updateFromCompletionStamp(const CompletionStamp &completionStamp);
+    void updateFromCompletionStamp(const CompletionStamp &completionStamp, Event *outEvent);
 
     virtual bool isCacheFlushCommand(uint32_t commandType) const { return false; }
 
@@ -210,11 +211,12 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     volatile uint32_t *getHwTagAddress() const;
 
-    bool isCompleted(uint32_t taskCount) const;
+    bool isCompleted(uint32_t gpgpuTaskCount, uint32_t bcsTaskCount) const;
 
     MOCKABLE_VIRTUAL bool isQueueBlocked();
 
-    MOCKABLE_VIRTUAL void waitUntilComplete(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep);
+    MOCKABLE_VIRTUAL void waitUntilComplete(uint32_t gpgpuTaskCountToWait, uint32_t bcsTaskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep);
+    void waitUntilComplete(bool blockedQueue, PrintfHandler *printfHandler);
 
     static uint32_t getTaskLevelFromWaitList(uint32_t taskLevel,
                                              cl_uint numEventsInWaitList,
@@ -222,6 +224,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     MOCKABLE_VIRTUAL CommandStreamReceiver &getGpgpuCommandStreamReceiver() const;
     CommandStreamReceiver *getBcsCommandStreamReceiver() const;
+    MOCKABLE_VIRTUAL CommandStreamReceiver &getCommandStreamReceiverByCommandType(cl_command_type cmdType) const;
     Device &getDevice() const noexcept;
     Context &getContext() const { return *context; }
     Context *getContextPtr() const { return context; }
@@ -267,6 +270,10 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
         this->isSpecialCommandQueue = newValue;
     }
 
+    bool isSpecial() {
+        return this->isSpecialCommandQueue;
+    }
+
     QueuePriority getPriority() const {
         return priority;
     }
@@ -274,6 +281,8 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     QueueThrottle getThrottle() const {
         return throttle;
     }
+
+    const std::vector<uint64_t> &getPropertiesVector() const { return propertiesVector; }
 
     void enqueueBlockedMapUnmapOperation(const cl_event *eventWaitList,
                                          size_t numEventsInWaitlist,
@@ -291,6 +300,9 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     }
 
     void updateBcsTaskCount(uint32_t newBcsTaskCount) { this->bcsTaskCount = newBcsTaskCount; }
+    uint32_t peekBcsTaskCount() const { return bcsTaskCount; }
+
+    void updateLatestSentEnqueueType(EnqueueProperties::Operation newEnqueueType) { this->latestSentEnqueueType = newEnqueueType; }
 
     // taskCount of last task
     uint32_t taskCount = 0;
@@ -319,7 +331,8 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     virtual void obtainTaskLevelAndBlockedStatus(unsigned int &taskLevel, cl_uint &numEventsInWaitList, const cl_event *&eventWaitList, bool &blockQueueStatus, unsigned int commandType){};
     bool isBlockedCommandStreamRequired(uint32_t commandType, const EventsRequest &eventsRequest, bool blockedQueue) const;
 
-    MOCKABLE_VIRTUAL void obtainNewTimestampPacketNodes(size_t numberOfNodes, TimestampPacketContainer &previousNodes, bool clearAllDependencies);
+    MOCKABLE_VIRTUAL void obtainNewTimestampPacketNodes(size_t numberOfNodes, TimestampPacketContainer &previousNodes, bool clearAllDependencies, bool blitEnqueue);
+    void storeProperties(const cl_queue_properties *properties);
     void processProperties(const cl_queue_properties *properties);
     bool bufferCpuCopyAllowed(Buffer *buffer, cl_command_type commandType, cl_bool blocking, size_t size, void *ptr,
                               cl_uint numEventsInWaitList, const cl_event *eventWaitList);
@@ -335,9 +348,11 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     EngineControl *bcsEngine = nullptr;
 
     cl_command_queue_properties commandQueueProperties = 0;
+    std::vector<uint64_t> propertiesVector;
 
     QueuePriority priority = QueuePriority::MEDIUM;
     QueueThrottle throttle = QueueThrottle::MEDIUM;
+    EnqueueProperties::Operation latestSentEnqueueType = EnqueueProperties::Operation::None;
     uint64_t sliceCount = QueueSliceCount::defaultSliceCount;
     uint32_t bcsTaskCount = 0;
 

@@ -5,8 +5,9 @@
  *
  */
 
+#include "shared/test/unit_test/mocks/mock_device.h"
+
 #include "opencl/test/unit_test/fixtures/execution_model_kernel_fixture.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 #include "test.h"
@@ -31,6 +32,26 @@ TEST(DebugKernelTest, givenKernelCompiledForDebuggingWhenGetPerThreadSystemThrea
     std::unique_ptr<MockDebugKernel> kernel(MockKernel::create<MockDebugKernel>(device->getDevice(), &program));
 
     EXPECT_EQ(MockDebugKernel::perThreadSystemThreadSurfaceSize, kernel->getPerThreadSystemThreadSurfaceSize());
+}
+
+TEST(DebugKernelTest, givenKernelCompiledForDebuggingWhenQueryingIsKernelDebugEnabledThenTrueIsReturned) {
+    auto device = std::make_unique<MockClDevice>(new MockDevice);
+    MockProgram program(*device->getExecutionEnvironment());
+    program.enableKernelDebug();
+    std::unique_ptr<MockKernel> kernel(MockKernel::create<MockDebugKernel>(device->getDevice(), &program));
+    kernel->initialize();
+
+    EXPECT_TRUE(kernel->isKernelDebugEnabled());
+}
+
+TEST(DebugKernelTest, givenKernelWithoutDebugFlagWhenQueryingIsKernelDebugEnabledThenFalseIsReturned) {
+    auto device = std::make_unique<MockClDevice>(new MockDevice);
+    MockProgram program(*device->getExecutionEnvironment());
+    program.enableKernelDebug();
+    std::unique_ptr<MockKernel> kernel(MockKernel::create<MockKernel>(device->getDevice(), &program));
+    kernel->initialize();
+
+    EXPECT_FALSE(kernel->isKernelDebugEnabled());
 }
 
 TEST(DebugKernelTest, givenKernelWithoutDebugFlagWhenGetDebugSurfaceBtiIsCalledThenInvalidIndexValueIsReturned) {

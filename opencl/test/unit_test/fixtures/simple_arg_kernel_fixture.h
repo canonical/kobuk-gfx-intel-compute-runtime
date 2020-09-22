@@ -13,7 +13,7 @@
 
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/source/program/program.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/program_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
@@ -262,7 +262,7 @@ class SimpleKernelStatelessFixture : public ProgramFixture {
         retVal = pProgram->build(
             1,
             &deviceId,
-            CompilerOptions::greaterThan4gbBuffersRequired,
+            CompilerOptions::greaterThan4gbBuffersRequired.data(),
             nullptr,
             nullptr,
             false);
@@ -282,6 +282,54 @@ class SimpleKernelStatelessFixture : public ProgramFixture {
 
     std::unique_ptr<Kernel> kernel = nullptr;
     cl_int retVal = CL_SUCCESS;
+};
+
+class BindlessKernelFixture : public ProgramFixture {
+  public:
+    using ProgramFixture::SetUp;
+    void SetUp(ClDevice *device, Context *context) {
+        ProgramFixture::SetUp();
+        this->deviceCl = device;
+        this->contextCl = context;
+    }
+
+    void TearDown() override {
+        ProgramFixture::TearDown();
+    }
+
+    void createKernel(const std::string &programName, const std::string &kernelName) {
+        DebugManager.flags.UseBindlessBuffers.set(true);
+        DebugManager.flags.UseBindlessImages.set(true);
+        cl_device_id deviceId = deviceCl;
+        cl_context clContext = contextCl;
+        CreateProgramFromBinary(
+            clContext,
+            &deviceId,
+            programName);
+        ASSERT_NE(nullptr, pProgram);
+
+        retVal = pProgram->build(
+            1,
+            &deviceId,
+            nullptr,
+            nullptr,
+            nullptr,
+            false);
+        ASSERT_EQ(CL_SUCCESS, retVal);
+
+        kernel.reset(Kernel::create<MockKernel>(
+            pProgram,
+            *pProgram->getKernelInfo(kernelName.c_str()),
+            &retVal));
+        ASSERT_NE(nullptr, kernel);
+        ASSERT_EQ(CL_SUCCESS, retVal);
+    }
+
+    DebugManagerStateRestore restorer;
+    std::unique_ptr<Kernel> kernel = nullptr;
+    cl_int retVal = CL_SUCCESS;
+    ClDevice *deviceCl = nullptr;
+    Context *contextCl = nullptr;
 };
 
 } // namespace NEO

@@ -10,11 +10,11 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/gmm_helper/resource_info.h"
 #include "shared/source/helpers/aligned_memory.h"
-#include "shared/source/helpers/hw_cmds.h"
 
 #include "opencl/source/helpers/surface_formats.h"
 #include "opencl/source/mem_obj/image.h"
 
+#include "hw_cmds.h"
 #include "image_ext.inl"
 
 namespace NEO {
@@ -29,12 +29,13 @@ union SURFACE_STATE_BUFFER_LENGTH {
 };
 
 template <typename GfxFamily>
-void ImageHw<GfxFamily>::setImageArg(void *memory, bool setAsMediaBlockImage, uint32_t mipLevel) {
+void ImageHw<GfxFamily>::setImageArg(void *memory, bool setAsMediaBlockImage, uint32_t mipLevel, uint32_t rootDeviceIndex) {
     using SURFACE_FORMAT = typename RENDER_SURFACE_STATE::SURFACE_FORMAT;
     auto surfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(memory);
 
-    auto gmm = getGraphicsAllocation()->getDefaultGmm();
-    auto gmmHelper = rootDeviceEnvironment->getGmmHelper();
+    auto graphicsAllocation = multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex);
+    auto gmm = graphicsAllocation->getDefaultGmm();
+    auto gmmHelper = executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->getGmmHelper();
 
     auto imageDescriptor = Image::convertDescriptor(getImageDesc());
     ImageInfo imgInfo;
@@ -42,7 +43,7 @@ void ImageHw<GfxFamily>::setImageArg(void *memory, bool setAsMediaBlockImage, ui
     imgInfo.qPitch = qPitch;
     imgInfo.surfaceFormat = &getSurfaceFormatInfo().surfaceFormat;
 
-    setImageSurfaceState<GfxFamily>(surfaceState, imgInfo, getGraphicsAllocation()->getDefaultGmm(), *gmmHelper, cubeFaceIndex, getGraphicsAllocation()->getGpuAddress(), surfaceOffsets, IsNV12Image(&this->getImageFormat()));
+    setImageSurfaceState<GfxFamily>(surfaceState, imgInfo, graphicsAllocation->getDefaultGmm(), *gmmHelper, cubeFaceIndex, graphicsAllocation->getGpuAddress(), surfaceOffsets, IsNV12Image(&this->getImageFormat()));
 
     if (getImageDesc().image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
         // image1d_buffer is image1d created from buffer. The length of buffer could be larger
@@ -88,8 +89,8 @@ void ImageHw<GfxFamily>::setImageArg(void *memory, bool setAsMediaBlockImage, ui
     } else if (gmm && gmm->isRenderCompressed) {
         setAuxParamsForCCS<GfxFamily>(surfaceState, gmm);
     }
-    appendSurfaceStateDepthParams(surfaceState);
-    appendSurfaceStateParams(surfaceState);
+    appendSurfaceStateDepthParams(surfaceState, gmm);
+    appendSurfaceStateParams(surfaceState, rootDeviceIndex);
     appendSurfaceStateExt(surfaceState);
 }
 
@@ -120,59 +121,62 @@ void ImageHw<GfxFamily>::setAuxParamsForMultisamples(RENDER_SURFACE_STATE *surfa
 }
 
 template <typename GfxFamily>
-void ImageHw<GfxFamily>::appendSurfaceStateParams(RENDER_SURFACE_STATE *surfaceState) {
+void ImageHw<GfxFamily>::appendSurfaceStateParams(RENDER_SURFACE_STATE *surfaceState, uint32_t rootDeviceIndex) {
 }
 
 template <typename GfxFamily>
-inline void ImageHw<GfxFamily>::appendSurfaceStateDepthParams(RENDER_SURFACE_STATE *surfaceState) {
+inline void ImageHw<GfxFamily>::appendSurfaceStateDepthParams(RENDER_SURFACE_STATE *surfaceState, Gmm *gmm) {
 }
 
 template <typename GfxFamily>
-void ImageHw<GfxFamily>::setMediaImageArg(void *memory) {
+void ImageHw<GfxFamily>::setMediaImageArg(void *memory, uint32_t rootDeviceIndex) {
     using MEDIA_SURFACE_STATE = typename GfxFamily::MEDIA_SURFACE_STATE;
     using SURFACE_FORMAT = typename MEDIA_SURFACE_STATE::SURFACE_FORMAT;
     SURFACE_FORMAT surfaceFormat = MEDIA_SURFACE_STATE::SURFACE_FORMAT_Y8_UNORM_VA;
 
-    auto gmmHelper = rootDeviceEnvironment->getGmmHelper();
+    auto graphicsAllocation = multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex);
+    auto gmmHelper = executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->getGmmHelper();
     auto surfaceState = reinterpret_cast<MEDIA_SURFACE_STATE *>(memory);
-    *surfaceState = GfxFamily::cmdInitMediaSurfaceState;
+    MEDIA_SURFACE_STATE state = GfxFamily::cmdInitMediaSurfaceState;
 
-    setMediaSurfaceRotation(reinterpret_cast<void *>(surfaceState));
+    setMediaSurfaceRotation(reinterpret_cast<void *>(&state));
 
     DEBUG_BREAK_IF(surfaceFormat == MEDIA_SURFACE_STATE::SURFACE_FORMAT_Y1_UNORM);
-    surfaceState->setWidth(static_cast<uint32_t>(getImageDesc().image_width));
+    state.setWidth(static_cast<uint32_t>(getImageDesc().image_width));
 
-    surfaceState->setHeight(static_cast<uint32_t>(getImageDesc().image_height));
-    surfaceState->setPictureStructure(MEDIA_SURFACE_STATE::PICTURE_STRUCTURE_FRAME_PICTURE);
+    state.setHeight(static_cast<uint32_t>(getImageDesc().image_height));
+    state.setPictureStructure(MEDIA_SURFACE_STATE::PICTURE_STRUCTURE_FRAME_PICTURE);
 
-    auto gmm = getGraphicsAllocation()->getDefaultGmm();
+    auto gmm = graphicsAllocation->getDefaultGmm();
     auto tileMode = static_cast<typename MEDIA_SURFACE_STATE::TILE_MODE>(gmm->gmmResourceInfo->getTileModeSurfaceState());
 
-    surfaceState->setTileMode(tileMode);
-    surfaceState->setSurfacePitch(static_cast<uint32_t>(getImageDesc().image_row_pitch));
+    state.setTileMode(tileMode);
+    state.setSurfacePitch(static_cast<uint32_t>(getImageDesc().image_row_pitch));
 
-    surfaceState->setSurfaceFormat(surfaceFormat);
+    state.setSurfaceFormat(surfaceFormat);
 
-    surfaceState->setHalfPitchForChroma(false);
-    surfaceState->setInterleaveChroma(false);
-    surfaceState->setXOffsetForUCb(0);
-    surfaceState->setYOffsetForUCb(0);
-    surfaceState->setXOffsetForVCr(0);
-    surfaceState->setYOffsetForVCr(0);
+    state.setHalfPitchForChroma(false);
+    state.setInterleaveChroma(false);
+    state.setXOffsetForUCb(0);
+    state.setYOffsetForUCb(0);
+    state.setXOffsetForVCr(0);
+    state.setYOffsetForVCr(0);
 
     setSurfaceMemoryObjectControlStateIndexToMocsTable(
-        reinterpret_cast<void *>(surfaceState),
+        reinterpret_cast<void *>(&state),
         gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_IMAGE));
 
     if (IsNV12Image(&this->getImageFormat())) {
-        surfaceState->setInterleaveChroma(true);
-        surfaceState->setYOffsetForUCb(this->surfaceOffsets.yOffsetForUVplane);
+        state.setInterleaveChroma(true);
+        state.setYOffsetForUCb(this->surfaceOffsets.yOffsetForUVplane);
     }
 
-    surfaceState->setVerticalLineStride(0);
-    surfaceState->setVerticalLineStrideOffset(0);
+    state.setVerticalLineStride(0);
+    state.setVerticalLineStrideOffset(0);
 
-    surfaceState->setSurfaceBaseAddress(getGraphicsAllocation()->getGpuAddress() + this->surfaceOffsets.offset);
+    state.setSurfaceBaseAddress(graphicsAllocation->getGpuAddress() + this->surfaceOffsets.offset);
+
+    *surfaceState = state;
 }
 
 template <typename GfxFamily>

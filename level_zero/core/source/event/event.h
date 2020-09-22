@@ -10,7 +10,7 @@
 #include "level_zero/core/source/cmdlist/cmdlist.h"
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/driver/driver_handle.h"
-#include <level_zero/ze_event.h>
+#include <level_zero/ze_api.h>
 
 struct _ze_event_handle_t {};
 
@@ -19,29 +19,21 @@ struct _ze_event_pool_handle_t {};
 namespace L0 {
 typedef uint64_t FlushStamp;
 struct EventPool;
-struct MetricTracer;
+struct MetricStreamer;
 
 struct Event : _ze_event_handle_t {
     virtual ~Event() = default;
     virtual ze_result_t destroy();
     virtual ze_result_t hostSignal() = 0;
-    virtual ze_result_t hostSynchronize(uint32_t timeout) = 0;
+    virtual ze_result_t hostSynchronize(uint64_t timeout) = 0;
     virtual ze_result_t queryStatus() = 0;
     virtual ze_result_t reset() = 0;
-    virtual ze_result_t getTimestamp(ze_event_timestamp_type_t timestampType, void *dstptr) = 0;
+    virtual ze_result_t queryKernelTimestamp(ze_kernel_timestamp_result_t *dstptr) = 0;
 
-    enum State : uint64_t {
+    enum State : uint32_t {
         STATE_SIGNALED = 0u,
-        STATE_CLEARED = static_cast<uint64_t>(-1),
+        STATE_CLEARED = static_cast<uint32_t>(-1),
         STATE_INITIAL = STATE_CLEARED
-    };
-
-    enum EventTimestampRegister : uint32_t {
-        GLOBAL_START_LOW = 0u,
-        GLOBAL_START_HIGH,
-        GLOBAL_END,
-        CONTEXT_START,
-        CONTEXT_END
     };
 
     static Event *create(EventPool *eventPool, const ze_event_desc_t *desc, Device *device);
@@ -50,46 +42,67 @@ struct Event : _ze_event_handle_t {
 
     inline ze_event_handle_t toHandle() { return this; }
 
-    NEO::GraphicsAllocation &getAllocation();
+    virtual NEO::GraphicsAllocation &getAllocation();
 
     uint64_t getGpuAddress() { return gpuAddress; }
-    uint64_t getOffsetOfEventTimestampRegister(uint32_t eventTimestampReg);
 
     void *hostAddress = nullptr;
     uint64_t gpuAddress;
-    int offsetUsed = -1;
 
-    ze_event_scope_flag_t signalScope; // Saving scope for use later
-    ze_event_scope_flag_t waitScope;
+    ze_event_scope_flags_t signalScope = 0u;
+    ze_event_scope_flags_t waitScope = 0u;
 
     bool isTimestampEvent = false;
 
-    // Metric tracer instance associated with the event.
-    MetricTracer *metricTracer = nullptr;
+    // Metric streamer instance associated with the event.
+    MetricStreamer *metricStreamer = nullptr;
+
+    NEO::CommandStreamReceiver *csr = nullptr;
 
   protected:
     NEO::GraphicsAllocation *allocation = nullptr;
 };
 
-struct EventPool : _ze_event_pool_handle_t {
-    static EventPool *create(Device *device, const ze_event_pool_desc_t *desc);
+struct EventImp : public Event {
+    EventImp(EventPool *eventPool, int index, Device *device)
+        : device(device), eventPool(eventPool) {}
 
+    ~EventImp() override {}
+
+    ze_result_t hostSignal() override;
+
+    ze_result_t hostSynchronize(uint64_t timeout) override;
+
+    ze_result_t queryStatus() override;
+
+    ze_result_t reset() override;
+
+    ze_result_t queryKernelTimestamp(ze_kernel_timestamp_result_t *dstptr) override;
+
+    Device *device;
+    EventPool *eventPool;
+
+  protected:
+    ze_result_t hostEventSetValue(uint32_t eventValue);
+    ze_result_t hostEventSetValueTimestamps(uint32_t eventVal);
+    void makeAllocationResident();
+};
+
+struct KernelTimestampEvent {
+    uint32_t contextStart = Event::STATE_INITIAL;
+    uint32_t globalStart = Event::STATE_INITIAL;
+    uint32_t contextEnd = Event::STATE_INITIAL;
+    uint32_t globalEnd = Event::STATE_INITIAL;
+};
+
+struct EventPool : _ze_event_pool_handle_t {
+    static EventPool *create(DriverHandle *driver, uint32_t numDevices, ze_device_handle_t *phDevices, const ze_event_pool_desc_t *desc);
     virtual ~EventPool() = default;
     virtual ze_result_t destroy() = 0;
-    virtual size_t getPoolSize() = 0;
-    virtual uint32_t getPoolUsedCount() = 0;
     virtual ze_result_t getIpcHandle(ze_ipc_event_pool_handle_t *pIpcHandle) = 0;
     virtual ze_result_t closeIpcHandle() = 0;
     virtual ze_result_t createEvent(const ze_event_desc_t *desc, ze_event_handle_t *phEvent) = 0;
-    virtual ze_result_t reserveEventFromPool(int index, Event *event) = 0;
-    virtual ze_result_t releaseEventToPool(Event *event) = 0;
     virtual Device *getDevice() = 0;
-
-    enum EventCreationState : int {
-        EVENT_STATE_INITIAL = 0,
-        EVENT_STATE_DESTROYED = EVENT_STATE_INITIAL,
-        EVENT_STATE_CREATED = 1
-    };
 
     static EventPool *fromHandle(ze_event_pool_handle_t handle) {
         return static_cast<EventPool *>(handle);
@@ -97,10 +110,9 @@ struct EventPool : _ze_event_pool_handle_t {
 
     inline ze_event_pool_handle_t toHandle() { return this; }
 
-    NEO::GraphicsAllocation &getAllocation() { return *eventPoolAllocation; }
+    virtual NEO::GraphicsAllocation &getAllocation() { return *eventPoolAllocation; }
 
     virtual uint32_t getEventSize() = 0;
-    virtual uint32_t getNumEventTimestampsToRead() = 0;
 
     bool isEventPoolUsedForTimestamp = false;
 

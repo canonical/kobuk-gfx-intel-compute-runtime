@@ -16,6 +16,8 @@
 #include "opencl/source/device_queue/device_queue_hw.h"
 #include "opencl/source/helpers/hardware_commands_helper.h"
 
+#include "pipe_control_args.h"
+
 namespace NEO {
 template <typename GfxFamily>
 void DeviceQueueHw<GfxFamily>::allocateSlbBuffer() {
@@ -27,7 +29,7 @@ void DeviceQueueHw<GfxFamily>::allocateSlbBuffer() {
     slbSize += (4 * MemoryConstants::pageSize); // +4 pages spec restriction
     slbSize = alignUp(slbSize, MemoryConstants::pageSize);
 
-    slbBuffer = device->getMemoryManager()->allocateGraphicsMemoryWithProperties({device->getRootDeviceIndex(), slbSize, GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER});
+    slbBuffer = device->getMemoryManager()->allocateGraphicsMemoryWithProperties({device->getRootDeviceIndex(), slbSize, GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER, device->getDeviceBitfield()});
 }
 
 template <typename GfxFamily>
@@ -124,14 +126,22 @@ void DeviceQueueHw<GfxFamily>::addExecutionModelCleanUpSection(Kernel *parentKer
     }
 
     uint64_t criticalSectionAddress = (uint64_t)&igilQueue->m_controls.m_CriticalSection;
+    PipeControlArgs args;
+    MemorySynchronizationCommands<GfxFamily>::addPipeControlAndProgramPostSyncOperation(
+        slbCS,
+        PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA,
+        criticalSectionAddress,
+        ExecutionModelCriticalSection::Free,
+        device->getHardwareInfo(),
+        args);
 
-    MemorySynchronizationCommands<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(
-        slbCS, PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA,
-        criticalSectionAddress, ExecutionModelCriticalSection::Free, false, device->getHardwareInfo());
-
-    MemorySynchronizationCommands<GfxFamily>::obtainPipeControlAndProgramPostSyncOperation(
-        slbCS, PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA,
-        tagAddress, taskCount, false, device->getHardwareInfo());
+    MemorySynchronizationCommands<GfxFamily>::addPipeControlAndProgramPostSyncOperation(
+        slbCS,
+        PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA,
+        tagAddress,
+        taskCount,
+        device->getHardwareInfo(),
+        args);
 
     addMediaStateClearCmds();
 

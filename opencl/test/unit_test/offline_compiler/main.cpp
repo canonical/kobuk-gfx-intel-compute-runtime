@@ -6,9 +6,9 @@
  */
 
 #include "shared/source/os_interface/os_library.h"
+#include "shared/test/unit_test/helpers/test_files.h"
 
 #include "opencl/test/unit_test/custom_event_listener.h"
-#include "opencl/test/unit_test/helpers/test_files.h"
 
 #include "environment.h"
 #include "limits.h"
@@ -22,12 +22,15 @@ const char *fSeparator = "/";
 Environment *gEnvironment;
 
 std::string getRunPath() {
-    std::string res;
+    char *cwd;
 #if defined(__linux__)
-    res = getcwd(nullptr, 0);
+    cwd = getcwd(nullptr, 0);
 #else
-    res = _getcwd(nullptr, 0);
+    cwd = _getcwd(nullptr, 0);
 #endif
+    std::string res{cwd};
+    free(cwd);
+
     return res;
 }
 

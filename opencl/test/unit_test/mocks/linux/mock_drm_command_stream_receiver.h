@@ -14,16 +14,17 @@ template <typename GfxFamily>
 class TestedDrmCommandStreamReceiver : public DrmCommandStreamReceiver<GfxFamily> {
   public:
     using CommandStreamReceiver::commandStream;
+    using CommandStreamReceiver::globalFenceAllocation;
     using CommandStreamReceiver::makeResident;
-    using DrmCommandStreamReceiver<GfxFamily>::makeResidentBufferObjects;
     using DrmCommandStreamReceiver<GfxFamily>::residency;
+    using CommandStreamReceiverHw<GfxFamily>::directSubmission;
     using CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiver::lastSentSliceCount;
 
     TestedDrmCommandStreamReceiver(gemCloseWorkerMode mode, ExecutionEnvironment &executionEnvironment)
         : DrmCommandStreamReceiver<GfxFamily>(executionEnvironment, 0, mode) {
     }
-    TestedDrmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment)
-        : DrmCommandStreamReceiver<GfxFamily>(executionEnvironment, 0, gemCloseWorkerMode::gemCloseWorkerInactive) {
+    TestedDrmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex)
+        : DrmCommandStreamReceiver<GfxFamily>(executionEnvironment, rootDeviceIndex, gemCloseWorkerMode::gemCloseWorkerInactive) {
     }
 
     void overrideDispatchPolicy(DispatchMode overrideValue) {

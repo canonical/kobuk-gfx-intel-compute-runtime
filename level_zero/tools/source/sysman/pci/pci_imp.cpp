@@ -9,7 +9,9 @@
 
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/debug_helpers.h"
+#include "shared/source/helpers/string.h"
 
+#include <cstring>
 namespace L0 {
 
 //
@@ -21,11 +23,11 @@ namespace L0 {
 // pcieSpeedWithEnc = maxLinkSpeedInGt * (Gigabit to Megabit) * Encoding =
 //                               maxLinkSpeedInGt * 1000 * Encoding
 //
-uint64_t convertPcieSpeedFromGTsToBs(double maxLinkSpeedInGt) {
+int64_t convertPcieSpeedFromGTsToBs(double maxLinkSpeedInGt) {
     double pcieSpeedWithEnc;
-    if ((maxLinkSpeedInGt == 16) || (maxLinkSpeedInGt == 8)) {
+    if ((maxLinkSpeedInGt == PciLinkSpeeds::Pci16_0GigatransfersPerSecond) || (maxLinkSpeedInGt == PciLinkSpeeds::Pci8_0GigatransfersPerSecond)) {
         pcieSpeedWithEnc = maxLinkSpeedInGt * 1000 * 128 / 130;
-    } else if ((maxLinkSpeedInGt == 5) || (maxLinkSpeedInGt == 2.5)) {
+    } else if ((maxLinkSpeedInGt == PciLinkSpeeds::Pci5_0GigatransfersPerSecond) || (maxLinkSpeedInGt == PciLinkSpeeds::Pci2_5GigatransfersPerSecond)) {
         pcieSpeedWithEnc = maxLinkSpeedInGt * 1000 * 8 / 10;
     } else {
         pcieSpeedWithEnc = 0;
@@ -37,32 +39,76 @@ uint64_t convertPcieSpeedFromGTsToBs(double maxLinkSpeedInGt) {
     //  Now, because 1Mb/s = (1000*1000)/8 bytes/second = 125000 bytes/second
     //
     pcieSpeedWithEnc = pcieSpeedWithEnc * 125000;
-    return static_cast<uint64_t>(pcieSpeedWithEnc);
+    return static_cast<int64_t>(pcieSpeedWithEnc);
 }
 
-ze_result_t PciImp::pciStaticProperties(zet_pci_properties_t *pProperties) {
+double convertPciGenToLinkSpeed(uint32_t gen) {
+    switch (gen) {
+    case PciGenerations::PciGen1: {
+        return PciLinkSpeeds::Pci2_5GigatransfersPerSecond;
+    } break;
+    case PciGenerations::PciGen2: {
+        return PciLinkSpeeds::Pci5_0GigatransfersPerSecond;
+    } break;
+    case PciGenerations::PciGen3: {
+        return PciLinkSpeeds::Pci8_0GigatransfersPerSecond;
+    } break;
+    case PciGenerations::PciGen4: {
+        return PciLinkSpeeds::Pci16_0GigatransfersPerSecond;
+    } break;
+    case PciGenerations::PciGen5: {
+        return PciLinkSpeeds::Pci32_0GigatransfersPerSecond;
+    } break;
+    default: {
+        return 0.0;
+    } break;
+    }
+}
+
+int32_t convertLinkSpeedToPciGen(double speed) {
+    if (speed == PciLinkSpeeds::Pci2_5GigatransfersPerSecond) {
+        return PciGenerations::PciGen1;
+    } else if (speed == PciLinkSpeeds::Pci5_0GigatransfersPerSecond) {
+        return PciGenerations::PciGen2;
+    } else if (speed == PciLinkSpeeds::Pci8_0GigatransfersPerSecond) {
+        return PciGenerations::PciGen3;
+    } else if (speed == PciLinkSpeeds::Pci16_0GigatransfersPerSecond) {
+        return PciGenerations::PciGen4;
+    } else if (speed == PciLinkSpeeds::Pci32_0GigatransfersPerSecond) {
+        return PciGenerations::PciGen5;
+    } else {
+        return -1;
+    }
+}
+
+ze_result_t PciImp::pciStaticProperties(zes_pci_properties_t *pProperties) {
     *pProperties = pciProperties;
     return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t PciImp::pciGetInitializedBars(uint32_t *pCount, zet_pci_bar_properties_t *pProperties) {
-    if (pProperties == nullptr) {
-        *pCount = static_cast<uint32_t>(pciBarProperties.size());
-        return ZE_RESULT_SUCCESS;
-    } else {
-        *pCount = std::min(*pCount, static_cast<uint32_t>(pciBarProperties.size()));
-        for (uint32_t i = 0; i < *pCount; i++) {
+ze_result_t PciImp::pciGetInitializedBars(uint32_t *pCount, zes_pci_bar_properties_t *pProperties) {
+    uint32_t pciBarPropertiesSize = static_cast<uint32_t>(pciBarProperties.size());
+    uint32_t numToCopy = std::min(*pCount, pciBarPropertiesSize);
+    if (0 == *pCount || *pCount > pciBarPropertiesSize) {
+        *pCount = pciBarPropertiesSize;
+    }
+    if (nullptr != pProperties) {
+        for (uint32_t i = 0; i < numToCopy; i++) {
             pProperties[i] = *pciBarProperties[i];
         }
     }
     return ZE_RESULT_SUCCESS;
 }
 
+ze_result_t PciImp::pciGetState(zes_pci_state_t *pState) {
+    return pOsPci->getState(pState);
+}
 void PciImp::init() {
     if (pOsPci == nullptr) {
         pOsPci = OsPci::create(pOsSysman);
     }
     UNRECOVERABLE_IF(nullptr == pOsPci);
+    pOsPci->getProperties(&pciProperties);
     std::string bdf;
     pOsPci->getPciBdf(bdf);
     if (bdf.empty()) {
@@ -76,24 +122,30 @@ void PciImp::init() {
                &pciProperties.address.device, &pciProperties.address.function);
     }
 
-    uint32_t maxLinkWidth, gen;
-    uint64_t maxBandWidth;
-    double maxLinkSpeed;
+    int32_t maxLinkWidth = -1;
+    int64_t maxBandWidth = -1;
+    double maxLinkSpeed = 0;
     pOsPci->getMaxLinkSpeed(maxLinkSpeed);
     pOsPci->getMaxLinkWidth(maxLinkWidth);
     maxBandWidth = maxLinkWidth * convertPcieSpeedFromGTsToBs(maxLinkSpeed);
-
-    pciProperties.maxSpeed.maxBandwidth = maxBandWidth;
+    if (maxBandWidth == 0) {
+        pciProperties.maxSpeed.maxBandwidth = -1;
+    } else {
+        pciProperties.maxSpeed.maxBandwidth = maxBandWidth;
+    }
     pciProperties.maxSpeed.width = maxLinkWidth;
-    pOsPci->getLinkGen(gen);
-    pciProperties.maxSpeed.gen = gen;
+    pciProperties.maxSpeed.gen = convertLinkSpeedToPciGen(maxLinkSpeed);
     pOsPci->initializeBarProperties(pciBarProperties);
 }
 
 PciImp::~PciImp() {
+    for (zes_pci_bar_properties_t *pProperties : pciBarProperties) {
+        delete pProperties;
+        pProperties = nullptr;
+    }
     if (nullptr != pOsPci) {
         delete pOsPci;
+        pOsPci = nullptr;
     }
 }
-
 } // namespace L0

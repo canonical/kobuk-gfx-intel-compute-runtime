@@ -7,9 +7,8 @@
 
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/ptr_math.h"
+#include "shared/test/unit_test/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/unit_test/fixtures/command_container_fixture.h"
-
-#include "opencl/test/unit_test/gen_common/gen_cmd_parse.h"
 
 using namespace NEO;
 
@@ -46,8 +45,8 @@ HWTEST_F(CommandEncodeStatesTest, givenCreatedSurfaceStateBufferWhenAllocationPr
     uint64_t gpuAddr = 0x4000u;
     size_t allocSize = size;
     length.Length = static_cast<uint32_t>(allocSize - 1);
-    GraphicsAllocation allocation(0, GraphicsAllocation::AllocationType::UNKNOWN, cpuAddr, gpuAddr, 0u, allocSize, MemoryPool::MemoryNull);
-    EncodeSurfaceState<FamilyType>::encodeBuffer(stateBuffer, reinterpret_cast<void *>(gpuAddr), allocSize, 1,
+    GraphicsAllocation allocation(0, GraphicsAllocation::AllocationType::UNKNOWN, cpuAddr, gpuAddr, 0u, allocSize, MemoryPool::MemoryNull, 1);
+    EncodeSurfaceState<FamilyType>::encodeBuffer(stateBuffer, gpuAddr, allocSize, 1,
                                                  RENDER_SURFACE_STATE::COHERENCY_TYPE_IA_COHERENT);
     EXPECT_EQ(length.SurfaceState.Depth + 1u, state->getDepth());
     EXPECT_EQ(length.SurfaceState.Width + 1u, state->getWidth());
@@ -73,7 +72,7 @@ HWTEST_F(CommandEncodeStatesTest, givenCreatedSurfaceStateBufferWhenAllocationNo
     size_t allocSize = size;
     length.Length = static_cast<uint32_t>(allocSize - 1);
 
-    EncodeSurfaceState<FamilyType>::encodeBuffer(stateBuffer, reinterpret_cast<void *>(gpuAddr), allocSize, 1,
+    EncodeSurfaceState<FamilyType>::encodeBuffer(stateBuffer, gpuAddr, allocSize, 1,
                                                  RENDER_SURFACE_STATE::COHERENCY_TYPE_IA_COHERENT);
 
     EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_NULL, state->getSurfaceType());
@@ -97,7 +96,7 @@ HWTEST_F(CommandEncodeStatesTest, givenCreatedSurfaceStateBufferWhenGpuCoherency
     size_t allocSize = size;
     length.Length = static_cast<uint32_t>(allocSize - 1);
 
-    EncodeSurfaceState<FamilyType>::encodeBuffer(stateBuffer, reinterpret_cast<void *>(gpuAddr), allocSize, 1,
+    EncodeSurfaceState<FamilyType>::encodeBuffer(stateBuffer, gpuAddr, allocSize, 1,
                                                  RENDER_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT);
 
     EXPECT_EQ(RENDER_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT, state->getCoherencyType());
@@ -108,30 +107,39 @@ HWTEST_F(CommandEncodeStatesTest, givenCreatedSurfaceStateBufferWhenGpuCoherency
 HWTEST_F(CommandEncodeStatesTest, givenCommandContainerWithDirtyHeapsWhenSetStateBaseAddressCalledThenStateBaseAddressAreNotSet) {
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
     cmdContainer->dirtyHeaps = 0;
-    auto baseAddres = cmdContainer->getCommandStream()->getCpuBase();
 
     cmdContainer->setHeapDirty(NEO::HeapType::DYNAMIC_STATE);
     cmdContainer->setHeapDirty(NEO::HeapType::INDIRECT_OBJECT);
     cmdContainer->setHeapDirty(NEO::HeapType::SURFACE_STATE);
 
-    EncodeStateBaseAddress<FamilyType>::encode(*cmdContainer.get());
+    STATE_BASE_ADDRESS sba;
+    EncodeStateBaseAddress<FamilyType>::encode(*cmdContainer.get(), sba);
 
     auto dsh = cmdContainer->getIndirectHeap(NEO::HeapType::DYNAMIC_STATE);
     auto ioh = cmdContainer->getIndirectHeap(NEO::HeapType::INDIRECT_OBJECT);
     auto ssh = cmdContainer->getIndirectHeap(NEO::HeapType::SURFACE_STATE);
 
-    auto pCmd = static_cast<STATE_BASE_ADDRESS *>(baseAddres);
+    GenCmdList commands;
+    CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
+
+    auto itorCmd = find<STATE_BASE_ADDRESS *>(commands.begin(), commands.end());
+    auto pCmd = genCmdCast<STATE_BASE_ADDRESS *>(*itorCmd);
 
     EXPECT_EQ(dsh->getHeapGpuBase(), pCmd->getDynamicStateBaseAddress());
     EXPECT_EQ(ioh->getHeapGpuBase(), pCmd->getIndirectObjectBaseAddress());
     EXPECT_EQ(ssh->getHeapGpuBase(), pCmd->getSurfaceStateBaseAddress());
+
+    EXPECT_EQ(sba.getDynamicStateBaseAddress(), pCmd->getDynamicStateBaseAddress());
+    EXPECT_EQ(sba.getIndirectObjectBaseAddress(), pCmd->getIndirectObjectBaseAddress());
+    EXPECT_EQ(sba.getSurfaceStateBaseAddress(), pCmd->getSurfaceStateBaseAddress());
 }
 
 HWTEST_F(CommandEncodeStatesTest, givenCommandContainerWhenSetStateBaseAddressCalledThenStateBaseAddressIsSetCorrectly) {
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
     cmdContainer->dirtyHeaps = 0;
 
-    EncodeStateBaseAddress<FamilyType>::encode(*cmdContainer.get());
+    STATE_BASE_ADDRESS sba;
+    EncodeStateBaseAddress<FamilyType>::encode(*cmdContainer.get(), sba);
 
     auto dsh = cmdContainer->getIndirectHeap(NEO::HeapType::DYNAMIC_STATE);
     auto ssh = cmdContainer->getIndirectHeap(NEO::HeapType::SURFACE_STATE);

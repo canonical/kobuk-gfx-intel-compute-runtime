@@ -34,7 +34,7 @@ std::string getCurrentLibraryPath() {
 
 namespace NEO {
 
-DriverInfo *DriverInfo::create(OSInterface *osInterface) {
+DriverInfo *DriverInfo::create(const HardwareInfo *hwInfo, OSInterface *osInterface) {
     if (osInterface) {
         auto wddm = osInterface->get()->getWddm();
         DEBUG_BREAK_IF(wddm == nullptr);
@@ -68,6 +68,11 @@ std::string DriverInfoWindows::getVersion(std::string defaultVersion) {
 
 bool DriverInfoWindows::isCompatibleDriverStore() const {
     auto currentLibraryPath = getCurrentLibraryPath();
+    auto openclDriverName = registryReader.get()->getSetting("OpenCLDriverName", std::string{});
+    if (openclDriverName.empty()) {
+        return false;
+    }
+
     auto driverStorePath = registryReader.get()->getSetting("DriverStorePathForComputeRuntime", currentLibraryPath);
     return currentLibraryPath.find(driverStorePath.c_str()) == 0u;
 }

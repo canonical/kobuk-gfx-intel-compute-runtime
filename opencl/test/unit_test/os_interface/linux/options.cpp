@@ -25,7 +25,9 @@ const char *gmmInitFuncName = "initMockGmm";
 const char *gmmDestroyFuncName = "destroyMockGmm";
 const char *metricsLibraryDllName = "";
 #endif
-const char *sysFsPciPath = "./test_files";
+const char *sysFsPciPathPrefix = "./test_files/linux/devices/";
+const char *pciDevicesDirectory = "./test_files/linux/by-path";
+const char *sysFsProcPathPrefix = "./test_files/linux/proc/";
 } // namespace Os
 
 NEO::OsLibrary *setAdapterInfo(const PLATFORM *platform, const GT_SYSTEM_INFO *gtSystemInfo, uint64_t gpuAddressSpace) {

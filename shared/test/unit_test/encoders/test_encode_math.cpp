@@ -7,9 +7,9 @@
 
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/helpers/register_offsets.h"
+#include "shared/test/unit_test/cmd_parse/gen_cmd_parse.h"
+#include "shared/test/unit_test/fixtures/device_fixture.h"
 
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
-#include "opencl/test/unit_test/gen_common/gen_cmd_parse.h"
 #include "test.h"
 
 using namespace NEO;
@@ -185,11 +185,11 @@ HWTEST_F(CommandEncoderMathTest, setGroupSizeIndirect) {
     CommandContainer cmdContainer;
     cmdContainer.initialize(pDevice);
 
-    uint32_t offsets[3] = {0, sizeof(uint32_t), 2 * sizeof(uint32_t)};
+    CrossThreadDataOffset offsets[3] = {0, sizeof(uint32_t), 2 * sizeof(uint32_t)};
     uint32_t crossThreadAdress[3] = {};
     uint32_t lws[3] = {2, 1, 1};
 
-    EncodeIndirectParams<FamilyType>::setGroupSizeIndirect(cmdContainer, offsets, crossThreadAdress, lws);
+    EncodeIndirectParams<FamilyType>::setGlobalWorkSizeIndirect(cmdContainer, offsets, crossThreadAdress, lws);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer.getCommandStream()->getCpuBase(), 0), cmdContainer.getCommandStream()->getUsed());
@@ -211,7 +211,7 @@ HWTEST_F(CommandEncoderMathTest, setGroupCountIndirect) {
     CommandContainer cmdContainer;
     cmdContainer.initialize(pDevice);
 
-    uint32_t offsets[3] = {0, sizeof(uint32_t), 2 * sizeof(uint32_t)};
+    CrossThreadDataOffset offsets[3] = {0, sizeof(uint32_t), 2 * sizeof(uint32_t)};
     uint32_t crossThreadAdress[3] = {};
 
     EncodeIndirectParams<FamilyType>::setGroupCountIndirect(cmdContainer, offsets, crossThreadAdress);

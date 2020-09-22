@@ -5,21 +5,24 @@
  *
  */
 
+#include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/memory_manager/allocations_list.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
+#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/test/unit_test/command_queue/command_enqueue_fixture.h"
 #include "opencl/test/unit_test/command_queue/command_queue_fixture.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
 #include "opencl/test/unit_test/mocks/mock_builtin_dispatch_info_builder.h"
 #include "opencl/test/unit_test/mocks/mock_builtins.h"
+#include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "test.h"
 
 using namespace NEO;
 
-struct EnqueueSvmMemCopyTest : public DeviceFixture,
+struct EnqueueSvmMemCopyTest : public ClDeviceFixture,
                                public CommandQueueHwFixture,
                                public ::testing::Test {
     typedef CommandQueueHwFixture CommandQueueFixture;
@@ -28,24 +31,24 @@ struct EnqueueSvmMemCopyTest : public DeviceFixture,
     }
 
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
 
         if (!pDevice->isFullRangeSvm()) {
             return;
         }
 
         CommandQueueFixture::SetUp(pClDevice, 0);
-        srcSvmPtr = context->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {});
+        srcSvmPtr = context->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {}, pDevice->getDeviceBitfield());
         ASSERT_NE(nullptr, srcSvmPtr);
-        dstSvmPtr = context->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {});
+        dstSvmPtr = context->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {}, pDevice->getDeviceBitfield());
         ASSERT_NE(nullptr, dstSvmPtr);
         auto srcSvmData = context->getSVMAllocsManager()->getSVMAlloc(srcSvmPtr);
         ASSERT_NE(nullptr, srcSvmData);
-        srcSvmAlloc = srcSvmData->gpuAllocation;
+        srcSvmAlloc = srcSvmData->gpuAllocations.getGraphicsAllocation(pDevice->getRootDeviceIndex());
         ASSERT_NE(nullptr, srcSvmAlloc);
         auto dstSvmData = context->getSVMAllocsManager()->getSVMAlloc(dstSvmPtr);
         ASSERT_NE(nullptr, dstSvmData);
-        dstSvmAlloc = dstSvmData->gpuAllocation;
+        dstSvmAlloc = dstSvmData->gpuAllocations.getGraphicsAllocation(pDevice->getRootDeviceIndex());
         ASSERT_NE(nullptr, dstSvmAlloc);
     }
 
@@ -55,7 +58,7 @@ struct EnqueueSvmMemCopyTest : public DeviceFixture,
             context->getSVMAllocsManager()->freeSVMAlloc(dstSvmPtr);
             CommandQueueFixture::TearDown();
         }
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     void *srcSvmPtr = nullptr;
@@ -302,6 +305,61 @@ HWTEST_F(EnqueueSvmMemCopyTest, givenEnqueueSVMMemcpyWhenUsingCopyBufferToBuffer
     alignedFree(dstHostPtr);
 }
 
+HWTEST_F(EnqueueSvmMemCopyTest, givenCommandQueueWhenEnqueueSVMMemcpyIsCalledThenSetAllocDumpable) {
+    if (!pDevice->isFullRangeSvm()) {
+        return;
+    }
+
+    DebugManagerStateRestore dbgRestore;
+    DebugManager.flags.AUBDumpAllocsOnEnqueueSVMMemcpyOnly.set(true);
+    DebugManager.flags.AUBDumpBufferFormat.set("BIN");
+
+    auto dstHostPtr = alignedMalloc(256, 64);
+
+    EXPECT_FALSE(srcSvmAlloc->isAllocDumpable());
+
+    auto retVal = pCmdQ->enqueueSVMMemcpy(
+        CL_TRUE,    // cl_bool  blocking_copy
+        dstHostPtr, // void *dst_ptr
+        srcSvmPtr,  // const void *src_ptr
+        256,        // size_t size
+        0,          // cl_uint num_events_in_wait_list
+        nullptr,    // cl_event *event_wait_list
+        nullptr     // cL_event *event
+    );
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    EXPECT_TRUE(srcSvmAlloc->isAllocDumpable());
+
+    alignedFree(dstHostPtr);
+}
+
+HWTEST_F(EnqueueSvmMemCopyTest, givenCommandQueueWhenEnqueueSVMMemcpyIsCalledThenItCallsNotifyFunction) {
+    if (!pDevice->isFullRangeSvm()) {
+        return;
+    }
+
+    auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pClDevice, nullptr);
+    auto dstHostPtr = alignedMalloc(256, 64);
+
+    auto retVal = mockCmdQ->enqueueSVMMemcpy(
+        CL_TRUE,    // cl_bool  blocking_copy
+        dstHostPtr, // void *dst_ptr
+        srcSvmPtr,  // const void *src_ptr
+        256,        // size_t size
+        0,          // cl_uint num_events_in_wait_list
+        nullptr,    // cl_event *event_wait_list
+        nullptr     // cL_event *event
+    );
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_TRUE(mockCmdQ->notifyEnqueueSVMMemcpyCalled);
+
+    auto &csr = mockCmdQ->getCommandStreamReceiverByCommandType(CL_COMMAND_SVM_MEMCPY);
+    EXPECT_EQ(EngineHelpers::isBcs(csr.getOsContext().getEngineType()), mockCmdQ->useBcsCsrOnNotifyEnabled);
+
+    alignedFree(dstHostPtr);
+}
+
 struct EnqueueSvmMemCopyHw : public ::testing::Test {
 
     void SetUp() override {
@@ -312,7 +370,7 @@ struct EnqueueSvmMemCopyHw : public ::testing::Test {
         }
 
         context = std::make_unique<MockContext>(device.get());
-        srcSvmPtr = context->getSVMAllocsManager()->createSVMAlloc(device->getRootDeviceIndex(), 256, {});
+        srcSvmPtr = context->getSVMAllocsManager()->createSVMAlloc(device->getRootDeviceIndex(), 256, {}, device->getDeviceBitfield());
         ASSERT_NE(nullptr, srcSvmPtr);
         dstHostPtr = alignedMalloc(256, 64);
     }

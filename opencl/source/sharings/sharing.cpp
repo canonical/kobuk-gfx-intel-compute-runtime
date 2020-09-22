@@ -15,10 +15,11 @@
 
 namespace NEO {
 
-int SharingHandler::acquire(MemObj *memObj) {
+int SharingHandler::acquire(MemObj *memObj, uint32_t rootDeviceIndex) {
     if (acquireCount == 0) {
-        UpdateData updateData;
-        auto currentSharedHandle = memObj->getGraphicsAllocation()->peekSharedHandle();
+        UpdateData updateData{rootDeviceIndex};
+        auto graphicsAllocation = memObj->getGraphicsAllocation(rootDeviceIndex);
+        auto currentSharedHandle = graphicsAllocation->peekSharedHandle();
         updateData.sharedHandle = currentSharedHandle;
         updateData.memObject = memObj;
         int result = synchronizeHandler(updateData);
@@ -30,7 +31,7 @@ int SharingHandler::acquire(MemObj *memObj) {
             return CL_OUT_OF_RESOURCES;
         }
 
-        DEBUG_BREAK_IF(memObj->getGraphicsAllocation()->peekSharedHandle() != updateData.sharedHandle);
+        DEBUG_BREAK_IF(graphicsAllocation->peekSharedHandle() != updateData.sharedHandle);
     }
     acquireCount++;
     return CL_SUCCESS;
@@ -51,11 +52,11 @@ int SharingHandler::validateUpdateData(UpdateData &updateData) {
 void SharingHandler::resolveGraphicsAllocationChange(osHandle currentSharedHandle, UpdateData *updateData) {
 }
 
-void SharingHandler::release(MemObj *memObject) {
+void SharingHandler::release(MemObj *memObject, uint32_t rootDeviceIndex) {
     DEBUG_BREAK_IF(acquireCount <= 0);
     acquireCount--;
     if (acquireCount == 0) {
-        releaseResource(memObject);
+        releaseResource(memObject, rootDeviceIndex);
     }
 }
 } // namespace NEO

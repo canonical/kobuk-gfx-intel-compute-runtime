@@ -9,7 +9,7 @@
 
 #include "shared/source/command_stream/csr_definitions.h"
 #include "shared/source/command_stream/submissions_aggregator.h"
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/helpers/constants.h"
 
 #include "level_zero/core/source/cmdqueue/cmdqueue.h"
 
@@ -58,6 +58,7 @@ struct CommandQueueImp : public CommandQueue {
         MemoryConstants::cacheLineSize +
         NEO::CSRequirements::csOverfetchSize;
 
+    CommandQueueImp() = delete;
     CommandQueueImp(Device *device, NEO::CommandStreamReceiver *csr, const ze_command_queue_desc_t *desc)
         : device(device), csr(csr), desc(*desc) {
         std::atomic_init(&commandQueuePerThreadScratchSize, 0u);
@@ -65,9 +66,9 @@ struct CommandQueueImp : public CommandQueue {
 
     ze_result_t destroy() override;
 
-    ze_result_t synchronize(uint32_t timeout) override;
+    ze_result_t synchronize(uint64_t timeout) override;
 
-    void initialize();
+    void initialize(bool copyOnly);
 
     Device *getDevice() { return device; }
 
@@ -80,9 +81,9 @@ struct CommandQueueImp : public CommandQueue {
     virtual void dispatchTaskCountWrite(NEO::LinearStream &commandStream, bool flushDataCache) = 0;
 
   protected:
-    void submitBatchBuffer(size_t offset, NEO::ResidencyContainer &residencyContainer, void *endingCmdPtr);
+    MOCKABLE_VIRTUAL void submitBatchBuffer(size_t offset, NEO::ResidencyContainer &residencyContainer, void *endingCmdPtr);
 
-    ze_result_t synchronizeByPollingForTaskCount(uint32_t timeout);
+    ze_result_t synchronizeByPollingForTaskCount(uint64_t timeout);
 
     void printFunctionsPrintfOutput();
 
@@ -90,7 +91,7 @@ struct CommandQueueImp : public CommandQueue {
     NEO::CommandStreamReceiver *csr = nullptr;
     const ze_command_queue_desc_t desc;
     NEO::LinearStream *commandStream = nullptr;
-    uint32_t taskCount = 0;
+    std::atomic<uint32_t> taskCount{0};
     std::vector<Kernel *> printfFunctionContainer;
     bool gsbaInit = false;
     bool frontEndInit = false;

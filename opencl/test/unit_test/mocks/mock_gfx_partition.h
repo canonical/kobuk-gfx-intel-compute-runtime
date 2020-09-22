@@ -15,6 +15,9 @@ class MockGfxPartition : public GfxPartition {
   public:
     using GfxPartition::osMemory;
 
+    MockGfxPartition() : GfxPartition(reservedCpuAddressRange) {}
+    MockGfxPartition(OSMemory::ReservedCpuAddressRange &sharedReservedCpuAddressRange) : GfxPartition(sharedReservedCpuAddressRange) {}
+
     uint64_t getHeapSize(HeapIndex heapIndex) {
         return getHeap(heapIndex).getSize();
     }
@@ -24,14 +27,16 @@ class MockGfxPartition : public GfxPartition {
     }
 
     void *getReservedCpuAddressRange() {
-        return reservedCpuAddressRange;
+        return reservedCpuAddressRange.alignedPtr;
     }
 
     size_t getReservedCpuAddressRangeSize() {
-        return reservedCpuAddressRangeSize;
+        return reservedCpuAddressRange.actualReservedSize - GfxPartition::heapGranularity;
     }
 
     MOCK_METHOD2(freeGpuAddressRange, void(uint64_t gpuAddress, size_t size));
 
     static std::array<HeapIndex, static_cast<uint32_t>(HeapIndex::TOTAL_HEAPS)> allHeapNames;
+
+    OSMemory::ReservedCpuAddressRange reservedCpuAddressRange;
 };

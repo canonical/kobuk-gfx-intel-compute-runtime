@@ -5,24 +5,25 @@
  *
  */
 
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
+
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_source_level_debugger.h"
 #include "test.h"
 
 using namespace NEO;
-struct BdwDeviceTest : public DeviceFixture,
+struct BdwDeviceTest : public ClDeviceFixture,
                        public ::testing::Test {
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
     }
 
     void TearDown() override {
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 };
 
 BDWTEST_F(BdwDeviceTest, givenBdwDeviceWhenAskedForClVersionThenReport21) {
-    auto version = pClDevice->getSupportedClVersion();
+    auto version = pClDevice->getEnabledClVersion();
     EXPECT_EQ(21u, version);
 }

@@ -6,10 +6,10 @@
  */
 
 #include "shared/source/helpers/hw_info.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 #include "opencl/source/context/context.h"
 #include "opencl/source/mem_obj/image.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 
 #include "cl_api_tests.h"
 
@@ -37,8 +37,8 @@ struct clGetImageInfoTests : public ApiFixture<>,
         imageDesc.num_samples = 0;
         imageDesc.mem_object = nullptr;
 
-        image = clCreateImage(pContext, CL_MEM_READ_WRITE, &imageFormat, &imageDesc,
-                              nullptr, &retVal);
+        image = Image::validateAndCreateImage(pContext, nullptr, CL_MEM_READ_WRITE, 0, &imageFormat, &imageDesc, nullptr, retVal);
+
         ASSERT_EQ(CL_SUCCESS, retVal);
         EXPECT_NE(nullptr, image);
     }
@@ -78,6 +78,14 @@ TEST_F(clGetImageInfoTests, GivenInvalidParamNameWhenGettingImageInfoThenInvalid
     retVal = clGetImageInfo(image, CL_MEM_SIZE, 0, nullptr, &paramRetSize);
     EXPECT_EQ(CL_INVALID_VALUE, retVal);
     ASSERT_EQ(0u, paramRetSize);
+}
+
+TEST_F(clGetImageInfoTests, GivenInvalidParametersWhenGettingImageInfoThenValueSizeRetIsNotUpdated) {
+    size_t paramRetSize = 0x1234;
+
+    retVal = clGetImageInfo(image, CL_MEM_SIZE, 0, nullptr, &paramRetSize);
+    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+    EXPECT_EQ(0x1234u, paramRetSize);
 }
 
 TEST_F(clGetImageInfoTests, GivenClImageFormatWhenGettingImageInfoThenImageFormatIsReturned) {
@@ -210,8 +218,7 @@ TEST_F(clGetImageInfoTests, Given3dImageWithMipMapsWhenGettingImageInfoThenWidth
     imageDesc2.num_samples = 0;
     imageDesc2.mem_object = nullptr;
 
-    image2 = clCreateImage(pContext, CL_MEM_READ_WRITE, &imageFormat2, &imageDesc2,
-                           nullptr, &retVal);
+    image2 = Image::validateAndCreateImage(pContext, nullptr, CL_MEM_READ_WRITE, 0, &imageFormat2, &imageDesc2, nullptr, retVal);
     ASSERT_EQ(CL_SUCCESS, retVal);
     EXPECT_NE(nullptr, image2);
 
@@ -265,8 +272,7 @@ TEST_F(clGetImageInfoTests, Given1dImageWithMipMapsWhenGettingImageInfoThenWidth
     imageDesc2.num_samples = 0;
     imageDesc2.mem_object = nullptr;
 
-    image2 = clCreateImage(pContext, CL_MEM_READ_WRITE, &imageFormat2, &imageDesc2,
-                           nullptr, &retVal);
+    image2 = Image::validateAndCreateImage(pContext, nullptr, CL_MEM_READ_WRITE, 0, &imageFormat2, &imageDesc2, nullptr, retVal);
     ASSERT_EQ(CL_SUCCESS, retVal);
     EXPECT_NE(nullptr, image2);
 
@@ -364,7 +370,7 @@ TEST_F(clGetImageInfoTests, givenMultisampleCountForMcsWhenAskingForRowPitchThen
     size_t receivedRowPitch = 0;
 
     clReleaseMemObject(image);
-    image = clCreateImage(pContext, CL_MEM_READ_WRITE, &imageFormat, &imageDesc, nullptr, &retVal);
+    image = Image::validateAndCreateImage(pContext, nullptr, CL_MEM_READ_WRITE, 0, &imageFormat, &imageDesc, nullptr, retVal);
 
     auto imageObj = castToObject<Image>(image);
     auto formatInfo = imageObj->getSurfaceFormatInfo();

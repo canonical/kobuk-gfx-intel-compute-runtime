@@ -25,12 +25,12 @@ void NEO::UltConfigListener::OnTestStart(const ::testing::TestInfo &testInfo) {
 }
 void NEO::UltConfigListener::OnTestEnd(const ::testing::TestInfo &testInfo) {
     // Clear global platform that it shouldn't be reused between tests
-    platformsImpl.clear();
+    platformsImpl->clear();
     MemoryManager::maxOsContextCount = 0u;
 
     // Ensure that global state is restored
     UltHwConfig expectedState{};
-    static_assert(sizeof(UltHwConfig) == 7 * sizeof(bool), ""); // Ensure that there is no internal padding
+    static_assert(sizeof(UltHwConfig) == 9 * sizeof(bool), ""); // Ensure that there is no internal padding
     EXPECT_EQ(0, memcmp(&expectedState, &ultHwConfig, sizeof(UltHwConfig)));
     EXPECT_EQ(0, memcmp(&referencedHwInfo, defaultHwInfo.get(), sizeof(HardwareInfo)));
 }

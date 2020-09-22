@@ -75,7 +75,7 @@ void MockGmmResourceInfo::computeRowPitch() {
     if (mockResourceCreateParams.OverridePitch) {
         rowPitch = mockResourceCreateParams.OverridePitch;
     } else {
-        rowPitch = static_cast<size_t>(mockResourceCreateParams.BaseWidth64 * (surfaceFormatInfo->PerChannelSizeInBytes * surfaceFormatInfo->NumChannels));
+        rowPitch = static_cast<size_t>(mockResourceCreateParams.BaseWidth64 * (surfaceFormatInfo->ImageElementSizeInBytes));
         rowPitch = alignUp(rowPitch, 64);
     }
 }
@@ -101,6 +101,15 @@ void MockGmmResourceInfo::setSurfaceFormat() {
         surfaceFormatInfo = &tempSurface;
     }
 
+    if (mockResourceCreateParams.Format == GMM_RESOURCE_FORMAT::GMM_FORMAT_RGBP) {
+        tempSurface.GMMSurfaceFormat = GMM_RESOURCE_FORMAT::GMM_FORMAT_RGBP;
+        tempSurface.NumChannels = 1;
+        tempSurface.ImageElementSizeInBytes = 8;
+        tempSurface.PerChannelSizeInBytes = 8;
+
+        surfaceFormatInfo = &tempSurface;
+    }
+
     iterate(SurfaceFormats::readOnly12());
     iterate(SurfaceFormats::readOnly20());
     iterate(SurfaceFormats::writeOnly());
@@ -116,7 +125,7 @@ void MockGmmResourceInfo::setSurfaceFormat() {
 }
 
 uint32_t MockGmmResourceInfo::getBitsPerPixel() {
-    return (surfaceFormatInfo->PerChannelSizeInBytes << 3) * surfaceFormatInfo->NumChannels;
+    return static_cast<uint32_t>(surfaceFormatInfo->ImageElementSizeInBytes * 8);
 }
 
 void MockGmmResourceInfo::setUnifiedAuxTranslationCapable() {

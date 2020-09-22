@@ -9,8 +9,8 @@
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/command_stream/scratch_space_controller.h"
 #include "shared/source/command_stream/submissions_aggregator.h"
+#include "shared/source/helpers/constants.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
-#include "shared/source/memory_manager/memory_constants.h"
 #include "shared/source/memory_manager/residency_container.h"
 
 #include "level_zero/core/source/cmdqueue/cmdqueue_imp.h"
@@ -22,6 +22,7 @@ namespace L0 {
 template <GFXCORE_FAMILY gfxCoreFamily>
 struct CommandQueueHw : public CommandQueueImp {
     using CommandQueueImp::CommandQueueImp;
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
     ze_result_t createFence(const ze_fence_desc_t *desc, ze_fence_handle_t *phFence) override;
     ze_result_t destroy() override;
@@ -34,7 +35,7 @@ struct CommandQueueHw : public CommandQueueImp {
 
     void dispatchTaskCountWrite(NEO::LinearStream &commandStream, bool flushDataCache) override;
 
-    void programGeneralStateBaseAddress(uint64_t gsba, NEO::LinearStream &commandStream);
+    void programGeneralStateBaseAddress(uint64_t gsba, bool useLocalMemoryForIndirectHeap, NEO::LinearStream &commandStream);
     size_t estimateStateBaseAddressCmdSize();
     void programFrontEnd(uint64_t scratchAddress, NEO::LinearStream &commandStream);
 

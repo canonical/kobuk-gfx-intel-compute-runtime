@@ -50,7 +50,12 @@ Image *GlTexture::createSharedGlTexture(Context *context, cl_mem_flags flags, cl
 
     errorCode.set(CL_SUCCESS);
 
-    AllocationProperties allocProperties(context->getDevice(0)->getRootDeviceIndex(), false, 0u, GraphicsAllocation::AllocationType::SHARED_IMAGE, false);
+    AllocationProperties allocProperties(context->getDevice(0)->getRootDeviceIndex(),
+                                         false, // allocateMemory
+                                         0u,    // size
+                                         GraphicsAllocation::AllocationType::SHARED_IMAGE,
+                                         false, // isMultiStorageAllocation
+                                         context->getDeviceBitfieldForAllocation());
     auto alloc = memoryManager->createGraphicsAllocationFromSharedHandle(texInfo.globalShareHandle, allocProperties, false);
 
     if (alloc == nullptr) {
@@ -106,7 +111,7 @@ Image *GlTexture::createSharedGlTexture(Context *context, cl_mem_flags flags, cl
         errorCode.set(CL_INVALID_GL_OBJECT);
         return nullptr;
     }
-    auto surfaceFormatInfoAddress = Image::getSurfaceFormatFromTable(flags, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+    auto surfaceFormatInfoAddress = Image::getSurfaceFormatFromTable(flags, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
     if (!surfaceFormatInfoAddress) {
         memoryManager->freeGraphicsMemory(alloc);
         errorCode.set(CL_INVALID_GL_OBJECT);
@@ -119,7 +124,7 @@ Image *GlTexture::createSharedGlTexture(Context *context, cl_mem_flags flags, cl
 
     GraphicsAllocation *mcsAlloc = nullptr;
     if (texInfo.globalShareHandleMCS) {
-        AllocationProperties allocProperties(context->getDevice(0)->getRootDeviceIndex(), 0, GraphicsAllocation::AllocationType::MCS);
+        AllocationProperties allocProperties(context->getDevice(0)->getRootDeviceIndex(), 0, GraphicsAllocation::AllocationType::MCS, context->getDeviceBitfieldForAllocation());
         mcsAlloc = memoryManager->createGraphicsAllocationFromSharedHandle(texInfo.globalShareHandleMCS, allocProperties, false);
         if (texInfo.pGmmResInfoMCS) {
             DEBUG_BREAK_IF(mcsAlloc->getDefaultGmm() != nullptr);
@@ -141,14 +146,16 @@ Image *GlTexture::createSharedGlTexture(Context *context, cl_mem_flags flags, cl
 
     auto glTexture = new GlTexture(sharingFunctions, getClGlObjectType(target), texture, texInfo, target, std::max(miplevel, 0));
 
-    auto hwInfo = context->getDevice(0)->getHardwareInfo();
-    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-    if (alloc->getDefaultGmm()->unifiedAuxTranslationCapable()) {
+    if (texInfo.isAuxEnabled && alloc->getDefaultGmm()->unifiedAuxTranslationCapable()) {
+        auto hwInfo = context->getDevice(0)->getHardwareInfo();
+        auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
         alloc->getDefaultGmm()->isRenderCompressed = hwHelper.isPageTableManagerSupported(hwInfo) ? memoryManager->mapAuxGpuVA(alloc)
                                                                                                   : true;
     }
+    auto multiGraphicsAllocation = MultiGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
+    multiGraphicsAllocation.addAllocation(alloc);
 
-    return Image::createSharedImage(context, glTexture, mcsSurfaceInfo, alloc, mcsAlloc, flags, &surfaceFormatInfo, imgInfo, cubeFaceIndex,
+    return Image::createSharedImage(context, glTexture, mcsSurfaceInfo, std::move(multiGraphicsAllocation), mcsAlloc, flags, 0, &surfaceFormatInfo, imgInfo, cubeFaceIndex,
                                     std::max(miplevel, 0), imgInfo.imgDesc.numMipLevels);
 } // namespace NEO
 
@@ -161,7 +168,7 @@ void GlTexture::synchronizeObject(UpdateData &updateData) {
     } else {
         sharingFunctions->acquireSharedTexture(&resourceInfo);
         // Set texture buffer offset acquired from OpenGL layer in graphics allocation
-        updateData.memObject->getGraphicsAllocation()->setAllocationOffset(resourceInfo.textureBufferOffset);
+        updateData.memObject->getGraphicsAllocation(updateData.rootDeviceIndex)->setAllocationOffset(resourceInfo.textureBufferOffset);
     }
     updateData.sharedHandle = resourceInfo.globalShareHandle;
     updateData.synchronizationStatus = SynchronizeStatus::ACQUIRE_SUCCESFUL;
@@ -248,7 +255,7 @@ cl_GLenum GlTexture::getBaseTargetType(cl_GLenum target) {
     return returnTarget;
 }
 
-void GlTexture::releaseResource(MemObj *memObject) {
+void GlTexture::releaseResource(MemObj *memObject, uint32_t rootDeviceIndex) {
     auto sharingFunctions = static_cast<GLSharingFunctionsWindows *>(this->sharingFunctions);
     if (target == GL_RENDERBUFFER_EXT) {
         sharingFunctions->releaseSharedRenderBuffer(&textureInfo);

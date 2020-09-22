@@ -99,6 +99,7 @@ GLboolean WINAPI mockGLAcquireSharedTexture(GLDisplay, GLContext, GLContext, GLv
     pTextureInfo->glHWFormat = textureInfoOutput.glHWFormat;
     pTextureInfo->textureBufferOffset = textureInfoOutput.textureBufferOffset;
     pTextureInfo->numberOfSamples = textureInfoOutput.numberOfSamples;
+    pTextureInfo->isAuxEnabled = textureInfoOutput.isAuxEnabled;
     GLAcquireSharedTextureCalled++;
     return (GLboolean)1;
 };
@@ -327,7 +328,7 @@ void memParam() {
     memset(&bufferInfoOutput, 0, sizeof(CL_GL_BUFFER_INFO));
     memset(&textureInfoInput, 0, sizeof(CL_GL_RESOURCE_INFO));
     memset(&textureInfoOutput, 0, sizeof(CL_GL_RESOURCE_INFO));
-    memset(&glMockReturnedValues, 0, sizeof(GLMockReturnedValues));
+    memset(&glMockReturnedValues, 0, sizeof(NEO::GLMockReturnedValues));
 };
 void loadBuffer(CL_GL_BUFFER_INFO buff) { bufferInfoOutput = buff; };
 void loadTexture(CL_GL_RESOURCE_INFO texture) { textureInfoOutput = texture; };

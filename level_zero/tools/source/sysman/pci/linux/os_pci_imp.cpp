@@ -5,46 +5,38 @@
  *
  */
 
-#include "shared/source/os_interface/linux/drm_neo.h"
-#include "shared/source/os_interface/linux/os_interface.h"
+#include "level_zero/tools/source/sysman/pci/linux/os_pci_imp.h"
 
-#include "level_zero/core/source/device/device.h"
+#include "level_zero/tools/source/sysman/linux/fs_access.h"
 
 #include "sysman/linux/os_sysman_imp.h"
-#include "sysman/pci/os_pci.h"
 #include "sysman/pci/pci_imp.h"
 
-#include <unistd.h>
-
 namespace L0 {
-constexpr uint8_t maxPciBars = 6;
-class LinuxPciImp : public OsPci {
-  public:
-    ze_result_t getPciBdf(std::string &bdf) override;
-    ze_result_t getMaxLinkSpeed(double &maxLinkSpeed) override;
-    ze_result_t getMaxLinkWidth(uint32_t &maxLinkwidth) override;
-    ze_result_t getLinkGen(uint32_t &linkGen) override;
-    ze_result_t initializeBarProperties(std::vector<zet_pci_bar_properties_t *> &pBarProperties) override;
-    LinuxPciImp(OsSysman *pOsSysman);
-    ~LinuxPciImp() override = default;
-
-    // Don't allow copies of the LinuxPciImp object
-    LinuxPciImp(const LinuxPciImp &obj) = delete;
-    LinuxPciImp &operator=(const LinuxPciImp &obj) = delete;
-
-  private:
-    SysfsAccess *pSysfsAccess;
-    static const std::string deviceDir;
-    static const std::string resourceFile;
-    static const std::string maxLinkSpeedFile;
-    static const std::string maxLinkWidthFile;
-};
 
 const std::string LinuxPciImp::deviceDir("device");
 const std::string LinuxPciImp::resourceFile("device/resource");
 const std::string LinuxPciImp::maxLinkSpeedFile("device/max_link_speed");
 const std::string LinuxPciImp::maxLinkWidthFile("device/max_link_width");
+constexpr uint8_t maxPciBars = 6;
+// Linux kernel would report 255 link width, as an indication of unknown.
+constexpr uint32_t unknownPcieLinkWidth = 255u;
 
+std::string LinuxPciImp::changeDirNLevelsUp(std::string realRootPath, uint8_t nLevel) {
+    size_t loc;
+    while (nLevel > 0) {
+        loc = realRootPath.find_last_of('/');
+        realRootPath = realRootPath.substr(0, loc);
+        nLevel--;
+    }
+    return realRootPath;
+}
+ze_result_t LinuxPciImp::getProperties(zes_pci_properties_t *properties) {
+    properties->haveBandwidthCounters = false;
+    properties->havePacketCounters = false;
+    properties->haveReplayCounters = false;
+    return ZE_RESULT_SUCCESS;
+}
 ze_result_t LinuxPciImp::getPciBdf(std::string &bdf) {
     std::string bdfDir;
     ze_result_t result = pSysfsAccess->readSymLink(deviceDir, bdfDir);
@@ -57,45 +49,65 @@ ze_result_t LinuxPciImp::getPciBdf(std::string &bdf) {
 }
 
 ze_result_t LinuxPciImp::getMaxLinkSpeed(double &maxLinkSpeed) {
-    double val;
-    ze_result_t result = pSysfsAccess->read(maxLinkSpeedFile, val);
-    if (ZE_RESULT_SUCCESS != result) {
-        maxLinkSpeed = 0;
-        return result;
-    }
-
-    maxLinkSpeed = val;
-    return ZE_RESULT_SUCCESS;
-}
-
-ze_result_t LinuxPciImp::getMaxLinkWidth(uint32_t &maxLinkwidth) {
-    int intVal;
-
-    ze_result_t result = pSysfsAccess->read(maxLinkWidthFile, intVal);
-    if (ZE_RESULT_SUCCESS != result) {
-        return result;
-    }
-    maxLinkwidth = intVal;
-    return ZE_RESULT_SUCCESS;
-}
-
-ze_result_t LinuxPciImp::getLinkGen(uint32_t &linkGen) {
-    double maxLinkSpeed;
-    getMaxLinkSpeed(maxLinkSpeed);
-    if (maxLinkSpeed == 2.5) {
-        linkGen = 1;
-    } else if (maxLinkSpeed == 5) {
-        linkGen = 2;
-    } else if (maxLinkSpeed == 8) {
-        linkGen = 3;
-    } else if (maxLinkSpeed == 16) {
-        linkGen = 4;
-    } else if (maxLinkSpeed == 32) {
-        linkGen = 5;
+    ze_result_t result;
+    if (isLmemSupported) {
+        std::string rootPortPath;
+        std::string realRootPath;
+        result = pSysfsAccess->getRealPath(deviceDir, realRootPath);
+        // we need to change the absolute path to two levels up to get actual
+        // values of speed and width at the Discrete card's root port.
+        // the root port is always at a fixed distance as defined in HW
+        rootPortPath = changeDirNLevelsUp(realRootPath, 2);
+        if (ZE_RESULT_SUCCESS != result) {
+            maxLinkSpeed = 0;
+            return result;
+        }
+        result = pfsAccess->read(rootPortPath + '/' + "max_link_speed", maxLinkSpeed);
+        if (ZE_RESULT_SUCCESS != result) {
+            maxLinkSpeed = 0;
+            return result;
+        }
     } else {
-        linkGen = 0;
+        result = pSysfsAccess->read(maxLinkSpeedFile, maxLinkSpeed);
+        if (ZE_RESULT_SUCCESS != result) {
+            maxLinkSpeed = 0;
+            return result;
+        }
     }
+    return ZE_RESULT_SUCCESS;
+}
 
+ze_result_t LinuxPciImp::getMaxLinkWidth(int32_t &maxLinkwidth) {
+    ze_result_t result;
+    if (isLmemSupported) {
+        std::string rootPortPath;
+        std::string realRootPath;
+        result = pSysfsAccess->getRealPath(deviceDir, realRootPath);
+        // we need to change the absolute path to two levels up to get actual
+        // values of speed and width at the Discrete card's root port.
+        // the root port is always at a fixed distance as defined in HW
+        rootPortPath = changeDirNLevelsUp(realRootPath, 2);
+        if (ZE_RESULT_SUCCESS != result) {
+            maxLinkwidth = -1;
+            return result;
+        }
+        result = pfsAccess->read(rootPortPath + '/' + "max_link_width", maxLinkwidth);
+        if (ZE_RESULT_SUCCESS != result) {
+            maxLinkwidth = -1;
+            return result;
+        }
+        if (maxLinkwidth == static_cast<int32_t>(unknownPcieLinkWidth)) {
+            maxLinkwidth = -1;
+        }
+    } else {
+        result = pSysfsAccess->read(maxLinkWidthFile, maxLinkwidth);
+        if (ZE_RESULT_SUCCESS != result) {
+            return result;
+        }
+        if (maxLinkwidth == static_cast<int32_t>(unknownPcieLinkWidth)) {
+            maxLinkwidth = -1;
+        }
+    }
     return ZE_RESULT_SUCCESS;
 }
 
@@ -114,7 +126,7 @@ void getBarBaseAndSize(std::string readBytes, uint64_t &baseAddr, uint64_t &barS
     barSize = end - start + 1;
 }
 
-ze_result_t LinuxPciImp::initializeBarProperties(std::vector<zet_pci_bar_properties_t *> &pBarProperties) {
+ze_result_t LinuxPciImp::initializeBarProperties(std::vector<zes_pci_bar_properties_t *> &pBarProperties) {
     std::vector<std::string> ReadBytes;
     ze_result_t result = pSysfsAccess->read(resourceFile, ReadBytes);
     if (result != ZE_RESULT_SUCCESS) {
@@ -123,20 +135,22 @@ ze_result_t LinuxPciImp::initializeBarProperties(std::vector<zet_pci_bar_propert
     for (uint32_t i = 0; i <= maxPciBars; i++) {
         uint64_t baseAddr, barSize, barFlags;
         getBarBaseAndSize(ReadBytes[i], baseAddr, barSize, barFlags);
-        if (baseAddr) {
-            zet_pci_bar_properties_t *pBarProp = new zet_pci_bar_properties_t;
+        if (baseAddr && !(barFlags & 0x1)) { // we do not update for I/O ports
+            zes_pci_bar_properties_t *pBarProp = new zes_pci_bar_properties_t;
             pBarProp->index = i;
             pBarProp->base = baseAddr;
             pBarProp->size = barSize;
             // Bar Flags Desc.
             // Bit-0 - Value 0x0 -> MMIO type BAR
-            // Bit-0 - Value 0x1 -> I/O Type BAR
-            // Bit-1 -  Reserved
-            // Bit-2 - Valid only for MMIO type BAR
-            //         Value  0x1 -> 64bit BAR*/
-            pBarProp->type = (barFlags & 0x1) ? ZET_PCI_BAR_TYPE_VGA_IO : ZET_PCI_BAR_TYPE_MMIO;
+            // Bit-0 - Value 0x1 -> I/O type BAR
+            if (i == 0) { // GRaphics MMIO is at BAR0, and is a 64-bit
+                pBarProp->type = ZES_PCI_BAR_TYPE_MMIO;
+            }
+            if (i == 2) {
+                pBarProp->type = ZES_PCI_BAR_TYPE_MEM; // device memory is always at BAR2
+            }
             if (i == 6) { // the 7th entry of resource file is expected to be ROM BAR
-                pBarProp->type = ZET_PCI_BAR_TYPE_ROM;
+                pBarProp->type = ZES_PCI_BAR_TYPE_ROM;
             }
             pBarProperties.push_back(pBarProp);
         }
@@ -147,10 +161,15 @@ ze_result_t LinuxPciImp::initializeBarProperties(std::vector<zet_pci_bar_propert
     return result;
 }
 
+ze_result_t LinuxPciImp::getState(zes_pci_state_t *state) {
+    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+}
 LinuxPciImp::LinuxPciImp(OsSysman *pOsSysman) {
     LinuxSysmanImp *pLinuxSysmanImp = static_cast<LinuxSysmanImp *>(pOsSysman);
-
     pSysfsAccess = &pLinuxSysmanImp->getSysfsAccess();
+    pfsAccess = &pLinuxSysmanImp->getFsAccess();
+    Device *pDevice = pLinuxSysmanImp->getDeviceHandle();
+    isLmemSupported = pDevice->getDriverHandle()->getMemoryManager()->isLocalMemorySupported(pDevice->getRootDeviceIndex());
 }
 
 OsPci *OsPci::create(OsSysman *pOsSysman) {

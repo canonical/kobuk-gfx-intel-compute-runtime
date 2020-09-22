@@ -74,7 +74,7 @@ struct WddmResidencyControllerTest : ::testing::Test {
     void SetUp() {
         executionEnvironment = std::make_unique<MockExecutionEnvironment>();
         rootDeviceEnvironment = std::make_unique<RootDeviceEnvironment>(*executionEnvironment);
-        wddm = std::unique_ptr<WddmMock>(static_cast<WddmMock *>(Wddm::createWddm(nullptr, *rootDeviceEnvironment)));
+        wddm = static_cast<WddmMock *>(Wddm::createWddm(nullptr, *rootDeviceEnvironment));
         wddm->init();
         mockOsContextWin = std::make_unique<MockOsContextWin>(*wddm, osContextId, 0, aub_stream::ENGINE_RCS,
                                                               PreemptionMode::Disabled, false, false, false);
@@ -84,7 +84,7 @@ struct WddmResidencyControllerTest : ::testing::Test {
 
     std::unique_ptr<MockExecutionEnvironment> executionEnvironment;
     std::unique_ptr<RootDeviceEnvironment> rootDeviceEnvironment;
-    std::unique_ptr<WddmMock> wddm;
+    WddmMock *wddm = nullptr;
     std::unique_ptr<MockOsContextWin> mockOsContextWin;
     MockWddmResidencyController *residencyController = nullptr;
 };
@@ -95,7 +95,7 @@ struct WddmResidencyControllerWithGdiTest : ::testing::Test {
     void SetUp() {
         executionEnvironment = std::make_unique<MockExecutionEnvironment>();
         rootDeviceEnvironment = std::make_unique<RootDeviceEnvironment>(*executionEnvironment);
-        wddm = std::unique_ptr<WddmMock>(static_cast<WddmMock *>(Wddm::createWddm(nullptr, *rootDeviceEnvironment)));
+        wddm = static_cast<WddmMock *>(Wddm::createWddm(nullptr, *rootDeviceEnvironment));
         gdi = new MockGdi();
         wddm->resetGdi(gdi);
         wddm->init();
@@ -109,10 +109,10 @@ struct WddmResidencyControllerWithGdiTest : ::testing::Test {
 
     std::unique_ptr<MockExecutionEnvironment> executionEnvironment;
     std::unique_ptr<RootDeviceEnvironment> rootDeviceEnvironment;
-    std::unique_ptr<WddmMock> wddm;
+    WddmMock *wddm = nullptr;
     std::unique_ptr<MockOsContextWin> mockOsContextWin;
     MockWddmResidencyController *residencyController = nullptr;
-    MockGdi *gdi;
+    MockGdi *gdi = nullptr;
 };
 
 struct WddmResidencyControllerWithMockWddmTest : public WddmResidencyControllerTest {
@@ -124,8 +124,6 @@ struct WddmResidencyControllerWithMockWddmTest : public WddmResidencyControllerT
         auto preemptionMode = PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo);
         wddm->init();
 
-        executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
-        executionEnvironment->rootDeviceEnvironments[0]->osInterface->get()->setWddm(wddm);
         executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
         executionEnvironment->initializeMemoryManager();
 
@@ -163,8 +161,6 @@ struct WddmResidencyControllerWithGdiAndMemoryManagerTest : ::testing::Test {
         gdi = new MockGdi();
         wddm->resetGdi(gdi);
 
-        executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
-        executionEnvironment->rootDeviceEnvironments[0]->osInterface->get()->setWddm(wddm);
         executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
         executionEnvironment->initializeMemoryManager();
 
@@ -199,7 +195,7 @@ TEST(WddmResidencyController, givenWddmResidencyControllerWhenItIsConstructedThe
     MockExecutionEnvironment executionEnvironment;
     executionEnvironment.prepareRootDeviceEnvironments(1);
     auto gdi = new MockGdi();
-    auto wddm = std::unique_ptr<WddmMock>{static_cast<WddmMock *>(Wddm::createWddm(nullptr, *executionEnvironment.rootDeviceEnvironments[0].get()))};
+    auto wddm = static_cast<WddmMock *>(Wddm::createWddm(nullptr, *executionEnvironment.rootDeviceEnvironments[0].get()));
     wddm->resetGdi(gdi);
     wddm->init();
 
@@ -218,7 +214,7 @@ TEST(WddmResidencyController, givenWddmResidencyControllerWhenRegisterCallbackTh
     MockExecutionEnvironment executionEnvironment;
     executionEnvironment.prepareRootDeviceEnvironments(1);
     auto gdi = new MockGdi();
-    auto wddm = std::unique_ptr<WddmMock>{static_cast<WddmMock *>(Wddm::createWddm(nullptr, *executionEnvironment.rootDeviceEnvironments[0].get()))};
+    auto wddm = static_cast<WddmMock *>(Wddm::createWddm(nullptr, *executionEnvironment.rootDeviceEnvironments[0].get()));
     wddm->resetGdi(gdi);
     wddm->init();
 
@@ -280,7 +276,7 @@ TEST_F(WddmResidencyControllerTest, givenUnusedAllocationWhenCallingRemoveFromTr
     EXPECT_EQ(trimListUnusedPosition, allocation.getTrimCandidateListPosition(osContextId));
 }
 
-TEST_F(WddmResidencyControllerTest, addToTrimCandidateListPlacesAllocationInContainerAndAssignsPosition) {
+TEST_F(WddmResidencyControllerTest, WhenAddingToTrimCandidateListThenAllocationIsPlacedInContainerAndAssignedPosition) {
     MockWddmAllocation allocation;
     residencyController->addToTrimCandidateList(&allocation);
 
@@ -293,7 +289,7 @@ TEST_F(WddmResidencyControllerTest, addToTrimCandidateListPlacesAllocationInCont
     EXPECT_EQ(&allocation, residencyController->trimCandidateList[position]);
 }
 
-TEST_F(WddmResidencyControllerTest, addToTrimCandidateListDoesNotInsertAllocationAlreadyOnTheList) {
+TEST_F(WddmResidencyControllerTest, WhenAddingToTrimCandidateListThenDoNotInsertAllocationAlreadyOnTheList) {
     MockWddmAllocation allocation;
 
     residencyController->trimCandidateList.resize(0);
@@ -314,7 +310,7 @@ TEST_F(WddmResidencyControllerTest, addToTrimCandidateListDoesNotInsertAllocatio
     EXPECT_EQ(position, allocation.getTrimCandidateListPosition(osContextId));
 }
 
-TEST_F(WddmResidencyControllerTest, removeFromTrimCandidateListAssignsUnusedPosition) {
+TEST_F(WddmResidencyControllerTest, WhenRemovingFromTrimCandidateListThenUnusedPositionIsAssigned) {
     MockWddmAllocation allocation;
 
     residencyController->addToTrimCandidateList(&allocation);
@@ -323,7 +319,7 @@ TEST_F(WddmResidencyControllerTest, removeFromTrimCandidateListAssignsUnusedPosi
     EXPECT_EQ(trimListUnusedPosition, allocation.getTrimCandidateListPosition(osContextId));
 }
 
-TEST_F(WddmResidencyControllerTest, removeFromTrimCandidateListRemovesAllocationInAssignedPosition) {
+TEST_F(WddmResidencyControllerTest, WhenRemovingFromTrimCandidateListThenAllocationInAssignedPositionIsRemoved) {
     MockWddmAllocation allocation;
 
     residencyController->addToTrimCandidateList(&allocation);
@@ -336,7 +332,7 @@ TEST_F(WddmResidencyControllerTest, removeFromTrimCandidateListRemovesAllocation
     }
 }
 
-TEST_F(WddmResidencyControllerTest, removeFromTrimCandidateListRemovesLastAllocation) {
+TEST_F(WddmResidencyControllerTest, GivenOneAllocationWhenRemovingFromTrimCandidateListThenTrimCandidateListIsEmpty) {
     MockWddmAllocation allocation;
 
     residencyController->trimCandidateList.resize(0);
@@ -348,7 +344,7 @@ TEST_F(WddmResidencyControllerTest, removeFromTrimCandidateListRemovesLastAlloca
     EXPECT_EQ(0u, residencyController->trimCandidateList.size());
 }
 
-TEST_F(WddmResidencyControllerTest, removeFromTrimCandidateListRemovesLastAllocationAndAllPreviousEmptyEntries) {
+TEST_F(WddmResidencyControllerTest, WhenRemovingFromTrimCandidateListThenLastAllocationAndAllPreviousEmptyEntriesAreRemoved) {
     MockWddmAllocation allocation1, allocation2;
 
     residencyController->trimCandidateList.resize(0);
@@ -368,7 +364,7 @@ TEST_F(WddmResidencyControllerTest, removeFromTrimCandidateListRemovesLastAlloca
     EXPECT_EQ(1u, residencyController->trimCandidateList.size());
 }
 
-TEST_F(WddmResidencyControllerTest, successiveAddingToTrimCandidateListAssignsNewPositions) {
+TEST_F(WddmResidencyControllerTest, WhenAddingToTrimCandidateListThenSuccessivePositionIsAssigned) {
     MockWddmAllocation allocation1, allocation2, allocation3;
 
     residencyController->addToTrimCandidateList(&allocation1);
@@ -395,7 +391,7 @@ TEST_F(WddmResidencyControllerTest, DISABLED_removingNotLastAllocationFromTrimCa
     EXPECT_NE(allocation2.getTrimCandidateListPosition(osContextId), allocation3.getTrimCandidateListPosition(osContextId));
 }
 
-TEST_F(WddmResidencyControllerTest, removingNotLastAllocationFromTrimCandidateListPutsNullEntry) {
+TEST_F(WddmResidencyControllerTest, GivenAllocationThatIsNotLastWhenRemovingFromTrimCandidateListThenReplaceWithNullEntry) {
     MockWddmAllocation allocation1, allocation2, allocation3;
 
     residencyController->addToTrimCandidateList(&allocation1);
@@ -411,7 +407,7 @@ TEST_F(WddmResidencyControllerTest, removingNotLastAllocationFromTrimCandidateLi
     EXPECT_EQ(nullptr, residencyController->trimCandidateList[position2]);
 }
 
-TEST_F(WddmResidencyControllerTest, compactTrimCandidateListRemovesInitialNullEntriesAndUpdatesPositions) {
+TEST_F(WddmResidencyControllerTest, WhenCompactingTrimCandidateListThenInitialNullEntriesAreRemovedAndPositionsAreUpdated) {
     MockWddmAllocation allocation1, allocation2, allocation3, allocation4;
 
     residencyController->addToTrimCandidateList(&allocation1);
@@ -438,7 +434,7 @@ TEST_F(WddmResidencyControllerTest, compactTrimCandidateListRemovesInitialNullEn
     EXPECT_EQ(1u, allocation4.getTrimCandidateListPosition(osContextId));
 }
 
-TEST_F(WddmResidencyControllerTest, compactTrimCandidateListWithNonNullEntries) {
+TEST_F(WddmResidencyControllerTest, WhenCompactingTrimCandidateListThenNonNullEntriesAreNotRemoved) {
     MockWddmAllocation allocation1, allocation2, allocation3, allocation4;
 
     residencyController->addToTrimCandidateList(&allocation1);
@@ -453,7 +449,7 @@ TEST_F(WddmResidencyControllerTest, compactTrimCandidateListWithNonNullEntries) 
     EXPECT_EQ(4u, residencyController->trimCandidateList.size());
 }
 
-TEST_F(WddmResidencyControllerTest, checkTrimCandidateListCompaction) {
+TEST_F(WddmResidencyControllerTest, GivenListSizeLessThenDoubleCandidateCountWhenCheckingTrimCandidateListCompactionThenCompactionIsRequired) {
     bool comapactionRequired;
 
     residencyController->trimCandidatesCount = 10;
@@ -617,13 +613,13 @@ TEST_F(WddmResidencyControllerWithGdiTest, givenRestartPeriodicTrimWhenTrimCallb
     EXPECT_EQ(20u, residencyController->lastTrimFenceValue);
 }
 
-TEST_F(WddmResidencyControllerWithGdiTest, trimToBudgetWithZeroSizeReturnsTrue) {
+TEST_F(WddmResidencyControllerWithGdiTest, GivenZeroWhenTrimmingToBudgetThenTrueIsReturned) {
     bool status = residencyController->trimResidencyToBudget(0);
 
     EXPECT_TRUE(status);
 }
 
-TEST_F(WddmResidencyControllerWithGdiTest, trimToBudgetAllDoneAllocations) {
+TEST_F(WddmResidencyControllerWithGdiTest, WhenTrimmingToBudgetThenAllDoneAllocationsAreTrimmed) {
     gdi->setNonZeroNumBytesToTrimInEvict();
 
     MockWddmAllocation allocation1, allocation2, allocation3;
@@ -660,7 +656,7 @@ TEST_F(WddmResidencyControllerWithGdiTest, trimToBudgetAllDoneAllocations) {
     EXPECT_NE(trimListUnusedPosition, allocation3.getTrimCandidateListPosition(osContextId));
 }
 
-TEST_F(WddmResidencyControllerWithGdiTest, trimToBudgetReturnsFalseWhenNumBytesToTrimIsNotZero) {
+TEST_F(WddmResidencyControllerWithGdiTest, GivenNumBytesToTrimIsNotZeroWhenTrimmingToBudgetThenFalseIsReturned) {
     gdi->setNonZeroNumBytesToTrimInEvict();
 
     MockWddmAllocation allocation1;
@@ -683,10 +679,10 @@ TEST_F(WddmResidencyControllerWithGdiTest, trimToBudgetReturnsFalseWhenNumBytesT
     EXPECT_FALSE(status);
 }
 
-TEST_F(WddmResidencyControllerWithGdiTest, trimToBudgetStopsEvictingWhenNumBytesToTrimIsZero) {
-    WddmAllocation allocation1(0, GraphicsAllocation::AllocationType::UNKNOWN, reinterpret_cast<void *>(0x1000), 0x1000, nullptr, MemoryPool::MemoryNull);
-    WddmAllocation allocation2(0, GraphicsAllocation::AllocationType::UNKNOWN, reinterpret_cast<void *>(0x1000), 0x3000, nullptr, MemoryPool::MemoryNull);
-    WddmAllocation allocation3(0, GraphicsAllocation::AllocationType::UNKNOWN, reinterpret_cast<void *>(0x1000), 0x1000, nullptr, MemoryPool::MemoryNull);
+TEST_F(WddmResidencyControllerWithGdiTest, GivenNumBytesToTrimIsZeroWhenTrimmingToBudgetThenEvictingStops) {
+    WddmAllocation allocation1(0, GraphicsAllocation::AllocationType::UNKNOWN, reinterpret_cast<void *>(0x1000), 0x1000, nullptr, MemoryPool::MemoryNull, 0u, 1u);
+    WddmAllocation allocation2(0, GraphicsAllocation::AllocationType::UNKNOWN, reinterpret_cast<void *>(0x1000), 0x3000, nullptr, MemoryPool::MemoryNull, 0u, 1u);
+    WddmAllocation allocation3(0, GraphicsAllocation::AllocationType::UNKNOWN, reinterpret_cast<void *>(0x1000), 0x1000, nullptr, MemoryPool::MemoryNull, 0u, 1u);
 
     allocation1.getResidencyData().resident[osContextId] = true;
     allocation1.getResidencyData().updateCompletionData(0, osContextId);
@@ -718,7 +714,7 @@ TEST_F(WddmResidencyControllerWithGdiTest, trimToBudgetStopsEvictingWhenNumBytes
     EXPECT_NE(trimListUnusedPosition, allocation3.getTrimCandidateListPosition(osContextId));
 }
 
-TEST_F(WddmResidencyControllerWithGdiTest, trimToBudgetMarksEvictedAllocationNonResident) {
+TEST_F(WddmResidencyControllerWithGdiTest, WhenTrimmingToBudgetThenEvictedAllocationIsMarkedNonResident) {
     gdi->setNonZeroNumBytesToTrimInEvict();
 
     MockWddmAllocation allocation1, allocation2, allocation3;
@@ -749,7 +745,7 @@ TEST_F(WddmResidencyControllerWithGdiTest, trimToBudgetMarksEvictedAllocationNon
     EXPECT_TRUE(allocation3.getResidencyData().resident[osContextId]);
 }
 
-TEST_F(WddmResidencyControllerWithGdiTest, trimToBudgetWaitsFromCpuWhenLastFenceIsGreaterThanMonitored) {
+TEST_F(WddmResidencyControllerWithGdiTest, GivenLastFenceIsGreaterThanMonitoredWhenTrimmingToBudgetThenWaitForCpu) {
     gdi->setNonZeroNumBytesToTrimInEvict();
 
     MockWddmAllocation allocation1;
@@ -776,11 +772,11 @@ TEST_F(WddmResidencyControllerWithGdiTest, trimToBudgetWaitsFromCpuWhenLastFence
     EXPECT_EQ(wddm->getDevice(), gdi->getWaitFromCpuArg().hDevice);
 }
 
-TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, trimToBudgetEvictsDoneFragmentsOnly) {
+TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, WhenTrimmingToBudgetThenOnlyDoneFragmentsAreEvicted) {
     gdi->setNonZeroNumBytesToTrimInEvict();
     void *ptr = reinterpret_cast<void *>(wddm->virtualAllocAddress + 0x1000);
-    WddmAllocation allocation1(0, GraphicsAllocation::AllocationType::UNKNOWN, ptr, 0x1000, nullptr, MemoryPool::MemoryNull);
-    WddmAllocation allocation2(0, GraphicsAllocation::AllocationType::UNKNOWN, ptr, 0x1000, nullptr, MemoryPool::MemoryNull);
+    WddmAllocation allocation1(0, GraphicsAllocation::AllocationType::UNKNOWN, ptr, 0x1000, nullptr, MemoryPool::MemoryNull, 0u, 1u);
+    WddmAllocation allocation2(0, GraphicsAllocation::AllocationType::UNKNOWN, ptr, 0x1000, nullptr, MemoryPool::MemoryNull, 0u, 1u);
 
     allocation1.getResidencyData().resident[osContextId] = true;
     allocation1.getResidencyData().updateCompletionData(0, osContextId);
@@ -838,9 +834,9 @@ TEST_F(WddmResidencyControllerWithGdiTest, givenThreeAllocationsAlignedSizeBigge
     void *ptr2 = reinterpret_cast<void *>(wddm->virtualAllocAddress + 0x3000);
     void *ptr3 = reinterpret_cast<void *>(wddm->virtualAllocAddress + 0x5000);
 
-    WddmAllocation allocation1(0, GraphicsAllocation::AllocationType::UNKNOWN, ptr1, underlyingSize, nullptr, MemoryPool::MemoryNull);
-    WddmAllocation allocation2(0, GraphicsAllocation::AllocationType::UNKNOWN, ptr2, underlyingSize, nullptr, MemoryPool::MemoryNull);
-    WddmAllocation allocation3(0, GraphicsAllocation::AllocationType::UNKNOWN, ptr3, underlyingSize, nullptr, MemoryPool::MemoryNull);
+    WddmAllocation allocation1(0, GraphicsAllocation::AllocationType::UNKNOWN, ptr1, underlyingSize, nullptr, MemoryPool::MemoryNull, 0u, 1u);
+    WddmAllocation allocation2(0, GraphicsAllocation::AllocationType::UNKNOWN, ptr2, underlyingSize, nullptr, MemoryPool::MemoryNull, 0u, 1u);
+    WddmAllocation allocation3(0, GraphicsAllocation::AllocationType::UNKNOWN, ptr3, underlyingSize, nullptr, MemoryPool::MemoryNull, 0u, 1u);
 
     allocation1.getResidencyData().resident[osContextId] = true;
     allocation1.getResidencyData().updateCompletionData(0, osContextId);
@@ -899,7 +895,7 @@ TEST_F(WddmResidencyControllerLockTest, givenPeriodicTrimAndTrimToBudgetWhenTrim
     EXPECT_EQ(2, residencyController->acquireLockCallCount);
 }
 
-TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, makeResidentResidencyAllocationsMarksAllocationsResident) {
+TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, WhenMakingResidentResidencyAllocationsThenAllAllocationsAreMarked) {
     MockWddmAllocation allocation1, allocation2, allocation3, allocation4;
     ResidencyContainer residencyPack{&allocation1, &allocation2, &allocation3, &allocation4};
 
@@ -911,7 +907,7 @@ TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, makeResidentResidency
     EXPECT_TRUE(allocation4.getResidencyData().resident[osContextId]);
 }
 
-TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, makeResidentResidencyAllocationsUpdatesLastFence) {
+TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, WhenMakingResidentResidencyAllocationsThenLastFenceIsUpdated) {
     MockWddmAllocation allocation1, allocation2, allocation3, allocation4;
     ResidencyContainer residencyPack{&allocation1, &allocation2, &allocation3, &allocation4};
 
@@ -925,7 +921,7 @@ TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, makeResidentResidency
     EXPECT_EQ(20u, allocation4.getResidencyData().getFenceValueForContextId(osContext->getContextId()));
 }
 
-TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, makeResidentResidencyAllocationsMarksTripleAllocationsResident) {
+TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, GivenTripleAllocationsWhenMakingResidentResidencyAllocationsThenAllAllocationsAreMarkedResident) {
     MockWddmAllocation allocation1, allocation2;
     void *ptr = reinterpret_cast<void *>(wddm->virtualAllocAddress + 0x1500);
 
@@ -938,12 +934,12 @@ TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, makeResidentResidency
         EXPECT_TRUE(allocationTriple->fragmentsStorage.fragmentStorageData[i].residency->resident[osContextId]);
     }
 
-    EXPECT_EQ(5u, gdi->getMakeResidentArg().NumAllocations);
+    EXPECT_EQ(EngineLimits::maxHandleCount + 3 + EngineLimits::maxHandleCount, gdi->getMakeResidentArg().NumAllocations);
 
     memoryManager->freeGraphicsMemory(allocationTriple);
 }
 
-TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, makeResidentResidencyAllocationsSetsLastFencePLusOneForTripleAllocations) {
+TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, GivenTripleAllocationsWhenMakingResidentResidencyAllocationsThenLastFencePlusOneIsSet) {
     MockWddmAllocation allocation1, allocation2;
 
     WddmAllocation *allocationTriple = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{csr->getRootDeviceIndex(), false, 2 * MemoryConstants::pageSize}, reinterpret_cast<void *>(0x1500)));
@@ -1025,12 +1021,12 @@ TEST_F(WddmResidencyControllerWithMockWddmTest, givenAllocationPackPassedWhenCal
     ResidencyContainer residencyPack{&allocation1, &allocation2};
 
     auto makeResidentWithOutBytesToTrim = [](const D3DKMT_HANDLE *handles, uint32_t count, bool cantTrimFurther, uint64_t *numberOfBytesToTrim, size_t size) -> bool {
-        EXPECT_EQ(1, handles[0]);
-        EXPECT_EQ(2, handles[1]);
+        EXPECT_EQ(1, handles[0 * EngineLimits::maxHandleCount]);
+        EXPECT_EQ(2, handles[1 * EngineLimits::maxHandleCount]);
         return true;
     };
     ON_CALL(*wddm, makeResident(::testing::_, ::testing::_, ::testing::_, ::testing::_, ::testing::_)).WillByDefault(::testing::Invoke(makeResidentWithOutBytesToTrim));
-    EXPECT_CALL(*wddm, makeResident(::testing::_, 2, false, ::testing::_, ::testing::_)).Times(1);
+    EXPECT_CALL(*wddm, makeResident(::testing::_, 2 * EngineLimits::maxHandleCount, false, ::testing::_, ::testing::_)).Times(1);
 
     bool result = residencyController->makeResidentResidencyAllocations(residencyPack);
     EXPECT_TRUE(result);
@@ -1040,7 +1036,7 @@ TEST_F(WddmResidencyControllerWithMockWddmTest, givenMakeResidentFailsAndTrimToB
     MockWddmAllocation allocation1;
     void *cpuPtr = reinterpret_cast<void *>(wddm->getWddmMinAddress() + 0x1000);
     size_t allocationSize = 0x1000;
-    WddmAllocation allocationToTrim(0, GraphicsAllocation::AllocationType::UNKNOWN, cpuPtr, allocationSize, nullptr, MemoryPool::MemoryNull);
+    WddmAllocation allocationToTrim(0, GraphicsAllocation::AllocationType::UNKNOWN, cpuPtr, allocationSize, nullptr, MemoryPool::MemoryNull, 0u, 1u);
 
     allocationToTrim.getResidencyData().updateCompletionData(residencyController->getMonitoredFence().lastSubmittedFence, osContext->getContextId());
 

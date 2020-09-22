@@ -28,13 +28,13 @@ struct KernelImp : Kernel {
         return ZE_RESULT_SUCCESS;
     }
 
-    ze_result_t setAttribute(ze_kernel_attribute_t attr, uint32_t size, const void *pValue) override;
-
-    ze_result_t getAttribute(ze_kernel_attribute_t attr, uint32_t *pSize, void *pValue) override;
+    ze_result_t setIndirectAccess(ze_kernel_indirect_access_flags_t flags) override;
+    ze_result_t getIndirectAccess(ze_kernel_indirect_access_flags_t *flags) override;
+    ze_result_t getSourceAttributes(uint32_t *pSize, char **pString) override;
 
     ze_result_t getProperties(ze_kernel_properties_t *pKernelProperties) override;
 
-    ze_result_t setIntermediateCacheConfig(ze_cache_config_t cacheConfig) override {
+    ze_result_t setIntermediateCacheConfig(ze_cache_config_flags_t cacheConfig) override {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
@@ -42,16 +42,14 @@ struct KernelImp : Kernel {
 
     void setGroupCount(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
 
-    bool getGroupCountOffsets(uint32_t *locations) override;
-
-    bool getGroupSizeOffsets(uint32_t *locations) override;
-
     ze_result_t setGroupSize(uint32_t groupSizeX, uint32_t groupSizeY,
                              uint32_t groupSizeZ) override;
 
     ze_result_t suggestGroupSize(uint32_t globalSizeX, uint32_t globalSizeY, uint32_t globalSizeZ,
                                  uint32_t *groupSizeX, uint32_t *groupSizeY,
                                  uint32_t *groupSizeZ) override;
+
+    ze_result_t getKernelName(size_t *pSize, char *pName) override;
 
     ze_result_t suggestMaxCooperativeGroupCount(uint32_t *totalGroupCount) override;
 
@@ -62,20 +60,13 @@ struct KernelImp : Kernel {
         return residencyContainer;
     }
 
-    void getGroupSize(uint32_t &outGroupSizeX, uint32_t &outGroupSizeY,
-                      uint32_t &outGroupSizeZ) const override {
-        outGroupSizeX = this->groupSize[0];
-        outGroupSizeY = this->groupSize[1];
-        outGroupSizeZ = this->groupSize[2];
-    }
-
     ze_result_t setArgImmediate(uint32_t argIndex, size_t argSize, const void *argVal);
 
     ze_result_t setArgBuffer(uint32_t argIndex, size_t argSize, const void *argVal);
 
     ze_result_t setArgRedescribedImage(uint32_t argIndex, ze_image_handle_t argVal) override;
 
-    ze_result_t setArgBufferWithAlloc(uint32_t argIndex, const void *argVal, NEO::GraphicsAllocation *allocation) override;
+    ze_result_t setArgBufferWithAlloc(uint32_t argIndex, uintptr_t argVal, NEO::GraphicsAllocation *allocation) override;
 
     ze_result_t setArgImage(uint32_t argIndex, size_t argSize, const void *argVal);
 
@@ -89,7 +80,7 @@ struct KernelImp : Kernel {
     uint32_t getPerThreadDataSizeForWholeThreadGroup() const override { return perThreadDataSizeForWholeThreadGroup; }
 
     uint32_t getPerThreadDataSize() const override { return perThreadDataSize; }
-    uint32_t getThreadsPerThreadGroup() const override { return threadsPerThreadGroup; }
+    uint32_t getNumThreadsPerThreadGroup() const override { return numThreadsPerThreadGroup; }
     uint32_t getThreadExecutionMask() const override { return threadExecutionMask; }
 
     NEO::GraphicsAllocation *getPrintfBufferAllocation() override { return this->printfBuffer; }
@@ -99,39 +90,23 @@ struct KernelImp : Kernel {
     uint32_t getSurfaceStateHeapDataSize() const override { return surfaceStateHeapDataSize; }
 
     const uint8_t *getDynamicStateHeapData() const override { return dynamicStateHeapData.get(); }
-    size_t getDynamicStateHeapDataSize() const override { return dynamicStateHeapDataSize; }
 
     const KernelImmutableData *getImmutableData() const override { return kernelImmData; }
 
     UnifiedMemoryControls getUnifiedMemoryControls() const override { return unifiedMemoryControls; }
     bool hasIndirectAllocationsAllowed() const override;
 
-    bool hasBarriers() override;
-    uint32_t getSlmTotalSize() override;
-    uint32_t getBindingTableOffset() override;
-    uint32_t getBorderColor() override;
-    uint32_t getSamplerTableOffset() override;
-    uint32_t getNumSurfaceStates() override;
-    uint32_t getNumSamplers() override;
-    uint32_t getSimdSize() override;
-    uint32_t getSizeCrossThreadData() override;
-    uint32_t getPerThreadScratchSize() override;
-    uint32_t getThreadsPerThreadGroupCount() override;
-    uint32_t getSizePerThreadData() override;
-    uint32_t getSizePerThreadDataForWholeGroup() override;
-    uint32_t getSizeSurfaceStateHeapData() override;
-    uint32_t getPerThreadExecutionMask() override;
-    uint32_t *getCountOffsets() override;
-    uint32_t *getSizeOffsets() override;
-    uint32_t *getLocalWorkSize() override;
-    uint32_t getNumGrfRequired() override;
-    NEO::GraphicsAllocation *getIsaAllocation() override;
-    bool hasGroupCounts() override;
-    bool hasGroupSize() override;
-    const void *getSurfaceStateHeap() override;
-    const void *getDynamicStateHeap() override;
-    const void *getCrossThread() override;
-    const void *getPerThread() override;
+    const NEO::KernelDescriptor &getKernelDescriptor() const override {
+        return kernelImmData->getDescriptor();
+    }
+    const uint32_t *getGroupSize() const override {
+        return groupSize;
+    }
+    uint32_t getSlmTotalSize() const override;
+    NEO::GraphicsAllocation *getIsaAllocation() const override;
+
+    uint32_t getRequiredWorkgroupOrder() const override { return requiredWorkgroupOrder; }
+    bool requiresGenerationOfLocalIdsByRuntime() const override { return kernelRequiresGenerationOfLocalIdsByRuntime; }
 
   protected:
     KernelImp() = default;
@@ -140,6 +115,7 @@ struct KernelImp : Kernel {
 
     void createPrintfBuffer();
     void setDebugSurface();
+    virtual void evaluateIfRequiresGenerationOfLocalIdsByRuntime(const NEO::KernelDescriptor &kernelDescriptor) = 0;
 
     const KernelImmutableData *kernelImmData = nullptr;
     Module *module = nullptr;
@@ -151,7 +127,7 @@ struct KernelImp : Kernel {
     NEO::GraphicsAllocation *printfBuffer = nullptr;
 
     uint32_t groupSize[3] = {0u, 0u, 0u};
-    uint32_t threadsPerThreadGroup = 0u;
+    uint32_t numThreadsPerThreadGroup = 1u;
     uint32_t threadExecutionMask = 0u;
 
     std::unique_ptr<uint8_t[]> crossThreadData = 0;
@@ -171,6 +147,9 @@ struct KernelImp : Kernel {
     UnifiedMemoryControls unifiedMemoryControls;
     std::vector<uint32_t> slmArgSizes;
     uint32_t slmArgsTotalSize = 0U;
+    uint32_t requiredWorkgroupOrder = 0u;
+
+    bool kernelRequiresGenerationOfLocalIdsByRuntime = true;
 };
 
 } // namespace L0

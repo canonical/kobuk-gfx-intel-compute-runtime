@@ -41,7 +41,7 @@ class MockMM : public OsAgnosticMemoryManager {
     }
     GraphicsAllocation *allocateGraphicsMemoryForImage(const AllocationData &allocationData) override {
         auto gmm = std::make_unique<Gmm>(executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getGmmClientContext(), *allocationData.imgInfo, StorageInfo{});
-        AllocationProperties properties(allocationData.rootDeviceIndex, nullptr, false, GraphicsAllocation::AllocationType::SHARED_IMAGE, false);
+        AllocationProperties properties(allocationData.rootDeviceIndex, nullptr, false, GraphicsAllocation::AllocationType::SHARED_IMAGE, false, {});
         auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle(1, properties, false);
         alloc->setDefaultGmm(forceGmm);
         gmmOwnershipPassed = true;
@@ -189,7 +189,7 @@ TEST_F(D3D9Tests, WhenCreatingSurfaceThenImagePropertiesAreSetCorrectly) {
     auto image = castToObject<Image>(memObj);
     EXPECT_NE(nullptr, image->getSharingHandler());
 
-    EXPECT_TRUE(CL_MEM_READ_WRITE == image->getMemoryPropertiesFlags());
+    EXPECT_TRUE(CL_MEM_READ_WRITE == image->getFlags());
 
     EXPECT_TRUE(expectedImgFormat.image_channel_data_type == image->getImageFormat().image_channel_data_type);
     EXPECT_TRUE(expectedImgFormat.image_channel_order == image->getImageFormat().image_channel_order);
@@ -223,7 +223,7 @@ TEST_F(D3D9Tests, WhenCreatingSurfaceIntelThenImagePropertiesAreSetCorrectly) {
     auto image = castToObject<Image>(memObj);
     EXPECT_NE(nullptr, image->getSharingHandler());
 
-    EXPECT_TRUE(CL_MEM_READ_WRITE == image->getMemoryPropertiesFlags());
+    EXPECT_TRUE(CL_MEM_READ_WRITE == image->getFlags());
 
     EXPECT_TRUE(expectedImgFormat.image_channel_data_type == image->getImageFormat().image_channel_data_type);
     EXPECT_TRUE(expectedImgFormat.image_channel_order == image->getImageFormat().image_channel_order);
@@ -243,8 +243,9 @@ TEST_F(D3D9Tests, givenD3DHandleWhenCreatingSharedSurfaceThenAllocationTypeImage
 
     auto sharedImg = std::unique_ptr<Image>(D3DSurface::create(context, &surfaceInfo, CL_MEM_READ_WRITE, 0, 2, nullptr));
     ASSERT_NE(nullptr, sharedImg.get());
-    ASSERT_NE(nullptr, sharedImg->getGraphicsAllocation());
-    EXPECT_EQ(GraphicsAllocation::AllocationType::SHARED_IMAGE, sharedImg->getGraphicsAllocation()->getAllocationType());
+    auto graphicsAllocation = sharedImg->getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
+    ASSERT_NE(nullptr, graphicsAllocation);
+    EXPECT_EQ(GraphicsAllocation::AllocationType::SHARED_IMAGE, graphicsAllocation->getAllocationType());
 }
 
 TEST_F(D3D9Tests, givenUPlaneWhenCreateSurfaceThenChangeWidthHeightAndPitch) {
@@ -698,6 +699,7 @@ TEST_F(D3D9Tests, GivenNonSharedResourceSurfaceAndLockableWhenReleasingThenResou
 
     auto sharedImg = std::unique_ptr<Image>(D3DSurface::create(context, &surfaceInfo, CL_MEM_READ_WRITE, 0, 0, nullptr));
     ASSERT_NE(nullptr, sharedImg.get());
+    auto graphicsAllocation = sharedImg->getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(0u, mockGmmResInfo->getOffsetCalled);
     cl_mem clMem = sharedImg.get();
     auto imgHeight = static_cast<ULONG>(sharedImg->getImageDesc().image_height);
@@ -706,7 +708,7 @@ TEST_F(D3D9Tests, GivenNonSharedResourceSurfaceAndLockableWhenReleasingThenResou
     EXPECT_CALL(*mockSharingFcns, getRenderTargetData(_, _)).Times(0);
     EXPECT_CALL(*mockSharingFcns, lockRect((IDirect3DSurface9 *)&dummyD3DSurface, _, D3DLOCK_READONLY)).Times(1).WillOnce(SetArgPointee<1>(lockedRect));
     memoryManager->lockResourceReturnValue = returnedLockedRes;
-    memoryManager->expectedLockingAllocation = sharedImg->getGraphicsAllocation();
+    memoryManager->expectedLockingAllocation = graphicsAllocation;
 
     GMM_RES_COPY_BLT requestedResCopyBlt = {};
     GMM_RES_COPY_BLT expectedResCopyBlt = {};
@@ -753,6 +755,7 @@ TEST_F(D3D9Tests, GivenNonSharedResourceSurfaceAndLockableIntelWhenReleasingThen
 
     auto sharedImg = std::unique_ptr<Image>(D3DSurface::create(context, &surfaceInfo, CL_MEM_READ_WRITE, 0, 0, nullptr));
     ASSERT_NE(nullptr, sharedImg.get());
+    auto graphicsAllocation = sharedImg->getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
     cl_mem clMem = sharedImg.get();
     auto imgHeight = static_cast<ULONG>(sharedImg->getImageDesc().image_height);
     void *returnedLockedRes = (void *)100;
@@ -760,7 +763,7 @@ TEST_F(D3D9Tests, GivenNonSharedResourceSurfaceAndLockableIntelWhenReleasingThen
     EXPECT_CALL(*mockSharingFcns, getRenderTargetData(_, _)).Times(0);
     EXPECT_CALL(*mockSharingFcns, lockRect((IDirect3DSurface9 *)&dummyD3DSurface, _, D3DLOCK_READONLY)).Times(1).WillOnce(SetArgPointee<1>(lockedRect));
     memoryManager->lockResourceReturnValue = returnedLockedRes;
-    memoryManager->expectedLockingAllocation = sharedImg->getGraphicsAllocation();
+    memoryManager->expectedLockingAllocation = graphicsAllocation;
 
     GMM_RES_COPY_BLT requestedResCopyBlt = {};
     GMM_RES_COPY_BLT expectedResCopyBlt = {};
@@ -808,6 +811,7 @@ TEST_F(D3D9Tests, GivenNonSharedResourceSurfaceAndNonLockableWhenReleasingThenRe
 
     auto sharedImg = std::unique_ptr<Image>(D3DSurface::create(context, &surfaceInfo, CL_MEM_READ_WRITE, 0, 0, nullptr));
     ASSERT_NE(nullptr, sharedImg.get());
+    auto graphicsAllocation = sharedImg->getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(0u, mockGmmResInfo->getOffsetCalled);
     cl_mem clMem = sharedImg.get();
     auto imgHeight = static_cast<ULONG>(sharedImg->getImageDesc().image_height);
@@ -816,7 +820,7 @@ TEST_F(D3D9Tests, GivenNonSharedResourceSurfaceAndNonLockableWhenReleasingThenRe
     EXPECT_CALL(*mockSharingFcns, getRenderTargetData((IDirect3DSurface9 *)&dummyD3DSurface, (IDirect3DSurface9 *)&dummyD3DSurfaceStaging)).Times(1);
     EXPECT_CALL(*mockSharingFcns, lockRect((IDirect3DSurface9 *)&dummyD3DSurfaceStaging, _, D3DLOCK_READONLY)).Times(1).WillOnce(SetArgPointee<1>(lockedRect));
     memoryManager->lockResourceReturnValue = returnedLockedRes;
-    memoryManager->expectedLockingAllocation = sharedImg->getGraphicsAllocation();
+    memoryManager->expectedLockingAllocation = graphicsAllocation;
 
     GMM_RES_COPY_BLT requestedResCopyBlt = {};
     GMM_RES_COPY_BLT expectedResCopyBlt = {};
@@ -865,14 +869,14 @@ TEST_F(D3D9Tests, givenResourcesCreatedFromDifferentDevicesWhenAcquireReleaseCal
     mockSharingFcns->setDevice(createdResourceDevice); // create call will pick this device
     auto sharedImg = std::unique_ptr<Image>(D3DSurface::create(context, &surfaceInfo, CL_MEM_READ_WRITE, 0, 0, nullptr));
     ASSERT_NE(nullptr, sharedImg.get());
-    memoryManager->expectedLockingAllocation = sharedImg->getGraphicsAllocation();
+    memoryManager->expectedLockingAllocation = sharedImg->getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
 
     mockSharingFcns->setDevice(nullptr); // force device change
-    sharedImg->getSharingHandler()->acquire(sharedImg.get());
+    sharedImg->getSharingHandler()->acquire(sharedImg.get(), context->getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(createdResourceDevice, mockSharingFcns->getDevice());
 
     mockSharingFcns->setDevice(nullptr); // force device change
-    sharedImg->getSharingHandler()->release(sharedImg.get());
+    sharedImg->getSharingHandler()->release(sharedImg.get(), context->getDevice(0)->getRootDeviceIndex());
     EXPECT_EQ(createdResourceDevice, mockSharingFcns->getDevice());
 }
 
@@ -1168,8 +1172,9 @@ TEST_F(D3D9MultiRootDeviceTest, givenD3DHandleIsNullWhenCreatingSharedSurfaceAnd
 
     auto sharedImg = std::unique_ptr<Image>(D3DSurface::create(&ctx, &surfaceInfo, CL_MEM_READ_WRITE, 0, 0, nullptr));
     ASSERT_NE(nullptr, sharedImg.get());
-    ASSERT_NE(nullptr, sharedImg->getGraphicsAllocation());
-    EXPECT_EQ(expectedRootDeviceIndex, sharedImg->getGraphicsAllocation()->getRootDeviceIndex());
+    auto graphicsAllocation = sharedImg->getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
+    ASSERT_NE(nullptr, graphicsAllocation);
+    EXPECT_EQ(expectedRootDeviceIndex, graphicsAllocation->getRootDeviceIndex());
 }
 
 TEST_F(D3D9MultiRootDeviceTest, givenD3DHandleIsNotNullWhenCreatingSharedSurfaceAndRootDeviceIndexIsSpecifiedThenAllocationHasCorrectRootDeviceIndex) {
@@ -1200,7 +1205,8 @@ TEST_F(D3D9MultiRootDeviceTest, givenD3DHandleIsNotNullWhenCreatingSharedSurface
 
     auto sharedImg = std::unique_ptr<Image>(D3DSurface::create(&ctx, &surfaceInfo, CL_MEM_READ_WRITE, 0, 0, nullptr));
     ASSERT_NE(nullptr, sharedImg.get());
-    ASSERT_NE(nullptr, sharedImg->getGraphicsAllocation());
-    EXPECT_EQ(expectedRootDeviceIndex, sharedImg->getGraphicsAllocation()->getRootDeviceIndex());
+    auto graphicsAllocation = sharedImg->getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
+    ASSERT_NE(nullptr, graphicsAllocation);
+    EXPECT_EQ(expectedRootDeviceIndex, graphicsAllocation->getRootDeviceIndex());
 }
 } // namespace NEO

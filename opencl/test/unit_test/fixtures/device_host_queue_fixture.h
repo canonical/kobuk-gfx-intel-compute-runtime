@@ -11,6 +11,7 @@
 #include "opencl/source/device_queue/device_queue.h"
 #include "opencl/source/device_queue/device_queue_hw.h"
 #include "opencl/test/unit_test/api/cl_api_tests.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 #include "test.h"
 
 using namespace NEO;
@@ -38,13 +39,13 @@ class DeviceHostQueueFixture : public ApiFixture<>,
     }
 
     cl_command_queue createClQueue(cl_queue_properties properties[5] = deviceQueueProperties::noProperties) {
-        return create(pContext, devices[testedRootDeviceIndex], retVal, properties);
+        return create(pContext, testedClDevice, retVal, properties);
     }
 
     T *createQueueObject(cl_queue_properties properties[5] = deviceQueueProperties::noProperties) {
         using BaseType = typename T::BaseType;
         cl_context context = (cl_context)(pContext);
-        auto clQueue = create(context, devices[testedRootDeviceIndex], retVal, properties);
+        auto clQueue = create(context, testedClDevice, retVal, properties);
         return castToObject<T>(static_cast<BaseType *>(clQueue));
     }
 
@@ -57,11 +58,9 @@ class DeviceQueueHwTest : public DeviceHostQueueFixture<DeviceQueue> {
     using BaseClass = DeviceHostQueueFixture<DeviceQueue>;
     void SetUp() override {
         BaseClass::SetUp();
-        device = castToObject<ClDevice>(devices[testedRootDeviceIndex]);
+        device = castToObject<ClDevice>(testedClDevice);
         ASSERT_NE(device, nullptr);
-        if (!device->getHardwareInfo().capabilityTable.supportsDeviceEnqueue) {
-            GTEST_SKIP();
-        }
+        REQUIRE_DEVICE_ENQUEUE_OR_SKIP(device);
     }
 
     void TearDown() override {

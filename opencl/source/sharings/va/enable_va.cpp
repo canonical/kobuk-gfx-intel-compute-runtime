@@ -9,6 +9,8 @@
 
 #include "opencl/source/sharings/va/enable_va.h"
 
+#include "shared/source/os_interface/driver_info.h"
+
 #include "opencl/source/api/api.h"
 #include "opencl/source/context/context.h"
 #include "opencl/source/context/context.inl"
@@ -56,8 +58,9 @@ std::unique_ptr<SharingContextBuilder> VaSharingBuilderFactory::createContextBui
     return std::make_unique<VaSharingContextBuilder>();
 };
 
-std::string VaSharingBuilderFactory::getExtensions() {
-    if (VASharingFunctions::isVaLibraryAvailable()) {
+std::string VaSharingBuilderFactory::getExtensions(DriverInfo *driverInfo) {
+    auto imageSupport = driverInfo ? driverInfo->getImageSupport() : false;
+    if (imageSupport && VASharingFunctions::isVaLibraryAvailable()) {
         return "cl_intel_va_api_media_sharing ";
     }
     return "";
@@ -81,11 +84,11 @@ void *VaSharingBuilderFactory::getExtensionFunctionAddress(const std::string &fu
     RETURN_FUNC_PTR_IF_EXIST(clGetDeviceIDsFromVA_APIMediaAdapterINTEL);
     RETURN_FUNC_PTR_IF_EXIST(clEnqueueAcquireVA_APIMediaSurfacesINTEL);
     RETURN_FUNC_PTR_IF_EXIST(clEnqueueReleaseVA_APIMediaSurfacesINTEL);
-
     if (DebugManager.flags.EnableFormatQuery.get()) {
         RETURN_FUNC_PTR_IF_EXIST(clGetSupportedVA_APIMediaSurfaceFormatsINTEL);
     }
-    return nullptr;
+    auto extraFunction = getExtensionFunctionAddressExtra(functionName);
+    return extraFunction;
 }
 
 static SharingFactory::RegisterSharing<VaSharingBuilderFactory, VASharingFunctions> vaSharing;

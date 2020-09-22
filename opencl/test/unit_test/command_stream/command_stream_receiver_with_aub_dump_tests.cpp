@@ -264,6 +264,11 @@ struct CommandStreamReceiverTagTests : public ::testing::Test {
     template <typename CsrT, typename... Args>
     bool isTimestampPacketNodeReleasable(Args &&... args) {
         CsrT csr(std::forward<Args>(args)...);
+        auto hwInfo = csr.peekExecutionEnvironment().rootDeviceEnvironments[0]->getHardwareInfo();
+        MockOsContext osContext(0, 1, HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
+                                PreemptionHelper::getDefaultPreemptionMode(*hwInfo), false, false, false);
+        csr.setupContext(osContext);
+
         auto allocator = csr.getTimestampPacketAllocator();
         auto tag = allocator->getTag();
         for (auto &packet : tag->tagForCpuAccess->packets) {
@@ -308,7 +313,7 @@ HWTEST_F(CommandStreamReceiverTagTests, givenCsrTypeWhenCreatingTimestampPacketA
 }
 
 HWTEST_F(CommandStreamReceiverTagTests, givenCsrTypeWhenAskingForTagPoolSizeThenReturnOneForAubTbxMode) {
-    EXPECT_EQ(512u, getPreferredTagPoolSize<CommandStreamReceiverHw<FamilyType>>(*executionEnvironment, 0));
+    EXPECT_EQ(2048u, getPreferredTagPoolSize<CommandStreamReceiverHw<FamilyType>>(*executionEnvironment, 0));
     EXPECT_EQ(1u, getPreferredTagPoolSize<AUBCommandStreamReceiverHw<FamilyType>>(fileName, false, *executionEnvironment, 0));
     EXPECT_EQ(1u, getPreferredTagPoolSize<AubWithHw<FamilyType>>(fileName, *executionEnvironment, 0));
     EXPECT_EQ(1u, getPreferredTagPoolSize<AubWithTbx<FamilyType>>(fileName, *executionEnvironment, 0));

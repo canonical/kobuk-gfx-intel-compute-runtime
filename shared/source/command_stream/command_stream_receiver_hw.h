@@ -7,16 +7,19 @@
 
 #pragma once
 #include "shared/source/command_stream/command_stream_receiver.h"
+#include "shared/source/direct_submission/direct_submission_hw.h"
+#include "shared/source/direct_submission/dispatchers/blitter_dispatcher.h"
+#include "shared/source/direct_submission/dispatchers/render_dispatcher.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/helpers/dirty_state_helpers.h"
-#include "shared/source/helpers/hw_cmds.h"
 #include "shared/source/helpers/hw_info.h"
+
+#include "hw_cmds.h"
 
 namespace NEO {
 template <typename GfxFamily>
 class DeviceCommandStreamReceiver;
-template <typename GfxFamily>
-class DirectSubmissionHw;
+struct PipeControlArgs;
 
 template <typename GfxFamily>
 class CommandStreamReceiverHw : public CommandStreamReceiver {
@@ -37,7 +40,11 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
                               const IndirectHeap &dsh, const IndirectHeap &ioh, const IndirectHeap &ssh,
                               uint32_t taskLevel, DispatchFlags &dispatchFlags, Device &device) override;
 
+    void forcePipeControl(NEO::LinearStream &commandStreamCSR);
+
     bool flushBatchedSubmissions() override;
+    void programHardwareContext(LinearStream &cmdStream) override;
+    size_t getCmdsSizeForHardwareContext() const override;
 
     static void addBatchBufferEnd(LinearStream &commandStream, void **patchLocation);
     void programEndingCmd(LinearStream &commandStream, void **patchLocation, bool directSubmissionEnabled);
@@ -79,13 +86,22 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
         return CommandStreamReceiverType::CSR_HW;
     }
 
-    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking) override;
+    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled) override;
 
     bool isMultiOsContextCapable() const override;
 
     bool isDirectSubmissionEnabled() const override {
         return directSubmission.get() != nullptr;
     }
+
+    bool isBlitterDirectSubmissionEnabled() const override {
+        return blitterDirectSubmission.get() != nullptr;
+    }
+
+    bool initDirectSubmission(Device &device, OsContext &osContext) override;
+    bool checkDirectSubmissionSupportsEngine(const DirectSubmissionProperties &directSubmissionProperty,
+                                             aub_stream::EngineType contextEngineType,
+                                             bool &startOnInit);
 
   protected:
     void programPreemption(LinearStream &csr, DispatchFlags &dispatchFlags);
@@ -103,11 +119,11 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     void programEngineModeEpliogue(LinearStream &csr, const DispatchFlags &dispatchFlags);
 
     void programEnginePrologue(LinearStream &csr);
-    size_t getCmdSizeForPrologue(const DispatchFlags &dispatchFlags) const;
+    size_t getCmdSizeForPrologue() const;
 
     void addClearSLMWorkAround(typename GfxFamily::PIPE_CONTROL *pCmd);
-    PIPE_CONTROL *addPipeControlCmd(LinearStream &commandStream);
-    PIPE_CONTROL *addPipeControlBeforeStateBaseAddress(LinearStream &commandStream);
+    void addPipeControlCmd(LinearStream &commandStream, PipeControlArgs &args);
+    void addPipeControlBeforeStateBaseAddress(LinearStream &commandStream);
     size_t getSshHeapSize();
 
     uint64_t getScratchPatchAddress();
@@ -123,7 +139,8 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
 
     CsrSizeRequestFlags csrSizeRequestFlags = {};
 
-    std::unique_ptr<DirectSubmissionHw<GfxFamily>> directSubmission;
+    std::unique_ptr<DirectSubmissionHw<GfxFamily, RenderDispatcher<GfxFamily>>> directSubmission;
+    std::unique_ptr<DirectSubmissionHw<GfxFamily, BlitterDispatcher<GfxFamily>>> blitterDirectSubmission;
 };
 
 } // namespace NEO

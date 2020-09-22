@@ -14,6 +14,7 @@
 
 namespace NEO {
 class Context;
+class DriverInfo;
 
 struct VaCreateContextProperties {
     VADisplay vaDisplay = nullptr;
@@ -31,8 +32,9 @@ class VaSharingContextBuilder : public SharingContextBuilder {
 class VaSharingBuilderFactory : public SharingBuilderFactory {
   public:
     std::unique_ptr<SharingContextBuilder> createContextBuilder() override;
-    std::string getExtensions() override;
+    std::string getExtensions(DriverInfo *driverInfo) override;
     void fillGlobalDispatchTable() override;
     void *getExtensionFunctionAddress(const std::string &functionName) override;
+    virtual void *getExtensionFunctionAddressExtra(const std::string &functionName);
 };
 } // namespace NEO

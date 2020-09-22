@@ -8,10 +8,12 @@
 #pragma once
 
 #include "level_zero/core/source/cmdlist/cmdlist.h"
+#include "level_zero/core/source/context/context.h"
 #include "level_zero/core/source/kernel/kernel.h"
 #include "level_zero/core/source/module/module_build_log.h"
 #include <level_zero/ze_api.h>
 
+#include <set>
 #include <vector>
 
 struct _ze_module_handle_t {};
@@ -20,7 +22,7 @@ namespace L0 {
 struct Device;
 
 struct Module : _ze_module_handle_t {
-    static Module *create(Device *device, const ze_module_desc_t *desc, NEO::Device *neoDevice,
+    static Module *create(Device *device, const ze_module_desc_t *desc,
                           ModuleBuildLog *moduleBuildLog);
 
     virtual ~Module() = default;
@@ -35,11 +37,15 @@ struct Module : _ze_module_handle_t {
     virtual ze_result_t getGlobalPointer(const char *pGlobalName, void **pPtr) = 0;
     virtual ze_result_t getDebugInfo(size_t *pDebugDataSize, uint8_t *pDebugData) = 0;
     virtual ze_result_t getKernelNames(uint32_t *pCount, const char **pNames) = 0;
+    virtual ze_result_t performDynamicLink(uint32_t numModules,
+                                           ze_module_handle_t *phModules,
+                                           ze_module_build_log_handle_t *phLinkLog) = 0;
 
     virtual const KernelImmutableData *getKernelImmutableData(const char *functionName) const = 0;
     virtual const std::vector<std::unique_ptr<KernelImmutableData>> &getKernelImmutableDataVector() const = 0;
     virtual uint32_t getMaxGroupSize() const = 0;
     virtual bool isDebugEnabled() const = 0;
+    virtual const std::set<NEO::GraphicsAllocation *> &getImportedSymbolAllocations() const = 0;
 
     Module() = default;
     Module(const Module &) = delete;

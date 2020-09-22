@@ -9,10 +9,9 @@
 #include "shared/source/command_stream/thread_arbitration_policy.h"
 #include "shared/source/gen9/reg_configs.h"
 #include "shared/source/helpers/preamble.h"
+#include "shared/test/unit_test/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/preamble/preamble_fixture.h"
-
-#include "opencl/test/unit_test/gen_common/gen_cmd_parse.h"
 
 using namespace NEO;
 
@@ -101,7 +100,7 @@ SKLTEST_F(ThreadArbitration, givenPreambleWhenItIsProgrammedThenThreadArbitratio
 }
 
 SKLTEST_F(ThreadArbitration, defaultArbitrationPolicy) {
-    EXPECT_EQ(ThreadArbitrationPolicy::RoundRobin, PreambleHelper<SKLFamily>::getDefaultThreadArbitrationPolicy());
+    EXPECT_EQ(ThreadArbitrationPolicy::RoundRobin, HwHelperHw<SKLFamily>::get().getDefaultThreadArbitrationPolicy());
 }
 
 GEN9TEST_F(PreambleVfeState, WaOff) {

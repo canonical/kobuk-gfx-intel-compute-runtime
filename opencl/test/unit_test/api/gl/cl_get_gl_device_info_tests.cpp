@@ -34,13 +34,13 @@ TEST_P(GetDeviceGlInfoStr, StringType) {
     char *paramValue = nullptr;
     size_t paramRetSize = 0;
 
-    cl_int retVal = clGetDeviceInfo(devices[0], param, 0, nullptr, &paramRetSize);
+    cl_int retVal = clGetDeviceInfo(testedClDevice, param, 0, nullptr, &paramRetSize);
     EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(0u, paramRetSize);
 
     paramValue = new char[paramRetSize];
 
-    retVal = clGetDeviceInfo(devices[0], param, paramRetSize, paramValue, nullptr);
+    retVal = clGetDeviceInfo(testedClDevice, param, paramRetSize, paramValue, nullptr);
 
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_GE(std::strlen(paramValue), 0u);
@@ -84,8 +84,8 @@ TEST_P(GetDeviceGlInfoStr, StringType) {
 
 // Define new command types to run the parameterized tests
 static cl_device_info deviceInfoStrParams[] = {
-    CL_DEVICE_BUILT_IN_KERNELS, CL_DEVICE_EXTENSIONS, CL_DEVICE_NAME, CL_DEVICE_OPENCL_C_VERSION,
-    CL_DEVICE_PROFILE, CL_DEVICE_VENDOR, CL_DEVICE_VERSION, CL_DRIVER_VERSION};
+    CL_DEVICE_BUILT_IN_KERNELS, CL_DEVICE_EXTENSIONS, CL_DEVICE_LATEST_CONFORMANCE_VERSION_PASSED, CL_DEVICE_NAME,
+    CL_DEVICE_OPENCL_C_VERSION, CL_DEVICE_PROFILE, CL_DEVICE_VENDOR, CL_DEVICE_VERSION, CL_DRIVER_VERSION};
 
 INSTANTIATE_TEST_CASE_P(api, GetDeviceGlInfoStr, testing::ValuesIn(deviceInfoStrParams));
 

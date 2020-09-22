@@ -19,13 +19,32 @@ struct ClBlitProperties {
                                               CommandStreamReceiver &commandStreamReceiver,
                                               const BuiltinOpParams &builtinOpParams) {
 
+        auto rootDeviceIndex = commandStreamReceiver.getRootDeviceIndex();
         if (BlitterConstants::BlitDirection::BufferToBuffer == blitDirection) {
-            auto dstOffset = builtinOpParams.dstOffset.x + builtinOpParams.dstMemObj->getOffset();
-            auto srcOffset = builtinOpParams.srcOffset.x + builtinOpParams.srcMemObj->getOffset();
+            auto dstOffset = builtinOpParams.dstOffset.x;
+            auto srcOffset = builtinOpParams.srcOffset.x;
+            GraphicsAllocation *dstAllocation = nullptr;
+            GraphicsAllocation *srcAllocation = nullptr;
 
-            return BlitProperties::constructPropertiesForCopyBuffer(builtinOpParams.dstMemObj->getGraphicsAllocation(),
-                                                                    builtinOpParams.srcMemObj->getGraphicsAllocation(),
-                                                                    dstOffset, srcOffset, builtinOpParams.size.x);
+            if (!builtinOpParams.dstSvmAlloc) {
+                dstOffset += builtinOpParams.dstMemObj->getOffset();
+                srcOffset += builtinOpParams.srcMemObj->getOffset();
+                dstAllocation = builtinOpParams.dstMemObj->getGraphicsAllocation(rootDeviceIndex);
+                srcAllocation = builtinOpParams.srcMemObj->getGraphicsAllocation(rootDeviceIndex);
+            } else {
+                dstAllocation = builtinOpParams.dstSvmAlloc;
+                srcAllocation = builtinOpParams.srcSvmAlloc;
+                dstOffset += ptrDiff(builtinOpParams.dstPtr, dstAllocation->getGpuAddress());
+                srcOffset += ptrDiff(builtinOpParams.srcPtr, srcAllocation->getGpuAddress());
+            }
+
+            return BlitProperties::constructPropertiesForCopyBuffer(dstAllocation,
+                                                                    srcAllocation,
+                                                                    {dstOffset, builtinOpParams.dstOffset.y, builtinOpParams.dstOffset.z},
+                                                                    {srcOffset, builtinOpParams.srcOffset.y, builtinOpParams.srcOffset.z},
+                                                                    builtinOpParams.size,
+                                                                    builtinOpParams.srcRowPitch, builtinOpParams.srcSlicePitch,
+                                                                    builtinOpParams.dstRowPitch, builtinOpParams.dstSlicePitch);
         }
 
         GraphicsAllocation *gpuAllocation = nullptr;
@@ -58,10 +77,15 @@ struct ClBlitProperties {
                 gpuAllocation = builtinOpParams.dstSvmAlloc;
                 hostAllocation = builtinOpParams.srcSvmAlloc;
             } else {
-                gpuAllocation = builtinOpParams.dstMemObj->getGraphicsAllocation();
+                gpuAllocation = builtinOpParams.dstMemObj->getGraphicsAllocation(rootDeviceIndex);
                 memObjGpuVa = (gpuAllocation->getGpuAddress() + builtinOpParams.dstMemObj->getOffset());
             }
-            copySize.x = builtinOpParams.size.x;
+
+            hostRowPitch = builtinOpParams.srcRowPitch;
+            hostSlicePitch = builtinOpParams.srcSlicePitch;
+            gpuRowPitch = builtinOpParams.dstRowPitch;
+            gpuSlicePitch = builtinOpParams.dstSlicePitch;
+            copySize = builtinOpParams.size;
         }
 
         if (BlitterConstants::BlitDirection::BufferToHostPtr == blitDirection) {
@@ -78,7 +102,7 @@ struct ClBlitProperties {
                 gpuAllocation = builtinOpParams.srcSvmAlloc;
                 hostAllocation = builtinOpParams.dstSvmAlloc;
             } else {
-                gpuAllocation = builtinOpParams.srcMemObj->getGraphicsAllocation();
+                gpuAllocation = builtinOpParams.srcMemObj->getGraphicsAllocation(rootDeviceIndex);
                 memObjGpuVa = (gpuAllocation->getGpuAddress() + builtinOpParams.srcMemObj->getOffset());
             }
 
@@ -100,10 +124,12 @@ struct ClBlitProperties {
     }
 
     static BlitterConstants::BlitDirection obtainBlitDirection(uint32_t commandType) {
-        if (CL_COMMAND_WRITE_BUFFER == commandType) {
+        if (CL_COMMAND_WRITE_BUFFER == commandType || CL_COMMAND_WRITE_BUFFER_RECT == commandType) {
             return BlitterConstants::BlitDirection::HostPtrToBuffer;
         } else if (CL_COMMAND_READ_BUFFER == commandType || CL_COMMAND_READ_BUFFER_RECT == commandType) {
             return BlitterConstants::BlitDirection::BufferToHostPtr;
+        } else if (CL_COMMAND_COPY_BUFFER_RECT == commandType || CL_COMMAND_SVM_MEMCPY == commandType) {
+            return BlitterConstants::BlitDirection::BufferToBuffer;
         } else {
             UNRECOVERABLE_IF(CL_COMMAND_COPY_BUFFER != commandType);
             return BlitterConstants::BlitDirection::BufferToBuffer;

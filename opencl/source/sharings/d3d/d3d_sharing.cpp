@@ -56,7 +56,7 @@ void D3DSharing<D3D>::synchronizeObject(UpdateData &updateData) {
 }
 
 template <typename D3D>
-void D3DSharing<D3D>::releaseResource(MemObj *memObject) {
+void D3DSharing<D3D>::releaseResource(MemObj *memObject, uint32_t rootDeviceIndex) {
     if (!sharedResource) {
         sharingFunctions->getDeviceContext(d3dQuery);
         sharingFunctions->copySubresourceRegion(resource, subresource, resourceStaging, 0);
@@ -82,8 +82,8 @@ void D3DSharing<D3D>::updateImgInfoAndDesc(Gmm *gmm, ImageInfo &imgInfo, ImagePl
 }
 
 template <typename D3D>
-const ClSurfaceFormatInfo *D3DSharing<D3D>::findSurfaceFormatInfo(GMM_RESOURCE_FORMAT_ENUM gmmFormat, cl_mem_flags flags, unsigned int clVersionSupport) {
-    ArrayRef<const ClSurfaceFormatInfo> formats = SurfaceFormats::surfaceFormats(flags, clVersionSupport);
+const ClSurfaceFormatInfo *D3DSharing<D3D>::findSurfaceFormatInfo(GMM_RESOURCE_FORMAT_ENUM gmmFormat, cl_mem_flags flags, bool supportsOcl20Features) {
+    ArrayRef<const ClSurfaceFormatInfo> formats = SurfaceFormats::surfaceFormats(flags, supportsOcl20Features);
     for (auto &format : formats) {
         if (gmmFormat == format.surfaceFormat.GMMSurfaceFormat) {
             return &format;

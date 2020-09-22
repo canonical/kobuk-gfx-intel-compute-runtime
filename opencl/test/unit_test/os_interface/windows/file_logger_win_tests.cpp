@@ -8,15 +8,17 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/gmm_helper/gmm.h"
 
-#include "opencl/source/platform/platform.h"
-#include "opencl/test/unit_test/mocks/mock_platform.h"
+#include "opencl/test/unit_test/fixtures/mock_execution_environment_gmm_fixture.h"
+#include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/os_interface/windows/mock_wddm_allocation.h"
 #include "opencl/test/unit_test/utilities/file_logger_tests.h"
 #include "test.h"
 
 using namespace NEO;
 
-TEST(FileLogger, GivenLogAllocationMemoryPoolFlagThenLogsCorrectInfo) {
+using FileLoggerTests = Test<MockExecutionEnvironmentGmmFixture>;
+
+TEST_F(FileLoggerTests, GivenLogAllocationMemoryPoolFlagThenLogsCorrectInfo) {
     std::string testFile = "testfile";
     DebugVariables flags;
     flags.LogAllocationMemoryPool.set(true);
@@ -30,8 +32,6 @@ TEST(FileLogger, GivenLogAllocationMemoryPoolFlagThenLogsCorrectInfo) {
     allocation.handle = 4;
     allocation.setAllocationType(GraphicsAllocation::AllocationType::BUFFER);
     allocation.memoryPool = MemoryPool::System64KBPages;
-    auto gmm = std::make_unique<Gmm>(platform()->peekExecutionEnvironment()->rootDeviceEnvironments[0]->getGmmClientContext(), nullptr, 0, false);
-    allocation.setDefaultGmm(gmm.get());
     allocation.getDefaultGmm()->resourceParams.Flags.Info.NonLocalOnly = 0;
 
     fileLogger.logAllocation(&allocation);
@@ -53,7 +53,7 @@ TEST(FileLogger, GivenLogAllocationMemoryPoolFlagThenLogsCorrectInfo) {
     }
 }
 
-TEST(FileLogger, GivenLogAllocationMemoryPoolFlagSetFalseThenAllocationIsNotLogged) {
+TEST_F(FileLoggerTests, GivenLogAllocationMemoryPoolFlagSetFalseThenAllocationIsNotLogged) {
     std::string testFile = "testfile";
     DebugVariables flags;
     flags.LogAllocationMemoryPool.set(false);
@@ -67,8 +67,6 @@ TEST(FileLogger, GivenLogAllocationMemoryPoolFlagSetFalseThenAllocationIsNotLogg
     allocation.handle = 4;
     allocation.setAllocationType(GraphicsAllocation::AllocationType::BUFFER);
     allocation.memoryPool = MemoryPool::System64KBPages;
-    auto gmm = std::make_unique<Gmm>(platform()->peekExecutionEnvironment()->rootDeviceEnvironments[0]->getGmmClientContext(), nullptr, 0, false);
-    allocation.setDefaultGmm(gmm.get());
     allocation.getDefaultGmm()->resourceParams.Flags.Info.NonLocalOnly = 0;
 
     fileLogger.logAllocation(&allocation);

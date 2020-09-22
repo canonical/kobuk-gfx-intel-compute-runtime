@@ -8,10 +8,10 @@
 #pragma once
 #include "shared/source/command_stream/command_stream_receiver_hw.h"
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/test/unit_test/cmd_parse/hw_parse.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
-#include "opencl/test/unit_test/helpers/hw_parse.h"
 #include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "test.h"
 
 using namespace NEO;
@@ -61,10 +61,15 @@ struct ComputeModeRequirements : public ::testing::Test {
 
     template <typename FamilyType>
     void SetUpImpl() {
-        device.reset(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+        SetUpImpl<FamilyType>(defaultHwInfo.get());
+    }
+
+    template <typename FamilyType>
+    void SetUpImpl(const NEO::HardwareInfo *hardwareInfo) {
+        device.reset(MockDevice::createWithNewExecutionEnvironment<MockDevice>(hardwareInfo));
         csr = new myCsr<FamilyType>(*device->executionEnvironment);
         device->resetCommandStreamReceiver(csr);
-        AllocationProperties properties(device->getRootDeviceIndex(), false, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::SHARED_BUFFER, false);
+        AllocationProperties properties(device->getRootDeviceIndex(), false, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, {});
 
         alloc = device->getMemoryManager()->createGraphicsAllocationFromSharedHandle((osHandle)123, properties, false);
     }

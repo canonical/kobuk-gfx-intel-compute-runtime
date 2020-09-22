@@ -9,7 +9,9 @@
 #include "shared/source/helpers/array_count.h"
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/debug_helpers.h"
+#include "shared/source/helpers/hw_helper.h"
 
+#include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/context/context.h"
 #include "opencl/source/helpers/dispatch_info.h"
 #include "opencl/source/kernel/kernel.h"
@@ -171,8 +173,8 @@ void choosePreferredWorkGroupSizeWithRatio(uint32_t xyzFactors[3][1024], uint32_
     }
 }
 void choosePreferredWorkGroupSizeWithOutRatio(uint32_t xyzFactors[3][1024], uint32_t xyzFactorsLen[3], size_t workGroupSize[3], const size_t workItems[3], WorkSizeInfo wsInfo, uint32_t workdim) {
-    ulong localEuThrdsDispatched = 0xffffffff;
-    ulong workGroups;
+    uint64_t localEuThrdsDispatched = 0xffffffffffffffff;
+    uint64_t workGroups;
     for (uint32_t ZFactorsIdx = 0; ZFactorsIdx < xyzFactorsLen[2]; ++ZFactorsIdx) {
         for (uint32_t XFactorsIdx = 0; XFactorsIdx < xyzFactorsLen[0]; ++XFactorsIdx) {
             for (uint32_t YFactorsIdx = 0; YFactorsIdx < xyzFactorsLen[1]; ++YFactorsIdx) {
@@ -191,7 +193,7 @@ void choosePreferredWorkGroupSizeWithOutRatio(uint32_t xyzFactors[3][1024], uint
                 workGroups = Math::divideAndRoundUp(workItems[0], Xdim);
                 workGroups *= Math::divideAndRoundUp(workItems[1], Ydim);
                 workGroups *= Math::divideAndRoundUp(workItems[2], Zdim);
-                cl_ulong euThrdsDispatched;
+                uint64_t euThrdsDispatched;
 
                 euThrdsDispatched = Math::divideAndRoundUp(Xdim * Ydim * Zdim, wsInfo.simdSize);
                 euThrdsDispatched *= workGroups;
@@ -205,6 +207,12 @@ void choosePreferredWorkGroupSizeWithOutRatio(uint32_t xyzFactors[3][1024], uint
             }
         }
     }
+}
+
+void setSpecialWorkgroupSize(size_t workgroupSize[3]) {
+    workgroupSize[0] = 1;
+    workgroupSize[1] = 1;
+    workgroupSize[2] = 1;
 }
 
 void computeWorkgroupSize1D(uint32_t maxWorkGroupSize,
@@ -237,9 +245,9 @@ void computeWorkgroupSize2D(uint32_t maxWorkGroupSize, size_t workGroupSize[3], 
     uint32_t xFactorsLen = 0;
     uint32_t yFactorsLen = 0;
     uint64_t waste;
-    uint64_t localWSWaste = 0xffffffff;
+    uint64_t localWSWaste = 0xffffffffffffffff;
     uint64_t euThrdsDispatched;
-    uint64_t localEuThrdsDispatched = 0xffffffff;
+    uint64_t localEuThrdsDispatched = 0xffffffffffffffff;
     uint64_t workGroups;
     uint32_t xDim;
     uint32_t yDim;
@@ -403,14 +411,21 @@ void computeWorkgroupSizeND(WorkSizeInfo wsInfo, size_t workGroupSize[3], const 
 
 Vec3<size_t> computeWorkgroupSize(const DispatchInfo &dispatchInfo) {
     size_t workGroupSize[3] = {};
-    if (dispatchInfo.getKernel() != nullptr) {
-        if (DebugManager.flags.EnableComputeWorkSizeND.get()) {
+    auto kernel = dispatchInfo.getKernel();
+
+    if (kernel != nullptr) {
+        const auto &hwInfo = kernel->getDevice().getHardwareInfo();
+        auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+        auto isSimulation = kernel->getDevice().isSimulation();
+        if (kernel->requiresLimitedWorkgroupSize() && hwHelper.isSpecialWorkgroupSizeRequired(hwInfo, isSimulation)) {
+            setSpecialWorkgroupSize(workGroupSize);
+        } else if (DebugManager.flags.EnableComputeWorkSizeND.get()) {
             WorkSizeInfo wsInfo(dispatchInfo);
             size_t workItems[3] = {dispatchInfo.getGWS().x, dispatchInfo.getGWS().y, dispatchInfo.getGWS().z};
             computeWorkgroupSizeND(wsInfo, workGroupSize, workItems, dispatchInfo.getDim());
         } else {
-            auto maxWorkGroupSize = dispatchInfo.getKernel()->maxKernelWorkGroupSize;
-            auto simd = dispatchInfo.getKernel()->getKernelInfo().getMaxSimdSize();
+            auto maxWorkGroupSize = kernel->maxKernelWorkGroupSize;
+            auto simd = kernel->getKernelInfo().getMaxSimdSize();
             size_t workItems[3] = {dispatchInfo.getGWS().x, dispatchInfo.getGWS().y, dispatchInfo.getGWS().z};
             if (dispatchInfo.getDim() == 1) {
                 computeWorkgroupSize1D(maxWorkGroupSize, workGroupSize, workItems, simd);

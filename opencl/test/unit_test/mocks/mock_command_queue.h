@@ -56,12 +56,13 @@ class MockCommandQueue : public CommandQueue {
         writeBufferOffset = offset;
         writeBufferSize = size;
         writeBufferPtr = const_cast<void *>(ptr);
+        writeMapAllocation = mapAllocation;
         return writeBufferRetValue;
     }
 
-    void waitUntilComplete(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) override {
-        latestTaskCountWaited = taskCountToWait;
-        return CommandQueue::waitUntilComplete(taskCountToWait, flushStampToWait, useQuickKmdSleep);
+    void waitUntilComplete(uint32_t gpgpuTaskCountToWait, uint32_t bcsTaskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) override {
+        latestTaskCountWaited = gpgpuTaskCountToWait;
+        return CommandQueue::waitUntilComplete(gpgpuTaskCountToWait, bcsTaskCountToWait, flushStampToWait, useQuickKmdSleep);
     }
 
     cl_int enqueueCopyImage(Image *srcImage, Image *dstImage, const size_t srcOrigin[3],
@@ -178,6 +179,7 @@ class MockCommandQueue : public CommandQueue {
     size_t writeBufferSize = 0;
     void *writeBufferPtr = nullptr;
     size_t requestedCmdStreamSize = 0;
+    GraphicsAllocation *writeMapAllocation = nullptr;
     std::atomic<uint32_t> latestTaskCountWaited{std::numeric_limits<uint32_t>::max()};
 };
 
@@ -191,6 +193,7 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     using BaseClass::commandQueueProperties;
     using BaseClass::commandStream;
     using BaseClass::gpgpuEngine;
+    using BaseClass::latestSentEnqueueType;
     using BaseClass::obtainCommandStream;
     using BaseClass::obtainNewTimestampPacketNodes;
     using BaseClass::requiresCacheFlushAfterWalker;
@@ -204,6 +207,10 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
 
     void setOoqEnabled() {
         commandQueueProperties |= CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
+    }
+
+    void setProfilingEnabled() {
+        commandQueueProperties |= CL_QUEUE_PROFILING_ENABLE;
     }
 
     LinearStream &getCS(size_t minRequiredSize) override {
@@ -262,16 +269,22 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
         }
     }
 
-    void notifyEnqueueReadBuffer(Buffer *buffer, bool blockingRead) override {
+    void notifyEnqueueReadBuffer(Buffer *buffer, bool blockingRead, bool notifyBcsCsr) override {
         notifyEnqueueReadBufferCalled = true;
+        useBcsCsrOnNotifyEnabled = notifyBcsCsr;
     }
-    void notifyEnqueueReadImage(Image *image, bool blockingRead) override {
+    void notifyEnqueueReadImage(Image *image, bool blockingRead, bool notifyBcsCsr) override {
         notifyEnqueueReadImageCalled = true;
+        useBcsCsrOnNotifyEnabled = notifyBcsCsr;
+    }
+    void notifyEnqueueSVMMemcpy(GraphicsAllocation *gfxAllocation, bool blockingCopy, bool notifyBcsCsr) override {
+        notifyEnqueueSVMMemcpyCalled = true;
+        useBcsCsrOnNotifyEnabled = notifyBcsCsr;
     }
 
-    void waitUntilComplete(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) override {
-        latestTaskCountWaited = taskCountToWait;
-        return BaseClass::waitUntilComplete(taskCountToWait, flushStampToWait, useQuickKmdSleep);
+    void waitUntilComplete(uint32_t gpgpuTaskCountToWait, uint32_t bcsTaskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) override {
+        latestTaskCountWaited = gpgpuTaskCountToWait;
+        return BaseClass::waitUntilComplete(gpgpuTaskCountToWait, bcsTaskCountToWait, flushStampToWait, useQuickKmdSleep);
     }
 
     bool isCacheFlushForBcsRequired() const override {
@@ -291,7 +304,9 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     bool storeMultiDispatchInfo = false;
     bool notifyEnqueueReadBufferCalled = false;
     bool notifyEnqueueReadImageCalled = false;
+    bool notifyEnqueueSVMMemcpyCalled = false;
     bool cpuDataTransferHandlerCalled = false;
+    bool useBcsCsrOnNotifyEnabled = false;
     struct OverrideReturnValue {
         bool enabled = false;
         bool returnValue = false;

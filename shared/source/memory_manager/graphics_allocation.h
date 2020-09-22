@@ -7,10 +7,10 @@
 
 #pragma once
 
+#include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/memory_manager/host_ptr_defines.h"
-#include "shared/source/memory_manager/memory_constants.h"
 #include "shared/source/memory_manager/memory_pool.h"
 #include "shared/source/utilities/idlist.h"
 #include "shared/source/utilities/stackvec.h"
@@ -41,6 +41,14 @@ constexpr auto nonSharedResource = 0u;
 
 class Gmm;
 class MemoryManager;
+
+struct AubInfo {
+    uint32_t aubWritable = std::numeric_limits<uint32_t>::max();
+    uint32_t tbxWritable = std::numeric_limits<uint32_t>::max();
+    bool allocDumpable = false;
+    bool bcsDumpOnly = false;
+    bool memObjectsAllocationWithWritableFlags = false;
+};
 
 class GraphicsAllocation : public IDNode<GraphicsAllocation> {
   public:
@@ -83,16 +91,28 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
         TIMESTAMP_PACKET_TAG_BUFFER,
         WRITE_COMBINED,
         RING_BUFFER,
-        SEMAPHORE_BUFFER
+        SEMAPHORE_BUFFER,
+        DEBUG_CONTEXT_SAVE_AREA,
+        DEBUG_SBA_TRACKING_BUFFER
     };
 
     ~GraphicsAllocation() override;
     GraphicsAllocation &operator=(const GraphicsAllocation &) = delete;
     GraphicsAllocation(const GraphicsAllocation &) = delete;
 
-    GraphicsAllocation(uint32_t rootDeviceIndex, AllocationType allocationType, void *cpuPtrIn, uint64_t gpuAddress, uint64_t baseAddress, size_t sizeIn, MemoryPool::Type pool);
+    GraphicsAllocation(uint32_t rootDeviceIndex, AllocationType allocationType, void *cpuPtrIn,
+                       uint64_t gpuAddress, uint64_t baseAddress, size_t sizeIn, MemoryPool::Type pool, size_t maxOsContextCount)
+        : GraphicsAllocation(rootDeviceIndex, 1, allocationType, cpuPtrIn, gpuAddress, baseAddress, sizeIn, pool, maxOsContextCount) {}
 
-    GraphicsAllocation(uint32_t rootDeviceIndex, AllocationType allocationType, void *cpuPtrIn, size_t sizeIn, osHandle sharedHandleIn, MemoryPool::Type pool);
+    GraphicsAllocation(uint32_t rootDeviceIndex, AllocationType allocationType, void *cpuPtrIn,
+                       size_t sizeIn, osHandle sharedHandleIn, MemoryPool::Type pool, size_t maxOsContextCount)
+        : GraphicsAllocation(rootDeviceIndex, 1, allocationType, cpuPtrIn, sizeIn, sharedHandleIn, pool, maxOsContextCount) {}
+
+    GraphicsAllocation(uint32_t rootDeviceIndex, size_t numGmms, AllocationType allocationType, void *cpuPtrIn,
+                       uint64_t gpuAddress, uint64_t baseAddress, size_t sizeIn, MemoryPool::Type pool, size_t maxOsContextCount);
+
+    GraphicsAllocation(uint32_t rootDeviceIndex, size_t numGmms, AllocationType allocationType, void *cpuPtrIn,
+                       size_t sizeIn, osHandle sharedHandleIn, MemoryPool::Type pool, size_t maxOsContextCount);
 
     uint32_t getRootDeviceIndex() const { return rootDeviceIndex; }
     void *getUnderlyingBuffer() const { return cpuPtr; }
@@ -146,7 +166,10 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     bool isAubWritable(uint32_t banks) const;
     void setTbxWritable(bool writable, uint32_t banks);
     bool isTbxWritable(uint32_t banks) const;
-    void setAllocDumpable(bool dumpable) { aubInfo.allocDumpable = dumpable; }
+    void setAllocDumpable(bool dumpable, bool bcsDumpOnly) {
+        aubInfo.allocDumpable = dumpable;
+        aubInfo.bcsDumpOnly = bcsDumpOnly;
+    }
     bool isAllocDumpable() const { return aubInfo.allocDumpable; }
     bool isMemObjectsAllocationWithWritableFlags() const { return aubInfo.memObjectsAllocationWithWritableFlags; }
     void setMemObjectsAllocationWithWritableFlags(bool newValue) { aubInfo.memObjectsAllocationWithWritableFlags = newValue; }
@@ -171,7 +194,12 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     void setInspectionId(uint32_t newInspectionId, uint32_t contextId) { usageInfos[contextId].inspectionId = newInspectionId; }
 
     bool isResident(uint32_t contextId) const { return GraphicsAllocation::objectNotResident != getResidencyTaskCount(contextId); }
-    void updateResidencyTaskCount(uint32_t newTaskCount, uint32_t contextId) { usageInfos[contextId].residencyTaskCount = newTaskCount; }
+    bool isAlwaysResident(uint32_t contextId) const { return GraphicsAllocation::objectAlwaysResident == getResidencyTaskCount(contextId); }
+    void updateResidencyTaskCount(uint32_t newTaskCount, uint32_t contextId) {
+        if (usageInfos[contextId].residencyTaskCount != GraphicsAllocation::objectAlwaysResident || newTaskCount == GraphicsAllocation::objectNotResident) {
+            usageInfos[contextId].residencyTaskCount = newTaskCount;
+        }
+    }
     uint32_t getResidencyTaskCount(uint32_t contextId) const { return usageInfos[contextId].residencyTaskCount; }
     void releaseResidencyInOsContext(uint32_t contextId) { updateResidencyTaskCount(objectNotResident, contextId); }
     bool isResidencyTaskCountBelow(uint32_t taskCount, uint32_t contextId) const { return !isResident(contextId) || getResidencyTaskCount(contextId) < taskCount; }
@@ -215,8 +243,15 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
         gmms[handleId] = gmm;
     }
 
-    uint32_t getNumHandles() const { return storageInfo.getNumHandles(); }
+    uint32_t getNumGmms() const {
+        return static_cast<uint32_t>(gmms.size());
+    }
+
     uint32_t getUsedPageSize() const;
+
+    bool isAllocatedInLocalMemoryPool() const { return (this->memoryPool == MemoryPool::LocalMemory); }
+
+    const AubInfo &getAubInfo() const { return aubInfo; }
 
     OsHandleStorage fragmentsStorage;
     StorageInfo storageInfo = {};
@@ -225,6 +260,7 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     static constexpr uint32_t allBanks = 0xffffffff;
     constexpr static uint32_t objectNotResident = std::numeric_limits<uint32_t>::max();
     constexpr static uint32_t objectNotUsed = std::numeric_limits<uint32_t>::max();
+    constexpr static uint32_t objectAlwaysResident = std::numeric_limits<uint32_t>::max() - 1;
 
   protected:
     struct UsageInfo {
@@ -232,12 +268,7 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
         uint32_t residencyTaskCount = objectNotResident;
         uint32_t inspectionId = 0u;
     };
-    struct AubInfo {
-        uint32_t aubWritable = std::numeric_limits<uint32_t>::max();
-        uint32_t tbxWritable = std::numeric_limits<uint32_t>::max();
-        bool allocDumpable = false;
-        bool memObjectsAllocationWithWritableFlags = false;
-    };
+
     struct SharingInfo {
         uint32_t reuseCount = 0;
         osHandle sharedHandle = Sharing::nonSharedResource;
@@ -288,6 +319,6 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
 
     StackVec<UsageInfo, 32> usageInfos;
     std::atomic<uint32_t> registeredContextsNum{0};
-    std::array<Gmm *, EngineLimits::maxHandleCount> gmms{};
+    StackVec<Gmm *, EngineLimits::maxHandleCount> gmms;
 };
 } // namespace NEO

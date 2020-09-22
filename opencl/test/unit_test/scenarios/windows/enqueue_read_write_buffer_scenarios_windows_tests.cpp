@@ -7,15 +7,15 @@
 
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/source/os_interface/windows/os_interface.h"
+#include "shared/test/unit_test/cmd_parse/hw_parse.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 #include "opencl/source/os_interface/windows/wddm_device_command_stream.h"
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
 #include "opencl/test/unit_test/helpers/execution_environment_helper.h"
-#include "opencl/test/unit_test/helpers/hw_parse.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/os_interface/windows/mock_wddm_memory_manager.h"
 #include "test.h"
 
@@ -89,17 +89,17 @@ HWTEST_F(EnqueueBufferWindowsTest, givenMisalignedHostPtrWhenEnqueueReadBufferCa
     ASSERT_NE(0, cmdQ->lastEnqueuedKernels.size());
     Kernel *kernel = cmdQ->lastEnqueuedKernels[0];
 
-    auto hostPtrAllcoation = cmdQ->getGpgpuCommandStreamReceiver().getInternalAllocationStorage()->getTemporaryAllocations().peekHead();
+    auto hostPtrAllocation = cmdQ->getGpgpuCommandStreamReceiver().getInternalAllocationStorage()->getTemporaryAllocations().peekHead();
 
-    while (hostPtrAllcoation != nullptr) {
-        if (hostPtrAllcoation->getUnderlyingBuffer() == misalignedPtr) {
+    while (hostPtrAllocation != nullptr) {
+        if (hostPtrAllocation->getUnderlyingBuffer() == misalignedPtr) {
             break;
         }
-        hostPtrAllcoation = hostPtrAllcoation->next;
+        hostPtrAllocation = hostPtrAllocation->next;
     }
-    ASSERT_NE(nullptr, hostPtrAllcoation);
+    ASSERT_NE(nullptr, hostPtrAllocation);
 
-    uint64_t gpuVa = hostPtrAllcoation->getGpuAddress();
+    uint64_t gpuVa = hostPtrAllocation->getGpuAddress();
     cmdQ->finish();
 
     parseCommands<FamilyType>(*cmdQ);

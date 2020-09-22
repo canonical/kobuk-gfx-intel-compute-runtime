@@ -12,12 +12,12 @@
 #include "shared/source/os_interface/windows/driver_info_windows.h"
 #include "shared/source/os_interface/windows/os_interface.h"
 #include "shared/test/unit_test/helpers/ult_hw_config.h"
+#include "shared/test/unit_test/helpers/variable_backup.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 #include "opencl/source/memory_manager/os_agnostic_memory_manager.h"
-#include "opencl/test/unit_test/helpers/variable_backup.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/mocks/mock_wddm.h"
 #include "opencl/test/unit_test/os_interface/windows/registry_reader_tests.h"
@@ -55,10 +55,8 @@ class DriverInfoDeviceTest : public ::testing::Test {
 CommandStreamReceiver *createMockCommandStreamReceiver(bool withAubDump, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) {
     auto csr = new MockCommandStreamReceiver(executionEnvironment, rootDeviceIndex);
     if (!executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->osInterface) {
-        executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->osInterface = std::make_unique<OSInterface>();
         auto wddm = new WddmMock(*executionEnvironment.rootDeviceEnvironments[0]);
         wddm->init();
-        executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->osInterface->get()->setWddm(wddm);
     }
 
     EXPECT_NE(nullptr, executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->osInterface.get());
@@ -120,20 +118,23 @@ class MockRegistryReader : public SettingsReader {
         } else if (key == "UserModeDriverNameWOW") {
             properMediaSharingExtensions = true;
             return returnString;
-        }
-        if (key == "DriverStorePathForComputeRuntime") {
+        } else if (key == "DriverStorePathForComputeRuntime") {
             return driverStorePath;
+        } else if (key == "OpenCLDriverName") {
+            return openCLDriverName;
         }
         return value;
     }
 
     bool getSetting(const char *settingName, bool defaultValue) override { return defaultValue; };
+    int64_t getSetting(const char *settingName, int64_t defaultValue) override { return defaultValue; };
     int32_t getSetting(const char *settingName, int32_t defaultValue) override { return defaultValue; };
     const char *appSpecificLocation(const std::string &name) override { return name.c_str(); };
 
     bool properNameKey = false;
     bool properVersionKey = false;
     std::string driverStorePath = "driverStore\\0x8086";
+    std::string openCLDriverName = "igdrcl.dll";
     bool properMediaSharingExtensions = false;
     bool using64bit = false;
     std::string returnString = "";
@@ -212,7 +213,7 @@ TEST(DriverInfo, givenInitializedOsInterfaceWhenCreateDriverInfoThenReturnDriver
     osInterface->get()->setWddm(Wddm::createWddm(nullptr, rootDeviceEnvironment));
     EXPECT_NE(nullptr, osInterface->get()->getWddm());
 
-    std::unique_ptr<DriverInfo> driverInfo(DriverInfo::create(osInterface.get()));
+    std::unique_ptr<DriverInfo> driverInfo(DriverInfo::create(nullptr, osInterface.get()));
 
     EXPECT_NE(nullptr, driverInfo);
 };
@@ -221,7 +222,7 @@ TEST(DriverInfo, givenNotInitializedOsInterfaceWhenCreateDriverInfoThenReturnDri
 
     std::unique_ptr<OSInterface> osInterface;
 
-    std::unique_ptr<DriverInfo> driverInfo(DriverInfo::create(osInterface.get()));
+    std::unique_ptr<DriverInfo> driverInfo(DriverInfo::create(nullptr, osInterface.get()));
 
     EXPECT_EQ(nullptr, driverInfo);
 };
@@ -231,6 +232,15 @@ TEST(DriverInfo, givenInitializedOsInterfaceWhenCreateDriverInfoWindowsThenSetRe
     std::unique_ptr<MockDriverInfoWindows> driverInfo(MockDriverInfoWindows::create(path));
     EXPECT_STREQ(driverInfo->getRegistryReaderRegKey(), driverInfo->reader->getRegKey());
 };
+
+TEST_F(DriverInfoWindowsTest, whenThereIsNoOpenCLDriverNamePointedByDriverInfoThenItIsNotCompatible) {
+    VariableBackup<const wchar_t *> currentLibraryPathBackup(&SysCalls::currentLibraryPath);
+    currentLibraryPathBackup = L"driverStore\\0x8086\\myLib.dll";
+
+    static_cast<MockRegistryReader *>(driverInfo->registryReader.get())->openCLDriverName = "";
+
+    EXPECT_FALSE(driverInfo->isCompatibleDriverStore());
+}
 
 TEST_F(DriverInfoWindowsTest, whenCurrentLibraryIsLoadedFromDriverStorePointedByDriverInfoThenItIsCompatible) {
     VariableBackup<const wchar_t *> currentLibraryPathBackup(&SysCalls::currentLibraryPath);
@@ -244,6 +254,18 @@ TEST_F(DriverInfoWindowsTest, whenCurrentLibraryIsLoadedFromDifferentDriverStore
     currentLibraryPathBackup = L"driverStore\\different_driverStore\\myLib.dll";
 
     EXPECT_FALSE(driverInfo->isCompatibleDriverStore());
+}
+
+TEST_F(DriverInfoWindowsTest, givenDriverInfoWindowsWhenGetImageSupportIsCalledThenReturnTrue) {
+    MockExecutionEnvironment executionEnvironment;
+    RootDeviceEnvironment rootDeviceEnvironment(executionEnvironment);
+    std::unique_ptr<OSInterface> osInterface(new OSInterface());
+    osInterface->get()->setWddm(Wddm::createWddm(nullptr, rootDeviceEnvironment));
+    EXPECT_NE(nullptr, osInterface->get()->getWddm());
+
+    std::unique_ptr<DriverInfo> driverInfo(DriverInfo::create(nullptr, osInterface.get()));
+
+    EXPECT_TRUE(driverInfo->getImageSupport());
 }
 
 } // namespace NEO

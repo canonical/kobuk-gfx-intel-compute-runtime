@@ -87,6 +87,8 @@ Vec3<size_t> canonizeWorkgroup(
 
 void provideLocalWorkGroupSizeHints(Context *context, DispatchInfo dispatchInfo);
 
+void setSpecialWorkgroupSize(size_t workgroupSize[3]);
+
 inline cl_uint computeDimensions(const size_t workItems[3]) {
     return (workItems[2] > 1) ? 3 : (workItems[1] > 1) ? 2 : 1;
 }
@@ -120,7 +122,8 @@ class GpgpuWalkerHelper {
 
     static void dispatchProfilingCommandsEnd(
         TagNode<HwTimeStamps> &hwTimeStamps,
-        LinearStream *commandStream);
+        LinearStream *commandStream,
+        const HardwareInfo &hwInfo);
 
     static void dispatchPerfCountersCommandsStart(
         CommandQueue &commandQueue,
@@ -166,6 +169,7 @@ struct EnqueueOperation {
     static size_t getTotalSizeRequiredCS(uint32_t eventType, const CsrDependencies &csrDeps, bool reserveProfilingCmdsSpace, bool reservePerfCounters, bool blitEnqueue, CommandQueue &commandQueue, const MultiDispatchInfo &multiDispatchInfo);
     static size_t getSizeRequiredCS(uint32_t cmdType, bool reserveProfilingCmdsSpace, bool reservePerfCounters, CommandQueue &commandQueue, const Kernel *pKernel);
     static size_t getSizeRequiredForTimestampPacketWrite();
+    static size_t getSizeForCacheFlushAfterWalkerCommands(const Kernel &kernel, const CommandQueue &commandQueue);
 
   private:
     static size_t getSizeRequiredCSKernel(bool reserveProfilingCmdsSpace, bool reservePerfCounters, CommandQueue &commandQueue, const Kernel *pKernel);

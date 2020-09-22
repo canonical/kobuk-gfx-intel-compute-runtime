@@ -7,9 +7,10 @@
 
 #pragma once
 #include "shared/source/helpers/aux_translation.h"
-#include "shared/source/helpers/hw_cmds.h"
 
 #include "opencl/source/helpers/properties_helper.h"
+
+#include "hw_cmds.h"
 
 namespace NEO {
 
@@ -38,11 +39,15 @@ struct UnitTestHelper {
 
     static bool isPipeControlWArequired(const HardwareInfo &hwInfo);
 
+    static bool isAdditionalSynchronizationRequired(const HardwareInfo &hwInfo);
+
     static bool isAdditionalMiSemaphoreWaitRequired(const HardwareInfo &hwInfo);
 
     static bool isAdditionalMiSemaphoreWait(const typename GfxFamily::MI_SEMAPHORE_WAIT &semaphoreWait);
 
     static uint64_t getMemoryAddress(const typename GfxFamily::MI_ATOMIC &atomic);
+
+    static bool requiresTimestampPacketsInSystemMemory();
 
     static const bool tiledImagesSupported;
 

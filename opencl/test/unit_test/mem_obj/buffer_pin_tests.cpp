@@ -7,7 +7,7 @@
 
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/memory_manager/os_agnostic_memory_manager.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/memory_management_fixture.h"
 #include "opencl/test/unit_test/fixtures/platform_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
@@ -48,7 +48,7 @@ class TestedMemoryManager : public OsAgnosticMemoryManager {
     uint32_t HPAllocCount = 0;
 };
 
-TEST(BufferTests, doPinIsSet) {
+TEST(BufferTests, WhenBufferIsCreatedThenPinIsSet) {
     MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
     std::unique_ptr<TestedMemoryManager> mm(new MemoryManagerCreate<TestedMemoryManager>(false, false, executionEnvironment));
     {
@@ -71,7 +71,7 @@ TEST(BufferTests, doPinIsSet) {
         delete buffer;
     }
 }
-TEST(BufferTests, doPinIsSetForHostPtr) {
+TEST(BufferTests, GivenHostPtrWhenBufferIsCreatedThenPinIsSet) {
     MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
     std::unique_ptr<TestedMemoryManager> mm(new TestedMemoryManager(executionEnvironment));
     {

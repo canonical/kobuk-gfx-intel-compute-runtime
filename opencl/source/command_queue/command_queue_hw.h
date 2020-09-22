@@ -64,11 +64,18 @@ class CommandQueueHw : public CommandQueue {
         }
 
         if (getCmdQueueProperties<cl_queue_properties>(properties, CL_QUEUE_PROPERTIES) & static_cast<cl_queue_properties>(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE)) {
-            getGpgpuCommandStreamReceiver().overrideDispatchPolicy(DispatchMode::BatchedDispatch);
+            auto &csr = getGpgpuCommandStreamReceiver();
+            if (!csr.isDirectSubmissionEnabled()) {
+                csr.overrideDispatchPolicy(DispatchMode::BatchedDispatch);
+            }
             if (DebugManager.flags.CsrDispatchMode.get() != 0) {
                 getGpgpuCommandStreamReceiver().overrideDispatchPolicy(static_cast<DispatchMode>(DebugManager.flags.CsrDispatchMode.get()));
             }
             getGpgpuCommandStreamReceiver().enableNTo1SubmissionModel();
+        }
+
+        if (device->getDevice().getDebugger()) {
+            getGpgpuCommandStreamReceiver().allocateDebugSurface(SipKernel::maxDbgSurfaceSize);
         }
 
         uint64_t requestedSliceCount = getCmdQueueProperties<cl_command_queue_properties>(properties, CL_QUEUE_SLICE_COUNT_INTEL);
@@ -84,8 +91,9 @@ class CommandQueueHw : public CommandQueue {
         return new CommandQueueHw<GfxFamily>(context, device, properties, internalUsage);
     }
 
-    MOCKABLE_VIRTUAL void notifyEnqueueReadBuffer(Buffer *buffer, bool blockingRead);
-    MOCKABLE_VIRTUAL void notifyEnqueueReadImage(Image *image, bool blockingRead);
+    MOCKABLE_VIRTUAL void notifyEnqueueReadBuffer(Buffer *buffer, bool blockingRead, bool notifyBcsCsr);
+    MOCKABLE_VIRTUAL void notifyEnqueueReadImage(Image *image, bool blockingRead, bool notifyBcsCsr);
+    MOCKABLE_VIRTUAL void notifyEnqueueSVMMemcpy(GraphicsAllocation *gfxAllocation, bool blockingCopy, bool notifyBcsCsr);
 
     cl_int enqueueBarrierWithWaitList(cl_uint numEventsInWaitList,
                                       const cl_event *eventWaitList,
@@ -343,6 +351,12 @@ class CommandQueueHw : public CommandQueue {
                         const cl_event *eventWaitList,
                         cl_event *event);
 
+    template <uint32_t cmdType, size_t surfaceCount>
+    void dispatchBcsOrGpgpuEnqueue(MultiDispatchInfo &dispatchInfo, Surface *(&surfaces)[surfaceCount], EBuiltInOps::Type builtInOperation, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event, bool blocking);
+
+    template <uint32_t cmdType>
+    void enqueueBlit(const MultiDispatchInfo &multiDispatchInfo, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event, bool blocking);
+
     template <uint32_t commandType>
     CompletionStamp enqueueNonBlocked(Surface **surfacesForResidency,
                                       size_t surfaceCount,
@@ -474,5 +488,8 @@ class CommandQueueHw : public CommandQueue {
                                    CsrDependencies &csrDeps,
                                    KernelOperation *blockedCommandsData,
                                    TimestampPacketDependencies &timestampPacketDependencies);
+
+    bool isGpgpuSubmissionForBcsRequired(bool queueBlocked) const;
+    void setupEvent(EventBuilder &eventBuilder, cl_event *outEvent, uint32_t cmdType);
 };
 } // namespace NEO

@@ -14,9 +14,9 @@
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/helpers/default_hw_info.inl"
 #include "shared/test/unit_test/helpers/ult_hw_config.inl"
+#include "shared/test/unit_test/helpers/variable_backup.h"
 
 #include "opencl/test/unit_test/custom_event_listener.h"
-#include "opencl/test/unit_test/helpers/variable_backup.h"
 #include "opencl/test/unit_test/linux/drm_wrap.h"
 #include "opencl/test/unit_test/linux/mock_os_layer.h"
 #include "opencl/test/unit_test/mocks/mock_execution_environment.h"
@@ -28,6 +28,9 @@
 
 #include <string>
 
+namespace NEO {
+void __attribute__((destructor)) platformsDestructor();
+}
 using namespace NEO;
 
 class DrmTestsFixture {
@@ -55,6 +58,7 @@ void initializeTestedDevice() {
 }
 
 int openRetVal = 0;
+std::string lastOpenedPath;
 int testOpen(const char *fullPath, int, ...) {
     return openRetVal;
 };
@@ -62,6 +66,9 @@ int testOpen(const char *fullPath, int, ...) {
 int openCounter = 1;
 int openWithCounter(const char *fullPath, int, ...) {
     if (openCounter > 0) {
+        if (fullPath) {
+            lastOpenedPath = fullPath;
+        }
         openCounter--;
         return 1023; // valid file descriptor for ULT
     }
@@ -100,6 +107,102 @@ TEST(DrmTest, GivenSelectedExistingDeviceWhenGetDeviceFdThenReturnFd) {
     EXPECT_NE(nullptr, hwDeviceIds[0].get());
 }
 
+TEST(DrmTest, GivenSelectedExistingDeviceWhenOpenDirSuccedsThenHwDeviceIdsHaveProperPciPaths) {
+    VariableBackup<decltype(openFull)> backupOpenFull(&openFull);
+    VariableBackup<decltype(failOnOpenDir)> backupOpenDir(&failOnOpenDir, false);
+    VariableBackup<decltype(entryIndex)> backupEntryIndex(&entryIndex, 0u);
+    openFull = openWithCounter;
+
+    ExecutionEnvironment executionEnvironment;
+
+    entryIndex = 0;
+    openCounter = 1;
+    auto hwDeviceIds = OSInterface::discoverDevices(executionEnvironment);
+    EXPECT_EQ(1u, hwDeviceIds.size());
+    EXPECT_NE(nullptr, hwDeviceIds[0].get());
+    EXPECT_STREQ("test1", hwDeviceIds[0]->getPciPath());
+
+    entryIndex = 0;
+    openCounter = 2;
+    hwDeviceIds = OSInterface::discoverDevices(executionEnvironment);
+    EXPECT_EQ(2u, hwDeviceIds.size());
+    EXPECT_NE(nullptr, hwDeviceIds[0].get());
+    EXPECT_STREQ("test1", hwDeviceIds[0]->getPciPath());
+    EXPECT_NE(nullptr, hwDeviceIds[1].get());
+    EXPECT_STREQ("test2", hwDeviceIds[1]->getPciPath());
+}
+
+TEST(DrmTest, GivenSelectedExistingDeviceWhenOpenDirFailsThenRetryOpeningRenderDevices) {
+    VariableBackup<decltype(openFull)> backupOpenFull(&openFull);
+    VariableBackup<decltype(failOnOpenDir)> backupOpenDir(&failOnOpenDir, true);
+    openFull = openWithCounter;
+    openCounter = 1;
+
+    ExecutionEnvironment executionEnvironment;
+    auto hwDeviceIds = OSInterface::discoverDevices(executionEnvironment);
+    EXPECT_STREQ("/dev/dri/renderD128", lastOpenedPath.c_str());
+    EXPECT_EQ(1u, hwDeviceIds.size());
+    EXPECT_NE(nullptr, hwDeviceIds[0].get());
+    EXPECT_STREQ("00:02.0", hwDeviceIds[0]->getPciPath());
+
+    openCounter = 2;
+    hwDeviceIds = OSInterface::discoverDevices(executionEnvironment);
+    EXPECT_STREQ("/dev/dri/renderD129", lastOpenedPath.c_str());
+    EXPECT_EQ(2u, hwDeviceIds.size());
+    EXPECT_NE(nullptr, hwDeviceIds[0].get());
+    EXPECT_STREQ("00:02.0", hwDeviceIds[0]->getPciPath());
+    EXPECT_NE(nullptr, hwDeviceIds[1].get());
+    EXPECT_STREQ("00:02.0", hwDeviceIds[1]->getPciPath());
+}
+
+TEST(DrmTest, GivenSelectedNonExistingDeviceWhenOpenDirFailsThenRetryOpeningRenderDevicesAndNoDevicesAreCreated) {
+    VariableBackup<decltype(openFull)> backupOpenFull(&openFull);
+    VariableBackup<decltype(failOnOpenDir)> backupOpenDir(&failOnOpenDir, true);
+    openFull = openWithCounter;
+    openCounter = 0;
+
+    ExecutionEnvironment executionEnvironment;
+    auto hwDeviceIds = OSInterface::discoverDevices(executionEnvironment);
+    EXPECT_EQ(0u, hwDeviceIds.size());
+}
+
+TEST(DrmTest, GivenFailingOpenDirAndMultipleAvailableDevicesWhenCreateMultipleRootDevicesFlagIsSetThenTheFlagIsRespected) {
+    DebugManagerStateRestore stateRestore;
+    VariableBackup<decltype(openFull)> backupOpenFull(&openFull);
+    VariableBackup<decltype(failOnOpenDir)> backupOpenDir(&failOnOpenDir, true);
+    openFull = openWithCounter;
+    ExecutionEnvironment executionEnvironment;
+    const uint32_t requestedNumRootDevices = 2u;
+    DebugManager.flags.CreateMultipleRootDevices.set(requestedNumRootDevices);
+
+    openCounter = 4;
+    auto hwDeviceIds = OSInterface::discoverDevices(executionEnvironment);
+    EXPECT_STREQ("/dev/dri/renderD129", lastOpenedPath.c_str());
+    EXPECT_EQ(requestedNumRootDevices, hwDeviceIds.size());
+    EXPECT_NE(nullptr, hwDeviceIds[0].get());
+    EXPECT_STREQ("00:02.0", hwDeviceIds[0]->getPciPath());
+    EXPECT_NE(nullptr, hwDeviceIds[1].get());
+    EXPECT_STREQ("00:02.0", hwDeviceIds[1]->getPciPath());
+}
+
+TEST(DrmTest, GivenMultipleAvailableDevicesWhenCreateMultipleRootDevicesFlagIsSetThenTheFlagIsRespected) {
+    DebugManagerStateRestore stateRestore;
+    VariableBackup<decltype(openFull)> backupOpenFull(&openFull);
+    openFull = openWithCounter;
+    ExecutionEnvironment executionEnvironment;
+    const uint32_t requestedNumRootDevices = 2u;
+    DebugManager.flags.CreateMultipleRootDevices.set(requestedNumRootDevices);
+
+    openCounter = 4;
+    auto hwDeviceIds = OSInterface::discoverDevices(executionEnvironment);
+    EXPECT_STREQ("/dev/dri/by-path/pci-0000:test2-render", lastOpenedPath.c_str());
+    EXPECT_EQ(requestedNumRootDevices, hwDeviceIds.size());
+    EXPECT_NE(nullptr, hwDeviceIds[0].get());
+    EXPECT_STREQ("test1", hwDeviceIds[0]->getPciPath());
+    EXPECT_NE(nullptr, hwDeviceIds[1].get());
+    EXPECT_STREQ("test2", hwDeviceIds[1]->getPciPath());
+}
+
 TEST(DrmTest, GivenSelectedIncorectDeviceWhenGetDeviceFdThenFail) {
     DebugManagerStateRestore stateRestore;
     DebugManager.flags.ForceDeviceId.set("1234");
@@ -136,6 +239,16 @@ TEST_F(DrmTests, createReturnsDrm) {
     ioctlSeq[0] = -1;
     errno = EAGAIN;
     // check if device works, although there was EAGAIN error from KMD
+    getParam.param = I915_PARAM_CHIPSET_ID;
+    getParam.value = &lDeviceId;
+    ret = drm->ioctl(DRM_IOCTL_I915_GETPARAM, &getParam);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(deviceId, lDeviceId);
+
+    ioctlCnt = 0;
+    ioctlSeq[0] = -1;
+    errno = EBUSY;
+    // check if device works, although there was EBUSY error from KMD
     getParam.param = I915_PARAM_CHIPSET_ID;
     getParam.value = &lDeviceId;
     ret = drm->ioctl(DRM_IOCTL_I915_GETPARAM, &getParam);
@@ -254,7 +367,7 @@ TEST_F(DrmTests, failOnContextCreate) {
     auto drm = DrmWrap::createDrm(*rootDeviceEnvironment);
     EXPECT_NE(drm, nullptr);
     failOnContextCreate = -1;
-    EXPECT_THROW(drm->createDrmContext(), std::exception);
+    EXPECT_THROW(drm->createDrmContext(1), std::exception);
     EXPECT_FALSE(drm->isPreemptionSupported());
     failOnContextCreate = 0;
 }
@@ -265,7 +378,7 @@ TEST_F(DrmTests, failOnSetPriority) {
     auto drm = DrmWrap::createDrm(*rootDeviceEnvironment);
     EXPECT_NE(drm, nullptr);
     failOnSetPriority = -1;
-    auto drmContext = drm->createDrmContext();
+    auto drmContext = drm->createDrmContext(1);
     EXPECT_THROW(drm->setLowPriorityContextParam(drmContext), std::exception);
     EXPECT_FALSE(drm->isPreemptionSupported());
     failOnSetPriority = 0;
@@ -304,7 +417,7 @@ TEST(AllocatorHelper, givenExpectedSizeToReserveWhenGetSizeToReserveCalledThenEx
 
 TEST(DrmMemoryManagerCreate, whenCallCreateMemoryManagerThenDrmMemoryManagerIsCreated) {
     MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
-    auto drm = new DrmMockSuccess(*executionEnvironment.rootDeviceEnvironments[0]);
+    auto drm = new DrmMockSuccess(fakeFd, *executionEnvironment.rootDeviceEnvironments[0]);
 
     executionEnvironment.rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
     executionEnvironment.rootDeviceEnvironments[0]->osInterface->get()->setDrm(drm);
@@ -315,6 +428,55 @@ TEST(DrmMemoryManagerCreate, whenCallCreateMemoryManagerThenDrmMemoryManagerIsCr
 
 TEST(OsInterfaceTests, givenOsInterfaceWhenEnableLocalMemoryIsSpecifiedThenItIsSetToTrueOn64Bit) {
     EXPECT_TRUE(OSInterface::osEnableLocalMemory);
+}
+
+TEST_F(DrmTests, whenDrmIsCreatedWithMultipleSubDevicesThenCreateMultipleVirtualMemoryAddressSpaces) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.CreateMultipleSubDevices.set(2);
+
+    auto drm = DrmWrap::createDrm(*rootDeviceEnvironment);
+    EXPECT_NE(drm, nullptr);
+
+    auto numSubDevices = HwHelper::getSubDevicesCount(rootDeviceEnvironment->getHardwareInfo());
+    for (auto id = 0u; id < numSubDevices; id++) {
+        EXPECT_EQ(id + 1, drm->getVirtualMemoryAddressSpace(id));
+    }
+}
+
+TEST_F(DrmTests, givenRequiredPerContextMemorySpaceWhenDrmIsCreatedThenGetVirtualMemoryAddressSpaceReturnsZeroAndVMsAreNotCreated) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.CreateMultipleSubDevices.set(2);
+
+    rootDeviceEnvironment->executionEnvironment.setPerContextMemorySpace();
+
+    auto drm = DrmWrap::createDrm(*rootDeviceEnvironment);
+    EXPECT_NE(drm, nullptr);
+    EXPECT_TRUE(drm->isPerContextVMRequired());
+
+    auto numSubDevices = HwHelper::getSubDevicesCount(rootDeviceEnvironment->getHardwareInfo());
+    for (auto id = 0u; id < numSubDevices; id++) {
+        EXPECT_EQ(0u, drm->getVirtualMemoryAddressSpace(id));
+    }
+    EXPECT_EQ(0u, static_cast<DrmWrap *>(drm.get())->virtualMemoryIds.size());
+}
+
+TEST_F(DrmTests, givenDrmIsCreatedWhenCreateVirtualMemoryFailsThenReturnVirtualMemoryIdZeroAndPrintDebugMessage) {
+    DebugManagerStateRestore dbgRestorer;
+    DebugManager.flags.PrintDebugMessages.set(true);
+
+    VariableBackup<decltype(failOnVirtualMemoryCreate)> backupFailOnVirtualMemoryCreate(&failOnVirtualMemoryCreate);
+
+    failOnVirtualMemoryCreate = -1;
+
+    ::testing::internal::CaptureStderr();
+    auto drm = DrmWrap::createDrm(*rootDeviceEnvironment);
+    EXPECT_NE(drm, nullptr);
+
+    EXPECT_EQ(0u, drm->getVirtualMemoryAddressSpace(0));
+    EXPECT_EQ(0u, static_cast<DrmWrap *>(drm.get())->virtualMemoryIds.size());
+
+    std::string errStr = ::testing::internal::GetCapturedStderr();
+    EXPECT_THAT(errStr, ::testing::HasSubstr(std::string("INFO: Device doesn't support GEM Virtual Memory")));
 }
 
 int main(int argc, char **argv) {
@@ -360,4 +522,12 @@ TEST_F(DrmTests, whenCreateDrmIsCalledThenProperHwInfoIsSetup) {
     EXPECT_NE(IGFX_UNKNOWN_CORE, currentHwInfo->platform.eRenderCoreFamily);
     EXPECT_LT(0u, currentHwInfo->gtSystemInfo.EUCount);
     EXPECT_LT(0u, currentHwInfo->gtSystemInfo.SubSliceCount);
+}
+
+TEST(PlatformsDestructor, whenGlobalPlatformsDestructorIsCalledThenGlobalPlatformsAreDestroyed) {
+    EXPECT_NE(nullptr, platformsImpl);
+    platformsDestructor();
+
+    EXPECT_EQ(nullptr, platformsImpl);
+    platformsImpl = new std::vector<std::unique_ptr<Platform>>;
 }

@@ -15,7 +15,9 @@ using namespace NEO;
 
 typedef PreambleFixture TglLpSlm;
 
-TGLLPTEST_F(TglLpSlm, givenTglLpWhenPreambleIsBeingProgrammedThenThreadArbitrationPolicyIsIgnored) {
+HWTEST2_F(TglLpSlm, givenTglLpWhenPreambleIsBeingProgrammedThenThreadArbitrationPolicyIsIgnored, IsTGLLP) {
+    DebugManagerStateRestore dbgRestore;
+    DebugManager.flags.ForcePreemptionMode.set(static_cast<int32_t>(PreemptionMode::Disabled));
     typedef TGLLPFamily::MI_LOAD_REGISTER_IMM MI_LOAD_REGISTER_IMM;
     LinearStream &cs = linearStream;
     uint32_t l3Config = PreambleHelper<TGLLPFamily>::getL3Config(pDevice->getHardwareInfo(), true);
@@ -30,14 +32,14 @@ TGLLPTEST_F(TglLpSlm, givenTglLpWhenPreambleIsBeingProgrammedThenThreadArbitrati
     EXPECT_EQ(0U, countMmio<FamilyType>(cmdList.begin(), cmdList.end(), 0xE404));
 }
 
-TGLLPTEST_F(TglLpSlm, givenTglLpIsL3Programing) {
+HWTEST2_F(TglLpSlm, givenTglLpIsL3Programing, IsTGLLP) {
     bool isL3Programmable =
         PreambleHelper<TGLLPFamily>::isL3Configurable(*defaultHwInfo);
 
     EXPECT_FALSE(isL3Programmable);
 }
 
-TGLLPTEST_F(TglLpSlm, shouldNotBeEnabledOnGen12) {
+HWTEST2_F(TglLpSlm, shouldNotBeEnabledOnGen12, IsTGLLP) {
     typedef TGLLPFamily::MI_LOAD_REGISTER_IMM MI_LOAD_REGISTER_IMM;
     LinearStream &cs = linearStream;
     uint32_t l3Config = PreambleHelper<FamilyType>::getL3Config(pDevice->getHardwareInfo(), true);
@@ -50,13 +52,13 @@ TGLLPTEST_F(TglLpSlm, shouldNotBeEnabledOnGen12) {
 }
 
 typedef PreambleFixture Gen12LpUrbEntryAllocationSize;
-TGLLPTEST_F(Gen12LpUrbEntryAllocationSize, getUrbEntryAllocationSize) {
+HWTEST2_F(Gen12LpUrbEntryAllocationSize, getUrbEntryAllocationSize, IsTGLLP) {
     uint32_t actualVal = PreambleHelper<FamilyType>::getUrbEntryAllocationSize();
     EXPECT_EQ(1024u, actualVal);
 }
 
 typedef PreambleVfeState Gen12LpPreambleVfeState;
-TGLLPTEST_F(Gen12LpPreambleVfeState, WaOff) {
+HWTEST2_F(Gen12LpPreambleVfeState, WaOff, IsTGLLP) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
     testWaTable->waSendMIFLUSHBeforeVFE = 0;
     LinearStream &cs = linearStream;
@@ -70,11 +72,12 @@ TGLLPTEST_F(Gen12LpPreambleVfeState, WaOff) {
     const auto &pc = *reinterpret_cast<PIPE_CONTROL *>(*itorPC);
     EXPECT_FALSE(pc.getRenderTargetCacheFlushEnable());
     EXPECT_FALSE(pc.getDepthCacheFlushEnable());
+    EXPECT_FALSE(pc.getDepthStallEnable());
     EXPECT_FALSE(pc.getDcFlushEnable());
     EXPECT_EQ(1u, pc.getCommandStreamerStallEnable());
 }
 
-TGLLPTEST_F(Gen12LpPreambleVfeState, givenCcsEngineWhenWaIsSetThenAppropriatePipeControlFlushesAreSet) {
+HWTEST2_F(Gen12LpPreambleVfeState, givenCcsEngineWhenWaIsSetThenAppropriatePipeControlFlushesAreSet, IsTGLLP) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
     testWaTable->waSendMIFLUSHBeforeVFE = 1;
     LinearStream &cs = linearStream;
@@ -93,7 +96,7 @@ TGLLPTEST_F(Gen12LpPreambleVfeState, givenCcsEngineWhenWaIsSetThenAppropriatePip
     EXPECT_EQ(1u, pc.getCommandStreamerStallEnable());
 }
 
-TGLLPTEST_F(Gen12LpPreambleVfeState, givenRcsEngineWhenWaIsSetThenAppropriatePipeControlFlushesAreSet) {
+HWTEST2_F(Gen12LpPreambleVfeState, givenRcsEngineWhenWaIsSetThenAppropriatePipeControlFlushesAreSet, IsTGLLP) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
     testWaTable->waSendMIFLUSHBeforeVFE = 1;
     LinearStream &cs = linearStream;
@@ -108,11 +111,12 @@ TGLLPTEST_F(Gen12LpPreambleVfeState, givenRcsEngineWhenWaIsSetThenAppropriatePip
     const auto &pc = *reinterpret_cast<PIPE_CONTROL *>(*itorPC);
     EXPECT_TRUE(pc.getRenderTargetCacheFlushEnable());
     EXPECT_TRUE(pc.getDepthCacheFlushEnable());
+    EXPECT_TRUE(pc.getDepthStallEnable());
     EXPECT_TRUE(pc.getDcFlushEnable());
     EXPECT_EQ(1u, pc.getCommandStreamerStallEnable());
 }
 
-TGLLPTEST_F(Gen12LpPreambleVfeState, givenDefaultPipeControlWhenItIsProgrammedThenCsStallBitIsSet) {
+HWTEST2_F(Gen12LpPreambleVfeState, givenDefaultPipeControlWhenItIsProgrammedThenCsStallBitIsSet, IsTGLLP) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
     PIPE_CONTROL *pipeControl = static_cast<PIPE_CONTROL *>(linearStream.getSpace(sizeof(PIPE_CONTROL)));
@@ -121,7 +125,7 @@ TGLLPTEST_F(Gen12LpPreambleVfeState, givenDefaultPipeControlWhenItIsProgrammedTh
     EXPECT_EQ(1u, pipeControl->getCommandStreamerStallEnable());
 }
 
-TGLLPTEST_F(Gen12LpPreambleVfeState, givenCfeFusedEuDispatchFlagsWhenprogramAdditionalFieldsInVfeStateIsCalledThenGetDisableSlice0Subslice2ReturnsCorrectValues) {
+HWTEST2_F(Gen12LpPreambleVfeState, givenCfeFusedEuDispatchFlagsWhenprogramAdditionalFieldsInVfeStateIsCalledThenGetDisableSlice0Subslice2ReturnsCorrectValues, IsTGLLP) {
     using MEDIA_VFE_STATE = typename FamilyType::MEDIA_VFE_STATE;
 
     DebugManagerStateRestore restorer;
@@ -156,7 +160,7 @@ GEN12LPTEST_F(ThreadArbitrationGen12Lp, givenPolicyWhenThreadArbitrationProgramm
     PreambleHelper<FamilyType>::programThreadArbitration(&cs, ThreadArbitrationPolicy::RoundRobin);
 
     EXPECT_EQ(0u, cs.getUsed());
-    EXPECT_EQ(0u, PreambleHelper<FamilyType>::getDefaultThreadArbitrationPolicy());
+    EXPECT_EQ(0u, HwHelperHw<FamilyType>::get().getDefaultThreadArbitrationPolicy());
 }
 
 typedef PreambleFixture PreemptionWatermarkGen12LP;

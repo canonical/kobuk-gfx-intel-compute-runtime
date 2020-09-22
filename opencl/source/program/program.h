@@ -9,15 +9,18 @@
 #include "shared/source/compiler_interface/compiler_interface.h"
 #include "shared/source/compiler_interface/linker.h"
 #include "shared/source/device_binary_format/elf/elf_encoder.h"
+#include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/program/program_info.h"
 #include "shared/source/utilities/const_stringref.h"
 
 #include "opencl/source/api/cl_types.h"
 #include "opencl/source/helpers/base_object.h"
+#include "opencl/source/helpers/destructor_callback.h"
 
 #include "cif/builtins/memory/buffer/buffer.h"
 #include "patch_list.h"
 
+#include <list>
 #include <string>
 #include <vector>
 
@@ -148,6 +151,9 @@ class Program : public BaseObject<_cl_program> {
     cl_int setProgramSpecializationConstant(cl_uint specId, size_t specSize, const void *specValue);
     MOCKABLE_VIRTUAL cl_int updateSpecializationConstant(cl_uint specId, size_t specSize, const void *specValue);
 
+    cl_int setReleaseCallback(void(CL_CALLBACK *funcNotify)(cl_program, void *),
+                              void *userData);
+
     size_t getNumKernels() const;
     const KernelInfo *getKernelInfo(const char *kernelName) const;
     const KernelInfo *getKernelInfo(size_t ordinal) const;
@@ -187,9 +193,9 @@ class Program : public BaseObject<_cl_program> {
 
     void processDebugData();
 
-    void updateBuildLog(const Device *pDevice, const char *pErrorString, const size_t errorStringSize);
+    void updateBuildLog(uint32_t rootDeviceIndex, const char *pErrorString, const size_t errorStringSize);
 
-    const char *getBuildLog(const Device *pDevice) const;
+    const char *getBuildLog(uint32_t rootDeviceIndex) const;
 
     cl_uint getProgramBinaryType() const {
         return programBinaryType;
@@ -249,24 +255,29 @@ class Program : public BaseObject<_cl_program> {
         return debugDataSize;
     }
 
-    const Linker::RelocatedSymbolsMap &getSymbols() const {
-        return this->symbols;
+    const Linker::RelocatedSymbolsMap &getSymbols(uint32_t rootDeviceIndex) const {
+        return buildInfos[rootDeviceIndex].symbols;
     }
 
-    LinkerInput *getLinkerInput() const {
-        return this->linkerInput.get();
+    void setSymbols(uint32_t rootDeviceIndex, Linker::RelocatedSymbolsMap &&symbols) {
+        buildInfos[rootDeviceIndex].symbols = std::move(symbols);
+    }
+
+    LinkerInput *getLinkerInput(uint32_t rootDeviceIndex) const {
+        return buildInfos[rootDeviceIndex].linkerInput.get();
+    }
+    void setLinkerInput(uint32_t rootDeviceIndex, std::unique_ptr<LinkerInput> &&linkerInput) {
+        buildInfos[rootDeviceIndex].linkerInput = std::move(linkerInput);
     }
 
     MOCKABLE_VIRTUAL void replaceDeviceBinary(std::unique_ptr<char[]> newBinary, size_t newBinarySize);
 
   protected:
-    Program(ExecutionEnvironment &executionEnvironment);
-
     MOCKABLE_VIRTUAL cl_int createProgramFromBinary(const void *pBinary, size_t binarySize);
 
     cl_int packDeviceBinary();
 
-    MOCKABLE_VIRTUAL cl_int linkBinary();
+    MOCKABLE_VIRTUAL cl_int linkBinary(Device *pDevice, const void *constantsInitData, const void *variablesInitData);
 
     void separateBlockKernels();
 
@@ -321,10 +332,13 @@ class Program : public BaseObject<_cl_program> {
     uint32_t programOptionVersion = 12U;
     bool allowNonUniform = false;
 
-    std::unique_ptr<LinkerInput> linkerInput;
-    Linker::RelocatedSymbolsMap symbols;
+    struct BuildInfo : public NonCopyableClass {
+        std::unique_ptr<LinkerInput> linkerInput;
+        Linker::RelocatedSymbolsMap symbols{};
+        std::string buildLog{};
+    };
 
-    std::map<const Device *, std::string> buildLog;
+    std::vector<BuildInfo> buildInfos;
 
     bool areSpecializationConstantsInitialized = false;
     CIF::RAII::UPtr_t<CIF::Builtins::BufferSimple> specConstantsIds;
@@ -339,6 +353,8 @@ class Program : public BaseObject<_cl_program> {
 
     bool isBuiltIn = false;
     bool kernelDebugEnabled = false;
+
+    std::list<ProgramReleaseCallback *> releaseCallbacks;
 };
 
 } // namespace NEO

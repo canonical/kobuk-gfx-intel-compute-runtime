@@ -69,13 +69,31 @@ Image *D3DTexture<D3D>::create2d(Context *context, D3DTexture2d *d3dTexture, cl_
 
     if (textureDesc.MiscFlags & D3DResourceFlags::MISC_SHARED_NTHANDLE) {
         sharingFcns->getSharedNTHandle(textureStaging, &sharedHandle);
-        alloc = memoryManager->createGraphicsAllocationFromNTHandle(sharedHandle, rootDeviceIndex);
+        if (memoryManager->verifyHandle(toOsHandle(sharedHandle), rootDeviceIndex, true)) {
+            alloc = memoryManager->createGraphicsAllocationFromNTHandle(sharedHandle, rootDeviceIndex);
+        } else {
+            err.set(CL_INVALID_D3D11_RESOURCE_KHR);
+            return nullptr;
+        }
     } else {
         sharingFcns->getSharedHandle(textureStaging, &sharedHandle);
-        AllocationProperties allocProperties(rootDeviceIndex, nullptr, false, GraphicsAllocation::AllocationType::SHARED_IMAGE, false);
-        alloc = memoryManager->createGraphicsAllocationFromSharedHandle(toOsHandle(sharedHandle), allocProperties, false);
+        AllocationProperties allocProperties(rootDeviceIndex,
+                                             false, // allocateMemory
+                                             0u,    // size
+                                             GraphicsAllocation::AllocationType::SHARED_IMAGE,
+                                             false, // isMultiStorageAllocation
+                                             context->getDeviceBitfieldForAllocation());
+        if (memoryManager->verifyHandle(toOsHandle(sharedHandle), rootDeviceIndex, false)) {
+            alloc = memoryManager->createGraphicsAllocationFromSharedHandle(toOsHandle(sharedHandle), allocProperties, false);
+        } else {
+            err.set(CL_INVALID_D3D11_RESOURCE_KHR);
+            return nullptr;
+        }
     }
-    DEBUG_BREAK_IF(!alloc);
+    if (alloc == nullptr) {
+        err.set(CL_OUT_OF_HOST_MEMORY);
+        return nullptr;
+    }
 
     updateImgInfoAndDesc(alloc->getDefaultGmm(), imgInfo, imagePlane, arrayIndex);
 
@@ -86,7 +104,7 @@ Image *D3DTexture<D3D>::create2d(Context *context, D3DTexture2d *d3dTexture, cl_
         clSurfaceFormat = findYuvSurfaceFormatInfo(textureDesc.Format, imagePlane, flags);
         imgInfo.surfaceFormat = &clSurfaceFormat->surfaceFormat;
     } else {
-        clSurfaceFormat = findSurfaceFormatInfo(alloc->getDefaultGmm()->gmmResourceInfo->getResourceFormat(), flags, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+        clSurfaceFormat = findSurfaceFormatInfo(alloc->getDefaultGmm()->gmmResourceInfo->getResourceFormat(), flags, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
         imgInfo.surfaceFormat = &clSurfaceFormat->surfaceFormat;
     }
 
@@ -96,8 +114,10 @@ Image *D3DTexture<D3D>::create2d(Context *context, D3DTexture2d *d3dTexture, cl_
         alloc->getDefaultGmm()->isRenderCompressed = hwHelper.isPageTableManagerSupported(*hwInfo) ? memoryManager->mapAuxGpuVA(alloc)
                                                                                                    : true;
     }
+    auto multiGraphicsAllocation = MultiGraphicsAllocation(rootDeviceIndex);
+    multiGraphicsAllocation.addAllocation(alloc);
 
-    return Image::createSharedImage(context, d3dTextureObj, mcsSurfaceInfo, alloc, nullptr, flags, clSurfaceFormat, imgInfo, __GMM_NO_CUBE_MAP, 0, 0);
+    return Image::createSharedImage(context, d3dTextureObj, mcsSurfaceInfo, std::move(multiGraphicsAllocation), nullptr, flags, 0, clSurfaceFormat, imgInfo, __GMM_NO_CUBE_MAP, 0, 0);
 }
 
 template <typename D3D>
@@ -134,18 +154,36 @@ Image *D3DTexture<D3D>::create3d(Context *context, D3DTexture3d *d3dTexture, cl_
 
     if (textureDesc.MiscFlags & D3DResourceFlags::MISC_SHARED_NTHANDLE) {
         sharingFcns->getSharedNTHandle(textureStaging, &sharedHandle);
-        alloc = memoryManager->createGraphicsAllocationFromNTHandle(sharedHandle, rootDeviceIndex);
+        if (memoryManager->verifyHandle(toOsHandle(sharedHandle), rootDeviceIndex, true)) {
+            alloc = memoryManager->createGraphicsAllocationFromNTHandle(sharedHandle, rootDeviceIndex);
+        } else {
+            err.set(CL_INVALID_D3D11_RESOURCE_KHR);
+            return nullptr;
+        }
     } else {
         sharingFcns->getSharedHandle(textureStaging, &sharedHandle);
-        AllocationProperties allocProperties(rootDeviceIndex, nullptr, false, GraphicsAllocation::AllocationType::SHARED_IMAGE, false);
-        alloc = memoryManager->createGraphicsAllocationFromSharedHandle(toOsHandle(sharedHandle), allocProperties, false);
+        AllocationProperties allocProperties(rootDeviceIndex,
+                                             false, // allocateMemory
+                                             0u,    // size
+                                             GraphicsAllocation::AllocationType::SHARED_IMAGE,
+                                             false, // isMultiStorageAllocation
+                                             context->getDeviceBitfieldForAllocation());
+        if (memoryManager->verifyHandle(toOsHandle(sharedHandle), rootDeviceIndex, false)) {
+            alloc = memoryManager->createGraphicsAllocationFromSharedHandle(toOsHandle(sharedHandle), allocProperties, false);
+        } else {
+            err.set(CL_INVALID_D3D11_RESOURCE_KHR);
+            return nullptr;
+        }
     }
-    DEBUG_BREAK_IF(!alloc);
+    if (alloc == nullptr) {
+        err.set(CL_OUT_OF_HOST_MEMORY);
+        return nullptr;
+    }
 
     updateImgInfoAndDesc(alloc->getDefaultGmm(), imgInfo, ImagePlane::NO_PLANE, 0u);
 
     auto d3dTextureObj = new D3DTexture<D3D>(context, d3dTexture, subresource, textureStaging, sharedResource);
-    auto *clSurfaceFormat = findSurfaceFormatInfo(alloc->getDefaultGmm()->gmmResourceInfo->getResourceFormat(), flags, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+    auto *clSurfaceFormat = findSurfaceFormatInfo(alloc->getDefaultGmm()->gmmResourceInfo->getResourceFormat(), flags, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
     imgInfo.qPitch = alloc->getDefaultGmm()->queryQPitch(GMM_RESOURCE_TYPE::RESOURCE_3D);
 
     imgInfo.surfaceFormat = &clSurfaceFormat->surfaceFormat;
@@ -156,8 +194,10 @@ Image *D3DTexture<D3D>::create3d(Context *context, D3DTexture3d *d3dTexture, cl_
         alloc->getDefaultGmm()->isRenderCompressed = hwHelper.isPageTableManagerSupported(*hwInfo) ? memoryManager->mapAuxGpuVA(alloc)
                                                                                                    : true;
     }
+    auto multiGraphicsAllocation = MultiGraphicsAllocation(rootDeviceIndex);
+    multiGraphicsAllocation.addAllocation(alloc);
 
-    return Image::createSharedImage(context, d3dTextureObj, mcsSurfaceInfo, alloc, nullptr, flags, clSurfaceFormat, imgInfo, __GMM_NO_CUBE_MAP, 0, 0);
+    return Image::createSharedImage(context, d3dTextureObj, mcsSurfaceInfo, std::move(multiGraphicsAllocation), nullptr, flags, 0, clSurfaceFormat, imgInfo, __GMM_NO_CUBE_MAP, 0, 0);
 }
 
 template <typename D3D>
@@ -174,5 +214,5 @@ const ClSurfaceFormatInfo *D3DTexture<D3D>::findYuvSurfaceFormatInfo(DXGI_FORMAT
         imgFormat.image_channel_data_type = CL_UNORM_INT8;
     }
 
-    return Image::getSurfaceFormatFromTable(flags, &imgFormat, 12);
+    return Image::getSurfaceFormatFromTable(flags, &imgFormat, false /* supportsOcl20Features */);
 }

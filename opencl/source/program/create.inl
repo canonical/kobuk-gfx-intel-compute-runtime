@@ -7,7 +7,7 @@
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device/device.h"
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/source/helpers/constants.h"
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/context/context.h"
@@ -96,19 +96,9 @@ T *Program::create(
     }
 
     if (retVal == CL_SUCCESS) {
-        program = new T(*device.getExecutionEnvironment());
+        program = new T(*device.getExecutionEnvironment(), context, isBuiltIn, &device.getDevice());
         program->sourceCode = nullTerminatedString;
         program->createdFrom = CreatedFrom::SOURCE;
-        program->context = context;
-        program->isBuiltIn = isBuiltIn;
-        if (program->context && !program->isBuiltIn) {
-            program->context->incRefInternal();
-        }
-        program->pDevice = &device.getDevice();
-        program->numDevices = 1;
-        if (is32bit || DebugManager.flags.DisableStatelessToStatefulOptimization.get() || device.areSharedSystemAllocationsAllowed()) {
-            CompilerOptions::concatenateAppend(program->internalOptions, CompilerOptions::greaterThan4gbBuffersRequired);
-        }
     }
 
     if (errcodeRet) {
@@ -167,6 +157,11 @@ T *Program::createFromIL(Context *ctx,
                          size_t length,
                          cl_int &errcodeRet) {
     errcodeRet = CL_SUCCESS;
+
+    if (ctx->getDevice(0)->areOcl21FeaturesEnabled() == false) {
+        errcodeRet = CL_INVALID_VALUE;
+        return nullptr;
+    }
 
     if ((il == nullptr) || (length == 0)) {
         errcodeRet = CL_INVALID_BINARY;

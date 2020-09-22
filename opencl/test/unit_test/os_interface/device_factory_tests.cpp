@@ -6,8 +6,8 @@
  */
 
 #include "shared/source/execution_environment/execution_environment.h"
+#include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/hw_info.h"
-#include "shared/source/memory_manager/memory_constants.h"
 #include "shared/source/os_interface/device_factory.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/os_interface/os_library.h"
@@ -16,8 +16,8 @@
 #include "opencl/source/platform/platform.h"
 #include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
+#include "test.h"
 
-#include "gtest/gtest.h"
 #include "hw_device_id.h"
 
 #include <set>
@@ -43,16 +43,16 @@ struct DeviceFactoryTest : public ::testing::Test {
     ExecutionEnvironment *executionEnvironment;
 };
 
-TEST_F(DeviceFactoryTest, PrepareDeviceEnvironments_Check_HwInfo_Platform) {
+TEST_F(DeviceFactoryTest, WhenDeviceEnvironemntIsPreparedThenItIsInitializedCorrectly) {
     const HardwareInfo *refHwinfo = defaultHwInfo.get();
 
     bool success = DeviceFactory::prepareDeviceEnvironments(*executionEnvironment);
     EXPECT_TRUE(success);
     const HardwareInfo *hwInfo = executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo();
-        EXPECT_EQ(refHwinfo->platform.eDisplayCoreFamily, hwInfo->platform.eDisplayCoreFamily);
+    EXPECT_EQ(refHwinfo->platform.eDisplayCoreFamily, hwInfo->platform.eDisplayCoreFamily);
 }
 
-TEST_F(DeviceFactoryTest, overrideKmdNotifySettings) {
+TEST_F(DeviceFactoryTest, WhenOverridingUsingDebugManagerThenOverridesAreAppliedCorrectly) {
     DebugManagerStateRestore stateRestore;
 
     bool success = DeviceFactory::prepareDeviceEnvironments(*executionEnvironment);
@@ -74,7 +74,7 @@ TEST_F(DeviceFactoryTest, overrideKmdNotifySettings) {
     DebugManager.flags.OverrideEnableQuickKmdSleepForSporadicWaits.set(!refEnableQuickKmdSleepForSporadicWaits);
     DebugManager.flags.OverrideDelayQuickKmdSleepForSporadicWaitsMicroseconds.set(static_cast<int32_t>(refDelayQuickKmdSleepForSporadicWaitsMicroseconds) + 12);
 
-    platformsImpl.clear();
+    platformsImpl->clear();
     executionEnvironment = constructPlatform()->peekExecutionEnvironment();
     success = DeviceFactory::prepareDeviceEnvironments(*executionEnvironment);
     ASSERT_TRUE(success);
@@ -92,7 +92,7 @@ TEST_F(DeviceFactoryTest, overrideKmdNotifySettings) {
               hwInfo->capabilityTable.kmdNotifyProperties.delayQuickKmdSleepForSporadicWaitsMicroseconds);
 }
 
-TEST_F(DeviceFactoryTest, getEngineTypeDebugOverride) {
+TEST_F(DeviceFactoryTest, WhenOverridingEngineTypeThenDebugEngineIsReported) {
     DebugManagerStateRestore dbgRestorer;
     int32_t debugEngineType = 2;
     DebugManager.flags.NodeOrdinal.set(debugEngineType);
@@ -144,6 +144,26 @@ TEST_F(DeviceFactoryTest, givenDebugFlagSetWhenPrepareDeviceEnvironmentsForProdu
     EXPECT_EQ(maxNBitValue(12), executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo()->capabilityTable.gpuAddressSpace);
 }
 
+TEST_F(DeviceFactoryTest, givenDebugFlagSetWhenPrepareDeviceEnvironmentsIsCalledThenOverrideRevision) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.OverrideRevision.set(3);
+
+    bool success = DeviceFactory::prepareDeviceEnvironments(*executionEnvironment);
+
+    EXPECT_TRUE(success);
+    EXPECT_EQ(3u, executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo()->platform.usRevId);
+}
+
+TEST_F(DeviceFactoryTest, givenDebugFlagSetWhenPrepareDeviceEnvironmentsForProductFamilyOverrideIsCalledThenOverrideRevision) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.OverrideRevision.set(3);
+
+    bool success = DeviceFactory::prepareDeviceEnvironmentsForProductFamilyOverride(*executionEnvironment);
+
+    EXPECT_TRUE(success);
+    EXPECT_EQ(3u, executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo()->platform.usRevId);
+}
+
 TEST_F(DeviceFactoryTest, whenPrepareDeviceEnvironmentsIsCalledThenAllRootDeviceEnvironmentMembersAreInitialized) {
     DebugManagerStateRestore stateRestore;
     auto requiredDeviceCount = 2u;
@@ -181,7 +201,7 @@ TEST_F(DeviceFactoryTest, givenInvalidHwConfigStringPrepareDeviceEnvironmentsFor
     EXPECT_FALSE(success);
 }
 
-TEST_F(DeviceFactoryTest, givenValidHwConfigStringPrepareDeviceEnvironmentsForProductFamilyOverrideReturnsTrue) {
+HWTEST_F(DeviceFactoryTest, givenValidHwConfigStringPrepareDeviceEnvironmentsForProductFamilyOverrideReturnsTrue) {
     DebugManagerStateRestore stateRestore;
     DebugManager.flags.HardwareInfoOverride.set("1x1x1");
 

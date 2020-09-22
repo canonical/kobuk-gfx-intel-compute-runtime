@@ -7,37 +7,29 @@
 
 #include "shared/source/memory_manager/unified_memory_manager.h"
 
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 #include "test.h"
 
 #include "cl_api_tests.h"
 
 using namespace NEO;
 
-class KernelArgSvmFixture : public ApiFixture<>, public DeviceFixture {
-  public:
-    KernelArgSvmFixture()
-        : pCrossThreadData{0} {
-    }
-
+class KernelArgSvmFixture : public ApiFixture<>, public ClDeviceFixture {
   protected:
     void SetUp() override {
         ApiFixture::SetUp();
-        DeviceFixture::SetUp();
-        if (defaultHwInfo->capabilityTable.ftrSvm == false) {
-            GTEST_SKIP();
-        }
+        ClDeviceFixture::SetUp();
+        REQUIRE_SVM_OR_SKIP(defaultHwInfo);
 
         // define kernel info
         pKernelInfo = std::make_unique<KernelInfo>();
-
         // setup kernel arg offsets
         KernelArgPatchInfo kernelArgPatchInfo;
 
-        kernelHeader.SurfaceStateHeapSize = sizeof(pSshLocal);
+        pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(pSshLocal);
         pKernelInfo->heapInfo.pSsh = pSshLocal;
-        pKernelInfo->heapInfo.pKernelHeader = &kernelHeader;
         pKernelInfo->usesSsh = true;
         pKernelInfo->requiresSshForBuffers = true;
 
@@ -58,16 +50,15 @@ class KernelArgSvmFixture : public ApiFixture<>, public DeviceFixture {
             delete pMockKernel;
         }
 
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
         ApiFixture::TearDown();
     }
 
     cl_int retVal = CL_SUCCESS;
     MockKernel *pMockKernel = nullptr;
     std::unique_ptr<KernelInfo> pKernelInfo;
-    SKernelBinaryHeaderCommon kernelHeader;
-    char pSshLocal[64];
-    char pCrossThreadData[64];
+    char pSshLocal[64]{};
+    char pCrossThreadData[64]{};
 };
 
 typedef Test<KernelArgSvmFixture> clSetKernelArgSVMPointerTests;
@@ -207,7 +198,7 @@ TEST_F(clSetKernelArgSVMPointerTests, GivenSvmAndPointerWithInvalidOffsetWhenSet
         void *ptrSvm = clSVMAlloc(pContext, CL_MEM_READ_WRITE, 256, 4);
         auto svmData = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSvm);
         ASSERT_NE(nullptr, svmData);
-        auto svmAlloc = svmData->gpuAllocation;
+        auto svmAlloc = svmData->gpuAllocations.getGraphicsAllocation(pContext->getDevice(0)->getRootDeviceIndex());
         EXPECT_NE(nullptr, svmAlloc);
 
         size_t offset = svmAlloc->getUnderlyingBufferSize() + 1;

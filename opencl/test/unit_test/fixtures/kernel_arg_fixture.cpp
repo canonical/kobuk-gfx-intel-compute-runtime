@@ -21,14 +21,13 @@ KernelImageArgTest::~KernelImageArgTest() = default;
 void KernelImageArgTest::SetUp() {
     pKernelInfo = std::make_unique<KernelInfo>();
     KernelArgPatchInfo kernelArgPatchInfo;
-    kernelHeader.reset(new iOpenCL::SKernelBinaryHeaderCommon{});
 
-    kernelHeader->SurfaceStateHeapSize = sizeof(surfaceStateHeap);
+    pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
     pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
-    pKernelInfo->heapInfo.pKernelHeader = kernelHeader.get();
     pKernelInfo->usesSsh = true;
 
-    pKernelInfo->kernelArgInfo.resize(5);
+    constexpr int numImages = 5;
+    pKernelInfo->kernelArgInfo.resize(numImages);
     pKernelInfo->kernelArgInfo[4].kernelArgPatchInfoVector.push_back(kernelArgPatchInfo);
     pKernelInfo->kernelArgInfo[3].kernelArgPatchInfoVector.push_back(kernelArgPatchInfo);
     pKernelInfo->kernelArgInfo[2].kernelArgPatchInfoVector.push_back(kernelArgPatchInfo);
@@ -56,7 +55,7 @@ void KernelImageArgTest::SetUp() {
     pKernelInfo->kernelArgInfo[1].isImage = true;
     pKernelInfo->kernelArgInfo[0].isImage = true;
 
-    DeviceFixture::SetUp();
+    ClDeviceFixture::SetUp();
     program = std::make_unique<MockProgram>(*pDevice->getExecutionEnvironment());
     pKernel.reset(new MockKernel(program.get(), *pKernelInfo, *pClDevice));
     ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
@@ -67,7 +66,7 @@ void KernelImageArgTest::SetUp() {
     pKernel->setKernelArgHandler(3, &Kernel::setArgImage);
     pKernel->setKernelArgHandler(4, &Kernel::setArgImage);
 
-    uint32_t crossThreadData[0x44] = {};
+    uint32_t crossThreadData[numImages * 0x20] = {};
     crossThreadData[0x20 / sizeof(uint32_t)] = 0x12344321;
     pKernel->setCrossThreadData(crossThreadData, sizeof(crossThreadData));
 
@@ -82,5 +81,5 @@ void KernelImageArgTest::TearDown() {
     pKernel.reset();
     program.reset();
     context.reset();
-    DeviceFixture::TearDown();
+    ClDeviceFixture::TearDown();
 }

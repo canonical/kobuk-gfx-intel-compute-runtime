@@ -6,15 +6,15 @@
  */
 
 #include "shared/source/built_ins/built_ins.h"
+#include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/preamble.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
-#include "shared/source/memory_manager/memory_constants.h"
+#include "shared/test/unit_test/cmd_parse/hw_parse.h"
 
 #include "opencl/source/sharings/gl/gl_buffer.h"
 #include "opencl/test/unit_test/command_queue/enqueue_fixture.h"
 #include "opencl/test/unit_test/fixtures/hello_world_fixture.h"
 #include "opencl/test/unit_test/fixtures/memory_management_fixture.h"
-#include "opencl/test/unit_test/helpers/hw_parse.h"
 #include "opencl/test/unit_test/mocks/gl/windows/mock_gl_sharing_windows.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
@@ -32,6 +32,7 @@ TEST_F(EnqueueKernelTest, givenKernelWithSharedObjArgsWhenEnqueueIsCalledThenRes
     pContext->setSharingFunctions(glSharing.sharingFunctions.release());
     auto retVal = CL_SUCCESS;
     auto sharedBuffer = GlBuffer::createSharedGlBuffer(pContext, CL_MEM_READ_WRITE, 1, &retVal);
+    auto graphicsAllocation = sharedBuffer->getGraphicsAllocation(pContext->getDevice(0)->getRootDeviceIndex());
     auto sharedMem = static_cast<cl_mem>(sharedBuffer);
     auto nonSharedMem = static_cast<cl_mem>(nonSharedBuffer);
 
@@ -45,8 +46,8 @@ TEST_F(EnqueueKernelTest, givenKernelWithSharedObjArgsWhenEnqueueIsCalledThenRes
 
     auto address1 = static_cast<uint64_t>(*pKernelArg);
     auto sharedBufferGpuAddress =
-        pKernel->isBuiltIn ? sharedBuffer->getGraphicsAllocation()->getGpuAddress()
-                           : sharedBuffer->getGraphicsAllocation()->getGpuAddressToPatch();
+        pKernel->isBuiltIn ? graphicsAllocation->getGpuAddress()
+                           : graphicsAllocation->getGpuAddressToPatch();
     EXPECT_EQ(sharedBufferGpuAddress, address1);
 
     // update address
@@ -58,8 +59,8 @@ TEST_F(EnqueueKernelTest, givenKernelWithSharedObjArgsWhenEnqueueIsCalledThenRes
     auto address2 = static_cast<uint64_t>(*pKernelArg);
     EXPECT_NE(address1, address2);
     sharedBufferGpuAddress =
-        pKernel->isBuiltIn ? sharedBuffer->getGraphicsAllocation()->getGpuAddress()
-                           : sharedBuffer->getGraphicsAllocation()->getGpuAddressToPatch();
+        pKernel->isBuiltIn ? graphicsAllocation->getGpuAddress()
+                           : graphicsAllocation->getGpuAddressToPatch();
     EXPECT_EQ(sharedBufferGpuAddress, address2);
 
     delete sharedBuffer;

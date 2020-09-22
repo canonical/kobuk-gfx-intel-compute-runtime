@@ -11,10 +11,10 @@
 #include "shared/source/direct_submission/direct_submission_hw.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/os_interface/os_context.h"
+#include "shared/test/unit_test/helpers/dispatch_flags_helper.h"
 #include "shared/test/unit_test/helpers/ult_hw_config.h"
 
 #include "opencl/source/memory_manager/os_agnostic_memory_manager.h"
-#include "opencl/test/unit_test/helpers/dispatch_flags_helper.h"
 #include "opencl/test/unit_test/mocks/mock_experimental_command_buffer.h"
 
 #include <map>
@@ -35,6 +35,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::getScratchSpaceController;
     using BaseClass::indirectHeap;
     using BaseClass::iohState;
+    using BaseClass::isBlitterDirectSubmissionEnabled;
     using BaseClass::isDirectSubmissionEnabled;
     using BaseClass::perDssBackedBuffer;
     using BaseClass::programEnginePrologue;
@@ -46,6 +47,8 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::bindingTableBaseAddressRequired;
     using BaseClass::CommandStreamReceiver::cleanupResources;
     using BaseClass::CommandStreamReceiver::commandStream;
+    using BaseClass::CommandStreamReceiver::debugConfirmationFunction;
+    using BaseClass::CommandStreamReceiver::debugPauseStateAddress;
     using BaseClass::CommandStreamReceiver::dispatchMode;
     using BaseClass::CommandStreamReceiver::executionEnvironment;
     using BaseClass::CommandStreamReceiver::experimentalCmdBuffer;
@@ -54,6 +57,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::GSBAFor32BitProgrammed;
     using BaseClass::CommandStreamReceiver::initDirectSubmission;
     using BaseClass::CommandStreamReceiver::internalAllocationStorage;
+    using BaseClass::CommandStreamReceiver::isBlitterDirectSubmissionEnabled;
     using BaseClass::CommandStreamReceiver::isDirectSubmissionEnabled;
     using BaseClass::CommandStreamReceiver::isEnginePrologueSent;
     using BaseClass::CommandStreamReceiver::isPreambleSent;
@@ -82,6 +86,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::taskLevel;
     using BaseClass::CommandStreamReceiver::timestampPacketAllocator;
     using BaseClass::CommandStreamReceiver::timestampPacketWriteEnabled;
+    using BaseClass::CommandStreamReceiver::userPauseConfirmation;
     using BaseClass::CommandStreamReceiver::waitForTaskCountAndCleanAllocationList;
 
     UltCommandStreamReceiver(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) : BaseClass(executionEnvironment, rootDeviceIndex), recursiveLockCounter(0),
@@ -121,7 +126,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     }
     void setPreemptionAllocation(GraphicsAllocation *allocation) { this->preemptionAllocation = allocation; }
 
-    void downloadAllocation(GraphicsAllocation &gfxAllocation) override {
+    void downloadAllocations() override {
         downloadAllocationCalled = true;
     }
 
@@ -186,16 +191,16 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         return CommandStreamReceiverHw<GfxFamily>::obtainUniqueOwnership();
     }
 
-    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking) override {
+    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled) override {
         blitBufferCalled++;
-        return CommandStreamReceiverHw<GfxFamily>::blitBuffer(blitPropertiesContainer, blocking);
+        return CommandStreamReceiverHw<GfxFamily>::blitBuffer(blitPropertiesContainer, blocking, profilingEnabled);
     }
 
     bool createPerDssBackedBuffer(Device &device) override {
         createPerDssBackedBufferCalled++;
         bool result = BaseClass::createPerDssBackedBuffer(device);
         if (!perDssBackedBuffer) {
-            AllocationProperties properties{device.getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::INTERNAL_HEAP};
+            AllocationProperties properties{device.getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::INTERNAL_HEAP, device.getDeviceBitfield()};
             perDssBackedBuffer = executionEnvironment.memoryManager->allocateGraphicsMemoryWithProperties(properties);
         }
         return result;
@@ -221,6 +226,17 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         }
         return directSubmissionAvailable;
     }
+
+    bool isBlitterDirectSubmissionEnabled() const override {
+        if (ultHwConfig.csrBaseCallBlitterDirectSubmissionAvailable) {
+            return BaseClass::isBlitterDirectSubmissionEnabled();
+        }
+        if (ultHwConfig.csrSuperBaseCallBlitterDirectSubmissionAvailable) {
+            return BaseClass::CommandStreamReceiver::isBlitterDirectSubmissionEnabled();
+        }
+        return blitterDirectSubmissionAvailable;
+    }
+
     std::atomic<uint32_t> recursiveLockCounter;
     bool createPageTableManagerCalled = false;
     bool recordFlusheBatchBuffer = false;
@@ -240,5 +256,6 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     DispatchFlags recordedDispatchFlags;
     bool multiOsContextCapable = false;
     bool directSubmissionAvailable = false;
+    bool blitterDirectSubmissionAvailable = false;
 };
 } // namespace NEO

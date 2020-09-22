@@ -5,17 +5,21 @@
  *
  */
 
+#include "shared/source/command_container/command_encoder.h"
+#include "shared/source/device/device.h"
 #include "shared/source/execution_environment/execution_environment.h"
+#include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/gmm_helper/gmm.h"
+#include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/gmm_helper/resource_info.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/bit_helpers.h"
-#include "shared/source/helpers/hw_cmds.h"
 
 #include "opencl/source/helpers/surface_formats.h"
 #include "opencl/source/mem_obj/buffer.h"
 
 #include "buffer_ext.inl"
+#include "hw_cmds.h"
 
 namespace NEO {
 
@@ -29,58 +33,16 @@ union SURFACE_STATE_BUFFER_LENGTH {
 };
 
 template <typename GfxFamily>
-void BufferHw<GfxFamily>::setArgStateful(void *memory, bool forceNonAuxMode, bool disableL3, bool alignSizeForAuxTranslation, bool isReadOnlyArgument) {
-    using RENDER_SURFACE_STATE = typename GfxFamily::RENDER_SURFACE_STATE;
-    using SURFACE_FORMAT = typename RENDER_SURFACE_STATE::SURFACE_FORMAT;
-    using AUXILIARY_SURFACE_MODE = typename RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
+void BufferHw<GfxFamily>::setArgStateful(void *memory, bool forceNonAuxMode, bool disableL3, bool alignSizeForAuxTranslation, bool isReadOnlyArgument, const Device &device) {
+    auto rootDeviceIndex = device.getRootDeviceIndex();
+    auto graphicsAllocation = multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex);
+    EncodeSurfaceState<GfxFamily>::encodeBuffer(memory, getBufferAddress(rootDeviceIndex),
+                                                getSurfaceSize(alignSizeForAuxTranslation, rootDeviceIndex),
+                                                getMocsValue(disableL3, isReadOnlyArgument, rootDeviceIndex), true);
+    EncodeSurfaceState<GfxFamily>::encodeExtraBufferParams(graphicsAllocation,
+                                                           device.getGmmHelper(), memory, forceNonAuxMode, isReadOnlyArgument);
 
-    auto surfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(memory);
-    // The graphics allocation for Host Ptr surface will be created in makeResident call and GPU address is expected to be the same as CPU address
-    auto bufferAddress = (getGraphicsAllocation() != nullptr) ? getGraphicsAllocation()->getGpuAddress() : castToUint64(getHostPtr());
-    bufferAddress += this->offset;
-
-    auto bufferAddressAligned = alignDown(bufferAddress, 4);
-    auto bufferOffset = ptrDiff(bufferAddress, bufferAddressAligned);
-
-    auto surfaceSize = alignUp(getSize() + bufferOffset, alignSizeForAuxTranslation ? 512 : 4);
-
-    SURFACE_STATE_BUFFER_LENGTH Length = {0};
-    Length.Length = static_cast<uint32_t>(surfaceSize - 1);
-
-    surfaceState->setWidth(Length.SurfaceState.Width + 1);
-    surfaceState->setHeight(Length.SurfaceState.Height + 1);
-    surfaceState->setDepth(Length.SurfaceState.Depth + 1);
-
-    if (bufferAddress != 0) {
-        surfaceState->setSurfaceType(RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_BUFFER);
-    } else {
-        surfaceState->setSurfaceType(RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_NULL);
-    }
-    surfaceState->setSurfaceFormat(SURFACE_FORMAT::SURFACE_FORMAT_RAW);
-    surfaceState->setSurfaceVerticalAlignment(RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT_VALIGN_4);
-    surfaceState->setSurfaceHorizontalAlignment(RENDER_SURFACE_STATE::SURFACE_HORIZONTAL_ALIGNMENT_HALIGN_4);
-
-    surfaceState->setTileMode(RENDER_SURFACE_STATE::TILE_MODE_LINEAR);
-    surfaceState->setVerticalLineStride(0);
-    surfaceState->setVerticalLineStrideOffset(0);
-
-    surfaceState->setMemoryObjectControlState(getMocsValue(disableL3, isReadOnlyArgument));
-    surfaceState->setSurfaceBaseAddress(bufferAddressAligned);
-
-    Gmm *gmm = graphicsAllocation ? graphicsAllocation->getDefaultGmm() : nullptr;
-
-    if (gmm && gmm->isRenderCompressed && !forceNonAuxMode &&
-        GraphicsAllocation::AllocationType::BUFFER_COMPRESSED == graphicsAllocation->getAllocationType()) {
-        // Its expected to not program pitch/qpitch/baseAddress for Aux surface in CCS scenarios
-        surfaceState->setCoherencyType(RENDER_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT);
-        surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
-    } else {
-        surfaceState->setCoherencyType(RENDER_SURFACE_STATE::COHERENCY_TYPE_IA_COHERENT);
-        surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE);
-    }
-
-    appendBufferState(memory, context, getGraphicsAllocation(), isReadOnlyArgument);
+    appendBufferState(memory, device, isReadOnlyArgument);
     appendSurfaceStateExt(memory);
 }
-
 } // namespace NEO

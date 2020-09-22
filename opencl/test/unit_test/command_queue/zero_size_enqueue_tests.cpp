@@ -8,17 +8,18 @@
 #include "shared/source/memory_manager/unified_memory_manager.h"
 
 #include "opencl/source/event/event.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 #include "test.h"
 
 using namespace NEO;
 
-class ZeroSizeEnqueueHandlerTest : public Test<DeviceFixture> {
+class ZeroSizeEnqueueHandlerTest : public Test<ClDeviceFixture> {
   public:
     MockContext context;
     cl_int retVal;
@@ -60,8 +61,9 @@ class ZeroSizeEnqueueHandlerTestZeroGws : public ZeroSizeEnqueueHandlerTest {
     std::tuple<unsigned int, size_t *> testGwsInputs[14];
 };
 
-HWTEST_F(ZeroSizeEnqueueHandlerTestZeroGws, GivenZeroSizeEnqueueIsDetectedAndOpenClAtLeast21WhenEnqueingKernelThenCommandMarkerShouldBeEnqueued) {
+HWTEST_F(ZeroSizeEnqueueHandlerTestZeroGws, GivenZeroSizeEnqueueIsDetectedAndOpenClIs21WhenEnqueingKernelThenCommandMarkerShouldBeEnqueued) {
     pClDevice->enabledClVersion = 21;
+    pClDevice->ocl21FeaturesEnabled = true;
 
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pClDevice, 0));
 
@@ -78,24 +80,22 @@ HWTEST_F(ZeroSizeEnqueueHandlerTestZeroGws, GivenZeroSizeEnqueueIsDetectedAndOpe
     }
 }
 
-HWTEST_F(ZeroSizeEnqueueHandlerTestZeroGws, GivenZeroSizeEnqueueIsDetectedAndOpenClIs20OrOlderWhenEnqueingKernelThenErrorIsReturned) {
-    int oclVersionsToTest[] = {12, 20};
-    for (auto oclVersion : oclVersionsToTest) {
-        pClDevice->enabledClVersion = oclVersion;
+HWTEST_F(ZeroSizeEnqueueHandlerTestZeroGws, GivenZeroSizeEnqueueIsDetectedAndOpenClIs12WhenEnqueingKernelThenErrorIsReturned) {
+    pClDevice->enabledClVersion = 12;
+    pClDevice->ocl21FeaturesEnabled = false;
 
-        auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pClDevice, 0));
+    auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pClDevice, 0));
 
-        MockKernelWithInternals mockKernel(*pClDevice);
+    MockKernelWithInternals mockKernel(*pClDevice);
 
-        for (auto testInput : testGwsInputs) {
-            auto workDim = std::get<0>(testInput);
-            auto gws = std::get<1>(testInput);
-            mockCmdQ->lastCommandType = static_cast<cl_command_type>(CL_COMMAND_COPY_BUFFER);
+    for (auto testInput : testGwsInputs) {
+        auto workDim = std::get<0>(testInput);
+        auto gws = std::get<1>(testInput);
+        mockCmdQ->lastCommandType = static_cast<cl_command_type>(CL_COMMAND_COPY_BUFFER);
 
-            retVal = mockCmdQ->enqueueKernel(mockKernel.mockKernel, workDim, nullptr, gws, nullptr, 0, nullptr, nullptr);
-            EXPECT_EQ(CL_INVALID_GLOBAL_WORK_SIZE, retVal);
-            EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_COPY_BUFFER), mockCmdQ->lastCommandType);
-        }
+        retVal = mockCmdQ->enqueueKernel(mockKernel.mockKernel, workDim, nullptr, gws, nullptr, 0, nullptr, nullptr);
+        EXPECT_EQ(CL_INVALID_GLOBAL_WORK_SIZE, retVal);
+        EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_COPY_BUFFER), mockCmdQ->lastCommandType);
     }
 }
 
@@ -110,12 +110,12 @@ HWTEST_F(ZeroSizeEnqueueHandlerTestZeroGws, GivenZeroSizeEnqueueIsDetectedAndLoc
     size_t lws[1] = {1};
 
     EXPECT_NO_THROW(retVal = mockCmdQ->enqueueKernel(mockKernel.mockKernel, workDim, nullptr, gws, lws, 0, nullptr, nullptr));
-    auto expected = (pClDevice->getEnabledClVersion() < 21 ? CL_INVALID_GLOBAL_WORK_SIZE : CL_SUCCESS);
+    auto expected = (pClDevice->areOcl21FeaturesEnabled() == false ? CL_INVALID_GLOBAL_WORK_SIZE : CL_SUCCESS);
     EXPECT_EQ(expected, retVal);
 }
 
 HWTEST_F(ZeroSizeEnqueueHandlerTest, GivenZeroSizeEnqueueIsDetectedWhenEnqueingKernelThenEventCommandTypeShoudBeUnchanged) {
-    if (pClDevice->getEnabledClVersion() < 21) {
+    if (pClDevice->areOcl21FeaturesEnabled() == false) {
         return;
     }
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pClDevice, 0));
@@ -778,13 +778,11 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, GivenZeroSizeEnqueueIsDetectedWhenFillingIm
 }
 
 HWTEST_F(ZeroSizeEnqueueHandlerTest, GivenZeroSizeEnqueueIsDetectedWhenCopyingSvmMemThenCommandMarkerShouldBeEnqueued) {
-    if (pDevice->getHardwareInfo().capabilityTable.ftrSvm == false) {
-        GTEST_SKIP();
-    }
+    REQUIRE_SVM_OR_SKIP(pDevice);
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pClDevice, 0));
 
-    void *pSrcSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {});
-    void *pDstSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {});
+    void *pSrcSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {}, pDevice->getDeviceBitfield());
+    void *pDstSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {}, pDevice->getDeviceBitfield());
     size_t zeroSize = 0;
     mockCmdQ->enqueueSVMMemcpy(false, pSrcSVM, pDstSVM, zeroSize, 0, nullptr, nullptr);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
@@ -794,14 +792,12 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, GivenZeroSizeEnqueueIsDetectedWhenCopyingSv
 }
 
 HWTEST_F(ZeroSizeEnqueueHandlerTest, GivenZeroSizeEnqueueIsDetectedWhenCopyingSvmMemThenEventCommandTypeShouldBeUnchanged) {
-    if (pDevice->getHardwareInfo().capabilityTable.ftrSvm == false) {
-        GTEST_SKIP();
-    }
+    REQUIRE_SVM_OR_SKIP(pDevice);
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pClDevice, 0));
 
     cl_event event;
-    void *pSrcSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {});
-    void *pDstSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {});
+    void *pSrcSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {}, pDevice->getDeviceBitfield());
+    void *pDstSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {}, pDevice->getDeviceBitfield());
     size_t zeroSize = 0;
     mockCmdQ->enqueueSVMMemcpy(false, pSrcSVM, pDstSVM, zeroSize, 0, nullptr, &event);
     EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_MARKER), mockCmdQ->lastCommandType);
@@ -820,12 +816,10 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, GivenZeroSizeEnqueueIsDetectedWhenCopyingSv
 }
 
 HWTEST_F(ZeroSizeEnqueueHandlerTest, GivenZeroSizeEnqueueIsDetectedWhenFillingSvmMemThenCommandMarkerShouldBeEnqueued) {
-    if (pDevice->getHardwareInfo().capabilityTable.ftrSvm == false) {
-        GTEST_SKIP();
-    }
+    REQUIRE_SVM_OR_SKIP(pDevice);
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pClDevice, 0));
 
-    void *pSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {});
+    void *pSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {}, pDevice->getDeviceBitfield());
     const float pattern[1] = {1.2345f};
     size_t zeroSize = 0;
     mockCmdQ->enqueueSVMMemFill(pSVM, &pattern, sizeof(pattern), zeroSize, 0, nullptr, nullptr);
@@ -835,13 +829,11 @@ HWTEST_F(ZeroSizeEnqueueHandlerTest, GivenZeroSizeEnqueueIsDetectedWhenFillingSv
 }
 
 HWTEST_F(ZeroSizeEnqueueHandlerTest, GivenZeroSizeEnqueueIsDetectedWhenFillingSvmMemThenEventCommandTypeShouldBeUnchanged) {
-    if (pDevice->getHardwareInfo().capabilityTable.ftrSvm == false) {
-        GTEST_SKIP();
-    }
+    REQUIRE_SVM_OR_SKIP(pDevice);
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(&context, pClDevice, 0));
 
     cl_event event;
-    void *pSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {});
+    void *pSVM = context.getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {}, pDevice->getDeviceBitfield());
     const float pattern[1] = {1.2345f};
     size_t zeroSize = 0;
     mockCmdQ->enqueueSVMMemFill(pSVM, &pattern, sizeof(pattern), zeroSize, 0, nullptr, &event);

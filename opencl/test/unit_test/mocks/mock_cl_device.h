@@ -7,8 +7,10 @@
 
 #pragma once
 
+#include "shared/test/unit_test/mocks/mock_device.h"
+
 #include "opencl/source/cl_device/cl_device.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
+#include "opencl/test/unit_test/mocks/mock_cl_execution_environment.h"
 
 namespace NEO {
 class FailMemoryManager;
@@ -23,12 +25,14 @@ extern CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executio
 class MockClDevice : public ClDevice {
   public:
     using ClDevice::ClDevice;
+    using ClDevice::compilerFeatures;
     using ClDevice::deviceExtensions;
     using ClDevice::deviceInfo;
     using ClDevice::driverInfo;
     using ClDevice::enabledClVersion;
     using ClDevice::initializeCaps;
     using ClDevice::name;
+    using ClDevice::ocl21FeaturesEnabled;
     using ClDevice::simultaneousInterops;
     using ClDevice::subDevices;
 
@@ -55,11 +59,20 @@ class MockClDevice : public ClDevice {
     }
     template <typename T>
     static T *createWithNewExecutionEnvironment(const HardwareInfo *pHwInfo, uint32_t rootDeviceIndex = 0) {
-        return MockDevice::createWithNewExecutionEnvironment<T>(pHwInfo, rootDeviceIndex);
+        auto executionEnvironment = new MockClExecutionEnvironment();
+        auto numRootDevices = DebugManager.flags.CreateMultipleRootDevices.get() ? DebugManager.flags.CreateMultipleRootDevices.get() : 1u;
+        executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
+        pHwInfo = pHwInfo ? pHwInfo : defaultHwInfo.get();
+        for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
+            executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(pHwInfo);
+        }
+        return MockDevice::createWithExecutionEnvironment<T>(pHwInfo, executionEnvironment, rootDeviceIndex);
     }
     SubDevice *createSubDevice(uint32_t subDeviceIndex) { return device.createSubDevice(subDeviceIndex); }
     std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const { return device.createCommandStreamReceiver(); }
     BuiltIns *getBuiltIns() const { return getDevice().getBuiltIns(); }
+
+    bool areOcl21FeaturesSupported() const;
 
     void setDebuggerActive(bool active) {
         sharedDeviceInfo.debuggerActive = active;
@@ -72,6 +85,15 @@ class MockClDevice : public ClDevice {
     static decltype(&createCommandStream) &createCommandStreamReceiverFunc;
     std::unique_ptr<MemoryManager> &mockMemoryManager;
     std::vector<EngineControl> &engines;
+};
+
+class MockDeviceWithDebuggerActive : public MockDevice {
+  public:
+    MockDeviceWithDebuggerActive(ExecutionEnvironment *executionEnvironment, uint32_t deviceIndex) : MockDevice(executionEnvironment, deviceIndex) {}
+    void initializeCaps() override {
+        MockDevice::initializeCaps();
+        this->setDebuggerActive(true);
+    }
 };
 
 } // namespace NEO

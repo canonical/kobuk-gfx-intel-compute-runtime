@@ -14,10 +14,11 @@
 
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/context_fixture.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 #include "test.h"
 
 #include "gtest/gtest.h"
@@ -25,7 +26,7 @@
 using namespace NEO;
 
 class BufferSetArgTest : public ContextFixture,
-                         public DeviceFixture,
+                         public ClDeviceFixture,
                          public testing::Test {
 
     using ContextFixture::SetUp;
@@ -38,7 +39,7 @@ class BufferSetArgTest : public ContextFixture,
 
   protected:
     void SetUp() override {
-        DeviceFixture::SetUp();
+        ClDeviceFixture::SetUp();
         cl_device_id device = pClDevice;
         ContextFixture::SetUp(1, &device);
         pKernelInfo = std::make_unique<KernelInfo>();
@@ -63,9 +64,8 @@ class BufferSetArgTest : public ContextFixture,
         pKernelInfo->kernelArgInfo[1].kernelArgPatchInfoVector[0].size = sizeOfPointer;
         pKernelInfo->kernelArgInfo[0].kernelArgPatchInfoVector[0].size = sizeOfPointer;
 
-        kernelHeader.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
         pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
-        pKernelInfo->heapInfo.pKernelHeader = &kernelHeader;
+        pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
         pKernelInfo->usesSsh = true;
 
         pProgram = new MockProgram(*pDevice->getExecutionEnvironment(), pContext, false, pDevice);
@@ -90,7 +90,7 @@ class BufferSetArgTest : public ContextFixture,
 
         delete pProgram;
         ContextFixture::TearDown();
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     cl_int retVal = CL_SUCCESS;
@@ -103,15 +103,15 @@ class BufferSetArgTest : public ContextFixture,
     Buffer *buffer = nullptr;
 };
 
-TEST_F(BufferSetArgTest, setKernelArgBuffer) {
+TEST_F(BufferSetArgTest, WhenSettingKernelArgBufferThenGpuAddressIsSet) {
     auto pKernelArg = (void **)(pKernel->getCrossThreadData() +
                                 pKernelInfo->kernelArgInfo[0].kernelArgPatchInfoVector[0].crossthreadOffset);
 
     auto tokenSize = pKernelInfo->kernelArgInfo[0].kernelArgPatchInfoVector[0].size;
 
-    buffer->setArgStateless(pKernelArg, tokenSize);
+    buffer->setArgStateless(pKernelArg, tokenSize, pClDevice->getRootDeviceIndex(), false);
 
-    EXPECT_EQ((void *)((uintptr_t)buffer->getGraphicsAllocation()->getGpuAddress()), *pKernelArg);
+    EXPECT_EQ(reinterpret_cast<void *>(buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress()), *pKernelArg);
 }
 
 TEST_F(BufferSetArgTest, givenInvalidSizeWhenSettingKernelArgBufferThenReturnClInvalidArgSize) {
@@ -151,7 +151,7 @@ HWTEST_F(BufferSetArgTest, givenSetKernelArgOnReadOnlyBufferThatIsMisalingedWhen
     pKernelInfo->requiresSshForBuffers = true;
     pKernelInfo->kernelArgInfo[0].isReadOnly = true;
 
-    auto graphicsAllocation = castToObject<Buffer>(buffer)->getGraphicsAllocation();
+    auto graphicsAllocation = buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex());
     graphicsAllocation->setSize(graphicsAllocation->getUnderlyingBufferSize() - 1);
 
     cl_mem clMemBuffer = buffer;
@@ -187,9 +187,10 @@ HWTEST_F(BufferSetArgTest, givenNonPureStatefulArgWhenRenderCompressedBufferIsSe
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
     auto surfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(ptrOffset(pKernel->getSurfaceStateHeap(), pKernelInfo->kernelArgInfo[0].offsetHeap));
-    buffer->getGraphicsAllocation()->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
-    buffer->getGraphicsAllocation()->setDefaultGmm(new Gmm(pDevice->getGmmClientContext(), buffer->getGraphicsAllocation()->getUnderlyingBuffer(), buffer->getSize(), false));
-    buffer->getGraphicsAllocation()->getDefaultGmm()->isRenderCompressed = true;
+    auto graphicsAllocation = buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex());
+    graphicsAllocation->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
+    graphicsAllocation->setDefaultGmm(new Gmm(pDevice->getGmmClientContext(), graphicsAllocation->getUnderlyingBuffer(), buffer->getSize(), false));
+    graphicsAllocation->getDefaultGmm()->isRenderCompressed = true;
     pKernelInfo->requiresSshForBuffers = true;
     cl_mem clMem = buffer;
 
@@ -204,17 +205,17 @@ HWTEST_F(BufferSetArgTest, givenNonPureStatefulArgWhenRenderCompressedBufferIsSe
     EXPECT_TRUE(RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E == surfaceState->getAuxiliarySurfaceMode());
 }
 
-TEST_F(BufferSetArgTest, setKernelArgBufferFor32BitAddressing) {
+TEST_F(BufferSetArgTest, Given32BitAddressingWhenSettingArgStatelessThenGpuAddressIsSetCorrectly) {
     auto pKernelArg = (void **)(pKernel->getCrossThreadData() +
                                 pKernelInfo->kernelArgInfo[0].kernelArgPatchInfoVector[0].crossthreadOffset);
 
     auto tokenSize = pKernelInfo->kernelArgInfo[0].kernelArgPatchInfoVector[0].size;
 
-    uintptr_t gpuBase = (uintptr_t)buffer->getGraphicsAllocation()->getGpuAddress() >> 2;
-    buffer->getGraphicsAllocation()->setGpuBaseAddress(gpuBase);
-    buffer->setArgStateless(pKernelArg, tokenSize, true);
+    auto gpuBase = buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress() >> 2;
+    buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->setGpuBaseAddress(gpuBase);
+    buffer->setArgStateless(pKernelArg, tokenSize, pClDevice->getRootDeviceIndex(), true);
 
-    EXPECT_EQ((uintptr_t)buffer->getGraphicsAllocation()->getGpuAddress() - gpuBase, (uintptr_t)*pKernelArg);
+    EXPECT_EQ(reinterpret_cast<void *>(buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress() - gpuBase), *pKernelArg);
 }
 
 TEST_F(BufferSetArgTest, givenBufferWhenOffsetedSubbufferIsPassedToSetKernelArgThenCorrectGpuVAIsPatched) {
@@ -222,7 +223,7 @@ TEST_F(BufferSetArgTest, givenBufferWhenOffsetedSubbufferIsPassedToSetKernelArgT
     region.origin = 0xc0;
     region.size = 32;
     cl_int error = 0;
-    auto subBuffer = buffer->createSubBuffer(buffer->getMemoryPropertiesFlags(), buffer->getMemoryPropertiesFlagsIntel(), &region, error);
+    auto subBuffer = buffer->createSubBuffer(buffer->getFlags(), buffer->getFlagsIntel(), &region, error);
 
     ASSERT_NE(nullptr, subBuffer);
 
@@ -233,9 +234,9 @@ TEST_F(BufferSetArgTest, givenBufferWhenOffsetedSubbufferIsPassedToSetKernelArgT
 
     auto tokenSize = pKernelInfo->kernelArgInfo[0].kernelArgPatchInfoVector[0].size;
 
-    subBuffer->setArgStateless(pKernelArg, tokenSize);
+    subBuffer->setArgStateless(pKernelArg, tokenSize, pClDevice->getRootDeviceIndex(), false);
 
-    EXPECT_EQ((void *)((uintptr_t)subBuffer->getGraphicsAllocation()->getGpuAddress() + region.origin), *pKernelArg);
+    EXPECT_EQ(reinterpret_cast<void *>(subBuffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress() + region.origin), *pKernelArg);
     delete subBuffer;
 }
 
@@ -252,11 +253,11 @@ TEST_F(BufferSetArgTest, givenCurbeTokenThatSizeIs4BytesWhenStatelessArgIsPatche
 
     pKernelInfo->kernelArgInfo[0].kernelArgPatchInfoVector[0].size = sizeOf4Bytes;
 
-    buffer->setArgStateless(pKernelArg, sizeOf4Bytes);
+    buffer->setArgStateless(pKernelArg, sizeOf4Bytes, pClDevice->getRootDeviceIndex(), false);
 
     //make sure only 4 bytes are patched
-    uintptr_t bufferAddress = (uintptr_t)buffer->getGraphicsAllocation()->getGpuAddress();
-    uint32_t address32bits = (uint32_t)bufferAddress;
+    auto bufferAddress = buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress();
+    uint32_t address32bits = static_cast<uint32_t>(bufferAddress);
     uint64_t curbeValue = *pointer64bytes;
     uint32_t higherPart = curbeValue >> 32;
     uint32_t lowerPart = (curbeValue & 0xffffffff);
@@ -264,7 +265,7 @@ TEST_F(BufferSetArgTest, givenCurbeTokenThatSizeIs4BytesWhenStatelessArgIsPatche
     EXPECT_EQ(address32bits, lowerPart);
 }
 
-TEST_F(BufferSetArgTest, clSetKernelArgBuffer) {
+TEST_F(BufferSetArgTest, WhenSettingKernelArgThenAddressToPatchIsSetCorrectlyAndSurfacesSet) {
     cl_mem memObj = buffer;
 
     retVal = clSetKernelArg(
@@ -277,7 +278,7 @@ TEST_F(BufferSetArgTest, clSetKernelArgBuffer) {
     auto pKernelArg = (void **)(pKernel->getCrossThreadData() +
                                 pKernelInfo->kernelArgInfo[0].kernelArgPatchInfoVector[0].crossthreadOffset);
 
-    EXPECT_EQ((void *)buffer->getGraphicsAllocation()->getGpuAddressToPatch(), *pKernelArg);
+    EXPECT_EQ(reinterpret_cast<void *>(buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddressToPatch()), *pKernelArg);
 
     std::vector<Surface *> surfaces;
     pKernel->getResidency(surfaces);
@@ -288,16 +289,14 @@ TEST_F(BufferSetArgTest, clSetKernelArgBuffer) {
     }
 }
 
-TEST_F(BufferSetArgTest, clSetKernelArgSVMPointer) {
-    if (!pDevice->getHardwareInfo().capabilityTable.ftrSvm) {
-        GTEST_SKIP();
-    }
-    void *ptrSVM = pContext->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {});
+TEST_F(BufferSetArgTest, GivenSvmPointerWhenSettingKernelArgThenAddressToPatchIsSetCorrectlyAndSurfacesSet) {
+    REQUIRE_SVM_OR_SKIP(pDevice);
+    void *ptrSVM = pContext->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {}, pDevice->getDeviceBitfield());
     EXPECT_NE(nullptr, ptrSVM);
 
     auto svmData = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSVM);
     ASSERT_NE(nullptr, svmData);
-    GraphicsAllocation *pSvmAlloc = svmData->gpuAllocation;
+    GraphicsAllocation *pSvmAlloc = svmData->gpuAllocations.getGraphicsAllocation(pDevice->getRootDeviceIndex());
     EXPECT_NE(nullptr, pSvmAlloc);
 
     retVal = pKernel->setArgSvmAlloc(
@@ -321,7 +320,7 @@ TEST_F(BufferSetArgTest, clSetKernelArgSVMPointer) {
     pContext->getSVMAllocsManager()->freeSVMAlloc(ptrSVM);
 }
 
-TEST_F(BufferSetArgTest, getKernelArgShouldReturnBuffer) {
+TEST_F(BufferSetArgTest, WhenGettingKernelArgThenBufferIsReturned) {
     cl_mem memObj = buffer;
 
     retVal = pKernel->setArg(
@@ -348,7 +347,7 @@ TEST_F(BufferSetArgTest, givenKernelArgBufferWhenAddPathInfoDataIsSetThenPatchIn
 
     EXPECT_EQ(PatchInfoAllocationType::KernelArg, pKernel->getPatchInfoDataList()[0].sourceType);
     EXPECT_EQ(PatchInfoAllocationType::IndirectObjectHeap, pKernel->getPatchInfoDataList()[0].targetType);
-    EXPECT_EQ(buffer->getGraphicsAllocation()->getGpuAddressToPatch(), pKernel->getPatchInfoDataList()[0].sourceAllocation);
+    EXPECT_EQ(buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddressToPatch(), pKernel->getPatchInfoDataList()[0].sourceAllocation);
     EXPECT_EQ(reinterpret_cast<uint64_t>(pKernel->getCrossThreadData()), pKernel->getPatchInfoDataList()[0].targetAllocation);
     EXPECT_EQ(0u, pKernel->getPatchInfoDataList()[0].sourceAllocationOffset);
 }

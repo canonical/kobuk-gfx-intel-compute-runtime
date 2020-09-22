@@ -6,8 +6,9 @@
  */
 
 #include "shared/source/helpers/ptr_math.h"
+#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 
-#include "opencl/source/helpers/memory_properties_flags_helpers.h"
+#include "opencl/source/helpers/memory_properties_helpers.h"
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/test/unit_test/fixtures/kernel_arg_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
@@ -20,10 +21,11 @@
 #include "test.h"
 
 #include "gtest/gtest.h"
+#include "hw_cmds.h"
 
 using namespace NEO;
 
-TEST_F(KernelImageArgTest, GIVENkernelWithImageArgsWHENcheckDifferentScenariosTHENproperBehaviour) {
+TEST_F(KernelImageArgTest, GivenKernelWithImageArgsWhenCheckingDifferentScenariosThenBehaviourIsCorrect) {
     size_t imageWidth = image->getImageDesc().image_width;
     size_t imageHeight = image->getImageDesc().image_height;
     size_t imageDepth = image->getImageDesc().image_depth;
@@ -56,7 +58,7 @@ TEST_F(KernelImageArgTest, givenKernelWithFlatImageTokensWhenArgIsSetThenPatchAl
     size_t imageWidth = image->getImageDesc().image_width;
     size_t imageHeight = image->getImageDesc().image_height;
     size_t imageRowPitch = image->getImageDesc().image_row_pitch;
-    uint64_t imageBaseAddress = image->getGraphicsAllocation()->getGpuAddress();
+    uint64_t imageBaseAddress = image->getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex())->getGpuAddress();
 
     cl_mem memObj = image.get();
 
@@ -96,7 +98,7 @@ TEST_F(KernelImageArgTest, givenImageWithNumSamplesWhenSetArgIsCalledThenPatchNu
     imgDesc.image_width = 5;
     imgDesc.image_height = 5;
 
-    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
     auto sampleImg = Image::create(context.get(), {}, 0, 0, surfaceFormat, &imgDesc, nullptr, retVal);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -118,8 +120,11 @@ TEST_F(KernelImageArgTest, givenImageWithWriteOnlyAccessAndReadOnlyArgWhenCheckC
     cl_mem_flags flags = CL_MEM_WRITE_ONLY;
     imgDesc.image_width = 5;
     imgDesc.image_height = 5;
-    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
-    std::unique_ptr<Image> img(Image::create(context.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(
+        0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
+    std::unique_ptr<Image> img(
+        Image::create(context.get(), MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
+                      flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
     pKernelInfo->kernelArgInfo[0].metadata.accessQualifier = NEO::KernelArgMetadata::AccessReadOnly;
     cl_mem memObj = img.get();
     retVal = pKernel->checkCorrectImageAccessQualifier(0, sizeof(memObj), &memObj);
@@ -157,8 +162,11 @@ TEST_F(KernelImageArgTest, givenImageWithReadOnlyAccessAndWriteOnlyArgWhenCheckC
     cl_mem_flags flags = CL_MEM_READ_ONLY;
     imgDesc.image_width = 5;
     imgDesc.image_height = 5;
-    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
-    std::unique_ptr<Image> img(Image::create(context.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(
+        0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
+    std::unique_ptr<Image> img(
+        Image::create(context.get(), MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
+                      flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
     pKernelInfo->kernelArgInfo[0].metadata.accessQualifier = NEO::KernelArgMetadata::AccessWriteOnly;
     cl_mem memObj = img.get();
     retVal = pKernel->checkCorrectImageAccessQualifier(0, sizeof(memObj), &memObj);
@@ -177,8 +185,11 @@ TEST_F(KernelImageArgTest, givenImageWithReadOnlyAccessAndReadOnlyArgWhenCheckCo
     cl_mem_flags flags = CL_MEM_READ_ONLY;
     imgDesc.image_width = 5;
     imgDesc.image_height = 5;
-    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
-    std::unique_ptr<Image> img(Image::create(context.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(
+        0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
+    std::unique_ptr<Image> img(
+        Image::create(context.get(), MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
+                      flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
     pKernelInfo->kernelArgInfo[0].metadata.accessQualifier = NEO::KernelArgMetadata::AccessReadOnly;
     cl_mem memObj = img.get();
     retVal = pKernel->checkCorrectImageAccessQualifier(0, sizeof(memObj), &memObj);
@@ -193,8 +204,11 @@ TEST_F(KernelImageArgTest, givenImageWithWriteOnlyAccessAndWriteOnlyArgWhenCheck
     cl_mem_flags flags = CL_MEM_WRITE_ONLY;
     imgDesc.image_width = 5;
     imgDesc.image_height = 5;
-    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
-    std::unique_ptr<Image> img(Image::create(context.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(
+        0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
+    std::unique_ptr<Image> img(
+        Image::create(context.get(), MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
+                      flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
     pKernelInfo->kernelArgInfo[0].metadata.accessQualifier = NEO::KernelArgMetadata::AccessWriteOnly;
     cl_mem memObj = img.get();
     retVal = pKernel->checkCorrectImageAccessQualifier(0, sizeof(memObj), &memObj);
@@ -210,7 +224,7 @@ HWTEST_F(KernelImageArgTest, givenImgWithMcsAllocWhenMakeResidentThenMakeMcsAllo
     imgDesc.image_width = 5;
     imgDesc.image_height = 5;
 
-    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
     auto img = Image::create(context.get(), {}, 0, 0, surfaceFormat, &imgDesc, nullptr, retVal);
     EXPECT_EQ(CL_SUCCESS, retVal);
     auto mcsAlloc = context->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{pDevice->getRootDeviceIndex(), MemoryConstants::pageSize});
@@ -238,8 +252,11 @@ TEST_F(KernelImageArgTest, givenKernelWithSettedArgWhenUnSetCalledThenArgIsUnset
     cl_mem_flags flags = CL_MEM_WRITE_ONLY;
     imgDesc.image_width = 5;
     imgDesc.image_height = 5;
-    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
-    std::unique_ptr<Image> img(Image::create(context.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(
+        0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
+    std::unique_ptr<Image> img(
+        Image::create(context.get(), MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
+                      flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
     cl_mem memObj = img.get();
 
     retVal = pKernel->setArg(0, sizeof(memObj), &memObj);
@@ -275,8 +292,11 @@ TEST_F(KernelImageArgTest, givenKernelWithSharedImageWhenSetArgCalledThenUsingSh
     cl_mem_flags flags = CL_MEM_WRITE_ONLY;
     imgDesc.image_width = 5;
     imgDesc.image_height = 5;
-    auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.clVersionSupport);
-    std::unique_ptr<Image> img(Image::create(context.get(), MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(flags, 0, 0), flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
+    auto surfaceFormat = Image::getSurfaceFormatFromTable(
+        0, &imgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
+    std::unique_ptr<Image> img(
+        Image::create(context.get(), MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
+                      flags, 0, surfaceFormat, &imgDesc, nullptr, retVal));
     cl_mem memObj = img.get();
 
     MockSharingHandler *mockSharingHandler = new MockSharingHandler;
@@ -323,4 +343,89 @@ TEST_F(KernelImageArgTest, givenNoCacheFlushImageWhenSettingAsArgThenExpectAlloc
     pKernel->setArg(0, sizeof(imageObj), &imageObj);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(nullptr, pKernel->kernelArgRequiresCacheFlush[0]);
+}
+
+HWTEST_F(KernelImageArgTest, givenUsedBindlessImagesWhenPatchingSurfaceStateOffsetsThenCorrectOffsetIsPatchedInCrossThreadData) {
+    using DataPortBindlessSurfaceExtendedMessageDescriptor = typename FamilyType::DataPortBindlessSurfaceExtendedMessageDescriptor;
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.UseBindlessImages.set(1);
+
+    pKernelInfo->usesSsh = true;
+
+    for (size_t i = 0; i < pKernelInfo->kernelArgInfo.size(); i++) {
+        pKernelInfo->kernelArgInfo[i].kernelArgPatchInfoVector[0].crossthreadOffset = 0x20 + static_cast<uint32_t>(0x20 * i);
+        auto crossThreadDataOffset = pKernelInfo->kernelArgInfo[i].kernelArgPatchInfoVector[0].crossthreadOffset;
+        auto patchLocation = reinterpret_cast<uint32_t *>(ptrOffset(pKernel->getCrossThreadData(), crossThreadDataOffset));
+        *patchLocation = 0xdead;
+    }
+
+    pKernelInfo->kernelArgInfo[pKernelInfo->kernelArgInfo.size() - 1].isImage = false;
+
+    uint32_t sshOffset = 0x4000;
+    pKernel->patchBindlessSurfaceStateOffsets(sshOffset);
+
+    for (size_t i = 0; i < pKernelInfo->kernelArgInfo.size(); i++) {
+        auto crossThreadDataOffset = pKernelInfo->kernelArgInfo[i].kernelArgPatchInfoVector[0].crossthreadOffset;
+        auto patchLocation = reinterpret_cast<uint32_t *>(ptrOffset(pKernel->getCrossThreadData(), crossThreadDataOffset));
+
+        if (pKernelInfo->kernelArgInfo[i].isImage) {
+            DataPortBindlessSurfaceExtendedMessageDescriptor extMessageDesc;
+            extMessageDesc.setBindlessSurfaceOffset(sshOffset + pKernelInfo->kernelArgInfo[i].offsetHeap);
+            auto expectedOffset = extMessageDesc.getBindlessSurfaceOffsetToPatch();
+            EXPECT_EQ(expectedOffset, *patchLocation);
+        } else {
+            EXPECT_EQ(0xdeadu, *patchLocation);
+        }
+    }
+}
+
+TEST_F(KernelImageArgTest, givenUsedBindlessImagesAndNonImageArgWhenPatchingSurfaceStateOffsetsThenCrossThreadDataIsNotPatched) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.UseBindlessImages.set(1);
+
+    pKernelInfo->usesSsh = true;
+
+    for (size_t i = 0; i < pKernelInfo->kernelArgInfo.size(); i++) {
+        pKernelInfo->kernelArgInfo[i].kernelArgPatchInfoVector[0].crossthreadOffset = 0x20 + static_cast<uint32_t>(0x20 * i);
+        auto crossThreadDataOffset = pKernelInfo->kernelArgInfo[i].kernelArgPatchInfoVector[0].crossthreadOffset;
+        auto patchLocation = reinterpret_cast<uint32_t *>(ptrOffset(pKernel->getCrossThreadData(), crossThreadDataOffset));
+        *patchLocation = 0xdead;
+    }
+
+    int nonImageIndex = 1;
+    pKernelInfo->kernelArgInfo[nonImageIndex].isImage = false;
+
+    uint32_t sshOffset = 0x4000;
+    pKernel->patchBindlessSurfaceStateOffsets(sshOffset);
+
+    auto crossThreadDataOffset = pKernelInfo->kernelArgInfo[nonImageIndex].kernelArgPatchInfoVector[0].crossthreadOffset;
+    auto patchLocation = reinterpret_cast<uint32_t *>(ptrOffset(pKernel->getCrossThreadData(), crossThreadDataOffset));
+
+    EXPECT_EQ(0xdeadu, *patchLocation);
+}
+
+TEST_F(KernelImageArgTest, givenNotUsedBindlessImagesAndImageArgWhenPatchingSurfaceStateOffsetsThenCrossThreadDataIsNotPatched) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.UseBindlessImages.set(false);
+    DebugManager.flags.UseBindlessBuffers.set(true);
+
+    pKernelInfo->usesSsh = true;
+
+    for (size_t i = 0; i < pKernelInfo->kernelArgInfo.size(); i++) {
+        pKernelInfo->kernelArgInfo[i].kernelArgPatchInfoVector[0].crossthreadOffset = 0x20 + static_cast<uint32_t>(0x20 * i);
+        auto crossThreadDataOffset = pKernelInfo->kernelArgInfo[i].kernelArgPatchInfoVector[0].crossthreadOffset;
+        auto patchLocation = reinterpret_cast<uint32_t *>(ptrOffset(pKernel->getCrossThreadData(), crossThreadDataOffset));
+        *patchLocation = 0xdead;
+    }
+
+    int nonImageIndex = 1;
+    pKernelInfo->kernelArgInfo[nonImageIndex].isImage = true;
+
+    uint32_t sshOffset = 0x4000;
+    pKernel->patchBindlessSurfaceStateOffsets(sshOffset);
+
+    auto crossThreadDataOffset = pKernelInfo->kernelArgInfo[nonImageIndex].kernelArgPatchInfoVector[0].crossthreadOffset;
+    auto patchLocation = reinterpret_cast<uint32_t *>(ptrOffset(pKernel->getCrossThreadData(), crossThreadDataOffset));
+
+    EXPECT_EQ(0xdeadu, *patchLocation);
 }

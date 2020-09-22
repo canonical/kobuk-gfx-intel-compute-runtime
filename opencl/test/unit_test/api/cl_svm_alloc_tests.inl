@@ -9,7 +9,9 @@
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/context/context.h"
+#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 
 #include "cl_api_tests.h"
 
@@ -24,9 +26,7 @@ class clSVMAllocTemplateTests : public ApiFixture<>,
   public:
     void SetUp() override {
         ApiFixture::SetUp();
-        if (!pPlatform->getClDevice(testedRootDeviceIndex)->getHardwareInfo().capabilityTable.ftrSvm) {
-            GTEST_SKIP();
-        }
+        REQUIRE_SVM_OR_SKIP(pDevice);
     }
 
     void TearDown() override {
@@ -61,7 +61,7 @@ TEST(clSVMAllocTest, givenPlatformWithoutDevicesWhenClSVMAllocIsCalledThenDevice
 
 TEST_P(clSVMAllocValidFlagsTests, GivenSvmSupportWhenAllocatingSvmThenSvmIsAllocated) {
     cl_mem_flags flags = GetParam();
-    const ClDeviceInfo &devInfo = pPlatform->getClDevice(0)->getDeviceInfo();
+    const ClDeviceInfo &devInfo = pDevice->getDeviceInfo();
     //check for svm support
     if (devInfo.svmCapabilities != 0) {
         //fg svm flag
@@ -120,7 +120,7 @@ INSTANTIATE_TEST_CASE_P(
     testing::ValuesIn(SVMAllocValidFlags));
 
 TEST_P(clSVMAllocFtrFlagsTests, GivenCorrectFlagsWhenAllocatingSvmThenSvmIsAllocated) {
-    HardwareInfo *pHwInfo = pPlatform->peekExecutionEnvironment()->rootDeviceEnvironments[testedRootDeviceIndex]->getMutableHardwareInfo();
+    HardwareInfo *pHwInfo = pDevice->getExecutionEnvironment()->rootDeviceEnvironments[testedRootDeviceIndex]->getMutableHardwareInfo();
 
     cl_mem_flags flags = GetParam();
     void *SVMPtr = nullptr;
@@ -185,7 +185,7 @@ TEST_F(clSVMAllocTests, GivenZeroSizeWhenAllocatingSvmThenSvmIsNotAllocated) {
 }
 
 TEST_F(clSVMAllocTests, GivenZeroAlignmentWhenAllocatingSvmThenSvmIsAllocated) {
-    const ClDeviceInfo &devInfo = pPlatform->getClDevice(0)->getDeviceInfo();
+    const ClDeviceInfo &devInfo = pDevice->getDeviceInfo();
     if (devInfo.svmCapabilities != 0) {
         cl_mem_flags flags = CL_MEM_READ_WRITE;
         auto SVMPtr = clSVMAlloc(pContext /* cl_context */, flags, 4096 /* Size*/, 0 /* alignment */);
@@ -195,7 +195,7 @@ TEST_F(clSVMAllocTests, GivenZeroAlignmentWhenAllocatingSvmThenSvmIsAllocated) {
 }
 
 TEST_F(clSVMAllocTests, GivenUnalignedSizeAndDefaultAlignmentWhenAllocatingSvmThenSvmIsAllocated) {
-    const ClDeviceInfo &devInfo = pPlatform->getClDevice(0)->getDeviceInfo();
+    const ClDeviceInfo &devInfo = pDevice->getDeviceInfo();
     if (devInfo.svmCapabilities != 0) {
         cl_mem_flags flags = CL_MEM_READ_WRITE;
         auto SVMPtr = clSVMAlloc(pContext /* cl_context */, flags, 4095 /* Size*/, 0 /* alignment */);
@@ -214,4 +214,43 @@ TEST_F(clSVMAllocTests, GivenAlignmentTooLargeWhenAllocatingSvmThenSvmIsNotAlloc
     auto SVMPtr = clSVMAlloc(pContext, CL_MEM_READ_WRITE, 4096 /* Size */, 4096 /* alignment */);
     EXPECT_EQ(nullptr, SVMPtr);
 };
+
+TEST_F(clSVMAllocTests, GivenForcedFineGrainedSvmWhenCreatingSvmAllocThenAllocationIsCreated) {
+    REQUIRE_SVM_OR_SKIP(pDevice);
+    DebugManagerStateRestore restore{};
+    HardwareInfo *hwInfo = pDevice->getExecutionEnvironment()->rootDeviceEnvironments[testedRootDeviceIndex]->getMutableHardwareInfo();
+    hwInfo->capabilityTable.ftrSvm = true;
+    hwInfo->capabilityTable.ftrSupportsCoherency = false;
+
+    auto allocation = clSVMAlloc(pContext, CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER, 4096 /* Size */, 0 /* alignment */);
+    EXPECT_EQ(nullptr, allocation);
+    clSVMFree(pContext, allocation);
+
+    DebugManager.flags.ForceFineGrainedSVMSupport.set(1);
+    allocation = clSVMAlloc(pContext, CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER, 4096 /* Size */, 0 /* alignment */);
+    EXPECT_NE(nullptr, allocation);
+    clSVMFree(pContext, allocation);
+}
+
+TEST(clSvmAllocTest, givenSubDeviceWhenCreatingSvmAllocThenProperDeviceBitfieldIsPassed) {
+    REQUIRE_SVM_OR_SKIP(defaultHwInfo.get());
+    UltClDeviceFactory deviceFactory{1, 2};
+    auto device = deviceFactory.subDevices[1];
+
+    auto executionEnvironment = device->getExecutionEnvironment();
+    auto memoryManager = new MockMemoryManager(*executionEnvironment);
+
+    std::unique_ptr<MemoryManager> memoryManagerBackup(memoryManager);
+    std::swap(memoryManagerBackup, executionEnvironment->memoryManager);
+
+    MockContext context(device);
+    auto expectedDeviceBitfield = context.getDeviceBitfieldForAllocation();
+    EXPECT_NE(expectedDeviceBitfield, memoryManager->recentlyPassedDeviceBitfield);
+    auto svmPtr = clSVMAlloc(&context, CL_MEM_READ_WRITE, MemoryConstants::pageSize, MemoryConstants::cacheLineSize);
+    EXPECT_NE(nullptr, svmPtr);
+    EXPECT_EQ(expectedDeviceBitfield, memoryManager->recentlyPassedDeviceBitfield);
+    clSVMFree(&context, svmPtr);
+
+    std::swap(memoryManagerBackup, executionEnvironment->memoryManager);
+}
 } // namespace ULT

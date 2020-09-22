@@ -39,12 +39,21 @@ class D3DBuffer : public D3DSharing<D3D> {
         }
 
         sharingFcns->getSharedHandle(bufferStaging, &sharedHandle);
-        AllocationProperties properties = {context->getDevice(0)->getRootDeviceIndex(), false, 0, GraphicsAllocation::AllocationType::SHARED_BUFFER, false};
+        AllocationProperties properties = {context->getDevice(0)->getRootDeviceIndex(),
+                                           false, // allocateMemory
+                                           0,     // size
+                                           GraphicsAllocation::AllocationType::SHARED_BUFFER,
+                                           false, // isMultiStorageAllocation
+                                           context->getDeviceBitfieldForAllocation()};
         auto alloc = context->getMemoryManager()->createGraphicsAllocationFromSharedHandle(toOsHandle(sharedHandle), properties, true);
 
         auto d3dBufferObj = new D3DBuffer<D3D>(context, d3dBuffer, bufferStaging, sharedResource);
 
-        return Buffer::createSharedBuffer(context, flags, d3dBufferObj, alloc);
+        auto rootDeviceIndex = alloc->getRootDeviceIndex();
+        auto multiGraphicsAllocation = MultiGraphicsAllocation(rootDeviceIndex);
+        multiGraphicsAllocation.addAllocation(alloc);
+
+        return Buffer::createSharedBuffer(context, flags, d3dBufferObj, std::move(multiGraphicsAllocation));
     }
     ~D3DBuffer() override = default;
 

@@ -12,6 +12,7 @@
 #include "shared/source/helpers/hash.h"
 #include "shared/source/program/program_info_from_patchtokens.h"
 #include "shared/test/unit_test/helpers/default_hw_info.h"
+#include "shared/test/unit_test/mocks/mock_compiler_interface.h"
 
 #include "opencl/source/context/context.h"
 #include "opencl/source/program/create.inl"
@@ -39,8 +40,8 @@ cl_int GlobalMockSipProgram::processGenBinary() {
 
 cl_int GlobalMockSipProgram::processGenBinaryOnce() {
     cl_int ret = Program::processGenBinary();
-    sipAllocationStorage = alignedMalloc(this->kernelInfoArray[0]->heapInfo.pKernelHeader->KernelHeapSize, MemoryConstants::pageSize);
-    this->kernelInfoArray[0]->kernelAllocation = new MockGraphicsAllocation(sipAllocationStorage, this->kernelInfoArray[0]->heapInfo.pKernelHeader->KernelHeapSize);
+    sipAllocationStorage = alignedMalloc(this->kernelInfoArray[0]->heapInfo.KernelHeapSize, MemoryConstants::pageSize);
+    this->kernelInfoArray[0]->kernelAllocation = new MockGraphicsAllocation(sipAllocationStorage, this->kernelInfoArray[0]->heapInfo.KernelHeapSize);
     return ret;
 }
 void GlobalMockSipProgram::resetAllocationState() {

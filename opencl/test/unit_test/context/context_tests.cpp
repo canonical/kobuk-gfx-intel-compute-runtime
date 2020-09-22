@@ -7,20 +7,21 @@
 
 #include "shared/source/device/device.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/unit_test/helpers/variable_backup.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/context/context.inl"
 #include "opencl/source/device_queue/device_queue.h"
 #include "opencl/source/sharings/sharing.h"
 #include "opencl/test/unit_test/fixtures/platform_fixture.h"
-#include "opencl/test/unit_test/helpers/variable_backup.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_deferred_deleter.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 
 #include "gtest/gtest.h"
 
@@ -123,6 +124,7 @@ TEST_F(ContextTest, WhenSettingSpecialQueueThenQueueIsAvailable) {
 }
 
 TEST_F(ContextTest, WhenSettingDefaultQueueThenQueueIsAvailable) {
+    REQUIRE_DEVICE_ENQUEUE_OR_SKIP(context);
     EXPECT_EQ(nullptr, context->getDefaultDeviceQueue());
     auto dq = new DeviceQueue();
     context->setDefaultDeviceQueue(dq);
@@ -148,6 +150,7 @@ TEST_F(ContextTest, givenCmdQueueWithoutContextWhenBeingCreatedNextDeletedThenCo
 }
 
 TEST_F(ContextTest, givenDeviceQueueWithoutContextWhenBeingCreatedNextDeletedThenContextRefCountShouldNeitherBeIncrementedNorNextDecremented) {
+    REQUIRE_DEVICE_ENQUEUE_OR_SKIP(context);
     MockContext context((ClDevice *)devices[0]);
     EXPECT_EQ(1, context.getRefInternalCount());
 
@@ -177,6 +180,7 @@ TEST_F(ContextTest, givenCmdQueueWithContextWhenBeingCreatedNextDeletedThenConte
 }
 
 TEST_F(ContextTest, givenDeviceCmdQueueWithContextWhenBeingCreatedNextDeletedThenContextRefCountShouldBeIncrementedNextDecremented) {
+    REQUIRE_DEVICE_ENQUEUE_OR_SKIP(context);
     MockContext context((ClDevice *)devices[0]);
     EXPECT_EQ(1, context.getRefInternalCount());
 
@@ -189,6 +193,7 @@ TEST_F(ContextTest, givenDeviceCmdQueueWithContextWhenBeingCreatedNextDeletedThe
 }
 
 TEST_F(ContextTest, givenDefaultDeviceCmdQueueWithContextWhenBeingCreatedNextDeletedThenContextRefCountShouldBeIncrementedNextDecremented) {
+    REQUIRE_DEVICE_ENQUEUE_OR_SKIP(context);
     MockContext context((ClDevice *)devices[0]);
     EXPECT_EQ(1, context.getRefInternalCount());
 
@@ -334,23 +339,20 @@ TEST(Context, whenCreateContextThenSpecialQueueUsesInternalEngine) {
 
 TEST(MultiDeviceContextTest, givenContextWithMultipleDevicesWhenGettingTotalNumberOfDevicesThenNumberOfAllAvailableDevicesIsReturned) {
     DebugManagerStateRestore restorer;
-    const uint32_t numDevices = 2u;
+    const uint32_t numRootDevices = 1u;
     const uint32_t numSubDevices = 3u;
-    DebugManager.flags.CreateMultipleRootDevices.set(numDevices);
     DebugManager.flags.CreateMultipleSubDevices.set(numSubDevices);
     initPlatform();
-    auto device0 = platform()->getClDevice(0);
-    auto device1 = platform()->getClDevice(1);
-    cl_device_id clDevices[2]{device0, device1};
+    auto device = platform()->getClDevice(0);
 
-    ClDeviceVector deviceVector(clDevices, 2);
+    cl_device_id clDevice = device;
+    ClDeviceVector deviceVector(&clDevice, numRootDevices);
     cl_int retVal = CL_OUT_OF_HOST_MEMORY;
     auto context = std::unique_ptr<Context>(Context::create<Context>(nullptr, deviceVector, nullptr, nullptr, retVal));
     EXPECT_EQ(CL_SUCCESS, retVal);
-    EXPECT_EQ(numSubDevices, device0->getNumAvailableDevices());
-    EXPECT_EQ(numSubDevices, device1->getNumAvailableDevices());
-    EXPECT_EQ(numDevices, context->getNumDevices());
-    EXPECT_EQ(numDevices * numSubDevices, context->getTotalNumDevices());
+    EXPECT_EQ(numSubDevices, device->getNumAvailableDevices());
+    EXPECT_EQ(numRootDevices, context->getNumDevices());
+    EXPECT_EQ(numRootDevices * numSubDevices, context->getTotalNumDevices());
 }
 
 class ContextWithAsyncDeleterTest : public ::testing::WithParamInterface<bool>,
@@ -422,4 +424,54 @@ TEST(Context, givenContextWhenIsDeviceAssociatedIsCalledWithNotAssociatedDeviceT
     MockContext context1;
     EXPECT_FALSE(context0.isDeviceAssociated(*context1.getDevice(0)));
     EXPECT_FALSE(context1.isDeviceAssociated(*context0.getDevice(0)));
+}
+TEST(Context, givenContextWithSingleDevicesWhenGettingDeviceBitfieldForAllocationThenDeviceBitfieldForDeviceIsReturned) {
+    UltClDeviceFactory deviceFactory{1, 3};
+    auto device = deviceFactory.subDevices[1];
+    auto expectedDeviceBitfield = device->getDeviceBitfield();
+    MockContext context(device);
+    EXPECT_EQ(expectedDeviceBitfield.to_ulong(), context.getDeviceBitfieldForAllocation().to_ulong());
+}
+TEST(Context, givenContextWithMultipleSubDevicesWhenGettingDeviceBitfieldForAllocationThenMergedDeviceBitfieldIsReturned) {
+    UltClDeviceFactory deviceFactory{1, 3};
+    cl_int retVal;
+    cl_device_id devices[]{deviceFactory.subDevices[0], deviceFactory.subDevices[2]};
+    ClDeviceVector deviceVector(devices, 2);
+    auto expectedDeviceBitfield = deviceFactory.subDevices[0]->getDeviceBitfield() | deviceFactory.subDevices[2]->getDeviceBitfield();
+    auto context = Context::create<Context>(0, deviceVector, nullptr, nullptr, retVal);
+    EXPECT_NE(nullptr, context);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(expectedDeviceBitfield.to_ulong(), context->getDeviceBitfieldForAllocation().to_ulong());
+    context->release();
+}
+
+TEST(Context, WhenSettingContextDestructorCallbackThenCallOrderIsPreserved) {
+    struct UserDataType {
+        cl_context expectedContext;
+        std::vector<size_t> &vectorToModify;
+        size_t valueToAdd;
+    };
+    auto callback = [](cl_context context, void *userData) -> void {
+        auto pUserData = reinterpret_cast<UserDataType *>(userData);
+        EXPECT_EQ(pUserData->expectedContext, context);
+        pUserData->vectorToModify.push_back(pUserData->valueToAdd);
+    };
+
+    auto pContext = new MockContext{};
+    std::vector<size_t> callbacksReturnValues;
+    UserDataType userDataArray[]{
+        {pContext, callbacksReturnValues, 1},
+        {pContext, callbacksReturnValues, 2},
+        {pContext, callbacksReturnValues, 3}};
+
+    for (auto &userData : userDataArray) {
+        cl_int retVal = clSetContextDestructorCallback(pContext, callback, &userData);
+        ASSERT_EQ(CL_SUCCESS, retVal);
+    }
+    delete pContext;
+
+    ASSERT_EQ(3u, callbacksReturnValues.size());
+    EXPECT_EQ(3u, callbacksReturnValues[0]);
+    EXPECT_EQ(2u, callbacksReturnValues[1]);
+    EXPECT_EQ(1u, callbacksReturnValues[2]);
 }

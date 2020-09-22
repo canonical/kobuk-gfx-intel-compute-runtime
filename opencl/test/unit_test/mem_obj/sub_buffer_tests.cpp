@@ -5,11 +5,11 @@
  *
  */
 
+#include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/ptr_math.h"
-#include "shared/source/memory_manager/memory_constants.h"
 
 #include "opencl/source/mem_obj/buffer.h"
-#include "opencl/test/unit_test/fixtures/device_fixture.h"
+#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 
@@ -21,7 +21,7 @@ namespace ULT {
 
 static const unsigned int sizeTestBufferInBytes = 32;
 
-class SubBufferTest : public DeviceFixture,
+class SubBufferTest : public ClDeviceFixture,
                       public ::testing::Test {
   public:
     SubBufferTest() {
@@ -37,7 +37,7 @@ class SubBufferTest : public DeviceFixture,
 
     void TearDown() override {
         delete buffer;
-        DeviceFixture::TearDown();
+        ClDeviceFixture::TearDown();
     }
 
     cl_int retVal = CL_SUCCESS;
@@ -46,7 +46,7 @@ class SubBufferTest : public DeviceFixture,
     Buffer *buffer = nullptr;
 };
 
-TEST_F(SubBufferTest, createSubBuffer) {
+TEST_F(SubBufferTest, WhenCreatingSubBufferThenRefInternalCountIsIncremented) {
     cl_buffer_region region = {2, 12};
     EXPECT_EQ(1, buffer->getRefInternalCount());
 
@@ -87,7 +87,7 @@ TEST_F(SubBufferTest, GivenAlignmentThatIsHigherThen4BytesWhenCheckedForValidity
     cl_buffer_region region3 = {8, 4};
     EXPECT_TRUE(buffer->isValidSubBufferOffset(region3.origin));
 
-    buffer->getGraphicsAllocation()->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
+    buffer->getGraphicsAllocation(context.getDevice(0)->getRootDeviceIndex())->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
     EXPECT_FALSE(buffer->isValidSubBufferOffset(region.origin));
     EXPECT_FALSE(buffer->isValidSubBufferOffset(region2.origin));
     cl_buffer_region region4 = {1025, 4};
@@ -193,8 +193,8 @@ TEST_F(SubBufferTest, givenBufferWithNoHostPtrWhenSubbufferGetsMapPtrThenExpectB
     void *mapPtr = subBuffer->getBasePtrForMap(0);
     void *bufferMapPtr = buffer->getBasePtrForMap(0);
     EXPECT_EQ(bufferMapPtr, mapPtr);
-    auto mapAllocation = subBuffer->getMapAllocation();
-    auto bufferMapAllocation = buffer->getMapAllocation();
+    auto mapAllocation = subBuffer->getMapAllocation(0);
+    auto bufferMapAllocation = buffer->getMapAllocation(0);
     ASSERT_NE(nullptr, bufferMapAllocation);
     EXPECT_EQ(bufferMapAllocation, mapAllocation);
     EXPECT_EQ(bufferMapPtr, mapAllocation->getUnderlyingBuffer());

@@ -11,19 +11,14 @@ namespace L0 {
 namespace ult {
 
 using MockDriver = Mock<L0::ult::Driver>;
-using ::testing::Invoke;
 
 Mock<Driver>::Mock() {
     previousDriver = driver;
     driver = this;
-    EXPECT_CALL(*this, initialize)
-        .WillRepeatedly(Invoke(this, &MockDriver::mockInitialize));
 }
 
 Mock<Driver>::~Mock() {
-    if (driver == this) {
-        driver = previousDriver;
-    }
+    driver = previousDriver;
 }
 
 } // namespace ult

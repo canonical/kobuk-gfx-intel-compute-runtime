@@ -24,7 +24,6 @@
 
 #include "opencl/source/api/api.h"
 #include "opencl/source/cl_device/cl_device.h"
-#include "opencl/source/event/async_events_handler.h"
 #include "opencl/source/gtpin/gtpin_notify.h"
 #include "opencl/source/helpers/built_ins_helper.h"
 #include "opencl/source/helpers/get_info_status_mapper.h"
@@ -38,16 +37,14 @@
 #include <map>
 namespace NEO {
 
-std::vector<std::unique_ptr<Platform>> platformsImpl;
+std::vector<std::unique_ptr<Platform>> *platformsImpl = nullptr;
 
 Platform::Platform(ExecutionEnvironment &executionEnvironmentIn) : executionEnvironment(executionEnvironmentIn) {
     clDevices.reserve(4);
-    setAsyncEventsHandler(std::unique_ptr<AsyncEventsHandler>(new AsyncEventsHandler()));
     executionEnvironment.incRefInternal();
 }
 
 Platform::~Platform() {
-    asyncEventsHandler->closeThread();
     for (auto clDevice : this->clDevices) {
         clDevice->decRefInternal();
     }
@@ -62,15 +59,33 @@ cl_int Platform::getInfo(cl_platform_info paramName,
                          size_t *paramValueSizeRet) {
     auto retVal = CL_INVALID_VALUE;
     const std::string *param = nullptr;
-    size_t paramSize = 0;
-    uint64_t pVal = 0;
+    size_t paramSize = GetInfo::invalidSourceSize;
+    auto getInfoStatus = GetInfoStatus::INVALID_VALUE;
 
     switch (paramName) {
-    case CL_PLATFORM_HOST_TIMER_RESOLUTION:
-        pVal = static_cast<uint64_t>(this->clDevices[0]->getPlatformHostTimerResolution());
+    case CL_PLATFORM_HOST_TIMER_RESOLUTION: {
+        auto pVal = static_cast<uint64_t>(this->clDevices[0]->getPlatformHostTimerResolution());
         paramSize = sizeof(uint64_t);
-        retVal = changeGetInfoStatusToCLResultType(::getInfo(paramValue, paramValueSize, &pVal, paramSize));
+        getInfoStatus = GetInfo::getInfo(paramValue, paramValueSize, &pVal, paramSize);
         break;
+    }
+    case CL_PLATFORM_NUMERIC_VERSION: {
+        auto pVal = platformInfo->numericVersion;
+        paramSize = sizeof(pVal);
+        getInfoStatus = GetInfo::getInfo(paramValue, paramValueSize, &pVal, paramSize);
+        break;
+    }
+    case CL_PLATFORM_EXTENSIONS_WITH_VERSION: {
+        std::call_once(initializeExtensionsWithVersionOnce, [this]() {
+            this->clDevices[0]->getDeviceInfo(CL_DEVICE_EXTENSIONS_WITH_VERSION, 0, nullptr, nullptr);
+            this->platformInfo->extensionsWithVersion = this->clDevices[0]->getDeviceInfo().extensionsWithVersion;
+        });
+
+        auto pVal = platformInfo->extensionsWithVersion.data();
+        paramSize = platformInfo->extensionsWithVersion.size() * sizeof(cl_name_version);
+        getInfoStatus = GetInfo::getInfo(paramValue, paramValueSize, pVal, paramSize);
+        break;
+    }
     case CL_PLATFORM_PROFILE:
         param = &platformInfo->profile;
         break;
@@ -96,12 +111,11 @@ cl_int Platform::getInfo(cl_platform_info paramName,
     // Case for string parameters
     if (param) {
         paramSize = param->length() + 1;
-        retVal = changeGetInfoStatusToCLResultType(::getInfo(paramValue, paramValueSize, param->c_str(), paramSize));
+        getInfoStatus = GetInfo::getInfo(paramValue, paramValueSize, param->c_str(), paramSize);
     }
 
-    if (paramValueSizeRet) {
-        *paramValueSizeRet = paramSize;
-    }
+    retVal = changeGetInfoStatusToCLResultType(getInfoStatus);
+    GetInfo::setParamValueReturnSize(paramValueSizeRet, paramSize, getInfoStatus);
 
     return retVal;
 }
@@ -116,15 +130,7 @@ bool Platform::initialize(std::vector<std::unique_ptr<Device>> devices) {
         return true;
     }
 
-    if (DebugManager.flags.LoopAtPlatformInitialize.get()) {
-        while (DebugManager.flags.LoopAtPlatformInitialize.get())
-            this->initializationLoopHelper();
-    }
-
     state = StateIniting;
-
-    DEBUG_BREAK_IF(this->platformInfo);
-    this->platformInfo.reset(new PlatformInfo);
 
     for (auto &inputDevice : devices) {
         ClDevice *pClDevice = nullptr;
@@ -133,27 +139,31 @@ bool Platform::initialize(std::vector<std::unique_ptr<Device>> devices) {
         pClDevice = new ClDevice{*pDevice, this};
         this->clDevices.push_back(pClDevice);
 
-        this->platformInfo->extensions = pClDevice->getDeviceInfo().deviceExtensions;
-
-        switch (pClDevice->getEnabledClVersion()) {
-        case 21:
-            this->platformInfo->version = "OpenCL 2.1 ";
-            break;
-        case 20:
-            this->platformInfo->version = "OpenCL 2.0 ";
-            break;
-        default:
-            this->platformInfo->version = "OpenCL 1.2 ";
-            break;
+        auto hwInfo = pClDevice->getHardwareInfo();
+        if (pClDevice->getPreemptionMode() == PreemptionMode::MidThread || pClDevice->isDebuggerActive()) {
+            auto sipType = SipKernel::getSipKernelType(hwInfo.platform.eRenderCoreFamily, pClDevice->isDebuggerActive());
+            initSipKernel(sipType, *pDevice);
         }
     }
 
-    for (auto &clDevice : clDevices) {
-        auto hwInfo = clDevice->getHardwareInfo();
-        if (clDevice->getPreemptionMode() == PreemptionMode::MidThread || clDevice->isDebuggerActive()) {
-            auto sipType = SipKernel::getSipKernelType(hwInfo.platform.eRenderCoreFamily, clDevice->isDebuggerActive());
-            initSipKernel(sipType, clDevice->getDevice());
-        }
+    DEBUG_BREAK_IF(this->platformInfo);
+    this->platformInfo.reset(new PlatformInfo);
+
+    this->platformInfo->extensions = this->clDevices[0]->getDeviceInfo().deviceExtensions;
+
+    switch (this->clDevices[0]->getEnabledClVersion()) {
+    case 30:
+        this->platformInfo->version = "OpenCL 3.0 ";
+        this->platformInfo->numericVersion = CL_MAKE_VERSION(3, 0, 0);
+        break;
+    case 21:
+        this->platformInfo->version = "OpenCL 2.1 ";
+        this->platformInfo->numericVersion = CL_MAKE_VERSION(2, 1, 0);
+        break;
+    default:
+        this->platformInfo->version = "OpenCL 1.2 ";
+        this->platformInfo->numericVersion = CL_MAKE_VERSION(1, 2, 0);
+        break;
     }
 
     this->fillGlobalDispatchTable();
@@ -208,15 +218,6 @@ ClDevice **Platform::getClDevices() {
 const PlatformInfo &Platform::getPlatformInfo() const {
     DEBUG_BREAK_IF(!platformInfo);
     return *platformInfo;
-}
-
-AsyncEventsHandler *Platform::getAsyncEventsHandler() {
-    return asyncEventsHandler.get();
-}
-
-std::unique_ptr<AsyncEventsHandler> Platform::setAsyncEventsHandler(std::unique_ptr<AsyncEventsHandler> handler) {
-    asyncEventsHandler.swap(handler);
-    return handler;
 }
 
 std::unique_ptr<Platform> (*Platform::createFunc)(ExecutionEnvironment &) = [](ExecutionEnvironment &executionEnvironment) -> std::unique_ptr<Platform> {

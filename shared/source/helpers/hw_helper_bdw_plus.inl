@@ -21,12 +21,22 @@ uint32_t HwHelperHw<GfxFamily>::getComputeUnitsUsedForScratch(const HardwareInfo
 }
 
 template <typename GfxFamily>
+inline uint32_t HwHelperHw<GfxFamily>::getGlobalTimeStampBits() const {
+    return 36;
+}
+
+template <typename GfxFamily>
 void HwHelperHw<GfxFamily>::setCapabilityCoherencyFlag(const HardwareInfo *pHwInfo, bool &coherencyFlag) {
     coherencyFlag = true;
 }
 
 template <typename GfxFamily>
 bool HwHelperHw<GfxFamily>::isLocalMemoryEnabled(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::heapInLocalMem(const HardwareInfo &hwInfo) const {
     return false;
 }
 
@@ -40,11 +50,22 @@ bool HwHelperHw<GfxFamily>::timestampPacketWriteSupported() const {
     return false;
 }
 
+template <typename Family>
+bool HwHelperHw<Family>::obtainBlitterPreference(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
 template <typename GfxFamily>
 const HwHelper::EngineInstancesContainer HwHelperHw<GfxFamily>::getGpgpuEngineInstances(const HardwareInfo &hwInfo) const {
     return {aub_stream::ENGINE_RCS,
             aub_stream::ENGINE_RCS,  // low priority
             aub_stream::ENGINE_RCS}; // internal usage
+}
+
+template <typename GfxFamily>
+void HwHelperHw<GfxFamily>::addEngineToEngineGroup(std::vector<std::vector<EngineControl>> &engineGroups,
+                                                   EngineControl &engine, const HardwareInfo &hwInfo) const {
+    engineGroups[static_cast<uint32_t>(EngineGroupType::RenderCompute)].push_back(engine);
 }
 
 template <typename GfxFamily>
@@ -67,15 +88,34 @@ uint32_t HwHelperHw<GfxFamily>::calculateAvailableThreadCount(PRODUCT_FAMILY fam
 }
 
 template <typename GfxFamily>
-void MemorySynchronizationCommands<GfxFamily>::addPipeControlWA(LinearStream &commandStream, uint64_t gpuAddress, const HardwareInfo &hwInfo) {
+uint64_t HwHelperHw<GfxFamily>::getGpuTimeStampInNS(uint64_t timeStamp, double frequency) const {
+    return static_cast<uint64_t>(timeStamp * frequency);
 }
 
 template <typename GfxFamily>
-void MemorySynchronizationCommands<GfxFamily>::setExtraPipeControlProperties(PIPE_CONTROL &pipeControl, const HardwareInfo &hwInfo) {
+inline void MemorySynchronizationCommands<GfxFamily>::addPipeControlWA(LinearStream &commandStream, uint64_t gpuAddress, const HardwareInfo &hwInfo) {
 }
 
 template <typename GfxFamily>
-void MemorySynchronizationCommands<GfxFamily>::setExtraCacheFlushFields(PIPE_CONTROL *pipeControl) {
+inline void MemorySynchronizationCommands<GfxFamily>::setPostSyncExtraProperties(PipeControlArgs &args, const HardwareInfo &hwInfo) {
+}
+
+template <typename GfxFamily>
+inline void MemorySynchronizationCommands<GfxFamily>::setCacheFlushExtraProperties(PIPE_CONTROL &pipeControl) {
+}
+
+template <typename GfxFamily>
+inline void MemorySynchronizationCommands<GfxFamily>::setPipeControlExtraProperties(typename GfxFamily::PIPE_CONTROL &pipeControl, PipeControlArgs &args) {
+}
+
+template <typename GfxFamily>
+void LriHelper<GfxFamily>::program(LinearStream *cmdStream, uint32_t address, uint32_t value, bool remap) {
+    MI_LOAD_REGISTER_IMM cmd = GfxFamily::cmdInitLoadRegisterImm;
+    cmd.setRegisterOffset(address);
+    cmd.setDataDword(value);
+
+    auto lri = cmdStream->getSpaceForCmd<MI_LOAD_REGISTER_IMM>();
+    *lri = cmd;
 }
 
 } // namespace NEO

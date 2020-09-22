@@ -7,7 +7,6 @@
 
 #include "shared/source/device_binary_format/patchtokens_decoder.h"
 #include "shared/source/helpers/aligned_memory.h"
-#include "shared/source/helpers/hw_cmds.h"
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/memory_manager/memory_manager.h"
@@ -18,6 +17,8 @@
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/mem_obj/image.h"
 #include "opencl/source/sampler/sampler.h"
+
+#include "hw_cmds.h"
 
 #include <cstdint>
 #include <cstring>
@@ -419,14 +420,14 @@ uint32_t KernelInfo::getConstantBufferSize() const {
     return patchInfo.dataParameterStream ? patchInfo.dataParameterStream->DataParameterStreamSize : 0;
 }
 
-bool KernelInfo::createKernelAllocation(uint32_t rootDeviceIndex, MemoryManager *memoryManager) {
+bool KernelInfo::createKernelAllocation(const Device &device) {
     UNRECOVERABLE_IF(kernelAllocation);
-    auto kernelIsaSize = heapInfo.pKernelHeader->KernelHeapSize;
-    kernelAllocation = memoryManager->allocateGraphicsMemoryWithProperties({rootDeviceIndex, kernelIsaSize, GraphicsAllocation::AllocationType::KERNEL_ISA});
+    auto kernelIsaSize = heapInfo.KernelHeapSize;
+    kernelAllocation = device.getMemoryManager()->allocateGraphicsMemoryWithProperties({device.getRootDeviceIndex(), kernelIsaSize, GraphicsAllocation::AllocationType::KERNEL_ISA, device.getDeviceBitfield()});
     if (!kernelAllocation) {
         return false;
     }
-    return memoryManager->copyMemoryToAllocation(kernelAllocation, heapInfo.pKernelHeap, kernelIsaSize);
+    return device.getMemoryManager()->copyMemoryToAllocation(kernelAllocation, heapInfo.pKernelHeap, kernelIsaSize);
 }
 
 void KernelInfo::apply(const DeviceInfoKernelPayloadConstants &constants) {

@@ -41,7 +41,7 @@ void EventsRequest::fillCsrDependencies(CsrDependencies &csrDeps, CommandStreamR
 }
 
 TransferProperties::TransferProperties(MemObj *memObj, cl_command_type cmdType, cl_map_flags mapFlags, bool blocking,
-                                       size_t *offsetPtr, size_t *sizePtr, void *ptr, bool doTransferOnCpu)
+                                       size_t *offsetPtr, size_t *sizePtr, void *ptr, bool doTransferOnCpu, uint32_t rootDeviceIndex)
     : memObj(memObj), ptr(ptr), cmdType(cmdType), mapFlags(mapFlags), blocking(blocking), doTransferOnCpu(doTransferOnCpu) {
 
     // no size or offset passed for unmap operation
@@ -50,9 +50,9 @@ TransferProperties::TransferProperties(MemObj *memObj, cl_command_type cmdType, 
             size[0] = *sizePtr;
             offset[0] = *offsetPtr;
             if (doTransferOnCpu &&
-                (false == MemoryPool::isSystemMemoryPool(memObj->getGraphicsAllocation()->getMemoryPool())) &&
+                (false == MemoryPool::isSystemMemoryPool(memObj->getGraphicsAllocation(rootDeviceIndex)->getMemoryPool())) &&
                 (memObj->getMemoryManager() != nullptr)) {
-                this->lockedPtr = memObj->getMemoryManager()->lockResource(memObj->getGraphicsAllocation());
+                this->lockedPtr = memObj->getMemoryManager()->lockResource(memObj->getGraphicsAllocation(rootDeviceIndex));
             }
         } else {
             size = {{sizePtr[0], sizePtr[1], sizePtr[2]}};

@@ -8,6 +8,7 @@
 #pragma once
 
 #include "shared/offline_compiler/source/ocloc_arg_helper.h"
+#include "shared/source/helpers/hw_info.h"
 #include "shared/source/os_interface/os_library.h"
 #include "shared/source/utilities/arrayref.h"
 #include "shared/source/utilities/const_stringref.h"
@@ -50,10 +51,14 @@ class OfflineCompiler {
 
     OfflineCompiler &operator=(const OfflineCompiler &) = delete;
     OfflineCompiler(const OfflineCompiler &) = delete;
-    ~OfflineCompiler();
+    MOCKABLE_VIRTUAL ~OfflineCompiler();
 
     bool isQuiet() const {
         return quiet;
+    }
+
+    bool isOnlySpirV() const {
+        return onlySpirV;
     }
 
     std::string parseBinAsCharArray(uint8_t *binary, size_t size, std::string &fileName);
@@ -66,7 +71,7 @@ class OfflineCompiler {
 
     static std::string getFileNameTrunk(std::string &filePath);
     const HardwareInfo &getHardwareInfo() const {
-        return *hwInfo;
+        return hwInfo;
     }
 
   protected:
@@ -80,9 +85,10 @@ class OfflineCompiler {
     void resolveExtraSettings();
     void parseDebugSettings();
     void storeBinary(char *&pDst, size_t &dstSize, const void *pSrc, const size_t srcSize);
-    int buildSourceCode();
+    MOCKABLE_VIRTUAL int buildSourceCode();
+    int buildIrBinary();
     void updateBuildLog(const char *pErrorString, const size_t errorStringSize);
-    bool generateElfBinary();
+    MOCKABLE_VIRTUAL bool generateElfBinary();
     std::string generateFilePathForIr(const std::string &fileNameBase) {
         const char *ext = (isSpirV) ? ".spv" : ".bc";
         return generateFilePath(outputDirectory, fileNameBase, useLlvmText ? ".ll" : ext);
@@ -93,8 +99,8 @@ class OfflineCompiler {
         std::replace(suffix.begin(), suffix.end(), ' ', '_');
         return suffix;
     }
-    void writeOutAllFiles();
-    const HardwareInfo *hwInfo = nullptr;
+    MOCKABLE_VIRTUAL void writeOutAllFiles();
+    HardwareInfo hwInfo;
 
     std::string deviceName;
     std::string familyNameWithType;
@@ -112,6 +118,7 @@ class OfflineCompiler {
     bool useCppFile = false;
     bool useOptionsSuffix = false;
     bool quiet = false;
+    bool onlySpirV = false;
     bool inputFileLlvm = false;
     bool inputFileSpirV = false;
     bool outputNoSuffix = false;
@@ -125,10 +132,12 @@ class OfflineCompiler {
     bool isSpirV = false;
     char *debugDataBinary = nullptr;
     size_t debugDataBinarySize = 0;
-
+    struct buildInfo;
+    std::unique_ptr<buildInfo> pBuildInfo;
     std::unique_ptr<OsLibrary> igcLib = nullptr;
     CIF::RAII::UPtr_t<CIF::CIFMain> igcMain = nullptr;
     CIF::RAII::UPtr_t<IGC::IgcOclDeviceCtxTagOCL> igcDeviceCtx = nullptr;
+    int revisionId = -1;
 
     std::unique_ptr<OsLibrary> fclLib = nullptr;
     CIF::RAII::UPtr_t<CIF::CIFMain> fclMain = nullptr;

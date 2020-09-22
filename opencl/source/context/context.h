@@ -7,19 +7,22 @@
 
 #pragma once
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/helpers/common_types.h"
 #include "shared/source/helpers/vec.h"
 
 #include "opencl/source/cl_device/cl_device_vector.h"
 #include "opencl/source/context/context_type.h"
 #include "opencl/source/context/driver_diagnostics.h"
 #include "opencl/source/helpers/base_object.h"
+#include "opencl/source/helpers/destructor_callback.h"
 
-#include <vector>
+#include <list>
+#include <set>
 
 namespace NEO {
 
+class AsyncEventsHandler;
 struct BuiltInKernel;
-class CommandStreamReceiver;
 class CommandQueue;
 class Device;
 class DeviceQueue;
@@ -28,12 +31,6 @@ class MemoryManager;
 class SharingFunctions;
 class SVMAllocsManager;
 class SchedulerKernel;
-
-enum class BlitOperationResult {
-    Unsupported,
-    Fail,
-    Success
-};
 
 template <>
 struct OpenCLObjectMapper<_cl_context> {
@@ -70,6 +67,9 @@ class Context : public BaseObject<_cl_context> {
 
     ~Context() override;
 
+    cl_int setDestructorCallback(void(CL_CALLBACK *funcNotify)(cl_context, void *),
+                                 void *userData);
+
     cl_int getInfo(cl_context_info paramName, size_t paramValueSize,
                    void *paramValue, size_t *paramValueSizeRet);
 
@@ -88,6 +88,10 @@ class Context : public BaseObject<_cl_context> {
     SVMAllocsManager *getSVMAllocsManager() const {
         return svmAllocsManager;
     }
+
+    const std::set<uint32_t> &getRootDeviceIndices() const;
+
+    uint32_t getMaxRootDeviceIndex() const;
 
     DeviceQueue *getDefaultDeviceQueue();
     void setDefaultDeviceQueue(DeviceQueue *queue);
@@ -135,13 +139,16 @@ class Context : public BaseObject<_cl_context> {
     void setInteropUserSyncEnabled(bool enabled) { interopUserSync = enabled; }
     bool areMultiStorageAllocationsPreferred();
 
-    ContextType peekContextType() { return this->contextType; }
-
-    MOCKABLE_VIRTUAL BlitOperationResult blitMemoryToAllocation(MemObj &memObj, GraphicsAllocation *memory, void *hostPtr, Vec3<size_t> size) const;
+    ContextType peekContextType() const { return contextType; }
 
     SchedulerKernel &getSchedulerKernel();
 
     bool isDeviceAssociated(const ClDevice &clDevice) const;
+    ClDevice *getSubDeviceByIndex(uint32_t subDeviceIndex) const;
+
+    AsyncEventsHandler &getAsyncEventsHandler() const;
+
+    DeviceBitfield getDeviceBitfieldForAllocation() const;
 
   protected:
     Context(void(CL_CALLBACK *pfnNotify)(const char *, const void *, size_t, void *) = nullptr,
@@ -151,23 +158,27 @@ class Context : public BaseObject<_cl_context> {
     void *getOsContextInfo(cl_context_info &paramName, size_t *srcParamSize);
 
     cl_int processExtraProperties(cl_context_properties propertyType, cl_context_properties propertyValue);
+    void setupContextType();
 
-    const cl_context_properties *properties;
-    size_t numProperties;
-    void(CL_CALLBACK *contextCallback)(const char *, const void *, size_t, void *);
-    void *userData;
+    std::set<uint32_t> rootDeviceIndices = {};
+    uint32_t maxRootDeviceIndex = std::numeric_limits<uint32_t>::max();
 
+    const cl_context_properties *properties = nullptr;
+    size_t numProperties = 0u;
+    void(CL_CALLBACK *contextCallback)(const char *, const void *, size_t, void *) = nullptr;
+    void *userData = nullptr;
     std::unique_ptr<BuiltInKernel> schedulerBuiltIn;
-
     ClDeviceVector devices;
-    MemoryManager *memoryManager;
+    MemoryManager *memoryManager = nullptr;
     SVMAllocsManager *svmAllocsManager = nullptr;
-    CommandQueue *specialQueue;
-    DeviceQueue *defaultDeviceQueue;
+    CommandQueue *specialQueue = nullptr;
+    DeviceQueue *defaultDeviceQueue = nullptr;
     std::vector<std::unique_ptr<SharingFunctions>> sharingFunctions;
-    DriverDiagnostics *driverDiagnostics;
+    DriverDiagnostics *driverDiagnostics = nullptr;
     bool interopUserSync = false;
     cl_bool preferD3dSharedResources = 0u;
     ContextType contextType = ContextType::CONTEXT_TYPE_DEFAULT;
+
+    std::list<ContextDestructorCallback *> destructorCallbacks;
 };
 } // namespace NEO

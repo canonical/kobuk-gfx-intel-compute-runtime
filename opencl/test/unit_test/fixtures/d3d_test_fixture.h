@@ -45,19 +45,30 @@ class D3DTests : public PlatformFixture, public ::testing::Test {
     class MockMM : public OsAgnosticMemoryManager {
       public:
         using OsAgnosticMemoryManager::OsAgnosticMemoryManager;
+        bool failAlloc = false;
         GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness) override {
+            if (failAlloc) {
+                return nullptr;
+            }
             auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle(handle, properties, requireSpecificBitness);
             alloc->setDefaultGmm(forceGmm);
             gmmOwnershipPassed = true;
             return alloc;
         }
         GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex) override {
+            if (failAlloc) {
+                return nullptr;
+            }
             AllocationProperties properties(rootDeviceIndex, true, 0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY, false, false, 0);
             auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle(toOsHandle(handle), properties, false);
             alloc->setDefaultGmm(forceGmm);
             gmmOwnershipPassed = true;
             return alloc;
         }
+
+        bool verifyValue = true;
+        bool verifyHandle(osHandle handle, uint32_t rootDeviceIndex, bool) { return verifyValue; }
+
         bool mapAuxGpuVA(GraphicsAllocation *graphicsAllocation) override {
             mapAuxGpuVACalled++;
             return mapAuxGpuVaRetValue;
@@ -82,7 +93,10 @@ class D3DTests : public PlatformFixture, public ::testing::Test {
     }
 
     void SetUp() override {
+        VariableBackup<UltHwConfig> backup(&ultHwConfig);
+        ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc = false;
         PlatformFixture::SetUp();
+        rootDeviceIndex = pPlatform->getClDevice(0)->getRootDeviceIndex();
         context = new MockContext(pPlatform->getClDevice(0));
         context->preferD3dSharedResources = true;
         mockMM = std::make_unique<MockMM>(*context->getDevice(0)->getExecutionEnvironment());
@@ -190,6 +204,7 @@ class D3DTests : public PlatformFixture, public ::testing::Test {
     std::unique_ptr<MockMM> mockMM;
 
     uint8_t d3dMode = 0;
+    uint32_t rootDeviceIndex = 0;
 };
 typedef ::testing::Types<D3DTypesHelper::D3D10, D3DTypesHelper::D3D11> D3DTypes;
 } // namespace NEO

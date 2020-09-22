@@ -8,16 +8,16 @@
 #include "shared/source/memory_manager/allocations_list.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/os_interface/os_context.h"
+#include "shared/test/unit_test/mocks/mock_device.h"
 
 #include "opencl/source/api/api.h"
-#include "opencl/source/helpers/memory_properties_flags_helpers.h"
+#include "opencl/source/helpers/memory_properties_helpers.h"
 #include "opencl/source/mem_obj/mem_obj.h"
 #include "opencl/source/platform/platform.h"
 #include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
 #include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_device.h"
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 #include "test.h"
@@ -45,9 +45,9 @@ class MemObjDestructionTest : public ::testing::TestWithParam<bool> {
 
         allocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{device->getRootDeviceIndex(), size});
         memObj = new MemObj(context.get(), CL_MEM_OBJECT_BUFFER,
-                            MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(CL_MEM_READ_WRITE, 0, 0), CL_MEM_READ_WRITE, 0,
-                            size,
-                            nullptr, nullptr, allocation, true, false, false);
+                            MemoryPropertiesHelper::createMemoryProperties(CL_MEM_READ_WRITE, 0, 0, &device->getDevice()),
+                            CL_MEM_READ_WRITE, 0, size,
+                            nullptr, nullptr, GraphicsAllocationHelper::toMultiGraphicsAllocation(allocation), true, false, false);
         csr = device->getDefaultEngine().commandStreamReceiver;
         *csr->getTagAddress() = 0;
         contextId = device->getDefaultEngine().osContext->getContextId();
@@ -58,7 +58,7 @@ class MemObjDestructionTest : public ::testing::TestWithParam<bool> {
     }
 
     void makeMemObjUsed() {
-        memObj->getGraphicsAllocation()->updateTaskCount(taskCountReady, contextId);
+        memObj->getGraphicsAllocation(device->getRootDeviceIndex())->updateTaskCount(taskCountReady, contextId);
     }
 
     void makeMemObjNotReady() {
@@ -138,6 +138,8 @@ HWTEST_P(MemObjAsyncDestructionTest, givenUsedMemObjWithAsyncDestructionsEnabled
         memObj->setDestructorCallback(emptyDestructorCallback, nullptr);
     }
 
+    auto rootDeviceIndex = device->getRootDeviceIndex();
+
     auto mockCsr0 = new ::testing::NiceMock<MyCsr<FamilyType>>(*device->executionEnvironment);
     auto mockCsr1 = new ::testing::NiceMock<MyCsr<FamilyType>>(*device->executionEnvironment);
     device->resetCommandStreamReceiver(mockCsr0, 0);
@@ -156,8 +158,8 @@ HWTEST_P(MemObjAsyncDestructionTest, givenUsedMemObjWithAsyncDestructionsEnabled
     auto osContextId0 = mockCsr0->getOsContext().getContextId();
     auto osContextId1 = mockCsr1->getOsContext().getContextId();
 
-    memObj->getGraphicsAllocation()->updateTaskCount(taskCountReady, osContextId0);
-    memObj->getGraphicsAllocation()->updateTaskCount(taskCountReady, osContextId1);
+    memObj->getGraphicsAllocation(rootDeviceIndex)->updateTaskCount(taskCountReady, osContextId0);
+    memObj->getGraphicsAllocation(rootDeviceIndex)->updateTaskCount(taskCountReady, osContextId1);
 
     ON_CALL(*mockCsr0, waitForCompletionWithTimeout(::testing::_, ::testing::_, ::testing::_))
         .WillByDefault(::testing::Invoke(waitForCompletionWithTimeoutMock0));
@@ -224,9 +226,9 @@ HWTEST_P(MemObjAsyncDestructionTest, givenUsedMemObjWithAsyncDestructionsEnabled
         MemObjSizeArray region = {{1, 1, 1}};
         cl_map_flags mapFlags = CL_MAP_READ;
         memObj = new MemObj(context.get(), CL_MEM_OBJECT_BUFFER,
-                            MemoryPropertiesFlagsParser::createMemoryPropertiesFlags(CL_MEM_READ_WRITE, 0, 0), CL_MEM_READ_WRITE, 0,
-                            size,
-                            storage, nullptr, allocation, true, false, false);
+                            MemoryPropertiesHelper::createMemoryProperties(CL_MEM_READ_WRITE, 0, 0, &context->getDevice(0)->getDevice()),
+                            CL_MEM_READ_WRITE, 0, size,
+                            storage, nullptr, GraphicsAllocationHelper::toMultiGraphicsAllocation(allocation), true, false, false);
         memObj->addMappedPtr(storage, 1, mapFlags, region, origin, 0);
     } else {
         memObj->setAllocatedMapPtr(storage);
@@ -329,7 +331,7 @@ HWTEST_F(UsmDestructionTests, givenSharedUsmAllocationWhenBlockingFreeIsCalledTh
     MockClDevice mockClDevice(&mockDevice);
     MockContext mockContext(&mockClDevice, false);
 
-    if (mockContext.getDevice(0u)->getHardwareInfo().capabilityTable.clVersionSupport < 20) {
+    if (mockContext.getDevice(0u)->getHardwareInfo().capabilityTable.supportsOcl21Features == false) {
         GTEST_SKIP();
     }
 
@@ -344,6 +346,7 @@ HWTEST_F(UsmDestructionTests, givenSharedUsmAllocationWhenBlockingFreeIsCalledTh
     *mockCsr->getTagAddress() = 5u;
 
     SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY);
+    unifiedMemoryProperties.subdeviceBitfield = mockDevice.getDeviceBitfield();
 
     auto svmAllocationsManager = mockContext.getSVMAllocsManager();
     auto sharedMemory = svmAllocationsManager->createUnifiedAllocationWithDeviceStorage(0u, 4096u, {}, unifiedMemoryProperties);
@@ -354,7 +357,7 @@ HWTEST_F(UsmDestructionTests, givenSharedUsmAllocationWhenBlockingFreeIsCalledTh
     auto waitForCompletionWithTimeoutMock = [=](bool enableTimeout, int64_t timeoutMs, uint32_t taskCountToWait) -> bool { return true; };
     ON_CALL(*mockCsr, waitForCompletionWithTimeout(::testing::_, ::testing::_, ::testing::_))
         .WillByDefault(::testing::Invoke(waitForCompletionWithTimeoutMock));
-    svmEntry->gpuAllocation->updateTaskCount(6u, 0u);
+    svmEntry->gpuAllocations.getGraphicsAllocation(mockDevice.getRootDeviceIndex())->updateTaskCount(6u, 0u);
     svmEntry->cpuAllocation->updateTaskCount(6u, 0u);
     EXPECT_CALL(*mockCsr, waitForCompletionWithTimeout(::testing::_, TimeoutControls::maxTimeout, 6u))
         .Times(2);
@@ -368,7 +371,7 @@ HWTEST_F(UsmDestructionTests, givenUsmAllocationWhenBlockingFreeIsCalledThenWait
     MockClDevice mockClDevice(&mockDevice);
     MockContext mockContext(&mockClDevice, false);
 
-    if (mockContext.getDevice(0u)->getHardwareInfo().capabilityTable.clVersionSupport < 20) {
+    if (mockContext.getDevice(0u)->getHardwareInfo().capabilityTable.supportsOcl21Features == false) {
         GTEST_SKIP();
     }
 
@@ -383,6 +386,7 @@ HWTEST_F(UsmDestructionTests, givenUsmAllocationWhenBlockingFreeIsCalledThenWait
     *mockCsr->getTagAddress() = 5u;
 
     SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::HOST_UNIFIED_MEMORY);
+    unifiedMemoryProperties.subdeviceBitfield = mockClDevice.getDeviceBitfield();
 
     auto svmAllocationsManager = mockContext.getSVMAllocsManager();
     auto hostMemory = svmAllocationsManager->createUnifiedMemoryAllocation(0u, 4096u, unifiedMemoryProperties);
@@ -393,7 +397,7 @@ HWTEST_F(UsmDestructionTests, givenUsmAllocationWhenBlockingFreeIsCalledThenWait
     auto waitForCompletionWithTimeoutMock = [=](bool enableTimeout, int64_t timeoutMs, uint32_t taskCountToWait) -> bool { return true; };
     ON_CALL(*mockCsr, waitForCompletionWithTimeout(::testing::_, ::testing::_, ::testing::_))
         .WillByDefault(::testing::Invoke(waitForCompletionWithTimeoutMock));
-    svmEntry->gpuAllocation->updateTaskCount(6u, 0u);
+    svmEntry->gpuAllocations.getGraphicsAllocation(mockDevice.getRootDeviceIndex())->updateTaskCount(6u, 0u);
     EXPECT_CALL(*mockCsr, waitForCompletionWithTimeout(::testing::_, TimeoutControls::maxTimeout, 6u))
         .Times(1);
 

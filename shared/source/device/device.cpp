@@ -102,6 +102,7 @@ bool Device::createEngines() {
     auto &hwInfo = getHardwareInfo();
     auto gpgpuEngines = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getGpgpuEngineInstances(hwInfo);
 
+    this->engineGroups.resize(static_cast<uint32_t>(EngineGroupType::MaxEngineGroups));
     for (uint32_t deviceCsrIndex = 0; deviceCsrIndex < gpgpuEngines.size(); deviceCsrIndex++) {
         if (!createEngine(deviceCsrIndex, gpgpuEngines[deviceCsrIndex])) {
             return false;
@@ -124,6 +125,9 @@ bool Device::createEngine(uint32_t deviceCsrIndex, aub_stream::EngineType engine
     }
 
     bool internalUsage = (deviceCsrIndex == HwHelper::internalUsageEngineIndex);
+    if (internalUsage) {
+        commandStreamReceiver->initializeDefaultsForInternalEngine();
+    }
 
     if (commandStreamReceiver->needsPageTableManager(engineType)) {
         commandStreamReceiver->createPageTableManager();
@@ -151,7 +155,14 @@ bool Device::createEngine(uint32_t deviceCsrIndex, aub_stream::EngineType engine
         return false;
     }
 
-    engines.push_back({commandStreamReceiver.get(), osContext});
+    EngineControl engine{commandStreamReceiver.get(), osContext};
+    engines.push_back(engine);
+    if (!lowPriority && !internalUsage) {
+        const auto &hardwareInfo = this->getHardwareInfo();
+        auto &hwHelper = NEO::HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+        hwHelper.addEngineToEngineGroup(engineGroups, engine, hwInfo);
+    }
+
     commandStreamReceivers.push_back(std::move(commandStreamReceiver));
 
     return true;
@@ -171,9 +182,12 @@ bool Device::isSimulation() const {
     auto &hwInfo = getHardwareInfo();
 
     bool simulation = hwInfo.capabilityTable.isSimulation(hwInfo.platform.usDeviceID);
-    if (engines[0].commandStreamReceiver->getType() != CommandStreamReceiverType::CSR_HW) {
-        simulation = true;
+    for (const auto &engine : engines) {
+        if (engine.commandStreamReceiver->getType() != CommandStreamReceiverType::CSR_HW) {
+            simulation = true;
+        }
     }
+
     if (hwInfo.featureTable.ftrSimulationMode) {
         simulation = true;
     }
@@ -207,6 +221,11 @@ EngineControl &Device::getEngine(aub_stream::EngineType engineType, bool lowPrio
     UNRECOVERABLE_IF(true);
 }
 
+EngineControl &Device::getEngine(uint32_t index) {
+    UNRECOVERABLE_IF(index >= engines.size());
+    return engines[index];
+}
+
 bool Device::getDeviceAndHostTimer(uint64_t *deviceTimestamp, uint64_t *hostTimestamp) const {
     TimeStampData queueTimeStamp;
     bool retVal = getOSTime()->getCpuGpuTime(&queueTimeStamp);
@@ -225,6 +244,28 @@ bool Device::getHostTimer(uint64_t *hostTimestamp) const {
 
 GmmClientContext *Device::getGmmClientContext() const {
     return getGmmHelper()->getClientContext();
+}
+
+uint64_t Device::getGlobalMemorySize() const {
+
+    auto globalMemorySize = getMemoryManager()->isLocalMemorySupported(this->getRootDeviceIndex())
+                                ? getMemoryManager()->getLocalMemorySize(this->getRootDeviceIndex())
+                                : getMemoryManager()->getSystemSharedMemory(this->getRootDeviceIndex());
+    globalMemorySize = std::min(globalMemorySize, getMemoryManager()->getMaxApplicationAddress() + 1);
+    globalMemorySize = static_cast<uint64_t>(static_cast<double>(globalMemorySize) * 0.8);
+    return globalMemorySize;
+}
+
+NEO::SourceLevelDebugger *Device::getSourceLevelDebugger() {
+    auto debugger = getDebugger();
+    if (debugger) {
+        return debugger->isLegacy() ? static_cast<NEO::SourceLevelDebugger *>(debugger) : nullptr;
+    }
+    return nullptr;
+}
+
+const std::vector<EngineControl> &Device::getEngines() const {
+    return this->engines;
 }
 
 } // namespace NEO

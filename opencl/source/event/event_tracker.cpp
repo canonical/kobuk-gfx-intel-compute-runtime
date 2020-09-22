@@ -18,8 +18,10 @@ EventsTracker &EventsTracker::getEventsTracker() {
     static std::mutex initMutex;
     std::lock_guard<std::mutex> autolock(initMutex);
 
-    if (!EventsTracker::globalEvTracker)
+    if (!EventsTracker::globalEvTracker) {
         EventsTracker::globalEvTracker = std::unique_ptr<EventsTracker>{new EventsTracker()};
+    }
+    UNRECOVERABLE_IF(EventsTracker::globalEvTracker == nullptr);
     return *EventsTracker::globalEvTracker;
 }
 
@@ -46,14 +48,14 @@ void EventsTracker::dumpQueue(CommandQueue *cmdQ, std::ostream &out, CmdqSet &du
     out << label(cmdQ) << "[label=\"{------CmdQueue, ptr=" << cmdQ << "------|task count=";
     auto taskCount = cmdQ->taskCount;
     auto taskLevel = cmdQ->taskLevel;
-    if (taskCount == CompletionStamp::levelNotReady) {
+    if (taskCount == CompletionStamp::notReady) {
         out << "NOT_READY";
     } else {
         out << taskCount;
     }
 
     out << ", level=";
-    if (taskLevel == CompletionStamp::levelNotReady) {
+    if (taskLevel == CompletionStamp::notReady) {
         out << "NOT_READY";
     } else {
         out << taskLevel;
@@ -96,14 +98,14 @@ void EventsTracker::dumpNode(Event *node, std::ostream &out, const EventIdMap &e
                                                                                                  "|"
         << commandType << "|" << status[statusId] << "|"
                                                      "task count=";
-    if (taskCount == CompletionStamp::levelNotReady) {
+    if (taskCount == CompletionStamp::notReady) {
         out << "NOT_READY";
     } else {
         out << taskCount;
     }
 
     out << ", level=";
-    if (taskLevel == CompletionStamp::levelNotReady) {
+    if (taskLevel == CompletionStamp::notReady) {
         out << "NOT_READY";
     } else {
         out << taskLevel;

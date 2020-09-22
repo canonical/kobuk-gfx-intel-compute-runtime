@@ -14,7 +14,7 @@
 
 namespace NEO {
 
-static const char *spirvVersion = "SPIR-V_1.2 ";
+static const char *spirvWithVersion = "SPIR-V_1.2 ";
 
 void Device::initializeCaps() {
     auto &hwInfo = getHardwareInfo();
@@ -24,24 +24,22 @@ void Device::initializeCaps() {
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
 
     deviceInfo.ilVersion = "";
-    auto enabledClVersion = hwInfo.capabilityTable.clVersionSupport;
+    bool ocl21FeaturesEnabled = hwInfo.capabilityTable.supportsOcl21Features;
     if (DebugManager.flags.ForceOCLVersion.get() != 0) {
-        enabledClVersion = DebugManager.flags.ForceOCLVersion.get();
+        ocl21FeaturesEnabled = (DebugManager.flags.ForceOCLVersion.get() == 21);
     }
-    switch (enabledClVersion) {
-    case 21:
-        deviceInfo.ilVersion = spirvVersion;
+    if (DebugManager.flags.ForceOCL21FeaturesSupport.get() != -1) {
+        ocl21FeaturesEnabled = DebugManager.flags.ForceOCL21FeaturesSupport.get();
+    }
+    if (ocl21FeaturesEnabled) {
+        deviceInfo.ilVersion = spirvWithVersion;
         addressing32bitAllowed = false;
-        break;
-    case 20:
-        addressing32bitAllowed = false;
-        break;
     }
 
     deviceInfo.vendorId = 0x8086;
     deviceInfo.maxReadImageArgs = 128;
     deviceInfo.maxWriteImageArgs = 128;
-    deviceInfo.maxParameterSize = 1024;
+    deviceInfo.maxParameterSize = 2048;
 
     deviceInfo.addressBits = 64;
 
@@ -50,11 +48,7 @@ void Device::initializeCaps() {
 
     deviceInfo.globalMemCachelineSize = 64;
 
-    deviceInfo.globalMemSize = getMemoryManager()->isLocalMemorySupported(this->getRootDeviceIndex())
-                                   ? getMemoryManager()->getLocalMemorySize(this->getRootDeviceIndex())
-                                   : getMemoryManager()->getSystemSharedMemory(this->getRootDeviceIndex());
-    deviceInfo.globalMemSize = std::min(deviceInfo.globalMemSize, getMemoryManager()->getMaxApplicationAddress() + 1);
-    deviceInfo.globalMemSize = static_cast<uint64_t>(static_cast<double>(deviceInfo.globalMemSize) * 0.8);
+    deviceInfo.globalMemSize = getGlobalMemorySize();
 
     if (DebugManager.flags.Force32bitAddressing.get() || addressing32bitAllowed || is32bit) {
         deviceInfo.globalMemSize = std::min(deviceInfo.globalMemSize, static_cast<uint64_t>(4 * GB * 0.8));
@@ -67,8 +61,6 @@ void Device::initializeCaps() {
     deviceInfo.profilingTimerResolution = getProfilingTimerResolution();
     deviceInfo.outProfilingTimerResolution = static_cast<size_t>(deviceInfo.profilingTimerResolution);
 
-    deviceInfo.maxOnDeviceQueues = 1;
-
     // OpenCL 1.2 requires 128MB minimum
     deviceInfo.maxMemAllocSize = std::min(std::max(deviceInfo.globalMemSize / 2, static_cast<uint64_t>(128llu * MB)), this->hardwareCapabilities.maxMemAllocSize);
 
@@ -77,12 +69,15 @@ void Device::initializeCaps() {
 
     deviceInfo.maxNumEUsPerSubSlice = 0;
     deviceInfo.numThreadsPerEU = 0;
-    auto simdSizeUsed = DebugManager.flags.UseMaxSimdSizeToDeduceMaxWorkgroupSize.get() ? 32u : hwHelper.getMinimalSIMDSize();
+    auto simdSizeUsed = DebugManager.flags.UseMaxSimdSizeToDeduceMaxWorkgroupSize.get()
+                            ? CommonConstants::maximalSimdSize
+                            : hwHelper.getMinimalSIMDSize();
 
     deviceInfo.maxNumEUsPerSubSlice = (systemInfo.EuCountPerPoolMin == 0 || hwInfo.featureTable.ftrPooledEuEnabled == 0)
                                           ? (systemInfo.EUCount / systemInfo.SubSliceCount)
                                           : systemInfo.EuCountPerPoolMin;
     deviceInfo.numThreadsPerEU = systemInfo.ThreadCount / systemInfo.EUCount;
+    deviceInfo.threadsPerEUConfigs = hwHelper.getThreadsPerEUConfigs();
     auto maxWS = hwHelper.getMaxThreadsForWorkgroup(hwInfo, static_cast<uint32_t>(deviceInfo.maxNumEUsPerSubSlice)) * simdSizeUsed;
 
     maxWS = Math::prevPowerOfTwo(maxWS);
@@ -95,7 +90,7 @@ void Device::initializeCaps() {
     deviceInfo.maxWorkItemSizes[0] = deviceInfo.maxWorkGroupSize;
     deviceInfo.maxWorkItemSizes[1] = deviceInfo.maxWorkGroupSize;
     deviceInfo.maxWorkItemSizes[2] = deviceInfo.maxWorkGroupSize;
-    deviceInfo.maxSamplers = 16;
+    deviceInfo.maxSamplers = hwHelper.getMaxNumSamplers();
 
     deviceInfo.computeUnitsUsedForScratch = hwHelper.getComputeUnitsUsedForScratch(&hwInfo);
     deviceInfo.maxFrontEndThreads = HwHelper::getMaxThreadsForVfe(hwInfo);

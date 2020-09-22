@@ -19,25 +19,37 @@ class Image;
 struct KernelInfo;
 struct SurfaceFormatInfo;
 
-typedef Image *(*ImageCreatFunc)(Context *context,
-                                 const MemoryPropertiesFlags &memoryProperties,
-                                 uint64_t flags,
-                                 uint64_t flagsIntel,
-                                 size_t size,
-                                 void *hostPtr,
-                                 const cl_image_format &imageFormat,
-                                 const cl_image_desc &imageDesc,
-                                 bool zeroCopy,
-                                 GraphicsAllocation *graphicsAllocation,
-                                 bool isImageRedescribed,
-                                 uint32_t baseMipLevel,
-                                 uint32_t mipCount,
-                                 const ClSurfaceFormatInfo *surfaceFormatInfo,
-                                 const SurfaceOffsets *surfaceOffsets);
+using ImageCreatFunc = Image *(*)(Context *context,
+                                  const MemoryProperties &memoryProperties,
+                                  uint64_t flags,
+                                  uint64_t flagsIntel,
+                                  size_t size,
+                                  void *hostPtr,
+                                  const cl_image_format &imageFormat,
+                                  const cl_image_desc &imageDesc,
+                                  bool zeroCopy,
+                                  MultiGraphicsAllocation multiGraphicsAllocation,
+                                  bool isImageRedescribed,
+                                  uint32_t baseMipLevel,
+                                  uint32_t mipCount,
+                                  const ClSurfaceFormatInfo *surfaceFormatInfo,
+                                  const SurfaceOffsets *surfaceOffsets);
 
-typedef struct {
+struct ImageFactoryFuncs {
     ImageCreatFunc createImageFunction;
-} ImageFuncs;
+};
+
+namespace ImageFunctions {
+using ValidateAndCreateImageFunc = std::function<cl_mem(cl_context context,
+                                                        const uint64_t *properties,
+                                                        uint64_t flags,
+                                                        uint64_t flagsIntel,
+                                                        const cl_image_format *imageFormat,
+                                                        const cl_image_desc *imageDesc,
+                                                        const void *hostPtr,
+                                                        int32_t &errcodeRet)>;
+extern ValidateAndCreateImageFunc validateAndCreateImage;
+} // namespace ImageFunctions
 
 class Image : public MemObj {
   public:
@@ -47,7 +59,7 @@ class Image : public MemObj {
     ~Image() override;
 
     static Image *create(Context *context,
-                         const MemoryPropertiesFlags &memoryProperties,
+                         const MemoryProperties &memoryProperties,
                          cl_mem_flags flags,
                          cl_mem_flags_intel flagsIntel,
                          const ClSurfaceFormatInfo *surfaceFormat,
@@ -55,8 +67,8 @@ class Image : public MemObj {
                          const void *hostPtr,
                          cl_int &errcodeRet);
 
-    static Image *validateAndCreateImage(Context *context,
-                                         const MemoryPropertiesFlags &memoryProperties,
+    static cl_mem validateAndCreateImage(cl_context context,
+                                         const cl_mem_properties *properties,
                                          cl_mem_flags flags,
                                          cl_mem_flags_intel flagsIntel,
                                          const cl_image_format *imageFormat,
@@ -64,31 +76,31 @@ class Image : public MemObj {
                                          const void *hostPtr,
                                          cl_int &errcodeRet);
 
-    static Image *createImageHw(Context *context, const MemoryPropertiesFlags &memoryProperties, cl_mem_flags flags,
+    static Image *createImageHw(Context *context, const MemoryProperties &memoryProperties, cl_mem_flags flags,
                                 cl_mem_flags_intel flagsIntel, size_t size, void *hostPtr,
                                 const cl_image_format &imageFormat, const cl_image_desc &imageDesc,
-                                bool zeroCopy, GraphicsAllocation *graphicsAllocation,
+                                bool zeroCopy, MultiGraphicsAllocation multiGraphicsAllocation,
                                 bool isObjectRedescribed, uint32_t baseMipLevel, uint32_t mipCount, const ClSurfaceFormatInfo *surfaceFormatInfo = nullptr);
 
     static Image *createSharedImage(Context *context, SharingHandler *sharingHandler, const McsSurfaceInfo &mcsSurfaceInfo,
-                                    GraphicsAllocation *graphicsAllocation, GraphicsAllocation *mcsAllocation,
-                                    cl_mem_flags flags, const ClSurfaceFormatInfo *surfaceFormat, ImageInfo &imgInfo, uint32_t cubeFaceIndex, uint32_t baseMipLevel, uint32_t mipCount);
+                                    MultiGraphicsAllocation multiGraphicsAllocation, GraphicsAllocation *mcsAllocation,
+                                    cl_mem_flags flags, cl_mem_flags_intel flagsIntel, const ClSurfaceFormatInfo *surfaceFormat, ImageInfo &imgInfo, uint32_t cubeFaceIndex, uint32_t baseMipLevel, uint32_t mipCount);
 
     static cl_int validate(Context *context,
-                           const MemoryPropertiesFlags &memoryProperties,
+                           const MemoryProperties &memoryProperties,
                            const ClSurfaceFormatInfo *surfaceFormat,
                            const cl_image_desc *imageDesc,
                            const void *hostPtr);
     static cl_int validateImageFormat(const cl_image_format *imageFormat);
 
     static int32_t validatePlanarYUV(Context *context,
-                                     const MemoryPropertiesFlags &memoryProperties,
+                                     const MemoryProperties &memoryProperties,
                                      const cl_image_desc *imageDesc,
                                      const void *hostPtr);
 
-    static int32_t validatePackedYUV(const MemoryPropertiesFlags &memoryProperties, const cl_image_desc *imageDesc);
+    static int32_t validatePackedYUV(const MemoryProperties &memoryProperties, const cl_image_desc *imageDesc);
 
-    static cl_int validateImageTraits(Context *context, const MemoryPropertiesFlags &memoryProperties, const cl_image_format *imageFormat, const cl_image_desc *imageDesc, const void *hostPtr);
+    static cl_int validateImageTraits(Context *context, const MemoryProperties &memoryProperties, const cl_image_format *imageFormat, const cl_image_desc *imageDesc, const void *hostPtr);
 
     static size_t calculateHostPtrSize(const size_t *region, size_t rowPitch, size_t slicePitch, size_t pixelSize, uint32_t imageType);
 
@@ -123,8 +135,8 @@ class Image : public MemObj {
                         void *paramValue,
                         size_t *paramValueSizeRet);
 
-    virtual void setImageArg(void *memory, bool isMediaBlockImage, uint32_t mipLevel) = 0;
-    virtual void setMediaImageArg(void *memory) = 0;
+    virtual void setImageArg(void *memory, bool isMediaBlockImage, uint32_t mipLevel, uint32_t rootDeviceIndex) = 0;
+    virtual void setMediaImageArg(void *memory, uint32_t rootDeviceIndex) = 0;
     virtual void setMediaSurfaceRotation(void *memory) = 0;
     virtual void setSurfaceMemoryObjectControlStateIndexToMocsTable(void *memory, uint32_t value) = 0;
 
@@ -168,7 +180,7 @@ class Image : public MemObj {
     uint32_t peekMipCount() { return mipCount; }
     void setMipCount(uint32_t mipCountNew) { this->mipCount = mipCountNew; }
 
-    static const ClSurfaceFormatInfo *getSurfaceFormatFromTable(cl_mem_flags flags, const cl_image_format *imageFormat, unsigned int clVersionSupport);
+    static const ClSurfaceFormatInfo *getSurfaceFormatFromTable(cl_mem_flags flags, const cl_image_format *imageFormat, bool supportsOcl20Features);
     static cl_int validateRegionAndOrigin(const size_t *origin, const size_t *region, const cl_image_desc &imgDesc);
 
     cl_int writeNV12Planes(const void *hostPtr, size_t hostPtrRowPitch);
@@ -185,17 +197,20 @@ class Image : public MemObj {
     bool isImageFromBuffer() const { return castToObject<Buffer>(static_cast<cl_mem>(associatedMemObject)) ? true : false; }
     bool isImageFromImage() const { return castToObject<Image>(static_cast<cl_mem>(associatedMemObject)) ? true : false; }
 
+    static cl_int checkIfDeviceSupportsImages(cl_context context);
+
   protected:
     Image(Context *context,
-          const MemoryPropertiesFlags &memoryProperties,
+          const MemoryProperties &memoryProperties,
           cl_mem_flags flags,
           cl_mem_flags_intel flagsIntel,
           size_t size,
+          void *memoryStorage,
           void *hostPtr,
           cl_image_format imageFormat,
           const cl_image_desc &imageDesc,
           bool zeroCopy,
-          GraphicsAllocation *graphicsAllocation,
+          MultiGraphicsAllocation multiGraphicsAllocation,
           bool isObjectRedescribed,
           uint32_t baseMipLevel,
           uint32_t mipCount,
@@ -243,22 +258,23 @@ class ImageHw : public Image {
 
   public:
     ImageHw(Context *context,
-            const MemoryPropertiesFlags &memoryProperties,
+            const MemoryProperties &memoryProperties,
             cl_mem_flags flags,
             cl_mem_flags_intel flagsIntel,
             size_t size,
+            void *memoryStorage,
             void *hostPtr,
             const cl_image_format &imageFormat,
             const cl_image_desc &imageDesc,
             bool zeroCopy,
-            GraphicsAllocation *graphicsAllocation,
+            MultiGraphicsAllocation multiGraphicsAllocation,
             bool isObjectRedescribed,
             uint32_t baseMipLevel,
             uint32_t mipCount,
             const ClSurfaceFormatInfo &surfaceFormatInfo,
             const SurfaceOffsets *surfaceOffsets = nullptr)
-        : Image(context, memoryProperties, flags, flagsIntel, size, hostPtr, imageFormat, imageDesc,
-                zeroCopy, graphicsAllocation, isObjectRedescribed, baseMipLevel, mipCount, surfaceFormatInfo, surfaceOffsets) {
+        : Image(context, memoryProperties, flags, flagsIntel, size, memoryStorage, hostPtr, imageFormat, imageDesc,
+                zeroCopy, std::move(multiGraphicsAllocation), isObjectRedescribed, baseMipLevel, mipCount, surfaceFormatInfo, surfaceOffsets) {
         if (getImageDesc().image_type == CL_MEM_OBJECT_IMAGE1D ||
             getImageDesc().image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER ||
             getImageDesc().image_type == CL_MEM_OBJECT_IMAGE2D ||
@@ -284,19 +300,19 @@ class ImageHw : public Image {
         }
     }
 
-    void setImageArg(void *memory, bool setAsMediaBlockImage, uint32_t mipLevel) override;
+    void setImageArg(void *memory, bool setAsMediaBlockImage, uint32_t mipLevel, uint32_t rootDeviceIndex) override;
     void setAuxParamsForMultisamples(RENDER_SURFACE_STATE *surfaceState);
     MOCKABLE_VIRTUAL void setAuxParamsForMCSCCS(RENDER_SURFACE_STATE *surfaceState, Gmm *gmm);
-    void setMediaImageArg(void *memory) override;
+    void setMediaImageArg(void *memory, uint32_t rootDeviceIndex) override;
     void setMediaSurfaceRotation(void *memory) override;
     void setSurfaceMemoryObjectControlStateIndexToMocsTable(void *memory, uint32_t value) override;
-    void appendSurfaceStateParams(RENDER_SURFACE_STATE *surfaceState);
-    void appendSurfaceStateDepthParams(RENDER_SURFACE_STATE *surfaceState);
+    void appendSurfaceStateParams(RENDER_SURFACE_STATE *surfaceState, uint32_t rootDeviceIndex);
+    void appendSurfaceStateDepthParams(RENDER_SURFACE_STATE *surfaceState, Gmm *gmm);
     void appendSurfaceStateExt(void *memory);
     void transformImage2dArrayTo3d(void *memory) override;
     void transformImage3dTo2dArray(void *memory) override;
     static Image *create(Context *context,
-                         const MemoryPropertiesFlags &memoryProperties,
+                         const MemoryProperties &memoryProperties,
                          cl_mem_flags flags,
                          cl_mem_flags_intel flagsIntel,
                          size_t size,
@@ -304,23 +320,25 @@ class ImageHw : public Image {
                          const cl_image_format &imageFormat,
                          const cl_image_desc &imageDesc,
                          bool zeroCopy,
-                         GraphicsAllocation *graphicsAllocation,
+                         MultiGraphicsAllocation multiGraphicsAllocation,
                          bool isObjectRedescribed,
                          uint32_t baseMipLevel,
                          uint32_t mipCount,
                          const ClSurfaceFormatInfo *surfaceFormatInfo,
                          const SurfaceOffsets *surfaceOffsets) {
         UNRECOVERABLE_IF(surfaceFormatInfo == nullptr);
+        auto memoryStorage = multiGraphicsAllocation.getDefaultGraphicsAllocation()->getUnderlyingBuffer();
         return new ImageHw<GfxFamily>(context,
                                       memoryProperties,
                                       flags,
                                       flagsIntel,
                                       size,
+                                      memoryStorage,
                                       hostPtr,
                                       imageFormat,
                                       imageDesc,
                                       zeroCopy,
-                                      graphicsAllocation,
+                                      std::move(multiGraphicsAllocation),
                                       isObjectRedescribed,
                                       baseMipLevel,
                                       mipCount,
@@ -352,4 +370,5 @@ class ImageHw : public Image {
     }
     typename RENDER_SURFACE_STATE::SURFACE_TYPE surfaceType;
 };
+
 } // namespace NEO

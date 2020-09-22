@@ -8,8 +8,6 @@
 #pragma once
 #include "level_zero/tools/source/metrics/metric.h"
 
-#include "instrumentation.h"
-
 #include <map>
 #include <vector>
 
@@ -47,10 +45,14 @@ struct MetricsLibrary {
     bool isInitialized();
     static const char *getFilename();
 
+    // Deinitialization.
+    void release();
+
     // Metric query.
     bool createMetricQuery(const uint32_t slotsCount, QueryHandle_1_0 &query,
                            NEO::GraphicsAllocation *&pAllocation);
-    bool getMetricQueryReport(QueryHandle_1_0 &query, const size_t rawDataSize, uint8_t *pData);
+    uint32_t getMetricQueryCount();
+    bool getMetricQueryReport(QueryHandle_1_0 &query, const uint32_t slot, const size_t rawDataSize, uint8_t *pData);
     virtual bool getMetricQueryReportSize(size_t &rawDataSize);
     bool destroyMetricQuery(QueryHandle_1_0 &query);
 
@@ -62,6 +64,8 @@ struct MetricsLibrary {
     ConfigurationHandle_1_0 getConfiguration(const zet_metric_group_handle_t metricGroup);
     bool activateConfiguration(const ConfigurationHandle_1_0 configurationHandle);
     bool deactivateConfiguration(const ConfigurationHandle_1_0 configurationHandle);
+    void cacheConfiguration(zet_metric_group_handle_t metricGroup, ConfigurationHandle_1_0 configurationHandle);
+    void deleteAllConfigurations();
 
   protected:
     void initialize();
@@ -79,6 +83,7 @@ struct MetricsLibrary {
     NEO::OsLibrary *handle = nullptr;
     MetricContext &metricContext;
     ze_result_t initializationState = ZE_RESULT_ERROR_UNINITIALIZED;
+    std::mutex mutex;
 
     // Metrics library types.
     Interface_1_0 api = {};
@@ -86,8 +91,8 @@ struct MetricsLibrary {
     ContextHandle_1_0 context = {};
     ContextCreateFunction_1_0 contextCreateFunction = nullptr;
     ContextDeleteFunction_1_0 contextDeleteFunction = nullptr;
-    // MetricGroup configurations
     std::map<zet_metric_group_handle_t, ConfigurationHandle_1_0> configurations;
+    std::vector<QueryHandle_1_0> queries;
 };
 
 struct MetricQueryImp : MetricQuery {
@@ -96,7 +101,8 @@ struct MetricQueryImp : MetricQuery {
                    const uint32_t slot);
 
     ze_result_t appendBegin(CommandList &commandList) override;
-    ze_result_t appendEnd(CommandList &commandList, ze_event_handle_t hCompletionEvent) override;
+    ze_result_t appendEnd(CommandList &commandList, ze_event_handle_t hSignalEvent,
+                          uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) override;
 
     ze_result_t getData(size_t *pRawDataSize, uint8_t *pRawData) override;
 
@@ -104,8 +110,12 @@ struct MetricQueryImp : MetricQuery {
     ze_result_t destroy() override;
 
   protected:
-    ze_result_t writeMetricQuery(CommandList &commandList, ze_event_handle_t hCompletionEvent,
+    ze_result_t writeMetricQuery(CommandList &commandList, ze_event_handle_t hSignalEvent,
+                                 uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents,
                                  const bool begin);
+    ze_result_t writeSkipExecutionQuery(CommandList &commandList, ze_event_handle_t hSignalEvent,
+                                        uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents,
+                                        const bool begin);
 
   protected:
     MetricContext &metricContext;
@@ -119,12 +129,13 @@ struct MetricQueryPoolImp : MetricQueryPool {
     MetricQueryPoolImp(MetricContext &metricContext, zet_metric_group_handle_t hEventMetricGroup, const zet_metric_query_pool_desc_t &poolDescription);
 
     bool create();
-    bool destroy() override;
+    ze_result_t destroy() override;
 
     ze_result_t createMetricQuery(uint32_t index, zet_metric_query_handle_t *phMetricQuery) override;
 
   protected:
     bool createMetricQueryPool();
+    bool createSkipExecutionQueryPool();
 
   public:
     MetricContext &metricContext;
