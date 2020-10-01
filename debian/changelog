@@ -1,3 +1,9 @@
+intel-compute-runtime (20.38.17961-1) UNRELEASED; urgency=medium
+
+  * New upstream release.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 01 Oct 2020 16:09:40 +0300
+
 intel-compute-runtime (20.37.17906-1) unstable; urgency=medium
 
   * New upstream release.
