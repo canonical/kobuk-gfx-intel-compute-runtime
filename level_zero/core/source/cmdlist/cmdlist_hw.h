@@ -35,8 +35,7 @@ struct CommandListCoreFamily : CommandListImp {
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
 
     using CommandListImp::CommandListImp;
-
-    ze_result_t initialize(Device *device, bool isCopyOnly) override;
+    ze_result_t initialize(Device *device, NEO::EngineGroupType engineGroupType) override;
     virtual void programL3(bool isSLMused);
 
     ze_result_t close() override;
@@ -201,7 +200,7 @@ struct CommandListCoreFamily : CommandListImp {
     void appendEventForProfilingCopyCommand(ze_event_handle_t hEvent, bool beforeWalker);
     void appendSignalEventPostWalker(ze_event_handle_t hEvent);
     bool useMemCopyToBlitFill(size_t patternSize);
-    void programStateBaseAddress(NEO::CommandContainer &container);
+    void programStateBaseAddress(NEO::CommandContainer &container, bool genericMediaStateClearRequired);
 
     uint64_t getInputBufferSize(NEO::ImageType imageType, uint64_t bytesPerPixel, const ze_image_region_t *region);
     virtual AlignedAllocationData getAlignedAllocation(Device *device, const void *buffer, uint64_t bufferSize);

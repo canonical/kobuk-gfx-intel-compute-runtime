@@ -40,6 +40,7 @@ DECLARE_DEBUG_VARIABLE(bool, DisableTimestampPacketOptimizations, false, "Alloca
 DECLARE_DEBUG_VARIABLE(bool, DisableCachingForStatefulBufferAccess, false, "Disable caching for stateful buffer access")
 DECLARE_DEBUG_VARIABLE(bool, EnableDebugBreak, true, "Enable DEBUG_BREAKs")
 DECLARE_DEBUG_VARIABLE(bool, FlushAllCaches, false, "pipe controls between enqueues flush all possible caches")
+DECLARE_DEBUG_VARIABLE(bool, DoNotFlushCaches, false, "clear all possible cache flush flags from pipe controls between enqueue flush")
 DECLARE_DEBUG_VARIABLE(bool, MakeEachEnqueueBlocking, false, "equivalent of finish after each enqueue")
 DECLARE_DEBUG_VARIABLE(bool, DisableResourceRecycling, false, "when set to true disables resource recycling optimization")
 DECLARE_DEBUG_VARIABLE(bool, ForceDispatchScheduler, false, "dispatches scheduler kernel instead of kernel enqueued")
@@ -65,8 +66,9 @@ DECLARE_DEBUG_VARIABLE(int32_t, OverrideGpuAddressSpace, -1, "-1: Default, !=-1:
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideMaxWorkgroupSize, -1, "-1: Default, !=-1: Overrides max worgkroup size to this value")
 DECLARE_DEBUG_VARIABLE(int32_t, DoCpuCopyOnReadBuffer, -1, "-1: default 0: do not use CPU copy, 1: triggers CPU copy path for Read Buffer calls, only supported for some basic use cases (no blocked user events in dependencies tree)")
 DECLARE_DEBUG_VARIABLE(int32_t, DoCpuCopyOnWriteBuffer, -1, "-1: default 0: do not use CPU copy, 1: triggers CPU copy path for Write Buffer calls, only supported for some basic use cases (no blocked user events in dependencies tree)")
-DECLARE_DEBUG_VARIABLE(int32_t, PauseOnEnqueue, -1, "-1: default, x: pause on enqueue number x and ask for user confirmation before and after execution, counted from 0")
-DECLARE_DEBUG_VARIABLE(int32_t, PauseOnBlitCopy, -1, "-1: default, x: pause on blit enqueue number x and ask for user confirmation before and after execution, counted from 0. Note that single blit enqueue may have multiple copy instructions")
+DECLARE_DEBUG_VARIABLE(int32_t, PauseOnEnqueue, -1, "-1: default, -2: always, x: pause on enqueue number x and ask for user confirmation before and after execution, counted from 0")
+DECLARE_DEBUG_VARIABLE(int32_t, PauseOnBlitCopy, -1, "-1: default, -2: always, x: pause on blit enqueue number x and ask for user confirmation before and after execution, counted from 0. Note that single blit enqueue may have multiple copy instructions")
+DECLARE_DEBUG_VARIABLE(int32_t, PauseOnGpuMode, -1, "-1: default (before and after), 0: before only, 1: after only")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableMultiStorageResources, -1, "-1: default, 0: Disable, 1: Enable")
 DECLARE_DEBUG_VARIABLE(int32_t, LimitBlitterMaxWidth, -1, "-1: default, >=0: Max width")
 DECLARE_DEBUG_VARIABLE(int32_t, LimitBlitterMaxHeight, -1, "-1: default, >=0: Max height")
@@ -105,6 +107,8 @@ DECLARE_DEBUG_VARIABLE(bool, PrintTimestampPacketContents, false, "prints all ti
 DECLARE_DEBUG_VARIABLE(bool, WddmResidencyLogger, false, "gather Wddm residency statistics to file")
 DECLARE_DEBUG_VARIABLE(bool, PrintBOCreateDestroyResult, false, "tracks the result of creation and destruction of BOs")
 DECLARE_DEBUG_VARIABLE(bool, PrintBOBindingResult, false, "tracks the result of binding and unbinding of BOs")
+DECLARE_DEBUG_VARIABLE(bool, PrintTagAllocationAddress, false, "Print tag allocation address for each engine")
+DECLARE_DEBUG_VARIABLE(bool, ProvideVerboseImplicitFlush, false, "provides verbose messages about implicit flush mechanism")
 
 /*PERFORMANCE FLAGS*/
 DECLARE_DEBUG_VARIABLE(bool, DisableZeroCopyForBuffers, false, "When active all buffer allocations will not share memory with CPU.")
@@ -124,6 +128,8 @@ DECLARE_DEBUG_VARIABLE(int32_t, EnableHostPtrTracking, -1, "Enable host ptr trac
 DECLARE_DEBUG_VARIABLE(int32_t, MaxHwThreadsPercent, 0, "If not zero then maximum number of used HW threads is capped to max * MaxHwThreadsPercent / 100")
 DECLARE_DEBUG_VARIABLE(int32_t, MinHwThreadsUnoccupied, 0, "If not zero then maximum number of used HW threads is reduced by MinHwThreadsUnoccupied")
 DECLARE_DEBUG_VARIABLE(int32_t, PerformImplicitFlushEveryEnqueueCount, -1, "If greater then 0, driver performs implicit flush every N submissions.")
+DECLARE_DEBUG_VARIABLE(int32_t, PerformImplicitFlushForNewResource, -1, "-1: platform specific, 0: force disable, 1: force enable")
+DECLARE_DEBUG_VARIABLE(int32_t, PerformImplicitFlushForIdleGpu, -1, "-1: platform specific, 0: force disable, 1: force enable")
 
 /*DIRECT SUBMISSION FLAGS*/
 DECLARE_DEBUG_VARIABLE(int32_t, EnableDirectSubmission, -1, "-1: default (disabled), 0: disable, 1:enable. Enables direct submission of command buffers bypassing KMD")
@@ -137,8 +143,8 @@ DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionDiagnosticExecutionCount, 30, "N
 DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionOverrideBlitterSupport, -1, "Overrides default blitter support: -1: do not override, 0: disable engine support, 1: enable engine support with init start, 2: enable engine support without init start")
 DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionOverrideRenderSupport, -1, "Overrides default render support: -1: do not override, 0: disable engine support, 1: enable engine support with init start, 2: enable engine support without init start")
 DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionOverrideComputeSupport, -1, "Overrides default compute support: -1: do not override, 0: disable engine support, 1: enable engine support with init start, 2: enable engine support without init start")
+DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionDisableCacheFlush, -1, "-1: driver default, 0: additional cache flush is present 1: disable dispatching cache flush commands")
 DECLARE_DEBUG_VARIABLE(bool, USMEvictAfterMigration, true, "Evict USM allocation after implicit migration to GPU")
-DECLARE_DEBUG_VARIABLE(bool, DirectSubmissionDisableCacheFlush, false, "Disable dispatching cache flush commands")
 DECLARE_DEBUG_VARIABLE(bool, DirectSubmissionDisableMonitorFence, false, "Disable dispatching monitor fence commands")
 
 /*FEATURE FLAGS*/
@@ -203,6 +209,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, ForceUserptrAlignment, -1, "-1: no force (4kb), 
 DECLARE_DEBUG_VARIABLE(int64_t, ForceSystemMemoryPlacement, 0, "0: default,  >0: (bitmask) for given Graphics Allocation Type, force system memory placement")
 DECLARE_DEBUG_VARIABLE(int64_t, ForceNonSystemMemoryPlacement, 0, "0: default,  >0: (bitmask) for given Graphics Allocation Type, force non-system memory placement")
 DECLARE_DEBUG_VARIABLE(int64_t, DisableIndirectAccess, -1, "0: default,  0: Indirect access for L0 kernels is enabled, 1: Indirect is disabled")
+DECLARE_DEBUG_VARIABLE(int32_t, UseVmBind, -1, "Use new residency model on Linux (requires kernel support), -1: default, 0: disabled, 1: enabled")
 DECLARE_DEBUG_VARIABLE(bool, UseMaxSimdSizeToDeduceMaxWorkgroupSize, false, "With this flag on, max workgroup size is deduced using SIMD32 instead of SIMD8, this causes the max wkg size to be 4 times bigger")
 DECLARE_DEBUG_VARIABLE(bool, ReturnRawGpuTimestamps, false, "Driver returns raw GPU tiemstamps instead of calculated ones.")
 DECLARE_DEBUG_VARIABLE(bool, ForcePerDssBackedBufferProgramming, false, "Always program per-DSS memory backed buffer in preamble")

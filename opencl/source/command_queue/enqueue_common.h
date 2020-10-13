@@ -519,6 +519,7 @@ void CommandQueueHw<GfxFamily>::processDispatchForCacheFlush(Surface **surfaces,
     uint64_t postSyncAddress = 0;
     if (getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
         auto timestampPacketNodeForPostSync = timestampPacketContainer->peekNodes().at(0);
+        timestampPacketNodeForPostSync->setProfilingCapable(false);
         postSyncAddress = TimestampPacketHelper::getContextEndGpuAddress(*timestampPacketNodeForPostSync);
     }
 
@@ -738,6 +739,7 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
         numGrfRequired,                                                                             //numGrfRequired
         L3CachingSettings::l3CacheOn,                                                               //l3CacheSettings
         kernel->getThreadArbitrationPolicy(),                                                       //threadArbitrationPolicy
+        kernel->getAdditionalKernelExecInfo(),                                                      //additionalKernelExecInfo
         getSliceCount(),                                                                            //sliceCount
         blocking,                                                                                   //blocking
         shouldFlushDC(commandType, printfHandler) || allocNeedsFlushDC,                             //dcFlush
@@ -782,7 +784,7 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
         dispatchFlags.implicitFlush = true;
     }
 
-    printDebugString(DebugManager.flags.PrintDebugMessages.get(), stdout, "preemption = %d.\n", static_cast<int>(dispatchFlags.preemptionMode));
+    PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stdout, "preemption = %d.\n", static_cast<int>(dispatchFlags.preemptionMode));
     CompletionStamp completionStamp = getGpgpuCommandStreamReceiver().flushTask(
         commandStream,
         commandStreamStart,
@@ -950,6 +952,7 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueCommandWithoutKernel(
             GrfConfig::NotApplicable,                                            //numGrfRequired
             L3CachingSettings::NotApplicable,                                    //l3CacheSettings
             ThreadArbitrationPolicy::NotPresent,                                 //threadArbitrationPolicy
+            AdditionalKernelExecInfo::NotApplicable,                             //additionalKernelExecInfo
             getSliceCount(),                                                     //sliceCount
             blocking,                                                            //blocking
             false,                                                               //dcFlush

@@ -20,6 +20,8 @@
 #include "shared/source/kernel/grf_config.h"
 #include "shared/source/os_interface/os_thread.h"
 
+#include "csr_properties_flags.h"
+
 #include <cstddef>
 #include <cstdint>
 
@@ -219,6 +221,8 @@ class CommandStreamReceiver {
   protected:
     void cleanupResources();
     void printDeviceIndex();
+    void checkForNewResources(uint32_t submittedTaskCount, uint32_t allocationTaskCount, GraphicsAllocation &gfxAllocation);
+    bool checkImplicitFlushForGpuIdle();
 
     std::unique_ptr<FlushStampTracker> flushStamp;
     std::unique_ptr<SubmissionAggregator> submissionAggregator;
@@ -300,6 +304,11 @@ class CommandStreamReceiver {
 
     bool localMemoryEnabled = false;
     bool pageTableManagerInitialized = false;
+    uint32_t lastAdditionalKernelExecInfo = AdditionalKernelExecInfo::NotSet;
+
+    bool useNewResourceImplicitFlush = false;
+    bool newResources = false;
+    bool useGpuIdleImplicitFlush = false;
 };
 
 typedef CommandStreamReceiver *(*CommandStreamReceiverCreateFunc)(bool withAubDump, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex);

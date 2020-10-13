@@ -158,22 +158,22 @@ const HwHelper::EngineInstancesContainer HwHelperHw<Family>::getGpgpuEngineInsta
     auto defaultEngine = getChosenEngineType(hwInfo);
 
     EngineInstancesContainer engines = {
-        aub_stream::ENGINE_RCS,
-        aub_stream::ENGINE_RCS, // low priority
-        defaultEngine           // internal usage
+        {aub_stream::ENGINE_RCS, EngineUsage::Regular},
+        {aub_stream::ENGINE_RCS, EngineUsage::LowPriority}, // low priority
+        {defaultEngine, EngineUsage::Internal},             // internal usage
     };
 
     if (defaultEngine == aub_stream::EngineType::ENGINE_CCS && hwInfo.featureTable.ftrCCSNode && !hwInfo.featureTable.ftrGpGpuMidThreadLevelPreempt) {
-        engines.push_back(aub_stream::ENGINE_CCS);
+        engines.push_back({aub_stream::ENGINE_CCS, EngineUsage::Regular});
     }
 
     if (hwInfo.featureTable.ftrBcsInfo.test(0)) {
-        engines.push_back(aub_stream::ENGINE_BCS);
+        engines.push_back({aub_stream::ENGINE_BCS, EngineUsage::Regular});
     }
 
     auto hwInfoConfig = HwInfoConfig::get(hwInfo.platform.eProductFamily);
     if (hwInfoConfig->isEvenContextCountRequired() && engines.size() & 1) {
-        engines.push_back(aub_stream::ENGINE_RCS);
+        engines.push_back({aub_stream::ENGINE_RCS, EngineUsage::Regular});
     }
 
     return engines;
@@ -220,12 +220,19 @@ std::string HwHelperHw<Family>::getExtensions() const {
 template <>
 inline void MemorySynchronizationCommands<Family>::setPipeControlExtraProperties(PIPE_CONTROL &pipeControl, PipeControlArgs &args) {
     pipeControl.setHdcPipelineFlush(args.hdcPipelineFlush);
+
+    if (DebugManager.flags.FlushAllCaches.get()) {
+        pipeControl.setHdcPipelineFlush(true);
+    }
+    if (DebugManager.flags.DoNotFlushCaches.get()) {
+        pipeControl.setHdcPipelineFlush(false);
+    }
 }
 
 template <>
-void MemorySynchronizationCommands<Family>::setCacheFlushExtraProperties(Family::PIPE_CONTROL &pipeControl) {
-    pipeControl.setHdcPipelineFlush(true);
-    pipeControl.setConstantCacheInvalidationEnable(false);
+void MemorySynchronizationCommands<Family>::setCacheFlushExtraProperties(PipeControlArgs &args) {
+    args.hdcPipelineFlush = true;
+    args.constantCacheInvalidationEnable = false;
 }
 
 template <>

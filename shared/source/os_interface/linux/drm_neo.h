@@ -141,6 +141,14 @@ class Drm {
     static bool isi915Version(int fd);
 
     static Drm *create(std::unique_ptr<HwDeviceId> hwDeviceId, RootDeviceEnvironment &rootDeviceEnvironment);
+    static void overrideBindSupport(bool &useVmBind);
+
+    bool isBindAvailable() {
+        return this->bindAvailable;
+    }
+    void setBindAvailable() {
+        this->bindAvailable = true;
+    }
 
   protected:
     int getQueueSliceCount(drm_i915_gem_context_param_sseu *sseu);
@@ -150,6 +158,7 @@ class Drm {
     bool preemptionSupported = false;
     bool nonPersistentContextsSupported = false;
     bool requirePerContextVM = false;
+    bool bindAvailable = false;
     std::unique_ptr<HwDeviceId> hwDeviceId;
     int deviceId = 0;
     int revisionId = 0;

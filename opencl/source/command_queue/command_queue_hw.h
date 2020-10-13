@@ -42,7 +42,7 @@ class CommandQueueHw : public CommandQueue {
 
         if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_LOW_KHR)) {
             priority = QueuePriority::LOW;
-            this->gpgpuEngine = &device->getDeviceById(0)->getEngine(HwHelperHw<GfxFamily>::lowPriorityEngineType, true);
+            this->gpgpuEngine = &device->getDeviceById(0)->getEngine(getChosenEngineType(device->getHardwareInfo()), true, false);
         } else if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_MED_KHR)) {
             priority = QueuePriority::MEDIUM;
         } else if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_HIGH_KHR)) {
@@ -64,10 +64,7 @@ class CommandQueueHw : public CommandQueue {
         }
 
         if (getCmdQueueProperties<cl_queue_properties>(properties, CL_QUEUE_PROPERTIES) & static_cast<cl_queue_properties>(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE)) {
-            auto &csr = getGpgpuCommandStreamReceiver();
-            if (!csr.isDirectSubmissionEnabled()) {
-                csr.overrideDispatchPolicy(DispatchMode::BatchedDispatch);
-            }
+            getGpgpuCommandStreamReceiver().overrideDispatchPolicy(DispatchMode::BatchedDispatch);
             if (DebugManager.flags.CsrDispatchMode.get() != 0) {
                 getGpgpuCommandStreamReceiver().overrideDispatchPolicy(static_cast<DispatchMode>(DebugManager.flags.CsrDispatchMode.get()));
             }

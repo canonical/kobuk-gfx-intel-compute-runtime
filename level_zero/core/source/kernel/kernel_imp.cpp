@@ -8,7 +8,7 @@
 #include "level_zero/core/source/kernel/kernel_imp.h"
 
 #include "shared/source/helpers/basic_math.h"
-#include "shared/source/helpers/hw_helper.h"
+#include "shared/source/helpers/blit_commands_helper.h"
 #include "shared/source/helpers/kernel_helpers.h"
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/source/helpers/string.h"
@@ -105,9 +105,25 @@ void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, NEO::MemoryMan
     auto allocation = memoryManager.allocateGraphicsMemoryWithProperties(
         {device->getRootDeviceIndex(), kernelIsaSize, NEO::GraphicsAllocation::AllocationType::KERNEL_ISA, device->getDeviceBitfield()});
     UNRECOVERABLE_IF(allocation == nullptr);
+
+    auto &hwInfo = device->getHardwareInfo();
+    auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+
     if (kernelInfo->heapInfo.pKernelHeap != nullptr) {
-        memoryManager.copyMemoryToAllocation(allocation, kernelInfo->heapInfo.pKernelHeap, kernelIsaSize);
+        bool doCpuIsaCopy = true;
+
+        if (allocation->isAllocatedInLocalMemoryPool() && hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo)) {
+            auto status = NEO::BlitHelperFunctions::blitMemoryToAllocation(*device, allocation, 0, kernelInfo->heapInfo.pKernelHeap, {kernelIsaSize, 1, 1});
+            UNRECOVERABLE_IF(status == NEO::BlitOperationResult::Fail);
+
+            doCpuIsaCopy = (status == NEO::BlitOperationResult::Unsupported);
+        }
+
+        if (doCpuIsaCopy) {
+            memoryManager.copyMemoryToAllocation(allocation, kernelInfo->heapInfo.pKernelHeap, kernelIsaSize);
+        }
     }
+
     isaGraphicsAllocation.reset(allocation);
 
     this->crossThreadDataSize = this->kernelDescriptor->kernelAttributes.crossThreadDataSize;
@@ -486,6 +502,9 @@ ze_result_t KernelImp::setArgBuffer(uint32_t argIndex, size_t argSize, const voi
 
     if (nullptr == argVal) {
         residencyContainer[argIndex] = nullptr;
+        const auto &arg = kernelImmData->getDescriptor().payloadMappings.explicitArgs[argIndex].as<NEO::ArgDescPointer>();
+        uintptr_t nullBufferValue = 0;
+        NEO::patchPointer(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize), arg, nullBufferValue);
         return ZE_RESULT_SUCCESS;
     }
 
@@ -679,12 +698,8 @@ ze_result_t KernelImp::initialize(const ze_kernel_desc_t *desc) {
 
     this->setDebugSurface();
 
-    for (auto &alloc : kernelImmData->getResidencyContainer()) {
-        residencyContainer.push_back(alloc);
-    }
-    for (auto &alloc : module->getImportedSymbolAllocations()) {
-        residencyContainer.push_back(alloc);
-    }
+    residencyContainer.insert(residencyContainer.end(), kernelImmData->getResidencyContainer().begin(),
+                              kernelImmData->getResidencyContainer().end());
 
     return ZE_RESULT_SUCCESS;
 }

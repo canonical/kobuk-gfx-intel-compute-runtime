@@ -82,19 +82,19 @@ void SysmanDeviceImp::init() {
         pPci->init();
     }
     if (pStandbyHandleContext) {
-        pStandbyHandleContext->init();
+        pStandbyHandleContext->init(deviceHandles);
     }
     if (pEngineHandleContext) {
         pEngineHandleContext->init();
     }
     if (pSchedulerHandleContext) {
-        pSchedulerHandleContext->init();
+        pSchedulerHandleContext->init(deviceHandles);
     }
     if (pRasHandleContext) {
         pRasHandleContext->init();
     }
     if (pMemoryHandleContext) {
-        pMemoryHandleContext->init();
+        pMemoryHandleContext->init(deviceHandles);
     }
     if (pGlobalOperations) {
         pGlobalOperations->init();

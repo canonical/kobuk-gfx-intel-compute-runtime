@@ -17,6 +17,7 @@
 #include "opencl/source/helpers/destructor_callback.h"
 
 #include <list>
+#include <map>
 #include <set>
 
 namespace NEO {
@@ -148,7 +149,13 @@ class Context : public BaseObject<_cl_context> {
 
     AsyncEventsHandler &getAsyncEventsHandler() const;
 
-    DeviceBitfield getDeviceBitfieldForAllocation() const;
+    DeviceBitfield getDeviceBitfieldForAllocation(uint32_t rootDeviceIndex) const;
+    bool getResolvesRequiredInKernels() const {
+        return resolvesRequiredInKernels;
+    }
+    void setResolvesRequiredInKernels(bool resolves) {
+        resolvesRequiredInKernels = resolves;
+    }
 
   protected:
     Context(void(CL_CALLBACK *pfnNotify)(const char *, const void *, size_t, void *) = nullptr,
@@ -161,24 +168,27 @@ class Context : public BaseObject<_cl_context> {
     void setupContextType();
 
     std::set<uint32_t> rootDeviceIndices = {};
-    uint32_t maxRootDeviceIndex = std::numeric_limits<uint32_t>::max();
+    std::map<uint32_t, DeviceBitfield> deviceBitfields;
+    std::vector<std::unique_ptr<SharingFunctions>> sharingFunctions;
+    ClDeviceVector devices;
+    std::list<ContextDestructorCallback *> destructorCallbacks;
+    std::unique_ptr<BuiltInKernel> schedulerBuiltIn;
 
     const cl_context_properties *properties = nullptr;
     size_t numProperties = 0u;
     void(CL_CALLBACK *contextCallback)(const char *, const void *, size_t, void *) = nullptr;
     void *userData = nullptr;
-    std::unique_ptr<BuiltInKernel> schedulerBuiltIn;
-    ClDeviceVector devices;
     MemoryManager *memoryManager = nullptr;
     SVMAllocsManager *svmAllocsManager = nullptr;
     CommandQueue *specialQueue = nullptr;
     DeviceQueue *defaultDeviceQueue = nullptr;
-    std::vector<std::unique_ptr<SharingFunctions>> sharingFunctions;
     DriverDiagnostics *driverDiagnostics = nullptr;
-    bool interopUserSync = false;
+
+    uint32_t maxRootDeviceIndex = std::numeric_limits<uint32_t>::max();
     cl_bool preferD3dSharedResources = 0u;
     ContextType contextType = ContextType::CONTEXT_TYPE_DEFAULT;
 
-    std::list<ContextDestructorCallback *> destructorCallbacks;
+    bool interopUserSync = false;
+    bool resolvesRequiredInKernels = false;
 };
 } // namespace NEO

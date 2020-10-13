@@ -27,7 +27,7 @@ static std::string vendor = "Intel(R) Corporation";
 static std::string profile = "FULL_PROFILE";
 static std::string spirVersions = "1.2 ";
 static std::string spirvName = "SPIR-V";
-const char *latestConformanceVersionPassed = "1.0";
+const char *latestConformanceVersionPassed = "v2020-10-01-00";
 #define QTR(a) #a
 #define TOSTR(b) QTR(b)
 static std::string driverVersion = TOSTR(NEO_OCL_DRIVER_VERSION);
@@ -103,7 +103,7 @@ void ClDevice::initializeCaps() {
     switch (enabledClVersion) {
     case 30:
         deviceInfo.clVersion = "OpenCL 3.0 NEO ";
-        deviceInfo.clCVersion = "OpenCL C 3.0 ";
+        deviceInfo.clCVersion = (isOcl21Conformant() ? "OpenCL C 3.0 " : "OpenCL C 1.2 ");
         deviceInfo.numericClVersion = CL_MAKE_VERSION(3, 0, 0);
         break;
     case 21:
@@ -302,14 +302,14 @@ void ClDevice::initializeCaps() {
 
     deviceInfo.halfFpConfig = defaultFpFlags;
 
-    printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "computeUnitsUsedForScratch: %d\n", sharedDeviceInfo.computeUnitsUsedForScratch);
+    PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "computeUnitsUsedForScratch: %d\n", sharedDeviceInfo.computeUnitsUsedForScratch);
 
-    printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "hwInfo: {%d, %d}: (%d, %d, %d)\n",
-                     systemInfo.EUCount,
-                     systemInfo.ThreadCount,
-                     systemInfo.MaxEuPerSubSlice,
-                     systemInfo.MaxSlicesSupported,
-                     systemInfo.MaxSubSlicesSupported);
+    PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "hwInfo: {%d, %d}: (%d, %d, %d)\n",
+                       systemInfo.EUCount,
+                       systemInfo.ThreadCount,
+                       systemInfo.MaxEuPerSubSlice,
+                       systemInfo.MaxSlicesSupported,
+                       systemInfo.MaxSubSlicesSupported);
 
     deviceInfo.localMemType = CL_LOCAL;
 

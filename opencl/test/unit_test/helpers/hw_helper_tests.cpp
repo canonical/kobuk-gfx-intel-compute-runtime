@@ -947,11 +947,6 @@ HWTEST_F(HwHelperTest, givenVariousDebugKeyValuesWhenGettingLocalMemoryAccessMod
     EXPECT_EQ(LocalMemoryAccessMode::CpuAccessDisallowed, hwHelper.getLocalMemoryAccessMode(*defaultHwInfo));
 }
 
-HWTEST2_F(HwHelperTest, givenSingleEnginePlatformWhenGettingComputeEngineIndexByOrdinalThenZeroIndexIsReturned, IsAtMostGen11) {
-    auto &helper = HwHelper::get(renderCoreFamily);
-    EXPECT_EQ(0u, helper.getComputeEngineIndexByOrdinal(*defaultHwInfo, 0));
-}
-
 HWTEST2_F(HwHelperTest, givenDefaultHwHelperHwWhenGettingIsBlitCopyRequiredForLocalMemoryThenFalseIsReturned, IsAtMostGen11) {
     auto &helper = HwHelper::get(renderCoreFamily);
     EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(*defaultHwInfo));
@@ -997,6 +992,16 @@ TEST(HwInfoConfigCommonHelperTest, givenBlitterPreferenceWhenEnablingBlitterOper
     HwInfoConfigCommonHelper::enableBlitterOperationsSupport(hardwareInfo);
     const auto expectedBlitterSupport = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily).obtainBlitterPreference(hardwareInfo);
     EXPECT_EQ(expectedBlitterSupport, hardwareInfo.capabilityTable.blitterOperationsSupported);
+}
+
+HWTEST_F(HwHelperTest, givenHwHelperWhenAskingForIsaSystemMemoryPlacementThenReturnFalseIfLocalMemorySupported) {
+    HwHelper &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+
+    hardwareInfo.featureTable.ftrLocalMemory = true;
+    EXPECT_FALSE(hwHelper.useSystemMemoryPlacementForISA(hardwareInfo));
+
+    hardwareInfo.featureTable.ftrLocalMemory = false;
+    EXPECT_TRUE(hwHelper.useSystemMemoryPlacementForISA(hardwareInfo));
 }
 
 TEST(HwInfoConfigCommonHelperTest, givenDebugFlagSetWhenEnablingBlitterOperationsSupportThenHonorTheFlag) {

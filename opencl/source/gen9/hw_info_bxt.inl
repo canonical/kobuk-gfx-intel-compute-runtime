@@ -53,6 +53,8 @@ const RuntimeCapabilityTable BXT::capabilityTable{
     0,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
     sizeof(BXT::GRF),                              // grfSize
+    36u,                                           // timestampValidBits
+    32u,                                           // kernelTimestampValidBits
     false,                                         // blitterOperationsSupported
     false,                                         // ftrSupportsInteger64BitAtomics
     true,                                          // ftrSupportsFP64

@@ -129,7 +129,7 @@ TEST_F(DeviceGetCapsTest, WhenCreatingDeviceThenCapsArePopulatedCorrectly) {
     EXPECT_GT(caps.openclCAllVersions.size(), 0u);
     EXPECT_GT(caps.openclCFeatures.size(), 0u);
     EXPECT_EQ(caps.extensionsWithVersion.size(), 0u);
-    EXPECT_STREQ("1.0", caps.latestConformanceVersionPassed);
+    EXPECT_STREQ("v2020-10-01-00", caps.latestConformanceVersionPassed);
 
     EXPECT_NE(nullptr, caps.spirVersions);
     EXPECT_NE(nullptr, caps.deviceExtensions);
@@ -337,8 +337,9 @@ TEST_F(DeviceGetCapsTest, givenForceOclVersion30WhenCapsAreCreatedThenDeviceRepo
     DebugManager.flags.ForceOCLVersion.set(30);
     auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
     const auto &caps = device->getDeviceInfo();
+    auto expectedClCVersion = (device->isOcl21Conformant() ? "OpenCL C 3.0 " : "OpenCL C 1.2 ");
     EXPECT_STREQ("OpenCL 3.0 NEO ", caps.clVersion);
-    EXPECT_STREQ("OpenCL C 3.0 ", caps.clCVersion);
+    EXPECT_STREQ(expectedClCVersion, caps.clCVersion);
     EXPECT_EQ(CL_MAKE_VERSION(3u, 0u, 0u), caps.numericClVersion);
     EXPECT_FALSE(device->ocl21FeaturesEnabled);
     verifyOpenclCAllVersions(*device);

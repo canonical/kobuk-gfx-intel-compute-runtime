@@ -51,6 +51,8 @@ const RuntimeCapabilityTable LKF::capabilityTable{
     1,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
     sizeof(LKF::GRF),                              // grfSize
+    36u,                                           // timestampValidBits
+    32u,                                           // kernelTimestampValidBits
     false,                                         // blitterOperationsSupported
     false,                                         // ftrSupportsInteger64BitAtomics
     false,                                         // ftrSupportsFP64

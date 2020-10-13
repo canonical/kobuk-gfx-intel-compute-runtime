@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/helpers/pause_on_gpu_properties.h"
 #include "shared/source/helpers/vec.h"
 #include "shared/test/unit_test/cmd_parse/hw_parse.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
@@ -38,6 +39,10 @@ struct BlitEnqueueTests : public ::testing::Test {
 
             auto mockBlitMemoryToAllocation = [this](const Device &device, GraphicsAllocation *memory, size_t offset, const void *hostPtr,
                                                      Vec3<size_t> size) -> BlitOperationResult {
+                if (!device.getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.blitterOperationsSupported) {
+                    return BlitOperationResult::Unsupported;
+                }
+
                 auto blitProperties = BlitProperties::constructPropertiesForReadWriteBuffer(BlitterConstants::BlitDirection::HostPtrToBuffer,
                                                                                             *bcsCsr, memory, nullptr,
                                                                                             hostPtr,
@@ -77,7 +82,7 @@ struct BlitEnqueueTests : public ::testing::Test {
         capabilityTable.blitterOperationsSupported = true;
 
         if (createBcsEngine) {
-            auto &engine = device->getEngine(HwHelperHw<FamilyType>::lowPriorityEngineType, true);
+            auto &engine = device->getEngine(getChosenEngineType(device->getHardwareInfo()), true, false);
             bcsOsContext.reset(OsContext::create(nullptr, 1, device->getDeviceBitfield(), aub_stream::ENGINE_BCS, PreemptionMode::Disabled,
                                                  false, false, false));
             engine.osContext = bcsOsContext.get();
@@ -859,84 +864,219 @@ HWTEST_TEMPLATED_F(BlitEnqueueWithNoTimestampPacketTests, givenNoTimestampPacket
     verifySemaphore<FamilyType>(cmdFound, bcsSignalAddress);
 }
 
-using BlitEnqueueWithDebugCapabilityTests = BlitEnqueueTests<0>;
+struct BlitEnqueueWithDebugCapabilityTests : public BlitEnqueueTests<0> {
+    template <typename MI_SEMAPHORE_WAIT>
+    void findSemaphores(GenCmdList &cmdList) {
+        auto semaphore = find<MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
+
+        while (semaphore != cmdList.end()) {
+            auto semaphoreCmd = genCmdCast<MI_SEMAPHORE_WAIT *>(*semaphore);
+            if (static_cast<uint32_t>(DebugPauseState::hasUserStartConfirmation) == semaphoreCmd->getSemaphoreDataDword() &&
+                debugPauseStateAddress == semaphoreCmd->getSemaphoreGraphicsAddress()) {
+
+                EXPECT_EQ(MI_SEMAPHORE_WAIT::COMPARE_OPERATION::COMPARE_OPERATION_SAD_EQUAL_SDD, semaphoreCmd->getCompareOperation());
+                EXPECT_EQ(MI_SEMAPHORE_WAIT::WAIT_MODE::WAIT_MODE_POLLING_MODE, semaphoreCmd->getWaitMode());
+
+                semaphoreBeforeCopyFound++;
+            }
+
+            if (static_cast<uint32_t>(DebugPauseState::hasUserEndConfirmation) == semaphoreCmd->getSemaphoreDataDword() &&
+                debugPauseStateAddress == semaphoreCmd->getSemaphoreGraphicsAddress()) {
+
+                EXPECT_EQ(MI_SEMAPHORE_WAIT::COMPARE_OPERATION::COMPARE_OPERATION_SAD_EQUAL_SDD, semaphoreCmd->getCompareOperation());
+                EXPECT_EQ(MI_SEMAPHORE_WAIT::WAIT_MODE::WAIT_MODE_POLLING_MODE, semaphoreCmd->getWaitMode());
+
+                semaphoreAfterCopyFound++;
+            }
+
+            semaphore = find<MI_SEMAPHORE_WAIT *>(++semaphore, cmdList.end());
+        }
+    }
+
+    template <typename MI_FLUSH_DW>
+    void findMiFlushes(GenCmdList &cmdList) {
+        auto miFlush = find<MI_FLUSH_DW *>(cmdList.begin(), cmdList.end());
+
+        while (miFlush != cmdList.end()) {
+            auto miFlushCmd = genCmdCast<MI_FLUSH_DW *>(*miFlush);
+            if (static_cast<uint32_t>(DebugPauseState::waitingForUserStartConfirmation) == miFlushCmd->getImmediateData() &&
+                debugPauseStateAddress == miFlushCmd->getDestinationAddress()) {
+
+                EXPECT_EQ(MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA_QWORD, miFlushCmd->getPostSyncOperation());
+
+                miFlushBeforeCopyFound++;
+            }
+
+            if (static_cast<uint32_t>(DebugPauseState::waitingForUserEndConfirmation) == miFlushCmd->getImmediateData() &&
+                debugPauseStateAddress == miFlushCmd->getDestinationAddress()) {
+
+                EXPECT_EQ(MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA_QWORD, miFlushCmd->getPostSyncOperation());
+
+                miFlushAfterCopyFound++;
+            }
+
+            miFlush = find<MI_FLUSH_DW *>(++miFlush, cmdList.end());
+        }
+    }
+
+    uint32_t semaphoreBeforeCopyFound = 0;
+    uint32_t semaphoreAfterCopyFound = 0;
+    uint32_t miFlushBeforeCopyFound = 0;
+    uint32_t miFlushAfterCopyFound = 0;
+
+    ReleaseableObjectPtr<Buffer> buffer;
+    uint64_t debugPauseStateAddress = 0;
+    int hostPtr = 0;
+};
 
 HWTEST_TEMPLATED_F(BlitEnqueueWithDebugCapabilityTests, givenDebugFlagSetWhenDispatchingBlitEnqueueThenAddPausingCommands) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
 
-    DebugManager.flags.PauseOnBlitCopy.set(1);
-
     auto ultBcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(bcsCsr);
 
-    auto debugPauseStateAddress = ultBcsCsr->getDebugPauseStateGPUAddress();
+    debugPauseStateAddress = ultBcsCsr->getDebugPauseStateGPUAddress();
 
-    auto buffer = createBuffer(1, false);
+    buffer = createBuffer(1, false);
     buffer->forceDisallowCPUCopy = true;
-    int hostPtr = 0;
+
+    DebugManager.flags.PauseOnBlitCopy.set(1);
 
     commandQueue->enqueueWriteBuffer(buffer.get(), true, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
     commandQueue->enqueueWriteBuffer(buffer.get(), true, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(ultBcsCsr->commandStream);
-    auto &cmdList = hwParser.cmdList;
 
-    auto semaphore = find<MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
-    bool semaphoreBeforeCopyFound = false;
-    bool semaphoreAfterCopyFound = false;
-    while (semaphore != cmdList.end()) {
-        auto semaphoreCmd = genCmdCast<MI_SEMAPHORE_WAIT *>(*semaphore);
-        if (static_cast<uint32_t>(DebugPauseState::hasUserStartConfirmation) == semaphoreCmd->getSemaphoreDataDword()) {
-            EXPECT_EQ(debugPauseStateAddress, semaphoreCmd->getSemaphoreGraphicsAddress());
-            EXPECT_EQ(MI_SEMAPHORE_WAIT::COMPARE_OPERATION::COMPARE_OPERATION_SAD_EQUAL_SDD, semaphoreCmd->getCompareOperation());
-            EXPECT_EQ(MI_SEMAPHORE_WAIT::WAIT_MODE::WAIT_MODE_POLLING_MODE, semaphoreCmd->getWaitMode());
+    findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
 
-            semaphoreBeforeCopyFound = true;
-        }
+    EXPECT_EQ(1u, semaphoreBeforeCopyFound);
+    EXPECT_EQ(1u, semaphoreAfterCopyFound);
 
-        if (static_cast<uint32_t>(DebugPauseState::hasUserEndConfirmation) == semaphoreCmd->getSemaphoreDataDword()) {
-            EXPECT_TRUE(semaphoreBeforeCopyFound);
-            EXPECT_EQ(debugPauseStateAddress, semaphoreCmd->getSemaphoreGraphicsAddress());
-            EXPECT_EQ(MI_SEMAPHORE_WAIT::COMPARE_OPERATION::COMPARE_OPERATION_SAD_EQUAL_SDD, semaphoreCmd->getCompareOperation());
-            EXPECT_EQ(MI_SEMAPHORE_WAIT::WAIT_MODE::WAIT_MODE_POLLING_MODE, semaphoreCmd->getWaitMode());
+    findMiFlushes<MI_FLUSH_DW>(hwParser.cmdList);
 
-            semaphoreAfterCopyFound = true;
-            break;
-        }
+    EXPECT_EQ(1u, miFlushBeforeCopyFound);
+    EXPECT_EQ(1u, miFlushAfterCopyFound);
+}
 
-        semaphore = find<MI_SEMAPHORE_WAIT *>(++semaphore, cmdList.end());
-    }
+HWTEST_TEMPLATED_F(BlitEnqueueWithDebugCapabilityTests, givenDebugFlagSetToMinusTwoWhenDispatchingBlitEnqueueThenAddPausingCommandsForEachEnqueue) {
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+    using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
 
-    EXPECT_TRUE(semaphoreAfterCopyFound);
+    auto ultBcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(bcsCsr);
 
-    auto miFlush = find<MI_FLUSH_DW *>(cmdList.begin(), cmdList.end());
-    bool miFlushBeforeCopyFound = false;
-    bool miFlushAfterCopyFound = false;
-    while (miFlush != cmdList.end()) {
-        auto miFlushCmd = genCmdCast<MI_FLUSH_DW *>(*miFlush);
-        if (static_cast<uint32_t>(DebugPauseState::waitingForUserStartConfirmation) == miFlushCmd->getImmediateData() &&
-            debugPauseStateAddress == miFlushCmd->getDestinationAddress()) {
+    debugPauseStateAddress = ultBcsCsr->getDebugPauseStateGPUAddress();
 
-            EXPECT_EQ(MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA_QWORD, miFlushCmd->getPostSyncOperation());
+    buffer = createBuffer(1, false);
+    buffer->forceDisallowCPUCopy = true;
 
-            miFlushBeforeCopyFound = true;
-        }
+    DebugManager.flags.PauseOnBlitCopy.set(-2);
 
-        if (static_cast<uint32_t>(DebugPauseState::waitingForUserEndConfirmation) == miFlushCmd->getImmediateData() &&
-            debugPauseStateAddress == miFlushCmd->getDestinationAddress()) {
-            EXPECT_TRUE(miFlushBeforeCopyFound);
+    commandQueue->enqueueWriteBuffer(buffer.get(), true, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
+    commandQueue->enqueueWriteBuffer(buffer.get(), true, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
 
-            EXPECT_EQ(MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA_QWORD, miFlushCmd->getPostSyncOperation());
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(ultBcsCsr->commandStream);
 
-            miFlushAfterCopyFound = true;
-            break;
-        }
+    findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
 
-        miFlush = find<MI_FLUSH_DW *>(++miFlush, cmdList.end());
-    }
+    EXPECT_EQ(2u, semaphoreBeforeCopyFound);
+    EXPECT_EQ(2u, semaphoreAfterCopyFound);
 
-    EXPECT_TRUE(miFlushAfterCopyFound);
+    findMiFlushes<MI_FLUSH_DW>(hwParser.cmdList);
+
+    EXPECT_EQ(2u, miFlushBeforeCopyFound);
+    EXPECT_EQ(2u, miFlushAfterCopyFound);
+}
+
+HWTEST_TEMPLATED_F(BlitEnqueueWithDebugCapabilityTests, givenPauseModeSetToBeforeOnlyWhenDispatchingBlitEnqueueThenAddPauseCommandsOnlyBeforeEnqueue) {
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+    using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
+
+    auto ultBcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(bcsCsr);
+
+    debugPauseStateAddress = ultBcsCsr->getDebugPauseStateGPUAddress();
+
+    buffer = createBuffer(1, false);
+    buffer->forceDisallowCPUCopy = true;
+
+    DebugManager.flags.PauseOnBlitCopy.set(0);
+    DebugManager.flags.PauseOnGpuMode.set(PauseOnGpuProperties::PauseMode::BeforeWorkload);
+
+    commandQueue->enqueueWriteBuffer(buffer.get(), true, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(ultBcsCsr->commandStream);
+
+    findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
+
+    EXPECT_EQ(1u, semaphoreBeforeCopyFound);
+    EXPECT_EQ(0u, semaphoreAfterCopyFound);
+
+    findMiFlushes<MI_FLUSH_DW>(hwParser.cmdList);
+
+    EXPECT_EQ(1u, miFlushBeforeCopyFound);
+    EXPECT_EQ(0u, miFlushAfterCopyFound);
+}
+
+HWTEST_TEMPLATED_F(BlitEnqueueWithDebugCapabilityTests, givenPauseModeSetToAfterOnlyWhenDispatchingBlitEnqueueThenAddPauseCommandsOnlyAfterEnqueue) {
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+    using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
+
+    auto ultBcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(bcsCsr);
+
+    debugPauseStateAddress = ultBcsCsr->getDebugPauseStateGPUAddress();
+
+    buffer = createBuffer(1, false);
+    buffer->forceDisallowCPUCopy = true;
+
+    DebugManager.flags.PauseOnBlitCopy.set(0);
+    DebugManager.flags.PauseOnGpuMode.set(PauseOnGpuProperties::PauseMode::AfterWorkload);
+
+    commandQueue->enqueueWriteBuffer(buffer.get(), true, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(ultBcsCsr->commandStream);
+
+    findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
+
+    EXPECT_EQ(0u, semaphoreBeforeCopyFound);
+    EXPECT_EQ(1u, semaphoreAfterCopyFound);
+
+    findMiFlushes<MI_FLUSH_DW>(hwParser.cmdList);
+
+    EXPECT_EQ(0u, miFlushBeforeCopyFound);
+    EXPECT_EQ(1u, miFlushAfterCopyFound);
+}
+
+HWTEST_TEMPLATED_F(BlitEnqueueWithDebugCapabilityTests, givenPauseModeSetToBeforeAndAfterWorkloadWhenDispatchingBlitEnqueueThenAddPauseCommandsAroundEnqueue) {
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+    using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
+
+    auto ultBcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(bcsCsr);
+
+    debugPauseStateAddress = ultBcsCsr->getDebugPauseStateGPUAddress();
+
+    buffer = createBuffer(1, false);
+    buffer->forceDisallowCPUCopy = true;
+
+    DebugManager.flags.PauseOnBlitCopy.set(0);
+    DebugManager.flags.PauseOnGpuMode.set(PauseOnGpuProperties::PauseMode::BeforeAndAfterWorkload);
+
+    commandQueue->enqueueWriteBuffer(buffer.get(), true, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(ultBcsCsr->commandStream);
+
+    findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
+
+    EXPECT_EQ(1u, semaphoreBeforeCopyFound);
+    EXPECT_EQ(1u, semaphoreAfterCopyFound);
+
+    findMiFlushes<MI_FLUSH_DW>(hwParser.cmdList);
+
+    EXPECT_EQ(1u, miFlushBeforeCopyFound);
+    EXPECT_EQ(1u, miFlushAfterCopyFound);
 }
 
 HWTEST_TEMPLATED_F(BlitEnqueueWithDebugCapabilityTests, givenDebugFlagSetWhenCreatingCsrThenCreateDebugThread) {
@@ -1489,6 +1629,26 @@ HWTEST_TEMPLATED_F(BlitCopyTests, givenKernelAllocationInLocalMemoryWhenCreating
 HWTEST_TEMPLATED_F(BlitCopyTests, givenKernelAllocationInLocalMemoryWhenCreatingWithAllowedCpuAccessThenDontUseBcsForTransfer) {
     DebugManager.flags.ForceLocalMemoryAccessMode.set(static_cast<int32_t>(LocalMemoryAccessMode::CpuAccessAllowed));
     DebugManager.flags.ForceNonSystemMemoryPlacement.set(1 << (static_cast<int64_t>(GraphicsAllocation::AllocationType::KERNEL_ISA) - 1));
+
+    uint32_t kernelHeap = 0;
+    KernelInfo kernelInfo;
+    kernelInfo.heapInfo.KernelHeapSize = 1;
+    kernelInfo.heapInfo.pKernelHeap = &kernelHeap;
+
+    auto initialTaskCount = bcsMockContext->bcsCsr->peekTaskCount();
+
+    kernelInfo.createKernelAllocation(device->getDevice());
+
+    EXPECT_EQ(initialTaskCount, bcsMockContext->bcsCsr->peekTaskCount());
+
+    device->getMemoryManager()->freeGraphicsMemory(kernelInfo.kernelAllocation);
+}
+
+HWTEST_TEMPLATED_F(BlitCopyTests, givenKernelAllocationInLocalMemoryWhenCreatingWithDisallowedCpuAccessAndDisabledBlitterThenFallbackToCpuCopy) {
+    DebugManager.flags.ForceLocalMemoryAccessMode.set(static_cast<int32_t>(LocalMemoryAccessMode::CpuAccessDisallowed));
+    DebugManager.flags.ForceNonSystemMemoryPlacement.set(1 << (static_cast<int64_t>(GraphicsAllocation::AllocationType::KERNEL_ISA) - 1));
+
+    device->getExecutionEnvironment()->rootDeviceEnvironments[0]->getMutableHardwareInfo()->capabilityTable.blitterOperationsSupported = false;
 
     uint32_t kernelHeap = 0;
     KernelInfo kernelInfo;

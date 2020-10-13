@@ -113,11 +113,6 @@ Program::Program(ExecutionEnvironment &executionEnvironment, Context *context, b
 }
 
 Program::~Program() {
-    for (auto callback : releaseCallbacks) {
-        callback->invoke(this);
-        delete callback;
-    }
-
     cleanCurrentKernelInfo();
 
     freeBlockResources();
@@ -182,12 +177,12 @@ cl_int Program::createProgramFromBinary(
         auto singleDeviceBinary = unpackSingleDeviceBinary(archive, ConstStringRef(productAbbreviation, strlen(productAbbreviation)), targetDevice,
                                                            decodeErrors, decodeWarnings);
         if (decodeWarnings.empty() == false) {
-            printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s\n", decodeWarnings.c_str());
+            PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s\n", decodeWarnings.c_str());
         }
 
         if (singleDeviceBinary.intermediateRepresentation.empty() && singleDeviceBinary.deviceBinary.empty()) {
             retVal = CL_INVALID_BINARY;
-            printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s\n", decodeErrors.c_str());
+            PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s\n", decodeErrors.c_str());
         } else {
             retVal = CL_SUCCESS;
             this->irBinary = makeCopy(reinterpret_cast<const char *>(singleDeviceBinary.intermediateRepresentation.begin()), singleDeviceBinary.intermediateRepresentation.size());
@@ -269,15 +264,6 @@ cl_int Program::updateSpecializationConstant(cl_uint specId, size_t specSize, co
         }
     }
     return CL_INVALID_SPEC_ID;
-}
-
-cl_int Program::setReleaseCallback(void(CL_CALLBACK *funcNotify)(cl_program, void *),
-                                   void *userData) {
-    auto cb = new ProgramReleaseCallback(funcNotify, userData);
-
-    std::unique_lock<std::mutex> theLock(mtx);
-    releaseCallbacks.push_front(cb);
-    return CL_SUCCESS;
 }
 
 void Program::setDevice(Device *device) {

@@ -3524,7 +3524,7 @@ void *clHostMemAllocINTEL(
     cl_mem_flags flags = 0;
     cl_mem_flags_intel flagsIntel = 0;
     cl_mem_alloc_flags_intel allocflags = 0;
-    unifiedMemoryProperties.subdeviceBitfield = neoContext->getDeviceBitfieldForAllocation();
+    unifiedMemoryProperties.subdeviceBitfield = neoContext->getDeviceBitfieldForAllocation(neoContext->getDevice(0)->getRootDeviceIndex());
     if (!MemoryPropertiesHelper::parseMemoryProperties(properties, unifiedMemoryProperties.allocationFlags, flags, flagsIntel,
                                                        allocflags, MemoryPropertiesHelper::ObjType::UNKNOWN,
                                                        *neoContext)) {
@@ -3620,7 +3620,7 @@ void *clSharedMemAllocINTEL(
         unifiedMemoryProperties.subdeviceBitfield = neoDevice->getDeviceBitfield();
     } else {
         neoDevice = neoContext->getDevice(0);
-        unifiedMemoryProperties.subdeviceBitfield = neoContext->getDeviceBitfieldForAllocation();
+        unifiedMemoryProperties.subdeviceBitfield = neoContext->getDeviceBitfieldForAllocation(neoContext->getDevice(0)->getRootDeviceIndex());
     }
     if (size > neoDevice->getSharedDeviceInfo().maxMemAllocSize && !unifiedMemoryProperties.allocationFlags.flags.allowUnrestrictedSize) {
         err.set(CL_INVALID_BUFFER_SIZE);
@@ -4648,7 +4648,7 @@ cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel kernel,
         return retVal;
     }
     default: {
-        retVal = CL_INVALID_VALUE;
+        retVal = pKernel->setAdditionalKernelExecInfoWithParam(paramName);
         TRACING_EXIT(clSetKernelExecInfo, &retVal);
         return retVal;
     }
@@ -5389,7 +5389,7 @@ cl_int CL_API_CALL clSetProgramReleaseCallback(cl_program program,
                              reinterpret_cast<void *>(pfnNotify));
 
     if (retVal == CL_SUCCESS) {
-        retVal = pProgram->setReleaseCallback(pfnNotify, userData);
+        retVal = CL_INVALID_OPERATION;
     }
 
     return retVal;

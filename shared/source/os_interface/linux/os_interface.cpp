@@ -17,6 +17,8 @@
 namespace NEO {
 
 bool OSInterface::osEnabled64kbPages = false;
+bool OSInterface::newResourceImplicitFlush = true;
+bool OSInterface::gpuIdleImplicitFlush = true;
 
 OSInterface::OSInterfaceImpl::OSInterfaceImpl() = default;
 OSInterface::OSInterfaceImpl::~OSInterfaceImpl() = default;
@@ -46,7 +48,6 @@ bool RootDeviceEnvironment::initOsInterface(std::unique_ptr<HwDeviceId> &&hwDevi
         return false;
     }
 
-    memoryOperationsInterface = DrmMemoryOperationsHandler::create(*drm, rootDeviceIndex);
     osInterface.reset(new OSInterface());
     osInterface->get()->setDrm(drm);
     auto hardwareInfo = getMutableHardwareInfo();
@@ -54,6 +55,7 @@ bool RootDeviceEnvironment::initOsInterface(std::unique_ptr<HwDeviceId> &&hwDevi
     if (hwConfig->configureHwInfo(hardwareInfo, hardwareInfo, osInterface.get())) {
         return false;
     }
+    memoryOperationsInterface = DrmMemoryOperationsHandler::create(*drm, rootDeviceIndex);
     return true;
 }
 } // namespace NEO

@@ -108,13 +108,38 @@ HWTEST2_F(CommandQueueProgramSBATest, whenCreatingCommandQueueThenItIsInitialize
     uint32_t alignedSize = 4096u;
     NEO::LinearStream child(commandQueue->commandStream->getSpace(alignedSize), alignedSize);
 
-    EXPECT_CALL(*memoryManager, getInternalHeapBaseAddress(rootDeviceIndex, true))
-        .Times(1);
+    auto &hwHelper = HwHelper::get(neoDevice->getHardwareInfo().platform.eRenderCoreFamily);
+    bool isaInLocalMemory = !hwHelper.useSystemMemoryPlacementForISA(neoDevice->getHardwareInfo());
+
+    if (isaInLocalMemory) {
+        EXPECT_CALL(*memoryManager, getInternalHeapBaseAddress(rootDeviceIndex, true))
+            .Times(2);
+
+        EXPECT_CALL(*memoryManager, getInternalHeapBaseAddress(rootDeviceIndex, false))
+            .Times(0);
+    } else {
+        EXPECT_CALL(*memoryManager, getInternalHeapBaseAddress(rootDeviceIndex, true))
+            .Times(1); // IOH
+
+        EXPECT_CALL(*memoryManager, getInternalHeapBaseAddress(rootDeviceIndex, false))
+            .Times(1); // instruction heap
+    }
 
     commandQueue->programGeneralStateBaseAddress(0u, true, child);
 
-    EXPECT_CALL(*memoryManager, getInternalHeapBaseAddress(rootDeviceIndex, false))
-        .Times(1);
+    if (isaInLocalMemory) {
+        EXPECT_CALL(*memoryManager, getInternalHeapBaseAddress(rootDeviceIndex, false))
+            .Times(1); // IOH
+
+        EXPECT_CALL(*memoryManager, getInternalHeapBaseAddress(rootDeviceIndex, true))
+            .Times(1); // instruction heap
+    } else {
+        EXPECT_CALL(*memoryManager, getInternalHeapBaseAddress(rootDeviceIndex, true))
+            .Times(0);
+
+        EXPECT_CALL(*memoryManager, getInternalHeapBaseAddress(rootDeviceIndex, false))
+            .Times(2);
+    }
 
     commandQueue->programGeneralStateBaseAddress(0u, false, child);
 
@@ -134,7 +159,7 @@ TEST_F(CommandQueueCreate, givenCmdQueueWithBlitCopyWhenExecutingNonCopyBlitComm
     ASSERT_NE(nullptr, commandQueue);
 
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, false, returnValue));
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, returnValue));
     auto commandListHandle = commandList->toHandle();
     auto status = commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false);
 
@@ -155,7 +180,7 @@ TEST_F(CommandQueueCreate, givenCmdQueueWithBlitCopyWhenExecutingCopyBlitCommand
     ASSERT_NE(nullptr, commandQueue);
 
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, true, returnValue));
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::Copy, returnValue));
     auto commandListHandle = commandList->toHandle();
     auto status = commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false);
 
@@ -197,7 +222,7 @@ HWTEST_F(CommandQueueCommands, givenCommandQueueWhenExecutingCommandListsThenHar
     ASSERT_NE(nullptr, commandQueue);
 
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, true, returnValue));
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::Copy, returnValue));
     auto commandListHandle = commandList->toHandle();
     auto status = commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false);
 
@@ -233,7 +258,7 @@ HWTEST_F(CommandQueueIndirectAllocations, givenCommandQueueWhenExecutingCommandL
     ASSERT_NE(nullptr, commandQueue);
 
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, true, returnValue));
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::Copy, returnValue));
 
     void *deviceAlloc = nullptr;
     auto result = device->getDriverHandle()->allocDeviceMem(device->toHandle(), 0u, 16384u, 4096u, &deviceAlloc);

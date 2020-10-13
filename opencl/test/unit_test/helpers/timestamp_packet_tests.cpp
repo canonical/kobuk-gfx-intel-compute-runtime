@@ -57,6 +57,8 @@ struct TimestampPacketTests : public TimestampPacketSimpleTests {
     };
 
     void SetUp() override {
+        DebugManager.flags.EnableTimestampPacket.set(1);
+
         executionEnvironment = platform()->peekExecutionEnvironment();
         executionEnvironment->prepareRootDeviceEnvironments(2);
         for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
@@ -1639,7 +1641,7 @@ HWTEST_F(TimestampPacketTests, givenBlockedEnqueueWithoutKernelWhenSubmittingThe
 
     auto cmdQ0 = clUniquePtr(new MockCommandQueueHw<FamilyType>(context, device.get(), nullptr));
 
-    auto &secondEngine = device->getEngine(HwHelperHw<FamilyType>::lowPriorityEngineType, true);
+    auto &secondEngine = device->getEngine(getChosenEngineType(device->getHardwareInfo()), true, false);
     static_cast<UltCommandStreamReceiver<FamilyType> *>(secondEngine.commandStreamReceiver)->timestampPacketWriteEnabled = true;
 
     auto cmdQ1 = clUniquePtr(new MockCommandQueueHw<FamilyType>(context, device.get(), nullptr));

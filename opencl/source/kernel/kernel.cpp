@@ -382,6 +382,9 @@ cl_int Kernel::initialize() {
         } else {
             auxTranslationRequired &= hwHelper.requiresAuxResolves();
         }
+        if (auxTranslationRequired) {
+            program->getContextPtr()->setResolvesRequiredInKernels(true);
+        }
 
         if (usingImages && !usingBuffers) {
             usingImagesOnly = true;
@@ -2487,6 +2490,14 @@ void Kernel::patchBindlessSurfaceStateOffsets(const size_t sshOffset) {
             }
         }
     }
+}
+
+void Kernel::setAdditionalKernelExecInfo(uint32_t additionalKernelExecInfo) {
+    this->additionalKernelExecInfo = additionalKernelExecInfo;
+}
+
+uint32_t Kernel::getAdditionalKernelExecInfo() const {
+    return this->additionalKernelExecInfo;
 }
 
 } // namespace NEO

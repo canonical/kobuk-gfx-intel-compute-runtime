@@ -87,7 +87,11 @@ ErrorCode CommandContainer::initialize(Device *device) {
         indirectHeaps[i] = std::make_unique<IndirectHeap>(allocationIndirectHeaps[i], requireInternalHeap);
     }
 
-    instructionHeapBaseAddress = device->getMemoryManager()->getInternalHeapBaseAddress(device->getRootDeviceIndex(), allocationIndirectHeaps[IndirectHeap::Type::INDIRECT_OBJECT]->isAllocatedInLocalMemoryPool());
+    auto &hwHelper = HwHelper::get(getDevice()->getHardwareInfo().platform.eRenderCoreFamily);
+
+    indirectObjectHeapBaseAddress = device->getMemoryManager()->getInternalHeapBaseAddress(device->getRootDeviceIndex(), allocationIndirectHeaps[IndirectHeap::Type::INDIRECT_OBJECT]->isAllocatedInLocalMemoryPool());
+
+    instructionHeapBaseAddress = device->getMemoryManager()->getInternalHeapBaseAddress(device->getRootDeviceIndex(), !hwHelper.useSystemMemoryPlacementForISA(getDevice()->getHardwareInfo()));
 
     reserveBindlessOffsets(*indirectHeaps[IndirectHeap::Type::SURFACE_STATE]);
 
@@ -132,6 +136,8 @@ void CommandContainer::reset() {
     }
 
     reserveBindlessOffsets(*indirectHeaps[HeapType::SURFACE_STATE]);
+    iddBlock = nullptr;
+    nextIddInBlock = this->getNumIddPerBlock();
 }
 
 void *CommandContainer::getHeapSpaceAllowGrow(HeapType heapType,

@@ -48,6 +48,8 @@ const RuntimeCapabilityTable GLK::capabilityTable{
     0,                                             // extraQuantityThreadsPerEU
     64,                                            // slmSize
     sizeof(GLK::GRF),                              // grfSize
+    36u,                                           // timestampValidBits
+    32u,                                           // kernelTimestampValidBits
     false,                                         // blitterOperationsSupported
     false,                                         // ftrSupportsInteger64BitAtomics
     true,                                          // ftrSupportsFP64
