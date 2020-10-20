@@ -236,6 +236,23 @@ TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenforcePinAllowedWhenMem
     EXPECT_NE(nullptr, memoryManager->pinBBs[device->getRootDeviceIndex()]);
 }
 
+TEST_F(DrmMemoryManagerTest, givenDefaultDrmMemoryManagerWhenItIsCreatedThanItIsInitialized) {
+    EXPECT_TRUE(memoryManager->isInitialized());
+}
+
+TEST_F(DrmMemoryManagerTest, givenDefaultDrmMemoryManagerWhenItIsCreatedAndGfxPartitionInitIsFailedThenItIsNotInitialized) {
+    EXPECT_TRUE(memoryManager->isInitialized());
+
+    auto failedInitGfxPartition = std::make_unique<FailedInitGfxPartition>();
+    memoryManager->gfxPartitions[0].reset(failedInitGfxPartition.release());
+    memoryManager->initialize(gemCloseWorkerMode::gemCloseWorkerInactive);
+    EXPECT_FALSE(memoryManager->isInitialized());
+}
+
+TEST_F(DrmMemoryManagerTest, defaultDrmMemoryManagerIsInitialized) {
+    EXPECT_TRUE(memoryManager->isInitialized());
+}
+
 TEST_F(DrmMemoryManagerTest, pinBBisCreated) {
     mock->ioctl_expected.gemUserptr = 1;
     mock->ioctl_expected.gemClose = 1;
@@ -2847,6 +2864,30 @@ TEST_F(DrmMemoryManagerBasic, givenDefaultMemoryManagerWhenItIsCreatedThenAsyncD
     EXPECT_FALSE(memoryManager.isAsyncDeleterEnabled());
     EXPECT_EQ(nullptr, memoryManager.getDeferredDeleter());
     memoryManager.commonCleanup();
+}
+
+TEST_F(DrmMemoryManagerBasic, givenDisabledGemCloseWorkerWhenMemoryManagerIsCreatedThenNoGemCloseWorker) {
+    DebugManagerStateRestore dbgStateRestore;
+    DebugManager.flags.EnableGemCloseWorker.set(0u);
+
+    TestedDrmMemoryManager memoryManager(true, true, true, executionEnvironment);
+
+    EXPECT_EQ(memoryManager.peekGemCloseWorker(), nullptr);
+}
+
+TEST_F(DrmMemoryManagerBasic, givenEnabledGemCloseWorkerWhenMemoryManagerIsCreatedThenGemCloseWorker) {
+    DebugManagerStateRestore dbgStateRestore;
+    DebugManager.flags.EnableGemCloseWorker.set(1u);
+
+    TestedDrmMemoryManager memoryManager(true, true, true, executionEnvironment);
+
+    EXPECT_NE(memoryManager.peekGemCloseWorker(), nullptr);
+}
+
+TEST_F(DrmMemoryManagerBasic, givenDefaultGemCloseWorkerWhenMemoryManagerIsCreatedThenGemCloseWorker) {
+    MemoryManagerCreate<DrmMemoryManager> memoryManager(false, false, gemCloseWorkerMode::gemCloseWorkerActive, false, false, executionEnvironment);
+
+    EXPECT_NE(memoryManager.peekGemCloseWorker(), nullptr);
 }
 
 TEST_F(DrmMemoryManagerBasic, givenEnabledAsyncDeleterFlagWhenMemoryManagerIsCreatedThenAsyncDeleterEnabledIsFalseAndDeleterIsNullptr) {

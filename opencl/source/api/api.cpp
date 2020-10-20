@@ -685,18 +685,19 @@ cl_mem CL_API_CALL clCreateBufferWithProperties(cl_context context,
 
 cl_mem CL_API_CALL clCreateBufferWithPropertiesINTEL(cl_context context,
                                                      const cl_mem_properties_intel *properties,
+                                                     cl_mem_flags flags,
                                                      size_t size,
                                                      void *hostPtr,
                                                      cl_int *errcodeRet) {
     DBG_LOG_INPUTS("cl_context", context,
                    "cl_mem_properties_intel", properties,
+                   "cl_mem_flags", flags,
                    "size", size,
                    "hostPtr", NEO::FileLoggerInstance().infoPointerToString(hostPtr, size));
 
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
 
-    cl_mem_flags flags = 0;
     cl_mem_flags_intel flagsIntel = 0;
     cl_mem buffer = BufferFunctions::validateInputAndCreateBuffer(context, properties, flags, flagsIntel, size, hostPtr, retVal);
 
@@ -887,6 +888,7 @@ cl_mem CL_API_CALL clCreateImageWithProperties(cl_context context,
 
 cl_mem CL_API_CALL clCreateImageWithPropertiesINTEL(cl_context context,
                                                     const cl_mem_properties_intel *properties,
+                                                    cl_mem_flags flags,
                                                     const cl_image_format *imageFormat,
                                                     const cl_image_desc *imageDesc,
                                                     void *hostPtr,
@@ -894,6 +896,7 @@ cl_mem CL_API_CALL clCreateImageWithPropertiesINTEL(cl_context context,
 
     DBG_LOG_INPUTS("cl_context", context,
                    "cl_mem_properties_intel", properties,
+                   "cl_mem_flags", flags,
                    "cl_image_format.channel_data_type", imageFormat->image_channel_data_type,
                    "cl_image_format.channel_order", imageFormat->image_channel_order,
                    "cl_image_desc.width", imageDesc->image_width,
@@ -906,7 +909,6 @@ cl_mem CL_API_CALL clCreateImageWithPropertiesINTEL(cl_context context,
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
 
-    cl_mem_flags flags = 0;
     cl_mem_flags_intel flagsIntel = 0;
     cl_mem image = ImageFunctions::validateAndCreateImage(context, properties, flags, flagsIntel, imageFormat, imageDesc, hostPtr, retVal);
 
@@ -3520,7 +3522,8 @@ void *clHostMemAllocINTEL(
         return nullptr;
     }
 
-    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::HOST_UNIFIED_MEMORY);
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::HOST_UNIFIED_MEMORY,
+                                                                      neoContext->getDeviceBitfieldForAllocation(neoContext->getDevice(0)->getRootDeviceIndex()));
     cl_mem_flags flags = 0;
     cl_mem_flags_intel flagsIntel = 0;
     cl_mem_alloc_flags_intel allocflags = 0;
@@ -3559,11 +3562,11 @@ void *clDeviceMemAllocINTEL(
         return nullptr;
     }
 
-    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::DEVICE_UNIFIED_MEMORY);
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::DEVICE_UNIFIED_MEMORY,
+                                                                      neoDevice->getDeviceBitfield());
     cl_mem_flags flags = 0;
     cl_mem_flags_intel flagsIntel = 0;
     cl_mem_alloc_flags_intel allocflags = 0;
-    unifiedMemoryProperties.subdeviceBitfield = neoDevice->getDeviceBitfield();
     if (!MemoryPropertiesHelper::parseMemoryProperties(properties, unifiedMemoryProperties.allocationFlags, flags, flagsIntel,
                                                        allocflags, MemoryPropertiesHelper::ObjType::UNKNOWN,
                                                        *neoContext)) {
@@ -3600,28 +3603,32 @@ void *clSharedMemAllocINTEL(
         return nullptr;
     }
 
-    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY);
     cl_mem_flags flags = 0;
     cl_mem_flags_intel flagsIntel = 0;
     cl_mem_alloc_flags_intel allocflags = 0;
+    ClDevice *neoDevice = castToObject<ClDevice>(device);
+    void *unifiedMemoryPropertiesDevice = nullptr;
+    DeviceBitfield subdeviceBitfield;
+    if (neoDevice) {
+        if (!neoContext->isDeviceAssociated(*neoDevice)) {
+            err.set(CL_INVALID_DEVICE);
+            return nullptr;
+        }
+        unifiedMemoryPropertiesDevice = device;
+        subdeviceBitfield = neoDevice->getDeviceBitfield();
+    } else {
+        neoDevice = neoContext->getDevice(0);
+        subdeviceBitfield = neoContext->getDeviceBitfieldForAllocation(neoContext->getDevice(0)->getRootDeviceIndex());
+    }
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY, subdeviceBitfield);
+    unifiedMemoryProperties.device = unifiedMemoryPropertiesDevice;
     if (!MemoryPropertiesHelper::parseMemoryProperties(properties, unifiedMemoryProperties.allocationFlags, flags, flagsIntel,
                                                        allocflags, MemoryPropertiesHelper::ObjType::UNKNOWN,
                                                        *neoContext)) {
         err.set(CL_INVALID_VALUE);
         return nullptr;
     }
-    ClDevice *neoDevice = castToObject<ClDevice>(device);
-    if (neoDevice) {
-        if (!neoContext->isDeviceAssociated(*neoDevice)) {
-            err.set(CL_INVALID_DEVICE);
-            return nullptr;
-        }
-        unifiedMemoryProperties.device = device;
-        unifiedMemoryProperties.subdeviceBitfield = neoDevice->getDeviceBitfield();
-    } else {
-        neoDevice = neoContext->getDevice(0);
-        unifiedMemoryProperties.subdeviceBitfield = neoContext->getDeviceBitfieldForAllocation(neoContext->getDevice(0)->getRootDeviceIndex());
-    }
+
     if (size > neoDevice->getSharedDeviceInfo().maxMemAllocSize && !unifiedMemoryProperties.allocationFlags.flags.allowUnrestrictedSize) {
         err.set(CL_INVALID_BUFFER_SIZE);
         return nullptr;

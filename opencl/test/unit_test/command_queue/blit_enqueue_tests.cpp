@@ -7,7 +7,9 @@
 
 #include "shared/source/helpers/pause_on_gpu_properties.h"
 #include "shared/source/helpers/vec.h"
+#include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/test/unit_test/cmd_parse/hw_parse.h"
+#include "shared/test/unit_test/compiler_interface/linker_mock.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/helpers/variable_backup.h"
 #include "shared/test/unit_test/mocks/mock_device.h"
@@ -19,7 +21,9 @@
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
+#include "opencl/test/unit_test/mocks/mock_program.h"
 #include "opencl/test/unit_test/mocks/mock_timestamp_container.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 #include "test.h"
 
 namespace NEO {
@@ -66,13 +70,15 @@ struct BlitEnqueueTests : public ::testing::Test {
 
     template <typename FamilyType>
     void SetUpT() {
-        auto &hwHelper = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
-        if (is32bit || !hwHelper.requiresAuxResolves()) {
+        if (is32bit) {
             GTEST_SKIP();
         }
+        REQUIRE_AUX_RESOLVES();
+
         DebugManager.flags.EnableTimestampPacket.set(timestampPacketEnabled);
         DebugManager.flags.EnableBlitterOperationsForReadWriteBuffers.set(1);
         DebugManager.flags.ForceAuxTranslationMode.set(1);
+        DebugManager.flags.RenderCompressedBuffersEnabled.set(1);
         DebugManager.flags.ForceGpgpuSubmissionForBcsEnqueue.set(1);
         DebugManager.flags.CsrDispatchMode.set(static_cast<int32_t>(DispatchMode::ImmediateDispatch));
         DebugManager.flags.EnableLocalMemory.set(1);
@@ -92,7 +98,6 @@ struct BlitEnqueueTests : public ::testing::Test {
         auto mockCmdQueue = new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr);
         commandQueue.reset(mockCmdQueue);
         mockKernel = std::make_unique<MockKernelWithInternals>(*device, bcsMockContext.get());
-        mockKernel->mockKernel->auxTranslationRequired = true;
         auto mockProgram = mockKernel->mockProgram;
         mockProgram->setAllowNonUniform(true);
 
@@ -108,13 +113,18 @@ struct BlitEnqueueTests : public ::testing::Test {
         if (mockKernel->kernelInfo.kernelArgInfo.size() < buffers.size()) {
             mockKernel->kernelInfo.kernelArgInfo.resize(buffers.size());
         }
+
+        for (uint32_t i = 0; i < buffers.size(); i++) {
+            mockKernel->kernelInfo.kernelArgInfo.at(i).kernelArgPatchInfoVector.resize(1);
+            mockKernel->kernelInfo.kernelArgInfo.at(i).isBuffer = true;
+            mockKernel->kernelInfo.kernelArgInfo.at(i).pureStatefulBufferAccess = false;
+        }
+
         mockKernel->mockKernel->initialize();
+        EXPECT_TRUE(mockKernel->mockKernel->auxTranslationRequired);
 
         for (uint32_t i = 0; i < buffers.size(); i++) {
             cl_mem clMem = buffers[i];
-
-            mockKernel->kernelInfo.kernelArgInfo.at(i).kernelArgPatchInfoVector.resize(1);
-            mockKernel->kernelInfo.kernelArgInfo.at(i).pureStatefulBufferAccess = false;
             mockKernel->mockKernel->setArgBuffer(i, sizeof(cl_mem *), &clMem);
         }
     }
@@ -1662,6 +1672,33 @@ HWTEST_TEMPLATED_F(BlitCopyTests, givenKernelAllocationInLocalMemoryWhenCreating
     EXPECT_EQ(initialTaskCount, bcsMockContext->bcsCsr->peekTaskCount());
 
     device->getMemoryManager()->freeGraphicsMemory(kernelInfo.kernelAllocation);
+}
+
+HWTEST_TEMPLATED_F(BlitCopyTests, givenLocalMemoryAccessNotAllowedWhenGlobalConstantsAreExportedThenUseBlitter) {
+    DebugManager.flags.EnableLocalMemory.set(1);
+    DebugManager.flags.ForceLocalMemoryAccessMode.set(static_cast<int32_t>(LocalMemoryAccessMode::CpuAccessDisallowed));
+
+    char constantData[128] = {};
+    ProgramInfo programInfo;
+    programInfo.globalConstants.initData = constantData;
+    programInfo.globalConstants.size = sizeof(constantData);
+    auto mockLinkerInput = std::make_unique<WhiteBox<LinkerInput>>();
+    mockLinkerInput->traits.exportsGlobalConstants = true;
+    programInfo.linkerInput = std::move(mockLinkerInput);
+
+    MockProgram program(*device->getExecutionEnvironment(), bcsMockContext.get(), false, &device->getDevice());
+
+    EXPECT_EQ(0u, bcsMockContext->bcsCsr->peekTaskCount());
+
+    program.processProgramInfo(programInfo);
+
+    EXPECT_EQ(1u, bcsMockContext->bcsCsr->peekTaskCount());
+
+    auto rootDeviceIndex = device->getRootDeviceIndex();
+
+    ASSERT_NE(nullptr, program.getConstantSurface(rootDeviceIndex));
+    auto gpuAddress = reinterpret_cast<const void *>(program.getConstantSurface(rootDeviceIndex)->getGpuAddress());
+    EXPECT_NE(nullptr, bcsMockContext->getSVMAllocsManager()->getSVMAlloc(gpuAddress));
 }
 
 } // namespace NEO

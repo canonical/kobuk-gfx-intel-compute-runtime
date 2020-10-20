@@ -68,7 +68,9 @@ bool ModuleTranslationUnit::buildFromSpirV(const char *input, uint32_t inputSize
     UNRECOVERABLE_IF(nullptr == compilerInterface);
     UNRECOVERABLE_IF((nullptr == device) || (nullptr == device->getNEODevice()));
 
-    std::string options = buildOptions;
+    if (nullptr != buildOptions) {
+        options = buildOptions;
+    }
     std::string internalOptions = NEO::CompilerOptions::concatenate(internalBuildOptions, BuildOptions::hasBufferOffsetArg);
 
     if (device->getNEODevice()->getDeviceInfo().debuggerActive) {
@@ -143,7 +145,8 @@ bool ModuleTranslationUnit::createFromNativeBinary(const char *input, size_t inp
             this->debugDataSize = singleDeviceBinary.debugData.size();
         }
 
-        if ((false == singleDeviceBinary.deviceBinary.empty()) && (false == NEO::DebugManager.flags.RebuildPrecompiledKernels.get())) {
+        bool rebuild = NEO::DebugManager.flags.RebuildPrecompiledKernels.get() && irBinarySize != 0;
+        if ((false == singleDeviceBinary.deviceBinary.empty()) && (false == rebuild)) {
             this->unpackedDeviceBinary = makeCopy<char>(reinterpret_cast<const char *>(singleDeviceBinary.deviceBinary.begin()), singleDeviceBinary.deviceBinary.size());
             this->unpackedDeviceBinarySize = singleDeviceBinary.deviceBinary.size();
             this->packedDeviceBinary = makeCopy<char>(reinterpret_cast<const char *>(archive.begin()), archive.size());

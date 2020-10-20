@@ -30,11 +30,6 @@
 namespace NEO {
 
 template <typename GfxFamily>
-bool HardwareCommandsHelper<GfxFamily>::isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo) {
-    return false;
-}
-
-template <typename GfxFamily>
 size_t HardwareCommandsHelper<GfxFamily>::getSizeRequiredDSH(
     const Kernel &kernel) {
     using INTERFACE_DESCRIPTOR_DATA = typename GfxFamily::INTERFACE_DESCRIPTOR_DATA;
@@ -51,13 +46,14 @@ size_t HardwareCommandsHelper<GfxFamily>::getSizeRequiredDSH(
                                ? patchInfo.samplerStateArray->Offset - patchInfo.samplerStateArray->BorderColorOffset
                                : 0;
 
-    borderColorSize = alignUp(borderColorSize + alignIndirectStatePointer - 1, alignIndirectStatePointer);
+    borderColorSize = alignUp(borderColorSize + EncodeStates<GfxFamily>::alignIndirectStatePointer - 1,
+                              EncodeStates<GfxFamily>::alignIndirectStatePointer);
 
     totalSize += borderColorSize + additionalSizeRequiredDsh();
 
     DEBUG_BREAK_IF(!(totalSize >= kernel.getDynamicStateHeapSize() || kernel.getKernelInfo().isVmeWorkload));
 
-    return alignUp(totalSize, alignInterfaceDescriptorData);
+    return alignUp(totalSize, EncodeStates<GfxFamily>::alignInterfaceDescriptorData);
 }
 
 template <typename GfxFamily>
@@ -380,27 +376,6 @@ void HardwareCommandsHelper<GfxFamily>::updatePerThreadDataTotal(
 
     sizePerThreadDataTotal = getThreadsPerWG(simd, localWorkItems) * localIdSizePerThread;
     DEBUG_BREAK_IF(sizePerThreadDataTotal == 0); // Hardware requires at least 1 GRF of perThreadData for each thread in thread group
-}
-
-template <typename GfxFamily>
-void HardwareCommandsHelper<GfxFamily>::programMiAtomic(LinearStream &commandStream, uint64_t writeAddress,
-                                                        typename MI_ATOMIC::ATOMIC_OPCODES opcode,
-                                                        typename MI_ATOMIC::DATA_SIZE dataSize) {
-    auto miAtomic = commandStream.getSpaceForCmd<MI_ATOMIC>();
-    MI_ATOMIC cmd = GfxFamily::cmdInitAtomic;
-
-    HardwareCommandsHelper<GfxFamily>::programMiAtomic(cmd, writeAddress, opcode, dataSize);
-    *miAtomic = cmd;
-}
-
-template <typename GfxFamily>
-void HardwareCommandsHelper<GfxFamily>::programMiAtomic(MI_ATOMIC &atomic, uint64_t writeAddress,
-                                                        typename MI_ATOMIC::ATOMIC_OPCODES opcode,
-                                                        typename MI_ATOMIC::DATA_SIZE dataSize) {
-    atomic.setAtomicOpcode(opcode);
-    atomic.setDataSize(dataSize);
-    atomic.setMemoryAddress(static_cast<uint32_t>(writeAddress & 0x0000FFFFFFFFULL));
-    atomic.setMemoryAddressHigh(static_cast<uint32_t>(writeAddress >> 32));
 }
 
 template <typename GfxFamily>

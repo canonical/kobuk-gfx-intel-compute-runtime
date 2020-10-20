@@ -93,7 +93,7 @@ ErrorCode CommandContainer::initialize(Device *device) {
 
     instructionHeapBaseAddress = device->getMemoryManager()->getInternalHeapBaseAddress(device->getRootDeviceIndex(), !hwHelper.useSystemMemoryPlacementForISA(getDevice()->getHardwareInfo()));
 
-    reserveBindlessOffsets(*indirectHeaps[IndirectHeap::Type::SURFACE_STATE]);
+    indirectHeaps[IndirectHeap::Type::SURFACE_STATE]->getSpace(4 * MemoryConstants::pageSize);
 
     iddBlock = nullptr;
     nextIddInBlock = this->getNumIddPerBlock();
@@ -135,9 +135,11 @@ void CommandContainer::reset() {
         addToResidencyContainer(indirectHeap->getGraphicsAllocation());
     }
 
-    reserveBindlessOffsets(*indirectHeaps[HeapType::SURFACE_STATE]);
+    indirectHeaps[IndirectHeap::Type::SURFACE_STATE]->getSpace(4 * MemoryConstants::pageSize);
+
     iddBlock = nullptr;
     nextIddInBlock = this->getNumIddPerBlock();
+    lastSentNumGrfRequired = 0;
 }
 
 void *CommandContainer::getHeapSpaceAllowGrow(HeapType heapType,
@@ -188,7 +190,7 @@ IndirectHeap *CommandContainer::getHeapWithRequiredSizeAndAlignment(HeapType hea
         setIndirectHeapAllocation(heapType, newAlloc);
         setHeapDirty(heapType);
         if (heapType == HeapType::SURFACE_STATE) {
-            reserveBindlessOffsets(*indirectHeap);
+            indirectHeap->getSpace(4 * MemoryConstants::pageSize);
         }
     }
 
@@ -219,12 +221,4 @@ void CommandContainer::allocateNextCommandBuffer() {
 
     addToResidencyContainer(cmdBufferAllocation);
 }
-
-void CommandContainer::reserveBindlessOffsets(IndirectHeap &sshHeap) {
-    UNRECOVERABLE_IF(sshHeap.getUsed() > 0);
-    auto &helper = HwHelper::get(getDevice()->getHardwareInfo().platform.eRenderCoreFamily);
-    auto surfaceStateSize = helper.getRenderSurfaceStateSize();
-    sshHeap.getSpace(surfaceStateSize);
-}
-
 } // namespace NEO

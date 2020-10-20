@@ -240,6 +240,34 @@ bool HwHelperHw<Family>::useOnlyGlobalTimestamps() const {
     return true;
 }
 
+template <>
+uint32_t HwHelperHw<Family>::getMocsIndex(const GmmHelper &gmmHelper, bool l3enabled, bool l1enabled) const {
+    if (l3enabled) {
+        if (DebugManager.flags.ForceL1Caching.get() != -1) {
+            l1enabled = !!DebugManager.flags.ForceL1Caching.get();
+        }
+
+        if (l1enabled) {
+            return gmmHelper.getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST) >> 1;
+        } else {
+            return gmmHelper.getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) >> 1;
+        }
+    }
+
+    return gmmHelper.getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED) >> 1;
+}
+
+template <>
+bool MemorySynchronizationCommands<TGLLPFamily>::isPipeControlWArequired(const HardwareInfo &hwInfo) {
+    HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    return (Gen12LPHelpers::pipeControlWaRequired(hwInfo.platform.eProductFamily)) && hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_B, hwInfo);
+}
+
+template <>
+bool MemorySynchronizationCommands<TGLLPFamily>::isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo) {
+    return MemorySynchronizationCommands<TGLLPFamily>::isPipeControlWArequired(hwInfo);
+}
+
 template class HwHelperHw<Family>;
 template class FlatBatchBufferHelperHw<Family>;
 template struct MemorySynchronizationCommands<Family>;

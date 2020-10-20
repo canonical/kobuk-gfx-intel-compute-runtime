@@ -33,7 +33,7 @@ uint32_t EncodeStates<Family>::copySamplerState(IndirectHeap *dsh,
     auto sizeSamplerState = sizeof(SAMPLER_STATE) * samplerCount;
     auto borderColorSize = samplerStateOffset - borderColorOffset;
 
-    dsh->align(alignIndirectStatePointer);
+    dsh->align(EncodeStates<Family>::alignIndirectStatePointer);
     auto borderColorOffsetInDsh = static_cast<uint32_t>(dsh->getUsed());
 
     auto borderColor = dsh->getSpace(borderColorSize);
@@ -65,7 +65,7 @@ void EncodeMathMMIO<Family>::encodeMulRegVal(CommandContainer &container, uint32
     }
 
     EncodeSetMMIO<Family>::encodeREG(container, CS_GPR_R0, offset);
-    EncodeSetMMIO<Family>::encodeIMM(container, CS_GPR_R1, 0);
+    EncodeSetMMIO<Family>::encodeIMM(container, CS_GPR_R1, 0, false);
 
     i = 0;
     while (i < logLws) {
@@ -93,7 +93,7 @@ void EncodeMathMMIO<Family>::encodeMulRegVal(CommandContainer &container, uint32
 template <typename Family>
 void EncodeMathMMIO<Family>::encodeGreaterThanPredicate(CommandContainer &container, uint64_t firstOperand, uint32_t secondOperand) {
     EncodeSetMMIO<Family>::encodeMEM(container, CS_GPR_R0, firstOperand);
-    EncodeSetMMIO<Family>::encodeIMM(container, CS_GPR_R1, secondOperand);
+    EncodeSetMMIO<Family>::encodeIMM(container, CS_GPR_R1, secondOperand, false);
 
     /* CS_GPR_R* registers map to AluRegisters::R_* registers */
     EncodeMath<Family>::greaterThan(container, AluRegisters::R_0,
@@ -229,12 +229,11 @@ void EncodeIndirectParams<Family>::setGlobalWorkSizeIndirect(CommandContainer &c
 }
 
 template <typename Family>
-void EncodeSetMMIO<Family>::encodeIMM(CommandContainer &container, uint32_t offset, uint32_t data) {
-    MI_LOAD_REGISTER_IMM cmd = Family::cmdInitLoadRegisterImm;
-    cmd.setRegisterOffset(offset);
-    cmd.setDataDword(data);
-    auto buffer = container.getCommandStream()->getSpaceForCmd<MI_LOAD_REGISTER_IMM>();
-    *buffer = cmd;
+inline void EncodeSetMMIO<Family>::encodeIMM(CommandContainer &container, uint32_t offset, uint32_t data, bool remap) {
+    LriHelper<Family>::program(container.getCommandStream(),
+                               offset,
+                               data,
+                               remap);
 }
 
 template <typename Family>
@@ -267,7 +266,7 @@ void EncodeStoreMMIO<Family>::encode(LinearStream &csr, uint32_t offset, uint64_
 
 template <typename Family>
 void EncodeSurfaceState<Family>::encodeBuffer(void *dst, uint64_t address, size_t size, uint32_t mocs,
-                                              bool cpuCoherent, bool forceNonAuxMode, uint32_t numAvailableDevices,
+                                              bool cpuCoherent, bool forceNonAuxMode, bool isReadOnly, uint32_t numAvailableDevices,
                                               GraphicsAllocation *allocation, GmmHelper *gmmHelper) {
     auto surfaceState = reinterpret_cast<R_SURFACE_STATE *>(dst);
     UNRECOVERABLE_IF(!isAligned<getSurfaceBaseAddressAlignment()>(size));
@@ -306,14 +305,14 @@ void EncodeSurfaceState<Family>::encodeBuffer(void *dst, uint64_t address, size_
         surfaceState->setMemoryObjectControlState(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED));
     }
 
-    EncodeSurfaceState<Family>::encodeExtraBufferParams(surfaceState, allocation, gmmHelper, numAvailableDevices);
+    EncodeSurfaceState<Family>::encodeExtraBufferParams(surfaceState, allocation, gmmHelper, isReadOnly, numAvailableDevices);
 }
 
 template <typename Family>
 void *EncodeDispatchKernel<Family>::getInterfaceDescriptor(CommandContainer &container, uint32_t &iddOffset) {
 
     if (container.nextIddInBlock == container.getNumIddPerBlock()) {
-        container.getIndirectHeap(HeapType::DYNAMIC_STATE)->align(HardwareCommandsHelper<Family>::alignInterfaceDescriptorData);
+        container.getIndirectHeap(HeapType::DYNAMIC_STATE)->align(EncodeStates<Family>::alignInterfaceDescriptorData);
         container.setIddBlock(container.getHeapSpaceAllowGrow(HeapType::DYNAMIC_STATE,
                                                               sizeof(INTERFACE_DESCRIPTOR_DATA) * container.getNumIddPerBlock()));
         container.nextIddInBlock = 0;
@@ -424,16 +423,32 @@ size_t EncodeSempahore<Family>::getSizeMiSemaphoreWait() {
 }
 
 template <typename Family>
-void EncodeAtomic<Family>::programMiAtomic(MI_ATOMIC *atomic, uint64_t writeAddress,
+void EncodeAtomic<Family>::programMiAtomic(MI_ATOMIC *atomic,
+                                           uint64_t writeAddress,
                                            ATOMIC_OPCODES opcode,
-                                           DATA_SIZE dataSize) {
+                                           DATA_SIZE dataSize,
+                                           uint32_t returnDataControl,
+                                           uint32_t csStall) {
     MI_ATOMIC cmd = Family::cmdInitAtomic;
     cmd.setAtomicOpcode(opcode);
     cmd.setDataSize(dataSize);
     cmd.setMemoryAddress(static_cast<uint32_t>(writeAddress & 0x0000FFFFFFFFULL));
     cmd.setMemoryAddressHigh(static_cast<uint32_t>(writeAddress >> 32));
+    cmd.setReturnDataControl(returnDataControl);
+    cmd.setCsStall(csStall);
 
     *atomic = cmd;
+}
+
+template <typename GfxFamily>
+void EncodeAtomic<GfxFamily>::programMiAtomic(LinearStream &commandStream,
+                                              uint64_t writeAddress,
+                                              ATOMIC_OPCODES opcode,
+                                              DATA_SIZE dataSize,
+                                              uint32_t returnDataControl,
+                                              uint32_t csStall) {
+    auto miAtomic = commandStream.getSpaceForCmd<MI_ATOMIC>();
+    EncodeAtomic<GfxFamily>::programMiAtomic(miAtomic, writeAddress, opcode, dataSize, returnDataControl, csStall);
 }
 
 template <typename Family>

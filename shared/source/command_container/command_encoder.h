@@ -72,6 +72,7 @@ struct EncodeStates {
     using SAMPLER_STATE = typename GfxFamily::SAMPLER_STATE;
 
     static const uint32_t alignIndirectStatePointer = MemoryConstants::cacheLineSize;
+    static const size_t alignInterfaceDescriptorData = MemoryConstants::cacheLineSize;
 
     static uint32_t copySamplerState(IndirectHeap *dsh,
                                      uint32_t samplerStateOffset,
@@ -148,7 +149,7 @@ struct EncodeSetMMIO {
     static const size_t sizeMEM = sizeof(MI_LOAD_REGISTER_MEM);
     static const size_t sizeREG = sizeof(MI_LOAD_REGISTER_REG);
 
-    static void encodeIMM(CommandContainer &container, uint32_t offset, uint32_t data);
+    static void encodeIMM(CommandContainer &container, uint32_t offset, uint32_t data, bool remap);
 
     static void encodeMEM(CommandContainer &container, uint32_t offset, uint64_t address);
 
@@ -194,10 +195,10 @@ struct EncodeSurfaceState {
     using AUXILIARY_SURFACE_MODE = typename R_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
 
     static void encodeBuffer(void *dst, uint64_t address, size_t size, uint32_t mocs,
-                             bool cpuCoherent, bool forceNonAuxMode, uint32_t numAvailableDevices,
+                             bool cpuCoherent, bool forceNonAuxMode, bool isReadOnly, uint32_t numAvailableDevices,
                              GraphicsAllocation *allocation, GmmHelper *gmmHelper);
     static void encodeExtraBufferParams(R_SURFACE_STATE *surfaceState, GraphicsAllocation *allocation, GmmHelper *gmmHelper,
-                                        uint32_t numAvailableDevices);
+                                        bool isReadOnly, uint32_t numAvailableDevices);
 
     static constexpr uintptr_t getSurfaceBaseAddressAlignmentMask() {
         return ~(getSurfaceBaseAddressAlignment() - 1);
@@ -248,9 +249,19 @@ struct EncodeAtomic {
     using ATOMIC_OPCODES = typename GfxFamily::MI_ATOMIC::ATOMIC_OPCODES;
     using DATA_SIZE = typename GfxFamily::MI_ATOMIC::DATA_SIZE;
 
-    static void programMiAtomic(MI_ATOMIC *atomic, uint64_t writeAddress,
+    static void programMiAtomic(LinearStream &commandStream,
+                                uint64_t writeAddress,
                                 ATOMIC_OPCODES opcode,
-                                DATA_SIZE dataSize);
+                                DATA_SIZE dataSize,
+                                uint32_t returnDataControl,
+                                uint32_t csStall);
+
+    static void programMiAtomic(MI_ATOMIC *atomic,
+                                uint64_t writeAddress,
+                                ATOMIC_OPCODES opcode,
+                                DATA_SIZE dataSize,
+                                uint32_t returnDataControl,
+                                uint32_t csStall);
 };
 
 template <typename GfxFamily>

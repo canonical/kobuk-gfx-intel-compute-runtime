@@ -161,16 +161,18 @@ TEST_F(CommandContainerTest, givenHeapAllocationsWhenDestroyCommandContainerThen
     EXPECT_TRUE(status);
 }
 
-TEST_F(CommandContainerTest, givenCommandContainerWhenResetTheanStreamsAreNotUsed) {
+TEST_F(CommandContainerTest, givenCommandContainerWhenResetThenStateIsReset) {
     CommandContainer cmdContainer;
     cmdContainer.initialize(pDevice);
     LinearStream stream;
     uint32_t usedSize = 1;
+    cmdContainer.lastSentNumGrfRequired = 64;
     cmdContainer.getCommandStream()->getSpace(usedSize);
     EXPECT_EQ(usedSize, cmdContainer.getCommandStream()->getUsed());
     cmdContainer.reset();
     EXPECT_NE(usedSize, cmdContainer.getCommandStream()->getUsed());
     EXPECT_EQ(0u, cmdContainer.getCommandStream()->getUsed());
+    EXPECT_EQ(0u, cmdContainer.lastSentNumGrfRequired);
 }
 
 TEST_F(CommandContainerTest, givenCommandContainerWhenWantToAddNullPtrToResidencyContainerThenNothingIsAdded) {
@@ -213,7 +215,7 @@ HWTEST_F(CommandContainerTest, givenCmdContainerWhenInitializeCalledThenSSHHeapH
     auto heap = cmdContainer->getIndirectHeap(HeapType::SURFACE_STATE);
 
     ASSERT_NE(nullptr, heap);
-    EXPECT_EQ(sizeof(RENDER_SURFACE_STATE), heap->getUsed());
+    EXPECT_EQ(4 * MemoryConstants::pageSize, heap->getUsed());
 }
 
 HWTEST_F(CommandContainerTest, givenNotEnoughSpaceInSSHWhenGettingHeapWithRequiredSizeAndAlignmentThenSSHHeapHasBindlessOffsetReserved) {
@@ -228,7 +230,7 @@ HWTEST_F(CommandContainerTest, givenNotEnoughSpaceInSSHWhenGettingHeapWithRequir
 
     cmdContainer->getHeapWithRequiredSizeAndAlignment(HeapType::SURFACE_STATE, sizeof(RENDER_SURFACE_STATE), 0);
 
-    EXPECT_EQ(sizeof(RENDER_SURFACE_STATE), heap->getUsed());
+    EXPECT_EQ(4 * MemoryConstants::pageSize, heap->getUsed());
 }
 
 TEST_F(CommandContainerTest, givenAvailableSpaceWhenGetHeapWithRequiredSizeAndAlignmentCalledThenExistingAllocationIsReturned) {

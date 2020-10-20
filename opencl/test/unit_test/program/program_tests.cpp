@@ -864,19 +864,44 @@ TEST_P(ProgramFromSourceTest, CreateWithSource_Build_Options_Duplicate) {
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
-TEST_P(ProgramFromSourceTest, WhenBuildingProgramThenFeaturesOptionIsAdded) {
+TEST_P(ProgramFromSourceTest, WhenBuildingProgramThenFeaturesOptionIsNotAdded) {
     auto featuresOption = static_cast<ClDevice *>(devices[0])->peekCompilerFeatures();
     EXPECT_THAT(pProgram->getInternalOptions(), testing::Not(testing::HasSubstr(featuresOption)));
 
     retVal = pProgram->build(1, devices, nullptr, nullptr, nullptr, false);
     EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_THAT(pProgram->getInternalOptions(), testing::Not(testing::HasSubstr(featuresOption)));
+}
+
+TEST_P(ProgramFromSourceTest, WhenBuildingProgramWithOpenClC30ThenFeaturesOptionIsAdded) {
+    auto featuresOption = static_cast<ClDevice *>(devices[0])->peekCompilerFeatures();
+    EXPECT_THAT(pProgram->getInternalOptions(), testing::Not(testing::HasSubstr(featuresOption)));
+
+    auto cip = new MockCompilerInterfaceCaptureBuildOptions();
+    auto pClDevice = pContext->getDevice(0);
+    pClDevice->getExecutionEnvironment()->rootDeviceEnvironments[pClDevice->getRootDeviceIndex()]->compilerInterface.reset(cip);
+    auto pProgram = std::make_unique<SucceedingGenBinaryProgram>(*pClDevice->getExecutionEnvironment());
+    pProgram->setDevice(&pClDevice->getDevice());
+    pProgram->sourceCode = "__kernel mock() {}";
+    pProgram->createdFrom = Program::CreatedFrom::SOURCE;
+
+    retVal = pProgram->build(1, devices, "-cl-std=CL3.0", nullptr, nullptr, false);
+    EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_THAT(pProgram->getInternalOptions(), testing::HasSubstr(featuresOption));
 }
 
-TEST_P(ProgramFromSourceTest, WhenBuildingProgramThenFeaturesOptionIsAddedOnlyOnce) {
-    retVal = pProgram->build(1, devices, nullptr, nullptr, nullptr, false);
+TEST_P(ProgramFromSourceTest, WhenBuildingProgramWithOpenClC30ThenFeaturesOptionIsAddedOnlyOnce) {
+    auto cip = new MockCompilerInterfaceCaptureBuildOptions();
+    auto pClDevice = pContext->getDevice(0);
+    pClDevice->getExecutionEnvironment()->rootDeviceEnvironments[pClDevice->getRootDeviceIndex()]->compilerInterface.reset(cip);
+    auto pProgram = std::make_unique<SucceedingGenBinaryProgram>(*pClDevice->getExecutionEnvironment());
+    pProgram->setDevice(&pClDevice->getDevice());
+    pProgram->sourceCode = "__kernel mock() {}";
+    pProgram->createdFrom = Program::CreatedFrom::SOURCE;
+
+    retVal = pProgram->build(0, nullptr, "-cl-std=CL3.0", nullptr, nullptr, false);
     EXPECT_EQ(CL_SUCCESS, retVal);
-    retVal = pProgram->build(1, devices, nullptr, nullptr, nullptr, false);
+    retVal = pProgram->build(0, nullptr, "-cl-std=CL3.0", nullptr, nullptr, false);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     auto expectedFeaturesOption = static_cast<ClDevice *>(devices[0])->peekCompilerFeatures();
@@ -888,7 +913,7 @@ TEST_P(ProgramFromSourceTest, WhenBuildingProgramThenFeaturesOptionIsAddedOnlyOn
     EXPECT_EQ(std::string::npos, pos);
 }
 
-TEST_P(ProgramFromSourceTest, WhenCompilingProgramThenFeaturesOptionIsAdded) {
+TEST_P(ProgramFromSourceTest, WhenCompilingProgramThenFeaturesOptionIsNotAdded) {
     auto pCompilerInterface = new MockCompilerInterfaceCaptureBuildOptions();
     auto pClDevice = static_cast<ClDevice *>(devices[0]);
     pClDevice->getExecutionEnvironment()->rootDeviceEnvironments[pClDevice->getRootDeviceIndex()]->compilerInterface.reset(pCompilerInterface);
@@ -896,6 +921,23 @@ TEST_P(ProgramFromSourceTest, WhenCompilingProgramThenFeaturesOptionIsAdded) {
     EXPECT_THAT(pCompilerInterface->buildInternalOptions, testing::Not(testing::HasSubstr(featuresOption)));
 
     retVal = pProgram->compile(1, devices, nullptr, 0, nullptr, nullptr, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_THAT(pCompilerInterface->buildInternalOptions, testing::Not(testing::HasSubstr(featuresOption)));
+}
+
+TEST_P(ProgramFromSourceTest, WhenCompilingProgramWithOpenClC30ThenFeaturesOptionIsAdded) {
+    auto pCompilerInterface = new MockCompilerInterfaceCaptureBuildOptions();
+    auto pClDevice = pContext->getDevice(0);
+    pClDevice->getExecutionEnvironment()->rootDeviceEnvironments[pClDevice->getRootDeviceIndex()]->compilerInterface.reset(pCompilerInterface);
+    auto pProgram = std::make_unique<SucceedingGenBinaryProgram>(*pClDevice->getExecutionEnvironment());
+    pProgram->setDevice(&pClDevice->getDevice());
+    pProgram->sourceCode = "__kernel mock() {}";
+    pProgram->createdFrom = Program::CreatedFrom::SOURCE;
+
+    auto featuresOption = pClDevice->peekCompilerFeatures();
+    EXPECT_THAT(pCompilerInterface->buildInternalOptions, testing::Not(testing::HasSubstr(featuresOption)));
+
+    retVal = pProgram->compile(1, devices, "-cl-std=CL3.0", 0, nullptr, nullptr, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_THAT(pCompilerInterface->buildInternalOptions, testing::HasSubstr(featuresOption));
 }
@@ -965,13 +1007,26 @@ TEST_P(ProgramFromSourceTest, GivenDifferentCommpilerOptionsWhenBuildingProgramT
     Callback::unwatch(kernel2);
     Callback::watch(kernel3);
 
+    pProgram->createdFrom = NEO::Program::CreatedFrom::BINARY;
+    pProgram->setIrBinary(new char[16], true);
+    pProgram->setIrBinarySize(16, true);
     retVal = pProgram->build(0, nullptr, nullptr, nullptr, nullptr, true);
     EXPECT_EQ(CL_SUCCESS, retVal);
     auto hash4 = pProgram->getCachedFileName();
     auto kernel4 = pProgram->getKernelInfo("CopyBuffer");
     EXPECT_NE(nullptr, kernel4);
-    EXPECT_EQ(hash1, hash4);
+    EXPECT_EQ(hash3, hash4);
     Callback::unwatch(kernel3);
+    Callback::watch(kernel4);
+
+    pProgram->createdFrom = NEO::Program::CreatedFrom::SOURCE;
+    retVal = pProgram->build(0, nullptr, nullptr, nullptr, nullptr, true);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    auto hash5 = pProgram->getCachedFileName();
+    auto kernel5 = pProgram->getKernelInfo("CopyBuffer");
+    EXPECT_NE(nullptr, kernel5);
+    EXPECT_EQ(hash1, hash5);
+    Callback::unwatch(kernel4);
 }
 
 TEST_P(ProgramFromSourceTest, GivenEmptyProgramWhenCreatingProgramThenInvalidValueErrorIsReturned) {

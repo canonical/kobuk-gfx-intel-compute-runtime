@@ -367,8 +367,6 @@ cl_int Kernel::initialize() {
                 kernelArguments[i].type = BUFFER_OBJ;
                 usingBuffers = true;
                 allBufferArgsStateful &= static_cast<uint32_t>(argInfo.pureStatefulBufferAccess);
-                this->auxTranslationRequired |= !kernelInfo.kernelArgInfo[i].pureStatefulBufferAccess &&
-                                                HwHelper::renderCompressedBuffersSupported(hwInfo);
             } else if (argInfo.isDeviceQueue) {
                 kernelArgHandlers[i] = &Kernel::setArgDevQueue;
                 kernelArguments[i].type = DEVICE_QUEUE_OBJ;
@@ -377,10 +375,9 @@ cl_int Kernel::initialize() {
             }
         }
 
+        auxTranslationRequired = HwHelper::renderCompressedBuffersSupported(hwInfo) && hwHelper.requiresAuxResolves(kernelInfo);
         if (DebugManager.flags.ForceAuxTranslationEnabled.get() != -1) {
             auxTranslationRequired &= !!DebugManager.flags.ForceAuxTranslationEnabled.get();
-        } else {
-            auxTranslationRequired &= hwHelper.requiresAuxResolves();
         }
         if (auxTranslationRequired) {
             program->getContextPtr()->setResolvesRequiredInKernels(true);
@@ -829,15 +826,6 @@ void Kernel::resizeSurfaceStateHeap(void *pNewSsh, size_t newSshSize, size_t new
     sshLocalSize = static_cast<uint32_t>(newSshSize);
     numberOfBindingTableStates = newBindingTableCount;
     localBindingTableOffset = newBindingTableOffset;
-}
-
-uint32_t Kernel::getScratchSizeValueToProgramMediaVfeState(int scratchSize) {
-    scratchSize >>= MemoryConstants::kiloByteShiftSize;
-    uint32_t valueToProgram = 0;
-    while (scratchSize >>= 1) {
-        valueToProgram++;
-    }
-    return valueToProgram;
 }
 
 cl_int Kernel::setArg(uint32_t argIndex, size_t argSize, const void *argVal) {

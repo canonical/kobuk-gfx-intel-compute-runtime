@@ -15,7 +15,6 @@
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/helpers/dispatch_flags_helper.h"
 
-#include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
 #include "opencl/test/unit_test/helpers/raii_hw_helper.h"
 #include "opencl/test/unit_test/helpers/unit_test_helper.h"
@@ -471,6 +470,7 @@ struct MockScratchController : public ScratchSpaceController {
     using ScratchSpaceController::scratchAllocation;
     using ScratchSpaceController::ScratchSpaceController;
     void setRequiredScratchSpace(void *sshBaseAddress,
+                                 uint32_t scratchSlot,
                                  uint32_t requiredPerThreadScratchSize,
                                  uint32_t requiredPerThreadPrivateScratchSize,
                                  uint32_t currentTaskCount,
@@ -488,6 +488,15 @@ struct MockScratchController : public ScratchSpaceController {
     }
     uint64_t calculateNewGSH() override { return 0u; };
     uint64_t getScratchPatchAddress() override { return 0u; };
+    void programHeaps(HeapContainer &heapContainer,
+                      uint32_t scratchSlot,
+                      uint32_t requiredPerThreadScratchSize,
+                      uint32_t requiredPerThreadPrivateScratchSize,
+                      uint32_t currentTaskCount,
+                      OsContext &osContext,
+                      bool &stateBaseAddressDirty,
+                      bool &vfeStateDirty) override {
+    }
 
     void reserveHeap(IndirectHeap::Type heapType, IndirectHeap *&indirectHeap) override{};
 };
@@ -1057,7 +1066,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenSpecialPipelineSelectModeChan
     size_t size = commandStreamReceiver.getCmdSizeForPipelineSelect();
 
     size_t expectedSize = sizeof(PIPELINE_SELECT);
-    if (HardwareCommandsHelper<FamilyType>::isPipeControlPriorToPipelineSelectWArequired(pDevice->getHardwareInfo())) {
+    if (MemorySynchronizationCommands<FamilyType>::isPipeControlPriorToPipelineSelectWArequired(pDevice->getHardwareInfo())) {
         expectedSize += sizeof(PIPE_CONTROL);
     }
     EXPECT_EQ(expectedSize, size);
@@ -1085,7 +1094,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrWhenPreambleSentThenRequir
     auto difference = mediaSamplerConfigChangedSize - mediaSamplerConfigNotChangedSize;
 
     size_t expectedDifference = sizeof(PIPELINE_SELECT);
-    if (HardwareCommandsHelper<FamilyType>::isPipeControlPriorToPipelineSelectWArequired(pDevice->getHardwareInfo())) {
+    if (MemorySynchronizationCommands<FamilyType>::isPipeControlPriorToPipelineSelectWArequired(pDevice->getHardwareInfo())) {
         expectedDifference += sizeof(PIPE_CONTROL);
     }
 

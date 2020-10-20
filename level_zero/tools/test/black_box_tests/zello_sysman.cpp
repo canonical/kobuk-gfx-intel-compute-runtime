@@ -10,16 +10,64 @@
 #include <algorithm>
 #include <getopt.h>
 #include <iostream>
+#include <map>
 #include <string.h>
 #include <unistd.h>
 #include <vector>
 
 bool verbose = true;
 
+std::string getErrorString(ze_result_t error) {
+    static const std::map<ze_result_t, std::string> mgetErrorString{
+        {ZE_RESULT_NOT_READY, "ZE_RESULT_NOT_READY"},
+        {ZE_RESULT_ERROR_DEVICE_LOST, "ZE_RESULT_ERROR_DEVICE_LOST"},
+        {ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY, "ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY"},
+        {ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY, "ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY"},
+        {ZE_RESULT_ERROR_MODULE_BUILD_FAILURE, "ZE_RESULT_ERROR_MODULE_BUILD_FAILURE"},
+        {ZE_RESULT_ERROR_MODULE_LINK_FAILURE, "ZE_RESULT_ERROR_MODULE_LINK_FAILURE"},
+        {ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS, "ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS"},
+        {ZE_RESULT_ERROR_NOT_AVAILABLE, "ZE_RESULT_ERROR_NOT_AVAILABLE"},
+        {ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE, "ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE"},
+        {ZE_RESULT_ERROR_UNINITIALIZED, "ZE_RESULT_ERROR_UNINITIALIZED"},
+        {ZE_RESULT_ERROR_UNSUPPORTED_VERSION, "ZE_RESULT_ERROR_UNSUPPORTED_VERSION"},
+        {ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, "ZE_RESULT_ERROR_UNSUPPORTED_FEATURE"},
+        {ZE_RESULT_ERROR_INVALID_ARGUMENT, "ZE_RESULT_ERROR_INVALID_ARGUMENT"},
+        {ZE_RESULT_ERROR_INVALID_NULL_HANDLE, "ZE_RESULT_ERROR_INVALID_NULL_HANDLE"},
+        {ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE, "ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE"},
+        {ZE_RESULT_ERROR_INVALID_NULL_POINTER, "ZE_RESULT_ERROR_INVALID_NULL_POINTER"},
+        {ZE_RESULT_ERROR_INVALID_SIZE, "ZE_RESULT_ERROR_INVALID_SIZE"},
+        {ZE_RESULT_ERROR_UNSUPPORTED_SIZE, "ZE_RESULT_ERROR_UNSUPPORTED_SIZE"},
+        {ZE_RESULT_ERROR_UNSUPPORTED_ALIGNMENT, "ZE_RESULT_ERROR_UNSUPPORTED_ALIGNMENT"},
+        {ZE_RESULT_ERROR_INVALID_SYNCHRONIZATION_OBJECT, "ZE_RESULT_ERROR_INVALID_SYNCHRONIZATION_OBJECT"},
+        {ZE_RESULT_ERROR_INVALID_ENUMERATION, "ZE_RESULT_ERROR_INVALID_ENUMERATION"},
+        {ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION, "ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION"},
+        {ZE_RESULT_ERROR_UNSUPPORTED_IMAGE_FORMAT, "ZE_RESULT_ERROR_UNSUPPORTED_IMAGE_FORMAT"},
+        {ZE_RESULT_ERROR_INVALID_NATIVE_BINARY, "ZE_RESULT_ERROR_INVALID_NATIVE_BINARY"},
+        {ZE_RESULT_ERROR_INVALID_GLOBAL_NAME, "ZE_RESULT_ERROR_INVALID_GLOBAL_NAME"},
+        {ZE_RESULT_ERROR_INVALID_KERNEL_NAME, "ZE_RESULT_ERROR_INVALID_KERNEL_NAME"},
+        {ZE_RESULT_ERROR_INVALID_FUNCTION_NAME, "ZE_RESULT_ERROR_INVALID_FUNCTION_NAME"},
+        {ZE_RESULT_ERROR_INVALID_GROUP_SIZE_DIMENSION, "ZE_RESULT_ERROR_INVALID_GROUP_SIZE_DIMENSION"},
+        {ZE_RESULT_ERROR_INVALID_GLOBAL_WIDTH_DIMENSION, "ZE_RESULT_ERROR_INVALID_GLOBAL_WIDTH_DIMENSION"},
+        {ZE_RESULT_ERROR_INVALID_KERNEL_ARGUMENT_INDEX, "ZE_RESULT_ERROR_INVALID_KERNEL_ARGUMENT_INDEX"},
+        {ZE_RESULT_ERROR_INVALID_KERNEL_ARGUMENT_SIZE, "ZE_RESULT_ERROR_INVALID_KERNEL_ARGUMENT_SIZE"},
+        {ZE_RESULT_ERROR_INVALID_KERNEL_ATTRIBUTE_VALUE, "ZE_RESULT_ERROR_INVALID_KERNEL_ATTRIBUTE_VALUE"},
+        {ZE_RESULT_ERROR_INVALID_MODULE_UNLINKED, "ZE_RESULT_ERROR_INVALID_MODULE_UNLINKED"},
+        {ZE_RESULT_ERROR_INVALID_COMMAND_LIST_TYPE, "ZE_RESULT_ERROR_INVALID_COMMAND_LIST_TYPE"},
+        {ZE_RESULT_ERROR_OVERLAPPING_REGIONS, "ZE_RESULT_ERROR_OVERLAPPING_REGIONS"},
+        {ZE_RESULT_ERROR_UNKNOWN, "ZE_RESULT_ERROR_UNKNOWN"}};
+    auto i = mgetErrorString.find(error);
+    if (i == mgetErrorString.end())
+        return "ZE_RESULT_ERROR_UNKNOWN";
+    else
+        return mgetErrorString.at(error);
+}
+
 #define VALIDATECALL(myZeCall)                \
     do {                                      \
-        if (myZeCall != ZE_RESULT_SUCCESS) {  \
-            std::cout << "Error at "          \
+        ze_result_t r = myZeCall;             \
+        if (r != ZE_RESULT_SUCCESS) {         \
+            std::cout << getErrorString(r)    \
+                      << " returned by "      \
                       << #myZeCall << ": "    \
                       << __FUNCTION__ << ": " \
                       << __LINE__ << "\n";    \
@@ -41,6 +89,7 @@ void usage() {
                  "\n  -o, --power                  selectively run power black box test"
                  "\n  -m, --memory                 selectively run memory black box test"
                  "\n  -g, --global                 selectively run device/global operations black box test"
+                 "\n  -r, --reset force|noforce  selectively run device reset test"
                  "\n  -h, --help                   display help message"
                  "\n"
                  "\n  All L0 Syman APIs that set values require root privileged execution"
@@ -83,6 +132,7 @@ void getDeviceHandles(std::vector<ze_device_handle_t> &devices, int argc, char *
 void testSysmanPower(ze_device_handle_t &device) {
     std::cout << std::endl
               << " ----  Power tests ---- " << std::endl;
+    bool iamroot = (geteuid() == 0);
     uint32_t count = 0;
     VALIDATECALL(zesDeviceEnumPowerDomains(device, &count, nullptr));
     if (count == 0) {
@@ -98,6 +148,35 @@ void testSysmanPower(ze_device_handle_t &device) {
         if (verbose) {
             std::cout << "energyCounter.energy = " << energyCounter.energy << std::endl;
             std::cout << "energyCounter.timestamp = " << energyCounter.timestamp << std::endl;
+        }
+        zes_power_sustained_limit_t sustainedGetDefault = {};
+        zes_power_burst_limit_t burstGetDefault = {};
+        VALIDATECALL(zesPowerGetLimits(handle, &sustainedGetDefault, &burstGetDefault, nullptr));
+        if (verbose) {
+            std::cout << "sustainedGetDefault.enabled = " << sustainedGetDefault.enabled << std::endl;
+            if (sustainedGetDefault.enabled) {
+                std::cout << "sustainedGetDefault.power = " << sustainedGetDefault.power << std::endl;
+                std::cout << "sustainedGetDefault.interval = " << sustainedGetDefault.interval << std::endl;
+            }
+            std::cout << "burstGetDefault.enabled = " << burstGetDefault.enabled << std::endl;
+            if (burstGetDefault.enabled) {
+                std::cout << "burstGetDefault.power = " << burstGetDefault.power << std::endl;
+            }
+        }
+        if (iamroot) {
+            zes_power_sustained_limit_t sustainedSet = {};
+            sustainedSet.power = sustainedGetDefault.power - sustainedGetDefault.power / 10; //Randomly try to reduce power
+            sustainedSet.interval = sustainedGetDefault.interval - sustainedGetDefault.interval / 10;
+            zes_power_burst_limit_t burstSet = {};
+            if (burstGetDefault.enabled) {
+                burstSet.enabled = 0;
+            }
+            VALIDATECALL(zesPowerSetLimits(handle, &sustainedSet, &burstSet, nullptr));
+            if (verbose) {
+                std::cout << "zesPowerSetLimits success" << std::endl;
+                std::cout << "Now restore the power values to default ones" << std::endl;
+            }
+            VALIDATECALL(zesPowerSetLimits(handle, &sustainedGetDefault, &burstGetDefault, nullptr));
         }
     }
 }
@@ -299,19 +378,19 @@ void testSysmanStandby(ze_device_handle_t &device) {
     }
 }
 std::string getEngineType(zes_engine_group_t engineGroup) {
-    if (engineGroup == ZES_ENGINE_GROUP_COMPUTE_SINGLE)
-        return "ZES_ENGINE_GROUP_COMPUTE_SINGLE";
-    else if (engineGroup == ZES_ENGINE_GROUP_RENDER_SINGLE)
-        return "ZES_ENGINE_GROUP_RENDER_SINGLE";
-    else if (engineGroup == ZES_ENGINE_GROUP_MEDIA_DECODE_SINGLE)
-        return "ZES_ENGINE_GROUP_MEDIA_DECODE_SINGLE";
-    else if (engineGroup == ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE)
-        return "ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE";
-    else if (engineGroup == ZES_ENGINE_GROUP_COPY_SINGLE)
-        return "ZES_ENGINE_GROUP_COPY_SINGLE";
-    else
+    static const std::map<zes_engine_group_t, std::string> mgetEngineType{
+        {ZES_ENGINE_GROUP_COMPUTE_SINGLE, "ZES_ENGINE_GROUP_COMPUTE_SINGLE"},
+        {ZES_ENGINE_GROUP_RENDER_SINGLE, "ZES_ENGINE_GROUP_RENDER_SINGLE"},
+        {ZES_ENGINE_GROUP_MEDIA_DECODE_SINGLE, "ZES_ENGINE_GROUP_MEDIA_DECODE_SINGLE"},
+        {ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE, "ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE"},
+        {ZES_ENGINE_GROUP_COPY_SINGLE, "ZES_ENGINE_GROUP_COPY_SINGLE"}};
+    auto i = mgetEngineType.find(engineGroup);
+    if (i == mgetEngineType.end())
         return "NOT SUPPORTED MODE Engine avalialbe";
+    else
+        return mgetEngineType.at(engineGroup);
 }
+
 void testSysmanEngine(ze_device_handle_t &device) {
     std::cout << std::endl
               << " ----  Engine tests ---- " << std::endl;
@@ -344,17 +423,18 @@ void testSysmanEngine(ze_device_handle_t &device) {
     }
 }
 std::string getSchedulerModeName(zes_sched_mode_t mode) {
-    if (mode == ZES_SCHED_MODE_TIMEOUT)
-        return "ZES_SCHED_MODE_TIMEOUT";
-    else if (mode == ZES_SCHED_MODE_TIMESLICE)
-        return "ZES_SCHED_MODE_TIMESLICE";
-    else if (mode == ZES_SCHED_MODE_EXCLUSIVE)
-        return "ZES_SCHED_MODE_EXCLUSIVE";
-    else if (mode == ZES_SCHED_MODE_COMPUTE_UNIT_DEBUG)
-        return "ZES_SCHED_MODE_COMPUTE_UNIT_DEBUG";
-    else
+    static const std::map<zes_sched_mode_t, std::string> mgetSchedulerModeName{
+        {ZES_SCHED_MODE_TIMEOUT, "ZES_SCHED_MODE_TIMEOUT"},
+        {ZES_SCHED_MODE_TIMESLICE, "ZES_SCHED_MODE_TIMESLICE"},
+        {ZES_SCHED_MODE_EXCLUSIVE, "ZES_SCHED_MODE_EXCLUSIVE"},
+        {ZES_SCHED_MODE_COMPUTE_UNIT_DEBUG, "ZES_SCHED_MODE_COMPUTE_UNIT_DEBUG"}};
+    auto i = mgetSchedulerModeName.find(mode);
+    if (i == mgetSchedulerModeName.end())
         return "NOT SUPPORTED MODE SET";
+    else
+        return mgetSchedulerModeName.at(mode);
 }
+
 void testSysmanScheduler(ze_device_handle_t &device) {
     std::cout << std::endl
               << " ----  Scheduler tests ---- " << std::endl;
@@ -366,9 +446,6 @@ void testSysmanScheduler(ze_device_handle_t &device) {
         std::cout << "Could not retrieve scheduler domains" << std::endl;
         return;
     }
-    if (verbose) {
-        std::cout << "Number of  scheduler domains = " << count << std::endl;
-    }
     std::vector<zes_sched_handle_t> handles(count, nullptr);
     VALIDATECALL(zesDeviceEnumSchedulers(device, &count, handles.data()));
 
@@ -378,19 +455,6 @@ void testSysmanScheduler(ze_device_handle_t &device) {
         if (verbose) {
             std::cout << "Current Mode = " << getSchedulerModeName(currentMode) << std::endl;
         }
-
-        zes_sched_properties_t schedProperties = {};
-        VALIDATECALL(zesSchedulerGetProperties(handle, &schedProperties));
-        if (verbose) {
-            std::cout << "Scheduler properties: onSubdevice  = " << schedProperties.onSubdevice << std::endl;
-            if (schedProperties.onSubdevice) {
-                std::cout << "Scheduler properties: subdeviceId  = " << schedProperties.subdeviceId << std::endl;
-            }
-            std::cout << "Scheduler properties: canControl  = " << schedProperties.canControl << std::endl;
-            std::cout << "Scheduler properties: engines  = " << schedProperties.engines << std::endl;
-            std::cout << "Scheduler properties: supportedModes  = " << schedProperties.supportedModes << std::endl;
-        }
-
         zes_sched_timeout_properties_t timeoutProperties = {};
         zes_sched_timeslice_properties_t timesliceProperties = {};
 
@@ -431,54 +495,42 @@ void testSysmanScheduler(ze_device_handle_t &device) {
     }
 }
 std::string getMemoryType(zes_mem_type_t memType) {
-    if (memType == ZES_MEM_TYPE_HBM) {
-        return "ZES_MEM_TYPE_HBM";
-    } else if (memType == ZES_MEM_TYPE_DDR) {
-        return "ZES_MEM_TYPE_DDR";
-    } else if (memType == ZES_MEM_TYPE_DDR3) {
-        return "ZES_MEM_TYPE_DDR3";
-    } else if (memType == ZES_MEM_TYPE_DDR4) {
-        return "ZES_MEM_TYPE_DDR4";
-    } else if (memType == ZES_MEM_TYPE_DDR5) {
-        return "ZES_MEM_TYPE_DDR5";
-    } else if (memType == ZES_MEM_TYPE_LPDDR) {
-        return "ZES_MEM_TYPE_LPDDR";
-    } else if (memType == ZES_MEM_TYPE_LPDDR3) {
-        return "ZES_MEM_TYPE_LPDDR3";
-    } else if (memType == ZES_MEM_TYPE_LPDDR4) {
-        return "ZES_MEM_TYPE_LPDDR4";
-    } else if (memType == ZES_MEM_TYPE_LPDDR5) {
-        return "ZES_MEM_TYPE_LPDDR5";
-    } else if (memType == ZES_MEM_TYPE_SRAM) {
-        return "ZES_MEM_TYPE_SRAM";
-    } else if (memType == ZES_MEM_TYPE_L1) {
-        return "ZES_MEM_TYPE_L1";
-    } else if (memType == ZES_MEM_TYPE_L3) {
-        return "ZES_MEM_TYPE_L3";
-    } else if (memType == ZES_MEM_TYPE_GRF) {
-        return "ZES_MEM_TYPE_GRF";
-    } else if (memType == ZES_MEM_TYPE_SLM) {
-        return "ZES_MEM_TYPE_SLM";
-    } else {
+    static const std::map<zes_mem_type_t, std::string> mgetMemoryType{
+        {ZES_MEM_TYPE_HBM, "ZES_MEM_TYPE_HBM"},
+        {ZES_MEM_TYPE_DDR, "ZES_MEM_TYPE_DDR"},
+        {ZES_MEM_TYPE_DDR3, "ZES_MEM_TYPE_DDR3"},
+        {ZES_MEM_TYPE_DDR4, "ZES_MEM_TYPE_DDR4"},
+        {ZES_MEM_TYPE_DDR5, "ZES_MEM_TYPE_DDR5"},
+        {ZES_MEM_TYPE_LPDDR, "ZES_MEM_TYPE_LPDDR"},
+        {ZES_MEM_TYPE_LPDDR3, "ZES_MEM_TYPE_LPDDR3"},
+        {ZES_MEM_TYPE_LPDDR4, "ZES_MEM_TYPE_LPDDR4"},
+        {ZES_MEM_TYPE_LPDDR5, "ZES_MEM_TYPE_LPDDR5"},
+        {ZES_MEM_TYPE_SRAM, "ZES_MEM_TYPE_SRAM"},
+        {ZES_MEM_TYPE_L1, "ZES_MEM_TYPE_L1"},
+        {ZES_MEM_TYPE_L3, "ZES_MEM_TYPE_L3"},
+        {ZES_MEM_TYPE_GRF, "ZES_MEM_TYPE_GRF"},
+        {ZES_MEM_TYPE_SLM, "ZES_MEM_TYPE_SLM"}};
+    auto i = mgetMemoryType.find(memType);
+    if (i == mgetMemoryType.end())
         return "NOT SUPPORTED MEMORY TYPE SET";
-    }
+    else
+        return mgetMemoryType.at(memType);
 }
 
 std::string getMemoryHealth(zes_mem_health_t memHealth) {
-    if (memHealth == ZES_MEM_HEALTH_UNKNOWN) {
-        return "ZES_MEM_HEALTH_UNKNOWN";
-    } else if (memHealth == ZES_MEM_HEALTH_OK) {
-        return "ZES_MEM_HEALTH_OK";
-    } else if (memHealth == ZES_MEM_HEALTH_DEGRADED) {
-        return "ZES_MEM_HEALTH_DEGRADED";
-    } else if (memHealth == ZES_MEM_HEALTH_CRITICAL) {
-        return "ZES_MEM_HEALTH_CRITICAL";
-    } else if (memHealth == ZES_MEM_HEALTH_REPLACE) {
-        return "ZES_MEM_HEALTH_REPLACE";
-    } else {
+    static const std::map<zes_mem_health_t, std::string> mgetMemoryHealth{
+        {ZES_MEM_HEALTH_UNKNOWN, "ZES_MEM_HEALTH_UNKNOWN"},
+        {ZES_MEM_HEALTH_OK, "ZES_MEM_HEALTH_OK"},
+        {ZES_MEM_HEALTH_DEGRADED, "ZES_MEM_HEALTH_DEGRADED"},
+        {ZES_MEM_HEALTH_CRITICAL, "ZES_MEM_HEALTH_CRITICAL"},
+        {ZES_MEM_HEALTH_REPLACE, "ZES_MEM_HEALTH_REPLACE"}};
+    auto i = mgetMemoryHealth.find(memHealth);
+    if (i == mgetMemoryHealth.end())
         return "NOT SUPPORTED MEMORY HEALTH SET";
-    }
+    else
+        return mgetMemoryHealth.at(memHealth);
 }
+
 void testSysmanMemory(ze_device_handle_t &device) {
     std::cout << std::endl
               << " ----  Memory tests ---- " << std::endl;
@@ -519,6 +571,11 @@ void testSysmanMemory(ze_device_handle_t &device) {
             std::cout << "Memory Timestamp = " << memoryBandwidth.timestamp << std::endl;
         }
     }
+}
+void testSysmanReset(ze_device_handle_t &device, bool force) {
+    std::cout << std::endl
+              << " ----  Reset test (force = " << (force ? "true" : "false") << ") ---- " << std::endl;
+    VALIDATECALL(zesDeviceReset(device, force));
 }
 void testSysmanGlobalOperations(ze_device_handle_t &device) {
     std::cout << std::endl
@@ -574,9 +631,11 @@ int main(int argc, char *argv[]) {
         {"power", no_argument, nullptr, 'o'},
         {"global", no_argument, nullptr, 'g'},
         {"memory", no_argument, nullptr, 'm'},
-        {nullptr, no_argument, nullptr, 0},
+        {"reset", required_argument, nullptr, 'r'},
+        {0, 0, 0, 0},
     };
-    while ((opt = getopt_long(argc, argv, "hpfsectogm", long_opts, nullptr)) != -1) {
+    bool force = false;
+    while ((opt = getopt_long(argc, argv, "hpfsectogmr:", long_opts, nullptr)) != -1) {
         switch (opt) {
         case 'h':
             usage();
@@ -625,6 +684,19 @@ int main(int argc, char *argv[]) {
         case 'm':
             std::for_each(devices.begin(), devices.end(), [&](auto device) {
                 testSysmanMemory(device);
+            });
+            break;
+        case 'r':
+            if (!strcmp(optarg, "force")) {
+                force = true;
+            } else if (!strcmp(optarg, "noforce")) {
+                force = false;
+            } else {
+                usage();
+                exit(0);
+            }
+            std::for_each(devices.begin(), devices.end(), [&](auto device) {
+                testSysmanReset(device, force);
             });
             break;
 

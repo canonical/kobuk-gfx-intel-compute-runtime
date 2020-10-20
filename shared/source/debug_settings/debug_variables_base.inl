@@ -55,6 +55,7 @@ DECLARE_DEBUG_VARIABLE(bool, ZebinAppendElws, false, "Append crossthread data wi
 DECLARE_DEBUG_VARIABLE(bool, ZebinIgnoreIcbeVersion, false, "Ignore IGC\'s ICBE version")
 DECLARE_DEBUG_VARIABLE(bool, UseExternalAllocatorForSshAndDsh, false, "Use 32 bit external Allocator for ssh and dsh in Level Zero")
 DECLARE_DEBUG_VARIABLE(std::string, ForceDeviceId, std::string("unk"), "DeviceId selected for testing")
+DECLARE_DEBUG_VARIABLE(int32_t, ForceL1Caching, -1, "-1: default, 0: disable, 1: enable, When set to true driver will program L1 cache policy for surface state and stateless accessess")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceAuxTranslationEnabled, -1, "-1: default, 0: disabled, 1: enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, SchedulerSimulationReturnInstance, 0, "prints execution model related debug information")
 DECLARE_DEBUG_VARIABLE(int32_t, SchedulerGWS, 0, "Forces gws of scheduler kernel, only multiple of 24 allowed or 0 - default selected")
@@ -165,6 +166,7 @@ DECLARE_DEBUG_VARIABLE(bool, EnableFreeMemory, false, "Enable freeMemory in memo
 DECLARE_DEBUG_VARIABLE(bool, ForceSamplerLowFilteringPrecision, false, "Force Low Filtering Precision Sampler mode")
 DECLARE_DEBUG_VARIABLE(bool, UseBindlessBuffers, false, "Force compiler to use bindless buffer addressing instead of stateful one")
 DECLARE_DEBUG_VARIABLE(bool, UseBindlessImages, false, "Force compiler to use bindless image addressing instead of stateful one")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableGemCloseWorker, -1, "Use asynchronous gem object closing, -1:default, 0:disable, 1:enable")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableIntelVme, -1, "-1: default, 0: disabled, 1: Enables cl_intel_motion_estimation extension")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableIntelAdvancedVme, -1, "-1: default, 0: disabled, 1: Enables cl_intel_advanced_motion_estimation extension")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableBlitterOperationsSupport, -1, "-1: default, 0: disable, 1: enable")
@@ -192,6 +194,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, ForceFineGrainedSVMSupport, -1, "-1: default, 0:
 DECLARE_DEBUG_VARIABLE(int32_t, ForceDeviceEnqueueSupport, -1, "-1: default, 0: disabled, 1: enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, ForcePipeSupport, -1, "-1: default, 0: disabled, 1: enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, UseAsyncDrmExec, -1, "-1: default, 0: Disabled 1: Enabled. If enabled, pass EXEC_OBJECT_ASYNC to exec ioctl.")
+DECLARE_DEBUG_VARIABLE(int32_t, UseBindlessBuiltins, -1, "Use precompiled builtins in bindless mode, -1: api dependent, 0: disabled, 1: enabled")
 
 /*DRIVER TOGGLES*/
 DECLARE_DEBUG_VARIABLE(int32_t, ForceOCLVersion, 0, "Force specific OpenCL API version")

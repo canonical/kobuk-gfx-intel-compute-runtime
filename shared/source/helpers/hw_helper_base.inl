@@ -20,7 +20,6 @@
 
 #include "opencl/source/aub_mem_dump/aub_mem_dump.h"
 #include "opencl/source/helpers/dispatch_info.h"
-#include "opencl/source/helpers/hardware_commands_helper.h"
 
 #include "pipe_control_args.h"
 
@@ -293,7 +292,7 @@ size_t MemorySynchronizationCommands<GfxFamily>::getSizeForSinglePipeControl() {
 
 template <typename GfxFamily>
 size_t MemorySynchronizationCommands<GfxFamily>::getSizeForPipeControlWithPostSyncOperation(const HardwareInfo &hwInfo) {
-    const auto pipeControlCount = HardwareCommandsHelper<GfxFamily>::isPipeControlWArequired(hwInfo) ? 2u : 1u;
+    const auto pipeControlCount = MemorySynchronizationCommands<GfxFamily>::isPipeControlWArequired(hwInfo) ? 2u : 1u;
     return pipeControlCount * getSizeForSinglePipeControl() + getSizeForAdditonalSynchronization(hwInfo);
 }
 
@@ -317,8 +316,8 @@ uint32_t HwHelperHw<GfxFamily>::getMetricsLibraryGenId() const {
 }
 
 template <typename GfxFamily>
-inline bool HwHelperHw<GfxFamily>::requiresAuxResolves() const {
-    return true;
+inline bool HwHelperHw<GfxFamily>::requiresAuxResolves(const KernelInfo &kernelInfo) const {
+    return hasStatelessAccessToBuffer(kernelInfo);
 }
 
 template <typename GfxFamily>
@@ -423,7 +422,8 @@ inline bool HwHelperHw<GfxFamily>::allowRenderCompression(const HardwareInfo &hw
 template <typename GfxFamily>
 inline bool HwHelperHw<GfxFamily>::isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo) const {
     HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-    return (hwHelper.getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed);
+    return (hwHelper.getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed) &&
+           hwInfo.capabilityTable.blitterOperationsSupported;
 }
 
 template <typename GfxFamily>
@@ -445,6 +445,17 @@ LocalMemoryAccessMode HwHelperHw<GfxFamily>::getLocalMemoryAccessMode(const Hard
 template <typename GfxFamily>
 inline LocalMemoryAccessMode HwHelperHw<GfxFamily>::getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const {
     return LocalMemoryAccessMode::Default;
+}
+
+template <typename GfxFamily>
+inline bool HwHelperHw<GfxFamily>::hasStatelessAccessToBuffer(const KernelInfo &kernelInfo) const {
+    bool hasStatelessAccessToBuffer = false;
+    for (uint32_t i = 0; i < kernelInfo.kernelArgInfo.size(); ++i) {
+        if (kernelInfo.kernelArgInfo[i].isBuffer) {
+            hasStatelessAccessToBuffer |= !kernelInfo.kernelArgInfo[i].pureStatefulBufferAccess;
+        }
+    }
+    return hasStatelessAccessToBuffer;
 }
 
 template <typename GfxFamily>
@@ -506,6 +517,11 @@ bool HwHelperHw<GfxFamily>::useSystemMemoryPlacementForISA(const HardwareInfo &h
 
 template <typename GfxFamily>
 bool HwHelperHw<GfxFamily>::packedFormatsSupported() const {
+    return false;
+}
+
+template <typename GfxFamily>
+bool MemorySynchronizationCommands<GfxFamily>::isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo) {
     return false;
 }
 
