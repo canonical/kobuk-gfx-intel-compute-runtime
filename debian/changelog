@@ -2,6 +2,7 @@ intel-compute-runtime (20.44.18297-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * Migrate to llvm 11.
+  * control: Bump depends on IGC.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Thu, 01 Oct 2020 16:09:40 +0300
 
