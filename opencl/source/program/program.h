@@ -14,6 +14,7 @@
 #include "shared/source/utilities/const_stringref.h"
 
 #include "opencl/source/api/cl_types.h"
+#include "opencl/source/cl_device/cl_device_vector.h"
 #include "opencl/source/helpers/base_object.h"
 #include "opencl/source/helpers/destructor_callback.h"
 
@@ -36,11 +37,20 @@ class Context;
 class CompilerInterface;
 class Device;
 class ExecutionEnvironment;
+class Program;
 struct KernelInfo;
 template <>
 struct OpenCLObjectMapper<_cl_program> {
     typedef class Program DerivedType;
 };
+
+namespace ProgramFunctions {
+using CreateFromILFunc = std::function<Program *(Context *ctx,
+                                                 const void *il,
+                                                 size_t length,
+                                                 int32_t &errcodeRet)>;
+extern CreateFromILFunc createFromIL;
+} // namespace ProgramFunctions
 
 constexpr cl_int asClError(TranslationOutput::ErrorCode err) {
     switch (err) {
@@ -73,9 +83,8 @@ class Program : public BaseObject<_cl_program> {
     // Create program from binary
     template <typename T = Program>
     static T *create(
-        cl_context context,
-        cl_uint numDevices,
-        const cl_device_id *deviceList,
+        Context *pContext,
+        const ClDeviceVector &deviceVector,
         const size_t *lengths,
         const unsigned char **binaries,
         cl_int *binaryStatus,
@@ -84,37 +93,26 @@ class Program : public BaseObject<_cl_program> {
     // Create program from source
     template <typename T = Program>
     static T *create(
-        cl_context context,
+        Context *pContext,
         cl_uint count,
         const char **strings,
         const size_t *lengths,
         cl_int &errcodeRet);
 
     template <typename T = Program>
-    static T *create(
+    static T *createBuiltInFromSource(
         const char *nullTerminatedString,
         Context *context,
-        ClDevice &device,
-        bool isBuiltIn,
+        const ClDeviceVector &deviceVector,
         cl_int *errcodeRet);
 
     template <typename T = Program>
-    static T *create(
-        const char *nullTerminatedString,
+    static T *createBuiltInFromGenBinary(
         Context *context,
-        Device &device,
-        bool isBuiltIn,
-        cl_int *errcodeRet);
-
-    template <typename T = Program>
-    static T *createFromGenBinary(
-        ExecutionEnvironment &executionEnvironment,
-        Context *context,
+        const ClDeviceVector &deviceVector,
         const void *binary,
         size_t size,
-        bool isBuiltIn,
-        cl_int *errcodeRet,
-        Device *device);
+        cl_int *errcodeRet);
 
     template <typename T = Program>
     static T *createFromIL(Context *context,
@@ -122,7 +120,7 @@ class Program : public BaseObject<_cl_program> {
                            size_t length,
                            cl_int &errcodeRet);
 
-    Program(ExecutionEnvironment &executionEnvironment, Context *context, bool isBuiltIn, Device *device);
+    Program(Context *context, bool isBuiltIn, const ClDeviceVector &clDevicesIn);
     ~Program() override;
 
     Program(const Program &) = delete;
@@ -135,7 +133,7 @@ class Program : public BaseObject<_cl_program> {
     cl_int build(const Device *pDevice, const char *buildOptions, bool enableCaching,
                  std::unordered_map<std::string, BuiltinDispatchInfoBuilder *> &builtinsMap);
 
-    MOCKABLE_VIRTUAL cl_int processGenBinary();
+    MOCKABLE_VIRTUAL cl_int processGenBinary(uint32_t rootDeviceIndex);
     MOCKABLE_VIRTUAL cl_int processProgramInfo(ProgramInfo &dst);
 
     cl_int compile(cl_uint numDevices, const cl_device_id *deviceList, const char *buildOptions,
@@ -181,8 +179,6 @@ class Program : public BaseObject<_cl_program> {
         UNRECOVERABLE_IF(pDevice == nullptr);
         return *pDevice;
     }
-
-    void setDevice(Device *device);
 
     cl_int processSpirBinary(const void *pBinary, size_t binarySize, bool isSpirV);
 
@@ -267,12 +263,12 @@ class Program : public BaseObject<_cl_program> {
         buildInfos[rootDeviceIndex].linkerInput = std::move(linkerInput);
     }
 
-    MOCKABLE_VIRTUAL void replaceDeviceBinary(std::unique_ptr<char[]> newBinary, size_t newBinarySize);
+    MOCKABLE_VIRTUAL void replaceDeviceBinary(std::unique_ptr<char[]> newBinary, size_t newBinarySize, uint32_t rootDeviceIndex);
 
   protected:
-    MOCKABLE_VIRTUAL cl_int createProgramFromBinary(const void *pBinary, size_t binarySize);
+    MOCKABLE_VIRTUAL cl_int createProgramFromBinary(const void *pBinary, size_t binarySize, uint32_t rootDeviceIndex);
 
-    cl_int packDeviceBinary();
+    cl_int packDeviceBinary(uint32_t rootDeviceIndex);
 
     MOCKABLE_VIRTUAL cl_int linkBinary(Device *pDevice, const void *constantsInitData, const void *variablesInitData);
 
@@ -294,12 +290,6 @@ class Program : public BaseObject<_cl_program> {
 
     std::unique_ptr<char[]> irBinary;
     size_t irBinarySize = 0U;
-
-    std::unique_ptr<char[]> unpackedDeviceBinary;
-    size_t unpackedDeviceBinarySize = 0U;
-
-    std::unique_ptr<char[]> packedDeviceBinary;
-    size_t packedDeviceBinarySize = 0U;
 
     std::unique_ptr<char[]> debugData;
     size_t debugDataSize = 0U;
@@ -329,6 +319,12 @@ class Program : public BaseObject<_cl_program> {
         std::unique_ptr<LinkerInput> linkerInput;
         Linker::RelocatedSymbolsMap symbols{};
         std::string buildLog{};
+
+        std::unique_ptr<char[]> unpackedDeviceBinary;
+        size_t unpackedDeviceBinarySize = 0U;
+
+        std::unique_ptr<char[]> packedDeviceBinary;
+        size_t packedDeviceBinarySize = 0U;
     };
 
     std::vector<BuildInfo> buildInfos;
@@ -343,6 +339,7 @@ class Program : public BaseObject<_cl_program> {
     Context *context = nullptr;
     Device *pDevice = nullptr;
     cl_uint numDevices = 0U;
+    ClDeviceVector clDevices;
 
     bool isBuiltIn = false;
     bool kernelDebugEnabled = false;

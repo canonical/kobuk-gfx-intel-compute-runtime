@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/aub_mem_dump/aub_mem_dump.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
@@ -17,9 +18,6 @@
 #include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/os_interface/os_interface.h"
-
-#include "opencl/source/aub_mem_dump/aub_mem_dump.h"
-#include "opencl/source/helpers/dispatch_info.h"
 
 #include "pipe_control_args.h"
 
@@ -183,14 +181,6 @@ AuxTranslationMode HwHelperHw<Family>::getAuxTranslationMode() {
     return HwHelperHw<Family>::defaultAuxTranslationMode;
 }
 
-template <typename Family>
-bool HwHelperHw<Family>::isBlitAuxTranslationRequired(const HardwareInfo &hwInfo, const MultiDispatchInfo &multiDispatchInfo) {
-    return (HwHelperHw<Family>::getAuxTranslationMode() == AuxTranslationMode::Blit) &&
-           hwInfo.capabilityTable.blitterOperationsSupported &&
-           multiDispatchInfo.getMemObjsForAuxTranslation() &&
-           (multiDispatchInfo.getMemObjsForAuxTranslation()->size() > 0);
-}
-
 template <typename GfxFamily>
 void MemorySynchronizationCommands<GfxFamily>::addPipeControlAndProgramPostSyncOperation(
     LinearStream &commandStream,
@@ -316,11 +306,6 @@ uint32_t HwHelperHw<GfxFamily>::getMetricsLibraryGenId() const {
 }
 
 template <typename GfxFamily>
-inline bool HwHelperHw<GfxFamily>::requiresAuxResolves(const KernelInfo &kernelInfo) const {
-    return hasStatelessAccessToBuffer(kernelInfo);
-}
-
-template <typename GfxFamily>
 bool HwHelperHw<GfxFamily>::tilingAllowed(bool isSharedContext, bool isImage1d, bool forceLinearStorage) {
     if (DebugManager.flags.ForceLinearImages.get() || forceLinearStorage || isSharedContext) {
         return false;
@@ -395,6 +380,11 @@ bool HwHelperHw<GfxFamily>::isForceEmuInt32DivRemSPWARequired(const HardwareInfo
 }
 
 template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isWaDisableRccRhwoOptimizationRequired() const {
+    return false;
+}
+
+template <typename GfxFamily>
 inline uint32_t HwHelperHw<GfxFamily>::getMinimalSIMDSize() {
     return 8u;
 }
@@ -420,9 +410,9 @@ inline bool HwHelperHw<GfxFamily>::allowRenderCompression(const HardwareInfo &hw
 }
 
 template <typename GfxFamily>
-inline bool HwHelperHw<GfxFamily>::isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo) const {
-    HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-    return (hwHelper.getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed) &&
+inline bool HwHelperHw<GfxFamily>::isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo, const GraphicsAllocation &allocation) const {
+    return allocation.isAllocatedInLocalMemoryPool() &&
+           (getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed) &&
            hwInfo.capabilityTable.blitterOperationsSupported;
 }
 
@@ -445,17 +435,6 @@ LocalMemoryAccessMode HwHelperHw<GfxFamily>::getLocalMemoryAccessMode(const Hard
 template <typename GfxFamily>
 inline LocalMemoryAccessMode HwHelperHw<GfxFamily>::getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const {
     return LocalMemoryAccessMode::Default;
-}
-
-template <typename GfxFamily>
-inline bool HwHelperHw<GfxFamily>::hasStatelessAccessToBuffer(const KernelInfo &kernelInfo) const {
-    bool hasStatelessAccessToBuffer = false;
-    for (uint32_t i = 0; i < kernelInfo.kernelArgInfo.size(); ++i) {
-        if (kernelInfo.kernelArgInfo[i].isBuffer) {
-            hasStatelessAccessToBuffer |= !kernelInfo.kernelArgInfo[i].pureStatefulBufferAccess;
-        }
-    }
-    return hasStatelessAccessToBuffer;
 }
 
 template <typename GfxFamily>
@@ -512,7 +491,7 @@ bool HwHelperHw<GfxFamily>::useOnlyGlobalTimestamps() const {
 
 template <typename GfxFamily>
 bool HwHelperHw<GfxFamily>::useSystemMemoryPlacementForISA(const HardwareInfo &hwInfo) const {
-    return !hwInfo.featureTable.ftrLocalMemory;
+    return !getEnableLocalMemory(hwInfo);
 }
 
 template <typename GfxFamily>
@@ -523,6 +502,11 @@ bool HwHelperHw<GfxFamily>::packedFormatsSupported() const {
 template <typename GfxFamily>
 bool MemorySynchronizationCommands<GfxFamily>::isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo) {
     return false;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isCooperativeDispatchSupported(const aub_stream::EngineType engine, const PRODUCT_FAMILY productFamily) const {
+    return true;
 }
 
 } // namespace NEO

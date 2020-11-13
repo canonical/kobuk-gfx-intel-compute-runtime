@@ -53,6 +53,23 @@ using ValidateInputAndCreateBufferFunc = std::function<cl_mem(cl_context context
 extern ValidateInputAndCreateBufferFunc validateInputAndCreateBuffer;
 } // namespace BufferFunctions
 
+namespace CreateBuffer {
+struct AllocationInfo {
+    GraphicsAllocation *mapAllocation = nullptr;
+    GraphicsAllocation *memory = nullptr;
+    GraphicsAllocation::AllocationType allocationType = GraphicsAllocation::AllocationType::UNKNOWN;
+
+    bool zeroCopyAllowed = true;
+    bool isHostPtrSVM = false;
+
+    bool alignementSatisfied = true;
+    bool allocateMemory = true;
+    bool copyMemoryFromHostPtr = false;
+};
+} // namespace CreateBuffer
+
+using AllocationInfoType = StackVec<CreateBuffer::AllocationInfo, 1>;
+
 class Buffer : public MemObj {
   public:
     constexpr static size_t maxBufferSizeForReadWriteOnCpu = 10 * MB;
@@ -157,6 +174,8 @@ class Buffer : public MemObj {
 
     bool isCompressed(uint32_t rootDeviceIndex) const;
 
+    static void cleanAllGraphicsAllocations(Context &context, MemoryManager &memoryManager, AllocationInfoType &allocationInfo);
+
   protected:
     Buffer(Context *context,
            MemoryProperties memoryProperties,
@@ -179,7 +198,8 @@ class Buffer : public MemObj {
                             bool &isZeroCopy,
                             bool &copyMemoryFromHostPtr,
                             MemoryManager *memMngr,
-                            uint32_t rootDeviceIndex);
+                            uint32_t rootDeviceIndex,
+                            bool forceCopyHostPtr);
     static GraphicsAllocation::AllocationType getGraphicsAllocationType(const MemoryProperties &properties, Context &context,
                                                                         bool renderCompressedBuffers, bool localMemoryEnabled,
                                                                         bool preferCompression);

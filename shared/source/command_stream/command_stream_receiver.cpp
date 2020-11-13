@@ -65,6 +65,10 @@ CommandStreamReceiver::~CommandStreamReceiver() {
     }
     cleanupResources();
 
+    profilingTimeStampAllocator.reset();
+    perfCounterAllocator.reset();
+    timestampPacketAllocator.reset();
+
     internalAllocationStorage->cleanAllocationList(-1, REUSABLE_ALLOCATION);
     internalAllocationStorage->cleanAllocationList(-1, TEMPORARY_ALLOCATION);
     getMemoryManager()->unregisterEngineForCsr(this);
@@ -565,7 +569,7 @@ void CommandStreamReceiver::printDeviceIndex() {
 
 void CommandStreamReceiver::checkForNewResources(uint32_t submittedTaskCount, uint32_t allocationTaskCount, GraphicsAllocation &gfxAllocation) {
     if (useNewResourceImplicitFlush) {
-        if (allocationTaskCount == GraphicsAllocation::objectNotUsed) {
+        if (allocationTaskCount == GraphicsAllocation::objectNotUsed && gfxAllocation.getAllocationType() != GraphicsAllocation::AllocationType::KERNEL_ISA) {
             newResources = true;
             if (DebugManager.flags.ProvideVerboseImplicitFlush.get()) {
                 printf("New resource detected of type %llu\n", static_cast<unsigned long long>(gfxAllocation.getAllocationType()));

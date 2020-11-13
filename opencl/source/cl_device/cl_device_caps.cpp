@@ -5,6 +5,8 @@
  *
  */
 
+#include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/device/device.h"
 #include "shared/source/device/device_info.h"
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/hw_helper.h"
@@ -71,10 +73,7 @@ void ClDevice::initializeCaps() {
 
     driverVersion = TOSTR(NEO_OCL_DRIVER_VERSION);
 
-    // Add our graphics family name to the device name
-    name += "Intel(R) ";
-    name += familyName[hwInfo.platform.eRenderCoreFamily];
-    name += " HD Graphics NEO";
+    name = getClDeviceName(hwInfo);
 
     if (driverInfo) {
         name.assign(driverInfo.get()->getDeviceName(name).c_str());
@@ -122,12 +121,12 @@ void ClDevice::initializeCaps() {
     initializeOpenclCAllVersions();
     deviceInfo.platformLP = (hwInfo.capabilityTable.supportsOcl21Features == false);
     deviceInfo.spirVersions = spirVersions.c_str();
+    deviceInfo.ilsWithVersion[0].version = CL_MAKE_VERSION(1, 2, 0);
+    strcpy_s(deviceInfo.ilsWithVersion[0].name, CL_NAME_VERSION_MAX_NAME_SIZE, spirvName.c_str());
     auto supportsVme = hwInfo.capabilityTable.supportsVme;
     auto supportsAdvancedVme = hwInfo.capabilityTable.supportsVme;
 
     deviceInfo.independentForwardProgress = hwInfo.capabilityTable.supportsIndependentForwardProgress;
-    deviceInfo.ilsWithVersion[0].name[0] = 0;
-    deviceInfo.ilsWithVersion[0].version = 0;
     deviceInfo.maxNumOfSubGroups = 0;
 
     if (ocl21FeaturesEnabled) {
@@ -142,9 +141,6 @@ void ClDevice::initializeCaps() {
         if (deviceInfo.independentForwardProgress) {
             deviceExtensions += "cl_khr_subgroups ";
         }
-
-        deviceInfo.ilsWithVersion[0].version = CL_MAKE_VERSION(1, 2, 0);
-        strcpy_s(deviceInfo.ilsWithVersion[0].name, CL_NAME_VERSION_MAX_NAME_SIZE, spirvName.c_str());
 
         if (supportsVme) {
             deviceExtensions += "cl_intel_spirv_device_side_avc_motion_estimation ";
@@ -435,6 +431,10 @@ void ClDevice::initializeOpenclCAllVersions() {
         openClCVersion.version = CL_MAKE_VERSION(3, 0, 0);
         deviceInfo.openclCAllVersions.push_back(openClCVersion);
     }
+}
+
+const std::string ClDevice::getClDeviceName(const HardwareInfo &hwInfo) const {
+    return this->getDevice().getDeviceInfo().name;
 }
 
 } // namespace NEO

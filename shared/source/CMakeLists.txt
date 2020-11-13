@@ -52,6 +52,15 @@ function(generate_shared_lib LIB_NAME MOCKABLE)
   endif()
 
   create_project_source_tree(${LIB_NAME})
+
+  # Enable SSE4/AVX2 options for files that need them
+  if(MSVC)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/helpers/local_id_gen_avx2.cpp PROPERTIES COMPILE_FLAGS /arch:AVX2)
+  else()
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/helpers/local_id_gen_avx2.cpp PROPERTIES COMPILE_FLAGS -mavx2)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/helpers/local_id_gen_sse4.cpp PROPERTIES COMPILE_FLAGS -msse4.2)
+  endif()
+
 endfunction()
 
 set(NEO_CORE_COMPILE_DEFS "")
@@ -74,13 +83,15 @@ endmacro()
 apply_macro_for_each_gen("SUPPORTED")
 
 append_sources_from_properties(CORE_SOURCES
+                               NEO_CORE_AUB
+                               NEO_CORE_AUB_MEM_DUMP
                                NEO_CORE_BUILT_INS
-                               NEO_CORE_COMMAND_STREAM
                                NEO_CORE_COMMANDS
                                NEO_CORE_COMMAND_CONTAINER
                                NEO_CORE_COMMAND_ENCODERS
-                               NEO_CORE_DEBUG_SETTINGS
+                               NEO_CORE_COMMAND_STREAM
                                NEO_CORE_DEBUGGER
+                               NEO_CORE_DEBUG_SETTINGS
                                NEO_CORE_DEVICE
                                NEO_CORE_DIRECT_SUBMISSION
                                NEO_CORE_DIRECT_SUBMISSION_DISPATCHERS
@@ -98,9 +109,10 @@ append_sources_from_properties(CORE_SOURCES
                                NEO_CORE_PROGRAM
                                NEO_CORE_SKU_INFO_BASE
                                NEO_CORE_SRCS_BUILT_INS
-                               NEO_CORE_SRCS_BUILT_IN_KERNELS
                                NEO_CORE_SRCS_BUILT_INS_OPS
+                               NEO_CORE_SRCS_BUILT_IN_KERNELS
                                NEO_CORE_SRCS_SOURCE_LEVEL_DEBUGGER
+                               NEO_CORE_TBX
                                NEO_CORE_UTILITIES
                                NEO_UNIFIED_MEMORY
 )

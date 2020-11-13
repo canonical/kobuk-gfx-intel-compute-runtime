@@ -868,7 +868,7 @@ TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenEnabledHostMemoryValid
 
     DrmMockCustom::IoctlResExt ioctlResExt = {1, -1};
     mock->ioctl_res_ext = &ioctlResExt;
-    mock->errnoValue = SUCCESS;
+    mock->errnoValue = 0;
     mock->ioctl_expected.gemUserptr = 1;
     mock->ioctl_expected.execbuffer2 = 1;
 
@@ -902,7 +902,7 @@ TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenEnabledHostMemoryValid
 
     DrmMockCustom::IoctlResExt ioctlResExt = {1, -1};
     mock->ioctl_res_ext = &ioctlResExt;
-    mock->errnoValue = SUCCESS;
+    mock->errnoValue = 0;
     mock->ioctl_expected.gemUserptr = 1;
     mock->ioctl_expected.execbuffer2 = 1;
 
@@ -1257,8 +1257,8 @@ TEST_F(DrmMemoryManagerTest, givenMemoryManagerWhenLimitedRangeAllocatorSetThenH
 }
 
 TEST_F(DrmMemoryManagerTest, givenMemoryManagerWhenAskedForAllocationWithAlignmentAndLimitedRangeAllocatorSetAndAcquireGpuRangeFailsThenNullIsReturned) {
-    mock->ioctl_expected.gemUserptr = 1;
-    mock->ioctl_expected.gemClose = 1;
+    mock->ioctl_expected.gemUserptr = 0;
+    mock->ioctl_expected.gemClose = 0;
 
     AllocationData allocationData;
 
@@ -2784,6 +2784,41 @@ TEST_F(DrmMemoryManagerUSMHostAllocationTests,
     memoryManager->freeGraphicsMemoryImpl(alloc);
 }
 
+TEST_F(DrmMemoryManagerUSMHostAllocationTests, givenCallToallocateGraphicsMemoryWithAlignmentWithisHostUSMAllocationSetToTrueThenGpuAddressIsNotFromGfxPartition) {
+    mock->ioctl_expected.gemUserptr = 1;
+    mock->ioctl_expected.gemClose = 1;
+
+    AllocationData allocationData;
+    allocationData.size = 16384;
+    allocationData.rootDeviceIndex = rootDeviceIndex;
+    allocationData.flags.isUSMHostAllocation = true;
+    allocationData.type = GraphicsAllocation::AllocationType::SVM_CPU;
+    auto alloc = memoryManager->allocateGraphicsMemoryWithAlignment(allocationData);
+
+    EXPECT_NE(nullptr, alloc);
+    EXPECT_EQ(reinterpret_cast<uint64_t>(alloc->getUnderlyingBuffer()), alloc->getGpuAddress());
+
+    memoryManager->freeGraphicsMemoryImpl(alloc);
+}
+
+TEST_F(DrmMemoryManagerUSMHostAllocationTests, givenMmapPtrWhenFreeGraphicsMemoryImplThenPtrIsDeallocated) {
+    mock->ioctl_expected.gemUserptr = 1;
+    mock->ioctl_expected.gemClose = 1;
+
+    const size_t size = 16384;
+    AllocationData allocationData;
+    allocationData.size = size;
+    allocationData.rootDeviceIndex = rootDeviceIndex;
+    auto alloc = memoryManager->allocateGraphicsMemoryWithAlignment(allocationData);
+    EXPECT_NE(nullptr, alloc);
+
+    auto ptr = memoryManager->mmapFunction(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
+    static_cast<DrmAllocation *>(alloc)->setMmapPtr(ptr);
+    static_cast<DrmAllocation *>(alloc)->setMmapSize(size);
+
+    memoryManager->freeGraphicsMemoryImpl(alloc);
+}
+
 TEST_F(DrmMemoryManagerUSMHostAllocationTests,
        givenCallToallocateGraphicsMemoryWithAlignmentWithisHostUSMAllocationSetToTrueThenTheExistingHostPointerIsUsedAndAllocationIsCreatedSuccesfully) {
     mock->ioctl_expected.gemUserptr = 1;
@@ -3083,7 +3118,7 @@ TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenDisabledForcePinAndEna
         PinBufferObject(Drm *drm) : BufferObject(drm, 1, 0, 1) {
         }
 
-        int pin(BufferObject *const boToPin[], size_t numberOfBos, OsContext *osContext, uint32_t vmHandleId, uint32_t drmContextId) override {
+        int validateHostPtr(BufferObject *const boToPin[], size_t numberOfBos, OsContext *osContext, uint32_t vmHandleId, uint32_t drmContextId) override {
             for (size_t i = 0; i < numberOfBos; i++) {
                 pinnedBoArray[i] = boToPin[i];
             }
@@ -3634,6 +3669,35 @@ TEST_F(DrmMemoryManagerBasic, givenLocalMemoryDisabledWhenAllocateInDevicePoolIs
     EXPECT_EQ(MemoryManager::AllocationStatus::RetryInNonDevicePool, status);
 }
 
+TEST_F(DrmMemoryManagerTest, givenDebugModuleAreaTypeWhenCreatingAllocationThen32BitDrmAllocationWithFrontWindowGpuVaIsReturned) {
+    mock->ioctl_expected.gemUserptr = 1;
+    mock->ioctl_expected.gemWait = 1;
+    mock->ioctl_expected.gemClose = 1;
+
+    const auto size = MemoryConstants::pageSize64k;
+
+    NEO::AllocationProperties properties{device->getRootDeviceIndex(), true, size,
+                                         NEO::GraphicsAllocation::AllocationType::DEBUG_MODULE_AREA,
+                                         false,
+                                         device->getDeviceBitfield()};
+
+    auto moduleDebugArea = memoryManager->allocateGraphicsMemoryWithProperties(properties);
+
+    EXPECT_NE(nullptr, moduleDebugArea);
+    EXPECT_NE(nullptr, moduleDebugArea->getUnderlyingBuffer());
+    EXPECT_GE(moduleDebugArea->getUnderlyingBufferSize(), size);
+
+    auto address64bit = moduleDebugArea->getGpuAddressToPatch();
+    EXPECT_LT(address64bit, MemoryConstants::max32BitAddress);
+    EXPECT_TRUE(moduleDebugArea->is32BitAllocation());
+
+    auto frontWindowBase = GmmHelper::canonize(memoryManager->getGfxPartition(moduleDebugArea->getRootDeviceIndex())->getHeapBase(memoryManager->selectInternalHeap(moduleDebugArea->isAllocatedInLocalMemoryPool())));
+    EXPECT_EQ(frontWindowBase, moduleDebugArea->getGpuBaseAddress());
+    EXPECT_EQ(frontWindowBase, moduleDebugArea->getGpuAddress());
+
+    memoryManager->freeGraphicsMemory(moduleDebugArea);
+}
+
 TEST(DrmAllocationTest, givenAllocationTypeWhenPassedToDrmAllocationConstructorThenAllocationTypeIsStored) {
     DrmAllocation allocation{0, GraphicsAllocation::AllocationType::COMMAND_BUFFER, nullptr, nullptr, static_cast<size_t>(0), 0u, MemoryPool::MemoryNull};
     EXPECT_EQ(GraphicsAllocation::AllocationType::COMMAND_BUFFER, allocation.getAllocationType());
@@ -3722,9 +3786,9 @@ TEST_F(DrmMemoryManagerTest, givenSvmCpuAllocationWhenSizeAndAlignmentProvidedTh
 }
 
 TEST_F(DrmMemoryManagerTest, givenSvmCpuAllocationWhenSizeAndAlignmentProvidedButFailsToReserveGpuVaThenNullAllocationIsReturned) {
-    mock->ioctl_expected.gemUserptr = 1;
+    mock->ioctl_expected.gemUserptr = 0;
     mock->ioctl_expected.gemWait = 0;
-    mock->ioctl_expected.gemClose = 1;
+    mock->ioctl_expected.gemClose = 0;
 
     memoryManager->getGfxPartition(rootDeviceIndex)->heapInit(HeapIndex::HEAP_STANDARD, 0, 0);
 
@@ -3874,6 +3938,16 @@ TEST(DrmAllocationTest, givenResourceRegistrationEnabledWhenAllocationTypeShould
         EXPECT_EQ(DrmMockResources::registerResourceReturnHandle, bo.bindExtHandles[0]);
         EXPECT_EQ(Drm::ResourceClass::Isa, drm.registeredClass);
     }
+    drm.registeredClass = Drm::ResourceClass::MaxSize;
+
+    {
+        MockBufferObject bo(&drm, 0, 0, 1);
+        MockDrmAllocation allocation(GraphicsAllocation::AllocationType::DEBUG_MODULE_AREA, MemoryPool::System4KBPages);
+        allocation.bufferObjects[0] = &bo;
+        allocation.registerBOBindExtHandle(&drm);
+        EXPECT_EQ(DrmMockResources::registerResourceReturnHandle, bo.bindExtHandles[0]);
+        EXPECT_EQ(Drm::ResourceClass::ModuleHeapDebugArea, drm.registeredClass);
+    }
 
     drm.registeredClass = Drm::ResourceClass::MaxSize;
 
@@ -3979,6 +4053,22 @@ TEST(DrmMemoryManager, givenNullBoWhenRegisteringBindExtHandleThenEarlyReturn) {
     gfxAllocation.registerBOBindExtHandle(mockDrm.get());
     EXPECT_EQ(1u, gfxAllocation.registeredBoBindHandles.size());
     gfxAllocation.freeRegisteredBOBindExtHandles(mockDrm.get());
+}
+
+TEST(DrmAllocationTest, givenResourceRegistrationEnabledWhenAllocationIsRegisteredThenBosAreMarkedForCapture) {
+    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
+    executionEnvironment->prepareRootDeviceEnvironments(1);
+
+    DrmMockResources drm(*executionEnvironment->rootDeviceEnvironments[0]);
+    // mock resource registration enabling by storing class handles
+    drm.classHandles.push_back(1);
+
+    MockBufferObject bo(&drm, 0, 0, 1);
+    MockDrmAllocation allocation(GraphicsAllocation::AllocationType::DEBUG_CONTEXT_SAVE_AREA, MemoryPool::System4KBPages);
+    allocation.bufferObjects[0] = &bo;
+    allocation.registerBOBindExtHandle(&drm);
+
+    EXPECT_TRUE(bo.isMarkedForCapture());
 }
 
 } // namespace NEO

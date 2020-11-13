@@ -18,6 +18,7 @@
 #include "shared/source/utilities/arrayref.h"
 
 #include "opencl/source/command_queue/gpgpu_walker.h"
+#include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/program/kernel_info.h"
 
 #include "level_zero/core/source/device/device.h"
@@ -110,18 +111,9 @@ void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, NEO::MemoryMan
     auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
 
     if (kernelInfo->heapInfo.pKernelHeap != nullptr) {
-        bool doCpuIsaCopy = true;
-
-        if (allocation->isAllocatedInLocalMemoryPool() && hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo)) {
-            auto status = NEO::BlitHelperFunctions::blitMemoryToAllocation(*device, allocation, 0, kernelInfo->heapInfo.pKernelHeap, {kernelIsaSize, 1, 1});
-            UNRECOVERABLE_IF(status == NEO::BlitOperationResult::Fail);
-
-            doCpuIsaCopy = (status == NEO::BlitOperationResult::Unsupported);
-        }
-
-        if (doCpuIsaCopy) {
-            memoryManager.copyMemoryToAllocation(allocation, kernelInfo->heapInfo.pKernelHeap, kernelIsaSize);
-        }
+        NEO::MemoryTransferHelper::transferMemoryToAllocation(hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo, *allocation),
+                                                              *device, allocation, 0, kernelInfo->heapInfo.pKernelHeap,
+                                                              static_cast<size_t>(kernelIsaSize));
     }
 
     isaGraphicsAllocation.reset(allocation);
@@ -162,10 +154,12 @@ void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, NEO::MemoryMan
     }
 
     ArrayRef<uint8_t> surfaceStateHeapArrayRef = ArrayRef<uint8_t>(surfaceStateHeapTemplate.get(), getSurfaceStateHeapSize());
-    uint32_t privateSurfaceSize = kernelDescriptor->kernelAttributes.perThreadPrivateMemorySize;
+    auto &kernelAttributes = kernelDescriptor->kernelAttributes;
 
-    if (privateSurfaceSize != 0) {
-        privateSurfaceSize *= computeUnitsUsedForSratch * kernelDescriptor->kernelAttributes.simdSize;
+    if (kernelAttributes.perThreadPrivateMemorySize != 0) {
+        auto privateSurfaceSize = NEO::KernelHelper::getPrivateSurfaceSize(kernelAttributes.perThreadPrivateMemorySize, computeUnitsUsedForSratch,
+                                                                           kernelAttributes.simdSize, kernelAttributes.flags.isSimtThread);
+
         UNRECOVERABLE_IF(privateSurfaceSize == 0);
         this->privateMemoryGraphicsAllocation.reset(memoryManager.allocateGraphicsMemoryWithProperties(
             {device->getRootDeviceIndex(), privateSurfaceSize, NEO::GraphicsAllocation::AllocationType::PRIVATE_SURFACE, device->getDeviceBitfield()}));
@@ -593,7 +587,7 @@ ze_result_t KernelImp::getProperties(ze_kernel_properties_t *pKernelProperties) 
     NEO::KernelInfo *ki = nullptr;
     for (uint32_t i = 0; i < moduleImp->getTranslationUnit()->programInfo.kernelInfos.size(); i++) {
         ki = moduleImp->getTranslationUnit()->programInfo.kernelInfos[i];
-        if (ki->name.compare(0, ki->name.size(), this->kernelImmData->getDescriptor().kernelMetadata.kernelName) == 0) {
+        if (ki->kernelDescriptor.kernelMetadata.kernelName.compare(0, ki->kernelDescriptor.kernelMetadata.kernelName.size(), this->kernelImmData->getDescriptor().kernelMetadata.kernelName) == 0) {
             break;
         }
     }

@@ -5,12 +5,12 @@
  *
  */
 
+#include "shared/source/aub/aub_subcapture.h"
 #include "shared/source/program/sync_buffer_handler.h"
 #include "shared/test/unit_test/cmd_parse/hw_parse.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
-#include "opencl/source/command_stream/aub_subcapture.h"
 #include "opencl/source/event/user_event.h"
 #include "opencl/source/platform/platform.h"
 #include "opencl/test/unit_test/command_stream/thread_arbitration_policy_helper.h"
@@ -53,7 +53,7 @@ HWTEST_F(EnqueueHandlerTest, givenEnqueueHandlerWithKernelWhenAubCsrIsActiveThen
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(context, pClDevice, 0));
 
     size_t gws[] = {1, 1, 1};
-    mockKernel.kernelInfo.name = "kernel_name";
+    mockKernel.kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "kernel_name";
     mockCmdQ->enqueueKernel(mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
     EXPECT_TRUE(aubCsr->addAubCommentCalled);
@@ -69,8 +69,8 @@ HWTEST_F(EnqueueHandlerTest, givenEnqueueHandlerWithKernelSplitWhenAubCsrIsActiv
 
     MockKernelWithInternals kernel1(*pClDevice);
     MockKernelWithInternals kernel2(*pClDevice);
-    kernel1.kernelInfo.name = "kernel_1";
-    kernel2.kernelInfo.name = "kernel_2";
+    kernel1.kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "kernel_1";
+    kernel2.kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "kernel_2";
 
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(context, pClDevice, 0));
     MockMultiDispatchInfo multiDispatchInfo(std::vector<Kernel *>({kernel1.mockKernel, kernel2.mockKernel}));
@@ -93,7 +93,7 @@ HWTEST_F(EnqueueHandlerTest, givenEnqueueHandlerWithEmptyDispatchInfoWhenAubCsrI
     auto mockCmdQ = std::unique_ptr<MockCommandQueueHw<FamilyType>>(new MockCommandQueueHw<FamilyType>(context, pClDevice, 0));
 
     size_t gws[] = {0, 0, 0};
-    mockKernel.kernelInfo.name = "kernel_name";
+    mockKernel.kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "kernel_name";
     mockCmdQ->enqueueKernel(mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
     EXPECT_FALSE(aubCsr->addAubCommentCalled);
@@ -159,6 +159,7 @@ HWTEST_F(EnqueueHandlerWithAubSubCaptureTests, givenEnqueueHandlerWithAubSubCapt
 
     MockCmdQWithAubSubCapture<FamilyType> cmdQ(context, pClDevice);
     MockKernelWithInternals mockKernel(*pClDevice);
+    mockKernel.kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "kernelName";
     size_t gws[3] = {1, 0, 0};
 
     // activate subcapture

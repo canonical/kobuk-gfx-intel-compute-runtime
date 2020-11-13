@@ -25,10 +25,10 @@ TEST_F(ProgramTests, GivenProgramWithDebugDataForTwoKernelsWhenPorcessedThenDebu
     std::unique_ptr<char[]> debugData(new char[debugDataSize]);
 
     auto kernelInfo1 = new KernelInfo();
-    kernelInfo1->name = kernelName1;
+    kernelInfo1->kernelDescriptor.kernelMetadata.kernelName = kernelName1;
     auto kernelInfo2 = new KernelInfo();
-    kernelInfo2->name = kernelName2;
-    auto program = std::make_unique<MockProgram>(*pDevice->getExecutionEnvironment());
+    kernelInfo2->kernelDescriptor.kernelMetadata.kernelName = kernelName2;
+    auto program = std::make_unique<MockProgram>(toClDeviceVector(*pClDevice));
 
     SProgramDebugDataHeaderIGC *programDebugHeader = reinterpret_cast<SProgramDebugDataHeaderIGC *>(debugData.get());
     programDebugHeader->NumberOfKernels = 2;
@@ -83,8 +83,8 @@ TEST_F(ProgramTests, GivenProgramWithoutDebugDataWhenPorcessedThenDebugDataIsNot
     const char kernelName1[] = "kernel1";
 
     auto kernelInfo1 = new KernelInfo();
-    kernelInfo1->name = kernelName1;
-    auto program = std::make_unique<MockProgram>(*pDevice->getExecutionEnvironment());
+    kernelInfo1->kernelDescriptor.kernelMetadata.kernelName = kernelName1;
+    auto program = std::make_unique<MockProgram>(toClDeviceVector(*pClDevice));
 
     program->addKernelInfo(kernelInfo1);
     program->processDebugData();

@@ -12,6 +12,7 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/aligned_memory.h"
+#include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/get_info.h"
@@ -31,6 +32,7 @@
 #include "opencl/source/device_queue/device_queue.h"
 #include "opencl/source/execution_model/device_enqueue.h"
 #include "opencl/source/gtpin/gtpin_notify.h"
+#include "opencl/source/helpers/cl_hw_helper.h"
 #include "opencl/source/helpers/dispatch_info.h"
 #include "opencl/source/helpers/get_info_status_mapper.h"
 #include "opencl/source/helpers/per_thread_data.h"
@@ -269,12 +271,14 @@ cl_int Kernel::initialize() {
         localBindingTableOffset = (patchInfo.bindingTableState != nullptr) ? patchInfo.bindingTableState->Offset : 0;
 
         // patch crossthread data and ssh with inline surfaces, if necessary
-        privateSurfaceSize = patchInfo.pAllocateStatelessPrivateSurface
-                                 ? patchInfo.pAllocateStatelessPrivateSurface->PerThreadPrivateMemorySize
-                                 : 0;
+        auto perThreadPrivateMemorySize = patchInfo.pAllocateStatelessPrivateSurface
+                                              ? patchInfo.pAllocateStatelessPrivateSurface->PerThreadPrivateMemorySize
+                                              : 0;
 
-        if (privateSurfaceSize) {
-            privateSurfaceSize *= device.getSharedDeviceInfo().computeUnitsUsedForScratch * getKernelInfo().getMaxSimdSize();
+        if (perThreadPrivateMemorySize) {
+            privateSurfaceSize = KernelHelper::getPrivateSurfaceSize(perThreadPrivateMemorySize, device.getSharedDeviceInfo().computeUnitsUsedForScratch,
+                                                                     getKernelInfo().getMaxSimdSize(), patchInfo.pAllocateStatelessPrivateSurface->IsSimtThread);
+
             DEBUG_BREAK_IF(privateSurfaceSize == 0);
             if (privateSurfaceSize > std::numeric_limits<uint32_t>::max()) {
                 retVal = CL_OUT_OF_RESOURCES;
@@ -375,7 +379,8 @@ cl_int Kernel::initialize() {
             }
         }
 
-        auxTranslationRequired = HwHelper::renderCompressedBuffersSupported(hwInfo) && hwHelper.requiresAuxResolves(kernelInfo);
+        auto &clHwHelper = ClHwHelper::get(hwInfo.platform.eRenderCoreFamily);
+        auxTranslationRequired = HwHelper::renderCompressedBuffersSupported(hwInfo) && clHwHelper.requiresAuxResolves(kernelInfo);
         if (DebugManager.flags.ForceAuxTranslationEnabled.get() != -1) {
             auxTranslationRequired &= !!DebugManager.flags.ForceAuxTranslationEnabled.get();
         }
@@ -457,8 +462,8 @@ cl_int Kernel::getInfo(cl_kernel_info paramName, size_t paramValueSize,
 
     switch (paramName) {
     case CL_KERNEL_FUNCTION_NAME:
-        pSrc = kernelInfo.name.c_str();
-        srcSize = kernelInfo.name.length() + 1;
+        pSrc = kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str();
+        srcSize = kernelInfo.kernelDescriptor.kernelMetadata.kernelName.length() + 1;
         break;
 
     case CL_KERNEL_NUM_ARGS:
@@ -771,7 +776,7 @@ void Kernel::substituteKernelHeap(void *newKernelHeap, size_t newKernelHeapSize)
     auto currentAllocationSize = pKernelInfo->kernelAllocation->getUnderlyingBufferSize();
     bool status = false;
     if (currentAllocationSize >= newKernelHeapSize) {
-        status = memoryManager->copyMemoryToAllocation(pKernelInfo->kernelAllocation, newKernelHeap, newKernelHeapSize);
+        status = memoryManager->copyMemoryToAllocation(pKernelInfo->kernelAllocation, 0, newKernelHeap, newKernelHeapSize);
     } else {
         memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(pKernelInfo->kernelAllocation);
         pKernelInfo->kernelAllocation = nullptr;
@@ -1048,14 +1053,19 @@ void Kernel::getSuggestedLocalWorkSize(const cl_uint workDim, const size_t *glob
         localWorkSize[2] = suggestedLws.z;
 }
 
-uint32_t Kernel::getMaxWorkGroupCount(const cl_uint workDim, const size_t *localWorkSize) const {
+uint32_t Kernel::getMaxWorkGroupCount(const cl_uint workDim, const size_t *localWorkSize, const CommandQueue *commandQueue) const {
     auto &hardwareInfo = getDevice().getHardwareInfo();
+    auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+
+    if (!hwHelper.isCooperativeDispatchSupported(commandQueue->getGpgpuEngine().getEngineType(), hardwareInfo.platform.eProductFamily)) {
+        return 0;
+    }
+
     auto executionEnvironment = kernelInfo.patchInfo.executionEnvironment;
     auto dssCount = hardwareInfo.gtSystemInfo.DualSubSliceCount;
     if (dssCount == 0) {
         dssCount = hardwareInfo.gtSystemInfo.SubSliceCount;
     }
-    auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
     auto availableThreadCount = hwHelper.calculateAvailableThreadCount(
         hardwareInfo.platform.eProductFamily,
         ((executionEnvironment != nullptr) ? executionEnvironment->NumGRFRequired : GrfConfig::DefaultGrfNumber),
@@ -2223,14 +2233,14 @@ void Kernel::provideInitializationHints() {
         return;
     if (privateSurfaceSize) {
         context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, PRIVATE_MEMORY_USAGE_TOO_HIGH,
-                                        kernelInfo.name.c_str(), privateSurfaceSize);
+                                        kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(), privateSurfaceSize);
     }
     if (patchInfo.mediavfestate) {
         auto scratchSize = patchInfo.mediavfestate->PerThreadScratchSpace;
         scratchSize *= device.getSharedDeviceInfo().computeUnitsUsedForScratch * getKernelInfo().getMaxSimdSize();
         if (scratchSize > 0) {
             context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, REGISTER_PRESSURE_TOO_HIGH,
-                                            kernelInfo.name.c_str(), scratchSize);
+                                            kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(), scratchSize);
         }
     }
 }
@@ -2372,7 +2382,7 @@ void Kernel::fillWithBuffersForAuxTranslation(MemObjsForAuxTranslation &memObjsF
                 auto &context = this->program->getContext();
                 if (context.isProvidingPerformanceHints()) {
                     context.providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, KERNEL_ARGUMENT_AUX_TRANSLATION,
-                                                   kernelInfo.name.c_str(), i, kernelInfo.kernelArgInfo.at(i).metadataExtended->argName.c_str());
+                                                   kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(), i, kernelInfo.kernelArgInfo.at(i).metadataExtended->argName.c_str());
                 }
             }
         }
@@ -2457,17 +2467,15 @@ uint64_t Kernel::getKernelStartOffset(
 }
 
 void Kernel::patchBindlessSurfaceStateOffsets(const size_t sshOffset) {
-    const bool bindlessBuffers = DebugManager.flags.UseBindlessBuffers.get();
-    const bool bindlessImages = DebugManager.flags.UseBindlessImages.get();
-    const bool bindlessUsed = (bindlessBuffers || bindlessImages) && !isBuiltIn;
+    const bool bindlessUsed = ApiSpecificConfig::getBindlessConfiguration();
 
     if (bindlessUsed) {
         auto &hardwareInfo = getDevice().getHardwareInfo();
         auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
 
         for (size_t i = 0; i < kernelInfo.kernelArgInfo.size(); i++) {
-            if ((kernelInfo.kernelArgInfo[i].isBuffer && bindlessBuffers) ||
-                (kernelInfo.kernelArgInfo[i].isImage && bindlessImages)) {
+            if ((kernelInfo.kernelArgInfo[i].isBuffer) ||
+                (kernelInfo.kernelArgInfo[i].isImage)) {
 
                 auto patchLocation = ptrOffset(getCrossThreadData(),
                                                kernelInfo.kernelArgInfo[i].kernelArgPatchInfoVector[0].crossthreadOffset);
@@ -2486,6 +2494,27 @@ void Kernel::setAdditionalKernelExecInfo(uint32_t additionalKernelExecInfo) {
 
 uint32_t Kernel::getAdditionalKernelExecInfo() const {
     return this->additionalKernelExecInfo;
+}
+
+bool Kernel::requiresWaDisableRccRhwoOptimization() const {
+    auto &hardwareInfo = getDevice().getHardwareInfo();
+    auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+
+    if (hwHelper.isWaDisableRccRhwoOptimizationRequired() && isUsingSharedObjArgs()) {
+        for (auto &arg : getKernelArguments()) {
+            auto clMemObj = static_cast<cl_mem>(arg.object);
+            auto memObj = castToObject<MemObj>(clMemObj);
+            if (memObj && memObj->peekSharingHandler()) {
+                auto allocation = memObj->getGraphicsAllocation(getDevice().getRootDeviceIndex());
+                for (uint32_t handleId = 0u; handleId < allocation->getNumGmms(); handleId++) {
+                    if (allocation->getGmm(handleId)->gmmResourceInfo->getResourceFlags()->Info.MediaCompressed) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
 }
 
 } // namespace NEO

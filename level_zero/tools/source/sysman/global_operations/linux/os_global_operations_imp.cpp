@@ -14,7 +14,6 @@
 #include <level_zero/zet_api.h>
 
 #include <chrono>
-#include <csignal>
 #include <time.h>
 
 namespace L0 {
@@ -28,6 +27,7 @@ const std::string LinuxGlobalOperationsImp::functionLevelReset("device/reset");
 const std::string LinuxGlobalOperationsImp::clientsDir("clients");
 const std::string LinuxGlobalOperationsImp::srcVersionFile("/sys/module/i915/srcversion");
 const std::string LinuxGlobalOperationsImp::agamaVersionFile("/sys/module/i915/agama_version");
+const std::string LinuxGlobalOperationsImp::ueventWedgedFile("/var/lib/libze_intel_gpu/wedged_file");
 
 // Map engine entries(numeric values) present in /sys/class/drm/card<n>/clients/<client_n>/busy,
 // with engine enum defined in leve-zero spec
@@ -130,10 +130,6 @@ static void getPidFdsForOpenDevice(ProcfsAccess *pProcfsAccess, SysfsAccess *pSy
 }
 
 ze_result_t LinuxGlobalOperationsImp::reset(ze_bool_t force) {
-    FsAccess *pFsAccess = &pLinuxSysmanImp->getFsAccess();
-    ProcfsAccess *pProcfsAccess = &pLinuxSysmanImp->getProcfsAccess();
-    SysfsAccess *pSysfsAccess = &pLinuxSysmanImp->getSysfsAccess();
-
     std::string resetPath;
     std::string resetName;
     ze_result_t result = ZE_RESULT_SUCCESS;
@@ -164,7 +160,7 @@ ze_result_t LinuxGlobalOperationsImp::reset(ze_bool_t force) {
             myPidFds = fds;
         } else if (!fds.empty()) {
             if (force) {
-                ::kill(pid, SIGKILL);
+                pProcfsAccess->kill(pid);
             } else {
                 // Device is in use by another process.
                 // Don't reset while in use.
@@ -205,24 +201,25 @@ ze_result_t LinuxGlobalOperationsImp::reset(ze_bool_t force) {
         if (!fds.empty()) {
 
             // Kill all processes that have the device open.
-            ::kill(pid, SIGKILL);
+            pProcfsAccess->kill(pid);
             deviceUsingPids.push_back(pid);
         }
     }
 
     // Wait for all the processes to exit
-    // If they don't all exit within 10
-    // seconds, just fail reset.
+    // If they don't all exit within resetTimeout
+    // just fail reset.
     auto start = std::chrono::steady_clock::now();
+    auto end = start;
     for (auto &&pid : deviceUsingPids) {
         while (pProcfsAccess->isAlive(pid)) {
-            auto end = std::chrono::steady_clock::now();
-            if (std::chrono::duration_cast<std::chrono::seconds>(end - start).count() >= LinuxGlobalOperationsImp::resetTimeout) {
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() > resetTimeout) {
                 return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
             }
 
             struct ::timespec timeout = {.tv_sec = 0, .tv_nsec = 1000};
             ::nanosleep(&timeout, NULL);
+            end = std::chrono::steady_clock::now();
         }
     }
 
@@ -377,11 +374,25 @@ ze_result_t LinuxGlobalOperationsImp::scanProcessesState(std::vector<zes_process
     }
     return result;
 }
-
+ze_result_t LinuxGlobalOperationsImp::deviceGetState(zes_device_state_t *pState) {
+    uint32_t valWedged = 0;
+    ze_result_t result = pFsAccess->read(ueventWedgedFile, valWedged);
+    if (result != ZE_RESULT_SUCCESS) {
+        if (result == ZE_RESULT_ERROR_NOT_AVAILABLE)
+            result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+        return result;
+    }
+    pState->reset = 0;
+    if (valWedged != 0) {
+        pState->reset |= ZES_RESET_REASON_FLAG_WEDGED;
+    }
+    return result;
+}
 LinuxGlobalOperationsImp::LinuxGlobalOperationsImp(OsSysman *pOsSysman) {
     pLinuxSysmanImp = static_cast<LinuxSysmanImp *>(pOsSysman);
 
     pSysfsAccess = &pLinuxSysmanImp->getSysfsAccess();
+    pProcfsAccess = &pLinuxSysmanImp->getProcfsAccess();
     pFsAccess = &pLinuxSysmanImp->getFsAccess();
     pDevice = pLinuxSysmanImp->getDeviceHandle();
 }

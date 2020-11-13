@@ -15,6 +15,7 @@ using Family = NEO::TGLLPFamily;
 #include "shared/source/command_container/command_encoder.inl"
 #include "shared/source/command_container/command_encoder_base.inl"
 #include "shared/source/command_container/encode_compute_mode_tgllp_plus.inl"
+#include "shared/source/command_stream/command_stream_receiver.h"
 
 namespace NEO {
 template <>
@@ -55,14 +56,23 @@ void EncodeSurfaceState<Family>::encodeExtraBufferParams(R_SURFACE_STATE *surfac
         const bool isConstantSurface = allocation && allocation->getAllocationType() == GraphicsAllocation::AllocationType::CONSTANT_SURFACE;
         bool useL1 = isReadOnly || isConstantSurface;
 
-        if (DebugManager.flags.ForceL1Caching.get() != -1) {
-            useL1 = !!DebugManager.flags.ForceL1Caching.get();
+        if (DebugManager.flags.ForceL1Caching.get() != 1) {
+            useL1 = false;
         }
 
         if (useL1) {
             surfaceState->setMemoryObjectControlState(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST));
         }
     }
+}
+
+template <>
+bool EncodeSurfaceState<Family>::doBindingTablePrefetch() {
+    return false;
+}
+
+template <>
+void EncodeL3State<Family>::encode(CommandContainer &container, bool enableSLM) {
 }
 
 template struct EncodeDispatchKernel<Family>;

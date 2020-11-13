@@ -93,7 +93,7 @@ ErrorCode CommandContainer::initialize(Device *device) {
 
     instructionHeapBaseAddress = device->getMemoryManager()->getInternalHeapBaseAddress(device->getRootDeviceIndex(), !hwHelper.useSystemMemoryPlacementForISA(getDevice()->getHardwareInfo()));
 
-    indirectHeaps[IndirectHeap::Type::SURFACE_STATE]->getSpace(4 * MemoryConstants::pageSize);
+    indirectHeaps[IndirectHeap::Type::SURFACE_STATE]->getSpace(reservedSshSize);
 
     iddBlock = nullptr;
     nextIddInBlock = this->getNumIddPerBlock();
@@ -119,6 +119,7 @@ void CommandContainer::reset() {
     slmSize = std::numeric_limits<uint32_t>::max();
     getResidencyContainer().clear();
     getDeallocationContainer().clear();
+    sshAllocations.clear();
 
     for (size_t i = 1; i < cmdBufferAllocations.size(); i++) {
         device->getMemoryManager()->freeGraphicsMemory(cmdBufferAllocations[i]);
@@ -135,7 +136,7 @@ void CommandContainer::reset() {
         addToResidencyContainer(indirectHeap->getGraphicsAllocation());
     }
 
-    indirectHeaps[IndirectHeap::Type::SURFACE_STATE]->getSpace(4 * MemoryConstants::pageSize);
+    indirectHeaps[IndirectHeap::Type::SURFACE_STATE]->getSpace(reservedSshSize);
 
     iddBlock = nullptr;
     nextIddInBlock = this->getNumIddPerBlock();
@@ -190,7 +191,8 @@ IndirectHeap *CommandContainer::getHeapWithRequiredSizeAndAlignment(HeapType hea
         setIndirectHeapAllocation(heapType, newAlloc);
         setHeapDirty(heapType);
         if (heapType == HeapType::SURFACE_STATE) {
-            indirectHeap->getSpace(4 * MemoryConstants::pageSize);
+            indirectHeap->getSpace(reservedSshSize);
+            sshAllocations.push_back(oldAlloc);
         }
     }
 

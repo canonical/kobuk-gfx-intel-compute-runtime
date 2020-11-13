@@ -16,6 +16,7 @@
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/event/user_event.h"
+#include "opencl/source/mem_obj/buffer.h"
 #include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
@@ -1686,7 +1687,7 @@ HWTEST_TEMPLATED_F(BlitCopyTests, givenLocalMemoryAccessNotAllowedWhenGlobalCons
     mockLinkerInput->traits.exportsGlobalConstants = true;
     programInfo.linkerInput = std::move(mockLinkerInput);
 
-    MockProgram program(*device->getExecutionEnvironment(), bcsMockContext.get(), false, &device->getDevice());
+    MockProgram program(bcsMockContext.get(), false, toClDeviceVector(*device));
 
     EXPECT_EQ(0u, bcsMockContext->bcsCsr->peekTaskCount());
 

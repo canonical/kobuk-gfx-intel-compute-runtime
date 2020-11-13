@@ -454,7 +454,7 @@ TEST_F(PerformanceHintTest, givenPrintDriverDiagnosticsDebugModeEnabledWhenCallF
     mockKernel.mockKernel->fillWithBuffersForAuxTranslation(memObjects);
 
     snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[KERNEL_ARGUMENT_AUX_TRANSLATION],
-             mockKernel.mockKernel->getKernelInfo().name.c_str(), 0, mockKernel.mockKernel->getKernelInfo().kernelArgInfo.at(0).metadataExtended->argName.c_str());
+             mockKernel.mockKernel->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName.c_str(), 0, mockKernel.mockKernel->getKernelInfo().kernelArgInfo.at(0).metadataExtended->argName.c_str());
 
     std::string output = testing::internal::GetCapturedStdout();
     EXPECT_NE(0u, output.size());
@@ -719,30 +719,37 @@ TEST_P(PerformanceHintKernelTest, GivenSpillFillWhenKernelIsInitializedThenConte
     mockKernel.mockKernel->initialize();
 
     snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[REGISTER_PRESSURE_TOO_HIGH],
-             mockKernel.mockKernel->getKernelInfo().name.c_str(), size);
+             mockKernel.mockKernel->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName.c_str(), size);
     EXPECT_EQ(!zeroSized, containsHint(expectedHint, userData));
 }
 
 TEST_P(PerformanceHintKernelTest, GivenPrivateSurfaceWhenKernelIsInitializedThenContextProvidesProperHint) {
     auto pDevice = castToObject<ClDevice>(devices[0]);
     static_cast<OsAgnosticMemoryManager *>(pDevice->getMemoryManager())->turnOnFakingBigAllocations();
-    auto size = zeroSized ? 0 : 1024;
-    MockKernelWithInternals mockKernel(*pDevice, context);
-    SPatchAllocateStatelessPrivateSurface allocateStatelessPrivateMemorySurface;
 
-    allocateStatelessPrivateMemorySurface.PerThreadPrivateMemorySize = size;
-    allocateStatelessPrivateMemorySurface.SurfaceStateHeapOffset = 128;
-    allocateStatelessPrivateMemorySurface.DataParamOffset = 16;
-    allocateStatelessPrivateMemorySurface.DataParamSize = 8;
+    for (auto isSmitThread : {false, true}) {
+        auto size = zeroSized ? 0 : 1024;
 
-    mockKernel.kernelInfo.patchInfo.pAllocateStatelessPrivateSurface = &allocateStatelessPrivateMemorySurface;
-    size *= pDevice->getSharedDeviceInfo().computeUnitsUsedForScratch * mockKernel.mockKernel->getKernelInfo().getMaxSimdSize();
+        MockKernelWithInternals mockKernel(*pDevice, context);
+        SPatchAllocateStatelessPrivateSurface allocateStatelessPrivateMemorySurface = {};
 
-    mockKernel.mockKernel->initialize();
+        allocateStatelessPrivateMemorySurface.PerThreadPrivateMemorySize = size;
+        allocateStatelessPrivateMemorySurface.SurfaceStateHeapOffset = 128;
+        allocateStatelessPrivateMemorySurface.DataParamOffset = 16;
+        allocateStatelessPrivateMemorySurface.DataParamSize = 8;
 
-    snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[PRIVATE_MEMORY_USAGE_TOO_HIGH],
-             mockKernel.mockKernel->getKernelInfo().name.c_str(), size);
-    EXPECT_EQ(!zeroSized, containsHint(expectedHint, userData));
+        allocateStatelessPrivateMemorySurface.IsSimtThread = isSmitThread;
+
+        mockKernel.kernelInfo.patchInfo.pAllocateStatelessPrivateSurface = &allocateStatelessPrivateMemorySurface;
+        size *= pDevice->getSharedDeviceInfo().computeUnitsUsedForScratch;
+        size *= isSmitThread ? mockKernel.mockKernel->getKernelInfo().getMaxSimdSize() : 1;
+
+        mockKernel.mockKernel->initialize();
+
+        snprintf(expectedHint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[PRIVATE_MEMORY_USAGE_TOO_HIGH],
+                 mockKernel.mockKernel->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName.c_str(), size);
+        EXPECT_EQ(!zeroSized, containsHint(expectedHint, userData));
+    }
 }
 
 INSTANTIATE_TEST_CASE_P(

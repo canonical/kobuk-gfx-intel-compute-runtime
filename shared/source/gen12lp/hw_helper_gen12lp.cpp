@@ -46,6 +46,11 @@ bool HwHelperHw<Family>::isForceEmuInt32DivRemSPWARequired(const HardwareInfo &h
 }
 
 template <>
+bool HwHelperHw<Family>::isWaDisableRccRhwoOptimizationRequired() const {
+    return true;
+}
+
+template <>
 uint32_t HwHelperHw<Family>::getComputeUnitsUsedForScratch(const HardwareInfo *pHwInfo) const {
     /* For ICL+ maxThreadCount equals (EUCount * 8).
      ThreadCount/EUCount=7 is no longer valid, so we have to force 8 in below formula.
@@ -83,6 +88,13 @@ uint32_t HwHelperHw<Family>::getHwRevIdFromStepping(uint32_t stepping, const Har
         case REVISION_C:
             return 0x4;
         }
+    } else if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_ALDERLAKE_S) {
+        switch (stepping) {
+        case REVISION_A0:
+            return 0x0;
+        case REVISION_B:
+            return 0x4;
+        }
     }
     return Gen12LPHelpers::getHwRevIdFromStepping(stepping, hwInfo);
 }
@@ -106,6 +118,13 @@ uint32_t HwHelperHw<Family>::getSteppingFromHwRevId(uint32_t hwRevId, const Hard
             return REVISION_B;
         case 0x4:
             return REVISION_C;
+        }
+    } else if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_ALDERLAKE_S) {
+        switch (hwRevId) {
+        case 0x0:
+            return REVISION_A0;
+        case 0x4:
+            return REVISION_B;
         }
     }
     return Gen12LPHelpers::getSteppingFromHwRevId(hwRevId, hwInfo);
@@ -243,8 +262,8 @@ bool HwHelperHw<Family>::useOnlyGlobalTimestamps() const {
 template <>
 uint32_t HwHelperHw<Family>::getMocsIndex(const GmmHelper &gmmHelper, bool l3enabled, bool l1enabled) const {
     if (l3enabled) {
-        if (DebugManager.flags.ForceL1Caching.get() != -1) {
-            l1enabled = !!DebugManager.flags.ForceL1Caching.get();
+        if (DebugManager.flags.ForceL1Caching.get() != 1) {
+            l1enabled = false;
         }
 
         if (l1enabled) {

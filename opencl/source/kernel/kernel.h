@@ -97,7 +97,7 @@ class Kernel : public BaseObject<_cl_kernel> {
         if (FileLoggerInstance().enabled()) {
             std::string source;
             program->getSource(source);
-            FileLoggerInstance().dumpKernel(kernelInfo.name, source);
+            FileLoggerInstance().dumpKernel(kernelInfo.kernelDescriptor.kernelMetadata.kernelName, source);
         }
 
         return pKernel;
@@ -408,7 +408,7 @@ class Kernel : public BaseObject<_cl_kernel> {
     }
     void getSuggestedLocalWorkSize(const cl_uint workDim, const size_t *globalWorkSize, const size_t *globalWorkOffset,
                                    size_t *localWorkSize);
-    uint32_t getMaxWorkGroupCount(const cl_uint workDim, const size_t *localWorkSize) const;
+    uint32_t getMaxWorkGroupCount(const cl_uint workDim, const size_t *localWorkSize, const CommandQueue *commandQueue) const;
 
     uint64_t getKernelStartOffset(
         const bool localIdsGenerationByRuntime,
@@ -421,6 +421,7 @@ class Kernel : public BaseObject<_cl_kernel> {
     int32_t setAdditionalKernelExecInfoWithParam(uint32_t paramName);
     void setAdditionalKernelExecInfo(uint32_t additionalKernelExecInfo);
     uint32_t getAdditionalKernelExecInfo() const;
+    MOCKABLE_VIRTUAL bool requiresWaDisableRccRhwoOptimization() const;
 
   protected:
     struct ObjectCounts {

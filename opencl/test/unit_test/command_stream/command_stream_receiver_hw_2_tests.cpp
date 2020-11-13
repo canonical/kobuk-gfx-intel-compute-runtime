@@ -6,16 +6,21 @@
  */
 
 #include "shared/source/command_stream/scratch_space_controller_base.h"
+#include "shared/source/direct_submission/dispatchers/blitter_dispatcher.h"
+#include "shared/test/unit_test/helpers/ult_hw_config.h"
+#include "shared/test/unit_test/mocks/mock_direct_submission_hw.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/event/user_event.h"
 #include "opencl/source/helpers/cl_blit_properties.h"
 #include "opencl/source/mem_obj/mem_obj_helper.h"
 #include "opencl/test/unit_test/command_stream/command_stream_receiver_hw_fixture.h"
+#include "opencl/test/unit_test/fixtures/image_fixture.h"
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
 #include "opencl/test/unit_test/helpers/raii_hw_helper.h"
 #include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
 #include "opencl/test/unit_test/mocks/mock_hw_helper.h"
+#include "opencl/test/unit_test/mocks/mock_image.h"
 #include "opencl/test/unit_test/mocks/mock_internal_allocation_storage.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
@@ -66,7 +71,7 @@ HWTEST_F(BcsTests, givenDebugCapabilityWhenEstimatingCommandSizeThenAddAllRequir
     blitPropertiesContainer.push_back(blitProperties);
 
     auto estimatedSize = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
-        blitPropertiesContainer, false, true, pClDevice->getRootDeviceEnvironment());
+        blitPropertiesContainer, false, true, false, pClDevice->getRootDeviceEnvironment());
 
     EXPECT_EQ(expectedSize, estimatedSize);
     EXPECT_FALSE(BlitCommandsHelper<FamilyType>::isCopyRegionPreferred(blitProperties.copySize, pClDevice->getRootDeviceEnvironment()));
@@ -308,6 +313,10 @@ HWTEST_F(BcsTests, givenProfilingEnabledWhenBlitBufferThenCommandBufferIsConstru
     ASSERT_NE(cmdList.end(), cmdIterator);
     cmdIterator = find<typename FamilyType::XY_COPY_BLT *>(++cmdIterator, cmdList.end());
     ASSERT_NE(cmdList.end(), cmdIterator);
+
+    cmdIterator = find<typename FamilyType::MI_FLUSH_DW *>(++cmdIterator, cmdList.end());
+    ASSERT_NE(cmdList.end(), cmdIterator);
+
     cmdIterator = find<typename FamilyType::MI_STORE_REGISTER_MEM *>(++cmdIterator, cmdList.end());
     ASSERT_NE(cmdList.end(), cmdIterator);
     cmdIterator = find<typename FamilyType::MI_STORE_REGISTER_MEM *>(++cmdIterator, cmdList.end());
@@ -1162,6 +1171,314 @@ HWTEST_F(BcsTests, givenInvalidBlitDirectionWhenConstructPropertiesThenException
     EXPECT_THROW(ClBlitProperties::constructProperties(static_cast<BlitterConstants::BlitDirection>(7), csr, {}), std::exception);
 }
 
+HWTEST_F(BcsTests, givenBlitterDirectSubmissionEnabledWhenProgrammingBlitterThenExpectRingBufferDispatched) {
+    using MI_BATCH_BUFFER_START = typename FamilyType::MI_BATCH_BUFFER_START;
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+
+    VariableBackup<UltHwConfig> backup(&ultHwConfig);
+    ultHwConfig.csrBaseCallBlitterDirectSubmissionAvailable = true;
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    using DirectSubmission = MockDirectSubmissionHw<FamilyType, BlitterDispatcher<FamilyType>>;
+
+    csr.blitterDirectSubmission = std::make_unique<DirectSubmission>(*pDevice, *csr.osContext);
+    csr.recordFlusheBatchBuffer = true;
+    DirectSubmission *directSubmission = reinterpret_cast<DirectSubmission *>(csr.blitterDirectSubmission.get());
+    bool initRet = directSubmission->initialize(true);
+    EXPECT_TRUE(initRet);
+
+    cl_int retVal = CL_SUCCESS;
+    auto buffer = clUniquePtr<Buffer>(Buffer::create(context.get(), CL_MEM_READ_WRITE, 1, nullptr, retVal));
+    void *hostPtr = reinterpret_cast<void *>(0x12340000);
+    size_t numberNodesPerContainer = 5;
+    auto graphicsAllocation = buffer->getGraphicsAllocation(pDevice->getRootDeviceIndex());
+
+    auto blitProperties = BlitProperties::constructPropertiesForReadWriteBuffer(BlitterConstants::BlitDirection::HostPtrToBuffer,
+                                                                                csr, graphicsAllocation, nullptr, hostPtr,
+                                                                                graphicsAllocation->getGpuAddress(), 0,
+                                                                                0, 0, {1, 1, 1}, 0, 0, 0, 0);
+
+    MockTimestampPacketContainer timestamp0(*csr.getTimestampPacketAllocator(), numberNodesPerContainer);
+    MockTimestampPacketContainer timestamp1(*csr.getTimestampPacketAllocator(), numberNodesPerContainer);
+    blitProperties.csrDependencies.push_back(&timestamp0);
+    blitProperties.csrDependencies.push_back(&timestamp1);
+
+    blitBuffer(&csr, blitProperties, true);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(csr.commandStream, 0u);
+    ASSERT_NE(nullptr, csr.latestFlushedBatchBuffer.endCmdPtr);
+
+    MI_BATCH_BUFFER_START *bbStart = hwParser.getCommand<MI_BATCH_BUFFER_START>();
+    ASSERT_NE(nullptr, bbStart);
+    EXPECT_EQ(csr.latestFlushedBatchBuffer.endCmdPtr, bbStart);
+    EXPECT_EQ(0ull, bbStart->getBatchBufferStartAddressGraphicsaddress472());
+}
+
+HWTEST_F(BcsTests, givenHostPtrToImageWhenConstructPropertiesIsCalledThenValuesAreSetCorrectly) {
+    void *hostPtr = reinterpret_cast<void *>(0x12340000);
+    cl_image_desc imgDesc = Image2dDefaults::imageDesc;
+    imgDesc.image_width = 10u;
+    imgDesc.image_height = 12u;
+    std::unique_ptr<Image> image(Image2dHelper<>::create(context.get(), &imgDesc));
+    BuiltinOpParams builtinOpParams{};
+    builtinOpParams.srcPtr = hostPtr;
+    builtinOpParams.srcMemObj = nullptr;
+    builtinOpParams.dstMemObj = image.get();
+    builtinOpParams.size = {2, 3, 1};
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto expectedDstPtr = image.get()->getGraphicsAllocation(csr.getRootDeviceIndex())->getGpuAddress();
+    auto expectedBytesPerPixel = image.get()->getSurfaceFormatInfo().surfaceFormat.ImageElementSizeInBytes;
+    auto srcRowPitchExpected = expectedBytesPerPixel * builtinOpParams.size.x;
+    auto dstRowPitchExpected = expectedBytesPerPixel * image.get()->getImageDesc().image_width;
+    auto srcSlicePitchExpected = srcRowPitchExpected * builtinOpParams.size.y;
+    auto dstSlicePitchExpected = dstRowPitchExpected * image.get()->getImageDesc().image_height;
+
+    auto blitProperties = ClBlitProperties::constructProperties(BlitterConstants::BlitDirection::HostPtrToImage,
+                                                                csr,
+                                                                builtinOpParams);
+
+    EXPECT_EQ(builtinOpParams.size, blitProperties.copySize);
+    EXPECT_EQ(expectedDstPtr, blitProperties.dstGpuAddress);
+    EXPECT_EQ(builtinOpParams.srcOffset, blitProperties.srcOffset);
+    EXPECT_EQ(builtinOpParams.dstOffset, blitProperties.dstOffset);
+    EXPECT_EQ(expectedBytesPerPixel, blitProperties.bytesPerPixel);
+    EXPECT_EQ(srcRowPitchExpected, blitProperties.srcRowPitch);
+    EXPECT_EQ(dstRowPitchExpected, blitProperties.dstRowPitch);
+    EXPECT_EQ(srcSlicePitchExpected, blitProperties.srcSlicePitch);
+    EXPECT_EQ(dstSlicePitchExpected, blitProperties.dstSlicePitch);
+}
+
+HWTEST_F(BcsTests, givenImageToHostPtrWhenConstructPropertiesIsCalledThenValuesAreSetCorrectly) {
+    void *hostPtr = reinterpret_cast<void *>(0x12340000);
+    cl_image_desc imgDesc = Image2dDefaults::imageDesc;
+    imgDesc.image_width = 10u;
+    imgDesc.image_height = 12u;
+    std::unique_ptr<Image> image(Image2dHelper<>::create(context.get(), &imgDesc));
+    BuiltinOpParams builtinOpParams{};
+    builtinOpParams.dstPtr = hostPtr;
+    builtinOpParams.srcMemObj = image.get();
+    builtinOpParams.dstMemObj = nullptr;
+    builtinOpParams.size = {2, 3, 1};
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto expectedSrcPtr = image.get()->getGraphicsAllocation(csr.getRootDeviceIndex())->getGpuAddress();
+    auto expectedBytesPerPixel = image.get()->getSurfaceFormatInfo().surfaceFormat.ImageElementSizeInBytes;
+    auto srcRowPitchExpected = expectedBytesPerPixel * image.get()->getImageDesc().image_width;
+    auto dstRowPitchExpected = expectedBytesPerPixel * builtinOpParams.size.x;
+    auto srcSlicePitchExpected = srcRowPitchExpected * image.get()->getImageDesc().image_height;
+    auto dstSlicePitchExpected = dstRowPitchExpected * builtinOpParams.size.y;
+
+    auto blitProperties = ClBlitProperties::constructProperties(BlitterConstants::BlitDirection::ImageToHostPtr,
+                                                                csr,
+                                                                builtinOpParams);
+
+    EXPECT_EQ(builtinOpParams.size, blitProperties.copySize);
+    EXPECT_EQ(expectedSrcPtr, blitProperties.srcGpuAddress);
+    EXPECT_EQ(builtinOpParams.srcOffset, blitProperties.srcOffset);
+    EXPECT_EQ(builtinOpParams.dstOffset, blitProperties.dstOffset);
+    EXPECT_EQ(expectedBytesPerPixel, blitProperties.bytesPerPixel);
+    EXPECT_EQ(srcRowPitchExpected, blitProperties.srcRowPitch);
+    EXPECT_EQ(dstRowPitchExpected, blitProperties.dstRowPitch);
+    EXPECT_EQ(srcSlicePitchExpected, blitProperties.srcSlicePitch);
+    EXPECT_EQ(dstSlicePitchExpected, blitProperties.dstSlicePitch);
+}
+
+HWTEST_F(BcsTests, givenHostPtrToImageWithInputRowSlicePitchesWhenConstructPropertiesIsCalledThenValuesAreSetCorrectly) {
+    void *hostPtr = reinterpret_cast<void *>(0x12340000);
+    cl_image_desc imgDesc = Image2dDefaults::imageDesc;
+    std::unique_ptr<Image> image(Image2dHelper<>::create(context.get(), &imgDesc));
+    BuiltinOpParams builtinOpParams{};
+    builtinOpParams.srcPtr = hostPtr;
+    builtinOpParams.srcMemObj = nullptr;
+    builtinOpParams.dstMemObj = image.get();
+    builtinOpParams.size = {2, 3, 1};
+    auto inputRowPitch = 0x20u;
+    auto inputSlicePitch = 0x400u;
+    builtinOpParams.dstRowPitch = inputRowPitch;
+    builtinOpParams.dstSlicePitch = inputSlicePitch;
+
+    auto expectedBytesPerPixel = image.get()->getSurfaceFormatInfo().surfaceFormat.ImageElementSizeInBytes;
+    auto dstRowPitchExpected = expectedBytesPerPixel * image.get()->getImageDesc().image_width;
+    auto dstSlicePitchExpected = dstRowPitchExpected * image.get()->getImageDesc().image_height;
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto blitProperties = ClBlitProperties::constructProperties(BlitterConstants::BlitDirection::HostPtrToImage,
+                                                                csr,
+                                                                builtinOpParams);
+
+    EXPECT_EQ(inputRowPitch, blitProperties.srcRowPitch);
+    EXPECT_EQ(dstRowPitchExpected, blitProperties.dstRowPitch);
+    EXPECT_EQ(inputSlicePitch, blitProperties.srcSlicePitch);
+    EXPECT_EQ(dstSlicePitchExpected, blitProperties.dstSlicePitch);
+}
+
+HWTEST_F(BcsTests, givenImageToHostPtrWithInputRowSlicePitchesWhenConstructPropertiesIsCalledThenValuesAreSetCorrectly) {
+    void *hostPtr = reinterpret_cast<void *>(0x12340000);
+    cl_image_desc imgDesc = Image2dDefaults::imageDesc;
+    std::unique_ptr<Image> image(Image2dHelper<>::create(context.get(), &imgDesc));
+    BuiltinOpParams builtinOpParams{};
+    builtinOpParams.dstPtr = hostPtr;
+    builtinOpParams.srcMemObj = image.get();
+    builtinOpParams.dstMemObj = nullptr;
+    builtinOpParams.size = {2, 3, 1};
+    auto inputRowPitch = 0x20u;
+    auto inputSlicePitch = 0x400u;
+    builtinOpParams.srcRowPitch = inputRowPitch;
+    builtinOpParams.srcSlicePitch = inputSlicePitch;
+
+    auto expectedBytesPerPixel = image.get()->getSurfaceFormatInfo().surfaceFormat.ImageElementSizeInBytes;
+    auto srcRowPitchExpected = expectedBytesPerPixel * image.get()->getImageDesc().image_width;
+    auto srcSlicePitchExpected = srcRowPitchExpected * image.get()->getImageDesc().image_height;
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto blitProperties = ClBlitProperties::constructProperties(BlitterConstants::BlitDirection::ImageToHostPtr,
+                                                                csr,
+                                                                builtinOpParams);
+
+    EXPECT_EQ(srcRowPitchExpected, blitProperties.srcRowPitch);
+    EXPECT_EQ(inputRowPitch, blitProperties.dstRowPitch);
+    EXPECT_EQ(srcSlicePitchExpected, blitProperties.srcSlicePitch);
+    EXPECT_EQ(inputSlicePitch, blitProperties.dstSlicePitch);
+}
+
+HWTEST_F(BcsTests, givenHostPtrToImageWhenBlitBufferIsCalledThenBlitCmdIsFound) {
+    if (!pDevice->getHardwareInfo().capabilityTable.supportsImages) {
+        GTEST_SKIP();
+    }
+    void *hostPtr = reinterpret_cast<void *>(0x12340000);
+    std::unique_ptr<Image> image(Image2dHelper<>::create(context.get()));
+    BuiltinOpParams builtinOpParams{};
+    builtinOpParams.srcPtr = hostPtr;
+    builtinOpParams.dstMemObj = image.get();
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto blitProperties = ClBlitProperties::constructProperties(BlitterConstants::BlitDirection::HostPtrToImage,
+                                                                csr,
+                                                                builtinOpParams);
+    blitBuffer(&csr, blitProperties, true);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(csr.commandStream, 0);
+    auto cmdIterator = find<typename FamilyType::XY_COPY_BLT *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
+    EXPECT_NE(hwParser.cmdList.end(), cmdIterator);
+}
+
+HWTEST_F(BcsTests, given3dImageWhenBlitBufferIsCalledThenBlitCmdIsFoundZtimes) {
+    if (!pDevice->getHardwareInfo().capabilityTable.supportsImages) {
+        GTEST_SKIP();
+    }
+    void *hostPtr = reinterpret_cast<void *>(0x12340000);
+    std::unique_ptr<Image> image(Image3dHelper<>::create(context.get()));
+    BuiltinOpParams builtinOpParams{};
+    builtinOpParams.srcPtr = hostPtr;
+    builtinOpParams.dstMemObj = image.get();
+    builtinOpParams.size = {1, 1, 10};
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto blitProperties = ClBlitProperties::constructProperties(BlitterConstants::BlitDirection::HostPtrToImage,
+                                                                csr,
+                                                                builtinOpParams);
+    blitBuffer(&csr, blitProperties, true);
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(csr.commandStream, 0);
+    uint32_t xyCopyBltCmdFound = 0;
+
+    for (auto &cmd : hwParser.cmdList) {
+        if (auto bltCmd = genCmdCast<typename FamilyType::XY_COPY_BLT *>(cmd)) {
+            ++xyCopyBltCmdFound;
+        }
+    }
+    EXPECT_EQ(static_cast<uint32_t>(builtinOpParams.size.z), xyCopyBltCmdFound);
+}
+
+HWTEST_F(BcsTests, givenImageToHostPtrWhenBlitBufferIsCalledThenBlitCmdIsFound) {
+    if (!pDevice->getHardwareInfo().capabilityTable.supportsImages) {
+        GTEST_SKIP();
+    }
+    void *hostPtr = reinterpret_cast<void *>(0x12340000);
+    std::unique_ptr<Image> image(Image2dHelper<>::create(context.get()));
+    BuiltinOpParams builtinOpParams{};
+    builtinOpParams.dstPtr = hostPtr;
+    builtinOpParams.srcMemObj = image.get();
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto blitProperties = ClBlitProperties::constructProperties(BlitterConstants::BlitDirection::ImageToHostPtr,
+                                                                csr,
+                                                                builtinOpParams);
+    blitBuffer(&csr, blitProperties, true);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(csr.commandStream, 0);
+    auto cmdIterator = find<typename FamilyType::XY_COPY_BLT *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
+    EXPECT_NE(hwParser.cmdList.end(), cmdIterator);
+}
+
+HWTEST_F(BcsTests, givenHostPtrToImageWhenBlitBufferIsCalledThenBlitCmdIsCorrectlyProgrammed) {
+    if (!pDevice->getHardwareInfo().capabilityTable.supportsImages) {
+        GTEST_SKIP();
+    }
+    void *hostPtr = reinterpret_cast<void *>(0x12340000);
+    cl_image_desc imgDesc = Image2dDefaults::imageDesc;
+    imgDesc.image_width = 10;
+    imgDesc.image_height = 12;
+    std::unique_ptr<Image> image(Image2dHelper<>::create(context.get(), &imgDesc));
+    BuiltinOpParams builtinOpParams{};
+    builtinOpParams.srcPtr = hostPtr;
+    builtinOpParams.srcMemObj = nullptr;
+    builtinOpParams.dstMemObj = image.get();
+    builtinOpParams.size = {6, 8, 1};
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto blitProperties = ClBlitProperties::constructProperties(BlitterConstants::BlitDirection::HostPtrToImage,
+                                                                csr,
+                                                                builtinOpParams);
+    blitBuffer(&csr, blitProperties, true);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(csr.commandStream, 0);
+    auto cmdIterator = find<typename FamilyType::XY_COPY_BLT *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
+    ASSERT_NE(hwParser.cmdList.end(), cmdIterator);
+    auto bltCmd = genCmdCast<typename FamilyType::XY_COPY_BLT *>(*cmdIterator);
+
+    auto dstPtr = builtinOpParams.dstMemObj->getGraphicsAllocation(csr.getRootDeviceIndex())->getGpuAddress();
+    EXPECT_EQ(blitProperties.srcGpuAddress, bltCmd->getSourceBaseAddress());
+    EXPECT_EQ(dstPtr, bltCmd->getDestinationBaseAddress());
+}
+
+HWTEST_F(BcsTests, givenImageToHostPtrWhenBlitBufferIsCalledThenBlitCmdIsCorrectlyProgrammed) {
+    if (!pDevice->getHardwareInfo().capabilityTable.supportsImages) {
+        GTEST_SKIP();
+    }
+    void *hostPtr = reinterpret_cast<void *>(0x12340000);
+    cl_image_desc imgDesc = Image2dDefaults::imageDesc;
+    imgDesc.image_width = 10u;
+    imgDesc.image_height = 12u;
+    std::unique_ptr<Image> image(Image2dHelper<>::create(context.get(), &imgDesc));
+    BuiltinOpParams builtinOpParams{};
+    builtinOpParams.dstPtr = hostPtr;
+    builtinOpParams.srcMemObj = image.get();
+    builtinOpParams.dstMemObj = nullptr;
+    builtinOpParams.size = {2, 3, 1};
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto blitProperties = ClBlitProperties::constructProperties(BlitterConstants::BlitDirection::ImageToHostPtr,
+                                                                csr,
+                                                                builtinOpParams);
+    blitBuffer(&csr, blitProperties, true);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(csr.commandStream, 0);
+    auto cmdIterator = find<typename FamilyType::XY_COPY_BLT *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
+    ASSERT_NE(hwParser.cmdList.end(), cmdIterator);
+    auto bltCmd = genCmdCast<typename FamilyType::XY_COPY_BLT *>(*cmdIterator);
+
+    auto srcPtr = builtinOpParams.srcMemObj->getGraphicsAllocation(csr.getRootDeviceIndex())->getGpuAddress();
+    EXPECT_EQ(srcPtr, bltCmd->getSourceBaseAddress());
+    EXPECT_EQ(blitProperties.dstGpuAddress, bltCmd->getDestinationBaseAddress());
+}
+
 struct MockScratchSpaceController : ScratchSpaceControllerBase {
     using ScratchSpaceControllerBase::privateScratchAllocation;
     using ScratchSpaceControllerBase::ScratchSpaceControllerBase;
@@ -1177,6 +1494,8 @@ TEST_F(ScratchSpaceControllerTest, whenScratchSpaceControllerIsDestroyedThenItRe
 }
 
 TEST(BcsConstantsTests, givenBlitConstantsThenTheyHaveDesiredValues) {
-    EXPECT_EQ(BlitterConstants::maxBlitWidth, 0x3FC0u);
+    EXPECT_EQ(BlitterConstants::maxBlitWidth, 0x3F80u);
     EXPECT_EQ(BlitterConstants::maxBlitHeight, 0x3FC0u);
+    EXPECT_EQ(BlitterConstants::maxBlitSetWidth, 0x1FF80u);
+    EXPECT_EQ(BlitterConstants::maxBlitSetHeight, 0x1FFC0u);
 }

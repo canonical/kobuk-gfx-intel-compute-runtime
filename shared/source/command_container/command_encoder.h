@@ -19,6 +19,7 @@
 namespace NEO {
 
 class GmmHelper;
+class IndirectHeap;
 
 template <typename GfxFamily>
 struct EncodeDispatchKernel {
@@ -204,9 +205,16 @@ struct EncodeSurfaceState {
         return ~(getSurfaceBaseAddressAlignment() - 1);
     }
 
-    static constexpr uintptr_t getSurfaceBaseAddressAlignment() { return 4; }
+    static constexpr uintptr_t getSurfaceBaseAddressMinimumAlignment() { return 4; }
+
+    static constexpr uintptr_t getSurfaceBaseAddressAlignment() { return MemoryConstants::pageSize; }
 
     static void getSshAlignedPointer(uintptr_t &ptr, size_t &offset);
+    static bool doBindingTablePrefetch();
+
+    static size_t pushBindingTableAndSurfaceStates(IndirectHeap &dstHeap, size_t bindingTableCount,
+                                                   const void *srcKernelSsh, size_t srcKernelSshSize,
+                                                   size_t numberOfBindingTableStates, size_t offsetOfBindingTable);
 };
 
 template <typename GfxFamily>
@@ -233,7 +241,14 @@ struct EncodeSempahore {
     static void programMiSemaphoreWait(MI_SEMAPHORE_WAIT *cmd,
                                        uint64_t compareAddress,
                                        uint32_t compareData,
-                                       COMPARE_OPERATION compareMode);
+                                       COMPARE_OPERATION compareMode,
+                                       bool registerPollMode);
+
+    static void addMiSemaphoreWaitCommand(LinearStream &commandStream,
+                                          uint64_t compareAddress,
+                                          uint32_t compareData,
+                                          COMPARE_OPERATION compareMode,
+                                          bool registerPollMode);
 
     static void addMiSemaphoreWaitCommand(LinearStream &commandStream,
                                           uint64_t compareAddress,

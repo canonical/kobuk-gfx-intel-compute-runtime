@@ -154,11 +154,12 @@ void ProgramDataTestBase::buildAndDecodeProgramPatchList() {
     memcpy_s(pCurPtr, programPatchListSize, pProgramPatchList, programPatchListSize);
     pCurPtr += programPatchListSize;
 
+    auto rootDeviceIndex = pPlatform->getClDevice(0)->getRootDeviceIndex();
     //as we use mock compiler in unit test, replace the genBinary here.
-    pProgram->unpackedDeviceBinary = makeCopy(pProgramData, headerSize + programBinaryHeader.PatchListSize);
-    pProgram->unpackedDeviceBinarySize = headerSize + programBinaryHeader.PatchListSize;
+    pProgram->buildInfos[rootDeviceIndex].unpackedDeviceBinary = makeCopy(pProgramData, headerSize + programBinaryHeader.PatchListSize);
+    pProgram->buildInfos[rootDeviceIndex].unpackedDeviceBinarySize = headerSize + programBinaryHeader.PatchListSize;
 
-    error = pProgram->processGenBinary();
+    error = pProgram->processGenBinary(rootDeviceIndex);
     patchlistDecodeErrorCode = error;
     if (allowDecodeFailure == false) {
         EXPECT_EQ(CL_SUCCESS, error);
@@ -423,7 +424,8 @@ TEST_F(ProgramDataTest, Given32BitDeviceWhenGlobalMemorySurfaceIsPresentThenItHa
 
 TEST(ProgramScopeMetadataTest, WhenPatchingGlobalSurfaceThenPickProperSourceBuffer) {
     MockExecutionEnvironment execEnv;
-    MockClDevice device{new MockDevice};
+    execEnv.incRefInternal();
+    MockClDevice device{new MockDevice(&execEnv, 0)};
     execEnv.memoryManager = std::make_unique<MockMemoryManager>();
     PatchTokensTestData::ValidProgramWithMixedGlobalVarAndConstSurfacesAndPointers decodedProgram;
     decodedProgram.globalPointerMutable->GlobalPointerOffset = 0U;
@@ -431,8 +433,7 @@ TEST(ProgramScopeMetadataTest, WhenPatchingGlobalSurfaceThenPickProperSourceBuff
     memset(decodedProgram.globalSurfMutable + 1, 0U, sizeof(uintptr_t));
     memset(decodedProgram.constSurfMutable + 1, 0U, sizeof(uintptr_t));
     ProgramInfo programInfo;
-    MockProgram program(execEnv);
-    program.pDevice = &device.getDevice();
+    MockProgram program(toClDeviceVector(device));
     NEO::populateProgramInfo(programInfo, decodedProgram);
     program.processProgramInfo(programInfo);
     auto &buildInfo = program.buildInfos[device.getRootDeviceIndex()];
@@ -472,6 +473,8 @@ TEST_F(ProgramDataTest, GivenProgramWith32bitPointerOptWhenProgramScopeConstantB
     constantSurfaceStorage[0] = 0U;
     constantSurfaceStorage[1] = sentinel;
 
+    programInfo.globalConstants.initData = constantSurface.mockGfxAllocation.getUnderlyingBuffer();
+
     pProgram->setLinkerInput(pProgram->getDevice().getRootDeviceIndex(), std::move(programInfo.linkerInput));
     pProgram->linkBinary(pProgram->pDevice, programInfo.globalConstants.initData, programInfo.globalVariables.initData);
     uint32_t expectedAddr = static_cast<uint32_t>(constantSurface.getGraphicsAllocation(pProgram->getDevice().getRootDeviceIndex())->getGpuAddressToPatch());
@@ -510,6 +513,8 @@ TEST_F(ProgramDataTest, GivenProgramWith32bitPointerOptWhenProgramScopeGlobalPoi
     globalSurfaceStorage[0] = 0U;
     globalSurfaceStorage[1] = sentinel;
 
+    programInfo.globalVariables.initData = globalSurface.mockGfxAllocation.getUnderlyingBuffer();
+
     pProgram->setLinkerInput(pProgram->getDevice().getRootDeviceIndex(), std::move(programInfo.linkerInput));
     pProgram->linkBinary(pProgram->pDevice, programInfo.globalConstants.initData, programInfo.globalVariables.initData);
     uint32_t expectedAddr = static_cast<uint32_t>(globalSurface.getGraphicsAllocation(pProgram->getDevice().getRootDeviceIndex())->getGpuAddressToPatch());
@@ -535,8 +540,8 @@ TEST_F(ProgramDataTest, givenSymbolTablePatchTokenThenLinkerInputIsCreated) {
 
 TEST(ProgramLinkBinaryTest, whenLinkerInputEmptyThenLinkSuccessful) {
     auto linkerInput = std::make_unique<WhiteBox<LinkerInput>>();
-    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-    MockProgram program{*device->getExecutionEnvironment(), nullptr, false, device.get()};
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    MockProgram program{nullptr, false, toClDeviceVector(*device)};
     program.setLinkerInput(device->getRootDeviceIndex(), std::move(linkerInput));
     auto ret = program.linkBinary(program.pDevice, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, ret);
@@ -549,10 +554,10 @@ TEST(ProgramLinkBinaryTest, whenLinkerUnresolvedExternalThenLinkFailedAndBuildLo
     relocation.offset = 0;
     linkerInput->relocations.push_back(NEO::LinkerInput::Relocations{relocation});
     linkerInput->traits.requiresPatchingOfInstructionSegments = true;
-    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-    MockProgram program{*device->getExecutionEnvironment(), nullptr, false, device.get()};
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    MockProgram program{nullptr, false, toClDeviceVector(*device)};
     KernelInfo kernelInfo = {};
-    kernelInfo.name = "onlyKernel";
+    kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "onlyKernel";
     std::vector<char> kernelHeap;
     kernelHeap.resize(32, 7);
     kernelInfo.heapInfo.pKernelHeap = kernelHeap.data();
@@ -569,7 +574,7 @@ TEST(ProgramLinkBinaryTest, whenLinkerUnresolvedExternalThenLinkFailedAndBuildLo
     EXPECT_FALSE(buildLog.empty());
     Linker::UnresolvedExternals expectedUnresolvedExternals;
     expectedUnresolvedExternals.push_back(Linker::UnresolvedExternal{relocation, 0, false});
-    auto expectedError = constructLinkerErrorMessage(expectedUnresolvedExternals, std::vector<std::string>{"kernel : " + kernelInfo.name});
+    auto expectedError = constructLinkerErrorMessage(expectedUnresolvedExternals, std::vector<std::string>{"kernel : " + kernelInfo.kernelDescriptor.kernelMetadata.kernelName});
     EXPECT_THAT(buildLog.c_str(), ::testing::HasSubstr(expectedError));
 }
 
@@ -585,11 +590,11 @@ TEST_F(ProgramDataTest, whenLinkerInputValidThenIsaIsProperlyPatched) {
                                         NEO::LinkerInput::RelocationInfo{"C", 24U, relocationType}});
     linkerInput->traits.requiresPatchingOfInstructionSegments = true;
     linkerInput->exportedFunctionsSegmentId = 0;
-    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-    MockProgram program{*device->getExecutionEnvironment(), nullptr, false, device.get()};
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    MockProgram program{nullptr, false, toClDeviceVector(*device)};
     auto &buildInfo = program.buildInfos[device->getRootDeviceIndex()];
     KernelInfo kernelInfo = {};
-    kernelInfo.name = "onlyKernel";
+    kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "onlyKernel";
     std::vector<char> kernelHeap;
     kernelHeap.resize(32, 7);
     kernelInfo.heapInfo.pKernelHeap = kernelHeap.data();
@@ -635,11 +640,11 @@ TEST_F(ProgramDataTest, whenRelocationsAreNotNeededThenIsaIsPreserved) {
     linkerInput->symbols["A"] = NEO::SymbolInfo{4U, 4U, NEO::SegmentType::GlobalVariables};
     linkerInput->symbols["B"] = NEO::SymbolInfo{8U, 4U, NEO::SegmentType::GlobalConstants};
 
-    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-    MockProgram program{*device->getExecutionEnvironment(), nullptr, false, device.get()};
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    MockProgram program{nullptr, false, toClDeviceVector(*device)};
     auto &buildInfo = program.buildInfos[device->getRootDeviceIndex()];
     KernelInfo kernelInfo = {};
-    kernelInfo.name = "onlyKernel";
+    kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "onlyKernel";
     std::vector<char> kernelHeapData;
     kernelHeapData.resize(32, 7);
     std::vector<char> kernelHeap(kernelHeapData.begin(), kernelHeapData.end());

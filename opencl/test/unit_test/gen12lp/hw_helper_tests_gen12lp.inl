@@ -8,6 +8,7 @@
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 
+#include "opencl/source/helpers/cl_hw_helper.h"
 #include "opencl/test/unit_test/gen12lp/special_ult_helper_gen12lp.h"
 #include "opencl/test/unit_test/helpers/hw_helper_tests.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
@@ -18,7 +19,7 @@
 using HwHelperTestGen12Lp = HwHelperTest;
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenTglLpThenAuxTranslationIsRequired) {
-    auto &helper = HwHelper::get(renderCoreFamily);
+    auto &clHwHelper = ClHwHelper::get(renderCoreFamily);
 
     for (auto isPureStateful : {false, true}) {
         KernelInfo kernelInfo{};
@@ -27,11 +28,11 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenTglLpThenAuxTranslationIsRequired) {
         argInfo.pureStatefulBufferAccess = isPureStateful;
         kernelInfo.kernelArgInfo.push_back(std::move(argInfo));
 
-        EXPECT_EQ(!isPureStateful, helper.requiresAuxResolves(kernelInfo));
+        EXPECT_EQ(!isPureStateful, clHwHelper.requiresAuxResolves(kernelInfo));
     }
 }
 
-GEN12LPTEST_F(HwHelperTestGen12Lp, getMaxBarriersPerSliceReturnsCorrectSize) {
+GEN12LPTEST_F(HwHelperTestGen12Lp, WhenGettingMaxBarriersPerSliceThenCorrectSizeIsReturned) {
     auto &helper = HwHelper::get(renderCoreFamily);
     EXPECT_EQ(32u, helper.getMaxBarrierRegisterPerSlice());
 }
@@ -58,7 +59,7 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenGen12LpSkuWhenGettingCapabilityCoherency
     }
 }
 
-GEN12LPTEST_F(HwHelperTestGen12Lp, getPitchAlignmentForImage) {
+GEN12LPTEST_F(HwHelperTestGen12Lp, WhenGettingPitchAlignmentForImageThenCorrectValueIsReturned) {
     auto &helper = HwHelper::get(renderCoreFamily);
     auto stepping = hardwareInfo.platform.usRevId;
 
@@ -69,7 +70,7 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, getPitchAlignmentForImage) {
     }
 }
 
-GEN12LPTEST_F(HwHelperTestGen12Lp, adjustDefaultEngineTypeNoCcs) {
+GEN12LPTEST_F(HwHelperTestGen12Lp, WhenAdjustingDefaultEngineTypeThenRcsIsSet) {
     hardwareInfo.featureTable.ftrCCSNode = false;
 
     auto &helper = HwHelper::get(renderCoreFamily);
@@ -385,12 +386,11 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, whenRequestingMocsThenProperMocsIndicesAreBei
 
     const auto mocsNoCache = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED) >> 1;
     const auto mocsL3 = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) >> 1;
-    const auto mocsL1 = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST) >> 1;
 
     EXPECT_EQ(mocsNoCache, helper.getMocsIndex(*gmmHelper, false, false));
     EXPECT_EQ(mocsNoCache, helper.getMocsIndex(*gmmHelper, false, true));
     EXPECT_EQ(mocsL3, helper.getMocsIndex(*gmmHelper, true, false));
-    EXPECT_EQ(mocsL1, helper.getMocsIndex(*gmmHelper, true, true));
+    EXPECT_EQ(mocsL3, helper.getMocsIndex(*gmmHelper, true, true));
 }
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenL1ForceEnabledWhenRequestingMocsThenProperMocsIndicesAreBeingReturned) {
@@ -401,11 +401,12 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenL1ForceEnabledWhenRequestingMocsThenProp
     auto gmmHelper = this->pDevice->getGmmHelper();
 
     const auto mocsNoCache = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED) >> 1;
+    const auto mocsL3 = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) >> 1;
     const auto mocsL1 = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST) >> 1;
 
     EXPECT_EQ(mocsNoCache, helper.getMocsIndex(*gmmHelper, false, false));
     EXPECT_EQ(mocsNoCache, helper.getMocsIndex(*gmmHelper, false, true));
-    EXPECT_EQ(mocsL1, helper.getMocsIndex(*gmmHelper, true, false));
+    EXPECT_EQ(mocsL3, helper.getMocsIndex(*gmmHelper, true, false));
     EXPECT_EQ(mocsL1, helper.getMocsIndex(*gmmHelper, true, true));
 }
 
@@ -423,4 +424,48 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenL1ForceDisabledWhenRequestingMocsThenPro
     EXPECT_EQ(mocsNoCache, helper.getMocsIndex(*gmmHelper, false, true));
     EXPECT_EQ(mocsL3, helper.getMocsIndex(*gmmHelper, true, false));
     EXPECT_EQ(mocsL3, helper.getMocsIndex(*gmmHelper, true, true));
+}
+
+HWTEST2_F(HwHelperTestGen12Lp, givenRevisionEnumThenProperValueForIsWorkaroundRequiredIsReturned, IsRKL) {
+    std::vector<unsigned short> steppings;
+    HardwareInfo hardwareInfo = *defaultHwInfo;
+
+    steppings.push_back(0x0); //A0
+    steppings.push_back(0x4); //B0
+    steppings.push_back(0x5); //undefined
+
+    for (auto stepping : steppings) {
+        hardwareInfo.platform.usRevId = stepping;
+        HwHelper &hwHelper = HwHelper::get(renderCoreFamily);
+
+        if (stepping == 0x0) {
+            EXPECT_TRUE(hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_B, hardwareInfo));
+            EXPECT_FALSE(hwHelper.isWorkaroundRequired(REVISION_B, REVISION_A0, hardwareInfo));
+        } else if (stepping == 0x1 || stepping == 0x5) {
+            EXPECT_FALSE(hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_D, hardwareInfo));
+        }
+    }
+}
+
+HWTEST2_F(HwHelperTestGen12Lp, givenRevisionEnumThenProperValueForIsWorkaroundRequiredIsReturned, IsADLS) {
+    std::vector<unsigned short> steppings;
+    HardwareInfo hardwareInfo = *defaultHwInfo;
+
+    steppings.push_back(0x0); //A0
+    steppings.push_back(0x4); //B0
+    steppings.push_back(0x5); //undefined
+
+    for (auto stepping : steppings) {
+        hardwareInfo.platform.usRevId = stepping;
+        HwHelper &hwHelper = HwHelper::get(renderCoreFamily);
+
+        if (stepping == 0x0) {
+            EXPECT_TRUE(hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_B, hardwareInfo));
+            EXPECT_FALSE(hwHelper.isWorkaroundRequired(REVISION_B, REVISION_A0, hardwareInfo));
+        } else if (stepping == 0x4 || stepping == 0x5) {
+            EXPECT_FALSE(hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_D, hardwareInfo));
+            EXPECT_FALSE(hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_B, hardwareInfo));
+            EXPECT_FALSE(hwHelper.isWorkaroundRequired(REVISION_B, REVISION_A0, hardwareInfo));
+        }
+    }
 }

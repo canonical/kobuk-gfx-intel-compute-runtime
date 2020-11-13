@@ -21,7 +21,7 @@
 namespace NEO {
 
 class GraphicsAllocation;
-
+ClDeviceVector toClDeviceVector(ClDevice &clDevice);
 ////////////////////////////////////////////////////////////////////////////////
 // Program - Core implementation
 ////////////////////////////////////////////////////////////////////////////////
@@ -49,8 +49,6 @@ class MockProgram : public Program {
     using Program::isSpirV;
     using Program::options;
     using Program::packDeviceBinary;
-    using Program::packedDeviceBinary;
-    using Program::packedDeviceBinarySize;
     using Program::pDevice;
     using Program::Program;
     using Program::programBinaryType;
@@ -58,10 +56,8 @@ class MockProgram : public Program {
     using Program::specConstantsIds;
     using Program::specConstantsSizes;
     using Program::specConstantsValues;
-    using Program::unpackedDeviceBinary;
-    using Program::unpackedDeviceBinarySize;
 
-    MockProgram(ExecutionEnvironment &executionEnvironment) : Program(executionEnvironment, nullptr, false, nullptr) {
+    MockProgram(const ClDeviceVector &deviceVector) : Program(nullptr, false, deviceVector) {
     }
 
     ~MockProgram() override {
@@ -91,9 +87,6 @@ class MockProgram : public Program {
             }
         }
     }
-    void setDevice(Device *device) {
-        this->pDevice = device;
-    };
     std::vector<KernelInfo *> &getKernelInfoArray() {
         return kernelInfoArray;
     }
@@ -160,26 +153,17 @@ class MockProgram : public Program {
     int isOptionValueValidOverride = -1;
 };
 
-class GlobalMockSipProgram : public Program {
-  public:
-    using Program::Program;
-    GlobalMockSipProgram(ExecutionEnvironment &executionEnvironment) : Program(executionEnvironment, nullptr, false, nullptr) {
-    }
-    cl_int processGenBinary() override;
-    cl_int processGenBinaryOnce();
-    void resetAllocationState();
-    void resetAllocation(GraphicsAllocation *allocation);
-    void deleteAllocation();
-    GraphicsAllocation *getAllocation();
-    static void initSipProgram();
-    static void shutDownSipProgram();
-    static GlobalMockSipProgram *sipProgram;
-    static Program *getSipProgramWithCustomBinary();
-
-  protected:
-    void *sipAllocationStorage;
-    static ExecutionEnvironment executionEnvironment;
-};
+namespace GlobalMockSipProgram {
+void resetAllocationState();
+void resetAllocation(GraphicsAllocation *allocation);
+void deleteAllocation();
+GraphicsAllocation *getAllocation();
+void initSipProgramInfo();
+void shutDownSipProgramInfo();
+ProgramInfo getSipProgramInfoWithCustomBinary();
+extern ProgramInfo *globalSipProgramInfo;
+ProgramInfo getSipProgramInfo();
+}; // namespace GlobalMockSipProgram
 
 class GMockProgram : public Program {
   public:

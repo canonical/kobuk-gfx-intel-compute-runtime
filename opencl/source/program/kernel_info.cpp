@@ -9,6 +9,7 @@
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/blit_commands_helper.h"
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/source/helpers/kernel_helpers.h"
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/memory_manager/memory_manager.h"
@@ -433,14 +434,9 @@ bool KernelInfo::createKernelAllocation(const Device &device) {
     auto &hwInfo = device.getHardwareInfo();
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
 
-    bool status = false;
-    if (kernelAllocation->isAllocatedInLocalMemoryPool() && hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo)) {
-        status = (BlitHelperFunctions::blitMemoryToAllocation(device, kernelAllocation, 0, heapInfo.pKernelHeap, {kernelIsaSize, 1, 1}) == BlitOperationResult::Success);
-    } else {
-        status = device.getMemoryManager()->copyMemoryToAllocation(kernelAllocation, heapInfo.pKernelHeap, kernelIsaSize);
-    }
-
-    return status;
+    return MemoryTransferHelper::transferMemoryToAllocation(hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo, *kernelAllocation),
+                                                            device, kernelAllocation, 0, heapInfo.pKernelHeap,
+                                                            static_cast<size_t>(kernelIsaSize));
 }
 
 void KernelInfo::apply(const DeviceInfoKernelPayloadConstants &constants) {
@@ -461,8 +457,10 @@ void KernelInfo::apply(const DeviceInfoKernelPayloadConstants &constants) {
     }
 
     uint32_t privateMemorySize = 0U;
-    if (this->patchInfo.pAllocateStatelessPrivateSurface) {
-        privateMemorySize = this->patchInfo.pAllocateStatelessPrivateSurface->PerThreadPrivateMemorySize * constants.computeUnitsUsedForScratch * this->getMaxSimdSize();
+    if (patchInfo.pAllocateStatelessPrivateSurface) {
+        privateMemorySize = static_cast<uint32_t>(KernelHelper::getPrivateSurfaceSize(patchInfo.pAllocateStatelessPrivateSurface->PerThreadPrivateMemorySize,
+                                                                                      constants.computeUnitsUsedForScratch, getMaxSimdSize(),
+                                                                                      patchInfo.pAllocateStatelessPrivateSurface->IsSimtThread));
     }
 
     if (privateMemoryStatelessSizeOffset != WorkloadInfo::undefinedOffset) {
@@ -481,7 +479,7 @@ std::string concatenateKernelNames(ArrayRef<KernelInfo *> kernelInfos) {
         if (!semiColonDelimitedKernelNameStr.empty()) {
             semiColonDelimitedKernelNameStr += ';';
         }
-        semiColonDelimitedKernelNameStr += kernelInfo->name;
+        semiColonDelimitedKernelNameStr += kernelInfo->kernelDescriptor.kernelMetadata.kernelName;
     }
 
     return semiColonDelimitedKernelNameStr;

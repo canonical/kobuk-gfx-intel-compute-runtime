@@ -17,6 +17,10 @@ BufferObject *DrmMemoryManager::createBufferObjectInMemoryRegion(Drm *drm, uint6
     return nullptr;
 }
 
+DrmAllocation *DrmMemoryManager::createAllocWithAlignment(const AllocationData &allocationData, size_t size, size_t alignment, size_t alignedSize, uint64_t gpuAddress) {
+    return createAllocWithAlignmentFromUserptr(allocationData, size, alignment, alignedSize, gpuAddress);
+}
+
 GraphicsAllocation *DrmMemoryManager::allocateGraphicsMemoryInDevicePool(const AllocationData &allocationData, AllocationStatus &status) {
     status = AllocationStatus::RetryInNonDevicePool;
     return nullptr;
@@ -33,8 +37,8 @@ void *DrmMemoryManager::lockResourceInLocalMemoryImpl(BufferObject *bo) {
 void DrmMemoryManager::unlockResourceInLocalMemoryImpl(BufferObject *bo) {
 }
 
-bool DrmMemoryManager::copyMemoryToAllocation(GraphicsAllocation *graphicsAllocation, const void *memoryToCopy, size_t sizeToCopy) {
-    return MemoryManager::copyMemoryToAllocation(graphicsAllocation, memoryToCopy, sizeToCopy);
+bool DrmMemoryManager::copyMemoryToAllocation(GraphicsAllocation *graphicsAllocation, size_t destinationOffset, const void *memoryToCopy, size_t sizeToCopy) {
+    return MemoryManager::copyMemoryToAllocation(graphicsAllocation, destinationOffset, memoryToCopy, sizeToCopy);
 }
 
 uint64_t DrmMemoryManager::getLocalMemorySize(uint32_t rootDeviceIndex) {

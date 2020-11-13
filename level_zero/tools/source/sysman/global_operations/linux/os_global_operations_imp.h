@@ -24,19 +24,21 @@ class LinuxGlobalOperationsImp : public OsGlobalOperations, NEO::NonCopyableOrMo
     Device *getDevice() override;
     ze_result_t reset(ze_bool_t force) override;
     ze_result_t scanProcessesState(std::vector<zes_process_state_t> &pProcessList) override;
+    ze_result_t deviceGetState(zes_device_state_t *pState) override;
     LinuxGlobalOperationsImp() = default;
     LinuxGlobalOperationsImp(OsSysman *pOsSysman);
     ~LinuxGlobalOperationsImp() override = default;
 
   protected:
     FsAccess *pFsAccess = nullptr;
+    ProcfsAccess *pProcfsAccess = nullptr;
     SysfsAccess *pSysfsAccess = nullptr;
     LinuxSysmanImp *pLinuxSysmanImp = nullptr;
     Device *pDevice = nullptr;
 
-  private:
-    static const int resetTimeout = 10;
+    int resetTimeout = 10000; // in milliseconds
 
+  private:
     static const std::string deviceDir;
     static const std::string vendorFile;
     static const std::string deviceFile;
@@ -46,6 +48,7 @@ class LinuxGlobalOperationsImp : public OsGlobalOperations, NEO::NonCopyableOrMo
     static const std::string clientsDir;
     static const std::string srcVersionFile;
     static const std::string agamaVersionFile;
+    static const std::string ueventWedgedFile;
 };
 
 } // namespace L0

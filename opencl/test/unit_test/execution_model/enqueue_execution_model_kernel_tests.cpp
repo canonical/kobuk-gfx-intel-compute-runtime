@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/helpers/engine_node_helper.h"
+#include "shared/source/helpers/local_id_gen.h"
 #include "shared/test/unit_test/cmd_parse/hw_parse.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
@@ -13,7 +14,6 @@
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/source/builtin_kernels_simulation/scheduler_simulation.h"
 #include "opencl/source/command_queue/gpgpu_walker.h"
-#include "opencl/source/command_queue/local_id_gen.h"
 #include "opencl/source/device_queue/device_queue_hw.h"
 #include "opencl/source/event/user_event.h"
 #include "opencl/source/helpers/per_thread_data.h"
@@ -73,7 +73,7 @@ HWCMDTEST_P(IGFX_GEN8_CORE, ParentKernelEnqueueTest, givenParentKernelWhenEnqueu
 
     pCmdQ->enqueueKernel(pKernel, 1, globalOffsets, workItems, workItems, 0, nullptr, nullptr);
 
-    if (pKernel->getKernelInfo().name == "kernel_reflection") {
+    if (pKernel->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName == "kernel_reflection") {
         EXPECT_NE(0u, idData[0].getSamplerCount());
         EXPECT_NE(0u, idData[0].getSamplerStatePointer());
     }
@@ -444,7 +444,7 @@ class ParentKernelEnqueueFixture : public ExecutionModelSchedulerTest,
     }
 };
 
-HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedTheDefaultDeviceQueueAndEventPoolIsPatched) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedThenDefaultDeviceQueueAndEventPoolIsPatched) {
 
     if (pClDevice->areOcl21FeaturesSupported()) {
         size_t offset[3] = {0, 0, 0};
@@ -544,7 +544,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, GivenParentKernelWhenEnq
     }
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, ParentKernelEnqueuedToNonBlockedQueueFlushesCSRWithSLM) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedToNonBlockedQueueThenFlushCsrWithSlm) {
 
     if (pClDevice->areOcl21FeaturesSupported()) {
         size_t offset[3] = {0, 0, 0};
@@ -559,7 +559,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, ParentKernelEnqueuedToNo
     }
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, ParentKernelEnqueuedWithSchedulerReturnInstanceRunsSimulation) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedWithSchedulerReturnInstanceThenRunSimulation) {
 
     if (pClDevice->areOcl21FeaturesSupported()) {
 
@@ -611,7 +611,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, givenCsrInBatchingModeWh
     }
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, ParentKernelEnqueueMarksCSRMediaVFEStateDirty) {
+HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelEnqueueFixture, GivenParentKernelWhenEnqueuedThenMarkCsrMediaVfeStateDirty) {
 
     if (pClDevice->areOcl21FeaturesSupported()) {
         size_t offset[3] = {0, 0, 0};

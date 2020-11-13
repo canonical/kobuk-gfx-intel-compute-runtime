@@ -24,6 +24,7 @@
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_execution_environment.h"
+#include "opencl/test/unit_test/mocks/mock_gmm.h"
 #include "test.h"
 
 using namespace NEO;
@@ -1724,6 +1725,11 @@ HWTEST_F(BufferUnmapTest, givenBufferWithSharingHandlerWhenUnmappingThenUseNonBl
     buffer->setSharingHandler(new SharingHandler());
     EXPECT_NE(nullptr, buffer->peekSharingHandler());
 
+    auto gfxAllocation = buffer->getGraphicsAllocation(pDevice->getRootDeviceIndex());
+    for (auto handleId = 0u; handleId < gfxAllocation->getNumGmms(); handleId++) {
+        gfxAllocation->setGmm(new MockGmm(), handleId);
+    }
+
     auto mappedPtr = clEnqueueMapBuffer(&cmdQ, buffer.get(), CL_TRUE, CL_MAP_WRITE, 0, 1, 0, nullptr, nullptr, &retVal);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -1802,6 +1808,16 @@ TEST_F(BufferTransferTests, givenBufferWhenTransferFromHostPtrCalledThenCopyRequ
 }
 
 using MultiRootDeviceBufferTest = MultiRootDeviceFixture;
+
+TEST_F(MultiRootDeviceBufferTest, WhenCleanAllGraphicsAllocationsCalledThenGraphicsAllocationsAreProperlyRemoved) {
+    AllocationInfoType allocationInfo;
+    allocationInfo.resize(3u);
+
+    allocationInfo[1u] = {};
+    allocationInfo[1u].memory = mockMemoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{1u, MemoryConstants::pageSize});
+
+    Buffer::cleanAllGraphicsAllocations(*context, *context->getMemoryManager(), allocationInfo);
+}
 
 TEST_F(MultiRootDeviceBufferTest, WhenBufferIsCreatedThenBufferGraphicsAllocationHasCorrectRootDeviceIndex) {
     cl_int retVal = 0;

@@ -20,6 +20,7 @@
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/helpers/variable_backup.h"
 
+#include "opencl/source/helpers/cl_hw_helper.h"
 #include "opencl/source/helpers/dispatch_info.h"
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/mem_obj/image.h"
@@ -743,20 +744,20 @@ HWTEST_F(HwHelperTest, givenMultiDispatchInfoWhenAskingForAuxTranslationThenChec
 
     DebugManager.flags.ForceAuxTranslationMode.set(static_cast<int32_t>(AuxTranslationMode::Blit));
 
-    EXPECT_FALSE(HwHelperHw<FamilyType>::isBlitAuxTranslationRequired(hwInfo, multiDispatchInfo));
+    EXPECT_FALSE(ClHwHelperHw<FamilyType>::isBlitAuxTranslationRequired(hwInfo, multiDispatchInfo));
 
     multiDispatchInfo.setMemObjsForAuxTranslation(memObjects);
-    EXPECT_FALSE(HwHelperHw<FamilyType>::isBlitAuxTranslationRequired(hwInfo, multiDispatchInfo));
+    EXPECT_FALSE(ClHwHelperHw<FamilyType>::isBlitAuxTranslationRequired(hwInfo, multiDispatchInfo));
 
     memObjects.insert(&buffer);
-    EXPECT_TRUE(HwHelperHw<FamilyType>::isBlitAuxTranslationRequired(hwInfo, multiDispatchInfo));
+    EXPECT_TRUE(ClHwHelperHw<FamilyType>::isBlitAuxTranslationRequired(hwInfo, multiDispatchInfo));
 
     hwInfo.capabilityTable.blitterOperationsSupported = false;
-    EXPECT_FALSE(HwHelperHw<FamilyType>::isBlitAuxTranslationRequired(hwInfo, multiDispatchInfo));
+    EXPECT_FALSE(ClHwHelperHw<FamilyType>::isBlitAuxTranslationRequired(hwInfo, multiDispatchInfo));
 
     hwInfo.capabilityTable.blitterOperationsSupported = true;
     DebugManager.flags.ForceAuxTranslationMode.set(static_cast<int32_t>(AuxTranslationMode::Builtin));
-    EXPECT_FALSE(HwHelperHw<FamilyType>::isBlitAuxTranslationRequired(hwInfo, multiDispatchInfo));
+    EXPECT_FALSE(ClHwHelperHw<FamilyType>::isBlitAuxTranslationRequired(hwInfo, multiDispatchInfo));
 }
 
 HWTEST_F(HwHelperTest, givenDebugVariableSetWhenAskingForAuxTranslationModeThenReturnCorrectValue) {
@@ -908,18 +909,26 @@ HWTEST_F(HwHelperTest, whenGettingIsBlitCopyRequiredForLocalMemoryThenCorrectVal
     HardwareInfo hwInfo = *defaultHwInfo;
     hwInfo.capabilityTable.blitterOperationsSupported = true;
 
+    MockGraphicsAllocation graphicsAllocation;
+    graphicsAllocation.overrideMemoryPool(MemoryPool::LocalMemory);
+
     auto expectedDefaultValue = (helper.getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed);
-    EXPECT_EQ(expectedDefaultValue, helper.isBlitCopyRequiredForLocalMemory(hwInfo));
+    EXPECT_EQ(expectedDefaultValue, helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
 
     DebugManager.flags.ForceLocalMemoryAccessMode.set(0);
-    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo));
+    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
     DebugManager.flags.ForceLocalMemoryAccessMode.set(1);
-    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo));
+    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
 
     DebugManager.flags.ForceLocalMemoryAccessMode.set(3);
-    EXPECT_TRUE(helper.isBlitCopyRequiredForLocalMemory(hwInfo));
+    EXPECT_TRUE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
     hwInfo.capabilityTable.blitterOperationsSupported = false;
-    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo));
+    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
+
+    graphicsAllocation.overrideMemoryPool(MemoryPool::System64KBPages);
+    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
+    hwInfo.capabilityTable.blitterOperationsSupported = true;
+    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
 }
 
 HWTEST_F(HwHelperTest, whenPatchingGlobalBuffersThenDontForceBlitter) {
@@ -954,7 +963,10 @@ HWTEST_F(HwHelperTest, givenVariousDebugKeyValuesWhenGettingLocalMemoryAccessMod
 
 HWTEST2_F(HwHelperTest, givenDefaultHwHelperHwWhenGettingIsBlitCopyRequiredForLocalMemoryThenFalseIsReturned, IsAtMostGen11) {
     auto &helper = HwHelper::get(renderCoreFamily);
-    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(*defaultHwInfo));
+    MockGraphicsAllocation graphicsAllocation;
+    graphicsAllocation.overrideMemoryPool(MemoryPool::LocalMemory);
+
+    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(*defaultHwInfo, graphicsAllocation));
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, HwHelperTest, WhenIsFusedEuDispatchEnabledIsCalledThenFalseIsReturned) {
@@ -1000,13 +1012,26 @@ TEST(HwInfoConfigCommonHelperTest, givenBlitterPreferenceWhenEnablingBlitterOper
 }
 
 HWTEST_F(HwHelperTest, givenHwHelperWhenAskingForIsaSystemMemoryPlacementThenReturnFalseIfLocalMemorySupported) {
+    DebugManagerStateRestore restorer;
     HwHelper &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
 
     hardwareInfo.featureTable.ftrLocalMemory = true;
-    EXPECT_FALSE(hwHelper.useSystemMemoryPlacementForISA(hardwareInfo));
+    auto localMemoryEnabled = hwHelper.getEnableLocalMemory(hardwareInfo);
+    EXPECT_NE(localMemoryEnabled, hwHelper.useSystemMemoryPlacementForISA(hardwareInfo));
 
     hardwareInfo.featureTable.ftrLocalMemory = false;
-    EXPECT_TRUE(hwHelper.useSystemMemoryPlacementForISA(hardwareInfo));
+    localMemoryEnabled = hwHelper.getEnableLocalMemory(hardwareInfo);
+    EXPECT_NE(localMemoryEnabled, hwHelper.useSystemMemoryPlacementForISA(hardwareInfo));
+
+    DebugManager.flags.EnableLocalMemory.set(true);
+    hardwareInfo.featureTable.ftrLocalMemory = false;
+    localMemoryEnabled = hwHelper.getEnableLocalMemory(hardwareInfo);
+    EXPECT_NE(localMemoryEnabled, hwHelper.useSystemMemoryPlacementForISA(hardwareInfo));
+
+    DebugManager.flags.EnableLocalMemory.set(false);
+    hardwareInfo.featureTable.ftrLocalMemory = true;
+    localMemoryEnabled = hwHelper.getEnableLocalMemory(hardwareInfo);
+    EXPECT_NE(localMemoryEnabled, hwHelper.useSystemMemoryPlacementForISA(hardwareInfo));
 }
 
 TEST(HwInfoConfigCommonHelperTest, givenDebugFlagSetWhenEnablingBlitterOperationsSupportThenHonorTheFlag) {

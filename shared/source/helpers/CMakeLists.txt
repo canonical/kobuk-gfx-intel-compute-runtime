@@ -64,11 +64,17 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/kmd_notify_properties.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kmd_notify_properties.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/local_id_gen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/local_id_gen.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/local_id_gen.inl
+    ${CMAKE_CURRENT_SOURCE_DIR}/local_id_gen_avx2.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/local_id_gen_sse4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/non_copyable_or_moveable.h
     ${CMAKE_CURRENT_SOURCE_DIR}/options.h
     ${CMAKE_CURRENT_SOURCE_DIR}/pause_on_gpu_properties.h
     ${CMAKE_CURRENT_SOURCE_DIR}/pipeline_select_args.h
     ${CMAKE_CURRENT_SOURCE_DIR}/pipeline_select_helper.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/populate_factory.h
     ${CMAKE_CURRENT_SOURCE_DIR}/preamble.h
     ${CMAKE_CURRENT_SOURCE_DIR}/preamble_base.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/preamble_bdw_plus.inl
@@ -89,6 +95,8 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/timestamp_packet.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/timestamp_packet.h
     ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/timestamp_packet_extra.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/uint16_avx2.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/uint16_sse4.h
     ${CMAKE_CURRENT_SOURCE_DIR}/vec.h
     ${CMAKE_CURRENT_SOURCE_DIR}/definitions/${BRANCH_DIR_SUFFIX}/hw_cmds.h
     ${CMAKE_CURRENT_SOURCE_DIR}/definitions/pipe_control_args_base.h

@@ -267,7 +267,7 @@ void ModuleTranslationUnit::processDebugData() {
             kernelName = reinterpret_cast<const char *>(ptrOffset(kernelDebugHeader, sizeof(iOpenCL::SKernelDebugDataHeaderIGC)));
 
             auto kernelInfo = programInfo.kernelInfos[i];
-            UNRECOVERABLE_IF(kernelInfo->name.compare(0, kernelInfo->name.size(), kernelName) != 0);
+            UNRECOVERABLE_IF(kernelInfo->kernelDescriptor.kernelMetadata.kernelName.compare(0, kernelInfo->kernelDescriptor.kernelMetadata.kernelName.size(), kernelName) != 0);
 
             kernelDebugData = ptrOffset(kernelName, kernelDebugHeader->KernelNameSize);
 
@@ -418,7 +418,7 @@ void ModuleImp::copyPatchedSegments(const NEO::Linker::PatchableSegments &isaSeg
                 continue;
             }
             auto segmentId = &kernelImmData - &this->kernelImmDatas[0];
-            this->device->getDriverHandle()->getMemoryManager()->copyMemoryToAllocation(kernelImmData->getIsaGraphicsAllocation(),
+            this->device->getDriverHandle()->getMemoryManager()->copyMemoryToAllocation(kernelImmData->getIsaGraphicsAllocation(), 0,
                                                                                         isaSegmentsForPatching[segmentId].hostPointer,
                                                                                         isaSegmentsForPatching[segmentId].segmentSize);
         }
@@ -473,7 +473,7 @@ bool ModuleImp::linkBinary() {
         if (moduleBuildLog) {
             std::vector<std::string> kernelNames;
             for (const auto &kernelInfo : this->translationUnit->programInfo.kernelInfos) {
-                kernelNames.push_back("kernel : " + kernelInfo->name);
+                kernelNames.push_back("kernel : " + kernelInfo->kernelDescriptor.kernelMetadata.kernelName);
             }
             auto error = constructLinkerErrorMessage(unresolvedExternalsInfo, kernelNames);
             moduleBuildLog->appendString(error.c_str(), error.size());

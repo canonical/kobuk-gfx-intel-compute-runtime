@@ -7,6 +7,7 @@
 
 #include "api.h"
 
+#include "shared/source/aub/aub_center.h"
 #include "shared/source/built_ins/built_ins.h"
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
@@ -23,7 +24,6 @@
 
 #include "opencl/source/accelerators/intel_motion_estimation.h"
 #include "opencl/source/api/additional_extensions.h"
-#include "opencl/source/aub/aub_center.h"
 #include "opencl/source/built_ins/vme_builtin.h"
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/command_queue/command_queue.h"
@@ -427,10 +427,14 @@ cl_context CL_API_CALL clCreateContextFromType(const cl_context_properties *prop
         retVal = clGetDeviceIDs(nullptr, deviceType, numDevices, supportedDevs.begin(), nullptr);
         DEBUG_BREAK_IF(retVal != CL_SUCCESS);
 
-        ClDeviceVector allDevs(supportedDevs.begin(), std::min(numDevices, 1u));
-        pContext = Context::create<Context>(properties, allDevs, funcNotify, userData, retVal);
+        if (!DebugManager.flags.EnableMultiRootDeviceContexts.get()) {
+            numDevices = 1u;
+        }
+
+        ClDeviceVector deviceVector(supportedDevs.begin(), numDevices);
+        pContext = Context::create<Context>(properties, deviceVector, funcNotify, userData, retVal);
         if (pContext != nullptr) {
-            gtpinNotifyContextCreate((cl_context)pContext);
+            gtpinNotifyContextCreate(pContext);
         }
     } while (false);
 
@@ -1308,12 +1312,13 @@ cl_program CL_API_CALL clCreateProgramWithSource(cl_context context,
                    "count", count,
                    "strings", strings,
                    "lengths", lengths);
-    retVal = validateObjects(context, count, strings);
+    Context *pContext = nullptr;
+    retVal = validateObjects(WithCastToInternal(context, &pContext), count, strings);
     cl_program program = nullptr;
 
     if (CL_SUCCESS == retVal) {
         program = Program::create(
-            context,
+            pContext,
             count,
             strings,
             lengths,
@@ -1344,16 +1349,32 @@ cl_program CL_API_CALL clCreateProgramWithBinary(cl_context context,
                    "lengths", lengths,
                    "binaries", binaries,
                    "binaryStatus", binaryStatus);
-    retVal = validateObjects(context, deviceList, *deviceList, binaries, *binaries, lengths, *lengths);
+    Context *pContext = nullptr;
+    retVal = validateObjects(WithCastToInternal(context, &pContext), deviceList, numDevices, binaries, lengths);
     cl_program program = nullptr;
+    ClDeviceVector deviceVector;
+
+    if (retVal == CL_SUCCESS) {
+        for (auto i = 0u; i < numDevices; i++) {
+            auto device = castToObject<ClDevice>(deviceList[i]);
+            if (!device || !pContext->isDeviceAssociated(*device)) {
+                retVal = CL_INVALID_DEVICE;
+                break;
+            }
+            if (lengths[i] == 0 || binaries[i] == nullptr) {
+                retVal = CL_INVALID_VALUE;
+                break;
+            }
+            deviceVector.push_back(device);
+        }
+    }
 
     NEO::FileLoggerInstance().dumpBinaryProgram(numDevices, lengths, binaries);
 
     if (CL_SUCCESS == retVal) {
         program = Program::create(
-            context,
-            numDevices,
-            deviceList,
+            pContext,
+            deviceVector,
             lengths,
             binaries,
             binaryStatus,
@@ -1380,10 +1401,11 @@ cl_program CL_API_CALL clCreateProgramWithIL(cl_context context,
                    "length", length);
 
     cl_program program = nullptr;
-    retVal = validateObjects(context, il);
+    Context *pContext = nullptr;
+    retVal = validateObjects(WithCastToInternal(context, &pContext), il);
     if (retVal == CL_SUCCESS) {
-        program = Program::createFromIL(
-            castToObjectOrAbort<Context>(context),
+        program = ProgramFunctions::createFromIL(
+            pContext,
             il,
             length,
             retVal);
@@ -1410,28 +1432,32 @@ cl_program CL_API_CALL clCreateProgramWithBuiltInKernels(cl_context context,
                    "deviceList", deviceList,
                    "kernelNames", kernelNames);
     cl_program program = nullptr;
+    Context *pContext = nullptr;
 
-    retVal = validateObjects(
-        context, deviceList, kernelNames, errcodeRet);
+    retVal = validateObjects(WithCastToInternal(context, &pContext), numDevices,
+                             deviceList, kernelNames, errcodeRet);
 
     if (numDevices == 0) {
         retVal = CL_INVALID_VALUE;
     }
 
     if (retVal == CL_SUCCESS) {
-
-        for (cl_uint i = 0; i < numDevices; i++) {
-            auto pContext = castToObject<Context>(context);
-            auto pDevice = castToObject<ClDevice>(*deviceList);
+        ClDeviceVector deviceVector;
+        for (auto i = 0u; i < numDevices; i++) {
+            auto device = castToObject<ClDevice>(deviceList[i]);
+            if (!device || !pContext->isDeviceAssociated(*device)) {
+                retVal = CL_INVALID_DEVICE;
+                break;
+            }
+            deviceVector.push_back(device);
+        }
+        if (retVal == CL_SUCCESS) {
 
             program = Vme::createBuiltInProgram(
                 *pContext,
-                pDevice->getDevice(),
+                deviceVector,
                 kernelNames,
                 retVal);
-            if (program && retVal == CL_SUCCESS) {
-                break;
-            }
         }
     }
 
@@ -1543,7 +1569,10 @@ cl_program CL_API_CALL clLinkProgram(cl_context context,
         pContext = castToObject<Context>(context);
     }
     if (pContext != nullptr) {
-        program = new Program(*pContext->getDevice(0)->getExecutionEnvironment(), pContext, false, &pContext->getDevice(0)->getDevice());
+
+        ClDeviceVector deviceVector;
+        deviceVector.push_back(pContext->getDevice(0));
+        program = new Program(pContext, false, deviceVector);
         retVal = program->link(numDevices, deviceList, options,
                                numInputPrograms, inputPrograms,
                                funcNotify, userData);
@@ -4025,10 +4054,11 @@ cl_program CL_API_CALL clCreateProgramWithILKHR(cl_context context,
                    "length", length);
 
     cl_program program = nullptr;
-    retVal = validateObjects(context, il);
+    Context *pContext = nullptr;
+    retVal = validateObjects(WithCastToInternal(context, &pContext), il);
     if (retVal == CL_SUCCESS) {
-        program = Program::createFromIL(
-            castToObjectOrAbort<Context>(context),
+        program = ProgramFunctions::createFromIL(
+            pContext,
             il,
             length,
             retVal);
@@ -5515,7 +5545,9 @@ cl_int CL_API_CALL clGetKernelMaxConcurrentWorkGroupCountINTEL(cl_command_queue 
         return retVal;
     }
 
-    *suggestedWorkGroupCount = pKernel->getMaxWorkGroupCount(workDim, localWorkSize);
+    CommandQueue *pCommandQueue = nullptr;
+    WithCastToInternal(commandQueue, &pCommandQueue);
+    *suggestedWorkGroupCount = pKernel->getMaxWorkGroupCount(workDim, localWorkSize, pCommandQueue);
 
     return retVal;
 }
@@ -5553,6 +5585,13 @@ cl_int CL_API_CALL clEnqueueNDCountKernelINTEL(cl_command_queue commandQueue,
         return retVal;
     }
 
+    auto &hardwareInfo = pKernel->getDevice().getHardwareInfo();
+    auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+    if (!hwHelper.isCooperativeDispatchSupported(pCommandQueue->getGpgpuEngine().getEngineType(), hardwareInfo.platform.eProductFamily)) {
+        retVal = CL_INVALID_COMMAND_QUEUE;
+        return retVal;
+    }
+
     size_t globalWorkSize[3];
     for (size_t i = 0; i < workDim; i++) {
         globalWorkSize[i] = workgroupCount[i] * localWorkSize[i];
@@ -5563,7 +5602,7 @@ cl_int CL_API_CALL clEnqueueNDCountKernelINTEL(cl_command_queue commandQueue,
         for (size_t i = 0; i < workDim; i++) {
             requestedNumberOfWorkgroups *= workgroupCount[i];
         }
-        size_t maximalNumberOfWorkgroupsAllowed = pKernel->getMaxWorkGroupCount(workDim, localWorkSize);
+        size_t maximalNumberOfWorkgroupsAllowed = pKernel->getMaxWorkGroupCount(workDim, localWorkSize, pCommandQueue);
         if (requestedNumberOfWorkgroups > maximalNumberOfWorkgroupsAllowed) {
             retVal = CL_INVALID_VALUE;
             return retVal;

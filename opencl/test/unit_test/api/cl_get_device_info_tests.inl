@@ -18,6 +18,8 @@ using clGetDeviceInfoTests = api_tests;
 
 namespace ULT {
 
+static_assert(CL_DEVICE_IL_VERSION == CL_DEVICE_IL_VERSION_KHR, "Param values are different");
+
 TEST_F(clGetDeviceInfoTests, givenNeoDeviceWhenAskedForSliceCountThenNumberOfSlicesIsReturned) {
     cl_device_info paramName = 0;
     size_t paramSize = 0;
@@ -212,7 +214,7 @@ TEST_F(clGetDeviceInfoTests, GivenClDeviceExtensionsParamWhenGettingDeviceInfoTh
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     std::string extensionString(paramValue.get());
-    static const char *const supportedExtensions[] = {
+    std::string supportedExtensions[] = {
         "cl_khr_byte_addressable_store ",
         "cl_khr_fp16 ",
         "cl_khr_global_int32_base_atomics ",
@@ -230,29 +232,17 @@ TEST_F(clGetDeviceInfoTests, GivenClDeviceExtensionsParamWhenGettingDeviceInfoTh
         "cl_khr_throttle_hints ",
         "cl_khr_create_command_queue ",
         "cl_intel_subgroups_char ",
-        "cl_intel_subgroups_long ",
-        "cl_khr_il_program ",
-        "cl_khr_subgroup_extended_types ",
-        "cl_khr_subgroup_non_uniform_vote ",
-        "cl_khr_subgroup_ballot ",
-        "cl_khr_subgroup_non_uniform_arithmetic ",
-        "cl_khr_subgroup_shuffle ",
-        "cl_khr_subgroup_shuffle_relative ",
-        "cl_khr_subgroup_clustered_reduce "};
+        "cl_intel_subgroups_long "
+        "cl_khr_il_program "};
 
-    for (auto extension : supportedExtensions) {
-        auto foundOffset = extensionString.find(extension);
+    for (auto element = 0u; element < sizeof(supportedExtensions) / sizeof(supportedExtensions[0]); element++) {
+        auto foundOffset = extensionString.find(supportedExtensions[element]);
         EXPECT_TRUE(foundOffset != std::string::npos);
     }
 }
 
-TEST_F(clGetDeviceInfoTests, GivenClDeviceIlVersionParamAndOcl21WhenGettingDeviceInfoThenSpirv12IsReturned) {
+TEST_F(clGetDeviceInfoTests, GivenClDeviceIlVersionParamWhenGettingDeviceInfoThenSpirv12IsReturned) {
     size_t paramRetSize = 0;
-
-    ClDevice *pDevice = castToObject<ClDevice>(testedClDevice);
-
-    if (pDevice->areOcl21FeaturesEnabled() == false)
-        return;
 
     cl_int retVal = clGetDeviceInfo(
         testedClDevice,

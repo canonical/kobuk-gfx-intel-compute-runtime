@@ -104,6 +104,10 @@ bool BufferObject::setTiling(uint32_t mode, uint32_t stride) {
     return set_tiling.tiling_mode == mode;
 }
 
+uint32_t BufferObject::getOsContextId(OsContext *osContext) {
+    return perContextVmsUsed ? osContext->getContextId() : 0u;
+}
+
 void BufferObject::fillExecObject(drm_i915_gem_exec_object2 &execObject, OsContext *osContext, uint32_t vmHandleId, uint32_t drmContextId) {
     execObject.handle = this->handle;
     execObject.relocation_count = 0; //No relocations, we are SoftPinning
@@ -111,6 +115,9 @@ void BufferObject::fillExecObject(drm_i915_gem_exec_object2 &execObject, OsConte
     execObject.alignment = 0;
     execObject.offset = this->gpuAddress;
     execObject.flags = EXEC_OBJECT_PINNED | EXEC_OBJECT_SUPPORTS_48B_ADDRESS;
+    if (this->isMarkedForCapture()) {
+        execObject.flags |= EXEC_OBJECT_CAPTURE;
+    }
     execObject.rsvd1 = drmContextId;
     execObject.rsvd2 = 0;
 
@@ -145,26 +152,32 @@ int BufferObject::exec(uint32_t used, size_t startOffset, unsigned int flags, bo
     return err;
 }
 
-void BufferObject::bind(OsContext *osContext, uint32_t vmHandleId) {
-    auto contextId = perContextVmsUsed ? osContext->getContextId() : 0;
+int BufferObject::bind(OsContext *osContext, uint32_t vmHandleId) {
+    int retVal = 0;
+    auto contextId = getOsContextId(osContext);
     if (!this->bindInfo[contextId][vmHandleId]) {
-        auto ret = this->drm->bindBufferObject(osContext, vmHandleId, this);
+        retVal = this->drm->bindBufferObject(osContext, vmHandleId, this);
         auto err = this->drm->getErrno();
-        PRINT_DEBUG_STRING(DebugManager.flags.PrintBOBindingResult.get(), stderr, "bind BO-%d to VM %u, range: %llx - %llx, size: %lld, result: %d, errno: %d(%s)\n", this->handle, vmHandleId, this->gpuAddress, ptrOffset(this->gpuAddress, this->size), this->size, ret, err, strerror(err));
-        UNRECOVERABLE_IF(ret != 0);
-        this->bindInfo[contextId][vmHandleId] = true;
+        PRINT_DEBUG_STRING(DebugManager.flags.PrintBOBindingResult.get(), stderr, "bind BO-%d to VM %u, range: %llx - %llx, size: %lld, result: %d, errno: %d(%s)\n", this->handle, vmHandleId, this->gpuAddress, ptrOffset(this->gpuAddress, this->size), this->size, retVal, err, strerror(err));
+        if (!retVal) {
+            this->bindInfo[contextId][vmHandleId] = true;
+        }
     }
+    return retVal;
 }
 
-void BufferObject::unbind(OsContext *osContext, uint32_t vmHandleId) {
-    auto contextId = perContextVmsUsed ? osContext->getContextId() : 0;
+int BufferObject::unbind(OsContext *osContext, uint32_t vmHandleId) {
+    int retVal = 0;
+    auto contextId = getOsContextId(osContext);
     if (this->bindInfo[contextId][vmHandleId]) {
-        auto ret = this->drm->unbindBufferObject(osContext, vmHandleId, this);
+        retVal = this->drm->unbindBufferObject(osContext, vmHandleId, this);
         auto err = this->drm->getErrno();
-        PRINT_DEBUG_STRING(DebugManager.flags.PrintBOBindingResult.get(), stderr, "unbind BO-%d from VM %u, range: %llx - %llx, size: %lld, result: %d, errno: %d(%s)\n", this->handle, vmHandleId, this->gpuAddress, ptrOffset(this->gpuAddress, this->size), this->size, ret, err, strerror(err));
-        UNRECOVERABLE_IF(ret != 0);
-        this->bindInfo[contextId][vmHandleId] = false;
+        PRINT_DEBUG_STRING(DebugManager.flags.PrintBOBindingResult.get(), stderr, "unbind BO-%d from VM %u, range: %llx - %llx, size: %lld, result: %d, errno: %d(%s)\n", this->handle, vmHandleId, this->gpuAddress, ptrOffset(this->gpuAddress, this->size), this->size, retVal, err, strerror(err));
+        if (!retVal) {
+            this->bindInfo[contextId][vmHandleId] = false;
+        }
     }
+    return retVal;
 }
 
 void BufferObject::printExecutionBuffer(drm_i915_gem_execbuffer2 &execbuf, const size_t &residencyCount, drm_i915_gem_exec_object2 *execObjectsStorage, BufferObject *const residency[]) {
@@ -195,20 +208,43 @@ void BufferObject::printExecutionBuffer(drm_i915_gem_execbuffer2 &execbuf, const
     std::cout << logger.str() << std::endl;
 }
 
-int BufferObject::pin(BufferObject *const boToPin[], size_t numberOfBos, OsContext *osContext, uint32_t vmHandleId, uint32_t drmContextId) {
+int bindBOsWithinContext(BufferObject *const boToPin[], size_t numberOfBos, OsContext *osContext, uint32_t vmHandleId) {
     auto retVal = 0;
-    if (this->drm->isBindAvailable()) {
-        for (auto drmIterator = 0u; drmIterator < osContext->getDeviceBitfield().size(); drmIterator++) {
-            if (osContext->getDeviceBitfield().test(drmIterator)) {
-                for (size_t i = 0; i < numberOfBos; i++) {
-                    boToPin[i]->bind(osContext, drmIterator);
-                }
+
+    for (auto drmIterator = 0u; drmIterator < osContext->getDeviceBitfield().size(); drmIterator++) {
+        if (osContext->getDeviceBitfield().test(drmIterator)) {
+            for (size_t i = 0; i < numberOfBos; i++) {
+                retVal |= boToPin[i]->bind(osContext, drmIterator);
             }
         }
+    }
+
+    return retVal;
+}
+
+int BufferObject::pin(BufferObject *const boToPin[], size_t numberOfBos, OsContext *osContext, uint32_t vmHandleId, uint32_t drmContextId) {
+    auto retVal = 0;
+
+    if (this->drm->isBindAvailable()) {
+        retVal = bindBOsWithinContext(boToPin, numberOfBos, osContext, vmHandleId);
     } else {
         StackVec<drm_i915_gem_exec_object2, maxFragmentsCount + 1> execObject(numberOfBos + 1);
         retVal = this->exec(4u, 0u, 0u, false, osContext, vmHandleId, drmContextId, boToPin, numberOfBos, &execObject[0]);
     }
+
+    return retVal;
+}
+
+int BufferObject::validateHostPtr(BufferObject *const boToPin[], size_t numberOfBos, OsContext *osContext, uint32_t vmHandleId, uint32_t drmContextId) {
+    auto retVal = 0;
+
+    if (osContext->isDirectSubmissionActive()) {
+        retVal = bindBOsWithinContext(boToPin, numberOfBos, osContext, vmHandleId);
+    } else {
+        StackVec<drm_i915_gem_exec_object2, maxFragmentsCount + 1> execObject(numberOfBos + 1);
+        retVal = this->exec(4u, 0u, 0u, false, osContext, vmHandleId, drmContextId, boToPin, numberOfBos, &execObject[0]);
+    }
+
     return retVal;
 }
 

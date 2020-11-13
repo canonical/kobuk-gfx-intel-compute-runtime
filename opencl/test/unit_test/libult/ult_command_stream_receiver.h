@@ -29,8 +29,10 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass = CommandStreamReceiverHw<GfxFamily>;
 
   public:
+    using BaseClass::blitterDirectSubmission;
     using BaseClass::checkPlatformSupportsGpuIdleImplicitFlush;
     using BaseClass::checkPlatformSupportsNewResourceImplicitFlush;
+    using BaseClass::directSubmission;
     using BaseClass::dshState;
     using BaseClass::getCmdSizeForPrologue;
     using BaseClass::getScratchPatchAddress;
@@ -244,6 +246,11 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         return blitterDirectSubmissionAvailable;
     }
 
+    void ensureCommandBufferAllocation(LinearStream &commandStream, size_t minimumRequiredSize, size_t additionalAllocationSize) override {
+        ensureCommandBufferAllocationCalled++;
+        BaseClass::ensureCommandBufferAllocation(commandStream, minimumRequiredSize, additionalAllocationSize);
+    }
+
     std::atomic<uint32_t> recursiveLockCounter;
     bool createPageTableManagerCalled = false;
     bool recordFlusheBatchBuffer = false;
@@ -264,5 +271,6 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     bool multiOsContextCapable = false;
     bool directSubmissionAvailable = false;
     bool blitterDirectSubmissionAvailable = false;
+    int ensureCommandBufferAllocationCalled = 0;
 };
 } // namespace NEO

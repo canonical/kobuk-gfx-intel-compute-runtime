@@ -10,6 +10,7 @@
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/event/user_event.h"
+#include "opencl/source/helpers/cl_blit_properties.h"
 #include "opencl/test/unit_test/command_stream/command_stream_receiver_hw_fixture.h"
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
@@ -222,8 +223,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenNoBlitterOverrideWhenBlitterNotSuppo
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = true;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
+    EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenNoBlitterOverrideWhenBlitterSupportedThenExpectTrueReturned) {
@@ -233,8 +236,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenNoBlitterOverrideWhenBlitterSupporte
     properties.engineSupported = true;
     properties.submitOnInit = true;
     bool startOnInit = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
+    EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenBlitterOverrideEnableWhenBlitterNotSupportedThenExpectTrueReturned) {
@@ -246,8 +251,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenBlitterOverrideEnableWhenBlitterNotS
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
+    EXPECT_TRUE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenBlitterOverrideEnableAndNoStartWhenBlitterNotSupportedThenExpectTrueReturnedStartOnInitSetToTrue) {
@@ -259,8 +266,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenBlitterOverrideEnableAndNoStartWhenB
     properties.engineSupported = false;
     properties.submitOnInit = true;
     bool startOnInit = true;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
+    EXPECT_TRUE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenBlitterOverrideDisableWhenBlitterSupportedThenExpectFalseReturned) {
@@ -272,8 +281,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenBlitterOverrideDisableWhenBlitterSup
     properties.engineSupported = true;
     properties.submitOnInit = false;
     bool startOnInit = true;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
+    EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenNoRenderOverrideWhenRenderNotSupportedThenExpectFalseReturned) {
@@ -283,8 +294,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenNoRenderOverrideWhenRenderNotSupport
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = true;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
+    EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenNoRenderOverrideWhenRenderSupportedThenExpectTrueReturned) {
@@ -294,8 +307,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenNoRenderOverrideWhenRenderSupportedT
     properties.engineSupported = true;
     properties.submitOnInit = true;
     bool startOnInit = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
+    EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenRenderOverrideEnableWhenRenderNotSupportedThenExpectTrueReturned) {
@@ -307,8 +322,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenRenderOverrideEnableWhenRenderNotSup
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
+    EXPECT_TRUE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenRenderOverrideEnableAndNoStartWhenRenderNotSupportedThenExpectTrueReturnedAndStartOnInitSetFalse) {
@@ -320,8 +337,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenRenderOverrideEnableAndNoStartWhenRe
     properties.engineSupported = false;
     properties.submitOnInit = true;
     bool startOnInit = true;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
+    EXPECT_TRUE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenRenderOverrideDisableWhenRenderSupportedThenExpectFalseReturned) {
@@ -333,8 +352,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenRenderOverrideDisableWhenRenderSuppo
     properties.engineSupported = true;
     properties.submitOnInit = false;
     bool startOnInit = true;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
+    EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenNoComputeOverrideWhenComputeNotSupportedThenExpectFalseReturned) {
@@ -344,8 +365,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenNoComputeOverrideWhenComputeNotSuppo
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = true;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
+    EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenNoComputeOverrideWhenComputeSupportedThenExpectTrueReturned) {
@@ -355,8 +378,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenNoComputeOverrideWhenComputeSupporte
     properties.engineSupported = true;
     properties.submitOnInit = true;
     bool startOnInit = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
+    EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenComputeOverrideEnableWhenComputeNotSupportedThenExpectTrueReturned) {
@@ -368,8 +393,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenComputeOverrideEnableWhenComputeNotS
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
+    EXPECT_TRUE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenComputeOverrideEnableAndNoStartWhenComputeNotSupportedThenExpectTrueReturnedAndStartOnInitSetToFalse) {
@@ -381,8 +408,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenComputeOverrideEnableAndNoStartWhenC
     properties.engineSupported = false;
     properties.submitOnInit = true;
     bool startOnInit = true;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
+    EXPECT_TRUE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenComputeOverrideDisableWhenComputeSupportedThenExpectFalseReturned) {
@@ -394,8 +423,10 @@ HWTEST_F(UltCommandStreamReceiverTest, givenComputeOverrideDisableWhenComputeSup
     properties.engineSupported = true;
     properties.submitOnInit = false;
     bool startOnInit = true;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit));
+    bool startInContext = false;
+    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
+    EXPECT_FALSE(startInContext);
 }
 
 typedef UltCommandStreamReceiverTest CommandStreamReceiverFlushTests;
@@ -574,7 +605,7 @@ HWTEST_F(BcsTests, whenAskingForCmdSizeForMiFlushDwWithMemoryWriteThenReturnCorr
     EXPECT_EQ(miFlushDwSize + additionalSize, totalSize);
 }
 
-HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenExstimatingCommandsSizeThenCalculateForAllAttachedProperites) {
+HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenEstimatingCommandsSizeThenCalculateForAllAttachedProperites) {
     const auto max2DBlitSize = BlitterConstants::maxBlitWidth * BlitterConstants::maxBlitHeight;
     const uint32_t numberOfBlts = 3;
     const size_t bltSize = (3 * max2DBlitSize);
@@ -598,12 +629,41 @@ HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenExstimatingCommandsSizeThenCa
     expectedAlignedSize = alignUp(expectedAlignedSize, MemoryConstants::cacheLineSize);
 
     auto alignedEstimatedSize = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
-        blitPropertiesContainer, false, false, pClDevice->getRootDeviceEnvironment());
+        blitPropertiesContainer, false, false, false, pClDevice->getRootDeviceEnvironment());
 
     EXPECT_EQ(expectedAlignedSize, alignedEstimatedSize);
 }
 
-HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenExstimatingCommandsSizeForWriteReadBufferRectThenCalculateForAllAttachedProperites) {
+HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenDirectsubmissionEnabledEstimatingCommandsSizeThenCalculateForAllAttachedProperites) {
+    const auto max2DBlitSize = BlitterConstants::maxBlitWidth * BlitterConstants::maxBlitHeight;
+    const uint32_t numberOfBlts = 3;
+    const size_t bltSize = (3 * max2DBlitSize);
+    const uint32_t numberOfBlitOperations = 4;
+
+    auto baseSize = EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite() + sizeof(typename FamilyType::MI_BATCH_BUFFER_START);
+    constexpr size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+    auto expectedBlitInstructionsSize = cmdsSizePerBlit * numberOfBlts;
+
+    auto expectedAlignedSize = baseSize + MemorySynchronizationCommands<FamilyType>::getSizeForAdditonalSynchronization(pDevice->getHardwareInfo());
+
+    BlitPropertiesContainer blitPropertiesContainer;
+    for (uint32_t i = 0; i < numberOfBlitOperations; i++) {
+        BlitProperties blitProperties;
+        blitProperties.copySize = {bltSize, 1, 1};
+        blitPropertiesContainer.push_back(blitProperties);
+
+        expectedAlignedSize += expectedBlitInstructionsSize;
+    }
+
+    expectedAlignedSize = alignUp(expectedAlignedSize, MemoryConstants::cacheLineSize);
+
+    auto alignedEstimatedSize = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
+        blitPropertiesContainer, false, false, true, pClDevice->getRootDeviceEnvironment());
+
+    EXPECT_EQ(expectedAlignedSize, alignedEstimatedSize);
+}
+
+HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenEstimatingCommandsSizeForWriteReadBufferRectThenCalculateForAllAttachedProperites) {
     constexpr auto max2DBlitSize = BlitterConstants::maxBlitWidth * BlitterConstants::maxBlitHeight;
     const Vec3<size_t> bltSize = {(3 * max2DBlitSize), 4, 2};
     const size_t numberOfBlts = 3 * bltSize.y * bltSize.z;
@@ -627,7 +687,36 @@ HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenExstimatingCommandsSizeForWri
     expectedAlignedSize = alignUp(expectedAlignedSize, MemoryConstants::cacheLineSize);
 
     auto alignedEstimatedSize = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
-        blitPropertiesContainer, false, false, pClDevice->getRootDeviceEnvironment());
+        blitPropertiesContainer, false, false, false, pClDevice->getRootDeviceEnvironment());
+
+    EXPECT_EQ(expectedAlignedSize, alignedEstimatedSize);
+}
+
+HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenDirectSubmissionEnabledEstimatingCommandsSizeForWriteReadBufferRectThenCalculateForAllAttachedProperites) {
+    constexpr auto max2DBlitSize = BlitterConstants::maxBlitWidth * BlitterConstants::maxBlitHeight;
+    const Vec3<size_t> bltSize = {(3 * max2DBlitSize), 4, 2};
+    const size_t numberOfBlts = 3 * bltSize.y * bltSize.z;
+    const size_t numberOfBlitOperations = 4 * bltSize.y * bltSize.z;
+    const size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+
+    auto baseSize = EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite() + sizeof(typename FamilyType::MI_BATCH_BUFFER_START);
+    auto expectedBlitInstructionsSize = cmdsSizePerBlit * numberOfBlts;
+
+    auto expectedAlignedSize = baseSize + MemorySynchronizationCommands<FamilyType>::getSizeForAdditonalSynchronization(pDevice->getHardwareInfo());
+
+    BlitPropertiesContainer blitPropertiesContainer;
+    for (uint32_t i = 0; i < numberOfBlitOperations; i++) {
+        BlitProperties blitProperties;
+        blitProperties.copySize = bltSize;
+        blitPropertiesContainer.push_back(blitProperties);
+
+        expectedAlignedSize += expectedBlitInstructionsSize;
+    }
+
+    expectedAlignedSize = alignUp(expectedAlignedSize, MemoryConstants::cacheLineSize);
+
+    auto alignedEstimatedSize = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
+        blitPropertiesContainer, false, false, true, pClDevice->getRootDeviceEnvironment());
 
     EXPECT_EQ(expectedAlignedSize, alignedEstimatedSize);
 }
@@ -645,6 +734,20 @@ HWTEST_F(BcsTests, givenTimestampPacketWriteRequestWhenEstimatingSizeForCommands
 
     EXPECT_EQ(expectedSizeWithTimestampPacketWrite, estimatedSizeWithTimestampPacketWrite);
     EXPECT_EQ(expectedSizeWithoutTimestampPacketWrite, estimatedSizeWithoutTimestampPacketWrite);
+}
+
+HWTEST_F(BcsTests, givenTimestampPacketWriteRequestWhenEstimatingSizeForCommandsWithProfilingThenAddMiFlushDw) {
+    size_t expectedBaseSize = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK) + EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+
+    auto expectedSizeWithTimestampPacketWriteAndProfiling = expectedBaseSize + 4 * sizeof(typename FamilyType::MI_STORE_REGISTER_MEM);
+
+    auto estimatedSizeWithTimestampPacketWrite = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
+        {1, 1, 1}, csrDependencies, true, false, pClDevice->getRootDeviceEnvironment());
+    auto estimatedSizeWithTimestampPacketWriteAndProfiling = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
+        {1, 1, 1}, csrDependencies, true, true, pClDevice->getRootDeviceEnvironment());
+
+    EXPECT_EQ(expectedSizeWithTimestampPacketWriteAndProfiling, estimatedSizeWithTimestampPacketWriteAndProfiling);
+    EXPECT_EQ(expectedBaseSize, estimatedSizeWithTimestampPacketWrite);
 }
 
 HWTEST_F(BcsTests, givenBltSizeAndCsrDependenciesWhenEstimatingCommandSizeThenAddAllRequiredCommands) {
@@ -770,6 +873,33 @@ HWTEST_F(BcsTests, givenBltSizeWithLeftoverWhenDispatchedThenProgramAllRequiredC
     while (cmdIterator != cmdList.end()) {
         EXPECT_NE(nullptr, genCmdCast<typename FamilyType::MI_NOOP *>(*(cmdIterator++)));
     }
+}
+HWTEST_F(BcsTests, givenCommandTypeWhenObtainBlitDirectionIsCalledThenReturnCorrectBlitDirection) {
+
+    std::array<std::pair<uint32_t, BlitterConstants::BlitDirection>, 9> testParams{
+        std::make_pair(CL_COMMAND_WRITE_BUFFER, BlitterConstants::BlitDirection::HostPtrToBuffer),
+        std::make_pair(CL_COMMAND_WRITE_BUFFER_RECT, BlitterConstants::BlitDirection::HostPtrToBuffer),
+        std::make_pair(CL_COMMAND_READ_BUFFER, BlitterConstants::BlitDirection::BufferToHostPtr),
+        std::make_pair(CL_COMMAND_READ_BUFFER_RECT, BlitterConstants::BlitDirection::BufferToHostPtr),
+        std::make_pair(CL_COMMAND_COPY_BUFFER_RECT, BlitterConstants::BlitDirection::BufferToBuffer),
+        std::make_pair(CL_COMMAND_SVM_MEMCPY, BlitterConstants::BlitDirection::BufferToBuffer),
+        std::make_pair(CL_COMMAND_WRITE_IMAGE, BlitterConstants::BlitDirection::HostPtrToImage),
+        std::make_pair(CL_COMMAND_READ_IMAGE, BlitterConstants::BlitDirection::ImageToHostPtr),
+        std::make_pair(CL_COMMAND_COPY_BUFFER, BlitterConstants::BlitDirection::BufferToBuffer)};
+
+    for (const auto &params : testParams) {
+        uint32_t commandType;
+        BlitterConstants::BlitDirection expectedBlitDirection;
+        std::tie(commandType, expectedBlitDirection) = params;
+
+        auto blitDirection = ClBlitProperties::obtainBlitDirection(commandType);
+        EXPECT_EQ(expectedBlitDirection, blitDirection);
+    }
+}
+
+HWTEST_F(BcsTests, givenWrongCommandTypeWhenObtainBlitDirectionIsCalledThenExpectThrow) {
+    uint32_t wrongCommandType = CL_COMMAND_COPY_IMAGE;
+    EXPECT_THROW(ClBlitProperties::obtainBlitDirection(wrongCommandType), std::exception);
 }
 
 struct BcsTestParam {

@@ -12,6 +12,8 @@
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/hw_info_config.h"
 
+#include <iomanip>
+
 namespace NEO {
 
 static const char *spirvWithVersion = "SPIR-V_1.2 ";
@@ -23,7 +25,6 @@ void Device::initializeCaps() {
 
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
 
-    deviceInfo.ilVersion = "";
     bool ocl21FeaturesEnabled = hwInfo.capabilityTable.supportsOcl21Features;
     if (DebugManager.flags.ForceOCLVersion.get() != 0) {
         ocl21FeaturesEnabled = (DebugManager.flags.ForceOCLVersion.get() == 21);
@@ -32,7 +33,6 @@ void Device::initializeCaps() {
         ocl21FeaturesEnabled = DebugManager.flags.ForceOCL21FeaturesSupport.get();
     }
     if (ocl21FeaturesEnabled) {
-        deviceInfo.ilVersion = spirvWithVersion;
         addressing32bitAllowed = false;
     }
 
@@ -42,6 +42,7 @@ void Device::initializeCaps() {
     deviceInfo.maxParameterSize = 2048;
 
     deviceInfo.addressBits = 64;
+    deviceInfo.ilVersion = spirvWithVersion;
 
     //copy system info to prevent misaligned reads
     const auto systemInfo = hwInfo.gtSystemInfo;
@@ -119,6 +120,13 @@ void Device::initializeCaps() {
     if (DebugManager.flags.EnableSharedSystemUsmSupport.get() != -1) {
         deviceInfo.sharedSystemAllocationsSupport = DebugManager.flags.EnableSharedSystemUsmSupport.get();
     }
+
+    std::stringstream deviceName;
+
+    deviceName << this->getDeviceName(hwInfo);
+    deviceName << " [0x" << std::hex << std::setw(4) << std::setfill('0') << hwInfo.platform.usDeviceID << "]";
+
+    deviceInfo.name = deviceName.str();
 }
 
 } // namespace NEO

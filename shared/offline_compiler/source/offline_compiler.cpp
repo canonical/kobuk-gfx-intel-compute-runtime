@@ -176,6 +176,8 @@ int OfflineCompiler::buildSourceCode() {
                                                      nullptr, 0);
 
         } else {
+            storeBinary(irBinary, irBinarySize, sourceCode.c_str(), sourceCode.size());
+            isSpirV = inputFileSpirV;
             auto igcSrc = CIF::Builtins::CreateConstBuffer(igcMain.get(), sourceCode.c_str(), sourceCode.size());
             auto igcOptions = CIF::Builtins::CreateConstBuffer(igcMain.get(), options.c_str(), options.size());
             auto igcInternalOptions = CIF::Builtins::CreateConstBuffer(igcMain.get(), internalOptions.c_str(), internalOptions.size());
@@ -738,9 +740,9 @@ Usage: ocloc [compile] -file <filename> -device <device_type> [-output <filename
 
   -options <options>            Optional OpenCL C compilation options
                                 as defined by OpenCL specification.
-                                Also you may use here special options for Vector Compute:
-                                -vc-codegen <vc options> to compile from SPIRV with VC extensions
-                                -cmc <cm-options> to compile from CM sources
+                                Special options for Vector Compute:
+                                -vc-codegen <vc options> compile from SPIRV
+                                -cmc <cm-options> compile from CM sources
 
   -32                           Forces target architecture to 32-bit pointers.
                                 Default pointer size is inherited from
@@ -756,6 +758,8 @@ Usage: ocloc [compile] -file <filename> -device <device_type> [-output <filename
                                 as defined by compilers used underneath.
                                 Check intel-graphics-compiler (IGC) project
                                 for details on available internal options.
+                                You also may provide explicit -help to inquire
+                                information about option, mentioned in -options
 
   -llvm_text                    Forces intermediate representation (IR) format
                                 to human-readable LLVM IR (.ll).

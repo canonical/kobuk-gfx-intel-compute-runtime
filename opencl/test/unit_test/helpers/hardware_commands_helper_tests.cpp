@@ -68,7 +68,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenProgramInterfaceDescriptor
     ASSERT_NE(nullptr, dstImage.get());
 
     auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyImageToImage3d,
-                                                                            cmdQ.getDevice());
+                                                                            cmdQ.getClDevice());
     ASSERT_NE(nullptr, &builder);
 
     BuiltinOpParams dc;
@@ -141,7 +141,7 @@ HWTEST_F(HardwareCommandsTest, WhenCrossThreadDataIsCreatedThenOnlyRequiredSpace
     ASSERT_NE(nullptr, dstImage.get());
 
     auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyImageToImage3d,
-                                                                            cmdQ.getDevice());
+                                                                            cmdQ.getClDevice());
     ASSERT_NE(nullptr, &builder);
 
     BuiltinOpParams dc;
@@ -177,7 +177,7 @@ HWTEST_F(HardwareCommandsTest, givenSendCrossThreadDataWhenWhenAddPatchInfoComme
 
     MockContext context;
 
-    MockProgram program(*pDevice->getExecutionEnvironment(), &context, false, pDevice);
+    MockProgram program(&context, false, toClDeviceVector(*pClDevice));
     auto kernelInfo = std::make_unique<KernelInfo>();
 
     std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *kernelInfo, *pClDevice));
@@ -243,7 +243,7 @@ HWTEST_F(HardwareCommandsTest, givenSendCrossThreadDataWhenWhenAddPatchInfoComme
 
     MockContext context;
 
-    MockProgram program(*pDevice->getExecutionEnvironment(), &context, false, pDevice);
+    MockProgram program(&context, false, toClDeviceVector(*pClDevice));
     auto kernelInfo = std::make_unique<KernelInfo>();
 
     std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *kernelInfo, *pClDevice));
@@ -290,7 +290,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenAllocatingIndirectStateRes
     ASSERT_NE(nullptr, dstImage.get());
 
     auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyImageToImage3d,
-                                                                            cmdQ.getDevice());
+                                                                            cmdQ.getClDevice());
     ASSERT_NE(nullptr, &builder);
 
     BuiltinOpParams dc;
@@ -405,7 +405,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, givenKernelWithFourBindingTabl
         true);
 
     auto interfaceDescriptor = reinterpret_cast<INTERFACE_DESCRIPTOR_DATA *>(dsh.getCpuBase());
-    if (HardwareCommandsHelper<FamilyType>::doBindingTablePrefetch()) {
+    if (EncodeSurfaceState<FamilyType>::doBindingTablePrefetch()) {
         EXPECT_EQ(expectedBindingTableCount, interfaceDescriptor->getBindingTableEntryCount());
     } else {
         EXPECT_EQ(0u, interfaceDescriptor->getBindingTableEntryCount());
@@ -493,7 +493,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, givenKernelWith100BindingTable
         true);
 
     auto interfaceDescriptor = reinterpret_cast<INTERFACE_DESCRIPTOR_DATA *>(dsh.getCpuBase());
-    if (HardwareCommandsHelper<FamilyType>::doBindingTablePrefetch()) {
+    if (EncodeSurfaceState<FamilyType>::doBindingTablePrefetch()) {
         EXPECT_EQ(31u, interfaceDescriptor->getBindingTableEntryCount());
     } else {
         EXPECT_EQ(0u, interfaceDescriptor->getBindingTableEntryCount());
@@ -509,7 +509,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, whenSendingIndirectStateThenKe
     std::unique_ptr<Image> img(Image2dHelper<>::create(pContext));
 
     auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyImageToImage3d,
-                                                                            cmdQ.getDevice());
+                                                                            cmdQ.getClDevice());
 
     BuiltinOpParams dc;
     dc.srcMemObj = img.get();
@@ -592,7 +592,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenSendingIndirectStateThenBi
     ASSERT_NE(nullptr, dstImage.get());
 
     auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::CopyBufferToImage3d,
-                                                                            cmdQ.getDevice());
+                                                                            cmdQ.getClDevice());
     ASSERT_NE(nullptr, &builder);
 
     BuiltinOpParams dc;
@@ -711,7 +711,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenGettingBindingTableStateTh
 
     // create program with valid context
     MockContext context;
-    MockProgram program(*pDevice->getExecutionEnvironment(), &context, false, pDevice);
+    MockProgram program(&context, false, toClDeviceVector(*pClDevice));
 
     // setup global memory
     char globalBuffer[16];
@@ -833,13 +833,12 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenGettingBindingTableStateTh
 }
 
 HWTEST_F(HardwareCommandsTest, GivenBuffersNotRequiringSshWhenSettingBindingTableStatesForKernelThenSshIsNotUsed) {
-
     // define kernel info
     auto pKernelInfo = std::make_unique<KernelInfo>();
 
     // create program with valid context
     MockContext context;
-    MockProgram program(*pDevice->getExecutionEnvironment(), &context, false, pDevice);
+    MockProgram program(&context, false, toClDeviceVector(*pClDevice));
 
     // create kernel
     MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
@@ -889,13 +888,12 @@ HWTEST_F(HardwareCommandsTest, GivenBuffersNotRequiringSshWhenSettingBindingTabl
 }
 
 HWTEST_F(HardwareCommandsTest, GivenZeroSurfaceStatesWhenSettingBindingTableStatesThenPointerIsZero) {
-
     // define kernel info
     auto pKernelInfo = std::make_unique<KernelInfo>();
 
     // create program with valid context
     MockContext context;
-    MockProgram program(*pDevice->getExecutionEnvironment(), &context, false, pDevice);
+    MockProgram program(&context, false, toClDeviceVector(*pClDevice));
 
     // create kernel
     MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);

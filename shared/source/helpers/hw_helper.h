@@ -6,14 +6,13 @@
  */
 
 #pragma once
+#include "shared/source/aub_mem_dump/aub_mem_dump.h"
 #include "shared/source/built_ins/sip.h"
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/commands/bxml_generator_glue.h"
 #include "shared/source/helpers/aux_translation.h"
 #include "shared/source/helpers/engine_node_helper.h"
-
-#include "opencl/source/aub_mem_dump/aub_mem_dump.h"
-#include "opencl/source/mem_obj/buffer.h"
+#include "shared/source/utilities/stackvec.h"
 
 #include "hw_cmds.h"
 
@@ -26,8 +25,8 @@ class GmmHelper;
 class GraphicsAllocation;
 struct AllocationData;
 struct AllocationProperties;
+struct EngineControl;
 struct HardwareCapabilities;
-struct KernelInfo;
 struct RootDeviceEnvironment;
 struct PipeControlArgs;
 
@@ -70,7 +69,7 @@ class HwHelper {
     virtual bool obtainBlitterPreference(const HardwareInfo &hwInfo) const = 0;
     virtual bool checkResourceCompatibility(GraphicsAllocation &graphicsAllocation) = 0;
     virtual bool allowRenderCompression(const HardwareInfo &hwInfo) const = 0;
-    virtual bool isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo) const = 0;
+    virtual bool isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo, const GraphicsAllocation &allocation) const = 0;
     virtual bool forceBlitterUseForGlobalBuffers(const HardwareInfo &hwInfo, GraphicsAllocation *allocation) const = 0;
     virtual LocalMemoryAccessMode getLocalMemoryAccessMode(const HardwareInfo &hwInfo) const = 0;
     static bool renderCompressedBuffersSupported(const HardwareInfo &hwInfo);
@@ -100,7 +99,6 @@ class HwHelper {
     virtual uint32_t getMaxThreadsForWorkgroup(const HardwareInfo &hwInfo, uint32_t maxNumEUsPerSubSlice) const;
     virtual uint32_t getMetricsLibraryGenId() const = 0;
     virtual uint32_t getMocsIndex(const GmmHelper &gmmHelper, bool l3enabled, bool l1enabled) const = 0;
-    virtual bool requiresAuxResolves(const KernelInfo &kernelInfo) const = 0;
     virtual bool tilingAllowed(bool isSharedContext, bool isImage1d, bool forceLinearStorage) = 0;
     virtual uint32_t getBarriersCountFromHasBarriers(uint32_t hasBarriers) = 0;
     virtual uint32_t calculateAvailableThreadCount(PRODUCT_FAMILY family, uint32_t grfCount, uint32_t euCount,
@@ -109,6 +107,7 @@ class HwHelper {
     virtual uint32_t computeSlmValues(uint32_t slmSize) = 0;
 
     virtual bool isForceEmuInt32DivRemSPWARequired(const HardwareInfo &hwInfo) = 0;
+    virtual bool isWaDisableRccRhwoOptimizationRequired() const = 0;
     virtual uint32_t getMinimalSIMDSize() = 0;
     virtual uint32_t getHwRevIdFromStepping(uint32_t stepping, const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getSteppingFromHwRevId(uint32_t hwRevId, const HardwareInfo &hwInfo) const = 0;
@@ -127,6 +126,7 @@ class HwHelper {
     virtual bool useOnlyGlobalTimestamps() const = 0;
     virtual bool useSystemMemoryPlacementForISA(const HardwareInfo &hwInfo) const = 0;
     virtual bool packedFormatsSupported() const = 0;
+    virtual bool isCooperativeDispatchSupported(const aub_stream::EngineType engine, const PRODUCT_FAMILY productFamily) const = 0;
 
     static uint32_t getSubDevicesCount(const HardwareInfo *pHwInfo);
     static uint32_t getEnginesCount(const HardwareInfo &hwInfo);
@@ -134,7 +134,6 @@ class HwHelper {
 
   protected:
     virtual LocalMemoryAccessMode getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const = 0;
-    virtual bool hasStatelessAccessToBuffer(const KernelInfo &kernelInfo) const = 0;
 
     HwHelper() = default;
 };
@@ -252,8 +251,6 @@ class HwHelperHw : public HwHelper {
 
     uint32_t getMocsIndex(const GmmHelper &gmmHelper, bool l3enabled, bool l1enabled) const override;
 
-    bool requiresAuxResolves(const KernelInfo &kernelInfo) const override;
-
     bool tilingAllowed(bool isSharedContext, bool isImage1d, bool forceLinearStorage) override;
 
     uint32_t getBarriersCountFromHasBarriers(uint32_t hasBarriers) override;
@@ -265,8 +262,6 @@ class HwHelperHw : public HwHelper {
     uint32_t computeSlmValues(uint32_t slmSize) override;
 
     static AuxTranslationMode getAuxTranslationMode();
-
-    static bool isBlitAuxTranslationRequired(const HardwareInfo &hwInfo, const MultiDispatchInfo &multiDispatchInfo);
 
     uint32_t getHwRevIdFromStepping(uint32_t stepping, const HardwareInfo &hwInfo) const override;
 
@@ -284,6 +279,8 @@ class HwHelperHw : public HwHelper {
 
     bool isForceEmuInt32DivRemSPWARequired(const HardwareInfo &hwInfo) override;
 
+    bool isWaDisableRccRhwoOptimizationRequired() const override;
+
     uint32_t getMinimalSIMDSize() override;
 
     uint64_t getGpuTimeStampInNS(uint64_t timeStamp, double frequency) const override;
@@ -296,7 +293,7 @@ class HwHelperHw : public HwHelper {
 
     bool allowRenderCompression(const HardwareInfo &hwInfo) const override;
 
-    bool isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo) const override;
+    bool isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo, const GraphicsAllocation &allocation) const override;
 
     bool forceBlitterUseForGlobalBuffers(const HardwareInfo &hwInfo, GraphicsAllocation *allocation) const override;
 
@@ -312,9 +309,10 @@ class HwHelperHw : public HwHelper {
 
     bool packedFormatsSupported() const override;
 
+    bool isCooperativeDispatchSupported(const aub_stream::EngineType engine, const PRODUCT_FAMILY productFamily) const override;
+
   protected:
     LocalMemoryAccessMode getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const override;
-    bool hasStatelessAccessToBuffer(const KernelInfo &kernelInfo) const override;
 
     static const AuxTranslationMode defaultAuxTranslationMode;
     HwHelperHw() = default;

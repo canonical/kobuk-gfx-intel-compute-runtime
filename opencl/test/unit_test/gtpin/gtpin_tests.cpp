@@ -24,6 +24,7 @@
 #include "opencl/source/gtpin/gtpin_hw_helper.h"
 #include "opencl/source/gtpin/gtpin_init.h"
 #include "opencl/source/gtpin/gtpin_notify.h"
+#include "opencl/source/helpers/validators.h"
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/program/create.inl"
@@ -913,7 +914,13 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelINTELIsExecutedThenGT
 
     cl_uint workDim = 1;
     size_t localWorkSize[3] = {1, 1, 1};
-    size_t n = pKernel1->getMaxWorkGroupCount(workDim, localWorkSize);
+    CommandQueue *commandQueue = nullptr;
+    WithCastToInternal(cmdQ, &commandQueue);
+    HwHelper &hwHelper = HwHelper::get(pDevice->getDevice().getHardwareInfo().platform.eRenderCoreFamily);
+    if (!hwHelper.isCooperativeDispatchSupported(commandQueue->getGpgpuEngine().getEngineType(), pDevice->getDevice().getHardwareInfo().platform.eProductFamily)) {
+        commandQueue->getGpgpuEngine().osContext = commandQueue->getDevice().getEngine(aub_stream::ENGINE_CCS, true, false).osContext;
+    }
+    size_t n = pKernel1->getMaxWorkGroupCount(workDim, localWorkSize, commandQueue);
     auto buff10 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
     auto buff11 = clCreateBuffer(context, 0, n * sizeof(unsigned int), nullptr, nullptr);
 
@@ -1009,18 +1016,19 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenKernelWithoutSSHIsUsedThenK
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_NE(nullptr, context);
     auto pContext = castToObject<Context>(context);
+    auto rootDeviceIndex = pDevice->getRootDeviceIndex();
 
     char binary[1024] = {1, 2, 3, 4, 5, 6, 7, 8, 9, '\0'};
     size_t binSize = 10;
-    MockProgram *pProgram = Program::createFromGenBinary<MockProgram>(*pDevice->getExecutionEnvironment(), pContext, &binary[0], binSize, false, &retVal, &pDevice->getDevice());
+    MockProgram *pProgram = Program::createBuiltInFromGenBinary<MockProgram>(pContext, pContext->getDevices(), &binary[0], binSize, &retVal);
     ASSERT_NE(nullptr, pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     PatchTokensTestData::ValidProgramWithKernel programTokens;
 
-    pProgram->unpackedDeviceBinary = makeCopy(reinterpret_cast<char *>(programTokens.storage.data()), programTokens.storage.size());
-    pProgram->unpackedDeviceBinarySize = programTokens.storage.size();
-    retVal = pProgram->processGenBinary();
+    pProgram->buildInfos[rootDeviceIndex].unpackedDeviceBinary = makeCopy(reinterpret_cast<char *>(programTokens.storage.data()), programTokens.storage.size());
+    pProgram->buildInfos[rootDeviceIndex].unpackedDeviceBinarySize = programTokens.storage.size();
+    retVal = pProgram->processGenBinary(rootDeviceIndex);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     int prevCount = KernelCreateCallbackCount;
@@ -1056,6 +1064,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, GTPinTests, givenInitializedGTPinInterfaceWhenKernel
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_NE(nullptr, context);
     auto pContext = castToObject<Context>(context);
+    auto rootDeviceIndex = pDevice->getRootDeviceIndex();
 
     cl_queue_properties devQproperties = 0;
     auto devQ = std::make_unique<DeviceQueueHw<FamilyType>>(pContext, pDevice, devQproperties);
@@ -1071,7 +1080,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, GTPinTests, givenInitializedGTPinInterfaceWhenKernel
     // Prepare a kernel with fake Execution Environment
     char binary[1024] = {1, 2, 3, 4, 5, 6, 7, 8, 9, '\0'};
     size_t binSize = 10;
-    MockProgram *pProgram = Program::createFromGenBinary<MockProgram>(*pDevice->getExecutionEnvironment(), pContext, &binary[0], binSize, false, &retVal, &pDevice->getDevice());
+    MockProgram *pProgram = Program::createBuiltInFromGenBinary<MockProgram>(pContext, pContext->getDevices(), &binary[0], binSize, &retVal);
     ASSERT_NE(nullptr, pProgram);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -1156,9 +1165,9 @@ HWCMDTEST_F(IGFX_GEN8_CORE, GTPinTests, givenInitializedGTPinInterfaceWhenKernel
     uint64_t hashValue = Hash::hash(reinterpret_cast<const char *>(pKernelBin), kernelBinSize);
     pKHdr->CheckSum = static_cast<uint32_t>(hashValue & 0xFFFFFFFF);
 
-    pProgram->unpackedDeviceBinary = makeCopy(&binary[0], binSize);
-    pProgram->unpackedDeviceBinarySize = binSize;
-    retVal = pProgram->processGenBinary();
+    pProgram->buildInfos[rootDeviceIndex].unpackedDeviceBinary = makeCopy(&binary[0], binSize);
+    pProgram->buildInfos[rootDeviceIndex].unpackedDeviceBinarySize = binSize;
+    retVal = pProgram->processGenBinary(rootDeviceIndex);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     // Verify that GT-Pin Kernel Create callback is not called
@@ -2094,15 +2103,17 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenLowMemoryConditionOccursThe
 
         char binary[1024] = {1, 2, 3, 4, 5, 6, 7, 8, 9, '\0'};
         size_t binSize = 10;
-        MockProgram *pProgram = Program::createFromGenBinary<MockProgram>(*pDevice->getExecutionEnvironment(), pContext, &binary[0], binSize, false, &retVal, &pDevice->getDevice());
+        MockProgram *pProgram = Program::createBuiltInFromGenBinary<MockProgram>(pContext, pContext->getDevices(), &binary[0], binSize, &retVal);
         ASSERT_NE(nullptr, pProgram);
         EXPECT_EQ(CL_SUCCESS, retVal);
 
         PatchTokensTestData::ValidProgramWithKernel programTokens;
 
-        pProgram->unpackedDeviceBinary = makeCopy(programTokens.storage.data(), programTokens.storage.size());
-        pProgram->unpackedDeviceBinarySize = programTokens.storage.size();
-        retVal = pProgram->processGenBinary();
+        auto rootDeviceIndex = pDevice->getRootDeviceIndex();
+
+        pProgram->buildInfos[rootDeviceIndex].unpackedDeviceBinary = makeCopy(programTokens.storage.data(), programTokens.storage.size());
+        pProgram->buildInfos[rootDeviceIndex].unpackedDeviceBinarySize = programTokens.storage.size();
+        retVal = pProgram->processGenBinary(rootDeviceIndex);
         if (retVal == CL_OUT_OF_HOST_MEMORY) {
             auto nonFailingAlloc = MemoryManagement::nonfailingAllocation;
             EXPECT_NE(nonFailingAlloc, failureIndex);
@@ -2381,7 +2392,7 @@ TEST_F(GTPinTests, givenInitializedGTPinInterfaceWhenOnKernelSubitIsCalledThenCo
     pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
     pKernelInfo->usesSsh = true;
 
-    auto pProgramm = std::make_unique<MockProgram>(*pDevice->getExecutionEnvironment(), context.get(), false, nullptr);
+    auto pProgramm = std::make_unique<MockProgram>(context.get(), false, toClDeviceVector(*pDevice));
     std::unique_ptr<MockCommandQueue> cmdQ(new MockCommandQueue(context.get(), pDevice, nullptr));
     std::unique_ptr<MockKernel> pKernel(new MockKernel(pProgramm.get(), *pKernelInfo, *pDevice));
 

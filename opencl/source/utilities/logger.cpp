@@ -219,7 +219,7 @@ void FileLogger<DebugLevel>::dumpKernelArgs(const Kernel *kernel) {
             }
 
             if (ptr && size) {
-                fileName = kernel->getKernelInfo().name + "_arg_" + std::to_string(i) + "_" + type + "_size_" + std::to_string(size) + "_flags_" + std::to_string(flags) + ".bin";
+                fileName = kernel->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName + "_arg_" + std::to_string(i) + "_" + type + "_size_" + std::to_string(size) + "_flags_" + std::to_string(flags) + ".bin";
                 writeToFile(fileName, ptr, size, std::ios::trunc | std::ios::binary);
             }
         }
@@ -328,6 +328,8 @@ const char *FileLogger<DebugLevel>::getAllocationTypeString(GraphicsAllocation c
         return "DEBUG_CONTEXT_SAVE_AREA";
     case GraphicsAllocation::AllocationType::DEBUG_SBA_TRACKING_BUFFER:
         return "DEBUG_SBA_TRACKING_BUFFER";
+    case GraphicsAllocation::AllocationType::DEBUG_MODULE_AREA:
+        return "DEBUG_MODULE_AREA";
     default:
         return "ILLEGAL_VALUE";
     }

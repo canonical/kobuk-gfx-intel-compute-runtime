@@ -260,6 +260,40 @@ HWTEST_F(KernelPropertiesTests, givenInvalidKernelThenUnitializedIsReturned) {
     EXPECT_NE(0u, moduleImp->getTranslationUnit()->programInfo.kernelInfos.size());
 }
 
+HWTEST_F(KernelPropertiesTests, givenSimtThreadFlagSetWhenInitializingThenComputeWithoutSimdSize) {
+    uint32_t computeUnitsUsedForSratch = 0x300;
+
+    KernelInfo kernelInfo;
+    auto &kernelAttributes = kernelInfo.kernelDescriptor.kernelAttributes;
+    kernelAttributes.perThreadPrivateMemorySize = 0x100;
+    kernelAttributes.flags.isSimtThread = false;
+    kernelAttributes.simdSize = 8;
+
+    {
+        kernelAttributes.flags.isSimtThread = true;
+
+        KernelImmutableData kernelImmutableData(device);
+
+        kernelImmutableData.initialize(&kernelInfo, *device->getNEODevice()->getMemoryManager(), device->getNEODevice(), computeUnitsUsedForSratch, nullptr, nullptr);
+
+        size_t expectedSize = kernelAttributes.perThreadPrivateMemorySize * computeUnitsUsedForSratch * kernelAttributes.simdSize;
+
+        EXPECT_GE(expectedSize, kernelImmutableData.getPrivateMemoryGraphicsAllocation()->getUnderlyingBufferSize());
+    }
+
+    {
+        kernelAttributes.flags.isSimtThread = false;
+
+        KernelImmutableData kernelImmutableData(device);
+
+        kernelImmutableData.initialize(&kernelInfo, *device->getNEODevice()->getMemoryManager(), device->getNEODevice(), computeUnitsUsedForSratch, nullptr, nullptr);
+
+        size_t expectedSize = kernelAttributes.perThreadPrivateMemorySize * computeUnitsUsedForSratch;
+
+        EXPECT_GE(expectedSize, kernelImmutableData.getPrivateMemoryGraphicsAllocation()->getUnderlyingBufferSize());
+    }
+}
+
 HWTEST_F(KernelPropertiesTests, givenValidKernelThenPropertiesAreRetrieved) {
     ze_kernel_properties_t kernelProperties = {};
 
@@ -288,7 +322,7 @@ HWTEST_F(KernelPropertiesTests, givenValidKernelThenPropertiesAreRetrieved) {
     NEO::KernelInfo *ki = nullptr;
     for (uint32_t i = 0; i < moduleImp->getTranslationUnit()->programInfo.kernelInfos.size(); i++) {
         ki = moduleImp->getTranslationUnit()->programInfo.kernelInfos[i];
-        if (ki->name.compare(0, ki->name.size(), kernel->getImmutableData()->getDescriptor().kernelMetadata.kernelName) == 0) {
+        if (ki->kernelDescriptor.kernelMetadata.kernelName.compare(0, ki->kernelDescriptor.kernelMetadata.kernelName.size(), kernel->getImmutableData()->getDescriptor().kernelMetadata.kernelName) == 0) {
             break;
         }
     }
@@ -414,7 +448,7 @@ HWTEST_F(KernelPropertiesTests, givenValidKernelAndNoMediavfestateThenSpillMemSi
     NEO::KernelInfo *ki = nullptr;
     for (uint32_t i = 0; i < moduleImp->getTranslationUnit()->programInfo.kernelInfos.size(); i++) {
         ki = moduleImp->getTranslationUnit()->programInfo.kernelInfos[i];
-        if (ki->name.compare(0, ki->name.size(), kernel->getImmutableData()->getDescriptor().kernelMetadata.kernelName) == 0) {
+        if (ki->kernelDescriptor.kernelMetadata.kernelName.compare(0, ki->kernelDescriptor.kernelMetadata.kernelName.size(), kernel->getImmutableData()->getDescriptor().kernelMetadata.kernelName) == 0) {
             break;
         }
     }
@@ -438,7 +472,7 @@ HWTEST_F(KernelPropertiesTests, givenValidKernelAndNollocateStatelessPrivateSurf
     NEO::KernelInfo *ki = nullptr;
     for (uint32_t i = 0; i < moduleImp->getTranslationUnit()->programInfo.kernelInfos.size(); i++) {
         ki = moduleImp->getTranslationUnit()->programInfo.kernelInfos[i];
-        if (ki->name.compare(0, ki->name.size(), kernel->getImmutableData()->getDescriptor().kernelMetadata.kernelName) == 0) {
+        if (ki->kernelDescriptor.kernelMetadata.kernelName.compare(0, ki->kernelDescriptor.kernelMetadata.kernelName.size(), kernel->getImmutableData()->getDescriptor().kernelMetadata.kernelName) == 0) {
             break;
         }
     }

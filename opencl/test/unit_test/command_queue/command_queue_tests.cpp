@@ -1026,7 +1026,7 @@ TEST(CommandQueue, givenEnqueueAcquireSharedObjectsCallWhenAcquireFailsThenCorre
 
 HWTEST_F(CommandQueueCommandStreamTest, givenDebugKernelWhenSetupDebugSurfaceIsCalledThenSurfaceStateIsCorrectlySet) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
-    MockProgram program(*pDevice->getExecutionEnvironment());
+    MockProgram program(toClDeviceVector(*pClDevice));
     program.enableKernelDebug();
     std::unique_ptr<MockDebugKernel> kernel(MockKernel::create<MockDebugKernel>(*pDevice, &program));
     MockCommandQueue cmdQ(context.get(), pClDevice, 0);
@@ -1046,7 +1046,7 @@ HWTEST_F(CommandQueueCommandStreamTest, givenDebugKernelWhenSetupDebugSurfaceIsC
 
 HWTEST_F(CommandQueueCommandStreamTest, givenCsrWithDebugSurfaceAllocatedWhenSetupDebugSurfaceIsCalledThenDebugSurfaceIsReused) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
-    MockProgram program(*pDevice->getExecutionEnvironment());
+    MockProgram program(toClDeviceVector(*pClDevice));
     program.enableKernelDebug();
     std::unique_ptr<MockDebugKernel> kernel(MockKernel::create<MockDebugKernel>(*pDevice, &program));
     MockCommandQueue cmdQ(context.get(), pClDevice, 0);
@@ -1149,4 +1149,22 @@ TEST(CommandQueue, givenCopyOnlyQueueWhenCallingBlitEnqueueAllowedThenReturnTrue
 
     queue.isCopyOnly = true;
     EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_READ_BUFFER));
+}
+
+TEST(CommandQueue, giveClCommandWhenCallingBlitEnqueueAllowedThenReturnCorrectValue) {
+    MockContext context{};
+    HardwareInfo *hwInfo = context.getDevice(0)->getRootDeviceEnvironment().getMutableHardwareInfo();
+    MockCommandQueue queue(&context, context.getDevice(0), 0);
+    hwInfo->capabilityTable.blitterOperationsSupported = true;
+
+    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_READ_BUFFER));
+    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_BUFFER));
+    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_BUFFER));
+    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_READ_BUFFER_RECT));
+    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_BUFFER_RECT));
+    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_BUFFER_RECT));
+    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_SVM_MEMCPY));
+    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_READ_IMAGE));
+    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_IMAGE));
+    EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_IMAGE));
 }

@@ -73,13 +73,14 @@ DECLARE_DEBUG_VARIABLE(int32_t, PauseOnGpuMode, -1, "-1: default (before and aft
 DECLARE_DEBUG_VARIABLE(int32_t, EnableMultiStorageResources, -1, "-1: default, 0: Disable, 1: Enable")
 DECLARE_DEBUG_VARIABLE(int32_t, LimitBlitterMaxWidth, -1, "-1: default, >=0: Max width")
 DECLARE_DEBUG_VARIABLE(int32_t, LimitBlitterMaxHeight, -1, "-1: default, >=0: Max height")
-DECLARE_DEBUG_VARIABLE(int32_t, FlushAfterEachBlit, -1, "-1: default, 0: disable, 1: enable")
+DECLARE_DEBUG_VARIABLE(int32_t, PostBlitCommand, -1, "-1: default, 0: MI_ARB_CHECK, 1: MI_FLUSH, 2: Nothing")
 DECLARE_DEBUG_VARIABLE(int32_t, OverridePreemptionSurfaceSizeInMb, -1, "-1: default, >=0 Override preemption surface size with value")
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideLeastOccupiedBank, -1, "-1: default,  >=0 Override least occupied bank with value")
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideRevision, -1, "-1: default,  >=0: Revision id")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceCacheFlushForBcs, -1, "Force cache flush from gpgpu engine before dispatching BCS copy. -1: default,  1: enabled, 0: disabled")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceGpgpuSubmissionForBcsEnqueue, -1, "-1: Default, 1: Submit gpgpu command buffer with cache flushing and completion synchronization, 0: Do nothing, if possible")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableUsmCompression, -1, "enable compression support for L0 USM Device and Shared Device side: -1 default, 0: disable, 1: enable")
+DECLARE_DEBUG_VARIABLE(int32_t, MediaVfeStateMaxSubSlices, -1, ">=0: Programs Media Vfe State Maximum Number of Dual-Subslices to given value ")
 
 /*LOGGING FLAGS*/
 DECLARE_DEBUG_VARIABLE(int32_t, PrintDriverDiagnostics, -1, "prints driver diagnostics messages to standard output, value corresponds to hint level")
@@ -110,6 +111,7 @@ DECLARE_DEBUG_VARIABLE(bool, PrintBOCreateDestroyResult, false, "tracks the resu
 DECLARE_DEBUG_VARIABLE(bool, PrintBOBindingResult, false, "tracks the result of binding and unbinding of BOs")
 DECLARE_DEBUG_VARIABLE(bool, PrintTagAllocationAddress, false, "Print tag allocation address for each engine")
 DECLARE_DEBUG_VARIABLE(bool, ProvideVerboseImplicitFlush, false, "provides verbose messages about implicit flush mechanism")
+DECLARE_DEBUG_VARIABLE(bool, PrintBlitDispatchDetails, false, "Print blit dispatch details")
 
 /*PERFORMANCE FLAGS*/
 DECLARE_DEBUG_VARIABLE(bool, DisableZeroCopyForBuffers, false, "When active all buffer allocations will not share memory with CPU.")
@@ -158,14 +160,12 @@ DECLARE_DEBUG_VARIABLE(bool, EnableForcePin, true, "Enables early pinning for me
 DECLARE_DEBUG_VARIABLE(bool, EnableComputeWorkSizeND, true, "Enables diffrent algorithm to compute local work size")
 DECLARE_DEBUG_VARIABLE(bool, EnableMultiRootDeviceContexts, false, "Enables support for multi root device contexts")
 DECLARE_DEBUG_VARIABLE(bool, EnableComputeWorkSizeSquared, false, "Enables algorithm to compute the most squared work group as possible")
-DECLARE_DEBUG_VARIABLE(bool, EnableVaLibCalls, true, "Enable cl-va sharing lib calls")
 DECLARE_DEBUG_VARIABLE(bool, EnableExtendedVaFormats, false, "Enable more formats in cl-va sharing")
 DECLARE_DEBUG_VARIABLE(bool, AddClGlSharing, false, "Add cl-gl extension")
 DECLARE_DEBUG_VARIABLE(bool, EnableFormatQuery, false, "Enable sharing format querying")
 DECLARE_DEBUG_VARIABLE(bool, EnableFreeMemory, false, "Enable freeMemory in memory manager")
 DECLARE_DEBUG_VARIABLE(bool, ForceSamplerLowFilteringPrecision, false, "Force Low Filtering Precision Sampler mode")
-DECLARE_DEBUG_VARIABLE(bool, UseBindlessBuffers, false, "Force compiler to use bindless buffer addressing instead of stateful one")
-DECLARE_DEBUG_VARIABLE(bool, UseBindlessImages, false, "Force compiler to use bindless image addressing instead of stateful one")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableBOMmapCreate, -1, "Create BOs using mmap, -1:default, 0:disable(GEM_USERPTR), 1:enable")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableGemCloseWorker, -1, "Use asynchronous gem object closing, -1:default, 0:disable, 1:enable")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableIntelVme, -1, "-1: default, 0: disabled, 1: Enables cl_intel_motion_estimation extension")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableIntelAdvancedVme, -1, "-1: default, 0: disabled, 1: Enables cl_intel_advanced_motion_estimation extension")
@@ -174,6 +174,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, EnableBlitterOperationsForReadWriteBuffers, -1, 
 DECLARE_DEBUG_VARIABLE(int32_t, EnableCacheFlushAfterWalker, -1, "-1: platform behavior, 0: disabled, 1: enabled. Adds dedicated cache flush command after WALKER command when surfaces used by kernel require to flush the cache")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableLocalMemory, -1, "-1: default behavior, 0: disabled, 1: enabled, Allows allocating graphics memory in Local Memory")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableStatelessToStatefulBufferOffsetOpt, -1, "-1: dont override, 0: disable, 1: enable, Enables buffer-offset improvement of the stateless to stateful optimization")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableVaLibCalls, -1, "-1: default, 0: disable, 1: enable cl-va sharing lib calls")
 DECLARE_DEBUG_VARIABLE(int32_t, CreateMultipleRootDevices, 0, "0: default - disable, 1+: Driver will create multiple (N) devices during initialization.")
 DECLARE_DEBUG_VARIABLE(int32_t, CreateMultipleSubDevices, 0, "0: default - disable, 1+: Driver will create multiple (N) sub devices during initialization.")
 DECLARE_DEBUG_VARIABLE(int32_t, LimitAmountOfReturnedDevices, 0, "0: default - disable, 1+: Driver will limit the number of devices returned from clGetDeviceIds to N.")
@@ -194,7 +195,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, ForceFineGrainedSVMSupport, -1, "-1: default, 0:
 DECLARE_DEBUG_VARIABLE(int32_t, ForceDeviceEnqueueSupport, -1, "-1: default, 0: disabled, 1: enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, ForcePipeSupport, -1, "-1: default, 0: disabled, 1: enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, UseAsyncDrmExec, -1, "-1: default, 0: Disabled 1: Enabled. If enabled, pass EXEC_OBJECT_ASYNC to exec ioctl.")
-DECLARE_DEBUG_VARIABLE(int32_t, UseBindlessBuiltins, -1, "Use precompiled builtins in bindless mode, -1: api dependent, 0: disabled, 1: enabled")
+DECLARE_DEBUG_VARIABLE(int32_t, UseBindlessMode, -1, "Use precompiled builtins in bindless mode, -1: api dependent, 0: disabled, 1: enabled")
 
 /*DRIVER TOGGLES*/
 DECLARE_DEBUG_VARIABLE(int32_t, ForceOCLVersion, 0, "Force specific OpenCL API version")

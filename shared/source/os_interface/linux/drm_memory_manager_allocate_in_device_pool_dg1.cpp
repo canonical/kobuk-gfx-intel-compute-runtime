@@ -12,10 +12,9 @@
 #include "shared/source/helpers/heap_assigner.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/helpers/surface_format_info.h"
+#include "shared/source/memory_manager/memory_banks.h"
 #include "shared/source/os_interface/linux/drm_memory_manager.h"
 #include "shared/source/os_interface/linux/memory_info_impl.h"
-
-#include "opencl/source/memory_manager/memory_banks.h"
 
 namespace NEO {
 
@@ -63,6 +62,55 @@ BufferObject *DrmMemoryManager::createBufferObjectInMemoryRegion(Drm *drm,
     bo->setAddress(gpuAddress);
 
     return bo;
+}
+
+DrmAllocation *DrmMemoryManager::createAllocWithAlignment(const AllocationData &allocationData, size_t size, size_t alignment, size_t alignedSize, uint64_t gpuAddress) {
+    bool useBooMmap = this->getDrm(allocationData.rootDeviceIndex).getMemoryInfo() && allocationData.useMmapObject;
+
+    if (DebugManager.flags.EnableBOMmapCreate.get() != -1) {
+        useBooMmap = DebugManager.flags.EnableBOMmapCreate.get();
+    }
+
+    if (useBooMmap) {
+        auto totalSizeToAlloc = alignedSize + alignment;
+        auto cpuPointer = this->mmapFunction(0, totalSizeToAlloc, PROT_NONE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+
+        auto cpuBasePointer = cpuPointer;
+        cpuPointer = alignUp(cpuPointer, alignment);
+
+        std::unique_ptr<BufferObject, BufferObject::Deleter> bo(this->createBufferObjectInMemoryRegion(&this->getDrm(allocationData.rootDeviceIndex), reinterpret_cast<uintptr_t>(cpuPointer), alignedSize, 0u, maxOsContextCount));
+
+        if (!bo) {
+            this->munmapFunction(cpuBasePointer, totalSizeToAlloc);
+            return nullptr;
+        }
+
+        drm_i915_gem_mmap_offset gemMmap{};
+        gemMmap.handle = bo->peekHandle();
+        gemMmap.flags = I915_MMAP_OFFSET_WB;
+
+        auto ret = this->getDrm(allocationData.rootDeviceIndex).ioctl(DRM_IOCTL_I915_GEM_MMAP_OFFSET, &gemMmap);
+        if (ret != 0) {
+            this->munmapFunction(cpuBasePointer, totalSizeToAlloc);
+            return nullptr;
+        }
+
+        this->mmapFunction(cpuPointer, alignedSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, getDrm(allocationData.rootDeviceIndex).getFileDescriptor(), static_cast<off_t>(gemMmap.offset));
+
+        obtainGpuAddress(allocationData, bo.get(), gpuAddress);
+        emitPinningRequest(bo.get(), allocationData);
+
+        auto allocation = new DrmAllocation(allocationData.rootDeviceIndex, allocationData.type, bo.get(), cpuPointer, bo->gpuAddress, alignedSize, MemoryPool::System4KBPages);
+        allocation->setMmapPtr(cpuBasePointer);
+        allocation->setMmapSize(totalSizeToAlloc);
+        allocation->setReservedAddressRange(reinterpret_cast<void *>(gpuAddress), alignedSize);
+
+        bo.release();
+
+        return allocation;
+    } else {
+        return createAllocWithAlignmentFromUserptr(allocationData, size, alignment, alignedSize, gpuAddress);
+    }
 }
 
 uint64_t getGpuAddress(GraphicsAllocation::AllocationType allocType, GfxPartition *gfxPartition, size_t &sizeAllocated, const void *hostPtr, bool resource48Bit) {
@@ -231,9 +279,9 @@ void DrmMemoryManager::unlockResourceInLocalMemoryImpl(BufferObject *bo) {
     bo->setLockedAddress(nullptr);
 }
 
-bool DrmMemoryManager::copyMemoryToAllocation(GraphicsAllocation *graphicsAllocation, const void *memoryToCopy, size_t sizeToCopy) {
+bool DrmMemoryManager::copyMemoryToAllocation(GraphicsAllocation *graphicsAllocation, size_t destinationOffset, const void *memoryToCopy, size_t sizeToCopy) {
     if (graphicsAllocation->getUnderlyingBuffer()) {
-        return MemoryManager::copyMemoryToAllocation(graphicsAllocation, memoryToCopy, sizeToCopy);
+        return MemoryManager::copyMemoryToAllocation(graphicsAllocation, destinationOffset, memoryToCopy, sizeToCopy);
     }
     auto drmAllocation = static_cast<DrmAllocation *>(graphicsAllocation);
     for (auto handleId = 0u; handleId < graphicsAllocation->storageInfo.getNumBanks(); handleId++) {
@@ -241,7 +289,7 @@ bool DrmMemoryManager::copyMemoryToAllocation(GraphicsAllocation *graphicsAlloca
         if (!ptr) {
             return false;
         }
-        memcpy_s(ptr, graphicsAllocation->getUnderlyingBufferSize(), memoryToCopy, sizeToCopy);
+        memcpy_s(ptrOffset(ptr, destinationOffset), graphicsAllocation->getUnderlyingBufferSize() - destinationOffset, memoryToCopy, sizeToCopy);
         this->unlockResourceInLocalMemoryImpl(drmAllocation->getBOs()[handleId]);
     }
     return true;

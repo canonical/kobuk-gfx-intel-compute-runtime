@@ -393,9 +393,8 @@ ze_result_t DeviceImp::getProperties(ze_device_properties_t *pDeviceProperties) 
     }
 
     memset(pDeviceProperties->name, 0, ZE_MAX_DEVICE_NAME);
-    std::string name = "Intel(R) ";
-    name += NEO::familyName[hardwareInfo.platform.eRenderCoreFamily];
-    name += '\0';
+
+    std::string name = getNEODevice()->getDeviceInfo().name;
     memcpy_s(pDeviceProperties->name, name.length(), name.c_str(), name.length());
 
     return ZE_RESULT_SUCCESS;
@@ -441,7 +440,7 @@ ze_result_t DeviceImp::getCacheProperties(uint32_t *pCount, ze_device_cache_prop
     }
 
     const auto &hardwareInfo = this->getHwInfo();
-    pCacheProperties[0].cacheSize = getIntermediateCacheSize(hardwareInfo);
+    pCacheProperties[0].cacheSize = hardwareInfo.gtSystemInfo.L3BankCount * 128 * KB;
     pCacheProperties[0].flags = 0;
 
     return ZE_RESULT_SUCCESS;
@@ -571,6 +570,10 @@ Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, uint3
         device->setDebugSurface(debugSurface);
     }
 
+    if (static_cast<DriverHandleImp *>(driverHandle)->enableSysman && !device->isSubdevice) {
+        device->setSysmanHandle(L0::SysmanDeviceHandleContext::init(device->toHandle()));
+    }
+
     if (device->neoDevice->getNumAvailableDevices() == 1) {
         device->numSubDevices = 0;
     } else {
@@ -589,6 +592,7 @@ Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, uint3
             }
             static_cast<DeviceImp *>(subDevice)->isSubdevice = true;
             static_cast<DeviceImp *>(subDevice)->setDebugSurface(debugSurface);
+            static_cast<DeviceImp *>(subDevice)->setSysmanHandle(device->getSysmanHandle());
             device->subDevices.push_back(static_cast<Device *>(subDevice));
         }
         device->numSubDevices = static_cast<uint32_t>(device->subDevices.size());
@@ -624,9 +628,6 @@ Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, uint3
         auto osInterface = neoDevice->getRootDeviceEnvironment().osInterface.get();
         device->getSourceLevelDebugger()
             ->notifyNewDevice(osInterface ? osInterface->getDeviceHandle() : 0);
-    }
-    if (static_cast<DriverHandleImp *>(driverHandle)->enableSysman && !device->isSubdevice) {
-        device->setSysmanHandle(L0::SysmanDeviceHandleContext::init(device->toHandle()));
     }
 
     return device;
@@ -674,9 +675,11 @@ void DeviceImp::releaseResources() {
 DeviceImp::~DeviceImp() {
     releaseResources();
 
-    if (pSysmanDevice != nullptr) {
-        delete pSysmanDevice;
-        pSysmanDevice = nullptr;
+    if (!isSubdevice) {
+        if (pSysmanDevice != nullptr) {
+            delete pSysmanDevice;
+            pSysmanDevice = nullptr;
+        }
     }
 }
 

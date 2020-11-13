@@ -67,8 +67,6 @@ add_library(compute_runtime_mockable_extra
             ${CMAKE_CURRENT_LIST_DIR}/l0_tests.cmake
             ${NEO_SHARED_TEST_DIRECTORY}/unit_test/utilities/cpuintrinsics.cpp
             ${NEO_SHARED_TEST_DIRECTORY}/unit_test/helpers/test_files.cpp
-            ${NEO_SHARED_TEST_DIRECTORY}/unit_test/mocks/mock_compiler_interface.cpp
-            ${NEO_SHARED_TEST_DIRECTORY}/unit_test/mocks/mock_compiler_interface.h
             ${NEO_SHARED_TEST_DIRECTORY}/unit_test/mocks/mock_command_stream_receiver.cpp
             ${NEO_SHARED_TEST_DIRECTORY}/unit_test/mocks/mock_device.cpp
             ${NEO_SOURCE_DIR}/opencl/test/unit_test/aub_stream_mocks/aub_stream_interface_mock.cpp
@@ -131,8 +129,8 @@ if(UNIX)
   target_sources(compute_runtime_mockable_extra
                  PRIVATE
                  ${NEO_SOURCE_DIR}/opencl/source/dll/linux/allocator_helper.cpp
-                 ${NEO_SOURCE_DIR}/opencl/source/tbx/tbx_sockets_imp.cpp
                  ${NEO_SOURCE_DIR}/opencl/test/unit_test/os_interface/linux/drm_mock.cpp
+                 ${NEO_SOURCE_DIR}/shared/source/tbx/tbx_sockets_imp.cpp
   )
   target_link_libraries(compute_runtime_mockable_extra
                         dl

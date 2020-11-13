@@ -32,14 +32,14 @@ HWTEST2_F(TglLpSlm, givenTglLpWhenPreambleIsBeingProgrammedThenThreadArbitration
     EXPECT_EQ(0U, countMmio<FamilyType>(cmdList.begin(), cmdList.end(), 0xE404));
 }
 
-HWTEST2_F(TglLpSlm, givenTglLpIsL3Programing, IsTGLLP) {
+HWTEST2_F(TglLpSlm, WhenCheckingL3IsConfigurableThenExpectItToBeFalse, IsTGLLP) {
     bool isL3Programmable =
         PreambleHelper<TGLLPFamily>::isL3Configurable(*defaultHwInfo);
 
     EXPECT_FALSE(isL3Programmable);
 }
 
-HWTEST2_F(TglLpSlm, shouldNotBeEnabledOnGen12, IsTGLLP) {
+HWTEST2_F(TglLpSlm, WhenPreambleIsCreatedThenSlmIsDisabled, IsTGLLP) {
     typedef TGLLPFamily::MI_LOAD_REGISTER_IMM MI_LOAD_REGISTER_IMM;
     LinearStream &cs = linearStream;
     uint32_t l3Config = PreambleHelper<FamilyType>::getL3Config(pDevice->getHardwareInfo(), true);
@@ -52,13 +52,13 @@ HWTEST2_F(TglLpSlm, shouldNotBeEnabledOnGen12, IsTGLLP) {
 }
 
 typedef PreambleFixture Gen12LpUrbEntryAllocationSize;
-HWTEST2_F(Gen12LpUrbEntryAllocationSize, getUrbEntryAllocationSize, IsTGLLP) {
+HWTEST2_F(Gen12LpUrbEntryAllocationSize, WhenPreambleIsCreatedThenUrbEntryAllocationSizeIsCorrect, IsTGLLP) {
     uint32_t actualVal = PreambleHelper<FamilyType>::getUrbEntryAllocationSize();
     EXPECT_EQ(1024u, actualVal);
 }
 
 typedef PreambleVfeState Gen12LpPreambleVfeState;
-HWTEST2_F(Gen12LpPreambleVfeState, WaOff, IsTGLLP) {
+HWTEST2_F(Gen12LpPreambleVfeState, GivenWaOffWhenProgrammingVfeStateThenProgrammingIsCorrect, IsTGLLP) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
     testWaTable->waSendMIFLUSHBeforeVFE = 0;
     LinearStream &cs = linearStream;
@@ -153,6 +153,18 @@ HWTEST2_F(Gen12LpPreambleVfeState, givenCfeFusedEuDispatchFlagsWhenprogramAdditi
     }
 }
 
+HWTEST2_F(Gen12LpPreambleVfeState, givenMaxNumberOfDssDebugVariableWhenMediaVfeStateIsProgrammedThenFieldIsSet, IsTGLLP) {
+    using MEDIA_VFE_STATE = typename FamilyType::MEDIA_VFE_STATE;
+
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.MediaVfeStateMaxSubSlices.set(2);
+    auto pHwInfo = pPlatform->getClDevice(0)->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto pMediaVfeState = reinterpret_cast<MEDIA_VFE_STATE *>(linearStream.getSpace(sizeof(MEDIA_VFE_STATE)));
+    *pMediaVfeState = FamilyType::cmdInitMediaVfeState;
+    PreambleHelper<FamilyType>::programAdditionalFieldsInVfeState(pMediaVfeState, *pHwInfo);
+    EXPECT_EQ(2u, pMediaVfeState->getMaximumNumberOfDualSubslices());
+}
+
 typedef PreambleFixture ThreadArbitrationGen12Lp;
 GEN12LPTEST_F(ThreadArbitrationGen12Lp, givenPolicyWhenThreadArbitrationProgrammedThenDoNothing) {
     LinearStream &cs = linearStream;
@@ -164,7 +176,7 @@ GEN12LPTEST_F(ThreadArbitrationGen12Lp, givenPolicyWhenThreadArbitrationProgramm
 }
 
 typedef PreambleFixture PreemptionWatermarkGen12LP;
-GEN12LPTEST_F(PreemptionWatermarkGen12LP, givenPreambleThenPreambleWorkAroundsIsNotProgrammed) {
+GEN12LPTEST_F(PreemptionWatermarkGen12LP, WhenPreambleIsCreatedThenPreambleWorkAroundsIsNotProgrammed) {
     PreambleHelper<FamilyType>::programGenSpecificPreambleWorkArounds(&linearStream, pDevice->getHardwareInfo());
 
     parseCommands<FamilyType>(linearStream);

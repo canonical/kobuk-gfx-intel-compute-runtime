@@ -133,7 +133,7 @@ TEST_F(DrmBufferObjectTest, givenAddressThatWhenSizeIsAddedWithin32BitBoundaryWh
     EXPECT_TRUE(execObject.flags & EXEC_OBJECT_SUPPORTS_48B_ADDRESS);
 }
 
-TEST_F(DrmBufferObjectTest, onPinIoctlFailed) {
+TEST_F(DrmBufferObjectTest, whenExecFailsThenPinFails) {
     std::unique_ptr<uint32_t[]> buff(new uint32_t[1024]);
 
     mock->ioctl_expected.total = 1;
@@ -146,6 +146,22 @@ TEST_F(DrmBufferObjectTest, onPinIoctlFailed) {
     bo->setAddress(reinterpret_cast<uint64_t>(buff.get()));
     BufferObject *boArray[1] = {boToPin.get()};
     auto ret = bo->pin(boArray, 1, osContext.get(), 0, 1);
+    EXPECT_EQ(EINVAL, ret);
+}
+
+TEST_F(DrmBufferObjectTest, whenExecFailsThenValidateHostPtrFails) {
+    std::unique_ptr<uint32_t[]> buff(new uint32_t[1024]);
+
+    mock->ioctl_expected.total = 1;
+    mock->ioctl_res = -1;
+    this->mock->errnoValue = EINVAL;
+
+    std::unique_ptr<BufferObject> boToPin(new TestedBufferObject(this->mock.get()));
+    ASSERT_NE(nullptr, boToPin.get());
+
+    bo->setAddress(reinterpret_cast<uint64_t>(buff.get()));
+    BufferObject *boArray[1] = {boToPin.get()};
+    auto ret = bo->validateHostPtr(boArray, 1, osContext.get(), 0, 1);
     EXPECT_EQ(EINVAL, ret);
 }
 
@@ -207,9 +223,10 @@ TEST_F(DrmBufferObjectTest, whenPrintExecutionBufferIsSetToTrueThenMessageFoundI
     EXPECT_EQ(expectedValue, idx);
 }
 
-TEST(DrmBufferObjectSimpleTest, givenInvalidBoWhenPinIsCalledThenErrorIsReturned) {
+TEST(DrmBufferObjectSimpleTest, givenInvalidBoWhenValidateHostptrIsCalledThenErrorIsReturned) {
     std::unique_ptr<uint32_t[]> buff(new uint32_t[256]);
     std::unique_ptr<DrmMockCustom> mock(new DrmMockCustom);
+    OsContextLinux osContext(*mock, 0u, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled, false, false, false);
     ASSERT_NE(nullptr, mock.get());
     std::unique_ptr<TestedBufferObject> bo(new TestedBufferObject(mock.get()));
     ASSERT_NE(nullptr, bo.get());
@@ -224,8 +241,32 @@ TEST(DrmBufferObjectSimpleTest, givenInvalidBoWhenPinIsCalledThenErrorIsReturned
     mock->errnoValue = EFAULT;
 
     BufferObject *boArray[1] = {boToPin.get()};
-    auto ret = bo->pin(boArray, 1, nullptr, 0, 1);
+    auto ret = bo->pin(boArray, 1, &osContext, 0, 1);
     EXPECT_EQ(EFAULT, ret);
+    mock->ioctl_res = 0;
+}
+
+TEST(DrmBufferObjectSimpleTest, givenInvalidBoWhenPinIsCalledThenErrorIsReturned) {
+    std::unique_ptr<uint32_t[]> buff(new uint32_t[256]);
+    std::unique_ptr<DrmMockCustom> mock(new DrmMockCustom);
+    OsContextLinux osContext(*mock, 0u, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled, false, false, false);
+    ASSERT_NE(nullptr, mock.get());
+    std::unique_ptr<TestedBufferObject> bo(new TestedBufferObject(mock.get()));
+    ASSERT_NE(nullptr, bo.get());
+
+    // fail DRM_IOCTL_I915_GEM_EXECBUFFER2 in pin
+    mock->ioctl_res = -1;
+
+    std::unique_ptr<BufferObject> boToPin(new TestedBufferObject(mock.get()));
+    ASSERT_NE(nullptr, boToPin.get());
+
+    bo->setAddress(reinterpret_cast<uint64_t>(buff.get()));
+    mock->errnoValue = EFAULT;
+
+    BufferObject *boArray[1] = {boToPin.get()};
+    auto ret = bo->validateHostPtr(boArray, 1, &osContext, 0, 1);
+    EXPECT_EQ(EFAULT, ret);
+    mock->ioctl_res = 0;
 }
 
 TEST(DrmBufferObjectSimpleTest, givenBufferObjectWhenConstructedWithASizeThenTheSizeIsInitialized) {
@@ -257,6 +298,39 @@ TEST(DrmBufferObjectSimpleTest, givenArrayOfBosWhenPinnedThenAllBosArePinned) {
 
     bo->setAddress(reinterpret_cast<uint64_t>(buff.get()));
     auto ret = bo->pin(array, 3, &osContext, 0, 1);
+    EXPECT_EQ(mock->ioctl_res, ret);
+
+    EXPECT_LT(0u, mock->execBuffer.batch_len);
+    EXPECT_EQ(4u, mock->execBuffer.buffer_count); // 3 bos to pin plus 1 exec bo
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(boToPin->execObjectPointerFilled), mock->execBuffer.buffers_ptr);
+    EXPECT_NE(nullptr, boToPin2->execObjectPointerFilled);
+    EXPECT_NE(nullptr, boToPin3->execObjectPointerFilled);
+
+    bo->setAddress(0llu);
+}
+
+TEST(DrmBufferObjectSimpleTest, givenArrayOfBosWhenValidatedThenAllBosArePinned) {
+    std::unique_ptr<uint32_t[]> buff(new uint32_t[256]);
+    std::unique_ptr<DrmMockCustom> mock(new DrmMockCustom);
+    ASSERT_NE(nullptr, mock.get());
+    OsContextLinux osContext(*mock, 0u, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled, false, false, false);
+
+    std::unique_ptr<TestedBufferObject> bo(new TestedBufferObject(mock.get()));
+    ASSERT_NE(nullptr, bo.get());
+    mock->ioctl_res = 0;
+
+    std::unique_ptr<TestedBufferObject> boToPin(new TestedBufferObject(mock.get()));
+    std::unique_ptr<TestedBufferObject> boToPin2(new TestedBufferObject(mock.get()));
+    std::unique_ptr<TestedBufferObject> boToPin3(new TestedBufferObject(mock.get()));
+
+    ASSERT_NE(nullptr, boToPin.get());
+    ASSERT_NE(nullptr, boToPin2.get());
+    ASSERT_NE(nullptr, boToPin3.get());
+
+    BufferObject *array[3] = {boToPin.get(), boToPin2.get(), boToPin3.get()};
+
+    bo->setAddress(reinterpret_cast<uint64_t>(buff.get()));
+    auto ret = bo->validateHostPtr(array, 3, &osContext, 0, 1);
     EXPECT_EQ(mock->ioctl_res, ret);
 
     EXPECT_LT(0u, mock->execBuffer.batch_len);
@@ -343,4 +417,28 @@ TEST(DrmBufferObject, whenBindExtHandleAddedThenItIsStored) {
 
     EXPECT_EQ(1u, bo.getBindExtHandles().size());
     EXPECT_EQ(4u, bo.getBindExtHandles()[0]);
+}
+
+TEST(DrmBufferObject, whenMarkForCapturedCalledThenIsMarkedForCaptureReturnsTrue) {
+    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
+    executionEnvironment->prepareRootDeviceEnvironments(1);
+    DrmMockResources drm(*executionEnvironment->rootDeviceEnvironments[0]);
+
+    MockBufferObject bo(&drm, 0, 0, 1);
+    EXPECT_FALSE(bo.isMarkedForCapture());
+
+    bo.markForCapture();
+    EXPECT_TRUE(bo.isMarkedForCapture());
+}
+
+TEST_F(DrmBufferObjectTest, givenBoMarkedForCaptureWhenFillingExecObjectThenCaptureFlagIsSet) {
+    drm_i915_gem_exec_object2 execObject;
+
+    memset(&execObject, 0, sizeof(execObject));
+    bo->markForCapture();
+    bo->setAddress(0x45000);
+    bo->setSize(0x1000);
+    bo->fillExecObject(execObject, osContext.get(), 0, 1);
+
+    EXPECT_TRUE(execObject.flags & EXEC_OBJECT_CAPTURE);
 }

@@ -7,6 +7,7 @@
 
 #include "opencl/source/memory_manager/os_agnostic_memory_manager.h"
 
+#include "shared/source/aub/aub_center.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/gmm_helper/gmm.h"
@@ -22,7 +23,6 @@
 #include "shared/source/memory_manager/residency.h"
 #include "shared/source/os_interface/os_memory.h"
 
-#include "opencl/source/aub/aub_center.h"
 #include "opencl/source/helpers/surface_formats.h"
 
 #include <cassert>
@@ -124,7 +124,7 @@ GraphicsAllocation *OsAgnosticMemoryManager::allocateGraphicsMemory64kb(const Al
 
 GraphicsAllocation *OsAgnosticMemoryManager::allocate32BitGraphicsMemoryImpl(const AllocationData &allocationData, bool useLocalMemory) {
     auto hwInfo = executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getHardwareInfo();
-    auto heap = heapAssigner.get32BitHeapIndex(allocationData.type, useLocalMemory, *hwInfo, allocationData.flags.use32BitExtraPool);
+    auto heap = heapAssigner.get32BitHeapIndex(allocationData.type, useLocalMemory, *hwInfo, allocationData.flags.use32BitFrontWindow);
     auto gfxPartition = getGfxPartition(allocationData.rootDeviceIndex);
     if (allocationData.hostPtr) {
         auto allocationSize = alignSizeWholePage(allocationData.hostPtr, allocationData.size);
@@ -167,7 +167,6 @@ GraphicsAllocation *OsAgnosticMemoryManager::allocate32BitGraphicsMemoryImpl(con
         memoryAllocation->set32BitAllocation(true);
         memoryAllocation->setGpuBaseAddress(GmmHelper::canonize(gfxPartition->getHeapBase(heap)));
         memoryAllocation->sizeToFree = allocationSize;
-        memoryAllocation->storageInfo = allocationData.storageInfo;
     }
     counter++;
     return memoryAllocation;

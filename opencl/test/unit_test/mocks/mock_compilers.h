@@ -178,7 +178,7 @@ struct MockOclTranslationOutput : MockCIF<IGC::OclTranslationOutputTagOCL> {
     MockCIFBuffer *debugData = nullptr;
 };
 
-struct MockIgcOclDeviceCtx : MockCIF<IGC::IgcOclDeviceCtxTagOCL> {
+struct MockIgcOclDeviceCtx : MockCIF<IGC::IgcOclDeviceCtx<2>> {
     static CIF::ICIF *Create(CIF::InterfaceId_t intId, CIF::Version_t version);
 
     MockIgcOclDeviceCtx();
@@ -209,6 +209,11 @@ struct MockIgcOclDeviceCtx : MockCIF<IGC::IgcOclDeviceCtxTagOCL> {
                                                             IGC::CodeType::CodeType_t inType,
                                                             IGC::CodeType::CodeType_t outType) override;
 
+    bool GetSystemRoutine(IGC::SystemRoutineType::SystemRoutineType_t typeOfSystemRoutine,
+                          bool bindless,
+                          CIF::Builtins::BufferSimple *outSystemRoutineBuffer,
+                          CIF::Builtins::BufferSimple *stateSaveAreaHeaderInit) override;
+
     void SetDebugVars(MockCompilerDebugVars &debugVars) {
         this->debugVars = debugVars;
     }
@@ -235,7 +240,7 @@ struct MockFclOclTranslationCtx : MockCIF<IGC::FclOclTranslationCtxTagOCL> {
         uint32_t tracingOptionsCount) override;
 };
 
-struct MockFclOclDeviceCtx : MockCIF<IGC::FclOclDeviceCtx<3>> {
+struct MockFclOclDeviceCtx : MockCIF<IGC::FclOclDeviceCtxTagOCL> {
     MockFclOclDeviceCtx();
     ~MockFclOclDeviceCtx() override;
 
@@ -255,4 +260,5 @@ struct MockFclOclDeviceCtx : MockCIF<IGC::FclOclDeviceCtx<3>> {
 
     uint32_t oclApiVersion = 120;
 };
+
 } // namespace NEO

@@ -156,11 +156,11 @@ cl_int Program::link(
                 break;
             }
 
-            this->replaceDeviceBinary(std::move(compilerOuput.deviceBinary.mem), compilerOuput.deviceBinary.size);
+            this->replaceDeviceBinary(std::move(compilerOuput.deviceBinary.mem), compilerOuput.deviceBinary.size, pDevice->getRootDeviceIndex());
             this->debugData = std::move(compilerOuput.debugData.mem);
             this->debugDataSize = compilerOuput.debugData.size;
 
-            retVal = processGenBinary();
+            retVal = processGenBinary(pDevice->getRootDeviceIndex());
             if (retVal != CL_SUCCESS) {
                 break;
             }
@@ -172,7 +172,7 @@ cl_int Program::link(
                 UNRECOVERABLE_IF(clDevice == nullptr);
                 for (auto kernelInfo : kernelInfoArray) {
                     clDevice->getSourceLevelDebugger()->notifyKernelDebugData(&kernelInfo->debugData,
-                                                                              kernelInfo->name,
+                                                                              kernelInfo->kernelDescriptor.kernelMetadata.kernelName,
                                                                               kernelInfo->heapInfo.pKernelHeap,
                                                                               kernelInfo->heapInfo.KernelHeapSize);
                 }

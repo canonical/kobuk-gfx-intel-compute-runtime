@@ -8,6 +8,7 @@
 #include "shared/test/unit_test/helpers/blit_commands_helper_tests.inl"
 
 #include "shared/source/helpers/blit_commands_helper.h"
+#include "shared/test/unit_test/fixtures/device_fixture.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 
 #include "opencl/test/unit_test/mocks/mock_graphics_allocation.h"
@@ -75,28 +76,36 @@ TEST(BlitCommandsHelperTest, GivenCopySizeYAndZEqual0WhenConstructingPropertiesF
     EXPECT_EQ(blitProperties.copySize, expectedSize);
 }
 
-using BlitTests = Test<ClDeviceFixture>;
+using BlitTests = Test<DeviceFixture>;
 
 HWTEST_F(BlitTests, givenDebugVariablesWhenGettingMaxBlitSizeThenHonorUseProvidedValues) {
     DebugManagerStateRestore restore{};
 
-    ASSERT_EQ(BlitterConstants::maxBlitWidth, BlitCommandsHelper<FamilyType>::getMaxBlitWidth(pClDevice->getRootDeviceEnvironment()));
-    ASSERT_EQ(BlitterConstants::maxBlitHeight, BlitCommandsHelper<FamilyType>::getMaxBlitHeight(pClDevice->getRootDeviceEnvironment()));
+    ASSERT_EQ(BlitterConstants::maxBlitWidth, BlitCommandsHelper<FamilyType>::getMaxBlitWidth(pDevice->getRootDeviceEnvironment()));
+    ASSERT_EQ(BlitterConstants::maxBlitHeight, BlitCommandsHelper<FamilyType>::getMaxBlitHeight(pDevice->getRootDeviceEnvironment()));
 
     DebugManager.flags.LimitBlitterMaxWidth.set(50);
-    EXPECT_EQ(50u, BlitCommandsHelper<FamilyType>::getMaxBlitWidth(pClDevice->getRootDeviceEnvironment()));
+    EXPECT_EQ(50u, BlitCommandsHelper<FamilyType>::getMaxBlitWidth(pDevice->getRootDeviceEnvironment()));
 
     DebugManager.flags.LimitBlitterMaxHeight.set(60);
-    EXPECT_EQ(60u, BlitCommandsHelper<FamilyType>::getMaxBlitHeight(pClDevice->getRootDeviceEnvironment()));
+    EXPECT_EQ(60u, BlitCommandsHelper<FamilyType>::getMaxBlitHeight(pDevice->getRootDeviceEnvironment()));
 }
 
 HWTEST_F(BlitTests, givenDebugVariableWhenEstimatingPostBlitsCommandSizeThenReturnCorrectResult) {
+    const size_t arbCheckSize = sizeof(typename FamilyType::MI_ARB_CHECK);
+    const size_t flushSize = sizeof(typename FamilyType::MI_FLUSH_DW);
+
     DebugManagerStateRestore restore{};
 
-    ASSERT_EQ(sizeof(typename FamilyType::MI_ARB_CHECK), BlitCommandsHelper<FamilyType>::estimatePostBlitCommandSize());
+    EXPECT_EQ(arbCheckSize, BlitCommandsHelper<FamilyType>::estimatePostBlitCommandSize());
+    DebugManager.flags.PostBlitCommand.set(0);
+    EXPECT_EQ(arbCheckSize, BlitCommandsHelper<FamilyType>::estimatePostBlitCommandSize());
 
-    DebugManager.flags.FlushAfterEachBlit.set(1);
-    EXPECT_EQ(sizeof(typename FamilyType::MI_FLUSH_DW), BlitCommandsHelper<FamilyType>::estimatePostBlitCommandSize());
+    DebugManager.flags.PostBlitCommand.set(1);
+    EXPECT_EQ(flushSize, BlitCommandsHelper<FamilyType>::estimatePostBlitCommandSize());
+
+    DebugManager.flags.PostBlitCommand.set(2);
+    EXPECT_EQ(0u, BlitCommandsHelper<FamilyType>::estimatePostBlitCommandSize());
 }
 
 HWTEST_F(BlitTests, givenDebugVariableWhenDispatchingPostBlitsCommandThenUseCorrectCommands) {
@@ -107,20 +116,39 @@ HWTEST_F(BlitTests, givenDebugVariableWhenDispatchingPostBlitsCommandThenUseCorr
     LinearStream linearStream{streamBuffer, sizeof(streamBuffer)};
     GenCmdList commands{};
 
+    // -1: default
     BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream);
     CmdParse<FamilyType>::parseCommandBuffer(commands, linearStream.getCpuBase(), linearStream.getUsed());
     auto arbCheck = find<MI_ARB_CHECK *>(commands.begin(), commands.end());
     EXPECT_NE(commands.end(), arbCheck);
 
+    // 0: MI_ARB_CHECK
     memset(streamBuffer, 0, sizeof(streamBuffer));
     linearStream.replaceBuffer(streamBuffer, sizeof(streamBuffer));
     commands.clear();
+    DebugManager.flags.PostBlitCommand.set(0);
+    BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream);
+    CmdParse<FamilyType>::parseCommandBuffer(commands, linearStream.getCpuBase(), linearStream.getUsed());
+    arbCheck = find<MI_ARB_CHECK *>(commands.begin(), commands.end());
+    EXPECT_NE(commands.end(), arbCheck);
 
-    DebugManager.flags.FlushAfterEachBlit.set(1);
+    // 1: MI_FLUSH_DW
+    memset(streamBuffer, 0, sizeof(streamBuffer));
+    linearStream.replaceBuffer(streamBuffer, sizeof(streamBuffer));
+    commands.clear();
+    DebugManager.flags.PostBlitCommand.set(1);
     BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream);
     CmdParse<FamilyType>::parseCommandBuffer(commands, linearStream.getCpuBase(), linearStream.getUsed());
     auto miFlush = find<MI_FLUSH_DW *>(commands.begin(), commands.end());
     EXPECT_NE(commands.end(), miFlush);
+
+    // 2: Nothing
+    memset(streamBuffer, 0, sizeof(streamBuffer));
+    linearStream.replaceBuffer(streamBuffer, sizeof(streamBuffer));
+    commands.clear();
+    DebugManager.flags.PostBlitCommand.set(2);
+    BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream);
+    EXPECT_EQ(0u, linearStream.getUsed());
 }
 
 HWTEST_F(BlitTests, givenMemoryWhenFillPatternWithBlitThenCommandIsProgrammed) {
@@ -352,8 +380,9 @@ HWTEST2_F(BlitTests, givenGen9AndGetBlitAllocationPropertiesThenCorrectValuesAre
     auto expectedQPitch = qPitch;
     auto expectedtileType = tileType;
     auto expectedMipTailLod = mipTailLod;
+    auto compressionDetails = 0u;
 
-    NEO::BlitCommandsHelper<FamilyType>::getBlitAllocationProperties(alloc, pitch, qPitch, tileType, mipTailLod);
+    NEO::BlitCommandsHelper<FamilyType>::getBlitAllocationProperties(alloc, pitch, qPitch, tileType, mipTailLod, compressionDetails, pDevice->getRootDeviceEnvironment());
 
     EXPECT_EQ(expectedPitch, pitch);
     EXPECT_EQ(expectedQPitch, qPitch);

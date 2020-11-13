@@ -102,7 +102,7 @@ if(DEFINED AUB_STREAM_PROJECT_NAME)
        $<TARGET_OBJECTS:aub_stream_mock_lib>
   )
 else()
-  list(APPEND IGDRCL_SRCS_tests_local ${NEO_SOURCE_DIR}/opencl/source/aub/aub_stream_interface.cpp)
+  list(APPEND IGDRCL_SRCS_tests_local ${NEO_SOURCE_DIR}/shared/source/aub/aub_stream_interface.cpp)
 endif()
 
 add_executable(igdrcl_tests
@@ -190,7 +190,7 @@ function(neo_copy_test_files_with_revision target product revision_id)
                      DEPENDS ${NEO_SOURCE_DIR}/opencl/test/unit_test/test_files
   )
   add_dependencies(${target} copy_compiler_files)
-  set_target_properties(${target} PROPERTIES FOLDER "${PLATFORM_SPECIFIC_TEST_TARGETS_FOLDER}/${product}/${revision_id}}")
+  set_target_properties(${target} PROPERTIES FOLDER "${PLATFORM_SPECIFIC_TEST_TARGETS_FOLDER}/${product}/${revision_id}")
 endfunction()
 
 add_dependencies(unit_tests

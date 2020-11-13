@@ -56,11 +56,13 @@ void DrmAllocation::bindBO(BufferObject *bo, OsContext *osContext, uint32_t vmHa
             bufferObjects->push_back(bo);
 
         } else {
+            auto retVal = 0;
             if (bind) {
-                bo->bind(osContext, vmHandleId);
+                retVal = bo->bind(osContext, vmHandleId);
             } else {
-                bo->unbind(osContext, vmHandleId);
+                retVal = bo->unbind(osContext, vmHandleId);
             }
+            UNRECOVERABLE_IF(retVal);
         }
     }
 }
@@ -82,6 +84,9 @@ void DrmAllocation::registerBOBindExtHandle(Drm *drm) {
     case GraphicsAllocation::AllocationType::KERNEL_ISA:
         resourceClass = Drm::ResourceClass::Isa;
         break;
+    case GraphicsAllocation::AllocationType::DEBUG_MODULE_AREA:
+        resourceClass = Drm::ResourceClass::ModuleHeapDebugArea;
+        break;
     default:
         break;
     }
@@ -95,6 +100,7 @@ void DrmAllocation::registerBOBindExtHandle(Drm *drm) {
         for (auto bo : bos) {
             if (bo) {
                 bo->addBindExtHandle(handle);
+                bo->markForCapture();
             }
         }
     }
