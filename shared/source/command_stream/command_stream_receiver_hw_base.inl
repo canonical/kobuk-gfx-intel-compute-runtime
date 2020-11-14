@@ -40,8 +40,10 @@ template <typename GfxFamily>
 CommandStreamReceiverHw<GfxFamily>::~CommandStreamReceiverHw() = default;
 
 template <typename GfxFamily>
-CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiverHw(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex)
-    : CommandStreamReceiver(executionEnvironment, rootDeviceIndex) {
+CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiverHw(ExecutionEnvironment &executionEnvironment,
+                                                            uint32_t rootDeviceIndex,
+                                                            const DeviceBitfield deviceBitfield)
+    : CommandStreamReceiver(executionEnvironment, rootDeviceIndex, deviceBitfield) {
 
     auto &hwHelper = HwHelper::get(peekHwInfo().platform.eRenderCoreFamily);
     localMemoryEnabled = hwHelper.getEnableLocalMemory(peekHwInfo());
@@ -441,7 +443,7 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
         requiresInstructionCacheFlush = false;
     }
 
-    // Add a PC if we have a dependency on a previous walker to avoid concurrency issues.
+    // Add a Pipe Control if we have a dependency on a previous walker to avoid concurrency issues.
     if (taskLevel > this->taskLevel) {
         if (!timestampPacketWriteEnabled) {
             PipeControlArgs args;

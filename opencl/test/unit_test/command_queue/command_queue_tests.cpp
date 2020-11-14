@@ -12,6 +12,7 @@
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/helpers/variable_backup.h"
+#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
 
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/event/event.h"
@@ -29,7 +30,6 @@
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
-#include "opencl/test/unit_test/mocks/mock_graphics_allocation.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_mdi.h"
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
@@ -224,14 +224,16 @@ TEST_P(CommandQueueWithBlitOperationsTests, givenDeviceNotSupportingBlitOperatio
 
     auto defaultCsr = mockDevice->getDefaultEngine().commandStreamReceiver;
     EXPECT_EQ(defaultCsr, &cmdQ.getGpgpuCommandStreamReceiver());
-    EXPECT_EQ(defaultCsr, &cmdQ.getCommandStreamReceiverByCommandType(cmdType));
+
+    auto blitAllowed = cmdQ.blitEnqueueAllowed(cmdType);
+    EXPECT_EQ(defaultCsr, &cmdQ.getCommandStreamReceiver(blitAllowed));
 }
 
 HWTEST_P(CommandQueueWithBlitOperationsTests, givenDeviceWithSubDevicesSupportingBlitOperationsWhenQueueIsCreatedThenBcsIsTakenFromFirstSubDevice) {
     DebugManagerStateRestore restorer;
     VariableBackup<bool> mockDeviceFlagBackup{&MockDevice::createSingleDevice, false};
     DebugManager.flags.CreateMultipleSubDevices.set(2);
-    DebugManager.flags.EnableBlitterOperationsForReadWriteBuffers.set(1);
+    DebugManager.flags.EnableBlitterForEnqueueOperations.set(1);
     HardwareInfo hwInfo = *defaultHwInfo;
     bool createBcsEngine = !hwInfo.capabilityTable.blitterOperationsSupported;
     hwInfo.capabilityTable.blitterOperationsSupported = true;
@@ -251,11 +253,12 @@ HWTEST_P(CommandQueueWithBlitOperationsTests, givenDeviceWithSubDevicesSupportin
 
     MockCommandQueue cmdQ(nullptr, device.get(), 0);
     auto cmdType = GetParam();
+    auto blitAllowed = cmdQ.blitEnqueueAllowed(cmdType);
 
     EXPECT_NE(nullptr, cmdQ.getBcsCommandStreamReceiver());
     EXPECT_EQ(bcsEngine.commandStreamReceiver, cmdQ.getBcsCommandStreamReceiver());
-    EXPECT_EQ(bcsEngine.commandStreamReceiver, &cmdQ.getCommandStreamReceiverByCommandType(cmdType));
-    EXPECT_EQ(bcsEngine.osContext, &cmdQ.getCommandStreamReceiverByCommandType(cmdType).getOsContext());
+    EXPECT_EQ(bcsEngine.commandStreamReceiver, &cmdQ.getCommandStreamReceiver(blitAllowed));
+    EXPECT_EQ(bcsEngine.osContext, &cmdQ.getCommandStreamReceiver(blitAllowed).getOsContext());
 }
 
 INSTANTIATE_TEST_CASE_P(uint32_t,
@@ -1157,14 +1160,55 @@ TEST(CommandQueue, giveClCommandWhenCallingBlitEnqueueAllowedThenReturnCorrectVa
     MockCommandQueue queue(&context, context.getDevice(0), 0);
     hwInfo->capabilityTable.blitterOperationsSupported = true;
 
-    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_READ_BUFFER));
-    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_BUFFER));
-    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_BUFFER));
-    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_READ_BUFFER_RECT));
-    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_BUFFER_RECT));
-    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_BUFFER_RECT));
-    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_SVM_MEMCPY));
-    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_READ_IMAGE));
-    EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_IMAGE));
-    EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_IMAGE));
+    if (queue.getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
+        EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_READ_BUFFER));
+        EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_BUFFER));
+        EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_BUFFER));
+        EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_READ_BUFFER_RECT));
+        EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_BUFFER_RECT));
+        EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_BUFFER_RECT));
+        EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_SVM_MEMCPY));
+        EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_READ_IMAGE));
+        EXPECT_TRUE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_IMAGE));
+        EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_IMAGE));
+    } else {
+        EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_READ_BUFFER));
+        EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_BUFFER));
+        EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_BUFFER));
+        EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_READ_BUFFER_RECT));
+        EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_BUFFER_RECT));
+        EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_BUFFER_RECT));
+        EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_SVM_MEMCPY));
+        EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_READ_IMAGE));
+        EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_WRITE_IMAGE));
+        EXPECT_FALSE(queue.blitEnqueueAllowed(CL_COMMAND_COPY_IMAGE));
+    }
+}
+
+TEST(CommandQueue, givenCopySizeAndOffsetWhenCallingBlitEnqueueImageAllowedThenReturnCorrectValue) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.EnableBlitterForReadWriteImage.set(1);
+    MockContext context{};
+    MockCommandQueue queue(&context, context.getDevice(0), 0);
+
+    auto maxBlitWidth = static_cast<size_t>(BlitterConstants::maxBlitWidth);
+    auto maxBlitHeight = static_cast<size_t>(BlitterConstants::maxBlitHeight);
+
+    std::array<std::tuple<size_t, size_t, size_t, size_t, bool>, 7> testParams{
+        std::make_tuple(1, 1, 0, 0, true),
+        std::make_tuple(maxBlitWidth, maxBlitHeight, 0, 0, true),
+        std::make_tuple(maxBlitWidth + 1, maxBlitHeight, 0, 0, false),
+        std::make_tuple(maxBlitWidth, maxBlitHeight + 1, 0, 0, false),
+        std::make_tuple(maxBlitWidth, maxBlitHeight, 1, 0, false),
+        std::make_tuple(maxBlitWidth, maxBlitHeight, 0, 1, false),
+        std::make_tuple(maxBlitWidth - 1, maxBlitHeight - 1, 1, 1, true)};
+
+    for (auto &params : testParams) {
+        size_t region[3];
+        size_t origin[3];
+        bool expectedResult;
+        std::tie(region[0], region[1], origin[0], origin[1], expectedResult) = params;
+
+        EXPECT_EQ(expectedResult, queue.blitEnqueueImageAllowed(origin, region));
+    }
 }

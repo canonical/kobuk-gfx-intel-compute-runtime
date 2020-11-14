@@ -59,7 +59,6 @@ class Drm {
         MaxSize
     };
 
-    static const std::array<const char *, size_t(ResourceClass::MaxSize)> classNames;
     virtual ~Drm();
 
     virtual int ioctl(unsigned long request, void *arg);
@@ -116,6 +115,7 @@ class Drm {
 
     MOCKABLE_VIRTUAL uint32_t registerResource(ResourceClass classType, void *data, size_t size);
     MOCKABLE_VIRTUAL void unregisterResource(uint32_t handle);
+    MOCKABLE_VIRTUAL uint32_t registerIsaCookie(uint32_t isaHandle);
 
     MemoryInfo *getMemoryInfo() const {
         return memoryInfo.get();

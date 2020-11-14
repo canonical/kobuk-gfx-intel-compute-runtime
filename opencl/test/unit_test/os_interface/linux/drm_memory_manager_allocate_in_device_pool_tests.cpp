@@ -102,7 +102,7 @@ TEST_F(DrmMemoryManagerTest, givenDrmMemoryManagerWhenCopyMemoryToAllocationThen
 }
 
 TEST_F(DrmMemoryManagerTest, givenDrmMemoryManagerWhenGetLocalMemoryIsCalledThenSizeOfLocalMemoryIsReturned) {
-    EXPECT_EQ(0 * GB, memoryManager->getLocalMemorySize(rootDeviceIndex));
+    EXPECT_EQ(0 * GB, memoryManager->getLocalMemorySize(rootDeviceIndex, 0xF));
 }
 
 HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenMakeAllBuffersResidentSetWhenFlushThenDrmMemoryOperationHandlerIsLocked) {
@@ -127,7 +127,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenMakeAllBuffersResidentSetW
     CommandStreamReceiverHw<FamilyType>::alignToCacheLine(cs);
     BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
 
-    MockDrmCsr mockCsr(*executionEnvironment, rootDeviceIndex, gemCloseWorkerMode::gemCloseWorkerInactive);
+    MockDrmCsr mockCsr(*executionEnvironment, rootDeviceIndex, 1, gemCloseWorkerMode::gemCloseWorkerInactive);
     mockCsr.flush(batchBuffer, mockCsr.getResidencyAllocations());
 
     mm->freeGraphicsMemory(commandBuffer);

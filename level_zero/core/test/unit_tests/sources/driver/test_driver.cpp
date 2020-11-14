@@ -9,6 +9,7 @@
 #include "shared/source/os_interface/device_factory.h"
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/unit_test/mocks/ult_device_factory.h"
 
 #include "opencl/test/unit_test/mocks/mock_io_functions.h"
 #include "test.h"
@@ -34,11 +35,12 @@ TEST(zeInit, whenCallingZeInitThenInitializeOnDriverIsCalled) {
 
 using DriverVersionTest = Test<DeviceFixture>;
 
-TEST_F(DriverVersionTest, givenCallToGetExtensionPropertiesThenUnsupportedIsReturned) {
+TEST_F(DriverVersionTest, givenCallToGetExtensionPropertiesThenZeroExtensionPropertiesAreReturned) {
     uint32_t count = 0;
     ze_driver_extension_properties_t properties;
     ze_result_t res = driverHandle->getExtensionProperties(&count, &properties);
-    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, res);
+    EXPECT_EQ(count, 0u);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 }
 
 TEST_F(DriverVersionTest, returnsExpectedDriverVersion) {
@@ -241,26 +243,23 @@ struct DriverTestMultipleFamilySupport : public ::testing::Test {
     void SetUp() override {
         VariableBackup<bool> mockDeviceFlagBackup(&MockDevice::createSingleDevice, false);
 
-        NEO::ExecutionEnvironment *executionEnvironment = new NEO::ExecutionEnvironment();
-        executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
-        for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
-            executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(NEO::defaultHwInfo.get());
-        }
-
-        for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
-            devices.push_back(std::unique_ptr<NEO::MockDevice>(NEO::MockDevice::createWithExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get(), executionEnvironment, i)));
+        deviceFactory = std::make_unique<UltDeviceFactory>(numRootDevices, numSubDevices);
+        for (auto i = 0u; i < numRootDevices; i++) {
+            devices.push_back(std::unique_ptr<NEO::Device>(deviceFactory->rootDevices[i]));
             if (i < numSupportedRootDevices) {
                 devices[i]->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.levelZeroSupported = true;
             } else {
+                deviceFactory->rootDevices.erase(deviceFactory->rootDevices.begin() + i);
                 devices[i]->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.levelZeroSupported = false;
             }
         }
     }
-
     DebugManagerStateRestore restorer;
     std::vector<std::unique_ptr<NEO::Device>> devices;
+    std::unique_ptr<UltDeviceFactory> deviceFactory;
 
     const uint32_t numRootDevices = 3u;
+    const uint32_t numSubDevices = 2u;
     const uint32_t numSupportedRootDevices = 2u;
 };
 

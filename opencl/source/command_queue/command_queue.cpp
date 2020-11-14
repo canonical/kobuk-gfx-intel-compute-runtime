@@ -120,8 +120,8 @@ CommandStreamReceiver *CommandQueue::getBcsCommandStreamReceiver() const {
     return nullptr;
 }
 
-CommandStreamReceiver &CommandQueue::getCommandStreamReceiverByCommandType(cl_command_type cmdType) const {
-    if (blitEnqueueAllowed(cmdType)) {
+CommandStreamReceiver &CommandQueue::getCommandStreamReceiver(bool blitAllowed) const {
+    if (blitAllowed) {
         auto csr = getBcsCommandStreamReceiver();
         UNRECOVERABLE_IF(!csr);
         return *csr;
@@ -637,11 +637,11 @@ bool CommandQueue::queueDependenciesClearRequired() const {
 }
 
 bool CommandQueue::blitEnqueueAllowed(cl_command_type cmdType) const {
+    auto blitterSupported = device->getHardwareInfo().capabilityTable.blitterOperationsSupported || this->isCopyOnly;
 
-    auto blitAllowed = device->getHardwareInfo().capabilityTable.blitterOperationsSupported || this->isCopyOnly;
-    if (DebugManager.flags.EnableBlitterOperationsForReadWriteBuffers.get() != -1) {
-
-        blitAllowed &= static_cast<bool>(DebugManager.flags.EnableBlitterOperationsForReadWriteBuffers.get());
+    bool blitEnqueueAllowed = getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled() || this->isCopyOnly;
+    if (DebugManager.flags.EnableBlitterForEnqueueOperations.get() != -1) {
+        blitEnqueueAllowed = DebugManager.flags.EnableBlitterForEnqueueOperations.get();
     }
 
     switch (cmdType) {
@@ -654,10 +654,21 @@ bool CommandQueue::blitEnqueueAllowed(cl_command_type cmdType) const {
     case CL_COMMAND_SVM_MEMCPY:
     case CL_COMMAND_READ_IMAGE:
     case CL_COMMAND_WRITE_IMAGE:
-        return blitAllowed;
+        return blitterSupported && blitEnqueueAllowed;
     default:
         return false;
     }
+}
+
+bool CommandQueue::blitEnqueueImageAllowed(const size_t *origin, const size_t *region) {
+    auto blitEnqueuImageAllowed = false;
+
+    if (DebugManager.flags.EnableBlitterForReadWriteImage.get() != -1) {
+        blitEnqueuImageAllowed = DebugManager.flags.EnableBlitterForReadWriteImage.get();
+        blitEnqueuImageAllowed &= (origin[0] + region[0] <= BlitterConstants::maxBlitWidth) && (origin[1] + region[1] <= BlitterConstants::maxBlitHeight);
+    }
+
+    return blitEnqueuImageAllowed;
 }
 
 bool CommandQueue::isBlockedCommandStreamRequired(uint32_t commandType, const EventsRequest &eventsRequest, bool blockedQueue) const {

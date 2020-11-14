@@ -32,8 +32,11 @@
 namespace NEO {
 
 template <typename GfxFamily>
-DrmCommandStreamReceiver<GfxFamily>::DrmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex, gemCloseWorkerMode mode)
-    : BaseClass(executionEnvironment, rootDeviceIndex), gemCloseWorkerOperationMode(mode) {
+DrmCommandStreamReceiver<GfxFamily>::DrmCommandStreamReceiver(ExecutionEnvironment &executionEnvironment,
+                                                              uint32_t rootDeviceIndex,
+                                                              const DeviceBitfield deviceBitfield,
+                                                              gemCloseWorkerMode mode)
+    : BaseClass(executionEnvironment, rootDeviceIndex, deviceBitfield), gemCloseWorkerOperationMode(mode) {
 
     auto rootDeviceEnvironment = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex].get();
 

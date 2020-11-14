@@ -10,8 +10,8 @@
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/test/unit_test/cmd_parse/gen_cmd_parse.h"
+#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
 
-#include "opencl/test/unit_test/mocks/mock_graphics_allocation.h"
 #include "test.h"
 
 #include "level_zero/core/source/driver/driver_handle_imp.h"
@@ -192,8 +192,8 @@ HWTEST2_F(CommandListCreate, givenCopyOnlyCommandListWhenAppendWriteGlobalTimest
     for (auto it : iterator) {
         auto cmd = genCmdCast<MI_FLUSH_DW *>(*it);
 
-        if ((cmd->getPostSyncOperation(), MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_TIMESTAMP_REGISTER) &&
-            (cmd->getDestinationAddress(), timestampAddress)) {
+        if ((cmd->getPostSyncOperation() == MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_TIMESTAMP_REGISTER) &&
+            (cmd->getDestinationAddress() == timestampAddress)) {
             postSyncFound = true;
         }
     }
@@ -1034,6 +1034,28 @@ HWTEST2_F(CommandListCreate, givenCommandList, SupportedPlatforms) {
     auto &helper = NEO::HwHelper::get(commandList.device->getHwInfo().platform.eRenderCoreFamily);
     auto size = helper.getRenderSurfaceStateSize();
     EXPECT_EQ(commandList.getReserveSshSize(), size);
+}
+
+HWTEST_F(CommandListCreate, GivenCommandListWhenUnalignedPtrThenLeftMiddleAndRightCopyAdded) {
+    using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::Copy, returnValue));
+    ASSERT_NE(nullptr, commandList);
+
+    EXPECT_EQ(device, commandList->device);
+
+    void *srcPtr = reinterpret_cast<void *>(0x4321);
+    void *dstPtr = reinterpret_cast<void *>(0x2345);
+    auto result = commandList->appendMemoryCopy(dstPtr, srcPtr, 2 * MemoryConstants::cacheLineSize, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    GenCmdList cmdList;
+
+    ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
+        cmdList, ptrOffset(commandList->commandContainer.getCommandStream()->getCpuBase(), 0), commandList->commandContainer.getCommandStream()->getUsed()));
+    auto itor = find<XY_COPY_BLT *>(cmdList.begin(), cmdList.end());
+    for (uint32_t i = 0; i < 3u; i++, itor++) {
+        EXPECT_NE(itor++, cmdList.end());
+    }
 }
 } // namespace ult
 } // namespace L0

@@ -67,7 +67,7 @@ cl_int Program::getInfo(cl_program_info paramName, size_t paramValueSize,
     case CL_PROGRAM_BINARY_SIZES:
         for (auto i = 0u; i < clDevices.size(); i++) {
             auto rootDeviceIndex = clDevices[i]->getRootDeviceIndex();
-            packDeviceBinary(rootDeviceIndex);
+            packDeviceBinary(*clDevices[i]);
             binarySizes.push_back(buildInfos[rootDeviceIndex].packedDeviceBinarySize);
         }
 
@@ -80,7 +80,7 @@ cl_int Program::getInfo(cl_program_info paramName, size_t paramValueSize,
         pSrc = kernelNamesString.c_str();
         retSize = srcSize = kernelNamesString.length() + 1;
 
-        if (buildStatus != CL_BUILD_SUCCESS) {
+        if (!isBuilt()) {
             retVal = CL_INVALID_PROGRAM_EXECUTABLE;
         }
         break;
@@ -90,7 +90,7 @@ cl_int Program::getInfo(cl_program_info paramName, size_t paramValueSize,
         pSrc = &numKernels;
         retSize = srcSize = sizeof(numKernels);
 
-        if (buildStatus != CL_BUILD_SUCCESS) {
+        if (!isBuilt()) {
             retVal = CL_INVALID_PROGRAM_EXECUTABLE;
         }
         break;
@@ -180,11 +180,6 @@ cl_int Program::getBuildInfo(cl_device_id device, cl_program_build_info paramNam
     const void *pSrc = nullptr;
     size_t srcSize = GetInfo::invalidSourceSize;
     size_t retSize = 0;
-    cl_device_id device_id = pDevice->getSpecializedDevice<ClDevice>();
-
-    if (device != device_id) {
-        return CL_INVALID_DEVICE;
-    }
 
     auto pClDev = castToObject<ClDevice>(device);
     auto rootDeviceIndex = pClDev->getRootDeviceIndex();
@@ -192,7 +187,7 @@ cl_int Program::getBuildInfo(cl_device_id device, cl_program_build_info paramNam
     switch (paramName) {
     case CL_PROGRAM_BUILD_STATUS:
         srcSize = retSize = sizeof(cl_build_status);
-        pSrc = &buildStatus;
+        pSrc = &deviceBuildInfos.at(pClDev).buildStatus;
         break;
 
     case CL_PROGRAM_BUILD_OPTIONS:
@@ -209,7 +204,7 @@ cl_int Program::getBuildInfo(cl_device_id device, cl_program_build_info paramNam
 
     case CL_PROGRAM_BINARY_TYPE:
         srcSize = retSize = sizeof(cl_program_binary_type);
-        pSrc = &programBinaryType;
+        pSrc = &deviceBuildInfos.at(pClDev).programBinaryType;
         break;
 
     case CL_PROGRAM_BUILD_GLOBAL_VARIABLE_TOTAL_SIZE:

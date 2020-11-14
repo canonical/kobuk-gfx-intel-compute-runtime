@@ -38,7 +38,7 @@ struct BlitEnqueueTests : public ::testing::Test {
         BcsMockContext(ClDevice *device) : MockContext(device) {
             bcsOsContext.reset(OsContext::create(nullptr, 0, 0, aub_stream::ENGINE_BCS, PreemptionMode::Disabled,
                                                  false, false, false));
-            bcsCsr.reset(createCommandStream(*device->getExecutionEnvironment(), device->getRootDeviceIndex()));
+            bcsCsr.reset(createCommandStream(*device->getExecutionEnvironment(), device->getRootDeviceIndex(), device->getDeviceBitfield()));
             bcsCsr->setupContext(*bcsOsContext);
             bcsCsr->initializeTagAllocation();
 
@@ -77,7 +77,7 @@ struct BlitEnqueueTests : public ::testing::Test {
         REQUIRE_AUX_RESOLVES();
 
         DebugManager.flags.EnableTimestampPacket.set(timestampPacketEnabled);
-        DebugManager.flags.EnableBlitterOperationsForReadWriteBuffers.set(1);
+        DebugManager.flags.EnableBlitterForEnqueueOperations.set(1);
         DebugManager.flags.ForceAuxTranslationMode.set(1);
         DebugManager.flags.RenderCompressedBuffersEnabled.set(1);
         DebugManager.flags.ForceGpgpuSubmissionForBcsEnqueue.set(1);
@@ -1111,8 +1111,10 @@ struct BlitEnqueueFlushTests : public BlitEnqueueTests<1> {
             return UltCommandStreamReceiver<FamilyType>::flush(batchBuffer, allocationsForResidency);
         }
 
-        static CommandStreamReceiver *create(bool withAubDump, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) {
-            return new MyUltCsr<FamilyType>(executionEnvironment, rootDeviceIndex);
+        static CommandStreamReceiver *create(bool withAubDump, ExecutionEnvironment &executionEnvironment,
+                                             uint32_t rootDeviceIndex,
+                                             const DeviceBitfield deviceBitfield) {
+            return new MyUltCsr<FamilyType>(executionEnvironment, rootDeviceIndex, deviceBitfield);
         }
 
         uint32_t *flushCounter = nullptr;
@@ -1260,7 +1262,7 @@ HWTEST_TEMPLATED_F(BlitEnqueueTaskCountTests, givenBufferDumpingEnabledWhenEnque
 
     {
         // Non-BCS enqueue
-        DebugManager.flags.EnableBlitterOperationsForReadWriteBuffers.set(0);
+        DebugManager.flags.EnableBlitterForEnqueueOperations.set(0);
 
         commandQueue->enqueueReadBuffer(buffer.get(), true, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
 

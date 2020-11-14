@@ -64,6 +64,10 @@ BufferObject *DrmMemoryManager::createBufferObjectInMemoryRegion(Drm *drm,
     return bo;
 }
 
+GraphicsAllocation *DrmMemoryManager::createSharedUnifiedMemoryAllocation(const AllocationData &allocationData) {
+    return nullptr;
+}
+
 DrmAllocation *DrmMemoryManager::createAllocWithAlignment(const AllocationData &allocationData, size_t size, size_t alignment, size_t alignedSize, uint64_t gpuAddress) {
     bool useBooMmap = this->getDrm(allocationData.rootDeviceIndex).getMemoryInfo() && allocationData.useMmapObject;
 
@@ -295,7 +299,7 @@ bool DrmMemoryManager::copyMemoryToAllocation(GraphicsAllocation *graphicsAlloca
     return true;
 }
 
-uint64_t DrmMemoryManager::getLocalMemorySize(uint32_t rootDeviceIndex) {
+uint64_t DrmMemoryManager::getLocalMemorySize(uint32_t rootDeviceIndex, uint32_t deviceBitfield) {
     auto memoryInfo = static_cast<MemoryInfoImpl *>(getDrm(rootDeviceIndex).getMemoryInfo());
     if (!memoryInfo) {
         return 0;

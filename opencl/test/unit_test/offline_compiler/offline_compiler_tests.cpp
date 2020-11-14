@@ -7,6 +7,7 @@
 
 #include "offline_compiler_tests.h"
 
+#include "shared/source/compiler_interface/intermediate_representations.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/file_io.h"
 #include "shared/source/helpers/hw_info.h"
@@ -693,9 +694,9 @@ TEST(OfflineCompilerTest, getHardwareInfo) {
     ASSERT_NE(nullptr, mockOfflineCompiler);
 
     EXPECT_EQ(CL_INVALID_DEVICE, mockOfflineCompiler->getHardwareInfo("invalid"));
-    EXPECT_EQ(0u, mockOfflineCompiler->getHardwareInfo().gtSystemInfo.SliceCount);
+    EXPECT_EQ(0u, mockOfflineCompiler->getHardwareInfo().gtSystemInfo.MaxSlicesSupported);
     EXPECT_EQ(CL_SUCCESS, mockOfflineCompiler->getHardwareInfo(gEnvironment->devicePrefix.c_str()));
-    EXPECT_NE(0u, mockOfflineCompiler->getHardwareInfo().gtSystemInfo.SliceCount);
+    EXPECT_NE(0u, mockOfflineCompiler->getHardwareInfo().gtSystemInfo.MaxSlicesSupported);
 }
 
 TEST(OfflineCompilerTest, storeBinary) {
@@ -1286,5 +1287,92 @@ INSTANTIATE_TEST_CASE_P(
     WorkaroundApplicable,
     OfflineCompilerTestWithParams,
     testing::ValuesIn(workaroundApplicableForDeviceArray));
+
+TEST(OclocCompile, whenDetectedPotentialInputTypeMismatchThenEmitsWarning) {
+    std::string sourceOclC = "__kernel void k() { }";
+    std::string sourceLlvmBc = NEO::llvmBcMagic.str();
+    std::string sourceSpirv = NEO::spirvMagic.str();
+    std::string sourceSpirvInv = NEO::spirvMagicInv.str();
+
+    std::string notSpirvWarning = "Warning : file does not look like spirv bitcode (wrong magic numbers)";
+    std::string notLlvmBcWarning = "Warning : file does not look like llvm bitcode (wrong magic numbers)";
+    std::string isSpirvWarning = "Warning : file looks like spirv bitcode (based on magic numbers) - please make sure proper CLI flags are present";
+    std::string isLlvmBcWarning = "Warning : file looks like llvm bitcode (based on magic numbers) - please make sure proper CLI flags are present";
+    std::string allWarnings[] = {notSpirvWarning, notLlvmBcWarning, isLlvmBcWarning, isSpirvWarning};
+
+    struct Case {
+        std::string input;
+        bool isSpirv;
+        bool isLlvm;
+        std::string expectedWarning;
+    };
+
+    Case cases[] = {
+        {sourceOclC, false, false, ""},
+        {sourceOclC, true, false, notSpirvWarning},
+        {sourceOclC, false, true, notLlvmBcWarning},
+
+        {sourceLlvmBc, false, false, isLlvmBcWarning},
+        {sourceLlvmBc, true, false, notSpirvWarning},
+        {sourceLlvmBc, false, true, ""},
+
+        {sourceSpirv, false, false, isSpirvWarning},
+        {sourceSpirv, true, false, ""},
+        {sourceSpirv, false, true, notLlvmBcWarning},
+
+        {sourceSpirvInv, false, false, isSpirvWarning},
+        {sourceSpirvInv, true, false, ""},
+        {sourceSpirvInv, false, true, notLlvmBcWarning},
+    };
+
+    MockOfflineCompiler ocloc;
+
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-q",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-device",
+        gEnvironment->devicePrefix.c_str()};
+
+    ocloc.getHardwareInfo(gEnvironment->devicePrefix.c_str());
+    int retVal = ocloc.initialize(argv.size(), argv);
+    ASSERT_EQ(0, retVal);
+
+    int caseNum = 0;
+    for (auto &c : cases) {
+        ocloc.sourceCode = c.input;
+        ocloc.inputFileLlvm = c.isLlvm;
+        ocloc.inputFileSpirV = c.isSpirv;
+        ocloc.build();
+        auto log = ocloc.argHelper->getPrinterRef().getLog().str();
+        ocloc.clearLog();
+        if (c.expectedWarning.empty()) {
+            for (auto &w : allWarnings) {
+                EXPECT_THAT(log.c_str(), testing::Not(testing::HasSubstr(w.c_str()))) << " Case : " << caseNum;
+            }
+        } else {
+            EXPECT_THAT(log.c_str(), testing::HasSubstr(c.expectedWarning.c_str())) << " Case : " << caseNum;
+        }
+        caseNum++;
+    }
+}
+
+TEST(OclocCompile, givenCommandLineWithoutDeviceWhenCompilingToSpirvThenSucceedsButUsesEmptyExtensionString) {
+    MockOfflineCompiler ocloc;
+
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-q",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-spv_only"};
+
+    int retVal = ocloc.initialize(argv.size(), argv);
+    ASSERT_EQ(0, retVal);
+    retVal = ocloc.build();
+    EXPECT_EQ(0, retVal);
+    EXPECT_THAT(ocloc.internalOptions.c_str(), testing::HasSubstr("-cl-ext=-all,+cl_khr_3d_image_writes"));
+}
 
 } // namespace NEO

@@ -49,19 +49,19 @@ TEST(ProgramFromBinary, givenBinaryWithDebugDataWhenCreatingProgramFromBinaryThe
 
     size_t binarySize = 0;
     auto pBinary = loadDataFromFile(filePath.c_str(), binarySize);
-    cl_int retVal = program->createProgramFromBinary(pBinary.get(), binarySize, device->getRootDeviceIndex());
+    cl_int retVal = program->createProgramFromBinary(pBinary.get(), binarySize, *device);
 
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_NE(nullptr, program->getDebugData());
     EXPECT_NE(0u, program->getDebugDataSize());
 }
 
-class ProgramWithKernelDebuggingTest : public ProgramSimpleFixture,
+class ProgramWithKernelDebuggingTest : public ProgramFixture,
                                        public ::testing::Test {
   public:
     void SetUp() override {
-        ProgramSimpleFixture::SetUp();
-        device = pClDevice;
+        pDevice = static_cast<MockDevice *>(&mockContext.getDevice(0)->getDevice());
+
         if (!pDevice->getHardwareInfo().capabilityTable.debuggerSupported) {
             GTEST_SKIP();
         }
@@ -72,19 +72,17 @@ class ProgramWithKernelDebuggingTest : public ProgramSimpleFixture,
 
         kbHelper = std::make_unique<KernelBinaryHelper>(filename, false);
         CreateProgramWithSource(
-            pContext,
-            &device,
+            &mockContext,
             "copybuffer.cl");
-        mockProgram = reinterpret_cast<MockProgram *>(pProgram);
         pProgram->enableKernelDebug();
     }
 
     void TearDown() override {
-        ProgramSimpleFixture::TearDown();
+        ProgramFixture::TearDown();
     }
-    cl_device_id device;
     std::unique_ptr<KernelBinaryHelper> kbHelper;
-    MockProgram *mockProgram = nullptr;
+    MockUnrestrictiveContext mockContext;
+    MockDevice *pDevice = nullptr;
 };
 
 TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsCompiledThenInternalOptionsIncludeDebugFlag) {
@@ -94,10 +92,8 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsCompi
     debugVars.receivedInternalOptionsOutput = &receivedInternalOptions;
     gEnvironment->fclPushDebugVars(debugVars);
 
-    cl_int retVal = pProgram->compile(1, &device, nullptr,
-                                      0, nullptr, nullptr,
-                                      nullptr,
-                                      nullptr);
+    cl_int retVal = pProgram->compile(pProgram->getDevices(), nullptr,
+                                      0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_TRUE(CompilerOptions::contains(receivedInternalOptions, CompilerOptions::debugKernelEnable)) << receivedInternalOptions;
@@ -105,10 +101,8 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsCompi
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsCompiledThenInternalOptionsIncludeDashGFlag) {
-    cl_int retVal = pProgram->compile(1, &device, nullptr,
-                                      0, nullptr, nullptr,
-                                      nullptr,
-                                      nullptr);
+    cl_int retVal = pProgram->compile(pProgram->getDevices(), nullptr,
+                                      0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_THAT(pProgram->getOptions(), ::testing::HasSubstr("-g"));
@@ -119,10 +113,8 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugAndOptDisabledWhen
     sourceLevelDebugger->isOptDisabled = true;
     pDevice->executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]->debugger.reset(sourceLevelDebugger);
 
-    cl_int retVal = pProgram->compile(1, &device, nullptr,
-                                      0, nullptr, nullptr,
-                                      nullptr,
-                                      nullptr);
+    cl_int retVal = pProgram->compile(pProgram->getDevices(), nullptr,
+                                      0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_THAT(pProgram->getOptions(), ::testing::HasSubstr(CompilerOptions::optDisable.data()));
 }
@@ -132,10 +124,8 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsCompi
     sourceLevelDebugger->sourceCodeFilename = "debugFileName";
     pDevice->executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]->debugger.reset(sourceLevelDebugger);
 
-    cl_int retVal = pProgram->compile(1, &device, nullptr,
-                                      0, nullptr, nullptr,
-                                      nullptr,
-                                      nullptr);
+    cl_int retVal = pProgram->compile(pProgram->getDevices(), nullptr,
+                                      0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_THAT(pProgram->getOptions(), ::testing::StartsWith("-s debugFileName"));
 }
@@ -147,7 +137,7 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsBuilt
     debugVars.receivedInternalOptionsOutput = &receivedInternalOptions;
     gEnvironment->fclPushDebugVars(debugVars);
 
-    cl_int retVal = pProgram->build(1, &device, nullptr, nullptr, nullptr, false);
+    cl_int retVal = pProgram->build(pProgram->getDevices(), nullptr, false);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_TRUE(CompilerOptions::contains(receivedInternalOptions, CompilerOptions::debugKernelEnable)) << receivedInternalOptions;
@@ -155,7 +145,7 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsBuilt
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsBuiltThenOptionsIncludeDashGFlag) {
-    cl_int retVal = pProgram->build(1, &device, nullptr, nullptr, nullptr, false);
+    cl_int retVal = pProgram->build(pProgram->getDevices(), nullptr, false);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_THAT(pProgram->getOptions(), ::testing::HasSubstr("-g"));
 }
@@ -165,7 +155,7 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugAndOptDisabledWhen
     sourceLevelDebugger->isOptDisabled = true;
     pDevice->executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]->debugger.reset(sourceLevelDebugger);
 
-    cl_int retVal = pProgram->build(1, &device, nullptr, nullptr, nullptr, false);
+    cl_int retVal = pProgram->build(pProgram->getDevices(), nullptr, false);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_THAT(pProgram->getOptions(), ::testing::HasSubstr(CompilerOptions::optDisable.data()));
 }
@@ -175,7 +165,7 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsBuilt
     sourceLevelDebugger->sourceCodeFilename = "debugFileName";
     pDevice->executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]->debugger.reset(sourceLevelDebugger);
 
-    cl_int retVal = pProgram->build(1, &device, nullptr, nullptr, nullptr, false);
+    cl_int retVal = pProgram->build(pProgram->getDevices(), nullptr, false);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_THAT(pProgram->getOptions(), ::testing::StartsWith("-s debugFileName"));
 }
@@ -184,61 +174,63 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsLinke
     MockActiveSourceLevelDebugger *sourceLevelDebugger = new MockActiveSourceLevelDebugger;
     pDevice->executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]->debugger.reset(sourceLevelDebugger);
 
-    cl_int retVal = pProgram->compile(1, &device, nullptr, 0, nullptr, nullptr, nullptr, nullptr);
+    cl_int retVal = pProgram->compile(pProgram->getDevices(), nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    auto program = std::unique_ptr<GMockProgram>(new GMockProgram(pContext, false, toClDeviceVector(*pClDevice)));
+    auto program = std::unique_ptr<GMockProgram>(new GMockProgram(&mockContext, false, mockContext.getDevices()));
     program->enableKernelDebug();
 
-    EXPECT_CALL(*program, appendKernelDebugOptions()).Times(1);
+    EXPECT_CALL(*program, appendKernelDebugOptions(::testing::_, ::testing::_)).Times(static_cast<int>(mockContext.getRootDeviceIndices().size()));
 
     cl_program clProgramToLink = pProgram;
-    retVal = program->link(1, &device, nullptr, 1, &clProgramToLink, nullptr, nullptr);
+    retVal = program->link(pProgram->getDevices(), nullptr, 1, &clProgramToLink);
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsBuiltThenDebuggerIsNotifiedWithKernelDebugData) {
-    GMockSourceLevelDebugger *sourceLevelDebugger = new GMockSourceLevelDebugger(nullptr);
-    ON_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).WillByDefault(::testing::Return(false));
-    ON_CALL(*sourceLevelDebugger, isOptimizationDisabled()).WillByDefault(::testing::Return(false));
+    for (auto &rootDeviceIndex : mockContext.getRootDeviceIndices()) {
+        GMockSourceLevelDebugger *sourceLevelDebugger = new GMockSourceLevelDebugger(nullptr);
+        ON_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).WillByDefault(::testing::Return(false));
+        ON_CALL(*sourceLevelDebugger, isOptimizationDisabled()).WillByDefault(::testing::Return(false));
 
-    EXPECT_CALL(*sourceLevelDebugger, isOptimizationDisabled()).Times(1);
-    EXPECT_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).Times(1);
-    EXPECT_CALL(*sourceLevelDebugger, notifyKernelDebugData(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(1);
+        EXPECT_CALL(*sourceLevelDebugger, isOptimizationDisabled()).Times(1);
+        EXPECT_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).Times(1);
+        EXPECT_CALL(*sourceLevelDebugger, notifyKernelDebugData(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(1);
 
-    sourceLevelDebugger->setActive(true);
-    pDevice->executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]->debugger.reset(sourceLevelDebugger);
+        sourceLevelDebugger->setActive(true);
+        pDevice->executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->debugger.reset(sourceLevelDebugger);
+    }
 
-    cl_int retVal = pProgram->build(1, &device, nullptr, nullptr, nullptr, false);
+    cl_int retVal = pProgram->build(pProgram->getDevices(), nullptr, false);
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsLinkedThenDebuggerIsNotifiedWithKernelDebugData) {
-    GMockSourceLevelDebugger *sourceLevelDebugger = new GMockSourceLevelDebugger(nullptr);
-    ON_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).WillByDefault(::testing::Return(false));
-    ON_CALL(*sourceLevelDebugger, isOptimizationDisabled()).WillByDefault(::testing::Return(false));
+    for (auto &rootDeviceIndex : mockContext.getRootDeviceIndices()) {
+        GMockSourceLevelDebugger *sourceLevelDebugger = new GMockSourceLevelDebugger(nullptr);
+        ON_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).WillByDefault(::testing::Return(false));
+        ON_CALL(*sourceLevelDebugger, isOptimizationDisabled()).WillByDefault(::testing::Return(false));
 
-    EXPECT_CALL(*sourceLevelDebugger, isOptimizationDisabled()).Times(2);
-    EXPECT_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).Times(1);
-    EXPECT_CALL(*sourceLevelDebugger, notifyKernelDebugData(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(1);
+        EXPECT_CALL(*sourceLevelDebugger, isOptimizationDisabled()).Times(2);
+        EXPECT_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).Times(1);
+        EXPECT_CALL(*sourceLevelDebugger, notifyKernelDebugData(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(1);
 
-    sourceLevelDebugger->setActive(true);
-    pDevice->executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]->debugger.reset(sourceLevelDebugger);
+        sourceLevelDebugger->setActive(true);
+        pDevice->executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->debugger.reset(sourceLevelDebugger);
+    }
 
-    cl_int retVal = pProgram->compile(1, &device, nullptr,
-                                      0, nullptr, nullptr,
-                                      nullptr,
-                                      nullptr);
+    cl_int retVal = pProgram->compile(pProgram->getDevices(), nullptr,
+                                      0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     cl_program program = pProgram;
-    retVal = pProgram->link(1, &device, nullptr,
-                            1, &program, nullptr, nullptr);
+    retVal = pProgram->link(pProgram->getDevices(), nullptr,
+                            1, &program);
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenProgramWithKernelDebugEnabledWhenBuiltThenPatchTokenAllocateSipSurfaceHasSizeGreaterThanZero) {
-    retVal = pProgram->build(1, &device, CompilerOptions::debugKernelEnable.data(), nullptr, nullptr, false);
+    auto retVal = pProgram->build(pProgram->getDevices(), CompilerOptions::debugKernelEnable.data(), false);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     auto kernelInfo = pProgram->getKernelInfo("CopyBuffer");
@@ -246,15 +238,16 @@ TEST_F(ProgramWithKernelDebuggingTest, givenProgramWithKernelDebugEnabledWhenBui
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenKernelDebugEnabledWhenProgramIsBuiltThenDebugDataIsStored) {
-    retVal = pProgram->build(1, &device, nullptr, nullptr, nullptr, false);
+    auto retVal = pProgram->build(pProgram->getDevices(), nullptr, false);
+    EXPECT_EQ(CL_SUCCESS, retVal);
 
-    auto debugData = mockProgram->getDebugData();
+    auto debugData = pProgram->getDebugData();
     EXPECT_NE(nullptr, debugData);
-    EXPECT_NE(0u, mockProgram->getDebugDataSize());
+    EXPECT_NE(0u, pProgram->getDebugDataSize());
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenProgramWithKernelDebugEnabledWhenProcessDebugDataIsCalledThenKernelInfosAreFilledWithDebugData) {
-    retVal = pProgram->build(1, &device, nullptr, nullptr, nullptr, false);
+    auto retVal = pProgram->build(pProgram->getDevices(), nullptr, false);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     pProgram->processDebugData();

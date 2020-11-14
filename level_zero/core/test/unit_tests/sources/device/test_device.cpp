@@ -5,9 +5,12 @@
  *
  */
 
+#include "shared/source/device/root_device.h"
+#include "shared/source/helpers/bindless_heaps_helper.h"
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/test/unit_test/mocks/ult_device_factory.h"
 
 #include "test.h"
 
@@ -264,6 +267,21 @@ TEST_F(DeviceTest, givenCallToDevicePropertiesThenTimestampValidBitsAreCorrectly
     EXPECT_EQ(32u, deviceProps.kernelTimestampValidBits);
 }
 
+TEST_F(DeviceTest, whenGetExternalMemoryPropertiesIsCalledThenSuccessIsReturnedAndNoPropertiesAreReturned) {
+    ze_device_external_memory_properties_t externalMemoryProperties;
+
+    ze_result_t result = device->getExternalMemoryProperties(&externalMemoryProperties);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(externalMemoryProperties.imageExportTypes & ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_FD, 0u);
+    EXPECT_EQ(externalMemoryProperties.imageExportTypes & ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF, 0u);
+    EXPECT_EQ(externalMemoryProperties.imageImportTypes & ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_FD, 0u);
+    EXPECT_EQ(externalMemoryProperties.imageImportTypes & ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF, 0u);
+    EXPECT_EQ(externalMemoryProperties.memoryAllocationExportTypes & ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_FD, 0u);
+    EXPECT_EQ(externalMemoryProperties.memoryAllocationExportTypes & ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF, 0u);
+    EXPECT_EQ(externalMemoryProperties.memoryAllocationImportTypes & ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_FD, 0u);
+    EXPECT_EQ(externalMemoryProperties.memoryAllocationImportTypes & ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF, 0u);
+}
+
 struct DeviceHasNoDoubleFp64Test : public ::testing::Test {
     void SetUp() override {
         DebugManager.flags.CreateMultipleRootDevices.set(numRootDevices);
@@ -377,13 +395,13 @@ struct MultipleDevicesTest : public ::testing::Test {
             executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(NEO::defaultHwInfo.get());
         }
 
+        memoryManager = new ::testing::NiceMock<MockMemoryManagerMultiDevice>(*executionEnvironment);
+        executionEnvironment->memoryManager.reset(memoryManager);
+        deviceFactory = std::make_unique<UltDeviceFactory>(numRootDevices, numSubDevices, *executionEnvironment);
+
         for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
-            devices.push_back(std::unique_ptr<NEO::MockDevice>(NEO::MockDevice::createWithExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get(), executionEnvironment, i)));
+            devices.push_back(std::unique_ptr<NEO::Device>(deviceFactory->rootDevices[i]));
         }
-
-        memoryManager = new ::testing::NiceMock<MockMemoryManagerMultiDevice>(*devices[0].get()->getExecutionEnvironment());
-        devices[0].get()->getExecutionEnvironment()->memoryManager.reset(memoryManager);
-
         driverHandle = std::make_unique<Mock<L0::DriverHandleImp>>();
         driverHandle->initialize(std::move(devices));
     }
@@ -391,6 +409,7 @@ struct MultipleDevicesTest : public ::testing::Test {
     DebugManagerStateRestore restorer;
     std::unique_ptr<Mock<L0::DriverHandleImp>> driverHandle;
     MockMemoryManagerMultiDevice *memoryManager = nullptr;
+    std::unique_ptr<UltDeviceFactory> deviceFactory;
 
     const uint32_t numRootDevices = 2u;
     const uint32_t numSubDevices = 2u;

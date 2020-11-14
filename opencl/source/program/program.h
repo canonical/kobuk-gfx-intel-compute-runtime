@@ -126,25 +126,20 @@ class Program : public BaseObject<_cl_program> {
     Program(const Program &) = delete;
     Program &operator=(const Program &) = delete;
 
-    cl_int build(cl_uint numDevices, const cl_device_id *deviceList, const char *buildOptions,
-                 void(CL_CALLBACK *funcNotify)(cl_program program, void *userData),
-                 void *userData, bool enableCaching);
+    cl_int build(const ClDeviceVector &deviceVector, const char *buildOptions,
+                 bool enableCaching);
 
-    cl_int build(const Device *pDevice, const char *buildOptions, bool enableCaching,
+    cl_int build(const ClDeviceVector &deviceVector, const char *buildOptions, bool enableCaching,
                  std::unordered_map<std::string, BuiltinDispatchInfoBuilder *> &builtinsMap);
 
     MOCKABLE_VIRTUAL cl_int processGenBinary(uint32_t rootDeviceIndex);
     MOCKABLE_VIRTUAL cl_int processProgramInfo(ProgramInfo &dst);
 
-    cl_int compile(cl_uint numDevices, const cl_device_id *deviceList, const char *buildOptions,
-                   cl_uint numInputHeaders, const cl_program *inputHeaders, const char **headerIncludeNames,
-                   void(CL_CALLBACK *funcNotify)(cl_program program, void *userData),
-                   void *userData);
+    cl_int compile(const ClDeviceVector &deviceVector, const char *buildOptions,
+                   cl_uint numInputHeaders, const cl_program *inputHeaders, const char **headerIncludeNames);
 
-    cl_int link(cl_uint numDevices, const cl_device_id *deviceList, const char *buildOptions,
-                cl_uint numInputPrograms, const cl_program *inputPrograms,
-                void(CL_CALLBACK *funcNotify)(cl_program program, void *userData),
-                void *userData);
+    cl_int link(const ClDeviceVector &deviceVector, const char *buildOptions,
+                cl_uint numInputPrograms, const cl_program *inputPrograms);
 
     cl_int setProgramSpecializationConstant(cl_uint specId, size_t specSize, const void *specValue);
     MOCKABLE_VIRTUAL cl_int updateSpecializationConstant(cl_uint specId, size_t specSize, const void *specValue);
@@ -159,8 +154,8 @@ class Program : public BaseObject<_cl_program> {
     cl_int getBuildInfo(cl_device_id device, cl_program_build_info paramName,
                         size_t paramValueSize, void *paramValue, size_t *paramValueSizeRet) const;
 
-    cl_build_status getBuildStatus() const {
-        return buildStatus;
+    bool isBuilt() const {
+        return std::all_of(this->deviceBuildInfos.begin(), this->deviceBuildInfos.end(), [](auto deviceBuildInfo) { return deviceBuildInfo.second.buildStatus == CL_SUCCESS; });
     }
 
     Context &getContext() const {
@@ -190,8 +185,8 @@ class Program : public BaseObject<_cl_program> {
 
     const char *getBuildLog(uint32_t rootDeviceIndex) const;
 
-    cl_uint getProgramBinaryType() const {
-        return programBinaryType;
+    cl_uint getProgramBinaryType(ClDevice *clDevice) const {
+        return deviceBuildInfos.at(clDevice).programBinaryType;
     }
 
     bool getIsSpirV() const {
@@ -219,8 +214,6 @@ class Program : public BaseObject<_cl_program> {
     void cleanCurrentKernelInfo();
 
     const std::string &getOptions() const { return options; }
-
-    const std::string &getInternalOptions() const { return internalOptions; }
 
     bool getAllowNonUniform() const {
         return allowNonUniform;
@@ -265,10 +258,19 @@ class Program : public BaseObject<_cl_program> {
 
     MOCKABLE_VIRTUAL void replaceDeviceBinary(std::unique_ptr<char[]> newBinary, size_t newBinarySize, uint32_t rootDeviceIndex);
 
-  protected:
-    MOCKABLE_VIRTUAL cl_int createProgramFromBinary(const void *pBinary, size_t binarySize, uint32_t rootDeviceIndex);
+    static bool isValidCallback(void(CL_CALLBACK *funcNotify)(cl_program program, void *userData), void *userData);
+    void invokeCallback(void(CL_CALLBACK *funcNotify)(cl_program program, void *userData), void *userData);
 
-    cl_int packDeviceBinary(uint32_t rootDeviceIndex);
+    const ClDeviceVector &getDevices() const { return clDevices; }
+    bool isDeviceAssociated(const ClDevice &clDevice) const;
+
+    static cl_int processInputDevices(ClDeviceVector *&deviceVectorPtr, cl_uint numDevices, const cl_device_id *deviceList, const ClDeviceVector &allAvailableDevices);
+    MOCKABLE_VIRTUAL void initInternalOptions(std::string &internalOptions) const;
+
+  protected:
+    MOCKABLE_VIRTUAL cl_int createProgramFromBinary(const void *pBinary, size_t binarySize, ClDevice &clDevice);
+
+    cl_int packDeviceBinary(ClDevice &clDevice);
 
     MOCKABLE_VIRTUAL cl_int linkBinary(Device *pDevice, const void *constantsInitData, const void *variablesInitData);
 
@@ -277,15 +279,17 @@ class Program : public BaseObject<_cl_program> {
     void updateNonUniformFlag();
     void updateNonUniformFlag(const Program **inputProgram, size_t numInputPrograms);
 
-    void extractInternalOptions(const std::string &options);
+    void extractInternalOptions(const std::string &options, std::string &internalOptions);
     MOCKABLE_VIRTUAL bool isFlagOption(ConstStringRef option);
     MOCKABLE_VIRTUAL bool isOptionValueValid(ConstStringRef option, ConstStringRef value);
-    MOCKABLE_VIRTUAL void applyAdditionalOptions();
+    MOCKABLE_VIRTUAL void applyAdditionalOptions(std::string &internalOptions);
 
-    MOCKABLE_VIRTUAL bool appendKernelDebugOptions();
-    void notifyDebuggerWithSourceCode(std::string &filename);
+    MOCKABLE_VIRTUAL bool appendKernelDebugOptions(ClDevice &clDevice, std::string &internalOptions);
+    void notifyDebuggerWithSourceCode(ClDevice &clDevice, std::string &filename);
 
-    cl_program_binary_type programBinaryType = CL_PROGRAM_BINARY_TYPE_NONE;
+    void setBuildStatus(cl_build_status status);
+    void setBuildStatusSuccess(const ClDeviceVector &deviceVector, cl_program_binary_type binaryType);
+
     bool isSpirV = false;
 
     std::unique_ptr<char[]> irBinary;
@@ -300,12 +304,17 @@ class Program : public BaseObject<_cl_program> {
     std::vector<KernelInfo *> parentKernelInfoArray;
     std::vector<KernelInfo *> subgroupKernelInfoArray;
 
-    cl_build_status buildStatus = CL_BUILD_NONE;
+    struct DeviceBuildInfo {
+        StackVec<ClDevice *, 2> associatedSubDevices;
+        cl_build_status buildStatus = CL_BUILD_NONE;
+        cl_program_binary_type programBinaryType = CL_PROGRAM_BINARY_TYPE_NONE;
+    };
+
+    std::unordered_map<ClDevice *, DeviceBuildInfo> deviceBuildInfos;
     bool isCreatedFromBinary = false;
 
     std::string sourceCode;
     std::string options;
-    std::string internalOptions;
     static const std::vector<ConstStringRef> internalOptionsToExtract;
 
     uint32_t programOptionVersion = 12U;

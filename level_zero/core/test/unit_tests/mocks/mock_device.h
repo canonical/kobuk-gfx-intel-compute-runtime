@@ -135,26 +135,12 @@ struct Mock<Device> : public Device {
                 (ze_device_image_properties_t * pDeviceImageProperties),
                 (override));
     MOCK_METHOD(ze_result_t,
+                getExternalMemoryProperties,
+                (ze_device_external_memory_properties_t * pExternalMemoryProperties),
+                (override));
+    MOCK_METHOD(ze_result_t,
                 systemBarrier,
                 (),
-                (override));
-    MOCK_METHOD(ze_result_t,
-                registerCLMemory,
-                (cl_context context,
-                 cl_mem mem,
-                 void **ptr),
-                (override));
-    MOCK_METHOD(ze_result_t,
-                registerCLProgram,
-                (cl_context context,
-                 cl_program program,
-                 ze_module_handle_t *phModule),
-                (override));
-    MOCK_METHOD(ze_result_t,
-                registerCLCommandQueue,
-                (cl_context context,
-                 cl_command_queue commandQueue,
-                 ze_command_queue_handle_t *phCommandQueue),
                 (override));
     // Runtime internal methods
     MOCK_METHOD(void *,

@@ -31,7 +31,7 @@
 
 namespace NEO {
 
-bool useKernelDescriptor = false;
+bool useKernelDescriptor = true;
 
 struct KernelArgumentType {
     const char *argTypeQualifier;
@@ -184,13 +184,6 @@ KernelInfo::~KernelInfo() {
 
 void KernelInfo::storePatchToken(const SPatchExecutionEnvironment *execEnv) {
     this->patchInfo.executionEnvironment = execEnv;
-    if (execEnv->RequiredWorkGroupSizeX != 0) {
-        this->reqdWorkGroupSize[0] = execEnv->RequiredWorkGroupSizeX;
-        this->reqdWorkGroupSize[1] = execEnv->RequiredWorkGroupSizeY;
-        this->reqdWorkGroupSize[2] = execEnv->RequiredWorkGroupSizeZ;
-        DEBUG_BREAK_IF(!(execEnv->RequiredWorkGroupSizeY > 0));
-        DEBUG_BREAK_IF(!(execEnv->RequiredWorkGroupSizeZ > 0));
-    }
     this->workgroupWalkOrder[0] = 0;
     this->workgroupWalkOrder[1] = 1;
     this->workgroupWalkOrder[2] = 2;
@@ -458,9 +451,9 @@ void KernelInfo::apply(const DeviceInfoKernelPayloadConstants &constants) {
 
     uint32_t privateMemorySize = 0U;
     if (patchInfo.pAllocateStatelessPrivateSurface) {
-        privateMemorySize = static_cast<uint32_t>(KernelHelper::getPrivateSurfaceSize(patchInfo.pAllocateStatelessPrivateSurface->PerThreadPrivateMemorySize,
-                                                                                      constants.computeUnitsUsedForScratch, getMaxSimdSize(),
-                                                                                      patchInfo.pAllocateStatelessPrivateSurface->IsSimtThread));
+        auto perHwThreadSize = PatchTokenBinary::getPerHwThreadPrivateSurfaceSize(patchInfo.pAllocateStatelessPrivateSurface, this->getMaxSimdSize());
+        privateMemorySize = static_cast<uint32_t>(KernelHelper::getPrivateSurfaceSize(perHwThreadSize,
+                                                                                      constants.computeUnitsUsedForScratch));
     }
 
     if (privateMemoryStatelessSizeOffset != WorkloadInfo::undefinedOffset) {

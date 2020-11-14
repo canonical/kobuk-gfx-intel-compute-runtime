@@ -343,6 +343,7 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
     case GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY:
     case GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER:
     case GraphicsAllocation::AllocationType::DEBUG_CONTEXT_SAVE_AREA:
+    case GraphicsAllocation::AllocationType::DEBUG_SBA_TRACKING_BUFFER:
         allocationData.flags.useSystemMemory = true;
     default:
         break;
@@ -475,6 +476,7 @@ GraphicsAllocation *MemoryManager::allocateGraphicsMemory(const AllocationData &
         return allocation;
     }
     bool use32Allocator = heapAssigner.use32BitHeap(allocationData.type);
+
     if (use32Allocator ||
         (force32bitAllocations && allocationData.flags.allow32Bit && is64bit)) {
         auto hwInfo = executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getHardwareInfo();

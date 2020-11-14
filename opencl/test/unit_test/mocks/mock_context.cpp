@@ -10,10 +10,10 @@
 #include "shared/source/built_ins/built_ins.h"
 #include "shared/source/compiler_interface/compiler_interface.h"
 #include "shared/source/memory_manager/deferred_deleter.h"
+#include "shared/source/memory_manager/os_agnostic_memory_manager.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 
 #include "opencl/source/command_queue/command_queue.h"
-#include "opencl/source/memory_manager/os_agnostic_memory_manager.h"
 #include "opencl/source/sharings/sharing.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
@@ -27,8 +27,8 @@ MockContext::MockContext(ClDevice *pDevice, bool noSpecialQueue) {
     initializeWithDevices(ClDeviceVector{&deviceId, 1}, noSpecialQueue);
 }
 
-MockContext::MockContext(const ClDeviceVector &clDeviceVector) {
-    initializeWithDevices(clDeviceVector, true);
+MockContext::MockContext(const ClDeviceVector &clDeviceVector, bool noSpecialQueue) {
+    initializeWithDevices(clDeviceVector, noSpecialQueue);
 }
 
 MockContext::MockContext(
@@ -40,7 +40,6 @@ MockContext::MockContext(
     contextCallback = funcNotify;
     userData = data;
     memoryManager = nullptr;
-    specialQueue = nullptr;
     defaultDeviceQueue = nullptr;
     driverDiagnostics = nullptr;
     rootDeviceIndices = {};
@@ -49,9 +48,11 @@ MockContext::MockContext(
 }
 
 MockContext::~MockContext() {
-    if (specialQueue) {
-        specialQueue->release();
-        specialQueue = nullptr;
+    for (auto &rootDeviceIndex : rootDeviceIndices) {
+        if (specialQueues[rootDeviceIndex]) {
+            specialQueues[rootDeviceIndex]->release();
+            specialQueues[rootDeviceIndex] = nullptr;
+        }
     }
     if (memoryManager && memoryManager->isAsyncDeleterEnabled()) {
         memoryManager->getDeferredDeleter()->removeClient();
@@ -97,6 +98,7 @@ void MockContext::initializeWithDevices(const ClDeviceVector &devices, bool noSp
         rootDeviceIndices.insert(pClDevice->getRootDeviceIndex());
     }
     maxRootDeviceIndex = *std::max_element(rootDeviceIndices.begin(), rootDeviceIndices.end(), std::less<uint32_t const>());
+    specialQueues.resize(maxRootDeviceIndex + 1u);
 
     this->devices = devices;
     memoryManager = devices[0]->getMemoryManager();
@@ -114,10 +116,16 @@ void MockContext::initializeWithDevices(const ClDeviceVector &devices, bool noSp
 
     cl_int retVal;
     if (!noSpecialQueue) {
-        auto commandQueue = CommandQueue::create(this, devices[0], nullptr, false, retVal);
-        assert(retVal == CL_SUCCESS);
-        overrideSpecialQueueAndDecrementRefCount(commandQueue);
+        for (auto &device : devices) {
+            if (!specialQueues[device->getRootDeviceIndex()]) {
+                auto commandQueue = CommandQueue::create(this, device, nullptr, false, retVal);
+                assert(retVal == CL_SUCCESS);
+                overrideSpecialQueueAndDecrementRefCount(commandQueue, device->getRootDeviceIndex());
+            }
+        }
     }
+
+    setupContextType();
 }
 
 MockDefaultContext::MockDefaultContext() : MockContext(nullptr, nullptr) {

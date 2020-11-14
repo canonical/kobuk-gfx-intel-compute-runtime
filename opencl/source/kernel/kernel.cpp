@@ -10,6 +10,7 @@
 #include "shared/source/built_ins/built_ins.h"
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/device_binary_format/patchtokens_decoder.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/api_specific_config.h"
@@ -271,13 +272,10 @@ cl_int Kernel::initialize() {
         localBindingTableOffset = (patchInfo.bindingTableState != nullptr) ? patchInfo.bindingTableState->Offset : 0;
 
         // patch crossthread data and ssh with inline surfaces, if necessary
-        auto perThreadPrivateMemorySize = patchInfo.pAllocateStatelessPrivateSurface
-                                              ? patchInfo.pAllocateStatelessPrivateSurface->PerThreadPrivateMemorySize
-                                              : 0;
+        auto perHwThreadPrivateMemorySize = PatchTokenBinary::getPerHwThreadPrivateSurfaceSize(patchInfo.pAllocateStatelessPrivateSurface, getKernelInfo().getMaxSimdSize());
 
-        if (perThreadPrivateMemorySize) {
-            privateSurfaceSize = KernelHelper::getPrivateSurfaceSize(perThreadPrivateMemorySize, device.getSharedDeviceInfo().computeUnitsUsedForScratch,
-                                                                     getKernelInfo().getMaxSimdSize(), patchInfo.pAllocateStatelessPrivateSurface->IsSimtThread);
+        if (perHwThreadPrivateMemorySize) {
+            privateSurfaceSize = KernelHelper::getPrivateSurfaceSize(perHwThreadPrivateMemorySize, device.getSharedDeviceInfo().computeUnitsUsedForScratch);
 
             DEBUG_BREAK_IF(privateSurfaceSize == 0);
             if (privateSurfaceSize > std::numeric_limits<uint32_t>::max()) {
@@ -605,9 +603,9 @@ cl_int Kernel::getWorkGroupInfo(cl_device_id device, cl_kernel_work_group_info p
 
     case CL_KERNEL_COMPILE_WORK_GROUP_SIZE:
         DEBUG_BREAK_IF(!patchInfo.executionEnvironment);
-        requiredWorkGroupSize.val[0] = patchInfo.executionEnvironment->RequiredWorkGroupSizeX;
-        requiredWorkGroupSize.val[1] = patchInfo.executionEnvironment->RequiredWorkGroupSizeY;
-        requiredWorkGroupSize.val[2] = patchInfo.executionEnvironment->RequiredWorkGroupSizeZ;
+        requiredWorkGroupSize.val[0] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[0];
+        requiredWorkGroupSize.val[1] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[1];
+        requiredWorkGroupSize.val[2] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[2];
         srcSize = sizeof(requiredWorkGroupSize);
         pSrc = &requiredWorkGroupSize;
         break;
@@ -2027,9 +2025,9 @@ uint32_t Kernel::ReflectionSurfaceHelper::setKernelData(void *reflectionSurface,
     kernelData->m_ScratchSpacePatchValue = 0;
     kernelData->m_SIMDSize = kernelInfo.patchInfo.executionEnvironment ? kernelInfo.patchInfo.executionEnvironment->LargestCompiledSIMDSize : 0;
     kernelData->m_HasBarriers = kernelInfo.patchInfo.executionEnvironment ? kernelInfo.patchInfo.executionEnvironment->HasBarriers : 0;
-    kernelData->m_RequiredWkgSizes[0] = kernelInfo.reqdWorkGroupSize[0] != WorkloadInfo::undefinedOffset ? static_cast<uint32_t>(kernelInfo.reqdWorkGroupSize[0]) : 0;
-    kernelData->m_RequiredWkgSizes[1] = kernelInfo.reqdWorkGroupSize[1] != WorkloadInfo::undefinedOffset ? static_cast<uint32_t>(kernelInfo.reqdWorkGroupSize[1]) : 0;
-    kernelData->m_RequiredWkgSizes[2] = kernelInfo.reqdWorkGroupSize[2] != WorkloadInfo::undefinedOffset ? static_cast<uint32_t>(kernelInfo.reqdWorkGroupSize[2]) : 0;
+    kernelData->m_RequiredWkgSizes[0] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[0];
+    kernelData->m_RequiredWkgSizes[1] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[1];
+    kernelData->m_RequiredWkgSizes[2] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[2];
     kernelData->m_InilineSLMSize = kernelInfo.workloadInfo.slmStaticSize;
 
     bool localIdRequired = false;

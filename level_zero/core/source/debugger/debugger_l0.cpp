@@ -31,7 +31,7 @@ DebuggerL0::DebuggerL0(NEO::Device *device) : device(device) {
     NEO::AllocationProperties properties{device->getRootDeviceIndex(), true, MemoryConstants::pageSize,
                                          NEO::GraphicsAllocation::AllocationType::DEBUG_SBA_TRACKING_BUFFER,
                                          false,
-                                         CommonConstants::allDevicesBitfield};
+                                         device->getDeviceBitfield()};
 
     properties.gpuAddress = sbaTrackingGpuVa.address;
     SbaTrackedAddresses sbaHeader;
@@ -87,10 +87,6 @@ DebuggerL0 ::~DebuggerL0() {
     }
     device->getMemoryManager()->freeGpuAddress(sbaTrackingGpuVa, device->getRootDeviceIndex());
     device->getMemoryManager()->freeGraphicsMemory(moduleDebugArea);
-}
-
-bool DebuggerL0::isDebuggerActive() {
-    return true;
 }
 
 void DebuggerL0::captureStateBaseAddress(NEO::CommandContainer &container, SbaAddresses sba) {

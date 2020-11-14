@@ -19,6 +19,7 @@ namespace NEO {
 class MockCommandQueue : public CommandQueue {
   public:
     using CommandQueue::blitEnqueueAllowed;
+    using CommandQueue::blitEnqueueImageAllowed;
     using CommandQueue::bufferCpuCopyAllowed;
     using CommandQueue::device;
     using CommandQueue::gpgpuEngine;
@@ -192,6 +193,7 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
   public:
     using BaseClass::bcsEngine;
     using BaseClass::bcsTaskCount;
+    using BaseClass::blitEnqueueAllowed;
     using BaseClass::commandQueueProperties;
     using BaseClass::commandStream;
     using BaseClass::gpgpuEngine;
@@ -205,6 +207,11 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     MockCommandQueueHw(Context *context,
                        ClDevice *device,
                        cl_queue_properties *properties) : BaseClass(context, device, properties, false) {
+    }
+
+    cl_int flush() override {
+        flushCalled = true;
+        return BaseClass::flush();
     }
 
     void setOoqEnabled() {
@@ -296,6 +303,11 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
         return BaseClass::isCacheFlushForBcsRequired();
     }
 
+    bool blitEnqueueImageAllowed(const size_t *origin, const size_t *region) override {
+        isBlitEnqueueImageAllowed = BaseClass::blitEnqueueImageAllowed(origin, region);
+        return isBlitEnqueueImageAllowed;
+    }
+
     unsigned int lastCommandType;
     std::vector<Kernel *> lastEnqueuedKernels;
     MultiDispatchInfo storedMultiDispatchInfo;
@@ -309,12 +321,14 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     bool notifyEnqueueSVMMemcpyCalled = false;
     bool cpuDataTransferHandlerCalled = false;
     bool useBcsCsrOnNotifyEnabled = false;
+    bool isBlitEnqueueImageAllowed = false;
     struct OverrideReturnValue {
         bool enabled = false;
         bool returnValue = false;
     } overrideIsCacheFlushForBcsRequired;
     BuiltinOpParams kernelParams;
     std::atomic<uint32_t> latestTaskCountWaited{std::numeric_limits<uint32_t>::max()};
+    bool flushCalled = false;
 
     LinearStream *peekCommandStream() {
         return this->commandStream;

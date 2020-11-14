@@ -6,13 +6,13 @@
  */
 
 #include "shared/source/command_stream/command_stream_receiver.h"
+#include "shared/source/memory_manager/os_agnostic_memory_manager.h"
 #include "shared/source/os_interface/driver_info.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/helpers/variable_backup.h"
 #include "shared/test/unit_test/mocks/mock_device.h"
 
-#include "opencl/source/memory_manager/os_agnostic_memory_manager.h"
 #include "opencl/source/platform/extensions.h"
 #include "opencl/test/unit_test/helpers/hw_helper_tests.h"
 #include "opencl/test/unit_test/mocks/mock_builtins.h"
@@ -473,7 +473,7 @@ TEST_F(DeviceGetCapsTest, givenDeviceCapsWhenLocalMemoryIsEnabledThenCalculateGl
     auto enabledOcl21Features = device->areOcl21FeaturesEnabled();
     bool addressing32Bit = is32bit || (is64bit && (enabledOcl21Features == false)) || DebugManager.flags.Force32bitAddressing.get();
 
-    auto localMem = pMemManager->getLocalMemorySize(0u);
+    auto localMem = pMemManager->getLocalMemorySize(0u, static_cast<uint32_t>(device->getDeviceBitfield().to_ulong()));
     auto maxAppAddrSpace = pMemManager->getMaxApplicationAddress() + 1;
     auto memSize = std::min(localMem, maxAppAddrSpace);
     memSize = static_cast<cl_ulong>(memSize * 0.8);
@@ -955,7 +955,7 @@ TEST_F(DeviceGetCapsTest, givenOCL12DeviceThenDoesNotExposesMipMapAndUnifiedMemo
     EXPECT_THAT(caps.deviceExtensions, testing::Not(testing::HasSubstr(std::string("cl_intel_unified_shared_memory_preview"))));
 }
 
-TEST_F(DeviceGetCapsTest, givenSupporteImagesWhenCreateExtentionsListThenDeviceReportsImagesExtensions) {
+TEST_F(DeviceGetCapsTest, givenSupportImagesWhenCreateExtentionsListThenDeviceReportsImagesExtensions) {
     DebugManagerStateRestore dbgRestorer;
     DebugManager.flags.ForceOCLVersion.set(20);
     HardwareInfo hwInfo = *defaultHwInfo;
@@ -965,7 +965,11 @@ TEST_F(DeviceGetCapsTest, givenSupporteImagesWhenCreateExtentionsListThenDeviceR
 
     EXPECT_THAT(extensions, testing::HasSubstr(std::string("cl_khr_image2d_from_buffer")));
     EXPECT_THAT(extensions, testing::HasSubstr(std::string("cl_khr_depth_images")));
-    EXPECT_THAT(extensions, testing::HasSubstr(std::string("cl_intel_media_block_io")));
+
+    auto &hwHelper = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
+    if (hwHelper.isMediaBlockIOSupported(*defaultHwInfo)) {
+        EXPECT_THAT(extensions, testing::HasSubstr(std::string("cl_intel_media_block_io")));
+    }
 }
 
 TEST_F(DeviceGetCapsTest, givenNotSupporteImagesWhenCreateExtentionsListThenDeviceNotReportsImagesExtensions) {

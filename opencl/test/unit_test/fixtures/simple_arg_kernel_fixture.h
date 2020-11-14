@@ -90,7 +90,6 @@ class SimpleArgKernelFixture : public ProgramFixture {
             testFile.replace(pos, 1, "_");
         }
 
-        cl_device_id device = pDevice;
         auto deviceVector = toClDeviceVector(*pDevice);
         pContext = Context::create<MockContext>(nullptr, deviceVector, nullptr, nullptr, retVal);
         ASSERT_EQ(CL_SUCCESS, retVal);
@@ -103,10 +102,7 @@ class SimpleArgKernelFixture : public ProgramFixture {
         ASSERT_NE(nullptr, pProgram);
 
         retVal = pProgram->build(
-            1,
-            &device,
-            nullptr,
-            nullptr,
+            pProgram->getDevices(),
             nullptr,
             false);
         ASSERT_EQ(CL_SUCCESS, retVal);
@@ -145,8 +141,6 @@ class SimpleArgNonUniformKernelFixture : public ProgramFixture {
     void SetUp(ClDevice *device, Context *context) {
         ProgramFixture::SetUp();
 
-        cl_device_id deviceId = device;
-
         CreateProgramFromBinary(
             context,
             context->getDevices(),
@@ -155,11 +149,8 @@ class SimpleArgNonUniformKernelFixture : public ProgramFixture {
         ASSERT_NE(nullptr, pProgram);
 
         retVal = pProgram->build(
-            1,
-            &deviceId,
+            pProgram->getDevices(),
             "-cl-std=CL2.0",
-            nullptr,
-            nullptr,
             false);
         ASSERT_EQ(CL_SUCCESS, retVal);
 
@@ -192,7 +183,6 @@ class SimpleKernelFixture : public ProgramFixture {
     void SetUp(ClDevice *device, Context *context) {
         ProgramFixture::SetUp();
 
-        cl_device_id deviceId = device;
         std::string programName("simple_kernels");
         CreateProgramFromBinary(
             context,
@@ -201,10 +191,7 @@ class SimpleKernelFixture : public ProgramFixture {
         ASSERT_NE(nullptr, pProgram);
 
         retVal = pProgram->build(
-            1,
-            &deviceId,
-            nullptr,
-            nullptr,
+            pProgram->getDevices(),
             nullptr,
             false);
         ASSERT_EQ(CL_SUCCESS, retVal);
@@ -247,7 +234,6 @@ class SimpleKernelStatelessFixture : public ProgramFixture {
   protected:
     void SetUp(ClDevice *device, Context *context) {
         ProgramFixture::SetUp();
-        cl_device_id deviceId = device;
         DebugManager.flags.DisableStatelessToStatefulOptimization.set(true);
         DebugManager.flags.EnableStatelessToStatefulBufferOffsetOpt.set(false);
 
@@ -258,11 +244,8 @@ class SimpleKernelStatelessFixture : public ProgramFixture {
         ASSERT_NE(nullptr, pProgram);
 
         retVal = pProgram->build(
-            1,
-            &deviceId,
+            pProgram->getDevices(),
             CompilerOptions::greaterThan4gbBuffersRequired.data(),
-            nullptr,
-            nullptr,
             false);
         ASSERT_EQ(CL_SUCCESS, retVal);
 
@@ -297,7 +280,6 @@ class BindlessKernelFixture : public ProgramFixture {
 
     void createKernel(const std::string &programName, const std::string &kernelName) {
         DebugManager.flags.UseBindlessMode.set(1);
-        cl_device_id deviceId = deviceCl;
         CreateProgramFromBinary(
             contextCl,
             contextCl->getDevices(),
@@ -305,10 +287,7 @@ class BindlessKernelFixture : public ProgramFixture {
         ASSERT_NE(nullptr, pProgram);
 
         retVal = pProgram->build(
-            1,
-            &deviceId,
-            nullptr,
-            nullptr,
+            pProgram->getDevices(),
             nullptr,
             false);
         ASSERT_EQ(CL_SUCCESS, retVal);

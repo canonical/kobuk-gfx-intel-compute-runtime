@@ -24,8 +24,11 @@ class MockCsrBase : public UltCommandStreamReceiver<GfxFamily> {
 
     MockCsrBase() = delete;
 
-    MockCsrBase(int32_t &execStamp, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex)
-        : BaseUltCsrClass(executionEnvironment, rootDeviceIndex), executionStamp(&execStamp), flushTaskStamp(-1) {
+    MockCsrBase(int32_t &execStamp,
+                ExecutionEnvironment &executionEnvironment,
+                uint32_t rootDeviceIndex,
+                const DeviceBitfield deviceBitfield)
+        : BaseUltCsrClass(executionEnvironment, rootDeviceIndex, deviceBitfield), executionStamp(&execStamp), flushTaskStamp(-1) {
     }
 
     void makeResident(GraphicsAllocation &gfxAllocation) override {
@@ -78,7 +81,11 @@ using MockCsrHw = MockCsrBase<GfxFamily>;
 template <typename GfxFamily>
 class MockCsrAub : public MockCsrBase<GfxFamily> {
   public:
-    MockCsrAub(int32_t &execStamp, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) : MockCsrBase<GfxFamily>(execStamp, executionEnvironment, rootDeviceIndex) {}
+    MockCsrAub(int32_t &execStamp,
+               ExecutionEnvironment &executionEnvironment,
+               uint32_t rootDeviceIndex,
+               const DeviceBitfield deviceBitfield)
+        : MockCsrBase<GfxFamily>(execStamp, executionEnvironment, rootDeviceIndex, deviceBitfield) {}
     CommandStreamReceiverType getType() override {
         return CommandStreamReceiverType::CSR_AUB;
     }
@@ -93,7 +100,11 @@ class MockCsr : public MockCsrBase<GfxFamily> {
 
     MockCsr() = delete;
     MockCsr(const HardwareInfo &hwInfoIn) = delete;
-    MockCsr(int32_t &execStamp, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) : BaseClass(execStamp, executionEnvironment, rootDeviceIndex) {
+    MockCsr(int32_t &execStamp,
+            ExecutionEnvironment &executionEnvironment,
+            uint32_t rootDeviceIndex,
+            const DeviceBitfield deviceBitfield)
+        : BaseClass(execStamp, executionEnvironment, rootDeviceIndex, deviceBitfield) {
     }
 
     bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {

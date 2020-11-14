@@ -63,7 +63,7 @@ class Device : public ReferenceTrackedObject<Device> {
     PerformanceCounters *getPerformanceCounters() { return performanceCounters.get(); }
     PreemptionMode getPreemptionMode() const { return preemptionMode; }
     MOCKABLE_VIRTUAL bool isDebuggerActive() const;
-    Debugger *getDebugger() { return getRootDeviceEnvironment().debugger.get(); }
+    Debugger *getDebugger() const { return getRootDeviceEnvironment().debugger.get(); }
     NEO::SourceLevelDebugger *getSourceLevelDebugger();
     const std::vector<EngineControl> &getEngines() const;
     const std::string getDeviceName(const HardwareInfo &hwInfo) const;
@@ -115,7 +115,7 @@ class Device : public ReferenceTrackedObject<Device> {
     virtual bool createEngines();
     bool createEngine(uint32_t deviceCsrIndex, EngineTypeUsage engineTypeUsage);
     MOCKABLE_VIRTUAL std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const;
-    virtual uint64_t getGlobalMemorySize() const;
+    virtual uint64_t getGlobalMemorySize(uint32_t deviceBitfield) const;
 
     DeviceInfo deviceInfo = {};
 

@@ -40,7 +40,7 @@ class DrmMemoryManager : public MemoryManager {
     GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex) override { return nullptr; }
 
     uint64_t getSystemSharedMemory(uint32_t rootDeviceIndex) override;
-    uint64_t getLocalMemorySize(uint32_t rootDeviceIndex) override;
+    uint64_t getLocalMemorySize(uint32_t rootDeviceIndex, uint32_t deviceBitfield) override;
 
     AllocationStatus populateOsHandles(OsHandleStorage &handleStorage, uint32_t rootDeviceIndex) override;
     void cleanOsHandles(OsHandleStorage &handleStorage, uint32_t rootDeviceIndex) override;
@@ -94,6 +94,7 @@ class DrmMemoryManager : public MemoryManager {
     GraphicsAllocation *allocateShareableMemory(const AllocationData &allocationData) override;
     GraphicsAllocation *allocateGraphicsMemoryForImageImpl(const AllocationData &allocationData, std::unique_ptr<Gmm> gmm) override;
     GraphicsAllocation *allocateGraphicsMemoryWithGpuVa(const AllocationData &allocationData) override;
+    GraphicsAllocation *createSharedUnifiedMemoryAllocation(const AllocationData &allocationData);
 
     void *lockResourceImpl(GraphicsAllocation &graphicsAllocation) override;
     void *lockResourceInLocalMemoryImpl(GraphicsAllocation &graphicsAllocation);

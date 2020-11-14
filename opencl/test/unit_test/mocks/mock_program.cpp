@@ -13,6 +13,7 @@
 #include "shared/source/program/program_info_from_patchtokens.h"
 #include "shared/test/unit_test/helpers/default_hw_info.h"
 #include "shared/test/unit_test/mocks/mock_compiler_interface.h"
+#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
 
 #include "opencl/source/context/context.h"
 #include "opencl/source/program/create.inl"
@@ -20,7 +21,6 @@
 #include "opencl/test/unit_test/helpers/ult_limits.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_compilers.h"
-#include "opencl/test/unit_test/mocks/mock_graphics_allocation.h"
 
 namespace NEO {
 ClDeviceVector toClDeviceVector(ClDevice &clDevice) {
@@ -30,12 +30,14 @@ ClDeviceVector toClDeviceVector(ClDevice &clDevice) {
 }
 ProgramInfo *GlobalMockSipProgram::globalSipProgramInfo;
 Device *MockProgram::getDevicePtr() { return this->pDevice; }
+int MockProgram::initInternalOptionsCalled = 0;
 
 std::string MockProgram::getCachedFileName() const {
     auto hwInfo = this->context->getDevice(0)->getHardwareInfo();
     auto input = ArrayRef<const char>(this->sourceCode.c_str(), this->sourceCode.size());
     auto opts = ArrayRef<const char>(this->options.c_str(), this->options.size());
-    auto internalOpts = ArrayRef<const char>(this->internalOptions.c_str(), this->internalOptions.size());
+    auto internalOptions = getInitInternalOptions();
+    auto internalOpts = ArrayRef<const char>(internalOptions.c_str(), internalOptions.size());
     return CompilerCache::getCachedFileName(hwInfo, input, opts, internalOpts);
 }
 

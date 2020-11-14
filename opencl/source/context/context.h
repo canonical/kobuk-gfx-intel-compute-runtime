@@ -98,9 +98,9 @@ class Context : public BaseObject<_cl_context> {
     DeviceQueue *getDefaultDeviceQueue();
     void setDefaultDeviceQueue(DeviceQueue *queue);
 
-    CommandQueue *getSpecialQueue();
-    void setSpecialQueue(CommandQueue *commandQueue);
-    void overrideSpecialQueueAndDecrementRefCount(CommandQueue *commandQueue);
+    CommandQueue *getSpecialQueue(uint32_t rootDeviceIndex);
+    void setSpecialQueue(CommandQueue *commandQueue, uint32_t rootDeviceIndex);
+    void overrideSpecialQueueAndDecrementRefCount(CommandQueue *commandQueue, uint32_t rootDeviceIndex);
 
     template <typename Sharing>
     Sharing *getSharing();
@@ -178,7 +178,6 @@ class Context : public BaseObject<_cl_context> {
     // OS specific implementation
     void *getOsContextInfo(cl_context_info &paramName, size_t *srcParamSize);
 
-    cl_int processExtraProperties(cl_context_properties propertyType, cl_context_properties propertyValue);
     void setupContextType();
 
     std::set<uint32_t> rootDeviceIndices = {};
@@ -194,7 +193,7 @@ class Context : public BaseObject<_cl_context> {
     void *userData = nullptr;
     MemoryManager *memoryManager = nullptr;
     SVMAllocsManager *svmAllocsManager = nullptr;
-    CommandQueue *specialQueue = nullptr;
+    StackVec<CommandQueue *, 1> specialQueues;
     DeviceQueue *defaultDeviceQueue = nullptr;
     DriverDiagnostics *driverDiagnostics = nullptr;
 

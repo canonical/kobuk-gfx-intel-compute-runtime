@@ -395,11 +395,6 @@ uint32_t HwHelperHw<GfxFamily>::getMaxThreadsForWorkgroup(const HardwareInfo &hw
 }
 
 template <typename GfxFamily>
-inline bool HwHelperHw<GfxFamily>::isFusedEuDispatchEnabled(const HardwareInfo &hwInfo) const {
-    return false;
-}
-
-template <typename GfxFamily>
 inline bool HwHelperHw<GfxFamily>::isSpecialWorkgroupSizeRequired(const HardwareInfo &hwInfo, bool isSimulation) const {
     return false;
 }
@@ -495,11 +490,6 @@ bool HwHelperHw<GfxFamily>::useSystemMemoryPlacementForISA(const HardwareInfo &h
 }
 
 template <typename GfxFamily>
-bool HwHelperHw<GfxFamily>::packedFormatsSupported() const {
-    return false;
-}
-
-template <typename GfxFamily>
 bool MemorySynchronizationCommands<GfxFamily>::isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo) {
     return false;
 }
@@ -507,6 +497,11 @@ bool MemorySynchronizationCommands<GfxFamily>::isPipeControlPriorToPipelineSelec
 template <typename GfxFamily>
 bool HwHelperHw<GfxFamily>::isCooperativeDispatchSupported(const aub_stream::EngineType engine, const PRODUCT_FAMILY productFamily) const {
     return true;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isMediaBlockIOSupported(const HardwareInfo &hwInfo) const {
+    return hwInfo.capabilityTable.supportsImages;
 }
 
 } // namespace NEO

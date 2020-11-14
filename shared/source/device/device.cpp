@@ -23,7 +23,9 @@
 namespace NEO {
 
 decltype(&PerformanceCounters::create) Device::createPerformanceCountersFunc = PerformanceCounters::create;
-extern CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex);
+extern CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executionEnvironment,
+                                                  uint32_t rootDeviceIndex,
+                                                  const DeviceBitfield deviceBitfield);
 
 Device::Device(ExecutionEnvironment *executionEnvironment)
     : executionEnvironment(executionEnvironment) {
@@ -42,6 +44,7 @@ Device::~Device() {
 
     commandStreamReceivers.clear();
     executionEnvironment->memoryManager->waitForDeletions();
+
     executionEnvironment->decRefInternal();
 }
 
@@ -112,7 +115,7 @@ bool Device::createEngines() {
 }
 
 std::unique_ptr<CommandStreamReceiver> Device::createCommandStreamReceiver() const {
-    return std::unique_ptr<CommandStreamReceiver>(createCommandStream(*executionEnvironment, getRootDeviceIndex()));
+    return std::unique_ptr<CommandStreamReceiver>(createCommandStream(*executionEnvironment, getRootDeviceIndex(), getDeviceBitfield()));
 }
 
 bool Device::createEngine(uint32_t deviceCsrIndex, EngineTypeUsage engineTypeUsage) {
@@ -153,7 +156,8 @@ bool Device::createEngine(uint32_t deviceCsrIndex, EngineTypeUsage engineTypeUsa
         defaultEngineIndex = deviceCsrIndex;
     }
 
-    if ((preemptionMode == PreemptionMode::MidThread || isDebuggerActive()) && !commandStreamReceiver->createPreemptionAllocation()) {
+    bool debuggingEnabled = getDebugger() != nullptr || isDebuggerActive();
+    if ((preemptionMode == PreemptionMode::MidThread || debuggingEnabled) && !commandStreamReceiver->createPreemptionAllocation()) {
         return false;
     }
 
@@ -249,10 +253,9 @@ GmmClientContext *Device::getGmmClientContext() const {
     return getGmmHelper()->getClientContext();
 }
 
-uint64_t Device::getGlobalMemorySize() const {
-
+uint64_t Device::getGlobalMemorySize(uint32_t deviceBitfield) const {
     auto globalMemorySize = getMemoryManager()->isLocalMemorySupported(this->getRootDeviceIndex())
-                                ? getMemoryManager()->getLocalMemorySize(this->getRootDeviceIndex())
+                                ? getMemoryManager()->getLocalMemorySize(this->getRootDeviceIndex(), deviceBitfield)
                                 : getMemoryManager()->getSystemSharedMemory(this->getRootDeviceIndex());
     globalMemorySize = std::min(globalMemorySize, getMemoryManager()->getMaxApplicationAddress() + 1);
     globalMemorySize = static_cast<uint64_t>(static_cast<double>(globalMemorySize) * 0.8);

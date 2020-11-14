@@ -7,6 +7,7 @@
 
 #include "offline_compiler.h"
 
+#include "shared/source/compiler_interface/intermediate_representations.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device_binary_format/device_binary_formats.h"
 #include "shared/source/device_binary_format/elf/elf_encoder.h"
@@ -153,15 +154,44 @@ int OfflineCompiler::buildIrBinary() {
     return retVal;
 }
 
+std::string OfflineCompiler::validateInputType(const std::string &input, bool isLlvm, bool isSpirv) {
+    auto asBitcode = ArrayRef<const uint8_t>::fromAny(input.data(), input.size());
+    if (isSpirv) {
+        if (NEO::isSpirVBitcode(asBitcode)) {
+            return "";
+        }
+        return "Warning : file does not look like spirv bitcode (wrong magic numbers)";
+    }
+
+    if (isLlvm) {
+        if (NEO::isLlvmBitcode(asBitcode)) {
+            return "";
+        }
+        return "Warning : file does not look like llvm bitcode (wrong magic numbers)";
+    }
+
+    if (NEO::isSpirVBitcode(asBitcode)) {
+        return "Warning : file looks like spirv bitcode (based on magic numbers) - please make sure proper CLI flags are present";
+    }
+
+    if (NEO::isLlvmBitcode(asBitcode)) {
+        return "Warning : file looks like llvm bitcode (based on magic numbers) - please make sure proper CLI flags are present";
+    }
+
+    return "";
+}
+
 int OfflineCompiler::buildSourceCode() {
     int retVal = SUCCESS;
 
     do {
-        if (strcmp(sourceCode.c_str(), "") == 0) {
+        if (sourceCode.empty()) {
             retVal = INVALID_PROGRAM;
             break;
         }
         UNRECOVERABLE_IF(igcDeviceCtx == nullptr);
+        auto inputTypeWarnings = validateInputType(sourceCode, inputFileLlvm, inputFileSpirV);
+        this->argHelper->printf(inputTypeWarnings.c_str());
 
         CIF::RAII::UPtr_t<IGC::OclTranslationOutputTagOCL> igcOutput;
         bool inputIsIntermediateRepresentation = inputFileLlvm || inputFileSpirV;
@@ -547,18 +577,18 @@ int OfflineCompiler::parseCommandLine(size_t numArgs, const std::vector<std::str
         } else if (inputFile.empty()) {
             argHelper->printf("Error: Input file name missing.\n");
             retVal = INVALID_COMMAND_LINE;
-        } else if (deviceName.empty()) {
+        } else if (deviceName.empty() && (false == onlySpirV)) {
             argHelper->printf("Error: Device name missing.\n");
             retVal = INVALID_COMMAND_LINE;
         } else if (!argHelper->fileExists(inputFile)) {
             argHelper->printf("Error: Input file %s missing.\n", inputFile.c_str());
             retVal = INVALID_FILE;
         } else {
-            retVal = getHardwareInfo(deviceName.c_str());
-            if (retVal != SUCCESS) {
+            retVal = deviceName.empty() ? 0 : getHardwareInfo(deviceName.c_str());
+            if (retVal != 0) {
                 argHelper->printf("Error: Cannot get HW Info for device %s.\n", deviceName.c_str());
-            } else {
-                std::string extensionsList = getExtensionsList(hwInfo);
+            } else if (false == deviceName.empty()) {
+                std::string extensionsList = deviceName.empty() ? "" : getExtensionsList(hwInfo);
                 if (requiresOpenClCFeatures(options)) {
                     OpenClCFeaturesContainer openclCFeatures;
                     getOpenclCFeaturesList(hwInfo, openclCFeatures);
@@ -571,6 +601,8 @@ int OfflineCompiler::parseCommandLine(size_t numArgs, const std::vector<std::str
                     auto compilerExtensions = convertEnabledExtensionsToCompilerInternalOptions(extensionsList.c_str(), emptyOpenClCFeatures);
                     CompilerOptions::concatenateAppend(internalOptions, compilerExtensions);
                 }
+            } else {
+                this->internalOptions = CompilerOptions::concatenate("-cl-ext=-all,+cl_khr_3d_image_writes", this->internalOptions);
             }
         }
     }

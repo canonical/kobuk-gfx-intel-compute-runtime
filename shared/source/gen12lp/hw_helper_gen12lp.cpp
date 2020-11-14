@@ -12,6 +12,7 @@ using Family = NEO::TGLLPFamily;
 
 #include "shared/source/gen12lp/helpers_gen12lp.h"
 #include "shared/source/helpers/flat_batch_buffer_helper_hw.inl"
+#include "shared/source/helpers/hw_helper_base.inl"
 #include "shared/source/helpers/hw_helper_bdw_plus.inl"
 #include "shared/source/helpers/hw_helper_tgllp_plus.inl"
 #include "shared/source/os_interface/hw_info_config.h"
@@ -285,6 +286,26 @@ bool MemorySynchronizationCommands<TGLLPFamily>::isPipeControlWArequired(const H
 template <>
 bool MemorySynchronizationCommands<TGLLPFamily>::isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo) {
     return MemorySynchronizationCommands<TGLLPFamily>::isPipeControlWArequired(hwInfo);
+}
+
+template <>
+bool HwHelperHw<Family>::obtainBlitterPreference(const HardwareInfo &hwInfo) const {
+    return Gen12LPHelpers::obtainBlitterPreference(hwInfo);
+}
+
+template <>
+inline LocalMemoryAccessMode HwHelperHw<Family>::getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const {
+    return Gen12LPHelpers::getDefaultLocalMemoryAccessMode(hwInfo);
+}
+
+template <>
+void HwHelperHw<TGLLPFamily>::setExtraAllocationData(AllocationData &allocationData, const AllocationProperties &properties, const HardwareInfo &hwInfo) const {
+    HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    if (hwHelper.getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed) {
+        if (GraphicsAllocation::isCpuAccessRequired(properties.allocationType)) {
+            allocationData.flags.useSystemMemory = true;
+        }
+    }
 }
 
 template class HwHelperHw<Family>;

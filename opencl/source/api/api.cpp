@@ -1437,10 +1437,6 @@ cl_program CL_API_CALL clCreateProgramWithBuiltInKernels(cl_context context,
     retVal = validateObjects(WithCastToInternal(context, &pContext), numDevices,
                              deviceList, kernelNames, errcodeRet);
 
-    if (numDevices == 0) {
-        retVal = CL_INVALID_VALUE;
-    }
-
     if (retVal == CL_SUCCESS) {
         ClDeviceVector deviceVector;
         for (auto i = 0u; i < numDevices; i++) {
@@ -1511,10 +1507,19 @@ cl_int CL_API_CALL clBuildProgram(cl_program program,
     cl_int retVal = CL_INVALID_PROGRAM;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("clProgram", program, "numDevices", numDevices, "cl_device_id", deviceList, "options", (options != nullptr) ? options : "", "funcNotify", funcNotify, "userData", userData);
-    auto pProgram = castToObject<Program>(program);
+    Program *pProgram = nullptr;
 
-    if (pProgram) {
-        retVal = pProgram->build(numDevices, deviceList, options, funcNotify, userData, clCacheEnabled);
+    retVal = validateObjects(WithCastToInternal(program, &pProgram), Program::isValidCallback(funcNotify, userData));
+
+    ClDeviceVector deviceVector;
+    ClDeviceVector *deviceVectorPtr = &deviceVector;
+
+    if (CL_SUCCESS == retVal) {
+        retVal = Program::processInputDevices(deviceVectorPtr, numDevices, deviceList, pProgram->getDevices());
+    }
+    if (CL_SUCCESS == retVal) {
+        retVal = pProgram->build(*deviceVectorPtr, options, clCacheEnabled);
+        pProgram->invokeCallback(funcNotify, userData);
     }
 
     TRACING_EXIT(clBuildProgram, &retVal);
@@ -1534,12 +1539,21 @@ cl_int CL_API_CALL clCompileProgram(cl_program program,
     cl_int retVal = CL_INVALID_PROGRAM;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("clProgram", program, "numDevices", numDevices, "cl_device_id", deviceList, "options", (options != nullptr) ? options : "", "numInputHeaders", numInputHeaders);
-    auto pProgram = castToObject<Program>(program);
 
-    if (pProgram != nullptr) {
-        retVal = pProgram->compile(numDevices, deviceList, options,
-                                   numInputHeaders, inputHeaders, headerIncludeNames,
-                                   funcNotify, userData);
+    Program *pProgram = nullptr;
+
+    retVal = validateObjects(WithCastToInternal(program, &pProgram), Program::isValidCallback(funcNotify, userData));
+
+    ClDeviceVector deviceVector;
+    ClDeviceVector *deviceVectorPtr = &deviceVector;
+
+    if (CL_SUCCESS == retVal) {
+        retVal = Program::processInputDevices(deviceVectorPtr, numDevices, deviceList, pProgram->getDevices());
+    }
+    if (CL_SUCCESS == retVal) {
+        retVal = pProgram->compile(*deviceVectorPtr, options,
+                                   numInputHeaders, inputHeaders, headerIncludeNames);
+        pProgram->invokeCallback(funcNotify, userData);
     }
 
     TRACING_EXIT(clCompileProgram, &retVal);
@@ -1562,26 +1576,28 @@ cl_program CL_API_CALL clLinkProgram(cl_context context,
 
     ErrorCodeHelper err(errcodeRet, CL_SUCCESS);
     Context *pContext = nullptr;
-    Program *program = nullptr;
+    Program *pProgram = nullptr;
 
-    retVal = validateObject(context);
+    retVal = validateObjects(WithCastToInternal(context, &pContext), Program::isValidCallback(funcNotify, userData));
+
+    ClDeviceVector deviceVector;
+    ClDeviceVector *deviceVectorPtr = &deviceVector;
     if (CL_SUCCESS == retVal) {
-        pContext = castToObject<Context>(context);
+        retVal = Program::processInputDevices(deviceVectorPtr, numDevices, deviceList, pContext->getDevices());
     }
-    if (pContext != nullptr) {
 
-        ClDeviceVector deviceVector;
-        deviceVector.push_back(pContext->getDevice(0));
-        program = new Program(pContext, false, deviceVector);
-        retVal = program->link(numDevices, deviceList, options,
-                               numInputPrograms, inputPrograms,
-                               funcNotify, userData);
+    if (CL_SUCCESS == retVal) {
+
+        pProgram = new Program(pContext, false, *deviceVectorPtr);
+        retVal = pProgram->link(*deviceVectorPtr, options,
+                                numInputPrograms, inputPrograms);
+        pProgram->invokeCallback(funcNotify, userData);
     }
 
     err.set(retVal);
 
-    TRACING_EXIT(clLinkProgram, (cl_program *)&program);
-    return program;
+    TRACING_EXIT(clLinkProgram, (cl_program *)&pProgram);
+    return pProgram;
 }
 
 cl_int CL_API_CALL clUnloadPlatformCompiler(cl_platform_id platform) {
@@ -1636,13 +1652,19 @@ cl_int CL_API_CALL clGetProgramBuildInfo(cl_program program,
                    "paramName", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSize", paramValueSize, "paramValue", paramValue,
                    "paramValueSizeRet", paramValueSizeRet);
-    retVal = validateObjects(program);
+    Program *pProgram = nullptr;
+    ClDevice *pClDevice = nullptr;
+
+    retVal = validateObjects(WithCastToInternal(program, &pProgram), WithCastToInternal(device, &pClDevice));
 
     if (CL_SUCCESS == retVal) {
-        Program *pProgram = (Program *)(program);
-
+        if (!pProgram->isDeviceAssociated(*pClDevice)) {
+            retVal = CL_INVALID_DEVICE;
+        }
+    }
+    if (CL_SUCCESS == retVal) {
         retVal = pProgram->getBuildInfo(
-            device,
+            pClDevice,
             paramName,
             paramValueSize,
             paramValue,
@@ -1674,7 +1696,7 @@ cl_kernel CL_API_CALL clCreateKernel(cl_program clProgram,
             break;
         }
 
-        if (pProgram->getBuildStatus() != CL_SUCCESS) {
+        if (!pProgram->isBuilt()) {
             retVal = CL_INVALID_PROGRAM_EXECUTABLE;
             break;
         }
@@ -3662,7 +3684,7 @@ void *clSharedMemAllocINTEL(
         err.set(CL_INVALID_BUFFER_SIZE);
         return nullptr;
     }
-    auto ptr = neoContext->getSVMAllocsManager()->createSharedUnifiedMemoryAllocation(neoDevice->getRootDeviceIndex(), size, unifiedMemoryProperties, neoContext->getSpecialQueue());
+    auto ptr = neoContext->getSVMAllocsManager()->createSharedUnifiedMemoryAllocation(neoDevice->getRootDeviceIndex(), size, unifiedMemoryProperties, neoContext->getSpecialQueue(neoDevice->getRootDeviceIndex()));
     if (!ptr) {
         err.set(CL_OUT_OF_RESOURCES);
     }
@@ -4685,7 +4707,7 @@ cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel kernel,
         return retVal;
     }
     default: {
-        retVal = pKernel->setAdditionalKernelExecInfoWithParam(paramName);
+        retVal = pKernel->setAdditionalKernelExecInfoWithParam(paramName, paramValueSize, paramValue);
         TRACING_EXIT(clSetKernelExecInfo, &retVal);
         return retVal;
     }

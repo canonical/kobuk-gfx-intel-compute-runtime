@@ -11,6 +11,7 @@
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/hw_info_config.h"
+#include "shared/source/source_level_debugger/source_level_debugger.h"
 
 #include <iomanip>
 
@@ -49,7 +50,11 @@ void Device::initializeCaps() {
 
     deviceInfo.globalMemCachelineSize = 64;
 
-    deviceInfo.globalMemSize = getGlobalMemorySize();
+    uint32_t allSubDevicesMask = static_cast<uint32_t>(getDeviceBitfield().to_ulong());
+    constexpr uint32_t singleSubDeviceMask = 1;
+
+    deviceInfo.globalMemSize = getGlobalMemorySize(allSubDevicesMask);
+    deviceInfo.maxMemAllocSize = getGlobalMemorySize(singleSubDeviceMask); // Allocation can be placed only on one SubDevice
 
     if (DebugManager.flags.Force32bitAddressing.get() || addressing32bitAllowed || is32bit) {
         deviceInfo.globalMemSize = std::min(deviceInfo.globalMemSize, static_cast<uint64_t>(4 * GB * 0.8));
@@ -58,14 +63,15 @@ void Device::initializeCaps() {
     }
 
     deviceInfo.globalMemSize = alignDown(deviceInfo.globalMemSize, MemoryConstants::pageSize);
+    deviceInfo.maxMemAllocSize = std::min(deviceInfo.globalMemSize, deviceInfo.maxMemAllocSize); // if globalMemSize was reduced for 32b
+
+    // OpenCL 1.2 requires 128MB minimum
+    deviceInfo.maxMemAllocSize = std::min(std::max(deviceInfo.maxMemAllocSize / 2, static_cast<uint64_t>(128llu * MB)), this->hardwareCapabilities.maxMemAllocSize);
 
     deviceInfo.profilingTimerResolution = getProfilingTimerResolution();
     deviceInfo.outProfilingTimerResolution = static_cast<size_t>(deviceInfo.profilingTimerResolution);
 
-    // OpenCL 1.2 requires 128MB minimum
-    deviceInfo.maxMemAllocSize = std::min(std::max(deviceInfo.globalMemSize / 2, static_cast<uint64_t>(128llu * MB)), this->hardwareCapabilities.maxMemAllocSize);
-
-    static const int maxPixelSize = 16;
+    constexpr uint64_t maxPixelSize = 16;
     deviceInfo.imageMaxBufferSize = static_cast<size_t>(deviceInfo.maxMemAllocSize / maxPixelSize);
 
     deviceInfo.maxNumEUsPerSubSlice = 0;
@@ -111,7 +117,13 @@ void Device::initializeCaps() {
 
     deviceInfo.vmeAvcSupportsPreemption = hwInfo.capabilityTable.ftrSupportsVmeAvcPreemption;
 
-    deviceInfo.debuggerActive = (getRootDeviceEnvironment().debugger.get()) ? getRootDeviceEnvironment().debugger->isDebuggerActive() : false;
+    NEO::Debugger *debugger = getRootDeviceEnvironment().debugger.get();
+    deviceInfo.debuggerActive = false;
+    if (debugger) {
+        UNRECOVERABLE_IF(!debugger->isLegacy());
+        deviceInfo.debuggerActive = static_cast<NEO::SourceLevelDebugger *>(debugger)->isDebuggerActive();
+    }
+
     if (deviceInfo.debuggerActive) {
         this->preemptionMode = PreemptionMode::Disabled;
     }

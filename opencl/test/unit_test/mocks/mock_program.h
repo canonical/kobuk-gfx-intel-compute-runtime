@@ -28,10 +28,12 @@ ClDeviceVector toClDeviceVector(ClDevice &clDevice);
 class MockProgram : public Program {
   public:
     using Program::createProgramFromBinary;
+    using Program::deviceBuildInfos;
     using Program::internalOptionsToExtract;
     using Program::kernelDebugEnabled;
     using Program::linkBinary;
     using Program::separateBlockKernels;
+    using Program::setBuildStatus;
     using Program::updateNonUniformFlag;
 
     using Program::applyAdditionalOptions;
@@ -51,7 +53,6 @@ class MockProgram : public Program {
     using Program::packDeviceBinary;
     using Program::pDevice;
     using Program::Program;
-    using Program::programBinaryType;
     using Program::sourceCode;
     using Program::specConstantsIds;
     using Program::specConstantsSizes;
@@ -68,7 +69,11 @@ class MockProgram : public Program {
     void setBuildOptions(const char *buildOptions) {
         options = buildOptions != nullptr ? buildOptions : "";
     }
-    std::string &getInternalOptions() { return internalOptions; };
+    std::string getInitInternalOptions() const {
+        std::string internalOptions;
+        initInternalOptions(internalOptions);
+        return internalOptions;
+    };
     void setConstantSurface(GraphicsAllocation *gfxAllocation) {
         if (gfxAllocation) {
             buildInfos[gfxAllocation->getRootDeviceIndex()].constantSurface = gfxAllocation;
@@ -103,8 +108,6 @@ class MockProgram : public Program {
         this->context = context;
         contextSet = true;
     }
-
-    void setBuildStatus(cl_build_status st) { buildStatus = st; }
     void setSourceCode(const char *ptr) { sourceCode = ptr; }
     void clearOptions() { options = ""; }
     void setCreatedFromBinary(bool createdFromBin) { isCreatedFromBinary = createdFromBin; }
@@ -142,12 +145,36 @@ class MockProgram : public Program {
 
     cl_int rebuildProgramFromIr() {
         this->isCreatedFromBinary = false;
-        this->buildStatus = CL_BUILD_NONE;
+        setBuildStatus(CL_BUILD_NONE);
         std::unordered_map<std::string, BuiltinDispatchInfoBuilder *> builtins;
-        auto &device = this->getDevice();
-        return this->build(&device, this->options.c_str(), false, builtins);
+        return this->build(getDevices(), this->options.c_str(), false, builtins);
     }
 
+    void replaceDeviceBinary(std::unique_ptr<char[]> newBinary, size_t newBinarySize, uint32_t rootDeviceIndex) override {
+        if (replaceDeviceBinaryCalledPerRootDevice.find(rootDeviceIndex) == replaceDeviceBinaryCalledPerRootDevice.end()) {
+            replaceDeviceBinaryCalledPerRootDevice.insert({rootDeviceIndex, 1});
+        } else {
+            replaceDeviceBinaryCalledPerRootDevice[rootDeviceIndex]++;
+        }
+        Program::replaceDeviceBinary(std::move(newBinary), newBinarySize, rootDeviceIndex);
+    }
+    cl_int processGenBinary(uint32_t rootDeviceIndex) override {
+        if (processGenBinaryCalledPerRootDevice.find(rootDeviceIndex) == processGenBinaryCalledPerRootDevice.end()) {
+            processGenBinaryCalledPerRootDevice.insert({rootDeviceIndex, 1});
+        } else {
+            processGenBinaryCalledPerRootDevice[rootDeviceIndex]++;
+        }
+        return Program::processGenBinary(rootDeviceIndex);
+    }
+
+    void initInternalOptions(std::string &internalOptions) const override {
+        initInternalOptionsCalled++;
+        Program::initInternalOptions(internalOptions);
+    };
+
+    std::map<uint32_t, int> processGenBinaryCalledPerRootDevice;
+    std::map<uint32_t, int> replaceDeviceBinaryCalledPerRootDevice;
+    static int initInternalOptionsCalled;
     bool contextSet = false;
     int isFlagOptionOverride = -1;
     int isOptionValueValidOverride = -1;
@@ -168,7 +195,7 @@ ProgramInfo getSipProgramInfo();
 class GMockProgram : public Program {
   public:
     using Program::Program;
-    MOCK_METHOD0(appendKernelDebugOptions, bool(void));
+    MOCK_METHOD(bool, appendKernelDebugOptions, (ClDevice &, std::string &), (override));
 };
 
 } // namespace NEO

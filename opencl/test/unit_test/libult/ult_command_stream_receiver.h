@@ -10,11 +10,11 @@
 #include "shared/source/device/device.h"
 #include "shared/source/direct_submission/direct_submission_hw.h"
 #include "shared/source/execution_environment/execution_environment.h"
+#include "shared/source/memory_manager/os_agnostic_memory_manager.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/unit_test/helpers/dispatch_flags_helper.h"
 #include "shared/test/unit_test/helpers/ult_hw_config.h"
 
-#include "opencl/source/memory_manager/os_agnostic_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_experimental_command_buffer.h"
 
 #include <map>
@@ -55,6 +55,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::commandStream;
     using BaseClass::CommandStreamReceiver::debugConfirmationFunction;
     using BaseClass::CommandStreamReceiver::debugPauseStateAddress;
+    using BaseClass::CommandStreamReceiver::deviceBitfield;
     using BaseClass::CommandStreamReceiver::dispatchMode;
     using BaseClass::CommandStreamReceiver::executionEnvironment;
     using BaseClass::CommandStreamReceiver::experimentalCmdBuffer;
@@ -98,10 +99,16 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::userPauseConfirmation;
     using BaseClass::CommandStreamReceiver::waitForTaskCountAndCleanAllocationList;
 
-    UltCommandStreamReceiver(ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) : BaseClass(executionEnvironment, rootDeviceIndex), recursiveLockCounter(0),
-                                                                                                     recordedDispatchFlags(DispatchFlagsHelper::createDefaultDispatchFlags()) {}
-    static CommandStreamReceiver *create(bool withAubDump, ExecutionEnvironment &executionEnvironment, uint32_t rootDeviceIndex) {
-        return new UltCommandStreamReceiver<GfxFamily>(executionEnvironment, rootDeviceIndex);
+    UltCommandStreamReceiver(ExecutionEnvironment &executionEnvironment,
+                             uint32_t rootDeviceIndex,
+                             const DeviceBitfield deviceBitfield)
+        : BaseClass(executionEnvironment, rootDeviceIndex, deviceBitfield), recursiveLockCounter(0),
+          recordedDispatchFlags(DispatchFlagsHelper::createDefaultDispatchFlags()) {}
+    static CommandStreamReceiver *create(bool withAubDump,
+                                         ExecutionEnvironment &executionEnvironment,
+                                         uint32_t rootDeviceIndex,
+                                         const DeviceBitfield deviceBitfield) {
+        return new UltCommandStreamReceiver<GfxFamily>(executionEnvironment, rootDeviceIndex, deviceBitfield);
     }
 
     GmmPageTableMngr *createPageTableManager() override {
@@ -216,6 +223,9 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     }
 
     bool isMultiOsContextCapable() const override {
+        if (callBaseIsMultiOsContextCapable) {
+            return BaseClass::isMultiOsContextCapable();
+        }
         return multiOsContextCapable;
     }
 
@@ -250,27 +260,32 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         ensureCommandBufferAllocationCalled++;
         BaseClass::ensureCommandBufferAllocation(commandStream, minimumRequiredSize, additionalAllocationSize);
     }
+    std::vector<std::string> aubCommentMessages;
+
+    BatchBuffer latestFlushedBatchBuffer = {};
 
     std::atomic<uint32_t> recursiveLockCounter;
+    std::atomic<uint32_t> latestWaitForCompletionWithTimeoutTaskCount{0};
+
+    LinearStream *lastFlushedCommandStream = nullptr;
+
+    uint32_t makeSurfacePackNonResidentCalled = false;
+    uint32_t latestSentTaskCountValueDuringFlush = 0;
+    uint32_t blitBufferCalled = 0;
+    uint32_t createPerDssBackedBufferCalled = 0;
+    int ensureCommandBufferAllocationCalled = 0;
+    DispatchFlags recordedDispatchFlags;
+
     bool createPageTableManagerCalled = false;
     bool recordFlusheBatchBuffer = false;
     bool checkAndActivateAubSubCaptureCalled = false;
     bool addAubCommentCalled = false;
     bool downloadAllocationCalled = false;
-    std::vector<std::string> aubCommentMessages;
     bool flushBatchedSubmissionsCalled = false;
-    uint32_t makeSurfacePackNonResidentCalled = false;
     bool initProgrammingFlagsCalled = false;
-    LinearStream *lastFlushedCommandStream = nullptr;
-    BatchBuffer latestFlushedBatchBuffer = {};
-    uint32_t latestSentTaskCountValueDuringFlush = 0;
-    uint32_t blitBufferCalled = 0;
-    uint32_t createPerDssBackedBufferCalled = 0;
-    std::atomic<uint32_t> latestWaitForCompletionWithTimeoutTaskCount{0};
-    DispatchFlags recordedDispatchFlags;
     bool multiOsContextCapable = false;
     bool directSubmissionAvailable = false;
     bool blitterDirectSubmissionAvailable = false;
-    int ensureCommandBufferAllocationCalled = 0;
+    bool callBaseIsMultiOsContextCapable = false;
 };
 } // namespace NEO

@@ -218,7 +218,7 @@ void BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill(NEO::GraphicsAllocati
         }
         tmpCmd.setTransferWidth(static_cast<uint32_t>(width));
         tmpCmd.setTransferHeight(static_cast<uint32_t>(height));
-        tmpCmd.setDestinationPitch(static_cast<uint32_t>(width * patternSize));
+        tmpCmd.setDestinationPitch(static_cast<uint32_t>(width));
 
         appendBlitCommandsForFillBuffer(dstAlloc, tmpCmd, rootDeviceEnvironment);
 
@@ -235,7 +235,7 @@ void BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsRegion(const BlitPropert
     auto srcSlicePitch = static_cast<uint32_t>(blitProperties.srcSlicePitch);
     auto dstSlicePitch = static_cast<uint32_t>(blitProperties.dstSlicePitch);
 
-    UNRECOVERABLE_IF(blitProperties.copySize.x > BlitterConstants::maxBlitWidth || blitProperties.copySize.y > BlitterConstants::maxBlitWidth);
+    UNRECOVERABLE_IF(blitProperties.copySize.x > BlitterConstants::maxBlitWidth || blitProperties.copySize.y > BlitterConstants::maxBlitHeight);
     auto bltCmd = GfxFamily::cmdInitXyCopyBlt;
 
     bltCmd.setSourceBaseAddress(blitProperties.srcAllocation->getGpuAddress());

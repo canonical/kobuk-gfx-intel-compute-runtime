@@ -14,6 +14,7 @@
 #include "shared/source/os_interface/device_factory.h"
 #include "shared/test/unit_test/cmd_parse/hw_parse.h"
 #include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
 #include "shared/test/unit_test/page_fault_manager/mock_cpu_page_fault_manager.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
@@ -25,7 +26,6 @@
 #include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_graphics_allocation.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_svm_manager.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
@@ -737,8 +737,7 @@ TEST_F(EnqueueSvmTest, GivenSvmAllocationWhenEnqueingKernelThenSuccessIsReturned
     EXPECT_NE(nullptr, ptrSVM);
 
     std::unique_ptr<Program> program(Program::createBuiltInFromSource("FillBufferBytes", context, context->getDevices(), &retVal));
-    cl_device_id device = pClDevice;
-    program->build(1, &device, nullptr, nullptr, nullptr, false);
+    program->build(program->getDevices(), nullptr, false);
     std::unique_ptr<MockKernel> kernel(Kernel::create<MockKernel>(program.get(), *program->getKernelInfo("FillBufferBytes"), &retVal));
 
     kernel->setSvmKernelExecInfo(pSvmAlloc);
@@ -766,8 +765,7 @@ TEST_F(EnqueueSvmTest, givenEnqueueTaskBlockedOnUserEventWhenItIsEnqueuedThenSur
     EXPECT_NE(nullptr, ptrSVM);
 
     auto program = clUniquePtr(Program::createBuiltInFromSource("FillBufferBytes", context, context->getDevices(), &retVal));
-    cl_device_id device = pClDevice;
-    program->build(1, &device, nullptr, nullptr, nullptr, false);
+    program->build(program->getDevices(), nullptr, false);
     auto kernel = clUniquePtr(Kernel::create<MockKernel>(program.get(), *program->getKernelInfo("FillBufferBytes"), &retVal));
 
     std::vector<Surface *> allSurfaces;
@@ -1393,6 +1391,36 @@ HWTEST_F(EnqueueSvmTest, whenInternalAllocationsAreAddedToResidencyContainerThen
 
     svmManager->freeSVMAlloc(unifiedMemoryPtr);
 }
+
+HWTEST_F(EnqueueSvmTest, whenInternalAllocationIsTriedToBeAddedTwiceToResidencyContainerThenOnlyOnceIsAdded) {
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::DEVICE_UNIFIED_MEMORY, pDevice->getDeviceBitfield());
+    unifiedMemoryProperties.device = pDevice;
+    auto allocationSize = 4096u;
+    auto svmManager = this->context->getSVMAllocsManager();
+    EXPECT_NE(0u, svmManager->getNumAllocs());
+    auto unifiedMemoryPtr = svmManager->createUnifiedMemoryAllocation(pDevice->getRootDeviceIndex(), allocationSize, unifiedMemoryProperties);
+    EXPECT_NE(nullptr, unifiedMemoryPtr);
+    EXPECT_EQ(2u, svmManager->getNumAllocs());
+
+    ResidencyContainer residencyContainer;
+    EXPECT_EQ(0u, residencyContainer.size());
+
+    svmManager->addInternalAllocationsToResidencyContainer(pDevice->getRootDeviceIndex(),
+                                                           residencyContainer,
+                                                           InternalMemoryType::DEVICE_UNIFIED_MEMORY);
+
+    //only unified memory allocation is added to residency container
+    EXPECT_EQ(1u, residencyContainer.size());
+    EXPECT_EQ(residencyContainer[0]->getGpuAddress(), castToUint64(unifiedMemoryPtr));
+
+    svmManager->addInternalAllocationsToResidencyContainer(pDevice->getRootDeviceIndex(),
+                                                           residencyContainer,
+                                                           InternalMemoryType::DEVICE_UNIFIED_MEMORY);
+    EXPECT_EQ(1u, residencyContainer.size());
+
+    svmManager->freeSVMAlloc(unifiedMemoryPtr);
+}
+
 struct createHostUnifiedMemoryAllocationTest : public ::testing::Test {
     void SetUp() override {
         device0 = context.pRootDevice0;
@@ -1786,7 +1814,7 @@ HWTEST_F(EnqueueSvmTest, GivenDstHostPtrWhenHostPtrAllocationCreationFailsThenRe
     void *pDstSVM = dstHostPtr;
     void *pSrcSVM = ptrSVM;
     MockCommandQueueHw<FamilyType> cmdQ(context, pClDevice, nullptr);
-    auto failCsr = std::make_unique<FailCsr<FamilyType>>(*pDevice->getExecutionEnvironment(), pDevice->getRootDeviceIndex());
+    auto failCsr = std::make_unique<FailCsr<FamilyType>>(*pDevice->getExecutionEnvironment(), pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
     CommandStreamReceiver *oldCommandStreamReceiver = cmdQ.gpgpuEngine->commandStreamReceiver;
     cmdQ.gpgpuEngine->commandStreamReceiver = failCsr.get();
     retVal = cmdQ.enqueueSVMMemcpy(
@@ -1807,7 +1835,7 @@ HWTEST_F(EnqueueSvmTest, GivenSrcHostPtrAndSizeZeroWhenHostPtrAllocationCreation
     void *pDstSVM = ptrSVM;
     void *pSrcSVM = srcHostPtr;
     MockCommandQueueHw<FamilyType> cmdQ(context, pClDevice, nullptr);
-    auto failCsr = std::make_unique<FailCsr<FamilyType>>(*pDevice->getExecutionEnvironment(), pDevice->getRootDeviceIndex());
+    auto failCsr = std::make_unique<FailCsr<FamilyType>>(*pDevice->getExecutionEnvironment(), pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
     CommandStreamReceiver *oldCommandStreamReceiver = cmdQ.gpgpuEngine->commandStreamReceiver;
     cmdQ.gpgpuEngine->commandStreamReceiver = failCsr.get();
     retVal = cmdQ.enqueueSVMMemcpy(
@@ -1829,7 +1857,7 @@ HWTEST_F(EnqueueSvmTest, givenDstHostPtrAndSrcHostPtrWhenHostPtrAllocationCreati
     void *pDstSVM = dstHostPtr;
     void *pSrcSVM = srcHostPtr;
     MockCommandQueueHw<FamilyType> cmdQ(context, pClDevice, nullptr);
-    auto failCsr = std::make_unique<FailCsr<FamilyType>>(*pDevice->getExecutionEnvironment(), pDevice->getRootDeviceIndex());
+    auto failCsr = std::make_unique<FailCsr<FamilyType>>(*pDevice->getExecutionEnvironment(), pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
     CommandStreamReceiver *oldCommandStreamReceiver = cmdQ.gpgpuEngine->commandStreamReceiver;
     cmdQ.gpgpuEngine->commandStreamReceiver = failCsr.get();
     retVal = cmdQ.enqueueSVMMemcpy(
@@ -1851,8 +1879,8 @@ TEST_F(EnqueueSvmTest, givenPageFaultManagerWhenEnqueueMemcpyThenAllocIsDecommit
     auto memoryManager = context->getMemoryManager();
     context->memoryManager = mockMemoryManager.get();
     auto srcSvm = context->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), 256, {}, pDevice->getDeviceBitfield());
-    mockMemoryManager->getPageFaultManager()->insertAllocation(srcSvm, 256, context->getSVMAllocsManager(), context->getSpecialQueue(), {});
-    mockMemoryManager->getPageFaultManager()->insertAllocation(ptrSVM, 256, context->getSVMAllocsManager(), context->getSpecialQueue(), {});
+    mockMemoryManager->getPageFaultManager()->insertAllocation(srcSvm, 256, context->getSVMAllocsManager(), context->getSpecialQueue(pDevice->getRootDeviceIndex()), {});
+    mockMemoryManager->getPageFaultManager()->insertAllocation(ptrSVM, 256, context->getSVMAllocsManager(), context->getSpecialQueue(pDevice->getRootDeviceIndex()), {});
     EXPECT_EQ(static_cast<MockPageFaultManager *>(mockMemoryManager->getPageFaultManager())->transferToCpuCalled, 0);
 
     this->pCmdQ->enqueueSVMMemcpy(false, ptrSVM, srcSvm, 256, 0, nullptr, nullptr);
@@ -1872,7 +1900,7 @@ TEST_F(EnqueueSvmTest, givenPageFaultManagerWhenEnqueueMemFillThenAllocIsDecommi
     mockMemoryManager->pageFaultManager.reset(new MockPageFaultManager());
     auto memoryManager = context->getMemoryManager();
     context->memoryManager = mockMemoryManager.get();
-    mockMemoryManager->getPageFaultManager()->insertAllocation(ptrSVM, 256, context->getSVMAllocsManager(), context->getSpecialQueue(), {});
+    mockMemoryManager->getPageFaultManager()->insertAllocation(ptrSVM, 256, context->getSVMAllocsManager(), context->getSpecialQueue(0u), {});
     EXPECT_EQ(static_cast<MockPageFaultManager *>(mockMemoryManager->getPageFaultManager())->transferToCpuCalled, 0);
     EXPECT_EQ(static_cast<MockPageFaultManager *>(mockMemoryManager->getPageFaultManager())->protectMemoryCalled, 0);
 

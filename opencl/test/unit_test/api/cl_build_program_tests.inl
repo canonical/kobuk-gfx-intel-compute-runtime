@@ -224,4 +224,163 @@ TEST_F(clBuildProgramTests, GivenNullAsInputWhenCreatingProgramThenInvalidProgra
         nullptr);
     EXPECT_EQ(CL_INVALID_PROGRAM, retVal);
 }
+
+TEST_F(clBuildProgramTests, GivenInvalidCallbackInputWhenBuildProgramThenInvalidValueErrorIsReturned) {
+    cl_program pProgram = nullptr;
+    cl_int binaryStatus = CL_SUCCESS;
+    size_t binarySize = 0;
+    std::string testFile;
+    retrieveBinaryKernelFilename(testFile, "CopyBuffer_simd16_", ".bin");
+
+    auto pBinary = loadDataFromFile(
+        testFile.c_str(),
+        binarySize);
+
+    ASSERT_NE(0u, binarySize);
+    ASSERT_NE(nullptr, pBinary);
+    const unsigned char *binaries[1] = {reinterpret_cast<const unsigned char *>(pBinary.get())};
+    pProgram = clCreateProgramWithBinary(
+        pContext,
+        1,
+        &testedClDevice,
+        &binarySize,
+        binaries,
+        &binaryStatus,
+        &retVal);
+
+    ASSERT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, pProgram);
+
+    retVal = clBuildProgram(
+        pProgram,
+        1,
+        &testedClDevice,
+        nullptr,
+        nullptr,
+        &retVal);
+
+    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+
+    retVal = clReleaseProgram(pProgram);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+TEST_F(clBuildProgramTests, GivenValidCallbackInputWhenBuildProgramThenCallbackIsInvoked) {
+    cl_program pProgram = nullptr;
+    cl_int binaryStatus = CL_SUCCESS;
+    size_t binarySize = 0;
+    std::string testFile;
+    retrieveBinaryKernelFilename(testFile, "CopyBuffer_simd16_", ".bin");
+
+    auto pBinary = loadDataFromFile(
+        testFile.c_str(),
+        binarySize);
+
+    ASSERT_NE(0u, binarySize);
+    ASSERT_NE(nullptr, pBinary);
+    const unsigned char *binaries[1] = {reinterpret_cast<const unsigned char *>(pBinary.get())};
+    pProgram = clCreateProgramWithBinary(
+        pContext,
+        1,
+        &testedClDevice,
+        &binarySize,
+        binaries,
+        &binaryStatus,
+        &retVal);
+
+    ASSERT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, pProgram);
+
+    char userData = 0;
+
+    retVal = clBuildProgram(
+        pProgram,
+        1,
+        &testedClDevice,
+        nullptr,
+        notifyFuncProgram,
+        &userData);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    EXPECT_EQ('a', userData);
+
+    retVal = clReleaseProgram(pProgram);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+TEST_F(clBuildProgramTests, givenMultiDeviceProgramWhenBuildingForInvalidDevicesInputThenInvalidDeviceErrorIsReturned) {
+    cl_program pProgram = nullptr;
+    size_t sourceSize = 0;
+    std::string testFile;
+
+    testFile.append(clFiles);
+    testFile.append("copybuffer.cl");
+    auto pSource = loadDataFromFile(
+        testFile.c_str(),
+        sourceSize);
+
+    ASSERT_NE(0u, sourceSize);
+    ASSERT_NE(nullptr, pSource);
+
+    const char *sources[1] = {pSource.get()};
+    pProgram = clCreateProgramWithSource(
+        pContext,
+        1,
+        sources,
+        &sourceSize,
+        &retVal);
+
+    EXPECT_NE(nullptr, pProgram);
+    ASSERT_EQ(CL_SUCCESS, retVal);
+
+    MockContext mockContext;
+    cl_device_id nullDeviceInput[] = {pContext->getDevice(0), nullptr};
+    cl_device_id notAssociatedDeviceInput[] = {mockContext.getDevice(0)};
+    cl_device_id validDeviceInput[] = {pContext->getDevice(0)};
+
+    retVal = clBuildProgram(
+        pProgram,
+        0,
+        validDeviceInput,
+        nullptr,
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+
+    retVal = clBuildProgram(
+        pProgram,
+        1,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+
+    retVal = clBuildProgram(
+        pProgram,
+        2,
+        nullDeviceInput,
+        nullptr,
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_INVALID_DEVICE, retVal);
+
+    retVal = clBuildProgram(
+        pProgram,
+        1,
+        notAssociatedDeviceInput,
+        nullptr,
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_INVALID_DEVICE, retVal);
+
+    retVal = clReleaseProgram(pProgram);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
 } // namespace ULT

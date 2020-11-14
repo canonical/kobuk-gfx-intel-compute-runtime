@@ -67,16 +67,12 @@ struct Device : _ze_device_handle_t {
     virtual ze_result_t getCacheProperties(uint32_t *pCount, ze_device_cache_properties_t *pCacheProperties) = 0;
     virtual ze_result_t imageGetProperties(const ze_image_desc_t *desc, ze_image_properties_t *pImageProperties) = 0;
     virtual ze_result_t getDeviceImageProperties(ze_device_image_properties_t *pDeviceImageProperties) = 0;
+    virtual ze_result_t getExternalMemoryProperties(ze_device_external_memory_properties_t *pExternalMemoryProperties) = 0;
 
     virtual ze_result_t getCommandQueueGroupProperties(uint32_t *pCount,
                                                        ze_command_queue_group_properties_t *pCommandQueueGroupProperties) = 0;
     virtual ze_result_t systemBarrier() = 0;
 
-    virtual ze_result_t registerCLMemory(cl_context context, cl_mem mem, void **ptr) = 0;
-    virtual ze_result_t registerCLProgram(cl_context context, cl_program program,
-                                          ze_module_handle_t *phModule) = 0;
-    virtual ze_result_t registerCLCommandQueue(cl_context context, cl_command_queue commandQueue,
-                                               ze_command_queue_handle_t *phCommandQueue) = 0;
     virtual ~Device() = default;
 
     virtual void *getExecEnvironment() = 0;
