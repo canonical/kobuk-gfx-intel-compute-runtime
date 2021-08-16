@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,9 +8,9 @@
 #pragma once
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
+#include "shared/test/common/mocks/mock_experimental_command_buffer.h"
 
 #include "opencl/source/command_stream/aub_command_stream_receiver_hw.h"
-#include "opencl/test/unit_test/mocks/mock_experimental_command_buffer.h"
 
 namespace NEO {
 
@@ -50,9 +50,9 @@ class UltAubCommandStreamReceiver : public AUBCommandStreamReceiverHw<GfxFamily>
         return csr;
     }
 
-    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled) override {
+    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override {
         blitBufferCalled++;
-        return BaseClass::blitBuffer(blitPropertiesContainer, blocking, profilingEnabled);
+        return BaseClass::blitBuffer(blitPropertiesContainer, blocking, profilingEnabled, device);
     }
 
     uint32_t blitBufferCalled = 0;

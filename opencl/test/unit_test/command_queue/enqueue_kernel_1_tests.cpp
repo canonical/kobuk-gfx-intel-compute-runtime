@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,16 +7,19 @@
 
 #include "shared/source/helpers/pause_on_gpu_properties.h"
 #include "shared/source/helpers/preamble.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
 
 #include "opencl/source/api/api.h"
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
+#include "opencl/test/unit_test/api/cl_api_tests.h"
 #include "opencl/test/unit_test/command_queue/enqueue_fixture.h"
 #include "opencl/test/unit_test/fixtures/hello_world_fixture.h"
-#include "opencl/test/unit_test/helpers/unit_test_helper.h"
+#include "opencl/test/unit_test/helpers/kernel_binary_helper.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
 #include "opencl/test/unit_test/mocks/mock_submissions_aggregator.h"
+#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 
 using namespace NEO;
 
@@ -42,32 +45,34 @@ TEST_F(EnqueueKernelTest, GivenNullKernelWhenEnqueuingKernelThenInvalidKernelErr
 TEST_F(EnqueueKernelTest, givenKernelWhenAllArgsAreSetThenClEnqueueNDRangeKernelReturnsSuccess) {
     const size_t n = 512;
     size_t globalWorkSize[3] = {n, 1, 1};
-    size_t localWorkSize[3] = {256, 1, 1};
-    cl_int retVal = CL_SUCCESS;
+    size_t localWorkSize[3] = {64, 1, 1};
+    cl_int retVal = CL_INVALID_KERNEL;
     CommandQueue *pCmdQ2 = createCommandQueue(pClDevice);
 
-    std::unique_ptr<Kernel> kernel(Kernel::create(pProgram, *pProgram->getKernelInfo("CopyBuffer"), &retVal));
+    std::unique_ptr<MultiDeviceKernel> pMultiDeviceKernel(MultiDeviceKernel::create(pProgram, pProgram->getKernelInfosForKernel("CopyBuffer"), &retVal));
+    auto kernel = pMultiDeviceKernel->getKernel(rootDeviceIndex);
+
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     auto b0 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
     auto b1 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ2, kernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 0, sizeof(cl_mem), &b0);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 0, sizeof(cl_mem), &b0);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ2, kernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 1, sizeof(cl_mem), &b1);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 1, sizeof(cl_mem), &b1);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ2, kernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     retVal = clReleaseMemObject(b0);
@@ -78,6 +83,95 @@ TEST_F(EnqueueKernelTest, givenKernelWhenAllArgsAreSetThenClEnqueueNDRangeKernel
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
+TEST(EnqueueMultiDeviceKernelTest, givenMultiDeviceKernelWhenSetArgDeviceUSMThenOnlyOneKernelIsPatched) {
+    REQUIRE_SVM_OR_SKIP(defaultHwInfo);
+    auto deviceFactory = std::make_unique<UltClDeviceFactory>(3, 0);
+    auto device0 = deviceFactory->rootDevices[0];
+    auto device1 = deviceFactory->rootDevices[1];
+    auto device2 = deviceFactory->rootDevices[2];
+
+    cl_device_id devices[] = {device0, device1, device2};
+
+    auto context = std::make_unique<MockContext>(ClDeviceVector(devices, 3), false);
+
+    auto pCmdQ1 = context->getSpecialQueue(1u);
+    auto pCmdQ2 = context->getSpecialQueue(2u);
+
+    std::unique_ptr<char[]> pSource = nullptr;
+    size_t sourceSize = 0;
+    std::string testFile;
+
+    KernelBinaryHelper kbHelper("CopyBuffer_simd16");
+
+    testFile.append(clFiles);
+    testFile.append("CopyBuffer_simd16.cl");
+
+    pSource = loadDataFromFile(
+        testFile.c_str(),
+        sourceSize);
+
+    ASSERT_NE(0u, sourceSize);
+    ASSERT_NE(nullptr, pSource);
+
+    const char *sources[1] = {pSource.get()};
+
+    cl_int retVal = CL_INVALID_PROGRAM;
+
+    auto clProgram = clCreateProgramWithSource(
+        context.get(),
+        1,
+        sources,
+        &sourceSize,
+        &retVal);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, clProgram);
+
+    clBuildProgram(clProgram, 0, nullptr, nullptr, nullptr, nullptr);
+
+    auto clKernel = clCreateKernel(clProgram, "CopyBuffer", &retVal);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    auto pMultiDeviceKernel = castToObject<MultiDeviceKernel>(clKernel);
+
+    auto buffer0 = clCreateBuffer(context.get(), 0, MemoryConstants::pageSize, nullptr, nullptr);
+    size_t globalWorkSize[3] = {1, 1, 1};
+    size_t localWorkSize[3] = {1, 1, 1};
+
+    retVal = clSetKernelArg(clKernel, 0, sizeof(cl_mem), &buffer0);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    auto deviceMem = clDeviceMemAllocINTEL(context.get(), device1, {}, MemoryConstants::pageSize, MemoryConstants::pageSize, &retVal);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = clSetKernelArgSVMPointer(clKernel, 1, deviceMem);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    EXPECT_FALSE(pMultiDeviceKernel->getKernel(0u)->isPatched());
+    EXPECT_TRUE(pMultiDeviceKernel->getKernel(1u)->isPatched());
+    EXPECT_FALSE(pMultiDeviceKernel->getKernel(2u)->isPatched());
+
+    retVal = clEnqueueNDRangeKernel(pCmdQ1, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = clEnqueueNDRangeKernel(pCmdQ2, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
+
+    retVal = clReleaseMemObject(buffer0);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = clMemFreeINTEL(context.get(), deviceMem);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    retVal = clReleaseKernel(clKernel);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    retVal = clReleaseProgram(clProgram);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
 TEST_F(EnqueueKernelTest, givenKernelWhenNotAllArgsAreSetButSetKernelArgIsCalledTwiceThenClEnqueueNDRangeKernelReturnsError) {
     const size_t n = 512;
     size_t globalWorkSize[3] = {n, 1, 1};
@@ -85,28 +179,30 @@ TEST_F(EnqueueKernelTest, givenKernelWhenNotAllArgsAreSetButSetKernelArgIsCalled
     cl_int retVal = CL_SUCCESS;
     CommandQueue *pCmdQ2 = createCommandQueue(pClDevice);
 
-    std::unique_ptr<Kernel> kernel(Kernel::create(pProgram, *pProgram->getKernelInfo("CopyBuffer"), &retVal));
+    std::unique_ptr<MultiDeviceKernel> pMultiDeviceKernel(MultiDeviceKernel::create(pProgram, pProgram->getKernelInfosForKernel("CopyBuffer"), &retVal));
+    auto kernel = pMultiDeviceKernel->getKernel(rootDeviceIndex);
+
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     auto b0 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
     auto b1 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ2, kernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 0, sizeof(cl_mem), &b0);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 0, sizeof(cl_mem), &b0);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ2, kernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 0, sizeof(cl_mem), &b1);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 0, sizeof(cl_mem), &b1);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ2, kernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
     retVal = clReleaseMemObject(b0);
@@ -124,28 +220,30 @@ TEST_F(EnqueueKernelTest, givenKernelWhenSetKernelArgIsCalledForEachArgButAtLeas
     cl_int retVal = CL_SUCCESS;
     CommandQueue *pCmdQ2 = createCommandQueue(pClDevice);
 
-    std::unique_ptr<Kernel> kernel(Kernel::create(pProgram, *pProgram->getKernelInfo("CopyBuffer"), &retVal));
+    std::unique_ptr<MultiDeviceKernel> pMultiDeviceKernel(MultiDeviceKernel::create(pProgram, pProgram->getKernelInfosForKernel("CopyBuffer"), &retVal));
+    auto kernel = pMultiDeviceKernel->getKernel(rootDeviceIndex);
+
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     auto b0 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
     auto b1 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ2, kernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 0, sizeof(cl_mem), &b0);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 0, sizeof(cl_mem), &b0);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ2, kernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 1, 2 * sizeof(cl_mem), &b1);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 1, 2 * sizeof(cl_mem), &b1);
     EXPECT_NE(CL_SUCCESS, retVal);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ2, kernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
     retVal = clReleaseMemObject(b0);
@@ -161,7 +259,7 @@ TEST_F(EnqueueKernelTest, GivenInvalidEventListCountWhenEnqueuingKernelThenInval
 
     auto retVal = clEnqueueNDRangeKernel(
         pCmdQ,
-        pKernel,
+        pMultiDeviceKernel,
         1,
         nullptr,
         globalWorkSize,
@@ -179,7 +277,7 @@ TEST_F(EnqueueKernelTest, GivenInvalidWorkGroupSizeWhenEnqueuingKernelThenInvali
 
     auto retVal = clEnqueueNDRangeKernel(
         pCmdQ,
-        pKernel,
+        pMultiDeviceKernel,
         3,
         nullptr,
         globalWorkSize,
@@ -207,40 +305,72 @@ TEST_F(EnqueueKernelTest, GivenNullKernelWhenEnqueuingNDCountKernelINTELThenInva
     EXPECT_EQ(CL_INVALID_KERNEL, retVal);
 }
 
+using clEnqueueNDCountKernelTests = api_tests;
+
+TEST_F(clEnqueueNDCountKernelTests, GivenQueueIncapableWhenEnqueuingNDCountKernelINTELThenInvalidOperationIsReturned) {
+    auto &hwHelper = HwHelper::get(::defaultHwInfo->platform.eRenderCoreFamily);
+    auto engineGroupType = hwHelper.getEngineGroupType(pCommandQueue->getGpgpuEngine().getEngineType(), *::defaultHwInfo);
+    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, ::defaultHwInfo->platform.eProductFamily)) {
+        GTEST_SKIP();
+    }
+
+    cl_uint workDim = 1;
+    size_t globalWorkOffset[3] = {0, 0, 0};
+    size_t workgroupCount[3] = {1, 1, 1};
+    size_t localWorkSize[3] = {1, 1, 1};
+
+    this->disableQueueCapabilities(CL_QUEUE_CAPABILITY_KERNEL_INTEL);
+    retVal = clEnqueueNDCountKernelINTEL(
+        pCommandQueue,
+        pMultiDeviceKernel,
+        workDim,
+        globalWorkOffset,
+        workgroupCount,
+        localWorkSize,
+        0,
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_INVALID_OPERATION, retVal);
+}
+
 TEST_F(EnqueueKernelTest, givenKernelWhenAllArgsAreSetThenClEnqueueNDCountKernelINTELReturnsSuccess) {
     const size_t n = 512;
     size_t workgroupCount[3] = {2, 1, 1};
-    size_t localWorkSize[3] = {256, 1, 1};
+    size_t localWorkSize[3] = {64, 1, 1};
     cl_int retVal = CL_SUCCESS;
     CommandQueue *pCmdQ2 = createCommandQueue(pClDevice);
 
     HwHelper &hwHelper = HwHelper::get(pClDevice->getDevice().getHardwareInfo().platform.eRenderCoreFamily);
-    if (!hwHelper.isCooperativeDispatchSupported(pCmdQ2->getGpgpuEngine().getEngineType(), pClDevice->getDevice().getHardwareInfo().platform.eProductFamily)) {
-        pCmdQ2->getGpgpuEngine().osContext = pCmdQ2->getDevice().getEngine(aub_stream::ENGINE_CCS, true, false).osContext;
+    auto engineGroupType = hwHelper.getEngineGroupType(pCmdQ2->getGpgpuEngine().getEngineType(), hardwareInfo);
+    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, pClDevice->getDevice().getHardwareInfo().platform.eProductFamily)) {
+        pCmdQ2->getGpgpuEngine().osContext = pCmdQ2->getDevice().getEngine(aub_stream::ENGINE_CCS, EngineUsage::LowPriority).osContext;
     }
 
-    std::unique_ptr<Kernel> kernel(Kernel::create(pProgram, *pProgram->getKernelInfo("CopyBuffer"), &retVal));
+    std::unique_ptr<MultiDeviceKernel> pMultiDeviceKernel(MultiDeviceKernel::create(pProgram, pProgram->getKernelInfosForKernel("CopyBuffer"), &retVal));
+    auto kernel = pMultiDeviceKernel->getKernel(rootDeviceIndex);
+
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     auto b0 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
     auto b1 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, kernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 0, sizeof(cl_mem), &b0);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 0, sizeof(cl_mem), &b0);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, kernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 1, sizeof(cl_mem), &b1);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 1, sizeof(cl_mem), &b1);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, kernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     retVal = clReleaseMemObject(b0);
@@ -259,32 +389,35 @@ TEST_F(EnqueueKernelTest, givenKernelWhenNotAllArgsAreSetButSetKernelArgIsCalled
     CommandQueue *pCmdQ2 = createCommandQueue(pClDevice);
 
     HwHelper &hwHelper = HwHelper::get(pClDevice->getDevice().getHardwareInfo().platform.eRenderCoreFamily);
-    if (!hwHelper.isCooperativeDispatchSupported(pCmdQ2->getGpgpuEngine().getEngineType(), pClDevice->getDevice().getHardwareInfo().platform.eProductFamily)) {
-        pCmdQ2->getGpgpuEngine().osContext = pCmdQ2->getDevice().getEngine(aub_stream::ENGINE_CCS, true, false).osContext;
+    auto engineGroupType = hwHelper.getEngineGroupType(pCmdQ2->getGpgpuEngine().getEngineType(), hardwareInfo);
+    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, pClDevice->getDevice().getHardwareInfo().platform.eProductFamily)) {
+        pCmdQ2->getGpgpuEngine().osContext = pCmdQ2->getDevice().getEngine(aub_stream::ENGINE_CCS, EngineUsage::LowPriority).osContext;
     }
 
-    std::unique_ptr<Kernel> kernel(Kernel::create(pProgram, *pProgram->getKernelInfo("CopyBuffer"), &retVal));
+    std::unique_ptr<MultiDeviceKernel> pMultiDeviceKernel(MultiDeviceKernel::create(pProgram, pProgram->getKernelInfosForKernel("CopyBuffer"), &retVal));
+    auto kernel = pMultiDeviceKernel->getKernel(rootDeviceIndex);
+
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     auto b0 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
     auto b1 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, kernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 0, sizeof(cl_mem), &b0);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 0, sizeof(cl_mem), &b0);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, kernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 0, sizeof(cl_mem), &b1);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 0, sizeof(cl_mem), &b1);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, kernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
     retVal = clReleaseMemObject(b0);
@@ -303,32 +436,35 @@ TEST_F(EnqueueKernelTest, givenKernelWhenSetKernelArgIsCalledForEachArgButAtLeas
     CommandQueue *pCmdQ2 = createCommandQueue(pClDevice);
 
     HwHelper &hwHelper = HwHelper::get(pClDevice->getDevice().getHardwareInfo().platform.eRenderCoreFamily);
-    if (!hwHelper.isCooperativeDispatchSupported(pCmdQ2->getGpgpuEngine().getEngineType(), pClDevice->getDevice().getHardwareInfo().platform.eProductFamily)) {
-        pCmdQ2->getGpgpuEngine().osContext = pCmdQ2->getDevice().getEngine(aub_stream::ENGINE_CCS, true, false).osContext;
+    auto engineGroupType = hwHelper.getEngineGroupType(pCmdQ2->getGpgpuEngine().getEngineType(), hardwareInfo);
+    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, pClDevice->getDevice().getHardwareInfo().platform.eProductFamily)) {
+        pCmdQ2->getGpgpuEngine().osContext = pCmdQ2->getDevice().getEngine(aub_stream::ENGINE_CCS, EngineUsage::LowPriority).osContext;
     }
 
-    std::unique_ptr<Kernel> kernel(Kernel::create(pProgram, *pProgram->getKernelInfo("CopyBuffer"), &retVal));
+    std::unique_ptr<MultiDeviceKernel> pMultiDeviceKernel(MultiDeviceKernel::create(pProgram, pProgram->getKernelInfosForKernel("CopyBuffer"), &retVal));
+    auto kernel = pMultiDeviceKernel->getKernel(rootDeviceIndex);
+
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     auto b0 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
     auto b1 = clCreateBuffer(context, 0, n * sizeof(float), nullptr, nullptr);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, kernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 0, sizeof(cl_mem), &b0);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 0, sizeof(cl_mem), &b0);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, kernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
-    retVal = clSetKernelArg(kernel.get(), 1, 2 * sizeof(cl_mem), &b1);
+    retVal = clSetKernelArg(pMultiDeviceKernel.get(), 1, 2 * sizeof(cl_mem), &b1);
     EXPECT_NE(CL_SUCCESS, retVal);
 
     EXPECT_FALSE(kernel->isPatched());
-    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, kernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDCountKernelINTEL(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, workgroupCount, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
     retVal = clReleaseMemObject(b0);
@@ -344,7 +480,7 @@ TEST_F(EnqueueKernelTest, GivenInvalidEventListCountWhenEnqueuingNDCountKernelIN
 
     auto retVal = clEnqueueNDCountKernelINTEL(
         pCmdQ,
-        pKernel,
+        pMultiDeviceKernel,
         1,
         nullptr,
         workgroupCount,
@@ -356,13 +492,13 @@ TEST_F(EnqueueKernelTest, GivenInvalidEventListCountWhenEnqueuingNDCountKernelIN
     EXPECT_EQ(CL_INVALID_EVENT_WAIT_LIST, retVal);
 }
 
-HWTEST_F(EnqueueKernelTest, bumpsTaskLevel) {
+HWTEST_F(EnqueueKernelTest, WhenEnqueingKernelThenTaskLevelIsIncremented) {
     auto taskLevelBefore = pCmdQ->taskLevel;
     callOneWorkItemNDRKernel();
     EXPECT_GT(pCmdQ->taskLevel, taskLevelBefore);
 }
 
-HWTEST_F(EnqueueKernelTest, alignsToCSR) {
+HWTEST_F(EnqueueKernelTest, WhenEnqueingKernelThenCsrTaskLevelIsIncremented) {
     //this test case assumes IOQ
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.taskCount = pCmdQ->taskCount + 100;
@@ -373,31 +509,29 @@ HWTEST_F(EnqueueKernelTest, alignsToCSR) {
     EXPECT_EQ(pCmdQ->taskLevel + 1, csr.peekTaskLevel());
 }
 
-HWTEST_F(EnqueueKernelTest, addsCommands) {
+HWTEST_F(EnqueueKernelTest, WhenEnqueingKernelThenCommandsAreAdded) {
     auto usedCmdBufferBefore = pCS->getUsed();
 
     callOneWorkItemNDRKernel();
     EXPECT_NE(usedCmdBufferBefore, pCS->getUsed());
 }
 
-HWTEST_F(EnqueueKernelTest, addsIndirectData) {
+HWTEST_F(EnqueueKernelTest, WhenEnqueingKernelThenIndirectDataIsAdded) {
     auto dshBefore = pDSH->getUsed();
     auto iohBefore = pIOH->getUsed();
     auto sshBefore = pSSH->getUsed();
 
     callOneWorkItemNDRKernel();
-    EXPECT_TRUE(UnitTestHelper<FamilyType>::evaluateDshUsage(dshBefore, pDSH->getUsed(), pKernel));
+    EXPECT_TRUE(UnitTestHelper<FamilyType>::evaluateDshUsage(dshBefore, pDSH->getUsed(), &pKernel->getKernelInfo().kernelDescriptor, rootDeviceIndex));
     EXPECT_NE(iohBefore, pIOH->getUsed());
-    if (pKernel->requiresSshForBuffers() || (pKernel->getKernelInfo().patchInfo.imageMemObjKernelArgs.size() > 0)) {
+    if (pKernel->usesBindfulAddressingForBuffers() || pKernel->getKernelInfo().kernelDescriptor.kernelAttributes.flags.usesImages) {
         EXPECT_NE(sshBefore, pSSH->getUsed());
     }
 }
 
 TEST_F(EnqueueKernelTest, GivenKernelWithBuiltinDispatchInfoBuilderWhenBeingDispatchedThenBuiltinDispatcherIsUsedForDispatchValidation) {
     struct MockBuiltinDispatchBuilder : BuiltinDispatchInfoBuilder {
-        MockBuiltinDispatchBuilder(BuiltIns &builtins)
-            : BuiltinDispatchInfoBuilder(builtins) {
-        }
+        using BuiltinDispatchInfoBuilder::BuiltinDispatchInfoBuilder;
 
         cl_int validateDispatch(Kernel *kernel, uint32_t inworkDim, const Vec3<size_t> &gws,
                                 const Vec3<size_t> &elws, const Vec3<size_t> &offset) const override {
@@ -422,7 +556,7 @@ TEST_F(EnqueueKernelTest, GivenKernelWithBuiltinDispatchInfoBuilderWhenBeingDisp
         mutable bool wasValidateDispatchCalled = false;
     };
 
-    MockBuiltinDispatchBuilder mockNuiltinDispatchBuilder(*pCmdQ->getDevice().getBuiltIns());
+    MockBuiltinDispatchBuilder mockNuiltinDispatchBuilder(*pCmdQ->getDevice().getBuiltIns(), pCmdQ->getClDevice());
 
     MockKernelWithInternals mockKernel(*pClDevice);
     mockKernel.kernelInfo.builtinDispatchBuilder = &mockNuiltinDispatchBuilder;
@@ -468,14 +602,10 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueKernelTest, givenSecondEnqueueWithTheSameScra
     HardwareParse hwParser;
     size_t off[3] = {0, 0, 0};
     size_t gws[3] = {1, 1, 1};
-
-    SPatchMediaVFEState mediaVFEstate;
     uint32_t scratchSize = 4096u;
 
-    mediaVFEstate.PerThreadScratchSpace = scratchSize;
-
     MockKernelWithInternals mockKernel(*pClDevice);
-    mockKernel.kernelInfo.patchInfo.mediavfestate = &mediaVFEstate;
+    mockKernel.kernelInfo.setPerThreadScratchSize(scratchSize, 0);
 
     auto sizeToProgram = PreambleHelper<FamilyType>::getScratchSizeValueToProgramMediaVfeState(scratchSize);
 
@@ -509,14 +639,10 @@ HWTEST_F(EnqueueKernelTest, whenEnqueueingKernelThatRequirePrivateScratchThenPri
     csr.getMemoryManager()->setForce32BitAllocations(false);
     size_t off[3] = {0, 0, 0};
     size_t gws[3] = {1, 1, 1};
-
-    SPatchMediaVFEState mediaVFEstate;
     uint32_t privateScratchSize = 4096u;
 
-    mediaVFEstate.PerThreadScratchSpace = privateScratchSize;
-
     MockKernelWithInternals mockKernel(*pClDevice);
-    mockKernel.kernelInfo.patchInfo.mediaVfeStateSlot1 = &mediaVFEstate;
+    mockKernel.kernelInfo.setPerThreadScratchSize(privateScratchSize, 1);
 
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
 
@@ -569,8 +695,7 @@ HWTEST_F(EnqueueKernelTest, givenEnqueueWithGlobalWorkSizeWhenZeroValueIsPassedI
     size_t gws[3] = {0, 0, 0};
     MockKernelWithInternals mockKernel(*pClDevice);
     auto ret = pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
-    auto expected = (pClDevice->areOcl21FeaturesEnabled() == false ? CL_INVALID_GLOBAL_WORK_SIZE : CL_SUCCESS);
-    EXPECT_EQ(expected, ret);
+    EXPECT_EQ(CL_SUCCESS, ret);
 }
 
 HWTEST_F(EnqueueKernelTest, givenCommandStreamReceiverInBatchingModeWhenEnqueueKernelIsCalledThenKernelIsRecorded) {
@@ -591,13 +716,14 @@ HWTEST_F(EnqueueKernelTest, givenCommandStreamReceiverInBatchingModeWhenEnqueueK
 
     auto cmdBuffer = mockedSubmissionsAggregator->peekCmdBufferList().peekHead();
 
-    //Two more surfaces from preemptionAllocation and SipKernel
+    //Three more surfaces from preemptionAllocation, SipKernel and clearColorAllocation
     size_t csrSurfaceCount = (pDevice->getPreemptionMode() == PreemptionMode::MidThread) ? 2 : 0;
     size_t timestampPacketSurfacesCount = mockCsr->peekTimestampPacketWriteEnabled() ? 1 : 0;
     size_t fenceSurfaceCount = mockCsr->globalFenceAllocation ? 1 : 0;
+    size_t clearColorSize = mockCsr->clearColorAllocation ? 1 : 0;
 
     EXPECT_EQ(0, mockCsr->flushCalledCount);
-    EXPECT_EQ(5u + csrSurfaceCount + timestampPacketSurfacesCount + fenceSurfaceCount, cmdBuffer->surfaces.size());
+    EXPECT_EQ(5u + csrSurfaceCount + timestampPacketSurfacesCount + fenceSurfaceCount + clearColorSize, cmdBuffer->surfaces.size());
 }
 
 HWTEST_F(EnqueueKernelTest, givenReducedAddressSpaceGraphicsAllocationForHostPtrWithL3FlushRequiredWhenEnqueueKernelIsCalledThenFlushIsCalledForReducedAddressSpacePlatforms) {
@@ -733,6 +859,7 @@ HWTEST_F(EnqueueKernelTest, givenCommandStreamReceiverInBatchingModeAndBatchedKe
     EXPECT_TRUE(mockedSubmissionsAggregator->peekCmdBufferList().peekIsEmpty());
     EXPECT_EQ(1, mockCsrmockCsr->flushCalledCount);
 }
+
 HWTEST_F(EnqueueKernelTest, givenCommandStreamReceiverInBatchingModeWhenKernelIsEnqueuedTwiceThenTwoSubmissionsAreRecorded) {
     auto &mockCsrmockCsr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     mockCsrmockCsr.overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -780,6 +907,30 @@ HWTEST_F(EnqueueKernelTest, givenCommandStreamReceiverInBatchingModeWhenFlushIsC
 
     EXPECT_TRUE(mockedSubmissionsAggregator->peekCmdBufferList().peekIsEmpty());
     EXPECT_EQ(1, mockCsr->flushCalledCount);
+}
+
+HWCMDTEST_F(IGFX_XE_HP_CORE, EnqueueKernelTest, givenTwoEnqueueProgrammedWithinSameCommandBufferWhenBatchedThenNoBBSBetweenThem) {
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
+    mockCsr->useNewResourceImplicitFlush = false;
+    mockCsr->useGpuIdleImplicitFlush = false;
+    pDevice->resetCommandStreamReceiver(mockCsr);
+
+    auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
+    mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
+
+    HardwareParse hwParse;
+
+    MockKernelWithInternals mockKernel(*pClDevice);
+    size_t gws[3] = {1, 0, 0};
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    pCmdQ->flush();
+
+    hwParse.parseCommands<FamilyType>(*pCmdQ);
+    auto bbsCommands = findAll<typename FamilyType::MI_BATCH_BUFFER_START *>(hwParse.cmdList.begin(), hwParse.cmdList.end());
+
+    EXPECT_EQ(bbsCommands.size(), 1u);
 }
 
 HWTEST_F(EnqueueKernelTest, givenCsrInBatchingModeWhenFinishIsCalledThenBatchesSubmissionsAreFlushed) {
@@ -1019,7 +1170,7 @@ HWTEST_F(EnqueueKernelTest, givenOutOfOrderCommandQueueWhenEnqueueKernelIsMadeTh
 
     MockKernelWithInternals mockKernel(*pClDevice, context);
     size_t gws[3] = {1, 0, 0};
-    clEnqueueNDRangeKernel(ooq, mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    clEnqueueNDRangeKernel(ooq, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
     EXPECT_FALSE(mockedSubmissionsAggregator->peekCmdBufferList().peekIsEmpty());
     auto cmdBuffer = mockedSubmissionsAggregator->peekCmdBufferList().peekHead();
@@ -1041,7 +1192,7 @@ HWTEST_F(EnqueueKernelTest, givenInOrderCommandQueueWhenEnqueueKernelIsMadeThenP
 
     MockKernelWithInternals mockKernel(*pClDevice, context);
     size_t gws[3] = {1, 0, 0};
-    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
     EXPECT_FALSE(mockedSubmissionsAggregator->peekCmdBufferList().peekIsEmpty());
     auto cmdBuffer = mockedSubmissionsAggregator->peekCmdBufferList().peekHead();
@@ -1066,7 +1217,7 @@ HWTEST_F(EnqueueKernelTest, givenInOrderCommandQueueWhenEnqueueKernelThatHasShar
     MockKernelWithInternals mockKernel(*pClDevice, context);
     size_t gws[3] = {1, 0, 0};
     mockKernel.mockKernel->setUsingSharedArgs(true);
-    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
     EXPECT_FALSE(mockedSubmissionsAggregator->peekCmdBufferList().peekIsEmpty());
     auto cmdBuffer = mockedSubmissionsAggregator->peekCmdBufferList().peekHead();
@@ -1084,7 +1235,7 @@ HWTEST_F(EnqueueKernelTest, givenInOrderCommandQueueWhenEnqueueKernelThatHasShar
     MockKernelWithInternals mockKernel(*pClDevice, context);
     size_t gws[3] = {1, 0, 0};
     mockKernel.mockKernel->setUsingSharedArgs(true);
-    clEnqueueNDRangeKernel(this->pCmdQ, mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    clEnqueueNDRangeKernel(this->pCmdQ, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
     EXPECT_FALSE(mockCsr->passedDispatchFlags.dcFlush);
 }
@@ -1107,7 +1258,7 @@ HWTEST_F(EnqueueKernelTest, givenInOrderCommandQueueWhenEnqueueKernelReturningEv
     size_t gws[3] = {1, 0, 0};
     cl_event event;
 
-    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, &event);
+    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, &event);
 
     EXPECT_FALSE(mockedSubmissionsAggregator->peekCmdBufferList().peekIsEmpty());
     auto cmdBuffer = mockedSubmissionsAggregator->peekCmdBufferList().peekHead();
@@ -1136,7 +1287,7 @@ HWTEST_F(EnqueueKernelTest, givenInOrderCommandQueueWhenEnqueueKernelReturningEv
     size_t gws[3] = {1, 0, 0};
     cl_event event;
 
-    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, &event);
+    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, &event);
 
     EXPECT_FALSE(mockedSubmissionsAggregator->peekCmdBufferList().peekIsEmpty());
     auto cmdBuffer = mockedSubmissionsAggregator->peekCmdBufferList().peekHead();
@@ -1164,7 +1315,7 @@ HWTEST_F(EnqueueKernelTest, givenOutOfOrderCommandQueueWhenEnqueueKernelReturnin
     size_t gws[3] = {1, 0, 0};
     cl_event event;
 
-    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, &event);
+    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, &event);
 
     EXPECT_FALSE(mockedSubmissionsAggregator->peekCmdBufferList().peekIsEmpty());
     auto cmdBuffer = mockedSubmissionsAggregator->peekCmdBufferList().peekHead();
@@ -1221,7 +1372,7 @@ HWTEST_F(EnqueueKernelTest, givenKernelWhenItIsSubmittedFromTwoDifferentCommandQ
 
     const cl_queue_properties props[] = {0};
     auto inOrderQueue = clCreateCommandQueueWithProperties(context, pClDevice, props, nullptr);
-    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    clEnqueueNDRangeKernel(inOrderQueue, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
     auto usedAfterSubmission = csr.commandStream.getUsed();
 
@@ -1236,12 +1387,14 @@ TEST_F(EnqueueKernelTest, givenKernelWhenAllArgsAreNotAndEventExistSetThenClEnqu
     cl_int retVal = CL_SUCCESS;
     CommandQueue *pCmdQ2 = createCommandQueue(pClDevice);
 
-    std::unique_ptr<Kernel> kernel(Kernel::create(pProgram, *pProgram->getKernelInfo("CopyBuffer"), &retVal));
+    std::unique_ptr<MultiDeviceKernel> pMultiDeviceKernel(MultiDeviceKernel::create(pProgram, pProgram->getKernelInfosForKernel("CopyBuffer"), &retVal));
+    auto kernel = pMultiDeviceKernel->getKernel(rootDeviceIndex);
+
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_FALSE(kernel->isPatched());
     cl_event event;
-    retVal = clEnqueueNDRangeKernel(pCmdQ2, kernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, &event);
+    retVal = clEnqueueNDRangeKernel(pCmdQ2, pMultiDeviceKernel.get(), 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, &event);
     EXPECT_EQ(CL_INVALID_KERNEL_ARGS, retVal);
 
     clFlush(pCmdQ2);
@@ -1277,9 +1430,49 @@ HWTEST_F(EnqueueKernelTest, givenVMEKernelWhenEnqueueKernelThenDispatchFlagsHave
 
     MockKernelWithInternals mockKernel(*pClDevice, context);
     size_t gws[3] = {1, 0, 0};
-    mockKernel.kernelInfo.isVmeWorkload = true;
-    clEnqueueNDRangeKernel(this->pCmdQ, mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    mockKernel.kernelInfo.kernelDescriptor.kernelAttributes.flags.usesVme = true;
+    clEnqueueNDRangeKernel(this->pCmdQ, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
     EXPECT_TRUE(mockCsr->passedDispatchFlags.pipelineSelectArgs.mediaSamplerRequired);
+}
+
+HWTEST_F(EnqueueKernelTest, givenUseGlobalAtomicsSetWhenEnqueueKernelThenDispatchFlagsUseGlobalAtomicsIsSet) {
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
+    pDevice->resetCommandStreamReceiver(mockCsr);
+
+    MockKernelWithInternals mockKernel(*pClDevice, context);
+    size_t gws[3] = {1, 0, 0};
+    mockKernel.kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics = true;
+    clEnqueueNDRangeKernel(this->pCmdQ, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    EXPECT_TRUE(mockCsr->passedDispatchFlags.useGlobalAtomics);
+}
+
+HWTEST_F(EnqueueKernelTest, givenUseGlobalAtomicsIsNotSetWhenEnqueueKernelThenDispatchFlagsUseGlobalAtomicsIsNotSet) {
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
+    pDevice->resetCommandStreamReceiver(mockCsr);
+
+    MockKernelWithInternals mockKernel(*pClDevice, context);
+    size_t gws[3] = {1, 0, 0};
+    mockKernel.kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics = false;
+    clEnqueueNDRangeKernel(this->pCmdQ, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    EXPECT_FALSE(mockCsr->passedDispatchFlags.useGlobalAtomics);
+}
+
+HWTEST_F(EnqueueKernelTest, givenContextWithSeveralDevicesWhenEnqueueKernelThenDispatchFlagsHaveCorrectInfoAboutMultipleSubDevicesInContext) {
+    auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
+    pDevice->resetCommandStreamReceiver(mockCsr);
+
+    MockKernelWithInternals mockKernel(*pClDevice, context);
+    size_t gws[3] = {1, 0, 0};
+    clEnqueueNDRangeKernel(this->pCmdQ, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    EXPECT_FALSE(mockCsr->passedDispatchFlags.areMultipleSubDevicesInContext);
+
+    context->deviceBitfields[rootDeviceIndex].set(7, true);
+    clEnqueueNDRangeKernel(this->pCmdQ, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    EXPECT_TRUE(mockCsr->passedDispatchFlags.areMultipleSubDevicesInContext);
+    context->deviceBitfields[rootDeviceIndex].set(7, false);
 }
 
 HWTEST_F(EnqueueKernelTest, givenNonVMEKernelWhenEnqueueKernelThenDispatchFlagsDoesntHaveMediaSamplerRequired) {
@@ -1289,8 +1482,8 @@ HWTEST_F(EnqueueKernelTest, givenNonVMEKernelWhenEnqueueKernelThenDispatchFlagsD
 
     MockKernelWithInternals mockKernel(*pClDevice, context);
     size_t gws[3] = {1, 0, 0};
-    mockKernel.kernelInfo.isVmeWorkload = false;
-    clEnqueueNDRangeKernel(this->pCmdQ, mockKernel.mockKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
+    mockKernel.kernelInfo.kernelDescriptor.kernelAttributes.flags.usesVme = false;
+    clEnqueueNDRangeKernel(this->pCmdQ, mockKernel.mockMultiDeviceKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
     EXPECT_FALSE(mockCsr->passedDispatchFlags.pipelineSelectArgs.mediaSamplerRequired);
 }
 
@@ -1332,8 +1525,10 @@ struct PauseOnGpuTests : public EnqueueKernelTest {
         return false;
     }
 
-    template <typename PIPE_CONTROL>
+    template <typename FamilyType>
     bool verifyPipeControl(const GenCmdList::iterator &iterator, uint64_t debugPauseStateAddress, DebugPauseState requiredDebugPauseState) {
+        using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+
         auto pipeControlCmd = genCmdCast<PIPE_CONTROL *>(*iterator);
 
         if ((static_cast<uint32_t>(requiredDebugPauseState) == pipeControlCmd->getImmediateData()) &&
@@ -1341,10 +1536,26 @@ struct PauseOnGpuTests : public EnqueueKernelTest {
             (static_cast<uint32_t>(debugPauseStateAddress >> 32) == pipeControlCmd->getAddressHigh())) {
 
             EXPECT_TRUE(pipeControlCmd->getCommandStreamerStallEnable());
-            EXPECT_TRUE(pipeControlCmd->getDcFlushEnable());
+
+            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pipeControlCmd->getDcFlushEnable());
 
             EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, pipeControlCmd->getPostSyncOperation());
 
+            return true;
+        }
+
+        return false;
+    }
+
+    template <typename FamilyType>
+    bool verifyLoadRegImm(const GenCmdList::iterator &iterator) {
+        using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
+        uint32_t expectedRegisterOffset = DebugManager.flags.GpuScratchRegWriteRegisterOffset.get();
+        uint32_t expectedRegisterData = DebugManager.flags.GpuScratchRegWriteRegisterData.get();
+        auto loadRegImm = genCmdCast<MI_LOAD_REGISTER_IMM *>(*iterator);
+
+        if ((expectedRegisterOffset == loadRegImm->getRegisterOffset()) &&
+            (expectedRegisterData == loadRegImm->getDataDword())) {
             return true;
         }
 
@@ -1368,20 +1579,35 @@ struct PauseOnGpuTests : public EnqueueKernelTest {
         }
     }
 
-    template <typename PIPE_CONTROL>
+    template <typename FamilyType>
     void findPipeControls(GenCmdList &cmdList) {
+        using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
         auto pipeControl = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
 
         while (pipeControl != cmdList.end()) {
-            if (verifyPipeControl<PIPE_CONTROL>(pipeControl, debugPauseStateAddress, DebugPauseState::waitingForUserStartConfirmation)) {
+            if (verifyPipeControl<FamilyType>(pipeControl, debugPauseStateAddress, DebugPauseState::waitingForUserStartConfirmation)) {
                 pipeControlBeforeWalkerFound++;
             }
 
-            if (verifyPipeControl<PIPE_CONTROL>(pipeControl, debugPauseStateAddress, DebugPauseState::waitingForUserEndConfirmation)) {
+            if (verifyPipeControl<FamilyType>(pipeControl, debugPauseStateAddress, DebugPauseState::waitingForUserEndConfirmation)) {
                 pipeControlAfterWalkerFound++;
             }
 
             pipeControl = find<PIPE_CONTROL *>(++pipeControl, cmdList.end());
+        }
+    }
+
+    template <typename FamilyType>
+    void findLoadRegImms(GenCmdList &cmdList) {
+        using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
+        auto loadRegImm = find<MI_LOAD_REGISTER_IMM *>(cmdList.begin(), cmdList.end());
+
+        while (loadRegImm != cmdList.end()) {
+            if (verifyLoadRegImm<FamilyType>(loadRegImm)) {
+                loadRegImmsFound++;
+            }
+
+            loadRegImm = find<MI_LOAD_REGISTER_IMM *>(++loadRegImm, cmdList.end());
         }
     }
 
@@ -1396,6 +1622,7 @@ struct PauseOnGpuTests : public EnqueueKernelTest {
     uint32_t semaphoreAfterWalkerFound = 0;
     uint32_t pipeControlBeforeWalkerFound = 0;
     uint32_t pipeControlAfterWalkerFound = 0;
+    uint32_t loadRegImmsFound = 0;
 };
 
 HWTEST_F(PauseOnGpuTests, givenPauseOnEnqueueFlagSetWhenDispatchWalkersThenInsertPauseCommandsAroundSpecifiedEnqueue) {
@@ -1417,7 +1644,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseOnEnqueueFlagSetWhenDispatchWalkersThenInser
     EXPECT_EQ(1u, semaphoreBeforeWalkerFound);
     EXPECT_EQ(1u, semaphoreAfterWalkerFound);
 
-    findPipeControls<PIPE_CONTROL>(hwParser.cmdList);
+    findPipeControls<FamilyType>(hwParser.cmdList);
 
     EXPECT_EQ(1u, pipeControlBeforeWalkerFound);
     EXPECT_EQ(1u, pipeControlAfterWalkerFound);
@@ -1439,7 +1666,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseOnEnqueueFlagSetToMinusTwoWhenDispatchWalker
 
     findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
 
-    findPipeControls<PIPE_CONTROL>(hwParser.cmdList);
+    findPipeControls<FamilyType>(hwParser.cmdList);
 
     EXPECT_EQ(2u, semaphoreBeforeWalkerFound);
     EXPECT_EQ(2u, semaphoreAfterWalkerFound);
@@ -1463,7 +1690,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseModeSetToBeforeOnlyWhenDispatchingThenInsert
 
     findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
 
-    findPipeControls<PIPE_CONTROL>(hwParser.cmdList);
+    findPipeControls<FamilyType>(hwParser.cmdList);
 
     EXPECT_EQ(1u, semaphoreBeforeWalkerFound);
     EXPECT_EQ(0u, semaphoreAfterWalkerFound);
@@ -1487,7 +1714,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseModeSetToAfterOnlyWhenDispatchingThenInsertP
 
     findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
 
-    findPipeControls<PIPE_CONTROL>(hwParser.cmdList);
+    findPipeControls<FamilyType>(hwParser.cmdList);
 
     EXPECT_EQ(0u, semaphoreBeforeWalkerFound);
     EXPECT_EQ(1u, semaphoreAfterWalkerFound);
@@ -1511,7 +1738,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseModeSetToBeforeAndAfterWhenDispatchingThenIn
 
     findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
 
-    findPipeControls<PIPE_CONTROL>(hwParser.cmdList);
+    findPipeControls<FamilyType>(hwParser.cmdList);
 
     EXPECT_EQ(1u, semaphoreBeforeWalkerFound);
     EXPECT_EQ(1u, semaphoreAfterWalkerFound);
@@ -1536,7 +1763,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseOnEnqueueFlagSetWhenDispatchWalkersThenDontI
 
     findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
 
-    findPipeControls<PIPE_CONTROL>(hwParser.cmdList);
+    findPipeControls<FamilyType>(hwParser.cmdList);
 
     EXPECT_EQ(0u, semaphoreBeforeWalkerFound);
     EXPECT_EQ(0u, semaphoreAfterWalkerFound);
@@ -1544,4 +1771,65 @@ HWTEST_F(PauseOnGpuTests, givenPauseOnEnqueueFlagSetWhenDispatchWalkersThenDontI
     EXPECT_EQ(0u, pipeControlAfterWalkerFound);
 
     pCmdQ->setIsSpecialCommandQueue(false);
+}
+
+HWTEST_F(PauseOnGpuTests, givenGpuScratchWriteEnabledWhenDispatchWalkersThenInsertLoadRegisterImmCommandAroundSpecifiedEnqueue) {
+    DebugManager.flags.GpuScratchRegWriteAfterWalker.set(1);
+    DebugManager.flags.GpuScratchRegWriteRegisterData.set(0x1234);
+    DebugManager.flags.GpuScratchRegWriteRegisterOffset.set(0x5678);
+
+    MockKernelWithInternals mockKernel(*pClDevice);
+
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+
+    HardwareParse hwParser;
+
+    hwParser.parseCommands<FamilyType>(*pCmdQ);
+
+    findLoadRegImms<FamilyType>(hwParser.cmdList);
+
+    EXPECT_EQ(0u, loadRegImmsFound);
+
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+    hwParser.parseCommands<FamilyType>(*pCmdQ);
+
+    findLoadRegImms<FamilyType>(hwParser.cmdList);
+
+    EXPECT_EQ(1u, loadRegImmsFound);
+}
+
+HWTEST_F(PauseOnGpuTests, givenGpuScratchWriteEnabledWhenDispatcMultiplehWalkersThenInsertLoadRegisterImmCommandOnlyOnce) {
+    DebugManager.flags.GpuScratchRegWriteAfterWalker.set(1);
+    DebugManager.flags.GpuScratchRegWriteRegisterData.set(0x1234);
+    DebugManager.flags.GpuScratchRegWriteRegisterOffset.set(0x5678);
+
+    MockKernelWithInternals mockKernel(*pClDevice);
+
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+    pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+
+    HardwareParse hwParser;
+
+    hwParser.parseCommands<FamilyType>(*pCmdQ);
+
+    findLoadRegImms<FamilyType>(hwParser.cmdList);
+
+    EXPECT_EQ(1u, loadRegImmsFound);
+}
+
+HWTEST_F(PauseOnGpuTests, givenGpuScratchWriteEnabledWhenEstimatingCommandStreamSizeThenMiLoadRegisterImmCommandSizeIsIncluded) {
+    MockKernelWithInternals mockKernel(*pClDevice);
+    DispatchInfo dispatchInfo;
+    MultiDispatchInfo multiDispatchInfo(mockKernel.mockKernel);
+    dispatchInfo.setKernel(mockKernel.mockKernel);
+    multiDispatchInfo.push(dispatchInfo);
+
+    auto baseCommandStreamSize = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_NDRANGE_KERNEL, {}, false, false, false, *pCmdQ, multiDispatchInfo, false, false);
+    DebugManager.flags.GpuScratchRegWriteAfterWalker.set(1);
+
+    auto extendedCommandStreamSize = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_NDRANGE_KERNEL, {}, false, false, false, *pCmdQ, multiDispatchInfo, false, false);
+
+    EXPECT_EQ(baseCommandStreamSize + sizeof(typename FamilyType::MI_LOAD_REGISTER_IMM), extendedCommandStreamSize);
 }

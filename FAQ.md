@@ -1,3 +1,10 @@
+<!---
+
+Copyright (C) 2018-2021 Intel Corporation
+
+SPDX-License-Identifier: MIT
+
+-->
 
 # Frequently asked questions
 
@@ -13,13 +20,17 @@ with default / stock configuration (no kernel patches), assuming the underlying
 kernel's drm subsystem is 4.7 or higher. Newer platforms will require a kernel version
 that provides support for that platform (e.g. Coffee Lake requires kernel 4.14 or higher).
 
-Our default (most frequent) validation config is currently Ubuntu 18.04 LTS (as of Q1'20).
+Our default (most frequent) validation config is currently Ubuntu 20.04 LTS (as of Q1'21).
 
 ### Does NEO support Microsoft Windows?
 
 Our closed-source driver for Windows is using the same codebase. At this time,
 we do not support compilation of the stack for Windows. It is our long-term
 intention to offer that option.
+
+### Does NEO support Windows Subsystem for Linux (WSL)?
+
+See [WSL.md](https://github.com/intel/compute-runtime/blob/master/WSL.md).
 
 ### Why is the feature set different in latest Windows driver vs. latest NEO on github?
 
@@ -49,7 +60,11 @@ See [README.md](https://github.com/intel/compute-runtime/blob/master/README.md).
 To check support for any device, you can follow these steps:
 1. Go to [Ark]( https://ark.intel.com) and find your Device ID
 1. Check if this Device ID is enumerated in the
-[supported device list](https://github.com/intel/compute-runtime/blob/master/opencl/source/dll/linux/devices/devices_base.inl)
+[supported device list](https://github.com/intel/compute-runtime/blob/master/shared/source/dll/devices/devices_base.inl)
+
+### Do you provide binary packages with support for DG1?
+
+Yes. Please refer to official [installation guide](https://dgpu-docs.intel.com/installation-guides/index.html). 
 
 ### When will support for platform X be added?
 
@@ -58,6 +73,6 @@ It is our intention to offer full support ahead of platform's market availabilit
 
 ## Who are we?
 
-The Compute Runtime team is part of VTT (Visual Technologies Team).
+The Compute Runtime team is part of GSE (Graphics Software Engineering).
 
-Most of our engineers are located in Poland and the United States.
+Most of our engineers are located in Poland, United States, and India.

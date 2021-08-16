@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/source/aub_mem_dump/aub_services.h"
+#include "shared/source/aub_mem_dump/definitions/aub_services.h"
 #include "shared/source/gen12lp/hw_cmds_rkl.h"
 #include "shared/source/helpers/constants.h"
 
@@ -64,6 +64,7 @@ const RuntimeCapabilityTable RKL::capabilityTable{
     true,                                            // instrumentationEnabled
     true,                                            // forceStatelessCompilationFor32Bit
     "lp",                                            // platformType
+    "",                                              // deviceName
     true,                                            // sourceLevelDebuggerSupported
     false,                                           // supportsVme
     false,                                           // supportCacheFlushAfterWalker
@@ -74,8 +75,10 @@ const RuntimeCapabilityTable RKL::capabilityTable{
     false,                                           // supportsOnDemandPageFaults
     false,                                           // supportsIndependentForwardProgress
     false,                                           // hostPtrTrackingEnabled
-    false,                                           // levelZeroSupported
-    true                                             // isIntegratedDevice
+    true,                                            // levelZeroSupported
+    true,                                            // isIntegratedDevice
+    true,                                            // supportsMediaBlock
+    true                                             // fusedEuEnabled
 };
 
 WorkaroundTable RKL::workaroundTable = {};
@@ -125,7 +128,7 @@ GT_SYSTEM_INFO RKL_HW_CONFIG::gtSystemInfo = {0};
 void RKL_HW_CONFIG::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable) {
     GT_SYSTEM_INFO *gtSysInfo = &hwInfo->gtSystemInfo;
     gtSysInfo->ThreadCount = gtSysInfo->EUCount * RKL::threadsPerEu;
-    gtSysInfo->DualSubSliceCount = gtSysInfo->SubSliceCount / 2;
+    gtSysInfo->DualSubSliceCount = gtSysInfo->SubSliceCount;
     gtSysInfo->L3CacheSizeInKb = 1920;
     gtSysInfo->L3BankCount = 4;
     gtSysInfo->MaxFillRate = 8;

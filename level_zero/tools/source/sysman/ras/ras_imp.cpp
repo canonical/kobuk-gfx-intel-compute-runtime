@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -20,15 +20,16 @@ ze_result_t RasImp::rasGetProperties(zes_ras_properties_t *pProperties) {
 }
 
 ze_result_t RasImp::rasGetConfig(zes_ras_config_t *pConfig) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return pOsRas->osRasGetConfig(pConfig);
 }
 
 ze_result_t RasImp::rasSetConfig(const zes_ras_config_t *pConfig) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return pOsRas->osRasSetConfig(pConfig);
 }
 
-ze_result_t RasImp::rasGetState(zes_ras_state_t *pState) {
-    return pOsRas->osRasGetState(*pState);
+ze_result_t RasImp::rasGetState(zes_ras_state_t *pState, ze_bool_t clear) {
+    memset(pState->category, 0, sizeof(pState->category));
+    return pOsRas->osRasGetState(*pState, clear);
 }
 
 void RasImp::init() {
@@ -36,7 +37,7 @@ void RasImp::init() {
 }
 
 RasImp::RasImp(OsSysman *pOsSysman, zes_ras_error_type_t type, ze_device_handle_t handle) : deviceHandle(handle) {
-    ze_device_properties_t deviceProperties = {};
+    ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
     Device::fromHandle(deviceHandle)->getProperties(&deviceProperties);
     pOsRas = OsRas::create(pOsSysman, type, deviceProperties.flags & ZE_DEVICE_PROPERTY_FLAG_SUBDEVICE, deviceProperties.subdeviceId);
     init();

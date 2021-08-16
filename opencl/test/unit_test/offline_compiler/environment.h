@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,10 +8,9 @@
 #pragma once
 
 #include "shared/offline_compiler/source/offline_compiler.h"
-#include "shared/test/unit_test/helpers/test_files.h"
-
-#include "opencl/source/os_interface/os_inc_base.h"
-#include "opencl/test/unit_test/mocks/mock_compilers.h"
+#include "shared/source/os_interface/os_inc_base.h"
+#include "shared/test/common/helpers/test_files.h"
+#include "shared/test/common/mocks/mock_compilers.h"
 
 #include "gtest/gtest.h"
 

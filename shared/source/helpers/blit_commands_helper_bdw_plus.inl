@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -20,7 +20,9 @@ uint64_t BlitCommandsHelper<GfxFamily>::getMaxBlitHeightOverride(const RootDevic
 }
 
 template <typename GfxFamily>
-void BlitCommandsHelper<GfxFamily>::appendBlitCommandsForBuffer(const BlitProperties &blitProperties, typename GfxFamily::XY_COPY_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment) {}
+void BlitCommandsHelper<GfxFamily>::appendBlitCommandsForBuffer(const BlitProperties &blitProperties, typename GfxFamily::XY_COPY_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment) {
+    appendExtraMemoryProperties(blitCmd, rootDeviceEnvironment);
+}
 
 template <typename GfxFamily>
 void BlitCommandsHelper<GfxFamily>::appendBlitCommandsForImages(const BlitProperties &blitProperties, typename GfxFamily::XY_COPY_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment, uint32_t &srcSlicePitch, uint32_t &dstSlicePitch) {
@@ -33,6 +35,7 @@ void BlitCommandsHelper<GfxFamily>::appendBlitCommandsForFillBuffer(NEO::Graphic
     if (blitCmd.getColorDepth() == XY_COLOR_BLT::COLOR_DEPTH::COLOR_DEPTH_32_BIT_COLOR) {
         blitCmd.set32BppByteMask(XY_COLOR_BLT::_32BPP_BYTE_MASK::_32BPP_BYTE_MASK_WRITE_RGBA_CHANNEL);
     }
+    appendExtraMemoryProperties(blitCmd, rootDeviceEnvironment);
 }
 
 template <typename GfxFamily>
@@ -80,6 +83,15 @@ void BlitCommandsHelper<GfxFamily>::programGlobalSequencerFlush(LinearStream &co
 template <typename GfxFamily>
 size_t BlitCommandsHelper<GfxFamily>::getSizeForGlobalSequencerFlush() {
     return 0u;
+}
+
+template <typename GfxFamily>
+bool BlitCommandsHelper<GfxFamily>::miArbCheckWaRequired() {
+    return false;
+}
+
+template <typename GfxFamily>
+void BlitCommandsHelper<GfxFamily>::appendClearColor(const BlitProperties &blitProperties, typename GfxFamily::XY_COPY_BLT &blitCmd) {
 }
 
 } // namespace NEO

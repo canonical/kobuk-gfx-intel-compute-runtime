@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_device.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/context/context.h"
@@ -221,7 +221,7 @@ TEST_F(clCreateBufferTests, GivenMemWriteOnlyFlagAndMemReadWriteFlagWhenCreating
 
 TEST_F(clCreateBufferTests, GivenBufferSizeOverMaxMemAllocSizeWhenCreatingBufferThenInvalidBufferSizeErrorIsReturned) {
     auto pDevice = pContext->getDevice(0);
-    size_t size = static_cast<size_t>(pDevice->getHardwareCapabilities().maxMemAllocSize) + 1;
+    size_t size = static_cast<size_t>(pDevice->getDevice().getDeviceInfo().maxMemAllocSize) + 1;
 
     auto buffer = clCreateBuffer(pContext, CL_MEM_ALLOC_HOST_PTR, size, nullptr, &retVal);
     EXPECT_EQ(CL_INVALID_BUFFER_SIZE, retVal);
@@ -230,7 +230,7 @@ TEST_F(clCreateBufferTests, GivenBufferSizeOverMaxMemAllocSizeWhenCreatingBuffer
 
 TEST_F(clCreateBufferTests, GivenBufferSizeOverMaxMemAllocSizeWhenCreateBufferWithPropertiesINTELThenInvalidBufferSizeErrorIsReturned) {
     auto pDevice = pContext->getDevice(0);
-    size_t size = static_cast<size_t>(pDevice->getHardwareCapabilities().maxMemAllocSize) + 1;
+    size_t size = static_cast<size_t>(pDevice->getDevice().getDeviceInfo().maxMemAllocSize) + 1;
 
     auto buffer = clCreateBufferWithPropertiesINTEL(pContext, nullptr, 0, size, nullptr, &retVal);
     EXPECT_EQ(CL_INVALID_BUFFER_SIZE, retVal);
@@ -514,33 +514,15 @@ INSTANTIATE_TEST_CASE_P(
     clCreateBufferWithMultiDeviceContextTests,
     testing::ValuesIn(validFlagsForMultiDeviceContextBuffer));
 
-class MockMemoryManagerWithFailures2 : public OsAgnosticMemoryManager {
-  public:
-    MockMemoryManagerWithFailures2(ExecutionEnvironment &executionEnvironment) : OsAgnosticMemoryManager(executionEnvironment){};
-
-    GraphicsAllocation *allocateGraphicsMemoryInDevicePool(const AllocationData &allocationData, AllocationStatus &status) override {
-        if (allocationData.rootDeviceIndex == forbiddenRootDeviceIndex) {
-            return nullptr;
-        }
-        return OsAgnosticMemoryManager::allocateGraphicsMemoryInDevicePool(allocationData, status);
-    }
-    uint32_t forbiddenRootDeviceIndex = 1u;
-};
-
 using clCreateBufferWithMultiDeviceContextFaillingAllocationTests = clCreateBufferTemplateTests;
 
 TEST_F(clCreateBufferWithMultiDeviceContextFaillingAllocationTests, GivenContextdWithMultiDeviceFailingAllocationThenBufferAllocateFails) {
     UltClDeviceFactory deviceFactory{3, 0};
     DebugManager.flags.EnableMultiRootDeviceContexts.set(true);
 
-    auto mockMemoryManager = new MockMemoryManagerWithFailures2(*deviceFactory.rootDevices[0]->getExecutionEnvironment());
-    deviceFactory.rootDevices[0]->injectMemoryManager(mockMemoryManager);
-
     cl_device_id devices[] = {deviceFactory.rootDevices[0], deviceFactory.rootDevices[1], deviceFactory.rootDevices[2]};
 
     MockContext pContext(ClDeviceVector(devices, 3));
-
-    pContext.memoryManager = mockMemoryManager;
 
     EXPECT_EQ(2u, pContext.getMaxRootDeviceIndex());
 
@@ -550,6 +532,9 @@ TEST_F(clCreateBufferWithMultiDeviceContextFaillingAllocationTests, GivenContext
     auto ptrHostBuffer = static_cast<uint8_t *>(hostBuffer);
 
     cl_mem_flags flags = CL_MEM_USE_HOST_PTR;
+
+    static_cast<MockMemoryManager *>(pContext.memoryManager)->successAllocatedGraphicsMemoryIndex = 0u;
+    static_cast<MockMemoryManager *>(pContext.memoryManager)->maxSuccessAllocatedGraphicsMemoryIndex = 2u;
 
     auto buffer = clCreateBuffer(&pContext, flags, bufferSize, ptrHostBuffer, &retVal);
     ASSERT_EQ(CL_OUT_OF_HOST_MEMORY, retVal);

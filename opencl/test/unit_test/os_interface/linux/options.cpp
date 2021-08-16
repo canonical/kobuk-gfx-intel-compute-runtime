@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -24,6 +24,8 @@ const char *gmmDllName = "libmock_gmm.so";
 const char *gmmInitFuncName = "initMockGmm";
 const char *gmmDestroyFuncName = "destroyMockGmm";
 const char *metricsLibraryDllName = "";
+const char *gdiDllName = "";
+const char *dxcoreDllName = "";
 #endif
 const char *sysFsPciPathPrefix = "./test_files/linux/devices/";
 const char *pciDevicesDirectory = "./test_files/linux/by-path";

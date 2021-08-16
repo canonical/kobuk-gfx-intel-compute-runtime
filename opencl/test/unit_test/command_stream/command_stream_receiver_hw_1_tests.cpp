@@ -1,12 +1,17 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/command_stream/scratch_space_controller.h"
 #include "shared/source/command_stream/scratch_space_controller_base.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/source/helpers/constants.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_command_stream_receiver.h"
+#include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/event/user_event.h"
@@ -16,6 +21,8 @@
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
+#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
+#include "opencl/test/unit_test/mocks/mock_os_context.h"
 #include "opencl/test/unit_test/mocks/mock_timestamp_container.h"
 #include "test.h"
 
@@ -140,25 +147,6 @@ HWTEST_F(UltCommandStreamReceiverTest, givenPreambleSentWhenEstimatingPreambleCm
     EXPECT_EQ(expectedDifference, actualDifference);
 }
 
-HWTEST_F(UltCommandStreamReceiverTest, givenPerDssBackBufferProgrammingEnabledWhenEstimatingPreambleCmdSizeThenResultIncludesPerDssBackBufferProgramingCommandsSize) {
-    DebugManagerStateRestore restore;
-    DebugManager.flags.ForcePerDssBackedBufferProgramming.set(true);
-
-    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
-    commandStreamReceiver.requiredThreadArbitrationPolicy = commandStreamReceiver.lastSentThreadArbitrationPolicy;
-
-    commandStreamReceiver.isPreambleSent = false;
-    auto preambleNotSent = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
-
-    commandStreamReceiver.isPreambleSent = true;
-    auto preambleSent = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
-
-    auto actualDifference = preambleNotSent - preambleSent;
-    auto expectedDifference = PreambleHelper<FamilyType>::getThreadArbitrationCommandsSize() + PreambleHelper<FamilyType>::getAdditionalCommandsSize(*pDevice) + PreambleHelper<FamilyType>::getPerDssBackedBufferCommandsSize(pDevice->getHardwareInfo());
-
-    EXPECT_EQ(expectedDifference, actualDifference);
-}
-
 HWCMDTEST_F(IGFX_GEN8_CORE, UltCommandStreamReceiverTest, givenMediaVfeStateDirtyEstimatingPreambleCmdSizeThenResultDependsVfeStateProgrammingCmdSize) {
     typedef typename FamilyType::MEDIA_VFE_STATE MEDIA_VFE_STATE;
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
@@ -218,26 +206,28 @@ HWTEST_F(UltCommandStreamReceiverTest, givenPreambleSentAndForceSemaphoreDelayBe
 
 HWTEST_F(UltCommandStreamReceiverTest, givenNoBlitterOverrideWhenBlitterNotSupportedThenExpectFalseReturned) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = true;
     bool startInContext = false;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
+    EXPECT_FALSE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
     EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenNoBlitterOverrideWhenBlitterSupportedThenExpectTrueReturned) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = true;
     properties.submitOnInit = true;
     bool startOnInit = false;
     bool startInContext = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
+    EXPECT_TRUE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
     EXPECT_FALSE(startInContext);
 }
@@ -246,13 +236,14 @@ HWTEST_F(UltCommandStreamReceiverTest, givenBlitterOverrideEnableWhenBlitterNotS
     DebugManagerStateRestore debugManagerStateRestore;
     DebugManager.flags.DirectSubmissionOverrideBlitterSupport.set(1);
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = false;
     bool startInContext = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
+    EXPECT_TRUE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
     EXPECT_TRUE(startInContext);
 }
@@ -261,13 +252,14 @@ HWTEST_F(UltCommandStreamReceiverTest, givenBlitterOverrideEnableAndNoStartWhenB
     DebugManagerStateRestore debugManagerStateRestore;
     DebugManager.flags.DirectSubmissionOverrideBlitterSupport.set(2);
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = false;
     properties.submitOnInit = true;
     bool startOnInit = true;
     bool startInContext = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
+    EXPECT_TRUE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
     EXPECT_TRUE(startInContext);
 }
@@ -276,39 +268,42 @@ HWTEST_F(UltCommandStreamReceiverTest, givenBlitterOverrideDisableWhenBlitterSup
     DebugManagerStateRestore debugManagerStateRestore;
     DebugManager.flags.DirectSubmissionOverrideBlitterSupport.set(0);
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = true;
     properties.submitOnInit = false;
     bool startOnInit = true;
     bool startInContext = false;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
+    EXPECT_FALSE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_BCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
     EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenNoRenderOverrideWhenRenderNotSupportedThenExpectFalseReturned) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = true;
     bool startInContext = false;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
+    EXPECT_FALSE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
     EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenNoRenderOverrideWhenRenderSupportedThenExpectTrueReturned) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = true;
     properties.submitOnInit = true;
     bool startOnInit = false;
     bool startInContext = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
+    EXPECT_TRUE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
     EXPECT_FALSE(startInContext);
 }
@@ -317,13 +312,14 @@ HWTEST_F(UltCommandStreamReceiverTest, givenRenderOverrideEnableWhenRenderNotSup
     DebugManagerStateRestore debugManagerStateRestore;
     DebugManager.flags.DirectSubmissionOverrideRenderSupport.set(1);
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = false;
     bool startInContext = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
+    EXPECT_TRUE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
     EXPECT_TRUE(startInContext);
 }
@@ -332,13 +328,14 @@ HWTEST_F(UltCommandStreamReceiverTest, givenRenderOverrideEnableAndNoStartWhenRe
     DebugManagerStateRestore debugManagerStateRestore;
     DebugManager.flags.DirectSubmissionOverrideRenderSupport.set(2);
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = false;
     properties.submitOnInit = true;
     bool startOnInit = true;
     bool startInContext = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
+    EXPECT_TRUE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
     EXPECT_TRUE(startInContext);
 }
@@ -347,39 +344,42 @@ HWTEST_F(UltCommandStreamReceiverTest, givenRenderOverrideDisableWhenRenderSuppo
     DebugManagerStateRestore debugManagerStateRestore;
     DebugManager.flags.DirectSubmissionOverrideRenderSupport.set(0);
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = true;
     properties.submitOnInit = false;
     bool startOnInit = true;
     bool startInContext = false;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
+    EXPECT_FALSE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_RCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
     EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenNoComputeOverrideWhenComputeNotSupportedThenExpectFalseReturned) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = true;
     bool startInContext = false;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
+    EXPECT_FALSE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
     EXPECT_FALSE(startInContext);
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenNoComputeOverrideWhenComputeSupportedThenExpectTrueReturned) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = true;
     properties.submitOnInit = true;
     bool startOnInit = false;
     bool startInContext = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
+    EXPECT_TRUE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
     EXPECT_FALSE(startInContext);
 }
@@ -388,13 +388,14 @@ HWTEST_F(UltCommandStreamReceiverTest, givenComputeOverrideEnableWhenComputeNotS
     DebugManagerStateRestore debugManagerStateRestore;
     DebugManager.flags.DirectSubmissionOverrideComputeSupport.set(1);
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = false;
     properties.submitOnInit = false;
     bool startOnInit = false;
     bool startInContext = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
+    EXPECT_TRUE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
     EXPECT_TRUE(startOnInit);
     EXPECT_TRUE(startInContext);
 }
@@ -403,13 +404,14 @@ HWTEST_F(UltCommandStreamReceiverTest, givenComputeOverrideEnableAndNoStartWhenC
     DebugManagerStateRestore debugManagerStateRestore;
     DebugManager.flags.DirectSubmissionOverrideComputeSupport.set(2);
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = false;
     properties.submitOnInit = true;
     bool startOnInit = true;
     bool startInContext = false;
-    EXPECT_TRUE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
+    EXPECT_TRUE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
     EXPECT_TRUE(startInContext);
 }
@@ -418,13 +420,14 @@ HWTEST_F(UltCommandStreamReceiverTest, givenComputeOverrideDisableWhenComputeSup
     DebugManagerStateRestore debugManagerStateRestore;
     DebugManager.flags.DirectSubmissionOverrideComputeSupport.set(0);
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto osContext = static_cast<MockOsContext *>(commandStreamReceiver.osContext);
 
     DirectSubmissionProperties properties;
     properties.engineSupported = true;
     properties.submitOnInit = false;
     bool startOnInit = true;
     bool startInContext = false;
-    EXPECT_FALSE(commandStreamReceiver.checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
+    EXPECT_FALSE(osContext->checkDirectSubmissionSupportsEngine(properties, aub_stream::ENGINE_CCS, startOnInit, startInContext));
     EXPECT_FALSE(startOnInit);
     EXPECT_FALSE(startInContext);
 }
@@ -503,6 +506,9 @@ HWTEST_F(CommandStreamReceiverHwTest, WhenScratchSpaceIsNotRequiredThenGshAddres
 
 HWTEST_F(CommandStreamReceiverHwTest, givenDefaultPlatformCapabilityWhenNoDebugKeysSetThenExpectDefaultPlatformSettings) {
     auto commandStreamReceiver = std::make_unique<MockCsrHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    commandStreamReceiver->setupContext(*osContext);
+    commandStreamReceiver->postInitFlagsSetup();
+
     if (commandStreamReceiver->checkPlatformSupportsNewResourceImplicitFlush()) {
         EXPECT_TRUE(commandStreamReceiver->useNewResourceImplicitFlush);
     } else {
@@ -512,6 +518,9 @@ HWTEST_F(CommandStreamReceiverHwTest, givenDefaultPlatformCapabilityWhenNoDebugK
 
 HWTEST_F(CommandStreamReceiverHwTest, givenDefaultGpuIdleImplicitFlushWhenNoDebugKeysSetThenExpectDefaultPlatformSettings) {
     auto commandStreamReceiver = std::make_unique<MockCsrHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    commandStreamReceiver->setupContext(*osContext);
+    commandStreamReceiver->postInitFlagsSetup();
+
     if (commandStreamReceiver->checkPlatformSupportsGpuIdleImplicitFlush()) {
         EXPECT_TRUE(commandStreamReceiver->useGpuIdleImplicitFlush);
     } else {
@@ -524,6 +533,8 @@ HWTEST_F(CommandStreamReceiverHwTest, WhenForceDisableNewResourceImplicitFlushTh
     DebugManager.flags.PerformImplicitFlushForNewResource.set(0);
 
     auto commandStreamReceiver = std::make_unique<MockCsrHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    commandStreamReceiver->setupContext(*osContext);
+    commandStreamReceiver->postInitFlagsSetup();
     EXPECT_FALSE(commandStreamReceiver->useNewResourceImplicitFlush);
 }
 
@@ -532,6 +543,8 @@ HWTEST_F(CommandStreamReceiverHwTest, WhenForceEnableNewResourceImplicitFlushThe
     DebugManager.flags.PerformImplicitFlushForNewResource.set(1);
 
     auto commandStreamReceiver = std::make_unique<MockCsrHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    commandStreamReceiver->setupContext(*osContext);
+    commandStreamReceiver->postInitFlagsSetup();
     EXPECT_TRUE(commandStreamReceiver->useNewResourceImplicitFlush);
 }
 
@@ -540,6 +553,8 @@ HWTEST_F(CommandStreamReceiverHwTest, WhenForceDisableGpuIdleImplicitFlushThenEx
     DebugManager.flags.PerformImplicitFlushForIdleGpu.set(0);
 
     auto commandStreamReceiver = std::make_unique<MockCsrHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    commandStreamReceiver->setupContext(*osContext);
+    commandStreamReceiver->postInitFlagsSetup();
     EXPECT_FALSE(commandStreamReceiver->useGpuIdleImplicitFlush);
 }
 
@@ -548,7 +563,49 @@ HWTEST_F(CommandStreamReceiverHwTest, WhenForceEnableGpuIdleImplicitFlushThenExp
     DebugManager.flags.PerformImplicitFlushForIdleGpu.set(1);
 
     auto commandStreamReceiver = std::make_unique<MockCsrHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    commandStreamReceiver->setupContext(*osContext);
+    commandStreamReceiver->postInitFlagsSetup();
     EXPECT_TRUE(commandStreamReceiver->useGpuIdleImplicitFlush);
+}
+
+HWTEST2_F(CommandStreamReceiverHwTest, whenProgramVFEStateIsCalledThenCorrectComputeOverdispatchDisableValueIsProgrammed, IsAtLeastXeHpCore) {
+    using CFE_STATE = typename FamilyType::CFE_STATE;
+
+    UltDeviceFactory deviceFactory{1, 0};
+    auto pDevice = deviceFactory.rootDevices[0];
+    auto pHwInfo = pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto &hwHelper = HwHelper::get(pHwInfo->platform.eRenderCoreFamily);
+
+    uint8_t memory[1 * KB];
+    auto mockCsr = std::make_unique<MockCsrHw2<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(),
+                                                            pDevice->getDeviceBitfield());
+    MockOsContext osContext{0, 8, EngineTypeUsage{aub_stream::ENGINE_CCS, EngineUsage::Regular}, PreemptionMode::Disabled, false};
+    mockCsr->setupContext(osContext);
+
+    uint32_t revisions[] = {REVISION_A0, REVISION_B};
+    for (auto revision : revisions) {
+        pHwInfo->platform.usRevId = hwHelper.getHwRevIdFromStepping(revision, *pHwInfo);
+
+        {
+            auto flags = DispatchFlagsHelper::createDefaultDispatchFlags();
+            LinearStream commandStream{&memory, sizeof(memory)};
+            mockCsr->mediaVfeStateDirty = true;
+            mockCsr->programVFEState(commandStream, flags, 10);
+            auto pCommand = reinterpret_cast<CFE_STATE *>(&memory);
+
+            auto expectedDisableOverdispatch = hwHelper.isDisableOverdispatchAvailable(*pHwInfo);
+            EXPECT_EQ(expectedDisableOverdispatch, pCommand->getComputeOverdispatchDisable());
+        }
+        {
+            auto flags = DispatchFlagsHelper::createDefaultDispatchFlags();
+            flags.additionalKernelExecInfo = AdditionalKernelExecInfo::NotSet;
+            LinearStream commandStream{&memory, sizeof(memory)};
+            mockCsr->mediaVfeStateDirty = true;
+            mockCsr->programVFEState(commandStream, flags, 10);
+            auto pCommand = reinterpret_cast<CFE_STATE *>(&memory);
+            EXPECT_FALSE(pCommand->getComputeOverdispatchDisable());
+        }
+    }
 }
 
 HWTEST_F(BcsTests, WhenGetNumberOfBlitsForCopyPerRowIsCalledThenCorrectValuesAreReturned) {
@@ -612,8 +669,17 @@ HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenEstimatingCommandsSizeThenCal
     const uint32_t numberOfBlitOperations = 4;
 
     auto baseSize = EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite() + sizeof(typename FamilyType::MI_BATCH_BUFFER_END);
-    constexpr size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+    size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+
+    if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+        cmdsSizePerBlit += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
+
     auto expectedBlitInstructionsSize = cmdsSizePerBlit * numberOfBlts;
+
+    if (BlitCommandsHelper<FamilyType>::preBlitCommandWARequired()) {
+        expectedBlitInstructionsSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
 
     auto expectedAlignedSize = baseSize + MemorySynchronizationCommands<FamilyType>::getSizeForAdditonalSynchronization(pDevice->getHardwareInfo());
 
@@ -641,8 +707,17 @@ HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenDirectsubmissionEnabledEstima
     const uint32_t numberOfBlitOperations = 4;
 
     auto baseSize = EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite() + sizeof(typename FamilyType::MI_BATCH_BUFFER_START);
-    constexpr size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+    size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+
+    if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+        cmdsSizePerBlit += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
+
     auto expectedBlitInstructionsSize = cmdsSizePerBlit * numberOfBlts;
+
+    if (BlitCommandsHelper<FamilyType>::preBlitCommandWARequired()) {
+        expectedBlitInstructionsSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
 
     auto expectedAlignedSize = baseSize + MemorySynchronizationCommands<FamilyType>::getSizeForAdditonalSynchronization(pDevice->getHardwareInfo());
 
@@ -668,10 +743,18 @@ HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenEstimatingCommandsSizeForWrit
     const Vec3<size_t> bltSize = {(3 * max2DBlitSize), 4, 2};
     const size_t numberOfBlts = 3 * bltSize.y * bltSize.z;
     const size_t numberOfBlitOperations = 4 * bltSize.y * bltSize.z;
-    const size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+    size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+
+    if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+        cmdsSizePerBlit += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
 
     auto baseSize = EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite() + sizeof(typename FamilyType::MI_BATCH_BUFFER_END);
     auto expectedBlitInstructionsSize = cmdsSizePerBlit * numberOfBlts;
+
+    if (BlitCommandsHelper<FamilyType>::preBlitCommandWARequired()) {
+        expectedBlitInstructionsSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
 
     auto expectedAlignedSize = baseSize + MemorySynchronizationCommands<FamilyType>::getSizeForAdditonalSynchronization(pDevice->getHardwareInfo());
 
@@ -697,10 +780,18 @@ HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenDirectSubmissionEnabledEstima
     const Vec3<size_t> bltSize = {(3 * max2DBlitSize), 4, 2};
     const size_t numberOfBlts = 3 * bltSize.y * bltSize.z;
     const size_t numberOfBlitOperations = 4 * bltSize.y * bltSize.z;
-    const size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+    size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+
+    if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+        cmdsSizePerBlit += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
 
     auto baseSize = EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite() + sizeof(typename FamilyType::MI_BATCH_BUFFER_START);
     auto expectedBlitInstructionsSize = cmdsSizePerBlit * numberOfBlts;
+
+    if (BlitCommandsHelper<FamilyType>::preBlitCommandWARequired()) {
+        expectedBlitInstructionsSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
 
     auto expectedAlignedSize = baseSize + MemorySynchronizationCommands<FamilyType>::getSizeForAdditonalSynchronization(pDevice->getHardwareInfo());
 
@@ -722,7 +813,14 @@ HWTEST_F(BcsTests, givenBlitPropertiesContainerWhenDirectSubmissionEnabledEstima
 }
 
 HWTEST_F(BcsTests, givenTimestampPacketWriteRequestWhenEstimatingSizeForCommandsThenAddMiFlushDw) {
-    constexpr size_t expectedBaseSize = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+    size_t expectedBaseSize = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+
+    if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+        expectedBaseSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
+    if (BlitCommandsHelper<FamilyType>::preBlitCommandWARequired()) {
+        expectedBaseSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
 
     auto expectedSizeWithTimestampPacketWrite = expectedBaseSize + EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
     auto expectedSizeWithoutTimestampPacketWrite = expectedBaseSize;
@@ -737,7 +835,16 @@ HWTEST_F(BcsTests, givenTimestampPacketWriteRequestWhenEstimatingSizeForCommands
 }
 
 HWTEST_F(BcsTests, givenTimestampPacketWriteRequestWhenEstimatingSizeForCommandsWithProfilingThenAddMiFlushDw) {
-    size_t expectedBaseSize = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK) + EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    size_t expectedBaseSize = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK) +
+                              EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+
+    if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+        expectedBaseSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
+
+    if (BlitCommandsHelper<FamilyType>::preBlitCommandWARequired()) {
+        expectedBaseSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
 
     auto expectedSizeWithTimestampPacketWriteAndProfiling = expectedBaseSize + 4 * sizeof(typename FamilyType::MI_STORE_REGISTER_MEM);
 
@@ -757,12 +864,21 @@ HWTEST_F(BcsTests, givenBltSizeAndCsrDependenciesWhenEstimatingCommandSizeThenAd
 
     MockTimestampPacketContainer timestamp0(*csr.getTimestampPacketAllocator(), numberNodesPerContainer);
     MockTimestampPacketContainer timestamp1(*csr.getTimestampPacketAllocator(), numberNodesPerContainer);
-    csrDependencies.push_back(&timestamp0);
-    csrDependencies.push_back(&timestamp1);
+    csrDependencies.timestampPacketContainer.push_back(&timestamp0);
+    csrDependencies.timestampPacketContainer.push_back(&timestamp1);
 
-    constexpr size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+    size_t cmdsSizePerBlit = sizeof(typename FamilyType::XY_COPY_BLT) + sizeof(typename FamilyType::MI_ARB_CHECK);
+
+    if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+        cmdsSizePerBlit += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
+
     size_t expectedSize = (cmdsSizePerBlit * numberOfBlts) +
                           TimestampPacketHelper::getRequiredCmdStreamSize<FamilyType>(csrDependencies);
+
+    if (BlitCommandsHelper<FamilyType>::preBlitCommandWARequired()) {
+        expectedSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+    }
 
     auto estimatedSize = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
         {1, 1, 1}, csrDependencies, false, false, pClDevice->getRootDeviceEnvironment());
@@ -788,18 +904,24 @@ HWTEST_F(BcsTests, givenBltSizeWithLeftoverWhenDispatchedThenProgramAllRequiredC
 
     uint32_t newTaskCount = 19;
     csr.taskCount = newTaskCount - 1;
-    EXPECT_EQ(0u, csr.recursiveLockCounter.load());
-    auto blitProperties = BlitProperties::constructPropertiesForReadWriteBuffer(BlitterConstants::BlitDirection::HostPtrToBuffer,
-                                                                                csr, buffer->getGraphicsAllocation(pDevice->getRootDeviceIndex()), nullptr, hostPtr,
-                                                                                buffer->getGraphicsAllocation(pDevice->getRootDeviceIndex())->getGpuAddress(), 0,
-                                                                                0, 0, {bltSize, 1, 1}, 0, 0, 0, 0);
+    uint32_t expectedResursiveLockCount = 0u;
+    EXPECT_EQ(expectedResursiveLockCount, csr.recursiveLockCounter.load());
+    auto blitProperties = BlitProperties::constructPropertiesForReadWrite(BlitterConstants::BlitDirection::HostPtrToBuffer,
+                                                                          csr, buffer->getGraphicsAllocation(pDevice->getRootDeviceIndex()), nullptr, hostPtr,
+                                                                          buffer->getGraphicsAllocation(pDevice->getRootDeviceIndex())->getGpuAddress(), 0,
+                                                                          0, 0, {bltSize, 1, 1}, 0, 0, 0, 0);
+    if (csr.getClearColorAllocation()) {
+        expectedResursiveLockCount++;
+    }
 
-    blitBuffer(&csr, blitProperties, true);
+    EXPECT_EQ(expectedResursiveLockCount, csr.recursiveLockCounter.load());
+    blitBuffer(&csr, blitProperties, true, *pDevice);
     EXPECT_EQ(newTaskCount, csr.taskCount);
     EXPECT_EQ(newTaskCount, csr.latestFlushedTaskCount);
     EXPECT_EQ(newTaskCount, csr.latestSentTaskCount);
     EXPECT_EQ(newTaskCount, csr.latestSentTaskCountValueDuringFlush);
-    EXPECT_EQ(1u, csr.recursiveLockCounter.load());
+    expectedResursiveLockCount++;
+    EXPECT_EQ(expectedResursiveLockCount, csr.recursiveLockCounter.load());
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(csr.commandStream);
@@ -818,18 +940,27 @@ HWTEST_F(BcsTests, givenBltSizeWithLeftoverWhenDispatchedThenProgramAllRequiredC
             expectedWidth = bltLeftover;
             expectedHeight = 1;
         }
-        EXPECT_EQ(expectedWidth, bltCmd->getTransferWidth());
-        EXPECT_EQ(expectedHeight, bltCmd->getTransferHeight());
+        EXPECT_EQ(expectedWidth, bltCmd->getDestinationX2CoordinateRight());
+        EXPECT_EQ(expectedHeight, bltCmd->getDestinationY2CoordinateBottom());
         EXPECT_EQ(expectedWidth, bltCmd->getDestinationPitch());
         EXPECT_EQ(expectedWidth, bltCmd->getSourcePitch());
+
+        if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+            auto miFlush = genCmdCast<typename FamilyType::MI_FLUSH_DW *>(*(cmdIterator++));
+            EXPECT_NE(nullptr, miFlush);
+            if (EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite() == 2 * sizeof(typename FamilyType::MI_FLUSH_DW)) {
+                miFlush = genCmdCast<typename FamilyType::MI_FLUSH_DW *>(*(cmdIterator++));
+                EXPECT_NE(nullptr, miFlush);
+            }
+        }
 
         auto miArbCheckCmd = genCmdCast<typename FamilyType::MI_ARB_CHECK *>(*(cmdIterator++));
         EXPECT_NE(nullptr, miArbCheckCmd);
         EXPECT_TRUE(memcmp(&FamilyType::cmdInitArbCheck, miArbCheckCmd, sizeof(typename FamilyType::MI_ARB_CHECK)) == 0);
     }
 
-    if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired(pDevice->getHardwareInfo())) {
-        if (UnitTestHelper<FamilyType>::isAdditionalMiSemaphoreWaitRequired(pDevice->getHardwareInfo())) {
+    if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
+        if (UnitTestHelper<FamilyType>::isAdditionalMiSemaphoreWaitRequired(*defaultHwInfo)) {
             auto miSemaphoreWaitCmd = genCmdCast<MI_SEMAPHORE_WAIT *>(*(cmdIterator++));
             EXPECT_NE(nullptr, miSemaphoreWaitCmd);
             EXPECT_TRUE(UnitTestHelper<FamilyType>::isAdditionalMiSemaphoreWait(*miSemaphoreWaitCmd));
@@ -857,8 +988,8 @@ HWTEST_F(BcsTests, givenBltSizeWithLeftoverWhenDispatchedThenProgramAllRequiredC
     EXPECT_EQ(csr.getTagAllocation()->getGpuAddress(), miFlushCmd->getDestinationAddress());
     EXPECT_EQ(newTaskCount, miFlushCmd->getImmediateData());
 
-    if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired(pDevice->getHardwareInfo())) {
-        if (UnitTestHelper<FamilyType>::isAdditionalMiSemaphoreWaitRequired(pDevice->getHardwareInfo())) {
+    if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
+        if (UnitTestHelper<FamilyType>::isAdditionalMiSemaphoreWaitRequired(*defaultHwInfo)) {
             auto miSemaphoreWaitCmd = genCmdCast<MI_SEMAPHORE_WAIT *>(*(cmdIterator++));
             EXPECT_NE(nullptr, miSemaphoreWaitCmd);
             EXPECT_TRUE(UnitTestHelper<FamilyType>::isAdditionalMiSemaphoreWait(*miSemaphoreWaitCmd));
@@ -876,29 +1007,25 @@ HWTEST_F(BcsTests, givenBltSizeWithLeftoverWhenDispatchedThenProgramAllRequiredC
 }
 HWTEST_F(BcsTests, givenCommandTypeWhenObtainBlitDirectionIsCalledThenReturnCorrectBlitDirection) {
 
-    std::array<std::pair<uint32_t, BlitterConstants::BlitDirection>, 9> testParams{
-        std::make_pair(CL_COMMAND_WRITE_BUFFER, BlitterConstants::BlitDirection::HostPtrToBuffer),
-        std::make_pair(CL_COMMAND_WRITE_BUFFER_RECT, BlitterConstants::BlitDirection::HostPtrToBuffer),
-        std::make_pair(CL_COMMAND_READ_BUFFER, BlitterConstants::BlitDirection::BufferToHostPtr),
-        std::make_pair(CL_COMMAND_READ_BUFFER_RECT, BlitterConstants::BlitDirection::BufferToHostPtr),
-        std::make_pair(CL_COMMAND_COPY_BUFFER_RECT, BlitterConstants::BlitDirection::BufferToBuffer),
-        std::make_pair(CL_COMMAND_SVM_MEMCPY, BlitterConstants::BlitDirection::BufferToBuffer),
-        std::make_pair(CL_COMMAND_WRITE_IMAGE, BlitterConstants::BlitDirection::HostPtrToImage),
-        std::make_pair(CL_COMMAND_READ_IMAGE, BlitterConstants::BlitDirection::ImageToHostPtr),
-        std::make_pair(CL_COMMAND_COPY_BUFFER, BlitterConstants::BlitDirection::BufferToBuffer)};
+    std::array<std::pair<uint32_t, BlitterConstants::BlitDirection>, 10> testParams = {{{CL_COMMAND_WRITE_BUFFER, BlitterConstants::BlitDirection::HostPtrToBuffer},
+                                                                                        {CL_COMMAND_WRITE_BUFFER_RECT, BlitterConstants::BlitDirection::HostPtrToBuffer},
+                                                                                        {CL_COMMAND_READ_BUFFER, BlitterConstants::BlitDirection::BufferToHostPtr},
+                                                                                        {CL_COMMAND_READ_BUFFER_RECT, BlitterConstants::BlitDirection::BufferToHostPtr},
+                                                                                        {CL_COMMAND_COPY_BUFFER_RECT, BlitterConstants::BlitDirection::BufferToBuffer},
+                                                                                        {CL_COMMAND_SVM_MEMCPY, BlitterConstants::BlitDirection::BufferToBuffer},
+                                                                                        {CL_COMMAND_WRITE_IMAGE, BlitterConstants::BlitDirection::HostPtrToImage},
+                                                                                        {CL_COMMAND_READ_IMAGE, BlitterConstants::BlitDirection::ImageToHostPtr},
+                                                                                        {CL_COMMAND_COPY_BUFFER, BlitterConstants::BlitDirection::BufferToBuffer},
+                                                                                        {CL_COMMAND_COPY_IMAGE, BlitterConstants::BlitDirection::ImageToImage}}};
 
-    for (const auto &params : testParams) {
-        uint32_t commandType;
-        BlitterConstants::BlitDirection expectedBlitDirection;
-        std::tie(commandType, expectedBlitDirection) = params;
-
+    for (const auto &[commandType, expectedBlitDirection] : testParams) {
         auto blitDirection = ClBlitProperties::obtainBlitDirection(commandType);
         EXPECT_EQ(expectedBlitDirection, blitDirection);
     }
 }
 
 HWTEST_F(BcsTests, givenWrongCommandTypeWhenObtainBlitDirectionIsCalledThenExpectThrow) {
-    uint32_t wrongCommandType = CL_COMMAND_COPY_IMAGE;
+    uint32_t wrongCommandType = CL_COMMAND_NDRANGE_KERNEL;
     EXPECT_THROW(ClBlitProperties::obtainBlitDirection(wrongCommandType), std::exception);
 }
 
@@ -985,22 +1112,25 @@ HWTEST_P(BcsDetaliedTestsWithParams, givenBltSizeWithLeftoverWhenDispatchedThenP
     size_t srcRowPitch = std::get<0>(GetParam()).srcRowPitch;
     size_t srcSlicePitch = std::get<0>(GetParam()).srcSlicePitch;
     auto allocation = buffer->getGraphicsAllocation(pDevice->getRootDeviceIndex());
-
-    auto blitProperties = BlitProperties::constructPropertiesForReadWriteBuffer(std::get<1>(GetParam()),     //blitDirection
-                                                                                csr, allocation,             //commandStreamReceiver
-                                                                                nullptr,                     //memObjAllocation
-                                                                                hostPtr,                     //preallocatedHostAllocation
-                                                                                allocation->getGpuAddress(), //memObjGpuVa
-                                                                                0,                           //hostAllocGpuVa
-                                                                                hostPtrOffset,               //hostPtrOffset
-                                                                                copyOffset,                  //copyOffset
-                                                                                bltSize,                     //copySize
-                                                                                dstRowPitch,                 //hostRowPitch
-                                                                                dstSlicePitch,               //hostSlicePitch
-                                                                                srcRowPitch,                 //gpuRowPitch
-                                                                                srcSlicePitch                //gpuSlicePitch
+    auto memoryManager = static_cast<MockMemoryManager *>(pDevice->getMemoryManager());
+    memoryManager->returnFakeAllocation = true;
+    auto blitProperties = BlitProperties::constructPropertiesForReadWrite(std::get<1>(GetParam()),     //blitDirection
+                                                                          csr, allocation,             //commandStreamReceiver
+                                                                          nullptr,                     //memObjAllocation
+                                                                          hostPtr,                     //preallocatedHostAllocation
+                                                                          allocation->getGpuAddress(), //memObjGpuVa
+                                                                          0,                           //hostAllocGpuVa
+                                                                          hostPtrOffset,               //hostPtrOffset
+                                                                          copyOffset,                  //copyOffset
+                                                                          bltSize,                     //copySize
+                                                                          dstRowPitch,                 //hostRowPitch
+                                                                          dstSlicePitch,               //hostSlicePitch
+                                                                          srcRowPitch,                 //gpuRowPitch
+                                                                          srcSlicePitch                //gpuSlicePitch
     );
-    blitBuffer(&csr, blitProperties, true);
+
+    memoryManager->returnFakeAllocation = false;
+    blitBuffer(&csr, blitProperties, true, *pDevice);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(csr.commandStream);
@@ -1046,6 +1176,15 @@ HWTEST_P(BcsDetaliedTestsWithParams, givenBltSizeWithLeftoverWhenDispatchedThenP
 
         offset += (expectedWidth * expectedHeight);
 
+        if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+            auto miFlush = genCmdCast<typename FamilyType::MI_FLUSH_DW *>(*(cmdIterator++));
+            EXPECT_NE(nullptr, miFlush);
+            if (EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite() == 2 * sizeof(typename FamilyType::MI_FLUSH_DW)) {
+                miFlush = genCmdCast<typename FamilyType::MI_FLUSH_DW *>(*(cmdIterator++));
+                EXPECT_NE(nullptr, miFlush);
+            }
+        }
+
         auto miArbCheckCmd = genCmdCast<typename FamilyType::MI_ARB_CHECK *>(*(cmdIterator++));
         EXPECT_NE(nullptr, miArbCheckCmd);
         EXPECT_TRUE(memcmp(&FamilyType::cmdInitArbCheck, miArbCheckCmd, sizeof(typename FamilyType::MI_ARB_CHECK)) == 0);
@@ -1075,21 +1214,25 @@ HWTEST_P(BcsDetaliedTestsWithParams, givenBltSizeWithLeftoverWhenDispatchedThenP
     size_t srcSlicePitch = std::get<0>(GetParam()).srcSlicePitch;
     auto allocation = buffer->getGraphicsAllocation(pDevice->getRootDeviceIndex());
 
-    auto blitProperties = BlitProperties::constructPropertiesForReadWriteBuffer(std::get<1>(GetParam()),     //blitDirection
-                                                                                csr, allocation,             //commandStreamReceiver
-                                                                                nullptr,                     //memObjAllocation
-                                                                                hostPtr,                     //preallocatedHostAllocation
-                                                                                allocation->getGpuAddress(), //memObjGpuVa
-                                                                                0,                           //hostAllocGpuVa
-                                                                                hostPtrOffset,               //hostPtrOffset
-                                                                                copyOffset,                  //copyOffset
-                                                                                bltSize,                     //copySize
-                                                                                dstRowPitch,                 //hostRowPitch
-                                                                                dstSlicePitch,               //hostSlicePitch
-                                                                                srcRowPitch,                 //gpuRowPitch
-                                                                                srcSlicePitch                //gpuSlicePitch
+    auto memoryManager = static_cast<MockMemoryManager *>(pDevice->getMemoryManager());
+    memoryManager->returnFakeAllocation = true;
+    auto blitProperties = BlitProperties::constructPropertiesForReadWrite(std::get<1>(GetParam()),     //blitDirection
+                                                                          csr, allocation,             //commandStreamReceiver
+                                                                          nullptr,                     //memObjAllocation
+                                                                          hostPtr,                     //preallocatedHostAllocation
+                                                                          allocation->getGpuAddress(), //memObjGpuVa
+                                                                          0,                           //hostAllocGpuVa
+                                                                          hostPtrOffset,               //hostPtrOffset
+                                                                          copyOffset,                  //copyOffset
+                                                                          bltSize,                     //copySize
+                                                                          dstRowPitch,                 //hostRowPitch
+                                                                          dstSlicePitch,               //hostSlicePitch
+                                                                          srcRowPitch,                 //gpuRowPitch
+                                                                          srcSlicePitch                //gpuSlicePitch
     );
-    blitBuffer(&csr, blitProperties, true);
+
+    memoryManager->returnFakeAllocation = false;
+    blitBuffer(&csr, blitProperties, true, *pDevice);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(csr.commandStream);
@@ -1113,8 +1256,8 @@ HWTEST_P(BcsDetaliedTestsWithParams, givenBltSizeWithLeftoverWhenDispatchedThenP
             offset = 0;
         }
 
-        EXPECT_EQ(expectedWidth, bltCmd->getTransferWidth());
-        EXPECT_EQ(expectedHeight, bltCmd->getTransferHeight());
+        EXPECT_EQ(expectedWidth, bltCmd->getDestinationX2CoordinateRight());
+        EXPECT_EQ(expectedHeight, bltCmd->getDestinationY2CoordinateBottom());
         EXPECT_EQ(expectedWidth, bltCmd->getDestinationPitch());
         EXPECT_EQ(expectedWidth, bltCmd->getSourcePitch());
 
@@ -1128,6 +1271,15 @@ HWTEST_P(BcsDetaliedTestsWithParams, givenBltSizeWithLeftoverWhenDispatchedThenP
         EXPECT_EQ(srcAddr, bltCmd->getSourceBaseAddress());
 
         offset += (expectedWidth * expectedHeight);
+
+        if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+            auto miFlush = genCmdCast<typename FamilyType::MI_FLUSH_DW *>(*(cmdIterator++));
+            EXPECT_NE(nullptr, miFlush);
+            if (EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite() == 2 * sizeof(typename FamilyType::MI_FLUSH_DW)) {
+                miFlush = genCmdCast<typename FamilyType::MI_FLUSH_DW *>(*(cmdIterator++));
+                EXPECT_NE(nullptr, miFlush);
+            }
+        }
 
         auto miArbCheckCmd = genCmdCast<typename FamilyType::MI_ARB_CHECK *>(*(cmdIterator++));
         EXPECT_NE(nullptr, miArbCheckCmd);
@@ -1157,17 +1309,18 @@ HWTEST_P(BcsDetaliedTestsWithParams, givenBltSizeWithLeftoverWhenDispatchedThenP
     size_t buffer2SlicePitch = std::get<0>(GetParam()).srcSlicePitch;
     auto allocation = buffer1->getGraphicsAllocation(pDevice->getRootDeviceIndex());
 
-    auto blitProperties = BlitProperties::constructPropertiesForCopyBuffer(allocation,        //dstAllocation
-                                                                           allocation,        //srcAllocation
-                                                                           buffer1Offset,     //dstOffset
-                                                                           buffer2Offset,     //srcOffset
-                                                                           bltSize,           //copySize
-                                                                           buffer1RowPitch,   //srcRowPitch
-                                                                           buffer1SlicePitch, //srcSlicePitch
-                                                                           buffer2RowPitch,   //dstRowPitch
-                                                                           buffer2SlicePitch  //dstSlicePitch
+    auto blitProperties = BlitProperties::constructPropertiesForCopy(allocation,                   //dstAllocation
+                                                                     allocation,                   //srcAllocation
+                                                                     buffer1Offset,                //dstOffset
+                                                                     buffer2Offset,                //srcOffset
+                                                                     bltSize,                      //copySize
+                                                                     buffer1RowPitch,              //srcRowPitch
+                                                                     buffer1SlicePitch,            //srcSlicePitch
+                                                                     buffer2RowPitch,              //dstRowPitch
+                                                                     buffer2SlicePitch,            //dstSlicePitch
+                                                                     csr.getClearColorAllocation() //clearColorAllocation
     );
-    blitBuffer(&csr, blitProperties, true);
+    blitBuffer(&csr, blitProperties, true, *pDevice);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(csr.commandStream);
@@ -1191,8 +1344,8 @@ HWTEST_P(BcsDetaliedTestsWithParams, givenBltSizeWithLeftoverWhenDispatchedThenP
             offset = 0;
         }
 
-        EXPECT_EQ(expectedWidth, bltCmd->getTransferWidth());
-        EXPECT_EQ(expectedHeight, bltCmd->getTransferHeight());
+        EXPECT_EQ(expectedWidth, bltCmd->getDestinationX2CoordinateRight());
+        EXPECT_EQ(expectedHeight, bltCmd->getDestinationY2CoordinateBottom());
         EXPECT_EQ(expectedWidth, bltCmd->getDestinationPitch());
         EXPECT_EQ(expectedWidth, bltCmd->getSourcePitch());
 
@@ -1206,6 +1359,15 @@ HWTEST_P(BcsDetaliedTestsWithParams, givenBltSizeWithLeftoverWhenDispatchedThenP
         EXPECT_EQ(srcAddr, bltCmd->getSourceBaseAddress());
 
         offset += (expectedWidth * expectedHeight);
+
+        if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+            auto miFlush = genCmdCast<typename FamilyType::MI_FLUSH_DW *>(*(cmdIterator++));
+            EXPECT_NE(nullptr, miFlush);
+            if (EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite() == 2 * sizeof(typename FamilyType::MI_FLUSH_DW)) {
+                miFlush = genCmdCast<typename FamilyType::MI_FLUSH_DW *>(*(cmdIterator++));
+                EXPECT_NE(nullptr, miFlush);
+            }
+        }
 
         auto miArbCheckCmd = genCmdCast<typename FamilyType::MI_ARB_CHECK *>(*(cmdIterator++));
         EXPECT_NE(nullptr, miArbCheckCmd);

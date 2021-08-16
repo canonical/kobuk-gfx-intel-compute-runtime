@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/built_ins/built_ins.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 
 #include "opencl/source/command_queue/enqueue_kernel.h"
 #include "opencl/source/device_queue/device_queue.h"
@@ -45,7 +45,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ExecutionModelSchedulerFixture, WhenDispatchingSched
     using MI_BATCH_BUFFER_START = typename FamilyType::MI_BATCH_BUFFER_START;
 
     DeviceQueueHw<FamilyType> *pDevQueueHw = castToObject<DeviceQueueHw<FamilyType>>(pDevQueue);
-    SchedulerKernel &scheduler = context->getSchedulerKernel();
+    auto &scheduler = static_cast<MockSchedulerKernel &>(context->getSchedulerKernel());
 
     auto *executionModelDshAllocation = pDevQueueHw->getDshBuffer();
     auto *dshHeap = pDevQueueHw->getIndirectHeap(IndirectHeap::DYNAMIC_STATE);
@@ -58,7 +58,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ExecutionModelSchedulerFixture, WhenDispatchingSched
     MultiDispatchInfo multiDispatchinfo(&scheduler);
     LinearStream &commandStream = getCommandStream<FamilyType, CL_COMMAND_NDRANGE_KERNEL>(*pCmdQ, CsrDependencies(),
                                                                                           false, false, false, multiDispatchinfo,
-                                                                                          nullptr, 0);
+                                                                                          nullptr, 0, false, false);
     pCmdQ->getIndirectHeap(IndirectHeap::SURFACE_STATE, minRequiredSizeForSchedulerSSH);
 
     GpgpuWalkerHelper<FamilyType>::dispatchScheduler(
@@ -70,27 +70,22 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ExecutionModelSchedulerFixture, WhenDispatchingSched
         pDevQueueHw->getIndirectHeap(IndirectHeap::DYNAMIC_STATE),
         false);
 
-    EXPECT_EQ(0u, *scheduler.globalWorkOffsetX);
-    EXPECT_EQ(0u, *scheduler.globalWorkOffsetY);
-    EXPECT_EQ(0u, *scheduler.globalWorkOffsetZ);
+    auto localWorkSize = scheduler.getLocalWorkSizeValues();
+    EXPECT_EQ((uint32_t)scheduler.getLws(), *localWorkSize[0]);
+    EXPECT_EQ(1u, *localWorkSize[1]);
+    EXPECT_EQ(1u, *localWorkSize[2]);
 
-    EXPECT_EQ((uint32_t)scheduler.getLws(), *scheduler.localWorkSizeX);
-    EXPECT_EQ(1u, *scheduler.localWorkSizeY);
-    EXPECT_EQ(1u, *scheduler.localWorkSizeZ);
-
-    EXPECT_EQ((uint32_t)scheduler.getLws(), *scheduler.localWorkSizeX2);
-    EXPECT_EQ(1u, *scheduler.localWorkSizeY2);
-    EXPECT_EQ(1u, *scheduler.localWorkSizeZ2);
-
-    if (scheduler.enqueuedLocalWorkSizeX != &Kernel::dummyPatchLocation) {
-        EXPECT_EQ((uint32_t)scheduler.getLws(), *scheduler.enqueuedLocalWorkSizeX);
+    auto enqueuedLocalWorkSize = scheduler.getEnqueuedLocalWorkSizeValues();
+    if (enqueuedLocalWorkSize[0] != &Kernel::dummyPatchLocation) {
+        EXPECT_EQ((uint32_t)scheduler.getLws(), *enqueuedLocalWorkSize[0]);
+        EXPECT_EQ(1u, *enqueuedLocalWorkSize[1]);
+        EXPECT_EQ(1u, *enqueuedLocalWorkSize[2]);
     }
-    EXPECT_EQ(1u, *scheduler.enqueuedLocalWorkSizeY);
-    EXPECT_EQ(1u, *scheduler.enqueuedLocalWorkSizeZ);
 
-    EXPECT_EQ((uint32_t)(scheduler.getGws() / scheduler.getLws()), *scheduler.numWorkGroupsX);
-    EXPECT_EQ(0u, *scheduler.numWorkGroupsY);
-    EXPECT_EQ(0u, *scheduler.numWorkGroupsZ);
+    auto numWorkGroups = scheduler.getNumWorkGroupsValues();
+    EXPECT_EQ((uint32_t)(scheduler.getGws() / scheduler.getLws()), *numWorkGroups[0]);
+    EXPECT_EQ(0u, *numWorkGroups[1]);
+    EXPECT_EQ(0u, *numWorkGroups[2]);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(commandStream, 0);
@@ -179,7 +174,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ExecutionModelSchedulerFixture, WhenDispatchingSched
 
     MultiDispatchInfo multiDispatchinfo(&scheduler);
     getCommandStream<FamilyType, CL_COMMAND_NDRANGE_KERNEL>(*pCmdQ, CsrDependencies(), false, false, false, multiDispatchinfo,
-                                                            nullptr, 0);
+                                                            nullptr, 0, false, false);
     pCmdQ->getIndirectHeap(IndirectHeap::SURFACE_STATE, minRequiredSizeForSchedulerSSH);
 
     GpgpuWalkerHelper<FamilyType>::dispatchScheduler(
@@ -214,7 +209,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, GivenEarlyReturnSet
     MultiDispatchInfo multiDispatchinfo(&scheduler);
     LinearStream &commandStream = getCommandStream<FamilyType, CL_COMMAND_NDRANGE_KERNEL>(*pCmdQ, CsrDependencies(),
                                                                                           false, false, false, multiDispatchinfo,
-                                                                                          nullptr, 0);
+                                                                                          nullptr, 0, false, false);
     pCmdQ->getIndirectHeap(IndirectHeap::SURFACE_STATE, minRequiredSizeForSchedulerSSH);
 
     GpgpuWalkerHelper<FamilyType>::dispatchScheduler(

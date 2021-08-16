@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/source/aub_mem_dump/aub_services.h"
+#include "shared/source/aub_mem_dump/definitions/aub_services.h"
 #include "shared/source/gen11/hw_cmds.h"
 #include "shared/source/helpers/constants.h"
 
@@ -67,6 +67,7 @@ const RuntimeCapabilityTable ICLLP::capabilityTable{
     true,                                            // instrumentationEnabled
     true,                                            // forceStatelessCompilationFor32Bit
     "lp",                                            // platformType
+    "",                                              // deviceName
     true,                                            // sourceLevelDebuggerSupported
     true,                                            // supportsVme
     false,                                           // supportCacheFlushAfterWalker
@@ -78,7 +79,9 @@ const RuntimeCapabilityTable ICLLP::capabilityTable{
     true,                                            // supportsIndependentForwardProgress
     true,                                            // hostPtrTrackingEnabled
     true,                                            // levelZeroSupported
-    true                                             // isIntegratedDevice
+    true,                                            // isIntegratedDevice
+    true,                                            // supportsMediaBlock
+    false                                            // fusedEuEnabled
 };
 
 WorkaroundTable ICLLP::workaroundTable = {};

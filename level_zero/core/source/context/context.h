@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -19,21 +19,36 @@ namespace L0 {
 struct DriverHandle;
 
 struct Context : _ze_context_handle_t {
+    inline static ze_memory_type_t parseUSMType(InternalMemoryType memoryType) {
+        switch (memoryType) {
+        case InternalMemoryType::SHARED_UNIFIED_MEMORY:
+            return ZE_MEMORY_TYPE_SHARED;
+        case InternalMemoryType::DEVICE_UNIFIED_MEMORY:
+            return ZE_MEMORY_TYPE_DEVICE;
+        case InternalMemoryType::HOST_UNIFIED_MEMORY:
+            return ZE_MEMORY_TYPE_HOST;
+        default:
+            return ZE_MEMORY_TYPE_UNKNOWN;
+        }
+
+        return ZE_MEMORY_TYPE_UNKNOWN;
+    }
+
     virtual ~Context() = default;
     virtual ze_result_t destroy() = 0;
     virtual ze_result_t getStatus() = 0;
     virtual DriverHandle *getDriverHandle() = 0;
-    virtual ze_result_t allocHostMem(ze_host_mem_alloc_flags_t flags,
+    virtual ze_result_t allocHostMem(const ze_host_mem_alloc_desc_t *hostDesc,
                                      size_t size,
                                      size_t alignment,
                                      void **ptr) = 0;
     virtual ze_result_t allocDeviceMem(ze_device_handle_t hDevice,
-                                       ze_device_mem_alloc_flags_t flags,
+                                       const ze_device_mem_alloc_desc_t *deviceDesc,
                                        size_t size,
                                        size_t alignment, void **ptr) = 0;
     virtual ze_result_t allocSharedMem(ze_device_handle_t hDevice,
-                                       ze_device_mem_alloc_flags_t deviceFlags,
-                                       ze_host_mem_alloc_flags_t hostFlags,
+                                       const ze_device_mem_alloc_desc_t *deviceDesc,
+                                       const ze_host_mem_alloc_desc_t *hostDesc,
                                        size_t size,
                                        size_t alignment,
                                        void **ptr) = 0;

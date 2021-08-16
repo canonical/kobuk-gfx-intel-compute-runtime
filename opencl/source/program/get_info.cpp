@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -33,6 +33,7 @@ cl_int Program::getInfo(cl_program_info paramName, size_t paramValueSize,
     cl_uint clFalse = CL_FALSE;
     std::vector<cl_device_id> devicesToExpose;
     StackVec<size_t, 1> binarySizes;
+    uint32_t numDevices = static_cast<uint32_t>(clDevices.size());
 
     switch (paramName) {
     case CL_PROGRAM_CONTEXT:
@@ -76,7 +77,7 @@ cl_int Program::getInfo(cl_program_info paramName, size_t paramValueSize,
         break;
 
     case CL_PROGRAM_KERNEL_NAMES:
-        kernelNamesString = concatenateKernelNames(kernelInfoArray);
+        kernelNamesString = concatenateKernelNames(buildInfos[clDevices[0]->getRootDeviceIndex()].kernelInfoArray);
         pSrc = kernelNamesString.c_str();
         retSize = srcSize = kernelNamesString.length() + 1;
 
@@ -86,7 +87,7 @@ cl_int Program::getInfo(cl_program_info paramName, size_t paramValueSize,
         break;
 
     case CL_PROGRAM_NUM_KERNELS:
-        numKernels = kernelInfoArray.size();
+        numKernels = getNumKernels();
         pSrc = &numKernels;
         retSize = srcSize = sizeof(numKernels);
 

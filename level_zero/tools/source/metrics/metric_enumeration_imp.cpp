@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,8 @@
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/os_interface/os_library.h"
+
+#include "level_zero/core/source/device/device_imp.h"
 
 #include <algorithm>
 
@@ -27,8 +29,9 @@ MetricEnumeration::~MetricEnumeration() {
 
 ze_result_t MetricEnumeration::metricGroupGet(uint32_t &count,
                                               zet_metric_group_handle_t *phMetricGroups) {
-    if (initialize() != ZE_RESULT_SUCCESS) {
-        return ZE_RESULT_ERROR_UNKNOWN;
+    ze_result_t result = initialize();
+    if (result != ZE_RESULT_SUCCESS) {
+        return result;
     }
 
     if (count == 0) {
@@ -36,11 +39,6 @@ ze_result_t MetricEnumeration::metricGroupGet(uint32_t &count,
         return ZE_RESULT_SUCCESS;
     } else if (count > metricGroups.size()) {
         count = static_cast<uint32_t>(metricGroups.size());
-    }
-
-    // User is expected to allocate space.
-    if (phMetricGroups == nullptr) {
-        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
     for (uint32_t i = 0; i < count; i++) {
@@ -61,9 +59,13 @@ bool MetricEnumeration::isInitialized() {
 
 ze_result_t MetricEnumeration::initialize() {
     if (initializationState == ZE_RESULT_ERROR_UNINITIALIZED) {
-        if (hMetricsDiscovery &&
-            openMetricsDiscovery() == ZE_RESULT_SUCCESS &&
-            cacheMetricInformation() == ZE_RESULT_SUCCESS) {
+        if (!this->metricContext.getMetricCollectionEnabled()) {
+            NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "%s",
+                                  "metrics collection is disabled on the root device\n");
+            initializationState = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+        } else if (hMetricsDiscovery &&
+                   openMetricsDiscovery() == ZE_RESULT_SUCCESS &&
+                   cacheMetricInformation() == ZE_RESULT_SUCCESS) {
             initializationState = ZE_RESULT_SUCCESS;
         } else {
             initializationState = ZE_RESULT_ERROR_UNKNOWN;
@@ -80,20 +82,14 @@ ze_result_t MetricEnumeration::loadMetricsDiscovery() {
 
     // Load exported functions.
     if (hMetricsDiscovery) {
-        openMetricsDevice = reinterpret_cast<MetricsDiscovery::OpenMetricsDevice_fn>(
-            hMetricsDiscovery->getProcAddress("OpenMetricsDevice"));
-        closeMetricsDevice = reinterpret_cast<MetricsDiscovery::CloseMetricsDevice_fn>(
-            hMetricsDiscovery->getProcAddress("CloseMetricsDevice"));
-        openMetricsDeviceFromFile =
-            reinterpret_cast<MetricsDiscovery::OpenMetricsDeviceFromFile_fn>(
-                hMetricsDiscovery->getProcAddress("OpenMetricsDeviceFromFile"));
+        openAdapterGroup = reinterpret_cast<MetricsDiscovery::OpenAdapterGroup_fn>(
+            hMetricsDiscovery->getProcAddress("OpenAdapterGroup"));
     }
 
-    if (openMetricsDevice == nullptr || closeMetricsDevice == nullptr ||
-        openMetricsDeviceFromFile == nullptr) {
-        PRINT_DEBUG_STRING(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "cannot load %s exported functions\n", MetricEnumeration::getMetricsDiscoveryFilename());
+    if (openAdapterGroup == nullptr) {
+        NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "cannot load %s exported functions\n", MetricEnumeration::getMetricsDiscoveryFilename());
         cleanupMetricsDiscovery();
-        return ZE_RESULT_ERROR_UNKNOWN;
+        return ZE_RESULT_ERROR_NOT_AVAILABLE;
     }
 
     // Return success if exported functions have been loaded.
@@ -101,12 +97,63 @@ ze_result_t MetricEnumeration::loadMetricsDiscovery() {
 }
 
 ze_result_t MetricEnumeration::openMetricsDiscovery() {
-    UNRECOVERABLE_IF(openMetricsDevice == nullptr);
-    UNRECOVERABLE_IF(closeMetricsDevice == nullptr);
+    UNRECOVERABLE_IF(openAdapterGroup == nullptr);
 
-    auto openResult = openMetricsDevice(&pMetricsDevice);
-    if (openResult != MetricsDiscovery::CC_OK) {
+    const uint32_t subDeviceIndex = metricContext.getSubDeviceIndex();
+
+    // Clean up members.
+    pAdapterGroup = nullptr;
+    pAdapter = nullptr;
+    pMetricsDevice = nullptr;
+
+    // Open adapter group.
+    openAdapterGroup(&pAdapterGroup);
+    if (pAdapterGroup == nullptr) {
+        NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "unable to open metrics adapter groups %s\n", " ");
+        cleanupMetricsDiscovery();
         return ZE_RESULT_ERROR_UNKNOWN;
+    }
+
+    // Obtain metrics adapter that matches adapter used by l0.
+    pAdapter = getMetricsAdapter();
+    if (pAdapter == nullptr) {
+        NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "unable to open metrics adapter %s\n", " ");
+        cleanupMetricsDiscovery();
+        return ZE_RESULT_ERROR_NOT_AVAILABLE;
+    }
+
+    auto &device = metricContext.getDevice();
+    if (device.isMultiDeviceCapable()) {
+
+        // Open metrics device for each sub device.
+        const auto &deviceImp = *static_cast<DeviceImp *>(&device);
+
+        for (uint32_t i = 0; i < deviceImp.subDevices.size(); i++) {
+
+            auto &metricsDevice = deviceImp.subDevices[i]->getMetricContext().getMetricEnumeration().pMetricsDevice;
+
+            pAdapter->OpenMetricsSubDevice(i, &metricsDevice);
+
+            if (metricsDevice == nullptr) {
+                NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "unable to open metrics device %u\n", i);
+                cleanupMetricsDiscovery();
+                return ZE_RESULT_ERROR_NOT_AVAILABLE;
+            }
+        }
+    } else {
+        if (subDeviceIndex == 0) {
+            // Open metrics device for root device or sub device with index 0.
+            pAdapter->OpenMetricsDevice(&pMetricsDevice);
+        } else {
+            // Open metrics device for a given sub device index.
+            pAdapter->OpenMetricsSubDevice(subDeviceIndex, &pMetricsDevice);
+        }
+
+        if (pMetricsDevice == nullptr) {
+            NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "unable to open metrics device %u\n", subDeviceIndex);
+            cleanupMetricsDiscovery();
+            return ZE_RESULT_ERROR_NOT_AVAILABLE;
+        }
     }
 
     return ZE_RESULT_SUCCESS;
@@ -119,16 +166,33 @@ ze_result_t MetricEnumeration::cleanupMetricsDiscovery() {
 
     metricGroups.clear();
 
-    if (pMetricsDevice) {
-        closeMetricsDevice(pMetricsDevice);
-        pMetricsDevice = nullptr;
+    if (pAdapter) {
+
+        auto &device = metricContext.getDevice();
+        if (device.isMultiDeviceCapable()) {
+
+            // Close metrics device for each sub device.
+            const auto &deviceImp = *static_cast<DeviceImp *>(&device);
+
+            for (uint32_t i = 0; i < deviceImp.subDevices.size(); i++) {
+
+                auto &metricsDevice = deviceImp.subDevices[i]->getMetricContext().getMetricEnumeration().pMetricsDevice;
+
+                if (metricsDevice) {
+                    pAdapter->CloseMetricsDevice(metricsDevice);
+                    metricsDevice = nullptr;
+                }
+            }
+        } else if (pMetricsDevice) {
+
+            // Close metrics device for one sub device or root device.
+            pAdapter->CloseMetricsDevice(pMetricsDevice);
+            pMetricsDevice = nullptr;
+        }
     }
 
     if (hMetricsDiscovery != nullptr) {
-        openMetricsDevice = nullptr;
-        closeMetricsDevice = nullptr;
-        openMetricsDeviceFromFile = nullptr;
-
+        openAdapterGroup = nullptr;
         hMetricsDiscovery.reset();
     }
 
@@ -136,6 +200,22 @@ ze_result_t MetricEnumeration::cleanupMetricsDiscovery() {
 }
 
 ze_result_t MetricEnumeration::cacheMetricInformation() {
+
+    MetricsDiscovery::IMetricsDevice_1_5 *pMetricsDevice = nullptr;
+
+    auto &device = metricContext.getDevice();
+
+    if (device.isMultiDeviceCapable()) {
+
+        // Get metric information from sub device 0.
+        const auto &deviceImp = *static_cast<DeviceImp *>(&device);
+        pMetricsDevice = deviceImp.subDevices[0]->getMetricContext().getMetricEnumeration().pMetricsDevice;
+    } else {
+
+        // Get metric information from root or sub device.
+        pMetricsDevice = this->pMetricsDevice;
+    }
+
     DEBUG_BREAK_IF(pMetricsDevice == nullptr);
 
     MetricsDiscovery::TMetricsDeviceParams_1_2 *pMetricsDeviceParams = pMetricsDevice->GetParams();

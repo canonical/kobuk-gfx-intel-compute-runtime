@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -90,7 +90,8 @@ void provideLocalWorkGroupSizeHints(Context *context, DispatchInfo dispatchInfo)
 void setSpecialWorkgroupSize(size_t workgroupSize[3]);
 
 inline cl_uint computeDimensions(const size_t workItems[3]) {
-    return (workItems[2] > 1) ? 3 : (workItems[1] > 1) ? 2 : 1;
+    return (workItems[2] > 1) ? 3 : (workItems[1] > 1) ? 2
+                                                       : 1;
 }
 
 template <typename GfxFamily>
@@ -105,6 +106,7 @@ class GpgpuWalkerHelper {
 
     static size_t setGpgpuWalkerThreadData(
         WALKER_TYPE<GfxFamily> *walkerCmd,
+        const KernelDescriptor &kernelDescriptor,
         const size_t globalOffsets[3],
         const size_t startWorkGroups[3],
         const size_t numWorkGroups[3],
@@ -113,34 +115,32 @@ class GpgpuWalkerHelper {
         uint32_t workDim,
         bool localIdsGenerationByRuntime,
         bool inlineDataProgrammingRequired,
-        const iOpenCL::SPatchThreadPayload &threadPayload,
         uint32_t requiredWorkgroupOrder);
 
     static void dispatchProfilingCommandsStart(
-        TagNode<HwTimeStamps> &hwTimeStamps,
+        TagNodeBase &hwTimeStamps,
         LinearStream *commandStream,
         const HardwareInfo &hwInfo);
 
     static void dispatchProfilingCommandsEnd(
-        TagNode<HwTimeStamps> &hwTimeStamps,
+        TagNodeBase &hwTimeStamps,
         LinearStream *commandStream,
         const HardwareInfo &hwInfo);
 
     static void dispatchPerfCountersCommandsStart(
         CommandQueue &commandQueue,
-        TagNode<HwPerfCounter> &hwPerfCounter,
+        TagNodeBase &hwPerfCounter,
         LinearStream *commandStream);
 
     static void dispatchPerfCountersCommandsEnd(
         CommandQueue &commandQueue,
-        TagNode<HwPerfCounter> &hwPerfCounter,
+        TagNodeBase &hwPerfCounter,
         LinearStream *commandStream);
 
     static void setupTimestampPacket(
         LinearStream *cmdStream,
         WALKER_TYPE<GfxFamily> *walkerCmd,
-        TagNode<TimestampPacketStorage> *timestampPacketNode,
-        TimestampPacketStorage::WriteOperationType writeOperationType,
+        TagNodeBase *timestampPacketNode,
         const RootDeviceEnvironment &rootDeviceEnvironment);
 
     static void dispatchScheduler(
@@ -167,21 +167,21 @@ class GpgpuWalkerHelper {
 template <typename GfxFamily>
 struct EnqueueOperation {
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
-    static size_t getTotalSizeRequiredCS(uint32_t eventType, const CsrDependencies &csrDeps, bool reserveProfilingCmdsSpace, bool reservePerfCounters, bool blitEnqueue, CommandQueue &commandQueue, const MultiDispatchInfo &multiDispatchInfo);
-    static size_t getSizeRequiredCS(uint32_t cmdType, bool reserveProfilingCmdsSpace, bool reservePerfCounters, CommandQueue &commandQueue, const Kernel *pKernel);
+    static size_t getTotalSizeRequiredCS(uint32_t eventType, const CsrDependencies &csrDeps, bool reserveProfilingCmdsSpace, bool reservePerfCounters, bool blitEnqueue, CommandQueue &commandQueue, const MultiDispatchInfo &multiDispatchInfo, bool isMarkerWithProfiling, bool eventsInWaitList);
+    static size_t getSizeRequiredCS(uint32_t cmdType, bool reserveProfilingCmdsSpace, bool reservePerfCounters, CommandQueue &commandQueue, const Kernel *pKernel, const DispatchInfo &dispatchInfo);
     static size_t getSizeRequiredForTimestampPacketWrite();
     static size_t getSizeForCacheFlushAfterWalkerCommands(const Kernel &kernel, const CommandQueue &commandQueue);
 
   private:
-    static size_t getSizeRequiredCSKernel(bool reserveProfilingCmdsSpace, bool reservePerfCounters, CommandQueue &commandQueue, const Kernel *pKernel);
+    static size_t getSizeRequiredCSKernel(bool reserveProfilingCmdsSpace, bool reservePerfCounters, CommandQueue &commandQueue, const Kernel *pKernel, const DispatchInfo &dispatchInfo);
     static size_t getSizeRequiredCSNonKernel(bool reserveProfilingCmdsSpace, bool reservePerfCounters, CommandQueue &commandQueue);
 };
 
 template <typename GfxFamily, uint32_t eventType>
 LinearStream &getCommandStream(CommandQueue &commandQueue, const CsrDependencies &csrDeps, bool reserveProfilingCmdsSpace,
                                bool reservePerfCounterCmdsSpace, bool blitEnqueue, const MultiDispatchInfo &multiDispatchInfo,
-                               Surface **surfaces, size_t numSurfaces) {
-    size_t expectedSizeCS = EnqueueOperation<GfxFamily>::getTotalSizeRequiredCS(eventType, csrDeps, reserveProfilingCmdsSpace, reservePerfCounterCmdsSpace, blitEnqueue, commandQueue, multiDispatchInfo);
+                               Surface **surfaces, size_t numSurfaces, bool isMarkerWithProfiling, bool eventsInWaitList) {
+    size_t expectedSizeCS = EnqueueOperation<GfxFamily>::getTotalSizeRequiredCS(eventType, csrDeps, reserveProfilingCmdsSpace, reservePerfCounterCmdsSpace, blitEnqueue, commandQueue, multiDispatchInfo, isMarkerWithProfiling, eventsInWaitList);
     return commandQueue.getCS(expectedSizeCS);
 }
 

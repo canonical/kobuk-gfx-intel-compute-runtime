@@ -1,9 +1,10 @@
 #
-# Copyright (C) 2017-2020 Intel Corporation
+# Copyright (C) 2020-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
 
+set(SHARED_BUIILINS_PROJECTS_FOLDER "built_ins")
 set(NEO_CORE_SRCS_BUILT_INS
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
     ${CMAKE_CURRENT_SOURCE_DIR}/built_ins_storage.cpp

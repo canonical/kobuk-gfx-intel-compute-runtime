@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -94,7 +94,21 @@ ze_result_t PciImp::pciGetInitializedBars(uint32_t *pCount, zes_pci_bar_properti
     }
     if (nullptr != pProperties) {
         for (uint32_t i = 0; i < numToCopy; i++) {
-            pProperties[i] = *pciBarProperties[i];
+            pProperties[i].base = pciBarProperties[i]->base;
+            pProperties[i].index = pciBarProperties[i]->index;
+            pProperties[i].size = pciBarProperties[i]->size;
+            pProperties[i].type = pciBarProperties[i]->type;
+
+            if (pProperties[i].pNext != nullptr && pProperties[i].stype == zes_structure_type_t::ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES_1_2) {
+                zes_pci_bar_properties_1_2_t *pBarPropsExt = static_cast<zes_pci_bar_properties_1_2_t *>(pProperties[i].pNext);
+                // base, index, size and type are the same as the non 1.2 struct.
+                pBarPropsExt->base = pciBarProperties[i]->base;
+                pBarPropsExt->index = pciBarProperties[i]->index;
+                pBarPropsExt->size = pciBarProperties[i]->size;
+                pBarPropsExt->type = pciBarProperties[i]->type;
+                pBarPropsExt->resizableBarEnabled = static_cast<ze_bool_t>(resizableBarEnabled);
+                pBarPropsExt->resizableBarSupported = static_cast<ze_bool_t>(resizableBarSupported);
+            }
         }
     }
     return ZE_RESULT_SUCCESS;
@@ -103,12 +117,11 @@ ze_result_t PciImp::pciGetInitializedBars(uint32_t *pCount, zes_pci_bar_properti
 ze_result_t PciImp::pciGetState(zes_pci_state_t *pState) {
     return pOsPci->getState(pState);
 }
-void PciImp::init() {
-    if (pOsPci == nullptr) {
-        pOsPci = OsPci::create(pOsSysman);
-    }
-    UNRECOVERABLE_IF(nullptr == pOsPci);
+
+void PciImp::pciGetStaticFields() {
     pOsPci->getProperties(&pciProperties);
+    resizableBarEnabled = pOsPci->resizableBarEnabled();
+    resizableBarSupported = pOsPci->resizableBarSupported();
     std::string bdf;
     pOsPci->getPciBdf(bdf);
     if (bdf.empty()) {
@@ -117,9 +130,12 @@ void PciImp::init() {
         pciProperties.address.device = 0;
         pciProperties.address.function = 0;
     } else {
-        sscanf(bdf.c_str(), "%04x:%02x:%02x.%d",
-               &pciProperties.address.domain, &pciProperties.address.bus,
-               &pciProperties.address.device, &pciProperties.address.function);
+        int domain = -1, bus = -1, device = -1, function = -1;
+        sscanf(bdf.c_str(), "%04x:%02x:%02x.%d", &domain, &bus, &device, &function);
+        pciProperties.address.domain = static_cast<uint32_t>(domain);
+        pciProperties.address.bus = static_cast<uint32_t>(bus);
+        pciProperties.address.device = static_cast<uint32_t>(device);
+        pciProperties.address.function = static_cast<uint32_t>(function);
     }
 
     int32_t maxLinkWidth = -1;
@@ -136,6 +152,15 @@ void PciImp::init() {
     pciProperties.maxSpeed.width = maxLinkWidth;
     pciProperties.maxSpeed.gen = convertLinkSpeedToPciGen(maxLinkSpeed);
     pOsPci->initializeBarProperties(pciBarProperties);
+}
+
+void PciImp::init() {
+    if (pOsPci == nullptr) {
+        pOsPci = OsPci::create(pOsSysman);
+    }
+    UNRECOVERABLE_IF(nullptr == pOsPci);
+
+    pciGetStaticFields();
 }
 
 PciImp::~PciImp() {

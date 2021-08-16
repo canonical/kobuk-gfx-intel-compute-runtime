@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_stream/linear_stream.h"
+#include "shared/source/device/device.h"
 #include "shared/source/direct_submission/linux/drm_direct_submission.h"
 #include "shared/source/os_interface/linux/drm_allocation.h"
 #include "shared/source/os_interface/linux/drm_buffer_object.h"
@@ -17,20 +18,28 @@
 namespace NEO {
 
 template <typename GfxFamily, typename Dispatcher>
-inline std::unique_ptr<DirectSubmissionHw<GfxFamily, Dispatcher>> DirectSubmissionHw<GfxFamily, Dispatcher>::create(Device &device, OsContext &osContext) {
-    return std::make_unique<DrmDirectSubmission<GfxFamily, Dispatcher>>(device, osContext);
-}
-
-template <typename GfxFamily, typename Dispatcher>
 DrmDirectSubmission<GfxFamily, Dispatcher>::DrmDirectSubmission(Device &device,
                                                                 OsContext &osContext)
-    : DirectSubmissionHw<GfxFamily, Dispatcher>(device, osContext){};
+    : DirectSubmissionHw<GfxFamily, Dispatcher>(device, osContext) {
+
+    this->disableMonitorFence = true;
+
+    if (DebugManager.flags.DirectSubmissionDisableMonitorFence.get() != -1) {
+        this->disableMonitorFence = DebugManager.flags.DirectSubmissionDisableMonitorFence.get();
+    }
+
+    auto osContextLinux = static_cast<OsContextLinux *>(&this->osContext);
+    osContextLinux->getDrm().setDirectSubmissionActive(true);
+};
 
 template <typename GfxFamily, typename Dispatcher>
 inline DrmDirectSubmission<GfxFamily, Dispatcher>::~DrmDirectSubmission() {
     if (this->ringStart) {
-        this->wait(static_cast<uint32_t>(this->currentTagData.tagValue));
         this->stopRingBuffer();
+        if (this->disableMonitorFence) {
+            this->currentTagData.tagValue++;
+        }
+        this->wait(static_cast<uint32_t>(this->currentTagData.tagValue));
         auto bb = static_cast<DrmAllocation *>(this->ringBuffer)->getBO();
         bb->wait(-1);
     }
@@ -55,6 +64,8 @@ bool DrmDirectSubmission<GfxFamily, Dispatcher>::submit(uint64_t gpuAddress, siz
 
     drm_i915_gem_exec_object2 execObject{};
 
+    this->handleResidency();
+
     bool ret = false;
     uint32_t drmContextId = 0u;
     for (auto drmIterator = 0u; drmIterator < osContextLinux->getDeviceBitfield().size(); drmIterator++) {
@@ -78,11 +89,54 @@ bool DrmDirectSubmission<GfxFamily, Dispatcher>::submit(uint64_t gpuAddress, siz
 
 template <typename GfxFamily, typename Dispatcher>
 bool DrmDirectSubmission<GfxFamily, Dispatcher>::handleResidency() {
+    auto osContextLinux = static_cast<OsContextLinux *>(&this->osContext);
+    osContextLinux->waitForPagingFence();
     return true;
 }
 
 template <typename GfxFamily, typename Dispatcher>
+bool DrmDirectSubmission<GfxFamily, Dispatcher>::isNewResourceHandleNeeded() {
+    auto osContextLinux = static_cast<OsContextLinux *>(&this->osContext);
+    auto newResourcesBound = osContextLinux->getDrm().getNewResourceBound();
+
+    if (DebugManager.flags.DirectSubmissionNewResourceTlbFlush.get() != -1) {
+        newResourcesBound = DebugManager.flags.DirectSubmissionNewResourceTlbFlush.get();
+    }
+
+    return newResourcesBound;
+}
+
+template <typename GfxFamily, typename Dispatcher>
+void DrmDirectSubmission<GfxFamily, Dispatcher>::handleNewResourcesSubmission() {
+    if (isNewResourceHandleNeeded()) {
+        Dispatcher::dispatchTlbFlush(this->ringCommandStream, this->gpuVaForMiFlush);
+    }
+
+    auto osContextLinux = static_cast<OsContextLinux *>(&this->osContext);
+    if (!EngineHelpers::isBcs(osContextLinux->getEngineType())) {
+        osContextLinux->getDrm().setNewResourceBound(false);
+    }
+}
+
+template <typename GfxFamily, typename Dispatcher>
+size_t DrmDirectSubmission<GfxFamily, Dispatcher>::getSizeNewResourceHandler() {
+    size_t size = 0u;
+
+    if (isNewResourceHandleNeeded()) {
+        size += Dispatcher::getSizeTlbFlush();
+    }
+
+    return size;
+}
+
+template <typename GfxFamily, typename Dispatcher>
 void DrmDirectSubmission<GfxFamily, Dispatcher>::handleSwitchRingBuffers() {
+    if (this->disableMonitorFence) {
+        auto previousRingBuffer = this->currentRingBuffer == DirectSubmissionHw<GfxFamily, Dispatcher>::RingBufferUse::FirstBuffer ? DirectSubmissionHw<GfxFamily, Dispatcher>::RingBufferUse::SecondBuffer : DirectSubmissionHw<GfxFamily, Dispatcher>::RingBufferUse::FirstBuffer;
+        this->currentTagData.tagValue++;
+        this->completionRingBuffers[previousRingBuffer] = this->currentTagData.tagValue;
+    }
+
     if (this->ringStart) {
         if (this->completionRingBuffers[this->currentRingBuffer] != 0) {
             this->wait(static_cast<uint32_t>(this->completionRingBuffers[this->currentRingBuffer]));
@@ -92,8 +146,10 @@ void DrmDirectSubmission<GfxFamily, Dispatcher>::handleSwitchRingBuffers() {
 
 template <typename GfxFamily, typename Dispatcher>
 uint64_t DrmDirectSubmission<GfxFamily, Dispatcher>::updateTagValue() {
-    this->currentTagData.tagValue++;
-    this->completionRingBuffers[this->currentRingBuffer] = this->currentTagData.tagValue;
+    if (!this->disableMonitorFence) {
+        this->currentTagData.tagValue++;
+        this->completionRingBuffers[this->currentRingBuffer] = this->currentTagData.tagValue;
+    }
     return 0ull;
 }
 

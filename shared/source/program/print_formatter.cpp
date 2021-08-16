@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,11 +14,14 @@
 namespace NEO {
 
 PrintFormatter::PrintFormatter(const uint8_t *printfOutputBuffer, uint32_t printfOutputBufferMaxSize,
-                               bool using32BitPointers, const StringMap &stringLiteralMap)
+                               bool using32BitPointers, const StringMap *stringLiteralMap)
     : printfOutputBuffer(printfOutputBuffer),
       printfOutputBufferSize(printfOutputBufferMaxSize),
-      stringLiteralMap(stringLiteralMap),
-      using32BitPointers(using32BitPointers) {
+      using32BitPointers(using32BitPointers),
+      usesStringMap(stringLiteralMap != nullptr),
+      stringLiteralMap(stringLiteralMap) {
+
+    output.reset(new char[maxSinglePrintStringLength]);
 }
 
 void PrintFormatter::printKernelOutput(const std::function<void(char *)> &print) {
@@ -29,21 +32,30 @@ void PrintFormatter::printKernelOutput(const std::function<void(char *)> &print)
     read(&printfOutputBufferSizeRead);
     printfOutputBufferSize = std::min(printfOutputBufferSizeRead, printfOutputBufferSize);
 
-    uint32_t stringIndex = 0;
-    while (currentOffset + 4 <= printfOutputBufferSize) {
-        read(&stringIndex);
-        const char *formatString = queryPrintfString(stringIndex);
-        if (formatString != nullptr) {
+    if (usesStringMap) {
+        uint32_t stringIndex = 0;
+        while (currentOffset + 4 <= printfOutputBufferSize) {
+            read(&stringIndex);
+            const char *formatString = queryPrintfString(stringIndex);
+            if (formatString != nullptr) {
+                printString(formatString, print);
+            }
+        }
+    } else {
+        while (currentOffset + sizeof(char *) <= printfOutputBufferSize) {
+            char *formatString = nullptr;
+            read(&formatString);
             printString(formatString, print);
         }
     }
 }
 
 void PrintFormatter::printString(const char *formatString, const std::function<void(char *)> &print) {
-    size_t length = strnlen_s(formatString, maxPrintfOutputLength);
-    char output[maxPrintfOutputLength];
+    size_t length = strnlen_s(formatString, maxSinglePrintStringLength - 1);
 
     size_t cursor = 0;
+    std::unique_ptr<char[]> dataFormat(new char[length + 1]);
+
     for (size_t i = 0; i <= length; i++) {
         if (formatString[i] == '\\')
             output[cursor++] = escapeChar(formatString[++i]);
@@ -56,23 +68,22 @@ void PrintFormatter::printString(const char *formatString, const std::function<v
 
             while (isConversionSpecifier(formatString[end++]) == false && end < length)
                 ;
-            char dataFormat[maxPrintfOutputLength];
 
-            memcpy_s(dataFormat, maxPrintfOutputLength, formatString + i, end - i);
+            memcpy_s(dataFormat.get(), length, formatString + i, end - i);
             dataFormat[end - i] = '\0';
 
             if (formatString[end - 1] == 's')
-                cursor += printStringToken(output + cursor, maxPrintfOutputLength - cursor, dataFormat);
+                cursor += printStringToken(output.get() + cursor, maxSinglePrintStringLength - cursor, dataFormat.get());
             else
-                cursor += printToken(output + cursor, maxPrintfOutputLength - cursor, dataFormat);
+                cursor += printToken(output.get() + cursor, maxSinglePrintStringLength - cursor, dataFormat.get());
 
             i = end - 1;
         } else {
             output[cursor++] = formatString[i];
         }
     }
-
-    print(output);
+    output[maxSinglePrintStringLength - 1] = '\0';
+    print(output.get());
 }
 
 void PrintFormatter::stripVectorFormat(const char *format, char *stripped) {
@@ -138,16 +149,27 @@ size_t PrintFormatter::printToken(char *output, size_t size, const char *formatS
 }
 
 size_t PrintFormatter::printStringToken(char *output, size_t size, const char *formatString) {
-    int index = 0;
     int type = 0;
-    // additional read to discard the token
     read(&type);
-    read(&index);
+
+    const char *string = nullptr;
+    if (usesStringMap) {
+        int index = 0;
+        read(&index);
+        string = queryPrintfString(index);
+    } else {
+        char *str = nullptr;
+        read(&str);
+        string = str;
+    }
+
     if (type == static_cast<int>(PRINTF_DATA_TYPE::STRING)) {
-        return simple_sprintf(output, size, formatString, queryPrintfString(index));
+        return simple_sprintf(output, size, formatString, string);
     } else {
         return simple_sprintf(output, size, formatString, 0);
     }
+
+    return 0;
 }
 
 size_t PrintFormatter::printPointerToken(char *output, size_t size, const char *formatString) {
@@ -159,6 +181,11 @@ size_t PrintFormatter::printPointerToken(char *output, size_t size, const char *
     }
 
     return simple_sprintf(output, size, formatString, value);
+}
+
+const char *PrintFormatter::queryPrintfString(uint32_t index) const {
+    auto stringEntry = stringLiteralMap->find(index);
+    return stringEntry == stringLiteralMap->end() ? nullptr : stringEntry->second.c_str();
 }
 
 char PrintFormatter::escapeChar(char escape) {
@@ -193,11 +220,6 @@ bool PrintFormatter::isConversionSpecifier(char c) {
     default:
         return false;
     }
-}
-
-const char *PrintFormatter::queryPrintfString(uint32_t index) const {
-    auto stringEntry = stringLiteralMap.find(index);
-    return stringEntry == stringLiteralMap.end() ? nullptr : stringEntry->second.c_str();
 }
 
 } // namespace NEO

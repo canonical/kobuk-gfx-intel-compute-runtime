@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -15,6 +15,7 @@
 #include "shared/source/os_interface/hw_info_config.h"
 
 #include "opencl/source/cl_device/cl_device.h"
+#include "opencl/source/helpers/cl_hw_helper.h"
 #include "opencl/source/platform/extensions.h"
 #include "opencl/source/sharings/sharing_factory.h"
 
@@ -29,7 +30,7 @@ static std::string vendor = "Intel(R) Corporation";
 static std::string profile = "FULL_PROFILE";
 static std::string spirVersions = "1.2 ";
 static std::string spirvName = "SPIR-V";
-const char *latestConformanceVersionPassed = "v2020-10-01-00";
+const char *latestConformanceVersionPassed = "v2021-06-16-00";
 #define QTR(a) #a
 #define TOSTR(b) QTR(b)
 static std::string driverVersion = TOSTR(NEO_OCL_DRIVER_VERSION);
@@ -145,7 +146,7 @@ void ClDevice::initializeCaps() {
         if (supportsVme) {
             deviceExtensions += "cl_intel_spirv_device_side_avc_motion_estimation ";
         }
-        if (hwInfo.capabilityTable.supportsImages) {
+        if (hwInfo.capabilityTable.supportsMediaBlock) {
             deviceExtensions += "cl_intel_spirv_media_block_io ";
         }
         deviceExtensions += "cl_intel_spirv_subgroups ";
@@ -192,7 +193,7 @@ void ClDevice::initializeCaps() {
         deviceExtensions += "cl_khr_3d_image_writes ";
     }
 
-    if (hwHelper.isMediaBlockIOSupported(hwInfo)) {
+    if (hwInfo.capabilityTable.supportsMediaBlock) {
         deviceExtensions += "cl_intel_media_block_io ";
     }
 
@@ -201,8 +202,22 @@ void ClDevice::initializeCaps() {
         deviceExtensions += sharingFactory.getExtensions(driverInfo.get());
     }
 
-    deviceExtensions += hwHelper.getExtensions();
+    PhysicalDevicePciBusInfo pciBusInfo(PhysicalDevicePciBusInfo::InvalidValue, PhysicalDevicePciBusInfo::InvalidValue, PhysicalDevicePciBusInfo::InvalidValue, PhysicalDevicePciBusInfo::InvalidValue);
 
+    if (driverInfo) {
+        pciBusInfo = driverInfo->getPciBusInfo();
+    }
+
+    deviceInfo.pciBusInfo.pci_domain = pciBusInfo.pciDomain;
+    deviceInfo.pciBusInfo.pci_bus = pciBusInfo.pciBus;
+    deviceInfo.pciBusInfo.pci_device = pciBusInfo.pciDevice;
+    deviceInfo.pciBusInfo.pci_function = pciBusInfo.pciFunction;
+
+    if (isPciBusInfoValid()) {
+        deviceExtensions += "cl_khr_pci_bus_info ";
+    }
+
+    deviceExtensions += hwHelper.getExtensions();
     deviceInfo.deviceExtensions = deviceExtensions.c_str();
 
     std::vector<std::string> exposedBuiltinKernelsVector;
@@ -230,7 +245,7 @@ void ClDevice::initializeCaps() {
     deviceInfo.deviceAvailable = CL_TRUE;
     deviceInfo.compilerAvailable = CL_TRUE;
     deviceInfo.parentDevice = nullptr;
-    deviceInfo.partitionMaxSubDevices = HwHelper::getSubDevicesCount(&hwInfo);
+    deviceInfo.partitionMaxSubDevices = device.getNumAvailableDevices();
     if (deviceInfo.partitionMaxSubDevices > 1) {
         deviceInfo.partitionProperties[0] = CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN;
         deviceInfo.partitionProperties[1] = 0;
@@ -255,7 +270,7 @@ void ClDevice::initializeCaps() {
     deviceInfo.nativeVectorWidthFloat = 1;
     deviceInfo.nativeVectorWidthDouble = 1;
     deviceInfo.nativeVectorWidthHalf = 8;
-    deviceInfo.maxReadWriteImageArgs = ocl21FeaturesEnabled ? 128 : 0;
+    deviceInfo.maxReadWriteImageArgs = hwInfo.capabilityTable.supportsImages ? 128 : 0;
     deviceInfo.executionCapabilities = CL_EXEC_KERNEL;
 
     //copy system info to prevent misaligned reads
@@ -287,6 +302,7 @@ void ClDevice::initializeCaps() {
 
     deviceInfo.preferredInteropUserSync = 1u;
 
+    device.reduceMaxMemAllocSize();
     // OpenCL 1.2 requires 128MB minimum
 
     deviceInfo.maxConstantBufferSize = sharedDeviceInfo.maxMemAllocSize;
@@ -344,7 +360,7 @@ void ClDevice::initializeCaps() {
                                               CL_DEVICE_ATOMIC_SCOPE_DEVICE | CL_DEVICE_ATOMIC_SCOPE_WORK_ITEM;
     }
 
-    deviceInfo.nonUniformWorkGroupSupport = ocl21FeaturesEnabled;
+    deviceInfo.nonUniformWorkGroupSupport = true;
     deviceInfo.workGroupCollectiveFunctionsSupport = ocl21FeaturesEnabled;
     deviceInfo.genericAddressSpaceSupport = ocl21FeaturesEnabled;
 
@@ -360,12 +376,31 @@ void ClDevice::initializeCaps() {
         }
     }
 
+    const std::vector<std::vector<EngineControl>> &queueFamilies = this->getDevice().getEngineGroups();
+    for (size_t queueFamilyIndex = 0u; queueFamilyIndex < queueFamilies.size(); queueFamilyIndex++) {
+        const std::vector<EngineControl> &enginesInFamily = queueFamilies.at(queueFamilyIndex);
+        if (enginesInFamily.size() > 0) {
+            const auto engineGroupType = static_cast<EngineGroupType>(queueFamilyIndex);
+            cl_queue_family_properties_intel properties = {};
+            properties.capabilities = getQueueFamilyCapabilities(engineGroupType);
+            properties.count = static_cast<cl_uint>(enginesInFamily.size());
+            properties.properties = deviceInfo.queueOnHostProperties;
+            getQueueFamilyName(properties.name, CL_QUEUE_FAMILY_MAX_NAME_SIZE_INTEL, engineGroupType);
+            deviceInfo.queueFamilyProperties.push_back(properties);
+        }
+    }
+    auto &clHwHelper = NEO::ClHwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    const std::vector<uint32_t> &supportedThreadArbitrationPolicies = clHwHelper.getSupportedThreadArbitrationPolicies();
+    deviceInfo.supportedThreadArbitrationPolicies.resize(supportedThreadArbitrationPolicies.size());
+    for (size_t policy = 0u; policy < supportedThreadArbitrationPolicies.size(); policy++) {
+        deviceInfo.supportedThreadArbitrationPolicies[policy] = supportedThreadArbitrationPolicies[policy];
+    }
     deviceInfo.preemptionSupported = false;
     deviceInfo.maxGlobalVariableSize = ocl21FeaturesEnabled ? 64 * KB : 0;
     deviceInfo.globalVariablePreferredTotalSize = ocl21FeaturesEnabled ? static_cast<size_t>(sharedDeviceInfo.maxMemAllocSize) : 0;
 
     deviceInfo.planarYuvMaxWidth = 16384;
-    deviceInfo.planarYuvMaxHeight = 16352;
+    deviceInfo.planarYuvMaxHeight = hwHelper.getPlanarYuvMaxHeight();
 
     deviceInfo.vmeAvcSupportsTextureSampler = hwInfo.capabilityTable.ftrSupportsVmeAvcTextureSampler;
     if (hwInfo.capabilityTable.supportsVme) {

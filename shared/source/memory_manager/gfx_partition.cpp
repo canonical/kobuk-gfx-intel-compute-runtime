@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,7 @@
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/heap_assigner.h"
 #include "shared/source/memory_manager/memory_manager.h"
+#include "shared/source/utilities/cpu_info.h"
 
 namespace NEO {
 
@@ -18,12 +19,13 @@ const std::array<HeapIndex, 4> GfxPartition::heap32Names{{HeapIndex::HEAP_INTERN
                                                           HeapIndex::HEAP_EXTERNAL_DEVICE_MEMORY,
                                                           HeapIndex::HEAP_EXTERNAL}};
 
-const std::array<HeapIndex, 7> GfxPartition::heapNonSvmNames{{HeapIndex::HEAP_INTERNAL_DEVICE_MEMORY,
+const std::array<HeapIndex, 8> GfxPartition::heapNonSvmNames{{HeapIndex::HEAP_INTERNAL_DEVICE_MEMORY,
                                                               HeapIndex::HEAP_INTERNAL,
                                                               HeapIndex::HEAP_EXTERNAL_DEVICE_MEMORY,
                                                               HeapIndex::HEAP_EXTERNAL,
                                                               HeapIndex::HEAP_STANDARD,
                                                               HeapIndex::HEAP_STANDARD64KB,
+                                                              HeapIndex::HEAP_STANDARD2MB,
                                                               HeapIndex::HEAP_EXTENDED}};
 
 GfxPartition::GfxPartition(OSMemory::ReservedCpuAddressRange &sharedReservedCpuAddressRange) : reservedCpuAddressRange(sharedReservedCpuAddressRange), osMemory(OSMemory::create()) {}
@@ -33,16 +35,21 @@ GfxPartition::~GfxPartition() {
     reservedCpuAddressRange = {0};
 }
 
-void GfxPartition::Heap::init(uint64_t base, uint64_t size) {
+void GfxPartition::Heap::init(uint64_t base, uint64_t size, size_t allocationAlignment) {
     this->base = base;
     this->size = size;
 
-    // Exclude very first and very last 64K from GPU address range allocation
-    if (size > 2 * GfxPartition::heapGranularity) {
-        size -= 2 * GfxPartition::heapGranularity;
+    auto heapGranularity = GfxPartition::heapGranularity;
+    if (allocationAlignment > heapGranularity) {
+        heapGranularity = GfxPartition::heapGranularity2MB;
     }
 
-    alloc = std::make_unique<HeapAllocator>(base + GfxPartition::heapGranularity, size);
+    // Exclude very first and very last 64K from GPU address range allocation
+    if (size > 2 * heapGranularity) {
+        size -= 2 * heapGranularity;
+    }
+
+    alloc = std::make_unique<HeapAllocator>(base + heapGranularity, size, allocationAlignment);
 }
 
 void GfxPartition::Heap::initExternalWithFrontWindow(uint64_t base, uint64_t size) {
@@ -51,7 +58,7 @@ void GfxPartition::Heap::initExternalWithFrontWindow(uint64_t base, uint64_t siz
 
     size -= GfxPartition::heapGranularity;
 
-    alloc = std::make_unique<HeapAllocator>(base, size, 0u);
+    alloc = std::make_unique<HeapAllocator>(base, size, MemoryConstants::pageSize, 0u);
 }
 
 void GfxPartition::Heap::initWithFrontWindow(uint64_t base, uint64_t size, uint64_t frontWindowSize) {
@@ -62,14 +69,14 @@ void GfxPartition::Heap::initWithFrontWindow(uint64_t base, uint64_t size, uint6
     size -= GfxPartition::heapGranularity;
     size -= frontWindowSize;
 
-    alloc = std::make_unique<HeapAllocator>(base + frontWindowSize, size);
+    alloc = std::make_unique<HeapAllocator>(base + frontWindowSize, size, MemoryConstants::pageSize);
 }
 
 void GfxPartition::Heap::initFrontWindow(uint64_t base, uint64_t size) {
     this->base = base;
     this->size = size;
 
-    alloc = std::make_unique<HeapAllocator>(base, size, 0u);
+    alloc = std::make_unique<HeapAllocator>(base, size, MemoryConstants::pageSize, 0u);
 }
 
 void GfxPartition::freeGpuAddressRange(uint64_t ptr, size_t size) {
@@ -82,7 +89,7 @@ void GfxPartition::freeGpuAddressRange(uint64_t ptr, size_t size) {
     }
 }
 
-bool GfxPartition::init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToReserve, uint32_t rootDeviceIndex, size_t numRootDevices, bool useFrontWindowPool) {
+bool GfxPartition::init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToReserve, uint32_t rootDeviceIndex, size_t numRootDevices, bool useExternalFrontWindowPool) {
 
     /*
      * I. 64-bit builds:
@@ -138,7 +145,8 @@ bool GfxPartition::init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToRe
         gfxBase = maxNBitValue(32) + 1;
         heapInit(HeapIndex::HEAP_SVM, 0ull, gfxBase);
     } else {
-        if (gpuAddressSpace == maxNBitValue(48)) {
+        auto cpuVirtualAddressSize = CpuInfo::getInstance().getVirtualAddressSize();
+        if (cpuVirtualAddressSize == 48 && gpuAddressSpace == maxNBitValue(48)) {
             gfxBase = maxNBitValue(48 - 1) + 1;
             heapInit(HeapIndex::HEAP_SVM, 0ull, gfxBase);
         } else if (gpuAddressSpace == maxNBitValue(47)) {
@@ -161,14 +169,14 @@ bool GfxPartition::init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToRe
             gfxBase = 0ull;
             heapInit(HeapIndex::HEAP_SVM, 0ull, 0ull);
         } else {
-            if (!initAdditionalRange(gpuAddressSpace, gfxBase, gfxTop, rootDeviceIndex, numRootDevices)) {
+            if (!initAdditionalRange(cpuVirtualAddressSize, gpuAddressSpace, gfxBase, gfxTop, rootDeviceIndex, numRootDevices)) {
                 return false;
             }
         }
     }
 
     for (auto heap : GfxPartition::heap32Names) {
-        if (useFrontWindowPool && HeapAssigner::heapTypeWithFrontWindowPool(heap)) {
+        if (useExternalFrontWindowPool && HeapAssigner::heapTypeExternalWithFrontWindowPool(heap)) {
             heapInitExternalWithFrontWindow(heap, gfxBase, gfxHeap32Size);
             size_t externalFrontWindowSize = GfxPartition::externalFrontWindowPoolSize;
             heapInitExternalWithFrontWindow(HeapAssigner::mapExternalWindowIndex(heap), heapAllocate(heap, externalFrontWindowSize),
@@ -182,14 +190,29 @@ bool GfxPartition::init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToRe
         gfxBase += gfxHeap32Size;
     }
 
-    uint64_t gfxStandardSize = alignDown((gfxTop - gfxBase) >> 1, heapGranularity);
+    constexpr uint32_t numStandardHeaps = static_cast<uint32_t>(HeapIndex::HEAP_STANDARD2MB) - static_cast<uint32_t>(HeapIndex::HEAP_STANDARD) + 1;
+    constexpr uint64_t maxStandardHeapGranularity = std::max(GfxPartition::heapGranularity, GfxPartition::heapGranularity2MB);
 
+    gfxBase = alignUp(gfxBase, maxStandardHeapGranularity);
+    uint64_t maxStandardHeapSize = alignDown((gfxTop - gfxBase) / numStandardHeaps, maxStandardHeapGranularity);
+
+    auto gfxStandardSize = maxStandardHeapSize;
     heapInit(HeapIndex::HEAP_STANDARD, gfxBase, gfxStandardSize);
-    gfxBase += gfxStandardSize;
+    DEBUG_BREAK_IF(!isAligned<GfxPartition::heapGranularity>(getHeapBase(HeapIndex::HEAP_STANDARD)));
+
+    gfxBase += maxStandardHeapSize;
 
     // Split HEAP_STANDARD64K among root devices
-    auto gfxStandard64KBSize = alignDown(gfxStandardSize / numRootDevices, GfxPartition::heapGranularity);
-    heapInit(HeapIndex::HEAP_STANDARD64KB, gfxBase + rootDeviceIndex * gfxStandard64KBSize, gfxStandard64KBSize);
+    auto gfxStandard64KBSize = alignDown(maxStandardHeapSize / numRootDevices, GfxPartition::heapGranularity);
+    heapInitWithAllocationAlignment(HeapIndex::HEAP_STANDARD64KB, gfxBase + rootDeviceIndex * gfxStandard64KBSize, gfxStandard64KBSize, MemoryConstants::pageSize64k);
+    DEBUG_BREAK_IF(!isAligned<GfxPartition::heapGranularity>(getHeapBase(HeapIndex::HEAP_STANDARD64KB)));
+
+    gfxBase += maxStandardHeapSize;
+
+    // Split HEAP_STANDARD2MB among root devices
+    auto gfxStandard2MBSize = alignDown(maxStandardHeapSize / numRootDevices, GfxPartition::heapGranularity2MB);
+    heapInitWithAllocationAlignment(HeapIndex::HEAP_STANDARD2MB, gfxBase + rootDeviceIndex * gfxStandard2MBSize, gfxStandard2MBSize, 2 * MemoryConstants::megaByte);
+    DEBUG_BREAK_IF(!isAligned<GfxPartition::heapGranularity2MB>(getHeapBase(HeapIndex::HEAP_STANDARD2MB)));
 
     return true;
 }

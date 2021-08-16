@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,6 +11,7 @@
 #include <bitset>
 
 namespace NEO {
+
 using BcsInfoMask = std::bitset<1>;
 
 struct FeatureTable : FeatureTableBase {

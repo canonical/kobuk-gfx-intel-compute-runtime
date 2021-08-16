@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -26,6 +26,7 @@
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/context/context.h"
+#include "opencl/source/platform/extensions.h"
 #include "opencl/source/platform/platform.h"
 #include "opencl/source/program/block_kernel_manager.h"
 #include "opencl/source/program/kernel_info.h"
@@ -38,18 +39,14 @@ namespace NEO {
 
 Program::Program(Context *context, bool isBuiltIn, const ClDeviceVector &clDevicesIn) : executionEnvironment(*clDevicesIn[0]->getExecutionEnvironment()),
                                                                                         context(context),
-                                                                                        pDevice(&clDevicesIn[0]->getDevice()),
                                                                                         clDevices(clDevicesIn),
                                                                                         isBuiltIn(isBuiltIn) {
     if (this->context && !this->isBuiltIn) {
         this->context->incRefInternal();
     }
     blockKernelManager = new BlockKernelManager();
-    ClDevice *pClDevice = castToObject<ClDevice>(pDevice->getSpecializedDevice<ClDevice>());
 
-    numDevices = static_cast<uint32_t>(clDevicesIn.size());
-
-    uint32_t maxRootDeviceIndex = 0;
+    maxRootDeviceIndex = 0;
 
     for (const auto &device : clDevicesIn) {
         if (device->getRootDeviceIndex() > maxRootDeviceIndex) {
@@ -67,19 +64,12 @@ Program::Program(Context *context, bool isBuiltIn, const ClDeviceVector &clDevic
     }
 
     buildInfos.resize(maxRootDeviceIndex + 1);
-    kernelDebugEnabled = pClDevice->isDebuggerActive();
+    kernelDebugEnabled = clDevices[0]->isDebuggerActive();
 }
 void Program::initInternalOptions(std::string &internalOptions) const {
     auto pClDevice = clDevices[0];
     auto force32BitAddressess = pClDevice->getSharedDeviceInfo().force32BitAddressess;
-    auto enabledClVersion = pClDevice->getEnabledClVersion();
-    if (enabledClVersion == 30) {
-        internalOptions = "-ocl-version=300 ";
-    } else if (enabledClVersion == 21) {
-        internalOptions = "-ocl-version=210 ";
-    } else {
-        internalOptions = "-ocl-version=120 ";
-    }
+    internalOptions = getOclVersionCompilerInternalOption(pClDevice->getEnabledClVersion());
 
     if (force32BitAddressess && !isBuiltIn) {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::arch32bit);
@@ -91,8 +81,7 @@ void Program::initInternalOptions(std::string &internalOptions) const {
     }
 
     if (ApiSpecificConfig::getBindlessConfiguration()) {
-        CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::bindlessBuffers);
-        CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::bindlessImages);
+        CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::bindlessMode);
     }
 
     auto enableStatelessToStatefullWithOffset = pClDevice->getHardwareCapabilities().isStatelesToStatefullWithOffsetSupported;
@@ -104,16 +93,23 @@ void Program::initInternalOptions(std::string &internalOptions) const {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::hasBufferOffsetArg);
     }
 
-    auto &hwHelper = HwHelper::get(pClDevice->getHardwareInfo().platform.eRenderCoreFamily);
-    if (hwHelper.isForceEmuInt32DivRemSPWARequired(pClDevice->getHardwareInfo())) {
+    auto &hwInfo = pClDevice->getHardwareInfo();
+    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    if (hwHelper.isForceEmuInt32DivRemSPWARequired(hwInfo)) {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::forceEmuInt32DivRemSP);
+    }
+
+    if (hwInfo.capabilityTable.supportsImages) {
+        CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::enableImageSupport);
     }
 
     CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::preserveVec3Type);
 }
 
 Program::~Program() {
-    cleanCurrentKernelInfo();
+    for (auto i = 0u; i < buildInfos.size(); i++) {
+        cleanCurrentKernelInfo(i);
+    }
 
     freeBlockResources();
 
@@ -229,15 +225,16 @@ cl_int Program::setProgramSpecializationConstant(cl_uint specId, size_t specSize
 
     static std::mutex mutex;
     std::lock_guard<std::mutex> lock(mutex);
+    auto &device = clDevices[0]->getDevice();
 
     if (!areSpecializationConstantsInitialized) {
-        auto pCompilerInterface = this->pDevice->getCompilerInterface();
+        auto pCompilerInterface = device.getCompilerInterface();
         if (nullptr == pCompilerInterface) {
             return CL_OUT_OF_HOST_MEMORY;
         }
 
         SpecConstantInfo specConstInfo;
-        auto retVal = pCompilerInterface->getSpecConstantsInfo(this->getDevice(), ArrayRef<const char>(irBinary.get(), irBinarySize), specConstInfo);
+        auto retVal = pCompilerInterface->getSpecConstantsInfo(device, ArrayRef<const char>(irBinary.get(), irBinarySize), specConstInfo);
 
         if (retVal != TranslationOutput::ErrorCode::Success) {
             return CL_INVALID_VALUE;
@@ -304,26 +301,26 @@ const char *Program::getBuildLog(uint32_t rootDeviceIndex) const {
     return currentLog.c_str();
 }
 
-void Program::separateBlockKernels() {
-    if ((0 == parentKernelInfoArray.size()) && (0 == subgroupKernelInfoArray.size())) {
+void Program::separateBlockKernels(uint32_t rootDeviceIndex) {
+    if ((0 == buildInfos[rootDeviceIndex].parentKernelInfoArray.size()) && (0 == buildInfos[rootDeviceIndex].subgroupKernelInfoArray.size())) {
         return;
     }
 
-    auto allKernelInfos(kernelInfoArray);
-    kernelInfoArray.clear();
+    auto allKernelInfos(buildInfos[rootDeviceIndex].kernelInfoArray);
+    buildInfos[rootDeviceIndex].kernelInfoArray.clear();
     for (auto &i : allKernelInfos) {
         auto end = i->kernelDescriptor.kernelMetadata.kernelName.rfind("_dispatch_");
         if (end != std::string::npos) {
             bool baseKernelFound = false;
             std::string baseKernelName(i->kernelDescriptor.kernelMetadata.kernelName, 0, end);
-            for (auto &j : parentKernelInfoArray) {
+            for (auto &j : buildInfos[rootDeviceIndex].parentKernelInfoArray) {
                 if (j->kernelDescriptor.kernelMetadata.kernelName.compare(baseKernelName) == 0) {
                     baseKernelFound = true;
                     break;
                 }
             }
             if (!baseKernelFound) {
-                for (auto &j : subgroupKernelInfoArray) {
+                for (auto &j : buildInfos[rootDeviceIndex].subgroupKernelInfoArray) {
                     if (j->kernelDescriptor.kernelMetadata.kernelName.compare(baseKernelName) == 0) {
                         baseKernelFound = true;
                         break;
@@ -334,31 +331,30 @@ void Program::separateBlockKernels() {
                 //Parent or subgroup kernel found -> child kernel
                 blockKernelManager->addBlockKernelInfo(i);
             } else {
-                kernelInfoArray.push_back(i);
+                buildInfos[rootDeviceIndex].kernelInfoArray.push_back(i);
             }
         } else {
             //Regular kernel found
-            kernelInfoArray.push_back(i);
+            buildInfos[rootDeviceIndex].kernelInfoArray.push_back(i);
         }
     }
     allKernelInfos.clear();
 }
 
-void Program::allocateBlockPrivateSurfaces(uint32_t rootDeviceIndex) {
+void Program::allocateBlockPrivateSurfaces(const ClDevice &clDevice) {
+    auto rootDeviceIndex = clDevice.getRootDeviceIndex();
     size_t blockCount = blockKernelManager->getCount();
 
     for (uint32_t i = 0; i < blockCount; i++) {
         const KernelInfo *info = blockKernelManager->getBlockKernelInfo(i);
 
-        if (info->patchInfo.pAllocateStatelessPrivateSurface) {
-            auto perHwThreadPrivateMemorySize = PatchTokenBinary::getPerHwThreadPrivateSurfaceSize(info->patchInfo.pAllocateStatelessPrivateSurface, info->getMaxSimdSize());
+        auto perHwThreadPrivateMemorySize = info->kernelDescriptor.kernelAttributes.perHwThreadPrivateMemorySize;
+        if (perHwThreadPrivateMemorySize > 0 && blockKernelManager->getPrivateSurface(i) == nullptr) {
+            auto privateSize = static_cast<size_t>(KernelHelper::getPrivateSurfaceSize(perHwThreadPrivateMemorySize, clDevice.getSharedDeviceInfo().computeUnitsUsedForScratch));
 
-            if (perHwThreadPrivateMemorySize > 0 && blockKernelManager->getPrivateSurface(i) == nullptr) {
-                auto privateSize = static_cast<size_t>(KernelHelper::getPrivateSurfaceSize(perHwThreadPrivateMemorySize, getDevice().getDeviceInfo().computeUnitsUsedForScratch));
-
-                auto *privateSurface = this->executionEnvironment.memoryManager->allocateGraphicsMemoryWithProperties({rootDeviceIndex, privateSize, GraphicsAllocation::AllocationType::PRIVATE_SURFACE, getDevice().getDeviceBitfield()});
-                blockKernelManager->pushPrivateSurface(privateSurface, i);
-            }
+            auto *privateSurface = this->executionEnvironment.memoryManager->allocateGraphicsMemoryWithProperties(
+                {rootDeviceIndex, privateSize, GraphicsAllocation::AllocationType::PRIVATE_SURFACE, clDevice.getDeviceBitfield()});
+            blockKernelManager->pushPrivateSurface(privateSurface, i);
         }
     }
 }
@@ -382,8 +378,9 @@ void Program::freeBlockResources() {
     }
 }
 
-void Program::cleanCurrentKernelInfo() {
-    for (auto &kernelInfo : kernelInfoArray) {
+void Program::cleanCurrentKernelInfo(uint32_t rootDeviceIndex) {
+    auto &buildInfo = buildInfos[rootDeviceIndex];
+    for (auto &kernelInfo : buildInfo.kernelInfoArray) {
         if (kernelInfo->kernelAllocation) {
             //register cache flush in all csrs where kernel allocation was used
             for (auto &engine : this->executionEnvironment.memoryManager->getRegisteredEngines()) {
@@ -397,7 +394,7 @@ void Program::cleanCurrentKernelInfo() {
         }
         delete kernelInfo;
     }
-    kernelInfoArray.clear();
+    buildInfo.kernelInfoArray.clear();
 }
 
 void Program::updateNonUniformFlag() {
@@ -501,9 +498,17 @@ void Program::setBuildStatus(cl_build_status status) {
 void Program::setBuildStatusSuccess(const ClDeviceVector &deviceVector, cl_program_binary_type binaryType) {
     for (const auto &device : deviceVector) {
         deviceBuildInfos[device].buildStatus = CL_BUILD_SUCCESS;
+        if (deviceBuildInfos[device].programBinaryType != binaryType) {
+            std::unique_lock<std::mutex> lock(lockMutex);
+            clDevicesInProgram.push_back(device);
+        }
         deviceBuildInfos[device].programBinaryType = binaryType;
         for (const auto &subDevice : deviceBuildInfos[device].associatedSubDevices) {
             deviceBuildInfos[subDevice].buildStatus = CL_BUILD_SUCCESS;
+            if (deviceBuildInfos[subDevice].programBinaryType != binaryType) {
+                std::unique_lock<std::mutex> lock(lockMutex);
+                clDevicesInProgram.push_back(subDevice);
+            }
             deviceBuildInfos[subDevice].programBinaryType = binaryType;
         }
     }
@@ -546,4 +551,21 @@ cl_int Program::processInputDevices(ClDeviceVector *&deviceVectorPtr, cl_uint nu
     }
     return CL_SUCCESS;
 }
+
+void Program::prependFilePathToOptions(const std::string &filename) {
+    ConstStringRef cmcOption = "-cmc";
+    if (!filename.empty() && options.compare(0, cmcOption.size(), cmcOption.data())) {
+        // Add "-s" flag first so it will be ignored by clang in case the options already have this flag set.
+        options = std::string("-s ") + filename + " " + options;
+    }
+}
+
+const ClDeviceVector &Program::getDevicesInProgram() const {
+    if (clDevicesInProgram.empty()) {
+        return clDevices;
+    } else {
+        return clDevicesInProgram;
+    }
+}
+
 } // namespace NEO

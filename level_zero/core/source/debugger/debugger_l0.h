@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,8 @@
 #include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/memory_manager/memory_manager.h"
 
+#include <level_zero/ze_api.h>
+
 #include <memory>
 #include <unordered_map>
 
@@ -17,6 +19,7 @@ namespace NEO {
 class Device;
 class GraphicsAllocation;
 class LinearStream;
+class OSInterface;
 } // namespace NEO
 
 namespace L0 {
@@ -46,6 +49,18 @@ struct DebugAreaHeader {
     uint16_t scratchEnd;
     uint64_t isShared : 1;
 };
+struct alignas(4) DebuggerVersion {
+    uint8_t major;
+    uint8_t minor;
+    uint16_t patch;
+};
+struct alignas(8) StateSaveAreaHeader {
+    char magic[8] = "tssarea";
+    uint64_t reserved1;
+    struct DebuggerVersion version;
+    uint8_t size;
+    uint8_t reserved2[3];
+};
 
 #pragma pack()
 
@@ -70,9 +85,14 @@ class DebuggerL0 : public NEO::Debugger, NEO::NonCopyableOrMovableClass {
 
     void captureStateBaseAddress(NEO::CommandContainer &container, SbaAddresses sba) override;
     void printTrackedAddresses(uint32_t contextId);
+    MOCKABLE_VIRTUAL void registerElf(NEO::DebugData *debugData, NEO::GraphicsAllocation *isaAllocation);
 
-    virtual size_t getSbaTrackingCommandsSize(size_t trackedAddressCount) const = 0;
-    virtual void programSbaTrackingCommands(NEO::LinearStream &cmdStream, const SbaAddresses &sba) const = 0;
+    virtual size_t getSbaTrackingCommandsSize(size_t trackedAddressCount) = 0;
+    virtual void programSbaTrackingCommands(NEO::LinearStream &cmdStream, const SbaAddresses &sba) = 0;
+
+    static void getAttentionBitmaskForThread(uint32_t slice, uint32_t subslice, uint32_t eu, uint32_t thread, const NEO::HardwareInfo &hwInfo, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize);
+    static void getAttentionBitmaskForSingleThreads(std::vector<ze_device_thread_t> &threads, const NEO::HardwareInfo &hwInfo, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize);
+    static std::vector<ze_device_thread_t> getThreadsFromAttentionBitmask(const NEO::HardwareInfo &hwInfo, const uint8_t *bitmask, const size_t bitmaskSize);
 
   protected:
     static bool isAnyTrackedAddressChanged(SbaAddresses sba) {
@@ -80,8 +100,9 @@ class DebuggerL0 : public NEO::Debugger, NEO::NonCopyableOrMovableClass {
                sba.SurfaceStateBaseAddress != 0 ||
                sba.BindlessSurfaceStateBaseAddress != 0;
     }
+    static bool initDebuggingInOs(NEO::OSInterface *osInterface);
 
-    MOCKABLE_VIRTUAL void registerResourceClasses();
+    void initialize();
 
     NEO::Device *device = nullptr;
     NEO::GraphicsAllocation *sbaAllocation = nullptr;
@@ -98,8 +119,8 @@ class DebuggerL0Hw : public DebuggerL0 {
   public:
     static DebuggerL0 *allocate(NEO::Device *device);
 
-    size_t getSbaTrackingCommandsSize(size_t trackedAddressCount) const override;
-    void programSbaTrackingCommands(NEO::LinearStream &cmdStream, const SbaAddresses &sba) const override;
+    size_t getSbaTrackingCommandsSize(size_t trackedAddressCount) override;
+    void programSbaTrackingCommands(NEO::LinearStream &cmdStream, const SbaAddresses &sba) override;
 
   protected:
     DebuggerL0Hw(NEO::Device *device) : DebuggerL0(device){};

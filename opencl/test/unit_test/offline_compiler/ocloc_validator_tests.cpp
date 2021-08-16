@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -35,7 +35,7 @@ TEST(OclocValidate, WhenInputFileIsMissingThenFail) {
     EXPECT_STREQ("Error : Input file missing : src.gen\n", oclocStdout.c_str());
 }
 
-TEST(OclocValidate, WhenInputFileIsAvailableTheLogItsSize) {
+TEST(OclocValidate, WhenInputFileIsAvailableThenLogItsSize) {
     MockOclocArgHelper::FilesMap files{{"src.gen", "01234567"}};
     MockOclocArgHelper argHelper{files};
     argHelper.getPrinterRef() = MessagePrinter(true);
@@ -92,4 +92,33 @@ TEST(OclocValidate, WhenErrorsEmitedThenRedirectsThemToStdout) {
     std::string oclocStdout = argHelper.getPrinterRef().getLog().str();
     EXPECT_EQ(static_cast<int>(NEO::DecodeError::InvalidBinary), res) << oclocStdout;
     EXPECT_NE(nullptr, strstr(oclocStdout.c_str(), "Validator detected errors :\nDeviceBinaryFormat::Zebin::.ze_info : Expected at most one kernels entry in global scope of .ze_info, got : 2")) << oclocStdout;
+}
+
+TEST(OclocValidate, givenDeviceProductTableEveryProductMatchesProperPattern) {
+    MockOclocArgHelper::FilesMap files{{"src.gen", "01234567"}};
+    MockOclocArgHelper argHelper{files};
+    ASSERT_GE(argHelper.deviceProductTable.size(), 1u);
+
+    std::vector<std::string> genPatterns;
+    for (int j = 0; j < IGFX_MAX_PRODUCT; j++) {
+        if (NEO::hardwarePrefix[j] == nullptr)
+            continue;
+        genPatterns.push_back(NEO::hardwarePrefix[j]);
+    }
+
+    ASSERT_GE(genPatterns.size(), 1u);
+
+    if (argHelper.deviceProductTable.size() == 1 && argHelper.deviceProductTable[0].deviceId == 0) {
+        auto &deviceProductTable = const_cast<std::vector<DeviceProduct> &>(argHelper.deviceProductTable);
+
+        deviceProductTable[0].product = genPatterns[0];
+        deviceProductTable[0].deviceId = 0x123;
+
+        deviceProductTable.push_back(DeviceProduct{0, ""});
+    }
+
+    for (int i = 0; argHelper.deviceProductTable[i].deviceId != 0; i++) {
+        auto res = std::find(genPatterns.begin(), genPatterns.end(), argHelper.returnProductNameForDevice(argHelper.deviceProductTable[i].deviceId));
+        EXPECT_NE(res, genPatterns.end());
+    }
 }

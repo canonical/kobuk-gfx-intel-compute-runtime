@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,8 +8,8 @@
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/helpers/blit_commands_helper.h"
-#include "shared/test/unit_test/cmd_parse/gen_cmd_parse.h"
-#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/cmd_parse/gen_cmd_parse.h"
+#include "shared/test/common/mocks/mock_graphics_allocation.h"
 
 #include "test.h"
 
@@ -23,7 +23,8 @@ HWTEST_F(EncodeMiFlushDWTest, GivenLinearStreamWhenCllaedEncodeWithNoPostSyncThe
     MockGraphicsAllocation gfxAllocation(static_cast<void *>(pCmdBuffer), sizeof(pCmdBuffer));
     LinearStream stream(&gfxAllocation);
 
-    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, 0, 0, false, false);
+    MiFlushArgs args;
+    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, 0, 0, args);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, stream.getCpuBase(), stream.getUsed());
@@ -44,7 +45,9 @@ HWTEST_F(EncodeMiFlushDWTest, GivenLinearStreamWhenCllaedEncodeWithPostSyncDataT
     uint64_t address = 0x1000;
     uint64_t data = 0x4321;
 
-    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, false, true);
+    MiFlushArgs args;
+    args.commandWithPostSync = true;
+    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, args);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, stream.getCpuBase(), stream.getUsed());
@@ -74,7 +77,9 @@ HWTEST_F(EncodeMiFlushDWTest, GivenLinearStreamWhenCllaedEncodeWithTimestampFasl
     uint64_t address = 0x1000;
     uint64_t data = 0x4321;
 
-    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, false, true);
+    MiFlushArgs args;
+    args.commandWithPostSync = true;
+    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, args);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, stream.getCpuBase(), stream.getUsed());
@@ -103,7 +108,10 @@ HWTEST_F(EncodeMiFlushDWTest, GivenLinearStreamWhenCllaedEncodeWithTimestampTrue
     uint64_t address = 0x1000;
     uint64_t data = 0x4321;
 
-    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, true, true);
+    MiFlushArgs args;
+    args.timeStampOperation = true;
+    args.commandWithPostSync = true;
+    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, args);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, stream.getCpuBase(), stream.getUsed());

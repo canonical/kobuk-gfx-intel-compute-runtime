@@ -1,13 +1,14 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_container/cmdcontainer.h"
-#include "shared/test/unit_test/fixtures/device_fixture.h"
-#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/fixtures/device_fixture.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_graphics_allocation.h"
 
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "test.h"
@@ -140,10 +141,27 @@ TEST_F(CommandContainerTest, givenCommandContainerWhenInitializeThenEverythingIs
               pDevice->getMemoryManager()->getInternalHeapBaseAddress(0, !hwHelper.useSystemMemoryPlacementForISA(pDevice->getHardwareInfo())));
 }
 
-TEST_F(CommandContainerTest, givenCommandContainerWhenInitializeWithoutDeviceThenReturnedFalse) {
+TEST_F(CommandContainerTest, givenEnabledLocalMemoryAndIsaInSystemMemoryWhenCmdContainerIsInitializedThenInstructionBaseAddressIsSetToInternalHeap) {
+    DebugManagerStateRestore dbgRestore;
+    DebugManager.flags.ForceSystemMemoryPlacement.set(1 << (static_cast<uint32_t>(GraphicsAllocation::AllocationType::KERNEL_ISA) - 1));
+
+    auto executionEnvironment = new NEO::ExecutionEnvironment();
+    const size_t numDevices = 1;
+    executionEnvironment->prepareRootDeviceEnvironments(numDevices);
+    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
+
+    auto hwInfo = executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo();
+    hwInfo->featureTable.ftrLocalMemory = true;
+
+    auto device = std::unique_ptr<MockDevice>(Device::create<MockDevice>(executionEnvironment, 0u));
+
+    auto instructionHeapBaseAddress = device->getMemoryManager()->getInternalHeapBaseAddress(0, false);
+
     CommandContainer cmdContainer;
-    auto status = cmdContainer.initialize(nullptr);
-    EXPECT_EQ(ErrorCode::INVALID_DEVICE, status);
+    auto status = cmdContainer.initialize(device.get());
+    EXPECT_EQ(ErrorCode::SUCCESS, status);
+
+    EXPECT_EQ(instructionHeapBaseAddress, cmdContainer.getInstructionHeapBaseAddress());
 }
 
 TEST_F(CommandContainerTest, givenCommandContainerDuringInitWhenAllocateGfxMemoryFailsThenErrorIsReturned) {
@@ -373,6 +391,38 @@ TEST_F(CommandContainerTest, givenNotEnoughSpaceWhenGetHeapWithRequiredSizeAndAl
     cmdContainer->getDeallocationContainer().clear();
 }
 
+TEST_F(CommandContainerTest, givenNotEnoughSpaceWhenCreatedAlocationHaveDifferentBaseThenHeapIsDirty) {
+    std::unique_ptr<CommandContainer> cmdContainer(new CommandContainer);
+    cmdContainer->initialize(pDevice);
+    cmdContainer->setDirtyStateForAllHeaps(false);
+    HeapType type = HeapType::INDIRECT_OBJECT;
+
+    auto heapAllocation = cmdContainer->getIndirectHeapAllocation(type);
+    auto heap = cmdContainer->getIndirectHeap(type);
+
+    const size_t sizeRequested = 32;
+    const size_t alignment = 32;
+    size_t availableSize = heap->getAvailableSpace();
+
+    heap->getSpace(availableSize - sizeRequested / 2);
+
+    EXPECT_LT(heap->getAvailableSpace(), sizeRequested + alignment);
+
+    auto heapRequested = cmdContainer->getHeapWithRequiredSizeAndAlignment(type, sizeRequested, alignment);
+    auto newAllocation = heapRequested->getGraphicsAllocation();
+
+    EXPECT_EQ(heap, heapRequested);
+    EXPECT_NE(heapAllocation, newAllocation);
+
+    EXPECT_TRUE((reinterpret_cast<size_t>(heapRequested->getSpace(0)) & (alignment - 1)) == 0);
+    EXPECT_FALSE(cmdContainer->isHeapDirty(type));
+
+    for (auto deallocation : cmdContainer->getDeallocationContainer()) {
+        cmdContainer->getDevice()->getMemoryManager()->freeGraphicsMemory(deallocation);
+    }
+    cmdContainer->getDeallocationContainer().clear();
+}
+
 TEST_F(CommandContainerTest, whenAllocateNextCmdBufferIsCalledThenNewAllocationIsCreatedAndCommandStreamReplaced) {
     std::unique_ptr<CommandContainer> cmdContainer(new CommandContainer);
     cmdContainer->initialize(pDevice);
@@ -462,6 +512,8 @@ TEST_P(CommandContainerHeaps, givenCommandContainerWhenGetingMoreThanAvailableSi
 
     CommandContainer cmdContainer;
     cmdContainer.initialize(pDevice);
+    cmdContainer.setDirtyStateForAllHeaps(false);
+
     auto usedSpaceBefore = cmdContainer.getIndirectHeap(heap)->getUsed();
     auto availableSizeBefore = cmdContainer.getIndirectHeap(heap)->getAvailableSpace();
 
@@ -471,6 +523,7 @@ TEST_P(CommandContainerHeaps, givenCommandContainerWhenGetingMoreThanAvailableSi
     auto usedSpaceAfter = cmdContainer.getIndirectHeap(heap)->getUsed();
     auto availableSizeAfter = cmdContainer.getIndirectHeap(heap)->getAvailableSpace();
     EXPECT_GT(usedSpaceAfter + availableSizeAfter, usedSpaceBefore + availableSizeBefore);
+    EXPECT_EQ(!cmdContainer.isHeapDirty(heap), heap == IndirectHeap::INDIRECT_OBJECT);
 }
 
 TEST_P(CommandContainerHeaps, givenCommandContainerForDifferentRootDevicesThenHeapsAreCreatedWithCorrectRootDeviceIndex) {
@@ -554,4 +607,44 @@ TEST_F(CommandContainerTest, givenCommandContainerWhenDestructionThenNonHeapAllo
     cmdContainer->getDeallocationContainer().push_back(&alloc);
     cmdContainer.reset();
     EXPECT_EQ(alloc.getUnderlyingBufferSize(), size);
+}
+
+TEST_F(CommandContainerTest, givenContainerAllocatesNextCommandBufferWhenResetingContainerThenExpectFirstCommandBufferAllocationIsReused) {
+    auto cmdContainer = std::make_unique<CommandContainer>();
+    cmdContainer->initialize(pDevice);
+
+    auto stream = cmdContainer->getCommandStream();
+    ASSERT_NE(nullptr, stream);
+    auto firstCmdBufferAllocation = stream->getGraphicsAllocation();
+    ASSERT_NE(nullptr, firstCmdBufferAllocation);
+    auto firstCmdBufferCpuPointer = stream->getSpace(0);
+    EXPECT_EQ(firstCmdBufferCpuPointer, firstCmdBufferAllocation->getUnderlyingBuffer());
+
+    cmdContainer->allocateNextCommandBuffer();
+    auto secondCmdBufferAllocation = stream->getGraphicsAllocation();
+    ASSERT_NE(nullptr, secondCmdBufferAllocation);
+    EXPECT_NE(firstCmdBufferAllocation, secondCmdBufferAllocation);
+    auto secondCmdBufferCpuPointer = stream->getSpace(0);
+    EXPECT_EQ(secondCmdBufferCpuPointer, secondCmdBufferAllocation->getUnderlyingBuffer());
+    EXPECT_NE(firstCmdBufferCpuPointer, secondCmdBufferCpuPointer);
+
+    cmdContainer->reset();
+
+    auto aferResetCmdBufferAllocation = stream->getGraphicsAllocation();
+    ASSERT_NE(nullptr, aferResetCmdBufferAllocation);
+    auto afterResetCmdBufferCpuPointer = stream->getSpace(0);
+    EXPECT_EQ(afterResetCmdBufferCpuPointer, aferResetCmdBufferAllocation->getUnderlyingBuffer());
+
+    EXPECT_EQ(firstCmdBufferAllocation, aferResetCmdBufferAllocation);
+    EXPECT_EQ(firstCmdBufferCpuPointer, afterResetCmdBufferCpuPointer);
+
+    bool firstAllocationFound = false;
+    auto &residencyContainer = cmdContainer->getResidencyContainer();
+    for (auto *allocation : residencyContainer) {
+        if (allocation == firstCmdBufferAllocation) {
+            firstAllocationFound = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(firstAllocationFound);
 }

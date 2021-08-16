@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,17 +13,6 @@ using namespace NEO;
 struct BcsTests : public Test<ClDeviceFixture> {
     void SetUp() override {
         Test<ClDeviceFixture>::SetUp();
-
-        auto &csr = pDevice->getGpgpuCommandStreamReceiver();
-        auto engine = csr.getMemoryManager()->getRegisteredEngineForCsr(&csr);
-        auto contextId = engine->osContext->getContextId();
-
-        delete engine->osContext;
-        engine->osContext = OsContext::create(nullptr, contextId, pDevice->getDeviceBitfield(), aub_stream::EngineType::ENGINE_BCS, PreemptionMode::Disabled,
-                                              false, false, false);
-        engine->osContext->incRefInternal();
-        csr.setupContext(*engine->osContext);
-
         context = std::make_unique<MockContext>(pClDevice);
     }
 
@@ -32,11 +21,11 @@ struct BcsTests : public Test<ClDeviceFixture> {
         Test<ClDeviceFixture>::TearDown();
     }
 
-    uint32_t blitBuffer(CommandStreamReceiver *bcsCsr, const BlitProperties &blitProperties, bool blocking) {
+    uint32_t blitBuffer(CommandStreamReceiver *bcsCsr, const BlitProperties &blitProperties, bool blocking, Device &device) {
         BlitPropertiesContainer container;
         container.push_back(blitProperties);
 
-        return bcsCsr->blitBuffer(container, blocking, false);
+        return bcsCsr->blitBuffer(container, blocking, false, device);
     }
 
     TimestampPacketContainer timestampPacketContainer;

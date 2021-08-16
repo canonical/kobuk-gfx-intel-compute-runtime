@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -342,7 +342,8 @@ void computeWorkgroupSizeND(WorkSizeInfo wsInfo, size_t workGroupSize[3], const 
     //Find biggest power of two which devide each dimension size
     if (wsInfo.slmTotalSize == 0 && !wsInfo.hasBarriers) {
         if (DebugManager.flags.EnableComputeWorkSizeSquared.get() && workDim == 2 && !wsInfo.imgUsed) {
-            return computeWorkgroupSizeSquared(wsInfo.maxWorkGroupSize, workGroupSize, workItems, wsInfo.simdSize, workDim);
+            computeWorkgroupSizeSquared(wsInfo.maxWorkGroupSize, workGroupSize, workItems, wsInfo.simdSize, workDim);
+            return;
         }
 
         size_t itemsPowerOfTwoDivisors[3] = {1, 1, 1};
@@ -414,17 +415,23 @@ Vec3<size_t> computeWorkgroupSize(const DispatchInfo &dispatchInfo) {
     auto kernel = dispatchInfo.getKernel();
 
     if (kernel != nullptr) {
-        const auto &hwInfo = kernel->getDevice().getHardwareInfo();
+        auto &device = dispatchInfo.getClDevice();
+        const auto &hwInfo = device.getHardwareInfo();
         auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-        auto isSimulation = kernel->getDevice().isSimulation();
+        auto isSimulation = device.isSimulation();
         if (kernel->requiresLimitedWorkgroupSize() && hwHelper.isSpecialWorkgroupSizeRequired(hwInfo, isSimulation)) {
             setSpecialWorkgroupSize(workGroupSize);
         } else if (DebugManager.flags.EnableComputeWorkSizeND.get()) {
             WorkSizeInfo wsInfo(dispatchInfo);
+            if (wsInfo.slmTotalSize == 0 && !wsInfo.hasBarriers && !wsInfo.imgUsed && hwHelper.preferSmallWorkgroupSizeForKernel(kernel->getKernelInfo().heapInfo.KernelUnpaddedSize, hwInfo) &&
+                ((dispatchInfo.getDim() == 1) && (dispatchInfo.getGWS().x % wsInfo.simdSize * 2 == 0))) {
+                wsInfo.maxWorkGroupSize = wsInfo.simdSize * 2;
+            }
+
             size_t workItems[3] = {dispatchInfo.getGWS().x, dispatchInfo.getGWS().y, dispatchInfo.getGWS().z};
             computeWorkgroupSizeND(wsInfo, workGroupSize, workItems, dispatchInfo.getDim());
         } else {
-            auto maxWorkGroupSize = kernel->maxKernelWorkGroupSize;
+            auto maxWorkGroupSize = kernel->getMaxKernelWorkGroupSize();
             auto simd = kernel->getKernelInfo().getMaxSimdSize();
             size_t workItems[3] = {dispatchInfo.getGWS().x, dispatchInfo.getGWS().y, dispatchInfo.getGWS().z};
             if (dispatchInfo.getDim() == 1) {
@@ -473,8 +480,9 @@ void provideLocalWorkGroupSizeHints(Context *context, DispatchInfo dispatchInfo)
         preferredWorkGroupSize[1] = lws.y;
         preferredWorkGroupSize[2] = lws.z;
 
+        const auto &kernelInfo = dispatchInfo.getKernel()->getKernelInfo();
         if (dispatchInfo.getEnqueuedWorkgroupSize().x == 0) {
-            context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, NULL_LOCAL_WORKGROUP_SIZE, dispatchInfo.getKernel()->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName.c_str(),
+            context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, NULL_LOCAL_WORKGROUP_SIZE, kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(),
                                             preferredWorkGroupSize[0], preferredWorkGroupSize[1], preferredWorkGroupSize[2]);
         } else {
             size_t localWorkSizesIn[3] = {dispatchInfo.getEnqueuedWorkgroupSize().x, dispatchInfo.getEnqueuedWorkgroupSize().y, dispatchInfo.getEnqueuedWorkgroupSize().z};
@@ -482,7 +490,7 @@ void provideLocalWorkGroupSizeHints(Context *context, DispatchInfo dispatchInfo)
                 if (localWorkSizesIn[i] != preferredWorkGroupSize[i]) {
                     context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, BAD_LOCAL_WORKGROUP_SIZE,
                                                     localWorkSizesIn[0], localWorkSizesIn[1], localWorkSizesIn[2],
-                                                    dispatchInfo.getKernel()->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName.c_str(),
+                                                    kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(),
                                                     preferredWorkGroupSize[0], preferredWorkGroupSize[1], preferredWorkGroupSize[2]);
                     break;
                 }

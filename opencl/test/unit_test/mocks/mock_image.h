@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_graphics_allocation.h"
 
 #include "opencl/source/mem_obj/image.h"
 
@@ -17,6 +17,7 @@ namespace NEO {
 
 struct MockImageBase : public Image {
     using Image::imageDesc;
+    using Image::imageFormat;
     MockGraphicsAllocation *graphicsAllocation = nullptr;
 
     MockImageBase() : Image(
@@ -33,7 +34,7 @@ struct MockImageBase : public Image {
         return graphicsAllocation;
     }
 
-    void setImageArg(void *memory, bool isMediaBlockImage, uint32_t mipLevel, uint32_t rootDeviceIndex) override {}
+    void setImageArg(void *memory, bool isMediaBlockImage, uint32_t mipLevel, uint32_t rootDeviceIndex, bool useGlobalAtomics) override {}
     void setMediaImageArg(void *memory, uint32_t rootDeviceIndex) override {}
     void setMediaSurfaceRotation(void *memory) override {}
     void setSurfaceMemoryObjectControlStateIndexToMocsTable(void *memory, uint32_t value) override {}

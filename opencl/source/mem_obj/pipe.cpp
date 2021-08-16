@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -64,7 +64,8 @@ Pipe *Pipe::create(Context *context,
                                                             true, // allocateMemory
                                                             size, GraphicsAllocation::AllocationType::PIPE,
                                                             false, // isMultiStorageAllocation
-                                                            context->getDevice(0)->getHardwareInfo(), context->getDeviceBitfieldForAllocation(rootDeviceIndex));
+                                                            context->getDevice(0)->getHardwareInfo(), context->getDeviceBitfieldForAllocation(rootDeviceIndex),
+                                                            context->isSingleDeviceContext());
         GraphicsAllocation *memory = memoryManager->allocateGraphicsMemoryWithProperties(allocProperties);
         if (!memory) {
             errcodeRet = CL_OUT_OF_HOST_MEMORY;

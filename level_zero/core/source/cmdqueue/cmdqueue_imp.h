@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -35,7 +35,7 @@ struct CommandQueueImp : public CommandQueue {
             COUNT
         };
 
-        void initialize(Device *device, size_t sizeRequested);
+        ze_result_t initialize(Device *device, size_t sizeRequested);
         void destroy(NEO::MemoryManager *memoryManager);
         void switchBuffers(NEO::CommandStreamReceiver *csr);
 
@@ -43,13 +43,16 @@ struct CommandQueueImp : public CommandQueue {
             return buffers[bufferUse];
         }
 
-        void setCurrentFlushStamp(NEO::FlushStamp flushStamp) {
-            flushId[bufferUse] = flushStamp;
+        void setCurrentFlushStamp(uint32_t taskCount, NEO::FlushStamp flushStamp) {
+            flushId[bufferUse] = std::make_pair(taskCount, flushStamp);
+        }
+        std::pair<uint32_t, NEO::FlushStamp> &getCurrentFlushStamp() {
+            return flushId[bufferUse];
         }
 
       private:
         NEO::GraphicsAllocation *buffers[BUFFER_ALLOCATION::COUNT];
-        NEO::FlushStamp flushId[BUFFER_ALLOCATION::COUNT];
+        std::pair<uint32_t, NEO::FlushStamp> flushId[BUFFER_ALLOCATION::COUNT];
         BUFFER_ALLOCATION bufferUse = BUFFER_ALLOCATION::FIRST;
     };
     static constexpr size_t defaultQueueCmdBufferSize = 128 * MemoryConstants::kiloByte;
@@ -60,16 +63,13 @@ struct CommandQueueImp : public CommandQueue {
         NEO::CSRequirements::csOverfetchSize;
 
     CommandQueueImp() = delete;
-    CommandQueueImp(Device *device, NEO::CommandStreamReceiver *csr, const ze_command_queue_desc_t *desc)
-        : device(device), csr(csr), desc(*desc) {
-        std::atomic_init(&commandQueuePerThreadScratchSize, 0u);
-    }
+    CommandQueueImp(Device *device, NEO::CommandStreamReceiver *csr, const ze_command_queue_desc_t *desc);
 
     ze_result_t destroy() override;
 
     ze_result_t synchronize(uint64_t timeout) override;
 
-    void initialize(bool copyOnly);
+    ze_result_t initialize(bool copyOnly, bool isInternal);
 
     Device *getDevice() { return device; }
 
@@ -78,8 +78,9 @@ struct CommandQueueImp : public CommandQueue {
     NEO::CommandStreamReceiver *getCsr() { return csr; }
 
     void reserveLinearStreamSize(size_t size);
-    ze_command_queue_mode_t getSynchronousMode();
+    ze_command_queue_mode_t getSynchronousMode() const;
     virtual void dispatchTaskCountWrite(NEO::LinearStream &commandStream, bool flushDataCache) = 0;
+    virtual bool getPreemptionCmdProgramming() = 0;
 
   protected:
     MOCKABLE_VIRTUAL void submitBatchBuffer(size_t offset, NEO::ResidencyContainer &residencyContainer, void *endingCmdPtr);
@@ -88,18 +89,21 @@ struct CommandQueueImp : public CommandQueue {
 
     void printFunctionsPrintfOutput();
 
+    void postSyncOperations();
+
+    CommandBufferManager buffers;
+    NEO::HeapContainer heapContainer;
+    ze_command_queue_desc_t desc;
+    std::vector<Kernel *> printfFunctionContainer;
+
     Device *device = nullptr;
     NEO::CommandStreamReceiver *csr = nullptr;
-    const ze_command_queue_desc_t desc;
     NEO::LinearStream *commandStream = nullptr;
+
     std::atomic<uint32_t> taskCount{0};
-    std::vector<Kernel *> printfFunctionContainer;
-    bool gsbaInit = false;
-    bool frontEndInit = false;
+
     bool gpgpuEnabled = false;
-    CommandBufferManager buffers;
-    NEO::ResidencyContainer residencyContainer;
-    NEO::HeapContainer heapContainer;
+    bool useKmdWaitFunction = false;
 };
 
 } // namespace L0

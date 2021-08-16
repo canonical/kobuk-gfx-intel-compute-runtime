@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -18,6 +18,7 @@ class MockWddmMemoryManager : public MemoryManagerCreate<WddmMemoryManager> {
     using BaseClass = WddmMemoryManager;
 
   public:
+    using BaseClass::alignmentSelector;
     using BaseClass::allocateGraphicsMemoryForNonSvmHostPtr;
     using BaseClass::allocateGraphicsMemoryWithGpuVa;
     using BaseClass::allocateGraphicsMemoryWithProperties;
@@ -43,8 +44,8 @@ class MockWddmMemoryManager : public MemoryManagerCreate<WddmMemoryManager> {
         return BaseClass::allocateGraphicsMemoryInDevicePool(allocationData, status);
     }
 
-    size_t hugeGfxMemoryChunkSize = BaseClass::getHugeGfxMemoryChunkSize();
-    size_t getHugeGfxMemoryChunkSize() const override { return hugeGfxMemoryChunkSize; }
+    size_t hugeGfxMemoryChunkSize = BaseClass::getHugeGfxMemoryChunkSize(preferredAllocationMethod);
+    size_t getHugeGfxMemoryChunkSize(GfxMemoryAllocationMethod allocationMethod) const override { return hugeGfxMemoryChunkSize; }
 
     MockWddmMemoryManager(ExecutionEnvironment &executionEnvironment) : MemoryManagerCreate(false, false, executionEnvironment) {
         hostPtrManager.reset(new MockHostPtrManager);
@@ -72,8 +73,14 @@ class MockWddmMemoryManager : public MemoryManagerCreate<WddmMemoryManager> {
         BaseClass::freeGraphicsMemoryImpl(gfxAllocation);
     }
 
+    GraphicsAllocation *allocateHugeGraphicsMemory(const AllocationData &allocationData, bool sharedVirtualAddress) override {
+        allocateHugeGraphicsMemoryCalled = true;
+        return BaseClass::allocateHugeGraphicsMemory(allocationData, sharedVirtualAddress);
+    }
+
     uint32_t freeGraphicsMemoryImplCalled = 0u;
     bool allocationGraphicsMemory64kbCreated = false;
     bool allocateGraphicsMemoryInNonDevicePool = false;
+    bool allocateHugeGraphicsMemoryCalled = false;
 };
 } // namespace NEO

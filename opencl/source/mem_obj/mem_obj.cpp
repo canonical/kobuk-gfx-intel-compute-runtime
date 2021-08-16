@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -105,10 +105,7 @@ MemObj::~MemObj() {
             releaseAllocatedMapPtr();
         }
     }
-    for (auto callback : destructorCallbacks) {
-        callback->invoke(this);
-        delete callback;
-    }
+    destructorCallbacks.invoke(this);
 
     context->decRefInternal();
 }
@@ -127,7 +124,8 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
     cl_context ctx = nullptr;
     uint64_t internalHandle = 0llu;
     auto allocation = getMultiGraphicsAllocation().getDefaultGraphicsAllocation();
-    cl_bool usesCompression = allocation->getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED;
+    Gmm *gmm;
+    cl_bool usesCompression;
 
     switch (paramName) {
     case CL_MEM_TYPE:
@@ -191,6 +189,12 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
         break;
 
     case CL_MEM_USES_COMPRESSION_INTEL:
+        gmm = allocation->getDefaultGmm();
+        if (gmm != nullptr) {
+            usesCompression = gmm->isCompressionEnabled;
+        } else {
+            usesCompression = allocation->getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED;
+        }
         srcParam = &usesCompression;
         srcParamSize = sizeof(cl_bool);
         break;
@@ -214,10 +218,8 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
 
 cl_int MemObj::setDestructorCallback(void(CL_CALLBACK *funcNotify)(cl_mem, void *),
                                      void *userData) {
-    auto cb = new MemObjDestructorCallback(funcNotify, userData);
-
     std::unique_lock<std::mutex> theLock(mtx);
-    destructorCallbacks.push_front(cb);
+    destructorCallbacks.add(funcNotify, userData);
     return CL_SUCCESS;
 }
 
@@ -396,7 +398,7 @@ bool MemObj::isTiledAllocation() const {
 bool MemObj::mappingOnCpuAllowed() const {
     auto graphicsAllocation = multiGraphicsAllocation.getDefaultGraphicsAllocation();
     return !isTiledAllocation() && !peekSharingHandler() && !isMipMapped(this) && !DebugManager.flags.DisableZeroCopyForBuffers.get() &&
-           !(graphicsAllocation->getDefaultGmm() && graphicsAllocation->getDefaultGmm()->isRenderCompressed) &&
+           !(graphicsAllocation->getDefaultGmm() && graphicsAllocation->getDefaultGmm()->isCompressionEnabled) &&
            MemoryPool::isSystemMemoryPool(graphicsAllocation->getMemoryPool());
 }
 
@@ -407,6 +409,17 @@ void MemObj::storeProperties(const cl_mem_properties *properties) {
             propertiesVector.push_back(properties[i + 1]);
         }
         propertiesVector.push_back(0);
+    }
+}
+
+void MemObj::cleanAllGraphicsAllocations(Context &context, MemoryManager &memoryManager, AllocationInfoType &allocationInfo, bool isParentObject) {
+    if (!isParentObject) {
+        for (auto &index : context.getRootDeviceIndices()) {
+            if (allocationInfo[index].memory) {
+                memoryManager.removeAllocationFromHostPtrManager(allocationInfo[index].memory);
+                memoryManager.freeGraphicsMemory(allocationInfo[index].memory);
+            }
+        }
     }
 }
 

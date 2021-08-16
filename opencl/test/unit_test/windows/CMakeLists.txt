@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2020 Intel Corporation
+# Copyright (C) 2018-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -8,6 +8,7 @@ if(WIN32)
   project(igdrcl_windows_dll_tests)
 
   set(NEO_IGDRCL_WINDOWS_DLL_TESTS_TARGET_OBJECTS
+      $<TARGET_OBJECTS:igdrcl_libult_common>
       $<TARGET_OBJECTS:igdrcl_libult>
       $<TARGET_OBJECTS:igdrcl_libult_env>
       $<TARGET_OBJECTS:mock_gmm>
@@ -20,18 +21,20 @@ if(WIN32)
                  ${NEO_SOURCE_DIR}/opencl/source/dll${BRANCH_DIR_SUFFIX}/get_devices.cpp
                  ${NEO_SOURCE_DIR}/opencl/source/dll/windows/os_interface.cpp
                  ${NEO_SOURCE_DIR}/opencl/source/helpers/api_specific_config_ocl.cpp
-                 ${NEO_SOURCE_DIR}/opencl/test/unit_test/ult_configuration.cpp
+                 ${NEO_SOURCE_DIR}/opencl/test/unit_test/test_macros/test_checks_ocl.cpp
                  ${NEO_SOURCE_DIR}/shared/source/aub/aub_stream_interface.cpp
+                 ${NEO_SOURCE_DIR}/shared/test/common/test_macros/test_checks_shared.cpp
                  ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/get_devices_tests.cpp
                  ${CMAKE_CURRENT_SOURCE_DIR}/os_interface_tests.cpp
                  ${CMAKE_CURRENT_SOURCE_DIR}/wddm_create_tests.cpp
                  ${CMAKE_CURRENT_SOURCE_DIR}/test_mode.h
+                 ${NEO_SHARED_TEST_DIRECTORY}/common/test_configuration/unit_tests/ult_configuration.cpp
   )
 
   target_link_libraries(igdrcl_windows_dll_tests ${NEO_MOCKABLE_LIB_NAME} ${NEO_SHARED_MOCKABLE_LIB_NAME} igdrcl_mocks gmock-gtest ${IGDRCL_EXTRA_LIBS})
 
   target_include_directories(igdrcl_windows_dll_tests PRIVATE
-                             ${NEO_SHARED_TEST_DIRECTORY}/unit_test/test_macros/header${BRANCH_DIR_SUFFIX}
+                             ${NEO_SHARED_TEST_DIRECTORY}/common/test_macros/header${BRANCH_DIR_SUFFIX}
                              ${NEO_SOURCE_DIR}/opencl/test/unit_test/gen_common${BRANCH_DIR_SUFFIX}
                              ${CMAKE_CURRENT_SOURCE_DIR}
   )

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -455,4 +455,10 @@ union HAS_MSG_BODY {
 struct HAS_MSG {
     struct HAS_HDR hdr;
     union HAS_MSG_BODY u;
+};
+
+enum mem_types : uint32_t {
+    MEM_TYPE_SYSTEM = 0,
+    MEM_TYPE_LOCALMEM = 1,
+    MEM_TYPE_MAX = 4
 };

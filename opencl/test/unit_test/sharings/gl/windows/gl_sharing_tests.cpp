@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,8 +9,8 @@
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/helpers/array_count.h"
 #include "shared/source/os_interface/os_interface.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
-#include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_device.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/event/user_event.h"
@@ -99,7 +99,7 @@ TEST_F(glSharingTests, givenMockGlWhenGlBufferIsCreatedThenMemObjectHasGlHandler
 
 class FailingMemoryManager : public MockMemoryManager {
   public:
-    GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness) override {
+    GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override {
         return nullptr;
     }
 };
@@ -217,7 +217,7 @@ TEST_F(glSharingTests, givenClGLBufferWhenItIsAcquiredThenAcuqireCountIsIncremen
     auto memObject = castToObject<Buffer>(glBuffer);
     EXPECT_FALSE(memObject->isMemObjZeroCopy());
 
-    EXPECT_FALSE(memObject->isReadWriteOnCpuAllowed(rootDeviceIndex));
+    EXPECT_FALSE(memObject->isReadWriteOnCpuAllowed(context.getDevice(0)->getDevice()));
     auto currentGraphicsAllocation = memObject->getGraphicsAllocation(rootDeviceIndex);
 
     memObject->peekSharingHandler()->acquire(memObject, rootDeviceIndex);
@@ -256,9 +256,9 @@ TEST_F(glSharingTests, givenClGLBufferWhenItIsAcquiredTwiceThenAcuqireIsNotCalle
 TEST_F(glSharingTests, givenClGLBufferWhenItIsCreatedAndGmmIsAvailableThenItIsUsedInGraphicsAllocation) {
     void *ptr = (void *)0x1000;
     auto rootDeviceIndex = context.getDevice(0)->getRootDeviceIndex();
-    auto gmm = new Gmm(context.getDevice(0)->getGmmClientContext(), ptr, 4096u, false);
+    auto gmm = new Gmm(context.getDevice(0)->getGmmClientContext(), ptr, 4096u, 0, false);
 
-    mockGlSharing->m_bufferInfoOutput.pGmmResInfo = gmm->gmmResourceInfo->peekHandle();
+    mockGlSharing->m_bufferInfoOutput.pGmmResInfo = gmm->gmmResourceInfo->peekGmmResourceInfo();
     mockGlSharing->uploadDataToBufferInfo();
 
     auto retVal = CL_SUCCESS;
@@ -804,7 +804,7 @@ TEST(glSharingBasicTest, givenCorrectFlagsWhenGettingSupportedFormatsThenCorrect
 TEST(glSharingBasicTest, givenSupportedImageTypesWhenGettingSupportedFormatsThenCorrectListIsReturned) {
     MockGLSharingFunctions glSharingFunctions;
     cl_mem_flags flags = CL_MEM_READ_WRITE;
-    cl_mem_object_type image_types[] = {CL_MEM_OBJECT_IMAGE1D, CL_MEM_OBJECT_IMAGE2D, CL_MEM_OBJECT_IMAGE3D, CL_MEM_OBJECT_IMAGE1D_ARRAY, CL_MEM_OBJECT_IMAGE1D_BUFFER};
+    cl_mem_object_type image_types[] = {CL_MEM_OBJECT_IMAGE1D, CL_MEM_OBJECT_IMAGE2D, CL_MEM_OBJECT_IMAGE3D, CL_MEM_OBJECT_IMAGE1D_ARRAY, CL_MEM_OBJECT_IMAGE1D_BUFFER, CL_MEM_OBJECT_IMAGE2D_ARRAY};
     cl_GLenum glFormats[3] = {};
     cl_uint numImageFormats = 0;
 
@@ -846,7 +846,7 @@ TEST(glSharingBasicTest, givenNullNumImageFormatsWhenGettingSupportedFormatsThen
 TEST(glSharingBasicTest, givenInvalidImageTypeWhenGettingSupportedFormatsThenIvalidValueErrorIsReturned) {
     MockGLSharingFunctions glSharingFunctions;
     cl_mem_flags flags = CL_MEM_READ_WRITE;
-    cl_mem_object_type image_type = CL_MEM_OBJECT_IMAGE2D_ARRAY;
+    cl_mem_object_type image_type = CL_MEM_OBJECT_PIPE;
     cl_GLenum glFormats[3] = {};
     cl_uint numImageFormats = 0;
 
@@ -1147,7 +1147,7 @@ HWTEST_F(glSharingTests, givenEventCreatedFromFenceObjectWhenItIsPassedToAcquire
     clReleaseEvent(event);
 }
 
-TEST_F(glSharingTests, glSyncEventReportsAsExternallySynchronized) {
+TEST_F(glSharingTests, GivenGlSyncEventThenReportsAsExternallySynchronized) {
     GLsync glSync = {0};
     auto syncEvent = GlSyncEvent::create(context, glSync, nullptr);
     ASSERT_NE(nullptr, syncEvent);

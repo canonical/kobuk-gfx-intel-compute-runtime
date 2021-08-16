@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2017-2020 Intel Corporation
+# Copyright (C) 2018-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -12,14 +12,10 @@ endif()
 
 include(ExternalProject)
 
-# Include custom configs
-file(GLOB custom_configs *custom_config.cmake)
-foreach(config ${custom_configs})
-  include(${config})
-endforeach()
-
-# Include needed macros
-include(common_macros.cmake)
+# Set the runtime source directory
+if(NOT DEFINED NEO_SOURCE_DIR)
+  set(NEO_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
 
 if(MSVC)
   set(CMAKE_GENERATOR_TOOLSET "host=x64")
@@ -30,6 +26,21 @@ if(NOT PROJECT_NAME)
 endif()
 
 project(${PROJECT_NAME})
+
+file(READ ".branch" BRANCH_TYPE)
+string(STRIP "${BRANCH_TYPE}" BRANCH_TYPE)
+set(BRANCH_DIR_SUFFIX "/${BRANCH_TYPE}")
+list(APPEND BRANCH_DIR_LIST "/")
+if(NOT "${BRANCH_TYPE}" STREQUAL "")
+  list(APPEND BRANCH_DIR_LIST "/${BRANCH_TYPE}/")
+endif()
+message(STATUS "branch dir list: ${BRANCH_DIR_LIST}")
+
+# Include custom configs
+include("${BRANCH_TYPE}/custom_config.cmake" OPTIONAL)
+
+# Include needed macros
+include(common_macros.cmake)
 
 if(CMAKE_CONFIGURATION_TYPES)
   # Set custom build types for multi-configuration generators
@@ -48,20 +59,67 @@ set(GLOBAL PROPERTY NEO_OCL_COMPONENTS_LIST "")
 define_property(GLOBAL PROPERTY NEO_L0_COMPONENTS_LIST BRIEF_DOCS "List of components" FULL_DOCS "List of components to create packages")
 set(GLOBAL PROPERTY NEO_L0_COMPONENTS_LIST "")
 
-file(READ ".branch" BRANCH_TYPE)
-string(STRIP "${BRANCH_TYPE}" BRANCH_TYPE)
-set(BRANCH_DIR_SUFFIX "/${BRANCH_TYPE}")
-list(APPEND BRANCH_DIR_LIST "/")
-if(NOT "${BRANCH_TYPE}" STREQUAL "")
-  list(APPEND BRANCH_DIR_LIST "/${BRANCH_TYPE}/")
+if(WIN32)
+  set(DISABLE_WDDM_LINUX TRUE)
 endif()
-message(STATUS "branch dir list: ${BRANCH_DIR_LIST}")
+
+if(WIN32)
+  # get WDK location and version to use
+  if(NOT WDK_DIR)
+    if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../wdk")
+      get_filename_component(WDK_DIR "../wdk" ABSOLUTE)
+    endif()
+  endif()
+  if(WDK_DIR)
+    if(IS_DIRECTORY "${WDK_DIR}/Win15")
+      get_filename_component(WDK_DIR "${WDK_DIR}/Win15" ABSOLUTE)
+    endif()
+  endif()
+  message(STATUS "WDK Directory: ${WDK_DIR}")
+
+  if(NOT WDK_VERSION)
+    if(WDK_DIR)
+      # Get WDK version from ${WDK_DIR}/WDKVersion.txt
+      file(READ "${WDK_DIR}/WDKVersion.txt" WindowsTargetPlatformVersion)
+      string(REPLACE " " ";" WindowsTargetPlatformVersion ${WindowsTargetPlatformVersion})
+      list(LENGTH WindowsTargetPlatformVersion versionListLength)
+      if(NOT versionListLength EQUAL 3)
+        if(WIN32)
+          message(ERROR "Error reading content of WDKVersion.txt file")
+        endif()
+      else()
+        list(GET WindowsTargetPlatformVersion 2 WindowsTargetPlatformVersion)
+      endif()
+    else()
+      if(WIN32)
+        message(ERROR "WDK not available")
+      endif()
+    endif()
+  else()
+    set(WindowsTargetPlatformVersion ${WDK_VERSION})
+  endif()
+  message(STATUS "WDK Version is ${WindowsTargetPlatformVersion}")
+endif()
+
+if(NOT DISABLE_WDDM_LINUX)
+  get_filename_component(LIBDXG_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libdxg" ABSOLUTE)
+  set(D3DKMTHK_INCLUDE_PATHS "${LIBDXG_PATH}/include/")
+endif()
+
+if(WIN32)
+  set(DRIVER_MODEL wddm)
+else()
+  if(DISABLE_WDDM_LINUX)
+    set(DRIVER_MODEL drm)
+  else()
+    set(DRIVER_MODEL drm_or_wddm)
+  endif()
+endif()
+message(STATUS "Driver model : ${DRIVER_MODEL}")
 
 if(TR_DEPRECATED)
   add_definitions(-D_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING=1)
 endif()
-
-add_definitions(-DIGC_CLEANUP)
 
 if(RELEASE_WITH_REGKEYS)
   message(STATUS "Enabling RegKey reading in release build")
@@ -76,7 +134,7 @@ if(DEFINED NEO_EXTRA_DEFINES)
   endforeach()
 endif()
 
-include("${BRANCH_TYPE}.cmake" OPTIONAL)
+include("${BRANCH_TYPE}/${BRANCH_TYPE}.cmake" OPTIONAL)
 
 if(NOT CMAKE_BUILD_TYPE)
   message(STATUS "CMAKE_BUILD_TYPE not specified, using Release")
@@ -109,8 +167,12 @@ add_definitions(
                 -DCL_USE_DEPRECATED_OPENCL_2_2_APIS
 )
 
-if(WIN32)
+if(WIN32 OR NOT DISABLE_WDDM_LINUX)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS -DWDDM_VERSION_NUMBER=23 -DNOMINMAX)
+  add_definitions(-DLEGACY_D3DAPI_VERSION=20)
+  if(NOT WIN32)
+    add_definitions(-DWDDM_LINUX=1)
+  endif()
 endif()
 
 set(CMAKE_C_FLAGS_RELEASEINTERNAL "${CMAKE_C_FLAGS_RELEASE}")
@@ -123,6 +185,18 @@ if(MSVC AND ENABLE_VS_FASTLINK)
   string(APPEND CMAKE_STATIC_LINKER_FLAGS_DEBUG " /debug:FASTLINK")
   string(APPEND CMAKE_MODULE_LINKER_FLAGS_DEBUG " /debug:FASTLINK")
 endif()
+if(UNIX)
+  if(NEO_BUILD_DEBUG_SYMBOLS_PACKAGE)
+    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g")
+    set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -g")
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -g")
+  endif()
+  set(CMAKE_C_FLAGS_RELEASEINTERNAL "${CMAKE_C_FLAGS_RELEASEINTERNAL} -g")
+  set(CMAKE_CXX_FLAGS_RELEASEINTERNAL "${CMAKE_CXX_FLAGS_RELEASEINTERNAL} -g")
+  set(CMAKE_SHARED_LINKER_FLAGS_RELEASEINTERNAL "${CMAKE_SHARED_LINKER_FLAGS_RELEASEINTERNAL} -g")
+  set(CMAKE_EXE_LINKER_FLAGS_RELEASEINTERNAL "${CMAKE_EXE_LINKER_FLAGS_RELEASEINTERNAL} -g")
+endif()
 
 string(TOLOWER "${CMAKE_BUILD_TYPE}" BUILD_TYPE_lower)
 if("${BUILD_TYPE_lower}" STREQUAL "releaseinternal")
@@ -130,11 +204,6 @@ if("${BUILD_TYPE_lower}" STREQUAL "releaseinternal")
 endif("${BUILD_TYPE_lower}" STREQUAL "releaseinternal")
 
 message(STATUS "${CMAKE_BUILD_TYPE} build configuration")
-
-# Set the runtime source directory
-if(NOT DEFINED NEO_SOURCE_DIR)
-  set(NEO_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-endif()
 
 set(NEO_RUNTIME_SUB_DIR "opencl/source")
 set(NEO_RUNTIME_SOURCE_DIR "${NEO_SOURCE_DIR}/${NEO_RUNTIME_SUB_DIR}")
@@ -161,6 +230,7 @@ endif()
 
 if(SKIP_UNIT_TESTS)
   set(SKIP_NEO_UNIT_TESTS TRUE)
+  set(SKIP_SHARED_UNIT_TESTS TRUE)
 endif()
 
 # Set our build directory
@@ -172,8 +242,8 @@ if(NOT NEO_BINARY_DIR)
   set(NEO_BINARY_DIR ${CMAKE_BINARY_DIR})
 endif()
 
-# we use c++14
-set(CMAKE_CXX_STANDARD 14)
+# we use c++17
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # we force using response files
@@ -187,12 +257,28 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${NEO_BINARY_DIR}/lib)
 # determine Neo version
 include(version.cmake)
 
+# set variables for symbols stripping
+if(UNIX AND NEO_BUILD_DEBUG_SYMBOLS_PACKAGE)
+  set_property(GLOBAL PROPERTY DEBUG_SYMBOL_FILES "")
+  set_property(GLOBAL PROPERTY IGDRCL_SYMBOL_FILE "")
+  set_property(GLOBAL APPEND PROPERTY NEO_OCL_COMPONENTS_LIST "opencl-debuginfo")
+  set(STRIP_SYMBOLS_TARGET strip_debug_symbols)
+  set(DEBUG_SYMBOL_INSTALL_DIR "/usr/lib/debug${CMAKE_INSTALL_FULL_LIBDIR}")
+  add_custom_target(${STRIP_SYMBOLS_TARGET} ALL)
+endif()
+
 # We want to build with the static, multithreaded runtime libraries (as opposed
 # to the multithreaded runtime DLLs)
 if(MSVC)
   string(REPLACE "/MDd" "/MTd" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
   string(REPLACE "/MD" "/MT" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
   string(REPLACE "/MD" "/MT" CMAKE_CXX_FLAGS_RELEASEINTERNAL "${CMAKE_CXX_FLAGS_RELEASEINTERNAL}")
+
+  string(REPLACE "/GR" "/GR-" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  add_definitions(-D_HAS_STATIC_RTTI=0)
+  add_definitions(-DPURGE_DEBUG_KEY_NAMES=1)
+else()
+  add_definitions(-DPURGE_DEBUG_KEY_NAMES=0)
 endif()
 
 if(NOT SKIP_UNIT_TESTS)
@@ -294,45 +380,29 @@ endif()
 message(STATUS "Third party dir: ${THIRD_PARTY_DIR}")
 
 if(WIN32)
-  # get WDK location and version to use
-  if(NOT WDK_DIR)
-    if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../wdk")
-      get_filename_component(WDK_DIR "../wdk" ABSOLUTE)
-    endif()
-  endif()
-  if(WDK_DIR)
-    if(IS_DIRECTORY "${WDK_DIR}/Win15")
-      get_filename_component(WDK_DIR "${WDK_DIR}/Win15" ABSOLUTE)
-    endif()
-  endif()
-  message(STATUS "WDK Directory: ${WDK_DIR}")
-
-  if(NOT WDK_VERSION)
-    # Get WDK version from ${WDK_DIR}/WDKVersion.txt
-    file(READ "${WDK_DIR}/WDKVersion.txt" WindowsTargetPlatformVersion)
-    string(REPLACE " " ";" WindowsTargetPlatformVersion ${WindowsTargetPlatformVersion})
-    list(LENGTH WindowsTargetPlatformVersion versionListLength)
-    if(NOT versionListLength EQUAL 3)
-      message(ERROR "Error reading content of WDKVersion.txt file")
-    endif()
-    list(GET WindowsTargetPlatformVersion 2 WindowsTargetPlatformVersion)
-  else()
-    set(WindowsTargetPlatformVersion ${WDK_VERSION})
-  endif()
-  message(STATUS "WDK Version is ${WindowsTargetPlatformVersion}")
-
   if(${WindowsTargetPlatformVersion} VERSION_LESS "10.0.18328.0")
     set(CONST_FROM_WDK_10_0_18328_0)
   else()
     set(CONST_FROM_WDK_10_0_18328_0 "CONST")
   endif()
   add_compile_options(-DCONST_FROM_WDK_10_0_18328_0=${CONST_FROM_WDK_10_0_18328_0})
-
-  set(WDK_INCLUDE_PATHS
-      "${WDK_DIR}/Include/${WindowsTargetPlatformVersion}/um"
-      "${WDK_DIR}/Include/${WindowsTargetPlatformVersion}/shared"
-      "${WDK_DIR}/Include/${WindowsTargetPlatformVersion}/km"
+  set(WDK_INCLUDE_PATHS "")
+  list(APPEND WDK_INCLUDE_PATHS
+       "${WDK_DIR}/Include/${WindowsTargetPlatformVersion}/um"
+       "${WDK_DIR}/Include/${WindowsTargetPlatformVersion}/shared"
+       "${WDK_DIR}/Include/${WindowsTargetPlatformVersion}/km"
   )
+  message(STATUS "WDK include paths: ${WDK_INCLUDE_PATHS}")
+elseif(NOT DISABLE_WDDM_LINUX)
+  add_compile_options(-DCONST_FROM_WDK_10_0_18328_0=CONST)
+  add_compile_options(-DWDDM_LINUX=1)
+  set(WDK_INCLUDE_PATHS "")
+  get_filename_component(DX_HEADERS_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/DirectX-Headers" ABSOLUTE)
+  list(APPEND WDK_INCLUDE_PATHS ${DX_HEADERS_PATH}/include/wsl)
+  list(APPEND WDK_INCLUDE_PATHS ${DX_HEADERS_PATH}/include/wsl/stubs)
+  list(APPEND WDK_INCLUDE_PATHS ${DX_HEADERS_PATH}/include/directx)
+  list(APPEND WDK_INCLUDE_PATHS ${DX_HEADERS_PATH}/include/dxguids)
+  list(APPEND WDK_INCLUDE_PATHS ${D3DKMTHK_INCLUDE_PATHS})
   message(STATUS "WDK include paths: ${WDK_INCLUDE_PATHS}")
 endif()
 
@@ -657,6 +727,9 @@ if(MSVC)
   # Disable generating manifest
   set(LINKER_FLAGS "/MANIFEST:NO")
 
+  # Disable COMDAT folding optimization
+  set(LINKER_FLAGS "${LINKER_FLAGS} /OPT:NOICF")
+
   # Use legacy float rounding
   set(LINKER_FLAGS "${LINKER_FLAGS} legacy_stdio_float_rounding.obj")
 
@@ -685,11 +758,11 @@ else()
     endif()
   endif()
   if(USE_TSAN)
-    if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
+    if(CMAKE_COMPILER_IS_GNUCC AND USE_ASAN)
+      message(STATUS "Cannot use thread sanitization with address sanitization in gcc")
+    else()
       set(TSAN_FLAGS " -fsanitize=thread -DSANITIZER_BUILD")
       set(TSAN_LIBS "tsan")
-    else()
-      message(STATUS "Thread sanitization with gcc is not fully supported")
     endif()
   endif()
 
@@ -700,10 +773,10 @@ endif()
 if(MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi")
-  set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF")
+  set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF")
 
   set(CMAKE_CXX_FLAGS_RELEASEINTERNAL "${CMAKE_CXX_FLAGS_RELEASEINTERNAL} /Zi")
-  set(CMAKE_SHARED_LINKER_FLAGS_RELEASEINTERNAL "${CMAKE_SHARED_LINKER_FLAGS_RELEASEINTERNAL} /DEBUG /OPT:REF /OPT:ICF")
+  set(CMAKE_SHARED_LINKER_FLAGS_RELEASEINTERNAL "${CMAKE_SHARED_LINKER_FLAGS_RELEASEINTERNAL} /DEBUG /OPT:REF")
 
   if(NO_PDB)
     string(REGEX REPLACE "/Zi" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
@@ -771,17 +844,11 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wuninitialized")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Wno-unused-parameter -Wno-missing-field-initializers")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Winvalid-pch")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
 
   if("${CMAKE_C_COMPILER_ID}" STREQUAL "Clang")
     # clang only
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wshorten-64-to-32")
-    if(USE_SANITIZE_UB)
-      message(STATUS "Enabling undefined behavior sanitizer")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined -fsanitize-recover=vptr -fno-rtti -DSANITIZER_BUILD")
-      if(NOT SANITIZE_UB_ALLOW_CONTINUE)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-sanitize-recover=undefined")
-      endif()
-    endif()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wshorten-64-to-32 -Wno-extern-c-compat")
     if(NOT (CMAKE_C_COMPILER_VERSION VERSION_LESS 3.6))
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs -DSANITIZER_BUILD")
     endif()
@@ -802,6 +869,17 @@ if(NOT MSVC)
     endif()
   endif()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+
+  if(USE_SANITIZE_UB)
+    check_cxx_compiler_flag(-fsanitize=undefined COMPILER_SUPPORTS_UNDEFINED_BEHAVIOR_SANITIZER)
+    if(COMPILER_SUPPORTS_UNDEFINED_BEHAVIOR_SANITIZER)
+      message(STATUS "Enabling undefined behavior sanitizer")
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined -fsanitize-recover=vptr -fno-rtti -DSANITIZER_BUILD")
+      if(NOT SANITIZE_UB_ALLOW_CONTINUE)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-sanitize-recover=undefined")
+      endif()
+    endif()
+  endif()
 endif()
 
 # Compile code with defenses enabled (settings to be used for production release code)
@@ -839,25 +917,33 @@ endif()
 # Please keep alphabetical order
 include_directories(${NEO_BUILD_DIR})
 include_directories(${NEO_SOURCE_DIR})
+include_directories(${NEO_SHARED_DIRECTORY}/aub_mem_dump/definitions${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SHARED_DIRECTORY}/built_ins/builtinops${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SHARED_DIRECTORY}/command_stream/definitions${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SHARED_DIRECTORY}/compiler_interface/compiler_options${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SHARED_DIRECTORY}/debug_settings/definitions${BRANCH_DIR_SUFFIX})
+include_directories(${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SHARED_DIRECTORY}/gen_common${BRANCH_DIR_SUFFIX})
-include_directories(${NEO_SHARED_DIRECTORY}/gmm_helper/client_context${BRANCH_DIR_SUFFIX})
-include_directories(${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory${BRANCH_DIR_SUFFIX})
+if(WIN32)
+  include_directories(${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory${BRANCH_DIR_SUFFIX})
+else()
+  include_directories(${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory)
+endif()
 include_directories(${NEO_SHARED_DIRECTORY}/helpers/definitions${BRANCH_DIR_SUFFIX})
-include_directories(${NEO_SHARED_DIRECTORY}/memory_manager/definitions${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SHARED_DIRECTORY}/memory_properties${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SHARED_DIRECTORY}/sku_info/definitions${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SOURCE_DIR}/opencl/source/command_queue/definitions${BRANCH_DIR_SUFFIX})
-include_directories(${NEO_SOURCE_DIR}/opencl/source/command_stream/definitions${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SOURCE_DIR}/opencl/source/mem_obj/definitions${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SOURCE_DIR}/opencl/source/memory_manager/definitions${BRANCH_DIR_SUFFIX})
 if(MSVC)
   include_directories(${NEO_SOURCE_DIR}/opencl/source/sharings/gl/windows/include)
+else()
+  include_directories(${NEO_SHARED_DIRECTORY}/os_interface/linux/flags${BRANCH_DIR_SUFFIX})
 endif()
-
+if(SUPPORT_XE_HP_CORE)
+  include_directories(${NEO_SHARED_DIRECTORY}/xe_hp_core/definitions${BRANCH_DIR_SUFFIX})
+  include_directories(${NEO_SOURCE_DIR}/opencl/source/xe_hp_core/definitions${BRANCH_DIR_SUFFIX})
+endif()
 # Define where to put binaries
 set(TargetDir ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 if(MSVC)
@@ -966,6 +1052,7 @@ if(EXISTS ${NEO_SOURCE_DIR}/../internal)
   add_subdirectory_unique(${NEO_SOURCE_DIR}/../internal ${NEO_BUILD_DIR}/internal)
 endif()
 
+set(NEO_SCRIPT_PROJECTS_FOLDER "neo scripts")
 add_subdirectory_unique(scripts/lint)
 if(EXISTS ${NEO_SOURCE_DIR}/scripts/format)
   add_subdirectory_unique(scripts/format)
@@ -985,6 +1072,7 @@ if(BUILD_WITH_L0)
 endif()
 
 add_subdirectory_unique(target_unit_tests)
+add_subdirectory_unique(target_aub_tests)
 
 add_subdirectories()
 

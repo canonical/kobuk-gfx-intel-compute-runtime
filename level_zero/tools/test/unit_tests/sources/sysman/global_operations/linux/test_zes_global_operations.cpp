@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,8 +16,14 @@ namespace ult {
 
 constexpr uint64_t memSize1 = 2048;
 constexpr uint64_t memSize2 = 1024;
+constexpr uint64_t memSize4 = 1024;
+constexpr uint64_t memSize6 = 1024;
+constexpr uint64_t memSize7 = 0;
 constexpr uint64_t sharedMemSize1 = 1024;
 constexpr uint64_t sharedMemSize2 = 512;
+constexpr uint64_t sharedMemSize4 = 512;
+constexpr uint64_t sharedMemSize6 = 512;
+constexpr uint64_t sharedMemSize7 = 0;
 // In mock function getValUnsignedLong, we have set the engines used as 0, 3 and 1.
 // Hence, expecting 28 as engine field because 28 in binary would be 00011100
 // This indicates bit number 2, 3 and 4 are set, thus this indicates, this process
@@ -27,8 +33,11 @@ constexpr int64_t engines1 = 28u;
 // 4 in binary 0100, as 2nd bit is set, hence it indicates, process used ZES_ENGINE_TYPE_FLAG_3D
 // Corresponding i915 mapped value in mocked getValUnsignedLong() is 0.
 constexpr int64_t engines2 = 4u;
-constexpr uint32_t totalProcessStates = 2u; // Two process States for two pids
-const std::string expectedModelName("0x3ea5");
+constexpr int64_t engines4 = 20u;
+constexpr int64_t engines6 = 1u;
+constexpr int64_t engines7 = 1u;
+constexpr uint32_t totalProcessStates = 5u; // Three process States for three pids
+constexpr uint32_t totalProcessStatesForFaultyClients = 3u;
 class SysmanGlobalOperationsFixture : public SysmanDeviceFixture {
   protected:
     std::unique_ptr<Mock<GlobalOperationsSysfsAccess>> pSysfsAccess;
@@ -40,6 +49,7 @@ class SysmanGlobalOperationsFixture : public SysmanDeviceFixture {
     OsGlobalOperations *pOsGlobalOperationsPrev = nullptr;
     L0::GlobalOperations *pGlobalOperationsPrev = nullptr;
     L0::GlobalOperationsImp *pGlobalOperationsImp;
+    std::string expectedModelName;
 
     void SetUp() override {
         SysmanDeviceFixture::SetUp();
@@ -64,6 +74,7 @@ class SysmanGlobalOperationsFixture : public SysmanDeviceFixture {
         pGlobalOperationsImp = static_cast<L0::GlobalOperationsImp *>(pSysmanDeviceImp->pGlobalOperations);
         pOsGlobalOperationsPrev = pGlobalOperationsImp->pOsGlobalOperations;
         pGlobalOperationsImp->pOsGlobalOperations = nullptr;
+        expectedModelName = neoDevice->getDeviceName(neoDevice->getHardwareInfo());
         pGlobalOperationsImp->init();
     }
 
@@ -130,6 +141,29 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingzesDevice
     EXPECT_TRUE(0 == unknown.compare(properties.driverVersion));
 }
 
+TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingzesDeviceGetPropertiesForCheckingDriverVersionWhenDriverVersionFileReadFailsThenVerifyzesDeviceGetPropertiesCallSucceeds) {
+    zes_device_properties_t properties;
+    ON_CALL(*pFsAccess.get(), read(_, Matcher<std::string &>(_)))
+        .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<GlobalOperationsFsAccess>::getValErrorUnkown));
+    pGlobalOperationsImp->init();
+
+    ze_result_t result = zesDeviceGetProperties(device, &properties);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_TRUE(0 == unknown.compare(properties.driverVersion));
+}
+
+TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingzesDeviceGetPropertiesForCheckingDevicePropertiesWhenVendorIsUnKnownThenVerifyzesDeviceGetPropertiesCallSucceeds) {
+    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<std::string &>(_)))
+        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::getFalseValString));
+    neoDevice->deviceInfo.vendorId = 1806; //Unknown Vendor id
+    pGlobalOperationsImp->init();
+    zes_device_properties_t properties;
+    ze_result_t result = zesDeviceGetProperties(device, &properties);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_TRUE(0 == unknown.compare(properties.vendorName));
+    EXPECT_TRUE(0 == unknown.compare(properties.brandName));
+}
+
 TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingzesDeviceGetPropertiesForCheckingDriverVersionWhenAccessingAgamaFileOrSrcFileGotPermissionDeniedThenVerifyzesDeviceGetPropertiesCallSucceeds) {
     zes_device_properties_t properties;
     ON_CALL(*pFsAccess.get(), read(_, Matcher<std::string &>(_)))
@@ -155,6 +189,43 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhileRetrievingInfor
     EXPECT_EQ(processes[1].engines, engines2);
     EXPECT_EQ(processes[1].memSize, memSize2);
     EXPECT_EQ(processes[1].sharedSize, sharedMemSize2);
+    EXPECT_EQ(processes[2].processId, pid4);
+    EXPECT_EQ(processes[2].engines, engines4);
+    EXPECT_EQ(processes[2].memSize, memSize4);
+    EXPECT_EQ(processes[2].sharedSize, sharedMemSize4);
+    EXPECT_EQ(processes[3].processId, pid6);
+    EXPECT_EQ(processes[3].engines, engines6);
+    EXPECT_EQ(processes[3].memSize, memSize6);
+    EXPECT_EQ(processes[3].sharedSize, sharedMemSize6);
+    EXPECT_EQ(processes[4].processId, pid7);
+    EXPECT_EQ(processes[4].engines, engines7);
+    EXPECT_EQ(processes[4].memSize, memSize7);
+    EXPECT_EQ(processes[4].sharedSize, sharedMemSize7);
+}
+
+TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhileRetrievingInformationAboutHostProcessesUsingDeviceThenSuccessIsReturnedEvenwithFaultyClient) {
+    uint32_t count = 0;
+    ON_CALL(*pSysfsAccess.get(), scanDirEntries(_, _))
+        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::getScannedDir4Entries));
+    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<uint64_t &>(_)))
+        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::getValUnsignedLongCreatedBytesSuccess));
+
+    ASSERT_EQ(ZE_RESULT_SUCCESS, zesDeviceProcessesGetState(device, &count, nullptr));
+    EXPECT_EQ(count, totalProcessStatesForFaultyClients);
+    std::vector<zes_process_state_t> processes(count);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, zesDeviceProcessesGetState(device, &count, processes.data()));
+    EXPECT_EQ(processes[0].processId, pid1);
+    EXPECT_EQ(processes[0].engines, engines1);
+    EXPECT_EQ(processes[0].memSize, memSize1);
+    EXPECT_EQ(processes[0].sharedSize, sharedMemSize1);
+    EXPECT_EQ(processes[1].processId, pid2);
+    EXPECT_EQ(processes[1].engines, engines2);
+    EXPECT_EQ(processes[1].memSize, memSize2);
+    EXPECT_EQ(processes[1].sharedSize, sharedMemSize2);
+    EXPECT_EQ(processes[2].processId, pid4);
+    EXPECT_EQ(processes[2].engines, engines4);
+    EXPECT_EQ(processes[2].memSize, memSize4);
+    EXPECT_EQ(processes[2].sharedSize, sharedMemSize4);
 }
 
 TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhileRetrievingInformationAboutHostProcessesUsingFaultyClientFileThenFailureIsReturned) {
@@ -182,7 +253,7 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhileReadingNonExist
     EXPECT_EQ(ZE_RESULT_ERROR_NOT_AVAILABLE, pSysfsAccess->scanDirEntries("clients/7/busy", engineEntries));
 }
 
-TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingGetDeviceStatewhenDeviceIsWedged) {
+TEST_F(SysmanGlobalOperationsFixture, GivenDeviceIsWedgedWhenCallingGetDeviceStateThenZesResetReasonFlagWedgedIsReturned) {
     ON_CALL(*pFsAccess.get(), read(_, Matcher<uint32_t &>(_)))
         .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<GlobalOperationsFsAccess>::getValWedgedFileTrue));
     zes_device_state_t deviceState;
@@ -190,7 +261,7 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingGetDevice
     EXPECT_EQ(ZES_RESET_REASON_FLAG_WEDGED, deviceState.reset);
 }
 
-TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingGetDeviceStatewhenDeviceIsNotWedged) {
+TEST_F(SysmanGlobalOperationsFixture, GivenDeviceIsNotWedgedWhenCallingGetDeviceStateThenZeroIsReturned) {
     ON_CALL(*pFsAccess.get(), read(_, Matcher<uint32_t &>(_)))
         .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<GlobalOperationsFsAccess>::getValWedgedFileFalse));
     zes_device_state_t deviceState;
@@ -198,21 +269,7 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingGetDevice
     EXPECT_EQ(0u, deviceState.reset);
 }
 
-TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingGetDeviceStatewhenDeviceWdegedFileIsNotFound) {
-    ON_CALL(*pFsAccess.get(), read(_, Matcher<uint32_t &>(_)))
-        .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<GlobalOperationsFsAccess>::getValWedgedFileNotFound));
-    zes_device_state_t deviceState;
-    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesDeviceGetState(device, &deviceState));
-}
-
-TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingGetDeviceStatewhenDeviceWdegedFileHasInsufficientPermissions) {
-    ON_CALL(*pFsAccess.get(), read(_, Matcher<uint32_t &>(_)))
-        .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<GlobalOperationsFsAccess>::getValWedgedFileInsufficientPermissions));
-    zes_device_state_t deviceState;
-    EXPECT_EQ(ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS, zesDeviceGetState(device, &deviceState));
-}
-
-TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingResetVerifyPermissionDenied) {
+TEST_F(SysmanGlobalOperationsFixture, GivenPermissionDeniedWhenCallingGetDeviceStateThenZeResultErrorInsufficientPermissionsIsReturned) {
     ON_CALL(*pSysfsAccess.get(), getRealPath(_, Matcher<std::string &>(_)))
         .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::getRealPathVal));
     ON_CALL(*pFsAccess.get(), canWrite(Matcher<std::string>(mockFunctionResetPath)))
@@ -222,7 +279,7 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingResetVeri
     EXPECT_EQ(ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS, result);
 }
 
-TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenForceFalseCallingAndInUseResetVerifyInUseError) {
+TEST_F(SysmanGlobalOperationsFixture, GivenDeviceInUseWhenCallingResetThenZeResultErrorHandleObjectInUseIsReturned) {
     pProcfsAccess->ourDevicePid = pProcfsAccess->extraPid;
     pProcfsAccess->ourDeviceFd = pProcfsAccess->extraFd;
     ON_CALL(*pSysfsAccess.get(), getRealPath(_, Matcher<std::string &>(_)))
@@ -242,7 +299,7 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenForceFalseCallin
     EXPECT_EQ(ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE, result);
 }
 
-TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenForceFalseAndNotInUseCallingResetVerifySuccess) {
+TEST_F(SysmanGlobalOperationsFixture, GivenDeviceNotInUseWhenCallingResetThenSuccessIsReturned) {
     // Pretend we have the device open
     pProcfsAccess->ourDevicePid = getpid();
     pProcfsAccess->ourDeviceFd = ::open("/dev/null", 0);
@@ -280,7 +337,7 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenForceFalseAndNot
     EXPECT_EQ(errno, EBADF);
 }
 
-TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenForceTrueAndInUseCallingResetVerifySuccessAndKillProcess) {
+TEST_F(SysmanGlobalOperationsFixture, GivenForceTrueAndDeviceInUseWhenCallingResetThenSuccessIsReturned) {
     // Pretend another process has the device open
     pProcfsAccess->ourDevicePid = getpid() + 1; // make sure it isn't our process id
     pProcfsAccess->ourDeviceFd = pProcfsAccess->extraFd;
@@ -314,7 +371,7 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenForceTrueAndInUs
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
-TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenForceFalseAndProcessStartsMidResetCallingResetVerifySuccessAndProcessKilled) {
+TEST_F(SysmanGlobalOperationsFixture, GivenProcessStartsMidResetWhenCallingResetThenSuccessIsReturned) {
     // Pretend another process has the device open
     pProcfsAccess->ourDevicePid = getpid() + 1; // make sure it isn't our process id
     pProcfsAccess->ourDeviceFd = pProcfsAccess->extraFd;
@@ -350,7 +407,79 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenForceFalseAndPro
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
-TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenForceTrueAndInUseButProcessWontDieCallingResetVerifyFailureInUse) {
+TEST_F(SysmanGlobalOperationsFixture, GivenProcessStartsMidResetWhenCallingResetAndBindFailsThenFailureIsReturned) {
+    // Pretend another process has the device open
+    pProcfsAccess->ourDevicePid = getpid() + 1; // make sure it isn't our process id
+    pProcfsAccess->ourDeviceFd = pProcfsAccess->extraFd;
+
+    ON_CALL(*pSysfsAccess.get(), getRealPath(_, Matcher<std::string &>(_)))
+        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::getRealPathVal));
+    ON_CALL(*pFsAccess.get(), canWrite(Matcher<std::string>(mockFunctionResetPath)))
+        .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<GlobalOperationsFsAccess>::getSuccess));
+    // Return process list without open fd on first call, but with open fd on subsequent calls
+    EXPECT_CALL(*pProcfsAccess.get(), listProcesses(Matcher<std::vector<::pid_t> &>(_)))
+        .WillOnce(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::mockProcessListDeviceUnused))
+        .WillRepeatedly(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::mockProcessListDeviceInUse));
+    ON_CALL(*pProcfsAccess.get(), isAlive(_))
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::mockIsAlive));
+    ON_CALL(*pProcfsAccess.get(), myProcessId())
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::getMockMyProcessId));
+    ON_CALL(*pProcfsAccess.get(), getFileDescriptors(_, Matcher<std::vector<int> &>(_)))
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::getMockFileDescriptors));
+    ON_CALL(*pProcfsAccess.get(), getFileName(_, _, Matcher<std::string &>(_)))
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::getMockFileName));
+    ON_CALL(*pSysfsAccess.get(), isMyDeviceFile(_))
+        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::mockIsMyDeviceFile));
+    EXPECT_CALL(*pProcfsAccess.get(), kill(pProcfsAccess->ourDevicePid))
+        .WillOnce(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::mockKill));
+    EXPECT_CALL(*pSysfsAccess.get(), unbindDevice(_))
+        .WillOnce(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::mockDeviceOpSuccess));
+    EXPECT_CALL(*pFsAccess.get(), write(mockFunctionResetPath, std::string("1")))
+        .WillOnce(::testing::Invoke(pFsAccess.get(), &Mock<GlobalOperationsFsAccess>::writeSuccess));
+    EXPECT_CALL(*pSysfsAccess.get(), bindDevice(_))
+        .WillOnce(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::mockDeviceOpFailure));
+    pGlobalOperationsImp->init();
+    ze_result_t result = zesDeviceReset(device, false);
+    EXPECT_EQ(ZE_RESULT_ERROR_UNKNOWN, result);
+}
+
+TEST_F(SysmanGlobalOperationsFixture, GivenProcessStartsMidResetWhenCallingResetAndGetFileNameFailsThenSuccessIsReturned) {
+    // Pretend another process has the device open
+    pProcfsAccess->ourDevicePid = getpid() + 1; // make sure it isn't our process id
+    pProcfsAccess->ourDeviceFd = pProcfsAccess->extraFd;
+
+    ON_CALL(*pSysfsAccess.get(), getRealPath(_, Matcher<std::string &>(_)))
+        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::getRealPathVal));
+    ON_CALL(*pFsAccess.get(), canWrite(Matcher<std::string>(mockFunctionResetPath)))
+        .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<GlobalOperationsFsAccess>::getSuccess));
+    // Return process list without open fd on first call, but with open fd on subsequent calls
+    EXPECT_CALL(*pProcfsAccess.get(), listProcesses(Matcher<std::vector<::pid_t> &>(_)))
+        .WillOnce(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::mockProcessListDeviceUnused))
+        .WillRepeatedly(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::mockProcessListDeviceInUse));
+    ON_CALL(*pProcfsAccess.get(), isAlive(_))
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::mockIsAlive));
+    ON_CALL(*pProcfsAccess.get(), myProcessId())
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::getMockMyProcessId));
+    ON_CALL(*pProcfsAccess.get(), getFileDescriptors(_, Matcher<std::vector<int> &>(_)))
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::getMockFileDescriptors));
+    ON_CALL(*pProcfsAccess.get(), getFileName(_, _, Matcher<std::string &>(_)))
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::getMockFileNameReturnError));
+    ON_CALL(*pSysfsAccess.get(), isMyDeviceFile(_))
+        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::mockIsMyDeviceFile));
+    ON_CALL(*pProcfsAccess.get(), kill(pProcfsAccess->ourDevicePid))
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::mockKill));
+    EXPECT_CALL(*pSysfsAccess.get(), unbindDevice(_))
+        .WillOnce(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::mockDeviceOpSuccess));
+    EXPECT_CALL(*pFsAccess.get(), write(mockFunctionResetPath, std::string("1")))
+        .WillOnce(::testing::Invoke(pFsAccess.get(), &Mock<GlobalOperationsFsAccess>::writeSuccess));
+    EXPECT_CALL(*pSysfsAccess.get(), bindDevice(_))
+        .WillOnce(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::mockDeviceOpSuccess));
+    pGlobalOperationsImp->init();
+    ze_result_t result = zesDeviceReset(device, false);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+}
+
+TEST_F(SysmanGlobalOperationsFixture, GivenProcessWontDieWhenCallingResetThenZeResultErrorHandleObjectInUseErrorIsReturned) {
     // Pretend another process has the device open
     pProcfsAccess->ourDevicePid = getpid() + 1; // make sure it isn't our process id
     pProcfsAccess->ourDeviceFd = pProcfsAccess->extraFd;
@@ -386,6 +515,42 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenForceTrueAndInUs
     pGlobalOperationsImp->init();
     ze_result_t result = zesDeviceReset(device, false);
     EXPECT_EQ(ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE, result);
+}
+
+TEST_F(SysmanGlobalOperationsFixture, GivenProcessStartsMidResetWhenCallingResetAndGetFileDescriptorsFailsThenSuccessIsReturned) {
+    // Pretend another process has the device open
+    pProcfsAccess->ourDevicePid = getpid() + 1; // make sure it isn't our process id
+    pProcfsAccess->ourDeviceFd = pProcfsAccess->extraFd;
+
+    ON_CALL(*pSysfsAccess.get(), getRealPath(_, Matcher<std::string &>(_)))
+        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::getRealPathVal));
+    ON_CALL(*pFsAccess.get(), canWrite(Matcher<std::string>(mockFunctionResetPath)))
+        .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<GlobalOperationsFsAccess>::getSuccess));
+    // Return process list without open fd on first call, but with open fd on subsequent calls
+    ON_CALL(*pProcfsAccess.get(), listProcesses(Matcher<std::vector<::pid_t> &>(_)))
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::mockProcessListDeviceInUse));
+    ON_CALL(*pProcfsAccess.get(), isAlive(_))
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::mockIsAlive));
+    ON_CALL(*pProcfsAccess.get(), myProcessId())
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::getMockMyProcessId));
+    EXPECT_CALL(*pProcfsAccess.get(), getFileDescriptors(_, Matcher<std::vector<int> &>(_)))
+        .WillOnce(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::getMockFileDescriptorsFailure))
+        .WillRepeatedly(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::getMockFileDescriptors));
+    ON_CALL(*pProcfsAccess.get(), getFileName(_, _, Matcher<std::string &>(_)))
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::getMockFileNameReturnError));
+    ON_CALL(*pSysfsAccess.get(), isMyDeviceFile(_))
+        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::mockIsMyDeviceFile));
+    ON_CALL(*pProcfsAccess.get(), kill(pProcfsAccess->ourDevicePid))
+        .WillByDefault(::testing::Invoke(pProcfsAccess.get(), &Mock<GlobalOperationsProcfsAccess>::mockKill));
+    EXPECT_CALL(*pSysfsAccess.get(), unbindDevice(_))
+        .WillOnce(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::mockDeviceOpSuccess));
+    EXPECT_CALL(*pFsAccess.get(), write(mockFunctionResetPath, std::string("1")))
+        .WillOnce(::testing::Invoke(pFsAccess.get(), &Mock<GlobalOperationsFsAccess>::writeSuccess));
+    EXPECT_CALL(*pSysfsAccess.get(), bindDevice(_))
+        .WillOnce(::testing::Invoke(pSysfsAccess.get(), &Mock<GlobalOperationsSysfsAccess>::mockDeviceOpSuccess));
+    pGlobalOperationsImp->init();
+    ze_result_t result = zesDeviceReset(device, false);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
 } // namespace ult

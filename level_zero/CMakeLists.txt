@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019-2020 Intel Corporation
+# Copyright (C) 2020-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -27,6 +27,10 @@ if(BUILD_WITH_L0)
       file(COPY ${LEVEL_ZERO_SOURCE_HEADERS} DESTINATION ${CUSTOM_L0_INCLUDE_PATH})
       set(LEVEL_ZERO_ROOT "${LEVEL_ZERO_ROOT_tmp}")
     endif()
+  endif()
+
+  if(NOT DEFINED DONT_USE_PREBUILT_KERNELS_L0)
+    set(DONT_USE_PREBUILT_KERNELS_L0 FALSE)
   endif()
 
   project(level-zero-gpu VERSION ${NEO_L0_VERSION_MAJOR}.${NEO_L0_VERSION_MINOR}.${NEO_VERSION_BUILD})
@@ -61,13 +65,36 @@ if(BUILD_WITH_L0)
   endif()
 
   if(UNIX)
-    # Xml Library
+    # Xml Package
     find_package(LibXml2)
     if(PC_LIBXML_FOUND)
       include_directories(SYSTEM ${LIBXML2_INCLUDE_DIR})
       message(STATUS "LibXml2 Library headers directory: ${LIBXML2_INCLUDE_DIR}")
     else()
       message(STATUS "LibXml2 Library headers not available. Building without.")
+    endif()
+    # Netlink and Generic Netlink
+    find_path(LIBGENL_INCLUDE_DIR netlink/genl/genl.h PATH_SUFFIXES libnl3)
+    if(LIBGENL_INCLUDE_DIR)
+      message(STATUS "LibGenl headers directory: ${LIBGENL_INCLUDE_DIR}")
+      include_directories(SYSTEM ${LIBGENL_INCLUDE_DIR})
+      set(LIBGENL_FOUND TRUE)
+    else()
+      message(STATUS "LibGenl headers not available. Building without")
+    endif()
+  endif()
+
+  if(UNIX)
+    # Firmware Update Library
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/source/sysman/linux/firmware_util${BRANCH_DIR_SUFFIX}")
+    find_package(libigsc)
+    if(libigsc_FOUND)
+      add_definitions(-DIGSC_PRESENT=1)
+      message(STATUS "libigsc Library headers directory: ${libigsc_INCLUDE_DIR}")
+      message(STATUS "libigsc version: ${libigsc_VERSION}")
+      include_directories(SYSTEM ${libigsc_INCLUDE_DIR})
+    else()
+      message(STATUS "libigsc Library headers not available. Building without")
     endif()
   endif()
 
@@ -90,6 +117,7 @@ if(BUILD_WITH_L0)
 
   if(SKIP_UNIT_TESTS)
     set(SKIP_L0_UNIT_TESTS TRUE)
+    set(SKIP_L0_BLACK_BOX_TESTS TRUE)
   endif()
 
   # Copy third_party_binaries to output BIN folder
@@ -125,8 +153,8 @@ if(BUILD_WITH_L0)
                          TARGET copy_third_party_files
                          PRE_BUILD
                          COMMAND ${CMAKE_COMMAND} -E make_directory ${CUSTOM_COMMAND_BINARY_DIR}
-                         COMMAND ${CMAKE_COMMAND} -E copy_directory "${IGC_DIR}/lib" "${CUSTOM_COMMAND_BINARY_DIR}/"
-                         DEPENDS "${IGC_DIR}/lib"
+                         COMMAND ${CMAKE_COMMAND} -E copy_directory "${NEO__IGC_LIBRARY_PATH}" "${CUSTOM_COMMAND_BINARY_DIR}/"
+                         DEPENDS "${NEO__IGC_LIBRARY_PATH}"
       )
     endif()
   endif()
@@ -155,8 +183,8 @@ if(BUILD_WITH_L0)
                          TARGET copy_third_party_files
                          PRE_BUILD
                          COMMAND ${CMAKE_COMMAND} -E make_directory ${CUSTOM_COMMAND_BINARY_DIR}
-                         COMMAND ${CMAKE_COMMAND} -E copy_directory "${GMM_DIR}/lib" "${CUSTOM_COMMAND_BINARY_DIR}/"
-                         DEPENDS "${GMM_DIR}/lib"
+                         COMMAND ${CMAKE_COMMAND} -E copy_directory "${NEO__GMM_LIBRARY_PATH}" "${CUSTOM_COMMAND_BINARY_DIR}/"
+                         DEPENDS "${NEO__GMM_LIBRARY_PATH}"
       )
     endif()
   endif()
@@ -186,6 +214,7 @@ if(BUILD_WITH_L0)
   include_directories(experimental/source/tracing)
 
   # Create our shared library/DLL
+  configure_file(ze_intel_gpu_version.h.in ${NEO_BUILD_DIR}/ze_intel_gpu_version.h)
   add_library(${TARGET_NAME_L0}
               SHARED
               ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
@@ -203,10 +232,11 @@ if(BUILD_WITH_L0)
                  PRIVATE
                  ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/create_command_stream.cpp
                  ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/create_deferred_deleter.cpp
+                 ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/create_memory_manager_${DRIVER_MODEL}.cpp
                  ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/create_tbx_sockets.cpp
                  ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/get_devices.cpp
                  ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/source_level_debugger_dll.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/source/helpers/built_ins_helper.cpp
+                 ${COMPUTE_RUNTIME_DIR}/shared/source/built_ins/sip_init.cpp
                  ${COMPUTE_RUNTIME_DIR}/shared/source/aub/aub_stream_interface.cpp
   )
 
@@ -216,29 +246,38 @@ if(BUILD_WITH_L0)
                    ${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory_base.cpp
                    ${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory.cpp
                    ${NEO_SHARED_DIRECTORY}/os_interface/windows/sys_calls.cpp
-                   ${NEO_SHARED_DIRECTORY}/os_interface/windows/os_interface.cpp
+                   ${NEO_SHARED_DIRECTORY}/os_interface/windows/os_interface_win.cpp
                    ${NEO_SHARED_DIRECTORY}/os_interface/windows/wddm/wddm_calls.cpp
                    ${NEO_SHARED_DIRECTORY}/os_interface/windows/wddm/wddm_create.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/windows/environment_variables.cpp
                    ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/windows/options_windows.cpp
                    ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/windows/os_interface.cpp
-                   ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/windows/create_wddm_memory_manager.cpp
     )
     target_link_libraries(${TARGET_NAME_L0}
                           dxgi
                           ws2_32
     )
+    if(DEFINED L0_DLL_RC_FILE)
+      message(STATUS "Setting L0 Resource Info")
+      target_sources(${TARGET_NAME_L0} PRIVATE ${L0_DLL_RC_FILE})
+    endif()
   else()
     target_sources(${TARGET_NAME_L0}
                    PRIVATE
                    ${NEO_SHARED_DIRECTORY}/os_interface/linux/sys_calls_linux.cpp
+                   ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}/devices.inl
+                   ${NEO_SHARED_DIRECTORY}/dll/devices/devices_base.inl
                    ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/linux/allocator_helper.cpp
-                   ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/linux/create_drm_memory_manager.cpp
-                   ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/linux/devices${BRANCH_DIR_SUFFIX}/devices.inl
-                   ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/linux/devices/devices_base.inl
                    ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/linux/options_linux.cpp
                    ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/linux/os_interface.cpp
     )
+    if(NOT DISABLE_WDDM_LINUX)
+      target_sources(${TARGET_NAME_L0}
+                     PRIVATE
+                     ${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory.cpp
+                     ${NEO_SHARED_DIRECTORY}/os_interface/windows/wddm/wddm_create.cpp
+      )
+    endif()
   endif()
 
   if(DEFINED AUB_STREAM_PROJECT_NAME)
@@ -250,9 +289,15 @@ if(BUILD_WITH_L0)
   target_sources(${TARGET_NAME_L0}
                  PRIVATE
                  $<TARGET_OBJECTS:${BUILTINS_SPIRV_LIB_NAME}>
-                 $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDFUL_LIB_NAME}>
-                 $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDLESS_LIB_NAME}>
   )
+  if(NOT ${DONT_USE_PREBUILT_KERNELS_L0})
+    message("Prebuilt kernels are linked to Level Zero.")
+    target_sources(${TARGET_NAME_L0}
+                   PRIVATE
+                   $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDFUL_LIB_NAME}>
+                   $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDLESS_LIB_NAME}>
+    )
+  endif()
 
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/source/inc)
 
@@ -283,7 +328,7 @@ if(BUILD_WITH_L0)
                                ${I915_INCLUDES_DIR}
     )
     target_include_directories(${TARGET_NAME_L0} PRIVATE
-                               ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/linux/devices${BRANCH_DIR_SUFFIX}
+                               ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}
     )
   else()
     set(OS_SPECIFIC_LIBS "")
@@ -337,16 +382,20 @@ if(BUILD_WITH_L0)
                                    L0_API
                                    L0_SOURCES_LINUX
                                    L0_SOURCES_WINDOWS
+                                   L0_SRCS_CACHE_RESERVATION
                                    L0_SRCS_COMPILER_INTERFACE
                                    L0_SRCS_DEBUGGER
+                                   L0_SRCS_DRIVER
                                    L0_SRCS_OCLOC_SHARED
     )
     if(WIN32)
       append_sources_from_properties(L0_RUNTIME_SOURCES
+                                     L0_SRCS_CACHE_RESERVATION_WINDOWS
                                      L0_SRCS_DEBUGGER_WINDOWS
       )
     else()
       append_sources_from_properties(L0_RUNTIME_SOURCES
+                                     L0_SRCS_CACHE_RESERVATION_LINUX
                                      L0_SRCS_DEBUGGER_LINUX
       )
     endif()
@@ -387,9 +436,12 @@ if(BUILD_WITH_L0)
                                ${KHRONOS_HEADERS_DIR}
     )
 
+    if(WIN32 OR NOT DISABLE_WDDM_LINUX)
+      target_include_directories(${LIB_NAME} PUBLIC ${WDK_INCLUDE_PATHS})
+    endif()
+
     if(WIN32)
       target_include_directories(${LIB_NAME} PUBLIC
-                                 ${WDK_INCLUDE_PATHS}
                                  ${CMAKE_CURRENT_SOURCE_DIR}/os_interface/windows
       )
     else()
@@ -452,6 +504,20 @@ if(BUILD_WITH_L0)
   )
 
   if(UNIX)
+    if(NEO_BUILD_DEBUG_SYMBOLS_PACKAGE)
+      get_filename_component(lib_file_name $<TARGET_FILE:${TARGET_NAME_L0}> NAME_WE)
+      set(symbols_file_name ${lib_file_name}.debug)
+      set(debug_symbols_target_name "${STRIP_SYMBOLS_TARGET}_${TARGET_NAME_L0}")
+      add_custom_target(${debug_symbols_target_name}
+                        COMMAND sh -c "objcopy --only-keep-debug ${lib_file_name} ${symbols_file_name}"
+                        COMMAND sh -c "strip -g ${lib_file_name}"
+                        COMMAND sh -c "objcopy --add-gnu-debuglink=${symbols_file_name} ${lib_file_name}"
+      )
+      add_dependencies(${debug_symbols_target_name} ${TARGET_NAME_L0})
+      add_dependencies(${STRIP_SYMBOLS_TARGET} ${debug_symbols_target_name})
+      set_property(GLOBAL APPEND PROPERTY DEBUG_SYMBOL_FILES "${symbols_file_name}")
+    endif()
+
     install(TARGETS ${TARGET_NAME_L0}
             LIBRARY
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
@@ -474,13 +540,22 @@ if(BUILD_WITH_L0)
     )
   endif()
   if(NOT SKIP_L0_UNIT_TESTS)
-    add_subdirectory_unique(core/test)
-    add_subdirectory_unique(tools/test)
-    add_subdirectory_unique(experimental/test)
+    add_subdirectory_unique(core/test/unit_tests)
+    add_subdirectory_unique(core/test/aub_tests)
+    add_subdirectory_unique(tools/test/unit_tests)
+    add_subdirectory_unique(experimental/test/unit_tests)
   else()
-    hide_subdir(core/test)
-    hide_subdir(tools/test)
-    hide_subdir(experimental/test)
+    hide_subdir(core/test/unit_tests)
+    hide_subdir(core/test/aub_tests)
+    hide_subdir(tools/test/unit_tests)
+    hide_subdir(experimental/test/unit_tests)
+  endif()
+  if(NOT SKIP_L0_BLACK_BOX_TESTS)
+    add_subdirectory_unique(core/test/black_box_tests)
+    add_subdirectory_unique(tools/test/black_box_tests)
+  else()
+    hide_subdir(core/test/black_box_tests)
+    hide_subdir(tools/test/black_box_tests)
   endif()
   add_subdirectories()
 

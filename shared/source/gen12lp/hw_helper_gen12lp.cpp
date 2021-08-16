@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -52,6 +52,11 @@ bool HwHelperHw<Family>::isWaDisableRccRhwoOptimizationRequired() const {
 }
 
 template <>
+bool HwHelperHw<Family>::isAdditionalFeatureFlagRequired(const FeatureTable *featureTable) const {
+    return featureTable->ftrGpGpuMidThreadLevelPreempt;
+}
+
+template <>
 uint32_t HwHelperHw<Family>::getComputeUnitsUsedForScratch(const HardwareInfo *pHwInfo) const {
     /* For ICL+ maxThreadCount equals (EUCount * 8).
      ThreadCount/EUCount=7 is no longer valid, so we have to force 8 in below formula.
@@ -101,9 +106,9 @@ uint32_t HwHelperHw<Family>::getHwRevIdFromStepping(uint32_t stepping, const Har
 }
 
 template <>
-uint32_t HwHelperHw<Family>::getSteppingFromHwRevId(uint32_t hwRevId, const HardwareInfo &hwInfo) const {
+uint32_t HwHelperHw<Family>::getSteppingFromHwRevId(const HardwareInfo &hwInfo) const {
     if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_TIGERLAKE_LP) {
-        switch (hwRevId) {
+        switch (hwInfo.platform.usRevId) {
         case 0x0:
             return REVISION_A0;
         case 0x1:
@@ -112,7 +117,7 @@ uint32_t HwHelperHw<Family>::getSteppingFromHwRevId(uint32_t hwRevId, const Hard
             return REVISION_C;
         }
     } else if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_ROCKETLAKE) {
-        switch (hwRevId) {
+        switch (hwInfo.platform.usRevId) {
         case 0x0:
             return REVISION_A0;
         case 0x1:
@@ -121,18 +126,18 @@ uint32_t HwHelperHw<Family>::getSteppingFromHwRevId(uint32_t hwRevId, const Hard
             return REVISION_C;
         }
     } else if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_ALDERLAKE_S) {
-        switch (hwRevId) {
+        switch (hwInfo.platform.usRevId) {
         case 0x0:
             return REVISION_A0;
         case 0x4:
             return REVISION_B;
         }
     }
-    return Gen12LPHelpers::getSteppingFromHwRevId(hwRevId, hwInfo);
+    return Gen12LPHelpers::getSteppingFromHwRevId(hwInfo);
 }
 
 template <>
-bool HwHelperHw<Family>::obtainRenderBufferCompressionPreference(const HardwareInfo &hwInfo, const size_t size) const {
+bool HwHelperHw<Family>::isBufferSizeSuitableForRenderCompression(const size_t size, const HardwareInfo &hwInfo) const {
     return false;
 }
 
@@ -157,7 +162,7 @@ void HwHelperHw<Family>::setCapabilityCoherencyFlag(const HardwareInfo *pHwInfo,
 }
 
 template <>
-uint32_t HwHelperHw<Family>::getPitchAlignmentForImage(const HardwareInfo *hwInfo) {
+uint32_t HwHelperHw<Family>::getPitchAlignmentForImage(const HardwareInfo *hwInfo) const {
     if (Gen12LPHelpers::imagePitchAlignmentWaRequired(hwInfo->platform.eProductFamily)) {
         HwHelper &hwHelper = HwHelper::get(hwInfo->platform.eRenderCoreFamily);
         if (hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_B, *hwInfo)) {
@@ -191,31 +196,21 @@ const HwHelper::EngineInstancesContainer HwHelperHw<Family>::getGpgpuEngineInsta
         engines.push_back({aub_stream::ENGINE_BCS, EngineUsage::Regular});
     }
 
-    auto hwInfoConfig = HwInfoConfig::get(hwInfo.platform.eProductFamily);
-    if (hwInfoConfig->isEvenContextCountRequired() && engines.size() & 1) {
-        engines.push_back({aub_stream::ENGINE_RCS, EngineUsage::Regular});
-    }
-
     return engines;
 };
 
 template <>
-void HwHelperHw<Family>::addEngineToEngineGroup(std::vector<std::vector<EngineControl>> &engineGroups,
-                                                EngineControl &engine, const HardwareInfo &hwInfo) const {
-    if (engine.getEngineType() == aub_stream::ENGINE_RCS) {
-        engineGroups[static_cast<uint32_t>(EngineGroupType::RenderCompute)].push_back(engine);
+EngineGroupType HwHelperHw<Family>::getEngineGroupType(aub_stream::EngineType engineType, const HardwareInfo &hwInfo) const {
+    switch (engineType) {
+    case aub_stream::ENGINE_RCS:
+        return EngineGroupType::RenderCompute;
+    case aub_stream::ENGINE_CCS:
+        return EngineGroupType::Compute;
+    case aub_stream::ENGINE_BCS:
+        return EngineGroupType::Copy;
+    default:
+        UNRECOVERABLE_IF(true);
     }
-    if (engine.getEngineType() == aub_stream::ENGINE_CCS) {
-        engineGroups[static_cast<uint32_t>(EngineGroupType::Compute)].push_back(engine);
-    }
-    if (engine.getEngineType() == aub_stream::ENGINE_BCS && DebugManager.flags.EnableBlitterOperationsSupport.get() != 0) {
-        engineGroups[static_cast<uint32_t>(EngineGroupType::Copy)].push_back(engine);
-    }
-}
-
-template <>
-bool HwHelperHw<Family>::forceBlitterUseForGlobalBuffers(const HardwareInfo &hwInfo, GraphicsAllocation *allocation) const {
-    return Gen12LPHelpers::forceBlitterUseForGlobalBuffers(hwInfo, allocation);
 }
 
 template <>
@@ -289,21 +284,16 @@ bool MemorySynchronizationCommands<TGLLPFamily>::isPipeControlPriorToPipelineSel
 }
 
 template <>
-bool HwHelperHw<Family>::obtainBlitterPreference(const HardwareInfo &hwInfo) const {
-    return Gen12LPHelpers::obtainBlitterPreference(hwInfo);
-}
-
-template <>
-inline LocalMemoryAccessMode HwHelperHw<Family>::getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const {
-    return Gen12LPHelpers::getDefaultLocalMemoryAccessMode(hwInfo);
-}
-
-template <>
 void HwHelperHw<TGLLPFamily>::setExtraAllocationData(AllocationData &allocationData, const AllocationProperties &properties, const HardwareInfo &hwInfo) const {
     HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
     if (hwHelper.getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed) {
         if (GraphicsAllocation::isCpuAccessRequired(properties.allocationType)) {
             allocationData.flags.useSystemMemory = true;
+        }
+    }
+    if (IGFX_DG1 == hwInfo.platform.eProductFamily) {
+        if (properties.allocationType == GraphicsAllocation::AllocationType::BUFFER) {
+            allocationData.storageInfo.isLockable = true;
         }
     }
 }

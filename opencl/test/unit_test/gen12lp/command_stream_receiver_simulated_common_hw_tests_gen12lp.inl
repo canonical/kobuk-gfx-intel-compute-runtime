@@ -1,17 +1,16 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 
+#include "opencl/source/command_stream/definitions/command_stream_receiver_simulated_hw.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_aub_stream.h"
 #include "test.h"
-
-#include "command_stream_receiver_simulated_hw.h"
 
 using namespace NEO;
 
@@ -25,6 +24,7 @@ class MockSimulatedCsrHw : public CommandStreamReceiverSimulatedHw<FamilyType> {
     void pollForCompletion() override {}
     bool writeMemory(GraphicsAllocation &gfxAllocation) override { return true; }
     void writeMemory(uint64_t gpuAddress, void *cpuAddress, size_t size, uint32_t memoryBank, uint64_t entryBits) override {}
+    void writeMMIO(uint32_t offset, uint32_t value) override {}
     void dumpAllocation(GraphicsAllocation &gfxAllocation) override {}
 };
 

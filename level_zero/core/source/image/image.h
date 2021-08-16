@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,10 +16,10 @@ struct _ze_image_handle_t {};
 
 namespace NEO {
 struct ImageInfo;
-}
+struct ImageDescriptor;
+} // namespace NEO
 
 namespace L0 {
-
 struct Image : _ze_image_handle_t {
     template <typename Type>
     struct Allocator {
@@ -31,12 +31,16 @@ struct Image : _ze_image_handle_t {
 
     static ze_result_t create(uint32_t productFamily, Device *device, const ze_image_desc_t *desc, Image **pImage);
 
+    virtual ze_result_t createView(Device *device, const ze_image_desc_t *desc, ze_image_handle_t *pImage) = 0;
+
     virtual NEO::GraphicsAllocation *getAllocation() = 0;
     virtual void copySurfaceStateToSSH(void *surfaceStateHeap,
-                                       const uint32_t surfaceStateOffset) = 0;
+                                       const uint32_t surfaceStateOffset,
+                                       bool isMediaBlockArg) = 0;
     virtual void copyRedescribedSurfaceStateToSSH(void *surfaceStateHeap, const uint32_t surfaceStateOffset) = 0;
     virtual NEO::ImageInfo getImageInfo() = 0;
     virtual ze_image_desc_t getImageDesc() = 0;
+    virtual ze_result_t getMemoryProperties(ze_image_memory_properties_exp_t *pMemoryProperties) = 0;
 
     static Image *fromHandle(ze_image_handle_t handle) { return static_cast<Image *>(handle); }
 

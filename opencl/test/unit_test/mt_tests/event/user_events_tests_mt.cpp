@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -15,7 +15,7 @@
 
 typedef HelloWorldTest<HelloWorldFixtureFactory> EventTests;
 
-TEST_F(MockEventTests, eventCreatedFromUserEventsThatIsNotSignaledDoesntFlushToCSR) {
+TEST_F(MockEventTests, GivenEventCreatedFromUserEventsThatIsNotSignaledThenDoNotFlushToCsr) {
     uEvent = make_releaseable<UserEvent>();
     cl_event retEvent = nullptr;
     cl_event eventWaitList[] = {uEvent.get()};

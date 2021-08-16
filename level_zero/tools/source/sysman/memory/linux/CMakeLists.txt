@@ -1,20 +1,22 @@
 #
-# Copyright (C) 2020 Intel Corporation
+# Copyright (C) 2020-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
 
-if(SUPPORT_DG1)
-  set(L0_SRCS_TOOLS_SYSMAN_MEMORY_LINUX
-      ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
-      ${CMAKE_CURRENT_SOURCE_DIR}/dg1${BRANCH_DIR_SUFFIX}/os_memory_imp.cpp
-      ${CMAKE_CURRENT_SOURCE_DIR}/dg1${BRANCH_DIR_SUFFIX}/os_memory_imp.h
+set(L0_SRCS_TOOLS_SYSMAN_MEMORY_LINUX
+    ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+)
+
+if(SUPPORT_DG1 AND "${BRANCH_TYPE}" STREQUAL "")
+  list(APPEND L0_SRCS_TOOLS_SYSMAN_MEMORY_LINUX
+       ${CMAKE_CURRENT_SOURCE_DIR}/os_memory_imp.h
+       ${CMAKE_CURRENT_SOURCE_DIR}/os_memory_imp_dg1.cpp
   )
 else()
-  set(L0_SRCS_TOOLS_SYSMAN_MEMORY_LINUX
-      ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
-      ${CMAKE_CURRENT_SOURCE_DIR}/os_memory_imp.cpp
-      ${CMAKE_CURRENT_SOURCE_DIR}/os_memory_imp.h
+  list(APPEND L0_SRCS_TOOLS_SYSMAN_MEMORY_LINUX
+       ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/os_memory_imp.h
+       ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/os_memory_imp.cpp
   )
 endif()
 

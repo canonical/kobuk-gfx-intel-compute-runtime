@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,8 +7,8 @@
 
 #include "shared/source/memory_manager/multi_graphics_allocation.h"
 
-#include "shared/source/helpers/string.h"
-#include "shared/source/memory_manager/memory_manager.h"
+#include "shared/source/gmm_helper/gmm.h"
+#include "shared/source/memory_manager/migration_sync_data.h"
 
 namespace NEO {
 
@@ -16,10 +16,24 @@ MultiGraphicsAllocation::MultiGraphicsAllocation(uint32_t maxRootDeviceIndex) {
     graphicsAllocations.resize(maxRootDeviceIndex + 1);
 }
 
-MultiGraphicsAllocation::MultiGraphicsAllocation(const MultiGraphicsAllocation &obj) {
-    lastUsedRootDeviceIndex = obj.lastUsedRootDeviceIndex;
-    requiredRootDeviceIndex = obj.requiredRootDeviceIndex;
-    graphicsAllocations = obj.graphicsAllocations;
+MultiGraphicsAllocation::MultiGraphicsAllocation(const MultiGraphicsAllocation &multiGraphicsAllocation) {
+    this->graphicsAllocations = multiGraphicsAllocation.graphicsAllocations;
+    this->migrationSyncData = multiGraphicsAllocation.migrationSyncData;
+    this->isMultiStorage = multiGraphicsAllocation.isMultiStorage;
+    if (migrationSyncData) {
+        migrationSyncData->incRefInternal();
+    }
+}
+MultiGraphicsAllocation::MultiGraphicsAllocation(MultiGraphicsAllocation &&multiGraphicsAllocation) {
+    this->graphicsAllocations = std::move(multiGraphicsAllocation.graphicsAllocations);
+    std::swap(this->migrationSyncData, multiGraphicsAllocation.migrationSyncData);
+    this->isMultiStorage = multiGraphicsAllocation.isMultiStorage;
+};
+
+MultiGraphicsAllocation::~MultiGraphicsAllocation() {
+    if (migrationSyncData) {
+        migrationSyncData->decRefInternal();
+    }
 }
 
 GraphicsAllocation *MultiGraphicsAllocation::getDefaultGraphicsAllocation() const {
@@ -57,35 +71,24 @@ StackVec<GraphicsAllocation *, 1> const &MultiGraphicsAllocation::getGraphicsAll
     return graphicsAllocations;
 }
 
-void MultiGraphicsAllocation::ensureMemoryOnDevice(MemoryManager &memoryManager, uint32_t requiredRootDeviceIndex) {
-    std::unique_lock<std::mutex> lock(transferMutex);
-    this->requiredRootDeviceIndex = requiredRootDeviceIndex;
-
-    if (lastUsedRootDeviceIndex == std::numeric_limits<uint32_t>::max()) {
-        lastUsedRootDeviceIndex = requiredRootDeviceIndex;
-        return;
+void MultiGraphicsAllocation::setMultiStorage(bool value) {
+    isMultiStorage = value;
+    if (isMultiStorage && !migrationSyncData) {
+        auto graphicsAllocation = getDefaultGraphicsAllocation();
+        UNRECOVERABLE_IF(!graphicsAllocation);
+        migrationSyncData = createMigrationSyncDataFunc(graphicsAllocation->getUnderlyingBufferSize());
+        migrationSyncData->incRefInternal();
     }
-
-    if (this->requiredRootDeviceIndex == lastUsedRootDeviceIndex) {
-        return;
-    }
-
-    if (MemoryPool::isSystemMemoryPool(getGraphicsAllocation(requiredRootDeviceIndex)->getMemoryPool())) {
-        lastUsedRootDeviceIndex = requiredRootDeviceIndex;
-        return;
-    }
-
-    auto srcPtr = memoryManager.lockResource(getGraphicsAllocation(lastUsedRootDeviceIndex));
-    auto dstPtr = memoryManager.lockResource(getGraphicsAllocation(requiredRootDeviceIndex));
-
-    memcpy_s(dstPtr, getGraphicsAllocation(requiredRootDeviceIndex)->getUnderlyingBufferSize(),
-             srcPtr, getGraphicsAllocation(lastUsedRootDeviceIndex)->getUnderlyingBufferSize());
-
-    memoryManager.unlockResource(getGraphicsAllocation(lastUsedRootDeviceIndex));
-    memoryManager.unlockResource(getGraphicsAllocation(requiredRootDeviceIndex));
-
-    lastUsedRootDeviceIndex = requiredRootDeviceIndex;
-    lock.unlock();
 }
 
+bool MultiGraphicsAllocation::requiresMigrations() const {
+    if (migrationSyncData && migrationSyncData->isMigrationInProgress()) {
+        return false;
+    }
+    return isMultiStorage;
+}
+
+decltype(MultiGraphicsAllocation::createMigrationSyncDataFunc) MultiGraphicsAllocation::createMigrationSyncDataFunc = [](size_t size) -> MigrationSyncData * {
+    return new MigrationSyncData(size);
+};
 } // namespace NEO

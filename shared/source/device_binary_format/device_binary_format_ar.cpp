@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -45,6 +45,7 @@ SingleDeviceBinary unpackSingleDeviceBinary<NEO::DeviceBinaryFormat::Archive>(co
 
     std::string unpackErrors;
     std::string unpackWarnings;
+    SingleDeviceBinary binaryForRecompilation = {};
     for (auto matchedFile : matchedFiles) {
         if (nullptr == matchedFile) {
             continue;
@@ -56,6 +57,13 @@ SingleDeviceBinary unpackSingleDeviceBinary<NEO::DeviceBinaryFormat::Archive>(co
             }
             return unpacked;
         }
+        if (binaryForRecompilation.intermediateRepresentation.empty() && (false == unpacked.intermediateRepresentation.empty())) {
+            binaryForRecompilation = unpacked;
+        }
+    }
+
+    if (false == binaryForRecompilation.intermediateRepresentation.empty()) {
+        return binaryForRecompilation;
     }
 
     outErrReason = "Couldn't find matching binary in AR archive";

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,8 +13,9 @@
 #include "opencl/source/cl_device/cl_device_vector.h"
 #include "opencl/source/context/context_type.h"
 #include "opencl/source/context/driver_diagnostics.h"
+#include "opencl/source/gtpin/gtpin_notify.h"
 #include "opencl/source/helpers/base_object.h"
-#include "opencl/source/helpers/destructor_callback.h"
+#include "opencl/source/helpers/destructor_callbacks.h"
 
 #include <list>
 #include <map>
@@ -33,6 +34,7 @@ class SharingFunctions;
 class SVMAllocsManager;
 class SchedulerKernel;
 class Program;
+class Platform;
 
 template <>
 struct OpenCLObjectMapper<_cl_context> {
@@ -60,7 +62,7 @@ class Context : public BaseObject<_cl_context> {
             delete pContext;
             pContext = nullptr;
         }
-
+        gtpinNotifyContextCreate(pContext);
         return pContext;
     }
 
@@ -80,7 +82,7 @@ class Context : public BaseObject<_cl_context> {
                                     cl_image_format *imageFormats, cl_uint *numImageFormats);
 
     size_t getNumDevices() const;
-    size_t getTotalNumDevices() const;
+    bool containsMultipleSubDevices(uint32_t rootDeviceIndex) const;
     ClDevice *getDevice(size_t deviceOrdinal) const;
 
     MemoryManager *getMemoryManager() const {
@@ -109,7 +111,7 @@ class Context : public BaseObject<_cl_context> {
     void registerSharing(Sharing *sharing);
 
     template <typename... Args>
-    void providePerformanceHint(cl_diagnostics_verbose_level flags, PerformanceHints performanceHint, Args &&... args) {
+    void providePerformanceHint(cl_diagnostics_verbose_level flags, PerformanceHints performanceHint, Args &&...args) {
         DEBUG_BREAK_IF(contextCallback == nullptr);
         DEBUG_BREAK_IF(driverDiagnostics == nullptr);
         char hint[DriverDiagnostics::maxHintStringSize];
@@ -125,7 +127,7 @@ class Context : public BaseObject<_cl_context> {
     }
 
     template <typename... Args>
-    void providePerformanceHintForMemoryTransfer(cl_command_type commandType, bool transferRequired, Args &&... args) {
+    void providePerformanceHintForMemoryTransfer(cl_command_type commandType, bool transferRequired, Args &&...args) {
         cl_diagnostics_verbose_level verboseLevel = transferRequired ? CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL
                                                                      : CL_CONTEXT_DIAGNOSTICS_LEVEL_GOOD_INTEL;
         PerformanceHints hint = driverDiagnostics->obtainHintForTransferOperation(commandType, transferRequired);
@@ -140,10 +142,11 @@ class Context : public BaseObject<_cl_context> {
     bool getInteropUserSyncEnabled() { return interopUserSync; }
     void setInteropUserSyncEnabled(bool enabled) { interopUserSync = enabled; }
     bool areMultiStorageAllocationsPreferred();
+    bool isSingleDeviceContext();
 
     ContextType peekContextType() const { return contextType; }
 
-    SchedulerKernel &getSchedulerKernel();
+    MOCKABLE_VIRTUAL SchedulerKernel &getSchedulerKernel();
 
     bool isDeviceAssociated(const ClDevice &clDevice) const;
     ClDevice *getSubDeviceByIndex(uint32_t subDeviceIndex) const;
@@ -160,6 +163,9 @@ class Context : public BaseObject<_cl_context> {
     const ClDeviceVector &getDevices() const {
         return devices;
     }
+    const std::map<uint32_t, DeviceBitfield> &getDeviceBitfields() const { return deviceBitfields; };
+
+    static Platform *getPlatformFromProperties(const cl_context_properties *properties, cl_int &errcode);
 
   protected:
     struct BuiltInKernel {
@@ -184,7 +190,7 @@ class Context : public BaseObject<_cl_context> {
     std::map<uint32_t, DeviceBitfield> deviceBitfields;
     std::vector<std::unique_ptr<SharingFunctions>> sharingFunctions;
     ClDeviceVector devices;
-    std::list<ContextDestructorCallback *> destructorCallbacks;
+    ContextDestructorCallbacks destructorCallbacks;
     std::unique_ptr<BuiltInKernel> schedulerBuiltIn;
 
     const cl_context_properties *properties = nullptr;

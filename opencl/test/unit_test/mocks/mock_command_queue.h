@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -18,13 +18,19 @@
 namespace NEO {
 class MockCommandQueue : public CommandQueue {
   public:
+    using CommandQueue::bcsEngine;
     using CommandQueue::blitEnqueueAllowed;
     using CommandQueue::blitEnqueueImageAllowed;
+    using CommandQueue::blitEnqueuePreferred;
     using CommandQueue::bufferCpuCopyAllowed;
     using CommandQueue::device;
     using CommandQueue::gpgpuEngine;
     using CommandQueue::isCopyOnly;
     using CommandQueue::obtainNewTimestampPacketNodes;
+    using CommandQueue::queueCapabilities;
+    using CommandQueue::queueFamilyIndex;
+    using CommandQueue::queueFamilySelected;
+    using CommandQueue::queueIndexWithinFamily;
     using CommandQueue::requiresCacheFlushAfterWalker;
     using CommandQueue::throttle;
     using CommandQueue::timestampPacketContainer;
@@ -35,10 +41,10 @@ class MockCommandQueue : public CommandQueue {
     void setOoqEnabled() {
         commandQueueProperties |= CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
     }
-    MockCommandQueue() : CommandQueue(nullptr, nullptr, 0) {}
-    MockCommandQueue(Context &context) : MockCommandQueue(&context, context.getDevice(0), nullptr) {}
-    MockCommandQueue(Context *context, ClDevice *device, const cl_queue_properties *props)
-        : CommandQueue(context, device, props) {
+    MockCommandQueue() : CommandQueue(nullptr, nullptr, 0, false) {}
+    MockCommandQueue(Context &context) : MockCommandQueue(&context, context.getDevice(0), nullptr, false) {}
+    MockCommandQueue(Context *context, ClDevice *device, const cl_queue_properties *props, bool internalUsage)
+        : CommandQueue(context, device, props, internalUsage) {
     }
 
     LinearStream &getCS(size_t minRequiredSize) override {
@@ -68,8 +74,8 @@ class MockCommandQueue : public CommandQueue {
         return CommandQueue::waitUntilComplete(gpgpuTaskCountToWait, bcsTaskCountToWait, flushStampToWait, useQuickKmdSleep);
     }
 
-    cl_int enqueueCopyImage(Image *srcImage, Image *dstImage, const size_t srcOrigin[3],
-                            const size_t dstOrigin[3], const size_t region[3],
+    cl_int enqueueCopyImage(Image *srcImage, Image *dstImage, const size_t *srcOrigin,
+                            const size_t *dstOrigin, const size_t *region,
                             cl_uint numEventsInWaitList, const cl_event *eventWaitList,
                             cl_event *event) override { return CL_SUCCESS; }
 
@@ -82,7 +88,7 @@ class MockCommandQueue : public CommandQueue {
                              size_t size, cl_uint numEventsInWaitList,
                              const cl_event *eventWaitList, cl_event *event) override { return CL_SUCCESS; }
 
-    cl_int enqueueKernel(cl_kernel kernel, cl_uint workDim, const size_t *globalWorkOffset,
+    cl_int enqueueKernel(Kernel *kernel, cl_uint workDim, const size_t *globalWorkOffset,
                          const size_t *globalWorkSize, const size_t *localWorkSize,
                          cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event) override { return CL_SUCCESS; }
 
@@ -188,7 +194,7 @@ class MockCommandQueue : public CommandQueue {
 
 template <typename GfxFamily>
 class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
-    typedef CommandQueueHw<GfxFamily> BaseClass;
+    using BaseClass = CommandQueueHw<GfxFamily>;
 
   public:
     using BaseClass::bcsEngine;
@@ -196,7 +202,9 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     using BaseClass::blitEnqueueAllowed;
     using BaseClass::commandQueueProperties;
     using BaseClass::commandStream;
+    using BaseClass::deferredTimestampPackets;
     using BaseClass::gpgpuEngine;
+    using BaseClass::isBlitAuxTranslationRequired;
     using BaseClass::latestSentEnqueueType;
     using BaseClass::obtainCommandStream;
     using BaseClass::obtainNewTimestampPacketNodes;
@@ -303,8 +311,8 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
         return BaseClass::isCacheFlushForBcsRequired();
     }
 
-    bool blitEnqueueImageAllowed(const size_t *origin, const size_t *region) override {
-        isBlitEnqueueImageAllowed = BaseClass::blitEnqueueImageAllowed(origin, region);
+    bool blitEnqueueImageAllowed(const size_t *origin, const size_t *region, const Image &image) override {
+        isBlitEnqueueImageAllowed = BaseClass::blitEnqueueImageAllowed(origin, region, image);
         return isBlitEnqueueImageAllowed;
     }
 

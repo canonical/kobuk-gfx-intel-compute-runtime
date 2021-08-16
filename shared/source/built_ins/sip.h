@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,41 +11,50 @@
 #include "shared/source/program/program_info.h"
 
 #include <memory>
-
+#include <vector>
 namespace NEO {
 
 class Device;
 class GraphicsAllocation;
-
-const char *getSipKernelCompilerInternalOptions(SipKernelType kernel);
-
-const char *getSipLlSrc(const Device &device);
+class MemoryManager;
+struct RootDeviceEnvironment;
 
 class SipKernel {
   public:
-    SipKernel(SipKernelType type, ProgramInfo &&sipProgramInfo);
+    SipKernel(SipKernelType type, GraphicsAllocation *sipAlloc, std::vector<char> ssah);
     SipKernel(const SipKernel &) = delete;
     SipKernel &operator=(const SipKernel &) = delete;
     SipKernel(SipKernel &&) = delete;
     SipKernel &operator=(SipKernel &&) = delete;
     virtual ~SipKernel();
 
-    const char *getBinary() const;
-
-    size_t getBinarySize() const;
-
     SipKernelType getType() const {
         return type;
     }
 
-    static const size_t maxDbgSurfaceSize;
-
     MOCKABLE_VIRTUAL GraphicsAllocation *getSipAllocation() const;
-    static SipKernelType getSipKernelType(GFXCORE_FAMILY family, bool debuggingActive);
-    static GraphicsAllocation *getSipKernelAllocation(Device &device);
+    MOCKABLE_VIRTUAL const std::vector<char> &getStateSaveAreaHeader() const;
+
+    static bool initSipKernel(SipKernelType type, Device &device);
+    static void freeSipKernels(RootDeviceEnvironment *rootDeviceEnvironment, MemoryManager *memoryManager);
+
+    static const SipKernel &getSipKernel(Device &device);
+    static SipKernelType getSipKernelType(Device &device);
+
+    static const size_t maxDbgSurfaceSize;
+    static SipClassType classType;
 
   protected:
+    static bool initSipKernelImpl(SipKernelType type, Device &device);
+    static const SipKernel &getSipKernelImpl(Device &device);
+
+    static bool initBuiltinsSipKernel(SipKernelType type, Device &device);
+    static bool initRawBinaryFromFileKernel(SipKernelType type, Device &device, std::string &fileName);
+
+    static void selectSipClassType(std::string &fileName);
+
+    const std::vector<char> stateSaveAreaHeader;
+    GraphicsAllocation *sipAllocation = nullptr;
     SipKernelType type = SipKernelType::COUNT;
-    const ProgramInfo programInfo;
 };
 } // namespace NEO

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -34,17 +34,17 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBuffer(
 
     auto rootDeviceIndex = getDevice().getRootDeviceIndex();
 
-    buffer->getMigrateableMultiGraphicsAllocation().ensureMemoryOnDevice(*getDevice().getMemoryManager(), rootDeviceIndex);
-
     const cl_command_type cmdType = CL_COMMAND_WRITE_BUFFER;
     auto isMemTransferNeeded = buffer->isMemObjZeroCopy() ? buffer->checkIfMemoryTransferIsRequired(offset, 0, ptr, cmdType) : true;
     bool isCpuCopyAllowed = bufferCpuCopyAllowed(buffer, cmdType, blockingWrite, size, const_cast<void *>(ptr),
                                                  numEventsInWaitList, eventWaitList);
 
+    InternalMemoryType memoryType = InternalMemoryType::NOT_SPECIFIED;
     //check if we are dealing with SVM pointer here for which we already have an allocation
     if (!mapAllocation && this->getContext().getSVMAllocsManager()) {
         auto svmEntry = this->getContext().getSVMAllocsManager()->getSVMAlloc(ptr);
         if (svmEntry) {
+            memoryType = svmEntry->memoryType;
             if ((svmEntry->gpuAllocations.getGraphicsAllocation(rootDeviceIndex)->getGpuAddress() + svmEntry->size) < (castToUint64(ptr) + size)) {
                 return CL_INVALID_OPERATION;
             }
@@ -54,7 +54,6 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBuffer(
                     isCpuCopyAllowed = false;
                 }
             }
-
             mapAllocation = svmEntry->cpuAllocation ? svmEntry->cpuAllocation : svmEntry->gpuAllocations.getGraphicsAllocation(rootDeviceIndex);
         }
     }
@@ -89,8 +88,10 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBuffer(
         surfaces[1] = &mapSurface;
         mapSurface.setGraphicsAllocation(mapAllocation);
         //get offset between base cpu ptr of map allocation and dst ptr
-        size_t srcOffset = ptrDiff(srcPtr, mapAllocation->getUnderlyingBuffer());
-        srcPtr = reinterpret_cast<void *>(mapAllocation->getGpuAddress() + srcOffset);
+        if ((memoryType != DEVICE_UNIFIED_MEMORY) && (memoryType != SHARED_UNIFIED_MEMORY)) {
+            size_t srcOffset = ptrDiff(srcPtr, mapAllocation->getUnderlyingBuffer());
+            srcPtr = reinterpret_cast<void *>(mapAllocation->getGpuAddress() + srcOffset);
+        }
     } else {
         surfaces[1] = &hostPtrSurf;
         if (size != 0) {

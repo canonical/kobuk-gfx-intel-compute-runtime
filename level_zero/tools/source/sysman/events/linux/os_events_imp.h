@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,7 +13,7 @@ namespace L0 {
 
 class LinuxEventsImp : public OsEvents, NEO::NonCopyableOrMovableClass {
   public:
-    bool eventListen(zes_event_type_flags_t &pEvent) override;
+    bool eventListen(zes_event_type_flags_t &pEvent, uint64_t timeout) override;
     ze_result_t eventRegister(zes_event_type_flags_t events) override;
     LinuxEventsImp() = default;
     LinuxEventsImp(OsSysman *pOsSysman);
@@ -21,11 +21,14 @@ class LinuxEventsImp : public OsEvents, NEO::NonCopyableOrMovableClass {
 
   protected:
     LinuxSysmanImp *pLinuxSysmanImp = nullptr;
-    void init();
+    void getPciIdPathTag();
+    zes_mem_health_t currentMemHealth();
     bool isResetRequired(zes_event_type_flags_t &pEvent);
     bool checkDeviceDetachEvent(zes_event_type_flags_t &pEvent);
     bool checkDeviceAttachEvent(zes_event_type_flags_t &pEvent);
+    bool checkIfMemHealthChanged(zes_event_type_flags_t &pEvent);
     std::string pciIdPathTag;
+    zes_mem_health_t memHealthAtEventRegister = ZES_MEM_HEALTH_UNKNOWN;
 
   private:
     FsAccess *pFsAccess = nullptr;

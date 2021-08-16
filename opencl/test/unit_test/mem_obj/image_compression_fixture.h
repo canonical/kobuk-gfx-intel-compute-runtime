@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/helpers/surface_formats.h"
@@ -31,12 +31,15 @@ class ImageCompressionTests : public ::testing::Test {
     };
 
     void SetUp() override {
-        mockDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-        myMemoryManager = new MyMemoryManager(*mockDevice->getExecutionEnvironment());
-        mockDevice->injectMemoryManager(myMemoryManager);
+        mockExecutionEnvironment = new MockExecutionEnvironment();
+        myMemoryManager = new MyMemoryManager(*mockExecutionEnvironment);
+        mockExecutionEnvironment->memoryManager.reset(myMemoryManager);
+
+        mockDevice = std::make_unique<MockClDevice>(MockDevice::createWithExecutionEnvironment<MockDevice>(nullptr, mockExecutionEnvironment, 0u));
         mockContext = make_releaseable<MockContext>(mockDevice.get());
     }
 
+    MockExecutionEnvironment *mockExecutionEnvironment;
     std::unique_ptr<MockClDevice> mockDevice;
     ReleaseableObjectPtr<MockContext> mockContext;
     MyMemoryManager *myMemoryManager = nullptr;

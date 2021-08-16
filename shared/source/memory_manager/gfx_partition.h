@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -23,6 +23,7 @@ enum class HeapIndex : uint32_t {
     HEAP_EXTERNAL = 3u,
     HEAP_STANDARD,
     HEAP_STANDARD64KB,
+    HEAP_STANDARD2MB,
     HEAP_SVM,
     HEAP_EXTENDED,
     HEAP_EXTERNAL_FRONT_WINDOW,
@@ -42,10 +43,14 @@ class GfxPartition {
     bool init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToReserve, uint32_t rootDeviceIndex, size_t numRootDevices) {
         return init(gpuAddressSpace, cpuAddressRangeSizeToReserve, rootDeviceIndex, numRootDevices, false);
     }
-    MOCKABLE_VIRTUAL bool init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToReserve, uint32_t rootDeviceIndex, size_t numRootDevices, bool useFrontWindowPool);
+    MOCKABLE_VIRTUAL bool init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToReserve, uint32_t rootDeviceIndex, size_t numRootDevices, bool useExternalFrontWindowPool);
 
     void heapInit(HeapIndex heapIndex, uint64_t base, uint64_t size) {
-        getHeap(heapIndex).init(base, size);
+        getHeap(heapIndex).init(base, size, MemoryConstants::pageSize);
+    }
+
+    void heapInitWithAllocationAlignment(HeapIndex heapIndex, uint64_t base, uint64_t size, size_t allocationAlignment) {
+        getHeap(heapIndex).init(base, size, allocationAlignment);
     }
 
     void heapInitExternalWithFrontWindow(HeapIndex heapIndex, uint64_t base, uint64_t size) {
@@ -60,11 +65,15 @@ class GfxPartition {
         getHeap(heapIndex).initFrontWindow(base, size);
     }
 
-    uint64_t heapAllocate(HeapIndex heapIndex, size_t &size) {
+    MOCKABLE_VIRTUAL uint64_t heapAllocate(HeapIndex heapIndex, size_t &size) {
         return getHeap(heapIndex).allocate(size);
     }
 
-    void heapFree(HeapIndex heapIndex, uint64_t ptr, size_t size) {
+    uint64_t heapAllocateWithCustomAlignment(HeapIndex heapIndex, size_t &size, size_t alignment) {
+        return getHeap(heapIndex).allocateWithCustomAlignment(size, alignment);
+    }
+
+    MOCKABLE_VIRTUAL void heapFree(HeapIndex heapIndex, uint64_t ptr, size_t size) {
         getHeap(heapIndex).free(ptr, size);
     }
 
@@ -79,7 +88,8 @@ class GfxPartition {
     }
 
     uint64_t getHeapMinimalAddress(HeapIndex heapIndex) {
-        if (heapIndex == HeapIndex::HEAP_EXTERNAL_DEVICE_FRONT_WINDOW ||
+        if (heapIndex == HeapIndex::HEAP_SVM ||
+            heapIndex == HeapIndex::HEAP_EXTERNAL_DEVICE_FRONT_WINDOW ||
             heapIndex == HeapIndex::HEAP_EXTERNAL_FRONT_WINDOW ||
             heapIndex == HeapIndex::HEAP_INTERNAL_DEVICE_FRONT_WINDOW ||
             heapIndex == HeapIndex::HEAP_INTERNAL_FRONT_WINDOW) {
@@ -92,6 +102,8 @@ class GfxPartition {
             } else if (heapIndex == HeapIndex::HEAP_INTERNAL ||
                        heapIndex == HeapIndex::HEAP_INTERNAL_DEVICE_MEMORY) {
                 return getHeapBase(heapIndex) + GfxPartition::internalFrontWindowPoolSize;
+            } else if (heapIndex == HeapIndex::HEAP_STANDARD2MB) {
+                return getHeapBase(heapIndex) + GfxPartition::heapGranularity2MB;
             }
             return getHeapBase(heapIndex) + GfxPartition::heapGranularity;
         }
@@ -99,20 +111,21 @@ class GfxPartition {
 
     bool isLimitedRange() { return getHeap(HeapIndex::HEAP_SVM).getSize() == 0ull; }
 
-    static const uint64_t heapGranularity = MemoryConstants::pageSize64k;
+    static constexpr uint64_t heapGranularity = MemoryConstants::pageSize64k;
+    static constexpr uint64_t heapGranularity2MB = 2 * MemoryConstants::megaByte;
     static constexpr size_t externalFrontWindowPoolSize = 16 * MemoryConstants::megaByte;
     static constexpr size_t internalFrontWindowPoolSize = 1 * MemoryConstants::megaByte;
 
     static const std::array<HeapIndex, 4> heap32Names;
-    static const std::array<HeapIndex, 7> heapNonSvmNames;
+    static const std::array<HeapIndex, 8> heapNonSvmNames;
 
   protected:
-    bool initAdditionalRange(uint64_t gpuAddressSpace, uint64_t &gfxBase, uint64_t &gfxTop, uint32_t rootDeviceIndex, size_t numRootDevices);
+    bool initAdditionalRange(uint32_t cpuAddressWidth, uint64_t gpuAddressSpace, uint64_t &gfxBase, uint64_t &gfxTop, uint32_t rootDeviceIndex, size_t numRootDevices);
 
     class Heap {
       public:
         Heap() = default;
-        void init(uint64_t base, uint64_t size);
+        void init(uint64_t base, uint64_t size, size_t allocationAlignment);
         void initExternalWithFrontWindow(uint64_t base, uint64_t size);
         void initWithFrontWindow(uint64_t base, uint64_t size, uint64_t frontWindowSize);
         void initFrontWindow(uint64_t base, uint64_t size);
@@ -120,6 +133,7 @@ class GfxPartition {
         uint64_t getSize() const { return size; }
         uint64_t getLimit() const { return size ? base + size - 1 : 0; }
         uint64_t allocate(size_t &size) { return alloc->allocate(size); }
+        uint64_t allocateWithCustomAlignment(size_t &sizeToAllocate, size_t alignment) { return alloc->allocateWithCustomAlignment(sizeToAllocate, alignment); }
         void free(uint64_t ptr, size_t size) { alloc->free(ptr, size); }
 
       protected:

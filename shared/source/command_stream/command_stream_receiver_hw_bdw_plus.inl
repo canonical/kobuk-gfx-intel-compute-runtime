@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,6 +13,9 @@ template <typename GfxFamily>
 size_t CommandStreamReceiverHw<GfxFamily>::getSshHeapSize() {
     return defaultHeapSize;
 }
+
+template <typename GfxFamily>
+bool CommandStreamReceiverHw<GfxFamily>::are4GbHeapsAvailable() const { return true; }
 
 template <typename GfxFamily>
 inline void CommandStreamReceiverHw<GfxFamily>::programL3(LinearStream &csr, DispatchFlags &dispatchFlags, uint32_t &newL3Config) {
@@ -32,7 +35,7 @@ inline void CommandStreamReceiverHw<GfxFamily>::programL3(LinearStream &csr, Dis
 }
 
 template <typename GfxFamily>
-size_t CommandStreamReceiverHw<GfxFamily>::getRequiredStateBaseAddressSize() const {
+size_t CommandStreamReceiverHw<GfxFamily>::getRequiredStateBaseAddressSize(const Device &device) const {
     using PIPELINE_SELECT = typename GfxFamily::PIPELINE_SELECT;
 
     size_t size = 0;
@@ -63,9 +66,6 @@ void CommandStreamReceiverHw<GfxFamily>::programPipelineSelect(LinearStream &com
         this->lastMediaSamplerConfig = pipelineSelectArgs.mediaSamplerRequired;
     }
 }
-
-template <typename GfxFamily>
-void CommandStreamReceiverHw<GfxFamily>::adjustThreadArbitionPolicy(void *const stateComputeMode) {}
 
 template <typename GfxFamily>
 void CommandStreamReceiverHw<GfxFamily>::createScratchSpaceController() {
@@ -102,6 +102,20 @@ bool CommandStreamReceiverHw<GfxFamily>::checkPlatformSupportsNewResourceImplici
 template <typename GfxFamily>
 bool CommandStreamReceiverHw<GfxFamily>::checkPlatformSupportsGpuIdleImplicitFlush() const {
     return false;
+}
+
+template <typename GfxFamily>
+GraphicsAllocation *CommandStreamReceiverHw<GfxFamily>::getClearColorAllocation() {
+    return nullptr;
+}
+
+template <typename GfxFamily>
+void CommandStreamReceiverHw<GfxFamily>::programPerDssBackedBuffer(LinearStream &commandStream, Device &device, DispatchFlags &dispatchFlags) {
+}
+
+template <typename GfxFamily>
+size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForPerDssBackedBuffer(const HardwareInfo &hwInfo) {
+    return 0;
 }
 
 } // namespace NEO

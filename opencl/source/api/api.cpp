@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -39,6 +39,7 @@
 #include "opencl/source/helpers/validators.h"
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/source/kernel/kernel_info_cl.h"
+#include "opencl/source/kernel/multi_device_kernel.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/mem_obj/image.h"
 #include "opencl/source/mem_obj/mem_obj_helper.h"
@@ -380,12 +381,25 @@ cl_context CL_API_CALL clCreateContext(const cl_context_properties *properties,
             retVal = CL_INVALID_VALUE;
             break;
         }
+        auto pPlatform = Context::getPlatformFromProperties(properties, retVal);
+        if (CL_SUCCESS != retVal) {
+            break;
+        }
 
         ClDeviceVector allDevs(devices, numDevices);
-        context = Context::create<Context>(properties, allDevs, funcNotify, userData, retVal);
-        if (context != nullptr) {
-            gtpinNotifyContextCreate(context);
+        if (!pPlatform) {
+            pPlatform = allDevs[0]->getPlatform();
         }
+        for (auto &pClDevice : allDevs) {
+            if (pClDevice->getPlatform() != pPlatform) {
+                retVal = CL_INVALID_DEVICE;
+                break;
+            }
+        }
+        if (CL_SUCCESS != retVal) {
+            break;
+        }
+        context = Context::create<Context>(properties, allDevs, funcNotify, userData, retVal);
     } while (false);
 
     if (errcodeRet) {
@@ -412,30 +426,25 @@ cl_context CL_API_CALL clCreateContextFromType(const cl_context_properties *prop
             retVal = CL_INVALID_VALUE;
             break;
         }
-
+        auto pPlatform = Context::getPlatformFromProperties(properties, retVal);
+        if (CL_SUCCESS != retVal) {
+            break;
+        }
         cl_uint numDevices = 0;
         /* Query the number of device first. */
-        retVal = clGetDeviceIDs(nullptr, deviceType, 0, nullptr, &numDevices);
+        retVal = clGetDeviceIDs(pPlatform, deviceType, 0, nullptr, &numDevices);
         if (retVal != CL_SUCCESS) {
             break;
         }
 
         DEBUG_BREAK_IF(numDevices <= 0);
-        StackVec<cl_device_id, 2> supportedDevs;
-        supportedDevs.resize(numDevices);
+        cl_device_id device = nullptr;
 
-        retVal = clGetDeviceIDs(nullptr, deviceType, numDevices, supportedDevs.begin(), nullptr);
+        retVal = clGetDeviceIDs(pPlatform, deviceType, 1, &device, nullptr);
         DEBUG_BREAK_IF(retVal != CL_SUCCESS);
 
-        if (!DebugManager.flags.EnableMultiRootDeviceContexts.get()) {
-            numDevices = 1u;
-        }
-
-        ClDeviceVector deviceVector(supportedDevs.begin(), numDevices);
+        ClDeviceVector deviceVector(&device, 1);
         pContext = Context::create<Context>(properties, deviceVector, funcNotify, userData, retVal);
-        if (pContext != nullptr) {
-            gtpinNotifyContextCreate(pContext);
-        }
     } while (false);
 
     if (errcodeRet) {
@@ -1511,6 +1520,12 @@ cl_int CL_API_CALL clBuildProgram(cl_program program,
 
     retVal = validateObjects(WithCastToInternal(program, &pProgram), Program::isValidCallback(funcNotify, userData));
 
+    if (CL_SUCCESS == retVal) {
+        if (pProgram->isLocked()) {
+            retVal = CL_INVALID_OPERATION;
+        }
+    }
+
     ClDeviceVector deviceVector;
     ClDeviceVector *deviceVectorPtr = &deviceVector;
 
@@ -1543,6 +1558,12 @@ cl_int CL_API_CALL clCompileProgram(cl_program program,
     Program *pProgram = nullptr;
 
     retVal = validateObjects(WithCastToInternal(program, &pProgram), Program::isValidCallback(funcNotify, userData));
+
+    if (CL_SUCCESS == retVal) {
+        if (pProgram->isLocked()) {
+            retVal = CL_INVALID_OPERATION;
+        }
+    }
 
     ClDeviceVector deviceVector;
     ClDeviceVector *deviceVectorPtr = &deviceVector;
@@ -1701,15 +1722,27 @@ cl_kernel CL_API_CALL clCreateKernel(cl_program clProgram,
             break;
         }
 
-        const KernelInfo *pKernelInfo = pProgram->getKernelInfo(kernelName);
-        if (!pKernelInfo) {
+        bool kernelFound = false;
+        KernelInfoContainer kernelInfos;
+        kernelInfos.resize(pProgram->getMaxRootDeviceIndex() + 1);
+
+        for (const auto &pClDevice : pProgram->getDevicesInProgram()) {
+            auto rootDeviceIndex = pClDevice->getRootDeviceIndex();
+            auto pKernelInfo = pProgram->getKernelInfo(kernelName, rootDeviceIndex);
+            if (pKernelInfo) {
+                kernelFound = true;
+                kernelInfos[rootDeviceIndex] = pKernelInfo;
+            }
+        }
+
+        if (!kernelFound) {
             retVal = CL_INVALID_KERNEL_NAME;
             break;
         }
 
-        kernel = Kernel::create(
+        kernel = MultiDeviceKernel::create(
             pProgram,
-            *pKernelInfo,
+            kernelInfos,
             &retVal);
 
         DBG_LOG_INPUTS("kernel", kernel);
@@ -1734,9 +1767,9 @@ cl_int CL_API_CALL clCreateKernelsInProgram(cl_program clProgram,
                    "numKernels", numKernels,
                    "kernels", kernels,
                    "numKernelsRet", numKernelsRet);
-    auto program = castToObject<Program>(clProgram);
-    if (program) {
-        auto numKernelsInProgram = program->getNumKernels();
+    auto pProgram = castToObject<Program>(clProgram);
+    if (pProgram) {
+        auto numKernelsInProgram = pProgram->getNumKernels();
 
         if (kernels) {
             if (numKernels < numKernelsInProgram) {
@@ -1746,11 +1779,17 @@ cl_int CL_API_CALL clCreateKernelsInProgram(cl_program clProgram,
             }
 
             for (unsigned int i = 0; i < numKernelsInProgram; ++i) {
-                const auto kernelInfo = program->getKernelInfo(i);
-                DEBUG_BREAK_IF(kernelInfo == nullptr);
-                kernels[i] = Kernel::create(
-                    program,
-                    *kernelInfo,
+                KernelInfoContainer kernelInfos;
+                kernelInfos.resize(pProgram->getMaxRootDeviceIndex() + 1);
+                for (const auto &pClDevice : pProgram->getDevicesInProgram()) {
+                    auto rootDeviceIndex = pClDevice->getRootDeviceIndex();
+                    auto kernelInfo = pProgram->getKernelInfo(i, rootDeviceIndex);
+                    DEBUG_BREAK_IF(kernelInfo == nullptr);
+                    kernelInfos[rootDeviceIndex] = kernelInfo;
+                }
+                kernels[i] = MultiDeviceKernel::create(
+                    pProgram,
+                    kernelInfos,
                     nullptr);
                 gtpinNotifyKernelCreate(kernels[i]);
             }
@@ -1772,9 +1811,9 @@ cl_int CL_API_CALL clRetainKernel(cl_kernel kernel) {
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("kernel", kernel);
-    auto pKernel = castToObject<Kernel>(kernel);
-    if (pKernel) {
-        pKernel->retain();
+    auto pMultiDeviceKernel = castToObject<MultiDeviceKernel>(kernel);
+    if (pMultiDeviceKernel) {
+        pMultiDeviceKernel->retain();
         TRACING_EXIT(clRetainKernel, &retVal);
         return retVal;
     }
@@ -1788,9 +1827,9 @@ cl_int CL_API_CALL clReleaseKernel(cl_kernel kernel) {
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("kernel", kernel);
-    auto pKernel = castToObject<Kernel>(kernel);
-    if (pKernel) {
-        pKernel->release();
+    auto pMultiDeviceKernel = castToObject<MultiDeviceKernel>(kernel);
+    if (pMultiDeviceKernel) {
+        pMultiDeviceKernel->release();
         TRACING_EXIT(clReleaseKernel, &retVal);
         return retVal;
     }
@@ -1806,25 +1845,24 @@ cl_int CL_API_CALL clSetKernelArg(cl_kernel kernel,
     TRACING_ENTER(clSetKernelArg, &kernel, &argIndex, &argSize, &argValue);
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
-
-    auto pKernel = castToObject<Kernel>(kernel);
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
+    retVal = validateObject(WithCastToInternal(kernel, &pMultiDeviceKernel));
     DBG_LOG_INPUTS("kernel", kernel, "argIndex", argIndex,
                    "argSize", argSize, "argValue", NEO::FileLoggerInstance().infoPointerToString(argValue, argSize));
     do {
-        if (!pKernel) {
-            retVal = CL_INVALID_KERNEL;
+        if (retVal != CL_SUCCESS) {
             break;
         }
-        if (pKernel->getKernelInfo().kernelArgInfo.size() <= argIndex) {
+        if (pMultiDeviceKernel->getKernelArguments().size() <= argIndex) {
             retVal = CL_INVALID_ARG_INDEX;
             break;
         }
-        retVal = pKernel->checkCorrectImageAccessQualifier(argIndex, argSize, argValue);
+        retVal = pMultiDeviceKernel->checkCorrectImageAccessQualifier(argIndex, argSize, argValue);
         if (retVal != CL_SUCCESS) {
-            pKernel->unsetArg(argIndex);
+            pMultiDeviceKernel->unsetArg(argIndex);
             break;
         }
-        retVal = pKernel->setArg(
+        retVal = pMultiDeviceKernel->setArg(
             argIndex,
             argSize,
             argValue);
@@ -1847,14 +1885,15 @@ cl_int CL_API_CALL clGetKernelInfo(cl_kernel kernel,
                    "paramValueSize", paramValueSize,
                    "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
-    auto pKernel = castToObject<Kernel>(kernel);
-    retVal = pKernel
-                 ? pKernel->getInfo(
-                       paramName,
-                       paramValueSize,
-                       paramValue,
-                       paramValueSizeRet)
-                 : CL_INVALID_KERNEL;
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
+    retVal = validateObject(WithCastToInternal(kernel, &pMultiDeviceKernel));
+    if (retVal == CL_SUCCESS) {
+        retVal = pMultiDeviceKernel->getInfo(
+            paramName,
+            paramValueSize,
+            paramValue,
+            paramValueSizeRet);
+    }
     TRACING_EXIT(clGetKernelInfo, &retVal);
     return retVal;
 }
@@ -1876,9 +1915,9 @@ cl_int CL_API_CALL clGetKernelArgInfo(cl_kernel kernel,
                    "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
 
-    auto pKernel = castToObject<Kernel>(kernel);
-    retVal = pKernel
-                 ? pKernel->getArgInfo(
+    auto pMultiDeviceKernel = castToObject<MultiDeviceKernel>(kernel);
+    retVal = pMultiDeviceKernel
+                 ? pMultiDeviceKernel->getArgInfo(
                        argIndx,
                        paramName,
                        paramValueSize,
@@ -1906,15 +1945,25 @@ cl_int CL_API_CALL clGetKernelWorkGroupInfo(cl_kernel kernel,
                    "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
 
-    auto pKernel = castToObject<Kernel>(kernel);
-    retVal = pKernel
-                 ? pKernel->getWorkGroupInfo(
-                       device,
-                       paramName,
-                       paramValueSize,
-                       paramValue,
-                       paramValueSizeRet)
-                 : CL_INVALID_KERNEL;
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
+    retVal = validateObjects(WithCastToInternal(kernel, &pMultiDeviceKernel));
+
+    ClDevice *pClDevice = nullptr;
+    if (CL_SUCCESS == retVal) {
+        if (pMultiDeviceKernel->getDevices().size() == 1u && !device) {
+            pClDevice = pMultiDeviceKernel->getDevices()[0];
+        } else {
+            retVal = validateObjects(WithCastToInternal(device, &pClDevice));
+        }
+    }
+    if (CL_SUCCESS == retVal) {
+        auto pKernel = pMultiDeviceKernel->getKernel(pClDevice->getRootDeviceIndex());
+        retVal = pKernel->getWorkGroupInfo(
+            paramName,
+            paramValueSize,
+            paramValue,
+            paramValueSizeRet);
+    }
     TRACING_EXIT(clGetKernelWorkGroupInfo, &retVal);
     return retVal;
 }
@@ -1963,6 +2012,7 @@ cl_int CL_API_CALL clGetEventInfo(cl_event event,
     }
 
     GetInfoHelper info(paramValue, paramValueSize, paramValueSizeRet);
+    auto flushEvents = true;
 
     switch (paramName) {
     default: {
@@ -1992,7 +2042,13 @@ cl_int CL_API_CALL clGetEventInfo(cl_event event,
         TRACING_EXIT(clGetEventInfo, &retVal);
         return retVal;
     case CL_EVENT_COMMAND_EXECUTION_STATUS:
-        neoEvent->tryFlushEvent();
+        if (DebugManager.flags.SkipFlushingEventsOnGetStatusCalls.get()) {
+            flushEvents = false;
+        }
+        if (flushEvents) {
+            neoEvent->tryFlushEvent();
+        }
+
         if (neoEvent->isUserEvent()) {
             auto executionStatus = neoEvent->peekExecutionStatus();
             //Spec requires initial state to be queued
@@ -2237,6 +2293,12 @@ cl_int CL_API_CALL clEnqueueReadBuffer(cl_command_queue commandQueue,
             return retVal;
         }
 
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_INTEL, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
+            TRACING_EXIT(clEnqueueReadBuffer, &retVal);
+            return retVal;
+        }
+
         retVal = pCommandQueue->enqueueReadBuffer(
             pBuffer,
             blockingRead,
@@ -2316,8 +2378,15 @@ cl_int CL_API_CALL clEnqueueReadBufferRect(cl_command_queue commandQueue,
                                     bufferRowPitch,
                                     bufferSlicePitch,
                                     hostRowPitch,
-                                    hostSlicePitch) == false) {
+                                    hostSlicePitch,
+                                    true) == false) {
         retVal = CL_INVALID_VALUE;
+        TRACING_EXIT(clEnqueueReadBufferRect, &retVal);
+        return retVal;
+    }
+
+    if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_RECT_INTEL, numEventsInWaitList, eventWaitList, event)) {
+        retVal = CL_INVALID_OPERATION;
         TRACING_EXIT(clEnqueueReadBufferRect, &retVal);
         return retVal;
     }
@@ -2370,6 +2439,12 @@ cl_int CL_API_CALL clEnqueueWriteBuffer(cl_command_queue commandQueue,
     if (CL_SUCCESS == retVal) {
 
         if (pBuffer->writeMemObjFlagsInvalid()) {
+            retVal = CL_INVALID_OPERATION;
+            TRACING_EXIT(clEnqueueWriteBuffer, &retVal);
+            return retVal;
+        }
+
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_INTEL, numEventsInWaitList, eventWaitList, event)) {
             retVal = CL_INVALID_OPERATION;
             TRACING_EXIT(clEnqueueWriteBuffer, &retVal);
             return retVal;
@@ -2444,8 +2519,15 @@ cl_int CL_API_CALL clEnqueueWriteBufferRect(cl_command_queue commandQueue,
                                     bufferRowPitch,
                                     bufferSlicePitch,
                                     hostRowPitch,
-                                    hostSlicePitch) == false) {
+                                    hostSlicePitch,
+                                    true) == false) {
         retVal = CL_INVALID_VALUE;
+        TRACING_EXIT(clEnqueueWriteBufferRect, &retVal);
+        return retVal;
+    }
+
+    if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_RECT_INTEL, numEventsInWaitList, eventWaitList, event)) {
+        retVal = CL_INVALID_OPERATION;
         TRACING_EXIT(clEnqueueWriteBufferRect, &retVal);
         return retVal;
     }
@@ -2500,6 +2582,12 @@ cl_int CL_API_CALL clEnqueueFillBuffer(cl_command_queue commandQueue,
         EventWaitList(numEventsInWaitList, eventWaitList));
 
     if (CL_SUCCESS == retVal) {
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_FILL_BUFFER_INTEL, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
+            TRACING_EXIT(clEnqueueFillBuffer, &retVal);
+            return retVal;
+        }
+
         retVal = pCommandQueue->enqueueFillBuffer(
             pBuffer,
             pattern,
@@ -2547,6 +2635,12 @@ cl_int CL_API_CALL clEnqueueCopyBuffer(cl_command_queue commandQueue,
         size_t dstSize = pDstBuffer->getSize();
         if (srcOffset + cb > srcSize || dstOffset + cb > dstSize) {
             retVal = CL_INVALID_VALUE;
+            TRACING_EXIT(clEnqueueCopyBuffer, &retVal);
+            return retVal;
+        }
+
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_INTEL, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
             TRACING_EXIT(clEnqueueCopyBuffer, &retVal);
             return retVal;
         }
@@ -2603,6 +2697,31 @@ cl_int CL_API_CALL clEnqueueCopyBufferRect(cl_command_queue commandQueue,
         WithCastToInternal(dstBuffer, &pDstBuffer));
 
     if (CL_SUCCESS == retVal) {
+
+        if (!pSrcBuffer->bufferRectPitchSet(srcOrigin,
+                                            region,
+                                            srcRowPitch,
+                                            srcSlicePitch,
+                                            dstRowPitch,
+                                            dstSlicePitch,
+                                            true) ||
+            !pDstBuffer->bufferRectPitchSet(dstOrigin,
+                                            region,
+                                            srcRowPitch,
+                                            srcSlicePitch,
+                                            dstRowPitch,
+                                            dstSlicePitch,
+                                            false)) {
+            retVal = CL_INVALID_VALUE;
+            TRACING_EXIT(clEnqueueCopyBufferRect, &retVal);
+            return retVal;
+        }
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_RECT_INTEL, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
+            TRACING_EXIT(clEnqueueCopyBufferRect, &retVal);
+            return retVal;
+        }
+
         retVal = pCommandQueue->enqueueCopyBufferRect(
             pSrcBuffer,
             pDstBuffer,
@@ -2659,7 +2778,7 @@ cl_int CL_API_CALL clEnqueueReadImage(cl_command_queue commandQueue,
             TRACING_EXIT(clEnqueueReadImage, &retVal);
             return retVal;
         }
-        if (IsPackedYuvImage(&pImage->getImageFormat())) {
+        if (isPackedYuvImage(&pImage->getImageFormat())) {
             retVal = validateYuvOperation(origin, region);
             if (retVal != CL_SUCCESS) {
                 TRACING_EXIT(clEnqueueReadImage, &retVal);
@@ -2668,6 +2787,12 @@ cl_int CL_API_CALL clEnqueueReadImage(cl_command_queue commandQueue,
         }
         retVal = Image::validateRegionAndOrigin(origin, region, pImage->getImageDesc());
         if (retVal != CL_SUCCESS) {
+            TRACING_EXIT(clEnqueueReadImage, &retVal);
+            return retVal;
+        }
+
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_IMAGE_INTEL, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
             TRACING_EXIT(clEnqueueReadImage, &retVal);
             return retVal;
         }
@@ -2726,7 +2851,7 @@ cl_int CL_API_CALL clEnqueueWriteImage(cl_command_queue commandQueue,
             TRACING_EXIT(clEnqueueWriteImage, &retVal);
             return retVal;
         }
-        if (IsPackedYuvImage(&pImage->getImageFormat())) {
+        if (isPackedYuvImage(&pImage->getImageFormat())) {
             retVal = validateYuvOperation(origin, region);
             if (retVal != CL_SUCCESS) {
                 TRACING_EXIT(clEnqueueWriteImage, &retVal);
@@ -2735,6 +2860,12 @@ cl_int CL_API_CALL clEnqueueWriteImage(cl_command_queue commandQueue,
         }
         retVal = Image::validateRegionAndOrigin(origin, region, pImage->getImageDesc());
         if (retVal != CL_SUCCESS) {
+            TRACING_EXIT(clEnqueueWriteImage, &retVal);
+            return retVal;
+        }
+
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_IMAGE_INTEL, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
             TRACING_EXIT(clEnqueueWriteImage, &retVal);
             return retVal;
         }
@@ -2792,6 +2923,12 @@ cl_int CL_API_CALL clEnqueueFillImage(cl_command_queue commandQueue,
             return retVal;
         }
 
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_FILL_IMAGE_INTEL, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
+            TRACING_EXIT(clEnqueueFillImage, &retVal);
+            return retVal;
+        }
+
         retVal = pCommandQueue->enqueueFillImage(
             dstImage,
             fillColor,
@@ -2841,14 +2978,14 @@ cl_int CL_API_CALL clEnqueueCopyImage(cl_command_queue commandQueue,
             TRACING_EXIT(clEnqueueCopyImage, &retVal);
             return retVal;
         }
-        if (IsPackedYuvImage(&pSrcImage->getImageFormat())) {
+        if (isPackedYuvImage(&pSrcImage->getImageFormat())) {
             retVal = validateYuvOperation(srcOrigin, region);
             if (retVal != CL_SUCCESS) {
                 TRACING_EXIT(clEnqueueCopyImage, &retVal);
                 return retVal;
             }
         }
-        if (IsPackedYuvImage(&pDstImage->getImageFormat())) {
+        if (isPackedYuvImage(&pDstImage->getImageFormat())) {
             retVal = validateYuvOperation(dstOrigin, region);
 
             if (retVal != CL_SUCCESS) {
@@ -2868,6 +3005,12 @@ cl_int CL_API_CALL clEnqueueCopyImage(cl_command_queue commandQueue,
         }
         retVal = Image::validateRegionAndOrigin(dstOrigin, region, pDstImage->getImageDesc());
         if (retVal != CL_SUCCESS) {
+            TRACING_EXIT(clEnqueueCopyImage, &retVal);
+            return retVal;
+        }
+
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_IMAGE_INTEL, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
             TRACING_EXIT(clEnqueueCopyImage, &retVal);
             return retVal;
         }
@@ -2918,7 +3061,7 @@ cl_int CL_API_CALL clEnqueueCopyImageToBuffer(cl_command_queue commandQueue,
         WithCastToInternal(dstBuffer, &pDstBuffer));
 
     if (CL_SUCCESS == retVal) {
-        if (IsPackedYuvImage(&pSrcImage->getImageFormat())) {
+        if (isPackedYuvImage(&pSrcImage->getImageFormat())) {
             retVal = validateYuvOperation(srcOrigin, region);
             if (retVal != CL_SUCCESS) {
                 TRACING_EXIT(clEnqueueCopyImageToBuffer, &retVal);
@@ -2927,6 +3070,12 @@ cl_int CL_API_CALL clEnqueueCopyImageToBuffer(cl_command_queue commandQueue,
         }
         retVal = Image::validateRegionAndOrigin(srcOrigin, region, pSrcImage->getImageDesc());
         if (retVal != CL_SUCCESS) {
+            TRACING_EXIT(clEnqueueCopyImageToBuffer, &retVal);
+            return retVal;
+        }
+
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_IMAGE_BUFFER_INTEL, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
             TRACING_EXIT(clEnqueueCopyImageToBuffer, &retVal);
             return retVal;
         }
@@ -2977,7 +3126,7 @@ cl_int CL_API_CALL clEnqueueCopyBufferToImage(cl_command_queue commandQueue,
         WithCastToInternal(dstImage, &pDstImage));
 
     if (CL_SUCCESS == retVal) {
-        if (IsPackedYuvImage(&pDstImage->getImageFormat())) {
+        if (isPackedYuvImage(&pDstImage->getImageFormat())) {
             retVal = validateYuvOperation(dstOrigin, region);
             if (retVal != CL_SUCCESS) {
                 TRACING_EXIT(clEnqueueCopyBufferToImage, &retVal);
@@ -2986,6 +3135,12 @@ cl_int CL_API_CALL clEnqueueCopyBufferToImage(cl_command_queue commandQueue,
         }
         retVal = Image::validateRegionAndOrigin(dstOrigin, region, pDstImage->getImageDesc());
         if (retVal != CL_SUCCESS) {
+            TRACING_EXIT(clEnqueueCopyBufferToImage, &retVal);
+            return retVal;
+        }
+
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_IMAGE_INTEL, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
             TRACING_EXIT(clEnqueueCopyBufferToImage, &retVal);
             return retVal;
         }
@@ -3041,6 +3196,11 @@ void *CL_API_CALL clEnqueueMapBuffer(cl_command_queue commandQueue,
         }
 
         if (pBuffer->mapMemObjFlagsInvalid(mapFlags)) {
+            retVal = CL_INVALID_OPERATION;
+            break;
+        }
+
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_MAP_BUFFER_INTEL, numEventsInWaitList, eventWaitList, event)) {
             retVal = CL_INVALID_OPERATION;
             break;
         }
@@ -3111,7 +3271,7 @@ void *CL_API_CALL clEnqueueMapImage(cl_command_queue commandQueue,
             retVal = CL_INVALID_OPERATION;
             break;
         }
-        if (IsPackedYuvImage(&pImage->getImageFormat())) {
+        if (isPackedYuvImage(&pImage->getImageFormat())) {
             retVal = validateYuvOperation(origin, region);
             if (retVal != CL_SUCCESS) {
                 break;
@@ -3120,6 +3280,11 @@ void *CL_API_CALL clEnqueueMapImage(cl_command_queue commandQueue,
 
         retVal = Image::validateRegionAndOrigin(origin, region, pImage->getImageDesc());
         if (retVal != CL_SUCCESS) {
+            break;
+        }
+
+        if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_MAP_IMAGE_INTEL, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
             break;
         }
 
@@ -3170,8 +3335,27 @@ cl_int CL_API_CALL clEnqueueUnmapMemObject(cl_command_queue commandQueue,
                    "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     if (retVal == CL_SUCCESS) {
-        if (pMemObj->peekClMemObjType() == CL_MEM_OBJECT_PIPE) {
+        cl_command_queue_capabilities_intel requiredCapability = 0u;
+        switch (pMemObj->peekClMemObjType()) {
+        case CL_MEM_OBJECT_BUFFER:
+            requiredCapability = CL_QUEUE_CAPABILITY_MAP_BUFFER_INTEL;
+            break;
+        case CL_MEM_OBJECT_IMAGE2D:
+        case CL_MEM_OBJECT_IMAGE3D:
+        case CL_MEM_OBJECT_IMAGE2D_ARRAY:
+        case CL_MEM_OBJECT_IMAGE1D:
+        case CL_MEM_OBJECT_IMAGE1D_ARRAY:
+        case CL_MEM_OBJECT_IMAGE1D_BUFFER:
+            requiredCapability = CL_QUEUE_CAPABILITY_MAP_IMAGE_INTEL;
+            break;
+        default:
             retVal = CL_INVALID_MEM_OBJECT;
+            TRACING_EXIT(clEnqueueUnmapMemObject, &retVal);
+            return retVal;
+        }
+
+        if (!pCommandQueue->validateCapabilityForOperation(requiredCapability, numEventsInWaitList, eventWaitList, event)) {
+            retVal = CL_INVALID_OPERATION;
             TRACING_EXIT(clEnqueueUnmapMemObject, &retVal);
             return retVal;
         }
@@ -3219,6 +3403,15 @@ cl_int CL_API_CALL clEnqueueMigrateMemObjects(cl_command_queue commandQueue,
         return retVal;
     }
 
+    for (unsigned int object = 0; object < numMemObjects; object++) {
+        auto memObject = castToObject<MemObj>(memObjects[object]);
+        if (!memObject) {
+            retVal = CL_INVALID_MEM_OBJECT;
+            TRACING_EXIT(clEnqueueMigrateMemObjects, &retVal);
+            return retVal;
+        }
+    }
+
     const cl_mem_migration_flags allValidFlags = CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED | CL_MIGRATE_MEM_OBJECT_HOST;
 
     if ((flags & (~allValidFlags)) != 0) {
@@ -3261,11 +3454,11 @@ cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue commandQueue,
                    "event", NEO::FileLoggerInstance().getEvents(reinterpret_cast<const uintptr_t *>(event), 1));
 
     CommandQueue *pCommandQueue = nullptr;
-    Kernel *pKernel = nullptr;
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
 
     retVal = validateObjects(
         WithCastToInternal(commandQueue, &pCommandQueue),
-        WithCastToInternal(kernel, &pKernel),
+        WithCastToInternal(kernel, &pMultiDeviceKernel),
         EventWaitList(numEventsInWaitList, eventWaitList));
 
     if (CL_SUCCESS != retVal) {
@@ -3273,20 +3466,27 @@ cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue commandQueue,
         return retVal;
     }
 
+    Kernel *pKernel = pMultiDeviceKernel->getKernel(pCommandQueue->getDevice().getRootDeviceIndex());
     if ((pKernel->getExecutionType() != KernelExecutionType::Default) ||
-        pKernel->isUsingSyncBuffer()) {
+        pKernel->usesSyncBuffer()) {
         retVal = CL_INVALID_KERNEL;
         TRACING_EXIT(clEnqueueNDRangeKernel, &retVal);
         return retVal;
     }
 
-    TakeOwnershipWrapper<Kernel> kernelOwnership(*pKernel, gtpinIsGTPinInitialized());
+    if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_KERNEL_INTEL, numEventsInWaitList, eventWaitList, event)) {
+        retVal = CL_INVALID_OPERATION;
+        TRACING_EXIT(clEnqueueNDRangeKernel, &retVal);
+        return retVal;
+    }
+
+    TakeOwnershipWrapper<MultiDeviceKernel> kernelOwnership(*pMultiDeviceKernel, gtpinIsGTPinInitialized());
     if (gtpinIsGTPinInitialized()) {
         gtpinNotifyKernelSubmit(kernel, pCommandQueue);
     }
 
     retVal = pCommandQueue->enqueueKernel(
-        kernel,
+        pKernel,
         workDim,
         globalWorkOffset,
         globalWorkSize,
@@ -3363,6 +3563,12 @@ cl_int CL_API_CALL clEnqueueMarker(cl_command_queue commandQueue,
 
     auto pCommandQueue = castToObject<CommandQueue>(commandQueue);
     if (pCommandQueue) {
+        if (!pCommandQueue->validateCapability(CL_QUEUE_CAPABILITY_MARKER_INTEL)) {
+            retVal = CL_INVALID_OPERATION;
+            TRACING_EXIT(clEnqueueMarker, &retVal);
+            return retVal;
+        }
+
         retVal = pCommandQueue->enqueueMarkerWithWaitList(
             0,
             nullptr,
@@ -3399,6 +3605,12 @@ cl_int CL_API_CALL clEnqueueWaitForEvents(cl_command_queue commandQueue,
         return retVal;
     }
 
+    if (!pCommandQueue->validateCapabilitiesForEventWaitList(numEvents, eventList)) {
+        retVal = CL_INVALID_OPERATION;
+        TRACING_EXIT(clEnqueueWaitForEvents, &retVal);
+        return retVal;
+    }
+
     retVal = Event::waitForEvents(numEvents, eventList);
 
     TRACING_EXIT(clEnqueueWaitForEvents, &retVal);
@@ -3413,6 +3625,12 @@ cl_int CL_API_CALL clEnqueueBarrier(cl_command_queue commandQueue) {
     DBG_LOG_INPUTS("commandQueue", commandQueue);
     auto pCommandQueue = castToObject<CommandQueue>(commandQueue);
     if (pCommandQueue) {
+        if (!pCommandQueue->validateCapability(CL_QUEUE_CAPABILITY_BARRIER_INTEL)) {
+            retVal = CL_INVALID_OPERATION;
+            TRACING_EXIT(clEnqueueBarrier, &retVal);
+            return retVal;
+        }
+
         retVal = pCommandQueue->enqueueBarrierWithWaitList(
             0,
             nullptr,
@@ -3447,6 +3665,12 @@ cl_int CL_API_CALL clEnqueueMarkerWithWaitList(cl_command_queue commandQueue,
         return retVal;
     }
 
+    if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_MARKER_INTEL, numEventsInWaitList, eventWaitList, event)) {
+        retVal = CL_INVALID_OPERATION;
+        TRACING_EXIT(clEnqueueMarkerWithWaitList, &retVal);
+        return retVal;
+    }
+
     retVal = pCommandQueue->enqueueMarkerWithWaitList(
         numEventsInWaitList,
         eventWaitList,
@@ -3477,6 +3701,13 @@ cl_int CL_API_CALL clEnqueueBarrierWithWaitList(cl_command_queue commandQueue,
         TRACING_EXIT(clEnqueueBarrierWithWaitList, &retVal);
         return retVal;
     }
+
+    if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_BARRIER_INTEL, numEventsInWaitList, eventWaitList, event)) {
+        retVal = CL_INVALID_OPERATION;
+        TRACING_EXIT(clEnqueueBarrierWithWaitList, &retVal);
+        return retVal;
+    }
+
     retVal = pCommandQueue->enqueueBarrierWithWaitList(
         numEventsInWaitList,
         eventWaitList,
@@ -3574,11 +3805,10 @@ void *clHostMemAllocINTEL(
     }
 
     SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::HOST_UNIFIED_MEMORY,
-                                                                      neoContext->getDeviceBitfieldForAllocation(neoContext->getDevice(0)->getRootDeviceIndex()));
+                                                                      neoContext->getRootDeviceIndices(), neoContext->getDeviceBitfields());
     cl_mem_flags flags = 0;
     cl_mem_flags_intel flagsIntel = 0;
     cl_mem_alloc_flags_intel allocflags = 0;
-    unifiedMemoryProperties.subdeviceBitfield = neoContext->getDeviceBitfieldForAllocation(neoContext->getDevice(0)->getRootDeviceIndex());
     if (!MemoryPropertiesHelper::parseMemoryProperties(properties, unifiedMemoryProperties.allocationFlags, flags, flagsIntel,
                                                        allocflags, MemoryPropertiesHelper::ObjType::UNKNOWN,
                                                        *neoContext)) {
@@ -3591,7 +3821,7 @@ void *clHostMemAllocINTEL(
         return nullptr;
     }
 
-    return neoContext->getSVMAllocsManager()->createUnifiedMemoryAllocation(neoContext->getDevice(0)->getRootDeviceIndex(), size, unifiedMemoryProperties);
+    return neoContext->getSVMAllocsManager()->createHostUnifiedMemoryAllocation(size, unifiedMemoryProperties);
 }
 
 void *clDeviceMemAllocINTEL(
@@ -3613,8 +3843,11 @@ void *clDeviceMemAllocINTEL(
         return nullptr;
     }
 
+    auto subDeviceBitfields = neoContext->getDeviceBitfields();
+    subDeviceBitfields[neoDevice->getRootDeviceIndex()] = neoDevice->getDeviceBitfield();
+
     SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::DEVICE_UNIFIED_MEMORY,
-                                                                      neoDevice->getDeviceBitfield());
+                                                                      neoContext->getRootDeviceIndices(), subDeviceBitfields);
     cl_mem_flags flags = 0;
     cl_mem_flags_intel flagsIntel = 0;
     cl_mem_alloc_flags_intel allocflags = 0;
@@ -3625,15 +3858,15 @@ void *clDeviceMemAllocINTEL(
         return nullptr;
     }
 
-    if (size > neoContext->getDevice(0u)->getHardwareCapabilities().maxMemAllocSize &&
+    if (size > neoDevice->getDevice().getDeviceInfo().maxMemAllocSize &&
         !unifiedMemoryProperties.allocationFlags.flags.allowUnrestrictedSize) {
         err.set(CL_INVALID_BUFFER_SIZE);
         return nullptr;
     }
 
-    unifiedMemoryProperties.device = device;
+    unifiedMemoryProperties.device = &neoDevice->getDevice();
 
-    return neoContext->getSVMAllocsManager()->createUnifiedMemoryAllocation(neoDevice->getRootDeviceIndex(), size, unifiedMemoryProperties);
+    return neoContext->getSVMAllocsManager()->createUnifiedMemoryAllocation(size, unifiedMemoryProperties);
 }
 
 void *clSharedMemAllocINTEL(
@@ -3658,20 +3891,19 @@ void *clSharedMemAllocINTEL(
     cl_mem_flags_intel flagsIntel = 0;
     cl_mem_alloc_flags_intel allocflags = 0;
     ClDevice *neoDevice = castToObject<ClDevice>(device);
-    void *unifiedMemoryPropertiesDevice = nullptr;
-    DeviceBitfield subdeviceBitfield;
+    Device *unifiedMemoryPropertiesDevice = nullptr;
+    auto subDeviceBitfields = neoContext->getDeviceBitfields();
     if (neoDevice) {
         if (!neoContext->isDeviceAssociated(*neoDevice)) {
             err.set(CL_INVALID_DEVICE);
             return nullptr;
         }
-        unifiedMemoryPropertiesDevice = device;
-        subdeviceBitfield = neoDevice->getDeviceBitfield();
+        unifiedMemoryPropertiesDevice = &neoDevice->getDevice();
+        subDeviceBitfields[neoDevice->getRootDeviceIndex()] = neoDevice->getDeviceBitfield();
     } else {
         neoDevice = neoContext->getDevice(0);
-        subdeviceBitfield = neoContext->getDeviceBitfieldForAllocation(neoContext->getDevice(0)->getRootDeviceIndex());
     }
-    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY, subdeviceBitfield);
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY, neoContext->getRootDeviceIndices(), subDeviceBitfields);
     unifiedMemoryProperties.device = unifiedMemoryPropertiesDevice;
     if (!MemoryPropertiesHelper::parseMemoryProperties(properties, unifiedMemoryProperties.allocationFlags, flags, flagsIntel,
                                                        allocflags, MemoryPropertiesHelper::ObjType::UNKNOWN,
@@ -3684,7 +3916,7 @@ void *clSharedMemAllocINTEL(
         err.set(CL_INVALID_BUFFER_SIZE);
         return nullptr;
     }
-    auto ptr = neoContext->getSVMAllocsManager()->createSharedUnifiedMemoryAllocation(neoDevice->getRootDeviceIndex(), size, unifiedMemoryProperties, neoContext->getSpecialQueue(neoDevice->getRootDeviceIndex()));
+    auto ptr = neoContext->getSVMAllocsManager()->createSharedUnifiedMemoryAllocation(size, unifiedMemoryProperties, neoContext->getSpecialQueue(neoDevice->getRootDeviceIndex()));
     if (!ptr) {
         err.set(CL_OUT_OF_RESOURCES);
     }
@@ -3787,7 +4019,8 @@ cl_int clGetMemAllocInfoINTEL(
         if (!unifiedMemoryAllocation) {
             return changeGetInfoStatusToCLResultType(info.set<cl_device_id>(static_cast<cl_device_id>(nullptr)));
         }
-        return changeGetInfoStatusToCLResultType(info.set<cl_device_id>(static_cast<cl_device_id>(unifiedMemoryAllocation->device)));
+        auto device = unifiedMemoryAllocation->device ? unifiedMemoryAllocation->device->getSpecializedDevice<ClDevice>() : nullptr;
+        return changeGetInfoStatusToCLResultType(info.set<cl_device_id>(device));
     }
 
     default: {
@@ -4093,12 +4326,13 @@ cl_program CL_API_CALL clCreateProgramWithILKHR(cl_context context,
     return program;
 }
 
-#define RETURN_FUNC_PTR_IF_EXIST(name)                                   \
-    {                                                                    \
-        if (!strcmp(funcName, #name)) {                                  \
-            TRACING_EXIT(clGetExtensionFunctionAddress, (void **)&name); \
-            return ((void *)(name));                                     \
-        }                                                                \
+#define RETURN_FUNC_PTR_IF_EXIST(name)                                  \
+    {                                                                   \
+        if (!strcmp(funcName, #name)) {                                 \
+            void *ret = ((void *)(name));                               \
+            TRACING_EXIT(clGetExtensionFunctionAddress, (void **)&ret); \
+            return ret;                                                 \
+        }                                                               \
     }
 void *CL_API_CALL clGetExtensionFunctionAddress(const char *funcName) {
     TRACING_ENTER(clGetExtensionFunctionAddress, &funcName);
@@ -4197,27 +4431,36 @@ void *CL_API_CALL clSVMAlloc(cl_context context,
         return pAlloc;
     }
 
-    if (flags == 0) {
-        flags = CL_MEM_READ_WRITE;
-    }
+    {
+        // allow CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL with every combination
+        cl_svm_mem_flags tempFlags = flags & (~CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL);
 
-    if (!((flags == CL_MEM_READ_WRITE) ||
-          (flags == CL_MEM_WRITE_ONLY) ||
-          (flags == CL_MEM_READ_ONLY) ||
-          (flags == CL_MEM_SVM_FINE_GRAIN_BUFFER) ||
-          (flags == (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS)) ||
-          (flags == (CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER)) ||
-          (flags == (CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS)) ||
-          (flags == (CL_MEM_WRITE_ONLY | CL_MEM_SVM_FINE_GRAIN_BUFFER)) ||
-          (flags == (CL_MEM_WRITE_ONLY | CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS)) ||
-          (flags == (CL_MEM_READ_ONLY | CL_MEM_SVM_FINE_GRAIN_BUFFER)) ||
-          (flags == (CL_MEM_READ_ONLY | CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS)))) {
-        TRACING_EXIT(clSVMAlloc, &pAlloc);
-        return pAlloc;
+        if (tempFlags == 0) {
+            tempFlags = CL_MEM_READ_WRITE;
+        }
+
+        if (!((tempFlags == CL_MEM_READ_WRITE) ||
+              (tempFlags == CL_MEM_WRITE_ONLY) ||
+              (tempFlags == CL_MEM_READ_ONLY) ||
+              (tempFlags == CL_MEM_SVM_FINE_GRAIN_BUFFER) ||
+              (tempFlags == (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS)) ||
+              (tempFlags == (CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER)) ||
+              (tempFlags == (CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS)) ||
+              (tempFlags == (CL_MEM_WRITE_ONLY | CL_MEM_SVM_FINE_GRAIN_BUFFER)) ||
+              (tempFlags == (CL_MEM_WRITE_ONLY | CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS)) ||
+              (tempFlags == (CL_MEM_READ_ONLY | CL_MEM_SVM_FINE_GRAIN_BUFFER)) ||
+              (tempFlags == (CL_MEM_READ_ONLY | CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS)))) {
+
+            TRACING_EXIT(clSVMAlloc, &pAlloc);
+            return pAlloc;
+        }
     }
 
     auto pDevice = pContext->getDevice(0);
-    if ((size == 0) || (size > pDevice->getSharedDeviceInfo().maxMemAllocSize)) {
+    bool allowUnrestrictedSize = (flags & CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL);
+
+    if ((size == 0) ||
+        (!allowUnrestrictedSize && (size > pDevice->getSharedDeviceInfo().maxMemAllocSize))) {
         TRACING_EXIT(clSVMAlloc, &pAlloc);
         return pAlloc;
     }
@@ -4244,7 +4487,7 @@ void *CL_API_CALL clSVMAlloc(cl_context context,
         }
     }
 
-    pAlloc = pContext->getSVMAllocsManager()->createSVMAlloc(pDevice->getRootDeviceIndex(), size, MemObjHelper::getSvmAllocationProperties(flags), pDevice->getDeviceBitfield());
+    pAlloc = pContext->getSVMAllocsManager()->createSVMAlloc(size, MemObjHelper::getSvmAllocationProperties(flags), pContext->getRootDeviceIndices(), pContext->getDeviceBitfields());
 
     if (pContext->isProvidingPerformanceHints()) {
         pContext->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_GOOD_INTEL, CL_SVM_ALLOC_MEETS_ALIGNMENT_RESTRICTIONS, pAlloc, size);
@@ -4385,6 +4628,12 @@ cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue commandQueue,
         return retVal;
     }
 
+    if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_INTEL, numEventsInWaitList, eventWaitList, event)) {
+        retVal = CL_INVALID_OPERATION;
+        TRACING_EXIT(clEnqueueSVMMemcpy, &retVal);
+        return retVal;
+    }
+
     retVal = pCommandQueue->enqueueSVMMemcpy(
         blockingCopy,
         dstPtr,
@@ -4439,6 +4688,12 @@ cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue commandQueue,
 
     if ((svmPtr == nullptr) || (size == 0)) {
         retVal = CL_INVALID_VALUE;
+        TRACING_EXIT(clEnqueueSVMMemFill, &retVal);
+        return retVal;
+    }
+
+    if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_FILL_BUFFER_INTEL, numEventsInWaitList, eventWaitList, event)) {
+        retVal = CL_INVALID_OPERATION;
         TRACING_EXIT(clEnqueueSVMMemFill, &retVal);
         return retVal;
     }
@@ -4499,6 +4754,12 @@ cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue commandQueue,
         return retVal;
     }
 
+    if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_MAP_BUFFER_INTEL, numEventsInWaitList, eventWaitList, event)) {
+        retVal = CL_INVALID_OPERATION;
+        TRACING_EXIT(clEnqueueSVMMap, &retVal);
+        return retVal;
+    }
+
     retVal = pCommandQueue->enqueueSVMMap(
         blockingMap,
         mapFlags,
@@ -4547,6 +4808,12 @@ cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue commandQueue,
         return retVal;
     }
 
+    if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_MAP_BUFFER_INTEL, numEventsInWaitList, eventWaitList, event)) {
+        retVal = CL_INVALID_OPERATION;
+        TRACING_EXIT(clEnqueueSVMUnmap, &retVal);
+        return retVal;
+    }
+
     retVal = pCommandQueue->enqueueSVMUnmap(
         svmPtr,
         numEventsInWaitList,
@@ -4563,9 +4830,9 @@ cl_int CL_API_CALL clSetKernelArgSVMPointer(cl_kernel kernel,
                                             const void *argValue) {
     TRACING_ENTER(clSetKernelArgSVMPointer, &kernel, &argIndex, &argValue);
 
-    Kernel *pKernel = nullptr;
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
 
-    auto retVal = validateObjects(WithCastToInternal(kernel, &pKernel));
+    auto retVal = validateObjects(WithCastToInternal(kernel, &pMultiDeviceKernel));
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("kernel", kernel, "argIndex", argIndex, "argValue", argValue);
@@ -4575,43 +4842,53 @@ cl_int CL_API_CALL clSetKernelArgSVMPointer(cl_kernel kernel,
         return retVal;
     }
 
-    const HardwareInfo &hwInfo = pKernel->getDevice().getHardwareInfo();
-    if (!hwInfo.capabilityTable.ftrSvm) {
-        retVal = CL_INVALID_OPERATION;
-        TRACING_EXIT(clSetKernelArgSVMPointer, &retVal);
-        return retVal;
+    for (const auto &pDevice : pMultiDeviceKernel->getDevices()) {
+        const HardwareInfo &hwInfo = pDevice->getHardwareInfo();
+        if (!hwInfo.capabilityTable.ftrSvm) {
+            retVal = CL_INVALID_OPERATION;
+            TRACING_EXIT(clSetKernelArgSVMPointer, &retVal);
+            return retVal;
+        }
     }
 
-    if (argIndex >= pKernel->getKernelArgsNumber()) {
+    if (argIndex >= pMultiDeviceKernel->getKernelArgsNumber()) {
         retVal = CL_INVALID_ARG_INDEX;
         TRACING_EXIT(clSetKernelArgSVMPointer, &retVal);
         return retVal;
     }
 
-    cl_int kernelArgAddressQualifier = asClKernelArgAddressQualifier(pKernel->getKernelInfo().kernelArgInfo[argIndex].metadata.getAddressQualifier());
-    if ((kernelArgAddressQualifier != CL_KERNEL_ARG_ADDRESS_GLOBAL) &&
-        (kernelArgAddressQualifier != CL_KERNEL_ARG_ADDRESS_CONSTANT)) {
-        retVal = CL_INVALID_ARG_VALUE;
-        TRACING_EXIT(clSetKernelArgSVMPointer, &retVal);
-        return retVal;
-    }
-
-    GraphicsAllocation *pSvmAlloc = nullptr;
-    if (argValue != nullptr) {
-        auto svmManager = pKernel->getContext().getSVMAllocsManager();
-        auto svmData = svmManager->getSVMAlloc(argValue);
-        if (svmData == nullptr) {
-            if (!pKernel->getDevice().areSharedSystemAllocationsAllowed()) {
-                retVal = CL_INVALID_ARG_VALUE;
-                TRACING_EXIT(clSetKernelArgSVMPointer, &retVal);
-                return retVal;
-            }
-        } else {
-            pSvmAlloc = svmData->gpuAllocations.getGraphicsAllocation(pKernel->getDevice().getRootDeviceIndex());
+    for (const auto &pDevice : pMultiDeviceKernel->getDevices()) {
+        auto pKernel = pMultiDeviceKernel->getKernel(pDevice->getRootDeviceIndex());
+        cl_int kernelArgAddressQualifier = asClKernelArgAddressQualifier(pKernel->getKernelInfo()
+                                                                             .kernelDescriptor.payloadMappings.explicitArgs[argIndex]
+                                                                             .getTraits()
+                                                                             .getAddressQualifier());
+        if ((kernelArgAddressQualifier != CL_KERNEL_ARG_ADDRESS_GLOBAL) &&
+            (kernelArgAddressQualifier != CL_KERNEL_ARG_ADDRESS_CONSTANT)) {
+            retVal = CL_INVALID_ARG_VALUE;
+            TRACING_EXIT(clSetKernelArgSVMPointer, &retVal);
+            return retVal;
         }
     }
 
-    retVal = pKernel->setArgSvmAlloc(argIndex, const_cast<void *>(argValue), pSvmAlloc);
+    MultiGraphicsAllocation *pSvmAllocs = nullptr;
+    if (argValue != nullptr) {
+        auto svmManager = pMultiDeviceKernel->getContext().getSVMAllocsManager();
+        auto svmData = svmManager->getSVMAlloc(argValue);
+        if (svmData == nullptr) {
+            for (const auto &pDevice : pMultiDeviceKernel->getDevices()) {
+                if (!pDevice->areSharedSystemAllocationsAllowed()) {
+                    retVal = CL_INVALID_ARG_VALUE;
+                    TRACING_EXIT(clSetKernelArgSVMPointer, &retVal);
+                    return retVal;
+                }
+            }
+        } else {
+            pSvmAllocs = &svmData->gpuAllocations;
+        }
+    }
+
+    retVal = pMultiDeviceKernel->setArgSvmAlloc(argIndex, const_cast<void *>(argValue), pSvmAllocs);
     TRACING_EXIT(clSetKernelArgSVMPointer, &retVal);
     return retVal;
 }
@@ -4622,8 +4899,8 @@ cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel kernel,
                                        const void *paramValue) {
     TRACING_ENTER(clSetKernelExecInfo, &kernel, &paramName, &paramValueSize, &paramValue);
 
-    Kernel *pKernel = nullptr;
-    auto retVal = validateObjects(WithCastToInternal(kernel, &pKernel));
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
+    auto retVal = validateObjects(WithCastToInternal(kernel, &pMultiDeviceKernel));
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("kernel", kernel, "paramName", paramName,
@@ -4634,19 +4911,27 @@ cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel kernel,
         return retVal;
     }
 
-    const HardwareInfo &hwInfo = pKernel->getDevice().getHardwareInfo();
-    if (!hwInfo.capabilityTable.ftrSvm) {
-        retVal = CL_INVALID_OPERATION;
-        TRACING_EXIT(clSetKernelExecInfo, &retVal);
-        return retVal;
+    switch (paramName) {
+    case CL_KERNEL_EXEC_INFO_SVM_PTRS:
+    case CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM:
+        for (const auto &pDevice : pMultiDeviceKernel->getDevices()) {
+            const HardwareInfo &hwInfo = pDevice->getHardwareInfo();
+            if (!hwInfo.capabilityTable.ftrSvm) {
+                retVal = CL_INVALID_OPERATION;
+                TRACING_EXIT(clSetKernelExecInfo, &retVal);
+                return retVal;
+            }
+        }
     }
 
     switch (paramName) {
     case CL_KERNEL_EXEC_INFO_INDIRECT_DEVICE_ACCESS_INTEL:
     case CL_KERNEL_EXEC_INFO_INDIRECT_HOST_ACCESS_INTEL:
     case CL_KERNEL_EXEC_INFO_INDIRECT_SHARED_ACCESS_INTEL: {
-        auto propertyValue = *reinterpret_cast<const cl_bool *>(paramValue);
-        pKernel->setUnifiedMemoryProperty(paramName, propertyValue);
+        if (NEO::DebugManager.flags.DisableIndirectAccess.get() != 1 && pMultiDeviceKernel->getHasIndirectAccess() == true) {
+            auto propertyValue = *reinterpret_cast<const cl_bool *>(paramValue);
+            pMultiDeviceKernel->setUnifiedMemoryProperty(paramName, propertyValue);
+        }
     } break;
 
     case CL_KERNEL_EXEC_INFO_SVM_PTRS:
@@ -4662,31 +4947,31 @@ cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel kernel,
         size_t *pSvmPtrList = (size_t *)paramValue;
 
         if (paramName == CL_KERNEL_EXEC_INFO_SVM_PTRS) {
-            pKernel->clearSvmKernelExecInfo();
+            pMultiDeviceKernel->clearSvmKernelExecInfo();
         } else {
-            pKernel->clearUnifiedMemoryExecInfo();
+            pMultiDeviceKernel->clearUnifiedMemoryExecInfo();
         }
 
         for (uint32_t i = 0; i < numPointers; i++) {
-            auto svmData = pKernel->getContext().getSVMAllocsManager()->getSVMAlloc((const void *)pSvmPtrList[i]);
+            auto svmData = pMultiDeviceKernel->getContext().getSVMAllocsManager()->getSVMAlloc((const void *)pSvmPtrList[i]);
             if (svmData == nullptr) {
                 retVal = CL_INVALID_VALUE;
                 TRACING_EXIT(clSetKernelExecInfo, &retVal);
                 return retVal;
             }
-            GraphicsAllocation *svmAlloc = svmData->gpuAllocations.getGraphicsAllocation(pKernel->getDevice().getRootDeviceIndex());
+            auto &svmAllocs = svmData->gpuAllocations;
 
             if (paramName == CL_KERNEL_EXEC_INFO_SVM_PTRS) {
-                pKernel->setSvmKernelExecInfo(svmAlloc);
+                pMultiDeviceKernel->setSvmKernelExecInfo(svmAllocs);
             } else {
-                pKernel->setUnifiedMemoryExecInfo(svmAlloc);
+                pMultiDeviceKernel->setUnifiedMemoryExecInfo(svmAllocs);
             }
         }
         break;
     }
     case CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_INTEL: {
         auto propertyValue = *static_cast<const uint32_t *>(paramValue);
-        retVal = pKernel->setKernelThreadArbitrationPolicy(propertyValue);
+        retVal = pMultiDeviceKernel->setKernelThreadArbitrationPolicy(propertyValue);
         return retVal;
     }
     case CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM: {
@@ -4702,12 +4987,12 @@ cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel kernel,
             return retVal;
         }
         auto kernelType = *static_cast<const cl_execution_info_kernel_type_intel *>(paramValue);
-        retVal = pKernel->setKernelExecutionType(kernelType);
+        retVal = pMultiDeviceKernel->setKernelExecutionType(kernelType);
         TRACING_EXIT(clSetKernelExecInfo, &retVal);
         return retVal;
     }
     default: {
-        retVal = pKernel->setAdditionalKernelExecInfoWithParam(paramName, paramValueSize, paramValue);
+        retVal = pMultiDeviceKernel->setAdditionalKernelExecInfoWithParam(paramName, paramValueSize, paramValue);
         TRACING_EXIT(clSetKernelExecInfo, &retVal);
         return retVal;
     }
@@ -4864,7 +5149,8 @@ cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_context conte
             tokenValue != CL_QUEUE_PRIORITY_KHR &&
             tokenValue != CL_QUEUE_THROTTLE_KHR &&
             tokenValue != CL_QUEUE_SLICE_COUNT_INTEL &&
-            !isExtraToken(propertiesAddress)) {
+            tokenValue != CL_QUEUE_FAMILY_INTEL &&
+            tokenValue != CL_QUEUE_INDEX_INTEL) {
             err.set(CL_INVALID_VALUE);
             TRACING_EXIT(clCreateCommandQueueWithProperties, &commandQueue);
             return commandQueue;
@@ -4872,12 +5158,6 @@ cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_context conte
 
         propertiesAddress += 2;
         tokenValue = *propertiesAddress;
-    }
-
-    if (!verifyExtraTokens(pDevice, *pContext, properties)) {
-        err.set(CL_INVALID_VALUE);
-        TRACING_EXIT(clCreateCommandQueueWithProperties, &commandQueue);
-        return commandQueue;
     }
 
     auto commandQueueProperties = getCmdQueueProperties<cl_command_queue_properties>(properties);
@@ -4933,6 +5213,23 @@ cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_context conte
     }
 
     if (getCmdQueueProperties<cl_command_queue_properties>(properties, CL_QUEUE_SLICE_COUNT_INTEL) > pDevice->getDeviceInfo().maxSliceCount) {
+        err.set(CL_INVALID_QUEUE_PROPERTIES);
+        TRACING_EXIT(clCreateCommandQueueWithProperties, &commandQueue);
+        return commandQueue;
+    }
+
+    bool queueFamilySelected = false;
+    bool queueSelected = false;
+    const auto queueFamilyIndex = getCmdQueueProperties<cl_uint>(properties, CL_QUEUE_FAMILY_INTEL, &queueFamilySelected);
+    const auto queueIndex = getCmdQueueProperties<cl_uint>(properties, CL_QUEUE_INDEX_INTEL, &queueSelected);
+    if (queueFamilySelected != queueSelected) {
+        err.set(CL_INVALID_QUEUE_PROPERTIES);
+        TRACING_EXIT(clCreateCommandQueueWithProperties, &commandQueue);
+        return commandQueue;
+    }
+    if (queueFamilySelected &&
+        (queueFamilyIndex >= pDevice->getDeviceInfo().queueFamilyProperties.size() ||
+         queueIndex >= pDevice->getDeviceInfo().queueFamilyProperties[queueFamilyIndex].count)) {
         err.set(CL_INVALID_QUEUE_PROPERTIES);
         TRACING_EXIT(clCreateCommandQueueWithProperties, &commandQueue);
         return commandQueue;
@@ -5029,13 +5326,22 @@ cl_int CL_API_CALL clGetKernelSubGroupInfoKHR(cl_kernel kernel,
                    "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
 
-    Kernel *pKernel = nullptr;
-    retVal = validateObjects(device,
-                             WithCastToInternal(kernel, &pKernel));
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
+    retVal = validateObjects(WithCastToInternal(kernel, &pMultiDeviceKernel));
+
+    ClDevice *pClDevice = nullptr;
+    if (CL_SUCCESS == retVal) {
+        if (pMultiDeviceKernel->getDevices().size() == 1u && !device) {
+            pClDevice = pMultiDeviceKernel->getDevices()[0];
+        } else {
+            retVal = validateObjects(WithCastToInternal(device, &pClDevice));
+        }
+    }
 
     if (CL_SUCCESS != retVal) {
         return retVal;
     }
+    auto pKernel = pMultiDeviceKernel->getKernel(pClDevice->getRootDeviceIndex());
 
     switch (paramName) {
     case CL_KERNEL_MAX_SUB_GROUP_SIZE_FOR_NDRANGE:
@@ -5129,15 +5435,24 @@ cl_int CL_API_CALL clGetKernelSubGroupInfo(cl_kernel kernel,
                    "paramValue", NEO::FileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
 
-    Kernel *pKernel = nullptr;
-    retVal = validateObjects(device,
-                             WithCastToInternal(kernel, &pKernel));
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
+    retVal = validateObjects(WithCastToInternal(kernel, &pMultiDeviceKernel));
+
+    ClDevice *pClDevice = nullptr;
+    if (CL_SUCCESS == retVal) {
+        if (pMultiDeviceKernel->getDevices().size() == 1u && !device) {
+            pClDevice = pMultiDeviceKernel->getDevices()[0];
+        } else {
+            retVal = validateObjects(WithCastToInternal(device, &pClDevice));
+        }
+    }
 
     if (CL_SUCCESS != retVal) {
         TRACING_EXIT(clGetKernelSubGroupInfo, &retVal);
         return retVal;
     }
 
+    auto pKernel = pMultiDeviceKernel->getKernel(pClDevice->getRootDeviceIndex());
     retVal = pKernel->getSubGroupInfo(paramName,
                                       inputValueSize, inputValue,
                                       paramValueSize, paramValue,
@@ -5289,31 +5604,31 @@ cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue commandQueue,
 cl_kernel CL_API_CALL clCloneKernel(cl_kernel sourceKernel,
                                     cl_int *errcodeRet) {
     TRACING_ENTER(clCloneKernel, &sourceKernel, &errcodeRet);
-    Kernel *pSourceKernel = nullptr;
-    Kernel *pClonedKernel = nullptr;
+    MultiDeviceKernel *pSourceMultiDeviceKernel = nullptr;
+    MultiDeviceKernel *pClonedMultiDeviceKernel = nullptr;
 
-    auto retVal = validateObjects(WithCastToInternal(sourceKernel, &pSourceKernel));
+    auto retVal = validateObjects(WithCastToInternal(sourceKernel, &pSourceMultiDeviceKernel));
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("sourceKernel", sourceKernel);
 
     if (CL_SUCCESS == retVal) {
-        pClonedKernel = Kernel::create(pSourceKernel->getProgram(),
-                                       pSourceKernel->getKernelInfo(),
-                                       &retVal);
-        UNRECOVERABLE_IF((pClonedKernel == nullptr) || (retVal != CL_SUCCESS));
+        pClonedMultiDeviceKernel = MultiDeviceKernel::create(pSourceMultiDeviceKernel->getProgram(),
+                                                             pSourceMultiDeviceKernel->getKernelInfos(),
+                                                             &retVal);
+        UNRECOVERABLE_IF((pClonedMultiDeviceKernel == nullptr) || (retVal != CL_SUCCESS));
 
-        retVal = pClonedKernel->cloneKernel(pSourceKernel);
+        retVal = pClonedMultiDeviceKernel->cloneKernel(pSourceMultiDeviceKernel);
     }
 
     if (errcodeRet) {
         *errcodeRet = retVal;
     }
-    if (pClonedKernel != nullptr) {
-        gtpinNotifyKernelCreate(pClonedKernel);
+    if (pClonedMultiDeviceKernel != nullptr) {
+        gtpinNotifyKernelCreate(pClonedMultiDeviceKernel);
     }
 
-    TRACING_EXIT(clCloneKernel, (cl_kernel *)&pClonedKernel);
-    return pClonedKernel;
+    TRACING_EXIT(clCloneKernel, (cl_kernel *)&pClonedMultiDeviceKernel);
+    return pClonedMultiDeviceKernel;
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueVerifyMemoryINTEL(cl_command_queue commandQueue,
@@ -5487,7 +5802,9 @@ cl_int CL_API_CALL clGetKernelSuggestedLocalWorkSizeINTEL(cl_command_queue comma
                    "globalWorkSize", NEO::FileLoggerInstance().getSizes(globalWorkSize, workDim, true),
                    "suggestedLocalWorkSize", suggestedLocalWorkSize);
 
-    retVal = validateObjects(commandQueue, kernel);
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
+    CommandQueue *pCommandQueue = nullptr;
+    retVal = validateObjects(WithCastToInternal(commandQueue, &pCommandQueue), WithCastToInternal(kernel, &pMultiDeviceKernel));
 
     if (CL_SUCCESS != retVal) {
         return retVal;
@@ -5498,12 +5815,15 @@ cl_int CL_API_CALL clGetKernelSuggestedLocalWorkSizeINTEL(cl_command_queue comma
         return retVal;
     }
 
-    if (globalWorkSize == nullptr) {
+    if (globalWorkSize == nullptr ||
+        globalWorkSize[0] == 0 ||
+        (workDim > 1 && globalWorkSize[1] == 0) ||
+        (workDim > 2 && globalWorkSize[2] == 0)) {
         retVal = CL_INVALID_GLOBAL_WORK_SIZE;
         return retVal;
     }
 
-    auto pKernel = castToObjectOrAbort<Kernel>(kernel);
+    auto pKernel = pMultiDeviceKernel->getKernel(pCommandQueue->getDevice().getRootDeviceIndex());
     if (!pKernel->isPatched()) {
         retVal = CL_INVALID_KERNEL;
         return retVal;
@@ -5535,7 +5855,10 @@ cl_int CL_API_CALL clGetKernelMaxConcurrentWorkGroupCountINTEL(cl_command_queue 
                    "localWorkSize", NEO::FileLoggerInstance().getSizes(localWorkSize, workDim, true),
                    "suggestedWorkGroupCount", suggestedWorkGroupCount);
 
-    retVal = validateObjects(commandQueue, kernel);
+    CommandQueue *pCommandQueue = nullptr;
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
+
+    retVal = validateObjects(WithCastToInternal(commandQueue, &pCommandQueue), WithCastToInternal(kernel, &pMultiDeviceKernel));
 
     if (CL_SUCCESS != retVal) {
         return retVal;
@@ -5556,7 +5879,7 @@ cl_int CL_API_CALL clGetKernelMaxConcurrentWorkGroupCountINTEL(cl_command_queue 
         return retVal;
     }
 
-    auto pKernel = castToObjectOrAbort<Kernel>(kernel);
+    auto pKernel = pMultiDeviceKernel->getKernel(pCommandQueue->getDevice().getRootDeviceIndex());
     if (!pKernel->isPatched()) {
         retVal = CL_INVALID_KERNEL;
         return retVal;
@@ -5567,7 +5890,6 @@ cl_int CL_API_CALL clGetKernelMaxConcurrentWorkGroupCountINTEL(cl_command_queue 
         return retVal;
     }
 
-    CommandQueue *pCommandQueue = nullptr;
     WithCastToInternal(commandQueue, &pCommandQueue);
     *suggestedWorkGroupCount = pKernel->getMaxWorkGroupCount(workDim, localWorkSize, pCommandQueue);
 
@@ -5597,23 +5919,28 @@ cl_int CL_API_CALL clEnqueueNDCountKernelINTEL(cl_command_queue commandQueue,
 
     CommandQueue *pCommandQueue = nullptr;
     Kernel *pKernel = nullptr;
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
 
     retVal = validateObjects(
         WithCastToInternal(commandQueue, &pCommandQueue),
-        WithCastToInternal(kernel, &pKernel),
+        WithCastToInternal(kernel, &pMultiDeviceKernel),
         EventWaitList(numEventsInWaitList, eventWaitList));
 
     if (CL_SUCCESS != retVal) {
         return retVal;
     }
 
-    auto &hardwareInfo = pKernel->getDevice().getHardwareInfo();
+    auto &device = pCommandQueue->getClDevice();
+    auto rootDeviceIndex = device.getRootDeviceIndex();
+    auto &hardwareInfo = device.getHardwareInfo();
     auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
-    if (!hwHelper.isCooperativeDispatchSupported(pCommandQueue->getGpgpuEngine().getEngineType(), hardwareInfo.platform.eProductFamily)) {
+    auto engineGroupType = hwHelper.getEngineGroupType(pCommandQueue->getGpgpuEngine().getEngineType(), hardwareInfo);
+    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, hardwareInfo.platform.eProductFamily)) {
         retVal = CL_INVALID_COMMAND_QUEUE;
         return retVal;
     }
 
+    pKernel = pMultiDeviceKernel->getKernel(rootDeviceIndex);
     size_t globalWorkSize[3];
     for (size_t i = 0; i < workDim; i++) {
         globalWorkSize[i] = workgroupCount[i] * localWorkSize[i];
@@ -5631,22 +5958,27 @@ cl_int CL_API_CALL clEnqueueNDCountKernelINTEL(cl_command_queue commandQueue,
         }
     }
 
-    if (pKernel->isUsingSyncBuffer()) {
+    if (pKernel->usesSyncBuffer()) {
         if (pKernel->getExecutionType() != KernelExecutionType::Concurrent) {
             retVal = CL_INVALID_KERNEL;
             return retVal;
         }
 
-        pCommandQueue->getDevice().getSpecializedDevice<ClDevice>()->allocateSyncBufferHandler();
+        device.getDevice().allocateSyncBufferHandler();
     }
 
-    TakeOwnershipWrapper<Kernel> kernelOwnership(*pKernel, gtpinIsGTPinInitialized());
+    if (!pCommandQueue->validateCapabilityForOperation(CL_QUEUE_CAPABILITY_KERNEL_INTEL, numEventsInWaitList, eventWaitList, event)) {
+        retVal = CL_INVALID_OPERATION;
+        return retVal;
+    }
+
+    TakeOwnershipWrapper<MultiDeviceKernel> kernelOwnership(*pMultiDeviceKernel, gtpinIsGTPinInitialized());
     if (gtpinIsGTPinInitialized()) {
         gtpinNotifyKernelSubmit(kernel, pCommandQueue);
     }
 
     retVal = pCommandQueue->enqueueKernel(
-        kernel,
+        pKernel,
         workDim,
         globalWorkOffset,
         globalWorkSize,

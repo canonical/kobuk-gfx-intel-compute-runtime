@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -75,7 +75,12 @@ clGetDeviceIDsFromVA_APIMediaAdapterINTEL(cl_platform_id platform, cl_va_api_dev
         VADevice vaDevice{};
         cl_device_id device = vaDevice.getDeviceFromVA(pPlatform, mediaAdapter);
         GetInfoHelper::set(devices, device);
-        GetInfoHelper::set(numDevices, 1u);
+        if (device == nullptr) {
+            GetInfoHelper::set(numDevices, 0u);
+            status = CL_DEVICE_NOT_FOUND;
+        } else {
+            GetInfoHelper::set(numDevices, 1u);
+        }
     }
     return status;
 }
@@ -141,6 +146,7 @@ cl_int CL_API_CALL clGetSupportedVA_APIMediaSurfaceFormatsINTEL(
     cl_context context,
     cl_mem_flags flags,
     cl_mem_object_type imageType,
+    cl_uint plane,
     cl_uint numEntries,
     VAImageFormat *vaApiFormats,
     cl_uint *numImageFormats) {
@@ -155,5 +161,5 @@ cl_int CL_API_CALL clGetSupportedVA_APIMediaSurfaceFormatsINTEL(
         return CL_INVALID_CONTEXT;
     }
 
-    return pSharing->getSupportedFormats(flags, imageType, numEntries, vaApiFormats, numImageFormats);
+    return pSharing->getSupportedFormats(flags, imageType, plane, numEntries, vaApiFormats, numImageFormats);
 }

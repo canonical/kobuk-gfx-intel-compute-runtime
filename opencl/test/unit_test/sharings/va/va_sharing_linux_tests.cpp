@@ -1,12 +1,12 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
-#include "shared/test/unit_test/helpers/variable_backup.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/variable_backup.h"
 
 #include "opencl/source/sharings/va/va_sharing_functions.h"
 #include "opencl/test/unit_test/sharings/va/mock_va_sharing.h"
@@ -188,13 +188,19 @@ TEST(VASharingFunctions, givenEnabledExtendedVaFormatsWhenQueryingSupportedForma
 
     sharingFunctions.querySupportedVaImageFormats(VADisplay(1));
 
-    EXPECT_EQ(2u, sharingFunctions.supportedFormats.size());
+    EXPECT_EQ(3u, sharingFunctions.supported2PlaneFormats.size());
+    EXPECT_EQ(1u, sharingFunctions.supported3PlaneFormats.size());
 
     size_t allFormatsFound = 0;
-    for (const auto &supportedFormat : sharingFunctions.supportedFormats) {
-        if (supportedFormat.fourcc == VA_FOURCC_NV12 || supportedFormat.fourcc == VA_FOURCC_P010) {
+    for (const auto &supported2PlaneFormat : sharingFunctions.supported2PlaneFormats) {
+        if (supported2PlaneFormat.fourcc == VA_FOURCC_NV12 || supported2PlaneFormat.fourcc == VA_FOURCC_P010 || supported2PlaneFormat.fourcc == VA_FOURCC_P016) {
             allFormatsFound++;
         }
     }
-    EXPECT_EQ(2u, allFormatsFound);
+    for (const auto &supported3PlaneFormat : sharingFunctions.supported3PlaneFormats) {
+        if (supported3PlaneFormat.fourcc == VA_FOURCC_RGBP) {
+            allFormatsFound++;
+        }
+    }
+    EXPECT_EQ(4u, allFormatsFound);
 }

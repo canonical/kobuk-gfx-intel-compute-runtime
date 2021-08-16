@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,41 +10,37 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/os_interface/windows/os_context_win.h"
 #include "shared/source/os_interface/windows/wddm/wddm.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
-#include "shared/test/unit_test/helpers/ult_hw_config.h"
-#include "shared/test/unit_test/helpers/variable_backup.h"
-#include "shared/test/unit_test/mocks/mock_device.h"
-#include "shared/test/unit_test/mocks/windows/mock_wddm_direct_submission.h"
+#include "shared/source/os_interface/windows/wddm_memory_manager.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/ult_hw_config.h"
+#include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_io_functions.h"
+#include "shared/test/common/mocks/windows/mock_wddm_direct_submission.h"
+#include "shared/test/common/os_interface/windows/wddm_fixture.h"
 
-#include "opencl/test/unit_test/mocks/mock_io_functions.h"
-#include "opencl/test/unit_test/os_interface/windows/wddm_fixture.h"
+using namespace NEO;
 
 struct WddmDirectSubmissionFixture : public WddmFixture {
     void SetUp() override {
-        backupUlt = std::make_unique<VariableBackup<UltHwConfig>>(&ultHwConfig);
         WddmFixture::SetUp();
 
         wddm->wddmInterface.reset(new WddmMockInterface20(*wddm));
         wddmMockInterface = static_cast<WddmMockInterface20 *>(wddm->wddmInterface.get());
 
-        ultHwConfig.forceOsAgnosticMemoryManager = false;
+        executionEnvironment->memoryManager.reset(new WddmMemoryManager{*executionEnvironment});
         device.reset(MockDevice::create<MockDevice>(executionEnvironment.get(), 0u));
-        osContext = std::make_unique<OsContextWin>(*wddm, 0u, device->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                   false, false, false);
+        osContext = std::make_unique<OsContextWin>(*wddm, 0u, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup, false);
+        osContext->ensureContextInitialized();
         device->setPreemptionMode(PreemptionMode::ThreadGroup);
     }
 
     WddmMockInterface20 *wddmMockInterface;
     std::unique_ptr<OsContextWin> osContext;
     std::unique_ptr<MockDevice> device;
-
-    std::unique_ptr<VariableBackup<UltHwConfig>> backupUlt;
 };
 
 using WddmDirectSubmissionTest = WddmDirectSubmissionFixture;
-
-using namespace NEO;
 
 HWTEST_F(WddmDirectSubmissionTest, givenWddmWhenDirectIsInitializedAndStartedThenExpectProperCommandsDispatched) {
     std::unique_ptr<MockWddmDirectSubmission<FamilyType, RenderDispatcher<FamilyType>>> wddmDirectSubmission =
@@ -324,7 +320,7 @@ HWTEST_F(WddmDirectSubmissionTest, givenWddmWhenUpdatingTagValueThenExpectComple
     EXPECT_EQ(value, wddmDirectSubmission.completionRingBuffers[wddmDirectSubmission.currentRingBuffer]);
 }
 
-HWTEST_F(WddmDirectSubmissionTest, givenWddmResidencyEnabledWhenCreatingDestroyingSubmitterNotifiesResidencyLogger) {
+HWTEST_F(WddmDirectSubmissionTest, givenWddmResidencyEnabledWhenCreatingDestroyingThenSubmitterNotifiesResidencyLogger) {
     using Dispatcher = RenderDispatcher<FamilyType>;
     if (!NEO::wddmResidencyLoggingAvailable) {
         GTEST_SKIP();
@@ -388,7 +384,7 @@ HWTEST_F(WddmDirectSubmissionTest, givenWddmResidencyEnabledWhenAllocatingResour
     EXPECT_EQ(0u, NEO::IoFunctions::mockFcloseCalled);
 }
 
-HWTEST_F(WddmDirectSubmissionTest, givenWddmResidencyEnabledWhenHandleResidencySubmitterNotifiesResidencyLogger) {
+HWTEST_F(WddmDirectSubmissionTest, givenWddmResidencyEnabledWhenHandleResidencyThenSubmitterNotifiesResidencyLogger) {
     using Dispatcher = RenderDispatcher<FamilyType>;
     if (!NEO::wddmResidencyLoggingAvailable) {
         GTEST_SKIP();
@@ -417,7 +413,7 @@ HWTEST_F(WddmDirectSubmissionTest, givenWddmResidencyEnabledWhenHandleResidencyS
     EXPECT_EQ(0u, NEO::IoFunctions::mockFcloseCalled);
 }
 
-HWTEST_F(WddmDirectSubmissionTest, givenWddmResidencyEnabledWhenSubmitToGpuSubmitterNotifiesResidencyLogger) {
+HWTEST_F(WddmDirectSubmissionTest, givenWddmResidencyEnabledWhenSubmitToGpuThenSubmitterNotifiesResidencyLogger) {
     using Dispatcher = RenderDispatcher<FamilyType>;
     if (!NEO::wddmResidencyLoggingAvailable) {
         GTEST_SKIP();

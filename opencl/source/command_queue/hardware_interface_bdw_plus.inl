@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -81,7 +81,7 @@ inline void HardwareInterface<GfxFamily>::programWalker(
 
     if (currentTimestampPacketNodes && commandQueue.getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
         auto timestampPacketNode = currentTimestampPacketNodes->peekNodes().at(currentDispatchIndex);
-        GpgpuWalkerHelper<GfxFamily>::setupTimestampPacket(&commandStream, &walkerCmd, timestampPacketNode, TimestampPacketStorage::WriteOperationType::AfterWalker, commandQueue.getDevice().getRootDeviceEnvironment());
+        GpgpuWalkerHelper<GfxFamily>::setupTimestampPacket(&commandStream, &walkerCmd, timestampPacketNode, commandQueue.getDevice().getRootDeviceEnvironment());
     }
 
     auto isCcsUsed = EngineHelpers::isCcs(commandQueue.getGpgpuEngine().osContext->getEngineType());
@@ -101,12 +101,13 @@ inline void HardwareInterface<GfxFamily>::programWalker(
         preemptionMode,
         &walkerCmd,
         nullptr,
-        true);
+        true,
+        commandQueue.getDevice());
 
-    GpgpuWalkerHelper<GfxFamily>::setGpgpuWalkerThreadData(&walkerCmd, globalOffsets, startWorkGroups,
+    GpgpuWalkerHelper<GfxFamily>::setGpgpuWalkerThreadData(&walkerCmd, kernel.getKernelInfo().kernelDescriptor,
+                                                           globalOffsets, startWorkGroups,
                                                            numWorkGroups, localWorkSizes, simd, dim,
-                                                           false, false,
-                                                           *kernel.getKernelInfo().patchInfo.threadPayload, 0u);
+                                                           false, false, 0u);
 
     EncodeDispatchKernel<GfxFamily>::encodeAdditionalWalkerFields(commandQueue.getDevice().getHardwareInfo(), walkerCmd);
     *walkerCmdBuf = walkerCmd;

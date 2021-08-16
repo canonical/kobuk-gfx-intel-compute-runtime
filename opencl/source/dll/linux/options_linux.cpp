@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,11 +14,13 @@ namespace Os {
 const char *frontEndDllName = FCL_LIBRARY_NAME;
 const char *igcDllName = IGC_LIBRARY_NAME;
 const char *libvaDllName = "libva.so.2";
+const char *gdiDllName = "/usr/lib/wsl/lib/libdxcore.so";
+const char *dxcoreDllName = "/usr/lib/wsl/lib/libdxcore.so";
 
 const char *sysFsPciPathPrefix = "/sys/bus/pci/devices/0000:";
 const char *pciDevicesDirectory = "/dev/dri/by-path";
 const char *sysFsProcPathPrefix = "/proc";
 
 // Metrics Library name
-const char *metricsLibraryDllName = "libigdml.so";
+const char *metricsLibraryDllName = "libigdml.so.1";
 } // namespace Os

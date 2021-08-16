@@ -1,13 +1,14 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/test/common/helpers/unit_test_helper.h"
+
 #include "opencl/source/context/context.h"
 #include "opencl/test/unit_test/fixtures/device_host_queue_fixture.h"
-#include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 
 #include "cl_api_tests.h"
@@ -54,7 +55,6 @@ TEST_F(clReleaseCommandQueueTests, givenBlockedEnqueueWithOutputEventStoredAsVir
     cl_queue_properties properties = 0;
     ClDevice *device = (ClDevice *)testedClDevice;
     MockKernelWithInternals kernelInternals(*device, pContext);
-    Kernel *kernel = kernelInternals.mockKernel;
 
     cmdQ = clCreateCommandQueue(pContext, testedClDevice, properties, &retVal);
 
@@ -72,7 +72,7 @@ TEST_F(clReleaseCommandQueueTests, givenBlockedEnqueueWithOutputEventStoredAsVir
 
     EXPECT_EQ(success, retVal);
 
-    retVal = clEnqueueNDRangeKernel(cmdQ, kernel, 1, offset, gws, nullptr, 1, &event, &eventOut);
+    retVal = clEnqueueNDRangeKernel(cmdQ, kernelInternals.mockMultiDeviceKernel, 1, offset, gws, nullptr, 1, &event, &eventOut);
 
     EXPECT_EQ(success, retVal);
     EXPECT_NE(nullptr, eventOut);

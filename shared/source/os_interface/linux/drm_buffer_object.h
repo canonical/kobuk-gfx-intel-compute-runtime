@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,10 +7,11 @@
 
 #pragma once
 
+#include "shared/source/memory_manager/definitions/engine_limits.h"
+#include "shared/source/os_interface/linux/cache_info.h"
 #include "shared/source/utilities/stackvec.h"
 
 #include "drm/i915_drm.h"
-#include "engine_limits.h"
 
 #include <array>
 #include <atomic>
@@ -79,6 +80,16 @@ class BufferObject {
         return allowCapture;
     }
 
+    bool isImmediateBindingRequired() {
+        return requiresImmediateBinding;
+    }
+    void requireImmediateBinding(bool required) {
+        requiresImmediateBinding = required;
+    }
+
+    void setCacheRegion(CacheRegion regionIndex) { cacheRegion = regionIndex; }
+    CacheRegion peekCacheRegion() const { return cacheRegion; }
+
   protected:
     Drm *drm = nullptr;
     bool perContextVmsUsed = false;
@@ -91,6 +102,7 @@ class BufferObject {
     //Tiling
     uint32_t tiling_mode;
     bool allowCapture = false;
+    bool requiresImmediateBinding = false;
 
     uint32_t getOsContextId(OsContext *osContext);
     MOCKABLE_VIRTUAL void fillExecObject(drm_i915_gem_exec_object2 &execObject, OsContext *osContext, uint32_t vmHandleId, uint32_t drmContextId);
@@ -101,6 +113,8 @@ class BufferObject {
     void *lockedAddress; // CPU side virtual address
 
     uint64_t unmapSize = 0;
+
+    CacheRegion cacheRegion = CacheRegion::Default;
 
     std::vector<std::array<bool, EngineLimits::maxHandleCount>> bindInfo;
     StackVec<uint32_t, 2> bindExtHandles;

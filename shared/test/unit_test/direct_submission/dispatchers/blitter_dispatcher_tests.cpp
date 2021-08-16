@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,7 +7,7 @@
 
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/direct_submission/dispatchers/blitter_dispatcher.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/unit_test/direct_submission/dispatchers/dispatcher_fixture.h"
 
 #include "test.h"
@@ -37,7 +37,7 @@ HWTEST_F(BlitterDispatcheTest, givenBlitterWhenDispatchingMonitorFenceCmdThenDis
 
     uint64_t expectedGpuAddress = 0x5100ull;
     uint64_t expectedValue = 0x1234ull;
-    BlitterDispatcher<FamilyType>::dispatchMonitorFence(cmdBuffer, expectedGpuAddress, expectedValue, pDevice->getHardwareInfo());
+    BlitterDispatcher<FamilyType>::dispatchMonitorFence(cmdBuffer, expectedGpuAddress, expectedValue, pDevice->getHardwareInfo(), false);
 
     EXPECT_EQ(expectedSize, cmdBuffer.getUsed());
 
@@ -64,7 +64,7 @@ HWTEST_F(BlitterDispatcheTest, givenBlitterWhenDispatchingCacheFlushCmdThenDispa
     using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
     size_t expectedSize = EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
 
-    BlitterDispatcher<FamilyType>::dispatchCacheFlush(cmdBuffer, pDevice->getHardwareInfo());
+    BlitterDispatcher<FamilyType>::dispatchCacheFlush(cmdBuffer, pDevice->getHardwareInfo(), 0ull);
 
     EXPECT_EQ(expectedSize, cmdBuffer.getUsed());
 
@@ -72,4 +72,22 @@ HWTEST_F(BlitterDispatcheTest, givenBlitterWhenDispatchingCacheFlushCmdThenDispa
     hwParse.parseCommands<FamilyType>(cmdBuffer);
     auto commandsList = hwParse.getCommandsList<MI_FLUSH_DW>();
     EXPECT_LE(1u, commandsList.size());
+}
+
+HWTEST_F(BlitterDispatcheTest, givenBlitterWhenDispatchingTlbFlushThenDispatchMiFlushCommandWithproperBits) {
+    using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
+    size_t expectedSize = EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+
+    BlitterDispatcher<FamilyType>::dispatchTlbFlush(cmdBuffer, 0ull);
+
+    EXPECT_EQ(expectedSize, cmdBuffer.getUsed());
+
+    HardwareParse hwParse;
+    hwParse.parseCommands<FamilyType>(cmdBuffer, EncodeMiFlushDW<FamilyType>::getMiFlushDwWaSize());
+    auto miFlushDw = hwParse.getCommand<MI_FLUSH_DW>();
+
+    EXPECT_TRUE(miFlushDw->getTlbInvalidate());
+    EXPECT_EQ(miFlushDw->getPostSyncOperation(), MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA_QWORD);
+
+    EXPECT_EQ(BlitterDispatcher<FamilyType>::getSizeTlbFlush(), EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite());
 }

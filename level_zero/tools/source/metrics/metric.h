@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -33,6 +33,8 @@ struct MetricContext {
     static std::unique_ptr<MetricContext> create(struct Device &device);
     static bool isMetricApiAvailable();
     virtual bool loadDependencies() = 0;
+    virtual void setMetricCollectionEnabled(bool enable) = 0;
+    virtual bool getMetricCollectionEnabled() = 0;
     virtual bool isInitialized() = 0;
     virtual void setInitializationState(const ze_result_t state) = 0;
     virtual Device &getDevice() = 0;
@@ -54,6 +56,8 @@ struct MetricContext {
 
     virtual void setUseCompute(const bool useCompute) = 0;
     virtual bool isComputeUsed() = 0;
+    virtual uint32_t getSubDeviceIndex() = 0;
+    virtual void setSubDeviceIndex(const uint32_t index) = 0;
 };
 
 struct Metric : _zet_metric_handle_t {

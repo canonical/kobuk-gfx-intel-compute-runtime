@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,7 @@
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/os_interface/linux/drm_memory_manager.h"
+#include "shared/source/os_interface/linux/drm_memory_operations_handler.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
 #include "shared/source/os_interface/linux/os_time_linux.h"
 #include "shared/source/os_interface/os_context.h"
@@ -71,15 +72,11 @@ bool BufferObject::close() {
 }
 
 int BufferObject::wait(int64_t timeoutNs) {
-    drm_i915_gem_wait wait = {};
-    wait.bo_handle = this->handle;
-    wait.timeout_ns = -1;
-
-    int ret = this->drm->ioctl(DRM_IOCTL_I915_GEM_WAIT, &wait);
-    if (ret != 0) {
-        int err = errno;
-        PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "ioctl(I915_GEM_WAIT) failed with %d. errno=%d(%s)\n", ret, err, strerror(err));
+    if (this->drm->isVmBindAvailable()) {
+        return 0;
     }
+
+    int ret = this->drm->waitHandle(this->handle, -1);
     UNRECOVERABLE_IF(ret != 0);
 
     return ret;
@@ -115,6 +112,11 @@ void BufferObject::fillExecObject(drm_i915_gem_exec_object2 &execObject, OsConte
     execObject.alignment = 0;
     execObject.offset = this->gpuAddress;
     execObject.flags = EXEC_OBJECT_PINNED | EXEC_OBJECT_SUPPORTS_48B_ADDRESS;
+
+    if (DebugManager.flags.UseAsyncDrmExec.get() == 1) {
+        execObject.flags |= EXEC_OBJECT_ASYNC;
+    }
+
     if (this->isMarkedForCapture()) {
         execObject.flags |= EXEC_OBJECT_CAPTURE;
     }
@@ -143,6 +145,17 @@ int BufferObject::exec(uint32_t used, size_t startOffset, unsigned int flags, bo
     }
 
     int ret = this->drm->ioctl(DRM_IOCTL_I915_GEM_EXECBUFFER2, &execbuf);
+
+    if (ret != 0) {
+        static_cast<DrmMemoryOperationsHandler *>(this->drm->getRootDeviceEnvironment().memoryOperationsInterface.get())->evictUnusedAllocations(false);
+        ret = this->drm->ioctl(DRM_IOCTL_I915_GEM_EXECBUFFER2, &execbuf);
+    }
+
+    if (ret != 0) {
+        static_cast<DrmMemoryOperationsHandler *>(this->drm->getRootDeviceEnvironment().memoryOperationsInterface.get())->evictUnusedAllocations(true);
+        ret = this->drm->ioctl(DRM_IOCTL_I915_GEM_EXECBUFFER2, &execbuf);
+    }
+
     if (ret == 0) {
         return 0;
     }
@@ -196,25 +209,28 @@ void BufferObject::printExecutionBuffer(drm_i915_gem_execbuffer2 &execbuf, const
         logger << "Buffer Object = { handle: BO-" << execObjectsStorage[i].handle
                << ", address range: 0x" << (void *)execObjectsStorage[i].offset
                << " - 0x" << (void *)ptrOffset(execObjectsStorage[i].offset, residency[i]->peekSize())
-               << ", flags: " << execObjectsStorage[i].flags
+               << ", flags: " << std::hex << execObjectsStorage[i].flags << std::dec
                << ", size: " << residency[i]->peekSize() << " }\n";
     }
     logger << "Command Buffer Object = { handle: BO-" << execObjectsStorage[i].handle
            << ", address range: 0x" << (void *)execObjectsStorage[i].offset
            << " - 0x" << (void *)ptrOffset(execObjectsStorage[i].offset, this->peekSize())
-           << ", flags: " << execObjectsStorage[i].flags
+           << ", flags: " << std::hex << execObjectsStorage[i].flags << std::dec
            << ", size: " << this->peekSize() << " }\n";
 
-    std::cout << logger.str() << std::endl;
+    printf("%s\n", logger.str().c_str());
 }
 
-int bindBOsWithinContext(BufferObject *const boToPin[], size_t numberOfBos, OsContext *osContext, uint32_t vmHandleId) {
+int bindBOsWithinContext(BufferObject *const boToPin[], size_t numberOfBos, OsContext *osContext, uint32_t vmHandleId, bool allContexts) {
     auto retVal = 0;
 
     for (auto drmIterator = 0u; drmIterator < osContext->getDeviceBitfield().size(); drmIterator++) {
         if (osContext->getDeviceBitfield().test(drmIterator)) {
             for (size_t i = 0; i < numberOfBos; i++) {
                 retVal |= boToPin[i]->bind(osContext, drmIterator);
+                if (!allContexts) {
+                    return retVal;
+                }
             }
         }
     }
@@ -225,8 +241,8 @@ int bindBOsWithinContext(BufferObject *const boToPin[], size_t numberOfBos, OsCo
 int BufferObject::pin(BufferObject *const boToPin[], size_t numberOfBos, OsContext *osContext, uint32_t vmHandleId, uint32_t drmContextId) {
     auto retVal = 0;
 
-    if (this->drm->isBindAvailable()) {
-        retVal = bindBOsWithinContext(boToPin, numberOfBos, osContext, vmHandleId);
+    if (this->drm->isVmBindAvailable()) {
+        retVal = bindBOsWithinContext(boToPin, numberOfBos, osContext, vmHandleId, true);
     } else {
         StackVec<drm_i915_gem_exec_object2, maxFragmentsCount + 1> execObject(numberOfBos + 1);
         retVal = this->exec(4u, 0u, 0u, false, osContext, vmHandleId, drmContextId, boToPin, numberOfBos, &execObject[0]);
@@ -238,8 +254,8 @@ int BufferObject::pin(BufferObject *const boToPin[], size_t numberOfBos, OsConte
 int BufferObject::validateHostPtr(BufferObject *const boToPin[], size_t numberOfBos, OsContext *osContext, uint32_t vmHandleId, uint32_t drmContextId) {
     auto retVal = 0;
 
-    if (osContext->isDirectSubmissionActive()) {
-        retVal = bindBOsWithinContext(boToPin, numberOfBos, osContext, vmHandleId);
+    if (this->drm->isVmBindAvailable()) {
+        retVal = bindBOsWithinContext(boToPin, numberOfBos, osContext, vmHandleId, false);
     } else {
         StackVec<drm_i915_gem_exec_object2, maxFragmentsCount + 1> execObject(numberOfBos + 1);
         retVal = this->exec(4u, 0u, 0u, false, osContext, vmHandleId, drmContextId, boToPin, numberOfBos, &execObject[0]);

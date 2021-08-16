@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -52,23 +52,6 @@ using ValidateInputAndCreateBufferFunc = std::function<cl_mem(cl_context context
                                                               int32_t &retVal)>;
 extern ValidateInputAndCreateBufferFunc validateInputAndCreateBuffer;
 } // namespace BufferFunctions
-
-namespace CreateBuffer {
-struct AllocationInfo {
-    GraphicsAllocation *mapAllocation = nullptr;
-    GraphicsAllocation *memory = nullptr;
-    GraphicsAllocation::AllocationType allocationType = GraphicsAllocation::AllocationType::UNKNOWN;
-
-    bool zeroCopyAllowed = true;
-    bool isHostPtrSVM = false;
-
-    bool alignementSatisfied = true;
-    bool allocateMemory = true;
-    bool copyMemoryFromHostPtr = false;
-};
-} // namespace CreateBuffer
-
-using AllocationInfoType = StackVec<CreateBuffer::AllocationInfo, 1>;
 
 class Buffer : public MemObj {
   public:
@@ -137,12 +120,16 @@ class Buffer : public MemObj {
 
     static void setSurfaceState(const Device *device,
                                 void *surfaceState,
+                                bool forceNonAuxMode,
+                                bool disableL3,
                                 size_t svmSize,
                                 void *svmPtr,
                                 size_t offset,
                                 GraphicsAllocation *gfxAlloc,
                                 cl_mem_flags flags,
-                                cl_mem_flags_intel flagsIntel);
+                                cl_mem_flags_intel flagsIntel,
+                                bool useGlobalAtomics,
+                                bool areMultipleSubDevicesInContext);
 
     static void provideCompressionHint(GraphicsAllocation::AllocationType allocationType,
                                        Context *context,
@@ -152,20 +139,22 @@ class Buffer : public MemObj {
     bool isSubBuffer();
     bool isValidSubBufferOffset(size_t offset);
     uint64_t setArgStateless(void *memory, uint32_t patchSize, uint32_t rootDeviceIndex, bool set32BitAddressing);
-    virtual void setArgStateful(void *memory, bool forceNonAuxMode, bool disableL3, bool alignSizeForAuxTranslation, bool isReadOnly, const Device &device) = 0;
+    virtual void setArgStateful(void *memory, bool forceNonAuxMode, bool disableL3, bool alignSizeForAuxTranslation,
+                                bool isReadOnly, const Device &device, bool useGlobalAtomics, bool areMultipleSubDevicesInContext) = 0;
     bool bufferRectPitchSet(const size_t *bufferOrigin,
                             const size_t *region,
                             size_t &bufferRowPitch,
                             size_t &bufferSlicePitch,
                             size_t &hostRowPitch,
-                            size_t &hostSlicePitch);
+                            size_t &hostSlicePitch,
+                            bool isSrcBuffer);
 
     static size_t calculateHostPtrSize(const size_t *origin, const size_t *region, size_t rowPitch, size_t slicePitch);
 
     void transferDataToHostPtr(MemObjSizeArray &copySize, MemObjOffsetArray &copyOffset) override;
     void transferDataFromHostPtr(MemObjSizeArray &copySize, MemObjOffsetArray &copyOffset) override;
 
-    bool isReadWriteOnCpuAllowed(uint32_t rootDeviceIndex);
+    bool isReadWriteOnCpuAllowed(const Device &device);
     bool isReadWriteOnCpuPreferred(void *ptr, size_t size, const Device &device);
 
     uint32_t getMocsValue(bool disableL3Cache, bool isReadOnlyArgument, uint32_t rootDeviceIndex) const;
@@ -173,8 +162,6 @@ class Buffer : public MemObj {
     uint64_t getBufferAddress(uint32_t rootDeviceIndex) const;
 
     bool isCompressed(uint32_t rootDeviceIndex) const;
-
-    static void cleanAllGraphicsAllocations(Context &context, MemoryManager &memoryManager, AllocationInfoType &allocationInfo);
 
   protected:
     Buffer(Context *context,
@@ -225,7 +212,8 @@ class BufferHw : public Buffer {
         : Buffer(context, memoryProperties, flags, flagsIntel, size, memoryStorage, hostPtr, std::move(multiGraphicsAllocation),
                  zeroCopy, isHostPtrSVM, isObjectRedescribed) {}
 
-    void setArgStateful(void *memory, bool forceNonAuxMode, bool disableL3, bool alignSizeForAuxTranslation, bool isReadOnlyArgument, const Device &device) override;
+    void setArgStateful(void *memory, bool forceNonAuxMode, bool disableL3, bool alignSizeForAuxTranslation,
+                        bool isReadOnlyArgument, const Device &device, bool useGlobalAtomics, bool areMultipleSubDevicesInContext) override;
     void appendSurfaceStateExt(void *memory);
 
     static Buffer *create(Context *context,

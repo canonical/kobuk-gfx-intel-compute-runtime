@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -29,27 +29,23 @@ class MediaImageSetArgTest : public ClDeviceFixture,
     void SetUp() override {
         ClDeviceFixture::SetUp();
 
-        pKernelInfo = std::make_unique<KernelInfo>();
+        pKernelInfo = std::make_unique<MockKernelInfo>();
+        pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = 1;
+
         program = std::make_unique<MockProgram>(toClDeviceVector(*pClDevice));
 
         pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
         pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
-        pKernelInfo->usesSsh = true;
-        pKernelInfo->isVmeWorkload = true;
+        pKernelInfo->kernelDescriptor.kernelAttributes.flags.usesVme = true;
 
-        pKernelInfo->kernelArgInfo.resize(2);
-        pKernelInfo->kernelArgInfo[1].offsetHeap = 0x00;
-        pKernelInfo->kernelArgInfo[0].offsetHeap = 0x40;
+        pKernelInfo->addArgImage(0, 0x00, iOpenCL::IMAGE_MEMORY_OBJECT_2D_MEDIA);
+        pKernelInfo->addArgImage(0, 0x40, iOpenCL::IMAGE_MEMORY_OBJECT_2D_MEDIA);
 
-        pKernelInfo->kernelArgInfo[1].isMediaImage = true;
-        pKernelInfo->kernelArgInfo[0].isMediaImage = true;
-
-        pKernelInfo->kernelArgInfo[1].isImage = true;
-        pKernelInfo->kernelArgInfo[0].isImage = true;
-
-        pKernel = new MockKernel(program.get(), *pKernelInfo, *pClDevice);
+        int32_t retVal = CL_INVALID_PLATFORM;
+        pMultiDeviceKernel = MultiDeviceKernel::create<MockKernel>(program.get(), MockKernel::toKernelInfoContainer(*static_cast<KernelInfo *>(pKernelInfo.get()), rootDeviceIndex), &retVal);
+        pKernel = static_cast<MockKernel *>(pMultiDeviceKernel->getKernel(rootDeviceIndex));
         ASSERT_NE(nullptr, pKernel);
-        ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+        ASSERT_EQ(CL_SUCCESS, retVal);
 
         ASSERT_EQ(true, pKernel->isVmeKernel());
 
@@ -62,8 +58,8 @@ class MediaImageSetArgTest : public ClDeviceFixture,
 
     void TearDown() override {
         delete srcImage;
-        delete pKernel;
-
+        delete pMultiDeviceKernel;
+        program.reset();
         delete context;
         ClDeviceFixture::TearDown();
     }
@@ -72,7 +68,8 @@ class MediaImageSetArgTest : public ClDeviceFixture,
     MockContext *context;
     std::unique_ptr<MockProgram> program;
     MockKernel *pKernel = nullptr;
-    std::unique_ptr<KernelInfo> pKernelInfo;
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
+    std::unique_ptr<MockKernelInfo> pKernelInfo;
     char surfaceStateHeap[0x80];
     Image *srcImage = nullptr;
 };
@@ -82,7 +79,7 @@ HWTEST_F(MediaImageSetArgTest, WhenSettingMediaImageArgThenArgsSetCorrectly) {
 
     auto pSurfaceState = reinterpret_cast<const MEDIA_SURFACE_STATE *>(
         ptrOffset(pKernel->getSurfaceStateHeap(),
-                  pKernelInfo->kernelArgInfo[0].offsetHeap));
+                  pKernelInfo->argAsImg(0).bindful));
 
     srcImage->setMediaImageArg(const_cast<MEDIA_SURFACE_STATE *>(pSurfaceState), pClDevice->getRootDeviceIndex());
 
@@ -102,7 +99,7 @@ HWTEST_F(MediaImageSetArgTest, WhenSettingKernelArgImageThenArgsSetCorrectly) {
     cl_mem memObj = srcImage;
 
     retVal = clSetKernelArg(
-        pKernel,
+        pMultiDeviceKernel,
         0,
         sizeof(memObj),
         &memObj);
@@ -110,7 +107,7 @@ HWTEST_F(MediaImageSetArgTest, WhenSettingKernelArgImageThenArgsSetCorrectly) {
 
     auto pSurfaceState = reinterpret_cast<const MEDIA_SURFACE_STATE *>(
         ptrOffset(pKernel->getSurfaceStateHeap(),
-                  pKernelInfo->kernelArgInfo[0].offsetHeap));
+                  pKernelInfo->argAsImg(0).bindful));
 
     uint64_t surfaceAddress = pSurfaceState->getSurfaceBaseAddress();
     ASSERT_EQ(srcImage->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress(), surfaceAddress);

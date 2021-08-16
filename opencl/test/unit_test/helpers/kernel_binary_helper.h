@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,4 +14,5 @@ class KernelBinaryHelper {
     ~KernelBinaryHelper();
 
     static const std::string BUILT_INS;
+    static const std::string BUILT_INS_WITH_IMAGES;
 };

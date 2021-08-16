@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -25,6 +25,7 @@ struct SysmanDeviceImp : SysmanDevice, NEO::NonCopyableOrMovableClass {
     void init();
 
     ze_device_handle_t hCoreDevice = nullptr;
+    std::vector<ze_device_handle_t> deviceHandles; // handles of all subdevices
     OsSysman *pOsSysman = nullptr;
     Pci *pPci = nullptr;
     GlobalOperations *pGlobalOperations = nullptr;
@@ -40,7 +41,10 @@ struct SysmanDeviceImp : SysmanDevice, NEO::NonCopyableOrMovableClass {
     MemoryHandleContext *pMemoryHandleContext = nullptr;
     FanHandleContext *pFanHandleContext = nullptr;
     FirmwareHandleContext *pFirmwareHandleContext = nullptr;
+    DiagnosticsHandleContext *pDiagnosticsHandleContext = nullptr;
+    PerformanceHandleContext *pPerformanceHandleContext = nullptr;
 
+    ze_result_t performanceGet(uint32_t *pCount, zes_perf_handle_t *phPerformance) override;
     ze_result_t powerGet(uint32_t *pCount, zes_pwr_handle_t *phPower) override;
     ze_result_t frequencyGet(uint32_t *pCount, zes_freq_handle_t *phFrequency) override;
     ze_result_t fabricPortGet(uint32_t *pCount, zes_fabric_port_handle_t *phPort) override;
@@ -59,9 +63,10 @@ struct SysmanDeviceImp : SysmanDevice, NEO::NonCopyableOrMovableClass {
     ze_result_t rasGet(uint32_t *pCount, zes_ras_handle_t *phRas) override;
     ze_result_t memoryGet(uint32_t *pCount, zes_mem_handle_t *phMemory) override;
     ze_result_t fanGet(uint32_t *pCount, zes_fan_handle_t *phFan) override;
+    ze_result_t diagnosticsGet(uint32_t *pCount, zes_diag_handle_t *phFirmware) override;
     ze_result_t firmwareGet(uint32_t *pCount, zes_firmware_handle_t *phFirmware) override;
     ze_result_t deviceEventRegister(zes_event_type_flags_t events) override;
-    bool deviceEventListen(zes_event_type_flags_t &pEvent) override;
+    bool deviceEventListen(zes_event_type_flags_t &pEvent, uint64_t timeout) override;
 
   private:
     template <typename T>

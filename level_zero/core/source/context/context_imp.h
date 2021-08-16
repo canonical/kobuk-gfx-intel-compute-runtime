@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -18,17 +18,17 @@ struct ContextImp : Context {
     ze_result_t destroy() override;
     ze_result_t getStatus() override;
     DriverHandle *getDriverHandle() override;
-    ze_result_t allocHostMem(ze_host_mem_alloc_flags_t flags,
+    ze_result_t allocHostMem(const ze_host_mem_alloc_desc_t *hostDesc,
                              size_t size,
                              size_t alignment,
                              void **ptr) override;
     ze_result_t allocDeviceMem(ze_device_handle_t hDevice,
-                               ze_device_mem_alloc_flags_t flags,
+                               const ze_device_mem_alloc_desc_t *deviceDesc,
                                size_t size,
                                size_t alignment, void **ptr) override;
     ze_result_t allocSharedMem(ze_device_handle_t hDevice,
-                               ze_device_mem_alloc_flags_t deviceFlags,
-                               ze_host_mem_alloc_flags_t hostFlags,
+                               const ze_device_mem_alloc_desc_t *deviceDesc,
+                               const ze_host_mem_alloc_desc_t *hostDesc,
                                size_t size,
                                size_t alignment,
                                void **ptr) override;
@@ -109,8 +109,20 @@ struct ContextImp : Context {
                             const ze_image_desc_t *desc,
                             ze_image_handle_t *phImage) override;
 
+    void addDeviceAndSubDevices(Device *device);
+
+    std::map<ze_device_handle_t, Device *> &getDevices() {
+        return devices;
+    }
+
+    std::set<uint32_t> rootDeviceIndices = {};
+    std::map<uint32_t, NEO::DeviceBitfield> deviceBitfields;
+
+    bool isDeviceDefinedForThisContext(Device *inDevice);
+
   protected:
-    DriverHandle *driverHandle = nullptr;
+    std::map<ze_device_handle_t, Device *> devices;
+    DriverHandleImp *driverHandle = nullptr;
 };
 
 } // namespace L0

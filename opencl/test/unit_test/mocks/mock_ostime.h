@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,13 +10,28 @@
 
 namespace NEO {
 static int PerfTicks = 0;
-class MockOSTime : public OSTime {
-  public:
-    bool getCpuGpuTime(TimeStampData *pGpuCpuTime) override {
+class MockDeviceTime : public DeviceTime {
+    bool getCpuGpuTime(TimeStampData *pGpuCpuTime, OSTime *osTime) override {
         pGpuCpuTime->GPUTimeStamp = ++PerfTicks;
         pGpuCpuTime->CPUTimeinNS = PerfTicks;
         return true;
     }
+
+    double getDynamicDeviceTimerResolution(HardwareInfo const &hwInfo) const override {
+        return OSTime::getDeviceTimerResolution(hwInfo);
+    }
+
+    uint64_t getDynamicDeviceTimerClock(HardwareInfo const &hwInfo) const override {
+        return static_cast<uint64_t>(1000000000.0 / OSTime::getDeviceTimerResolution(hwInfo));
+    }
+};
+
+class MockOSTime : public OSTime {
+  public:
+    MockOSTime() {
+        this->deviceTime = std::make_unique<MockDeviceTime>();
+    }
+
     bool getCpuTime(uint64_t *timeStamp) override {
         *timeStamp = ++PerfTicks;
         return true;
@@ -24,9 +39,7 @@ class MockOSTime : public OSTime {
     double getHostTimerResolution() const override {
         return 0;
     }
-    double getDynamicDeviceTimerResolution(HardwareInfo const &hwInfo) const override {
-        return OSTime::getDeviceTimerResolution(hwInfo);
-    }
+
     uint64_t getCpuRawTimestamp() override {
         return 0;
     }

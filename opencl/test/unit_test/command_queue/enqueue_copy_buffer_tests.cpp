@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,15 +7,16 @@
 
 #include "shared/source/built_ins/built_ins.h"
 #include "shared/source/helpers/ptr_math.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/helpers/dispatch_info.h"
 #include "opencl/source/kernel/kernel.h"
+#include "opencl/test/unit_test/api/cl_api_tests.h"
 #include "opencl/test/unit_test/command_queue/enqueue_copy_buffer_fixture.h"
 #include "opencl/test/unit_test/command_queue/enqueue_fixture.h"
 #include "opencl/test/unit_test/gen_common/gen_commands_common_validation.h"
-#include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "test.h"
@@ -26,13 +27,15 @@
 
 using namespace NEO;
 
-HWTEST_F(EnqueueCopyBufferTest, GivenNullSrcMemObjWhenCopyingBufferThenClInvalidMemObjectErrorIsReturned) {
-    auto dstBuffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
+using clEnqueueCopyBufferTests = api_tests;
+
+HWTEST_F(clEnqueueCopyBufferTests, GivenNullSrcMemObjWhenCopyingBufferThenClInvalidMemObjectErrorIsReturned) {
+    MockBuffer dstBuffer{};
 
     auto retVal = clEnqueueCopyBuffer(
-        pCmdQ,
+        pCommandQueue,
         nullptr,
-        dstBuffer.get(),
+        &dstBuffer,
         0,
         0,
         sizeof(float),
@@ -42,12 +45,12 @@ HWTEST_F(EnqueueCopyBufferTest, GivenNullSrcMemObjWhenCopyingBufferThenClInvalid
     EXPECT_EQ(CL_INVALID_MEM_OBJECT, retVal);
 }
 
-HWTEST_F(EnqueueCopyBufferTest, GivenNullDstMemObjWhenCopyingBufferThenClInvalidMemObjectErrorIsReturned) {
-    auto srcBuffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
+HWTEST_F(clEnqueueCopyBufferTests, GivenNullDstMemObjWhenCopyingBufferThenClInvalidMemObjectErrorIsReturned) {
+    MockBuffer srcBuffer{};
 
     auto retVal = clEnqueueCopyBuffer(
-        pCmdQ,
-        srcBuffer.get(),
+        pCommandQueue,
+        &srcBuffer,
         nullptr,
         0,
         0,
@@ -56,6 +59,41 @@ HWTEST_F(EnqueueCopyBufferTest, GivenNullDstMemObjWhenCopyingBufferThenClInvalid
         nullptr,
         nullptr);
     EXPECT_EQ(CL_INVALID_MEM_OBJECT, retVal);
+}
+
+HWTEST_F(clEnqueueCopyBufferTests, GivenCorrectArgumentsWhenCopyingBufferThenSuccessIsReturned) {
+    MockBuffer srcBuffer{};
+    MockBuffer dstBuffer{};
+
+    retVal = clEnqueueCopyBuffer(
+        pCommandQueue,
+        &srcBuffer,
+        &dstBuffer,
+        0,
+        0,
+        128,
+        0,
+        nullptr,
+        nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+TEST_F(clEnqueueCopyBufferTests, GivenQueueIncapableWhenCopyingBufferThenInvalidOperationIsReturned) {
+    MockBuffer srcBuffer{};
+    MockBuffer dstBuffer{};
+
+    this->disableQueueCapabilities(CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_INTEL);
+    retVal = clEnqueueCopyBuffer(
+        pCommandQueue,
+        &srcBuffer,
+        &dstBuffer,
+        0,
+        0,
+        128,
+        0,
+        nullptr,
+        nullptr);
+    EXPECT_EQ(CL_INVALID_OPERATION, retVal);
 }
 
 HWTEST_F(EnqueueCopyBufferTest, GivenInvalidMemoryLocationWhenCopyingBufferThenClInvalidValueErrorIsReturned) {
@@ -65,6 +103,18 @@ HWTEST_F(EnqueueCopyBufferTest, GivenInvalidMemoryLocationWhenCopyingBufferThenC
         dstBuffer,
         0,
         8,
+        128,
+        0,
+        nullptr,
+        nullptr);
+    EXPECT_EQ(CL_INVALID_VALUE, retVal);
+
+    retVal = clEnqueueCopyBuffer(
+        pCmdQ,
+        srcBuffer,
+        dstBuffer,
+        8,
+        0,
         128,
         0,
         nullptr,
@@ -102,7 +152,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferTest, WhenCopyingBufferThenGpgpuWal
 
     // Compute the SIMD lane mask
     size_t simd =
-        cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16 : 8;
+        cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16
+                                                                                                                         : 8;
     uint64_t simdMask = maxNBitValue(simd);
 
     // Mask off lanes based on the execution masks
@@ -151,10 +202,11 @@ HWTEST_F(EnqueueCopyBufferTest, WhenCopyingBufferThenIndirectDataGetsAdded) {
     EXPECT_NE(0u, multiDispatchInfo.size());
 
     auto kernel = multiDispatchInfo.begin()->getKernel();
+    auto kernelDescriptor = &kernel->getKernelInfo().kernelDescriptor;
 
-    EXPECT_TRUE(UnitTestHelper<FamilyType>::evaluateDshUsage(dshBefore, pDSH->getUsed(), kernel));
+    EXPECT_TRUE(UnitTestHelper<FamilyType>::evaluateDshUsage(dshBefore, pDSH->getUsed(), kernelDescriptor, rootDeviceIndex));
     EXPECT_NE(iohBefore, pIOH->getUsed());
-    if (kernel->requiresSshForBuffers()) {
+    if (kernel->usesBindfulAddressingForBuffers()) {
         EXPECT_NE(sshBefore, pSSH->getUsed());
     }
 }
@@ -180,8 +232,8 @@ HWTEST_F(EnqueueCopyBufferTest, WhenCopyingBufferStatelessThenStatelessKernelIsU
     EXPECT_NE(0u, multiDispatchInfo.size());
 
     auto kernel = multiDispatchInfo.begin()->getKernel();
-    EXPECT_TRUE(kernel->getKernelInfo().patchInfo.executionEnvironment->CompiledForGreaterThan4GBBuffers);
-    EXPECT_FALSE(kernel->getKernelInfo().kernelArgInfo[0].pureStatefulBufferAccess);
+    EXPECT_TRUE(kernel->getKernelInfo().kernelDescriptor.kernelAttributes.supportsBuffersBiggerThan4Gb());
+    EXPECT_FALSE(kernel->getKernelInfo().getArgDescriptorAt(0).as<ArgDescPointer>().isPureStateful());
 }
 
 HWTEST_F(EnqueueCopyBufferTest, WhenCopyingBufferThenL3ProgrammingIsCorrect) {
@@ -279,7 +331,7 @@ HWTEST_F(EnqueueCopyBufferTest, WhenCopyingBufferThenArgumentZeroMatchesSourceAd
     ASSERT_NE(nullptr, kernel);
 
     // Determine where the argument is
-    auto pArgument = (void **)getStatelessArgumentPointer<FamilyType>(*kernel, 0u, pCmdQ->getIndirectHeap(IndirectHeap::INDIRECT_OBJECT, 0));
+    auto pArgument = (void **)getStatelessArgumentPointer<FamilyType>(*kernel, 0u, pCmdQ->getIndirectHeap(IndirectHeap::INDIRECT_OBJECT, 0), rootDeviceIndex);
 
     EXPECT_EQ(reinterpret_cast<void *>(srcBuffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress()), *pArgument);
 }
@@ -307,7 +359,7 @@ HWTEST_F(EnqueueCopyBufferTest, WhenCopyingBufferThenArgumentOneMatchesDestinati
     ASSERT_NE(nullptr, kernel);
 
     // Determine where the argument is
-    auto pArgument = (void **)getStatelessArgumentPointer<FamilyType>(*kernel, 1u, pCmdQ->getIndirectHeap(IndirectHeap::INDIRECT_OBJECT, 0));
+    auto pArgument = (void **)getStatelessArgumentPointer<FamilyType>(*kernel, 1u, pCmdQ->getIndirectHeap(IndirectHeap::INDIRECT_OBJECT, 0), rootDeviceIndex);
 
     EXPECT_EQ(reinterpret_cast<void *>(dstBuffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress()), *pArgument);
 }

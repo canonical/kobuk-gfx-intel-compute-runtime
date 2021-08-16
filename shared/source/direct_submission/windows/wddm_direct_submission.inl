@@ -1,10 +1,11 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/device/device.h"
 #include "shared/source/direct_submission/windows/wddm_direct_submission.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
@@ -20,11 +21,6 @@ namespace NEO {
 
 // Initialize COMMAND_BUFFER_HEADER         Type PatchList  Streamer Perf Tag
 DECLARE_COMMAND_BUFFER(CommandBufferHeader, UMD_OCL, FALSE, FALSE, PERFTAG_OCL);
-
-template <typename GfxFamily, typename Dispatcher>
-inline std::unique_ptr<DirectSubmissionHw<GfxFamily, Dispatcher>> DirectSubmissionHw<GfxFamily, Dispatcher>::create(Device &device, OsContext &osContext) {
-    return std::make_unique<WddmDirectSubmission<GfxFamily, Dispatcher>>(device, osContext);
-}
 
 template <typename GfxFamily, typename Dispatcher>
 WddmDirectSubmission<GfxFamily, Dispatcher>::WddmDirectSubmission(Device &device,
@@ -45,11 +41,11 @@ WddmDirectSubmission<GfxFamily, Dispatcher>::WddmDirectSubmission(Device &device
 template <typename GfxFamily, typename Dispatcher>
 WddmDirectSubmission<GfxFamily, Dispatcher>::~WddmDirectSubmission() {
     perfLogResidencyVariadicLog(wddm->getResidencyLogger(), "Stopping Wddm ULLS\n");
-    if (ringStart) {
-        stopRingBuffer();
+    if (this->ringStart) {
+        this->stopRingBuffer();
         WddmDirectSubmission<GfxFamily, Dispatcher>::handleCompletionRingBuffer(ringFence.lastSubmittedFence, ringFence);
     }
-    deallocateResources();
+    this->deallocateResources();
     wddm->getWddmInterface()->destroyMonitorFence(ringFence);
 }
 
@@ -93,10 +89,10 @@ bool WddmDirectSubmission<GfxFamily, Dispatcher>::handleResidency() {
 
 template <typename GfxFamily, typename Dispatcher>
 void WddmDirectSubmission<GfxFamily, Dispatcher>::handleSwitchRingBuffers() {
-    if (ringStart) {
-        if (completionRingBuffers[currentRingBuffer] != 0) {
+    if (this->ringStart) {
+        if (this->completionRingBuffers[this->currentRingBuffer] != 0) {
             MonitoredFence &currentFence = osContextWin->getResidencyController().getMonitoredFence();
-            handleCompletionRingBuffer(completionRingBuffers[currentRingBuffer], currentFence);
+            handleCompletionRingBuffer(this->completionRingBuffers[this->currentRingBuffer], currentFence);
         }
     }
 }
@@ -107,7 +103,7 @@ uint64_t WddmDirectSubmission<GfxFamily, Dispatcher>::updateTagValue() {
 
     currentFence.lastSubmittedFence = currentFence.currentFenceValue;
     currentFence.currentFenceValue++;
-    completionRingBuffers[currentRingBuffer] = currentFence.lastSubmittedFence;
+    this->completionRingBuffers[this->currentRingBuffer] = currentFence.lastSubmittedFence;
 
     return currentFence.lastSubmittedFence;
 }

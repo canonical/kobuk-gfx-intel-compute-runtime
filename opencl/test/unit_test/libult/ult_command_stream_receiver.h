@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -12,10 +12,9 @@
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
 #include "shared/source/os_interface/os_context.h"
-#include "shared/test/unit_test/helpers/dispatch_flags_helper.h"
-#include "shared/test/unit_test/helpers/ult_hw_config.h"
-
-#include "opencl/test/unit_test/mocks/mock_experimental_command_buffer.h"
+#include "shared/test/common/helpers/dispatch_flags_helper.h"
+#include "shared/test/common/helpers/ult_hw_config.h"
+#include "shared/test/common/mocks/mock_experimental_command_buffer.h"
 
 #include <map>
 #include <memory>
@@ -41,17 +40,25 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::iohState;
     using BaseClass::isBlitterDirectSubmissionEnabled;
     using BaseClass::isDirectSubmissionEnabled;
+    using BaseClass::isPerDssBackedBufferSent;
+    using BaseClass::makeResident;
     using BaseClass::perDssBackedBuffer;
+    using BaseClass::postInitFlagsSetup;
     using BaseClass::programEnginePrologue;
+    using BaseClass::programPerDssBackedBuffer;
     using BaseClass::programPreamble;
     using BaseClass::programStateSip;
     using BaseClass::requiresInstructionCacheFlush;
     using BaseClass::rootDeviceIndex;
     using BaseClass::sshState;
+    using BaseClass::staticWorkPartitioningEnabled;
+    using BaseClass::wasSubmittedToSingleSubdevice;
     using BaseClass::CommandStreamReceiver::bindingTableBaseAddressRequired;
+    using BaseClass::CommandStreamReceiver::canUse4GbHeaps;
     using BaseClass::CommandStreamReceiver::checkForNewResources;
     using BaseClass::CommandStreamReceiver::checkImplicitFlushForGpuIdle;
     using BaseClass::CommandStreamReceiver::cleanupResources;
+    using BaseClass::CommandStreamReceiver::clearColorAllocation;
     using BaseClass::CommandStreamReceiver::commandStream;
     using BaseClass::CommandStreamReceiver::debugConfirmationFunction;
     using BaseClass::CommandStreamReceiver::debugPauseStateAddress;
@@ -69,11 +76,14 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::isEnginePrologueSent;
     using BaseClass::CommandStreamReceiver::isPreambleSent;
     using BaseClass::CommandStreamReceiver::isStateSipSent;
+    using BaseClass::CommandStreamReceiver::lastKernelExecutionType;
     using BaseClass::CommandStreamReceiver::lastMediaSamplerConfig;
+    using BaseClass::CommandStreamReceiver::lastMemoryCompressionState;
     using BaseClass::CommandStreamReceiver::lastPreemptionMode;
     using BaseClass::CommandStreamReceiver::lastSentCoherencyRequest;
     using BaseClass::CommandStreamReceiver::lastSentL3Config;
     using BaseClass::CommandStreamReceiver::lastSentThreadArbitrationPolicy;
+    using BaseClass::CommandStreamReceiver::lastSentUseGlobalAtomics;
     using BaseClass::CommandStreamReceiver::lastVmeSubslicesConfig;
     using BaseClass::CommandStreamReceiver::latestFlushedTaskCount;
     using BaseClass::CommandStreamReceiver::latestSentStatelessMocsConfig;
@@ -207,9 +217,10 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         return CommandStreamReceiverHw<GfxFamily>::obtainUniqueOwnership();
     }
 
-    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled) override {
+    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override {
         blitBufferCalled++;
-        return CommandStreamReceiverHw<GfxFamily>::blitBuffer(blitPropertiesContainer, blocking, profilingEnabled);
+        receivedBlitProperties = blitPropertiesContainer;
+        return CommandStreamReceiverHw<GfxFamily>::blitBuffer(blitPropertiesContainer, blocking, profilingEnabled, device);
     }
 
     bool createPerDssBackedBuffer(Device &device) override {
@@ -275,6 +286,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     uint32_t createPerDssBackedBufferCalled = 0;
     int ensureCommandBufferAllocationCalled = 0;
     DispatchFlags recordedDispatchFlags;
+    BlitPropertiesContainer receivedBlitProperties = {};
 
     bool createPageTableManagerCalled = false;
     bool recordFlusheBatchBuffer = false;
@@ -284,6 +296,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     bool flushBatchedSubmissionsCalled = false;
     bool initProgrammingFlagsCalled = false;
     bool multiOsContextCapable = false;
+    bool memoryCompressionEnabled = false;
     bool directSubmissionAvailable = false;
     bool blitterDirectSubmissionAvailable = false;
     bool callBaseIsMultiOsContextCapable = false;

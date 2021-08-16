@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,16 +7,18 @@
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
 
+#include "opencl/source/helpers/cl_hw_helper.h"
 #include "opencl/source/kernel/kernel.h"
 
 namespace NEO {
-bool Kernel::requiresCacheFlushCommand(const CommandQueue &commandQueue) const {
-    return false;
-}
-void Kernel::reconfigureKernel() {
-}
+
 int Kernel::setKernelThreadArbitrationPolicy(uint32_t policy) {
-    if (policy == CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_ROUND_ROBIN_INTEL) {
+    auto hwInfo = clDevice.getHardwareInfo();
+    auto &hwHelper = NEO::ClHwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    if (!hwHelper.isSupportedKernelThreadArbitrationPolicy()) {
+        this->threadArbitrationPolicy = ThreadArbitrationPolicy::NotPresent;
+        return CL_INVALID_DEVICE;
+    } else if (policy == CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_ROUND_ROBIN_INTEL) {
         this->threadArbitrationPolicy = ThreadArbitrationPolicy::RoundRobin;
     } else if (policy == CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_OLDEST_FIRST_INTEL) {
         this->threadArbitrationPolicy = ThreadArbitrationPolicy::AgeBased;
@@ -31,10 +33,6 @@ int Kernel::setKernelThreadArbitrationPolicy(uint32_t policy) {
 
 bool Kernel::requiresPerDssBackedBuffer() const {
     return DebugManager.flags.ForcePerDssBackedBufferProgramming.get();
-}
-
-bool Kernel::requiresLimitedWorkgroupSize() const {
-    return this->isBuiltIn;
 }
 
 int32_t Kernel::setAdditionalKernelExecInfoWithParam(uint32_t paramName, size_t paramValueSize, const void *paramValue) {

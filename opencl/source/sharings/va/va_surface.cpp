@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -40,6 +40,8 @@ Image *VASurface::createSharedVaSurface(Context *context, VASharingFunctions *sh
     uint32_t imageFourcc = 0;
     size_t imageOffset = 0;
     size_t imagePitch = 0;
+
+    std::unique_lock<std::mutex> lock(sharingFunctions->mutex);
 
     vaStatus = sharingFunctions->exportSurfaceHandle(*surface,
                                                      VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
@@ -97,8 +99,11 @@ Image *VASurface::createSharedVaSurface(Context *context, VASharingFunctions *sh
 
     auto gmmSurfaceFormat = Image::getSurfaceFormatFromTable(flags, &gmmImgFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features); //vaImage.format.fourcc == VA_FOURCC_NV12
 
-    if (DebugManager.flags.EnableExtendedVaFormats.get() && (imageFourcc == VA_FOURCC_P010 || imageFourcc == VA_FOURCC_RGBP)) {
-        channelType = isRGBPFormat ? CL_UNORM_INT8 : CL_UNORM_INT16;
+    if (DebugManager.flags.EnableExtendedVaFormats.get() && imageFourcc == VA_FOURCC_RGBP) {
+        channelType = CL_UNORM_INT8;
+        gmmSurfaceFormat = getExtendedSurfaceFormatInfo(imageFourcc);
+    } else if (imageFourcc == VA_FOURCC_P010 || imageFourcc == VA_FOURCC_P016) {
+        channelType = CL_UNORM_INT16;
         gmmSurfaceFormat = getExtendedSurfaceFormatInfo(imageFourcc);
     }
     imgInfo.surfaceFormat = &gmmSurfaceFormat->surfaceFormat;
@@ -111,7 +116,11 @@ Image *VASurface::createSharedVaSurface(Context *context, VASharingFunctions *sh
                                     imgInfo, GraphicsAllocation::AllocationType::SHARED_IMAGE,
                                     context->getDeviceBitfieldForAllocation(context->getDevice(0)->getRootDeviceIndex()));
 
-    auto alloc = memoryManager->createGraphicsAllocationFromSharedHandle(sharedHandle, properties, false);
+    auto alloc = memoryManager->createGraphicsAllocationFromSharedHandle(sharedHandle, properties, false, false);
+
+    memoryManager->closeSharedHandle(alloc);
+
+    lock.unlock();
 
     imgDesc.image_row_pitch = imgInfo.rowPitch;
     imgDesc.image_slice_pitch = 0u;
@@ -173,14 +182,24 @@ bool VASurface::validate(cl_mem_flags flags, cl_uint plane) {
 
 const ClSurfaceFormatInfo *VASurface::getExtendedSurfaceFormatInfo(uint32_t formatFourCC) {
     if (formatFourCC == VA_FOURCC_P010) {
-        static const ClSurfaceFormatInfo formatInfo = {{CL_NV12_INTEL, CL_UNORM_INT16},
-                                                       {GMM_RESOURCE_FORMAT::GMM_FORMAT_P010,
-                                                        static_cast<GFX3DSTATE_SURFACEFORMAT>(NUM_GFX3DSTATE_SURFACEFORMATS), // not used for plane images
-                                                        0,
-                                                        1,
-                                                        2,
-                                                        2}};
-        return &formatInfo;
+        static const ClSurfaceFormatInfo formatInfoP010 = {{CL_NV12_INTEL, CL_UNORM_INT16},
+                                                           {GMM_RESOURCE_FORMAT::GMM_FORMAT_P010,
+                                                            static_cast<GFX3DSTATE_SURFACEFORMAT>(NUM_GFX3DSTATE_SURFACEFORMATS), // not used for plane images
+                                                            0,
+                                                            1,
+                                                            2,
+                                                            2}};
+        return &formatInfoP010;
+    }
+    if (formatFourCC == VA_FOURCC_P016) {
+        static const ClSurfaceFormatInfo formatInfoP016 = {{CL_NV12_INTEL, CL_UNORM_INT16},
+                                                           {GMM_RESOURCE_FORMAT::GMM_FORMAT_P016,
+                                                            static_cast<GFX3DSTATE_SURFACEFORMAT>(NUM_GFX3DSTATE_SURFACEFORMATS), // not used for plane images
+                                                            0,
+                                                            1,
+                                                            2,
+                                                            2}};
+        return &formatInfoP016;
     }
     if (formatFourCC == VA_FOURCC_RGBP) {
         static const ClSurfaceFormatInfo formatInfoRGBP = {{CL_NV12_INTEL, CL_UNORM_INT8},
@@ -195,11 +214,20 @@ const ClSurfaceFormatInfo *VASurface::getExtendedSurfaceFormatInfo(uint32_t form
     return nullptr;
 }
 
-bool VASurface::isSupportedFourCC(int fourcc) {
+bool VASurface::isSupportedFourCCTwoPlaneFormat(int fourcc) {
     if ((fourcc == VA_FOURCC_NV12) ||
-        (DebugManager.flags.EnableExtendedVaFormats.get() && fourcc == VA_FOURCC_P010)) {
+        (fourcc == VA_FOURCC_P010) ||
+        (fourcc == VA_FOURCC_P016)) {
         return true;
     }
     return false;
 }
+
+bool VASurface::isSupportedFourCCThreePlaneFormat(int fourcc) {
+    if (DebugManager.flags.EnableExtendedVaFormats.get() && fourcc == VA_FOURCC_RGBP) {
+        return true;
+    }
+    return false;
+}
+
 } // namespace NEO

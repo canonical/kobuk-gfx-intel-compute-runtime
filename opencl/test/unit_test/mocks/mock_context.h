@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -20,6 +20,7 @@ class MockContext : public Context {
   public:
     using Context::contextType;
     using Context::deviceBitfields;
+    using Context::devices;
     using Context::driverDiagnostics;
     using Context::maxRootDeviceIndex;
     using Context::memoryManager;
@@ -47,12 +48,15 @@ class MockContext : public Context {
     std::unique_ptr<AsyncEventsHandler> &getAsyncEventsHandlerUniquePtr();
     void initializeWithDevices(const ClDeviceVector &devices, bool noSpecialQueue);
 
+    SchedulerKernel &getSchedulerKernel() override;
+
   private:
     ClDevice *pDevice = nullptr;
 };
 
 struct MockDefaultContext : MockContext {
     MockDefaultContext();
+    MockDefaultContext(bool initSpecialQueues);
 
     UltClDeviceFactory ultClDeviceFactory{3, 0};
     MockClDevice *pRootDevice0;

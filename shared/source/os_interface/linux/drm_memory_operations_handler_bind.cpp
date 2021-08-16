@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -15,7 +15,7 @@
 #include "shared/source/os_interface/linux/drm_memory_manager.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
-#include "shared/source/os_interface/linux/os_interface.h"
+#include "shared/source/os_interface/os_interface.h"
 
 namespace NEO {
 
@@ -26,8 +26,9 @@ DrmMemoryOperationsHandlerBind::DrmMemoryOperationsHandlerBind(RootDeviceEnviron
 DrmMemoryOperationsHandlerBind::~DrmMemoryOperationsHandlerBind() = default;
 
 MemoryOperationsStatus DrmMemoryOperationsHandlerBind::makeResident(Device *device, ArrayRef<GraphicsAllocation *> gfxAllocations) {
-    auto engines = device->getEngines();
+    auto &engines = device->getEngines();
     for (const auto &engine : engines) {
+        engine.osContext->ensureContextInitialized();
         this->makeResidentWithinOsContext(engine.osContext, gfxAllocations, false);
     }
     return MemoryOperationsStatus::SUCCESS;
@@ -50,7 +51,7 @@ MemoryOperationsStatus DrmMemoryOperationsHandlerBind::makeResidentWithinOsConte
 }
 
 MemoryOperationsStatus DrmMemoryOperationsHandlerBind::evict(Device *device, GraphicsAllocation &gfxAllocation) {
-    auto engines = device->getEngines();
+    auto &engines = device->getEngines();
     auto retVal = MemoryOperationsStatus::SUCCESS;
     for (const auto &engine : engines) {
         retVal = this->evictWithinOsContext(engine.osContext, gfxAllocation);
@@ -80,7 +81,7 @@ void DrmMemoryOperationsHandlerBind::evictImpl(OsContext *osContext, GraphicsAll
 MemoryOperationsStatus DrmMemoryOperationsHandlerBind::isResident(Device *device, GraphicsAllocation &gfxAllocation) {
     std::lock_guard<std::mutex> lock(mutex);
     bool isResident = true;
-    auto engines = device->getEngines();
+    auto &engines = device->getEngines();
     for (const auto &engine : engines) {
         isResident &= gfxAllocation.isAlwaysResident(engine.osContext->getContextId());
     }
@@ -93,34 +94,57 @@ MemoryOperationsStatus DrmMemoryOperationsHandlerBind::isResident(Device *device
 
 void DrmMemoryOperationsHandlerBind::mergeWithResidencyContainer(OsContext *osContext, ResidencyContainer &residencyContainer) {
     this->makeResidentWithinOsContext(osContext, ArrayRef<GraphicsAllocation *>(residencyContainer), true);
-    residencyContainer.clear();
+
+    auto clearContainer = true;
+
+    if (DebugManager.flags.PassBoundBOToExec.get() != -1) {
+        clearContainer = !DebugManager.flags.PassBoundBOToExec.get();
+    }
+
+    if (clearContainer) {
+        residencyContainer.clear();
+    }
 }
 
-std::unique_lock<std::mutex> DrmMemoryOperationsHandlerBind::lockHandlerForExecWA() {
+std::unique_lock<std::mutex> DrmMemoryOperationsHandlerBind::lockHandlerIfUsed() {
     return std::unique_lock<std::mutex>();
 }
 
-void DrmMemoryOperationsHandlerBind::evictUnusedAllocations() {
+void DrmMemoryOperationsHandlerBind::evictUnusedAllocations(bool waitForCompletion) {
     auto memoryManager = static_cast<DrmMemoryManager *>(this->rootDeviceEnvironment.executionEnvironment.memoryManager.get());
 
     std::lock_guard<std::mutex> lock(mutex);
     auto allocLock = memoryManager->acquireAllocLock();
 
-    this->evictUnusedAllocationsImpl(memoryManager->getSysMemAllocs());
-    this->evictUnusedAllocationsImpl(memoryManager->getLocalMemAllocs(this->rootDeviceIndex));
+    this->evictUnusedAllocationsImpl(memoryManager->getSysMemAllocs(), waitForCompletion);
+    this->evictUnusedAllocationsImpl(memoryManager->getLocalMemAllocs(this->rootDeviceIndex), waitForCompletion);
 }
 
-void DrmMemoryOperationsHandlerBind::evictUnusedAllocationsImpl(std::vector<GraphicsAllocation *> &allocationsForEviction) {
+void DrmMemoryOperationsHandlerBind::evictUnusedAllocationsImpl(std::vector<GraphicsAllocation *> &allocationsForEviction, bool waitForCompletion) {
     const auto &engines = this->rootDeviceEnvironment.executionEnvironment.memoryManager->getRegisteredEngines();
     std::vector<GraphicsAllocation *> evictCandidates;
 
     for (auto subdeviceIndex = 0u; subdeviceIndex < HwHelper::getSubDevicesCount(rootDeviceEnvironment.getHardwareInfo()); subdeviceIndex++) {
         for (auto &allocation : allocationsForEviction) {
             bool evict = true;
+
             for (const auto &engine : engines) {
                 if (this->rootDeviceIndex == engine.commandStreamReceiver->getRootDeviceIndex() &&
                     engine.osContext->getDeviceBitfield().test(subdeviceIndex)) {
-                    evict &= allocation->isResidencyTaskCountBelow(*engine.commandStreamReceiver->getTagAddress(), engine.osContext->getContextId());
+                    if (allocation->isAlwaysResident(engine.osContext->getContextId())) {
+                        evict = false;
+                        break;
+                    }
+
+                    if (waitForCompletion) {
+                        engine.commandStreamReceiver->waitForCompletionWithTimeout(false, 0, engine.commandStreamReceiver->peekLatestFlushedTaskCount());
+                    }
+
+                    if (allocation->isUsedByOsContext(engine.osContext->getContextId()) &&
+                        allocation->getTaskCount(engine.osContext->getContextId()) > *engine.commandStreamReceiver->getTagAddress()) {
+                        evict = false;
+                        break;
+                    }
                 }
             }
             if (evict) {

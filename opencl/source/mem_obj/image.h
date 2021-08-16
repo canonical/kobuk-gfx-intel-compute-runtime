@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -135,7 +135,7 @@ class Image : public MemObj {
                         void *paramValue,
                         size_t *paramValueSizeRet);
 
-    virtual void setImageArg(void *memory, bool isMediaBlockImage, uint32_t mipLevel, uint32_t rootDeviceIndex) = 0;
+    virtual void setImageArg(void *memory, bool isMediaBlockImage, uint32_t mipLevel, uint32_t rootDeviceIndex, bool useGlobalAtomics) = 0;
     virtual void setMediaImageArg(void *memory, uint32_t rootDeviceIndex) = 0;
     virtual void setMediaSurfaceRotation(void *memory) = 0;
     virtual void setSurfaceMemoryObjectControlStateIndexToMocsTable(void *memory, uint32_t value) = 0;
@@ -199,6 +199,8 @@ class Image : public MemObj {
 
     static cl_int checkIfDeviceSupportsImages(cl_context context);
 
+    void fillImageRegion(size_t *region) const;
+
   protected:
     Image(Context *context,
           const MemoryProperties &memoryProperties,
@@ -219,9 +221,9 @@ class Image : public MemObj {
 
     void getOsSpecificImageInfo(const cl_mem_info &paramName, size_t *srcParamSize, void **srcParam);
 
-    void transferData(void *dst, size_t dstRowPitch, size_t dstSlicePitch,
-                      void *src, size_t srcRowPitch, size_t srcSlicePitch,
-                      std::array<size_t, 3> copyRegion, std::array<size_t, 3> copyOrigin);
+    MOCKABLE_VIRTUAL void transferData(void *dst, size_t dstRowPitch, size_t dstSlicePitch,
+                                       void *src, size_t srcRowPitch, size_t srcSlicePitch,
+                                       std::array<size_t, 3> copyRegion, std::array<size_t, 3> copyOrigin);
 
     cl_image_format imageFormat;
     cl_image_desc imageDesc;
@@ -300,13 +302,12 @@ class ImageHw : public Image {
         }
     }
 
-    void setImageArg(void *memory, bool setAsMediaBlockImage, uint32_t mipLevel, uint32_t rootDeviceIndex) override;
+    void setImageArg(void *memory, bool setAsMediaBlockImage, uint32_t mipLevel, uint32_t rootDeviceIndex, bool useGlobalAtomics) override;
     void setAuxParamsForMultisamples(RENDER_SURFACE_STATE *surfaceState);
-    MOCKABLE_VIRTUAL void setAuxParamsForMCSCCS(RENDER_SURFACE_STATE *surfaceState, Gmm *gmm);
     void setMediaImageArg(void *memory, uint32_t rootDeviceIndex) override;
     void setMediaSurfaceRotation(void *memory) override;
     void setSurfaceMemoryObjectControlStateIndexToMocsTable(void *memory, uint32_t value) override;
-    void appendSurfaceStateParams(RENDER_SURFACE_STATE *surfaceState, uint32_t rootDeviceIndex);
+    void appendSurfaceStateParams(RENDER_SURFACE_STATE *surfaceState, uint32_t rootDeviceIndex, bool useGlobalAtomics);
     void appendSurfaceStateDepthParams(RENDER_SURFACE_STATE *surfaceState, Gmm *gmm);
     void appendSurfaceStateExt(void *memory);
     void transformImage2dArrayTo3d(void *memory) override;

@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "opencl/source/command_stream/tbx_command_stream_receiver_hw.h"
+#include "shared/source/command_stream/tbx_command_stream_receiver_hw.h"
+
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "test.h"
 

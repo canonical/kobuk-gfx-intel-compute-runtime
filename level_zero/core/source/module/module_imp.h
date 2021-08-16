@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -24,6 +24,7 @@ namespace L0 {
 
 namespace BuildOptions {
 extern NEO::ConstStringRef optDisable;
+extern NEO::ConstStringRef optLevel;
 extern NEO::ConstStringRef greaterThan4GbRequired;
 extern NEO::ConstStringRef hasBufferOffsetArg;
 extern NEO::ConstStringRef debugKernelEnable;
@@ -59,6 +60,7 @@ struct ModuleTranslationUnit {
 
     std::unique_ptr<char[]> debugData;
     size_t debugDataSize = 0U;
+    std::vector<char *> alignedvIsas;
 
     NEO::specConstValuesMap specConstantsValues;
 };
@@ -66,7 +68,7 @@ struct ModuleTranslationUnit {
 struct ModuleImp : public Module {
     ModuleImp() = delete;
 
-    ModuleImp(Device *device, ModuleBuildLog *moduleBuildLog);
+    ModuleImp(Device *device, ModuleBuildLog *moduleBuildLog, ModuleType type);
 
     ~ModuleImp() override;
 
@@ -82,9 +84,11 @@ struct ModuleImp : public Module {
 
     ze_result_t getFunctionPointer(const char *pFunctionName, void **pfnFunction) override;
 
-    ze_result_t getGlobalPointer(const char *pGlobalName, void **pPtr) override;
+    ze_result_t getGlobalPointer(const char *pGlobalName, size_t *pSize, void **pPtr) override;
 
     ze_result_t getKernelNames(uint32_t *pCount, const char **pNames) override;
+
+    ze_result_t getProperties(ze_module_properties_t *pModuleProperties) override;
 
     ze_result_t performDynamicLink(uint32_t numModules,
                                    ze_module_handle_t *phModules,
@@ -110,6 +114,10 @@ struct ModuleImp : public Module {
 
     bool isDebugEnabled() const override;
 
+    bool shouldAllocatePrivateMemoryPerDispatch() const override {
+        return allocatePrivateMemoryPerDispatch;
+    }
+
     ModuleTranslationUnit *getTranslationUnit() {
         return this->translationUnit.get();
     }
@@ -117,6 +125,8 @@ struct ModuleImp : public Module {
   protected:
     void copyPatchedSegments(const NEO::Linker::PatchableSegments &isaSegmentsForPatching);
     void verifyDebugCapabilities();
+    void checkIfPrivateMemoryPerDispatchIsNeeded() override;
+
     Device *device = nullptr;
     PRODUCT_FAMILY productFamily{};
     std::unique_ptr<ModuleTranslationUnit> translationUnit;
@@ -127,6 +137,8 @@ struct ModuleImp : public Module {
     NEO::Linker::RelocatedSymbolsMap symbols;
     bool debugEnabled = false;
     bool isFullyLinked = false;
+    bool allocatePrivateMemoryPerDispatch = true;
+    ModuleType type;
     NEO::Linker::UnresolvedExternals unresolvedExternalsInfo{};
     std::set<NEO::GraphicsAllocation *> importedSymbolAllocations{};
 };

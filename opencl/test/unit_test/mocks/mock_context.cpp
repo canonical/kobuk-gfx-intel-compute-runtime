@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,6 +17,8 @@
 #include "opencl/source/sharings/sharing.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
+#include "opencl/test/unit_test/mocks/mock_kernel.h"
+#include "opencl/test/unit_test/mocks/mock_svm_manager.h"
 
 #include "d3d_sharing_functions.h"
 
@@ -102,7 +104,8 @@ void MockContext::initializeWithDevices(const ClDeviceVector &devices, bool noSp
 
     this->devices = devices;
     memoryManager = devices[0]->getMemoryManager();
-    svmAllocsManager = new SVMAllocsManager(memoryManager);
+    svmAllocsManager = new MockSVMAllocsManager(memoryManager,
+                                                true);
 
     for (auto &rootDeviceIndex : rootDeviceIndices) {
         DeviceBitfield deviceBitfield{};
@@ -128,11 +131,56 @@ void MockContext::initializeWithDevices(const ClDeviceVector &devices, bool noSp
     setupContextType();
 }
 
-MockDefaultContext::MockDefaultContext() : MockContext(nullptr, nullptr) {
+SchedulerKernel &MockContext::getSchedulerKernel() {
+    if (schedulerBuiltIn->pKernel) {
+        return *static_cast<SchedulerKernel *>(schedulerBuiltIn->pKernel);
+    }
+
+    auto initializeSchedulerProgramAndKernel = [&] {
+        cl_int retVal = CL_SUCCESS;
+        auto clDevice = getDevice(0);
+        auto src = SchedulerKernel::loadSchedulerKernel(&clDevice->getDevice());
+
+        auto program = Program::createBuiltInFromGenBinary(this,
+                                                           devices,
+                                                           src.resource.data(),
+                                                           src.resource.size(),
+                                                           &retVal);
+        DEBUG_BREAK_IF(retVal != CL_SUCCESS);
+        DEBUG_BREAK_IF(!program);
+
+        retVal = program->processGenBinary(*clDevice);
+        DEBUG_BREAK_IF(retVal != CL_SUCCESS);
+
+        schedulerBuiltIn->pProgram = program;
+
+        auto kernelInfo = schedulerBuiltIn->pProgram->getKernelInfo(SchedulerKernel::schedulerName, clDevice->getRootDeviceIndex());
+        DEBUG_BREAK_IF(!kernelInfo);
+
+        schedulerBuiltIn->pKernel = Kernel::create<MockSchedulerKernel>(
+            schedulerBuiltIn->pProgram,
+            *kernelInfo,
+            *clDevice,
+            &retVal);
+
+        UNRECOVERABLE_IF(schedulerBuiltIn->pKernel->getScratchSize() != 0);
+
+        DEBUG_BREAK_IF(retVal != CL_SUCCESS);
+    };
+    std::call_once(schedulerBuiltIn->programIsInitialized, initializeSchedulerProgramAndKernel);
+
+    UNRECOVERABLE_IF(schedulerBuiltIn->pKernel == nullptr);
+    return *static_cast<SchedulerKernel *>(schedulerBuiltIn->pKernel);
+}
+
+MockDefaultContext::MockDefaultContext() : MockDefaultContext(false) {}
+
+MockDefaultContext::MockDefaultContext(bool initSpecialQueues) : MockContext(nullptr, nullptr) {
     pRootDevice0 = ultClDeviceFactory.rootDevices[0];
     pRootDevice1 = ultClDeviceFactory.rootDevices[1];
-    cl_device_id deviceIds[] = {pRootDevice0, pRootDevice1};
-    initializeWithDevices(ClDeviceVector{deviceIds, 2}, true);
+    pRootDevice2 = ultClDeviceFactory.rootDevices[2];
+    cl_device_id deviceIds[] = {pRootDevice0, pRootDevice1, pRootDevice2};
+    initializeWithDevices(ClDeviceVector{deviceIds, 3}, !initSpecialQueues);
 }
 
 MockSpecializedContext::MockSpecializedContext() : MockContext(nullptr, nullptr) {

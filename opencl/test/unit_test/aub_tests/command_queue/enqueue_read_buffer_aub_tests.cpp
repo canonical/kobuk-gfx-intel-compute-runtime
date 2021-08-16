@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,10 +7,10 @@
 
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/helpers/ptr_math.h"
-#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/test_configuration/aub_tests/aub_tests_configuration.h"
 
 #include "opencl/source/mem_obj/buffer.h"
-#include "opencl/test/unit_test/aub_tests/aub_tests_configuration.h"
 #include "opencl/test/unit_test/aub_tests/command_queue/command_enqueue_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "test.h"
@@ -35,7 +35,7 @@ struct ReadBufferHw
 
 typedef ReadBufferHw AUBReadBuffer;
 
-HWTEST_P(AUBReadBuffer, simple) {
+HWTEST_P(AUBReadBuffer, WhenReadingBufferThenExpectationsAreMet) {
     MockContext context(this->pClDevice);
 
     cl_float srcMemory[] = {1.0f, 2.0f, 3.0f, 4.0f};
@@ -107,7 +107,7 @@ INSTANTIATE_TEST_CASE_P(AUBReadBuffer_simple,
                             2 * sizeof(cl_float),
                             3 * sizeof(cl_float)));
 
-HWTEST_F(AUBReadBuffer, reserveCanonicalGpuAddress) {
+HWTEST_F(AUBReadBuffer, GivenReserveCanonicalGpuAddressWhenReadingBufferThenExpectationsAreMet) {
     if (!GetAubTestsConfig<FamilyType>().testCanonicalAddress) {
         return;
     }
@@ -214,7 +214,7 @@ struct AUBReadBufferUnaligned
     }
 };
 
-HWTEST_F(AUBReadBufferUnaligned, all) {
+HWTEST_F(AUBReadBufferUnaligned, GivenOffestAndSizeWhenReadingBufferThenExpectationsAreMet) {
     const std::vector<size_t> offsets = {0, 1, 2, 3};
     const std::vector<size_t> sizes = {4, 3, 2, 1};
     for (auto offset : offsets) {

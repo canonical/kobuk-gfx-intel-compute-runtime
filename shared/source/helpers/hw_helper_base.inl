@@ -1,11 +1,10 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/source/aub_mem_dump/aub_mem_dump.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
@@ -15,10 +14,13 @@
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/preamble.h"
+#include "shared/source/helpers/timestamp_packet.h"
 #include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/os_interface/os_interface.h"
+#include "shared/source/utilities/tag_allocator.h"
 
+#include "aub_mem_dump.h"
 #include "pipe_control_args.h"
 
 namespace NEO {
@@ -27,7 +29,7 @@ template <typename Family>
 const AuxTranslationMode HwHelperHw<Family>::defaultAuxTranslationMode = AuxTranslationMode::Builtin;
 
 template <typename Family>
-bool HwHelperHw<Family>::obtainRenderBufferCompressionPreference(const HardwareInfo &hwInfo, const size_t size) const {
+bool HwHelperHw<Family>::isBufferSizeSuitableForRenderCompression(const size_t size, const HardwareInfo &hwInfo) const {
     return size > KB;
 }
 
@@ -47,7 +49,7 @@ bool HwHelperHw<Family>::isL3Configurable(const HardwareInfo &hwInfo) {
 }
 
 template <typename Family>
-SipKernelType HwHelperHw<Family>::getSipKernelType(bool debuggingActive) {
+SipKernelType HwHelperHw<Family>::getSipKernelType(bool debuggingActive) const {
     if (!debuggingActive) {
         return SipKernelType::Csr;
     }
@@ -60,7 +62,12 @@ size_t HwHelperHw<Family>::getMaxBarrierRegisterPerSlice() const {
 }
 
 template <typename Family>
-uint32_t HwHelperHw<Family>::getPitchAlignmentForImage(const HardwareInfo *hwInfo) {
+size_t HwHelperHw<Family>::getPaddingForISAAllocation() const {
+    return 512;
+}
+
+template <typename Family>
+uint32_t HwHelperHw<Family>::getPitchAlignmentForImage(const HardwareInfo *hwInfo) const {
     return 4u;
 }
 
@@ -145,17 +152,17 @@ void HwHelperHw<Family>::setRenderSurfaceStateForBuffer(const RootDeviceEnvironm
     state.setSurfaceBaseAddress(bufferStateAddress);
 
     Gmm *gmm = gfxAlloc ? gfxAlloc->getDefaultGmm() : nullptr;
-    if (gmm && gmm->isRenderCompressed && !forceNonAuxMode) {
+    if (gmm && gmm->isCompressionEnabled && !forceNonAuxMode) {
         // Its expected to not program pitch/qpitch/baseAddress for Aux surface in CCS scenarios
-        state.setCoherencyType(RENDER_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT);
-        state.setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
+        EncodeSurfaceState<Family>::setCoherencyType(&state, RENDER_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT);
+        EncodeSurfaceState<Family>::setBufferAuxParamsForCCS(&state);
     } else {
-        state.setCoherencyType(RENDER_SURFACE_STATE::COHERENCY_TYPE_IA_COHERENT);
+        EncodeSurfaceState<Family>::setCoherencyType(&state, RENDER_SURFACE_STATE::COHERENCY_TYPE_IA_COHERENT);
         state.setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE);
     }
-    *surfaceState = state;
+    setL1CachePolicy(useL1Cache, &state, rootDeviceEnvironment.getHardwareInfo());
 
-    setL1CachePolicy(useL1Cache, surfaceState, rootDeviceEnvironment.getHardwareInfo());
+    *surfaceState = state;
 }
 
 template <typename GfxFamily>
@@ -173,12 +180,23 @@ bool HwHelperHw<Family>::getEnableLocalMemory(const HardwareInfo &hwInfo) const 
 }
 
 template <typename Family>
-AuxTranslationMode HwHelperHw<Family>::getAuxTranslationMode() {
+bool HwHelperHw<Family>::is1MbAlignmentSupported(const HardwareInfo &hwInfo, bool isCompressionEnabled) const {
+    return false;
+}
+
+template <typename Family>
+AuxTranslationMode HwHelperHw<Family>::getAuxTranslationMode(const HardwareInfo &hwInfo) {
+    auto mode = HwHelperHw<Family>::defaultAuxTranslationMode;
     if (DebugManager.flags.ForceAuxTranslationMode.get() != -1) {
-        return static_cast<AuxTranslationMode>(DebugManager.flags.ForceAuxTranslationMode.get());
+        mode = static_cast<AuxTranslationMode>(DebugManager.flags.ForceAuxTranslationMode.get());
     }
 
-    return HwHelperHw<Family>::defaultAuxTranslationMode;
+    if (mode == AuxTranslationMode::Blit && !hwInfo.capabilityTable.blitterOperationsSupported) {
+        DEBUG_BREAK_IF(true);
+        mode = AuxTranslationMode::Builtin;
+    }
+
+    return mode;
 }
 
 template <typename GfxFamily>
@@ -223,7 +241,6 @@ void MemorySynchronizationCommands<GfxFamily>::addPipeControlWithPostSync(
 template <typename GfxFamily>
 void MemorySynchronizationCommands<GfxFamily>::setPipeControl(typename GfxFamily::PIPE_CONTROL &pipeControl, PipeControlArgs &args) {
     pipeControl.setCommandStreamerStallEnable(true);
-    pipeControl.setDcFlushEnable(args.dcFlushEnable);
     pipeControl.setConstantCacheInvalidationEnable(args.constantCacheInvalidationEnable);
     pipeControl.setInstructionCacheInvalidateEnable(args.instructionCacheInvalidateEnable);
     pipeControl.setPipeControlFlushEnable(args.pipeControlFlushEnable);
@@ -232,6 +249,12 @@ void MemorySynchronizationCommands<GfxFamily>::setPipeControl(typename GfxFamily
     pipeControl.setTextureCacheInvalidationEnable(args.textureCacheInvalidationEnable);
     pipeControl.setVfCacheInvalidationEnable(args.vfCacheInvalidationEnable);
     pipeControl.setGenericMediaStateClear(args.genericMediaStateClear);
+    pipeControl.setTlbInvalidate(args.tlbInvalidation);
+    pipeControl.setNotifyEnable(args.notifyEnable);
+
+    if (isDcFlushAllowed()) {
+        pipeControl.setDcFlushEnable(args.dcFlushEnable);
+    }
 
     setPipeControlExtraProperties(pipeControl, args);
 
@@ -244,6 +267,7 @@ void MemorySynchronizationCommands<GfxFamily>::setPipeControl(typename GfxFamily
         pipeControl.setVfCacheInvalidationEnable(true);
         pipeControl.setConstantCacheInvalidationEnable(true);
         pipeControl.setStateCacheInvalidationEnable(true);
+        pipeControl.setTlbInvalidate(true);
     }
     if (DebugManager.flags.DoNotFlushCaches.get()) {
         pipeControl.setDcFlushEnable(false);
@@ -258,6 +282,11 @@ void MemorySynchronizationCommands<GfxFamily>::setPipeControl(typename GfxFamily
 }
 
 template <typename GfxFamily>
+bool MemorySynchronizationCommands<GfxFamily>::isDcFlushAllowed() {
+    return true;
+}
+
+template <typename GfxFamily>
 void MemorySynchronizationCommands<GfxFamily>::addPipeControl(LinearStream &commandStream, PipeControlArgs &args) {
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
     PIPE_CONTROL cmd = GfxFamily::cmdInitPipeControl;
@@ -267,7 +296,7 @@ void MemorySynchronizationCommands<GfxFamily>::addPipeControl(LinearStream &comm
 }
 
 template <typename GfxFamily>
-void MemorySynchronizationCommands<GfxFamily>::addPipeControlWithCSStallOnly(LinearStream &commandStream, PipeControlArgs &args) {
+void MemorySynchronizationCommands<GfxFamily>::addPipeControlWithCSStallOnly(LinearStream &commandStream) {
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
     PIPE_CONTROL cmd = GfxFamily::cmdInitPipeControl;
     cmd.setCommandStreamerStallEnable(true);
@@ -325,7 +354,7 @@ uint32_t HwHelperHw<GfxFamily>::alignSlmSize(uint32_t slmSize) {
 }
 
 template <typename GfxFamily>
-uint32_t HwHelperHw<GfxFamily>::computeSlmValues(uint32_t slmSize) {
+uint32_t HwHelperHw<GfxFamily>::computeSlmValues(const HardwareInfo &hwInfo, uint32_t slmSize) {
     auto value = std::max(slmSize, 1024u);
     value = Math::nextPowerOfTwo(value);
     value = Math::getMinLsbSet(value);
@@ -350,8 +379,27 @@ uint32_t HwHelperHw<GfxFamily>::getHwRevIdFromStepping(uint32_t stepping, const 
 }
 
 template <typename GfxFamily>
-uint32_t HwHelperHw<GfxFamily>::getSteppingFromHwRevId(uint32_t hwRevId, const HardwareInfo &hwInfo) const {
+uint32_t HwHelperHw<GfxFamily>::getSteppingFromHwRevId(const HardwareInfo &hwInfo) const {
     return CommonConstants::invalidStepping;
+}
+
+template <typename GfxFamily>
+uint32_t HwHelperHw<GfxFamily>::getAubStreamSteppingFromHwRevId(const HardwareInfo &hwInfo) const {
+    switch (getSteppingFromHwRevId(hwInfo)) {
+    default:
+    case REVISION_A0:
+    case REVISION_A1:
+    case REVISION_A3:
+        return AubMemDump::SteppingValues::A;
+    case REVISION_B:
+        return AubMemDump::SteppingValues::B;
+    case REVISION_C:
+        return AubMemDump::SteppingValues::C;
+    case REVISION_D:
+        return AubMemDump::SteppingValues::D;
+    case REVISION_K:
+        return AubMemDump::SteppingValues::K;
+    }
 }
 
 template <typename GfxFamily>
@@ -390,11 +438,6 @@ inline uint32_t HwHelperHw<GfxFamily>::getMinimalSIMDSize() {
 }
 
 template <typename GfxFamily>
-uint32_t HwHelperHw<GfxFamily>::getMaxThreadsForWorkgroup(const HardwareInfo &hwInfo, uint32_t maxNumEUsPerSubSlice) const {
-    return HwHelper::getMaxThreadsForWorkgroup(hwInfo, maxNumEUsPerSubSlice);
-}
-
-template <typename GfxFamily>
 inline bool HwHelperHw<GfxFamily>::isSpecialWorkgroupSizeRequired(const HardwareInfo &hwInfo, bool isSimulation) const {
     return false;
 }
@@ -405,15 +448,68 @@ inline bool HwHelperHw<GfxFamily>::allowRenderCompression(const HardwareInfo &hw
 }
 
 template <typename GfxFamily>
-inline bool HwHelperHw<GfxFamily>::isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo, const GraphicsAllocation &allocation) const {
-    return allocation.isAllocatedInLocalMemoryPool() &&
-           (getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed) &&
-           hwInfo.capabilityTable.blitterOperationsSupported;
+inline bool HwHelperHw<GfxFamily>::allowStatelessCompression(const HardwareInfo &hwInfo) const {
+    if (DebugManager.flags.EnableStatelessCompression.get() != -1) {
+        return static_cast<bool>(DebugManager.flags.EnableStatelessCompression.get());
+    }
+    return false;
 }
 
 template <typename GfxFamily>
-inline bool HwHelperHw<GfxFamily>::forceBlitterUseForGlobalBuffers(const HardwareInfo &hwInfo, GraphicsAllocation *allocation) const {
+inline bool HwHelperHw<GfxFamily>::isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo, const GraphicsAllocation &allocation) const {
+    return allocation.isAllocatedInLocalMemoryPool() &&
+           (getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed || !allocation.isAllocationLockable());
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isDisableOverdispatchAvailable(const HardwareInfo &hwInfo) const {
     return false;
+}
+
+template <typename GfxFamily>
+std::unique_ptr<TagAllocatorBase> HwHelperHw<GfxFamily>::createTimestampPacketAllocator(const std::vector<uint32_t> &rootDeviceIndices, MemoryManager *memoryManager,
+                                                                                        size_t initialTagCount, CommandStreamReceiverType csrType, DeviceBitfield deviceBitfield) const {
+    bool doNotReleaseNodes = (csrType > CommandStreamReceiverType::CSR_HW) ||
+                             DebugManager.flags.DisableTimestampPacketOptimizations.get();
+
+    auto tagAlignment = getTimestampPacketAllocatorAlignment();
+
+    if (DebugManager.flags.OverrideTimestampPacketSize.get() != -1) {
+        if (DebugManager.flags.OverrideTimestampPacketSize.get() == 4) {
+            using TimestampPackets32T = TimestampPackets<uint32_t>;
+            return std::make_unique<TagAllocator<TimestampPackets32T>>(rootDeviceIndices, memoryManager, initialTagCount, tagAlignment, sizeof(TimestampPackets32T), doNotReleaseNodes, deviceBitfield);
+        } else if (DebugManager.flags.OverrideTimestampPacketSize.get() == 8) {
+            using TimestampPackets64T = TimestampPackets<uint64_t>;
+            return std::make_unique<TagAllocator<TimestampPackets64T>>(rootDeviceIndices, memoryManager, initialTagCount, tagAlignment, sizeof(TimestampPackets64T), doNotReleaseNodes, deviceBitfield);
+        } else {
+            UNRECOVERABLE_IF(true);
+        }
+    }
+
+    using TimestampPacketType = typename GfxFamily::TimestampPacketType;
+    using TimestampPacketsT = TimestampPackets<TimestampPacketType>;
+
+    return std::make_unique<TagAllocator<TimestampPacketsT>>(rootDeviceIndices, memoryManager, initialTagCount, tagAlignment, sizeof(TimestampPacketsT), doNotReleaseNodes, deviceBitfield);
+}
+
+template <typename GfxFamily>
+size_t HwHelperHw<GfxFamily>::getTimestampPacketAllocatorAlignment() const {
+    return MemoryConstants::cacheLineSize * 4;
+}
+
+template <typename GfxFamily>
+size_t HwHelperHw<GfxFamily>::getSingleTimestampPacketSize() const {
+    if (DebugManager.flags.OverrideTimestampPacketSize.get() != -1) {
+        if (DebugManager.flags.OverrideTimestampPacketSize.get() == 4) {
+            return TimestampPackets<uint32_t>::getSinglePacketSize();
+        } else if (DebugManager.flags.OverrideTimestampPacketSize.get() == 8) {
+            return TimestampPackets<uint64_t>::getSinglePacketSize();
+        } else {
+            UNRECOVERABLE_IF(true);
+        }
+    }
+
+    return TimestampPackets<typename GfxFamily::TimestampPacketType>::getSinglePacketSize();
 }
 
 template <typename GfxFamily>
@@ -451,6 +547,7 @@ void MemorySynchronizationCommands<GfxFamily>::addFullCacheFlush(LinearStream &c
     args.pipeControlFlushEnable = true;
     args.constantCacheInvalidationEnable = true;
     args.stateCacheInvalidationEnable = true;
+    args.tlbInvalidation = true;
     MemorySynchronizationCommands<GfxFamily>::setCacheFlushExtraProperties(args);
     MemorySynchronizationCommands<GfxFamily>::setPipeControl(cmd, args);
     *pipeControl = cmd;
@@ -490,18 +587,85 @@ bool HwHelperHw<GfxFamily>::useSystemMemoryPlacementForISA(const HardwareInfo &h
 }
 
 template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isCpuImageTransferPreferred(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <typename GfxFamily>
 bool MemorySynchronizationCommands<GfxFamily>::isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo) {
     return false;
 }
 
 template <typename GfxFamily>
-bool HwHelperHw<GfxFamily>::isCooperativeDispatchSupported(const aub_stream::EngineType engine, const PRODUCT_FAMILY productFamily) const {
+bool HwHelperHw<GfxFamily>::isCooperativeDispatchSupported(const EngineGroupType engineGroupType, const PRODUCT_FAMILY productFamily) const {
     return true;
 }
 
 template <typename GfxFamily>
-bool HwHelperHw<GfxFamily>::isMediaBlockIOSupported(const HardwareInfo &hwInfo) const {
-    return hwInfo.capabilityTable.supportsImages;
+bool HwHelperHw<GfxFamily>::isKmdMigrationSupported(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isNewResidencyModelSupported() const {
+    return false;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isDirectSubmissionSupported(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isCopyOnlyEngineType(EngineGroupType type) const {
+    return NEO::EngineGroupType::Copy == type;
+}
+
+template <typename GfxFamily>
+void HwHelperHw<GfxFamily>::adjustAddressWidthForCanonize(uint32_t &addressWidth) const {
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isSipWANeeded(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isAdditionalFeatureFlagRequired(const FeatureTable *featureTable) const {
+    return false;
+}
+
+template <typename GfxFamily>
+uint32_t HwHelperHw<GfxFamily>::getDefaultRevisionId(const HardwareInfo &hwInfo) const {
+    return 0u;
+}
+
+template <typename GfxFamily>
+uint32_t HwHelperHw<GfxFamily>::getNumCacheRegions() const {
+    return 0;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isSubDeviceEngineSupported(const HardwareInfo &hwInfo, const DeviceBitfield &deviceBitfield, aub_stream::EngineType engineType) const {
+    return true;
+}
+
+template <typename GfxFamily>
+bool HwHelperHw<GfxFamily>::isBlitterForImagesSupported(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <typename GfxFamily>
+size_t HwHelperHw<GfxFamily>::getPreemptionAllocationAlignment() const {
+    return 256 * MemoryConstants::kiloByte;
+}
+
+template <typename GfxFamily>
+void HwHelperHw<GfxFamily>::applyAdditionalCompressionSettings(Gmm &gmm, bool isNotCompressed) const {}
+
+template <typename GfxFamily>
+void HwHelperHw<GfxFamily>::applyRenderCompressionFlag(Gmm &gmm, uint32_t isRenderCompressed) const {
+    gmm.resourceParams.Flags.Info.RenderCompressed = isRenderCompressed;
 }
 
 } // namespace NEO

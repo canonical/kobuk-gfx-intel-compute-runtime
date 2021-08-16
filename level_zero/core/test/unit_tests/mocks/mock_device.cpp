@@ -1,13 +1,15 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "mock_device.h"
+#include "level_zero/core/test/unit_tests/mocks/mock_device.h"
 
 #include "shared/source/device/device.h"
+
+#include "level_zero/tools/source/debug/debug_session.h"
 
 #include "gmock/gmock.h"
 

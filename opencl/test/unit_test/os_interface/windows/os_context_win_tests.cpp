@@ -1,14 +1,13 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
-
-#include "opencl/test/unit_test/mocks/mock_wddm.h"
-#include "opencl/test/unit_test/os_interface/windows/wddm_fixture.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_wddm.h"
+#include "shared/test/common/os_interface/windows/wddm_fixture.h"
 
 using namespace NEO;
 
@@ -16,39 +15,36 @@ struct OsContextWinTest : public WddmTestWithMockGdiDll {
     void SetUp() override {
         WddmTestWithMockGdiDll::SetUp();
         preemptionMode = PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo);
-        engineType = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*defaultHwInfo)[0].first;
+        engineTypeUsage = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*defaultHwInfo)[0];
 
         init();
     }
 
     PreemptionMode preemptionMode;
-    aub_stream::EngineType engineType;
+    EngineTypeUsage engineTypeUsage;
 };
 
 TEST_F(OsContextWinTest, givenWddm20WhenCreatingOsContextThenOsContextIsInitialized) {
-    osContext = std::make_unique<OsContextWin>(*osInterface->get()->getWddm(), 0u, 1, engineType, preemptionMode, false, false, false);
-    EXPECT_TRUE(osContext->isInitialized());
+    osContext = std::make_unique<OsContextWin>(*osInterface->getDriverModel()->as<Wddm>(), 0u, 1, engineTypeUsage, preemptionMode, false);
+    EXPECT_NO_THROW(osContext->ensureContextInitialized());
 }
 
-TEST_F(OsContextWinTest, givenWddm20WhenCreatingWddmContextFailThenOsContextIsNotInitialized) {
+TEST_F(OsContextWinTest, givenWddm20WhenCreatingWddmContextFailThenOsContextCreationFails) {
     wddm->device = INVALID_HANDLE;
-
-    osContext = std::make_unique<OsContextWin>(*osInterface->get()->getWddm(), 0u, 1, engineType, preemptionMode, false, false, false);
-    EXPECT_FALSE(osContext->isInitialized());
+    osContext = std::make_unique<OsContextWin>(*osInterface->getDriverModel()->as<Wddm>(), 0u, 1, engineTypeUsage, preemptionMode, false);
+    EXPECT_ANY_THROW(osContext->ensureContextInitialized());
 }
 
-TEST_F(OsContextWinTest, givenWddm20WhenCreatingWddmMonitorFenceFailThenOsContextIsNotInitialized) {
+TEST_F(OsContextWinTest, givenWddm20WhenCreatingWddmMonitorFenceFailThenOsContextCreationFails) {
     *getCreateSynchronizationObject2FailCallFcn() = true;
-
-    osContext = std::make_unique<OsContextWin>(*osInterface->get()->getWddm(), 0u, 1, engineType, preemptionMode, false, false, false);
-    EXPECT_FALSE(osContext->isInitialized());
+    osContext = std::make_unique<OsContextWin>(*osInterface->getDriverModel()->as<Wddm>(), 0u, 1, engineTypeUsage, preemptionMode, false);
+    EXPECT_ANY_THROW(osContext->ensureContextInitialized());
 }
 
-TEST_F(OsContextWinTest, givenWddm20WhenRegisterTrimCallbackFailThenOsContextIsNotInitialized) {
+TEST_F(OsContextWinTest, givenWddm20WhenRegisterTrimCallbackFailThenOsContextCreationFails) {
     *getRegisterTrimNotificationFailCallFcn() = true;
-
-    osContext = std::make_unique<OsContextWin>(*osInterface->get()->getWddm(), 0u, 1, engineType, preemptionMode, false, false, false);
-    EXPECT_FALSE(osContext->isInitialized());
+    osContext = std::make_unique<OsContextWin>(*osInterface->getDriverModel()->as<Wddm>(), 0u, 1, engineTypeUsage, preemptionMode, false);
+    EXPECT_ANY_THROW(osContext->ensureContextInitialized());
 }
 
 TEST_F(OsContextWinTest, givenWddm20WhenRegisterTrimCallbackIsDisabledThenOsContextIsInitialized) {
@@ -56,6 +52,6 @@ TEST_F(OsContextWinTest, givenWddm20WhenRegisterTrimCallbackIsDisabledThenOsCont
     DebugManager.flags.DoNotRegisterTrimCallback.set(true);
     *getRegisterTrimNotificationFailCallFcn() = true;
 
-    osContext = std::make_unique<OsContextWin>(*osInterface->get()->getWddm(), 0u, 1, engineType, preemptionMode, false, false, false);
-    EXPECT_TRUE(osContext->isInitialized());
+    osContext = std::make_unique<OsContextWin>(*osInterface->getDriverModel()->as<Wddm>(), 0u, 1, engineTypeUsage, preemptionMode, false);
+    EXPECT_NO_THROW(osContext->ensureContextInitialized());
 }

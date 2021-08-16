@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,7 +8,8 @@
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/os_context.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/test_macros/test_checks_shared.h"
 
 #include "opencl/test/unit_test/command_queue/enqueue_fixture.h"
 #include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
@@ -538,6 +539,32 @@ TEST_F(MockEventTests, GivenAbortedUserEventWhenEnqueingNdrThenDoNotFlushToCsr) 
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
+TEST_F(MockEventTests, givenDebugVariableWhenStatusIsQueriedThenNoFlushHappens) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.SkipFlushingEventsOnGetStatusCalls.set(1);
+    DebugManager.flags.PerformImplicitFlushForNewResource.set(0);
+    DebugManager.flags.PerformImplicitFlushForIdleGpu.set(0);
+
+    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
+    csr.overrideDispatchPolicy(DispatchMode::BatchedDispatch);
+    csr.postInitFlagsSetup();
+
+    cl_event retEvent = nullptr;
+
+    auto latestFlushed = csr.peekLatestFlushedTaskCount();
+    retVal = callOneWorkItemNDRKernel(nullptr, 0u, &retEvent);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    cl_int eventStatus = 0;
+    retVal = clGetEventInfo(retEvent, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(cl_int), &eventStatus, NULL);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    EXPECT_EQ(csr.peekLatestFlushedTaskCount(), latestFlushed);
+
+    retVal = clReleaseEvent(retEvent);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
 TEST_F(MockEventTests, GivenAbortedParentWhenDestroyingChildEventThenDoNotProcessBlockedCommands) {
     uEvent = make_releaseable<UserEvent>(context);
 
@@ -868,6 +895,7 @@ TEST_F(EventTests, GivenEventCallbackWithoutWaitWhenWaitingForEventsThenSuccessI
 }
 
 TEST_F(MockEventTests, GivenEnqueueReadImageWhenWaitingforEventThenSuccessIsReturned) {
+    REQUIRE_IMAGES_OR_SKIP(defaultHwInfo);
     cl_event retEvent;
     uEvent = make_releaseable<UserEvent>(context);
     cl_event eventWaitList[] = {uEvent.get()};

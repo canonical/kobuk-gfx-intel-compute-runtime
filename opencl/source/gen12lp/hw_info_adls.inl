@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/source/aub_mem_dump/aub_services.h"
+#include "shared/source/aub_mem_dump/definitions/aub_services.h"
 #include "shared/source/gen12lp/hw_cmds.h"
 #include "shared/source/helpers/constants.h"
 
@@ -68,6 +68,7 @@ const RuntimeCapabilityTable ADLS::capabilityTable{
     true,                                           // forceStatelessCompilationFor32Bit
     true,                                           // ftr64KBpages
     "lp",                                           // platformType
+    "",                                             // deviceName
     true,                                           // sourceLevelDebuggerSupported
     false,                                          // supportsVme
     false,                                          // supportCacheFlushAfterWalker
@@ -78,8 +79,10 @@ const RuntimeCapabilityTable ADLS::capabilityTable{
     false,                                          // supportsOnDemandPageFaults
     false,                                          // supportsIndependentForwardProgress
     false,                                          // hostPtrTrackingEnabled
-    false,                                          // levelZeroSupported
-    true                                            // isIntegratedDevice
+    true,                                           // levelZeroSupported
+    true,                                           // isIntegratedDevice
+    true,                                           // supportsMediaBlock
+    true                                            // fusedEuEnabled
 };
 
 WorkaroundTable ADLS::workaroundTable = {};
@@ -131,7 +134,7 @@ GT_SYSTEM_INFO ADLS_HW_CONFIG::gtSystemInfo = {0};
 void ADLS_HW_CONFIG::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable) {
     GT_SYSTEM_INFO *gtSysInfo = &hwInfo->gtSystemInfo;
     gtSysInfo->ThreadCount = gtSysInfo->EUCount * ADLS::threadsPerEu;
-    gtSysInfo->DualSubSliceCount = gtSysInfo->SubSliceCount / 2;
+    gtSysInfo->DualSubSliceCount = gtSysInfo->SubSliceCount;
     gtSysInfo->L3CacheSizeInKb = 1920;
     gtSysInfo->L3BankCount = 4;
     gtSysInfo->MaxFillRate = 8;
@@ -158,7 +161,7 @@ void ADLS_HW_CONFIG::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTa
 };
 
 const HardwareInfo ADLS::hwInfo = ADLS_HW_CONFIG::hwInfo;
-const uint64_t ADLS::defaultHardwareInfoConfig = 0x100020016;
+const uint64_t ADLS::defaultHardwareInfoConfig = 0x100020010;
 
 void setupADLSHardwareInfoImpl(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable, uint64_t hwInfoConfig) {
     ADLS_HW_CONFIG::setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable);

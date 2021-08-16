@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -40,7 +40,7 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(VABaseObjectTests, BaseObjectTypes);
 
-TYPED_TEST(VABaseObjectTests, commonRuntimeExpectsDispatchTableAtFirstPointerInObject) {
+TYPED_TEST(VABaseObjectTests, GivenCommonRuntimeThenDispatchTableAtFirstPointerInObject) {
     TypeParam objectDrv;
 
     // Automatic downcasting to _cl_type *.

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,6 +8,7 @@
 #pragma once
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/core/source/driver/driver_handle_imp.h"
+#include "level_zero/core/source/driver/host_pointer_manager.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdqueue.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_device.h"
@@ -33,7 +34,7 @@ extern struct APITracerContextImp *pGlobalAPITracerContextImp;
 
 namespace ult {
 template <typename TFunctionPointer, typename... Args>
-ze_result_t callHandleTracerRecursion(TFunctionPointer zeApiPtr, Args &&... args) {
+ze_result_t callHandleTracerRecursion(TFunctionPointer zeApiPtr, Args &&...args) {
     ZE_HANDLE_TRACER_RECURSION(zeApiPtr, args...);
     return ZE_RESULT_ERROR_UNKNOWN;
 }

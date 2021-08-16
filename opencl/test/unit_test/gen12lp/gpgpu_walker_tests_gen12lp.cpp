@@ -1,12 +1,12 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/gen12lp/hw_info.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
 
 #include "opencl/source/command_queue/gpgpu_walker.h"
 #include "opencl/source/command_queue/hardware_interface.h"
@@ -37,7 +37,7 @@ GEN12LPTEST_F(GpgpuWalkerTests, givenMiStoreRegMemWhenAdjustMiStoreRegMemModeThe
 
 class MockKernelWithApplicableWa : public MockKernel {
   public:
-    MockKernelWithApplicableWa(Program *program, KernelInfo &kernelInfo, ClDevice &device) : MockKernel(program, kernelInfo, device) {}
+    MockKernelWithApplicableWa(Program *program, const KernelInfo &kernelInfos, ClDevice &clDeviceArg) : MockKernel(program, kernelInfos, clDeviceArg) {}
     bool requiresWaDisableRccRhwoOptimization() const override {
         return waApplicable;
     }
@@ -50,13 +50,15 @@ struct HardwareInterfaceTests : public ClDeviceFixture, public LinearStreamFixtu
         LinearStreamFixture::SetUp();
 
         pContext = new NEO::MockContext(pClDevice);
-        pCommandQueue = new MockCommandQueue(pContext, pClDevice, nullptr);
+        pCommandQueue = new MockCommandQueue(pContext, pClDevice, nullptr, false);
         pProgram = new MockProgram(pContext, false, toClDeviceVector(*pClDevice));
-        pKernel = new MockKernelWithApplicableWa(static_cast<Program *>(pProgram), pProgram->mockKernelInfo, *pClDevice);
+        auto kernelInfos = MockKernel::toKernelInfoContainer(pProgram->mockKernelInfo, rootDeviceIndex);
+        pMultiDeviceKernel = MockMultiDeviceKernel::create<MockKernelWithApplicableWa>(pProgram, kernelInfos);
+        pKernel = static_cast<MockKernelWithApplicableWa *>(pMultiDeviceKernel->getKernel(rootDeviceIndex));
     }
 
     void TearDown() override {
-        pKernel->release();
+        pMultiDeviceKernel->release();
         pProgram->release();
         pCommandQueue->release();
         pContext->release();
@@ -69,6 +71,7 @@ struct HardwareInterfaceTests : public ClDeviceFixture, public LinearStreamFixtu
     Context *pContext = nullptr;
     MockProgram *pProgram = nullptr;
     MockKernelWithApplicableWa *pKernel = nullptr;
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
 };
 
 GEN12LPTEST_F(HardwareInterfaceTests, GivenKernelWithApplicableWaDisableRccRhwoOptimizationWhenDispatchWorkaroundsIsCalledThenWorkaroundIsApplied) {

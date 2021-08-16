@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -12,12 +12,15 @@
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
+#include "shared/source/helpers/api_specific_config.h"
+#include "shared/source/helpers/bindless_heaps_helper.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/local_id_gen.h"
 #include "shared/source/helpers/preamble.h"
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/source/helpers/simd_helper.h"
 #include "shared/source/helpers/string.h"
+#include "shared/source/image/image_surface_state.h"
 #include "shared/source/kernel/dispatch_kernel_encoder_interface.h"
 #include "shared/source/kernel/kernel_descriptor.h"
 
@@ -30,22 +33,44 @@ uint32_t EncodeStates<Family>::copySamplerState(IndirectHeap *dsh,
                                                 uint32_t samplerStateOffset,
                                                 uint32_t samplerCount,
                                                 uint32_t borderColorOffset,
-                                                const void *fnDynamicStateHeap) {
+                                                const void *fnDynamicStateHeap,
+                                                BindlessHeapsHelper *bindlessHeapHelper) {
     auto sizeSamplerState = sizeof(SAMPLER_STATE) * samplerCount;
     auto borderColorSize = samplerStateOffset - borderColorOffset;
 
+    SAMPLER_STATE *dstSamplerState = nullptr;
+    uint32_t samplerStateOffsetInDsh = 0;
+
     dsh->align(EncodeStates<Family>::alignIndirectStatePointer);
-    auto borderColorOffsetInDsh = static_cast<uint32_t>(dsh->getUsed());
+    uint32_t borderColorOffsetInDsh = 0;
+    if (!ApiSpecificConfig::getBindlessConfiguration()) {
+        borderColorOffsetInDsh = static_cast<uint32_t>(dsh->getUsed());
+        auto borderColor = dsh->getSpace(borderColorSize);
 
-    auto borderColor = dsh->getSpace(borderColorSize);
+        memcpy_s(borderColor, borderColorSize, ptrOffset(fnDynamicStateHeap, borderColorOffset),
+                 borderColorSize);
 
-    memcpy_s(borderColor, borderColorSize, ptrOffset(fnDynamicStateHeap, borderColorOffset),
-             borderColorSize);
+        dsh->align(INTERFACE_DESCRIPTOR_DATA::SAMPLERSTATEPOINTER_ALIGN_SIZE);
+        samplerStateOffsetInDsh = static_cast<uint32_t>(dsh->getUsed());
 
-    dsh->align(INTERFACE_DESCRIPTOR_DATA::SAMPLERSTATEPOINTER_ALIGN_SIZE);
-    auto samplerStateOffsetInDsh = static_cast<uint32_t>(dsh->getUsed());
-
-    auto dstSamplerState = reinterpret_cast<SAMPLER_STATE *>(dsh->getSpace(sizeSamplerState));
+        dstSamplerState = reinterpret_cast<SAMPLER_STATE *>(dsh->getSpace(sizeSamplerState));
+    } else {
+        auto borderColor = reinterpret_cast<const SAMPLER_BORDER_COLOR_STATE *>(ptrOffset(fnDynamicStateHeap, borderColorOffset));
+        if (borderColor->getBorderColorRed() != 0.0f ||
+            borderColor->getBorderColorGreen() != 0.0f ||
+            borderColor->getBorderColorBlue() != 0.0f ||
+            (borderColor->getBorderColorAlpha() != 0.0f && borderColor->getBorderColorAlpha() != 1.0f)) {
+            UNRECOVERABLE_IF(true);
+        } else if (borderColor->getBorderColorAlpha() == 0.0f) {
+            borderColorOffsetInDsh = bindlessHeapHelper->getDefaultBorderColorOffset();
+        } else {
+            borderColorOffsetInDsh = bindlessHeapHelper->getAlphaBorderColorOffset();
+        }
+        dsh->align(INTERFACE_DESCRIPTOR_DATA::SAMPLERSTATEPOINTER_ALIGN_SIZE);
+        auto samplerStateInDsh = bindlessHeapHelper->allocateSSInHeap(sizeSamplerState, nullptr, BindlessHeapsHelper::BindlesHeapType::GLOBAL_DSH);
+        dstSamplerState = reinterpret_cast<SAMPLER_STATE *>(samplerStateInDsh.ssPtr);
+        samplerStateOffsetInDsh = static_cast<uint32_t>(samplerStateInDsh.surfaceStateOffset);
+    }
 
     auto srcSamplerState = reinterpret_cast<const SAMPLER_STATE *>(ptrOffset(fnDynamicStateHeap, samplerStateOffset));
     SAMPLER_STATE state = {};
@@ -56,10 +81,10 @@ uint32_t EncodeStates<Family>::copySamplerState(IndirectHeap *dsh,
     }
 
     return samplerStateOffsetInDsh;
-}
+} // namespace NEO
 
 template <typename Family>
-size_t EncodeStates<Family>::getAdjustStateComputeModeSize() {
+inline size_t EncodeStates<Family>::getAdjustStateComputeModeSize() {
     return 0;
 }
 
@@ -107,6 +132,21 @@ void EncodeMathMMIO<Family>::encodeGreaterThanPredicate(CommandContainer &contai
                                     AluRegisters::R_1, AluRegisters::R_2);
 
     EncodeSetMMIO<Family>::encodeREG(container, CS_PREDICATE_RESULT, CS_GPR_R2);
+}
+
+/*
+ * Compute bitwise AND between a register value from regOffset and immVal
+ * and store it into dstAddress.
+ */
+template <typename Family>
+void EncodeMathMMIO<Family>::encodeBitwiseAndVal(CommandContainer &container, uint32_t regOffset, uint32_t immVal, uint64_t dstAddress) {
+    EncodeSetMMIO<Family>::encodeREG(container, CS_GPR_R0, regOffset);
+    EncodeSetMMIO<Family>::encodeIMM(container, CS_GPR_R1, immVal, true);
+    EncodeMath<Family>::bitwiseAnd(container, AluRegisters::R_0,
+                                   AluRegisters::R_1,
+                                   AluRegisters::R_2);
+    EncodeStoreMMIO<Family>::encode(*container.getCommandStream(),
+                                    CS_GPR_R2, dstAddress);
 }
 
 /*
@@ -184,6 +224,14 @@ void EncodeMathMMIO<Family>::encodeAluSubStoreCarry(MI_MATH_ALU_INST_INLINE *pAl
     encodeAlu(pAluParam, regA, regB, AluRegisters::OPCODE_SUB, finalResultRegister, AluRegisters::R_CF);
 }
 
+template <typename Family>
+void EncodeMathMMIO<Family>::encodeAluAnd(MI_MATH_ALU_INST_INLINE *pAluParam,
+                                          AluRegisters firstOperandRegister,
+                                          AluRegisters secondOperandRegister,
+                                          AluRegisters finalResultRegister) {
+    encodeAlu(pAluParam, firstOperandRegister, secondOperandRegister, AluRegisters::OPCODE_AND, finalResultRegister, AluRegisters::R_ACCU);
+}
+
 /*
  * greaterThan() tests if firstOperandRegister is greater than
  * secondOperandRegister.
@@ -213,6 +261,33 @@ void EncodeMath<Family>::addition(CommandContainer &container,
                                          firstOperandRegister,
                                          secondOperandRegister,
                                          finalResultRegister);
+}
+
+template <typename Family>
+void EncodeMath<Family>::bitwiseAnd(CommandContainer &container,
+                                    AluRegisters firstOperandRegister,
+                                    AluRegisters secondOperandRegister,
+                                    AluRegisters finalResultRegister) {
+    uint32_t *cmd = EncodeMath<Family>::commandReserve(container);
+
+    EncodeMathMMIO<Family>::encodeAluAnd(reinterpret_cast<MI_MATH_ALU_INST_INLINE *>(cmd),
+                                         firstOperandRegister,
+                                         secondOperandRegister,
+                                         finalResultRegister);
+}
+
+template <typename Family>
+void EncodeMath<Family>::bitwiseOr(CommandContainer &container,
+                                   AluRegisters firstOperandRegister,
+                                   AluRegisters secondOperandRegister,
+                                   AluRegisters finalResultRegister) {
+    uint32_t *cmd = EncodeMath<Family>::commandReserve(container);
+    EncodeMathMMIO<Family>::encodeAlu(reinterpret_cast<MI_MATH_ALU_INST_INLINE *>(cmd),
+                                      firstOperandRegister,
+                                      secondOperandRegister,
+                                      AluRegisters::OPCODE_OR,
+                                      finalResultRegister,
+                                      AluRegisters::R_ACCU);
 }
 
 template <typename Family>
@@ -257,9 +332,9 @@ void EncodeStoreMMIO<Family>::encode(LinearStream &csr, uint32_t offset, uint64_
 template <typename Family>
 void EncodeSurfaceState<Family>::encodeBuffer(void *dst, uint64_t address, size_t size, uint32_t mocs,
                                               bool cpuCoherent, bool forceNonAuxMode, bool isReadOnly, uint32_t numAvailableDevices,
-                                              GraphicsAllocation *allocation, GmmHelper *gmmHelper) {
+                                              GraphicsAllocation *allocation, GmmHelper *gmmHelper, bool useGlobalAtomics, bool areMultipleSubDevicesInContext) {
     auto surfaceState = reinterpret_cast<R_SURFACE_STATE *>(dst);
-    UNRECOVERABLE_IF(!isAligned<getSurfaceBaseAddressMinimumAlignment()>(size));
+    UNRECOVERABLE_IF(!isAligned<getSurfaceBaseAddressAlignment()>(size));
 
     SURFACE_STATE_BUFFER_LENGTH Length = {0};
     Length.Length = static_cast<uint32_t>(size - 1);
@@ -280,22 +355,22 @@ void EncodeSurfaceState<Family>::encodeBuffer(void *dst, uint64_t address, size_
     surfaceState->setMemoryObjectControlState(mocs);
     surfaceState->setSurfaceBaseAddress(address);
 
-    surfaceState->setCoherencyType(cpuCoherent ? R_SURFACE_STATE::COHERENCY_TYPE_IA_COHERENT
-                                               : R_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT);
     surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE);
 
+    setCoherencyType(surfaceState, cpuCoherent ? R_SURFACE_STATE::COHERENCY_TYPE_IA_COHERENT : R_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT);
+
     Gmm *gmm = allocation ? allocation->getDefaultGmm() : nullptr;
-    if (gmm && gmm->isRenderCompressed && !forceNonAuxMode) {
+    if (gmm && gmm->isCompressionEnabled && !forceNonAuxMode) {
         // Its expected to not program pitch/qpitch/baseAddress for Aux surface in CCS scenarios
-        surfaceState->setCoherencyType(R_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT);
-        surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
+        setCoherencyType(surfaceState, R_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT);
+        setBufferAuxParamsForCCS(surfaceState);
     }
 
     if (DebugManager.flags.DisableCachingForStatefulBufferAccess.get()) {
         surfaceState->setMemoryObjectControlState(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED));
     }
 
-    EncodeSurfaceState<Family>::encodeExtraBufferParams(surfaceState, allocation, gmmHelper, isReadOnly, numAvailableDevices);
+    EncodeSurfaceState<Family>::encodeExtraBufferParams(surfaceState, allocation, gmmHelper, isReadOnly, numAvailableDevices, useGlobalAtomics, areMultipleSubDevicesInContext);
 }
 
 template <typename Family>
@@ -363,17 +438,49 @@ size_t EncodeSurfaceState<Family>::pushBindingTableAndSurfaceStates(IndirectHeap
 }
 
 template <typename Family>
-bool EncodeSurfaceState<Family>::doBindingTablePrefetch() {
-    return true;
+inline void EncodeSurfaceState<Family>::encodeExtraCacheSettings(R_SURFACE_STATE *surfaceState, const HardwareInfo &hwInfo) {}
+
+template <typename Family>
+void EncodeSurfaceState<Family>::setImageAuxParamsForCCS(R_SURFACE_STATE *surfaceState, Gmm *gmm) {
+    using AUXILIARY_SURFACE_MODE = typename Family::RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
+    // Its expected to not program pitch/qpitch/baseAddress for Aux surface in CCS scenarios
+    surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
+    setFlagsForMediaCompression(surfaceState, gmm);
+
+    setClearColorParams(surfaceState, gmm);
+    setUnifiedAuxBaseAddress<Family>(surfaceState, gmm);
+}
+
+template <typename Family>
+void EncodeSurfaceState<Family>::setBufferAuxParamsForCCS(R_SURFACE_STATE *surfaceState) {
+    using AUXILIARY_SURFACE_MODE = typename R_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
+
+    surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
+}
+
+template <typename Family>
+bool EncodeSurfaceState<Family>::isAuxModeEnabled(R_SURFACE_STATE *surfaceState, Gmm *gmm) {
+    using AUXILIARY_SURFACE_MODE = typename R_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
+
+    return (surfaceState->getAuxiliarySurfaceMode() == AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
+}
+
+template <typename Family>
+void EncodeSurfaceState<Family>::appendParamsForImageFromBuffer(R_SURFACE_STATE *surfaceState) {
 }
 
 template <typename Family>
 void *EncodeDispatchKernel<Family>::getInterfaceDescriptor(CommandContainer &container, uint32_t &iddOffset) {
 
     if (container.nextIddInBlock == container.getNumIddPerBlock()) {
-        container.getIndirectHeap(HeapType::DYNAMIC_STATE)->align(EncodeStates<Family>::alignInterfaceDescriptorData);
-        container.setIddBlock(container.getHeapSpaceAllowGrow(HeapType::DYNAMIC_STATE,
-                                                              sizeof(INTERFACE_DESCRIPTOR_DATA) * container.getNumIddPerBlock()));
+        if (ApiSpecificConfig::getBindlessConfiguration()) {
+            container.getDevice()->getBindlessHeapsHelper()->getHeap(BindlessHeapsHelper::BindlesHeapType::GLOBAL_DSH)->align(EncodeStates<Family>::alignInterfaceDescriptorData);
+            container.setIddBlock(container.getDevice()->getBindlessHeapsHelper()->getSpaceInHeap(sizeof(INTERFACE_DESCRIPTOR_DATA) * container.getNumIddPerBlock(), BindlessHeapsHelper::BindlesHeapType::GLOBAL_DSH));
+        } else {
+            container.getIndirectHeap(HeapType::DYNAMIC_STATE)->align(EncodeStates<Family>::alignInterfaceDescriptorData);
+            container.setIddBlock(container.getHeapSpaceAllowGrow(HeapType::DYNAMIC_STATE,
+                                                                  sizeof(INTERFACE_DESCRIPTOR_DATA) * container.getNumIddPerBlock()));
+        }
         container.nextIddInBlock = 0;
 
         EncodeMediaInterfaceDescriptorLoad<Family>::encode(container);
@@ -382,40 +489,6 @@ void *EncodeDispatchKernel<Family>::getInterfaceDescriptor(CommandContainer &con
     iddOffset = container.nextIddInBlock;
     auto interfaceDescriptorData = static_cast<INTERFACE_DESCRIPTOR_DATA *>(container.getIddBlock());
     return &interfaceDescriptorData[container.nextIddInBlock++];
-}
-
-template <typename Family>
-void EncodeDispatchKernel<Family>::patchBindlessSurfaceStateOffsets(const size_t sshOffset, const KernelDescriptor &kernelDesc, uint8_t *crossThread) {
-    auto &hwHelper = HwHelperHw<Family>::get();
-
-    for (const auto &argT : kernelDesc.payloadMappings.explicitArgs) {
-        CrossThreadDataOffset bindless = undefined<CrossThreadDataOffset>;
-        SurfaceStateHeapOffset bindful = undefined<SurfaceStateHeapOffset>;
-
-        switch (argT.type) {
-        case ArgDescriptor::ArgTPointer: {
-            auto &arg = argT.as<NEO::ArgDescPointer>();
-            bindless = arg.bindless;
-            bindful = arg.bindful;
-        } break;
-
-        case ArgDescriptor::ArgTImage: {
-            auto &arg = argT.as<NEO::ArgDescImage>();
-            bindless = arg.bindless;
-            bindful = arg.bindful;
-        } break;
-
-        default:
-            break;
-        }
-
-        if (NEO::isValidOffset(bindless)) {
-            auto patchLocation = ptrOffset(crossThread, bindless);
-            auto bindlessOffset = static_cast<uint32_t>(sshOffset) + bindful;
-            auto patchValue = hwHelper.getBindlessSurfaceExtendedMessageDescriptorValue(bindlessOffset);
-            patchWithRequiredSize(patchLocation, sizeof(patchValue), patchValue);
-        }
-    }
 }
 
 template <typename Family>
@@ -430,6 +503,9 @@ bool EncodeDispatchKernel<Family>::inlineDataProgrammingRequired(const KernelDes
     return false;
 }
 
+template <typename GfxFamily>
+void EncodeDispatchKernel<GfxFamily>::adjustTimestampPacket(WALKER_TYPE &walkerCmd, const HardwareInfo &hwInfo) {}
+
 template <typename Family>
 void EncodeIndirectParams<Family>::setGroupCountIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset offsets[3], void *crossThreadAddress) {
     for (int i = 0; i < 3; ++i) {
@@ -439,6 +515,73 @@ void EncodeIndirectParams<Family>::setGroupCountIndirect(CommandContainer &conta
         EncodeStoreMMIO<Family>::encode(*container.getCommandStream(), GPUGPU_DISPATCHDIM[i], ptrOffset(reinterpret_cast<uint64_t>(crossThreadAddress), offsets[i]));
     }
 }
+
+template <typename Family>
+void EncodeIndirectParams<Family>::setWorkDimIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset workDimOffset, void *crossThreadAddress, const uint32_t *groupSize) {
+    if (NEO::isValidOffset(workDimOffset)) {
+        constexpr uint32_t GROUP_SIZE_1_GT_1_REGISTER = CS_GPR_R0;
+        constexpr AluRegisters GROUP_SIZE_1_GT_1_ALU_REGISTER = AluRegisters::R_0;
+
+        constexpr AluRegisters GROUP_DIM_2_GT_1_ALU_REGISTER = AluRegisters::R_1;
+
+        constexpr AluRegisters GROUP_DIM_1_GT_1_ALU_REGISTER = AluRegisters::R_2;
+
+        constexpr uint32_t SUB_RESULT_REGISTER = CS_GPR_R3;
+        constexpr AluRegisters SUB_RESULT_ALU_REGISTER = AluRegisters::R_3;
+
+        constexpr uint32_t RESULT_REGISTER = CS_GPR_R4;
+        constexpr AluRegisters RESULT_ALU_REGISTER = AluRegisters::R_4;
+
+        constexpr uint32_t CONSTANT_ONE_REGISTER = CS_GPR_R5;
+        constexpr AluRegisters CONSTANT_ONE_ALU_REGISTER = AluRegisters::R_5;
+
+        constexpr uint32_t GROUP_DIM_2_REGISTER = CS_GPR_R6;
+        constexpr AluRegisters GROUP_DIM_2_ALU_REGISTER = AluRegisters::R_6;
+
+        constexpr uint32_t GROUP_DIM_1_REGISTER = CS_GPR_R7;
+        constexpr AluRegisters GROUP_DIM_1_ALU_REGISTER = AluRegisters::R_7;
+
+        if (groupSize[2] > 1) {
+            EncodeSetMMIO<Family>::encodeIMM(container, RESULT_REGISTER, 3, true);
+        } else {
+            EncodeSetMMIO<Family>::encodeIMM(container, GROUP_SIZE_1_GT_1_REGISTER, groupSize[1] > 1, true);
+            EncodeSetMMIO<Family>::encodeREG(container, GROUP_DIM_2_REGISTER, GPUGPU_DISPATCHDIM[2]);
+            EncodeSetMMIO<Family>::encodeREG(container, GROUP_DIM_1_REGISTER, GPUGPU_DISPATCHDIM[1]);
+
+            EncodeSetMMIO<Family>::encodeIMM(container, CONSTANT_ONE_REGISTER, 1, true);
+            EncodeMath<Family>::greaterThan(container, GROUP_DIM_2_ALU_REGISTER, CONSTANT_ONE_ALU_REGISTER, GROUP_DIM_2_GT_1_ALU_REGISTER);
+            EncodeMath<Family>::greaterThan(container, GROUP_DIM_1_ALU_REGISTER, CONSTANT_ONE_ALU_REGISTER, GROUP_DIM_1_GT_1_ALU_REGISTER);
+
+            EncodeSetMMIO<Family>::encodeIMM(container, SUB_RESULT_REGISTER, 0, true);
+            EncodeMath<Family>::bitwiseOr(container, GROUP_DIM_2_GT_1_ALU_REGISTER, GROUP_DIM_1_GT_1_ALU_REGISTER, SUB_RESULT_ALU_REGISTER);
+            EncodeMath<Family>::bitwiseOr(container, SUB_RESULT_ALU_REGISTER, GROUP_SIZE_1_GT_1_ALU_REGISTER, SUB_RESULT_ALU_REGISTER);
+
+            EncodeSetMMIO<Family>::encodeIMM(container, RESULT_REGISTER, 1, true);
+            EncodeMath<Family>::addition(container, RESULT_ALU_REGISTER, SUB_RESULT_ALU_REGISTER, RESULT_ALU_REGISTER);
+            EncodeMath<Family>::addition(container, RESULT_ALU_REGISTER, GROUP_DIM_2_GT_1_ALU_REGISTER, RESULT_ALU_REGISTER);
+        }
+        EncodeStoreMMIO<Family>::encode(*container.getCommandStream(), RESULT_REGISTER, ptrOffset(reinterpret_cast<uint64_t>(crossThreadAddress), workDimOffset));
+    }
+}
+
+template <typename Family>
+void EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t samplerCount, uint32_t bindingTableEntryCount) {
+    auto enablePrefetch = EncodeSurfaceState<Family>::doBindingTablePrefetch();
+    if (DebugManager.flags.ForceBtpPrefetchMode.get() != -1) {
+        enablePrefetch = static_cast<bool>(DebugManager.flags.ForceBtpPrefetchMode.get());
+    }
+
+    if (enablePrefetch) {
+        interfaceDescriptor.setSamplerCount(static_cast<typename INTERFACE_DESCRIPTOR_DATA::SAMPLER_COUNT>((samplerCount + 3) / 4));
+        interfaceDescriptor.setBindingTableEntryCount(std::min(bindingTableEntryCount, 31u));
+    } else {
+        interfaceDescriptor.setSamplerCount(INTERFACE_DESCRIPTOR_DATA::SAMPLER_COUNT::SAMPLER_COUNT_NO_SAMPLERS_USED);
+        interfaceDescriptor.setBindingTableEntryCount(0u);
+    }
+}
+
+template <typename Family>
+void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo) {}
 
 template <typename Family>
 void EncodeIndirectParams<Family>::setGlobalWorkSizeIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset offsets[3], void *crossThreadAddress, const uint32_t *lws) {
@@ -451,17 +594,17 @@ void EncodeIndirectParams<Family>::setGlobalWorkSizeIndirect(CommandContainer &c
 }
 
 template <typename Family>
-size_t EncodeIndirectParams<Family>::getCmdsSizeForIndirectParams() {
+inline size_t EncodeIndirectParams<Family>::getCmdsSizeForIndirectParams() {
     return 3 * sizeof(typename Family::MI_LOAD_REGISTER_MEM);
 }
 
 template <typename Family>
-size_t EncodeIndirectParams<Family>::getCmdsSizeForSetGroupCountIndirect() {
+inline size_t EncodeIndirectParams<Family>::getCmdsSizeForSetGroupCountIndirect() {
     return 3 * (sizeof(MI_STORE_REGISTER_MEM));
 }
 
 template <typename Family>
-size_t EncodeIndirectParams<Family>::getCmdsSizeForSetGroupSizeIndirect() {
+inline size_t EncodeIndirectParams<Family>::getCmdsSizeForSetGroupSizeIndirect() {
     return 3 * (sizeof(MI_LOAD_REGISTER_REG) + sizeof(MI_LOAD_REGISTER_IMM) + sizeof(MI_MATH) + sizeof(MI_MATH_ALU_INST_INLINE) + sizeof(MI_STORE_REGISTER_MEM));
 }
 
@@ -488,8 +631,14 @@ void EncodeSempahore<Family>::addMiSemaphoreWaitCommand(LinearStream &commandStr
 }
 
 template <typename Family>
-size_t EncodeSempahore<Family>::getSizeMiSemaphoreWait() {
+inline size_t EncodeSempahore<Family>::getSizeMiSemaphoreWait() {
     return sizeof(MI_SEMAPHORE_WAIT);
+}
+
+template <typename Family>
+inline void EncodeAtomic<Family>::setMiAtomicAddress(MI_ATOMIC &atomic, uint64_t writeAddress) {
+    atomic.setMemoryAddress(static_cast<uint32_t>(writeAddress & 0x0000FFFFFFFFULL));
+    atomic.setMemoryAddressHigh(static_cast<uint32_t>(writeAddress >> 32));
 }
 
 template <typename Family>
@@ -498,14 +647,22 @@ void EncodeAtomic<Family>::programMiAtomic(MI_ATOMIC *atomic,
                                            ATOMIC_OPCODES opcode,
                                            DATA_SIZE dataSize,
                                            uint32_t returnDataControl,
-                                           uint32_t csStall) {
+                                           uint32_t csStall,
+                                           uint32_t operand1dword0,
+                                           uint32_t operand1dword1) {
     MI_ATOMIC cmd = Family::cmdInitAtomic;
     cmd.setAtomicOpcode(opcode);
     cmd.setDataSize(dataSize);
-    cmd.setMemoryAddress(static_cast<uint32_t>(writeAddress & 0x0000FFFFFFFFULL));
-    cmd.setMemoryAddressHigh(static_cast<uint32_t>(writeAddress >> 32));
+    EncodeAtomic<Family>::setMiAtomicAddress(cmd, writeAddress);
     cmd.setReturnDataControl(returnDataControl);
     cmd.setCsStall(csStall);
+    if (opcode == ATOMIC_OPCODES::ATOMIC_4B_MOVE ||
+        opcode == ATOMIC_OPCODES::ATOMIC_8B_MOVE) {
+        cmd.setDwordLength(MI_ATOMIC::DWORD_LENGTH::DWORD_LENGTH_INLINE_DATA_1);
+        cmd.setInlineData(0x1);
+        cmd.setOperand1DataDword0(operand1dword0);
+        cmd.setOperand1DataDword1(operand1dword1);
+    }
 
     *atomic = cmd;
 }
@@ -516,9 +673,11 @@ void EncodeAtomic<Family>::programMiAtomic(LinearStream &commandStream,
                                            ATOMIC_OPCODES opcode,
                                            DATA_SIZE dataSize,
                                            uint32_t returnDataControl,
-                                           uint32_t csStall) {
+                                           uint32_t csStall,
+                                           uint32_t operand1dword0,
+                                           uint32_t operand1dword1) {
     auto miAtomic = commandStream.getSpaceForCmd<MI_ATOMIC>();
-    EncodeAtomic<Family>::programMiAtomic(miAtomic, writeAddress, opcode, dataSize, returnDataControl, csStall);
+    EncodeAtomic<Family>::programMiAtomic(miAtomic, writeAddress, opcode, dataSize, returnDataControl, csStall, operand1dword0, operand1dword1);
 }
 
 template <typename Family>
@@ -543,17 +702,19 @@ void EncodeBatchBufferStartOrEnd<Family>::programBatchBufferEnd(CommandContainer
 }
 
 template <typename GfxFamily>
-void EncodeMiFlushDW<GfxFamily>::programMiFlushDw(LinearStream &commandStream, uint64_t immediateDataGpuAddress, uint64_t immediateData, bool timeStampOperation, bool commandWithPostSync) {
+void EncodeMiFlushDW<GfxFamily>::programMiFlushDw(LinearStream &commandStream, uint64_t immediateDataGpuAddress, uint64_t immediateData, MiFlushArgs &args) {
     programMiFlushDwWA(commandStream);
 
     auto miFlushDwCmd = commandStream.getSpaceForCmd<MI_FLUSH_DW>();
     MI_FLUSH_DW miFlush = GfxFamily::cmdInitMiFlushDw;
-    if (commandWithPostSync) {
-        auto postSyncType = timeStampOperation ? MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_TIMESTAMP_REGISTER : MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA_QWORD;
+    if (args.commandWithPostSync) {
+        auto postSyncType = args.timeStampOperation ? MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_TIMESTAMP_REGISTER : MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA_QWORD;
         miFlush.setPostSyncOperation(postSyncType);
         miFlush.setDestinationAddress(immediateDataGpuAddress);
         miFlush.setImmediateData(immediateData);
     }
+    miFlush.setNotifyEnable(args.notifyEnable);
+    miFlush.setTlbInvalidate(args.tlbFlush);
     appendMiFlushDw(&miFlush);
     *miFlushDwCmd = miFlush;
 }
@@ -564,9 +725,18 @@ size_t EncodeMiFlushDW<GfxFamily>::getMiFlushDwCmdSizeForDataWrite() {
 }
 
 template <typename GfxFamily>
-void EncodeMemoryPrefetch<GfxFamily>::programMemoryPrefetch(LinearStream &commandStream, const GraphicsAllocation &graphicsAllocation, uint32_t size, const HardwareInfo &hwInfo) {}
+inline void EncodeMemoryPrefetch<GfxFamily>::programMemoryPrefetch(LinearStream &commandStream, const GraphicsAllocation &graphicsAllocation, uint32_t size, size_t offset, const HardwareInfo &hwInfo) {}
 
 template <typename GfxFamily>
-size_t EncodeMemoryPrefetch<GfxFamily>::getSizeForMemoryPrefetch() { return 0; }
+inline size_t EncodeMemoryPrefetch<GfxFamily>::getSizeForMemoryPrefetch(size_t size) { return 0u; }
+
+template <typename Family>
+void EncodeMiArbCheck<Family>::program(LinearStream &commandStream) {
+    auto miArbCheckStream = commandStream.getSpaceForCmd<MI_ARB_CHECK>();
+    *miArbCheckStream = Family::cmdInitArbCheck;
+}
+
+template <typename Family>
+inline size_t EncodeMiArbCheck<Family>::getCommandSize() { return sizeof(MI_ARB_CHECK); }
 
 } // namespace NEO

@@ -1,14 +1,15 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/device/device.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
-#include "shared/test/unit_test/helpers/variable_backup.h"
-#include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/variable_backup.h"
+#include "shared/test/common/mocks/mock_deferred_deleter.h"
+#include "shared/test/common/mocks/mock_device.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/context/context.inl"
@@ -18,7 +19,6 @@
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_deferred_deleter.h"
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
@@ -117,7 +117,7 @@ TEST_F(ContextTest, WhenSettingSpecialQueueThenQueueIsAvailable) {
     auto specialQ = context.getSpecialQueue(0u);
     EXPECT_EQ(specialQ, nullptr);
 
-    auto cmdQ = new MockCommandQueue(&context, (ClDevice *)devices[0], 0);
+    auto cmdQ = new MockCommandQueue(&context, (ClDevice *)devices[0], 0, false);
     context.setSpecialQueue(cmdQ, 0u);
     specialQ = context.getSpecialQueue(0u);
     EXPECT_NE(specialQ, nullptr);
@@ -142,7 +142,7 @@ TEST_F(ContextTest, givenCmdQueueWithoutContextWhenBeingCreatedNextDeletedThenCo
     delete cmdQ1;
     EXPECT_EQ(1, context.getRefInternalCount());
 
-    auto cmdQ2 = new MockCommandQueue(nullptr, (ClDevice *)devices[0], 0);
+    auto cmdQ2 = new MockCommandQueue(nullptr, (ClDevice *)devices[0], 0, false);
     EXPECT_EQ(1, context.getRefInternalCount());
 
     delete cmdQ2;
@@ -172,7 +172,7 @@ TEST_F(ContextTest, givenCmdQueueWithContextWhenBeingCreatedNextDeletedThenConte
     MockContext context((ClDevice *)devices[0]);
     EXPECT_EQ(1, context.getRefInternalCount());
 
-    auto cmdQ = new MockCommandQueue(&context, (ClDevice *)devices[0], 0);
+    auto cmdQ = new MockCommandQueue(&context, (ClDevice *)devices[0], 0, false);
     EXPECT_EQ(2, context.getRefInternalCount());
 
     delete cmdQ;
@@ -234,7 +234,7 @@ TEST_F(ContextTest, givenSpecialCmdQueueWithContextWhenBeingCreatedNextAutoDelet
     MockContext context((ClDevice *)devices[0], true);
     EXPECT_EQ(1, context.getRefInternalCount());
 
-    auto cmdQ = new MockCommandQueue(&context, (ClDevice *)devices[0], 0);
+    auto cmdQ = new MockCommandQueue(&context, (ClDevice *)devices[0], 0, false);
     context.overrideSpecialQueueAndDecrementRefCount(cmdQ, 0u);
     EXPECT_EQ(1, context.getRefInternalCount());
 
@@ -245,7 +245,7 @@ TEST_F(ContextTest, givenSpecialCmdQueueWithContextWhenBeingCreatedNextDeletedTh
     MockContext context((ClDevice *)devices[0], true);
     EXPECT_EQ(1, context.getRefInternalCount());
 
-    auto cmdQ = new MockCommandQueue(&context, (ClDevice *)devices[0], 0);
+    auto cmdQ = new MockCommandQueue(&context, (ClDevice *)devices[0], 0, false);
     context.overrideSpecialQueueAndDecrementRefCount(cmdQ, 0u);
     EXPECT_EQ(1, context.getRefInternalCount());
 
@@ -337,22 +337,21 @@ TEST(Context, whenCreateContextThenSpecialQueueUsesInternalEngine) {
     EXPECT_EQ(internalEngine.commandStreamReceiver, specialQueueEngine.commandStreamReceiver);
 }
 
-TEST(MultiDeviceContextTest, givenContextWithMultipleDevicesWhenGettingTotalNumberOfDevicesThenNumberOfAllAvailableDevicesIsReturned) {
-    DebugManagerStateRestore restorer;
-    const uint32_t numRootDevices = 1u;
-    const uint32_t numSubDevices = 3u;
-    DebugManager.flags.CreateMultipleSubDevices.set(numSubDevices);
-    initPlatform();
-    auto device = platform()->getClDevice(0);
+TEST(MultiDeviceContextTest, givenContextWithMultipleDevicesWhenGettingInfoAboutSubDevicesThenCorrectValueIsReturned) {
+    MockSpecializedContext context1;
+    MockUnrestrictiveContext context2;
+    MockDefaultContext context3;
 
-    cl_device_id clDevice = device;
-    ClDeviceVector deviceVector(&clDevice, numRootDevices);
-    cl_int retVal = CL_OUT_OF_HOST_MEMORY;
-    auto context = std::unique_ptr<Context>(Context::create<Context>(nullptr, deviceVector, nullptr, nullptr, retVal));
-    EXPECT_EQ(CL_SUCCESS, retVal);
-    EXPECT_EQ(numSubDevices, device->getNumAvailableDevices());
-    EXPECT_EQ(numRootDevices, context->getNumDevices());
-    EXPECT_EQ(numRootDevices * numSubDevices, context->getTotalNumDevices());
+    EXPECT_EQ(2u, context1.getNumDevices());
+    EXPECT_TRUE(context1.containsMultipleSubDevices(0));
+
+    EXPECT_EQ(3u, context2.getNumDevices());
+    EXPECT_TRUE(context2.containsMultipleSubDevices(0));
+
+    EXPECT_EQ(3u, context3.getNumDevices());
+    EXPECT_FALSE(context3.containsMultipleSubDevices(0));
+    EXPECT_FALSE(context3.containsMultipleSubDevices(1));
+    EXPECT_FALSE(context3.containsMultipleSubDevices(2));
 }
 
 class ContextWithAsyncDeleterTest : public ::testing::WithParamInterface<bool>,
@@ -499,4 +498,18 @@ TEST(Context, WhenSettingContextDestructorCallbackThenCallOrderIsPreserved) {
     EXPECT_EQ(3u, callbacksReturnValues[0]);
     EXPECT_EQ(2u, callbacksReturnValues[1]);
     EXPECT_EQ(1u, callbacksReturnValues[2]);
+}
+
+TEST(Context, givenContextAndDevicesWhenIsTileOnlyThenProperValueReturned) {
+    UltClDeviceFactory deviceFactoryWithSubDevices{1, 2};
+    UltClDeviceFactory deviceFactoryWithMultipleDevices{2, 0};
+    cl_device_id devices[] = {deviceFactoryWithMultipleDevices.rootDevices[0], deviceFactoryWithMultipleDevices.rootDevices[1]};
+
+    MockContext tileOnlyContext(deviceFactoryWithMultipleDevices.rootDevices[0]);
+    MockContext subDevicesContext(deviceFactoryWithSubDevices.rootDevices[0]);
+    MockContext multipleDevicesContext(ClDeviceVector(devices, 2));
+
+    EXPECT_TRUE(tileOnlyContext.isSingleDeviceContext());
+    EXPECT_FALSE(subDevicesContext.isSingleDeviceContext());
+    EXPECT_FALSE(multipleDevicesContext.isSingleDeviceContext());
 }

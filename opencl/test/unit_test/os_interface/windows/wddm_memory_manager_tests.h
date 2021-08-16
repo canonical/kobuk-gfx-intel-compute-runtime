@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,9 +7,11 @@
 
 #pragma once
 
+#include "shared/source/os_interface/os_interface.h"
 #include "shared/source/os_interface/windows/os_environment_win.h"
-#include "shared/source/os_interface/windows/os_interface.h"
 #include "shared/source/os_interface/windows/wddm_memory_operations_handler.h"
+#include "shared/test/common/mocks/mock_wddm_residency_allocations_container.h"
+#include "shared/test/common/os_interface/windows/wddm_fixture.h"
 #include "shared/test/unit_test/os_interface/windows/mock_gdi_interface.h"
 
 #include "opencl/test/unit_test/helpers/execution_environment_helper.h"
@@ -17,9 +19,7 @@
 #include "opencl/test/unit_test/mocks/mock_gmm.h"
 #include "opencl/test/unit_test/mocks/mock_gmm_page_table_mngr.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
-#include "opencl/test/unit_test/mocks/mock_wddm_residency_allocations_container.h"
 #include "opencl/test/unit_test/os_interface/windows/mock_wddm_memory_manager.h"
-#include "opencl/test/unit_test/os_interface/windows/wddm_fixture.h"
 #include "test.h"
 
 #include "gmock/gmock.h"
@@ -68,8 +68,9 @@ class MockWddmMemoryManagerFixture {
         csr.reset(createCommandStream(*executionEnvironment, 0u, 1));
         auto hwInfo = rootDeviceEnvironment->getHardwareInfo();
         osContext = memoryManager->createAndRegisterOsContext(csr.get(),
-                                                              HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0].first,
-                                                              1, PreemptionHelper::getDefaultPreemptionMode(*hwInfo), false, false, false);
+                                                              HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
+                                                              1, PreemptionHelper::getDefaultPreemptionMode(*hwInfo), false);
+        osContext->ensureContextInitialized();
 
         osContext->incRefInternal();
         mockTemporaryResources = reinterpret_cast<MockWddmResidentAllocationsContainer *>(wddm->getTemporaryResourcesContainer());
@@ -120,8 +121,8 @@ class WddmMemoryManagerFixtureWithGmockWddm : public ExecutionEnvironmentFixture
         csr.reset(createCommandStream(*executionEnvironment, 0u, 1));
         auto hwInfo = executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo();
         osContext = memoryManager->createAndRegisterOsContext(csr.get(),
-                                                              HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0].first,
-                                                              1, preemptionMode, false, false, false);
+                                                              HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
+                                                              1, preemptionMode, false);
 
         osContext->incRefInternal();
 
@@ -177,7 +178,7 @@ class MockWddmMemoryManagerTest : public ::testing::Test {
     void SetUp() override {
         executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 2);
         wddm = new WddmMock(*executionEnvironment->rootDeviceEnvironments[1].get());
-        executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->osInterface->get()->setWddm(wddm);
+        executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->osInterface->setDriverModel(std::unique_ptr<DriverModel>(wddm));
         executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
     }
 

@@ -1,24 +1,24 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include "shared/source/os_interface/windows/sharedata_wrapper.h"
 #include "shared/source/os_interface/windows/windows_wrapper.h"
 
 #include "sku_info.h"
-#include "umKmInc/sharedata.h"
 
 namespace NEO {
 class SkuInfoReceiver {
   public:
-    static void receiveFtrTableFromAdapterInfo(FeatureTable *ftrTable, _ADAPTER_INFO *adapterInfo);
-    static void receiveWaTableFromAdapterInfo(WorkaroundTable *workaroundTable, _ADAPTER_INFO *adapterInfo);
+    static void receiveFtrTableFromAdapterInfo(FeatureTable *ftrTable, ADAPTER_INFO_KMD *adapterInfo);
+    static void receiveWaTableFromAdapterInfo(WorkaroundTable *workaroundTable, ADAPTER_INFO_KMD *adapterInfo);
 
   protected:
-    static void receiveFtrTableFromAdapterInfoBase(FeatureTable *ftrTable, _ADAPTER_INFO *adapterInfo) {
+    static void receiveFtrTableFromAdapterInfoBase(FeatureTable *ftrTable, ADAPTER_INFO_KMD *adapterInfo) {
 #define RECEIVE_FTR(VAL_NAME) ftrTable->ftr##VAL_NAME = adapterInfo->SkuTable.Ftr##VAL_NAME
         RECEIVE_FTR(Desktop);
         RECEIVE_FTR(ChannelSwizzlingXOREnabled);
@@ -101,10 +101,16 @@ class SkuInfoReceiver {
         RECEIVE_FTR(CCSNode);
         RECEIVE_FTR(MemTypeMocsDeferPAT);
         RECEIVE_FTR(LocalMemory);
+        RECEIVE_FTR(LocalMemoryAllows4KB);
+        RECEIVE_FTR(FlatPhysCCS);
+        RECEIVE_FTR(MultiTileArch);
+        RECEIVE_FTR(CCSMultiInstance);
+        RECEIVE_FTR(Ppgtt64KBWalkOptimization);
+
 #undef RECEIVE_FTR
     }
 
-    static void receiveWaTableFromAdapterInfoBase(WorkaroundTable *workaroundTable, _ADAPTER_INFO *adapterInfo) {
+    static void receiveWaTableFromAdapterInfoBase(WorkaroundTable *workaroundTable, ADAPTER_INFO_KMD *adapterInfo) {
 #define RECEIVE_WA(VAL_NAME) workaroundTable->wa##VAL_NAME = adapterInfo->WaTable.Wa##VAL_NAME
         RECEIVE_WA(DoNotUseMIReportPerfCount);
 
@@ -131,6 +137,8 @@ class SkuInfoReceiver {
         RECEIVE_WA(Limit128BMediaCompr);
         RECEIVE_WA(UntypedBufferCompression);
         RECEIVE_WA(DisableFusedThreadScheduling);
+        RECEIVE_WA(DefaultTile4);
+
 #undef RECEIVE_WA
     }
 };

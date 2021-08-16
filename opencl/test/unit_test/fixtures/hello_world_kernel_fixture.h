@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,7 +8,7 @@
 #pragma once
 #include "shared/source/device/device.h"
 #include "shared/source/helpers/file_io.h"
-#include "shared/test/unit_test/helpers/test_files.h"
+#include "shared/test/common/helpers/test_files.h"
 
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/source/platform/platform.h"
@@ -51,7 +51,7 @@ struct HelloWorldKernelFixture : public ProgramFixture {
         if (options) {
             std::string optionsToProgram(options);
             if (optionsToProgram.find("-cl-std=CL2.0") != std::string::npos) {
-                ASSERT_TRUE(pDevice->areOcl21FeaturesEnabled());
+                ASSERT_TRUE(pDevice->isOcl21Conformant());
             }
 
             CreateProgramFromBinary(
@@ -75,11 +75,12 @@ struct HelloWorldKernelFixture : public ProgramFixture {
         ASSERT_EQ(CL_SUCCESS, retVal);
 
         // create a kernel
-        pKernel = Kernel::create<MockKernel>(
+        pMultiDeviceKernel = MultiDeviceKernel::create<MockKernel, Program, MockMultiDeviceKernel>(
             pProgram,
-            *pProgram->getKernelInfo(pKernelName->c_str()),
+            pProgram->getKernelInfosForKernel(pKernelName->c_str()),
             &retVal);
 
+        pKernel = static_cast<MockKernel *>(pMultiDeviceKernel->getKernel(pDevice->getRootDeviceIndex()));
         EXPECT_NE(nullptr, pKernel);
         EXPECT_EQ(CL_SUCCESS, retVal);
     }
@@ -87,7 +88,7 @@ struct HelloWorldKernelFixture : public ProgramFixture {
     void TearDown() override {
         delete pKernelName;
         delete pTestFilename;
-        pKernel->release();
+        pMultiDeviceKernel->release();
 
         pContext->release();
         ProgramFixture::TearDown();
@@ -97,7 +98,8 @@ struct HelloWorldKernelFixture : public ProgramFixture {
     std::string *pKernelName = nullptr;
     cl_uint simd = 32;
     cl_int retVal = CL_SUCCESS;
-    Kernel *pKernel = nullptr;
+    MockMultiDeviceKernel *pMultiDeviceKernel = nullptr;
+    MockKernel *pKernel = nullptr;
     MockContext *pContext = nullptr;
 };
 } // namespace NEO

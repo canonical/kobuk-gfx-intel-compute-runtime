@@ -1,165 +1,47 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/offline_compiler/source/ocloc_api.h"
+#include "zello_common.h"
+#include "zello_compile.h"
 
-#include <level_zero/ze_api.h>
-
-#include <cstring>
-#include <fstream>
-#include <iostream>
-#include <limits>
-#include <memory>
-#include <string>
-#include <vector>
-
-#define VALIDATECALL(myZeCall)                \
-    do {                                      \
-        if (myZeCall != ZE_RESULT_SUCCESS) {  \
-            std::cout << "Error at "          \
-                      << #myZeCall << ": "    \
-                      << __FUNCTION__ << ": " \
-                      << __LINE__ << "\n";    \
-            std::terminate();                 \
-        }                                     \
-    } while (0);
+extern bool verbose;
+bool verbose = false;
 
 const char *module = R"===(
-__kernel void kernel_copy(__global int *dst, __global char *src){
+__kernel void kernel_copy(__global char *dst, __global char *src){
     uint gid = get_global_id(0);
     dst[gid] = src[gid];
 }
 )===";
 
-std::vector<uint8_t> compileToSpirV(const std::string &src, const std::string &options, std::string &outCompilerLog) {
-    std::vector<uint8_t> ret;
-
-    const char *mainFileName = "main.cl";
-    const char *argv[] = {"ocloc", "-q", "-device", "skl", "-file", mainFileName};
-    const unsigned char *sources[] = {reinterpret_cast<const unsigned char *>(src.c_str())};
-    size_t sourcesLengths[] = {src.size() + 1};
-    const char *sourcesNames[] = {mainFileName};
-    unsigned int numOutputs = 0U;
-    unsigned char **outputs = nullptr;
-    size_t *ouputLengths = nullptr;
-    char **outputNames = nullptr;
-
-    int result = oclocInvoke(sizeof(argv) / sizeof(argv[0]), argv,
-                             1, sources, sourcesLengths, sourcesNames,
-                             0, nullptr, nullptr, nullptr,
-                             &numOutputs, &outputs, &ouputLengths, &outputNames);
-
-    unsigned char *spirV = nullptr;
-    size_t spirVlen = 0;
-    const char *log = nullptr;
-    size_t logLen = 0;
-    for (unsigned int i = 0; i < numOutputs; ++i) {
-        std::string spvExtension = ".spv";
-        std::string logFileName = "stdout.log";
-        auto nameLen = strlen(outputNames[i]);
-        if ((nameLen > spvExtension.size()) && (strstr(&outputNames[i][nameLen - spvExtension.size()], spvExtension.c_str()) != nullptr)) {
-            spirV = outputs[i];
-            spirVlen = ouputLengths[i];
-        } else if ((nameLen >= logFileName.size()) && (strstr(outputNames[i], logFileName.c_str()) != nullptr)) {
-            log = reinterpret_cast<const char *>(outputs[i]);
-            logLen = ouputLengths[i];
-            break;
-        }
-    }
-
-    if ((result != 0) && (logLen == 0)) {
-        outCompilerLog = "Unknown error, ocloc returned : " + std::to_string(result) + "\n";
-        return ret;
-    }
-
-    if (logLen != 0) {
-        outCompilerLog = std::string(log, logLen).c_str();
-    }
-
-    ret.assign(spirV, spirV + spirVlen);
-    oclocFreeOutput(&numOutputs, &outputs, &ouputLengths, &outputNames);
-    return ret;
-}
-
-int main(int argc, char *argv[]) {
-    // Initialize driver
-    VALIDATECALL(zeInit(ZE_INIT_FLAG_GPU_ONLY));
-
-    // Retrieve driver
-    uint32_t driverCount = 0;
-    VALIDATECALL(zeDriverGet(&driverCount, nullptr));
-
-    ze_driver_handle_t driverHandle;
-    VALIDATECALL(zeDriverGet(&driverCount, &driverHandle));
-
-    ze_context_desc_t contextDesc = {};
-    ze_context_handle_t context;
-    VALIDATECALL(zeContextCreate(driverHandle, &contextDesc, &context));
-
-    // Retrieve device
-    uint32_t deviceCount = 0;
-    VALIDATECALL(zeDeviceGet(driverHandle, &deviceCount, nullptr));
-
-    ze_device_handle_t device;
-    deviceCount = 1;
-    VALIDATECALL(zeDeviceGet(driverHandle, &deviceCount, &device));
-
-    // Print some properties
-    ze_device_properties_t deviceProperties = {};
-    VALIDATECALL(zeDeviceGetProperties(device, &deviceProperties));
-
-    std::cout << "Device : \n"
-              << " * name : " << deviceProperties.name << "\n"
-              << " * type : " << ((deviceProperties.type == ZE_DEVICE_TYPE_GPU) ? "GPU" : "FPGA") << "\n"
-              << " * vendorId : " << std::hex << deviceProperties.vendorId << std::dec << "\n";
-
-    // Create command queue
-    uint32_t numQueueGroups = 0;
-    VALIDATECALL(zeDeviceGetCommandQueueGroupProperties(device, &numQueueGroups, nullptr));
-    if (numQueueGroups == 0) {
-        std::cout << "No queue groups found!\n";
-        std::terminate();
-    }
-    std::vector<ze_command_queue_group_properties_t> queueProperties(numQueueGroups);
-    VALIDATECALL(zeDeviceGetCommandQueueGroupProperties(device, &numQueueGroups,
-                                                        queueProperties.data()));
-
+void executeKernelAndValidate(ze_context_handle_t context, ze_device_handle_t &device, bool &outputValidationSuccessful) {
     ze_command_queue_handle_t cmdQueue;
-    ze_command_queue_desc_t cmdQueueDesc = {};
+    ze_command_queue_desc_t cmdQueueDesc = {ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
+    ze_command_list_handle_t cmdList;
 
-    for (uint32_t i = 0; i < numQueueGroups; i++) {
-        if (queueProperties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE) {
-            cmdQueueDesc.ordinal = i;
-        }
-    }
+    cmdQueueDesc.ordinal = getCommandQueueOrdinal(device);
     cmdQueueDesc.index = 0;
     cmdQueueDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
-    VALIDATECALL(zeCommandQueueCreate(context, device, &cmdQueueDesc, &cmdQueue));
-
-    // Create command list
-    ze_command_list_handle_t cmdList;
-    ze_command_list_desc_t cmdListDesc = {};
-    cmdListDesc.commandQueueGroupOrdinal = cmdQueueDesc.ordinal;
-    VALIDATECALL(zeCommandListCreate(context, device, &cmdListDesc, &cmdList));
-
+    SUCCESS_OR_TERMINATE(zeCommandQueueCreate(context, device, &cmdQueueDesc, &cmdQueue));
+    SUCCESS_OR_TERMINATE(createCommandList(context, device, cmdList));
     // Create two shared buffers
     constexpr size_t allocSize = 4096;
-    ze_device_mem_alloc_desc_t deviceDesc;
+    ze_device_mem_alloc_desc_t deviceDesc = {ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC};
     deviceDesc.flags = ZE_DEVICE_MEM_ALLOC_FLAG_BIAS_UNCACHED;
     deviceDesc.ordinal = 0;
 
-    ze_host_mem_alloc_desc_t hostDesc;
+    ze_host_mem_alloc_desc_t hostDesc = {ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC};
     hostDesc.flags = ZE_HOST_MEM_ALLOC_FLAG_BIAS_UNCACHED;
 
     void *srcBuffer = nullptr;
-    VALIDATECALL(zeMemAllocShared(context, &deviceDesc, &hostDesc, allocSize, 1, device, &srcBuffer));
+    SUCCESS_OR_TERMINATE(zeMemAllocShared(context, &deviceDesc, &hostDesc, allocSize, 1, device, &srcBuffer));
 
     void *dstBuffer = nullptr;
-    VALIDATECALL(zeMemAllocShared(context, &deviceDesc, &hostDesc, allocSize, 1, device, &dstBuffer));
+    SUCCESS_OR_TERMINATE(zeMemAllocShared(context, &deviceDesc, &hostDesc, allocSize, 1, device, &dstBuffer));
 
     // Initialize memory
     constexpr uint8_t val = 55;
@@ -171,12 +53,12 @@ int main(int argc, char *argv[]) {
     if (buildLog.size() > 0) {
         std::cout << "Build log " << buildLog;
     }
-    VALIDATECALL((0 == spirV.size()));
+    SUCCESS_OR_TERMINATE((0 == spirV.size()));
 
     ze_module_handle_t module = nullptr;
     ze_kernel_handle_t kernel = nullptr;
 
-    ze_module_desc_t moduleDesc = {};
+    ze_module_desc_t moduleDesc = {ZE_STRUCTURE_TYPE_MODULE_DESC};
     ze_module_build_log_handle_t buildlog;
     moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
     moduleDesc.pInputModule = spirV.data();
@@ -193,13 +75,13 @@ int main(int argc, char *argv[]) {
 
         free(strLog);
     }
-    VALIDATECALL(zeModuleBuildLogDestroy(buildlog));
+    SUCCESS_OR_TERMINATE(zeModuleBuildLogDestroy(buildlog));
 
-    ze_kernel_desc_t kernelDesc = {};
+    ze_kernel_desc_t kernelDesc = {ZE_STRUCTURE_TYPE_KERNEL_DESC};
     kernelDesc.pKernelName = "kernel_copy";
-    VALIDATECALL(zeKernelCreate(module, &kernelDesc, &kernel));
-    ze_kernel_properties_t kernProps;
-    VALIDATECALL(zeKernelGetProperties(kernel, &kernProps));
+    SUCCESS_OR_TERMINATE(zeKernelCreate(module, &kernelDesc, &kernel));
+    ze_kernel_properties_t kernProps{ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES};
+    SUCCESS_OR_TERMINATE(zeKernelGetProperties(kernel, &kernProps));
     std::cout << "Kernel : \n"
               << " * name : " << kernelDesc.pKernelName << "\n"
               << " * uuid.mid : " << kernProps.uuid.mid << "\n"
@@ -219,49 +101,70 @@ int main(int argc, char *argv[]) {
     uint32_t groupSizeX = 32u;
     uint32_t groupSizeY = 1u;
     uint32_t groupSizeZ = 1u;
-    VALIDATECALL(zeKernelSuggestGroupSize(kernel, allocSize, 1U, 1U, &groupSizeX, &groupSizeY, &groupSizeZ));
-    VALIDATECALL(zeKernelSetGroupSize(kernel, groupSizeX, groupSizeY, groupSizeZ));
+    SUCCESS_OR_TERMINATE(zeKernelSuggestGroupSize(kernel, allocSize, 1U, 1U, &groupSizeX, &groupSizeY, &groupSizeZ));
+    SUCCESS_OR_TERMINATE(zeKernelSetGroupSize(kernel, groupSizeX, groupSizeY, groupSizeZ));
 
-    VALIDATECALL(zeKernelSetArgumentValue(kernel, 1, sizeof(dstBuffer), &dstBuffer));
-    VALIDATECALL(zeKernelSetArgumentValue(kernel, 0, sizeof(srcBuffer), &srcBuffer));
+    SUCCESS_OR_TERMINATE(zeKernelSetArgumentValue(kernel, 0, sizeof(dstBuffer), &dstBuffer));
+    SUCCESS_OR_TERMINATE(zeKernelSetArgumentValue(kernel, 1, sizeof(srcBuffer), &srcBuffer));
 
     ze_group_count_t dispatchTraits;
     dispatchTraits.groupCountX = allocSize / groupSizeX;
     dispatchTraits.groupCountY = 1u;
     dispatchTraits.groupCountZ = 1u;
 
-    VALIDATECALL(zeCommandListAppendLaunchKernel(cmdList, kernel, &dispatchTraits,
-                                                 nullptr, 0, nullptr));
+    SUCCESS_OR_TERMINATE(zeCommandListAppendLaunchKernel(cmdList, kernel, &dispatchTraits,
+                                                         nullptr, 0, nullptr));
 
     // Close list and submit for execution
-    VALIDATECALL(zeCommandListClose(cmdList));
-    VALIDATECALL(zeCommandQueueExecuteCommandLists(cmdQueue, 1, &cmdList, nullptr));
+    SUCCESS_OR_TERMINATE(zeCommandListClose(cmdList));
+    SUCCESS_OR_TERMINATE(zeCommandQueueExecuteCommandLists(cmdQueue, 1, &cmdList, nullptr));
 
-    VALIDATECALL(zeCommandQueueSynchronize(cmdQueue, std::numeric_limits<uint64_t>::max()));
+    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, std::numeric_limits<uint64_t>::max()));
 
     // Validate
-    bool outputValidationSuccessful = true;
+    outputValidationSuccessful = true;
     if (memcmp(dstBuffer, srcBuffer, allocSize)) {
         outputValidationSuccessful = false;
         uint8_t *srcCharBuffer = static_cast<uint8_t *>(srcBuffer);
         uint8_t *dstCharBuffer = static_cast<uint8_t *>(dstBuffer);
         for (size_t i = 0; i < allocSize; i++) {
             if (srcCharBuffer[i] != dstCharBuffer[i]) {
-                std::cout << "srcBuffer[" << i << "] = " << static_cast<unsigned int>(srcCharBuffer[i]) << " not equal to "
-                          << "dstBuffer[" << i << "] = " << static_cast<unsigned int>(dstCharBuffer[i]) << "\n";
+                std::cout << "srcBuffer[" << i << "] = " << std::dec << static_cast<unsigned int>(srcCharBuffer[i]) << " not equal to "
+                          << "dstBuffer[" << i << "] = " << std::dec << static_cast<unsigned int>(dstCharBuffer[i]) << "\n";
                 break;
             }
         }
     }
 
     // Cleanup
-    VALIDATECALL(zeMemFree(context, dstBuffer));
-    VALIDATECALL(zeMemFree(context, srcBuffer));
-    VALIDATECALL(zeCommandListDestroy(cmdList));
-    VALIDATECALL(zeCommandQueueDestroy(cmdQueue));
-    VALIDATECALL(zeContextDestroy(context));
+    SUCCESS_OR_TERMINATE(zeKernelDestroy(kernel));
+    SUCCESS_OR_TERMINATE(zeModuleDestroy(module));
+    SUCCESS_OR_TERMINATE(zeMemFree(context, dstBuffer));
+    SUCCESS_OR_TERMINATE(zeMemFree(context, srcBuffer));
+    SUCCESS_OR_TERMINATE(zeCommandListDestroy(cmdList));
+    SUCCESS_OR_TERMINATE(zeCommandQueueDestroy(cmdQueue));
+}
 
-    std::cout << "\nZello World Results validation " << (outputValidationSuccessful ? "PASSED" : "FAILED") << "\n";
+int main(int argc, char *argv[]) {
+    verbose = isVerbose(argc, argv);
+    ze_context_handle_t context = nullptr;
+    auto devices = zelloInitContextAndGetDevices(context);
+    auto device = devices[0];
+
+    bool outputValidationSuccessful;
+
+    ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
+    SUCCESS_OR_TERMINATE(zeDeviceGetProperties(device, &deviceProperties));
+    std::cout << "Device : \n"
+              << " * name : " << deviceProperties.name << "\n"
+              << " * vendorId : " << std::hex << deviceProperties.vendorId << "\n";
+
+    executeKernelAndValidate(context, device, outputValidationSuccessful);
+
+    SUCCESS_OR_TERMINATE(zeContextDestroy(context));
+
+    std::cout << "\nZello World JIT Results validation "
+              << (outputValidationSuccessful ? "PASSED" : "FAILED") << "\n";
 
     return 0;
 }

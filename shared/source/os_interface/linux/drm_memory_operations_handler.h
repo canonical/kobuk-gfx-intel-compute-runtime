@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -23,7 +23,9 @@ class DrmMemoryOperationsHandler : public MemoryOperationsHandler {
     virtual MemoryOperationsStatus makeResidentWithinOsContext(OsContext *osContext, ArrayRef<GraphicsAllocation *> gfxAllocations, bool evictable) = 0;
     virtual MemoryOperationsStatus evictWithinOsContext(OsContext *osContext, GraphicsAllocation &gfxAllocation) = 0;
     virtual void mergeWithResidencyContainer(OsContext *osContext, ResidencyContainer &residencyContainer) = 0;
-    virtual std::unique_lock<std::mutex> lockHandlerForExecWA() = 0;
+    virtual std::unique_lock<std::mutex> lockHandlerIfUsed() = 0;
+
+    virtual void evictUnusedAllocations(bool waitForCompletion) = 0;
 
     static std::unique_ptr<DrmMemoryOperationsHandler> create(Drm &drm, uint32_t rootDeviceIndex);
 

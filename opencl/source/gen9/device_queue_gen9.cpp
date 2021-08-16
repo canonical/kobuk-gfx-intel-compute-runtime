@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -44,7 +44,7 @@ void DeviceQueueHw<Family>::addMiAtomicCmdWa(uint64_t atomicOpPlaceholder) {
                                           atomicOpPlaceholder,
                                           Family::MI_ATOMIC::ATOMIC_OPCODES::ATOMIC_8B_INCREMENT,
                                           Family::MI_ATOMIC::DATA_SIZE::DATA_SIZE_QWORD,
-                                          0x1u, 0x1u);
+                                          0x1u, 0x1u, 0x0u, 0x0u);
 }
 
 template <>

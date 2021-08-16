@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,6 +8,7 @@
 #pragma once
 #include "shared/source/command_stream/aub_subcapture_status.h"
 #include "shared/source/command_stream/csr_definitions.h"
+#include "shared/source/command_stream/csr_properties_flags.h"
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/command_stream/submissions_aggregator.h"
 #include "shared/source/command_stream/thread_arbitration_policy.h"
@@ -20,8 +21,9 @@
 #include "shared/source/indirect_heap/indirect_heap.h"
 #include "shared/source/kernel/grf_config.h"
 #include "shared/source/os_interface/os_thread.h"
+#include "shared/source/utilities/spinlock.h"
 
-#include "csr_properties_flags.h"
+#include "pipe_control_args.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -38,12 +40,16 @@ class IndirectHeap;
 class InternalAllocationStorage;
 class LinearStream;
 class MemoryManager;
+class MultiGraphicsAllocation;
 class OsContext;
 class OSInterface;
 class ScratchSpaceController;
-struct HwPerfCounter;
-struct HwTimeStamps;
-struct TimestampPacketStorage;
+class HwPerfCounter;
+class HwTimeStamps;
+class TagAllocatorBase;
+
+template <typename TSize>
+class TimestampPackets;
 
 template <typename T1>
 class TagAllocator;
@@ -81,6 +87,7 @@ class CommandStreamReceiver {
     virtual void programHardwareContext(LinearStream &cmdStream) = 0;
     virtual size_t getCmdsSizeForHardwareContext() const = 0;
 
+    void makeResident(MultiGraphicsAllocation &gfxAllocation);
     MOCKABLE_VIRTUAL void makeResident(GraphicsAllocation &gfxAllocation);
     virtual void makeNonResident(GraphicsAllocation &gfxAllocation);
     MOCKABLE_VIRTUAL void makeSurfacePackNonResident(ResidencyContainer &allocationsForResidency);
@@ -109,6 +116,10 @@ class CommandStreamReceiver {
     GraphicsAllocation *getTagAllocation() const {
         return tagAllocation;
     }
+    MultiGraphicsAllocation *getTagsMultiAllocation() const {
+        return tagsMultiAllocation;
+    }
+    MultiGraphicsAllocation &createTagsMultiAllocation();
     MOCKABLE_VIRTUAL volatile uint32_t *getTagAddress() const { return tagAddress; }
     uint64_t getDebugPauseStateGPUAddress() const { return tagAllocation->getGpuAddress() + debugPauseStateAddressOffset; }
 
@@ -128,6 +139,10 @@ class CommandStreamReceiver {
     void overrideDispatchPolicy(DispatchMode overrideValue) { this->dispatchMode = overrideValue; }
 
     void setMediaVFEStateDirty(bool dirty) { mediaVfeStateDirty = dirty; }
+    bool getMediaVFEStateDirty() { return mediaVfeStateDirty; }
+
+    void setGSBAStateDirty(bool dirty) { GSBAStateDirty = dirty; }
+    bool getGSBAStateDirty() { return GSBAStateDirty; }
 
     void setRequiredScratchSizes(uint32_t newRequiredScratchSize, uint32_t newRequiredPrivateScratchSize);
     GraphicsAllocation *getScratchAllocation();
@@ -135,6 +150,7 @@ class CommandStreamReceiver {
     GraphicsAllocation *allocateDebugSurface(size_t size);
     GraphicsAllocation *getPreemptionAllocation() const { return preemptionAllocation; }
     GraphicsAllocation *getGlobalFenceAllocation() const { return globalFenceAllocation; }
+    GraphicsAllocation *getWorkPartitionAllocation() const { return workPartitionAllocation; }
 
     void requestStallingPipeControlOnNextFlush() { stallingPipeControlOnNextFlushRequired = true; }
     bool isStallingPipeControlOnNextFlushRequired() const { return stallingPipeControlOnNextFlushRequired; }
@@ -161,6 +177,7 @@ class CommandStreamReceiver {
     void setExperimentalCmdBuffer(std::unique_ptr<ExperimentalCommandBuffer> &&cmdBuffer);
 
     bool initializeTagAllocation();
+    MOCKABLE_VIRTUAL bool createWorkPartitionAllocation(const Device &device);
     MOCKABLE_VIRTUAL bool createGlobalFenceAllocation();
     MOCKABLE_VIRTUAL bool createPreemptionAllocation();
     MOCKABLE_VIRTUAL bool createPerDssBackedBuffer(Device &device);
@@ -169,6 +186,7 @@ class CommandStreamReceiver {
     bool peekTimestampPacketWriteEnabled() const { return timestampPacketWriteEnabled; }
 
     size_t defaultSshSize;
+    bool canUse4GbHeaps = true;
 
     AllocationsList &getTemporaryAllocations();
     AllocationsList &getAllocationsForReuse();
@@ -178,19 +196,25 @@ class CommandStreamReceiver {
     virtual void setupContext(OsContext &osContext) { this->osContext = &osContext; }
     OsContext &getOsContext() const { return *osContext; }
 
-    TagAllocator<HwTimeStamps> *getEventTsAllocator();
-    TagAllocator<HwPerfCounter> *getEventPerfCountAllocator(const uint32_t tagSize);
-    TagAllocator<TimestampPacketStorage> *getTimestampPacketAllocator();
+    TagAllocatorBase *getEventTsAllocator();
+    TagAllocatorBase *getEventPerfCountAllocator(const uint32_t tagSize);
+    virtual TagAllocatorBase *getTimestampPacketAllocator() = 0;
 
     virtual bool expectMemory(const void *gfxAddress, const void *srcAddress, size_t length, uint32_t compareOperation);
 
     virtual bool isMultiOsContextCapable() const = 0;
 
+    virtual MemoryCompressionState getMemoryCompressionState(bool auxTranslationRequired, const HardwareInfo &hwInfo) const = 0;
+
     void setLatestSentTaskCount(uint32_t latestSentTaskCount) {
         this->latestSentTaskCount = latestSentTaskCount;
     }
 
-    virtual uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled) = 0;
+    virtual uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) = 0;
+
+    virtual void flushTagUpdate() = 0;
+    virtual void flushNonKernelTask(GraphicsAllocation *eventAlloc, uint64_t immediateGpuAddress, uint64_t immediateData, PipeControlArgs &args, bool isWaitOnEvents, bool isStartOfDispatch, bool isEndOfDispatch) = 0;
+    virtual void updateTagFromWait() = 0;
 
     ScratchSpaceController *getScratchSpaceController() const {
         return scratchSpaceController.get();
@@ -217,9 +241,23 @@ class CommandStreamReceiver {
         return false;
     }
 
+    bool isStaticWorkPartitioningEnabled() const {
+        return staticWorkPartitioningEnabled;
+    }
+
+    uint64_t getWorkPartitionAllocationGpuAddress() const;
+
     bool isRcs() const;
 
     virtual void initializeDefaultsForInternalEngine(){};
+
+    virtual GraphicsAllocation *getClearColorAllocation() = 0;
+
+    virtual void postInitFlagsSetup() = 0;
+
+    bool isUsedNotifyEnableForPostSync() const {
+        return useNotifyEnableForPostSync;
+    }
 
   protected:
     void cleanupResources();
@@ -234,9 +272,9 @@ class CommandStreamReceiver {
     std::unique_ptr<InternalAllocationStorage> internalAllocationStorage;
     std::unique_ptr<KmdNotifyHelper> kmdNotifyHelper;
     std::unique_ptr<ScratchSpaceController> scratchSpaceController;
-    std::unique_ptr<TagAllocator<HwTimeStamps>> profilingTimeStampAllocator;
-    std::unique_ptr<TagAllocator<HwPerfCounter>> perfCounterAllocator;
-    std::unique_ptr<TagAllocator<TimestampPacketStorage>> timestampPacketAllocator;
+    std::unique_ptr<TagAllocatorBase> profilingTimeStampAllocator;
+    std::unique_ptr<TagAllocatorBase> perfCounterAllocator;
+    std::unique_ptr<TagAllocatorBase> timestampPacketAllocator;
     std::unique_ptr<Thread> userPauseConfirmation;
 
     ResidencyContainer residencyAllocations;
@@ -251,7 +289,8 @@ class CommandStreamReceiver {
     uint64_t totalMemoryUsed = 0u;
 
     volatile uint32_t *tagAddress = nullptr;
-    volatile DebugPauseState *debugPauseStateAddress = nullptr;
+    volatile DebugPauseState *debugPauseStateAddress;
+    SpinLock debugPauseStateLock;
     static void *asyncDebugBreakConfirmation(void *arg);
     std::function<void()> debugConfirmationFunction = []() { std::cin.get(); };
 
@@ -260,6 +299,10 @@ class CommandStreamReceiver {
     GraphicsAllocation *preemptionAllocation = nullptr;
     GraphicsAllocation *debugSurface = nullptr;
     GraphicsAllocation *perDssBackedBuffer = nullptr;
+    GraphicsAllocation *clearColorAllocation = nullptr;
+    GraphicsAllocation *workPartitionAllocation = nullptr;
+
+    MultiGraphicsAllocation *tagsMultiAllocation = nullptr;
 
     IndirectHeap *indirectHeap[IndirectHeap::NUM_TYPES];
     OsContext *osContext = nullptr;
@@ -285,6 +328,8 @@ class CommandStreamReceiver {
     uint32_t requiredScratchSize = 0;
     uint32_t requiredPrivateScratchSize = 0;
     uint32_t lastAdditionalKernelExecInfo = AdditionalKernelExecInfo::NotSet;
+    KernelExecutionType lastKernelExecutionType = KernelExecutionType::Default;
+    MemoryCompressionState lastMemoryCompressionState = MemoryCompressionState::NotApplicable;
 
     const uint32_t rootDeviceIndex;
     const DeviceBitfield deviceBitfield;
@@ -295,12 +340,15 @@ class CommandStreamReceiver {
     bool isPreambleSent = false;
     bool isStateSipSent = false;
     bool isEnginePrologueSent = false;
+    bool isPerDssBackedBufferSent = false;
     bool GSBAFor32BitProgrammed = false;
+    bool GSBAStateDirty = true;
     bool bindingTableBaseAddressRequired = false;
     bool mediaVfeStateDirty = true;
     bool lastVmeSubslicesConfig = false;
     bool stallingPipeControlOnNextFlushRequired = false;
     bool timestampPacketWriteEnabled = false;
+    bool staticWorkPartitioningEnabled = false;
     bool nTo1SubmissionModelEnabled = false;
     bool lastSpecialPipelineSelectMode = false;
     bool requiresInstructionCacheFlush = false;
@@ -311,6 +359,8 @@ class CommandStreamReceiver {
     bool useNewResourceImplicitFlush = false;
     bool newResources = false;
     bool useGpuIdleImplicitFlush = false;
+    bool lastSentUseGlobalAtomics = false;
+    bool useNotifyEnableForPostSync = false;
 };
 
 typedef CommandStreamReceiver *(*CommandStreamReceiverCreateFunc)(bool withAubDump,

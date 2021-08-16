@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,6 +9,12 @@
 #include "shared/source/command_stream/command_stream_receiver_hw.h"
 
 namespace NEO {
+
+template <typename GfxFamily>
+CommandStreamReceiver *createDeviceCommandStreamReceiver(bool withAubDump,
+                                                         ExecutionEnvironment &executionEnvironment,
+                                                         uint32_t rootDeviceIndex,
+                                                         const DeviceBitfield deviceBitfield);
 
 template <typename GfxFamily>
 class DeviceCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
@@ -25,6 +31,9 @@ class DeviceCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
     static CommandStreamReceiver *create(bool withAubDump,
                                          ExecutionEnvironment &executionEnvironment,
                                          uint32_t rootDeviceIndex,
-                                         const DeviceBitfield deviceBitfield);
+                                         const DeviceBitfield deviceBitfield) {
+        return createDeviceCommandStreamReceiver<GfxFamily>(withAubDump, executionEnvironment,
+                                                            rootDeviceIndex, deviceBitfield);
+    }
 };
 } // namespace NEO

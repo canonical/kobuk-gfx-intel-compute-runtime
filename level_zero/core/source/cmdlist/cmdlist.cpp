@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,6 +21,7 @@ CommandList::~CommandList() {
     removeHostPtrAllocations();
     printfFunctionContainer.clear();
 }
+
 void CommandList::storePrintfFunction(Kernel *kernel) {
     auto it = std::find(this->printfFunctionContainer.begin(), this->printfFunctionContainer.end(),
                         kernel);
@@ -55,13 +56,13 @@ NEO::GraphicsAllocation *CommandList::getAllocationFromHostPtrMap(const void *bu
     return nullptr;
 }
 
-NEO::GraphicsAllocation *CommandList::getHostPtrAlloc(const void *buffer, uint64_t bufferSize, size_t *offset) {
+NEO::GraphicsAllocation *CommandList::getHostPtrAlloc(const void *buffer, uint64_t bufferSize) {
     NEO::GraphicsAllocation *alloc = getAllocationFromHostPtrMap(buffer, bufferSize);
     if (alloc) {
-        *offset += ptrDiff(buffer, alloc->getUnderlyingBuffer());
         return alloc;
     }
     alloc = device->allocateMemoryFromHostPtr(buffer, bufferSize);
+    UNRECOVERABLE_IF(alloc == nullptr);
     hostPtrMap.insert(std::make_pair(buffer, alloc));
     return alloc;
 }
@@ -106,7 +107,9 @@ void CommandList::eraseResidencyContainerEntry(NEO::GraphicsAllocation *allocati
 }
 
 bool CommandList::isCopyOnly() const {
-    return NEO::EngineGroupType::Copy == engineGroupType;
+    const auto &hardwareInfo = device->getNEODevice()->getHardwareInfo();
+    auto &hwHelper = NEO::HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+    return hwHelper.isCopyOnlyEngineType(engineGroupType);
 }
 
 NEO::PreemptionMode CommandList::obtainFunctionPreemptionMode(Kernel *kernel) {

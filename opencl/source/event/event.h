@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -24,7 +24,7 @@
 
 namespace NEO {
 template <typename TagType>
-struct TagNode;
+class TagNode;
 class CommandQueue;
 class Context;
 class Device;
@@ -106,7 +106,7 @@ class Event : public BaseObject<_cl_event>, public IDNode<Event> {
 
     void setProfilingEnabled(bool profilingEnabled) { this->profilingEnabled = profilingEnabled; }
 
-    TagNode<HwTimeStamps> *getHwTimeStampNode();
+    TagNodeBase *getHwTimeStampNode();
 
     void addTimestampPacketNodes(const TimestampPacketContainer &inputTimestampPacketContainer);
     TimestampPacketContainer *getTimestampPacketNodes() const;
@@ -119,7 +119,7 @@ class Event : public BaseObject<_cl_event>, public IDNode<Event> {
         this->perfCountersEnabled = perfCountersEnabled;
     }
 
-    TagNode<HwPerfCounter> *getHwPerfCounterNode();
+    TagNodeBase *getHwPerfCounterNode();
 
     std::unique_ptr<FlushStampTracker> flushStamp;
     std::atomic<uint32_t> taskLevel;
@@ -222,6 +222,10 @@ class Event : public BaseObject<_cl_event>, public IDNode<Event> {
         return cmdQueue;
     }
 
+    const CommandQueue *getCommandQueue() const {
+        return cmdQueue;
+    }
+
     cl_command_type getCommandType() {
         return cmdType;
     }
@@ -298,6 +302,8 @@ class Event : public BaseObject<_cl_event>, public IDNode<Event> {
 
     static bool checkUserEventDependencies(cl_uint numEventsInWaitList, const cl_event *eventWaitList);
 
+    static void getBoundaryTimestampValues(TimestampPacketContainer *timestampContainer, uint64_t &globalStartTS, uint64_t &globalEndTS);
+
   protected:
     Event(Context *ctx, CommandQueue *cmdQueue, cl_command_type cmdType,
           uint32_t taskLevel, uint32_t taskCount);
@@ -366,8 +372,8 @@ class Event : public BaseObject<_cl_event>, public IDNode<Event> {
     uint64_t completeTimeStamp;
     uint32_t bcsTaskCount = 0;
     bool perfCountersEnabled;
-    TagNode<HwTimeStamps> *timeStampNode = nullptr;
-    TagNode<HwPerfCounter> *perfCounterNode = nullptr;
+    TagNodeBase *timeStampNode = nullptr;
+    TagNodeBase *perfCounterNode = nullptr;
     std::unique_ptr<TimestampPacketContainer> timestampPacketContainer;
     //number of events this event depends on
     std::atomic<int> parentCount;

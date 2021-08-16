@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -41,12 +41,12 @@ void CL_CALLBACK callback(cl_event event, cl_int status, void *data) {
     }
 }
 
-TEST_F(ScenarioTest, givenAsyncHandlerDisabledAndUserEventBlockingEnqueueAndOutputEventWithCallbackWhenUserEventIsSetCompleteThanCallbackIsExecuted) {
+TEST_F(ScenarioTest, givenAsyncHandlerDisabledAndUserEventBlockingEnqueueAndOutputEventWithCallbackWhenUserEventIsSetCompleteThenCallbackIsExecuted) {
     DebugManager.flags.EnableAsyncEventsHandler.set(false);
 
     cl_command_queue clCommandQ = nullptr;
     cl_queue_properties properties = 0;
-    cl_kernel clKernel = kernel;
+    cl_kernel clKernel = kernelInternals->mockMultiDeviceKernel;
     size_t offset[] = {0, 0, 0};
     size_t gws[] = {1, 1, 1};
 
@@ -81,12 +81,12 @@ TEST_F(ScenarioTest, givenAsyncHandlerDisabledAndUserEventBlockingEnqueueAndOutp
     clReleaseCommandQueue(clCommandQ);
 }
 
-TEST_F(ScenarioTest, givenAsyncHandlerEnabledAndUserEventBlockingEnqueueAndOutputEventWithCallbackWhenUserEventIsSetCompleteThanCallbackIsExecuted) {
+TEST_F(ScenarioTest, givenAsyncHandlerEnabledAndUserEventBlockingEnqueueAndOutputEventWithCallbackWhenUserEventIsSetCompleteThenCallbackIsExecuted) {
     DebugManager.flags.EnableAsyncEventsHandler.set(true);
 
     cl_command_queue clCommandQ = nullptr;
     cl_queue_properties properties = 0;
-    cl_kernel clKernel = kernel;
+    cl_kernel clKernel = kernelInternals->mockMultiDeviceKernel;
     size_t offset[] = {0, 0, 0};
     size_t gws[] = {1, 1, 1};
     cl_int retVal = CL_SUCCESS;

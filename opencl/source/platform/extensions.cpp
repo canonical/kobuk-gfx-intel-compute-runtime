@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,6 +21,7 @@ const char *deviceExtensionsList = "cl_khr_byte_addressable_store "
                                    "cl_khr_icd "
                                    "cl_khr_local_int32_base_atomics "
                                    "cl_khr_local_int32_extended_atomics "
+                                   "cl_intel_command_queue_families "
                                    "cl_intel_subgroups "
                                    "cl_intel_required_subgroup_size "
                                    "cl_intel_subgroups_short "
@@ -33,7 +34,15 @@ const char *deviceExtensionsList = "cl_khr_byte_addressable_store "
                                    "cl_intel_subgroups_char "
                                    "cl_intel_subgroups_long "
                                    "cl_khr_il_program "
-                                   "cl_intel_mem_force_host_memory ";
+                                   "cl_intel_mem_force_host_memory "
+                                   "cl_khr_subgroup_extended_types "
+                                   "cl_khr_subgroup_non_uniform_vote "
+                                   "cl_khr_subgroup_ballot "
+                                   "cl_khr_subgroup_non_uniform_arithmetic "
+                                   "cl_khr_subgroup_shuffle "
+                                   "cl_khr_subgroup_shuffle_relative "
+                                   "cl_khr_subgroup_clustered_reduce "
+                                   "cl_intel_device_attribute_query ";
 
 std::string getExtensionsList(const HardwareInfo &hwInfo) {
     std::string allExtensionsList;
@@ -46,7 +55,7 @@ std::string getExtensionsList(const HardwareInfo &hwInfo) {
         if (hwInfo.capabilityTable.supportsVme) {
             allExtensionsList += "cl_intel_spirv_device_side_avc_motion_estimation ";
         }
-        if (hwInfo.capabilityTable.supportsImages) {
+        if (hwInfo.capabilityTable.supportsMediaBlock) {
             allExtensionsList += "cl_intel_spirv_media_block_io ";
         }
         allExtensionsList += "cl_intel_spirv_subgroups ";
@@ -77,9 +86,6 @@ void getOpenclCFeaturesList(const HardwareInfo &hwInfo, OpenClCFeaturesContainer
     cl_name_version openClCFeature;
     openClCFeature.version = CL_MAKE_VERSION(3, 0, 0);
 
-    strcpy_s(openClCFeature.name, CL_NAME_VERSION_MAX_NAME_SIZE, "__opencl_c_atomic_order_acq_rel");
-    openclCFeatures.push_back(openClCFeature);
-
     strcpy_s(openClCFeature.name, CL_NAME_VERSION_MAX_NAME_SIZE, "__opencl_c_int64");
     openclCFeatures.push_back(openClCFeature);
 
@@ -89,9 +95,15 @@ void getOpenclCFeaturesList(const HardwareInfo &hwInfo, OpenClCFeaturesContainer
 
         strcpy_s(openClCFeature.name, CL_NAME_VERSION_MAX_NAME_SIZE, "__opencl_c_images");
         openclCFeatures.push_back(openClCFeature);
+
+        strcpy_s(openClCFeature.name, CL_NAME_VERSION_MAX_NAME_SIZE, "__opencl_c_read_write_images");
+        openclCFeatures.push_back(openClCFeature);
     }
 
     if (hwInfo.capabilityTable.supportsOcl21Features) {
+        strcpy_s(openClCFeature.name, CL_NAME_VERSION_MAX_NAME_SIZE, "__opencl_c_atomic_order_acq_rel");
+        openclCFeatures.push_back(openClCFeature);
+
         strcpy_s(openClCFeature.name, CL_NAME_VERSION_MAX_NAME_SIZE, "__opencl_c_atomic_order_seq_cst");
         openclCFeatures.push_back(openClCFeature);
 
@@ -105,9 +117,6 @@ void getOpenclCFeaturesList(const HardwareInfo &hwInfo, OpenClCFeaturesContainer
         openclCFeatures.push_back(openClCFeature);
 
         strcpy_s(openClCFeature.name, CL_NAME_VERSION_MAX_NAME_SIZE, "__opencl_c_program_scope_global_variables");
-        openclCFeatures.push_back(openClCFeature);
-
-        strcpy_s(openClCFeature.name, CL_NAME_VERSION_MAX_NAME_SIZE, "__opencl_c_read_write_images");
         openclCFeatures.push_back(openClCFeature);
 
         strcpy_s(openClCFeature.name, CL_NAME_VERSION_MAX_NAME_SIZE, "__opencl_c_work_group_collective_functions");
@@ -152,7 +161,6 @@ std::string convertEnabledExtensionsToCompilerInternalOptions(const char *enable
         extensionsList.append(extension);
         extensionsList.append(",");
     }
-    extensionsList.append("+cl_khr_3d_image_writes,");
     for (auto &feature : openclCFeatures) {
         extensionsList.append("+");
         extensionsList.append(feature.name);
@@ -163,18 +171,15 @@ std::string convertEnabledExtensionsToCompilerInternalOptions(const char *enable
     return extensionsList;
 }
 
-std::string convertEnabledOclCFeaturesToCompilerInternalOptions(OpenClCFeaturesContainer &openclCFeatures) {
-    UNRECOVERABLE_IF(openclCFeatures.empty());
-    std::string featuresList;
-    featuresList.reserve(500);
-    featuresList = " -cl-feature=";
-    for (auto &feature : openclCFeatures) {
-        featuresList.append("+");
-        featuresList.append(feature.name);
-        featuresList.append(",");
+std::string getOclVersionCompilerInternalOption(unsigned int oclVersion) {
+    switch (oclVersion) {
+    case 30:
+        return "-ocl-version=300 ";
+    case 21:
+        return "-ocl-version=210 ";
+    default:
+        return "-ocl-version=120 ";
     }
-    featuresList[featuresList.size() - 1] = ' ';
-    return featuresList;
 }
 
 } // namespace NEO

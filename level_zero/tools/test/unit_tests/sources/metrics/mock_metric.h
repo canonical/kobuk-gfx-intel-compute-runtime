@@ -1,11 +1,13 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include "test.h"
+
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 #include "level_zero/core/test/unit_tests/mock.h"
@@ -147,6 +149,8 @@ class MetricContextFixture : public ContextFixture {
   protected:
     void SetUp() override;
     void TearDown() override;
+    void openMetricsAdapter();
+    void openMetricsAdapterGroup();
 
   public:
     // Mocked objects.
@@ -158,6 +162,60 @@ class MetricContextFixture : public ContextFixture {
     MockMetricsDiscoveryApi mockMetricsDiscoveryApi = {};
 
     // Metrics discovery device
+    Mock<IAdapterGroup_1_9> adapterGroup;
+    Mock<IAdapter_1_9> adapter;
+    Mock<IMetricsDevice_1_5> metricsDevice;
+    MetricsDiscovery::TMetricsDeviceParams_1_2 metricsDeviceParams = {};
+};
+
+class MetricMultiDeviceFixture : public MultiDeviceFixture {
+
+  protected:
+    void SetUp() override;
+    void TearDown() override;
+    void openMetricsAdapter();
+    void openMetricsAdapterGroup();
+
+  public:
+    std::vector<L0::Device *> devices;
+
+    // Mocked objects.
+    std::unique_ptr<Mock<MetricEnumeration>> mockMetricEnumeration = nullptr;
+    std::unique_ptr<Mock<MetricsLibrary>> mockMetricsLibrary = nullptr;
+
+    // Mocked metrics library/discovery APIs.
+    MockMetricsLibraryApi mockMetricsLibraryApi = {};
+    MockMetricsDiscoveryApi mockMetricsDiscoveryApi = {};
+
+    // Metrics discovery device
+    Mock<IAdapterGroup_1_9> adapterGroup;
+    Mock<IAdapter_1_9> adapter;
+    Mock<IMetricsDevice_1_5> metricsDevice;
+    MetricsDiscovery::TMetricsDeviceParams_1_2 metricsDeviceParams = {};
+};
+
+class MetricMultiDeviceContextFixture : public MultiDeviceFixture {
+
+  protected:
+    void SetUp() override;
+    void TearDown() override;
+    void openMetricsAdapter();
+    void openMetricsAdapterGroup();
+
+  public:
+    std::vector<L0::Device *> devices;
+
+    // Mocked objects.
+    std::unique_ptr<Mock<MetricEnumeration>> mockMetricEnumeration = nullptr;
+    std::unique_ptr<Mock<MetricsLibrary>> mockMetricsLibrary = nullptr;
+
+    // Mocked metrics library/discovery APIs.
+    MockMetricsLibraryApi mockMetricsLibraryApi = {};
+    MockMetricsDiscoveryApi mockMetricsDiscoveryApi = {};
+
+    // Metrics discovery device
+    Mock<IAdapterGroup_1_9> adapterGroup;
+    Mock<IAdapter_1_9> adapter;
     Mock<IMetricsDevice_1_5> metricsDevice;
     MetricsDiscovery::TMetricsDeviceParams_1_2 metricsDeviceParams = {};
 };

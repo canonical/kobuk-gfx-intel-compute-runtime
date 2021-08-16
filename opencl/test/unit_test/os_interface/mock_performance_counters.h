@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,7 +8,7 @@
 #pragma once
 #include "shared/source/device/device.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
-#include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_device.h"
 
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
@@ -82,7 +82,7 @@ class MockMetricsLibrary : public MetricsLibrary {
     bool open() override;
 
     // Context create / destroy functions.
-    bool contextCreate              (const ClientType_1_0 &client, ClientData_1_0& clientData, ContextCreateData_1_0 &createData, ContextHandle_1_0 &handle) override;
+    bool contextCreate              (const ClientType_1_0 &client, ClientOptionsSubDeviceData_1_0 &subDevice, ClientOptionsSubDeviceIndexData_1_0 &subDeviceIndex, ClientOptionsSubDeviceCountData_1_0 &subDeviceCount, ClientData_1_0& clientData, ContextCreateData_1_0 &createData, ContextHandle_1_0 &handle) override;
     bool contextDelete              (const ContextHandle_1_0 &handle) override;
 
     // HwCounters functions.

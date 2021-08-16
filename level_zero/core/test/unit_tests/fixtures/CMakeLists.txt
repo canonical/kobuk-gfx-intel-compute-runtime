@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2020 Intel Corporation
+# Copyright (C) 2020-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -11,10 +11,11 @@ set(L0_FIXTURES_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/cmdlist_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/device_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/device_fixture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/host_pointer_manager_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/module_fixture.h
 )
 
-add_library(${TARGET_NAME} OBJECT ${L0_FIXTURES_SOURCES})
+add_library(${TARGET_NAME} OBJECT ${L0_FIXTURES_SOURCES} ${NEO_CORE_tests_compiler_mocks})
 
 target_include_directories(${TARGET_NAME} PRIVATE
                            $<TARGET_PROPERTY:gmock-gtest,INTERFACE_INCLUDE_DIRECTORIES>

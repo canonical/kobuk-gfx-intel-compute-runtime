@@ -1,17 +1,13 @@
 #
-# Copyright (C) 2019-2020 Intel Corporation
+# Copyright (C) 2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
 
 target_sources(${TARGET_NAME} PRIVATE
                ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
-               ${CMAKE_CURRENT_SOURCE_DIR}/command_container_fixture.h
-               ${CMAKE_CURRENT_SOURCE_DIR}/device_fixture.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/device_fixture.h
-               ${CMAKE_CURRENT_SOURCE_DIR}/direct_submission_fixture.h
-               ${CMAKE_CURRENT_SOURCE_DIR}/front_window_fixture.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/front_window_fixture.h
-               ${CMAKE_CURRENT_SOURCE_DIR}/preemption_fixture.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/preemption_fixture.h
+               ${CMAKE_CURRENT_SOURCE_DIR}/mock_aub_center_fixture.h
+               ${CMAKE_CURRENT_SOURCE_DIR}/templated_fixture_tests.cpp
 )
+
+add_subdirectories()

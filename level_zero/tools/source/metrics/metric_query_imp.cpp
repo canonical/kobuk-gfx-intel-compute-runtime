@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -29,6 +29,10 @@ MetricsLibrary::MetricsLibrary(MetricContext &metricContextInput)
 
 MetricsLibrary::~MetricsLibrary() {
     release();
+}
+
+ze_result_t MetricsLibrary::getInitializationState() {
+    return initializationState;
 }
 
 bool MetricsLibrary::isInitialized() {
@@ -109,13 +113,6 @@ bool MetricsLibrary::destroyMetricQuery(QueryHandle_1_0 &query) {
     // Unregister query.
     if (iter != queries.end()) {
         queries.erase(iter);
-    }
-
-    // Unload metrics library if there are no active queries.
-    // It will allow to open metric streamer. Query and streamer cannot be used
-    // simultaneously since they use the same exclusive resource (oa buffer).
-    if (queries.size() == 0) {
-        release();
     }
 
     return result;
@@ -200,12 +197,59 @@ bool MetricsLibrary::load() {
     return true;
 }
 
+void MetricsLibrary::getSubDeviceClientOptions(
+    NEO::Device &neoDevice,
+    ClientOptionsData_1_0 &subDevice,
+    ClientOptionsData_1_0 &subDeviceIndex,
+    ClientOptionsData_1_0 &subDeviceCount) {
+
+    if (!neoDevice.isSubDevice()) {
+
+        // Root device.
+        subDevice.Type = ClientOptionsType::SubDevice;
+        subDevice.SubDevice.Enabled = false;
+
+        subDeviceIndex.Type = ClientOptionsType::SubDeviceIndex;
+        subDeviceIndex.SubDeviceIndex.Index = 0;
+
+        subDeviceCount.Type = ClientOptionsType::SubDeviceCount;
+        subDeviceCount.SubDeviceCount.Count = neoDevice.getNumAvailableDevices();
+
+    } else {
+
+        // Sub device.
+        subDevice.Type = ClientOptionsType::SubDevice;
+        subDevice.SubDevice.Enabled = true;
+
+        subDeviceIndex.Type = ClientOptionsType::SubDeviceIndex;
+        subDeviceIndex.SubDeviceIndex.Index = static_cast<NEO::SubDevice *>(&neoDevice)->getSubDeviceIndex();
+
+        subDeviceCount.Type = ClientOptionsType::SubDeviceCount;
+        subDeviceCount.SubDeviceCount.Count = neoDevice.getRootDevice()->getNumAvailableDevices();
+    }
+}
+
 bool MetricsLibrary::createContext() {
+
     auto &device = metricContext.getDevice();
+    bool status = true;
+
+    if (device.isMultiDeviceCapable()) {
+        const auto &deviceImp = *static_cast<DeviceImp *>(&device);
+        for (auto subDevice : deviceImp.subDevices) {
+            status &= createContextForDevice(*subDevice);
+        }
+    } else {
+        status = createContextForDevice(device);
+    }
+    return status;
+}
+
+bool MetricsLibrary::createContextForDevice(Device &device) {
     const auto &hwHelper = device.getHwHelper();
     const auto &asyncComputeEngines = hwHelper.getGpgpuEngineInstances(device.getHwInfo());
     ContextCreateData_1_0 createData = {};
-    ClientOptionsData_1_0 clientOptions[2] = {};
+    ClientOptionsData_1_0 clientOptions[5] = {};
     ClientData_1_0 clientData = {};
     ClientType_1_0 clientType = {};
     ClientDataLinuxAdapter_1_0 adapter = {};
@@ -232,6 +276,9 @@ bool MetricsLibrary::createContext() {
 
     clientOptions[1].Type = ClientOptionsType::Tbs;
     clientOptions[1].Tbs.Enabled = metricContext.getMetricStreamer() != nullptr;
+
+    // Sub device client options #2
+    getSubDeviceClientOptions(*device.getNEODevice(), clientOptions[2], clientOptions[3], clientOptions[4]);
 
     clientData.Linux.Adapter = &adapter;
     clientData.ClientOptions = clientOptions;

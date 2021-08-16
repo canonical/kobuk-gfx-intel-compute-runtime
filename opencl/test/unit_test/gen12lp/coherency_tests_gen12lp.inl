@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,9 +9,9 @@
 #include "shared/source/gen12lp/helpers_gen12lp.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/ptr_math.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
-#include "shared/test/unit_test/helpers/dispatch_flags_helper.h"
-#include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
+#include "shared/test/common/helpers/dispatch_flags_helper.h"
+#include "shared/test/common/mocks/mock_device.h"
 
 #include "test.h"
 
@@ -47,7 +47,7 @@ struct Gen12LpCoherencyRequirements : public ::testing::Test {
         device->resetCommandStreamReceiver(csr);
         AllocationProperties properties(device->getRootDeviceIndex(), false, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, {});
 
-        alloc = device->getMemoryManager()->createGraphicsAllocationFromSharedHandle((osHandle)123, properties, false);
+        alloc = device->getMemoryManager()->createGraphicsAllocationFromSharedHandle((osHandle)123, properties, false, false);
     }
 
     void TearDown() override {
@@ -60,7 +60,7 @@ struct Gen12LpCoherencyRequirements : public ::testing::Test {
     GraphicsAllocation *alloc = nullptr;
 };
 
-GEN12LPTEST_F(Gen12LpCoherencyRequirements, coherencyCmdSizeWithoutSharedHandles) {
+GEN12LPTEST_F(Gen12LpCoherencyRequirements, GivenNoSharedHandlesWhenGettingCmdSizeThenSizeIsCorrect) {
     auto cmdsSize = sizeof(STATE_COMPUTE_MODE);
     auto &hwHelper = HwHelper::get(device->getHardwareInfo().platform.eRenderCoreFamily);
     if (hwHelper.is3DPipelineSelectWARequired(device->getHardwareInfo())) {
@@ -87,7 +87,7 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, coherencyCmdSizeWithoutSharedHandles
     EXPECT_EQ(cmdsSize, retSize);
 }
 
-GEN12LPTEST_F(Gen12LpCoherencyRequirements, coherencyCmdSizeWithSharedHandles) {
+GEN12LPTEST_F(Gen12LpCoherencyRequirements, GivenSharedHandlesWhenGettingCmdSizeThenSizeIsCorrect) {
     auto cmdsSize = sizeof(STATE_COMPUTE_MODE) + sizeof(PIPE_CONTROL);
     auto &hwHelper = HwHelper::get(device->getHardwareInfo().platform.eRenderCoreFamily);
     if (hwHelper.is3DPipelineSelectWARequired(device->getHardwareInfo())) {
@@ -114,7 +114,7 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, coherencyCmdSizeWithSharedHandles) {
     EXPECT_EQ(cmdsSize, retSize);
 }
 
-GEN12LPTEST_F(Gen12LpCoherencyRequirements, coherencyCmdValuesWithoutSharedHandles) {
+GEN12LPTEST_F(Gen12LpCoherencyRequirements, GivenNoSharedHandlesThenCoherencyCmdValuesAreCorrect) {
     auto cmdsSize = sizeof(STATE_COMPUTE_MODE);
     auto cmdsSizeWABeginOffset = 0;
     auto &hwHelper = HwHelper::get(device->getHardwareInfo().platform.eRenderCoreFamily);
@@ -136,7 +136,7 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, coherencyCmdValuesWithoutSharedHandl
     expectedScmCmd.setMaskBits(FamilyType::stateComputeModeForceNonCoherentMask);
 
     overrideCoherencyRequest(true, false, false);
-    csr->programComputeMode(stream, flags);
+    csr->programComputeMode(stream, flags, *defaultHwInfo);
     EXPECT_EQ(cmdsSize, stream.getUsed());
 
     auto scmCmd = reinterpret_cast<char *>(stream.getCpuBase());
@@ -145,7 +145,7 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, coherencyCmdValuesWithoutSharedHandl
     auto startOffset = stream.getUsed();
 
     overrideCoherencyRequest(true, true, false);
-    csr->programComputeMode(stream, flags);
+    csr->programComputeMode(stream, flags, *defaultHwInfo);
     EXPECT_EQ(cmdsSize * 2, stream.getUsed());
 
     expectedScmCmd.setForceNonCoherent(STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_DISABLED);
@@ -154,7 +154,7 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, coherencyCmdValuesWithoutSharedHandl
     EXPECT_TRUE(memcmp(&expectedScmCmd, scmCmd + cmdsSizeWABeginOffset, sizeof(STATE_COMPUTE_MODE)) == 0);
 }
 
-GEN12LPTEST_F(Gen12LpCoherencyRequirements, coherencyCmdValuesWithSharedHandles) {
+GEN12LPTEST_F(Gen12LpCoherencyRequirements, GivenSharedHandlesThenCoherencyCmdValuesAreCorrect) {
     auto cmdsSize = sizeof(STATE_COMPUTE_MODE) + sizeof(PIPE_CONTROL);
     auto cmdsSizeWABeginOffset = 0;
     auto &hwHelper = HwHelper::get(device->getHardwareInfo().platform.eRenderCoreFamily);
@@ -178,7 +178,7 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, coherencyCmdValuesWithSharedHandles)
     auto expectedPcCmd = FamilyType::cmdInitPipeControl;
 
     overrideCoherencyRequest(true, false, true);
-    csr->programComputeMode(stream, flags);
+    csr->programComputeMode(stream, flags, *defaultHwInfo);
     EXPECT_EQ(cmdsSize, stream.getUsed());
 
     auto scmCmd = reinterpret_cast<char *>(stream.getCpuBase());
@@ -190,7 +190,7 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, coherencyCmdValuesWithSharedHandles)
     auto startOffset = stream.getUsed();
 
     overrideCoherencyRequest(true, true, true);
-    csr->programComputeMode(stream, flags);
+    csr->programComputeMode(stream, flags, *defaultHwInfo);
     EXPECT_EQ(cmdsSize * 2, stream.getUsed());
 
     expectedScmCmd.setForceNonCoherent(STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_DISABLED);

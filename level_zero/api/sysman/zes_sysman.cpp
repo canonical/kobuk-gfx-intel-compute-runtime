@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -388,7 +388,7 @@ zesFirmwareFlash(
     zes_firmware_handle_t hFirmware,
     void *pImage,
     uint32_t size) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return L0::Firmware::fromHandle(hFirmware)->firmwareFlash(pImage, size);
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
@@ -648,7 +648,7 @@ zesRasGetState(
     zes_ras_handle_t hRas,
     ze_bool_t clear,
     zes_ras_state_t *pState) {
-    return L0::Ras::fromHandle(hRas)->rasGetState(pState);
+    return L0::Ras::fromHandle(hRas)->rasGetState(pState, clear);
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
@@ -670,18 +670,29 @@ zesDriverEventListen(
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
+zesDriverEventListenEx(
+    ze_driver_handle_t hDriver,
+    uint64_t timeout,
+    uint32_t count,
+    zes_device_handle_t *phDevices,
+    uint32_t *pNumDeviceEvents,
+    zes_event_type_flags_t *pEvents) {
+    return L0::DriverHandle::fromHandle(hDriver)->sysmanEventsListenEx(timeout, count, phDevices, pNumDeviceEvents, pEvents);
+}
+
+ZE_APIEXPORT ze_result_t ZE_APICALL
 zesDeviceEnumDiagnosticTestSuites(
     zes_device_handle_t hDevice,
     uint32_t *pCount,
     zes_diag_handle_t *phDiagnostics) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return L0::SysmanDevice::fromHandle(hDevice)->diagnosticsGet(pCount, phDiagnostics);
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
 zesDiagnosticsGetProperties(
     zes_diag_handle_t hDiagnostics,
     zes_diag_properties_t *pProperties) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return L0::Diagnostics::fromHandle(hDiagnostics)->diagnosticsGetProperties(pProperties);
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
@@ -689,7 +700,7 @@ zesDiagnosticsGetTests(
     zes_diag_handle_t hDiagnostics,
     uint32_t *pCount,
     zes_diag_test_t *pTests) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return L0::Diagnostics::fromHandle(hDiagnostics)->diagnosticsGetTests(pCount, pTests);
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
@@ -698,7 +709,7 @@ zesDiagnosticsRunTests(
     uint32_t start,
     uint32_t end,
     zes_diag_result_t *pResult) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return L0::Diagnostics::fromHandle(hDiagnostics)->diagnosticsRunTests(start, end, pResult);
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
@@ -706,26 +717,26 @@ zesDeviceEnumPerformanceFactorDomains(
     zes_device_handle_t hDevice,
     uint32_t *pCount,
     zes_perf_handle_t *phPerf) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return L0::SysmanDevice::fromHandle(hDevice)->performanceGet(pCount, phPerf);
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
 zesPerformanceFactorGetProperties(
     zes_perf_handle_t hPerf,
     zes_perf_properties_t *pProperties) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return L0::Performance::fromHandle(hPerf)->performanceGetProperties(pProperties);
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
 zesPerformanceFactorGetConfig(
     zes_perf_handle_t hPerf,
     double *pFactor) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return L0::Performance::fromHandle(hPerf)->performanceGetConfig(pFactor);
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
 zesPerformanceFactorSetConfig(
     zes_perf_handle_t hPerf,
     double factor) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return L0::Performance::fromHandle(hPerf)->performanceSetConfig(factor);
 }

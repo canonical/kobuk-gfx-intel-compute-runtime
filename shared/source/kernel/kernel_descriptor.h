@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -26,7 +26,12 @@ namespace NEO {
 using StringMap = std::unordered_map<uint32_t, std::string>;
 using InstructionsSegmentOffset = uint16_t;
 
-struct KernelDescriptor final {
+struct ExtendedInfoBase {
+    virtual ~ExtendedInfoBase() = default;
+    virtual bool specialPipelineSelectModeRequired() const { return false; }
+};
+
+struct KernelDescriptor {
     enum AddressingMode : uint8_t {
         AddrNone,
         Stateless,
@@ -37,7 +42,8 @@ struct KernelDescriptor final {
     };
 
     KernelDescriptor() = default;
-    ~KernelDescriptor() = default;
+    virtual ~KernelDescriptor() = default;
+    virtual bool hasRTCalls() const;
 
     struct KernelAttributes {
         KernelAttributes() { flags.packed = 0U; }
@@ -46,12 +52,16 @@ struct KernelDescriptor final {
         uint32_t perThreadScratchSize[2] = {0U, 0U};
         uint32_t perHwThreadPrivateMemorySize = 0U;
         uint32_t perThreadSystemThreadSurfaceSize = 0U;
-        uint32_t hasBarriers = 0u;
         uint16_t requiredWorkgroupSize[3] = {0U, 0U, 0U};
         uint16_t crossThreadDataSize = 0U;
         uint16_t perThreadDataSize = 0U;
         uint16_t numArgsToPatch = 0U;
         uint16_t numGrfRequired = 0U;
+        uint8_t barrierCount = 0u;
+        bool hasNonKernelArgLoad = true;
+        bool hasNonKernelArgStore = true;
+        bool hasNonKernelArgAtomic = true;
+
         AddressingMode bufferAddressingMode = BindfulAndStateless;
         AddressingMode imageAddressingMode = Bindful;
         AddressingMode samplerAddressingMode = Bindful;
@@ -62,15 +72,20 @@ struct KernelDescriptor final {
         uint8_t gpuPointerSize = 0;
         uint8_t simdSize = 8;
         uint8_t numLocalIdChannels = 3;
+        uint8_t localId[3] = {0U, 0U, 0U};
 
         bool supportsBuffersBiggerThan4Gb() const {
             return Stateless == bufferAddressingMode;
         }
 
+        bool usesBarriers() const {
+            return 0 != barrierCount;
+        }
+
         union {
             struct {
+                bool usesStringMapForPrintf : 1;
                 bool usesPrintf : 1;
-                bool usesBarriers : 1;
                 bool usesFencesForReadWriteImages : 1;
                 bool usesFlattenedLocalIds;
                 bool usesPrivateMemory : 1;
@@ -166,10 +181,12 @@ struct KernelDescriptor final {
 
     struct {
         std::unique_ptr<DebugData> debugData;
+        std::unique_ptr<uint8_t[]> relocatedDebugData;
         const void *igcInfoForGtpin = nullptr;
     } external;
 
     std::vector<uint8_t> generatedHeaps;
+    std::unique_ptr<ExtendedInfoBase> extendedInfo;
 };
 
 } // namespace NEO

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,6 +11,14 @@
 
 namespace L0 {
 namespace ult {
+
+inline static int mockAccessFailure(const char *pathname, int mode) {
+    return -1;
+}
+
+inline static int mockAccessSuccess(const char *pathname, int mode) {
+    return 0;
+}
 
 using MockDeviceSysmanGetTest = Test<DeviceFixture>;
 TEST_F(MockDeviceSysmanGetTest, GivenValidSysmanHandleSetInDeviceStructWhenGetThisSysmanHandleThenHandlesShouldBeSimilar) {
@@ -28,7 +36,7 @@ TEST_F(SysmanDeviceFixture, GivenValidDeviceHandleInSysmanInitThenValidSysmanHan
 }
 
 TEST_F(SysmanDeviceFixture, GivenSetValidDrmHandleForDeviceWhenDoingOsSysmanDeviceInitThenSameDrmHandleIsRetrieved) {
-    EXPECT_EQ(&pLinuxSysmanImp->getDrm(), device->getOsInterface().get()->getDrm());
+    EXPECT_EQ(&pLinuxSysmanImp->getDrm(), device->getOsInterface().getDriverModel()->as<Drm>());
 }
 
 TEST_F(SysmanDeviceFixture, GivenCreateFsAccessHandleWhenCallinggetFsAccessThenCreatedFsAccessHandleWillBeRetrieved) {
@@ -39,6 +47,26 @@ TEST_F(SysmanDeviceFixture, GivenCreateFsAccessHandleWhenCallinggetFsAccessThenC
     }
     pLinuxSysmanImp->pFsAccess = FsAccess::create();
     EXPECT_EQ(&pLinuxSysmanImp->getFsAccess(), pLinuxSysmanImp->pFsAccess);
+}
+
+TEST_F(SysmanDeviceFixture, GivenPublicFsAccessClassWhenCallingDirectoryExistsWithValidAndInvalidPathThenSuccessAndFailureAreReturnedRespectively) {
+    PublicFsAccess *tempFsAccess = new PublicFsAccess();
+    tempFsAccess->accessSyscall = mockAccessSuccess;
+    char cwd[PATH_MAX];
+    std::string path = getcwd(cwd, PATH_MAX);
+    EXPECT_TRUE(tempFsAccess->directoryExists(path));
+    tempFsAccess->accessSyscall = mockAccessFailure;
+    path = "invalidDiretory";
+    EXPECT_FALSE(tempFsAccess->directoryExists(path));
+    delete tempFsAccess;
+}
+
+TEST_F(SysmanDeviceFixture, GivenPublicSysfsAccessClassWhenCallingDirectoryExistsWithInvalidPathThenFalseIsRetured) {
+    PublicFsAccess *tempSysfsAccess = new PublicFsAccess();
+    tempSysfsAccess->accessSyscall = mockAccessFailure;
+    std::string path = "invalidDiretory";
+    EXPECT_FALSE(tempSysfsAccess->directoryExists(path));
+    delete tempSysfsAccess;
 }
 
 TEST_F(SysmanDeviceFixture, GivenValidPathnameWhenCallingFsAccessExistsThenSuccessIsReturned) {
@@ -88,17 +116,7 @@ TEST_F(SysmanDeviceFixture, GivenInvalidPidWhenCallingProcfsAccessIsAliveThenErr
     EXPECT_FALSE(ProcfsAccess.isAlive(reinterpret_cast<::pid_t>(-1)));
 }
 
-TEST_F(SysmanDeviceFixture, GivenPmtHandleWhenCallinggetPlatformMonitoringTechAccessThenCreatedPmtHandleWillBeRetrieved) {
-    if (pLinuxSysmanImp->pPmt != nullptr) {
-        //delete previously allocated pPmt
-        delete pLinuxSysmanImp->pPmt;
-        pLinuxSysmanImp->pPmt = nullptr;
-    }
-    pLinuxSysmanImp->pPmt = new PlatformMonitoringTech();
-    EXPECT_EQ(&pLinuxSysmanImp->getPlatformMonitoringTechAccess(), pLinuxSysmanImp->pPmt);
-}
-
-TEST_F(SysmanDeviceFixture, GivenValidDeviceHandleVerifyThatSameHandleIsRetrievedFromOsSpecificCode) {
+TEST_F(SysmanDeviceFixture, GivenValidDeviceHandleThenSameHandleIsRetrievedFromOsSpecificCode) {
     EXPECT_EQ(pLinuxSysmanImp->getDeviceHandle(), device);
 }
 
@@ -112,6 +130,18 @@ TEST_F(SysmanDeviceFixture, GivenPmuInterfaceHandleWhenCallinggetPmuInterfaceThe
     EXPECT_EQ(pLinuxSysmanImp->getPmuInterface(), pLinuxSysmanImp->pPmuInterface);
 }
 
+TEST_F(SysmanDeviceFixture, GivenValidPciPathWhileGettingRootPciPortThenReturnedPathIs2LevelUpThenTheCurrentPath) {
+    const std::string mockBdf = "0000:00:02.0";
+    const std::string mockRealPath = "/sys/devices/pci0000:00/0000:00:01.0/0000:01:00.0/0000:02:01.0/" + mockBdf;
+    const std::string mockRealPath2LevelsUp = "/sys/devices/pci0000:00/0000:00:01.0/0000:01:00.0";
+
+    std::string pciRootPort1 = pLinuxSysmanImp->getPciRootPortDirectoryPath(mockRealPath);
+    EXPECT_EQ(pciRootPort1, mockRealPath2LevelsUp);
+
+    std::string pciRootPort2 = pLinuxSysmanImp->getPciRootPortDirectoryPath("device");
+    EXPECT_EQ(pciRootPort2, "device");
+}
+
 TEST_F(SysmanMultiDeviceFixture, GivenValidDeviceHandleHavingSubdevicesWhenValidatingSysmanHandlesForSubdevicesThenSysmanHandleForSubdeviceWillBeSameAsSysmanHandleForDevice) {
     uint32_t count = 0;
     EXPECT_EQ(ZE_RESULT_SUCCESS, device->getSubDevices(&count, nullptr));
@@ -120,6 +150,16 @@ TEST_F(SysmanMultiDeviceFixture, GivenValidDeviceHandleHavingSubdevicesWhenValid
     for (auto subDeviceHandle : subDeviceHandles) {
         L0::DeviceImp *subDeviceHandleImp = static_cast<DeviceImp *>(Device::fromHandle(subDeviceHandle));
         EXPECT_EQ(subDeviceHandleImp->getSysmanHandle(), device->getSysmanHandle());
+    }
+}
+
+TEST_F(SysmanMultiDeviceFixture, GivenValidEffectiveUserIdCheckWhetherPermissionsReturnedByIsRootUserAreCorrect) {
+    int euid = geteuid();
+    auto pFsAccess = pLinuxSysmanImp->getFsAccess();
+    if (euid == 0) {
+        EXPECT_EQ(true, pFsAccess.isRootUser());
+    } else {
+        EXPECT_EQ(false, pFsAccess.isRootUser());
     }
 }
 

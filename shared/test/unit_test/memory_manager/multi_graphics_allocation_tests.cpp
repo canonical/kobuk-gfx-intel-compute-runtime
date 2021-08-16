@@ -1,24 +1,23 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/helpers/aligned_memory.h"
+#include "shared/source/memory_manager/migration_sync_data.h"
 #include "shared/source/memory_manager/multi_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_migration_sync_data.h"
+#include "shared/test/common/mocks/mock_multi_graphics_allocation.h"
+#include "shared/test/common/mocks/ult_device_factory.h"
 
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 
 #include "gtest/gtest.h"
 
 using namespace NEO;
-
-struct MockMultiGraphicsAllocation : public MultiGraphicsAllocation {
-    using MultiGraphicsAllocation::graphicsAllocations;
-    using MultiGraphicsAllocation::lastUsedRootDeviceIndex;
-    using MultiGraphicsAllocation::MultiGraphicsAllocation;
-};
 
 TEST(MultiGraphicsAllocationTest, whenCreatingMultiGraphicsAllocationThenTheAllocationIsObtainableAsADefault) {
     GraphicsAllocation graphicsAllocation(1, // rootDeviceIndex
@@ -106,71 +105,217 @@ TEST(MultiGraphicsAllocationTest, givenMultiGraphicsAllocationWhenRemovingGraphi
     EXPECT_EQ(nullptr, multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex));
 }
 
-TEST(MultiGraphicsAllocationTest, givenMultiGraphicsAllocationWhenEnsureMemoryOnDeviceIsCalledThenDataIsProperlyTransferred) {
-    constexpr auto bufferSize = 4u;
+struct MultiGraphicsAllocationTests : ::testing::Test {
 
-    uint8_t hostBuffer[bufferSize] = {1u, 1u, 1u, 1u};
-    uint8_t refBuffer[bufferSize] = {3u, 3u, 3u, 3u};
-
-    GraphicsAllocation graphicsAllocation1(1u, GraphicsAllocation::AllocationType::BUFFER, hostBuffer, bufferSize, 0, MemoryPool::LocalMemory, 0);
-    GraphicsAllocation graphicsAllocation2(2u, GraphicsAllocation::AllocationType::BUFFER, refBuffer, bufferSize, 0, MemoryPool::LocalMemory, 0);
-
-    MockMultiGraphicsAllocation multiGraphicsAllocation(2u);
-    multiGraphicsAllocation.addAllocation(&graphicsAllocation1);
-    multiGraphicsAllocation.addAllocation(&graphicsAllocation2);
-
-    MockExecutionEnvironment mockExecutionEnvironment(defaultHwInfo.get());
-    MockMemoryManager mockMemoryManager(mockExecutionEnvironment);
-
-    multiGraphicsAllocation.lastUsedRootDeviceIndex = 1u;
-    multiGraphicsAllocation.ensureMemoryOnDevice(mockMemoryManager, 2u);
-
-    auto underlyingBuffer1 = multiGraphicsAllocation.getGraphicsAllocation(1u)->getUnderlyingBuffer();
-    auto ptrUnderlyingBuffer1 = static_cast<uint8_t *>(underlyingBuffer1);
-
-    auto underlyingBuffer2 = multiGraphicsAllocation.getGraphicsAllocation(2u)->getUnderlyingBuffer();
-    auto ptrUnderlyingBuffer2 = static_cast<uint8_t *>(underlyingBuffer2);
-
-    for (auto i = 0u; i < bufferSize; i++) {
-        EXPECT_EQ(ptrUnderlyingBuffer1[i], ptrUnderlyingBuffer2[i]);
+    void SetUp() override {
+        memoryManager = deviceFactory.rootDevices[0]->getMemoryManager();
     }
+    void TearDown() override {
+        for (auto &rootDeviceIndex : rootDeviceIndices) {
+            memoryManager->freeGraphicsMemory(multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex));
+        }
+    }
+
+    UltDeviceFactory deviceFactory{2, 0};
+    MockMultiGraphicsAllocation multiGraphicsAllocation{1};
+    std::vector<uint32_t> rootDeviceIndices{{0u, 1u}};
+    MemoryManager *memoryManager = nullptr;
+};
+
+TEST_F(MultiGraphicsAllocationTests, whenCreatingMultiGraphicsAllocationWithSharedStorageThenMigrationIsNotRequired) {
+
+    AllocationProperties allocationProperties{0u,
+                                              true, //allocateMemory
+                                              MemoryConstants::pageSize,
+                                              GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY,
+                                              false, //multiOsContextCapable
+                                              false, //isMultiStorageAllocationParam
+                                              systemMemoryBitfield};
+
+    auto ptr = memoryManager->createMultiGraphicsAllocationInSystemMemoryPool(rootDeviceIndices, allocationProperties, multiGraphicsAllocation);
+    EXPECT_NE(nullptr, ptr);
+
+    EXPECT_EQ(2u, multiGraphicsAllocation.graphicsAllocations.size());
+
+    EXPECT_NE(nullptr, multiGraphicsAllocation.getGraphicsAllocation(0)->getUnderlyingBuffer());
+    EXPECT_EQ(multiGraphicsAllocation.getGraphicsAllocation(0)->getUnderlyingBuffer(), multiGraphicsAllocation.getGraphicsAllocation(1)->getUnderlyingBuffer());
+
+    EXPECT_FALSE(multiGraphicsAllocation.requiresMigrations());
 }
 
-TEST(MultiGraphicsAllocationTest, givenMultiGraphicsAllocationWhenEnsureMemoryOnDeviceIsCalledThenLockAndUnlockAreProperlyCalled) {
-    constexpr auto bufferSize = 4u;
+TEST_F(MultiGraphicsAllocationTests, whenCreatingMultiGraphicsAllocationWithExistingSystemMemoryThenMigrationIsNotRequired) {
 
-    uint8_t hostBuffer[bufferSize] = {1u, 1u, 1u, 1u};
-    uint8_t refBuffer[bufferSize] = {3u, 3u, 3u, 3u};
+    uint8_t hostPtr[MemoryConstants::pageSize]{};
 
-    MemoryAllocation allocation1(1u, GraphicsAllocation::AllocationType::BUFFER, hostBuffer, bufferSize, 0, MemoryPool::System4KBPages, 0);
-    MemoryAllocation allocation2(2u, GraphicsAllocation::AllocationType::BUFFER, refBuffer, bufferSize, 0, MemoryPool::System4KBPages, 0);
+    AllocationProperties allocationProperties{0u,
+                                              false, //allocateMemory
+                                              MemoryConstants::pageSize,
+                                              GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY,
+                                              false, //multiOsContextCapable
+                                              false, //isMultiStorageAllocationParam
+                                              systemMemoryBitfield};
 
-    MockMultiGraphicsAllocation multiGraphicsAllocation(2u);
-    multiGraphicsAllocation.addAllocation(&allocation1);
-    multiGraphicsAllocation.addAllocation(&allocation2);
+    multiGraphicsAllocation.addAllocation(memoryManager->allocateGraphicsMemoryWithProperties(allocationProperties, hostPtr));
+    EXPECT_FALSE(multiGraphicsAllocation.requiresMigrations());
 
-    MockExecutionEnvironment mockExecutionEnvironment(defaultHwInfo.get());
-    MockMemoryManager mockMemoryManager(mockExecutionEnvironment);
+    allocationProperties.rootDeviceIndex = 1u;
+    multiGraphicsAllocation.addAllocation(memoryManager->allocateGraphicsMemoryWithProperties(allocationProperties, hostPtr));
 
-    multiGraphicsAllocation.ensureMemoryOnDevice(mockMemoryManager, 1u);
-    EXPECT_EQ(mockMemoryManager.lockResourceCalled, 0u);
-    EXPECT_EQ(mockMemoryManager.unlockResourceCalled, 0u);
+    EXPECT_FALSE(multiGraphicsAllocation.requiresMigrations());
 
-    multiGraphicsAllocation.ensureMemoryOnDevice(mockMemoryManager, 1u);
-    EXPECT_EQ(mockMemoryManager.lockResourceCalled, 0u);
-    EXPECT_EQ(mockMemoryManager.unlockResourceCalled, 0u);
+    multiGraphicsAllocation.setMultiStorage(false);
+    EXPECT_FALSE(multiGraphicsAllocation.requiresMigrations());
+}
 
-    multiGraphicsAllocation.ensureMemoryOnDevice(mockMemoryManager, 2u);
-    EXPECT_EQ(mockMemoryManager.lockResourceCalled, 0u);
-    EXPECT_EQ(mockMemoryManager.unlockResourceCalled, 0u);
+TEST_F(MultiGraphicsAllocationTests, whenCreatingMultiGraphicsAllocationWithSeparatedStorageThenMigrationIsRequired) {
+    AllocationProperties allocationProperties{0u,
+                                              true, //allocateMemory
+                                              MemoryConstants::pageSize,
+                                              GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY,
+                                              false, //multiOsContextCapable
+                                              false, //isMultiStorageAllocationParam
+                                              systemMemoryBitfield};
 
-    multiGraphicsAllocation.ensureMemoryOnDevice(mockMemoryManager, 1u);
-    EXPECT_EQ(mockMemoryManager.lockResourceCalled, 0u);
-    EXPECT_EQ(mockMemoryManager.unlockResourceCalled, 0u);
+    multiGraphicsAllocation.addAllocation(memoryManager->allocateGraphicsMemoryWithProperties(allocationProperties));
+    EXPECT_FALSE(multiGraphicsAllocation.requiresMigrations());
 
-    (&allocation1)->overrideMemoryPool(MemoryPool::LocalMemory);
-    (&allocation2)->overrideMemoryPool(MemoryPool::LocalMemory);
-    multiGraphicsAllocation.ensureMemoryOnDevice(mockMemoryManager, 2u);
-    EXPECT_EQ(mockMemoryManager.lockResourceCalled, 2u);
-    EXPECT_EQ(mockMemoryManager.unlockResourceCalled, 2u);
+    allocationProperties.rootDeviceIndex = 1u;
+    multiGraphicsAllocation.addAllocation(memoryManager->allocateGraphicsMemoryWithProperties(allocationProperties));
+    EXPECT_FALSE(multiGraphicsAllocation.requiresMigrations());
+
+    multiGraphicsAllocation.setMultiStorage(true);
+    EXPECT_TRUE(multiGraphicsAllocation.requiresMigrations());
+}
+
+TEST_F(MultiGraphicsAllocationTests, givenMultiGraphicsAllocationThatRequiresMigrationWhenCopyOrMoveMultiGraphicsAllocationThenTheCopyStillRequiresMigration) {
+    AllocationProperties allocationProperties{0u,
+                                              true, //allocateMemory
+                                              MemoryConstants::pageSize,
+                                              GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY,
+                                              false, //multiOsContextCapable
+                                              false, //isMultiStorageAllocationParam
+                                              systemMemoryBitfield};
+
+    multiGraphicsAllocation.addAllocation(memoryManager->allocateGraphicsMemoryWithProperties(allocationProperties));
+
+    allocationProperties.rootDeviceIndex = 1u;
+    multiGraphicsAllocation.addAllocation(memoryManager->allocateGraphicsMemoryWithProperties(allocationProperties));
+
+    multiGraphicsAllocation.setMultiStorage(true);
+    EXPECT_TRUE(multiGraphicsAllocation.requiresMigrations());
+    EXPECT_EQ(1, multiGraphicsAllocation.migrationSyncData->getRefInternalCount());
+    {
+
+        auto copyMultiGraphicsAllocation(multiGraphicsAllocation);
+        EXPECT_TRUE(copyMultiGraphicsAllocation.requiresMigrations());
+        EXPECT_EQ(2, multiGraphicsAllocation.migrationSyncData->getRefInternalCount());
+
+        auto movedMultiGraphicsAllocation(std::move(copyMultiGraphicsAllocation));
+        EXPECT_TRUE(movedMultiGraphicsAllocation.requiresMigrations());
+        EXPECT_EQ(2, multiGraphicsAllocation.migrationSyncData->getRefInternalCount());
+    }
+    EXPECT_EQ(1, multiGraphicsAllocation.migrationSyncData->getRefInternalCount());
+}
+
+struct MigrationSyncDataTests : public MultiGraphicsAllocationTests {
+    void SetUp() override {
+        MultiGraphicsAllocationTests::SetUp();
+        AllocationProperties allocationProperties{0u,
+                                                  true, //allocateMemory
+                                                  MemoryConstants::pageSize,
+                                                  GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY,
+                                                  false, //multiOsContextCapable
+                                                  false, //isMultiStorageAllocationParam
+                                                  systemMemoryBitfield};
+
+        multiGraphicsAllocation.addAllocation(memoryManager->allocateGraphicsMemoryWithProperties(allocationProperties));
+
+        allocationProperties.rootDeviceIndex = 1u;
+        multiGraphicsAllocation.addAllocation(memoryManager->allocateGraphicsMemoryWithProperties(allocationProperties));
+
+        multiGraphicsAllocation.setMultiStorage(true);
+        EXPECT_TRUE(multiGraphicsAllocation.requiresMigrations());
+
+        migrationSyncData = multiGraphicsAllocation.getMigrationSyncData();
+    }
+
+    void TearDown() override {
+        MultiGraphicsAllocationTests::TearDown();
+    }
+
+    MigrationSyncData *migrationSyncData = nullptr;
+};
+
+TEST_F(MigrationSyncDataTests, whenMigrationSyncDataExistsAndSetMultiStorageIsCalledThenReuseSameMigrationSyncData) {
+
+    EXPECT_NE(nullptr, migrationSyncData);
+
+    multiGraphicsAllocation.setMultiStorage(true);
+
+    EXPECT_EQ(migrationSyncData, multiGraphicsAllocation.getMigrationSyncData());
+}
+
+TEST(MigrationSyncDataTest, givenEmptyMultiGraphicsAllocationWhenSetMultiStorageIsCalledThenAbortIsCalled) {
+    MultiGraphicsAllocation multiGraphicsAllocation(1);
+    EXPECT_EQ(nullptr, multiGraphicsAllocation.getDefaultGraphicsAllocation());
+    EXPECT_THROW(multiGraphicsAllocation.setMultiStorage(true), std::exception);
+}
+
+TEST_F(MigrationSyncDataTests, whenMigrationIsNotStartedThenMigrationIsNotInProgress) {
+    EXPECT_FALSE(migrationSyncData->isMigrationInProgress());
+
+    migrationSyncData->startMigration();
+
+    EXPECT_TRUE(migrationSyncData->isMigrationInProgress());
+}
+
+TEST_F(MigrationSyncDataTests, whenMigrationIsInProgressThenMultigraphicsAllocationDoesntRequireMigration) {
+    EXPECT_TRUE(multiGraphicsAllocation.requiresMigrations());
+    migrationSyncData->startMigration();
+
+    EXPECT_TRUE(migrationSyncData->isMigrationInProgress());
+    EXPECT_FALSE(multiGraphicsAllocation.requiresMigrations());
+}
+
+TEST_F(MigrationSyncDataTests, whenSetTargetLocationIsCalledThenProperLocationIsSetAndMigrationIsStopped) {
+    migrationSyncData->startMigration();
+
+    EXPECT_TRUE(migrationSyncData->isMigrationInProgress());
+
+    migrationSyncData->setCurrentLocation(0u);
+    EXPECT_FALSE(migrationSyncData->isMigrationInProgress());
+    EXPECT_EQ(0u, migrationSyncData->getCurrentLocation());
+}
+
+TEST(MigrationSyncDataTest, whenWaitOnCpuIsCalledThenWaitForValueSpecifiedInSignalUsageMethod) {
+    auto migrationSyncData = std::make_unique<MockMigrationSyncDataWithYield>(MemoryConstants::pageSize);
+    uint32_t tagAddress = 0;
+
+    migrationSyncData->signalUsage(&tagAddress, 2u);
+    migrationSyncData->waitOnCpu();
+    EXPECT_EQ(2u, tagAddress);
+}
+
+TEST(MigrationSyncDataTest, whenTaskCountIsHigherThanExpectedThenWaitOnCpuDoesntHang) {
+    auto migrationSyncData = std::make_unique<MockMigrationSyncData>(MemoryConstants::pageSize);
+    uint32_t tagAddress = 5u;
+
+    migrationSyncData->signalUsage(&tagAddress, 2u);
+    EXPECT_EQ(&tagAddress, migrationSyncData->tagAddress);
+    EXPECT_EQ(2u, migrationSyncData->latestTaskCountUsed);
+
+    migrationSyncData->waitOnCpu();
+    EXPECT_EQ(5u, tagAddress);
+}
+
+TEST_F(MigrationSyncDataTests, givenNoSignaledUsageWhenWaitOnCpuIsCalledThenEarlyReturnAndDontCrash) {
+    EXPECT_NO_THROW(migrationSyncData->waitOnCpu());
+    migrationSyncData->signalUsage(nullptr, 2u);
+    EXPECT_NO_THROW(migrationSyncData->waitOnCpu());
+}
+
+TEST_F(MigrationSyncDataTests, whenGetHostPtrMethodIsCalledThenAlignedPointerIsReturned) {
+    auto hostPtr = reinterpret_cast<uintptr_t>(migrationSyncData->getHostPtr());
+
+    EXPECT_TRUE(isAligned(hostPtr, MemoryConstants::pageSize));
 }

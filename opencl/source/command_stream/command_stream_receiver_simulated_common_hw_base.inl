@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -51,14 +51,14 @@ bool CommandStreamReceiverSimulatedCommonHw<GfxFamily>::getParametersForWriteMem
     gpuAddress = GmmHelper::decanonize(graphicsAllocation.getGpuAddress());
     size = graphicsAllocation.getUnderlyingBufferSize();
     auto gmm = graphicsAllocation.getDefaultGmm();
-    if (gmm && gmm->isRenderCompressed) {
+    if (gmm && gmm->isCompressionEnabled) {
         size = gmm->gmmResourceInfo->getSizeAllocation();
     }
 
     if (size == 0)
         return false;
 
-    if (cpuAddress == nullptr) {
+    if (cpuAddress == nullptr && graphicsAllocation.isAllocationLockable()) {
         cpuAddress = this->getMemoryManager()->lockResource(&graphicsAllocation);
     }
     return true;
@@ -71,6 +71,11 @@ bool CommandStreamReceiverSimulatedCommonHw<GfxFamily>::expectMemoryEqual(void *
 }
 template <typename GfxFamily>
 bool CommandStreamReceiverSimulatedCommonHw<GfxFamily>::expectMemoryNotEqual(void *gfxAddress, const void *srcAddress, size_t length) {
+    return this->expectMemory(gfxAddress, srcAddress, length,
+                              AubMemDump::CmdServicesMemTraceMemoryCompare::CompareOperationValues::CompareNotEqual);
+}
+template <typename GfxFamily>
+bool CommandStreamReceiverSimulatedCommonHw<GfxFamily>::expectMemoryCompressed(void *gfxAddress, const void *srcAddress, size_t length) {
     return this->expectMemory(gfxAddress, srcAddress, length,
                               AubMemDump::CmdServicesMemTraceMemoryCompare::CompareOperationValues::CompareNotEqual);
 }

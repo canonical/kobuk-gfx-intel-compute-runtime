@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,14 +7,40 @@
 
 #pragma once
 
+#include "shared/source/helpers/topology_map.h"
+#include "shared/source/page_fault_manager/cpu_page_fault_manager.h"
+#include "shared/source/utilities/spinlock.h"
+
 #include "level_zero/core/source/builtin/builtin_functions_lib.h"
+#include "level_zero/core/source/cache/cache_reservation.h"
 #include "level_zero/core/source/cmdlist/cmdlist.h"
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/driver/driver_handle.h"
+#include "level_zero/core/source/module/module.h"
+#include "level_zero/tools/source/debug/debug_session.h"
 #include "level_zero/tools/source/metrics/metric.h"
+
+#include <map>
+#include <mutex>
 
 namespace L0 {
 struct SysmanDevice;
+
+typedef union {
+    uint8_t memadvise_flags; /* all memadvise_flags */
+    struct
+    {
+        uint8_t read_only : 1,             /* ZE_MEMORY_ADVICE_SET_READ_MOSTLY or ZE_MEMORY_ADVICE_CLEAR_READ_MOSTLY */
+            device_preferred_location : 1, /* ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION  or ZE_MEMORY_ADVICE_CLEAR_PREFERRED_LOCATION  */
+            non_atomic : 1,                /* ZE_MEMORY_ADVICE_SET_NON_ATOMIC_MOSTLY  or ZE_MEMORY_ADVICE_CLEAR_NON_ATOMIC_MOSTLY  */
+            cached_memory : 1,             /* ZE_MEMORY_ADVICE_BIAS_CACHED or ZE_MEMORY_ADVICE_BIAS_UNCACHED */
+            cpu_migration_blocked : 1,     /* ZE_MEMORY_ADVICE_SET_READ_MOSTLY and ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION */
+            reserved2 : 1,
+            reserved1 : 1,
+            reserved0 : 1;
+    };
+} MemAdviseFlags;
+
 struct DeviceImp : public Device {
     uint32_t getRootDeviceIndex() override;
     ze_result_t canAccessPeer(ze_device_handle_t hPeerDevice, ze_bool_t *value) override;
@@ -26,7 +52,7 @@ struct DeviceImp : public Device {
                                    ze_command_queue_handle_t *commandQueue) override;
     ze_result_t createImage(const ze_image_desc_t *desc, ze_image_handle_t *phImage) override;
     ze_result_t createModule(const ze_module_desc_t *desc, ze_module_handle_t *module,
-                             ze_module_build_log_handle_t *buildLog) override;
+                             ze_module_build_log_handle_t *buildLog, ModuleType type) override;
     ze_result_t createSampler(const ze_sampler_desc_t *pDesc,
                               ze_sampler_handle_t *phSampler) override;
     ze_result_t getComputeProperties(ze_device_compute_properties_t *pComputeProperties) override;
@@ -37,14 +63,17 @@ struct DeviceImp : public Device {
     ze_result_t getMemoryAccessProperties(ze_device_memory_access_properties_t *pMemAccessProperties) override;
     ze_result_t getProperties(ze_device_properties_t *pDeviceProperties) override;
     ze_result_t getSubDevices(uint32_t *pCount, ze_device_handle_t *phSubdevices) override;
-    ze_result_t setIntermediateCacheConfig(ze_cache_config_flags_t cacheConfig) override;
-    ze_result_t setLastLevelCacheConfig(ze_cache_config_flags_t cacheConfig) override;
     ze_result_t getCacheProperties(uint32_t *pCount, ze_device_cache_properties_t *pCacheProperties) override;
+    ze_result_t reserveCache(size_t cacheLevel, size_t cacheReservationSize) override;
+    ze_result_t setCacheAdvice(void *ptr, size_t regionSize, ze_cache_ext_region_t cacheRegion) override;
     ze_result_t imageGetProperties(const ze_image_desc_t *desc, ze_image_properties_t *pImageProperties) override;
     ze_result_t getDeviceImageProperties(ze_device_image_properties_t *pDeviceImageProperties) override;
     ze_result_t getCommandQueueGroupProperties(uint32_t *pCount,
                                                ze_command_queue_group_properties_t *pCommandQueueGroupProperties) override;
     ze_result_t getExternalMemoryProperties(ze_device_external_memory_properties_t *pExternalMemoryProperties) override;
+    ze_result_t getGlobalTimestamps(uint64_t *hostTimestamp, uint64_t *deviceTimestamp) override;
+    ze_result_t getDebugProperties(zet_device_debug_properties_t *pDebugProperties) override;
+
     ze_result_t systemBarrier() override;
     void *getExecEnvironment() override;
     BuiltinFunctionsLib *getBuiltinFunctionsLib() override;
@@ -55,6 +84,10 @@ struct DeviceImp : public Device {
     NEO::OSInterface &getOsInterface() override;
     uint32_t getPlatformInfo() const override;
     MetricContext &getMetricContext() override;
+    DebugSession *getDebugSession(const zet_debug_config_t &config) override;
+    DebugSession *createDebugSession(const zet_debug_config_t &config, ze_result_t &result) override;
+    void removeDebugSession() override { debugSession.release(); }
+
     uint32_t getMaxNumHwThreads() const override;
     ze_result_t activateMetricGroups(uint32_t count,
                                      zet_metric_group_handle_t *phMetricGroups) override;
@@ -75,13 +108,19 @@ struct DeviceImp : public Device {
     void setSysmanHandle(SysmanDevice *pSysman) override;
     SysmanDevice *getSysmanHandle() override;
     ze_result_t getCsrForOrdinalAndIndex(NEO::CommandStreamReceiver **csr, uint32_t ordinal, uint32_t index) override;
+    ze_result_t getCsrForLowPriority(NEO::CommandStreamReceiver **csr) override;
     ze_result_t mapOrdinalForAvailableEngineGroup(uint32_t *ordinal) override;
+    NEO::Device *getActiveDevice() const;
+
+    bool toPhysicalSliceId(const NEO::TopologyMap &topologyMap, uint32_t &slice, uint32_t &deviceIndex);
+    bool toApiSliceId(const NEO::TopologyMap &topologyMap, uint32_t &slice, uint32_t deviceIndex);
 
     NEO::Device *neoDevice = nullptr;
     bool isSubdevice = false;
     void *execEnvironment = nullptr;
     std::unique_ptr<BuiltinFunctionsLib> builtins = nullptr;
     std::unique_ptr<MetricContext> metricContext = nullptr;
+    std::unique_ptr<CacheReservation> cacheReservation = nullptr;
     uint32_t maxNumHwThreads = 0;
     uint32_t numSubDevices = 0;
     std::vector<Device *> subDevices;
@@ -91,9 +130,16 @@ struct DeviceImp : public Device {
     bool resourcesReleased = false;
     void releaseResources();
 
+    NEO::SVMAllocsManager::MapBasedAllocationTracker peerAllocations;
+    NEO::SpinLock peerAllocationsMutex;
+    std::map<NEO::SvmAllocationData *, MemAdviseFlags> memAdviseSharedAllocations;
+
   protected:
     NEO::GraphicsAllocation *debugSurface = nullptr;
     SysmanDevice *pSysmanDevice = nullptr;
+    std::unique_ptr<DebugSession> debugSession = nullptr;
 };
+
+void handleGpuDomainTransferForHwWithHints(NEO::PageFaultManager *pageFaultHandler, void *allocPtr, NEO::PageFaultManager::PageFaultData &pageFaultData);
 
 } // namespace L0

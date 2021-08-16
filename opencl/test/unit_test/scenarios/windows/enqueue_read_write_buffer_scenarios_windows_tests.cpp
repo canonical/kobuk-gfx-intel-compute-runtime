@@ -1,15 +1,15 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/memory_manager/internal_allocation_storage.h"
-#include "shared/source/os_interface/windows/os_interface.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
-#include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/source/os_interface/os_interface.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_device.h"
 
 #include "opencl/source/os_interface/windows/wddm_device_command_stream.h"
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
@@ -44,7 +44,7 @@ struct EnqueueBufferWindowsTest : public HardwareParse,
         memoryManager = new MockWddmMemoryManager(*executionEnvironment);
         executionEnvironment->memoryManager.reset(memoryManager);
 
-        device = std::make_unique<MockClDevice>(Device::create<MockDevice>(executionEnvironment, 0));
+        device = std::make_unique<MockClDevice>(Device::create<MockDevice>(executionEnvironment, rootDeviceIndex));
         context = std::make_unique<MockContext>(device.get());
 
         const size_t bufferMisalignment = 1;
@@ -71,11 +71,15 @@ struct EnqueueBufferWindowsTest : public HardwareParse,
     std::unique_ptr<MockClDevice> device;
     std::unique_ptr<MockContext> context;
     std::unique_ptr<Buffer> buffer;
+    const uint32_t rootDeviceIndex = 0u;
 
     MockWddmMemoryManager *memoryManager = nullptr;
 };
 
 HWTEST_F(EnqueueBufferWindowsTest, givenMisalignedHostPtrWhenEnqueueReadBufferCalledThenStateBaseAddressAddressIsAlignedAndMatchesKernelDispatchInfoParams) {
+    if (executionEnvironment->memoryManager.get()->isLimitedGPU(0)) {
+        GTEST_SKIP();
+    }
     initializeFixture<FamilyType>();
     if (device->areSharedSystemAllocationsAllowed()) {
         GTEST_SKIP();
@@ -103,30 +107,26 @@ HWTEST_F(EnqueueBufferWindowsTest, givenMisalignedHostPtrWhenEnqueueReadBufferCa
     cmdQ->finish();
 
     parseCommands<FamilyType>(*cmdQ);
+    auto &kernelInfo = kernel->getKernelInfo();
 
     if (hwInfo->capabilityTable.gpuAddressSpace == MemoryConstants::max48BitAddress) {
         const auto &surfaceStateDst = getSurfaceState<FamilyType>(&cmdQ->getIndirectHeap(IndirectHeap::SURFACE_STATE, 0), 1);
 
-        if (kernel->getKernelInfo().kernelArgInfo[1].kernelArgPatchInfoVector[0].size == sizeof(uint64_t)) {
-            auto pKernelArg = (uint64_t *)(kernel->getCrossThreadData() +
-                                           kernel->getKernelInfo().kernelArgInfo[1].kernelArgPatchInfoVector[0].crossthreadOffset);
+        const auto &arg1AsPtr = kernelInfo.getArgDescriptorAt(1).as<ArgDescPointer>();
+        if (arg1AsPtr.pointerSize == sizeof(uint64_t)) {
+            auto pKernelArg = (uint64_t *)(kernel->getCrossThreadData() + arg1AsPtr.stateless);
             EXPECT_EQ(alignDown(gpuVa, 4), static_cast<uint64_t>(*pKernelArg));
             EXPECT_EQ(*pKernelArg, surfaceStateDst.getSurfaceBaseAddress());
 
-        } else if (kernel->getKernelInfo().kernelArgInfo[1].kernelArgPatchInfoVector[0].size == sizeof(uint32_t)) {
-            auto pKernelArg = (uint32_t *)(kernel->getCrossThreadData() +
-                                           kernel->getKernelInfo().kernelArgInfo[1].kernelArgPatchInfoVector[0].crossthreadOffset);
+        } else if (arg1AsPtr.pointerSize == sizeof(uint32_t)) {
+            auto pKernelArg = (uint32_t *)(kernel->getCrossThreadData() + arg1AsPtr.stateless);
             EXPECT_EQ(alignDown(gpuVa, 4), static_cast<uint64_t>(*pKernelArg));
             EXPECT_EQ(static_cast<uint64_t>(*pKernelArg), surfaceStateDst.getSurfaceBaseAddress());
         }
     }
 
-    if (kernel->getKernelInfo().kernelArgInfo[3].kernelArgPatchInfoVector[0].size == sizeof(uint32_t)) {
-        auto dstOffset = (uint32_t *)(kernel->getCrossThreadData() +
-                                      kernel->getKernelInfo().kernelArgInfo[3].kernelArgPatchInfoVector[0].crossthreadOffset);
-        EXPECT_EQ(ptrDiff(misalignedPtr, alignDown(misalignedPtr, 4)), *dstOffset);
-    } else {
-        // dstOffset arg should be 4 bytes in size, if that changes, above if path should be modified
-        EXPECT_TRUE(false);
-    }
+    auto arg3AsVal = kernelInfo.getArgDescriptorAt(3).as<ArgDescValue>();
+    EXPECT_EQ(sizeof(uint32_t), arg3AsVal.elements[0].size);
+    auto dstOffset = (uint32_t *)(kernel->getCrossThreadData() + arg3AsVal.elements[0].offset);
+    EXPECT_EQ(ptrDiff(misalignedPtr, alignDown(misalignedPtr, 4)), *dstOffset);
 }

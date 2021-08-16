@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2020 Intel Corporation
+# Copyright (C) 2019-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -13,4 +13,5 @@ set(NEO_CORE_EXECUTION_ENVIRONMENT
 
 )
 
+add_subdirectories()
 set_property(GLOBAL PROPERTY NEO_CORE_EXECUTION_ENVIRONMENT ${NEO_CORE_EXECUTION_ENVIRONMENT})

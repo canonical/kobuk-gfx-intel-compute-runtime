@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,13 +7,13 @@
 
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/os_interface/device_factory.h"
-#include "shared/source/os_interface/windows/os_interface.h"
-#include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/source/os_interface/os_interface.h"
+#include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_wddm.h"
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/test/unit_test/api/cl_api_tests.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
-#include "opencl/test/unit_test/mocks/mock_wddm.h"
 #include "opencl/test/unit_test/sharings/gl/gl_dll_helper.h"
 
 using namespace NEO;
@@ -22,7 +22,7 @@ using clGetGLContextInfoKhrTest = api_tests;
 
 namespace ULT {
 
-TEST_F(clGetGLContextInfoKhrTest, successWithDefaultPlatform) {
+TEST_F(clGetGLContextInfoKhrTest, GivenDefaultPlatformWhenGettingGlContextThenSuccessIsReturned) {
     VariableBackup<UltHwConfig> backup(&ultHwConfig);
     ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc = false;
 
@@ -49,7 +49,7 @@ TEST_F(clGetGLContextInfoKhrTest, successWithDefaultPlatform) {
 
 using clGetGLContextInfoKHRNonDefaultPlatform = ::testing::Test;
 
-TEST_F(clGetGLContextInfoKHRNonDefaultPlatform, successWithNonDefaultPlatform) {
+TEST_F(clGetGLContextInfoKHRNonDefaultPlatform, GivenNonDefaultPlatformWhenGettingGlContextThenSuccessIsReturned) {
     platformsImpl->clear();
 
     VariableBackup<UltHwConfig> backup(&ultHwConfig);
@@ -79,7 +79,7 @@ TEST_F(clGetGLContextInfoKHRNonDefaultPlatform, successWithNonDefaultPlatform) {
     EXPECT_EQ(sizeof(cl_device_id), retSize);
 }
 
-TEST_F(clGetGLContextInfoKhrTest, invalidParam) {
+TEST_F(clGetGLContextInfoKhrTest, GivenInvalidParamWhenGettingGlContextThenInvalidValueErrorIsReturned) {
     cl_device_id retDevice = 0;
     size_t retSize = 0;
     const cl_context_properties properties[] = {CL_GL_CONTEXT_KHR, 1, CL_WGL_HDC_KHR, 2, 0};
@@ -145,7 +145,7 @@ TEST_F(clGetGLContextInfoKHRNonDefaultPlatform, whenVerificationOfAdapterLuidFai
 
     auto device = nonDefaultPlatform->getClDevice(0);
 
-    static_cast<WddmMock *>(device->getRootDeviceEnvironment().osInterface->get()->getWddm())->verifyAdapterLuidReturnValue = false;
+    static_cast<WddmMock *>(device->getRootDeviceEnvironment().osInterface->getDriverModel()->as<Wddm>())->verifyAdapterLuidReturnValue = false;
     size_t retSize = 0;
     cl_device_id retDevice = 0;
 
@@ -172,8 +172,8 @@ TEST_F(clGetGLContextInfoKHRNonDefaultPlatform, whenVerificationOfAdapterLuidFai
     auto device1 = nonDefaultPlatform->getClDevice(0);
     cl_device_id expectedDevice = device1;
 
-    static_cast<WddmMock *>(device0->getRootDeviceEnvironment().osInterface->get()->getWddm())->verifyAdapterLuidReturnValue = false;
-    static_cast<WddmMock *>(device1->getRootDeviceEnvironment().osInterface->get()->getWddm())->verifyAdapterLuidReturnValue = true;
+    static_cast<WddmMock *>(device0->getRootDeviceEnvironment().osInterface->getDriverModel()->as<Wddm>())->verifyAdapterLuidReturnValue = false;
+    static_cast<WddmMock *>(device1->getRootDeviceEnvironment().osInterface->getDriverModel()->as<Wddm>())->verifyAdapterLuidReturnValue = true;
     size_t retSize = 0;
     cl_device_id retDevice = 0;
 

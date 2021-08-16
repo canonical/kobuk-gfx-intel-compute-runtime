@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,6 +21,7 @@ struct ProfilingTestsGen12LP : public CommandEnqueueFixture,
     }
 
     void TearDown() override {
+        mockKernelWithInternals.reset();
         CommandEnqueueFixture::TearDown();
     }
 
@@ -81,20 +82,29 @@ struct MockTagNode : public TagNode<TagType> {
     }
 };
 
+class MyDeviceTime : public DeviceTime {
+    double getDynamicDeviceTimerResolution(HardwareInfo const &hwInfo) const override {
+        EXPECT_FALSE(true);
+        return 1.0;
+    }
+    uint64_t getDynamicDeviceTimerClock(HardwareInfo const &hwInfo) const override {
+        EXPECT_FALSE(true);
+        return 0;
+    }
+    bool getCpuGpuTime(TimeStampData *pGpuCpuTime, OSTime *) override {
+        EXPECT_FALSE(true);
+        return false;
+    }
+};
+
 class MyOSTime : public OSTime {
   public:
     static int instanceNum;
     MyOSTime() {
         instanceNum++;
+        this->deviceTime.reset(new MyDeviceTime());
     }
-    double getDynamicDeviceTimerResolution(HardwareInfo const &hwInfo) const override {
-        EXPECT_FALSE(true);
-        return 1.0;
-    }
-    bool getCpuGpuTime(TimeStampData *pGpuCpuTime) override {
-        EXPECT_FALSE(true);
-        return false;
-    }
+
     bool getCpuTime(uint64_t *timeStamp) override {
         EXPECT_FALSE(true);
         return false;
@@ -120,7 +130,7 @@ GEN12LPTEST_F(ProfilingTestsGen12LP, givenRawTimestampsDebugModeWhenDataIsQuerie
     EXPECT_EQ(1, MyOSTime::instanceNum);
     MockContext context;
     cl_command_queue_properties props[5] = {0, 0, 0, 0, 0};
-    MockCommandQueue cmdQ(&context, device.get(), props);
+    MockCommandQueue cmdQ(&context, device.get(), props, false);
     cmdQ.setProfilingEnabled();
     cmdQ.device = device.get();
 

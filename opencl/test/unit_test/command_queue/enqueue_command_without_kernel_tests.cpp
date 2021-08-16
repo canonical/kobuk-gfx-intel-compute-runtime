@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,7 +8,8 @@
 #include "shared/source/helpers/timestamp_packet.h"
 #include "shared/source/memory_manager/surface.h"
 #include "shared/source/os_interface/os_context.h"
-#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_execution_environment.h"
+#include "shared/test/common/mocks/mock_graphics_allocation.h"
 
 #include "opencl/source/event/event_builder.h"
 #include "opencl/source/event/user_event.h"
@@ -19,7 +20,6 @@
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
 #include "opencl/test/unit_test/mocks/mock_event.h"
-#include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_mdi.h"
 #include "opencl/test/unit_test/mocks/mock_timestamp_container.h"
@@ -50,10 +50,12 @@ HWTEST_F(EnqueueHandlerTest, GivenCommandStreamWithoutKernelWhenCommandEnqueuedT
     Surface *surfaces[] = {surface.get()};
     auto blocking = true;
     TimestampPacketDependencies timestampPacketDependencies;
-    EnqueueProperties enqueueProperties(false, false, false, true, nullptr);
+
+    CsrDependencies csrDeps;
+    EnqueueProperties enqueueProperties(false, false, false, true, false, nullptr);
 
     mockCmdQ->enqueueCommandWithoutKernel(surfaces, 1, &mockCmdQ->getCS(0), 0, blocking, enqueueProperties, timestampPacketDependencies,
-                                          eventsRequest, eventBuilder, 0);
+                                          eventsRequest, eventBuilder, 0, csrDeps);
     EXPECT_EQ(allocation->getTaskCount(mockCmdQ->getGpgpuCommandStreamReceiver().getOsContext().getContextId()), 1u);
 }
 
@@ -87,13 +89,15 @@ HWTEST_F(EnqueueHandlerTimestampEnabledTest, givenProflingAndTimeStampPacketsEna
     Surface *surfaces[] = {surface.get()};
     auto blocking = true;
     TimestampPacketDependencies timestampPacketDependencies;
-    EnqueueProperties enqueueProperties(false, false, false, true, nullptr);
+
+    CsrDependencies csrDeps;
+    EnqueueProperties enqueueProperties(false, false, false, true, false, nullptr);
 
     EXPECT_EQ(ev->submitTimeStamp.CPUTimeinNS, 0u);
     EXPECT_EQ(ev->submitTimeStamp.GPUTimeStamp, 0u);
 
     mockCmdQ->enqueueCommandWithoutKernel(surfaces, 1, &mockCmdQ->getCS(0), 0, blocking, enqueueProperties, timestampPacketDependencies,
-                                          eventsRequest, eventBuilder, 0);
+                                          eventsRequest, eventBuilder, 0, csrDeps);
 
     EXPECT_NE(ev->submitTimeStamp.CPUTimeinNS, 0u);
     EXPECT_NE(ev->submitTimeStamp.GPUTimeStamp, 0u);
@@ -117,13 +121,15 @@ HWTEST_F(EnqueueHandlerTimestampDisabledTest, givenProflingEnabledTimeStampPacke
     Surface *surfaces[] = {surface.get()};
     auto blocking = true;
     TimestampPacketDependencies timestampPacketDependencies;
-    EnqueueProperties enqueueProperties(false, false, false, true, nullptr);
+
+    CsrDependencies csrDeps;
+    EnqueueProperties enqueueProperties(false, false, false, true, false, nullptr);
 
     EXPECT_EQ(ev->submitTimeStamp.CPUTimeinNS, 0u);
     EXPECT_EQ(ev->submitTimeStamp.GPUTimeStamp, 0u);
 
     mockCmdQ->enqueueCommandWithoutKernel(surfaces, 1, &mockCmdQ->getCS(0), 0, blocking, enqueueProperties, timestampPacketDependencies,
-                                          eventsRequest, eventBuilder, 0);
+                                          eventsRequest, eventBuilder, 0, csrDeps);
 
     EXPECT_NE(ev->submitTimeStamp.CPUTimeinNS, 0u);
     EXPECT_NE(ev->submitTimeStamp.GPUTimeStamp, 0u);
@@ -145,7 +151,7 @@ HWTEST_F(EnqueueHandlerTest, givenNonBlitPropertyWhenEnqueueIsBlockedThenDontReg
     EventsRequest eventsRequest(0, nullptr, nullptr);
     EventBuilder eventBuilder;
 
-    const EnqueueProperties enqueuePropertiesForDependencyFlush(false, false, false, true, nullptr);
+    const EnqueueProperties enqueuePropertiesForDependencyFlush(false, false, false, true, false, nullptr);
 
     auto blockedCommandsData = std::unique_ptr<KernelOperation>(blockedCommandsDataForDependencyFlush);
     Surface *surfaces[] = {nullptr};
@@ -174,7 +180,7 @@ HWTEST_F(EnqueueHandlerTest, givenBlitPropertyWhenEnqueueIsBlockedThenRegisterBl
     blitProperties.dstAllocation = reinterpret_cast<GraphicsAllocation *>(0x56789);
     BlitPropertiesContainer blitPropertiesContainer;
     blitPropertiesContainer.push_back(blitProperties);
-    const EnqueueProperties enqueuePropertiesForBlitEnqueue(true, false, false, false, &blitPropertiesContainer);
+    const EnqueueProperties enqueuePropertiesForBlitEnqueue(true, false, false, false, false, &blitPropertiesContainer);
 
     auto blockedCommandsData = std::unique_ptr<KernelOperation>(blockedCommandsDataForBlitEnqueue);
     Surface *surfaces[] = {nullptr};
@@ -195,12 +201,13 @@ HWTEST_F(DispatchFlagsTests, whenEnqueueCommandWithoutKernelThenPassCorrectDispa
 
     auto blocking = true;
     TimestampPacketDependencies timestampPacketDependencies;
+    CsrDependencies csrDeps;
     EventsRequest eventsRequest(0, nullptr, nullptr);
     EventBuilder eventBuilder;
 
-    EnqueueProperties enqueueProperties(false, false, false, true, nullptr);
+    EnqueueProperties enqueueProperties(false, false, false, true, false, nullptr);
     mockCmdQ->enqueueCommandWithoutKernel(nullptr, 0, &mockCmdQ->getCS(0), 0, blocking, enqueueProperties, timestampPacketDependencies,
-                                          eventsRequest, eventBuilder, 0);
+                                          eventsRequest, eventBuilder, 0, csrDeps);
 
     EXPECT_EQ(blocking, mockCsr->passedDispatchFlags.blocking);
     EXPECT_FALSE(mockCsr->passedDispatchFlags.implicitFlush);
@@ -220,14 +227,15 @@ HWTEST_F(DispatchFlagsTests, whenEnqueueCommandWithoutKernelThenPassCorrectThrot
     auto mockCsr = static_cast<CsrType *>(&mockCmdQ->getGpgpuCommandStreamReceiver());
 
     TimestampPacketDependencies timestampPacketDependencies;
+    CsrDependencies csrDeps;
     EventsRequest eventsRequest(0, nullptr, nullptr);
     EventBuilder eventBuilder;
 
-    EnqueueProperties enqueueProperties(false, false, false, true, nullptr);
+    EnqueueProperties enqueueProperties(false, false, false, true, false, nullptr);
     bool blocking = true;
 
     mockCmdQ->enqueueCommandWithoutKernel(nullptr, 0, &mockCmdQ->getCS(0), 0, blocking, enqueueProperties, timestampPacketDependencies,
-                                          eventsRequest, eventBuilder, 0);
+                                          eventsRequest, eventBuilder, 0, csrDeps);
 
     EXPECT_EQ(mockCmdQ->throttle, mockCsr->passedDispatchFlags.throttle);
 }
@@ -254,6 +262,7 @@ HWTEST_F(DispatchFlagsTests, givenBlitEnqueueWhenDispatchingCommandsWithoutKerne
     builtinOpParams.dstPtr = reinterpret_cast<void *>(0x1234);
     MultiDispatchInfo multiDispatchInfo;
     multiDispatchInfo.setBuiltinOpParams(builtinOpParams);
+    CsrDependencies csrDeps;
 
     mockCmdQ->obtainNewTimestampPacketNodes(1, timestampPacketDependencies.previousEnqueueNodes, true, true);
 
@@ -264,9 +273,9 @@ HWTEST_F(DispatchFlagsTests, givenBlitEnqueueWhenDispatchingCommandsWithoutKerne
     BlitPropertiesContainer blitPropertiesContainer;
     blitPropertiesContainer.push_back(blitProperties);
 
-    EnqueueProperties enqueueProperties(true, false, false, false, &blitPropertiesContainer);
+    EnqueueProperties enqueueProperties(true, false, false, false, false, &blitPropertiesContainer);
     mockCmdQ->enqueueCommandWithoutKernel(nullptr, 0, &mockCmdQ->getCS(0), 0, blocking, enqueueProperties, timestampPacketDependencies,
-                                          eventsRequest, eventBuilder, 0);
+                                          eventsRequest, eventBuilder, 0, csrDeps);
 
     EXPECT_TRUE(mockCsr->passedDispatchFlags.implicitFlush);
     EXPECT_TRUE(mockCsr->passedDispatchFlags.guardCommandBufferWithPipeControl);
@@ -274,7 +283,7 @@ HWTEST_F(DispatchFlagsTests, givenBlitEnqueueWhenDispatchingCommandsWithoutKerne
     EXPECT_EQ(GrfConfig::NotApplicable, mockCsr->passedDispatchFlags.numGrfRequired);
 }
 
-HWTEST_F(DispatchFlagsTests, givenN1EnabledWhenDispatchingWithoutKernelTheAllowOutOfOrderExecution) {
+HWTEST_F(DispatchFlagsTests, givenN1EnabledWhenDispatchingWithoutKernelThenAllowOutOfOrderExecution) {
     using CsrType = MockCsrHw2<FamilyType>;
     DebugManager.flags.EnableTimestampPacket.set(1);
     DebugManager.flags.ForceGpgpuSubmissionForBcsEnqueue.set(1);
@@ -305,16 +314,18 @@ HWTEST_F(DispatchFlagsTests, givenN1EnabledWhenDispatchingWithoutKernelTheAllowO
                                                                             eventsRequest, &mockCmdQ->getCS(0), CL_COMMAND_READ_BUFFER, false);
     BlitPropertiesContainer blitPropertiesContainer;
     blitPropertiesContainer.push_back(blitProperties);
-    EnqueueProperties enqueueProperties(true, false, false, false, &blitPropertiesContainer);
+
+    CsrDependencies csrDeps;
+    EnqueueProperties enqueueProperties(true, false, false, false, false, &blitPropertiesContainer);
 
     mockCsr->nTo1SubmissionModelEnabled = false;
     mockCmdQ->enqueueCommandWithoutKernel(nullptr, 0, &mockCmdQ->getCS(0), 0, blocked, enqueueProperties, timestampPacketDependencies,
-                                          eventsRequest, eventBuilder, 0);
+                                          eventsRequest, eventBuilder, 0, csrDeps);
     EXPECT_FALSE(mockCsr->passedDispatchFlags.outOfOrderExecutionAllowed);
 
     mockCsr->nTo1SubmissionModelEnabled = true;
     mockCmdQ->enqueueCommandWithoutKernel(nullptr, 0, &mockCmdQ->getCS(0), 0, blocked, enqueueProperties, timestampPacketDependencies,
-                                          eventsRequest, eventBuilder, 0);
+                                          eventsRequest, eventBuilder, 0, csrDeps);
     EXPECT_TRUE(mockCsr->passedDispatchFlags.outOfOrderExecutionAllowed);
 }
 
@@ -329,13 +340,13 @@ HWTEST_F(DispatchFlagsTests, givenMockKernelWhenSettingAdditionalKernelExecInfoT
     EventsRequest eventsRequest(0, nullptr, nullptr);
     EventBuilder eventBuilder;
 
-    EnqueueProperties enqueueProperties(false, false, false, true, nullptr);
+    EnqueueProperties enqueueProperties(false, false, false, true, false, nullptr);
 
     auto cmdStream = new LinearStream(device->getMemoryManager()->allocateGraphicsMemoryWithProperties({device->getRootDeviceIndex(), 4096, GraphicsAllocation::AllocationType::COMMAND_BUFFER, device->getDeviceBitfield()}));
     auto blockedCommandsData = std::make_unique<KernelOperation>(cmdStream, *mockCmdQ->getGpgpuCommandStreamReceiver().getInternalAllocationStorage());
     MockKernelWithInternals mockKernelWithInternals(*device.get());
     auto pKernel = mockKernelWithInternals.mockKernel;
-    MockMultiDispatchInfo multiDispatchInfo(pKernel);
+    MockMultiDispatchInfo multiDispatchInfo(device.get(), pKernel);
 
     std::unique_ptr<PrintfHandler> printfHandler(PrintfHandler::create(multiDispatchInfo, *device.get()));
     IndirectHeap *dsh = nullptr, *ioh = nullptr, *ssh = nullptr;

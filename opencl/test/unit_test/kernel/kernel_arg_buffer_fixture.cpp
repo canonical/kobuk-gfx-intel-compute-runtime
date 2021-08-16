@@ -1,11 +1,13 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "kernel_arg_buffer_fixture.h"
+
+#include "shared/source/helpers/api_specific_config.h"
 
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/source/mem_obj/buffer.h"
@@ -30,21 +32,15 @@ void KernelArgBufferFixture::SetUp() {
     ContextFixture::SetUp(1, &device);
 
     // define kernel info
-    pKernelInfo = std::make_unique<KernelInfo>();
-
-    // setup kernel arg offsets
-    KernelArgPatchInfo kernelArgPatchInfo;
+    pKernelInfo = std::make_unique<MockKernelInfo>();
+    pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = 1;
 
     pKernelInfo->heapInfo.pSsh = pSshLocal;
     pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(pSshLocal);
-    pKernelInfo->usesSsh = true;
-    pKernelInfo->requiresSshForBuffers = true;
 
-    pKernelInfo->kernelArgInfo.resize(1);
-    pKernelInfo->kernelArgInfo[0].kernelArgPatchInfoVector.push_back(kernelArgPatchInfo);
+    pKernelInfo->addArgBuffer(0, 0x30, sizeof(void *), 0x0);
 
-    pKernelInfo->kernelArgInfo[0].kernelArgPatchInfoVector[0].crossthreadOffset = 0x30;
-    pKernelInfo->kernelArgInfo[0].kernelArgPatchInfoVector[0].size = (uint32_t)sizeof(void *);
+    pKernelInfo->kernelDescriptor.kernelAttributes.bufferAddressingMode = ApiSpecificConfig::getBindlessConfiguration() ? KernelDescriptor::AddressingMode::BindlessAndStateless : KernelDescriptor::AddressingMode::BindfulAndStateless;
 
     pProgram = new MockProgram(pContext, false, toClDeviceVector(*pClDevice));
 

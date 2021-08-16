@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -37,10 +37,12 @@ typedef Test<MigrateMemObjectsFixture> MigrateMemObjectsTest;
 TEST_F(MigrateMemObjectsTest, GivenNullEventWhenMigratingEventsThenSuccessIsReturned) {
 
     MockBuffer buffer;
+    auto bufferMemObj = static_cast<cl_mem>(&buffer);
+    auto pBufferMemObj = &bufferMemObj;
 
     auto retVal = pCmdQ->enqueueMigrateMemObjects(
         1,
-        (cl_mem *)&buffer,
+        pBufferMemObj,
         CL_MIGRATE_MEM_OBJECT_HOST,
         0,
         nullptr,
@@ -52,13 +54,15 @@ TEST_F(MigrateMemObjectsTest, GivenNullEventWhenMigratingEventsThenSuccessIsRetu
 TEST_F(MigrateMemObjectsTest, GivenValidEventListWhenMigratingEventsThenSuccessIsReturned) {
 
     MockBuffer buffer;
+    auto bufferMemObj = static_cast<cl_mem>(&buffer);
+    auto pBufferMemObj = &bufferMemObj;
 
     UserEvent uEvent;
     cl_event eventWaitList[] = {&uEvent};
 
     auto retVal = pCmdQ->enqueueMigrateMemObjects(
         1,
-        (cl_mem *)&buffer,
+        pBufferMemObj,
         CL_MIGRATE_MEM_OBJECT_HOST,
         1,
         eventWaitList,
@@ -70,12 +74,14 @@ TEST_F(MigrateMemObjectsTest, GivenValidEventListWhenMigratingEventsThenSuccessI
 TEST_F(MigrateMemObjectsTest, GivenEventPointerWhenMigratingEventsThenEventIsReturned) {
 
     MockBuffer buffer;
+    auto bufferMemObj = static_cast<cl_mem>(&buffer);
+    auto pBufferMemObj = &bufferMemObj;
 
     cl_event event = nullptr;
 
     auto retVal = pCmdQ->enqueueMigrateMemObjects(
         1,
-        (cl_mem *)&buffer,
+        pBufferMemObj,
         CL_MIGRATE_MEM_OBJECT_HOST,
         0,
         nullptr,

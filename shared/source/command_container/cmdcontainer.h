@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -27,8 +27,7 @@ using HeapType = IndirectHeap::Type;
 
 enum class ErrorCode {
     SUCCESS = 0,
-    INVALID_DEVICE = 1,
-    OUT_OF_DEVICE_MEMORY = 2
+    OUT_OF_DEVICE_MEMORY = 1
 };
 
 class CommandContainer : public NonCopyableOrMovableClass {
@@ -80,11 +79,15 @@ class CommandContainer : public NonCopyableOrMovableClass {
 
     ErrorCode initialize(Device *device);
 
+    void prepareBindfulSsh();
+
     virtual ~CommandContainer();
 
     uint32_t slmSize = std::numeric_limits<uint32_t>::max();
     uint32_t nextIddInBlock = 0;
     uint32_t lastSentNumGrfRequired = 0;
+    bool lastPipelineSelectModeRequired = false;
+    bool lastSentUseGlobalAtomics = false;
 
     Device *getDevice() const { return device; }
 
@@ -105,6 +108,9 @@ class CommandContainer : public NonCopyableOrMovableClass {
     }
     HeapContainer sshAllocations;
 
+    bool getFlushTaskUsedForImmediate() { return isFlushTaskUsedForImmediate; }
+    void setFlushTaskUsedForImmediate(bool flushTaskUsedForImmediate) { isFlushTaskUsedForImmediate = flushTaskUsedForImmediate; }
+
   protected:
     void *iddBlock = nullptr;
     Device *device = nullptr;
@@ -122,6 +128,8 @@ class CommandContainer : public NonCopyableOrMovableClass {
     std::unique_ptr<IndirectHeap> indirectHeaps[HeapType::NUM_TYPES];
     ResidencyContainer residencyContainer;
     std::vector<GraphicsAllocation *> deallocationContainer;
+
+    bool isFlushTaskUsedForImmediate = false;
 };
 
 } // namespace NEO

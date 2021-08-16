@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -19,29 +19,31 @@
 #include "shared/source/memory_manager/surface.h"
 #include "shared/source/os_interface/device_factory.h"
 #include "shared/source/utilities/tag_allocator.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
-#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/mocks/mock_execution_environment.h"
+#include "shared/test/common/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/ult_device_factory.h"
+#include "shared/test/common/test_macros/matchers.h"
+#include "shared/test/common/test_macros/test_checks_shared.h"
 
+#include "opencl/source/command_stream/definitions/command_stream_receiver_simulated_hw.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/platform/platform.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/multi_root_device_fixture.h"
-#include "opencl/test/unit_test/gen_common/matchers.h"
 #include "opencl/test/unit_test/helpers/raii_hw_helper.h"
-#include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_builtins.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
-#include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/mocks/mock_hw_helper.h"
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 #include "test.h"
 
-#include "command_stream_receiver_simulated_hw.h"
 #include "gmock/gmock.h"
 
 using namespace NEO;
@@ -73,6 +75,19 @@ HWTEST_F(CommandStreamReceiverTest, WhenCreatingCsrThenDefaultValuesAreSet) {
     EXPECT_FALSE(csr.isPreambleSent);
 }
 
+HWTEST_F(CommandStreamReceiverTest, WhenCreatingCsrThenTimestampTypeIs32b) {
+    using ExpectedType = TimestampPackets<typename FamilyType::TimestampPacketType>;
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    auto allocator = csr.getTimestampPacketAllocator();
+    auto tag = allocator->getTag();
+
+    auto expectedOffset = sizeof(typename FamilyType::TimestampPacketType);
+
+    EXPECT_EQ(expectedOffset, tag->getGlobalStartOffset());
+}
+
 HWTEST_F(CommandStreamReceiverTest, WhenCreatingCsrThenFlagsAreSetCorrectly) {
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     csr.initProgrammingFlags();
@@ -85,6 +100,7 @@ HWTEST_F(CommandStreamReceiverTest, WhenCreatingCsrThenFlagsAreSetCorrectly) {
     EXPECT_EQ(-1, csr.lastMediaSamplerConfig);
     EXPECT_EQ(PreemptionMode::Initial, csr.lastPreemptionMode);
     EXPECT_EQ(0u, csr.latestSentStatelessMocsConfig);
+    EXPECT_FALSE(csr.lastSentUseGlobalAtomics);
 }
 
 TEST_F(CommandStreamReceiverTest, WhenMakingResidentThenBufferResidencyFlagIsSet) {
@@ -286,7 +302,7 @@ TEST(CommandStreamReceiverSimpleTest, givenCsrWhenSubmitiingBatchBufferThenTaskC
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
     ResidencyContainer residencyList;
 
     auto expectedTaskCount = csr.peekTaskCount() + 1;
@@ -297,6 +313,28 @@ TEST(CommandStreamReceiverSimpleTest, givenCsrWhenSubmitiingBatchBufferThenTaskC
     EXPECT_EQ(expectedTaskCount, csr.peekLatestSentTaskCount());
 
     executionEnvironment.memoryManager->freeGraphicsMemoryImpl(commandBuffer);
+}
+
+HWTEST_F(CommandStreamReceiverTest, givenOverrideCsrAllocationSizeWhenCreatingCommandStreamCsrGraphicsAllocationThenAllocationHasCorrectSize) {
+    DebugManagerStateRestore restore;
+
+    int32_t overrideSize = 10 * MemoryConstants::pageSize;
+    DebugManager.flags.OverrideCsrAllocationSize.set(overrideSize);
+
+    MockCsrHw<FamilyType> commandStreamReceiver(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+
+    bool ret = commandStreamReceiver.createPreemptionAllocation();
+    ASSERT_TRUE(ret);
+    EXPECT_EQ(static_cast<size_t>(overrideSize), commandStreamReceiver.preemptionAllocation->getUnderlyingBufferSize());
+}
+
+HWTEST_F(CommandStreamReceiverTest, givenCommandStreamReceiverWhenCallingGetMemoryCompressionStateThenReturnNotApplicable) {
+    CommandStreamReceiverHw<FamilyType> commandStreamReceiver(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+
+    for (bool auxTranslationRequired : {false, true}) {
+        auto memoryCompressionState = commandStreamReceiver.getMemoryCompressionState(auxTranslationRequired, *defaultHwInfo);
+        EXPECT_EQ(MemoryCompressionState::NotApplicable, memoryCompressionState);
+    }
 }
 
 HWTEST_F(CommandStreamReceiverTest, givenDebugVariableEnabledWhenCreatingCsrThenEnableTimestampPacketWriteMode) {
@@ -315,13 +353,22 @@ HWTEST_F(CommandStreamReceiverTest, whenDirectSubmissionDisabledThenExpectNoFeat
     DeviceFactory::prepareDeviceEnvironments(*pDevice->getExecutionEnvironment());
     CommandStreamReceiverHw<FamilyType> csr(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(pDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, pDevice->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                           false, false, false));
+                                                           0, pDevice->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
+                                                           false));
     osContext->setDefaultContext(true);
     bool ret = csr.initDirectSubmission(*pDevice, *osContext.get());
     EXPECT_TRUE(ret);
     EXPECT_FALSE(csr.isDirectSubmissionEnabled());
     EXPECT_FALSE(csr.isBlitterDirectSubmissionEnabled());
+}
+
+HWTEST_F(CommandStreamReceiverTest, whenClearColorAllocationIsCreatedThenItIsDestroyedInCleanupResources) {
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto mockClearColorAllocation = std::make_unique<MockGraphicsAllocation>();
+    csr.clearColorAllocation = mockClearColorAllocation.release();
+    EXPECT_NE(nullptr, csr.clearColorAllocation);
+    csr.cleanupResources();
+    EXPECT_EQ(nullptr, csr.clearColorAllocation);
 }
 
 struct InitDirectSubmissionFixture {
@@ -347,8 +394,9 @@ using InitDirectSubmissionTest = Test<InitDirectSubmissionFixture>;
 HWTEST_F(InitDirectSubmissionTest, whenDirectSubmissionEnabledOnRcsThenExpectFeatureAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                           false, false, false));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
     osContext->setDefaultContext(true);
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->capabilityTable.directSubmissionEngines.data[aub_stream::ENGINE_RCS].engineSupported = true;
@@ -362,11 +410,45 @@ HWTEST_F(InitDirectSubmissionTest, whenDirectSubmissionEnabledOnRcsThenExpectFea
     csr.reset();
 }
 
+template <class Type>
+class CommandStreamReceiverHwDirectSubmissionMock : public CommandStreamReceiverHw<Type> {
+  public:
+    using CommandStreamReceiverHw<Type>::CommandStreamReceiverHw;
+    using CommandStreamReceiverHw<Type>::directSubmission;
+};
+
+HWTEST_F(InitDirectSubmissionTest, whenCallInitDirectSubmissionAgainThenItIsNotReinitialized) {
+    auto csr = std::make_unique<CommandStreamReceiverHwDirectSubmissionMock<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
+    std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
+    osContext->setDefaultContext(true);
+    auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
+    hwInfo->capabilityTable.directSubmissionEngines.data[aub_stream::ENGINE_RCS].engineSupported = true;
+    hwInfo->capabilityTable.directSubmissionEngines.data[aub_stream::ENGINE_RCS].submitOnInit = false;
+
+    bool ret = csr->initDirectSubmission(*device, *osContext.get());
+    auto directSubmission = csr->directSubmission.get();
+    EXPECT_TRUE(ret);
+    EXPECT_TRUE(csr->isDirectSubmissionEnabled());
+    EXPECT_FALSE(csr->isBlitterDirectSubmissionEnabled());
+
+    ret = csr->initDirectSubmission(*device, *osContext.get());
+    EXPECT_TRUE(ret);
+    EXPECT_TRUE(csr->isDirectSubmissionEnabled());
+    EXPECT_FALSE(csr->isBlitterDirectSubmissionEnabled());
+    EXPECT_EQ(directSubmission, csr->directSubmission.get());
+
+    csr.reset();
+}
+
 HWTEST_F(InitDirectSubmissionTest, givenDirectSubmissionEnabledWhenPlatformNotSupportsRcsThenExpectFeatureNotAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                           false, false, false));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
     osContext->setDefaultContext(true);
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->capabilityTable.directSubmissionEngines.data[aub_stream::ENGINE_RCS].engineSupported = false;
@@ -382,8 +464,9 @@ HWTEST_F(InitDirectSubmissionTest, givenDirectSubmissionEnabledWhenPlatformNotSu
 HWTEST_F(InitDirectSubmissionTest, whenDirectSubmissionEnabledOnBcsThenExpectFeatureAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_BCS, PreemptionMode::ThreadGroup,
-                                                           false, false, false));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_BCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
     osContext->setDefaultContext(true);
 
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
@@ -401,8 +484,9 @@ HWTEST_F(InitDirectSubmissionTest, whenDirectSubmissionEnabledOnBcsThenExpectFea
 HWTEST_F(InitDirectSubmissionTest, givenDirectSubmissionEnabledWhenPlatformNotSupportsBcsThenExpectFeatureNotAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_BCS, PreemptionMode::ThreadGroup,
-                                                           false, false, false));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_BCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
     osContext->setDefaultContext(true);
 
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
@@ -420,8 +504,9 @@ HWTEST_F(InitDirectSubmissionTest, givenDirectSubmissionEnabledWhenPlatformNotSu
 HWTEST_F(InitDirectSubmissionTest, givenLowPriorityContextWhenDirectSubmissionDisabledOnLowPriorityThenExpectFeatureNotAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                           true, false, false));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::LowPriority}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
     osContext->setDefaultContext(true);
 
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
@@ -439,8 +524,9 @@ HWTEST_F(InitDirectSubmissionTest, givenLowPriorityContextWhenDirectSubmissionDi
 HWTEST_F(InitDirectSubmissionTest, givenLowPriorityContextWhenDirectSubmissionEnabledOnLowPriorityThenExpectFeatureAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                           true, false, false));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::LowPriority}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
 
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->capabilityTable.directSubmissionEngines.data[aub_stream::ENGINE_RCS].engineSupported = true;
@@ -456,8 +542,9 @@ HWTEST_F(InitDirectSubmissionTest, givenLowPriorityContextWhenDirectSubmissionEn
 HWTEST_F(InitDirectSubmissionTest, givenInternalContextWhenDirectSubmissionDisabledOnInternalThenExpectFeatureNotAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                           false, true, false));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Internal}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
     osContext->setDefaultContext(true);
 
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
@@ -475,8 +562,9 @@ HWTEST_F(InitDirectSubmissionTest, givenInternalContextWhenDirectSubmissionDisab
 HWTEST_F(InitDirectSubmissionTest, givenInternalContextWhenDirectSubmissionEnabledOnInternalThenExpectFeatureAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                           false, true, false));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Internal}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
 
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->capabilityTable.directSubmissionEngines.data[aub_stream::ENGINE_RCS].engineSupported = true;
@@ -493,8 +581,9 @@ HWTEST_F(InitDirectSubmissionTest, givenInternalContextWhenDirectSubmissionEnabl
 HWTEST_F(InitDirectSubmissionTest, givenRootDeviceContextWhenDirectSubmissionDisabledOnRootDeviceThenExpectFeatureNotAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                           false, false, true));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
+                                                           true));
+    osContext->ensureContextInitialized();
     osContext->setDefaultContext(true);
 
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
@@ -512,8 +601,9 @@ HWTEST_F(InitDirectSubmissionTest, givenRootDeviceContextWhenDirectSubmissionDis
 HWTEST_F(InitDirectSubmissionTest, givenRootDeviceContextWhenDirectSubmissionEnabledOnRootDeviceThenExpectFeatureAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                           false, false, true));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
+                                                           true));
+    osContext->ensureContextInitialized();
 
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->capabilityTable.directSubmissionEngines.data[aub_stream::ENGINE_RCS].engineSupported = true;
@@ -530,8 +620,9 @@ HWTEST_F(InitDirectSubmissionTest, givenRootDeviceContextWhenDirectSubmissionEna
 HWTEST_F(InitDirectSubmissionTest, givenNonDefaultContextWhenDirectSubmissionDisabledOnNonDefaultThenExpectFeatureNotAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                           false, false, false));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
     osContext->setDefaultContext(false);
 
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
@@ -549,8 +640,9 @@ HWTEST_F(InitDirectSubmissionTest, givenNonDefaultContextWhenDirectSubmissionDis
 HWTEST_F(InitDirectSubmissionTest, givenNonDefaultContextContextWhenDirectSubmissionEnabledOnNonDefaultContextThenExpectFeatureAvailable) {
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_RCS, PreemptionMode::ThreadGroup,
-                                                           false, false, false));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
     osContext->setDefaultContext(false);
 
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
@@ -567,11 +659,13 @@ HWTEST_F(InitDirectSubmissionTest, givenNonDefaultContextContextWhenDirectSubmis
 
 HWTEST_F(InitDirectSubmissionTest, GivenBlitterOverrideEnabledWhenBlitterIsNonDefaultContextThenExpectDirectSubmissionStarted) {
     DebugManager.flags.DirectSubmissionOverrideBlitterSupport.set(1);
+    DebugManager.flags.DirectSubmissionDisableMonitorFence.set(0);
 
     auto csr = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*device->executionEnvironment, device->getRootDeviceIndex(), device->getDeviceBitfield());
     std::unique_ptr<OsContext> osContext(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                                           0, device->getDeviceBitfield(), aub_stream::ENGINE_BCS, PreemptionMode::ThreadGroup,
-                                                           false, false, false));
+                                                           0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_BCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
+                                                           false));
+    osContext->ensureContextInitialized();
     osContext->setDefaultContext(false);
 
     auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
@@ -591,42 +685,19 @@ HWTEST_F(CommandStreamReceiverTest, whenCsrIsCreatedThenUseTimestampPacketWriteI
     EXPECT_EQ(UnitTestHelper<FamilyType>::isTimestampPacketWriteSupported(), csr.peekTimestampPacketWriteEnabled());
 }
 
-TEST_F(CommandStreamReceiverTest, whenGetEventTsAllocatorIsCalledItReturnsSameTagAllocator) {
-    TagAllocator<HwTimeStamps> *allocator = commandStreamReceiver->getEventTsAllocator();
+TEST_F(CommandStreamReceiverTest, whenGettingEventTsAllocatorThenSameTagAllocatorIsReturned) {
+    TagAllocatorBase *allocator = commandStreamReceiver->getEventTsAllocator();
     EXPECT_NE(nullptr, allocator);
-    TagAllocator<HwTimeStamps> *allocator2 = commandStreamReceiver->getEventTsAllocator();
+    TagAllocatorBase *allocator2 = commandStreamReceiver->getEventTsAllocator();
     EXPECT_EQ(allocator2, allocator);
 }
 
-TEST_F(CommandStreamReceiverTest, whenGetEventPerfCountAllocatorIsCalledItReturnsSameTagAllocator) {
+TEST_F(CommandStreamReceiverTest, whenGettingEventPerfCountAllocatorThenSameTagAllocatorIsReturned) {
     const uint32_t gpuReportSize = 100;
-    TagAllocator<HwPerfCounter> *allocator = commandStreamReceiver->getEventPerfCountAllocator(gpuReportSize);
+    TagAllocatorBase *allocator = commandStreamReceiver->getEventPerfCountAllocator(gpuReportSize);
     EXPECT_NE(nullptr, allocator);
-    TagAllocator<HwPerfCounter> *allocator2 = commandStreamReceiver->getEventPerfCountAllocator(gpuReportSize);
+    TagAllocatorBase *allocator2 = commandStreamReceiver->getEventPerfCountAllocator(gpuReportSize);
     EXPECT_EQ(allocator2, allocator);
-}
-
-HWTEST_F(CommandStreamReceiverTest, givenTimestampPacketAllocatorWhenAskingForTagThenReturnValidObject) {
-    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
-    EXPECT_EQ(nullptr, csr.timestampPacketAllocator.get());
-
-    TagAllocator<TimestampPacketStorage> *allocator = csr.getTimestampPacketAllocator();
-    EXPECT_NE(nullptr, csr.timestampPacketAllocator.get());
-    EXPECT_EQ(allocator, csr.timestampPacketAllocator.get());
-
-    TagAllocator<TimestampPacketStorage> *allocator2 = csr.getTimestampPacketAllocator();
-    EXPECT_EQ(allocator, allocator2);
-
-    auto node1 = allocator->getTag();
-    auto node2 = allocator->getTag();
-    EXPECT_NE(nullptr, node1);
-    EXPECT_NE(nullptr, node2);
-    EXPECT_NE(node1, node2);
-
-    constexpr auto tagAlignment = MemoryConstants::cacheLineSize * 4;
-
-    EXPECT_TRUE(isAligned(node1->getGpuAddress(), tagAlignment));
-    EXPECT_TRUE(isAligned(node2->getGpuAddress(), tagAlignment));
 }
 
 HWTEST_F(CommandStreamReceiverTest, givenUltCommandStreamReceiverWhenAddAubCommentIsCalledThenCallAddAubCommentOnCsr) {
@@ -650,7 +721,13 @@ TEST(CommandStreamReceiverSimpleTest, givenCommandStreamReceiverWhenItIsDestroye
     MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
     auto csr = std::make_unique<MockCommandStreamReceiver>(executionEnvironment, 0, 1);
     executionEnvironment.memoryManager.reset(new OsAgnosticMemoryManager(executionEnvironment));
-    csr->setTagAllocation(mockGraphicsAllocation);
+
+    auto allocations = new MultiGraphicsAllocation(0u);
+    allocations->addAllocation(mockGraphicsAllocation);
+
+    csr->tagsMultiAllocation = allocations;
+    csr->setTagAllocation(allocations->getGraphicsAllocation(0u));
+
     EXPECT_FALSE(destructorCalled);
     csr.reset(nullptr);
     EXPECT_TRUE(destructorCalled);
@@ -667,6 +744,31 @@ TEST(CommandStreamReceiverSimpleTest, givenCommandStreamReceiverWhenInitializeTa
     EXPECT_EQ(GraphicsAllocation::AllocationType::TAG_BUFFER, csr->getTagAllocation()->getAllocationType());
     EXPECT_TRUE(csr->getTagAddress() != nullptr);
     EXPECT_EQ(*csr->getTagAddress(), initialHardwareTag);
+}
+
+TEST(CommandStreamReceiverSimpleTest, givenCommandStreamReceiverWhenInitializeTagAllocationIsCalledInMultiRootDeviceEnvironmentThenTagAllocationIsBeingAllocated) {
+    MockExecutionEnvironment executionEnvironment(defaultHwInfo.get(), true, 10u);
+    auto csr = std::make_unique<MockCommandStreamReceiver>(executionEnvironment, 0, 1);
+    executionEnvironment.memoryManager.reset(new OsAgnosticMemoryManager(executionEnvironment));
+
+    EXPECT_EQ(nullptr, csr->getTagAllocation());
+    EXPECT_TRUE(csr->getTagAddress() == nullptr);
+
+    csr->initializeTagAllocation();
+
+    EXPECT_NE(nullptr, csr->getTagAllocation());
+    EXPECT_EQ(GraphicsAllocation::AllocationType::TAG_BUFFER, csr->getTagAllocation()->getAllocationType());
+    EXPECT_TRUE(csr->getTagAddress() != nullptr);
+    EXPECT_EQ(*csr->getTagAddress(), initialHardwareTag);
+
+    auto tagsMultiAllocation = csr->getTagsMultiAllocation();
+    auto graphicsAllocation0 = tagsMultiAllocation->getGraphicsAllocation(0);
+
+    for (auto graphicsAllocation : tagsMultiAllocation->getGraphicsAllocations()) {
+        if (graphicsAllocation != graphicsAllocation0) {
+            EXPECT_EQ(graphicsAllocation->getUnderlyingBuffer(), graphicsAllocation0->getUnderlyingBuffer());
+        }
+    }
 }
 
 HWTEST_F(CommandStreamReceiverTest, givenCommandStreamReceiverWhenFenceAllocationIsRequiredAndCreateGlobalFenceAllocationIsCalledThenFenceAllocationIsAllocated) {
@@ -820,9 +922,9 @@ TEST(CommandStreamReceiverSimpleTest, givenPrintfTagAllocationAddressFlagEnabled
     DebugManager.flags.PrintTagAllocationAddress.set(true);
     DeviceBitfield deviceBitfield(1);
     auto osContext = std::unique_ptr<OsContext>(OsContext::create(nullptr, 0, deviceBitfield,
-                                                                  aub_stream::EngineType::ENGINE_BCS,
+                                                                  EngineTypeUsage{aub_stream::ENGINE_BCS, EngineUsage::Regular},
                                                                   PreemptionMode::Disabled,
-                                                                  false, false, false));
+                                                                  false));
 
     MockExecutionEnvironment executionEnvironment;
     executionEnvironment.prepareRootDeviceEnvironments(1);
@@ -1119,98 +1221,93 @@ TEST_F(CommandStreamReceiverTest, givenMinimumSizeExceedsCurrentAndNoSuitableReu
     memoryManager->freeGraphicsMemory(commandStream.getGraphicsAllocation());
 }
 
-HWTEST_F(CommandStreamReceiverTest, givenDebugPauseThreadWhenSettingFlagProgressThenFunctionAsksTwiceForConfirmation) {
-    DebugManagerStateRestore restore;
-    DebugManager.flags.PauseOnEnqueue.set(0);
-    testing::internal::CaptureStdout();
-    int32_t executionStamp = 0;
-    auto mockCSR = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-
-    uint32_t confirmationCounter = 0;
-
-    mockCSR->debugConfirmationFunction = [&confirmationCounter, &mockCSR]() {
-        if (confirmationCounter == 0) {
-            EXPECT_TRUE(DebugPauseState::waitingForUserStartConfirmation == *mockCSR->debugPauseStateAddress);
-            confirmationCounter++;
-        } else if (confirmationCounter == 1) {
-            EXPECT_TRUE(DebugPauseState::waitingForUserEndConfirmation == *mockCSR->debugPauseStateAddress);
-            confirmationCounter++;
-        }
-    };
-
-    pDevice->resetCommandStreamReceiver(mockCSR);
-
-    *mockCSR->debugPauseStateAddress = DebugPauseState::waitingForUserStartConfirmation;
-
-    while (*mockCSR->debugPauseStateAddress != DebugPauseState::hasUserStartConfirmation)
-        ;
-
-    *mockCSR->debugPauseStateAddress = DebugPauseState::waitingForUserEndConfirmation;
-
-    while (*mockCSR->debugPauseStateAddress != DebugPauseState::hasUserEndConfirmation)
-        ;
-
-    EXPECT_EQ(2u, confirmationCounter);
-
-    auto output = testing::internal::GetCapturedStdout();
-    EXPECT_THAT(output, testing::HasSubstr(std::string("Debug break: Press enter to start workload")));
-    EXPECT_THAT(output, testing::HasSubstr(std::string("Debug break: Workload ended, press enter to continue")));
-}
-
-HWTEST_F(CommandStreamReceiverTest, givenDebugPauseThreadWhenTerminatingAtFirstStageThenFunctionEndsCorrectly) {
-    DebugManagerStateRestore restore;
-    DebugManager.flags.PauseOnEnqueue.set(0);
-    testing::internal::CaptureStdout();
-    int32_t executionStamp = 0;
-    auto mockCSR = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-
-    uint32_t confirmationCounter = 0;
-
-    mockCSR->debugConfirmationFunction = [&confirmationCounter]() {
-        confirmationCounter++;
-    };
-
-    pDevice->resetCommandStreamReceiver(mockCSR);
-
-    *mockCSR->debugPauseStateAddress = DebugPauseState::terminate;
-
-    EXPECT_EQ(0u, confirmationCounter);
-    auto output = testing::internal::GetCapturedStdout();
-    EXPECT_EQ(0u, output.length());
-}
-
 HWTEST_F(CommandStreamReceiverTest, whenCreatingCommandStreamReceiverThenLastAddtionalKernelExecInfoValueIsCorrect) {
     int32_t executionStamp = 0;
     std::unique_ptr<MockCsr<FamilyType>> mockCSR(new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield()));
     EXPECT_EQ(AdditionalKernelExecInfo::NotSet, mockCSR->lastAdditionalKernelExecInfo);
 }
 
-HWTEST_F(CommandStreamReceiverTest, givenDebugPauseThreadWhenTerminatingAtSecondStageThenFunctionEndsCorrectly) {
-    DebugManagerStateRestore restore;
-    DebugManager.flags.PauseOnEnqueue.set(0);
-    testing::internal::CaptureStdout();
-    int32_t executionStamp = 0;
-    auto mockCSR = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+HWTEST_F(CommandStreamReceiverTest, givenDebugFlagWhenCreatingCsrThenSetEnableStaticPartitioningAccordingly) {
+    DebugManagerStateRestore restore{};
 
-    uint32_t confirmationCounter = 0;
+    {
+        UltDeviceFactory deviceFactory{1, 2};
+        MockDevice &device = *deviceFactory.rootDevices[0];
+        EXPECT_TRUE(device.getGpgpuCommandStreamReceiver().isStaticWorkPartitioningEnabled());
+        EXPECT_NE(0u, device.getGpgpuCommandStreamReceiver().getWorkPartitionAllocationGpuAddress());
+        const auto gpuVa = device.getGpgpuCommandStreamReceiver().getWorkPartitionAllocation()->getGpuAddress();
+        EXPECT_EQ(gpuVa, device.getGpgpuCommandStreamReceiver().getWorkPartitionAllocationGpuAddress());
+    }
+    {
+        DebugManager.flags.EnableStaticPartitioning.set(0);
+        UltDeviceFactory deviceFactory{1, 2};
+        MockDevice &device = *deviceFactory.rootDevices[0];
+        EXPECT_FALSE(device.getGpgpuCommandStreamReceiver().isStaticWorkPartitioningEnabled());
+        EXPECT_EQ(0u, device.getGpgpuCommandStreamReceiver().getWorkPartitionAllocationGpuAddress());
+    }
+    {
+        DebugManager.flags.EnableStaticPartitioning.set(1);
+        UltDeviceFactory deviceFactory{1, 2};
+        MockDevice &device = *deviceFactory.rootDevices[0];
+        EXPECT_TRUE(device.getGpgpuCommandStreamReceiver().isStaticWorkPartitioningEnabled());
+        EXPECT_NE(0u, device.getGpgpuCommandStreamReceiver().getWorkPartitionAllocationGpuAddress());
+        const auto gpuVa = device.getGpgpuCommandStreamReceiver().getWorkPartitionAllocation()->getGpuAddress();
+        EXPECT_EQ(gpuVa, device.getGpgpuCommandStreamReceiver().getWorkPartitionAllocationGpuAddress());
+    }
+}
 
-    mockCSR->debugConfirmationFunction = [&confirmationCounter]() {
-        confirmationCounter++;
+HWTEST_F(CommandStreamReceiverTest, whenCreatingWorkPartitionAllocationThenInitializeContentsWithCopyEngine) {
+    REQUIRE_BLITTER_OR_SKIP(defaultHwInfo.get());
+    DebugManagerStateRestore restore{};
+    DebugManager.flags.EnableStaticPartitioning.set(0);
+
+    constexpr size_t subDeviceCount = 3;
+    UltDeviceFactory deviceFactory{1, subDeviceCount};
+    MockDevice &rootDevice = *deviceFactory.rootDevices[0];
+    rootDevice.getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.blitterOperationsSupported = true;
+    rootDevice.getRootDeviceEnvironment().getMutableHardwareInfo()->featureTable.ftrBcsInfo = 1;
+    UltCommandStreamReceiver<FamilyType> &csr = rootDevice.getUltCommandStreamReceiver<FamilyType>();
+    UltCommandStreamReceiver<FamilyType> *bcsCsrs[] = {
+        reinterpret_cast<UltCommandStreamReceiver<FamilyType> *>(rootDevice.getDeviceById(0)->getEngine(aub_stream::ENGINE_BCS, EngineUsage::Regular).commandStreamReceiver),
+        reinterpret_cast<UltCommandStreamReceiver<FamilyType> *>(rootDevice.getDeviceById(1)->getEngine(aub_stream::ENGINE_BCS, EngineUsage::Regular).commandStreamReceiver),
+        reinterpret_cast<UltCommandStreamReceiver<FamilyType> *>(rootDevice.getDeviceById(2)->getEngine(aub_stream::ENGINE_BCS, EngineUsage::Regular).commandStreamReceiver),
+    };
+    const size_t bcsStarts[] = {
+        bcsCsrs[0]->commandStream.getUsed(),
+        bcsCsrs[1]->commandStream.getUsed(),
+        bcsCsrs[2]->commandStream.getUsed(),
     };
 
-    pDevice->resetCommandStreamReceiver(mockCSR);
+    csr.staticWorkPartitioningEnabled = true;
+    EXPECT_TRUE(csr.createWorkPartitionAllocation(rootDevice));
+    EXPECT_NE(nullptr, csr.getWorkPartitionAllocation());
 
-    *mockCSR->debugPauseStateAddress = DebugPauseState::waitingForUserStartConfirmation;
+    EXPECT_LT(bcsStarts[0], bcsCsrs[0]->commandStream.getUsed());
+    EXPECT_LT(bcsStarts[1], bcsCsrs[1]->commandStream.getUsed());
+    EXPECT_LT(bcsStarts[2], bcsCsrs[2]->commandStream.getUsed());
+}
 
-    while (*mockCSR->debugPauseStateAddress != DebugPauseState::hasUserStartConfirmation)
-        ;
+HWTEST_F(CommandStreamReceiverTest, givenFailingMemoryManagerWhenCreatingWorkPartitionAllocationThenReturnFalse) {
+    struct FailingMemoryManager : OsAgnosticMemoryManager {
+        using OsAgnosticMemoryManager::OsAgnosticMemoryManager;
+        GraphicsAllocation *allocateGraphicsMemoryWithProperties(const AllocationProperties &properties) override {
+            return nullptr;
+        }
+    };
 
-    *mockCSR->debugPauseStateAddress = DebugPauseState::terminate;
+    DebugManagerStateRestore restore{};
+    DebugManager.flags.EnableStaticPartitioning.set(0);
+    UltDeviceFactory deviceFactory{1, 2};
+    MockDevice &rootDevice = *deviceFactory.rootDevices[0];
+    UltCommandStreamReceiver<FamilyType> &csr = rootDevice.getUltCommandStreamReceiver<FamilyType>();
 
-    auto output = testing::internal::GetCapturedStdout();
-    EXPECT_THAT(output, testing::HasSubstr(std::string("Debug break: Press enter to start workload")));
-    EXPECT_THAT(output, testing::Not(testing::HasSubstr(std::string("Debug break: Workload ended, press enter to continue"))));
-    EXPECT_EQ(1u, confirmationCounter);
+    ExecutionEnvironment &executionEnvironment = *deviceFactory.rootDevices[0]->executionEnvironment;
+    executionEnvironment.memoryManager = std::make_unique<FailingMemoryManager>(executionEnvironment);
+
+    csr.staticWorkPartitioningEnabled = true;
+    DebugManager.flags.EnableStaticPartitioning.set(1);
+    EXPECT_FALSE(csr.createWorkPartitionAllocation(rootDevice));
+    EXPECT_EQ(nullptr, csr.getWorkPartitionAllocation());
 }
 
 class CommandStreamReceiverWithAubSubCaptureTest : public CommandStreamReceiverTest,
@@ -1268,6 +1365,7 @@ struct MockSimulatedCsrHw : public CommandStreamReceiverSimulatedHw<FamilyType> 
     void pollForCompletion() override {}
     bool writeMemory(GraphicsAllocation &gfxAllocation) override { return true; }
     void writeMemory(uint64_t gpuAddress, void *cpuAddress, size_t size, uint32_t memoryBank, uint64_t entryBits) override {}
+    void writeMMIO(uint32_t offset, uint32_t value) override {}
     void dumpAllocation(GraphicsAllocation &gfxAllocation) override {}
 };
 
@@ -1277,9 +1375,8 @@ HWTEST_F(SimulatedCommandStreamReceiverTest, givenCsrWithOsContextWhenGetDeviceI
     executionEnvironment.initializeMemoryManager();
     DeviceBitfield deviceBitfield(0b11);
     MockSimulatedCsrHw<FamilyType> csr(executionEnvironment, 0, deviceBitfield);
-    auto osContext = executionEnvironment.memoryManager->createAndRegisterOsContext(&csr, aub_stream::EngineType::ENGINE_RCS,
-                                                                                    deviceBitfield, PreemptionMode::Disabled,
-                                                                                    false, false, false);
+    auto osContext = executionEnvironment.memoryManager->createAndRegisterOsContext(&csr, EngineTypeUsage{aub_stream::EngineType::ENGINE_RCS, EngineUsage::Regular},
+                                                                                    deviceBitfield, PreemptionMode::Disabled, false);
 
     csr.setupContext(*osContext);
     EXPECT_EQ(1u, csr.getDeviceIndex());
@@ -1291,9 +1388,8 @@ HWTEST_F(SimulatedCommandStreamReceiverTest, givenOsContextWithNoDeviceBitfieldW
     executionEnvironment.initializeMemoryManager();
     DeviceBitfield deviceBitfield(0b00);
     MockSimulatedCsrHw<FamilyType> csr(executionEnvironment, 0, deviceBitfield);
-    auto osContext = executionEnvironment.memoryManager->createAndRegisterOsContext(&csr, aub_stream::EngineType::ENGINE_RCS,
-                                                                                    deviceBitfield, PreemptionMode::Disabled,
-                                                                                    false, false, false);
+    auto osContext = executionEnvironment.memoryManager->createAndRegisterOsContext(&csr, EngineTypeUsage{aub_stream::EngineType::ENGINE_RCS, EngineUsage::Regular},
+                                                                                    deviceBitfield, PreemptionMode::Disabled, false);
 
     csr.setupContext(*osContext);
     EXPECT_EQ(0u, csr.getDeviceIndex());
@@ -1302,13 +1398,13 @@ HWTEST_F(SimulatedCommandStreamReceiverTest, givenOsContextWithNoDeviceBitfieldW
 using CommandStreamReceiverMultiRootDeviceTest = MultiRootDeviceFixture;
 
 TEST_F(CommandStreamReceiverMultiRootDeviceTest, WhenCreatingCommandStreamGraphicsAllocationsThenTheyHaveCorrectRootDeviceIndex) {
-    auto commandStreamReceiver = &device->getGpgpuCommandStreamReceiver();
+    auto commandStreamReceiver = &device1->getGpgpuCommandStreamReceiver();
 
     ASSERT_NE(nullptr, commandStreamReceiver);
     EXPECT_EQ(expectedRootDeviceIndex, commandStreamReceiver->getRootDeviceIndex());
 
     // Linear stream / Command buffer
-    GraphicsAllocation *allocation = mockMemoryManager->allocateGraphicsMemoryWithProperties({expectedRootDeviceIndex, 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER, device->getDeviceBitfield()});
+    GraphicsAllocation *allocation = mockMemoryManager->allocateGraphicsMemoryWithProperties({expectedRootDeviceIndex, 128u, GraphicsAllocation::AllocationType::COMMAND_BUFFER, device1->getDeviceBitfield()});
     LinearStream commandStream{allocation};
 
     commandStreamReceiver->ensureCommandBufferAllocation(commandStream, 100u, 0u);

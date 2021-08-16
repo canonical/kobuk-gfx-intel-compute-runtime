@@ -1,12 +1,12 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/program/sync_buffer_handler.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/ult_device_factory.h"
 
 #include "opencl/source/api/api.h"
 #include "opencl/test/unit_test/fixtures/enqueue_handler_fixture.h"
@@ -64,10 +64,11 @@ class SyncBufferHandlerTest : public SyncBufferEnqueueHandlerTest {
     void SetUpT() {
         SyncBufferEnqueueHandlerTest::SetUp();
         kernelInternals = std::make_unique<MockKernelWithInternals>(*pClDevice, context);
+        kernelInternals->kernelInfo.kernelDescriptor.kernelAttributes.bufferAddressingMode = KernelDescriptor::Stateless;
         kernel = kernelInternals->mockKernel;
         kernel->executionType = KernelExecutionType::Concurrent;
         commandQueue = reinterpret_cast<MockCommandQueue *>(new MockCommandQueueHw<FamilyType>(context, pClDevice, 0));
-        hwHelper = &HwHelper::get(kernel->getDevice().getHardwareInfo().platform.eRenderCoreFamily);
+        hwHelper = &HwHelper::get(pClDevice->getHardwareInfo().platform.eRenderCoreFamily);
     }
 
     template <typename FamilyType>
@@ -78,22 +79,20 @@ class SyncBufferHandlerTest : public SyncBufferEnqueueHandlerTest {
     }
 
     void patchAllocateSyncBuffer() {
-        sPatchAllocateSyncBuffer.SurfaceStateHeapOffset = 0;
-        sPatchAllocateSyncBuffer.DataParamOffset = 0;
-        sPatchAllocateSyncBuffer.DataParamSize = sizeof(uint8_t);
-        kernelInternals->kernelInfo.patchInfo.pAllocateSyncBuffer = &sPatchAllocateSyncBuffer;
+        kernelInternals->kernelInfo.setSyncBuffer(sizeof(uint8_t), 0, 0);
     }
 
     MockSyncBufferHandler *getSyncBufferHandler() {
-        return reinterpret_cast<MockSyncBufferHandler *>(pClDevice->syncBufferHandler.get());
+        return reinterpret_cast<MockSyncBufferHandler *>(pDevice->syncBufferHandler.get());
     }
 
     cl_int enqueueNDCount() {
-        return clEnqueueNDCountKernelINTEL(commandQueue, kernel, workDim, gwOffset, workgroupCount, lws, 0, nullptr, nullptr);
+        return clEnqueueNDCountKernelINTEL(commandQueue, kernelInternals->mockMultiDeviceKernel, workDim, gwOffset, workgroupCount, lws, 0, nullptr, nullptr);
     }
 
     bool isCooperativeDispatchSupported() {
-        return hwHelper->isCooperativeDispatchSupported(commandQueue->getGpgpuEngine().getEngineType(), kernel->getDevice().getHardwareInfo().platform.eProductFamily);
+        auto engineGroupType = hwHelper->getEngineGroupType(commandQueue->getGpgpuEngine().getEngineType(), hardwareInfo);
+        return hwHelper->isCooperativeDispatchSupported(engineGroupType, commandQueue->getDevice().getHardwareInfo().platform.eProductFamily);
     }
 
     const cl_uint workDim = 1;
@@ -105,7 +104,6 @@ class SyncBufferHandlerTest : public SyncBufferEnqueueHandlerTest {
     std::unique_ptr<MockKernelWithInternals> kernelInternals;
     MockKernel *kernel;
     MockCommandQueue *commandQueue;
-    SPatchAllocateSyncBuffer sPatchAllocateSyncBuffer;
     HwHelper *hwHelper;
 };
 
@@ -156,7 +154,7 @@ HWTEST_TEMPLATED_F(SyncBufferHandlerTest, GivenMaxWorkgroupCountWhenEnqueuingCon
 HWTEST_TEMPLATED_F(SyncBufferHandlerTest, GivenTooHighWorkgroupCountWhenEnqueuingConcurrentKernelThenErrorIsReturned) {
     size_t maxWorkGroupCount = kernel->getMaxWorkGroupCount(workDim, lws, commandQueue);
     workgroupCount[0] = maxWorkGroupCount + 1;
-    globalWorkSize[0] = maxWorkGroupCount * lws[0] + 1;
+    globalWorkSize[0] = maxWorkGroupCount * lws[0];
 
     auto retVal = enqueueNDCount();
     EXPECT_EQ(CL_INVALID_VALUE, retVal);
@@ -174,27 +172,27 @@ HWTEST_TEMPLATED_F(SyncBufferHandlerTest, GivenSyncBufferFullWhenEnqueuingKernel
 
 HWTEST_TEMPLATED_F(SyncBufferHandlerTest, GivenSshRequiredWhenPatchingSyncBufferThenSshIsProperlyPatched) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
-    kernelInternals->kernelInfo.usesSsh = true;
-    kernelInternals->kernelInfo.requiresSshForBuffers = true;
+    kernelInternals->kernelInfo.setBufferAddressingMode(KernelDescriptor::BindfulAndStateless);
+
     patchAllocateSyncBuffer();
 
-    pClDevice->allocateSyncBufferHandler();
+    pDevice->allocateSyncBufferHandler();
     auto syncBufferHandler = getSyncBufferHandler();
     auto surfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(ptrOffset(kernel->getSurfaceStateHeap(),
-                                                                           sPatchAllocateSyncBuffer.SurfaceStateHeapOffset));
+                                                                           kernel->getKernelInfo().kernelDescriptor.payloadMappings.implicitArgs.syncBufferAddress.bindful));
     auto bufferAddress = syncBufferHandler->graphicsAllocation->getGpuAddress();
     surfaceState->setSurfaceBaseAddress(bufferAddress + 1);
     auto surfaceAddress = surfaceState->getSurfaceBaseAddress();
     EXPECT_NE(bufferAddress, surfaceAddress);
 
-    kernel->patchSyncBuffer(commandQueue->getDevice(), syncBufferHandler->graphicsAllocation, syncBufferHandler->usedBufferSize);
+    kernel->patchSyncBuffer(syncBufferHandler->graphicsAllocation, syncBufferHandler->usedBufferSize);
     surfaceAddress = surfaceState->getSurfaceBaseAddress();
     EXPECT_EQ(bufferAddress, surfaceAddress);
 }
 
 TEST(SyncBufferHandlerDeviceTest, GivenRootDeviceWhenAllocateSyncBufferIsCalledTwiceThenTheObjectIsCreatedOnlyOnce) {
     const size_t testUsedBufferSize = 100;
-    MockClDevice rootDevice{new MockDevice};
+    MockDevice rootDevice;
     rootDevice.allocateSyncBufferHandler();
     auto syncBufferHandler = reinterpret_cast<MockSyncBufferHandler *>(rootDevice.syncBufferHandler.get());
 
@@ -208,20 +206,17 @@ TEST(SyncBufferHandlerDeviceTest, GivenRootDeviceWhenAllocateSyncBufferIsCalledT
 }
 
 TEST(SyncBufferHandlerDeviceTest, GivenSubDeviceWhenAllocateSyncBufferIsCalledTwiceThenTheObjectIsCreatedOnlyOnce) {
-    DebugManagerStateRestore restorer;
-    DebugManager.flags.CreateMultipleSubDevices.set(2);
-    VariableBackup<bool> mockDeviceFlagBackup(&MockDevice::createSingleDevice, false);
-    auto rootDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-    auto &subDevice = rootDevice->subDevices[0];
-    subDevice->allocateSyncBufferHandler();
-    auto syncBufferHandler = reinterpret_cast<MockSyncBufferHandler *>(subDevice->syncBufferHandler.get());
+    UltDeviceFactory ultDeviceFactory{1, 2};
+    auto pSubDevice = ultDeviceFactory.subDevices[0];
+    pSubDevice->allocateSyncBufferHandler();
+    auto syncBufferHandler = reinterpret_cast<MockSyncBufferHandler *>(pSubDevice->syncBufferHandler.get());
 
     const size_t testUsedBufferSize = 100;
     ASSERT_NE(syncBufferHandler->usedBufferSize, testUsedBufferSize);
     syncBufferHandler->usedBufferSize = testUsedBufferSize;
 
-    subDevice->allocateSyncBufferHandler();
-    syncBufferHandler = reinterpret_cast<MockSyncBufferHandler *>(subDevice->syncBufferHandler.get());
+    pSubDevice->allocateSyncBufferHandler();
+    syncBufferHandler = reinterpret_cast<MockSyncBufferHandler *>(pSubDevice->syncBufferHandler.get());
 
     EXPECT_EQ(testUsedBufferSize, syncBufferHandler->usedBufferSize);
 }

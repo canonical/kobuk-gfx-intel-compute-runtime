@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,33 +13,34 @@
 
 namespace L0 {
 
-static const std::multimap<drm_i915_gem_engine_class, zes_engine_group_t> i915ToEngineMap = {
-    {I915_ENGINE_CLASS_RENDER, ZES_ENGINE_GROUP_RENDER_SINGLE},
-    {I915_ENGINE_CLASS_VIDEO, ZES_ENGINE_GROUP_MEDIA_DECODE_SINGLE},
-    {I915_ENGINE_CLASS_VIDEO, ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE},
-    {I915_ENGINE_CLASS_COPY, ZES_ENGINE_GROUP_COPY_SINGLE}};
+static const std::multimap<__u16, zes_engine_group_t> i915ToEngineMap = {
+    {static_cast<__u16>(I915_ENGINE_CLASS_RENDER), ZES_ENGINE_GROUP_RENDER_SINGLE},
+    {static_cast<__u16>(I915_ENGINE_CLASS_VIDEO), ZES_ENGINE_GROUP_MEDIA_DECODE_SINGLE},
+    {static_cast<__u16>(I915_ENGINE_CLASS_VIDEO), ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE},
+    {static_cast<__u16>(I915_ENGINE_CLASS_COPY), ZES_ENGINE_GROUP_COPY_SINGLE},
+    {static_cast<__u16>(I915_ENGINE_CLASS_VIDEO_ENHANCE), ZES_ENGINE_GROUP_MEDIA_ENHANCEMENT_SINGLE}};
 
-static const std::multimap<zes_engine_group_t, drm_i915_gem_engine_class> engineToI915Map = {
-    {ZES_ENGINE_GROUP_RENDER_SINGLE, I915_ENGINE_CLASS_RENDER},
-    {ZES_ENGINE_GROUP_MEDIA_DECODE_SINGLE, I915_ENGINE_CLASS_VIDEO},
-    {ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE, I915_ENGINE_CLASS_VIDEO},
-    {ZES_ENGINE_GROUP_COPY_SINGLE, I915_ENGINE_CLASS_COPY}};
+static const std::multimap<zes_engine_group_t, __u16> engineToI915Map = {
+    {ZES_ENGINE_GROUP_RENDER_SINGLE, static_cast<__u16>(I915_ENGINE_CLASS_RENDER)},
+    {ZES_ENGINE_GROUP_MEDIA_DECODE_SINGLE, static_cast<__u16>(I915_ENGINE_CLASS_VIDEO)},
+    {ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE, static_cast<__u16>(I915_ENGINE_CLASS_VIDEO)},
+    {ZES_ENGINE_GROUP_COPY_SINGLE, static_cast<__u16>(I915_ENGINE_CLASS_COPY)},
+    {ZES_ENGINE_GROUP_MEDIA_ENHANCEMENT_SINGLE, static_cast<__u16>(I915_ENGINE_CLASS_VIDEO_ENHANCE)}};
 
-ze_result_t OsEngine::getNumEngineTypeAndInstances(std::multimap<zes_engine_group_t, uint32_t> &engineGroupInstance, OsSysman *pOsSysman) {
+ze_result_t OsEngine::getNumEngineTypeAndInstances(std::set<std::pair<zes_engine_group_t, EngineInstanceSubDeviceId>> &engineGroupInstance, OsSysman *pOsSysman) {
     LinuxSysmanImp *pLinuxSysmanImp = static_cast<LinuxSysmanImp *>(pOsSysman);
     NEO::Drm *pDrm = &pLinuxSysmanImp->getDrm();
 
-    if (pDrm->queryEngineInfo() == false) {
+    if (pDrm->sysmanQueryEngineInfo() == false) {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
     auto engineInfo = static_cast<NEO::EngineInfoImpl *>(pDrm->getEngineInfo());
     for (auto itr = engineInfo->engines.begin(); itr != engineInfo->engines.end(); ++itr) {
-        auto L0EngineEntryInMap = i915ToEngineMap.find(static_cast<drm_i915_gem_engine_class>(itr->engine.engine_class));
-        if (L0EngineEntryInMap == i915ToEngineMap.end()) {
-            continue;
+        auto i915ToEngineMapRange = i915ToEngineMap.equal_range(static_cast<__u16>(itr->engine.engine_class));
+        for (auto L0EngineEntryInMap = i915ToEngineMapRange.first; L0EngineEntryInMap != i915ToEngineMapRange.second; L0EngineEntryInMap++) {
+            auto L0EngineType = L0EngineEntryInMap->second;
+            engineGroupInstance.insert({L0EngineType, {static_cast<uint32_t>(itr->engine.engine_instance), 0}});
         }
-        auto L0EngineType = L0EngineEntryInMap->second;
-        engineGroupInstance.insert({L0EngineType, static_cast<uint32_t>(itr->engine.engine_instance)});
     }
     return ZE_RESULT_SUCCESS;
 }
@@ -49,7 +50,7 @@ ze_result_t LinuxEngineImp::getActivity(zes_engine_stats_t *pStats) {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
     uint64_t data[2] = {};
-    if (pPmuInterface->pmuReadSingle(static_cast<int>(fd), data, sizeof(data)) < 0) {
+    if (pPmuInterface->pmuRead(static_cast<int>(fd), data, sizeof(data)) < 0) {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
     // In data[], First u64 is "active time", And second u64 is "timestamp". Both in nanoseconds
@@ -61,7 +62,7 @@ ze_result_t LinuxEngineImp::getActivity(zes_engine_stats_t *pStats) {
 ze_result_t LinuxEngineImp::getProperties(zes_engine_properties_t &properties) {
     properties.type = engineGroup;
     properties.onSubdevice = 0;
-    properties.subdeviceId = 0;
+    properties.subdeviceId = subDeviceId;
     return ZE_RESULT_SUCCESS;
 }
 
@@ -71,7 +72,7 @@ void LinuxEngineImp::init() {
     fd = pPmuInterface->pmuInterfaceOpen(I915_PMU_ENGINE_BUSY(i915EngineClass->second, engineInstance), -1, PERF_FORMAT_TOTAL_TIME_ENABLED);
 }
 
-LinuxEngineImp::LinuxEngineImp(OsSysman *pOsSysman, zes_engine_group_t type, uint32_t engineInstance) : engineGroup(type), engineInstance(engineInstance) {
+LinuxEngineImp::LinuxEngineImp(OsSysman *pOsSysman, zes_engine_group_t type, uint32_t engineInstance, uint32_t subDeviceId) : engineGroup(type), engineInstance(engineInstance), subDeviceId(subDeviceId) {
     LinuxSysmanImp *pLinuxSysmanImp = static_cast<LinuxSysmanImp *>(pOsSysman);
     pDrm = &pLinuxSysmanImp->getDrm();
     pDevice = pLinuxSysmanImp->getDeviceHandle();
@@ -79,8 +80,8 @@ LinuxEngineImp::LinuxEngineImp(OsSysman *pOsSysman, zes_engine_group_t type, uin
     init();
 }
 
-OsEngine *OsEngine::create(OsSysman *pOsSysman, zes_engine_group_t type, uint32_t engineInstance) {
-    LinuxEngineImp *pLinuxEngineImp = new LinuxEngineImp(pOsSysman, type, engineInstance);
+OsEngine *OsEngine::create(OsSysman *pOsSysman, zes_engine_group_t type, uint32_t engineInstance, uint32_t subDeviceId) {
+    LinuxEngineImp *pLinuxEngineImp = new LinuxEngineImp(pOsSysman, type, engineInstance, subDeviceId);
     return static_cast<OsEngine *>(pLinuxEngineImp);
 }
 

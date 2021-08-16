@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_container/command_encoder.h"
+#include "shared/source/command_stream/stream_properties.h"
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/device_queue/device_queue_hw_base.inl"
@@ -58,13 +59,13 @@ void DeviceQueueHw<GfxFamily>::buildSlbDummyCommands() {
 
         addMiAtomicCmdWa((uint64_t)&igilCmdQueue->m_controls.m_DummyAtomicOperationPlaceholder);
 
-        auto mediaIdLoad = slbCS.getSpaceForCmd<MEDIA_INTERFACE_DESCRIPTOR_LOAD>();
-        *mediaIdLoad = GfxFamily::cmdInitMediaInterfaceDescriptorLoad;
-        mediaIdLoad->setInterfaceDescriptorTotalLength(2048);
+        auto mediaIdLoadSpace = slbCS.getSpaceForCmd<MEDIA_INTERFACE_DESCRIPTOR_LOAD>();
+        auto mediaIdLoad = GfxFamily::cmdInitMediaInterfaceDescriptorLoad;
+        mediaIdLoad.setInterfaceDescriptorTotalLength(2048);
 
         auto dataStartAddress = colorCalcStateSize;
-
-        mediaIdLoad->setInterfaceDescriptorDataStartAddress(dataStartAddress + sizeof(INTERFACE_DESCRIPTOR_DATA) * schedulerIDIndex);
+        mediaIdLoad.setInterfaceDescriptorDataStartAddress(dataStartAddress + sizeof(INTERFACE_DESCRIPTOR_DATA) * schedulerIDIndex);
+        *mediaIdLoadSpace = mediaIdLoad;
 
         addLriCmdWa(true);
 
@@ -79,14 +80,15 @@ void DeviceQueueHw<GfxFamily>::buildSlbDummyCommands() {
             addPipeControlCmdWa(true);
         }
 
-        auto gpgpuWalker = slbCS.getSpaceForCmd<GPGPU_WALKER>();
-        *gpgpuWalker = GfxFamily::cmdInitGpgpuWalker;
-        gpgpuWalker->setSimdSize(GPGPU_WALKER::SIMD_SIZE::SIMD_SIZE_SIMD16);
-        gpgpuWalker->setThreadGroupIdXDimension(1);
-        gpgpuWalker->setThreadGroupIdYDimension(1);
-        gpgpuWalker->setThreadGroupIdZDimension(1);
-        gpgpuWalker->setRightExecutionMask(0xFFFFFFFF);
-        gpgpuWalker->setBottomExecutionMask(0xFFFFFFFF);
+        auto gpgpuWalkerSpace = slbCS.getSpaceForCmd<GPGPU_WALKER>();
+        auto gpgpuWalker = GfxFamily::cmdInitGpgpuWalker;
+        gpgpuWalker.setSimdSize(GPGPU_WALKER::SIMD_SIZE::SIMD_SIZE_SIMD16);
+        gpgpuWalker.setThreadGroupIdXDimension(1);
+        gpgpuWalker.setThreadGroupIdYDimension(1);
+        gpgpuWalker.setThreadGroupIdZDimension(1);
+        gpgpuWalker.setRightExecutionMask(0xFFFFFFFF);
+        gpgpuWalker.setBottomExecutionMask(0xFFFFFFFF);
+        *gpgpuWalkerSpace = gpgpuWalker;
 
         mediaStateFlush = slbCS.getSpaceForCmd<MEDIA_STATE_FLUSH>();
         *mediaStateFlush = GfxFamily::cmdInitMediaStateFlush;
@@ -108,10 +110,11 @@ void DeviceQueueHw<GfxFamily>::buildSlbDummyCommands() {
     auto bbStartOffset = (commandsSize * 128) - slbCS.getUsed();
     slbCS.getSpace(bbStartOffset);
 
-    auto bbStart = slbCS.getSpaceForCmd<MI_BATCH_BUFFER_START>();
-    *bbStart = GfxFamily::cmdInitBatchBufferStart;
+    auto bbStartSpace = slbCS.getSpaceForCmd<MI_BATCH_BUFFER_START>();
+    auto bbStart = GfxFamily::cmdInitBatchBufferStart;
     auto slbPtr = reinterpret_cast<uintptr_t>(slbBuffer->getUnderlyingBuffer());
-    bbStart->setBatchBufferStartAddressGraphicsaddress472(slbPtr);
+    bbStart.setBatchBufferStartAddressGraphicsaddress472(slbPtr);
+    *bbStartSpace = bbStart;
 
     igilCmdQueue->m_controls.m_CleanupSectionSize = 0;
     igilQueue->m_controls.m_CleanupSectionAddress = 0;
@@ -123,14 +126,17 @@ void DeviceQueueHw<GfxFamily>::addMediaStateClearCmds() {
 
     addPipeControlCmdWa();
 
-    auto pipeControl = slbCS.getSpaceForCmd<PIPE_CONTROL>();
-    *pipeControl = GfxFamily::cmdInitPipeControl;
-    pipeControl->setGenericMediaStateClear(true);
-    pipeControl->setCommandStreamerStallEnable(true);
+    auto pipeControlSpace = slbCS.getSpaceForCmd<PIPE_CONTROL>();
+    auto pipeControl = GfxFamily::cmdInitPipeControl;
+    pipeControl.setGenericMediaStateClear(true);
+    pipeControl.setCommandStreamerStallEnable(true);
+    addDcFlushToPipeControlWa(&pipeControl);
+    *pipeControlSpace = pipeControl;
 
-    addDcFlushToPipeControlWa(pipeControl);
-
-    PreambleHelper<GfxFamily>::programVFEState(&slbCS, device->getHardwareInfo(), 0u, 0, device->getSharedDeviceInfo().maxFrontEndThreads, aub_stream::EngineType::ENGINE_RCS, AdditionalKernelExecInfo::NotApplicable);
+    auto pVfeState = PreambleHelper<GfxFamily>::getSpaceForVfeState(&slbCS, device->getHardwareInfo(), EngineGroupType::RenderCompute);
+    StreamProperties emptyProperties{};
+    PreambleHelper<GfxFamily>::programVfeState(pVfeState, device->getHardwareInfo(), 0u, 0, device->getSharedDeviceInfo().maxFrontEndThreads,
+                                               AdditionalKernelExecInfo::NotApplicable, emptyProperties);
 }
 
 template <typename GfxFamily>
@@ -149,13 +155,12 @@ template <typename GfxFamily>
 void DeviceQueueHw<GfxFamily>::setupIndirectState(IndirectHeap &surfaceStateHeap, IndirectHeap &dynamicStateHeap, Kernel *parentKernel, uint32_t parentIDCount, bool isCcsUsed) {
     using GPGPU_WALKER = typename GfxFamily::GPGPU_WALKER;
     void *pDSH = dynamicStateHeap.getCpuBase();
-
     // Set scheduler ID to last entry in first table, it will have ID == 0, blocks will have following entries.
     auto igilCmdQueue = reinterpret_cast<IGIL_CommandQueue *>(queueBuffer->getUnderlyingBuffer());
     igilCmdQueue->m_controls.m_IDTstart = colorCalcStateSize + sizeof(INTERFACE_DESCRIPTOR_DATA) * (interfaceDescriptorEntries - 2);
 
     // Parent's dsh is located after ColorCalcState and 2 ID tables
-    igilCmdQueue->m_controls.m_DynamicHeapStart = offsetDsh + alignUp((uint32_t)parentKernel->getDynamicStateHeapSize(), GPGPU_WALKER::INDIRECTDATASTARTADDRESS_ALIGN_SIZE);
+    igilCmdQueue->m_controls.m_DynamicHeapStart = offsetDsh + alignUp(static_cast<uint32_t>(parentKernel->getDynamicStateHeapSize()), GPGPU_WALKER::INDIRECTDATASTARTADDRESS_ALIGN_SIZE);
     igilCmdQueue->m_controls.m_DynamicHeapSizeInBytes = (uint32_t)dshBuffer->getUnderlyingBufferSize();
 
     igilCmdQueue->m_controls.m_CurrentDSHoffset = igilCmdQueue->m_controls.m_DynamicHeapStart;
@@ -180,7 +185,7 @@ void DeviceQueueHw<GfxFamily>::setupIndirectState(IndirectHeap &surfaceStateHeap
 
         auto blockKernelStartPointer = getBlockKernelStartPointer(getDevice(), pBlockInfo, isCcsUsed);
 
-        auto bindingTableCount = pBlockInfo->patchInfo.bindingTableState->Count;
+        auto bindingTableCount = static_cast<uint32_t>(pBlockInfo->kernelDescriptor.payloadMappings.bindingTable.numEntries);
         maxBindingTableCount = std::max(maxBindingTableCount, bindingTableCount);
 
         totalBlockSSHSize += alignUp(pBlockInfo->heapInfo.SurfaceStateHeapSize, BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE);
@@ -190,15 +195,14 @@ void DeviceQueueHw<GfxFamily>::setupIndirectState(IndirectHeap &surfaceStateHeap
                                                                                         pBlockInfo->heapInfo.pSsh,
                                                                                         pBlockInfo->heapInfo.SurfaceStateHeapSize,
                                                                                         bindingTableCount,
-                                                                                        pBlockInfo->patchInfo.bindingTableState->Offset);
+                                                                                        pBlockInfo->kernelDescriptor.payloadMappings.bindingTable.tableOffset);
 
         parentKernel->setReflectionSurfaceBlockBtOffset(i, static_cast<uint32_t>(btOffset));
 
         // Determine SIMD size
         uint32_t simd = pBlockInfo->getMaxSimdSize();
-        DEBUG_BREAK_IF(pBlockInfo->patchInfo.interfaceDescriptorData == nullptr);
 
-        uint32_t idOffset = pBlockInfo->patchInfo.interfaceDescriptorData->Offset;
+        uint32_t idOffset = pBlockInfo->kernelDescriptor.kernelMetadata.deviceSideEnqueueBlockInterfaceDescriptorOffset;
         const INTERFACE_DESCRIPTOR_DATA *pBlockID = static_cast<const INTERFACE_DESCRIPTOR_DATA *>(ptrOffset(pBlockInfo->heapInfo.pDsh, idOffset));
 
         pIDDestination[blockIndex + i] = *pBlockID;
@@ -206,16 +210,13 @@ void DeviceQueueHw<GfxFamily>::setupIndirectState(IndirectHeap &surfaceStateHeap
         pIDDestination[blockIndex + i].setKernelStartPointer(static_cast<uint32_t>(blockKernelStartPointer));
         pIDDestination[blockIndex + i].setDenormMode(INTERFACE_DESCRIPTOR_DATA::DENORM_MODE_SETBYKERNEL);
         EncodeDispatchKernel<GfxFamily>::programBarrierEnable(pIDDestination[blockIndex + i],
-                                                              pBlockInfo->patchInfo.executionEnvironment->HasBarriers,
-                                                              parentKernel->getDevice().getHardwareInfo());
+                                                              pBlockInfo->kernelDescriptor.kernelAttributes.barrierCount,
+                                                              device->getHardwareInfo());
 
         // Set offset to sampler states, block's DHSOffset is added by scheduler
         pIDDestination[blockIndex + i].setSamplerStatePointer(static_cast<uint32_t>(pBlockInfo->getBorderColorStateSize()));
 
-        auto threadPayload = pBlockInfo->patchInfo.threadPayload;
-        DEBUG_BREAK_IF(nullptr == threadPayload);
-
-        auto numChannels = PerThreadDataHelper::getNumLocalIdChannels(*threadPayload);
+        auto numChannels = pBlockInfo->kernelDescriptor.kernelAttributes.numLocalIdChannels;
         auto grfSize = device->getDeviceInfo().grfSize;
         auto sizePerThreadData = getPerThreadSizeLocalIDs(simd, grfSize, numChannels);
         auto numGrfPerThreadData = static_cast<uint32_t>(sizePerThreadData / grfSize);

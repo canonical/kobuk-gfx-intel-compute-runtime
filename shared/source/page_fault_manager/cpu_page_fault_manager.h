@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -26,7 +26,7 @@ class PageFaultManager : public NonCopyableOrMovableClass {
 
     virtual ~PageFaultManager() = default;
 
-    void moveAllocationToGpuDomain(void *ptr);
+    MOCKABLE_VIRTUAL void moveAllocationToGpuDomain(void *ptr);
     void moveAllocationsWithinUMAllocsManagerToGpuDomain(SVMAllocsManager *unifiedMemoryManager);
     void insertAllocation(void *ptr, size_t size, SVMAllocsManager *unifiedMemoryManager, void *cmdQ, const MemoryProperties &memoryProperties);
     void removeAllocation(void *ptr);
@@ -37,7 +37,6 @@ class PageFaultManager : public NonCopyableOrMovableClass {
         Gpu,
     };
 
-  protected:
     struct PageFaultData {
         size_t size;
         SVMAllocsManager *unifiedMemoryManager;
@@ -45,15 +44,26 @@ class PageFaultManager : public NonCopyableOrMovableClass {
         AllocationDomain domain;
     };
 
+    typedef void (*gpuDomainHandlerFunc)(PageFaultManager *pageFaultHandler, void *alloc, PageFaultData &pageFaultData);
+
+    void setGpuDomainHandler(gpuDomainHandlerFunc gpuHandlerFuncPtr);
+
     virtual void allowCPUMemoryAccess(void *ptr, size_t size) = 0;
     virtual void protectCPUMemoryAccess(void *ptr, size_t size) = 0;
+    MOCKABLE_VIRTUAL void transferToCpu(void *ptr, size_t size, void *cmdQ);
 
+  protected:
     virtual void evictMemoryAfterImplCopy(GraphicsAllocation *allocation, Device *device) = 0;
 
     MOCKABLE_VIRTUAL bool verifyPageFault(void *ptr);
-    MOCKABLE_VIRTUAL void transferToCpu(void *ptr, size_t size, void *cmdQ);
     MOCKABLE_VIRTUAL void transferToGpu(void *ptr, void *cmdQ);
     MOCKABLE_VIRTUAL void setAubWritable(bool writable, void *ptr, SVMAllocsManager *unifiedMemoryManager);
+
+    static void handleGpuDomainTransferForHw(PageFaultManager *pageFaultHandler, void *alloc, PageFaultData &pageFaultData);
+    static void handleGpuDomainTransferForAubAndTbx(PageFaultManager *pageFaultHandler, void *alloc, PageFaultData &pageFaultData);
+    void selectGpuDomainHandler();
+
+    decltype(&handleGpuDomainTransferForHw) gpuDomainHandler = &handleGpuDomainTransferForHw;
 
     std::unordered_map<void *, PageFaultData> memoryData;
     SpinLock mtx;

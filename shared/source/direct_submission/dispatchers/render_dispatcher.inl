@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -29,7 +29,8 @@ template <typename GfxFamily>
 inline void RenderDispatcher<GfxFamily>::dispatchMonitorFence(LinearStream &cmdBuffer,
                                                               uint64_t gpuAddress,
                                                               uint64_t immediateData,
-                                                              const HardwareInfo &hwInfo) {
+                                                              const HardwareInfo &hwInfo,
+                                                              bool useNotifyEnable) {
     using POST_SYNC_OPERATION = typename GfxFamily::PIPE_CONTROL::POST_SYNC_OPERATION;
     PipeControlArgs args(true);
     MemorySynchronizationCommands<GfxFamily>::addPipeControlAndProgramPostSyncOperation(
@@ -48,14 +49,29 @@ inline size_t RenderDispatcher<GfxFamily>::getSizeMonitorFence(const HardwareInf
 }
 
 template <typename GfxFamily>
-inline void RenderDispatcher<GfxFamily>::dispatchCacheFlush(LinearStream &cmdBuffer, const HardwareInfo &hwInfo) {
+inline void RenderDispatcher<GfxFamily>::dispatchCacheFlush(LinearStream &cmdBuffer, const HardwareInfo &hwInfo, uint64_t address) {
     MemorySynchronizationCommands<GfxFamily>::addFullCacheFlush(cmdBuffer);
+}
+
+template <typename GfxFamily>
+inline void RenderDispatcher<GfxFamily>::dispatchTlbFlush(LinearStream &cmdBuffer, uint64_t address) {
+    PipeControlArgs args(false);
+    args.tlbInvalidation = true;
+    args.pipeControlFlushEnable = true;
+    args.textureCacheInvalidationEnable = true;
+
+    MemorySynchronizationCommands<GfxFamily>::addPipeControl(cmdBuffer, args);
 }
 
 template <typename GfxFamily>
 inline size_t RenderDispatcher<GfxFamily>::getSizeCacheFlush(const HardwareInfo &hwInfo) {
     size_t size = MemorySynchronizationCommands<GfxFamily>::getSizeForFullCacheFlush();
     return size;
+}
+
+template <typename GfxFamily>
+inline size_t RenderDispatcher<GfxFamily>::getSizeTlbFlush() {
+    return MemorySynchronizationCommands<GfxFamily>::getSizeForSinglePipeControl();
 }
 
 } // namespace NEO

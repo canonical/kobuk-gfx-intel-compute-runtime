@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -94,16 +94,18 @@ void DeviceQueueHw<GfxFamily>::resetDeviceQueue() {
 
 template <typename GfxFamily>
 void DeviceQueueHw<GfxFamily>::initPipeControl(PIPE_CONTROL *pc) {
-    *pc = GfxFamily::cmdInitPipeControl;
-    pc->setStateCacheInvalidationEnable(0x1);
-    pc->setDcFlushEnable(true);
-    pc->setPipeControlFlushEnable(true);
-    pc->setTextureCacheInvalidationEnable(true);
-    pc->setCommandStreamerStallEnable(true);
+    auto cmd = GfxFamily::cmdInitPipeControl;
+    cmd.setStateCacheInvalidationEnable(0x1);
+    cmd.setDcFlushEnable(true);
+    cmd.setPipeControlFlushEnable(true);
+    cmd.setTextureCacheInvalidationEnable(true);
+    cmd.setCommandStreamerStallEnable(true);
+
+    *pc = cmd;
 }
 
 template <typename GfxFamily>
-void DeviceQueueHw<GfxFamily>::addExecutionModelCleanUpSection(Kernel *parentKernel, TagNode<HwTimeStamps> *hwTimeStamp, uint64_t tagAddress, uint32_t taskCount) {
+void DeviceQueueHw<GfxFamily>::addExecutionModelCleanUpSection(Kernel *parentKernel, TagNodeBase *hwTimeStamp, uint64_t tagAddress, uint32_t taskCount) {
     // CleanUp Section
     auto offset = slbCS.getUsed();
     auto alignmentSize = alignUp(offset, MemoryConstants::pageSize) - offset;
@@ -256,7 +258,7 @@ uint64_t DeviceQueueHw<GfxFamily>::getBlockKernelStartPointer(const Device &devi
     auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
 
     if (blockAllocation && isCcsUsed && hwHelper.isOffsetToSkipSetFFIDGPWARequired(hardwareInfo)) {
-        blockKernelStartPointer += blockInfo->patchInfo.threadPayload->OffsetToSkipSetFFIDGP;
+        blockKernelStartPointer += blockInfo->kernelDescriptor.entryPoints.skipSetFFIDGP;
     }
     return blockKernelStartPointer;
 }

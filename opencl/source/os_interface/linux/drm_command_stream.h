@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -22,14 +22,18 @@ class DrmMemoryManager;
 template <typename GfxFamily>
 class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
   protected:
-    typedef DeviceCommandStreamReceiver<GfxFamily> BaseClass;
-    using CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiver::getTagAddress;
+    using BaseClass = DeviceCommandStreamReceiver<GfxFamily>;
+
     using BaseClass::getScratchPatchAddress;
     using BaseClass::makeNonResident;
     using BaseClass::makeResident;
     using BaseClass::mediaVfeStateDirty;
     using BaseClass::osContext;
     using BaseClass::requiredScratchSize;
+    using CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiver::getTagAddress;
+    using CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiver::getTagAllocation;
+    using CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiver::taskCount;
+    using CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiver::useNotifyEnableForPostSync;
 
   public:
     // When drm is null default implementation is used. In this case DrmCommandStreamReceiver is responsible to free drm.
@@ -43,6 +47,7 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
     MOCKABLE_VIRTUAL void processResidency(const ResidencyContainer &allocationsForResidency, uint32_t handleId) override;
     void makeNonResident(GraphicsAllocation &gfxAllocation) override;
     bool waitForFlushStamp(FlushStamp &flushStampToWait) override;
+    bool isKmdWaitModeActive() override;
 
     DrmMemoryManager *getMemoryManager() const;
     GmmPageTableMngr *createPageTableManager() override;
@@ -55,13 +60,22 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
         gemCloseWorkerOperationMode = gemCloseWorkerMode::gemCloseWorkerInactive;
     }
 
+    void printBOsForSubmit(ResidencyContainer &allocationsForResidency, GraphicsAllocation &cmdBufferAllocation);
+
   protected:
     MOCKABLE_VIRTUAL void flushInternal(const BatchBuffer &batchBuffer, const ResidencyContainer &allocationsForResidency);
     MOCKABLE_VIRTUAL void exec(const BatchBuffer &batchBuffer, uint32_t vmHandleId, uint32_t drmContextId);
+    MOCKABLE_VIRTUAL int waitUserFence(uint32_t waitValue);
+    bool isUserFenceWaitActive();
 
     std::vector<BufferObject *> residency;
     std::vector<drm_i915_gem_exec_object2> execObjectsStorage;
     Drm *drm;
     gemCloseWorkerMode gemCloseWorkerOperationMode;
+
+    int32_t kmdWaitTimeout = -1;
+
+    bool useUserFenceWait = false;
+    bool useContextForUserFenceWait = true;
 };
 } // namespace NEO

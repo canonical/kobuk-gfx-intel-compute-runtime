@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -28,14 +28,20 @@ struct CommandQueueHwFixture {
         ClDevice *device,
         const cl_command_queue_properties *properties);
 
+    CommandQueue *createCommandQueue(
+        ClDevice *device,
+        const cl_command_queue_properties *properties,
+        Context *context);
+
     virtual void SetUp();
     virtual void SetUp(ClDevice *pDevice, cl_command_queue_properties properties);
 
     virtual void TearDown();
 
     CommandQueue *pCmdQ = nullptr;
-    ClDevice *device = nullptr;
+    MockClDevice *device = nullptr;
     MockContext *context = nullptr;
+    bool createdDevice = false;
 };
 
 struct OOQueueFixture : public CommandQueueHwFixture {
@@ -58,7 +64,8 @@ struct CommandQueueFixture {
     CommandQueue *createCommandQueue(
         Context *context,
         ClDevice *device,
-        cl_command_queue_properties properties);
+        cl_command_queue_properties properties,
+        bool internalUsage);
 
     CommandQueue *pCmdQ = nullptr;
 };

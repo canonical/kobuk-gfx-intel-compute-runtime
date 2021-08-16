@@ -1,14 +1,14 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/direct_submission/dispatchers/render_dispatcher.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
+#include "shared/test/common/fixtures/preemption_fixture.h"
 #include "shared/test/unit_test/direct_submission/dispatchers/dispatcher_fixture.h"
-#include "shared/test/unit_test/fixtures/preemption_fixture.h"
 
 #include "test.h"
 
@@ -64,7 +64,7 @@ HWTEST_F(RenderDispatcherTest, givenRenderWhenAddingMonitorFenceCmdThenExpectPip
     uint32_t gpuVaLow = static_cast<uint32_t>(gpuVa & 0x0000FFFFFFFFull);
     uint32_t gpuVaHigh = static_cast<uint32_t>(gpuVa >> 32);
 
-    RenderDispatcher<FamilyType>::dispatchMonitorFence(cmdBuffer, gpuVa, value, hardwareInfo);
+    RenderDispatcher<FamilyType>::dispatchMonitorFence(cmdBuffer, gpuVa, value, hardwareInfo, false);
 
     HardwareParse hwParse;
     hwParse.parseCommands<FamilyType>(cmdBuffer);
@@ -96,7 +96,7 @@ HWTEST_F(RenderDispatcherTest, givenRenderWhenAskingForCacheFlushCmdSizeThenRetu
 HWTEST_F(RenderDispatcherTest, givenRenderWhenAddingCacheFlushCmdThenExpectPipeControlWithProperFields) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
-    RenderDispatcher<FamilyType>::dispatchCacheFlush(cmdBuffer, hardwareInfo);
+    RenderDispatcher<FamilyType>::dispatchCacheFlush(cmdBuffer, hardwareInfo, 0ull);
 
     HardwareParse hwParse;
     hwParse.parseCommands<FamilyType>(cmdBuffer);

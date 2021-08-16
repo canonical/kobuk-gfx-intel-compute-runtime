@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,8 +10,9 @@
 #include "level_zero/tools/source/sysman/linux/fs_access.h"
 #include "level_zero/tools/source/sysman/sysman_const.h"
 
-#include "sysman/linux/os_sysman_imp.h"
 #include "sysman/pci/pci_imp.h"
+
+#include <linux/pci_regs.h>
 
 namespace L0 {
 
@@ -20,15 +21,6 @@ const std::string LinuxPciImp::resourceFile("device/resource");
 const std::string LinuxPciImp::maxLinkSpeedFile("device/max_link_speed");
 const std::string LinuxPciImp::maxLinkWidthFile("device/max_link_width");
 
-std::string LinuxPciImp::changeDirNLevelsUp(std::string realRootPath, uint8_t nLevel) {
-    size_t loc;
-    while (nLevel > 0) {
-        loc = realRootPath.find_last_of('/');
-        realRootPath = realRootPath.substr(0, loc);
-        nLevel--;
-    }
-    return realRootPath;
-}
 ze_result_t LinuxPciImp::getProperties(zes_pci_properties_t *properties) {
     properties->haveBandwidthCounters = false;
     properties->havePacketCounters = false;
@@ -52,14 +44,14 @@ ze_result_t LinuxPciImp::getMaxLinkSpeed(double &maxLinkSpeed) {
         std::string rootPortPath;
         std::string realRootPath;
         result = pSysfsAccess->getRealPath(deviceDir, realRootPath);
-        // we need to change the absolute path to two levels up to get actual
-        // values of speed and width at the Discrete card's root port.
-        // the root port is always at a fixed distance as defined in HW
-        rootPortPath = changeDirNLevelsUp(realRootPath, 2);
         if (ZE_RESULT_SUCCESS != result) {
             maxLinkSpeed = 0;
             return result;
         }
+
+        // we need to get actual values of speed and width at the Discrete card's root port.
+        rootPortPath = pLinuxSysmanImp->getPciRootPortDirectoryPath(realRootPath);
+
         result = pfsAccess->read(rootPortPath + '/' + "max_link_speed", maxLinkSpeed);
         if (ZE_RESULT_SUCCESS != result) {
             maxLinkSpeed = 0;
@@ -81,14 +73,14 @@ ze_result_t LinuxPciImp::getMaxLinkWidth(int32_t &maxLinkwidth) {
         std::string rootPortPath;
         std::string realRootPath;
         result = pSysfsAccess->getRealPath(deviceDir, realRootPath);
-        // we need to change the absolute path to two levels up to get actual
-        // values of speed and width at the Discrete card's root port.
-        // the root port is always at a fixed distance as defined in HW
-        rootPortPath = changeDirNLevelsUp(realRootPath, 2);
         if (ZE_RESULT_SUCCESS != result) {
             maxLinkwidth = -1;
             return result;
         }
+
+        // we need to get actual values of speed and width at the Discrete card's root port.
+        rootPortPath = pLinuxSysmanImp->getPciRootPortDirectoryPath(realRootPath);
+
         result = pfsAccess->read(rootPortPath + '/' + "max_link_width", maxLinkwidth);
         if (ZE_RESULT_SUCCESS != result) {
             maxLinkwidth = -1;
@@ -135,6 +127,7 @@ ze_result_t LinuxPciImp::initializeBarProperties(std::vector<zes_pci_bar_propert
         getBarBaseAndSize(ReadBytes[i], baseAddr, barSize, barFlags);
         if (baseAddr && !(barFlags & 0x1)) { // we do not update for I/O ports
             zes_pci_bar_properties_t *pBarProp = new zes_pci_bar_properties_t;
+            memset(pBarProp, 0, sizeof(zes_pci_bar_properties_t));
             pBarProp->index = i;
             pBarProp->base = baseAddr;
             pBarProp->size = barSize;
@@ -159,15 +152,68 @@ ze_result_t LinuxPciImp::initializeBarProperties(std::vector<zes_pci_bar_propert
     return result;
 }
 
+// Parse PCIe configuration space to see if resizable Bar is supported
+bool LinuxPciImp::resizableBarSupported() {
+    uint32_t pos = PCI_CFG_SPACE_SIZE;
+    uint32_t header = 0;
+
+    if (!configMemory) {
+        return false;
+    }
+
+    // Minimum 8 bytes per capability. Hence maximum capabilities that
+    // could be present in PCI extended configuration space are
+    // represented by loopCount.
+    auto loopCount = (PCI_CFG_SPACE_EXP_SIZE - PCI_CFG_SPACE_SIZE) / 8;
+    header = getDwordFromConfig(pos);
+    if (!header) {
+        return false;
+    }
+
+    while (loopCount-- > 0) {
+        if (PCI_EXT_CAP_ID(header) == PCI_EXT_CAP_ID_REBAR) {
+            return true;
+        }
+        pos = PCI_EXT_CAP_NEXT(header);
+        if (pos < PCI_CFG_SPACE_SIZE) {
+            return false;
+        }
+        header = getDwordFromConfig(pos);
+    }
+    return false;
+}
+
+bool LinuxPciImp::resizableBarEnabled() {
+    return false;
+}
+
 ze_result_t LinuxPciImp::getState(zes_pci_state_t *state) {
     return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
 }
+
+void LinuxPciImp::pciExtendedConfigRead() {
+    std::string pciConfigNode;
+    pSysfsAccess->getRealPath("device/config", pciConfigNode);
+    int fdConfig = -1;
+    fdConfig = this->openFunction(pciConfigNode.c_str(), O_RDONLY);
+    if (fdConfig < 0) {
+        return;
+    }
+    configMemory = std::make_unique<uint8_t[]>(PCI_CFG_SPACE_EXP_SIZE);
+    memset(configMemory.get(), 0, PCI_CFG_SPACE_EXP_SIZE);
+    this->preadFunction(fdConfig, configMemory.get(), PCI_CFG_SPACE_EXP_SIZE, 0);
+    this->closeFunction(fdConfig);
+}
+
 LinuxPciImp::LinuxPciImp(OsSysman *pOsSysman) {
-    LinuxSysmanImp *pLinuxSysmanImp = static_cast<LinuxSysmanImp *>(pOsSysman);
+    pLinuxSysmanImp = static_cast<LinuxSysmanImp *>(pOsSysman);
     pSysfsAccess = &pLinuxSysmanImp->getSysfsAccess();
     pfsAccess = &pLinuxSysmanImp->getFsAccess();
     Device *pDevice = pLinuxSysmanImp->getDeviceHandle();
     isLmemSupported = pDevice->getDriverHandle()->getMemoryManager()->isLocalMemorySupported(pDevice->getRootDeviceIndex());
+    if (pSysfsAccess->isRootUser()) {
+        pciExtendedConfigRead();
+    }
 }
 
 OsPci *OsPci::create(OsSysman *pOsSysman) {

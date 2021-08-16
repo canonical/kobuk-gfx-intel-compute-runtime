@@ -1,11 +1,12 @@
 #
-# Copyright (C) 2017-2020 Intel Corporation
+# Copyright (C) 2018-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
 
 set(IGDRCL_SRCS_tests_kernel
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+    ${CMAKE_CURRENT_SOURCE_DIR}/cache_flush_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/clone_kernel_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/image_transformer_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_accelerator_arg_tests.cpp
@@ -15,7 +16,7 @@ set(IGDRCL_SRCS_tests_kernel
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_arg_info_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_arg_pipe_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_arg_svm_tests.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/kernel_cache_flush_requirements_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernel_cache_flush_requirements_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_info_cl_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_image_arg_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_immediate_arg_tests.cpp
@@ -30,6 +31,12 @@ set(IGDRCL_SRCS_tests_kernel
     ${CMAKE_CURRENT_SOURCE_DIR}/parent_kernel_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/substitute_kernel_heap_tests.cpp
 )
+
+if(TESTS_XEHP_PLUS)
+  list(APPEND IGDRCL_SRCS_tests_kernel
+       ${CMAKE_CURRENT_SOURCE_DIR}/cache_flush_xehp_plus_tests.inl
+  )
+endif()
 
 target_sources(igdrcl_tests PRIVATE ${IGDRCL_SRCS_tests_kernel})
 add_subdirectories()

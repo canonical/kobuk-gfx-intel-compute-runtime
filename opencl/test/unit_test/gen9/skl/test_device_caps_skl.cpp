@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -36,11 +36,11 @@ typedef Test<ClDeviceFixture> SklUsDeviceIdTest;
 
 SKLTEST_F(SklUsDeviceIdTest, WhenCheckingIsSimulationThenTrueReturnedOnlyForSimulationId) {
     unsigned short sklSimulationIds[6] = {
-        ISKL_GT0_DESK_DEVICE_F0_ID,
-        ISKL_GT1_DESK_DEVICE_F0_ID,
-        ISKL_GT2_DESK_DEVICE_F0_ID,
-        ISKL_GT3_DESK_DEVICE_F0_ID,
-        ISKL_GT4_DESK_DEVICE_F0_ID,
+        0x0900,
+        0x0901,
+        0x0902,
+        0x0903,
+        0x0904,
         0, // default, non-simulation
     };
     NEO::MockDevice *mockDevice = nullptr;

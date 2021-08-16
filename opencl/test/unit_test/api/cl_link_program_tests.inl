@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,7 +8,7 @@
 #include "shared/source/compiler_interface/compiler_interface.h"
 #include "shared/source/device_binary_format/elf/elf_decoder.h"
 #include "shared/source/helpers/file_io.h"
-#include "shared/test/unit_test/helpers/test_files.h"
+#include "shared/test/common/helpers/test_files.h"
 
 #include "opencl/source/context/context.h"
 #include "opencl/test/unit_test/global_environment.h"
@@ -176,7 +176,6 @@ TEST_F(clLinkProgramTests, GivenProgramsWithSpecConstantsThenSpecConstantsAreEmb
     uint64_t prog2Values[1] = {13};
 
     auto progSrc1 = clUniquePtr(new MockProgram(pContext, false, toClDeviceVector(*pDevice)));
-    progSrc1->pDevice = pProgram->pDevice;
     progSrc1->specConstantsValues[prog1Keys[0]] = prog1Values[0];
     progSrc1->specConstantsValues[prog1Keys[1]] = prog1Values[1];
     progSrc1->areSpecializationConstantsInitialized = true;
@@ -185,7 +184,6 @@ TEST_F(clLinkProgramTests, GivenProgramsWithSpecConstantsThenSpecConstantsAreEmb
     progSrc1->isSpirV = true;
 
     auto progSrc2 = clUniquePtr(new MockProgram(pContext, false, toClDeviceVector(*pDevice)));
-    progSrc2->pDevice = pProgram->pDevice;
     progSrc2->specConstantsValues[prog2Keys[0]] = prog2Values[0];
     progSrc2->areSpecializationConstantsInitialized = true;
     progSrc2->irBinary = makeCopy(ir2, sizeof(ir2));
@@ -193,13 +191,11 @@ TEST_F(clLinkProgramTests, GivenProgramsWithSpecConstantsThenSpecConstantsAreEmb
     progSrc2->isSpirV = true;
 
     auto progSrc3 = clUniquePtr(new MockProgram(pContext, false, toClDeviceVector(*pDevice)));
-    progSrc3->pDevice = pProgram->pDevice;
     progSrc3->irBinary = makeCopy(ir3, sizeof(ir3));
     progSrc3->irBinarySize = sizeof(ir3);
     progSrc3->isSpirV = true;
 
     auto progDst = clUniquePtr(new MockProgram(pContext, false, toClDeviceVector(*pDevice)));
-    progDst->pDevice = pProgram->pDevice;
     cl_program inputPrograms[3] = {progSrc1.get(), progSrc2.get(), progSrc3.get()};
 
     std::string receivedInput;

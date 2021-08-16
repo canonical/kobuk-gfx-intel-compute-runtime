@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -12,6 +12,7 @@
 #include "opencl/source/helpers/surface_formats.h"
 #include "opencl/source/mem_obj/image.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
+#include "opencl/test/unit_test/fixtures/image_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 
 #include "gtest/gtest.h"
@@ -226,3 +227,11 @@ INSTANTIATE_TEST_CASE_P(
     testing::Combine(
         ::testing::Range(readWriteSurfaceFormatsStart, SurfaceFormats::readWrite().size()),
         ::testing::ValuesIn(ImageTypes)));
+
+TEST(ImageRedescribeTestSimple, givenImageWhenItIsRedescribedThenCreateFunctionIsSameAsInOriginalImage) {
+    MockContext context;
+    std::unique_ptr<Image> image(ImageHelper<Image1dDefaults>::create(&context));
+    std::unique_ptr<Image> imageNew(image->redescribe());
+    ASSERT_NE(nullptr, imageNew);
+    EXPECT_EQ(image->createFunction, imageNew->createFunction);
+}

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -20,7 +20,7 @@ BXTTEST_F(BxtDeviceCaps, WhenCheckingProfilingTimerResolutionThenCorrectResoluti
 BXTTEST_F(BxtDeviceCaps, givenBxtDeviceWhenAskedFor32BitSupportThenCorrectValuesAreReturned) {
     const auto &sharedCaps = pDevice->getDeviceInfo();
     auto memoryManager = pDevice->getMemoryManager();
-    if (is64bit) {
+    if constexpr (is64bit) {
         EXPECT_TRUE(memoryManager->peekForce32BitAllocations());
         EXPECT_TRUE(sharedCaps.force32BitAddressess);
     } else {
@@ -46,8 +46,8 @@ typedef Test<ClDeviceFixture> BxtUsDeviceIdTest;
 
 BXTTEST_F(BxtUsDeviceIdTest, WhenCheckingIsSimulationThenTrueReturnedOnlyForSimulationId) {
     unsigned short bxtSimulationIds[3] = {
-        IBXT_A_DEVICE_F0_ID,
-        IBXT_C_DEVICE_F0_ID,
+        0x9906,
+        0x9907,
         0, // default, non-simulation
     };
     NEO::MockDevice *mockDevice = nullptr;

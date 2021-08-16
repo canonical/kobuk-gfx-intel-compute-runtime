@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,6 +13,7 @@ namespace L0 {
 
 struct EventPool;
 struct Event;
+constexpr size_t maxImmediateCommandSize = 4 * MemoryConstants::kiloByte;
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 struct CommandListCoreFamilyImmediate : public CommandListCoreFamily<gfxCoreFamily> {
@@ -50,11 +51,15 @@ struct CommandListCoreFamilyImmediate : public CommandListCoreFamily<gfxCoreFami
                                        const ze_copy_region_t *srcRegion,
                                        uint32_t srcPitch,
                                        uint32_t srcSlicePitch,
-                                       ze_event_handle_t hSignalEvent) override;
+                                       ze_event_handle_t hSignalEvent,
+                                       uint32_t numWaitEvents,
+                                       ze_event_handle_t *phWaitEvents) override;
 
     ze_result_t appendMemoryFill(void *ptr, const void *pattern,
                                  size_t patternSize, size_t size,
-                                 ze_event_handle_t hEvent) override;
+                                 ze_event_handle_t hSignalEvent,
+                                 uint32_t numWaitEvents,
+                                 ze_event_handle_t *phWaitEvents) override;
 
     ze_result_t appendSignalEvent(ze_event_handle_t hEvent) override;
 
@@ -85,6 +90,27 @@ struct CommandListCoreFamilyImmediate : public CommandListCoreFamily<gfxCoreFami
                                         ze_event_handle_t hEvent,
                                         uint32_t numWaitEvents,
                                         ze_event_handle_t *phWaitEvents) override;
+
+    ze_result_t appendImageCopy(
+        ze_image_handle_t dst, ze_image_handle_t src,
+        ze_event_handle_t hEvent,
+        uint32_t numWaitEvents,
+        ze_event_handle_t *phWaitEvents) override;
+
+    ze_result_t appendImageCopyRegion(ze_image_handle_t hDstImage,
+                                      ze_image_handle_t hSrcImage,
+                                      const ze_image_region_t *pDstRegion,
+                                      const ze_image_region_t *pSrcRegion,
+                                      ze_event_handle_t hEvent,
+                                      uint32_t numWaitEvents,
+                                      ze_event_handle_t *phWaitEvents) override;
+
+    ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration);
+
+    void checkAvailableSpace();
+
+  protected:
+    size_t cmdListBBEndOffset = 0;
 };
 
 template <PRODUCT_FAMILY gfxProductFamily>

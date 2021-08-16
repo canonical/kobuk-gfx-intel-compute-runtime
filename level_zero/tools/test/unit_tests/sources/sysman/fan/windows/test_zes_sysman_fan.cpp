@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -18,9 +18,11 @@ class SysmanDeviceFanFixture : public SysmanDeviceFixture {
   protected:
     std::unique_ptr<Mock<FanKmdSysManager>> pKmdSysManager;
     KmdSysManager *pOriginalKmdSysManager = nullptr;
-    void SetUp(bool allowSetCalls) { // NOLINT(readability-identifier-naming)
+    void SetUp() override {
         SysmanDeviceFixture::SetUp();
+    }
 
+    void init(bool allowSetCalls) {
         pKmdSysManager.reset(new Mock<FanKmdSysManager>);
 
         pKmdSysManager->allowSetCalls = allowSetCalls;
@@ -51,7 +53,7 @@ class SysmanDeviceFanFixture : public SysmanDeviceFixture {
 };
 
 TEST_F(SysmanDeviceFanFixture, GivenComponentCountZeroWhenEnumeratingFansThenValidCountIsReturnedAndVerifySysmanPowerGetCallSucceeds) {
-    SetUp(true);
+    init(true);
 
     uint32_t count = 0;
     EXPECT_EQ(zesDeviceEnumFans(device->toHandle(), &count, nullptr), ZE_RESULT_SUCCESS);
@@ -59,7 +61,7 @@ TEST_F(SysmanDeviceFanFixture, GivenComponentCountZeroWhenEnumeratingFansThenVal
 }
 
 TEST_F(SysmanDeviceFanFixture, GivenInvalidComponentCountWhenEnumeratingFansThenValidCountIsReturnedAndVerifySysmanPowerGetCallSucceeds) {
-    SetUp(true);
+    init(true);
 
     uint32_t count = 0;
     EXPECT_EQ(zesDeviceEnumFans(device->toHandle(), &count, nullptr), ZE_RESULT_SUCCESS);
@@ -71,7 +73,7 @@ TEST_F(SysmanDeviceFanFixture, GivenInvalidComponentCountWhenEnumeratingFansThen
 }
 
 TEST_F(SysmanDeviceFanFixture, GivenComponentCountZeroWhenEnumeratingFansThenValidPowerHandlesIsReturned) {
-    SetUp(true);
+    init(true);
 
     uint32_t count = 0;
     EXPECT_EQ(zesDeviceEnumFans(device->toHandle(), &count, nullptr), ZE_RESULT_SUCCESS);
@@ -86,7 +88,7 @@ TEST_F(SysmanDeviceFanFixture, GivenComponentCountZeroWhenEnumeratingFansThenVal
 
 TEST_F(SysmanDeviceFanFixture, GivenValidPowerHandleWhenGettingFanPropertiesAllowSetToTrueThenCallSucceeds) {
     // Setting allow set calls or not
-    SetUp(true);
+    init(true);
 
     auto handles = get_fan_handles(fanHandleComponentCount);
 
@@ -101,14 +103,14 @@ TEST_F(SysmanDeviceFanFixture, GivenValidPowerHandleWhenGettingFanPropertiesAllo
         EXPECT_TRUE(properties.canControl);
         EXPECT_EQ(properties.maxPoints, pKmdSysManager->mockFanMaxPoints);
         EXPECT_EQ(properties.maxRPM, -1);
-        EXPECT_EQ(properties.supportedModes, 1);
-        EXPECT_EQ(properties.supportedUnits, 1);
+        EXPECT_EQ(properties.supportedModes, zes_fan_speed_mode_t::ZES_FAN_SPEED_MODE_TABLE);
+        EXPECT_EQ(properties.supportedUnits, zes_fan_speed_units_t::ZES_FAN_SPEED_UNITS_PERCENT);
     }
 }
 
 TEST_F(SysmanDeviceFanFixture, GivenValidPowerHandleWhenGettingFanPropertiesAllowSetToFalseThenCallSucceeds) {
     // Setting allow set calls or not
-    SetUp(false);
+    init(false);
 
     auto handles = get_fan_handles(fanHandleComponentCount);
 
@@ -123,14 +125,14 @@ TEST_F(SysmanDeviceFanFixture, GivenValidPowerHandleWhenGettingFanPropertiesAllo
         EXPECT_FALSE(properties.canControl);
         EXPECT_EQ(properties.maxPoints, pKmdSysManager->mockFanMaxPoints);
         EXPECT_EQ(properties.maxRPM, -1);
-        EXPECT_EQ(properties.supportedModes, 1);
-        EXPECT_EQ(properties.supportedUnits, 1);
+        EXPECT_EQ(properties.supportedModes, zes_fan_speed_mode_t::ZES_FAN_SPEED_MODE_TABLE);
+        EXPECT_EQ(properties.supportedUnits, zes_fan_speed_units_t::ZES_FAN_SPEED_UNITS_PERCENT);
     }
 }
 
 TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanConfigThenUnsupportedIsReturned) {
     // Setting allow set calls or not
-    SetUp(true);
+    init(true);
 
     auto handles = get_fan_handles(fanHandleComponentCount);
 
@@ -142,7 +144,7 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanConfigThenUnsupp
 
 TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingDefaultModeThenUnsupportedIsReturned) {
     // Setting allow set calls or not
-    SetUp(true);
+    init(true);
 
     auto handles = get_fan_handles(fanHandleComponentCount);
 
@@ -153,7 +155,7 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingDefaultModeThenUnsu
 
 TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingFixedSpeedModeThenUnsupportedIsReturned) {
     // Setting allow set calls or not
-    SetUp(true);
+    init(true);
 
     auto handles = get_fan_handles(fanHandleComponentCount);
 
@@ -165,19 +167,19 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingFixedSpeedModeThenU
 
 TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingTheSpeedTableModeThenUnsupportedIsReturned) {
     // Setting allow set calls or not
-    SetUp(true);
+    init(true);
 
     auto handles = get_fan_handles(fanHandleComponentCount);
 
     for (auto handle : handles) {
         zes_fan_speed_table_t fanSpeedTable = {0};
-        EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesFanSetSpeedTableMode(handle, &fanSpeedTable));
+        EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, zesFanSetSpeedTableMode(handle, &fanSpeedTable));
     }
 }
 
 TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanSpeedWithRPMUnitThenValidFanSpeedReadingsRetrieved) {
     // Setting allow set calls or not
-    SetUp(true);
+    init(true);
 
     auto handles = get_fan_handles(fanHandleComponentCount);
 
@@ -193,7 +195,7 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanSpeedWithRPMUnit
 
 TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanSpeedWithPercentUnitThenUnsupportedIsReturned) {
     // Setting allow set calls or not
-    SetUp(true);
+    init(true);
 
     auto handles = get_fan_handles(fanHandleComponentCount);
 

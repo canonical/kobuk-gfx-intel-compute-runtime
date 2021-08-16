@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -109,7 +109,7 @@ struct MemoryManagerReturningCompressedAllocations : UnifiedSharingMockMemoryMan
         auto allocation = UnifiedSharingMockMemoryManager<true>::createGraphicsAllocationFromNTHandle(handle, rootDeviceIndex);
 
         auto gmm = allocation->getDefaultGmm();
-        auto mockGmmResourceInfo = std::make_unique<MockGmmResourceInfo>(gmm->gmmResourceInfo->peekHandle());
+        auto mockGmmResourceInfo = std::make_unique<MockGmmResourceInfo>(gmm->gmmResourceInfo->peekGmmResourceInfo());
         mockGmmResourceInfo->setUnifiedAuxTranslationCapable();
         gmm->gmmResourceInfo = std::move(mockGmmResourceInfo);
 
@@ -138,7 +138,7 @@ HWTEST_F(UnifiedSharingImageTestsWithMemoryManager, givenCompressedImageAndNoPag
     auto image = std::unique_ptr<Image>(UnifiedImage::createSharedUnifiedImage(context.get(), flags, getValidUnifiedSharingDesc(),
                                                                                &format, &imageDesc, &retVal));
     ASSERT_EQ(CL_SUCCESS, retVal);
-    EXPECT_TRUE(image->getGraphicsAllocation(device->getRootDeviceIndex())->getDefaultGmm()->isRenderCompressed);
+    EXPECT_TRUE(image->getGraphicsAllocation(device->getRootDeviceIndex())->getDefaultGmm()->isCompressionEnabled);
     EXPECT_EQ(0u, memoryManager.calledMapAuxGpuVA);
 }
 
@@ -157,13 +157,13 @@ HWTEST_F(UnifiedSharingImageTestsWithMemoryManager, givenCompressedImageAndPageT
     auto image = std::unique_ptr<Image>(UnifiedImage::createSharedUnifiedImage(context.get(), flags, getValidUnifiedSharingDesc(),
                                                                                &format, &imageDesc, &retVal));
     ASSERT_EQ(CL_SUCCESS, retVal);
-    EXPECT_EQ(memoryManager.resultOfMapAuxGpuVA, image->getGraphicsAllocation(device->getRootDeviceIndex())->getDefaultGmm()->isRenderCompressed);
+    EXPECT_EQ(memoryManager.resultOfMapAuxGpuVA, image->getGraphicsAllocation(device->getRootDeviceIndex())->getDefaultGmm()->isCompressionEnabled);
     EXPECT_EQ(1u, memoryManager.calledMapAuxGpuVA);
 
     memoryManager.resultOfMapAuxGpuVA = false;
     image = std::unique_ptr<Image>(UnifiedImage::createSharedUnifiedImage(context.get(), flags, getValidUnifiedSharingDesc(),
                                                                           &format, &imageDesc, &retVal));
     ASSERT_EQ(CL_SUCCESS, retVal);
-    EXPECT_EQ(memoryManager.resultOfMapAuxGpuVA, image->getGraphicsAllocation(device->getRootDeviceIndex())->getDefaultGmm()->isRenderCompressed);
+    EXPECT_EQ(memoryManager.resultOfMapAuxGpuVA, image->getGraphicsAllocation(device->getRootDeviceIndex())->getDefaultGmm()->isCompressionEnabled);
     EXPECT_EQ(2u, memoryManager.calledMapAuxGpuVA);
 }

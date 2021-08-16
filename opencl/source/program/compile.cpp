@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -116,24 +116,23 @@ cl_int Program::compile(
         TranslationInput inputArgs = {IGC::CodeType::elf, IGC::CodeType::undefined};
 
         // set parameters for compilation
-        if (requiresOpenClCFeatures(options)) {
-            CompilerOptions::concatenateAppend(internalOptions, defaultClDevice->peekCompilerExtensionsWithFeatures());
-            CompilerOptions::concatenateAppend(internalOptions, defaultClDevice->peekCompilerFeatures());
-        } else {
-            CompilerOptions::concatenateAppend(internalOptions, defaultClDevice->peekCompilerExtensions());
+        std::string extensions = requiresOpenClCFeatures(options) ? defaultClDevice->peekCompilerExtensionsWithFeatures()
+                                                                  : defaultClDevice->peekCompilerExtensions();
+        if (requiresAdditionalExtensions(options)) {
+            extensions.erase(extensions.length() - 1);
+            extensions += ",+cl_khr_3d_image_writes ";
         }
+        CompilerOptions::concatenateAppend(internalOptions, extensions);
 
         if (isKernelDebugEnabled()) {
             for (const auto &device : deviceVector) {
                 if (sourceLevelDebuggerNotified[device->getRootDeviceIndex()]) {
                     continue;
                 }
-                appendKernelDebugOptions(*device, internalOptions);
                 std::string filename;
+                appendKernelDebugOptions(*device, internalOptions);
                 notifyDebuggerWithSourceCode(*device, filename);
-                if (!filename.empty()) {
-                    options = std::string("-s ") + filename + " " + options;
-                }
+                prependFilePathToOptions(filename);
 
                 sourceLevelDebuggerNotified[device->getRootDeviceIndex()] = true;
             }

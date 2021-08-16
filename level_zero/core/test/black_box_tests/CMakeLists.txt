@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2020 Intel Corporation
+# Copyright (C) 2020-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -10,9 +10,36 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
       zello_timestamp
       zello_world_gpu
       zello_world_jitc_ocloc
+      zello_ipc_copy_dma_buf
+      zello_ipc_copy_dma_buf_p2p
+      zello_copy
+      zello_copy_only
+      zello_copy_fence
+      zello_copy_image
+      zello_world_usm
+      zello_world_global_work_offset
+      zello_scratch
+      zello_fence
+      zello_printf
+      zello_image
+      zello_image_view
   )
 
+  include_directories(common)
+
   foreach(TEST_NAME ${TEST_TARGETS})
+    if(MSVC)
+      if(${TEST_NAME} STREQUAL "zello_ipc_copy_dma_buf")
+        continue()
+      endif()
+      if(${TEST_NAME} STREQUAL "zello_ipc_copy_dma_buf_p2p")
+        continue()
+      endif()
+      if(${TEST_NAME} STREQUAL "zello_world_global_work_offset")
+        continue()
+      endif()
+    endif()
+
     add_executable(${TEST_NAME} ${TEST_NAME}.cpp)
 
     set_target_properties(${TEST_NAME}
@@ -29,4 +56,13 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
   endforeach()
 
   target_link_libraries(zello_world_jitc_ocloc PUBLIC ocloc_lib)
+  target_link_libraries(zello_scratch PUBLIC ocloc_lib)
+  target_link_libraries(zello_fence PUBLIC ocloc_lib)
+  target_link_libraries(zello_printf PUBLIC ocloc_lib)
+  target_link_libraries(zello_image_view PUBLIC ocloc_lib)
+  if(UNIX)
+    target_link_libraries(zello_world_global_work_offset PUBLIC ocloc_lib)
+  endif()
 endif()
+
+add_subdirectories()

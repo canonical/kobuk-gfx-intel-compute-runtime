@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -23,9 +23,12 @@ struct WhiteBox<::L0::CommandQueue> : public ::L0::CommandQueueImp {
     using BaseClass::commandStream;
     using BaseClass::csr;
     using BaseClass::device;
+    using BaseClass::preemptionCmdSyncProgramming;
     using BaseClass::printfFunctionContainer;
+    using BaseClass::submitBatchBuffer;
     using BaseClass::synchronizeByPollingForTaskCount;
-    using CommandQueue::commandQueuePerThreadScratchSize;
+    using CommandQueue::commandQueuePreemptionMode;
+    using CommandQueue::internalUsage;
 
     WhiteBox(Device *device, NEO::CommandStreamReceiver *csr,
              const ze_command_queue_desc_t *desc);
@@ -70,6 +73,10 @@ struct Mock<CommandQueue> : public CommandQueue {
                 (NEO::LinearStream & commandStream,
                  bool flushDataCache),
                 (override));
+    MOCK_METHOD(bool,
+                getPreemptionCmdProgramming,
+                (),
+                (override));
 };
 
 template <GFXCORE_FAMILY gfxCoreFamily>
@@ -77,6 +84,9 @@ struct MockCommandQueueHw : public L0::CommandQueueHw<gfxCoreFamily> {
     using BaseClass = ::L0::CommandQueueHw<gfxCoreFamily>;
     using BaseClass::commandStream;
     using BaseClass::printfFunctionContainer;
+    using L0::CommandQueue::internalUsage;
+    using L0::CommandQueue::preemptionCmdSyncProgramming;
+    using L0::CommandQueueImp::csr;
 
     MockCommandQueueHw(L0::Device *device, NEO::CommandStreamReceiver *csr, const ze_command_queue_desc_t *desc) : L0::CommandQueueHw<gfxCoreFamily>(device, csr, desc) {
     }

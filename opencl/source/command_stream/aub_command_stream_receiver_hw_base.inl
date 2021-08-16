@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -146,7 +146,9 @@ void AUBCommandStreamReceiverHw<GfxFamily>::initFile(const std::string &fileName
             UNRECOVERABLE_IF(true);
         }
         // Add the file header
-        stream->init(AubMemDump::SteppingValues::A, aubDeviceId);
+        auto &hwInfo = this->peekHwInfo();
+        auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+        stream->init(hwHelper.getAubStreamSteppingFromHwRevId(hwInfo), aubDeviceId);
     }
 }
 
@@ -676,6 +678,15 @@ bool AUBCommandStreamReceiverHw<GfxFamily>::writeMemory(AllocationView &allocati
 }
 
 template <typename GfxFamily>
+void AUBCommandStreamReceiverHw<GfxFamily>::writeMMIO(uint32_t offset, uint32_t value) {
+    auto streamLocked = getAubStream()->lockStream();
+
+    if (hardwareContextController) {
+        hardwareContextController->writeMMIO(offset, value);
+    }
+}
+
+template <typename GfxFamily>
 void AUBCommandStreamReceiverHw<GfxFamily>::expectMMIO(uint32_t mmioRegister, uint32_t expectedValue) {
     if (hardwareContextController) {
         //Add support for expectMMIO to AubStream
@@ -772,10 +783,10 @@ void AUBCommandStreamReceiverHw<GfxFamily>::dumpAllocation(GraphicsAllocation &g
 
 template <typename GfxFamily>
 AubSubCaptureStatus AUBCommandStreamReceiverHw<GfxFamily>::checkAndActivateAubSubCapture(const MultiDispatchInfo &dispatchInfo) {
-    std::string kernelName = dispatchInfo.peekMainKernel()->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName;
+    auto &kernelName = dispatchInfo.peekMainKernel()->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName;
     auto status = subCaptureManager->checkAndActivateSubCapture(kernelName);
     if (status.isActive) {
-        std::string subCaptureFile = subCaptureManager->getSubCaptureFileName(kernelName);
+        auto &subCaptureFile = subCaptureManager->getSubCaptureFileName(kernelName);
         auto isReopened = reopenFile(subCaptureFile);
         if (isReopened) {
             dumpAubNonWritable = true;
@@ -815,11 +826,12 @@ void AUBCommandStreamReceiverHw<GfxFamily>::addGUCStartMessage(uint64_t batchBuf
     uint32_t *header = static_cast<uint32_t *>(linearStream.getSpace(sizeof(uint32_t)));
     *header = getGUCWorkQueueItemHeader();
 
-    MI_BATCH_BUFFER_START *miBatchBufferStart = linearStream.getSpaceForCmd<MI_BATCH_BUFFER_START>();
+    MI_BATCH_BUFFER_START *miBatchBufferStartSpace = linearStream.getSpaceForCmd<MI_BATCH_BUFFER_START>();
     DEBUG_BREAK_IF(bufferSize != linearStream.getUsed());
-    *miBatchBufferStart = GfxFamily::cmdInitBatchBufferStart;
-    miBatchBufferStart->setBatchBufferStartAddressGraphicsaddress472(AUB::ptrToPPGTT(buffer.get()));
-    miBatchBufferStart->setAddressSpaceIndicator(MI_BATCH_BUFFER_START::ADDRESS_SPACE_INDICATOR_PPGTT);
+    auto miBatchBufferStart = GfxFamily::cmdInitBatchBufferStart;
+    miBatchBufferStart.setBatchBufferStartAddressGraphicsaddress472(AUB::ptrToPPGTT(buffer.get()));
+    miBatchBufferStart.setAddressSpaceIndicator(MI_BATCH_BUFFER_START::ADDRESS_SPACE_INDICATOR_PPGTT);
+    *miBatchBufferStartSpace = miBatchBufferStart;
 
     auto physBufferAddres = ppgtt->map(reinterpret_cast<uintptr_t>(buffer.get()), bufferSize,
                                        this->getPPGTTAdditionalBits(linearStream.getGraphicsAllocation()),

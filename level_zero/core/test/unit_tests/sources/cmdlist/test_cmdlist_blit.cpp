@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/helpers/register_offsets.h"
-#include "shared/test/unit_test/cmd_parse/gen_cmd_parse.h"
-#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/cmd_parse/gen_cmd_parse.h"
+#include "shared/test/common/mocks/mock_graphics_allocation.h"
 
 #include "test.h"
 
@@ -33,8 +33,7 @@ class MockCommandListForMemFill : public WhiteBox<::L0::CommandListCoreFamily<gf
                                      uint64_t dstOffset, uintptr_t srcPtr,
                                      NEO::GraphicsAllocation *srcPtrAlloc,
                                      uint64_t srcOffset,
-                                     uint32_t size,
-                                     ze_event_handle_t hSignalEvent) override {
+                                     uint64_t size) override {
         appendMemoryCopyBlitCalledTimes++;
         return ZE_RESULT_SUCCESS;
     }
@@ -59,146 +58,24 @@ class MockDriverHandle : public L0::DriverHandleImp {
     NEO::SvmAllocationData data{rootDeviceIndex};
 };
 
-template <GFXCORE_FAMILY gfxCoreFamily>
-class MockCommandListForMemFillHostPtr : public WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>> {
-  public:
-    MockCommandListForMemFillHostPtr() : WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>() {}
-
-    AlignedAllocationData getAlignedAllocation(L0::Device *device, const void *buffer, uint64_t bufferSize) override {
-        return L0::CommandListCoreFamily<gfxCoreFamily>::getAlignedAllocation(device, buffer, bufferSize);
-    }
-};
-
-uint32_t memoryFillMockGroupSizeX = 0, memoryFillMockGroupSizeY = 0, memoryFillMockGroupSizeZ = 0;
-struct AppendMemoryFillFixture {
-    class MockDriverHandleHostPtr : public L0::DriverHandleImp {
-      public:
-        bool findAllocationDataForRange(const void *buffer,
-                                        size_t size,
-                                        NEO::SvmAllocationData **allocData) override {
-            if (buffer == reinterpret_cast<void *>(registeredGraphicsAllocationAddress)) {
-                mockAllocation.reset(new NEO::MockGraphicsAllocation(rootDeviceIndex, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
-                                                                     reinterpret_cast<void *>(registeredGraphicsAllocationAddress), 0x1000, 0, sizeof(uint32_t),
-                                                                     MemoryPool::System4KBPages));
-                data.gpuAllocations.addAllocation(mockAllocation.get());
-                if (allocData) {
-                    *allocData = &data;
-                }
-                return true;
-            }
-            return false;
-        }
-        const uint32_t rootDeviceIndex = 0u;
-        std::unique_ptr<NEO::GraphicsAllocation> mockAllocation;
-        NEO::SvmAllocationData data{rootDeviceIndex};
-    };
-    struct MockKernelImmutableDataForMemFill : KernelImmutableData {
-        MockKernelImmutableDataForMemFill(L0::Device *l0device = nullptr) {
-            mockKernelDescriptor = new NEO::KernelDescriptor;
-            mockKernelDescriptor->kernelAttributes.simdSize = 32;
-            kernelDescriptor = mockKernelDescriptor;
-            return;
-        }
-        ~MockKernelImmutableDataForMemFill() override {
-            delete mockKernelDescriptor;
-        }
-        NEO::KernelDescriptor *mockKernelDescriptor = nullptr;
-    };
-    class MockKernelForMemFill : public L0::KernelImp {
-      public:
-        MockKernelForMemFill() {
-            mockKernelImmData = new MockKernelImmutableDataForMemFill();
-        }
-        ze_result_t setGroupSize(uint32_t groupSizeX, uint32_t groupSizeY,
-                                 uint32_t groupSizeZ) override {
-            memoryFillMockGroupSizeX = groupSizeX;
-            memoryFillMockGroupSizeY = groupSizeY;
-            memoryFillMockGroupSizeZ = groupSizeZ;
-            return ZE_RESULT_ERROR_UNKNOWN;
-        }
-        void setBufferSurfaceState(uint32_t argIndex, void *address, NEO::GraphicsAllocation *alloc) override {
-            return;
-        }
-        void evaluateIfRequiresGenerationOfLocalIdsByRuntime(const NEO::KernelDescriptor &kernelDescriptor) override {
-            return;
-        }
-        const MockKernelImmutableDataForMemFill *getImmutableData() const override {
-            return mockKernelImmData;
-        }
-        ~MockKernelForMemFill() override {
-            delete mockKernelImmData;
-        }
-        std::unique_ptr<Kernel> clone() const override { return nullptr; }
-        MockKernelImmutableDataForMemFill *mockKernelImmData = nullptr;
-    };
-
-    struct MockBuiltinFunctionsForMemFill : BuiltinFunctionsLibImpl {
-        MockBuiltinFunctionsForMemFill(L0::Device *device, NEO::BuiltIns *builtInsLib) : BuiltinFunctionsLibImpl(device, builtInsLib) {
-            tmpMockKernel = new MockKernelForMemFill;
-        }
-        MockKernelForMemFill *getFunction(Builtin func) override {
-            return tmpMockKernel;
-        }
-        ~MockBuiltinFunctionsForMemFill() override {
-            delete tmpMockKernel;
-        }
-        MockKernelForMemFill *tmpMockKernel = nullptr;
-    };
-    class MockDeviceHandle : public L0::DeviceImp {
-      public:
-        MockDeviceHandle() {
-            tmpMockBultinLib = new MockBuiltinFunctionsForMemFill{nullptr, nullptr};
-        }
-        MockBuiltinFunctionsForMemFill *getBuiltinFunctionsLib() override {
-            return tmpMockBultinLib;
-        }
-        ~MockDeviceHandle() override {
-            delete tmpMockBultinLib;
-        }
-        MockBuiltinFunctionsForMemFill *tmpMockBultinLib = nullptr;
-    };
-    virtual void SetUp() { // NOLINT(readability-identifier-naming)
-        memoryFillMockGroupSizeX = 0;
-        memoryFillMockGroupSizeY = 0;
-        memoryFillMockGroupSizeZ = 0;
-        neoDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
-        neoMockDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
-        NEO::DeviceVector devices;
-        devices.push_back(std::unique_ptr<NEO::Device>(neoDevice));
-        driverHandle = std::make_unique<Mock<L0::DriverHandleImp>>();
-        deviceMock = std::make_unique<MockDeviceHandle>();
-        driverHandle->initialize(std::move(devices));
-        neoMockDevice->incRefInternal();
-        deviceMock.get()->neoDevice = neoMockDevice;
-    }
-
-    virtual void TearDown() { // NOLINT(readability-identifier-naming)
-    }
-    std::unique_ptr<Mock<L0::DriverHandleImp>> driverHandle;
-    std::unique_ptr<MockDeviceHandle> deviceMock;
-    NEO::MockDevice *neoDevice = nullptr;
-    NEO::MockDevice *neoMockDevice = nullptr;
-    static constexpr uint64_t registeredGraphicsAllocationAddress = 0x1234;
-};
-
 using AppendMemoryCopy = Test<DeviceFixture>;
 using Platforms = IsAtLeastProduct<IGFX_SKYLAKE>;
 
 HWTEST2_F(AppendMemoryCopy, givenCopyOnlyCommandListWhenAppenBlitFillCalledWithLargePatternSizeThenMemCopyWasCalled, Platforms) {
     MockCommandListForMemFill<gfxCoreFamily> cmdList;
-    cmdList.initialize(device, NEO::EngineGroupType::Copy);
+    cmdList.initialize(device, NEO::EngineGroupType::Copy, 0u);
     uint64_t pattern[4] = {1, 2, 3, 4};
     void *ptr = reinterpret_cast<void *>(0x1234);
-    auto ret = cmdList.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), sizeof(pattern), 0x1000, nullptr);
+    auto ret = cmdList.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), sizeof(pattern), 0x1000, nullptr, 0, nullptr);
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_SIZE, ret);
 }
 
 HWTEST2_F(AppendMemoryCopy, givenCopyOnlyCommandListWhenAppenBlitFillToNotDeviceMemThenInvalidArgumentReturned, Platforms) {
     MockCommandListForMemFill<gfxCoreFamily> cmdList;
-    cmdList.initialize(device, NEO::EngineGroupType::Copy);
+    cmdList.initialize(device, NEO::EngineGroupType::Copy, 0u);
     uint8_t pattern = 1;
     void *ptr = reinterpret_cast<void *>(0x1234);
-    auto ret = cmdList.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), sizeof(pattern), 0x1000, nullptr);
+    auto ret = cmdList.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), sizeof(pattern), 0x1000, nullptr, 0, nullptr);
     EXPECT_EQ(ret, ZE_RESULT_ERROR_INVALID_ARGUMENT);
 }
 
@@ -209,11 +86,14 @@ HWTEST2_F(AppendMemoryCopy, givenCopyOnlyCommandListWhenAppenBlitFillThenCopyBlt
     using XY_COLOR_BLT = typename GfxFamily::XY_COLOR_BLT;
     MockCommandListForMemFill<gfxCoreFamily> commandList;
     MockDriverHandle driverHandleMock;
+    NEO::DeviceVector neoDevices;
+    neoDevices.push_back(std::unique_ptr<NEO::Device>(neoDevice));
+    driverHandleMock.initialize(std::move(neoDevices));
     device->setDriverHandle(&driverHandleMock);
-    commandList.initialize(device, NEO::EngineGroupType::Copy);
+    commandList.initialize(device, NEO::EngineGroupType::Copy, 0u);
     uint16_t pattern = 1;
     void *ptr = reinterpret_cast<void *>(0x1234);
-    commandList.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), sizeof(pattern), 0x1000, nullptr);
+    commandList.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), sizeof(pattern), 0x1000, nullptr, 0, nullptr);
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
         cmdList, ptrOffset(commandList.commandContainer.getCommandStream()->getCpuBase(), 0), commandList.commandContainer.getCommandStream()->getUsed()));
@@ -228,7 +108,7 @@ HWTEST2_F(AppendMemoryCopy, givenCopyOnlyCommandListAndHostPointersWhenMemoryCop
     using XY_COPY_BLT = typename GfxFamily::XY_COPY_BLT;
 
     auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    commandList->initialize(device, NEO::EngineGroupType::Copy);
+    commandList->initialize(device, NEO::EngineGroupType::Copy, 0u);
     void *srcPtr = reinterpret_cast<void *>(0x1234);
     void *dstPtr = reinterpret_cast<void *>(0x2345);
     commandList->appendMemoryCopy(dstPtr, srcPtr, 8, nullptr, 0, nullptr);
@@ -251,12 +131,12 @@ HWTEST2_F(AppendMemoryCopy, givenCopyOnlyCommandListAndHostPointersWhenMemoryCop
     using XY_COPY_BLT = typename GfxFamily::XY_COPY_BLT;
 
     auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    commandList->initialize(device, NEO::EngineGroupType::Copy);
+    commandList->initialize(device, NEO::EngineGroupType::Copy, 0u);
     void *srcPtr = reinterpret_cast<void *>(0x1234);
     void *dstPtr = reinterpret_cast<void *>(0x2345);
     ze_copy_region_t dstRegion = {4, 4, 0, 2, 2, 1};
     ze_copy_region_t srcRegion = {4, 4, 0, 2, 2, 1};
-    commandList->appendMemoryCopyRegion(dstPtr, &dstRegion, 0, 0, srcPtr, &srcRegion, 0, 0, nullptr);
+    commandList->appendMemoryCopyRegion(dstPtr, &dstRegion, 0, 0, srcPtr, &srcRegion, 0, 0, nullptr, 0, nullptr);
 
     auto &commandContainer = commandList->commandContainer;
     GenCmdList genCmdList;
@@ -270,25 +150,25 @@ HWTEST2_F(AppendMemoryCopy, givenCopyOnlyCommandListAndHostPointersWhenMemoryCop
     EXPECT_EQ(genCmdList.end(), itor);
 }
 
-HWTEST2_F(AppendMemoryCopy, givenCopyOnlyCommandListWhenWithDcFlushAddedIsNotAddedAfterBlitCopy, Platforms) {
+HWTEST2_F(AppendMemoryCopy, givenCopyOnlyCommandListThenDcFlushIsNotAddedAfterBlitCopy, Platforms) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using XY_COPY_BLT = typename GfxFamily::XY_COPY_BLT;
 
     auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    commandList->initialize(device, NEO::EngineGroupType::Copy);
+    commandList->initialize(device, NEO::EngineGroupType::Copy, 0u);
     uintptr_t srcPtr = 0x5001;
     uintptr_t dstPtr = 0x7001;
     uint64_t srcOffset = 0x101;
     uint64_t dstOffset = 0x201;
-    uint32_t copySize = 0x301;
+    uint64_t copySize = 0x301;
     NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(srcPtr), 0x1000, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
     NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(dstPtr), 0x1000, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
-    commandList->appendMemoryCopyBlit(ptrOffset(dstPtr, dstOffset), &mockAllocationDst, 0, ptrOffset(srcPtr, srcOffset), &mockAllocationSrc, 0, copySize, nullptr);
+    commandList->appendMemoryCopyBlit(ptrOffset(dstPtr, dstOffset), &mockAllocationDst, 0, ptrOffset(srcPtr, srcOffset), &mockAllocationSrc, 0, copySize);
 
     auto &commandContainer = commandList->commandContainer;
     GenCmdList genCmdList;
@@ -305,15 +185,15 @@ HWTEST2_F(AppendMemoryCopy, givenCopyCommandListWhenTimestampPassedToMemoryCopyR
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
     auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    commandList->initialize(device, NEO::EngineGroupType::Copy);
+    commandList->initialize(device, NEO::EngineGroupType::Copy, 0u);
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 1;
     eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
 
     ze_event_desc_t eventDesc = {};
     eventDesc.index = 0;
-    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), 0, nullptr, &eventPoolDesc));
-    auto event = std::unique_ptr<L0::Event>(L0::Event::create(eventPool.get(), &eventDesc, device));
+    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc));
+    auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
 
     ze_copy_region_t srcRegion = {4, 4, 4, 2, 2, 2};
     ze_copy_region_t dstRegion = {4, 4, 4, 2, 2, 2};
@@ -324,14 +204,14 @@ HWTEST2_F(AppendMemoryCopy, givenCopyCommandListWhenTimestampPassedToMemoryCopyR
                                                   reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
 
-    commandList->appendMemoryCopyBlitRegion(&mockAllocationDst, &mockAllocationSrc, 0, 0, srcRegion, dstRegion, {0, 0, 0}, 0, 0, 0, 0, 0, 0, event->toHandle());
+    commandList->appendMemoryCopyBlitRegion(&mockAllocationDst, &mockAllocationSrc, 0, 0, srcRegion, dstRegion, {0, 0, 0}, 0, 0, 0, 0, 0, 0, event->toHandle(), 0, nullptr);
     GenCmdList cmdList;
 
-    auto baseAddr = event->getGpuAddress();
-    auto contextStartOffset = offsetof(KernelTimestampEvent, contextStart);
-    auto globalStartOffset = offsetof(KernelTimestampEvent, globalStart);
-    auto contextEndOffset = offsetof(KernelTimestampEvent, contextEnd);
-    auto globalEndOffset = offsetof(KernelTimestampEvent, globalEnd);
+    auto baseAddr = event->getGpuAddress(device);
+    auto contextStartOffset = event->getContextStartOffset();
+    auto globalStartOffset = event->getGlobalStartOffset();
+    auto contextEndOffset = event->getContextEndOffset();
+    auto globalEndOffset = event->getGlobalEndOffset();
 
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
         cmdList, ptrOffset(commandList->commandContainer.getCommandStream()->getCpuBase(), 0), commandList->commandContainer.getCommandStream()->getUsed()));
@@ -364,15 +244,15 @@ HWTEST2_F(AppendMemoryCopy, givenCopyCommandListWhenTimestampPassedToImageCopyBl
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
     auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    commandList->initialize(device, NEO::EngineGroupType::Copy);
+    commandList->initialize(device, NEO::EngineGroupType::Copy, 0u);
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 1;
     eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
 
     ze_event_desc_t eventDesc = {};
     eventDesc.index = 0;
-    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), 0, nullptr, &eventPoolDesc));
-    auto event = std::unique_ptr<L0::Event>(L0::Event::create(eventPool.get(), &eventDesc, device));
+    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc));
+    auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
 
     NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
@@ -396,8 +276,9 @@ HWTEST2_F(AppendMemoryCopy, givenCopyCommandListWhenCopyFromImagBlitThenCommandA
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using XY_COPY_BLT = typename GfxFamily::XY_COPY_BLT;
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::Copy, returnValue));
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::Copy, 0u, returnValue));
     ze_image_desc_t zeDesc = {};
+    zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
     auto imageHWSrc = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
     auto imageHWDst = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
     imageHWSrc->initialize(device, &zeDesc);
@@ -417,85 +298,11 @@ HWTEST2_F(AppendMemoryCopyFromContext, givenCommandListThenUpOnPerformingAppendM
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
     auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    commandList->initialize(device, NEO::EngineGroupType::Copy);
+    commandList->initialize(device, NEO::EngineGroupType::Copy, 0u);
     void *srcPtr = reinterpret_cast<void *>(0x1234);
     void *dstPtr = reinterpret_cast<void *>(0x2345);
     auto result = commandList->appendMemoryCopyFromContext(dstPtr, nullptr, srcPtr, 8, nullptr, 0, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-}
-
-using AppendMemoryfillHostPtr = Test<AppendMemoryFillFixture>;
-HWTEST2_F(AppendMemoryfillHostPtr, givenTwoCommandListsAndHostPointerUsedInBothWhenMemoryfillCalledThenNewUniqueAllocationIsAddedtoHostPtrMap, Platforms) {
-    MockCommandListForMemFillHostPtr<gfxCoreFamily> cmdListFirst;
-    MockCommandListForMemFillHostPtr<gfxCoreFamily> cmdListSecond;
-    MockDriverHandleHostPtr driverHandleMock;
-    deviceMock.get()->setDriverHandle(&driverHandleMock);
-    cmdListFirst.initialize(deviceMock.get(), NEO::EngineGroupType::RenderCompute);
-    cmdListSecond.initialize(deviceMock.get(), NEO::EngineGroupType::RenderCompute);
-    uint64_t pattern[4] = {1, 2, 3, 4};
-    void *ptr = reinterpret_cast<void *>(registeredGraphicsAllocationAddress);
-    cmdListFirst.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), sizeof(pattern), 0x1000, nullptr);
-    cmdListSecond.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), sizeof(pattern), 0x1000, nullptr);
-    EXPECT_EQ(cmdListFirst.hostPtrMap.size(), 1u);
-    EXPECT_EQ(cmdListSecond.hostPtrMap.size(), 1u);
-    auto allocationFirstList = cmdListFirst.hostPtrMap.begin()->second;
-    auto allocationSecondList = cmdListSecond.hostPtrMap.begin()->second;
-    EXPECT_NE(allocationFirstList, allocationSecondList);
-    deviceMock.get()->setDriverHandle(driverHandle.get());
-}
-
-HWTEST2_F(AppendMemoryfillHostPtr, givenCommandListAndHostPointerWhenMemoryfillCalledThenNewAllocationisAddedToHostPtrMap, Platforms) {
-    MockCommandListForMemFillHostPtr<gfxCoreFamily> cmdList;
-    MockDriverHandleHostPtr driverHandleMock;
-    deviceMock.get()->setDriverHandle(&driverHandleMock);
-    cmdList.initialize(deviceMock.get(), NEO::EngineGroupType::RenderCompute);
-    uint64_t pattern[4] = {1, 2, 3, 4};
-    void *ptr = reinterpret_cast<void *>(registeredGraphicsAllocationAddress);
-    cmdList.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), sizeof(pattern), 0x1000, nullptr);
-    EXPECT_EQ(cmdList.hostPtrMap.size(), 1u);
-    deviceMock.get()->setDriverHandle(driverHandle.get());
-}
-
-HWTEST2_F(AppendMemoryfillHostPtr, givenCommandListAndHostPointerWithPatternSizeGreaterThanSizeWhenMemoryfillCalledThenGroupSizeXEqualsSize, Platforms) {
-    MockCommandListForMemFillHostPtr<gfxCoreFamily> cmdList;
-    MockDriverHandleHostPtr driverHandleMock;
-    size_t patternSize = 0x1001;
-    size_t dstSize = 0x1000;
-    deviceMock.get()->setDriverHandle(&driverHandleMock);
-    cmdList.initialize(deviceMock.get(), NEO::EngineGroupType::RenderCompute);
-    uint64_t pattern[4] = {1, 2, 3, 4};
-    void *ptr = reinterpret_cast<void *>(registeredGraphicsAllocationAddress);
-    cmdList.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), patternSize, dstSize, nullptr);
-    EXPECT_EQ(memoryFillMockGroupSizeX, 0x1000u);
-    deviceMock.get()->setDriverHandle(driverHandle.get());
-}
-
-HWTEST2_F(AppendMemoryfillHostPtr, givenCommandListAndHostPointerWithSizeLessThanSimdWhenMemoryfillCalledThenGroupSizeXEqualsSize, Platforms) {
-    MockCommandListForMemFillHostPtr<gfxCoreFamily> cmdList;
-    MockDriverHandleHostPtr driverHandleMock;
-    size_t patternSize = 1;
-    size_t dstSize = 16;
-    deviceMock.get()->setDriverHandle(&driverHandleMock);
-    cmdList.initialize(deviceMock.get(), NEO::EngineGroupType::RenderCompute);
-    uint64_t pattern[4] = {1, 2, 3, 4};
-    void *ptr = reinterpret_cast<void *>(registeredGraphicsAllocationAddress);
-    cmdList.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), patternSize, dstSize, nullptr);
-    EXPECT_EQ(memoryFillMockGroupSizeX, 16u);
-    deviceMock.get()->setDriverHandle(driverHandle.get());
-}
-
-HWTEST2_F(AppendMemoryfillHostPtr, givenCommandListAndHostPointerWithSizeLargerThanSimdWhenMemoryfillCalledThenGroupSizeIsSimd, Platforms) {
-    MockCommandListForMemFillHostPtr<gfxCoreFamily> cmdList;
-    MockDriverHandleHostPtr driverHandleMock;
-    size_t patternSize = 1;
-    size_t dstSize = 64;
-    deviceMock.get()->setDriverHandle(&driverHandleMock);
-    cmdList.initialize(deviceMock.get(), NEO::EngineGroupType::RenderCompute);
-    uint64_t pattern[4] = {1, 2, 3, 4};
-    void *ptr = reinterpret_cast<void *>(registeredGraphicsAllocationAddress);
-    cmdList.appendMemoryFill(ptr, reinterpret_cast<void *>(&pattern), patternSize, dstSize, nullptr);
-    EXPECT_EQ(memoryFillMockGroupSizeX, 32u);
-    deviceMock.get()->setDriverHandle(driverHandle.get());
 }
 
 } // namespace ult

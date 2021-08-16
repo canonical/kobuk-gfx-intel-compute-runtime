@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,7 +13,6 @@
 #include "opencl/source/api/cl_types.h"
 
 #include <array>
-#include <unordered_set>
 
 namespace NEO {
 class MemObj;
@@ -25,7 +24,8 @@ struct EventsRequest {
     EventsRequest(cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *outEvent)
         : numEventsInWaitList(numEventsInWaitList), eventWaitList(eventWaitList), outEvent(outEvent) {}
 
-    void fillCsrDependencies(CsrDependencies &csrDeps, CommandStreamReceiver &currentCsr, CsrDependencies::DependenciesType depsType) const;
+    void fillCsrDependenciesForTimestampPacketContainer(CsrDependencies &csrDeps, CommandStreamReceiver &currentCsr, CsrDependencies::DependenciesType depsType) const;
+    void fillCsrDependenciesForTaskCountContainer(CsrDependencies &csrDeps, CommandStreamReceiver &currentCsr) const;
 
     cl_uint numEventsInWaitList;
     const cl_event *eventWaitList;
@@ -34,7 +34,6 @@ struct EventsRequest {
 
 using MemObjSizeArray = std::array<size_t, 3>;
 using MemObjOffsetArray = std::array<size_t, 3>;
-using MemObjsForAuxTranslation = std::unordered_set<MemObj *>;
 
 struct TransferProperties {
     TransferProperties() = delete;

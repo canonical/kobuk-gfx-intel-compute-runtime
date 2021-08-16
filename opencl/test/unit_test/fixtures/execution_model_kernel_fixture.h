@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,17 +16,17 @@
 
 using namespace NEO;
 
-class ExecutionModelKernelFixture : public ProgramFromBinaryTest,
-                                    public PlatformFixture {
-  protected:
-    void SetUp() override {
+struct ExecutionModelKernelFixture : public ProgramFromBinaryFixture,
+                                     public PlatformFixture {
+    using ProgramFromBinaryFixture::SetUp;
+    void SetUp(const char *binaryFileName, const char *kernelName) {
         REQUIRE_DEVICE_ENQUEUE_OR_SKIP(defaultHwInfo);
 
         PlatformFixture::SetUp();
 
         std::string options("-cl-std=CL2.0");
         this->setOptions(options);
-        ProgramFromBinaryTest::SetUp();
+        ProgramFromBinaryFixture::SetUp(binaryFileName, kernelName);
 
         ASSERT_NE(nullptr, pProgram);
         ASSERT_EQ(CL_SUCCESS, retVal);
@@ -37,11 +37,10 @@ class ExecutionModelKernelFixture : public ProgramFromBinaryTest,
             false);
         ASSERT_EQ(CL_SUCCESS, retVal);
 
-        // create a kernel
-        pKernel = Kernel::create<MockKernel>(
-            pProgram,
-            *pProgram->getKernelInfo(KernelName),
-            &retVal);
+        pMultiDeviceKernel = MultiDeviceKernel::create<MockKernel>(pProgram,
+                                                                   pProgram->getKernelInfosForKernel(kernelName),
+                                                                   &retVal);
+        pKernel = pMultiDeviceKernel->getKernel(rootDeviceIndex);
 
         ASSERT_EQ(CL_SUCCESS, retVal);
         ASSERT_NE(nullptr, pKernel);
@@ -51,11 +50,11 @@ class ExecutionModelKernelFixture : public ProgramFromBinaryTest,
         if (IsSkipped()) {
             return;
         }
-        if (pKernel != nullptr) {
-            pKernel->release();
+        if (pMultiDeviceKernel != nullptr) {
+            pMultiDeviceKernel->release();
         }
 
-        ProgramFromBinaryTest::TearDown();
+        ProgramFromBinaryFixture::TearDown();
         PlatformFixture::TearDown();
 
         if (pDevice != nullptr) {
@@ -68,6 +67,7 @@ class ExecutionModelKernelFixture : public ProgramFromBinaryTest,
         }
     }
 
+    MultiDeviceKernel *pMultiDeviceKernel = nullptr;
     Kernel *pKernel = nullptr;
     cl_int retVal = CL_SUCCESS;
 };

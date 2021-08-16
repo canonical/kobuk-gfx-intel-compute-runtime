@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -20,6 +20,8 @@
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/utilities/cpu_info.h"
 #include "shared/source/utilities/cpuintrinsics.h"
+
+#include "create_direct_submission_hw.inl"
 
 #include <cstring>
 
@@ -92,6 +94,8 @@ bool DirectSubmissionHw<GfxFamily, Dispatcher>::allocateResources() {
     cpuCachelineFlush(semaphorePtr, MemoryConstants::cacheLineSize);
     workloadModeOneStoreAddress = static_cast<volatile void *>(&semaphoreData->DiagnosticModeCounter);
     *static_cast<volatile uint32_t *>(workloadModeOneStoreAddress) = 0u;
+
+    this->gpuVaForMiFlush = this->semaphoreGpuVa + 2 * MemoryConstants::cacheLineSize;
 
     auto ret = makeResourcesResident(allocations);
 
@@ -170,11 +174,11 @@ bool DirectSubmissionHw<GfxFamily, Dispatcher>::startRingBuffer() {
 template <typename GfxFamily, typename Dispatcher>
 bool DirectSubmissionHw<GfxFamily, Dispatcher>::stopRingBuffer() {
     void *flushPtr = ringCommandStream.getSpace(0);
-    Dispatcher::dispatchCacheFlush(ringCommandStream, *hwInfo);
+    Dispatcher::dispatchCacheFlush(ringCommandStream, *hwInfo, gpuVaForMiFlush);
     if (disableMonitorFence) {
         TagData currentTagData = {};
         getTagAddressValue(currentTagData);
-        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, *hwInfo);
+        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, *hwInfo, false);
     }
     Dispatcher::dispatchStopCommandBuffer(ringCommandStream);
     cpuCachelineFlush(flushPtr, getSizeEnd());
@@ -218,12 +222,21 @@ inline size_t DirectSubmissionHw<GfxFamily, Dispatcher>::getSizeStartSection() {
 
 template <typename GfxFamily, typename Dispatcher>
 inline void DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchSwitchRingBufferSection(uint64_t nextBufferGpuAddress) {
+    if (disableMonitorFence) {
+        TagData currentTagData = {};
+        getTagAddressValue(currentTagData);
+        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, *hwInfo, false);
+    }
     Dispatcher::dispatchStartCommandBuffer(ringCommandStream, nextBufferGpuAddress);
 }
 
 template <typename GfxFamily, typename Dispatcher>
 inline size_t DirectSubmissionHw<GfxFamily, Dispatcher>::getSizeSwitchRingBufferSection() {
-    return Dispatcher::getSizeStartCommandBuffer();
+    size_t size = Dispatcher::getSizeStartCommandBuffer();
+    if (disableMonitorFence) {
+        size += Dispatcher::getSizeMonitorFence(*hwInfo);
+    }
+    return size;
 }
 
 template <typename GfxFamily, typename Dispatcher>
@@ -260,6 +273,8 @@ inline size_t DirectSubmissionHw<GfxFamily, Dispatcher>::getSizeDispatch() {
     if (!disableMonitorFence) {
         size += Dispatcher::getSizeMonitorFence(*hwInfo);
     }
+
+    size += getSizeNewResourceHandler();
 
     return size;
 }
@@ -299,13 +314,13 @@ void *DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchWorkloadSection(BatchBu
     //mode 2 does not dispatch any commands
 
     if (!disableCacheFlush) {
-        Dispatcher::dispatchCacheFlush(ringCommandStream, *hwInfo);
+        Dispatcher::dispatchCacheFlush(ringCommandStream, *hwInfo, gpuVaForMiFlush);
     }
 
     if (!disableMonitorFence) {
         TagData currentTagData = {};
         getTagAddressValue(currentTagData);
-        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, *hwInfo);
+        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, *hwInfo, false);
     }
 
     dispatchSemaphoreSection(currentQueueWorkCount + 1);
@@ -328,6 +343,8 @@ bool DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchCommandBuffer(BatchBuffe
         startGpuVa = switchRingBuffers();
         buffersSwitched = true;
     }
+
+    handleNewResourcesSubmission();
 
     void *currentPosition = dispatchWorkloadSection(batchBuffer);
 
@@ -373,6 +390,15 @@ inline void DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchDisablePrefetcher
 
 template <typename GfxFamily, typename Dispatcher>
 inline size_t DirectSubmissionHw<GfxFamily, Dispatcher>::getSizeDisablePrefetcher() {
+    return 0u;
+}
+
+template <typename GfxFamily, typename Dispatcher>
+inline void DirectSubmissionHw<GfxFamily, Dispatcher>::handleNewResourcesSubmission() {
+}
+
+template <typename GfxFamily, typename Dispatcher>
+inline size_t DirectSubmissionHw<GfxFamily, Dispatcher>::getSizeNewResourceHandler() {
     return 0u;
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,7 +8,7 @@
 #include "shared/source/memory_manager/allocations_list.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/os_interface/os_context.h"
-#include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_device.h"
 
 #include "opencl/source/api/api.h"
 #include "opencl/source/helpers/memory_properties_helpers.h"
@@ -487,19 +487,13 @@ HWTEST_F(UsmDestructionTests, givenSharedUsmAllocationWhenBlockingFreeIsCalledTh
     }
 
     auto mockCsr = new ::testing::NiceMock<MyCsr<FamilyType>>(*mockDevice.executionEnvironment, 1);
-    auto osContext = mockDevice.executionEnvironment->memoryManager->createAndRegisterOsContext(mockDevice.engines[0].commandStreamReceiver,
-                                                                                                aub_stream::ENGINE_RCS, 1,
-                                                                                                PreemptionMode::Disabled,
-                                                                                                false, false, false);
-    mockDevice.engines[0].osContext = osContext;
-
     mockDevice.resetCommandStreamReceiver(mockCsr);
     *mockCsr->getTagAddress() = 5u;
 
-    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY, mockDevice.getDeviceBitfield());
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY, mockContext.getRootDeviceIndices(), mockContext.getDeviceBitfields());
 
     auto svmAllocationsManager = mockContext.getSVMAllocsManager();
-    auto sharedMemory = svmAllocationsManager->createUnifiedAllocationWithDeviceStorage(0u, 4096u, {}, unifiedMemoryProperties);
+    auto sharedMemory = svmAllocationsManager->createUnifiedAllocationWithDeviceStorage(4096u, {}, unifiedMemoryProperties);
     ASSERT_NE(nullptr, sharedMemory);
 
     auto svmEntry = svmAllocationsManager->getSVMAlloc(sharedMemory);
@@ -526,19 +520,13 @@ HWTEST_F(UsmDestructionTests, givenUsmAllocationWhenBlockingFreeIsCalledThenWait
     }
 
     auto mockCsr = new ::testing::NiceMock<MyCsr<FamilyType>>(*mockDevice.executionEnvironment, 1);
-    auto osContext = mockDevice.executionEnvironment->memoryManager->createAndRegisterOsContext(mockDevice.engines[0].commandStreamReceiver,
-                                                                                                aub_stream::ENGINE_RCS, 1,
-                                                                                                PreemptionMode::Disabled,
-                                                                                                false, false, false);
-    mockDevice.engines[0].osContext = osContext;
-
     mockDevice.resetCommandStreamReceiver(mockCsr);
     *mockCsr->getTagAddress() = 5u;
 
-    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::HOST_UNIFIED_MEMORY, mockClDevice.getDeviceBitfield());
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::HOST_UNIFIED_MEMORY, mockContext.getRootDeviceIndices(), mockContext.getDeviceBitfields());
 
     auto svmAllocationsManager = mockContext.getSVMAllocsManager();
-    auto hostMemory = svmAllocationsManager->createUnifiedMemoryAllocation(0u, 4096u, unifiedMemoryProperties);
+    auto hostMemory = svmAllocationsManager->createUnifiedMemoryAllocation(4096u, unifiedMemoryProperties);
     ASSERT_NE(nullptr, hostMemory);
 
     auto svmEntry = svmAllocationsManager->getSVMAlloc(hostMemory);

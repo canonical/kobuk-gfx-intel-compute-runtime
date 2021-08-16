@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -12,11 +12,18 @@
 
 using namespace NEO;
 
-struct FailOSTime : public MockOSTime {
-  public:
-    bool getCpuGpuTime(TimeStampData *pGpuCpuTime) override {
+struct FailDeviceTime : public MockDeviceTime {
+    bool getCpuGpuTime(TimeStampData *pGpuCpuTime, OSTime *) override {
         return false;
     }
+};
+
+struct FailOSTime : public MockOSTime {
+  public:
+    FailOSTime() {
+        this->deviceTime = std::make_unique<FailDeviceTime>();
+    }
+
     bool getCpuTime(uint64_t *timeStamp) override {
         return false;
     };

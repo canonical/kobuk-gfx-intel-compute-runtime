@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,10 +16,11 @@
 
 namespace NEO {
 struct HardwareInfo;
+class GmmHelper;
 
 class AubCenter {
   public:
-    AubCenter(const HardwareInfo *pHwInfo, bool localMemoryEnabled, const std::string &aubFileName, CommandStreamReceiverType csrType);
+    AubCenter(const HardwareInfo *pHwInfo, const GmmHelper &gmmHelper, bool localMemoryEnabled, const std::string &aubFileName, CommandStreamReceiverType csrType);
 
     AubCenter();
     virtual ~AubCenter() = default;
@@ -58,5 +59,6 @@ class AubCenter {
     std::unique_ptr<AubSubCaptureCommon> subCaptureCommon;
     std::unique_ptr<aub_stream::AubManager> aubManager;
     uint32_t aubStreamMode = 0;
+    uint32_t stepping = 0;
 };
 } // namespace NEO

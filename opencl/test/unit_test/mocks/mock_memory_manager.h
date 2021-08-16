@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,9 +8,9 @@
 #pragma once
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
-#include "shared/test/unit_test/helpers/default_hw_info.h"
+#include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/mocks/mock_execution_environment.h"
 
-#include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/mocks/mock_host_ptr_manager.h"
 
 #include "gmock/gmock.h"
@@ -23,7 +23,7 @@ class MemoryManagerCreate : public T {
     using T::T;
 
     template <class... U>
-    MemoryManagerCreate(bool enable64kbPages, bool enableLocalMemory, U &&... args) : T(std::forward<U>(args)...) {
+    MemoryManagerCreate(bool enable64kbPages, bool enableLocalMemory, U &&...args) : T(std::forward<U>(args)...) {
         std::fill(this->enable64kbpages.begin(), this->enable64kbpages.end(), enable64kbPages);
         std::fill(this->localMemorySupported.begin(), this->localMemorySupported.end(), enableLocalMemory);
     }
@@ -37,9 +37,11 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     using MemoryManager::allocateGraphicsMemoryWithProperties;
     using MemoryManager::createGraphicsAllocation;
     using MemoryManager::createStorageInfoFromProperties;
+    using MemoryManager::defaultEngineIndex;
+    using MemoryManager::externalLocalMemoryUsageBankSelector;
     using MemoryManager::getAllocationData;
     using MemoryManager::gfxPartitions;
-    using MemoryManager::localMemoryUsageBankSelector;
+    using MemoryManager::internalLocalMemoryUsageBankSelector;
     using MemoryManager::multiContextResourceDestructor;
     using MemoryManager::overrideAllocationData;
     using MemoryManager::pageFaultManager;
@@ -48,7 +50,11 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     using MemoryManager::useNonSvmHostPtrAlloc;
     using OsAgnosticMemoryManager::allocateGraphicsMemoryForImageFromHostPtr;
     using MemoryManagerCreate<OsAgnosticMemoryManager>::MemoryManagerCreate;
+    using MemoryManager::enable64kbpages;
+    using MemoryManager::isaInLocalMemory;
+    using MemoryManager::isAllocationTypeToCapture;
     using MemoryManager::isCopyRequired;
+    using MemoryManager::localMemorySupported;
     using MemoryManager::reservedMemory;
 
     MockMemoryManager(ExecutionEnvironment &executionEnvironment) : MockMemoryManager(false, executionEnvironment) {}
@@ -73,6 +79,8 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     GraphicsAllocation *allocateGraphicsMemoryInDevicePool(const AllocationData &allocationData, AllocationStatus &status) override;
     GraphicsAllocation *allocateGraphicsMemoryWithAlignment(const AllocationData &allocationData) override;
     GraphicsAllocation *allocateGraphicsMemoryWithProperties(const AllocationProperties &properties) override;
+    GraphicsAllocation *allocateGraphicsMemoryWithProperties(const AllocationProperties &properties, const void *ptr) override;
+    GraphicsAllocation *createGraphicsAllocationFromExistingStorage(AllocationProperties &properties, void *ptr, MultiGraphicsAllocation &multiGraphicsAllocation) override;
 
     void *allocateSystemMemory(size_t size, size_t alignment) override;
 
@@ -83,12 +91,22 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
 
     void *lockResourceImpl(GraphicsAllocation &gfxAllocation) override {
         lockResourceCalled++;
-        return OsAgnosticMemoryManager::lockResourceImpl(gfxAllocation);
+        auto pLockedMemory = OsAgnosticMemoryManager::lockResourceImpl(gfxAllocation);
+        lockResourcePointers.push_back(pLockedMemory);
+        return pLockedMemory;
     }
 
     void unlockResourceImpl(GraphicsAllocation &gfxAllocation) override {
         unlockResourceCalled++;
         OsAgnosticMemoryManager::unlockResourceImpl(gfxAllocation);
+    }
+
+    void waitForEnginesCompletion(GraphicsAllocation &graphicsAllocation) override {
+        waitForEnginesCompletionCalled++;
+        if (waitAllocations.get()) {
+            waitAllocations.get()->addAllocation(&graphicsAllocation);
+        }
+        MemoryManager::waitForEnginesCompletion(graphicsAllocation);
     }
 
     void handleFenceCompletion(GraphicsAllocation *graphicsAllocation) override {
@@ -103,17 +121,37 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
         return OsAgnosticMemoryManager::reserveCpuAddressRange(size, rootDeviceIndex);
     }
 
+    void *createMultiGraphicsAllocationInSystemMemoryPool(std::vector<uint32_t> &rootDeviceIndices,
+                                                          AllocationProperties &properties,
+                                                          MultiGraphicsAllocation &multiGraphicsAllocation) override {
+        if (isMockEventPoolCreateMemoryManager) {
+            return nullptr;
+        }
+        return OsAgnosticMemoryManager::createMultiGraphicsAllocationInSystemMemoryPool(rootDeviceIndices, properties, multiGraphicsAllocation);
+    }
+
     bool isCpuCopyRequired(const void *ptr) override { return cpuCopyRequired; }
 
     GraphicsAllocation *allocate32BitGraphicsMemory(uint32_t rootDeviceIndex, size_t size, const void *ptr, GraphicsAllocation::AllocationType allocationType);
     GraphicsAllocation *allocate32BitGraphicsMemoryImpl(const AllocationData &allocationData, bool useLocalMemory) override;
 
+    bool isLimitedGPU(uint32_t rootDeviceIndex) override {
+        return limitedGPU;
+    }
     void forceLimitedRangeAllocator(uint32_t rootDeviceIndex, uint64_t range) { getGfxPartition(rootDeviceIndex)->init(range, 0, 0, gfxPartitions.size()); }
 
     uint32_t freeGraphicsMemoryCalled = 0u;
     uint32_t unlockResourceCalled = 0u;
     uint32_t lockResourceCalled = 0u;
+    uint32_t createGraphicsAllocationFromExistingStorageCalled = 0u;
+    std::vector<GraphicsAllocation *> allocationsFromExistingStorage{};
+    AllocationData alignAllocationData;
+    uint32_t successAllocatedGraphicsMemoryIndex = 0u;
+    uint32_t maxSuccessAllocatedGraphicsMemoryIndex = std::numeric_limits<uint32_t>::max();
+    std::vector<void *> lockResourcePointers;
     uint32_t handleFenceCompletionCalled = 0u;
+    uint32_t waitForEnginesCompletionCalled = 0u;
+    uint32_t allocateGraphicsMemoryWithPropertiesCount = 0;
     bool allocationCreated = false;
     bool allocation64kbPageCreated = false;
     bool allocationInDevicePoolCreated = false;
@@ -122,14 +160,22 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     bool failInAllocateWithSizeAndAlignment = false;
     bool preferRenderCompressedFlagPassed = false;
     bool allocateForImageCalled = false;
+    bool allocate32BitGraphicsMemoryImplCalled = false;
     bool allocateForShareableCalled = false;
     bool failReserveAddress = false;
     bool failAllocateSystemMemory = false;
     bool failAllocate32Bit = false;
     bool cpuCopyRequired = false;
     bool forceRenderCompressed = false;
+    bool forceFailureInPrimaryAllocation = false;
+    bool forceFailureInAllocationWithHostPointer = false;
+    bool isMockHostMemoryManager = false;
+    bool isMockEventPoolCreateMemoryManager = false;
+    bool limitedGPU = false;
+    bool returnFakeAllocation = false;
     std::unique_ptr<MockExecutionEnvironment> mockExecutionEnvironment;
     DeviceBitfield recentlyPassedDeviceBitfield{};
+    std::unique_ptr<MultiGraphicsAllocation> waitAllocations = nullptr;
 };
 
 class GMockMemoryManager : public MockMemoryManager {
@@ -188,7 +234,7 @@ class FailMemoryManager : public MockMemoryManager {
     GraphicsAllocation *allocate32BitGraphicsMemoryImpl(const AllocationData &allocationData, bool useLocalMemory) override {
         return nullptr;
     }
-    GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness) override {
+    GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override {
         return nullptr;
     }
     GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex) override {

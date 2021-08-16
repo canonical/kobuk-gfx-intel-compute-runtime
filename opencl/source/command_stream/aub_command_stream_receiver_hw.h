@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,16 +7,16 @@
 
 #pragma once
 #include "shared/source/aub/aub_center.h"
+#include "shared/source/command_stream/aub_command_stream_receiver.h"
 #include "shared/source/helpers/array_count.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
+#include "shared/source/memory_manager/page_table.h"
 #include "shared/source/memory_manager/physical_address_allocator.h"
 #include "shared/source/utilities/spinlock.h"
 
-#include "opencl/source/command_stream/aub_command_stream_receiver.h"
-#include "opencl/source/memory_manager/page_table.h"
+#include "opencl/source/command_stream/definitions/command_stream_receiver_simulated_hw.h"
 
 #include "aub_mapper.h"
-#include "command_stream_receiver_simulated_hw.h"
 
 namespace NEO {
 
@@ -52,6 +52,7 @@ class AUBCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     void writeMemory(uint64_t gpuAddress, void *cpuAddress, size_t size, uint32_t memoryBank, uint64_t entryBits) override;
     bool writeMemory(GraphicsAllocation &gfxAllocation) override;
     MOCKABLE_VIRTUAL bool writeMemory(AllocationView &allocationView);
+    void writeMMIO(uint32_t offset, uint32_t value) override;
     void expectMMIO(uint32_t mmioRegister, uint32_t expectedValue);
     bool expectMemory(const void *gfxAddress, const void *srcAddress, size_t length, uint32_t compareOperation) override;
 

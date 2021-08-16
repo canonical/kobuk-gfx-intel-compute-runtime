@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -69,7 +69,8 @@ struct Mock<Device> : public Device {
                 createModule,
                 (const ze_module_desc_t *desc,
                  ze_module_handle_t *module,
-                 ze_module_build_log_handle_t *buildLog),
+                 ze_module_build_log_handle_t *buildLog,
+                 ModuleType type),
                 (override));
     MOCK_METHOD(ze_result_t,
                 createSampler,
@@ -108,17 +109,20 @@ struct Mock<Device> : public Device {
                  ze_device_handle_t *phSubdevices),
                 (override));
     MOCK_METHOD(ze_result_t,
-                setIntermediateCacheConfig,
-                (ze_cache_config_flags_t CacheConfig),
-                (override));
-    MOCK_METHOD(ze_result_t,
-                setLastLevelCacheConfig,
-                (ze_cache_config_flags_t CacheConfig),
-                (override));
-    MOCK_METHOD(ze_result_t,
                 getCacheProperties,
                 (uint32_t * pCount,
                  ze_device_cache_properties_t *pCacheProperties),
+                (override));
+    MOCK_METHOD(ze_result_t,
+                reserveCache,
+                (size_t cacheLevel,
+                 size_t cacheReservationSize),
+                (override));
+    MOCK_METHOD(ze_result_t,
+                setCacheAdvice,
+                (void *ptr,
+                 size_t regionSize,
+                 ze_cache_ext_region_t cacheRegion),
                 (override));
     MOCK_METHOD(ze_result_t,
                 imageGetProperties,
@@ -137,6 +141,11 @@ struct Mock<Device> : public Device {
     MOCK_METHOD(ze_result_t,
                 getExternalMemoryProperties,
                 (ze_device_external_memory_properties_t * pExternalMemoryProperties),
+                (override));
+    MOCK_METHOD(ze_result_t,
+                getGlobalTimestamps,
+                (uint64_t * hostTimestamp,
+                 uint64_t *deviceTimestamp),
                 (override));
     MOCK_METHOD(ze_result_t,
                 systemBarrier,
@@ -242,14 +251,34 @@ struct Mock<Device> : public Device {
         return ZE_RESULT_SUCCESS;
     }
 
+    ze_result_t getCsrForLowPriority(NEO::CommandStreamReceiver **csr) override {
+        return ZE_RESULT_SUCCESS;
+    }
+
     ze_result_t mapOrdinalForAvailableEngineGroup(uint32_t *ordinal) override {
         return ZE_RESULT_SUCCESS;
     }
+
+    ze_result_t getDebugProperties(zet_device_debug_properties_t *properties) override {
+        return ZE_RESULT_SUCCESS;
+    }
+
+    DebugSession *getDebugSession(const zet_debug_config_t &config) override {
+        return nullptr;
+    }
+
+    DebugSession *createDebugSession(const zet_debug_config_t &config, ze_result_t &result) override {
+        result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+        return nullptr;
+    }
+
+    void removeDebugSession() override {}
 };
 
 template <>
 struct Mock<L0::DeviceImp> : public L0::DeviceImp {
     using Base = L0::DeviceImp;
+    using Base::debugSession;
 
     explicit Mock(NEO::Device *device, NEO::ExecutionEnvironment *execEnv) {
         device->incRefInternal();

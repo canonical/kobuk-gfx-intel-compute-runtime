@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,13 +7,13 @@
 
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/os_interface/os_context.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
-#include "shared/test/unit_test/helpers/dispatch_flags_helper.h"
-#include "shared/test/unit_test/helpers/ult_hw_helper.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/dispatch_flags_helper.h"
+#include "shared/test/common/helpers/ult_hw_helper.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
 
 #include "opencl/source/command_queue/gpgpu_walker.h"
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
-#include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
@@ -80,7 +80,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenOverrideThreadArbitrationPoli
     EXPECT_EQ(ThreadArbitrationPolicy::RoundRobin, commandStreamReceiver.lastSentThreadArbitrationPolicy);
 }
 
-HWTEST_F(CommandStreamReceiverFlushTaskTests, taskCountShouldBeUpdated) {
+HWTEST_F(CommandStreamReceiverFlushTaskTests, WhenFlushingTaskThenTaskCountIsIncremented) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     flushTask(commandStreamReceiver);
 
@@ -199,7 +199,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeAndMidThread
                       *pDevice);
 
     auto cmdBuffer = mockedSubmissionsAggregator->peekCommandBuffers().peekHead();
-    auto sipAllocation = pDevice->getBuiltIns()->getSipKernel(SipKernelType::Csr, *pDevice).getSipAllocation();
+    auto sipAllocation = SipKernel::getSipKernel(*pDevice).getSipAllocation();
     bool found = false;
     for (auto allocation : cmdBuffer->surfaces) {
         if (allocation == sipAllocation) {
@@ -229,7 +229,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInDefaultModeAndMidThreadP
                        dispatchFlags,
                        *pDevice);
 
-    auto sipAllocation = pDevice->getBuiltIns()->getSipKernel(SipKernelType::Csr, *pDevice).getSipAllocation();
+    auto sipAllocation = SipKernel::getSipKernel(*pDevice).getSipAllocation();
     bool found = false;
     for (auto allocation : mockCsr->copyOfAllocations) {
         if (allocation == sipAllocation) {
@@ -238,6 +238,36 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInDefaultModeAndMidThreadP
         }
     }
     EXPECT_TRUE(found);
+}
+
+HWTEST_F(CommandStreamReceiverFlushTaskTests, whenFlushThenCommandBufferAlreadyHasProperTaskCountsAndIsNotIncludedInResidencyVector) {
+    struct MockCsrFlushCmdBuffer : public MockCommandStreamReceiver {
+        using MockCommandStreamReceiver::MockCommandStreamReceiver;
+        bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
+            EXPECT_EQ(batchBuffer.commandBufferAllocation->getResidencyTaskCount(this->osContext->getContextId()), this->taskCount + 1);
+            EXPECT_EQ(batchBuffer.commandBufferAllocation->getTaskCount(this->osContext->getContextId()), this->taskCount + 1);
+            EXPECT_EQ(std::find(allocationsForResidency.begin(), allocationsForResidency.end(), batchBuffer.commandBufferAllocation), allocationsForResidency.end());
+            return true;
+        }
+    };
+
+    auto mockCsr = new MockCsrFlushCmdBuffer(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    pDevice->resetCommandStreamReceiver(mockCsr);
+
+    CommandQueueHw<FamilyType> commandQueue(nullptr, pClDevice, 0, false);
+    auto &commandStream = commandQueue.getCS(4096u);
+
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.preemptionMode = PreemptionMode::MidThread;
+
+    mockCsr->flushTask(commandStream,
+                       0,
+                       dsh,
+                       ioh,
+                       ssh,
+                       taskLevel,
+                       dispatchFlags,
+                       *pDevice);
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, GivenSameTaskLevelWhenFlushingTaskThenDoNotSendPipeControl) {
@@ -361,6 +391,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, WhenForcePipeCo
                 EXPECT_EQ(bool(pipeControl->getVfCacheInvalidationEnable()), false);
                 EXPECT_EQ(bool(pipeControl->getConstantCacheInvalidationEnable()), false);
                 EXPECT_EQ(bool(pipeControl->getStateCacheInvalidationEnable()), false);
+                EXPECT_EQ(bool(pipeControl->getTlbInvalidate()), false);
                 break;
             case 1: // Second pipe control with all flushes
                 EXPECT_EQ(bool(pipeControl->getCommandStreamerStallEnable()), true);
@@ -372,6 +403,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, WhenForcePipeCo
                 EXPECT_EQ(bool(pipeControl->getVfCacheInvalidationEnable()), true);
                 EXPECT_EQ(bool(pipeControl->getConstantCacheInvalidationEnable()), true);
                 EXPECT_EQ(bool(pipeControl->getStateCacheInvalidationEnable()), true);
+                EXPECT_EQ(bool(pipeControl->getTlbInvalidate()), true);
             default:
                 break;
             }
@@ -543,7 +575,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenStateBaseAddressWhenItIsRequi
     EXPECT_NE(stateBaseAddressItor, pipeControlItor);
     auto pipeControlCmd = (typename FamilyType::PIPE_CONTROL *)*pipeControlItor;
     EXPECT_TRUE(pipeControlCmd->getTextureCacheInvalidationEnable());
-    EXPECT_TRUE(pipeControlCmd->getDcFlushEnable());
+    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pipeControlCmd->getDcFlushEnable());
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenNotApplicableL3ConfigWhenFlushingTaskThenDontReloadSba) {
@@ -596,6 +628,90 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenNotApplicableGrfConfigWhenFlu
         auto stateBaseAddressItor = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
         EXPECT_EQ(cmdList.end(), stateBaseAddressItor);
     }
+}
+
+HWTEST_F(CommandStreamReceiverFlushTaskTests, givenMultiOsContextCapableSetAndDispatchFlagsWhenFlushingTaskThenReloadSbaProperly) {
+    using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    // 1. Ignore dispatchFlags.useGlobalAtomics flip if csr is not multi context capable
+    commandStreamReceiver.multiOsContextCapable = false;
+
+    flushTaskFlags.useGlobalAtomics = false;
+    auto offset = commandStreamReceiver.commandStream.getUsed();
+    flushTask(commandStreamReceiver);
+
+    parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
+    auto stateBaseAddressItor = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
+    EXPECT_NE(cmdList.end(), stateBaseAddressItor);
+
+    flushTaskFlags.useGlobalAtomics ^= true;
+    offset = commandStreamReceiver.commandStream.getUsed();
+    flushTask(commandStreamReceiver);
+
+    cmdList.clear();
+    parseCommands<FamilyType>(commandStreamReceiver.commandStream, offset);
+    stateBaseAddressItor = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
+    EXPECT_EQ(cmdList.end(), stateBaseAddressItor);
+
+    // 2. Reprogram SBA only if dispatchFlags.useGlobalAtomics flips and csr is multi context capable or context has several devices
+    commandStreamReceiver.multiOsContextCapable = true;
+
+    flushTaskFlags.useGlobalAtomics = true;
+    flushTaskFlags.areMultipleSubDevicesInContext = false;
+    offset = commandStreamReceiver.commandStream.getUsed();
+    flushTask(commandStreamReceiver);
+
+    cmdList.clear();
+    parseCommands<FamilyType>(commandStreamReceiver.commandStream, offset);
+    stateBaseAddressItor = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
+    EXPECT_NE(cmdList.end(), stateBaseAddressItor);
+
+    flushTaskFlags.useGlobalAtomics ^= true;
+    offset = commandStreamReceiver.commandStream.getUsed();
+    flushTask(commandStreamReceiver);
+
+    cmdList.clear();
+    parseCommands<FamilyType>(commandStreamReceiver.commandStream, offset);
+    stateBaseAddressItor = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
+    EXPECT_NE(cmdList.end(), stateBaseAddressItor);
+
+    offset = commandStreamReceiver.commandStream.getUsed();
+    flushTask(commandStreamReceiver);
+
+    cmdList.clear();
+    parseCommands<FamilyType>(commandStreamReceiver.commandStream, offset);
+    stateBaseAddressItor = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
+    EXPECT_EQ(cmdList.end(), stateBaseAddressItor);
+
+    commandStreamReceiver.multiOsContextCapable = false;
+
+    flushTaskFlags.useGlobalAtomics = true;
+    flushTaskFlags.areMultipleSubDevicesInContext = true;
+    offset = commandStreamReceiver.commandStream.getUsed();
+    flushTask(commandStreamReceiver);
+
+    cmdList.clear();
+    parseCommands<FamilyType>(commandStreamReceiver.commandStream, offset);
+    stateBaseAddressItor = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
+    EXPECT_NE(cmdList.end(), stateBaseAddressItor);
+
+    flushTaskFlags.useGlobalAtomics ^= true;
+    offset = commandStreamReceiver.commandStream.getUsed();
+    flushTask(commandStreamReceiver);
+
+    cmdList.clear();
+    parseCommands<FamilyType>(commandStreamReceiver.commandStream, offset);
+    stateBaseAddressItor = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
+    EXPECT_NE(cmdList.end(), stateBaseAddressItor);
+
+    offset = commandStreamReceiver.commandStream.getUsed();
+    flushTask(commandStreamReceiver);
+
+    cmdList.clear();
+    parseCommands<FamilyType>(commandStreamReceiver.commandStream, offset);
+    stateBaseAddressItor = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
+    EXPECT_EQ(cmdList.end(), stateBaseAddressItor);
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenPreambleNotSentWhenFlushingTaskThenPreambleIsSent) {
@@ -1099,20 +1215,20 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, GivenBlockingWh
 
             // Verify that the dcFlushEnabled bit is not set in PC
             auto pCmd = reinterpret_cast<PIPE_CONTROL *>(pipeControlTask);
-            EXPECT_TRUE(pCmd->getDcFlushEnable());
+            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pCmd->getDcFlushEnable());
         }
     } else {
         auto pCmd = reinterpret_cast<PIPE_CONTROL *>(*itorPC);
-        EXPECT_TRUE(pCmd->getDcFlushEnable());
+        EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pCmd->getDcFlushEnable());
     }
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelRequiringDCFlushWhenUnblockedThenDCFlushIsAdded) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
     MockContext ctx(pClDevice);
-    CommandQueueHw<FamilyType> commandQueue(&ctx, pClDevice, 0, false);
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.timestampPacketWriteEnabled = false;
+    CommandQueueHw<FamilyType> commandQueue(&ctx, pClDevice, 0, false);
     cl_event blockingEvent;
     MockEvent<UserEvent> mockEvent(&ctx);
     blockingEvent = &mockEvent;
@@ -1147,7 +1263,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelRequiringDCFlush
 
     // Verify that the dcFlushEnabled bit is set in PC
     auto pCmdWA = reinterpret_cast<PIPE_CONTROL *>(*itorPC);
-    EXPECT_TRUE(pCmdWA->getDcFlushEnable());
+    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pCmdWA->getDcFlushEnable());
 
     buffer->release();
 }
@@ -1188,3 +1304,75 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWhenCallFlushTas
 
     EXPECT_EQ(dispatchFlags.threadArbitrationPolicy, mockCsr->requiredThreadArbitrationPolicy);
 }
+
+class CommandStreamReceiverFlushTaskMemoryCompressionTests : public UltCommandStreamReceiverTest,
+                                                             public ::testing::WithParamInterface<MemoryCompressionState> {};
+
+HWTEST_P(CommandStreamReceiverFlushTaskMemoryCompressionTests, givenCsrWithMemoryCompressionStateNotApplicableWhenFlushTaskIsCalledThenUseLastMemoryCompressionState) {
+    auto &mockCsr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    CommandQueueHw<FamilyType> commandQueue(nullptr, pClDevice, 0, false);
+    auto &commandStream = commandQueue.getCS(4096u);
+
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.memoryCompressionState = MemoryCompressionState::NotApplicable;
+
+    mockCsr.lastMemoryCompressionState = GetParam();
+    MemoryCompressionState lastMemoryCompressionState = mockCsr.lastMemoryCompressionState;
+
+    mockCsr.flushTask(commandStream,
+                      0,
+                      dsh,
+                      ioh,
+                      ssh,
+                      taskLevel,
+                      dispatchFlags,
+                      *pDevice);
+    EXPECT_EQ(lastMemoryCompressionState, mockCsr.lastMemoryCompressionState);
+}
+
+HWTEST_P(CommandStreamReceiverFlushTaskMemoryCompressionTests, givenCsrWithMemoryCompressionStateApplicableWhenFlushTaskIsCalledThenUpdateLastMemoryCompressionState) {
+    auto &mockCsr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    CommandQueueHw<FamilyType> commandQueue(nullptr, pClDevice, 0, false);
+    auto &commandStream = commandQueue.getCS(4096u);
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+
+    dispatchFlags.memoryCompressionState = GetParam();
+
+    if (dispatchFlags.memoryCompressionState == MemoryCompressionState::NotApplicable) {
+
+        for (auto memoryCompressionState : {MemoryCompressionState::NotApplicable, MemoryCompressionState::Disabled, MemoryCompressionState::Enabled}) {
+            mockCsr.lastMemoryCompressionState = memoryCompressionState;
+            MemoryCompressionState lastMemoryCompressionState = mockCsr.lastMemoryCompressionState;
+            mockCsr.flushTask(commandStream,
+                              0,
+                              dsh,
+                              ioh,
+                              ssh,
+                              taskLevel,
+                              dispatchFlags,
+                              *pDevice);
+            EXPECT_EQ(lastMemoryCompressionState, mockCsr.lastMemoryCompressionState);
+        }
+    } else {
+
+        for (auto memoryCompressionState : {MemoryCompressionState::NotApplicable, MemoryCompressionState::Disabled, MemoryCompressionState::Enabled}) {
+            mockCsr.lastMemoryCompressionState = memoryCompressionState;
+            mockCsr.flushTask(commandStream,
+                              0,
+                              dsh,
+                              ioh,
+                              ssh,
+                              taskLevel,
+                              dispatchFlags,
+                              *pDevice);
+            EXPECT_EQ(dispatchFlags.memoryCompressionState, mockCsr.lastMemoryCompressionState);
+        }
+    }
+}
+
+INSTANTIATE_TEST_CASE_P(
+    CommandStreamReceiverFlushTaskMemoryCompressionTestsValues,
+    CommandStreamReceiverFlushTaskMemoryCompressionTests,
+    testing::Values(MemoryCompressionState::NotApplicable, MemoryCompressionState::Disabled, MemoryCompressionState::Enabled));

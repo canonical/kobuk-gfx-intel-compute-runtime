@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -12,8 +12,7 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device/device.h"
 #include "shared/source/helpers/hw_info.h"
-
-#include "opencl/source/os_interface/os_inc_base.h"
+#include "shared/source/os_interface/os_inc_base.h"
 
 #include "cif/common/cif_main.h"
 #include "cif/helpers/error.h"
@@ -21,8 +20,6 @@
 #include "ocl_igc_interface/code_type.h"
 #include "ocl_igc_interface/fcl_ocl_device_ctx.h"
 #include "ocl_igc_interface/igc_ocl_device_ctx.h"
-
-#undef IGC_CLEANUP
 #include "ocl_igc_interface/platform_helper.h"
 
 #include <fstream>
@@ -303,28 +300,48 @@ TranslationOutput::ErrorCode CompilerInterface::createLibrary(
     return TranslationOutput::ErrorCode::Success;
 }
 
-TranslationOutput::ErrorCode CompilerInterface::getSipKernelBinary(NEO::Device &device, SipKernelType type, std::vector<char> &retBinary) {
+TranslationOutput::ErrorCode CompilerInterface::getSipKernelBinary(NEO::Device &device, SipKernelType type, std::vector<char> &retBinary,
+                                                                   std::vector<char> &stateSaveAreaHeader) {
     if (false == isIgcAvailable()) {
         return TranslationOutput::ErrorCode::CompilerNotAvailable;
     }
 
-    const char *sipSrc = getSipLlSrc(device);
-    std::string sipInternalOptions = getSipKernelCompilerInternalOptions(type);
+    IGC::SystemRoutineType::SystemRoutineType_t typeOfSystemRoutine = IGC::SystemRoutineType::undefined;
+    bool debugSip = false;
+    switch (type) {
+    case SipKernelType::Csr:
+        typeOfSystemRoutine = IGC::SystemRoutineType::contextSaveRestore;
+        break;
+    case SipKernelType::DbgCsr:
+        typeOfSystemRoutine = IGC::SystemRoutineType::debug;
+        debugSip = true;
+        break;
+    case SipKernelType::DbgCsrLocal:
+        typeOfSystemRoutine = IGC::SystemRoutineType::debugSlm;
+        debugSip = true;
+        break;
+    default:
+        break;
+    }
 
-    auto igcSrc = CIF::Builtins::CreateConstBuffer(igcMain.get(), sipSrc, strlen(sipSrc) + 1);
-    auto igcOptions = CIF::Builtins::CreateConstBuffer(igcMain.get(), nullptr, 0);
-    auto igcInternalOptions = CIF::Builtins::CreateConstBuffer(igcMain.get(), sipInternalOptions.c_str(), sipInternalOptions.size() + 1);
+    auto deviceCtx = getIgcDeviceCtx(device);
+    bool bindlessSip = debugSip ? DebugManager.flags.UseBindlessDebugSip.get() : false;
 
-    auto igcTranslationCtx = createIgcTranslationCtx(device, IGC::CodeType::llvmLl, IGC::CodeType::oclGenBin);
+    auto systemRoutineBuffer = igcMain.get()->CreateBuiltin<CIF::Builtins::BufferLatest>();
+    auto stateSaveAreaBuffer = igcMain.get()->CreateBuiltin<CIF::Builtins::BufferLatest>();
 
-    auto igcOutput = translate(igcTranslationCtx.get(), igcSrc.get(),
-                               igcOptions.get(), igcInternalOptions.get());
+    auto result = deviceCtx->GetSystemRoutine(typeOfSystemRoutine,
+                                              bindlessSip,
+                                              systemRoutineBuffer.get(),
+                                              stateSaveAreaBuffer.get());
 
-    if ((igcOutput == nullptr) || (igcOutput->Successful() == false)) {
+    if (!result) {
         return TranslationOutput::ErrorCode::UnknownError;
     }
 
-    retBinary.assign(igcOutput->GetOutput()->GetMemory<char>(), igcOutput->GetOutput()->GetMemory<char>() + igcOutput->GetOutput()->GetSizeRaw());
+    retBinary.assign(systemRoutineBuffer->GetMemory<char>(), systemRoutineBuffer->GetMemory<char>() + systemRoutineBuffer->GetSizeRaw());
+    stateSaveAreaHeader.assign(stateSaveAreaBuffer->GetMemory<char>(), stateSaveAreaBuffer->GetMemory<char>() + stateSaveAreaBuffer->GetSizeRaw());
+
     return TranslationOutput::ErrorCode::Success;
 }
 
@@ -363,6 +380,15 @@ IGC::FclOclDeviceCtxTagOCL *CompilerInterface::getFclDeviceCtx(const Device &dev
         return nullptr;
     }
     newDeviceCtx->SetOclApiVersion(device.getHardwareInfo().capabilityTable.clVersionSupport * 10);
+    if (newDeviceCtx->GetUnderlyingVersion() > 4U) {
+        auto igcPlatform = newDeviceCtx->GetPlatformHandle();
+        if (nullptr == igcPlatform.get()) {
+            DEBUG_BREAK_IF(true); // could not acquire handles to platform descriptor
+            return nullptr;
+        }
+        const HardwareInfo *hwInfo = &device.getHardwareInfo();
+        IGC::PlatformHelper::PopulateInterfaceWith(*igcPlatform, hwInfo->platform);
+    }
     fclDeviceContexts[&device] = std::move(newDeviceCtx);
 
     return fclDeviceContexts[&device].get();

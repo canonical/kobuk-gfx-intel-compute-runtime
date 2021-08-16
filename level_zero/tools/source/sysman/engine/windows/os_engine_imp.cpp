@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,7 +10,8 @@
 namespace L0 {
 
 ze_result_t WddmEngineImp::getActivity(zes_engine_stats_t *pStats) {
-    uint64_t value = 0;
+    uint64_t activeTime = 0;
+    uint64_t timeStamp = 0;
     KmdSysman::RequestProperty request;
     KmdSysman::ResponseProperty response;
 
@@ -40,10 +41,11 @@ ze_result_t WddmEngineImp::getActivity(zes_engine_stats_t *pStats) {
         return status;
     }
 
-    memcpy_s(&value, sizeof(uint64_t), response.dataBuffer, sizeof(uint64_t));
-    pStats->activeTime = value;
-    memcpy_s(&value, sizeof(uint64_t), (response.dataBuffer + sizeof(uint64_t)), sizeof(uint64_t));
-    pStats->timestamp = value;
+    memcpy_s(&activeTime, sizeof(uint64_t), response.dataBuffer, sizeof(uint64_t));
+    memcpy_s(&timeStamp, sizeof(uint64_t), (response.dataBuffer + sizeof(uint64_t)), sizeof(uint64_t));
+
+    pStats->activeTime = activeTime;
+    pStats->timestamp = timeStamp;
 
     return status;
 }
@@ -55,18 +57,18 @@ ze_result_t WddmEngineImp::getProperties(zes_engine_properties_t &properties) {
     return ZE_RESULT_SUCCESS;
 }
 
-WddmEngineImp::WddmEngineImp(OsSysman *pOsSysman, zes_engine_group_t engineType, uint32_t engineInstance) {
+WddmEngineImp::WddmEngineImp(OsSysman *pOsSysman, zes_engine_group_t engineType, uint32_t engineInstance, uint32_t subDeviceId) {
     WddmSysmanImp *pWddmSysmanImp = static_cast<WddmSysmanImp *>(pOsSysman);
     this->engineGroup = engineType;
     pKmdSysManager = &pWddmSysmanImp->getKmdSysManager();
 }
 
-OsEngine *OsEngine::create(OsSysman *pOsSysman, zes_engine_group_t engineType, uint32_t engineInstance) {
-    WddmEngineImp *pWddmEngineImp = new WddmEngineImp(pOsSysman, engineType, engineInstance);
+OsEngine *OsEngine::create(OsSysman *pOsSysman, zes_engine_group_t engineType, uint32_t engineInstance, uint32_t subDeviceId) {
+    WddmEngineImp *pWddmEngineImp = new WddmEngineImp(pOsSysman, engineType, engineInstance, subDeviceId);
     return static_cast<OsEngine *>(pWddmEngineImp);
 }
 
-ze_result_t OsEngine::getNumEngineTypeAndInstances(std::multimap<zes_engine_group_t, uint32_t> &engineGroupInstance, OsSysman *pOsSysman) {
+ze_result_t OsEngine::getNumEngineTypeAndInstances(std::set<std::pair<zes_engine_group_t, EngineInstanceSubDeviceId>> &engineGroupInstance, OsSysman *pOsSysman) {
     WddmSysmanImp *pWddmSysmanImp = static_cast<WddmSysmanImp *>(pOsSysman);
     KmdSysManager *pKmdSysManager = &pWddmSysmanImp->getKmdSysManager();
 
@@ -91,7 +93,7 @@ ze_result_t OsEngine::getNumEngineTypeAndInstances(std::multimap<zes_engine_grou
     }
 
     for (uint32_t i = 0; i < maxNumEnginesSupported; i++) {
-        engineGroupInstance.insert({static_cast<zes_engine_group_t>(i), 0});
+        engineGroupInstance.insert({static_cast<zes_engine_group_t>(i), {0, 0}});
     }
 
     return status;

@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_container/command_encoder.h"
-#include "shared/test/unit_test/cmd_parse/gen_cmd_parse.h"
-#include "shared/test/unit_test/fixtures/device_fixture.h"
+#include "shared/test/common/cmd_parse/gen_cmd_parse.h"
+#include "shared/test/common/fixtures/device_fixture.h"
 
 #include "test.h"
 
@@ -29,7 +29,7 @@ class CommandSetMMIOFixture : public DeviceFixture {
 
 using CommandSetMMIOTest = Test<CommandSetMMIOFixture>;
 
-HWTEST_F(CommandSetMMIOTest, appendsAMI_LOAD_REGISTER_IMM) {
+HWTEST_F(CommandSetMMIOTest, WhenProgrammingThenLoadRegisterImmIsUsed) {
     EncodeSetMMIO<FamilyType>::encodeIMM(*cmdContainer.get(), 0x2000, 0xbaa, false);
 
     GenCmdList commands;
@@ -45,7 +45,7 @@ HWTEST_F(CommandSetMMIOTest, appendsAMI_LOAD_REGISTER_IMM) {
     }
 }
 
-HWTEST_F(CommandSetMMIOTest, appendsAMI_LOAD_REGISTER_MEM) {
+HWTEST_F(CommandSetMMIOTest, WhenProgrammingThenLoadRegisterMemIsUsed) {
     EncodeSetMMIO<FamilyType>::encodeMEM(*cmdContainer.get(), 0x2000, 0xDEADBEEFCAF0);
 
     GenCmdList commands;
@@ -61,7 +61,7 @@ HWTEST_F(CommandSetMMIOTest, appendsAMI_LOAD_REGISTER_MEM) {
     }
 }
 
-HWTEST_F(CommandSetMMIOTest, appendsAMI_LOAD_REGISTER_REG) {
+HWTEST_F(CommandSetMMIOTest, WhenProgrammingThenLoadRegisterRegIsUsed) {
     EncodeSetMMIO<FamilyType>::encodeREG(*cmdContainer.get(), 0x2000, 0x2000);
 
     GenCmdList commands;

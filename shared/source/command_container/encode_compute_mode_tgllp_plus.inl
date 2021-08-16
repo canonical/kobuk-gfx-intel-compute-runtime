@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,20 +11,15 @@
 
 namespace NEO {
 template <typename Family>
-void EncodeStates<Family>::adjustStateComputeMode(LinearStream &csr, uint32_t numGrfRequired, void *const stateComputeModePtr, bool isMultiOsContextCapable, bool requiresCoherency) {
-    using STATE_COMPUTE_MODE = typename Family::STATE_COMPUTE_MODE;
-    using FORCE_NON_COHERENT = typename STATE_COMPUTE_MODE::FORCE_NON_COHERENT;
-    STATE_COMPUTE_MODE stateComputeMode = (stateComputeModePtr != nullptr) ? *(static_cast<STATE_COMPUTE_MODE *>(stateComputeModePtr)) : Family::cmdInitStateComputeMode;
-    FORCE_NON_COHERENT coherencyValue = !requiresCoherency ? FORCE_NON_COHERENT::FORCE_NON_COHERENT_FORCE_GPU_NON_COHERENT : FORCE_NON_COHERENT::FORCE_NON_COHERENT_FORCE_DISABLED;
-    stateComputeMode.setForceNonCoherent(coherencyValue);
-
-    stateComputeMode.setMaskBits(stateComputeMode.getMaskBits() | Family::stateComputeModeForceNonCoherentMask);
-
-    EncodeComputeMode<Family>::adjustComputeMode(csr, numGrfRequired, &stateComputeMode, isMultiOsContextCapable);
+void EncodeStates<Family>::adjustStateComputeMode(LinearStream &csr, uint32_t numGrfRequired, void *const stateComputeModePtr,
+                                                  bool requiresCoherency, uint32_t threadArbitrationPolicy, const HardwareInfo &hwInfo) {
+    StreamProperties properties{};
+    properties.stateComputeMode.setProperties(requiresCoherency, numGrfRequired, threadArbitrationPolicy);
+    EncodeComputeMode<Family>::adjustComputeMode(csr, stateComputeModePtr, properties.stateComputeMode, hwInfo);
 }
 
 template <typename Family>
-void EncodeStoreMMIO<Family>::remapOffset(MI_STORE_REGISTER_MEM *pStoreRegMem) {
+inline void EncodeStoreMMIO<Family>::remapOffset(MI_STORE_REGISTER_MEM *pStoreRegMem) {
     pStoreRegMem->setMmioRemapEnable(true);
 }
 
@@ -46,10 +41,15 @@ void EncodeSetMMIO<Family>::remapOffset(MI_LOAD_REGISTER_REG *pMiLoadReg) {
 }
 
 template <typename Family>
-bool EncodeSetMMIO<Family>::isRemapApplicable(uint32_t offset) {
+inline bool EncodeSetMMIO<Family>::isRemapApplicable(uint32_t offset) {
     return (0x2000 <= offset && offset <= 0x27ff) ||
            (0x4200 <= offset && offset <= 0x420f) ||
            (0x4400 <= offset && offset <= 0x441f);
 }
 
+template <typename Family>
+void EncodeSurfaceState<Family>::disableCompressionFlags(R_SURFACE_STATE *surfaceState) {
+    surfaceState->setAuxiliarySurfaceMode(Family::RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE);
+    surfaceState->setMemoryCompressionEnable(false);
+}
 } // namespace NEO

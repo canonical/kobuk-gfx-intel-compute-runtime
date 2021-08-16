@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -271,6 +271,17 @@ std::string FsAccess::getDirName(const std::string path) {
     }
     // Include trailing slash
     return path.substr(0, pos);
+}
+
+bool FsAccess::isRootUser() {
+    return (geteuid() == 0);
+}
+
+bool FsAccess::directoryExists(const std::string path) {
+    if (accessSyscall(path.c_str(), F_OK)) {
+        return false;
+    }
+    return true;
 }
 
 // Procfs Access
@@ -550,6 +561,10 @@ bool SysfsAccess::fileExists(const std::string file) {
     return FsAccess::fileExists(fullPath(file).c_str());
 }
 
+bool SysfsAccess::directoryExists(const std::string path) {
+    return FsAccess::directoryExists(fullPath(path).c_str());
+}
+
 bool SysfsAccess::isMyDeviceFile(const std::string dev) {
     // dev is a full pathname.
     if (getDirName(dev).compare(drmDriverDevNodeDir)) {
@@ -560,6 +575,10 @@ bool SysfsAccess::isMyDeviceFile(const std::string dev) {
         }
     }
     return false;
+}
+
+bool SysfsAccess::isRootUser() {
+    return FsAccess::isRootUser();
 }
 
 } // namespace L0

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,14 +7,14 @@
 
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/helpers/ptr_math.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
-#include "shared/test/unit_test/fixtures/command_container_fixture.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
+#include "shared/test/common/fixtures/command_container_fixture.h"
 
 using namespace NEO;
 
 using CommandEncodeSemaphore = Test<CommandEncodeStatesFixture>;
 
-HWTEST_F(CommandEncodeSemaphore, programMiSemaphoreWait) {
+HWTEST_F(CommandEncodeSemaphore, WhenProgrammingThenMiSemaphoreWaitIsUsed) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     MI_SEMAPHORE_WAIT miSemaphore;
 

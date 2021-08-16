@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,6 +17,8 @@
 namespace NEO {
 template <typename GfxFamily>
 void setFilterMode(typename GfxFamily::RENDER_SURFACE_STATE *surfaceState, const HardwareInfo *hwInfo);
+template <typename GfxFamily>
+bool checkIfArrayNeeded(ImageType type, const HardwareInfo *hwInfo);
 
 template <typename GfxFamily>
 inline void setImageSurfaceState(typename GfxFamily::RENDER_SURFACE_STATE *surfaceState, const ImageInfo &imageInfo, Gmm *gmm, GmmHelper &gmmHelper, uint32_t cubeFaceIndex, uint64_t gpuAddress, const SurfaceOffsets &surfaceOffsets, bool isNV12Format) {
@@ -48,6 +50,7 @@ inline void setImageSurfaceState(typename GfxFamily::RENDER_SURFACE_STATE *surfa
         renderTargetViewExtent = 1;
         minimumArrayElement = cubeFaceIndex;
     }
+    isImageArray |= checkIfArrayNeeded<GfxFamily>(imageInfo.imgDesc.imageType, gmmHelper.getHardwareInfo());
 
     surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE);
     surfaceState->setAuxiliarySurfacePitch(1u);
@@ -124,22 +127,6 @@ inline void setUnifiedAuxBaseAddress(typename GfxFamily::RENDER_SURFACE_STATE *s
 }
 
 template <typename GfxFamily>
-void setFlagsForMediaCompression(typename GfxFamily::RENDER_SURFACE_STATE *surfaceState, Gmm *gmm);
-
-template <typename GfxFamily>
-void setClearColorParams(typename GfxFamily::RENDER_SURFACE_STATE *surfaceState, const Gmm *gmm);
-
-template <typename GfxFamily>
 void setMipTailStartLod(typename GfxFamily::RENDER_SURFACE_STATE *surfaceState, Gmm *gmm);
 
-template <typename GfxFamily>
-inline void setAuxParamsForCCS(typename GfxFamily::RENDER_SURFACE_STATE *surfaceState, Gmm *gmm) {
-    using AUXILIARY_SURFACE_MODE = typename GfxFamily::RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
-    // Its expected to not program pitch/qpitch/baseAddress for Aux surface in CCS scenarios
-    surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
-    setFlagsForMediaCompression<GfxFamily>(surfaceState, gmm);
-
-    setClearColorParams<GfxFamily>(surfaceState, gmm);
-    setUnifiedAuxBaseAddress<GfxFamily>(surfaceState, gmm);
-}
 } // namespace NEO

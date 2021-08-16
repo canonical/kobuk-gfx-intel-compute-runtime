@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -28,7 +28,7 @@ uint32_t HwHelperHw<Family>::alignSlmSize(uint32_t slmSize) {
 }
 
 template <>
-uint32_t HwHelperHw<Family>::computeSlmValues(uint32_t slmSize) {
+uint32_t HwHelperHw<Family>::computeSlmValues(const HardwareInfo &hwInfo, uint32_t slmSize) {
     slmSize += (4 * KB - 1);
     slmSize = slmSize >> 12;
     slmSize = std::min(slmSize, 15u);
@@ -59,7 +59,7 @@ void MemorySynchronizationCommands<Family>::addPipeControl(LinearStream &command
 }
 
 template <>
-void MemorySynchronizationCommands<Family>::addPipeControlWithCSStallOnly(LinearStream &commandStream, PipeControlArgs &args) {
+void MemorySynchronizationCommands<Family>::addPipeControlWithCSStallOnly(LinearStream &commandStream) {
     using PIPE_CONTROL = typename Family::PIPE_CONTROL;
     PIPE_CONTROL cmd = Family::cmdInitPipeControl;
     cmd.setCommandStreamerStallEnable(true);

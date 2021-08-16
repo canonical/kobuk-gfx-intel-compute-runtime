@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -28,23 +28,29 @@ class OsLibrary;
 
 std::string convertToPascalCase(const std::string &inString);
 
-enum ErrorCode {
-    SUCCESS = 0,
-    OUT_OF_HOST_MEMORY = -6,
-    BUILD_PROGRAM_FAILURE = -11,
-    INVALID_DEVICE = -33,
-    INVALID_PROGRAM = -44,
-    INVALID_COMMAND_LINE = -5150,
-    INVALID_FILE = -5151,
-    PRINT_USAGE = -5152,
-};
-
 std::string generateFilePath(const std::string &directory, const std::string &fileNameBase, const char *extension);
 std::string getDevicesTypes();
 
 class OfflineCompiler {
   public:
+    enum ErrorCode {
+        SUCCESS = 0,
+        OUT_OF_HOST_MEMORY = -6,
+        BUILD_PROGRAM_FAILURE = -11,
+        INVALID_DEVICE = -33,
+        INVALID_PROGRAM = -44,
+        INVALID_COMMAND_LINE = -5150,
+        INVALID_FILE = -5151,
+        PRINT_USAGE = -5152,
+    };
+    enum QueryOption {
+        QUERY_OCL_DRIVER_VERSION = 0,
+        QUERY_NEO_REVISION = 1,
+        QUERY_LAST,
+    };
+
     static OfflineCompiler *create(size_t numArgs, const std::vector<std::string> &allArgs, bool dumpFiles, int &retVal, OclocArgHelper *helper);
+    static int query(size_t numArgs, const std::vector<std::string> &allArgs, OclocArgHelper *helper);
     int build();
     std::string &getBuildLog();
     void printUsage();
@@ -77,10 +83,11 @@ class OfflineCompiler {
   protected:
     OfflineCompiler();
 
-    int getHardwareInfo(const char *pDeviceName);
+    int getHardwareInfo(std::string deviceName);
     std::string getStringWithinDelimiters(const std::string &src);
     int initialize(size_t numArgs, const std::vector<std::string> &allArgs, bool dumpFiles);
     int parseCommandLine(size_t numArgs, const std::vector<std::string> &allArgs);
+    int performQuery();
     void setStatelessToStatefullBufferOffsetFlag();
     void resolveExtraSettings();
     void parseDebugSettings();
@@ -124,6 +131,8 @@ class OfflineCompiler {
     bool inputFileSpirV = false;
     bool outputNoSuffix = false;
     bool forceStatelessToStatefulOptimization = false;
+    bool queryInvoke = false;
+    int queryOption = QUERY_LAST;
 
     std::vector<uint8_t> elfBinary;
     char *genBinary = nullptr;

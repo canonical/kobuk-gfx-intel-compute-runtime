@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -129,8 +129,8 @@ Event::~Event() {
             timeStampNode->returnTag();
         }
         if (perfCounterNode != nullptr) {
-            cmdQueue->getPerfCounters()->deleteQuery(perfCounterNode->tagForCpuAccess->query.handle);
-            perfCounterNode->tagForCpuAccess->query.handle = {};
+            cmdQueue->getPerfCounters()->deleteQuery(perfCounterNode->getQueryHandleRef());
+            perfCounterNode->getQueryHandleRef() = {};
             perfCounterNode->returnTag();
         }
         cmdQueue->decRefInternal();
@@ -258,49 +258,35 @@ bool Event::calcProfilingData() {
                 for (auto i = 0u; i < timestamps.size(); i++) {
                     std::cout << "Timestamp " << i << ", "
                               << "profiling capable: " << timestamps[i]->isProfilingCapable() << ", ";
-                    for (auto j = 0u; j < timestamps[i]->tagForCpuAccess->packetsUsed; j++) {
-                        const auto &packet = timestamps[i]->tagForCpuAccess->packets[j];
+                    for (auto j = 0u; j < timestamps[i]->getPacketsUsed(); j++) {
                         std::cout << "packet " << j << ": "
-                                  << "global start: " << packet.globalStart << ", "
-                                  << "global end: " << packet.globalEnd << ", "
-                                  << "context start: " << packet.contextStart << ", "
-                                  << "context end: " << packet.contextEnd << std::endl;
+                                  << "global start: " << timestamps[i]->getGlobalStartValue(j) << ", "
+                                  << "global end: " << timestamps[i]->getGlobalEndValue(j) << ", "
+                                  << "context start: " << timestamps[i]->getContextStartValue(j) << ", "
+                                  << "context end: " << timestamps[i]->getContextEndValue(j) << std::endl;
                     }
                 }
             }
 
-            uint64_t globalStartTS = timestamps[0]->tagForCpuAccess->packets[0].globalStart;
-            uint64_t globalEndTS = timestamps[0]->tagForCpuAccess->packets[0].globalEnd;
+            uint64_t globalStartTS = 0u;
+            uint64_t globalEndTS = 0u;
+            Event::getBoundaryTimestampValues(timestampPacketContainer.get(), globalStartTS, globalEndTS);
 
-            for (const auto &timestamp : timestamps) {
-                if (!timestamp->isProfilingCapable()) {
-                    continue;
-                }
-                for (auto i = 0u; i < timestamp->tagForCpuAccess->packetsUsed; ++i) {
-                    const auto &packet = timestamp->tagForCpuAccess->packets[i];
-                    if (globalStartTS > packet.globalStart) {
-                        globalStartTS = packet.globalStart;
-                    }
-                    if (globalEndTS < packet.globalEnd) {
-                        globalEndTS = packet.globalEnd;
-                    }
-                }
-            }
             calculateProfilingDataInternal(globalStartTS, globalEndTS, &globalEndTS, globalStartTS);
 
         } else if (timeStampNode) {
             if (HwHelper::get(this->cmdQueue->getDevice().getHardwareInfo().platform.eRenderCoreFamily).useOnlyGlobalTimestamps()) {
                 calculateProfilingDataInternal(
-                    timeStampNode->tagForCpuAccess->GlobalStartTS,
-                    timeStampNode->tagForCpuAccess->GlobalEndTS,
-                    &timeStampNode->tagForCpuAccess->GlobalEndTS,
-                    timeStampNode->tagForCpuAccess->GlobalStartTS);
+                    timeStampNode->getGlobalStartValue(0),
+                    timeStampNode->getGlobalEndValue(0),
+                    &timeStampNode->getGlobalEndRef(),
+                    timeStampNode->getGlobalStartValue(0));
             } else {
                 calculateProfilingDataInternal(
-                    timeStampNode->tagForCpuAccess->ContextStartTS,
-                    timeStampNode->tagForCpuAccess->ContextEndTS,
-                    &timeStampNode->tagForCpuAccess->ContextCompleteTS,
-                    timeStampNode->tagForCpuAccess->GlobalStartTS);
+                    timeStampNode->getContextStartValue(0),
+                    timeStampNode->getContextEndValue(0),
+                    &timeStampNode->getContextCompleteRef(),
+                    timeStampNode->getGlobalStartValue(0));
             }
         }
     }
@@ -355,6 +341,27 @@ void Event::calculateProfilingDataInternal(uint64_t contextStartTS, uint64_t con
     }
 
     dataCalculated = true;
+}
+
+void Event::getBoundaryTimestampValues(TimestampPacketContainer *timestampContainer, uint64_t &globalStartTS, uint64_t &globalEndTS) {
+    const auto timestamps = timestampContainer->peekNodes();
+
+    globalStartTS = timestamps[0]->getGlobalStartValue(0);
+    globalEndTS = timestamps[0]->getGlobalEndValue(0);
+
+    for (const auto &timestamp : timestamps) {
+        if (!timestamp->isProfilingCapable()) {
+            continue;
+        }
+        for (auto i = 0u; i < timestamp->getPacketsUsed(); ++i) {
+            if (globalStartTS > timestamp->getGlobalStartValue(i)) {
+                globalStartTS = timestamp->getGlobalStartValue(i);
+            }
+            if (globalEndTS < timestamp->getGlobalEndValue(i)) {
+                globalEndTS = timestamp->getGlobalEndValue(i);
+            }
+        }
+    }
 }
 
 inline bool Event::wait(bool blocking, bool useQuickKmdSleep) {
@@ -727,14 +734,14 @@ void Event::setEndTimeStamp() {
     }
 }
 
-TagNode<HwTimeStamps> *Event::getHwTimeStampNode() {
-    if (!timeStampNode) {
+TagNodeBase *Event::getHwTimeStampNode() {
+    if (!cmdQueue->getTimestampPacketContainer() && !timeStampNode) {
         timeStampNode = cmdQueue->getGpgpuCommandStreamReceiver().getEventTsAllocator()->getTag();
     }
     return timeStampNode;
 }
 
-TagNode<HwPerfCounter> *Event::getHwPerfCounterNode() {
+TagNodeBase *Event::getHwPerfCounterNode() {
 
     if (!perfCounterNode && cmdQueue->getPerfCounters()) {
         const uint32_t gpuReportSize = HwPerfCounter::getSize(*(cmdQueue->getPerfCounters()));

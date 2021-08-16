@@ -1,10 +1,11 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "level_zero/core/source/cmdlist/cmdlist.h"
 #include "level_zero/core/source/module/module.h"
 #include <level_zero/ze_api.h>
 
@@ -52,7 +53,7 @@ zeModuleGetGlobalPointer(
     const char *pGlobalName,
     size_t *pSize,
     void **pptr) {
-    return L0::Module::fromHandle(hModule)->getGlobalPointer(pGlobalName, pptr);
+    return L0::Module::fromHandle(hModule)->getGlobalPointer(pGlobalName, pSize, pptr);
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
@@ -145,13 +146,6 @@ zeKernelGetSourceAttributes(
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
-zeKernelSetIntermediateCacheConfig(
-    ze_kernel_handle_t hKernel,
-    ze_cache_config_flags_t cacheConfig) {
-    return L0::Kernel::fromHandle(hKernel)->setIntermediateCacheConfig(cacheConfig);
-}
-
-ZE_APIEXPORT ze_result_t ZE_APICALL
 zeKernelGetProperties(
     ze_kernel_handle_t hKernel,
     ze_kernel_properties_t *pKernelProperties) {
@@ -224,12 +218,12 @@ ZE_APIEXPORT ze_result_t ZE_APICALL
 zeModuleGetProperties(
     ze_module_handle_t hModule,
     ze_module_properties_t *pModuleProperties) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return L0::Module::fromHandle(hModule)->getProperties(pModuleProperties);
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
 zeKernelSetCacheConfig(
     ze_kernel_handle_t hKernel,
     ze_cache_config_flags_t flags) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    return L0::Kernel::fromHandle(hKernel)->setCacheConfig(flags);
 }

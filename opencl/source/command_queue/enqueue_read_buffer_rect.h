@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -34,9 +34,9 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadBufferRect(
     cl_uint numEventsInWaitList,
     const cl_event *eventWaitList,
     cl_event *event) {
-
     const cl_command_type cmdType = CL_COMMAND_READ_BUFFER_RECT;
     auto isMemTransferNeeded = true;
+
     if (buffer->isMemObjZeroCopy()) {
         size_t bufferOffset;
         size_t hostOffset;

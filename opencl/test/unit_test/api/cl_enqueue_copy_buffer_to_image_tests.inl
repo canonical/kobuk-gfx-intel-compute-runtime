@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -107,6 +107,34 @@ TEST_F(clEnqueueCopyBufferToImageTests, GivenValidParametersWhenCopyingBufferToI
         nullptr);
 
     EXPECT_EQ(CL_SUCCESS, retVal);
+    retVal = clReleaseMemObject(dstImage);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+TEST_F(clEnqueueCopyBufferToImageTests, GivenQueueIncapableWhenCopyingBufferToImageThenInvalidOperationIsReturned) {
+
+    imageFormat.image_channel_order = CL_RGBA;
+    cl_mem dstImage = ImageFunctions::validateAndCreateImage(pContext, nullptr, CL_MEM_READ_WRITE, 0, &imageFormat, &imageDesc,
+                                                             nullptr, retVal);
+    ASSERT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, dstImage);
+    auto srcBuffer = std::unique_ptr<Buffer>(BufferHelper<BufferUseHostPtr<>>::create(pContext));
+    size_t dstOrigin[] = {0, 0, 0};
+    size_t region[] = {10, 10, 1};
+
+    this->disableQueueCapabilities(CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_IMAGE_INTEL);
+    auto retVal = clEnqueueCopyBufferToImage(
+        pCommandQueue,
+        srcBuffer.get(),
+        dstImage,
+        0u, //src_offset
+        dstOrigin,
+        region,
+        0, //numEventsInWaitList
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_INVALID_OPERATION, retVal);
     retVal = clReleaseMemObject(dstImage);
     EXPECT_EQ(CL_SUCCESS, retVal);
 }

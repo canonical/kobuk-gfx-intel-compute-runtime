@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,7 +8,7 @@
 #pragma once
 
 #include "shared/source/utilities/stackvec.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
 
 #include <memory>
 #include <string>
@@ -58,7 +58,7 @@ struct NamedValidator {
 };
 
 #define EXPECT_MEMBER(TYPE, FUNC, EXPECTED) \
-    NamedValidator { GenericCmdValidator<TYPE, decltype((((TYPE *)nullptr)->FUNC)()), &TYPE::FUNC, EXPECTED>::get(), #FUNC }
+    NamedValidator { GenericCmdValidator<TYPE, std::invoke_result_t<decltype(&TYPE::FUNC), TYPE>, &TYPE::FUNC, EXPECTED>::get(), #FUNC }
 
 using Expects = std::vector<NamedValidator>;
 

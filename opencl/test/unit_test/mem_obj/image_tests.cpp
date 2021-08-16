@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,7 +10,9 @@
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/image/image_surface_state.h"
 #include "shared/source/os_interface/os_context.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/test_macros/test_checks_shared.h"
 
 #include "opencl/source/helpers/mipmap.h"
 #include "opencl/source/mem_obj/image.h"
@@ -21,7 +23,6 @@
 #include "opencl/test/unit_test/fixtures/memory_management_fixture.h"
 #include "opencl/test/unit_test/fixtures/multi_root_device_fixture.h"
 #include "opencl/test/unit_test/helpers/kernel_binary_helper.h"
-#include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/mem_obj/image_compression_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
@@ -46,6 +47,9 @@ class CreateImageTest : public ClDeviceFixture,
     CreateImageTest() {
     }
     Image *createImageWithFlags(cl_mem_flags flags) {
+        return createImageWithFlags(flags, context);
+    }
+    Image *createImageWithFlags(cl_mem_flags flags, Context *context) {
         auto surfaceFormat = Image::getSurfaceFormatFromTable(
             flags, &imageFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
         return Image::create(context, MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
@@ -552,7 +556,7 @@ TEST(TestCreateImage, GivenSharedContextWhenImageIsCreatedThenRowAndSliceAreCorr
 }
 
 TEST(TestCreateImageUseHostPtr, GivenDifferenHostPtrAlignmentsWhenCheckingMemoryALignmentThenCorrectValueIsReturned) {
-    KernelBinaryHelper kbHelper(KernelBinaryHelper::BUILT_INS);
+    KernelBinaryHelper kbHelper(KernelBinaryHelper::BUILT_INS_WITH_IMAGES);
 
     cl_image_format imageFormat;
     cl_image_desc imageDesc;
@@ -648,7 +652,7 @@ TEST(TestCreateImageUseHostPtr, givenZeroCopyImageValuesWhenUsingHostPtrThenZero
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_TRUE(image->isMemObjZeroCopy());
     EXPECT_EQ(hostPtr, allocation->getUnderlyingBuffer());
-    EXPECT_NE(nullptr, image->getMapAllocation(context.getDevice(0)->getRootDeviceIndex()));
+    EXPECT_EQ(nullptr, image->getMapAllocation(context.getDevice(0)->getRootDeviceIndex()));
 
     alignedFree(hostPtr);
 }
@@ -689,8 +693,10 @@ TEST_P(CreateImageNoHostPtr, GivenMissingPitchWhenImageIsCreatedThenConstructorF
 }
 
 TEST_P(CreateImageNoHostPtr, whenImageIsCreatedThenItHasProperAccessAndCacheProperties) {
-    auto image = createImageWithFlags(flags);
-
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.CreateMultipleSubDevices.set(2);
+    auto context = std::make_unique<MockContext>();
+    auto image = createImageWithFlags(flags, context.get());
     ASSERT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, image);
 
@@ -702,7 +708,6 @@ TEST_P(CreateImageNoHostPtr, whenImageIsCreatedThenItHasProperAccessAndCacheProp
 
     auto isReadOnly = isValueSet(flags, CL_MEM_READ_ONLY);
     EXPECT_NE(isReadOnly, allocation->isFlushL3Required());
-
     delete image;
 }
 
@@ -1189,6 +1194,38 @@ TEST_F(ImageCompressionTests, givenNonTiledImageWhenCreatingAllocationThenDontPr
     EXPECT_FALSE(myMemoryManager->capturedImgInfo.preferRenderCompression);
 }
 
+TEST(ImageTest, givenImageWhenGettingCompressionOfImageThenCorrectValueIsReturned) {
+    MockContext context;
+    std::unique_ptr<Image> image(ImageHelper<Image3dDefaults>::create(&context));
+    EXPECT_NE(nullptr, image);
+
+    auto allocation = image->getGraphicsAllocation(context.getDevice(0)->getRootDeviceIndex());
+    allocation->getDefaultGmm()->isCompressionEnabled = true;
+    size_t sizeReturned = 0;
+    cl_bool usesCompression;
+    cl_int retVal = CL_SUCCESS;
+    retVal = image->getMemObjectInfo(
+        CL_MEM_USES_COMPRESSION_INTEL,
+        sizeof(cl_bool),
+        &usesCompression,
+        &sizeReturned);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    ASSERT_EQ(sizeof(cl_bool), sizeReturned);
+    EXPECT_TRUE(usesCompression);
+
+    allocation->getDefaultGmm()->isCompressionEnabled = false;
+    sizeReturned = 0;
+    usesCompression = cl_bool{CL_FALSE};
+    retVal = image->getMemObjectInfo(
+        CL_MEM_USES_COMPRESSION_INTEL,
+        sizeof(cl_bool),
+        &usesCompression,
+        &sizeReturned);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    ASSERT_EQ(sizeof(cl_bool), sizeReturned);
+    EXPECT_FALSE(usesCompression);
+}
+
 using ImageTests = ::testing::Test;
 HWTEST_F(ImageTests, givenImageWhenAskedForPtrOffsetForGpuMappingThenReturnCorrectValue) {
     if (!UnitTestHelper<FamilyType>::tiledImagesSupported) {
@@ -1396,6 +1433,7 @@ TEST(ImageTest, givenClMemForceLinearStorageSetWhenCreateImageThenDisallowTiling
 }
 
 TEST(ImageTest, givenClMemCopyHostPointerPassedToImageCreateWhenAllocationIsNotInSystemMemoryPoolThenAllocationIsWrittenByEnqueueWriteImage) {
+    REQUIRE_IMAGES_OR_SKIP(defaultHwInfo);
     ExecutionEnvironment *executionEnvironment = platform()->peekExecutionEnvironment();
     auto *memoryManager = new ::testing::NiceMock<GMockMemoryManagerFailFirstAllocation>(*executionEnvironment);
     executionEnvironment->memoryManager.reset(memoryManager);
@@ -1578,7 +1616,7 @@ HWTEST_F(ImageTransformTest, givenSurfaceBaseAddressAndUnifiedSurfaceWhenSetUnif
     MockContext context;
     auto image = std::unique_ptr<Image>(ImageHelper<Image3dDefaults>::create(&context));
     auto surfaceState = FamilyType::cmdInitRenderSurfaceState;
-    auto gmm = std::unique_ptr<Gmm>(new Gmm(context.getDevice(0)->getGmmClientContext(), nullptr, 1, false));
+    auto gmm = std::unique_ptr<Gmm>(new Gmm(context.getDevice(0)->getGmmClientContext(), nullptr, 1, 0, false));
     uint64_t surfBsaseAddress = 0xABCDEF1000;
     surfaceState.setSurfaceBaseAddress(surfBsaseAddress);
     auto mockResource = reinterpret_cast<MockGmmResourceInfo *>(gmm->gmmResourceInfo.get());
@@ -1592,72 +1630,67 @@ HWTEST_F(ImageTransformTest, givenSurfaceBaseAddressAndUnifiedSurfaceWhenSetUnif
     EXPECT_EQ(surfBsaseAddress + offset, surfaceState.getAuxiliarySurfaceBaseAddress());
 }
 
-template <typename FamilyName>
-class MockImageHw : public ImageHw<FamilyName> {
-  public:
-    MockImageHw(Context *context, const cl_image_format &format, const cl_image_desc &desc, ClSurfaceFormatInfo &surfaceFormatInfo, GraphicsAllocation *graphicsAllocation) : ImageHw<FamilyName>(context, {}, 0, 0, 0, nullptr, nullptr, format, desc, false, GraphicsAllocationHelper::toMultiGraphicsAllocation(graphicsAllocation), false, 0, 0, surfaceFormatInfo) {
-    }
-
-    void setAuxParamsForMCSCCS(typename FamilyName::RENDER_SURFACE_STATE *surfaceState, Gmm *gmm) override;
-    bool setAuxParamsForMCSCCSCalled = false;
-};
-
-template <typename FamilyName>
-void MockImageHw<FamilyName>::setAuxParamsForMCSCCS(typename FamilyName::RENDER_SURFACE_STATE *surfaceState, Gmm *gmm) {
-    this->setAuxParamsForMCSCCSCalled = true;
-}
-
-using HwImageTest = ::testing::Test;
-HWTEST_F(HwImageTest, givenImageHwWithUnifiedSurfaceAndMcsWhenSettingParamsForMultisampleImageThenSetParamsForCcsMcsIsCalled) {
-
+TEST(ImageTest, givenImageWhenFillRegionIsCalledThenProperRegionIsSet) {
     MockContext context;
-    OsAgnosticMemoryManager memoryManager(*context.getDevice(0)->getExecutionEnvironment());
-    context.memoryManager = &memoryManager;
 
-    cl_image_desc imgDesc = {};
-    imgDesc.image_height = 1;
-    imgDesc.image_width = 4;
-    imgDesc.image_depth = 1;
-    imgDesc.image_type = CL_MEM_OBJECT_IMAGE1D;
-    imgDesc.num_samples = 8;
-    cl_image_format format = {};
+    {
+        size_t region[3] = {};
+        std::unique_ptr<Image> image(Image1dHelper<>::create(&context));
 
-    auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(0, imgInfo, true, {}, context.getDevice(0)->getHardwareInfo(), context.getDeviceBitfieldForAllocation(0));
+        image->fillImageRegion(region);
 
-    auto graphicsAllocation = memoryManager.allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
+        EXPECT_EQ(Image1dDefaults::imageDesc.image_width, region[0]);
+        EXPECT_EQ(1u, region[1]);
+        EXPECT_EQ(1u, region[2]);
+    }
+    {
+        size_t region[3] = {};
+        std::unique_ptr<Image> image(Image1dArrayHelper<>::create(&context));
 
-    ClSurfaceFormatInfo formatInfo = {};
-    std::unique_ptr<MockImageHw<FamilyType>> mockImage(new MockImageHw<FamilyType>(&context, format, imgDesc, formatInfo, graphicsAllocation));
+        image->fillImageRegion(region);
 
-    McsSurfaceInfo msi = {10, 20, 3};
-    auto mcsAlloc = context.getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{context.getDevice(0)->getRootDeviceIndex(), MemoryConstants::pageSize});
-    mcsAlloc->setDefaultGmm(new Gmm(context.getDevice(0)->getGmmClientContext(), nullptr, 1, false));
+        EXPECT_EQ(Image1dArrayDefaults::imageDesc.image_width, region[0]);
+        EXPECT_EQ(Image1dArrayDefaults::imageDesc.image_array_size, region[1]);
+        EXPECT_EQ(1u, region[2]);
+    }
+    {
+        size_t region[3] = {};
+        std::unique_ptr<Image> image(Image1dBufferHelper<>::create(&context));
 
-    auto mockMcsGmmResInfo = reinterpret_cast<::testing::NiceMock<MockGmmResourceInfo> *>(mcsAlloc->getDefaultGmm()->gmmResourceInfo.get());
-    mockMcsGmmResInfo->setUnifiedAuxTranslationCapable();
-    mockMcsGmmResInfo->setMultisampleControlSurface();
-    EXPECT_TRUE(mcsAlloc->getDefaultGmm()->unifiedAuxTranslationCapable());
-    EXPECT_TRUE(mcsAlloc->getDefaultGmm()->hasMultisampleControlSurface());
+        image->fillImageRegion(region);
 
-    mockImage->setMcsSurfaceInfo(msi);
-    mockImage->setMcsAllocation(mcsAlloc);
+        EXPECT_EQ(Image1dBufferDefaults::imageDesc.image_width, region[0]);
+        EXPECT_EQ(1u, region[1]);
+        EXPECT_EQ(1u, region[2]);
+    }
+    {
+        size_t region[3] = {};
+        std::unique_ptr<Image> image(Image2dHelper<>::create(&context));
 
-    typedef typename FamilyType::RENDER_SURFACE_STATE RENDER_SURFACE_STATE;
-    auto surfaceState = FamilyType::cmdInitRenderSurfaceState;
+        image->fillImageRegion(region);
 
-    EXPECT_FALSE(mockImage->setAuxParamsForMCSCCSCalled);
-    mockImage->setAuxParamsForMultisamples(&surfaceState);
+        EXPECT_EQ(Image2dDefaults::imageDesc.image_width, region[0]);
+        EXPECT_EQ(Image2dDefaults::imageDesc.image_height, region[1]);
+        EXPECT_EQ(1u, region[2]);
+    }
+    {
+        size_t region[3] = {};
+        std::unique_ptr<Image> image(Image2dArrayHelper<>::create(&context));
 
-    EXPECT_TRUE(mockImage->setAuxParamsForMCSCCSCalled);
-}
+        image->fillImageRegion(region);
 
-using ImageMultiRootDeviceTests = MultiRootDeviceFixture;
+        EXPECT_EQ(Image2dArrayDefaults::imageDesc.image_width, region[0]);
+        EXPECT_EQ(Image2dArrayDefaults::imageDesc.image_height, region[1]);
+        EXPECT_EQ(Image2dArrayDefaults::imageDesc.image_array_size, region[2]);
+    }
+    {
+        size_t region[3] = {};
+        std::unique_ptr<Image> image(Image3dHelper<>::create(&context));
 
-TEST_F(ImageMultiRootDeviceTests, WhenImageIsCreatedThenImageAllocationHasCorrectRootDeviceIndex) {
-    std::unique_ptr<Image> image(ImageHelper<Image3dDefaults>::create(context.get()));
+        image->fillImageRegion(region);
 
-    auto graphicsAllocation = image->getGraphicsAllocation(expectedRootDeviceIndex);
-    ASSERT_NE(nullptr, graphicsAllocation);
-    EXPECT_EQ(expectedRootDeviceIndex, graphicsAllocation->getRootDeviceIndex());
+        EXPECT_EQ(Image3dDefaults::imageDesc.image_width, region[0]);
+        EXPECT_EQ(Image3dDefaults::imageDesc.image_height, region[1]);
+        EXPECT_EQ(Image3dDefaults::imageDesc.image_depth, region[2]);
+    }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,17 +21,14 @@ ProgramInfo::~ProgramInfo() {
 size_t getMaxInlineSlmNeeded(const ProgramInfo &programInfo) {
     uint32_t ret = 0U;
     for (const auto &kernelInfo : programInfo.kernelInfos) {
-        if (nullptr == kernelInfo->patchInfo.localsurface) {
-            continue;
-        }
-        ret = std::max(ret, kernelInfo->patchInfo.localsurface->TotalInlineLocalMemorySize);
+        ret = std::max(ret, kernelInfo->kernelDescriptor.kernelAttributes.slmInlineSize);
     }
     return ret;
 }
 
 bool requiresLocalMemoryWindowVA(const ProgramInfo &programInfo) {
     for (const auto &kernelInfo : programInfo.kernelInfos) {
-        if (WorkloadInfo::undefinedOffset != kernelInfo->workloadInfo.localMemoryStatelessWindowStartAddressOffset) {
+        if (isValidOffset(kernelInfo->kernelDescriptor.payloadMappings.implicitArgs.localMemoryStatelessWindowStartAddres)) {
             return true;
         }
     }

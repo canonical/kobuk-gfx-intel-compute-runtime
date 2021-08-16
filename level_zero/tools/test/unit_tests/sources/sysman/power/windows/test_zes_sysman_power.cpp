@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -18,9 +18,11 @@ class SysmanDevicePowerFixture : public SysmanDeviceFixture {
   protected:
     std::unique_ptr<Mock<PowerKmdSysManager>> pKmdSysManager;
     KmdSysManager *pOriginalKmdSysManager = nullptr;
-    void SetUp(bool allowSetCalls) { // NOLINT(readability-identifier-naming)
+    void SetUp() override {
         SysmanDeviceFixture::SetUp();
+    }
 
+    void init(bool allowSetCalls) {
         pKmdSysManager.reset(new Mock<PowerKmdSysManager>);
 
         pKmdSysManager->allowSetCalls = allowSetCalls;
@@ -51,7 +53,7 @@ class SysmanDevicePowerFixture : public SysmanDeviceFixture {
 };
 
 TEST_F(SysmanDevicePowerFixture, GivenComponentCountZeroWhenEnumeratingPowerDomainThenValidCountIsReturnedAndVerifySysmanPowerGetCallSucceeds) {
-    SetUp(true);
+    init(true);
 
     uint32_t count = 0;
     EXPECT_EQ(zesDeviceEnumPowerDomains(device->toHandle(), &count, nullptr), ZE_RESULT_SUCCESS);
@@ -59,7 +61,7 @@ TEST_F(SysmanDevicePowerFixture, GivenComponentCountZeroWhenEnumeratingPowerDoma
 }
 
 TEST_F(SysmanDevicePowerFixture, GivenInvalidComponentCountWhenEnumeratingPowerDomainThenValidCountIsReturnedAndVerifySysmanPowerGetCallSucceeds) {
-    SetUp(true);
+    init(true);
 
     uint32_t count = 0;
     EXPECT_EQ(zesDeviceEnumPowerDomains(device->toHandle(), &count, nullptr), ZE_RESULT_SUCCESS);
@@ -71,7 +73,7 @@ TEST_F(SysmanDevicePowerFixture, GivenInvalidComponentCountWhenEnumeratingPowerD
 }
 
 TEST_F(SysmanDevicePowerFixture, GivenComponentCountZeroWhenEnumeratingPowerDomainThenValidPowerHandlesIsReturned) {
-    SetUp(true);
+    init(true);
 
     uint32_t count = 0;
     EXPECT_EQ(zesDeviceEnumPowerDomains(device->toHandle(), &count, nullptr), ZE_RESULT_SUCCESS);
@@ -86,7 +88,7 @@ TEST_F(SysmanDevicePowerFixture, GivenComponentCountZeroWhenEnumeratingPowerDoma
 
 TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenGettingPowerPropertiesAllowSetToTrueThenCallSucceeds) {
     // Setting allow set calls or not
-    SetUp(true);
+    init(true);
 
     auto handles = get_power_handles(powerHandleComponentCount);
 
@@ -108,7 +110,7 @@ TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenGettingPowerProperties
 
 TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenGettingPowerPropertiesAllowSetToFalseThenCallSucceeds) {
     // Setting allow set calls or not
-    SetUp(false);
+    init(false);
 
     auto handles = get_power_handles(powerHandleComponentCount);
 
@@ -130,7 +132,7 @@ TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenGettingPowerProperties
 
 TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenGettingPowerEnergyCounterThenValidPowerReadingsRetrieved) {
     // Setting allow set calls or not
-    SetUp(true);
+    init(true);
 
     auto handles = get_power_handles(powerHandleComponentCount);
 
@@ -139,16 +141,19 @@ TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenGettingPowerEnergyCoun
 
         ze_result_t result = zesPowerGetEnergyCounter(handle, &energyCounter);
 
-        uint32_t mockEnergytoMicroJoules = (pKmdSysManager->mockEnergyCounter >> pKmdSysManager->mockEnergyUnit) * convertJouleToMicroJoule;
+        uint32_t conversionUnit = (1 << pKmdSysManager->mockEnergyUnit);
+        double valueConverted = static_cast<double>(pKmdSysManager->mockEnergyCounter) / static_cast<double>(conversionUnit);
+        valueConverted *= static_cast<double>(convertJouleToMicroJoule);
+        uint64_t mockEnergytoMicroJoules = static_cast<uint64_t>(valueConverted);
         EXPECT_EQ(ZE_RESULT_SUCCESS, result);
         EXPECT_EQ(energyCounter.energy, mockEnergytoMicroJoules);
-        EXPECT_EQ(energyCounter.timestamp, pKmdSysManager->mockTimeStamp);
+        EXPECT_EQ(energyCounter.timestamp, convertTStoMicroSec(pKmdSysManager->mockTimeStamp, pKmdSysManager->mockFrequencyTimeStamp));
     }
 }
 
 TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenGettingPowerLimitsAllowSetToFalseThenCallSucceedsWithValidPowerReadingsRetrieved) {
     // Setting allow set calls or not
-    SetUp(false);
+    init(false);
 
     auto handles = get_power_handles(powerHandleComponentCount);
 
@@ -172,7 +177,7 @@ TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenGettingPowerLimitsAllo
 
 TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenSettingPowerLimitsAllowSetToFalseThenCallFails) {
     // Setting allow set calls or not
-    SetUp(false);
+    init(false);
 
     auto handles = get_power_handles(powerHandleComponentCount);
 
@@ -195,7 +200,7 @@ TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenSettingPowerLimitsAllo
 
 TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenSettingEnergyThresholdAllowSetToFalseThenCallFails) {
     // Setting allow set calls or not
-    SetUp(false);
+    init(false);
 
     auto handles = get_power_handles(powerHandleComponentCount);
 
@@ -210,7 +215,7 @@ TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenSettingEnergyThreshold
 
 TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenSettingEnergyThresholdAllowSetToTrueThenCallSucceeds) {
     // Setting allow set calls or not
-    SetUp(true);
+    init(true);
 
     auto handles = get_power_handles(powerHandleComponentCount);
 
@@ -231,7 +236,7 @@ TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenSettingEnergyThreshold
 
 TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenSettingPowerLimitsAllowSetToTrueThenCallSucceeds) {
     // Setting allow set calls or not
-    SetUp(true);
+    init(true);
 
     auto handles = get_power_handles(powerHandleComponentCount);
 

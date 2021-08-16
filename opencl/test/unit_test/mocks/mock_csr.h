@@ -1,12 +1,12 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
-#include "shared/test/unit_test/mocks/mock_command_stream_receiver.h"
+#include "shared/test/common/mocks/mock_command_stream_receiver.h"
 
 #include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
 
@@ -21,6 +21,8 @@ class MockCsrBase : public UltCommandStreamReceiver<GfxFamily> {
   public:
     using BaseUltCsrClass = UltCommandStreamReceiver<GfxFamily>;
     using BaseUltCsrClass::BaseUltCsrClass;
+    using BaseUltCsrClass::debugPauseStateLock;
+    using BaseUltCsrClass::preemptionAllocation;
 
     MockCsrBase() = delete;
 

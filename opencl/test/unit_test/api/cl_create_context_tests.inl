@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -83,17 +83,35 @@ TEST_F(clCreateContextTests, GivenNullUserDataWhenCreatingContextThenContextIsCr
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
-TEST_F(clCreateContextTests, givenMultipleRootDevicesWhenCreateContextThenOutOrHostMemoryErrorIsReturned) {
+TEST_F(clCreateContextTests, givenMultipleRootDevicesWithoutSubDevicesWhenCreatingContextThenContextIsCreated) {
     UltClDeviceFactory deviceFactory{2, 0};
+    cl_device_id devices[] = {deviceFactory.rootDevices[0], deviceFactory.rootDevices[1]};
+    auto context = clCreateContext(nullptr, 2u, devices, eventCallBack, nullptr, &retVal);
+    EXPECT_NE(nullptr, context);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    clReleaseContext(context);
+}
+
+TEST_F(clCreateContextTests, givenMultipleSubDevicesFromDifferentRootDevicesWhenCreatingContextThenContextIsCreated) {
+    UltClDeviceFactory deviceFactory{2, 2};
+    cl_device_id devices[] = {deviceFactory.subDevices[0], deviceFactory.subDevices[1], deviceFactory.subDevices[2], deviceFactory.subDevices[3]};
+    auto context = clCreateContext(nullptr, 4u, devices, eventCallBack, nullptr, &retVal);
+    EXPECT_NE(nullptr, context);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    clReleaseContext(context);
+}
+
+TEST_F(clCreateContextTests, givenDisabledMultipleRootDeviceSupportWhenCreatingContextThenOutOfHostMemoryErrorIsReturned) {
+    UltClDeviceFactory deviceFactory{2, 2};
+    DebugManager.flags.EnableMultiRootDeviceContexts.set(false);
     cl_device_id devices[] = {deviceFactory.rootDevices[0], deviceFactory.rootDevices[1]};
     auto context = clCreateContext(nullptr, 2u, devices, eventCallBack, nullptr, &retVal);
     EXPECT_EQ(nullptr, context);
     EXPECT_EQ(CL_OUT_OF_HOST_MEMORY, retVal);
 }
 
-TEST_F(clCreateContextTests, givenEnabledMultipleRootDeviceSupportWhenCreateContextWithMultipleRootDevicesThenContextIsCreated) {
-    UltClDeviceFactory deviceFactory{2, 0};
-    DebugManager.flags.EnableMultiRootDeviceContexts.set(true);
+TEST_F(clCreateContextTests, whenCreateContextWithMultipleRootDevicesWithSubDevicesThenContextIsCreated) {
+    UltClDeviceFactory deviceFactory{2, 2};
     cl_device_id devices[] = {deviceFactory.rootDevices[0], deviceFactory.rootDevices[1]};
     auto context = clCreateContext(nullptr, 2u, devices, eventCallBack, nullptr, &retVal);
     EXPECT_NE(nullptr, context);
@@ -103,7 +121,6 @@ TEST_F(clCreateContextTests, givenEnabledMultipleRootDeviceSupportWhenCreateCont
 
 TEST_F(clCreateContextTests, givenMultipleRootDevicesWhenCreateContextThenRootDeviceIndicesSetIsFilled) {
     UltClDeviceFactory deviceFactory{3, 2};
-    DebugManager.flags.EnableMultiRootDeviceContexts.set(true);
     cl_device_id devices[] = {deviceFactory.rootDevices[0], deviceFactory.rootDevices[1], deviceFactory.rootDevices[2]};
     auto context = clCreateContext(nullptr, 3u, devices, eventCallBack, nullptr, &retVal);
     EXPECT_NE(nullptr, context);
@@ -180,7 +197,7 @@ TEST_F(clCreateContextTests, GivenNonDefaultPlatformInContextCreationPropertiesW
     clReleaseContext(clContext);
 }
 
-TEST_F(clCreateContextFromTypeTests, GivenNonDefaultPlatformWithInvalidIcdDispatchInContextCreationPropertiesWhenCreatingContextThenInvalidPlatformErrorIsReturned) {
+TEST_F(clCreateContextTests, GivenNonDefaultPlatformWithInvalidIcdDispatchInContextCreationPropertiesWhenCreatingContextThenInvalidPlatformErrorIsReturned) {
     auto nonDefaultPlatform = std::make_unique<MockPlatform>();
     nonDefaultPlatform->initializeWithNewDevices();
     cl_platform_id nonDefaultPlatformCl = nonDefaultPlatform.get();
@@ -192,4 +209,42 @@ TEST_F(clCreateContextFromTypeTests, GivenNonDefaultPlatformWithInvalidIcdDispat
     EXPECT_EQ(nullptr, clContext);
 }
 
+TEST_F(clCreateContextTests, GivenDeviceNotAssociatedToPlatformInPropertiesWhenCreatingContextThenInvalidDeviceErrorIsReturned) {
+    auto nonDefaultPlatform = std::make_unique<MockPlatform>();
+    nonDefaultPlatform->initializeWithNewDevices();
+    cl_device_id clDevice = platform()->getClDevice(0);
+    cl_platform_id nonDefaultPlatformCl = nonDefaultPlatform.get();
+    cl_context_properties properties[3] = {CL_CONTEXT_PLATFORM, reinterpret_cast<cl_context_properties>(nonDefaultPlatformCl), 0};
+
+    auto clContext = clCreateContext(properties, 1, &clDevice, nullptr, nullptr, &retVal);
+    EXPECT_EQ(CL_INVALID_DEVICE, retVal);
+    EXPECT_EQ(nullptr, clContext);
+}
+
+TEST_F(clCreateContextTests, GivenDevicesFromDifferentPlatformsWhenCreatingContextWithoutSpecifiedPlatformThenInvalidDeviceErrorIsReturned) {
+    auto platform1 = std::make_unique<MockPlatform>();
+    auto platform2 = std::make_unique<MockPlatform>();
+    platform1->initializeWithNewDevices();
+    platform2->initializeWithNewDevices();
+    cl_device_id clDevices[] = {platform1->getClDevice(0), platform2->getClDevice(0)};
+
+    auto clContext = clCreateContext(nullptr, 2, clDevices, nullptr, nullptr, &retVal);
+    EXPECT_EQ(CL_INVALID_DEVICE, retVal);
+    EXPECT_EQ(nullptr, clContext);
+}
+
+TEST_F(clCreateContextTests, GivenDevicesFromDifferentPlatformsWhenCreatingContextWithSpecifiedPlatformThenInvalidDeviceErrorIsReturned) {
+    auto platform1 = std::make_unique<MockPlatform>();
+    auto platform2 = std::make_unique<MockPlatform>();
+    platform1->initializeWithNewDevices();
+    platform2->initializeWithNewDevices();
+    cl_device_id clDevices[] = {platform1->getClDevice(0), platform2->getClDevice(0)};
+
+    cl_platform_id clPlatform = platform1.get();
+    cl_context_properties properties[3] = {CL_CONTEXT_PLATFORM, reinterpret_cast<cl_context_properties>(clPlatform), 0};
+
+    auto clContext = clCreateContext(properties, 2, clDevices, nullptr, nullptr, &retVal);
+    EXPECT_EQ(CL_INVALID_DEVICE, retVal);
+    EXPECT_EQ(nullptr, clContext);
+}
 } // namespace ClCreateContextTests

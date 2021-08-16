@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,7 +9,8 @@
 #include "shared/source/device/device.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/state_base_address.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/extensions/public/cl_ext_private.h"
@@ -29,7 +30,7 @@ template <typename FamilyType>
 uint32_t argMocs(Kernel &kernel, size_t argIndex) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     auto surfaceStateHeapAddress = kernel.getSurfaceStateHeap();
-    auto surfaceStateHeapAddressOffset = kernel.getKernelInfo().kernelArgInfo[argIndex].offsetHeap;
+    auto surfaceStateHeapAddressOffset = static_cast<size_t>(kernel.getKernelInfo().getArgDescriptorAt(static_cast<uint32_t>(argIndex)).as<ArgDescPointer>().bindful);
     auto surfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(ptrOffset(surfaceStateHeapAddress, surfaceStateHeapAddressOffset));
     return surfaceState->getMemoryObjectControlState();
 }
@@ -62,10 +63,9 @@ using clMemLocallyUncachedResourceFixture = Test<HelloWorldFixture<HelloWorldFix
 HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, GivenAtLeastOneLocallyUncacheableResourceWhenSettingKernelArgumentsThenKernelIsUncacheable) {
     cl_int retVal = CL_SUCCESS;
     MockKernelWithInternals mockKernel(*this->pClDevice, context, true);
-    mockKernel.kernelInfo.usesSsh = true;
-    mockKernel.kernelInfo.requiresSshForBuffers = true;
 
     auto kernel = mockKernel.mockKernel;
+    auto pMultiDeviceKernel = mockKernel.mockMultiDeviceKernel;
 
     auto bufferCacheable1 = clCreateBufferWithPropertiesINTEL(context, propertiesCacheable, 0, n * sizeof(float), nullptr, nullptr);
     auto pBufferCacheable1 = clUniquePtr(castToObject<Buffer>(bufferCacheable1));
@@ -77,71 +77,70 @@ HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, GivenAtLeastOne
     auto bufferUncacheable2 = clCreateBufferWithPropertiesINTEL(context, propertiesUncacheable, 0, n * sizeof(float), nullptr, nullptr);
     auto pBufferUncacheable2 = clUniquePtr(castToObject<Buffer>(bufferUncacheable2));
 
-    auto mocsCacheable = kernel->getDevice().getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
-    auto mocsUncacheable = kernel->getDevice().getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED);
+    auto mocsCacheable = pClDevice->getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
+    auto mocsUncacheable = pClDevice->getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED);
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferCacheable1);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferCacheable1);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 0));
 
-    retVal = clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufferCacheable2);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 1, sizeof(cl_mem), &bufferCacheable2);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 1));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
     EXPECT_FALSE(kernel->hasUncacheableStatelessArgs());
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferUncacheable1);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferUncacheable1);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, argMocs<FamilyType>(*kernel, 0));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, cmdQueueMocs<FamilyType>(pCmdQ));
     EXPECT_TRUE(kernel->hasUncacheableStatelessArgs());
 
-    retVal = clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufferUncacheable2);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 1, sizeof(cl_mem), &bufferUncacheable2);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, argMocs<FamilyType>(*kernel, 0));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, cmdQueueMocs<FamilyType>(pCmdQ));
     EXPECT_TRUE(kernel->hasUncacheableStatelessArgs());
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferCacheable1);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferCacheable1);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 0));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, cmdQueueMocs<FamilyType>(pCmdQ));
     EXPECT_TRUE(kernel->hasUncacheableStatelessArgs());
 
-    retVal = clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufferCacheable2);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 1, sizeof(cl_mem), &bufferCacheable2);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 1));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
     EXPECT_FALSE(kernel->hasUncacheableStatelessArgs());
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, givenBuffersThatAreUncachedInSurfaceStateWhenStatelessIsProgrammedItIsCached) {
+HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, givenBuffersThatAreUncachedInSurfaceStateWhenStatelessIsProgrammedThenItIsCached) {
     cl_int retVal = CL_SUCCESS;
 
     MockKernelWithInternals mockKernel(*this->pClDevice, context, true);
     auto kernel = mockKernel.mockKernel;
-    mockKernel.kernelInfo.usesSsh = true;
-    mockKernel.kernelInfo.requiresSshForBuffers = true;
+    auto pMultiDeviceKernel = mockKernel.mockMultiDeviceKernel;
 
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -155,57 +154,57 @@ HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, givenBuffersTha
     auto bufferUncacheable2 = clCreateBufferWithPropertiesINTEL(context, propertiesUncacheableInSurfaceState, 0, n * sizeof(float), nullptr, nullptr);
     auto pBufferUncacheable2 = clUniquePtr(castToObject<Buffer>(bufferUncacheable2));
 
-    auto mocsCacheable = kernel->getDevice().getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
-    auto mocsUncacheable = kernel->getDevice().getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED);
+    auto mocsCacheable = pClDevice->getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
+    auto mocsUncacheable = pClDevice->getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED);
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferCacheable1);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferCacheable1);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 0));
 
-    retVal = clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufferCacheable2);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 1, sizeof(cl_mem), &bufferCacheable2);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 1));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferUncacheable1);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferUncacheable1);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, argMocs<FamilyType>(*kernel, 0));
     EXPECT_FALSE(kernel->hasUncacheableStatelessArgs());
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 
-    retVal = clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufferUncacheable2);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 1, sizeof(cl_mem), &bufferUncacheable2);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, argMocs<FamilyType>(*kernel, 0));
     EXPECT_FALSE(kernel->hasUncacheableStatelessArgs());
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferCacheable1);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferCacheable1);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 0));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 
-    retVal = clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufferCacheable2);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 1, sizeof(cl_mem), &bufferCacheable2);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 1));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 }
@@ -215,12 +214,9 @@ HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, givenBuffersTha
 
     MockKernelWithInternals mockKernel(*this->pClDevice, context, true);
     auto kernel = mockKernel.mockKernel;
-    mockKernel.kernelInfo.usesSsh = true;
-    mockKernel.kernelInfo.requiresSshForBuffers = true;
-    mockKernel.kernelInfo.kernelArgInfo[0].pureStatefulBufferAccess = true;
-    mockKernel.kernelInfo.kernelArgInfo[1].pureStatefulBufferAccess = true;
-
-    EXPECT_EQ(CL_SUCCESS, retVal);
+    auto pMultiDeviceKernel = mockKernel.mockMultiDeviceKernel;
+    mockKernel.kernelInfo.setBufferStateful(0);
+    mockKernel.kernelInfo.setBufferStateful(1);
 
     auto bufferCacheable1 = clCreateBufferWithPropertiesINTEL(context, propertiesCacheable, 0, n * sizeof(float), nullptr, nullptr);
     auto pBufferCacheable1 = clUniquePtr(castToObject<Buffer>(bufferCacheable1));
@@ -232,70 +228,69 @@ HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, givenBuffersTha
     auto bufferUncacheable2 = clCreateBufferWithPropertiesINTEL(context, propertiesUncacheable, 0, n * sizeof(float), nullptr, nullptr);
     auto pBufferUncacheable2 = clUniquePtr(castToObject<Buffer>(bufferUncacheable2));
 
-    auto mocsCacheable = kernel->getDevice().getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
-    auto mocsUncacheable = kernel->getDevice().getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED);
+    auto mocsCacheable = pClDevice->getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
+    auto mocsUncacheable = pClDevice->getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED);
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferCacheable1);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferCacheable1);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 0));
 
-    retVal = clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufferCacheable2);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 1, sizeof(cl_mem), &bufferCacheable2);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 1));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferUncacheable1);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferUncacheable1);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, argMocs<FamilyType>(*kernel, 0));
     EXPECT_FALSE(kernel->hasUncacheableStatelessArgs());
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 
-    retVal = clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufferUncacheable2);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 1, sizeof(cl_mem), &bufferUncacheable2);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, argMocs<FamilyType>(*kernel, 0));
     EXPECT_FALSE(kernel->hasUncacheableStatelessArgs());
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferCacheable1);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferCacheable1);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 0));
     EXPECT_FALSE(kernel->hasUncacheableStatelessArgs());
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 
-    retVal = clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufferCacheable2);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 1, sizeof(cl_mem), &bufferCacheable2);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 1));
     EXPECT_FALSE(kernel->hasUncacheableStatelessArgs());
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
     EXPECT_FALSE(kernel->hasUncacheableStatelessArgs());
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, WhenUnsettingUncacheableResourceFromKernelThanKernelContinuesToCorrectlySetMocs) {
+HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, WhenUnsettingUncacheableResourceFromKernelThenKernelContinuesToCorrectlySetMocs) {
     cl_int retVal = CL_SUCCESS;
     MockKernelWithInternals mockKernel(*this->pClDevice, context, true);
+    auto pMultiDeviceKernel = mockKernel.mockMultiDeviceKernel;
     auto kernel = mockKernel.mockKernel;
-    mockKernel.kernelInfo.usesSsh = true;
-    mockKernel.kernelInfo.requiresSshForBuffers = true;
 
     EXPECT_EQ(CL_SUCCESS, retVal);
 
@@ -307,82 +302,81 @@ HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, WhenUnsettingUn
     auto bufferUncacheable = clCreateBufferWithPropertiesINTEL(context, propertiesUncacheable, 0, n * sizeof(float), nullptr, nullptr);
     auto pBufferUncacheable = clUniquePtr(castToObject<Buffer>(bufferUncacheable));
 
-    auto mocsCacheable = kernel->getDevice().getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
-    auto mocsUncacheable = kernel->getDevice().getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED);
+    auto mocsCacheable = pClDevice->getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
+    auto mocsUncacheable = pClDevice->getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED);
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferCacheable1);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferCacheable1);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 0));
 
-    retVal = clSetKernelArg(kernel, 1, sizeof(cl_mem), &bufferCacheable2);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 1, sizeof(cl_mem), &bufferCacheable2);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 1));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferUncacheable);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferUncacheable);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, argMocs<FamilyType>(*kernel, 0));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 
     kernel->unsetArg(0);
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferCacheable1);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferCacheable1);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, argMocs<FamilyType>(*kernel, 0));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 
     kernel->unsetArg(0);
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferUncacheable);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferUncacheable);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, argMocs<FamilyType>(*kernel, 0));
 
     EXPECT_TRUE(kernel->isPatched());
-    retVal = clEnqueueNDRangeKernel(pCmdQ, kernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    retVal = clEnqueueNDRangeKernel(pCmdQ, pMultiDeviceKernel, 1, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(mocsUncacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, givenBuffersThatAreUncachedInSurfaceStateAndAreNotUsedInStatelessFashionThenThoseResourcesAreNotRegistredAsResourcesForCacheFlush) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.CreateMultipleSubDevices.set(2);
+    auto context = std::make_unique<MockContext>();
     cl_int retVal = CL_SUCCESS;
-
-    MockKernelWithInternals mockKernel(*this->pClDevice, context, true);
+    MockKernelWithInternals mockKernel(*context->getDevice(0), context.get(), true);
     auto kernel = mockKernel.mockKernel;
-    mockKernel.kernelInfo.usesSsh = true;
-    mockKernel.kernelInfo.requiresSshForBuffers = true;
-    mockKernel.kernelInfo.kernelArgInfo[0].pureStatefulBufferAccess = true;
-    mockKernel.kernelInfo.kernelArgInfo[1].pureStatefulBufferAccess = true;
+    auto pMultiDeviceKernel = mockKernel.mockMultiDeviceKernel;
+    mockKernel.kernelInfo.setBufferStateful(0);
+    mockKernel.kernelInfo.setBufferStateful(1);
 
-    EXPECT_EQ(CL_SUCCESS, retVal);
+    auto bufferCacheable = clCreateBufferWithPropertiesINTEL(context.get(), propertiesCacheable, 0, n * sizeof(float), nullptr, nullptr);
 
-    auto bufferCacheable = clCreateBufferWithPropertiesINTEL(context, propertiesCacheable, 0, n * sizeof(float), nullptr, nullptr);
+    auto bufferUncacheableInSurfaceState = clCreateBufferWithPropertiesINTEL(context.get(), propertiesUncacheableInSurfaceState, 0, n * sizeof(float), nullptr, nullptr);
+    auto bufferUncacheable = clCreateBufferWithPropertiesINTEL(context.get(), propertiesUncacheable, 0, n * sizeof(float), nullptr, nullptr);
 
-    auto bufferUncacheableInSurfaceState = clCreateBufferWithPropertiesINTEL(context, propertiesUncacheableInSurfaceState, 0, n * sizeof(float), nullptr, nullptr);
-    auto bufferUncacheable = clCreateBufferWithPropertiesINTEL(context, propertiesUncacheable, 0, n * sizeof(float), nullptr, nullptr);
-
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferUncacheableInSurfaceState);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferUncacheableInSurfaceState);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_EQ(nullptr, kernel->kernelArgRequiresCacheFlush[0]);
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferCacheable);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferCacheable);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_NE(nullptr, kernel->kernelArgRequiresCacheFlush[0]);
 
-    retVal = clSetKernelArg(kernel, 0, sizeof(cl_mem), &bufferUncacheable);
+    retVal = clSetKernelArg(pMultiDeviceKernel, 0, sizeof(cl_mem), &bufferUncacheable);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_EQ(nullptr, kernel->kernelArgRequiresCacheFlush[0]);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,7 +16,7 @@
 
 using namespace NEO;
 
-GEN9TEST_F(AUBParentKernelFixture, EnqueueParentKernel) {
+GEN9TEST_F(AUBParentKernelFixture, WhenEnqueuingParentKernelThenExpectationsMet) {
     REQUIRE_DEVICE_ENQUEUE_OR_SKIP(pClDevice);
 
     ASSERT_NE(nullptr, pKernel);
@@ -54,10 +54,11 @@ GEN9TEST_F(AUBParentKernelFixture, EnqueueParentKernel) {
     desc.image_slice_pitch = 0;
     // clang-format on
 
+    auto memoryProperties = MemoryPropertiesHelper::createMemoryProperties(0, 0, 0, &context->getDevice(0)->getDevice());
     auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imageFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
     Image *image = Image::create(
         pContext,
-        {},
+        memoryProperties,
         0,
         0,
         surfaceFormat,

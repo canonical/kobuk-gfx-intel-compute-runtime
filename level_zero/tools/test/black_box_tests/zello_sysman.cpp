@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,10 +8,12 @@
 #include <level_zero/zes_api.h>
 
 #include <algorithm>
+#include <fstream>
 #include <getopt.h>
 #include <iostream>
 #include <map>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
@@ -89,8 +91,13 @@ void usage() {
                  "\n  -o,   --power                 selectively run power black box test"
                  "\n  -m,   --memory                selectively run memory black box test"
                  "\n  -g,   --global                selectively run device/global operations black box test"
+                 "\n  -R,   --ras                   selectively run ras black box test"
                  "\n  -E,   --event                 set and listen to events black box test"
                  "\n  -r,   --reset force|noforce   selectively run device reset test"
+                 "\n  -i,   --firmware <image>      selectively run device firmware test <image> is the firmware binary needed to flash"
+                 "\n  -F,   --fabricport            selectively run fabricport black box test"
+                 "\n  -d,   --diagnostics           selectively run diagnostics black box test"
+                 "\n  -P,   --performance           selectively run performance-factor black box test"
                  "\n  -h,   --help                  display help message"
                  "\n"
                  "\n  All L0 Syman APIs that set values require root privileged execution"
@@ -119,8 +126,8 @@ void getDeviceHandles(ze_driver_handle_t &driverHandle, std::vector<ze_device_ha
     devices.resize(deviceCount);
     VALIDATECALL(zeDeviceGet(driverHandle, &deviceCount, devices.data()));
 
-    ze_device_properties_t deviceProperties = {};
-    for (auto device : devices) {
+    ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
+    for (const auto &device : devices) {
         VALIDATECALL(zeDeviceGetProperties(device, &deviceProperties));
 
         if (verbose) {
@@ -142,7 +149,16 @@ void testSysmanPower(ze_device_handle_t &device) {
     std::vector<zes_pwr_handle_t> handles(count, nullptr);
     VALIDATECALL(zesDeviceEnumPowerDomains(device, &count, handles.data()));
 
-    for (auto handle : handles) {
+    for (const auto &handle : handles) {
+        zes_power_properties_t properties;
+        VALIDATECALL(zesPowerGetProperties(handle, &properties));
+        if (verbose) {
+            std::cout << "properties.canControl = " << properties.canControl << std::endl;
+            std::cout << "properties.isEnergyThresholdSupported= " << properties.isEnergyThresholdSupported << std::endl;
+            std::cout << "properties.defaultLimit= " << properties.defaultLimit << std::endl;
+            std::cout << "properties.maxLimit =" << properties.maxLimit << std::endl;
+            std::cout << "properties.minLimit =" << properties.minLimit << std::endl;
+        }
         zes_power_energy_counter_t energyCounter;
         VALIDATECALL(zesPowerGetEnergyCounter(handle, &energyCounter));
         if (verbose) {
@@ -181,6 +197,65 @@ void testSysmanPower(ze_device_handle_t &device) {
     }
 }
 
+std::string getEngineFlagType(zes_engine_type_flags_t engineFlag) {
+    static const std::map<zes_engine_type_flags_t, std::string> mgetEngineType{
+        {ZES_ENGINE_TYPE_FLAG_OTHER, "ZES_ENGINE_TYPE_FLAG_OTHER"},
+        {ZES_ENGINE_TYPE_FLAG_COMPUTE, "ZES_ENGINE_TYPE_FLAG_COMPUTE"},
+        {ZES_ENGINE_TYPE_FLAG_3D, "ZES_ENGINE_TYPE_FLAG_3D"},
+        {ZES_ENGINE_TYPE_FLAG_MEDIA, "ZES_ENGINE_TYPE_FLAG_MEDIA"},
+        {ZES_ENGINE_TYPE_FLAG_DMA, "ZES_ENGINE_TYPE_FLAG_DMA"},
+        {ZES_ENGINE_TYPE_FLAG_RENDER, "ZES_ENGINE_TYPE_FLAG_RENDER"}};
+    auto i = mgetEngineType.find(engineFlag);
+    if (i == mgetEngineType.end())
+        return "NOT SUPPORTED MODE Engine avalialbe";
+    else
+        return mgetEngineType.at(engineFlag);
+}
+
+void testSysmanPerformance(ze_device_handle_t &device) {
+    std::cout << std::endl
+              << " ----  Performance-factor tests ---- " << std::endl;
+    uint32_t count = 0;
+    VALIDATECALL(zesDeviceEnumPerformanceFactorDomains(device, &count, nullptr));
+    if (count == 0) {
+        std::cout << "Could not retrieve Performance factor domains" << std::endl;
+        return;
+    }
+    std::vector<zes_perf_handle_t> handles(count, nullptr);
+    VALIDATECALL(zesDeviceEnumPerformanceFactorDomains(device, &count, handles.data()));
+
+    for (const auto &handle : handles) {
+        zes_perf_properties_t properties;
+        VALIDATECALL(zesPerformanceFactorGetProperties(handle, &properties));
+        if (verbose) {
+            std::cout << "properties.onSubdevice = " << properties.onSubdevice << std::endl;
+            std::cout << "properties.subdeviceId = " << properties.subdeviceId << std::endl;
+            std::cout << "properties.engines = " << getEngineFlagType(properties.engines) << std::endl;
+        }
+        double originalFactor = 0;
+        VALIDATECALL(zesPerformanceFactorGetConfig(handle, &originalFactor));
+        if (verbose) {
+            std::cout << "current Performance Factor = " << originalFactor << std::endl;
+        }
+        std::cout << std::endl;
+    }
+}
+
+std::string getTemperatureSensorType(zes_temp_sensors_t type) {
+    static const std::map<zes_temp_sensors_t, std::string> mgetSensorType{
+        {ZES_TEMP_SENSORS_GLOBAL, "ZES_TEMP_SENSORS_GLOBAL"},
+        {ZES_TEMP_SENSORS_GPU, "ZES_TEMP_SENSORS_GPU"},
+        {ZES_TEMP_SENSORS_MEMORY, "ZES_TEMP_SENSORS_MEMORY"},
+        {ZES_TEMP_SENSORS_GLOBAL_MIN, "ZES_TEMP_SENSORS_GLOBAL_MIN"},
+        {ZES_TEMP_SENSORS_GPU_MIN, "ZES_TEMP_SENSORS_GPU_MIN"},
+        {ZES_TEMP_SENSORS_MEMORY_MIN, "ZES_TEMP_SENSORS_MEMORY_MIN"}};
+    auto i = mgetSensorType.find(type);
+    if (i == mgetSensorType.end())
+        return "NOT SUPPORTED MODE Engine avalialbe";
+    else
+        return mgetSensorType.at(type);
+}
+
 void testSysmanTemperature(ze_device_handle_t &device) {
     std::cout << std::endl
               << " ----  Temperature tests ---- " << std::endl;
@@ -193,11 +268,15 @@ void testSysmanTemperature(ze_device_handle_t &device) {
     std::vector<zes_temp_handle_t> handles(count, nullptr);
     VALIDATECALL(zesDeviceEnumTemperatureSensors(device, &count, handles.data()));
 
-    for (auto handle : handles) {
+    for (const auto &handle : handles) {
+        zes_temp_properties_t properties = {};
+        VALIDATECALL(zesTemperatureGetProperties(handle, &properties));
+
         double temperature;
         VALIDATECALL(zesTemperatureGetState(handle, &temperature));
         if (verbose) {
-            std::cout << "temperature current state is: " << temperature << std::endl;
+            std::cout << "For subDevice " << properties.subdeviceId << " temperature current state for "
+                      << getTemperatureSensorType(properties.type) << " is: " << temperature << std::endl;
         }
     }
 }
@@ -211,6 +290,7 @@ void testSysmanPci(ze_device_handle_t &device) {
         std::cout << "properties.address.domain = " << properties.address.domain << std::endl;
         std::cout << "properties.address.bus = " << properties.address.bus << std::endl;
         std::cout << "properties.address.device = " << properties.address.device << std::endl;
+        std::cout << "properties.address.function = " << properties.address.function << std::endl;
         std::cout << "properties.maxSpeed.gen = " << properties.maxSpeed.gen << std::endl;
         std::cout << "properties.maxSpeed.width = " << properties.maxSpeed.width << std::endl;
         std::cout << "properties.maxSpeed.maxBandwidth = " << properties.maxSpeed.maxBandwidth << std::endl;
@@ -222,6 +302,12 @@ void testSysmanPci(ze_device_handle_t &device) {
         std::cout << "Bar count = " << count << std::endl;
     }
     std::vector<zes_pci_bar_properties_t> pciBarProps(count);
+    zes_pci_bar_properties_1_2_t props1_2 = {};
+    memset(&props1_2, 0, sizeof(zes_pci_bar_properties_1_2_t));
+    for (uint32_t i = 0; i < count; i++) {
+        pciBarProps[i].pNext = static_cast<void *>(&props1_2);
+        pciBarProps[i].stype = ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES_1_2;
+    }
     VALIDATECALL(zesDevicePciGetBars(device, &count, pciBarProps.data()));
     if (verbose) {
         for (uint32_t i = 0; i < count; i++) {
@@ -229,6 +315,8 @@ void testSysmanPci(ze_device_handle_t &device) {
             std::cout << "pciBarProps.index = " << std::hex << pciBarProps[i].index << std::endl;
             std::cout << "pciBarProps.base = " << std::hex << pciBarProps[i].base << std::endl;
             std::cout << "pciBarProps.size = " << std::hex << pciBarProps[i].size << std::endl;
+            std::cout << "pci_bar_properties_1_2_t.resizableBarSupported = " << static_cast<uint32_t>(props1_2.resizableBarSupported) << std::endl;
+            std::cout << "pci_bar_properties_1_2_t.resizableBarEnabled = " << static_cast<uint32_t>(props1_2.resizableBarEnabled) << std::endl;
         }
     }
 }
@@ -247,7 +335,7 @@ void testSysmanFrequency(ze_device_handle_t &device) {
     std::vector<zes_freq_handle_t> handles(count, nullptr);
     VALIDATECALL(zesDeviceEnumFrequencyDomains(device, &count, handles.data()));
 
-    for (auto handle : handles) {
+    for (const auto &handle : handles) {
         zes_freq_properties_t freqProperties = {};
         zes_freq_range_t freqRange = {};
         zes_freq_range_t testFreqRange = {};
@@ -320,6 +408,82 @@ void testSysmanFrequency(ze_device_handle_t &device) {
         }
     }
 }
+
+void testSysmanRas(ze_device_handle_t &device) {
+    std::cout << std::endl
+              << " ----  Ras tests ---- " << std::endl;
+    uint32_t count = 0;
+    bool iamroot = (geteuid() == 0);
+    VALIDATECALL(zesDeviceEnumRasErrorSets(device, &count, nullptr));
+    if (count == 0) {
+        std::cout << "Could not retrieve Ras Error Sets" << std::endl;
+        return;
+    }
+    std::vector<zes_ras_handle_t> handles(count, nullptr);
+    VALIDATECALL(zesDeviceEnumRasErrorSets(device, &count, handles.data()));
+
+    for (const auto &handle : handles) {
+        zes_ras_properties_t rasProperties = {};
+        zes_ras_state_t rasState = {};
+
+        VALIDATECALL(zesRasGetProperties(handle, &rasProperties));
+        if (verbose) {
+            std::cout << "rasProperties.type = " << rasProperties.type << std::endl;
+            if (rasProperties.onSubdevice) {
+                std::cout << "rasProperties.subdeviceId = " << rasProperties.subdeviceId << std::endl;
+            }
+        }
+        ze_bool_t clear = 0;
+        VALIDATECALL(zesRasGetState(handle, clear, &rasState));
+        if (verbose) {
+            if (rasProperties.type == ZES_RAS_ERROR_TYPE_UNCORRECTABLE) {
+                std::cout << "Number of fatal accelerator engine resets attempted by the driver = " << rasState.category[ZES_RAS_ERROR_CAT_RESET] << std::endl;
+                std::cout << "Number of fatal errors that have occurred in caches = " << rasState.category[ZES_RAS_ERROR_CAT_CACHE_ERRORS] << std::endl;
+                std::cout << "Number of fatal programming errors that have occurred  = " << rasState.category[ZES_RAS_ERROR_CAT_PROGRAMMING_ERRORS] << std::endl;
+                std::cout << "Number of fatal driver errors that have occurred  = " << rasState.category[ZES_RAS_ERROR_CAT_DRIVER_ERRORS] << std::endl;
+                std::cout << "Number of fatal compute errors that have occurred  = " << rasState.category[ZES_RAS_ERROR_CAT_COMPUTE_ERRORS] << std::endl;
+                std::cout << "Number of fatal non compute errors that have occurred  = " << rasState.category[ZES_RAS_ERROR_CAT_NON_COMPUTE_ERRORS] << std::endl;
+                std::cout << "Number of fatal display errors that have occurred  = " << rasState.category[ZES_RAS_ERROR_CAT_DISPLAY_ERRORS] << std::endl;
+            } else {
+                std::cout << "Number of correctable accelerator engine resets attempted by the driver = " << rasState.category[ZES_RAS_ERROR_CAT_RESET] << std::endl;
+                std::cout << "Number of correctable errors that have occurred in caches = " << rasState.category[ZES_RAS_ERROR_CAT_CACHE_ERRORS] << std::endl;
+                std::cout << "Number of correctable programming errors that have occurred  = " << rasState.category[ZES_RAS_ERROR_CAT_PROGRAMMING_ERRORS] << std::endl;
+                std::cout << "Number of correctable driver errors that have occurred  = " << rasState.category[ZES_RAS_ERROR_CAT_DRIVER_ERRORS] << std::endl;
+                std::cout << "Number of correctable compute errors that have occurred  = " << rasState.category[ZES_RAS_ERROR_CAT_COMPUTE_ERRORS] << std::endl;
+                std::cout << "Number of correctable non compute errors that have occurred  = " << rasState.category[ZES_RAS_ERROR_CAT_NON_COMPUTE_ERRORS] << std::endl;
+                std::cout << "Number of correctable display errors that have occurred  = " << rasState.category[ZES_RAS_ERROR_CAT_DISPLAY_ERRORS] << std::endl;
+            }
+        }
+        if (iamroot) {
+            zes_ras_config_t getConfig = {};
+            zes_ras_config_t setConfig = {};
+            setConfig.totalThreshold = 14;
+            memset(setConfig.detailedThresholds.category, 0, sizeof(setConfig.detailedThresholds.category));
+            VALIDATECALL(zesRasSetConfig(handle, &setConfig));
+            if (verbose) {
+                std::cout << "Setting Total threshold = " << setConfig.totalThreshold << std::endl;
+                std::cout << "Setting Threshold for Engine Resets = " << setConfig.detailedThresholds.category[0] << std::endl;
+                std::cout << "Setting Threshold for Programming Errors = " << setConfig.detailedThresholds.category[1] << std::endl;
+                std::cout << "Setting Threshold for Driver Errors = " << setConfig.detailedThresholds.category[2] << std::endl;
+                std::cout << "Setting Threshold for Compute Errors = " << setConfig.detailedThresholds.category[3] << std::endl;
+                std::cout << "Setting Threshold for Non Compute Errors = " << setConfig.detailedThresholds.category[4] << std::endl;
+                std::cout << "Setting Threshold for Cache Errors = " << setConfig.detailedThresholds.category[5] << std::endl;
+                std::cout << "Setting Threshold for Display Errors = " << setConfig.detailedThresholds.category[6] << std::endl;
+            }
+            VALIDATECALL(zesRasGetConfig(handle, &getConfig));
+            if (verbose) {
+                std::cout << "Getting Total threshold = " << getConfig.totalThreshold << std::endl;
+                std::cout << "Getting Threshold for Engine Resets = " << getConfig.detailedThresholds.category[0] << std::endl;
+                std::cout << "Getting Threshold for Programming Errors = " << getConfig.detailedThresholds.category[1] << std::endl;
+                std::cout << "Getting Threshold for Driver Errors = " << getConfig.detailedThresholds.category[2] << std::endl;
+                std::cout << "Getting Threshold for Compute Errors = " << getConfig.detailedThresholds.category[3] << std::endl;
+                std::cout << "Getting Threshold for Non Compute Errors = " << getConfig.detailedThresholds.category[4] << std::endl;
+                std::cout << "Getting Threshold for Cache Errors = " << getConfig.detailedThresholds.category[5] << std::endl;
+                std::cout << "Getting Threshold for Display Errors = " << getConfig.detailedThresholds.category[6] << std::endl;
+            }
+        }
+    }
+}
 std::string getStandbyType(zes_standby_type_t standbyType) {
     if (standbyType == ZES_STANDBY_TYPE_GLOBAL)
         return "ZES_STANDBY_TYPE_GLOBAL";
@@ -347,7 +511,7 @@ void testSysmanStandby(ze_device_handle_t &device) {
     }
     std::vector<zes_standby_handle_t> handles(count, nullptr);
     VALIDATECALL(zesDeviceEnumStandbyDomains(device, &count, handles.data()));
-    for (auto handle : handles) {
+    for (const auto &handle : handles) {
         zes_standby_properties_t standbyProperties = {};
         zes_standby_promo_mode_t standbyMode = ZES_STANDBY_PROMO_MODE_FORCE_UINT32;
 
@@ -383,7 +547,13 @@ std::string getEngineType(zes_engine_group_t engineGroup) {
         {ZES_ENGINE_GROUP_RENDER_SINGLE, "ZES_ENGINE_GROUP_RENDER_SINGLE"},
         {ZES_ENGINE_GROUP_MEDIA_DECODE_SINGLE, "ZES_ENGINE_GROUP_MEDIA_DECODE_SINGLE"},
         {ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE, "ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE"},
-        {ZES_ENGINE_GROUP_COPY_SINGLE, "ZES_ENGINE_GROUP_COPY_SINGLE"}};
+        {ZES_ENGINE_GROUP_COPY_SINGLE, "ZES_ENGINE_GROUP_COPY_SINGLE"},
+        {ZES_ENGINE_GROUP_ALL, "ZES_ENGINE_GROUP_ALL"},
+        {ZES_ENGINE_GROUP_COMPUTE_ALL, "ZES_ENGINE_GROUP_COMPUTE_ALL"},
+        {ZES_ENGINE_GROUP_COPY_ALL, "ZES_ENGINE_GROUP_COPY_ALL"},
+        {ZES_ENGINE_GROUP_RENDER_ALL, "ZES_ENGINE_GROUP_RENDER_ALL"},
+        {ZES_ENGINE_GROUP_MEDIA_ALL, "ZES_ENGINE_GROUP_MEDIA_ALL"},
+        {ZES_ENGINE_GROUP_MEDIA_ENHANCEMENT_SINGLE, "ZES_ENGINE_GROUP_MEDIA_ENHANCEMENT_SINGLE"}};
     auto i = mgetEngineType.find(engineGroup);
     if (i == mgetEngineType.end())
         return "NOT SUPPORTED MODE Engine avalialbe";
@@ -402,7 +572,7 @@ void testSysmanEngine(ze_device_handle_t &device) {
     }
     std::vector<zes_engine_handle_t> handles(count, nullptr);
     VALIDATECALL(zesDeviceEnumEngineGroups(device, &count, handles.data()));
-    for (auto handle : handles) {
+    for (const auto &handle : handles) {
         zes_engine_properties_t engineProperties = {};
         zes_engine_stats_t engineStats = {};
 
@@ -449,7 +619,7 @@ void testSysmanScheduler(ze_device_handle_t &device) {
     std::vector<zes_sched_handle_t> handles(count, nullptr);
     VALIDATECALL(zesDeviceEnumSchedulers(device, &count, handles.data()));
 
-    for (auto handle : handles) {
+    for (const auto &handle : handles) {
         zes_sched_mode_t currentMode = {};
         VALIDATECALL(zesSchedulerGetCurrentMode(handle, &currentMode));
         if (verbose) {
@@ -543,7 +713,7 @@ void testSysmanMemory(ze_device_handle_t &device) {
     std::vector<zes_mem_handle_t> handles(count, nullptr);
     VALIDATECALL(zesDeviceEnumMemoryModules(device, &count, handles.data()));
 
-    for (auto handle : handles) {
+    for (const auto &handle : handles) {
         zes_mem_properties_t memoryProperties = {};
         zes_mem_state_t memoryState = {};
         zes_mem_bandwidth_t memoryBandwidth = {};
@@ -554,6 +724,7 @@ void testSysmanMemory(ze_device_handle_t &device) {
             std::cout << "On Subdevice = " << memoryProperties.onSubdevice << std::endl;
             std::cout << "Subdevice Id = " << memoryProperties.subdeviceId << std::endl;
             std::cout << "Memory Size = " << memoryProperties.physicalSize << std::endl;
+            std::cout << "Number of channels = " << memoryProperties.numChannels << std::endl;
         }
 
         VALIDATECALL(zesMemoryGetState(handle, &memoryState));
@@ -572,7 +743,53 @@ void testSysmanMemory(ze_device_handle_t &device) {
         }
     }
 }
+void testSysmanFirmware(ze_device_handle_t &device, std::string imagePath) {
+    std::cout << std::endl
+              << " ----  firmware tests ---- " << std::endl;
+    uint32_t count = 0;
+    std::ifstream imageFile;
+    uint64_t imgSize = 0;
+    if (imagePath.size() != 0) {
+        struct stat statBuf;
+        auto status = stat(imagePath.c_str(), &statBuf);
+        if (!status) {
+            imageFile.open(imagePath.c_str(), std::ios::binary);
+            imgSize = statBuf.st_size;
+        }
+    }
+    VALIDATECALL(zesDeviceEnumFirmwares(device, &count, nullptr));
+    if (count == 0) {
+        std::cout << "Could not retrieve Firmware domains" << std::endl;
+        return;
+    }
+    std::vector<zes_firmware_handle_t> handles(count, nullptr);
+    VALIDATECALL(zesDeviceEnumFirmwares(device, &count, handles.data()));
 
+    for (auto handle : handles) {
+        zes_firmware_properties_t fwProperties = {};
+
+        VALIDATECALL(zesFirmwareGetProperties(handle, &fwProperties));
+        if (verbose) {
+            std::cout << "firmware name = " << fwProperties.name << std::endl;
+            std::cout << "On Subdevice = " << fwProperties.onSubdevice << std::endl;
+            std::cout << "Subdevice Id = " << fwProperties.subdeviceId << std::endl;
+            std::cout << "firmware version = " << fwProperties.version << std::endl;
+        }
+        if (imagePath.size() != 0 && imgSize > 0) {
+            char img[imgSize];
+            imageFile.read(img, imgSize);
+            VALIDATECALL(zesFirmwareFlash(handle, img, static_cast<uint32_t>(imgSize)));
+
+            VALIDATECALL(zesFirmwareGetProperties(handle, &fwProperties));
+            if (verbose) {
+                std::cout << "firmware name = " << fwProperties.name << std::endl;
+                std::cout << "On Subdevice = " << fwProperties.onSubdevice << std::endl;
+                std::cout << "Subdevice Id = " << fwProperties.subdeviceId << std::endl;
+                std::cout << "firmware version = " << fwProperties.version << std::endl;
+            }
+        }
+    }
+}
 void testSysmanReset(ze_device_handle_t &device, bool force) {
     std::cout << std::endl
               << " ----  Reset test (force = " << (force ? "true" : "false") << ") ---- " << std::endl;
@@ -597,7 +814,152 @@ void testSysmanListenEvents(ze_driver_handle_t driver, std::vector<ze_device_han
                 if (pEvents[index] & ZES_EVENT_TYPE_FLAG_DEVICE_ATTACH) {
                     std::cout << "Device " << index << "got DEVICE_ATTACH event" << std::endl;
                 }
+                if (pEvents[index] & ZES_EVENT_TYPE_FLAG_RAS_UNCORRECTABLE_ERRORS) {
+                    std::cout << "Device " << index << "got RAS UNCORRECTABLE event" << std::endl;
+                }
+                if (pEvents[index] & ZES_EVENT_TYPE_FLAG_RAS_CORRECTABLE_ERRORS) {
+                    std::cout << "Device " << index << "got RAS CORRECTABLE event" << std::endl;
+                }
             }
+        }
+    }
+}
+
+void testSysmanListenEventsEx(ze_driver_handle_t driver, std::vector<ze_device_handle_t> &devices, zes_event_type_flags_t events) {
+    uint32_t numDeviceEvents = 0;
+    zes_event_type_flags_t *pEvents = new zes_event_type_flags_t[devices.size()];
+    uint64_t timeout = 10000u;
+    uint32_t numDevices = static_cast<uint32_t>(devices.size());
+    VALIDATECALL(zesDriverEventListenEx(driver, timeout, numDevices, devices.data(), &numDeviceEvents, pEvents));
+    if (verbose) {
+        if (numDeviceEvents) {
+            for (auto index = 0u; index < devices.size(); index++) {
+                if (pEvents[index] & ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED) {
+                    std::cout << "Device " << index << "got reset required event" << std::endl;
+                }
+                if (pEvents[index] & ZES_EVENT_TYPE_FLAG_DEVICE_DETACH) {
+                    std::cout << "Device " << index << "got DEVICE_DETACH event" << std::endl;
+                }
+                if (pEvents[index] & ZES_EVENT_TYPE_FLAG_DEVICE_ATTACH) {
+                    std::cout << "Device " << index << "got DEVICE_ATTACH event" << std::endl;
+                }
+                if (pEvents[index] & ZES_EVENT_TYPE_FLAG_RAS_UNCORRECTABLE_ERRORS) {
+                    std::cout << "Device " << index << "got RAS UNCORRECTABLE event" << std::endl;
+                }
+                if (pEvents[index] & ZES_EVENT_TYPE_FLAG_RAS_CORRECTABLE_ERRORS) {
+                    std::cout << "Device " << index << "got RAS CORRECTABLE event" << std::endl;
+                }
+            }
+        }
+    }
+}
+
+std::string getFabricPortStatus(zes_fabric_port_status_t status) {
+    static const std::map<zes_fabric_port_status_t, std::string> fabricPortStatus{
+        {ZES_FABRIC_PORT_STATUS_UNKNOWN, "ZES_FABRIC_PORT_STATUS_UNKNOWN"},
+        {ZES_FABRIC_PORT_STATUS_HEALTHY, "ZES_FABRIC_PORT_STATUS_HEALTHY"},
+        {ZES_FABRIC_PORT_STATUS_DEGRADED, "ZES_FABRIC_PORT_STATUS_DEGRADED"},
+        {ZES_FABRIC_PORT_STATUS_FAILED, "ZES_FABRIC_PORT_STATUS_FAILED"},
+        {ZES_FABRIC_PORT_STATUS_DISABLED, "ZES_FABRIC_PORT_STATUS_DISABLED"}};
+    auto i = fabricPortStatus.find(status);
+    if (i == fabricPortStatus.end())
+        return "UNEXPECTED STATUS";
+    else
+        return fabricPortStatus.at(status);
+}
+
+std::string getFabricPortQualityIssues(zes_fabric_port_qual_issue_flags_t qualityIssues) {
+    std::string returnValue;
+    returnValue.clear();
+    if (qualityIssues & ZES_FABRIC_PORT_QUAL_ISSUE_FLAG_LINK_ERRORS) {
+        returnValue.append("ZES_FABRIC_PORT_QUAL_ISSUE_FLAG_LINK_ERRORS ");
+    }
+    if (qualityIssues & ZES_FABRIC_PORT_QUAL_ISSUE_FLAG_SPEED) {
+        returnValue.append("ZES_FABRIC_PORT_QUAL_ISSUE_FLAG_SPEED");
+    }
+    return returnValue;
+}
+
+std::string getFabricPortFailureReasons(zes_fabric_port_failure_flags_t failureReasons) {
+    std::string returnValue;
+    returnValue.clear();
+    if (failureReasons & ZES_FABRIC_PORT_FAILURE_FLAG_FAILED) {
+        returnValue.append("ZES_FABRIC_PORT_FAILURE_FLAG_FAILED ");
+    }
+    if (failureReasons & ZES_FABRIC_PORT_FAILURE_FLAG_TRAINING_TIMEOUT) {
+        returnValue.append("ZES_FABRIC_PORT_FAILURE_FLAG_TRAINING_TIMEOUT ");
+    }
+    if (failureReasons & ZES_FABRIC_PORT_FAILURE_FLAG_FLAPPING) {
+        returnValue.append("ZES_FABRIC_PORT_FAILURE_FLAG_FLAPPING ");
+    }
+    return returnValue;
+}
+
+void testSysmanFabricPort(ze_device_handle_t &device) {
+    std::cout << std::endl
+              << " ----  FabricPort tests ---- " << std::endl;
+    uint32_t count = 0;
+    VALIDATECALL(zesDeviceEnumFabricPorts(device, &count, nullptr));
+    if (count == 0) {
+        std::cout << "Could not retrieve FabricPorts" << std::endl;
+        return;
+    }
+    std::vector<zes_fabric_port_handle_t> handles(count, nullptr);
+    VALIDATECALL(zesDeviceEnumFabricPorts(device, &count, handles.data()));
+
+    for (auto handle : handles) {
+        zes_fabric_port_properties_t fabricPortProperties = {};
+        zes_fabric_link_type_t fabricPortLinkType = {};
+        zes_fabric_port_config_t fabricPortConfig = {};
+        zes_fabric_port_state_t fabricPortState = {};
+        zes_fabric_port_throughput_t fabricPortThroughput = {};
+
+        VALIDATECALL(zesFabricPortGetProperties(handle, &fabricPortProperties));
+        if (verbose) {
+            std::cout << "Model = \"" << fabricPortProperties.model << "\"" << std::endl;
+            std::cout << "On Subdevice = " << static_cast<uint32_t>(fabricPortProperties.onSubdevice) << std::endl;
+            std::cout << "Subdevice Id = " << fabricPortProperties.subdeviceId << std::endl;
+            std::cout << "Port ID = [" << fabricPortProperties.portId.fabricId
+                      << ":" << fabricPortProperties.portId.attachId
+                      << ":" << static_cast<uint32_t>(fabricPortProperties.portId.portNumber) << "]" << std::endl;
+            std::cout << "Max Rx Speed = " << fabricPortProperties.maxRxSpeed.bitRate
+                      << " pbs, " << fabricPortProperties.maxRxSpeed.width << " lanes" << std::endl;
+            std::cout << "Max Tx Speed = " << fabricPortProperties.maxTxSpeed.bitRate
+                      << " pbs, " << fabricPortProperties.maxTxSpeed.width << " lanes" << std::endl;
+        }
+
+        VALIDATECALL(zesFabricPortGetLinkType(handle, &fabricPortLinkType));
+        if (verbose) {
+            std::cout << "Link Type = \"" << fabricPortLinkType.desc << "\"" << std::endl;
+        }
+
+        VALIDATECALL(zesFabricPortGetConfig(handle, &fabricPortConfig));
+        if (verbose) {
+            std::cout << "Enabled = " << static_cast<uint32_t>(fabricPortConfig.enabled) << std::endl;
+            std::cout << "Beaconing = " << static_cast<uint32_t>(fabricPortConfig.beaconing) << std::endl;
+        }
+
+        VALIDATECALL(zesFabricPortGetState(handle, &fabricPortState));
+        if (verbose) {
+            std::cout << "Status = " << getFabricPortStatus(fabricPortState.status) << std::endl;
+            std::cout << "Quality Issues = " << getFabricPortQualityIssues(fabricPortState.qualityIssues)
+                      << std::hex << fabricPortState.qualityIssues << std::endl;
+            std::cout << "Failure Reasons = " << getFabricPortFailureReasons(fabricPortState.failureReasons)
+                      << std::hex << fabricPortState.failureReasons << std::endl;
+            std::cout << "Remote Port ID = [" << fabricPortState.remotePortId.fabricId
+                      << ":" << fabricPortState.remotePortId.attachId
+                      << ":" << static_cast<uint32_t>(fabricPortState.remotePortId.portNumber) << "]" << std::endl;
+            std::cout << "Rx Speed = " << fabricPortState.rxSpeed.bitRate
+                      << " pbs, " << fabricPortState.rxSpeed.width << " lanes" << std::endl;
+            std::cout << "Tx Speed = " << fabricPortState.txSpeed.bitRate
+                      << " pbs, " << fabricPortState.txSpeed.width << " lanes" << std::endl;
+        }
+
+        VALIDATECALL(zesFabricPortGetThroughput(handle, &fabricPortThroughput));
+        if (verbose) {
+            std::cout << "Timestamp = " << fabricPortThroughput.timestamp << std::endl;
+            std::cout << "RX Counter = " << fabricPortThroughput.rxCounter << std::endl;
+            std::cout << "TX Counter = " << fabricPortThroughput.txCounter << std::endl;
         }
     }
 }
@@ -622,14 +984,87 @@ void testSysmanGlobalOperations(ze_device_handle_t &device) {
     std::vector<zes_process_state_t> processes(count);
     VALIDATECALL(zesDeviceProcessesGetState(device, &count, processes.data()));
     if (verbose) {
-        for (auto process : processes) {
+        for (const auto &process : processes) {
             std::cout << "processes.processId = " << process.processId << std::endl;
             std::cout << "processes.memSize = " << process.memSize << std::endl;
             std::cout << "processes.sharedSize = " << process.sharedSize << std::endl;
             std::cout << "processes.engines = " << process.engines << std::endl;
         }
     }
+    zes_device_state_t deviceState = {};
+    VALIDATECALL(zesDeviceGetState(device, &deviceState));
+    if (verbose) {
+        std::cout << "reset status: " << deviceState.reset << std::endl;
+        std::cout << "repair" << deviceState.repaired << std::endl;
+        if (deviceState.reset & ZES_RESET_REASON_FLAG_WEDGED) {
+            std::cout << "state reset wedged = " << deviceState.reset << std::endl;
+        }
+        if (deviceState.reset & ZES_RESET_REASON_FLAG_REPAIR) {
+            std::cout << "state reset repair = " << deviceState.reset << std::endl;
+            std::cout << "repair state = " << deviceState.repaired << std::endl;
+        }
+    }
 }
+
+void testSysmanDiagnostics(ze_device_handle_t &device) {
+    std::cout << std::endl
+              << " ----  diagnostics tests ---- " << std::endl;
+    uint32_t count = 0;
+    uint32_t subTestCount = 0;
+    zes_diag_test_t tests = {};
+    zes_diag_result_t results;
+    uint32_t start = 0, end = 0;
+    VALIDATECALL(zesDeviceEnumDiagnosticTestSuites(device, &count, nullptr));
+    if (count == 0) {
+        std::cout << "Could not retrieve diagnostics domains" << std::endl;
+        return;
+    }
+    std::vector<zes_diag_handle_t> handles(count, nullptr);
+    VALIDATECALL(zesDeviceEnumDiagnosticTestSuites(device, &count, handles.data()));
+
+    for (auto handle : handles) {
+        zes_diag_properties_t diagProperties = {};
+
+        VALIDATECALL(zesDiagnosticsGetProperties(handle, &diagProperties));
+        if (verbose) {
+            std::cout << "diagnostics name = " << diagProperties.name << std::endl;
+            std::cout << "On Subdevice = " << diagProperties.onSubdevice << std::endl;
+            std::cout << "Subdevice Id = " << diagProperties.subdeviceId << std::endl;
+            std::cout << "diagnostics have sub tests = " << diagProperties.haveTests << std::endl;
+        }
+        if (diagProperties.haveTests != 0) {
+            VALIDATECALL(zesDiagnosticsGetTests(handle, &subTestCount, &tests));
+            if (verbose) {
+                std::cout << "diagnostics subTestCount = " << subTestCount << "for " << diagProperties.name << std::endl;
+                for (uint32_t i = 0; i < subTestCount; i++) {
+                    std::cout << "subTest#" << tests.index << " = " << tests.name << std::endl;
+                }
+            }
+            end = subTestCount - 1;
+        }
+        VALIDATECALL(zesDiagnosticsRunTests(handle, start, end, &results));
+        if (verbose) {
+            switch (results) {
+            case ZES_DIAG_RESULT_NO_ERRORS:
+                std::cout << "No errors have occurred" << std::endl;
+                break;
+            case ZES_DIAG_RESULT_REBOOT_FOR_REPAIR:
+                std::cout << "diagnostics successful and repair applied, reboot needed" << std::endl;
+                break;
+            case ZES_DIAG_RESULT_FAIL_CANT_REPAIR:
+                std::cout << "diagnostics run, unable to fix" << std::endl;
+                break;
+            case ZES_DIAG_RESULT_ABORT:
+                std::cout << "diagnostics run fialed, unknown error" << std::endl;
+                break;
+            case ZES_DIAG_RESULT_FORCE_UINT32:
+            default:
+                std::cout << "undefined error" << std::endl;
+            }
+        }
+    }
+}
+
 bool validateGetenv(const char *name) {
     const char *env = getenv(name);
     if ((nullptr == env) || (0 == strcmp("0", env)))
@@ -646,6 +1081,7 @@ int main(int argc, char *argv[]) {
     }
     getDeviceHandles(driver, devices, argc, argv);
     int opt;
+
     static struct option long_opts[] = {
         {"help", no_argument, nullptr, 'h'},
         {"pci", no_argument, nullptr, 'p'},
@@ -656,13 +1092,18 @@ int main(int argc, char *argv[]) {
         {"temperature", no_argument, nullptr, 't'},
         {"power", no_argument, nullptr, 'o'},
         {"global", no_argument, nullptr, 'g'},
+        {"ras", no_argument, nullptr, 'R'},
         {"memory", no_argument, nullptr, 'm'},
         {"event", no_argument, nullptr, 'E'},
         {"reset", required_argument, nullptr, 'r'},
+        {"fabricport", no_argument, nullptr, 'F'},
+        {"firmware", optional_argument, nullptr, 'i'},
+        {"diagnostics", no_argument, nullptr, 'd'},
+        {"performance", no_argument, nullptr, 'P'},
         {0, 0, 0, 0},
     };
     bool force = false;
-    while ((opt = getopt_long(argc, argv, "hpfsectogmrE:", long_opts, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hdpPfsectogmrFEi:", long_opts, nullptr)) != -1) {
         switch (opt) {
         case 'h':
             usage();
@@ -671,6 +1112,11 @@ int main(int argc, char *argv[]) {
         case 'p':
             std::for_each(devices.begin(), devices.end(), [&](auto device) {
                 testSysmanPci(device);
+            });
+            break;
+        case 'P':
+            std::for_each(devices.begin(), devices.end(), [&](auto device) {
+                testSysmanPerformance(device);
             });
             break;
         case 'f':
@@ -713,6 +1159,21 @@ int main(int argc, char *argv[]) {
                 testSysmanMemory(device);
             });
             break;
+        case 'R':
+            std::for_each(devices.begin(), devices.end(), [&](auto device) {
+                testSysmanRas(device);
+            });
+            break;
+        case 'i': {
+            std::string filePathFirmware;
+            if (optarg != nullptr) {
+                filePathFirmware = optarg;
+            }
+            std::for_each(devices.begin(), devices.end(), [&](auto device) {
+                testSysmanFirmware(device, filePathFirmware);
+            });
+            break;
+        }
         case 'r':
             if (!strcmp(optarg, "force")) {
                 force = true;
@@ -729,12 +1190,35 @@ int main(int argc, char *argv[]) {
         case 'E':
             std::for_each(devices.begin(), devices.end(), [&](auto device) {
                 zesDeviceEventRegister(device,
-                                       ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED | ZES_EVENT_TYPE_FLAG_DEVICE_DETACH | ZES_EVENT_TYPE_FLAG_DEVICE_ATTACH);
+                                       ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED | ZES_EVENT_TYPE_FLAG_DEVICE_DETACH |
+                                           ZES_EVENT_TYPE_FLAG_DEVICE_ATTACH | ZES_EVENT_TYPE_FLAG_RAS_CORRECTABLE_ERRORS |
+                                           ZES_EVENT_TYPE_FLAG_RAS_UNCORRECTABLE_ERRORS | ZES_EVENT_TYPE_FLAG_FABRIC_PORT_HEALTH);
             });
             testSysmanListenEvents(driver, devices,
-                                   ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED | ZES_EVENT_TYPE_FLAG_DEVICE_DETACH | ZES_EVENT_TYPE_FLAG_DEVICE_ATTACH);
+                                   ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED | ZES_EVENT_TYPE_FLAG_DEVICE_DETACH |
+                                       ZES_EVENT_TYPE_FLAG_DEVICE_ATTACH | ZES_EVENT_TYPE_FLAG_RAS_CORRECTABLE_ERRORS |
+                                       ZES_EVENT_TYPE_FLAG_RAS_UNCORRECTABLE_ERRORS | ZES_EVENT_TYPE_FLAG_FABRIC_PORT_HEALTH);
+            std::for_each(devices.begin(), devices.end(), [&](auto device) {
+                zesDeviceEventRegister(device,
+                                       ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED | ZES_EVENT_TYPE_FLAG_DEVICE_DETACH |
+                                           ZES_EVENT_TYPE_FLAG_DEVICE_ATTACH | ZES_EVENT_TYPE_FLAG_RAS_CORRECTABLE_ERRORS |
+                                           ZES_EVENT_TYPE_FLAG_RAS_UNCORRECTABLE_ERRORS | ZES_EVENT_TYPE_FLAG_FABRIC_PORT_HEALTH);
+            });
+            testSysmanListenEventsEx(driver, devices,
+                                     ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED | ZES_EVENT_TYPE_FLAG_DEVICE_DETACH |
+                                         ZES_EVENT_TYPE_FLAG_DEVICE_ATTACH | ZES_EVENT_TYPE_FLAG_RAS_CORRECTABLE_ERRORS |
+                                         ZES_EVENT_TYPE_FLAG_RAS_UNCORRECTABLE_ERRORS | ZES_EVENT_TYPE_FLAG_FABRIC_PORT_HEALTH);
             break;
-
+        case 'F':
+            std::for_each(devices.begin(), devices.end(), [&](auto device) {
+                testSysmanFabricPort(device);
+            });
+            break;
+        case 'd':
+            std::for_each(devices.begin(), devices.end(), [&](auto device) {
+                testSysmanDiagnostics(device);
+            });
+            break;
         default:
             usage();
             exit(0);

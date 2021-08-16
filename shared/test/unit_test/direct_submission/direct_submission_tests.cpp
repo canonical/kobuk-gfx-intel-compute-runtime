@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,17 +9,17 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/direct_submission/dispatchers/render_dispatcher.h"
 #include "shared/source/helpers/flush_stamp.h"
-#include "shared/test/unit_test/cmd_parse/hw_parse.h"
-#include "shared/test/unit_test/fixtures/direct_submission_fixture.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
-#include "shared/test/unit_test/helpers/dispatch_flags_helper.h"
-#include "shared/test/unit_test/helpers/ult_hw_config.h"
-#include "shared/test/unit_test/helpers/variable_backup.h"
-#include "shared/test/unit_test/mocks/mock_direct_submission_diagnostic_collector.h"
-#include "shared/test/unit_test/mocks/mock_direct_submission_hw.h"
+#include "shared/test/common/cmd_parse/hw_parse.h"
+#include "shared/test/common/fixtures/direct_submission_fixture.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/dispatch_flags_helper.h"
+#include "shared/test/common/helpers/ult_hw_config.h"
+#include "shared/test/common/helpers/variable_backup.h"
+#include "shared/test/common/mocks/mock_direct_submission_diagnostic_collector.h"
+#include "shared/test/common/mocks/mock_direct_submission_hw.h"
+#include "shared/test/common/mocks/mock_io_functions.h"
 
 #include "opencl/test/unit_test/mocks/mock_csr.h"
-#include "opencl/test/unit_test/mocks/mock_io_functions.h"
 #include "test.h"
 
 using DirectSubmissionTest = Test<DirectSubmissionFixture>;
@@ -35,11 +35,11 @@ HWTEST_F(DirectSubmissionTest, whenDebugCacheFlushDisabledSetThenExpectNoCpuCach
     EXPECT_TRUE(directSubmission.disableCpuCacheFlush);
 
     uintptr_t expectedPtrVal = 0;
-    lastClFlushedPtr = 0;
+    CpuIntrinsicsTests::lastClFlushedPtr = 0;
     void *ptr = reinterpret_cast<void *>(0xABCD00u);
     size_t size = 64;
     directSubmission.cpuCachelineFlush(ptr, size);
-    EXPECT_EQ(expectedPtrVal, lastClFlushedPtr);
+    EXPECT_EQ(expectedPtrVal, CpuIntrinsicsTests::lastClFlushedPtr);
 }
 
 HWTEST_F(DirectSubmissionTest, whenDebugCacheFlushDisabledNotSetThenExpectCpuCacheFlush) {
@@ -51,11 +51,11 @@ HWTEST_F(DirectSubmissionTest, whenDebugCacheFlushDisabledNotSetThenExpectCpuCac
     EXPECT_FALSE(directSubmission.disableCpuCacheFlush);
 
     uintptr_t expectedPtrVal = 0xABCD00u;
-    lastClFlushedPtr = 0;
+    CpuIntrinsicsTests::lastClFlushedPtr = 0;
     void *ptr = reinterpret_cast<void *>(expectedPtrVal);
     size_t size = 64;
     directSubmission.cpuCachelineFlush(ptr, size);
-    EXPECT_EQ(expectedPtrVal, lastClFlushedPtr);
+    EXPECT_EQ(expectedPtrVal, CpuIntrinsicsTests::lastClFlushedPtr);
 }
 
 HWTEST_F(DirectSubmissionTest, givenDirectSubmissionInitializedWhenRingIsStartedThenExpectAllocationsCreatedAndCommandsDispatched) {
@@ -371,7 +371,7 @@ HWTEST_F(DirectSubmissionDispatchBufferTest,
     LinearStream parseDispatch;
     uint8_t buffer[256];
     parseDispatch.replaceBuffer(buffer, 256);
-    RenderDispatcher<FamilyType>::dispatchCacheFlush(parseDispatch, *directSubmission.hwInfo);
+    RenderDispatcher<FamilyType>::dispatchCacheFlush(parseDispatch, *directSubmission.hwInfo, 0ull);
     auto expectedPipeControl = static_cast<PIPE_CONTROL *>(parseDispatch.getCpuBase());
     for (auto it = hwParse.pipeControlList.begin(); it != hwParse.pipeControlList.end(); it++) {
         auto pipeControl = genCmdCast<PIPE_CONTROL *>(*it);
@@ -510,7 +510,7 @@ HWTEST_F(DirectSubmissionTest, givenDirectSubmissionWhenDispatchFlushSectionThen
     bool ret = directSubmission.initialize(false);
     EXPECT_TRUE(ret);
 
-    Dispatcher::dispatchCacheFlush(directSubmission.ringCommandStream, *directSubmission.hwInfo);
+    Dispatcher::dispatchCacheFlush(directSubmission.ringCommandStream, *directSubmission.hwInfo, 0ull);
     EXPECT_EQ(Dispatcher::getSizeCacheFlush(*directSubmission.hwInfo), directSubmission.ringCommandStream.getUsed());
 }
 
@@ -521,7 +521,7 @@ HWTEST_F(DirectSubmissionTest, givenDirectSubmissionWhenDispatchTagUpdateSection
 
     bool ret = directSubmission.initialize(false);
     EXPECT_TRUE(ret);
-    Dispatcher::dispatchMonitorFence(directSubmission.ringCommandStream, 0ull, 0ull, *directSubmission.hwInfo);
+    Dispatcher::dispatchMonitorFence(directSubmission.ringCommandStream, 0ull, 0ull, *directSubmission.hwInfo, false);
     EXPECT_NE(0x0u, directSubmission.ringCommandStream.getUsed());
     EXPECT_EQ(Dispatcher::getSizeMonitorFence(*directSubmission.hwInfo), directSubmission.ringCommandStream.getUsed());
 }
@@ -865,7 +865,8 @@ HWTEST_F(DirectSubmissionTest, givenDirectSubmissionAvailableWhenProgrammingEndi
     void *location = nullptr;
     uint8_t buffer[128];
     mockCsr->commandStream.replaceBuffer(&buffer[0], 128u);
-    mockCsr->programEndingCmd(mockCsr->commandStream, &location, ret);
+    auto &device = *pDevice;
+    mockCsr->programEndingCmd(mockCsr->commandStream, device, &location, ret);
     EXPECT_EQ(sizeof(MI_BATCH_BUFFER_START), mockCsr->commandStream.getUsed());
 
     DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
@@ -874,13 +875,6 @@ HWTEST_F(DirectSubmissionTest, givenDirectSubmissionAvailableWhenProgrammingEndi
                           mockCsr->getCmdSizeForEpilogueCommands(dispatchFlags);
     expectedSize = alignUp(expectedSize, MemoryConstants::cacheLineSize);
     EXPECT_EQ(expectedSize, mockCsr->getCmdSizeForEpilogue(dispatchFlags));
-}
-
-HWTEST_F(DirectSubmissionTest, whenInitDirectSubmissionFailThenEngineIsNotCreated) {
-    VariableBackup<UltHwConfig> backup(&ultHwConfig);
-    ultHwConfig.csrFailInitDirectSubmission = true;
-    auto device = MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hardwareInfo);
-    EXPECT_EQ(nullptr, device);
 }
 
 HWTEST_F(DirectSubmissionTest,

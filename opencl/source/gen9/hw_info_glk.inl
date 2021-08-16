@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/source/aub_mem_dump/aub_services.h"
+#include "shared/source/aub_mem_dump/definitions/aub_services.h"
 #include "shared/source/gen9/hw_cmds.h"
 #include "shared/source/helpers/constants.h"
 
@@ -63,6 +63,7 @@ const RuntimeCapabilityTable GLK::capabilityTable{
     true,                                          // instrumentationEnabled
     false,                                         // forceStatelessCompilationFor32Bit
     "lp",                                          // platformType
+    "",                                            // deviceName
     true,                                          // sourceLevelDebuggerSupported
     true,                                          // supportsVme
     false,                                         // supportCacheFlushAfterWalker
@@ -74,7 +75,9 @@ const RuntimeCapabilityTable GLK::capabilityTable{
     false,                                         // supportsIndependentForwardProgress
     true,                                          // hostPtrTrackingEnabled
     false,                                         // levelZeroSupported
-    true                                           // isIntegratedDevice
+    true,                                          // isIntegratedDevice
+    true,                                          // supportsMediaBlock
+    false                                          // fusedEuEnabled
 };
 
 WorkaroundTable GLK::workaroundTable = {};

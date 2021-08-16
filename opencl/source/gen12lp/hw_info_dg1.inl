@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/source/aub_mem_dump/aub_services.h"
+#include "shared/source/aub_mem_dump/definitions/aub_services.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/gen12lp/hw_cmds_dg1.h"
 #include "shared/source/helpers/constants.h"
@@ -72,6 +72,7 @@ const RuntimeCapabilityTable DG1::capabilityTable{
     true,                                          // instrumentationEnabled
     true,                                          // forceStatelessCompilationFor32Bit
     "lp",                                          // platformType
+    "",                                            // deviceName
     true,                                          // sourceLevelDebuggerSupported
     false,                                         // supportsVme
     true,                                          // supportCacheFlushAfterWalker
@@ -83,7 +84,9 @@ const RuntimeCapabilityTable DG1::capabilityTable{
     false,                                         // supportsIndependentForwardProgress
     false,                                         // hostPtrTrackingEnabled
     true,                                          // levelZeroSupported
-    false                                          // isIntegratedDevice
+    false,                                         // isIntegratedDevice
+    true,                                          // supportsMediaBlock
+    true                                           // fusedEuEnabled
 };
 
 WorkaroundTable DG1::workaroundTable = {};
@@ -163,10 +166,10 @@ void DG1_CONFIG::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableA
 };
 
 const HardwareInfo DG1::hwInfo = DG1_CONFIG::hwInfo;
-const uint64_t DG1::defaultHardwareInfoConfig = 0x100060016;
+const uint64_t DG1::defaultHardwareInfoConfig = 0x100060010;
 
 void setupDG1HardwareInfoImpl(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable, uint64_t hwInfoConfig) {
-    if (hwInfoConfig == 0x100060016) {
+    if (hwInfoConfig == 0x100060010) {
         DG1_CONFIG::setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable);
     } else if (hwInfoConfig == 0x0) {
         // Default config

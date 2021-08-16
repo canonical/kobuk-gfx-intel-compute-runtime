@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,8 +14,8 @@ using namespace NEO;
 
 class MockBuiltinDispatchInfoBuilder : public BuiltinDispatchInfoBuilder {
   public:
-    MockBuiltinDispatchInfoBuilder(BuiltIns &kernelLib, BuiltinDispatchInfoBuilder *origBuilder)
-        : BuiltinDispatchInfoBuilder(kernelLib), originalBuilder(origBuilder) {
+    MockBuiltinDispatchInfoBuilder(BuiltIns &kernelLib, ClDevice &clDevice, BuiltinDispatchInfoBuilder *origBuilder)
+        : BuiltinDispatchInfoBuilder(kernelLib, clDevice), originalBuilder(origBuilder) {
     }
 
     virtual void validateInput(const BuiltinOpParams &conf) const {};

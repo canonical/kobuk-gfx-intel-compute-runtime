@@ -1,16 +1,23 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include <cstddef>
 #include <cstdint>
 
 namespace NEO {
 class GraphicsAllocation;
 struct KernelDescriptor;
+
+enum class SlmPolicy {
+    SlmPolicyNone,
+    SlmPolicyLargeSlm,
+    SlmPolicyLargeData
+};
 
 struct DispatchKernelEncoderI {
     virtual ~DispatchKernelEncoderI() = default;
@@ -18,6 +25,7 @@ struct DispatchKernelEncoderI {
     virtual const KernelDescriptor &getKernelDescriptor() const = 0;
     virtual const uint32_t *getGroupSize() const = 0;
     virtual uint32_t getSlmTotalSize() const = 0;
+    virtual SlmPolicy getSlmPolicy() const = 0;
 
     virtual const uint8_t *getCrossThreadData() const = 0;
     virtual uint32_t getCrossThreadDataSize() const = 0;

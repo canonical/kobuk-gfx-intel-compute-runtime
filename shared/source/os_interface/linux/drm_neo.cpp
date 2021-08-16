@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -15,12 +15,19 @@
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/ptr_math.h"
+#include "shared/source/os_interface/driver_info.h"
+#include "shared/source/os_interface/linux/drm_gem_close_worker.h"
+#include "shared/source/os_interface/linux/drm_memory_manager.h"
 #include "shared/source/os_interface/linux/hw_device_id.h"
 #include "shared/source/os_interface/linux/os_inc.h"
+#include "shared/source/os_interface/linux/pci_path.h"
 #include "shared/source/os_interface/linux/sys_calls.h"
+#include "shared/source/os_interface/linux/system_info.h"
 #include "shared/source/os_interface/os_environment.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/utilities/directory.h"
+
+#include "drm_query_flags.h"
 
 #include <cstdio>
 #include <cstring>
@@ -29,7 +36,7 @@
 namespace NEO {
 
 namespace IoctlHelper {
-constexpr const char *getIoctlParamString(int param) {
+std::string getIoctlParamString(int param) {
     switch (param) {
     case I915_PARAM_CHIPSET_ID:
         return "I915_PARAM_CHIPSET_ID";
@@ -47,25 +54,188 @@ constexpr const char *getIoctlParamString(int param) {
         return "I915_PARAM_SUBSLICE_TOTAL";
     case I915_PARAM_MIN_EU_IN_POOL:
         return "I915_PARAM_MIN_EU_IN_POOL";
+    case I915_PARAM_CS_TIMESTAMP_FREQUENCY:
+        return "I915_PARAM_CS_TIMESTAMP_FREQUENCY";
     default:
-        break;
+        return getIoctlParamStringRemaining(param);
     }
+}
 
-    return "UNKNOWN";
+std::string getIoctlString(unsigned long request) {
+    switch (request) {
+    case DRM_IOCTL_I915_GEM_EXECBUFFER2:
+        return "DRM_IOCTL_I915_GEM_EXECBUFFER2";
+    case DRM_IOCTL_I915_GEM_WAIT:
+        return "DRM_IOCTL_I915_GEM_WAIT";
+    case DRM_IOCTL_GEM_CLOSE:
+        return "DRM_IOCTL_GEM_CLOSE";
+    case DRM_IOCTL_I915_GEM_USERPTR:
+        return "DRM_IOCTL_I915_GEM_USERPTR";
+    case DRM_IOCTL_I915_INIT:
+        return "DRM_IOCTL_I915_INIT";
+    case DRM_IOCTL_I915_FLUSH:
+        return "DRM_IOCTL_I915_FLUSH";
+    case DRM_IOCTL_I915_FLIP:
+        return "DRM_IOCTL_I915_FLIP";
+    case DRM_IOCTL_I915_BATCHBUFFER:
+        return "DRM_IOCTL_I915_BATCHBUFFER";
+    case DRM_IOCTL_I915_IRQ_EMIT:
+        return "DRM_IOCTL_I915_IRQ_EMIT";
+    case DRM_IOCTL_I915_IRQ_WAIT:
+        return "DRM_IOCTL_I915_IRQ_WAIT";
+    case DRM_IOCTL_I915_GETPARAM:
+        return "DRM_IOCTL_I915_GETPARAM";
+    case DRM_IOCTL_I915_SETPARAM:
+        return "DRM_IOCTL_I915_SETPARAM";
+    case DRM_IOCTL_I915_ALLOC:
+        return "DRM_IOCTL_I915_ALLOC";
+    case DRM_IOCTL_I915_FREE:
+        return "DRM_IOCTL_I915_FREE";
+    case DRM_IOCTL_I915_INIT_HEAP:
+        return "DRM_IOCTL_I915_INIT_HEAP";
+    case DRM_IOCTL_I915_CMDBUFFER:
+        return "DRM_IOCTL_I915_CMDBUFFER";
+    case DRM_IOCTL_I915_DESTROY_HEAP:
+        return "DRM_IOCTL_I915_DESTROY_HEAP";
+    case DRM_IOCTL_I915_SET_VBLANK_PIPE:
+        return "DRM_IOCTL_I915_SET_VBLANK_PIPE";
+    case DRM_IOCTL_I915_GET_VBLANK_PIPE:
+        return "DRM_IOCTL_I915_GET_VBLANK_PIPE";
+    case DRM_IOCTL_I915_VBLANK_SWAP:
+        return "DRM_IOCTL_I915_VBLANK_SWAP";
+    case DRM_IOCTL_I915_HWS_ADDR:
+        return "DRM_IOCTL_I915_HWS_ADDR";
+    case DRM_IOCTL_I915_GEM_INIT:
+        return "DRM_IOCTL_I915_GEM_INIT";
+    case DRM_IOCTL_I915_GEM_EXECBUFFER:
+        return "DRM_IOCTL_I915_GEM_EXECBUFFER";
+    case DRM_IOCTL_I915_GEM_EXECBUFFER2_WR:
+        return "DRM_IOCTL_I915_GEM_EXECBUFFER2_WR";
+    case DRM_IOCTL_I915_GEM_PIN:
+        return "DRM_IOCTL_I915_GEM_PIN";
+    case DRM_IOCTL_I915_GEM_UNPIN:
+        return "DRM_IOCTL_I915_GEM_UNPIN";
+    case DRM_IOCTL_I915_GEM_BUSY:
+        return "DRM_IOCTL_I915_GEM_BUSY";
+    case DRM_IOCTL_I915_GEM_SET_CACHING:
+        return "DRM_IOCTL_I915_GEM_SET_CACHING";
+    case DRM_IOCTL_I915_GEM_GET_CACHING:
+        return "DRM_IOCTL_I915_GEM_GET_CACHING";
+    case DRM_IOCTL_I915_GEM_THROTTLE:
+        return "DRM_IOCTL_I915_GEM_THROTTLE";
+    case DRM_IOCTL_I915_GEM_ENTERVT:
+        return "DRM_IOCTL_I915_GEM_ENTERVT";
+    case DRM_IOCTL_I915_GEM_LEAVEVT:
+        return "DRM_IOCTL_I915_GEM_LEAVEVT";
+    case DRM_IOCTL_I915_GEM_CREATE:
+        return "DRM_IOCTL_I915_GEM_CREATE";
+    case DRM_IOCTL_I915_GEM_PREAD:
+        return "DRM_IOCTL_I915_GEM_PREAD";
+    case DRM_IOCTL_I915_GEM_PWRITE:
+        return "DRM_IOCTL_I915_GEM_PWRITE";
+    case DRM_IOCTL_I915_GEM_SET_DOMAIN:
+        return "DRM_IOCTL_I915_GEM_SET_DOMAIN";
+    case DRM_IOCTL_I915_GEM_SW_FINISH:
+        return "DRM_IOCTL_I915_GEM_SW_FINISH";
+    case DRM_IOCTL_I915_GEM_SET_TILING:
+        return "DRM_IOCTL_I915_GEM_SET_TILING";
+    case DRM_IOCTL_I915_GEM_GET_TILING:
+        return "DRM_IOCTL_I915_GEM_GET_TILING";
+    case DRM_IOCTL_I915_GEM_GET_APERTURE:
+        return "DRM_IOCTL_I915_GEM_GET_APERTURE";
+    case DRM_IOCTL_I915_GET_PIPE_FROM_CRTC_ID:
+        return "DRM_IOCTL_I915_GET_PIPE_FROM_CRTC_ID";
+    case DRM_IOCTL_I915_GEM_MADVISE:
+        return "DRM_IOCTL_I915_GEM_MADVISE";
+    case DRM_IOCTL_I915_OVERLAY_PUT_IMAGE:
+        return "DRM_IOCTL_I915_OVERLAY_PUT_IMAGE";
+    case DRM_IOCTL_I915_OVERLAY_ATTRS:
+        return "DRM_IOCTL_I915_OVERLAY_ATTRS";
+    case DRM_IOCTL_I915_SET_SPRITE_COLORKEY:
+        return "DRM_IOCTL_I915_SET_SPRITE_COLORKEY";
+    case DRM_IOCTL_I915_GET_SPRITE_COLORKEY:
+        return "DRM_IOCTL_I915_GET_SPRITE_COLORKEY";
+    case DRM_IOCTL_I915_GEM_CONTEXT_CREATE:
+        return "DRM_IOCTL_I915_GEM_CONTEXT_CREATE";
+    case DRM_IOCTL_I915_GEM_CONTEXT_CREATE_EXT:
+        return "DRM_IOCTL_I915_GEM_CONTEXT_CREATE_EXT";
+    case DRM_IOCTL_I915_GEM_CONTEXT_DESTROY:
+        return "DRM_IOCTL_I915_GEM_CONTEXT_DESTROY";
+    case DRM_IOCTL_I915_REG_READ:
+        return "DRM_IOCTL_I915_REG_READ";
+    case DRM_IOCTL_I915_GET_RESET_STATS:
+        return "DRM_IOCTL_I915_GET_RESET_STATS";
+    case DRM_IOCTL_I915_GEM_CONTEXT_GETPARAM:
+        return "DRM_IOCTL_I915_GEM_CONTEXT_GETPARAM";
+    case DRM_IOCTL_I915_GEM_CONTEXT_SETPARAM:
+        return "DRM_IOCTL_I915_GEM_CONTEXT_SETPARAM";
+    case DRM_IOCTL_I915_PERF_OPEN:
+        return "DRM_IOCTL_I915_PERF_OPEN";
+    case DRM_IOCTL_I915_PERF_ADD_CONFIG:
+        return "DRM_IOCTL_I915_PERF_ADD_CONFIG";
+    case DRM_IOCTL_I915_PERF_REMOVE_CONFIG:
+        return "DRM_IOCTL_I915_PERF_REMOVE_CONFIG";
+    case DRM_IOCTL_I915_QUERY:
+        return "DRM_IOCTL_I915_QUERY";
+    case DRM_IOCTL_I915_GEM_MMAP:
+        return "DRM_IOCTL_I915_GEM_MMAP";
+    default:
+        return getIoctlStringRemaining(request);
+    }
 }
 
 } // namespace IoctlHelper
 
-Drm::Drm(std::unique_ptr<HwDeviceId> hwDeviceIdIn, RootDeviceEnvironment &rootDeviceEnvironment) : hwDeviceId(std::move(hwDeviceIdIn)), rootDeviceEnvironment(rootDeviceEnvironment) {
-    requirePerContextVM = rootDeviceEnvironment.executionEnvironment.isPerContextMemorySpaceRequired();
+Drm::Drm(std::unique_ptr<HwDeviceIdDrm> hwDeviceIdIn, RootDeviceEnvironment &rootDeviceEnvironment)
+    : DriverModel(DriverModelType::DRM),
+      hwDeviceId(std::move(hwDeviceIdIn)), rootDeviceEnvironment(rootDeviceEnvironment) {
+    pagingFence.fill(0u);
+    fenceVal.fill(0u);
 }
 
 int Drm::ioctl(unsigned long request, void *arg) {
     int ret;
+    int returnedErrno;
     SYSTEM_ENTER();
     do {
+        auto measureTime = DebugManager.flags.PrintIoctlTimes.get();
+        std::chrono::steady_clock::time_point start;
+        std::chrono::steady_clock::time_point end;
+
+        if (measureTime) {
+            start = std::chrono::steady_clock::now();
+        }
+
+        auto printIoctl = DebugManager.flags.PrintIoctlEntries.get();
+
+        if (printIoctl) {
+            printf("IOCTL %s called\n", IoctlHelper::getIoctlString(request).c_str());
+        }
+
         ret = SysCalls::ioctl(getFileDescriptor(), request, arg);
-    } while (ret == -1 && (errno == EINTR || errno == EAGAIN || errno == EBUSY));
+
+        returnedErrno = errno;
+
+        if (printIoctl) {
+            printf("IOCTL %s returns %d, errno %d(%s)\n", IoctlHelper::getIoctlString(request).c_str(), ret, returnedErrno, strerror(returnedErrno));
+        }
+
+        if (measureTime) {
+            end = std::chrono::steady_clock::now();
+            auto elapsedTime = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+            std::pair<long long, uint64_t> ioctlData{};
+            auto ioctlDataIt = this->ioctlStatistics.find(request);
+            if (ioctlDataIt != this->ioctlStatistics.end()) {
+                ioctlData = ioctlDataIt->second;
+            }
+
+            ioctlData.first += elapsedTime;
+            ioctlData.second++;
+
+            this->ioctlStatistics[request] = ioctlData;
+        }
+    } while (ret == -1 && (returnedErrno == EINTR || returnedErrno == EAGAIN || returnedErrno == EBUSY));
     SYSTEM_LEAVE(request);
     return ret;
 }
@@ -76,11 +246,12 @@ int Drm::getParamIoctl(int param, int *dstValue) {
     getParam.value = dstValue;
 
     int retVal = ioctl(DRM_IOCTL_I915_GETPARAM, &getParam);
-
-    PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stdout,
-                       "\nDRM_IOCTL_I915_GETPARAM: param: %s, output value: %d, retCode: %d\n",
-                       IoctlHelper::getIoctlParamString(param), *getParam.value, retVal);
-
+    if (DebugManager.flags.PrintIoctlEntries.get()) {
+        printf("DRM_IOCTL_I915_GETPARAM: param: %s, output value: %d, retCode:% d\n",
+               IoctlHelper::getIoctlParamString(param).c_str(),
+               *getParam.value,
+               retVal);
+    }
     return retVal;
 }
 
@@ -203,9 +374,12 @@ void Drm::setNonPersistentContext(uint32_t drmContextId) {
     ioctl(DRM_IOCTL_I915_GEM_CONTEXT_SETPARAM, &contextParam);
 }
 
-uint32_t Drm::createDrmContext(uint32_t drmVmId) {
-    drm_i915_gem_context_create gcc = {};
-    auto retVal = ioctl(DRM_IOCTL_I915_GEM_CONTEXT_CREATE, &gcc);
+uint32_t Drm::createDrmContext(uint32_t drmVmId, bool isSpecialContextRequested) {
+    drm_i915_gem_context_create_ext gcc = {};
+
+    this->appendDrmContextFlags(gcc, isSpecialContextRequested);
+
+    auto retVal = ioctl(DRM_IOCTL_I915_GEM_CONTEXT_CREATE_EXT, &gcc);
     UNRECOVERABLE_IF(retVal != 0);
 
     if (drmVmId > 0) {
@@ -225,15 +399,6 @@ void Drm::destroyDrmContext(uint32_t drmContextId) {
     destroy.ctx_id = drmContextId;
     auto retVal = ioctl(DRM_IOCTL_I915_GEM_CONTEXT_DESTROY, &destroy);
     UNRECOVERABLE_IF(retVal != 0);
-}
-
-int Drm::createDrmVirtualMemory(uint32_t &drmVmId) {
-    drm_i915_gem_vm_control ctl = {};
-    auto ret = SysCalls::ioctl(getFileDescriptor(), DRM_IOCTL_I915_GEM_VM_CREATE, &ctl);
-    if (ret == 0) {
-        drmVmId = ctl.vm_id;
-    }
-    return ret;
 }
 
 void Drm::destroyDrmVirtualMemory(uint32_t drmVmId) {
@@ -274,48 +439,58 @@ int Drm::getErrno() {
 int Drm::setupHardwareInfo(DeviceDescriptor *device, bool setupFeatureTableAndWorkaroundTable) {
     HardwareInfo *hwInfo = const_cast<HardwareInfo *>(device->pHwInfo);
     int ret;
-    int sliceTotal;
-    int subSliceTotal;
-    int euTotal;
 
-    bool status = queryTopology(sliceTotal, subSliceTotal, euTotal);
+    Drm::QueryTopologyData topologyData = {};
+
+    bool status = queryTopology(*hwInfo, topologyData);
 
     if (!status) {
         PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "WARNING: Topology query failed!\n");
 
-        sliceTotal = hwInfo->gtSystemInfo.SliceCount;
-
-        ret = getEuTotal(euTotal);
+        ret = getEuTotal(topologyData.euCount);
         if (ret != 0) {
             PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "FATAL: Cannot query EU total parameter!\n");
             return ret;
         }
 
-        ret = getSubsliceTotal(subSliceTotal);
+        ret = getSubsliceTotal(topologyData.subSliceCount);
         if (ret != 0) {
             PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s", "FATAL: Cannot query subslice total parameter!\n");
             return ret;
         }
     }
 
-    hwInfo->gtSystemInfo.SliceCount = static_cast<uint32_t>(sliceTotal);
-    hwInfo->gtSystemInfo.SubSliceCount = static_cast<uint32_t>(subSliceTotal);
-    hwInfo->gtSystemInfo.EUCount = static_cast<uint32_t>(euTotal);
+    hwInfo->gtSystemInfo.SliceCount = static_cast<uint32_t>(topologyData.sliceCount);
+    hwInfo->gtSystemInfo.SubSliceCount = static_cast<uint32_t>(topologyData.subSliceCount);
+    hwInfo->gtSystemInfo.DualSubSliceCount = static_cast<uint32_t>(topologyData.subSliceCount);
+    hwInfo->gtSystemInfo.EUCount = static_cast<uint32_t>(topologyData.euCount);
+
+    status = querySystemInfo();
+    if (status) {
+        setupSystemInfo(hwInfo, systemInfo.get());
+    }
     device->setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable);
+
+    if (systemInfo) {
+        systemInfo->checkSysInfoMismatch(hwInfo);
+    }
+
+    setupCacheInfo(*hwInfo);
+
     return 0;
 }
 
 void appendHwDeviceId(std::vector<std::unique_ptr<HwDeviceId>> &hwDeviceIds, int fileDescriptor, const char *pciPath) {
     if (fileDescriptor >= 0) {
         if (Drm::isi915Version(fileDescriptor)) {
-            hwDeviceIds.push_back(std::make_unique<HwDeviceId>(fileDescriptor, pciPath));
+            hwDeviceIds.push_back(std::make_unique<HwDeviceIdDrm>(fileDescriptor, pciPath));
         } else {
             SysCalls::close(fileDescriptor);
         }
     }
 }
 
-std::vector<std::unique_ptr<HwDeviceId>> OSInterface::discoverDevices(ExecutionEnvironment &executionEnvironment) {
+std::vector<std::unique_ptr<HwDeviceId>> Drm::discoverDevices(ExecutionEnvironment &executionEnvironment) {
     std::vector<std::unique_ptr<HwDeviceId>> hwDeviceIds;
     executionEnvironment.osEnvironment = std::make_unique<OsEnvironment>();
     std::string devicePrefix = std::string(Os::pciDevicesDirectory) + "/pci-0000:";
@@ -335,7 +510,10 @@ std::vector<std::unique_ptr<HwDeviceId>> OSInterface::discoverDevices(ExecutionE
         for (unsigned int i = 0; i < maxDrmDevices; i++) {
             std::string path = std::string(pathPrefix) + std::to_string(i + startNum);
             int fileDescriptor = SysCalls::open(path.c_str(), O_RDWR);
-            appendHwDeviceId(hwDeviceIds, fileDescriptor, "00:02.0");
+
+            auto pciPath = NEO::getPciPath(fileDescriptor);
+
+            appendHwDeviceId(hwDeviceIds, fileDescriptor, pciPath.value_or("00:02.0").c_str());
             if (!hwDeviceIds.empty() && hwDeviceIds.size() == numRootDevices) {
                 break;
             }
@@ -383,11 +561,12 @@ bool Drm::isi915Version(int fileDescriptor) {
     return strcmp(name, "i915") == 0;
 }
 
-std::unique_ptr<uint8_t[]> Drm::query(uint32_t queryId, int32_t &length) {
+std::unique_ptr<uint8_t[]> Drm::query(uint32_t queryId, uint32_t queryItemFlags, int32_t &length) {
     drm_i915_query query{};
     drm_i915_query_item queryItem{};
     queryItem.query_id = queryId;
     queryItem.length = 0; // query length first
+    queryItem.flags = queryItemFlags;
     query.items_ptr = reinterpret_cast<__u64>(&queryItem);
     query.num_items = 1;
     length = 0;
@@ -410,47 +589,22 @@ std::unique_ptr<uint8_t[]> Drm::query(uint32_t queryId, int32_t &length) {
     return data;
 }
 
-bool Drm::queryTopology(int &sliceCount, int &subSliceCount, int &euCount) {
-    int32_t length;
-    auto dataQuery = this->query(DRM_I915_QUERY_TOPOLOGY_INFO, length);
-    auto data = reinterpret_cast<drm_i915_query_topology_info *>(dataQuery.get());
-
-    if (!data) {
-        return false;
+void Drm::printIoctlStatistics() {
+    if (!DebugManager.flags.PrintIoctlTimes.get()) {
+        return;
     }
 
-    sliceCount = 0;
-    subSliceCount = 0;
-    euCount = 0;
-
-    for (int x = 0; x < data->max_slices; x++) {
-        bool isSliceEnable = (data->data[x / 8] >> (x % 8)) & 1;
-        if (!isSliceEnable) {
-            continue;
-        }
-        sliceCount++;
-        for (int y = 0; y < data->max_subslices; y++) {
-            bool isSubSliceEnabled = (data->data[data->subslice_offset + x * data->subslice_stride + y / 8] >> (y % 8)) & 1;
-            if (!isSubSliceEnabled) {
-                continue;
-            }
-            subSliceCount++;
-            for (int z = 0; z < data->max_eus_per_subslice; z++) {
-                bool isEUEnabled = (data->data[data->eu_offset + (x * data->max_subslices + y) * data->eu_stride + z / 8] >> (z % 8)) & 1;
-                if (!isEUEnabled) {
-                    continue;
-                }
-                euCount++;
-            }
-        }
+    printf("\n--- Ioctls statistics ---\n");
+    printf("%40s %15s %10s %20s", "Request", "Total time(ns)", "Count", "Avg time per ioctl\n");
+    for (const auto &ioctlData : this->ioctlStatistics) {
+        printf("%40s %15llu %10lu %20f\n", IoctlHelper::getIoctlString(ioctlData.first).c_str(), ioctlData.second.first, static_cast<unsigned long>(ioctlData.second.second), ioctlData.second.first / static_cast<double>(ioctlData.second.second));
     }
-
-    return (sliceCount && subSliceCount && euCount);
+    printf("\n");
 }
 
 bool Drm::createVirtualMemoryAddressSpace(uint32_t vmCount) {
     for (auto i = 0u; i < vmCount; i++) {
-        uint32_t id = 0;
+        uint32_t id = i;
         if (0 != createDrmVirtualMemory(id)) {
             return false;
         }
@@ -473,23 +627,129 @@ uint32_t Drm::getVirtualMemoryAddressSpace(uint32_t vmId) {
     return 0;
 }
 
-std::string Drm::generateUUID() {
-    const char uuidString[] = "00000000-0000-0000-%04" SCNx64 "-%012" SCNx64;
-    char buffer[36 + 1] = "00000000-0000-0000-0000-000000000000";
-    uuid++;
+bool Drm::translateTopologyInfo(const drm_i915_query_topology_info *queryTopologyInfo, QueryTopologyData &data, TopologyMapping &mapping) {
+    int sliceCount = 0;
+    int subSliceCount = 0;
+    int euCount = 0;
+    int maxSliceCount = 0;
+    int maxSubSliceCountPerSlice = 0;
+    std::vector<int> sliceIndices;
+    sliceIndices.reserve(maxSliceCount);
 
-    UNRECOVERABLE_IF(uuid == 0xFFFFFFFFFFFFFFFF);
+    for (int x = 0; x < queryTopologyInfo->max_slices; x++) {
+        bool isSliceEnable = (queryTopologyInfo->data[x / 8] >> (x % 8)) & 1;
+        if (!isSliceEnable) {
+            continue;
+        }
+        sliceIndices.push_back(x);
+        sliceCount++;
 
-    uint64_t parts[2] = {0, 0};
-    parts[0] = uuid & 0xFFFFFFFFFFFF;
-    parts[1] = (uuid & 0xFFFF000000000000) >> 48;
-    snprintf(buffer, sizeof(buffer), uuidString, parts[1], parts[0]);
+        std::vector<int> subSliceIndices;
+        subSliceIndices.reserve(queryTopologyInfo->max_subslices);
 
-    return std::string(buffer, 36);
+        for (int y = 0; y < queryTopologyInfo->max_subslices; y++) {
+            size_t yOffset = (queryTopologyInfo->subslice_offset + x * queryTopologyInfo->subslice_stride + y / 8);
+            bool isSubSliceEnabled = (queryTopologyInfo->data[yOffset] >> (y % 8)) & 1;
+            if (!isSubSliceEnabled) {
+                continue;
+            }
+            subSliceCount++;
+            subSliceIndices.push_back(y);
+
+            for (int z = 0; z < queryTopologyInfo->max_eus_per_subslice; z++) {
+                size_t zOffset = (queryTopologyInfo->eu_offset + (x * queryTopologyInfo->max_subslices + y) * queryTopologyInfo->eu_stride + z / 8);
+                bool isEUEnabled = (queryTopologyInfo->data[zOffset] >> (z % 8)) & 1;
+                if (!isEUEnabled) {
+                    continue;
+                }
+                euCount++;
+            }
+        }
+
+        if (subSliceIndices.size()) {
+            maxSubSliceCountPerSlice = std::max(maxSubSliceCountPerSlice, subSliceIndices[subSliceIndices.size() - 1] + 1);
+        }
+    }
+
+    if (sliceIndices.size()) {
+        maxSliceCount = sliceIndices[sliceIndices.size() - 1] + 1;
+        mapping.sliceIndices = std::move(sliceIndices);
+    }
+
+    data.sliceCount = sliceCount;
+    data.subSliceCount = subSliceCount;
+    data.euCount = euCount;
+    data.maxSliceCount = maxSliceCount;
+    data.maxSubSliceCount = maxSubSliceCountPerSlice;
+
+    return (data.sliceCount && data.subSliceCount && data.euCount);
+}
+
+PhysicalDevicePciBusInfo Drm::getPciBusInfo() const {
+    PhysicalDevicePciBusInfo pciBusInfo(PhysicalDevicePciBusInfo::InvalidValue, PhysicalDevicePciBusInfo::InvalidValue, PhysicalDevicePciBusInfo::InvalidValue, PhysicalDevicePciBusInfo::InvalidValue);
+
+    if (adapterBDF.Data != std::numeric_limits<uint32_t>::max()) {
+        pciBusInfo.pciDomain = 0;
+        pciBusInfo.pciBus = adapterBDF.Bus;
+        pciBusInfo.pciDevice = adapterBDF.Device;
+        pciBusInfo.pciFunction = adapterBDF.Function;
+    }
+    return pciBusInfo;
 }
 
 Drm::~Drm() {
     destroyVirtualMemoryAddressSpace();
+    this->printIoctlStatistics();
+}
+
+int Drm::queryAdapterBDF() {
+    constexpr int pciBusInfoTokensNum = 3;
+    uint32_t bus, device, function;
+
+    if (std::sscanf(hwDeviceId->getPciPath(), "%02x:%02x.%01x", &bus, &device, &function) != pciBusInfoTokensNum) {
+        adapterBDF.Data = std::numeric_limits<uint32_t>::max();
+        return 1;
+    }
+    adapterBDF.Bus = bus;
+    adapterBDF.Function = function;
+    adapterBDF.Device = device;
+    return 0;
+}
+
+void Drm::setGmmInputArgs(void *args) {
+    auto gmmInArgs = reinterpret_cast<GMM_INIT_IN_ARGS *>(args);
+    auto adapterBDF = this->getAdapterBDF();
+#if defined(__linux__)
+    gmmInArgs->FileDescriptor = adapterBDF.Data;
+#endif
+    gmmInArgs->ClientType = GMM_CLIENT::GMM_OCL_VISTA;
+}
+
+const std::vector<int> &Drm::getSliceMappings(uint32_t deviceIndex) {
+    return topologyMap[deviceIndex].sliceIndices;
+}
+
+const TopologyMap &Drm::getTopologyMap() {
+    return topologyMap;
+}
+
+int Drm::waitHandle(uint32_t waitHandle, int64_t timeout) {
+    drm_i915_gem_wait wait = {};
+    wait.bo_handle = waitHandle;
+    wait.timeout_ns = timeout;
+
+    int ret = ioctl(DRM_IOCTL_I915_GEM_WAIT, &wait);
+    if (ret != 0) {
+        int err = errno;
+        PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "ioctl(I915_GEM_WAIT) failed with %d. errno=%d(%s)\n", ret, err, strerror(err));
+    }
+
+    return ret;
+}
+
+int Drm::getTimestampFrequency(int &frequency) {
+    frequency = 0;
+    return getParamIoctl(I915_PARAM_CS_TIMESTAMP_FREQUENCY, &frequency);
 }
 
 } // namespace NEO

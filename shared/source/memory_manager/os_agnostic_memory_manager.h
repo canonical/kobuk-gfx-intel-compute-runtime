@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,8 +17,6 @@ class MemoryAllocation : public GraphicsAllocation {
     const unsigned long long id;
     size_t sizeToFree = 0;
     const bool uncacheable;
-
-    void setSharedHandle(osHandle handle) { sharingInfo.sharedHandle = handle; }
 
     MemoryAllocation(uint32_t rootDeviceIndex, AllocationType allocationType, void *cpuPtrIn, uint64_t gpuAddress, uint64_t baseAddress, size_t sizeIn,
                      MemoryPool::Type pool, size_t maxOsContextCount)
@@ -52,6 +50,14 @@ class MemoryAllocation : public GraphicsAllocation {
     }
 
     void overrideMemoryPool(MemoryPool::Type pool);
+
+    void clearUsageInfo() {
+        for (auto &info : usageInfos) {
+            info.inspectionId = 0u;
+            info.residencyTaskCount = objectNotResident;
+            info.taskCount = objectNotUsed;
+        }
+    }
 };
 
 class OsAgnosticMemoryManager : public MemoryManager {
@@ -63,7 +69,7 @@ class OsAgnosticMemoryManager : public MemoryManager {
     OsAgnosticMemoryManager(bool aubUsage, ExecutionEnvironment &executionEnvironment);
     void initialize(bool aubUsage);
     ~OsAgnosticMemoryManager() override;
-    GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness) override;
+    GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override;
     GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex) override { return nullptr; }
 
     void addAllocationToHostPtrManager(GraphicsAllocation *gfxAllocation) override;
@@ -83,6 +89,7 @@ class OsAgnosticMemoryManager : public MemoryManager {
 
     AddressRange reserveGpuAddress(size_t size, uint32_t rootDeviceIndex) override;
     void freeGpuAddress(AddressRange addressRange, uint32_t rootDeviceIndex) override;
+    bool is64kbPagesEnabled(const HardwareInfo *hwInfo);
 
   protected:
     GraphicsAllocation *createGraphicsAllocation(OsHandleStorage &handleStorage, const AllocationData &allocationData) override;

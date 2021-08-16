@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,7 +7,7 @@
 
 #include "shared/source/built_ins/built_ins.h"
 #include "shared/source/command_container/command_encoder.h"
-#include "shared/test/unit_test/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_graphics_allocation.h"
 
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/kernel/kernel.h"
@@ -45,7 +45,7 @@ struct HardwareCommandsTest : ClDeviceFixture,
 
     template <typename GfxFamily>
     size_t pushBindingTableAndSurfaceStates(IndirectHeap &dstHeap, const Kernel &srcKernel) {
-        return EncodeSurfaceState<GfxFamily>::pushBindingTableAndSurfaceStates(dstHeap, (srcKernel.getKernelInfo().patchInfo.bindingTableState != nullptr) ? srcKernel.getKernelInfo().patchInfo.bindingTableState->Count : 0,
+        return EncodeSurfaceState<GfxFamily>::pushBindingTableAndSurfaceStates(dstHeap, srcKernel.getKernelInfo().kernelDescriptor.payloadMappings.bindingTable.numEntries,
                                                                                srcKernel.getSurfaceStateHeap(), srcKernel.getSurfaceStateHeapSize(),
                                                                                srcKernel.getNumberOfBindingTableStates(), srcKernel.getBindingTableOffset());
     }

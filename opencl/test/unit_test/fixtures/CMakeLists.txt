@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2020 Intel Corporation
+# Copyright (C) 2018-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -30,22 +30,20 @@ set(IGDRCL_SRCS_tests_fixtures
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_arg_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_data_fixture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_data_fixture.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernel_work_group_info_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/media_kernel_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_allocator_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_allocator_multi_device_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_manager_fixture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_manager_fixture.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/mock_aub_center_fixture.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/mock_execution_environment_gmm_fixture.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mock_execution_environment_gmm_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/multi_root_device_fixture.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/one_mip_level_image_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/platform_fixture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/platform_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/run_kernel_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/scenario_test_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/simple_arg_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/simple_arg_kernel_fixture.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/templated_fixture_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/two_walker_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ult_command_stream_receiver_fixture.h
 )

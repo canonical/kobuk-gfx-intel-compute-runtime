@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,9 +17,8 @@ HeapAssigner::HeapAssigner() {
     apiAllowExternalHeapForSshAndDsh = ApiSpecificConfig::getHeapConfiguration();
 }
 bool HeapAssigner::useInternal32BitHeap(GraphicsAllocation::AllocationType allocType) {
-    return allocType == GraphicsAllocation::AllocationType::KERNEL_ISA ||
-           allocType == GraphicsAllocation::AllocationType::INTERNAL_HEAP ||
-           allocType == GraphicsAllocation::AllocationType::DEBUG_MODULE_AREA;
+    return GraphicsAllocation::isIsaAllocationType(allocType) ||
+           allocType == GraphicsAllocation::AllocationType::INTERNAL_HEAP;
 }
 bool HeapAssigner::use32BitHeap(GraphicsAllocation::AllocationType allocType) {
     return useExternal32BitHeap(allocType) || useInternal32BitHeap(allocType);
@@ -37,7 +36,7 @@ bool HeapAssigner::useExternal32BitHeap(GraphicsAllocation::AllocationType alloc
     return false;
 }
 
-bool HeapAssigner::heapTypeWithFrontWindowPool(HeapIndex heap) {
+bool HeapAssigner::heapTypeExternalWithFrontWindowPool(HeapIndex heap) {
     return heap == HeapIndex::HEAP_EXTERNAL_DEVICE_MEMORY || heap == HeapIndex::HEAP_EXTERNAL;
 }
 

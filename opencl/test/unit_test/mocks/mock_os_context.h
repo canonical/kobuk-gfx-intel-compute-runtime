@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,12 +11,13 @@
 namespace NEO {
 class MockOsContext : public OsContext {
   public:
+    using OsContext::checkDirectSubmissionSupportsEngine;
+    using OsContext::engineType;
     using OsContext::getDeviceBitfield;
 
     MockOsContext(uint32_t contextId, DeviceBitfield deviceBitfield,
-                  aub_stream::EngineType engineType, PreemptionMode preemptionMode,
-                  bool lowPriority, bool internalEngine, bool rootDevice)
-        : OsContext(contextId, deviceBitfield, engineType, preemptionMode,
-                    lowPriority, internalEngine, rootDevice) {}
+                  EngineTypeUsage typeUsage, PreemptionMode preemptionMode,
+                  bool rootDevice)
+        : OsContext(contextId, deviceBitfield, typeUsage, preemptionMode, rootDevice) {}
 };
 } // namespace NEO

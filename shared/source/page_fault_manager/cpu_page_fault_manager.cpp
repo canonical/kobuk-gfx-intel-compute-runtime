@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,7 +7,9 @@
 
 #include "shared/source/page_fault_manager/cpu_page_fault_manager.h"
 
+#include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/debug_helpers.h"
+#include "shared/source/helpers/options.h"
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 
@@ -15,7 +17,16 @@
 
 namespace NEO {
 void PageFaultManager::insertAllocation(void *ptr, size_t size, SVMAllocsManager *unifiedMemoryManager, void *cmdQ, const MemoryProperties &memoryProperties) {
-    const bool initialPlacementCpu = !memoryProperties.flags.usmInitialPlacementGpu;
+    bool initialPlacementCpu = true;
+    if (memoryProperties.allocFlags.usmInitialPlacementGpu) {
+        initialPlacementCpu = false;
+    }
+    if (memoryProperties.allocFlags.usmInitialPlacementCpu) {
+        initialPlacementCpu = true;
+    }
+    if (const int32_t debugFlag = DebugManager.flags.UsmInitialPlacement.get(); debugFlag != -1) {
+        initialPlacementCpu = debugFlag != 1;
+    }
     const auto domain = initialPlacementCpu ? AllocationDomain::Cpu : AllocationDomain::None;
 
     std::unique_lock<SpinLock> lock{mtx};
@@ -46,6 +57,9 @@ void PageFaultManager::moveAllocationToGpuDomain(void *ptr) {
         if (pageFaultData.domain != AllocationDomain::Gpu) {
             this->setAubWritable(false, ptr, pageFaultData.unifiedMemoryManager);
             if (pageFaultData.domain == AllocationDomain::Cpu) {
+                if (DebugManager.flags.PrintUmdSharedMigration.get()) {
+                    printf("UMD transferring shared allocation %llx from CPU to GPU\n", reinterpret_cast<unsigned long long int>(ptr));
+                }
                 this->transferToGpu(ptr, pageFaultData.cmdQ);
                 this->protectCPUMemoryAccess(ptr, pageFaultData.size);
             }
@@ -62,6 +76,9 @@ void PageFaultManager::moveAllocationsWithinUMAllocsManagerToGpuDomain(SVMAllocs
         if (pageFaultData.unifiedMemoryManager == unifiedMemoryManager && pageFaultData.domain != AllocationDomain::Gpu) {
             this->setAubWritable(false, allocPtr, pageFaultData.unifiedMemoryManager);
             if (pageFaultData.domain == AllocationDomain::Cpu) {
+                if (DebugManager.flags.PrintUmdSharedMigration.get()) {
+                    printf("UMD transferring shared allocation %llx from CPU to GPU\n", reinterpret_cast<unsigned long long int>(allocPtr));
+                }
                 this->transferToGpu(allocPtr, pageFaultData.cmdQ);
                 this->protectCPUMemoryAccess(allocPtr, pageFaultData.size);
             }
@@ -77,15 +94,46 @@ bool PageFaultManager::verifyPageFault(void *ptr) {
         auto &pageFaultData = alloc.second;
         if (ptr >= allocPtr && ptr < ptrOffset(allocPtr, pageFaultData.size)) {
             this->setAubWritable(true, allocPtr, pageFaultData.unifiedMemoryManager);
-            if (pageFaultData.domain == AllocationDomain::Gpu) {
-                this->transferToCpu(allocPtr, pageFaultData.size, pageFaultData.cmdQ);
-            }
-            pageFaultData.domain = AllocationDomain::Cpu;
-            this->allowCPUMemoryAccess(allocPtr, pageFaultData.size);
+            gpuDomainHandler(this, allocPtr, pageFaultData);
             return true;
         }
     }
     return false;
+}
+
+void PageFaultManager::setGpuDomainHandler(gpuDomainHandlerFunc gpuHandlerFuncPtr) {
+    this->gpuDomainHandler = gpuHandlerFuncPtr;
+}
+
+void PageFaultManager::handleGpuDomainTransferForHw(PageFaultManager *pageFaultHandler, void *allocPtr, PageFaultData &pageFaultData) {
+    if (pageFaultData.domain == AllocationDomain::Gpu) {
+        if (DebugManager.flags.PrintUmdSharedMigration.get()) {
+            printf("UMD transferring shared allocation %llx from GPU to CPU\n", reinterpret_cast<unsigned long long int>(allocPtr));
+        }
+        pageFaultHandler->transferToCpu(allocPtr, pageFaultData.size, pageFaultData.cmdQ);
+    }
+    pageFaultData.domain = AllocationDomain::Cpu;
+    pageFaultHandler->allowCPUMemoryAccess(allocPtr, pageFaultData.size);
+}
+
+void PageFaultManager::handleGpuDomainTransferForAubAndTbx(PageFaultManager *pageFaultHandler, void *allocPtr, PageFaultData &pageFaultData) {
+    pageFaultHandler->allowCPUMemoryAccess(allocPtr, pageFaultData.size);
+
+    if (pageFaultData.domain == AllocationDomain::Gpu) {
+        if (DebugManager.flags.PrintUmdSharedMigration.get()) {
+            printf("UMD transferring shared allocation %llx from GPU to CPU\n", reinterpret_cast<unsigned long long int>(allocPtr));
+        }
+        pageFaultHandler->transferToCpu(allocPtr, pageFaultData.size, pageFaultData.cmdQ);
+    }
+    pageFaultData.domain = AllocationDomain::Cpu;
+}
+
+void PageFaultManager::selectGpuDomainHandler() {
+    if (DebugManager.flags.SetCommandStreamReceiver.get() == CommandStreamReceiverType::CSR_AUB ||
+        DebugManager.flags.SetCommandStreamReceiver.get() == CommandStreamReceiverType::CSR_TBX ||
+        DebugManager.flags.SetCommandStreamReceiver.get() == CommandStreamReceiverType::CSR_TBX_WITH_AUB) {
+        this->gpuDomainHandler = &PageFaultManager::handleGpuDomainTransferForAubAndTbx;
+    }
 }
 
 void PageFaultManager::setAubWritable(bool writable, void *ptr, SVMAllocsManager *unifiedMemoryManager) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,11 +11,13 @@
 #include "shared/source/device/device.h"
 #include "shared/source/device/sub_device.h"
 #include "shared/source/execution_environment/root_device_environment.h"
+#include "shared/source/helpers/hw_helper.h"
+#include "shared/source/helpers/string.h"
 #include "shared/source/os_interface/driver_info.h"
 #include "shared/source/os_interface/os_interface.h"
-#include "shared/source/program/sync_buffer_handler.h"
 #include "shared/source/source_level_debugger/source_level_debugger.h"
 
+#include "opencl/source/helpers/cl_hw_helper.h"
 #include "opencl/source/platform/extensions.h"
 #include "opencl/source/platform/platform.h"
 
@@ -32,7 +34,6 @@ ClDevice::ClDevice(Device &device, Platform *platform) : device(device), platfor
     OpenClCFeaturesContainer emptyOpenClCFeatures;
     compilerExtensions = convertEnabledExtensionsToCompilerInternalOptions(deviceInfo.deviceExtensions, emptyOpenClCFeatures);
     compilerExtensionsWithFeatures = convertEnabledExtensionsToCompilerInternalOptions(deviceInfo.deviceExtensions, deviceInfo.openclCFeatures);
-    compilerFeatures = convertEnabledOclCFeaturesToCompilerInternalOptions(deviceInfo.openclCFeatures);
 
     auto numAvailableDevices = device.getNumAvailableDevices();
     if (numAvailableDevices > 1) {
@@ -56,7 +57,7 @@ ClDevice::ClDevice(Device &device, Platform *platform) : device(device), platfor
     }
     if (getSharedDeviceInfo().debuggerActive && getSourceLevelDebugger()) {
         auto osInterface = device.getRootDeviceEnvironment().osInterface.get();
-        getSourceLevelDebugger()->notifyNewDevice(osInterface ? osInterface->getDeviceHandle() : 0);
+        getSourceLevelDebugger()->notifyNewDevice(osInterface ? osInterface->getDriverModel()->getDeviceHandle() : 0);
     }
 }
 
@@ -66,7 +67,6 @@ ClDevice::~ClDevice() {
         getSourceLevelDebugger()->notifyDeviceDestruction();
     }
 
-    syncBufferHandler.reset();
     for (auto &subDevice : subDevices) {
         subDevice.reset();
     }
@@ -94,14 +94,6 @@ bool ClDevice::isOcl21Conformant() const {
     auto &hwInfo = device.getHardwareInfo();
     return (hwInfo.capabilityTable.supportsOcl21Features && hwInfo.capabilityTable.supportsDeviceEnqueue &&
             hwInfo.capabilityTable.supportsPipes && hwInfo.capabilityTable.supportsIndependentForwardProgress);
-}
-
-void ClDevice::allocateSyncBufferHandler() {
-    TakeOwnershipWrapper<ClDevice> lock(*this);
-    if (syncBufferHandler.get() == nullptr) {
-        syncBufferHandler = std::make_unique<SyncBufferHandler>(this->getDevice());
-        UNRECOVERABLE_IF(syncBufferHandler.get() == nullptr);
-    }
 }
 
 void ClDevice::retainApi() {
@@ -137,10 +129,10 @@ ClDevice *ClDevice::getDeviceById(uint32_t deviceId) {
 bool ClDevice::getDeviceAndHostTimer(uint64_t *deviceTimestamp, uint64_t *hostTimestamp) const { return device.getDeviceAndHostTimer(deviceTimestamp, hostTimestamp); }
 bool ClDevice::getHostTimer(uint64_t *hostTimestamp) const { return device.getHostTimer(hostTimestamp); }
 const HardwareInfo &ClDevice::getHardwareInfo() const { return device.getHardwareInfo(); }
-EngineControl &ClDevice::getEngine(aub_stream::EngineType engineType, bool lowPriority, bool internalUsage) { return device.getEngine(engineType, lowPriority, internalUsage); }
+EngineControl &ClDevice::getEngine(aub_stream::EngineType engineType, EngineUsage engineUsage) { return device.getEngine(engineType, engineUsage); }
 EngineControl &ClDevice::getDefaultEngine() { return device.getDefaultEngine(); }
 EngineControl &ClDevice::getInternalEngine() { return device.getInternalEngine(); }
-std::atomic<uint32_t> &ClDevice::getSelectorCopyEngine() { return device.getSelectorCopyEngine(); }
+SelectorCopyEngine &ClDevice::getSelectorCopyEngine() { return device.getSelectorCopyEngine(); }
 MemoryManager *ClDevice::getMemoryManager() const { return device.getMemoryManager(); }
 GmmHelper *ClDevice::getGmmHelper() const { return device.getGmmHelper(); }
 GmmClientContext *ClDevice::getGmmClientContext() const { return device.getGmmClientContext(); }
@@ -184,9 +176,6 @@ const std::string &ClDevice::peekCompilerExtensions() const {
 const std::string &ClDevice::peekCompilerExtensionsWithFeatures() const {
     return compilerExtensionsWithFeatures;
 }
-const std::string &ClDevice::peekCompilerFeatures() const {
-    return compilerFeatures;
-}
 DeviceBitfield ClDevice::getDeviceBitfield() const {
     return device.getDeviceBitfield();
 }
@@ -203,6 +192,80 @@ bool ClDevice::arePipesSupported() const {
         return DebugManager.flags.ForcePipeSupport.get();
     }
     return device.getHardwareInfo().capabilityTable.supportsPipes;
+}
+
+cl_command_queue_capabilities_intel ClDevice::getQueueFamilyCapabilitiesAll() {
+    return CL_QUEUE_CAPABILITY_CREATE_SINGLE_QUEUE_EVENTS_INTEL |
+           CL_QUEUE_CAPABILITY_CREATE_CROSS_QUEUE_EVENTS_INTEL |
+           CL_QUEUE_CAPABILITY_SINGLE_QUEUE_EVENT_WAIT_LIST_INTEL |
+           CL_QUEUE_CAPABILITY_CROSS_QUEUE_EVENT_WAIT_LIST_INTEL |
+           CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_INTEL |
+           CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_RECT_INTEL |
+           CL_QUEUE_CAPABILITY_MAP_BUFFER_INTEL |
+           CL_QUEUE_CAPABILITY_FILL_BUFFER_INTEL |
+           CL_QUEUE_CAPABILITY_TRANSFER_IMAGE_INTEL |
+           CL_QUEUE_CAPABILITY_MAP_IMAGE_INTEL |
+           CL_QUEUE_CAPABILITY_FILL_IMAGE_INTEL |
+           CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_IMAGE_INTEL |
+           CL_QUEUE_CAPABILITY_TRANSFER_IMAGE_BUFFER_INTEL |
+           CL_QUEUE_CAPABILITY_MARKER_INTEL |
+           CL_QUEUE_CAPABILITY_BARRIER_INTEL |
+           CL_QUEUE_CAPABILITY_KERNEL_INTEL;
+}
+
+cl_command_queue_capabilities_intel ClDevice::getQueueFamilyCapabilities(EngineGroupType type) {
+    auto &hwHelper = NEO::HwHelper::get(getHardwareInfo().platform.eRenderCoreFamily);
+    auto &clHwHelper = NEO::ClHwHelper::get(getHardwareInfo().platform.eRenderCoreFamily);
+
+    cl_command_queue_capabilities_intel disabledProperties = 0u;
+    if (hwHelper.isCopyOnlyEngineType(type)) {
+        disabledProperties |= static_cast<cl_command_queue_capabilities_intel>(CL_QUEUE_CAPABILITY_KERNEL_INTEL);
+        disabledProperties |= static_cast<cl_command_queue_capabilities_intel>(CL_QUEUE_CAPABILITY_FILL_BUFFER_INTEL);           // clEnqueueFillBuffer
+        disabledProperties |= static_cast<cl_command_queue_capabilities_intel>(CL_QUEUE_CAPABILITY_TRANSFER_IMAGE_INTEL);        // clEnqueueCopyImage
+        disabledProperties |= static_cast<cl_command_queue_capabilities_intel>(CL_QUEUE_CAPABILITY_FILL_IMAGE_INTEL);            // clEnqueueFillImage
+        disabledProperties |= static_cast<cl_command_queue_capabilities_intel>(CL_QUEUE_CAPABILITY_TRANSFER_BUFFER_IMAGE_INTEL); // clEnqueueCopyBufferToImage
+        disabledProperties |= static_cast<cl_command_queue_capabilities_intel>(CL_QUEUE_CAPABILITY_TRANSFER_IMAGE_BUFFER_INTEL); // clEnqueueCopyImageToBuffer
+    }
+    disabledProperties |= clHwHelper.getAdditionalDisabledQueueFamilyCapabilities(type);
+
+    if (disabledProperties != 0) {
+        return getQueueFamilyCapabilitiesAll() & ~disabledProperties;
+    }
+    return CL_QUEUE_DEFAULT_CAPABILITIES_INTEL;
+}
+
+void ClDevice::getQueueFamilyName(char *outputName, size_t maxOutputNameLength, EngineGroupType type) {
+    std::string name{};
+
+    const auto &clHwHelper = ClHwHelper::get(getHardwareInfo().platform.eRenderCoreFamily);
+    const bool hasHwSpecificName = clHwHelper.getQueueFamilyName(name, type);
+
+    if (!hasHwSpecificName) {
+        switch (type) {
+        case EngineGroupType::RenderCompute:
+            name = "rcs";
+            break;
+        case EngineGroupType::Compute:
+            name = "ccs";
+            break;
+        case EngineGroupType::Copy:
+            name = "bcs";
+            break;
+        default:
+            name = "";
+            break;
+        }
+    }
+
+    UNRECOVERABLE_IF(name.length() > maxOutputNameLength + 1);
+    strncpy_s(outputName, maxOutputNameLength, name.c_str(), name.size());
+}
+Platform *ClDevice::getPlatform() const {
+    return castToObject<Platform>(platformId);
+}
+bool ClDevice::isPciBusInfoValid() const {
+    return deviceInfo.pciBusInfo.pci_domain != PhysicalDevicePciBusInfo::InvalidValue && deviceInfo.pciBusInfo.pci_bus != PhysicalDevicePciBusInfo::InvalidValue &&
+           deviceInfo.pciBusInfo.pci_device != PhysicalDevicePciBusInfo::InvalidValue && deviceInfo.pciBusInfo.pci_function != PhysicalDevicePciBusInfo::InvalidValue;
 }
 
 } // namespace NEO

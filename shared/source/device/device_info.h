@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -26,10 +26,12 @@ struct DeviceInfo {
     size_t imageMaxArraySize;
     size_t imageMaxBufferSize;
     size_t maxNumEUsPerSubSlice;
+    size_t maxNumEUsPerDualSubSlice;
     size_t maxParameterSize;
     size_t maxWorkGroupSize;
     size_t maxWorkItemSizes[3];
     size_t outProfilingTimerResolution;
+    size_t outProfilingTimerClock;
     size_t printfBufferSize;
     uint32_t addressBits;
     uint32_t computeUnitsUsedForScratch;

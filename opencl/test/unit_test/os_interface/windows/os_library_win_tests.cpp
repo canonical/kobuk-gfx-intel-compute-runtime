@@ -1,12 +1,12 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/os_interface/windows/os_library_win.h"
-#include "shared/test/unit_test/helpers/variable_backup.h"
+#include "shared/test/common/helpers/variable_backup.h"
 
 #include "test.h"
 
@@ -101,4 +101,21 @@ TEST(OSLibraryWinTest, WhenCreatingFullSystemPathThenProperPathIsConstructed) {
 
     auto fullPath = OsLibrary::createFullSystemPath("test");
     EXPECT_STREQ("C:\\System\\test", fullPath.c_str());
+}
+
+TEST(OSLibraryWinTest, GivenInvalidLibraryWhenOpeningLibraryThenLoadLibraryErrorIsReturned) {
+    std::string errorValue;
+    auto lib = std::make_unique<Windows::OsLibrary>("abc", &errorValue);
+    EXPECT_FALSE(errorValue.empty());
+}
+
+TEST(OSLibraryWinTest, GivenNoLastErrorOnWindowsThenErrorStringisEmpty) {
+    std::string errorValue;
+
+    auto lib = std::make_unique<Windows::OsLibrary>(Os::testDllName, &errorValue);
+    EXPECT_NE(nullptr, lib);
+    EXPECT_TRUE(errorValue.empty());
+    lib.get()->getLastErrorString(&errorValue);
+    EXPECT_TRUE(errorValue.empty());
+    lib.get()->getLastErrorString(nullptr);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -23,11 +23,12 @@ TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithGreaterSizeT
     kernel.kernelInfo.heapInfo.KernelHeapSize = initialHeapSize;
 
     EXPECT_EQ(nullptr, kernel.kernelInfo.kernelAllocation);
-    kernel.kernelInfo.createKernelAllocation(*pDevice);
+    kernel.kernelInfo.createKernelAllocation(*pDevice, false);
     auto firstAllocation = kernel.kernelInfo.kernelAllocation;
     EXPECT_NE(nullptr, firstAllocation);
     auto firstAllocationSize = firstAllocation->getUnderlyingBufferSize();
-    EXPECT_EQ(initialHeapSize, firstAllocationSize);
+    size_t isaPadding = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getPaddingForISAAllocation();
+    EXPECT_EQ(firstAllocationSize, initialHeapSize + isaPadding);
 
     auto firstAllocationId = static_cast<MemoryAllocation *>(firstAllocation)->id;
 
@@ -38,8 +39,8 @@ TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithGreaterSizeT
     auto secondAllocation = kernel.kernelInfo.kernelAllocation;
     EXPECT_NE(nullptr, secondAllocation);
     auto secondAllocationSize = secondAllocation->getUnderlyingBufferSize();
-    EXPECT_NE(initialHeapSize, secondAllocationSize);
-    EXPECT_EQ(newHeapSize, secondAllocationSize);
+    EXPECT_NE(secondAllocationSize, initialHeapSize + isaPadding);
+    EXPECT_EQ(secondAllocationSize, newHeapSize + isaPadding);
     auto secondAllocationId = static_cast<MemoryAllocation *>(secondAllocation)->id;
 
     EXPECT_NE(firstAllocationId, secondAllocationId);
@@ -53,11 +54,12 @@ TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithSameSizeThen
     kernel.kernelInfo.heapInfo.KernelHeapSize = initialHeapSize;
 
     EXPECT_EQ(nullptr, kernel.kernelInfo.kernelAllocation);
-    kernel.kernelInfo.createKernelAllocation(*pDevice);
+    kernel.kernelInfo.createKernelAllocation(*pDevice, false);
     auto firstAllocation = kernel.kernelInfo.kernelAllocation;
     EXPECT_NE(nullptr, firstAllocation);
     auto firstAllocationSize = firstAllocation->getUnderlyingBufferSize();
-    EXPECT_EQ(initialHeapSize, firstAllocationSize);
+    size_t isaPadding = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getPaddingForISAAllocation();
+    EXPECT_EQ(firstAllocationSize, initialHeapSize + isaPadding);
 
     auto firstAllocationId = static_cast<MemoryAllocation *>(firstAllocation)->id;
 
@@ -68,7 +70,7 @@ TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithSameSizeThen
     auto secondAllocation = kernel.kernelInfo.kernelAllocation;
     EXPECT_NE(nullptr, secondAllocation);
     auto secondAllocationSize = secondAllocation->getUnderlyingBufferSize();
-    EXPECT_EQ(initialHeapSize, secondAllocationSize);
+    EXPECT_EQ(secondAllocationSize, initialHeapSize + isaPadding);
     auto secondAllocationId = static_cast<MemoryAllocation *>(secondAllocation)->id;
 
     EXPECT_EQ(firstAllocationId, secondAllocationId);
@@ -82,11 +84,12 @@ TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithSmallerSizeT
     kernel.kernelInfo.heapInfo.KernelHeapSize = initialHeapSize;
 
     EXPECT_EQ(nullptr, kernel.kernelInfo.kernelAllocation);
-    kernel.kernelInfo.createKernelAllocation(*pDevice);
+    kernel.kernelInfo.createKernelAllocation(*pDevice, false);
     auto firstAllocation = kernel.kernelInfo.kernelAllocation;
     EXPECT_NE(nullptr, firstAllocation);
     auto firstAllocationSize = firstAllocation->getUnderlyingBufferSize();
-    EXPECT_EQ(initialHeapSize, firstAllocationSize);
+    size_t isaPadding = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getPaddingForISAAllocation();
+    EXPECT_EQ(firstAllocationSize, initialHeapSize + isaPadding);
 
     auto firstAllocationId = static_cast<MemoryAllocation *>(firstAllocation)->id;
 
@@ -97,7 +100,7 @@ TEST_F(KernelSubstituteTest, givenKernelWhenSubstituteKernelHeapWithSmallerSizeT
     auto secondAllocation = kernel.kernelInfo.kernelAllocation;
     EXPECT_NE(nullptr, secondAllocation);
     auto secondAllocationSize = secondAllocation->getUnderlyingBufferSize();
-    EXPECT_EQ(initialHeapSize, secondAllocationSize);
+    EXPECT_EQ(secondAllocationSize, initialHeapSize + isaPadding);
     auto secondAllocationId = static_cast<MemoryAllocation *>(secondAllocation)->id;
 
     EXPECT_EQ(firstAllocationId, secondAllocationId);
@@ -113,7 +116,7 @@ TEST_F(KernelSubstituteTest, givenKernelWithUsedKernelAllocationWhenSubstituteKe
     const size_t initialHeapSize = 0x40;
     kernel.kernelInfo.heapInfo.KernelHeapSize = initialHeapSize;
 
-    kernel.kernelInfo.createKernelAllocation(*pDevice);
+    kernel.kernelInfo.createKernelAllocation(*pDevice, false);
     auto firstAllocation = kernel.kernelInfo.kernelAllocation;
 
     uint32_t notReadyTaskCount = *commandStreamReceiver.getTagAddress() + 1u;

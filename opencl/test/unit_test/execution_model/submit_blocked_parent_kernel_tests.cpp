@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -58,9 +58,12 @@ class MockDeviceQueueHwWithCriticalSectionRelease : public DeviceQueueHw<GfxFami
         indirectStateSetup = true;
         return BaseClass::setupIndirectState(surfaceStateHeap, dynamicStateHeap, parentKernel, parentIDCount, isCcsUsed);
     }
-    void addExecutionModelCleanUpSection(Kernel *parentKernel, TagNode<HwTimeStamps> *hwTimeStamp, uint64_t tagAddress, uint32_t taskCount) override {
+    void addExecutionModelCleanUpSection(Kernel *parentKernel, TagNodeBase *hwTimeStamp, uint64_t tagAddress, uint32_t taskCount) override {
         cleanupSectionAdded = true;
-        timestampAddedInCleanupSection = hwTimeStamp ? hwTimeStamp->tagForCpuAccess : nullptr;
+
+        auto hwTimestampT = static_cast<TagNode<HwTimeStamps> *>(hwTimeStamp);
+
+        timestampAddedInCleanupSection = hwTimestampT ? hwTimestampT->tagForCpuAccess : nullptr;
         return BaseClass::addExecutionModelCleanUpSection(parentKernel, hwTimeStamp, tagAddress, taskCount);
     }
     void dispatchScheduler(LinearStream &commandStream, SchedulerKernel &scheduler, PreemptionMode preemptionMode, IndirectHeap *ssh, IndirectHeap *dsh, bool isCcsUsed) override {
@@ -81,6 +84,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenLockedEMcritca
 
     cl_queue_properties properties[3] = {0};
     MockParentKernel *parentKernel = MockParentKernel::create(*context);
+    auto kernelInfos = MockKernel::toKernelInfoContainer(parentKernel->getKernelInfo(), rootDeviceIndex);
+    MultiDeviceKernel multiDeviceKernel(MockMultiDeviceKernel::toKernelVector(parentKernel), kernelInfos);
     MockDeviceQueueHwWithCriticalSectionRelease<FamilyType> mockDevQueue(context, device, properties[0]);
     parentKernel->createReflectionSurface();
     context->setDefaultDeviceQueue(&mockDevQueue);
@@ -113,7 +118,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenLockedEMcritca
 
     EXPECT_EQ(mockDevQueue.maxCounter, mockDevQueue.criticalSectioncheckCounter);
     delete cmdComputeKernel;
-    delete parentKernel;
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenParentKernelWhenCommandIsSubmittedThenPassedDshIsUsed) {
@@ -121,6 +125,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenParentKernelWh
 
     cl_queue_properties properties[3] = {0};
     MockParentKernel *parentKernel = MockParentKernel::create(*context);
+    auto kernelInfos = MockKernel::toKernelInfoContainer(parentKernel->getKernelInfo(), rootDeviceIndex);
+    MultiDeviceKernel multiDeviceKernel(MockMultiDeviceKernel::toKernelVector(parentKernel), kernelInfos);
     MockDeviceQueueHwWithCriticalSectionRelease<FamilyType> mockDevQueue(context, device, properties[0]);
     parentKernel->createReflectionSurface();
     context->setDefaultDeviceQueue(&mockDevQueue);
@@ -176,7 +182,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenParentKernelWh
     EXPECT_EQ(usedDSHAfterSubmit, usedDSHAfterSubmit);
 
     delete cmdComputeKernel;
-    delete parentKernel;
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenParentKernelWhenCommandIsSubmittedThenIndirectStateAndEMCleanupSectionIsSetup) {
@@ -184,6 +189,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenParentKernelWh
 
     cl_queue_properties properties[3] = {0};
     MockParentKernel *parentKernel = MockParentKernel::create(*context);
+    auto kernelInfos = MockKernel::toKernelInfoContainer(parentKernel->getKernelInfo(), rootDeviceIndex);
+    MultiDeviceKernel multiDeviceKernel(MockMultiDeviceKernel::toKernelVector(parentKernel), kernelInfos);
     MockDeviceQueueHwWithCriticalSectionRelease<FamilyType> mockDevQueue(context, device, properties[0]);
     parentKernel->createReflectionSurface();
     context->setDefaultDeviceQueue(&mockDevQueue);
@@ -216,7 +223,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenParentKernelWh
     EXPECT_TRUE(mockDevQueue.cleanupSectionAdded);
 
     delete cmdComputeKernel;
-    delete parentKernel;
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenBlockedParentKernelWithProfilingWhenCommandIsSubmittedThenEMCleanupSectionsSetsCompleteTimestamp) {
@@ -224,6 +230,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenBlockedParentK
 
     cl_queue_properties properties[3] = {0};
     MockParentKernel *parentKernel = MockParentKernel::create(*context);
+    auto kernelInfos = MockKernel::toKernelInfoContainer(parentKernel->getKernelInfo(), rootDeviceIndex);
+    MultiDeviceKernel multiDeviceKernel(MockMultiDeviceKernel::toKernelVector(parentKernel), kernelInfos);
     MockDeviceQueueHwWithCriticalSectionRelease<FamilyType> mockDevQueue(context, device, properties[0]);
     parentKernel->createReflectionSurface();
     context->setDefaultDeviceQueue(&mockDevQueue);
@@ -248,7 +256,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenBlockedParentK
     std::vector<Surface *> surfaces;
     auto *cmdComputeKernel = new CommandComputeKernel(*pCmdQ, blockedCommandData, surfaces, false, false, false, nullptr, preemptionMode, parentKernel, 1);
 
-    auto timestamp = pCmdQ->getGpgpuCommandStreamReceiver().getEventTsAllocator()->getTag();
+    auto timestamp = static_cast<TagNode<HwTimeStamps> *>(pCmdQ->getGpgpuCommandStreamReceiver().getEventTsAllocator()->getTag());
     cmdComputeKernel->timestamp = timestamp;
     cmdComputeKernel->submit(0, false);
 
@@ -256,7 +264,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenBlockedParentK
     EXPECT_EQ(mockDevQueue.timestampAddedInCleanupSection, timestamp->tagForCpuAccess);
 
     delete cmdComputeKernel;
-    delete parentKernel;
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenParentKernelWhenCommandIsSubmittedThenSchedulerIsDispatched) {
@@ -264,6 +271,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenParentKernelWh
 
     cl_queue_properties properties[3] = {0};
     MockParentKernel *parentKernel = MockParentKernel::create(*context);
+    auto kernelInfos = MockKernel::toKernelInfoContainer(parentKernel->getKernelInfo(), rootDeviceIndex);
+    MultiDeviceKernel multiDeviceKernel(MockMultiDeviceKernel::toKernelVector(parentKernel), kernelInfos);
     MockDeviceQueueHwWithCriticalSectionRelease<FamilyType> mockDevQueue(context, device, properties[0]);
     parentKernel->createReflectionSurface();
     context->setDefaultDeviceQueue(&mockDevQueue);
@@ -294,7 +303,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenParentKernelWh
     EXPECT_TRUE(mockDevQueue.schedulerDispatched);
 
     delete cmdComputeKernel;
-    delete parentKernel;
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenUsedCommandQueueHeapsWhenParentKernelIsSubmittedThenQueueHeapsAreNotUsed) {
@@ -302,11 +310,13 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenUsedCommandQue
 
     cl_queue_properties properties[3] = {0};
     MockParentKernel *parentKernel = MockParentKernel::create(*context);
+    auto kernelInfos = MockKernel::toKernelInfoContainer(parentKernel->getKernelInfo(), rootDeviceIndex);
+    MultiDeviceKernel multiDeviceKernel(MockMultiDeviceKernel::toKernelVector(parentKernel), kernelInfos);
     MockDeviceQueueHw<FamilyType> mockDevQueue(context, device, properties[0]);
     parentKernel->createReflectionSurface();
     context->setDefaultDeviceQueue(&mockDevQueue);
 
-    MockCommandQueue cmdQ(context, device, properties);
+    MockCommandQueue cmdQ(context, device, properties, false);
 
     size_t minSizeSSHForEM = HardwareCommandsHelper<FamilyType>::getSshSizeForExecutionModel(*parentKernel);
 
@@ -350,7 +360,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenUsedCommandQue
     EXPECT_EQ(intialSshUsed, queueSsh.getUsed());
 
     delete cmdComputeKernel;
-    delete parentKernel;
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenNotUsedSSHWhenParentKernelIsSubmittedThenExistingSSHIsUsed) {
@@ -358,6 +367,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenNotUsedSSHWhen
 
     cl_queue_properties properties[3] = {0};
     MockParentKernel *parentKernel = MockParentKernel::create(*context);
+    auto kernelInfos = MockKernel::toKernelInfoContainer(parentKernel->getKernelInfo(), rootDeviceIndex);
+    MultiDeviceKernel multiDeviceKernel(MockMultiDeviceKernel::toKernelVector(parentKernel), kernelInfos);
     MockDeviceQueueHw<FamilyType> mockDevQueue(context, device, properties[0]);
     parentKernel->createReflectionSurface();
     context->setDefaultDeviceQueue(&mockDevQueue);
@@ -395,14 +406,15 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenNotUsedSSHWhen
     EXPECT_EQ(sshBuffer, newSshBuffer);
 
     delete cmdComputeKernel;
-    delete parentKernel;
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenBlockedCommandQueueWhenDispatchWalkerIsCalledThenHeapsHaveProperSizes) {
     REQUIRE_DEVICE_ENQUEUE_OR_SKIP(device);
 
     cl_queue_properties properties[3] = {0};
-    std::unique_ptr<MockParentKernel> parentKernel(MockParentKernel::create(*context));
+    auto parentKernel = MockParentKernel::create(*context);
+    auto kernelInfos = MockKernel::toKernelInfoContainer(parentKernel->getKernelInfo(), rootDeviceIndex);
+    MultiDeviceKernel multiDeviceKernel(MockMultiDeviceKernel::toKernelVector(parentKernel), kernelInfos);
 
     MockDeviceQueueHw<FamilyType> mockDevQueue(context, device, properties[0]);
     parentKernel->createReflectionSurface();
@@ -412,8 +424,10 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ParentKernelCommandQueueFixture, givenBlockedCommand
     const size_t globalOffsets[3] = {0, 0, 0};
     const size_t workItems[3] = {1, 1, 1};
 
-    DispatchInfo dispatchInfo(parentKernel.get(), 1, workItems, nullptr, globalOffsets);
-    MultiDispatchInfo multiDispatchInfo(parentKernel.get());
+    DispatchInfo dispatchInfo(device, parentKernel, 1, workItems, nullptr, globalOffsets);
+    dispatchInfo.setNumberOfWorkgroups({1, 1, 1});
+    dispatchInfo.setTotalNumberOfWorkgroups({1, 1, 1});
+    MultiDispatchInfo multiDispatchInfo(parentKernel);
     multiDispatchInfo.push(dispatchInfo);
     HardwareInterface<FamilyType>::dispatchWalker(
         *pCmdQ,

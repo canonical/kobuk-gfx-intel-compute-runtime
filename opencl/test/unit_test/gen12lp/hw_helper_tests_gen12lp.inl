@@ -1,16 +1,17 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/os_interface/hw_info_config.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 
 #include "opencl/source/helpers/cl_hw_helper.h"
 #include "opencl/test/unit_test/gen12lp/special_ult_helper_gen12lp.h"
 #include "opencl/test/unit_test/helpers/hw_helper_tests.h"
+#include "opencl/test/unit_test/mocks/mock_cl_hw_helper.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
@@ -22,14 +23,14 @@ using HwHelperTestGen12Lp = HwHelperTest;
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenTglLpThenAuxTranslationIsRequired) {
     auto &clHwHelper = ClHwHelper::get(renderCoreFamily);
 
-    for (auto isPureStateful : {false, true}) {
+    for (auto accessedUsingStatelessAddressingMode : {true, false}) {
         KernelInfo kernelInfo{};
-        KernelArgInfo argInfo{};
-        argInfo.isBuffer = true;
-        argInfo.pureStatefulBufferAccess = isPureStateful;
-        kernelInfo.kernelArgInfo.push_back(std::move(argInfo));
 
-        EXPECT_EQ(!isPureStateful, clHwHelper.requiresAuxResolves(kernelInfo));
+        ArgDescriptor arg;
+        arg.as<ArgDescPointer>(true).accessedUsingStatelessAddressingMode = accessedUsingStatelessAddressingMode;
+        kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.push_back(std::move(arg));
+
+        EXPECT_EQ(accessedUsingStatelessAddressingMode, clHwHelper.requiresAuxResolves(kernelInfo, hardwareInfo));
     }
 }
 
@@ -49,10 +50,10 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenGen12LpSkuWhenGettingCapabilityCoherency
     }
 
     if (hardwareInfo.platform.eProductFamily == IGFX_TIGERLAKE_LP) {
-        hardwareInfo.platform.usRevId = 0x1;
+        hardwareInfo.platform.usRevId = helper.getHwRevIdFromStepping(REVISION_A1, hardwareInfo);
         helper.setCapabilityCoherencyFlag(&hardwareInfo, coherency);
         EXPECT_TRUE(coherency);
-        hardwareInfo.platform.usRevId = 0x0;
+        hardwareInfo.platform.usRevId = helper.getHwRevIdFromStepping(REVISION_A0, hardwareInfo);
         helper.setCapabilityCoherencyFlag(&hardwareInfo, coherency);
         EXPECT_FALSE(coherency);
     } else {
@@ -115,7 +116,7 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenDifferentSizesOfAllocationWhenCheckingCo
 
     const size_t sizesToCheck[] = {128, 256, 512, 1023, 1024, 1025};
     for (size_t size : sizesToCheck) {
-        EXPECT_FALSE(helper.obtainRenderBufferCompressionPreference(hardwareInfo, size));
+        EXPECT_FALSE(helper.isBufferSizeSuitableForRenderCompression(size, *defaultHwInfo));
     }
 }
 
@@ -135,61 +136,35 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeNotSetAndBcsInfoSetWhenGetGpgp
     EXPECT_EQ(aub_stream::ENGINE_BCS, engines[3].first);
 }
 
+GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeNotSetAndCcsDefualtEngineWhenGetGpgpuEnginesThenReturnTwoRcsEnginesAndOneCcs) {
+    HardwareInfo hwInfo = *defaultHwInfo;
+    hwInfo.featureTable.ftrCCSNode = false;
+    hwInfo.featureTable.ftrBcsInfo = 0;
+    hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
+
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
+    EXPECT_EQ(3u, device->engines.size());
+    auto &engines = HwHelperHw<FamilyType>::get().getGpgpuEngineInstances(hwInfo);
+    EXPECT_EQ(3u, engines.size());
+    EXPECT_EQ(aub_stream::ENGINE_RCS, engines[0].first);
+    EXPECT_EQ(aub_stream::ENGINE_RCS, engines[1].first);
+    EXPECT_EQ(aub_stream::ENGINE_CCS, engines[2].first);
+}
+
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeNotSetWhenGetGpgpuEnginesThenReturnThreeRcsEngines) {
     HardwareInfo hwInfo = *defaultHwInfo;
     hwInfo.featureTable.ftrCCSNode = false;
     hwInfo.featureTable.ftrBcsInfo = 0;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_RCS;
-    const auto expectedEnginesCount = HwInfoConfig::get(hwInfo.platform.eProductFamily)->isEvenContextCountRequired() ? 4u : 3u;
 
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
-    EXPECT_EQ(expectedEnginesCount, device->engines.size());
+    EXPECT_EQ(3u, device->engines.size());
     auto &engines = HwHelperHw<FamilyType>::get().getGpgpuEngineInstances(hwInfo);
 
-    EXPECT_EQ(expectedEnginesCount, engines.size());
+    EXPECT_EQ(3u, engines.size());
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[0].first);
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[1].first);
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[2].first);
-}
-
-GEN12LPTEST_F(HwHelperTestGen12Lp, givenEvenContextCountRequiredWhenGetGpgpuEnginesIsCalledThenInsertAdditionalEngineAtTheEndIfNeeded) {
-    struct MockHwInfoConfig : HwInfoConfigHw<IGFX_UNKNOWN> {
-        MockHwInfoConfig() {}
-        bool evenContextCountRequired = false;
-        bool isEvenContextCountRequired() override {
-            return evenContextCountRequired;
-        }
-    };
-
-    HardwareInfo hwInfo = *defaultHwInfo;
-    hwInfo.featureTable.ftrCCSNode = false;
-    hwInfo.featureTable.ftrBcsInfo = 0;
-    hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_RCS;
-
-    MockHwInfoConfig hwInfoConfig;
-    VariableBackup<HwInfoConfig *> hwInfoConfigBackup{&hwInfoConfigFactory[hwInfo.platform.eProductFamily], &hwInfoConfig};
-
-    hwInfoConfig.evenContextCountRequired = false;
-    auto engines = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getGpgpuEngineInstances(hwInfo);
-    EXPECT_EQ(3u, engines.size());
-
-    hwInfoConfig.evenContextCountRequired = true;
-    engines = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getGpgpuEngineInstances(hwInfo);
-    EXPECT_EQ(4u, engines.size());
-    EXPECT_EQ(aub_stream::ENGINE_RCS, engines[engines.size() - 1].first);
-
-    hwInfo.featureTable.ftrCCSNode = true;
-    engines = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getGpgpuEngineInstances(hwInfo);
-    EXPECT_EQ(4u, engines.size());
-
-    hwInfo.featureTable.ftrCCSNode = true;
-    hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
-    engines = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getGpgpuEngineInstances(hwInfo);
-    EXPECT_EQ(4u, engines.size());
-
-    hwInfo.featureTable.ftrCCSNode = false;
-    engines = HwHelper::get(hwInfo.platform.eRenderCoreFamily).getGpgpuEngineInstances(hwInfo);
-    EXPECT_EQ(4u, engines.size());
 }
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeSetWhenGetGpgpuEnginesThenReturnTwoRcsAndCcsEngines) {
@@ -210,16 +185,15 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeSetWhenGetGpgpuEnginesThenRetu
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeSetFtrGpGpuMidThreadLevelPreemptSetWhenGetGpgpuEnginesThenReturn2RcsAndCcsEngines) {
     HardwareInfo hwInfo = *defaultHwInfo;
-    auto hwInfoConfig = HwInfoConfig::get(hwInfo.platform.eProductFamily);
     hwInfo.featureTable.ftrCCSNode = true;
     hwInfo.featureTable.ftrBcsInfo = 0;
     hwInfo.featureTable.ftrGpGpuMidThreadLevelPreempt = true;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
-    size_t retDeivices = 3u + hwInfoConfig->isEvenContextCountRequired();
+
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
-    EXPECT_EQ(retDeivices, device->engines.size());
+    EXPECT_EQ(3u, device->engines.size());
     auto &engines = HwHelperHw<FamilyType>::get().getGpgpuEngineInstances(hwInfo);
-    EXPECT_EQ(retDeivices, engines.size());
+    EXPECT_EQ(3u, engines.size());
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[0].first);
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[1].first);
     EXPECT_EQ(aub_stream::ENGINE_CCS, engines[2].first);
@@ -248,39 +222,31 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeSetAndDefaultRcsWhenGetGpgpuEn
     hwInfo.featureTable.ftrBcsInfo = 0;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_RCS;
 
-    const auto expectedEnginesCount = HwInfoConfig::get(hwInfo.platform.eProductFamily)->isEvenContextCountRequired() ? 4u : 3u;
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
-    EXPECT_EQ(expectedEnginesCount, device->engines.size());
+    EXPECT_EQ(3u, device->engines.size());
     auto &engines = HwHelperHw<FamilyType>::get().getGpgpuEngineInstances(hwInfo);
-    EXPECT_EQ(expectedEnginesCount, engines.size());
+    EXPECT_EQ(3u, engines.size());
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[0].first);
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[1].first);
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[2].first);
-    if (expectedEnginesCount == 4) {
-        EXPECT_EQ(aub_stream::ENGINE_RCS, engines[3].first);
-    }
 }
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenTgllpWhenIsFusedEuDispatchEnabledIsCalledThenResultIsCorrect) {
     DebugManagerStateRestore restorer;
     auto &helper = HwHelper::get(renderCoreFamily);
     auto &waTable = hardwareInfo.workaroundTable;
-    bool wa;
-    int32_t debugKey;
-    size_t expectedResult;
 
-    const std::array<std::tuple<bool, bool, int32_t>, 6> testParams{std::make_tuple(true, false, -1),
-                                                                    std::make_tuple(false, true, -1),
-                                                                    std::make_tuple(true, false, 0),
-                                                                    std::make_tuple(true, true, 0),
-                                                                    std::make_tuple(false, false, 1),
-                                                                    std::make_tuple(false, true, 1)};
+    std::tuple<bool, bool, int32_t> testParams[]{
+        {true, false, -1},
+        {false, true, -1},
+        {true, false, 0},
+        {true, true, 0},
+        {false, false, 1},
+        {false, true, 1}};
 
-    for (const auto &params : testParams) {
-        std::tie(expectedResult, wa, debugKey) = params;
+    for (auto &[expectedResult, wa, debugKey] : testParams) {
         waTable.waDisableFusedThreadScheduling = wa;
         DebugManager.flags.CFEFusedEUDispatch.set(debugKey);
-
         EXPECT_EQ(expectedResult, helper.isFusedEuDispatchEnabled(hardwareInfo));
     }
 }
@@ -502,4 +468,21 @@ HWTEST2_F(HwHelperTestGen12Lp, givenRevisionEnumThenProperValueForIsWorkaroundRe
             EXPECT_FALSE(hwHelper.isWorkaroundRequired(REVISION_B, REVISION_A0, hardwareInfo));
         }
     }
+}
+
+HWTEST2_F(HwHelperTestGen12Lp, WhenGettingDeviceIpVersionThenMakeCorrectDeviceIpVersion, IsTGLLP) {
+    EXPECT_EQ(ClHwHelperMock::makeDeviceIpVersion(12, 0, 0), ClHwHelper::get(renderCoreFamily).getDeviceIpVersion(*defaultHwInfo));
+}
+
+HWTEST2_F(HwHelperTestGen12Lp, WhenGettingDeviceIpVersionThenMakeCorrectDeviceIpVersion, IsRKL) {
+    EXPECT_EQ(ClHwHelperMock::makeDeviceIpVersion(12, 0, 0), ClHwHelper::get(renderCoreFamily).getDeviceIpVersion(*defaultHwInfo));
+}
+
+HWTEST2_F(HwHelperTestGen12Lp, WhenGettingDeviceIpVersionThenMakeCorrectDeviceIpVersion, IsADLS) {
+    EXPECT_EQ(ClHwHelperMock::makeDeviceIpVersion(12, 0, 0), ClHwHelper::get(renderCoreFamily).getDeviceIpVersion(*defaultHwInfo));
+}
+
+GEN12LPTEST_F(HwHelperTestGen12Lp, WhenGettingSupportedDeviceFeatureCapabilitiesThenReturnCorrectValue) {
+    cl_device_feature_capabilities_intel expectedCapabilities = CL_DEVICE_FEATURE_FLAG_DP4A_INTEL;
+    EXPECT_EQ(expectedCapabilities, ClHwHelper::get(renderCoreFamily).getSupportedDeviceFeatureCapabilities());
 }

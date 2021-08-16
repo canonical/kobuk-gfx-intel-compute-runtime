@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -116,7 +116,7 @@ TEST_F(PipeTest, givenPipeWithDifferentCpuAndGpuAddressesWhenSetArgPipeThenUseGp
 
 using MultiRootDeviceTests = MultiRootDeviceFixture;
 
-TEST_F(MultiRootDeviceTests, pipeGraphicsAllocationHasCorrectRootDeviceIndex) {
+TEST_F(MultiRootDeviceTests, GivenPipeGraphicsAllocationThenItHasCorrectRootDeviceIndex) {
     int errCode = CL_SUCCESS;
 
     std::unique_ptr<Pipe> pipe(Pipe::create(context.get(), CL_MEM_READ_ONLY, 1, 20, nullptr, errCode));

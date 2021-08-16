@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -51,6 +51,7 @@ struct RuntimeCapabilityTable {
     bool instrumentationEnabled;
     bool forceStatelessCompilationFor32Bit;
     const char *platformType;
+    const char *deviceName;
     bool debuggerSupported;
     bool supportsVme;
     bool supportCacheFlushAfterWalker;
@@ -63,6 +64,8 @@ struct RuntimeCapabilityTable {
     bool hostPtrTrackingEnabled;
     bool levelZeroSupported;
     bool isIntegratedDevice;
+    bool supportsMediaBlock;
+    bool fusedEuEnabled;
 };
 
 struct HardwareCapabilities {
@@ -82,7 +85,7 @@ struct HardwareInfo {
     WorkaroundTable workaroundTable = {};
     alignas(4) GT_SYSTEM_INFO gtSystemInfo = {};
 
-    RuntimeCapabilityTable capabilityTable = {};
+    alignas(8) RuntimeCapabilityTable capabilityTable = {};
 };
 
 template <PRODUCT_FAMILY product>
@@ -110,6 +113,7 @@ struct EnableGfxFamilyHw {
 bool getHwInfoForPlatformString(std::string &platform, const HardwareInfo *&hwInfoIn);
 void setHwInfoValuesFromConfig(const uint64_t hwInfoConfig, HardwareInfo &hwInfoIn);
 bool parseHwInfoConfigString(const std::string &hwInfoConfigStr, uint64_t &hwInfoConfig);
+void overridePlatformName(std::string &name);
 aub_stream::EngineType getChosenEngineType(const HardwareInfo &hwInfo);
 const std::string getFamilyNameWithType(const HardwareInfo &hwInfo);
 

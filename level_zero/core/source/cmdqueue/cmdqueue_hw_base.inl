@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,6 +11,8 @@
 #include "shared/source/command_stream/csr_definitions.h"
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/device/device.h"
+#include "shared/source/helpers/api_specific_config.h"
+#include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/interlocked_max.h"
 #include "shared/source/helpers/preamble.h"
@@ -28,28 +30,27 @@
 namespace L0 {
 
 template <GFXCORE_FAMILY gfxCoreFamily>
-void CommandQueueHw<gfxCoreFamily>::programGeneralStateBaseAddress(uint64_t gsba, bool useLocalMemoryForIndirectHeap, NEO::LinearStream &commandStream) {
+void CommandQueueHw<gfxCoreFamily>::programStateBaseAddress(uint64_t gsba, bool useLocalMemoryForIndirectHeap, NEO::LinearStream &commandStream) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
-    using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
 
-    PIPE_CONTROL *pcCmd = commandStream.getSpaceForCmd<PIPE_CONTROL>();
-    PIPE_CONTROL cmd = GfxFamily::cmdInitPipeControl;
+    NEO::PipeControlArgs pcArgs;
+    pcArgs.dcFlushEnable = true;
+    pcArgs.textureCacheInvalidationEnable = true;
 
-    cmd.setTextureCacheInvalidationEnable(true);
-    cmd.setDcFlushEnable(true);
-    cmd.setCommandStreamerStallEnable(true);
-
-    *pcCmd = cmd;
+    NEO::MemorySynchronizationCommands<GfxFamily>::addPipeControl(commandStream, pcArgs);
 
     NEO::Device *neoDevice = device->getNEODevice();
-    auto &hwInfo = neoDevice->getHardwareInfo();
-    auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-
     NEO::EncodeWA<GfxFamily>::encodeAdditionalPipelineSelect(*neoDevice, commandStream, true);
 
     auto pSbaCmd = static_cast<STATE_BASE_ADDRESS *>(commandStream.getSpace(sizeof(STATE_BASE_ADDRESS)));
     STATE_BASE_ADDRESS sbaCmd;
+
+    bool useGlobalSshAndDsh = NEO::ApiSpecificConfig::getBindlessConfiguration();
+    uint64_t globalHeapsBase = 0;
+    if (useGlobalSshAndDsh) {
+        globalHeapsBase = neoDevice->getBindlessHeapsHelper()->getGlobalHeapsBase();
+    }
 
     NEO::StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(&sbaCmd,
                                                                     nullptr,
@@ -59,14 +60,19 @@ void CommandQueueHw<gfxCoreFamily>::programGeneralStateBaseAddress(uint64_t gsba
                                                                     true,
                                                                     (device->getMOCS(true, false) >> 1),
                                                                     neoDevice->getMemoryManager()->getInternalHeapBaseAddress(device->getRootDeviceIndex(), useLocalMemoryForIndirectHeap),
-                                                                    neoDevice->getMemoryManager()->getInternalHeapBaseAddress(device->getRootDeviceIndex(), !hwHelper.useSystemMemoryPlacementForISA(hwInfo)),
+                                                                    neoDevice->getMemoryManager()->getInternalHeapBaseAddress(device->getRootDeviceIndex(), neoDevice->getMemoryManager()->isLocalMemoryUsedForIsa(neoDevice->getRootDeviceIndex())),
+                                                                    globalHeapsBase,
                                                                     true,
+                                                                    useGlobalSshAndDsh,
                                                                     neoDevice->getGmmHelper(),
-                                                                    false);
+                                                                    false,
+                                                                    NEO::MemoryCompressionState::NotApplicable,
+                                                                    false,
+                                                                    1u);
     *pSbaCmd = sbaCmd;
-    gsbaInit = true;
+    csr->setGSBAStateDirty(false);
 
-    if (device->getL0Debugger()) {
+    if (NEO::Debugger::isDebugEnabled(internalUsage) && device->getL0Debugger()) {
 
         NEO::Debugger::SbaAddresses sbaAddresses = {};
         sbaAddresses.BindlessSurfaceStateBaseAddress = sbaCmd.getBindlessSurfaceStateBaseAddress();
@@ -90,24 +96,31 @@ size_t CommandQueueHw<gfxCoreFamily>::estimateStateBaseAddressCmdSize() {
 
     size_t size = sizeof(STATE_BASE_ADDRESS) + sizeof(PIPE_CONTROL) + NEO::EncodeWA<GfxFamily>::getAdditionalPipelineSelectSize(*device->getNEODevice());
 
-    if (device->getL0Debugger() != nullptr) {
-        size += device->getL0Debugger()->getSbaTrackingCommandsSize(1);
+    if (NEO::Debugger::isDebugEnabled(internalUsage) && device->getL0Debugger() != nullptr) {
+        const size_t trackedAddressesCount = 6;
+        size += device->getL0Debugger()->getSbaTrackingCommandsSize(trackedAddressesCount);
     }
     return size;
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
-void CommandQueueHw<gfxCoreFamily>::handleScratchSpace(NEO::ResidencyContainer &residency,
-                                                       NEO::HeapContainer &heapContainer,
+void CommandQueueHw<gfxCoreFamily>::handleScratchSpace(NEO::HeapContainer &heapContainer,
                                                        NEO::ScratchSpaceController *scratchController,
-                                                       bool &gsbaState, bool &frontEndState) {
+                                                       bool &gsbaState, bool &frontEndState,
+                                                       uint32_t perThreadScratchSpaceSize) {
 
-    if (commandQueuePerThreadScratchSize > 0) {
-        scratchController->setRequiredScratchSpace(nullptr, 0u, commandQueuePerThreadScratchSize, 0u, csr->peekTaskCount(),
+    if (perThreadScratchSpaceSize > 0) {
+        scratchController->setRequiredScratchSpace(nullptr, 0u, perThreadScratchSpaceSize, 0u, csr->peekTaskCount(),
                                                    csr->getOsContext(), gsbaState, frontEndState);
         auto scratchAllocation = scratchController->getScratchSpaceAllocation();
-        residency.push_back(scratchAllocation);
+        csr->makeResident(*scratchAllocation);
     }
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+void CommandQueueHw<gfxCoreFamily>::patchCommands(CommandList &commandList, uint64_t scratchAddress) {
+    auto &commandsToPatch = commandList.getCommandsToPatch();
+    UNRECOVERABLE_IF(!commandsToPatch.empty());
 }
 
 } // namespace L0

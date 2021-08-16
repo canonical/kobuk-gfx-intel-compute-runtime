@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -15,14 +15,13 @@
 #include "level_zero/core/source/image/image_imp.h"
 
 namespace L0 {
-
 template <GFXCORE_FAMILY gfxCoreFamily>
 struct ImageCoreFamily : public ImageImp {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using RENDER_SURFACE_STATE = typename GfxFamily::RENDER_SURFACE_STATE;
 
     ze_result_t initialize(Device *device, const ze_image_desc_t *desc) override;
-    void copySurfaceStateToSSH(void *surfaceStateHeap, const uint32_t surfaceStateOffset) override;
+    void copySurfaceStateToSSH(void *surfaceStateHeap, const uint32_t surfaceStateOffset, bool isMediaBlockArg) override;
     void copyRedescribedSurfaceStateToSSH(void *surfaceStateHeap, const uint32_t surfaceStateOffset) override;
     bool isMediaFormat(const ze_image_format_layout_t layout) {
         if (layout == ze_image_format_layout_t::ZE_IMAGE_FORMAT_LAYOUT_NV12 ||

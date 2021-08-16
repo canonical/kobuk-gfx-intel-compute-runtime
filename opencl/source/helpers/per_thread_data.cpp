@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -19,34 +19,29 @@ size_t PerThreadDataHelper::sendPerThreadData(
     uint32_t simd,
     uint32_t grfSize,
     uint32_t numChannels,
-    const size_t localWorkSizes[3],
+    const std::array<uint16_t, 3> &localWorkSizes,
     const std::array<uint8_t, 3> &workgroupWalkOrder,
     bool hasKernelOnlyImages) {
     auto offsetPerThreadData = indirectHeap.getUsed();
     if (numChannels) {
-        auto localWorkSize = localWorkSizes[0] * localWorkSizes[1] * localWorkSizes[2];
+        size_t localWorkSize = static_cast<size_t>(localWorkSizes[0]) * static_cast<size_t>(localWorkSizes[1]) * static_cast<size_t>(localWorkSizes[2]);
         auto sizePerThreadDataTotal = getPerThreadDataSizeTotal(simd, grfSize, numChannels, localWorkSize);
         auto pDest = indirectHeap.getSpace(sizePerThreadDataTotal);
 
         // Generate local IDs
         DEBUG_BREAK_IF(numChannels != 3);
-        generateLocalIDs(pDest, static_cast<uint16_t>(simd),
-                         std::array<uint16_t, 3>{{static_cast<uint16_t>(localWorkSizes[0]),
-                                                  static_cast<uint16_t>(localWorkSizes[1]),
-                                                  static_cast<uint16_t>(localWorkSizes[2])}},
-                         std::array<uint8_t, 3>{{workgroupWalkOrder[0], workgroupWalkOrder[1], workgroupWalkOrder[2]}},
-                         hasKernelOnlyImages, grfSize);
+        generateLocalIDs(pDest, static_cast<uint16_t>(simd), localWorkSizes, workgroupWalkOrder, hasKernelOnlyImages, grfSize);
     }
     return offsetPerThreadData;
 }
 
-uint32_t PerThreadDataHelper::getThreadPayloadSize(const iOpenCL::SPatchThreadPayload &threadPayload, uint32_t simd, uint32_t grfSize) {
-    uint32_t multiplier = static_cast<uint32_t>(getGRFsPerThread(simd, grfSize));
+uint32_t PerThreadDataHelper::getThreadPayloadSize(const KernelDescriptor &kernelDescriptor, uint32_t grfSize) {
+    uint32_t multiplier = static_cast<uint32_t>(getGRFsPerThread(kernelDescriptor.kernelAttributes.simdSize, grfSize));
     uint32_t threadPayloadSize = 0;
-    threadPayloadSize = getNumLocalIdChannels(threadPayload) * multiplier * grfSize;
-    threadPayloadSize += (threadPayload.HeaderPresent) ? grfSize : 0;
-    threadPayloadSize += (threadPayload.LocalIDFlattenedPresent) ? (grfSize * multiplier) : 0;
-    threadPayloadSize += (threadPayload.UnusedPerThreadConstantPresent) ? grfSize : 0;
+    threadPayloadSize = kernelDescriptor.kernelAttributes.numLocalIdChannels * multiplier * grfSize;
+    threadPayloadSize += (kernelDescriptor.kernelAttributes.flags.perThreadDataHeaderIsPresent) ? grfSize : 0;
+    threadPayloadSize += (kernelDescriptor.kernelAttributes.flags.usesFlattenedLocalIds) ? (grfSize * multiplier) : 0;
+    threadPayloadSize += (kernelDescriptor.kernelAttributes.flags.perThreadDataUnusedGrfIsPresent) ? grfSize : 0;
     return threadPayloadSize;
 }
 } // namespace NEO

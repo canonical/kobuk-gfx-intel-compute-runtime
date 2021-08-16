@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,6 +9,7 @@
 #include "shared/source/command_container/cmdcontainer.h"
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/execution_environment/execution_environment.h"
+#include "shared/source/helpers/definitions/mi_flush_args.h"
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/source/helpers/simd_helper.h"
 #include "shared/source/kernel/dispatch_kernel_encoder_interface.h"
@@ -18,8 +19,11 @@
 
 namespace NEO {
 
+class BindlessHeapsHelper;
 class GmmHelper;
 class IndirectHeap;
+struct HardwareInfo;
+struct StateComputeModeProperties;
 
 template <typename GfxFamily>
 struct EncodeDispatchKernel {
@@ -28,16 +32,27 @@ struct EncodeDispatchKernel {
     using BINDING_TABLE_STATE = typename GfxFamily::BINDING_TABLE_STATE;
 
     static void encode(CommandContainer &container,
-                       const void *pThreadGroupDimensions, bool isIndirect, bool isPredicate, DispatchKernelEncoderI *dispatchInterface, uint64_t eventAddress, Device *device, PreemptionMode preemptionMode);
+                       const void *pThreadGroupDimensions,
+                       bool isIndirect,
+                       bool isPredicate,
+                       DispatchKernelEncoderI *dispatchInterface,
+                       uint64_t eventAddress,
+                       bool isTimestampEvent,
+                       bool L3FlushEnable,
+                       Device *device,
+                       PreemptionMode preemptionMode,
+                       bool &requiresUncachedMocs,
+                       bool useGlobalAtomics,
+                       uint32_t &partitionCount,
+                       bool isInternal);
+
     static void encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd);
 
-    static void appendAdditionalIDDFields(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, const HardwareInfo &hwInfo, const uint32_t threadsPerThreadGroup, uint32_t slmTotalSize);
+    static void appendAdditionalIDDFields(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, const HardwareInfo &hwInfo, const uint32_t threadsPerThreadGroup, uint32_t slmTotalSize, SlmPolicy slmPolicy);
 
     static void *getInterfaceDescriptor(CommandContainer &container, uint32_t &iddOffset);
 
-    static size_t estimateEncodeDispatchKernelCmdsSize(Device *device);
-
-    static void patchBindlessSurfaceStateOffsets(const size_t sshOffset, const KernelDescriptor &kernelDesc, uint8_t *crossThread);
+    static size_t estimateEncodeDispatchKernelCmdsSize(Device *device, Vec3<size_t> groupStart, Vec3<size_t> groupCount, bool isInternal);
 
     static bool isRuntimeLocalIdsGenerationRequired(uint32_t activeChannels,
                                                     size_t *lws,
@@ -64,6 +79,10 @@ struct EncodeDispatchKernel {
     static void programBarrierEnable(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t value, const HardwareInfo &hwInfo);
 
     static void adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo);
+
+    static void adjustBindingTablePrefetch(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t samplerCount, uint32_t bindingTableEntryCount);
+
+    static void adjustTimestampPacket(WALKER_TYPE &walkerCmd, const HardwareInfo &hwInfo);
 };
 
 template <typename GfxFamily>
@@ -71,6 +90,7 @@ struct EncodeStates {
     using BINDING_TABLE_STATE = typename GfxFamily::BINDING_TABLE_STATE;
     using INTERFACE_DESCRIPTOR_DATA = typename GfxFamily::INTERFACE_DESCRIPTOR_DATA;
     using SAMPLER_STATE = typename GfxFamily::SAMPLER_STATE;
+    using SAMPLER_BORDER_COLOR_STATE = typename GfxFamily::SAMPLER_BORDER_COLOR_STATE;
 
     static const uint32_t alignIndirectStatePointer = MemoryConstants::cacheLineSize;
     static const size_t alignInterfaceDescriptorData = MemoryConstants::cacheLineSize;
@@ -79,9 +99,11 @@ struct EncodeStates {
                                      uint32_t samplerStateOffset,
                                      uint32_t samplerCount,
                                      uint32_t borderColorOffset,
-                                     const void *fnDynamicStateHeap);
+                                     const void *fnDynamicStateHeap,
+                                     BindlessHeapsHelper *bindlessHeapHelper);
 
-    static void adjustStateComputeMode(LinearStream &csr, uint32_t numGrfRequired, void *const stateComputeModePtr, bool isMultiOsContextCapable, bool requiresCoherency);
+    static void adjustStateComputeMode(LinearStream &csr, uint32_t numGrfRequired, void *const stateComputeModePtr,
+                                       bool requiresCoherency, uint32_t threadArbitrationPolicy, const HardwareInfo &hwInfo);
 
     static size_t getAdjustStateComputeModeSize();
 };
@@ -100,6 +122,14 @@ struct EncodeMath {
                          AluRegisters firstOperandRegister,
                          AluRegisters secondOperandRegister,
                          AluRegisters finalResultRegister);
+    static void bitwiseAnd(CommandContainer &container,
+                           AluRegisters firstOperandRegister,
+                           AluRegisters secondOperandRegister,
+                           AluRegisters finalResultRegister);
+    static void bitwiseOr(CommandContainer &container,
+                          AluRegisters firstOperandRegister,
+                          AluRegisters secondOperandRegister,
+                          AluRegisters finalResultRegister);
 };
 
 template <typename GfxFamily>
@@ -114,11 +144,21 @@ struct EncodeMathMMIO {
 
     static void encodeGreaterThanPredicate(CommandContainer &container, uint64_t lhsVal, uint32_t rhsVal);
 
+    static void encodeBitwiseAndVal(CommandContainer &container,
+                                    uint32_t regOffset,
+                                    uint32_t immVal,
+                                    uint64_t dstAddress);
+
     static void encodeAlu(MI_MATH_ALU_INST_INLINE *pAluParam, AluRegisters srcA, AluRegisters srcB, AluRegisters op, AluRegisters dest, AluRegisters result);
 
     static void encodeAluSubStoreCarry(MI_MATH_ALU_INST_INLINE *pAluParam, AluRegisters regA, AluRegisters regB, AluRegisters finalResultRegister);
 
     static void encodeAluAdd(MI_MATH_ALU_INST_INLINE *pAluParam,
+                             AluRegisters firstOperandRegister,
+                             AluRegisters secondOperandRegister,
+                             AluRegisters finalResultRegister);
+
+    static void encodeAluAnd(MI_MATH_ALU_INST_INLINE *pAluParam,
                              AluRegisters firstOperandRegister,
                              AluRegisters secondOperandRegister,
                              AluRegisters finalResultRegister);
@@ -133,6 +173,7 @@ struct EncodeIndirectParams {
     using MI_MATH = typename GfxFamily::MI_MATH;
     using MI_MATH_ALU_INST_INLINE = typename GfxFamily::MI_MATH_ALU_INST_INLINE;
     static void setGroupCountIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset offsets[3], void *crossThreadAddress);
+    static void setWorkDimIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset offset, void *crossThreadAddress, const uint32_t *groupSize);
     static void setGlobalWorkSizeIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset offsets[3], void *crossThreadAddress, const uint32_t *lws);
 
     static size_t getCmdsSizeForIndirectParams();
@@ -177,6 +218,8 @@ template <typename GfxFamily>
 struct EncodeStateBaseAddress {
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
     static void encode(CommandContainer &container, STATE_BASE_ADDRESS &sbaCmd);
+    static void encode(CommandContainer &container, STATE_BASE_ADDRESS &sbaCmd, uint32_t statelessMocsIndex, bool useGlobalAtomics);
+    static size_t getRequiredSizeForStateBaseAddress(Device &device, CommandContainer &container);
 };
 
 template <typename GfxFamily>
@@ -198,20 +241,20 @@ struct EncodeSurfaceState {
     using R_SURFACE_STATE = typename GfxFamily::RENDER_SURFACE_STATE;
     using SURFACE_FORMAT = typename R_SURFACE_STATE::SURFACE_FORMAT;
     using AUXILIARY_SURFACE_MODE = typename R_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
+    using COHERENCY_TYPE = typename R_SURFACE_STATE::COHERENCY_TYPE;
 
     static void encodeBuffer(void *dst, uint64_t address, size_t size, uint32_t mocs,
                              bool cpuCoherent, bool forceNonAuxMode, bool isReadOnly, uint32_t numAvailableDevices,
-                             GraphicsAllocation *allocation, GmmHelper *gmmHelper);
+                             GraphicsAllocation *allocation, GmmHelper *gmmHelper, bool useGlobalAtomics, bool areMultipleSubDevicesInContext);
     static void encodeExtraBufferParams(R_SURFACE_STATE *surfaceState, GraphicsAllocation *allocation, GmmHelper *gmmHelper,
-                                        bool isReadOnly, uint32_t numAvailableDevices);
+                                        bool isReadOnly, uint32_t numAvailableDevices, bool useGlobalAtomics, bool areMultipleSubDevicesInContext);
+    static void encodeExtraCacheSettings(R_SURFACE_STATE *surfaceState, const HardwareInfo &hwInfo);
 
     static constexpr uintptr_t getSurfaceBaseAddressAlignmentMask() {
         return ~(getSurfaceBaseAddressAlignment() - 1);
     }
 
-    static constexpr uintptr_t getSurfaceBaseAddressMinimumAlignment() { return 4; }
-
-    static constexpr uintptr_t getSurfaceBaseAddressAlignment() { return MemoryConstants::pageSize; }
+    static constexpr uintptr_t getSurfaceBaseAddressAlignment() { return 4; }
 
     static void getSshAlignedPointer(uintptr_t &ptr, size_t &offset);
     static bool doBindingTablePrefetch();
@@ -219,14 +262,24 @@ struct EncodeSurfaceState {
     static size_t pushBindingTableAndSurfaceStates(IndirectHeap &dstHeap, size_t bindingTableCount,
                                                    const void *srcKernelSsh, size_t srcKernelSshSize,
                                                    size_t numberOfBindingTableStates, size_t offsetOfBindingTable);
+
+    static void appendImageCompressionParams(R_SURFACE_STATE *surfaceState, GraphicsAllocation *allocation, GmmHelper *gmmHelper, bool imageFromBuffer);
+    static void setCoherencyType(R_SURFACE_STATE *surfaceState, COHERENCY_TYPE coherencyType);
+    static void setBufferAuxParamsForCCS(R_SURFACE_STATE *surfaceState);
+    static void setImageAuxParamsForCCS(R_SURFACE_STATE *surfaceState, Gmm *gmm);
+    static bool isAuxModeEnabled(R_SURFACE_STATE *surfaceState, Gmm *gmm);
+    static void setAuxParamsForMCSCCS(R_SURFACE_STATE *surfaceState);
+    static void setClearColorParams(R_SURFACE_STATE *surfaceState, Gmm *gmm);
+    static void setFlagsForMediaCompression(R_SURFACE_STATE *surfaceState, Gmm *gmm);
+    static void disableCompressionFlags(R_SURFACE_STATE *surfaceState);
+    static void appendParamsForImageFromBuffer(R_SURFACE_STATE *surfaceState);
 };
 
 template <typename GfxFamily>
 struct EncodeComputeMode {
-    using STATE_COMPUTE_MODE = typename GfxFamily::STATE_COMPUTE_MODE;
-    static void adjustComputeMode(LinearStream &csr, uint32_t numGrfRequired, void *const stateComputeModePtr, bool isMultiOsContextCapable);
+    static void adjustComputeMode(LinearStream &csr, void *const stateComputeModePtr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo);
 
-    static void adjustPipelineSelect(CommandContainer &container, uint32_t numGrfRequired);
+    static void adjustPipelineSelect(CommandContainer &container, const NEO::KernelDescriptor &kernelDescriptor);
 };
 
 template <typename GfxFamily>
@@ -273,14 +326,20 @@ struct EncodeAtomic {
                                 ATOMIC_OPCODES opcode,
                                 DATA_SIZE dataSize,
                                 uint32_t returnDataControl,
-                                uint32_t csStall);
+                                uint32_t csStall,
+                                uint32_t operand1dword0,
+                                uint32_t operand1dword1);
 
     static void programMiAtomic(MI_ATOMIC *atomic,
                                 uint64_t writeAddress,
                                 ATOMIC_OPCODES opcode,
                                 DATA_SIZE dataSize,
                                 uint32_t returnDataControl,
-                                uint32_t csStall);
+                                uint32_t csStall,
+                                uint32_t operand1dword0,
+                                uint32_t operand1dword1);
+
+    static void setMiAtomicAddress(MI_ATOMIC &atomic, uint64_t writeAddress);
 };
 
 template <typename GfxFamily>
@@ -297,7 +356,7 @@ struct EncodeBatchBufferStartOrEnd {
 template <typename GfxFamily>
 struct EncodeMiFlushDW {
     using MI_FLUSH_DW = typename GfxFamily::MI_FLUSH_DW;
-    static void programMiFlushDw(LinearStream &commandStream, uint64_t immediateDataGpuAddress, uint64_t immediateData, bool timeStampOperation, bool commandWithPostSync);
+    static void programMiFlushDw(LinearStream &commandStream, uint64_t immediateDataGpuAddress, uint64_t immediateData, MiFlushArgs &args);
     static void programMiFlushDwWA(LinearStream &commandStream);
     static void appendMiFlushDw(MI_FLUSH_DW *miFlushDwCmd);
     static size_t getMiFlushDwCmdSizeForDataWrite();
@@ -306,7 +365,21 @@ struct EncodeMiFlushDW {
 
 template <typename GfxFamily>
 struct EncodeMemoryPrefetch {
-    static void programMemoryPrefetch(LinearStream &commandStream, const GraphicsAllocation &graphicsAllocation, uint32_t size, const HardwareInfo &hwInfo);
-    static size_t getSizeForMemoryPrefetch();
+    static void programMemoryPrefetch(LinearStream &commandStream, const GraphicsAllocation &graphicsAllocation, uint32_t size, size_t offset, const HardwareInfo &hwInfo);
+    static size_t getSizeForMemoryPrefetch(size_t size);
 };
+
+template <typename GfxFamily>
+struct EncodeMiArbCheck {
+    using MI_ARB_CHECK = typename GfxFamily::MI_ARB_CHECK;
+
+    static void program(LinearStream &commandStream);
+    static size_t getCommandSize();
+};
+
+template <typename GfxFamily>
+struct EncodeEnableRayTracing {
+    static void programEnableRayTracing(LinearStream &commandStream, GraphicsAllocation &backBuffer);
+};
+
 } // namespace NEO

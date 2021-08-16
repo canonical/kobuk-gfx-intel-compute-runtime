@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -95,13 +95,6 @@ zeDeviceCanAccessPeer(
 }
 
 ZE_APIEXPORT ze_result_t ZE_APICALL
-zeDeviceSetLastLevelCacheConfig(
-    ze_device_handle_t hDevice,
-    ze_cache_config_flags_t cacheConfig) {
-    return L0::Device::fromHandle(hDevice)->setLastLevelCacheConfig(cacheConfig);
-}
-
-ZE_APIEXPORT ze_result_t ZE_APICALL
 zeDeviceGetCommandQueueGroupProperties(
     ze_device_handle_t hDevice,
     uint32_t *pCount,
@@ -120,4 +113,29 @@ ZE_APIEXPORT ze_result_t ZE_APICALL
 zeDeviceGetStatus(
     ze_device_handle_t hDevice) {
     return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+}
+
+ZE_APIEXPORT ze_result_t ZE_APICALL
+zeDeviceGetGlobalTimestamps(
+    ze_device_handle_t hDevice,
+    uint64_t *hostTimestamp,
+    uint64_t *deviceTimestamp) {
+    return L0::Device::fromHandle(hDevice)->getGlobalTimestamps(hostTimestamp, deviceTimestamp);
+}
+
+ZE_APIEXPORT ze_result_t ZE_APICALL
+zeDeviceReserveCacheExt(
+    ze_device_handle_t hDevice,
+    size_t cacheLevel,
+    size_t cacheReservationSize) {
+    return L0::Device::fromHandle(hDevice)->reserveCache(cacheLevel, cacheReservationSize);
+}
+
+ZE_APIEXPORT ze_result_t ZE_APICALL
+zeDeviceSetCacheAdviceExt(
+    ze_device_handle_t hDevice,
+    void *ptr,
+    size_t regionSize,
+    ze_cache_ext_region_t cacheRegion) {
+    return L0::Device::fromHandle(hDevice)->setCacheAdvice(ptr, regionSize, cacheRegion);
 }

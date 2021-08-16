@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -26,12 +26,13 @@ static constexpr ConstStringRef fastRelaxedMath = "-cl-fast-relaxed-math";
 static constexpr ConstStringRef preserveVec3Type = "-fpreserve-vec3-type";
 static constexpr ConstStringRef createLibrary = "-create-library";
 static constexpr ConstStringRef generateDebugInfo = "-g";
-static constexpr ConstStringRef bindlessBuffers = "-cl-intel-use-bindless-buffers";
-static constexpr ConstStringRef bindlessImages = "-cl-intel-use-bindless-images";
+static constexpr ConstStringRef bindlessMode = "-cl-intel-use-bindless-mode";
 static constexpr ConstStringRef uniformWorkgroupSize = "-cl-uniform-work-group-size";
 static constexpr ConstStringRef forceEmuInt32DivRem = "-cl-intel-force-emu-int32divrem";
 static constexpr ConstStringRef forceEmuInt32DivRemSP = "-cl-intel-force-emu-sp-int32divrem";
 static constexpr ConstStringRef allowZebin = "-allow-zebin";
+static constexpr ConstStringRef enableImageSupport = "-D__IMAGE_SUPPORT__=1";
+static constexpr ConstStringRef optLevel = "-ze-opt-level=O";
 
 constexpr size_t nullterminateSize = 1U;
 constexpr size_t spaceSeparatorSize = 1U;
@@ -71,7 +72,7 @@ constexpr size_t concatenationLength(const T &t) {
 }
 
 template <typename T, typename... RestT>
-constexpr size_t concatenationLength(const T &arg, const RestT &... rest) {
+constexpr size_t concatenationLength(const T &arg, const RestT &...rest) {
     return length(arg) + spaceSeparatorSize + concatenationLength(rest...);
 }
 
@@ -84,13 +85,13 @@ inline void concatenateAppend(ContainerT &out, T &&arg) {
 }
 
 template <typename ContainerT, typename T, typename... RestT>
-inline void concatenateAppend(ContainerT &out, T &&arg, RestT &&... rest) {
+inline void concatenateAppend(ContainerT &out, T &&arg, RestT &&...rest) {
     concatenateAppend(out, std::forward<T>(arg));
     concatenateAppend(out, std::forward<RestT>(rest)...);
 }
 
 template <typename T, typename... RestT>
-inline std::string concatenate(T &&arg, RestT &&... rest) {
+inline std::string concatenate(T &&arg, RestT &&...rest) {
     std::string ret;
     ret.reserve(nullterminateSize + concatenationLength(arg, rest...));
     concatenateAppend(ret, std::forward<T>(arg), std::forward<RestT>(rest)...);

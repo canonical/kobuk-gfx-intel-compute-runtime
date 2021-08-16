@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -90,6 +90,10 @@ GEN12LPTEST_F(Gen12LpDeviceCaps, givenGen12LpWhenCheckingImageSupportThenReturnT
     EXPECT_TRUE(pDevice->getHardwareInfo().capabilityTable.supportsImages);
 }
 
+GEN12LPTEST_F(Gen12LpDeviceCaps, givenGen12LpWhenCheckingMediaBlockSupportThenReturnTrue) {
+    EXPECT_TRUE(pDevice->getHardwareInfo().capabilityTable.supportsMediaBlock);
+}
+
 GEN12LPTEST_F(Gen12LpDeviceCaps, givenGen12LpWhenCheckingCoherencySupportThenReturnFalse) {
     EXPECT_FALSE(pDevice->getHardwareInfo().capabilityTable.ftrSupportsCoherency);
 }
@@ -110,7 +114,7 @@ using TglLpUsDeviceIdTest = Test<ClDeviceFixture>;
 
 HWTEST2_F(TglLpUsDeviceIdTest, WhenCheckingSimulationCapThenResultIsCorrect, IsTGLLP) {
     unsigned short tglLpSimulationIds[2] = {
-        DEV_ID_FF20,
+        0xFF20,
         0, // default, non-simulation
     };
     NEO::MockDevice *mockDevice = nullptr;

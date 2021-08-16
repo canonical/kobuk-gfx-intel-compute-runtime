@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,9 +7,9 @@
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/gmm_helper/gmm.h"
+#include "shared/test/common/fixtures/mock_execution_environment_gmm_fixture.h"
+#include "shared/test/common/mocks/mock_execution_environment.h"
 
-#include "opencl/test/unit_test/fixtures/mock_execution_environment_gmm_fixture.h"
-#include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/os_interface/windows/mock_wddm_allocation.h"
 #include "opencl/test/unit_test/utilities/file_logger_tests.h"
 #include "test.h"
@@ -33,6 +33,7 @@ TEST_F(FileLoggerTests, GivenLogAllocationMemoryPoolFlagThenLogsCorrectInfo) {
     allocation.setAllocationType(GraphicsAllocation::AllocationType::BUFFER);
     allocation.memoryPool = MemoryPool::System64KBPages;
     allocation.getDefaultGmm()->resourceParams.Flags.Info.NonLocalOnly = 0;
+    allocation.setGpuAddress(0x12345);
 
     fileLogger.logAllocation(&allocation);
 
@@ -44,11 +45,19 @@ TEST_F(FileLoggerTests, GivenLogAllocationMemoryPoolFlagThenLogsCorrectInfo) {
     std::stringstream memoryPoolCheck;
     memoryPoolCheck << " MemoryPool: " << allocation.getMemoryPool();
 
+    std::stringstream gpuAddressCheck;
+    gpuAddressCheck << " GPU address: 0x" << std::hex << allocation.getGpuAddress();
+
+    std::stringstream rootDeviceIndexCheck;
+    rootDeviceIndexCheck << " Root device index: " << allocation.getRootDeviceIndex();
+
     if (fileLogger.wasFileCreated(fileLogger.getLogFileName())) {
         auto str = fileLogger.getFileString(fileLogger.getLogFileName());
         EXPECT_TRUE(str.find(threadIDCheck.str()) != std::string::npos);
         EXPECT_TRUE(str.find("Handle: 4") != std::string::npos);
         EXPECT_TRUE(str.find(memoryPoolCheck.str()) != std::string::npos);
+        EXPECT_TRUE(str.find(gpuAddressCheck.str()) != std::string::npos);
+        EXPECT_TRUE(str.find(rootDeviceIndexCheck.str()) != std::string::npos);
         EXPECT_TRUE(str.find("AllocationType: BUFFER") != std::string::npos);
     }
 }

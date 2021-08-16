@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,4 +17,7 @@
 #endif
 #ifdef SUPPORT_GEN12LP
 #include "shared/source/gen12lp/aub_mapper.h"
+#endif
+#ifdef SUPPORT_XE_HP_CORE
+#include "shared/source/xe_hp_core/aub_mapper.h"
 #endif

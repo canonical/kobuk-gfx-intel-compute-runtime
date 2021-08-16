@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -47,9 +47,9 @@ void PerformanceCountersFixture::createPerfCounters() {
 void PerformanceCountersFixture::SetUp() {
     device = std::make_unique<MockClDevice>(new MockDevice());
     context = std::make_unique<MockContext>(device.get());
-    queue = std::make_unique<MockCommandQueue>(context.get(), device.get(), &queueProperties);
+    queue = std::make_unique<MockCommandQueue>(context.get(), device.get(), &queueProperties, false);
     osInterface = std::unique_ptr<OSInterface>(new OSInterface());
-    osInterface->get()->setDrm(new DrmMock(*device->getExecutionEnvironment()->rootDeviceEnvironments[0]));
+    osInterface->setDriverModel(std::unique_ptr<DriverModel>(new DrmMock(*device->getExecutionEnvironment()->rootDeviceEnvironments[0])));
     device->setOSTime(new MockOSTimeLinux(osInterface.get()));
 }
 

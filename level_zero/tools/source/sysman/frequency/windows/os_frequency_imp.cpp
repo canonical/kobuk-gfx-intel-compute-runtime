@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -48,12 +48,25 @@ ze_result_t WddmFrequencyImp::osFrequencyGetProperties(zes_freq_properties_t &pr
         properties.max = static_cast<double>(value);
     }
 
+    request.requestId = KmdSysman::Requests::Frequency::CanControlFrequency;
+    request.paramInfo = static_cast<uint32_t>(frequencyDomainNumber);
+
+    properties.canControl = false;
+    if (pKmdSysManager->requestSingle(request, response) == ZE_RESULT_SUCCESS) {
+        value = 0;
+        memcpy_s(&value, sizeof(uint32_t), response.dataBuffer, sizeof(uint32_t));
+        properties.canControl = (value == 1);
+    }
+
     properties.onSubdevice = false;
     properties.subdeviceId = 0;
     properties.type = frequencyDomainNumber;
-    properties.canControl = canControl();
 
     return ZE_RESULT_SUCCESS;
+}
+
+double WddmFrequencyImp::osFrequencyGetStepSize() {
+    return 50.0 / 3; // Step of 16.6666667 Mhz (GEN9 Hardcode);
 }
 
 ze_result_t WddmFrequencyImp::osFrequencyGetRange(zes_freq_range_t *pLimits) {
@@ -140,15 +153,6 @@ ze_result_t WddmFrequencyImp::osFrequencyGetState(zes_freq_state_t *pState) {
 
 ze_result_t WddmFrequencyImp::osFrequencyGetThrottleTime(zes_freq_throttle_time_t *pThrottleTime) {
     return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-}
-
-bool WddmFrequencyImp::canControl() {
-    double minF = 0.0, maxF = 0.0;
-    if (getRange(&minF, &maxF) != ZE_RESULT_SUCCESS) {
-        return false;
-    }
-
-    return (setRange(minF, maxF) == ZE_RESULT_SUCCESS);
 }
 
 ze_result_t WddmFrequencyImp::getOcCapabilities(zes_oc_capabilities_t *pOcCapabilities) {
@@ -241,19 +245,8 @@ ze_result_t WddmFrequencyImp::getOcMode(zes_oc_mode_t *pCurrentOcMode) {
 
     request.commandId = KmdSysman::Command::Get;
     request.componentId = KmdSysman::Component::FrequencyComponent;
-    request.requestId = KmdSysman::Requests::Frequency::CurrentFixedMode;
-    request.paramInfo = static_cast<uint32_t>(this->frequencyDomainNumber);
-
-    status = pKmdSysManager->requestSingle(request, response);
-
-    if (status != ZE_RESULT_SUCCESS) {
-        return status;
-    }
-
-    memcpy_s(&value, sizeof(uint32_t), response.dataBuffer, sizeof(uint32_t));
-    currentFixedMode = value ? ZES_OC_MODE_FIXED : ZES_OC_MODE_OFF;
-
     request.requestId = KmdSysman::Requests::Frequency::CurrentVoltageMode;
+    request.paramInfo = static_cast<uint32_t>(this->frequencyDomainNumber);
 
     status = pKmdSysManager->requestSingle(request, response);
 
@@ -264,39 +257,24 @@ ze_result_t WddmFrequencyImp::getOcMode(zes_oc_mode_t *pCurrentOcMode) {
     memcpy_s(&value, sizeof(uint32_t), response.dataBuffer, sizeof(uint32_t));
     currentVoltageMode = value ? ZES_OC_MODE_OVERRIDE : ZES_OC_MODE_INTERPOLATIVE;
 
-    if (currentFixedMode == ZES_OC_MODE_FIXED) {
-        currentOcMode = ZES_OC_MODE_FIXED;
-    } else {
-        currentOcMode = currentVoltageMode;
-    }
-
-    *pCurrentOcMode = currentOcMode;
+    *pCurrentOcMode = currentVoltageMode;
 
     return status;
 }
 
 ze_result_t WddmFrequencyImp::setOcMode(zes_oc_mode_t currentOcMode) {
-    if (currentOcMode == ZES_OC_MODE_OFF) {
-        this->currentFrequencyTarget = ocCapabilities.maxFactoryDefaultFrequency;
-        this->currentVoltageTarget = ocCapabilities.maxFactoryDefaultVoltage;
-        this->currentVoltageOffset = 0;
-        this->currentFixedMode = ZES_OC_MODE_OFF;
+    if (currentOcMode == ZES_OC_MODE_FIXED) {
         this->currentVoltageMode = ZES_OC_MODE_INTERPOLATIVE;
-        this->currentOcMode = ZES_OC_MODE_OFF;
-        return applyOcSettings();
+        return ze_result_t::ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION;
     }
 
-    if (currentOcMode == ZES_OC_MODE_FIXED) {
-        this->currentOcMode = ZES_OC_MODE_FIXED;
-        this->currentFixedMode = ZES_OC_MODE_FIXED;
-        this->currentVoltageMode = ZES_OC_MODE_OVERRIDE;
+    if (currentOcMode == ZES_OC_MODE_OFF) {
+        this->currentVoltageMode = ZES_OC_MODE_INTERPOLATIVE;
         return applyOcSettings();
     }
 
     if (currentOcMode == ZES_OC_MODE_INTERPOLATIVE || currentOcMode == ZES_OC_MODE_OVERRIDE) {
         this->currentVoltageMode = currentOcMode;
-        this->currentFixedMode = ZES_OC_MODE_OFF;
-        this->currentOcMode = currentOcMode;
         return applyOcSettings();
     }
 
@@ -439,7 +417,8 @@ ze_result_t WddmFrequencyImp::applyOcSettings() {
     request.paramInfo = static_cast<uint32_t>(this->frequencyDomainNumber);
     request.dataSize = sizeof(int32_t);
 
-    value = (currentFixedMode == ZES_OC_MODE_FIXED) ? 1 : 0;
+    // Fixed mode not supported.
+    value = 0;
     memcpy_s(request.dataBuffer, sizeof(int32_t), &value, sizeof(int32_t));
 
     status = pKmdSysManager->requestSingle(request, response);
@@ -574,13 +553,6 @@ void WddmFrequencyImp::readOverclockingInfo() {
         ocCapabilities.maxOcVoltage = static_cast<double>(value);
     }
 
-    request.requestId = KmdSysman::Requests::Frequency::CurrentFixedMode;
-
-    if (pKmdSysManager->requestSingle(request, response) == ZE_RESULT_SUCCESS) {
-        memcpy_s(&value, sizeof(uint32_t), response.dataBuffer, sizeof(uint32_t));
-        currentFixedMode = value ? ZES_OC_MODE_FIXED : ZES_OC_MODE_OFF;
-    }
-
     request.requestId = KmdSysman::Requests::Frequency::CurrentFrequencyTarget;
 
     if (pKmdSysManager->requestSingle(request, response) == ZE_RESULT_SUCCESS) {
@@ -617,12 +589,6 @@ void WddmFrequencyImp::readOverclockingInfo() {
         if (currentVoltageTarget == 0.0) {
             currentVoltageTarget = ocCapabilities.maxFactoryDefaultVoltage;
         }
-    }
-
-    if (currentFixedMode == ZES_OC_MODE_FIXED) {
-        currentOcMode = ZES_OC_MODE_FIXED;
-    } else {
-        currentOcMode = currentVoltageMode;
     }
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,14 +10,16 @@
 #include "shared/source/helpers/constants.h"
 #include "shared/source/os_interface/windows/gdi_interface.h"
 #include "shared/source/os_interface/windows/os_context_win.h"
+#include "shared/source/os_interface/windows/wddm/um_km_data_translator.h"
 #include "shared/source/os_interface/windows/wddm/wddm.h"
+#include "shared/source/os_interface/windows/windows_wrapper.h"
 
 using namespace NEO;
 
 bool WddmInterface::createMonitoredFence(MonitoredFence &monitorFence) {
     NTSTATUS status = STATUS_SUCCESS;
     D3DKMT_CREATESYNCHRONIZATIONOBJECT2 CreateSynchronizationObject = {0};
-    CreateSynchronizationObject.hDevice = wddm.getDevice();
+    CreateSynchronizationObject.hDevice = wddm.getDeviceHandle();
     CreateSynchronizationObject.Info.Type = D3DDDI_MONITORED_FENCE;
     CreateSynchronizationObject.Info.MonitoredFence.InitialFenceValue = 0;
 
@@ -31,10 +33,9 @@ bool WddmInterface::createMonitoredFence(MonitoredFence &monitorFence) {
     return status == STATUS_SUCCESS;
 }
 void WddmInterface::destroyMonitorFence(D3DKMT_HANDLE fenceHandle) {
-    NTSTATUS status = STATUS_SUCCESS;
     D3DKMT_DESTROYSYNCHRONIZATIONOBJECT destroySyncObject = {0};
     destroySyncObject.hSyncObject = fenceHandle;
-    status = wddm.getGdi()->destroySynchronizationObject(&destroySyncObject);
+    [[maybe_unused]] NTSTATUS status = wddm.getGdi()->destroySynchronizationObject(&destroySyncObject);
     DEBUG_BREAK_IF(STATUS_SUCCESS != status);
 }
 
@@ -57,7 +58,7 @@ void WddmInterface20::destroyMonitorFence(MonitoredFence &monitorFence) {
     WddmInterface::destroyMonitorFence(monitorFence.fenceHandle);
 }
 
-const bool WddmInterface20::hwQueuesSupported() {
+bool WddmInterface20::hwQueuesSupported() {
     return false;
 }
 
@@ -77,8 +78,17 @@ bool WddmInterface20::submit(uint64_t commandBuffer, size_t size, void *commandH
     pHeader->MonitorFenceValue = submitArguments.monitorFence->currentFenceValue;
 
     // Note: Private data should be the CPU VA Address
-    SubmitCommand.pPrivateDriverData = commandHeader;
-    SubmitCommand.PrivateDriverDataSize = sizeof(COMMAND_BUFFER_HEADER);
+    UmKmDataTempStorage<COMMAND_BUFFER_HEADER> internalRepresentation;
+    if (wddm.getHwDeviceId()->getUmKmDataTranslator()->enabled()) {
+        internalRepresentation.resize(wddm.getHwDeviceId()->getUmKmDataTranslator()->getSizeForCommandBufferHeaderDataInternalRepresentation());
+        bool translated = wddm.getHwDeviceId()->getUmKmDataTranslator()->tranlateCommandBufferHeaderDataToInternalRepresentation(internalRepresentation.data(), internalRepresentation.size(), *pHeader);
+        UNRECOVERABLE_IF(false == translated);
+        SubmitCommand.pPrivateDriverData = internalRepresentation.data();
+        SubmitCommand.PrivateDriverDataSize = static_cast<uint32_t>(internalRepresentation.size());
+    } else {
+        SubmitCommand.pPrivateDriverData = pHeader;
+        SubmitCommand.PrivateDriverDataSize = sizeof(COMMAND_BUFFER_HEADER);
+    }
 
     status = wddm.getGdi()->submitCommand(&SubmitCommand);
 
@@ -94,7 +104,7 @@ bool WddmInterface23::createHwQueue(OsContextWin &osContext) {
 
     createHwQueue.hHwContext = osContext.getWddmContextHandle();
     if (osContext.getPreemptionMode() >= PreemptionMode::MidBatch) {
-        createHwQueue.Flags.DisableGpuTimeout = wddm.readEnablePreemptionRegKey();
+        createHwQueue.Flags.DisableGpuTimeout = wddm.getEnablePreemptionRegValue();
     }
 
     auto status = wddm.getGdi()->createHwQueue(&createHwQueue);
@@ -122,12 +132,12 @@ void WddmInterface23::destroyHwQueue(D3DKMT_HANDLE hwQueue) {
         D3DKMT_DESTROYHWQUEUE destroyHwQueue = {};
         destroyHwQueue.hHwQueue = hwQueue;
 
-        auto status = wddm.getGdi()->destroyHwQueue(&destroyHwQueue);
+        [[maybe_unused]] auto status = wddm.getGdi()->destroyHwQueue(&destroyHwQueue);
         DEBUG_BREAK_IF(status != STATUS_SUCCESS);
     }
 }
 
-const bool WddmInterface23::hwQueuesSupported() {
+bool WddmInterface23::hwQueuesSupported() {
     return true;
 }
 

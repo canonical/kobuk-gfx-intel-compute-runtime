@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -29,11 +29,32 @@ uint64_t DrmAllocation::peekInternalHandle(MemoryManager *memoryManager) {
     return static_cast<uint64_t>((static_cast<DrmMemoryManager *>(memoryManager))->obtainFdFromHandle(getBO()->peekHandle(), this->rootDeviceIndex));
 }
 
+bool DrmAllocation::setCacheAdvice(Drm *drm, size_t regionSize, CacheRegion regionIndex) {
+    if (!drm->getCacheInfo()->getCacheRegion(regionSize, regionIndex)) {
+        return false;
+    }
+
+    if (fragmentsStorage.fragmentCount > 0) {
+        for (uint32_t i = 0; i < fragmentsStorage.fragmentCount; i++) {
+            auto bo = static_cast<OsHandleLinux *>(fragmentsStorage.fragmentStorageData[i].osHandleStorage)->bo;
+            bo->setCacheRegion(regionIndex);
+        }
+        return true;
+    }
+
+    for (auto bo : bufferObjects) {
+        if (bo != nullptr) {
+            bo->setCacheRegion(regionIndex);
+        }
+    }
+    return true;
+}
+
 void DrmAllocation::makeBOsResident(OsContext *osContext, uint32_t vmHandleId, std::vector<BufferObject *> *bufferObjects, bool bind) {
     if (this->fragmentsStorage.fragmentCount) {
         for (unsigned int f = 0; f < this->fragmentsStorage.fragmentCount; f++) {
             if (!this->fragmentsStorage.fragmentStorageData[f].residency->resident[osContext->getContextId()]) {
-                bindBO(this->fragmentsStorage.fragmentStorageData[f].osHandleStorage->bo, osContext, vmHandleId, bufferObjects, bind);
+                bindBO(static_cast<OsHandleLinux *>(this->fragmentsStorage.fragmentStorageData[f].osHandleStorage)->bo, osContext, vmHandleId, bufferObjects, bind);
                 this->fragmentsStorage.fragmentStorageData[f].residency->resident[osContext->getContextId()] = true;
             }
         }
@@ -107,14 +128,34 @@ void DrmAllocation::registerBOBindExtHandle(Drm *drm) {
                     bo->addBindExtHandle(cookieHandle);
                     registeredBoBindHandles.push_back(cookieHandle);
                 }
+
+                bo->requireImmediateBinding(true);
             }
         }
     }
 }
 
+void DrmAllocation::linkWithRegisteredHandle(uint32_t handle) {
+    auto &bos = getBOs();
+    for (auto bo : bos) {
+        if (bo) {
+            bo->addBindExtHandle(handle);
+        }
+    }
+}
+
 void DrmAllocation::freeRegisteredBOBindExtHandles(Drm *drm) {
-    for (auto &i : registeredBoBindHandles) {
-        drm->unregisterResource(i);
+    for (auto it = registeredBoBindHandles.rbegin(); it != registeredBoBindHandles.rend(); ++it) {
+        drm->unregisterResource(*it);
+    }
+}
+
+void DrmAllocation::markForCapture() {
+    auto &bos = getBOs();
+    for (auto bo : bos) {
+        if (bo) {
+            bo->markForCapture();
+        }
     }
 }
 } // namespace NEO

@@ -1,12 +1,12 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/helpers/timestamp_packet.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/event/async_events_handler.h"
@@ -50,7 +50,7 @@ class AsyncEventsHandlerTests : public ::testing::Test {
         handler.reset(new MockHandler());
         context = make_releaseable<NiceMock<MockContext>>();
 
-        commandQueue = make_releaseable<MockCommandQueue>(context.get(), context->getDevice(0), nullptr);
+        commandQueue = make_releaseable<MockCommandQueue>(context.get(), context->getDevice(0), nullptr, false);
 
         *(commandQueue->getGpgpuCommandStreamReceiver().getTagAddress()) = 0;
 

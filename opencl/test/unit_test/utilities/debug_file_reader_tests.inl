@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -78,7 +78,7 @@ TEST(SettingsFileReader, WhenGettingSettingThenCorrectStringValueIsReturned) {
             EXPECT_TRUE(true);                                                    \
         }                                                                         \
     }
-#include "opencl/test/unit_test/helpers/test_debug_variables.inl"
+#include "shared/test/unit_test/helpers/test_debug_variables.inl"
 #undef DECLARE_DEBUG_VARIABLE
 }
 
@@ -89,7 +89,11 @@ TEST(SettingsFileReader, givenDebugFileSettingInWhichStringIsFollowedByIntegerWh
     int32_t retValue = 0;
     int32_t returnedIntValue = reader->getSetting("IntTestKey", retValue);
 
-    EXPECT_EQ(1, returnedIntValue);
+    EXPECT_EQ(123, returnedIntValue);
+
+    int32_t returnedIntValueHex = reader->getSetting("IntTestKeyHex", 0);
+
+    EXPECT_EQ(0xABCD, returnedIntValueHex);
 
     std::string retValueString;
     std::string returnedStringValue = reader->getSetting("StringTestKey", retValueString);
@@ -119,7 +123,7 @@ TEST(SettingsFileReader, GivenSettingNotInFileWhenGettingSettingThenProvidedDefa
     EXPECT_EQ(defaultStringValue, returnedStringValue);
 }
 
-TEST(SettingsFileReader, WhenGettingAppSpecificLocationTheCorrectLocationIsReturned) {
+TEST(SettingsFileReader, WhenGettingAppSpecificLocationThenCorrectLocationIsReturned) {
     std::unique_ptr<TestSettingsFileReader> reader(new TestSettingsFileReader(TestSettingsFileReader::testPath));
     std::string appSpecific = "cl_cache_dir";
     EXPECT_EQ(appSpecific, reader->appSpecificLocation(appSpecific));

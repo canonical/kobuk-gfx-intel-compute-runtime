@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -27,6 +27,7 @@
 #include "opencl/source/event/event_builder.h"
 #include "opencl/source/event/user_event.h"
 #include "opencl/source/gtpin/gtpin_notify.h"
+#include "opencl/source/helpers/cl_hw_helper.h"
 #include "opencl/source/helpers/convert_color.h"
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/helpers/mipmap.h"
@@ -37,6 +38,7 @@
 
 #include "CL/cl_ext.h"
 
+#include <limits>
 #include <map>
 
 namespace NEO {
@@ -57,7 +59,7 @@ CommandQueue *CommandQueue::create(Context *context,
     return funcCreate(context, device, properties, internalUsage);
 }
 
-CommandQueue::CommandQueue(Context *context, ClDevice *device, const cl_queue_properties *properties)
+CommandQueue::CommandQueue(Context *context, ClDevice *device, const cl_queue_properties *properties, bool internalUsage)
     : context(context), device(device) {
     if (context) {
         context->incRefInternal();
@@ -67,14 +69,24 @@ CommandQueue::CommandQueue(Context *context, ClDevice *device, const cl_queue_pr
     flushStamp.reset(new FlushStampTracker(true));
 
     if (device) {
-        auto hwInfo = device->getHardwareInfo();
+        auto &hwInfo = device->getHardwareInfo();
+        auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+
         gpgpuEngine = &device->getDefaultEngine();
-        if (hwInfo.capabilityTable.blitterOperationsSupported || gpgpuEngine->commandStreamReceiver->peekTimestampPacketWriteEnabled()) {
+        UNRECOVERABLE_IF(gpgpuEngine->getEngineType() >= aub_stream::EngineType::NUM_ENGINES);
+
+        bool bcsAllowed = hwInfo.capabilityTable.blitterOperationsSupported &&
+                          hwHelper.isSubDeviceEngineSupported(hwInfo, device->getDeviceBitfield(), aub_stream::EngineType::ENGINE_BCS);
+
+        if (bcsAllowed || gpgpuEngine->commandStreamReceiver->peekTimestampPacketWriteEnabled()) {
             timestampPacketContainer = std::make_unique<TimestampPacketContainer>();
+            deferredTimestampPackets = std::make_unique<TimestampPacketContainer>();
         }
-        if (hwInfo.capabilityTable.blitterOperationsSupported) {
-            auto &selectorCopyEngine = device->getDeviceById(0)->getSelectorCopyEngine();
-            bcsEngine = &device->getDeviceById(0)->getEngine(EngineHelpers::getBcsEngineType(hwInfo, selectorCopyEngine), false, false);
+        if (bcsAllowed) {
+            auto &neoDevice = device->getDeviceById(0)->getDevice();
+            auto &selectorCopyEngine = neoDevice.getSelectorCopyEngine();
+            auto bcsEngineType = EngineHelpers::getBcsEngineType(hwInfo, selectorCopyEngine, internalUsage);
+            bcsEngine = neoDevice.tryGetEngine(bcsEngineType, EngineUsage::Regular);
         }
     }
 
@@ -98,6 +110,11 @@ CommandQueue::~CommandQueue() {
 
         if (this->perfCountersEnabled) {
             device->getPerformanceCounters()->shutdown();
+        }
+
+        if (bcsEngine) {
+            auto &selectorCopyEngine = device->getDeviceById(0)->getSelectorCopyEngine();
+            EngineHelpers::releaseBcsEngineType(bcsEngine->getEngineType(), selectorCopyEngine);
         }
     }
 
@@ -155,6 +172,15 @@ bool CommandQueue::isCompleted(uint32_t gpgpuTaskCount, uint32_t bcsTaskCount) c
     }
 
     return false;
+}
+
+void CommandQueue::waitForLatestTaskCount() {
+    TimestampPacketContainer nodesToRelease;
+    if (deferredTimestampPackets) {
+        deferredTimestampPackets->swapNodes(nodesToRelease);
+    }
+
+    waitUntilComplete(taskCount, bcsTaskCount, flushStamp->peekStamp(), false);
 }
 
 void CommandQueue::waitUntilComplete(uint32_t gpgpuTaskCountToWait, uint32_t bcsTaskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) {
@@ -527,14 +553,65 @@ void CommandQueue::enqueueBlockedMapUnmapOperation(const cl_event *eventWaitList
 bool CommandQueue::setupDebugSurface(Kernel *kernel) {
     auto debugSurface = getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation();
 
-    DEBUG_BREAK_IF(!kernel->requiresSshForBuffers());
-
+    DEBUG_BREAK_IF(!kernel->usesBindfulAddressingForBuffers());
     auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(kernel->getSurfaceStateHeap()),
-                                  kernel->getKernelInfo().patchInfo.pAllocateSystemThreadSurface->Offset);
+                                  kernel->getKernelInfo().kernelDescriptor.payloadMappings.implicitArgs.systemThreadSurfaceAddress.bindful);
     void *addressToPatch = reinterpret_cast<void *>(debugSurface->getGpuAddress());
     size_t sizeToPatch = debugSurface->getUnderlyingBufferSize();
-    Buffer::setSurfaceState(&device->getDevice(), surfaceState, sizeToPatch, addressToPatch, 0, debugSurface, 0, 0);
+    Buffer::setSurfaceState(&device->getDevice(), surfaceState, false, false, sizeToPatch,
+                            addressToPatch, 0, debugSurface, 0, 0,
+                            kernel->getKernelInfo().kernelDescriptor.kernelAttributes.flags.useGlobalAtomics,
+                            kernel->areMultipleSubDevicesInContext());
     return true;
+}
+
+bool CommandQueue::validateCapability(cl_command_queue_capabilities_intel capability) const {
+    return this->queueCapabilities == CL_QUEUE_DEFAULT_CAPABILITIES_INTEL || isValueSet(this->queueCapabilities, capability);
+}
+
+bool CommandQueue::validateCapabilitiesForEventWaitList(cl_uint numEventsInWaitList, const cl_event *waitList) const {
+    for (cl_uint eventIndex = 0u; eventIndex < numEventsInWaitList; eventIndex++) {
+        const Event *event = castToObject<Event>(waitList[eventIndex]);
+        if (event->isUserEvent()) {
+            continue;
+        }
+
+        const CommandQueue *eventCommandQueue = event->getCommandQueue();
+        const bool crossQueue = this != eventCommandQueue;
+        const cl_command_queue_capabilities_intel createCap = crossQueue ? CL_QUEUE_CAPABILITY_CREATE_CROSS_QUEUE_EVENTS_INTEL
+                                                                         : CL_QUEUE_CAPABILITY_CREATE_SINGLE_QUEUE_EVENTS_INTEL;
+        const cl_command_queue_capabilities_intel waitCap = crossQueue ? CL_QUEUE_CAPABILITY_CROSS_QUEUE_EVENT_WAIT_LIST_INTEL
+                                                                       : CL_QUEUE_CAPABILITY_SINGLE_QUEUE_EVENT_WAIT_LIST_INTEL;
+        if (!validateCapability(waitCap) || !eventCommandQueue->validateCapability(createCap)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool CommandQueue::validateCapabilityForOperation(cl_command_queue_capabilities_intel capability,
+                                                  cl_uint numEventsInWaitList,
+                                                  const cl_event *waitList,
+                                                  const cl_event *outEvent) const {
+    const bool operationValid = validateCapability(capability);
+    const bool waitListValid = validateCapabilitiesForEventWaitList(numEventsInWaitList, waitList);
+    const bool outEventValid = outEvent == nullptr ||
+                               validateCapability(CL_QUEUE_CAPABILITY_CREATE_SINGLE_QUEUE_EVENTS_INTEL) ||
+                               validateCapability(CL_QUEUE_CAPABILITY_CREATE_CROSS_QUEUE_EVENTS_INTEL);
+    return operationValid && waitListValid && outEventValid;
+}
+
+cl_uint CommandQueue::getQueueFamilyIndex() const {
+    if (isQueueFamilySelected()) {
+        return queueFamilyIndex;
+    } else {
+        const auto &hwInfo = device->getHardwareInfo();
+        const auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+        const auto engineGroupType = hwHelper.getEngineGroupType(gpgpuEngine->getEngineType(), hwInfo);
+        const auto familyIndex = device->getDevice().getIndexOfNonEmptyEngineGroup(engineGroupType);
+        return static_cast<cl_uint>(familyIndex);
+    }
 }
 
 IndirectHeap &CommandQueue::getIndirectHeap(IndirectHeap::Type heapType, size_t minRequiredSize) {
@@ -559,7 +636,9 @@ void CommandQueue::obtainNewTimestampPacketNodes(size_t numberOfNodes, Timestamp
         clearAllDependencies = false;
     }
 
-    previousNodes.resolveDependencies(clearAllDependencies);
+    if (clearAllDependencies) {
+        previousNodes.moveNodesToNewContainer(*deferredTimestampPackets);
+    }
 
     DEBUG_BREAK_IF(timestampPacketContainer->peekNodes().size() > 0);
 
@@ -601,7 +680,7 @@ bool CommandQueue::bufferCpuCopyAllowed(Buffer *buffer, cl_command_type commandT
     }
 
     //check if buffer is compatible
-    if (!buffer->isReadWriteOnCpuAllowed(device->getRootDeviceIndex())) {
+    if (!buffer->isReadWriteOnCpuAllowed(device->getDevice())) {
         return false;
     }
 
@@ -637,7 +716,7 @@ bool CommandQueue::queueDependenciesClearRequired() const {
 }
 
 bool CommandQueue::blitEnqueueAllowed(cl_command_type cmdType) const {
-    auto blitterSupported = device->getHardwareInfo().capabilityTable.blitterOperationsSupported || this->isCopyOnly;
+    auto blitterSupported = (getBcsCommandStreamReceiver() != nullptr);
 
     bool blitEnqueueAllowed = getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled() || this->isCopyOnly;
     if (DebugManager.flags.EnableBlitterForEnqueueOperations.get() != -1) {
@@ -654,21 +733,51 @@ bool CommandQueue::blitEnqueueAllowed(cl_command_type cmdType) const {
     case CL_COMMAND_SVM_MEMCPY:
     case CL_COMMAND_READ_IMAGE:
     case CL_COMMAND_WRITE_IMAGE:
+    case CL_COMMAND_COPY_IMAGE:
         return blitterSupported && blitEnqueueAllowed;
     default:
         return false;
     }
 }
 
-bool CommandQueue::blitEnqueueImageAllowed(const size_t *origin, const size_t *region) {
-    auto blitEnqueuImageAllowed = false;
+bool CommandQueue::blitEnqueuePreferred(cl_command_type cmdType, const BuiltinOpParams &builtinOpParams) const {
+    bool isLocalToLocal = false;
 
-    if (DebugManager.flags.EnableBlitterForReadWriteImage.get() != -1) {
-        blitEnqueuImageAllowed = DebugManager.flags.EnableBlitterForReadWriteImage.get();
-        blitEnqueuImageAllowed &= (origin[0] + region[0] <= BlitterConstants::maxBlitWidth) && (origin[1] + region[1] <= BlitterConstants::maxBlitHeight);
+    if (cmdType == CL_COMMAND_COPY_BUFFER &&
+        builtinOpParams.srcMemObj->getGraphicsAllocation(device->getRootDeviceIndex())->isAllocatedInLocalMemoryPool() &&
+        builtinOpParams.dstMemObj->getGraphicsAllocation(device->getRootDeviceIndex())->isAllocatedInLocalMemoryPool()) {
+        isLocalToLocal = true;
+    }
+    if (cmdType == CL_COMMAND_SVM_MEMCPY &&
+        builtinOpParams.srcSvmAlloc->isAllocatedInLocalMemoryPool() &&
+        builtinOpParams.dstSvmAlloc->isAllocatedInLocalMemoryPool()) {
+        isLocalToLocal = true;
     }
 
-    return blitEnqueuImageAllowed;
+    if (isLocalToLocal) {
+        if (DebugManager.flags.PreferCopyEngineForCopyBufferToBuffer.get() != -1) {
+            return static_cast<bool>(DebugManager.flags.PreferCopyEngineForCopyBufferToBuffer.get());
+        }
+        const auto &clHwHelper = ClHwHelper::get(device->getHardwareInfo().platform.eRenderCoreFamily);
+        return clHwHelper.preferBlitterForLocalToLocalTransfers();
+    }
+
+    return true;
+}
+
+bool CommandQueue::blitEnqueueImageAllowed(const size_t *origin, const size_t *region, const Image &image) {
+    const auto &hwInfo = device->getHardwareInfo();
+    const auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    auto blitEnqueueImageAllowed = hwHelper.isBlitterForImagesSupported(hwInfo);
+
+    if (DebugManager.flags.EnableBlitterForEnqueueImageOperations.get() != -1) {
+        blitEnqueueImageAllowed = DebugManager.flags.EnableBlitterForEnqueueImageOperations.get();
+    }
+
+    blitEnqueueImageAllowed &= (origin[0] + region[0] <= BlitterConstants::maxBlitWidth) && (origin[1] + region[1] <= BlitterConstants::maxBlitHeight);
+    blitEnqueueImageAllowed &= !isMipMapped(image.getImageDesc());
+
+    return blitEnqueueImageAllowed;
 }
 
 bool CommandQueue::isBlockedCommandStreamRequired(uint32_t commandType, const EventsRequest &eventsRequest, bool blockedQueue) const {
@@ -680,13 +789,18 @@ bool CommandQueue::isBlockedCommandStreamRequired(uint32_t commandType, const Ev
         return true;
     }
 
-    if ((CL_COMMAND_BARRIER == commandType || CL_COMMAND_MARKER == commandType) &&
-        getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
+    if (CL_COMMAND_BARRIER == commandType || CL_COMMAND_MARKER == commandType) {
+        auto timestampPacketWriteEnabled = getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled();
+        if (timestampPacketWriteEnabled || context->getRootDeviceIndices().size() > 1) {
 
-        for (size_t i = 0; i < eventsRequest.numEventsInWaitList; i++) {
-            auto waitlistEvent = castToObjectOrAbort<Event>(eventsRequest.eventWaitList[i]);
-            if (waitlistEvent->getTimestampPacketNodes()) {
-                return true;
+            for (size_t i = 0; i < eventsRequest.numEventsInWaitList; i++) {
+                auto waitlistEvent = castToObjectOrAbort<Event>(eventsRequest.eventWaitList[i]);
+                if (timestampPacketWriteEnabled && waitlistEvent->getTimestampPacketNodes()) {
+                    return true;
+                }
+                if (waitlistEvent->getCommandQueue() && waitlistEvent->getCommandQueue()->getDevice().getRootDeviceIndex() != this->getDevice().getRootDeviceIndex()) {
+                    return true;
+                }
             }
         }
     }
@@ -704,6 +818,57 @@ void CommandQueue::storeProperties(const cl_queue_properties *properties) {
     }
 }
 
+void CommandQueue::processProperties(const cl_queue_properties *properties) {
+    if (properties != nullptr) {
+        bool specificEngineSelected = false;
+        cl_uint selectedQueueFamilyIndex = std::numeric_limits<uint32_t>::max();
+        cl_uint selectedQueueIndex = std::numeric_limits<uint32_t>::max();
+
+        for (auto currentProperties = properties; *currentProperties != 0; currentProperties += 2) {
+            switch (*currentProperties) {
+            case CL_QUEUE_FAMILY_INTEL:
+                selectedQueueFamilyIndex = static_cast<cl_uint>(*(currentProperties + 1));
+                specificEngineSelected = true;
+                break;
+            case CL_QUEUE_INDEX_INTEL:
+                selectedQueueIndex = static_cast<cl_uint>(*(currentProperties + 1));
+                specificEngineSelected = true;
+                break;
+            }
+        }
+
+        if (specificEngineSelected) {
+            this->queueFamilySelected = true;
+            if (getDevice().getNumAvailableDevices() == 1) {
+                auto queueFamily = getDevice().getNonEmptyEngineGroup(selectedQueueFamilyIndex);
+                const auto &engine = queueFamily->at(selectedQueueIndex);
+                auto engineType = engine.getEngineType();
+                this->overrideEngine(engineType);
+                this->queueCapabilities = getClDevice().getDeviceInfo().queueFamilyProperties[selectedQueueFamilyIndex].capabilities;
+                this->queueFamilyIndex = selectedQueueFamilyIndex;
+                this->queueIndexWithinFamily = selectedQueueIndex;
+            }
+        }
+    }
+    requiresCacheFlushAfterWalker = device && (device->getDeviceInfo().parentDevice != nullptr);
+}
+
+void CommandQueue::overrideEngine(aub_stream::EngineType engineType) {
+    const HardwareInfo &hwInfo = getDevice().getHardwareInfo();
+    const HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    const EngineGroupType engineGroupType = hwHelper.getEngineGroupType(engineType, hwInfo);
+    const bool isEngineCopyOnly = hwHelper.isCopyOnlyEngineType(engineGroupType);
+
+    if (isEngineCopyOnly) {
+        bcsEngine = &device->getEngine(engineType, EngineUsage::Regular);
+        timestampPacketContainer = std::make_unique<TimestampPacketContainer>();
+        deferredTimestampPackets = std::make_unique<TimestampPacketContainer>();
+        isCopyOnly = true;
+    } else {
+        gpgpuEngine = &device->getEngine(engineType, EngineUsage::Regular);
+    }
+}
+
 void CommandQueue::aubCaptureHook(bool &blocking, bool &clearAllDependencies, const MultiDispatchInfo &multiDispatchInfo) {
     if (DebugManager.flags.AUBDumpSubCaptureMode.get()) {
         auto status = getGpgpuCommandStreamReceiver().checkAndActivateAubSubCapture(multiDispatchInfo);
@@ -718,7 +883,7 @@ void CommandQueue::aubCaptureHook(bool &blocking, bool &clearAllDependencies, co
 
     if (getGpgpuCommandStreamReceiver().getType() > CommandStreamReceiverType::CSR_HW) {
         for (auto &dispatchInfo : multiDispatchInfo) {
-            auto kernelName = dispatchInfo.getKernel()->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName;
+            auto &kernelName = dispatchInfo.getKernel()->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName;
             getGpgpuCommandStreamReceiver().addAubComment(kernelName.c_str());
         }
     }
@@ -730,7 +895,7 @@ void CommandQueue::waitUntilComplete(bool blockedQueue, PrintfHandler *printfHan
         }
     }
 
-    waitUntilComplete(taskCount, bcsTaskCount, flushStamp->peekStamp(), false);
+    waitForLatestTaskCount();
 
     if (printfHandler) {
         printfHandler->printEnqueueOutput();

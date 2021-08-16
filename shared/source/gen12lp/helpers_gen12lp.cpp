@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -23,7 +23,7 @@ uint32_t getHwRevIdFromStepping(uint32_t stepping, const HardwareInfo &hwInfo) {
     return CommonConstants::invalidStepping;
 }
 
-uint32_t getSteppingFromHwRevId(uint32_t hwRevId, const HardwareInfo &hwInfo) {
+uint32_t getSteppingFromHwRevId(const HardwareInfo &hwInfo) {
     return CommonConstants::invalidStepping;
 }
 
@@ -62,18 +62,6 @@ bool isForceEmuInt32DivRemSPWARequired(const HardwareInfo &hwInfo) {
 
 bool is3DPipelineSelectWARequired(const HardwareInfo &hwInfo) {
     return (hwInfo.platform.eProductFamily == IGFX_TIGERLAKE_LP || hwInfo.platform.eProductFamily == IGFX_ROCKETLAKE);
-}
-
-bool forceBlitterUseForGlobalBuffers(const HardwareInfo &hwInfo, GraphicsAllocation *allocation) {
-    return false;
-}
-
-bool obtainBlitterPreference(const HardwareInfo &hwInfo) {
-    return false;
-}
-
-LocalMemoryAccessMode getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) {
-    return LocalMemoryAccessMode::Default;
 }
 
 } // namespace Gen12LPHelpers

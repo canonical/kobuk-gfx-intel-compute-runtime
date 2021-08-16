@@ -1,3 +1,11 @@
+<!---
+
+Copyright (C) 2019-2021 Intel Corporation
+
+SPDX-License-Identifier: MIT
+
+-->
+
 # NEO in Linux distributions
 
 ## Level Zero specific
@@ -25,9 +33,9 @@ Starting with [release 19.43.14583](https://github.com/intel/compute-runtime/rel
 
 Docker images are provided in [intel-opencl](https://hub.docker.com/r/intelopencl/intel-opencl) repository.
 
-Example for Fedora* 31
+Example for Fedora* 33
 
 ```
-docker run -it --device /dev/dri:/dev/dri --rm docker.io/intelopencl/intel-opencl:fedora-31-copr clinfo
+docker run -it --device /dev/dri:/dev/dri --rm docker.io/intelopencl/intel-opencl:fedora-33-copr clinfo
 ```
 

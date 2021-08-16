@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019-2020 Intel Corporation
+# Copyright (C) 2020-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -11,9 +11,7 @@ set(NEO_CORE_AUB_MEM_DUMP
     ${CMAKE_CURRENT_SOURCE_DIR}/aub_data.h
     ${CMAKE_CURRENT_SOURCE_DIR}/aub_header.h
     ${CMAKE_CURRENT_SOURCE_DIR}/aub_mem_dump.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/aub_mem_dump.h
     ${CMAKE_CURRENT_SOURCE_DIR}/aub_mem_dump.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/aub_services.h
     ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/context_flags.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/page_table_entry_bits.h
 )
@@ -21,6 +19,12 @@ set(NEO_CORE_AUB_MEM_DUMP
 if(NOT DEFINED AUB_STREAM_PROJECT_NAME)
   list(APPEND NEO_CORE_AUB_MEM_DUMP
        ${CMAKE_CURRENT_SOURCE_DIR}/aub_stream_stubs.cpp
+  )
+endif()
+
+if(SUPPORT_XEHP_PLUS)
+  list(APPEND NEO_CORE_AUB_MEM_DUMP
+       ${CMAKE_CURRENT_SOURCE_DIR}/aub_mem_dump_xehp_plus.inl
   )
 endif()
 

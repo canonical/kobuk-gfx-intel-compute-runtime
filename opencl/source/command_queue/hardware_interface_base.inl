@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -30,8 +30,8 @@ inline WALKER_TYPE<GfxFamily> *HardwareInterface<GfxFamily>::allocateWalkerSpace
 
 template <typename GfxFamily>
 inline void HardwareInterface<GfxFamily>::dispatchProfilingPerfStartCommands(
-    TagNode<HwTimeStamps> *hwTimeStamps,
-    TagNode<HwPerfCounter> *hwPerfCounter,
+    TagNodeBase *hwTimeStamps,
+    TagNodeBase *hwPerfCounter,
     LinearStream *commandStream,
     CommandQueue &commandQueue) {
 
@@ -46,8 +46,8 @@ inline void HardwareInterface<GfxFamily>::dispatchProfilingPerfStartCommands(
 
 template <typename GfxFamily>
 inline void HardwareInterface<GfxFamily>::dispatchProfilingPerfEndCommands(
-    TagNode<HwTimeStamps> *hwTimeStamps,
-    TagNode<HwPerfCounter> *hwPerfCounter,
+    TagNodeBase *hwTimeStamps,
+    TagNodeBase *hwPerfCounter,
     LinearStream *commandStream,
     CommandQueue &commandQueue) {
 
@@ -66,8 +66,8 @@ void HardwareInterface<GfxFamily>::dispatchWalker(
     const MultiDispatchInfo &multiDispatchInfo,
     const CsrDependencies &csrDependencies,
     KernelOperation *blockedCommandsData,
-    TagNode<HwTimeStamps> *hwTimeStamps,
-    TagNode<HwPerfCounter> *hwPerfCounter,
+    TagNodeBase *hwTimeStamps,
+    TagNodeBase *hwPerfCounter,
     TimestampPacketDependencies *timestampPacketDependencies,
     TimestampPacketContainer *currentTimestampPacketNodes,
     uint32_t commandType) {
@@ -101,11 +101,12 @@ void HardwareInterface<GfxFamily>::dispatchWalker(
         void *addressToPatch = reinterpret_cast<void *>(debugSurface->getGpuAddress());
         size_t sizeToPatch = debugSurface->getUnderlyingBufferSize();
         Buffer::setSurfaceState(&commandQueue.getDevice(), commandQueue.getDevice().getDebugger()->getDebugSurfaceReservedSurfaceState(*ssh),
-                                sizeToPatch, addressToPatch, 0, debugSurface, 0, 0);
+                                false, false, sizeToPatch, addressToPatch, 0, debugSurface, 0, 0,
+                                mainKernel->getKernelInfo().kernelDescriptor.kernelAttributes.flags.useGlobalAtomics,
+                                mainKernel->areMultipleSubDevicesInContext());
     }
 
-    auto numSupportedDevices = commandQueue.getGpgpuCommandStreamReceiver().getOsContext().getNumSupportedDevices();
-    TimestampPacketHelper::programCsrDependencies<GfxFamily>(*commandStream, csrDependencies, numSupportedDevices);
+    TimestampPacketHelper::programCsrDependenciesForTimestampPacketContainer<GfxFamily>(*commandStream, csrDependencies);
 
     dsh->align(EncodeStates<GfxFamily>::alignInterfaceDescriptorData);
 
@@ -131,9 +132,15 @@ void HardwareInterface<GfxFamily>::dispatchWalker(
         dispatchDebugPauseCommands(commandStream, commandQueue, DebugPauseState::waitingForUserStartConfirmation, DebugPauseState::hasUserStartConfirmation);
     }
 
+    mainKernel->performKernelTuning(commandQueue.getGpgpuCommandStreamReceiver(),
+                                    multiDispatchInfo.begin()->getLocalWorkgroupSize(),
+                                    multiDispatchInfo.begin()->getActualWorkgroupSize(),
+                                    multiDispatchInfo.begin()->getOffset(),
+                                    currentTimestampPacketNodes);
+
     size_t currentDispatchIndex = 0;
     for (auto &dispatchInfo : multiDispatchInfo) {
-        dispatchInfo.dispatchInitCommands(*commandStream, timestampPacketDependencies, commandQueue.getDevice().getHardwareInfo(), numSupportedDevices);
+        dispatchInfo.dispatchInitCommands(*commandStream, timestampPacketDependencies, commandQueue.getDevice().getHardwareInfo());
         bool isMainKernel = (dispatchInfo.getKernel() == mainKernel);
 
         dispatchKernelCommands(commandQueue, dispatchInfo, commandType, *commandStream, isMainKernel,
@@ -141,8 +148,9 @@ void HardwareInterface<GfxFamily>::dispatchWalker(
                                offsetInterfaceDescriptorTable, *dsh, *ioh, *ssh);
 
         currentDispatchIndex++;
-        dispatchInfo.dispatchEpilogueCommands(*commandStream, timestampPacketDependencies, commandQueue.getDevice().getHardwareInfo(), numSupportedDevices);
+        dispatchInfo.dispatchEpilogueCommands(*commandStream, timestampPacketDependencies, commandQueue.getDevice().getHardwareInfo());
     }
+
     if (mainKernel->requiresCacheFlushCommand(commandQueue)) {
         uint64_t postSyncAddress = 0;
         if (commandQueue.getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
@@ -151,6 +159,12 @@ void HardwareInterface<GfxFamily>::dispatchWalker(
             postSyncAddress = TimestampPacketHelper::getContextEndGpuAddress(*timestampPacketNodeForPostSync);
         }
         HardwareCommandsHelper<GfxFamily>::programCacheFlushAfterWalkerCommand(commandStream, commandQueue, mainKernel, postSyncAddress);
+    }
+
+    if (PauseOnGpuProperties::GpuScratchRegWriteAllowed(DebugManager.flags.GpuScratchRegWriteAfterWalker.get(), commandQueue.getGpgpuCommandStreamReceiver().peekTaskCount())) {
+        uint32_t registerOffset = DebugManager.flags.GpuScratchRegWriteRegisterOffset.get();
+        uint32_t registerData = DebugManager.flags.GpuScratchRegWriteRegisterData.get();
+        LriHelper<GfxFamily>::program(commandStream, registerOffset, registerData, EncodeSetMMIO<GfxFamily>::isRemapApplicable(registerOffset));
     }
 
     if (PauseOnGpuProperties::pauseModeAllowed(DebugManager.flags.PauseOnEnqueue.get(), commandQueue.getGpgpuCommandStreamReceiver().peekTaskCount(), PauseOnGpuProperties::PauseMode::AfterWorkload)) {
@@ -189,53 +203,34 @@ void HardwareInterface<GfxFamily>::dispatchKernelCommands(CommandQueue &commandQ
     Vec3<size_t> elws = (dispatchInfo.getEnqueuedWorkgroupSize().x > 0) ? dispatchInfo.getEnqueuedWorkgroupSize() : lws;
 
     // Compute number of work groups
-    Vec3<size_t> totalNumberOfWorkgroups = (dispatchInfo.getTotalNumberOfWorkgroups().x > 0) ? dispatchInfo.getTotalNumberOfWorkgroups()
-                                                                                             : generateWorkgroupsNumber(gws, lws);
-
-    Vec3<size_t> numberOfWorkgroups = (dispatchInfo.getNumberOfWorkgroups().x > 0) ? dispatchInfo.getNumberOfWorkgroups() : totalNumberOfWorkgroups;
+    Vec3<size_t> totalNumberOfWorkgroups = dispatchInfo.getTotalNumberOfWorkgroups();
+    Vec3<size_t> numberOfWorkgroups = dispatchInfo.getNumberOfWorkgroups();
+    UNRECOVERABLE_IF(totalNumberOfWorkgroups.x == 0);
+    UNRECOVERABLE_IF(numberOfWorkgroups.x == 0);
 
     size_t globalWorkSizes[3] = {gws.x, gws.y, gws.z};
 
     // Patch our kernel constants
-    *kernel.globalWorkOffsetX = static_cast<uint32_t>(offset.x);
-    *kernel.globalWorkOffsetY = static_cast<uint32_t>(offset.y);
-    *kernel.globalWorkOffsetZ = static_cast<uint32_t>(offset.z);
+    kernel.setGlobalWorkOffsetValues(static_cast<uint32_t>(offset.x), static_cast<uint32_t>(offset.y), static_cast<uint32_t>(offset.z));
+    kernel.setGlobalWorkSizeValues(static_cast<uint32_t>(gws.x), static_cast<uint32_t>(gws.y), static_cast<uint32_t>(gws.z));
 
-    *kernel.globalWorkSizeX = static_cast<uint32_t>(gws.x);
-    *kernel.globalWorkSizeY = static_cast<uint32_t>(gws.y);
-    *kernel.globalWorkSizeZ = static_cast<uint32_t>(gws.z);
-
-    if (isMainKernel || (kernel.localWorkSizeX2 == &Kernel::dummyPatchLocation)) {
-        *kernel.localWorkSizeX = static_cast<uint32_t>(lws.x);
-        *kernel.localWorkSizeY = static_cast<uint32_t>(lws.y);
-        *kernel.localWorkSizeZ = static_cast<uint32_t>(lws.z);
+    if (isMainKernel || (!kernel.isLocalWorkSize2Patchable())) {
+        kernel.setLocalWorkSizeValues(static_cast<uint32_t>(lws.x), static_cast<uint32_t>(lws.y), static_cast<uint32_t>(lws.z));
     }
 
-    *kernel.localWorkSizeX2 = static_cast<uint32_t>(lws.x);
-    *kernel.localWorkSizeY2 = static_cast<uint32_t>(lws.y);
-    *kernel.localWorkSizeZ2 = static_cast<uint32_t>(lws.z);
-
-    *kernel.enqueuedLocalWorkSizeX = static_cast<uint32_t>(elws.x);
-    *kernel.enqueuedLocalWorkSizeY = static_cast<uint32_t>(elws.y);
-    *kernel.enqueuedLocalWorkSizeZ = static_cast<uint32_t>(elws.z);
+    kernel.setLocalWorkSize2Values(static_cast<uint32_t>(lws.x), static_cast<uint32_t>(lws.y), static_cast<uint32_t>(lws.z));
+    kernel.setEnqueuedLocalWorkSizeValues(static_cast<uint32_t>(elws.x), static_cast<uint32_t>(elws.y), static_cast<uint32_t>(elws.z));
 
     if (isMainKernel) {
-        *kernel.numWorkGroupsX = static_cast<uint32_t>(totalNumberOfWorkgroups.x);
-        *kernel.numWorkGroupsY = static_cast<uint32_t>(totalNumberOfWorkgroups.y);
-        *kernel.numWorkGroupsZ = static_cast<uint32_t>(totalNumberOfWorkgroups.z);
+        kernel.setNumWorkGroupsValues(static_cast<uint32_t>(totalNumberOfWorkgroups.x), static_cast<uint32_t>(totalNumberOfWorkgroups.y), static_cast<uint32_t>(totalNumberOfWorkgroups.z));
     }
 
-    *kernel.workDim = dim;
+    kernel.setWorkDim(dim);
 
     // Send our indirect object data
     size_t localWorkSizes[3] = {lws.x, lws.y, lws.z};
 
     dispatchWorkarounds(&commandStream, commandQueue, kernel, true);
-
-    if (commandQueue.getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
-        auto timestampPacketNode = currentTimestampPacketNodes->peekNodes().at(currentDispatchIndex);
-        GpgpuWalkerHelper<GfxFamily>::setupTimestampPacket(&commandStream, nullptr, timestampPacketNode, TimestampPacketStorage::WriteOperationType::BeforeWalker, commandQueue.getDevice().getRootDeviceEnvironment());
-    }
 
     programWalker(commandStream, kernel, commandQueue, currentTimestampPacketNodes, dsh, ioh, ssh, globalWorkSizes,
                   localWorkSizes, preemptionMode, currentDispatchIndex, interfaceDescriptorIndex, dispatchInfo,
@@ -321,5 +316,4 @@ inline void HardwareInterface<GfxFamily>::dispatchDebugPauseCommands(
         }
     }
 }
-
 } // namespace NEO

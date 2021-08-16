@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,8 +7,11 @@
 
 #include "shared/offline_compiler/source/decoder/helper.h"
 
+#include "hw_cmds.h"
+
 #include <cctype>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -36,6 +39,11 @@ struct Output {
     Output(const std::string &name, const void *data, const size_t &size);
 };
 
+struct DeviceProduct {
+    unsigned short deviceId;
+    std::string product;
+};
+
 class OclocArgHelper {
   protected:
     std::vector<Source> inputs, headers;
@@ -45,6 +53,8 @@ class OclocArgHelper {
     uint8_t ***dataOutputs = nullptr;
     uint64_t **lenOutputs = nullptr;
     bool hasOutput = false;
+    const std::vector<DeviceProduct> deviceProductTable;
+    std::map<std::string, unsigned int> genIGFXMap;
     void moveOutputs();
     MessagePrinter messagePrinter;
     Source *findSourceFile(const std::string &filename);
@@ -55,7 +65,7 @@ class OclocArgHelper {
     }
 
   public:
-    OclocArgHelper() = default;
+    OclocArgHelper();
     OclocArgHelper(const uint32_t numSources, const uint8_t **dataSources,
                    const uint64_t *lenSources, const char **nameSources,
                    const uint32_t numInputHeaders,
@@ -72,8 +82,16 @@ class OclocArgHelper {
     MOCKABLE_VIRTUAL std::vector<char> readBinaryFile(const std::string &filename);
     std::unique_ptr<char[]> loadDataFromFile(const std::string &filename, size_t &retSize);
 
-    inline bool outputEnabled() { return hasOutput; }
-    inline bool hasHeaders() { return headers.size() > 0; }
+    bool outputEnabled() const {
+        return hasOutput;
+    }
+    bool hasHeaders() const {
+        return headers.size() > 0;
+    }
+    const std::vector<Source> &getHeaders() const {
+        return headers;
+    }
+
     void saveOutput(const std::string &filename, const void *pData, const size_t &dataSize);
     void saveOutput(const std::string &filename, const std::ostream &stream);
 
@@ -85,4 +103,7 @@ class OclocArgHelper {
     void printf(const char *format, Args... args) {
         messagePrinter.printf(format, std::forward<Args>(args)...);
     }
+    std::string returnProductNameForDevice(unsigned short deviceId);
+    bool isGen(const std::string &device);
+    unsigned int returnIGFXforGen(const std::string &device);
 };

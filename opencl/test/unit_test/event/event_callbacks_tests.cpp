@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -41,7 +41,7 @@ TEST(EventCallbackTest, GivenUserEventWhenAddingCallbackThenNestedCallbacksCanBe
 TEST(EventCallbackTest, GivenEventWhenAddingCallbackThenNestedCallbacksCanBeCreated) {
     auto device = std::make_unique<MockClDevice>(MockClDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
     MockContext context(device.get());
-    MockCommandQueue queue(&context, context.getDevice(0), nullptr);
+    MockCommandQueue queue(&context, context.getDevice(0), nullptr, false);
     MockEvent<Event> event(&queue, CL_COMMAND_MARKER, 0, 0);
     uint32_t nestLevel = 0;
 

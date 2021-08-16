@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -20,7 +20,7 @@ using namespace NEO;
 
 typedef AUBParentKernelFixture GEN8AUBParentKernelFixture;
 
-GEN8TEST_F(GEN8AUBParentKernelFixture, EnqueueParentKernel) {
+GEN8TEST_F(GEN8AUBParentKernelFixture, WhenEnqueuingParentKernelThenExpectationsMet) {
     REQUIRE_DEVICE_ENQUEUE_OR_SKIP(pClDevice);
 
     ASSERT_NE(nullptr, pKernel);
@@ -56,10 +56,11 @@ GEN8TEST_F(GEN8AUBParentKernelFixture, EnqueueParentKernel) {
     desc.image_row_pitch = 0;
     desc.image_slice_pitch = 0;
 
+    auto memoryProperties = MemoryPropertiesHelper::createMemoryProperties(0, 0, 0, &pClDevice->getDevice());
     auto surfaceFormat = Image::getSurfaceFormatFromTable(0, &imageFormat, context->getDevice(0)->getHardwareInfo().capabilityTable.supportsOcl21Features);
     std::unique_ptr<Image> image(Image::create(
         pContext,
-        {},
+        memoryProperties,
         0,
         0,
         surfaceFormat,

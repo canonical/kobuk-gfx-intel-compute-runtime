@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,7 +16,6 @@
 #include "opencl/source/api/cl_types.h"
 #include "opencl/source/cl_device/cl_device_vector.h"
 #include "opencl/source/helpers/base_object.h"
-#include "opencl/source/helpers/destructor_callback.h"
 
 #include "cif/builtins/memory/buffer/buffer.h"
 #include "patch_list.h"
@@ -132,8 +131,8 @@ class Program : public BaseObject<_cl_program> {
     cl_int build(const ClDeviceVector &deviceVector, const char *buildOptions, bool enableCaching,
                  std::unordered_map<std::string, BuiltinDispatchInfoBuilder *> &builtinsMap);
 
-    MOCKABLE_VIRTUAL cl_int processGenBinary(uint32_t rootDeviceIndex);
-    MOCKABLE_VIRTUAL cl_int processProgramInfo(ProgramInfo &dst);
+    MOCKABLE_VIRTUAL cl_int processGenBinary(const ClDevice &clDevice);
+    MOCKABLE_VIRTUAL cl_int processProgramInfo(ProgramInfo &dst, const ClDevice &clDevice);
 
     cl_int compile(const ClDeviceVector &deviceVector, const char *buildOptions,
                    cl_uint numInputHeaders, const cl_program *inputHeaders, const char **headerIncludeNames);
@@ -145,8 +144,8 @@ class Program : public BaseObject<_cl_program> {
     MOCKABLE_VIRTUAL cl_int updateSpecializationConstant(cl_uint specId, size_t specSize, const void *specValue);
 
     size_t getNumKernels() const;
-    const KernelInfo *getKernelInfo(const char *kernelName) const;
-    const KernelInfo *getKernelInfo(size_t ordinal) const;
+    const KernelInfo *getKernelInfo(const char *kernelName, uint32_t rootDeviceIndex) const;
+    const KernelInfo *getKernelInfo(size_t ordinal, uint32_t rootDeviceIndex) const;
 
     cl_int getInfo(cl_program_info paramName, size_t paramValueSize,
                    void *paramValue, size_t *paramValueSizeRet);
@@ -155,7 +154,7 @@ class Program : public BaseObject<_cl_program> {
                         size_t paramValueSize, void *paramValue, size_t *paramValueSizeRet) const;
 
     bool isBuilt() const {
-        return std::all_of(this->deviceBuildInfos.begin(), this->deviceBuildInfos.end(), [](auto deviceBuildInfo) { return deviceBuildInfo.second.buildStatus == CL_SUCCESS; });
+        return std::any_of(this->deviceBuildInfos.begin(), this->deviceBuildInfos.end(), [](auto deviceBuildInfo) { return deviceBuildInfo.second.buildStatus == CL_SUCCESS && deviceBuildInfo.second.programBinaryType == CL_PROGRAM_BINARY_TYPE_EXECUTABLE; });
     }
 
     Context &getContext() const {
@@ -170,16 +169,11 @@ class Program : public BaseObject<_cl_program> {
         return executionEnvironment;
     }
 
-    const Device &getDevice() const {
-        UNRECOVERABLE_IF(pDevice == nullptr);
-        return *pDevice;
-    }
-
     cl_int processSpirBinary(const void *pBinary, size_t binarySize, bool isSpirV);
 
     cl_int getSource(std::string &binary) const;
 
-    void processDebugData();
+    void processDebugData(uint32_t rootDeviceIndex);
 
     void updateBuildLog(uint32_t rootDeviceIndex, const char *pErrorString, const size_t errorStringSize);
 
@@ -209,9 +203,9 @@ class Program : public BaseObject<_cl_program> {
         return blockKernelManager;
     }
 
-    void allocateBlockPrivateSurfaces(uint32_t rootDeviceIndex);
+    void allocateBlockPrivateSurfaces(const ClDevice &clDevice);
     void freeBlockResources();
-    void cleanCurrentKernelInfo();
+    void cleanCurrentKernelInfo(uint32_t rootDeviceIndex);
 
     const std::string &getOptions() const { return options; }
 
@@ -262,10 +256,31 @@ class Program : public BaseObject<_cl_program> {
     void invokeCallback(void(CL_CALLBACK *funcNotify)(cl_program program, void *userData), void *userData);
 
     const ClDeviceVector &getDevices() const { return clDevices; }
+    const ClDeviceVector &getDevicesInProgram() const;
     bool isDeviceAssociated(const ClDevice &clDevice) const;
 
     static cl_int processInputDevices(ClDeviceVector *&deviceVectorPtr, cl_uint numDevices, const cl_device_id *deviceList, const ClDeviceVector &allAvailableDevices);
     MOCKABLE_VIRTUAL void initInternalOptions(std::string &internalOptions) const;
+    uint32_t getMaxRootDeviceIndex() const { return maxRootDeviceIndex; }
+    void retainForKernel() {
+        std::unique_lock<std::mutex> lock{lockMutex};
+        exposedKernels++;
+    }
+    void releaseForKernel() {
+        std::unique_lock<std::mutex> lock{lockMutex};
+        UNRECOVERABLE_IF(exposedKernels == 0);
+        exposedKernels--;
+    }
+    bool isLocked() {
+        std::unique_lock<std::mutex> lock{lockMutex};
+        return 0 != exposedKernels;
+    }
+
+    const ExecutionEnvironment &getExecutionEnvironment() const { return executionEnvironment; }
+
+    void setContext(Context *pContext) {
+        this->context = pContext;
+    }
 
   protected:
     MOCKABLE_VIRTUAL cl_int createProgramFromBinary(const void *pBinary, size_t binarySize, ClDevice &clDevice);
@@ -274,7 +289,7 @@ class Program : public BaseObject<_cl_program> {
 
     MOCKABLE_VIRTUAL cl_int linkBinary(Device *pDevice, const void *constantsInitData, const void *variablesInitData);
 
-    void separateBlockKernels();
+    void separateBlockKernels(uint32_t rootDeviceIndex);
 
     void updateNonUniformFlag();
     void updateNonUniformFlag(const Program **inputProgram, size_t numInputPrograms);
@@ -286,6 +301,7 @@ class Program : public BaseObject<_cl_program> {
 
     MOCKABLE_VIRTUAL bool appendKernelDebugOptions(ClDevice &clDevice, std::string &internalOptions);
     void notifyDebuggerWithSourceCode(ClDevice &clDevice, std::string &filename);
+    void prependFilePathToOptions(const std::string &filename);
 
     void setBuildStatus(cl_build_status status);
     void setBuildStatusSuccess(const ClDeviceVector &deviceVector, cl_program_binary_type binaryType);
@@ -299,10 +315,6 @@ class Program : public BaseObject<_cl_program> {
     size_t debugDataSize = 0U;
 
     CreatedFrom createdFrom = CreatedFrom::UNKNOWN;
-
-    std::vector<KernelInfo *> kernelInfoArray;
-    std::vector<KernelInfo *> parentKernelInfoArray;
-    std::vector<KernelInfo *> subgroupKernelInfoArray;
 
     struct DeviceBuildInfo {
         StackVec<ClDevice *, 2> associatedSubDevices;
@@ -321,6 +333,9 @@ class Program : public BaseObject<_cl_program> {
     bool allowNonUniform = false;
 
     struct BuildInfo : public NonCopyableClass {
+        std::vector<KernelInfo *> kernelInfoArray;
+        std::vector<KernelInfo *> parentKernelInfoArray;
+        std::vector<KernelInfo *> subgroupKernelInfoArray;
         GraphicsAllocation *constantSurface = nullptr;
         GraphicsAllocation *globalSurface = nullptr;
         GraphicsAllocation *exportedFunctionsSurface = nullptr;
@@ -346,12 +361,14 @@ class Program : public BaseObject<_cl_program> {
     BlockKernelManager *blockKernelManager = nullptr;
     ExecutionEnvironment &executionEnvironment;
     Context *context = nullptr;
-    Device *pDevice = nullptr;
-    cl_uint numDevices = 0U;
     ClDeviceVector clDevices;
+    ClDeviceVector clDevicesInProgram;
 
     bool isBuiltIn = false;
     bool kernelDebugEnabled = false;
+    uint32_t maxRootDeviceIndex = std::numeric_limits<uint32_t>::max();
+    std::mutex lockMutex;
+    uint32_t exposedKernels = 0;
 };
 
 } // namespace NEO

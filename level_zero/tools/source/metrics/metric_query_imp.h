@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,6 +13,7 @@
 
 using MetricsLibraryApi::ClientCallbacks_1_0;
 using MetricsLibraryApi::ClientGen;
+using MetricsLibraryApi::ClientOptionsData_1_0;
 using MetricsLibraryApi::CommandBufferData_1_0;
 using MetricsLibraryApi::ConfigurationHandle_1_0;
 using MetricsLibraryApi::ContextCreateData_1_0;
@@ -43,6 +44,11 @@ struct MetricsLibrary {
     // Initialization.
     virtual bool load();
     bool isInitialized();
+    ze_result_t getInitializationState();
+    void getSubDeviceClientOptions(NEO::Device &neoDevice,
+                                   ClientOptionsData_1_0 &subDevice,
+                                   ClientOptionsData_1_0 &subDeviceIndex,
+                                   ClientOptionsData_1_0 &subDeviceCount);
     static const char *getFilename();
 
     // Deinitialization.
@@ -71,6 +77,7 @@ struct MetricsLibrary {
     void initialize();
 
     bool createContext();
+    bool createContextForDevice(Device &device);
     virtual bool getContextData(Device &device, ContextCreateData_1_0 &contextData);
 
     ConfigurationHandle_1_0 createConfiguration(const zet_metric_group_handle_t metricGroup,

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,6 +14,7 @@
 namespace NEO {
 
 constexpr size_t globalSshAllocationSize = 4 * MemoryConstants::pageSize64k;
+constexpr size_t borderColorAlphaOffset = alignUp(4 * sizeof(float), MemoryConstants::cacheLineSize);
 using BindlesHeapType = BindlessHeapsHelper::BindlesHeapType;
 
 BindlessHeapsHelper::BindlessHeapsHelper(MemoryManager *memManager, bool isMultiOsContextCapable, const uint32_t rootDeviceIndex) : memManager(memManager), isMultiOsContextCapable(isMultiOsContextCapable), rootDeviceIndex(rootDeviceIndex) {
@@ -22,7 +23,7 @@ BindlessHeapsHelper::BindlessHeapsHelper(MemoryManager *memManager, bool isMulti
         auto heapAllocation = getHeapAllocation(MemoryConstants::pageSize64k, MemoryConstants::pageSize64k, allocInFrontWindow);
         UNRECOVERABLE_IF(heapAllocation == nullptr);
         ssHeapsAllocations.push_back(heapAllocation);
-        surfaceStateHeaps[heapType] = std::make_unique<IndirectHeap>(heapAllocation, false);
+        surfaceStateHeaps[heapType] = std::make_unique<IndirectHeap>(heapAllocation, true);
     }
 
     borderColorStates = getHeapAllocation(MemoryConstants::pageSize, MemoryConstants::pageSize, true);
@@ -30,7 +31,7 @@ BindlessHeapsHelper::BindlessHeapsHelper(MemoryManager *memManager, bool isMulti
     float borderColorDefault[4] = {0, 0, 0, 0};
     memcpy_s(borderColorStates->getUnderlyingBuffer(), sizeof(borderColorDefault), borderColorDefault, sizeof(borderColorDefault));
     float borderColorAlpha[4] = {0, 0, 0, 1.0};
-    memcpy_s(ptrOffset(borderColorStates->getUnderlyingBuffer(), sizeof(borderColorDefault)), sizeof(borderColorAlpha), borderColorAlpha, sizeof(borderColorAlpha));
+    memcpy_s(ptrOffset(borderColorStates->getUnderlyingBuffer(), borderColorAlphaOffset), sizeof(borderColorAlpha), borderColorAlpha, sizeof(borderColorDefault));
 }
 
 BindlessHeapsHelper::~BindlessHeapsHelper() {
@@ -56,9 +57,19 @@ SurfaceStateInHeapInfo BindlessHeapsHelper::allocateSSInHeap(size_t ssSize, Grap
         auto ssAllocatedInfo = surfaceStateInHeapAllocationMap.find(surfaceAllocation);
         if (ssAllocatedInfo != surfaceStateInHeapAllocationMap.end()) {
             return *ssAllocatedInfo->second.get();
+        } else {
+            std::lock_guard<std::mutex> autolock(this->mtx);
+            if (surfaceStateInHeapVectorReuse.size()) {
+                SurfaceStateInHeapInfo surfaceStateFromVector = *(surfaceStateInHeapVectorReuse.back());
+                surfaceStateInHeapVectorReuse.pop_back();
+                std::pair<GraphicsAllocation *, std::unique_ptr<SurfaceStateInHeapInfo>> pair(surfaceAllocation, std::make_unique<SurfaceStateInHeapInfo>(surfaceStateFromVector));
+                surfaceStateInHeapAllocationMap.insert(std::move(pair));
+                return surfaceStateFromVector;
+            }
         }
     }
     void *ptrInHeap = getSpaceInHeap(ssSize, heapType);
+    memset(ptrInHeap, 0, ssSize);
     auto bindlessOffset = heap->getGraphicsAllocation()->getGpuAddress() - heap->getGraphicsAllocation()->getGpuBaseAddress() + heap->getUsed() - ssSize;
     SurfaceStateInHeapInfo bindlesInfo;
     if (heapType == BindlesHeapType::GLOBAL_SSH) {
@@ -87,7 +98,11 @@ uint32_t BindlessHeapsHelper::getDefaultBorderColorOffset() {
     return static_cast<uint32_t>(borderColorStates->getGpuAddress() - borderColorStates->getGpuBaseAddress());
 }
 uint32_t BindlessHeapsHelper::getAlphaBorderColorOffset() {
-    return getDefaultBorderColorOffset() + 4 * sizeof(float);
+    return getDefaultBorderColorOffset() + borderColorAlphaOffset;
+}
+
+IndirectHeap *BindlessHeapsHelper::getHeap(BindlesHeapType heapType) {
+    return surfaceStateHeaps[heapType].get();
 }
 
 void BindlessHeapsHelper::growHeap(BindlesHeapType heapType) {
@@ -99,6 +114,16 @@ void BindlessHeapsHelper::growHeap(BindlesHeapType heapType) {
     heap->replaceGraphicsAllocation(newAlloc);
     heap->replaceBuffer(newAlloc->getUnderlyingBuffer(),
                         newAlloc->getUnderlyingBufferSize());
+}
+
+void BindlessHeapsHelper::placeSSAllocationInReuseVectorOnFreeMemory(GraphicsAllocation *gfxAllocation) {
+    auto ssAllocatedInfo = surfaceStateInHeapAllocationMap.find(gfxAllocation);
+    if (ssAllocatedInfo != surfaceStateInHeapAllocationMap.end()) {
+        std::lock_guard<std::mutex> autolock(this->mtx);
+        surfaceStateInHeapVectorReuse.push_back(std::move(ssAllocatedInfo->second));
+        surfaceStateInHeapAllocationMap.erase(ssAllocatedInfo);
+    }
+    return;
 }
 
 } // namespace NEO

@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 
 #include "opencl/source/command_queue/gpgpu_walker.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
@@ -22,7 +22,8 @@ struct WorkGroupSizeBase {
 
         // Compute the SIMD lane mask
         size_t simd =
-            pCmd.getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : pCmd.getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16 : 8;
+            pCmd.getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : pCmd.getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16
+                                                                                                                             : 8;
         uint64_t simdMask = maxNBitValue(simd);
 
         // Mask off lanes based on the execution masks
@@ -54,7 +55,7 @@ struct WorkGroupSizeBase {
         size_t workGroupSize[3];
         auto maxWorkGroupSize = 256u;
         if (DebugManager.flags.EnableComputeWorkSizeND.get()) {
-            WorkSizeInfo wsInfo(maxWorkGroupSize, 0u, simdSize, 0u, IGFX_GEN9_CORE, 32u, 0u, false, false);
+            WorkSizeInfo wsInfo(maxWorkGroupSize, 0u, simdSize, 0u, ::defaultHwInfo.get(), 32u, 0u, false, false);
             computeWorkgroupSizeND(wsInfo, workGroupSize, workItems, dims);
         } else {
             if (dims == 1)
@@ -86,9 +87,9 @@ struct WorkGroupSizeBase {
             Math::divideAndRoundUp(workItems[0], workGroupSize[0]),
             Math::divideAndRoundUp(workItems[1], workGroupSize[1]),
             Math::divideAndRoundUp(workItems[2], workGroupSize[2])};
-        const iOpenCL::SPatchThreadPayload threadPayload = {};
-        GpgpuWalkerHelper<FamilyType>::setGpgpuWalkerThreadData(&pCmd, globalOffsets, workGroupsStart, workGroupsNum,
-                                                                workGroupSize, simdSize, dims, true, false, threadPayload, 0u);
+        KernelDescriptor kd;
+        GpgpuWalkerHelper<FamilyType>::setGpgpuWalkerThreadData(&pCmd, kd, globalOffsets, workGroupsStart, workGroupsNum,
+                                                                workGroupSize, simdSize, dims, true, false, 0u);
 
         //And check if it is programmed correctly
         auto numWorkItems = computeWalkerWorkItems<FamilyType>(pCmd);

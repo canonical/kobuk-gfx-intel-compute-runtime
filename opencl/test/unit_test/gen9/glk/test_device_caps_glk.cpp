@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -24,7 +24,7 @@ GLKTEST_F(Gen9DeviceCaps, givenGlkDeviceWhenAskedForDoubleSupportThenTrueIsRetur
 GLKTEST_F(Gen9DeviceCaps, GlkIs32BitOsAllocatorAvailable) {
     const auto &caps = pDevice->getDeviceInfo();
     auto memoryManager = pDevice->getMemoryManager();
-    if (is64bit) {
+    if constexpr (is64bit) {
         EXPECT_TRUE(memoryManager->peekForce32BitAllocations());
         EXPECT_TRUE(caps.force32BitAddressess);
     } else {
@@ -37,8 +37,8 @@ typedef Test<ClDeviceFixture> GlkUsDeviceIdTest;
 
 GLKTEST_F(GlkUsDeviceIdTest, WhenCheckingIsSimulationThenTrueReturnedOnlyForSimulationId) {
     unsigned short glkSimulationIds[3] = {
-        IGLK_GT2_ULT_18EU_DEVICE_F0_ID,
-        IGLK_GT2_ULT_12EU_DEVICE_F0_ID,
+        0x3184,
+        0x3185,
         0, // default, non-simulation
     };
     NEO::MockDevice *mockDevice = nullptr;

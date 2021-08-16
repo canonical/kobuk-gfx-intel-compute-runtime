@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -59,7 +59,8 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         const Kernel &kernel,
         uint32_t bindingTablePrefetchSize,
         PreemptionMode preemptionMode,
-        INTERFACE_DESCRIPTOR_DATA *inlineInterfaceDescriptor);
+        INTERFACE_DESCRIPTOR_DATA *inlineInterfaceDescriptor,
+        const Device &device);
 
     static void sendMediaStateFlush(
         LinearStream &commandStream,
@@ -91,7 +92,8 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         PreemptionMode preemptionMode,
         WALKER_TYPE<GfxFamily> *walkerCmd,
         INTERFACE_DESCRIPTOR_DATA *inlineInterfaceDescriptor,
-        bool localIdsGenerationByRuntime);
+        bool localIdsGenerationByRuntime,
+        const Device &device);
 
     static void programPerThreadData(
         size_t &sizePerThreadData,
@@ -102,7 +104,8 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         const size_t localWorkSize[3],
         Kernel &kernel,
         size_t &sizePerThreadDataTotal,
-        size_t &localWorkItems);
+        size_t &localWorkItems,
+        uint32_t rootDeviceIndex);
 
     static void updatePerThreadDataTotal(
         size_t &sizePerThreadData,
@@ -113,7 +116,7 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
 
     inline static bool resetBindingTablePrefetch(Kernel &kernel);
 
-    static size_t getSizeRequiredCS(const Kernel *kernel);
+    static size_t getSizeRequiredCS();
     static size_t getSizeRequiredForCacheFlush(const CommandQueue &commandQueue, const Kernel *kernel, uint64_t postSyncAddress);
 
     static size_t getSizeRequiredDSH(

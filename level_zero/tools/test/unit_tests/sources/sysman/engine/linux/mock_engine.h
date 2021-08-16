@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,8 @@
 
 #pragma once
 #include "shared/source/os_interface/linux/engine_info_impl.h"
+
+#include "opencl/test/unit_test/os_interface/linux/drm_mock.h"
 
 #include "level_zero/core/test/unit_tests/mock.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_memory_manager.h"
@@ -23,34 +25,37 @@ constexpr int64_t mockPmuFd = 10;
 constexpr uint64_t mockTimestamp = 87654321;
 constexpr uint64_t mockActiveTime = 987654321;
 const uint32_t microSecondsToNanoSeconds = 1000u;
+constexpr uint16_t I915_INVALID_ENGINE_CLASS = UINT16_MAX;
 const std::string deviceDir("device");
 struct MockMemoryManagerInEngineSysman : public MemoryManagerMock {
     MockMemoryManagerInEngineSysman(NEO::ExecutionEnvironment &executionEnvironment) : MemoryManagerMock(const_cast<NEO::ExecutionEnvironment &>(executionEnvironment)) {}
 };
 class EngineNeoDrm : public Drm {
   public:
-    using Drm::engineInfo;
+    using Drm::getEngineInfo;
     const int mockFd = 0;
-    EngineNeoDrm(RootDeviceEnvironment &rootDeviceEnvironment) : Drm(std::make_unique<HwDeviceId>(mockFd, ""), rootDeviceEnvironment) {}
+    EngineNeoDrm(RootDeviceEnvironment &rootDeviceEnvironment) : Drm(std::make_unique<HwDeviceIdDrm>(mockFd, ""), rootDeviceEnvironment) {}
 };
 template <>
 struct Mock<EngineNeoDrm> : public EngineNeoDrm {
     Mock<EngineNeoDrm>(RootDeviceEnvironment &rootDeviceEnvironment) : EngineNeoDrm(rootDeviceEnvironment) {}
 
     bool queryEngineInfoMockPositiveTest() {
-        drm_i915_engine_info i915engineInfo[5] = {};
+        drm_i915_engine_info i915engineInfo[6] = {};
         i915engineInfo[0].engine.engine_class = I915_ENGINE_CLASS_RENDER;
         i915engineInfo[0].engine.engine_instance = 0;
-        i915engineInfo[1].engine.engine_class = I915_ENGINE_CLASS_VIDEO;
-        i915engineInfo[1].engine.engine_instance = 0;
+        i915engineInfo[1].engine.engine_class = I915_ENGINE_CLASS_RENDER;
+        i915engineInfo[1].engine.engine_instance = 1;
         i915engineInfo[2].engine.engine_class = I915_ENGINE_CLASS_VIDEO;
         i915engineInfo[2].engine.engine_instance = 1;
         i915engineInfo[3].engine.engine_class = I915_ENGINE_CLASS_COPY;
         i915engineInfo[3].engine.engine_instance = 0;
         i915engineInfo[4].engine.engine_class = I915_ENGINE_CLASS_VIDEO_ENHANCE;
         i915engineInfo[4].engine.engine_instance = 0;
+        i915engineInfo[5].engine.engine_class = I915_INVALID_ENGINE_CLASS;
+        i915engineInfo[5].engine.engine_instance = 0;
 
-        this->engineInfo.reset(new EngineInfoImpl(i915engineInfo, 5));
+        this->engineInfo.reset(new EngineInfoImpl(i915engineInfo, 6));
         return true;
     }
 
@@ -58,7 +63,7 @@ struct Mock<EngineNeoDrm> : public EngineNeoDrm {
         return false;
     }
 
-    MOCK_METHOD(bool, queryEngineInfo, (), (override));
+    MOCK_METHOD(bool, sysmanQueryEngineInfo, (), (override));
 };
 
 class MockPmuInterfaceImp : public PmuInterfaceImp {
@@ -75,17 +80,17 @@ struct Mock<MockPmuInterfaceImp> : public MockPmuInterfaceImp {
     int64_t mockedPerfEventOpenAndFailureReturn(perf_event_attr *attr, pid_t pid, int cpu, int groupFd, uint64_t flags) {
         return -1;
     }
-    int mockedPmuReadSingleAndSuccessReturn(int fd, uint64_t *data, ssize_t sizeOfdata) {
+    int mockedPmuReadAndSuccessReturn(int fd, uint64_t *data, ssize_t sizeOfdata) {
         data[0] = mockActiveTime;
         data[1] = mockTimestamp;
         return 0;
     }
-    int mockedPmuReadSingleAndFailureReturn(int fd, uint64_t *data, ssize_t sizeOfdata) {
+    int mockedPmuReadAndFailureReturn(int fd, uint64_t *data, ssize_t sizeOfdata) {
         return -1;
     }
 
     MOCK_METHOD(int64_t, perfEventOpen, (perf_event_attr * attr, pid_t pid, int cpu, int groupFd, uint64_t flags), (override));
-    MOCK_METHOD(int, pmuReadSingle, (int fd, uint64_t *data, ssize_t sizeOfdata), (override));
+    MOCK_METHOD(int, pmuRead, (int fd, uint64_t *data, ssize_t sizeOfdata), (override));
 };
 
 class EngineSysfsAccess : public SysfsAccess {};
@@ -119,6 +124,13 @@ struct Mock<EngineSysfsAccess> : public EngineSysfsAccess {
     }
 
     Mock<EngineSysfsAccess>() = default;
+};
+
+class DrmMockEngineInfoFailing : public DrmMock {
+  public:
+    using DrmMock::DrmMock;
+    DrmMockEngineInfoFailing(RootDeviceEnvironment &rootDeviceEnvironment) : DrmMock(rootDeviceEnvironment) {}
+    int handleRemainingRequests(unsigned long request, void *arg) override { return -1; }
 };
 
 } // namespace ult

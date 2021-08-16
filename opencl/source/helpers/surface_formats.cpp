@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -101,7 +101,7 @@ const ClSurfaceFormatInfo SurfaceFormats::packedYuvSurfaceFormats[] = {
 };
 
 const ClSurfaceFormatInfo SurfaceFormats::planarYuvSurfaceFormats[] = {
-    {{CL_NV12_INTEL,      CL_UNORM_INT8},     {GMM_FORMAT_NV12,                     GFX3DSTATE_SURFACEFORMAT_NV12                    , 0, 1, 1, 1}}
+    {{CL_NV12_INTEL,      CL_UNORM_INT8},     {GMM_FORMAT_NV12,                     GFX3DSTATE_SURFACEFORMAT_PLANAR_420_8                    , 0, 1, 1, 1}}
 };
 
 const ClSurfaceFormatInfo SurfaceFormats::packedSurfaceFormats[] = {
@@ -168,10 +168,10 @@ ArrayRef<const ClSurfaceFormatInfo> SurfaceFormats::surfaceFormats(cl_mem_flags 
 }
 
 ArrayRef<const ClSurfaceFormatInfo> SurfaceFormats::surfaceFormats(cl_mem_flags flags, const cl_image_format *imageFormat, bool supportsOcl20Features) noexcept {
-    if (NEO::IsNV12Image(imageFormat)) {
+    if (NEO::isNV12Image(imageFormat)) {
         return planarYuv();
     }
-    else if (IsPackedYuvImage(imageFormat)) {
+    else if (isPackedYuvImage(imageFormat)) {
         return packedYuv();
     }
     else if (Image::isDepthFormat(*imageFormat)) {

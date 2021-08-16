@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/os_interface/linux/drm_neo.h"
-#include "shared/source/os_interface/linux/os_interface.h"
 #include "shared/source/os_interface/linux/os_time_linux.h"
+#include "shared/source/os_interface/os_interface.h"
 
 #include "opencl/test/unit_test/os_interface/linux/device_command_stream_fixture.h"
 #include "opencl/test/unit_test/os_interface/linux/mock_os_time_linux.h"
@@ -53,51 +53,51 @@ struct DrmTimeTest : public ::testing::Test {
     std::unique_ptr<OSInterface> osInterface;
 };
 
-TEST_F(DrmTimeTest, DetectWithNullDrmNoCrash) {
+TEST_F(DrmTimeTest, GivenMockOsTimeThenInitializes) {
 }
 
-TEST_F(DrmTimeTest, GetCpuTime) {
+TEST_F(DrmTimeTest, WhenGettingCpuTimeThenSucceeds) {
     uint64_t time = 0;
     auto error = osTime->getCpuTime(&time);
     EXPECT_TRUE(error);
     EXPECT_NE(0ULL, time);
 }
 
-TEST_F(DrmTimeTest, GetCpuTimeFail) {
+TEST_F(DrmTimeTest, GivenFalseTimeFuncWhenGettingCpuTimeThenFails) {
     uint64_t time = 0;
     osTime->setGetTimeFunc(getTimeFuncFalse);
     auto error = osTime->getCpuTime(&time);
     EXPECT_FALSE(error);
 }
 
-TEST_F(DrmTimeTest, GetGpuTime) {
+TEST_F(DrmTimeTest, WhenGettingGpuTimeThenSuceeds) {
     uint64_t time = 0;
     auto pDrm = new DrmMockTime();
     osTime->updateDrm(pDrm);
-    auto error = osTime->getGpuTime32(&time);
+    auto error = osTime->getDeviceTime()->getGpuTime32(&time);
     EXPECT_TRUE(error);
     EXPECT_NE(0ULL, time);
-    error = osTime->getGpuTime36(&time);
+    error = osTime->getDeviceTime()->getGpuTime36(&time);
     EXPECT_TRUE(error);
     EXPECT_NE(0ULL, time);
-    error = osTime->getGpuTimeSplitted(&time);
+    error = osTime->getDeviceTime()->getGpuTimeSplitted(&time);
     EXPECT_TRUE(error);
     EXPECT_NE(0ULL, time);
 }
 
-TEST_F(DrmTimeTest, GetGpuTimeFails) {
+TEST_F(DrmTimeTest, GivenInvalidDrmWhenGettingGpuTimeThenFails) {
     uint64_t time = 0;
     auto pDrm = new DrmMockFail();
     osTime->updateDrm(pDrm);
-    auto error = osTime->getGpuTime32(&time);
+    auto error = osTime->getDeviceTime()->getGpuTime32(&time);
     EXPECT_FALSE(error);
-    error = osTime->getGpuTime36(&time);
+    error = osTime->getDeviceTime()->getGpuTime36(&time);
     EXPECT_FALSE(error);
-    error = osTime->getGpuTimeSplitted(&time);
+    error = osTime->getDeviceTime()->getGpuTimeSplitted(&time);
     EXPECT_FALSE(error);
 }
 
-TEST_F(DrmTimeTest, GetCpuGpuTime) {
+TEST_F(DrmTimeTest, WhenGettingCpuGpuTimeThenSucceeds) {
     TimeStampData CPUGPUTime01 = {0, 0};
     TimeStampData CPUGPUTime02 = {0, 0};
     auto pDrm = new DrmMockTime();
@@ -114,7 +114,7 @@ TEST_F(DrmTimeTest, GetCpuGpuTime) {
     EXPECT_GT(CPUGPUTime02.CPUTimeinNS, CPUGPUTime01.CPUTimeinNS);
 }
 
-TEST_F(DrmTimeTest, GIVENDrmWHENGetCpuGpuTimeTHENPassed) {
+TEST_F(DrmTimeTest, GivenDrmWhenGettingCpuGpuTimeThenSucceeds) {
     TimeStampData CPUGPUTime01 = {0, 0};
     TimeStampData CPUGPUTime02 = {0, 0};
     auto pDrm = new DrmMockTime();
@@ -137,7 +137,7 @@ TEST_F(DrmTimeTest, givenGetCpuGpuTimeWhenItIsUnavailableThenReturnFalse) {
     EXPECT_FALSE(error);
 }
 
-TEST_F(DrmTimeTest, GetCpuGpuTimeFails) {
+TEST_F(DrmTimeTest, GivenInvalidDrmWhenGettingCpuGpuTimeThenFails) {
     TimeStampData CPUGPUTime01 = {0, 0};
     auto pDrm = new DrmMockFail();
     osTime->updateDrm(pDrm);
@@ -145,7 +145,7 @@ TEST_F(DrmTimeTest, GetCpuGpuTimeFails) {
     EXPECT_FALSE(error);
 }
 
-TEST_F(DrmTimeTest, GetCpuGpuTimeCpuFails) {
+TEST_F(DrmTimeTest, GivenInvalidFuncTimeWhenGettingCpuGpuTimeCpuThenFails) {
     TimeStampData CPUGPUTime01 = {0, 0};
     auto pDrm = new DrmMockTime();
     osTime->setGetTimeFunc(getTimeFuncFalse);
@@ -154,20 +154,20 @@ TEST_F(DrmTimeTest, GetCpuGpuTimeCpuFails) {
     EXPECT_FALSE(error);
 }
 
-TEST_F(DrmTimeTest, detect) {
+TEST_F(DrmTimeTest, WhenGettingTimeThenTimeIsCorrect) {
     auto drm = new DrmMockCustom;
     osTime->updateDrm(drm);
 
     {
-        auto p = osTime->getGpuTime;
-        EXPECT_EQ(p, &OSTimeLinux::getGpuTime36);
+        auto p = osTime->getDeviceTime()->getGpuTime;
+        EXPECT_EQ(p, &DeviceTimeDrm::getGpuTime36);
     }
 
     {
         drm->ioctl_res = -1;
-        osTime->timestampTypeDetect();
-        auto p = osTime->getGpuTime;
-        EXPECT_EQ(p, &OSTimeLinux::getGpuTime32);
+        osTime->getDeviceTime()->timestampTypeDetect();
+        auto p = osTime->getDeviceTime()->getGpuTime;
+        EXPECT_EQ(p, &DeviceTimeDrm::getGpuTime32);
     }
 
     DrmMockCustom::IoctlResExt ioctlToPass = {1, 0};
@@ -175,9 +175,9 @@ TEST_F(DrmTimeTest, detect) {
         drm->reset();
         drm->ioctl_res = -1;
         drm->ioctl_res_ext = &ioctlToPass; // 2nd ioctl is successful
-        osTime->timestampTypeDetect();
-        auto p = osTime->getGpuTime;
-        EXPECT_EQ(p, &OSTimeLinux::getGpuTimeSplitted);
+        osTime->getDeviceTime()->timestampTypeDetect();
+        auto p = osTime->getDeviceTime()->getGpuTime;
+        EXPECT_EQ(p, &DeviceTimeDrm::getGpuTimeSplitted);
         drm->ioctl_res_ext = &drm->NONE;
     }
 }
@@ -193,6 +193,31 @@ TEST_F(DrmTimeTest, givenGpuTimestampResolutionQueryWhenIoctlFailsThenDefaultRes
 
     auto result = osTime->getDynamicDeviceTimerResolution(*defaultHwInfo);
     EXPECT_DOUBLE_EQ(result, defaultResolution);
+}
+
+TEST_F(DrmTimeTest, givenGetDynamicDeviceTimerClockWhenIoctlFailsThenDefaultClockIsReturned) {
+    auto defaultResolution = defaultHwInfo->capabilityTable.defaultProfilingTimerResolution;
+
+    auto drm = new DrmMockCustom();
+    osTime->updateDrm(drm);
+
+    drm->getParamRetValue = 0;
+    drm->ioctl_res = -1;
+
+    auto result = osTime->getDynamicDeviceTimerClock(*defaultHwInfo);
+    auto expectedResult = static_cast<uint64_t>(1000000000.0 / defaultResolution);
+    EXPECT_EQ(result, expectedResult);
+}
+
+TEST_F(DrmTimeTest, givenGetDynamicDeviceTimerClockWhenIoctlSucceedsThenNonDefaultClockIsReturned) {
+    auto drm = new DrmMockCustom();
+    osTime->updateDrm(drm);
+
+    uint64_t frequency = 1500;
+    drm->getParamRetValue = static_cast<int>(frequency);
+
+    auto result = osTime->getDynamicDeviceTimerClock(*defaultHwInfo);
+    EXPECT_EQ(result, frequency);
 }
 
 TEST_F(DrmTimeTest, givenGpuTimestampResolutionQueryWhenNoDrmThenDefaultResolutionIsReturned) {

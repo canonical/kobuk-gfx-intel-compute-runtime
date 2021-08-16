@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -37,6 +37,11 @@ void Device::initializeCaps() {
         addressing32bitAllowed = false;
     }
 
+    deviceInfo.sharedSystemAllocationsSupport = hwInfoConfig->getSharedSystemMemCapabilities();
+    if (DebugManager.flags.EnableSharedSystemUsmSupport.get() != -1) {
+        deviceInfo.sharedSystemAllocationsSupport = DebugManager.flags.EnableSharedSystemUsmSupport.get();
+    }
+
     deviceInfo.vendorId = 0x8086;
     deviceInfo.maxReadImageArgs = 128;
     deviceInfo.maxWriteImageArgs = 128;
@@ -57,7 +62,8 @@ void Device::initializeCaps() {
     deviceInfo.maxMemAllocSize = getGlobalMemorySize(singleSubDeviceMask); // Allocation can be placed only on one SubDevice
 
     if (DebugManager.flags.Force32bitAddressing.get() || addressing32bitAllowed || is32bit) {
-        deviceInfo.globalMemSize = std::min(deviceInfo.globalMemSize, static_cast<uint64_t>(4 * GB * 0.8));
+        double percentOfGlobalMemoryAvailable = getPercentOfGlobalMemoryAvailable();
+        deviceInfo.globalMemSize = std::min(deviceInfo.globalMemSize, static_cast<uint64_t>(4 * GB * percentOfGlobalMemoryAvailable));
         deviceInfo.addressBits = 32;
         deviceInfo.force32BitAddressess = is64bit;
     }
@@ -65,10 +71,25 @@ void Device::initializeCaps() {
     deviceInfo.globalMemSize = alignDown(deviceInfo.globalMemSize, MemoryConstants::pageSize);
     deviceInfo.maxMemAllocSize = std::min(deviceInfo.globalMemSize, deviceInfo.maxMemAllocSize); // if globalMemSize was reduced for 32b
 
-    // OpenCL 1.2 requires 128MB minimum
-    deviceInfo.maxMemAllocSize = std::min(std::max(deviceInfo.maxMemAllocSize / 2, static_cast<uint64_t>(128llu * MB)), this->hardwareCapabilities.maxMemAllocSize);
+    if (!deviceInfo.sharedSystemAllocationsSupport) {
+        deviceInfo.maxMemAllocSize = std::min(deviceInfo.maxMemAllocSize, this->hardwareCapabilities.maxMemAllocSize);
+    }
+
+    // Some specific driver model configurations may impose additional limitations
+    auto driverModelMaxMemAlloc = std::numeric_limits<size_t>::max();
+    if (this->executionEnvironment->rootDeviceEnvironments[0]->osInterface) {
+        driverModelMaxMemAlloc = this->executionEnvironment->rootDeviceEnvironments[0]->osInterface->getDriverModel()->getMaxMemAllocSize();
+    }
+    deviceInfo.maxMemAllocSize = std::min<std::uint64_t>(driverModelMaxMemAlloc, deviceInfo.maxMemAllocSize);
 
     deviceInfo.profilingTimerResolution = getProfilingTimerResolution();
+    if (DebugManager.flags.OverrideProfilingTimerResolution.get() != -1) {
+        deviceInfo.profilingTimerResolution = static_cast<double>(DebugManager.flags.OverrideProfilingTimerResolution.get());
+        deviceInfo.outProfilingTimerClock = static_cast<size_t>(1000000000.0 / deviceInfo.profilingTimerResolution);
+    } else {
+        deviceInfo.outProfilingTimerClock = static_cast<size_t>(getProfilingTimerClock());
+    }
+
     deviceInfo.outProfilingTimerResolution = static_cast<size_t>(deviceInfo.profilingTimerResolution);
 
     constexpr uint64_t maxPixelSize = 16;
@@ -83,9 +104,17 @@ void Device::initializeCaps() {
     deviceInfo.maxNumEUsPerSubSlice = (systemInfo.EuCountPerPoolMin == 0 || hwInfo.featureTable.ftrPooledEuEnabled == 0)
                                           ? (systemInfo.EUCount / systemInfo.SubSliceCount)
                                           : systemInfo.EuCountPerPoolMin;
+    if (systemInfo.DualSubSliceCount != 0) {
+        deviceInfo.maxNumEUsPerDualSubSlice = (systemInfo.EuCountPerPoolMin == 0 || hwInfo.featureTable.ftrPooledEuEnabled == 0)
+                                                  ? (systemInfo.EUCount / systemInfo.DualSubSliceCount)
+                                                  : systemInfo.EuCountPerPoolMin;
+
+    } else {
+        deviceInfo.maxNumEUsPerDualSubSlice = deviceInfo.maxNumEUsPerSubSlice;
+    }
     deviceInfo.numThreadsPerEU = systemInfo.ThreadCount / systemInfo.EUCount;
     deviceInfo.threadsPerEUConfigs = hwHelper.getThreadsPerEUConfigs();
-    auto maxWS = hwHelper.getMaxThreadsForWorkgroup(hwInfo, static_cast<uint32_t>(deviceInfo.maxNumEUsPerSubSlice)) * simdSizeUsed;
+    auto maxWS = hwInfoConfig->getMaxThreadsForWorkgroupInDSSOrSS(hwInfo, static_cast<uint32_t>(deviceInfo.maxNumEUsPerSubSlice), static_cast<uint32_t>(deviceInfo.maxNumEUsPerDualSubSlice)) * simdSizeUsed;
 
     maxWS = Math::prevPowerOfTwo(maxWS);
     deviceInfo.maxWorkGroupSize = std::min(maxWS, 1024u);
@@ -103,6 +132,9 @@ void Device::initializeCaps() {
     deviceInfo.maxFrontEndThreads = HwHelper::getMaxThreadsForVfe(hwInfo);
 
     deviceInfo.localMemSize = hwInfo.capabilityTable.slmSize * KB;
+    if (DebugManager.flags.OverrideSlmSize.get() != -1) {
+        deviceInfo.localMemSize = DebugManager.flags.OverrideSlmSize.get() * KB;
+    }
 
     deviceInfo.imageSupport = hwInfo.capabilityTable.supportsImages;
     deviceInfo.image2DMaxWidth = 16384;
@@ -128,17 +160,24 @@ void Device::initializeCaps() {
         this->preemptionMode = PreemptionMode::Disabled;
     }
 
-    deviceInfo.sharedSystemAllocationsSupport = hwInfoConfig->getSharedSystemMemCapabilities();
-    if (DebugManager.flags.EnableSharedSystemUsmSupport.get() != -1) {
-        deviceInfo.sharedSystemAllocationsSupport = DebugManager.flags.EnableSharedSystemUsmSupport.get();
-    }
-
     std::stringstream deviceName;
 
     deviceName << this->getDeviceName(hwInfo);
     deviceName << " [0x" << std::hex << std::setw(4) << std::setfill('0') << hwInfo.platform.usDeviceID << "]";
 
     deviceInfo.name = deviceName.str();
+}
+
+void Device::reduceMaxMemAllocSize() {
+    deviceInfo.maxMemAllocSize = std::min(deviceInfo.globalMemSize, getGlobalMemorySize(1u));
+
+    if (!deviceInfo.sharedSystemAllocationsSupport) {
+        deviceInfo.maxMemAllocSize /= 2;
+        deviceInfo.maxMemAllocSize = std::min(deviceInfo.maxMemAllocSize, this->hardwareCapabilities.maxMemAllocSize);
+    }
+
+    // OpenCL 1.2 requires 128MB minimum
+    deviceInfo.maxMemAllocSize = std::max(deviceInfo.maxMemAllocSize, static_cast<uint64_t>(128llu * MB));
 }
 
 } // namespace NEO

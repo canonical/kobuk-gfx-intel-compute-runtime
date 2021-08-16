@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -280,7 +280,7 @@ class clEventProfilingWithPerfCountersTests : public DeviceInstrumentationFixtur
         cl_int retVal = CL_SUCCESS;
         context = std::unique_ptr<Context>(Context::create<MockContext>(nullptr, ClDeviceVector(&deviceId, 1),
                                                                         nullptr, nullptr, retVal));
-        commandQueue = std::make_unique<MockCommandQueue>(context.get(), device.get(), nullptr);
+        commandQueue = std::make_unique<MockCommandQueue>(context.get(), device.get(), nullptr, false);
         event = std::make_unique<Event>(commandQueue.get(), 0, 0, 0);
         event->setStatus(CL_COMPLETE);
         event->setProfilingEnabled(true);

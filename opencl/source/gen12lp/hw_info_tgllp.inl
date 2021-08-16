@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/source/aub_mem_dump/aub_services.h"
+#include "shared/source/aub_mem_dump/definitions/aub_services.h"
 #include "shared/source/gen12lp/hw_cmds.h"
 #include "shared/source/helpers/constants.h"
 
@@ -17,7 +17,7 @@ const char *HwMapper<IGFX_TIGERLAKE_LP>::abbreviation = "tgllp";
 
 bool isSimulationTGLLP(unsigned short deviceId) {
     switch (deviceId) {
-    case DEV_ID_FF20:
+    case 0xFF20:
         return true;
     }
     return false;
@@ -68,6 +68,7 @@ const RuntimeCapabilityTable TGLLP::capabilityTable{
     true,                                            // forceStatelessCompilationFor32Bit
     true,                                            // ftr64KBpages
     "lp",                                            // platformType
+    "",                                              // deviceName
     true,                                            // sourceLevelDebuggerSupported
     false,                                           // supportsVme
     false,                                           // supportCacheFlushAfterWalker
@@ -79,7 +80,9 @@ const RuntimeCapabilityTable TGLLP::capabilityTable{
     false,                                           // supportsIndependentForwardProgress
     false,                                           // hostPtrTrackingEnabled
     true,                                            // levelZeroSupported
-    true                                             // isIntegratedDevice
+    true,                                            // isIntegratedDevice
+    true,                                            // supportsMediaBlock
+    true                                             // fusedEuEnabled
 };
 
 WorkaroundTable TGLLP::workaroundTable = {};

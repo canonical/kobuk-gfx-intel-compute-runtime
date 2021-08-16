@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019-2020 Intel Corporation
+# Copyright (C) 2019-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -8,7 +8,10 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
     ${CMAKE_CURRENT_SOURCE_DIR}/abort.h
     ${CMAKE_CURRENT_SOURCE_DIR}/address_patch.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/affinity_mask.h
     ${CMAKE_CURRENT_SOURCE_DIR}/aligned_memory.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/app_resource_defines.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/app_resource_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/api_specific_config.h
     ${CMAKE_CURRENT_SOURCE_DIR}/array_count.h
     ${CMAKE_CURRENT_SOURCE_DIR}/aux_translation.h
@@ -18,9 +21,9 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/bit_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper_base.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper_bdw_plus.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/blit_commands_helper_extra.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cache_flush.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy.h
     ${CMAKE_CURRENT_SOURCE_DIR}/common_types.h
@@ -34,7 +37,8 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/dirty_state_helpers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dirty_state_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/engine_control.h
-    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/engine_node_helper.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine_node_helper.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/engine_node_helper_extra.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/engine_node_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/extendable_enum.h
     ${CMAKE_CURRENT_SOURCE_DIR}/file_io.cpp
@@ -60,13 +64,13 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_tgllp_plus.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_info.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_info.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/hw_info_config_common_helper.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/hw_info_config_common_helper.h
+    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/hw_info_extended.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/interlocked_max.h
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_helpers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/kmd_notify_properties.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kmd_notify_properties.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/l3_range.h
     ${CMAKE_CURRENT_SOURCE_DIR}/local_id_gen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/local_id_gen.h
     ${CMAKE_CURRENT_SOURCE_DIR}/local_id_gen.inl
@@ -81,39 +85,66 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/preamble.h
     ${CMAKE_CURRENT_SOURCE_DIR}/preamble_base.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/preamble_bdw_plus.inl
+    ${CMAKE_CURRENT_SOURCE_DIR}/preprocessor.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ptr_math.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ray_tracing_helper.h
+    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/ray_tracing_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register_offsets.h
     ${CMAKE_CURRENT_SOURCE_DIR}/registered_method_dispatcher.h
     ${CMAKE_CURRENT_SOURCE_DIR}/simd_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address.h
     ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_base.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_bdw.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_skl_plus.inl
+    ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_skl.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_bdw_plus.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/state_compute_mode_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/stdio.h
     ${CMAKE_CURRENT_SOURCE_DIR}/string.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/string_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/surface_format_info.h
     ${CMAKE_CURRENT_SOURCE_DIR}/timestamp_offsets.h
     ${CMAKE_CURRENT_SOURCE_DIR}/timestamp_packet.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/timestamp_packet.h
-    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/timestamp_packet_extra.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/topology_map.h
     ${CMAKE_CURRENT_SOURCE_DIR}/uint16_avx2.h
     ${CMAKE_CURRENT_SOURCE_DIR}/uint16_sse4.h
     ${CMAKE_CURRENT_SOURCE_DIR}/vec.h
     ${CMAKE_CURRENT_SOURCE_DIR}/definitions/${BRANCH_DIR_SUFFIX}/hw_cmds.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/definitions/${BRANCH_DIR_SUFFIX}/engine_group_types.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/definitions/mi_flush_args.h
     ${CMAKE_CURRENT_SOURCE_DIR}/definitions/pipe_control_args_base.h
     ${CMAKE_CURRENT_SOURCE_DIR}/definitions${BRANCH_DIR_SUFFIX}/pipe_control_args.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/${BRANCH_DIR_SUFFIX}/pipe_control_args.cpp
 )
 
-set_property(GLOBAL PROPERTY NEO_CORE_HELPERS ${NEO_CORE_HELPERS})
-if(WIN32)
-  set(NEO_CORE_SRCS_HELPERS_WINDOWS
-      ${CMAKE_CURRENT_SOURCE_DIR}/windows/gmm_callbacks.cpp
-      ${CMAKE_CURRENT_SOURCE_DIR}/windows/gmm_callbacks.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/windows/gmm_callbacks.inl
+if(SUPPORT_XEHP_PLUS)
+  list(APPEND NEO_CORE_HELPERS
+       ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper_xehp_plus.inl
+       ${CMAKE_CURRENT_SOURCE_DIR}/cache_flush_xehp_plus.inl
+       ${CMAKE_CURRENT_SOURCE_DIR}/extra_allocation_data_xehp_plus.inl
+       ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_xehp_plus.inl
+       ${CMAKE_CURRENT_SOURCE_DIR}/preamble_xehp_plus.inl
+       ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_xehp_plus.inl
   )
-  set_property(GLOBAL PROPERTY NEO_CORE_SRCS_HELPERS_WINDOWS ${NEO_CORE_SRCS_HELPERS_WINDOWS})
 endif()
+
+if(WIN32)
+  list(APPEND NEO_CORE_HELPERS
+       ${CMAKE_CURRENT_SOURCE_DIR}/windows/app_resource_helper.cpp
+  )
+else()
+  list(APPEND NEO_CORE_HELPERS
+       ${CMAKE_CURRENT_SOURCE_DIR}/linux/app_resource_helper.cpp
+  )
+endif()
+
+set(NEO_CORE_HELPERS_GMM_CALLBACKS_WINDOWS
+    ${CMAKE_CURRENT_SOURCE_DIR}/windows/gmm_callbacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/windows/gmm_callbacks.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/windows/gmm_callbacks.inl
+)
+
+set_property(GLOBAL PROPERTY NEO_CORE_HELPERS_GMM_CALLBACKS_WINDOWS ${NEO_CORE_HELPERS_GMM_CALLBACKS_WINDOWS})
+set_property(GLOBAL PROPERTY NEO_CORE_HELPERS ${NEO_CORE_HELPERS})
 
 add_subdirectories()

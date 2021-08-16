@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -34,13 +34,13 @@ class SchedulerKernel : public Kernel {
     }
 
     size_t getCurbeSize() {
-        size_t crossTrheadDataSize = kernelInfo.patchInfo.dataParameterStream ? kernelInfo.patchInfo.dataParameterStream->DataParameterStreamSize : 0;
+        size_t crossThreadDataSize = kernelInfo.kernelDescriptor.kernelAttributes.crossThreadDataSize;
         size_t dshSize = kernelInfo.heapInfo.DynamicStateHeapSize;
 
-        crossTrheadDataSize = alignUp(crossTrheadDataSize, 64);
+        crossThreadDataSize = alignUp(crossThreadDataSize, 64);
         dshSize = alignUp(dshSize, 64);
 
-        return alignUp(SCHEDULER_DYNAMIC_PAYLOAD_SIZE, 64) + crossTrheadDataSize + dshSize;
+        return alignUp(SCHEDULER_DYNAMIC_PAYLOAD_SIZE, 64) + crossThreadDataSize + dshSize;
     }
 
     void setArgs(GraphicsAllocation *queue,
@@ -55,13 +55,13 @@ class SchedulerKernel : public Kernel {
     static BuiltinCode loadSchedulerKernel(Device *device);
 
   protected:
-    SchedulerKernel(Program *programArg, const KernelInfo &kernelInfoArg, const ClDevice &deviceArg) : Kernel(programArg, kernelInfoArg, deviceArg, true), gws(0) {
+    SchedulerKernel(Program *programArg, const KernelInfo &kernelInfoArg, ClDevice &clDeviceArg) : Kernel(programArg, kernelInfoArg, clDeviceArg, true) {
         computeGws();
     };
 
     void computeGws();
 
-    size_t gws;
+    size_t gws = 0u;
 };
 
 } // namespace NEO

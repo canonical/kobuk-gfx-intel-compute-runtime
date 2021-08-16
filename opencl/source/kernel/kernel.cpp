@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -20,8 +20,11 @@
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/kernel_helpers.h"
 #include "shared/source/helpers/ptr_math.h"
+#include "shared/source/kernel/kernel_arg_descriptor_extended_device_side_enqueue.h"
+#include "shared/source/kernel/kernel_arg_descriptor_extended_vme.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
+#include "shared/source/os_interface/hw_info_config.h"
 
 #include "opencl/source/accelerators/intel_accelerator.h"
 #include "opencl/source/accelerators/intel_motion_estimation.h"
@@ -64,51 +67,24 @@ class Surface;
 
 uint32_t Kernel::dummyPatchLocation = 0xbaddf00d;
 
-Kernel::Kernel(Program *programArg, const KernelInfo &kernelInfoArg, const ClDevice &deviceArg, bool schedulerKernel)
-    : globalWorkOffsetX(&Kernel::dummyPatchLocation),
-      globalWorkOffsetY(&Kernel::dummyPatchLocation),
-      globalWorkOffsetZ(&Kernel::dummyPatchLocation),
-      localWorkSizeX(&Kernel::dummyPatchLocation),
-      localWorkSizeY(&Kernel::dummyPatchLocation),
-      localWorkSizeZ(&Kernel::dummyPatchLocation),
-      localWorkSizeX2(&Kernel::dummyPatchLocation),
-      localWorkSizeY2(&Kernel::dummyPatchLocation),
-      localWorkSizeZ2(&Kernel::dummyPatchLocation),
-      globalWorkSizeX(&Kernel::dummyPatchLocation),
-      globalWorkSizeY(&Kernel::dummyPatchLocation),
-      globalWorkSizeZ(&Kernel::dummyPatchLocation),
-      enqueuedLocalWorkSizeX(&Kernel::dummyPatchLocation),
-      enqueuedLocalWorkSizeY(&Kernel::dummyPatchLocation),
-      enqueuedLocalWorkSizeZ(&Kernel::dummyPatchLocation),
-      numWorkGroupsX(&Kernel::dummyPatchLocation),
-      numWorkGroupsY(&Kernel::dummyPatchLocation),
-      numWorkGroupsZ(&Kernel::dummyPatchLocation),
-      maxWorkGroupSizeForCrossThreadData(&Kernel::dummyPatchLocation),
-      workDim(&Kernel::dummyPatchLocation),
-      dataParameterSimdSize(&Kernel::dummyPatchLocation),
-      parentEventOffset(&Kernel::dummyPatchLocation),
-      preferredWkgMultipleOffset(&Kernel::dummyPatchLocation),
-      slmTotalSize(kernelInfoArg.workloadInfo.slmStaticSize),
-      isBuiltIn(false),
-      isParentKernel((kernelInfoArg.patchInfo.executionEnvironment != nullptr) ? (kernelInfoArg.patchInfo.executionEnvironment->HasDeviceEnqueue != 0) : false),
+Kernel::Kernel(Program *programArg, const KernelInfo &kernelInfoArg, ClDevice &clDeviceArg, bool schedulerKernel)
+    : isParentKernel(kernelInfoArg.kernelDescriptor.kernelAttributes.flags.usesDeviceSideEnqueue),
       isSchedulerKernel(schedulerKernel),
+      executionEnvironment(programArg->getExecutionEnvironment()),
       program(programArg),
-      context(nullptr),
-      device(deviceArg),
-      kernelInfo(kernelInfoArg),
-      numberOfBindingTableStates(0),
-      localBindingTableOffset(0),
-      sshLocalSize(0),
-      crossThreadData(nullptr),
-      crossThreadDataSize(0),
-      privateSurface(nullptr),
-      privateSurfaceSize(0),
-      kernelReflectionSurface(nullptr),
-      usingSharedObjArgs(false) {
+      clDevice(clDeviceArg),
+      kernelInfo(kernelInfoArg) {
     program->retain();
+    program->retainForKernel();
     imageTransformer.reset(new ImageTransformer);
-
-    maxKernelWorkGroupSize = static_cast<uint32_t>(device.getSharedDeviceInfo().maxWorkGroupSize);
+    if (kernelInfoArg.kernelDescriptor.kernelAttributes.simdSize == 1u) {
+        auto deviceInfo = getDevice().getDevice().getDeviceInfo();
+        auto &hwInfoConfig = *HwInfoConfig::get(getHardwareInfo().platform.eProductFamily);
+        maxKernelWorkGroupSize = hwInfoConfig.getMaxThreadsForWorkgroupInDSSOrSS(getHardwareInfo(), static_cast<uint32_t>(deviceInfo.maxNumEUsPerSubSlice), static_cast<uint32_t>(deviceInfo.maxNumEUsPerDualSubSlice));
+    } else {
+        maxKernelWorkGroupSize = static_cast<uint32_t>(clDevice.getSharedDeviceInfo().maxWorkGroupSize);
+    }
+    slmTotalSize = kernelInfoArg.kernelDescriptor.kernelAttributes.slmInlineSize;
 }
 
 Kernel::~Kernel() {
@@ -127,7 +103,7 @@ Kernel::~Kernel() {
     }
 
     for (uint32_t i = 0; i < patchedArgumentsNum; i++) {
-        if (kernelInfo.kernelArgInfo.at(i).isSampler) {
+        if (SAMPLER_OBJ == getKernelArguments()[i].type) {
             auto sampler = castToObject<Sampler>(kernelArguments.at(i).object);
             if (sampler) {
                 sampler->decRefInternal();
@@ -136,278 +112,232 @@ Kernel::~Kernel() {
     }
 
     kernelArgHandlers.clear();
+    program->releaseForKernel();
     program->release();
 }
-
-// Checks if patch offset is invalid (undefined)
-inline bool isInvalidOffset(uint32_t offset) {
-    return (offset == KernelArgInfo::undefinedOffset);
-}
-
-// Checks if patch offset is valid
-inline bool isValidOffset(uint32_t offset) {
-    return isInvalidOffset(offset) == false;
-}
-
 // If dstOffsetBytes is not an invalid offset, then patches dst at dstOffsetBytes
 // with src casted to DstT type.
 template <typename DstT, typename SrcT>
-inline void patch(const SrcT &src, void *dst, uint32_t dstOffsetBytes) {
-    if (isInvalidOffset(dstOffsetBytes)) {
-        return;
+inline void patch(const SrcT &src, void *dst, CrossThreadDataOffset dstOffsetBytes) {
+    if (isValidOffset(dstOffsetBytes)) {
+        DstT *patchLocation = reinterpret_cast<DstT *>(ptrOffset(dst, dstOffsetBytes));
+        *patchLocation = static_cast<DstT>(src);
     }
-
-    DstT *patchLocation = reinterpret_cast<DstT *>(ptrOffset(dst, dstOffsetBytes));
-    *patchLocation = static_cast<DstT>(src);
 }
 
-template <typename PatchTokenT>
-void Kernel::patchWithImplicitSurface(void *ptrToPatchInCrossThreadData, GraphicsAllocation &allocation, const PatchTokenT &patch) {
-    uint32_t crossThreadDataOffset = patch.DataParamOffset;
-    uint32_t pointerSize = patch.DataParamSize;
-    uint32_t sshOffset = patch.SurfaceStateHeapOffset;
-    void *crossThreadData = getCrossThreadData();
-    void *ssh = getSurfaceStateHeap();
-    if (crossThreadData != nullptr) {
-        auto pp = ptrOffset(crossThreadData, crossThreadDataOffset);
+void Kernel::patchWithImplicitSurface(void *ptrToPatchInCrossThreadData, GraphicsAllocation &allocation, const ArgDescPointer &arg) {
+    if ((nullptr != crossThreadData) && isValidOffset(arg.stateless)) {
+        auto pp = ptrOffset(crossThreadData, arg.stateless);
         uintptr_t addressToPatch = reinterpret_cast<uintptr_t>(ptrToPatchInCrossThreadData);
-        patchWithRequiredSize(pp, pointerSize, addressToPatch);
+        patchWithRequiredSize(pp, arg.pointerSize, addressToPatch);
         if (DebugManager.flags.AddPatchInfoCommentsForAUBDump.get()) {
-            PatchInfoData patchInfoData(addressToPatch, 0u, PatchInfoAllocationType::KernelArg, reinterpret_cast<uint64_t>(getCrossThreadData()), crossThreadDataOffset, PatchInfoAllocationType::IndirectObjectHeap, pointerSize);
+            PatchInfoData patchInfoData(addressToPatch, 0u, PatchInfoAllocationType::KernelArg, reinterpret_cast<uint64_t>(crossThreadData), arg.stateless, PatchInfoAllocationType::IndirectObjectHeap, arg.pointerSize);
             this->patchInfoDataList.push_back(patchInfoData);
         }
     }
 
-    if (ssh) {
-        auto surfaceState = ptrOffset(ssh, sshOffset);
+    void *ssh = getSurfaceStateHeap();
+    if ((nullptr != ssh) & isValidOffset(arg.bindful)) {
+        auto surfaceState = ptrOffset(ssh, arg.bindful);
         void *addressToPatch = reinterpret_cast<void *>(allocation.getGpuAddressToPatch());
         size_t sizeToPatch = allocation.getUnderlyingBufferSize();
-        Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, sizeToPatch, addressToPatch, 0, &allocation, 0, 0);
+        Buffer::setSurfaceState(&clDevice.getDevice(), surfaceState, false, false, sizeToPatch, addressToPatch, 0, &allocation, 0, 0,
+                                kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics, areMultipleSubDevicesInContext());
     }
 }
 
-template void Kernel::patchWithImplicitSurface(void *ptrToPatchInCrossThreadData, GraphicsAllocation &allocation, const SPatchAllocateStatelessGlobalMemorySurfaceWithInitialization &patch);
-
-template void Kernel::patchWithImplicitSurface(void *ptrToPatchInCrossThreadData, GraphicsAllocation &allocation, const SPatchAllocateStatelessPrivateSurface &patch);
-
-template void Kernel::patchWithImplicitSurface(void *ptrToPatchInCrossThreadData, GraphicsAllocation &allocation, const SPatchAllocateStatelessConstantMemorySurfaceWithInitialization &patch);
-
 cl_int Kernel::initialize() {
-    cl_int retVal = CL_OUT_OF_HOST_MEMORY;
-    do {
-        const auto &workloadInfo = kernelInfo.workloadInfo;
-        const auto &heapInfo = kernelInfo.heapInfo;
-        const auto &patchInfo = kernelInfo.patchInfo;
+    this->kernelHasIndirectAccess = false;
+    auto pClDevice = &getDevice();
+    auto rootDeviceIndex = pClDevice->getRootDeviceIndex();
+    reconfigureKernel();
+    auto &hwInfo = pClDevice->getHardwareInfo();
+    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    auto &kernelDescriptor = kernelInfo.kernelDescriptor;
+    const auto &implicitArgs = kernelDescriptor.payloadMappings.implicitArgs;
+    const auto &explicitArgs = kernelDescriptor.payloadMappings.explicitArgs;
+    auto maxSimdSize = kernelInfo.getMaxSimdSize();
+    const auto &heapInfo = kernelInfo.heapInfo;
 
-        reconfigureKernel();
-        auto &hwInfo = device.getHardwareInfo();
-        auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-        auto maxSimdSize = getKernelInfo().getMaxSimdSize();
+    if (maxSimdSize != 1 && maxSimdSize < hwHelper.getMinimalSIMDSize()) {
+        return CL_INVALID_KERNEL;
+    }
 
-        if (maxSimdSize != 1 && maxSimdSize < hwHelper.getMinimalSIMDSize()) {
-            return CL_INVALID_KERNEL;
+    crossThreadDataSize = kernelDescriptor.kernelAttributes.crossThreadDataSize;
+
+    // now allocate our own cross-thread data, if necessary
+    if (crossThreadDataSize) {
+        crossThreadData = new char[crossThreadDataSize];
+
+        if (kernelInfo.crossThreadData) {
+            memcpy_s(crossThreadData, crossThreadDataSize,
+                     kernelInfo.crossThreadData, crossThreadDataSize);
+        } else {
+            memset(crossThreadData, 0x00, crossThreadDataSize);
         }
 
-        crossThreadDataSize = patchInfo.dataParameterStream
-                                  ? patchInfo.dataParameterStream->DataParameterStreamSize
-                                  : 0;
-
-        // now allocate our own cross-thread data, if necessary
-        if (crossThreadDataSize) {
-            crossThreadData = new char[crossThreadDataSize];
-
-            if (kernelInfo.crossThreadData) {
-                memcpy_s(crossThreadData, crossThreadDataSize, kernelInfo.crossThreadData, crossThreadDataSize);
-            } else {
-                memset(crossThreadData, 0x00, crossThreadDataSize);
+        auto crossThread = reinterpret_cast<uint32_t *>(crossThreadData);
+        auto setArgsIfValidOffset = [&](uint32_t *&crossThreadData, NEO::CrossThreadDataOffset offset, uint32_t value) {
+            if (isValidOffset(offset)) {
+                crossThreadData = ptrOffset(crossThread, offset);
+                *crossThreadData = value;
             }
+        };
+        setArgsIfValidOffset(maxWorkGroupSizeForCrossThreadData, implicitArgs.maxWorkGroupSize, maxKernelWorkGroupSize);
+        setArgsIfValidOffset(dataParameterSimdSize, implicitArgs.simdSize, maxSimdSize);
+        setArgsIfValidOffset(preferredWkgMultipleOffset, implicitArgs.preferredWkgMultiple, maxSimdSize);
+        setArgsIfValidOffset(parentEventOffset, implicitArgs.deviceSideEnqueueParentEvent, undefined<uint32_t>);
+    }
 
-            auto crossThread = reinterpret_cast<uint32_t *>(crossThreadData);
-            globalWorkOffsetX = workloadInfo.globalWorkOffsetOffsets[0] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.globalWorkOffsetOffsets[0]) : globalWorkOffsetX;
-            globalWorkOffsetY = workloadInfo.globalWorkOffsetOffsets[1] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.globalWorkOffsetOffsets[1]) : globalWorkOffsetY;
-            globalWorkOffsetZ = workloadInfo.globalWorkOffsetOffsets[2] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.globalWorkOffsetOffsets[2]) : globalWorkOffsetZ;
+    // allocate our own SSH, if necessary
+    sshLocalSize = heapInfo.SurfaceStateHeapSize;
+    if (sshLocalSize) {
+        pSshLocal = std::make_unique<char[]>(sshLocalSize);
 
-            localWorkSizeX = workloadInfo.localWorkSizeOffsets[0] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.localWorkSizeOffsets[0]) : localWorkSizeX;
-            localWorkSizeY = workloadInfo.localWorkSizeOffsets[1] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.localWorkSizeOffsets[1]) : localWorkSizeY;
-            localWorkSizeZ = workloadInfo.localWorkSizeOffsets[2] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.localWorkSizeOffsets[2]) : localWorkSizeZ;
+        // copy the ssh into our local copy
+        memcpy_s(pSshLocal.get(), sshLocalSize,
+                 heapInfo.pSsh, heapInfo.SurfaceStateHeapSize);
+    }
+    numberOfBindingTableStates = kernelDescriptor.payloadMappings.bindingTable.numEntries;
+    localBindingTableOffset = kernelDescriptor.payloadMappings.bindingTable.tableOffset;
 
-            localWorkSizeX2 = workloadInfo.localWorkSizeOffsets2[0] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.localWorkSizeOffsets2[0]) : localWorkSizeX2;
-            localWorkSizeY2 = workloadInfo.localWorkSizeOffsets2[1] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.localWorkSizeOffsets2[1]) : localWorkSizeY2;
-            localWorkSizeZ2 = workloadInfo.localWorkSizeOffsets2[2] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.localWorkSizeOffsets2[2]) : localWorkSizeZ2;
+    // patch crossthread data and ssh with inline surfaces, if necessary
+    auto perHwThreadPrivateMemorySize = kernelDescriptor.kernelAttributes.perHwThreadPrivateMemorySize;
+    if (perHwThreadPrivateMemorySize) {
+        privateSurfaceSize = KernelHelper::getPrivateSurfaceSize(perHwThreadPrivateMemorySize, pClDevice->getSharedDeviceInfo().computeUnitsUsedForScratch);
+        DEBUG_BREAK_IF(privateSurfaceSize == 0);
 
-            globalWorkSizeX = workloadInfo.globalWorkSizeOffsets[0] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.globalWorkSizeOffsets[0]) : globalWorkSizeX;
-            globalWorkSizeY = workloadInfo.globalWorkSizeOffsets[1] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.globalWorkSizeOffsets[1]) : globalWorkSizeY;
-            globalWorkSizeZ = workloadInfo.globalWorkSizeOffsets[2] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.globalWorkSizeOffsets[2]) : globalWorkSizeZ;
-
-            enqueuedLocalWorkSizeX = workloadInfo.enqueuedLocalWorkSizeOffsets[0] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.enqueuedLocalWorkSizeOffsets[0]) : enqueuedLocalWorkSizeX;
-            enqueuedLocalWorkSizeY = workloadInfo.enqueuedLocalWorkSizeOffsets[1] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.enqueuedLocalWorkSizeOffsets[1]) : enqueuedLocalWorkSizeY;
-            enqueuedLocalWorkSizeZ = workloadInfo.enqueuedLocalWorkSizeOffsets[2] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.enqueuedLocalWorkSizeOffsets[2]) : enqueuedLocalWorkSizeZ;
-
-            numWorkGroupsX = workloadInfo.numWorkGroupsOffset[0] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.numWorkGroupsOffset[0]) : numWorkGroupsX;
-            numWorkGroupsY = workloadInfo.numWorkGroupsOffset[1] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.numWorkGroupsOffset[1]) : numWorkGroupsY;
-            numWorkGroupsZ = workloadInfo.numWorkGroupsOffset[2] != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.numWorkGroupsOffset[2]) : numWorkGroupsZ;
-
-            maxWorkGroupSizeForCrossThreadData = workloadInfo.maxWorkGroupSizeOffset != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.maxWorkGroupSizeOffset) : maxWorkGroupSizeForCrossThreadData;
-            workDim = workloadInfo.workDimOffset != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.workDimOffset) : workDim;
-            dataParameterSimdSize = workloadInfo.simdSizeOffset != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.simdSizeOffset) : dataParameterSimdSize;
-            parentEventOffset = workloadInfo.parentEventOffset != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.parentEventOffset) : parentEventOffset;
-            preferredWkgMultipleOffset = workloadInfo.preferredWkgMultipleOffset != WorkloadInfo::undefinedOffset ? ptrOffset(crossThread, workloadInfo.preferredWkgMultipleOffset) : preferredWkgMultipleOffset;
-
-            *maxWorkGroupSizeForCrossThreadData = maxKernelWorkGroupSize;
-            *dataParameterSimdSize = maxSimdSize;
-            *preferredWkgMultipleOffset = maxSimdSize;
-            *parentEventOffset = WorkloadInfo::invalidParentEvent;
+        if (privateSurfaceSize > std::numeric_limits<uint32_t>::max()) {
+            return CL_OUT_OF_RESOURCES;
+        }
+        privateSurface = executionEnvironment.memoryManager->allocateGraphicsMemoryWithProperties(
+            {rootDeviceIndex,
+             static_cast<size_t>(privateSurfaceSize),
+             GraphicsAllocation::AllocationType::PRIVATE_SURFACE,
+             pClDevice->getDeviceBitfield()});
+        if (privateSurface == nullptr) {
+            return CL_OUT_OF_RESOURCES;
         }
 
-        // allocate our own SSH, if necessary
-        sshLocalSize = heapInfo.SurfaceStateHeapSize;
+        const auto &privateMemoryAddress = kernelDescriptor.payloadMappings.implicitArgs.privateMemoryAddress;
+        patchWithImplicitSurface(reinterpret_cast<void *>(privateSurface->getGpuAddressToPatch()), *privateSurface, privateMemoryAddress);
+    }
 
-        if (sshLocalSize) {
-            pSshLocal = std::make_unique<char[]>(sshLocalSize);
+    if (isValidOffset(kernelDescriptor.payloadMappings.implicitArgs.globalConstantsSurfaceAddress.stateless)) {
+        DEBUG_BREAK_IF(program->getConstantSurface(rootDeviceIndex) == nullptr);
+        uintptr_t constMemory = isBuiltIn ? (uintptr_t)program->getConstantSurface(rootDeviceIndex)->getUnderlyingBuffer() : (uintptr_t)program->getConstantSurface(rootDeviceIndex)->getGpuAddressToPatch();
 
-            // copy the ssh into our local copy
-            memcpy_s(pSshLocal.get(), sshLocalSize, heapInfo.pSsh, sshLocalSize);
-        }
-        numberOfBindingTableStates = (patchInfo.bindingTableState != nullptr) ? patchInfo.bindingTableState->Count : 0;
-        localBindingTableOffset = (patchInfo.bindingTableState != nullptr) ? patchInfo.bindingTableState->Offset : 0;
+        const auto &arg = kernelDescriptor.payloadMappings.implicitArgs.globalConstantsSurfaceAddress;
+        patchWithImplicitSurface(reinterpret_cast<void *>(constMemory), *program->getConstantSurface(rootDeviceIndex), arg);
+    }
 
-        // patch crossthread data and ssh with inline surfaces, if necessary
-        auto perHwThreadPrivateMemorySize = PatchTokenBinary::getPerHwThreadPrivateSurfaceSize(patchInfo.pAllocateStatelessPrivateSurface, getKernelInfo().getMaxSimdSize());
+    if (isValidOffset(kernelDescriptor.payloadMappings.implicitArgs.globalVariablesSurfaceAddress.stateless)) {
+        DEBUG_BREAK_IF(program->getGlobalSurface(rootDeviceIndex) == nullptr);
+        uintptr_t globalMemory = isBuiltIn ? (uintptr_t)program->getGlobalSurface(rootDeviceIndex)->getUnderlyingBuffer() : (uintptr_t)program->getGlobalSurface(rootDeviceIndex)->getGpuAddressToPatch();
 
-        if (perHwThreadPrivateMemorySize) {
-            privateSurfaceSize = KernelHelper::getPrivateSurfaceSize(perHwThreadPrivateMemorySize, device.getSharedDeviceInfo().computeUnitsUsedForScratch);
+        const auto &arg = kernelDescriptor.payloadMappings.implicitArgs.globalVariablesSurfaceAddress;
+        patchWithImplicitSurface(reinterpret_cast<void *>(globalMemory), *program->getGlobalSurface(rootDeviceIndex), arg);
+    }
 
-            DEBUG_BREAK_IF(privateSurfaceSize == 0);
-            if (privateSurfaceSize > std::numeric_limits<uint32_t>::max()) {
-                retVal = CL_OUT_OF_RESOURCES;
-                break;
-            }
-            privateSurface = device.getMemoryManager()->allocateGraphicsMemoryWithProperties({device.getRootDeviceIndex(), static_cast<size_t>(privateSurfaceSize), GraphicsAllocation::AllocationType::PRIVATE_SURFACE, device.getDeviceBitfield()});
-            if (privateSurface == nullptr) {
-                retVal = CL_OUT_OF_RESOURCES;
-                break;
-            }
-            const auto &patch = patchInfo.pAllocateStatelessPrivateSurface;
-            patchWithImplicitSurface(reinterpret_cast<void *>(privateSurface->getGpuAddressToPatch()), *privateSurface, *patch);
-        }
-        auto rootDeviceIndex = device.getRootDeviceIndex();
-        if (patchInfo.pAllocateStatelessConstantMemorySurfaceWithInitialization) {
-            DEBUG_BREAK_IF(program->getConstantSurface(rootDeviceIndex) == nullptr);
-            uintptr_t constMemory = isBuiltIn ? (uintptr_t)program->getConstantSurface(rootDeviceIndex)->getUnderlyingBuffer() : (uintptr_t)program->getConstantSurface(rootDeviceIndex)->getGpuAddressToPatch();
+    // Patch Surface State Heap
+    bool useGlobalAtomics = kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics;
 
-            const auto &patch = patchInfo.pAllocateStatelessConstantMemorySurfaceWithInitialization;
-            patchWithImplicitSurface(reinterpret_cast<void *>(constMemory), *program->getConstantSurface(rootDeviceIndex), *patch);
-        }
+    if (isValidOffset(kernelDescriptor.payloadMappings.implicitArgs.deviceSideEnqueueEventPoolSurfaceAddress.bindful)) {
+        auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(getSurfaceStateHeap()),
+                                      kernelDescriptor.payloadMappings.implicitArgs.deviceSideEnqueueEventPoolSurfaceAddress.bindful);
+        Buffer::setSurfaceState(&pClDevice->getDevice(), surfaceState, false, false, 0, nullptr, 0, nullptr, 0, 0, useGlobalAtomics, areMultipleSubDevicesInContext());
+    }
 
-        if (patchInfo.pAllocateStatelessGlobalMemorySurfaceWithInitialization) {
-            DEBUG_BREAK_IF(program->getGlobalSurface(rootDeviceIndex) == nullptr);
-            uintptr_t globalMemory = isBuiltIn ? (uintptr_t)program->getGlobalSurface(rootDeviceIndex)->getUnderlyingBuffer() : (uintptr_t)program->getGlobalSurface(rootDeviceIndex)->getGpuAddressToPatch();
+    if (isValidOffset(kernelDescriptor.payloadMappings.implicitArgs.deviceSideEnqueueDefaultQueueSurfaceAddress.bindful)) {
+        auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(getSurfaceStateHeap()),
+                                      kernelDescriptor.payloadMappings.implicitArgs.deviceSideEnqueueDefaultQueueSurfaceAddress.bindful);
+        Buffer::setSurfaceState(&pClDevice->getDevice(), surfaceState, false, false, 0, nullptr, 0, nullptr, 0, 0, useGlobalAtomics, areMultipleSubDevicesInContext());
+    }
 
-            const auto &patch = patchInfo.pAllocateStatelessGlobalMemorySurfaceWithInitialization;
-            patchWithImplicitSurface(reinterpret_cast<void *>(globalMemory), *program->getGlobalSurface(rootDeviceIndex), *patch);
-        }
+    setThreadArbitrationPolicy(hwHelper.getDefaultThreadArbitrationPolicy());
+    if (false == kernelInfo.kernelDescriptor.kernelAttributes.flags.requiresSubgroupIndependentForwardProgress) {
+        setThreadArbitrationPolicy(ThreadArbitrationPolicy::AgeBased);
+    }
+    patchBlocksSimdSize();
 
-        if (patchInfo.pAllocateStatelessEventPoolSurface) {
-            if (requiresSshForBuffers()) {
-                auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(getSurfaceStateHeap()),
-                                              patchInfo.pAllocateStatelessEventPoolSurface->SurfaceStateHeapOffset);
-                Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, 0, nullptr, 0, nullptr, 0, 0);
-            }
-        }
+    auto &clHwHelper = ClHwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    auxTranslationRequired = HwHelper::renderCompressedBuffersSupported(hwInfo) && clHwHelper.requiresAuxResolves(kernelInfo, hwInfo);
+    if (DebugManager.flags.ForceAuxTranslationEnabled.get() != -1) {
+        auxTranslationRequired &= !!DebugManager.flags.ForceAuxTranslationEnabled.get();
+    }
+    if (auxTranslationRequired) {
+        program->getContextPtr()->setResolvesRequiredInKernels(true);
+    }
 
-        if (patchInfo.pAllocateStatelessDefaultDeviceQueueSurface) {
+    if (isParentKernel) {
+        program->allocateBlockPrivateSurfaces(*pClDevice);
+    }
+    if (program->isKernelDebugEnabled() && isValidOffset(kernelDescriptor.payloadMappings.implicitArgs.systemThreadSurfaceAddress.bindful)) {
+        debugEnabled = true;
+    }
+    auto numArgs = explicitArgs.size();
+    slmSizes.resize(numArgs);
 
-            if (requiresSshForBuffers()) {
-                auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(getSurfaceStateHeap()),
-                                              patchInfo.pAllocateStatelessDefaultDeviceQueueSurface->SurfaceStateHeapOffset);
-                Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, 0, nullptr, 0, nullptr, 0, 0);
-            }
-        }
+    this->kernelHasIndirectAccess |= kernelInfo.kernelDescriptor.kernelAttributes.hasNonKernelArgLoad ||
+                                     kernelInfo.kernelDescriptor.kernelAttributes.hasNonKernelArgStore ||
+                                     kernelInfo.kernelDescriptor.kernelAttributes.hasNonKernelArgAtomic;
 
-        setThreadArbitrationPolicy(hwHelper.getDefaultThreadArbitrationPolicy());
-        if (kernelInfo.patchInfo.executionEnvironment) {
-            if (!kernelInfo.patchInfo.executionEnvironment->SubgroupIndependentForwardProgressRequired) {
-                setThreadArbitrationPolicy(ThreadArbitrationPolicy::AgeBased);
-            }
-        }
-        patchBlocksSimdSize();
+    provideInitializationHints();
+    // resolve the new kernel info to account for kernel handlers
+    // I think by this time we have decoded the binary and know the number of args etc.
+    // double check this assumption
+    bool usingBuffers = false;
+    kernelArguments.resize(numArgs);
+    kernelArgHandlers.resize(numArgs);
+    kernelArgRequiresCacheFlush.resize(numArgs);
 
-        provideInitializationHints();
-        // resolve the new kernel info to account for kernel handlers
-        // I think by this time we have decoded the binary and know the number of args etc.
-        // double check this assumption
-        bool usingBuffers = false;
-        bool usingImages = false;
-        auto numArgs = kernelInfo.kernelArgInfo.size();
-        kernelArguments.resize(numArgs);
-        slmSizes.resize(numArgs);
-        kernelArgHandlers.resize(numArgs);
-        kernelArgRequiresCacheFlush.resize(numArgs);
+    for (uint32_t i = 0; i < numArgs; ++i) {
+        storeKernelArg(i, NONE_OBJ, nullptr, nullptr, 0);
 
-        for (uint32_t i = 0; i < numArgs; ++i) {
-            storeKernelArg(i, NONE_OBJ, nullptr, nullptr, 0);
-            slmSizes[i] = 0;
-
-            // set the argument handler
-            auto &argInfo = kernelInfo.kernelArgInfo[i];
-            if (argInfo.metadata.addressQualifier == KernelArgMetadata::AddrLocal) {
+        // set the argument handler
+        const auto &arg = explicitArgs[i];
+        if (arg.is<ArgDescriptor::ArgTPointer>()) {
+            if (arg.getTraits().addressQualifier == KernelArgMetadata::AddrLocal) {
                 kernelArgHandlers[i] = &Kernel::setArgLocal;
-            } else if (argInfo.isAccelerator) {
-                kernelArgHandlers[i] = &Kernel::setArgAccelerator;
-            } else if (argInfo.metadata.typeQualifiers.pipeQual) {
+            } else if (arg.getTraits().typeQualifiers.pipeQual) {
                 kernelArgHandlers[i] = &Kernel::setArgPipe;
                 kernelArguments[i].type = PIPE_OBJ;
-            } else if (argInfo.isImage) {
-                kernelArgHandlers[i] = &Kernel::setArgImage;
-                kernelArguments[i].type = IMAGE_OBJ;
-                usingImages = true;
-            } else if (argInfo.isSampler) {
-                kernelArgHandlers[i] = &Kernel::setArgSampler;
-                kernelArguments[i].type = SAMPLER_OBJ;
-            } else if (argInfo.isBuffer) {
-                kernelArgHandlers[i] = &Kernel::setArgBuffer;
-                kernelArguments[i].type = BUFFER_OBJ;
-                usingBuffers = true;
-                allBufferArgsStateful &= static_cast<uint32_t>(argInfo.pureStatefulBufferAccess);
-            } else if (argInfo.isDeviceQueue) {
+            } else if (arg.getExtendedTypeInfo().isDeviceQueue) {
                 kernelArgHandlers[i] = &Kernel::setArgDevQueue;
                 kernelArguments[i].type = DEVICE_QUEUE_OBJ;
             } else {
-                kernelArgHandlers[i] = &Kernel::setArgImmediate;
+                kernelArgHandlers[i] = &Kernel::setArgBuffer;
+                kernelArguments[i].type = BUFFER_OBJ;
+                usingBuffers = true;
+                allBufferArgsStateful &= static_cast<uint32_t>(arg.as<ArgDescPointer>().isPureStateful());
             }
+        } else if (arg.is<ArgDescriptor::ArgTImage>()) {
+            kernelArgHandlers[i] = &Kernel::setArgImage;
+            kernelArguments[i].type = IMAGE_OBJ;
+            usingImages = true;
+        } else if (arg.is<ArgDescriptor::ArgTSampler>()) {
+            if (arg.getExtendedTypeInfo().isAccelerator) {
+                kernelArgHandlers[i] = &Kernel::setArgAccelerator;
+            } else {
+                kernelArgHandlers[i] = &Kernel::setArgSampler;
+                kernelArguments[i].type = SAMPLER_OBJ;
+            }
+        } else {
+            kernelArgHandlers[i] = &Kernel::setArgImmediate;
         }
+    }
 
-        auto &clHwHelper = ClHwHelper::get(hwInfo.platform.eRenderCoreFamily);
-        auxTranslationRequired = HwHelper::renderCompressedBuffersSupported(hwInfo) && clHwHelper.requiresAuxResolves(kernelInfo);
-        if (DebugManager.flags.ForceAuxTranslationEnabled.get() != -1) {
-            auxTranslationRequired &= !!DebugManager.flags.ForceAuxTranslationEnabled.get();
-        }
-        if (auxTranslationRequired) {
-            program->getContextPtr()->setResolvesRequiredInKernels(true);
-        }
+    if (usingImages && !usingBuffers) {
+        usingImagesOnly = true;
+    }
 
-        if (usingImages && !usingBuffers) {
-            usingImagesOnly = true;
-        }
-
-        if (isParentKernel) {
-            program->allocateBlockPrivateSurfaces(device.getRootDeviceIndex());
-        }
-
-        if (program->isKernelDebugEnabled() && getKernelInfo().patchInfo.pAllocateSystemThreadSurface) {
-            debugEnabled = true;
-        }
-
-        retVal = CL_SUCCESS;
-
-    } while (false);
-
-    return retVal;
+    return CL_SUCCESS;
 }
 
 cl_int Kernel::cloneKernel(Kernel *pSourceKernel) {
     // copy cross thread data to store arguments set to source kernel with clSetKernelArg on immediate data (non-pointer types)
-    memcpy_s(crossThreadData, crossThreadDataSize, pSourceKernel->crossThreadData, pSourceKernel->crossThreadDataSize);
+    memcpy_s(crossThreadData, crossThreadDataSize,
+             pSourceKernel->crossThreadData, pSourceKernel->crossThreadDataSize);
     DEBUG_BREAK_IF(pSourceKernel->crossThreadDataSize != crossThreadDataSize);
 
     // copy arguments set to source kernel with clSetKernelArg or clSetKernelArgSVMPointer
@@ -438,8 +368,11 @@ cl_int Kernel::cloneKernel(Kernel *pSourceKernel) {
     }
 
     // copy additional information other than argument values set to source kernel with clSetKernelExecInfo
-    for (auto gfxAlloc : pSourceKernel->kernelSvmGfxAllocations) {
+    for (auto &gfxAlloc : pSourceKernel->kernelSvmGfxAllocations) {
         kernelSvmGfxAllocations.push_back(gfxAlloc);
+    }
+    for (auto &gfxAlloc : pSourceKernel->kernelUnifiedMemoryGfxAllocations) {
+        kernelUnifiedMemoryGfxAllocations.push_back(gfxAlloc);
     }
 
     this->isBuiltIn = pSourceKernel->isBuiltIn;
@@ -466,7 +399,7 @@ cl_int Kernel::getInfo(cl_kernel_info paramName, size_t paramValueSize,
 
     case CL_KERNEL_NUM_ARGS:
         srcSize = sizeof(cl_uint);
-        numArgs = (cl_uint)kernelInfo.kernelArgInfo.size();
+        numArgs = static_cast<cl_uint>(kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.size());
         pSrc = &numArgs;
         break;
 
@@ -483,14 +416,14 @@ cl_int Kernel::getInfo(cl_kernel_info paramName, size_t paramValueSize,
         break;
 
     case CL_KERNEL_REFERENCE_COUNT:
-        refCount = static_cast<cl_uint>(this->getReference());
+        refCount = static_cast<cl_uint>(pMultiDeviceKernel->getRefApiCount());
         srcSize = sizeof(refCount);
         pSrc = &refCount;
         break;
 
     case CL_KERNEL_ATTRIBUTES:
-        pSrc = kernelInfo.attributes.c_str();
-        srcSize = kernelInfo.attributes.length() + 1;
+        pSrc = kernelInfo.kernelDescriptor.kernelMetadata.kernelLanguageAttributes.c_str();
+        srcSize = kernelInfo.kernelDescriptor.kernelMetadata.kernelLanguageAttributes.length() + 1;
         break;
 
     case CL_KERNEL_BINARY_PROGRAM_INTEL:
@@ -514,18 +447,20 @@ cl_int Kernel::getInfo(cl_kernel_info paramName, size_t paramValueSize,
     return retVal;
 }
 
-cl_int Kernel::getArgInfo(cl_uint argIndx, cl_kernel_arg_info paramName, size_t paramValueSize,
+cl_int Kernel::getArgInfo(cl_uint argIndex, cl_kernel_arg_info paramName, size_t paramValueSize,
                           void *paramValue, size_t *paramValueSizeRet) const {
     cl_int retVal;
     const void *pSrc = nullptr;
     size_t srcSize = GetInfo::invalidSourceSize;
-    auto numArgs = (cl_uint)kernelInfo.kernelArgInfo.size();
-    const auto &argInfo = kernelInfo.kernelArgInfo[argIndx];
+    const auto &args = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs;
 
-    if (argIndx >= numArgs) {
+    if (argIndex >= args.size()) {
         retVal = CL_INVALID_ARG_INDEX;
         return retVal;
     }
+
+    const auto &argTraits = args[argIndex].getTraits();
+    const auto &argMetadata = kernelInfo.kernelDescriptor.explicitArgsExtendedMetadata[argIndex];
 
     cl_kernel_arg_address_qualifier addressQualifier;
     cl_kernel_arg_access_qualifier accessQualifier;
@@ -533,31 +468,31 @@ cl_int Kernel::getArgInfo(cl_uint argIndx, cl_kernel_arg_info paramName, size_t 
 
     switch (paramName) {
     case CL_KERNEL_ARG_ADDRESS_QUALIFIER:
-        addressQualifier = asClKernelArgAddressQualifier(argInfo.metadata.getAddressQualifier());
+        addressQualifier = asClKernelArgAddressQualifier(argTraits.getAddressQualifier());
         srcSize = sizeof(addressQualifier);
         pSrc = &addressQualifier;
         break;
 
     case CL_KERNEL_ARG_ACCESS_QUALIFIER:
-        accessQualifier = asClKernelArgAccessQualifier(argInfo.metadata.getAccessQualifier());
+        accessQualifier = asClKernelArgAccessQualifier(argTraits.getAccessQualifier());
         srcSize = sizeof(accessQualifier);
         pSrc = &accessQualifier;
         break;
 
     case CL_KERNEL_ARG_TYPE_QUALIFIER:
-        typeQualifier = asClKernelArgTypeQualifier(argInfo.metadata.typeQualifiers);
+        typeQualifier = asClKernelArgTypeQualifier(argTraits.typeQualifiers);
         srcSize = sizeof(typeQualifier);
         pSrc = &typeQualifier;
         break;
 
     case CL_KERNEL_ARG_TYPE_NAME:
-        srcSize = argInfo.metadataExtended->type.length() + 1;
-        pSrc = argInfo.metadataExtended->type.c_str();
+        srcSize = argMetadata.type.length() + 1;
+        pSrc = argMetadata.type.c_str();
         break;
 
     case CL_KERNEL_ARG_NAME:
-        srcSize = argInfo.metadataExtended->argName.length() + 1;
-        pSrc = argInfo.metadataExtended->argName.c_str();
+        srcSize = argMetadata.argName.length() + 1;
+        pSrc = argMetadata.argName.c_str();
         break;
 
     default:
@@ -571,7 +506,7 @@ cl_int Kernel::getArgInfo(cl_uint argIndx, cl_kernel_arg_info paramName, size_t 
     return retVal;
 }
 
-cl_int Kernel::getWorkGroupInfo(cl_device_id device, cl_kernel_work_group_info paramName,
+cl_int Kernel::getWorkGroupInfo(cl_kernel_work_group_info paramName,
                                 size_t paramValueSize, void *paramValue,
                                 size_t *paramValueSizeRet) const {
     cl_int retVal = CL_INVALID_VALUE;
@@ -581,20 +516,21 @@ cl_int Kernel::getWorkGroupInfo(cl_device_id device, cl_kernel_work_group_info p
         size_t val[3];
     } requiredWorkGroupSize;
     cl_ulong localMemorySize;
-    const auto &patchInfo = kernelInfo.patchInfo;
+    const auto &kernelDescriptor = kernelInfo.kernelDescriptor;
     size_t preferredWorkGroupSizeMultiple = 0;
     cl_ulong scratchSize;
     cl_ulong privateMemSize;
     size_t maxWorkgroupSize;
-    const auto &hwInfo = getDevice().getHardwareInfo();
+    const auto &hwInfo = clDevice.getHardwareInfo();
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    auto &clHwHelper = ClHwHelper::get(hwInfo.platform.eRenderCoreFamily);
     GetInfoHelper info(paramValue, paramValueSize, paramValueSizeRet);
 
     switch (paramName) {
     case CL_KERNEL_WORK_GROUP_SIZE:
-        maxWorkgroupSize = this->maxKernelWorkGroupSize;
+        maxWorkgroupSize = maxKernelWorkGroupSize;
         if (DebugManager.flags.UseMaxSimdSizeToDeduceMaxWorkgroupSize.get()) {
-            auto divisionSize = CommonConstants::maximalSimdSize / patchInfo.executionEnvironment->LargestCompiledSIMDSize;
+            auto divisionSize = CommonConstants::maximalSimdSize / kernelInfo.getMaxSimdSize();
             maxWorkgroupSize /= divisionSize;
         }
         srcSize = sizeof(maxWorkgroupSize);
@@ -602,25 +538,21 @@ cl_int Kernel::getWorkGroupInfo(cl_device_id device, cl_kernel_work_group_info p
         break;
 
     case CL_KERNEL_COMPILE_WORK_GROUP_SIZE:
-        DEBUG_BREAK_IF(!patchInfo.executionEnvironment);
-        requiredWorkGroupSize.val[0] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[0];
-        requiredWorkGroupSize.val[1] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[1];
-        requiredWorkGroupSize.val[2] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[2];
+        requiredWorkGroupSize.val[0] = kernelDescriptor.kernelAttributes.requiredWorkgroupSize[0];
+        requiredWorkGroupSize.val[1] = kernelDescriptor.kernelAttributes.requiredWorkgroupSize[1];
+        requiredWorkGroupSize.val[2] = kernelDescriptor.kernelAttributes.requiredWorkgroupSize[2];
         srcSize = sizeof(requiredWorkGroupSize);
         pSrc = &requiredWorkGroupSize;
         break;
 
     case CL_KERNEL_LOCAL_MEM_SIZE:
-        localMemorySize = patchInfo.localsurface
-                              ? patchInfo.localsurface->TotalInlineLocalMemorySize
-                              : 0;
+        localMemorySize = kernelInfo.kernelDescriptor.kernelAttributes.slmInlineSize;
         srcSize = sizeof(localMemorySize);
         pSrc = &localMemorySize;
         break;
 
     case CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE:
-        DEBUG_BREAK_IF(!patchInfo.executionEnvironment);
-        preferredWorkGroupSizeMultiple = patchInfo.executionEnvironment->LargestCompiledSIMDSize;
+        preferredWorkGroupSizeMultiple = kernelInfo.getMaxSimdSize();
         if (hwHelper.isFusedEuDispatchEnabled(hwInfo)) {
             preferredWorkGroupSizeMultiple *= 2;
         }
@@ -629,12 +561,12 @@ cl_int Kernel::getWorkGroupInfo(cl_device_id device, cl_kernel_work_group_info p
         break;
 
     case CL_KERNEL_SPILL_MEM_SIZE_INTEL:
-        scratchSize = kernelInfo.patchInfo.mediavfestate ? kernelInfo.patchInfo.mediavfestate->PerThreadScratchSpace : 0;
+        scratchSize = kernelDescriptor.kernelAttributes.perThreadScratchSize[0];
         srcSize = sizeof(scratchSize);
         pSrc = &scratchSize;
         break;
     case CL_KERNEL_PRIVATE_MEM_SIZE:
-        privateMemSize = kernelInfo.patchInfo.pAllocateStatelessPrivateSurface ? kernelInfo.patchInfo.pAllocateStatelessPrivateSurface->PerThreadPrivateMemorySize : 0;
+        privateMemSize = clHwHelper.getKernelPrivateMemSize(kernelInfo);
         srcSize = sizeof(privateMemSize);
         pSrc = &privateMemSize;
         break;
@@ -656,16 +588,16 @@ cl_int Kernel::getSubGroupInfo(cl_kernel_sub_group_info paramName,
                                size_t *paramValueSizeRet) const {
     size_t numDimensions = 0;
     size_t WGS = 1;
-    auto maxSimdSize = static_cast<size_t>(getKernelInfo().getMaxSimdSize());
-    auto maxRequiredWorkGroupSize = static_cast<size_t>(getKernelInfo().getMaxRequiredWorkGroupSize(maxKernelWorkGroupSize));
-    auto largestCompiledSIMDSize = static_cast<size_t>(getKernelInfo().patchInfo.executionEnvironment->LargestCompiledSIMDSize);
+    auto maxSimdSize = static_cast<size_t>(kernelInfo.getMaxSimdSize());
+    auto maxRequiredWorkGroupSize = static_cast<size_t>(kernelInfo.getMaxRequiredWorkGroupSize(getMaxKernelWorkGroupSize()));
+    auto largestCompiledSIMDSize = static_cast<size_t>(kernelInfo.getMaxSimdSize());
 
     GetInfoHelper info(paramValue, paramValueSize, paramValueSizeRet);
 
     if ((paramName == CL_KERNEL_LOCAL_SIZE_FOR_SUB_GROUP_COUNT) ||
         (paramName == CL_KERNEL_MAX_NUM_SUB_GROUPS) ||
         (paramName == CL_KERNEL_COMPILE_NUM_SUB_GROUPS)) {
-        if (device.areOcl21FeaturesEnabled() == false) {
+        if (clDevice.areOcl21FeaturesEnabled() == false) {
             return CL_INVALID_OPERATION;
         }
     }
@@ -680,7 +612,7 @@ cl_int Kernel::getSubGroupInfo(cl_kernel_sub_group_info paramName,
         }
         numDimensions = inputValueSize / sizeof(size_t);
         if (numDimensions == 0 ||
-            numDimensions > static_cast<size_t>(device.getDeviceInfo().maxWorkItemDimensions)) {
+            numDimensions > static_cast<size_t>(clDevice.getDeviceInfo().maxWorkItemDimensions)) {
             return CL_INVALID_VALUE;
         }
     }
@@ -694,7 +626,7 @@ cl_int Kernel::getSubGroupInfo(cl_kernel_sub_group_info paramName,
         }
         numDimensions = paramValueSize / sizeof(size_t);
         if (numDimensions == 0 ||
-            numDimensions > static_cast<size_t>(device.getDeviceInfo().maxWorkItemDimensions)) {
+            numDimensions > static_cast<size_t>(clDevice.getDeviceInfo().maxWorkItemDimensions)) {
             return CL_INVALID_VALUE;
         }
     }
@@ -728,7 +660,6 @@ cl_int Kernel::getSubGroupInfo(cl_kernel_sub_group_info paramName,
             workGroupSize2.val[0] = workGroupSize;
             workGroupSize2.val[1] = (workGroupSize > 0) ? 1 : 0;
             return changeGetInfoStatusToCLResultType(info.set<size_t2>(workGroupSize2));
-        case 3:
         default:
             struct size_t3 {
                 size_t val[3];
@@ -744,10 +675,10 @@ cl_int Kernel::getSubGroupInfo(cl_kernel_sub_group_info paramName,
         return changeGetInfoStatusToCLResultType(info.set<size_t>(Math::divideAndRoundUp(maxRequiredWorkGroupSize, largestCompiledSIMDSize)));
     }
     case CL_KERNEL_COMPILE_NUM_SUB_GROUPS: {
-        return changeGetInfoStatusToCLResultType(info.set<size_t>(static_cast<size_t>(getKernelInfo().patchInfo.executionEnvironment->CompiledSubGroupsNumber)));
+        return changeGetInfoStatusToCLResultType(info.set<size_t>(static_cast<size_t>(kernelInfo.kernelDescriptor.kernelMetadata.compiledSubGroupsNumber)));
     }
     case CL_KERNEL_COMPILE_SUB_GROUP_SIZE_INTEL: {
-        return changeGetInfoStatusToCLResultType(info.set<size_t>(getKernelInfo().requiredSubGroupSize));
+        return changeGetInfoStatusToCLResultType(info.set<size_t>(kernelInfo.kernelDescriptor.kernelMetadata.requiredSubGroupSize));
     }
     default:
         return CL_INVALID_VALUE;
@@ -769,16 +700,24 @@ void Kernel::substituteKernelHeap(void *newKernelHeap, size_t newKernelHeapSize)
     auto &heapInfo = pKernelInfo->heapInfo;
     heapInfo.KernelHeapSize = static_cast<uint32_t>(newKernelHeapSize);
     pKernelInfo->isKernelHeapSubstituted = true;
-    auto memoryManager = device.getMemoryManager();
+    auto memoryManager = executionEnvironment.memoryManager.get();
 
     auto currentAllocationSize = pKernelInfo->kernelAllocation->getUnderlyingBufferSize();
     bool status = false;
-    if (currentAllocationSize >= newKernelHeapSize) {
-        status = memoryManager->copyMemoryToAllocation(pKernelInfo->kernelAllocation, 0, newKernelHeap, newKernelHeapSize);
+
+    const auto &hwInfo = clDevice.getHardwareInfo();
+    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    size_t isaPadding = hwHelper.getPaddingForISAAllocation();
+    if (currentAllocationSize >= newKernelHeapSize + isaPadding) {
+        auto &hwInfo = clDevice.getDevice().getHardwareInfo();
+        auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+        status = MemoryTransferHelper::transferMemoryToAllocation(hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo, *pKernelInfo->getGraphicsAllocation()),
+                                                                  clDevice.getDevice(), pKernelInfo->getGraphicsAllocation(), 0, newKernelHeap,
+                                                                  static_cast<size_t>(newKernelHeapSize));
     } else {
         memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(pKernelInfo->kernelAllocation);
         pKernelInfo->kernelAllocation = nullptr;
-        status = pKernelInfo->createKernelAllocation(device.getDevice());
+        status = pKernelInfo->createKernelAllocation(clDevice.getDevice(), isBuiltIn);
     }
     UNRECOVERABLE_IF(!status);
 }
@@ -803,7 +742,7 @@ void Kernel::setStartOffset(uint32_t offset) {
 }
 
 void *Kernel::getSurfaceStateHeap() const {
-    return kernelInfo.usesSsh ? pSshLocal.get() : nullptr;
+    return pSshLocal.get();
 }
 
 size_t Kernel::getDynamicStateHeapSize() const {
@@ -815,9 +754,7 @@ const void *Kernel::getDynamicStateHeap() const {
 }
 
 size_t Kernel::getSurfaceStateHeapSize() const {
-    return kernelInfo.usesSsh
-               ? sshLocalSize
-               : 0;
+    return sshLocalSize;
 }
 
 size_t Kernel::getNumberOfBindingTableStates() const {
@@ -831,12 +768,34 @@ void Kernel::resizeSurfaceStateHeap(void *pNewSsh, size_t newSshSize, size_t new
     localBindingTableOffset = newBindingTableOffset;
 }
 
+void Kernel::markArgPatchedAndResolveArgs(uint32_t argIndex) {
+    if (!kernelArguments[argIndex].isPatched) {
+        patchedArgumentsNum++;
+        kernelArguments[argIndex].isPatched = true;
+    }
+    if (program->getContextPtr() && getContext().getRootDeviceIndices().size() > 1u && Kernel::isMemObj(kernelArguments[argIndex].type) && kernelArguments[argIndex].object) {
+        auto argMemObj = castToObjectOrAbort<MemObj>(reinterpret_cast<cl_mem>(kernelArguments[argIndex].object));
+        auto memObj = argMemObj->getHighestRootMemObj();
+        auto migrateRequiredForArg = memObj->getMultiGraphicsAllocation().requiresMigrations();
+
+        if (migratableArgsMap.find(argIndex) == migratableArgsMap.end() && migrateRequiredForArg) {
+            migratableArgsMap.insert({argIndex, memObj});
+        } else if (migrateRequiredForArg) {
+            migratableArgsMap[argIndex] = memObj;
+        } else {
+            migratableArgsMap.erase(argIndex);
+        }
+    }
+
+    resolveArgs();
+}
+
 cl_int Kernel::setArg(uint32_t argIndex, size_t argSize, const void *argVal) {
     cl_int retVal = CL_SUCCESS;
     bool updateExposedKernel = true;
     auto argWasUncacheable = false;
-    if (getKernelInfo().builtinDispatchBuilder != nullptr) {
-        updateExposedKernel = getKernelInfo().builtinDispatchBuilder->setExplicitArg(argIndex, argSize, argVal, retVal);
+    if (kernelInfo.builtinDispatchBuilder != nullptr) {
+        updateExposedKernel = kernelInfo.builtinDispatchBuilder->setExplicitArg(argIndex, argSize, argVal, retVal);
     }
     if (updateExposedKernel) {
         if (argIndex >= kernelArgHandlers.size()) {
@@ -847,13 +806,9 @@ cl_int Kernel::setArg(uint32_t argIndex, size_t argSize, const void *argVal) {
         retVal = (this->*argHandler)(argIndex, argSize, argVal);
     }
     if (retVal == CL_SUCCESS) {
-        if (!kernelArguments[argIndex].isPatched) {
-            patchedArgumentsNum++;
-            kernelArguments[argIndex].isPatched = true;
-        }
         auto argIsUncacheable = kernelArguments[argIndex].isStatelessUncacheable;
         statelessUncacheableArgsCount += (argIsUncacheable ? 1 : 0) - (argWasUncacheable ? 1 : 0);
-        resolveArgs();
+        markArgPatchedAndResolveArgs(argIndex);
     }
     return retVal;
 }
@@ -871,14 +826,17 @@ cl_int Kernel::setArg(uint32_t argIndex, cl_mem argVal) {
 }
 
 cl_int Kernel::setArg(uint32_t argIndex, cl_mem argVal, uint32_t mipLevel) {
-    return setArgImageWithMipLevel(argIndex, sizeof(argVal), &argVal, mipLevel);
+    auto retVal = setArgImageWithMipLevel(argIndex, sizeof(argVal), &argVal, mipLevel);
+    if (retVal == CL_SUCCESS) {
+        markArgPatchedAndResolveArgs(argIndex);
+    }
+    return retVal;
 }
 
-void *Kernel::patchBufferOffset(const KernelArgInfo &argInfo, void *svmPtr, GraphicsAllocation *svmAlloc) {
-    if (isInvalidOffset(argInfo.offsetBufferOffset)) {
+void *Kernel::patchBufferOffset(const ArgDescPointer &argAsPtr, void *svmPtr, GraphicsAllocation *svmAlloc) {
+    if (isUndefinedOffset(argAsPtr.bufferOffset)) {
         return svmPtr;
     }
-
     void *ptrToPatch = svmPtr;
     if (svmAlloc != nullptr) {
         ptrToPatch = reinterpret_cast<void *>(svmAlloc->getGpuAddressToPatch());
@@ -889,21 +847,24 @@ void *Kernel::patchBufferOffset(const KernelArgInfo &argInfo, void *svmPtr, Grap
     DEBUG_BREAK_IF(ptrDiff(svmPtr, ptrToPatch) != static_cast<uint32_t>(ptrDiff(svmPtr, ptrToPatch)));
     uint32_t offsetToPatch = static_cast<uint32_t>(ptrDiff(svmPtr, ptrToPatch));
 
-    patch<uint32_t, uint32_t>(offsetToPatch, getCrossThreadData(), argInfo.offsetBufferOffset);
+    patch<uint32_t, uint32_t>(offsetToPatch, getCrossThreadData(), argAsPtr.bufferOffset);
     return ptrToPatch;
 }
 
 cl_int Kernel::setArgSvm(uint32_t argIndex, size_t svmAllocSize, void *svmPtr, GraphicsAllocation *svmAlloc, cl_mem_flags svmFlags) {
-    void *ptrToPatch = patchBufferOffset(kernelInfo.kernelArgInfo[argIndex], svmPtr, svmAlloc);
-    setArgImmediate(argIndex, sizeof(void *), &svmPtr);
+    const auto &argAsPtr = getKernelInfo().kernelDescriptor.payloadMappings.explicitArgs[argIndex].as<ArgDescPointer>();
+
+    auto patchLocation = ptrOffset(getCrossThreadData(), argAsPtr.stateless);
+    patchWithRequiredSize(patchLocation, argAsPtr.pointerSize, reinterpret_cast<uintptr_t>(svmPtr));
+
+    void *ptrToPatch = patchBufferOffset(argAsPtr, svmPtr, svmAlloc);
+    if (isValidOffset(argAsPtr.bindful)) {
+        auto surfaceState = ptrOffset(getSurfaceStateHeap(), argAsPtr.bindful);
+        Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, false, false, svmAllocSize + ptrDiff(svmPtr, ptrToPatch), ptrToPatch, 0, svmAlloc, svmFlags, 0,
+                                kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics, areMultipleSubDevicesInContext());
+    }
 
     storeKernelArg(argIndex, SVM_OBJ, nullptr, svmPtr, sizeof(void *), svmAlloc, svmFlags);
-
-    if (requiresSshForBuffers()) {
-        const auto &kernelArgInfo = kernelInfo.kernelArgInfo[argIndex];
-        auto surfaceState = ptrOffset(getSurfaceStateHeap(), kernelArgInfo.offsetHeap);
-        Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, svmAllocSize + ptrDiff(svmPtr, ptrToPatch), ptrToPatch, 0, svmAlloc, svmFlags, 0);
-    }
     if (!kernelArguments[argIndex].isPatched) {
         patchedArgumentsNum++;
         kernelArguments[argIndex].isPatched = true;
@@ -916,22 +877,35 @@ cl_int Kernel::setArgSvm(uint32_t argIndex, size_t svmAllocSize, void *svmPtr, G
 cl_int Kernel::setArgSvmAlloc(uint32_t argIndex, void *svmPtr, GraphicsAllocation *svmAlloc) {
     DBG_LOG_INPUTS("setArgBuffer svm_alloc", svmAlloc);
 
-    const auto &kernelArgInfo = kernelInfo.kernelArgInfo[argIndex];
+    const auto &argAsPtr = getKernelInfo().kernelDescriptor.payloadMappings.explicitArgs[argIndex].as<ArgDescPointer>();
 
-    storeKernelArg(argIndex, SVM_ALLOC_OBJ, svmAlloc, svmPtr, sizeof(uintptr_t));
+    auto patchLocation = ptrOffset(getCrossThreadData(), argAsPtr.stateless);
+    patchWithRequiredSize(patchLocation, argAsPtr.pointerSize, reinterpret_cast<uintptr_t>(svmPtr));
 
-    void *ptrToPatch = patchBufferOffset(kernelArgInfo, svmPtr, svmAlloc);
+    bool disableL3 = false;
+    bool forceNonAuxMode = false;
+    bool isAuxTranslationKernel = (AuxTranslationDirection::None != auxTranslationDirection);
+    auto &hwInfo = getDevice().getHardwareInfo();
+    auto &clHwHelper = ClHwHelper::get(hwInfo.platform.eRenderCoreFamily);
 
-    auto patchLocation = ptrOffset(getCrossThreadData(),
-                                   kernelArgInfo.kernelArgPatchInfoVector[0].crossthreadOffset);
+    if (isAuxTranslationKernel) {
+        if (((AuxTranslationDirection::AuxToNonAux == auxTranslationDirection) && argIndex == 1) ||
+            ((AuxTranslationDirection::NonAuxToAux == auxTranslationDirection) && argIndex == 0)) {
+            forceNonAuxMode = true;
+        }
+        disableL3 = (argIndex == 0);
+    } else if (svmAlloc && svmAlloc->getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED &&
+               clHwHelper.requiresNonAuxMode(argAsPtr, hwInfo)) {
+        forceNonAuxMode = true;
+    }
 
-    auto patchSize = kernelArgInfo.kernelArgPatchInfoVector[0].size;
+    bool argWasUncacheable = kernelArguments[argIndex].isStatelessUncacheable;
+    bool argIsUncacheable = svmAlloc ? svmAlloc->isUncacheable() : false;
+    statelessUncacheableArgsCount += (argIsUncacheable ? 1 : 0) - (argWasUncacheable ? 1 : 0);
 
-    patchWithRequiredSize(patchLocation, patchSize, reinterpret_cast<uintptr_t>(svmPtr));
-
-    if (requiresSshForBuffers()) {
-        const auto &kernelArgInfo = kernelInfo.kernelArgInfo[argIndex];
-        auto surfaceState = ptrOffset(getSurfaceStateHeap(), kernelArgInfo.offsetHeap);
+    void *ptrToPatch = patchBufferOffset(argAsPtr, svmPtr, svmAlloc);
+    if (isValidOffset(argAsPtr.bindful)) {
+        auto surfaceState = ptrOffset(getSurfaceStateHeap(), argAsPtr.bindful);
         size_t allocSize = 0;
         size_t offset = 0;
         if (svmAlloc != nullptr) {
@@ -939,14 +913,15 @@ cl_int Kernel::setArgSvmAlloc(uint32_t argIndex, void *svmPtr, GraphicsAllocatio
             offset = ptrDiff(ptrToPatch, svmAlloc->getGpuAddressToPatch());
             allocSize -= offset;
         }
-        Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, allocSize, ptrToPatch, offset, svmAlloc, 0, 0);
+        Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, forceNonAuxMode, disableL3, allocSize, ptrToPatch, offset, svmAlloc, 0, 0,
+                                kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics, areMultipleSubDevicesInContext());
     }
 
+    storeKernelArg(argIndex, SVM_ALLOC_OBJ, svmAlloc, svmPtr, sizeof(uintptr_t));
     if (!kernelArguments[argIndex].isPatched) {
         patchedArgumentsNum++;
         kernelArguments[argIndex].isPatched = true;
     }
-
     addAllocationToCacheFlushVector(argIndex, svmAlloc);
 
     return CL_SUCCESS;
@@ -1028,8 +1003,8 @@ void Kernel::getSuggestedLocalWorkSize(const cl_uint workDim, const size_t *glob
     Vec3<size_t> elws{0, 0, 0};
     Vec3<size_t> gws{
         globalWorkSize[0],
-        (workDim > 1) ? globalWorkSize[1] : 0,
-        (workDim > 2) ? globalWorkSize[2] : 0};
+        (workDim > 1) ? globalWorkSize[1] : 1,
+        (workDim > 2) ? globalWorkSize[2] : 1};
     Vec3<size_t> offset{0, 0, 0};
     if (globalWorkOffset) {
         offset.x = globalWorkOffset[0];
@@ -1041,8 +1016,17 @@ void Kernel::getSuggestedLocalWorkSize(const cl_uint workDim, const size_t *glob
         }
     }
 
-    const DispatchInfo dispatchInfo{this, workDim, gws, elws, offset};
-    auto suggestedLws = computeWorkgroupSize(dispatchInfo);
+    Vec3<size_t> suggestedLws{0, 0, 0};
+
+    if (kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[0] != 0) {
+        suggestedLws.x = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[0];
+        suggestedLws.y = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[1];
+        suggestedLws.z = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[2];
+    } else {
+        uint32_t dispatchWorkDim = std::max(1U, std::max(gws.getSimplifiedDim(), offset.getSimplifiedDim()));
+        const DispatchInfo dispatchInfo{&clDevice, this, dispatchWorkDim, gws, elws, offset};
+        suggestedLws = computeWorkgroupSize(dispatchInfo);
+    }
 
     localWorkSize[0] = suggestedLws.x;
     if (workDim > 1)
@@ -1052,42 +1036,43 @@ void Kernel::getSuggestedLocalWorkSize(const cl_uint workDim, const size_t *glob
 }
 
 uint32_t Kernel::getMaxWorkGroupCount(const cl_uint workDim, const size_t *localWorkSize, const CommandQueue *commandQueue) const {
-    auto &hardwareInfo = getDevice().getHardwareInfo();
+    auto &hardwareInfo = getHardwareInfo();
     auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
 
-    if (!hwHelper.isCooperativeDispatchSupported(commandQueue->getGpgpuEngine().getEngineType(), hardwareInfo.platform.eProductFamily)) {
+    auto engineGroupType = hwHelper.getEngineGroupType(commandQueue->getGpgpuEngine().getEngineType(), hardwareInfo);
+    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, hardwareInfo.platform.eProductFamily)) {
         return 0;
     }
 
-    auto executionEnvironment = kernelInfo.patchInfo.executionEnvironment;
+    const auto &kernelDescriptor = kernelInfo.kernelDescriptor;
     auto dssCount = hardwareInfo.gtSystemInfo.DualSubSliceCount;
     if (dssCount == 0) {
         dssCount = hardwareInfo.gtSystemInfo.SubSliceCount;
     }
     auto availableThreadCount = hwHelper.calculateAvailableThreadCount(
         hardwareInfo.platform.eProductFamily,
-        ((executionEnvironment != nullptr) ? executionEnvironment->NumGRFRequired : GrfConfig::DefaultGrfNumber),
+        kernelDescriptor.kernelAttributes.numGrfRequired,
         hardwareInfo.gtSystemInfo.EUCount, hardwareInfo.gtSystemInfo.ThreadCount / hardwareInfo.gtSystemInfo.EUCount);
 
-    auto hasBarriers = ((executionEnvironment != nullptr) ? executionEnvironment->HasBarriers : 0u);
+    auto barrierCount = kernelDescriptor.kernelAttributes.barrierCount;
     return KernelHelper::getMaxWorkGroupCount(kernelInfo.getMaxSimdSize(),
                                               availableThreadCount,
                                               dssCount,
                                               dssCount * KB * hardwareInfo.capabilityTable.slmSize,
                                               hwHelper.alignSlmSize(slmTotalSize),
                                               static_cast<uint32_t>(hwHelper.getMaxBarrierRegisterPerSlice()),
-                                              hwHelper.getBarriersCountFromHasBarriers(hasBarriers),
+                                              hwHelper.getBarriersCountFromHasBarriers(barrierCount),
                                               workDim,
                                               localWorkSize);
 }
 
 inline void Kernel::makeArgsResident(CommandStreamReceiver &commandStreamReceiver) {
-    auto numArgs = kernelInfo.kernelArgInfo.size();
+    auto numArgs = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.size();
     for (decltype(numArgs) argIndex = 0; argIndex < numArgs; argIndex++) {
         if (kernelArguments[argIndex].object) {
             if (kernelArguments[argIndex].type == SVM_ALLOC_OBJ) {
                 auto pSVMAlloc = (GraphicsAllocation *)kernelArguments[argIndex].object;
-                auto pageFaultManager = device.getMemoryManager()->getPageFaultManager();
+                auto pageFaultManager = executionEnvironment.memoryManager->getPageFaultManager();
                 if (pageFaultManager &&
                     this->isUnifiedMemorySyncRequired) {
                     pageFaultManager->moveAllocationToGpuDomain(reinterpret_cast<void *>(pSVMAlloc->getGpuAddress()));
@@ -1109,8 +1094,93 @@ inline void Kernel::makeArgsResident(CommandStreamReceiver &commandStreamReceive
     }
 }
 
+void Kernel::performKernelTuning(CommandStreamReceiver &commandStreamReceiver, const Vec3<size_t> &lws, const Vec3<size_t> &gws, const Vec3<size_t> &offsets, TimestampPacketContainer *timestampContainer) {
+    auto performTunning = TunningType::DISABLED;
+
+    if (DebugManager.flags.EnableKernelTunning.get() != -1) {
+        performTunning = static_cast<TunningType>(DebugManager.flags.EnableKernelTunning.get());
+    }
+
+    if (performTunning == TunningType::SIMPLE) {
+        this->singleSubdevicePreferredInCurrentEnqueue = !this->kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics;
+
+    } else if (performTunning == TunningType::FULL) {
+        KernelConfig config{gws, lws, offsets};
+
+        auto submissionDataIt = this->kernelSubmissionMap.find(config);
+        if (submissionDataIt == this->kernelSubmissionMap.end()) {
+            KernelSubmissionData submissionData;
+            submissionData.kernelStandardTimestamps = std::make_unique<TimestampPacketContainer>();
+            submissionData.kernelSubdeviceTimestamps = std::make_unique<TimestampPacketContainer>();
+            submissionData.status = TunningStatus::STANDARD_TUNNING_IN_PROGRESS;
+            submissionData.kernelStandardTimestamps->assignAndIncrementNodesRefCounts(*timestampContainer);
+            this->kernelSubmissionMap[config] = std::move(submissionData);
+            this->singleSubdevicePreferredInCurrentEnqueue = false;
+            return;
+        }
+
+        auto &submissionData = submissionDataIt->second;
+
+        if (submissionData.status == TunningStatus::TUNNING_DONE) {
+            this->singleSubdevicePreferredInCurrentEnqueue = submissionData.singleSubdevicePreferred;
+        }
+
+        if (submissionData.status == TunningStatus::SUBDEVICE_TUNNING_IN_PROGRESS) {
+            if (this->hasTunningFinished(submissionData)) {
+                submissionData.status = TunningStatus::TUNNING_DONE;
+                submissionData.kernelStandardTimestamps.reset();
+                submissionData.kernelSubdeviceTimestamps.reset();
+                this->singleSubdevicePreferredInCurrentEnqueue = submissionData.singleSubdevicePreferred;
+            } else {
+                this->singleSubdevicePreferredInCurrentEnqueue = false;
+            }
+        }
+
+        if (submissionData.status == TunningStatus::STANDARD_TUNNING_IN_PROGRESS) {
+            submissionData.status = TunningStatus::SUBDEVICE_TUNNING_IN_PROGRESS;
+            submissionData.kernelSubdeviceTimestamps->assignAndIncrementNodesRefCounts(*timestampContainer);
+            this->singleSubdevicePreferredInCurrentEnqueue = true;
+        }
+    }
+}
+
+bool Kernel::hasTunningFinished(KernelSubmissionData &submissionData) {
+    if (!this->hasRunFinished(submissionData.kernelStandardTimestamps.get()) ||
+        !this->hasRunFinished(submissionData.kernelSubdeviceTimestamps.get())) {
+        return false;
+    }
+
+    uint64_t globalStartTS = 0u;
+    uint64_t globalEndTS = 0u;
+
+    Event::getBoundaryTimestampValues(submissionData.kernelStandardTimestamps.get(), globalStartTS, globalEndTS);
+    auto standardTSDiff = globalEndTS - globalStartTS;
+
+    Event::getBoundaryTimestampValues(submissionData.kernelSubdeviceTimestamps.get(), globalStartTS, globalEndTS);
+    auto subdeviceTSDiff = globalEndTS - globalStartTS;
+
+    submissionData.singleSubdevicePreferred = standardTSDiff > subdeviceTSDiff;
+
+    return true;
+}
+
+bool Kernel::hasRunFinished(TimestampPacketContainer *timestampContainer) {
+    for (const auto &node : timestampContainer->peekNodes()) {
+        for (uint32_t i = 0; i < node->getPacketsUsed(); i++) {
+            if (node->getContextEndValue(i) == 1) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool Kernel::isSingleSubdevicePreferred() const {
+    return this->singleSubdevicePreferredInCurrentEnqueue;
+}
+
 void Kernel::makeResident(CommandStreamReceiver &commandStreamReceiver) {
-    auto rootDeviceIndex = device.getRootDeviceIndex();
+    auto rootDeviceIndex = commandStreamReceiver.getRootDeviceIndex();
     if (privateSurface) {
         commandStreamReceiver.makeResident(*privateSurface);
     }
@@ -1160,12 +1230,12 @@ void Kernel::makeResident(CommandStreamReceiver &commandStreamReceiver) {
 }
 
 void Kernel::getResidency(std::vector<Surface *> &dst) {
-    auto rootDeviceIndex = device.getRootDeviceIndex();
     if (privateSurface) {
         GeneralSurface *surface = new GeneralSurface(privateSurface);
         dst.push_back(surface);
     }
 
+    auto rootDeviceIndex = getDevice().getRootDeviceIndex();
     if (program->getConstantSurface(rootDeviceIndex)) {
         GeneralSurface *surface = new GeneralSurface(program->getConstantSurface(rootDeviceIndex));
         dst.push_back(surface);
@@ -1186,7 +1256,7 @@ void Kernel::getResidency(std::vector<Surface *> &dst) {
         dst.push_back(surface);
     }
 
-    auto numArgs = kernelInfo.kernelArgInfo.size();
+    auto numArgs = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.size();
     for (decltype(numArgs) argIndex = 0; argIndex < numArgs; argIndex++) {
         if (kernelArguments[argIndex].object) {
             if (kernelArguments[argIndex].type == SVM_ALLOC_OBJ) {
@@ -1211,7 +1281,7 @@ void Kernel::getResidency(std::vector<Surface *> &dst) {
 }
 
 bool Kernel::requiresCoherency() {
-    auto numArgs = kernelInfo.kernelArgInfo.size();
+    auto numArgs = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.size();
     for (decltype(numArgs) argIndex = 0; argIndex < numArgs; argIndex++) {
         if (kernelArguments[argIndex].object) {
             if (kernelArguments[argIndex].type == SVM_ALLOC_OBJ) {
@@ -1233,44 +1303,43 @@ bool Kernel::requiresCoherency() {
     return false;
 }
 
-cl_int Kernel::setArgLocal(uint32_t argIndex,
+cl_int Kernel::setArgLocal(uint32_t argIndexIn,
                            size_t argSize,
                            const void *argVal) {
-    auto crossThreadData = reinterpret_cast<uint32_t *>(getCrossThreadData());
+    storeKernelArg(argIndexIn, SLM_OBJ, nullptr, argVal, argSize);
+    uint32_t *crossThreadData = reinterpret_cast<uint32_t *>(this->crossThreadData);
+    uint32_t argIndex = argIndexIn;
 
-    storeKernelArg(argIndex, SLM_OBJ, nullptr, argVal, argSize);
+    const auto &args = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs;
+    const auto &currArg = args[argIndex];
+    UNRECOVERABLE_IF(currArg.getTraits().getAddressQualifier() != KernelArgMetadata::AddrLocal);
 
-    slmSizes[argIndex] = argSize;
+    slmSizes[argIndex] = static_cast<uint32_t>(argSize);
 
-    // Extract our current slmOffset
-    auto slmOffset = *ptrOffset(crossThreadData,
-                                kernelInfo.kernelArgInfo[argIndex].kernelArgPatchInfoVector[0].crossthreadOffset);
-
-    // Add our size
+    UNRECOVERABLE_IF(isUndefinedOffset(currArg.as<NEO::ArgDescPointer>().slmOffset));
+    auto slmOffset = *ptrOffset(crossThreadData, currArg.as<ArgDescPointer>().slmOffset);
     slmOffset += static_cast<uint32_t>(argSize);
 
-    // Update all slm offsets after this argIndex
     ++argIndex;
     while (argIndex < slmSizes.size()) {
-        const auto &kernelArgInfo = kernelInfo.kernelArgInfo[argIndex];
-        auto slmAlignment = kernelArgInfo.slmAlignment;
-
-        // If an local argument, alignment should be non-zero
-        if (slmAlignment) {
-            // Align to specified alignment
-            slmOffset = alignUp(slmOffset, slmAlignment);
-
-            // Patch our new offset into cross thread data
-            auto patchLocation = ptrOffset(crossThreadData,
-                                           kernelArgInfo.kernelArgPatchInfoVector[0].crossthreadOffset);
-            *patchLocation = slmOffset;
+        if (args[argIndex].getTraits().getAddressQualifier() != KernelArgMetadata::AddrLocal) {
+            ++argIndex;
+            continue;
         }
+
+        const auto &nextArg = args[argIndex].as<ArgDescPointer>();
+        UNRECOVERABLE_IF(0 == nextArg.requiredSlmAlignment);
+
+        slmOffset = alignUp<uint32_t>(slmOffset, nextArg.requiredSlmAlignment);
+
+        auto patchLocation = ptrOffset(crossThreadData, nextArg.slmOffset);
+        *patchLocation = slmOffset;
 
         slmOffset += static_cast<uint32_t>(slmSizes[argIndex]);
         ++argIndex;
     }
 
-    slmTotalSize = kernelInfo.workloadInfo.slmStaticSize + alignUp(slmOffset, KB);
+    slmTotalSize = kernelInfo.kernelDescriptor.kernelAttributes.slmInlineSize + alignUp(slmOffset, KB);
 
     return CL_SUCCESS;
 }
@@ -1279,12 +1348,16 @@ cl_int Kernel::setArgBuffer(uint32_t argIndex,
                             size_t argSize,
                             const void *argVal) {
 
-    if (argSize != sizeof(cl_mem *))
+    if (argSize != sizeof(cl_mem *)) {
         return CL_INVALID_ARG_SIZE;
+    }
 
-    const auto &kernelArgInfo = kernelInfo.kernelArgInfo[argIndex];
     auto clMem = reinterpret_cast<const cl_mem *>(argVal);
-    patchBufferOffset(kernelArgInfo, nullptr, nullptr);
+    auto pClDevice = &getDevice();
+    auto rootDeviceIndex = pClDevice->getRootDeviceIndex();
+
+    const auto &arg = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[argIndex];
+    const auto &argAsPtr = arg.as<ArgDescPointer>();
 
     if (clMem && *clMem) {
         auto clMemObj = *clMem;
@@ -1296,27 +1369,30 @@ cl_int Kernel::setArgBuffer(uint32_t argIndex,
         if (!buffer)
             return CL_INVALID_MEM_OBJECT;
 
-        auto graphicsAllocation = buffer->getGraphicsAllocation(getDevice().getRootDeviceIndex());
-
         if (buffer->peekSharingHandler()) {
             usingSharedObjArgs = true;
         }
+        patchBufferOffset(argAsPtr, nullptr, nullptr);
 
-        auto patchLocation = ptrOffset(getCrossThreadData(),
-                                       kernelArgInfo.kernelArgPatchInfoVector[0].crossthreadOffset);
+        if (isValidOffset(argAsPtr.stateless)) {
+            auto patchLocation = ptrOffset(crossThreadData, argAsPtr.stateless);
+            uint64_t addressToPatch = buffer->setArgStateless(patchLocation, argAsPtr.pointerSize, rootDeviceIndex, !this->isBuiltIn);
 
-        auto patchSize = kernelArgInfo.kernelArgPatchInfoVector[0].size;
-
-        uint64_t addressToPatch = buffer->setArgStateless(patchLocation, patchSize, getDevice().getRootDeviceIndex(), !this->isBuiltIn);
-
-        if (DebugManager.flags.AddPatchInfoCommentsForAUBDump.get()) {
-            PatchInfoData patchInfoData(addressToPatch - buffer->getOffset(), static_cast<uint64_t>(buffer->getOffset()), PatchInfoAllocationType::KernelArg, reinterpret_cast<uint64_t>(getCrossThreadData()), static_cast<uint64_t>(kernelArgInfo.kernelArgPatchInfoVector[0].crossthreadOffset), PatchInfoAllocationType::IndirectObjectHeap, patchSize);
-            this->patchInfoDataList.push_back(patchInfoData);
+            if (DebugManager.flags.AddPatchInfoCommentsForAUBDump.get()) {
+                PatchInfoData patchInfoData(addressToPatch - buffer->getOffset(), static_cast<uint64_t>(buffer->getOffset()),
+                                            PatchInfoAllocationType::KernelArg, reinterpret_cast<uint64_t>(crossThreadData),
+                                            static_cast<uint64_t>(argAsPtr.stateless),
+                                            PatchInfoAllocationType::IndirectObjectHeap, argAsPtr.pointerSize);
+                this->patchInfoDataList.push_back(patchInfoData);
+            }
         }
 
         bool disableL3 = false;
         bool forceNonAuxMode = false;
         bool isAuxTranslationKernel = (AuxTranslationDirection::None != auxTranslationDirection);
+        auto graphicsAllocation = buffer->getGraphicsAllocation(rootDeviceIndex);
+        auto &hwInfo = pClDevice->getHardwareInfo();
+        auto &clHwHelper = ClHwHelper::get(hwInfo.platform.eRenderCoreFamily);
 
         if (isAuxTranslationKernel) {
             if (((AuxTranslationDirection::AuxToNonAux == auxTranslationDirection) && argIndex == 1) ||
@@ -1325,38 +1401,43 @@ cl_int Kernel::setArgBuffer(uint32_t argIndex,
             }
             disableL3 = (argIndex == 0);
         } else if (graphicsAllocation->getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED &&
-                   !kernelArgInfo.pureStatefulBufferAccess) {
+                   clHwHelper.requiresNonAuxMode(argAsPtr, hwInfo)) {
             forceNonAuxMode = true;
         }
 
-        if (requiresSshForBuffers()) {
-            auto surfaceState = ptrOffset(getSurfaceStateHeap(), kernelArgInfo.offsetHeap);
-            buffer->setArgStateful(surfaceState, forceNonAuxMode, disableL3, isAuxTranslationKernel, kernelArgInfo.isReadOnly, getDevice().getDevice());
+        if (isValidOffset(argAsPtr.bindful)) {
+            buffer->setArgStateful(ptrOffset(getSurfaceStateHeap(), argAsPtr.bindful), forceNonAuxMode,
+                                   disableL3, isAuxTranslationKernel, arg.isReadOnly(), pClDevice->getDevice(),
+                                   kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics, areMultipleSubDevicesInContext());
+        } else if (isValidOffset(argAsPtr.bindless)) {
+            buffer->setArgStateful(patchBindlessSurfaceState(graphicsAllocation, argAsPtr.bindless), forceNonAuxMode,
+                                   disableL3, isAuxTranslationKernel, arg.isReadOnly(), pClDevice->getDevice(),
+                                   kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics, areMultipleSubDevicesInContext());
         }
 
-        kernelArguments[argIndex].isStatelessUncacheable = kernelArgInfo.pureStatefulBufferAccess ? false : buffer->isMemObjUncacheable();
+        kernelArguments[argIndex].isStatelessUncacheable = argAsPtr.isPureStateful() ? false : buffer->isMemObjUncacheable();
 
         auto allocationForCacheFlush = graphicsAllocation;
 
         //if we make object uncacheable for surface state and there are not stateless accessess , then ther is no need to flush caches
-        if (buffer->isMemObjUncacheableForSurfaceState() && kernelArgInfo.pureStatefulBufferAccess) {
+        if (buffer->isMemObjUncacheableForSurfaceState() && argAsPtr.isPureStateful()) {
             allocationForCacheFlush = nullptr;
         }
 
         addAllocationToCacheFlushVector(argIndex, allocationForCacheFlush);
+
         return CL_SUCCESS;
     } else {
-
-        auto patchLocation = ptrOffset(getCrossThreadData(),
-                                       kernelArgInfo.kernelArgPatchInfoVector[0].crossthreadOffset);
-
-        patchWithRequiredSize(patchLocation, kernelArgInfo.kernelArgPatchInfoVector[0].size, 0u);
-
         storeKernelArg(argIndex, BUFFER_OBJ, nullptr, argVal, argSize);
+        if (isValidOffset(argAsPtr.stateless)) {
+            auto patchLocation = ptrOffset(getCrossThreadData(), argAsPtr.stateless);
+            patchWithRequiredSize(patchLocation, argAsPtr.pointerSize, 0u);
+        }
 
-        if (requiresSshForBuffers()) {
-            auto surfaceState = ptrOffset(getSurfaceStateHeap(), kernelArgInfo.offsetHeap);
-            Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, 0, nullptr, 0, nullptr, 0, 0);
+        if (isValidOffset(argAsPtr.bindful)) {
+            auto surfaceState = ptrOffset(getSurfaceStateHeap(), argAsPtr.bindful);
+            Buffer::setSurfaceState(&pClDevice->getDevice(), surfaceState, false, false, 0, nullptr, 0, nullptr, 0, 0,
+                                    kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics, areMultipleSubDevicesInContext());
         }
 
         return CL_SUCCESS;
@@ -1371,7 +1452,6 @@ cl_int Kernel::setArgPipe(uint32_t argIndex,
         return CL_INVALID_ARG_SIZE;
     }
 
-    const auto &kernelArgInfo = kernelInfo.kernelArgInfo[argIndex];
     auto clMem = reinterpret_cast<const cl_mem *>(argVal);
 
     if (clMem && *clMem) {
@@ -1394,20 +1474,19 @@ cl_int Kernel::setArgPipe(uint32_t argIndex,
             return CL_INVALID_MEM_OBJECT;
         }
 
-        auto patchLocation = ptrOffset(getCrossThreadData(),
-                                       kernelArgInfo.kernelArgPatchInfoVector[0].crossthreadOffset);
+        auto rootDeviceIndex = getDevice().getRootDeviceIndex();
+        const auto &argAsPtr = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[argIndex].as<ArgDescPointer>();
 
-        auto patchSize = kernelArgInfo.kernelArgPatchInfoVector[0].size;
+        auto patchLocation = ptrOffset(getCrossThreadData(), argAsPtr.stateless);
+        pipe->setPipeArg(patchLocation, argAsPtr.pointerSize, rootDeviceIndex);
 
-        pipe->setPipeArg(patchLocation, patchSize, getDevice().getRootDeviceIndex());
-
-        auto graphicsAllocation = pipe->getGraphicsAllocation(getDevice().getRootDeviceIndex());
-
-        if (requiresSshForBuffers()) {
-            auto surfaceState = ptrOffset(getSurfaceStateHeap(), kernelArgInfo.offsetHeap);
-            Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState,
+        if (isValidOffset(argAsPtr.bindful)) {
+            auto graphicsAllocation = pipe->getGraphicsAllocation(rootDeviceIndex);
+            auto surfaceState = ptrOffset(getSurfaceStateHeap(), argAsPtr.bindful);
+            Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, false, false,
                                     pipe->getSize(), pipe->getCpuAddress(), 0,
-                                    graphicsAllocation, 0, 0);
+                                    graphicsAllocation, 0, 0,
+                                    kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics, areMultipleSubDevicesInContext());
         }
 
         return CL_SUCCESS;
@@ -1426,8 +1505,12 @@ cl_int Kernel::setArgImageWithMipLevel(uint32_t argIndex,
                                        size_t argSize,
                                        const void *argVal, uint32_t mipLevel) {
     auto retVal = CL_INVALID_ARG_VALUE;
-    patchBufferOffset(kernelInfo.kernelArgInfo[argIndex], nullptr, nullptr);
+    auto rootDeviceIndex = getDevice().getRootDeviceIndex();
 
+    const auto &arg = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[argIndex];
+    const auto &argAsImg = arg.as<ArgDescImage>();
+
+    uint32_t *crossThreadData = reinterpret_cast<uint32_t *>(this->crossThreadData);
     auto clMemObj = *(static_cast<const cl_mem *>(argVal));
     auto pImage = castToObject<Image>(clMemObj);
 
@@ -1435,47 +1518,56 @@ cl_int Kernel::setArgImageWithMipLevel(uint32_t argIndex,
         if (pImage->peekSharingHandler()) {
             usingSharedObjArgs = true;
         }
-        const auto &kernelArgInfo = kernelInfo.kernelArgInfo[argIndex];
 
         DBG_LOG_INPUTS("setArgImage cl_mem", clMemObj);
 
         storeKernelArg(argIndex, IMAGE_OBJ, clMemObj, argVal, argSize);
 
-        auto surfaceState = ptrOffset(getSurfaceStateHeap(), kernelArgInfo.offsetHeap);
-        DEBUG_BREAK_IF(!kernelArgInfo.isImage);
-
-        // Sets SS structure
-        if (kernelArgInfo.isMediaImage) {
-            DEBUG_BREAK_IF(!kernelInfo.isVmeWorkload);
-            pImage->setMediaImageArg(surfaceState, getDevice().getRootDeviceIndex());
+        void *surfaceState = nullptr;
+        if (isValidOffset(argAsImg.bindless)) {
+            surfaceState = patchBindlessSurfaceState(pImage->getGraphicsAllocation(rootDeviceIndex), argAsImg.bindless);
         } else {
-            pImage->setImageArg(surfaceState, kernelArgInfo.isMediaBlockImage, mipLevel, getDevice().getRootDeviceIndex());
+            DEBUG_BREAK_IF(isUndefinedOffset(argAsImg.bindful));
+            surfaceState = ptrOffset(getSurfaceStateHeap(), argAsImg.bindful);
         }
 
-        auto crossThreadData = reinterpret_cast<uint32_t *>(getCrossThreadData());
+        // Sets SS structure
+        if (arg.getExtendedTypeInfo().isMediaImage) {
+            DEBUG_BREAK_IF(!kernelInfo.kernelDescriptor.kernelAttributes.flags.usesVme);
+            pImage->setMediaImageArg(surfaceState, rootDeviceIndex);
+        } else {
+            pImage->setImageArg(surfaceState, arg.getExtendedTypeInfo().isMediaBlockImage, mipLevel, rootDeviceIndex,
+                                getKernelInfo().kernelDescriptor.kernelAttributes.flags.useGlobalAtomics);
+        }
+
         auto &imageDesc = pImage->getImageDesc();
         auto &imageFormat = pImage->getImageFormat();
-        auto graphicsAllocation = pImage->getGraphicsAllocation(getDevice().getRootDeviceIndex());
+        auto graphicsAllocation = pImage->getGraphicsAllocation(rootDeviceIndex);
 
         if (imageDesc.image_type == CL_MEM_OBJECT_IMAGE3D) {
             imageTransformer->registerImage3d(argIndex);
         }
 
-        patch<uint32_t, size_t>(imageDesc.image_width, crossThreadData, kernelArgInfo.offsetImgWidth);
-        patch<uint32_t, size_t>(imageDesc.image_height, crossThreadData, kernelArgInfo.offsetImgHeight);
-        patch<uint32_t, size_t>(imageDesc.image_depth, crossThreadData, kernelArgInfo.offsetImgDepth);
-        patch<uint32_t, cl_uint>(imageDesc.num_samples, crossThreadData, kernelArgInfo.offsetNumSamples);
-        patch<uint32_t, size_t>(imageDesc.image_array_size, crossThreadData, kernelArgInfo.offsetArraySize);
-        patch<uint32_t, cl_channel_type>(imageFormat.image_channel_data_type, crossThreadData, kernelArgInfo.offsetChannelDataType);
-        patch<uint32_t, cl_channel_order>(imageFormat.image_channel_order, crossThreadData, kernelArgInfo.offsetChannelOrder);
-        patch<uint32_t, uint32_t>(kernelArgInfo.offsetHeap, crossThreadData, kernelArgInfo.offsetObjectId);
-        patch<uint32_t, cl_uint>(imageDesc.num_mip_levels, crossThreadData, kernelArgInfo.offsetNumMipLevels);
+        patch<uint32_t, cl_uint>(imageDesc.num_samples, crossThreadData, argAsImg.metadataPayload.numSamples);
+        patch<uint32_t, cl_uint>(imageDesc.num_mip_levels, crossThreadData, argAsImg.metadataPayload.numMipLevels);
+        patch<uint32_t, uint64_t>(imageDesc.image_width, crossThreadData, argAsImg.metadataPayload.imgWidth);
+        patch<uint32_t, uint64_t>(imageDesc.image_height, crossThreadData, argAsImg.metadataPayload.imgHeight);
+        patch<uint32_t, uint64_t>(imageDesc.image_depth, crossThreadData, argAsImg.metadataPayload.imgDepth);
+        patch<uint32_t, uint64_t>(imageDesc.image_array_size, crossThreadData, argAsImg.metadataPayload.arraySize);
+        patch<uint32_t, cl_channel_type>(imageFormat.image_channel_data_type, crossThreadData, argAsImg.metadataPayload.channelDataType);
+        patch<uint32_t, cl_channel_order>(imageFormat.image_channel_order, crossThreadData, argAsImg.metadataPayload.channelOrder);
+        if (arg.getExtendedTypeInfo().hasDeviceSideEnqueueExtendedDescriptor) {
+            const auto &explicitArgsExtendedDescriptors = kernelInfo.kernelDescriptor.payloadMappings.explicitArgsExtendedDescriptors;
+            UNRECOVERABLE_IF(argIndex >= explicitArgsExtendedDescriptors.size());
+            auto deviceSideEnqueueDescriptor = static_cast<ArgDescriptorDeviceSideEnqueue *>(explicitArgsExtendedDescriptors[argIndex].get());
+            patch<uint32_t, uint32_t>(argAsImg.bindful, crossThreadData, deviceSideEnqueueDescriptor->objectId);
+        }
 
         auto pixelSize = pImage->getSurfaceFormatInfo().surfaceFormat.ImageElementSizeInBytes;
-        patch<uint64_t, uint64_t>(graphicsAllocation->getGpuAddress(), crossThreadData, kernelArgInfo.offsetFlatBaseOffset);
-        patch<uint32_t, size_t>((imageDesc.image_width * pixelSize) - 1, crossThreadData, kernelArgInfo.offsetFlatWidth);
-        patch<uint32_t, size_t>((imageDesc.image_height * pixelSize) - 1, crossThreadData, kernelArgInfo.offsetFlatHeight);
-        patch<uint32_t, size_t>(imageDesc.image_row_pitch - 1, crossThreadData, kernelArgInfo.offsetFlatPitch);
+        patch<uint64_t, uint64_t>(graphicsAllocation->getGpuAddress(), crossThreadData, argAsImg.metadataPayload.flatBaseOffset);
+        patch<uint32_t, uint64_t>((imageDesc.image_width * pixelSize) - 1, crossThreadData, argAsImg.metadataPayload.flatWidth);
+        patch<uint32_t, uint64_t>((imageDesc.image_height * pixelSize) - 1, crossThreadData, argAsImg.metadataPayload.flatHeight);
+        patch<uint32_t, uint64_t>(imageDesc.image_row_pitch - 1, crossThreadData, argAsImg.metadataPayload.flatPitch);
 
         addAllocationToCacheFlushVector(argIndex, graphicsAllocation);
         retVal = CL_SUCCESS;
@@ -1491,29 +1583,26 @@ cl_int Kernel::setArgImmediate(uint32_t argIndex,
     auto retVal = CL_INVALID_ARG_VALUE;
 
     if (argVal) {
-        const auto &kernelArgInfo = kernelInfo.kernelArgInfo[argIndex];
-        DEBUG_BREAK_IF(kernelArgInfo.kernelArgPatchInfoVector.size() <= 0);
-
         storeKernelArg(argIndex, NONE_OBJ, nullptr, nullptr, argSize);
 
-        auto crossThreadData = getCrossThreadData();
-        auto crossThreadDataEnd = ptrOffset(crossThreadData, getCrossThreadDataSize());
+        auto crossThreadDataEnd = ptrOffset(crossThreadData, crossThreadDataSize);
+        const auto &argAsVal = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[argIndex].as<ArgDescValue>();
+        for (const auto &element : argAsVal.elements) {
+            DEBUG_BREAK_IF(element.size <= 0);
 
-        for (const auto &kernelArgPatchInfo : kernelArgInfo.kernelArgPatchInfoVector) {
-            DEBUG_BREAK_IF(kernelArgPatchInfo.size <= 0);
-            auto pDst = ptrOffset(crossThreadData, kernelArgPatchInfo.crossthreadOffset);
+            auto pDst = ptrOffset(crossThreadData, element.offset);
+            auto pSrc = ptrOffset(argVal, element.sourceOffset);
 
-            auto pSrc = ptrOffset(argVal, kernelArgPatchInfo.sourceOffset);
-
-            DEBUG_BREAK_IF(!(ptrOffset(pDst, kernelArgPatchInfo.size) <= crossThreadDataEnd));
+            DEBUG_BREAK_IF(!(ptrOffset(pDst, element.size) <= crossThreadDataEnd));
             UNUSED_VARIABLE(crossThreadDataEnd);
 
-            if (kernelArgPatchInfo.sourceOffset < argSize) {
-                size_t maxBytesToCopy = argSize - kernelArgPatchInfo.sourceOffset;
-                size_t bytesToCopy = std::min(static_cast<size_t>(kernelArgPatchInfo.size), maxBytesToCopy);
-                memcpy_s(pDst, kernelArgPatchInfo.size, pSrc, bytesToCopy);
+            if (element.sourceOffset < argSize) {
+                size_t maxBytesToCopy = argSize - element.sourceOffset;
+                size_t bytesToCopy = std::min(static_cast<size_t>(element.size), maxBytesToCopy);
+                memcpy_s(pDst, element.size, pSrc, bytesToCopy);
             }
         }
+
         retVal = CL_SUCCESS;
     }
 
@@ -1529,6 +1618,7 @@ cl_int Kernel::setArgSampler(uint32_t argIndex,
         return retVal;
     }
 
+    uint32_t *crossThreadData = reinterpret_cast<uint32_t *>(this->crossThreadData);
     auto clSamplerObj = *(static_cast<const cl_sampler *>(argVal));
     auto pSampler = castToObject<Sampler>(clSamplerObj);
 
@@ -1543,20 +1633,25 @@ cl_int Kernel::setArgSampler(uint32_t argIndex,
     }
 
     if (pSampler && argSize == sizeof(cl_sampler *)) {
-        const auto &kernelArgInfo = kernelInfo.kernelArgInfo[argIndex];
+        const auto &arg = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[argIndex];
+        const auto &argAsSmp = arg.as<ArgDescSampler>();
 
         storeKernelArg(argIndex, SAMPLER_OBJ, clSamplerObj, argVal, argSize);
 
         auto dsh = getDynamicStateHeap();
-        auto samplerState = ptrOffset(dsh, kernelArgInfo.offsetHeap);
+        auto samplerState = ptrOffset(dsh, argAsSmp.bindful);
 
-        pSampler->setArg(const_cast<void *>(samplerState));
+        pSampler->setArg(const_cast<void *>(samplerState), clDevice.getHardwareInfo());
 
-        auto crossThreadData = reinterpret_cast<uint32_t *>(getCrossThreadData());
-        patch<uint32_t, unsigned int>(pSampler->getSnapWaValue(), crossThreadData, kernelArgInfo.offsetSamplerSnapWa);
-        patch<uint32_t, uint32_t>(GetAddrModeEnum(pSampler->addressingMode), crossThreadData, kernelArgInfo.offsetSamplerAddressingMode);
-        patch<uint32_t, uint32_t>(GetNormCoordsEnum(pSampler->normalizedCoordinates), crossThreadData, kernelArgInfo.offsetSamplerNormalizedCoords);
-        patch<uint32_t, uint32_t>(SAMPLER_OBJECT_ID_SHIFT + kernelArgInfo.offsetHeap, crossThreadData, kernelArgInfo.offsetObjectId);
+        patch<uint32_t, uint32_t>(pSampler->getSnapWaValue(), crossThreadData, argAsSmp.metadataPayload.samplerSnapWa);
+        patch<uint32_t, uint32_t>(GetAddrModeEnum(pSampler->addressingMode), crossThreadData, argAsSmp.metadataPayload.samplerAddressingMode);
+        patch<uint32_t, uint32_t>(GetNormCoordsEnum(pSampler->normalizedCoordinates), crossThreadData, argAsSmp.metadataPayload.samplerNormalizedCoords);
+        if (arg.getExtendedTypeInfo().hasDeviceSideEnqueueExtendedDescriptor) {
+            const auto &explicitArgsExtendedDescriptors = kernelInfo.kernelDescriptor.payloadMappings.explicitArgsExtendedDescriptors;
+            UNRECOVERABLE_IF(argIndex >= explicitArgsExtendedDescriptors.size());
+            auto deviceSideEnqueueDescriptor = static_cast<ArgDescriptorDeviceSideEnqueue *>(explicitArgsExtendedDescriptors[argIndex].get());
+            patch<uint32_t, uint32_t>(SAMPLER_OBJECT_ID_SHIFT + argAsSmp.bindful, crossThreadData, deviceSideEnqueueDescriptor->objectId);
+        }
 
         retVal = CL_SUCCESS;
     }
@@ -1585,29 +1680,35 @@ cl_int Kernel::setArgAccelerator(uint32_t argIndex,
     if (pAccelerator) {
         storeKernelArg(argIndex, ACCELERATOR_OBJ, clAcceleratorObj, argVal, argSize);
 
-        const auto &kernelArgInfo = kernelInfo.kernelArgInfo[argIndex];
+        const auto &arg = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[argIndex];
+        const auto &argAsSmp = arg.as<ArgDescSampler>();
 
-        if (kernelArgInfo.samplerArgumentType == iOpenCL::SAMPLER_OBJECT_VME) {
-            auto crossThreadData = getCrossThreadData();
+        if (argAsSmp.samplerType == iOpenCL::SAMPLER_OBJECT_VME) {
 
             const auto pVmeAccelerator = castToObjectOrAbort<VmeAccelerator>(pAccelerator);
             auto pDesc = static_cast<const cl_motion_estimation_desc_intel *>(pVmeAccelerator->getDescriptor());
             DEBUG_BREAK_IF(!pDesc);
 
-            auto pVmeMbBlockTypeDst = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, kernelArgInfo.offsetVmeMbBlockType));
-            *pVmeMbBlockTypeDst = pDesc->mb_block_type;
+            if (arg.getExtendedTypeInfo().hasVmeExtendedDescriptor) {
+                const auto &explicitArgsExtendedDescriptors = kernelInfo.kernelDescriptor.payloadMappings.explicitArgsExtendedDescriptors;
+                UNRECOVERABLE_IF(argIndex >= explicitArgsExtendedDescriptors.size());
+                auto vmeDescriptor = static_cast<ArgDescVme *>(explicitArgsExtendedDescriptors[argIndex].get());
 
-            auto pVmeSubpixelMode = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, kernelArgInfo.offsetVmeSubpixelMode));
-            *pVmeSubpixelMode = pDesc->subpixel_mode;
+                auto pVmeMbBlockTypeDst = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, vmeDescriptor->mbBlockType));
+                *pVmeMbBlockTypeDst = pDesc->mb_block_type;
 
-            auto pVmeSadAdjustMode = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, kernelArgInfo.offsetVmeSadAdjustMode));
-            *pVmeSadAdjustMode = pDesc->sad_adjust_mode;
+                auto pVmeSubpixelMode = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, vmeDescriptor->subpixelMode));
+                *pVmeSubpixelMode = pDesc->subpixel_mode;
 
-            auto pVmeSearchPathType = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, kernelArgInfo.offsetVmeSearchPathType));
-            *pVmeSearchPathType = pDesc->search_path_type;
+                auto pVmeSadAdjustMode = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, vmeDescriptor->sadAdjustMode));
+                *pVmeSadAdjustMode = pDesc->sad_adjust_mode;
+
+                auto pVmeSearchPathType = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, vmeDescriptor->searchPathType));
+                *pVmeSearchPathType = pDesc->search_path_type;
+            }
 
             retVal = CL_SUCCESS;
-        } else if (kernelArgInfo.samplerArgumentType == iOpenCL::SAMPLER_OBJECT_VE) {
+        } else if (argAsSmp.samplerType == iOpenCL::SAMPLER_OBJECT_VE) {
             retVal = CL_SUCCESS;
         }
     }
@@ -1635,11 +1736,9 @@ cl_int Kernel::setArgDevQueue(uint32_t argIndex,
 
     storeKernelArg(argIndex, DEVICE_QUEUE_OBJ, clDeviceQueue, argVal, argSize);
 
-    const auto &kernelArgPatchInfo = kernelInfo.kernelArgInfo[argIndex].kernelArgPatchInfoVector[0];
-    auto patchLocation = ptrOffset(reinterpret_cast<uint32_t *>(getCrossThreadData()),
-                                   kernelArgPatchInfo.crossthreadOffset);
-
-    patchWithRequiredSize(patchLocation, kernelArgPatchInfo.size,
+    const auto &argAsPtr = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[argIndex].as<ArgDescPointer>();
+    auto patchLocation = ptrOffset(reinterpret_cast<uint32_t *>(crossThreadData), argAsPtr.stateless);
+    patchWithRequiredSize(patchLocation, argAsPtr.pointerSize,
                           static_cast<uintptr_t>(pDeviceQueue->getQueueBuffer()->getGpuAddressToPatch()));
 
     return CL_SUCCESS;
@@ -1665,8 +1764,9 @@ void Kernel::unsetArg(uint32_t argIndex) {
 }
 
 void Kernel::createReflectionSurface() {
+    auto pClDevice = &clDevice;
     if (this->isParentKernel && kernelReflectionSurface == nullptr) {
-        auto &hwInfo = device.getHardwareInfo();
+        auto &hwInfo = pClDevice->getHardwareInfo();
         auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
         BlockKernelManager *blockManager = program->getBlockKernelManager();
         uint32_t blockCount = static_cast<uint32_t>(blockManager->getCount());
@@ -1695,7 +1795,7 @@ void Kernel::createReflectionSurface() {
 
             ReflectionSurfaceHelper::getCurbeParams(curbeParamsForBlocks[i], tokenMask[i], firstSSHTokenIndex, *pBlockInfo, hwInfo);
 
-            maxConstantBufferSize = std::max(maxConstantBufferSize, static_cast<size_t>(pBlockInfo->patchInfo.dataParameterStream->DataParameterStreamSize));
+            maxConstantBufferSize = std::max(maxConstantBufferSize, static_cast<size_t>(pBlockInfo->kernelDescriptor.kernelAttributes.crossThreadDataSize));
 
             samplerStateAndBorderColorSize = pBlockInfo->getSamplerStateArraySize(hwInfo);
             samplerStateAndBorderColorSize = alignUp(samplerStateAndBorderColorSize, Sampler::samplerStateArrayAlignment);
@@ -1712,7 +1812,10 @@ void Kernel::createReflectionSurface() {
         kernelReflectionSize += blockCount * alignUp(maxConstantBufferSize, sizeof(void *));
         kernelReflectionSize += parentImageCount * sizeof(IGIL_ImageParamters);
         kernelReflectionSize += parentSamplerCount * sizeof(IGIL_ParentSamplerParams);
-        kernelReflectionSurface = device.getMemoryManager()->allocateGraphicsMemoryWithProperties({device.getRootDeviceIndex(), kernelReflectionSize, GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER, device.getDeviceBitfield()});
+        kernelReflectionSurface = executionEnvironment.memoryManager->allocateGraphicsMemoryWithProperties(
+            {pClDevice->getRootDeviceIndex(), kernelReflectionSize,
+             GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER,
+             pClDevice->getDeviceBitfield()});
 
         for (uint32_t i = 0; i < blockCount; i++) {
             const KernelInfo *pBlockInfo = blockManager->getBlockKernelInfo(i);
@@ -1723,12 +1826,12 @@ void Kernel::createReflectionSurface() {
                                                                                   maxConstantBufferSize,
                                                                                   parentSamplerCount,
                                                                                   *pBlockInfo,
-                                                                                  device.getHardwareInfo());
+                                                                                  hwInfo);
 
             uint32_t offset = static_cast<uint32_t>(offsetof(IGIL_KernelDataHeader, m_data) + sizeof(IGIL_KernelAddressData) * i);
 
             uint32_t samplerHeapOffset = static_cast<uint32_t>(alignUp(kernelDataOffset + sizeof(IGIL_KernelData) + curbeParamsForBlocks[i].size() * sizeof(IGIL_KernelCurbeParams), sizeof(void *)));
-            uint32_t samplerHeapSize = static_cast<uint32_t>(alignUp(pBlockInfo->getSamplerStateArraySize(device.getHardwareInfo()), Sampler::samplerStateArrayAlignment) + pBlockInfo->getBorderColorStateSize());
+            uint32_t samplerHeapSize = static_cast<uint32_t>(alignUp(pBlockInfo->getSamplerStateArraySize(hwInfo), Sampler::samplerStateArrayAlignment) + pBlockInfo->getBorderColorStateSize());
             uint32_t constantBufferOffset = alignUp(samplerHeapOffset + samplerHeapSize, sizeof(void *));
 
             uint32_t samplerParamsOffset = 0;
@@ -1736,11 +1839,12 @@ void Kernel::createReflectionSurface() {
                 samplerParamsOffset = newKernelDataOffset - sizeof(IGIL_SamplerParams) * parentSamplerCount;
                 IGIL_SamplerParams *pSamplerParams = (IGIL_SamplerParams *)ptrOffset(kernelReflectionSurface->getUnderlyingBuffer(), samplerParamsOffset);
                 uint32_t sampler = 0;
-                for (uint32_t argID = 0; argID < pBlockInfo->kernelArgInfo.size(); argID++) {
-                    if (pBlockInfo->kernelArgInfo[argID].isSampler) {
+                const auto &args = pBlockInfo->kernelDescriptor.payloadMappings.explicitArgs;
+                for (uint32_t argID = 0; argID < args.size(); argID++) {
+                    if (args[argID].is<ArgDescriptor::ArgTSampler>()) {
 
                         pSamplerParams[sampler].m_ArgID = argID;
-                        pSamplerParams[sampler].m_SamplerStateOffset = pBlockInfo->kernelArgInfo[argID].offsetHeap;
+                        pSamplerParams[sampler].m_SamplerStateOffset = args[argID].as<ArgDescSampler>().bindful;
                         sampler++;
                     }
                 }
@@ -1755,7 +1859,7 @@ void Kernel::createReflectionSurface() {
                                                           sshTokenOffsetsFromKernelData[i] + kernelDataOffset,
                                                           btOffset,
                                                           *pBlockInfo,
-                                                          device.getHardwareInfo());
+                                                          hwInfo);
 
             if (samplerHeapSize > 0) {
                 void *pDst = ptrOffset(kernelReflectionSurface->getUnderlyingBuffer(), samplerHeapOffset);
@@ -1767,7 +1871,7 @@ void Kernel::createReflectionSurface() {
             const char *pSrc = pBlockInfo->crossThreadData;
             memcpy_s(pDst, pBlockInfo->getConstantBufferSize(), pSrc, pBlockInfo->getConstantBufferSize());
 
-            btOffset += pBlockInfo->patchInfo.bindingTableState->Offset;
+            btOffset += pBlockInfo->kernelDescriptor.payloadMappings.bindingTable.tableOffset;
             kernelDataOffset = newKernelDataOffset;
         }
 
@@ -1786,7 +1890,10 @@ void Kernel::createReflectionSurface() {
 
     if (DebugManager.flags.ForceDispatchScheduler.get()) {
         if (this->isSchedulerKernel && kernelReflectionSurface == nullptr) {
-            kernelReflectionSurface = device.getMemoryManager()->allocateGraphicsMemoryWithProperties({device.getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER, device.getDeviceBitfield()});
+            kernelReflectionSurface = executionEnvironment.memoryManager->allocateGraphicsMemoryWithProperties(
+                {pClDevice->getRootDeviceIndex(), MemoryConstants::pageSize,
+                 GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER,
+                 pClDevice->getDeviceBitfield()});
         }
     }
 }
@@ -1806,7 +1913,7 @@ void Kernel::getParentObjectCounts(ObjectCounts &objectCount) {
 }
 
 bool Kernel::hasPrintfOutput() const {
-    return getKernelInfo().patchInfo.pAllocateStatelessPrintfSurface != nullptr;
+    return kernelInfo.kernelDescriptor.kernelAttributes.flags.usesPrintf;
 }
 
 size_t Kernel::getInstructionHeapSizeForExecutionModel() const {
@@ -1826,7 +1933,7 @@ size_t Kernel::getInstructionHeapSizeForExecutionModel() const {
 }
 
 void Kernel::patchBlocksCurbeWithConstantValues() {
-    auto rootDeviceIndex = device.getRootDeviceIndex();
+    auto rootDeviceIndex = clDevice.getRootDeviceIndex();
     BlockKernelManager *blockManager = program->getBlockKernelManager();
     uint32_t blockCount = static_cast<uint32_t>(blockManager->getCount());
 
@@ -1841,14 +1948,14 @@ void Kernel::patchBlocksCurbeWithConstantValues() {
         uint64_t constantMemoryCurbeOffset = ReflectionSurfaceHelper::undefinedOffset;
         uint32_t constantMemoryPatchSize = 0;
 
-        if (pBlockInfo->patchInfo.pAllocateStatelessGlobalMemorySurfaceWithInitialization) {
-            globalMemoryCurbeOffset = pBlockInfo->patchInfo.pAllocateStatelessGlobalMemorySurfaceWithInitialization->DataParamOffset;
-            globalMemoryPatchSize = pBlockInfo->patchInfo.pAllocateStatelessGlobalMemorySurfaceWithInitialization->DataParamSize;
+        if (isValidOffset(pBlockInfo->kernelDescriptor.payloadMappings.implicitArgs.globalVariablesSurfaceAddress.stateless)) {
+            globalMemoryCurbeOffset = pBlockInfo->kernelDescriptor.payloadMappings.implicitArgs.globalVariablesSurfaceAddress.stateless;
+            globalMemoryPatchSize = pBlockInfo->kernelDescriptor.payloadMappings.implicitArgs.globalVariablesSurfaceAddress.pointerSize;
         }
 
-        if (pBlockInfo->patchInfo.pAllocateStatelessConstantMemorySurfaceWithInitialization) {
-            constantMemoryCurbeOffset = pBlockInfo->patchInfo.pAllocateStatelessConstantMemorySurfaceWithInitialization->DataParamOffset;
-            constantMemoryPatchSize = pBlockInfo->patchInfo.pAllocateStatelessConstantMemorySurfaceWithInitialization->DataParamSize;
+        if (isValidOffset(pBlockInfo->kernelDescriptor.payloadMappings.implicitArgs.globalConstantsSurfaceAddress.stateless)) {
+            constantMemoryCurbeOffset = pBlockInfo->kernelDescriptor.payloadMappings.implicitArgs.globalConstantsSurfaceAddress.stateless;
+            constantMemoryPatchSize = pBlockInfo->kernelDescriptor.payloadMappings.implicitArgs.globalConstantsSurfaceAddress.pointerSize;
         }
 
         ReflectionSurfaceHelper::patchBlocksCurbeWithConstantValues(kernelReflectionSurface->getUnderlyingBuffer(), blockID,
@@ -1859,152 +1966,127 @@ void Kernel::patchBlocksCurbeWithConstantValues() {
 }
 
 void Kernel::ReflectionSurfaceHelper::getCurbeParams(std::vector<IGIL_KernelCurbeParams> &curbeParamsOut, uint64_t &tokenMaskOut, uint32_t &firstSSHTokenIndex, const KernelInfo &kernelInfo, const HardwareInfo &hwInfo) {
-
-    size_t numArgs = kernelInfo.kernelArgInfo.size();
-    size_t patchTokenCount = +kernelInfo.kernelNonArgInfo.size();
-    uint64_t tokenMask = 0;
-    tokenMaskOut = 0;
-    firstSSHTokenIndex = 0;
-    curbeParamsOut.reserve(patchTokenCount * 5);
-
+    const auto &args = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs;
+    const auto gpuPointerSize = kernelInfo.kernelDescriptor.kernelAttributes.gpuPointerSize;
     uint32_t bindingTableIndex = 253;
+    uint64_t tokenMask = 0;
 
-    for (uint32_t argNumber = 0; argNumber < numArgs; argNumber++) {
-        IGIL_KernelCurbeParams curbeParam;
+    for (size_t argNum = 0; argNum < args.size(); argNum++) {
+        const auto &arg = args[argNum];
+
+        auto sizeOfKernelArgForSSH = gpuPointerSize;
         bindingTableIndex = 253;
-        auto sizeOfkernelArgForSSH = kernelInfo.gpuPointerSize;
 
-        if (kernelInfo.kernelArgInfo[argNumber].isBuffer) {
-            curbeParam.m_patchOffset = kernelInfo.kernelArgInfo[argNumber].kernelArgPatchInfoVector[0].crossthreadOffset;
-            curbeParam.m_parameterSize = kernelInfo.gpuPointerSize;
-            curbeParam.m_parameterType = COMPILER_DATA_PARAMETER_GLOBAL_SURFACE;
-            curbeParam.m_sourceOffset = argNumber;
+        if (arg.is<ArgDescriptor::ArgTPointer>()) {
+            const auto &argAsPtr = arg.as<ArgDescPointer>();
 
-            curbeParamsOut.push_back(curbeParam);
-            tokenMask |= shiftLeftBy(63);
-        } else if (kernelInfo.kernelArgInfo[argNumber].isImage) {
-            if (isValidOffset(kernelInfo.kernelArgInfo[argNumber].offsetImgWidth)) {
-                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_IMAGE_WIDTH + 50, sizeof(uint32_t), kernelInfo.kernelArgInfo[argNumber].offsetImgWidth, argNumber});
+            if (argAsPtr.requiredSlmAlignment) {
+                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_SUM_OF_LOCAL_MEMORY_OBJECT_ARGUMENT_SIZES, 0, argAsPtr.slmOffset, argAsPtr.requiredSlmAlignment});
+                tokenMask |= shiftLeftBy(DATA_PARAMETER_SUM_OF_LOCAL_MEMORY_OBJECT_ARGUMENT_SIZES);
+            } else {
+                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{COMPILER_DATA_PARAMETER_GLOBAL_SURFACE, gpuPointerSize, argAsPtr.stateless, static_cast<uint>(argNum)});
+                tokenMask |= shiftLeftBy(63);
+            }
+        } else if (arg.is<ArgDescriptor::ArgTImage>()) {
+            const auto &argAsImg = arg.as<ArgDescImage>();
+
+            auto emplaceIfValidOffset = [&](uint parameterType, NEO::CrossThreadDataOffset offset) {
+                if (isValidOffset(offset)) {
+                    curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{parameterType + 50, sizeof(uint32_t), offset, static_cast<uint>(argNum)});
+                }
+            };
+            emplaceIfValidOffset(DATA_PARAMETER_IMAGE_WIDTH, argAsImg.metadataPayload.imgWidth);
+            emplaceIfValidOffset(DATA_PARAMETER_IMAGE_HEIGHT, argAsImg.metadataPayload.imgHeight);
+            emplaceIfValidOffset(DATA_PARAMETER_IMAGE_DEPTH, argAsImg.metadataPayload.imgDepth);
+            emplaceIfValidOffset(DATA_PARAMETER_IMAGE_CHANNEL_DATA_TYPE, argAsImg.metadataPayload.channelDataType);
+            emplaceIfValidOffset(DATA_PARAMETER_IMAGE_CHANNEL_ORDER, argAsImg.metadataPayload.channelOrder);
+            emplaceIfValidOffset(DATA_PARAMETER_IMAGE_ARRAY_SIZE, argAsImg.metadataPayload.arraySize);
+            if (arg.getExtendedTypeInfo().hasDeviceSideEnqueueExtendedDescriptor) {
+                const auto &argsExtDescriptors = kernelInfo.kernelDescriptor.payloadMappings.explicitArgsExtendedDescriptors;
+                UNRECOVERABLE_IF(argNum >= argsExtDescriptors.size());
+                const auto &deviceSideEnqueueDescriptor = static_cast<ArgDescriptorDeviceSideEnqueue *>(argsExtDescriptors[argNum].get());
+                emplaceIfValidOffset(DATA_PARAMETER_OBJECT_ID, deviceSideEnqueueDescriptor->objectId);
             }
 
-            if (isValidOffset(kernelInfo.kernelArgInfo[argNumber].offsetImgHeight)) {
-                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_IMAGE_HEIGHT + 50, sizeof(uint32_t), kernelInfo.kernelArgInfo[argNumber].offsetImgHeight, argNumber});
-            }
-
-            if (isValidOffset(kernelInfo.kernelArgInfo[argNumber].offsetImgDepth)) {
-                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_IMAGE_DEPTH + 50, sizeof(uint32_t), kernelInfo.kernelArgInfo[argNumber].offsetImgDepth, argNumber});
-            }
-
-            if (isValidOffset(kernelInfo.kernelArgInfo[argNumber].offsetChannelDataType)) {
-                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_IMAGE_CHANNEL_DATA_TYPE + 50, sizeof(uint32_t), kernelInfo.kernelArgInfo[argNumber].offsetChannelDataType, argNumber});
-            }
-
-            if (isValidOffset(kernelInfo.kernelArgInfo[argNumber].offsetChannelOrder)) {
-                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_IMAGE_CHANNEL_ORDER + 50, sizeof(uint32_t), kernelInfo.kernelArgInfo[argNumber].offsetChannelOrder, argNumber});
-            }
-
-            if (isValidOffset(kernelInfo.kernelArgInfo[argNumber].offsetArraySize)) {
-                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_IMAGE_ARRAY_SIZE + 50, sizeof(uint32_t), kernelInfo.kernelArgInfo[argNumber].offsetArraySize, argNumber});
-            }
-
-            if (isValidOffset(kernelInfo.kernelArgInfo[argNumber].offsetObjectId)) {
-                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_OBJECT_ID + 50, sizeof(uint32_t), kernelInfo.kernelArgInfo[argNumber].offsetObjectId, argNumber});
-            }
-            tokenMask |= shiftLeftBy(50);
-
-            if (kernelInfo.patchInfo.bindingTableState) {
+            const auto &bindingTable = kernelInfo.kernelDescriptor.payloadMappings.bindingTable;
+            if (isValidOffset(bindingTable.tableOffset)) {
                 auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-                const void *ssh = static_cast<const char *>(kernelInfo.heapInfo.pSsh) + kernelInfo.patchInfo.bindingTableState->Offset;
+                const auto ssh = static_cast<const char *>(kernelInfo.heapInfo.pSsh) + bindingTable.tableOffset;
 
-                for (uint32_t i = 0; i < kernelInfo.patchInfo.bindingTableState->Count; i++) {
-
-                    uint32_t pointer = hwHelper.getBindingTableStateSurfaceStatePointer(ssh, i);
-                    if (pointer == kernelInfo.kernelArgInfo[argNumber].offsetHeap) {
+                for (uint8_t i = 0; i < bindingTable.numEntries; i++) {
+                    const auto pointer = static_cast<NEO::SurfaceStateHeapOffset>(hwHelper.getBindingTableStateSurfaceStatePointer(ssh, i));
+                    if (pointer == argAsImg.bindful) {
                         bindingTableIndex = i;
                         break;
                     }
                 }
-                DEBUG_BREAK_IF(!((bindingTableIndex != 253) || (kernelInfo.patchInfo.bindingTableState->Count == 0)));
+                DEBUG_BREAK_IF(bindingTableIndex == 253);
             }
 
-        } else if (kernelInfo.kernelArgInfo[argNumber].isSampler) {
-            if (isValidOffset(kernelInfo.kernelArgInfo[argNumber].offsetSamplerSnapWa)) {
-                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_SAMPLER_COORDINATE_SNAP_WA_REQUIRED + 100, sizeof(uint32_t), kernelInfo.kernelArgInfo[argNumber].offsetSamplerSnapWa, argNumber});
+            tokenMask |= shiftLeftBy(50);
+        } else if (arg.is<ArgDescriptor::ArgTSampler>()) {
+            const auto &argAsSmp = arg.as<ArgDescSampler>();
+
+            auto emplaceIfValidOffset = [&](uint parameterType, NEO::CrossThreadDataOffset offset) {
+                if (isValidOffset(offset)) {
+                    curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{parameterType + 100, sizeof(uint32_t), offset, static_cast<uint>(argNum)});
+                }
+            };
+            emplaceIfValidOffset(DATA_PARAMETER_SAMPLER_COORDINATE_SNAP_WA_REQUIRED, argAsSmp.metadataPayload.samplerSnapWa);
+            emplaceIfValidOffset(DATA_PARAMETER_SAMPLER_ADDRESS_MODE, argAsSmp.metadataPayload.samplerAddressingMode);
+            emplaceIfValidOffset(DATA_PARAMETER_SAMPLER_NORMALIZED_COORDS, argAsSmp.metadataPayload.samplerNormalizedCoords);
+            if (arg.getExtendedTypeInfo().hasDeviceSideEnqueueExtendedDescriptor) {
+                const auto &argsExtDescriptors = kernelInfo.kernelDescriptor.payloadMappings.explicitArgsExtendedDescriptors;
+                UNRECOVERABLE_IF(argNum >= argsExtDescriptors.size());
+                const auto &deviceSideEnqueueDescriptor = static_cast<ArgDescriptorDeviceSideEnqueue *>(argsExtDescriptors[argNum].get());
+                emplaceIfValidOffset(DATA_PARAMETER_OBJECT_ID, deviceSideEnqueueDescriptor->objectId);
             }
 
-            if (isValidOffset(kernelInfo.kernelArgInfo[argNumber].offsetSamplerAddressingMode)) {
-                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_SAMPLER_ADDRESS_MODE + 100, sizeof(uint32_t), kernelInfo.kernelArgInfo[argNumber].offsetSamplerAddressingMode, argNumber});
-            }
-
-            if (isValidOffset(kernelInfo.kernelArgInfo[argNumber].offsetSamplerNormalizedCoords)) {
-                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_SAMPLER_NORMALIZED_COORDS + 100, sizeof(uint32_t), kernelInfo.kernelArgInfo[argNumber].offsetSamplerNormalizedCoords, argNumber});
-            }
-
-            if (isValidOffset(kernelInfo.kernelArgInfo[argNumber].offsetObjectId)) {
-                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_OBJECT_ID + 100, sizeof(uint32_t), kernelInfo.kernelArgInfo[argNumber].offsetObjectId, argNumber});
-            }
             tokenMask |= shiftLeftBy(51);
         } else {
             bindingTableIndex = 0;
-            sizeOfkernelArgForSSH = 0;
+            sizeOfKernelArgForSSH = 0;
         }
 
-        curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{1024, sizeOfkernelArgForSSH, bindingTableIndex, argNumber});
-
-        if (kernelInfo.kernelArgInfo[argNumber].slmAlignment != 0) {
-            DEBUG_BREAK_IF(kernelInfo.kernelArgInfo[argNumber].kernelArgPatchInfoVector.size() != 1);
-            uint32_t offset = kernelInfo.kernelArgInfo[argNumber].kernelArgPatchInfoVector[0].crossthreadOffset;
-            uint32_t srcOffset = kernelInfo.kernelArgInfo[argNumber].slmAlignment;
-            curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_SUM_OF_LOCAL_MEMORY_OBJECT_ARGUMENT_SIZES, 0, offset, srcOffset});
-            tokenMask |= shiftLeftBy(DATA_PARAMETER_SUM_OF_LOCAL_MEMORY_OBJECT_ARGUMENT_SIZES);
-        }
+        curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{1024, sizeOfKernelArgForSSH, bindingTableIndex, static_cast<uint>(argNum)});
     }
 
-    for (auto param : kernelInfo.patchInfo.dataParameterBuffersKernelArgs) {
-        curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_KERNEL_ARGUMENT, param->DataSize, param->Offset, param->ArgumentNumber});
+    for (const auto &param : kernelInfo.kernelDescriptor.kernelMetadata.allByValueKernelArguments) {
+        curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_KERNEL_ARGUMENT, param.byValueElement.size, param.byValueElement.offset, param.argNum});
         tokenMask |= shiftLeftBy(DATA_PARAMETER_KERNEL_ARGUMENT);
     }
 
-    for (uint32_t i = 0; i < 3; i++) {
-        const uint32_t sizeOfParam = 4;
-        if (kernelInfo.workloadInfo.enqueuedLocalWorkSizeOffsets[i] != WorkloadInfo::undefinedOffset) {
-            curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_ENQUEUED_LOCAL_WORK_SIZE, sizeOfParam, kernelInfo.workloadInfo.enqueuedLocalWorkSizeOffsets[i], i * sizeOfParam});
-            tokenMask |= shiftLeftBy(DATA_PARAMETER_ENQUEUED_LOCAL_WORK_SIZE);
-        }
-        if (kernelInfo.workloadInfo.globalWorkOffsetOffsets[i] != WorkloadInfo::undefinedOffset) {
-            curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_GLOBAL_WORK_OFFSET, sizeOfParam, kernelInfo.workloadInfo.globalWorkOffsetOffsets[i], i * sizeOfParam});
-            tokenMask |= shiftLeftBy(DATA_PARAMETER_GLOBAL_WORK_OFFSET);
-        }
-        if (kernelInfo.workloadInfo.globalWorkSizeOffsets[i] != WorkloadInfo::undefinedOffset) {
-            curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_GLOBAL_WORK_SIZE, sizeOfParam, kernelInfo.workloadInfo.globalWorkSizeOffsets[i], i * sizeOfParam});
-            tokenMask |= shiftLeftBy(DATA_PARAMETER_GLOBAL_WORK_SIZE);
-        }
-        if (kernelInfo.workloadInfo.localWorkSizeOffsets[i] != WorkloadInfo::undefinedOffset) {
-            curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_LOCAL_WORK_SIZE, sizeOfParam, kernelInfo.workloadInfo.localWorkSizeOffsets[i], i * sizeOfParam});
-            tokenMask |= shiftLeftBy(DATA_PARAMETER_LOCAL_WORK_SIZE);
-        }
-        if (kernelInfo.workloadInfo.localWorkSizeOffsets2[i] != WorkloadInfo::undefinedOffset) {
-            curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_LOCAL_WORK_SIZE, sizeOfParam, kernelInfo.workloadInfo.localWorkSizeOffsets2[i], i * sizeOfParam});
-            tokenMask |= shiftLeftBy(DATA_PARAMETER_LOCAL_WORK_SIZE);
-        }
-        if (kernelInfo.workloadInfo.numWorkGroupsOffset[i] != WorkloadInfo::undefinedOffset) {
-            curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_NUM_WORK_GROUPS, sizeOfParam, kernelInfo.workloadInfo.numWorkGroupsOffset[i], i * sizeOfParam});
-            tokenMask |= shiftLeftBy(DATA_PARAMETER_NUM_WORK_GROUPS);
-        }
+    const auto &dispatchTraits = kernelInfo.kernelDescriptor.payloadMappings.dispatchTraits;
+    for (uint32_t i = 0; i < 3U; i++) {
+        auto emplaceIfValidOffsetAndSetTokenMask = [&](uint parameterType, NEO::CrossThreadDataOffset offset) {
+            constexpr uint paramSize = sizeof(uint32_t);
+            if (isValidOffset(offset)) {
+                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{parameterType, paramSize, offset, static_cast<uint>(i * paramSize)});
+                tokenMask |= shiftLeftBy(parameterType);
+            }
+        };
+        emplaceIfValidOffsetAndSetTokenMask(DATA_PARAMETER_LOCAL_WORK_SIZE, dispatchTraits.localWorkSize[i]);
+        emplaceIfValidOffsetAndSetTokenMask(DATA_PARAMETER_LOCAL_WORK_SIZE, dispatchTraits.localWorkSize2[i]);
+        emplaceIfValidOffsetAndSetTokenMask(DATA_PARAMETER_GLOBAL_WORK_OFFSET, dispatchTraits.globalWorkOffset[i]);
+        emplaceIfValidOffsetAndSetTokenMask(DATA_PARAMETER_ENQUEUED_LOCAL_WORK_SIZE, dispatchTraits.enqueuedLocalWorkSize[i]);
+        emplaceIfValidOffsetAndSetTokenMask(DATA_PARAMETER_GLOBAL_WORK_SIZE, dispatchTraits.globalWorkSize[i]);
+        emplaceIfValidOffsetAndSetTokenMask(DATA_PARAMETER_NUM_WORK_GROUPS, dispatchTraits.numWorkGroups[i]);
     }
-
-    if (kernelInfo.workloadInfo.parentEventOffset != WorkloadInfo::undefinedOffset) {
-        curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_PARENT_EVENT, sizeof(uint32_t), kernelInfo.workloadInfo.parentEventOffset, 0});
-        tokenMask |= shiftLeftBy(DATA_PARAMETER_PARENT_EVENT);
-    }
-    if (kernelInfo.workloadInfo.workDimOffset != WorkloadInfo::undefinedOffset) {
-        curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{DATA_PARAMETER_WORK_DIMENSIONS, sizeof(uint32_t), kernelInfo.workloadInfo.workDimOffset, 0});
-        tokenMask |= shiftLeftBy(DATA_PARAMETER_WORK_DIMENSIONS);
+    {
+        const auto &payloadMappings = kernelInfo.kernelDescriptor.payloadMappings;
+        auto emplaceIfValidOffsetAndSetTokenMask = [&](uint parameterType, NEO::CrossThreadDataOffset offset) {
+            if (isValidOffset(offset)) {
+                curbeParamsOut.emplace_back(IGIL_KernelCurbeParams{parameterType, sizeof(uint32_t), offset, 0});
+                tokenMask |= shiftLeftBy(parameterType);
+            }
+        };
+        emplaceIfValidOffsetAndSetTokenMask(DATA_PARAMETER_PARENT_EVENT, payloadMappings.implicitArgs.deviceSideEnqueueParentEvent);
+        emplaceIfValidOffsetAndSetTokenMask(DATA_PARAMETER_WORK_DIMENSIONS, payloadMappings.dispatchTraits.workDim);
     }
 
     std::sort(curbeParamsOut.begin(), curbeParamsOut.end(), compareFunction);
     tokenMaskOut = tokenMask;
-    firstSSHTokenIndex = static_cast<uint32_t>(curbeParamsOut.size() - numArgs);
+    firstSSHTokenIndex = static_cast<uint32_t>(curbeParamsOut.size() - args.size());
 }
 
 uint32_t Kernel::ReflectionSurfaceHelper::setKernelData(void *reflectionSurface, uint32_t offset,
@@ -2015,41 +2097,34 @@ uint32_t Kernel::ReflectionSurfaceHelper::setKernelData(void *reflectionSurface,
     size_t samplerHeapSize = alignUp(kernelInfo.getSamplerStateArraySize(hwInfo), Sampler::samplerStateArrayAlignment) + kernelInfo.getBorderColorStateSize();
 
     kernelData->m_numberOfCurbeParams = static_cast<uint32_t>(curbeParamsIn.size()); // number of paramters to patch
-    kernelData->m_numberOfCurbeTokens = static_cast<uint32_t>(curbeParamsIn.size() - kernelInfo.kernelArgInfo.size());
+    kernelData->m_numberOfCurbeTokens = static_cast<uint32_t>(curbeParamsIn.size() - kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.size());
     kernelData->m_numberOfSamplerStates = static_cast<uint32_t>(kernelInfo.getSamplerStateArrayCount());
     kernelData->m_SizeOfSamplerHeap = static_cast<uint32_t>(samplerHeapSize);
-    kernelData->m_SamplerBorderColorStateOffsetOnDSH = kernelInfo.patchInfo.samplerStateArray ? kernelInfo.patchInfo.samplerStateArray->BorderColorOffset : 0;
-    kernelData->m_SamplerStateArrayOffsetOnDSH = kernelInfo.patchInfo.samplerStateArray ? kernelInfo.patchInfo.samplerStateArray->Offset : (uint32_t)-1;
+    kernelData->m_SamplerBorderColorStateOffsetOnDSH = isValidOffset(kernelInfo.kernelDescriptor.payloadMappings.samplerTable.borderColor) ? kernelInfo.kernelDescriptor.payloadMappings.samplerTable.borderColor : 0;
+    kernelData->m_SamplerStateArrayOffsetOnDSH = isValidOffset(kernelInfo.kernelDescriptor.payloadMappings.samplerTable.tableOffset) ? kernelInfo.kernelDescriptor.payloadMappings.samplerTable.tableOffset : -1;
     kernelData->m_sizeOfConstantBuffer = kernelInfo.getConstantBufferSize();
     kernelData->m_PatchTokensMask = tokenMaskIn;
     kernelData->m_ScratchSpacePatchValue = 0;
-    kernelData->m_SIMDSize = kernelInfo.patchInfo.executionEnvironment ? kernelInfo.patchInfo.executionEnvironment->LargestCompiledSIMDSize : 0;
-    kernelData->m_HasBarriers = kernelInfo.patchInfo.executionEnvironment ? kernelInfo.patchInfo.executionEnvironment->HasBarriers : 0;
+    kernelData->m_SIMDSize = kernelInfo.getMaxSimdSize();
+    kernelData->m_HasBarriers = kernelInfo.kernelDescriptor.kernelAttributes.barrierCount;
     kernelData->m_RequiredWkgSizes[0] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[0];
     kernelData->m_RequiredWkgSizes[1] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[1];
     kernelData->m_RequiredWkgSizes[2] = kernelInfo.kernelDescriptor.kernelAttributes.requiredWorkgroupSize[2];
-    kernelData->m_InilineSLMSize = kernelInfo.workloadInfo.slmStaticSize;
+    kernelData->m_InilineSLMSize = kernelInfo.kernelDescriptor.kernelAttributes.slmInlineSize;
 
     bool localIdRequired = false;
-    if (kernelInfo.patchInfo.threadPayload) {
-        if (kernelInfo.patchInfo.threadPayload->LocalIDFlattenedPresent ||
-            kernelInfo.patchInfo.threadPayload->LocalIDXPresent ||
-            kernelInfo.patchInfo.threadPayload->LocalIDYPresent ||
-            kernelInfo.patchInfo.threadPayload->LocalIDZPresent) {
-            localIdRequired = true;
-        }
-        kernelData->m_PayloadSize = PerThreadDataHelper::getThreadPayloadSize(*kernelInfo.patchInfo.threadPayload, kernelData->m_SIMDSize, hwInfo.capabilityTable.grfSize);
+    if (kernelInfo.kernelDescriptor.kernelAttributes.flags.usesFlattenedLocalIds || (kernelInfo.kernelDescriptor.kernelAttributes.numLocalIdChannels > 0)) {
+        localIdRequired = true;
     }
+    kernelData->m_PayloadSize = PerThreadDataHelper::getThreadPayloadSize(kernelInfo.kernelDescriptor, hwInfo.capabilityTable.grfSize);
 
     kernelData->m_NeedLocalIDS = localIdRequired ? 1 : 0;
     kernelData->m_DisablePreemption = 0u;
 
     bool concurrentExecAllowed = true;
 
-    if (kernelInfo.patchInfo.pAllocateStatelessPrivateSurface) {
-        if (kernelInfo.patchInfo.pAllocateStatelessPrivateSurface->PerThreadPrivateMemorySize > 0) {
-            concurrentExecAllowed = false;
-        }
+    if (kernelInfo.kernelDescriptor.kernelAttributes.perHwThreadPrivateMemorySize > 0) {
+        concurrentExecAllowed = false;
     }
     kernelData->m_CanRunConcurently = concurrentExecAllowed ? 1 : 0;
 
@@ -2093,7 +2168,7 @@ void Kernel::ReflectionSurfaceHelper::setKernelAddressData(void *reflectionSurfa
     kernelAddressData->m_ConstantBufferOffset = constantBufferOffset;
     kernelAddressData->m_SSHTokensOffset = sshTokensOffset;
     kernelAddressData->m_BTSoffset = btOffset;
-    kernelAddressData->m_BTSize = static_cast<uint32_t>(kernelInfo.patchInfo.bindingTableState ? kernelInfo.patchInfo.bindingTableState->Count * hwHelper.getBindingTableStateSize() : 0);
+    kernelAddressData->m_BTSize = static_cast<uint32_t>(kernelInfo.kernelDescriptor.payloadMappings.bindingTable.numEntries * hwHelper.getBindingTableStateSize());
 }
 
 template <>
@@ -2186,7 +2261,7 @@ void Kernel::ReflectionSurfaceHelper::setParentImageParams(void *reflectionSurfa
 
                 pImageParameters->m_ChannelDataType = (uint32_t)image->getImageFormat().image_channel_data_type;
                 pImageParameters->m_ChannelOrder = (uint32_t)image->getImageFormat().image_channel_data_type;
-                pImageParameters->m_ObjectID = (uint32_t)parentKernelInfo.kernelArgInfo[i].offsetHeap;
+                pImageParameters->m_ObjectID = (uint32_t)parentKernelInfo.kernelDescriptor.payloadMappings.explicitArgs[i].as<ArgDescImage>().bindful;
                 pImageParameters++;
             }
         }
@@ -2206,7 +2281,7 @@ void Kernel::ReflectionSurfaceHelper::setParentSamplerParams(void *reflectionSur
                 pParentSamplerParams->m_AddressingMode = (uint32_t)sampler->addressingMode;
                 pParentSamplerParams->NormalizedCoords = (uint32_t)sampler->normalizedCoordinates;
 
-                pParentSamplerParams->m_ObjectID = OCLRT_ARG_OFFSET_TO_SAMPLER_OBJECT_ID((uint32_t)parentKernelInfo.kernelArgInfo[i].offsetHeap);
+                pParentSamplerParams->m_ObjectID = OCLRT_ARG_OFFSET_TO_SAMPLER_OBJECT_ID((uint32_t)parentKernelInfo.kernelDescriptor.payloadMappings.explicitArgs[i].as<ArgDescSampler>().bindful);
                 pParentSamplerParams++;
             }
         }
@@ -2225,62 +2300,54 @@ void Kernel::resetSharedObjectsPatchAddresses() {
 
 void Kernel::provideInitializationHints() {
 
-    const auto &patchInfo = kernelInfo.patchInfo;
     Context *context = program->getContextPtr();
     if (context == nullptr || !context->isProvidingPerformanceHints())
         return;
+
+    auto pClDevice = &getDevice();
     if (privateSurfaceSize) {
         context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, PRIVATE_MEMORY_USAGE_TOO_HIGH,
-                                        kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(), privateSurfaceSize);
+                                        kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(),
+                                        privateSurfaceSize);
     }
-    if (patchInfo.mediavfestate) {
-        auto scratchSize = patchInfo.mediavfestate->PerThreadScratchSpace;
-        scratchSize *= device.getSharedDeviceInfo().computeUnitsUsedForScratch * getKernelInfo().getMaxSimdSize();
-        if (scratchSize > 0) {
-            context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, REGISTER_PRESSURE_TOO_HIGH,
-                                            kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(), scratchSize);
-        }
+    auto scratchSize = kernelInfo.kernelDescriptor.kernelAttributes.perThreadScratchSize[0] *
+                       pClDevice->getSharedDeviceInfo().computeUnitsUsedForScratch * kernelInfo.getMaxSimdSize();
+    if (scratchSize > 0) {
+        context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, REGISTER_PRESSURE_TOO_HIGH,
+                                        kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(), scratchSize);
     }
 }
 
 void Kernel::patchDefaultDeviceQueue(DeviceQueue *devQueue) {
-
-    const auto &patchInfo = kernelInfo.patchInfo;
-    if (patchInfo.pAllocateStatelessDefaultDeviceQueueSurface) {
-        if (crossThreadData) {
-            auto patchLocation = ptrOffset(reinterpret_cast<uint32_t *>(getCrossThreadData()),
-                                           patchInfo.pAllocateStatelessDefaultDeviceQueueSurface->DataParamOffset);
-
-            patchWithRequiredSize(patchLocation, patchInfo.pAllocateStatelessDefaultDeviceQueueSurface->DataParamSize,
-                                  static_cast<uintptr_t>(devQueue->getQueueBuffer()->getGpuAddressToPatch()));
-        }
-        if (requiresSshForBuffers()) {
-            auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(getSurfaceStateHeap()),
-                                          patchInfo.pAllocateStatelessDefaultDeviceQueueSurface->SurfaceStateHeapOffset);
-            Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, devQueue->getQueueBuffer()->getUnderlyingBufferSize(),
-                                    (void *)devQueue->getQueueBuffer()->getGpuAddress(), 0, devQueue->getQueueBuffer(), 0, 0);
-        }
+    const auto &defaultQueueSurfaceAddress = kernelInfo.kernelDescriptor.payloadMappings.implicitArgs.deviceSideEnqueueDefaultQueueSurfaceAddress;
+    if (isValidOffset(defaultQueueSurfaceAddress.stateless) && crossThreadData) {
+        auto patchLocation = ptrOffset(reinterpret_cast<uint32_t *>(crossThreadData), defaultQueueSurfaceAddress.stateless);
+        patchWithRequiredSize(patchLocation, defaultQueueSurfaceAddress.pointerSize,
+                              static_cast<uintptr_t>(devQueue->getQueueBuffer()->getGpuAddressToPatch()));
+    }
+    if (isValidOffset(defaultQueueSurfaceAddress.bindful)) {
+        auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(getSurfaceStateHeap()), defaultQueueSurfaceAddress.bindful);
+        Buffer::setSurfaceState(&devQueue->getDevice(), surfaceState, false, false, devQueue->getQueueBuffer()->getUnderlyingBufferSize(),
+                                (void *)devQueue->getQueueBuffer()->getGpuAddress(), 0, devQueue->getQueueBuffer(), 0, 0,
+                                kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics, areMultipleSubDevicesInContext());
     }
 }
 
 void Kernel::patchEventPool(DeviceQueue *devQueue) {
+    const auto &eventPoolSurfaceAddress = kernelInfo.kernelDescriptor.payloadMappings.implicitArgs.deviceSideEnqueueEventPoolSurfaceAddress;
 
-    const auto &patchInfo = kernelInfo.patchInfo;
-    if (patchInfo.pAllocateStatelessEventPoolSurface) {
-        if (crossThreadData) {
-            auto patchLocation = ptrOffset(reinterpret_cast<uint32_t *>(getCrossThreadData()),
-                                           patchInfo.pAllocateStatelessEventPoolSurface->DataParamOffset);
+    if (isValidOffset(eventPoolSurfaceAddress.stateless) && crossThreadData) {
+        auto patchLocation = ptrOffset(reinterpret_cast<uint32_t *>(crossThreadData), eventPoolSurfaceAddress.stateless);
+        patchWithRequiredSize(patchLocation, eventPoolSurfaceAddress.pointerSize,
+                              static_cast<uintptr_t>(devQueue->getEventPoolBuffer()->getGpuAddressToPatch()));
+    }
 
-            patchWithRequiredSize(patchLocation, patchInfo.pAllocateStatelessEventPoolSurface->DataParamSize,
-                                  static_cast<uintptr_t>(devQueue->getEventPoolBuffer()->getGpuAddressToPatch()));
-        }
-
-        if (requiresSshForBuffers()) {
-            auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(getSurfaceStateHeap()),
-                                          patchInfo.pAllocateStatelessEventPoolSurface->SurfaceStateHeapOffset);
-            Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, devQueue->getEventPoolBuffer()->getUnderlyingBufferSize(),
-                                    (void *)devQueue->getEventPoolBuffer()->getGpuAddress(), 0, devQueue->getEventPoolBuffer(), 0, 0);
-        }
+    if (isValidOffset(eventPoolSurfaceAddress.bindful)) {
+        auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(getSurfaceStateHeap()), eventPoolSurfaceAddress.bindful);
+        auto eventPoolBuffer = devQueue->getEventPoolBuffer();
+        Buffer::setSurfaceState(&devQueue->getDevice(), surfaceState, false, false, eventPoolBuffer->getUnderlyingBufferSize(),
+                                (void *)eventPoolBuffer->getGpuAddress(), 0, eventPoolBuffer, 0, 0,
+                                kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics, areMultipleSubDevicesInContext());
     }
 }
 
@@ -2298,38 +2365,39 @@ void Kernel::patchBlocksSimdSize() {
 }
 
 bool Kernel::usesSyncBuffer() {
-    return (kernelInfo.patchInfo.pAllocateSyncBuffer != nullptr);
+    return kernelInfo.kernelDescriptor.kernelAttributes.flags.usesSyncBuffer;
 }
 
-void Kernel::patchSyncBuffer(Device &device, GraphicsAllocation *gfxAllocation, size_t bufferOffset) {
-    auto &patchInfo = kernelInfo.patchInfo;
-    auto bufferPatchAddress = ptrOffset(getCrossThreadData(), patchInfo.pAllocateSyncBuffer->DataParamOffset);
-    patchWithRequiredSize(bufferPatchAddress, patchInfo.pAllocateSyncBuffer->DataParamSize,
+void Kernel::patchSyncBuffer(GraphicsAllocation *gfxAllocation, size_t bufferOffset) {
+    const auto &syncBuffer = kernelInfo.kernelDescriptor.payloadMappings.implicitArgs.syncBufferAddress;
+    auto bufferPatchAddress = ptrOffset(crossThreadData, syncBuffer.stateless);
+    patchWithRequiredSize(bufferPatchAddress, syncBuffer.pointerSize,
                           ptrOffset(gfxAllocation->getGpuAddressToPatch(), bufferOffset));
 
-    if (requiresSshForBuffers()) {
-        auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(getSurfaceStateHeap()),
-                                      patchInfo.pAllocateSyncBuffer->SurfaceStateHeapOffset);
+    if (isValidOffset(syncBuffer.bindful)) {
+        auto surfaceState = ptrOffset(reinterpret_cast<uintptr_t *>(getSurfaceStateHeap()), syncBuffer.bindful);
         auto addressToPatch = gfxAllocation->getUnderlyingBuffer();
         auto sizeToPatch = gfxAllocation->getUnderlyingBufferSize();
-        Buffer::setSurfaceState(&device, surfaceState, sizeToPatch, addressToPatch, 0, gfxAllocation, 0, 0);
+        Buffer::setSurfaceState(&clDevice.getDevice(), surfaceState, false, false, sizeToPatch, addressToPatch, 0, gfxAllocation, 0, 0,
+                                kernelInfo.kernelDescriptor.kernelAttributes.flags.useGlobalAtomics, areMultipleSubDevicesInContext());
     }
 }
 
 template void Kernel::patchReflectionSurface<false>(DeviceQueue *, PrintfHandler *);
 
 bool Kernel::isPatched() const {
-    return patchedArgumentsNum == kernelInfo.argumentsToPatchNum;
+    return patchedArgumentsNum == kernelInfo.kernelDescriptor.kernelAttributes.numArgsToPatch;
 }
 cl_int Kernel::checkCorrectImageAccessQualifier(cl_uint argIndex,
                                                 size_t argSize,
                                                 const void *argValue) const {
-    if (getKernelInfo().kernelArgInfo[argIndex].isImage) {
+    const auto &arg = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[argIndex];
+    if (arg.is<ArgDescriptor::ArgTImage>()) {
         cl_mem mem = *(static_cast<const cl_mem *>(argValue));
         MemObj *pMemObj = nullptr;
         WithCastToInternal(mem, &pMemObj);
         if (pMemObj) {
-            auto accessQualifier = getKernelInfo().kernelArgInfo[argIndex].metadata.accessQualifier;
+            auto accessQualifier = arg.getTraits().accessQualifier;
             cl_mem_flags flags = pMemObj->getFlags();
             if ((accessQualifier == KernelArgMetadata::AccessReadOnly && ((flags | CL_MEM_WRITE_ONLY) == flags)) ||
                 (accessQualifier == KernelArgMetadata::AccessWriteOnly && ((flags | CL_MEM_READ_ONLY) == flags))) {
@@ -2346,8 +2414,9 @@ void Kernel::resolveArgs() {
     if (!Kernel::isPatched() || !imageTransformer->hasRegisteredImages3d() || !canTransformImages())
         return;
     bool canTransformImageTo2dArray = true;
+    const auto &args = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs;
     for (uint32_t i = 0; i < patchedArgumentsNum; i++) {
-        if (kernelInfo.kernelArgInfo.at(i).isSampler) {
+        if (args[i].is<ArgDescriptor::ArgTSampler>()) {
             auto sampler = castToObject<Sampler>(kernelArguments.at(i).object);
             if (sampler->isTransformable()) {
                 canTransformImageTo2dArray = true;
@@ -2357,6 +2426,7 @@ void Kernel::resolveArgs() {
             }
         }
     }
+
     if (canTransformImageTo2dArray) {
         imageTransformer->transformImagesTo2dArray(kernelInfo, kernelArguments, getSurfaceStateHeap());
     } else if (imageTransformer->didTransform()) {
@@ -2365,30 +2435,106 @@ void Kernel::resolveArgs() {
 }
 
 bool Kernel::canTransformImages() const {
-    return device.getHardwareInfo().platform.eRenderCoreFamily >= IGFX_GEN9_CORE &&
-           device.getHardwareInfo().platform.eRenderCoreFamily <= IGFX_GEN11LP_CORE;
+    auto renderCoreFamily = clDevice.getHardwareInfo().platform.eRenderCoreFamily;
+    return renderCoreFamily >= IGFX_GEN9_CORE && renderCoreFamily <= IGFX_GEN11LP_CORE && !isBuiltIn;
 }
 
-void Kernel::fillWithBuffersForAuxTranslation(MemObjsForAuxTranslation &memObjsForAuxTranslation) {
-    memObjsForAuxTranslation.reserve(getKernelArgsNumber());
+void Kernel::fillWithKernelObjsForAuxTranslation(KernelObjsForAuxTranslation &kernelObjsForAuxTranslation) {
+    kernelObjsForAuxTranslation.reserve(getKernelArgsNumber());
     for (uint32_t i = 0; i < getKernelArgsNumber(); i++) {
-        if (BUFFER_OBJ == kernelArguments.at(i).type && !kernelInfo.kernelArgInfo.at(i).pureStatefulBufferAccess) {
+        const auto &arg = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[i];
+        if (BUFFER_OBJ == kernelArguments.at(i).type && !arg.as<ArgDescPointer>().isPureStateful()) {
             auto buffer = castToObject<Buffer>(getKernelArg(i));
             if (buffer && buffer->getMultiGraphicsAllocation().getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED) {
-                memObjsForAuxTranslation.insert(buffer);
-
+                kernelObjsForAuxTranslation.insert({KernelObjForAuxTranslation::Type::MEM_OBJ, buffer});
                 auto &context = this->program->getContext();
                 if (context.isProvidingPerformanceHints()) {
+                    const auto &argExtMeta = kernelInfo.kernelDescriptor.explicitArgsExtendedMetadata[i];
                     context.providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, KERNEL_ARGUMENT_AUX_TRANSLATION,
-                                                   kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(), i, kernelInfo.kernelArgInfo.at(i).metadataExtended->argName.c_str());
+                                                   kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(), i, argExtMeta.argName.c_str());
+                }
+            }
+        }
+        if (SVM_ALLOC_OBJ == getKernelArguments().at(i).type && !arg.as<ArgDescPointer>().isPureStateful()) {
+            auto svmAlloc = reinterpret_cast<GraphicsAllocation *>(const_cast<void *>(getKernelArg(i)));
+            if (svmAlloc && svmAlloc->getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED) {
+                kernelObjsForAuxTranslation.insert({KernelObjForAuxTranslation::Type::GFX_ALLOC, svmAlloc});
+                auto &context = this->program->getContext();
+                if (context.isProvidingPerformanceHints()) {
+                    const auto &argExtMeta = kernelInfo.kernelDescriptor.explicitArgsExtendedMetadata[i];
+                    context.providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, KERNEL_ARGUMENT_AUX_TRANSLATION,
+                                                   kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(), i, argExtMeta.argName.c_str());
+                }
+            }
+        }
+    }
+    auto &hwHelper = HwHelper::get(getDevice().getHardwareInfo().platform.eRenderCoreFamily);
+    if (hwHelper.allowStatelessCompression(getDevice().getHardwareInfo())) {
+        for (auto gfxAllocation : kernelUnifiedMemoryGfxAllocations) {
+            if ((gfxAllocation->getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED) ||
+                (gfxAllocation->getAllocationType() == GraphicsAllocation::AllocationType::SVM_GPU)) {
+                kernelObjsForAuxTranslation.insert({KernelObjForAuxTranslation::Type::GFX_ALLOC, gfxAllocation});
+                auto &context = this->program->getContext();
+                if (context.isProvidingPerformanceHints()) {
+                    context.providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, KERNEL_ALLOCATION_AUX_TRANSLATION,
+                                                   kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str(),
+                                                   reinterpret_cast<void *>(gfxAllocation->getGpuAddress()), gfxAllocation->getUnderlyingBufferSize());
+                }
+            }
+        }
+        if (getContext().getSVMAllocsManager()) {
+            for (auto &allocation : getContext().getSVMAllocsManager()->getSVMAllocs()->allocations) {
+                auto gfxAllocation = allocation.second.gpuAllocations.getDefaultGraphicsAllocation();
+                if (gfxAllocation->getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED) {
+                    kernelObjsForAuxTranslation.insert({KernelObjForAuxTranslation::Type::GFX_ALLOC, gfxAllocation});
+                }
+                if (gfxAllocation->getAllocationType() == GraphicsAllocation::AllocationType::SVM_GPU) {
+                    kernelObjsForAuxTranslation.insert({KernelObjForAuxTranslation::Type::GFX_ALLOC, gfxAllocation});
                 }
             }
         }
     }
 }
 
+bool Kernel::hasDirectStatelessAccessToHostMemory() const {
+    for (uint32_t i = 0; i < getKernelArgsNumber(); i++) {
+        const auto &arg = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[i];
+        if (BUFFER_OBJ == kernelArguments.at(i).type && !arg.as<ArgDescPointer>().isPureStateful()) {
+            auto buffer = castToObject<Buffer>(getKernelArg(i));
+            if (buffer && buffer->getMultiGraphicsAllocation().getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY) {
+                return true;
+            }
+        }
+        if (SVM_ALLOC_OBJ == kernelArguments.at(i).type && !arg.as<ArgDescPointer>().isPureStateful()) {
+            auto svmAlloc = reinterpret_cast<const GraphicsAllocation *>(getKernelArg(i));
+            if (svmAlloc && svmAlloc->getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool Kernel::hasIndirectStatelessAccessToHostMemory() const {
+    if (!kernelInfo.hasIndirectStatelessAccess) {
+        return false;
+    }
+
+    for (auto gfxAllocation : kernelUnifiedMemoryGfxAllocations) {
+        if (gfxAllocation->getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY) {
+            return true;
+        }
+    }
+
+    if (unifiedMemoryControls.indirectHostAllocationsAllowed) {
+        return getContext().getSVMAllocsManager()->hasHostAllocations();
+    }
+
+    return false;
+}
+
 void Kernel::getAllocationsForCacheFlush(CacheFlushAllocationsVec &out) const {
-    if (false == HwHelper::cacheFlushAfterWalkerSupported(device.getHardwareInfo())) {
+    if (false == HwHelper::cacheFlushAfterWalkerSupported(getHardwareInfo())) {
         return;
     }
     for (GraphicsAllocation *alloc : this->kernelArgRequiresCacheFlush) {
@@ -2399,7 +2545,8 @@ void Kernel::getAllocationsForCacheFlush(CacheFlushAllocationsVec &out) const {
         out.push_back(alloc);
     }
 
-    auto global = getProgram()->getGlobalSurface(device.getRootDeviceIndex());
+    auto rootDeviceIndex = getDevice().getRootDeviceIndex();
+    auto global = getProgram()->getGlobalSurface(rootDeviceIndex);
     if (global != nullptr) {
         out.push_back(global);
     }
@@ -2448,42 +2595,30 @@ uint64_t Kernel::getKernelStartOffset(
     if (kernelInfo.getGraphicsAllocation()) {
         kernelStartOffset = kernelInfo.getGraphicsAllocation()->getGpuAddressToPatch();
         if (localIdsGenerationByRuntime == false && kernelUsesLocalIds == true) {
-            kernelStartOffset += kernelInfo.patchInfo.threadPayload->OffsetToSkipPerThreadDataLoad;
+            kernelStartOffset += kernelInfo.kernelDescriptor.entryPoints.skipPerThreadDataLoad;
         }
     }
 
     kernelStartOffset += getStartOffset();
 
-    auto &hardwareInfo = getDevice().getHardwareInfo();
+    auto &hardwareInfo = getHardwareInfo();
     auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
 
     if (isCssUsed && hwHelper.isOffsetToSkipSetFFIDGPWARequired(hardwareInfo)) {
-        kernelStartOffset += kernelInfo.patchInfo.threadPayload->OffsetToSkipSetFFIDGP;
+        kernelStartOffset += kernelInfo.kernelDescriptor.entryPoints.skipSetFFIDGP;
     }
 
     return kernelStartOffset;
 }
-
-void Kernel::patchBindlessSurfaceStateOffsets(const size_t sshOffset) {
-    const bool bindlessUsed = ApiSpecificConfig::getBindlessConfiguration();
-
-    if (bindlessUsed) {
-        auto &hardwareInfo = getDevice().getHardwareInfo();
-        auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
-
-        for (size_t i = 0; i < kernelInfo.kernelArgInfo.size(); i++) {
-            if ((kernelInfo.kernelArgInfo[i].isBuffer) ||
-                (kernelInfo.kernelArgInfo[i].isImage)) {
-
-                auto patchLocation = ptrOffset(getCrossThreadData(),
-                                               kernelInfo.kernelArgInfo[i].kernelArgPatchInfoVector[0].crossthreadOffset);
-
-                auto bindlessOffset = static_cast<uint32_t>(sshOffset) + kernelInfo.kernelArgInfo[i].offsetHeap;
-                auto patchValue = hwHelper.getBindlessSurfaceExtendedMessageDescriptorValue(bindlessOffset);
-                patchWithRequiredSize(patchLocation, sizeof(patchValue), patchValue);
-            }
-        }
-    }
+void *Kernel::patchBindlessSurfaceState(NEO::GraphicsAllocation *alloc, uint32_t bindless) {
+    auto &hwHelper = HwHelper::get(getDevice().getHardwareInfo().platform.eRenderCoreFamily);
+    auto surfaceStateSize = hwHelper.getRenderSurfaceStateSize();
+    NEO::BindlessHeapsHelper *bindlessHeapsHelper = getDevice().getDevice().getBindlessHeapsHelper();
+    auto ssInHeap = bindlessHeapsHelper->allocateSSInHeap(surfaceStateSize, alloc, NEO::BindlessHeapsHelper::GLOBAL_SSH);
+    auto patchLocation = ptrOffset(getCrossThreadData(), bindless);
+    auto patchValue = hwHelper.getBindlessSurfaceExtendedMessageDescriptorValue(static_cast<uint32_t>(ssInHeap.surfaceStateOffset));
+    patchWithRequiredSize(patchLocation, sizeof(patchValue), patchValue);
+    return ssInHeap.ssPtr;
 }
 
 void Kernel::setAdditionalKernelExecInfo(uint32_t additionalKernelExecInfo) {
@@ -2495,15 +2630,16 @@ uint32_t Kernel::getAdditionalKernelExecInfo() const {
 }
 
 bool Kernel::requiresWaDisableRccRhwoOptimization() const {
-    auto &hardwareInfo = getDevice().getHardwareInfo();
+    auto &hardwareInfo = getHardwareInfo();
     auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+    auto rootDeviceIndex = getDevice().getRootDeviceIndex();
 
     if (hwHelper.isWaDisableRccRhwoOptimizationRequired() && isUsingSharedObjArgs()) {
         for (auto &arg : getKernelArguments()) {
             auto clMemObj = static_cast<cl_mem>(arg.object);
             auto memObj = castToObject<MemObj>(clMemObj);
             if (memObj && memObj->peekSharingHandler()) {
-                auto allocation = memObj->getGraphicsAllocation(getDevice().getRootDeviceIndex());
+                auto allocation = memObj->getGraphicsAllocation(rootDeviceIndex);
                 for (uint32_t handleId = 0u; handleId < allocation->getNumGmms(); handleId++) {
                     if (allocation->getGmm(handleId)->gmmResourceInfo->getResourceFlags()->Info.MediaCompressed) {
                         return true;
@@ -2513,6 +2649,152 @@ bool Kernel::requiresWaDisableRccRhwoOptimization() const {
         }
     }
     return false;
+}
+
+const HardwareInfo &Kernel::getHardwareInfo() const {
+    return getDevice().getHardwareInfo();
+}
+
+void Kernel::setWorkDim(uint32_t workDim) {
+    patchNonPointer(getCrossThreadDataRef(), getDescriptor().payloadMappings.dispatchTraits.workDim, workDim);
+}
+
+void Kernel::setGlobalWorkOffsetValues(uint32_t globalWorkOffsetX, uint32_t globalWorkOffsetY, uint32_t globalWorkOffsetZ) {
+    patchVecNonPointer(getCrossThreadDataRef(),
+                       getDescriptor().payloadMappings.dispatchTraits.globalWorkOffset,
+                       {globalWorkOffsetX, globalWorkOffsetY, globalWorkOffsetZ});
+}
+
+void Kernel::setGlobalWorkSizeValues(uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ) {
+    patchVecNonPointer(getCrossThreadDataRef(),
+                       getDescriptor().payloadMappings.dispatchTraits.globalWorkSize,
+                       {globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ});
+}
+
+void Kernel::setLocalWorkSizeValues(uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ) {
+    patchVecNonPointer(getCrossThreadDataRef(),
+                       getDescriptor().payloadMappings.dispatchTraits.localWorkSize,
+                       {localWorkSizeX, localWorkSizeY, localWorkSizeZ});
+}
+
+void Kernel::setLocalWorkSize2Values(uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ) {
+    patchVecNonPointer(getCrossThreadDataRef(),
+                       getDescriptor().payloadMappings.dispatchTraits.localWorkSize2,
+                       {localWorkSizeX, localWorkSizeY, localWorkSizeZ});
+}
+
+void Kernel::setEnqueuedLocalWorkSizeValues(uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ) {
+    patchVecNonPointer(getCrossThreadDataRef(),
+                       getDescriptor().payloadMappings.dispatchTraits.enqueuedLocalWorkSize,
+                       {localWorkSizeX, localWorkSizeY, localWorkSizeZ});
+}
+
+void Kernel::setNumWorkGroupsValues(uint32_t numWorkGroupsX, uint32_t numWorkGroupsY, uint32_t numWorkGroupsZ) {
+    patchVecNonPointer(getCrossThreadDataRef(),
+                       getDescriptor().payloadMappings.dispatchTraits.numWorkGroups,
+                       {numWorkGroupsX, numWorkGroupsY, numWorkGroupsZ});
+}
+
+bool Kernel::isLocalWorkSize2Patchable() {
+    const auto &localWorkSize2 = getDescriptor().payloadMappings.dispatchTraits.localWorkSize2;
+    return isValidOffset(localWorkSize2[0]) && isValidOffset(localWorkSize2[1]) && isValidOffset(localWorkSize2[2]);
+}
+
+uint32_t Kernel::getMaxKernelWorkGroupSize() const {
+    return maxKernelWorkGroupSize;
+}
+
+uint32_t Kernel::getSlmTotalSize() const {
+    return slmTotalSize;
+}
+
+bool Kernel::areMultipleSubDevicesInContext() const {
+    auto context = program->getContextPtr();
+    return context ? context->containsMultipleSubDevices(clDevice.getRootDeviceIndex()) : false;
+}
+
+void Kernel::reconfigureKernel() {
+    auto &kernelDescriptor = kernelInfo.kernelDescriptor;
+    if (kernelDescriptor.kernelAttributes.numGrfRequired == GrfConfig::LargeGrfNumber) {
+        maxKernelWorkGroupSize >>= 1;
+    }
+    this->containsStatelessWrites = kernelDescriptor.kernelAttributes.flags.usesStatelessWrites;
+    this->specialPipelineSelectMode = kernelDescriptor.extendedInfo.get() ? kernelDescriptor.extendedInfo->specialPipelineSelectModeRequired() : false;
+}
+bool Kernel::requiresCacheFlushCommand(const CommandQueue &commandQueue) const {
+    if (false == HwHelper::cacheFlushAfterWalkerSupported(commandQueue.getDevice().getHardwareInfo())) {
+        return false;
+    }
+
+    if (DebugManager.flags.EnableCacheFlushAfterWalkerForAllQueues.get() != -1) {
+        return !!DebugManager.flags.EnableCacheFlushAfterWalkerForAllQueues.get();
+    }
+
+    bool cmdQueueRequiresCacheFlush = commandQueue.getRequiresCacheFlushAfterWalker();
+    if (false == cmdQueueRequiresCacheFlush) {
+        return false;
+    }
+    if (commandQueue.getGpgpuCommandStreamReceiver().isMultiOsContextCapable()) {
+        return false;
+    }
+    bool isMultiDevice = commandQueue.getContext().containsMultipleSubDevices(commandQueue.getDevice().getRootDeviceIndex());
+    if (false == isMultiDevice) {
+        return false;
+    }
+    bool isDefaultContext = (commandQueue.getContext().peekContextType() == ContextType::CONTEXT_TYPE_DEFAULT);
+    if (true == isDefaultContext) {
+        return false;
+    }
+
+    if (getProgram()->getGlobalSurface(commandQueue.getDevice().getRootDeviceIndex()) != nullptr) {
+        return true;
+    }
+    if (svmAllocationsRequireCacheFlush) {
+        return true;
+    }
+    size_t args = kernelArgRequiresCacheFlush.size();
+    for (size_t i = 0; i < args; i++) {
+        if (kernelArgRequiresCacheFlush[i] != nullptr) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Kernel::requiresLimitedWorkgroupSize() const {
+    if (!this->isBuiltIn) {
+        return false;
+    }
+    if (this->auxTranslationDirection != AuxTranslationDirection::None) {
+        return false;
+    }
+
+    //if source is buffer in local memory, no need for limited workgroup
+    if (this->kernelInfo.getArgDescriptorAt(0).is<ArgDescriptor::ArgTPointer>()) {
+        if (this->getKernelArgInfo(0).object) {
+            auto rootDeviceIndex = getDevice().getRootDeviceIndex();
+            auto buffer = castToObject<Buffer>(this->getKernelArgInfo(0u).object);
+            if (buffer && buffer->getGraphicsAllocation(rootDeviceIndex)->getMemoryPool() == MemoryPool::LocalMemory) {
+                return false;
+            }
+        }
+    }
+
+    //if we are reading from image no need for limited workgroup
+    if (this->kernelInfo.getArgDescriptorAt(0).is<ArgDescriptor::ArgTImage>()) {
+        return false;
+    }
+
+    return true;
+}
+
+void Kernel::updateAuxTranslationRequired() {
+    auto &hwHelper = HwHelper::get(getDevice().getHardwareInfo().platform.eRenderCoreFamily);
+    if (hwHelper.allowStatelessCompression(getDevice().getHardwareInfo())) {
+        if (hasDirectStatelessAccessToHostMemory() || hasIndirectStatelessAccessToHostMemory()) {
+            setAuxTranslationRequired(true);
+        }
+    }
 }
 
 } // namespace NEO

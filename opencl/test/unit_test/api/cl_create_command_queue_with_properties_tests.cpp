@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,13 +8,13 @@
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/os_interface/os_context.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
-#include "shared/test/unit_test/helpers/variable_backup.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/helpers/variable_backup.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/device_queue/device_queue.h"
 #include "opencl/test/unit_test/fixtures/memory_management_fixture.h"
-#include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
@@ -482,6 +482,74 @@ TEST_F(clCreateCommandQueueWithPropertiesApi, GivenDeviceQueueCreatedWithVarious
     }
 }
 
+TEST_F(clCreateCommandQueueWithPropertiesApi, givenQueueFamilySelectedAndNotIndexWhenCreatingQueueThenFail) {
+    cl_queue_properties queueProperties[] = {
+        CL_QUEUE_FAMILY_INTEL,
+        0,
+        0,
+    };
+
+    auto queue = clCreateCommandQueueWithProperties(pContext, testedClDevice, queueProperties, &retVal);
+    EXPECT_EQ(nullptr, queue);
+    EXPECT_EQ(CL_INVALID_QUEUE_PROPERTIES, retVal);
+}
+
+TEST_F(clCreateCommandQueueWithPropertiesApi, givenQueueIndexSelectedAndNotFamilyWhenCreatingQueueThenFail) {
+    cl_queue_properties queueProperties[] = {
+        CL_QUEUE_INDEX_INTEL,
+        0,
+        0,
+    };
+
+    auto queue = clCreateCommandQueueWithProperties(pContext, testedClDevice, queueProperties, &retVal);
+    EXPECT_EQ(nullptr, queue);
+    EXPECT_EQ(CL_INVALID_QUEUE_PROPERTIES, retVal);
+}
+
+TEST_F(clCreateCommandQueueWithPropertiesApi, givenValidFamilyAndIndexSelectedWhenCreatingQueueThenReturnSuccess) {
+    cl_queue_properties queueProperties[] = {
+        CL_QUEUE_FAMILY_INTEL,
+        0,
+        CL_QUEUE_INDEX_INTEL,
+        0,
+        0,
+    };
+
+    auto queue = clCreateCommandQueueWithProperties(pContext, testedClDevice, queueProperties, &retVal);
+    EXPECT_NE(nullptr, queue);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(CL_SUCCESS, clReleaseCommandQueue(queue));
+}
+
+TEST_F(clCreateCommandQueueWithPropertiesApi, givenInvalidQueueFamilySelectedWhenCreatingQueueThenFail) {
+    const auto &families = castToObject<ClDevice>(testedClDevice)->getDevice().getEngineGroups();
+    cl_queue_properties queueProperties[] = {
+        CL_QUEUE_FAMILY_INTEL,
+        families.size(),
+        CL_QUEUE_INDEX_INTEL,
+        0,
+        0,
+    };
+
+    auto queue = clCreateCommandQueueWithProperties(pContext, testedClDevice, queueProperties, &retVal);
+    EXPECT_EQ(nullptr, queue);
+    EXPECT_EQ(CL_INVALID_QUEUE_PROPERTIES, retVal);
+}
+
+TEST_F(clCreateCommandQueueWithPropertiesApi, givenInvalidQueueIndexSelectedWhenCreatingQueueThenFail) {
+    cl_queue_properties queueProperties[] = {
+        CL_QUEUE_FAMILY_INTEL,
+        0,
+        CL_QUEUE_INDEX_INTEL,
+        50,
+        0,
+    };
+
+    auto queue = clCreateCommandQueueWithProperties(pContext, testedClDevice, queueProperties, &retVal);
+    EXPECT_EQ(nullptr, queue);
+    EXPECT_EQ(CL_INVALID_QUEUE_PROPERTIES, retVal);
+}
+
 using LowPriorityCommandQueueTest = ::testing::Test;
 HWTEST_F(LowPriorityCommandQueueTest, GivenDeviceWithSubdevicesWhenCreatingLowPriorityCommandQueueThenEngineFromFirstSubdeviceIsTaken) {
     DebugManagerStateRestore restorer;
@@ -494,7 +562,7 @@ HWTEST_F(LowPriorityCommandQueueTest, GivenDeviceWithSubdevicesWhenCreatingLowPr
 
     auto commandQueueObj = castToObject<CommandQueue>(cmdQ);
     auto subDevice = context.getDevice(0)->getDeviceById(0);
-    auto engine = subDevice->getEngine(getChosenEngineType(subDevice->getHardwareInfo()), true, false);
+    auto &engine = subDevice->getEngine(getChosenEngineType(subDevice->getHardwareInfo()), EngineUsage::LowPriority);
 
     EXPECT_EQ(engine.commandStreamReceiver, &commandQueueObj->getGpgpuCommandStreamReceiver());
     EXPECT_EQ(engine.osContext, &commandQueueObj->getGpgpuCommandStreamReceiver().getOsContext());

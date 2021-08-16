@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -36,13 +36,13 @@ class CommandQueueHw : public CommandQueue {
     CommandQueueHw(Context *context,
                    ClDevice *device,
                    const cl_queue_properties *properties,
-                   bool internalUsage) : BaseClass(context, device, properties) {
+                   bool internalUsage) : BaseClass(context, device, properties, internalUsage) {
 
         auto clPriority = getCmdQueueProperties<cl_queue_priority_khr>(properties, CL_QUEUE_PRIORITY_KHR);
 
         if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_LOW_KHR)) {
             priority = QueuePriority::LOW;
-            this->gpgpuEngine = &device->getDeviceById(0)->getEngine(getChosenEngineType(device->getHardwareInfo()), true, false);
+            this->gpgpuEngine = &device->getDeviceById(0)->getEngine(getChosenEngineType(device->getHardwareInfo()), EngineUsage::LowPriority);
         } else if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_MED_KHR)) {
             priority = QueuePriority::MEDIUM;
         } else if (clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_HIGH_KHR)) {
@@ -72,12 +72,28 @@ class CommandQueueHw : public CommandQueue {
         }
 
         if (device->getDevice().getDebugger() && !getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation()) {
-            getGpgpuCommandStreamReceiver().allocateDebugSurface(SipKernel::maxDbgSurfaceSize);
+            auto debugSurface = getGpgpuCommandStreamReceiver().allocateDebugSurface(SipKernel::maxDbgSurfaceSize);
+
+            auto &stateSaveAreaHeader = SipKernel::getSipKernel(device->getDevice()).getStateSaveAreaHeader();
+            if (stateSaveAreaHeader.size() > 0) {
+                auto &hwInfo = device->getDevice().getHardwareInfo();
+                auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+                NEO::MemoryTransferHelper::transferMemoryToAllocation(hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo, *debugSurface),
+                                                                      device->getDevice(), debugSurface, 0, stateSaveAreaHeader.data(),
+                                                                      stateSaveAreaHeader.size());
+            }
         }
 
         uint64_t requestedSliceCount = getCmdQueueProperties<cl_command_queue_properties>(properties, CL_QUEUE_SLICE_COUNT_INTEL);
         if (requestedSliceCount > 0) {
             sliceCount = requestedSliceCount;
+        }
+
+        gpgpuEngine->osContext->ensureContextInitialized();
+        gpgpuEngine->commandStreamReceiver->initDirectSubmission(device->getDevice(), *gpgpuEngine->osContext);
+        if (bcsEngine) {
+            bcsEngine->osContext->ensureContextInitialized();
+            bcsEngine->commandStreamReceiver->initDirectSubmission(device->getDevice(), *bcsEngine->osContext);
         }
     }
 
@@ -120,9 +136,9 @@ class CommandQueueHw : public CommandQueue {
 
     cl_int enqueueCopyImage(Image *srcImage,
                             Image *dstImage,
-                            const size_t srcOrigin[3],
-                            const size_t dstOrigin[3],
-                            const size_t region[3],
+                            const size_t *srcOrigin,
+                            const size_t *dstOrigin,
+                            const size_t *region,
                             cl_uint numEventsInWaitList,
                             const cl_event *eventWaitList,
                             cl_event *event) override;
@@ -144,7 +160,7 @@ class CommandQueueHw : public CommandQueue {
                             const cl_event *eventWaitList,
                             cl_event *event) override;
 
-    cl_int enqueueKernel(cl_kernel kernel,
+    cl_int enqueueKernel(Kernel *kernel,
                          cl_uint workDim,
                          const size_t *globalWorkOffset,
                          const size_t *globalWorkSize,
@@ -360,6 +376,7 @@ class CommandQueueHw : public CommandQueue {
                                       LinearStream &commandStream,
                                       size_t commandStreamStart,
                                       bool &blocking,
+                                      bool clearDependenciesForSubCapture,
                                       const MultiDispatchInfo &multiDispatchInfo,
                                       const EnqueueProperties &enqueueProperties,
                                       TimestampPacketDependencies &timestampPacketDependencies,
@@ -388,11 +405,20 @@ class CommandQueueHw : public CommandQueue {
                                                 TimestampPacketDependencies &timestampPacketDependencies,
                                                 EventsRequest &eventsRequest,
                                                 EventBuilder &eventBuilder,
-                                                uint32_t taskLevel);
+                                                uint32_t taskLevel,
+                                                CsrDependencies &csrDeps);
     void processDispatchForCacheFlush(Surface **surfaces,
                                       size_t numSurfaces,
                                       LinearStream *commandStream,
                                       CsrDependencies &csrDeps);
+    void processDispatchForMarker(CommandQueue &commandQueue,
+                                  LinearStream *commandStream,
+                                  EventsRequest &eventsRequest,
+                                  CsrDependencies &csrDeps);
+    void processDispatchForMarkerWithTimestampPacket(CommandQueue &commandQueue,
+                                                     LinearStream *commandStream,
+                                                     EventsRequest &eventsRequest,
+                                                     CsrDependencies &csrDeps);
     BlitProperties processDispatchForBlitEnqueue(const MultiDispatchInfo &multiDispatchInfo,
                                                  TimestampPacketDependencies &timestampPacketDependencies,
                                                  const EventsRequest &eventsRequest,
@@ -429,7 +455,7 @@ class CommandQueueHw : public CommandQueue {
     LinearStream *obtainCommandStream(const CsrDependencies &csrDependencies, bool blitEnqueue, bool blockedQueue,
                                       const MultiDispatchInfo &multiDispatchInfo, const EventsRequest &eventsRequest,
                                       std::unique_ptr<KernelOperation> &blockedCommandsData,
-                                      Surface **surfaces, size_t numSurfaces) {
+                                      Surface **surfaces, size_t numSurfaces, bool isMarkerWithProfiling) {
         LinearStream *commandStream = nullptr;
 
         bool profilingRequired = (this->isProfilingEnabled() && eventsRequest.outEvent);
@@ -446,7 +472,7 @@ class CommandQueueHw : public CommandQueue {
             blockedCommandsData = std::make_unique<KernelOperation>(commandStream, *gpgpuCsr.getInternalAllocationStorage());
         } else {
             commandStream = &getCommandStream<GfxFamily, commandType>(*this, csrDependencies, profilingRequired, perfCountersRequired,
-                                                                      blitEnqueue, multiDispatchInfo, surfaces, numSurfaces);
+                                                                      blitEnqueue, multiDispatchInfo, surfaces, numSurfaces, isMarkerWithProfiling, eventsRequest.numEventsInWaitList > 0);
         }
         return commandStream;
     }
@@ -472,14 +498,14 @@ class CommandQueueHw : public CommandQueue {
                                                    size_t hostSlicePitch);
     void processDeviceEnqueue(DeviceQueueHw<GfxFamily> *devQueueHw,
                               const MultiDispatchInfo &multiDispatchInfo,
-                              TagNode<HwTimeStamps> *hwTimeStamps,
+                              TagNodeBase *hwTimeStamps,
                               bool &blocking);
 
     template <uint32_t commandType>
     void processDispatchForKernels(const MultiDispatchInfo &multiDispatchInfo,
                                    std::unique_ptr<PrintfHandler> &printfHandler,
                                    Event *event,
-                                   TagNode<NEO::HwTimeStamps> *&hwTimeStamps,
+                                   TagNodeBase *&hwTimeStamps,
                                    bool blockQueue,
                                    DeviceQueueHw<GfxFamily> *devQueueHw,
                                    CsrDependencies &csrDeps,
@@ -488,5 +514,7 @@ class CommandQueueHw : public CommandQueue {
 
     bool isGpgpuSubmissionForBcsRequired(bool queueBlocked) const;
     void setupEvent(EventBuilder &eventBuilder, cl_event *outEvent, uint32_t cmdType);
+
+    bool isBlitAuxTranslationRequired(const MultiDispatchInfo &multiDispatchInfo);
 };
 } // namespace NEO

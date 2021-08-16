@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2020 Intel Corporation
+# Copyright (C) 2018-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -8,7 +8,6 @@ set(RUNTIME_SRCS_HELPERS_BASE
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
     ${CMAKE_CURRENT_SOURCE_DIR}/base_object.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/base_object.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/built_ins_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_blit_properties.h
     ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/cl_device_helpers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_device_helpers.h
@@ -16,8 +15,9 @@ set(RUNTIME_SRCS_HELPERS_BASE
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_hw_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_hw_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_hw_helper_base.inl
+    ${CMAKE_CURRENT_SOURCE_DIR}/cl_hw_helper_bdw_plus.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/convert_color.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/destructor_callback.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/destructor_callbacks.h
     ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_info.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_info.h
     ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_info_builder.h
@@ -33,6 +33,7 @@ set(RUNTIME_SRCS_HELPERS_BASE
     ${CMAKE_CURRENT_SOURCE_DIR}/hardware_context_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hardware_context_controller.h
     ${CMAKE_CURRENT_SOURCE_DIR}/helper_options.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/implicit_scaling_ocl.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/memory_properties_helpers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_properties_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_properties_helpers_base.inl
@@ -42,10 +43,8 @@ set(RUNTIME_SRCS_HELPERS_BASE
     ${CMAKE_CURRENT_SOURCE_DIR}/per_thread_data.h
     ${CMAKE_CURRENT_SOURCE_DIR}/properties_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/properties_helper.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/queue_helpers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/queue_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/sampler_helpers.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/string_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/surface_formats.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/surface_formats.h
     ${CMAKE_CURRENT_SOURCE_DIR}/task_information.cpp
@@ -54,6 +53,13 @@ set(RUNTIME_SRCS_HELPERS_BASE
     ${CMAKE_CURRENT_SOURCE_DIR}/validators.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/validators.h
 )
+
+if(SUPPORT_XEHP_PLUS)
+  list(APPEND RUNTIME_SRCS_HELPERS_BASE
+       ${CMAKE_CURRENT_SOURCE_DIR}/cl_hw_helper_xehp_plus.inl
+       ${CMAKE_CURRENT_SOURCE_DIR}/hardware_commands_helper_xehp_plus.inl
+  )
+endif()
 
 set(RUNTIME_SRCS_HELPERS_WINDOWS
     ${CMAKE_CURRENT_SOURCE_DIR}/windows/gmm_callbacks_tgllp_plus.inl

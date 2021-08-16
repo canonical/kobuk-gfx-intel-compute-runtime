@@ -1,11 +1,12 @@
 #
-# Copyright (C) 2019-2020 Intel Corporation
+# Copyright (C) 2019-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
 
+set(SHARED_SOURCE_PROJECTS_FOLDER "neo shared")
 if(NOT DEFINED NEO_SHARED_RELEASE_LIB_NAME)
-  MESSAGE(FATAL_ERROR "NEO Core library name undefined!")
+  MESSAGE(FATAL_ERROR "NEO Shared library name undefined!")
 endif()
 
 include(enable_gens.cmake)
@@ -25,8 +26,9 @@ function(generate_shared_lib LIB_NAME MOCKABLE)
   list(APPEND LIB_FLAGS_DEFINITIONS ${SUPPORTED_GEN_FLAGS_DEFINITONS})
 
   set_property(TARGET ${LIB_NAME} APPEND_STRING PROPERTY COMPILE_FLAGS ${ASAN_FLAGS} ${TSAN_FLAGS})
+  set_target_properties(${LIB_NAME} PROPERTIES FOLDER "${SHARED_SOURCE_PROJECTS_FOLDER}")
   target_compile_definitions(${LIB_NAME} PUBLIC PUBLIC GMM_LIB_DLL ${LIB_FLAGS_DEFINITIONS} DEFAULT_PLATFORM=${DEFAULT_SUPPORTED_PLATFORM} PRIVATE OGL=1)
-  target_compile_definitions(${LIB_NAME} PUBLIC ${NEO_CORE_COMPILE_DEFS})
+  target_compile_definitions(${LIB_NAME} PUBLIC ${NEO_CORE_COMPILE_DEFS} ${NEO__IGC_COMPILE_DEFINITIONS})
 
   target_include_directories(${LIB_NAME} PUBLIC
                              ${KMDAF_HEADERS_DIR}
@@ -37,11 +39,15 @@ function(generate_shared_lib LIB_NAME MOCKABLE)
                              ${NEO__IGC_INCLUDE_DIR}
                              ${KHRONOS_HEADERS_DIR}
                              ${SOURCE_LEVEL_DEBUGGER_HEADERS_DIR}
+                             ${CMAKE_CURRENT_SOURCE_DIR}/direct_submission/create_direct_submission_${DRIVER_MODEL}
   )
+
+  if(WIN32 OR NOT DISABLE_WDDM_LINUX)
+    target_include_directories(${LIB_NAME} PUBLIC ${WDK_INCLUDE_PATHS})
+  endif()
 
   if(WIN32)
     target_include_directories(${LIB_NAME} PUBLIC
-                               ${WDK_INCLUDE_PATHS}
                                ${CMAKE_CURRENT_SOURCE_DIR}/os_interface/windows
     )
   else()
@@ -68,9 +74,11 @@ set(CORE_SOURCES ${CORE_SRCS_GENX_ALL_BASE})
 
 add_subdirectories()
 
-if(WIN32)
+if(WIN32 OR NOT DISABLE_WDDM_LINUX)
   list(APPEND CORE_SOURCES ${CORE_SRCS_GENX_ALL_WINDOWS})
-else()
+endif()
+
+if(NOT WIN32)
   list(APPEND CORE_SOURCES ${CORE_SRCS_GENX_ALL_LINUX})
 endif()
 
@@ -83,6 +91,7 @@ endmacro()
 apply_macro_for_each_gen("SUPPORTED")
 
 append_sources_from_properties(CORE_SOURCES
+                               NEO_CORE_AIL
                                NEO_CORE_AUB
                                NEO_CORE_AUB_MEM_DUMP
                                NEO_CORE_BUILT_INS
@@ -114,18 +123,23 @@ append_sources_from_properties(CORE_SOURCES
                                NEO_CORE_SRCS_SOURCE_LEVEL_DEBUGGER
                                NEO_CORE_TBX
                                NEO_CORE_UTILITIES
+                               NEO_DEVICE_BINARY_FORMAT
                                NEO_UNIFIED_MEMORY
 )
 
 if(WIN32)
   append_sources_from_properties(CORE_SOURCES
                                  NEO_CORE_GMM_HELPER_WINDOWS
+                                 NEO_CORE_HELPERS_GMM_CALLBACKS_WINDOWS
                                  NEO_CORE_DIRECT_SUBMISSION_WINDOWS
                                  NEO_CORE_OS_INTERFACE_WINDOWS
+                                 NEO_CORE_OS_INTERFACE_WDDM
                                  NEO_CORE_PAGE_FAULT_MANAGER_WINDOWS
                                  NEO_CORE_SKU_INFO_WINDOWS
                                  NEO_CORE_SRCS_HELPERS_WINDOWS
                                  NEO_CORE_UTILITIES_WINDOWS
+                                 NEO_CORE_EXECUTION_ENVIRONMENT_WINDOWS
+                                 NEO_CORE_AIL_WINDOWS
   )
 else()
   append_sources_from_properties(CORE_SOURCES
@@ -133,7 +147,18 @@ else()
                                  NEO_CORE_OS_INTERFACE_LINUX
                                  NEO_CORE_PAGE_FAULT_MANAGER_LINUX
                                  NEO_CORE_UTILITIES_LINUX
+                                 NEO_CORE_EXECUTION_ENVIRONMENT_LINUX
+                                 NEO_CORE_AIL_LINUX
   )
+  if(NOT DISABLE_WDDM_LINUX)
+    append_sources_from_properties(CORE_SOURCES
+                                   NEO_CORE_HELPERS_GMM_CALLBACKS_WINDOWS
+                                   NEO_CORE_SRCS_HELPERS_WINDOWS
+                                   NEO_CORE_GMM_HELPER_WINDOWS
+                                   NEO_CORE_OS_INTERFACE_WDDM
+                                   NEO_CORE_SKU_INFO_WINDOWS
+    )
+  endif()
 endif()
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${BRANCH_TYPE}/core_sources.cmake)

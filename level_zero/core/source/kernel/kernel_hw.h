@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,6 +8,10 @@
 #pragma once
 
 #include "shared/source/command_container/command_encoder.h"
+#include "shared/source/gmm_helper/gmm.h"
+#include "shared/source/gmm_helper/gmm_helper.h"
+#include "shared/source/helpers/bindless_heaps_helper.h"
+#include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/string.h"
 
 #include "level_zero/core/source/kernel/kernel_imp.h"
@@ -25,36 +29,50 @@ struct KernelHw : public KernelImp {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
     void setBufferSurfaceState(uint32_t argIndex, void *address, NEO::GraphicsAllocation *alloc) override {
-        uint64_t baseAddress = castToUint64(address);
+        uint64_t baseAddress = alloc->getGpuAddressToPatch();
         auto sshAlignmentMask = NEO::EncodeSurfaceState<GfxFamily>::getSurfaceBaseAddressAlignmentMask();
 
         // Remove misalligned bytes, accounted for in in bufferOffset patch token
         baseAddress &= sshAlignmentMask;
-
+        auto misalignedSize = ptrDiff(alloc->getGpuAddressToPatch(), baseAddress);
         auto offset = ptrDiff(address, reinterpret_cast<void *>(baseAddress));
-        size_t sizeTillEndOfSurface = alloc->getUnderlyingBufferSize() - offset;
+        size_t bufferSizeForSsh = alloc->getUnderlyingBufferSize();
         auto argInfo = kernelImmData->getDescriptor().payloadMappings.explicitArgs[argIndex].as<NEO::ArgDescPointer>();
         bool offsetWasPatched = NEO::patchNonPointer(ArrayRef<uint8_t>(this->crossThreadData.get(), this->crossThreadDataSize),
                                                      argInfo.bufferOffset, static_cast<uint32_t>(offset));
         if (false == offsetWasPatched) {
             // fallback to handling offset in surface state
             baseAddress = reinterpret_cast<uintptr_t>(address);
+            bufferSizeForSsh -= offset;
             DEBUG_BREAK_IF(baseAddress != (baseAddress & sshAlignmentMask));
             offset = 0;
         }
-
-        auto surfaceStateAddress = ptrOffset(surfaceStateHeapData.get(), argInfo.bindful);
+        void *surfaceStateAddress = nullptr;
+        auto surfaceState = GfxFamily::cmdInitRenderSurfaceState;
+        if (NEO::isValidOffset(argInfo.bindless)) {
+            surfaceStateAddress = patchBindlessSurfaceState(alloc, argInfo.bindless);
+        } else {
+            surfaceStateAddress = ptrOffset(surfaceStateHeapData.get(), argInfo.bindful);
+            surfaceState = *reinterpret_cast<typename GfxFamily::RENDER_SURFACE_STATE *>(surfaceStateAddress);
+        }
         uint64_t bufferAddressForSsh = baseAddress;
         auto alignment = NEO::EncodeSurfaceState<GfxFamily>::getSurfaceBaseAddressAlignment();
-        size_t bufferSizeForSsh = ptrDiff(alloc->getGpuAddress(), bufferAddressForSsh);
-        bufferSizeForSsh += sizeTillEndOfSurface; // take address alignment offset into account
+        bufferSizeForSsh += misalignedSize;
         bufferSizeForSsh = alignUp(bufferSizeForSsh, alignment);
 
-        auto mocs = this->module->getDevice()->getMOCS(true, false);
+        bool l3Enabled = true;
+        auto allocData = this->module->getDevice()->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(reinterpret_cast<void *>(alloc->getGpuAddress()));
+        if (allocData && allocData->allocationFlagsProperty.flags.locallyUncachedResource) {
+            l3Enabled = false;
+        }
+        auto mocs = this->module->getDevice()->getMOCS(l3Enabled, false);
+
         NEO::Device *neoDevice = module->getDevice()->getNEODevice();
-        NEO::EncodeSurfaceState<GfxFamily>::encodeBuffer(surfaceStateAddress, bufferAddressForSsh, bufferSizeForSsh, mocs,
+        NEO::EncodeSurfaceState<GfxFamily>::encodeBuffer(&surfaceState, bufferAddressForSsh, bufferSizeForSsh, mocs,
                                                          false, false, false, neoDevice->getNumAvailableDevices(),
-                                                         alloc, neoDevice->getGmmHelper());
+                                                         alloc, neoDevice->getGmmHelper(),
+                                                         kernelImmData->getDescriptor().kernelAttributes.flags.useGlobalAtomics, 1u);
+        *reinterpret_cast<typename GfxFamily::RENDER_SURFACE_STATE *>(surfaceStateAddress) = surfaceState;
     }
 
     std::unique_ptr<Kernel> clone() const override {

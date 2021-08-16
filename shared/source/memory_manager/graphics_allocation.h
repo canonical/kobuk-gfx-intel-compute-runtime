@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,13 +10,12 @@
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/ptr_math.h"
+#include "shared/source/memory_manager/definitions/engine_limits.h"
+#include "shared/source/memory_manager/definitions/storage_info.h"
 #include "shared/source/memory_manager/host_ptr_defines.h"
 #include "shared/source/memory_manager/memory_pool.h"
 #include "shared/source/utilities/idlist.h"
 #include "shared/source/utilities/stackvec.h"
-
-#include "engine_limits.h"
-#include "storage_info.h"
 
 #include <array>
 #include <atomic>
@@ -69,6 +68,7 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
         INTERNAL_HEAP,
         INTERNAL_HOST_MEMORY,
         KERNEL_ISA,
+        KERNEL_ISA_INTERNAL,
         LINEAR_STREAM,
         MAP_ALLOCATION,
         MCS,
@@ -95,7 +95,10 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
         DEBUG_CONTEXT_SAVE_AREA,
         DEBUG_SBA_TRACKING_BUFFER,
         DEBUG_MODULE_AREA,
-        UNIFIED_SHARED_MEMORY
+        UNIFIED_SHARED_MEMORY,
+        WORK_PARTITION_SURFACE,
+        GPU_TIMESTAMP_DEVICE_BUFFER,
+        COUNT
     };
 
     ~GraphicsAllocation() override;
@@ -161,6 +164,9 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     bool peekEvictable() const { return allocationInfo.flags.evictable; }
     bool isFlushL3Required() const { return allocationInfo.flags.flushL3Required; }
     void setFlushL3Required(bool flushL3Required) { allocationInfo.flags.flushL3Required = flushL3Required; }
+
+    bool isUncacheable() const { return allocationInfo.flags.uncacheable; }
+    void setUncacheable(bool uncacheable) { allocationInfo.flags.uncacheable = uncacheable; }
     bool is32BitAllocation() const { return allocationInfo.flags.is32BitAllocation; }
     void set32BitAllocation(bool is32BitAllocation) { allocationInfo.flags.is32BitAllocation = is32BitAllocation; }
 
@@ -180,6 +186,7 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     void decReuseCount() { sharingInfo.reuseCount--; }
     uint32_t peekReuseCount() const { return sharingInfo.reuseCount; }
     osHandle peekSharedHandle() const { return sharingInfo.sharedHandle; }
+    void setSharedHandle(osHandle handle) { sharingInfo.sharedHandle = handle; }
 
     void setAllocationType(AllocationType allocationType);
     AllocationType getAllocationType() const { return allocationType; }
@@ -219,8 +226,24 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
                allocationType == AllocationType::PRINTF_SURFACE ||
                allocationType == AllocationType::TIMESTAMP_PACKET_TAG_BUFFER ||
                allocationType == AllocationType::RING_BUFFER ||
-               allocationType == AllocationType::SEMAPHORE_BUFFER;
+               allocationType == AllocationType::SEMAPHORE_BUFFER ||
+               allocationType == AllocationType::DEBUG_CONTEXT_SAVE_AREA ||
+               allocationType == AllocationType::DEBUG_MODULE_AREA;
     }
+    static bool isLockable(AllocationType allocationType) {
+        return isCpuAccessRequired(allocationType) ||
+               isIsaAllocationType(allocationType) ||
+               allocationType == AllocationType::BUFFER_HOST_MEMORY ||
+               allocationType == AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER ||
+               allocationType == AllocationType::SHARED_RESOURCE_COPY;
+    }
+
+    static bool isIsaAllocationType(GraphicsAllocation::AllocationType type) {
+        return type == GraphicsAllocation::AllocationType::KERNEL_ISA ||
+               type == GraphicsAllocation::AllocationType::KERNEL_ISA_INTERNAL ||
+               type == AllocationType::DEBUG_MODULE_AREA;
+    }
+
     void *getReservedAddressPtr() const {
         return this->reservedAddressRangeInfo.addressPtr;
     }
@@ -252,6 +275,7 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     uint32_t getUsedPageSize() const;
 
     bool isAllocatedInLocalMemoryPool() const { return (this->memoryPool == MemoryPool::LocalMemory); }
+    bool isAllocationLockable() const;
 
     const AubInfo &getAubInfo() const { return aubInfo; }
 
@@ -281,8 +305,9 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
                 uint32_t coherent : 1;
                 uint32_t evictable : 1;
                 uint32_t flushL3Required : 1;
+                uint32_t uncacheable : 1;
                 uint32_t is32BitAllocation : 1;
-                uint32_t reserved : 28;
+                uint32_t reserved : 27;
             } flags;
             uint32_t allFlags = 0u;
         };

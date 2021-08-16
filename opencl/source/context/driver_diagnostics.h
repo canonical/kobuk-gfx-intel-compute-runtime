@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -48,6 +48,7 @@ enum PerformanceHints {
     PRIVATE_MEMORY_USAGE_TOO_HIGH,
     KERNEL_REQUIRES_COHERENCY,
     KERNEL_ARGUMENT_AUX_TRANSLATION,
+    KERNEL_ALLOCATION_AUX_TRANSLATION,
     BUFFER_IS_COMPRESSED,
     BUFFER_IS_NOT_COMPRESSED,
     IMAGE_IS_COMPRESSED,

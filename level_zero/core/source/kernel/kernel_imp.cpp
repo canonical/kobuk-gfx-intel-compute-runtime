@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,19 +9,26 @@
 
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/blit_commands_helper.h"
+#include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/kernel_helpers.h"
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/helpers/surface_format_info.h"
+#include "shared/source/kernel/kernel_arg_descriptor.h"
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/source/memory_manager/memory_manager.h"
+#include "shared/source/memory_manager/memory_operations_handler.h"
+#include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/utilities/arrayref.h"
 
 #include "opencl/source/command_queue/gpgpu_walker.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/program/kernel_info.h"
 
+#include "level_zero/core/source/debugger/debugger_l0.h"
 #include "level_zero/core/source/device/device.h"
+#include "level_zero/core/source/device/device_imp.h"
+#include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/source/image/image.h"
 #include "level_zero/core/source/image/image_format_desc_helper.h"
 #include "level_zero/core/source/module/module.h"
@@ -70,17 +77,13 @@ KernelImmutableData::~KernelImmutableData() {
         isaGraphicsAllocation.release();
     }
     crossThreadDataTemplate.reset();
-    if (nullptr != privateMemoryGraphicsAllocation) {
-        this->getDevice()->getNEODevice()->getMemoryManager()->freeGraphicsMemory(&*privateMemoryGraphicsAllocation);
-        privateMemoryGraphicsAllocation.release();
-    }
     surfaceStateHeapTemplate.reset();
     dynamicStateHeapTemplate.reset();
 }
 
 inline void patchWithImplicitSurface(ArrayRef<uint8_t> crossThreadData, ArrayRef<uint8_t> surfaceStateHeap,
                                      uintptr_t ptrToPatchInCrossThreadData, NEO::GraphicsAllocation &allocation,
-                                     const NEO::ArgDescPointer &ptr, const NEO::Device &device) {
+                                     const NEO::ArgDescPointer &ptr, const NEO::Device &device, bool useGlobalAtomics) {
     if (false == crossThreadData.empty()) {
         NEO::patchPointer(crossThreadData, ptr, ptrToPatchInCrossThreadData);
     }
@@ -89,34 +92,54 @@ inline void patchWithImplicitSurface(ArrayRef<uint8_t> crossThreadData, ArrayRef
         auto surfaceState = surfaceStateHeap.begin() + ptr.bindful;
         void *addressToPatch = reinterpret_cast<void *>(allocation.getUnderlyingBuffer());
         size_t sizeToPatch = allocation.getUnderlyingBufferSize();
-        NEO::Buffer::setSurfaceState(&device, surfaceState, sizeToPatch, addressToPatch, 0,
-                                     &allocation, 0, 0);
+        NEO::Buffer::setSurfaceState(&device, surfaceState, false, false, sizeToPatch, addressToPatch, 0,
+                                     &allocation, 0, 0, useGlobalAtomics, device.getNumAvailableDevices() > 1);
     }
 }
 
-void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, NEO::MemoryManager &memoryManager,
-                                     const NEO::Device *device, uint32_t computeUnitsUsedForSratch,
+void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, Device *device,
+                                     uint32_t computeUnitsUsedForSratch,
                                      NEO::GraphicsAllocation *globalConstBuffer,
-                                     NEO::GraphicsAllocation *globalVarBuffer) {
+                                     NEO::GraphicsAllocation *globalVarBuffer, bool internalKernel) {
+
     UNRECOVERABLE_IF(kernelInfo == nullptr);
+    this->kernelInfo = kernelInfo;
     this->kernelDescriptor = &kernelInfo->kernelDescriptor;
 
-    auto kernelIsaSize = kernelInfo->heapInfo.KernelHeapSize;
+    auto neoDevice = device->getNEODevice();
+    auto memoryManager = device->getNEODevice()->getMemoryManager();
 
-    auto allocation = memoryManager.allocateGraphicsMemoryWithProperties(
-        {device->getRootDeviceIndex(), kernelIsaSize, NEO::GraphicsAllocation::AllocationType::KERNEL_ISA, device->getDeviceBitfield()});
+    auto kernelIsaSize = kernelInfo->heapInfo.KernelHeapSize;
+    const auto allocType = internalKernel ? NEO::GraphicsAllocation::AllocationType::KERNEL_ISA_INTERNAL : NEO::GraphicsAllocation::AllocationType::KERNEL_ISA;
+
+    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(
+        {neoDevice->getRootDeviceIndex(), kernelIsaSize, allocType, neoDevice->getDeviceBitfield()});
     UNRECOVERABLE_IF(allocation == nullptr);
 
-    auto &hwInfo = device->getHardwareInfo();
-    auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    isaGraphicsAllocation.reset(allocation);
 
-    if (kernelInfo->heapInfo.pKernelHeap != nullptr) {
-        NEO::MemoryTransferHelper::transferMemoryToAllocation(hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo, *allocation),
-                                                              *device, allocation, 0, kernelInfo->heapInfo.pKernelHeap,
-                                                              static_cast<size_t>(kernelIsaSize));
+    if (neoDevice->getDebugger() && kernelInfo->kernelDescriptor.external.debugData.get()) {
+        createRelocatedDebugData(globalConstBuffer, globalVarBuffer);
+        if (device->getL0Debugger()) {
+            device->getL0Debugger()->registerElf(kernelInfo->kernelDescriptor.external.debugData.get(), allocation);
+        }
     }
 
-    isaGraphicsAllocation.reset(allocation);
+    auto &hwInfo = neoDevice->getHardwareInfo();
+    auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+
+    if (device->getL0Debugger()) {
+        NEO::MemoryOperationsHandler *memoryOperationsIface = neoDevice->getRootDeviceEnvironment().memoryOperationsInterface.get();
+        if (memoryOperationsIface) {
+            memoryOperationsIface->makeResident(neoDevice, ArrayRef<NEO::GraphicsAllocation *>(&allocation, 1));
+        }
+    }
+
+    if (kernelInfo->heapInfo.pKernelHeap != nullptr && internalKernel == false) {
+        NEO::MemoryTransferHelper::transferMemoryToAllocation(hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo, *allocation),
+                                                              *neoDevice, allocation, 0, kernelInfo->heapInfo.pKernelHeap,
+                                                              static_cast<size_t>(kernelIsaSize));
+    }
 
     this->crossThreadDataSize = this->kernelDescriptor->kernelAttributes.crossThreadDataSize;
 
@@ -154,28 +177,16 @@ void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, NEO::MemoryMan
     }
 
     ArrayRef<uint8_t> surfaceStateHeapArrayRef = ArrayRef<uint8_t>(surfaceStateHeapTemplate.get(), getSurfaceStateHeapSize());
-    auto &kernelAttributes = kernelDescriptor->kernelAttributes;
-
-    if (kernelAttributes.perHwThreadPrivateMemorySize != 0) {
-        auto privateSurfaceSize = NEO::KernelHelper::getPrivateSurfaceSize(kernelAttributes.perHwThreadPrivateMemorySize, computeUnitsUsedForSratch);
-
-        UNRECOVERABLE_IF(privateSurfaceSize == 0);
-        this->privateMemoryGraphicsAllocation.reset(memoryManager.allocateGraphicsMemoryWithProperties(
-            {device->getRootDeviceIndex(), privateSurfaceSize, NEO::GraphicsAllocation::AllocationType::PRIVATE_SURFACE, device->getDeviceBitfield()}));
-
-        UNRECOVERABLE_IF(this->privateMemoryGraphicsAllocation == nullptr);
-        patchWithImplicitSurface(crossThredDataArrayRef, surfaceStateHeapArrayRef,
-                                 static_cast<uintptr_t>(privateMemoryGraphicsAllocation->getGpuAddressToPatch()),
-                                 *privateMemoryGraphicsAllocation, kernelDescriptor->payloadMappings.implicitArgs.privateMemoryAddress, *device);
-        this->residencyContainer.push_back(this->privateMemoryGraphicsAllocation.get());
-    }
 
     if (NEO::isValidOffset(kernelDescriptor->payloadMappings.implicitArgs.globalConstantsSurfaceAddress.stateless)) {
         UNRECOVERABLE_IF(nullptr == globalConstBuffer);
 
         patchWithImplicitSurface(crossThredDataArrayRef, surfaceStateHeapArrayRef,
                                  static_cast<uintptr_t>(globalConstBuffer->getGpuAddressToPatch()),
-                                 *globalConstBuffer, kernelDescriptor->payloadMappings.implicitArgs.globalConstantsSurfaceAddress, *device);
+                                 *globalConstBuffer, kernelDescriptor->payloadMappings.implicitArgs.globalConstantsSurfaceAddress,
+                                 *neoDevice, kernelDescriptor->kernelAttributes.flags.useGlobalAtomics);
+        this->residencyContainer.push_back(globalConstBuffer);
+    } else if (nullptr != globalConstBuffer) {
         this->residencyContainer.push_back(globalConstBuffer);
     }
 
@@ -184,8 +195,46 @@ void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, NEO::MemoryMan
 
         patchWithImplicitSurface(crossThredDataArrayRef, surfaceStateHeapArrayRef,
                                  static_cast<uintptr_t>(globalVarBuffer->getGpuAddressToPatch()),
-                                 *globalVarBuffer, kernelDescriptor->payloadMappings.implicitArgs.globalVariablesSurfaceAddress, *device);
+                                 *globalVarBuffer, kernelDescriptor->payloadMappings.implicitArgs.globalVariablesSurfaceAddress,
+                                 *neoDevice, kernelDescriptor->kernelAttributes.flags.useGlobalAtomics);
         this->residencyContainer.push_back(globalVarBuffer);
+    } else if (nullptr != globalVarBuffer) {
+        this->residencyContainer.push_back(globalVarBuffer);
+    }
+}
+
+void KernelImmutableData::createRelocatedDebugData(NEO::GraphicsAllocation *globalConstBuffer,
+                                                   NEO::GraphicsAllocation *globalVarBuffer) {
+    NEO::Linker::SegmentInfo globalData;
+    NEO::Linker::SegmentInfo constData;
+    if (globalVarBuffer) {
+        globalData.gpuAddress = globalVarBuffer->getGpuAddress();
+        globalData.segmentSize = globalVarBuffer->getUnderlyingBufferSize();
+    }
+    if (globalConstBuffer) {
+        constData.gpuAddress = globalConstBuffer->getGpuAddress();
+        constData.segmentSize = globalConstBuffer->getUnderlyingBufferSize();
+    }
+
+    if (kernelInfo->kernelDescriptor.external.debugData.get()) {
+        std::string outErrReason;
+        std::string outWarning;
+        auto decodedElf = NEO::Elf::decodeElf<NEO::Elf::EI_CLASS_64>(ArrayRef<const uint8_t>(reinterpret_cast<const uint8_t *>(kernelInfo->kernelDescriptor.external.debugData->vIsa),
+                                                                                             kernelInfo->kernelDescriptor.external.debugData->vIsaSize),
+                                                                     outErrReason, outWarning);
+
+        if (decodedElf.getDebugInfoRelocations().size() > 1) {
+            auto size = kernelInfo->kernelDescriptor.external.debugData->vIsaSize;
+            kernelInfo->kernelDescriptor.external.relocatedDebugData = std::make_unique<uint8_t[]>(size);
+
+            memcpy_s(kernelInfo->kernelDescriptor.external.relocatedDebugData.get(), size, kernelInfo->kernelDescriptor.external.debugData->vIsa, kernelInfo->kernelDescriptor.external.debugData->vIsaSize);
+
+            NEO::Linker::SegmentInfo textSegment = {getIsaGraphicsAllocation()->getGpuAddress(),
+                                                    getIsaGraphicsAllocation()->getUnderlyingBufferSize()};
+
+            NEO::Linker::applyDebugDataRelocations(decodedElf, ArrayRef<uint8_t>(kernelInfo->kernelDescriptor.external.relocatedDebugData.get(), size),
+                                                   textSegment, globalData, constData);
+        }
     }
 }
 
@@ -193,21 +242,19 @@ uint32_t KernelImmutableData::getIsaSize() const {
     return static_cast<uint32_t>(isaGraphicsAllocation->getUnderlyingBufferSize());
 }
 
-uint64_t KernelImmutableData::getPrivateMemorySize() const {
-    uint64_t size = 0;
-    if (privateMemoryGraphicsAllocation != nullptr) {
-        size = privateMemoryGraphicsAllocation->getUnderlyingBufferSize();
-    }
-    return size;
-}
-
 KernelImp::KernelImp(Module *module) : module(module) {}
 
 KernelImp::~KernelImp() {
+    if (nullptr != privateMemoryGraphicsAllocation) {
+        module->getDevice()->getNEODevice()->getMemoryManager()->freeGraphicsMemory(privateMemoryGraphicsAllocation);
+    }
+
     if (perThreadDataForWholeThreadGroup != nullptr) {
         alignedFree(perThreadDataForWholeThreadGroup);
     }
     if (printfBuffer != nullptr) {
+        //not allowed to call virtual function on destructor, so calling printOutput directly
+        PrintfHandler::printOutput(kernelImmData, this->printfBuffer, module->getDevice());
         module->getDevice()->getNEODevice()->getMemoryManager()->freeGraphicsMemory(printfBuffer);
     }
     slmArgSizes.clear();
@@ -254,6 +301,18 @@ ze_result_t KernelImp::setGroupSize(uint32_t groupSizeX, uint32_t groupSizeY,
     this->groupSize[1] = groupSizeY;
     this->groupSize[2] = groupSizeZ;
     const NEO::KernelDescriptor &kernelDescriptor = kernelImmData->getDescriptor();
+    for (uint32_t i = 0u; i < 3u; i++) {
+        if (kernelDescriptor.kernelAttributes.requiredWorkgroupSize[i] != 0 &&
+            kernelDescriptor.kernelAttributes.requiredWorkgroupSize[i] != this->groupSize[i]) {
+            NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr,
+                                  "Invalid group size {%d, %d, %d} specified, requiredWorkGroupSize = {%d, %d, %d}\n",
+                                  this->groupSize[0], this->groupSize[1], this->groupSize[2],
+                                  kernelDescriptor.kernelAttributes.requiredWorkgroupSize[0],
+                                  kernelDescriptor.kernelAttributes.requiredWorkgroupSize[1],
+                                  kernelDescriptor.kernelAttributes.requiredWorkgroupSize[2]);
+            return ZE_RESULT_ERROR_INVALID_GROUP_SIZE_DIMENSION;
+        }
+    }
 
     auto simdSize = kernelDescriptor.kernelAttributes.simdSize;
     this->numThreadsPerThreadGroup = static_cast<uint32_t>((itemsInGroup + simdSize - 1u) / simdSize);
@@ -308,13 +367,13 @@ ze_result_t KernelImp::suggestGroupSize(uint32_t globalSizeX, uint32_t globalSiz
 
     if (NEO::DebugManager.flags.EnableComputeWorkSizeND.get()) {
         auto usesImages = getImmutableData()->getDescriptor().kernelAttributes.flags.usesImages;
-        auto coreFamily = module->getDevice()->getNEODevice()->getHardwareInfo().platform.eRenderCoreFamily;
+        const auto hwInfo = &module->getDevice()->getNEODevice()->getHardwareInfo();
         const auto &deviceInfo = module->getDevice()->getNEODevice()->getDeviceInfo();
         uint32_t numThreadsPerSubSlice = (uint32_t)deviceInfo.maxNumEUsPerSubSlice * deviceInfo.numThreadsPerEU;
         uint32_t localMemSize = (uint32_t)deviceInfo.localMemSize;
 
-        NEO::WorkSizeInfo wsInfo(maxWorkGroupSize, kernelImmData->getDescriptor().kernelAttributes.flags.usesBarriers, simd, this->getSlmTotalSize(),
-                                 coreFamily, numThreadsPerSubSlice, localMemSize,
+        NEO::WorkSizeInfo wsInfo(maxWorkGroupSize, kernelImmData->getDescriptor().kernelAttributes.usesBarriers(), simd, this->getSlmTotalSize(),
+                                 hwInfo, numThreadsPerSubSlice, localMemSize,
                                  usesImages, false);
         NEO::computeWorkgroupSizeND(wsInfo, retGroupSize, workItems, dim);
     } else {
@@ -352,7 +411,7 @@ ze_result_t KernelImp::suggestMaxCooperativeGroupCount(uint32_t *totalGroupCount
         descriptor.kernelAttributes.numGrfRequired,
         hardwareInfo.gtSystemInfo.EUCount, hardwareInfo.gtSystemInfo.ThreadCount / hardwareInfo.gtSystemInfo.EUCount);
 
-    auto usesBarriers = descriptor.kernelAttributes.flags.usesBarriers;
+    auto barrierCount = descriptor.kernelAttributes.barrierCount;
     const uint32_t workDim = 3;
     const size_t localWorkSize[] = {groupSize[0], groupSize[1], groupSize[2]};
     *totalGroupCount = NEO::KernelHelper::getMaxWorkGroupCount(descriptor.kernelAttributes.simdSize,
@@ -361,14 +420,14 @@ ze_result_t KernelImp::suggestMaxCooperativeGroupCount(uint32_t *totalGroupCount
                                                                dssCount * KB * hardwareInfo.capabilityTable.slmSize,
                                                                hwHelper.alignSlmSize(slmArgsTotalSize + descriptor.kernelAttributes.slmInlineSize),
                                                                static_cast<uint32_t>(hwHelper.getMaxBarrierRegisterPerSlice()),
-                                                               hwHelper.getBarriersCountFromHasBarriers(usesBarriers),
+                                                               hwHelper.getBarriersCountFromHasBarriers(barrierCount),
                                                                workDim,
                                                                localWorkSize);
     return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t KernelImp::setIndirectAccess(ze_kernel_indirect_access_flags_t flags) {
-    if (NEO::DebugManager.flags.DisableIndirectAccess.get() == 1) {
+    if (NEO::DebugManager.flags.DisableIndirectAccess.get() == 1 || this->kernelHasIndirectAccess == false) {
         return ZE_RESULT_SUCCESS;
     }
 
@@ -391,10 +450,10 @@ ze_result_t KernelImp::getIndirectAccess(ze_kernel_indirect_access_flags_t *flag
         *flags |= ZE_KERNEL_INDIRECT_ACCESS_FLAG_DEVICE;
     }
     if (this->unifiedMemoryControls.indirectHostAllocationsAllowed) {
-        *flags |= ZE_KERNEL_INDIRECT_ACCESS_FLAG_DEVICE;
+        *flags |= ZE_KERNEL_INDIRECT_ACCESS_FLAG_HOST;
     }
     if (this->unifiedMemoryControls.indirectSharedAllocationsAllowed) {
-        *flags |= ZE_KERNEL_INDIRECT_ACCESS_FLAG_DEVICE;
+        *flags |= ZE_KERNEL_INDIRECT_ACCESS_FLAG_SHARED;
     }
 
     return ZE_RESULT_SUCCESS;
@@ -459,11 +518,28 @@ ze_result_t KernelImp::setArgBufferWithAlloc(uint32_t argIndex, uintptr_t argVal
     const auto val = argVal;
 
     NEO::patchPointer(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize), arg, val);
-    if (NEO::isValidOffset(arg.bindful)) {
+    if (NEO::isValidOffset(arg.bindful) || NEO::isValidOffset(arg.bindless)) {
         setBufferSurfaceState(argIndex, reinterpret_cast<void *>(val), allocation);
     }
+
+    auto allocData = this->module->getDevice()->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(reinterpret_cast<void *>(allocation->getGpuAddress()));
+    if (allocData) {
+        bool argWasUncacheable = isArgUncached[argIndex];
+        bool argIsUncacheable = allocData->allocationFlagsProperty.flags.locallyUncachedResource;
+        if (argWasUncacheable == false && argIsUncacheable) {
+            kernelRequiresUncachedMocsCount++;
+        } else if (argWasUncacheable && argIsUncacheable == false) {
+            kernelRequiresUncachedMocsCount--;
+        }
+        this->setKernelArgUncached(argIndex, argIsUncacheable);
+    }
+
     residencyContainer[argIndex] = allocation;
 
+    return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t KernelImp::setArgUnknown(uint32_t argIndex, size_t argSize, const void *argVal) {
     return ZE_RESULT_SUCCESS;
 }
 
@@ -502,29 +578,45 @@ ze_result_t KernelImp::setArgBuffer(uint32_t argIndex, size_t argSize, const voi
     }
 
     auto requestedAddress = *reinterpret_cast<void *const *>(argVal);
-    auto svmAllocsManager = module->getDevice()->getDriverHandle()->getSvmAllocsManager();
-    if (nullptr == svmAllocsManager->getSVMAlloc(requestedAddress)) {
-        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    uintptr_t gpuAddress = 0u;
+    NEO::GraphicsAllocation *alloc = module->getDevice()->getDriverHandle()->getDriverSystemMemoryAllocation(requestedAddress,
+                                                                                                             1u,
+                                                                                                             module->getDevice()->getRootDeviceIndex(),
+                                                                                                             &gpuAddress);
+    DeviceImp *device = static_cast<DeviceImp *>(this->module->getDevice());
+    DriverHandleImp *driverHandle = static_cast<DriverHandleImp *>(device->getDriverHandle());
+    auto allocData = driverHandle->getSvmAllocsManager()->getSVMAlloc(requestedAddress);
+    if (driverHandle->isRemoteResourceNeeded(requestedAddress, alloc, allocData, device)) {
+        alloc = driverHandle->getPeerAllocation(device, allocData, requestedAddress, &gpuAddress);
+        if (alloc == nullptr) {
+            return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+        }
     }
-    uint32_t rootDeviceIndex = module->getDevice()->getRootDeviceIndex();
-    NEO::GraphicsAllocation *alloc = svmAllocsManager->getSVMAlloc(requestedAddress)->gpuAllocations.getGraphicsAllocation(rootDeviceIndex);
-    auto gpuAddress = reinterpret_cast<uintptr_t>(requestedAddress);
+
     return setArgBufferWithAlloc(argIndex, gpuAddress, alloc);
 }
 
 ze_result_t KernelImp::setArgImage(uint32_t argIndex, size_t argSize, const void *argVal) {
-    const auto &arg = kernelImmData->getDescriptor().payloadMappings.explicitArgs[argIndex].as<NEO::ArgDescImage>();
     if (argVal == nullptr) {
         residencyContainer[argIndex] = nullptr;
         return ZE_RESULT_SUCCESS;
     }
 
+    const auto &hwInfo = module->getDevice()->getNEODevice()->getHardwareInfo();
+    auto isMediaBlockImage = (hwInfo.capabilityTable.supportsMediaBlock &&
+                              kernelImmData->getDescriptor().payloadMappings.explicitArgs[argIndex].getExtendedTypeInfo().isMediaBlockImage);
+    const auto &arg = kernelImmData->getDescriptor().payloadMappings.explicitArgs[argIndex].as<NEO::ArgDescImage>();
     const auto image = Image::fromHandle(*static_cast<const ze_image_handle_t *>(argVal));
-    image->copySurfaceStateToSSH(surfaceStateHeapData.get(), arg.bindful);
+
+    if (kernelImmData->getDescriptor().kernelAttributes.imageAddressingMode == NEO::KernelDescriptor::Bindless) {
+        image->copySurfaceStateToSSH(patchBindlessSurfaceState(image->getAllocation(), arg.bindless), 0u, isMediaBlockImage);
+    } else {
+        image->copySurfaceStateToSSH(surfaceStateHeapData.get(), arg.bindful, isMediaBlockImage);
+    }
+
     residencyContainer[argIndex] = image->getAllocation();
 
     auto imageInfo = image->getImageInfo();
-
     auto clChannelType = getClChannelDataType(image->getImageDesc().format);
     auto clChannelOrder = getClChannelOrder(image->getImageDesc().format);
     NEO::patchNonPointer<size_t>(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize), arg.metadataPayload.imgWidth, imageInfo.imgDesc.imageWidth);
@@ -594,16 +686,60 @@ ze_result_t KernelImp::getProperties(ze_kernel_properties_t *pKernelProperties) 
     return ZE_RESULT_SUCCESS;
 }
 
+NEO::GraphicsAllocation *KernelImp::allocatePrivateMemoryGraphicsAllocation() {
+    auto &kernelAttributes = kernelImmData->getDescriptor().kernelAttributes;
+    auto neoDevice = module->getDevice()->getNEODevice();
+
+    auto privateSurfaceSize = NEO::KernelHelper::getPrivateSurfaceSize(kernelAttributes.perHwThreadPrivateMemorySize,
+                                                                       neoDevice->getDeviceInfo().computeUnitsUsedForScratch);
+
+    UNRECOVERABLE_IF(privateSurfaceSize == 0);
+    auto privateMemoryGraphicsAllocation = neoDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties(
+        {neoDevice->getRootDeviceIndex(), privateSurfaceSize, NEO::GraphicsAllocation::AllocationType::PRIVATE_SURFACE, neoDevice->getDeviceBitfield()});
+
+    UNRECOVERABLE_IF(privateMemoryGraphicsAllocation == nullptr);
+    return privateMemoryGraphicsAllocation;
+}
+
+void KernelImp::patchCrossthreadDataWithPrivateAllocation(NEO::GraphicsAllocation *privateAllocation) {
+    auto &kernelAttributes = kernelImmData->getDescriptor().kernelAttributes;
+    auto neoDevice = module->getDevice()->getNEODevice();
+
+    ArrayRef<uint8_t> crossThredDataArrayRef = ArrayRef<uint8_t>(this->crossThreadData.get(), this->crossThreadDataSize);
+    ArrayRef<uint8_t> surfaceStateHeapArrayRef = ArrayRef<uint8_t>(this->surfaceStateHeapData.get(), this->surfaceStateHeapDataSize);
+
+    patchWithImplicitSurface(crossThredDataArrayRef, surfaceStateHeapArrayRef,
+                             static_cast<uintptr_t>(privateMemoryGraphicsAllocation->getGpuAddressToPatch()),
+                             *privateMemoryGraphicsAllocation, kernelImmData->getDescriptor().payloadMappings.implicitArgs.privateMemoryAddress,
+                             *neoDevice, kernelAttributes.flags.useGlobalAtomics);
+
+    this->residencyContainer.push_back(this->privateMemoryGraphicsAllocation);
+}
+
 ze_result_t KernelImp::initialize(const ze_kernel_desc_t *desc) {
     this->kernelImmData = module->getKernelImmutableData(desc->pKernelName);
     if (this->kernelImmData == nullptr) {
-        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+        return ZE_RESULT_ERROR_INVALID_KERNEL_NAME;
+    }
+
+    auto isaAllocation = this->kernelImmData->getIsaGraphicsAllocation();
+    if (this->kernelImmData->getKernelInfo()->heapInfo.pKernelHeap != nullptr &&
+        isaAllocation->getAllocationType() == NEO::GraphicsAllocation::AllocationType::KERNEL_ISA_INTERNAL) {
+        auto neoDevice = module->getDevice()->getNEODevice();
+        auto &hwInfo = neoDevice->getHardwareInfo();
+        auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+        NEO::MemoryTransferHelper::transferMemoryToAllocation(hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo, *isaAllocation),
+                                                              *neoDevice,
+                                                              isaAllocation,
+                                                              0,
+                                                              this->kernelImmData->getKernelInfo()->heapInfo.pKernelHeap,
+                                                              static_cast<size_t>(this->kernelImmData->getKernelInfo()->heapInfo.KernelHeapSize));
     }
 
     for (const auto &argT : kernelImmData->getDescriptor().payloadMappings.explicitArgs) {
         switch (argT.type) {
         default:
-            UNRECOVERABLE_IF(true);
+            this->kernelArgHandlers.push_back(&KernelImp::setArgUnknown);
             break;
         case NEO::ArgDescriptor::ArgTPointer:
             this->kernelArgHandlers.push_back(&KernelImp::setArgBuffer);
@@ -621,6 +757,8 @@ ze_result_t KernelImp::initialize(const ze_kernel_desc_t *desc) {
     }
 
     slmArgSizes.resize(this->kernelArgHandlers.size(), 0);
+
+    isArgUncached.resize(this->kernelArgHandlers.size(), 0);
 
     if (kernelImmData->getSurfaceStateHeapSize() > 0) {
         this->surfaceStateHeapData.reset(new uint8_t[kernelImmData->getSurfaceStateHeapSize()]);
@@ -666,12 +804,28 @@ ze_result_t KernelImp::initialize(const ze_kernel_desc_t *desc) {
 
     residencyContainer.resize(this->kernelArgHandlers.size(), nullptr);
 
+    auto &kernelAttributes = kernelImmData->getDescriptor().kernelAttributes;
+    auto neoDevice = module->getDevice()->getNEODevice();
+    if ((kernelAttributes.perHwThreadPrivateMemorySize != 0U) && (false == module->shouldAllocatePrivateMemoryPerDispatch())) {
+        this->privateMemoryGraphicsAllocation = allocatePrivateMemoryGraphicsAllocation();
+        this->patchCrossthreadDataWithPrivateAllocation(this->privateMemoryGraphicsAllocation);
+    }
+
     this->createPrintfBuffer();
 
     this->setDebugSurface();
 
     residencyContainer.insert(residencyContainer.end(), kernelImmData->getResidencyContainer().begin(),
                               kernelImmData->getResidencyContainer().end());
+
+    kernelHasIndirectAccess = kernelImmData->getDescriptor().kernelAttributes.hasNonKernelArgLoad ||
+                              kernelImmData->getDescriptor().kernelAttributes.hasNonKernelArgStore ||
+                              kernelImmData->getDescriptor().kernelAttributes.hasNonKernelArgAtomic;
+
+    if (this->usesRayTracing()) {
+        neoDevice->initializeRayTracing();
+        this->residencyContainer.push_back(neoDevice->getRTMemoryBackedBuffer());
+    }
 
     return ZE_RESULT_SUCCESS;
 }
@@ -690,19 +844,40 @@ void KernelImp::printPrintfOutput() {
     PrintfHandler::printOutput(kernelImmData, this->printfBuffer, module->getDevice());
 }
 
+bool KernelImp::usesSyncBuffer() {
+    return this->kernelImmData->getDescriptor().kernelAttributes.flags.usesSyncBuffer;
+}
+
+void KernelImp::patchSyncBuffer(NEO::GraphicsAllocation *gfxAllocation, size_t bufferOffset) {
+    this->residencyContainer.push_back(gfxAllocation);
+    NEO::patchPointer(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize),
+                      this->getImmutableData()->getDescriptor().payloadMappings.implicitArgs.syncBufferAddress,
+                      static_cast<uintptr_t>(ptrOffset(gfxAllocation->getGpuAddressToPatch(), bufferOffset)));
+}
+
 void KernelImp::setDebugSurface() {
     auto device = module->getDevice();
-    if (module->isDebugEnabled() && device->getNEODevice()->isDebuggerActive()) {
+    if (module->isDebugEnabled() && device->getNEODevice()->getDebugger()) {
 
         auto surfaceStateHeapRef = ArrayRef<uint8_t>(surfaceStateHeapData.get(), surfaceStateHeapDataSize);
 
         patchWithImplicitSurface(ArrayRef<uint8_t>(), surfaceStateHeapRef,
                                  0,
                                  *device->getDebugSurface(), this->getImmutableData()->getDescriptor().payloadMappings.implicitArgs.systemThreadSurfaceAddress,
-                                 *device->getNEODevice());
+                                 *device->getNEODevice(), getKernelDescriptor().kernelAttributes.flags.useGlobalAtomics);
     }
 }
-
+void *KernelImp::patchBindlessSurfaceState(NEO::GraphicsAllocation *alloc, uint32_t bindless) {
+    auto &hwHelper = NEO::HwHelper::get(this->module->getDevice()->getHwInfo().platform.eRenderCoreFamily);
+    auto surfaceStateSize = hwHelper.getRenderSurfaceStateSize();
+    NEO::BindlessHeapsHelper *bindlessHeapsHelper = this->module->getDevice()->getNEODevice()->getBindlessHeapsHelper();
+    auto ssInHeap = bindlessHeapsHelper->allocateSSInHeap(surfaceStateSize, alloc, NEO::BindlessHeapsHelper::GLOBAL_SSH);
+    this->residencyContainer.push_back(ssInHeap.heapAllocation);
+    auto patchLocation = ptrOffset(getCrossThreadData(), bindless);
+    auto patchValue = hwHelper.getBindlessSurfaceExtendedMessageDescriptorValue(static_cast<uint32_t>(ssInHeap.surfaceStateOffset));
+    patchWithRequiredSize(const_cast<uint8_t *>(patchLocation), sizeof(patchValue), patchValue);
+    return ssInHeap.ssPtr;
+}
 void KernelImp::patchWorkgroupSizeInCrossThreadData(uint32_t x, uint32_t y, uint32_t z) {
     const NEO::KernelDescriptor &desc = kernelImmData->getDescriptor();
     auto dst = ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize);
@@ -710,6 +885,37 @@ void KernelImp::patchWorkgroupSizeInCrossThreadData(uint32_t x, uint32_t y, uint
     NEO::patchVecNonPointer(dst, desc.payloadMappings.dispatchTraits.localWorkSize, workgroupSize);
     NEO::patchVecNonPointer(dst, desc.payloadMappings.dispatchTraits.localWorkSize2, workgroupSize);
     NEO::patchVecNonPointer(dst, desc.payloadMappings.dispatchTraits.enqueuedLocalWorkSize, workgroupSize);
+}
+
+ze_result_t KernelImp::setGlobalOffsetExp(uint32_t offsetX,
+                                          uint32_t offsetY,
+                                          uint32_t offsetZ) {
+    this->globalOffsets[0] = offsetX;
+    this->globalOffsets[1] = offsetY;
+    this->globalOffsets[2] = offsetZ;
+
+    return ZE_RESULT_SUCCESS;
+}
+
+void KernelImp::patchGlobalOffset() {
+    const NEO::KernelDescriptor &desc = kernelImmData->getDescriptor();
+    auto dst = ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize);
+    NEO::patchVecNonPointer(dst, desc.payloadMappings.dispatchTraits.globalWorkOffset, this->globalOffsets);
+}
+
+void KernelImp::patchWorkDim(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
+    const NEO::KernelDescriptor &kernelDescriptor = kernelImmData->getDescriptor();
+    auto dataOffset = kernelDescriptor.payloadMappings.dispatchTraits.workDim;
+    if (NEO::isValidOffset(dataOffset)) {
+        auto destinationBuffer = ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize);
+        uint32_t workDim = 1;
+        if (groupCountZ * groupSize[2] > 1) {
+            workDim = 3;
+        } else if (groupCountY * groupSize[1] > 1) {
+            workDim = 2;
+        }
+        NEO::patchNonPointer(destinationBuffer, kernelDescriptor.payloadMappings.dispatchTraits.workDim, workDim);
+    }
 }
 
 Kernel *Kernel::create(uint32_t productFamily, Module *module,
@@ -733,6 +939,11 @@ bool KernelImp::hasIndirectAllocationsAllowed() const {
 
 uint32_t KernelImp::getSlmTotalSize() const {
     return slmArgsTotalSize + getImmutableData()->getDescriptor().kernelAttributes.slmInlineSize;
+}
+
+ze_result_t KernelImp::setCacheConfig(ze_cache_config_flags_t flags) {
+    cacheConfigFlags = flags;
+    return ZE_RESULT_SUCCESS;
 }
 
 NEO::GraphicsAllocation *KernelImp::getIsaAllocation() const {

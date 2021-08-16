@@ -1,22 +1,17 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include <level_zero/ze_api.h>
+#include "zello_common.h"
 
-#include <chrono>
-#include <cstring>
-#include <fstream>
-#include <iostream>
-#include <limits>
-#include <memory>
-#include <vector>
+extern bool verbose;
+bool verbose = false;
 
 inline std::vector<uint8_t> loadBinaryFile(const std::string &filePath) {
-    std::ifstream stream(filePath, std::ios::in);
+    std::ifstream stream(filePath, std::ios::binary);
     if (!stream.good()) {
         std::cerr << "Failed to load binary file: " << filePath << " " << strerror(errno) << "\n";
         return {};
@@ -30,22 +25,6 @@ inline std::vector<uint8_t> loadBinaryFile(const std::string &filePath) {
     stream.read(reinterpret_cast<char *>(binary_file.data()), length);
     return binary_file;
 }
-
-template <bool TerminateOnFailure, typename ResulT>
-inline void validate(ResulT result, const char *message) {
-    if (result == 0) { // assumption 0 is success
-        std::cerr << "SUCCESS : " << message << std::endl;
-        return;
-    }
-    std::cerr << (TerminateOnFailure ? "ERROR : " : "WARNING : ") << message << " : " << result
-              << std::endl;
-
-    if (TerminateOnFailure) {
-        std::terminate();
-    }
-}
-
-#define SUCCESS_OR_TERMINATE(CALL) validate<true>(CALL, #CALL)
 
 void createCmdQueueAndCmdList(ze_context_handle_t &context,
                               ze_device_handle_t &device,
@@ -62,7 +41,7 @@ void createCmdQueueAndCmdList(ze_context_handle_t &context,
     SUCCESS_OR_TERMINATE(zeDeviceGetCommandQueueGroupProperties(device, &numQueueGroups,
                                                                 queueProperties.data()));
 
-    ze_command_queue_desc_t cmdQueueDesc = {};
+    ze_command_queue_desc_t cmdQueueDesc = {ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
     for (uint32_t i = 0; i < numQueueGroups; i++) {
         if (queueProperties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE) {
             cmdQueueDesc.ordinal = i;
@@ -74,7 +53,7 @@ void createCmdQueueAndCmdList(ze_context_handle_t &context,
     SUCCESS_OR_TERMINATE(zeCommandQueueCreate(context, device, &cmdQueueDesc, &cmdQueue));
 
     // Create command list
-    ze_command_list_desc_t cmdListDesc = {};
+    ze_command_list_desc_t cmdListDesc = {ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC};
     cmdListDesc.commandQueueGroupOrdinal = cmdQueueDesc.ordinal;
     SUCCESS_OR_TERMINATE(zeCommandListCreate(context, device, &cmdListDesc, &cmdList));
 }
@@ -85,8 +64,8 @@ void createEventPoolAndEvents(ze_context_handle_t &context,
                               ze_event_pool_flag_t poolFlag,
                               uint32_t poolSize,
                               ze_event_handle_t *events) {
-    ze_event_pool_desc_t eventPoolDesc;
-    ze_event_desc_t eventDesc;
+    ze_event_pool_desc_t eventPoolDesc = {ZE_STRUCTURE_TYPE_EVENT_POOL_DESC};
+    ze_event_desc_t eventDesc = {ZE_STRUCTURE_TYPE_EVENT_DESC};
     eventPoolDesc.count = poolSize;
     eventPoolDesc.flags = poolFlag;
     SUCCESS_OR_TERMINATE(zeEventPoolCreate(context, &eventPoolDesc, 1, &device, &eventPool));
@@ -119,7 +98,7 @@ bool testWriteGlobalTimestamp(ze_context_handle_t &context,
     globalTsStart = nullptr;
     globalTsEnd = nullptr;
 
-    ze_device_mem_alloc_desc_t deviceDesc;
+    ze_device_mem_alloc_desc_t deviceDesc = {ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC};
     deviceDesc.flags = ZE_DEVICE_MEM_ALLOC_FLAG_BIAS_UNCACHED;
     deviceDesc.ordinal = 0;
 
@@ -144,9 +123,9 @@ bool testWriteGlobalTimestamp(ze_context_handle_t &context,
                                                        nullptr, 0, nullptr));
     SUCCESS_OR_TERMINATE(zeCommandListClose(cmdList));
     SUCCESS_OR_TERMINATE(zeCommandQueueExecuteCommandLists(cmdQueue, 1, &cmdList, nullptr));
-    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, UINT32_MAX));
+    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, std::numeric_limits<uint32_t>::max()));
 
-    ze_device_properties_t devProperties = {};
+    ze_device_properties_t devProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
     SUCCESS_OR_TERMINATE(zeDeviceGetProperties(device, &devProperties));
 
     uint64_t commandDuration = tsEndResult - tsStartResult;
@@ -180,11 +159,11 @@ bool testKernelTimestampHostQuery(ze_context_handle_t &context,
 
     // Create two shared buffers
     constexpr size_t allocSize = 4096;
-    ze_device_mem_alloc_desc_t deviceDesc;
+    ze_device_mem_alloc_desc_t deviceDesc = {ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC};
     deviceDesc.flags = ZE_DEVICE_MEM_ALLOC_FLAG_BIAS_UNCACHED;
     deviceDesc.ordinal = 0;
 
-    ze_host_mem_alloc_desc_t hostDesc;
+    ze_host_mem_alloc_desc_t hostDesc = {ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC};
     hostDesc.flags = ZE_HOST_MEM_ALLOC_FLAG_BIAS_UNCACHED;
 
     void *srcBuffer = nullptr;
@@ -206,13 +185,13 @@ bool testKernelTimestampHostQuery(ze_context_handle_t &context,
 
     ze_module_handle_t module;
     ze_kernel_handle_t kernel;
-    ze_module_desc_t moduleDesc = {};
+    ze_module_desc_t moduleDesc = {ZE_STRUCTURE_TYPE_MODULE_DESC};
     moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
     moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(spirvModule.data());
     moduleDesc.inputSize = spirvModule.size();
     SUCCESS_OR_TERMINATE(zeModuleCreate(context, device, &moduleDesc, &module, nullptr));
 
-    ze_kernel_desc_t kernelDesc = {};
+    ze_kernel_desc_t kernelDesc = {ZE_STRUCTURE_TYPE_KERNEL_DESC};
     kernelDesc.pKernelName = "CopyBufferToBufferBytes";
     SUCCESS_OR_TERMINATE(zeKernelCreate(module, &kernelDesc, &kernel));
 
@@ -241,12 +220,12 @@ bool testKernelTimestampHostQuery(ze_context_handle_t &context,
     SUCCESS_OR_TERMINATE(zeCommandListAppendLaunchKernel(cmdList, kernel, &dispatchTraits, kernelTsEvent, 0, nullptr));
     SUCCESS_OR_TERMINATE(zeCommandListClose(cmdList));
     SUCCESS_OR_TERMINATE(zeCommandQueueExecuteCommandLists(cmdQueue, 1, &cmdList, nullptr));
-    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, UINT32_MAX));
+    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, std::numeric_limits<uint32_t>::max()));
 
     ze_kernel_timestamp_result_t kernelTsResults;
     SUCCESS_OR_TERMINATE(zeEventQueryKernelTimestamp(kernelTsEvent, &kernelTsResults));
 
-    ze_device_properties_t devProperties = {};
+    ze_device_properties_t devProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
     SUCCESS_OR_TERMINATE(zeDeviceGetProperties(device, &devProperties));
 
     uint64_t timerResolution = devProperties.timerResolution;
@@ -257,7 +236,8 @@ bool testKernelTimestampHostQuery(ze_context_handle_t &context,
               << " Kernel start: " << std::dec << kernelTsResults.context.kernelStart << " cycles\n"
               << " Kernel end: " << std::dec << kernelTsResults.context.kernelEnd << " cycles\n"
               << " Global end: " << std::dec << kernelTsResults.global.kernelEnd << " cycles\n"
-              << " Kernel duration : " << std::dec << kernelDuration << " cycles, " << kernelDuration * timerResolution << " ns\n";
+              << " timerResolution clock: " << std::dec << timerResolution << " cycles/s\n"
+              << " Kernel duration : " << std::dec << kernelDuration << " cycles, " << kernelDuration * (1000000000.0 / static_cast<double>(timerResolution)) << " ns\n";
 
     // Cleanup
     SUCCESS_OR_TERMINATE(zeMemFree(context, dstBuffer));
@@ -270,8 +250,8 @@ bool testKernelTimestampHostQuery(ze_context_handle_t &context,
 }
 
 bool testKernelTimestampApendQuery(ze_context_handle_t &context,
-                                   ze_driver_handle_t &driver,
-                                   ze_device_handle_t &device) {
+                                   ze_device_handle_t &device,
+                                   ze_device_properties_t devProperties) {
 
     ze_command_queue_handle_t cmdQueue;
     ze_command_list_handle_t cmdList;
@@ -281,11 +261,11 @@ bool testKernelTimestampApendQuery(ze_context_handle_t &context,
 
     // Create two shared buffers
     constexpr size_t allocSize = 4096;
-    ze_device_mem_alloc_desc_t deviceDesc;
+    ze_device_mem_alloc_desc_t deviceDesc = {ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC};
     deviceDesc.flags = ZE_DEVICE_MEM_ALLOC_FLAG_BIAS_UNCACHED;
     deviceDesc.ordinal = 0;
 
-    ze_host_mem_alloc_desc_t hostDesc;
+    ze_host_mem_alloc_desc_t hostDesc = {ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC};
     hostDesc.flags = ZE_HOST_MEM_ALLOC_FLAG_BIAS_UNCACHED;
 
     void *srcBuffer = nullptr;
@@ -311,13 +291,13 @@ bool testKernelTimestampApendQuery(ze_context_handle_t &context,
 
     ze_module_handle_t module;
     ze_kernel_handle_t kernel;
-    ze_module_desc_t moduleDesc = {};
+    ze_module_desc_t moduleDesc = {ZE_STRUCTURE_TYPE_MODULE_DESC};
     moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
     moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(spirvModule.data());
     moduleDesc.inputSize = spirvModule.size();
     SUCCESS_OR_TERMINATE(zeModuleCreate(context, device, &moduleDesc, &module, nullptr));
 
-    ze_kernel_desc_t kernelDesc = {};
+    ze_kernel_desc_t kernelDesc = {ZE_STRUCTURE_TYPE_KERNEL_DESC};
     kernelDesc.pKernelName = "CopyBufferToBufferBytes";
     SUCCESS_OR_TERMINATE(zeKernelCreate(module, &kernelDesc, &kernel));
 
@@ -349,23 +329,33 @@ bool testKernelTimestampApendQuery(ze_context_handle_t &context,
 
     SUCCESS_OR_TERMINATE(zeCommandListClose(cmdList));
     SUCCESS_OR_TERMINATE(zeCommandQueueExecuteCommandLists(cmdQueue, 1, &cmdList, nullptr));
-    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, UINT32_MAX));
+    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, std::numeric_limits<uint32_t>::max()));
 
     ze_kernel_timestamp_result_t *kernelTsResults = reinterpret_cast<ze_kernel_timestamp_result_t *>(timestampBuffer);
 
-    ze_device_properties_t devProperties = {};
     SUCCESS_OR_TERMINATE(zeDeviceGetProperties(device, &devProperties));
 
     uint64_t timerResolution = devProperties.timerResolution;
     uint64_t kernelDuration = kernelTsResults->context.kernelEnd - kernelTsResults->context.kernelStart;
-    std::cout << "Kernel timestamp statistics: \n"
-              << std::fixed
-              << " Global start : " << std::dec << kernelTsResults->global.kernelStart << " cycles\n"
-              << " Kernel start: " << std::dec << kernelTsResults->context.kernelStart << " cycles\n"
-              << " Kernel end: " << std::dec << kernelTsResults->context.kernelEnd << " cycles\n"
-              << " Global end: " << std::dec << kernelTsResults->global.kernelEnd << " cycles\n"
-              << " Kernel duration : " << std::dec << kernelDuration << " cycles, " << kernelDuration * timerResolution << " ns\n";
-
+    if (devProperties.stype == ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES_1_2) {
+        std::cout << "Kernel timestamp statistics (V1.2 and later): \n"
+                  << std::fixed
+                  << " Global start : " << std::dec << kernelTsResults->global.kernelStart << " cycles\n"
+                  << " Kernel start: " << std::dec << kernelTsResults->context.kernelStart << " cycles\n"
+                  << " Kernel end: " << std::dec << kernelTsResults->context.kernelEnd << " cycles\n"
+                  << " Global end: " << std::dec << kernelTsResults->global.kernelEnd << " cycles\n"
+                  << " timerResolution clock: " << std::dec << timerResolution << " cycles/s\n"
+                  << " Kernel duration : " << std::dec << kernelDuration << " cycles, " << kernelDuration * (1000000000.0 / static_cast<double>(timerResolution)) << " ns\n";
+    } else {
+        std::cout << "Kernel timestamp statistics (prior to V1.2): \n"
+                  << std::fixed
+                  << " Global start : " << std::dec << kernelTsResults->global.kernelStart << " cycles\n"
+                  << " Kernel start: " << std::dec << kernelTsResults->context.kernelStart << " cycles\n"
+                  << " Kernel end: " << std::dec << kernelTsResults->context.kernelEnd << " cycles\n"
+                  << " Global end: " << std::dec << kernelTsResults->global.kernelEnd << " cycles\n"
+                  << " timerResolution: " << std::dec << timerResolution << " ns\n"
+                  << " Kernel duration : " << std::dec << kernelDuration << " cycles, " << kernelDuration * timerResolution << " ns\n";
+    }
     // Cleanup
     SUCCESS_OR_TERMINATE(zeMemFree(context, dstBuffer));
     SUCCESS_OR_TERMINATE(zeMemFree(context, srcBuffer));
@@ -381,46 +371,34 @@ void printResult(bool result, std::string &currentTest) {
     std::cout << "\nZello Timestamp: " << currentTest.c_str()
               << "  Results validation "
               << (result ? "PASSED" : "FAILED")
+              << std::endl
               << std::endl;
 }
 
 int main(int argc, char *argv[]) {
-    bool result;
+    verbose = isVerbose(argc, argv);
+    ze_context_handle_t context = nullptr;
+    auto devices = zelloInitContextAndGetDevices(context);
+    auto device = devices[0];
 
-    SUCCESS_OR_TERMINATE(zeInit(ZE_INIT_FLAG_GPU_ONLY));
-
-    uint32_t driverCount = 0;
-    SUCCESS_OR_TERMINATE(zeDriverGet(&driverCount, nullptr));
-    if (driverCount == 0)
-        std::terminate();
-
-    ze_driver_handle_t driverHandle;
-    SUCCESS_OR_TERMINATE(zeDriverGet(&driverCount, &driverHandle));
-
-    ze_context_desc_t contextDesc = {};
-    ze_context_handle_t context;
-    SUCCESS_OR_TERMINATE(zeContextCreate(driverHandle, &contextDesc, &context));
-
-    uint32_t deviceCount = 0;
-    SUCCESS_OR_TERMINATE(zeDeviceGet(driverHandle, &deviceCount, nullptr));
-    if (deviceCount == 0)
-        std::terminate();
-
-    ze_device_handle_t device;
-    SUCCESS_OR_TERMINATE(zeDeviceGet(driverHandle, &deviceCount, &device));
-
-    ze_device_properties_t deviceProperties = {};
+    ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
     SUCCESS_OR_TERMINATE(zeDeviceGetProperties(device, &deviceProperties));
     std::cout << "Device : \n"
               << " * name : " << deviceProperties.name << "\n"
-              << " * type : " << ((deviceProperties.type == ZE_DEVICE_TYPE_GPU) ? "GPU" : "FPGA") << "\n"
-              << " * vendorId : " << deviceProperties.vendorId << "\n";
+              << " * vendorId : " << std::hex << deviceProperties.vendorId << "\n";
 
+    bool result;
     std::string currentTest;
 
-    currentTest = "Test Append Write of Global Timestamp";
-    result = testKernelTimestampApendQuery(context, driverHandle, device);
+    currentTest = "Test Append Write of Global Timestamp: Default Device Properties Structure";
+    deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
+    result = testKernelTimestampApendQuery(context, device, deviceProperties);
     printResult(result, currentTest);
+    currentTest = "Test Append Write of Global Timestamp: V1.2 (and later) Device Properties Structure";
+    deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES_1_2};
+    result = testKernelTimestampApendQuery(context, device, deviceProperties);
+    printResult(result, currentTest);
+
     SUCCESS_OR_TERMINATE(zeContextDestroy(context));
 
     return result ? 0 : 1;

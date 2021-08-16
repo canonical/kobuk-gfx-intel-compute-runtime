@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_device.h"
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_cl_execution_environment.h"
@@ -29,12 +29,13 @@ class MockClDevice : public ClDevice {
     using ClDevice::ClDevice;
     using ClDevice::compilerExtensions;
     using ClDevice::compilerExtensionsWithFeatures;
-    using ClDevice::compilerFeatures;
     using ClDevice::deviceExtensions;
     using ClDevice::deviceInfo;
     using ClDevice::driverInfo;
     using ClDevice::enabledClVersion;
     using ClDevice::getClDeviceName;
+    using ClDevice::getQueueFamilyCapabilities;
+    using ClDevice::getQueueFamilyCapabilitiesAll;
     using ClDevice::initializeCaps;
     using ClDevice::name;
     using ClDevice::ocl21FeaturesEnabled;
@@ -88,7 +89,6 @@ class MockClDevice : public ClDevice {
     ExecutionEnvironment *&executionEnvironment;
     static bool &createSingleDevice;
     static decltype(&createCommandStream) &createCommandStreamReceiverFunc;
-    std::unique_ptr<MemoryManager> &mockMemoryManager;
     std::vector<EngineControl> &engines;
 };
 

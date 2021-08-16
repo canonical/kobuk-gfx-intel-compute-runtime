@@ -1,26 +1,30 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/gmm_helper/gmm_helper.h"
+#include "shared/source/gmm_helper/gmm_interface.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/os_interface/hw_info_config.h"
-#include "shared/test/unit_test/helpers/default_hw_info.inl"
-#include "shared/test/unit_test/helpers/memory_leak_listener.h"
-#include "shared/test/unit_test/helpers/test_files.h"
-#include "shared/test/unit_test/helpers/ult_hw_config.inl"
+#include "shared/source/utilities/debug_settings_reader.h"
+#include "shared/test/common/helpers/default_hw_info.inl"
+#include "shared/test/common/helpers/memory_leak_listener.h"
+#include "shared/test/common/helpers/test_files.h"
+#include "shared/test/common/helpers/ult_hw_config.inl"
+#include "shared/test/common/mocks/mock_gmm_client_context.h"
+#include "shared/test/common/mocks/mock_sip.h"
+#include "shared/test/unit_test/base_ult_config_listener.h"
 
 #include "opencl/source/program/kernel_info.h"
 #include "opencl/source/utilities/logger.h"
 #include "opencl/test/unit_test/custom_event_listener.h"
 #include "opencl/test/unit_test/global_environment.h"
-#include "opencl/test/unit_test/mocks/mock_gmm_client_context.h"
-#include "opencl/test/unit_test/mocks/mock_sip.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist.h"
+#include "level_zero/core/source/compiler_interface/l0_reg_path.h"
 
 #include "gmock/gmock.h"
 #include "igfxfmid.h"
@@ -54,9 +58,18 @@ using namespace L0::ult;
 
 PRODUCT_FAMILY productFamily = NEO::DEFAULT_TEST_PLATFORM::hwInfo.platform.eProductFamily;
 GFXCORE_FAMILY renderCoreFamily = NEO::DEFAULT_TEST_PLATFORM::hwInfo.platform.eRenderCoreFamily;
+int32_t revId = -1;
+uint32_t euPerSubSlice = 0;
+uint32_t sliceCount = 0;
+uint32_t subSlicePerSliceCount = 0;
+int dieRecovery = 0;
 
 namespace NEO {
 extern const HardwareInfo *hardwareInfoTable[IGFX_MAX_PRODUCT];
+extern bool useMockGmm;
+extern TestMode testMode;
+extern const char *executionDirectorySuffix;
+
 namespace MockSipData {
 extern std::unique_ptr<MockSipKernel> mockSipKernel;
 }
@@ -133,6 +146,7 @@ void applyWorkarounds() {
 
 int main(int argc, char **argv) {
     bool useDefaultListener = false;
+    bool setupFeatureTableAndWorkaroundTable = testMode == TestMode::AubTests ? true : false;
     applyWorkarounds();
 
     testing::InitGoogleMock(&argc, argv);
@@ -178,15 +192,78 @@ int main(int argc, char **argv) {
                 std::cout << "product family: " << NEO::hardwarePrefix[productFamily] << " ("
                           << productFamily << ")" << std::endl;
             }
-        }
-        if (!strcmp("--disable_default_listener", argv[i])) {
+        } else if (!strcmp("--rev_id", argv[i])) {
+            ++i;
+            if (i < argc) {
+                revId = atoi(argv[i]);
+            }
+        } else if (!strcmp("--slices", argv[i])) {
+            ++i;
+            if (i < argc) {
+                sliceCount = atoi(argv[i]);
+            }
+        } else if (!strcmp("--subslices", argv[i])) {
+            ++i;
+            if (i < argc) {
+                subSlicePerSliceCount = atoi(argv[i]);
+            }
+        } else if (!strcmp("--eu_per_ss", argv[i])) {
+            ++i;
+            if (i < argc) {
+                euPerSubSlice = atoi(argv[i]);
+            }
+        } else if (!strcmp("--die_recovery", argv[i])) {
+            ++i;
+            if (i < argc) {
+                dieRecovery = atoi(argv[i]) ? 1 : 0;
+            }
+        } else if (!strcmp("--disable_default_listener", argv[i])) {
             useDefaultListener = false;
+        } else if (!strcmp("--tbx", argv[i])) {
+            if (testMode == TestMode::AubTests) {
+                testMode = TestMode::AubTestsWithTbx;
+            }
+            initialHardwareTag = 0;
+        } else if (!strcmp("--read-config", argv[i]) && (testMode == TestMode::AubTests || testMode == TestMode::AubTestsWithTbx)) {
+            if (DebugManager.registryReadAvailable()) {
+                DebugManager.setReaderImpl(NEO::SettingsReader::create(L0::registryPath));
+                DebugManager.injectSettingsFromReader();
+            }
         } else if (!strcmp("--enable_default_listener", argv[i])) {
             useDefaultListener = true;
         }
     }
+
     productFamily = hwInfoForTests.platform.eProductFamily;
     renderCoreFamily = hwInfoForTests.platform.eRenderCoreFamily;
+    uint32_t threadsPerEu = hwInfoConfigFactory[productFamily]->threadsPerEu;
+    PLATFORM &platform = hwInfoForTests.platform;
+    if (revId != -1) {
+        platform.usRevId = revId;
+    } else {
+        revId = platform.usRevId;
+    }
+    uint64_t hwInfoConfig = defaultHardwareInfoConfigTable[productFamily];
+    setHwInfoValuesFromConfig(hwInfoConfig, hwInfoForTests);
+
+    // set Gt and FeatureTable to initial state
+    hardwareInfoSetup[productFamily](&hwInfoForTests, setupFeatureTableAndWorkaroundTable, hwInfoConfig);
+    GT_SYSTEM_INFO &gtSystemInfo = hwInfoForTests.gtSystemInfo;
+
+    // and adjust dynamic values if not secified
+    sliceCount = sliceCount > 0 ? sliceCount : gtSystemInfo.SliceCount;
+    subSlicePerSliceCount = subSlicePerSliceCount > 0 ? subSlicePerSliceCount : (gtSystemInfo.SubSliceCount / sliceCount);
+    euPerSubSlice = euPerSubSlice > 0 ? euPerSubSlice : gtSystemInfo.MaxEuPerSubSlice;
+    // clang-format off
+    gtSystemInfo.SliceCount             = sliceCount;
+    gtSystemInfo.SubSliceCount          = gtSystemInfo.SliceCount * subSlicePerSliceCount;
+    gtSystemInfo.EUCount                = gtSystemInfo.SubSliceCount * euPerSubSlice - dieRecovery;
+    gtSystemInfo.ThreadCount            = gtSystemInfo.EUCount * threadsPerEu;
+    gtSystemInfo.MaxEuPerSubSlice       = std::max(gtSystemInfo.MaxEuPerSubSlice, euPerSubSlice);
+    gtSystemInfo.MaxSlicesSupported     = std::max(gtSystemInfo.MaxSlicesSupported, gtSystemInfo.SliceCount);
+    gtSystemInfo.MaxSubSlicesSupported  = std::max(gtSystemInfo.MaxSubSlicesSupported, gtSystemInfo.SubSliceCount);
+    gtSystemInfo.IsDynamicallyPopulated = false;
+    // clang-format on
 
     // Platforms with uninitialized factory are not supported
     if (L0::commandListFactory[productFamily] == nullptr) {
@@ -205,32 +282,55 @@ int main(int argc, char **argv) {
         listeners.Append(customEventListener);
     }
 
+    listeners.Append(new NEO::MemoryLeakListener);
+    listeners.Append(new NEO::BaseUltConfigListener);
+
     binaryNameSuffix.append(NEO::familyName[hwInfoForTests.platform.eRenderCoreFamily]);
     binaryNameSuffix.append(hwInfoForTests.capabilityTable.platformType);
 
     std::string testBinaryFiles = getRunPath(argv[0]);
-    testBinaryFiles.append("/level_zero/");
-    testBinaryFiles.append(binaryNameSuffix);
+    std::string testBinaryFilesNoRev = testBinaryFiles;
+    testBinaryFilesNoRev.append("/level_zero/");
+    testBinaryFiles.append("/" + binaryNameSuffix + "/");
+    testBinaryFilesNoRev.append(binaryNameSuffix + "/");
+
+    testBinaryFiles.append(std::to_string(revId));
     testBinaryFiles.append("/");
     testBinaryFiles.append(testFiles);
+    testBinaryFilesNoRev.append(testFiles);
     testFiles = testBinaryFiles;
+    testFilesNoRev = testBinaryFilesNoRev;
 
-    listeners.Append(new NEO::MemoryLeakListener);
+    std::string executionDirectory(hardwarePrefix[productFamily]);
+    executionDirectory += NEO::executionDirectorySuffix; //_aub for aub_tests, empty otherwise
+    executionDirectory += "/";
+    executionDirectory += std::to_string(revId);
 
-    NEO::GmmHelper::createGmmContextWrapperFunc =
-        NEO::GmmClientContextBase::create<NEO::MockGmmClientContext>;
+#ifdef WIN32
+#include <direct.h>
+    if (_chdir(executionDirectory.c_str())) {
+        std::cout << "chdir into " << executionDirectory << " directory failed.\nThis might cause test failures." << std::endl;
+    }
+#elif defined(__linux__)
+#include <unistd.h>
+    if (chdir(executionDirectory.c_str()) != 0) {
+        std::cout << "chdir into " << executionDirectory << " directory failed.\nThis might cause test failures." << std::endl;
+    }
+#endif
 
-    uint64_t hwInfoConfig = NEO::defaultHardwareInfoConfigTable[productFamily];
-    NEO::setHwInfoValuesFromConfig(hwInfoConfig, hwInfoForTests);
-
-    // set Gt and FeatureTable to initial state
-    NEO::hardwareInfoSetup[productFamily](&hwInfoForTests, false, hwInfoConfig);
+    if (useMockGmm) {
+        NEO::GmmHelper::createGmmContextWrapperFunc = NEO::GmmClientContext::create<MockGmmClientContext>;
+    } else {
+        NEO::GmmInterface::initialize(nullptr, nullptr);
+    }
 
     NEO::defaultHwInfo = std::make_unique<NEO::HardwareInfo>();
     *NEO::defaultHwInfo = hwInfoForTests;
 
-    NEO::useKernelDescriptor = true;
     NEO::MockSipData::mockSipKernel.reset(new NEO::MockSipKernel());
+    if (testMode == TestMode::AubTests || testMode == TestMode::AubTestsWithTbx) {
+        MockSipData::useMockSip = false;
+    }
 
     environment = reinterpret_cast<TestEnvironment *>(::testing::AddGlobalTestEnvironment(new TestEnvironment));
 

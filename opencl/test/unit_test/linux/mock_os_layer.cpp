@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,9 +7,13 @@
 
 #include "mock_os_layer.h"
 
+#include "shared/source/helpers/string.h"
+
 #include <cassert>
 #include <dirent.h>
 #include <iostream>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 
 int (*c_open)(const char *pathname, int flags, ...) = nullptr;
 int (*openFull)(const char *pathname, int flags, ...) = nullptr;
@@ -36,10 +40,38 @@ int failOnVirtualMemoryCreate = 0;
 int failOnSetPriority = 0;
 int failOnPreemption = 0;
 int failOnDrmVersion = 0;
+int accessCalledTimes = 0;
+int readLinkCalledTimes = 0;
+int fstatCalledTimes = 0;
 char providedDrmVersion[5] = {'i', '9', '1', '5', '\0'};
 uint64_t gpuTimestamp = 0;
 int ioctlSeq[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 size_t ioctlCnt = 0;
+
+int fstat(int fd, struct stat *buf) {
+    ++fstatCalledTimes;
+    buf->st_rdev = 0x0;
+    return 0;
+}
+
+int access(const char *pathname, int mode) {
+    ++accessCalledTimes;
+    return 0;
+}
+
+ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
+    ++readLinkCalledTimes;
+
+    if (readLinkCalledTimes % 2 == 1) {
+        return -1;
+    }
+
+    constexpr size_t sizeofPath = sizeof("../../devices/pci0000:4a/0000:4a:02.0/0000:4b:00.0/0000:4c:01.0/0000:00:03.0/drm/renderD128");
+
+    strcpy_s(buf, sizeofPath, "../../devices/pci0000:4a/0000:4a:02.0/0000:4b:00.0/0000:4c:01.0/0000:00:03.0/drm/renderD128");
+
+    return sizeofPath;
+}
 
 int open(const char *pathname, int flags, ...) {
     if (openFull != nullptr) {
@@ -70,16 +102,18 @@ DIR *opendir(const char *name) {
 int closedir(DIR *dirp) {
     return 0u;
 }
-uint32_t entryIndex = 0u;
-const uint32_t numEntries = 4u;
 
 struct dirent entries[] = {
     {0, 0, 0, 0, "."},
     {0, 0, 0, 0, "pci-0000:test1-render"},
     {0, 0, 0, 0, "pci-0000:test2-render"},
     {0, 0, 0, 0, "pci-0000:1234-render"},
-
+    {0, 0, 0, 0, "pci-0000:0:2.1-render"},
+    {0, 0, 0, 0, "pci-0000:3:0.0-render"},
 };
+
+uint32_t entryIndex = 0u;
+const uint32_t numEntries = sizeof(entries) / sizeof(entries[0]);
 
 struct dirent *readdir(DIR *dir) {
     if (entryIndex >= numEntries) {
@@ -176,7 +210,7 @@ int drmGetContextParam(drm_i915_gem_context_param *param) {
     return ret;
 }
 
-int drmContextCreate(drm_i915_gem_context_create *create) {
+int drmContextCreate(drm_i915_gem_context_create_ext *create) {
     assert(create);
 
     create->ctx_id = 1;
@@ -194,7 +228,6 @@ int drmContextDestroy(drm_i915_gem_context_destroy *destroy) {
 
 int drmVirtualMemoryCreate(drm_i915_gem_vm_control *control) {
     assert(control);
-
     control->vm_id = ++vmId;
     return failOnVirtualMemoryCreate;
 }
@@ -253,8 +286,8 @@ int ioctl(int fd, unsigned long int request, ...) throw() {
             case DRM_IOCTL_I915_GEM_CONTEXT_GETPARAM:
                 res = drmGetContextParam(va_arg(vl, drm_i915_gem_context_param *));
                 break;
-            case DRM_IOCTL_I915_GEM_CONTEXT_CREATE:
-                res = drmContextCreate(va_arg(vl, drm_i915_gem_context_create *));
+            case DRM_IOCTL_I915_GEM_CONTEXT_CREATE_EXT:
+                res = drmContextCreate(va_arg(vl, drm_i915_gem_context_create_ext *));
                 break;
             case DRM_IOCTL_I915_GEM_CONTEXT_DESTROY:
                 res = drmContextDestroy(va_arg(vl, drm_i915_gem_context_destroy *));

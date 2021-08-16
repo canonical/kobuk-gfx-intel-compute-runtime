@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -67,8 +67,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     CommandQueue() = delete;
 
-    CommandQueue(Context *context, ClDevice *device,
-                 const cl_queue_properties *properties);
+    CommandQueue(Context *context, ClDevice *device, const cl_queue_properties *properties, bool internalUsage);
 
     CommandQueue &operator=(const CommandQueue &) = delete;
     CommandQueue(const CommandQueue &) = delete;
@@ -76,8 +75,8 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     ~CommandQueue() override;
 
     // API entry points
-    virtual cl_int enqueueCopyImage(Image *srcImage, Image *dstImage, const size_t srcOrigin[3], const size_t dstOrigin[3],
-                                    const size_t region[3], cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event) = 0;
+    virtual cl_int enqueueCopyImage(Image *srcImage, Image *dstImage, const size_t *srcOrigin, const size_t *dstOrigin,
+                                    const size_t *region, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event) = 0;
 
     virtual cl_int enqueueFillImage(Image *image, const void *fillColor, const size_t *origin, const size_t *region,
                                     cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event) = 0;
@@ -85,7 +84,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     virtual cl_int enqueueFillBuffer(Buffer *buffer, const void *pattern, size_t patternSize, size_t offset,
                                      size_t size, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event) = 0;
 
-    virtual cl_int enqueueKernel(cl_kernel kernel, cl_uint workDim, const size_t *globalWorkOffset, const size_t *globalWorkSize,
+    virtual cl_int enqueueKernel(Kernel *kernel, cl_uint workDim, const size_t *globalWorkOffset, const size_t *globalWorkSize,
                                  const size_t *localWorkSize, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event) = 0;
 
     virtual cl_int enqueueBarrierWithWaitList(cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event) = 0;
@@ -216,7 +215,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     MOCKABLE_VIRTUAL bool isQueueBlocked();
 
     MOCKABLE_VIRTUAL void waitUntilComplete(uint32_t gpgpuTaskCountToWait, uint32_t bcsTaskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep);
-    void waitUntilComplete(bool blockedQueue, PrintfHandler *printfHandler);
+    MOCKABLE_VIRTUAL void waitUntilComplete(bool blockedQueue, PrintfHandler *printfHandler);
 
     static uint32_t getTaskLevelFromWaitList(uint32_t taskLevel,
                                              cl_uint numEventsInWaitList,
@@ -300,6 +299,13 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     MOCKABLE_VIRTUAL bool setupDebugSurface(Kernel *kernel);
 
+    bool validateCapability(cl_command_queue_capabilities_intel capability) const;
+    bool validateCapabilitiesForEventWaitList(cl_uint numEventsInWaitList, const cl_event *waitList) const;
+    bool validateCapabilityForOperation(cl_command_queue_capabilities_intel capability, cl_uint numEventsInWaitList, const cl_event *waitList, const cl_event *outEvent) const;
+    cl_uint getQueueFamilyIndex() const;
+    cl_uint getQueueIndexWithinFamily() const { return queueIndexWithinFamily; }
+    bool isQueueFamilySelected() const { return queueFamilySelected; }
+
     bool getRequiresCacheFlushAfterWalker() const {
         return requiresCacheFlushAfterWalker;
     }
@@ -324,6 +330,8 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     uint64_t getSliceCount() const { return sliceCount; }
 
+    TimestampPacketContainer *getDeferredTimestampPackets() const { return deferredTimestampPackets.get(); }
+
     uint64_t dispatchHints = 0;
 
   protected:
@@ -339,14 +347,17 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     MOCKABLE_VIRTUAL void obtainNewTimestampPacketNodes(size_t numberOfNodes, TimestampPacketContainer &previousNodes, bool clearAllDependencies, bool blitEnqueue);
     void storeProperties(const cl_queue_properties *properties);
     void processProperties(const cl_queue_properties *properties);
+    void overrideEngine(aub_stream::EngineType engineType);
     bool bufferCpuCopyAllowed(Buffer *buffer, cl_command_type commandType, cl_bool blocking, size_t size, void *ptr,
                               cl_uint numEventsInWaitList, const cl_event *eventWaitList);
     void providePerformanceHint(TransferProperties &transferProperties);
     bool queueDependenciesClearRequired() const;
     bool blitEnqueueAllowed(cl_command_type cmdType) const;
-    MOCKABLE_VIRTUAL bool blitEnqueueImageAllowed(const size_t *origin, const size_t *region);
+    bool blitEnqueuePreferred(cl_command_type cmdType, const BuiltinOpParams &builtinOpParams) const;
+    MOCKABLE_VIRTUAL bool blitEnqueueImageAllowed(const size_t *origin, const size_t *region, const Image &image);
     void aubCaptureHook(bool &blocking, bool &clearAllDependencies, const MultiDispatchInfo &multiDispatchInfo);
     virtual bool obtainTimestampPacketForCacheFlush(bool isCacheFlushRequired) const = 0;
+    void waitForLatestTaskCount();
 
     Context *context = nullptr;
     ClDevice *device = nullptr;
@@ -355,6 +366,11 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     cl_command_queue_properties commandQueueProperties = 0;
     std::vector<uint64_t> propertiesVector;
+
+    cl_command_queue_capabilities_intel queueCapabilities = CL_QUEUE_DEFAULT_CAPABILITIES_INTEL;
+    cl_uint queueFamilyIndex = 0;
+    cl_uint queueIndexWithinFamily = 0;
+    bool queueFamilySelected = false;
 
     QueuePriority priority = QueuePriority::MEDIUM;
     QueueThrottle throttle = QueueThrottle::MEDIUM;
@@ -371,6 +387,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     bool isSpecialCommandQueue = false;
     bool requiresCacheFlushAfterWalker = false;
 
+    std::unique_ptr<TimestampPacketContainer> deferredTimestampPackets;
     std::unique_ptr<TimestampPacketContainer> timestampPacketContainer;
 };
 

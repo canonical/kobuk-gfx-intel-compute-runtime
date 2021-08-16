@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -65,10 +65,7 @@ Context::~Context() {
         memoryManager->getDeferredDeleter()->removeClient();
     }
     gtpinNotifyContextDestroy((cl_context)this);
-    for (auto callback : destructorCallbacks) {
-        callback->invoke(this);
-        delete callback;
-    }
+    destructorCallbacks.invoke(this);
     for (auto &device : devices) {
         device->decRefInternal();
     }
@@ -80,10 +77,8 @@ Context::~Context() {
 
 cl_int Context::setDestructorCallback(void(CL_CALLBACK *funcNotify)(cl_context, void *),
                                       void *userData) {
-    auto cb = new ContextDestructorCallback(funcNotify, userData);
-
     std::unique_lock<std::mutex> theLock(mtx);
-    destructorCallbacks.push_front(cb);
+    destructorCallbacks.add(funcNotify, userData);
     return CL_SUCCESS;
 }
 
@@ -140,12 +135,8 @@ bool Context::createImpl(const cl_context_properties *properties,
         propertiesCurrent += 2;
 
         switch (propertyType) {
-        case CL_CONTEXT_PLATFORM: {
-            if (castToObject<Platform>(reinterpret_cast<cl_platform_id>(propertyValue)) == nullptr) {
-                errcodeRet = CL_INVALID_PLATFORM;
-                return false;
-            }
-        } break;
+        case CL_CONTEXT_PLATFORM:
+            break;
         case CL_CONTEXT_SHOW_DIAGNOSTICS_INTEL:
             driverDiagnosticsUsed = static_cast<int32_t>(propertyValue);
             break;
@@ -187,13 +178,15 @@ bool Context::createImpl(const cl_context_properties *properties,
         return false;
     }
 
+    bool containsDeviceWithSubdevices = false;
     for (const auto &device : inputDevices) {
         rootDeviceIndices.insert(device->getRootDeviceIndex());
+        containsDeviceWithSubdevices |= device->getNumAvailableDevices() > 1;
     }
 
     this->driverDiagnostics = driverDiagnostics.release();
-    if (rootDeviceIndices.size() > 1 && !DebugManager.flags.EnableMultiRootDeviceContexts.get()) {
-        DEBUG_BREAK_IF("No support for context with multiple root devices");
+    if (rootDeviceIndices.size() > 1 && containsDeviceWithSubdevices && !DebugManager.flags.EnableMultiRootDeviceContexts.get()) {
+        DEBUG_BREAK_IF("No support for context with multiple devices with subdevices");
         errcodeRet = CL_OUT_OF_HOST_MEMORY;
         return false;
     }
@@ -224,10 +217,11 @@ bool Context::createImpl(const cl_context_properties *properties,
             anySvmSupport |= device->getHardwareInfo().capabilityTable.ftrSvm;
         }
 
-        if (anySvmSupport) {
-            this->svmAllocsManager = new SVMAllocsManager(this->memoryManager);
-        }
         setupContextType();
+        if (anySvmSupport) {
+            this->svmAllocsManager = new SVMAllocsManager(this->memoryManager,
+                                                          this->areMultiStorageAllocationsPreferred());
+        }
     }
 
     for (auto &device : devices) {
@@ -299,12 +293,8 @@ size_t Context::getNumDevices() const {
     return devices.size();
 }
 
-size_t Context::getTotalNumDevices() const {
-    size_t numAvailableDevices = 0u;
-    for (auto &device : devices) {
-        numAvailableDevices += device->getNumAvailableDevices();
-    }
-    return numAvailableDevices;
+bool Context::containsMultipleSubDevices(uint32_t rootDeviceIndex) const {
+    return deviceBitfields.at(rootDeviceIndex).count() > 1;
 }
 
 ClDevice *Context::getDevice(size_t deviceOrdinal) const {
@@ -319,13 +309,6 @@ cl_int Context::getSupportedImageFormats(
     cl_image_format *imageFormats,
     cl_uint *numImageFormatsReturned) {
     size_t numImageFormats = 0;
-
-    if (isValueSet(CL_MEM_KERNEL_READ_AND_WRITE, flags) && device->getSpecializedDevice<ClDevice>()->areOcl21FeaturesEnabled() == false) {
-        if (numImageFormatsReturned) {
-            *numImageFormatsReturned = static_cast<cl_uint>(numImageFormats);
-        }
-        return CL_SUCCESS;
-    }
 
     const bool nv12ExtensionEnabled = device->getSpecializedDevice<ClDevice>()->getDeviceInfo().nv12Extension;
     const bool packedYuvExtensionEnabled = device->getSpecializedDevice<ClDevice>()->getDeviceInfo().packedYuvExtension;
@@ -388,8 +371,8 @@ SchedulerKernel &Context::getSchedulerKernel() {
 
     auto initializeSchedulerProgramAndKernel = [&] {
         cl_int retVal = CL_SUCCESS;
-        auto device = &getDevice(0)->getDevice();
-        auto src = SchedulerKernel::loadSchedulerKernel(device);
+        auto clDevice = getDevice(0);
+        auto src = SchedulerKernel::loadSchedulerKernel(&clDevice->getDevice());
 
         auto program = Program::createBuiltInFromGenBinary(this,
                                                            devices,
@@ -399,17 +382,18 @@ SchedulerKernel &Context::getSchedulerKernel() {
         DEBUG_BREAK_IF(retVal != CL_SUCCESS);
         DEBUG_BREAK_IF(!program);
 
-        retVal = program->processGenBinary(device->getRootDeviceIndex());
+        retVal = program->processGenBinary(*clDevice);
         DEBUG_BREAK_IF(retVal != CL_SUCCESS);
 
         schedulerBuiltIn->pProgram = program;
 
-        auto kernelInfo = schedulerBuiltIn->pProgram->getKernelInfo(SchedulerKernel::schedulerName);
+        auto kernelInfo = schedulerBuiltIn->pProgram->getKernelInfo(SchedulerKernel::schedulerName, clDevice->getRootDeviceIndex());
         DEBUG_BREAK_IF(!kernelInfo);
 
         schedulerBuiltIn->pKernel = Kernel::create<SchedulerKernel>(
             schedulerBuiltIn->pProgram,
             *kernelInfo,
+            *clDevice,
             &retVal);
 
         UNRECOVERABLE_IF(schedulerBuiltIn->pKernel->getScratchSize() != 0);
@@ -471,4 +455,23 @@ void Context::setupContextType() {
     }
 }
 
+Platform *Context::getPlatformFromProperties(const cl_context_properties *properties, cl_int &errcode) {
+    errcode = CL_SUCCESS;
+    auto propertiesCurrent = properties;
+    while (propertiesCurrent && *propertiesCurrent) {
+        auto propertyType = propertiesCurrent[0];
+        auto propertyValue = propertiesCurrent[1];
+        propertiesCurrent += 2;
+        if (CL_CONTEXT_PLATFORM == propertyType) {
+            Platform *pPlatform = nullptr;
+            errcode = validateObject(WithCastToInternal(reinterpret_cast<cl_platform_id>(propertyValue), &pPlatform));
+            return pPlatform;
+        }
+    }
+    return nullptr;
+}
+
+bool Context::isSingleDeviceContext() {
+    return devices[0]->getNumAvailableDevices() == 1 && getNumDevices() == 1;
+}
 } // namespace NEO

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,6 +8,7 @@
 #pragma once
 #include "shared/source/command_stream/preemption_mode.h"
 #include "shared/source/helpers/common_types.h"
+#include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/utilities/reference_tracked_object.h"
 
 #include "opencl/source/api/cl_types.h"
@@ -30,12 +31,12 @@ class MemoryManager;
 class PerformanceCounters;
 class Platform;
 class SourceLevelDebugger;
-class SyncBufferHandler;
 struct DeviceInfo;
 struct EngineControl;
 struct HardwareCapabilities;
 struct HardwareInfo;
 struct RootDeviceEnvironment;
+struct SelectorCopyEngine;
 
 template <>
 struct OpenCLObjectMapper<_cl_device_id> {
@@ -65,10 +66,10 @@ class ClDevice : public BaseObject<_cl_device_id> {
     bool getDeviceAndHostTimer(uint64_t *deviceTimestamp, uint64_t *hostTimestamp) const;
     bool getHostTimer(uint64_t *hostTimestamp) const;
     const HardwareInfo &getHardwareInfo() const;
-    EngineControl &getEngine(aub_stream::EngineType engineType, bool lowPriority, bool internalUsage);
+    EngineControl &getEngine(aub_stream::EngineType engineType, EngineUsage engineUsage);
     EngineControl &getDefaultEngine();
     EngineControl &getInternalEngine();
-    std::atomic<uint32_t> &getSelectorCopyEngine();
+    SelectorCopyEngine &getSelectorCopyEngine();
     MemoryManager *getMemoryManager() const;
     GmmHelper *getGmmHelper() const;
     GmmClientContext *getGmmClientContext() const;
@@ -76,7 +77,6 @@ class ClDevice : public BaseObject<_cl_device_id> {
     double getPlatformHostTimerResolution() const;
     bool isSimulation() const;
     GFXCORE_FAMILY getRenderCoreFamily() const;
-    void allocateSyncBufferHandler();
     PerformanceCounters *getPerformanceCounters();
     PreemptionMode getPreemptionMode() const;
     bool isDebuggerActive() const;
@@ -118,11 +118,15 @@ class ClDevice : public BaseObject<_cl_device_id> {
     ClDevice *getDeviceById(uint32_t deviceId);
     const std::string &peekCompilerExtensions() const;
     const std::string &peekCompilerExtensionsWithFeatures() const;
-    const std::string &peekCompilerFeatures() const;
-    std::unique_ptr<SyncBufferHandler> syncBufferHandler;
     DeviceBitfield getDeviceBitfield() const;
     bool isDeviceEnqueueSupported() const;
     bool arePipesSupported() const;
+    bool isPciBusInfoValid() const;
+
+    static cl_command_queue_capabilities_intel getQueueFamilyCapabilitiesAll();
+    MOCKABLE_VIRTUAL cl_command_queue_capabilities_intel getQueueFamilyCapabilities(EngineGroupType type);
+    void getQueueFamilyName(char *outputName, size_t maxOutputNameLength, EngineGroupType type);
+    Platform *getPlatform() const;
 
   protected:
     void initializeCaps();
@@ -149,7 +153,6 @@ class ClDevice : public BaseObject<_cl_device_id> {
     std::vector<unsigned int> simultaneousInterops = {0};
     std::string compilerExtensions;
     std::string compilerExtensionsWithFeatures;
-    std::string compilerFeatures;
 };
 
 } // namespace NEO

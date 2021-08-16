@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -85,6 +85,6 @@ bool areNotNullptr(T t, RT... rt) {
 }
 
 cl_int validateYuvOperation(const size_t *origin, const size_t *region);
-bool IsPackedYuvImage(const cl_image_format *imageFormat);
-bool IsNV12Image(const cl_image_format *imageFormat);
+bool isPackedYuvImage(const cl_image_format *imageFormat);
+bool isNV12Image(const cl_image_format *imageFormat);
 } // namespace NEO

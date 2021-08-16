@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -99,24 +99,19 @@ cl_int Program::build(
                     }
                     appendKernelDebugOptions(*clDevice, internalOptions);
                     notifyDebuggerWithSourceCode(*clDevice, filename);
-                    if (!filename.empty()) {
-                        // Add "-s" flag first so it will be ignored by clang in case the options already have this flag set.
-                        options = std::string("-s ") + filename + " " + options;
-                    }
+                    prependFilePathToOptions(filename);
 
                     phaseReached[clDevice->getRootDeviceIndex()] = BuildPhase::SourceCodeNotification;
                 }
             }
 
-            if (requiresOpenClCFeatures(options)) {
-                auto compilerExtensionsWithFeaturesOptions = defaultClDevice->peekCompilerExtensionsWithFeatures();
-                CompilerOptions::concatenateAppend(internalOptions, compilerExtensionsWithFeaturesOptions);
-                auto compilerFeaturesOptions = defaultClDevice->peekCompilerFeatures();
-                CompilerOptions::concatenateAppend(internalOptions, compilerFeaturesOptions);
-            } else {
-                auto compilerExtensionsOptions = defaultClDevice->peekCompilerExtensions();
-                CompilerOptions::concatenateAppend(internalOptions, compilerExtensionsOptions);
+            std::string extensions = requiresOpenClCFeatures(options) ? defaultClDevice->peekCompilerExtensionsWithFeatures()
+                                                                      : defaultClDevice->peekCompilerExtensions();
+            if (requiresAdditionalExtensions(options)) {
+                extensions.erase(extensions.length() - 1);
+                extensions += ",+cl_khr_3d_image_writes ";
             }
+            CompilerOptions::concatenateAppend(internalOptions, extensions);
 
             inputArgs.apiOptions = ArrayRef<const char>(options.c_str(), options.length());
             inputArgs.internalOptions = ArrayRef<const char>(internalOptions.c_str(), internalOptions.length());
@@ -160,9 +155,9 @@ cl_int Program::build(
                 continue;
             }
             if (DebugManager.flags.PrintProgramBinaryProcessingTime.get()) {
-                retVal = TimeMeasureWrapper::functionExecution(*this, &Program::processGenBinary, clDevice->getRootDeviceIndex());
+                retVal = TimeMeasureWrapper::functionExecution(*this, &Program::processGenBinary, *clDevice);
             } else {
-                retVal = processGenBinary(clDevice->getRootDeviceIndex());
+                retVal = processGenBinary(*clDevice);
             }
 
             if (retVal != CL_SUCCESS) {
@@ -175,26 +170,29 @@ cl_int Program::build(
             break;
         }
 
-        if (isKernelDebugEnabled()) {
-            processDebugData();
+        if (isKernelDebugEnabled() || gtpinIsGTPinInitialized()) {
 
             for (auto &clDevice : deviceVector) {
-                if (BuildPhase::DebugDataNotification == phaseReached[clDevice->getRootDeviceIndex()]) {
+                auto rootDeviceIndex = clDevice->getRootDeviceIndex();
+                if (BuildPhase::DebugDataNotification == phaseReached[rootDeviceIndex]) {
                     continue;
                 }
+                processDebugData(rootDeviceIndex);
                 if (clDevice->getSourceLevelDebugger()) {
-                    for (auto kernelInfo : kernelInfoArray) {
+                    for (auto kernelInfo : buildInfos[rootDeviceIndex].kernelInfoArray) {
                         clDevice->getSourceLevelDebugger()->notifyKernelDebugData(&kernelInfo->debugData,
                                                                                   kernelInfo->kernelDescriptor.kernelMetadata.kernelName,
                                                                                   kernelInfo->heapInfo.pKernelHeap,
                                                                                   kernelInfo->heapInfo.KernelHeapSize);
                     }
                 }
-                phaseReached[clDevice->getRootDeviceIndex()] = BuildPhase::DebugDataNotification;
+                phaseReached[rootDeviceIndex] = BuildPhase::DebugDataNotification;
             }
         }
 
-        separateBlockKernels();
+        for (const auto &device : deviceVector) {
+            separateBlockKernels(device->getRootDeviceIndex());
+        }
     } while (false);
 
     if (retVal != CL_SUCCESS) {
@@ -214,7 +212,7 @@ bool Program::appendKernelDebugOptions(ClDevice &clDevice, std::string &internal
     CompilerOptions::concatenateAppend(options, CompilerOptions::generateDebugInfo);
 
     auto debugger = clDevice.getSourceLevelDebugger();
-    if (debugger && debugger->isOptimizationDisabled()) {
+    if (debugger && (NEO::SourceLevelDebugger::shouldAppendOptDisable(*debugger))) {
         CompilerOptions::concatenateAppend(options, CompilerOptions::optDisable);
     }
     return true;
@@ -233,7 +231,7 @@ cl_int Program::build(const ClDeviceVector &deviceVector, const char *buildOptio
         return ret;
     }
 
-    for (auto &ki : this->kernelInfoArray) {
+    for (auto &ki : buildInfos[deviceVector[0]->getRootDeviceIndex()].kernelInfoArray) {
         auto fit = builtinsMap.find(ki->kernelDescriptor.kernelMetadata.kernelName);
         if (fit == builtinsMap.end()) {
             continue;

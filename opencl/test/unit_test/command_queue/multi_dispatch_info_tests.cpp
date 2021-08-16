@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,7 +21,7 @@ struct MultiDispatchInfoTest : public ::testing::Test {
 
 TEST_F(MultiDispatchInfoTest, GivenNullKernelWhenCreatingMultiDispatchInfoThenExpectationsAreMet) {
 
-    MockMultiDispatchInfo multiDispatchInfo(nullptr);
+    MockMultiDispatchInfo multiDispatchInfo(nullptr, nullptr);
 
     EXPECT_FALSE(multiDispatchInfo.begin()->usesSlm());
     EXPECT_FALSE(multiDispatchInfo.begin()->usesStatelessPrintfSurface());

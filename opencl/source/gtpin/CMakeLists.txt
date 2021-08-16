@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2020 Intel Corporation
+# Copyright (C) 2018-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -13,11 +13,18 @@ if(NOT DISABLED_GTPIN_SUPPORT)
       ${CMAKE_CURRENT_SOURCE_DIR}/gtpin_hw_helper.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/gtpin_hw_helper.h
       ${CMAKE_CURRENT_SOURCE_DIR}/gtpin_hw_helper.inl
+      ${CMAKE_CURRENT_SOURCE_DIR}/gtpin_hw_helper_bdw_plus.inl
       ${CMAKE_CURRENT_SOURCE_DIR}/gtpin_init.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/gtpin_init.h
       ${CMAKE_CURRENT_SOURCE_DIR}/gtpin_notify.h
       ${CMAKE_CURRENT_SOURCE_DIR}/gtpin_defs.h
   )
+
+  if(SUPPORT_XEHP_PLUS)
+    list(APPEND RUNTIME_SRCS_GTPIN
+         ${CMAKE_CURRENT_SOURCE_DIR}/gtpin_hw_helper_xehp_plus.inl
+    )
+  endif()
 
   if(WIN32)
     set(MSVC_DEF_ADDITIONAL_EXPORTS "${MSVC_DEF_ADDITIONAL_EXPORTS}\nGTPin_Init")
@@ -34,3 +41,5 @@ endif()
 target_sources(${NEO_STATIC_LIB_NAME} PRIVATE ${RUNTIME_SRCS_GTPIN})
 set_property(GLOBAL PROPERTY RUNTIME_SRCS_GTPIN ${RUNTIME_SRCS_GTPIN})
 set(MSVC_DEF_ADDITIONAL_EXPORTS "${MSVC_DEF_ADDITIONAL_EXPORTS}" PARENT_SCOPE)
+
+add_subdirectories()

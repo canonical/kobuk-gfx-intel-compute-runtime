@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2017-2020 Intel Corporation
+# Copyright (C) 2018-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -42,19 +42,24 @@ link_libraries(${ASAN_LIBS} ${TSAN_LIBS})
 add_custom_target(prepare_test_kernels)
 add_custom_target(copy_test_files_per_product)
 add_custom_target(run_unit_tests ALL)
-add_custom_target(unit_tests)
 add_dependencies(unit_tests copy_test_files_per_product)
 
 set(IGDRCL_SRCS_tests_local
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
-    ${CMAKE_CURRENT_SOURCE_DIR}/libult/os_interface.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/ult_configuration.cpp
+    ${NEO_SHARED_TEST_DIRECTORY}/common/libult/os_interface.cpp
+    ${NEO_SHARED_TEST_DIRECTORY}/common/test_configuration/unit_tests/ult_configuration.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/unit_test/tests_configuration.h
     ${NEO_SOURCE_DIR}/opencl/source/helpers/api_specific_config_ocl.cpp
 )
 
 if(WIN32)
   list(APPEND IGDRCL_SRCS_tests_local ${NEO_SOURCE_DIR}/opencl/test/unit_test/os_interface/windows/wddm_create.cpp)
+else()
+  if(NOT DISABLE_WDDM_LINUX)
+    list(APPEND IGDRCL_SRCS_tests_local ${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory.cpp
+         ${NEO_SHARED_DIRECTORY}/os_interface/windows/wddm/wddm_create.cpp
+    )
+  endif()
 endif()
 
 add_subdirectory(libult)
@@ -71,17 +76,10 @@ if(UNIX)
                      COMMAND igdrcl_linux_dll_tests ${IGDRCL_TESTS_LISTENER_OPTION}
                      COMMAND WORKING_DIRECTORY ${TargetDir}
   )
-  if(PRE_ULT_COMMAND)
-    add_custom_command(
-                       TARGET unit_tests
-                       POST_BUILD
-                       COMMAND echo running ${PRE_ULT_COMMAND} utility before ULTs execution
-                       COMMAND ${PRE_ULT_COMMAND}
-    )
-  endif()
 endif()
 
 set(NEO_IGDRCL_TESTS__TARGET_OBJECTS
+    $<TARGET_OBJECTS:igdrcl_libult_common>
     $<TARGET_OBJECTS:igdrcl_libult>
     $<TARGET_OBJECTS:igdrcl_libult_cs>
     $<TARGET_OBJECTS:igdrcl_libult_env>
@@ -95,7 +93,7 @@ set(NEO_IGDRCL_TESTS__TARGET_OBJECTS
 
 if(DEFINED AUB_STREAM_PROJECT_NAME)
   add_library(aub_stream_mock_lib OBJECT EXCLUDE_FROM_ALL
-              ${NEO_SOURCE_DIR}/opencl/test/unit_test/aub_stream_mocks/aub_stream_interface_mock.cpp
+              ${NEO_SHARED_TEST_DIRECTORY}/common/aub_stream_mocks/aub_stream_interface_mock.cpp
   )
   list(APPEND NEO_IGDRCL_TESTS__TARGET_OBJECTS
        $<TARGET_OBJECTS:${AUB_STREAM_PROJECT_NAME}_all_hw>
@@ -144,6 +142,7 @@ endif()
 
 target_include_directories(igdrcl_tests PRIVATE
                            ${NEO_SOURCE_DIR}/opencl/test/unit_test/mocks${BRANCH_DIR_SUFFIX}
+                           ${NEO_SHARED_TEST_DIRECTORY}/common/mocks${BRANCH_DIR_SUFFIX}
                            ${ENGINE_NODE_DIR}
                            ${KHRONOS_GL_HEADERS_DIR}
                            ${CMAKE_CURRENT_SOURCE_DIR}/config
@@ -176,6 +175,7 @@ endfunction()
 function(neo_copy_test_files_with_revision target product revision_id)
   set(outputdir "${TargetDir}/${product}/${revision_id}")
   add_custom_target(${target})
+  add_dependencies(${target} copy_test_kernel_${product}_${revision_id})
   add_custom_command(
                      TARGET ${target}
                      POST_BUILD
@@ -207,10 +207,14 @@ if(UNIX)
 endif()
 
 set_target_properties(unit_tests PROPERTIES FOLDER ${OPENCL_TEST_PROJECTS_FOLDER})
+set_target_properties(copy_test_files_per_product PROPERTIES FOLDER ${OPENCL_TEST_PROJECTS_FOLDER})
 set_target_properties(prepare_test_kernels PROPERTIES FOLDER ${OPENCL_TEST_PROJECTS_FOLDER})
 set_target_properties(run_unit_tests PROPERTIES FOLDER ${OPENCL_TEST_PROJECTS_FOLDER})
 
-target_include_directories(igdrcl_tests BEFORE PRIVATE ${NEO_SHARED_TEST_DIRECTORY}/unit_test/test_macros/header${BRANCH_DIR_SUFFIX})
+target_include_directories(igdrcl_tests BEFORE PRIVATE
+                           ${NEO_SHARED_TEST_DIRECTORY}/common/test_macros/header${BRANCH_DIR_SUFFIX}
+                           ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/includes${BRANCH_DIR_SUFFIX}
+)
 
 if(NOT DEFINED cloc_cmd_prefix)
   if(WIN32)
@@ -428,11 +432,14 @@ set(TEST_KERNEL_SIP_DEBUG_LOCAL_options
 )
 
 set(TEST_KERNEL_BINDLESS_internal_options
-    "-cl-intel-use-bindless-buffers -cl-intel-use-bindless-images"
+    "-cl-intel-use-bindless-mode"
 )
 
 set(TEST_KERNEL_BINDLESS
     test_files/stateful_copy_buffer.cl
+)
+
+set(TEST_KERNEL_BINDLESS_IMAGES
     test_files/copy_buffer_to_image.cl
 )
 
@@ -462,7 +469,13 @@ macro(macro_for_each_gen)
       set(PLATFORM_VME_LOWER ${DEFAULT_SUPPORTED_VME_${GEN_TYPE}_${PLATFORM_TYPE}_PLATFORM})
 
       set(PLATFORM_TEST_KERNELS ${TEST_KERNELS})
-      foreach(KERNEL_TO_REMOVE ${${GEN_TYPE}_TEST_KERNELS_BLACKLIST})
+      set(IMAGE_SUPPORT FALSE)
+      GEN_CONTAINS_PLATFORMS("SUPPORTED_IMAGES" ${GEN_TYPE} IMAGE_SUPPORT)
+      if(NOT IMAGE_SUPPORT)
+        list(REMOVE_ITEM PLATFORM_TEST_KERNELS "${CMAKE_CURRENT_SOURCE_DIR}/test_files/copy_buffer_to_image.cl")
+      endif()
+
+      foreach(KERNEL_TO_REMOVE ${${GEN_TYPE}_TEST_KERNELS_BLOCKLIST})
         set(KERNEL_TO_REMOVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test_files/${KERNEL_TO_REMOVE}")
         list(REMOVE_ITEM PLATFORM_TEST_KERNELS ${KERNEL_TO_REMOVE_PATH})
       endforeach()
@@ -501,28 +514,16 @@ macro(macro_for_each_gen)
           endforeach()
         endif()
 
-        foreach(file ${TEST_KERNEL_BINDLESS})
+        set(BINDLESS_KERNELS_IMAGES "")
+        if(IMAGE_SUPPORT)
+          set(BINDLESS_KERNELS_IMAGES ${TEST_KERNEL_BINDLESS_IMAGES})
+        endif()
 
+        foreach(file ${TEST_KERNEL_BINDLESS} ${BINDLESS_KERNELS_IMAGES})
           foreach(REVISION_ID ${${PLATFORM_TYPE}_${GEN_TYPE}_REVISIONS})
             neo_gen_kernels_with_internal_options(${family_name_with_type} ${PLATFORM_LOWER} ${REVISION_ID} ${family_name_with_type} ${file} "bindless" ${TEST_KERNEL_BINDLESS_internal_options})
           endforeach()
-
         endforeach()
-
-        set(sip_kernel_file_name)
-        set(sip_kernel_output_file)
-        set(sip_debug_kernel_output_file)
-        set(sip_debug_local_kernel_output_file)
-        list(APPEND sip_kernel_file_name "opencl/test/unit_test/test_files/sip_dummy_kernel_${NEO_BITS}.ll")
-        list(APPEND sip_debug_kernel_output_file "sip_dummy_kernel_debug_${NEO_BITS}")
-        list(APPEND sip_debug_local_kernel_output_file "sip_dummy_kernel_debug_local_${NEO_BITS}")
-
-        # Temporarily disabled sip kernel generation
-        # if("${GEN_TYPE_LOWER}" STREQUAL "gen9" )
-        #   neo_gen_kernel_from_ll(${family_name_with_type} ${PLATFORM_LOWER} ${family_name_with_type} ${sip_kernel_file_name} ${sip_debug_local_kernel_output_file} ${TEST_KERNEL_SIP_DEBUG_LOCAL_options})
-        # endif()
-
-        # neo_gen_kernel_from_ll(${family_name_with_type} ${PLATFORM_LOWER} ${family_name_with_type} ${sip_kernel_file_name} ${sip_debug_kernel_output_file} ${TEST_KERNEL_SIP_DEBUG_options})
 
         if(PLATFORM_2_0_LOWER)
           foreach(REVISION_ID ${${PLATFORM_TYPE}_${GEN_TYPE}_REVISIONS})

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,6 +16,9 @@
 #include <vector>
 
 std::string lastTest("");
+namespace NEO {
+extern const char *executionName;
+}
 
 class CCustomEventListener : public ::testing::TestEventListener {
   public:
@@ -100,21 +103,34 @@ class CCustomEventListener : public ::testing::TestEventListener {
         int testsFailed = unitTest.failed_test_count();
         int testsDisabled = unitTest.disabled_test_count();
         auto timeElapsed = static_cast<int>(unitTest.elapsed_time());
-
+        std::string ultStatus = "PASSED";
+        std::string paddingS = "";
+        std::string paddingE = "";
         if (unitTest.Failed()) {
+            ultStatus = "FAILED";
+        }
+        auto executionNameLen = strlen(NEO::executionName);
+
+        if (hardwarePrefix != "---") {
+            paddingS = std::string(hardwarePrefix.length() + executionNameLen, ' ');
+            paddingE = std::string(hardwarePrefix.length() + executionNameLen, '=');
+
             fprintf(
                 stdout,
                 "\n"
-                "=====================\n"
-                "==   ULTs FAILED   ==\n"
-                "=====================\n");
+                "%s==================\n"
+                "==  %s %ss %s   ==\n"
+                "%s==================\n",
+                paddingE.c_str(), hardwarePrefix.c_str(), NEO::executionName, ultStatus.c_str(), paddingE.c_str());
         } else {
+            paddingE = std::string(executionNameLen, '=');
             fprintf(
                 stdout,
                 "\n"
-                "=====================\n"
-                "==   ULTs PASSED   ==\n"
-                "=====================\n");
+                "%s==================\n"
+                "==   %ss %s   ==\n"
+                "%s==================\n",
+                paddingE.c_str(), NEO::executionName, ultStatus.c_str(), paddingE.c_str());
         }
 
         fprintf(
@@ -125,13 +141,14 @@ class CCustomEventListener : public ::testing::TestEventListener {
             "Tests failed:   %d\n"
             "Tests disabled: %d\n"
             " Time elapsed:  %d ms\n"
-            "=====================\n",
+            "%s==================\n",
             testsRun,
             testsPassed,
             testsSkipped,
             testsFailed,
             testsDisabled,
-            timeElapsed);
+            timeElapsed,
+            paddingE.c_str());
 
         for (auto failure : testFailures)
             fprintf(

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -15,8 +15,10 @@
 namespace NEO {
 class MockContext;
 class MockKernel;
+class MultiDeviceKernel;
 class MockProgram;
 class Image;
+class MockKernelInfo;
 struct KernelInfo;
 } // namespace NEO
 
@@ -40,10 +42,11 @@ class KernelImageArgTest : public Test<NEO::ClDeviceFixture> {
     std::unique_ptr<iOpenCL::SKernelBinaryHeaderCommon> kernelHeader;
     std::unique_ptr<NEO::MockContext> context;
     std::unique_ptr<NEO::MockProgram> program;
-    std::unique_ptr<NEO::KernelInfo> pKernelInfo;
-    std::unique_ptr<NEO::MockKernel> pKernel;
+    std::unique_ptr<NEO::MockKernelInfo> pKernelInfo;
+    std::unique_ptr<NEO::MultiDeviceKernel> pMultiDeviceKernel;
+    NEO::MockKernel *pKernel;
     std::unique_ptr<NEO::Image> image;
 
     char surfaceStateHeap[0x80];
-    uint32_t offsetNumMipLevelsImage0 = -1;
+    uint32_t offsetNumMipLevelsImage0 = 0x40;
 };

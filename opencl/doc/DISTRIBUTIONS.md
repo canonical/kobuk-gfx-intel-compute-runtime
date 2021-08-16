@@ -1,3 +1,11 @@
+<!---
+
+Copyright (C) 2020-2021 Intel Corporation
+
+SPDX-License-Identifier: MIT
+
+-->
+
 # NEO OpenCL in Linux distributions
 
 [![Packaging status](https://repology.org/badge/vertical-allrepos/intel-compute-runtime.svg)](https://repology.org/project/intel-compute-runtime/versions)
@@ -8,7 +16,7 @@
 pacman -S intel-compute-runtime
 ```
 
-## Centos* 7, 8, Red Hat Enterprise Linux* 7
+## Centos* 7, 8, Stream, Red Hat Enterprise Linux* 7
 
 ```
 yum install yum-plugin-copr
@@ -28,13 +36,22 @@ swupd bundle-add computer-vision-basic
 cave resolve --execute intel-compute-runtime
 ```
 
-## Fedora* 31, 32, rawhide, Red Hat Enterprise Linux* 8, Mageia* 7
+## Fedora* 33, 34, rawhide, Red Hat Enterprise Linux* 8, Mageia* 8
 
 ```
 dnf install dnf-plugins-core
 dnf copr enable jdanecki/intel-opencl
 dnf install intel-opencl
 ```
+
+## Mageia* Cauldron
+
+```
+dnf install dnf-plugins-core
+dnf copr enable jdanecki/intel-opencl mageia-cauldron-x86_64
+dnf install intel-opencl
+```
+
 
 ## Gentoo*, Funtoo*
 
@@ -49,14 +66,6 @@ nix-channel --add https://nixos.org/channels/nixpkgs-unstable
 nix-channel --update
 nix-env -i intel-compute-runtime
 ```
-
-## OpenSUSE Leap 15.1
-
-```
-zypper addrepo -r https://copr.fedorainfracloud.org/coprs/jdanecki/intel-opencl/repo/opensuse-leap-15.1/jdanecki-intel-opencl-opensuse-leap-15.1.repo
-zypper install intel-opencl
-```
-
 ## OpenSUSE Leap 15.2
 
 ```
@@ -77,7 +86,7 @@ zypper install intel-opencl
 ipoldek install intel-gmmlib intel-graphics-compiler intel-compute-runtime
 ```
 
-## Ubuntu* ppa for 18.04, 20.04
+## Ubuntu* ppa for 18.04, 20.04, 20.10, 21.04
 
 ```
 add-apt-repository ppa:intel-opencl/intel-opencl
@@ -85,10 +94,17 @@ apt update
 apt install intel-opencl-icd
 ```
 
-## Ubuntu* 20.04
+## Ubuntu* 20.04, 20.10, 21.04
 
 ```
 apt install intel-opencl-icd
+```
+
+## Conda (Linux glibc>=2.12)
+
+```
+conda config --add channels conda-forge
+conda install intel-compute-runtime
 ```
 
 ## Building and installation

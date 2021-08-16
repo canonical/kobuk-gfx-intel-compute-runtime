@@ -1,34 +1,35 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/source/aub_mem_dump/aub_alloc_dump.h"
 #include "shared/source/aub_mem_dump/page_table_entry_bits.h"
 #include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/os_interface/os_context.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_aub_center.h"
+#include "shared/test/common/mocks/mock_aub_file_stream.h"
+#include "shared/test/common/mocks/mock_aub_manager.h"
+#include "shared/test/common/mocks/mock_execution_environment.h"
+#include "shared/test/common/mocks/ult_device_factory.h"
+#include "shared/test/unit_test/fixtures/mock_aub_center_fixture.h"
 
 #include "opencl/source/helpers/hardware_context_controller.h"
 #include "opencl/source/mem_obj/mem_obj_helper.h"
 #include "opencl/source/platform/platform.h"
 #include "opencl/test/unit_test/fixtures/aub_command_stream_receiver_fixture.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
-#include "opencl/test/unit_test/fixtures/mock_aub_center_fixture.h"
-#include "opencl/test/unit_test/mocks/mock_aub_center.h"
 #include "opencl/test/unit_test/mocks/mock_aub_csr.h"
-#include "opencl/test/unit_test/mocks/mock_aub_file_stream.h"
-#include "opencl/test/unit_test/mocks/mock_aub_manager.h"
 #include "opencl/test/unit_test/mocks/mock_aub_subcapture_manager.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_csr.h"
-#include "opencl/test/unit_test/mocks/mock_execution_environment.h"
 #include "opencl/test/unit_test/mocks/mock_gmm.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_mdi.h"
+#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_os_context.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 #include "test.h"
@@ -53,7 +54,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenForcedB
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, chainedBatchBuffer, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, chainedBatchBuffer, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
     size_t sizeBatchBuffer = 0xffffu;
 
@@ -78,7 +79,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenForcedB
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
     size_t sizeBatchBuffer = 0xffffu;
 
@@ -105,7 +106,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenForcedB
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, chainedBatchBuffer, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, chainedBatchBuffer, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
     size_t sizeBatchBuffer = 0xffffu;
 
@@ -127,7 +128,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenRegiste
     auto aubCsr = aubExecutionEnvironment->template getCsr<AUBCommandStreamReceiverHw<FamilyType>>();
     LinearStream cs(aubExecutionEnvironment->commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
     aubCsr->getFlatBatchBufferHelper().registerCommandChunk(batchBuffer, sizeof(MI_BATCH_BUFFER_START));
     ASSERT_EQ(1u, aubCsr->getFlatBatchBufferHelper().getCommandChunkList().size());
@@ -224,7 +225,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenForcedB
 
     ASSERT_EQ(3u, aubCsr->getFlatBatchBufferHelper().getPatchInfoCollection().size());
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
     size_t sizeBatchBuffer = 0u;
 
@@ -253,11 +254,81 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenDefault
     auto mockHelper = new MockFlatBatchBufferHelper<FamilyType>(*aubExecutionEnvironment->executionEnvironment);
     aubCsr->overwriteFlatBatchBufferHelper(mockHelper);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
     ResidencyContainer allocationsForResidency = {};
 
     EXPECT_CALL(*mockHelper, flattenBatchBuffer(aubCsr->getRootDeviceIndex(), ::testing::_, ::testing::_, ::testing::_, aubCsr->getOsContext().getDeviceBitfield())).Times(0);
     aubCsr->flush(batchBuffer, allocationsForResidency);
+}
+
+HWTEST_F(AubCommandStreamReceiverTests, givenNoCpuPtrAndNotLockableAllocationWhenGettingParametersForWriteThenLockResourceIsNotCalled) {
+    auto aubExecutionEnvironment = getEnvironment<MockAubCsr<FamilyType>>(true, true, true);
+    auto aubCsr = aubExecutionEnvironment->template getCsr<MockAubCsr<FamilyType>>();
+    auto mockMemoryManager = new MockMemoryManager();
+
+    auto memoryManagerBackup = aubExecutionEnvironment->executionEnvironment->memoryManager.release();
+    aubExecutionEnvironment->executionEnvironment->memoryManager.reset(mockMemoryManager);
+
+    EXPECT_EQ(0u, mockMemoryManager->lockResourceCalled);
+
+    constexpr uint64_t initGpuAddress = 1234;
+    constexpr size_t initSize = 10;
+    MockGraphicsAllocation allocation(nullptr, initGpuAddress, initSize);
+    allocation.setAllocationType(GraphicsAllocation::AllocationType::BUFFER);
+    allocation.overrideMemoryPool(MemoryPool::LocalMemory);
+
+    aubExecutionEnvironment->executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+    MockGmm mockGmm(aubExecutionEnvironment->executionEnvironment->rootDeviceEnvironments[0]->getGmmClientContext(), nullptr, initSize, initSize, false, false, false, {});
+    mockGmm.resourceParams.Flags.Info.NotLockable = true;
+    allocation.setDefaultGmm(&mockGmm);
+
+    uint64_t gpuAddress{};
+    void *cpuAddress{};
+    size_t size{};
+
+    aubCsr->getParametersForWriteMemory(allocation, gpuAddress, cpuAddress, size);
+
+    EXPECT_EQ(nullptr, cpuAddress);
+    EXPECT_EQ(initGpuAddress, gpuAddress);
+    EXPECT_EQ(initSize, size);
+
+    EXPECT_EQ(0u, mockMemoryManager->lockResourceCalled);
+    aubExecutionEnvironment->executionEnvironment->memoryManager.reset(memoryManagerBackup);
+}
+
+HWTEST_F(AubCommandStreamReceiverTests, givenNoCpuPtrAndLockableAllocationWhenGettingParametersForWriteThenLockResourceIsCalled) {
+    auto aubExecutionEnvironment = getEnvironment<MockAubCsr<FamilyType>>(true, true, true);
+    auto aubCsr = aubExecutionEnvironment->template getCsr<MockAubCsr<FamilyType>>();
+    auto mockMemoryManager = new MockMemoryManager();
+
+    auto memoryManagerBackup = aubExecutionEnvironment->executionEnvironment->memoryManager.release();
+    aubExecutionEnvironment->executionEnvironment->memoryManager.reset(mockMemoryManager);
+
+    EXPECT_EQ(0u, mockMemoryManager->lockResourceCalled);
+
+    constexpr uint64_t initGpuAddress = 1234;
+    constexpr size_t initSize = 10;
+    MockGraphicsAllocation allocation(nullptr, initGpuAddress, initSize);
+    allocation.setAllocationType(GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY);
+    allocation.overrideMemoryPool(MemoryPool::LocalMemory);
+
+    aubExecutionEnvironment->executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+    MockGmm mockGmm(aubExecutionEnvironment->executionEnvironment->rootDeviceEnvironments[0]->getGmmClientContext(), nullptr, initSize, initSize, false, false, false, {});
+    mockGmm.resourceParams.Flags.Info.NotLockable = false;
+    allocation.setDefaultGmm(&mockGmm);
+
+    uint64_t gpuAddress{};
+    void *cpuAddress{};
+    size_t size{};
+
+    aubCsr->getParametersForWriteMemory(allocation, gpuAddress, cpuAddress, size);
+
+    EXPECT_EQ(nullptr, cpuAddress);
+    EXPECT_EQ(initGpuAddress, gpuAddress);
+    EXPECT_EQ(initSize, size);
+
+    EXPECT_EQ(1u, mockMemoryManager->lockResourceCalled);
+    aubExecutionEnvironment->executionEnvironment->memoryManager.reset(memoryManagerBackup);
 }
 
 HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenForcedFlattenBatchBufferAndImmediateDispatchModeThenExpectFlattenBatchBufferIsCalled) {
@@ -276,7 +347,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenForcedF
     auto chainedBatchBuffer = aubExecutionEnvironment->executionEnvironment->memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{pDevice->getRootDeviceIndex(), MemoryConstants::pageSize});
     ASSERT_NE(nullptr, chainedBatchBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, chainedBatchBuffer, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, chainedBatchBuffer, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
     aubCsr->makeResident(*chainedBatchBuffer);
 
@@ -306,7 +377,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenForcedF
     auto mockHelper = new MockFlatBatchBufferHelper<FamilyType>(*aubExecutionEnvironment->executionEnvironment);
     aubCsr->overwriteFlatBatchBufferHelper(mockHelper);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
     EXPECT_CALL(*mockHelper, flattenBatchBuffer(aubCsr->getRootDeviceIndex(), ::testing::_, ::testing::_, ::testing::_, aubCsr->getOsContext().getDeviceBitfield())).Times(1);
     aubCsr->flush(batchBuffer, allocationsForResidency);
@@ -325,7 +396,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenForcedF
     aubCsr->overwriteFlatBatchBufferHelper(mockHelper);
     ResidencyContainer allocationsForResidency;
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 128u, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
     EXPECT_CALL(*mockHelper, flattenBatchBuffer(aubCsr->getRootDeviceIndex(), ::testing::_, ::testing::_, ::testing::_, aubCsr->getOsContext().getDeviceBitfield())).Times(1);
     aubCsr->flush(batchBuffer, allocationsForResidency);
@@ -339,7 +410,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenAddPatc
     auto aubCsr = aubExecutionEnvironment->template getCsr<MockAubCsr<FamilyType>>();
     LinearStream cs(aubExecutionEnvironment->commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
     ResidencyContainer allocationsForResidency;
 
@@ -352,7 +423,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenAddPatc
     auto aubCsr = aubExecutionEnvironment->template getCsr<MockAubCsr<FamilyType>>();
     LinearStream cs(aubExecutionEnvironment->commandBuffer);
 
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr};
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
     ResidencyContainer allocationsForResidency;
 
@@ -500,9 +571,9 @@ HWTEST_F(AubCommandStreamReceiverNoHostPtrTests, givenAubCommandStreamReceiverWh
     executionEnvironment->memoryManager.reset(memoryManager);
     auto hwInfo = executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo();
     auto engineInstance = HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0];
+    UltDeviceFactory deviceFactory{1, 0};
     DeviceBitfield deviceBitfield(1);
-    MockOsContext osContext(0, deviceBitfield, engineInstance.first, PreemptionMode::Disabled,
-                            false, false, false);
+    MockOsContext osContext(0, deviceBitfield, engineInstance, PreemptionMode::Disabled, false);
     std::unique_ptr<AUBCommandStreamReceiverHw<FamilyType>> aubCsr(new AUBCommandStreamReceiverHw<FamilyType>("", true, *executionEnvironment, 0, deviceBitfield));
     aubCsr->setupContext(osContext);
 
@@ -513,7 +584,8 @@ HWTEST_F(AubCommandStreamReceiverNoHostPtrTests, givenAubCommandStreamReceiverWh
 
     auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
 
-    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(aubCsr->getRootDeviceIndex(), imgInfo, true, {}, *hwInfo, osContext.getDeviceBitfield());
+    auto memoryProperties = MemoryPropertiesHelper::createMemoryProperties(0, 0, 0, deviceFactory.rootDevices[0]);
+    AllocationProperties allocProperties = MemObjHelper::getAllocationPropertiesWithImageInfo(aubCsr->getRootDeviceIndex(), imgInfo, true, memoryProperties, *hwInfo, osContext.getDeviceBitfield(), true);
 
     auto imageAllocation = memoryManager->allocateGraphicsMemoryInPreferredPool(allocProperties, nullptr);
     ASSERT_NE(nullptr, imageAllocation);
@@ -535,9 +607,8 @@ HWTEST_F(AubCommandStreamReceiverNoHostPtrTests, givenAubCommandStreamReceiverWh
     executionEnvironment->memoryManager.reset(memoryManager);
     DeviceBitfield deviceBitfield(1);
     std::unique_ptr<AUBCommandStreamReceiverHw<FamilyType>> aubCsr(new AUBCommandStreamReceiverHw<FamilyType>("", true, *executionEnvironment, 0, deviceBitfield));
-    auto osContext = memoryManager->createAndRegisterOsContext(aubCsr.get(), getChosenEngineType(*defaultHwInfo), deviceBitfield,
-                                                               PreemptionMode::Disabled,
-                                                               false, false, false);
+    auto osContext = memoryManager->createAndRegisterOsContext(aubCsr.get(), EngineTypeUsage{getChosenEngineType(*defaultHwInfo), EngineUsage::Regular}, deviceBitfield,
+                                                               PreemptionMode::Disabled, false);
     aubCsr->setupContext(*osContext);
     auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{aubCsr->getRootDeviceIndex(), MemoryConstants::pageSize});
 
@@ -716,11 +787,11 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenWriteMe
     auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{pDevice->getRootDeviceIndex(), MemoryConstants::pageSize});
     aubCsr->setAubWritable(true, *gfxAllocation);
 
-    auto gmm = new Gmm(pDevice->getGmmClientContext(), nullptr, 1, false);
+    auto gmm = new Gmm(pDevice->getGmmClientContext(), nullptr, 1, 0, false);
     gfxAllocation->setDefaultGmm(gmm);
 
     for (bool compressed : {false, true}) {
-        gmm->isRenderCompressed = compressed;
+        gmm->isCompressionEnabled = compressed;
 
         aubCsr->writeMemory(*gfxAllocation);
 
@@ -752,8 +823,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenEngineI
     auto hwInfo = executionEnvironment.rootDeviceEnvironments[0]->getHardwareInfo();
     auto engineInstance = HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0];
     DeviceBitfield deviceBitfield(1);
-    MockOsContext osContext(0, deviceBitfield, engineInstance.first, PreemptionMode::Disabled,
-                            false, false, false);
+    MockOsContext osContext(0, deviceBitfield, engineInstance, PreemptionMode::Disabled, false);
     executionEnvironment.initializeMemoryManager();
 
     auto aubCsr = std::make_unique<MockAubCsrToTestDumpContext<FamilyType>>("", true, executionEnvironment, 0, deviceBitfield);
@@ -904,7 +974,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenObtaini
     EXPECT_EQ(1u, aubCsr->getPreferredTagPoolSize());
 }
 
-HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenSshSizeIsObtainedItEqualsTo64KB) {
+HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenSshSizeIsObtainedThenReturn64KB) {
     auto aubCsr = std::make_unique<MockAubCsr<FamilyType>>("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
     EXPECT_EQ(64 * KB, aubCsr->defaultSshSize);
 }
@@ -915,290 +985,25 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenPhysica
     ASSERT_NE(nullptr, allocator);
 }
 
-HWTEST_F(AubCommandStreamReceiverTests, givenGraphicsAllocationWritableWhenDumpAllocationIsCalledAndDumpFormatIsSpecifiedThenGraphicsAllocationShouldBeDumped) {
-    DebugManagerStateRestore dbgRestore;
-    DebugManager.flags.AUBDumpBufferFormat.set("BIN");
-
+HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWithoutHardwareContextControllerWhenCallingWriteMMIOThenDontRedirectToHardwareContextController) {
     MockAubCsr<FamilyType> aubCsr("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    MockOsContext osContext(0, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled,
-                            false, false, false);
+    MockOsContext osContext(0, 1, EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::Disabled, false);
+    EXPECT_EQ(nullptr, aubCsr.hardwareContextController);
+
+    aubCsr.writeMMIO(0x11111111, 0x22222222);
+
+    EXPECT_TRUE(aubCsr.writeMMIOCalled);
+}
+
+HWTEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWithHardwareContextControllerWhenCallingWriteMMIOThenRedirectToHardwareContextController) {
+    MockAubCsr<FamilyType> aubCsr("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    MockOsContext osContext(0, 1, EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::Disabled, false);
     aubCsr.setupContext(osContext);
+    EXPECT_NE(nullptr, aubCsr.hardwareContextController);
 
     auto mockHardwareContext = static_cast<MockHardwareContext *>(aubCsr.hardwareContextController->hardwareContexts[0].get());
 
-    auto memoryManager = pDevice->getMemoryManager();
-    auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER, pDevice->getDeviceBitfield()});
-    gfxAllocation->setMemObjectsAllocationWithWritableFlags(true);
-    EXPECT_TRUE(AubAllocDump::isWritableBuffer(*gfxAllocation));
+    aubCsr.writeMMIO(0x11111111, 0x22222222);
 
-    aubCsr.dumpAllocation(*gfxAllocation);
-
-    EXPECT_TRUE(mockHardwareContext->dumpSurfaceCalled);
-
-    memoryManager->freeGraphicsMemory(gfxAllocation);
-}
-
-HWTEST_F(AubCommandStreamReceiverTests, givenBcsEngineWhenDumpAllocationCalledThenIgnore) {
-    DebugManagerStateRestore dbgRestore;
-    DebugManager.flags.AUBDumpBufferFormat.set("BIN");
-
-    MockAubCsr<FamilyType> aubCsr("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    MockOsContext osContext(0, 1, aub_stream::ENGINE_BCS, PreemptionMode::Disabled,
-                            false, false, false);
-    aubCsr.setupContext(osContext);
-
-    auto mockHardwareContext = static_cast<MockHardwareContext *>(aubCsr.hardwareContextController->hardwareContexts[0].get());
-
-    auto memoryManager = pDevice->getMemoryManager();
-    auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER, pDevice->getDeviceBitfield()});
-    gfxAllocation->setMemObjectsAllocationWithWritableFlags(true);
-    EXPECT_TRUE(AubAllocDump::isWritableBuffer(*gfxAllocation));
-
-    aubCsr.dumpAllocation(*gfxAllocation);
-
-    EXPECT_FALSE(mockHardwareContext->dumpSurfaceCalled);
-    EXPECT_TRUE(AubAllocDump::isWritableBuffer(*gfxAllocation));
-
-    memoryManager->freeGraphicsMemory(gfxAllocation);
-}
-
-HWTEST_F(AubCommandStreamReceiverTests, givenCompressedGraphicsAllocationWritableWhenDumpAllocationIsCalledAndDumpFormatIsSpecifiedThenGraphicsAllocationShouldBeDumped) {
-    DebugManagerStateRestore dbgRestore;
-    DebugManager.flags.AUBDumpBufferFormat.set("TRE");
-
-    MockAubCenter *mockAubCenter = new MockAubCenter(defaultHwInfo.get(), false, "aubfile", CommandStreamReceiverType::CSR_AUB);
-    mockAubCenter->aubManager = std::make_unique<MockAubManager>();
-
-    pDevice->executionEnvironment->rootDeviceEnvironments[0]->aubCenter.reset(mockAubCenter);
-    MockAubCsr<FamilyType> aubCsr("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    MockOsContext osContext(0, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled,
-                            false, false, false);
-    aubCsr.setupContext(osContext);
-
-    auto mockHardwareContext = static_cast<MockHardwareContext *>(aubCsr.hardwareContextController->hardwareContexts[0].get());
-
-    auto memoryManager = pDevice->getMemoryManager();
-    auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER_COMPRESSED, pDevice->getDeviceBitfield()});
-    gfxAllocation->setMemObjectsAllocationWithWritableFlags(true);
-    EXPECT_TRUE(AubAllocDump::isWritableBuffer(*gfxAllocation));
-
-    aubCsr.dumpAllocation(*gfxAllocation);
-
-    EXPECT_TRUE(mockHardwareContext->dumpSurfaceCalled);
-
-    memoryManager->freeGraphicsMemory(gfxAllocation);
-}
-
-HWTEST_F(AubCommandStreamReceiverTests, givenGraphicsAllocationWritableWhenDumpAllocationIsCalledButDumpFormatIsNotSpecifiedThenGraphicsAllocationShouldNotBeDumped) {
-    DebugManagerStateRestore dbgRestore;
-
-    MockAubCsr<FamilyType> aubCsr("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    MockOsContext osContext(0, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled,
-                            false, false, false);
-    aubCsr.setupContext(osContext);
-
-    auto mockHardwareContext = static_cast<MockHardwareContext *>(aubCsr.hardwareContextController->hardwareContexts[0].get());
-
-    auto memoryManager = pDevice->getMemoryManager();
-    auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER, pDevice->getDeviceBitfield()});
-
-    gfxAllocation->setMemObjectsAllocationWithWritableFlags(true);
-    EXPECT_TRUE(AubAllocDump::isWritableBuffer(*gfxAllocation));
-
-    aubCsr.dumpAllocation(*gfxAllocation);
-
-    EXPECT_FALSE(mockHardwareContext->dumpSurfaceCalled);
-
-    memoryManager->freeGraphicsMemory(gfxAllocation);
-}
-
-HWTEST_F(AubCommandStreamReceiverTests, givenGraphicsAllocationNonWritableWhenDumpAllocationIsCalledAndFormatIsSpecifiedThenGraphicsAllocationShouldNotBeDumped) {
-    DebugManagerStateRestore dbgRestore;
-    DebugManager.flags.AUBDumpBufferFormat.set("BIN");
-
-    MockAubCsr<FamilyType> aubCsr("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    MockOsContext osContext(0, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled,
-                            false, false, false);
-    aubCsr.setupContext(osContext);
-
-    auto mockHardwareContext = static_cast<MockHardwareContext *>(aubCsr.hardwareContextController->hardwareContexts[0].get());
-
-    auto memoryManager = pDevice->getMemoryManager();
-    auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER, pDevice->getDeviceBitfield()});
-
-    gfxAllocation->setMemObjectsAllocationWithWritableFlags(false);
-    EXPECT_FALSE(AubAllocDump::isWritableBuffer(*gfxAllocation));
-
-    aubCsr.dumpAllocation(*gfxAllocation);
-
-    EXPECT_FALSE(mockHardwareContext->dumpSurfaceCalled);
-
-    memoryManager->freeGraphicsMemory(gfxAllocation);
-}
-
-HWTEST_F(AubCommandStreamReceiverTests, givenGraphicsAllocationNotDumpableWhenDumpAllocationIsCalledAndAUBDumpAllocsOnEnqueueReadOnlyIsSetThenGraphicsAllocationShouldNotBeDumpedAndRemainNonDumpable) {
-    DebugManagerStateRestore dbgRestore;
-    DebugManager.flags.AUBDumpAllocsOnEnqueueReadOnly.set(true);
-    DebugManager.flags.AUBDumpBufferFormat.set("BIN");
-
-    MockAubCsr<FamilyType> aubCsr("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    MockOsContext osContext(0, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled,
-                            false, false, false);
-    aubCsr.setupContext(osContext);
-
-    auto mockHardwareContext = static_cast<MockHardwareContext *>(aubCsr.hardwareContextController->hardwareContexts[0].get());
-
-    auto memoryManager = pDevice->getMemoryManager();
-    auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER, pDevice->getDeviceBitfield()});
-
-    gfxAllocation->setMemObjectsAllocationWithWritableFlags(true);
-    gfxAllocation->setAllocDumpable(false, false);
-
-    aubCsr.dumpAllocation(*gfxAllocation);
-
-    EXPECT_FALSE(gfxAllocation->isAllocDumpable());
-    EXPECT_FALSE(mockHardwareContext->dumpSurfaceCalled);
-
-    memoryManager->freeGraphicsMemory(gfxAllocation);
-}
-
-HWTEST_F(AubCommandStreamReceiverTests, givenGraphicsAllocationDumpableWhenDumpAllocationIsCalledAndAUBDumpAllocsOnEnqueueReadOnlyIsOnThenGraphicsAllocationShouldBeDumpedAndMarkedNonDumpable) {
-    DebugManagerStateRestore dbgRestore;
-    DebugManager.flags.AUBDumpAllocsOnEnqueueReadOnly.set(true);
-    DebugManager.flags.AUBDumpBufferFormat.set("BIN");
-
-    MockAubCsr<FamilyType> aubCsr("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    MockOsContext osContext(0, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled,
-                            false, false, false);
-    aubCsr.setupContext(osContext);
-
-    auto mockHardwareContext = static_cast<MockHardwareContext *>(aubCsr.hardwareContextController->hardwareContexts[0].get());
-
-    auto memoryManager = pDevice->getMemoryManager();
-    auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER, pDevice->getDeviceBitfield()});
-
-    gfxAllocation->setMemObjectsAllocationWithWritableFlags(true);
-
-    auto &csrOsContext = aubCsr.getOsContext();
-
-    {
-        // Non-BCS engine, BCS dump
-        EXPECT_FALSE(EngineHelpers::isBcs(csrOsContext.getEngineType()));
-        gfxAllocation->setAllocDumpable(true, true);
-
-        aubCsr.dumpAllocation(*gfxAllocation);
-
-        EXPECT_TRUE(gfxAllocation->isAllocDumpable());
-        EXPECT_FALSE(mockHardwareContext->dumpSurfaceCalled);
-    }
-
-    {
-        // Non-BCS engine, Non-BCS dump
-        EXPECT_FALSE(EngineHelpers::isBcs(csrOsContext.getEngineType()));
-        gfxAllocation->setAllocDumpable(true, false);
-
-        aubCsr.dumpAllocation(*gfxAllocation);
-
-        EXPECT_FALSE(gfxAllocation->isAllocDumpable());
-        EXPECT_TRUE(mockHardwareContext->dumpSurfaceCalled);
-        mockHardwareContext->dumpSurfaceCalled = false;
-    }
-
-    {
-        // BCS engine, Non-BCS dump
-        csrOsContext.getEngineType() = aub_stream::EngineType::ENGINE_BCS;
-        EXPECT_TRUE(EngineHelpers::isBcs(csrOsContext.getEngineType()));
-        gfxAllocation->setAllocDumpable(true, false);
-
-        aubCsr.dumpAllocation(*gfxAllocation);
-
-        EXPECT_TRUE(gfxAllocation->isAllocDumpable());
-        EXPECT_FALSE(mockHardwareContext->dumpSurfaceCalled);
-    }
-
-    {
-        // BCS engine, BCS dump
-        csrOsContext.getEngineType() = aub_stream::EngineType::ENGINE_BCS;
-        EXPECT_TRUE(EngineHelpers::isBcs(csrOsContext.getEngineType()));
-        gfxAllocation->setAllocDumpable(true, true);
-
-        aubCsr.dumpAllocation(*gfxAllocation);
-
-        EXPECT_FALSE(gfxAllocation->isAllocDumpable());
-        EXPECT_TRUE(mockHardwareContext->dumpSurfaceCalled);
-    }
-
-    memoryManager->freeGraphicsMemory(gfxAllocation);
-}
-
-HWTEST_F(AubCommandStreamReceiverTests, givenGraphicsAllocationWhenDumpAllocationIsCalledAndAUBDumpAllocsOnEnqueueSVMMemcpyOnlyIsSetThenDumpableFlagShouldBeRespected) {
-    DebugManagerStateRestore dbgRestore;
-    DebugManager.flags.AUBDumpAllocsOnEnqueueSVMMemcpyOnly.set(true);
-    DebugManager.flags.AUBDumpBufferFormat.set("BIN");
-
-    MockAubCsr<FamilyType> aubCsr("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    MockOsContext osContext(0, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled, false, false, false);
-    aubCsr.setupContext(osContext);
-
-    auto mockHardwareContext = static_cast<MockHardwareContext *>(aubCsr.hardwareContextController->hardwareContexts[0].get());
-
-    auto memoryManager = pDevice->getMemoryManager();
-    auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER, pDevice->getDeviceBitfield()});
-
-    gfxAllocation->setMemObjectsAllocationWithWritableFlags(true);
-    gfxAllocation->setAllocDumpable(false, false);
-
-    aubCsr.dumpAllocation(*gfxAllocation);
-    EXPECT_FALSE(mockHardwareContext->dumpSurfaceCalled);
-    EXPECT_FALSE(gfxAllocation->isAllocDumpable());
-
-    gfxAllocation->setAllocDumpable(true, false);
-    aubCsr.dumpAllocation(*gfxAllocation);
-    EXPECT_FALSE(gfxAllocation->isAllocDumpable());
-    EXPECT_TRUE(mockHardwareContext->dumpSurfaceCalled);
-
-    memoryManager->freeGraphicsMemory(gfxAllocation);
-}
-
-HWTEST_F(AubCommandStreamReceiverTests, givenGraphicsAllocationWritableWhenDumpAllocationIsCalledAndDumpFormatIsSpecifiedThenPollForCompletionShouldBeCalledBeforeGraphicsAllocationIsDumped) {
-    DebugManagerStateRestore dbgRestore;
-    DebugManager.flags.AUBDumpBufferFormat.set("BIN");
-
-    MockAubCsr<FamilyType> aubCsr("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    MockOsContext osContext(0, 1, aub_stream::ENGINE_RCS, PreemptionMode::Disabled,
-                            false, false, false);
-    aubCsr.setupContext(osContext);
-    aubCsr.latestSentTaskCount = 1;
-
-    auto mockHardwareContext = static_cast<MockHardwareContext *>(aubCsr.hardwareContextController->hardwareContexts[0].get());
-
-    auto memoryManager = pDevice->getMemoryManager();
-    auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::BUFFER, pDevice->getDeviceBitfield()});
-    gfxAllocation->setMemObjectsAllocationWithWritableFlags(true);
-    EXPECT_TRUE(AubAllocDump::isWritableBuffer(*gfxAllocation));
-
-    aubCsr.dumpAllocation(*gfxAllocation);
-
-    EXPECT_TRUE(mockHardwareContext->pollForCompletionCalled);
-
-    memoryManager->freeGraphicsMemory(gfxAllocation);
-}
-
-using SimulatedCsrTest = ::testing::Test;
-HWTEST_F(SimulatedCsrTest, givenAubCsrTypeWhenCreateCommandStreamReceiverThenProperAubCenterIsInitalized) {
-    uint32_t expectedRootDeviceIndex = 10;
-    MockExecutionEnvironment executionEnvironment;
-    executionEnvironment.initializeMemoryManager();
-    executionEnvironment.prepareRootDeviceEnvironments(expectedRootDeviceIndex + 2);
-
-    auto rootDeviceEnvironment = new MockRootDeviceEnvironment(executionEnvironment);
-    executionEnvironment.rootDeviceEnvironments[expectedRootDeviceIndex].reset(rootDeviceEnvironment);
-    rootDeviceEnvironment->setHwInfo(defaultHwInfo.get());
-
-    EXPECT_EQ(nullptr, executionEnvironment.rootDeviceEnvironments[expectedRootDeviceIndex]->aubCenter.get());
-    EXPECT_FALSE(rootDeviceEnvironment->initAubCenterCalled);
-    DeviceBitfield deviceBitfield(1);
-    auto csr = std::make_unique<AUBCommandStreamReceiverHw<FamilyType>>("", true, executionEnvironment, expectedRootDeviceIndex, deviceBitfield);
-    EXPECT_TRUE(rootDeviceEnvironment->initAubCenterCalled);
-    EXPECT_NE(nullptr, executionEnvironment.rootDeviceEnvironments[expectedRootDeviceIndex]->aubCenter.get());
+    EXPECT_TRUE(mockHardwareContext->writeMMIOCalled);
 }

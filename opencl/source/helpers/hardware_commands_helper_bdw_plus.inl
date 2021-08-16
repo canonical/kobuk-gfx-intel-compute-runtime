@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -46,7 +46,7 @@ uint32_t HardwareCommandsHelper<GfxFamily>::additionalSizeRequiredDsh() {
 }
 
 template <typename GfxFamily>
-size_t HardwareCommandsHelper<GfxFamily>::getSizeRequiredCS(const Kernel *kernel) {
+size_t HardwareCommandsHelper<GfxFamily>::getSizeRequiredCS() {
     size_t size = 2 * sizeof(typename GfxFamily::MEDIA_STATE_FLUSH) +
                   sizeof(typename GfxFamily::MEDIA_INTERFACE_DESCRIPTOR_LOAD);
     return size;
@@ -101,7 +101,8 @@ void HardwareCommandsHelper<GfxFamily>::programPerThreadData(
     const size_t localWorkSize[3],
     Kernel &kernel,
     size_t &sizePerThreadDataTotal,
-    size_t &localWorkItems) {
+    size_t &localWorkItems,
+    uint32_t rootDeviceIndex) {
 
     uint32_t grfSize = sizeof(typename GfxFamily::GRF);
 
@@ -110,8 +111,10 @@ void HardwareCommandsHelper<GfxFamily>::programPerThreadData(
         simd,
         grfSize,
         numChannels,
-        localWorkSize,
-        kernel.getKernelInfo().workgroupDimensionsOrder,
+        std::array<uint16_t, 3>{{static_cast<uint16_t>(localWorkSize[0]), static_cast<uint16_t>(localWorkSize[1]), static_cast<uint16_t>(localWorkSize[2])}},
+        std::array<uint8_t, 3>{{kernel.getKernelInfo().kernelDescriptor.kernelAttributes.workgroupDimensionsOrder[0],
+                                kernel.getKernelInfo().kernelDescriptor.kernelAttributes.workgroupDimensionsOrder[1],
+                                kernel.getKernelInfo().kernelDescriptor.kernelAttributes.workgroupDimensionsOrder[2]}},
         kernel.usesOnlyImages());
 
     updatePerThreadDataTotal(sizePerThreadData, simd, numChannels, sizePerThreadDataTotal, localWorkItems);

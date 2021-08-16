@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,6 +11,6 @@
 #pragma once
 
 namespace NEO {
-std::vector<std::string> getBuiltInFileNames();
-std::string getBuiltInHashFileName(uint64_t hash);
+std::vector<std::string> getBuiltInFileNames(bool imagesSupport);
+std::string getBuiltInHashFileName(uint64_t hash, bool imagesSupport);
 } // namespace NEO

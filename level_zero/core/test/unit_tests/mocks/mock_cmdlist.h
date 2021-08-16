@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -34,14 +34,26 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::appendMemoryCopyBlit;
     using BaseClass::appendMemoryCopyBlitRegion;
     using BaseClass::appendSignalEventPostWalker;
+    using BaseClass::appendWriteKernelTimestamp;
     using BaseClass::applyMemoryRangesBarrier;
+    using BaseClass::clearCommandsToPatch;
     using BaseClass::commandListPerThreadScratchSize;
     using BaseClass::commandListPreemptionMode;
+    using BaseClass::commandsToPatch;
+    using BaseClass::containsAnyKernel;
+    using BaseClass::containsCooperativeKernelsFlag;
+    using BaseClass::engineGroupType;
+    using BaseClass::finalStreamState;
+    using BaseClass::flags;
     using BaseClass::getAlignedAllocation;
     using BaseClass::getAllocationFromHostPtrMap;
     using BaseClass::getHostPtrAlloc;
     using BaseClass::hostPtrMap;
+    using BaseClass::indirectAllocationsAllowed;
     using BaseClass::initialize;
+    using BaseClass::requiredStreamState;
+    using BaseClass::unifiedMemoryControls;
+    using BaseClass::updateStreamProperties;
 
     WhiteBox() : ::L0::CommandListCoreFamily<gfxCoreFamily>(BaseClass::defaultNumIddsPerBlock) {}
 };
@@ -54,6 +66,10 @@ struct WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>
     : public L0::CommandListCoreFamilyImmediate<gfxCoreFamily> {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using BaseClass = L0::CommandListCoreFamilyImmediate<gfxCoreFamily>;
+    using BaseClass::clearCommandsToPatch;
+    using BaseClass::commandsToPatch;
+    using BaseClass::finalStreamState;
+    using BaseClass::requiredStreamState;
 
     WhiteBox() : BaseClass(BaseClass::defaultNumIddsPerBlock) {}
 };
@@ -207,7 +223,9 @@ struct MockCommandList : public CommandList {
                       const ze_copy_region_t *srcRegion,
                       uint32_t srcPitch,
                       uint32_t srcSlicePitch,
-                      ze_event_handle_t hSignalEvent));
+                      ze_event_handle_t hSignalEvent,
+                      uint32_t numWaitEvents,
+                      ze_event_handle_t *phWaitEvents));
 
     ADDMETHOD_NOBASE(appendMemoryPrefetch, ze_result_t, ZE_RESULT_SUCCESS,
                      (const void *ptr,
@@ -218,7 +236,9 @@ struct MockCommandList : public CommandList {
                       const void *pattern,
                       size_t pattern_size,
                       size_t size,
-                      ze_event_handle_t hEvent));
+                      ze_event_handle_t hEvent,
+                      uint32_t numWaitEvents,
+                      ze_event_handle_t *phWaitEvents));
 
     ADDMETHOD_NOBASE(appendSignalEvent, ze_result_t, ZE_RESULT_SUCCESS,
                      (ze_event_handle_t hEvent));
@@ -304,17 +324,26 @@ struct MockCommandList : public CommandList {
     ADDMETHOD_NOBASE(appendPipeControl, ze_result_t, ZE_RESULT_SUCCESS,
                      (void *dstPtr,
                       uint64_t value));
+    ADDMETHOD_NOBASE(appendWaitOnMemory, ze_result_t, ZE_RESULT_SUCCESS,
+                     (void *desc, void *ptr,
+                      uint32_t data, ze_event_handle_t hSignalEvent));
+
+    ADDMETHOD_NOBASE(appendWriteToMemory, ze_result_t, ZE_RESULT_SUCCESS,
+                     (void *desc, void *ptr,
+                      uint64_t data));
 
     ADDMETHOD_NOBASE(executeCommandListImmediate, ze_result_t, ZE_RESULT_SUCCESS,
                      (bool perforMigration));
 
     ADDMETHOD_NOBASE(initialize, ze_result_t, ZE_RESULT_SUCCESS,
                      (L0::Device * device,
-                      NEO::EngineGroupType engineGroupType));
+                      NEO::EngineGroupType engineGroupType,
+                      ze_command_list_flags_t flags));
 
     uint8_t *batchBuffer = nullptr;
     NEO::GraphicsAllocation *mockAllocation = nullptr;
 };
-
+#undef ADDMETHOD
+#undef ADDMETHOD_NOBASE
 } // namespace ult
 } // namespace L0

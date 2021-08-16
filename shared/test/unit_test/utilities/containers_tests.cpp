@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -579,7 +579,7 @@ TEST(IDList, GivenNonThreadSafeWhenPushingOneThenResultIsCorrect) {
     iDListTestPushOne<false>();
 }
 
-TEST(IDList, WhenResettingTheListIsEmpty) {
+TEST(IDList, WhenResettingThenListIsEmpty) {
     DummyDNode *nodes[7];
     uint32_t destructorCounter = 0;
     makeList(nodes, &destructorCounter);
@@ -1595,6 +1595,50 @@ TEST(StackVec, WhenCallingDataThenVectorDataIsReturned) {
     for (size_t i = 0; i < 5; i++) {
         EXPECT_EQ(dataA[i], stackVecAData[i]);
         EXPECT_EQ(dataB[i], stackVecBData[i]);
+    }
+}
+
+TEST(StackVec, GivenStackVecWithDynamicMemWhenSelfAssignedThenMemoryIsReused) {
+    char dataA[] = {0, 1, 3, 4, 5};
+
+    StackVec<char, 1> stackVecA{dataA, dataA + sizeof(dataA)};
+
+    EXPECT_TRUE(stackVecA.usesDynamicMem());
+
+    {
+
+        auto currentMemory = stackVecA.data();
+        auto currentSize = stackVecA.size();
+        auto &stackVecB = stackVecA;
+        stackVecA = stackVecB;
+
+        EXPECT_EQ(currentMemory, stackVecA.data());
+        EXPECT_EQ(currentSize, stackVecA.size());
+
+        stackVecA.push_back(7);
+        currentMemory = stackVecA.data();
+        EXPECT_EQ(7, currentMemory[5]);
+        for (size_t i = 0; i < 5; i++) {
+            EXPECT_EQ(dataA[i], currentMemory[i]);
+        }
+    }
+
+    {
+
+        auto currentMemory = stackVecA.data();
+        auto currentSize = stackVecA.size();
+        auto &stackVecB = stackVecA;
+        stackVecA = std::move(stackVecB);
+
+        EXPECT_EQ(currentMemory, stackVecA.data());
+        EXPECT_EQ(currentSize, stackVecA.size());
+
+        stackVecA.push_back(7);
+        currentMemory = stackVecA.data();
+        EXPECT_EQ(7, currentMemory[5]);
+        for (size_t i = 0; i < 5; i++) {
+            EXPECT_EQ(dataA[i], currentMemory[i]);
+        }
     }
 }
 

@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_container/command_encoder.h"
+#include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/gen12lp/hw_cmds_base.h"
 #include "shared/source/gen12lp/reg_configs.h"
 #include "shared/source/helpers/preamble.h"
@@ -13,8 +14,10 @@
 using Family = NEO::TGLLPFamily;
 
 #include "shared/source/command_container/command_encoder.inl"
-#include "shared/source/command_container/command_encoder_base.inl"
+#include "shared/source/command_container/command_encoder_bdw_plus.inl"
 #include "shared/source/command_container/encode_compute_mode_tgllp_plus.inl"
+#include "shared/source/command_container/image_surface_state/compression_params_bdw_plus.inl"
+#include "shared/source/command_container/image_surface_state/compression_params_tgllp_plus.inl"
 #include "shared/source/command_stream/command_stream_receiver.h"
 
 namespace NEO {
@@ -33,10 +36,25 @@ size_t EncodeStates<Family>::getAdjustStateComputeModeSize() {
 }
 
 template <>
-void EncodeComputeMode<Family>::adjustComputeMode(LinearStream &csr, uint32_t numGrfRequired, void *const stateComputeModePtr, bool isMultiOsContextCapable) {
-    STATE_COMPUTE_MODE *stateComputeMode = static_cast<STATE_COMPUTE_MODE *>(stateComputeModePtr);
+void EncodeComputeMode<Family>::adjustComputeMode(LinearStream &csr, void *const stateComputeModePtr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo) {
+    using STATE_COMPUTE_MODE = typename Family::STATE_COMPUTE_MODE;
+    using FORCE_NON_COHERENT = typename STATE_COMPUTE_MODE::FORCE_NON_COHERENT;
+
+    STATE_COMPUTE_MODE stateComputeMode = (stateComputeModePtr) ? *(static_cast<STATE_COMPUTE_MODE *>(stateComputeModePtr))
+                                                                : Family::cmdInitStateComputeMode;
+    auto maskBits = stateComputeMode.getMaskBits();
+
+    if (properties.isCoherencyRequired.isDirty) {
+        FORCE_NON_COHERENT coherencyValue = !properties.isCoherencyRequired.value ? FORCE_NON_COHERENT::FORCE_NON_COHERENT_FORCE_GPU_NON_COHERENT
+                                                                                  : FORCE_NON_COHERENT::FORCE_NON_COHERENT_FORCE_DISABLED;
+        stateComputeMode.setForceNonCoherent(coherencyValue);
+        maskBits |= Family::stateComputeModeForceNonCoherentMask;
+    }
+
+    stateComputeMode.setMaskBits(maskBits);
+
     auto buffer = csr.getSpace(sizeof(STATE_COMPUTE_MODE));
-    *reinterpret_cast<STATE_COMPUTE_MODE *>(buffer) = *stateComputeMode;
+    *reinterpret_cast<STATE_COMPUTE_MODE *>(buffer) = stateComputeMode;
 }
 
 template <>
@@ -50,7 +68,7 @@ void EncodeWA<Family>::encodeAdditionalPipelineSelect(Device &device, LinearStre
 
 template <>
 void EncodeSurfaceState<Family>::encodeExtraBufferParams(R_SURFACE_STATE *surfaceState, GraphicsAllocation *allocation, GmmHelper *gmmHelper,
-                                                         bool isReadOnly, uint32_t numAvailableDevices) {
+                                                         bool isReadOnly, uint32_t numAvailableDevices, bool useGlobalAtomics, bool areMultipleSubDevicesInContext) {
     const bool isL3Allowed = surfaceState->getMemoryObjectControlState() == gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
     if (isL3Allowed) {
         const bool isConstantSurface = allocation && allocation->getAllocationType() == GraphicsAllocation::AllocationType::CONSTANT_SURFACE;
@@ -92,4 +110,7 @@ template struct EncodeBatchBufferStartOrEnd<Family>;
 template struct EncodeMiFlushDW<Family>;
 template struct EncodeWA<Family>;
 template struct EncodeMemoryPrefetch<Family>;
+template struct EncodeMiArbCheck<Family>;
+template struct EncodeComputeMode<Family>;
+template struct EncodeEnableRayTracing<Family>;
 } // namespace NEO

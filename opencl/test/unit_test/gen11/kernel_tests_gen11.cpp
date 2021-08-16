@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,6 +17,13 @@ GEN11TEST_F(Gen11KernelTest, givenKernelWhenCanTransformImagesIsCalledThenReturn
     MockKernelWithInternals mockKernel(*pClDevice);
     auto retVal = mockKernel.mockKernel->Kernel::canTransformImages();
     EXPECT_TRUE(retVal);
+}
+
+GEN11TEST_F(Gen11KernelTest, givenBuiltinKernelWhenCanTransformImagesIsCalledThenReturnsFalse) {
+    MockKernelWithInternals mockKernel(*pClDevice);
+    mockKernel.mockKernel->isBuiltIn = true;
+    auto retVal = mockKernel.mockKernel->Kernel::canTransformImages();
+    EXPECT_FALSE(retVal);
 }
 
 GEN11TEST_F(Gen11KernelTest, GivenKernelWhenNotRunningOnGen12lpThenWaDisableRccRhwoOptimizationIsNotRequired) {

@@ -1,11 +1,17 @@
 #
-# Copyright (C) 2018-2020 Intel Corporation
+# Copyright (C) 2019-2021 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
 
 if(TESTS_GEN12LP)
+  set(IGDRCL_SRCS_tests_gen12lp_excludes
+      ${CMAKE_CURRENT_SOURCE_DIR}/excludes_gen12lp.cpp
+  )
+  set_property(GLOBAL APPEND PROPERTY IGDRCL_SRCS_tests_excludes ${IGDRCL_SRCS_tests_gen12lp_excludes})
+
   set(IGDRCL_SRCS_tests_gen12lp
+      ${IGDRCL_SRCS_tests_gen12lp_excludes}
       ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
       ${CMAKE_CURRENT_SOURCE_DIR}/aub_command_stream_receiver_tests_gen12lp.inl
       ${CMAKE_CURRENT_SOURCE_DIR}/buffer_tests_gen12lp.inl
@@ -30,7 +36,7 @@ if(TESTS_GEN12LP)
       ${CMAKE_CURRENT_SOURCE_DIR}/test_device_queue_hw_gen12lp.inl
       ${CMAKE_CURRENT_SOURCE_DIR}/test_platform_caps_gen12lp.inl
       ${CMAKE_CURRENT_SOURCE_DIR}/test_sample_gen12lp.inl
-      ${CMAKE_CURRENT_SOURCE_DIR}/unit_test_helper_gen12lp.cpp
+      ${NEO_SOURCE_DIR}/shared/test/common/gen12lp/unit_test_helper_gen12lp.cpp
   )
 
   get_property(NEO_CORE_TESTS_GEN12LP GLOBAL PROPERTY NEO_CORE_TESTS_GEN12LP)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,6 +13,7 @@
 #include "opencl/source/accelerators/intel_motion_estimation.h"
 #include "opencl/source/built_ins/built_in_ops_vme.h"
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
+#include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/helpers/dispatch_info_builder.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/mem_obj/image.h"
@@ -22,10 +23,12 @@ class VmeBuiltinDispatchInfoBuilder : public BuiltinDispatchInfoBuilder {
   public:
     VmeBuiltinDispatchInfoBuilder(BuiltIns &kernelsLib, ClDevice &device, EBuiltInOps::Type builtinOp,
                                   const char *kernelName)
-        : BuiltinDispatchInfoBuilder(kernelsLib) {
-        populate(device, builtinOp,
+        : BuiltinDispatchInfoBuilder(kernelsLib, device) {
+        populate(builtinOp,
                  mediaKernelsBuildOptions,
-                 kernelName, vmeKernel);
+                 kernelName, multiDeviceVmeKernel);
+        auto rootDeviceIndex = device.getRootDeviceIndex();
+        vmeKernel = multiDeviceVmeKernel->getKernel(rootDeviceIndex);
         widthArgNum = vmeKernel->getKernelInfo().getArgNumByName("width");
         heightArgNum = vmeKernel->getKernelInfo().getArgNumByName("height");
         strideArgNum = vmeKernel->getKernelInfo().getArgNumByName("stride");
@@ -70,7 +73,7 @@ class VmeBuiltinDispatchInfoBuilder : public BuiltinDispatchInfoBuilder {
         Vec3<size_t> gws = {numThreadsX * simdWidth, 1, 1};
         Vec3<size_t> lws = {vmeKernel->getKernelInfo().kernelDescriptor.kernelAttributes.requiredWorkgroupSize[0], 1, 1};
 
-        DispatchInfoBuilder<SplitDispatch::Dim::d2D, SplitDispatch::SplitMode::NoSplit> builder;
+        DispatchInfoBuilder<SplitDispatch::Dim::d2D, SplitDispatch::SplitMode::NoSplit> builder(clDevice);
         builder.setDispatchGeometry(gws, lws, inOffset, gws, lws);
         builder.setKernel(vmeKernel);
         builder.bake(multiDispatchInfo);
@@ -163,11 +166,12 @@ class VmeBuiltinDispatchInfoBuilder : public BuiltinDispatchInfoBuilder {
 
     template <typename RetType>
     RetType getKernelArgByValValue(uint32_t argNum) const {
-        auto &kai = vmeKernel->getKernelInfo().kernelArgInfo[argNum];
-        DEBUG_BREAK_IF(kai.kernelArgPatchInfoVector.size() != 1);
-        const KernelArgPatchInfo &patchInfo = kai.kernelArgPatchInfoVector[0];
-        DEBUG_BREAK_IF(sizeof(RetType) > patchInfo.size);
-        return *(RetType *)(vmeKernel->getCrossThreadData() + patchInfo.crossthreadOffset);
+        const auto &argAsVal = vmeKernel->getKernelInfo().kernelDescriptor.payloadMappings.explicitArgs[argNum].as<ArgDescValue>();
+        DEBUG_BREAK_IF(argAsVal.elements.size() != 1);
+
+        const auto &element = argAsVal.elements[0];
+        DEBUG_BREAK_IF(sizeof(RetType) > element.size);
+        return *(RetType *)(vmeKernel->getCrossThreadData() + element.offset);
     }
 
     cl_int validateImages(Vec3<size_t> inputRegion, Vec3<size_t> offset) const {
@@ -236,6 +240,7 @@ class VmeBuiltinDispatchInfoBuilder : public BuiltinDispatchInfoBuilder {
     int32_t motionVectorBufferArgNum;
     int32_t predictionMotionVectorBufferArgNum;
     int32_t residualsArgNum;
+    MultiDeviceKernel *multiDeviceVmeKernel;
     Kernel *vmeKernel;
 };
 

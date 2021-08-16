@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -56,11 +56,15 @@ void DrmMemoryOperationsHandlerDefault::mergeWithResidencyContainer(OsContext *o
     }
 }
 
-std::unique_lock<std::mutex> DrmMemoryOperationsHandlerDefault::lockHandlerForExecWA() {
-    if (DebugManager.flags.MakeAllBuffersResident.get()) {
-        return std::unique_lock<std::mutex>(this->mutex);
+std::unique_lock<std::mutex> DrmMemoryOperationsHandlerDefault::lockHandlerIfUsed() {
+    std::unique_lock<std::mutex> lock(this->mutex);
+    if (this->residency.size()) {
+        return lock;
     }
     return std::unique_lock<std::mutex>();
+}
+
+void DrmMemoryOperationsHandlerDefault::evictUnusedAllocations(bool waitForCompletion) {
 }
 
 } // namespace NEO

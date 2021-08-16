@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/os_interface/device_factory.h"
+#include "shared/test/common/mocks/ult_device_factory.h"
 
 #include "test.h"
 
@@ -28,9 +29,10 @@ class MetricQueryPoolTest : public MetricContextFixture,
                             public ::testing::Test {
   public:
     void SetUp() override {
+        ze_result_t returnValue = ZE_RESULT_SUCCESS;
         MetricContextFixture::SetUp();
         auto executionEnvironment = new NEO::ExecutionEnvironment();
-        driverHandle.reset(DriverHandle::create(NEO::DeviceFactory::createDevices(*executionEnvironment), L0EnvVariables{}));
+        driverHandle.reset(DriverHandle::create(NEO::DeviceFactory::createDevices(*executionEnvironment), L0EnvVariables{}, &returnValue));
     }
 
     void TearDown() override {
@@ -152,16 +154,7 @@ TEST_F(MetricQueryPoolTest, givenCorrectArgumentsWhenStreamerIsOpenThenQueryPool
     EXPECT_CALL(*mockMetricsLibrary, load())
         .Times(0);
 
-    EXPECT_CALL(*mockMetricEnumeration, loadMetricsDiscovery())
-        .Times(0);
-
-    EXPECT_CALL(*mockMetricEnumeration->g_mockApi, MockOpenMetricsDevice(_))
-        .Times(1)
-        .WillOnce(DoAll(::testing::SetArgPointee<0>(&metricsDevice), Return(TCompletionCode::CC_OK)));
-
-    EXPECT_CALL(*mockMetricEnumeration->g_mockApi, MockCloseMetricsDevice(_))
-        .Times(1)
-        .WillOnce(Return(TCompletionCode::CC_OK));
+    openMetricsAdapter();
 
     EXPECT_CALL(metricsDevice, GetParams())
         .WillRepeatedly(Return(&metricsDeviceParams));
@@ -275,7 +268,7 @@ TEST_F(MetricQueryPoolTest, givenCorrectArgumentsWhenZetCommandListAppendMetricQ
     zet_device_handle_t metricDevice = device->toHandle();
 
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, returnValue));
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue));
     zet_command_list_handle_t commandListHandle = commandList->toHandle();
 
     ze_event_pool_handle_t eventPoolHandle = {};
@@ -391,7 +384,7 @@ TEST_F(MetricQueryPoolTest, givenIncorrectArgumentsWhenZetMetricQueryGetDataIsCa
     zet_device_handle_t metricDevice = device->toHandle();
 
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, returnValue));
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue));
     zet_command_list_handle_t commandListHandle = commandList->toHandle();
 
     ze_event_pool_handle_t eventPoolHandle = {};
@@ -507,7 +500,7 @@ TEST_F(MetricQueryPoolTest, givenCorrectArgumentsWhenZetMetricQueryGetDataIsCall
     zet_device_handle_t metricDevice = device->toHandle();
 
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, returnValue));
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue));
     zet_command_list_handle_t commandListHandle = commandList->toHandle();
 
     ze_event_pool_handle_t eventPoolHandle = {};
@@ -674,7 +667,7 @@ TEST_F(MetricQueryPoolTest, givenExecutionQueryTypeWhenAppendMetricQueryBeginAnd
     poolDesc.type = ZET_METRIC_QUERY_POOL_TYPE_EXECUTION;
 
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, returnValue));
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue));
     zet_command_list_handle_t commandListHandle = commandList->toHandle();
 
     TypedValue_1_0 value = {};
@@ -736,7 +729,7 @@ TEST_F(MetricQueryPoolTest, givenExecutionQueryTypeAndCompletionEventWhenAppendM
     poolDesc.type = ZET_METRIC_QUERY_POOL_TYPE_EXECUTION;
 
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, returnValue));
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue));
     zet_command_list_handle_t commandListHandle = commandList->toHandle();
 
     TypedValue_1_0 value = {};
@@ -820,7 +813,7 @@ TEST_F(MetricQueryPoolTest, givenExecutionQueryTypeAndMetricsLibraryWillFailWhen
     poolDesc.type = ZET_METRIC_QUERY_POOL_TYPE_EXECUTION;
 
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, returnValue));
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue));
     zet_command_list_handle_t commandListHandle = commandList->toHandle();
 
     TypedValue_1_0 value = {};
@@ -888,5 +881,52 @@ TEST_F(MetricQueryPoolTest, givenExecutionQueryTypeAndMetricsLibraryWillFailWhen
     EXPECT_EQ(zeEventPoolDestroy(eventPoolHandle), ZE_RESULT_SUCCESS);
 }
 
+TEST_F(MetricQueryPoolTest, givenRootDeviceWhenGetSubDeviceClientOptionsIsCalledThenReturnRootDeviceProperties) {
+
+    auto &metricContext = device->getMetricContext();
+    auto &metricsLibrary = metricContext.getMetricsLibrary();
+    auto subDevice = ClientOptionsData_1_0{};
+    auto subDeviceIndex = ClientOptionsData_1_0{};
+    auto subDeviceCount = ClientOptionsData_1_0{};
+
+    metricsLibrary.getSubDeviceClientOptions(*device->getNEODevice(), subDevice, subDeviceIndex, subDeviceCount);
+
+    // Root device
+    EXPECT_EQ(subDevice.Type, MetricsLibraryApi::ClientOptionsType::SubDevice);
+    EXPECT_EQ(subDevice.SubDevice.Enabled, false);
+
+    EXPECT_EQ(subDeviceIndex.Type, MetricsLibraryApi::ClientOptionsType::SubDeviceIndex);
+    EXPECT_EQ(subDeviceIndex.SubDeviceIndex.Index, 0u);
+
+    EXPECT_EQ(subDeviceCount.Type, MetricsLibraryApi::ClientOptionsType::SubDeviceCount);
+    EXPECT_EQ(subDeviceCount.SubDeviceCount.Count, device->getNEODevice()->getNumAvailableDevices());
+}
+
+TEST_F(MetricQueryPoolTest, givenSubDeviceWhenGetSubDeviceClientOptionsIsCalledThenReturnSubDeviceProperties) {
+
+    auto deviceFactory = std::make_unique<UltDeviceFactory>(1, 4);
+    auto rootDevice = deviceFactory->rootDevices[0];
+
+    auto &metricContext = device->getMetricContext();
+    auto &metricsLibrary = metricContext.getMetricsLibrary();
+    auto subDevice = ClientOptionsData_1_0{};
+    auto subDeviceIndex = ClientOptionsData_1_0{};
+    auto subDeviceCount = ClientOptionsData_1_0{};
+
+    // Sub devices
+    for (uint32_t i = 0, count = rootDevice->getNumAvailableDevices(); i < count; ++i) {
+
+        metricsLibrary.getSubDeviceClientOptions(*rootDevice->subdevices[i], subDevice, subDeviceIndex, subDeviceCount);
+
+        EXPECT_EQ(subDevice.Type, MetricsLibraryApi::ClientOptionsType::SubDevice);
+        EXPECT_EQ(subDevice.SubDevice.Enabled, true);
+
+        EXPECT_EQ(subDeviceIndex.Type, MetricsLibraryApi::ClientOptionsType::SubDeviceIndex);
+        EXPECT_EQ(subDeviceIndex.SubDeviceIndex.Index, i);
+
+        EXPECT_EQ(subDeviceCount.Type, MetricsLibraryApi::ClientOptionsType::SubDeviceCount);
+        EXPECT_EQ(subDeviceCount.SubDeviceCount.Count, rootDevice->getNumAvailableDevices());
+    }
+}
 } // namespace ult
 } // namespace L0

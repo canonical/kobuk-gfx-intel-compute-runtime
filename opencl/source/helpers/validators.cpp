@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -12,7 +12,7 @@
 #include "opencl/source/context/context.h"
 #include "opencl/source/event/event.h"
 #include "opencl/source/helpers/base_object.h"
-#include "opencl/source/kernel/kernel.h"
+#include "opencl/source/kernel/multi_device_kernel.h"
 #include "opencl/source/mem_obj/mem_obj.h"
 #include "opencl/source/platform/platform.h"
 #include "opencl/source/program/program.h"
@@ -75,7 +75,7 @@ cl_int validateObject(cl_program object) {
 }
 
 cl_int validateObject(cl_kernel object) {
-    return castToObject<Kernel>(object) != nullptr
+    return castToObject<MultiDeviceKernel>(object) != nullptr
                ? CL_SUCCESS
                : CL_INVALID_KERNEL;
 }
@@ -148,7 +148,7 @@ cl_int validateYuvOperation(const size_t *origin, const size_t *region) {
     return ((origin[0] % 2 == 0) && (region[0] % 2 == 0)) ? CL_SUCCESS : CL_INVALID_VALUE;
 }
 
-bool IsPackedYuvImage(const cl_image_format *imageFormat) {
+bool isPackedYuvImage(const cl_image_format *imageFormat) {
     auto channelOrder = imageFormat->image_channel_order;
     return (channelOrder == CL_YUYV_INTEL) ||
            (channelOrder == CL_UYVY_INTEL) ||
@@ -156,7 +156,7 @@ bool IsPackedYuvImage(const cl_image_format *imageFormat) {
            (channelOrder == CL_VYUY_INTEL);
 }
 
-bool IsNV12Image(const cl_image_format *imageFormat) {
+bool isNV12Image(const cl_image_format *imageFormat) {
     return imageFormat->image_channel_order == CL_NV12_INTEL;
 }
 } // namespace NEO

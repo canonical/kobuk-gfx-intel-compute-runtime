@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,6 +8,7 @@
 #include "shared/source/command_stream/command_stream_receiver_hw.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
+#include "shared/test/common/test_macros/test_checks_shared.h"
 
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/helpers/memory_properties_helpers.h"
@@ -95,13 +96,13 @@ struct EnqueueThreadingFixture : public ClDeviceFixture {
       protected:
         ~MyCommandQueue() override {
             if (kernel) {
-                EXPECT_FALSE(kernel->hasOwnership());
+                EXPECT_FALSE(kernel->getMultiDeviceKernel()->hasOwnership());
             }
         }
         void enqueueHandlerHook(const unsigned int commandType, const MultiDispatchInfo &multiDispatchInfo) override {
             for (auto &dispatchInfo : multiDispatchInfo) {
                 auto &kernel = *dispatchInfo.getKernel();
-                EXPECT_TRUE(kernel.hasOwnership());
+                EXPECT_TRUE(kernel.getMultiDeviceKernel()->hasOwnership());
             }
         }
 
@@ -122,6 +123,18 @@ struct EnqueueThreadingFixture : public ClDeviceFixture {
 };
 
 typedef Test<EnqueueThreadingFixture> EnqueueThreading;
+
+struct EnqueueThreadingImage : EnqueueThreading {
+    void SetUp() override {
+        REQUIRE_IMAGES_OR_SKIP(defaultHwInfo);
+        EnqueueThreading::SetUp();
+    }
+    void TearDown() override {
+        if (!IsSkipped()) {
+            EnqueueThreading::TearDown();
+        }
+    }
+};
 
 HWTEST_F(EnqueueThreading, WhenEnqueuingReadBufferThenKernelHasOwnership) {
     createCQ<FamilyType>();
@@ -199,7 +212,7 @@ HWTEST_F(EnqueueThreading, WhenEnqueuingCopyBufferRectThenKernelHasOwnership) {
     pCmdQ->enqueueCopyBufferRect(srcBuffer.get(), dstBuffer.get(), srcOrigin, dstOrigin, region, 0, 0, 0, 0, 0, nullptr, nullptr);
 }
 
-HWTEST_F(EnqueueThreading, WhenEnqueuingCopyBufferToImageThenKernelHasOwnership) {
+HWTEST_F(EnqueueThreadingImage, WhenEnqueuingCopyBufferToImageThenKernelHasOwnership) {
     createCQ<FamilyType>();
     cl_int retVal;
 
@@ -229,7 +242,7 @@ HWTEST_F(EnqueueThreading, WhenEnqueuingCopyBufferToImageThenKernelHasOwnership)
     pCmdQ->enqueueCopyBufferToImage(srcBuffer.get(), dstImage.get(), 0, dstOrigin, region, 0, nullptr, nullptr);
 }
 
-HWTEST_F(EnqueueThreading, WhenEnqueuingCopyImageThenKernelHasOwnership) {
+HWTEST_F(EnqueueThreadingImage, WhenEnqueuingCopyImageThenKernelHasOwnership) {
     createCQ<FamilyType>();
     cl_int retVal;
 
@@ -261,7 +274,7 @@ HWTEST_F(EnqueueThreading, WhenEnqueuingCopyImageThenKernelHasOwnership) {
     pCmdQ->enqueueCopyImage(srcImage.get(), dstImage.get(), srcOrigin, dstOrigin, region, 0, nullptr, nullptr);
 }
 
-HWTEST_F(EnqueueThreading, WhenEnqueuingCopyImageToBufferThenKernelHasOwnership) {
+HWTEST_F(EnqueueThreadingImage, WhenEnqueuingCopyImageToBufferThenKernelHasOwnership) {
     createCQ<FamilyType>();
     cl_int retVal;
 
@@ -303,7 +316,7 @@ HWTEST_F(EnqueueThreading, WhenEnqueuingFillBufferThenKernelHasOwnership) {
     pCmdQ->enqueueFillBuffer(buffer.get(), &pattern, sizeof(pattern), 0, 1024u, 0, nullptr, nullptr);
 }
 
-HWTEST_F(EnqueueThreading, WhenEnqueuingFillImageThenKernelHasOwnership) {
+HWTEST_F(EnqueueThreadingImage, WhenEnqueuingFillImageThenKernelHasOwnership) {
     createCQ<FamilyType>();
     cl_int retVal;
 
@@ -352,7 +365,7 @@ HWTEST_F(EnqueueThreading, WhenEnqueuingReadBufferRectThenKernelHasOwnership) {
     ::alignedFree(ptr);
 }
 
-HWTEST_F(EnqueueThreading, WhenEnqueuingReadImageThenKernelHasOwnership) {
+HWTEST_F(EnqueueThreadingImage, WhenEnqueuingReadImageThenKernelHasOwnership) {
     createCQ<FamilyType>();
     cl_int retVal;
 
@@ -405,7 +418,7 @@ HWTEST_F(EnqueueThreading, WhenEnqueuingWriteBufferRectThenKernelHasOwnership) {
     ::alignedFree(ptr);
 }
 
-HWTEST_F(EnqueueThreading, WhenEnqueuingWriteImageThenKernelHasOwnership) {
+HWTEST_F(EnqueueThreadingImage, WhenEnqueuingWriteImageThenKernelHasOwnership) {
     createCQ<FamilyType>();
     cl_int retVal;
 
@@ -446,6 +459,7 @@ HWTEST_F(EnqueueThreading, WhenFinishingThenKernelHasOwnership) {
     pCmdQ->taskLevel = 1;
     auto csr = (CommandStreamReceiverMock<FamilyType> *)&this->pCmdQ->getGpgpuCommandStreamReceiver();
     csr->expectedToFreeCount = 0u;
+    csr->latestSentTaskCount = 1;
 
     pCmdQ->finish();
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,6 +17,17 @@ namespace ult {
 using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::Return;
+
+using DeviceFixtureGen12LP = Test<DeviceFixture>;
+
+HWTEST2_F(DeviceFixtureGen12LP, GivenTargetGen12LPaWhenGettingMemoryPropertiesThenMemoryNameComesAsDDR, IsGen12LP) {
+    ze_device_memory_properties_t memProperties = {};
+    uint32_t pCount = 1u;
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, device->getMemoryProperties(&pCount, &memProperties));
+    EXPECT_EQ(0, strcmp(memProperties.name, "DDR"));
+    EXPECT_EQ(0u, memProperties.maxClockRate);
+}
 
 using DeviceQueueGroupTest = Test<DeviceFixture>;
 
@@ -118,16 +129,12 @@ HWTEST2_F(DeviceQueueGroupTest,
             EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY);
             EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COOPERATIVE_KERNELS);
             EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_METRICS);
-            auto hwInfoConfig = NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
-            if (hwInfoConfig->isEvenContextCountRequired()) {
-                EXPECT_EQ(properties[i].numQueues, 2u);
-            } else {
-                EXPECT_EQ(properties[i].numQueues, 1u);
-            }
+            EXPECT_EQ(properties[i].numQueues, 1u);
             EXPECT_EQ(properties[i].maxMemoryFillPatternSize, std::numeric_limits<size_t>::max());
         } else if (i == static_cast<uint32_t>(NEO::EngineGroupType::Compute)) {
             EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE);
             EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY);
+            EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COOPERATIVE_KERNELS);
             EXPECT_EQ(properties[i].numQueues, 1u);
             EXPECT_EQ(properties[i].maxMemoryFillPatternSize, std::numeric_limits<size_t>::max());
         } else if (i == static_cast<uint32_t>(NEO::EngineGroupType::Copy)) {
@@ -167,16 +174,12 @@ HWTEST2_F(DeviceQueueGroupTest,
             EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY);
             EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COOPERATIVE_KERNELS);
             EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_METRICS);
-            auto hwInfoConfig = NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
-            if (hwInfoConfig->isEvenContextCountRequired()) {
-                EXPECT_EQ(properties[i].numQueues, 2u);
-            } else {
-                EXPECT_EQ(properties[i].numQueues, 1u);
-            }
+            EXPECT_EQ(properties[i].numQueues, 1u);
             EXPECT_EQ(properties[i].maxMemoryFillPatternSize, std::numeric_limits<size_t>::max());
         } else if (i == static_cast<uint32_t>(NEO::EngineGroupType::Compute)) {
             EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE);
             EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY);
+            EXPECT_TRUE(properties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COOPERATIVE_KERNELS);
             EXPECT_EQ(properties[i].numQueues, 1u);
             EXPECT_EQ(properties[i].maxMemoryFillPatternSize, std::numeric_limits<size_t>::max());
         } else if (i == static_cast<uint32_t>(NEO::EngineGroupType::Copy)) {
@@ -245,7 +248,7 @@ HWTEST2_F(DeviceQueueGroupTest,
 
     ze_context_handle_t hContext;
     ze_context_desc_t desc;
-    res = driverHandle->createContext(&desc, &hContext);
+    res = driverHandle->createContext(&desc, 0u, nullptr, &hContext);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     L0::Context *context = Context::fromHandle(hContext);
 

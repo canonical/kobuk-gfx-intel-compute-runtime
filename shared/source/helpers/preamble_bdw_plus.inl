@@ -1,13 +1,16 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/helpers/flat_batch_buffer_helper.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/preamble_base.inl"
+
+#include "opencl/source/kernel/kernel_execution_type.h"
 
 namespace NEO {
 
@@ -25,19 +28,25 @@ uint32_t PreambleHelper<GfxFamily>::getUrbEntryAllocationSize() {
 }
 
 template <typename GfxFamily>
-uint64_t PreambleHelper<GfxFamily>::programVFEState(LinearStream *pCommandStream,
-                                                    const HardwareInfo &hwInfo,
-                                                    uint32_t scratchSize,
-                                                    uint64_t scratchAddress,
-                                                    uint32_t maxFrontEndThreads,
-                                                    aub_stream::EngineType engineType,
-                                                    uint32_t additionalExecInfo) {
+void *PreambleHelper<GfxFamily>::getSpaceForVfeState(LinearStream *pCommandStream,
+                                                     const HardwareInfo &hwInfo,
+                                                     EngineGroupType engineGroupType) {
+    using MEDIA_VFE_STATE = typename GfxFamily::MEDIA_VFE_STATE;
+    addPipeControlBeforeVfeCmd(pCommandStream, &hwInfo, engineGroupType);
+    return pCommandStream->getSpaceForCmd<MEDIA_VFE_STATE>();
+}
+
+template <typename GfxFamily>
+void PreambleHelper<GfxFamily>::programVfeState(void *pVfeState,
+                                                const HardwareInfo &hwInfo,
+                                                uint32_t scratchSize,
+                                                uint64_t scratchAddress,
+                                                uint32_t maxFrontEndThreads,
+                                                uint32_t additionalExecInfo,
+                                                const StreamProperties &streamProperties) {
     using MEDIA_VFE_STATE = typename GfxFamily::MEDIA_VFE_STATE;
 
-    addPipeControlBeforeVfeCmd(pCommandStream, &hwInfo, engineType);
-
-    auto scratchSpaceAddressOffset = static_cast<uint64_t>(pCommandStream->getUsed() + MEDIA_VFE_STATE::PATCH_CONSTANTS::SCRATCHSPACEBASEPOINTER_BYTEOFFSET);
-    auto pMediaVfeState = pCommandStream->getSpaceForCmd<MEDIA_VFE_STATE>();
+    auto pMediaVfeState = reinterpret_cast<MEDIA_VFE_STATE *>(pVfeState);
     MEDIA_VFE_STATE cmd = GfxFamily::cmdInitMediaVfeState;
     cmd.setMaximumNumberOfThreads(maxFrontEndThreads);
     cmd.setNumberOfUrbEntries(1);
@@ -50,9 +59,16 @@ uint64_t PreambleHelper<GfxFamily>::programVFEState(LinearStream *pCommandStream
     cmd.setScratchSpaceBasePointerHigh(highAddress);
 
     programAdditionalFieldsInVfeState(&cmd, hwInfo);
+    appendProgramVFEState(hwInfo, streamProperties, additionalExecInfo, &cmd);
     *pMediaVfeState = cmd;
+}
 
-    return scratchSpaceAddressOffset;
+template <typename GfxFamily>
+uint64_t PreambleHelper<GfxFamily>::getScratchSpaceAddressOffsetForVfeState(LinearStream *pCommandStream, void *pVfeState) {
+    using MEDIA_VFE_STATE = typename GfxFamily::MEDIA_VFE_STATE;
+    return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pVfeState) -
+                                 reinterpret_cast<uintptr_t>(pCommandStream->getCpuBase()) +
+                                 MEDIA_VFE_STATE::PATCH_CONSTANTS::SCRATCHSPACEBASEPOINTER_BYTEOFFSET);
 }
 
 template <typename GfxFamily>

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,11 +17,13 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <set>
 
 namespace NEO {
 class CommandStreamReceiver;
 class GraphicsAllocation;
 class MemoryManager;
+class Device;
 
 struct SvmAllocationData {
     SvmAllocationData(uint32_t maxRootDeviceIndex) : gpuAllocations(maxRootDeviceIndex), maxRootDeviceIndex(maxRootDeviceIndex){};
@@ -43,7 +45,7 @@ struct SvmAllocationData {
     size_t size = 0;
     InternalMemoryType memoryType = InternalMemoryType::SVM;
     MemoryProperties allocationFlagsProperty;
-    void *device = nullptr;
+    Device *device = nullptr;
 
   protected:
     const uint32_t maxRootDeviceIndex;
@@ -69,7 +71,6 @@ class SVMAllocsManager {
         SvmAllocationData *get(const void *);
         size_t getNumAllocs() const { return allocations.size(); };
 
-      protected:
         SvmAllocationContainer allocations;
     };
 
@@ -91,31 +92,32 @@ class SVMAllocsManager {
     };
 
     struct UnifiedMemoryProperties {
-        UnifiedMemoryProperties(InternalMemoryType memoryType, DeviceBitfield subdeviceBitfield) : memoryType(memoryType), subdeviceBitfield(subdeviceBitfield){};
+        UnifiedMemoryProperties(InternalMemoryType memoryType,
+                                const std::set<uint32_t> &rootDeviceIndices,
+                                const std::map<uint32_t, DeviceBitfield> &subdeviceBitfields) : memoryType(memoryType),
+                                                                                                rootDeviceIndices(rootDeviceIndices),
+                                                                                                subdeviceBitfields(subdeviceBitfields){};
         InternalMemoryType memoryType = InternalMemoryType::NOT_SPECIFIED;
         MemoryProperties allocationFlags;
-        void *device = nullptr;
-        DeviceBitfield subdeviceBitfield;
+        Device *device = nullptr;
+        const std::set<uint32_t> &rootDeviceIndices;
+        const std::map<uint32_t, DeviceBitfield> &subdeviceBitfields;
     };
 
-    SVMAllocsManager(MemoryManager *memoryManager);
+    SVMAllocsManager(MemoryManager *memoryManager, bool multiOsContextSupport);
     MOCKABLE_VIRTUAL ~SVMAllocsManager() = default;
-    void *createSVMAlloc(uint32_t rootDeviceIndex,
-                         size_t size,
+    void *createSVMAlloc(size_t size,
                          const SvmAllocationProperties svmProperties,
-                         const DeviceBitfield &deviceBitfield);
-    void *createHostUnifiedMemoryAllocation(uint32_t maxRootDeviceIndex,
-                                            size_t size,
-                                            const UnifiedMemoryProperties &svmProperties);
-    void *createUnifiedMemoryAllocation(uint32_t rootDeviceIndex,
-                                        size_t size,
-                                        const UnifiedMemoryProperties &svmProperties);
-    void *createSharedUnifiedMemoryAllocation(uint32_t rootDeviceIndex,
-                                              size_t size,
-                                              const UnifiedMemoryProperties &svmProperties,
-                                              void *cmdQ);
-    void *createUnifiedKmdMigratedAllocation(uint32_t rootDeviceIndex,
-                                             size_t size,
+                         const std::set<uint32_t> &rootDeviceIndices,
+                         const std::map<uint32_t, DeviceBitfield> &subdeviceBitfields);
+    MOCKABLE_VIRTUAL void *createHostUnifiedMemoryAllocation(size_t size,
+                                                             const UnifiedMemoryProperties &svmProperties);
+    MOCKABLE_VIRTUAL void *createUnifiedMemoryAllocation(size_t size,
+                                                         const UnifiedMemoryProperties &svmProperties);
+    MOCKABLE_VIRTUAL void *createSharedUnifiedMemoryAllocation(size_t size,
+                                                               const UnifiedMemoryProperties &svmProperties,
+                                                               void *cmdQ);
+    void *createUnifiedKmdMigratedAllocation(size_t size,
                                              const SvmAllocationProperties &svmProperties,
                                              const UnifiedMemoryProperties &unifiedMemoryProperties);
     void setUnifiedAllocationProperties(GraphicsAllocation *allocation, const SvmAllocationProperties &svmProperties);
@@ -134,11 +136,15 @@ class SVMAllocsManager {
                                                     ResidencyContainer &residencyContainer,
                                                     uint32_t requestedTypesMask);
     void makeInternalAllocationsResident(CommandStreamReceiver &commandStreamReceiver, uint32_t requestedTypesMask);
-    void *createUnifiedAllocationWithDeviceStorage(uint32_t rootDeviceIndex, size_t size, const SvmAllocationProperties &svmProperties, const UnifiedMemoryProperties &unifiedMemoryProperties);
+    void *createUnifiedAllocationWithDeviceStorage(size_t size, const SvmAllocationProperties &svmProperties, const UnifiedMemoryProperties &unifiedMemoryProperties);
     void freeSvmAllocationWithDeviceStorage(SvmAllocationData *svmData);
+    bool hasHostAllocations();
 
   protected:
-    void *createZeroCopySvmAllocation(uint32_t rootDeviceIndex, size_t size, const SvmAllocationProperties &svmProperties, const DeviceBitfield &deviceBitfield);
+    void *createZeroCopySvmAllocation(size_t size, const SvmAllocationProperties &svmProperties,
+                                      const std::set<uint32_t> &rootDeviceIndices,
+                                      const std::map<uint32_t, DeviceBitfield> &subdeviceBitfields);
+    GraphicsAllocation::AllocationType getGraphicsAllocationType(const UnifiedMemoryProperties &unifiedMemoryProperties) const;
 
     void freeZeroCopySvmAllocation(SvmAllocationData *svmData);
 
@@ -146,5 +152,6 @@ class SVMAllocsManager {
     MapOperationsTracker svmMapOperations;
     MemoryManager *memoryManager;
     SpinLock mtx;
+    bool multiOsContextSupport;
 };
 } // namespace NEO

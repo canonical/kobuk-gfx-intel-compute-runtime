@@ -1,17 +1,19 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/memory_manager/allocations_list.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/source/memory_manager/migration_sync_data.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/test/unit_test/command_queue/enqueue_read_image_fixture.h"
+#include "opencl/test/unit_test/fixtures/one_mip_level_image_fixture.h"
 #include "opencl/test/unit_test/gen_common/gen_commands_common_validation.h"
-#include "opencl/test/unit_test/helpers/unit_test_helper.h"
 #include "opencl/test/unit_test/mocks/mock_builtin_dispatch_info_builder.h"
 #include "opencl/test/unit_test/mocks/mock_builtins.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
@@ -40,7 +42,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, WhenReadingImageThenGpgpuWalke
 
     // Compute the SIMD lane mask
     size_t simd =
-        cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16 : 8;
+        cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD32 ? 32 : cmd->getSimdSize() == GPGPU_WALKER::SIMD_SIZE_SIMD16 ? 16
+                                                                                                                         : 8;
     uint64_t simdMask = maxNBitValue(simd);
 
     // Mask off lanes based on the execution masks
@@ -62,6 +65,345 @@ HWTEST_F(EnqueueReadImageTest, GivenBlockingEnqueueWhenReadingImageThenTaskLevel
     EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage, CL_TRUE);
     EXPECT_EQ(csr.peekTaskCount(), pCmdQ->taskCount);
     EXPECT_EQ(oldCsrTaskLevel, pCmdQ->taskLevel);
+}
+
+HWTEST_F(EnqueueReadImageTest, whenEnqueueReadImageThenBuiltinKernelIsResolved) {
+
+    UserEvent userEvent{};
+    cl_event inputEvent = &userEvent;
+    cl_event outputEvent{};
+
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage, CL_FALSE,
+                                               EnqueueReadImageTraits::origin,
+                                               EnqueueReadImageTraits::region,
+                                               EnqueueReadImageTraits::rowPitch,
+                                               EnqueueReadImageTraits::slicePitch,
+                                               EnqueueReadImageTraits::hostPtr,
+                                               EnqueueReadImageTraits::mapAllocation,
+                                               1u,
+                                               &inputEvent,
+                                               &outputEvent);
+
+    auto pEvent = castToObject<Event>(outputEvent);
+    auto pCommand = static_cast<CommandComputeKernel *>(pEvent->peekCommand());
+    EXPECT_FALSE(pCommand->peekKernel()->Kernel::canTransformImages());
+    EXPECT_TRUE(pCommand->peekKernel()->isPatched());
+    userEvent.setStatus(CL_COMPLETE);
+    pEvent->release();
+    pCmdQ->finish();
+}
+
+HWTEST_F(EnqueueReadImageTest, givenMultiRootDeviceImageWhenEnqueueReadImageThenKernelRequiresMigration) {
+
+    MockDefaultContext context;
+
+    auto pCmdQ1 = createCommandQueue(context.getDevice(0), nullptr, &context);
+
+    auto pImage = Image2dHelper<>::create(&context);
+    EXPECT_TRUE(pImage->getMultiGraphicsAllocation().requiresMigrations());
+
+    UserEvent userEvent{};
+    cl_event inputEvent = &userEvent;
+    cl_event outputEvent{};
+
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ1, pImage, CL_FALSE,
+                                               EnqueueReadImageTraits::origin,
+                                               EnqueueReadImageTraits::region,
+                                               EnqueueReadImageTraits::rowPitch,
+                                               EnqueueReadImageTraits::slicePitch,
+                                               EnqueueReadImageTraits::hostPtr,
+                                               EnqueueReadImageTraits::mapAllocation,
+                                               1u,
+                                               &inputEvent,
+                                               &outputEvent);
+
+    auto pEvent = castToObject<Event>(outputEvent);
+    auto pCommand = static_cast<CommandComputeKernel *>(pEvent->peekCommand());
+    auto pKernel = pCommand->peekKernel();
+    EXPECT_FALSE(pKernel->Kernel::canTransformImages());
+    EXPECT_TRUE(pKernel->isPatched());
+    EXPECT_TRUE(pKernel->requiresMemoryMigration());
+
+    auto &memObjectsForMigration = pKernel->getMemObjectsToMigrate();
+    ASSERT_EQ(1u, memObjectsForMigration.size());
+    auto memObj = memObjectsForMigration.begin()->second;
+    for (auto &rootDeviceIndex : context.getRootDeviceIndices()) {
+        EXPECT_EQ(pImage->getMultiGraphicsAllocation().getGraphicsAllocation(rootDeviceIndex), memObj->getMultiGraphicsAllocation().getGraphicsAllocation(rootDeviceIndex));
+    }
+
+    EXPECT_TRUE(memObj->getMultiGraphicsAllocation().requiresMigrations());
+
+    EXPECT_EQ(MigrationSyncData::locationUndefined, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+
+    userEvent.setStatus(CL_COMPLETE);
+
+    EXPECT_EQ(0u, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    pEvent->release();
+    pCmdQ1->finish();
+    pCmdQ1->release();
+    pImage->release();
+}
+
+HWTEST_F(EnqueueReadImageTest, givenMultiRootDeviceImageWhenEnqueueReadImageIsCalledMultipleTimesThenEachKernelUsesDifferentImage) {
+
+    MockDefaultContext context;
+
+    auto pCmdQ1 = createCommandQueue(context.getDevice(0), nullptr, &context);
+
+    auto pImage = Image2dHelper<>::create(&context);
+    EXPECT_TRUE(pImage->getMultiGraphicsAllocation().requiresMigrations());
+
+    UserEvent userEvent{};
+    cl_event inputEvent = &userEvent;
+    cl_event outputEvent0{};
+    cl_event outputEvent1{};
+
+    EXPECT_EQ(MigrationSyncData::locationUndefined, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ1, pImage, CL_FALSE,
+                                               EnqueueReadImageTraits::origin,
+                                               EnqueueReadImageTraits::region,
+                                               EnqueueReadImageTraits::rowPitch,
+                                               EnqueueReadImageTraits::slicePitch,
+                                               EnqueueReadImageTraits::hostPtr,
+                                               EnqueueReadImageTraits::mapAllocation,
+                                               1u,
+                                               &inputEvent,
+                                               &outputEvent0);
+    EXPECT_EQ(MigrationSyncData::locationUndefined, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+
+    auto pEvent0 = castToObject<Event>(outputEvent0);
+    auto pCommand0 = static_cast<CommandComputeKernel *>(pEvent0->peekCommand());
+    auto pKernel0 = pCommand0->peekKernel();
+    EXPECT_FALSE(pKernel0->Kernel::canTransformImages());
+    EXPECT_TRUE(pKernel0->isPatched());
+    EXPECT_TRUE(pKernel0->requiresMemoryMigration());
+
+    auto &memObjectsForMigration0 = pKernel0->getMemObjectsToMigrate();
+    ASSERT_EQ(1u, memObjectsForMigration0.size());
+    auto memObj0 = memObjectsForMigration0.begin()->second;
+    for (auto &rootDeviceIndex : context.getRootDeviceIndices()) {
+        EXPECT_EQ(pImage->getMultiGraphicsAllocation().getGraphicsAllocation(rootDeviceIndex), memObj0->getMultiGraphicsAllocation().getGraphicsAllocation(rootDeviceIndex));
+    }
+
+    EXPECT_TRUE(memObj0->getMultiGraphicsAllocation().requiresMigrations());
+
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ1, pImage, CL_FALSE,
+                                               EnqueueReadImageTraits::origin,
+                                               EnqueueReadImageTraits::region,
+                                               EnqueueReadImageTraits::rowPitch,
+                                               EnqueueReadImageTraits::slicePitch,
+                                               EnqueueReadImageTraits::hostPtr,
+                                               EnqueueReadImageTraits::mapAllocation,
+                                               1u,
+                                               &outputEvent0,
+                                               &outputEvent1);
+    EXPECT_EQ(MigrationSyncData::locationUndefined, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+
+    auto pEvent1 = castToObject<Event>(outputEvent1);
+    auto pCommand1 = static_cast<CommandComputeKernel *>(pEvent1->peekCommand());
+    auto pKernel1 = pCommand1->peekKernel();
+    EXPECT_FALSE(pKernel1->Kernel::canTransformImages());
+    EXPECT_TRUE(pKernel1->isPatched());
+    EXPECT_TRUE(pKernel1->requiresMemoryMigration());
+
+    auto &memObjectsForMigration1 = pKernel1->getMemObjectsToMigrate();
+    ASSERT_EQ(1u, memObjectsForMigration1.size());
+    auto memObj1 = memObjectsForMigration1.begin()->second;
+    for (auto &rootDeviceIndex : context.getRootDeviceIndices()) {
+        EXPECT_EQ(pImage->getMultiGraphicsAllocation().getGraphicsAllocation(rootDeviceIndex), memObj1->getMultiGraphicsAllocation().getGraphicsAllocation(rootDeviceIndex));
+    }
+
+    EXPECT_TRUE(memObj1->getMultiGraphicsAllocation().requiresMigrations());
+
+    EXPECT_NE(memObj0, memObj1);
+
+    userEvent.setStatus(CL_COMPLETE);
+
+    EXPECT_EQ(0u, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    pEvent0->release();
+    pEvent1->release();
+    pCmdQ1->finish();
+    pCmdQ1->release();
+    pImage->release();
+}
+
+HWTEST_F(EnqueueReadImageTest, givenMultiRootDeviceImageWhenNonBlockedEnqueueReadImageIsCalledThenCommandQueueIsFlushed) {
+    MockDefaultContext context;
+
+    auto pCmdQ1 = createCommandQueue(context.getDevice(0), nullptr, &context);
+
+    auto pImage = Image2dHelper<>::create(&context);
+    EXPECT_TRUE(pImage->getMultiGraphicsAllocation().requiresMigrations());
+    auto &ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> &>(pCmdQ1->getGpgpuCommandStreamReceiver());
+
+    EXPECT_FALSE(ultCsr.flushBatchedSubmissionsCalled);
+    EXPECT_EQ(MigrationSyncData::locationUndefined, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ1, pImage, CL_FALSE);
+
+    EXPECT_EQ(0u, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    EXPECT_TRUE(ultCsr.flushBatchedSubmissionsCalled);
+    pCmdQ1->finish();
+    pCmdQ1->release();
+    pImage->release();
+}
+
+HWTEST_F(EnqueueReadImageTest, givenMultiRootDeviceImageWhenNonBlockedEnqueueReadImageIsCalledThenTlbCacheIsInvalidated) {
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+
+    MockDefaultContext context;
+
+    auto pCmdQ1 = createCommandQueue(context.getDevice(0), nullptr, &context);
+
+    auto pImage = Image2dHelper<>::create(&context);
+    EXPECT_TRUE(pImage->getMultiGraphicsAllocation().requiresMigrations());
+
+    EXPECT_EQ(MigrationSyncData::locationUndefined, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ1, pImage, CL_FALSE);
+
+    EXPECT_EQ(0u, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    pCmdQ1->finish();
+
+    {
+        HardwareParse hwParser;
+        hwParser.parseCommands<FamilyType>(pCmdQ1->getCS(0), 0);
+        auto pipeControls = findAll<PIPE_CONTROL *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
+        EXPECT_LT(0u, pipeControls.size());
+        bool pipeControlWithTlbInvalidateFound = false;
+        for (auto &pipeControl : pipeControls) {
+            auto pipeControlCmd = genCmdCast<PIPE_CONTROL *>(*pipeControl);
+            if (pipeControlCmd->getTlbInvalidate()) {
+                EXPECT_TRUE(pipeControlCmd->getCommandStreamerStallEnable());
+                pipeControlWithTlbInvalidateFound = true;
+            }
+        }
+        EXPECT_TRUE(pipeControlWithTlbInvalidateFound);
+    }
+
+    pCmdQ1->release();
+    pImage->release();
+}
+
+HWTEST_F(EnqueueReadImageTest, givenMultiRootDeviceImageWhenEnqueueReadImageIsCalledToDifferentDevicesThenCorrectLocationIsSet) {
+
+    MockDefaultContext context;
+
+    auto pCmdQ1 = createCommandQueue(context.getDevice(0), nullptr, &context);
+    auto pCmdQ2 = createCommandQueue(context.getDevice(1), nullptr, &context);
+
+    auto pImage = Image2dHelper<>::create(&context);
+    EXPECT_TRUE(pImage->getMultiGraphicsAllocation().requiresMigrations());
+    auto &ultCsr1 = static_cast<UltCommandStreamReceiver<FamilyType> &>(pCmdQ1->getGpgpuCommandStreamReceiver());
+    auto &ultCsr2 = static_cast<UltCommandStreamReceiver<FamilyType> &>(pCmdQ2->getGpgpuCommandStreamReceiver());
+
+    EXPECT_FALSE(ultCsr1.flushBatchedSubmissionsCalled);
+    EXPECT_FALSE(ultCsr2.flushBatchedSubmissionsCalled);
+    EXPECT_EQ(MigrationSyncData::locationUndefined, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ1, pImage, CL_FALSE,
+                                               EnqueueReadImageTraits::origin,
+                                               EnqueueReadImageTraits::region,
+                                               EnqueueReadImageTraits::rowPitch,
+                                               EnqueueReadImageTraits::slicePitch,
+                                               EnqueueReadImageTraits::hostPtr,
+                                               EnqueueReadImageTraits::mapAllocation,
+                                               0u,
+                                               nullptr,
+                                               nullptr);
+
+    EXPECT_EQ(0u, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    EXPECT_TRUE(ultCsr1.flushBatchedSubmissionsCalled);
+    EXPECT_FALSE(ultCsr2.flushBatchedSubmissionsCalled);
+    pCmdQ1->finish();
+
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ2, pImage, CL_FALSE,
+                                               EnqueueReadImageTraits::origin,
+                                               EnqueueReadImageTraits::region,
+                                               EnqueueReadImageTraits::rowPitch,
+                                               EnqueueReadImageTraits::slicePitch,
+                                               EnqueueReadImageTraits::hostPtr,
+                                               EnqueueReadImageTraits::mapAllocation,
+                                               0u,
+                                               nullptr,
+                                               nullptr);
+
+    EXPECT_EQ(1u, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    EXPECT_TRUE(ultCsr2.flushBatchedSubmissionsCalled);
+    pCmdQ2->finish();
+
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ1, pImage, CL_FALSE,
+                                               EnqueueReadImageTraits::origin,
+                                               EnqueueReadImageTraits::region,
+                                               EnqueueReadImageTraits::rowPitch,
+                                               EnqueueReadImageTraits::slicePitch,
+                                               EnqueueReadImageTraits::hostPtr,
+                                               EnqueueReadImageTraits::mapAllocation,
+                                               0u,
+                                               nullptr,
+                                               nullptr);
+
+    EXPECT_EQ(0u, pImage->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    pCmdQ1->finish();
+    pCmdQ1->release();
+    pCmdQ2->release();
+    pImage->release();
+}
+
+HWTEST_F(EnqueueReadImageTest, givenImageFromBufferThatRequiresMigrationWhenEnqueueReadImageThenBufferObjectIsTakenForMigration) {
+
+    MockDefaultContext context;
+
+    auto pCmdQ1 = createCommandQueue(context.getDevice(0), nullptr, &context);
+
+    auto pBuffer = BufferHelper<>::create(&context);
+    auto imageDesc = Image2dDefaults::imageDesc;
+
+    cl_mem clBuffer = pBuffer;
+    imageDesc.mem_object = clBuffer;
+
+    const_cast<MultiGraphicsAllocation &>(pBuffer->getMultiGraphicsAllocation()).setMultiStorage(true);
+
+    EXPECT_TRUE(pBuffer->getMultiGraphicsAllocation().requiresMigrations());
+    auto pImage = Image2dHelper<>::create(&context, &imageDesc);
+    EXPECT_TRUE(pImage->getMultiGraphicsAllocation().requiresMigrations());
+
+    UserEvent userEvent{};
+    cl_event inputEvent = &userEvent;
+    cl_event outputEvent{};
+
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ1, pImage, CL_FALSE,
+                                               EnqueueReadImageTraits::origin,
+                                               EnqueueReadImageTraits::region,
+                                               EnqueueReadImageTraits::rowPitch,
+                                               EnqueueReadImageTraits::slicePitch,
+                                               EnqueueReadImageTraits::hostPtr,
+                                               EnqueueReadImageTraits::mapAllocation,
+                                               1u,
+                                               &inputEvent,
+                                               &outputEvent);
+
+    auto pEvent = castToObject<Event>(outputEvent);
+    auto pCommand = static_cast<CommandComputeKernel *>(pEvent->peekCommand());
+    auto pKernel = pCommand->peekKernel();
+    EXPECT_FALSE(pKernel->Kernel::canTransformImages());
+    EXPECT_TRUE(pKernel->isPatched());
+    EXPECT_TRUE(pKernel->requiresMemoryMigration());
+
+    auto &memObjectsForMigration = pKernel->getMemObjectsToMigrate();
+    ASSERT_EQ(1u, memObjectsForMigration.size());
+    auto memObj = memObjectsForMigration.begin()->second;
+    EXPECT_EQ(static_cast<MemObj *>(pBuffer), memObj);
+
+    EXPECT_TRUE(memObj->getMultiGraphicsAllocation().requiresMigrations());
+
+    EXPECT_EQ(MigrationSyncData::locationUndefined, pBuffer->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+
+    userEvent.setStatus(CL_COMPLETE);
+
+    EXPECT_EQ(0u, pBuffer->getMultiGraphicsAllocation().getMigrationSyncData()->getCurrentLocation());
+    pEvent->release();
+    pCmdQ1->finish();
+    pCmdQ1->release();
+    pImage->release();
+    pBuffer->release();
 }
 
 HWTEST_F(EnqueueReadImageTest, GivenNonBlockingEnqueueWhenReadingImageThenTaskLevelIsIncremented) {
@@ -95,7 +437,7 @@ HWTEST_F(EnqueueReadImageTest, WhenReadingImageThenIndirectDataIsAdded) {
     auto sshBefore = pSSH->getUsed();
 
     EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage, EnqueueReadImageTraits::blocking);
-    EXPECT_TRUE(UnitTestHelper<FamilyType>::evaluateDshUsage(dshBefore, pDSH->getUsed(), nullptr));
+    EXPECT_TRUE(UnitTestHelper<FamilyType>::evaluateDshUsage(dshBefore, pDSH->getUsed(), nullptr, rootDeviceIndex));
     EXPECT_NE(iohBefore, pIOH->getUsed());
     EXPECT_NE(sshBefore, pSSH->getUsed());
 }
@@ -227,13 +569,13 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueReadImageTest, GivenBlockingEnqueueWhenReadin
 }
 
 HWTEST_F(EnqueueReadImageTest, GivenImage1DarrayWhenReadImageIsCalledThenHostPtrSizeIsCalculatedProperly) {
-    auto srcImage = Image1dArrayHelper<>::create(context);
-    auto imageDesc = srcImage->getImageDesc();
+    std::unique_ptr<Image> srcImage(Image1dArrayHelper<>::create(context));
+    auto &imageDesc = srcImage->getImageDesc();
     auto imageSize = imageDesc.image_width * imageDesc.image_array_size * 4;
     size_t origin[] = {0, 0, 0};
     size_t region[] = {imageDesc.image_width, imageDesc.image_array_size, 1};
 
-    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage, CL_FALSE, origin, region);
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage.get(), CL_FALSE, origin, region);
 
     auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
 
@@ -241,8 +583,6 @@ HWTEST_F(EnqueueReadImageTest, GivenImage1DarrayWhenReadImageIsCalledThenHostPtr
     ASSERT_NE(nullptr, temporaryAllocation);
 
     EXPECT_EQ(temporaryAllocation->getUnderlyingBufferSize(), imageSize);
-
-    delete srcImage;
 }
 
 HWTEST_F(EnqueueReadImageTest, GivenImage1DarrayWhenReadImageIsCalledThenRowPitchIsSetToSlicePitch) {
@@ -258,21 +598,21 @@ HWTEST_F(EnqueueReadImageTest, GivenImage1DarrayWhenReadImageIsCalledThenRowPitc
         copyBuiltIn,
         pCmdQ->getContext(),
         pCmdQ->getDevice(),
-        std::unique_ptr<NEO::BuiltinDispatchInfoBuilder>(new MockBuiltinDispatchInfoBuilder(*builtIns, &origBuilder)));
+        std::unique_ptr<NEO::BuiltinDispatchInfoBuilder>(new MockBuiltinDispatchInfoBuilder(*builtIns, pCmdQ->getClDevice(), &origBuilder)));
 
-    auto srcImage = Image1dArrayHelper<>::create(context);
-    auto imageDesc = srcImage->getImageDesc();
+    std::unique_ptr<Image> srcImage(Image1dArrayHelper<>::create(context));
+    auto &imageDesc = srcImage->getImageDesc();
     size_t origin[] = {0, 0, 0};
     size_t region[] = {imageDesc.image_width, imageDesc.image_array_size, 1};
     size_t rowPitch = 64;
     size_t slicePitch = 128;
 
-    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage, CL_TRUE, origin, region, rowPitch, slicePitch);
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage.get(), CL_TRUE, origin, region, rowPitch, slicePitch);
 
     auto &mockBuilder = static_cast<MockBuiltinDispatchInfoBuilder &>(BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(copyBuiltIn,
                                                                                                                               pCmdQ->getClDevice()));
     auto params = mockBuilder.getBuiltinOpParams();
-    EXPECT_EQ(params->srcRowPitch, slicePitch);
+    EXPECT_EQ(params->dstRowPitch, slicePitch);
 
     // restore original builder and retrieve mock builder
     auto newBuilder = builtIns->setBuiltinDispatchInfoBuilder(
@@ -281,17 +621,16 @@ HWTEST_F(EnqueueReadImageTest, GivenImage1DarrayWhenReadImageIsCalledThenRowPitc
         pCmdQ->getDevice(),
         std::move(oldBuilder));
     EXPECT_NE(nullptr, newBuilder);
-    delete srcImage;
 }
 
 HWTEST_F(EnqueueReadImageTest, GivenImage2DarrayWhenReadImageIsCalledThenHostPtrSizeIsCalculatedProperly) {
-    auto srcImage = Image2dArrayHelper<>::create(context);
-    auto imageDesc = srcImage->getImageDesc();
+    std::unique_ptr<Image> srcImage(Image2dArrayHelper<>::create(context));
+    auto &imageDesc = srcImage->getImageDesc();
     auto imageSize = imageDesc.image_width * imageDesc.image_height * imageDesc.image_array_size * 4;
     size_t origin[] = {0, 0, 0};
     size_t region[] = {imageDesc.image_width, imageDesc.image_height, imageDesc.image_array_size};
 
-    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage, CL_FALSE, origin, region);
+    EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, srcImage.get(), CL_FALSE, origin, region);
 
     auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
 
@@ -299,14 +638,12 @@ HWTEST_F(EnqueueReadImageTest, GivenImage2DarrayWhenReadImageIsCalledThenHostPtr
     ASSERT_NE(nullptr, temporaryAllocation);
 
     EXPECT_EQ(temporaryAllocation->getUnderlyingBufferSize(), imageSize);
-
-    delete srcImage;
 }
 
 HWTEST_F(EnqueueReadImageTest, GivenImage1DAndImageShareTheSameStorageWithHostPtrWhenReadReadImageIsCalledThenImageIsNotRead) {
     cl_int retVal = CL_SUCCESS;
     std::unique_ptr<Image> dstImage2(Image1dHelper<>::create(context));
-    auto imageDesc = dstImage2->getImageDesc();
+    auto &imageDesc = dstImage2->getImageDesc();
     std::unique_ptr<CommandQueue> pCmdOOQ(createCommandQueue(pClDevice, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE));
     size_t origin[] = {0, 0, 0};
     size_t region[] = {imageDesc.image_width, 1, 1};
@@ -335,7 +672,7 @@ HWTEST_F(EnqueueReadImageTest, GivenImage1DAndImageShareTheSameStorageWithHostPt
 HWTEST_F(EnqueueReadImageTest, GivenImage1DArrayAndImageShareTheSameStorageWithHostPtrWhenReadReadImageIsCalledThenImageIsNotRead) {
     cl_int retVal = CL_SUCCESS;
     std::unique_ptr<Image> dstImage2(Image1dArrayHelper<>::create(context));
-    auto imageDesc = dstImage2->getImageDesc();
+    auto &imageDesc = dstImage2->getImageDesc();
     size_t origin[] = {imageDesc.image_width / 2, imageDesc.image_array_size / 2, 0};
     size_t region[] = {imageDesc.image_width - (imageDesc.image_width / 2), imageDesc.image_array_size - (imageDesc.image_array_size / 2), 1};
     void *ptr = dstImage2->getCpuAddressForMemoryTransfer();
@@ -357,8 +694,6 @@ HWTEST_F(EnqueueReadImageTest, GivenImage1DArrayAndImageShareTheSameStorageWithH
                                      nullptr);
 
     EXPECT_EQ(CL_SUCCESS, retVal);
-
-    EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(pCmdQ->taskLevel, 0u);
 }
 
@@ -369,7 +704,7 @@ HWTEST_F(EnqueueReadImageTest, GivenSharedContextZeroCopy2DImageWhenEnqueueReadI
     std::unique_ptr<Image> dstImage(ImageHelper<ImageUseHostPtr<Image2dDefaults>>::create(context));
     EXPECT_TRUE(dstImage->isMemObjZeroCopy());
 
-    auto imageDesc = dstImage->getImageDesc();
+    auto &imageDesc = dstImage->getImageDesc();
     size_t origin[] = {0, 0, 0};
     size_t region[] = {imageDesc.image_width, imageDesc.image_height, 1};
     void *ptr = dstImage->getCpuAddressForMemoryTransfer();
@@ -387,9 +722,6 @@ HWTEST_F(EnqueueReadImageTest, GivenSharedContextZeroCopy2DImageWhenEnqueueReadI
                                      0,
                                      nullptr,
                                      nullptr);
-
-    EXPECT_EQ(CL_SUCCESS, retVal);
-
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(pCmdQ->taskLevel, 0u);
 }
@@ -397,7 +729,7 @@ HWTEST_F(EnqueueReadImageTest, GivenSharedContextZeroCopy2DImageWhenEnqueueReadI
 HWTEST_F(EnqueueReadImageTest, GivenImage1DThatIsZeroCopyWhenReadImageWithTheSamePointerAndOutputEventIsPassedThenEventHasCorrectCommandTypeSet) {
     cl_int retVal = CL_SUCCESS;
     std::unique_ptr<Image> dstImage(Image1dHelper<>::create(context));
-    auto imageDesc = dstImage->getImageDesc();
+    auto &imageDesc = dstImage->getImageDesc();
     size_t origin[] = {0, 0, 0};
     size_t region[] = {imageDesc.image_width, imageDesc.image_height, 1};
     void *ptr = dstImage->getCpuAddressForMemoryTransfer();
@@ -420,8 +752,6 @@ HWTEST_F(EnqueueReadImageTest, GivenImage1DThatIsZeroCopyWhenReadImageWithTheSam
                                      &event);
 
     EXPECT_EQ(CL_SUCCESS, retVal);
-
-    EXPECT_EQ(CL_SUCCESS, retVal);
     ASSERT_NE(nullptr, event);
 
     auto pEvent = static_cast<Event *>(event);
@@ -434,10 +764,11 @@ HWTEST_F(EnqueueReadImageTest, givenDeviceWithBlitterSupportWhenEnqueueReadImage
     DebugManagerStateRestore restorer;
     DebugManager.flags.OverrideInvalidEngineWithDefault.set(1);
     DebugManager.flags.EnableBlitterForEnqueueOperations.set(1);
-    DebugManager.flags.EnableBlitterForReadWriteImage.set(1);
+    DebugManager.flags.EnableBlitterForEnqueueImageOperations.set(1);
 
-    auto &capabilityTable = pClDevice->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable;
-    capabilityTable.blitterOperationsSupported = true;
+    auto hwInfo = pClDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto &hwHelper = HwHelper::get(hwInfo->platform.eRenderCoreFamily);
+    hwInfo->capabilityTable.blitterOperationsSupported = true;
     size_t origin[] = {0, 0, 0};
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pClDevice, nullptr);
     std::unique_ptr<Image> image(Image2dHelper<>::create(context));
@@ -452,13 +783,14 @@ HWTEST_F(EnqueueReadImageTest, givenDeviceWithBlitterSupportWhenEnqueueReadImage
         EXPECT_TRUE(mockCmdQ->isBlitEnqueueImageAllowed);
     }
     {
-        DebugManager.flags.EnableBlitterForReadWriteImage.set(-1);
+        DebugManager.flags.EnableBlitterForEnqueueImageOperations.set(-1);
         size_t region[] = {BlitterConstants::maxBlitWidth, BlitterConstants::maxBlitHeight, 1};
         EnqueueReadImageHelper<>::enqueueReadImage(mockCmdQ.get(), image.get(), CL_TRUE, origin, region);
-        EXPECT_FALSE(mockCmdQ->isBlitEnqueueImageAllowed);
+        auto supportExpected = hwHelper.isBlitterForImagesSupported(*hwInfo);
+        EXPECT_EQ(supportExpected, mockCmdQ->isBlitEnqueueImageAllowed);
     }
     {
-        DebugManager.flags.EnableBlitterForReadWriteImage.set(0);
+        DebugManager.flags.EnableBlitterForEnqueueImageOperations.set(0);
         size_t region[] = {BlitterConstants::maxBlitWidth, BlitterConstants::maxBlitHeight, 1};
         EnqueueReadImageHelper<>::enqueueReadImage(mockCmdQ.get(), image.get(), CL_TRUE, origin, region);
         EXPECT_FALSE(mockCmdQ->isBlitEnqueueImageAllowed);
@@ -468,7 +800,7 @@ HWTEST_F(EnqueueReadImageTest, givenDeviceWithBlitterSupportWhenEnqueueReadImage
 HWTEST_F(EnqueueReadImageTest, givenCommandQueueWhenEnqueueReadImageIsCalledThenItCallsNotifyFunction) {
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pClDevice, nullptr);
     std::unique_ptr<Image> srcImage(Image2dArrayHelper<>::create(context));
-    auto imageDesc = srcImage->getImageDesc();
+    auto &imageDesc = srcImage->getImageDesc();
     size_t origin[] = {0, 0, 0};
     size_t region[] = {imageDesc.image_width, imageDesc.image_height, imageDesc.image_array_size};
 
@@ -480,7 +812,7 @@ HWTEST_F(EnqueueReadImageTest, givenCommandQueueWhenEnqueueReadImageIsCalledThen
 HWTEST_F(EnqueueReadImageTest, givenCommandQueueWhenEnqueueReadImageWithMapAllocationIsCalledThenItDoesntCallNotifyFunction) {
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pClDevice, nullptr);
     std::unique_ptr<Image> srcImage(Image2dArrayHelper<>::create(context));
-    auto imageDesc = srcImage->getImageDesc();
+    auto &imageDesc = srcImage->getImageDesc();
     size_t origin[] = {0, 0, 0};
     size_t region[] = {imageDesc.image_width, imageDesc.image_height, imageDesc.image_array_size};
     size_t rowPitch = srcImage->getHostPtrRowPitch();
@@ -498,7 +830,7 @@ HWTEST_F(EnqueueReadImageTest, givenEnqueueReadImageBlockingWhenAUBDumpAllocsOnE
 
     std::unique_ptr<Image> srcImage(Image2dArrayHelper<>::create(context));
     srcAllocation = srcImage->getGraphicsAllocation(pClDevice->getRootDeviceIndex());
-    auto imageDesc = srcImage->getImageDesc();
+    auto &imageDesc = srcImage->getImageDesc();
     size_t origin[] = {0, 0, 0};
     size_t region[] = {imageDesc.image_width, imageDesc.image_height, imageDesc.image_array_size};
 
@@ -515,7 +847,7 @@ HWTEST_F(EnqueueReadImageTest, givenEnqueueReadImageNonBlockingWhenAUBDumpAllocs
 
     std::unique_ptr<Image> srcImage(Image2dArrayHelper<>::create(context));
     srcAllocation = srcImage->getGraphicsAllocation(pClDevice->getRootDeviceIndex());
-    auto imageDesc = srcImage->getImageDesc();
+    auto &imageDesc = srcImage->getImageDesc();
     size_t origin[] = {0, 0, 0};
     size_t region[] = {imageDesc.image_width, imageDesc.image_height, imageDesc.image_array_size};
 
@@ -541,7 +873,7 @@ HWTEST_P(MipMapReadImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalled
         EBuiltInOps::CopyImage3dToBuffer,
         pCmdQ->getContext(),
         pCmdQ->getDevice(),
-        std::unique_ptr<NEO::BuiltinDispatchInfoBuilder>(new MockBuiltinDispatchInfoBuilder(*builtIns, &origBuilder)));
+        std::unique_ptr<NEO::BuiltinDispatchInfoBuilder>(new MockBuiltinDispatchInfoBuilder(*builtIns, pCmdQ->getClDevice(), &origBuilder)));
 
     cl_int retVal = CL_SUCCESS;
     cl_image_desc imageDesc = {};
@@ -617,7 +949,7 @@ using NegativeFailAllocationTest = Test<NegativeFailAllocationCommandEnqueueBase
 
 HWTEST_F(NegativeFailAllocationTest, givenEnqueueWriteImageWhenHostPtrAllocationCreationFailsThenReturnOutOfResource) {
     cl_int retVal = CL_SUCCESS;
-    auto imageDesc = image->getImageDesc();
+    auto &imageDesc = image->getImageDesc();
 
     size_t origin[] = {0, 0, 0};
     size_t region[] = {imageDesc.image_width, imageDesc.image_height, 1};
@@ -638,4 +970,25 @@ HWTEST_F(NegativeFailAllocationTest, givenEnqueueWriteImageWhenHostPtrAllocation
                                       nullptr);
 
     EXPECT_EQ(CL_OUT_OF_RESOURCES, retVal);
+}
+
+using OneMipLevelReadImageTests = Test<OneMipLevelImageFixture>;
+
+HWTEST_F(OneMipLevelReadImageTests, GivenNotMippedImageWhenReadingImageThenDoNotProgramSourceMipLevel) {
+    auto queue = createQueue<FamilyType>();
+    auto retVal = queue->enqueueReadImage(
+        image.get(),
+        CL_TRUE,
+        origin,
+        region,
+        0,
+        0,
+        cpuPtr,
+        nullptr,
+        0,
+        nullptr,
+        nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_TRUE(builtinOpsParamsCaptured);
+    EXPECT_EQ(0u, usedBuiltinOpsParams.srcMipLevel);
 }

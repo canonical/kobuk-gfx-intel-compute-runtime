@@ -1,15 +1,15 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/device/device_info.h"
+#include "shared/test/common/test_macros/matchers.h"
 
 #include "opencl/source/helpers/dispatch_info.h"
 #include "opencl/test/unit_test/fixtures/device_host_queue_fixture.h"
-#include "opencl/test/unit_test/gen_common/matchers.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
@@ -287,9 +287,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, DeviceQueueTest, WhenDeviceQueueIsCreatedThenDshBuff
 
 HWCMDTEST_F(IGFX_GEN8_CORE, DeviceQueueTest, WhenDispatchingSchedulerThenNoAssertsOccur) {
     DeviceQueue devQueue;
-    MockContext context;
     MockProgram program(toClDeviceVector(*device));
-    MockCommandQueue cmdQ(nullptr, nullptr, 0);
+    MockCommandQueue cmdQ(nullptr, nullptr, 0, false);
     KernelInfo info;
     MockSchedulerKernel *kernel = new MockSchedulerKernel(&program, info, *device);
     LinearStream cmdStream;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #include "graphics_allocation.h"
 
+#include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/memory_manager/memory_manager.h"
 
@@ -69,6 +70,32 @@ uint32_t GraphicsAllocation::getUsedPageSize() const {
     default:
         return MemoryConstants::pageSize;
     }
+}
+
+bool GraphicsAllocation::isAllocationLockable() const {
+    auto gmm = getDefaultGmm();
+    if (!gmm) {
+        return true;
+    }
+    return 0 == gmm->resourceParams.Flags.Info.NotLockable;
+}
+
+void GraphicsAllocation::setAubWritable(bool writable, uint32_t banks) {
+    UNRECOVERABLE_IF(banks == 0);
+    aubInfo.aubWritable = static_cast<uint32_t>(setBits(aubInfo.aubWritable, writable, banks));
+}
+
+bool GraphicsAllocation::isAubWritable(uint32_t banks) const {
+    return isAnyBitSet(aubInfo.aubWritable, banks);
+}
+
+void GraphicsAllocation::setTbxWritable(bool writable, uint32_t banks) {
+    UNRECOVERABLE_IF(banks == 0);
+    aubInfo.tbxWritable = static_cast<uint32_t>(setBits(aubInfo.tbxWritable, writable, banks));
+}
+
+bool GraphicsAllocation::isTbxWritable(uint32_t banks) const {
+    return isAnyBitSet(aubInfo.tbxWritable, banks);
 }
 
 constexpr uint32_t GraphicsAllocation::objectNotUsed;

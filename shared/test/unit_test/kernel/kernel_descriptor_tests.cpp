@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -98,7 +98,7 @@ TEST(KernelDescriptorAttributesSupportsBuffersBiggerThan4Gb, GivenPureStatelessB
     EXPECT_TRUE(desc.kernelAttributes.supportsBuffersBiggerThan4Gb());
 }
 
-TEST(KernelDescriptorAttributesSupportsBuffersBiggerThan4Gb, GiveStatefulBufferAddressingThenReturnFalse) {
+TEST(KernelDescriptorAttributesSupportsBuffersBiggerThan4Gb, GivenStatefulBufferAddressingThenReturnFalse) {
     NEO::KernelDescriptor desc;
     desc.kernelAttributes.bufferAddressingMode = NEO::KernelDescriptor::Bindful;
     EXPECT_FALSE(desc.kernelAttributes.supportsBuffersBiggerThan4Gb());
@@ -108,4 +108,9 @@ TEST(KernelDescriptorAttributesSupportsBuffersBiggerThan4Gb, GiveStatefulBufferA
     EXPECT_FALSE(desc.kernelAttributes.supportsBuffersBiggerThan4Gb());
     desc.kernelAttributes.bufferAddressingMode = NEO::KernelDescriptor::BindlessAndStateless;
     EXPECT_FALSE(desc.kernelAttributes.supportsBuffersBiggerThan4Gb());
+}
+
+TEST(KernelDescriptorTest, givenExtendedInfoWhenAskingForSpecialPipelineSelectModeThenReturnFalse) {
+    NEO::ExtendedInfoBase extendedInfo;
+    EXPECT_FALSE(extendedInfo.specialPipelineSelectModeRequired());
 }

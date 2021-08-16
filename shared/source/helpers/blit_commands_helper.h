@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -22,11 +22,16 @@ class CommandStreamReceiver;
 class Device;
 class GraphicsAllocation;
 class LinearStream;
-struct TimestampPacketStorage;
+
 struct RootDeviceEnvironment;
 
 template <typename TagType>
-struct TagNode;
+class TagNode;
+
+template <typename TSize>
+class TimestampPackets;
+
+class TagNodeBase;
 
 struct BlitProperties;
 struct HardwareInfo;
@@ -34,35 +39,36 @@ struct TimestampPacketDependencies;
 using BlitPropertiesContainer = StackVec<BlitProperties, 16>;
 
 struct BlitProperties {
-    static BlitProperties constructPropertiesForReadWriteBuffer(BlitterConstants::BlitDirection blitDirection,
-                                                                CommandStreamReceiver &commandStreamReceiver,
-                                                                GraphicsAllocation *memObjAllocation,
-                                                                GraphicsAllocation *preallocatedHostAllocation,
-                                                                const void *hostPtr, uint64_t memObjGpuVa,
-                                                                uint64_t hostAllocGpuVa, Vec3<size_t> hostPtrOffset,
-                                                                Vec3<size_t> copyOffset, Vec3<size_t> copySize,
-                                                                size_t hostRowPitch, size_t hostSlicePitch,
-                                                                size_t gpuRowPitch, size_t gpuSlicePitch);
+    static BlitProperties constructPropertiesForReadWrite(BlitterConstants::BlitDirection blitDirection,
+                                                          CommandStreamReceiver &commandStreamReceiver,
+                                                          GraphicsAllocation *memObjAllocation,
+                                                          GraphicsAllocation *preallocatedHostAllocation,
+                                                          const void *hostPtr, uint64_t memObjGpuVa,
+                                                          uint64_t hostAllocGpuVa, Vec3<size_t> hostPtrOffset,
+                                                          Vec3<size_t> copyOffset, Vec3<size_t> copySize,
+                                                          size_t hostRowPitch, size_t hostSlicePitch,
+                                                          size_t gpuRowPitch, size_t gpuSlicePitch);
 
-    static BlitProperties constructPropertiesForCopyBuffer(GraphicsAllocation *dstAllocation, GraphicsAllocation *srcAllocation,
-                                                           Vec3<size_t> dstOffset, Vec3<size_t> srcOffset, Vec3<size_t> copySize,
-                                                           size_t srcRowPitch, size_t srcSlicePitch,
-                                                           size_t dstRowPitch, size_t dstSlicePitch);
+    static BlitProperties constructPropertiesForCopy(GraphicsAllocation *dstAllocation, GraphicsAllocation *srcAllocation,
+                                                     Vec3<size_t> dstOffset, Vec3<size_t> srcOffset, Vec3<size_t> copySize,
+                                                     size_t srcRowPitch, size_t srcSlicePitch,
+                                                     size_t dstRowPitch, size_t dstSlicePitch, GraphicsAllocation *clearColorAllocation);
 
     static BlitProperties constructPropertiesForAuxTranslation(AuxTranslationDirection auxTranslationDirection,
-                                                               GraphicsAllocation *allocation);
+                                                               GraphicsAllocation *allocation, GraphicsAllocation *clearColorAllocation);
 
     static void setupDependenciesForAuxTranslation(BlitPropertiesContainer &blitPropertiesContainer, TimestampPacketDependencies &timestampPacketDependencies,
                                                    TimestampPacketContainer &kernelTimestamps, const CsrDependencies &depsFromEvents,
                                                    CommandStreamReceiver &gpguCsr, CommandStreamReceiver &bcsCsr);
 
-    TagNode<TimestampPacketStorage> *outputTimestampPacket = nullptr;
+    TagNodeBase *outputTimestampPacket = nullptr;
     BlitterConstants::BlitDirection blitDirection;
     CsrDependencies csrDependencies;
     AuxTranslationDirection auxTranslationDirection = AuxTranslationDirection::None;
 
     GraphicsAllocation *dstAllocation = nullptr;
     GraphicsAllocation *srcAllocation = nullptr;
+    GraphicsAllocation *clearColorAllocation = nullptr;
     uint64_t dstGpuAddress = 0;
     uint64_t srcGpuAddress = 0;
 
@@ -74,9 +80,9 @@ struct BlitProperties {
     size_t dstSlicePitch = 0;
     size_t srcRowPitch = 0;
     size_t srcSlicePitch = 0;
+    Vec3<size_t> dstSize = 0;
+    Vec3<size_t> srcSize = 0;
     size_t bytesPerPixel = 0;
-    Vec3<uint32_t> dstSize = 0;
-    Vec3<uint32_t> srcSize = 0;
 };
 
 enum class BlitOperationResult {
@@ -92,14 +98,13 @@ using BlitMemoryToAllocationFunc = std::function<BlitOperationResult(const Devic
                                                                      const void *hostPtr,
                                                                      Vec3<size_t> size)>;
 extern BlitMemoryToAllocationFunc blitMemoryToAllocation;
-extern BlitMemoryToAllocationFunc blitAllocationToMemory;
 } // namespace BlitHelperFunctions
 
 struct BlitHelper {
     static BlitOperationResult blitMemoryToAllocation(const Device &device, GraphicsAllocation *memory, size_t offset, const void *hostPtr,
                                                       Vec3<size_t> size);
-    static BlitOperationResult blitAllocationToMemory(const Device &device, GraphicsAllocation *memory, size_t offset, const void *hostPtr,
-                                                      Vec3<size_t> size);
+    static BlitOperationResult blitMemoryToAllocationBanks(const Device &device, GraphicsAllocation *memory, size_t offset, const void *hostPtr,
+                                                           Vec3<size_t> size, DeviceBitfield memoryBanks);
 };
 
 template <typename GfxFamily>
@@ -109,6 +114,8 @@ struct BlitCommandsHelper {
     static uint64_t getMaxBlitWidthOverride(const RootDeviceEnvironment &rootDeviceEnvironment);
     static uint64_t getMaxBlitHeight(const RootDeviceEnvironment &rootDeviceEnvironment);
     static uint64_t getMaxBlitHeightOverride(const RootDeviceEnvironment &rootDeviceEnvironment);
+    static void dispatchPreBlitCommand(LinearStream &linearStream);
+    static size_t estimatePreBlitCommandSize();
     static void dispatchPostBlitCommand(LinearStream &linearStream);
     static size_t estimatePostBlitCommandSize();
     static size_t estimateBlitCommandsSize(const Vec3<size_t> &copySize, const CsrDependencies &csrDependencies, bool updateTimestampPacket,
@@ -130,6 +137,8 @@ struct BlitCommandsHelper {
     static void dispatchBlitMemoryFill(NEO::GraphicsAllocation *dstAlloc, uint32_t *pattern, LinearStream &linearStream, size_t size, const RootDeviceEnvironment &rootDeviceEnvironment, COLOR_DEPTH depth);
     static void appendBlitCommandsForBuffer(const BlitProperties &blitProperties, typename GfxFamily::XY_COPY_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment);
     static void appendBlitCommandsForImages(const BlitProperties &blitProperties, typename GfxFamily::XY_COPY_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment, uint32_t &srcSlicePitch, uint32_t &dstSlicePitch);
+    static void appendExtraMemoryProperties(typename GfxFamily::XY_COPY_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment);
+    static void appendExtraMemoryProperties(typename GfxFamily::XY_COLOR_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment);
     static void appendColorDepth(const BlitProperties &blitProperties, typename GfxFamily::XY_COPY_BLT &blitCmd);
     static void appendBlitCommandsForFillBuffer(NEO::GraphicsAllocation *dstAlloc, typename GfxFamily::XY_COLOR_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment);
     static void appendSurfaceType(const BlitProperties &blitProperties, typename GfxFamily::XY_COPY_BLT &blitCmd);
@@ -140,9 +149,16 @@ struct BlitCommandsHelper {
     static void dispatchDebugPauseCommands(LinearStream &commandStream, uint64_t debugPauseStateGPUAddress, DebugPauseState confirmationTrigger, DebugPauseState waitCondition);
     static size_t getSizeForDebugPauseCommands();
     static bool useOneBlitCopyCommand(Vec3<size_t> copySize, uint32_t bytesPerPixel);
-    static uint32_t getAvailableBytesPerPixel(size_t copySize, uint32_t srcOrigin, uint32_t dstOrigin, uint32_t srcSize, uint32_t dstSize);
+    static uint32_t getAvailableBytesPerPixel(size_t copySize, uint32_t srcOrigin, uint32_t dstOrigin, size_t srcSize, size_t dstSize);
     static bool isCopyRegionPreferred(const Vec3<size_t> &copySize, const RootDeviceEnvironment &rootDeviceEnvironment);
     static void programGlobalSequencerFlush(LinearStream &commandStream);
     static size_t getSizeForGlobalSequencerFlush();
+    static bool miArbCheckWaRequired();
+    static bool preBlitCommandWARequired();
+    static void appendClearColor(const BlitProperties &blitProperties, typename GfxFamily::XY_COPY_BLT &blitCmd);
+
+    static void encodeProfilingStartMmios(LinearStream &cmdStream, const TagNodeBase &timestampPacketNode);
+    static void encodeProfilingEndMmios(LinearStream &cmdStream, const TagNodeBase &timestampPacketNode);
+    static size_t getProfilingMmioCmdsSize();
 };
 } // namespace NEO

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,7 +9,7 @@
 #include "shared/source/device/device.h"
 #include "shared/source/helpers/array_count.h"
 #include "shared/source/helpers/file_io.h"
-#include "shared/test/unit_test/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/source/program/program.h"
@@ -110,7 +110,8 @@ class SimpleArgKernelFixture : public ProgramFixture {
         // create a kernel
         pKernel = Kernel::create<MockKernel>(
             pProgram,
-            *pProgram->getKernelInfo("SimpleArg"),
+            pProgram->getKernelInfoForKernel("SimpleArg"),
+            *pDevice,
             &retVal);
 
         ASSERT_NE(nullptr, pKernel);
@@ -156,7 +157,8 @@ class SimpleArgNonUniformKernelFixture : public ProgramFixture {
 
         kernel = Kernel::create<MockKernel>(
             pProgram,
-            *pProgram->getKernelInfo("simpleNonUniform"),
+            pProgram->getKernelInfoForKernel("simpleNonUniform"),
+            *device,
             &retVal);
         ASSERT_NE(nullptr, kernel);
         ASSERT_EQ(CL_SUCCESS, retVal);
@@ -202,7 +204,8 @@ class SimpleKernelFixture : public ProgramFixture {
                 kernelName.append(std::to_string(i));
                 kernels[i].reset(Kernel::create<MockKernel>(
                     pProgram,
-                    *pProgram->getKernelInfo(kernelName.c_str()),
+                    pProgram->getKernelInfoForKernel(kernelName.c_str()),
+                    *device,
                     &retVal));
                 ASSERT_NE(nullptr, kernels[i]);
                 ASSERT_EQ(CL_SUCCESS, retVal);
@@ -251,7 +254,8 @@ class SimpleKernelStatelessFixture : public ProgramFixture {
 
         kernel.reset(Kernel::create<MockKernel>(
             pProgram,
-            *pProgram->getKernelInfo("statelessKernel"),
+            pProgram->getKernelInfoForKernel("statelessKernel"),
+            *device,
             &retVal));
         ASSERT_NE(nullptr, kernel);
         ASSERT_EQ(CL_SUCCESS, retVal);
@@ -262,6 +266,88 @@ class SimpleKernelStatelessFixture : public ProgramFixture {
     }
 
     std::unique_ptr<Kernel> kernel = nullptr;
+    cl_int retVal = CL_SUCCESS;
+};
+
+class StatelessCopyKernelFixture : public ProgramFixture {
+  public:
+    DebugManagerStateRestore restorer;
+    using ProgramFixture::SetUp;
+
+  protected:
+    void SetUp(ClDevice *device, Context *context) {
+        ProgramFixture::SetUp();
+        DebugManager.flags.DisableStatelessToStatefulOptimization.set(true);
+        DebugManager.flags.EnableStatelessToStatefulBufferOffsetOpt.set(false);
+
+        CreateProgramFromBinary(
+            context,
+            toClDeviceVector(*device),
+            "stateless_copy_buffer");
+        ASSERT_NE(nullptr, pProgram);
+
+        retVal = pProgram->build(
+            pProgram->getDevices(),
+            CompilerOptions::greaterThan4gbBuffersRequired.data(),
+            false);
+        ASSERT_EQ(CL_SUCCESS, retVal);
+
+        multiDeviceKernel.reset(MultiDeviceKernel::create<MockKernel>(
+            pProgram,
+            pProgram->getKernelInfosForKernel("StatelessCopyBuffer"),
+            &retVal));
+        kernel = static_cast<MockKernel *>(multiDeviceKernel->getKernel(device->getRootDeviceIndex()));
+        ASSERT_NE(nullptr, kernel);
+        ASSERT_EQ(CL_SUCCESS, retVal);
+    }
+
+    void TearDown() override {
+        ProgramFixture::TearDown();
+    }
+
+    std::unique_ptr<MultiDeviceKernel> multiDeviceKernel = nullptr;
+    MockKernel *kernel = nullptr;
+    cl_int retVal = CL_SUCCESS;
+};
+
+class StatelessKernelWithIndirectAccessFixture : public ProgramFixture {
+  public:
+    DebugManagerStateRestore restorer;
+    using ProgramFixture::SetUp;
+
+  protected:
+    void SetUp(ClDevice *device, Context *context) {
+        ProgramFixture::SetUp();
+        DebugManager.flags.DisableStatelessToStatefulOptimization.set(true);
+        DebugManager.flags.EnableStatelessToStatefulBufferOffsetOpt.set(false);
+
+        CreateProgramFromBinary(
+            context,
+            toClDeviceVector(*device),
+            "indirect_access_kernel");
+        ASSERT_NE(nullptr, pProgram);
+
+        retVal = pProgram->build(
+            pProgram->getDevices(),
+            CompilerOptions::greaterThan4gbBuffersRequired.data(),
+            false);
+        ASSERT_EQ(CL_SUCCESS, retVal);
+
+        multiDeviceKernel.reset(MultiDeviceKernel::create<MockKernel>(
+            pProgram,
+            pProgram->getKernelInfosForKernel("testIndirect"),
+            &retVal));
+        ASSERT_NE(nullptr, multiDeviceKernel);
+        ASSERT_EQ(CL_SUCCESS, retVal);
+
+        EXPECT_TRUE(multiDeviceKernel->getKernel(device->getRootDeviceIndex())->getKernelInfo().hasIndirectStatelessAccess);
+    }
+
+    void TearDown() override {
+        ProgramFixture::TearDown();
+    }
+
+    std::unique_ptr<MultiDeviceKernel> multiDeviceKernel = nullptr;
     cl_int retVal = CL_SUCCESS;
 };
 
@@ -294,7 +380,8 @@ class BindlessKernelFixture : public ProgramFixture {
 
         kernel.reset(Kernel::create<MockKernel>(
             pProgram,
-            *pProgram->getKernelInfo(kernelName.c_str()),
+            pProgram->getKernelInfoForKernel(kernelName.c_str()),
+            *deviceCl,
             &retVal));
         ASSERT_NE(nullptr, kernel);
         ASSERT_EQ(CL_SUCCESS, retVal);

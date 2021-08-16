@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -41,19 +41,21 @@ void DriverImp::initialize(ze_result_t *result) {
         envReader.getSetting("ZET_ENABLE_PROGRAM_INSTRUMENTATION", false);
     envVariables.sysman =
         envReader.getSetting("ZES_ENABLE_SYSMAN", false);
+    envVariables.pciIdDeviceOrder =
+        envReader.getSetting("ZE_ENABLE_PCI_ID_DEVICE_ORDER", false);
 
     auto executionEnvironment = new NEO::ExecutionEnvironment();
     UNRECOVERABLE_IF(nullptr == executionEnvironment);
 
     if (envVariables.programDebugging) {
-        executionEnvironment->setPerContextMemorySpace();
+        executionEnvironment->setDebuggingEnabled();
     }
 
     executionEnvironment->incRefInternal();
     auto neoDevices = NEO::DeviceFactory::createDevices(*executionEnvironment);
     executionEnvironment->decRefInternal();
     if (!neoDevices.empty()) {
-        GlobalDriverHandle = DriverHandle::create(std::move(neoDevices), envVariables);
+        GlobalDriverHandle = DriverHandle::create(std::move(neoDevices), envVariables, result);
         if (GlobalDriverHandle != nullptr) {
             *result = ZE_RESULT_SUCCESS;
 
@@ -100,7 +102,7 @@ ze_result_t driverHandleGet(uint32_t *pCount, ze_driver_handle_t *phDriverHandle
     }
 
     if (phDriverHandles == nullptr) {
-        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+        return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
     }
 
     for (uint32_t i = 0; i < *pCount; i++) {

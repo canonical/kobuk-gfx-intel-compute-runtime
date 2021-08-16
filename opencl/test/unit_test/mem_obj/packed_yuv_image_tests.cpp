@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -85,7 +85,7 @@ TEST_P(PackedYuvImageTest, GivenValidPackedYuvImageFormatAndDescriptorWhenCreati
         nullptr,
         retVal);
     ASSERT_NE(nullptr, image);
-    EXPECT_TRUE(IsPackedYuvImage(&image->getImageFormat()));
+    EXPECT_TRUE(isPackedYuvImage(&image->getImageFormat()));
     delete image;
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #include "shared/source/os_interface/windows/wddm_memory_operations_handler.h"
 
+#include "shared/source/helpers/string.h"
 #include "shared/source/memory_manager/host_ptr_defines.h"
 #include "shared/source/os_interface/windows/wddm_allocation.h"
 #include "shared/source/os_interface/windows/wddm_residency_allocations_container.h"
@@ -17,6 +18,8 @@ namespace NEO {
 WddmMemoryOperationsHandler::WddmMemoryOperationsHandler(Wddm *wddm) : wddm(wddm) {
     residentAllocations = std::make_unique<WddmResidentAllocationsContainer>(wddm);
 }
+
+WddmMemoryOperationsHandler::~WddmMemoryOperationsHandler() = default;
 
 MemoryOperationsStatus WddmMemoryOperationsHandler::makeResident(Device *device, ArrayRef<GraphicsAllocation *> gfxAllocations) {
     uint32_t totalHandlesCount = 0;
@@ -31,7 +34,8 @@ MemoryOperationsStatus WddmMemoryOperationsHandler::makeResident(Device *device,
 
         if (wddmAllocation->fragmentsStorage.fragmentCount > 0) {
             for (uint32_t allocationId = 0; allocationId < wddmAllocation->fragmentsStorage.fragmentCount; allocationId++) {
-                handlesForResidency[totalHandlesCount++] = wddmAllocation->fragmentsStorage.fragmentStorageData[allocationId].osHandleStorage->handle;
+                handlesForResidency[totalHandlesCount++] =
+                    static_cast<OsHandleWin *>(wddmAllocation->fragmentsStorage.fragmentStorageData[allocationId].osHandleStorage)->handle;
             }
         } else {
             memcpy_s(&handlesForResidency[totalHandlesCount],
@@ -53,7 +57,7 @@ MemoryOperationsStatus WddmMemoryOperationsHandler::evict(Device *device, Graphi
         OsHandleStorage &fragmentStorage = wddmAllocation.fragmentsStorage;
 
         for (uint32_t allocId = 0; allocId < fragmentStorage.fragmentCount; allocId++) {
-            handlesForEviction.push_back(fragmentStorage.fragmentStorageData[allocId].osHandleStorage->handle);
+            handlesForEviction.push_back(static_cast<OsHandleWin *>(fragmentStorage.fragmentStorageData[allocId].osHandleStorage)->handle);
             totalHandleCount++;
         }
     } else {
@@ -71,7 +75,7 @@ MemoryOperationsStatus WddmMemoryOperationsHandler::isResident(Device *device, G
     WddmAllocation &wddmAllocation = reinterpret_cast<WddmAllocation &>(gfxAllocation);
     D3DKMT_HANDLE defaultHandle = 0u;
     if (wddmAllocation.fragmentsStorage.fragmentCount > 0) {
-        defaultHandle = wddmAllocation.fragmentsStorage.fragmentStorageData[0].osHandleStorage->handle;
+        defaultHandle = static_cast<OsHandleWin *>(wddmAllocation.fragmentsStorage.fragmentStorageData[0].osHandleStorage)->handle;
     } else {
         defaultHandle = wddmAllocation.getDefaultHandle();
     }

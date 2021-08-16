@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,7 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/timestamp_packet.h"
 
+#include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/event/event.h"
 #include "opencl/source/helpers/dispatch_info.h"
 #include "opencl/source/kernel/kernel.h"
@@ -96,6 +97,8 @@ void FileLogger<DebugLevel>::logAllocation(GraphicsAllocation const *graphicsAll
         ss << " ThreadID: " << thisThread;
         ss << " AllocationType: " << getAllocationTypeString(graphicsAllocation);
         ss << " MemoryPool: " << graphicsAllocation->getMemoryPool();
+        ss << " Root device index: " << graphicsAllocation->getRootDeviceIndex();
+        ss << " GPU address: 0x" << std::hex << graphicsAllocation->getGpuAddress();
         ss << graphicsAllocation->getAllocationInfoString();
         ss << std::endl;
 
@@ -168,8 +171,9 @@ void FileLogger<DebugLevel>::dumpKernelArgs(const Kernel *kernel) {
     if (dumpKernelArgsEnabled && kernel != nullptr) {
         std::unique_lock<std::mutex> theLock(mtx);
         std::ofstream outFile;
-
-        for (unsigned int i = 0; i < kernel->getKernelInfo().kernelArgInfo.size(); i++) {
+        const auto &kernelDescriptor = kernel->getKernelInfo().kernelDescriptor;
+        const auto &explicitArgs = kernelDescriptor.payloadMappings.explicitArgs;
+        for (unsigned int i = 0; i < explicitArgs.size(); i++) {
             std::string type;
             std::string fileName;
             const char *ptr = nullptr;
@@ -177,11 +181,10 @@ void FileLogger<DebugLevel>::dumpKernelArgs(const Kernel *kernel) {
             uint64_t flags = 0;
             std::unique_ptr<char[]> argVal = nullptr;
 
-            auto &argInfo = kernel->getKernelInfo().kernelArgInfo[i];
-
-            if (argInfo.metadata.addressQualifier == KernelArgMetadata::AddrLocal) {
+            const auto &arg = explicitArgs[i];
+            if (arg.getTraits().getAddressQualifier() == KernelArgMetadata::AddrLocal) {
                 type = "local";
-            } else if (argInfo.isImage) {
+            } else if (arg.is<ArgDescriptor::ArgTImage>()) {
                 type = "image";
                 auto clMem = (const cl_mem)kernel->getKernelArg(i);
                 auto memObj = castToObject<MemObj>(clMem);
@@ -190,9 +193,9 @@ void FileLogger<DebugLevel>::dumpKernelArgs(const Kernel *kernel) {
                     size = memObj->getSize();
                     flags = memObj->getFlags();
                 }
-            } else if (argInfo.isSampler) {
+            } else if (arg.is<ArgDescriptor::ArgTSampler>()) {
                 type = "sampler";
-            } else if (argInfo.isBuffer) {
+            } else if (arg.is<ArgDescriptor::ArgTPointer>()) {
                 type = "buffer";
                 auto clMem = (const cl_mem)kernel->getKernelArg(i);
                 auto memObj = castToObject<MemObj>(clMem);
@@ -208,18 +211,18 @@ void FileLogger<DebugLevel>::dumpKernelArgs(const Kernel *kernel) {
                 argVal = std::unique_ptr<char[]>(new char[crossThreadDataSize]);
 
                 size_t totalArgSize = 0;
-                for (const auto &kernelArgPatchInfo : argInfo.kernelArgPatchInfoVector) {
-                    auto pSource = ptrOffset(crossThreadData, kernelArgPatchInfo.crossthreadOffset);
-                    auto pDestination = ptrOffset(argVal.get(), kernelArgPatchInfo.sourceOffset);
-                    memcpy_s(pDestination, kernelArgPatchInfo.size, pSource, kernelArgPatchInfo.size);
-                    totalArgSize += kernelArgPatchInfo.size;
+                for (const auto &element : arg.as<ArgDescValue>().elements) {
+                    auto pSource = ptrOffset(crossThreadData, element.offset);
+                    auto pDestination = ptrOffset(argVal.get(), element.sourceOffset);
+                    memcpy_s(pDestination, element.size, pSource, element.size);
+                    totalArgSize += element.size;
                 }
                 size = totalArgSize;
                 ptr = argVal.get();
             }
 
             if (ptr && size) {
-                fileName = kernel->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName + "_arg_" + std::to_string(i) + "_" + type + "_size_" + std::to_string(size) + "_flags_" + std::to_string(flags) + ".bin";
+                fileName = kernelDescriptor.kernelMetadata.kernelName + "_arg_" + std::to_string(i) + "_" + type + "_size_" + std::to_string(size) + "_flags_" + std::to_string(flags) + ".bin";
                 writeToFile(fileName, ptr, size, std::ios::trunc | std::ios::binary);
             }
         }
@@ -280,6 +283,8 @@ const char *FileLogger<DebugLevel>::getAllocationTypeString(GraphicsAllocation c
         return "INTERNAL_HOST_MEMORY";
     case GraphicsAllocation::AllocationType::KERNEL_ISA:
         return "KERNEL_ISA";
+    case GraphicsAllocation::AllocationType::KERNEL_ISA_INTERNAL:
+        return "KERNEL_ISA_INTERNAL";
     case GraphicsAllocation::AllocationType::LINEAR_STREAM:
         return "LINEAR_STREAM";
     case GraphicsAllocation::AllocationType::MAP_ALLOCATION:
@@ -330,6 +335,16 @@ const char *FileLogger<DebugLevel>::getAllocationTypeString(GraphicsAllocation c
         return "DEBUG_SBA_TRACKING_BUFFER";
     case GraphicsAllocation::AllocationType::DEBUG_MODULE_AREA:
         return "DEBUG_MODULE_AREA";
+    case GraphicsAllocation::AllocationType::WORK_PARTITION_SURFACE:
+        return "WORK_PARTITION_SURFACE";
+    case GraphicsAllocation::AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER:
+        return "GPU_TIMESTAMP_DEVICE_BUFFER";
+    case GraphicsAllocation::AllocationType::RING_BUFFER:
+        return "RING_BUFFER";
+    case GraphicsAllocation::AllocationType::SEMAPHORE_BUFFER:
+        return "SEMAPHORE_BUFFER";
+    case GraphicsAllocation::AllocationType::UNIFIED_SHARED_MEMORY:
+        return "UNIFIED_SHARED_MEMORY";
     default:
         return "ILLEGAL_VALUE";
     }

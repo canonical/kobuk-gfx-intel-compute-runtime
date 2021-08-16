@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,6 +11,7 @@
 #include "shared/source/helpers/string.h"
 
 #include "opencl/source/cl_device/cl_device.h"
+#include "opencl/source/kernel/multi_device_kernel.h"
 #include "opencl/source/program/kernel_info.h"
 #include "opencl/source/program/program.h"
 
@@ -51,7 +52,6 @@ class MockProgram : public Program {
     using Program::isSpirV;
     using Program::options;
     using Program::packDeviceBinary;
-    using Program::pDevice;
     using Program::Program;
     using Program::sourceCode;
     using Program::specConstantsIds;
@@ -92,17 +92,17 @@ class MockProgram : public Program {
             }
         }
     }
-    std::vector<KernelInfo *> &getKernelInfoArray() {
-        return kernelInfoArray;
+    std::vector<KernelInfo *> &getKernelInfoArray(uint32_t rootDeviceIndex) {
+        return buildInfos[rootDeviceIndex].kernelInfoArray;
     }
-    void addKernelInfo(KernelInfo *inInfo) {
-        kernelInfoArray.push_back(inInfo);
+    void addKernelInfo(KernelInfo *inInfo, uint32_t rootDeviceIndex) {
+        buildInfos[rootDeviceIndex].kernelInfoArray.push_back(inInfo);
     }
-    std::vector<KernelInfo *> &getParentKernelInfoArray() {
-        return parentKernelInfoArray;
+    std::vector<KernelInfo *> &getParentKernelInfoArray(uint32_t rootDeviceIndex) {
+        return buildInfos[rootDeviceIndex].parentKernelInfoArray;
     }
-    std::vector<KernelInfo *> &getSubgroupKernelInfoArray() {
-        return subgroupKernelInfoArray;
+    std::vector<KernelInfo *> &getSubgroupKernelInfoArray(uint32_t rootDeviceIndex) {
+        return buildInfos[rootDeviceIndex].subgroupKernelInfoArray;
     }
     void setContext(Context *context) {
         this->context = context;
@@ -126,8 +126,6 @@ class MockProgram : public Program {
     void setAllowNonUniform(bool allow) {
         allowNonUniform = allow;
     }
-
-    Device *getDevicePtr();
 
     bool isFlagOption(ConstStringRef option) override {
         if (isFlagOptionOverride != -1) {
@@ -158,19 +156,33 @@ class MockProgram : public Program {
         }
         Program::replaceDeviceBinary(std::move(newBinary), newBinarySize, rootDeviceIndex);
     }
-    cl_int processGenBinary(uint32_t rootDeviceIndex) override {
+    cl_int processGenBinary(const ClDevice &clDevice) override {
+        auto rootDeviceIndex = clDevice.getRootDeviceIndex();
         if (processGenBinaryCalledPerRootDevice.find(rootDeviceIndex) == processGenBinaryCalledPerRootDevice.end()) {
             processGenBinaryCalledPerRootDevice.insert({rootDeviceIndex, 1});
         } else {
             processGenBinaryCalledPerRootDevice[rootDeviceIndex]++;
         }
-        return Program::processGenBinary(rootDeviceIndex);
+        return Program::processGenBinary(clDevice);
     }
 
     void initInternalOptions(std::string &internalOptions) const override {
         initInternalOptionsCalled++;
         Program::initInternalOptions(internalOptions);
     };
+
+    const KernelInfo &getKernelInfoForKernel(const char *kernelName) const {
+        return *getKernelInfo(kernelName, getDevices()[0]->getRootDeviceIndex());
+    }
+
+    const KernelInfoContainer getKernelInfosForKernel(const char *kernelName) const {
+        KernelInfoContainer kernelInfos;
+        kernelInfos.resize(getMaxRootDeviceIndex() + 1);
+        for (auto i = 0u; i < kernelInfos.size(); i++) {
+            kernelInfos[i] = getKernelInfo(kernelName, i);
+        }
+        return kernelInfos;
+    }
 
     std::map<uint32_t, int> processGenBinaryCalledPerRootDevice;
     std::map<uint32_t, int> replaceDeviceBinaryCalledPerRootDevice;
@@ -179,18 +191,6 @@ class MockProgram : public Program {
     int isFlagOptionOverride = -1;
     int isOptionValueValidOverride = -1;
 };
-
-namespace GlobalMockSipProgram {
-void resetAllocationState();
-void resetAllocation(GraphicsAllocation *allocation);
-void deleteAllocation();
-GraphicsAllocation *getAllocation();
-void initSipProgramInfo();
-void shutDownSipProgramInfo();
-ProgramInfo getSipProgramInfoWithCustomBinary();
-extern ProgramInfo *globalSipProgramInfo;
-ProgramInfo getSipProgramInfo();
-}; // namespace GlobalMockSipProgram
 
 class GMockProgram : public Program {
   public:

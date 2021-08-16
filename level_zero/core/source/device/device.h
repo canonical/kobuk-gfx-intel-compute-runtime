@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,6 +16,7 @@
 #include "level_zero/core/source/debugger/debugger_l0.h"
 #include "level_zero/core/source/driver/driver.h"
 #include "level_zero/core/source/driver/driver_handle.h"
+#include "level_zero/core/source/module/module.h"
 #include <level_zero/ze_api.h>
 #include <level_zero/zet_api.h>
 
@@ -35,6 +36,9 @@ struct BuiltinFunctionsLib;
 struct ExecutionEnvironment;
 struct MetricContext;
 struct SysmanDevice;
+struct DebugSession;
+
+enum class ModuleType;
 
 struct Device : _ze_device_handle_t {
     virtual uint32_t getRootDeviceIndex() = 0;
@@ -51,7 +55,7 @@ struct Device : _ze_device_handle_t {
     virtual ze_result_t createImage(const ze_image_desc_t *desc, ze_image_handle_t *phImage) = 0;
 
     virtual ze_result_t createModule(const ze_module_desc_t *desc, ze_module_handle_t *module,
-                                     ze_module_build_log_handle_t *buildLog) = 0;
+                                     ze_module_build_log_handle_t *buildLog, ModuleType type) = 0;
     virtual ze_result_t createSampler(const ze_sampler_desc_t *pDesc,
                                       ze_sampler_handle_t *phSampler) = 0;
     virtual ze_result_t getComputeProperties(ze_device_compute_properties_t *pComputeProperties) = 0;
@@ -62,15 +66,18 @@ struct Device : _ze_device_handle_t {
     virtual ze_result_t getMemoryAccessProperties(ze_device_memory_access_properties_t *pMemAccessProperties) = 0;
     virtual ze_result_t getProperties(ze_device_properties_t *pDeviceProperties) = 0;
     virtual ze_result_t getSubDevices(uint32_t *pCount, ze_device_handle_t *phSubdevices) = 0;
-    virtual ze_result_t setIntermediateCacheConfig(ze_cache_config_flags_t cacheConfig) = 0;
-    virtual ze_result_t setLastLevelCacheConfig(ze_cache_config_flags_t cacheConfig) = 0;
     virtual ze_result_t getCacheProperties(uint32_t *pCount, ze_device_cache_properties_t *pCacheProperties) = 0;
+    virtual ze_result_t reserveCache(size_t cacheLevel, size_t cacheReservationSize) = 0;
+    virtual ze_result_t setCacheAdvice(void *ptr, size_t regionSize, ze_cache_ext_region_t cacheRegion) = 0;
     virtual ze_result_t imageGetProperties(const ze_image_desc_t *desc, ze_image_properties_t *pImageProperties) = 0;
     virtual ze_result_t getDeviceImageProperties(ze_device_image_properties_t *pDeviceImageProperties) = 0;
     virtual ze_result_t getExternalMemoryProperties(ze_device_external_memory_properties_t *pExternalMemoryProperties) = 0;
+    virtual ze_result_t getGlobalTimestamps(uint64_t *hostTimestamp, uint64_t *deviceTimestamp) = 0;
 
     virtual ze_result_t getCommandQueueGroupProperties(uint32_t *pCount,
                                                        ze_command_queue_group_properties_t *pCommandQueueGroupProperties) = 0;
+    virtual ze_result_t getDebugProperties(zet_device_debug_properties_t *pDebugProperties) = 0;
+
     virtual ze_result_t systemBarrier() = 0;
 
     virtual ~Device() = default;
@@ -86,6 +93,9 @@ struct Device : _ze_device_handle_t {
     virtual NEO::OSInterface &getOsInterface() = 0;
     virtual uint32_t getPlatformInfo() const = 0;
     virtual MetricContext &getMetricContext() = 0;
+    virtual DebugSession *getDebugSession(const zet_debug_config_t &config) = 0;
+    virtual DebugSession *createDebugSession(const zet_debug_config_t &config, ze_result_t &result) = 0;
+    virtual void removeDebugSession() = 0;
 
     virtual ze_result_t activateMetricGroups(uint32_t count,
                                              zet_metric_group_handle_t *phMetricGroups) = 0;
@@ -98,7 +108,7 @@ struct Device : _ze_device_handle_t {
 
     inline ze_device_handle_t toHandle() { return this; }
 
-    static Device *create(DriverHandle *driverHandle, NEO::Device *neoDevice, uint32_t currentDeviceMask, bool isSubDevice);
+    static Device *create(DriverHandle *driverHandle, NEO::Device *neoDevice, uint32_t currentDeviceMask, bool isSubDevice, ze_result_t *returnValue);
 
     virtual NEO::PreemptionMode getDevicePreemptionMode() const = 0;
     virtual const NEO::DeviceInfo &getDeviceInfo() const = 0;
@@ -121,6 +131,7 @@ struct Device : _ze_device_handle_t {
     virtual void setSysmanHandle(SysmanDevice *pSysmanDevice) = 0;
     virtual SysmanDevice *getSysmanHandle() = 0;
     virtual ze_result_t getCsrForOrdinalAndIndex(NEO::CommandStreamReceiver **csr, uint32_t ordinal, uint32_t index) = 0;
+    virtual ze_result_t getCsrForLowPriority(NEO::CommandStreamReceiver **csr) = 0;
     virtual ze_result_t mapOrdinalForAvailableEngineGroup(uint32_t *ordinal) = 0;
 };
 

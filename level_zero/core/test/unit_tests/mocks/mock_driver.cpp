@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "mock_driver.h"
+#include "level_zero/core/test/unit_tests/mocks/mock_driver.h"
 
 namespace L0 {
 namespace ult {

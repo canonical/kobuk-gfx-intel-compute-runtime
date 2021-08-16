@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #include "platform.h"
 
+#include "shared/source/built_ins/sip.h"
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/compiler_interface/compiler_interface.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
@@ -25,13 +26,11 @@
 #include "opencl/source/api/api.h"
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/gtpin/gtpin_notify.h"
-#include "opencl/source/helpers/built_ins_helper.h"
 #include "opencl/source/helpers/get_info_status_mapper.h"
 #include "opencl/source/platform/extensions.h"
 #include "opencl/source/sharings/sharing_factory.h"
 
 #include "CL/cl_ext.h"
-#include "gmm_client_context.h"
 
 #include <algorithm>
 #include <map>
@@ -139,10 +138,9 @@ bool Platform::initialize(std::vector<std::unique_ptr<Device>> devices) {
         pClDevice = new ClDevice{*pDevice, this};
         this->clDevices.push_back(pClDevice);
 
-        auto hwInfo = pClDevice->getHardwareInfo();
         if (pClDevice->getPreemptionMode() == PreemptionMode::MidThread || pClDevice->isDebuggerActive()) {
-            auto sipType = SipKernel::getSipKernelType(hwInfo.platform.eRenderCoreFamily, pClDevice->isDebuggerActive());
-            initSipKernel(sipType, *pDevice);
+            bool ret = SipKernel::initSipKernel(SipKernel::getSipKernelType(*pDevice), *pDevice);
+            UNRECOVERABLE_IF(!ret);
         }
     }
 

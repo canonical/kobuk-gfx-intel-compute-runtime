@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,19 +16,10 @@ using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::Return;
 
-using KernelPropertyTest = Test<DeviceFixture>;
-
-HWTEST2_F(KernelPropertyTest, givenReturnedKernelPropertiesThenExpectedDp4aSupportReturned, IsGen9) {
-    ze_device_module_properties_t kernelProps;
-
-    device->getKernelProperties(&kernelProps);
-    EXPECT_EQ(0u, kernelProps.flags & ZE_DEVICE_MODULE_FLAG_DP4A);
-}
-
 using DevicePropertyTest = Test<DeviceFixture>;
 
 HWTEST2_F(DevicePropertyTest, givenReturnedDevicePropertiesThenExpectedPropertiesFlagsSet, IsGen9) {
-    ze_device_properties_t deviceProps;
+    ze_device_properties_t deviceProps = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
 
     device->getProperties(&deviceProps);
     EXPECT_EQ(0u, deviceProps.flags & ZE_DEVICE_PROPERTY_FLAG_ONDEMANDPAGING);
@@ -76,7 +67,7 @@ HWTEST2_F(DeviceQueueGroupTest, givenQueueGroupsReturnedThenCommandListIsCreated
 
     ze_context_handle_t hContext;
     ze_context_desc_t contextDesc;
-    res = driverHandle->createContext(&contextDesc, &hContext);
+    res = driverHandle->createContext(&contextDesc, 0u, nullptr, &hContext);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     L0::Context *context = Context::fromHandle(hContext);
 

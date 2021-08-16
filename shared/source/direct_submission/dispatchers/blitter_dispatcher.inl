@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -26,8 +26,12 @@ template <typename GfxFamily>
 inline void BlitterDispatcher<GfxFamily>::dispatchMonitorFence(LinearStream &cmdBuffer,
                                                                uint64_t gpuAddress,
                                                                uint64_t immediateData,
-                                                               const HardwareInfo &hwInfo) {
-    EncodeMiFlushDW<GfxFamily>::programMiFlushDw(cmdBuffer, gpuAddress, immediateData, false, true);
+                                                               const HardwareInfo &hwInfo,
+                                                               bool useNotifyEnable) {
+    MiFlushArgs args;
+    args.commandWithPostSync = true;
+    args.notifyEnable = useNotifyEnable;
+    EncodeMiFlushDW<GfxFamily>::programMiFlushDw(cmdBuffer, gpuAddress, immediateData, args);
 }
 
 template <typename GfxFamily>
@@ -37,12 +41,26 @@ inline size_t BlitterDispatcher<GfxFamily>::getSizeMonitorFence(const HardwareIn
 }
 
 template <typename GfxFamily>
-inline void BlitterDispatcher<GfxFamily>::dispatchCacheFlush(LinearStream &cmdBuffer, const HardwareInfo &hwInfo) {
-    EncodeMiFlushDW<GfxFamily>::programMiFlushDw(cmdBuffer, 0ull, 0ull, false, false);
+inline void BlitterDispatcher<GfxFamily>::dispatchCacheFlush(LinearStream &cmdBuffer, const HardwareInfo &hwInfo, uint64_t address) {
+    dispatchTlbFlush(cmdBuffer, address);
+}
+
+template <typename GfxFamily>
+inline void BlitterDispatcher<GfxFamily>::dispatchTlbFlush(LinearStream &cmdBuffer, uint64_t address) {
+    MiFlushArgs args;
+    args.tlbFlush = true;
+    args.commandWithPostSync = true;
+    EncodeMiFlushDW<GfxFamily>::programMiFlushDw(cmdBuffer, address, 0ull, args);
 }
 
 template <typename GfxFamily>
 inline size_t BlitterDispatcher<GfxFamily>::getSizeCacheFlush(const HardwareInfo &hwInfo) {
+    size_t size = EncodeMiFlushDW<GfxFamily>::getMiFlushDwCmdSizeForDataWrite();
+    return size;
+}
+
+template <typename GfxFamily>
+inline size_t BlitterDispatcher<GfxFamily>::getSizeTlbFlush() {
     size_t size = EncodeMiFlushDW<GfxFamily>::getMiFlushDwCmdSizeForDataWrite();
     return size;
 }

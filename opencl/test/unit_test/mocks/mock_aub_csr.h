@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,7 +11,8 @@
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/hw_info.h"
-#include "shared/test/unit_test/helpers/default_hw_info.h"
+#include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/helpers/dispatch_flags_helper.h"
 
 #include "opencl/source/command_stream/aub_command_stream_receiver_hw.h"
 #include "opencl/source/platform/platform.h"
@@ -57,8 +58,17 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
     using AUBCommandStreamReceiverHw<GfxFamily>::taskCount;
     using AUBCommandStreamReceiverHw<GfxFamily>::latestSentTaskCount;
     using AUBCommandStreamReceiverHw<GfxFamily>::pollForCompletionTaskCount;
+    using AUBCommandStreamReceiverHw<GfxFamily>::getParametersForWriteMemory;
     using AUBCommandStreamReceiverHw<GfxFamily>::writeMemory;
     using AUBCommandStreamReceiverHw<GfxFamily>::AUBCommandStreamReceiverHw;
+
+    CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
+                              const IndirectHeap &dsh, const IndirectHeap &ioh, const IndirectHeap &ssh,
+                              uint32_t taskLevel, DispatchFlags &dispatchFlags, Device &device) override {
+        recordedDispatchFlags = dispatchFlags;
+
+        return AUBCommandStreamReceiverHw<GfxFamily>::flushTask(commandStream, commandStreamStart, dsh, ioh, ssh, taskLevel, dispatchFlags, device);
+    }
 
     DispatchMode peekDispatchMode() const {
         return this->dispatchMode;
@@ -87,6 +97,10 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
         AUBCommandStreamReceiverHw<GfxFamily>::writeMemory(gpuAddress, cpuAddress, size, memoryBank, entryBits);
         writeMemoryCalled = true;
     }
+    void writeMMIO(uint32_t offset, uint32_t value) override {
+        AUBCommandStreamReceiverHw<GfxFamily>::writeMMIO(offset, value);
+        writeMMIOCalled = true;
+    }
     void submitBatchBuffer(uint64_t batchBufferGpuAddress, const void *batchBuffer, size_t batchBufferSize, uint32_t memoryBank, uint64_t entryBits) override {
         AUBCommandStreamReceiverHw<GfxFamily>::submitBatchBuffer(batchBufferGpuAddress, batchBuffer, batchBufferSize, memoryBank, entryBits);
         submitBatchBufferCalled = true;
@@ -109,6 +123,10 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
         expectMemoryNotEqualCalled = true;
         return AUBCommandStreamReceiverHw<GfxFamily>::expectMemoryNotEqual(gfxAddress, srcAddress, length);
     }
+    bool expectMemoryCompressed(void *gfxAddress, const void *srcAddress, size_t length) override {
+        expectMemoryCompressedCalled = true;
+        return AUBCommandStreamReceiverHw<GfxFamily>::expectMemoryCompressed(gfxAddress, srcAddress, length);
+    }
     bool waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) override {
         return true;
     }
@@ -123,16 +141,20 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
     bool isMultiOsContextCapable() const override {
         return multiOsContextCapable;
     }
+
+    DispatchFlags recordedDispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     bool multiOsContextCapable = false;
     bool flushBatchedSubmissionsCalled = false;
     bool initProgrammingFlagsCalled = false;
     bool initializeEngineCalled = false;
     bool writeMemoryCalled = false;
     bool writeMemoryWithAubManagerCalled = false;
+    bool writeMMIOCalled = false;
     bool submitBatchBufferCalled = false;
     bool pollForCompletionCalled = false;
     bool expectMemoryEqualCalled = false;
     bool expectMemoryNotEqualCalled = false;
+    bool expectMemoryCompressedCalled = false;
     bool addAubCommentCalled = false;
     bool dumpAllocationCalled = false;
 
@@ -186,9 +208,10 @@ std::unique_ptr<AubExecutionEnvironment> getEnvironment(bool createTagAllocation
     auto commandStreamReceiver = std::make_unique<CsrType>("", standalone, *executionEnvironment, rootDeviceIndex, deviceBitfield);
 
     auto osContext = executionEnvironment->memoryManager->createAndRegisterOsContext(commandStreamReceiver.get(),
-                                                                                     getChosenEngineType(*defaultHwInfo), deviceBitfield,
+                                                                                     EngineTypeUsage{getChosenEngineType(*defaultHwInfo), EngineUsage::Regular},
+                                                                                     deviceBitfield,
                                                                                      PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo),
-                                                                                     false, false, false);
+                                                                                     false);
     commandStreamReceiver->setupContext(*osContext);
 
     if (createTagAllocation) {

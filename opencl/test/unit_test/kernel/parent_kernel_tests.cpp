@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2017-2020 Intel Corporation
+ * Copyright (C) 2018-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/test/unit_test/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_device.h"
 
 #include "opencl/test/unit_test/fixtures/execution_model_kernel_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
@@ -16,8 +16,6 @@
 
 using namespace NEO;
 
-typedef ExecutionModelKernelFixture ParentKernelFromBinaryTest;
-
 class MockKernelWithArgumentAccess : public Kernel {
   public:
     std::vector<SimpleKernelArgInfo> &getKernelArguments() {
@@ -27,7 +25,7 @@ class MockKernelWithArgumentAccess : public Kernel {
     class ObjectCountsPublic : public Kernel::ObjectCounts {
     };
 
-    MockKernelWithArgumentAccess(Program *programArg, const KernelInfo &kernelInfoArg, const ClDevice &deviceArg) : Kernel(programArg, kernelInfoArg, deviceArg) {
+    MockKernelWithArgumentAccess(Program *programArg, KernelInfo &kernelInfoArg, ClDevice &clDeviceArg) : Kernel(programArg, kernelInfoArg, clDeviceArg, false) {
     }
 
     void getParentObjectCountsPublic(MockKernelWithArgumentAccess::ObjectCountsPublic &objectCount) {
@@ -36,13 +34,10 @@ class MockKernelWithArgumentAccess : public Kernel {
 };
 
 TEST(ParentKernelTest, WhenArgsAddedThenObjectCountsAreIncremented) {
-    KernelInfo info;
     MockClDevice *device = new MockClDevice{new MockDevice};
     MockProgram program(toClDeviceVector(*device));
-    SPatchExecutionEnvironment environment = {};
-    environment.HasDeviceEnqueue = 1;
-
-    info.patchInfo.executionEnvironment = &environment;
+    KernelInfo info;
+    info.kernelDescriptor.kernelAttributes.flags.usesDeviceSideEnqueue = true;
 
     MockKernelWithArgumentAccess kernel(&program, info, *device);
 
@@ -113,76 +108,28 @@ TEST(ParentKernelTest, WhenInitializingParentKernelThenPrivateMemoryForBlocksIsA
     std::unique_ptr<MockParentKernel> parentKernel(MockParentKernel::create(context, true));
     MockProgram *program = (MockProgram *)parentKernel->mockProgram;
 
+    auto infoBlock = new MockKernelInfo();
+    infoBlock->kernelDescriptor.kernelAttributes.bufferAddressingMode = KernelDescriptor::Stateless;
+
     uint32_t crossThreadOffsetBlock = 0;
-
-    auto infoBlock = new KernelInfo();
-    SPatchAllocateStatelessDefaultDeviceQueueSurface *allocateDeviceQueueBlock = new SPatchAllocateStatelessDefaultDeviceQueueSurface;
-    allocateDeviceQueueBlock->DataParamOffset = crossThreadOffsetBlock;
-    allocateDeviceQueueBlock->DataParamSize = 8;
-    allocateDeviceQueueBlock->SurfaceStateHeapOffset = 0;
-    allocateDeviceQueueBlock->Size = 8;
-    infoBlock->patchInfo.pAllocateStatelessDefaultDeviceQueueSurface = allocateDeviceQueueBlock;
-
+    infoBlock->setDeviceSideEnqueueDefaultQueueSurface(8, crossThreadOffsetBlock);
     crossThreadOffsetBlock += 8;
 
-    SPatchAllocateStatelessEventPoolSurface *eventPoolBlock = new SPatchAllocateStatelessEventPoolSurface;
-    eventPoolBlock->DataParamOffset = crossThreadOffsetBlock;
-    eventPoolBlock->DataParamSize = 8;
-    eventPoolBlock->EventPoolSurfaceIndex = 0;
-    eventPoolBlock->Size = 8;
-    infoBlock->patchInfo.pAllocateStatelessEventPoolSurface = eventPoolBlock;
-
+    infoBlock->setDeviceSideEnqueueEventPoolSurface(8, crossThreadOffsetBlock);
     crossThreadOffsetBlock += 8;
 
-    auto privateSurfaceBlock = std::make_unique<SPatchAllocateStatelessPrivateSurface>();
-    privateSurfaceBlock->DataParamOffset = crossThreadOffsetBlock;
-    privateSurfaceBlock->DataParamSize = 8;
-    privateSurfaceBlock->Size = 8;
-    privateSurfaceBlock->SurfaceStateHeapOffset = 0;
-    privateSurfaceBlock->Token = 0;
-    privateSurfaceBlock->PerThreadPrivateMemorySize = 1000;
-    infoBlock->patchInfo.pAllocateStatelessPrivateSurface = privateSurfaceBlock.get();
-
+    infoBlock->setPrivateMemory(1000, false, 8, crossThreadOffsetBlock);
     crossThreadOffsetBlock += 8;
 
-    SPatchThreadPayload *threadPayloadBlock = new SPatchThreadPayload;
-    threadPayloadBlock->LocalIDXPresent = 0;
-    threadPayloadBlock->LocalIDYPresent = 0;
-    threadPayloadBlock->LocalIDZPresent = 0;
-    threadPayloadBlock->HeaderPresent = 0;
-    threadPayloadBlock->Size = 128;
+    infoBlock->setLocalIds({0, 0, 0});
 
-    infoBlock->patchInfo.threadPayload = threadPayloadBlock;
-
-    SPatchExecutionEnvironment *executionEnvironmentBlock = new SPatchExecutionEnvironment;
-    *executionEnvironmentBlock = {};
-    executionEnvironmentBlock->HasDeviceEnqueue = 1;
-    infoBlock->patchInfo.executionEnvironment = executionEnvironmentBlock;
-
-    SPatchDataParameterStream *streamBlock = new SPatchDataParameterStream;
-    streamBlock->DataParameterStreamSize = 0;
-    streamBlock->Size = 0;
-    infoBlock->patchInfo.dataParameterStream = streamBlock;
-
-    SPatchBindingTableState *bindingTable = new SPatchBindingTableState;
-    bindingTable->Count = 0;
-    bindingTable->Offset = 0;
-    bindingTable->Size = 0;
-    bindingTable->SurfaceStateOffset = 0;
-    infoBlock->patchInfo.bindingTableState = bindingTable;
-
-    SPatchInterfaceDescriptorData *idData = new SPatchInterfaceDescriptorData;
-    idData->BindingTableOffset = 0;
-    idData->KernelOffset = 0;
-    idData->Offset = 0;
-    idData->SamplerStateOffset = 0;
-    idData->Size = 0;
-    infoBlock->patchInfo.interfaceDescriptorData = idData;
-
-    infoBlock->patchInfo.pAllocateStatelessGlobalMemorySurfaceWithInitialization = nullptr;
-    infoBlock->patchInfo.pAllocateStatelessConstantMemorySurfaceWithInitialization = nullptr;
+    infoBlock->kernelDescriptor.kernelAttributes.flags.usesDeviceSideEnqueue = true;
+    infoBlock->setDeviceSideEnqueueBlockInterfaceDescriptorOffset(0);
 
     infoBlock->heapInfo.pDsh = (void *)new uint64_t[64];
+    infoBlock->heapInfo.DynamicStateHeapSize = 64 * sizeof(uint64_t);
+
+    infoBlock->setCrossThreadDataSize(crossThreadOffsetBlock);
     infoBlock->crossThreadData = new char[crossThreadOffsetBlock];
 
     program->blockKernelManager->addBlockKernelInfo(infoBlock);
@@ -192,16 +139,14 @@ TEST(ParentKernelTest, WhenInitializingParentKernelThenPrivateMemoryForBlocksIsA
     EXPECT_NE(nullptr, program->getBlockKernelManager()->getPrivateSurface(program->getBlockKernelManager()->getCount() - 1));
 }
 
-TEST_P(ParentKernelFromBinaryTest, GivenParentKernelWhenGettingInstructionHeapSizeForExecutionModelThenSizeIsGreaterThanZero) {
+struct ParentKernelFromBinaryTest : public ExecutionModelKernelFixture {
+
+    void SetUp() override {
+        ExecutionModelKernelFixture::SetUp("simple_block_kernel", "simple_block_kernel");
+    }
+};
+
+TEST_F(ParentKernelFromBinaryTest, GivenParentKernelWhenGettingInstructionHeapSizeForExecutionModelThenSizeIsGreaterThanZero) {
     EXPECT_TRUE(pKernel->isParentKernel);
     EXPECT_LT(0u, pKernel->getInstructionHeapSizeForExecutionModel());
 }
-
-static const char *binaryFile = "simple_block_kernel";
-static const char *KernelNames[] = {"simple_block_kernel"};
-
-INSTANTIATE_TEST_CASE_P(ParentKernelFromBinaryTest,
-                        ParentKernelFromBinaryTest,
-                        ::testing::Combine(
-                            ::testing::Values(binaryFile),
-                            ::testing::ValuesIn(KernelNames)));
