@@ -1,5 +1,7 @@
 #!/usr/bin/make -f
 
+LLVM_VERSION	 = $(shell sed -n -r '/^Build/,/^$$/s/.*llvm-([0-9]+)[, ].*/\1/p' debian/control)
+
 %:
 	dh $@ --builddir build/
 
@@ -8,5 +10,3 @@ override_dh_auto_configure:
 		-DCMAKE_BUILD_TYPE=Release \
 		-Wno-dev
 
-override_dh_install:
-	dh_install
