@@ -10,3 +10,6 @@ override_dh_auto_configure:
 		-DCMAKE_BUILD_TYPE=Release \
 		-Wno-dev
 
+override_dh_gencontrol:
+	dh_gencontrol -- \
+		-V'llvm:Version=$(LLVM_VERSION)'
