@@ -27,7 +27,6 @@ Depends:
  ${misc:Depends},
  libigc1 (>= 1.0.8279~),
  libigdfcl1 (>= 1.0.8279~),
- libigdgmm11,
  ocl-icd-libopencl1,
 Breaks:
  intel-opencl
