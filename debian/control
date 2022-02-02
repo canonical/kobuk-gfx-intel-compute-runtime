@@ -4,13 +4,8 @@ Priority: optional
 Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alioth.debian.org>
 Uploaders: Timo Aaltonen <tjaalton@debian.org>
 Build-Depends: debhelper-compat (= 12),
- bison,
- clang-12,
  cmake,
- flex,
- llvm-12,
- libopencl-clang-dev (>= 12.0~),
- libigc-dev (>= 1.0.8279~),
+ libigc1 (>= 1.0.8279~),
  libigdfcl-dev (>= 1.0.8279~),
  libigdgmm-dev (>= 20.1.1),
  libva-dev,
