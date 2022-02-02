@@ -1,7 +1,5 @@
 #!/usr/bin/make -f
 
-LLVM_VERSION	 = $(shell sed -n -r '/^Build/,/^$$/s/.*llvm-([0-9]+)[, ].*/\1/p' debian/control)
-
 %:
 	dh $@ --builddir build/
 

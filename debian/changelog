@@ -1,6 +1,5 @@
 intel-compute-runtime (21.32.20609-2) UNRELEASED; urgency=medium
 
-  * rules: Parse llvm version from Build-Depends.
 
  -- Andreas Beckmann <anbe@debian.org>  Thu, 14 Oct 2021 23:46:28 +0200
 
