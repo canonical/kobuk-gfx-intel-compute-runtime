@@ -6,6 +6,8 @@ intel-compute-runtime (21.32.20609-2) UNRELEASED; urgency=medium
   * control: Set Rules-Requires-Root: no.
   * control: Bump policy to 4.6.0.
   * upstream/metadata: Add.
+  * tests/control: Add superficial build-needed autopkgtest to detect
+    incompatible intel-graphics-compiler builds.  (Closes: #998058)
   * Fix typos.
   * Update Lintian overrides.
 
