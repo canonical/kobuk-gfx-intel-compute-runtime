@@ -6,6 +6,7 @@ intel-compute-runtime (21.32.20609-2) UNRELEASED; urgency=medium
   * control: Set Rules-Requires-Root: no.
   * control: Bump policy to 4.6.0.
   * Fix typos.
+  * Update Lintian overrides.
 
  -- Andreas Beckmann <anbe@debian.org>  Thu, 14 Oct 2021 23:46:28 +0200
 
