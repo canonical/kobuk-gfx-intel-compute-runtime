@@ -11,6 +11,7 @@ Build-Depends:
  libigdgmm-dev (>= 20.1.1),
  libva-dev,
  pkg-config,
+Rules-Requires-Root: no
 Standards-Version: 4.5.0
 Homepage: https://github.com/intel/compute-runtime
 Vcs-Browser: https://salsa.debian.org/opencl-team/intel-compute-runtime
