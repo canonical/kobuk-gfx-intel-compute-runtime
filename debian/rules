@@ -10,3 +10,4 @@ override_dh_auto_configure:
 
 override_dh_gencontrol:
 	dh_gencontrol -- \
+		-V"igc:Upstream-Version=$(shell dpkg-query -f '$${source:Upstream-Version}' -W libigc1)"

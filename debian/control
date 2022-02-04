@@ -22,8 +22,8 @@ Architecture: any-amd64 any-i386
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
- libigc1 (>= 1.0.8279~),
- libigdfcl1 (>= 1.0.8279~),
+ libigc1 (>= ${igc:Upstream-Version}),
+ libigdfcl1 (>= ${igc:Upstream-Version}),
  ocl-icd-libopencl1,
 Breaks:
  intel-opencl
