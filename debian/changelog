@@ -5,6 +5,7 @@ intel-compute-runtime (21.32.20609-2) UNRELEASED; urgency=medium
   * control: Switch to debhelper-compat (= 13).
   * control: Set Rules-Requires-Root: no.
   * control: Bump policy to 4.6.0.
+  * upstream/metadata: Add.
   * Fix typos.
   * Update Lintian overrides.
 
