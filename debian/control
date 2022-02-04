@@ -8,7 +8,7 @@ Build-Depends:
  cmake,
  libigc1 (>= 1.0.8279~),
  libigdfcl-dev (>= 1.0.8279~),
- libigdgmm-dev (>= 20.1.1),
+ libigdgmm-dev (>= 21.2.1),
  libva-dev,
  pkg-config,
 Rules-Requires-Root: no
@@ -32,12 +32,16 @@ Replaces:
 Provides:
  opencl-icd
 Description: Intel graphics compute runtime for OpenCL
- The Intel(R) Graphics Compute Runtime for OpenCL(TM) is a open source
+ The Intel(R) Graphics Compute Runtime for OpenCL(TM) is an open source
  project to converge Intel's development efforts on OpenCL(TM) compute
  stacks supporting the GEN graphics hardware architecture.
  .
- Supported platforms:
- - Intel Core Processors with Gen8 GPU (Broadwell) - OpenCL 2.1
- - Intel Core Processors with Gen9 GPU (Skylake, Kaby Lake, Coffee Lake) - OpenCL 2.1
- - Intel Atom Processors with Gen9 GPU (Apollo Lake, Gemini Lake) - OpenCL 1.2
- - Intel Core Processors with Gen11 GPU (Ice Lake) - OpenCL 2.1
+ Supported platforms - OpenCL 3.0, Production:
+  - Intel Core Processors with Gen9 GPU (Skylake, Kaby Lake, Coffee Lake)
+  - Intel Core Processors with Gen11 GPU (Ice Lake)
+  - Intel Core Processors with Xe LP (Gen12) GPU (Tiger Lake, Rocket Lake)
+ Supported platforms - OpenCL 3.0, Maintenance:
+  - Intel Core Processors with Gen8 GPU (Broadwell)
+  - Intel Atom Processors with Gen9 GPU (Apollo Lake, Gemini Lake)
+ Supported platforms - OpenCL 3.0, Early Support:
+  - Intel Atom Processors with Gen11 GPU (Elkhart Lake)

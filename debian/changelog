@@ -1,6 +1,6 @@
 intel-compute-runtime (21.32.20609-2) UNRELEASED; urgency=medium
 
-  * control: Drop superfluous (Build-)Depends.
+  * control: Drop superfluous (Build-)Depends.  (Closes: #1004885)
   * control: Set Architecture: any-amd64 any-i386.
   * control: Switch to debhelper-compat (= 13).
   * control: Set Rules-Requires-Root: no.
