@@ -2,7 +2,9 @@ Source: intel-compute-runtime
 Section: libs
 Priority: optional
 Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alioth.debian.org>
-Uploaders: Timo Aaltonen <tjaalton@debian.org>
+Uploaders:
+ Timo Aaltonen <tjaalton@debian.org>,
+ Andreas Beckmann <anbe@debian.org>,
 Build-Depends:
  debhelper-compat (= 13),
  cmake,
