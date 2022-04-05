@@ -11,4 +11,5 @@ override_dh_auto_configure:
 
 override_dh_gencontrol:
 	dh_gencontrol -- \
+		-V"igc:LLVM-Version=$(shell dpkg-query -f '$${Provides}' -W libigc1 | sed -rn 's/.*libigc1\+llvm([0-9]+).*/\1/p')" \
 		-V"igc:Upstream-Version=$(shell dpkg-query -f '$${source:Upstream-Version}' -W libigc1)"

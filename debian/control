@@ -25,7 +25,11 @@ Depends:
  ${shlibs:Depends},
  ${misc:Depends},
  libigc1 (>= ${igc:Upstream-Version}),
+ libigc1 (<< ${igc:Upstream-Version}+~),
+ libigc1+llvm${igc:LLVM-Version},
  libigdfcl1 (>= ${igc:Upstream-Version}),
+ libigdfcl1 (<< ${igc:Upstream-Version}+~),
+ libigdfcl1+llvm${igc:LLVM-Version},
  ocl-icd-libopencl1,
 Breaks:
  intel-opencl
