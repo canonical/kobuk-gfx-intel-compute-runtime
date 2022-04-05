@@ -1,3 +1,10 @@
+intel-compute-runtime (21.32.20609-3) UNRELEASED; urgency=medium
+
+  * control, rules: Tighten dependencies on the igc version used at build
+    time. Tighten dependencies on the llvm version used to build igc.
+
+ -- Andreas Beckmann <anbe@debian.org>  Tue, 17 May 2022 11:28:06 +0200
+
 intel-compute-runtime (21.32.20609-2) unstable; urgency=medium
 
   * control: Drop superfluous (Build-)Depends.  (Closes: #1004885)
