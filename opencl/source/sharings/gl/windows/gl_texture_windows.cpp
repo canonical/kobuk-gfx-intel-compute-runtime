@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,6 +13,7 @@
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/memory_manager/memory_manager.h"
+#include "shared/source/os_interface/hw_info_config.h"
 
 #include "opencl/extensions/public/cl_gl_private_intel.h"
 #include "opencl/source/cl_device/cl_device.h"
@@ -53,7 +54,7 @@ Image *GlTexture::createSharedGlTexture(Context *context, cl_mem_flags flags, cl
     AllocationProperties allocProperties(context->getDevice(0)->getRootDeviceIndex(),
                                          false, // allocateMemory
                                          0u,    // size
-                                         GraphicsAllocation::AllocationType::SHARED_IMAGE,
+                                         AllocationType::SHARED_IMAGE,
                                          false, // isMultiStorageAllocation
                                          context->getDeviceBitfieldForAllocation(context->getDevice(0)->getRootDeviceIndex()));
     auto alloc = memoryManager->createGraphicsAllocationFromSharedHandle(texInfo.globalShareHandle, allocProperties, false, false);
@@ -124,7 +125,7 @@ Image *GlTexture::createSharedGlTexture(Context *context, cl_mem_flags flags, cl
 
     GraphicsAllocation *mcsAlloc = nullptr;
     if (texInfo.globalShareHandleMCS) {
-        AllocationProperties allocProperties(context->getDevice(0)->getRootDeviceIndex(), 0, GraphicsAllocation::AllocationType::MCS, context->getDeviceBitfieldForAllocation(context->getDevice(0)->getRootDeviceIndex()));
+        AllocationProperties allocProperties(context->getDevice(0)->getRootDeviceIndex(), 0, AllocationType::MCS, context->getDeviceBitfieldForAllocation(context->getDevice(0)->getRootDeviceIndex()));
         mcsAlloc = memoryManager->createGraphicsAllocationFromSharedHandle(texInfo.globalShareHandleMCS, allocProperties, false, false);
         if (texInfo.pGmmResInfoMCS) {
             DEBUG_BREAK_IF(mcsAlloc->getDefaultGmm() != nullptr);
@@ -147,10 +148,10 @@ Image *GlTexture::createSharedGlTexture(Context *context, cl_mem_flags flags, cl
     auto glTexture = new GlTexture(sharingFunctions, getClGlObjectType(target), texture, texInfo, target, std::max(miplevel, 0));
 
     if (texInfo.isAuxEnabled && alloc->getDefaultGmm()->unifiedAuxTranslationCapable()) {
-        auto &hwInfo = context->getDevice(0)->getHardwareInfo();
-        auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-        alloc->getDefaultGmm()->isCompressionEnabled = hwHelper.isPageTableManagerSupported(hwInfo) ? memoryManager->mapAuxGpuVA(alloc)
-                                                                                                    : true;
+        const auto &hwInfo = context->getDevice(0)->getHardwareInfo();
+        const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+        alloc->getDefaultGmm()->isCompressionEnabled = hwInfoConfig.isPageTableManagerSupported(hwInfo) ? memoryManager->mapAuxGpuVA(alloc)
+                                                                                                        : true;
     }
     auto multiGraphicsAllocation = MultiGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
     multiGraphicsAllocation.addAllocation(alloc);

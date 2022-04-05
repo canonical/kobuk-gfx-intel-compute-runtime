@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,6 +8,8 @@
 #include "level_zero/tools/test/unit_tests/sources/sysman/linux/mock_sysman_fixture.h"
 
 #include "mock_sysfs_performance.h"
+
+extern bool sysmanUltsEnable;
 
 using ::testing::_;
 using ::testing::Matcher;
@@ -20,8 +22,11 @@ class ZesPerformanceFixture : public SysmanMultiDeviceFixture {
   protected:
     std::vector<ze_device_handle_t> deviceHandles;
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanMultiDeviceFixture::SetUp();
-        pSysmanDeviceImp->pRasHandleContext->handleList.clear();
+        pSysmanDeviceImp->pPerformanceHandleContext->handleList.clear();
         uint32_t subDeviceCount = 0;
         Device::fromHandle(device->toHandle())->getSubDevices(&subDeviceCount, nullptr);
         if (subDeviceCount == 0) {
@@ -30,9 +35,12 @@ class ZesPerformanceFixture : public SysmanMultiDeviceFixture {
             deviceHandles.resize(subDeviceCount, nullptr);
             Device::fromHandle(device->toHandle())->getSubDevices(&subDeviceCount, deviceHandles.data());
         }
-        pSysmanDeviceImp->pPerformanceHandleContext->init(deviceHandles);
+        pSysmanDeviceImp->pPerformanceHandleContext->init(deviceHandles, device);
     }
     void TearDown() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanMultiDeviceFixture::TearDown();
     }
 

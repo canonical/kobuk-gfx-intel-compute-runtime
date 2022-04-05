@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -24,8 +24,6 @@ struct SkuInfoBaseReference {
         refFtrTable.FtrTileY = 1;
         refFtrTable.FtrDisplayYTiling = 1;
         refFtrTable.FtrFbc = 1;
-        refFtrTable.FtrVERing = 1;
-        refFtrTable.FtrVcs2 = 1;
         refFtrTable.FtrLCIA = 1;
         refFtrTable.FtrIA32eGfxPTEs = 1;
         refFtrTable.FtrWddm2GpuMmu = 1;
@@ -48,6 +46,8 @@ struct SkuInfoBaseReference {
         refFtrTable.FtrMultiTileArch = 1;
         refFtrTable.FtrCCSMultiInstance = 1;
         refFtrTable.FtrPpgtt64KBWalkOptimization = 1;
+        refFtrTable.FtrUnified3DMediaCompressionFormats = 1;
+        refFtrTable.Ftr57bGPUAddressing = 1;
     }
 
     static void fillReferenceWaForTransfer(_WA_TABLE &refWaTable) {
@@ -60,129 +60,113 @@ struct SkuInfoBaseReference {
         refWaTable.WaLimit128BMediaCompr = 1;
         refWaTable.WaUntypedBufferCompression = 1;
         refWaTable.WaAuxTable16KGranular = 1;
-        refWaTable.WaDefaultTile4 = 1;
+        refWaTable.WaAuxTable64KGranular = 1;
     }
 
     static void fillReferenceFtrToReceive(FeatureTable &refFtrTable) {
         refFtrTable = {};
-        refFtrTable.ftrDesktop = true;
-        refFtrTable.ftrChannelSwizzlingXOREnabled = true;
+        refFtrTable.flags.ftrDesktop = true;
+        refFtrTable.flags.ftrChannelSwizzlingXOREnabled = true;
 
-        refFtrTable.ftrGtBigDie = true;
-        refFtrTable.ftrGtMediumDie = true;
-        refFtrTable.ftrGtSmallDie = true;
+        refFtrTable.flags.ftrIVBM0M1Platform = true;
+        refFtrTable.flags.ftrSGTPVSKUStrapPresent = true;
+        refFtrTable.flags.ftr5Slice = true;
 
-        refFtrTable.ftrGT1 = true;
-        refFtrTable.ftrGT1_5 = true;
-        refFtrTable.ftrGT2 = true;
-        refFtrTable.ftrGT2_5 = true;
-        refFtrTable.ftrGT3 = true;
-        refFtrTable.ftrGT4 = true;
+        refFtrTable.flags.ftrGpGpuMidBatchPreempt = true;
+        refFtrTable.flags.ftrGpGpuThreadGroupLevelPreempt = true;
+        refFtrTable.flags.ftrGpGpuMidThreadLevelPreempt = true;
 
-        refFtrTable.ftrIVBM0M1Platform = true;
-        refFtrTable.ftrSGTPVSKUStrapPresent = true;
-        refFtrTable.ftrGTA = true;
-        refFtrTable.ftrGTC = true;
-        refFtrTable.ftrGTX = true;
-        refFtrTable.ftr5Slice = true;
+        refFtrTable.flags.ftrIoMmuPageFaulting = true;
+        refFtrTable.flags.ftrWddm2Svm = true;
+        refFtrTable.flags.ftrPooledEuEnabled = true;
 
-        refFtrTable.ftrGpGpuMidBatchPreempt = true;
-        refFtrTable.ftrGpGpuThreadGroupLevelPreempt = true;
-        refFtrTable.ftrGpGpuMidThreadLevelPreempt = true;
+        refFtrTable.flags.ftrResourceStreamer = true;
 
-        refFtrTable.ftrIoMmuPageFaulting = true;
-        refFtrTable.ftrWddm2Svm = true;
-        refFtrTable.ftrPooledEuEnabled = true;
+        refFtrTable.flags.ftrPPGTT = true;
+        refFtrTable.flags.ftrSVM = true;
+        refFtrTable.flags.ftrEDram = true;
+        refFtrTable.flags.ftrL3IACoherency = true;
+        refFtrTable.flags.ftrIA32eGfxPTEs = true;
 
-        refFtrTable.ftrResourceStreamer = true;
+        refFtrTable.flags.ftr3dMidBatchPreempt = true;
+        refFtrTable.flags.ftr3dObjectLevelPreempt = true;
+        refFtrTable.flags.ftrPerCtxtPreemptionGranularityControl = true;
 
-        refFtrTable.ftrPPGTT = true;
-        refFtrTable.ftrSVM = true;
-        refFtrTable.ftrEDram = true;
-        refFtrTable.ftrL3IACoherency = true;
-        refFtrTable.ftrIA32eGfxPTEs = true;
+        refFtrTable.flags.ftrTileY = true;
+        refFtrTable.flags.ftrDisplayYTiling = true;
+        refFtrTable.flags.ftrTranslationTable = true;
+        refFtrTable.flags.ftrUserModeTranslationTable = true;
 
-        refFtrTable.ftr3dMidBatchPreempt = true;
-        refFtrTable.ftr3dObjectLevelPreempt = true;
-        refFtrTable.ftrPerCtxtPreemptionGranularityControl = true;
+        refFtrTable.flags.ftrEnableGuC = true;
 
-        refFtrTable.ftrTileY = true;
-        refFtrTable.ftrDisplayYTiling = true;
-        refFtrTable.ftrTranslationTable = true;
-        refFtrTable.ftrUserModeTranslationTable = true;
+        refFtrTable.flags.ftrFbc = true;
+        refFtrTable.flags.ftrFbc2AddressTranslation = true;
+        refFtrTable.flags.ftrFbcBlitterTracking = true;
+        refFtrTable.flags.ftrFbcCpuTracking = true;
 
-        refFtrTable.ftrEnableGuC = true;
+        refFtrTable.flags.ftrULT = true;
+        refFtrTable.flags.ftrLCIA = true;
+        refFtrTable.flags.ftrGttCacheInvalidation = true;
+        refFtrTable.flags.ftrTileMappedResource = true;
+        refFtrTable.flags.ftrAstcHdr2D = true;
+        refFtrTable.flags.ftrAstcLdr2D = true;
 
-        refFtrTable.ftrFbc = true;
-        refFtrTable.ftrFbc2AddressTranslation = true;
-        refFtrTable.ftrFbcBlitterTracking = true;
-        refFtrTable.ftrFbcCpuTracking = true;
+        refFtrTable.flags.ftrStandardMipTailFormat = true;
+        refFtrTable.flags.ftrFrameBufferLLC = true;
+        refFtrTable.flags.ftrCrystalwell = true;
+        refFtrTable.flags.ftrLLCBypass = true;
+        refFtrTable.flags.ftrDisplayEngineS3d = true;
+        refFtrTable.flags.ftrWddm2GpuMmu = true;
+        refFtrTable.flags.ftrWddm2_1_64kbPages = true;
 
-        refFtrTable.ftrVcs2 = true;
-        refFtrTable.ftrVEBOX = true;
-        refFtrTable.ftrSingleVeboxSlice = true;
-        refFtrTable.ftrULT = true;
-        refFtrTable.ftrLCIA = true;
-        refFtrTable.ftrGttCacheInvalidation = true;
-        refFtrTable.ftrTileMappedResource = true;
-        refFtrTable.ftrAstcHdr2D = true;
-        refFtrTable.ftrAstcLdr2D = true;
+        refFtrTable.flags.ftrKmdDaf = true;
+        refFtrTable.flags.ftrSimulationMode = true;
 
-        refFtrTable.ftrStandardMipTailFormat = true;
-        refFtrTable.ftrFrameBufferLLC = true;
-        refFtrTable.ftrCrystalwell = true;
-        refFtrTable.ftrLLCBypass = true;
-        refFtrTable.ftrDisplayEngineS3d = true;
-        refFtrTable.ftrVERing = true;
-        refFtrTable.ftrWddm2GpuMmu = true;
-        refFtrTable.ftrWddm2_1_64kbPages = true;
+        refFtrTable.flags.ftrE2ECompression = true;
+        refFtrTable.flags.ftrLinearCCS = true;
+        refFtrTable.flags.ftrCCSRing = true;
+        refFtrTable.flags.ftrCCSNode = true;
+        refFtrTable.flags.ftrRcsNode = true;
+        refFtrTable.flags.ftrMemTypeMocsDeferPAT = true;
+        refFtrTable.flags.ftrLocalMemory = true;
+        refFtrTable.flags.ftrLocalMemoryAllows4KB = true;
 
-        refFtrTable.ftrKmdDaf = true;
-        refFtrTable.ftrSimulationMode = true;
-
-        refFtrTable.ftrE2ECompression = true;
-        refFtrTable.ftrLinearCCS = true;
-        refFtrTable.ftrCCSRing = true;
-        refFtrTable.ftrCCSNode = true;
-        refFtrTable.ftrRcsNode = true;
-        refFtrTable.ftrMemTypeMocsDeferPAT = true;
-        refFtrTable.ftrLocalMemory = true;
-        refFtrTable.ftrLocalMemoryAllows4KB = true;
-
-        refFtrTable.ftrFlatPhysCCS = true;
-        refFtrTable.ftrMultiTileArch = true;
-        refFtrTable.ftrCCSMultiInstance = true;
-        refFtrTable.ftrPpgtt64KBWalkOptimization = true;
+        refFtrTable.flags.ftrFlatPhysCCS = true;
+        refFtrTable.flags.ftrMultiTileArch = true;
+        refFtrTable.flags.ftrCCSMultiInstance = true;
+        refFtrTable.flags.ftrPpgtt64KBWalkOptimization = true;
+        refFtrTable.flags.ftrUnified3DMediaCompressionFormats = true;
+        refFtrTable.flags.ftr57bGPUAddressing = true;
     }
 
     static void fillReferenceWaToReceive(WorkaroundTable &refWaTable) {
         refWaTable = {};
-        refWaTable.waDoNotUseMIReportPerfCount = true;
+        refWaTable.flags.waDoNotUseMIReportPerfCount = true;
 
-        refWaTable.waEnablePreemptionGranularityControlByUMD = true;
-        refWaTable.waSendMIFLUSHBeforeVFE = true;
-        refWaTable.waReportPerfCountUseGlobalContextID = true;
-        refWaTable.waDisableLSQCROPERFforOCL = true;
-        refWaTable.waMsaa8xTileYDepthPitchAlignment = true;
-        refWaTable.waLosslessCompressionSurfaceStride = true;
-        refWaTable.waFbcLinearSurfaceStride = true;
-        refWaTable.wa4kAlignUVOffsetNV12LinearSurface = true;
-        refWaTable.waEncryptedEdramOnlyPartials = true;
-        refWaTable.waDisableEdramForDisplayRT = true;
-        refWaTable.waForcePcBbFullCfgRestore = true;
-        refWaTable.waCompressedResourceRequiresConstVA21 = true;
-        refWaTable.waDisablePerCtxtPreemptionGranularityControl = true;
-        refWaTable.waLLCCachingUnsupported = true;
-        refWaTable.waUseVAlign16OnTileXYBpp816 = true;
-        refWaTable.waModifyVFEStateAfterGPGPUPreemption = true;
-        refWaTable.waCSRUncachable = true;
-        refWaTable.waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
-        refWaTable.waRestrictPitch128KB = true;
-        refWaTable.waLimit128BMediaCompr = true;
-        refWaTable.waUntypedBufferCompression = true;
-        refWaTable.waAuxTable16KGranular = true;
-        refWaTable.waDisableFusedThreadScheduling = true;
-        refWaTable.waDefaultTile4 = true;
+        refWaTable.flags.waEnablePreemptionGranularityControlByUMD = true;
+        refWaTable.flags.waSendMIFLUSHBeforeVFE = true;
+        refWaTable.flags.waReportPerfCountUseGlobalContextID = true;
+        refWaTable.flags.waDisableLSQCROPERFforOCL = true;
+        refWaTable.flags.waMsaa8xTileYDepthPitchAlignment = true;
+        refWaTable.flags.waLosslessCompressionSurfaceStride = true;
+        refWaTable.flags.waFbcLinearSurfaceStride = true;
+        refWaTable.flags.wa4kAlignUVOffsetNV12LinearSurface = true;
+        refWaTable.flags.waEncryptedEdramOnlyPartials = true;
+        refWaTable.flags.waDisableEdramForDisplayRT = true;
+        refWaTable.flags.waForcePcBbFullCfgRestore = true;
+        refWaTable.flags.waCompressedResourceRequiresConstVA21 = true;
+        refWaTable.flags.waDisablePerCtxtPreemptionGranularityControl = true;
+        refWaTable.flags.waLLCCachingUnsupported = true;
+        refWaTable.flags.waUseVAlign16OnTileXYBpp816 = true;
+        refWaTable.flags.waModifyVFEStateAfterGPGPUPreemption = true;
+        refWaTable.flags.waCSRUncachable = true;
+        refWaTable.flags.waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
+        refWaTable.flags.waRestrictPitch128KB = true;
+        refWaTable.flags.waLimit128BMediaCompr = true;
+        refWaTable.flags.waUntypedBufferCompression = true;
+        refWaTable.flags.waAuxTable16KGranular = true;
+        refWaTable.flags.waDisableFusedThreadScheduling = true;
+        refWaTable.flags.waAuxTable64KGranular = true;
     }
 }; // namespace SkuInfoBaseReference
 } // namespace NEO

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -447,23 +447,9 @@ struct TOKSTR__SKU_FEATURE_TABLE {
             : base(TOK_S_SKU_FEATURE_TABLE__ANONYMOUS3245, 0, sizeof(*this) - sizeof(base)) {}
 
         TokenDword FtrDesktop = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_DESKTOP};
-        TokenDword FtrVERing = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_VERING};
-        TokenDword FtrVcs2 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_VCS2};
-        TokenDword FtrGtBigDie = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_BIG_DIE};
-        TokenDword FtrGtMediumDie = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_MEDIUM_DIE};
-        TokenDword FtrGtSmallDie = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_SMALL_DIE};
-        TokenDword FtrGT1 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT1};
-        TokenDword FtrGT1_5 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT1_5};
-        TokenDword FtrGT2 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT2};
-        TokenDword FtrGT2_5 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT2_5};
-        TokenDword FtrGT3 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT3};
-        TokenDword FtrGT4 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT4};
         TokenDword FtrULT = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_ULT};
         TokenDword FtrIVBM0M1Platform = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_IVBM0M1PLATFORM};
         TokenDword FtrChannelSwizzlingXOREnabled = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_CHANNEL_SWIZZLING_XORENABLED};
-        TokenDword FtrGTA = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTA};
-        TokenDword FtrGTC = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTC};
-        TokenDword FtrGTX = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTX};
         TokenDword Ftr5Slice = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR5SLICE};
         TokenDword FtrLCIA = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_LCIA};
         TokenDword FtrResourceStreamer = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_RESOURCE_STREAMER};
@@ -571,24 +557,6 @@ struct TOKSTR__SKU_FEATURE_TABLE {
     static_assert(std::is_standard_layout_v<TOKSTR_ANONYMOUS37751>, "");
     static_assert(sizeof(TOKSTR_ANONYMOUS37751) % sizeof(uint32_t) == 0, "");
 
-    struct TOKSTR_ANONYMOUS42853 {
-        TokenVariableLength base;
-
-        TOKSTR_ANONYMOUS42853(uint16_t tokenId, uint32_t elementId = 0)
-            : base(tokenId, elementId, offsetof(TOKSTR_ANONYMOUS42853, FtrVEBOX) + sizeof(FtrVEBOX) - offsetof(TOKSTR_ANONYMOUS42853, FtrFbc), (sizeof(*this) - sizeof(base)) / sizeof(uint32_t)) {}
-
-        TOKSTR_ANONYMOUS42853()
-            : base(TOK_S_SKU_FEATURE_TABLE__ANONYMOUS42853, 0, sizeof(*this) - sizeof(base)) {}
-
-        TokenDword FtrFbc = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_FBC};
-        TokenDword FtrFbc2AddressTranslation = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_FBC2ADDRESS_TRANSLATION};
-        TokenDword FtrFbcBlitterTracking = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_FBC_BLITTER_TRACKING};
-        TokenDword FtrFbcCpuTracking = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_FBC_CPU_TRACKING};
-        TokenDword FtrVEBOX = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_VEBOX};
-    };
-    static_assert(std::is_standard_layout_v<TOKSTR_ANONYMOUS42853>, "");
-    static_assert(sizeof(TOKSTR_ANONYMOUS42853) % sizeof(uint32_t) == 0, "");
-
     struct TOKSTR_ANONYMOUS54736 {
         TokenVariableLength base;
 
@@ -615,7 +583,6 @@ struct TOKSTR__SKU_FEATURE_TABLE {
 
         TokenDword FtrS3D = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_S3D};
         TokenDword FtrDisplayEngineS3d = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_DISPLAY_ENGINE_S3D};
-        TokenDword FtrSingleVeboxSlice = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_SINGLE_VEBOX_SLICE};
         TokenDword FtrSimulationMode = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_SIMULATION_MODE};
     };
     static_assert(std::is_standard_layout_v<TOKSTR_ANONYMOUS66219>, "");
@@ -664,23 +631,9 @@ struct TOKSTR__SKU_FEATURE_TABLE {
     static_assert(sizeof(TOKSTR_ANONYMOUS91822) % sizeof(uint32_t) == 0, "");
 
     TokenDword FtrDesktop = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_DESKTOP};                                                              // Indirect field from anonymous struct
-    TokenDword FtrVERing = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_VERING};                                                                // Indirect field from anonymous struct
-    TokenDword FtrVcs2 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_VCS2};                                                                    // Indirect field from anonymous struct
-    TokenDword FtrGtBigDie = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_BIG_DIE};                                                          // Indirect field from anonymous struct
-    TokenDword FtrGtMediumDie = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_MEDIUM_DIE};                                                    // Indirect field from anonymous struct
-    TokenDword FtrGtSmallDie = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_SMALL_DIE};                                                      // Indirect field from anonymous struct
-    TokenDword FtrGT1 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT1};                                                                      // Indirect field from anonymous struct
-    TokenDword FtrGT1_5 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT1_5};                                                                  // Indirect field from anonymous struct
-    TokenDword FtrGT2 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT2};                                                                      // Indirect field from anonymous struct
-    TokenDword FtrGT2_5 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT2_5};                                                                  // Indirect field from anonymous struct
-    TokenDword FtrGT3 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT3};                                                                      // Indirect field from anonymous struct
-    TokenDword FtrGT4 = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT4};                                                                      // Indirect field from anonymous struct
     TokenDword FtrULT = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_ULT};                                                                      // Indirect field from anonymous struct
     TokenDword FtrIVBM0M1Platform = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_IVBM0M1PLATFORM};                                              // Indirect field from anonymous struct
     TokenDword FtrChannelSwizzlingXOREnabled = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_CHANNEL_SWIZZLING_XORENABLED};                      // Indirect field from anonymous struct
-    TokenDword FtrGTA = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTA};                                                                      // Indirect field from anonymous struct
-    TokenDword FtrGTC = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTC};                                                                      // Indirect field from anonymous struct
-    TokenDword FtrGTX = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTX};                                                                      // Indirect field from anonymous struct
     TokenDword Ftr5Slice = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR5SLICE};                                                                 // Indirect field from anonymous struct
     TokenDword FtrLCIA = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_LCIA};                                                                    // Indirect field from anonymous struct
     TokenDword FtrResourceStreamer = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_RESOURCE_STREAMER};                                           // Indirect field from anonymous struct
@@ -736,12 +689,10 @@ struct TOKSTR__SKU_FEATURE_TABLE {
     TokenDword FtrFbc2AddressTranslation = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_FBC2ADDRESS_TRANSLATION};                              // Indirect field from anonymous struct
     TokenDword FtrFbcBlitterTracking = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_FBC_BLITTER_TRACKING};                                     // Indirect field from anonymous struct
     TokenDword FtrFbcCpuTracking = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_FBC_CPU_TRACKING};                                             // Indirect field from anonymous struct
-    TokenDword FtrVEBOX = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_VEBOX};                                                                 // Indirect field from anonymous struct
     TokenDword FtrRendComp = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS54736__FTR_REND_COMP};                                                          // Indirect field from anonymous struct
     TokenDword FtrDisplayYTiling = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS54736__FTR_DISPLAY_YTILING};                                              // Indirect field from anonymous struct
     TokenDword FtrS3D = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_S3D};                                                                     // Indirect field from anonymous struct
     TokenDword FtrDisplayEngineS3d = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_DISPLAY_ENGINE_S3D};                                         // Indirect field from anonymous struct
-    TokenDword FtrSingleVeboxSlice = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_SINGLE_VEBOX_SLICE};                                         // Indirect field from anonymous struct
     TokenDword FtrSimulationMode = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_SIMULATION_MODE};                                              // Indirect field from anonymous struct
     TokenDword FtrEnableGuC = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS88095__FTR_ENABLE_GU_C};                                                       // Indirect field from anonymous struct
     TokenDword FtrVgt = {TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS89755__FTR_VGT};                                                                     // Indirect field from anonymous struct
@@ -803,7 +754,6 @@ struct TOKSTR__WA_TABLE {
     TokenDword WaMemTypeIsMaxOfPatAndMocs = {TOK_FBD_WA_TABLE__WA_MEM_TYPE_IS_MAX_OF_PAT_AND_MOCS};
     TokenDword WaGttPat0GttWbOverOsIommuEllcOnly = {TOK_FBD_WA_TABLE__WA_GTT_PAT0GTT_WB_OVER_OS_IOMMU_ELLC_ONLY};
     TokenDword WaAddDummyPageForDisplayPrefetch = {TOK_FBD_WA_TABLE__WA_ADD_DUMMY_PAGE_FOR_DISPLAY_PREFETCH};
-    TokenDword WaDefaultTile4 = {TOK_FBD_WA_TABLE__WA_DEFAULT_TILE4};
     TokenDword WaLLCCachingUnsupported = {TOK_FBD_WA_TABLE__WA_LLCCACHING_UNSUPPORTED};
     TokenDword WaDoubleFastClearWidthAlignment = {TOK_FBD_WA_TABLE__WA_DOUBLE_FAST_CLEAR_WIDTH_ALIGNMENT};
     TokenDword WaCompressedResourceRequiresConstVA21 = {TOK_FBD_WA_TABLE__WA_COMPRESSED_RESOURCE_REQUIRES_CONST_VA21};
@@ -1362,7 +1312,7 @@ struct TOKSTR_GMM_RESOURCE_FLAG_REC {
         TokenVariableLength base;
 
         TOKSTR_ANONYMOUS12521(uint16_t tokenId, uint32_t elementId = 0)
-            : base(tokenId, elementId, offsetof(TOKSTR_ANONYMOUS12521, PreGen12FastClearOnly) + sizeof(PreGen12FastClearOnly) - offsetof(TOKSTR_ANONYMOUS12521, GTMfx2ndLevelBatchRingSizeAlign), (sizeof(*this) - sizeof(base)) / sizeof(uint32_t)) {}
+            : base(tokenId, elementId, offsetof(TOKSTR_ANONYMOUS12521, DeniableLocalOnlyForCompression) + sizeof(DeniableLocalOnlyForCompression) - offsetof(TOKSTR_ANONYMOUS12521, GTMfx2ndLevelBatchRingSizeAlign), (sizeof(*this) - sizeof(base)) / sizeof(uint32_t)) {}
 
         TOKSTR_ANONYMOUS12521()
             : base(TOK_S_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521, 0, sizeof(*this) - sizeof(base)) {}
@@ -1378,6 +1328,8 @@ struct TOKSTR_GMM_RESOURCE_FLAG_REC {
         TokenDword DisableDisplayCcsClearColor = {TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__DISABLE_DISPLAY_CCS_CLEAR_COLOR};
         TokenDword DisableDisplayCcsCompression = {TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__DISABLE_DISPLAY_CCS_COMPRESSION};
         TokenDword PreGen12FastClearOnly = {TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__PRE_GEN12FAST_CLEAR_ONLY};
+        TokenDword ForceStdAllocAlign = {TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__FORCE_STD_ALLOC_ALIGN};
+        TokenDword DeniableLocalOnlyForCompression = {TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__DENIABLE_LOCAL_ONLY_FOR_COMPRESSION};
     };
     static_assert(std::is_standard_layout_v<TOKSTR_ANONYMOUS12521>, "");
     static_assert(sizeof(TOKSTR_ANONYMOUS12521) % sizeof(uint32_t) == 0, "");
@@ -1689,35 +1641,16 @@ struct TOKSTR_GmmResourceInfoCommonStruct {
 static_assert(std::is_standard_layout_v<TOKSTR_GmmResourceInfoCommonStruct>, "");
 static_assert(sizeof(TOKSTR_GmmResourceInfoCommonStruct) % sizeof(uint32_t) == 0, "");
 
-struct TOKSTR_GmmResourceInfoWinStructPadding00 {
-    TokenVariableLength base;
-
-    TOKSTR_GmmResourceInfoWinStructPadding00(uint16_t tokenId, uint32_t elementId = 0)
-        : base(tokenId, elementId, offsetof(TOKSTR_GmmResourceInfoWinStructPadding00, padding000) + sizeof(padding000) - offsetof(TOKSTR_GmmResourceInfoWinStructPadding00, padding000), (sizeof(*this) - sizeof(base)) / sizeof(uint32_t)) {}
-
-    TokenQword padding000 = {3933};
-};
-
-struct TOKSTR_GmmResourceInfoWinStructPadding0 {
-    TokenVariableLength base;
-
-    TOKSTR_GmmResourceInfoWinStructPadding0(uint16_t tokenId, uint32_t elementId = 0)
-        : base(tokenId, elementId, offsetof(TOKSTR_GmmResourceInfoWinStructPadding0, padding00) + sizeof(padding00) - offsetof(TOKSTR_GmmResourceInfoWinStructPadding0, padding00), (sizeof(*this) - sizeof(base)) / sizeof(uint32_t)) {}
-
-    TOKSTR_GmmResourceInfoWinStructPadding00 padding00 = {3943};
-};
-
 struct TOKSTR_GmmResourceInfoWinStruct {
     TokenVariableLength base;
 
     TOKSTR_GmmResourceInfoWinStruct(uint16_t tokenId, uint32_t elementId = 0)
-        : base(tokenId, elementId, offsetof(TOKSTR_GmmResourceInfoWinStruct, padding0) + sizeof(padding0) - offsetof(TOKSTR_GmmResourceInfoWinStruct, GmmResourceInfoCommon), (sizeof(*this) - sizeof(base)) / sizeof(uint32_t)) {}
+        : base(tokenId, elementId, offsetof(TOKSTR_GmmResourceInfoWinStruct, GmmResourceInfoCommon) + sizeof(GmmResourceInfoCommon) - offsetof(TOKSTR_GmmResourceInfoWinStruct, GmmResourceInfoCommon), (sizeof(*this) - sizeof(base)) / sizeof(uint32_t)) {}
 
     TOKSTR_GmmResourceInfoWinStruct()
         : base(TOK_S_GMM_RESOURCE_INFO_WIN_STRUCT, 0, sizeof(*this) - sizeof(base)) {}
 
     TOKSTR_GmmResourceInfoCommonStruct GmmResourceInfoCommon = {TOK_FS_GMM_RESOURCE_INFO_WIN_STRUCT__GMM_RESOURCE_INFO_COMMON};
-    TOKSTR_GmmResourceInfoWinStructPadding0 padding0 = {3967};
 };
 static_assert(std::is_standard_layout_v<TOKSTR_GmmResourceInfoWinStruct>, "");
 static_assert(sizeof(TOKSTR_GmmResourceInfoWinStruct) % sizeof(uint32_t) == 0, "");

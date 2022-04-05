@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,6 +14,10 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
 #include "shared/test/common/helpers/variable_backup.h"
+#include "shared/test/common/libult/create_command_stream.h"
+#include "shared/test/common/libult/linux/drm_mock.h"
+#include "shared/test/common/libult/ult_command_stream_receiver.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/api/api.h"
 #include "opencl/source/cl_device/cl_device.h"
@@ -23,14 +27,10 @@
 #include "opencl/source/sharings/va/va_sharing.h"
 #include "opencl/source/sharings/va/va_surface.h"
 #include "opencl/test/unit_test/fixtures/platform_fixture.h"
-#include "opencl/test/unit_test/libult/create_command_stream.h"
-#include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
-#include "opencl/test/unit_test/os_interface/linux/drm_mock.h"
 #include "opencl/test/unit_test/sharings/va/mock_va_sharing.h"
-#include "test.h"
 
 #include "gtest/gtest.h"
 
@@ -438,16 +438,18 @@ TEST_F(VaSharingTests, givenHwCommandQueueWhenAcquireAndReleaseCallsAreMadeWithE
 }
 
 TEST_F(VaSharingTests, givenVaMediaSurfaceWhenGetMemObjectInfoIsCalledThenSurfaceIdIsReturned) {
+    vaSurfaceId = 1u;
     createMediaSurface();
 
     VASurfaceID *retVaSurfaceId = nullptr;
     size_t retSize = 0;
+    vaSurfaceId = 0;
     errCode = clGetMemObjectInfo(sharedClMem, CL_MEM_VA_API_MEDIA_SURFACE_INTEL,
                                  sizeof(VASurfaceID *), &retVaSurfaceId, &retSize);
 
     EXPECT_EQ(CL_SUCCESS, errCode);
     EXPECT_EQ(sizeof(VASurfaceID *), retSize);
-    EXPECT_EQ(vaSurfaceId, *retVaSurfaceId);
+    EXPECT_EQ(1u, *retVaSurfaceId);
 }
 
 TEST_F(VaSharingTests, givenVaMediaSurfaceWhenGetImageInfoIsCalledThenPlaneIsReturned) {
@@ -507,14 +509,17 @@ TEST_F(VaSharingTests, givenSimpleParamsWhenCreateSurfaceIsCalledThenSetImgObjec
 
 TEST_F(VaSharingTests, givenNonInteropUserSyncContextWhenAcquireIsCalledThenSyncSurface) {
     context.setInteropUserSyncEnabled(false);
-
+    vaSurfaceId = 1u;
     createMediaSurface();
+    vaSurfaceId = 0u;
 
     auto memObj = castToObject<MemObj>(sharedClMem);
 
     EXPECT_FALSE(vaSharing->sharingFunctions.syncSurfaceCalled);
-    memObj->peekSharingHandler()->acquire(sharedImg, context.getDevice(0)->getRootDeviceIndex());
+    auto ret = memObj->peekSharingHandler()->acquire(sharedImg, context.getDevice(0)->getRootDeviceIndex());
     EXPECT_TRUE(vaSharing->sharingFunctions.syncSurfaceCalled);
+    EXPECT_EQ(CL_SUCCESS, ret);
+    EXPECT_EQ(1u, vaSharing->sharingFunctions.syncedSurfaceID);
 }
 
 TEST_F(VaSharingTests, givenInteropUserSyncContextWhenAcquireIsCalledThenDontSyncSurface) {
@@ -525,6 +530,14 @@ TEST_F(VaSharingTests, givenInteropUserSyncContextWhenAcquireIsCalledThenDontSyn
     EXPECT_FALSE(vaSharing->sharingFunctions.syncSurfaceCalled);
     sharedImg->peekSharingHandler()->acquire(sharedImg, context.getDevice(0)->getRootDeviceIndex());
     EXPECT_FALSE(vaSharing->sharingFunctions.syncSurfaceCalled);
+}
+
+TEST_F(VaSharingTests, whenSyncSurfaceFailedThenReturnOutOfResource) {
+    vaSharing->sharingFunctions.syncSurfaceReturnStatus = VA_STATUS_ERROR_INVALID_SURFACE;
+    createMediaSurface();
+
+    auto ret = sharedImg->peekSharingHandler()->acquire(sharedImg, context.getDevice(0)->getRootDeviceIndex());
+    EXPECT_EQ(CL_OUT_OF_RESOURCES, ret);
 }
 
 TEST_F(VaSharingTests, givenYuvPlaneWhenCreateIsCalledThenChangeWidthAndHeight) {
@@ -1246,7 +1259,7 @@ TEST_F(VaDeviceTests, givenVADeviceWhenGetDeviceFromVAIsCalledThenRootDeviceIsRe
     NEO::Device *neoDevice = &device->getDevice();
 
     auto mockDrm = static_cast<DrmMock *>(neoDevice->getRootDeviceEnvironment().osInterface->getDriverModel()->as<Drm>());
-    mockDrm->setPciPath("00:02.0");
+    mockDrm->setPciPath("0000:00:02.0");
 
     VADevice vaDevice{};
     auto clDevice = vaDevice.getDeviceFromVA(pPlatform, vaDisplay.get());
@@ -1386,7 +1399,7 @@ TEST_F(VaDeviceTests, givenValidPlatformWhenGetDeviceIdsFromVaApiMediaAdapterCal
     NEO::Device *neoDevice = &device->getDevice();
 
     auto mockDrm = static_cast<DrmMock *>(neoDevice->getRootDeviceEnvironment().osInterface->getDriverModel()->as<Drm>());
-    mockDrm->setPciPath("00:02.0");
+    mockDrm->setPciPath("0000:00:02.0");
 
     auto errCode = clGetDeviceIDsFromVA_APIMediaAdapterINTEL(platformId, 0u, vaDisplay.get(), 0u, 1, &devices, &numDevices);
     EXPECT_EQ(CL_SUCCESS, errCode);

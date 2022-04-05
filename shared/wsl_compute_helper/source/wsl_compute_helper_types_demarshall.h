@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -1733,39 +1733,6 @@ struct Demarshaller<TOK_S_SKU_FEATURE_TABLE> {
                 case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_DESKTOP: {
                     dst.FtrDesktop = readTokValue<decltype(dst.FtrDesktop)>(*tok);
                 } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_VERING: {
-                    dst.FtrVERing = readTokValue<decltype(dst.FtrVERing)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_VCS2: {
-                    dst.FtrVcs2 = readTokValue<decltype(dst.FtrVcs2)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_BIG_DIE: {
-                    dst.FtrGtBigDie = readTokValue<decltype(dst.FtrGtBigDie)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_MEDIUM_DIE: {
-                    dst.FtrGtMediumDie = readTokValue<decltype(dst.FtrGtMediumDie)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_SMALL_DIE: {
-                    dst.FtrGtSmallDie = readTokValue<decltype(dst.FtrGtSmallDie)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT1: {
-                    dst.FtrGT1 = readTokValue<decltype(dst.FtrGT1)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT1_5: {
-                    dst.FtrGT1_5 = readTokValue<decltype(dst.FtrGT1_5)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT2: {
-                    dst.FtrGT2 = readTokValue<decltype(dst.FtrGT2)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT2_5: {
-                    dst.FtrGT2_5 = readTokValue<decltype(dst.FtrGT2_5)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT3: {
-                    dst.FtrGT3 = readTokValue<decltype(dst.FtrGT3)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT4: {
-                    dst.FtrGT4 = readTokValue<decltype(dst.FtrGT4)>(*tok);
-                } break;
                 case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_ULT: {
                     dst.FtrULT = readTokValue<decltype(dst.FtrULT)>(*tok);
                 } break;
@@ -1774,15 +1741,6 @@ struct Demarshaller<TOK_S_SKU_FEATURE_TABLE> {
                 } break;
                 case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_CHANNEL_SWIZZLING_XORENABLED: {
                     dst.FtrChannelSwizzlingXOREnabled = readTokValue<decltype(dst.FtrChannelSwizzlingXOREnabled)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTA: {
-                    dst.FtrGTA = readTokValue<decltype(dst.FtrGTA)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTC: {
-                    dst.FtrGTC = readTokValue<decltype(dst.FtrGTC)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTX: {
-                    dst.FtrGTX = readTokValue<decltype(dst.FtrGTX)>(*tok);
                 } break;
                 case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR5SLICE: {
                     dst.Ftr5Slice = readTokValue<decltype(dst.Ftr5Slice)>(*tok);
@@ -1949,9 +1907,6 @@ struct Demarshaller<TOK_S_SKU_FEATURE_TABLE> {
                 case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_FBC_CPU_TRACKING: {
                     dst.FtrFbcCpuTracking = readTokValue<decltype(dst.FtrFbcCpuTracking)>(*tok);
                 } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_VEBOX: {
-                    dst.FtrVEBOX = readTokValue<decltype(dst.FtrVEBOX)>(*tok);
-                } break;
                 case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS54736__FTR_REND_COMP: {
                     dst.FtrRendComp = readTokValue<decltype(dst.FtrRendComp)>(*tok);
                 } break;
@@ -1963,9 +1918,6 @@ struct Demarshaller<TOK_S_SKU_FEATURE_TABLE> {
                 } break;
                 case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_DISPLAY_ENGINE_S3D: {
                     dst.FtrDisplayEngineS3d = readTokValue<decltype(dst.FtrDisplayEngineS3d)>(*tok);
-                } break;
-                case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_SINGLE_VEBOX_SLICE: {
-                    dst.FtrSingleVeboxSlice = readTokValue<decltype(dst.FtrSingleVeboxSlice)>(*tok);
                 } break;
                 case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_SIMULATION_MODE: {
                     dst.FtrSimulationMode = readTokValue<decltype(dst.FtrSimulationMode)>(*tok);
@@ -2147,9 +2099,6 @@ struct Demarshaller<TOK_S_WA_TABLE> {
                 } break;
                 case TOK_FBD_WA_TABLE__WA_ADD_DUMMY_PAGE_FOR_DISPLAY_PREFETCH: {
                     dst.WaAddDummyPageForDisplayPrefetch = readTokValue<decltype(dst.WaAddDummyPageForDisplayPrefetch)>(*tok);
-                } break;
-                case TOK_FBD_WA_TABLE__WA_DEFAULT_TILE4: {
-                    dst.WaDefaultTile4 = readTokValue<decltype(dst.WaDefaultTile4)>(*tok);
                 } break;
                 case TOK_FBD_WA_TABLE__WA_LLCCACHING_UNSUPPORTED: {
                     dst.WaLLCCachingUnsupported = readTokValue<decltype(dst.WaLLCCachingUnsupported)>(*tok);
@@ -2991,39 +2940,6 @@ struct Demarshaller<TOK_S_ADAPTER_INFO> {
                             case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_DESKTOP: {
                                 dst.SkuTable.FtrDesktop = readTokValue<decltype(dst.SkuTable.FtrDesktop)>(*tokSkuTable);
                             } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_VERING: {
-                                dst.SkuTable.FtrVERing = readTokValue<decltype(dst.SkuTable.FtrVERing)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_VCS2: {
-                                dst.SkuTable.FtrVcs2 = readTokValue<decltype(dst.SkuTable.FtrVcs2)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_BIG_DIE: {
-                                dst.SkuTable.FtrGtBigDie = readTokValue<decltype(dst.SkuTable.FtrGtBigDie)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_MEDIUM_DIE: {
-                                dst.SkuTable.FtrGtMediumDie = readTokValue<decltype(dst.SkuTable.FtrGtMediumDie)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT_SMALL_DIE: {
-                                dst.SkuTable.FtrGtSmallDie = readTokValue<decltype(dst.SkuTable.FtrGtSmallDie)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT1: {
-                                dst.SkuTable.FtrGT1 = readTokValue<decltype(dst.SkuTable.FtrGT1)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT1_5: {
-                                dst.SkuTable.FtrGT1_5 = readTokValue<decltype(dst.SkuTable.FtrGT1_5)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT2: {
-                                dst.SkuTable.FtrGT2 = readTokValue<decltype(dst.SkuTable.FtrGT2)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT2_5: {
-                                dst.SkuTable.FtrGT2_5 = readTokValue<decltype(dst.SkuTable.FtrGT2_5)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT3: {
-                                dst.SkuTable.FtrGT3 = readTokValue<decltype(dst.SkuTable.FtrGT3)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GT4: {
-                                dst.SkuTable.FtrGT4 = readTokValue<decltype(dst.SkuTable.FtrGT4)>(*tokSkuTable);
-                            } break;
                             case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_ULT: {
                                 dst.SkuTable.FtrULT = readTokValue<decltype(dst.SkuTable.FtrULT)>(*tokSkuTable);
                             } break;
@@ -3032,15 +2948,6 @@ struct Demarshaller<TOK_S_ADAPTER_INFO> {
                             } break;
                             case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_CHANNEL_SWIZZLING_XORENABLED: {
                                 dst.SkuTable.FtrChannelSwizzlingXOREnabled = readTokValue<decltype(dst.SkuTable.FtrChannelSwizzlingXOREnabled)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTA: {
-                                dst.SkuTable.FtrGTA = readTokValue<decltype(dst.SkuTable.FtrGTA)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTC: {
-                                dst.SkuTable.FtrGTC = readTokValue<decltype(dst.SkuTable.FtrGTC)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR_GTX: {
-                                dst.SkuTable.FtrGTX = readTokValue<decltype(dst.SkuTable.FtrGTX)>(*tokSkuTable);
                             } break;
                             case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS3245__FTR5SLICE: {
                                 dst.SkuTable.Ftr5Slice = readTokValue<decltype(dst.SkuTable.Ftr5Slice)>(*tokSkuTable);
@@ -3207,9 +3114,6 @@ struct Demarshaller<TOK_S_ADAPTER_INFO> {
                             case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_FBC_CPU_TRACKING: {
                                 dst.SkuTable.FtrFbcCpuTracking = readTokValue<decltype(dst.SkuTable.FtrFbcCpuTracking)>(*tokSkuTable);
                             } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS42853__FTR_VEBOX: {
-                                dst.SkuTable.FtrVEBOX = readTokValue<decltype(dst.SkuTable.FtrVEBOX)>(*tokSkuTable);
-                            } break;
                             case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS54736__FTR_REND_COMP: {
                                 dst.SkuTable.FtrRendComp = readTokValue<decltype(dst.SkuTable.FtrRendComp)>(*tokSkuTable);
                             } break;
@@ -3221,9 +3125,6 @@ struct Demarshaller<TOK_S_ADAPTER_INFO> {
                             } break;
                             case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_DISPLAY_ENGINE_S3D: {
                                 dst.SkuTable.FtrDisplayEngineS3d = readTokValue<decltype(dst.SkuTable.FtrDisplayEngineS3d)>(*tokSkuTable);
-                            } break;
-                            case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_SINGLE_VEBOX_SLICE: {
-                                dst.SkuTable.FtrSingleVeboxSlice = readTokValue<decltype(dst.SkuTable.FtrSingleVeboxSlice)>(*tokSkuTable);
                             } break;
                             case TOK_FBD_SKU_FEATURE_TABLE__ANONYMOUS66219__FTR_SIMULATION_MODE: {
                                 dst.SkuTable.FtrSimulationMode = readTokValue<decltype(dst.SkuTable.FtrSimulationMode)>(*tokSkuTable);
@@ -3391,9 +3292,6 @@ struct Demarshaller<TOK_S_ADAPTER_INFO> {
                             } break;
                             case TOK_FBD_WA_TABLE__WA_ADD_DUMMY_PAGE_FOR_DISPLAY_PREFETCH: {
                                 dst.WaTable.WaAddDummyPageForDisplayPrefetch = readTokValue<decltype(dst.WaTable.WaAddDummyPageForDisplayPrefetch)>(*tokWaTable);
-                            } break;
-                            case TOK_FBD_WA_TABLE__WA_DEFAULT_TILE4: {
-                                dst.WaTable.WaDefaultTile4 = readTokValue<decltype(dst.WaTable.WaDefaultTile4)>(*tokWaTable);
                             } break;
                             case TOK_FBD_WA_TABLE__WA_LLCCACHING_UNSUPPORTED: {
                                 dst.WaTable.WaLLCCachingUnsupported = readTokValue<decltype(dst.WaTable.WaLLCCachingUnsupported)>(*tokWaTable);
@@ -5202,6 +5100,12 @@ struct Demarshaller<TOK_S_GMM_RESOURCE_FLAG_REC> {
                             case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__PRE_GEN12FAST_CLEAR_ONLY: {
                                 dst.Wa.PreGen12FastClearOnly = readTokValue<decltype(dst.Wa.PreGen12FastClearOnly)>(*tokWa);
                             } break;
+                            case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__FORCE_STD_ALLOC_ALIGN: {
+                                dst.Wa.ForceStdAllocAlign = readTokValue<decltype(dst.Wa.ForceStdAllocAlign)>(*tokWa);
+                            } break;
+                            case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__DENIABLE_LOCAL_ONLY_FOR_COMPRESSION: {
+                                dst.Wa.DeniableLocalOnlyForCompression = readTokValue<decltype(dst.Wa.DeniableLocalOnlyForCompression)>(*tokWa);
+                            } break;
                             };
                             tokWa = tokWa + 1 + tokWa->valueDwordCount;
                         } else {
@@ -6288,6 +6192,12 @@ struct Demarshaller<TOK_S_GMM_TEXTURE_INFO_REC> {
                                         case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__PRE_GEN12FAST_CLEAR_ONLY: {
                                             dst.Flags.Wa.PreGen12FastClearOnly = readTokValue<decltype(dst.Flags.Wa.PreGen12FastClearOnly)>(*tokWa);
                                         } break;
+                                        case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__FORCE_STD_ALLOC_ALIGN: {
+                                            dst.Flags.Wa.ForceStdAllocAlign = readTokValue<decltype(dst.Flags.Wa.ForceStdAllocAlign)>(*tokWa);
+                                        } break;
+                                        case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__DENIABLE_LOCAL_ONLY_FOR_COMPRESSION: {
+                                            dst.Flags.Wa.DeniableLocalOnlyForCompression = readTokValue<decltype(dst.Flags.Wa.DeniableLocalOnlyForCompression)>(*tokWa);
+                                        } break;
                                         };
                                         tokWa = tokWa + 1 + tokWa->valueDwordCount;
                                     } else {
@@ -7363,6 +7273,12 @@ struct Demarshaller<TOK_S_GMM_RESOURCE_INFO_COMMON_STRUCT> {
                                                     case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__PRE_GEN12FAST_CLEAR_ONLY: {
                                                         dst.Surf.Flags.Wa.PreGen12FastClearOnly = readTokValue<decltype(dst.Surf.Flags.Wa.PreGen12FastClearOnly)>(*tokWa);
                                                     } break;
+                                                    case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__FORCE_STD_ALLOC_ALIGN: {
+                                                        dst.Surf.Flags.Wa.ForceStdAllocAlign = readTokValue<decltype(dst.Surf.Flags.Wa.ForceStdAllocAlign)>(*tokWa);
+                                                    } break;
+                                                    case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__DENIABLE_LOCAL_ONLY_FOR_COMPRESSION: {
+                                                        dst.Surf.Flags.Wa.DeniableLocalOnlyForCompression = readTokValue<decltype(dst.Surf.Flags.Wa.DeniableLocalOnlyForCompression)>(*tokWa);
+                                                    } break;
                                                     };
                                                     tokWa = tokWa + 1 + tokWa->valueDwordCount;
                                                 } else {
@@ -8343,6 +8259,12 @@ struct Demarshaller<TOK_S_GMM_RESOURCE_INFO_COMMON_STRUCT> {
                                                     case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__PRE_GEN12FAST_CLEAR_ONLY: {
                                                         dst.AuxSurf.Flags.Wa.PreGen12FastClearOnly = readTokValue<decltype(dst.AuxSurf.Flags.Wa.PreGen12FastClearOnly)>(*tokWa);
                                                     } break;
+                                                    case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__FORCE_STD_ALLOC_ALIGN: {
+                                                        dst.AuxSurf.Flags.Wa.ForceStdAllocAlign = readTokValue<decltype(dst.AuxSurf.Flags.Wa.ForceStdAllocAlign)>(*tokWa);
+                                                    } break;
+                                                    case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__DENIABLE_LOCAL_ONLY_FOR_COMPRESSION: {
+                                                        dst.AuxSurf.Flags.Wa.DeniableLocalOnlyForCompression = readTokValue<decltype(dst.AuxSurf.Flags.Wa.DeniableLocalOnlyForCompression)>(*tokWa);
+                                                    } break;
                                                     };
                                                     tokWa = tokWa + 1 + tokWa->valueDwordCount;
                                                 } else {
@@ -9322,6 +9244,12 @@ struct Demarshaller<TOK_S_GMM_RESOURCE_INFO_COMMON_STRUCT> {
                                                     } break;
                                                     case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__PRE_GEN12FAST_CLEAR_ONLY: {
                                                         dst.AuxSecSurf.Flags.Wa.PreGen12FastClearOnly = readTokValue<decltype(dst.AuxSecSurf.Flags.Wa.PreGen12FastClearOnly)>(*tokWa);
+                                                    } break;
+                                                    case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__FORCE_STD_ALLOC_ALIGN: {
+                                                        dst.AuxSecSurf.Flags.Wa.ForceStdAllocAlign = readTokValue<decltype(dst.AuxSecSurf.Flags.Wa.ForceStdAllocAlign)>(*tokWa);
+                                                    } break;
+                                                    case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__DENIABLE_LOCAL_ONLY_FOR_COMPRESSION: {
+                                                        dst.AuxSecSurf.Flags.Wa.DeniableLocalOnlyForCompression = readTokValue<decltype(dst.AuxSecSurf.Flags.Wa.DeniableLocalOnlyForCompression)>(*tokWa);
                                                     } break;
                                                     };
                                                     tokWa = tokWa + 1 + tokWa->valueDwordCount;
@@ -10445,6 +10373,12 @@ struct Demarshaller<TOK_S_GMM_RESOURCE_INFO_WIN_STRUCT> {
                                                                 case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__PRE_GEN12FAST_CLEAR_ONLY: {
                                                                     dst.GmmResourceInfoCommon.Surf.Flags.Wa.PreGen12FastClearOnly = readTokValue<decltype(dst.GmmResourceInfoCommon.Surf.Flags.Wa.PreGen12FastClearOnly)>(*tokWa);
                                                                 } break;
+                                                                case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__FORCE_STD_ALLOC_ALIGN: {
+                                                                    dst.GmmResourceInfoCommon.Surf.Flags.Wa.ForceStdAllocAlign = readTokValue<decltype(dst.GmmResourceInfoCommon.Surf.Flags.Wa.ForceStdAllocAlign)>(*tokWa);
+                                                                } break;
+                                                                case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__DENIABLE_LOCAL_ONLY_FOR_COMPRESSION: {
+                                                                    dst.GmmResourceInfoCommon.Surf.Flags.Wa.DeniableLocalOnlyForCompression = readTokValue<decltype(dst.GmmResourceInfoCommon.Surf.Flags.Wa.DeniableLocalOnlyForCompression)>(*tokWa);
+                                                                } break;
                                                                 };
                                                                 tokWa = tokWa + 1 + tokWa->valueDwordCount;
                                                             } else {
@@ -11425,6 +11359,12 @@ struct Demarshaller<TOK_S_GMM_RESOURCE_INFO_WIN_STRUCT> {
                                                                 case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__PRE_GEN12FAST_CLEAR_ONLY: {
                                                                     dst.GmmResourceInfoCommon.AuxSurf.Flags.Wa.PreGen12FastClearOnly = readTokValue<decltype(dst.GmmResourceInfoCommon.AuxSurf.Flags.Wa.PreGen12FastClearOnly)>(*tokWa);
                                                                 } break;
+                                                                case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__FORCE_STD_ALLOC_ALIGN: {
+                                                                    dst.GmmResourceInfoCommon.AuxSurf.Flags.Wa.ForceStdAllocAlign = readTokValue<decltype(dst.GmmResourceInfoCommon.AuxSurf.Flags.Wa.ForceStdAllocAlign)>(*tokWa);
+                                                                } break;
+                                                                case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__DENIABLE_LOCAL_ONLY_FOR_COMPRESSION: {
+                                                                    dst.GmmResourceInfoCommon.AuxSurf.Flags.Wa.DeniableLocalOnlyForCompression = readTokValue<decltype(dst.GmmResourceInfoCommon.AuxSurf.Flags.Wa.DeniableLocalOnlyForCompression)>(*tokWa);
+                                                                } break;
                                                                 };
                                                                 tokWa = tokWa + 1 + tokWa->valueDwordCount;
                                                             } else {
@@ -12404,6 +12344,12 @@ struct Demarshaller<TOK_S_GMM_RESOURCE_INFO_WIN_STRUCT> {
                                                                 } break;
                                                                 case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__PRE_GEN12FAST_CLEAR_ONLY: {
                                                                     dst.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.PreGen12FastClearOnly = readTokValue<decltype(dst.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.PreGen12FastClearOnly)>(*tokWa);
+                                                                } break;
+                                                                case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__FORCE_STD_ALLOC_ALIGN: {
+                                                                    dst.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.ForceStdAllocAlign = readTokValue<decltype(dst.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.ForceStdAllocAlign)>(*tokWa);
+                                                                } break;
+                                                                case TOK_FBD_GMM_RESOURCE_FLAG_REC__ANONYMOUS12521__DENIABLE_LOCAL_ONLY_FOR_COMPRESSION: {
+                                                                    dst.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.DeniableLocalOnlyForCompression = readTokValue<decltype(dst.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.DeniableLocalOnlyForCompression)>(*tokWa);
                                                                 } break;
                                                                 };
                                                                 tokWa = tokWa + 1 + tokWa->valueDwordCount;

@@ -1,29 +1,28 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/test/common/mocks/mock_aub_csr.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
-
-#include "opencl/test/unit_test/mocks/mock_aub_csr.h"
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 
 TEST(GraphicsAllocationTest, givenGraphicsAllocationWhenIsCreatedThenAllInspectionIdsAreSetToZero) {
-    MockGraphicsAllocation graphicsAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0u, 0u, 0, MemoryPool::MemoryNull, mockMaxOsContextCount);
-    for (auto i = 0u; i < mockMaxOsContextCount; i++) {
+    MockGraphicsAllocation graphicsAllocation(0, AllocationType::UNKNOWN, nullptr, 0u, 0u, 0, MemoryPool::MemoryNull, MemoryManager::maxOsContextCount);
+    for (auto i = 0u; i < MemoryManager::maxOsContextCount; i++) {
         EXPECT_EQ(0u, graphicsAllocation.getInspectionId(i));
     }
 }
 
 TEST(GraphicsAllocationTest, givenGraphicsAllocationWhenIsCreatedThenTaskCountsAreInitializedProperly) {
-    GraphicsAllocation graphicsAllocation1(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0u, 0u, 0, MemoryPool::MemoryNull, mockMaxOsContextCount);
-    GraphicsAllocation graphicsAllocation2(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0u, 0u, 0, MemoryPool::MemoryNull, mockMaxOsContextCount);
-    for (auto i = 0u; i < mockMaxOsContextCount; i++) {
+    GraphicsAllocation graphicsAllocation1(0, AllocationType::UNKNOWN, nullptr, 0u, 0u, 0, MemoryPool::MemoryNull, MemoryManager::maxOsContextCount);
+    GraphicsAllocation graphicsAllocation2(0, AllocationType::UNKNOWN, nullptr, 0u, 0u, 0, MemoryPool::MemoryNull, MemoryManager::maxOsContextCount);
+    for (auto i = 0u; i < MemoryManager::maxOsContextCount; i++) {
         EXPECT_EQ(MockGraphicsAllocation::objectNotUsed, graphicsAllocation1.getTaskCount(i));
         EXPECT_EQ(MockGraphicsAllocation::objectNotUsed, graphicsAllocation2.getTaskCount(i));
         EXPECT_EQ(MockGraphicsAllocation::objectNotResident, graphicsAllocation1.getResidencyTaskCount(i));
@@ -41,13 +40,13 @@ TEST(GraphicsAllocationTest, givenGraphicsAllocationWhenUpdatedTaskCountThenOnly
     MockGraphicsAllocation graphicsAllocation;
     graphicsAllocation.updateTaskCount(1u, 0u);
     EXPECT_EQ(1u, graphicsAllocation.getTaskCount(0u));
-    for (auto i = 1u; i < mockMaxOsContextCount; i++) {
+    for (auto i = 1u; i < MemoryManager::maxOsContextCount; i++) {
         EXPECT_EQ(MockGraphicsAllocation::objectNotUsed, graphicsAllocation.getTaskCount(i));
     }
     graphicsAllocation.updateTaskCount(2u, 1u);
     EXPECT_EQ(1u, graphicsAllocation.getTaskCount(0u));
     EXPECT_EQ(2u, graphicsAllocation.getTaskCount(1u));
-    for (auto i = 2u; i < mockMaxOsContextCount; i++) {
+    for (auto i = 2u; i < MemoryManager::maxOsContextCount; i++) {
         EXPECT_EQ(MockGraphicsAllocation::objectNotUsed, graphicsAllocation.getTaskCount(i));
     }
 }
@@ -117,47 +116,51 @@ TEST(GraphicsAllocationTest, givenResidentGraphicsAllocationWhenCheckIfResidency
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsCommandBufferThenCpuAccessIsRequired) {
-    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::COMMAND_BUFFER));
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(AllocationType::COMMAND_BUFFER));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsConstantSurfaceThenCpuAccessIsRequired) {
-    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::CONSTANT_SURFACE));
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(AllocationType::CONSTANT_SURFACE));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsGlobalSurfaceThenCpuAccessIsRequired) {
-    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::GLOBAL_SURFACE));
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(AllocationType::GLOBAL_SURFACE));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsInternalHeapThenCpuAccessIsRequired) {
-    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::INTERNAL_HEAP));
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(AllocationType::INTERNAL_HEAP));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsKernelIsaThenCpuAccessIsNotRequired) {
-    EXPECT_FALSE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::KERNEL_ISA));
+    EXPECT_FALSE(GraphicsAllocation::isCpuAccessRequired(AllocationType::KERNEL_ISA));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsKernelIsaInternalThenCpuAccessIsNotRequired) {
-    EXPECT_FALSE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::KERNEL_ISA_INTERNAL));
+    EXPECT_FALSE(GraphicsAllocation::isCpuAccessRequired(AllocationType::KERNEL_ISA_INTERNAL));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsLinearStreamThenCpuAccessIsRequired) {
-    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::LINEAR_STREAM));
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(AllocationType::LINEAR_STREAM));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsPipeThenCpuAccessIsRequired) {
-    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::PIPE));
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(AllocationType::PIPE));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsTimestampPacketThenCpuAccessIsRequired) {
-    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER));
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(AllocationType::TIMESTAMP_PACKET_TAG_BUFFER));
+}
+
+TEST(GraphicsAllocationTest, whenAllocationTypeIsGpuTimestampDeviceBufferThenCpuAccessIsRequired) {
+    EXPECT_TRUE(GraphicsAllocation::isCpuAccessRequired(AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationRequiresCpuAccessThenAllocationIsLockable) {
-    auto firstAllocationIdx = static_cast<int>(GraphicsAllocation::AllocationType::UNKNOWN);
-    auto lastAllocationIdx = static_cast<int>(GraphicsAllocation::AllocationType::COUNT);
+    auto firstAllocationIdx = static_cast<int>(AllocationType::UNKNOWN);
+    auto lastAllocationIdx = static_cast<int>(AllocationType::COUNT);
 
     for (int allocationIdx = firstAllocationIdx; allocationIdx != lastAllocationIdx; allocationIdx++) {
-        auto allocationType = static_cast<GraphicsAllocation::AllocationType>(allocationIdx);
+        auto allocationType = static_cast<AllocationType>(allocationIdx);
         if (GraphicsAllocation::isCpuAccessRequired(allocationType)) {
             EXPECT_TRUE(GraphicsAllocation::isLockable(allocationType));
         }
@@ -165,36 +168,32 @@ TEST(GraphicsAllocationTest, whenAllocationRequiresCpuAccessThenAllocationIsLock
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsISAThenAllocationIsLockable) {
-    EXPECT_TRUE(GraphicsAllocation::isLockable(GraphicsAllocation::AllocationType::KERNEL_ISA));
-    EXPECT_TRUE(GraphicsAllocation::isLockable(GraphicsAllocation::AllocationType::KERNEL_ISA_INTERNAL));
+    EXPECT_TRUE(GraphicsAllocation::isLockable(AllocationType::KERNEL_ISA));
+    EXPECT_TRUE(GraphicsAllocation::isLockable(AllocationType::KERNEL_ISA_INTERNAL));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsBufferThenAllocationIsNotLockable) {
-    EXPECT_FALSE(GraphicsAllocation::isLockable(GraphicsAllocation::AllocationType::BUFFER));
+    EXPECT_FALSE(GraphicsAllocation::isLockable(AllocationType::BUFFER));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsBufferHostMemoryThenAllocationIsLockable) {
-    EXPECT_TRUE(GraphicsAllocation::isLockable(GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY));
+    EXPECT_TRUE(GraphicsAllocation::isLockable(AllocationType::BUFFER_HOST_MEMORY));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsGpuTimestampDeviceBufferThenAllocationIsLockable) {
-    EXPECT_TRUE(GraphicsAllocation::isLockable(GraphicsAllocation::AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER));
+    EXPECT_TRUE(GraphicsAllocation::isLockable(AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsSvmGpuThenAllocationIsNotLockable) {
-    EXPECT_FALSE(GraphicsAllocation::isLockable(GraphicsAllocation::AllocationType::SVM_GPU));
+    EXPECT_FALSE(GraphicsAllocation::isLockable(AllocationType::SVM_GPU));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsSharedResourceCopyThenAllocationIsLockable) {
-    EXPECT_TRUE(GraphicsAllocation::isLockable(GraphicsAllocation::AllocationType::SHARED_RESOURCE_COPY));
-}
-
-TEST(GraphicsAllocationTest, whenAllocationTypeIsBufferCompressedThenAllocationIsNotLockable) {
-    EXPECT_FALSE(GraphicsAllocation::isLockable(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED));
+    EXPECT_TRUE(GraphicsAllocation::isLockable(AllocationType::SHARED_RESOURCE_COPY));
 }
 
 TEST(GraphicsAllocationTest, whenAllocationTypeIsImageThenAllocationIsNotLockable) {
-    EXPECT_FALSE(GraphicsAllocation::isLockable(GraphicsAllocation::AllocationType::IMAGE));
+    EXPECT_FALSE(GraphicsAllocation::isLockable(AllocationType::IMAGE));
 }
 
 TEST(GraphicsAllocationTest, givenDefaultAllocationWhenGettingNumHandlesThenOneIsReturned) {
@@ -224,7 +223,7 @@ TEST(GraphicsAllocationTest, givenGraphicsAllocationWhenQueryingUsedPageSizeThen
                                       MemoryPool::SystemCpuInaccessible};
 
     for (auto pool : page4kPools) {
-        MockGraphicsAllocation graphicsAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0u, 0u, (osHandle)1, pool, mockMaxOsContextCount);
+        MockGraphicsAllocation graphicsAllocation(0, AllocationType::UNKNOWN, nullptr, 0u, 0u, static_cast<osHandle>(1), pool, MemoryManager::maxOsContextCount);
 
         EXPECT_EQ(MemoryConstants::pageSize, graphicsAllocation.getUsedPageSize());
     }
@@ -234,7 +233,7 @@ TEST(GraphicsAllocationTest, givenGraphicsAllocationWhenQueryingUsedPageSizeThen
                                        MemoryPool::LocalMemory};
 
     for (auto pool : page64kPools) {
-        MockGraphicsAllocation graphicsAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 0u, 0u, 0, pool, mockMaxOsContextCount);
+        MockGraphicsAllocation graphicsAllocation(0, AllocationType::UNKNOWN, nullptr, 0u, 0u, 0, pool, MemoryManager::maxOsContextCount);
 
         EXPECT_EQ(MemoryConstants::pageSize64k, graphicsAllocation.getUsedPageSize());
     }

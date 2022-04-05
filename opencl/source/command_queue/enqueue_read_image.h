@@ -40,9 +40,10 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadImage(
     cl_uint numEventsInWaitList,
     const cl_event *eventWaitList,
     cl_event *event) {
-    cl_command_type cmdType = CL_COMMAND_READ_IMAGE;
-    auto blitAllowed = blitEnqueueAllowed(cmdType) && blitEnqueueImageAllowed(origin, region, *srcImage);
-    auto &csr = getCommandStreamReceiver(blitAllowed);
+    constexpr cl_command_type cmdType = CL_COMMAND_READ_IMAGE;
+
+    CsrSelectionArgs csrSelectionArgs{cmdType, srcImage, {}, device->getRootDeviceIndex(), region, origin, nullptr};
+    CommandStreamReceiver &csr = selectCsrForBuiltinOperation(csrSelectionArgs);
 
     if (nullptr == mapAllocation) {
         notifyEnqueueReadImage(srcImage, static_cast<bool>(blockingRead), EngineHelpers::isBcs(csr.getOsContext().getEngineType()));
@@ -67,6 +68,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadImage(
     GeneralSurface mapSurface;
     Surface *surfaces[] = {&srcImgSurf, nullptr};
 
+    bool tempAllocFallback = false;
     if (mapAllocation) {
         surfaces[1] = &mapSurface;
         mapSurface.setGraphicsAllocation(mapAllocation);
@@ -80,7 +82,16 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadImage(
             region[2] != 0) {
             bool status = csr.createAllocationForHostSurface(hostPtrSurf, true);
             if (!status) {
-                return CL_OUT_OF_RESOURCES;
+                if (CL_TRUE == blockingRead) {
+                    hostPtrSurf.setIsPtrCopyAllowed(true);
+                    status = csr.createAllocationForHostSurface(hostPtrSurf, true);
+                    if (!status) {
+                        return CL_OUT_OF_RESOURCES;
+                    }
+                    tempAllocFallback = true;
+                } else {
+                    return CL_OUT_OF_RESOURCES;
+                }
             }
             dstPtr = reinterpret_cast<void *>(hostPtrSurf.getAllocation()->getGpuAddress());
         }
@@ -101,11 +112,14 @@ cl_int CommandQueueHw<GfxFamily>::enqueueReadImage(
         dc.srcMipLevel = findMipLevel(srcImage->getImageDesc().image_type, origin);
     }
     dc.transferAllocation = mapAllocation ? mapAllocation : hostPtrSurf.getAllocation();
+    if (tempAllocFallback) {
+        dc.userPtrForPostOperationCpuCopy = ptr;
+    }
 
     auto eBuiltInOps = EBuiltInOps::CopyImage3dToBuffer;
     MultiDispatchInfo dispatchInfo(dc);
 
-    dispatchBcsOrGpgpuEnqueue<CL_COMMAND_READ_IMAGE>(dispatchInfo, surfaces, eBuiltInOps, numEventsInWaitList, eventWaitList, event, blockingRead == CL_TRUE, blitAllowed);
+    dispatchBcsOrGpgpuEnqueue<CL_COMMAND_READ_IMAGE>(dispatchInfo, surfaces, eBuiltInOps, numEventsInWaitList, eventWaitList, event, blockingRead == CL_TRUE, csr);
 
     if (context->isProvidingPerformanceHints()) {
         if (!isL3Capable(ptr, hostPtrSize)) {

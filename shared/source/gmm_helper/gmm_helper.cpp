@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -30,6 +30,10 @@ const HardwareInfo *GmmHelper::getHardwareInfo() {
 }
 
 uint32_t GmmHelper::getMOCS(uint32_t type) const {
+    if (allResourcesUncached || (DebugManager.flags.ForceAllResourcesUncached.get() == true)) {
+        type = GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED;
+    }
+
     MEMORY_OBJECT_CONTROL_STATE mocs = gmmClientContext->cachePolicyGetMemoryObject(nullptr, static_cast<GMM_RESOURCE_USAGE_TYPE>(type));
 
     return static_cast<uint32_t>(mocs.DwordValue);
@@ -37,11 +41,20 @@ uint32_t GmmHelper::getMOCS(uint32_t type) const {
 
 GmmHelper::GmmHelper(OSInterface *osInterface, const HardwareInfo *pHwInfo) : hwInfo(pHwInfo) {
     auto hwInfoAddressWidth = Math::log2(hwInfo->capabilityTable.gpuAddressSpace + 1);
-    HwHelper::get(hwInfo->platform.eRenderCoreFamily).adjustAddressWidthForCanonize(hwInfoAddressWidth);
     GmmHelper::addressWidth = std::max(hwInfoAddressWidth, static_cast<uint32_t>(48));
 
     gmmClientContext = GmmHelper::createGmmContextWrapperFunc(osInterface, const_cast<HardwareInfo *>(pHwInfo));
     UNRECOVERABLE_IF(!gmmClientContext);
+}
+
+bool GmmHelper::isValidCanonicalGpuAddress(uint64_t address) {
+    auto decanonizedAddress = NEO::GmmHelper::decanonize(address);
+    auto canonizedAddress = NEO::GmmHelper::canonize(decanonizedAddress);
+
+    if (address == canonizedAddress) {
+        return true;
+    }
+    return false;
 }
 
 GmmHelper::~GmmHelper() = default;

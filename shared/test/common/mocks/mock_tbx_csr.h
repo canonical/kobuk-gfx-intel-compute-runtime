@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -27,7 +27,7 @@ class MockTbxCsr : public TbxCommandStreamReceiverHw<GfxFamily> {
     MockTbxCsr(ExecutionEnvironment &executionEnvironment, const DeviceBitfield deviceBitfield)
         : TbxCommandStreamReceiverHw<GfxFamily>(executionEnvironment, 0, deviceBitfield) {}
 
-    void initializeEngine() {
+    void initializeEngine() override {
         TbxCommandStreamReceiverHw<GfxFamily>::initializeEngine();
         initializeEngineCalled = true;
     }
@@ -41,8 +41,8 @@ class MockTbxCsr : public TbxCommandStreamReceiverHw<GfxFamily> {
         TbxCommandStreamReceiverHw<GfxFamily>::writeMemory(gpuAddress, cpuAddress, size, memoryBank, entryBits);
         writeMemoryCalled = true;
     }
-    void submitBatchBuffer(uint64_t batchBufferGpuAddress, const void *batchBuffer, size_t batchBufferSize, uint32_t memoryBank, uint64_t entryBits, bool overrideRingHead) override {
-        TbxCommandStreamReceiverHw<GfxFamily>::submitBatchBuffer(batchBufferGpuAddress, batchBuffer, batchBufferSize, memoryBank, entryBits, overrideRingHead);
+    void submitBatchBufferTbx(uint64_t batchBufferGpuAddress, const void *batchBuffer, size_t batchBufferSize, uint32_t memoryBank, uint64_t entryBits, bool overrideRingHead) override {
+        TbxCommandStreamReceiverHw<GfxFamily>::submitBatchBufferTbx(batchBufferGpuAddress, batchBuffer, batchBufferSize, memoryBank, entryBits, overrideRingHead);
         overrideRingHeadPassed = overrideRingHead;
         submitBatchBufferCalled = true;
     }
@@ -75,6 +75,7 @@ struct MockTbxCsrRegisterDownloadedAllocations : TbxCommandStreamReceiverHw<GfxF
     using CommandStreamReceiver::latestFlushedTaskCount;
     using CommandStreamReceiver::tagsMultiAllocation;
     using TbxCommandStreamReceiverHw<GfxFamily>::TbxCommandStreamReceiverHw;
+    using TbxCommandStreamReceiverHw<GfxFamily>::flushSubmissionsAndDownloadAllocations;
     void downloadAllocation(GraphicsAllocation &gfxAllocation) override {
         *reinterpret_cast<uint32_t *>(CommandStreamReceiver::getTagAllocation()->getUnderlyingBuffer()) = this->latestFlushedTaskCount;
         downloadedAllocations.insert(&gfxAllocation);
@@ -83,7 +84,17 @@ struct MockTbxCsrRegisterDownloadedAllocations : TbxCommandStreamReceiverHw<GfxF
         flushBatchedSubmissionsCalled = true;
         return true;
     }
+    void flushTagUpdate() override {
+        flushTagCalled = true;
+    }
+
+    std::unique_lock<CommandStreamReceiver::MutexType> obtainUniqueOwnership() override {
+        obtainUniqueOwnershipCalled++;
+        return TbxCommandStreamReceiverHw<GfxFamily>::obtainUniqueOwnership();
+    }
     std::set<GraphicsAllocation *> downloadedAllocations;
     bool flushBatchedSubmissionsCalled = false;
+    bool flushTagCalled = false;
+    size_t obtainUniqueOwnershipCalled = 0;
 };
 } // namespace NEO

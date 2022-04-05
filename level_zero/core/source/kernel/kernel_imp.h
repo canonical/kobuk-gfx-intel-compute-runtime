@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "shared/source/command_stream/thread_arbitration_policy.h"
 #include "shared/source/kernel/dispatch_kernel_encoder_interface.h"
 #include "shared/source/unified_memory/unified_memory.h"
 
@@ -15,6 +16,12 @@
 #include <memory>
 
 namespace L0 {
+
+struct KernelArgInfo {
+    const void *value;
+    uint32_t allocId;
+    uint32_t allocIdMemoryManagerCounter;
+};
 
 struct KernelImp : Kernel {
     KernelImp(Module *module);
@@ -45,7 +52,8 @@ struct KernelImp : Kernel {
 
     ze_result_t getKernelName(size_t *pSize, char *pName) override;
 
-    ze_result_t suggestMaxCooperativeGroupCount(uint32_t *totalGroupCount) override;
+    ze_result_t suggestMaxCooperativeGroupCount(uint32_t *totalGroupCount, NEO::EngineGroupType engineGroupType,
+                                                bool isEngineInstanced) override;
 
     const uint8_t *getCrossThreadData() const override { return crossThreadData.get(); }
     uint32_t getCrossThreadDataSize() const override { return crossThreadDataSize; }
@@ -118,6 +126,7 @@ struct KernelImp : Kernel {
     uint32_t getRequiredWorkgroupOrder() const override { return requiredWorkgroupOrder; }
     bool requiresGenerationOfLocalIdsByRuntime() const override { return kernelRequiresGenerationOfLocalIdsByRuntime; }
     bool getKernelRequiresUncachedMocs() { return (kernelRequiresUncachedMocsCount > 0); }
+    bool getKernelRequiresQueueUncachedMocs() { return (kernelRequiresQueueUncachedMocsCount > 0); }
     void setKernelArgUncached(uint32_t index, bool val) { isArgUncached[index] = val; }
 
     uint32_t *getGlobalOffsets() override {
@@ -125,8 +134,6 @@ struct KernelImp : Kernel {
     }
     ze_result_t setGlobalOffsetExp(uint32_t offsetX, uint32_t offsetY, uint32_t offsetZ) override;
     void patchGlobalOffset() override;
-
-    void patchWorkDim(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
 
     ze_result_t setCacheConfig(ze_cache_config_flags_t flags) override;
     bool usesRayTracing() {
@@ -150,6 +157,11 @@ struct KernelImp : Kernel {
         return privateMemoryGraphicsAllocation;
     }
 
+    ze_result_t setSchedulingHintExp(ze_scheduling_hint_exp_desc_t *pHint) override;
+    int32_t getSchedulingHintExp() override;
+
+    NEO::ImplicitArgs *getImplicitArgs() const override { return pImplicitArgs.get(); }
+
   protected:
     KernelImp() = default;
 
@@ -166,6 +178,7 @@ struct KernelImp : Kernel {
     Module *module = nullptr;
 
     typedef ze_result_t (KernelImp::*KernelArgHandler)(uint32_t argIndex, size_t argSize, const void *argVal);
+    std::vector<KernelArgInfo> kernelArgInfos;
     std::vector<KernelImp::KernelArgHandler> kernelArgHandlers;
     std::vector<NEO::GraphicsAllocation *> residencyContainer;
 
@@ -196,6 +209,7 @@ struct KernelImp : Kernel {
 
     bool kernelRequiresGenerationOfLocalIdsByRuntime = true;
     uint32_t kernelRequiresUncachedMocsCount = false;
+    uint32_t kernelRequiresQueueUncachedMocsCount = false;
     std::vector<bool> isArgUncached;
 
     uint32_t globalOffsets[3] = {};
@@ -203,6 +217,9 @@ struct KernelImp : Kernel {
     ze_cache_config_flags_t cacheConfigFlags = 0u;
 
     bool kernelHasIndirectAccess = true;
+
+    int32_t schedulingHintExpFlag = NEO::ThreadArbitrationPolicy::NotPresent;
+    std::unique_ptr<NEO::ImplicitArgs> pImplicitArgs;
 };
 
 } // namespace L0

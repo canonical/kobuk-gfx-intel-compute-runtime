@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,7 +7,9 @@
 
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 
+#include "shared/source/os_interface/device_factory.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
+#include "shared/test/unit_test/page_fault_manager/mock_cpu_page_fault_manager.h"
 
 #include "level_zero/core/test/unit_tests/mocks/mock_built_ins.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_context.h"
@@ -17,8 +19,12 @@ namespace L0 {
 namespace ult {
 
 void DeviceFixture::SetUp() { // NOLINT(readability-identifier-naming)
-    neoDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
-    auto mockBuiltIns = new MockBuiltins();
+    auto executionEnvironment = MockDevice::prepareExecutionEnvironment(NEO::defaultHwInfo.get(), 0u);
+    setupWithExecutionEnvironment(*executionEnvironment);
+}
+void DeviceFixture::setupWithExecutionEnvironment(NEO::ExecutionEnvironment &executionEnvironment) {
+    neoDevice = NEO::MockDevice::createWithExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get(), &executionEnvironment, 0u);
+    mockBuiltIns = new MockBuiltins();
     neoDevice->executionEnvironment->rootDeviceEnvironments[0]->builtins.reset(mockBuiltIns);
     NEO::DeviceVector devices;
     devices.push_back(std::unique_ptr<NEO::Device>(neoDevice));
@@ -27,7 +33,7 @@ void DeviceFixture::SetUp() { // NOLINT(readability-identifier-naming)
     device = driverHandle->devices[0];
 
     ze_context_handle_t hContext;
-    ze_context_desc_t desc;
+    ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
     ze_result_t res = driverHandle->createContext(&desc, 0u, nullptr, &hContext);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     context = static_cast<ContextImp *>(Context::fromHandle(hContext));
@@ -48,7 +54,7 @@ void PageFaultDeviceFixture::SetUp() { // NOLINT(readability-identifier-naming)
     device = driverHandle->devices[0];
 
     ze_context_handle_t hContext;
-    ze_context_desc_t desc;
+    ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
     ze_result_t res = driverHandle->createContext(&desc, 0u, nullptr, &hContext);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     context = static_cast<ContextImp *>(Context::fromHandle(hContext));
@@ -74,7 +80,7 @@ void MultiDeviceFixture::SetUp() { // NOLINT(readability-identifier-naming)
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
     ze_context_handle_t hContext;
-    ze_context_desc_t desc;
+    ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
     res = driverHandle->createContext(&desc, 0u, nullptr, &hContext);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     context = static_cast<ContextImp *>(Context::fromHandle(hContext));
@@ -110,9 +116,9 @@ void MultipleDevicesWithCustomHwInfo::SetUp() {
     hwInfo.gtSystemInfo.MaxEuPerSubSlice = numEuPerSubslice;
     hwInfo.gtSystemInfo.NumThreadsPerEu = numThreadsPerEu;
 
-    hwInfo.gtSystemInfo.MaxSlicesSupported = 2 * sliceCount;
-    hwInfo.gtSystemInfo.MaxSubSlicesSupported = 2 * subsliceCount;
-    hwInfo.gtSystemInfo.MaxDualSubSlicesSupported = 2 * subsliceCount;
+    hwInfo.gtSystemInfo.MaxSlicesSupported = sliceCount;
+    hwInfo.gtSystemInfo.MaxSubSlicesSupported = sliceCount * subsliceCount;
+    hwInfo.gtSystemInfo.MaxDualSubSlicesSupported = sliceCount * subsliceCount;
 
     hwInfo.gtSystemInfo.MultiTileArchInfo.IsValid = 1;
     hwInfo.gtSystemInfo.MultiTileArchInfo.TileCount = numSubDevices;
@@ -132,6 +138,42 @@ void MultipleDevicesWithCustomHwInfo::SetUp() {
     }
     driverHandle = std::make_unique<Mock<L0::DriverHandleImp>>();
     driverHandle->initialize(std::move(devices));
+}
+
+void SingleRootMultiSubDeviceFixture::SetUp() {
+    MultiDeviceFixture::numRootDevices = 1u;
+    MultiDeviceFixture::SetUp();
+
+    device = driverHandle->devices[0];
+    neoDevice = device->getNEODevice();
+}
+
+void GetMemHandlePtrTestFixture::SetUp() {
+    NEO::MockCompilerEnableGuard mock(true);
+    neoDevice =
+        NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
+    auto mockBuiltIns = new MockBuiltins();
+    neoDevice->executionEnvironment->rootDeviceEnvironments[0]->builtins.reset(mockBuiltIns);
+    NEO::DeviceVector devices;
+    devices.push_back(std::unique_ptr<NEO::Device>(neoDevice));
+    driverHandle = std::make_unique<DriverHandleGetMemHandlePtrMock>();
+    driverHandle->initialize(std::move(devices));
+    prevMemoryManager = driverHandle->getMemoryManager();
+    currMemoryManager = new MemoryManagerMemHandleMock();
+    driverHandle->setMemoryManager(currMemoryManager);
+    device = driverHandle->devices[0];
+
+    context = std::make_unique<L0::ContextImp>(driverHandle.get());
+    EXPECT_NE(context, nullptr);
+    context->getDevices().insert(std::make_pair(device->toHandle(), device));
+    auto neoDevice = device->getNEODevice();
+    context->rootDeviceIndices.insert(neoDevice->getRootDeviceIndex());
+    context->deviceBitfields.insert({neoDevice->getRootDeviceIndex(), neoDevice->getDeviceBitfield()});
+}
+
+void GetMemHandlePtrTestFixture::TearDown() {
+    driverHandle->setMemoryManager(prevMemoryManager);
+    delete currMemoryManager;
 }
 
 } // namespace ult

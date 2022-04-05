@@ -6,45 +6,36 @@
  */
 
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/helpers/default_hw_info.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 using HwHelperTestXeHP = ::testing::Test;
 
-XEHPTEST_F(HwHelperTestXeHP, givenSteppingWhenAskingForLocalMemoryAccessModeThenDisallowOnA0) {
-    HardwareInfo hwInfo = *defaultHwInfo;
-    auto renderCoreFamily = defaultHwInfo->platform.eRenderCoreFamily;
-
-    auto &helper = HwHelper::get(renderCoreFamily);
-
-    hwInfo.platform.usRevId = helper.getHwRevIdFromStepping(REVISION_A0, hwInfo);
-    EXPECT_EQ(LocalMemoryAccessMode::CpuAccessDisallowed, helper.getLocalMemoryAccessMode(hwInfo));
-
-    hwInfo.platform.usRevId = helper.getHwRevIdFromStepping(REVISION_B, hwInfo);
-    EXPECT_EQ(LocalMemoryAccessMode::Default, helper.getLocalMemoryAccessMode(hwInfo));
-}
-
 XEHPTEST_F(HwHelperTestXeHP, givenSteppingAorBWhenCheckingSipWAThenTrueIsReturned) {
     HardwareInfo hwInfo = *defaultHwInfo;
     auto renderCoreFamily = defaultHwInfo->platform.eRenderCoreFamily;
+    auto productFamily = defaultHwInfo->platform.eProductFamily;
 
     auto &helper = HwHelper::get(renderCoreFamily);
+    const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
 
-    hwInfo.platform.usRevId = helper.getHwRevIdFromStepping(REVISION_A0, hwInfo);
+    hwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_A0, hwInfo);
     EXPECT_TRUE(helper.isSipWANeeded(hwInfo));
 
-    hwInfo.platform.usRevId = helper.getHwRevIdFromStepping(REVISION_B, hwInfo);
+    hwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
     EXPECT_TRUE(helper.isSipWANeeded(hwInfo));
 }
 
 XEHPTEST_F(HwHelperTestXeHP, givenSteppingCWhenCheckingSipWAThenFalseIsReturned) {
     HardwareInfo hwInfo = *defaultHwInfo;
     auto renderCoreFamily = defaultHwInfo->platform.eRenderCoreFamily;
+    auto productFamily = defaultHwInfo->platform.eProductFamily;
 
     auto &helper = HwHelper::get(renderCoreFamily);
+    const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
 
-    hwInfo.platform.usRevId = helper.getHwRevIdFromStepping(REVISION_C, hwInfo);
+    hwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_C, hwInfo);
     EXPECT_FALSE(helper.isSipWANeeded(hwInfo));
 }

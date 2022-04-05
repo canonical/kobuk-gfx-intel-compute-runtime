@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_container/command_encoder.h"
+#include "shared/source/command_container/implicit_scaling.h"
 #include "shared/source/device/device.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/execution_environment/root_device_environment.h"
@@ -19,7 +20,6 @@
 #include "opencl/source/helpers/surface_formats.h"
 #include "opencl/source/mem_obj/buffer.h"
 
-#include "buffer_ext.inl"
 #include "hw_cmds.h"
 
 namespace NEO {
@@ -39,11 +39,22 @@ void BufferHw<GfxFamily>::setArgStateful(void *memory, bool forceNonAuxMode, boo
     auto rootDeviceIndex = device.getRootDeviceIndex();
     auto graphicsAllocation = multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex);
     const auto isReadOnly = isValueSet(getFlags(), CL_MEM_READ_ONLY) || isReadOnlyArgument;
-    EncodeSurfaceState<GfxFamily>::encodeBuffer(memory, getBufferAddress(rootDeviceIndex),
-                                                getSurfaceSize(alignSizeForAuxTranslation, rootDeviceIndex),
-                                                getMocsValue(disableL3, isReadOnly, rootDeviceIndex),
-                                                true, forceNonAuxMode, isReadOnly, device.getNumAvailableDevices(),
-                                                graphicsAllocation, device.getGmmHelper(), useGlobalAtomics, areMultipleSubDevicesInContext);
-    appendSurfaceStateExt(memory);
+
+    NEO::EncodeSurfaceStateArgs args;
+    args.outMemory = memory;
+    args.graphicsAddress = getBufferAddress(rootDeviceIndex);
+    args.size = getSurfaceSize(alignSizeForAuxTranslation, rootDeviceIndex);
+    args.mocs = getMocsValue(disableL3, isReadOnly, rootDeviceIndex);
+    args.cpuCoherent = true;
+    args.forceNonAuxMode = forceNonAuxMode;
+    args.isReadOnly = isReadOnly;
+    args.numAvailableDevices = device.getNumGenericSubDevices();
+    args.allocation = graphicsAllocation;
+    args.gmmHelper = device.getGmmHelper();
+    args.useGlobalAtomics = useGlobalAtomics;
+    args.areMultipleSubDevicesInContext = areMultipleSubDevicesInContext;
+    args.implicitScaling = ImplicitScalingHelper::isImplicitScalingEnabled(device.getDeviceBitfield(), true);
+    appendSurfaceStateArgs(args);
+    EncodeSurfaceState<GfxFamily>::encodeBuffer(args);
 }
 } // namespace NEO

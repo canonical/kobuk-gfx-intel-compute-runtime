@@ -8,9 +8,8 @@
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/direct_submission/dispatchers/blitter_dispatcher.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
+#include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/direct_submission/dispatchers/dispatcher_fixture.h"
-
-#include "test.h"
 
 using namespace NEO;
 
@@ -37,7 +36,7 @@ HWTEST_F(BlitterDispatcheTest, givenBlitterWhenDispatchingMonitorFenceCmdThenDis
 
     uint64_t expectedGpuAddress = 0x5100ull;
     uint64_t expectedValue = 0x1234ull;
-    BlitterDispatcher<FamilyType>::dispatchMonitorFence(cmdBuffer, expectedGpuAddress, expectedValue, pDevice->getHardwareInfo(), false);
+    BlitterDispatcher<FamilyType>::dispatchMonitorFence(cmdBuffer, expectedGpuAddress, expectedValue, pDevice->getHardwareInfo(), false, false);
 
     EXPECT_EQ(expectedSize, cmdBuffer.getUsed());
 
@@ -78,7 +77,7 @@ HWTEST_F(BlitterDispatcheTest, givenBlitterWhenDispatchingTlbFlushThenDispatchMi
     using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
     size_t expectedSize = EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
 
-    BlitterDispatcher<FamilyType>::dispatchTlbFlush(cmdBuffer, 0ull);
+    BlitterDispatcher<FamilyType>::dispatchTlbFlush(cmdBuffer, 0ull, *defaultHwInfo);
 
     EXPECT_EQ(expectedSize, cmdBuffer.getUsed());
 
@@ -90,4 +89,8 @@ HWTEST_F(BlitterDispatcheTest, givenBlitterWhenDispatchingTlbFlushThenDispatchMi
     EXPECT_EQ(miFlushDw->getPostSyncOperation(), MI_FLUSH_DW::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA_QWORD);
 
     EXPECT_EQ(BlitterDispatcher<FamilyType>::getSizeTlbFlush(), EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite());
+}
+
+HWTEST_F(BlitterDispatcheTest, givenBlitterWhenCheckingForMultiTileSynchronizationSupportThenExpectFalse) {
+    EXPECT_FALSE(BlitterDispatcher<FamilyType>::isMultiTileSynchronizationSupported());
 }

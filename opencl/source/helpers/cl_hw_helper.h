@@ -7,9 +7,10 @@
 
 #pragma once
 
+#include "shared/source/helpers/definitions/engine_group_types.h"
+
 #include "opencl/extensions/public/cl_ext_private.h"
 
-#include "engine_group_types.h"
 #include "igfxfmid.h"
 
 #include <string>
@@ -30,7 +31,7 @@ class ClHwHelper {
 
     virtual bool requiresNonAuxMode(const ArgDescPointer &argAsPtr, const HardwareInfo &hwInfo) const = 0;
     virtual bool requiresAuxResolves(const KernelInfo &kernelInfo, const HardwareInfo &hwInfo) const = 0;
-    virtual bool allowRenderCompressionForContext(const ClDevice &clDevice, const Context &context) const = 0;
+    virtual bool allowCompressionForContext(const ClDevice &clDevice, const Context &context) const = 0;
     virtual cl_command_queue_capabilities_intel getAdditionalDisabledQueueFamilyCapabilities(EngineGroupType type) const = 0;
     virtual bool getQueueFamilyName(std::string &name, EngineGroupType type) const = 0;
     virtual cl_ulong getKernelPrivateMemSize(const KernelInfo &kernelInfo) const = 0;
@@ -39,6 +40,8 @@ class ClHwHelper {
     virtual std::vector<uint32_t> getSupportedThreadArbitrationPolicies() const = 0;
     virtual cl_version getDeviceIpVersion(const HardwareInfo &hwInfo) const = 0;
     virtual cl_device_feature_capabilities_intel getSupportedDeviceFeatureCapabilities() const = 0;
+    virtual bool allowImageCompression(cl_image_format format) const = 0;
+    virtual bool isFormatRedescribable(cl_image_format format) const = 0;
 
   protected:
     virtual bool hasStatelessAccessToBuffer(const KernelInfo &kernelInfo) const = 0;
@@ -59,7 +62,7 @@ class ClHwHelperHw : public ClHwHelper {
 
     bool requiresNonAuxMode(const ArgDescPointer &argAsPtr, const HardwareInfo &hwInfo) const override;
     bool requiresAuxResolves(const KernelInfo &kernelInfo, const HardwareInfo &hwInfo) const override;
-    bool allowRenderCompressionForContext(const ClDevice &clDevice, const Context &context) const override;
+    bool allowCompressionForContext(const ClDevice &clDevice, const Context &context) const override;
     cl_command_queue_capabilities_intel getAdditionalDisabledQueueFamilyCapabilities(EngineGroupType type) const override;
     bool getQueueFamilyName(std::string &name, EngineGroupType type) const override;
     cl_ulong getKernelPrivateMemSize(const KernelInfo &kernelInfo) const override;
@@ -68,10 +71,14 @@ class ClHwHelperHw : public ClHwHelper {
     std::vector<uint32_t> getSupportedThreadArbitrationPolicies() const override;
     cl_version getDeviceIpVersion(const HardwareInfo &hwInfo) const override;
     cl_device_feature_capabilities_intel getSupportedDeviceFeatureCapabilities() const override;
+    bool allowImageCompression(cl_image_format format) const override;
+    bool isFormatRedescribable(cl_image_format format) const override;
 
   protected:
     bool hasStatelessAccessToBuffer(const KernelInfo &kernelInfo) const override;
     ClHwHelperHw() = default;
 };
+
+extern ClHwHelper *clHwHelperFactory[IGFX_MAX_CORE];
 
 } // namespace NEO

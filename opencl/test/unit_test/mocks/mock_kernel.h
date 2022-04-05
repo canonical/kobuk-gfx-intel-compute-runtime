@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,17 +11,15 @@
 #include "shared/source/helpers/string.h"
 #include "shared/source/kernel/grf_config.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_kernel_info.h"
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/source/kernel/kernel_objects_for_aux_translation.h"
 #include "opencl/source/kernel/multi_device_kernel.h"
 #include "opencl/source/platform/platform.h"
-#include "opencl/source/program/block_kernel_manager.h"
-#include "opencl/source/scheduler/scheduler_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_kernel_info.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 
 #include <cassert>
@@ -35,7 +33,6 @@ struct MockKernelObjForAuxTranslation : public KernelObjForAuxTranslation {
     MockKernelObjForAuxTranslation(Type type) : KernelObjForAuxTranslation(type, nullptr) {
         if (type == KernelObjForAuxTranslation::Type::MEM_OBJ) {
             mockBuffer.reset(new MockBuffer);
-            mockBuffer->getGraphicsAllocation(0)->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
             this->object = mockBuffer.get();
         } else {
             DEBUG_BREAK_IF(type != KernelObjForAuxTranslation::Type::GFX_ALLOC);
@@ -107,8 +104,8 @@ class MockKernel : public Kernel {
     using Kernel::getDevice;
     using Kernel::getHardwareInfo;
     using Kernel::hasDirectStatelessAccessToHostMemory;
+    using Kernel::hasDirectStatelessAccessToSharedBuffer;
     using Kernel::hasIndirectStatelessAccessToHostMemory;
-    using Kernel::isSchedulerKernel;
     using Kernel::kernelArgHandlers;
     using Kernel::kernelArgRequiresCacheFlush;
     using Kernel::kernelArguments;
@@ -123,6 +120,7 @@ class MockKernel : public Kernel {
     using Kernel::parentEventOffset;
     using Kernel::patchBufferOffset;
     using Kernel::patchWithImplicitSurface;
+    using Kernel::pImplicitArgs;
     using Kernel::preferredWkgMultipleOffset;
     using Kernel::privateSurface;
     using Kernel::singleSubdevicePreferredInCurrentEnqueue;
@@ -133,55 +131,8 @@ class MockKernel : public Kernel {
     using Kernel::slmSizes;
     using Kernel::slmTotalSize;
 
-    struct BlockPatchValues {
-        uint64_t offset;
-        uint32_t size;
-        uint64_t address;
-    };
-
-    class ReflectionSurfaceHelperPublic : public Kernel::ReflectionSurfaceHelper {
-      public:
-        static BlockPatchValues devQueue;
-        static BlockPatchValues defaultQueue;
-        static BlockPatchValues eventPool;
-        static BlockPatchValues printfBuffer;
-        static const uint64_t undefinedOffset = (uint64_t)-1;
-
-        static void patchBlocksCurbeMock(void *reflectionSurface, uint32_t blockID,
-                                         uint64_t defaultDeviceQueueCurbeOffset, uint32_t patchSizeDefaultQueue, uint64_t defaultDeviceQueueGpuAddress,
-                                         uint64_t eventPoolCurbeOffset, uint32_t patchSizeEventPool, uint64_t eventPoolGpuAddress,
-                                         uint64_t deviceQueueCurbeOffset, uint32_t patchSizeDeviceQueue, uint64_t deviceQueueGpuAddress,
-                                         uint64_t printfBufferOffset, uint32_t patchSizePrintfBuffer, uint64_t printfBufferGpuAddress) {
-            defaultQueue.address = defaultDeviceQueueGpuAddress;
-            defaultQueue.offset = defaultDeviceQueueCurbeOffset;
-            defaultQueue.size = patchSizeDefaultQueue;
-
-            devQueue.address = deviceQueueGpuAddress;
-            devQueue.offset = deviceQueueCurbeOffset;
-            devQueue.size = patchSizeDeviceQueue;
-
-            eventPool.address = eventPoolGpuAddress;
-            eventPool.offset = eventPoolCurbeOffset;
-            eventPool.size = patchSizeEventPool;
-
-            printfBuffer.address = printfBufferGpuAddress;
-            printfBuffer.offset = printfBufferOffset;
-            printfBuffer.size = patchSizePrintfBuffer;
-        }
-
-        static uint32_t getConstantBufferOffset(void *reflectionSurface, uint32_t blockID) {
-            IGIL_KernelDataHeader *pKernelHeader = reinterpret_cast<IGIL_KernelDataHeader *>(reflectionSurface);
-            assert(blockID < pKernelHeader->m_numberOfKernels);
-
-            IGIL_KernelAddressData *addressData = pKernelHeader->m_data;
-            assert(addressData[blockID].m_ConstantBufferOffset != 0);
-
-            return addressData[blockID].m_ConstantBufferOffset;
-        }
-    };
-
-    MockKernel(Program *programArg, const KernelInfo &kernelInfoArg, ClDevice &clDeviceArg, bool scheduler = false)
-        : Kernel(programArg, kernelInfoArg, clDeviceArg, scheduler) {
+    MockKernel(Program *programArg, const KernelInfo &kernelInfoArg, ClDevice &clDeviceArg)
+        : Kernel(programArg, kernelInfoArg, clDeviceArg) {
     }
 
     ~MockKernel() override {
@@ -206,7 +157,6 @@ class MockKernel : public Kernel {
         const size_t crossThreadSize = 160;
 
         info->setLocalIds({0, 0, 0});
-        info->kernelDescriptor.kernelAttributes.flags.usesDeviceSideEnqueue = false;
         info->kernelDescriptor.kernelAttributes.numGrfRequired = grfNumber;
         info->kernelDescriptor.kernelAttributes.simdSize = 32;
 
@@ -295,8 +245,11 @@ class MockKernel : public Kernel {
 
     bool requiresCacheFlushCommand(const CommandQueue &commandQueue) const override;
 
+    cl_int setArgSvmAlloc(uint32_t argIndex, void *svmPtr, GraphicsAllocation *svmAlloc, uint32_t allocId) override;
+
     uint32_t makeResidentCalls = 0;
     uint32_t getResidencyCalls = 0;
+    uint32_t setArgSvmAllocCalls = 0;
 
     bool canKernelTransformImages = true;
     bool isPatchedOverride = true;
@@ -410,138 +363,6 @@ class MockKernelWithInternals {
     char dshLocal[128];
     std::vector<Kernel::SimpleKernelArgInfo> defaultKernelArguments;
 };
-
-class MockParentKernel : public Kernel {
-  public:
-    using Kernel::auxTranslationRequired;
-    using Kernel::kernelInfo;
-    using Kernel::patchBlocksCurbeWithConstantValues;
-    using Kernel::pSshLocal;
-    using Kernel::sshLocalSize;
-
-    static MockParentKernel *create(Context &context, bool addChildSimdSize = false, bool addChildGlobalMemory = false, bool addChildConstantMemory = false, bool addPrintfForParent = true, bool addPrintfForBlock = true) {
-        auto clDevice = context.getDevice(0);
-
-        auto info = new MockKernelInfo();
-        const size_t crossThreadSize = 160;
-        uint32_t crossThreadOffset = 0;
-        uint32_t crossThreadOffsetBlock = 0;
-
-        info->setLocalIds({0, 0, 0});
-
-        info->kernelDescriptor.kernelAttributes.bufferAddressingMode = KernelDescriptor::Stateless;
-        info->kernelDescriptor.kernelAttributes.flags.usesDeviceSideEnqueue = true;
-        info->kernelDescriptor.kernelAttributes.numGrfRequired = GrfConfig::DefaultGrfNumber;
-        info->kernelDescriptor.kernelAttributes.simdSize = 32;
-
-        info->setDeviceSideEnqueueDefaultQueueSurface(8, crossThreadOffset);
-        crossThreadOffset += 8;
-
-        info->setDeviceSideEnqueueEventPoolSurface(8, crossThreadOffset);
-        crossThreadOffset += 8;
-
-        if (addPrintfForParent) {
-            info->setPrintfSurface(8, crossThreadOffset);
-            crossThreadOffset += 8;
-        }
-
-        ClDeviceVector deviceVector;
-        deviceVector.push_back(clDevice);
-        MockProgram *mockProgram = new MockProgram(&context, false, deviceVector);
-
-        if (addChildSimdSize) {
-            info->childrenKernelsIdOffset.push_back({0, crossThreadOffset});
-        }
-
-        UNRECOVERABLE_IF(crossThreadSize < crossThreadOffset + 8);
-        info->crossThreadData = new char[crossThreadSize];
-
-        auto parent = new MockParentKernel(mockProgram, *info);
-        parent->crossThreadData = new char[crossThreadSize];
-        memset(parent->crossThreadData, 0, crossThreadSize);
-        parent->crossThreadDataSize = crossThreadSize;
-        parent->mockKernelInfo = info;
-
-        auto infoBlock = new MockKernelInfo();
-
-        infoBlock->kernelDescriptor.kernelAttributes.bufferAddressingMode = KernelDescriptor::Stateless;
-
-        infoBlock->setDeviceSideEnqueueDefaultQueueSurface(8, crossThreadOffsetBlock);
-        crossThreadOffsetBlock += 8;
-
-        infoBlock->setDeviceSideEnqueueEventPoolSurface(8, crossThreadOffset);
-        crossThreadOffsetBlock += 8;
-
-        if (addPrintfForBlock) {
-            infoBlock->setPrintfSurface(8, crossThreadOffsetBlock);
-            crossThreadOffsetBlock += 8;
-        }
-
-        if (addChildGlobalMemory) {
-            infoBlock->setGlobalVariablesSurface(8, crossThreadOffsetBlock);
-            crossThreadOffsetBlock += 8;
-        }
-
-        if (addChildConstantMemory) {
-            infoBlock->setGlobalConstantsSurface(8, crossThreadOffsetBlock);
-            crossThreadOffsetBlock += 8;
-        }
-
-        infoBlock->setLocalIds({0, 0, 0});
-
-        infoBlock->kernelDescriptor.kernelAttributes.flags.usesDeviceSideEnqueue = true;
-        infoBlock->kernelDescriptor.kernelAttributes.numGrfRequired = GrfConfig::DefaultGrfNumber;
-        infoBlock->kernelDescriptor.kernelAttributes.simdSize = 32;
-
-        infoBlock->setDeviceSideEnqueueBlockInterfaceDescriptorOffset(0);
-
-        infoBlock->heapInfo.pDsh = (void *)new uint64_t[64];
-        infoBlock->heapInfo.DynamicStateHeapSize = 64 * sizeof(uint64_t);
-
-        size_t crossThreadDataSize = crossThreadOffsetBlock > crossThreadSize ? crossThreadOffsetBlock : crossThreadSize;
-        infoBlock->crossThreadData = new char[crossThreadDataSize];
-        infoBlock->setCrossThreadDataSize(static_cast<uint16_t>(crossThreadDataSize));
-
-        mockProgram->blockKernelManager->addBlockKernelInfo(infoBlock);
-        parent->mockProgram = mockProgram;
-
-        return parent;
-    }
-
-    MockParentKernel(Program *programArg, const KernelInfo &kernelInfoArg) : Kernel(programArg, kernelInfoArg, *programArg->getDevices()[0], false) {
-    }
-
-    ~MockParentKernel() override {
-        delete &kernelInfo;
-        BlockKernelManager *blockManager = program->getBlockKernelManager();
-
-        for (uint32_t i = 0; i < blockManager->getCount(); i++) {
-            const KernelInfo *blockInfo = blockManager->getBlockKernelInfo(i);
-            delete[](uint64_t *) blockInfo->heapInfo.pDsh;
-        }
-
-        if (mockProgram) {
-            mockProgram->decRefInternal();
-        }
-    }
-
-    Context *getContext() {
-        return &mockProgram->getContext();
-    }
-
-    void setReflectionSurface(GraphicsAllocation *reflectionSurface) {
-        kernelReflectionSurface = reflectionSurface;
-    }
-
-    MockProgram *mockProgram;
-    KernelInfo *mockKernelInfo = nullptr;
-};
-
-class MockSchedulerKernel : public SchedulerKernel {
-  public:
-    MockSchedulerKernel(Program *programArg, const KernelInfo &kernelInfoArg, ClDevice &clDeviceArg) : SchedulerKernel(programArg, kernelInfoArg, clDeviceArg){};
-};
-
 class MockDebugKernel : public MockKernel {
   public:
     MockDebugKernel(Program *program, const KernelInfo &kernelInfo, ClDevice &clDeviceArg) : MockKernel(program, kernelInfo, clDeviceArg) {

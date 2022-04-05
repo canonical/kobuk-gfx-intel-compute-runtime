@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,21 +10,24 @@
 #include "shared/source/command_stream/csr_definitions.h"
 #include "shared/source/command_stream/csr_properties_flags.h"
 #include "shared/source/command_stream/linear_stream.h"
+#include "shared/source/command_stream/stream_properties.h"
+#include "shared/source/command_stream/submission_status.h"
 #include "shared/source/command_stream/submissions_aggregator.h"
 #include "shared/source/command_stream/thread_arbitration_policy.h"
+#include "shared/source/command_stream/wait_status.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/blit_commands_helper.h"
 #include "shared/source/helpers/common_types.h"
 #include "shared/source/helpers/completion_stamp.h"
 #include "shared/source/helpers/flat_batch_buffer_helper.h"
 #include "shared/source/helpers/options.h"
+#include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
 #include "shared/source/kernel/grf_config.h"
 #include "shared/source/os_interface/os_thread.h"
 #include "shared/source/utilities/spinlock.h"
 
-#include "pipe_control_args.h"
-
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 
@@ -76,14 +79,15 @@ class CommandStreamReceiver {
                           const DeviceBitfield deviceBitfield);
     virtual ~CommandStreamReceiver();
 
-    virtual bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) = 0;
+    virtual SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) = 0;
 
     virtual CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
                                       const IndirectHeap &dsh, const IndirectHeap &ioh, const IndirectHeap &ssh,
                                       uint32_t taskLevel, DispatchFlags &dispatchFlags, Device &device) = 0;
 
     virtual bool flushBatchedSubmissions() = 0;
-    bool submitBatchBuffer(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency);
+    MOCKABLE_VIRTUAL SubmissionStatus submitBatchBuffer(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency);
+    virtual void pollForCompletion() {}
     virtual void programHardwareContext(LinearStream &cmdStream) = 0;
     virtual size_t getCmdsSizeForHardwareContext() const = 0;
 
@@ -103,10 +107,11 @@ class CommandStreamReceiver {
     ResidencyContainer &getEvictionAllocations();
 
     virtual GmmPageTableMngr *createPageTableManager() { return nullptr; }
-    bool needsPageTableManager(aub_stream::EngineType engineType) const;
+    bool needsPageTableManager() const;
 
-    void waitForTaskCountAndCleanAllocationList(uint32_t requiredTaskCount, uint32_t allocationUsage);
-    MOCKABLE_VIRTUAL void waitForTaskCountAndCleanTemporaryAllocationList(uint32_t requiredTaskCount);
+    MOCKABLE_VIRTUAL WaitStatus waitForTaskCount(uint32_t requiredTaskCount);
+    WaitStatus waitForTaskCountAndCleanAllocationList(uint32_t requiredTaskCount, uint32_t allocationUsage);
+    MOCKABLE_VIRTUAL WaitStatus waitForTaskCountAndCleanTemporaryAllocationList(uint32_t requiredTaskCount);
 
     LinearStream &getCS(size_t minRequiredSize = 1024u);
     OSInterface *getOSInterface() const;
@@ -120,7 +125,7 @@ class CommandStreamReceiver {
         return tagsMultiAllocation;
     }
     MultiGraphicsAllocation &createTagsMultiAllocation();
-    MOCKABLE_VIRTUAL volatile uint32_t *getTagAddress() const { return tagAddress; }
+    volatile uint32_t *getTagAddress() const { return tagAddress; }
     uint64_t getDebugPauseStateGPUAddress() const { return tagAllocation->getGpuAddress() + debugPauseStateAddressOffset; }
 
     virtual bool waitForFlushStamp(FlushStamp &flushStampToWait) { return true; };
@@ -152,11 +157,13 @@ class CommandStreamReceiver {
     GraphicsAllocation *getGlobalFenceAllocation() const { return globalFenceAllocation; }
     GraphicsAllocation *getWorkPartitionAllocation() const { return workPartitionAllocation; }
 
-    void requestStallingPipeControlOnNextFlush() { stallingPipeControlOnNextFlushRequired = true; }
-    bool isStallingPipeControlOnNextFlushRequired() const { return stallingPipeControlOnNextFlushRequired; }
+    void requestStallingCommandsOnNextFlush() { stallingCommandsOnNextFlushRequired = true; }
+    bool isStallingCommandsOnNextFlushRequired() const { return stallingCommandsOnNextFlushRequired; }
 
-    virtual void waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) = 0;
-    virtual bool waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait);
+    virtual WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) = 0;
+    virtual WaitStatus waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait);
+    WaitStatus baseWaitFunction(volatile uint32_t *pollAddress, bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait);
+    MOCKABLE_VIRTUAL bool testTaskCountReady(volatile uint32_t *pollAddress, uint32_t taskCountToWait);
     virtual void downloadAllocations(){};
 
     void setSamplerCacheFlushRequired(SamplerCacheFlushState value) { this->samplerCacheFlushRequired = value; }
@@ -165,7 +172,7 @@ class CommandStreamReceiver {
     void overwriteFlatBatchBufferHelper(FlatBatchBufferHelper *newHelper) { flatBatchBufferHelper.reset(newHelper); }
 
     MOCKABLE_VIRTUAL void initProgrammingFlags();
-    virtual AubSubCaptureStatus checkAndActivateAubSubCapture(const MultiDispatchInfo &dispatchInfo);
+    virtual AubSubCaptureStatus checkAndActivateAubSubCapture(const std::string &kernelName);
     void programForAubSubCapture(bool wasActiveInPreviousEnqueue, bool isActive);
     virtual void addAubComment(const char *comment);
 
@@ -185,7 +192,11 @@ class CommandStreamReceiver {
 
     bool peekTimestampPacketWriteEnabled() const { return timestampPacketWriteEnabled; }
 
-    size_t defaultSshSize;
+    bool isLatestTaskCountFlushed() {
+        return this->peekLatestFlushedTaskCount() == this->peekTaskCount();
+    }
+
+    size_t defaultSshSize = 0u;
     bool canUse4GbHeaps = true;
 
     AllocationsList &getTemporaryAllocations();
@@ -209,16 +220,22 @@ class CommandStreamReceiver {
     void setLatestSentTaskCount(uint32_t latestSentTaskCount) {
         this->latestSentTaskCount = latestSentTaskCount;
     }
+    void setLatestFlushedTaskCount(uint32_t latestFlushedTaskCount) {
+        this->latestFlushedTaskCount = latestFlushedTaskCount;
+    }
 
-    virtual uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) = 0;
+    virtual uint32_t flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) = 0;
 
     virtual void flushTagUpdate() = 0;
     virtual void flushNonKernelTask(GraphicsAllocation *eventAlloc, uint64_t immediateGpuAddress, uint64_t immediateData, PipeControlArgs &args, bool isWaitOnEvents, bool isStartOfDispatch, bool isEndOfDispatch) = 0;
     virtual void updateTagFromWait() = 0;
+    virtual bool isUpdateTagFromWaitEnabled() = 0;
 
     ScratchSpaceController *getScratchSpaceController() const {
         return scratchSpaceController.get();
     }
+
+    virtual void downloadAllocation(GraphicsAllocation &gfxAllocation){};
 
     void registerInstructionCacheFlush() {
         auto mutex = obtainUniqueOwnership();
@@ -228,6 +245,12 @@ class CommandStreamReceiver {
     bool isLocalMemoryEnabled() const { return localMemoryEnabled; }
 
     uint32_t getRootDeviceIndex() { return rootDeviceIndex; }
+
+    void startControllingDirectSubmissions();
+
+    bool isAnyDirectSubmissionEnabled() {
+        return this->isDirectSubmissionEnabled() || isBlitterDirectSubmissionEnabled();
+    }
 
     virtual bool initDirectSubmission(Device &device, OsContext &osContext) {
         return true;
@@ -241,13 +264,15 @@ class CommandStreamReceiver {
         return false;
     }
 
+    virtual void stopDirectSubmission() {}
+
     bool isStaticWorkPartitioningEnabled() const {
         return staticWorkPartitioningEnabled;
     }
 
     uint64_t getWorkPartitionAllocationGpuAddress() const;
 
-    bool isRcs() const;
+    MOCKABLE_VIRTUAL bool isRcs() const;
 
     virtual void initializeDefaultsForInternalEngine(){};
 
@@ -259,11 +284,47 @@ class CommandStreamReceiver {
         return useNotifyEnableForPostSync;
     }
 
+    NEO::StreamProperties &getStreamProperties() {
+        return this->streamProperties;
+    }
+
+    inline void setActivePartitions(uint32_t newPartitionCount) {
+        activePartitions = newPartitionCount;
+    }
+
+    inline uint32_t getActivePartitions() const {
+        return activePartitions;
+    }
+
+    bool skipResourceCleanup() const;
+
+    inline bool isProgramActivePartitionConfigRequired() const {
+        return this->isDirectSubmissionEnabled() ? false : this->activePartitionsConfig != this->activePartitions;
+    }
+
+    std::unique_ptr<GmmPageTableMngr> pageTableManager;
+
+    inline uint32_t getPostSyncWriteOffset() const {
+        return postSyncWriteOffset;
+    }
+
+    inline bool isMultiTileOperationEnabled() const {
+        return (activePartitions > 1) && staticWorkPartitioningEnabled;
+    }
+
+    virtual void programComputeBarrierCommand(LinearStream &cmdStream) = 0;
+    virtual size_t getCmdsSizeForComputeBarrierCommand() const = 0;
+
+    const HardwareInfo &peekHwInfo() const;
+
+    MOCKABLE_VIRTUAL bool isGpuHangDetected() const;
+
   protected:
     void cleanupResources();
     void printDeviceIndex();
     void checkForNewResources(uint32_t submittedTaskCount, uint32_t allocationTaskCount, GraphicsAllocation &gfxAllocation);
     bool checkImplicitFlushForGpuIdle();
+    MOCKABLE_VIRTUAL std::unique_lock<MutexType> obtainHostPtrSurfaceCreationLock();
 
     std::unique_ptr<FlushStampTracker> flushStamp;
     std::unique_ptr<SubmissionAggregator> submissionAggregator;
@@ -280,16 +341,18 @@ class CommandStreamReceiver {
     ResidencyContainer residencyAllocations;
     ResidencyContainer evictionAllocations;
     MutexType ownershipMutex;
+    MutexType hostPtrSurfaceCreationMutex;
     ExecutionEnvironment &executionEnvironment;
 
     LinearStream commandStream;
+    StreamProperties streamProperties{};
 
-    // offset for debug state must be 8 bytes, if only 4 bytes are used tag writes overwrite it
-    const uint64_t debugPauseStateAddressOffset = 8;
+    // offset for debug state is 1kbyte, tag writes can use multiple offsets for multiple partitions and each offset can vary per platform
+    const uint64_t debugPauseStateAddressOffset = MemoryConstants::kiloByte;
     uint64_t totalMemoryUsed = 0u;
 
     volatile uint32_t *tagAddress = nullptr;
-    volatile DebugPauseState *debugPauseStateAddress;
+    volatile DebugPauseState *debugPauseStateAddress = nullptr;
     SpinLock debugPauseStateLock;
     static void *asyncDebugBreakConfirmation(void *arg);
     std::function<void()> debugConfirmationFunction = []() { std::cin.get(); };
@@ -304,7 +367,7 @@ class CommandStreamReceiver {
 
     MultiGraphicsAllocation *tagsMultiAllocation = nullptr;
 
-    IndirectHeap *indirectHeap[IndirectHeap::NUM_TYPES];
+    IndirectHeap *indirectHeap[IndirectHeap::Type::NUM_TYPES];
     OsContext *osContext = nullptr;
 
     // current taskLevel.  Used for determining if a PIPE_CONTROL is needed.
@@ -318,11 +381,9 @@ class CommandStreamReceiver {
     SamplerCacheFlushState samplerCacheFlushRequired = SamplerCacheFlushState::samplerCacheFlushNotRequired;
     PreemptionMode lastPreemptionMode = PreemptionMode::Initial;
 
+    std::chrono::microseconds gpuHangCheckPeriod{500'000};
     uint32_t lastSentL3Config = 0;
     uint32_t latestSentStatelessMocsConfig = 0;
-    uint32_t lastSentNumGrfRequired = GrfConfig::DefaultGrfNumber;
-    uint32_t requiredThreadArbitrationPolicy = ThreadArbitrationPolicy::RoundRobin;
-    uint32_t lastSentThreadArbitrationPolicy = ThreadArbitrationPolicy::NotPresent;
     uint64_t lastSentSliceCount = QueueSliceCount::defaultSliceCount;
 
     uint32_t requiredScratchSize = 0;
@@ -330,11 +391,13 @@ class CommandStreamReceiver {
     uint32_t lastAdditionalKernelExecInfo = AdditionalKernelExecInfo::NotSet;
     KernelExecutionType lastKernelExecutionType = KernelExecutionType::Default;
     MemoryCompressionState lastMemoryCompressionState = MemoryCompressionState::NotApplicable;
+    uint32_t activePartitions = 1;
+    uint32_t activePartitionsConfig = 1;
+    uint32_t postSyncWriteOffset = 0;
 
     const uint32_t rootDeviceIndex;
     const DeviceBitfield deviceBitfield;
 
-    int8_t lastSentCoherencyRequest = -1;
     int8_t lastMediaSamplerConfig = -1;
 
     bool isPreambleSent = false;
@@ -346,7 +409,7 @@ class CommandStreamReceiver {
     bool bindingTableBaseAddressRequired = false;
     bool mediaVfeStateDirty = true;
     bool lastVmeSubslicesConfig = false;
-    bool stallingPipeControlOnNextFlushRequired = false;
+    bool stallingCommandsOnNextFlushRequired = false;
     bool timestampPacketWriteEnabled = false;
     bool staticWorkPartitioningEnabled = false;
     bool nTo1SubmissionModelEnabled = false;

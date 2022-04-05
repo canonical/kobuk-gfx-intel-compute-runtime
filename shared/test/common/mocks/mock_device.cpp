@@ -11,11 +11,10 @@
 #include "shared/source/command_stream/preemption.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/mocks/mock_ostime.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/unit_test/tests_configuration.h"
-
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
-#include "opencl/test/unit_test/mocks/mock_ostime.h"
 
 using namespace NEO;
 
@@ -30,14 +29,13 @@ MockDevice::MockDevice()
     CommandStreamReceiver *commandStreamReceiver = createCommandStream(*executionEnvironment, this->getRootDeviceIndex(), this->getDeviceBitfield());
     commandStreamReceivers.resize(1);
     commandStreamReceivers[0].reset(commandStreamReceiver);
-    OsContext *osContext = getMemoryManager()->createAndRegisterOsContext(commandStreamReceiver,
-                                                                          EngineTypeUsage{aub_stream::ENGINE_CCS, EngineUsage::Regular},
-                                                                          this->getDeviceBitfield(),
-                                                                          PreemptionMode::Disabled, true);
+
+    EngineDescriptor engineDescriptor = {EngineTypeUsage{aub_stream::ENGINE_CCS, EngineUsage::Regular}, this->getDeviceBitfield(), PreemptionMode::Disabled, true, false};
+
+    OsContext *osContext = getMemoryManager()->createAndRegisterOsContext(commandStreamReceiver, engineDescriptor);
     commandStreamReceiver->setupContext(*osContext);
-    this->engines.resize(1);
-    this->engines[0] = {commandStreamReceiver, osContext};
-    this->engineGroups.resize(static_cast<uint32_t>(EngineGroupType::MaxEngineGroups));
+    this->allEngines.resize(1);
+    this->allEngines[0] = {commandStreamReceiver, osContext};
     initializeCaps();
 }
 
@@ -48,8 +46,10 @@ const char *MockDevice::getProductAbbrev() const {
 MockDevice::MockDevice(ExecutionEnvironment *executionEnvironment, uint32_t rootDeviceIndex)
     : RootDevice(executionEnvironment, rootDeviceIndex) {
     UltDeviceFactory::initializeMemoryManager(*executionEnvironment);
-    this->osTime = MockOSTime::create();
-    this->engineGroups.resize(static_cast<uint32_t>(EngineGroupType::MaxEngineGroups));
+
+    if (!getOSTime()) {
+        getRootDeviceEnvironmentRef().osTime = MockOSTime::create();
+    }
     auto &hwInfo = getHardwareInfo();
     executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->setHwInfo(&hwInfo);
     initializeCaps();
@@ -64,8 +64,8 @@ bool MockDevice::createDeviceImpl() {
 }
 
 void MockDevice::setOSTime(OSTime *osTime) {
-    this->osTime.reset(osTime);
-};
+    getRootDeviceEnvironmentRef().osTime.reset(osTime);
+}
 
 void MockDevice::injectMemoryManager(MemoryManager *memoryManager) {
     executionEnvironment->memoryManager.reset(memoryManager);
@@ -77,12 +77,12 @@ void MockDevice::resetCommandStreamReceiver(CommandStreamReceiver *newCsr) {
 
 void MockDevice::resetCommandStreamReceiver(CommandStreamReceiver *newCsr, uint32_t engineIndex) {
 
-    auto osContext = this->engines[engineIndex].osContext;
+    auto osContext = this->allEngines[engineIndex].osContext;
     auto memoryManager = executionEnvironment->memoryManager.get();
-    auto registeredEngine = *memoryManager->getRegisteredEngineForCsr(engines[engineIndex].commandStreamReceiver);
+    auto registeredEngine = *memoryManager->getRegisteredEngineForCsr(allEngines[engineIndex].commandStreamReceiver);
 
     registeredEngine.commandStreamReceiver = newCsr;
-    engines[engineIndex].commandStreamReceiver = newCsr;
+    allEngines[engineIndex].commandStreamReceiver = newCsr;
     memoryManager->getRegisteredEngines().emplace_back(registeredEngine);
     osContext->incRefInternal();
     newCsr->setupContext(*osContext);

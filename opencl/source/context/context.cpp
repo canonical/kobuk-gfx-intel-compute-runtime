@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -20,14 +20,12 @@
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/command_queue/command_queue.h"
-#include "opencl/source/device_queue/device_queue.h"
 #include "opencl/source/execution_environment/cl_execution_environment.h"
 #include "opencl/source/gtpin/gtpin_notify.h"
 #include "opencl/source/helpers/get_info_status_mapper.h"
 #include "opencl/source/helpers/surface_formats.h"
 #include "opencl/source/mem_obj/image.h"
 #include "opencl/source/platform/platform.h"
-#include "opencl/source/scheduler/scheduler_kernel.h"
 #include "opencl/source/sharings/sharing.h"
 #include "opencl/source/sharings/sharing_factory.h"
 
@@ -44,7 +42,6 @@ Context::Context(
     contextCallback = funcNotify;
     userData = data;
     sharingFunctions.resize(SharingType::MAX_SHARING_VALUE);
-    schedulerBuiltIn = std::make_unique<BuiltInKernel>();
 }
 
 Context::~Context() {
@@ -69,10 +66,6 @@ Context::~Context() {
     for (auto &device : devices) {
         device->decRefInternal();
     }
-    delete static_cast<SchedulerKernel *>(schedulerBuiltIn->pKernel);
-    delete schedulerBuiltIn->pProgram;
-    schedulerBuiltIn->pKernel = nullptr;
-    schedulerBuiltIn->pProgram = nullptr;
 }
 
 cl_int Context::setDestructorCallback(void(CL_CALLBACK *funcNotify)(cl_context, void *),
@@ -82,20 +75,62 @@ cl_int Context::setDestructorCallback(void(CL_CALLBACK *funcNotify)(cl_context, 
     return CL_SUCCESS;
 }
 
+cl_int Context::tryGetExistingHostPtrAllocation(const void *ptr,
+                                                size_t size,
+                                                uint32_t rootDeviceIndex,
+                                                GraphicsAllocation *&allocation,
+                                                InternalMemoryType &memoryType,
+                                                bool &isCpuCopyAllowed) {
+    cl_int retVal = tryGetExistingSvmAllocation(ptr, size, rootDeviceIndex, allocation, memoryType, isCpuCopyAllowed);
+    if (retVal != CL_SUCCESS || allocation != nullptr) {
+        return retVal;
+    }
+
+    retVal = tryGetExistingMapAllocation(ptr, size, allocation);
+    return retVal;
+}
+
+cl_int Context::tryGetExistingSvmAllocation(const void *ptr,
+                                            size_t size,
+                                            uint32_t rootDeviceIndex,
+                                            GraphicsAllocation *&allocation,
+                                            InternalMemoryType &memoryType,
+                                            bool &isCpuCopyAllowed) {
+    if (getSVMAllocsManager()) {
+        SvmAllocationData *svmEntry = getSVMAllocsManager()->getSVMAlloc(ptr);
+        if (svmEntry) {
+            memoryType = svmEntry->memoryType;
+            if ((svmEntry->gpuAllocations.getGraphicsAllocation(rootDeviceIndex)->getGpuAddress() + svmEntry->size) < (castToUint64(ptr) + size)) {
+                return CL_INVALID_OPERATION;
+            }
+            allocation = svmEntry->cpuAllocation ? svmEntry->cpuAllocation : svmEntry->gpuAllocations.getGraphicsAllocation(rootDeviceIndex);
+            if (isCpuCopyAllowed) {
+                if (svmEntry->memoryType == DEVICE_UNIFIED_MEMORY) {
+                    isCpuCopyAllowed = false;
+                }
+            }
+        }
+    }
+    return CL_SUCCESS;
+}
+
+cl_int Context::tryGetExistingMapAllocation(const void *ptr,
+                                            size_t size,
+                                            GraphicsAllocation *&allocation) {
+    if (MapInfo mapInfo = {}; mapOperationsStorage.getInfoForHostPtr(ptr, size, mapInfo)) {
+        if (mapInfo.graphicsAllocation) {
+            allocation = mapInfo.graphicsAllocation;
+        }
+    }
+    return CL_SUCCESS;
+}
+
 const std::set<uint32_t> &Context::getRootDeviceIndices() const {
     return rootDeviceIndices;
 }
 
 uint32_t Context::getMaxRootDeviceIndex() const {
     return maxRootDeviceIndex;
-}
-
-DeviceQueue *Context::getDefaultDeviceQueue() {
-    return defaultDeviceQueue;
-}
-
-void Context::setDefaultDeviceQueue(DeviceQueue *queue) {
-    defaultDeviceQueue = queue;
 }
 
 CommandQueue *Context::getSpecialQueue(uint32_t rootDeviceIndex) {
@@ -181,7 +216,7 @@ bool Context::createImpl(const cl_context_properties *properties,
     bool containsDeviceWithSubdevices = false;
     for (const auto &device : inputDevices) {
         rootDeviceIndices.insert(device->getRootDeviceIndex());
-        containsDeviceWithSubdevices |= device->getNumAvailableDevices() > 1;
+        containsDeviceWithSubdevices |= device->getNumGenericSubDevices() > 1;
     }
 
     this->driverDiagnostics = driverDiagnostics.release();
@@ -364,48 +399,6 @@ cl_int Context::getSupportedImageFormats(
     return CL_SUCCESS;
 }
 
-SchedulerKernel &Context::getSchedulerKernel() {
-    if (schedulerBuiltIn->pKernel) {
-        return *static_cast<SchedulerKernel *>(schedulerBuiltIn->pKernel);
-    }
-
-    auto initializeSchedulerProgramAndKernel = [&] {
-        cl_int retVal = CL_SUCCESS;
-        auto clDevice = getDevice(0);
-        auto src = SchedulerKernel::loadSchedulerKernel(&clDevice->getDevice());
-
-        auto program = Program::createBuiltInFromGenBinary(this,
-                                                           devices,
-                                                           src.resource.data(),
-                                                           src.resource.size(),
-                                                           &retVal);
-        DEBUG_BREAK_IF(retVal != CL_SUCCESS);
-        DEBUG_BREAK_IF(!program);
-
-        retVal = program->processGenBinary(*clDevice);
-        DEBUG_BREAK_IF(retVal != CL_SUCCESS);
-
-        schedulerBuiltIn->pProgram = program;
-
-        auto kernelInfo = schedulerBuiltIn->pProgram->getKernelInfo(SchedulerKernel::schedulerName, clDevice->getRootDeviceIndex());
-        DEBUG_BREAK_IF(!kernelInfo);
-
-        schedulerBuiltIn->pKernel = Kernel::create<SchedulerKernel>(
-            schedulerBuiltIn->pProgram,
-            *kernelInfo,
-            *clDevice,
-            &retVal);
-
-        UNRECOVERABLE_IF(schedulerBuiltIn->pKernel->getScratchSize() != 0);
-
-        DEBUG_BREAK_IF(retVal != CL_SUCCESS);
-    };
-    std::call_once(schedulerBuiltIn->programIsInitialized, initializeSchedulerProgramAndKernel);
-
-    UNRECOVERABLE_IF(schedulerBuiltIn->pKernel == nullptr);
-    return *static_cast<SchedulerKernel *>(schedulerBuiltIn->pKernel);
-}
-
 bool Context::isDeviceAssociated(const ClDevice &clDevice) const {
     for (const auto &pDevice : devices) {
         if (pDevice == &clDevice) {
@@ -472,6 +465,6 @@ Platform *Context::getPlatformFromProperties(const cl_context_properties *proper
 }
 
 bool Context::isSingleDeviceContext() {
-    return devices[0]->getNumAvailableDevices() == 1 && getNumDevices() == 1;
+    return devices[0]->getNumGenericSubDevices() == 0 && getNumDevices() == 1;
 }
 } // namespace NEO

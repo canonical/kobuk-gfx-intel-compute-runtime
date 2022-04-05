@@ -9,7 +9,7 @@
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/flat_batch_buffer_helper_hw.inl"
 #include "shared/source/helpers/hw_helper_base.inl"
-#include "shared/source/helpers/hw_helper_bdw_plus.inl"
+#include "shared/source/helpers/hw_helper_bdw_and_later.inl"
 #include "shared/source/helpers/hw_helper_bdw_to_icllp.inl"
 
 namespace NEO {
@@ -42,11 +42,18 @@ size_t HwHelperHw<Family>::getMaxBarrierRegisterPerSlice() const {
 }
 
 template <>
-void HwHelperHw<Family>::setupHardwareCapabilities(HardwareCapabilities *caps, const HardwareInfo &hwInfo) {
-    caps->image3DMaxHeight = 2048;
-    caps->image3DMaxWidth = 2048;
-    caps->maxMemAllocSize = 2 * MemoryConstants::gigaByte - 8 * MemoryConstants::megaByte;
-    caps->isStatelesToStatefullWithOffsetSupported = false;
+size_t HwHelperHw<Family>::getMax3dImageWidthOrHeight() const {
+    return 2048;
+}
+
+template <>
+uint64_t HwHelperHw<Family>::getMaxMemAllocSize() const {
+    return (2 * MemoryConstants::gigaByte) - (8 * MemoryConstants::kiloByte);
+}
+
+template <>
+bool HwHelperHw<Family>::isStatelesToStatefullWithOffsetSupported() const {
+    return false;
 }
 
 template <>

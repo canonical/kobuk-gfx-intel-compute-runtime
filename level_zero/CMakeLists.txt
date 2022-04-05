@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2020-2021 Intel Corporation
+# Copyright (C) 2020-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -7,7 +7,6 @@
 include(cmake/verify_l0_support.cmake)
 
 if(BUILD_WITH_L0)
-
   set(TARGET_NAME_L0 ze_intel_gpu)
 
   # Level Zero third party detection
@@ -65,14 +64,6 @@ if(BUILD_WITH_L0)
   endif()
 
   if(UNIX)
-    # Xml Package
-    find_package(LibXml2)
-    if(PC_LIBXML_FOUND)
-      include_directories(SYSTEM ${LIBXML2_INCLUDE_DIR})
-      message(STATUS "LibXml2 Library headers directory: ${LIBXML2_INCLUDE_DIR}")
-    else()
-      message(STATUS "LibXml2 Library headers not available. Building without.")
-    endif()
     # Netlink and Generic Netlink
     find_path(LIBGENL_INCLUDE_DIR netlink/genl/genl.h PATH_SUFFIXES libnl3)
     if(LIBGENL_INCLUDE_DIR)
@@ -86,15 +77,22 @@ if(BUILD_WITH_L0)
 
   if(UNIX)
     # Firmware Update Library
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/source/sysman/linux/firmware_util${BRANCH_DIR_SUFFIX}")
-    find_package(libigsc)
-    if(libigsc_FOUND)
-      add_definitions(-DIGSC_PRESENT=1)
-      message(STATUS "libigsc Library headers directory: ${libigsc_INCLUDE_DIR}")
-      message(STATUS "libigsc version: ${libigsc_VERSION}")
-      include_directories(SYSTEM ${libigsc_INCLUDE_DIR})
+    get_filename_component(IGSC_DIR_tmp "${NEO_SOURCE_DIR}/../igsc" ABSOLUTE)
+    if(EXISTS "${IGSC_DIR_tmp}/lib/cmake")
+      find_package(igsc HINTS "${IGSC_DIR_tmp}/lib/cmake")
     else()
-      message(STATUS "libigsc Library headers not available. Building without")
+      find_package(igsc)
+    endif()
+    if(igsc_FOUND)
+      add_definitions(-DIGSC_PRESENT=1)
+      if(EXISTS "${IGSC_DIR_tmp}/lib/cmake")
+        get_filename_component(igsc_INCLUDE_DIR "${NEO_SOURCE_DIR}/../igsc/include" ABSOLUTE)
+      endif()
+      message(STATUS "igsc Library headers directory: ${igsc_INCLUDE_DIR}")
+      message(STATUS "igsc version: ${igsc_VERSION}")
+      include_directories(SYSTEM ${igsc_INCLUDE_DIR})
+    else()
+      message(STATUS "igsc Library headers not available. Building without")
     endif()
   endif()
 
@@ -114,11 +112,6 @@ if(BUILD_WITH_L0)
   endif()
   # Option to disable tests
   option(${PROJECT_NAME}_BUILD_TESTS "Build unit tests." ON)
-
-  if(SKIP_UNIT_TESTS)
-    set(SKIP_L0_UNIT_TESTS TRUE)
-    set(SKIP_L0_BLACK_BOX_TESTS TRUE)
-  endif()
 
   # Copy third_party_binaries to output BIN folder
   add_custom_target(copy_third_party_files)
@@ -210,7 +203,7 @@ if(BUILD_WITH_L0)
   include_directories("${CMAKE_CURRENT_SOURCE_DIR}")
   include_directories(ddi${BRANCH_DIR_SUFFIX})
   include_directories(tools/source)
-  include_directories(experimental${BRANCH_DIR_SUFFIX}/source)
+  include_directories(experimental${BRANCH_DIR_SUFFIX}source)
   include_directories(experimental/source/tracing)
 
   # Create our shared library/DLL
@@ -218,6 +211,8 @@ if(BUILD_WITH_L0)
   add_library(${TARGET_NAME_L0}
               SHARED
               ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+              ${NEO_SHARED_DIRECTORY}/dll/create_command_stream.cpp
+              ${NEO_SHARED_DIRECTORY}/dll/direct_submission_controller_enabled.cpp
               ${NEO_SHARED_DIRECTORY}/dll/options_dll.cpp
               ${NEO_SHARED_DIRECTORY}/gmm_helper/page_table_mngr.cpp
               ${NEO_SHARED_DIRECTORY}/gmm_helper/resource_info.cpp
@@ -230,32 +225,31 @@ if(BUILD_WITH_L0)
 
   target_sources(${TARGET_NAME_L0}
                  PRIVATE
-                 ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/create_command_stream.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/create_deferred_deleter.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/create_memory_manager_${DRIVER_MODEL}.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/create_tbx_sockets.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/get_devices.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/source_level_debugger_dll.cpp
-                 ${COMPUTE_RUNTIME_DIR}/shared/source/built_ins/sip_init.cpp
-                 ${COMPUTE_RUNTIME_DIR}/shared/source/aub/aub_stream_interface.cpp
+                 ${NEO_SHARED_DIRECTORY}/aub/aub_stream_interface.cpp
+                 ${NEO_SHARED_DIRECTORY}/built_ins/sip_init.cpp
+                 ${NEO_SHARED_DIRECTORY}/dll/create_deferred_deleter.cpp
+                 ${NEO_SHARED_DIRECTORY}/dll/create_memory_manager_${DRIVER_MODEL}.cpp
+                 ${NEO_SHARED_DIRECTORY}/dll/create_tbx_sockets.cpp
+                 ${NEO_SHARED_DIRECTORY}/dll/get_devices.cpp
+                 ${NEO_SHARED_DIRECTORY}/dll/source_level_debugger_dll.cpp
   )
 
   if(WIN32)
     target_sources(${TARGET_NAME_L0}
                    PRIVATE
+                   ${NEO_SHARED_DIRECTORY}/dll/windows/environment_variables.cpp
+                   ${NEO_SHARED_DIRECTORY}/dll/windows/options_windows.cpp
+                   ${NEO_SHARED_DIRECTORY}/dll/windows/os_interface.cpp
                    ${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory_base.cpp
                    ${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory.cpp
                    ${NEO_SHARED_DIRECTORY}/os_interface/windows/sys_calls.cpp
                    ${NEO_SHARED_DIRECTORY}/os_interface/windows/os_interface_win.cpp
+                   ${NEO_SHARED_DIRECTORY}/os_interface/windows/os_memory_virtual_alloc.cpp
                    ${NEO_SHARED_DIRECTORY}/os_interface/windows/wddm/wddm_calls.cpp
                    ${NEO_SHARED_DIRECTORY}/os_interface/windows/wddm/wddm_create.cpp
-                   ${NEO_SHARED_DIRECTORY}/dll/windows/environment_variables.cpp
-                   ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/windows/options_windows.cpp
-                   ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/windows/os_interface.cpp
     )
     target_link_libraries(${TARGET_NAME_L0}
                           dxgi
-                          ws2_32
     )
     if(DEFINED L0_DLL_RC_FILE)
       message(STATUS "Setting L0 Resource Info")
@@ -265,11 +259,13 @@ if(BUILD_WITH_L0)
     target_sources(${TARGET_NAME_L0}
                    PRIVATE
                    ${NEO_SHARED_DIRECTORY}/os_interface/linux/sys_calls_linux.cpp
-                   ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}/devices.inl
+                   ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}devices.inl
+                   ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}devices_additional.inl
                    ${NEO_SHARED_DIRECTORY}/dll/devices/devices_base.inl
-                   ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/linux/allocator_helper.cpp
-                   ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/linux/options_linux.cpp
-                   ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/linux/os_interface.cpp
+                   ${NEO_SHARED_DIRECTORY}/dll/linux/drm_neo_create.cpp
+                   ${NEO_SHARED_DIRECTORY}/dll/linux/options_linux.cpp
+                   ${NEO_SHARED_DIRECTORY}/dll/linux/os_interface.cpp
+                   ${NEO_SHARED_DIRECTORY}/os_interface/linux/gmm_interface_linux.cpp
     )
     if(NOT DISABLE_WDDM_LINUX)
       target_sources(${TARGET_NAME_L0}
@@ -286,12 +282,14 @@ if(BUILD_WITH_L0)
                    $<TARGET_OBJECTS:aub_stream_all_hw>
     )
   endif()
-  target_sources(${TARGET_NAME_L0}
-                 PRIVATE
-                 $<TARGET_OBJECTS:${BUILTINS_SPIRV_LIB_NAME}>
-  )
+  if(TARGET ${BUILTINS_SPIRV_LIB_NAME})
+    target_sources(${TARGET_NAME_L0}
+                   PRIVATE
+                   $<TARGET_OBJECTS:${BUILTINS_SPIRV_LIB_NAME}>
+    )
+  endif()
   if(NOT ${DONT_USE_PREBUILT_KERNELS_L0})
-    message("Prebuilt kernels are linked to Level Zero.")
+    message(STATUS "Prebuilt kernels are linked to Level Zero.")
     target_sources(${TARGET_NAME_L0}
                    PRIVATE
                    $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDFUL_LIB_NAME}>
@@ -307,7 +305,7 @@ if(BUILD_WITH_L0)
   )
 
   get_property(COMPUTE_RUNTIME_DEFINITIONS
-               TARGET ${NEO_RELEASE_LIB_NAME}
+               TARGET ${NEO_SHARED_RELEASE_LIB_NAME}
                PROPERTY COMPILE_DEFINITIONS
   )
 
@@ -317,12 +315,6 @@ if(BUILD_WITH_L0)
   )
 
   if(UNIX)
-    target_sources(${TARGET_NAME_L0}
-                   PRIVATE
-                   ${NEO_SHARED_DIRECTORY}/os_interface/linux/gmm_interface_linux.cpp
-                   ${COMPUTE_RUNTIME_DIR}/opencl/source/dll/linux/drm_neo_create.cpp
-    )
-    set(OS_SPECIFIC_LIBS dl pthread rt)
     target_include_directories(${TARGET_NAME_L0} PUBLIC
                                ${L0_ROOT_DIR}/core/source/os_interface/linux
                                ${I915_INCLUDES_DIR}
@@ -331,7 +323,6 @@ if(BUILD_WITH_L0)
                                ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}
     )
   else()
-    set(OS_SPECIFIC_LIBS "")
     target_include_directories(${TARGET_NAME_L0} PUBLIC
                                ${L0_ROOT_DIR}/core/source/os_interface/windows
     )
@@ -357,12 +348,11 @@ if(BUILD_WITH_L0)
   add_subdirectory_unique(api)
   add_subdirectory_unique(source)
 
-  if(DONT_CARE_OF_VIRTUALS)
-    set(L0_RELEASE_LIB_NAME "${TARGET_NAME_L0}_lib")
-    set(L0_MOCKABLE_LIB_NAME "${TARGET_NAME_L0}_lib")
-  else()
-    set(L0_RELEASE_LIB_NAME "${TARGET_NAME_L0}_lib")
-    if(NOT SKIP_UNIT_TESTS)
+  set(L0_RELEASE_LIB_NAME "${TARGET_NAME_L0}_lib")
+  if(NOT NEO_SKIP_L0_UNIT_TESTS)
+    if(DONT_CARE_OF_VIRTUALS)
+      set(L0_MOCKABLE_LIB_NAME "${TARGET_NAME_L0}_lib")
+    else()
       set(L0_MOCKABLE_LIB_NAME "${TARGET_NAME_L0}_mockable")
     endif()
   endif()
@@ -374,7 +364,7 @@ if(BUILD_WITH_L0)
     )
 
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/core/source "${NEO_BUILD_DIR}/${LIB_NAME}/core/source")
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/experimental${BRANCH_DIR_SUFFIX}/source "${NEO_BUILD_DIR}/${LIB_NAME}/experimental${BRANCH_DIR_SUFFIX}/source")
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/experimental${BRANCH_DIR_SUFFIX}source "${NEO_BUILD_DIR}/${LIB_NAME}/experimental${BRANCH_DIR_SUFFIX}source")
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/experimental/source/tracing "${NEO_BUILD_DIR}/${LIB_NAME}/experimental/tracing")
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/tools/source "${NEO_BUILD_DIR}/${LIB_NAME}tools/source")
 
@@ -404,7 +394,7 @@ if(BUILD_WITH_L0)
 
     if(${MOCKABLE})
       get_property(COMPUTE_RUNTIME_DEFINITIONS
-                   TARGET ${NEO_MOCKABLE_LIB_NAME}
+                   TARGET ${NEO_SHARED_MOCKABLE_LIB_NAME}
                    PROPERTY COMPILE_DEFINITIONS
       )
       target_compile_definitions(${LIB_NAME}
@@ -414,7 +404,7 @@ if(BUILD_WITH_L0)
       )
     else()
       get_property(COMPUTE_RUNTIME_DEFINITIONS
-                   TARGET ${NEO_RELEASE_LIB_NAME}
+                   TARGET ${NEO_SHARED_RELEASE_LIB_NAME}
                    PROPERTY COMPILE_DEFINITIONS
       )
       target_compile_definitions(${LIB_NAME}
@@ -472,17 +462,17 @@ if(BUILD_WITH_L0)
     generate_l0_lib(${L0_RELEASE_LIB_NAME} TRUE)
   else()
     generate_l0_lib(${L0_RELEASE_LIB_NAME} FALSE)
-    if(NOT SKIP_UNIT_TESTS)
+    if(NOT NEO_SKIP_L0_UNIT_TESTS)
       generate_l0_lib(${L0_MOCKABLE_LIB_NAME} TRUE)
     endif()
   endif()
 
-  append_sources_from_properties(L0_SHARED_LIB_SRCS L0_SRCS_DLL NEO_CORE_SRCS_LINK)
+  append_sources_from_properties(L0_SHARED_LIB_SRCS L0_SRCS_DLL NEO_CORE_SRCS_LINK NEO_SRCS_ENABLE_CORE)
   target_sources(${TARGET_NAME_L0} PRIVATE $<TARGET_OBJECTS:${L0_RELEASE_LIB_NAME}> ${L0_SHARED_LIB_SRCS})
 
   target_link_libraries(${TARGET_NAME_L0}
-                        ${NEO_STATICALLY_LINKED_LIBRARIES}
-                        ${OS_SPECIFIC_LIBS} ${ASAN_LIBS} ${TSAN_LIBS}
+                        ${NEO_SHARED_RELEASE_LIB_NAME}
+                        ${NEO_EXTRA_LIBS} ${ASAN_LIBS} ${TSAN_LIBS}
   )
 
   if(UNIX)
@@ -539,18 +529,20 @@ if(BUILD_WITH_L0)
             CONFIGURATIONS Debug
     )
   endif()
-  if(NOT SKIP_L0_UNIT_TESTS)
+  if(NOT NEO_SKIP_L0_UNIT_TESTS)
+    add_subdirectory_unique(core/test/common)
     add_subdirectory_unique(core/test/unit_tests)
     add_subdirectory_unique(core/test/aub_tests)
     add_subdirectory_unique(tools/test/unit_tests)
     add_subdirectory_unique(experimental/test/unit_tests)
   else()
+    hide_subdir(core/test/common)
     hide_subdir(core/test/unit_tests)
     hide_subdir(core/test/aub_tests)
     hide_subdir(tools/test/unit_tests)
     hide_subdir(experimental/test/unit_tests)
   endif()
-  if(NOT SKIP_L0_BLACK_BOX_TESTS)
+  if(NOT NEO_SKIP_L0_BLACK_BOX_TESTS)
     add_subdirectory_unique(core/test/black_box_tests)
     add_subdirectory_unique(tools/test/black_box_tests)
   else()

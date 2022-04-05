@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -12,13 +12,14 @@
 #include "shared/source/memory_manager/deferred_deleter.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
+#include "shared/test/common/helpers/engine_descriptor_helper.h"
+#include "shared/test/common/mocks/mock_svm_manager.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/sharings/sharing.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
-#include "opencl/test/unit_test/mocks/mock_svm_manager.h"
 
 #include "d3d_sharing_functions.h"
 
@@ -42,7 +43,6 @@ MockContext::MockContext(
     contextCallback = funcNotify;
     userData = data;
     memoryManager = nullptr;
-    defaultDeviceQueue = nullptr;
     driverDiagnostics = nullptr;
     rootDeviceIndices = {};
     maxRootDeviceIndex = std::numeric_limits<uint32_t>::max();
@@ -131,48 +131,6 @@ void MockContext::initializeWithDevices(const ClDeviceVector &devices, bool noSp
     setupContextType();
 }
 
-SchedulerKernel &MockContext::getSchedulerKernel() {
-    if (schedulerBuiltIn->pKernel) {
-        return *static_cast<SchedulerKernel *>(schedulerBuiltIn->pKernel);
-    }
-
-    auto initializeSchedulerProgramAndKernel = [&] {
-        cl_int retVal = CL_SUCCESS;
-        auto clDevice = getDevice(0);
-        auto src = SchedulerKernel::loadSchedulerKernel(&clDevice->getDevice());
-
-        auto program = Program::createBuiltInFromGenBinary(this,
-                                                           devices,
-                                                           src.resource.data(),
-                                                           src.resource.size(),
-                                                           &retVal);
-        DEBUG_BREAK_IF(retVal != CL_SUCCESS);
-        DEBUG_BREAK_IF(!program);
-
-        retVal = program->processGenBinary(*clDevice);
-        DEBUG_BREAK_IF(retVal != CL_SUCCESS);
-
-        schedulerBuiltIn->pProgram = program;
-
-        auto kernelInfo = schedulerBuiltIn->pProgram->getKernelInfo(SchedulerKernel::schedulerName, clDevice->getRootDeviceIndex());
-        DEBUG_BREAK_IF(!kernelInfo);
-
-        schedulerBuiltIn->pKernel = Kernel::create<MockSchedulerKernel>(
-            schedulerBuiltIn->pProgram,
-            *kernelInfo,
-            *clDevice,
-            &retVal);
-
-        UNRECOVERABLE_IF(schedulerBuiltIn->pKernel->getScratchSize() != 0);
-
-        DEBUG_BREAK_IF(retVal != CL_SUCCESS);
-    };
-    std::call_once(schedulerBuiltIn->programIsInitialized, initializeSchedulerProgramAndKernel);
-
-    UNRECOVERABLE_IF(schedulerBuiltIn->pKernel == nullptr);
-    return *static_cast<SchedulerKernel *>(schedulerBuiltIn->pKernel);
-}
-
 MockDefaultContext::MockDefaultContext() : MockDefaultContext(false) {}
 
 MockDefaultContext::MockDefaultContext(bool initSpecialQueues) : MockContext(nullptr, nullptr) {
@@ -211,4 +169,28 @@ MockUnrestrictiveContextMultiGPU::MockUnrestrictiveContextMultiGPU() : MockConte
     initializeWithDevices(ClDeviceVector{deviceIds, 6}, true);
 }
 
+BcsMockContext::BcsMockContext(ClDevice *device) : MockContext(device) {
+    bcsOsContext.reset(OsContext::create(nullptr, 0, EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_BCS, EngineUsage::Regular}, device->getDeviceBitfield())));
+    bcsCsr.reset(createCommandStream(*device->getExecutionEnvironment(), device->getRootDeviceIndex(), device->getDeviceBitfield()));
+    bcsCsr->setupContext(*bcsOsContext);
+    bcsCsr->initializeTagAllocation();
+    bcsCsr->createGlobalFenceAllocation();
+
+    auto mockBlitMemoryToAllocation = [this](const Device &device, GraphicsAllocation *memory, size_t offset, const void *hostPtr,
+                                             Vec3<size_t> size) -> BlitOperationResult {
+        auto blitProperties = BlitProperties::constructPropertiesForReadWrite(BlitterConstants::BlitDirection::HostPtrToBuffer,
+                                                                              *bcsCsr, memory, nullptr,
+                                                                              hostPtr,
+                                                                              memory->getGpuAddress(), 0,
+                                                                              0, 0, size, 0, 0, 0, 0);
+
+        BlitPropertiesContainer container;
+        container.push_back(blitProperties);
+        bcsCsr->flushBcsTask(container, true, false, const_cast<Device &>(device));
+
+        return BlitOperationResult::Success;
+    };
+    blitMemoryToAllocationFuncBackup = mockBlitMemoryToAllocation;
+}
+BcsMockContext::~BcsMockContext() = default;
 } // namespace NEO

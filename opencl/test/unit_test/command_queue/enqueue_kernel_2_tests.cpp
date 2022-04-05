@@ -1,25 +1,27 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/command_container/implicit_scaling.h"
 #include "shared/source/command_stream/scratch_space_controller.h"
+#include "shared/source/command_stream/wait_status.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/memory_manager/allocations_list.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
-#include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_csr.h"
+#include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/test/unit_test/command_queue/enqueue_fixture.h"
 #include "opencl/test/unit_test/fixtures/hello_world_fixture.h"
 #include "opencl/test/unit_test/gen_common/gen_commands_common_validation.h"
+#include "opencl/test/unit_test/helpers/cl_hw_parse.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
-#include "opencl/test/unit_test/mocks/mock_csr.h"
-#include "opencl/test/unit_test/mocks/mock_device_queue.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 
 #include "reg_configs_common.h"
@@ -56,7 +58,7 @@ struct TestParam {
 };
 template <typename InputType>
 struct EnqueueKernelTypeTest : public HelloWorldFixture<HelloWorldFixtureFactory>,
-                               public HardwareParse,
+                               public ClHardwareParse,
                                ::testing::TestWithParam<InputType> {
     typedef HelloWorldFixture<HelloWorldFixtureFactory> ParentClass;
     using ParentClass::pCmdBuffer;
@@ -117,10 +119,10 @@ struct EnqueueKernelTypeTest : public HelloWorldFixture<HelloWorldFixtureFactory
 
     void SetUp() override {
         ParentClass::SetUp();
-        HardwareParse::SetUp();
+        ClHardwareParse::SetUp();
     }
     void TearDown() override {
-        HardwareParse::TearDown();
+        ClHardwareParse::TearDown();
         ParentClass::TearDown();
     }
     size_t globalWorkSize[3];
@@ -272,7 +274,7 @@ HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueWorkItemTestsWithLimitedParamSet, givenDebugV
     auto itorCmd = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
     ASSERT_NE(itorWalker, itorCmd);
     auto *cmdSBA = (STATE_BASE_ADDRESS *)*itorCmd;
-    auto mocsProgrammed = cmdSBA->getStatelessDataPortAccessMemoryObjectControlStateIndexToMocsTables() >> 1;
+    auto mocsProgrammed = cmdSBA->getStatelessDataPortAccessMemoryObjectControlState() >> 1;
     EXPECT_EQ(1u, mocsProgrammed);
 }
 
@@ -623,49 +625,97 @@ HWCMDTEST_P(IGFX_GEN8_CORE, EnqueueKernelPrintfTest, GivenKernelWithPrintfBlocke
 }
 
 HWTEST_P(EnqueueKernelPrintfTest, GivenKernelWithPrintfBlockedByEventWhenEventUnblockedThenOutputPrinted) {
-    typedef typename FamilyType::PARSE PARSE;
+    auto userEvent = make_releaseable<UserEvent>(context);
 
-    // In scenarios with 32bit allocator and 64 bit tests this code won't work
-    // due to inability to retrieve original buffer pointer as it is done in this test.
-    auto memoryManager = pDevice->getMemoryManager();
-    if (!memoryManager->peekForce32BitAllocations() && !memoryManager->isLimitedRange(0)) {
-        testing::internal::CaptureStdout();
+    MockKernelWithInternals mockKernel(*pClDevice);
+    std::string testString = "test";
+    mockKernel.kernelInfo.addToPrintfStringsMap(0, testString);
+    mockKernel.kernelInfo.kernelDescriptor.kernelAttributes.flags.usesPrintf = false;
+    mockKernel.kernelInfo.kernelDescriptor.kernelAttributes.flags.usesStringMapForPrintf = true;
+    mockKernel.kernelInfo.kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::Patchtokens;
+    UnitTestHelper<FamilyType>::adjustKernelDescriptorForImplicitArgs(mockKernel.kernelInfo.kernelDescriptor);
+    mockKernel.mockKernel->pImplicitArgs = std::make_unique<ImplicitArgs>();
+    *mockKernel.mockKernel->pImplicitArgs = {};
 
-        auto userEvent = make_releaseable<UserEvent>(context);
+    cl_uint workDim = 1;
+    size_t globalWorkOffset[3] = {0, 0, 0};
 
-        MockKernelWithInternals mockKernel(*pClDevice);
-        mockKernel.kernelInfo.setPrintfSurface(sizeof(uintptr_t), 0);
-        std::string testString = "test";
-        mockKernel.kernelInfo.addToPrintfStringsMap(0, testString);
+    FillValues();
 
-        cl_uint workDim = 1;
-        size_t globalWorkOffset[3] = {0, 0, 0};
+    cl_event blockedEvent = userEvent.get();
+    cl_event outEvent{};
+    auto retVal = pCmdQ->enqueueKernel(
+        mockKernel,
+        workDim,
+        globalWorkOffset,
+        globalWorkSize,
+        localWorkSize,
+        1,
+        &blockedEvent,
+        &outEvent);
 
-        FillValues();
+    ASSERT_EQ(CL_SUCCESS, retVal);
 
-        cl_event blockedEvent = userEvent.get();
-        auto retVal = pCmdQ->enqueueKernel(
-            mockKernel,
-            workDim,
-            globalWorkOffset,
-            globalWorkSize,
-            localWorkSize,
-            1,
-            &blockedEvent,
-            nullptr);
+    auto pOutEvent = castToObject<Event>(outEvent);
 
-        ASSERT_EQ(CL_SUCCESS, retVal);
+    auto printfAllocation = reinterpret_cast<uint32_t *>(static_cast<CommandComputeKernel *>(pOutEvent->peekCommand())->peekPrintfHandler()->getSurface()->getUnderlyingBuffer());
+    printfAllocation[0] = 8;
+    printfAllocation[1] = 0;
 
-        auto crossThreadData = reinterpret_cast<uint64_t *>(mockKernel.mockKernel->getCrossThreadData());
-        auto printfAllocation = reinterpret_cast<uint32_t *>(*crossThreadData);
-        printfAllocation[0] = 8;
-        printfAllocation[1] = 0;
+    pOutEvent->release();
 
-        userEvent->setStatus(CL_COMPLETE);
+    testing::internal::CaptureStdout();
+    userEvent->setStatus(CL_COMPLETE);
+    std::string output = testing::internal::GetCapturedStdout();
 
-        std::string output = testing::internal::GetCapturedStdout();
-        EXPECT_STREQ("test", output.c_str());
-    }
+    EXPECT_STREQ("test", output.c_str());
+}
+
+HWTEST_P(EnqueueKernelPrintfTest, GivenKernelWithPrintfWithStringMapDisbaledAndImplicitArgsBlockedByEventWhenEventUnblockedThenOutputPrinted) {
+    auto userEvent = make_releaseable<UserEvent>(context);
+
+    MockKernelWithInternals mockKernel(*pClDevice);
+    std::string testString = "test";
+    mockKernel.kernelInfo.addToPrintfStringsMap(0, testString);
+    mockKernel.kernelInfo.kernelDescriptor.kernelAttributes.flags.usesPrintf = false;
+    mockKernel.kernelInfo.kernelDescriptor.kernelAttributes.flags.usesStringMapForPrintf = false;
+    UnitTestHelper<FamilyType>::adjustKernelDescriptorForImplicitArgs(mockKernel.kernelInfo.kernelDescriptor);
+    mockKernel.kernelInfo.kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::Patchtokens;
+    mockKernel.mockKernel->pImplicitArgs = std::make_unique<ImplicitArgs>();
+    *mockKernel.mockKernel->pImplicitArgs = {};
+
+    cl_uint workDim = 1;
+    size_t globalWorkOffset[3] = {0, 0, 0};
+
+    FillValues();
+
+    cl_event blockedEvent = userEvent.get();
+    cl_event outEvent{};
+    auto retVal = pCmdQ->enqueueKernel(
+        mockKernel,
+        workDim,
+        globalWorkOffset,
+        globalWorkSize,
+        localWorkSize,
+        1,
+        &blockedEvent,
+        &outEvent);
+
+    ASSERT_EQ(CL_SUCCESS, retVal);
+
+    auto pOutEvent = castToObject<Event>(outEvent);
+
+    auto printfAllocation = reinterpret_cast<uint32_t *>(static_cast<CommandComputeKernel *>(pOutEvent->peekCommand())->peekPrintfHandler()->getSurface()->getUnderlyingBuffer());
+    printfAllocation[0] = 8;
+    printfAllocation[1] = 0;
+
+    pOutEvent->release();
+
+    testing::internal::CaptureStdout();
+    userEvent->setStatus(CL_COMPLETE);
+    std::string output = testing::internal::GetCapturedStdout();
+
+    EXPECT_STREQ("test", output.c_str());
 }
 
 INSTANTIATE_TEST_CASE_P(EnqueueKernel,
@@ -676,7 +726,7 @@ using EnqueueKernelTests = ::testing::Test;
 
 HWTEST_F(EnqueueKernelTests, whenEnqueueingKernelThenCsrCorrectlySetsRequiredThreadArbitrationPolicy) {
     struct myCsr : public UltCommandStreamReceiver<FamilyType> {
-        using CommandStreamReceiverHw<FamilyType>::requiredThreadArbitrationPolicy;
+        using CommandStreamReceiverHw<FamilyType>::streamProperties;
     };
 
     cl_uint workDim = 1;
@@ -709,7 +759,8 @@ HWTEST_F(EnqueueKernelTests, whenEnqueueingKernelThenCsrCorrectlySetsRequiredThr
         nullptr,
         nullptr);
     pCommandQueue->flush();
-    EXPECT_EQ(HwHelperHw<FamilyType>::get().getDefaultThreadArbitrationPolicy(), csr.requiredThreadArbitrationPolicy);
+    EXPECT_EQ(HwHelperHw<FamilyType>::get().getDefaultThreadArbitrationPolicy(),
+              csr.streamProperties.stateComputeMode.threadArbitrationPolicy.value);
 
     pCommandQueue->enqueueKernel(
         mockKernelWithInternalsWithIfpNotRequired.mockKernel,
@@ -721,7 +772,8 @@ HWTEST_F(EnqueueKernelTests, whenEnqueueingKernelThenCsrCorrectlySetsRequiredThr
         nullptr,
         nullptr);
     pCommandQueue->flush();
-    EXPECT_EQ(ThreadArbitrationPolicy::AgeBased, csr.requiredThreadArbitrationPolicy);
+    EXPECT_EQ(ThreadArbitrationPolicy::AgeBased,
+              csr.streamProperties.stateComputeMode.threadArbitrationPolicy.value);
 
     pCommandQueue->enqueueKernel(
         mockKernelWithInternalsWithIfpRequired.mockKernel,
@@ -733,43 +785,44 @@ HWTEST_F(EnqueueKernelTests, whenEnqueueingKernelThenCsrCorrectlySetsRequiredThr
         nullptr,
         nullptr);
     pCommandQueue->flush();
-    EXPECT_EQ(HwHelperHw<FamilyType>::get().getDefaultThreadArbitrationPolicy(), csr.requiredThreadArbitrationPolicy);
+    EXPECT_EQ(HwHelperHw<FamilyType>::get().getDefaultThreadArbitrationPolicy(),
+              csr.streamProperties.stateComputeMode.threadArbitrationPolicy.value);
 }
 
 typedef HelloWorldFixture<HelloWorldFixtureFactory> EnqueueKernelFixture;
 typedef Test<EnqueueKernelFixture> EnqueueKernelTest;
 
+template <typename FamilyType>
+class MyCmdQ : public MockCommandQueueHw<FamilyType> {
+  public:
+    using CommandQueueHw<FamilyType>::commandStream;
+    using CommandQueueHw<FamilyType>::gpgpuEngine;
+    using CommandQueueHw<FamilyType>::bcsEngines;
+    MyCmdQ(Context *context, ClDevice *device) : MockCommandQueueHw<FamilyType>(context, device, nullptr) {}
+    void dispatchAuxTranslationBuiltin(MultiDispatchInfo &multiDispatchInfo, AuxTranslationDirection auxTranslationDirection) override {
+        CommandQueueHw<FamilyType>::dispatchAuxTranslationBuiltin(multiDispatchInfo, auxTranslationDirection);
+        auxTranslationDirections.push_back(auxTranslationDirection);
+        Kernel *lastKernel = nullptr;
+        for (const auto &dispatchInfo : multiDispatchInfo) {
+            lastKernel = dispatchInfo.getKernel();
+            dispatchInfos.emplace_back(dispatchInfo);
+        }
+        dispatchAuxTranslationInputs.emplace_back(lastKernel, multiDispatchInfo.size(), *multiDispatchInfo.getKernelObjsForAuxTranslation(),
+                                                  auxTranslationDirection);
+    }
+
+    WaitStatus waitUntilComplete(uint32_t gpgpuTaskCountToWait, Range<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool cleanTemporaryAllocationList, bool skipWait) override {
+        waitCalled++;
+        return MockCommandQueueHw<FamilyType>::waitUntilComplete(gpgpuTaskCountToWait, copyEnginesToWait, flushStampToWait, useQuickKmdSleep, cleanTemporaryAllocationList, skipWait);
+    }
+
+    std::vector<AuxTranslationDirection> auxTranslationDirections;
+    std::vector<DispatchInfo> dispatchInfos;
+    std::vector<std::tuple<Kernel *, size_t, KernelObjsForAuxTranslation, AuxTranslationDirection>> dispatchAuxTranslationInputs;
+    uint32_t waitCalled = 0;
+};
+
 struct EnqueueAuxKernelTests : public EnqueueKernelTest {
-    template <typename FamilyType>
-    class MyCmdQ : public CommandQueueHw<FamilyType> {
-      public:
-        using CommandQueueHw<FamilyType>::commandStream;
-        using CommandQueueHw<FamilyType>::gpgpuEngine;
-        using CommandQueueHw<FamilyType>::bcsEngine;
-        MyCmdQ(Context *context, ClDevice *device) : CommandQueueHw<FamilyType>(context, device, nullptr, false) {}
-        void dispatchAuxTranslationBuiltin(MultiDispatchInfo &multiDispatchInfo, AuxTranslationDirection auxTranslationDirection) override {
-            CommandQueueHw<FamilyType>::dispatchAuxTranslationBuiltin(multiDispatchInfo, auxTranslationDirection);
-            auxTranslationDirections.push_back(auxTranslationDirection);
-            Kernel *lastKernel = nullptr;
-            for (const auto &dispatchInfo : multiDispatchInfo) {
-                lastKernel = dispatchInfo.getKernel();
-                dispatchInfos.emplace_back(dispatchInfo);
-            }
-            dispatchAuxTranslationInputs.emplace_back(lastKernel, multiDispatchInfo.size(), *multiDispatchInfo.getKernelObjsForAuxTranslation(),
-                                                      auxTranslationDirection);
-        }
-
-        void waitUntilComplete(uint32_t gpgpuTaskCountToWait, uint32_t bcsTaskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) override {
-            waitCalled++;
-            CommandQueueHw<FamilyType>::waitUntilComplete(gpgpuTaskCountToWait, bcsTaskCountToWait, flushStampToWait, useQuickKmdSleep);
-        }
-
-        std::vector<AuxTranslationDirection> auxTranslationDirections;
-        std::vector<DispatchInfo> dispatchInfos;
-        std::vector<std::tuple<Kernel *, size_t, KernelObjsForAuxTranslation, AuxTranslationDirection>> dispatchAuxTranslationInputs;
-        uint32_t waitCalled = 0;
-    };
-
     void SetUp() override {
         DebugManager.flags.ForceAuxTranslationMode.set(static_cast<int32_t>(AuxTranslationMode::Builtin));
         EnqueueKernelTest::SetUp();
@@ -801,10 +854,10 @@ HWTEST_F(EnqueueAuxKernelTests, givenMultipleArgsWhenAuxTranslationIsRequiredThe
     cl_mem clMem1 = &buffer1;
     cl_mem clMem2 = &buffer2;
     cl_mem clMem3 = &buffer3;
-    buffer0.getGraphicsAllocation(pClDevice->getRootDeviceIndex())->setAllocationType(GraphicsAllocation::AllocationType::BUFFER);
-    buffer1.getGraphicsAllocation(pClDevice->getRootDeviceIndex())->setAllocationType(GraphicsAllocation::AllocationType::BUFFER);
-    buffer2.getGraphicsAllocation(pClDevice->getRootDeviceIndex())->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
-    buffer3.getGraphicsAllocation(pClDevice->getRootDeviceIndex())->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
+    buffer0.setAllocationType(pClDevice->getRootDeviceIndex(), false);
+    buffer1.setAllocationType(pClDevice->getRootDeviceIndex(), false);
+    buffer2.setAllocationType(pClDevice->getRootDeviceIndex(), true);
+    buffer3.setAllocationType(pClDevice->getRootDeviceIndex(), true);
 
     MockKernelWithInternals mockKernel(*pClDevice, context);
 
@@ -822,8 +875,8 @@ HWTEST_F(EnqueueAuxKernelTests, givenMultipleArgsWhenAuxTranslationIsRequiredThe
 
     mockKernel.mockKernel->setArgBuffer(0, sizeof(cl_mem *), &clMem0);                    // stateless on regular buffer - dont insert
     mockKernel.mockKernel->setArgBuffer(1, sizeof(cl_mem *), &clMem1);                    // stateful on regular buffer - dont insert
-    mockKernel.mockKernel->setArgBuffer(2, sizeof(cl_mem *), &clMem2);                    // stateless on BUFFER_COMPRESSED - insert
-    mockKernel.mockKernel->setArgBuffer(3, sizeof(cl_mem *), &clMem3);                    // stateful on BUFFER_COMPRESSED - dont insert
+    mockKernel.mockKernel->setArgBuffer(2, sizeof(cl_mem *), &clMem2);                    // stateless on compressed BUFFER - insert
+    mockKernel.mockKernel->setArgBuffer(3, sizeof(cl_mem *), &clMem3);                    // stateful on compressed BUFFER - dont insert
     mockKernel.mockKernel->setArgBuffer(4, sizeof(cl_mem *), nullptr);                    // nullptr - dont insert
     mockKernel.mockKernel->kernelArguments.at(5).type = Kernel::kernelArgType::IMAGE_OBJ; // non-buffer arg - dont insert
 
@@ -862,7 +915,7 @@ HWTEST_F(EnqueueAuxKernelTests, givenKernelWithRequiredAuxTranslationWhenEnqueue
     MockBuffer buffer;
     cl_mem clMem = &buffer;
 
-    buffer.getGraphicsAllocation(pClDevice->getRootDeviceIndex())->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
+    buffer.setAllocationType(pClDevice->getRootDeviceIndex(), true);
     mockKernel.kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.resize(1);
     mockKernel.kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[0].as<ArgDescPointer>(true).accessedUsingStatelessAddressingMode = true;
     mockKernel.mockKernel->initialize();
@@ -885,23 +938,33 @@ HWTEST_F(EnqueueAuxKernelTests, givenKernelWithRequiredAuxTranslationWhenEnqueue
     EXPECT_TRUE(kernelAfter->isBuiltIn);
 }
 
-HWTEST_F(EnqueueAuxKernelTests, givenDebugVariableDisablingBuiltinTranslationWhenDispatchingKernelWithRequiredAuxTranslationThenDontDispatch) {
+using BlitAuxKernelTests = ::testing::Test;
+HWTEST_F(BlitAuxKernelTests, givenDebugVariableDisablingBuiltinTranslationWhenDispatchingKernelWithRequiredAuxTranslationThenDontDispatch) {
+    DebugManagerStateRestore dbgRestore;
     DebugManager.flags.ForceAuxTranslationMode.set(static_cast<int32_t>(AuxTranslationMode::Blit));
+
+    VariableBackup<HardwareInfo> backupHwInfo(defaultHwInfo.get());
+    defaultHwInfo->capabilityTable.blitterOperationsSupported = true;
+
+    UltClDeviceFactory factory{1, 0};
+    auto rootDeviceIndex = 0u;
+    auto pClDevice = factory.rootDevices[rootDeviceIndex];
+    auto pDevice = factory.pUltDeviceFactory->rootDevices[rootDeviceIndex];
     pDevice->getUltCommandStreamReceiver<FamilyType>().timestampPacketWriteEnabled = true;
 
     auto hwInfo = pDevice->getExecutionEnvironment()->rootDeviceEnvironments[rootDeviceIndex]->getMutableHardwareInfo();
-
-    MockKernelWithInternals mockKernel(*pClDevice, context);
-    MyCmdQ<FamilyType> cmdQ(context, pClDevice);
-    cmdQ.bcsEngine = cmdQ.gpgpuEngine;
-
     hwInfo->capabilityTable.blitterOperationsSupported = true;
+    REQUIRE_FULL_BLITTER_OR_SKIP(hwInfo);
+
+    MockContext context(pClDevice);
+    MockKernelWithInternals mockKernel(context.getDevices(), &context);
+    MyCmdQ<FamilyType> cmdQ(&context, pClDevice);
 
     size_t gws[3] = {1, 0, 0};
     MockBuffer buffer;
     cl_mem clMem = &buffer;
 
-    buffer.getGraphicsAllocation(pClDevice->getRootDeviceIndex())->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
+    buffer.setAllocationType(pClDevice->getRootDeviceIndex(), true);
     mockKernel.kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.resize(1);
     mockKernel.kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[0].as<ArgDescPointer>(true).accessedUsingStatelessAddressingMode = true;
     mockKernel.mockKernel->initialize();
@@ -939,41 +1002,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueKernelTest, givenCacheFlushAfterWalkerEnabled
     EXPECT_TRUE(pipeControl->getDcFlushEnable());
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueAuxKernelTests, givenParentKernelWhenAuxTranslationIsRequiredThenMakeEnqueueBlocking) {
-    REQUIRE_DEVICE_ENQUEUE_OR_SKIP(pClDevice);
-
-    MyCmdQ<FamilyType> cmdQ(context, pClDevice);
-    size_t gws[3] = {1, 0, 0};
-
-    cl_queue_properties queueProperties = {};
-    auto mockDevQueue = std::make_unique<MockDeviceQueueHw<FamilyType>>(context, pClDevice, queueProperties);
-    context->setDefaultDeviceQueue(mockDevQueue.get());
-    std::unique_ptr<MockParentKernel> parentKernel(MockParentKernel::create(*context, false, false, false, false, false));
-    parentKernel->initialize();
-
-    parentKernel->auxTranslationRequired = false;
-    cmdQ.enqueueKernel(parentKernel.get(), 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(0u, cmdQ.waitCalled);
-    mockDevQueue->getIgilQueue()->m_controls.m_CriticalSection = 0;
-
-    parentKernel->auxTranslationRequired = true;
-    cmdQ.enqueueKernel(parentKernel.get(), 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(1u, cmdQ.waitCalled);
-}
-
-HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueAuxKernelTests, givenParentKernelButNoDeviceQueueWhenEnqueueIsCalledThenItReturnsInvalidOperation) {
-    REQUIRE_DEVICE_ENQUEUE_OR_SKIP(pClDevice);
-
-    MyCmdQ<FamilyType> cmdQ(context, pClDevice);
-    size_t gws[3] = {1, 0, 0};
-
-    std::unique_ptr<MockParentKernel> parentKernel(MockParentKernel::create(*context, false, false, false, false, false));
-    parentKernel->initialize();
-
-    auto status = cmdQ.enqueueKernel(parentKernel.get(), 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
-    EXPECT_EQ(CL_INVALID_OPERATION, status);
-}
-
 HWTEST_F(EnqueueKernelTest, givenTimestampWriteEnableWhenMarkerProfilingWithoutWaitListThenSizeHasFourMMIOStoresAndPipeControll) {
     pDevice->getUltCommandStreamReceiver<FamilyType>().timestampPacketWriteEnabled = true;
     MockKernelWithInternals mockKernel(*pClDevice);
@@ -987,6 +1015,26 @@ HWTEST_F(EnqueueKernelTest, givenTimestampWriteEnableWhenMarkerProfilingWithoutW
 
     EXPECT_EQ(baseCommandStreamSize + 4 * EncodeStoreMMIO<FamilyType>::size + MemorySynchronizationCommands<FamilyType>::getSizeForSinglePipeControl(), extendedCommandStreamSize);
 }
+
+HWCMDTEST_F(IGFX_XE_HP_CORE, EnqueueKernelTest, givenTimestampWriteEnableOnMultiTileQueueWhenMarkerProfilingWithoutWaitListThenSizeHasFourMMIOStoresAndCrossTileBarrier) {
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    csr.timestampPacketWriteEnabled = true;
+    csr.activePartitions = 2;
+    csr.activePartitionsConfig = 2;
+    csr.staticWorkPartitioningEnabled = true;
+
+    MockKernelWithInternals mockKernel(*pClDevice);
+    DispatchInfo dispatchInfo;
+    MultiDispatchInfo multiDispatchInfo(mockKernel.mockKernel);
+    dispatchInfo.setKernel(mockKernel.mockKernel);
+    multiDispatchInfo.push(dispatchInfo);
+
+    auto baseCommandStreamSize = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_MARKER, {}, false, false, false, *pCmdQ, multiDispatchInfo, false, false);
+    auto extendedCommandStreamSize = EnqueueOperation<FamilyType>::getTotalSizeRequiredCS(CL_COMMAND_MARKER, {}, false, false, false, *pCmdQ, multiDispatchInfo, true, false);
+
+    EXPECT_EQ(baseCommandStreamSize + 4 * EncodeStoreMMIO<FamilyType>::size + ImplicitScalingDispatch<FamilyType>::getBarrierSize(csr.peekHwInfo(), false, false), extendedCommandStreamSize);
+}
+
 HWTEST_F(EnqueueKernelTest, givenTimestampWriteEnableWhenMarkerProfilingWithWaitListThenSizeHasFourMMIOStores) {
     pDevice->getUltCommandStreamReceiver<FamilyType>().timestampPacketWriteEnabled = true;
     MockKernelWithInternals mockKernel(*pClDevice);

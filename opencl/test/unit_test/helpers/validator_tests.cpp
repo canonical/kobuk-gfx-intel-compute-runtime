@@ -1,16 +1,17 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/helpers/ptr_math.h"
+#include "shared/source/helpers/validators.h"
 
 #include "opencl/source/api/cl_types.h"
 #include "opencl/source/helpers/base_object.h"
+#include "opencl/source/helpers/cl_validators.h"
 #include "opencl/source/helpers/error_mappers.h"
-#include "opencl/source/helpers/validators.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
@@ -53,7 +54,6 @@ REGISTER_TYPED_TEST_CASE_P(
 // Define new command types to run the parameterized tests
 typedef ::testing::Types<
     cl_command_queue,
-    device_queue, // internal type
     cl_context,
     cl_device_id,
     cl_event,

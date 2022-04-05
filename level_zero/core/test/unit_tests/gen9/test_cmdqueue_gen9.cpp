@@ -9,9 +9,7 @@
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_compilers.h"
-
-#include "opencl/source/helpers/hardware_commands_helper.h"
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/cmdqueue/cmdqueue_imp.h"
 #include "level_zero/core/source/driver/driver_handle_imp.h"
@@ -167,8 +165,8 @@ HWTEST2_F(CommandQueueThreadArbitrationPolicyTests,
     }
 }
 
-struct CommandQueueGroupMultiDevice : public MultiDeviceFixture, public ::testing::Test {
-    void SetUp() override {
+struct CommandQueueGroupMultiDeviceFixture : public MultiDeviceFixture {
+    void SetUp() {
         NEO::MockCompilerEnableGuard mock(true);
         MultiDeviceFixture::SetUp();
         uint32_t count = 1;
@@ -178,11 +176,13 @@ struct CommandQueueGroupMultiDevice : public MultiDeviceFixture, public ::testin
         device = L0::Device::fromHandle(hDevice);
         ASSERT_NE(nullptr, device);
     }
-    void TearDown() override {
+    void TearDown() {
         MultiDeviceFixture::TearDown();
     }
     L0::Device *device = nullptr;
 };
+
+using CommandQueueGroupMultiDevice = Test<CommandQueueGroupMultiDeviceFixture>;
 
 HWTEST2_F(CommandQueueGroupMultiDevice,
           givenCommandQueuePropertiesCallThenCallSucceedsAndCommandListImmediateIsCreated, IsGen9) {
@@ -210,8 +210,9 @@ HWTEST2_F(CommandQueueGroupMultiDevice,
                                                                                returnValue));
 
     L0::CommandQueueImp *cmdQueue = reinterpret_cast<CommandQueueImp *>(commandList0->cmdQImmediate);
-    L0::DeviceImp *deviceImp = reinterpret_cast<L0::DeviceImp *>(device);
-    auto expectedCSR = deviceImp->neoDevice->getDeviceById(0)->getEngineGroups()[queueGroupOrdinal][queueGroupIndex].commandStreamReceiver;
+    auto &nearestSubDevice = *device->getNEODevice()->getNearestGenericSubDevice(0);
+    const auto rcsIndex = nearestSubDevice.getEngineGroupIndexFromEngineGroupType(NEO::EngineGroupType::RenderCompute);
+    auto expectedCSR = nearestSubDevice.getRegularEngineGroups()[rcsIndex].engines[queueGroupIndex].commandStreamReceiver;
     EXPECT_EQ(cmdQueue->getCsr(), expectedCSR);
 }
 

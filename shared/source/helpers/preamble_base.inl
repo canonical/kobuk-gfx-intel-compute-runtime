@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,12 +21,8 @@
 namespace NEO {
 
 template <typename GfxFamily>
-void PreambleHelper<GfxFamily>::programThreadArbitration(LinearStream *pCommandStream, uint32_t requiredThreadArbitrationPolicy) {
-}
-
-template <typename GfxFamily>
-size_t PreambleHelper<GfxFamily>::getThreadArbitrationCommandsSize() {
-    return 0;
+std::vector<int32_t> PreambleHelper<GfxFamily>::getSupportedThreadArbitrationPolicies() {
+    return {};
 }
 
 template <typename GfxFamily>
@@ -70,9 +66,8 @@ size_t PreambleHelper<GfxFamily>::getCmdSizeForPipelineSelect(const HardwareInfo
 
 template <typename GfxFamily>
 void PreambleHelper<GfxFamily>::programPreamble(LinearStream *pCommandStream, Device &device, uint32_t l3Config,
-                                                uint32_t requiredThreadArbitrationPolicy, GraphicsAllocation *preemptionCsr) {
+                                                GraphicsAllocation *preemptionCsr) {
     programL3(pCommandStream, l3Config);
-    programThreadArbitration(pCommandStream, requiredThreadArbitrationPolicy);
     programPreemption(pCommandStream, device, preemptionCsr);
     if (device.isDebuggerActive()) {
         programKernelDebugging(pCommandStream);
@@ -113,11 +108,11 @@ bool PreambleHelper<GfxFamily>::isL3Configurable(const HardwareInfo &hwInfo) {
 }
 
 template <typename GfxFamily>
-void PreambleHelper<GfxFamily>::programAdditionalFieldsInVfeState(VFE_STATE_TYPE *mediaVfeState, const HardwareInfo &hwInfo) {
+void PreambleHelper<GfxFamily>::programAdditionalFieldsInVfeState(VFE_STATE_TYPE *mediaVfeState, const HardwareInfo &hwInfo, bool disableEUFusion) {
 }
 
 template <typename GfxFamily>
-void PreambleHelper<GfxFamily>::appendProgramVFEState(const HardwareInfo &hwInfo, const StreamProperties &streamProperties, uint32_t additionalKernelExecInfo, void *cmd) {}
+void PreambleHelper<GfxFamily>::appendProgramVFEState(const HardwareInfo &hwInfo, const StreamProperties &streamProperties, void *cmd) {}
 
 template <typename GfxFamily>
 uint32_t PreambleHelper<GfxFamily>::getScratchSizeValueToProgramMediaVfeState(uint32_t scratchSize) {

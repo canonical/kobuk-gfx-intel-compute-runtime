@@ -5,7 +5,7 @@
  *
  */
 
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/cache/windows/cache_reservation_impl.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
@@ -17,13 +17,13 @@ namespace ult {
 
 class CacheReservationFixture : public DeviceFixture {
   public:
-    void SetUp() override {
+    void SetUp() {
         DeviceFixture::SetUp();
         auto deviceImp = static_cast<DeviceImp *>(device);
         ASSERT_NE(nullptr, deviceImp->cacheReservation.get());
         cache = deviceImp->cacheReservation.get();
     }
-    void TearDown() override {
+    void TearDown() {
         DeviceFixture::TearDown();
     }
     CacheReservation *cache = nullptr;

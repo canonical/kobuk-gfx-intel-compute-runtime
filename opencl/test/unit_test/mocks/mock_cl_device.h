@@ -65,14 +65,19 @@ class MockClDevice : public ClDevice {
     }
     template <typename T>
     static T *createWithNewExecutionEnvironment(const HardwareInfo *pHwInfo, uint32_t rootDeviceIndex = 0) {
+        auto executionEnvironment = prepareExecutionEnvironment(pHwInfo, rootDeviceIndex);
+        return MockDevice::createWithExecutionEnvironment<T>(pHwInfo, executionEnvironment, rootDeviceIndex);
+    }
+    static ExecutionEnvironment *prepareExecutionEnvironment(const HardwareInfo *pHwInfo, uint32_t rootDeviceIndex) {
         auto executionEnvironment = new MockClExecutionEnvironment();
-        auto numRootDevices = DebugManager.flags.CreateMultipleRootDevices.get() ? DebugManager.flags.CreateMultipleRootDevices.get() : 1u;
+        auto numRootDevices = DebugManager.flags.CreateMultipleRootDevices.get() ? DebugManager.flags.CreateMultipleRootDevices.get() : rootDeviceIndex + 1;
         executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
         pHwInfo = pHwInfo ? pHwInfo : defaultHwInfo.get();
         for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
             executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(pHwInfo);
         }
-        return MockDevice::createWithExecutionEnvironment<T>(pHwInfo, executionEnvironment, rootDeviceIndex);
+        executionEnvironment->calculateMaxOsContextCount();
+        return executionEnvironment;
     }
     SubDevice *createSubDevice(uint32_t subDeviceIndex) { return device.createSubDevice(subDeviceIndex); }
     std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const { return device.createCommandStreamReceiver(); }
@@ -89,7 +94,7 @@ class MockClDevice : public ClDevice {
     ExecutionEnvironment *&executionEnvironment;
     static bool &createSingleDevice;
     static decltype(&createCommandStream) &createCommandStreamReceiverFunc;
-    std::vector<EngineControl> &engines;
+    std::vector<EngineControl> &allEngines;
 };
 
 class MockDeviceWithDebuggerActive : public MockDevice {

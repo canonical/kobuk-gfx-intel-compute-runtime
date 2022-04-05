@@ -17,7 +17,6 @@
 
 int (*c_open)(const char *pathname, int flags, ...) = nullptr;
 int (*openFull)(const char *pathname, int flags, ...) = nullptr;
-int (*c_ioctl)(int fd, unsigned long int request, ...) = nullptr;
 
 int fakeFd = 1023;
 int haveDri = 0;                                       // index of dri to serve, -1 - none
@@ -105,11 +104,19 @@ int closedir(DIR *dirp) {
 
 struct dirent entries[] = {
     {0, 0, 0, 0, "."},
+    {0, 0, 0, 0, "pci-0000:00:03.1-render"},
+    {0, 0, 0, 0, "platform-4010000000.pcie-pci-0000:00:02.0-render"},
     {0, 0, 0, 0, "pci-0000:test1-render"},
     {0, 0, 0, 0, "pci-0000:test2-render"},
     {0, 0, 0, 0, "pci-0000:1234-render"},
-    {0, 0, 0, 0, "pci-0000:0:2.1-render"},
     {0, 0, 0, 0, "pci-0000:3:0.0-render"},
+    {0, 0, 0, 0, "pci-0a00:00:03.1-render"},
+    {0, 0, 0, 0, "pci-0000:b3:03.1-render"},
+    {0, 0, 0, 0, "pci-0000:00:b3.1-render"},
+    {0, 0, 0, 0, "pci-0000:00:03.a-render"},
+    {0, 0, 0, 0, "pci-0000:00:03.a-render-12"},
+    {0, 0, 0, 0, "pcii0000:00:03.a-render"},
+    {0, 0, 0, 0, "pcii-render"},
 };
 
 uint32_t entryIndex = 0u;
@@ -156,7 +163,6 @@ int drmGetParam(drm_i915_getparam_t *param) {
 #endif
     default:
         ret = -1;
-        std::cerr << "drm.getParam: " << std::dec << param->param << std::endl;
         break;
     }
     return ret;
@@ -186,7 +192,6 @@ int drmSetContextParam(drm_i915_gem_context_param *param) {
         break;
     default:
         ret = -1;
-        std::cerr << "drm.setContextParam: " << std::dec << param->param << std::endl;
         break;
     }
     return ret;
@@ -204,7 +209,6 @@ int drmGetContextParam(drm_i915_gem_context_param *param) {
         break;
     default:
         ret = -1;
-        std::cerr << "drm.getContextParam: " << std::dec << param->param << std::endl;
         break;
     }
     return ret;
@@ -266,8 +270,6 @@ int drmQueryItem(drm_i915_query *query) {
 }
 
 int ioctl(int fd, unsigned long int request, ...) throw() {
-    if (c_ioctl == nullptr)
-        c_ioctl = (int (*)(int, unsigned long int, ...))dlsym(RTLD_NEXT, "ioctl");
     int res;
     va_list vl;
     va_start(vl, request);
@@ -313,7 +315,6 @@ int ioctl(int fd, unsigned long int request, ...) throw() {
         return res;
     }
 
-    res = c_ioctl(fd, request, vl);
     va_end(vl);
-    return res;
+    return -1;
 }

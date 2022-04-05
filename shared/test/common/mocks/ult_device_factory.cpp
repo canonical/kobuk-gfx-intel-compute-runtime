@@ -11,8 +11,7 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/mocks/mock_device.h"
-
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
 
 using namespace NEO;
 
@@ -37,8 +36,10 @@ UltDeviceFactory::UltDeviceFactory(uint32_t rootDevicesCount, uint32_t subDevice
 
     for (auto &pCreatedDevice : createdDevices) {
         pCreatedDevice->incRefInternal();
-        for (uint32_t i = 0; i < pCreatedDevice->getNumAvailableDevices(); i++) {
-            this->subDevices.push_back(static_cast<SubDevice *>(pCreatedDevice->getDeviceById(i)));
+        if (pCreatedDevice->getNumSubDevices() > 1) {
+            for (uint32_t i = 0; i < pCreatedDevice->getNumSubDevices(); i++) {
+                this->subDevices.push_back(static_cast<SubDevice *>(pCreatedDevice->getSubDevice(i)));
+            }
         }
         this->rootDevices.push_back(static_cast<MockDevice *>(pCreatedDevice.release()));
     }

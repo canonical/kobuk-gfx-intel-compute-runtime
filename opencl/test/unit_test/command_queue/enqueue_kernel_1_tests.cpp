@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,18 +7,18 @@
 
 #include "shared/source/helpers/pause_on_gpu_properties.h"
 #include "shared/source/helpers/preamble.h"
-#include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/kernel_binary_helper.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/mocks/mock_csr.h"
+#include "shared/test/common/mocks/mock_submissions_aggregator.h"
 
 #include "opencl/source/api/api.h"
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/test/unit_test/api/cl_api_tests.h"
 #include "opencl/test/unit_test/command_queue/enqueue_fixture.h"
 #include "opencl/test/unit_test/fixtures/hello_world_fixture.h"
-#include "opencl/test/unit_test/helpers/kernel_binary_helper.h"
-#include "opencl/test/unit_test/mocks/mock_csr.h"
-#include "opencl/test/unit_test/mocks/mock_submissions_aggregator.h"
+#include "opencl/test/unit_test/helpers/cl_hw_parse.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 
 using namespace NEO;
@@ -309,8 +309,9 @@ using clEnqueueNDCountKernelTests = api_tests;
 
 TEST_F(clEnqueueNDCountKernelTests, GivenQueueIncapableWhenEnqueuingNDCountKernelINTELThenInvalidOperationIsReturned) {
     auto &hwHelper = HwHelper::get(::defaultHwInfo->platform.eRenderCoreFamily);
-    auto engineGroupType = hwHelper.getEngineGroupType(pCommandQueue->getGpgpuEngine().getEngineType(), *::defaultHwInfo);
-    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, ::defaultHwInfo->platform.eProductFamily)) {
+    auto engineGroupType = hwHelper.getEngineGroupType(pCommandQueue->getGpgpuEngine().getEngineType(),
+                                                       pCommandQueue->getGpgpuEngine().getEngineUsage(), *::defaultHwInfo);
+    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, *::defaultHwInfo)) {
         GTEST_SKIP();
     }
 
@@ -341,9 +342,10 @@ TEST_F(EnqueueKernelTest, givenKernelWhenAllArgsAreSetThenClEnqueueNDCountKernel
     cl_int retVal = CL_SUCCESS;
     CommandQueue *pCmdQ2 = createCommandQueue(pClDevice);
 
-    HwHelper &hwHelper = HwHelper::get(pClDevice->getDevice().getHardwareInfo().platform.eRenderCoreFamily);
-    auto engineGroupType = hwHelper.getEngineGroupType(pCmdQ2->getGpgpuEngine().getEngineType(), hardwareInfo);
-    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, pClDevice->getDevice().getHardwareInfo().platform.eProductFamily)) {
+    HwHelper &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+    auto engineGroupType = hwHelper.getEngineGroupType(pCmdQ2->getGpgpuEngine().getEngineType(),
+                                                       pCmdQ2->getGpgpuEngine().getEngineUsage(), hardwareInfo);
+    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, hardwareInfo)) {
         pCmdQ2->getGpgpuEngine().osContext = pCmdQ2->getDevice().getEngine(aub_stream::ENGINE_CCS, EngineUsage::LowPriority).osContext;
     }
 
@@ -388,9 +390,10 @@ TEST_F(EnqueueKernelTest, givenKernelWhenNotAllArgsAreSetButSetKernelArgIsCalled
     cl_int retVal = CL_SUCCESS;
     CommandQueue *pCmdQ2 = createCommandQueue(pClDevice);
 
-    HwHelper &hwHelper = HwHelper::get(pClDevice->getDevice().getHardwareInfo().platform.eRenderCoreFamily);
-    auto engineGroupType = hwHelper.getEngineGroupType(pCmdQ2->getGpgpuEngine().getEngineType(), hardwareInfo);
-    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, pClDevice->getDevice().getHardwareInfo().platform.eProductFamily)) {
+    HwHelper &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+    auto engineGroupType = hwHelper.getEngineGroupType(pCmdQ2->getGpgpuEngine().getEngineType(),
+                                                       pCmdQ2->getGpgpuEngine().getEngineUsage(), hardwareInfo);
+    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, hardwareInfo)) {
         pCmdQ2->getGpgpuEngine().osContext = pCmdQ2->getDevice().getEngine(aub_stream::ENGINE_CCS, EngineUsage::LowPriority).osContext;
     }
 
@@ -435,9 +438,10 @@ TEST_F(EnqueueKernelTest, givenKernelWhenSetKernelArgIsCalledForEachArgButAtLeas
     cl_int retVal = CL_SUCCESS;
     CommandQueue *pCmdQ2 = createCommandQueue(pClDevice);
 
-    HwHelper &hwHelper = HwHelper::get(pClDevice->getDevice().getHardwareInfo().platform.eRenderCoreFamily);
-    auto engineGroupType = hwHelper.getEngineGroupType(pCmdQ2->getGpgpuEngine().getEngineType(), hardwareInfo);
-    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, pClDevice->getDevice().getHardwareInfo().platform.eProductFamily)) {
+    HwHelper &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+    auto engineGroupType = hwHelper.getEngineGroupType(pCmdQ2->getGpgpuEngine().getEngineType(),
+                                                       pCmdQ2->getGpgpuEngine().getEngineUsage(), hardwareInfo);
+    if (!hwHelper.isCooperativeDispatchSupported(engineGroupType, hardwareInfo)) {
         pCmdQ2->getGpgpuEngine().osContext = pCmdQ2->getDevice().getEngine(aub_stream::ENGINE_CCS, EngineUsage::LowPriority).osContext;
     }
 
@@ -599,7 +603,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueKernelTest, givenSecondEnqueueWithTheSameScra
     pDevice->setPreemptionMode(PreemptionMode::ThreadGroup);
     auto &csr = pDevice->getGpgpuCommandStreamReceiver();
     csr.getMemoryManager()->setForce32BitAllocations(false);
-    HardwareParse hwParser;
+    ClHardwareParse hwParser;
     size_t off[3] = {0, 0, 0};
     size_t gws[3] = {1, 1, 1};
     uint32_t scratchSize = 4096u;
@@ -737,7 +741,7 @@ HWTEST_F(EnqueueKernelTest, givenReducedAddressSpaceGraphicsAllocationForHostPtr
     auto memoryManager = mockCsr->getMemoryManager();
     uint32_t hostPtr[10]{};
 
-    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false, device->getDeviceBitfield()};
+    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, AllocationType::EXTERNAL_HOST_PTR, false, device->getDeviceBitfield()};
     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = true;
     auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
     MockKernelWithInternals mockKernel(*device, context);
@@ -761,7 +765,7 @@ HWTEST_F(EnqueueKernelTest, givenReducedAddressSpaceGraphicsAllocationForHostPtr
     auto memoryManager = mockCsr->getMemoryManager();
     uint32_t hostPtr[10]{};
 
-    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false, device->getDeviceBitfield()};
+    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, AllocationType::EXTERNAL_HOST_PTR, false, device->getDeviceBitfield()};
     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = false;
     auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
     MockKernelWithInternals mockKernel(*device, context);
@@ -786,7 +790,7 @@ HWTEST_F(EnqueueKernelTest, givenFullAddressSpaceGraphicsAllocationWhenEnqueueKe
     auto memoryManager = mockCsr->getMemoryManager();
     uint32_t hostPtr[10]{};
 
-    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR, false, device->getDeviceBitfield()};
+    AllocationProperties properties{device->getRootDeviceIndex(), false, 1, AllocationType::EXTERNAL_HOST_PTR, false, device->getDeviceBitfield()};
     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = false;
     auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
     MockKernelWithInternals mockKernel(*device, context);
@@ -919,7 +923,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, EnqueueKernelTest, givenTwoEnqueueProgrammedWithinS
     auto mockedSubmissionsAggregator = new mockSubmissionsAggregator();
     mockCsr->overrideSubmissionAggregator(mockedSubmissionsAggregator);
 
-    HardwareParse hwParse;
+    ClHardwareParse hwParse;
 
     MockKernelWithInternals mockKernel(*pClDevice);
     size_t gws[3] = {1, 0, 0};
@@ -1423,6 +1427,19 @@ TEST_F(EnqueueKernelTest, givenEnqueueCommandThatLocalWorkgroupSizeContainsZeroW
     EXPECT_EQ(CL_INVALID_WORK_GROUP_SIZE, status);
 }
 
+TEST_F(EnqueueKernelTest, givenEnqueueCommandWithWorkDimLargerThanAllowedWhenEnqueueNDRangeKernelIsCalledThenClInvalidWorkDimensionIsReturned) {
+    size_t globalWorkSize[3] = {1, 1, 1};
+    size_t localWorkSize[3] = {1, 1, 1};
+    MockKernelWithInternals mockKernel(*pClDevice);
+    auto testedWorkDim = pClDevice->deviceInfo.maxWorkItemDimensions;
+    auto status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    ASSERT_EQ(CL_SUCCESS, status);
+
+    testedWorkDim += 1;
+    status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_INVALID_WORK_DIMENSION, status);
+}
+
 HWTEST_F(EnqueueKernelTest, givenVMEKernelWhenEnqueueKernelThenDispatchFlagsHaveMediaSamplerRequired) {
     auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
@@ -1532,12 +1549,11 @@ struct PauseOnGpuTests : public EnqueueKernelTest {
         auto pipeControlCmd = genCmdCast<PIPE_CONTROL *>(*iterator);
 
         if ((static_cast<uint32_t>(requiredDebugPauseState) == pipeControlCmd->getImmediateData()) &&
-            (static_cast<uint32_t>(debugPauseStateAddress & 0x0000FFFFFFFFULL) == pipeControlCmd->getAddress()) &&
-            (static_cast<uint32_t>(debugPauseStateAddress >> 32) == pipeControlCmd->getAddressHigh())) {
+            (debugPauseStateAddress == NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControlCmd))) {
 
             EXPECT_TRUE(pipeControlCmd->getCommandStreamerStallEnable());
 
-            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pipeControlCmd->getDcFlushEnable());
+            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), pipeControlCmd->getDcFlushEnable());
 
             EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, pipeControlCmd->getPostSyncOperation());
 
@@ -1636,7 +1652,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseOnEnqueueFlagSetWhenDispatchWalkersThenInser
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
 
-    HardwareParse hwParser;
+    ClHardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(*pCmdQ);
 
     findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
@@ -1661,7 +1677,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseOnEnqueueFlagSetToMinusTwoWhenDispatchWalker
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
 
-    HardwareParse hwParser;
+    ClHardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(*pCmdQ);
 
     findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
@@ -1685,7 +1701,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseModeSetToBeforeOnlyWhenDispatchingThenInsert
 
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
 
-    HardwareParse hwParser;
+    ClHardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(*pCmdQ);
 
     findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
@@ -1709,7 +1725,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseModeSetToAfterOnlyWhenDispatchingThenInsertP
 
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
 
-    HardwareParse hwParser;
+    ClHardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(*pCmdQ);
 
     findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
@@ -1733,7 +1749,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseModeSetToBeforeAndAfterWhenDispatchingThenIn
 
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
 
-    HardwareParse hwParser;
+    ClHardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(*pCmdQ);
 
     findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
@@ -1758,7 +1774,7 @@ HWTEST_F(PauseOnGpuTests, givenPauseOnEnqueueFlagSetWhenDispatchWalkersThenDontI
 
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
 
-    HardwareParse hwParser;
+    ClHardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(*pCmdQ);
 
     findSemaphores<MI_SEMAPHORE_WAIT>(hwParser.cmdList);
@@ -1782,7 +1798,7 @@ HWTEST_F(PauseOnGpuTests, givenGpuScratchWriteEnabledWhenDispatchWalkersThenInse
 
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
 
-    HardwareParse hwParser;
+    ClHardwareParse hwParser;
 
     hwParser.parseCommands<FamilyType>(*pCmdQ);
 
@@ -1810,7 +1826,7 @@ HWTEST_F(PauseOnGpuTests, givenGpuScratchWriteEnabledWhenDispatcMultiplehWalkers
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
     pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
 
-    HardwareParse hwParser;
+    ClHardwareParse hwParser;
 
     hwParser.parseCommands<FamilyType>(*pCmdQ);
 

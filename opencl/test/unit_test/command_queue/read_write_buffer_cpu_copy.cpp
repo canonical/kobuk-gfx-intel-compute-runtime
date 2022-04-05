@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,23 +7,24 @@
 
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/helpers/basic_math.h"
+#include "shared/source/helpers/local_memory_access_modes.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/test/unit_test/command_queue/enqueue_read_buffer_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
-#include "test.h"
 
 using namespace NEO;
 
 typedef EnqueueReadBufferTypeTest ReadWriteBufferCpuCopyTest;
 
-HWTEST_F(ReadWriteBufferCpuCopyTest, givenRenderCompressedGmmWhenAskingForCpuOperationThenDisallow) {
+HWTEST_F(ReadWriteBufferCpuCopyTest, givenCompressedGmmWhenAskingForCpuOperationThenDisallow) {
     DebugManagerStateRestore restorer;
     DebugManager.flags.ForceLocalMemoryAccessMode.set(static_cast<int32_t>(LocalMemoryAccessMode::Default));
     cl_int retVal;
     auto rootDeviceIndex = context->getDevice(0)->getRootDeviceIndex();
     std::unique_ptr<Buffer> buffer(Buffer::create(context, CL_MEM_READ_WRITE, 1, nullptr, retVal));
-    auto gmm = new Gmm(pDevice->getGmmClientContext(), nullptr, 1, 0, false);
+    auto gmm = new Gmm(pDevice->getGmmClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
     gmm->isCompressionEnabled = false;
     auto allocation = buffer->getGraphicsAllocation(rootDeviceIndex);
     allocation->setDefaultGmm(gmm);

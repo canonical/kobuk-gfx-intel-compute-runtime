@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,10 +7,11 @@
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/populate_factory.h"
+#include "shared/source/os_interface/hw_info_config.h"
 
 #include "opencl/source/context/context.h"
 #include "opencl/source/helpers/cl_hw_helper_base.inl"
-#include "opencl/source/helpers/cl_hw_helper_xehp_plus.inl"
+#include "opencl/source/helpers/cl_hw_helper_xehp_and_later.inl"
 
 #include "hw_cmds.h"
 
@@ -27,7 +28,7 @@ void populateFactoryTable<ClHwHelperHw<Family>>() {
 
 template <>
 bool ClHwHelperHw<Family>::requiresNonAuxMode(const ArgDescPointer &argAsPtr, const HardwareInfo &hwInfo) const {
-    if (HwHelperHw<Family>::get().allowStatelessCompression(hwInfo)) {
+    if (HwInfoConfig::get(hwInfo.platform.eProductFamily)->allowStatelessCompression(hwInfo)) {
         return false;
     } else {
         return !argAsPtr.isPureStateful();
@@ -36,7 +37,7 @@ bool ClHwHelperHw<Family>::requiresNonAuxMode(const ArgDescPointer &argAsPtr, co
 
 template <>
 bool ClHwHelperHw<Family>::requiresAuxResolves(const KernelInfo &kernelInfo, const HardwareInfo &hwInfo) const {
-    if (HwHelperHw<Family>::get().allowStatelessCompression(hwInfo)) {
+    if (HwInfoConfig::get(hwInfo.platform.eProductFamily)->allowStatelessCompression(hwInfo)) {
         return false;
     } else {
         return hasStatelessAccessToBuffer(kernelInfo);
@@ -44,7 +45,7 @@ bool ClHwHelperHw<Family>::requiresAuxResolves(const KernelInfo &kernelInfo, con
 }
 
 template <>
-inline bool ClHwHelperHw<Family>::allowRenderCompressionForContext(const ClDevice &clDevice, const Context &context) const {
+inline bool ClHwHelperHw<Family>::allowCompressionForContext(const ClDevice &clDevice, const Context &context) const {
     auto rootDeviceIndex = clDevice.getRootDeviceIndex();
     auto &hwInfo = clDevice.getHardwareInfo();
     if (context.containsMultipleSubDevices(rootDeviceIndex) && HwHelperHw<Family>::get().isWorkaroundRequired(REVISION_A0, REVISION_A1, hwInfo)) {
@@ -58,7 +59,7 @@ bool ClHwHelperHw<Family>::isSupportedKernelThreadArbitrationPolicy() const { re
 
 template <>
 std::vector<uint32_t> ClHwHelperHw<Family>::getSupportedThreadArbitrationPolicies() const {
-    return std::vector<uint32_t>{};
+    return {};
 }
 
 template <>

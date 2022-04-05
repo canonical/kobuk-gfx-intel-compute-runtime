@@ -1,18 +1,18 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_gmm.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/test/unit_test/fixtures/platform_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_d3d_objects.h"
-#include "opencl/test/unit_test/mocks/mock_gmm.h"
-#include "test.h"
 
 namespace NEO {
 template <>
@@ -55,11 +55,11 @@ class D3DTests : public PlatformFixture, public ::testing::Test {
             gmmOwnershipPassed = true;
             return alloc;
         }
-        GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex) override {
+        GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex, AllocationType allocType) override {
             if (failAlloc) {
                 return nullptr;
             }
-            AllocationProperties properties(rootDeviceIndex, true, 0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY, false, false, 0);
+            AllocationProperties properties(rootDeviceIndex, true, 0, AllocationType::INTERNAL_HOST_MEMORY, false, false, 0);
             auto alloc = OsAgnosticMemoryManager::createGraphicsAllocationFromSharedHandle(toOsHandle(handle), properties, false, false);
             alloc->setDefaultGmm(forceGmm);
             gmmOwnershipPassed = true;
@@ -80,14 +80,14 @@ class D3DTests : public PlatformFixture, public ::testing::Test {
     };
 
     void setupMockGmm() {
-        cl_image_desc imgDesc = {};
-        imgDesc.image_height = 4;
-        imgDesc.image_width = 4;
-        imgDesc.image_depth = 1;
-        imgDesc.image_type = CL_MEM_OBJECT_IMAGE2D;
+        ImageDescriptor imgDesc = {};
+        imgDesc.imageHeight = 4;
+        imgDesc.imageWidth = 4;
+        imgDesc.imageDepth = 1;
+        imgDesc.imageType = ImageType::Image2D;
         auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-        gmm = MockGmm::queryImgParams(pPlatform->peekExecutionEnvironment()->rootDeviceEnvironments[0]->getGmmClientContext(), imgInfo).release();
-        mockGmmResInfo = reinterpret_cast<NiceMock<MockGmmResourceInfo> *>(gmm->gmmResourceInfo.get());
+        gmm = MockGmm::queryImgParams(pPlatform->peekExecutionEnvironment()->rootDeviceEnvironments[0]->getGmmClientContext(), imgInfo, false).release();
+        mockGmmResInfo = static_cast<MockGmmResourceInfo *>(gmm->gmmResourceInfo.get());
 
         mockMM->forceGmm = gmm;
     }
@@ -101,9 +101,9 @@ class D3DTests : public PlatformFixture, public ::testing::Test {
         context->preferD3dSharedResources = true;
         mockMM = std::make_unique<MockMM>(*context->getDevice(0)->getExecutionEnvironment());
 
-        mockSharingFcns = new NiceMock<MockD3DSharingFunctions<T>>();
-        auto checkFormat = [](DXGI_FORMAT format, UINT *pFormat) -> bool { *pFormat = D3D11_FORMAT_SUPPORT_BUFFER | D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_TEXTURE3D; return true; };
-        ON_CALL(*mockSharingFcns, checkFormatSupport(::testing::_, ::testing::_)).WillByDefault(::testing::Invoke(checkFormat));
+        mockSharingFcns = new MockD3DSharingFunctions<T>();
+        mockSharingFcns->checkFormatSupportSetParam1 = true;
+        mockSharingFcns->checkFormatSupportParamsSet.pFormat = D3D11_FORMAT_SUPPORT_BUFFER | D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_TEXTURE3D;
 
         context->setSharingFunctions(mockSharingFcns);
         context->memoryManager = mockMM.get();
@@ -193,7 +193,7 @@ class D3DTests : public PlatformFixture, public ::testing::Test {
         return clGetDeviceIDsFromD3D11KHR(platform, d3dDeviceSource, d3dObject, d3dDeviceSet, numEntries, devices, numDevices);
     }
 
-    NiceMock<MockD3DSharingFunctions<T>> *mockSharingFcns;
+    MockD3DSharingFunctions<T> *mockSharingFcns;
     MockContext *context;
     MockCommandQueue *cmdQ;
     char dummyD3DBuffer;
@@ -201,7 +201,7 @@ class D3DTests : public PlatformFixture, public ::testing::Test {
     char dummyD3DTexture;
     char dummyD3DTextureStaging;
     Gmm *gmm = nullptr;
-    NiceMock<MockGmmResourceInfo> *mockGmmResInfo = nullptr;
+    MockGmmResourceInfo *mockGmmResInfo = nullptr;
 
     DebugManagerStateRestore dbgRestore;
     std::unique_ptr<MockMM> mockMM;

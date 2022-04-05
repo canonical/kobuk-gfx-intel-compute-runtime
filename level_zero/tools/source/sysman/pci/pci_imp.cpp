@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,7 @@
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/string.h"
+#include "shared/source/utilities/directory.h"
 
 #include <cstring>
 namespace L0 {
@@ -25,7 +26,7 @@ namespace L0 {
 //
 int64_t convertPcieSpeedFromGTsToBs(double maxLinkSpeedInGt) {
     double pcieSpeedWithEnc;
-    if ((maxLinkSpeedInGt == PciLinkSpeeds::Pci16_0GigatransfersPerSecond) || (maxLinkSpeedInGt == PciLinkSpeeds::Pci8_0GigatransfersPerSecond)) {
+    if ((maxLinkSpeedInGt == PciLinkSpeeds::Pci32_0GigatransfersPerSecond) || (maxLinkSpeedInGt == PciLinkSpeeds::Pci16_0GigatransfersPerSecond) || (maxLinkSpeedInGt == PciLinkSpeeds::Pci8_0GigatransfersPerSecond)) {
         pcieSpeedWithEnc = maxLinkSpeedInGt * 1000 * 128 / 130;
     } else if ((maxLinkSpeedInGt == PciLinkSpeeds::Pci5_0GigatransfersPerSecond) || (maxLinkSpeedInGt == PciLinkSpeeds::Pci2_5GigatransfersPerSecond)) {
         pcieSpeedWithEnc = maxLinkSpeedInGt * 1000 * 8 / 10;
@@ -99,15 +100,17 @@ ze_result_t PciImp::pciGetInitializedBars(uint32_t *pCount, zes_pci_bar_properti
             pProperties[i].size = pciBarProperties[i]->size;
             pProperties[i].type = pciBarProperties[i]->type;
 
-            if (pProperties[i].pNext != nullptr && pProperties[i].stype == zes_structure_type_t::ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES_1_2) {
+            if (pProperties[i].pNext != nullptr) {
                 zes_pci_bar_properties_1_2_t *pBarPropsExt = static_cast<zes_pci_bar_properties_1_2_t *>(pProperties[i].pNext);
-                // base, index, size and type are the same as the non 1.2 struct.
-                pBarPropsExt->base = pciBarProperties[i]->base;
-                pBarPropsExt->index = pciBarProperties[i]->index;
-                pBarPropsExt->size = pciBarProperties[i]->size;
-                pBarPropsExt->type = pciBarProperties[i]->type;
-                pBarPropsExt->resizableBarEnabled = static_cast<ze_bool_t>(resizableBarEnabled);
-                pBarPropsExt->resizableBarSupported = static_cast<ze_bool_t>(resizableBarSupported);
+                if (pBarPropsExt->stype == zes_structure_type_t::ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES_1_2) {
+                    // base, index, size and type are the same as the non 1.2 struct.
+                    pBarPropsExt->base = pciBarProperties[i]->base;
+                    pBarPropsExt->index = pciBarProperties[i]->index;
+                    pBarPropsExt->size = pciBarProperties[i]->size;
+                    pBarPropsExt->type = pciBarProperties[i]->type;
+                    pBarPropsExt->resizableBarSupported = static_cast<ze_bool_t>(resizableBarSupported);
+                    pBarPropsExt->resizableBarEnabled = static_cast<ze_bool_t>(pOsPci->resizableBarEnabled(pBarPropsExt->index));
+                }
             }
         }
     }
@@ -120,24 +123,9 @@ ze_result_t PciImp::pciGetState(zes_pci_state_t *pState) {
 
 void PciImp::pciGetStaticFields() {
     pOsPci->getProperties(&pciProperties);
-    resizableBarEnabled = pOsPci->resizableBarEnabled();
     resizableBarSupported = pOsPci->resizableBarSupported();
     std::string bdf;
-    pOsPci->getPciBdf(bdf);
-    if (bdf.empty()) {
-        pciProperties.address.domain = 0;
-        pciProperties.address.bus = 0;
-        pciProperties.address.device = 0;
-        pciProperties.address.function = 0;
-    } else {
-        int domain = -1, bus = -1, device = -1, function = -1;
-        sscanf(bdf.c_str(), "%04x:%02x:%02x.%d", &domain, &bus, &device, &function);
-        pciProperties.address.domain = static_cast<uint32_t>(domain);
-        pciProperties.address.bus = static_cast<uint32_t>(bus);
-        pciProperties.address.device = static_cast<uint32_t>(device);
-        pciProperties.address.function = static_cast<uint32_t>(function);
-    }
-
+    pOsPci->getPciBdf(pciProperties);
     int32_t maxLinkWidth = -1;
     int64_t maxBandWidth = -1;
     double maxLinkSpeed = 0;

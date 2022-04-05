@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,6 +11,7 @@
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
 
 #include "opencl/extensions/public/cl_ext_private.h"
 
@@ -25,92 +26,25 @@ constexpr uint32_t hwConfigTestMidBatchBit = 1 << 10;
 template <>
 int HwInfoConfigHw<IGFX_UNKNOWN>::configureHardwareCustom(HardwareInfo *hwInfo, OSInterface *osIface) {
     FeatureTable *featureTable = &hwInfo->featureTable;
-    featureTable->ftrGpGpuMidThreadLevelPreempt = 0;
-    featureTable->ftrGpGpuThreadGroupLevelPreempt = 0;
-    featureTable->ftrGpGpuMidBatchPreempt = 0;
+    featureTable->flags.ftrGpGpuMidThreadLevelPreempt = 0;
+    featureTable->flags.ftrGpGpuThreadGroupLevelPreempt = 0;
+    featureTable->flags.ftrGpGpuMidBatchPreempt = 0;
 
     if (hwInfo->platform.usDeviceID == 30) {
         GT_SYSTEM_INFO *gtSystemInfo = &hwInfo->gtSystemInfo;
         gtSystemInfo->EdramSizeInKb = 128 * 1000;
     }
     if (hwInfo->platform.usDeviceID & hwConfigTestMidThreadBit) {
-        featureTable->ftrGpGpuMidThreadLevelPreempt = 1;
+        featureTable->flags.ftrGpGpuMidThreadLevelPreempt = 1;
     }
     if (hwInfo->platform.usDeviceID & hwConfigTestThreadGroupBit) {
-        featureTable->ftrGpGpuThreadGroupLevelPreempt = 1;
+        featureTable->flags.ftrGpGpuThreadGroupLevelPreempt = 1;
     }
     if (hwInfo->platform.usDeviceID & hwConfigTestMidBatchBit) {
-        featureTable->ftrGpGpuMidBatchPreempt = 1;
+        featureTable->flags.ftrGpGpuMidBatchPreempt = 1;
     }
     return (hwInfo->platform.usDeviceID == 10) ? -1 : 0;
 }
-
-template <>
-cl_unified_shared_memory_capabilities_intel HwInfoConfigHw<IGFX_UNKNOWN>::getHostMemCapabilities(const HardwareInfo * /*hwInfo*/) {
-    return 0;
-}
-
-template <>
-void HwInfoConfigHw<IGFX_UNKNOWN>::adjustPlatformForProductFamily(HardwareInfo *hwInfo) {
-}
-
-template <>
-cl_unified_shared_memory_capabilities_intel HwInfoConfigHw<IGFX_UNKNOWN>::getDeviceMemCapabilities() {
-    return 0;
-}
-
-template <>
-cl_unified_shared_memory_capabilities_intel HwInfoConfigHw<IGFX_UNKNOWN>::getSingleDeviceSharedMemCapabilities() {
-    return 0;
-}
-
-template <>
-cl_unified_shared_memory_capabilities_intel HwInfoConfigHw<IGFX_UNKNOWN>::getCrossDeviceSharedMemCapabilities() {
-    return 0;
-}
-
-template <>
-void HwInfoConfigHw<IGFX_UNKNOWN>::getKernelExtendedProperties(uint32_t *fp16, uint32_t *fp32, uint32_t *fp64) {
-}
-
-template <>
-uint32_t HwInfoConfigHw<IGFX_UNKNOWN>::getDeviceMemoryMaxClkRate(const HardwareInfo *hwInfo) {
-    return 0;
-}
-
-template <>
-cl_unified_shared_memory_capabilities_intel HwInfoConfigHw<IGFX_UNKNOWN>::getSharedSystemMemCapabilities() {
-    return 0;
-}
-
-template <>
-void HwInfoConfigHw<IGFX_UNKNOWN>::adjustSamplerState(void *sampler, const HardwareInfo &hwInfo){};
-
-template <>
-void HwInfoConfigHw<IGFX_UNKNOWN>::convertTimestampsFromOaToCsDomain(uint64_t &timestampData){};
-
-template <>
-bool HwInfoConfigHw<IGFX_UNKNOWN>::isAdditionalStateBaseAddressWARequired(const HardwareInfo &hwInfo) const {
-    return false;
-}
-
-template <>
-bool HwInfoConfigHw<IGFX_UNKNOWN>::isMaxThreadsForWorkgroupWARequired(const HardwareInfo &hwInfo) const {
-    return false;
-}
-
-template <>
-uint32_t HwInfoConfigHw<IGFX_UNKNOWN>::getMaxThreadsForWorkgroupInDSSOrSS(const HardwareInfo &hwInfo, uint32_t maxNumEUsPerSubSlice, uint32_t maxNumEUsPerDualSubSlice) const {
-    return 0;
-}
-
-template <>
-uint32_t HwInfoConfigHw<IGFX_UNKNOWN>::getMaxThreadsForWorkgroup(const HardwareInfo &hwInfo, uint32_t maxNumEUsPerSubSlice) const {
-    return 0;
-}
-
-template <>
-void HwInfoConfigHw<IGFX_UNKNOWN>::setForceNonCoherent(void *const commandPtr, const StateComputeModeProperties &properties) {}
 } // namespace NEO
 
 struct DummyHwConfig : HwInfoConfigHw<IGFX_UNKNOWN> {
@@ -164,7 +98,7 @@ struct HwInfoConfigTestLinuxDummy : HwInfoConfigTestLinux {
         HwInfoConfigTestLinux::SetUp();
 
         drm->storedDeviceID = 1;
-        drm->setGtType(GTTYPE_GT0);
+
         testPlatform->eRenderCoreFamily = defaultHwInfo->platform.eRenderCoreFamily;
     }
 
@@ -179,10 +113,6 @@ TEST_F(HwInfoConfigTestLinuxDummy, GivenDummyConfigWhenConfiguringHwInfoThenSucc
     int ret = hwConfig.configureHwInfoDrm(&pInHwInfo, &outHwInfo, osInterface);
     EXPECT_EQ(0, ret);
 }
-
-GTTYPE GtTypes[] = {
-    GTTYPE_GT1, GTTYPE_GT2, GTTYPE_GT1_5, GTTYPE_GT2_5, GTTYPE_GT3, GTTYPE_GT4, GTTYPE_GTA, GTTYPE_GTC, GTTYPE_GTX};
-
 using HwInfoConfigCommonLinuxTest = ::testing::Test;
 
 HWTEST2_F(HwInfoConfigCommonLinuxTest, givenDebugFlagSetWhenEnablingBlitterOperationsSupportThenIgnore, IsAtMostGen11) {
@@ -196,56 +126,11 @@ HWTEST2_F(HwInfoConfigCommonLinuxTest, givenDebugFlagSetWhenEnablingBlitterOpera
     EXPECT_FALSE(hardwareInfo.capabilityTable.blitterOperationsSupported);
 }
 
-TEST_F(HwInfoConfigTestLinuxDummy, GivenDummyConfigGtTypesThenFtrIsSetCorrectly) {
-    int ret = hwConfig.configureHwInfoDrm(&pInHwInfo, &outHwInfo, osInterface);
-    EXPECT_EQ(0, ret);
-
-    EXPECT_EQ(GTTYPE_GT0, outHwInfo.platform.eGTType);
-    EXPECT_EQ(0u, outHwInfo.featureTable.ftrGT1);
-    EXPECT_EQ(0u, outHwInfo.featureTable.ftrGT1_5);
-    EXPECT_EQ(0u, outHwInfo.featureTable.ftrGT2);
-    EXPECT_EQ(0u, outHwInfo.featureTable.ftrGT2_5);
-    EXPECT_EQ(0u, outHwInfo.featureTable.ftrGT3);
-    EXPECT_EQ(0u, outHwInfo.featureTable.ftrGT4);
-    EXPECT_EQ(0u, outHwInfo.featureTable.ftrGTA);
-    EXPECT_EQ(0u, outHwInfo.featureTable.ftrGTC);
-    EXPECT_EQ(0u, outHwInfo.featureTable.ftrGTX);
-
-    size_t arrSize = sizeof(GtTypes) / sizeof(GTTYPE);
-    uint32_t FtrSum = 0;
-    for (uint32_t i = 0; i < arrSize; i++) {
-        drm->setGtType(GtTypes[i]);
-        ret = hwConfig.configureHwInfoDrm(&pInHwInfo, &outHwInfo, osInterface);
-        EXPECT_EQ(0, ret);
-        EXPECT_EQ(GtTypes[i], outHwInfo.platform.eGTType);
-        bool FtrPresent = (outHwInfo.featureTable.ftrGT1 ||
-                           outHwInfo.featureTable.ftrGT1_5 ||
-                           outHwInfo.featureTable.ftrGT2 ||
-                           outHwInfo.featureTable.ftrGT2_5 ||
-                           outHwInfo.featureTable.ftrGT3 ||
-                           outHwInfo.featureTable.ftrGT4 ||
-                           outHwInfo.featureTable.ftrGTA ||
-                           outHwInfo.featureTable.ftrGTC ||
-                           outHwInfo.featureTable.ftrGTX);
-        EXPECT_TRUE(FtrPresent);
-        FtrSum += (outHwInfo.featureTable.ftrGT1 +
-                   outHwInfo.featureTable.ftrGT1_5 +
-                   outHwInfo.featureTable.ftrGT2 +
-                   outHwInfo.featureTable.ftrGT2_5 +
-                   outHwInfo.featureTable.ftrGT3 +
-                   outHwInfo.featureTable.ftrGT4 +
-                   outHwInfo.featureTable.ftrGTA +
-                   outHwInfo.featureTable.ftrGTC +
-                   outHwInfo.featureTable.ftrGTX);
-    }
-    EXPECT_EQ(arrSize, FtrSum);
-}
-
 TEST_F(HwInfoConfigTestLinuxDummy, GivenDummyConfigThenEdramIsDetected) {
     drm->storedDeviceID = 30;
     int ret = hwConfig.configureHwInfoDrm(&pInHwInfo, &outHwInfo, osInterface);
     EXPECT_EQ(0, ret);
-    EXPECT_EQ(1u, outHwInfo.featureTable.ftrEDram);
+    EXPECT_EQ(1u, outHwInfo.featureTable.flags.ftrEDram);
 }
 
 TEST_F(HwInfoConfigTestLinuxDummy, givenEnabledPlatformCoherencyWhenConfiguringHwInfoThenIgnoreAndSetAsDisabled) {
@@ -260,13 +145,6 @@ TEST_F(HwInfoConfigTestLinuxDummy, givenDisabledPlatformCoherencyWhenConfiguring
     int ret = hwConfig.configureHwInfoDrm(&pInHwInfo, &outHwInfo, osInterface);
     EXPECT_EQ(0, ret);
     EXPECT_FALSE(outHwInfo.capabilityTable.ftrSupportsCoherency);
-}
-
-TEST_F(HwInfoConfigTestLinuxDummy, GivenUnknownGtTypeWhenConfiguringHwInfoThenFails) {
-    drm->setGtType(GTTYPE_UNDEFINED);
-
-    int ret = hwConfig.configureHwInfoDrm(&pInHwInfo, &outHwInfo, osInterface);
-    EXPECT_EQ(-1, ret);
 }
 
 TEST_F(HwInfoConfigTestLinuxDummy, GivenUnknownDevIdWhenConfiguringHwInfoThenFails) {
@@ -358,7 +236,6 @@ TEST_F(HwInfoConfigTestLinuxDummy, GivenFailingCustomConfigWhenConfiguringHwInfo
 
 TEST_F(HwInfoConfigTestLinuxDummy, GivenUnknownDeviceIdWhenConfiguringHwInfoThenFails) {
     drm->storedDeviceID = 0;
-    drm->setGtType(GTTYPE_GT1);
 
     auto hwConfig = DummyHwConfig{};
     int ret = hwConfig.configureHwInfoDrm(&pInHwInfo, &outHwInfo, osInterface);
@@ -378,13 +255,16 @@ TEST_F(HwInfoConfigTestLinuxDummy, whenConfigureHwInfoIsCalledAndPersitentContex
     EXPECT_FALSE(drm->areNonPersistentContextsSupported());
 }
 
-TEST_F(HwInfoConfigTestLinuxDummy, GivenPreemptionDrmEnabledMidThreadOnWhenConfiguringHwInfoThenPreemptionIsSupported) {
+HWTEST_F(HwInfoConfigTestLinuxDummy, GivenPreemptionDrmEnabledMidThreadOnWhenConfiguringHwInfoThenPreemptionIsSupported) {
     pInHwInfo.capabilityTable.defaultPreemptionMode = PreemptionMode::MidThread;
     drm->storedPreemptionSupport =
         I915_SCHEDULER_CAP_ENABLED |
         I915_SCHEDULER_CAP_PRIORITY |
         I915_SCHEDULER_CAP_PREEMPTION;
     drm->storedDeviceID = hwConfigTestMidThreadBit;
+
+    UnitTestHelper<FamilyType>::setExtraMidThreadPreemptionFlag(pInHwInfo, true);
+
     int ret = hwConfig.configureHwInfoDrm(&pInHwInfo, &outHwInfo, osInterface);
     EXPECT_EQ(0, ret);
     EXPECT_EQ(PreemptionMode::MidThread, outHwInfo.capabilityTable.defaultPreemptionMode);
@@ -516,7 +396,9 @@ TEST_F(HwInfoConfigTestLinuxDummy, givenPointerToHwInfoWhenConfigureHwInfoCalled
     EXPECT_EQ(MemoryConstants::pageSize, pInHwInfo.capabilityTable.requiredPreemptionSurfaceSize);
     int ret = hwConfig.configureHwInfoDrm(&pInHwInfo, &outHwInfo, osInterface);
     EXPECT_EQ(0, ret);
-    EXPECT_EQ(outHwInfo.gtSystemInfo.CsrSizeInMb * MemoryConstants::megaByte, outHwInfo.capabilityTable.requiredPreemptionSurfaceSize);
+    auto expectedSize = static_cast<size_t>(outHwInfo.gtSystemInfo.CsrSizeInMb * MemoryConstants::megaByte);
+    HwHelper::get(outHwInfo.platform.eRenderCoreFamily).adjustPreemptionSurfaceSize(expectedSize);
+    EXPECT_EQ(expectedSize, outHwInfo.capabilityTable.requiredPreemptionSurfaceSize);
 }
 
 TEST_F(HwInfoConfigTestLinuxDummy, givenInstrumentationForHardwareIsEnabledOrDisabledWhenConfiguringHwInfoThenOverrideItUsingHaveInstrumentation) {
@@ -562,16 +444,6 @@ TEST_F(HwInfoConfigTestLinuxDummy, givenFailingGttSizeIoctlWhenInitializingHwInf
     EXPECT_EQ(pInHwInfo.capabilityTable.gpuAddressSpace, outHwInfo.capabilityTable.gpuAddressSpace);
 }
 
-HWTEST_F(HwInfoConfigTestLinuxDummy, givenHardwareInfoWhenCallingIsAdditionalStateBaseAddressWARequiredThenFalseIsReturned) {
-    bool ret = hwConfig.isAdditionalStateBaseAddressWARequired(outHwInfo);
-    EXPECT_FALSE(ret);
-}
-
-HWTEST_F(HwInfoConfigTestLinuxDummy, givenHardwareInfoWhenCallingIsMaxThreadsForWorkgroupWARequiredThenFalseIsReturned) {
-    bool ret = hwConfig.isMaxThreadsForWorkgroupWARequired(outHwInfo);
-    EXPECT_FALSE(ret);
-}
-
 using HwConfigLinux = ::testing::Test;
 
 HWTEST2_F(HwConfigLinux, GivenDifferentValuesFromTopologyQueryWhenConfiguringHwInfoThenMaxSlicesSupportedSetToAvailableCountInGtSystemInfo, MatchAny) {
@@ -580,7 +452,6 @@ HWTEST2_F(HwConfigLinux, GivenDifferentValuesFromTopologyQueryWhenConfiguringHwI
 
     *executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo() = *NEO::defaultHwInfo.get();
     auto drm = new DrmMock(*executionEnvironment->rootDeviceEnvironments[0]);
-    drm->setGtType(GTTYPE_GT1);
 
     auto osInterface = std::make_unique<OSInterface>();
     osInterface->setDriverModel(std::unique_ptr<DriverModel>(drm));
@@ -625,4 +496,29 @@ HWTEST2_F(HwConfigLinux, GivenDifferentValuesFromTopologyQueryWhenConfiguringHwI
     ret = hwConfig->configureHwInfoDrm(&hwInfo, &outHwInfo, osInterface.get());
     EXPECT_EQ(0, ret);
     EXPECT_EQ(8u, outHwInfo.gtSystemInfo.MaxEuPerSubSlice);
+}
+
+HWTEST2_F(HwConfigLinux, givenSliceCountWhenConfigureHwInfoDrmThenProperInitializationInSliceInfoEnabled, MatchAny) {
+    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
+    executionEnvironment->prepareRootDeviceEnvironments(1);
+
+    *executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo() = *NEO::defaultHwInfo.get();
+    auto drm = new DrmMock(*executionEnvironment->rootDeviceEnvironments[0]);
+
+    auto osInterface = std::make_unique<OSInterface>();
+    osInterface->setDriverModel(std::unique_ptr<DriverModel>(drm));
+
+    auto hwInfo = *executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo();
+    HardwareInfo outHwInfo;
+    auto hwConfig = HwInfoConfigHw<productFamily>::get();
+    uint32_t sliceCount = 4;
+    drm->storedSVal = sliceCount;
+    hwInfo.gtSystemInfo.SliceCount = sliceCount;
+
+    int ret = hwConfig->configureHwInfoDrm(&hwInfo, &outHwInfo, osInterface.get());
+    EXPECT_EQ(0, ret);
+
+    for (uint32_t i = 0; i < sliceCount; i++) {
+        EXPECT_TRUE(outHwInfo.gtSystemInfo.SliceInfo[i].Enabled);
+    }
 }

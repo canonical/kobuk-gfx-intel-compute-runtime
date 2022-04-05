@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,17 +7,20 @@
 
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/source/helpers/local_work_size.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
+#include "shared/source/utilities/perf_counter.h"
 #include "shared/source/utilities/tag_allocator.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_timestamp_container.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/built_ins/aux_translation_builtin.h"
 #include "opencl/source/command_queue/gpgpu_walker.h"
 #include "opencl/source/command_queue/hardware_interface.h"
-#include "opencl/source/event/perf_counter.h"
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/helpers/task_information.h"
 #include "opencl/test/unit_test/command_queue/command_queue_fixture.h"
@@ -27,8 +30,6 @@
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_mdi.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
-#include "opencl/test/unit_test/mocks/mock_timestamp_container.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -893,7 +894,7 @@ HWTEST_F(DispatchWalkerTest, givenThereAreAllocationsForReuseWhenDispatchWalkerI
 
     auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
     auto allocation = csr.getMemoryManager()->allocateGraphicsMemoryWithProperties({csr.getRootDeviceIndex(), MemoryConstants::pageSize64k + CSRequirements::csOverfetchSize,
-                                                                                    GraphicsAllocation::AllocationType::COMMAND_BUFFER, csr.getOsContext().getDeviceBitfield()});
+                                                                                    AllocationType::COMMAND_BUFFER, csr.getOsContext().getDeviceBitfield()});
     csr.getInternalAllocationStorage()->storeAllocation(std::unique_ptr<GraphicsAllocation>{allocation}, REUSABLE_ALLOCATION);
     ASSERT_FALSE(csr.getInternalAllocationStorage()->getAllocationsForReuse().peekIsEmpty());
 
@@ -944,8 +945,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, DispatchWalkerTest, GivenMultipleKernelsWhenDispatch
     using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
 
     auto memoryManager = this->pDevice->getMemoryManager();
-    auto kernelIsaAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::KERNEL_ISA, pDevice->getDeviceBitfield()});
-    auto kernelIsaWithSamplerAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::KERNEL_ISA, pDevice->getDeviceBitfield()});
+    auto kernelIsaAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, AllocationType::KERNEL_ISA, pDevice->getDeviceBitfield()});
+    auto kernelIsaWithSamplerAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, AllocationType::KERNEL_ISA, pDevice->getDeviceBitfield()});
     kernelInfo.kernelAllocation = kernelIsaAllocation;
     kernelInfoWithSampler.kernelAllocation = kernelIsaWithSamplerAllocation;
     auto gpuAddress1 = kernelIsaAllocation->getGpuAddressToPatch();
@@ -959,7 +960,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, DispatchWalkerTest, GivenMultipleKernelsWhenDispatch
     MockMultiDispatchInfo multiDispatchInfo(pClDevice, std::vector<Kernel *>({&kernel1, &kernel2}));
 
     // create Indirect DSH heap
-    auto &indirectHeap = pCmdQ->getIndirectHeap(IndirectHeap::DYNAMIC_STATE, 8192);
+    auto &indirectHeap = pCmdQ->getIndirectHeap(IndirectHeap::Type::DYNAMIC_STATE, 8192);
 
     indirectHeap.align(EncodeStates<FamilyType>::alignInterfaceDescriptorData);
     auto dshBeforeMultiDisptach = indirectHeap.getUsed();
@@ -1366,7 +1367,7 @@ HWTEST_P(DispatchWalkerTestForAuxTranslation, givenKernelWhenAuxToNonAuxWhenTran
     ASSERT_EQ(2u, pipeControls.size());
 
     auto beginPipeControl = genCmdCast<typename FamilyType::PIPE_CONTROL *>(*(pipeControls[0]));
-    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), beginPipeControl->getDcFlushEnable());
+    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), beginPipeControl->getDcFlushEnable());
     EXPECT_TRUE(beginPipeControl->getCommandStreamerStallEnable());
 
     auto endPipeControl = genCmdCast<typename FamilyType::PIPE_CONTROL *>(*(pipeControls[1]));
@@ -1422,7 +1423,7 @@ HWTEST_P(DispatchWalkerTestForAuxTranslation, givenKernelWhenNonAuxToAuxWhenTran
     bool dcFlushRequired = (pClDevice->getHardwareInfo().platform.eRenderCoreFamily == IGFX_GEN8_CORE);
 
     auto beginPipeControl = genCmdCast<typename FamilyType::PIPE_CONTROL *>(*(pipeControls[0]));
-    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), beginPipeControl->getDcFlushEnable());
+    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), beginPipeControl->getDcFlushEnable());
     EXPECT_TRUE(beginPipeControl->getCommandStreamerStallEnable());
 
     auto endPipeControl = genCmdCast<typename FamilyType::PIPE_CONTROL *>(*(pipeControls[1]));
@@ -1491,7 +1492,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingCommandsTest, givenKernelWhenProfilingComma
     auto pipeControl = genCmdCast<PIPE_CONTROL *>(*itorPipeCtrl);
     ASSERT_NE(nullptr, pipeControl);
 
-    gpuAddress = static_cast<uint64_t>(pipeControl->getAddress()) | (static_cast<uint64_t>(pipeControl->getAddressHigh()) << 32);
+    gpuAddress = NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControl);
     expectedAddress = hwTimeStamp1->getGpuAddress() + offsetof(HwTimeStamps, GlobalStartTS);
     EXPECT_EQ(expectedAddress, gpuAddress);
 
@@ -1507,7 +1508,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingCommandsTest, givenKernelWhenProfilingComma
     pipeControl = genCmdCast<PIPE_CONTROL *>(*itorPipeCtrl);
     ASSERT_NE(nullptr, pipeControl);
 
-    gpuAddress = static_cast<uint64_t>(pipeControl->getAddress()) | static_cast<uint64_t>(pipeControl->getAddressHigh()) << 32;
+    gpuAddress = NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControl);
     expectedAddress = hwTimeStamp2->getGpuAddress() + offsetof(HwTimeStamps, GlobalStartTS);
     EXPECT_EQ(expectedAddress, gpuAddress);
 }
@@ -1550,4 +1551,72 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingCommandsTest, givenKernelWhenProfilingComma
     gpuAddress = storeReg->getMemoryAddress();
     expectedAddress = hwTimeStamp2->getGpuAddress() + contextTimestampFieldOffset;
     EXPECT_EQ(expectedAddress, gpuAddress);
+}
+
+HWTEST_F(DispatchWalkerTest, WhenKernelRequiresImplicitArgsThenIohRequiresMoreSpace) {
+    size_t globalOffsets[3] = {0, 0, 0};
+    size_t workItems[3] = {1, 1, 1};
+    size_t workGroupSize[3] = {2, 5, 10};
+    cl_uint dimensions = 1;
+    Vec3<size_t> localWorkgroupSize(workGroupSize);
+    auto blockedCommandsData = createBlockedCommandsData(*pCmdQ);
+
+    kernelInfo.kernelDescriptor.kernelAttributes.simdSize = 1u;
+    kernelInfo.kernelDescriptor.kernelAttributes.flags.requiresImplicitArgs = false;
+    MockKernel kernelWithoutImplicitArgs(program.get(), kernelInfo, *pClDevice);
+    ASSERT_EQ(CL_SUCCESS, kernelWithoutImplicitArgs.initialize());
+
+    UnitTestHelper<FamilyType>::adjustKernelDescriptorForImplicitArgs(kernelInfo.kernelDescriptor);
+    MockKernel kernelWithImplicitArgs(program.get(), kernelInfo, *pClDevice);
+    ASSERT_EQ(CL_SUCCESS, kernelWithImplicitArgs.initialize());
+
+    DispatchInfo dispatchInfoWithoutImplicitArgs(pClDevice, const_cast<MockKernel *>(&kernelWithoutImplicitArgs), dimensions, workItems, workGroupSize, globalOffsets);
+    dispatchInfoWithoutImplicitArgs.setNumberOfWorkgroups({1, 1, 1});
+    dispatchInfoWithoutImplicitArgs.setTotalNumberOfWorkgroups({1, 1, 1});
+    MultiDispatchInfo multiDispatchInfoWithoutImplicitArgs(&kernelWithoutImplicitArgs);
+    multiDispatchInfoWithoutImplicitArgs.push(dispatchInfoWithoutImplicitArgs);
+    HardwareInterface<FamilyType>::dispatchWalker(
+        *pCmdQ,
+        multiDispatchInfoWithoutImplicitArgs,
+        CsrDependencies(),
+        blockedCommandsData.get(),
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        CL_COMMAND_NDRANGE_KERNEL);
+
+    auto iohSizeWithoutImplicitArgs = HardwareCommandsHelper<FamilyType>::getSizeRequiredIOH(kernelWithoutImplicitArgs, Math::computeTotalElementsCount(localWorkgroupSize));
+
+    DispatchInfo dispatchInfoWithImplicitArgs(pClDevice, const_cast<MockKernel *>(&kernelWithImplicitArgs), dimensions, workItems, workGroupSize, globalOffsets);
+    dispatchInfoWithImplicitArgs.setNumberOfWorkgroups({1, 1, 1});
+    dispatchInfoWithImplicitArgs.setTotalNumberOfWorkgroups({1, 1, 1});
+    MultiDispatchInfo multiDispatchInfoWithImplicitArgs(&kernelWithoutImplicitArgs);
+    multiDispatchInfoWithImplicitArgs.push(dispatchInfoWithImplicitArgs);
+    HardwareInterface<FamilyType>::dispatchWalker(
+        *pCmdQ,
+        multiDispatchInfoWithImplicitArgs,
+        CsrDependencies(),
+        blockedCommandsData.get(),
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        CL_COMMAND_NDRANGE_KERNEL);
+
+    auto iohSizeWithImplicitArgs = HardwareCommandsHelper<FamilyType>::getSizeRequiredIOH(kernelWithImplicitArgs, Math::computeTotalElementsCount(localWorkgroupSize));
+
+    EXPECT_LE(iohSizeWithoutImplicitArgs, iohSizeWithImplicitArgs);
+
+    {
+        auto numChannels = kernelInfo.kernelDescriptor.kernelAttributes.numLocalIdChannels;
+        auto simdSize = kernelInfo.getMaxSimdSize();
+        uint32_t grfSize = sizeof(typename FamilyType::GRF);
+        auto size = kernelWithImplicitArgs.getCrossThreadDataSize() +
+                    HardwareCommandsHelper<FamilyType>::getPerThreadDataSizeTotal(simdSize, grfSize, numChannels, Math::computeTotalElementsCount(localWorkgroupSize)) +
+                    ImplicitArgsHelper::getSizeForImplicitArgsPatching(kernelWithImplicitArgs.getImplicitArgs(), kernelWithImplicitArgs.getDescriptor(), *defaultHwInfo);
+
+        size = alignUp(size, MemoryConstants::cacheLineSize);
+        EXPECT_EQ(size, iohSizeWithImplicitArgs);
+    }
 }

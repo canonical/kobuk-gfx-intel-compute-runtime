@@ -5,19 +5,27 @@
  *
  */
 
+#include "shared/source/command_container/implicit_scaling.h"
+#include "shared/source/direct_submission/dispatchers/blitter_dispatcher.h"
 #include "shared/source/direct_submission/dispatchers/render_dispatcher.h"
 #include "shared/source/direct_submission/linux/drm_direct_submission.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
+#include "shared/test/common/helpers/variable_backup.h"
+#include "shared/test/common/libult/linux/drm_mock.h"
+#include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_device.h"
-
-#include "opencl/test/unit_test/os_interface/linux/drm_memory_manager_tests.h"
-#include "opencl/test/unit_test/os_interface/linux/drm_mock.h"
-#include "test.h"
+#include "shared/test/common/os_interface/linux/drm_memory_manager_tests.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include <memory>
+
+namespace CpuIntrinsicsTests {
+extern std::atomic<uint32_t> pauseCounter;
+}
 
 struct DrmDirectSubmissionTest : public DrmMemoryManagerBasic {
     void SetUp() override {
@@ -29,9 +37,9 @@ struct DrmDirectSubmissionTest : public DrmMemoryManagerBasic {
                                                                                 true,
                                                                                 executionEnvironment);
         device.reset(MockDevice::create<MockDevice>(&executionEnvironment, 0u));
-        osContext = std::make_unique<OsContextLinux>(*executionEnvironment.rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Drm>(),
-                                                     0u, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
-                                                     false);
+        osContext = std::make_unique<OsContextLinux>(*executionEnvironment.rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Drm>(), 0u,
+                                                     EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Regular},
+                                                                                                  PreemptionMode::ThreadGroup, device->getDeviceBitfield()));
         osContext->ensureContextInitialized();
     }
 
@@ -46,6 +54,7 @@ struct DrmDirectSubmissionTest : public DrmMemoryManagerBasic {
 template <typename GfxFamily, typename Dispatcher>
 struct MockDrmDirectSubmission : public DrmDirectSubmission<GfxFamily, Dispatcher> {
     using BaseClass = DrmDirectSubmission<GfxFamily, Dispatcher>;
+    using BaseClass::activeTiles;
     using BaseClass::allocateResources;
     using BaseClass::currentTagData;
     using BaseClass::disableMonitorFence;
@@ -57,11 +66,17 @@ struct MockDrmDirectSubmission : public DrmDirectSubmission<GfxFamily, Dispatche
     using BaseClass::handleNewResourcesSubmission;
     using BaseClass::handleResidency;
     using BaseClass::isNewResourceHandleNeeded;
+    using BaseClass::partitionConfigSet;
+    using BaseClass::partitionedMode;
+    using BaseClass::postSyncOffset;
     using BaseClass::ringStart;
     using BaseClass::submit;
     using BaseClass::switchRingBuffers;
     using BaseClass::tagAddress;
     using BaseClass::updateTagValue;
+    using BaseClass::useNotifyForPostSync;
+    using BaseClass::wait;
+    using BaseClass::workPartitionAllocation;
 
     MockDrmDirectSubmission(Device &device, OsContext &osContext) : DrmDirectSubmission<GfxFamily, Dispatcher>(device, osContext) {
         this->disableMonitorFence = false;
@@ -93,12 +108,17 @@ HWTEST_F(DrmDirectSubmissionTest, givenDrmDirectSubmissionWhenCallingLinuxImplem
     drmDirectSubmission.getTagAddressValue(tagData);
     EXPECT_EQ(drmDirectSubmission.currentTagData.tagAddress, tagData.tagAddress);
     EXPECT_EQ(drmDirectSubmission.currentTagData.tagValue + 1, tagData.tagValue);
+
+    *drmDirectSubmission.tagAddress = 1u;
 }
 
 HWTEST_F(DrmDirectSubmissionTest, whenCreateDirectSubmissionThenValidObjectIsReturned) {
     auto directSubmission = DirectSubmissionHw<FamilyType, RenderDispatcher<FamilyType>>::create(*device.get(),
                                                                                                  *osContext.get());
     EXPECT_NE(directSubmission.get(), nullptr);
+
+    bool ret = directSubmission->initialize(false, false);
+    EXPECT_TRUE(ret);
 }
 
 HWTEST_F(DrmDirectSubmissionTest, givenDisabledMonitorFenceWhenDispatchSwitchRingBufferThenDispatchPipeControl) {
@@ -153,8 +173,8 @@ HWTEST_F(DrmDirectSubmissionTest, givenDisabledMonitorFenceWhenUpdateTagValueThe
 HWTEST_F(DrmDirectSubmissionTest, whenCheckForDirectSubmissionSupportThenProperValueIsReturned) {
     auto directSubmissionSupported = osContext->isDirectSubmissionSupported(device->getHardwareInfo());
 
-    auto &hwHelper = HwHelper::get(device->getHardwareInfo().platform.eRenderCoreFamily);
-    EXPECT_EQ(directSubmissionSupported, hwHelper.isDirectSubmissionSupported(device->getHardwareInfo()) && executionEnvironment.rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Drm>()->isVmBindAvailable());
+    auto hwInfoConfig = HwInfoConfig::get(device->getHardwareInfo().platform.eProductFamily);
+    EXPECT_EQ(directSubmissionSupported, hwInfoConfig->isDirectSubmissionSupported(device->getHardwareInfo()) && executionEnvironment.rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Drm>()->isVmBindAvailable());
 }
 
 HWTEST_F(DrmDirectSubmissionTest, givenDirectSubmissionNewResourceTlbFlushWhenDispatchCommandBufferThenTlbIsFlushed) {
@@ -198,8 +218,7 @@ HWTEST_F(DrmDirectSubmissionTest, givenNewResourceBoundhWhenDispatchCommandBuffe
     bool ret = directSubmission.allocateResources();
     EXPECT_TRUE(ret);
 
-    auto drm = static_cast<DrmMock *>(executionEnvironment.rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Drm>());
-    drm->setNewResourceBound(true);
+    osContext->setNewResourceBound(true);
 
     EXPECT_EQ(directSubmission.getSizeNewResourceHandler(), sizeof(PIPE_CONTROL));
 
@@ -212,12 +231,12 @@ HWTEST_F(DrmDirectSubmissionTest, givenNewResourceBoundhWhenDispatchCommandBuffe
     auto *pipeControl = hwParse.getCommand<PIPE_CONTROL>();
     EXPECT_TRUE(pipeControl->getTlbInvalidate());
     EXPECT_TRUE(pipeControl->getTextureCacheInvalidationEnable());
-    EXPECT_FALSE(drm->getNewResourceBound());
+    EXPECT_FALSE(osContext->getNewResourceBound());
 
     EXPECT_EQ(directSubmission.getSizeNewResourceHandler(), 0u);
 }
 
-HWTEST_F(DrmDirectSubmissionTest, givennoNewResourceBoundhWhenDispatchCommandBufferThenTlbIsNotFlushed) {
+HWTEST_F(DrmDirectSubmissionTest, givenNoNewResourceBoundhWhenDispatchCommandBufferThenTlbIsNotFlushed) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
     using Dispatcher = RenderDispatcher<FamilyType>;
 
@@ -230,8 +249,7 @@ HWTEST_F(DrmDirectSubmissionTest, givennoNewResourceBoundhWhenDispatchCommandBuf
     bool ret = directSubmission.allocateResources();
     EXPECT_TRUE(ret);
 
-    auto drm = static_cast<DrmMock *>(executionEnvironment.rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Drm>());
-    drm->setNewResourceBound(false);
+    osContext->setNewResourceBound(false);
 
     EXPECT_EQ(directSubmission.getSizeNewResourceHandler(), 0u);
 
@@ -243,7 +261,7 @@ HWTEST_F(DrmDirectSubmissionTest, givennoNewResourceBoundhWhenDispatchCommandBuf
     hwParse.findHardwareCommands<FamilyType>();
     auto *pipeControl = hwParse.getCommand<PIPE_CONTROL>();
     EXPECT_EQ(pipeControl, nullptr);
-    EXPECT_FALSE(drm->getNewResourceBound());
+    EXPECT_FALSE(osContext->getNewResourceBound());
 
     EXPECT_EQ(directSubmission.getSizeNewResourceHandler(), 0u);
 }
@@ -261,8 +279,7 @@ HWTEST_F(DrmDirectSubmissionTest, givenDirectSubmissionNewResourceTlbFlusZeroAnd
     bool ret = directSubmission.allocateResources();
     EXPECT_TRUE(ret);
 
-    auto drm = static_cast<DrmMock *>(executionEnvironment.rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Drm>());
-    drm->setNewResourceBound(true);
+    osContext->setNewResourceBound(true);
 
     EXPECT_EQ(directSubmission.getSizeNewResourceHandler(), 0u);
 
@@ -274,7 +291,107 @@ HWTEST_F(DrmDirectSubmissionTest, givenDirectSubmissionNewResourceTlbFlusZeroAnd
     hwParse.findHardwareCommands<FamilyType>();
     auto *pipeControl = hwParse.getCommand<PIPE_CONTROL>();
     EXPECT_EQ(pipeControl, nullptr);
-    EXPECT_FALSE(drm->getNewResourceBound());
+    EXPECT_FALSE(osContext->getNewResourceBound());
 
     EXPECT_EQ(directSubmission.getSizeNewResourceHandler(), 0u);
+}
+
+HWCMDTEST_F(IGFX_XE_HP_CORE, DrmDirectSubmissionTest, givenMultipleActiveTilesWhenWaitingForTagUpdateThenQueryAllActiveTiles) {
+    using Dispatcher = RenderDispatcher<FamilyType>;
+
+    MockDrmDirectSubmission<FamilyType, Dispatcher> directSubmission(*device.get(),
+                                                                     *osContext.get());
+
+    uint32_t offset = directSubmission.postSyncOffset;
+    EXPECT_NE(0u, offset);
+    bool ret = directSubmission.allocateResources();
+    EXPECT_TRUE(ret);
+    directSubmission.activeTiles = 2;
+
+    auto pollAddress = directSubmission.tagAddress;
+    *pollAddress = 10;
+    pollAddress = ptrOffset(pollAddress, offset);
+    *pollAddress = 10;
+
+    CpuIntrinsicsTests::pauseCounter = 0;
+    directSubmission.wait(9);
+    EXPECT_EQ(2u, CpuIntrinsicsTests::pauseCounter);
+}
+
+HWTEST_F(DrmDirectSubmissionTest,
+         givenRenderDispatcherAndMultiTileDeviceWhenCreatingDirectSubmissionUsingMultiTileContextThenExpectActiveTilesMatchSubDeviceCount) {
+    using Dispatcher = RenderDispatcher<FamilyType>;
+
+    VariableBackup<bool> backup(&ImplicitScaling::apiSupport, true);
+    device->deviceBitfield.set(0b11);
+    device->rootCsrCreated = true;
+    device->numSubDevices = 2;
+
+    osContext = std::make_unique<OsContextLinux>(*executionEnvironment.rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Drm>(), 0u,
+                                                 EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Regular},
+                                                                                              PreemptionMode::ThreadGroup, device->getDeviceBitfield()));
+    osContext->ensureContextInitialized();
+    EXPECT_EQ(2u, osContext->getDeviceBitfield().count());
+
+    auto ultCsr = reinterpret_cast<UltCommandStreamReceiver<FamilyType> *>(device->getDefaultEngine().commandStreamReceiver);
+    ultCsr->staticWorkPartitioningEnabled = true;
+    ultCsr->createWorkPartitionAllocation(*device);
+
+    MockDrmDirectSubmission<FamilyType, Dispatcher> directSubmission(*device.get(),
+                                                                     *osContext.get());
+
+    EXPECT_EQ(2u, directSubmission.activeTiles);
+    EXPECT_TRUE(directSubmission.partitionedMode);
+    EXPECT_FALSE(directSubmission.partitionConfigSet);
+
+    bool ret = directSubmission.allocateResources();
+    EXPECT_TRUE(ret);
+}
+
+HWTEST_F(DrmDirectSubmissionTest, givenRenderDispatcherAndMultiTileDeviceWhenCreatingDirectSubmissionSingleTileContextThenExpectActiveTilesEqualsSingleTile) {
+    using Dispatcher = RenderDispatcher<FamilyType>;
+
+    VariableBackup<bool> backup(&ImplicitScaling::apiSupport, true);
+    device->deviceBitfield.set(0b11);
+    device->rootCsrCreated = true;
+    device->numSubDevices = 2;
+
+    EXPECT_EQ(1u, osContext->getDeviceBitfield().count());
+
+    auto ultCsr = reinterpret_cast<UltCommandStreamReceiver<FamilyType> *>(device->getDefaultEngine().commandStreamReceiver);
+    ultCsr->staticWorkPartitioningEnabled = true;
+    ultCsr->createWorkPartitionAllocation(*device);
+
+    MockDrmDirectSubmission<FamilyType, Dispatcher> directSubmission(*device.get(),
+                                                                     *osContext.get());
+
+    EXPECT_EQ(1u, directSubmission.activeTiles);
+    EXPECT_FALSE(directSubmission.partitionedMode);
+    EXPECT_TRUE(directSubmission.partitionConfigSet);
+
+    bool ret = directSubmission.allocateResources();
+    EXPECT_TRUE(ret);
+}
+
+HWTEST_F(DrmDirectSubmissionTest, givenBlitterDispatcherAndMultiTileDeviceWhenCreatingDirectSubmissionThenExpectActiveTilesEqualsOne) {
+    using Dispatcher = BlitterDispatcher<FamilyType>;
+
+    VariableBackup<bool> backup(&ImplicitScaling::apiSupport, true);
+    device->deviceBitfield.set(0b11);
+
+    osContext = std::make_unique<OsContextLinux>(*executionEnvironment.rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Drm>(), 0u,
+                                                 EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Regular},
+                                                                                              PreemptionMode::ThreadGroup, device->getDeviceBitfield()));
+    osContext->ensureContextInitialized();
+    EXPECT_EQ(2u, osContext->getDeviceBitfield().count());
+
+    MockDrmDirectSubmission<FamilyType, Dispatcher> directSubmission(*device.get(),
+                                                                     *osContext.get());
+
+    EXPECT_EQ(1u, directSubmission.activeTiles);
+    EXPECT_FALSE(directSubmission.partitionedMode);
+    EXPECT_TRUE(directSubmission.partitionConfigSet);
+
+    bool ret = directSubmission.allocateResources();
+    EXPECT_TRUE(ret);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,16 +7,16 @@
 
 #include "shared/source/memory_manager/migration_sync_data.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/mock_migration_sync_data.h"
 #include "shared/test/common/mocks/mock_multi_graphics_allocation.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/memory_manager/migration_controller.h"
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -98,8 +98,8 @@ TEST_F(MigrationControllerTests, givenNotLockableBufferAllocationWithDefinedLoca
     auto srcAllocation = pBuffer->getMultiGraphicsAllocation().getGraphicsAllocation(0);
     auto dstAllocation = pBuffer->getMultiGraphicsAllocation().getGraphicsAllocation(1);
 
-    auto gmm0 = new Gmm(context.getDevice(0)->getGmmClientContext(), nullptr, 1, 0, false);
-    auto gmm1 = new Gmm(context.getDevice(1)->getGmmClientContext(), nullptr, 1, 0, false);
+    auto gmm0 = new Gmm(context.getDevice(0)->getGmmClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
+    auto gmm1 = new Gmm(context.getDevice(1)->getGmmClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
     srcAllocation->setDefaultGmm(gmm0);
     dstAllocation->setDefaultGmm(gmm1);
 

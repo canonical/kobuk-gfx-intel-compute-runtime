@@ -26,6 +26,12 @@ enum class DebugPauseState : uint32_t {
     terminate
 };
 
+enum class ColouringPolicy : uint32_t {
+    DeviceCountBased,
+    ChunkSizeBased,
+    MappingBased
+};
+
 class TagTypeBase {
 };
 

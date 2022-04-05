@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,6 +8,7 @@
 #include "shared/source/os_interface/device_factory.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/fixtures/device_fixture.h"
+#include "shared/test/common/helpers/engine_descriptor_helper.h"
 
 #include <atomic>
 #include <memory>
@@ -23,7 +24,8 @@ struct DirectSubmissionFixture : public DeviceFixture {
         DeviceFixture::SetUp();
         DeviceFactory::prepareDeviceEnvironments(*pDevice->getExecutionEnvironment());
 
-        osContext.reset(OsContext::create(nullptr, 0u, pDevice->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup, false));
+        osContext.reset(OsContext::create(nullptr, 0u,
+                                          EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup, pDevice->getDeviceBitfield())));
     }
 
     std::unique_ptr<OsContext> osContext;
@@ -34,7 +36,7 @@ struct DirectSubmissionDispatchBufferFixture : public DirectSubmissionFixture {
         DirectSubmissionFixture::SetUp();
         MemoryManager *memoryManager = pDevice->getExecutionEnvironment()->memoryManager.get();
         const AllocationProperties commandBufferProperties{pDevice->getRootDeviceIndex(), 0x1000,
-                                                           GraphicsAllocation::AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()};
+                                                           AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()};
         commandBuffer = memoryManager->allocateGraphicsMemoryWithProperties(commandBufferProperties);
 
         batchBuffer.endCmdPtr = &bbStart[0];

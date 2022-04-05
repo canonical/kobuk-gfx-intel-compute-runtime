@@ -9,8 +9,7 @@
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/fixtures/device_fixture.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 
@@ -24,7 +23,7 @@ GEN9TEST_F(CommandEncoderMathTestGen9, WhenAppendsAGreaterThanThenPredicateCorre
     using MI_MATH_ALU_INST_INLINE = typename FamilyType::MI_MATH_ALU_INST_INLINE;
 
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice);
+    cmdContainer.initialize(pDevice, nullptr);
 
     EncodeMathMMIO<FamilyType>::encodeGreaterThanPredicate(cmdContainer, 0xDEADBEEFCAF0u, 17u);
 

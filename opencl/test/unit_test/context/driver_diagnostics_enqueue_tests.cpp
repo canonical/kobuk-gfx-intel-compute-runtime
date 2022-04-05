@@ -1,10 +1,11 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/helpers/local_work_size.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 
@@ -797,7 +798,7 @@ TEST_F(PerformanceHintEnqueueKernelPrintfTest, GivenKernelWithPrintfWhenEnqueueK
     size_t preferredWorkGroupSize[3];
     auto maxWorkGroupSize = static_cast<uint32_t>(pPlatform->getClDevice(0)->getSharedDeviceInfo().maxWorkGroupSize);
     if (DebugManager.flags.EnableComputeWorkSizeND.get()) {
-        WorkSizeInfo wsInfo(maxWorkGroupSize, 0u, 32u, 0u, ::defaultHwInfo.get(), 32u, 0u, false, false);
+        WorkSizeInfo wsInfo(maxWorkGroupSize, 0u, 32u, 0u, ::defaultHwInfo.get(), 32u, 0u, false, false, false);
         computeWorkgroupSizeND(wsInfo, preferredWorkGroupSize, globalWorkGroupSize, 2);
     } else
         computeWorkgroupSize2D(maxWorkGroupSize, preferredWorkGroupSize, globalWorkGroupSize, 32);
@@ -816,7 +817,7 @@ TEST_F(PerformanceHintEnqueueTest, GivenKernelWithCoherentPtrWhenEnqueueKernelIs
     Kernel::SimpleKernelArgInfo kernelArgInfo;
 
     if (DebugManager.flags.EnableComputeWorkSizeND.get()) {
-        WorkSizeInfo wsInfo(maxWorkGroupSize, 0u, 32u, 0u, ::defaultHwInfo.get(), 32u, 0u, false, false);
+        WorkSizeInfo wsInfo(maxWorkGroupSize, 0u, 32u, 0u, ::defaultHwInfo.get(), 32u, 0u, false, false, false);
         computeWorkgroupSizeND(wsInfo, preferredWorkGroupSize, globalWorkGroupSize, 2);
     } else
         computeWorkgroupSize2D(maxWorkGroupSize, preferredWorkGroupSize, globalWorkGroupSize, 32);

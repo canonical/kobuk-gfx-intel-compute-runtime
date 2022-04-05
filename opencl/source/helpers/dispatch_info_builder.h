@@ -1,13 +1,14 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include "shared/source/helpers/local_work_size.h"
 
-#include "opencl/source/command_queue/gpgpu_walker.h"
+#include "opencl/source/command_queue/cl_local_work_size.h"
 #include "opencl/source/helpers/dispatch_info.h"
 #include "opencl/source/kernel/kernel.h"
 
@@ -77,7 +78,7 @@ class DispatchInfoBuilder {
     cl_int setArgSvmAlloc(uint32_t argIndex, void *svmPtr, GraphicsAllocation *svmAlloc) {
         for (auto &dispatchInfo : dispatchInfos) {
             if (dispatchInfo.getKernel()) {
-                dispatchInfo.getKernel()->setArgSvmAlloc(argIndex, svmPtr, svmAlloc);
+                dispatchInfo.getKernel()->setArgSvmAlloc(argIndex, svmPtr, svmAlloc, 0u);
             }
         }
         return CL_SUCCESS;

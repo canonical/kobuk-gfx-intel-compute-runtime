@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,20 +9,20 @@
 #include "shared/source/device/device.h"
 #include "shared/source/helpers/file_io.h"
 #include "shared/source/os_interface/os_interface.h"
+#include "shared/source/program/kernel_info.h"
 #include "shared/source/source_level_debugger/source_level_debugger.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/execution_environment_helper.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/libult/source_level_debugger_library.h"
+#include "shared/test/common/mocks/mock_gmm_helper.h"
+#include "shared/test/common/mocks/mock_source_level_debugger.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/platform/platform.h"
-#include "opencl/source/program/kernel_info.h"
-#include "opencl/test/unit_test/helpers/execution_environment_helper.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
-#include "opencl/test/unit_test/mocks/mock_source_level_debugger.h"
-
-#include <gtest/gtest.h>
 
 #include <memory>
 #include <string>
@@ -166,6 +166,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryActiveWhenNotifySourceCodeIs
 
     const char source[] = "sourceCode";
     string file;
+    debugger.callBaseNotifySourceCode = true;
     debugger.notifySourceCode(source, sizeof(source), file);
 
     EXPECT_TRUE(interceptor.sourceCodeCalled);
@@ -192,6 +193,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryNotActiveWhenNotifySourceCod
 
     const char source[] = "sourceCode";
     string file;
+    debugger.callBaseNotifySourceCode = true;
     debugger.notifySourceCode(source, sizeof(source), file);
     EXPECT_FALSE(interceptor.sourceCodeCalled);
 }
@@ -205,6 +207,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryActiveWhenNotifyNewDeviceIsC
     DebuggerLibrary::injectDebuggerLibraryInterceptor(&interceptor);
 
     MockSourceLevelDebugger debugger;
+    debugger.callBaseNotifyNewDevice = true;
     debugger.notifyNewDevice(4);
 
     EXPECT_TRUE(interceptor.newDeviceCalled);
@@ -221,6 +224,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryNotActiveWhenNotifyNewDevice
     DebuggerLibrary::injectDebuggerLibraryInterceptor(&interceptor);
 
     MockSourceLevelDebugger debugger;
+    debugger.callBaseNotifyNewDevice = true;
 
     debugger.setActive(false);
     debugger.notifyNewDevice(4);
@@ -236,6 +240,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryActiveWhenIsOptimizationDisa
     DebuggerLibrary::injectDebuggerLibraryInterceptor(&interceptor);
 
     MockSourceLevelDebugger debugger;
+    debugger.callBaseIsOptimizationDisabled = true;
     bool isOptDisabled = debugger.isOptimizationDisabled();
     EXPECT_FALSE(isOptDisabled);
 
@@ -255,6 +260,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryNotActiveWhenIsOptimizationD
     MockSourceLevelDebugger debugger;
 
     debugger.setActive(false);
+    debugger.callBaseIsOptimizationDisabled = true;
     bool isOptDisabled = debugger.isOptimizationDisabled();
     EXPECT_FALSE(isOptDisabled);
     EXPECT_FALSE(interceptor.optionCalled);
@@ -276,6 +282,7 @@ TEST(SourceLevelDebugger, givenActiveDebuggerWhenGetDebuggerOptionReturnsZeroThe
     interceptor.optionRetVal = 0;
 
     MockSourceLevelDebugger debugger;
+    debugger.callBaseIsOptimizationDisabled = true;
     bool isOptDisabled = debugger.isOptimizationDisabled();
     EXPECT_FALSE(isOptDisabled);
 }
@@ -296,6 +303,7 @@ TEST(SourceLevelDebugger, givenActiveDebuggerAndOptDisabledWhenGetDebuggerOption
     interceptor.optionRetVal = 1;
 
     MockSourceLevelDebugger debugger;
+    debugger.callBaseIsOptimizationDisabled = true;
     bool isOptDisabled = debugger.isOptimizationDisabled();
     EXPECT_TRUE(isOptDisabled);
 }
@@ -316,6 +324,7 @@ TEST(SourceLevelDebugger, givenActiveDebuggerAndOptDisabledWhenGetDebuggerOption
     interceptor.optionRetVal = 1;
 
     MockSourceLevelDebugger debugger;
+    debugger.callBaseIsOptimizationDisabled = true;
     bool isOptDisabled = debugger.isOptimizationDisabled();
     EXPECT_FALSE(isOptDisabled);
 }
@@ -344,6 +353,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryActiveWhenNotifyKernelDebugD
     info.heapInfo.KernelHeapSize = sizeof(isa);
     info.heapInfo.pKernelHeap = isa;
 
+    debugger.callBaseNotifyKernelDebugData = true;
     debugger.notifyKernelDebugData(&info.debugData, info.kernelDescriptor.kernelMetadata.kernelName, info.heapInfo.pKernelHeap, info.heapInfo.KernelHeapSize);
 
     EXPECT_TRUE(interceptor.kernelDebugDataCalled);
@@ -379,6 +389,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryActiveWhenNullptrDebugDataIs
     info.heapInfo.KernelHeapSize = sizeof(isa);
     info.heapInfo.pKernelHeap = isa;
 
+    debugger.callBaseNotifyKernelDebugData = true;
     debugger.notifyKernelDebugData(nullptr, info.kernelDescriptor.kernelMetadata.kernelName, info.heapInfo.pKernelHeap, info.heapInfo.KernelHeapSize);
 
     EXPECT_TRUE(interceptor.kernelDebugDataCalled);
@@ -420,6 +431,7 @@ TEST(SourceLevelDebugger, givenNoVisaWhenNotifyKernelDebugDataIsCalledThenDebugg
     info.heapInfo.KernelHeapSize = sizeof(isa);
     info.heapInfo.pKernelHeap = isa;
 
+    debugger.callBaseNotifyKernelDebugData = true;
     debugger.notifyKernelDebugData(&info.debugData, info.kernelDescriptor.kernelMetadata.kernelName, info.heapInfo.pKernelHeap, info.heapInfo.KernelHeapSize);
     EXPECT_TRUE(interceptor.kernelDebugDataCalled);
     EXPECT_EQ(isa, interceptor.kernelDebugDataArgIn.kernelBinBuffer);
@@ -448,6 +460,7 @@ TEST(SourceLevelDebugger, givenNoGenIsaWhenNotifyKernelDebugDataIsCalledThenDebu
     info.heapInfo.KernelHeapSize = sizeof(isa);
     info.heapInfo.pKernelHeap = isa;
 
+    debugger.callBaseNotifyKernelDebugData = true;
     debugger.notifyKernelDebugData(&info.debugData, info.kernelDescriptor.kernelMetadata.kernelName, isa, sizeof(isa));
     EXPECT_TRUE(interceptor.kernelDebugDataCalled);
     EXPECT_EQ(isa, interceptor.kernelDebugDataArgIn.kernelBinBuffer);
@@ -465,6 +478,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryNotActiveWhenNotifyKernelDeb
 
     debugger.setActive(false);
     KernelInfo info;
+    debugger.callBaseNotifyKernelDebugData = true;
     debugger.notifyKernelDebugData(&info.debugData, info.kernelDescriptor.kernelMetadata.kernelName, nullptr, 0);
     EXPECT_FALSE(interceptor.kernelDebugDataCalled);
 }
@@ -479,6 +493,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryActiveWhenInitializeIsCalled
 
     MockSourceLevelDebugger debugger;
 
+    debugger.callBaseInitialize = true;
     debugger.initialize(false);
     EXPECT_TRUE(interceptor.initCalled);
     EXPECT_FALSE(interceptor.targetCapsArgIn.supportsLocalMemory);
@@ -495,6 +510,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryActiveWhenInitializeReturnsE
     MockSourceLevelDebugger debugger;
 
     interceptor.initRetVal = IgfxdbgRetVal::IGFXDBG_FAILURE;
+    debugger.callBaseInitialize = true;
     debugger.initialize(false);
     EXPECT_TRUE(interceptor.initCalled);
     EXPECT_FALSE(debugger.isDebuggerActive());
@@ -510,6 +526,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryActiveWhenInitializeIsCalled
 
     MockSourceLevelDebugger debugger;
 
+    debugger.callBaseInitialize = true;
     debugger.initialize(true);
     EXPECT_TRUE(interceptor.initCalled);
     EXPECT_TRUE(interceptor.targetCapsArgIn.supportsLocalMemory);
@@ -525,6 +542,7 @@ TEST(SourceLevelDebugger, givenKernelDebuggerLibraryNotActiveWhenInitializeIsCal
 
     MockSourceLevelDebugger debugger;
 
+    debugger.callBaseInitialize = true;
     debugger.initialize(false);
     EXPECT_FALSE(interceptor.initCalled);
 }
@@ -684,7 +702,7 @@ TEST(SourceLevelDebugger, whenCaptureSBACalledThenNoCommandsAreAddedToStream) {
     MockSourceLevelDebugger debugger;
 
     CommandContainer container;
-    container.initialize(device.get());
+    container.initialize(device.get(), nullptr);
 
     NEO::Debugger::SbaAddresses sbaAddresses = {};
     debugger.captureStateBaseAddress(container, sbaAddresses);
@@ -700,7 +718,6 @@ TEST(SourceLevelDebugger, givenEnableMockSourceLevelDebuggerWhenInitializingExec
     DebuggerLibrary::setLibraryAvailable(false);
 
     DebugManager.flags.EnableMockSourceLevelDebugger.set(1);
-
     auto executionEnvironment = new ExecutionEnvironment();
     MockPlatform platform(*executionEnvironment);
     platform.initializeWithNewDevices();
@@ -798,6 +815,7 @@ TEST(SourceLevelDebugger, givenDebugVarDumpElfWhenNotifyKernelDebugDataIsCalledT
     std::string fileName = info.kernelDescriptor.kernelMetadata.kernelName + ".elf";
     EXPECT_FALSE(fileExists(fileName));
 
+    debugger.callBaseNotifyKernelDebugData = true;
     debugger.notifyKernelDebugData(&info.debugData, info.kernelDescriptor.kernelMetadata.kernelName, info.heapInfo.pKernelHeap, info.heapInfo.KernelHeapSize);
     EXPECT_TRUE(fileExists(fileName));
     std::remove(fileName.c_str());
@@ -836,10 +854,49 @@ TEST(SourceLevelDebugger, givenDebugVarDumpElfWhenElfFileExistsWhileNotifyingDeb
     EXPECT_TRUE(fileExists(fileName));
 
     std::string fileName2 = info.kernelDescriptor.kernelMetadata.kernelName + "_0.elf";
+    debugger.callBaseNotifyKernelDebugData = true;
     debugger.notifyKernelDebugData(&info.debugData, info.kernelDescriptor.kernelMetadata.kernelName, info.heapInfo.pKernelHeap, info.heapInfo.KernelHeapSize);
 
     EXPECT_TRUE(fileExists(fileName2));
 
     std::remove(fileName.c_str());
     std::remove(fileName2.c_str());
+}
+
+TEST(SourceLevelDebugger, givenDebuggerLibraryAvailableAndExperimentalEnableSourceLevelDebuggerThenDebuggerIsCreated) {
+    DebugManagerStateRestore stateRestore;
+    DebuggerLibraryRestorer restorer;
+    DebuggerLibrary::setDebuggerActive(true);
+    DebuggerLibrary::setLibraryAvailable(true);
+
+    DebugManager.flags.ExperimentalEnableSourceLevelDebugger.set(1);
+
+    auto hwInfo = *defaultHwInfo;
+    auto debugger = std::unique_ptr<Debugger>(Debugger::create(&hwInfo));
+    ASSERT_NE(nullptr, debugger.get());
+    EXPECT_TRUE(debugger->isLegacy());
+}
+
+using LegacyDebuggerTest = ::testing::Test;
+
+using NotXeHPOrDG2 = AreNotGfxCores<IGFX_XE_HP_CORE, IGFX_XE_HPG_CORE>;
+HWTEST2_F(LegacyDebuggerTest, givenNotAtsOrDg2AndDebugIsActiveThenDisableL3CacheInGmmHelperIsNotSet, NotXeHPOrDG2) {
+    DebugManagerStateRestore stateRestore;
+    DebugManager.flags.EnableMockSourceLevelDebugger.set(1);
+    auto executionEnvironment = new ExecutionEnvironment();
+    MockPlatform platform(*executionEnvironment);
+    platform.initializeWithNewDevices();
+
+    EXPECT_FALSE(static_cast<MockGmmHelper *>(platform.getClDevice(0)->getDevice().getGmmHelper())->allResourcesUncached);
+}
+
+using ATSOrDG2 = IsWithinGfxCore<IGFX_XE_HP_CORE, IGFX_XE_HPG_CORE>;
+HWTEST2_F(LegacyDebuggerTest, givenAtsOrDg2AndDebugIsActiveThenDisableL3CacheInGmmHelperIsSet, ATSOrDG2) {
+    DebugManagerStateRestore stateRestore;
+    DebugManager.flags.EnableMockSourceLevelDebugger.set(1);
+    auto executionEnvironment = new ExecutionEnvironment();
+    MockPlatform platform(*executionEnvironment);
+    platform.initializeWithNewDevices();
+
+    EXPECT_TRUE(static_cast<MockGmmHelper *>(platform.getClDevice(0)->getDevice().getGmmHelper())->allResourcesUncached);
 }

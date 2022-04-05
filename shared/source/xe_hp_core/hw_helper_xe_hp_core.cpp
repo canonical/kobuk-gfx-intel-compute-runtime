@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -12,11 +12,12 @@ using Family = NEO::XeHpFamily;
 
 #include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/constants.h"
-#include "shared/source/helpers/extra_allocation_data_xehp_plus.inl"
+#include "shared/source/helpers/extra_allocation_data_xehp_and_later.inl"
 #include "shared/source/helpers/flat_batch_buffer_helper_hw.inl"
 #include "shared/source/helpers/hw_helper_base.inl"
-#include "shared/source/helpers/hw_helper_tgllp_plus.inl"
-#include "shared/source/helpers/hw_helper_xehp_plus.inl"
+#include "shared/source/helpers/hw_helper_tgllp_and_later.inl"
+#include "shared/source/helpers/hw_helper_xehp_and_later.inl"
+#include "shared/source/os_interface/hw_info_config.h"
 
 namespace NEO {
 template <>
@@ -33,66 +34,8 @@ uint32_t HwHelperHw<Family>::getComputeUnitsUsedForScratch(const HardwareInfo *p
         return static_cast<uint32_t>(DebugManager.flags.OverrideNumComputeUnitsForScratch.get());
     }
 
-    // XeHP plus products return physical threads
+    // XeHP and later products return physical threads
     return std::max(pHwInfo->gtSystemInfo.MaxSubSlicesSupported, static_cast<uint32_t>(32)) * pHwInfo->gtSystemInfo.MaxEuPerSubSlice * (pHwInfo->gtSystemInfo.ThreadCount / pHwInfo->gtSystemInfo.EUCount);
-}
-
-template <>
-inline bool HwHelperHw<Family>::isSpecialWorkgroupSizeRequired(const HardwareInfo &hwInfo, bool isSimulation) const {
-    if (DebugManager.flags.ForceWorkgroupSize1x1x1.get() != -1) {
-        return static_cast<bool>(DebugManager.flags.ForceWorkgroupSize1x1x1.get());
-    } else {
-        HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-        return (!isSimulation && hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_B, hwInfo) && hwHelper.getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessAllowed);
-    }
-}
-
-template <>
-bool HwHelperHw<Family>::isPageTableManagerSupported(const HardwareInfo &hwInfo) const {
-    return false;
-}
-
-template <>
-bool HwHelperHw<Family>::isNewResidencyModelSupported() const {
-    return true;
-}
-
-template <>
-uint32_t HwHelperHw<Family>::getHwRevIdFromStepping(uint32_t stepping, const HardwareInfo &hwInfo) const {
-    if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_XE_HP_SDV) {
-        switch (stepping) {
-        case REVISION_A0:
-            return 0x0;
-        case REVISION_A1:
-            return 0x1;
-        case REVISION_B:
-            return 0x4;
-        }
-    }
-    return CommonConstants::invalidStepping;
-}
-
-template <>
-bool HwHelperHw<Family>::isDirectSubmissionSupported(const HardwareInfo &hwInfo) const {
-    if (hwInfo.platform.usRevId < getHwRevIdFromStepping(REVISION_B, hwInfo)) {
-        return false;
-    }
-    return true;
-}
-
-template <>
-uint32_t HwHelperHw<Family>::getSteppingFromHwRevId(const HardwareInfo &hwInfo) const {
-    if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_XE_HP_SDV) {
-        switch (hwInfo.platform.usRevId) {
-        case 0x0:
-            return REVISION_A0;
-        case 0x1:
-            return REVISION_A1;
-        case 0x4:
-            return REVISION_B;
-        }
-    }
-    return CommonConstants::invalidStepping;
 }
 
 template <>
@@ -114,32 +57,6 @@ void HwHelperHw<Family>::setL1CachePolicy(bool useL1Cache, typename Family::REND
 }
 
 template <>
-inline bool HwHelperHw<Family>::allowRenderCompression(const HardwareInfo &hwInfo) const {
-    if (hwInfo.gtSystemInfo.EUCount == 256u) {
-        return false;
-    }
-
-    return true;
-}
-
-template <>
-inline bool HwHelperHw<Family>::allowStatelessCompression(const HardwareInfo &hwInfo) const {
-    if (!NEO::ApiSpecificConfig::isStatelessCompressionSupported()) {
-        return false;
-    }
-    if (DebugManager.flags.EnableStatelessCompression.get() != -1) {
-        return static_cast<bool>(DebugManager.flags.EnableStatelessCompression.get());
-    }
-    if (HwHelper::getSubDevicesCount(&hwInfo) > 1) {
-        return DebugManager.flags.EnableMultiTileCompression.get() > 0 ? true : false;
-    }
-    if (hwInfo.platform.usRevId < getHwRevIdFromStepping(REVISION_B, hwInfo)) {
-        return false;
-    }
-    return true;
-}
-
-template <>
 bool HwHelperHw<Family>::isBankOverrideRequired(const HardwareInfo &hwInfo) const {
 
     bool forceOverrideMemoryBankIndex = (HwHelper::getSubDevicesCount(&hwInfo) == 4 &&
@@ -153,24 +70,19 @@ bool HwHelperHw<Family>::isBankOverrideRequired(const HardwareInfo &hwInfo) cons
 
 template <>
 bool HwHelperHw<Family>::isSipWANeeded(const HardwareInfo &hwInfo) const {
-    return hwInfo.platform.usRevId <= getHwRevIdFromStepping(REVISION_B, hwInfo);
+    return hwInfo.platform.usRevId <= HwInfoConfig::get(hwInfo.platform.eProductFamily)->getHwRevIdFromStepping(REVISION_B, hwInfo);
 }
 
 template <>
-bool HwHelperHw<Family>::isBufferSizeSuitableForRenderCompression(const size_t size, const HardwareInfo &hwInfo) const {
-    if (allowStatelessCompression(hwInfo)) {
+bool HwHelperHw<Family>::isBufferSizeSuitableForCompression(const size_t size, const HardwareInfo &hwInfo) const {
+    if (DebugManager.flags.OverrideBufferSuitableForRenderCompression.get() != -1) {
+        return !!DebugManager.flags.OverrideBufferSuitableForRenderCompression.get();
+    }
+    if (HwInfoConfig::get(hwInfo.platform.eProductFamily)->allowStatelessCompression(hwInfo)) {
         return true;
     } else {
         return size > KB;
     }
-}
-
-template <>
-LocalMemoryAccessMode HwHelperHw<Family>::getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const {
-    if (isWorkaroundRequired(REVISION_A0, REVISION_B, hwInfo)) {
-        return LocalMemoryAccessMode::CpuAccessDisallowed;
-    }
-    return LocalMemoryAccessMode::Default;
 }
 
 template <>
@@ -183,40 +95,24 @@ std::string HwHelperHw<Family>::getExtensions() const {
     std::string extensions;
     extensions += "cl_intel_dot_accumulate ";
     extensions += "cl_intel_subgroup_local_block_io ";
+    extensions += "cl_intel_subgroup_matrix_multiply_accumulate ";
+    extensions += "cl_intel_subgroup_split_matrix_multiply_accumulate ";
 
     return extensions;
 }
 
 template <>
-bool HwHelperHw<Family>::isBlitterForImagesSupported(const HardwareInfo &hwInfo) const {
-    return true;
-}
-
-template <>
-bool HwHelperHw<Family>::isDisableOverdispatchAvailable(const HardwareInfo &hwInfo) const {
-    return (this->getSteppingFromHwRevId(hwInfo) >= REVISION_B);
-}
-
-template <>
-void MemorySynchronizationCommands<Family>::addPipeControlWA(LinearStream &commandStream, uint64_t gpuAddress, const HardwareInfo &hwInfo) {
-    using PIPE_CONTROL = typename Family::PIPE_CONTROL;
-
-    if (DebugManager.flags.DisablePipeControlPrecedingPostSyncCommand.get() == 1) {
-        if (hwInfo.featureTable.ftrLocalMemory) {
-            PIPE_CONTROL cmd = Family::cmdInitPipeControl;
-            cmd.setCommandStreamerStallEnable(true);
-            cmd.setHdcPipelineFlush(true);
-
-            auto pipeControl = static_cast<PIPE_CONTROL *>(commandStream.getSpace(sizeof(PIPE_CONTROL)));
-            *pipeControl = cmd;
-        }
-    }
+void MemorySynchronizationCommands<Family>::setPipeControlWAFlags(PIPE_CONTROL &pipeControl) {
+    pipeControl.setCommandStreamerStallEnable(true);
+    pipeControl.setHdcPipelineFlush(true);
 }
 
 template <>
 void MemorySynchronizationCommands<Family>::setPipeControlExtraProperties(PIPE_CONTROL &pipeControl, PipeControlArgs &args) {
     pipeControl.setHdcPipelineFlush(args.hdcPipelineFlush);
     pipeControl.setCompressionControlSurfaceCcsFlush(args.compressionControlSurfaceCcsFlush);
+    pipeControl.setWorkloadPartitionIdOffsetEnable(args.workloadPartitionOffset);
+    pipeControl.setAmfsFlushEnable(args.amfsFlushEnable);
 
     if (DebugManager.flags.FlushAllCaches.get()) {
         pipeControl.setHdcPipelineFlush(true);
@@ -230,7 +126,7 @@ void MemorySynchronizationCommands<Family>::setPipeControlExtraProperties(PIPE_C
 
 template <>
 void MemorySynchronizationCommands<Family>::setPostSyncExtraProperties(PipeControlArgs &args, const HardwareInfo &hwInfo) {
-    if (hwInfo.featureTable.ftrLocalMemory) {
+    if (hwInfo.featureTable.flags.ftrLocalMemory) {
         args.hdcPipelineFlush = true;
     }
 }
@@ -241,8 +137,18 @@ void MemorySynchronizationCommands<Family>::setCacheFlushExtraProperties(PipeCon
 }
 
 template <>
-bool HwHelperHw<Family>::additionalPipeControlArgsRequired() const {
+bool HwHelperHw<Family>::unTypedDataPortCacheFlushRequired() const {
     return false;
+}
+
+template <>
+uint32_t HwHelperHw<Family>::getDefaultRevisionId(const HardwareInfo &hwInfo) const {
+    return HwInfoConfig::get(hwInfo.platform.eProductFamily)->getHwRevIdFromStepping(REVISION_B, hwInfo);
+}
+
+template <>
+bool HwHelperHw<Family>::disableL3CacheForDebug(const HardwareInfo &) const {
+    return true;
 }
 
 template class HwHelperHw<Family>;

@@ -52,7 +52,6 @@ class Sampler : public BaseObject<_cl_sampler> {
 
     virtual void setArg(void *memory, const HardwareInfo &hwInfo) = 0;
 
-    static size_t getSamplerStateSize(const HardwareInfo &hwInfo);
     bool isTransformable() const;
 
     Sampler(Context *context,
@@ -87,7 +86,6 @@ class Sampler : public BaseObject<_cl_sampler> {
 template <typename GfxFamily>
 struct SamplerHw : public Sampler {
     void setArg(void *memory, const HardwareInfo &hwInfo) override;
-    void appendSamplerStateParams(typename GfxFamily::SAMPLER_STATE *state, const HardwareInfo &hwInfo);
     static constexpr float getGenSamplerMaxLod() {
         return 14.0f;
     }
@@ -125,8 +123,6 @@ struct SamplerHw : public Sampler {
                                         lodMin,
                                         lodMax);
     }
-
-    static size_t getSamplerStateSize();
 };
 
 typedef Sampler *(*SamplerCreateFunc)(Context *context,

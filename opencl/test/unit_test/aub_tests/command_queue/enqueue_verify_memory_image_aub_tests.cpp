@@ -10,12 +10,12 @@
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/api/api.h"
 #include "opencl/source/mem_obj/image.h"
 #include "opencl/test/unit_test/aub_tests/command_queue/command_enqueue_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -74,7 +74,7 @@ HWTEST_P(VerifyMemoryImageHw, givenDifferentImagesWhenValidatingMemoryThenSucces
     auto retVal = CL_INVALID_VALUE;
     std::unique_ptr<Image> image(Image::create(
         context,
-        MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
+        ClMemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
         flags,
         0,
         surfaceFormat,

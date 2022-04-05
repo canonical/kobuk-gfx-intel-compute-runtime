@@ -1,26 +1,27 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_stream/command_stream_receiver.h"
+#include "shared/source/compiler_interface/oclc_extensions.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/hw_helper_tests.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_driver_info.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_sip.h"
 
-#include "opencl/source/platform/extensions.h"
+#include "opencl/source/helpers/cl_hw_helper.h"
 #include "opencl/test/unit_test/fixtures/device_info_fixture.h"
-#include "opencl/test/unit_test/helpers/hw_helper_tests.h"
 #include "opencl/test/unit_test/helpers/raii_hw_helper.h"
-#include "opencl/test/unit_test/mocks/mock_builtins.h"
 #include "opencl/test/unit_test/mocks/ult_cl_device_factory.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 
@@ -57,9 +58,6 @@ struct DeviceGetCapsTest : public ::testing::Test {
         EXPECT_EQ(CL_MAKE_VERSION(1u, 1u, 0u), (++openclCWithVersionIterator)->version);
         EXPECT_EQ(CL_MAKE_VERSION(1u, 2u, 0u), (++openclCWithVersionIterator)->version);
 
-        if (clDevice.isOcl21Conformant()) {
-            EXPECT_EQ(CL_MAKE_VERSION(2u, 0u, 0u), (++openclCWithVersionIterator)->version);
-        }
         if (clDevice.getEnabledClVersion() == 30) {
             EXPECT_EQ(CL_MAKE_VERSION(3u, 0u, 0u), (++openclCWithVersionIterator)->version);
         }
@@ -129,8 +127,7 @@ TEST_F(DeviceGetCapsTest, WhenCreatingDeviceThenCapsArePopulatedCorrectly) {
     EXPECT_NE(nullptr, caps.driverVersion);
     EXPECT_NE(nullptr, caps.profile);
     EXPECT_STREQ("OpenCL 3.0 NEO ", caps.clVersion);
-    auto expectedClCVersion = (device->isOcl21Conformant() ? "OpenCL C 3.0 " : "OpenCL C 1.2 ");
-    EXPECT_STREQ(expectedClCVersion, caps.clCVersion);
+    EXPECT_STREQ("OpenCL C 1.2 ", caps.clCVersion);
     EXPECT_NE(0u, caps.numericClVersion);
     EXPECT_GT(caps.openclCAllVersions.size(), 0u);
     EXPECT_GT(caps.openclCFeatures.size(), 0u);
@@ -180,7 +177,7 @@ TEST_F(DeviceGetCapsTest, WhenCreatingDeviceThenCapsArePopulatedCorrectly) {
     EXPECT_LE(sharedCaps.maxReadImageArgs * sizeof(cl_mem), sharedCaps.maxParameterSize);
     EXPECT_LE(sharedCaps.maxWriteImageArgs * sizeof(cl_mem), sharedCaps.maxParameterSize);
     EXPECT_LE(128u * MB, sharedCaps.maxMemAllocSize);
-    if (!sharedCaps.sharedSystemAllocationsSupport) {
+    if (!device->areSharedSystemAllocationsAllowed()) {
         EXPECT_GE((4 * GB) - (8 * KB), sharedCaps.maxMemAllocSize);
     }
     EXPECT_LE(65536u, sharedCaps.imageMaxBufferSize);
@@ -223,20 +220,11 @@ TEST_F(DeviceGetCapsTest, WhenCreatingDeviceThenCapsArePopulatedCorrectly) {
     auto expectedMaxNumOfSubGroups = device->areOcl21FeaturesEnabled() ? sharedCaps.maxWorkGroupSize / hwHelper.getMinimalSIMDSize() : 0u;
     EXPECT_EQ(expectedMaxNumOfSubGroups, caps.maxNumOfSubGroups);
 
-    if (defaultHwInfo->capabilityTable.supportsDeviceEnqueue || (defaultHwInfo->capabilityTable.clVersionSupport == 21)) {
-        EXPECT_EQ(1024u, caps.maxOnDeviceEvents);
-        EXPECT_EQ(1u, caps.maxOnDeviceQueues);
-        EXPECT_EQ(64u * MB, caps.queueOnDeviceMaxSize);
-        EXPECT_EQ(128 * KB, caps.queueOnDevicePreferredSize);
-        EXPECT_EQ(static_cast<cl_command_queue_properties>(CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE),
-                  caps.queueOnDeviceProperties);
-    } else {
-        EXPECT_EQ(0u, caps.maxOnDeviceEvents);
-        EXPECT_EQ(0u, caps.maxOnDeviceQueues);
-        EXPECT_EQ(0u, caps.queueOnDeviceMaxSize);
-        EXPECT_EQ(0u, caps.queueOnDevicePreferredSize);
-        EXPECT_EQ(static_cast<cl_command_queue_properties>(0), caps.queueOnDeviceProperties);
-    }
+    EXPECT_EQ(0u, caps.maxOnDeviceEvents);
+    EXPECT_EQ(0u, caps.maxOnDeviceQueues);
+    EXPECT_EQ(0u, caps.queueOnDeviceMaxSize);
+    EXPECT_EQ(0u, caps.queueOnDevicePreferredSize);
+    EXPECT_EQ(static_cast<cl_command_queue_properties>(0), caps.queueOnDeviceProperties);
 
     if (defaultHwInfo->capabilityTable.supportsPipes) {
         EXPECT_EQ(16u, caps.maxPipeArgs);
@@ -264,10 +252,6 @@ TEST_F(DeviceGetCapsTest, WhenCreatingDeviceThenCapsArePopulatedCorrectly) {
     EXPECT_EQ(2048u, sharedCaps.imageMaxArraySize);
     if (device->getHardwareInfo().capabilityTable.supportsOcl21Features == false && is64bit) {
         EXPECT_TRUE(sharedCaps.force32BitAddressess);
-    }
-
-    if (caps.numericClVersion == 21) {
-        EXPECT_TRUE(device->isOcl21Conformant());
     }
 }
 
@@ -299,67 +283,13 @@ TEST_F(DeviceGetCapsTest, GivenPlatformWhenGettingHwInfoThenImage3dDimensionsAre
     EXPECT_EQ(2048u, sharedCaps.image3DMaxDepth);
 }
 
-TEST_F(DeviceGetCapsTest, givenDontForcePreemptionModeDebugVariableWhenCreateDeviceThenSetDefaultHwPreemptionMode) {
-    DebugManagerStateRestore dbgRestorer;
-    {
-        DebugManager.flags.ForcePreemptionMode.set(-1);
-        auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-        EXPECT_TRUE(device->getHardwareInfo().capabilityTable.defaultPreemptionMode ==
-                    device->getPreemptionMode());
-    }
-}
-
-TEST_F(DeviceGetCapsTest, givenDebugFlagSetWhenCreatingDeviceInfoThenOverrideProfilingTimerResolution) {
-    DebugManagerStateRestore dbgRestorer;
-
-    DebugManager.flags.OverrideProfilingTimerResolution.set(123);
-
-    auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-
-    EXPECT_EQ(double(123), device->getDeviceInfo().profilingTimerResolution);
-    EXPECT_EQ(123u, device->getDeviceInfo().outProfilingTimerResolution);
-}
-
-TEST_F(DeviceGetCapsTest, givenForcePreemptionModeDebugVariableWhenCreateDeviceThenSetForcedMode) {
-    DebugManagerStateRestore dbgRestorer;
-    {
-        PreemptionMode forceMode = PreemptionMode::MidThread;
-        if (defaultHwInfo->capabilityTable.defaultPreemptionMode == forceMode) {
-            // force non-default mode
-            forceMode = PreemptionMode::ThreadGroup;
-        }
-        DebugManager.flags.ForcePreemptionMode.set((int32_t)forceMode);
-        auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-
-        EXPECT_TRUE(forceMode == device->getPreemptionMode());
-    }
-}
-
-TEST_F(DeviceGetCapsTest, givenDeviceWithMidThreadPreemptionWhenDeviceIsCreatedThenSipKernelIsNotCreated) {
-    DebugManagerStateRestore dbgRestorer;
-    {
-        auto builtIns = new MockBuiltins();
-        ASSERT_FALSE(MockSipData::called);
-
-        DebugManager.flags.ForcePreemptionMode.set((int32_t)PreemptionMode::MidThread);
-
-        auto executionEnvironment = new ExecutionEnvironment();
-        executionEnvironment->prepareRootDeviceEnvironments(1);
-        executionEnvironment->rootDeviceEnvironments[0u]->builtins.reset(builtIns);
-        auto device = std::unique_ptr<Device>(MockDevice::createWithExecutionEnvironment<MockDevice>(defaultHwInfo.get(), executionEnvironment, 0u));
-        ASSERT_EQ(builtIns, device->getBuiltIns());
-        EXPECT_FALSE(MockSipData::called);
-    }
-}
-
 TEST_F(DeviceGetCapsTest, givenForceOclVersion30WhenCapsAreCreatedThenDeviceReportsOpenCL30) {
     DebugManagerStateRestore dbgRestorer;
     DebugManager.flags.ForceOCLVersion.set(30);
     auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
     const auto &caps = device->getDeviceInfo();
-    auto expectedClCVersion = (device->isOcl21Conformant() ? "OpenCL C 3.0 " : "OpenCL C 1.2 ");
     EXPECT_STREQ("OpenCL 3.0 NEO ", caps.clVersion);
-    EXPECT_STREQ(expectedClCVersion, caps.clCVersion);
+    EXPECT_STREQ("OpenCL C 1.2 ", caps.clCVersion);
     EXPECT_EQ(CL_MAKE_VERSION(3u, 0u, 0u), caps.numericClVersion);
     EXPECT_FALSE(device->ocl21FeaturesEnabled);
     verifyOpenclCAllVersions(*device);
@@ -437,12 +367,13 @@ TEST_F(DeviceGetCapsTest, givenForce32bitAddressingWhenCapsAreCreatedThenDeviceR
         auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
         const auto &caps = device->getDeviceInfo();
         const auto &sharedCaps = device->getSharedDeviceInfo();
+        const auto memSizePercent = device->getMemoryManager()->getPercentOfGlobalMemoryAvailable(device->getRootDeviceIndex());
         if constexpr (is64bit) {
             EXPECT_TRUE(sharedCaps.force32BitAddressess);
         } else {
             EXPECT_FALSE(sharedCaps.force32BitAddressess);
         }
-        auto expectedSize = (cl_ulong)(4 * 0.8 * GB);
+        auto expectedSize = (cl_ulong)(4 * memSizePercent * GB);
         EXPECT_LE(sharedCaps.globalMemSize, expectedSize);
         EXPECT_LE(sharedCaps.maxMemAllocSize, expectedSize);
         EXPECT_LE(caps.maxConstantBufferSize, expectedSize);
@@ -465,13 +396,14 @@ TEST_F(DeviceGetCapsTest, Given32bitAddressingWhenDeviceIsCreatedThenGlobalMemSi
     auto pMemManager = device->getMemoryManager();
     auto enabledOcl21Features = device->areOcl21FeaturesEnabled();
     bool addressing32Bit = is32bit || (is64bit && (enabledOcl21Features == false)) || DebugManager.flags.Force32bitAddressing.get();
+    const auto memSizePercent = pMemManager->getPercentOfGlobalMemoryAvailable(device->getRootDeviceIndex());
 
     cl_ulong sharedMem = (cl_ulong)pMemManager->getSystemSharedMemory(0u);
     cl_ulong maxAppAddrSpace = (cl_ulong)pMemManager->getMaxApplicationAddress() + 1ULL;
     cl_ulong memSize = std::min(sharedMem, maxAppAddrSpace);
-    memSize = (cl_ulong)((double)memSize * 0.8);
+    memSize = (cl_ulong)((double)memSize * memSizePercent);
     if (addressing32Bit) {
-        memSize = std::min(memSize, (uint64_t)(4 * GB * 0.8));
+        memSize = std::min(memSize, (uint64_t)(4 * GB * memSizePercent));
     }
     cl_ulong expectedSize = alignDown(memSize, MemoryConstants::pageSize);
 
@@ -487,31 +419,28 @@ TEST_F(DeviceGetCapsTest, givenDeviceCapsWhenLocalMemoryIsEnabledThenCalculateGl
     auto pMemManager = device->getMemoryManager();
     auto enabledOcl21Features = device->areOcl21FeaturesEnabled();
     bool addressing32Bit = is32bit || (is64bit && (enabledOcl21Features == false)) || DebugManager.flags.Force32bitAddressing.get();
+    const auto memSizePercent = pMemManager->getPercentOfGlobalMemoryAvailable(device->getRootDeviceIndex());
 
     auto localMem = pMemManager->getLocalMemorySize(0u, static_cast<uint32_t>(device->getDeviceBitfield().to_ulong()));
     auto maxAppAddrSpace = pMemManager->getMaxApplicationAddress() + 1;
     auto memSize = std::min(localMem, maxAppAddrSpace);
-    memSize = static_cast<cl_ulong>(memSize * 0.8);
+    memSize = static_cast<cl_ulong>(memSize * memSizePercent);
     if (addressing32Bit) {
-        memSize = std::min(memSize, static_cast<cl_ulong>(4 * GB * 0.8));
+        memSize = std::min(memSize, static_cast<cl_ulong>(4 * GB * memSizePercent));
     }
     cl_ulong expectedSize = alignDown(memSize, MemoryConstants::pageSize);
 
     EXPECT_EQ(sharedCaps.globalMemSize, expectedSize);
 }
 
-TEST_F(DeviceGetCapsTest, givenGlobalMemSizeAndSharedSystemAllocationsNotSupportedWhenCalculatingMaxAllocSizeThenAdjustToHWCap) {
+HWTEST_F(DeviceGetCapsTest, givenGlobalMemSizeAndSharedSystemAllocationsNotSupportedWhenCalculatingMaxAllocSizeThenAdjustToHWCap) {
     DebugManagerStateRestore dbgRestorer;
     DebugManager.flags.EnableSharedSystemUsmSupport.set(0);
     auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
     const auto &caps = device->getSharedDeviceInfo();
 
-    HardwareCapabilities hwCaps = {0};
-    auto &hwHelper = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
-    hwHelper.setupHardwareCapabilities(&hwCaps, *defaultHwInfo);
-
     uint64_t expectedSize = std::max((caps.globalMemSize / 2), static_cast<uint64_t>(128ULL * MemoryConstants::megaByte));
-    expectedSize = std::min(expectedSize, hwCaps.maxMemAllocSize);
+    expectedSize = std::min(expectedSize, HwHelperHw<FamilyType>::get().getMaxMemAllocSize());
     EXPECT_EQ(caps.maxMemAllocSize, expectedSize);
 }
 
@@ -522,30 +451,6 @@ TEST_F(DeviceGetCapsTest, givenGlobalMemSizeAndSharedSystemAllocationsSupportedW
     const auto &caps = device->getSharedDeviceInfo();
 
     EXPECT_EQ(caps.maxMemAllocSize, caps.globalMemSize);
-}
-
-TEST_F(DeviceGetCapsTest, whenDriverModelHasLimitationForMaxMemoryAllocationSizeThenTakeItIntoAccount) {
-    struct MockDriverModel : NEO::DriverModel {
-        size_t maxAllocSize;
-
-        MockDriverModel(size_t maxAllocSize) : NEO::DriverModel(NEO::DriverModelType::UNKNOWN), maxAllocSize(maxAllocSize) {}
-
-        void setGmmInputArgs(void *args) override {}
-        uint32_t getDeviceHandle() const override { return {}; }
-        PhysicalDevicePciBusInfo getPciBusInfo() const override { return {}; }
-        size_t getMaxMemAllocSize() const override {
-            return maxAllocSize;
-        }
-    };
-
-    DebugManagerStateRestore dbgRestorer;
-    size_t maxAllocSizeTestValue = 512;
-    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-    device->executionEnvironment->rootDeviceEnvironments[0]->osInterface.reset(new NEO::OSInterface());
-    device->executionEnvironment->rootDeviceEnvironments[0]->osInterface->setDriverModel(std::make_unique<MockDriverModel>(maxAllocSizeTestValue));
-    device->initializeCaps();
-    const auto &caps = device->getDeviceInfo();
-    EXPECT_EQ(maxAllocSizeTestValue, caps.maxMemAllocSize);
 }
 
 TEST_F(DeviceGetCapsTest, WhenDeviceIsCreatedThenExtensionsStringEndsWithSpace) {
@@ -583,10 +488,10 @@ TEST_F(DeviceGetCapsTest, givenEnableSharingFormatQuerySetTrueAndEnabledMultiple
     auto rootDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
     EXPECT_THAT(rootDevice->getDeviceInfo().deviceExtensions, ::testing::Not(::testing::HasSubstr(std::string("cl_intel_sharing_format_query "))));
 
-    auto subDevice0 = rootDevice->getDeviceById(0);
+    auto subDevice0 = rootDevice->getSubDevice(0);
     EXPECT_THAT(subDevice0->getDeviceInfo().deviceExtensions, ::testing::HasSubstr(std::string("cl_intel_sharing_format_query ")));
 
-    auto subDevice1 = rootDevice->getDeviceById(1);
+    auto subDevice1 = rootDevice->getSubDevice(1);
     EXPECT_THAT(subDevice1->getDeviceInfo().deviceExtensions, ::testing::HasSubstr(std::string("cl_intel_sharing_format_query ")));
 }
 
@@ -875,11 +780,6 @@ TEST_F(DeviceGetCapsTest, givenEnableAdvancedVmeSetToFalseAndDeviceSupportsVmeWh
     EXPECT_THAT(caps.builtInKernels, testing::Not(testing::HasSubstr("block_advanced_motion_estimate_bidirectional_check_intel")));
 }
 
-TEST_F(DeviceGetCapsTest, WhenDeviceIsCreatedThenVmeIsEnabled) {
-    DebugSettingsManager<DebugFunctionalityLevel::RegKeys> freshDebugSettingsManager("");
-    EXPECT_TRUE(freshDebugSettingsManager.flags.EnableIntelVme.get());
-}
-
 TEST_F(DeviceGetCapsTest, WhenDeviceDoesNotSupportOcl21FeaturesThenDeviceEnqueueAndPipeAreNotSupported) {
     UltClDeviceFactory deviceFactory{1, 0};
     if (deviceFactory.rootDevices[0]->areOcl21FeaturesEnabled() == false) {
@@ -1144,17 +1044,6 @@ TEST(DeviceGetCaps, WhenComparingCompilerExtensionsAndCompilerExtensionsWithFeat
     EXPECT_STREQ(compilerExtensions.c_str(), compilerExtensionsWithFeatures.substr(0, compilerExtensions.size()).c_str());
 }
 
-TEST(DeviceGetCaps, givenVariousOclVersionsWhenCapsAreCreatedThenDeviceReportsSpirvAsSupportedIl) {
-    DebugManagerStateRestore dbgRestorer;
-    int32_t oclVersionsToTest[] = {12, 21, 30};
-    for (auto oclVersion : oclVersionsToTest) {
-        DebugManager.flags.ForceOCLVersion.set(oclVersion);
-        auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-        const auto &caps = device->getDeviceInfo();
-        EXPECT_STREQ("SPIR-V_1.2 ", caps.ilVersion);
-    }
-}
-
 HWTEST_F(DeviceGetCapsTest, givenDisabledFtrPooledEuWhenCalculatingMaxEuPerSSThenIgnoreEuCountPerPoolMin) {
     HardwareInfo myHwInfo = *defaultHwInfo;
     GT_SYSTEM_INFO &mySysInfo = myHwInfo.gtSystemInfo;
@@ -1162,12 +1051,18 @@ HWTEST_F(DeviceGetCapsTest, givenDisabledFtrPooledEuWhenCalculatingMaxEuPerSSThe
 
     mySysInfo.EUCount = 20;
     mySysInfo.EuCountPerPoolMin = 99999;
-    mySkuTable.ftrPooledEuEnabled = 0;
+    mySkuTable.flags.ftrPooledEuEnabled = 0;
 
-    auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&myHwInfo));
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&myHwInfo));
+    auto &deviceInfo = device->deviceInfo;
 
-    auto expectedMaxWGS = (mySysInfo.EUCount / mySysInfo.SubSliceCount) *
-                          (mySysInfo.ThreadCount / mySysInfo.EUCount) * 8;
+    auto simdSizeUsed = HwHelperHw<FamilyType>::get().getMinimalSIMDSize();
+
+    auto hwInfoConfig = HwInfoConfig::get(myHwInfo.platform.eProductFamily);
+    auto expectedMaxWGS = hwInfoConfig->getMaxThreadsForWorkgroupInDSSOrSS(myHwInfo, static_cast<uint32_t>(deviceInfo.maxNumEUsPerSubSlice),
+                                                                           static_cast<uint32_t>(deviceInfo.maxNumEUsPerDualSubSlice)) *
+                          simdSizeUsed;
+
     expectedMaxWGS = std::min(Math::prevPowerOfTwo(expectedMaxWGS), 1024u);
 
     EXPECT_EQ(expectedMaxWGS, device->getDeviceInfo().maxWorkGroupSize);
@@ -1180,7 +1075,7 @@ HWTEST_F(DeviceGetCapsTest, givenEnabledFtrPooledEuWhenCalculatingMaxEuPerSSThen
 
     mySysInfo.EUCount = 20;
     mySysInfo.EuCountPerPoolMin = 99999;
-    mySkuTable.ftrPooledEuEnabled = 1;
+    mySkuTable.flags.ftrPooledEuEnabled = 1;
 
     auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&myHwInfo));
 
@@ -1206,37 +1101,6 @@ TEST(DeviceGetCaps, givenDebugFlagToUseMaxSimdSizeForWkgCalculationWhenDeviceCap
 
     EXPECT_EQ(1024u, device->getSharedDeviceInfo().maxWorkGroupSize);
     EXPECT_EQ(device->getSharedDeviceInfo().maxWorkGroupSize / CommonConstants::maximalSimdSize, device->getDeviceInfo().maxNumOfSubGroups);
-}
-
-TEST(DeviceGetCaps, givenDebugFlagToSetWorkgroupSizeWhenDeviceIsCreatedThenItUsesThatWorkgroupSize) {
-    DebugManagerStateRestore dbgRestorer;
-    DebugManager.flags.OverrideMaxWorkgroupSize.set(16u);
-
-    HardwareInfo myHwInfo = *defaultHwInfo;
-    GT_SYSTEM_INFO &mySysInfo = myHwInfo.gtSystemInfo;
-
-    mySysInfo.EUCount = 24;
-    mySysInfo.SubSliceCount = 3;
-    mySysInfo.ThreadCount = 24 * 7;
-    auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&myHwInfo));
-
-    EXPECT_EQ(16u, device->getDeviceInfo().maxWorkGroupSize);
-}
-
-TEST(DeviceGetCaps, givenDebugFlagToDisableDeviceEnqueuesWhenCreatingDeviceThenDeviceQueueCapsAreSetCorrectly) {
-    REQUIRE_OCL_21_OR_SKIP(defaultHwInfo);
-
-    DebugManagerStateRestore dbgRestorer;
-    DebugManager.flags.ForceDeviceEnqueueSupport.set(0);
-
-    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
-    const auto &caps = device->getDeviceInfo();
-
-    EXPECT_EQ(0u, caps.queueOnDeviceProperties);
-    EXPECT_EQ(0u, caps.queueOnDevicePreferredSize);
-    EXPECT_EQ(0u, caps.queueOnDeviceMaxSize);
-    EXPECT_EQ(0u, caps.maxOnDeviceQueues);
-    EXPECT_EQ(0u, caps.maxOnDeviceEvents);
 }
 
 HWTEST_F(DeviceGetCapsTest, givenDeviceThatHasHighNumberOfExecutionUnitsWhenMaxWorkgroupSizeIsComputedThenItIsLimitedTo1024) {
@@ -1353,77 +1217,6 @@ TEST_F(DeviceGetCapsTest, givenSystemWithNoDriverInfoWhenGettingNameAndVersionTh
     EXPECT_STREQ(tempName.c_str(), caps.name);
     EXPECT_STREQ(expectedVersion.c_str(), caps.driverVersion);
 }
-TEST_F(DeviceGetCapsTest, givenFlagEnabled64kbPagesWhenCallConstructorMemoryManagerThenReturnCorrectValue) {
-    DebugManagerStateRestore dbgRestore;
-    VariableBackup<bool> OsEnabled64kbPagesBackup(&OSInterface::osEnabled64kbPages);
-    class MockMemoryManager : public MemoryManager {
-      public:
-        MockMemoryManager(ExecutionEnvironment &executionEnvironment) : MemoryManager(executionEnvironment) {}
-        void addAllocationToHostPtrManager(GraphicsAllocation *memory) override{};
-        void removeAllocationFromHostPtrManager(GraphicsAllocation *memory) override{};
-        GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override { return nullptr; };
-        GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex) override { return nullptr; };
-        AllocationStatus populateOsHandles(OsHandleStorage &handleStorage, uint32_t rootDeviceIndex) override { return AllocationStatus::Success; };
-        void cleanOsHandles(OsHandleStorage &handleStorage, uint32_t rootDeviceIndex) override{};
-        void freeGraphicsMemoryImpl(GraphicsAllocation *gfxAllocation) override{};
-        uint64_t getSystemSharedMemory(uint32_t rootDeviceIndex) override {
-            return 0;
-        };
-        uint64_t getLocalMemorySize(uint32_t rootDeviceIndex, uint32_t deviceBitfield) override { return 0; };
-        AddressRange reserveGpuAddress(size_t size, uint32_t rootDeviceIndex) override {
-            return {};
-        }
-        void freeGpuAddress(AddressRange addressRange, uint32_t rootDeviceIndex) override{};
-        GraphicsAllocation *createGraphicsAllocation(OsHandleStorage &handleStorage, const AllocationData &allocationData) override { return nullptr; };
-        GraphicsAllocation *allocateGraphicsMemoryForNonSvmHostPtr(const AllocationData &allocationData) override { return nullptr; };
-        GraphicsAllocation *allocateGraphicsMemoryWithAlignment(const AllocationData &allocationData) override { return nullptr; };
-        GraphicsAllocation *allocateUSMHostGraphicsMemory(const AllocationData &allocationData) override { return nullptr; };
-        GraphicsAllocation *allocateGraphicsMemory64kb(const AllocationData &allocationData) override { return nullptr; };
-        GraphicsAllocation *allocate32BitGraphicsMemoryImpl(const AllocationData &allocationData, bool useLocalMemory) override { return nullptr; };
-        GraphicsAllocation *allocateGraphicsMemoryInDevicePool(const AllocationData &allocationData, AllocationStatus &status) override { return nullptr; };
-        GraphicsAllocation *allocateGraphicsMemoryWithGpuVa(const AllocationData &allocationData) override { return nullptr; };
-
-        GraphicsAllocation *allocateGraphicsMemoryForImageImpl(const AllocationData &allocationData, std::unique_ptr<Gmm> gmm) override { return nullptr; };
-        GraphicsAllocation *allocateShareableMemory(const AllocationData &allocationData) override { return nullptr; };
-        void *lockResourceImpl(GraphicsAllocation &graphicsAllocation) override { return nullptr; };
-        void unlockResourceImpl(GraphicsAllocation &graphicsAllocation) override{};
-    };
-
-    MockExecutionEnvironment executionEnvironment;
-    executionEnvironment.prepareRootDeviceEnvironments(1);
-    auto &capabilityTable = executionEnvironment.rootDeviceEnvironments[0]->getMutableHardwareInfo()->capabilityTable;
-    std::unique_ptr<MemoryManager> memoryManager;
-
-    DebugManager.flags.Enable64kbpages.set(-1);
-
-    capabilityTable.ftr64KBpages = false;
-    OSInterface::osEnabled64kbPages = false;
-    memoryManager.reset(new MockMemoryManager(executionEnvironment));
-    EXPECT_FALSE(memoryManager->peek64kbPagesEnabled(0u));
-
-    capabilityTable.ftr64KBpages = false;
-    OSInterface::osEnabled64kbPages = true;
-    memoryManager.reset(new MockMemoryManager(executionEnvironment));
-    EXPECT_FALSE(memoryManager->peek64kbPagesEnabled(0u));
-
-    capabilityTable.ftr64KBpages = true;
-    OSInterface::osEnabled64kbPages = false;
-    memoryManager.reset(new MockMemoryManager(executionEnvironment));
-    EXPECT_FALSE(memoryManager->peek64kbPagesEnabled(0u));
-
-    capabilityTable.ftr64KBpages = true;
-    OSInterface::osEnabled64kbPages = true;
-    memoryManager.reset(new MockMemoryManager(executionEnvironment));
-    EXPECT_TRUE(memoryManager->peek64kbPagesEnabled(0u));
-
-    DebugManager.flags.Enable64kbpages.set(0); // force false
-    memoryManager.reset(new MockMemoryManager(executionEnvironment));
-    EXPECT_FALSE(memoryManager->peek64kbPagesEnabled(0u));
-
-    DebugManager.flags.Enable64kbpages.set(1); // force true
-    memoryManager.reset(new MockMemoryManager(executionEnvironment));
-    EXPECT_TRUE(memoryManager->peek64kbPagesEnabled(0u));
-}
 
 TEST_F(DeviceGetCapsTest, givenFlagEnabled64kbPagesWhenCallConstructorOsAgnosticMemoryManagerThenReturnCorrectValue) {
     DebugManagerStateRestore dbgRestore;
@@ -1490,47 +1283,27 @@ TEST_F(DeviceGetCapsTest, givenOcl21DeviceWhenCheckingPipesSupportThenPipesAreSu
     }
 }
 
-TEST_F(DeviceGetCapsTest, givenDeviceEnqueueSupportForcedWhenCheckingDeviceEnqueueSupportThenDeviceEnqueueIsCorrectlyReported) {
-    DebugManagerStateRestore dbgRestorer;
-    int32_t forceDeviceEnqueueSupportValues[] = {-1, 0, 1};
+TEST_F(DeviceGetCapsTest, givenCapsDeviceEnqueueWhenCheckingDeviceEnqueueSupportThenNoSupportReported) {
     auto hwInfo = *defaultHwInfo;
 
     for (auto isDeviceEnqueueSupportedByHw : ::testing::Bool()) {
         hwInfo.capabilityTable.supportsDeviceEnqueue = isDeviceEnqueueSupportedByHw;
 
-        for (auto forceDeviceEnqueueSupport : forceDeviceEnqueueSupportValues) {
-            DebugManager.flags.ForceDeviceEnqueueSupport.set(forceDeviceEnqueueSupport);
-            auto pClDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
-            auto &caps = pClDevice->getDeviceInfo();
+        auto pClDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
+        auto &caps = pClDevice->getDeviceInfo();
 
-            size_t deviceEnqueueFeaturesCount = 0;
-            for (auto &openclCFeature : caps.openclCFeatures) {
-                if (0 == strcmp(openclCFeature.name, "__opencl_c_device_enqueue")) {
-                    deviceEnqueueFeaturesCount++;
-                }
-            }
-
-            bool expectedDeviceEnqueueSupport =
-                ((forceDeviceEnqueueSupport == -1) ? isDeviceEnqueueSupportedByHw : forceDeviceEnqueueSupport);
-            if (expectedDeviceEnqueueSupport) {
-                EXPECT_TRUE(pClDevice->isDeviceEnqueueSupported());
-                EXPECT_EQ(1024u, caps.maxOnDeviceEvents);
-                EXPECT_EQ(1u, caps.maxOnDeviceQueues);
-                EXPECT_EQ(64u * MB, caps.queueOnDeviceMaxSize);
-                EXPECT_EQ(128 * KB, caps.queueOnDevicePreferredSize);
-                EXPECT_EQ(static_cast<cl_command_queue_properties>(CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE),
-                          caps.queueOnDeviceProperties);
-                EXPECT_EQ(1u, deviceEnqueueFeaturesCount);
-            } else {
-                EXPECT_FALSE(pClDevice->isDeviceEnqueueSupported());
-                EXPECT_EQ(0u, caps.maxOnDeviceEvents);
-                EXPECT_EQ(0u, caps.maxOnDeviceQueues);
-                EXPECT_EQ(0u, caps.queueOnDeviceMaxSize);
-                EXPECT_EQ(0u, caps.queueOnDevicePreferredSize);
-                EXPECT_EQ(static_cast<cl_command_queue_properties>(0), caps.queueOnDeviceProperties);
-                EXPECT_EQ(0u, deviceEnqueueFeaturesCount);
+        size_t deviceEnqueueFeaturesCount = 0;
+        for (auto &openclCFeature : caps.openclCFeatures) {
+            if (0 == strcmp(openclCFeature.name, "__opencl_c_device_enqueue")) {
+                deviceEnqueueFeaturesCount++;
             }
         }
+        EXPECT_EQ(0u, caps.maxOnDeviceEvents);
+        EXPECT_EQ(0u, caps.maxOnDeviceQueues);
+        EXPECT_EQ(0u, caps.queueOnDeviceMaxSize);
+        EXPECT_EQ(0u, caps.queueOnDevicePreferredSize);
+        EXPECT_EQ(static_cast<cl_command_queue_properties>(0), caps.queueOnDeviceProperties);
+        EXPECT_EQ(0u, deviceEnqueueFeaturesCount);
     }
 }
 
@@ -1680,6 +1453,31 @@ HWTEST_F(QueueFamilyNameTest, givenBcsWhenGettingQueueFamilyNameThenReturnProper
 HWTEST_F(QueueFamilyNameTest, givenInvalidEngineGroupWhenGettingQueueFamilyNameThenReturnEmptyName) {
     verify(EngineGroupType::MaxEngineGroups, "");
 }
+
+HWTEST_F(QueueFamilyNameTest, givenTooBigQueueFamilyNameWhenGettingQueueFamilyNameThenExceptionIsThrown) {
+    struct MockClHwHelper : NEO::ClHwHelperHw<FamilyType> {
+        bool getQueueFamilyName(std::string &name, EngineGroupType type) const override {
+            name = familyNameOverride;
+            return true;
+        }
+        std::string familyNameOverride = "";
+    };
+
+    MockClHwHelper clHwHelper{};
+    VariableBackup<ClHwHelper *> clHwHelperFactoryBackup{
+        &NEO::clHwHelperFactory[static_cast<size_t>(defaultHwInfo->platform.eRenderCoreFamily)]};
+    clHwHelperFactoryBackup = &clHwHelper;
+
+    char name[CL_QUEUE_FAMILY_MAX_NAME_SIZE_INTEL] = "";
+
+    clHwHelper.familyNameOverride = std::string(CL_QUEUE_FAMILY_MAX_NAME_SIZE_INTEL - 1, 'a');
+    device->getQueueFamilyName(name, EngineGroupType::MaxEngineGroups);
+    EXPECT_EQ(0, std::strcmp(name, clHwHelper.familyNameOverride.c_str()));
+
+    clHwHelper.familyNameOverride = std::string(CL_QUEUE_FAMILY_MAX_NAME_SIZE_INTEL, 'a');
+    EXPECT_ANY_THROW(device->getQueueFamilyName(name, EngineGroupType::MaxEngineGroups));
+}
+
 HWCMDTEST_F(IGFX_GEN8_CORE, DeviceGetCapsTest, givenSysInfoWhenDeviceCreatedThenMaxWorkGroupCalculatedCorrectly) {
     HardwareInfo myHwInfo = *defaultHwInfo;
     GT_SYSTEM_INFO &mySysInfo = myHwInfo.gtSystemInfo;
@@ -1726,24 +1524,4 @@ HWTEST_F(DeviceGetCapsTest, givenDSSCountEqualZeroWhenDeviceCreatedThenMaxEuPerD
     auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&myHwInfo));
 
     EXPECT_EQ(device->sharedDeviceInfo.maxNumEUsPerSubSlice, device->sharedDeviceInfo.maxNumEUsPerDualSubSlice);
-}
-
-TEST_F(DeviceGetCapsTest, givenGlobalMemSizeAndSharedSystemAllocationSupportWhenReduceMaxMemAllocSizeThenValidValueIsSet) {
-    HardwareCapabilities hwCaps = {0};
-    auto &hwHelper = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
-    hwHelper.setupHardwareCapabilities(&hwCaps, *defaultHwInfo);
-    DebugManagerStateRestore dbgRestorer;
-
-    DebugManager.flags.EnableSharedSystemUsmSupport.set(0);
-    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-    auto globalMemSize = std::min(device->getDevice().getGlobalMemorySize(1u), device->getSharedDeviceInfo().globalMemSize);
-    device->getDevice().reduceMaxMemAllocSize();
-    auto expectedSize = std::min(globalMemSize / 2, hwCaps.maxMemAllocSize);
-    expectedSize = std::max(expectedSize, static_cast<uint64_t>(128llu * MB));
-    EXPECT_EQ(device->getSharedDeviceInfo().maxMemAllocSize, expectedSize);
-
-    DebugManager.flags.EnableSharedSystemUsmSupport.set(1);
-    device.reset(new MockClDevice(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get())));
-    device->getDevice().reduceMaxMemAllocSize();
-    EXPECT_EQ(device->getSharedDeviceInfo().maxMemAllocSize, globalMemSize);
 }

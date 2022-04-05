@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,6 +8,7 @@
 #pragma once
 #include "shared/source/compiler_interface/compiler_interface.h"
 #include "shared/source/compiler_interface/linker.h"
+#include "shared/source/device_binary_format/debug_zebin.h"
 #include "shared/source/device_binary_format/elf/elf_encoder.h"
 #include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/program/program_info.h"
@@ -29,7 +30,6 @@ namespace PatchTokenBinary {
 struct ProgramFromPatchtokens;
 }
 
-class BlockKernelManager;
 class BuiltinDispatchInfoBuilder;
 class ClDevice;
 class Context;
@@ -173,7 +173,7 @@ class Program : public BaseObject<_cl_program> {
 
     cl_int getSource(std::string &binary) const;
 
-    void processDebugData(uint32_t rootDeviceIndex);
+    MOCKABLE_VIRTUAL void processDebugData(uint32_t rootDeviceIndex);
 
     void updateBuildLog(uint32_t rootDeviceIndex, const char *pErrorString, const size_t errorStringSize);
 
@@ -199,12 +199,6 @@ class Program : public BaseObject<_cl_program> {
         return buildInfos[rootDeviceIndex].exportedFunctionsSurface;
     }
 
-    BlockKernelManager *getBlockKernelManager() const {
-        return blockKernelManager;
-    }
-
-    void allocateBlockPrivateSurfaces(const ClDevice &clDevice);
-    void freeBlockResources();
     void cleanCurrentKernelInfo(uint32_t rootDeviceIndex);
 
     const std::string &getOptions() const { return options; }
@@ -227,12 +221,12 @@ class Program : public BaseObject<_cl_program> {
         return kernelDebugEnabled;
     }
 
-    char *getDebugData() {
-        return debugData.get();
+    char *getDebugData(uint32_t rootDeviceIndex) {
+        return buildInfos[rootDeviceIndex].debugData.get();
     }
 
-    size_t getDebugDataSize() {
-        return debugDataSize;
+    size_t getDebugDataSize(uint32_t rootDeviceIndex) {
+        return buildInfos[rootDeviceIndex].debugDataSize;
     }
 
     const Linker::RelocatedSymbolsMap &getSymbols(uint32_t rootDeviceIndex) const {
@@ -250,7 +244,7 @@ class Program : public BaseObject<_cl_program> {
         buildInfos[rootDeviceIndex].linkerInput = std::move(linkerInput);
     }
 
-    MOCKABLE_VIRTUAL void replaceDeviceBinary(std::unique_ptr<char[]> newBinary, size_t newBinarySize, uint32_t rootDeviceIndex);
+    MOCKABLE_VIRTUAL void replaceDeviceBinary(std::unique_ptr<char[]> &&newBinary, size_t newBinarySize, uint32_t rootDeviceIndex);
 
     static bool isValidCallback(void(CL_CALLBACK *funcNotify)(cl_program program, void *userData), void *userData);
     void invokeCallback(void(CL_CALLBACK *funcNotify)(cl_program program, void *userData), void *userData);
@@ -260,7 +254,7 @@ class Program : public BaseObject<_cl_program> {
     bool isDeviceAssociated(const ClDevice &clDevice) const;
 
     static cl_int processInputDevices(ClDeviceVector *&deviceVectorPtr, cl_uint numDevices, const cl_device_id *deviceList, const ClDeviceVector &allAvailableDevices);
-    MOCKABLE_VIRTUAL void initInternalOptions(std::string &internalOptions) const;
+    MOCKABLE_VIRTUAL std::string getInternalOptions() const;
     uint32_t getMaxRootDeviceIndex() const { return maxRootDeviceIndex; }
     void retainForKernel() {
         std::unique_lock<std::mutex> lock{lockMutex};
@@ -282,14 +276,17 @@ class Program : public BaseObject<_cl_program> {
         this->context = pContext;
     }
 
+    void notifyDebuggerWithDebugData(ClDevice *clDevice);
+    MOCKABLE_VIRTUAL void createDebugZebin(uint32_t rootDeviceIndex);
+    Debug::Segments getZebinSegments(uint32_t rootDeviceIndex);
+
   protected:
     MOCKABLE_VIRTUAL cl_int createProgramFromBinary(const void *pBinary, size_t binarySize, ClDevice &clDevice);
 
     cl_int packDeviceBinary(ClDevice &clDevice);
 
-    MOCKABLE_VIRTUAL cl_int linkBinary(Device *pDevice, const void *constantsInitData, const void *variablesInitData);
-
-    void separateBlockKernels(uint32_t rootDeviceIndex);
+    MOCKABLE_VIRTUAL cl_int linkBinary(Device *pDevice, const void *constantsInitData, const void *variablesInitData,
+                                       const ProgramInfo::GlobalSurfaceInfo &stringInfo, std::vector<NEO::ExternalFunctionInfo> &extFuncInfos);
 
     void updateNonUniformFlag();
     void updateNonUniformFlag(const Program **inputProgram, size_t numInputPrograms);
@@ -311,9 +308,6 @@ class Program : public BaseObject<_cl_program> {
     std::unique_ptr<char[]> irBinary;
     size_t irBinarySize = 0U;
 
-    std::unique_ptr<char[]> debugData;
-    size_t debugDataSize = 0U;
-
     CreatedFrom createdFrom = CreatedFrom::UNKNOWN;
 
     struct DeviceBuildInfo {
@@ -324,6 +318,7 @@ class Program : public BaseObject<_cl_program> {
 
     std::unordered_map<ClDevice *, DeviceBuildInfo> deviceBuildInfos;
     bool isCreatedFromBinary = false;
+    bool shouldWarnAboutRebuild = false;
 
     std::string sourceCode;
     std::string options;
@@ -334,8 +329,6 @@ class Program : public BaseObject<_cl_program> {
 
     struct BuildInfo : public NonCopyableClass {
         std::vector<KernelInfo *> kernelInfoArray;
-        std::vector<KernelInfo *> parentKernelInfoArray;
-        std::vector<KernelInfo *> subgroupKernelInfoArray;
         GraphicsAllocation *constantSurface = nullptr;
         GraphicsAllocation *globalSurface = nullptr;
         GraphicsAllocation *exportedFunctionsSurface = nullptr;
@@ -349,6 +342,10 @@ class Program : public BaseObject<_cl_program> {
 
         std::unique_ptr<char[]> packedDeviceBinary;
         size_t packedDeviceBinarySize = 0U;
+        ProgramInfo::GlobalSurfaceInfo constStringSectionData;
+
+        std::unique_ptr<char[]> debugData;
+        size_t debugDataSize = 0U;
     };
 
     std::vector<BuildInfo> buildInfos;
@@ -358,7 +355,6 @@ class Program : public BaseObject<_cl_program> {
     CIF::RAII::UPtr_t<CIF::Builtins::BufferSimple> specConstantsSizes;
     specConstValuesMap specConstantsValues;
 
-    BlockKernelManager *blockKernelManager = nullptr;
     ExecutionEnvironment &executionEnvironment;
     Context *context = nullptr;
     ClDeviceVector clDevices;

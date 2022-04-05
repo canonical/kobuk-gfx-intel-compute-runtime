@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,8 +9,8 @@
 
 #include "shared/source/command_stream/stream_properties.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
-
-#include "test.h"
+#include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 
@@ -41,14 +41,60 @@ TEST(StreamPropertiesTests, whenPropertyValueIsChangedThenProperStateIsSet) {
     }
 }
 
+TEST(StreamPropertiesTests, whenSettingCooperativeKernelPropertiesThenCorrectValueIsSet) {
+    StreamProperties properties;
+    for (auto isEngineInstanced : ::testing::Bool()) {
+        for (auto isCooperativeKernel : ::testing::Bool()) {
+            for (auto disableOverdispatch : ::testing::Bool()) {
+                for (auto disableEUFusion : ::testing::Bool()) {
+                    properties.frontEndState.setProperties(isCooperativeKernel, disableEUFusion, disableOverdispatch, isEngineInstanced, *defaultHwInfo);
+                    EXPECT_EQ(isCooperativeKernel, properties.frontEndState.computeDispatchAllWalkerEnable.value);
+                    EXPECT_EQ(disableEUFusion, properties.frontEndState.disableEUFusion.value);
+                    EXPECT_EQ(disableOverdispatch, properties.frontEndState.disableOverdispatch.value);
+                    EXPECT_EQ(isEngineInstanced, properties.frontEndState.singleSliceDispatchCcsMode.value);
+                }
+            }
+        }
+    }
+}
+
 TEST(StreamPropertiesTests, whenSettingStateComputeModePropertiesThenCorrectValuesAreSet) {
+    DebugManagerStateRestore restorer;
+
+    int32_t threadArbitrationPolicyValues[] = {
+        ThreadArbitrationPolicy::AgeBased, ThreadArbitrationPolicy::RoundRobin,
+        ThreadArbitrationPolicy::RoundRobinAfterDependency};
+
     StreamProperties properties;
     for (auto requiresCoherency : ::testing::Bool()) {
         for (auto largeGrf : ::testing::Bool()) {
-            properties.stateComputeMode.setProperties(requiresCoherency, largeGrf ? 256 : 128, 0u);
-            EXPECT_EQ(largeGrf, properties.stateComputeMode.largeGrfMode.value);
-            EXPECT_EQ(requiresCoherency, properties.stateComputeMode.isCoherencyRequired.value);
+            for (auto threadArbitrationPolicy : threadArbitrationPolicyValues) {
+                properties.stateComputeMode.setProperties(requiresCoherency, largeGrf ? 256 : 128, threadArbitrationPolicy, *defaultHwInfo);
+                EXPECT_EQ(largeGrf, properties.stateComputeMode.largeGrfMode.value);
+                EXPECT_EQ(requiresCoherency, properties.stateComputeMode.isCoherencyRequired.value);
+                EXPECT_EQ(-1, properties.stateComputeMode.zPassAsyncComputeThreadLimit.value);
+                EXPECT_EQ(-1, properties.stateComputeMode.pixelAsyncComputeThreadLimit.value);
+                EXPECT_EQ(threadArbitrationPolicy, properties.stateComputeMode.threadArbitrationPolicy.value);
+            }
         }
+    }
+
+    for (auto forceZPassAsyncComputeThreadLimit : ::testing::Bool()) {
+        DebugManager.flags.ForceZPassAsyncComputeThreadLimit.set(forceZPassAsyncComputeThreadLimit);
+        properties.stateComputeMode.setProperties(false, 0u, 0u, *defaultHwInfo);
+        EXPECT_EQ(forceZPassAsyncComputeThreadLimit, properties.stateComputeMode.zPassAsyncComputeThreadLimit.value);
+    }
+
+    for (auto forcePixelAsyncComputeThreadLimit : ::testing::Bool()) {
+        DebugManager.flags.ForcePixelAsyncComputeThreadLimit.set(forcePixelAsyncComputeThreadLimit);
+        properties.stateComputeMode.setProperties(false, 0u, 0u, *defaultHwInfo);
+        EXPECT_EQ(forcePixelAsyncComputeThreadLimit, properties.stateComputeMode.pixelAsyncComputeThreadLimit.value);
+    }
+
+    for (auto threadArbitrationPolicy : threadArbitrationPolicyValues) {
+        DebugManager.flags.OverrideThreadArbitrationPolicy.set(threadArbitrationPolicy);
+        properties.stateComputeMode.setProperties(false, 0u, 0u, *defaultHwInfo);
+        EXPECT_EQ(threadArbitrationPolicy, properties.stateComputeMode.threadArbitrationPolicy.value);
     }
 }
 

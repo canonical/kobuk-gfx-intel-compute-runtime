@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,7 +7,10 @@
 
 #pragma once
 #include "shared/source/helpers/engine_control.h"
+#include "shared/source/utilities/range.h"
 
+#include "opencl/source/command_queue/copy_engine_state.h"
+#include "opencl/source/command_queue/csr_selection_args.h"
 #include "opencl/source/event/event.h"
 #include "opencl/source/helpers/base_object.h"
 #include "opencl/source/helpers/dispatch_info.h"
@@ -33,7 +36,6 @@ class Kernel;
 class MemObj;
 class PerformanceCounters;
 struct CompletionStamp;
-struct DispatchGlobalsArgs;
 struct MultiDispatchInfo;
 
 enum class QueuePriority {
@@ -41,14 +43,6 @@ enum class QueuePriority {
     MEDIUM,
     HIGH
 };
-
-inline bool shouldFlushDC(uint32_t commandType, PrintfHandler *printfHandler) {
-    return (commandType == CL_COMMAND_READ_BUFFER ||
-            commandType == CL_COMMAND_READ_BUFFER_RECT ||
-            commandType == CL_COMMAND_READ_IMAGE ||
-            commandType == CL_COMMAND_SVM_MAP ||
-            printfHandler);
-}
 
 template <>
 struct OpenCLObjectMapper<_cl_command_queue> {
@@ -193,8 +187,6 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
                                           const cl_event *eventWaitList, cl_event *event) = 0;
 
     virtual cl_int finish() = 0;
-    virtual cl_int enqueueInitDispatchGlobals(DispatchGlobalsArgs *dispatchGlobalsArgs, cl_uint numEventsInWaitList,
-                                              const cl_event *eventWaitList, cl_event *event) = 0;
 
     virtual cl_int flush() = 0;
 
@@ -210,20 +202,30 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     volatile uint32_t *getHwTagAddress() const;
 
-    bool isCompleted(uint32_t gpgpuTaskCount, uint32_t bcsTaskCount) const;
+    bool isCompleted(uint32_t gpgpuTaskCount, CopyEngineState bcsState) const;
+
+    bool isWaitForTimestampsEnabled() const;
+    virtual bool waitForTimestamps(uint32_t taskCount) = 0;
 
     MOCKABLE_VIRTUAL bool isQueueBlocked();
 
-    MOCKABLE_VIRTUAL void waitUntilComplete(uint32_t gpgpuTaskCountToWait, uint32_t bcsTaskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep);
-    MOCKABLE_VIRTUAL void waitUntilComplete(bool blockedQueue, PrintfHandler *printfHandler);
+    MOCKABLE_VIRTUAL WaitStatus waitUntilComplete(uint32_t gpgpuTaskCountToWait, Range<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool cleanTemporaryAllocationList, bool skipWait);
+    MOCKABLE_VIRTUAL WaitStatus waitUntilComplete(uint32_t gpgpuTaskCountToWait, Range<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) {
+        return this->waitUntilComplete(gpgpuTaskCountToWait, copyEnginesToWait, flushStampToWait, useQuickKmdSleep, true, false);
+    }
+    MOCKABLE_VIRTUAL WaitStatus waitForAllEngines(bool blockedQueue, PrintfHandler *printfHandler, bool cleanTemporaryAllocationsList);
+    MOCKABLE_VIRTUAL WaitStatus waitForAllEngines(bool blockedQueue, PrintfHandler *printfHandler) {
+        return this->waitForAllEngines(blockedQueue, printfHandler, true);
+    }
 
     static uint32_t getTaskLevelFromWaitList(uint32_t taskLevel,
                                              cl_uint numEventsInWaitList,
                                              const cl_event *eventWaitList);
 
     MOCKABLE_VIRTUAL CommandStreamReceiver &getGpgpuCommandStreamReceiver() const;
-    CommandStreamReceiver *getBcsCommandStreamReceiver() const;
-    MOCKABLE_VIRTUAL CommandStreamReceiver &getCommandStreamReceiver(bool blitAllowed) const;
+    MOCKABLE_VIRTUAL CommandStreamReceiver *getBcsCommandStreamReceiver(aub_stream::EngineType bcsEngineType) const;
+    CommandStreamReceiver *getBcsForAuxTranslation() const;
+    MOCKABLE_VIRTUAL CommandStreamReceiver &selectCsrForBuiltinOperation(const CsrSelectionArgs &args) const;
     Device &getDevice() const noexcept;
     ClDevice &getClDevice() const { return *device; }
     Context &getContext() const { return *context; }
@@ -236,6 +238,9 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     void allocateHeapMemory(IndirectHeap::Type heapType,
                             size_t minRequiredSize, IndirectHeap *&indirectHeap);
+
+    static bool isAssignEngineRoundRobinEnabled();
+    static bool isTimestampWaitEnabled();
 
     MOCKABLE_VIRTUAL void releaseIndirectHeap(IndirectHeap::Type heapType);
 
@@ -310,10 +315,20 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
         return requiresCacheFlushAfterWalker;
     }
 
-    void updateBcsTaskCount(uint32_t newBcsTaskCount) { this->bcsTaskCount = newBcsTaskCount; }
-    uint32_t peekBcsTaskCount() const { return bcsTaskCount; }
+    template <typename PtrType>
+    static PtrType convertAddressWithOffsetToGpuVa(PtrType ptr, InternalMemoryType memoryType, GraphicsAllocation &allocation);
+
+    void updateBcsTaskCount(aub_stream::EngineType bcsEngineType, uint32_t newBcsTaskCount);
+    uint32_t peekBcsTaskCount(aub_stream::EngineType bcsEngineType) const;
 
     void updateLatestSentEnqueueType(EnqueueProperties::Operation newEnqueueType) { this->latestSentEnqueueType = newEnqueueType; }
+    EnqueueProperties::Operation peekLatestSentEnqueueOperation() { return this->latestSentEnqueueType; }
+
+    void setupBarrierTimestampForBcsEngines(aub_stream::EngineType engineType, TimestampPacketDependencies &timestampPacketDependencies);
+    void processBarrierTimestampForBcsEngine(aub_stream::EngineType bcsEngineType, TimestampPacketDependencies &blitDependencies);
+    void setLastBcsPacket(aub_stream::EngineType bcsEngineType);
+    void fillCsrDependenciesWithLastBcsPackets(CsrDependencies &csrDeps);
+    void clearLastBcsPackets();
 
     // taskCount of last task
     uint32_t taskCount = 0;
@@ -334,6 +349,8 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     uint64_t dispatchHints = 0;
 
+    bool isTextureCacheFlushNeeded(uint32_t commandType) const;
+
   protected:
     void *enqueueReadMemObjForMap(TransferProperties &transferProperties, EventsRequest &eventsRequest, cl_int &errcodeRet);
     cl_int enqueueWriteMemObjForUnmap(MemObj *memObj, void *mappedPtr, EventsRequest &eventsRequest);
@@ -342,27 +359,36 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     cl_int enqueueUnmapMemObject(TransferProperties &transferProperties, EventsRequest &eventsRequest);
 
     virtual void obtainTaskLevelAndBlockedStatus(unsigned int &taskLevel, cl_uint &numEventsInWaitList, const cl_event *&eventWaitList, bool &blockQueueStatus, unsigned int commandType){};
-    bool isBlockedCommandStreamRequired(uint32_t commandType, const EventsRequest &eventsRequest, bool blockedQueue) const;
+    bool isBlockedCommandStreamRequired(uint32_t commandType, const EventsRequest &eventsRequest, bool blockedQueue, bool isMarkerWithProfiling) const;
 
-    MOCKABLE_VIRTUAL void obtainNewTimestampPacketNodes(size_t numberOfNodes, TimestampPacketContainer &previousNodes, bool clearAllDependencies, bool blitEnqueue);
+    MOCKABLE_VIRTUAL void obtainNewTimestampPacketNodes(size_t numberOfNodes, TimestampPacketContainer &previousNodes, bool clearAllDependencies, CommandStreamReceiver &csr);
     void storeProperties(const cl_queue_properties *properties);
     void processProperties(const cl_queue_properties *properties);
-    void overrideEngine(aub_stream::EngineType engineType);
+    void overrideEngine(aub_stream::EngineType engineType, EngineUsage engineUsage);
     bool bufferCpuCopyAllowed(Buffer *buffer, cl_command_type commandType, cl_bool blocking, size_t size, void *ptr,
                               cl_uint numEventsInWaitList, const cl_event *eventWaitList);
     void providePerformanceHint(TransferProperties &transferProperties);
     bool queueDependenciesClearRequired() const;
-    bool blitEnqueueAllowed(cl_command_type cmdType) const;
-    bool blitEnqueuePreferred(cl_command_type cmdType, const BuiltinOpParams &builtinOpParams) const;
-    MOCKABLE_VIRTUAL bool blitEnqueueImageAllowed(const size_t *origin, const size_t *region, const Image &image);
+    bool blitEnqueueAllowed(const CsrSelectionArgs &args) const;
+
+    inline bool shouldFlushDC(uint32_t commandType, PrintfHandler *printfHandler) const {
+        return (commandType == CL_COMMAND_READ_BUFFER ||
+                commandType == CL_COMMAND_READ_BUFFER_RECT ||
+                commandType == CL_COMMAND_READ_IMAGE ||
+                commandType == CL_COMMAND_SVM_MAP ||
+                printfHandler ||
+                isTextureCacheFlushNeeded(commandType));
+    }
+
+    MOCKABLE_VIRTUAL bool blitEnqueueImageAllowed(const size_t *origin, const size_t *region, const Image &image) const;
     void aubCaptureHook(bool &blocking, bool &clearAllDependencies, const MultiDispatchInfo &multiDispatchInfo);
     virtual bool obtainTimestampPacketForCacheFlush(bool isCacheFlushRequired) const = 0;
-    void waitForLatestTaskCount();
 
     Context *context = nullptr;
     ClDevice *device = nullptr;
     EngineControl *gpgpuEngine = nullptr;
-    EngineControl *bcsEngine = nullptr;
+    std::array<EngineControl *, bcsInfoMaskSize> bcsEngines = {};
+    std::vector<aub_stream::EngineType> bcsEngineTypes = {};
 
     cl_command_queue_properties commandQueueProperties = 0;
     std::vector<uint64_t> propertiesVector;
@@ -376,7 +402,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     QueueThrottle throttle = QueueThrottle::MEDIUM;
     EnqueueProperties::Operation latestSentEnqueueType = EnqueueProperties::Operation::None;
     uint64_t sliceCount = QueueSliceCount::defaultSliceCount;
-    uint32_t bcsTaskCount = 0;
+    std::array<CopyEngineState, bcsInfoMaskSize> bcsStates = {};
 
     bool perfCountersEnabled = false;
 
@@ -389,7 +415,24 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     std::unique_ptr<TimestampPacketContainer> deferredTimestampPackets;
     std::unique_ptr<TimestampPacketContainer> timestampPacketContainer;
+    struct BcsTimestampPacketContainers {
+        TimestampPacketContainer lastBarrierToWaitFor;
+        TimestampPacketContainer lastSignalledPacket;
+    };
+    std::array<BcsTimestampPacketContainers, bcsInfoMaskSize> bcsTimestampPacketContainers;
 };
+
+template <typename PtrType>
+PtrType CommandQueue::convertAddressWithOffsetToGpuVa(PtrType ptr, InternalMemoryType memoryType, GraphicsAllocation &allocation) {
+    // If this is device or shared USM pointer, it is already a gpuVA and we don't have to do anything.
+    // Otherwise, we assume this is a cpuVA and we have to convert to gpuVA, while preserving offset from allocation start.
+    const bool isCpuPtr = (memoryType != DEVICE_UNIFIED_MEMORY) && (memoryType != SHARED_UNIFIED_MEMORY);
+    if (isCpuPtr) {
+        size_t dstOffset = ptrDiff(ptr, allocation.getUnderlyingBuffer());
+        ptr = reinterpret_cast<PtrType>(allocation.getGpuAddress() + dstOffset);
+    }
+    return ptr;
+}
 
 using CommandQueueCreateFunc = CommandQueue *(*)(Context *context, ClDevice *device, const cl_queue_properties *properties, bool internalUsage);
 

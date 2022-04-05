@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2021 Intel Corporation
+# Copyright (C) 2018-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -8,20 +8,17 @@ project(igdrcl_aub_tests)
 
 set(OPENCL_AUB_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
-get_property(NEO_SHARED_aub_tests_configurations GLOBAL PROPERTY NEO_SHARED_aub_tests_configurations)
-
 list(APPEND IGDRCL_AUB_TESTS__TARGET_OBJECTS
-     ${NEO_SHARED_TEST_DIRECTORY}/common/libult/os_interface.cpp
      ${NEO_SOURCE_DIR}/opencl/test/unit_test/test_macros/test_checks_ocl.cpp
-     ${NEO_SOURCE_DIR}/shared/source/aub/aub_stream_interface.cpp
      ${NEO_SOURCE_DIR}/shared/test/common/test_macros/test_checks_shared.cpp
-     ${NEO_SHARED_aub_tests_configurations}
      $<TARGET_OBJECTS:${BUILTINS_SOURCES_LIB_NAME}>
-     $<TARGET_OBJECTS:${SCHEDULER_BINARY_LIB_NAME}>
      $<TARGET_OBJECTS:igdrcl_libult>
-     $<TARGET_OBJECTS:igdrcl_libult_common>
-     $<TARGET_OBJECTS:igdrcl_libult_cs>
+     $<TARGET_OBJECTS:neo_libult_common>
+     $<TARGET_OBJECTS:neo_libult_cs>
+     $<TARGET_OBJECTS:neo_libult>
      $<TARGET_OBJECTS:igdrcl_libult_env>
+     $<TARGET_OBJECTS:neo_shared_mocks>
+     $<TARGET_OBJECTS:neo_aub_tests_config>
 )
 
 if(DEFINED AUB_STREAM_PROJECT_NAME)
@@ -48,50 +45,23 @@ if(WIN32)
 endif()
 
 target_include_directories(igdrcl_aub_tests PRIVATE
-                           ${CMAKE_CURRENT_SOURCE_DIR}
+                           ${NEO_SHARED_TEST_DIRECTORY}/common/test_configuration/aub_tests
                            ${NEO_SOURCE_DIR}/shared/test/common/helpers/includes${BRANCH_DIR_SUFFIX}
 )
 
 target_sources(igdrcl_aub_tests PRIVATE
                ${NEO_SHARED_TEST_DIRECTORY}/unit_test/page_fault_manager/default_asan_options.cpp
-               ${NEO_SHARED_DIRECTORY}/gmm_helper/resource_info.cpp
-               ${NEO_SOURCE_DIR}/opencl/source/helpers/api_specific_config_ocl.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/test_mode.h
 )
-
-if(WIN32)
-  target_sources(igdrcl_aub_tests PRIVATE
-                 ${NEO_SHARED_DIRECTORY}/os_interface/windows/gmm_interface_win.cpp
-                 ${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory.cpp
-                 ${NEO_SOURCE_DIR}/opencl/test/unit_test/os_interface/windows/wddm_create.cpp
-  )
-else()
-  target_sources(igdrcl_aub_tests PRIVATE
-                 ${NEO_SHARED_DIRECTORY}/os_interface/linux/gmm_interface_linux.cpp
-                 ${NEO_SOURCE_DIR}/opencl/test/unit_test/os_interface/linux/drm_neo_create.cpp
-  )
-  if(NOT DISABLE_WDDM_LINUX)
-    target_sources(igdrcl_aub_tests PRIVATE
-                   ${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory.cpp
-                   ${NEO_SHARED_DIRECTORY}/os_interface/windows/wddm/wddm_create.cpp
-    )
-  endif()
-endif()
-
 copy_gmm_dll_for(igdrcl_aub_tests)
 add_subdirectories()
 
+target_link_libraries(igdrcl_aub_tests ${NEO_MOCKABLE_LIB_NAME} ${NEO_SHARED_MOCKABLE_LIB_NAME})
 target_link_libraries(igdrcl_aub_tests igdrcl_mocks)
-target_link_libraries(igdrcl_aub_tests ${NEO_STATICALLY_LINKED_LIBRARIES_MOCKABLE})
-target_link_libraries(igdrcl_aub_tests igdrcl_mocks)
-target_link_libraries(igdrcl_aub_tests gmock-gtest ${IGDRCL_EXTRA_LIBS})
+target_link_libraries(igdrcl_aub_tests gmock-gtest ${NEO_EXTRA_LIBS})
 if(UNIX)
   target_link_libraries(igdrcl_aub_tests ${GMM_LINK_NAME})
 else()
   add_dependencies(igdrcl_aub_tests ${GMM_TARGET_NAME})
-  target_sources(igdrcl_aub_tests PRIVATE
-                 ${NEO_SHARED_DIRECTORY}/os_interface/windows/gmm_interface_win.cpp
-  )
 endif()
 target_include_directories(igdrcl_aub_tests BEFORE PRIVATE ${NEO_SHARED_TEST_DIRECTORY}/common/test_macros/header${BRANCH_DIR_SUFFIX})
 

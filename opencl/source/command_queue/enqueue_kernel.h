@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -31,6 +31,10 @@ cl_int CommandQueueHw<GfxFamily>::enqueueKernel(
     const cl_event *eventWaitList,
     cl_event *event) {
 
+    if (workDim > device->getDeviceInfo().maxWorkItemDimensions) {
+        return CL_INVALID_WORK_DIMENSION;
+    }
+
     size_t region[3] = {1, 1, 1};
     size_t globalWorkOffset[3] = {0, 0, 0};
     size_t workGroupSize[3] = {1, 1, 1};
@@ -38,10 +42,6 @@ cl_int CommandQueueHw<GfxFamily>::enqueueKernel(
 
     auto &kernel = *pKernel;
     const auto &kernelInfo = kernel.getKernelInfo();
-
-    if (kernel.isParentKernel && !this->context->getDefaultDeviceQueue()) {
-        return CL_INVALID_OPERATION;
-    }
 
     if (!kernel.isPatched()) {
         if (event) {

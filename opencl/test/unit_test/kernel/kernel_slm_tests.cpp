@@ -1,20 +1,20 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/program/kernel_info.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/kernel/kernel.h"
-#include "opencl/source/program/kernel_info.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -65,7 +65,7 @@ HWCMDTEST_P(IGFX_GEN8_CORE, KernelSLMAndBarrierTest, GivenStaticSlmSizeWhenProgr
     ASSERT_EQ(CL_SUCCESS, kernel.initialize());
 
     // After creating Mock Kernel now create Indirect Heap
-    auto &indirectHeap = cmdQ.getIndirectHeap(IndirectHeap::DYNAMIC_STATE, 8192);
+    auto &indirectHeap = cmdQ.getIndirectHeap(IndirectHeap::Type::DYNAMIC_STATE, 8192);
 
     uint64_t interfaceDescriptorOffset = indirectHeap.getUsed();
 
@@ -152,7 +152,7 @@ HWTEST_F(KernelSLMAndBarrierTest, GivenInterfaceDescriptorProgrammedWhenOverride
     ASSERT_EQ(CL_SUCCESS, kernel.initialize());
 
     CommandQueueHw<FamilyType> cmdQ(nullptr, pClDevice, 0, false);
-    auto &indirectHeap = cmdQ.getIndirectHeap(IndirectHeap::DYNAMIC_STATE, 8192);
+    auto &indirectHeap = cmdQ.getIndirectHeap(IndirectHeap::Type::DYNAMIC_STATE, 8192);
 
     uint64_t interfaceDescriptorOffset = indirectHeap.getUsed();
     INTERFACE_DESCRIPTOR_DATA interfaceDescriptorData;

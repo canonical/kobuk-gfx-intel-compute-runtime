@@ -13,6 +13,8 @@
 
 #include <cmath>
 
+extern bool sysmanUltsEnable;
+
 using ::testing::Invoke;
 
 namespace L0 {
@@ -36,6 +38,9 @@ class SysmanDeviceFrequencyFixture : public SysmanDeviceFixture {
     std::vector<ze_device_handle_t> deviceHandles;
 
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::SetUp();
         pSysfsAccessOld = pLinuxSysmanImp->pSysfsAccess;
         pSysfsAccess = std::make_unique<NiceMock<Mock<FrequencySysfsAccess>>>();
@@ -74,6 +79,9 @@ class SysmanDeviceFrequencyFixture : public SysmanDeviceFixture {
     }
 
     void TearDown() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::TearDown();
         pLinuxSysmanImp->pSysfsAccess = pSysfsAccessOld;
     }
@@ -152,6 +160,25 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleAndZeroCountWhenCa
         uint32_t count = 0;
         EXPECT_EQ(ZE_RESULT_SUCCESS, zesFrequencyGetAvailableClocks(handle, &count, nullptr));
         EXPECT_EQ(numClocks, count);
+    }
+}
+
+TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleAndZeroCountWhenCountIsMoreThanNumClocksThenCallSucceeds) {
+    auto handles = get_freq_handles(handleComponentCount);
+    for (auto handle : handles) {
+        EXPECT_NE(handle, nullptr);
+        uint32_t count = 80;
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesFrequencyGetAvailableClocks(handle, &count, nullptr));
+        EXPECT_EQ(numClocks, count);
+    }
+}
+
+TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleAndZeroCountWhenCountIsLessThanNumClocksThenCallSucceeds) {
+    auto handles = get_freq_handles(handleComponentCount);
+    for (auto handle : handles) {
+        EXPECT_NE(handle, nullptr);
+        uint32_t count = 20;
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesFrequencyGetAvailableClocks(handle, &count, nullptr));
     }
 }
 
@@ -475,7 +502,7 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenOnSubdeviceSetWhenValidatingAnyFrequen
     EXPECT_EQ(1, properties.canControl);
 }
 
-TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleWhenCallingzesFrequencySetRangeAndIfsetMaxFailsThenVerifyzesFrequencySetRangeTestCallFail) {
+TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleWhenCallingzesFrequencySetRangeAndIfgetMaxFailsThenVerifyzesFrequencySetRangeTestCallFail) {
     auto handles = get_freq_handles(handleComponentCount);
     for (auto handle : handles) {
         const double startingMax = 600.0;
@@ -488,6 +515,24 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleWhenCallingzesFreq
         limits.min = newMin;
         limits.max = maxFreq;
         ON_CALL(*pSysfsAccess.get(), read(_, _))
+            .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::setValMaxReturnErrorNotAvailable));
+        EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesFrequencySetRange(handle, &limits));
+    }
+}
+
+TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleWhenCallingzesFrequencySetRangeAndIfsetMaxFailsThenVerifyzesFrequencySetRangeTestCallFail) {
+    auto handles = get_freq_handles(handleComponentCount);
+    for (auto handle : handles) {
+        const double startingMax = 600.0;
+        const double newMin = 900.0;
+        zes_freq_range_t limits;
+
+        pSysfsAccess->setVal(maxFreqFile, startingMax);
+        // If the new Min value is greater than the old Max
+        // value, the new Max must be set before the new Min
+        limits.min = newMin;
+        limits.max = maxFreq;
+        ON_CALL(*pSysfsAccess.get(), write(_, _))
             .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::setValMaxReturnErrorNotAvailable));
         EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesFrequencySetRange(handle, &limits));
     }

@@ -1,14 +1,14 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/os_interface/os_interface.h"
+#include "shared/test/common/libult/linux/drm_mock.h"
 
 #include "opencl/test/unit_test/helpers/gtest_helpers.h"
-#include "opencl/test/unit_test/os_interface/linux/drm_mock.h"
 #include "opencl/test/unit_test/os_interface/linux/hw_info_config_linux_tests.h"
 
 using namespace NEO;
@@ -21,7 +21,6 @@ struct HwInfoConfigTestLinuxAdls : HwInfoConfigTestLinux {
         osInterface->setDriverModel(std::unique_ptr<DriverModel>(drm));
 
         drm->storedDeviceID = IGFX_ALDERLAKE_S;
-        drm->setGtType(GTTYPE_GT1);
     }
 };
 
@@ -35,16 +34,7 @@ ADLSTEST_F(HwInfoConfigTestLinuxAdls, WhenConfiguringHwInfoThenConfigIsCorrect) 
     EXPECT_EQ(static_cast<uint32_t>(drm->storedSSVal), outHwInfo.gtSystemInfo.SubSliceCount);
     EXPECT_EQ(1u, outHwInfo.gtSystemInfo.SliceCount);
 
-    EXPECT_EQ(GTTYPE_GT1, outHwInfo.platform.eGTType);
-    EXPECT_TRUE(outHwInfo.featureTable.ftrGT1);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGT1_5);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGT2);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGT3);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGT4);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGTA);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGTC);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGTX);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrTileY);
+    EXPECT_FALSE(outHwInfo.featureTable.flags.ftrTileY);
 }
 
 ADLSTEST_F(HwInfoConfigTestLinuxAdls, GivenIncorrectDataWhenConfiguringHwInfoThenErrorIsReturned) {
@@ -78,7 +68,7 @@ TEST(AdlsHwInfoTests, WhenSettingUpHwInfoThenConfigIsCorrect) {
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     DrmMock drm(*executionEnvironment->rootDeviceEnvironments[0]);
     GT_SYSTEM_INFO &gtSystemInfo = hwInfo.gtSystemInfo;
-    DeviceDescriptor device = {0, &hwInfo, &ADLS_HW_CONFIG::setupHardwareInfo, GTTYPE_GT1};
+    DeviceDescriptor device = {0, &hwInfo, &ADLS_HW_CONFIG::setupHardwareInfo};
 
     int ret = drm.setupHardwareInfo(&device, false);
 

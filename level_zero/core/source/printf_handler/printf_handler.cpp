@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,7 +17,7 @@ namespace L0 {
 
 NEO::GraphicsAllocation *PrintfHandler::createPrintfBuffer(Device *device) {
     NEO::AllocationProperties properties(
-        device->getRootDeviceIndex(), PrintfHandler::printfBufferSize, NEO::GraphicsAllocation::AllocationType::PRINTF_SURFACE, device->getNEODevice()->getDeviceBitfield());
+        device->getRootDeviceIndex(), PrintfHandler::printfBufferSize, NEO::AllocationType::PRINTF_SURFACE, device->getNEODevice()->getDeviceBitfield());
     properties.alignment = MemoryConstants::pageSize64k;
     auto allocation = device->getNEODevice()->getMemoryManager()->allocateGraphicsMemoryWithProperties(properties);
 
@@ -29,11 +29,13 @@ NEO::GraphicsAllocation *PrintfHandler::createPrintfBuffer(Device *device) {
 void PrintfHandler::printOutput(const KernelImmutableData *kernelData,
                                 NEO::GraphicsAllocation *printfBuffer, Device *device) {
     bool using32BitGpuPointers = kernelData->getDescriptor().kernelAttributes.gpuPointerSize == 4u;
+
+    auto usesStringMap = kernelData->getDescriptor().kernelAttributes.usesStringMap();
     NEO::PrintFormatter printfFormatter{
         static_cast<uint8_t *>(printfBuffer->getUnderlyingBuffer()),
         static_cast<uint32_t>(printfBuffer->getUnderlyingBufferSize()),
         using32BitGpuPointers,
-        kernelData->getDescriptor().kernelAttributes.flags.usesStringMapForPrintf ? &kernelData->getDescriptor().kernelMetadata.printfStringsMap : nullptr};
+        usesStringMap ? &kernelData->getDescriptor().kernelMetadata.printfStringsMap : nullptr};
     printfFormatter.printKernelOutput();
 
     *reinterpret_cast<uint32_t *>(printfBuffer->getUnderlyingBuffer()) =

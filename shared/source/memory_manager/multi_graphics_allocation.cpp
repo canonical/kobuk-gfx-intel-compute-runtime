@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,6 +14,9 @@ namespace NEO {
 
 MultiGraphicsAllocation::MultiGraphicsAllocation(uint32_t maxRootDeviceIndex) {
     graphicsAllocations.resize(maxRootDeviceIndex + 1);
+    for (auto &allocation : graphicsAllocations) {
+        allocation = nullptr;
+    }
 }
 
 MultiGraphicsAllocation::MultiGraphicsAllocation(const MultiGraphicsAllocation &multiGraphicsAllocation) {
@@ -56,10 +59,13 @@ void MultiGraphicsAllocation::removeAllocation(uint32_t rootDeviceIndex) {
 }
 
 GraphicsAllocation *MultiGraphicsAllocation::getGraphicsAllocation(uint32_t rootDeviceIndex) const {
+    if (rootDeviceIndex >= graphicsAllocations.size()) {
+        return nullptr;
+    }
     return graphicsAllocations[rootDeviceIndex];
 }
 
-GraphicsAllocation::AllocationType MultiGraphicsAllocation::getAllocationType() const {
+AllocationType MultiGraphicsAllocation::getAllocationType() const {
     return getDefaultGraphicsAllocation()->getAllocationType();
 }
 

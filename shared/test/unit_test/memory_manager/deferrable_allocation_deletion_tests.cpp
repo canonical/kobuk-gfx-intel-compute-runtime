@@ -10,12 +10,11 @@
 #include "shared/source/memory_manager/deferrable_allocation_deletion.h"
 #include "shared/source/memory_manager/deferred_deleter.h"
 #include "shared/source/os_interface/os_context.h"
+#include "shared/test/common/libult/ult_command_stream_receiver.h"
+#include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_device.h"
-
-#include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
-#include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
-#include "test.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 
@@ -167,6 +166,32 @@ TEST_F(DeferrableAllocationDeletionTest, givenAllocationUsedByUnregisteredEngine
     EXPECT_TRUE(allocation->isUsed());
 
     memoryManager->freeGraphicsMemoryCalled = 0u;
+    EXPECT_TRUE(deletion.apply());
+    EXPECT_EQ(1u, memoryManager->freeGraphicsMemoryCalled);
+}
+
+HWTEST_F(DeferrableAllocationDeletionTest, givenMultiTileWhenTaskCompletedOnSingleTileThenDoNotFreeGraphicsAllocation) {
+    auto csr = reinterpret_cast<UltCommandStreamReceiver<FamilyType> *>(device->getDefaultEngine().commandStreamReceiver);
+    csr->setActivePartitions(2u);
+    csr->postSyncWriteOffset = 32;
+    auto hwTagNextTile = ptrOffset(hwTag, 32);
+
+    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{device->getRootDeviceIndex(), MemoryConstants::pageSize});
+    allocation->updateTaskCount(1u, defaultOsContextId);
+
+    EXPECT_EQ(0u, memoryManager->freeGraphicsMemoryCalled);
+    DeferrableAllocationDeletion deletion{*memoryManager, *allocation};
+
+    *hwTag = 0u;
+    *hwTagNextTile = 0u;
+    EXPECT_FALSE(deletion.apply());
+    EXPECT_EQ(0u, memoryManager->freeGraphicsMemoryCalled);
+
+    *hwTag = 1u;
+    EXPECT_FALSE(deletion.apply());
+    EXPECT_EQ(0u, memoryManager->freeGraphicsMemoryCalled);
+
+    *hwTagNextTile = 1u;
     EXPECT_TRUE(deletion.apply());
     EXPECT_EQ(1u, memoryManager->freeGraphicsMemoryCalled);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,6 +8,8 @@
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/utilities/tag_allocator.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_timestamp_container.h"
+#include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/command_queue/command_queue_hw.h"
@@ -23,9 +25,7 @@
 #include "opencl/test/unit_test/mocks/mock_event.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
-#include "opencl/test/unit_test/mocks/mock_timestamp_container.h"
 #include "opencl/test/unit_test/os_interface/mock_performance_counters.h"
-#include "test.h"
 
 namespace NEO {
 
@@ -455,6 +455,71 @@ HWTEST_F(ProfilingTests, givenMarkerEnqueueWhenNonBlockedEnqueueThenSetGpuPath) 
     eventObj->release();
 }
 
+HWTEST_F(ProfilingTests, givenMarkerEnqueueWhenBlockedEnqueueThenSetGpuPath) {
+    cl_event event = nullptr;
+    cl_event userEvent = new UserEvent();
+    pCmdQ->enqueueMarkerWithWaitList(1, &userEvent, &event);
+
+    auto eventObj = static_cast<Event *>(event);
+    EXPECT_FALSE(eventObj->isCPUProfilingPath());
+
+    auto userEventObj = static_cast<UserEvent *>(userEvent);
+
+    pCmdQ->flush();
+    userEventObj->setStatus(CL_COMPLETE);
+    Event::waitForEvents(1, &event);
+
+    uint64_t queued = 0u, submit = 0u;
+    cl_int retVal;
+
+    retVal = eventObj->getEventProfilingInfo(CL_PROFILING_COMMAND_QUEUED, sizeof(uint64_t), &queued, 0);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    retVal = eventObj->getEventProfilingInfo(CL_PROFILING_COMMAND_SUBMIT, sizeof(uint64_t), &submit, 0);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    EXPECT_LT(0u, queued);
+    EXPECT_LT(queued, submit);
+
+    eventObj->release();
+    userEventObj->release();
+}
+
+HWTEST_F(ProfilingTests, givenMarkerEnqueueWhenBlockedEnqueueThenPipeControlsArePresentInCS) {
+    typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
+
+    cl_event event = nullptr;
+    cl_event userEvent = new UserEvent();
+    static_cast<CommandQueueHw<FamilyType> *>(pCmdQ)->enqueueMarkerWithWaitList(1, &userEvent, &event);
+
+    auto eventObj = static_cast<Event *>(event);
+    EXPECT_FALSE(eventObj->isCPUProfilingPath());
+
+    auto userEventObj = static_cast<UserEvent *>(userEvent);
+
+    pCmdQ->flush();
+    userEventObj->setStatus(CL_COMPLETE);
+    Event::waitForEvents(1, &event);
+
+    parseCommands<FamilyType>(*pCmdQ);
+
+    // Check PIPE_CONTROLs
+    auto itorFirstPC = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+    ASSERT_NE(cmdList.end(), itorFirstPC);
+    auto pFirstPC = genCmdCast<PIPE_CONTROL *>(*itorFirstPC);
+    ASSERT_NE(nullptr, pFirstPC);
+
+    auto itorSecondPC = find<PIPE_CONTROL *>(itorFirstPC, cmdList.end());
+    ASSERT_NE(cmdList.end(), itorSecondPC);
+    auto pSecondPC = genCmdCast<PIPE_CONTROL *>(*itorSecondPC);
+    ASSERT_NE(nullptr, pSecondPC);
+
+    EXPECT_TRUE(static_cast<MockEvent<Event> *>(event)->calcProfilingData());
+
+    eventObj->release();
+    userEventObj->release();
+    pCmdQ->isQueueBlocked();
+}
+
 template <typename TagType>
 struct MockTagNode : public TagNode<TagType> {
   public:
@@ -648,7 +713,7 @@ struct ProfilingWithPerfCountersTests : public PerformanceCountersFixture, ::tes
 
         HardwareInfo hwInfo = *hardwareInfo;
         if (hwInfo.capabilityTable.defaultEngineType == aub_stream::EngineType::ENGINE_CCS) {
-            hwInfo.featureTable.ftrCCSNode = true;
+            hwInfo.featureTable.flags.ftrCCSNode = true;
         }
 
         pDevice = MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0);
@@ -739,7 +804,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingWithPerfCountersTests, GivenCommandQueueWit
 
     static_cast<CommandQueueHw<FamilyType> *>(pCmdQ.get())->enqueueKernel(kernel->mockKernel, dimensions, globalOffsets, workItems, nullptr, 0, nullptr, &event);
 
-    HardwareParse parse;
+    ClHardwareParse parse;
     auto &cmdList = parse.cmdList;
     parse.parseCommands<FamilyType>(*pCmdQ);
 
@@ -790,7 +855,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingWithPerfCountersTests, GivenCommandQueueWit
 
     static_cast<CommandQueueHw<FamilyType> *>(pCmdQ.get())->enqueueKernel(kernel->mockKernel, dimensions, globalOffsets, workItems, nullptr, 0, nullptr, &event);
 
-    HardwareParse parse;
+    ClHardwareParse parse;
     auto &cmdList = parse.cmdList;
     parse.parseCommands<FamilyType>(*pCmdQ);
 
@@ -898,7 +963,7 @@ HWTEST_F(ProfilingWithPerfCountersTests, GivenCommandQueueWithProfilingPerfCount
 
     static_cast<CommandQueueHw<FamilyType> *>(pCmdQ.get())->enqueueKernel(kernel->mockKernel, dimensions, globalOffsets, workItems, nullptr, 0, nullptr, nullptr);
 
-    HardwareParse parse;
+    ClHardwareParse parse;
     auto &cmdList = parse.cmdList;
     parse.parseCommands<FamilyType>(*pCmdQ);
 
@@ -968,7 +1033,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingWithPerfCountersTests, GivenCommandQueueWit
     auto pEvent = static_cast<MockEvent<Event> *>(event);
     EXPECT_EQ(pEvent->getHwTimeStampNode()->getGpuAddress(), timeStampGpuAddress);
     EXPECT_EQ(pEvent->getHwPerfCounterNode()->getGpuAddress(), perfCountersGpuAddress);
-    HardwareParse parse;
+    ClHardwareParse parse;
     auto &cmdList = parse.cmdList;
     parse.parseCommands<FamilyType>(*pCmdQ);
 
@@ -1073,7 +1138,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingWithPerfCountersOnCCSTests, givenCommandQue
 
     cmdQHw->enqueueKernel(kernel->mockKernel, dimensions, globalOffsets, workItems, nullptr, 0, nullptr, &event);
 
-    HardwareParse parse;
+    ClHardwareParse parse;
     auto &cmdList = parse.cmdList;
     parse.parseCommands<FamilyType>(*pCmdQ);
 
@@ -1261,13 +1326,15 @@ TEST_F(ProfilingTimestampPacketsTest, givenPrintTimestampPacketContentsSetWhenCa
     std::string output = testing::internal::GetCapturedStdout();
     std::stringstream expected;
 
-    expected << "Timestamp 0, profiling capable: " << ev->timestampPacketContainer->peekNodes()[0]->isProfilingCapable() << ", ";
+    expected << "Timestamp 0, cmd type: " << ev->getCommandType() << ", ";
     for (int i = 0; i < 16; i++) {
         expected << "packet " << i << ": "
                  << "global start: " << globalStart[i] << ", "
                  << "global end: " << globalEnd[i] << ", "
                  << "context start: " << contextStart[i] << ", "
-                 << "context end: " << contextEnd[i] << std::endl;
+                 << "context end: " << contextEnd[i] << ", "
+                 << "global delta: " << globalEnd[i] - globalStart[i] << ", "
+                 << "context delta: " << contextEnd[i] - contextStart[i] << std::endl;
     }
     EXPECT_EQ(0, output.compare(expected.str().c_str()));
 }

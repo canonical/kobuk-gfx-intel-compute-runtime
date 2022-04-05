@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -22,6 +22,8 @@ namespace NEO {
 struct GEN8 {
 #include "shared/source/generated/gen8/hw_cmds_generated_gen8.inl"
 
+    static constexpr bool supportsSampler = true;
+    static constexpr bool isUsingGenericMediaStateClear = true;
     struct DataPortBindlessSurfaceExtendedMessageDescriptor {
         union {
             struct {
@@ -52,6 +54,7 @@ struct BDWFamily : public GEN8 {
     using GfxFamily = BDWFamily;
     using WALKER_TYPE = GPGPU_WALKER;
     using VFE_STATE_TYPE = MEDIA_VFE_STATE;
+    using XY_BLOCK_COPY_BLT = typename GfxFamily::XY_SRC_COPY_BLT;
     using XY_COPY_BLT = typename GfxFamily::XY_SRC_COPY_BLT;
     using MI_STORE_REGISTER_MEM_CMD = typename GfxFamily::MI_STORE_REGISTER_MEM;
     using TimestampPacketType = uint32_t;
@@ -82,6 +85,7 @@ struct BDWFamily : public GEN8 {
     static const STATE_SIP cmdInitStateSip;
     static const BINDING_TABLE_STATE cmdInitBindingTableState;
     static const MI_USER_INTERRUPT cmdInitUserInterrupt;
+    static const XY_BLOCK_COPY_BLT cmdInitXyBlockCopyBlt;
     static const XY_SRC_COPY_BLT cmdInitXyCopyBlt;
     static const MI_FLUSH_DW cmdInitMiFlushDw;
     static const XY_COLOR_BLT cmdInitXyColorBlt;

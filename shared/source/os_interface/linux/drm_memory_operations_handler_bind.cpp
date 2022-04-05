@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -26,7 +26,7 @@ DrmMemoryOperationsHandlerBind::DrmMemoryOperationsHandlerBind(RootDeviceEnviron
 DrmMemoryOperationsHandlerBind::~DrmMemoryOperationsHandlerBind() = default;
 
 MemoryOperationsStatus DrmMemoryOperationsHandlerBind::makeResident(Device *device, ArrayRef<GraphicsAllocation *> gfxAllocations) {
-    auto &engines = device->getEngines();
+    auto &engines = device->getAllEngines();
     for (const auto &engine : engines) {
         engine.osContext->ensureContextInitialized();
         this->makeResidentWithinOsContext(engine.osContext, gfxAllocations, false);
@@ -40,7 +40,10 @@ MemoryOperationsStatus DrmMemoryOperationsHandlerBind::makeResidentWithinOsConte
         auto drmAllocation = static_cast<DrmAllocation *>(*gfxAllocation);
         for (auto drmIterator = 0u; drmIterator < osContext->getDeviceBitfield().size(); drmIterator++) {
             if (osContext->getDeviceBitfield().test(drmIterator)) {
-                drmAllocation->makeBOsResident(osContext, drmIterator, nullptr, true);
+                int result = drmAllocation->makeBOsResident(osContext, drmIterator, nullptr, true);
+                if (result) {
+                    return MemoryOperationsStatus::OUT_OF_MEMORY;
+                }
             }
         }
         if (!evictable) {
@@ -51,7 +54,7 @@ MemoryOperationsStatus DrmMemoryOperationsHandlerBind::makeResidentWithinOsConte
 }
 
 MemoryOperationsStatus DrmMemoryOperationsHandlerBind::evict(Device *device, GraphicsAllocation &gfxAllocation) {
-    auto &engines = device->getEngines();
+    auto &engines = device->getAllEngines();
     auto retVal = MemoryOperationsStatus::SUCCESS;
     for (const auto &engine : engines) {
         retVal = this->evictWithinOsContext(engine.osContext, gfxAllocation);
@@ -64,24 +67,32 @@ MemoryOperationsStatus DrmMemoryOperationsHandlerBind::evict(Device *device, Gra
 
 MemoryOperationsStatus DrmMemoryOperationsHandlerBind::evictWithinOsContext(OsContext *osContext, GraphicsAllocation &gfxAllocation) {
     std::lock_guard<std::mutex> lock(mutex);
-    evictImpl(osContext, gfxAllocation, osContext->getDeviceBitfield());
+    int retVal = evictImpl(osContext, gfxAllocation, osContext->getDeviceBitfield());
+    if (retVal) {
+        return MemoryOperationsStatus::FAILED;
+    }
     return MemoryOperationsStatus::SUCCESS;
 }
 
-void DrmMemoryOperationsHandlerBind::evictImpl(OsContext *osContext, GraphicsAllocation &gfxAllocation, DeviceBitfield deviceBitfield) {
+int DrmMemoryOperationsHandlerBind::evictImpl(OsContext *osContext, GraphicsAllocation &gfxAllocation, DeviceBitfield deviceBitfield) {
     auto drmAllocation = static_cast<DrmAllocation *>(&gfxAllocation);
     for (auto drmIterator = 0u; drmIterator < deviceBitfield.size(); drmIterator++) {
         if (deviceBitfield.test(drmIterator)) {
-            drmAllocation->makeBOsResident(osContext, drmIterator, nullptr, false);
+            int retVal = drmAllocation->makeBOsResident(osContext, drmIterator, nullptr, false);
+            if (retVal) {
+                return retVal;
+            }
         }
     }
     drmAllocation->updateResidencyTaskCount(GraphicsAllocation::objectNotResident, osContext->getContextId());
+
+    return 0;
 }
 
 MemoryOperationsStatus DrmMemoryOperationsHandlerBind::isResident(Device *device, GraphicsAllocation &gfxAllocation) {
     std::lock_guard<std::mutex> lock(mutex);
     bool isResident = true;
-    auto &engines = device->getEngines();
+    auto &engines = device->getAllEngines();
     for (const auto &engine : engines) {
         isResident &= gfxAllocation.isAlwaysResident(engine.osContext->getContextId());
     }
@@ -92,8 +103,19 @@ MemoryOperationsStatus DrmMemoryOperationsHandlerBind::isResident(Device *device
     return MemoryOperationsStatus::MEMORY_NOT_FOUND;
 }
 
-void DrmMemoryOperationsHandlerBind::mergeWithResidencyContainer(OsContext *osContext, ResidencyContainer &residencyContainer) {
-    this->makeResidentWithinOsContext(osContext, ArrayRef<GraphicsAllocation *>(residencyContainer), true);
+MemoryOperationsStatus DrmMemoryOperationsHandlerBind::mergeWithResidencyContainer(OsContext *osContext, ResidencyContainer &residencyContainer) {
+    if (DebugManager.flags.MakeEachAllocationResident.get() == 2) {
+        auto memoryManager = static_cast<DrmMemoryManager *>(this->rootDeviceEnvironment.executionEnvironment.memoryManager.get());
+
+        auto allocLock = memoryManager->acquireAllocLock();
+        this->makeResidentWithinOsContext(osContext, ArrayRef<GraphicsAllocation *>(memoryManager->getSysMemAllocs()), true);
+        this->makeResidentWithinOsContext(osContext, ArrayRef<GraphicsAllocation *>(memoryManager->getLocalMemAllocs(this->rootDeviceIndex)), true);
+    }
+
+    auto retVal = this->makeResidentWithinOsContext(osContext, ArrayRef<GraphicsAllocation *>(residencyContainer), true);
+    if (retVal != MemoryOperationsStatus::SUCCESS) {
+        return retVal;
+    }
 
     auto clearContainer = true;
 
@@ -104,16 +126,21 @@ void DrmMemoryOperationsHandlerBind::mergeWithResidencyContainer(OsContext *osCo
     if (clearContainer) {
         residencyContainer.clear();
     }
+    return MemoryOperationsStatus::SUCCESS;
 }
 
 std::unique_lock<std::mutex> DrmMemoryOperationsHandlerBind::lockHandlerIfUsed() {
     return std::unique_lock<std::mutex>();
 }
 
-void DrmMemoryOperationsHandlerBind::evictUnusedAllocations(bool waitForCompletion) {
+void DrmMemoryOperationsHandlerBind::evictUnusedAllocations(bool waitForCompletion, bool isLockNeeded) {
     auto memoryManager = static_cast<DrmMemoryManager *>(this->rootDeviceEnvironment.executionEnvironment.memoryManager.get());
 
-    std::lock_guard<std::mutex> lock(mutex);
+    std::unique_lock<std::mutex> evictLock(mutex, std::defer_lock);
+    if (isLockNeeded) {
+        evictLock.lock();
+    }
+
     auto allocLock = memoryManager->acquireAllocLock();
 
     this->evictUnusedAllocationsImpl(memoryManager->getSysMemAllocs(), waitForCompletion);

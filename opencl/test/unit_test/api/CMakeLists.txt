@@ -1,12 +1,12 @@
 #
-# Copyright (C) 2018-2021 Intel Corporation
+# Copyright (C) 2018-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
 
 set(IGDRCL_SRCS_tests_api
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
-    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}/additional_extensions_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}additional_extensions_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/api_tests_wrapper1.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/api_tests_wrapper2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/api_tests_wrapper3.cpp
@@ -83,6 +83,7 @@ set(IGDRCL_SRCS_tests_api
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_kernel_sub_group_info_khr_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_kernel_sub_group_info_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_kernel_suggested_local_work_size_intel_tests.inl
+    ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_kernel_suggested_local_work_size_khr_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_kernel_work_group_info_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_mem_object_info_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_pipe_info_tests.inl
@@ -109,7 +110,6 @@ set(IGDRCL_SRCS_tests_api
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_retain_release_device_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_retain_release_sampler_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_set_context_destructor_callback.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/cl_set_default_device_command_queue_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_set_event_callback_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_set_kernel_arg_svm_pointer_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_set_kernel_exec_info_tests.inl
@@ -123,6 +123,11 @@ set(IGDRCL_SRCS_tests_api
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_unload_compiler_tests.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_unload_platform_compiler_tests.inl
 )
+
+if(TESTS_PVC_AND_LATER)
+  list(APPEND IGDRCL_SRCS_tests_api ${CMAKE_CURRENT_SOURCE_DIR}/cl_get_device_info_pvc_and_later_tests.cpp)
+endif()
+
 target_sources(igdrcl_tests PRIVATE ${IGDRCL_SRCS_tests_api})
 
 add_subdirectories()

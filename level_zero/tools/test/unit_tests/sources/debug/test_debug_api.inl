@@ -6,10 +6,10 @@
  */
 
 #include "shared/test/common/mocks/mock_device.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
+#include "level_zero/core/test/unit_tests/mocks/mock_built_ins.h"
 #include "level_zero/tools/test/unit_tests/sources/debug/mock_debug_session.h"
 
 namespace L0 {
@@ -73,6 +73,19 @@ TEST_F(DebugApiTest, givenDeviceWhenDebugAttachIsAvaialbleThenGetPropertiesRetur
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_EQ(ZET_DEVICE_DEBUG_PROPERTY_FLAG_ATTACH, debugProperties.flags);
+}
+
+TEST_F(DebugApiTest, givenStateSaveAreaHeaderUnavailableWhenGettingDebugPropertiesThenAttachFlagIsNotReturned) {
+    zet_device_debug_properties_t debugProperties = {};
+    debugProperties.flags = ZET_DEVICE_DEBUG_PROPERTY_FLAG_FORCE_UINT32;
+
+    neoDevice->executionEnvironment->rootDeviceEnvironments[0]->osInterface.reset(new OsInterfaceWithDebugAttach);
+    mockBuiltIns->stateSaveAreaHeader.clear();
+
+    auto result = zetDeviceGetDebugProperties(device->toHandle(), &debugProperties);
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(0u, debugProperties.flags);
 }
 
 TEST_F(DebugApiTest, givenSubDeviceWhenDebugAttachIsAvaialbleThenGetPropertiesReturnsNoFlag) {

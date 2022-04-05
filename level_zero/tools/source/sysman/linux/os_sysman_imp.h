@@ -15,7 +15,6 @@
 #include "level_zero/tools/source/sysman/linux/fs_access.h"
 #include "level_zero/tools/source/sysman/linux/pmt/pmt.h"
 #include "level_zero/tools/source/sysman/linux/pmu/pmu_imp.h"
-#include "level_zero/tools/source/sysman/linux/xml_parser/xml_parser.h"
 #include "level_zero/tools/source/sysman/sysman_imp.h"
 
 #include <map>
@@ -30,7 +29,6 @@ class LinuxSysmanImp : public OsSysman, NEO::NonCopyableOrMovableClass {
 
     ze_result_t init() override;
 
-    XmlParser *getXmlParser();
     PmuInterface *getPmuInterface();
     FirmwareUtil *getFwUtilInterface();
     FsAccess &getFsAccess();
@@ -42,17 +40,22 @@ class LinuxSysmanImp : public OsSysman, NEO::NonCopyableOrMovableClass {
     SysmanDeviceImp *getSysmanDeviceImp();
     std::string getPciRootPortDirectoryPath(std::string realPciPath);
     void releasePmtObject();
+    ze_result_t createPmtHandles();
+    void createFwUtilInterface();
+    void releaseFwUtilInterface();
+    void releaseLocalDrmHandle();
+    PRODUCT_FAMILY getProductFamily();
 
   protected:
-    XmlParser *pXmlParser = nullptr;
     FsAccess *pFsAccess = nullptr;
     ProcfsAccess *pProcfsAccess = nullptr;
     SysfsAccess *pSysfsAccess = nullptr;
-    NEO::Drm *pDrm = nullptr;
     Device *pDevice = nullptr;
+    NEO::Drm *pDrm = nullptr;
     PmuInterface *pPmuInterface = nullptr;
     FirmwareUtil *pFwUtilInterface = nullptr;
     std::map<uint32_t, L0::PlatformMonitoringTech *> mapOfSubDeviceIdToPmtObject;
+    ze_result_t initLocalDeviceAndDrmHandles();
 
   private:
     LinuxSysmanImp() = delete;

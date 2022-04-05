@@ -13,12 +13,12 @@ list(GET aub_test_config 4 revision_id)
 
 add_custom_target(run_${product}_${revision_id}_aub_tests ALL)
 
-if(NOT SKIP_NEO_UNIT_TESTS OR NOT SKIP_L0_UNIT_TESTS)
+if(NOT NEO_SKIP_OCL_UNIT_TESTS OR NOT NEO_SKIP_L0_UNIT_TESTS)
 
-  if(NOT SKIP_NEO_UNIT_TESTS)
+  if(NOT NEO_SKIP_OCL_UNIT_TESTS)
     add_dependencies(run_${product}_${revision_id}_aub_tests copy_test_files_per_product)
-    add_dependencies(run_${product}_${revision_id}_aub_tests prepare_test_kernels)
-    add_dependencies(run_${product}_${revision_id}_aub_tests prepare_test_kernel_for_shared)
+    add_dependencies(run_${product}_${revision_id}_aub_tests prepare_test_kernels_for_ocl)
+    add_dependencies(run_${product}_${revision_id}_aub_tests prepare_test_kernels_for_shared)
   endif()
 
   add_dependencies(run_aub_tests run_${product}_${revision_id}_aub_tests)
@@ -51,11 +51,11 @@ if(NOT SKIP_NEO_UNIT_TESTS OR NOT SKIP_L0_UNIT_TESTS)
 
 endif()
 
-if(NOT SKIP_NEO_UNIT_TESTS)
+if(NOT NEO_SKIP_OCL_UNIT_TESTS)
   if(WIN32 OR NOT DEFINED NEO__GMM_LIBRARY_PATH)
     set(aub_test_cmd_prefix $<TARGET_FILE:igdrcl_aub_tests>)
   else()
-    set(aub_test_cmd_prefix LD_LIBRARY_PATH=${NEO__GMM_LIBRARY_PATH} IGDRCL_TEST_SELF_EXEC=off $<TARGET_FILE:igdrcl_aub_tests>)
+    set(aub_test_cmd_prefix LD_LIBRARY_PATH=${NEO__GMM_LIBRARY_PATH} IGDRCL_TEST_SELF_EXEC=off ${NEO_RUN_INTERCEPTOR_LIST} $<TARGET_FILE:igdrcl_aub_tests>)
   endif()
 
   add_custom_command(
@@ -63,15 +63,17 @@ if(NOT SKIP_NEO_UNIT_TESTS)
                      POST_BUILD
                      COMMAND WORKING_DIRECTORY ${TargetDir}
                      COMMAND echo Running AUB generation for ${product} in ${TargetDir}/${product}_aub
-                     COMMAND ${aub_test_cmd_prefix} --product ${product} --slices ${slices} --subslices ${subslices} --eu_per_ss ${eu_per_ss} --gtest_repeat=1 ${aub_tests_options} ${IGDRCL_TESTS_LISTENER_OPTION} --rev_id ${revision_id}
+                     COMMAND ${aub_test_cmd_prefix} --product ${product} --slices ${slices} --subslices ${subslices} --eu_per_ss ${eu_per_ss} --gtest_repeat=1 ${aub_tests_options} ${NEO_TESTS_LISTENER_OPTION} --rev_id ${revision_id}
   )
 endif()
 
-if(NOT SKIP_L0_UNIT_TESTS AND BUILD_WITH_L0)
+if(NOT NEO_SKIP_L0_UNIT_TESTS AND BUILD_WITH_L0)
+  add_dependencies(run_${product}_${revision_id}_aub_tests prepare_test_kernels_for_l0)
+
   if(WIN32 OR NOT DEFINED NEO__GMM_LIBRARY_PATH)
     set(l0_aub_test_cmd_prefix $<TARGET_FILE:ze_intel_gpu_aub_tests>)
   else()
-    set(l0_aub_test_cmd_prefix LD_LIBRARY_PATH=${NEO__GMM_LIBRARY_PATH} $<TARGET_FILE:ze_intel_gpu_aub_tests>)
+    set(l0_aub_test_cmd_prefix LD_LIBRARY_PATH=${NEO__GMM_LIBRARY_PATH} ${NEO_RUN_INTERCEPTOR_LIST} $<TARGET_FILE:ze_intel_gpu_aub_tests>)
   endif()
 
   add_custom_command(

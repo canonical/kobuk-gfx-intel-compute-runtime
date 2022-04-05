@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -40,15 +40,23 @@ struct SbaTrackedAddresses {
 
 struct DebugAreaHeader {
     char magic[8] = "dbgarea";
-    uint64_t reserved1;
-    uint8_t version;
-    uint8_t pgsize;
-    uint8_t size;
-    uint8_t reserved2;
-    uint16_t scratchBegin;
-    uint16_t scratchEnd;
-    uint64_t isShared : 1;
+    uint64_t reserved1 = 0;
+    uint8_t version = 0;
+    uint8_t pgsize = 0;
+    uint8_t size = 0;
+    uint8_t reserved2 = 0;
+    uint16_t scratchBegin = 0;
+    uint16_t scratchEnd = 0;
+    union {
+        uint64_t isSharedBitfield = 0;
+        struct {
+            uint64_t isShared : 1;
+            uint64_t reserved3 : 63;
+        };
+    };
 };
+static_assert(sizeof(DebugAreaHeader) == 32u * sizeof(uint8_t));
+
 struct alignas(4) DebuggerVersion {
     uint8_t major;
     uint8_t minor;
@@ -86,13 +94,14 @@ class DebuggerL0 : public NEO::Debugger, NEO::NonCopyableOrMovableClass {
     void captureStateBaseAddress(NEO::CommandContainer &container, SbaAddresses sba) override;
     void printTrackedAddresses(uint32_t contextId);
     MOCKABLE_VIRTUAL void registerElf(NEO::DebugData *debugData, NEO::GraphicsAllocation *isaAllocation);
+    MOCKABLE_VIRTUAL void notifyCommandQueueCreated();
+    MOCKABLE_VIRTUAL void notifyCommandQueueDestroyed();
 
     virtual size_t getSbaTrackingCommandsSize(size_t trackedAddressCount) = 0;
     virtual void programSbaTrackingCommands(NEO::LinearStream &cmdStream, const SbaAddresses &sba) = 0;
 
-    static void getAttentionBitmaskForThread(uint32_t slice, uint32_t subslice, uint32_t eu, uint32_t thread, const NEO::HardwareInfo &hwInfo, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize);
-    static void getAttentionBitmaskForSingleThreads(std::vector<ze_device_thread_t> &threads, const NEO::HardwareInfo &hwInfo, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize);
-    static std::vector<ze_device_thread_t> getThreadsFromAttentionBitmask(const NEO::HardwareInfo &hwInfo, const uint8_t *bitmask, const size_t bitmaskSize);
+    MOCKABLE_VIRTUAL bool attachZebinModuleToSegmentAllocations(const StackVec<NEO::GraphicsAllocation *, 32> &kernelAlloc, uint32_t &moduleHandle);
+    MOCKABLE_VIRTUAL bool removeZebinModule(uint32_t moduleHandle);
 
   protected:
     static bool isAnyTrackedAddressChanged(SbaAddresses sba) {
@@ -109,6 +118,8 @@ class DebuggerL0 : public NEO::Debugger, NEO::NonCopyableOrMovableClass {
     std::unordered_map<uint32_t, NEO::GraphicsAllocation *> perContextSbaAllocations;
     NEO::AddressRange sbaTrackingGpuVa;
     NEO::GraphicsAllocation *moduleDebugArea = nullptr;
+    std::atomic<uint32_t> commandQueueCount = 0u;
+    uint32_t uuidL0CommandQueueHandle = 0;
 };
 
 using DebugerL0CreateFn = DebuggerL0 *(*)(NEO::Device *device);
@@ -126,10 +137,10 @@ class DebuggerL0Hw : public DebuggerL0 {
     DebuggerL0Hw(NEO::Device *device) : DebuggerL0(device){};
 };
 
-template <uint32_t productFamily, typename GfxFamily>
+template <uint32_t coreFamily, typename GfxFamily>
 struct DebuggerL0PopulateFactory {
     DebuggerL0PopulateFactory() {
-        debuggerL0Factory[productFamily] = DebuggerL0Hw<GfxFamily>::allocate;
+        debuggerL0Factory[coreFamily] = DebuggerL0Hw<GfxFamily>::allocate;
     }
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,8 +9,7 @@
 #include "shared/source/utilities/software_tags_manager.h"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 using namespace SWTags;
@@ -53,7 +52,7 @@ struct SoftwareTagsManagerTests : public DeviceFixture, public ::testing::Test {
         const AllocationProperties properties{
             pDevice->getRootDeviceIndex(),
             SWTagsManager::estimateSpaceForSWTags<GfxFamily>(),
-            GraphicsAllocation::AllocationType::LINEAR_STREAM,
+            AllocationType::LINEAR_STREAM,
             pDevice->getDeviceBitfield()};
 
         GraphicsAllocation *allocation = pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties(properties);
@@ -156,16 +155,6 @@ HWTEST_F(SoftwareTagsManagerTests, whenTestTagIsInsertedThenItIsSuccessful) {
     freeTestCmdStream();
 }
 
-HWTEST_F(SoftwareTagsManagerTests, whenVeryLargeTagIsInsertedThenItIsNotSuccessful) {
-    initializeTestCmdStream<FamilyType>();
-
-    tagsManager->insertTag<FamilyType, VeryLargeTag>(*testCmdStream.get(), *pDevice);
-
-    EXPECT_EQ(0u, testCmdStream->getUsed());
-
-    freeTestCmdStream();
-}
-
 HWTEST_F(SoftwareTagsManagerTests, givenSoftwareManagerWithMaxTagsReachedWhenTagIsInsertedThenItIsNotSuccessful) {
     using MI_NOOP = typename FamilyType::MI_NOOP;
 
@@ -186,6 +175,28 @@ HWTEST_F(SoftwareTagsManagerTests, givenSoftwareManagerWithMaxTagsReachedWhenTag
     freeTestCmdStream();
 }
 
+HWTEST_F(SoftwareTagsManagerTests, givenSoftwareManagerWithMaxHeapReachedWhenTagIsInsertedThenItIsNotSuccessful) {
+    using MI_NOOP = typename FamilyType::MI_NOOP;
+
+    initializeTestCmdStream<FamilyType>();
+
+    size_t prevHeapOffset = tagsManager->getCurrentHeapOffset();
+
+    uint32_t i = 0;
+    while (tagsManager->getCurrentHeapOffset() + sizeof(VeryLargeTag) <= NEO::SWTagsManager::MAX_TAG_HEAP_SIZE) {
+        tagsManager->insertTag<FamilyType, VeryLargeTag>(*testCmdStream.get(), *pDevice);
+        i++;
+    }
+
+    EXPECT_EQ(tagsManager->getCurrentHeapOffset(), prevHeapOffset + (i * sizeof(VeryLargeTag)));
+
+    tagsManager->insertTag<FamilyType, VeryLargeTag>(*testCmdStream.get(), *pDevice);
+
+    EXPECT_EQ(tagsManager->getCurrentHeapOffset(), prevHeapOffset + (i * sizeof(VeryLargeTag)));
+
+    freeTestCmdStream();
+}
+
 TEST(SoftwareTagsManagerMultiDeviceTests, givenEnableSWTagsAndCreateMultipleSubDevicesWhenDeviceCreatedThenSWTagsManagerIsInitializedOnlyOnce) {
     DebugManagerStateRestore dbgRestorer;
     DebugManager.flags.EnableSWTags.set(true);
@@ -202,8 +213,8 @@ TEST(SoftwareTagsManagerMultiDeviceTests, givenEnableSWTagsAndCreateMultipleSubD
 
 struct SoftwareTagsParametrizedTests : public ::testing::TestWithParam<SWTags::OpCode> {
     void SetUp() override {
-        tagMap.emplace(OpCode::KernelName, std::make_unique<KernelNameTag>(""));
-        tagMap.emplace(OpCode::PipeControlReason, std::make_unique<PipeControlReasonTag>(""));
+        tagMap.emplace(OpCode::KernelName, std::make_unique<KernelNameTag>("", 0u));
+        tagMap.emplace(OpCode::PipeControlReason, std::make_unique<PipeControlReasonTag>("", 0u));
     }
 
     std::map<OpCode, std::unique_ptr<BaseTag>> tagMap;

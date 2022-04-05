@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,8 +9,7 @@
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/test/common/fixtures/device_fixture.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 namespace NEO {
 
@@ -24,7 +23,7 @@ class CommandEncodeStatesFixture : public DeviceFixture {
     void SetUp() {
         DeviceFixture::SetUp();
         cmdContainer = std::make_unique<MyMockCommandContainer>();
-        cmdContainer->initialize(pDevice);
+        cmdContainer->initialize(pDevice, nullptr);
         cmdContainer->setDirtyStateForAllHeaps(false);
     }
     void TearDown() {
@@ -33,6 +32,30 @@ class CommandEncodeStatesFixture : public DeviceFixture {
     }
     std::unique_ptr<MyMockCommandContainer> cmdContainer;
     KernelDescriptor descriptor;
+
+    EncodeDispatchKernelArgs createDefaultDispatchKernelArgs(Device *device,
+                                                             DispatchKernelEncoderI *dispatchInterface,
+                                                             const void *pThreadGroupDimensions,
+                                                             bool requiresUncachedMocs) {
+        EncodeDispatchKernelArgs args{
+            0,                        //eventAddress
+            device,                   //device
+            dispatchInterface,        //dispatchInterface
+            pThreadGroupDimensions,   //pThreadGroupDimensions
+            PreemptionMode::Disabled, //preemptionMode
+            1,                        //partitionCount
+            false,                    //isIndirect
+            false,                    //isPredicate
+            false,                    //isTimestampEvent
+            false,                    //L3FlushEnable
+            requiresUncachedMocs,     //requiresUncachedMocs
+            false,                    //useGlobalAtomics
+            false,                    //isInternal
+            false                     //isCooperative
+        };
+
+        return args;
+    }
 };
 
 } // namespace NEO

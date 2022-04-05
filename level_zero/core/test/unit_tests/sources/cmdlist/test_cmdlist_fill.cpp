@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,8 +7,7 @@
 
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/builtin/builtin_functions_lib_impl.h"
 #include "level_zero/core/source/kernel/kernel_imp.h"
@@ -21,7 +20,7 @@
 namespace L0 {
 namespace ult {
 
-class AppendFillFixture : public DeviceFixture, public ::testing::Test {
+class AppendFillFixture : public DeviceFixture {
   public:
     class MockDriverFillHandle : public L0::DriverHandleImp {
       public:
@@ -68,7 +67,7 @@ class AppendFillFixture : public DeviceFixture, public ::testing::Test {
         uint32_t numberOfCallsToAppendLaunchKernelWithParams = 0;
     };
 
-    void SetUp() override {
+    void SetUp() {
         dstPtr = new uint8_t[allocSize];
         immediateDstPtr = new uint8_t[allocSize];
 
@@ -82,7 +81,7 @@ class AppendFillFixture : public DeviceFixture, public ::testing::Test {
         device = driverHandle->devices[0];
     }
 
-    void TearDown() override {
+    void TearDown() {
         delete[] immediateDstPtr;
         delete[] dstPtr;
     }
@@ -100,10 +99,10 @@ class AppendFillFixture : public DeviceFixture, public ::testing::Test {
     uint8_t *immediateDstPtr = nullptr;
 };
 
-using Platforms = IsAtLeastProduct<IGFX_SKYLAKE>;
+using AppendFillTest = Test<AppendFillFixture>;
 
-HWTEST2_F(AppendFillFixture,
-          givenCallToAppendMemoryFillWithImmediateValueThenSuccessIsReturned, Platforms) {
+HWTEST2_F(AppendFillTest,
+          givenCallToAppendMemoryFillWithImmediateValueThenSuccessIsReturned, IsAtLeastSkl) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
     auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
@@ -115,8 +114,8 @@ HWTEST2_F(AppendFillFixture,
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
-HWTEST2_F(AppendFillFixture,
-          givenCallToAppendMemoryFillThenSuccessIsReturned, Platforms) {
+HWTEST2_F(AppendFillTest,
+          givenCallToAppendMemoryFillThenSuccessIsReturned, IsAtLeastSkl) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
     auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
@@ -126,8 +125,8 @@ HWTEST2_F(AppendFillFixture,
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
-HWTEST2_F(AppendFillFixture,
-          givenCallToAppendMemoryFillWithAppendLaunchKernelFailureThenSuccessIsNotReturned, Platforms) {
+HWTEST2_F(AppendFillTest,
+          givenCallToAppendMemoryFillWithAppendLaunchKernelFailureThenSuccessIsNotReturned, IsAtLeastSkl) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
     auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
@@ -138,8 +137,8 @@ HWTEST2_F(AppendFillFixture,
     EXPECT_NE(ZE_RESULT_SUCCESS, result);
 }
 
-HWTEST2_F(AppendFillFixture,
-          givenTwoCallsToAppendMemoryFillWithSamePatternThenAllocationIsAddedtoHostPtrMapOnlyOnce, Platforms) {
+HWTEST2_F(AppendFillTest,
+          givenTwoCallsToAppendMemoryFillWithSamePatternThenAllocationIsCreatedForEachCall, IsAtLeastSkl) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
     auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
@@ -147,21 +146,21 @@ HWTEST2_F(AppendFillFixture,
 
     ze_result_t result = commandList->appendMemoryFill(dstPtr, pattern, 4, allocSize, nullptr, 0, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    size_t hostPtrMapSize = commandList->getHostPtrMap().size();
-    EXPECT_EQ(hostPtrMapSize, 1u);
+    size_t patternAllocationsVectorSize = commandList->patternAllocations.size();
+    EXPECT_EQ(patternAllocationsVectorSize, 1u);
 
     uint8_t *newDstPtr = new uint8_t[allocSize];
     result = commandList->appendMemoryFill(newDstPtr, pattern, patternSize, allocSize, nullptr, 0, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    size_t newHostPtrMapSize = commandList->getHostPtrMap().size();
+    size_t newPatternAllocationsVectorSize = commandList->patternAllocations.size();
 
-    EXPECT_EQ(hostPtrMapSize, newHostPtrMapSize);
+    EXPECT_GT(newPatternAllocationsVectorSize, patternAllocationsVectorSize);
 
     delete[] newDstPtr;
 }
 
-HWTEST2_F(AppendFillFixture,
-          givenTwoCallsToAppendMemoryFillWithDifferentPatternsThenHostPtrSizeIncrementsByOne, Platforms) {
+HWTEST2_F(AppendFillTest,
+          givenTwoCallsToAppendMemoryFillWithDifferentPatternsThenAllocationIsCreatedForEachPattern, IsAtLeastSkl) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
     auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
@@ -169,19 +168,19 @@ HWTEST2_F(AppendFillFixture,
 
     ze_result_t result = commandList->appendMemoryFill(dstPtr, pattern, 4, allocSize, nullptr, 0, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    size_t hostPtrMapSize = commandList->getHostPtrMap().size();
-    EXPECT_EQ(hostPtrMapSize, 1u);
+    size_t patternAllocationsVectorSize = commandList->patternAllocations.size();
+    EXPECT_EQ(patternAllocationsVectorSize, 1u);
 
     uint8_t newPattern[patternSize] = {1, 2, 3, 4};
     result = commandList->appendMemoryFill(dstPtr, newPattern, patternSize, allocSize, nullptr, 0, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    size_t newHostPtrMapSize = commandList->getHostPtrMap().size();
+    size_t newPatternAllocationsVectorSize = commandList->patternAllocations.size();
 
-    EXPECT_EQ(hostPtrMapSize + 1u, newHostPtrMapSize);
+    EXPECT_EQ(patternAllocationsVectorSize + 1u, newPatternAllocationsVectorSize);
 }
 
-HWTEST2_F(AppendFillFixture,
-          givenCallToAppendMemoryFillWithSizeNotMultipleOfPatternSizeThenSuccessIsReturned, Platforms) {
+HWTEST2_F(AppendFillTest,
+          givenCallToAppendMemoryFillWithSizeNotMultipleOfPatternSizeThenSuccessIsReturned, IsAtLeastSkl) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
     auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
@@ -195,8 +194,8 @@ HWTEST2_F(AppendFillFixture,
     delete[] nonMultipleDstPtr;
 }
 
-HWTEST2_F(AppendFillFixture,
-          givenCallToAppendMemoryFillWithSizeNotMultipleOfPatternSizeAndAppendLaunchKernelFailureOnRemainderThenSuccessIsNotReturned, Platforms) {
+HWTEST2_F(AppendFillTest,
+          givenCallToAppendMemoryFillWithSizeNotMultipleOfPatternSizeAndAppendLaunchKernelFailureOnRemainderThenSuccessIsNotReturned, IsAtLeastSkl) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
     auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,8 +13,10 @@
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
+#include "shared/test/common/test_macros/test_checks_shared.h"
 
 #include "gtest/gtest.h"
 
@@ -182,7 +184,7 @@ HWTEST_F(BlitTests, givenDebugVariableWhenDispatchingPostBlitsCommandThenUseCorr
     }
 
     // -1: default
-    BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream);
+    BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream, *defaultHwInfo);
     EXPECT_EQ(expectedDefaultSize, linearStream.getUsed());
     CmdParse<FamilyType>::parseCommandBuffer(commands, linearStream.getCpuBase(), linearStream.getUsed());
 
@@ -204,7 +206,7 @@ HWTEST_F(BlitTests, givenDebugVariableWhenDispatchingPostBlitsCommandThenUseCorr
     linearStream.replaceBuffer(streamBuffer, sizeof(streamBuffer));
     commands.clear();
     DebugManager.flags.PostBlitCommand.set(BlitterConstants::PostBlitMode::MiArbCheck);
-    BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream);
+    BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream, *defaultHwInfo);
     CmdParse<FamilyType>::parseCommandBuffer(commands, linearStream.getCpuBase(), linearStream.getUsed());
     arbCheck = find<MI_ARB_CHECK *>(commands.begin(), commands.end());
     EXPECT_NE(commands.end(), arbCheck);
@@ -214,7 +216,7 @@ HWTEST_F(BlitTests, givenDebugVariableWhenDispatchingPostBlitsCommandThenUseCorr
     linearStream.replaceBuffer(streamBuffer, sizeof(streamBuffer));
     commands.clear();
     DebugManager.flags.PostBlitCommand.set(BlitterConstants::PostBlitMode::MiFlush);
-    BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream);
+    BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream, *defaultHwInfo);
     CmdParse<FamilyType>::parseCommandBuffer(commands, linearStream.getCpuBase(), linearStream.getUsed());
     auto miFlush = find<MI_FLUSH_DW *>(commands.begin(), commands.end());
     EXPECT_NE(commands.end(), miFlush);
@@ -224,7 +226,7 @@ HWTEST_F(BlitTests, givenDebugVariableWhenDispatchingPostBlitsCommandThenUseCorr
     linearStream.replaceBuffer(streamBuffer, sizeof(streamBuffer));
     commands.clear();
     DebugManager.flags.PostBlitCommand.set(BlitterConstants::PostBlitMode::None);
-    BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream);
+    BlitCommandsHelper<FamilyType>::dispatchPostBlitCommand(linearStream, *defaultHwInfo);
     EXPECT_EQ(0u, linearStream.getUsed());
 }
 
@@ -234,10 +236,10 @@ HWTEST_F(BlitTests, givenMemoryWhenFillPatternWithBlitThenCommandIsProgrammed) {
     uint32_t pattern[4] = {1, 0, 0, 0};
     uint32_t streamBuffer[100] = {};
     LinearStream stream(streamBuffer, sizeof(streamBuffer));
-    MockGraphicsAllocation mockAllocation(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocation(0, AllocationType::INTERNAL_HOST_MEMORY,
                                           reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
-                                          MemoryPool::System4KBPages, mockMaxOsContextCount);
-    BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, pattern, sizeof(uint32_t), stream, mockAllocation.getUnderlyingBufferSize(), *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
+                                          MemoryPool::System4KBPages, MemoryManager::maxOsContextCount);
+    BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, 0, pattern, sizeof(uint32_t), stream, mockAllocation.getUnderlyingBufferSize(), *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
         cmdList, ptrOffset(stream.getCpuBase(), 0), stream.getUsed()));
@@ -251,10 +253,11 @@ HWTEST_F(BlitTests, givenMemorySizeBiggerThanMaxWidthButLessThanTwiceMaxWidthWhe
     uint32_t pattern[4] = {1, 0, 0, 0};
     uint32_t streamBuffer[100] = {};
     LinearStream stream(streamBuffer, sizeof(streamBuffer));
-    MockGraphicsAllocation mockAllocation(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocation(0, AllocationType::INTERNAL_HOST_MEMORY,
                                           reinterpret_cast<void *>(0x1234), 0x1000, 0, (2 * BlitterConstants::maxBlitWidth) - 1,
-                                          MemoryPool::System4KBPages, mockMaxOsContextCount);
-    BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, pattern, sizeof(uint32_t), stream, mockAllocation.getUnderlyingBufferSize(), *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
+                                          MemoryPool::System4KBPages, MemoryManager::maxOsContextCount);
+
+    BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, 0, pattern, sizeof(uint32_t), stream, mockAllocation.getUnderlyingBufferSize(), *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
         cmdList, ptrOffset(stream.getCpuBase(), 0), stream.getUsed()));
@@ -266,16 +269,44 @@ HWTEST_F(BlitTests, givenMemorySizeBiggerThanMaxWidthButLessThanTwiceMaxWidthWhe
     }
 }
 
+HWTEST_F(BlitTests, givenMemoryPointerOffsetVerifyCorrectDestinationBaseAddress) {
+    using XY_COLOR_BLT = typename FamilyType::XY_COLOR_BLT;
+    using COLOR_DEPTH = typename XY_COLOR_BLT::COLOR_DEPTH;
+    uint32_t pattern[4] = {5, 0, 0, 0};
+    uint32_t streamBuffer[100] = {};
+    LinearStream stream(streamBuffer, sizeof(streamBuffer));
+    MockGraphicsAllocation mockAllocation(0, AllocationType::INTERNAL_HOST_MEMORY,
+                                          reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
+                                          MemoryPool::System4KBPages, MemoryManager::maxOsContextCount);
+
+    BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, 0x234, pattern, sizeof(uint32_t), stream, mockAllocation.getUnderlyingBufferSize(), *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
+        cmdList, ptrOffset(stream.getCpuBase(), 0), stream.getUsed()));
+    auto itor = find<XY_COLOR_BLT *>(cmdList.begin(), cmdList.end());
+    EXPECT_NE(cmdList.end(), itor);
+    {
+        auto cmd = genCmdCast<XY_COLOR_BLT *>(*itor);
+        EXPECT_EQ(cmd->getDestinationBaseAddress(), static_cast<uint64_t>(0x1234));
+    }
+}
+
 HWTEST_F(BlitTests, givenMemorySizeTwiceBiggerThanMaxWidthWhenFillPatternWithBlitThenHeightIsTwo) {
     using XY_COLOR_BLT = typename FamilyType::XY_COLOR_BLT;
     using COLOR_DEPTH = typename XY_COLOR_BLT::COLOR_DEPTH;
+
+    HardwareInfo *hwInfo = pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
+    hwInfo->capabilityTable.blitterOperationsSupported = true;
+
+    REQUIRE_BLITTER_OR_SKIP(hwInfo);
+
     uint32_t pattern[4] = {1, 0, 0, 0};
     uint32_t streamBuffer[100] = {};
     LinearStream stream(streamBuffer, sizeof(streamBuffer));
-    MockGraphicsAllocation mockAllocation(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocation(0, AllocationType::INTERNAL_HOST_MEMORY,
                                           reinterpret_cast<void *>(0x1234), 0x1000, 0, (2 * BlitterConstants::maxBlitWidth * sizeof(uint32_t)),
-                                          MemoryPool::System4KBPages, mockMaxOsContextCount);
-    BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, pattern, sizeof(uint32_t), stream, mockAllocation.getUnderlyingBufferSize(), *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
+                                          MemoryPool::System4KBPages, MemoryManager::maxOsContextCount);
+    BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, 0, pattern, sizeof(uint32_t), stream, mockAllocation.getUnderlyingBufferSize(), *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
         cmdList, ptrOffset(stream.getCpuBase(), 0), stream.getUsed()));
@@ -284,20 +315,26 @@ HWTEST_F(BlitTests, givenMemorySizeTwiceBiggerThanMaxWidthWhenFillPatternWithBli
     {
         auto cmd = genCmdCast<XY_COLOR_BLT *>(*itor);
         EXPECT_EQ(cmd->getDestinationY2CoordinateBottom(), 2u);
-        EXPECT_EQ(cmd->getDestinationPitch(), BlitterConstants::maxBlitWidth);
+        EXPECT_EQ(cmd->getDestinationPitch(), BlitterConstants::maxBlitWidth * sizeof(uint32_t));
     }
 }
 
 HWTEST_F(BlitTests, givenMemorySizeIsLessThanTwicenMaxWidthWhenFillPatternWithBlitThenHeightIsOne) {
     using XY_COLOR_BLT = typename FamilyType::XY_COLOR_BLT;
     using COLOR_DEPTH = typename XY_COLOR_BLT::COLOR_DEPTH;
+
+    HardwareInfo *hwInfo = pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
+    hwInfo->capabilityTable.blitterOperationsSupported = true;
+
+    REQUIRE_BLITTER_OR_SKIP(hwInfo);
+
     uint32_t pattern[4] = {1, 0, 0, 0};
     uint32_t streamBuffer[100] = {};
     LinearStream stream(streamBuffer, sizeof(streamBuffer));
-    MockGraphicsAllocation mockAllocation(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocation(0, AllocationType::INTERNAL_HOST_MEMORY,
                                           reinterpret_cast<void *>(0x1234), 0x1000, 0, ((BlitterConstants::maxBlitWidth + 1) * sizeof(uint32_t)),
-                                          MemoryPool::System4KBPages, mockMaxOsContextCount);
-    BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, pattern, sizeof(uint32_t), stream, mockAllocation.getUnderlyingBufferSize(), *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
+                                          MemoryPool::System4KBPages, MemoryManager::maxOsContextCount);
+    BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, 0, pattern, sizeof(uint32_t), stream, mockAllocation.getUnderlyingBufferSize(), *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
         cmdList, ptrOffset(stream.getCpuBase(), 0), stream.getUsed()));
@@ -307,6 +344,25 @@ HWTEST_F(BlitTests, givenMemorySizeIsLessThanTwicenMaxWidthWhenFillPatternWithBl
         auto cmd = genCmdCast<XY_COLOR_BLT *>(*itor);
         EXPECT_EQ(cmd->getDestinationY2CoordinateBottom(), 1u);
     }
+}
+
+HWTEST_F(BlitTests, givenXyCopyBltCommandWhenAppendBlitCommandsMemCopyIsCalledThenNothingChanged) {
+    using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
+    auto bltCmd = FamilyType::cmdInitXyCopyBlt;
+    auto bltCmdBefore = bltCmd;
+    BlitProperties properties = {};
+    NEO::BlitCommandsHelper<FamilyType>::appendBlitCommandsMemCopy(properties, bltCmd, pDevice->getRootDeviceEnvironment());
+    EXPECT_EQ(memcmp(&bltCmd, &bltCmdBefore, sizeof(XY_COPY_BLT)), 0);
+}
+
+HWTEST_F(BlitTests, givenXyBlockCopyBltCommandAndSliceIndex0WhenAppendBaseAddressOffsetIsCalledThenNothingChanged) {
+    using XY_BLOCK_COPY_BLT = typename FamilyType::XY_BLOCK_COPY_BLT;
+    auto bltCmd = FamilyType::cmdInitXyBlockCopyBlt;
+    auto bltCmdBefore = bltCmd;
+    BlitProperties properties{};
+    uint32_t sliceIndex = 0;
+    NEO::BlitCommandsHelper<FamilyType>::appendBaseAddressOffset(properties, bltCmd, sliceIndex, false);
+    EXPECT_EQ(memcmp(&bltCmd, &bltCmdBefore, sizeof(XY_BLOCK_COPY_BLT)), 0);
 }
 
 using BlitColor = IsWithinProducts<IGFX_SKYLAKE, IGFX_ICELAKE_LP>;
@@ -317,10 +373,10 @@ HWTEST2_F(BlitTests, givenMemoryWhenFillPatternSizeIs4BytesThen32BitMaskISSetCor
     uint32_t pattern = 1;
     uint32_t streamBuffer[100] = {};
     LinearStream stream(streamBuffer, sizeof(streamBuffer));
-    MockGraphicsAllocation mockAllocation(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocation(0, AllocationType::INTERNAL_HOST_MEMORY,
                                           reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
-                                          MemoryPool::System4KBPages, mockMaxOsContextCount);
-    BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, &pattern, sizeof(uint32_t), stream, mockAllocation.getUnderlyingBufferSize(), *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
+                                          MemoryPool::System4KBPages, MemoryManager::maxOsContextCount);
+    BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, 0, &pattern, sizeof(uint32_t), stream, mockAllocation.getUnderlyingBufferSize(), *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
         cmdList, ptrOffset(stream.getCpuBase(), 0), stream.getUsed()));
@@ -411,7 +467,7 @@ INSTANTIATE_TEST_CASE_P(size_t,
                                         8,
                                         16));
 HWTEST2_F(BlitTests, givenMemoryAndImageWhenDispatchCopyImageCallThenCommandAddedToStream, BlitPlatforms) {
-    using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
+    using XY_BLOCK_COPY_BLT = typename FamilyType::XY_BLOCK_COPY_BLT;
     MockGraphicsAllocation srcAlloc;
     MockGraphicsAllocation dstAlloc;
     MockGraphicsAllocation clearColorAllocation;
@@ -437,11 +493,11 @@ HWTEST2_F(BlitTests, givenMemoryAndImageWhenDispatchCopyImageCallThenCommandAdde
     blitProperties.bytesPerPixel = 4;
     blitProperties.srcSize = srcSize;
     blitProperties.dstSize = dstSize;
-    NEO::BlitCommandsHelper<FamilyType>::dispatchBlitCommandsRegion(blitProperties, stream, *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
+    NEO::BlitCommandsHelper<FamilyType>::dispatchBlitCommandsForImageRegion(blitProperties, stream, *pDevice->getExecutionEnvironment()->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]);
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
         cmdList, ptrOffset(stream.getCpuBase(), 0), stream.getUsed()));
-    auto itor = find<XY_COPY_BLT *>(cmdList.begin(), cmdList.end());
+    auto itor = find<XY_BLOCK_COPY_BLT *>(cmdList.begin(), cmdList.end());
     EXPECT_NE(cmdList.end(), itor);
 }
 
@@ -470,7 +526,7 @@ HWTEST2_F(BlitTests, givenGen9AndGetBlitAllocationPropertiesThenCorrectValuesAre
 
 using BlitTestsParams = BlitColorTests;
 
-HWTEST2_P(BlitTestsParams, givenCopySizeAlignedWithin1and16ByteWhenGettingBytesPerPixelThenCorectPixelSizeReturned, BlitPlatforms) {
+HWTEST2_P(BlitTestsParams, givenCopySizeAlignedWithin1and16BytesWhenGettingBytesPerPixelThenCorrectPixelSizeIsReturned, BlitPlatforms) {
     size_t copySize = 33;
     auto aligment = GetParam();
     copySize = alignUp(copySize, aligment);
@@ -482,7 +538,7 @@ HWTEST2_P(BlitTestsParams, givenCopySizeAlignedWithin1and16ByteWhenGettingBytesP
     EXPECT_EQ(bytesPerPixel, aligment);
 }
 
-HWTEST2_P(BlitTestsParams, givenSrcSizeAlignedWithin1and16ByteWhenGettingBytesPerPixelThenCorectPixelSizeReturned, BlitPlatforms) {
+HWTEST2_P(BlitTestsParams, givenSrcSizeAlignedWithin1and16BytesWhenGettingBytesPerPixelThenCorrectPixelSizeIsReturned, BlitPlatforms) {
     size_t copySize = BlitterConstants::maxBytesPerPixel;
     auto aligment = GetParam();
     uint32_t srcOrigin, dstOrigin, srcSize, dstSize;
@@ -494,7 +550,17 @@ HWTEST2_P(BlitTestsParams, givenSrcSizeAlignedWithin1and16ByteWhenGettingBytesPe
     EXPECT_EQ(bytesPerPixel, aligment);
 }
 
-HWTEST2_P(BlitTestsParams, givenDstSizeAlignedWithin1and16ByteWhenGettingBytesPerPixelThenCorectPixelSizeReturned, BlitPlatforms) {
+HWTEST2_P(BlitTestsParams, givenSrcSizeNotAlignedWithin1and16BytesWhenGettingBytesPerPixelThen1BytePixelSizeIsReturned, BlitPlatforms) {
+    size_t copySize = BlitterConstants::maxBytesPerPixel;
+    uint32_t srcOrigin, dstOrigin, srcSize, dstSize;
+    srcSize = 33;
+    srcOrigin = dstOrigin = dstSize = static_cast<uint32_t>(BlitterConstants::maxBytesPerPixel);
+    uint32_t bytesPerPixel = NEO::BlitCommandsHelper<FamilyType>::getAvailableBytesPerPixel(copySize, srcOrigin, dstOrigin, srcSize, dstSize);
+
+    EXPECT_EQ(bytesPerPixel, 1u);
+}
+
+HWTEST2_P(BlitTestsParams, givenDstSizeAlignedWithin1and16BytesWhenGettingBytesPerPixelThenCorrectPixelSizeIsReturned, BlitPlatforms) {
     size_t copySize = BlitterConstants::maxBytesPerPixel;
     auto aligment = GetParam();
     uint32_t srcOrigin, dstOrigin, srcSize, dstSize;
@@ -506,7 +572,17 @@ HWTEST2_P(BlitTestsParams, givenDstSizeAlignedWithin1and16ByteWhenGettingBytesPe
     EXPECT_EQ(bytesPerPixel, aligment);
 }
 
-HWTEST2_P(BlitTestsParams, givenSrcOriginAlignedWithin1and16ByteWhenGettingBytesPerPixelThenCorectPixelSizeReturned, BlitPlatforms) {
+HWTEST2_P(BlitTestsParams, givenDstSizeNotAlignedWithin1and16BytesWhenGettingBytesPerPixelThen1BytePixelSizeIsReturned, BlitPlatforms) {
+    size_t copySize = BlitterConstants::maxBytesPerPixel;
+    uint32_t srcOrigin, dstOrigin, srcSize, dstSize;
+    dstSize = 33;
+    srcOrigin = dstOrigin = srcSize = static_cast<uint32_t>(BlitterConstants::maxBytesPerPixel);
+    uint32_t bytesPerPixel = NEO::BlitCommandsHelper<FamilyType>::getAvailableBytesPerPixel(copySize, srcOrigin, dstOrigin, srcSize, dstSize);
+
+    EXPECT_EQ(bytesPerPixel, 1u);
+}
+
+HWTEST2_P(BlitTestsParams, givenSrcOriginAlignedWithin1and16BytesWhenGettingBytesPerPixelThenCorrectPixelSizeIsReturned, BlitPlatforms) {
     size_t copySize = BlitterConstants::maxBytesPerPixel;
     auto aligment = GetParam();
     uint32_t srcOrigin, dstOrigin, srcSize, dstSize;
@@ -518,7 +594,7 @@ HWTEST2_P(BlitTestsParams, givenSrcOriginAlignedWithin1and16ByteWhenGettingBytes
     EXPECT_EQ(bytesPerPixel, aligment);
 }
 
-HWTEST2_P(BlitTestsParams, givenDrcOriginAlignedWithin1and16ByteWhenGettingBytesPerPixelThenCorectPixelSizeReturned, BlitPlatforms) {
+HWTEST2_P(BlitTestsParams, givenDstOriginAlignedWithin1and16BytesWhenGettingBytesPerPixelThenCorrectPixelSizeIsReturned, BlitPlatforms) {
     size_t copySize = BlitterConstants::maxBytesPerPixel;
     auto aligment = GetParam();
     uint32_t srcOrigin, dstOrigin, srcSize, dstSize;
@@ -530,6 +606,16 @@ HWTEST2_P(BlitTestsParams, givenDrcOriginAlignedWithin1and16ByteWhenGettingBytes
     EXPECT_EQ(bytesPerPixel, aligment);
 }
 
+HWTEST2_P(BlitTestsParams, givenDstOriginNotAlignedWithin1and16BytesWhenGettingBytesPerPixelThen1BytePixelSizeIsReturned, BlitPlatforms) {
+    size_t copySize = BlitterConstants::maxBytesPerPixel;
+    uint32_t srcOrigin, dstOrigin, srcSize, dstSize;
+    dstOrigin = 33;
+    dstSize = srcOrigin = srcSize = static_cast<uint32_t>(BlitterConstants::maxBytesPerPixel);
+    uint32_t bytesPerPixel = NEO::BlitCommandsHelper<FamilyType>::getAvailableBytesPerPixel(copySize, srcOrigin, dstOrigin, srcSize, dstSize);
+
+    EXPECT_EQ(bytesPerPixel, 1u);
+}
+
 INSTANTIATE_TEST_CASE_P(size_t,
                         BlitTestsParams,
                         testing::Values(1,
@@ -537,26 +623,6 @@ INSTANTIATE_TEST_CASE_P(size_t,
                                         4,
                                         8,
                                         16));
-
-HWTEST2_F(BlitTests, givenAllocWidthGreaterThanMaxBlitWidthWhenCheckingIfOneCommandCanBeUsedThenFalseReturned, BlitPlatforms) {
-    uint32_t bytesPerPixel = 1;
-    Vec3<size_t> copySize = {BlitterConstants::maxBlitWidth + 1, 1, 1};
-    bool useOneCommand = NEO::BlitCommandsHelper<FamilyType>::useOneBlitCopyCommand(copySize, bytesPerPixel);
-    EXPECT_FALSE(useOneCommand);
-}
-
-HWTEST2_F(BlitTests, givenAllocHeightGreaterThanMaxBlitHeightWhenCheckingIfOneCommandCanBeUsedThenFalseReturned, BlitPlatforms) {
-    uint32_t bytesPerPixel = 1;
-    Vec3<size_t> copySize = {0x10, BlitterConstants::maxBlitHeight + 1, 1};
-    bool useOneCommand = NEO::BlitCommandsHelper<FamilyType>::useOneBlitCopyCommand(copySize, bytesPerPixel);
-    EXPECT_FALSE(useOneCommand);
-}
-HWTEST2_F(BlitTests, givenAllocDimsLowerThanMaxSizesWhenCheckingIfOneCommandCanBeUsedThenTrueReturned, BlitPlatforms) {
-    uint32_t bytesPerPixel = 1;
-    Vec3<size_t> copySize = {BlitterConstants::maxBlitWidth - 1, BlitterConstants::maxBlitHeight - 1, 1};
-    bool useOneCommand = NEO::BlitCommandsHelper<FamilyType>::useOneBlitCopyCommand(copySize, bytesPerPixel);
-    EXPECT_TRUE(useOneCommand);
-}
 
 using WithoutGen12Lp = IsNotGfxCore<IGFX_GEN12LP_CORE>;
 
@@ -574,7 +640,7 @@ HWTEST2_F(BlitTests, givenPlatformWhenCallingDispatchPreBlitCommandThenNoneMiFlu
     auto miFlushBuffer = std::make_unique<MI_FLUSH_DW>();
     LinearStream linearStream(miFlushBuffer.get(), EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite());
 
-    BlitCommandsHelper<FamilyType>::dispatchPreBlitCommand(linearStream);
+    BlitCommandsHelper<FamilyType>::dispatchPreBlitCommand(linearStream, *defaultHwInfo);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(linearStream);

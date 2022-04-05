@@ -1,11 +1,15 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/built_ins/built_ins.h"
+#include "shared/source/helpers/compiler_hw_info_config.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/test_macros/test.h"
+#include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/source/event/event.h"
@@ -15,7 +19,6 @@
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
 #include "opencl/test/unit_test/gen_common/gen_commands_common_validation.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
-#include "test.h"
 
 #include "reg_configs_common.h"
 
@@ -547,10 +550,10 @@ HWTEST_F(EnqueueReadWriteBufferRectDispatch, givenOffsetResultingInMisalignedPtr
     hwInfo->capabilityTable.blitterOperationsSupported = false;
     initializeFixture<FamilyType>();
 
-    if (device->areSharedSystemAllocationsAllowed()) {
+    const auto &compilerHwInfoConfig = *CompilerHwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    if (compilerHwInfoConfig.isForceToStatelessRequired()) {
         GTEST_SKIP();
     }
-
     auto cmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context.get(), device.get(), &properties);
 
     buffer->forceDisallowCPUCopy = true;
@@ -571,7 +574,7 @@ HWTEST_F(EnqueueReadWriteBufferRectDispatch, givenOffsetResultingInMisalignedPtr
     auto &kernelInfo = kernel->getKernelInfo();
 
     if (hwInfo->capabilityTable.gpuAddressSpace == MemoryConstants::max48BitAddress) {
-        const auto &surfaceState = getSurfaceState<FamilyType>(&cmdQ->getIndirectHeap(IndirectHeap::SURFACE_STATE, 0), 0);
+        const auto &surfaceState = getSurfaceState<FamilyType>(&cmdQ->getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 0), 0);
 
         if (kernelInfo.getArgDescriptorAt(0).as<ArgDescPointer>().pointerSize == sizeof(uint64_t)) {
             auto pKernelArg = (uint64_t *)(kernel->getCrossThreadData() +
@@ -631,7 +634,7 @@ struct EnqueueWriteBufferRectHw : public ::testing::Test {
         if (is32bit) {
             GTEST_SKIP();
         }
-        device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+        device = std::make_unique<MockClDevice>(MockClDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
         context.reset(new MockContext(device.get()));
     }
 
@@ -650,9 +653,9 @@ struct EnqueueWriteBufferRectHw : public ::testing::Test {
     uint64_t smallSize = 4ull * MemoryConstants::gigaByte - 1;
 };
 
-using EnqeueWriteBufferRectStatelessTest = EnqueueWriteBufferRectHw;
+using EnqueueWriteBufferRectStatelessTest = EnqueueWriteBufferRectHw;
 
-HWTEST_F(EnqeueWriteBufferRectStatelessTest, WhenWritingBufferRectStatelessThenSuccessIsReturned) {
+HWTEST_F(EnqueueWriteBufferRectStatelessTest, WhenWritingBufferRectStatelessThenSuccessIsReturned) {
 
     auto pCmdQ = std::make_unique<CommandQueueStateless<FamilyType>>(context.get(), device.get());
     void *missAlignedPtr = reinterpret_cast<void *>(0x1041);
@@ -674,9 +677,9 @@ HWTEST_F(EnqeueWriteBufferRectStatelessTest, WhenWritingBufferRectStatelessThenS
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
-using EnqeueWriteBufferRectStatefulTest = EnqueueWriteBufferRectHw;
+using EnqueueWriteBufferRectStatefulTest = EnqueueWriteBufferRectHw;
 
-HWTEST_F(EnqeueWriteBufferRectStatefulTest, WhenWritingBufferRectStatefulThenSuccessIsReturned) {
+HWTEST_F(EnqueueWriteBufferRectStatefulTest, WhenWritingBufferRectStatefulThenSuccessIsReturned) {
 
     auto pCmdQ = std::make_unique<CommandQueueStateful<FamilyType>>(context.get(), device.get());
     void *missAlignedPtr = reinterpret_cast<void *>(0x1041);
@@ -696,4 +699,49 @@ HWTEST_F(EnqeueWriteBufferRectStatefulTest, WhenWritingBufferRectStatefulThenSuc
                                                 nullptr);
 
     EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+HWTEST_F(EnqueueWriteBufferRectHw, givenHostPtrIsFromMappedBufferWhenWriteBufferRectIsCalledThenReuseGraphicsAllocation) {
+    DebugManagerStateRestore restore{};
+    DebugManager.flags.DisableZeroCopyForBuffers.set(1);
+
+    MockCommandQueueHw<FamilyType> queue(context.get(), device.get(), nullptr);
+    auto &csr = device->getUltCommandStreamReceiver<FamilyType>();
+
+    BufferDefaults::context = context.get();
+    auto bufferForMap = clUniquePtr(BufferHelper<>::create());
+    auto bufferForWrite = clUniquePtr(BufferHelper<>::create());
+
+    cl_int retVal{};
+    void *mappedPtr = queue.enqueueMapBuffer(bufferForMap.get(), CL_TRUE, CL_MAP_READ, 0, bufferForMap->getSize(), 0, nullptr, nullptr, retVal);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, mappedPtr);
+    EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+
+    MapOperationsHandler *mapOperationsHandler = context->getMapOperationsStorage().getHandlerIfExists(bufferForMap.get());
+    EXPECT_NE(nullptr, mapOperationsHandler);
+    MapInfo mapInfo{};
+    EXPECT_TRUE(mapOperationsHandler->find(mappedPtr, mapInfo));
+    EXPECT_NE(nullptr, mapInfo.graphicsAllocation);
+
+    auto unmappedPtr = std::make_unique<char[]>(bufferForWrite->getSize());
+    retVal = queue.enqueueWriteBufferRect(bufferForWrite.get(), CL_TRUE,
+                                          bufferOrigin, hostOrigin,
+                                          region,
+                                          bufferRowPitch, bufferSlicePitch,
+                                          hostRowPitch, hostSlicePitch,
+                                          unmappedPtr.get(),
+                                          0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(1u, csr.createAllocationForHostSurfaceCalled);
+
+    retVal = queue.enqueueWriteBufferRect(bufferForWrite.get(), CL_TRUE,
+                                          bufferOrigin, hostOrigin,
+                                          region,
+                                          bufferRowPitch, bufferSlicePitch,
+                                          hostRowPitch, hostSlicePitch,
+                                          mappedPtr,
+                                          0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(1u, csr.createAllocationForHostSurfaceCalled);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,13 +7,13 @@
 
 #include "shared/source/helpers/timestamp_packet.h"
 #include "shared/source/utilities/tag_allocator.h"
+#include "shared/test/common/fixtures/memory_allocator_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/engine_descriptor_helper.h"
+#include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-
-#include "opencl/test/unit_test/fixtures/memory_allocator_fixture.h"
-#include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "gtest/gtest.h"
 
@@ -53,8 +53,8 @@ struct TimeStamps {
         start = 1;
         end = 2;
     }
-    static constexpr GraphicsAllocation::AllocationType getAllocationType() {
-        return GraphicsAllocation::AllocationType::PROFILING_TAG_BUFFER;
+    static constexpr AllocationType getAllocationType() {
+        return AllocationType::PROFILING_TAG_BUFFER;
     }
 
     static constexpr TagNodeType getTagNodeType() { return TagNodeType::HwTimeStamps; }
@@ -74,6 +74,8 @@ struct TimeStamps {
     uint64_t getGlobalEndValue(uint32_t packetIndex) const {
         return end;
     }
+
+    void const *getContextEndAddress(uint32_t packetIndex) const { return &end; }
 
     uint64_t start;
     uint64_t end;
@@ -235,7 +237,7 @@ TEST_F(TagAllocatorTest, givenInputTagCountWhenCreatingAllocatorThenRequestedNum
         using MockMemoryManager::MockMemoryManager;
         GraphicsAllocation *allocateGraphicsMemoryWithAlignment(const AllocationData &allocationData) override {
             return new MemoryAllocation(0, TimestampPackets<uint32_t>::getAllocationType(), nullptr, nullptr, 0, MemoryConstants::pageSize,
-                                        1, MemoryPool::System4KBPages, false, false, mockMaxOsContextCount);
+                                        1, MemoryPool::System4KBPages, false, false, MemoryManager::maxOsContextCount);
         }
     };
 
@@ -460,9 +462,9 @@ TEST_F(TagAllocatorTest, givenTagAllocatorWhenGraphicsAllocationIsCreatedThenSet
     auto hwTimeStampsTag = hwTimeStampsAllocator.getTag();
     auto hwPerfCounterTag = hwPerfCounterAllocator.getTag();
 
-    EXPECT_EQ(GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER, timestampPacketTag->getBaseGraphicsAllocation()->getAllocationType());
-    EXPECT_EQ(GraphicsAllocation::AllocationType::PROFILING_TAG_BUFFER, hwTimeStampsTag->getBaseGraphicsAllocation()->getAllocationType());
-    EXPECT_EQ(GraphicsAllocation::AllocationType::PROFILING_TAG_BUFFER, hwPerfCounterTag->getBaseGraphicsAllocation()->getAllocationType());
+    EXPECT_EQ(AllocationType::TIMESTAMP_PACKET_TAG_BUFFER, timestampPacketTag->getBaseGraphicsAllocation()->getAllocationType());
+    EXPECT_EQ(AllocationType::PROFILING_TAG_BUFFER, hwTimeStampsTag->getBaseGraphicsAllocation()->getAllocationType());
+    EXPECT_EQ(AllocationType::PROFILING_TAG_BUFFER, hwPerfCounterTag->getBaseGraphicsAllocation()->getAllocationType());
 }
 
 TEST_F(TagAllocatorTest, givenMultipleRootDevicesWhenPopulatingTagsThenCreateMultiGraphicsAllocation) {
@@ -517,11 +519,11 @@ HWTEST_F(TagAllocatorTest, givenMultipleRootDevicesWhenCallingMakeResidentThenUs
     auto multiGraphicsAllocation = timestampPacketAllocator.gfxAllocations[0].get();
 
     auto rootCsr0 = std::unique_ptr<UltCommandStreamReceiver<FamilyType>>(static_cast<UltCommandStreamReceiver<FamilyType> *>(createCommandStream(*executionEnvironment, 0, 1)));
-    auto osContext0 = testMemoryManager->createAndRegisterOsContext(rootCsr0.get(), {aub_stream::EngineType::ENGINE_BCS, EngineUsage::Regular}, 1, PreemptionMode::Disabled, true);
+    auto osContext0 = testMemoryManager->createAndRegisterOsContext(rootCsr0.get(), EngineDescriptorHelper::getDefaultDescriptor({aub_stream::EngineType::ENGINE_BCS, EngineUsage::Regular}, true));
     rootCsr0->setupContext(*osContext0);
 
     auto rootCsr1 = std::unique_ptr<UltCommandStreamReceiver<FamilyType>>(static_cast<UltCommandStreamReceiver<FamilyType> *>(createCommandStream(*executionEnvironment, 1, 1)));
-    auto osContext1 = testMemoryManager->createAndRegisterOsContext(rootCsr1.get(), {aub_stream::EngineType::ENGINE_BCS, EngineUsage::Regular}, 1, PreemptionMode::Disabled, true);
+    auto osContext1 = testMemoryManager->createAndRegisterOsContext(rootCsr1.get(), EngineDescriptorHelper::getDefaultDescriptor({aub_stream::EngineType::ENGINE_BCS, EngineUsage::Regular}, true));
     rootCsr1->setupContext(*osContext1);
 
     rootCsr0->storeMakeResidentAllocations = true;
@@ -549,6 +551,7 @@ TEST_F(TagAllocatorTest, givenNotSupportedTagTypeWhenCallingMethodThenAbortOrRet
         EXPECT_ANY_THROW(perfCounterNode.getGlobalStartValue(0));
         EXPECT_ANY_THROW(perfCounterNode.getContextEndValue(0));
         EXPECT_ANY_THROW(perfCounterNode.getGlobalEndValue(0));
+        EXPECT_ANY_THROW(perfCounterNode.getContextEndAddress(0));
         EXPECT_ANY_THROW(perfCounterNode.getContextCompleteRef());
         EXPECT_ANY_THROW(perfCounterNode.getGlobalEndRef());
         EXPECT_ANY_THROW(perfCounterNode.getSinglePacketSize());

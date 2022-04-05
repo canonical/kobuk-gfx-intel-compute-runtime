@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,9 +17,15 @@
 
 #include "igfxfmid.h"
 
+#include <list>
 #include <memory>
 #include <string>
 
+namespace NEO {
+namespace Debug {
+struct Segments;
+}
+} // namespace NEO
 namespace L0 {
 
 namespace BuildOptions {
@@ -35,8 +41,14 @@ struct ModuleTranslationUnit {
     virtual ~ModuleTranslationUnit();
     MOCKABLE_VIRTUAL bool buildFromSpirV(const char *input, uint32_t inputSize, const char *buildOptions, const char *internalBuildOptions,
                                          const ze_module_constants_t *pConstants);
+    MOCKABLE_VIRTUAL bool staticLinkSpirV(std::vector<const char *> inputSpirVs, std::vector<uint32_t> inputModuleSizes, const char *buildOptions, const char *internalBuildOptions,
+                                          std::vector<const ze_module_constants_t *> specConstants);
     MOCKABLE_VIRTUAL bool createFromNativeBinary(const char *input, size_t inputSize);
     MOCKABLE_VIRTUAL bool processUnpackedBinary();
+    std::vector<uint8_t> generateElfFromSpirV(std::vector<const char *> inputSpirVs, std::vector<uint32_t> inputModuleSizes);
+    bool processSpecConstantInfo(NEO::CompilerInterface *compilerInterface, const ze_module_constants_t *pConstants, const char *input, uint32_t inputSize);
+    std::string generateCompilerOptions(const char *buildOptions, const char *internalBuildOptions);
+    MOCKABLE_VIRTUAL bool compileGenBinary(NEO::TranslationInput inputArgs, bool staticLink);
     void updateBuildLog(const std::string &newLogEntry);
     void processDebugData();
     L0::Device *device = nullptr;
@@ -46,6 +58,7 @@ struct ModuleTranslationUnit {
     NEO::ProgramInfo programInfo;
 
     std::string options;
+    bool shouldSuppressRebuildWarning{false};
 
     std::string buildLog;
 
@@ -73,7 +86,12 @@ struct ModuleImp : public Module {
     ~ModuleImp() override;
 
     ze_result_t destroy() override {
+        auto tempHandle = debugModuleHandle;
+        auto tempDevice = device;
         delete this;
+        if (tempDevice->getL0Debugger() && tempHandle != 0) {
+            tempDevice->getL0Debugger()->removeZebinModule(tempHandle);
+        }
         return ZE_RESULT_SUCCESS;
     }
 
@@ -122,10 +140,17 @@ struct ModuleImp : public Module {
         return this->translationUnit.get();
     }
 
+    void moduleDependencyWalker(std::map<void *, std::map<void *, void *>> inDeps, void *moduleHandle, std::list<ModuleImp *> *outDeps);
+
   protected:
     void copyPatchedSegments(const NEO::Linker::PatchableSegments &isaSegmentsForPatching);
     void verifyDebugCapabilities();
     void checkIfPrivateMemoryPerDispatchIsNeeded() override;
+    NEO::Debug::Segments getZebinSegments();
+    void passDebugData();
+    void createDebugZebin();
+    void registerElfInDebuggerL0();
+    bool populateHostGlobalSymbolsMap(std::unordered_map<std::string, std::string> &devToHostNameMapping);
 
     Device *device = nullptr;
     PRODUCT_FAMILY productFamily{};
@@ -135,12 +160,21 @@ struct ModuleImp : public Module {
     uint32_t maxGroupSize = 0U;
     std::vector<std::unique_ptr<KernelImmutableData>> kernelImmDatas;
     NEO::Linker::RelocatedSymbolsMap symbols;
+
+    struct GlobalSymbol {
+        uintptr_t address = std::numeric_limits<uintptr_t>::max();
+        size_t size = 0U;
+    };
+
+    std::unordered_map<std::string, GlobalSymbol> hostGlobalSymbolsMap;
+
     bool debugEnabled = false;
     bool isFullyLinked = false;
     bool allocatePrivateMemoryPerDispatch = true;
     ModuleType type;
     NEO::Linker::UnresolvedExternals unresolvedExternalsInfo{};
     std::set<NEO::GraphicsAllocation *> importedSymbolAllocations{};
+    uint32_t debugModuleHandle = 0;
 };
 
 bool moveBuildOption(std::string &dstOptionsSet, std::string &srcOptionSet, NEO::ConstStringRef dstOptionName, NEO::ConstStringRef srcOptionName);

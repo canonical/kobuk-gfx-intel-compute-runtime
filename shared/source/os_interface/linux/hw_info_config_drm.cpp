@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #include "shared/source/command_stream/preemption.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/helpers/compiler_hw_info_config.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
@@ -38,7 +39,7 @@ int configureCacheInfo(HardwareInfo *hwInfo) {
     const CpuInfo &cpuInfo = CpuInfo::getInstance();
 
     do {
-        uint32_t cpuRegsInfo[4];
+        uint32_t cpuRegsInfo[4] = {};
 
         cpuInfo.cpuidex(cpuRegsInfo, 4, subleaf);
         eax = cpuRegsInfo[0];
@@ -125,34 +126,22 @@ int HwInfoConfig::configureHwInfoDrm(const HardwareInfo *inHwInfo, HardwareInfo 
     gtSystemInfo->MaxSubSlicesSupported = std::max(static_cast<uint32_t>(topologyData.maxSubSliceCount * topologyData.maxSliceCount), gtSystemInfo->MaxSubSlicesSupported);
     gtSystemInfo->MaxSlicesSupported = topologyData.maxSliceCount;
 
+    for (uint32_t slice = 0; slice < gtSystemInfo->SliceCount; slice++) {
+        gtSystemInfo->SliceInfo[slice].Enabled = true;
+    }
+
     uint64_t gttSizeQuery = 0;
-    featureTable->ftrSVM = true;
+    featureTable->flags.ftrSVM = true;
 
     ret = drm->queryGttSize(gttSizeQuery);
 
     if (ret == 0) {
-        featureTable->ftrSVM = (gttSizeQuery > MemoryConstants::max64BitAppAddress);
+        featureTable->flags.ftrSVM = (gttSizeQuery > MemoryConstants::max64BitAppAddress);
         outHwInfo->capabilityTable.gpuAddressSpace = gttSizeQuery - 1; // gttSizeQuery = (1 << bits)
     }
 
     int maxGpuFreq = 0;
     drm->getMaxGpuFrequency(*outHwInfo, maxGpuFreq);
-
-    GTTYPE gtType = drm->getGtType();
-    if (gtType == GTTYPE_UNDEFINED) {
-        *outHwInfo = {};
-        return -1;
-    }
-    platform->eGTType = gtType;
-    featureTable->ftrGTA = (gtType == GTTYPE_GTA) ? 1 : 0;
-    featureTable->ftrGTC = (gtType == GTTYPE_GTC) ? 1 : 0;
-    featureTable->ftrGTX = (gtType == GTTYPE_GTX) ? 1 : 0;
-    featureTable->ftrGT1 = (gtType == GTTYPE_GT1) ? 1 : 0;
-    featureTable->ftrGT1_5 = (gtType == GTTYPE_GT1_5) ? 1 : 0;
-    featureTable->ftrGT2 = (gtType == GTTYPE_GT2) ? 1 : 0;
-    featureTable->ftrGT2_5 = (gtType == GTTYPE_GT2_5) ? 1 : 0;
-    featureTable->ftrGT3 = (gtType == GTTYPE_GT3) ? 1 : 0;
-    featureTable->ftrGT4 = (gtType == GTTYPE_GT4) ? 1 : 0;
 
     ret = configureHardwareCustom(outHwInfo, osIface);
     if (ret != 0) {
@@ -160,10 +149,10 @@ int HwInfoConfig::configureHwInfoDrm(const HardwareInfo *inHwInfo, HardwareInfo 
         return ret;
     }
     configureCacheInfo(outHwInfo);
-    featureTable->ftrEDram = (gtSystemInfo->EdramSizeInKb != 0) ? 1 : 0;
+    featureTable->flags.ftrEDram = (gtSystemInfo->EdramSizeInKb != 0) ? 1 : 0;
 
     outHwInfo->capabilityTable.maxRenderFrequency = maxGpuFreq;
-    outHwInfo->capabilityTable.ftrSvm = featureTable->ftrSVM;
+    outHwInfo->capabilityTable.ftrSvm = featureTable->flags.ftrSVM;
 
     HwHelper &hwHelper = HwHelper::get(platform->eRenderCoreFamily);
     outHwInfo->capabilityTable.ftrSupportsCoherency = false;
@@ -175,11 +164,14 @@ int HwInfoConfig::configureHwInfoDrm(const HardwareInfo *inHwInfo, HardwareInfo 
     drm->checkNonPersistentContextsSupport();
     drm->checkPreemptionSupport();
     bool preemption = drm->isPreemptionSupported();
+    auto compilerHwInfoConfig = CompilerHwInfoConfig::get(outHwInfo->platform.eProductFamily);
     PreemptionHelper::adjustDefaultPreemptionMode(outHwInfo->capabilityTable,
-                                                  static_cast<bool>(outHwInfo->featureTable.ftrGpGpuMidThreadLevelPreempt) && preemption,
-                                                  static_cast<bool>(outHwInfo->featureTable.ftrGpGpuThreadGroupLevelPreempt) && preemption,
-                                                  static_cast<bool>(outHwInfo->featureTable.ftrGpGpuMidBatchPreempt) && preemption);
+                                                  compilerHwInfoConfig->isMidThreadPreemptionSupported(*outHwInfo) && preemption,
+                                                  static_cast<bool>(outHwInfo->featureTable.flags.ftrGpGpuThreadGroupLevelPreempt) && preemption,
+                                                  static_cast<bool>(outHwInfo->featureTable.flags.ftrGpGpuMidBatchPreempt) && preemption);
+
     outHwInfo->capabilityTable.requiredPreemptionSurfaceSize = outHwInfo->gtSystemInfo.CsrSizeInMb * MemoryConstants::megaByte;
+    hwHelper.adjustPreemptionSurfaceSize(outHwInfo->capabilityTable.requiredPreemptionSurfaceSize);
 
     auto &kmdNotifyProperties = outHwInfo->capabilityTable.kmdNotifyProperties;
     KmdNotifyHelper::overrideFromDebugVariable(DebugManager.flags.OverrideEnableKmdNotify.get(), kmdNotifyProperties.enableKmdNotify);
@@ -188,6 +180,8 @@ int HwInfoConfig::configureHwInfoDrm(const HardwareInfo *inHwInfo, HardwareInfo 
     KmdNotifyHelper::overrideFromDebugVariable(DebugManager.flags.OverrideQuickKmdSleepDelayMicroseconds.get(), kmdNotifyProperties.delayQuickKmdSleepMicroseconds);
     KmdNotifyHelper::overrideFromDebugVariable(DebugManager.flags.OverrideEnableQuickKmdSleepForSporadicWaits.get(), kmdNotifyProperties.enableQuickKmdSleepForSporadicWaits);
     KmdNotifyHelper::overrideFromDebugVariable(DebugManager.flags.OverrideDelayQuickKmdSleepForSporadicWaitsMicroseconds.get(), kmdNotifyProperties.delayQuickKmdSleepForSporadicWaitsMicroseconds);
+    KmdNotifyHelper::overrideFromDebugVariable(DebugManager.flags.OverrideEnableQuickKmdSleepForDirectSubmission.get(), kmdNotifyProperties.enableQuickKmdSleepForDirectSubmission);
+    KmdNotifyHelper::overrideFromDebugVariable(DebugManager.flags.OverrideDelayQuickKmdSleepForDirectSubmissionMicroseconds.get(), kmdNotifyProperties.delayQuickKmdSleepForDirectSubmissionMicroseconds);
 
     return 0;
 }

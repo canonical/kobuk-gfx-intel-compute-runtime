@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,12 +8,14 @@
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/gmm_helper/resource_info.h"
 #include "shared/source/helpers/surface_format_info.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_gmm_client_context.h"
+#include "shared/test/common/mocks/mock_sip.h"
+#include "shared/test/common/test_macros/test.h"
 
-#include "test.h"
-
+#include "level_zero/core/source/hw_helpers/l0_hw_helper.h"
 #include "level_zero/core/source/image/image_format_desc_helper.h"
 #include "level_zero/core/source/image/image_formats.h"
 #include "level_zero/core/source/image/image_hw.h"
@@ -25,11 +27,10 @@
 namespace L0 {
 namespace ult {
 
-using ImageSupport = IsAtLeastProduct<IGFX_SKYLAKE>;
 using ImageCreate = Test<DeviceFixture>;
 using ImageView = Test<DeviceFixture>;
 
-HWTEST2_F(ImageCreate, givenValidImageDescriptionWhenImageCreateThenImageIsCreatedCorrectly, ImageSupport) {
+HWTEST2_F(ImageCreate, givenValidImageDescriptionWhenImageCreateThenImageIsCreatedCorrectly, IsAtLeastSkl) {
     ze_image_desc_t zeDesc = {};
     zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
     zeDesc.arraylevels = 1u;
@@ -68,11 +69,10 @@ HWTEST2_F(ImageCreate, givenValidImageDescriptionWhenImageCreateThenImageIsCreat
     EXPECT_EQ(imageInfo.linearStorage, false);
     EXPECT_EQ(imageInfo.mipCount, 0u);
     EXPECT_EQ(imageInfo.plane, GMM_NO_PLANE);
-    EXPECT_EQ(imageInfo.preferRenderCompression, false);
     EXPECT_EQ(imageInfo.useLocalMemory, false);
 }
 
-HWTEST2_F(ImageCreate, givenValidImageDescriptionWhenImageCreateWithUnsupportedImageThenNullPtrImageIsReturned, ImageSupport) {
+HWTEST2_F(ImageCreate, givenValidImageDescriptionWhenImageCreateWithUnsupportedImageThenNullPtrImageIsReturned, IsAtLeastSkl) {
     ze_image_desc_t zeDesc = {};
     zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
     zeDesc.arraylevels = 1u;
@@ -110,7 +110,7 @@ struct WhiteBox<::L0::ImageCoreFamily<T>> : public ::L0::ImageCoreFamily<T> {
     using BaseClass::surfaceState;
 };
 
-HWTEST2_F(ImageCreate, givenDifferentSwizzleFormatWhenImageInitializeThenCorrectSwizzleInRSSIsSet, ImageSupport) {
+HWTEST2_F(ImageCreate, givenDifferentSwizzleFormatWhenImageInitializeThenCorrectSwizzleInRSSIsSet, IsAtLeastSkl) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
     ze_image_desc_t desc = {};
@@ -144,7 +144,7 @@ HWTEST2_F(ImageCreate, givenDifferentSwizzleFormatWhenImageInitializeThenCorrect
               RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_ZERO);
 }
 
-HWTEST2_F(ImageView, givenPlanarImageWhenCreateImageViewThenProperPlaneIsCreated, ImageSupport) {
+HWTEST2_F(ImageView, givenPlanarImageWhenCreateImageViewThenProperPlaneIsCreated, IsAtLeastSkl) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     const size_t width = 32;
     const size_t height = 32;
@@ -220,7 +220,7 @@ HWTEST2_F(ImageView, givenPlanarImageWhenCreateImageViewThenProperPlaneIsCreated
     zeImageDestroy(planeUV);
 }
 
-HWTEST2_F(ImageView, givenPlanarImageWhenCreateImageWithInvalidStructViewThenProperErrorIsReturned, ImageSupport) {
+HWTEST2_F(ImageView, givenPlanarImageWhenCreateImageWithInvalidStructViewThenProperErrorIsReturned, IsAtLeastSkl) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     const size_t width = 32;
     const size_t height = 32;
@@ -265,7 +265,7 @@ HWTEST2_F(ImageView, givenPlanarImageWhenCreateImageWithInvalidStructViewThenPro
     ASSERT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION, ret);
 }
 
-HWTEST2_F(ImageCreate, givenFDWhenCreatingImageThenSuccessIsReturned, ImageSupport) {
+HWTEST2_F(ImageCreate, givenFDWhenCreatingImageThenSuccessIsReturned, IsAtLeastSkl) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
     ze_image_desc_t desc = {};
@@ -295,7 +295,7 @@ HWTEST2_F(ImageCreate, givenFDWhenCreatingImageThenSuccessIsReturned, ImageSuppo
     ASSERT_EQ(static_cast<int>(imageHW->getAllocation()->peekSharedHandle()), importFd.fd);
 }
 
-HWTEST2_F(ImageCreate, givenOpaqueFdWhenCreatingImageThenUnsuportedErrorIsReturned, ImageSupport) {
+HWTEST2_F(ImageCreate, givenOpaqueFdWhenCreatingImageThenUnsuportedErrorIsReturned, IsAtLeastSkl) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
     ze_image_desc_t desc = {};
@@ -324,7 +324,7 @@ HWTEST2_F(ImageCreate, givenOpaqueFdWhenCreatingImageThenUnsuportedErrorIsReturn
     ASSERT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION, ret);
 }
 
-HWTEST2_F(ImageCreate, givenInvalidExensionStructWhenCreatingImageThenUnsuportedErrorIsReturned, ImageSupport) {
+HWTEST2_F(ImageCreate, givenExportStructWhenCreatingImageThenUnsupportedErrorIsReturned, IsAtLeastSkl) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
     ze_image_desc_t desc = {};
@@ -345,6 +345,7 @@ HWTEST2_F(ImageCreate, givenInvalidExensionStructWhenCreatingImageThenUnsuported
     ze_external_memory_export_fd_t exportFd = {};
     exportFd.fd = 1;
     exportFd.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_EXPORT_DESC;
+    exportFd.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_WIN32;
     desc.pNext = &exportFd;
 
     auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
@@ -356,18 +357,18 @@ class MemoryManagerNTHandleMock : public NEO::OsAgnosticMemoryManager {
   public:
     MemoryManagerNTHandleMock(NEO::ExecutionEnvironment &executionEnvironment) : NEO::OsAgnosticMemoryManager(executionEnvironment) {}
 
-    NEO::GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex) override {
-        auto graphicsAllocation = createMemoryAllocation(GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY, nullptr, reinterpret_cast<void *>(1), 1,
+    NEO::GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex, AllocationType allocType) override {
+        auto graphicsAllocation = createMemoryAllocation(AllocationType::INTERNAL_HOST_MEMORY, nullptr, reinterpret_cast<void *>(1), 1,
                                                          4096u, reinterpret_cast<uint64_t>(handle), MemoryPool::SystemCpuInaccessible,
                                                          rootDeviceIndex, false, false, false);
         graphicsAllocation->setSharedHandle(static_cast<osHandle>(reinterpret_cast<uint64_t>(handle)));
         graphicsAllocation->set32BitAllocation(false);
-        graphicsAllocation->setDefaultGmm(new Gmm(executionEnvironment.rootDeviceEnvironments[0]->getGmmClientContext(), nullptr, 1, 0, false));
+        graphicsAllocation->setDefaultGmm(new Gmm(executionEnvironment.rootDeviceEnvironments[0]->getGmmClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
         return graphicsAllocation;
     }
 };
 
-HWTEST2_F(ImageCreate, givenNTHandleWhenCreatingImageThenSuccessIsReturned, ImageSupport) {
+HWTEST2_F(ImageCreate, givenNTHandleWhenCreatingImageThenSuccessIsReturned, IsAtLeastSkl) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
     ze_image_desc_t desc = {};
@@ -400,7 +401,7 @@ HWTEST2_F(ImageCreate, givenNTHandleWhenCreatingImageThenSuccessIsReturned, Imag
     neoDevice->injectMemoryManager(currMemoryManager);
 
     ze_result_t result = ZE_RESULT_SUCCESS;
-    auto device = L0::Device::create(driverHandle.get(), neoDevice, 0, false, &result);
+    auto device = L0::Device::create(driverHandle.get(), neoDevice, false, &result);
 
     auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
@@ -421,8 +422,9 @@ class FailMemoryManagerMock : public NEO::OsAgnosticMemoryManager {
     }
 };
 
-HWTEST2_F(ImageCreate, givenImageDescWhenFailImageAllocationThenProperErrorIsReturned, ImageSupport) {
+HWTEST2_F(ImageCreate, givenImageDescWhenFailImageAllocationThenProperErrorIsReturned, IsAtLeastSkl) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
+    VariableBackup<bool> backupSipInitType{&MockSipData::useMockSip};
 
     ze_image_desc_t desc = {};
 
@@ -439,13 +441,18 @@ HWTEST2_F(ImageCreate, givenImageDescWhenFailImageAllocationThenProperErrorIsRet
     desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_1;
     desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
 
+    auto isHexadecimalArrayPrefered = NEO::HwHelper::get(NEO::defaultHwInfo->platform.eRenderCoreFamily).isSipKernelAsHexadecimalArrayPreferred();
+    if (isHexadecimalArrayPrefered) {
+        backupSipInitType = true;
+    }
+
     NEO::MockDevice *neoDevice = nullptr;
     neoDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
     NEO::MemoryManager *currMemoryManager = new FailMemoryManagerMock(*neoDevice->executionEnvironment);
     neoDevice->injectMemoryManager(currMemoryManager);
 
     ze_result_t result = ZE_RESULT_SUCCESS;
-    auto device = L0::Device::create(driverHandle.get(), neoDevice, 0, false, &result);
+    auto device = L0::Device::create(driverHandle.get(), neoDevice, false, &result);
 
     L0::Image *imageHandle;
 
@@ -457,7 +464,7 @@ HWTEST2_F(ImageCreate, givenImageDescWhenFailImageAllocationThenProperErrorIsRet
     delete device;
 }
 
-HWTEST2_F(ImageCreate, givenMediaBlockOptionWhenCopySurfaceStateThenSurfaceStateIsSet, ImageSupport) {
+HWTEST2_F(ImageCreate, givenMediaBlockOptionWhenCopySurfaceStateThenSurfaceStateIsSet, IsAtLeastSkl) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
     ze_image_desc_t desc = {};
@@ -488,7 +495,7 @@ HWTEST2_F(ImageCreate, givenMediaBlockOptionWhenCopySurfaceStateThenSurfaceState
     EXPECT_EQ(surfaceState->getWidth(), (static_cast<uint32_t>(imageHW->getImageInfo().surfaceFormat->ImageElementSizeInBytes) * static_cast<uint32_t>(imageHW->getImageInfo().imgDesc.imageWidth)) / sizeof(uint32_t));
 }
 
-HWTEST2_P(TestImageFormats, givenValidLayoutAndTypeWhenCreateImageCoreFamilyThenValidImageIsCreated, ImageSupport) {
+HWTEST2_P(TestImageFormats, givenValidLayoutAndTypeWhenCreateImageCoreFamilyThenValidImageIsCreated, IsAtLeastSkl) {
     auto params = GetParam();
 
     ze_image_desc_t zeDesc = {};
@@ -513,7 +520,7 @@ HWTEST2_P(TestImageFormats, givenValidLayoutAndTypeWhenCreateImageCoreFamilyThen
 
     imageHW->initialize(device, &zeDesc);
 
-    EXPECT_EQ(imageHW->getAllocation()->getAllocationType(), NEO::GraphicsAllocation::AllocationType::IMAGE);
+    EXPECT_EQ(imageHW->getAllocation()->getAllocationType(), NEO::AllocationType::IMAGE);
     auto RSS = imageHW->surfaceState;
     EXPECT_EQ(RSS.getSurfaceType(), FamilyType::RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_2D);
     EXPECT_EQ(RSS.getAuxiliarySurfaceMode(), FamilyType::RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE);
@@ -615,7 +622,9 @@ std::pair<ze_image_format_layout_t, ze_image_format_type_t> validFormats[] = {
     {ZE_IMAGE_FORMAT_LAYOUT_Y410, ZE_IMAGE_FORMAT_TYPE_UNORM},
     {ZE_IMAGE_FORMAT_LAYOUT_P012, ZE_IMAGE_FORMAT_TYPE_UNORM},
     {ZE_IMAGE_FORMAT_LAYOUT_Y216, ZE_IMAGE_FORMAT_TYPE_UNORM},
-    {ZE_IMAGE_FORMAT_LAYOUT_P016, ZE_IMAGE_FORMAT_TYPE_UNORM}};
+    {ZE_IMAGE_FORMAT_LAYOUT_P016, ZE_IMAGE_FORMAT_TYPE_UNORM},
+    {ZE_IMAGE_FORMAT_LAYOUT_RGBP, ZE_IMAGE_FORMAT_TYPE_UNORM},
+    {ZE_IMAGE_FORMAT_LAYOUT_BRGP, ZE_IMAGE_FORMAT_TYPE_UNORM}};
 
 INSTANTIATE_TEST_CASE_P(
     validImageFormats,
@@ -783,7 +792,7 @@ TEST(ImageFormatDescHelperTest, givenSupportedSwizzlesThenProperClEnumIsReturned
 
 using ImageGetMemoryProperties = Test<DeviceFixture>;
 
-HWTEST2_F(ImageGetMemoryProperties, givenImageMemoryPropertiesExpStructureWhenGetMemroyPropertiesThenProperDataAreSet, ImageSupport) {
+HWTEST2_F(ImageGetMemoryProperties, givenImageMemoryPropertiesExpStructureWhenGetMemroyPropertiesThenProperDataAreSet, IsAtLeastSkl) {
     ze_image_desc_t zeDesc = {};
     zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
     zeDesc.arraylevels = 1u;
@@ -819,5 +828,144 @@ HWTEST2_F(ImageGetMemoryProperties, givenImageMemoryPropertiesExpStructureWhenGe
     EXPECT_EQ(imageInfo.rowPitch, imageMemoryPropertiesExp.rowPitch);
 }
 
+HWTEST2_F(ImageGetMemoryProperties, givenDebugFlagSetWhenCreatingImageThenEnableCompression, IsAtLeastSkl) {
+    DebugManagerStateRestore restore;
+
+    device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.ftrRenderCompressedImages = true;
+
+    ze_image_desc_t zeDesc = {};
+    zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    zeDesc.arraylevels = 1u;
+    zeDesc.depth = 1u;
+    zeDesc.height = 1u;
+    zeDesc.width = 1u;
+    zeDesc.miplevels = 1u;
+    zeDesc.type = ZE_IMAGE_TYPE_2DARRAY;
+    zeDesc.flags = ZE_IMAGE_FLAG_BIAS_UNCACHED;
+
+    zeDesc.format = {ZE_IMAGE_FORMAT_LAYOUT_32,
+                     ZE_IMAGE_FORMAT_TYPE_UINT,
+                     ZE_IMAGE_FORMAT_SWIZZLE_R,
+                     ZE_IMAGE_FORMAT_SWIZZLE_G,
+                     ZE_IMAGE_FORMAT_SWIZZLE_B,
+                     ZE_IMAGE_FORMAT_SWIZZLE_A};
+
+    {
+        Image *image_ptr = nullptr;
+        auto result = Image::create(productFamily, device, &zeDesc, &image_ptr);
+        EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+        EXPECT_NE(nullptr, image_ptr);
+        std::unique_ptr<L0::Image> image(image_ptr);
+
+        EXPECT_EQ(L0HwHelperHw<FamilyType>::get().imageCompressionSupported(device->getHwInfo()), image->getAllocation()->isCompressionEnabled());
+    }
+
+    {
+        NEO::DebugManager.flags.RenderCompressedImagesEnabled.set(1);
+
+        ze_external_memory_import_win32_handle_t compressionHint = {};
+        compressionHint.stype = ZE_STRUCTURE_TYPE_MEMORY_COMPRESSION_HINTS_EXT_DESC;
+        compressionHint.flags = ZE_MEMORY_COMPRESSION_HINTS_EXT_FLAG_UNCOMPRESSED;
+
+        zeDesc.pNext = &compressionHint;
+
+        Image *image_ptr = nullptr;
+        auto result = Image::create(productFamily, device, &zeDesc, &image_ptr);
+        EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+        EXPECT_NE(nullptr, image_ptr);
+        std::unique_ptr<L0::Image> image(image_ptr);
+
+        EXPECT_FALSE(image->getAllocation()->isCompressionEnabled());
+
+        zeDesc.pNext = nullptr;
+    }
+
+    {
+        NEO::DebugManager.flags.RenderCompressedImagesEnabled.set(1);
+
+        Image *image_ptr = nullptr;
+        auto result = Image::create(productFamily, device, &zeDesc, &image_ptr);
+        EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+        EXPECT_NE(nullptr, image_ptr);
+        std::unique_ptr<L0::Image> image(image_ptr);
+
+        EXPECT_TRUE(image->getAllocation()->isCompressionEnabled());
+    }
+
+    {
+        NEO::DebugManager.flags.RenderCompressedImagesEnabled.set(0);
+
+        Image *image_ptr = nullptr;
+        auto result = Image::create(productFamily, device, &zeDesc, &image_ptr);
+        EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+        EXPECT_NE(nullptr, image_ptr);
+        std::unique_ptr<L0::Image> image(image_ptr);
+
+        EXPECT_FALSE(image->getAllocation()->isCompressionEnabled());
+    }
+}
+
+HWTEST2_F(ImageGetMemoryProperties, givenDebugFlagSetWhenCreatingLinearImageThenDontEnableCompression, IsAtLeastSkl) {
+    DebugManagerStateRestore restore;
+
+    device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.ftrRenderCompressedImages = true;
+
+    ze_image_desc_t zeDesc = {};
+    zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    zeDesc.arraylevels = 1u;
+    zeDesc.depth = 1u;
+    zeDesc.height = 1u;
+    zeDesc.width = 1u;
+    zeDesc.miplevels = 1u;
+    zeDesc.type = ZE_IMAGE_TYPE_1D;
+    zeDesc.flags = ZE_IMAGE_FLAG_BIAS_UNCACHED;
+
+    zeDesc.format = {ZE_IMAGE_FORMAT_LAYOUT_32,
+                     ZE_IMAGE_FORMAT_TYPE_UINT,
+                     ZE_IMAGE_FORMAT_SWIZZLE_R,
+                     ZE_IMAGE_FORMAT_SWIZZLE_G,
+                     ZE_IMAGE_FORMAT_SWIZZLE_B,
+                     ZE_IMAGE_FORMAT_SWIZZLE_A};
+
+    Image *image_ptr = nullptr;
+    auto result = Image::create(productFamily, device, &zeDesc, &image_ptr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    EXPECT_NE(nullptr, image_ptr);
+    std::unique_ptr<L0::Image> image(image_ptr);
+
+    EXPECT_FALSE(image->getAllocation()->isCompressionEnabled());
+}
+
+HWTEST2_F(ImageCreate, givenImageSizeZeroThenDummyImageIsCreated, IsAtMostXeHpgCore) {
+    ze_image_desc_t desc = {};
+
+    desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    desc.type = ZE_IMAGE_TYPE_3D;
+    desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_8_8_8_8;
+    desc.format.type = ZE_IMAGE_FORMAT_TYPE_UINT;
+    desc.format.x = desc.format.y = desc.format.z = desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_R;
+    desc.width = 0;
+    desc.height = 0;
+    desc.depth = 0;
+
+    L0::Image *image_ptr;
+
+    auto result = Image::create(productFamily, device, &desc, &image_ptr);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+    auto image = whitebox_cast(image_ptr);
+    ASSERT_NE(nullptr, image);
+
+    auto alloc = image->getAllocation();
+    ASSERT_NE(nullptr, alloc);
+
+    auto renderSurfaceState = FamilyType::cmdInitRenderSurfaceState;
+    image->copySurfaceStateToSSH(&renderSurfaceState, 0u, false);
+
+    EXPECT_EQ(1u, renderSurfaceState.getWidth());
+    EXPECT_EQ(1u, renderSurfaceState.getHeight());
+    EXPECT_EQ(1u, renderSurfaceState.getDepth());
+
+    image->destroy();
+}
 } // namespace ult
 } // namespace L0

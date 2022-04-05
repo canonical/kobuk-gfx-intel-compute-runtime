@@ -9,23 +9,25 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_os_library.h"
+#include "shared/test/common/mocks/mock_source_level_debugger.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
-#include "opencl/test/unit_test/mocks/mock_source_level_debugger.h"
-#include "test.h"
 
 using PreambleTest = ::testing::Test;
 using namespace NEO;
 
 TEST(DeviceWithSourceLevelDebugger, givenDeviceWithSourceLevelDebuggerActiveWhenDeviceIsDestructedThenSourceLevelDebuggerIsNotified) {
     ExecutionEnvironment *executionEnvironment = platform()->peekExecutionEnvironment();
-    auto gmock = new ::testing::NiceMock<GMockSourceLevelDebugger>(new MockOsLibrary);
+    auto mock = new MockSourceLevelDebugger(new MockOsLibrary);
 
-    executionEnvironment->rootDeviceEnvironments[0]->debugger.reset(gmock);
-    auto device = std::make_unique<MockClDevice>(MockDevice::create<MockDeviceWithDebuggerActive>(executionEnvironment, 0u));
-
-    EXPECT_CALL(*gmock, notifyDeviceDestruction()).Times(1);
+    executionEnvironment->rootDeviceEnvironments[0]->debugger.reset(mock);
+    {
+        auto device = std::make_unique<MockClDevice>(MockDevice::create<MockDeviceWithDebuggerActive>(executionEnvironment, 0u));
+        EXPECT_EQ(0u, mock->notifyDeviceDestructionCalled);
+    }
+    EXPECT_EQ(1u, mock->notifyDeviceDestructionCalled);
 }
 
 TEST(DeviceWithSourceLevelDebugger, givenDeviceWithSourceLevelDebuggerActiveWhenDeviceIsCreatedThenPreemptionIsDisabled) {

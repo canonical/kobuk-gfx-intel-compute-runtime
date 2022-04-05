@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,8 @@
 
 #pragma once
 #include "shared/source/command_stream/command_stream_receiver.h"
+#include "shared/source/command_stream/submission_status.h"
+#include "shared/source/command_stream/wait_status.h"
 #include "shared/source/direct_submission/direct_submission_hw.h"
 #include "shared/source/direct_submission/dispatchers/blitter_dispatcher.h"
 #include "shared/source/direct_submission/dispatchers/render_dispatcher.h"
@@ -38,7 +40,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
                             const DeviceBitfield deviceBitfield);
     ~CommandStreamReceiverHw() override;
 
-    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
+    SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
 
     CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
                               const IndirectHeap &dsh, const IndirectHeap &ioh, const IndirectHeap &ssh,
@@ -53,7 +55,6 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     static void addBatchBufferEnd(LinearStream &commandStream, void **patchLocation);
     void programEndingCmd(LinearStream &commandStream, Device &device, void **patchLocation, bool directSubmissionEnabled);
     void addBatchBufferStart(MI_BATCH_BUFFER_START *commandBufferMemory, uint64_t startAddress, bool secondary);
-    static void alignToCacheLine(LinearStream &commandStream);
 
     size_t getRequiredStateBaseAddressSize(const Device &device) const;
     size_t getRequiredCmdStreamSize(const DispatchFlags &dispatchFlags, Device &device);
@@ -64,18 +65,20 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     size_t getCmdSizeForEpilogueCommands(const DispatchFlags &dispatchFlags) const;
     size_t getCmdSizeForL3Config() const;
     size_t getCmdSizeForPipelineSelect() const;
-    size_t getCmdSizeForComputeMode();
     size_t getCmdSizeForMediaSampler(bool mediaSamplerRequired) const;
     size_t getCmdSizeForEngineMode(const DispatchFlags &dispatchFlags) const;
     size_t getCmdSizeForPerDssBackedBuffer(const HardwareInfo &hwInfo);
+    size_t getCmdSizeForActivePartitionConfig() const;
+    size_t getCmdSizeForStallingCommands(const DispatchFlags &dispatchFlags) const;
+    size_t getCmdSizeForStallingNoPostSyncCommands() const;
+    size_t getCmdSizeForStallingPostSyncCommands() const;
+    size_t getCmdSizeForComputeMode();
+    MOCKABLE_VIRTUAL bool hasSharedHandles();
 
-    bool isComputeModeNeeded() const;
-    bool isAdditionalPipeControlNeeded() const;
     bool isPipelineSelectAlreadyProgrammed() const;
     void programComputeMode(LinearStream &csr, DispatchFlags &dispatchFlags, const HardwareInfo &hwInfo);
 
-    void waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) override;
-    const HardwareInfo &peekHwInfo() const;
+    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) override;
 
     void collectStateBaseAddresPatchInfo(
         uint64_t commandBufferAddress,
@@ -85,13 +88,15 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
         const LinearStream &ssh,
         uint64_t generalStateBase);
 
+    void collectStateBaseAddresIohPatchInfo(uint64_t commandBufferAddress, uint64_t commandOffset, const LinearStream &ioh);
+
     void resetKmdNotifyHelper(KmdNotifyHelper *newHelper);
 
     CommandStreamReceiverType getType() override {
         return CommandStreamReceiverType::CSR_HW;
     }
 
-    uint32_t blitBuffer(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override;
+    uint32_t flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override;
 
     void flushTagUpdate() override;
     void flushNonKernelTask(GraphicsAllocation *eventAlloc, uint64_t immediateGpuAddress, uint64_t immediateData, PipeControlArgs &args, bool isWaitOnEvent, bool isStartOfDispatch, bool isEndOfDispatch) override;
@@ -104,7 +109,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
                         size_t commandStreamStartTask);
     void flushHandler(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency);
 
-    bool isUpdateTagFromWaitEnabled();
+    bool isUpdateTagFromWaitEnabled() override;
     void updateTagFromWait() override;
 
     bool isMultiOsContextCapable() const override;
@@ -119,6 +124,8 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
         return blitterDirectSubmission.get() != nullptr;
     }
 
+    void stopDirectSubmission() override;
+
     virtual bool isKmdWaitModeActive() { return true; }
 
     bool initDirectSubmission(Device &device, OsContext &osContext) override;
@@ -127,13 +134,20 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     TagAllocatorBase *getTimestampPacketAllocator() override;
 
     void postInitFlagsSetup() override;
+    void programActivePartitionConfig(LinearStream &csr);
+
+    void programComputeBarrierCommand(LinearStream &cmdStream) override {
+        programStallingNoPostSyncCommandsForBarrier(cmdStream);
+    }
+    size_t getCmdsSizeForComputeBarrierCommand() const override {
+        return getCmdSizeForStallingNoPostSyncCommands();
+    }
 
   protected:
     void programPreemption(LinearStream &csr, DispatchFlags &dispatchFlags);
-    void programL3(LinearStream &csr, DispatchFlags &dispatchFlags, uint32_t &newL3Config);
-    void programPreamble(LinearStream &csr, Device &device, DispatchFlags &dispatchFlags, uint32_t &newL3Config);
+    void programL3(LinearStream &csr, uint32_t &newL3Config);
+    void programPreamble(LinearStream &csr, Device &device, uint32_t &newL3Config);
     void programPipelineSelect(LinearStream &csr, PipelineSelectArgs &pipelineSelectArgs);
-    void programAdditionalPipelineSelect(LinearStream &csr, PipelineSelectArgs &pipelineSelectArgs, bool is3DPipeline);
     void programAdditionalStateBaseAddress(LinearStream &csr, typename GfxFamily::STATE_BASE_ADDRESS &cmd, Device &device);
     void programEpilogue(LinearStream &csr, Device &device, void **batchBufferEndLocation, DispatchFlags &dispatchFlags);
     void programEpliogueCommands(LinearStream &csr, const DispatchFlags &dispatchFlags);
@@ -141,27 +155,30 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     void programPerDssBackedBuffer(LinearStream &scr, Device &device, DispatchFlags &dispatchFlags);
     void programStateSip(LinearStream &cmdStream, Device &device);
     void programVFEState(LinearStream &csr, DispatchFlags &dispatchFlags, uint32_t maxFrontEndThreads);
-    void programStallingPipeControlForBarrier(LinearStream &cmdStream, DispatchFlags &dispatchFlags);
+    void programStallingCommandsForBarrier(LinearStream &cmdStream, DispatchFlags &dispatchFlags);
+    void programStallingNoPostSyncCommandsForBarrier(LinearStream &cmdStream);
+    void programStallingPostSyncCommandsForBarrier(LinearStream &cmdStream, TagNodeBase &tagNode);
     void programEngineModeCommands(LinearStream &csr, const DispatchFlags &dispatchFlags);
     void programEngineModeEpliogue(LinearStream &csr, const DispatchFlags &dispatchFlags);
+    void programActivePartitionConfigFlushTask(LinearStream &csr);
 
     void programEnginePrologue(LinearStream &csr);
     size_t getCmdSizeForPrologue() const;
 
     void addClearSLMWorkAround(typename GfxFamily::PIPE_CONTROL *pCmd);
-    void addPipeControlCmd(LinearStream &commandStream, PipeControlArgs &args);
     void addPipeControlBeforeStateBaseAddress(LinearStream &commandStream);
+    void addPipeControlBeforeStateSip(LinearStream &commandStream, Device &device);
+    void addPipeControlBefore3dState(LinearStream &commandStream, DispatchFlags &dispatchFlags);
     size_t getSshHeapSize();
     bool are4GbHeapsAvailable() const;
 
     uint64_t getScratchPatchAddress();
     void createScratchSpaceController();
 
-    static void emitNoop(LinearStream &commandStream, size_t bytesToUpdate);
-
     bool detectInitProgrammingFlagsRequired(const DispatchFlags &dispatchFlags) const;
     bool checkPlatformSupportsNewResourceImplicitFlush() const;
     bool checkPlatformSupportsGpuIdleImplicitFlush() const;
+    void configurePostSyncWriteOffset();
 
     HeapDirtyState dshState;
     HeapDirtyState iohState;

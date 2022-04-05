@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,7 +8,6 @@
 #pragma once
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/command_stream/scratch_space_controller.h"
-#include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/command_stream/submissions_aggregator.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
@@ -36,12 +35,14 @@ struct CommandQueueHw : public CommandQueueImp {
 
     void dispatchTaskCountWrite(NEO::LinearStream &commandStream, bool flushDataCache) override;
 
-    void programStateBaseAddress(uint64_t gsba, bool useLocalMemoryForIndirectHeap, NEO::LinearStream &commandStream);
+    void programStateBaseAddress(uint64_t gsba, bool useLocalMemoryForIndirectHeap, NEO::LinearStream &commandStream, bool cachedMOCSAllowed);
     size_t estimateStateBaseAddressCmdSize();
     MOCKABLE_VIRTUAL void programFrontEnd(uint64_t scratchAddress, uint32_t perThreadScratchSpaceSize, NEO::LinearStream &commandStream);
 
-    size_t estimateFrontEndCmdSizeForMultipleCommandLists(bool isFrontEndStateDirty, uint32_t numCommandLists,
-                                                          ze_command_list_handle_t *phCommandLists);
+    MOCKABLE_VIRTUAL size_t estimateFrontEndCmdSizeForMultipleCommandLists(bool isFrontEndStateDirty, uint32_t numCommandLists,
+                                                                           ze_command_list_handle_t *phCommandLists);
+    MOCKABLE_VIRTUAL size_t estimateStateComputeModeCmdSizeForMultipleCommandLists(uint32_t numCommandLists,
+                                                                                   ze_command_list_handle_t *phCommandLists);
     size_t estimateFrontEndCmdSize();
     size_t estimatePipelineSelect();
     void programPipelineSelect(NEO::LinearStream &commandStream);
@@ -49,12 +50,11 @@ struct CommandQueueHw : public CommandQueueImp {
     MOCKABLE_VIRTUAL void handleScratchSpace(NEO::HeapContainer &heapContainer,
                                              NEO::ScratchSpaceController *scratchController,
                                              bool &gsbaState, bool &frontEndState,
-                                             uint32_t perThreadScratchSpaceSize);
+                                             uint32_t perThreadScratchSpaceSize,
+                                             uint32_t perThreadPrivateScratchSize);
 
     bool getPreemptionCmdProgramming() override;
     void patchCommands(CommandList &commandList, uint64_t scratchAddress);
-
-    NEO::StreamProperties streamProperties{};
 };
 
 } // namespace L0

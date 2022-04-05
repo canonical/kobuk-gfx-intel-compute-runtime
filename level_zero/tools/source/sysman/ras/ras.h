@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -31,14 +31,14 @@ class Ras : _zes_ras_handle_t {
     }
     inline zes_ras_handle_t toHandle() { return this; }
     bool isRasErrorSupported = false;
-    zes_ras_error_type_t rasErrorType;
+    zes_ras_error_type_t rasErrorType{};
 };
 
 struct RasHandleContext {
     RasHandleContext(OsSysman *pOsSysman) : pOsSysman(pOsSysman){};
-    ~RasHandleContext();
+    MOCKABLE_VIRTUAL ~RasHandleContext();
 
-    void init(std::vector<ze_device_handle_t> &deviceHandles);
+    MOCKABLE_VIRTUAL void init(std::vector<ze_device_handle_t> &deviceHandles);
     void releaseRasHandles();
 
     ze_result_t rasGet(uint32_t *pCount, zes_ras_handle_t *phRas);

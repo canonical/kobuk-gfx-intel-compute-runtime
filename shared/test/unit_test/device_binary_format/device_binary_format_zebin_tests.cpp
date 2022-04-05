@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,9 +10,8 @@
 #include "shared/source/device_binary_format/elf/zebin_elf.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/program/program_info.h"
+#include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/device_binary_format/zebin_tests.h"
-
-#include "test.h"
 
 TEST(IsDeviceBinaryFormatZebin, GivenValidExecutableTypeBinaryThenReturnTrue) {
     NEO::Elf::ElfFileHeader<NEO::Elf::EI_CLASS_64> zebin;
@@ -333,7 +332,7 @@ TEST(UnpackSingleDeviceBinaryZebin, WhenMachineIsIntelGTAndIntelGTNoteSectionIsV
     notes[1].type = NEO::Elf::IntelGTSectionType::GfxCore;
     notes[1].desc = targetDevice.coreFamily;
 
-    NEO::Elf::ZebinTargetMetadata targetMetadata;
+    NEO::Elf::ZebinTargetFlags targetMetadata;
     targetMetadata.validateRevisionId = true;
     targetMetadata.minHwRevisionId = targetDevice.stepping - 1;
     targetMetadata.maxHwRevisionId = targetDevice.stepping + 1;

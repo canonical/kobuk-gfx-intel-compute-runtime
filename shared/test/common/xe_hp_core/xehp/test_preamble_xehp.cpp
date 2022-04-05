@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,12 +7,11 @@
 
 #include "shared/source/command_stream/preemption.h"
 #include "shared/source/command_stream/stream_properties.h"
+#include "shared/source/helpers/preamble.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
-
-#include "opencl/source/helpers/hardware_commands_helper.h"
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 
@@ -25,7 +24,7 @@ struct XeHPSlm : HardwareParse, ::testing::Test {
         HardwareParse::TearDown();
     }
 
-    uint32_t cmdBuffer[1024];
+    uint32_t cmdBuffer[1024]{};
     MockGraphicsAllocation gfxAllocation{cmdBuffer, sizeof(cmdBuffer)};
     LinearStream linearStream{&gfxAllocation};
 };
@@ -36,7 +35,6 @@ XEHPTEST_F(XeHPSlm, givenTglWhenPreambleIsBeingProgrammedThenThreadArbitrationPo
     uint32_t l3Config = PreambleHelper<XeHpFamily>::getL3Config(*defaultHwInfo, true);
     MockDevice mockDevice;
     PreambleHelper<XeHpFamily>::programPreamble(&linearStream, mockDevice, l3Config,
-                                                ThreadArbitrationPolicy::RoundRobin,
                                                 nullptr);
 
     parseCommands<XeHpFamily>(cs);
@@ -105,9 +103,7 @@ XEHPTEST_F(XeHPPreambleVfeState, WhenProgramVFEStateIsCalledThenCorrectCfeStateA
 
     auto pCfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&preambleStream, *defaultHwInfo, EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<FamilyType>::programVfeState(pCfeCmd, *defaultHwInfo, 1024u, addressToPatch,
-                                                10u, AdditionalKernelExecInfo::NotApplicable,
-                                                emptyProperties);
+    PreambleHelper<FamilyType>::programVfeState(pCfeCmd, *defaultHwInfo, 1024u, addressToPatch, 10u, emptyProperties);
     EXPECT_GE(reinterpret_cast<uintptr_t>(pCfeCmd), reinterpret_cast<uintptr_t>(preambleStream.getCpuBase()));
     EXPECT_LT(reinterpret_cast<uintptr_t>(pCfeCmd), reinterpret_cast<uintptr_t>(preambleStream.getCpuBase()) + preambleStream.getUsed());
 
@@ -115,4 +111,28 @@ XEHPTEST_F(XeHPPreambleVfeState, WhenProgramVFEStateIsCalledThenCorrectCfeStateA
     EXPECT_EQ(10u, cfeCmd.getMaximumNumberOfThreads());
     EXPECT_EQ(1u, cfeCmd.getNumberOfWalkers());
     EXPECT_EQ(expectedAddress, cfeCmd.getScratchSpaceBuffer());
+}
+
+using XeHPPipelineSelect = ::testing::Test;
+
+XEHPTEST_F(XeHPPipelineSelect, WhenAppendProgramPipelineSelectThenCorrectValuesSet) {
+    using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
+    PIPELINE_SELECT cmd = FamilyType::cmdInitPipelineSelect;
+    PreambleHelper<FamilyType>::appendProgramPipelineSelect(&cmd, true, *defaultHwInfo);
+    EXPECT_TRUE(cmd.getSystolicModeEnable());
+    PreambleHelper<FamilyType>::appendProgramPipelineSelect(&cmd, false, *defaultHwInfo);
+    EXPECT_FALSE(cmd.getSystolicModeEnable());
+    EXPECT_EQ(pipelineSelectSystolicModeEnableMaskBits, cmd.getMaskBits());
+}
+
+XEHPTEST_F(XeHPPipelineSelect, WhenProgramPipelineSelectThenProgramMediaSamplerDopClockGateEnable) {
+    using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
+    PIPELINE_SELECT cmd = FamilyType::cmdInitPipelineSelect;
+    LinearStream pipelineSelectStream(&cmd, sizeof(cmd));
+    PreambleHelper<FamilyType>::programPipelineSelect(&pipelineSelectStream, {}, *defaultHwInfo);
+
+    auto expectedSubMask = pipelineSelectMediaSamplerDopClockGateMaskBits;
+
+    EXPECT_TRUE(cmd.getMediaSamplerDopClockGateEnable());
+    EXPECT_EQ(expectedSubMask, (cmd.getMaskBits() & expectedSubMask));
 }

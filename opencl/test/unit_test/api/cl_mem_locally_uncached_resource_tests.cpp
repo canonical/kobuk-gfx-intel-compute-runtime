@@ -11,6 +11,7 @@
 #include "shared/source/helpers/state_base_address.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/extensions/public/cl_ext_private.h"
@@ -18,7 +19,6 @@
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/test/unit_test/fixtures/hello_world_fixture.h"
-#include "test.h"
 
 #include "hw_cmds.h"
 
@@ -51,12 +51,12 @@ uint32_t cmdQueueMocs(CommandQueue *pCmdQ) {
 }
 
 const size_t n = 512;
-const size_t globalWorkSize[3] = {n, 1, 1};
-const size_t localWorkSize[3] = {256, 1, 1};
+[[maybe_unused]] const size_t globalWorkSize[3] = {n, 1, 1};
+[[maybe_unused]] const size_t localWorkSize[3] = {256, 1, 1};
 
-const cl_mem_properties_intel *propertiesCacheable = nullptr;
-const cl_mem_properties_intel propertiesUncacheable[] = {CL_MEM_FLAGS_INTEL, CL_MEM_LOCALLY_UNCACHED_RESOURCE, 0};
-const cl_mem_properties_intel propertiesUncacheableInSurfaceState[] = {CL_MEM_FLAGS_INTEL, CL_MEM_LOCALLY_UNCACHED_SURFACE_STATE_RESOURCE, 0};
+[[maybe_unused]] const cl_mem_properties_intel *propertiesCacheable = nullptr;
+[[maybe_unused]] const cl_mem_properties_intel propertiesUncacheable[] = {CL_MEM_FLAGS_INTEL, CL_MEM_LOCALLY_UNCACHED_RESOURCE, 0};
+[[maybe_unused]] const cl_mem_properties_intel propertiesUncacheableInSurfaceState[] = {CL_MEM_FLAGS_INTEL, CL_MEM_LOCALLY_UNCACHED_SURFACE_STATE_RESOURCE, 0};
 
 using clMemLocallyUncachedResourceFixture = Test<HelloWorldFixture<HelloWorldFixtureFactory>>;
 

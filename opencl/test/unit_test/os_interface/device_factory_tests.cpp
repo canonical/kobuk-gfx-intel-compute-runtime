@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -15,12 +15,12 @@
 #include "shared/test/common/helpers/ult_hw_config.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/platform/platform.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
-#include "test.h"
 
 #include "hw_device_id.h"
 
@@ -68,6 +68,8 @@ TEST_F(DeviceFactoryTest, WhenOverridingUsingDebugManagerThenOverridesAreApplied
     auto refDelayQuickKmdSleepMicroseconds = hwInfo->capabilityTable.kmdNotifyProperties.delayQuickKmdSleepMicroseconds;
     auto refEnableQuickKmdSleepForSporadicWaits = hwInfo->capabilityTable.kmdNotifyProperties.enableQuickKmdSleepForSporadicWaits;
     auto refDelayQuickKmdSleepForSporadicWaitsMicroseconds = hwInfo->capabilityTable.kmdNotifyProperties.delayQuickKmdSleepForSporadicWaitsMicroseconds;
+    auto refEnableQuickKmdSleepForDirectSubmission = hwInfo->capabilityTable.kmdNotifyProperties.enableQuickKmdSleepForDirectSubmission;
+    auto refDelayQuickKmdSleepForDirectSubmissionMicroseconds = hwInfo->capabilityTable.kmdNotifyProperties.delayQuickKmdSleepForDirectSubmissionMicroseconds;
 
     DebugManager.flags.OverrideEnableKmdNotify.set(!refEnableKmdNotify);
     DebugManager.flags.OverrideKmdNotifyDelayMicroseconds.set(static_cast<int32_t>(refDelayKmdNotifyMicroseconds) + 10);
@@ -77,6 +79,9 @@ TEST_F(DeviceFactoryTest, WhenOverridingUsingDebugManagerThenOverridesAreApplied
 
     DebugManager.flags.OverrideEnableQuickKmdSleepForSporadicWaits.set(!refEnableQuickKmdSleepForSporadicWaits);
     DebugManager.flags.OverrideDelayQuickKmdSleepForSporadicWaitsMicroseconds.set(static_cast<int32_t>(refDelayQuickKmdSleepForSporadicWaitsMicroseconds) + 12);
+
+    DebugManager.flags.OverrideEnableQuickKmdSleepForDirectSubmission.set(!refEnableQuickKmdSleepForDirectSubmission);
+    DebugManager.flags.OverrideDelayQuickKmdSleepForDirectSubmissionMicroseconds.set(static_cast<int32_t>(refDelayQuickKmdSleepForDirectSubmissionMicroseconds) + 15);
 
     platformsImpl->clear();
     executionEnvironment = constructPlatform()->peekExecutionEnvironment();
@@ -94,6 +99,11 @@ TEST_F(DeviceFactoryTest, WhenOverridingUsingDebugManagerThenOverridesAreApplied
               hwInfo->capabilityTable.kmdNotifyProperties.enableQuickKmdSleepForSporadicWaits);
     EXPECT_EQ(refDelayQuickKmdSleepForSporadicWaitsMicroseconds + 12,
               hwInfo->capabilityTable.kmdNotifyProperties.delayQuickKmdSleepForSporadicWaitsMicroseconds);
+
+    EXPECT_EQ(!refEnableQuickKmdSleepForDirectSubmission,
+              hwInfo->capabilityTable.kmdNotifyProperties.enableQuickKmdSleepForDirectSubmission);
+    EXPECT_EQ(refDelayQuickKmdSleepForDirectSubmissionMicroseconds + 15,
+              hwInfo->capabilityTable.kmdNotifyProperties.delayQuickKmdSleepForDirectSubmissionMicroseconds);
 }
 
 TEST_F(DeviceFactoryTest, givenZeAffinityMaskSetWhenCreateDevicesThenProperNumberOfDevicesIsReturned) {
@@ -107,10 +117,10 @@ TEST_F(DeviceFactoryTest, givenZeAffinityMaskSetWhenCreateDevicesThenProperNumbe
     auto devices = DeviceFactory::createDevices(*executionEnvironment);
 
     EXPECT_EQ(devices.size(), 4u);
-    EXPECT_EQ(devices[0]->getNumAvailableDevices(), 4u);
-    EXPECT_EQ(devices[1]->getNumAvailableDevices(), 2u);
-    EXPECT_EQ(devices[2]->getNumAvailableDevices(), 3u);
-    EXPECT_EQ(devices[3]->getNumAvailableDevices(), 4u);
+    EXPECT_EQ(devices[0]->getNumSubDevices(), 4u);
+    EXPECT_EQ(devices[1]->getNumSubDevices(), 2u);
+    EXPECT_EQ(devices[2]->getNumSubDevices(), 3u);
+    EXPECT_EQ(devices[3]->getNumSubDevices(), 4u);
 }
 
 TEST_F(DeviceFactoryTest, givenZeAffinityMaskSetToGreaterRootDeviceThanAvailableWhenCreateDevicesThenProperNumberOfDevicesIsReturned) {
@@ -124,8 +134,9 @@ TEST_F(DeviceFactoryTest, givenZeAffinityMaskSetToGreaterRootDeviceThanAvailable
     auto devices = DeviceFactory::createDevices(*executionEnvironment);
 
     EXPECT_EQ(devices.size(), 2u);
-    EXPECT_EQ(devices[0]->getNumAvailableDevices(), 4u);
-    EXPECT_EQ(devices[1]->getNumAvailableDevices(), 1u);
+    EXPECT_EQ(devices[0]->getNumSubDevices(), 4u);
+    EXPECT_EQ(devices[0]->getNumGenericSubDevices(), 4u);
+    EXPECT_EQ(devices[1]->getNumGenericSubDevices(), 0u);
 }
 
 TEST_F(DeviceFactoryTest, givenZeAffinityMaskSetToGreaterSubDeviceThanAvailableWhenCreateDevicesThenProperNumberOfDevicesIsReturned) {
@@ -139,7 +150,7 @@ TEST_F(DeviceFactoryTest, givenZeAffinityMaskSetToGreaterSubDeviceThanAvailableW
     auto devices = DeviceFactory::createDevices(*executionEnvironment);
 
     EXPECT_EQ(devices.size(), 1u);
-    EXPECT_EQ(devices[0]->getNumAvailableDevices(), 4u);
+    EXPECT_EQ(devices[0]->getNumSubDevices(), 4u);
 }
 
 TEST_F(DeviceFactoryTest, givenZeAffinityMaskSetToRootDevicesOnlyWhenCreateDevicesThenProperNumberOfDevicesIsReturned) {
@@ -153,8 +164,8 @@ TEST_F(DeviceFactoryTest, givenZeAffinityMaskSetToRootDevicesOnlyWhenCreateDevic
     auto devices = DeviceFactory::createDevices(*executionEnvironment);
 
     EXPECT_EQ(devices.size(), 2u);
-    EXPECT_EQ(devices[0]->getNumAvailableDevices(), 4u);
-    EXPECT_EQ(devices[1]->getNumAvailableDevices(), 4u);
+    EXPECT_EQ(devices[0]->getNumSubDevices(), 4u);
+    EXPECT_EQ(devices[1]->getNumSubDevices(), 4u);
 }
 
 TEST_F(DeviceFactoryTest, WhenOverridingEngineTypeThenDebugEngineIsReported) {
@@ -175,7 +186,11 @@ TEST_F(DeviceFactoryTest, givenPointerToHwInfoWhenGetDevicedCalledThenRequiedSur
     ASSERT_TRUE(success);
     auto hwInfo = executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo();
 
-    EXPECT_EQ(hwInfo->gtSystemInfo.CsrSizeInMb * MemoryConstants::megaByte, hwInfo->capabilityTable.requiredPreemptionSurfaceSize);
+    const auto &hwHelper = HwHelper::get(hwInfo->platform.eRenderCoreFamily);
+    auto expextedSize = static_cast<size_t>(hwInfo->gtSystemInfo.CsrSizeInMb * MemoryConstants::megaByte);
+    hwHelper.adjustPreemptionSurfaceSize(expextedSize);
+
+    EXPECT_EQ(expextedSize, hwInfo->capabilityTable.requiredPreemptionSurfaceSize);
 }
 
 TEST_F(DeviceFactoryTest, givenCreateMultipleRootDevicesDebugFlagWhenPrepareDeviceEnvironmentsIsCalledThenNumberOfReturnedDevicesIsEqualToDebugVariable) {
@@ -356,6 +371,25 @@ TEST(DiscoverDevices, whenDiscoverDevicesAndForceDeviceIdIsDifferentFromTheExist
 TEST(DiscoverDevices, whenDiscoverDevicesAndForceDeviceIdIsDifferentFromTheExistingDeviceThenPrepareDeviceEnvironmentsReturnsFalse) {
     DebugManagerStateRestore stateRestore;
     DebugManager.flags.ForceDeviceId.set("invalid");
+    ExecutionEnvironment executionEnviornment;
+
+    auto result = DeviceFactory::prepareDeviceEnvironments(executionEnviornment);
+    EXPECT_FALSE(result);
+}
+
+TEST(DiscoverDevices, whenDiscoverDevicesAndFilterDifferentFromTheExistingDeviceThenReturnNullptr) {
+    DebugManagerStateRestore stateRestore;
+    DebugManager.flags.FilterDeviceId.set("invalid");
+    DebugManager.flags.FilterBdfPath.set("invalid");
+    ExecutionEnvironment executionEnviornment;
+    auto hwDeviceIds = OSInterface::discoverDevices(executionEnviornment);
+    EXPECT_TRUE(hwDeviceIds.empty());
+}
+
+TEST(DiscoverDevices, whenDiscoverDevicesAndFilterDifferentFromTheExistingDeviceThenPrepareDeviceEnvironmentsReturnsFalse) {
+    DebugManagerStateRestore stateRestore;
+    DebugManager.flags.FilterDeviceId.set("invalid");
+    DebugManager.flags.FilterBdfPath.set("invalid");
     ExecutionEnvironment executionEnviornment;
 
     auto result = DeviceFactory::prepareDeviceEnvironments(executionEnviornment);

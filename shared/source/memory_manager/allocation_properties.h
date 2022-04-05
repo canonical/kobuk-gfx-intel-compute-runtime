@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -28,7 +28,8 @@ struct AllocationProperties {
             uint32_t use32BitFrontWindow : 1;
             uint32_t crossRootDeviceAccess : 1;
             uint32_t forceSystemMemory : 1;
-            uint32_t reserved : 18;
+            uint32_t preferCompressed : 1;
+            uint32_t reserved : 17;
         } flags;
         uint32_t allFlags = 0;
     };
@@ -36,9 +37,12 @@ struct AllocationProperties {
     uint32_t rootDeviceIndex = std::numeric_limits<uint32_t>::max();
     size_t size = 0;
     size_t alignment = 0;
-    GraphicsAllocation::AllocationType allocationType = GraphicsAllocation::AllocationType::UNKNOWN;
+    AllocationType allocationType = AllocationType::UNKNOWN;
+    GraphicsAllocation::UsmInitialPlacement usmInitialPlacement = GraphicsAllocation::UsmInitialPlacement::DEFAULT;
     ImageInfo *imgInfo = nullptr;
     bool multiStorageResource = false;
+    ColouringPolicy colouringPolicy = ColouringPolicy::DeviceCountBased;
+    size_t colouringGranularity = MemoryConstants::pageSize64k;
     DeviceBitfield subDevicesBitfield{};
     uint64_t gpuAddress = 0;
     OsContext *osContext = nullptr;
@@ -46,12 +50,12 @@ struct AllocationProperties {
     uint32_t cacheRegion = 0;
 
     AllocationProperties(uint32_t rootDeviceIndex, size_t size,
-                         GraphicsAllocation::AllocationType allocationType, DeviceBitfield subDevicesBitfieldParam)
+                         AllocationType allocationType, DeviceBitfield subDevicesBitfieldParam)
         : AllocationProperties(rootDeviceIndex, true, size, allocationType, false, subDevicesBitfieldParam) {}
 
     AllocationProperties(uint32_t rootDeviceIndex, bool allocateMemory,
                          ImageInfo &imgInfo,
-                         GraphicsAllocation::AllocationType allocationType,
+                         AllocationType allocationType,
                          DeviceBitfield subDevicesBitfieldParam)
         : AllocationProperties(rootDeviceIndex, allocateMemory, 0u, allocationType, false, subDevicesBitfieldParam) {
         this->imgInfo = &imgInfo;
@@ -60,7 +64,7 @@ struct AllocationProperties {
     AllocationProperties(uint32_t rootDeviceIndex,
                          bool allocateMemory,
                          size_t size,
-                         GraphicsAllocation::AllocationType allocationType,
+                         AllocationType allocationType,
                          bool isMultiStorageAllocation,
                          DeviceBitfield subDevicesBitfieldParam)
         : AllocationProperties(rootDeviceIndex, allocateMemory, size, allocationType, false, isMultiStorageAllocation, subDevicesBitfieldParam) {}
@@ -68,7 +72,7 @@ struct AllocationProperties {
     AllocationProperties(uint32_t rootDeviceIndexParam,
                          bool allocateMemoryParam,
                          size_t sizeParam,
-                         GraphicsAllocation::AllocationType allocationTypeParam,
+                         AllocationType allocationTypeParam,
                          bool multiOsContextCapable,
                          bool isMultiStorageAllocationParam,
                          DeviceBitfield subDevicesBitfieldParam)
@@ -95,7 +99,7 @@ struct AllocationData {
             uint32_t forcePin : 1;
             uint32_t uncacheable : 1;
             uint32_t flushL3 : 1;
-            uint32_t preferRenderCompressed : 1;
+            uint32_t preferCompressed : 1;
             uint32_t multiOsContextCapable : 1;
             uint32_t requiresCpuAccess : 1;
             uint32_t shareable : 1;
@@ -103,12 +107,15 @@ struct AllocationData {
             uint32_t isUSMHostAllocation : 1;
             uint32_t use32BitFrontWindow : 1;
             uint32_t crossRootDeviceAccess : 1;
-            uint32_t reserved : 17;
+            uint32_t isUSMDeviceMemory : 1;
+            uint32_t zeroMemory : 1;
+            uint32_t reserved : 15;
         } flags;
         uint32_t allFlags = 0;
     };
     static_assert(sizeof(AllocationData::flags) == sizeof(AllocationData::allFlags), "");
-    GraphicsAllocation::AllocationType type = GraphicsAllocation::AllocationType::UNKNOWN;
+    AllocationType type = AllocationType::UNKNOWN;
+    GraphicsAllocation::UsmInitialPlacement usmInitialPlacement = GraphicsAllocation::UsmInitialPlacement::DEFAULT;
     const void *hostPtr = nullptr;
     uint64_t gpuAddress = 0;
     size_t size = 0;

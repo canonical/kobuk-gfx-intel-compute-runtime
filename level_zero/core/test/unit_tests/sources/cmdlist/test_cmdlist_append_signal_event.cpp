@@ -7,8 +7,8 @@
 
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
-
-#include "test.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
 #include "level_zero/core/test/unit_tests/fixtures/cmdlist_fixture.h"
@@ -68,11 +68,13 @@ HWTEST_F(CommandListAppendSignalEvent, givenEventWithScopeFlagDeviceWhenAppendin
     eventDesc.index = 0;
     eventDesc.signal = ZE_EVENT_SCOPE_FLAG_DEVICE;
 
-    auto eventPoolHostVisible = std::unique_ptr<EventPool>(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc));
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    auto eventPoolHostVisible = std::unique_ptr<EventPool>(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     auto eventHostVisible = std::unique_ptr<Event>(Event::create<uint32_t>(eventPoolHostVisible.get(), &eventDesc, device));
 
     auto usedSpaceBefore = commandList->commandContainer.getCommandStream()->getUsed();
-    auto result = commandList->appendSignalEvent(eventHostVisible->toHandle());
+    result = commandList->appendSignalEvent(eventHostVisible->toHandle());
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
     auto usedSpaceAfter = commandList->commandContainer.getCommandStream()->getUsed();
@@ -91,22 +93,19 @@ HWTEST_F(CommandListAppendSignalEvent, givenEventWithScopeFlagDeviceWhenAppendin
         if (cmd->getPostSyncOperation() == POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA) {
             EXPECT_EQ(cmd->getImmediateData(), Event::STATE_SIGNALED);
             EXPECT_TRUE(cmd->getCommandStreamerStallEnable());
-            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), cmd->getDcFlushEnable());
+            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), cmd->getDcFlushEnable());
             postSyncFound = true;
         }
     }
     ASSERT_TRUE(postSyncFound);
 }
 
-using Platforms = IsAtLeastProduct<IGFX_SKYLAKE>;
-HWTEST2_F(CommandListAppendSignalEvent, givenCommandListWhenAppendWriteGlobalTimestampCalledWithSignalEventThenPipeControlForTimestampAndSignalEncoded, Platforms) {
+HWTEST2_F(CommandListAppendSignalEvent, givenCommandListWhenAppendWriteGlobalTimestampCalledWithSignalEventThenPipeControlForTimestampAndSignalEncoded, IsAtLeastSkl) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
     using POST_SYNC_OPERATION = typename PIPE_CONTROL::POST_SYNC_OPERATION;
     auto &commandContainer = commandList->commandContainer;
 
     uint64_t timestampAddress = 0x12345678555500;
-    uint32_t timestampAddressLow = (uint32_t)(timestampAddress & 0xFFFFFFFF);
-    uint32_t timestampAddressHigh = (uint32_t)(timestampAddress >> 32);
     uint64_t *dstptr = reinterpret_cast<uint64_t *>(timestampAddress);
 
     commandList->appendWriteGlobalTimestamp(dstptr, event->toHandle(), 0, nullptr);
@@ -126,8 +125,7 @@ HWTEST2_F(CommandListAppendSignalEvent, givenCommandListWhenAppendWriteGlobalTim
     }
     EXPECT_TRUE(cmd->getCommandStreamerStallEnable());
     EXPECT_FALSE(cmd->getDcFlushEnable());
-    EXPECT_EQ(cmd->getAddressHigh(), timestampAddressHigh);
-    EXPECT_EQ(cmd->getAddress(), timestampAddressLow);
+    EXPECT_EQ(timestampAddress, NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*cmd));
 
     itorPC++;
     itorPC = find<PIPE_CONTROL *>(itorPC, cmdList.end());
@@ -144,7 +142,7 @@ HWTEST2_F(CommandListAppendSignalEvent, givenCommandListWhenAppendWriteGlobalTim
     EXPECT_FALSE(cmd->getDcFlushEnable());
 }
 
-HWTEST2_F(CommandListAppendSignalEvent, givenTimestampEventUsedInSignalThenPipeControlAppendedCorrectly, Platforms) {
+HWTEST2_F(CommandListAppendSignalEvent, givenTimestampEventUsedInSignalThenPipeControlAppendedCorrectly, IsAtLeastSkl) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
     using POST_SYNC_OPERATION = typename PIPE_CONTROL::POST_SYNC_OPERATION;
@@ -156,7 +154,9 @@ HWTEST2_F(CommandListAppendSignalEvent, givenTimestampEventUsedInSignalThenPipeC
 
     ze_event_desc_t eventDesc = {};
     eventDesc.index = 0;
-    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc));
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
 
     commandList->appendSignalEvent(event->toHandle());
@@ -176,13 +176,175 @@ HWTEST2_F(CommandListAppendSignalEvent, givenTimestampEventUsedInSignalThenPipeC
         if (cmd->getPostSyncOperation() == POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA) {
             EXPECT_EQ(cmd->getImmediateData(), Event::STATE_SIGNALED);
             EXPECT_TRUE(cmd->getCommandStreamerStallEnable());
-            EXPECT_EQ(cmd->getAddressHigh(), gpuAddress >> 32u);
-            EXPECT_EQ(cmd->getAddress(), uint32_t(gpuAddress));
+            EXPECT_EQ(gpuAddress, NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*cmd));
             EXPECT_FALSE(cmd->getDcFlushEnable());
             postSyncFound = true;
         }
     }
     ASSERT_TRUE(postSyncFound);
+}
+
+HWTEST2_F(CommandListAppendSignalEvent,
+          givenMultiTileCommandListWhenAppendingScopeEventSignalThenExpectPartitionedPipeControl, IsAtLeastXeHpCore) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+    using POST_SYNC_OPERATION = typename PIPE_CONTROL::POST_SYNC_OPERATION;
+    using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
+
+    auto cmdStream = commandList->commandContainer.getCommandStream();
+
+    size_t useSize = cmdStream->getAvailableSpace();
+    useSize -= sizeof(MI_BATCH_BUFFER_END);
+    cmdStream->getSpace(useSize);
+
+    constexpr uint32_t packets = 2u;
+
+    event->setEventTimestampFlag(false);
+    event->signalScope = ZE_EVENT_SCOPE_FLAG_HOST;
+
+    commandList->partitionCount = packets;
+    ze_result_t returnValue = commandList->appendSignalEvent(event->toHandle());
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+    EXPECT_EQ(packets, event->getPacketsInUse());
+
+    auto gpuAddress = event->getGpuAddress(device);
+    auto &hwInfo = device->getNEODevice()->getHardwareInfo();
+
+    size_t expectedSize = NEO::MemorySynchronizationCommands<GfxFamily>::getSizeForPipeControlWithPostSyncOperation(hwInfo);
+    size_t usedSize = cmdStream->getUsed();
+    EXPECT_EQ(expectedSize, usedSize);
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
+        cmdList,
+        cmdStream->getCpuBase(),
+        usedSize));
+
+    auto pipeControlList = findAll<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+    ASSERT_NE(0u, pipeControlList.size());
+    uint32_t postSyncFound = 0;
+    for (auto &it : pipeControlList) {
+        auto cmd = genCmdCast<PIPE_CONTROL *>(*it);
+        if (cmd->getPostSyncOperation() == POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA) {
+            EXPECT_EQ(Event::STATE_SIGNALED, cmd->getImmediateData());
+            EXPECT_TRUE(cmd->getCommandStreamerStallEnable());
+            EXPECT_EQ(gpuAddress, NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*cmd));
+            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), cmd->getDcFlushEnable());
+            EXPECT_TRUE(cmd->getWorkloadPartitionIdOffsetEnable());
+            postSyncFound++;
+            gpuAddress += event->getSinglePacketSize();
+        }
+    }
+    EXPECT_EQ(1u, postSyncFound);
+}
+
+HWTEST2_F(CommandListAppendSignalEvent,
+          givenMultiTileCommandListWhenAppendingNonScopeEventSignalThenExpectPartitionedStoreDataImm, IsAtLeastXeHpCore) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+    using MI_STORE_DATA_IMM = typename FamilyType::MI_STORE_DATA_IMM;
+    using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
+
+    auto cmdStream = commandList->commandContainer.getCommandStream();
+
+    size_t useSize = cmdStream->getAvailableSpace();
+    useSize -= sizeof(MI_BATCH_BUFFER_END);
+    cmdStream->getSpace(useSize);
+
+    constexpr uint32_t packets = 2u;
+
+    event->setEventTimestampFlag(false);
+    event->signalScope = 0;
+
+    commandList->partitionCount = packets;
+    ze_result_t returnValue = commandList->appendSignalEvent(event->toHandle());
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+    EXPECT_EQ(packets, event->getPacketsInUse());
+
+    auto gpuAddress = event->getGpuAddress(device);
+
+    size_t expectedSize = NEO::EncodeStoreMemory<GfxFamily>::getStoreDataImmSize();
+    size_t usedSize = cmdStream->getUsed();
+    EXPECT_EQ(expectedSize, usedSize);
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
+        cmdList,
+        cmdStream->getCpuBase(),
+        usedSize));
+
+    auto storeDataImmList = findAll<MI_STORE_DATA_IMM *>(cmdList.begin(), cmdList.end());
+    ASSERT_NE(0u, storeDataImmList.size());
+    uint32_t postSyncFound = 0;
+    for (auto &it : storeDataImmList) {
+        auto cmd = genCmdCast<MI_STORE_DATA_IMM *>(*it);
+        EXPECT_EQ(gpuAddress, cmd->getAddress());
+        EXPECT_FALSE(cmd->getStoreQword());
+        EXPECT_EQ(Event::STATE_SIGNALED, cmd->getDataDword0());
+        EXPECT_EQ(0u, cmd->getDataDword1());
+        EXPECT_EQ(MI_STORE_DATA_IMM::DWORD_LENGTH::DWORD_LENGTH_STORE_DWORD, cmd->getDwordLength());
+        EXPECT_TRUE(cmd->getWorkloadPartitionIdOffsetEnable());
+        postSyncFound++;
+        gpuAddress += event->getSinglePacketSize();
+    }
+    EXPECT_EQ(1u, postSyncFound);
+}
+
+HWTEST2_F(CommandListAppendSignalEvent,
+          givenMultiTileCommandListWhenAppendingScopeEventSignalAfterWalkerThenExpectPartitionedPipeControl, IsAtLeastXeHpCore) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+    using POST_SYNC_OPERATION = typename PIPE_CONTROL::POST_SYNC_OPERATION;
+    using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
+
+    auto commandList = std::make_unique<::L0::ult::CommandListCoreFamily<gfxCoreFamily>>();
+    ASSERT_NE(nullptr, commandList);
+    ze_result_t returnValue = commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+
+    auto cmdStream = commandList->commandContainer.getCommandStream();
+
+    size_t useSize = cmdStream->getAvailableSpace();
+    useSize -= sizeof(MI_BATCH_BUFFER_END);
+    cmdStream->getSpace(useSize);
+
+    constexpr uint32_t packets = 2u;
+
+    event->setEventTimestampFlag(false);
+    event->signalScope = ZE_EVENT_SCOPE_FLAG_HOST;
+
+    commandList->partitionCount = packets;
+    commandList->appendSignalEventPostWalker(event->toHandle());
+    EXPECT_EQ(packets, event->getPacketsInUse());
+
+    auto gpuAddress = event->getGpuAddress(device);
+    auto &hwInfo = device->getNEODevice()->getHardwareInfo();
+
+    size_t expectedSize = NEO::MemorySynchronizationCommands<GfxFamily>::getSizeForPipeControlWithPostSyncOperation(hwInfo);
+    size_t usedSize = cmdStream->getUsed();
+    EXPECT_EQ(expectedSize, usedSize);
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
+        cmdList,
+        cmdStream->getCpuBase(),
+        usedSize));
+
+    auto pipeControlList = findAll<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+    ASSERT_NE(0u, pipeControlList.size());
+    uint32_t postSyncFound = 0;
+    for (auto &it : pipeControlList) {
+        auto cmd = genCmdCast<PIPE_CONTROL *>(*it);
+        if (cmd->getPostSyncOperation() == POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA) {
+            EXPECT_EQ(Event::STATE_SIGNALED, cmd->getImmediateData());
+            EXPECT_TRUE(cmd->getCommandStreamerStallEnable());
+            EXPECT_EQ(gpuAddress, NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*cmd));
+            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), cmd->getDcFlushEnable());
+            EXPECT_TRUE(cmd->getWorkloadPartitionIdOffsetEnable());
+            postSyncFound++;
+            gpuAddress += event->getSinglePacketSize();
+        }
+    }
+    EXPECT_EQ(1u, postSyncFound);
 }
 
 } // namespace ult

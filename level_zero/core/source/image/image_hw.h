@@ -15,6 +15,8 @@
 #include "level_zero/core/source/image/image_imp.h"
 
 namespace L0 {
+struct StructuresLookupTable;
+
 template <GFXCORE_FAMILY gfxCoreFamily>
 struct ImageCoreFamily : public ImageImp {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
@@ -27,7 +29,9 @@ struct ImageCoreFamily : public ImageImp {
         if (layout == ze_image_format_layout_t::ZE_IMAGE_FORMAT_LAYOUT_NV12 ||
             layout == ze_image_format_layout_t::ZE_IMAGE_FORMAT_LAYOUT_P010 ||
             layout == ze_image_format_layout_t::ZE_IMAGE_FORMAT_LAYOUT_P012 ||
-            layout == ze_image_format_layout_t::ZE_IMAGE_FORMAT_LAYOUT_P016) {
+            layout == ze_image_format_layout_t::ZE_IMAGE_FORMAT_LAYOUT_P016 ||
+            layout == ze_image_format_layout_t::ZE_IMAGE_FORMAT_LAYOUT_RGBP ||
+            layout == ze_image_format_layout_t::ZE_IMAGE_FORMAT_LAYOUT_BRGP) {
             return true;
         }
         return false;
@@ -45,6 +49,8 @@ struct ImageCoreFamily : public ImageImp {
         RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_ZERO};
 
   protected:
+    bool isSuitableForCompression(const StructuresLookupTable &structuresLookupTable, const NEO::ImageInfo &imgInfo);
+
     RENDER_SURFACE_STATE surfaceState;
     RENDER_SURFACE_STATE redescribedSurfaceState;
 };

@@ -24,8 +24,11 @@ class OsInterfaceWithDebugAttach : public NEO::OSInterface {
 };
 
 struct DebugSessionMock : public L0::DebugSession {
+    using L0::DebugSession::allThreads;
     using L0::DebugSession::debugArea;
-    using L0::DebugSession::getSingleThreads;
+    using L0::DebugSession::fillDevicesFromThread;
+    using L0::DebugSession::getPerThreadScratchOffset;
+    using L0::DebugSession::getSingleThreadsForDevice;
     using L0::DebugSession::isBindlessSystemRoutine;
 
     DebugSessionMock(const zet_debug_config_t &config, L0::Device *device) : DebugSession(config, device), config(config){};
@@ -58,6 +61,9 @@ struct DebugSessionMock : public L0::DebugSession {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
     ze_result_t writeRegisters(ze_device_thread_t thread, uint32_t type, uint32_t start, uint32_t count, void *pRegisterValues) override {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    }
+    ze_result_t readSbaBuffer(EuThread::ThreadId threadId, SbaTrackedAddresses &sbaBuffer) override {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
     void startAsyncThread() override {

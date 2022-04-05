@@ -1,17 +1,17 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include "shared/source/command_stream/command_stream_receiver_simulated_hw.h"
 #include "shared/source/command_stream/tbx_command_stream_receiver.h"
+#include "shared/source/command_stream/wait_status.h"
 #include "shared/source/memory_manager/address_mapper.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
 #include "shared/source/memory_manager/page_table.h"
-
-#include "opencl/source/command_stream/definitions/command_stream_receiver_simulated_hw.h"
 
 #include "aub_mapper.h"
 
@@ -32,8 +32,7 @@ class TbxCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
 
     uint32_t getMaskAndValueForPollForCompletion() const;
     bool getpollNotEqualValueForPollForCompletion() const;
-    void flushSubmissionsAndDownloadAllocations();
-    MOCKABLE_VIRTUAL void downloadAllocation(GraphicsAllocation &gfxAllocation);
+    void flushSubmissionsAndDownloadAllocations(uint32_t taskCount);
 
   public:
     using CommandStreamReceiverSimulatedCommonHw<GfxFamily>::initAdditionalMMIO;
@@ -42,11 +41,12 @@ class TbxCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     using CommandStreamReceiverSimulatedCommonHw<GfxFamily>::engineInfo;
     using CommandStreamReceiverSimulatedCommonHw<GfxFamily>::stream;
 
-    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
+    SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
 
-    void waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) override;
-    bool waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) override;
+    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) override;
+    WaitStatus waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) override;
     void downloadAllocations() override;
+    void downloadAllocation(GraphicsAllocation &gfxAllocation) override;
 
     void processEviction() override;
     void processResidency(const ResidencyContainer &allocationsForResidency, uint32_t handleId) override;
@@ -55,10 +55,10 @@ class TbxCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     void writeMMIO(uint32_t offset, uint32_t value) override;
     bool expectMemory(const void *gfxAddress, const void *srcAddress, size_t length, uint32_t compareOperation) override;
 
-    AubSubCaptureStatus checkAndActivateAubSubCapture(const MultiDispatchInfo &dispatchInfo) override;
+    AubSubCaptureStatus checkAndActivateAubSubCapture(const std::string &kernelName) override;
 
     // Family specific version
-    MOCKABLE_VIRTUAL void submitBatchBuffer(uint64_t batchBufferGpuAddress, const void *batchBuffer, size_t batchBufferSize, uint32_t memoryBank, uint64_t entryBits, bool overrideRingHead);
+    MOCKABLE_VIRTUAL void submitBatchBufferTbx(uint64_t batchBufferGpuAddress, const void *batchBuffer, size_t batchBufferSize, uint32_t memoryBank, uint64_t entryBits, bool overrideRingHead);
     void pollForCompletion() override;
 
     void dumpAllocation(GraphicsAllocation &gfxAllocation) override;
@@ -74,7 +74,7 @@ class TbxCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
                                const DeviceBitfield deviceBitfield);
     ~TbxCommandStreamReceiverHw() override;
 
-    void initializeEngine();
+    void initializeEngine() override;
 
     MemoryManager *getMemoryManager() {
         return CommandStreamReceiver::getMemoryManager();
@@ -98,5 +98,6 @@ class TbxCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
     }
 
     bool dumpTbxNonWritable = false;
+    bool isEngineInitialized = false;
 };
 } // namespace NEO

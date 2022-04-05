@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -99,6 +99,7 @@ using cl_unified_shared_memory_capabilities_intel = cl_bitfield;
 
 /* cl_mem_properties_intel */
 #define CL_MEM_ALLOC_FLAGS_INTEL 0x4195
+#define CL_MEM_ALLOC_USE_HOST_PTR_INTEL 0x1000F
 
 /* cl_mem_alloc_flags_intel - bitfield */
 #define CL_MEM_ALLOC_DEFAULT_INTEL 0
@@ -142,6 +143,7 @@ using cl_unified_shared_memory_capabilities_intel = cl_bitfield;
 #define CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_ROUND_ROBIN_INTEL 0x10023
 #define CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_AFTER_DEPENDENCY_ROUND_ROBIN_INTEL 0x10024
 #define CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_INTEL 0x10025
+#define CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_STALL_BASED_ROUND_ROBIN_INTEL 0x10026
 
 /******************************
 *    SLICE COUNT SELECTING    *
@@ -246,3 +248,21 @@ typedef struct _cl_device_pci_bus_info_khr {
     cl_uint pci_device;
     cl_uint pci_function;
 } cl_device_pci_bus_info_khr;
+
+/************************************************
+*   cl_intel_mem_compression_hints extension    *
+*************************************************/
+#define CL_MEM_COMPRESSED_HINT_INTEL (1u << 21)
+#define CL_MEM_UNCOMPRESSED_HINT_INTEL (1u << 22)
+
+// New query for clGetDeviceInfo:
+#define CL_MEM_COMPRESSED_INTEL 0x417D
+
+/* cl_queue_properties */
+#define CL_QUEUE_MDAPI_PROPERTIES_INTEL 0x425E
+#define CL_QUEUE_MDAPI_CONFIGURATION_INTEL 0x425F
+
+typedef cl_bitfield cl_command_queue_mdapi_properties_intel;
+
+/* cl_command_queue_mdapi_properties_intel - bitfield */
+#define CL_QUEUE_MDAPI_ENABLE_INTEL (1 << 0)

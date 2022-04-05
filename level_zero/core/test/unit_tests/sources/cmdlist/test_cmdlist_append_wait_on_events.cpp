@@ -7,8 +7,8 @@
 
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
-
-#include "test.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
 #include "level_zero/core/test/unit_tests/fixtures/cmdlist_fixture.h"
@@ -132,7 +132,7 @@ HWTEST_F(CommandListAppendWaitOnEvent, givenEventWithWaitScopeFlagDeviceWhenAppe
         ASSERT_NE(cmd, nullptr);
 
         EXPECT_TRUE(cmd->getCommandStreamerStallEnable());
-        EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), cmd->getDcFlushEnable());
+        EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), cmd->getDcFlushEnable());
     }
 }
 
@@ -146,12 +146,14 @@ HWTEST_F(CommandListAppendWaitOnEvent, WhenAppendingWaitOnTimestampEventWithThre
 
     ze_event_desc_t eventDesc = {};
     eventDesc.index = 0;
-    std::unique_ptr<L0::EventPool> eventPool(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc));
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    std::unique_ptr<L0::EventPool> eventPool(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
 
     event->setPacketsInUse(3u);
     ze_event_handle_t hEventHandle = event->toHandle();
-    auto result = commandList->appendWaitOnEvents(1, &hEventHandle);
+    result = commandList->appendWaitOnEvents(1, &hEventHandle);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     auto usedSpaceAfter = commandList->commandContainer.getCommandStream()->getUsed();
     ASSERT_GT(usedSpaceAfter, usedSpaceBefore);
@@ -193,7 +195,9 @@ HWTEST_F(CommandListAppendWaitOnEvent, WhenAppendingWaitOnTimestampEventWithThre
 
     ze_event_desc_t eventDesc = {};
     eventDesc.index = 0;
-    std::unique_ptr<L0::EventPool> eventPool(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc));
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    std::unique_ptr<L0::EventPool> eventPool(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
 
     event->setPacketsInUse(3u);
@@ -204,7 +208,7 @@ HWTEST_F(CommandListAppendWaitOnEvent, WhenAppendingWaitOnTimestampEventWithThre
     ASSERT_EQ(9u, event->getPacketsInUse());
 
     ze_event_handle_t hEventHandle = event->toHandle();
-    auto result = commandList->appendWaitOnEvents(1, &hEventHandle);
+    result = commandList->appendWaitOnEvents(1, &hEventHandle);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     auto usedSpaceAfter = commandList->commandContainer.getCommandStream()->getUsed();
     ASSERT_GT(usedSpaceAfter, usedSpaceBefore);
@@ -236,15 +240,12 @@ HWTEST_F(CommandListAppendWaitOnEvent, WhenAppendingWaitOnTimestampEventWithThre
     ASSERT_EQ(9u, semaphoreWaitsFound);
 }
 
-using Platforms = IsAtLeastProduct<IGFX_SKYLAKE>;
-HWTEST2_F(CommandListAppendWaitOnEvent, givenCommandListWhenAppendWriteGlobalTimestampCalledWithWaitOnEventsThenSemaphoreWaitAndPipeControlForTimestampEncoded, Platforms) {
+HWTEST2_F(CommandListAppendWaitOnEvent, givenCommandListWhenAppendWriteGlobalTimestampCalledWithWaitOnEventsThenSemaphoreWaitAndPipeControlForTimestampEncoded, IsAtLeastSkl) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
     using POST_SYNC_OPERATION = typename PIPE_CONTROL::POST_SYNC_OPERATION;
 
     uint64_t timestampAddress = 0x12345678555500;
-    uint32_t timestampAddressLow = (uint32_t)(timestampAddress & 0xFFFFFFFF);
-    uint32_t timestampAddressHigh = (uint32_t)(timestampAddress >> 32);
     uint64_t *dstptr = reinterpret_cast<uint64_t *>(timestampAddress);
     ze_event_handle_t hEventHandle = event->toHandle();
 
@@ -279,12 +280,85 @@ HWTEST2_F(CommandListAppendWaitOnEvent, givenCommandListWhenAppendWriteGlobalTim
         if (cmdPC->getPostSyncOperation() == POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_TIMESTAMP) {
             EXPECT_TRUE(cmdPC->getCommandStreamerStallEnable());
             EXPECT_FALSE(cmdPC->getDcFlushEnable());
-            EXPECT_EQ(cmdPC->getAddressHigh(), timestampAddressHigh);
-            EXPECT_EQ(cmdPC->getAddress(), timestampAddressLow);
+            EXPECT_EQ(timestampAddress, NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*cmdPC));
             postSyncFound = true;
         }
     }
     ASSERT_TRUE(postSyncFound);
+}
+
+HWTEST_F(CommandListAppendWaitOnEvent, givenCommandBufferIsEmptyWhenAppendingWaitOnEventThenAllocateNewCommandBuffer) {
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+    using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
+
+    auto consumeSpace = commandList->commandContainer.getCommandStream()->getAvailableSpace();
+    consumeSpace -= sizeof(MI_BATCH_BUFFER_END);
+    commandList->commandContainer.getCommandStream()->getSpace(consumeSpace);
+
+    size_t expectedConsumedSpace = sizeof(MI_SEMAPHORE_WAIT);
+    if (MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo)) {
+        expectedConsumedSpace += sizeof(PIPE_CONTROL);
+    }
+
+    const ze_event_desc_t eventDesc = {
+        ZE_STRUCTURE_TYPE_EVENT_DESC,
+        nullptr,
+        0,
+        0,
+        ZE_EVENT_SCOPE_FLAG_DEVICE};
+
+    auto event = std::unique_ptr<Event>(Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
+    ze_event_handle_t hEventHandle = event->toHandle();
+
+    auto oldCommandBuffer = commandList->commandContainer.getCommandStream()->getGraphicsAllocation();
+    auto result = commandList->appendWaitOnEvents(1, &hEventHandle);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+
+    auto usedSpaceAfter = commandList->commandContainer.getCommandStream()->getUsed();
+    auto newCommandBuffer = commandList->commandContainer.getCommandStream()->getGraphicsAllocation();
+
+    EXPECT_EQ(expectedConsumedSpace, usedSpaceAfter);
+    EXPECT_NE(oldCommandBuffer, newCommandBuffer);
+
+    auto gpuAddress = event->getGpuAddress(device);
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(cmdList,
+                                                      commandList->commandContainer.getCommandStream()->getCpuBase(),
+                                                      usedSpaceAfter));
+
+    auto itorPC = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+    if (MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo)) {
+        ASSERT_NE(cmdList.end(), itorPC);
+        {
+            auto cmd = genCmdCast<PIPE_CONTROL *>(*itorPC);
+            ASSERT_NE(cmd, nullptr);
+
+            EXPECT_TRUE(cmd->getCommandStreamerStallEnable());
+            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), cmd->getDcFlushEnable());
+        }
+    } else {
+        EXPECT_EQ(cmdList.end(), itorPC);
+    }
+
+    auto itorSW = findAll<MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
+    ASSERT_NE(0u, itorSW.size());
+    uint32_t semaphoreWaitsFound = 0;
+    for (auto it : itorSW) {
+        auto cmd = genCmdCast<MI_SEMAPHORE_WAIT *>(*it);
+        auto addressSpace = device->getHwInfo().capabilityTable.gpuAddressSpace;
+
+        EXPECT_EQ(MI_SEMAPHORE_WAIT::COMPARE_OPERATION::COMPARE_OPERATION_SAD_NOT_EQUAL_SDD,
+                  cmd->getCompareOperation());
+        EXPECT_EQ(cmd->getSemaphoreDataDword(), std::numeric_limits<uint32_t>::max());
+        EXPECT_EQ(gpuAddress & addressSpace, cmd->getSemaphoreGraphicsAddress() & addressSpace);
+        EXPECT_EQ(MI_SEMAPHORE_WAIT::WAIT_MODE::WAIT_MODE_POLLING_MODE, cmd->getWaitMode());
+
+        semaphoreWaitsFound++;
+        gpuAddress += event->getSinglePacketSize();
+    }
+    EXPECT_EQ(1u, semaphoreWaitsFound);
 }
 
 } // namespace ult

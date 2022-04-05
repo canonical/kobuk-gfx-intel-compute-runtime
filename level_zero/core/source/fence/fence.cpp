@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,69 +13,56 @@
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/utilities/wait_util.h"
 
-#include "hw_helpers.h"
-
 namespace L0 {
 
 Fence *Fence::create(CommandQueueImp *cmdQueue, const ze_fence_desc_t *desc) {
-    auto fence = new FenceImp(cmdQueue);
+    auto fence = new Fence(cmdQueue);
     UNRECOVERABLE_IF(fence == nullptr);
-
-    fence->initialize();
-
+    fence->reset();
     return fence;
 }
 
-FenceImp::~FenceImp() {
-    cmdQueue->getDevice()->getDriverHandle()->getMemoryManager()->freeGraphicsMemory(allocation);
-    allocation = nullptr;
-}
-
-ze_result_t FenceImp::queryStatus() {
+ze_result_t Fence::queryStatus() {
     auto csr = cmdQueue->getCsr();
-    if (csr) {
-        csr->downloadAllocations();
-    }
+    csr->downloadAllocations();
 
-    uint64_t *hostAddr = static_cast<uint64_t *>(allocation->getUnderlyingBuffer());
-    uint32_t queryVal = Fence::STATE_CLEARED;
-    memcpy_s(static_cast<void *>(&queryVal), sizeof(uint32_t), static_cast<void *>(hostAddr), sizeof(uint32_t));
-    return queryVal == Fence::STATE_CLEARED ? ZE_RESULT_NOT_READY : ZE_RESULT_SUCCESS;
+    auto *hostAddr = csr->getTagAddress();
+
+    return csr->testTaskCountReady(hostAddr, taskCount) ? ZE_RESULT_SUCCESS : ZE_RESULT_NOT_READY;
 }
 
-void FenceImp::initialize() {
-    NEO::AllocationProperties properties(
-        cmdQueue->getDevice()->getRootDeviceIndex(), MemoryConstants::cacheLineSize, NEO::GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY, cmdQueue->getDevice()->getNEODevice()->getDeviceBitfield());
-    properties.alignment = MemoryConstants::cacheLineSize;
-    allocation = cmdQueue->getDevice()->getDriverHandle()->getMemoryManager()->allocateGraphicsMemoryWithProperties(properties);
-    UNRECOVERABLE_IF(allocation == nullptr);
-
-    reset();
-}
-
-ze_result_t FenceImp::reset() {
-    auto hostAddress = static_cast<uint64_t *>(allocation->getUnderlyingBuffer());
-    *(hostAddress) = Fence::STATE_CLEARED;
-
-    NEO::CpuIntrinsics::clFlush(hostAddress);
-
+ze_result_t Fence::assignTaskCountFromCsr() {
+    auto csr = cmdQueue->getCsr();
+    taskCount = csr->peekTaskCount() + 1;
     return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t FenceImp::hostSynchronize(uint64_t timeout) {
-    std::chrono::high_resolution_clock::time_point time1, time2;
+ze_result_t Fence::reset() {
+    taskCount = std::numeric_limits<uint32_t>::max();
+    return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t Fence::hostSynchronize(uint64_t timeout) {
+    std::chrono::microseconds elapsedTimeSinceGpuHangCheck{0};
+    std::chrono::high_resolution_clock::time_point waitStartTime, lastHangCheckTime, currentTime;
     uint64_t timeDiff = 0;
     ze_result_t ret = ZE_RESULT_NOT_READY;
+    const auto csr = cmdQueue->getCsr();
 
-    if (cmdQueue->getCsr()->getType() == NEO::CommandStreamReceiverType::CSR_AUB) {
+    if (csr->getType() == NEO::CommandStreamReceiverType::CSR_AUB) {
         return ZE_RESULT_SUCCESS;
+    }
+
+    if (std::numeric_limits<uint32_t>::max() == taskCount) {
+        return ZE_RESULT_NOT_READY;
     }
 
     if (timeout == 0) {
         return queryStatus();
     }
 
-    time1 = std::chrono::high_resolution_clock::now();
+    waitStartTime = std::chrono::high_resolution_clock::now();
+    lastHangCheckTime = waitStartTime;
     while (timeDiff < timeout) {
         ret = queryStatus();
         if (ret == ZE_RESULT_SUCCESS) {
@@ -84,12 +71,21 @@ ze_result_t FenceImp::hostSynchronize(uint64_t timeout) {
 
         NEO::WaitUtils::waitFunction(nullptr, 0u);
 
+        currentTime = std::chrono::high_resolution_clock::now();
+        elapsedTimeSinceGpuHangCheck = std::chrono::duration_cast<std::chrono::microseconds>(currentTime - lastHangCheckTime);
+
+        if (elapsedTimeSinceGpuHangCheck.count() >= gpuHangCheckPeriod.count()) {
+            lastHangCheckTime = currentTime;
+            if (csr->isGpuHangDetected()) {
+                return ZE_RESULT_ERROR_DEVICE_LOST;
+            }
+        }
+
         if (timeout == std::numeric_limits<uint64_t>::max()) {
             continue;
         }
 
-        time2 = std::chrono::high_resolution_clock::now();
-        timeDiff = std::chrono::duration_cast<std::chrono::nanoseconds>(time2 - time1).count();
+        timeDiff = std::chrono::duration_cast<std::chrono::nanoseconds>(currentTime - waitStartTime).count();
     }
 
     return ret;

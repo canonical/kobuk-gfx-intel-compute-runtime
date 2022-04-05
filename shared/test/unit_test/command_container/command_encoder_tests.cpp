@@ -1,15 +1,17 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_container/command_encoder.h"
+#include "shared/source/command_stream/linear_stream.h"
+#include "shared/source/memory_manager/graphics_allocation.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 using CommandEncoderTests = ::testing::Test;
@@ -24,7 +26,7 @@ HWTEST_F(CommandEncoderTests, givenImmDataWriteWhenProgrammingMiFlushDwThenSetAl
 
     MiFlushArgs args;
     args.commandWithPostSync = true;
-    EncodeMiFlushDW<FamilyType>::programMiFlushDw(linearStream, gpuAddress, immData, args);
+    EncodeMiFlushDW<FamilyType>::programMiFlushDw(linearStream, gpuAddress, immData, args, *defaultHwInfo);
     auto miFlushDwCmd = reinterpret_cast<MI_FLUSH_DW *>(buffer);
 
     unsigned int sizeMultiplier = 1;
@@ -50,7 +52,7 @@ HWTEST_F(CommandEncoderTests, whenEncodeMemoryPrefetchCalledThenDoNothing) {
     uint8_t buffer[MemoryConstants::pageSize] = {};
     LinearStream linearStream(buffer, sizeof(buffer));
 
-    GraphicsAllocation allocation(0, GraphicsAllocation::AllocationType::UNKNOWN, nullptr, 123, 456, 789, MemoryPool::LocalMemory);
+    GraphicsAllocation allocation(0, AllocationType::UNKNOWN, nullptr, 123, 456, 789, MemoryPool::LocalMemory);
 
     EncodeMemoryPrefetch<FamilyType>::programMemoryPrefetch(linearStream, allocation, 2, 0, *defaultHwInfo);
 
@@ -80,7 +82,7 @@ HWTEST_F(CommandEncoderTests, givenNotify) {
     MiFlushArgs args;
     args.commandWithPostSync = true;
     args.notifyEnable = true;
-    EncodeMiFlushDW<FamilyType>::programMiFlushDw(linearStream, gpuAddress, immData, args);
+    EncodeMiFlushDW<FamilyType>::programMiFlushDw(linearStream, gpuAddress, immData, args, *defaultHwInfo);
     auto miFlushDwCmd = reinterpret_cast<MI_FLUSH_DW *>(buffer);
 
     unsigned int sizeMultiplier = 1;
@@ -110,4 +112,25 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandEncoderTests, whenAppendParamsForImageFromBuf
     EncodeSurfaceState<FamilyType>::appendParamsForImageFromBuffer(&surfaceState);
 
     EXPECT_EQ(0, memcmp(&expectedState, &surfaceState, sizeof(surfaceState)));
+}
+
+HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncoderTests, givenDebugFlagSetWhenProgrammingMiArbThenSetPreparserDisabledValue) {
+    DebugManagerStateRestore restore;
+
+    using MI_ARB_CHECK = typename FamilyType::MI_ARB_CHECK;
+
+    for (int32_t value : {-1, 0, 1}) {
+        DebugManager.flags.ForcePreParserEnabledForMiArbCheck.set(value);
+
+        MI_ARB_CHECK buffer[2] = {};
+        LinearStream linearStream(buffer, sizeof(buffer));
+
+        EncodeMiArbCheck<FamilyType>::program(linearStream);
+
+        if (value == 0) {
+            EXPECT_TRUE(buffer[0].getPreParserDisable());
+        } else {
+            EXPECT_FALSE(buffer[0].getPreParserDisable());
+        }
+    }
 }

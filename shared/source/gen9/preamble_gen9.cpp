@@ -1,12 +1,12 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_stream/csr_definitions.h"
-#include "shared/source/helpers/preamble_bdw_plus.inl"
+#include "shared/source/helpers/preamble_bdw_and_later.inl"
 
 namespace NEO {
 
@@ -55,7 +55,7 @@ void PreambleHelper<SKLFamily>::addPipeControlBeforeVfeCmd(LinearStream *pComman
     auto pipeControl = pCommandStream->getSpaceForCmd<PIPE_CONTROL>();
     PIPE_CONTROL cmd = SKLFamily::cmdInitPipeControl;
     cmd.setCommandStreamerStallEnable(true);
-    if (hwInfo->workaroundTable.waSendMIFLUSHBeforeVFE) {
+    if (hwInfo->workaroundTable.flags.waSendMIFLUSHBeforeVFE) {
         cmd.setRenderTargetCacheFlushEnable(true);
         cmd.setDepthCacheFlushEnable(true);
         cmd.setDcFlushEnable(true);
@@ -64,24 +64,12 @@ void PreambleHelper<SKLFamily>::addPipeControlBeforeVfeCmd(LinearStream *pComman
 }
 
 template <>
-void PreambleHelper<SKLFamily>::programThreadArbitration(LinearStream *pCommandStream, uint32_t requiredThreadArbitrationPolicy) {
-    UNRECOVERABLE_IF(requiredThreadArbitrationPolicy == ThreadArbitrationPolicy::NotPresent);
-
-    auto pipeControl = pCommandStream->getSpaceForCmd<PIPE_CONTROL>();
-    PIPE_CONTROL cmd = SKLFamily::cmdInitPipeControl;
-    cmd.setCommandStreamerStallEnable(true);
-    *pipeControl = cmd;
-
-    LriHelper<SKLFamily>::program(pCommandStream,
-                                  DebugControlReg2::address,
-                                  DebugControlReg2::getRegData(requiredThreadArbitrationPolicy),
-                                  false);
+std::vector<int32_t> PreambleHelper<SKLFamily>::getSupportedThreadArbitrationPolicies() {
+    std::vector<int32_t> retVal;
+    for (const int32_t &p : DebugControlReg2::supportedArbitrationPolicy) {
+        retVal.push_back(p);
+    }
+    return retVal;
 }
-
-template <>
-size_t PreambleHelper<SKLFamily>::getThreadArbitrationCommandsSize() {
-    return sizeof(MI_LOAD_REGISTER_IMM) + sizeof(PIPE_CONTROL);
-}
-
 template struct PreambleHelper<SKLFamily>;
 } // namespace NEO

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,22 +13,21 @@
 #include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/local_id_gen.h"
+#include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/os_interface/os_context.h"
+#include "shared/source/utilities/perf_counter.h"
 #include "shared/source/utilities/tag_allocator.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/command_queue/gpgpu_walker.h"
-#include "opencl/source/event/perf_counter.h"
 #include "opencl/source/event/user_event.h"
+#include "opencl/source/helpers/cl_validators.h"
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/helpers/queue_helpers.h"
-#include "opencl/source/helpers/validators.h"
 #include "opencl/source/mem_obj/mem_obj.h"
-
-#include "pipe_control_args.h"
 
 #include <algorithm>
 #include <cmath>
@@ -192,23 +191,18 @@ size_t EnqueueOperation<GfxFamily>::getTotalSizeRequiredCS(uint32_t eventType, c
         return expectedSizeCS;
     }
 
-    Kernel *parentKernel = multiDispatchInfo.peekParentKernel();
     for (auto &dispatchInfo : multiDispatchInfo) {
         expectedSizeCS += EnqueueOperation<GfxFamily>::getSizeRequiredCS(eventType, reserveProfilingCmdsSpace, reservePerfCounters, commandQueue, dispatchInfo.getKernel(), dispatchInfo);
         size_t kernelObjAuxCount = multiDispatchInfo.getKernelObjsForAuxTranslation() != nullptr ? multiDispatchInfo.getKernelObjsForAuxTranslation()->size() : 0;
         expectedSizeCS += dispatchInfo.dispatchInitCommands.estimateCommandsSize(kernelObjAuxCount, hwInfo, commandQueueHw.isCacheFlushForBcsRequired());
         expectedSizeCS += dispatchInfo.dispatchEpilogueCommands.estimateCommandsSize(kernelObjAuxCount, hwInfo, commandQueueHw.isCacheFlushForBcsRequired());
     }
-    if (parentKernel) {
-        SchedulerKernel &scheduler = commandQueue.getContext().getSchedulerKernel();
-        expectedSizeCS += EnqueueOperation<GfxFamily>::getSizeRequiredCS(eventType, reserveProfilingCmdsSpace, reservePerfCounters, commandQueue, &scheduler, DispatchInfo{});
-    }
     if (commandQueue.getGpgpuCommandStreamReceiver().peekTimestampPacketWriteEnabled()) {
         expectedSizeCS += TimestampPacketHelper::getRequiredCmdStreamSize<GfxFamily>(csrDeps);
         expectedSizeCS += EnqueueOperation<GfxFamily>::getSizeRequiredForTimestampPacketWrite();
         if (isMarkerWithProfiling) {
             if (!eventsInWaitlist) {
-                expectedSizeCS += MemorySynchronizationCommands<GfxFamily>::getSizeForSinglePipeControl();
+                expectedSizeCS += commandQueue.getGpgpuCommandStreamReceiver().getCmdsSizeForComputeBarrierCommand();
             }
             expectedSizeCS += 4 * EncodeStoreMMIO<GfxFamily>::size;
         }

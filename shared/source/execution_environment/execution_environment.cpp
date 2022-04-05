@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,6 +9,7 @@
 
 #include "shared/source/built_ins/built_ins.h"
 #include "shared/source/built_ins/sip.h"
+#include "shared/source/direct_submission/direct_submission_controller.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/affinity_mask.h"
 #include "shared/source/helpers/hw_helper.h"
@@ -24,14 +25,21 @@ ExecutionEnvironment::ExecutionEnvironment() {
     WaitUtils::init();
 }
 
+void ExecutionEnvironment::releaseRootDeviceEnvironmentResources(RootDeviceEnvironment *rootDeviceEnvironment) {
+    if (rootDeviceEnvironment == nullptr) {
+        return;
+    }
+    SipKernel::freeSipKernels(rootDeviceEnvironment, memoryManager.get());
+    if (rootDeviceEnvironment->builtins.get()) {
+        rootDeviceEnvironment->builtins.get()->freeSipKernels(memoryManager.get());
+    }
+}
+
 ExecutionEnvironment::~ExecutionEnvironment() {
     if (memoryManager) {
         memoryManager->commonCleanup();
         for (const auto &rootDeviceEnvironment : this->rootDeviceEnvironments) {
-            SipKernel::freeSipKernels(rootDeviceEnvironment.get(), memoryManager.get());
-            if (rootDeviceEnvironment->builtins.get()) {
-                rootDeviceEnvironment->builtins.get()->freeSipKernels(memoryManager.get());
-            }
+            releaseRootDeviceEnvironmentResources(rootDeviceEnvironment.get());
         }
     }
     rootDeviceEnvironments.clear();
@@ -72,12 +80,35 @@ void ExecutionEnvironment::calculateMaxOsContextCount() {
     for (const auto &rootDeviceEnvironment : this->rootDeviceEnvironments) {
         auto hwInfo = rootDeviceEnvironment->getHardwareInfo();
         auto &hwHelper = HwHelper::get(hwInfo->platform.eRenderCoreFamily);
-        auto osContextCount = hwHelper.getGpgpuEngineInstances(*hwInfo).size();
+        auto osContextCount = static_cast<uint32_t>(hwHelper.getGpgpuEngineInstances(*hwInfo).size());
         auto subDevicesCount = HwHelper::getSubDevicesCount(hwInfo);
+        auto ccsCount = hwInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
         bool hasRootCsr = subDevicesCount > 1;
 
-        MemoryManager::maxOsContextCount += static_cast<uint32_t>(osContextCount * subDevicesCount + hasRootCsr);
+        MemoryManager::maxOsContextCount += osContextCount * subDevicesCount + hasRootCsr;
+
+        if (ccsCount > 1 && DebugManager.flags.EngineInstancedSubDevices.get()) {
+            MemoryManager::maxOsContextCount += ccsCount * subDevicesCount;
+        }
     }
+}
+
+DirectSubmissionController *ExecutionEnvironment::initializeDirectSubmissionController() {
+    auto initializeDirectSubmissionController = DirectSubmissionController::isSupported();
+
+    if (DebugManager.flags.SetCommandStreamReceiver.get() > 0) {
+        initializeDirectSubmissionController = false;
+    }
+
+    if (DebugManager.flags.EnableDirectSubmissionController.get() != -1) {
+        initializeDirectSubmissionController = DebugManager.flags.EnableDirectSubmissionController.get();
+    }
+
+    if (initializeDirectSubmissionController && this->directSubmissionController == nullptr) {
+        this->directSubmissionController = std::make_unique<DirectSubmissionController>();
+    }
+
+    return directSubmissionController.get();
 }
 
 void ExecutionEnvironment::prepareRootDeviceEnvironments(uint32_t numRootDevices) {
@@ -89,6 +120,10 @@ void ExecutionEnvironment::prepareRootDeviceEnvironments(uint32_t numRootDevices
             rootDeviceEnvironments[rootDeviceIndex] = std::make_unique<RootDeviceEnvironment>(*this);
         }
     }
+}
+
+void ExecutionEnvironment::prepareRootDeviceEnvironment(const uint32_t rootDeviceIndexForReInit) {
+    rootDeviceEnvironments[rootDeviceIndexForReInit] = std::make_unique<RootDeviceEnvironment>(*this);
 }
 
 void ExecutionEnvironment::parseAffinityMask() {
@@ -116,7 +151,9 @@ void ExecutionEnvironment::parseAffinityMask() {
             if (subEntries.size() > 1) {
                 uint32_t subDeviceIndex = StringHelpers::toUint32t(subEntries[1]);
 
-                bool enableSecondLevelEngineInstanced = ((subDevicesCount == 1) && (hwInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled > 1));
+                bool enableSecondLevelEngineInstanced = ((subDevicesCount == 1) &&
+                                                         (hwInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled > 1) &&
+                                                         DebugManager.flags.AllowSingleTileEngineInstancedSubDevices.get());
 
                 if (enableSecondLevelEngineInstanced) {
                     UNRECOVERABLE_IF(subEntries.size() != 2);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -24,7 +24,6 @@ HWTEST2_F(TglLpSlm, givenTglLpWhenPreambleIsBeingProgrammedThenThreadArbitration
     uint32_t l3Config = PreambleHelper<TGLLPFamily>::getL3Config(pDevice->getHardwareInfo(), true);
     MockDevice mockDevice;
     PreambleHelper<TGLLPFamily>::programPreamble(&linearStream, mockDevice, l3Config,
-                                                 ThreadArbitrationPolicy::RoundRobin,
                                                  nullptr);
 
     parseCommands<TGLLPFamily>(cs);
@@ -61,13 +60,11 @@ HWTEST2_F(Gen12LpUrbEntryAllocationSize, WhenPreambleIsCreatedThenUrbEntryAlloca
 typedef PreambleVfeState Gen12LpPreambleVfeState;
 HWTEST2_F(Gen12LpPreambleVfeState, GivenWaOffWhenProgrammingVfeStateThenProgrammingIsCorrect, IsTGLLP) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
-    testWaTable->waSendMIFLUSHBeforeVFE = 0;
+    testWaTable->flags.waSendMIFLUSHBeforeVFE = 0;
     LinearStream &cs = linearStream;
-    auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, pPlatform->getClDevice(0)->getHardwareInfo(), EngineGroupType::RenderCompute);
+    auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, pDevice->getHardwareInfo(), EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, pPlatform->getClDevice(0)->getHardwareInfo(), 0u, 0, 672u,
-                                                AdditionalKernelExecInfo::NotApplicable,
-                                                emptyProperties);
+    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 672u, emptyProperties);
 
     parseCommands<FamilyType>(cs);
 
@@ -84,14 +81,12 @@ HWTEST2_F(Gen12LpPreambleVfeState, GivenWaOffWhenProgrammingVfeStateThenProgramm
 
 HWTEST2_F(Gen12LpPreambleVfeState, givenCcsEngineWhenWaIsSetThenAppropriatePipeControlFlushesAreSet, IsTGLLP) {
     typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
-    testWaTable->waSendMIFLUSHBeforeVFE = 1;
+    testWaTable->flags.waSendMIFLUSHBeforeVFE = 1;
     LinearStream &cs = linearStream;
 
-    auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, pPlatform->getClDevice(0)->getHardwareInfo(), EngineGroupType::Compute);
+    auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, pDevice->getHardwareInfo(), EngineGroupType::Compute);
     StreamProperties emptyProperties{};
-    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, pPlatform->getClDevice(0)->getHardwareInfo(), 0u, 0, 672u,
-                                                AdditionalKernelExecInfo::NotApplicable,
-                                                emptyProperties);
+    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 672u, emptyProperties);
 
     parseCommands<FamilyType>(cs);
 
@@ -107,14 +102,12 @@ HWTEST2_F(Gen12LpPreambleVfeState, givenCcsEngineWhenWaIsSetThenAppropriatePipeC
 
 HWTEST2_F(Gen12LpPreambleVfeState, givenRcsEngineWhenWaIsSetThenAppropriatePipeControlFlushesAreSet, IsTGLLP) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    testWaTable->waSendMIFLUSHBeforeVFE = 1;
+    testWaTable->flags.waSendMIFLUSHBeforeVFE = 1;
     LinearStream &cs = linearStream;
 
-    auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, pPlatform->getClDevice(0)->getHardwareInfo(), EngineGroupType::RenderCompute);
+    auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, pDevice->getHardwareInfo(), EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, pPlatform->getClDevice(0)->getHardwareInfo(), 0u, 0, 672u,
-                                                AdditionalKernelExecInfo::NotApplicable,
-                                                emptyProperties);
+    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 672u, emptyProperties);
 
     parseCommands<FamilyType>(cs);
 
@@ -142,7 +135,7 @@ HWTEST2_F(Gen12LpPreambleVfeState, givenCfeFusedEuDispatchFlagsWhenprogramAdditi
     using MEDIA_VFE_STATE = typename FamilyType::MEDIA_VFE_STATE;
 
     DebugManagerStateRestore restorer;
-    auto pHwInfo = pPlatform->getClDevice(0)->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto pHwInfo = pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
     auto pMediaVfeState = reinterpret_cast<MEDIA_VFE_STATE *>(linearStream.getSpace(sizeof(MEDIA_VFE_STATE)));
     *pMediaVfeState = FamilyType::cmdInitMediaVfeState;
     auto &waTable = pHwInfo->workaroundTable;
@@ -156,9 +149,9 @@ HWTEST2_F(Gen12LpPreambleVfeState, givenCfeFusedEuDispatchFlagsWhenprogramAdditi
         {true, true, 1}};
 
     for (auto &[expectedValue, waDisableFusedThreadScheduling, debugKeyValue] : testParams) {
-        waTable.waDisableFusedThreadScheduling = waDisableFusedThreadScheduling;
+        waTable.flags.waDisableFusedThreadScheduling = waDisableFusedThreadScheduling;
         ::DebugManager.flags.CFEFusedEUDispatch.set(debugKeyValue);
-        PreambleHelper<FamilyType>::programAdditionalFieldsInVfeState(pMediaVfeState, *pHwInfo);
+        PreambleHelper<FamilyType>::programAdditionalFieldsInVfeState(pMediaVfeState, *pHwInfo, false);
         EXPECT_EQ(expectedValue, pMediaVfeState->getDisableSlice0Subslice2());
     }
 }
@@ -168,21 +161,32 @@ HWTEST2_F(Gen12LpPreambleVfeState, givenMaxNumberOfDssDebugVariableWhenMediaVfeS
 
     DebugManagerStateRestore restorer;
     DebugManager.flags.MediaVfeStateMaxSubSlices.set(2);
-    auto pHwInfo = pPlatform->getClDevice(0)->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto pHwInfo = pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
     auto pMediaVfeState = reinterpret_cast<MEDIA_VFE_STATE *>(linearStream.getSpace(sizeof(MEDIA_VFE_STATE)));
     *pMediaVfeState = FamilyType::cmdInitMediaVfeState;
-    PreambleHelper<FamilyType>::programAdditionalFieldsInVfeState(pMediaVfeState, *pHwInfo);
+    PreambleHelper<FamilyType>::programAdditionalFieldsInVfeState(pMediaVfeState, *pHwInfo, false);
     EXPECT_EQ(2u, pMediaVfeState->getMaximumNumberOfDualSubslices());
 }
 
+HWTEST2_F(Gen12LpPreambleVfeState, givenDisableEUFusionWhenProgramAdditionalFieldsInVfeStateThenCorrectFieldIsSet, IsTGLLP) {
+    using MEDIA_VFE_STATE = typename FamilyType::MEDIA_VFE_STATE;
+
+    auto pHwInfo = pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto pMediaVfeState = reinterpret_cast<MEDIA_VFE_STATE *>(linearStream.getSpace(sizeof(MEDIA_VFE_STATE)));
+    *pMediaVfeState = FamilyType::cmdInitMediaVfeState;
+    PreambleHelper<FamilyType>::programAdditionalFieldsInVfeState(pMediaVfeState, *pHwInfo, true);
+    EXPECT_TRUE(pMediaVfeState->getDisableSlice0Subslice2());
+}
+
 typedef PreambleFixture ThreadArbitrationGen12Lp;
-GEN12LPTEST_F(ThreadArbitrationGen12Lp, givenPolicyWhenThreadArbitrationProgrammedThenDoNothing) {
-    LinearStream &cs = linearStream;
+GEN12LPTEST_F(ThreadArbitrationGen12Lp, whenGetDefaultThreadArbitrationPolicyIsCalledThenCorrectPolicyIsReturned) {
+    EXPECT_EQ(ThreadArbitrationPolicy::AgeBased, HwHelperHw<FamilyType>::get().getDefaultThreadArbitrationPolicy());
+}
 
-    PreambleHelper<FamilyType>::programThreadArbitration(&cs, ThreadArbitrationPolicy::RoundRobin);
+GEN12LPTEST_F(ThreadArbitrationGen12Lp, whenGetSupportThreadArbitrationPoliciesIsCalledThenEmptyVectorIsReturned) {
+    auto supportedPolicies = PreambleHelper<FamilyType>::getSupportedThreadArbitrationPolicies();
 
-    EXPECT_EQ(0u, cs.getUsed());
-    EXPECT_EQ(0u, HwHelperHw<FamilyType>::get().getDefaultThreadArbitrationPolicy());
+    EXPECT_EQ(0u, supportedPolicies.size());
 }
 
 typedef PreambleFixture PreemptionWatermarkGen12LP;
@@ -202,4 +206,32 @@ GEN12LPTEST_F(PreemptionWatermarkGen12LP, WhenPreambleIsCreatedThenPreambleWorkA
     mockDevice.setDebuggerActive(true);
     expectedSize += PreambleHelper<FamilyType>::getKernelDebuggingCommandsSize(mockDevice.isDebuggerActive());
     EXPECT_EQ(expectedSize, PreambleHelper<FamilyType>::getAdditionalCommandsSize(mockDevice));
+}
+
+using PreambleFixtureGen12lp = PreambleFixture;
+GEN12LPTEST_F(PreambleFixtureGen12lp, whenKernelDebuggingCommandsAreProgrammedThenCorrectRegisterAddressesAndValuesAreSet) {
+    typedef typename FamilyType::MI_LOAD_REGISTER_IMM MI_LOAD_REGISTER_IMM;
+
+    auto bufferSize = PreambleHelper<FamilyType>::getKernelDebuggingCommandsSize(true);
+    auto buffer = std::unique_ptr<char[]>(new char[bufferSize]);
+
+    LinearStream stream(buffer.get(), bufferSize);
+    PreambleHelper<FamilyType>::programKernelDebugging(&stream);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(stream);
+    auto cmdList = hwParser.getCommandsList<MI_LOAD_REGISTER_IMM>();
+
+    ASSERT_EQ(2u, cmdList.size());
+
+    auto it = cmdList.begin();
+
+    MI_LOAD_REGISTER_IMM *pCmd = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(*it);
+    EXPECT_EQ(0x20d8u, pCmd->getRegisterOffset());
+    EXPECT_EQ((1u << 5) | (1u << 21), pCmd->getDataDword());
+    it++;
+
+    pCmd = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(*it);
+    EXPECT_EQ(0xe400u, pCmd->getRegisterOffset());
+    EXPECT_EQ((1u << 7) | (1u << 4), pCmd->getDataDword());
 }

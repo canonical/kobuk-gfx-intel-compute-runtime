@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -148,7 +148,9 @@ struct Token {
                           SingleCharacter,
                           Comment,
                           FileSectionBeg,
-                          FileSectionEnd };
+                          FileSectionEnd,
+                          CollectionBeg,
+                          CollectionEnd };
 
     constexpr Token(ConstStringRef tokData, Type tokType) {
         pos = tokData.begin();
@@ -236,25 +238,40 @@ struct Line {
 };
 static_assert(sizeof(Line) == 12, "");
 
+template <typename T, typename It>
+inline bool reserveBasedOnEstimates(T &container, It beg, It end, It pos) {
+    if ((container.size() < container.capacity()) || (pos == beg)) {
+        return false;
+    }
+    DEBUG_BREAK_IF((beg > end) || (pos < beg));
+    auto normalizedPosInv = float(end - beg) / float(pos - beg);
+    auto estimatedTotalElements = static_cast<size_t>(container.size() * normalizedPosInv);
+    container.reserve(estimatedTotalElements);
+    return true;
+}
+
 using TokensCache = StackVec<Token, 2048>;
 using LinesCache = StackVec<Line, 512>;
 
 std::string constructYamlError(size_t lineNumber, const char *lineBeg, const char *parsePos, const char *reason = nullptr);
 
+bool isValidInlineCollectionFormat(const char *context, const char *contextEnd);
+constexpr ConstStringRef inlineCollectionYamlErrorMsg = "NEO::Yaml : Inline collection is not in valid regex format - ^\\[(\\s*(\\d|\\w)+,?)+\\s*\\]\\s*\\n";
+
 bool tokenize(ConstStringRef text, LinesCache &outLines, TokensCache &outTokens, std::string &outErrReason, std::string &outWarning);
 
-using NodeId = uint16_t;
+using NodeId = uint32_t;
 static constexpr NodeId invalidNodeID = std::numeric_limits<NodeId>::max();
 
-struct Node {
+struct alignas(32) Node {
     TokenId key = invalidTokenId;
     TokenId value = invalidTokenId;
-    uint32_t indent = 0;
     NodeId id = invalidNodeID;
     NodeId parentId = invalidNodeID;
     NodeId firstChildId = invalidNodeID;
     NodeId lastChildId = invalidNodeID;
     NodeId nextSiblingId = invalidNodeID;
+    uint16_t indent = 0;
     uint16_t numChildren = 0U;
 
     Node() = default;
@@ -262,7 +279,7 @@ struct Node {
     explicit Node(uint32_t indent) : indent(indent) {
     }
 };
-static_assert(sizeof(Node) == 24, "");
+static_assert(sizeof(Node) == 32, "");
 using NodesCache = StackVec<Node, 512>;
 
 constexpr bool isUnused(Line::LineType lineType) {
@@ -647,6 +664,16 @@ inline bool YamlParser::readValueChecked<bool>(const Node &node, bool &outValue)
     return true;
 }
 
+template <>
+inline bool YamlParser::readValueChecked<std::string>(const Node &node, std::string &outValue) const {
+    const auto &token = tokens[node.value];
+    if (Token::Type::LiteralString != token.traits.type) {
+        return false;
+    }
+    outValue.resize(token.len);
+    std::copy(token.pos, token.pos + token.len, outValue.begin());
+    return true;
+}
 } // namespace Yaml
 
 } // namespace NEO

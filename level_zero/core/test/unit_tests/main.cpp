@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,19 +9,20 @@
 #include "shared/source/gmm_helper/gmm_interface.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/os_interface/hw_info_config.h"
+#include "shared/source/program/kernel_info.h"
 #include "shared/source/utilities/debug_settings_reader.h"
+#include "shared/source/utilities/logger.h"
+#include "shared/test/common/helpers/custom_event_listener.h"
 #include "shared/test/common/helpers/default_hw_info.inl"
 #include "shared/test/common/helpers/memory_leak_listener.h"
 #include "shared/test/common/helpers/test_files.h"
 #include "shared/test/common/helpers/ult_hw_config.inl"
+#include "shared/test/common/libult/global_environment.h"
+#include "shared/test/common/libult/signal_utils.h"
 #include "shared/test/common/mocks/mock_gmm_client_context.h"
 #include "shared/test/common/mocks/mock_sip.h"
 #include "shared/test/unit_test/base_ult_config_listener.h"
-
-#include "opencl/source/program/kernel_info.h"
-#include "opencl/source/utilities/logger.h"
-#include "opencl/test/unit_test/custom_event_listener.h"
-#include "opencl/test/unit_test/global_environment.h"
+#include "shared/test/unit_test/test_stats.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist.h"
 #include "level_zero/core/source/compiler_interface/l0_reg_path.h"
@@ -33,11 +34,6 @@
 #include <mutex>
 #include <sstream>
 #include <thread>
-
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Winconsistent-missing-override"
-#endif
 
 #ifdef WIN32
 const char *fSeparator = "\\";
@@ -56,8 +52,8 @@ TestEnvironment *environment = nullptr;
 
 using namespace L0::ult;
 
-PRODUCT_FAMILY productFamily = NEO::DEFAULT_TEST_PLATFORM::hwInfo.platform.eProductFamily;
-GFXCORE_FAMILY renderCoreFamily = NEO::DEFAULT_TEST_PLATFORM::hwInfo.platform.eRenderCoreFamily;
+extern PRODUCT_FAMILY productFamily;
+extern GFXCORE_FAMILY renderCoreFamily;
 int32_t revId = -1;
 uint32_t euPerSubSlice = 0;
 uint32_t sliceCount = 0;
@@ -72,7 +68,7 @@ extern const char *executionDirectorySuffix;
 
 namespace MockSipData {
 extern std::unique_ptr<MockSipKernel> mockSipKernel;
-}
+} // namespace MockSipData
 } // namespace NEO
 
 std::string getRunPath(char *argv0) {
@@ -97,6 +93,7 @@ std::string getRunPath(char *argv0) {
 }
 
 std::thread::id tempThreadID;
+bool sysmanUltsEnable = false;
 
 void applyWorkarounds() {
     {
@@ -144,10 +141,44 @@ void applyWorkarounds() {
     }
 }
 
+bool checkAubTestsExecutionPathValidity() {
+    bool valid = true;
+    if ((testMode == TestMode::AubTests || testMode == TestMode::AubTestsWithTbx)) {
+        std::ofstream testFile;
+        std::string aubPath = folderAUB;
+        aubPath += fSeparator;
+        aubPath += "testAubFolder";
+        testFile.open(aubPath, std::ofstream::app);
+        if (testFile.is_open()) {
+            testFile.close();
+        } else {
+            valid = false;
+            std::cout << "ERROR: Aub tests must be run in directory containing \" " << folderAUB << "\" folder!\n";
+        }
+    }
+    return valid;
+}
+
 int main(int argc, char **argv) {
     bool useDefaultListener = false;
+    bool enableAlarm = true;
     bool setupFeatureTableAndWorkaroundTable = testMode == TestMode::AubTests ? true : false;
+    bool showTestStats = false;
+
+    auto sysmanUltsEnableEnv = getenv("NEO_L0_SYSMAN_ULTS_ENABLE");
+    if (sysmanUltsEnableEnv != nullptr) {
+        sysmanUltsEnable = (strcmp(sysmanUltsEnableEnv, "1") == 0);
+    }
+
     applyWorkarounds();
+
+    {
+        std::string envVar = std::string("NEO_") + executionName + "_DISABLE_TEST_ALARM";
+        char *envValue = getenv(envVar.c_str());
+        if (envValue != nullptr) {
+            enableAlarm = false;
+        }
+    }
 
     testing::InitGoogleMock(&argc, argv);
 
@@ -219,6 +250,10 @@ int main(int argc, char **argv) {
             }
         } else if (!strcmp("--disable_default_listener", argv[i])) {
             useDefaultListener = false;
+        } else if (!strcmp("--enable_default_listener", argv[i])) {
+            useDefaultListener = true;
+        } else if (!strcmp("--disable_alarm", argv[i])) {
+            enableAlarm = false;
         } else if (!strcmp("--tbx", argv[i])) {
             if (testMode == TestMode::AubTests) {
                 testMode = TestMode::AubTestsWithTbx;
@@ -229,9 +264,14 @@ int main(int argc, char **argv) {
                 DebugManager.setReaderImpl(NEO::SettingsReader::create(L0::registryPath));
                 DebugManager.injectSettingsFromReader();
             }
-        } else if (!strcmp("--enable_default_listener", argv[i])) {
-            useDefaultListener = true;
+        } else if (!strcmp("--show_test_stats", argv[i])) {
+            showTestStats = true;
         }
+    }
+
+    if (showTestStats) {
+        std::cout << getTestStats() << std::endl;
+        return 0;
     }
 
     productFamily = hwInfoForTests.platform.eProductFamily;
@@ -289,17 +329,19 @@ int main(int argc, char **argv) {
     binaryNameSuffix.append(hwInfoForTests.capabilityTable.platformType);
 
     std::string testBinaryFiles = getRunPath(argv[0]);
-    std::string testBinaryFilesNoRev = testBinaryFiles;
-    testBinaryFilesNoRev.append("/level_zero/");
+    std::string testBinaryFilesApiSpecific = testBinaryFiles;
+    testBinaryFilesApiSpecific.append("/level_zero/");
     testBinaryFiles.append("/" + binaryNameSuffix + "/");
-    testBinaryFilesNoRev.append(binaryNameSuffix + "/");
+    testBinaryFilesApiSpecific.append(binaryNameSuffix + "/");
 
     testBinaryFiles.append(std::to_string(revId));
     testBinaryFiles.append("/");
     testBinaryFiles.append(testFiles);
-    testBinaryFilesNoRev.append(testFiles);
+    testBinaryFilesApiSpecific.append(std::to_string(revId));
+    testBinaryFilesApiSpecific.append("/");
+    testBinaryFilesApiSpecific.append(testFilesApiSpecific);
     testFiles = testBinaryFiles;
-    testFilesNoRev = testBinaryFilesNoRev;
+    testFilesApiSpecific = testBinaryFilesApiSpecific;
 
     std::string executionDirectory(hardwarePrefix[productFamily]);
     executionDirectory += NEO::executionDirectorySuffix; //_aub for aub_tests, empty otherwise
@@ -317,6 +359,10 @@ int main(int argc, char **argv) {
         std::cout << "chdir into " << executionDirectory << " directory failed.\nThis might cause test failures." << std::endl;
     }
 #endif
+
+    if (!checkAubTestsExecutionPathValidity()) {
+        return -1;
+    }
 
     if (useMockGmm) {
         NEO::GmmHelper::createGmmContextWrapperFunc = NEO::GmmClientContext::create<MockGmmClientContext>;
@@ -339,11 +385,11 @@ int main(int argc, char **argv) {
 
     environment->setDefaultDebugVars(fclDebugVars, igcDebugVars, hwInfoForTests);
 
+    int sigOut = setAlarm(enableAlarm);
+    if (sigOut != 0)
+        return sigOut;
+
     auto retVal = RUN_ALL_TESTS();
 
     return retVal;
 }
-
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif

@@ -1,16 +1,16 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/command_stream/aub_command_stream_receiver_hw.h"
 #include "shared/source/command_stream/command_stream_receiver_hw.h"
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
+#include "shared/test/common/test_macros/test.h"
 
-#include "opencl/source/command_stream/aub_command_stream_receiver_hw.h"
 #include "opencl/test/unit_test/aub_tests/fixtures/aub_fixture.h"
-#include "test.h"
 
 #include <cstdint>
 
@@ -24,7 +24,7 @@ struct MiAtomicAubFixture : public AUBFixture {
         AllocationProperties commandBufferProperties = {device->getRootDeviceIndex(),
                                                         true,
                                                         MemoryConstants::pageSize,
-                                                        GraphicsAllocation::AllocationType::COMMAND_BUFFER,
+                                                        AllocationType::COMMAND_BUFFER,
                                                         false,
                                                         device->getDeviceBitfield()};
         streamAllocation = memoryManager->allocateGraphicsMemoryWithProperties(commandBufferProperties);
@@ -33,7 +33,7 @@ struct MiAtomicAubFixture : public AUBFixture {
         AllocationProperties deviceBufferProperties = {device->getRootDeviceIndex(),
                                                        true,
                                                        MemoryConstants::pageSize,
-                                                       GraphicsAllocation::AllocationType::BUFFER,
+                                                       AllocationType::BUFFER,
                                                        false,
                                                        device->getDeviceBitfield()};
         deviceSurface = memoryManager->allocateGraphicsMemoryWithProperties(deviceBufferProperties);
@@ -42,7 +42,7 @@ struct MiAtomicAubFixture : public AUBFixture {
         AllocationProperties systemBufferProperties = {device->getRootDeviceIndex(),
                                                        true,
                                                        MemoryConstants::pageSize,
-                                                       GraphicsAllocation::AllocationType::SVM_CPU,
+                                                       AllocationType::SVM_CPU,
                                                        false,
                                                        device->getDeviceBitfield()};
         systemSurface = memoryManager->allocateGraphicsMemoryWithProperties(systemBufferProperties);
@@ -69,9 +69,9 @@ struct MiAtomicAubFixture : public AUBFixture {
         csr->makeResident(*deviceSurface);
         csr->makeResident(*systemSurface);
         csr->flushTask(taskStream, 0,
-                       csr->getIndirectHeap(IndirectHeap::DYNAMIC_STATE, 0u),
-                       csr->getIndirectHeap(IndirectHeap::INDIRECT_OBJECT, 0u),
-                       csr->getIndirectHeap(IndirectHeap::SURFACE_STATE, 0u),
+                       csr->getIndirectHeap(IndirectHeap::Type::DYNAMIC_STATE, 0u),
+                       csr->getIndirectHeap(IndirectHeap::Type::INDIRECT_OBJECT, 0u),
+                       csr->getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 0u),
                        0u, dispatchFlags, device->getDevice());
 
         csr->flushBatchedSubmissions();

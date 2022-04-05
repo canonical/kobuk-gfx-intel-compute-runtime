@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,6 +9,12 @@
 
 #include "shared/source/built_ins/built_ins.h"
 
+namespace NEO {
+const char *getAdditionalBuiltinAsString(EBuiltInOps::Type builtin) {
+    return nullptr;
+}
+} // namespace NEO
+
 namespace L0 {
 
 std::unique_lock<BuiltinFunctionsLib::MutexType> BuiltinFunctionsLib::obtainUniqueOwnership() {
@@ -16,15 +22,17 @@ std::unique_lock<BuiltinFunctionsLib::MutexType> BuiltinFunctionsLib::obtainUniq
 }
 
 void BuiltinFunctionsLibImpl::initBuiltinKernel(Builtin func) {
-    auto builtId = static_cast<uint32_t>(func);
-
     const char *builtinName = nullptr;
     NEO::EBuiltInOps::Type builtin;
 
-    switch (static_cast<Builtin>(builtId)) {
+    switch (func) {
     case Builtin::CopyBufferBytes:
         builtinName = "copyBufferToBufferBytesSingle";
         builtin = NEO::EBuiltInOps::CopyBufferToBuffer;
+        break;
+    case Builtin::CopyBufferBytesStateless:
+        builtinName = "copyBufferToBufferBytesSingle";
+        builtin = NEO::EBuiltInOps::CopyBufferToBufferStateless;
         break;
     case Builtin::CopyBufferRectBytes2d:
         builtinName = "CopyBufferRectBytes2d";
@@ -38,81 +46,47 @@ void BuiltinFunctionsLibImpl::initBuiltinKernel(Builtin func) {
         builtinName = "CopyBufferToBufferMiddleRegion";
         builtin = NEO::EBuiltInOps::CopyBufferToBuffer;
         break;
+    case Builtin::CopyBufferToBufferMiddleStateless:
+        builtinName = "CopyBufferToBufferMiddleRegion";
+        builtin = NEO::EBuiltInOps::CopyBufferToBufferStateless;
+        break;
     case Builtin::CopyBufferToBufferSide:
         builtinName = "CopyBufferToBufferSideRegion";
         builtin = NEO::EBuiltInOps::CopyBufferToBuffer;
+        break;
+    case Builtin::CopyBufferToBufferSideStateless:
+        builtinName = "CopyBufferToBufferSideRegion";
+        builtin = NEO::EBuiltInOps::CopyBufferToBufferStateless;
         break;
     case Builtin::FillBufferImmediate:
         builtinName = "FillBufferImmediate";
         builtin = NEO::EBuiltInOps::FillBuffer;
         break;
+    case Builtin::FillBufferImmediateStateless:
+        builtinName = "FillBufferImmediate";
+        builtin = NEO::EBuiltInOps::FillBufferStateless;
+        break;
     case Builtin::FillBufferSSHOffset:
         builtinName = "FillBufferSSHOffset";
         builtin = NEO::EBuiltInOps::FillBuffer;
         break;
+    case Builtin::FillBufferSSHOffsetStateless:
+        builtinName = "FillBufferSSHOffset";
+        builtin = NEO::EBuiltInOps::FillBufferStateless;
+        break;
     case Builtin::FillBufferMiddle:
         builtinName = "FillBufferMiddle";
         builtin = NEO::EBuiltInOps::FillBuffer;
+        break;
+    case Builtin::FillBufferMiddleStateless:
+        builtinName = "FillBufferMiddle";
+        builtin = NEO::EBuiltInOps::FillBufferStateless;
         break;
     case Builtin::FillBufferRightLeftover:
         builtinName = "FillBufferRightLeftover";
         builtin = NEO::EBuiltInOps::FillBuffer;
         break;
-    case Builtin::QueryKernelTimestamps:
-        builtinName = "QueryKernelTimestamps";
-        builtin = NEO::EBuiltInOps::QueryKernelTimestamps;
-        break;
-    case Builtin::QueryKernelTimestampsWithOffsets:
-        builtinName = "QueryKernelTimestampsWithOffsets";
-        builtin = NEO::EBuiltInOps::QueryKernelTimestamps;
-        break;
-    default:
-        UNRECOVERABLE_IF(true);
-    };
-
-    builtins[builtId] = loadBuiltIn(builtin, builtinName);
-}
-
-void BuiltinFunctionsLibImpl::initStatelessBuiltinKernel(Builtin func) {
-    auto builtId = static_cast<uint32_t>(func);
-
-    const char *builtinName = nullptr;
-    NEO::EBuiltInOps::Type builtin;
-
-    switch (static_cast<Builtin>(builtId)) {
-    case Builtin::CopyBufferBytes:
-        builtinName = "copyBufferToBufferBytesSingle";
-        builtin = NEO::EBuiltInOps::CopyBufferToBufferStateless;
-        break;
-    case Builtin::CopyBufferRectBytes2d:
-        builtinName = "CopyBufferRectBytes2d";
-        builtin = NEO::EBuiltInOps::CopyBufferRect;
-        break;
-    case Builtin::CopyBufferRectBytes3d:
-        builtinName = "CopyBufferRectBytes3d";
-        builtin = NEO::EBuiltInOps::CopyBufferRect;
-        break;
-    case Builtin::CopyBufferToBufferMiddle:
-        builtinName = "CopyBufferToBufferMiddleRegion";
-        builtin = NEO::EBuiltInOps::CopyBufferToBufferStateless;
-        break;
-    case Builtin::CopyBufferToBufferSide:
-        builtinName = "CopyBufferToBufferSideRegion";
-        builtin = NEO::EBuiltInOps::CopyBufferToBufferStateless;
-        break;
-    case Builtin::FillBufferImmediate:
-        builtinName = "FillBufferImmediate";
-        builtin = NEO::EBuiltInOps::FillBufferStateless;
-        break;
-    case Builtin::FillBufferSSHOffset:
-        builtinName = "FillBufferSSHOffset";
-        builtin = NEO::EBuiltInOps::FillBufferStateless;
-        break;
-    case Builtin::FillBufferMiddle:
-        builtinName = "FillBufferMiddle";
-        builtin = NEO::EBuiltInOps::FillBufferStateless;
-        break;
-    case Builtin::FillBufferRightLeftover:
+    case Builtin::FillBufferRightLeftoverStateless:
         builtinName = "FillBufferRightLeftover";
         builtin = NEO::EBuiltInOps::FillBufferStateless;
         break;
@@ -128,16 +102,15 @@ void BuiltinFunctionsLibImpl::initStatelessBuiltinKernel(Builtin func) {
         UNRECOVERABLE_IF(true);
     };
 
+    auto builtId = static_cast<uint32_t>(func);
     builtins[builtId] = loadBuiltIn(builtin, builtinName);
 }
 
 void BuiltinFunctionsLibImpl::initBuiltinImageKernel(ImageBuiltin func) {
-    auto builtId = static_cast<uint32_t>(func);
-
     const char *builtinName = nullptr;
     NEO::EBuiltInOps::Type builtin;
 
-    switch (static_cast<ImageBuiltin>(builtId)) {
+    switch (func) {
     case ImageBuiltin::CopyBufferToImage3d16Bytes:
         builtinName = "CopyBufferToImage3d16Bytes";
         builtin = NEO::EBuiltInOps::CopyBufferToImage3d;
@@ -186,6 +159,7 @@ void BuiltinFunctionsLibImpl::initBuiltinImageKernel(ImageBuiltin func) {
         UNRECOVERABLE_IF(true);
     };
 
+    auto builtId = static_cast<uint32_t>(func);
     imageBuiltins[builtId] = loadBuiltIn(builtin, builtinName);
 }
 
@@ -199,15 +173,6 @@ Kernel *BuiltinFunctionsLibImpl::getFunction(Builtin func) {
     return builtins[builtId]->func.get();
 }
 
-Kernel *BuiltinFunctionsLibImpl::getStatelessFunction(Builtin func) {
-    auto builtId = static_cast<uint32_t>(func);
-
-    if (builtins[builtId].get() == nullptr) {
-        initStatelessBuiltinKernel(func);
-    }
-
-    return builtins[builtId]->func.get();
-}
 Kernel *BuiltinFunctionsLibImpl::getImageFunction(ImageBuiltin func) {
     auto builtId = static_cast<uint32_t>(func);
 
@@ -221,16 +186,28 @@ Kernel *BuiltinFunctionsLibImpl::getImageFunction(ImageBuiltin func) {
 std::unique_ptr<BuiltinFunctionsLibImpl::BuiltinData> BuiltinFunctionsLibImpl::loadBuiltIn(NEO::EBuiltInOps::Type builtin, const char *builtInName) {
     using BuiltInCodeType = NEO::BuiltinCode::ECodeType;
 
-    auto builtInCodeType = NEO::DebugManager.flags.RebuildPrecompiledKernels.get() ? BuiltInCodeType::Intermediate : BuiltInCodeType::Binary;
-    auto builtInCode = builtInsLib->getBuiltinsLib().getBuiltinCode(builtin, builtInCodeType, *device->getNEODevice());
+    StackVec<BuiltInCodeType, 2> supportedTypes{};
+    if (!NEO::DebugManager.flags.RebuildPrecompiledKernels.get()) {
+        supportedTypes.push_back(BuiltInCodeType::Binary);
+    }
+    supportedTypes.push_back(BuiltInCodeType::Intermediate);
 
-    ze_result_t res;
+    NEO::BuiltinCode builtinCode{};
+
+    for (auto &builtinCodeType : supportedTypes) {
+        builtinCode = builtInsLib->getBuiltinsLib().getBuiltinCode(builtin, builtinCodeType, *device->getNEODevice());
+        if (!builtinCode.resource.empty()) {
+            break;
+        }
+    }
+
+    [[maybe_unused]] ze_result_t res;
     std::unique_ptr<Module> module;
     ze_module_handle_t moduleHandle;
     ze_module_desc_t moduleDesc = {};
-    moduleDesc.format = builtInCode.type == BuiltInCodeType::Binary ? ZE_MODULE_FORMAT_NATIVE : ZE_MODULE_FORMAT_IL_SPIRV;
-    moduleDesc.pInputModule = reinterpret_cast<uint8_t *>(&builtInCode.resource[0]);
-    moduleDesc.inputSize = builtInCode.resource.size();
+    moduleDesc.format = builtinCode.type == BuiltInCodeType::Binary ? ZE_MODULE_FORMAT_NATIVE : ZE_MODULE_FORMAT_IL_SPIRV;
+    moduleDesc.pInputModule = reinterpret_cast<uint8_t *>(&builtinCode.resource[0]);
+    moduleDesc.inputSize = builtinCode.resource.size();
     res = device->createModule(&moduleDesc, &moduleHandle, nullptr, ModuleType::Builtin);
     UNRECOVERABLE_IF(res != ZE_RESULT_SUCCESS);
 
@@ -242,7 +219,7 @@ std::unique_ptr<BuiltinFunctionsLibImpl::BuiltinData> BuiltinFunctionsLibImpl::l
     kernelDesc.pKernelName = builtInName;
     res = module->createKernel(&kernelDesc, &kernelHandle);
     DEBUG_BREAK_IF(res != ZE_RESULT_SUCCESS);
-    UNUSED_VARIABLE(res);
+
     kernel.reset(Kernel::fromHandle(kernelHandle));
     return std::unique_ptr<BuiltinData>(new BuiltinData{std::move(module), std::move(kernel)});
 }

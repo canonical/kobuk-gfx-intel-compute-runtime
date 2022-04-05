@@ -1,12 +1,15 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+
 #include "shared/offline_compiler/source/offline_compiler.h"
+
+#include "opencl/test/unit_test/offline_compiler/mock/mock_argument_helper.h"
 
 #include <string>
 
@@ -14,18 +17,21 @@ namespace NEO {
 
 class MockOfflineCompiler : public OfflineCompiler {
   public:
+    using OfflineCompiler::appendExtraInternalOptions;
     using OfflineCompiler::argHelper;
     using OfflineCompiler::deviceName;
     using OfflineCompiler::elfBinary;
+    using OfflineCompiler::excludeIr;
     using OfflineCompiler::fclDeviceCtx;
+    using OfflineCompiler::forceStatelessToStatefulOptimization;
     using OfflineCompiler::genBinary;
     using OfflineCompiler::genBinarySize;
     using OfflineCompiler::generateFilePathForIr;
     using OfflineCompiler::generateOptsSuffix;
-    using OfflineCompiler::getHardwareInfo;
     using OfflineCompiler::getStringWithinDelimiters;
     using OfflineCompiler::hwInfo;
     using OfflineCompiler::igcDeviceCtx;
+    using OfflineCompiler::initHardwareInfo;
     using OfflineCompiler::inputFileLlvm;
     using OfflineCompiler::inputFileSpirV;
     using OfflineCompiler::internalOptions;
@@ -37,6 +43,7 @@ class MockOfflineCompiler : public OfflineCompiler {
     using OfflineCompiler::outputFile;
     using OfflineCompiler::parseCommandLine;
     using OfflineCompiler::parseDebugSettings;
+    using OfflineCompiler::setStatelessToStatefullBufferOffsetFlag;
     using OfflineCompiler::sourceCode;
     using OfflineCompiler::storeBinary;
     using OfflineCompiler::updateBuildLog;
@@ -44,7 +51,8 @@ class MockOfflineCompiler : public OfflineCompiler {
     using OfflineCompiler::useOptionsSuffix;
 
     MockOfflineCompiler() : OfflineCompiler() {
-        uniqueHelper = std::make_unique<OclocArgHelper>();
+        uniqueHelper = std::make_unique<MockOclocArgHelper>(filesMap);
+        uniqueHelper->setAllCallBase(true);
         argHelper = uniqueHelper.get();
     }
     ~MockOfflineCompiler() override = default;
@@ -75,14 +83,16 @@ class MockOfflineCompiler : public OfflineCompiler {
     }
 
     void clearLog() {
-        uniqueHelper = std::make_unique<OclocArgHelper>();
+        uniqueHelper = std::make_unique<MockOclocArgHelper>(filesMap);
+        uniqueHelper->setAllCallBase(true);
         argHelper = uniqueHelper.get();
     }
 
+    std::map<std::string, std::string> filesMap{};
     int buildSourceCodeStatus = 0;
     bool overrideBuildSourceCodeStatus = false;
     uint32_t generateElfBinaryCalled = 0u;
     uint32_t writeOutAllFilesCalled = 0u;
-    std::unique_ptr<OclocArgHelper> uniqueHelper;
+    std::unique_ptr<MockOclocArgHelper> uniqueHelper;
 };
 } // namespace NEO

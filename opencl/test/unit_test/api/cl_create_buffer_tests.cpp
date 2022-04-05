@@ -1,18 +1,18 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/context/context.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 
 #include "cl_api_tests.h"
@@ -176,6 +176,56 @@ TEST_F(clCreateBufferTests, GivenValidParametersWhenCreatingBufferThenSuccessIsR
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
+TEST_F(clCreateBufferTests, GivenForceExtendedBufferSizeDebugFlagWhenBufferIsCreatedThenSizeIsProperlyExtended) {
+    DebugManagerStateRestore restorer;
+
+    unsigned char *pHostMem = nullptr;
+    cl_mem_flags flags = 0;
+    constexpr auto bufferSize = 16;
+
+    auto pageSizeNumber = 1;
+    DebugManager.flags.ForceExtendedBufferSize.set(pageSizeNumber);
+    auto extendedBufferSize = bufferSize + MemoryConstants::pageSize * pageSizeNumber;
+
+    auto buffer = clCreateBuffer(pContext, flags, bufferSize, pHostMem, &retVal);
+
+    EXPECT_NE(nullptr, buffer);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    auto bufferObj = NEO::castToObject<Buffer>(buffer);
+    EXPECT_EQ(extendedBufferSize, bufferObj->getSize());
+
+    clReleaseMemObject(buffer);
+
+    pageSizeNumber = 4;
+    DebugManager.flags.ForceExtendedBufferSize.set(pageSizeNumber);
+    extendedBufferSize = bufferSize + MemoryConstants::pageSize * pageSizeNumber;
+
+    buffer = clCreateBufferWithProperties(pContext, nullptr, flags, bufferSize, pHostMem, &retVal);
+
+    EXPECT_NE(nullptr, buffer);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    bufferObj = NEO::castToObject<Buffer>(buffer);
+    EXPECT_EQ(extendedBufferSize, bufferObj->getSize());
+
+    clReleaseMemObject(buffer);
+
+    pageSizeNumber = 6;
+    DebugManager.flags.ForceExtendedBufferSize.set(pageSizeNumber);
+    extendedBufferSize = bufferSize + MemoryConstants::pageSize * pageSizeNumber;
+
+    buffer = clCreateBufferWithPropertiesINTEL(pContext, nullptr, flags, bufferSize, pHostMem, &retVal);
+
+    EXPECT_NE(nullptr, buffer);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    bufferObj = NEO::castToObject<Buffer>(buffer);
+    EXPECT_EQ(extendedBufferSize, bufferObj->getSize());
+
+    clReleaseMemObject(buffer);
+}
+
 TEST_F(clCreateBufferTests, GivenNullContextWhenCreatingBufferThenInvalidContextErrorIsReturned) {
     unsigned char *pHostMem = nullptr;
     cl_mem_flags flags = 0;
@@ -271,6 +321,26 @@ TEST_F(clCreateBufferTests, GivenBufferSizeOverMaxMemAllocSizeAndClMemAllowUnres
     }
 
     auto buffer = clCreateBufferWithPropertiesINTEL(pContext, properties, 0, size, nullptr, &retVal);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, buffer);
+
+    retVal = clReleaseMemObject(buffer);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+TEST_F(clCreateBufferTests, GivenBufferSizeOverMaxMemAllocSizeAndDebugFlagSetWhenCreatingBufferThenClSuccessIsReturned) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.AllowUnrestrictedSize.set(1);
+    auto pDevice = pContext->getDevice(0);
+    size_t size = static_cast<size_t>(pDevice->getDevice().getDeviceInfo().maxMemAllocSize) + 1;
+    auto memoryManager = static_cast<OsAgnosticMemoryManager *>(pDevice->getMemoryManager());
+    memoryManager->turnOnFakingBigAllocations();
+
+    if (memoryManager->peekForce32BitAllocations() || is32bit) {
+        GTEST_SKIP();
+    }
+
+    auto buffer = clCreateBuffer(pContext, 0, size, nullptr, &retVal);
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_NE(nullptr, buffer);
 

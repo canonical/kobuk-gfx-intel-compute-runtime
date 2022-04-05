@@ -15,9 +15,6 @@ namespace L0 {
 namespace ult {
 
 using MockDriverHandle = Mock<L0::ult::DriverHandle>;
-using namespace testing;
-using ::testing::Invoke;
-using ::testing::Return;
 
 Mock<DriverHandle>::Mock() = default;
 
@@ -76,7 +73,7 @@ void Mock<DriverHandle>::setupDevices(std::vector<std::unique_ptr<NEO::Device>> 
         ze_result_t returnValue = ZE_RESULT_SUCCESS;
         this->rootDeviceIndices.insert(neoDevice->getRootDeviceIndex());
         this->deviceBitfields.insert({neoDevice->getRootDeviceIndex(), neoDevice->getDeviceBitfield()});
-        auto device = Device::create(this, neoDevice.release(), std::numeric_limits<uint32_t>::max(), false, &returnValue);
+        auto device = Device::create(this, neoDevice.release(), false, &returnValue);
         this->devices.push_back(device);
     }
 }

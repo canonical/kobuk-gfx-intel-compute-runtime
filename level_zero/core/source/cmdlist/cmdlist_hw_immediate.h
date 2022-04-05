@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -65,7 +65,8 @@ struct CommandListCoreFamilyImmediate : public CommandListCoreFamily<gfxCoreFami
 
     ze_result_t appendEventReset(ze_event_handle_t hEvent) override;
 
-    ze_result_t appendPageFaultCopy(NEO::GraphicsAllocation *dstptr, NEO::GraphicsAllocation *srcptr,
+    ze_result_t appendPageFaultCopy(NEO::GraphicsAllocation *dstAllocation,
+                                    NEO::GraphicsAllocation *srcAllocation,
                                     size_t size, bool flushHost) override;
 
     ze_result_t appendWaitOnEvents(uint32_t numEvents, ze_event_handle_t *phEvent) override;
@@ -108,9 +109,9 @@ struct CommandListCoreFamilyImmediate : public CommandListCoreFamily<gfxCoreFami
     ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration);
 
     void checkAvailableSpace();
+    void updateDispatchFlagsWithRequiredStreamState(NEO::DispatchFlags &dispatchFlags);
 
-  protected:
-    size_t cmdListBBEndOffset = 0;
+    ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration);
 };
 
 template <PRODUCT_FAMILY gfxProductFamily>

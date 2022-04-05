@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,9 +9,11 @@
 
 #include "shared/source/device_binary_format/patchtokens_decoder.h"
 #include "shared/source/helpers/api_specific_config.h"
+#include "shared/source/helpers/string.h"
 
 #include "igfxfmid.h"
 
+#include <RelocationInfo.h>
 #include <vector>
 
 extern GFXCORE_FAMILY renderCoreFamily;
@@ -332,4 +334,40 @@ struct ValidProgramWithKernelAndArg : ValidProgramWithKernel {
     size_t kernelArgOffset = 0U;
 };
 
+struct ValidProgramWithKernelUsingHostAccessTable : ValidProgramWithKernel {
+    ValidProgramWithKernelUsingHostAccessTable() {
+        hostAccessMutableOffset = storage.size();
+        iOpenCL::SPatchFunctionTableInfo hostAccessTok = {};
+        hostAccessTok.Token = iOpenCL::PATCH_TOKEN_GLOBAL_HOST_ACCESS_TABLE;
+        hostAccessTok.NumEntries = 2;
+        struct HostAccessTableEntry {
+            char deviceName[vISA::MAX_SYMBOL_NAME_LENGTH];
+            char hostName[vISA::MAX_SYMBOL_NAME_LENGTH];
+        };
+        hostAccessTok.Size = sizeof(hostAccessTok) + 2 * sizeof(HostAccessTableEntry);
+        const size_t hostAccessTokStorageSize = sizeof(hostAccessTok) + 2 * sizeof(HostAccessTableEntry);
+        uint8_t hostAccessTokStorage[hostAccessTokStorageSize] = {};
+        uint8_t *storagePtr = hostAccessTokStorage;
+        memcpy_s(storagePtr, hostAccessTokStorageSize, &hostAccessTok, sizeof(iOpenCL::SPatchFunctionTableInfo));
+        storagePtr = ptrOffset(storagePtr, sizeof(iOpenCL::SPatchFunctionTableInfo));
+
+        HostAccessTableEntry *entries = reinterpret_cast<HostAccessTableEntry *>(storagePtr);
+        strcpy_s(entries[0].deviceName, vISA::MAX_SYMBOL_NAME_LENGTH, "deviceNameOne");
+        strcpy_s(entries[0].hostName, vISA::MAX_SYMBOL_NAME_LENGTH, "hostNameOne");
+        strcpy_s(entries[1].deviceName, vISA::MAX_SYMBOL_NAME_LENGTH, "deviceNameTwo");
+        strcpy_s(entries[1].hostName, vISA::MAX_SYMBOL_NAME_LENGTH, "hostNameTwo");
+
+        storage.insert(storage.end(), hostAccessTokStorage, hostAccessTokStorage + hostAccessTokStorageSize);
+        ValidProgramWithKernel::recalcTokPtr();
+    }
+
+    void recalcTokPtr() {
+        ValidProgramWithKernel::recalcTokPtr();
+        hostAccessMutable = reinterpret_cast<iOpenCL::SPatchFunctionTableInfo *>(storage.data() + hostAccessMutableOffset);
+        this->kernels[0].tokens.hostAccessTable = hostAccessMutable;
+    }
+
+    iOpenCL::SPatchFunctionTableInfo *hostAccessMutable = nullptr;
+    size_t hostAccessMutableOffset = 0u;
+};
 } // namespace PatchTokensTestData

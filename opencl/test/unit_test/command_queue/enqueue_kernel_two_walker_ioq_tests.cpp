@@ -6,10 +6,11 @@
  */
 
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/libult/ult_command_stream_receiver.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/test/unit_test/fixtures/two_walker_fixture.h"
-#include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -60,9 +61,7 @@ HWTEST_F(IOQWithTwoWalkers, GivenTwoCommandQueuesWhenEnqueuingKernelThenOnePipeC
 
     // We should be writing a tag value to an address
     EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, pipeControl->getPostSyncOperation());
-    uint64_t addressPC = ((uint64_t)pipeControl->getAddressHigh() << 32) | pipeControl->getAddress();
-
     // The PC address should match the CS tag address
-    EXPECT_EQ(commandStreamReceiver.getTagAllocation()->getGpuAddress(), addressPC);
+    EXPECT_EQ(commandStreamReceiver.getTagAllocation()->getGpuAddress(), NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControl));
     EXPECT_EQ(1u, pipeControl->getImmediateData());
 }

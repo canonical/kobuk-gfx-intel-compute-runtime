@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,11 +8,11 @@
 #include "shared/source/built_ins/built_ins.h"
 #include "shared/source/built_ins/sip.h"
 #include "shared/test/common/helpers/test_files.h"
+#include "shared/test/common/libult/global_environment.h"
 #include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/test_macros/test.h"
 
-#include "opencl/test/unit_test/global_environment.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
-#include "test.h"
 
 #include "gtest/gtest.h"
 
@@ -33,10 +33,6 @@ TEST(Sip, WhenGettingTypeThenCorrectTypeIsReturned) {
 
     SipKernel undefined{SipKernelType::COUNT, nullptr, ssaHeader};
     EXPECT_EQ(SipKernelType::COUNT, undefined.getType());
-}
-
-TEST(Sip, givenSipKernelClassWhenAskedForMaxDebugSurfaceSizeThenCorrectValueIsReturned) {
-    EXPECT_EQ(0x1800000u, SipKernel::maxDbgSurfaceSize);
 }
 
 TEST(Sip, givenDebuggingInactiveWhenSipTypeIsQueriedThenCsrSipTypeIsReturned) {
@@ -67,4 +63,15 @@ TEST(DebugSip, givenBuiltInsWhenDbgCsrSipIsRequestedThenCorrectSipKernelIsReturn
     EXPECT_EQ(SipKernelType::DbgCsr, sipKernel.getType());
 }
 
+TEST(DebugBindlessSip, givenBindlessDebugSipIsRequestedThenCorrectSipKernelIsReturned) {
+    auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
+    EXPECT_NE(nullptr, mockDevice);
+
+    auto &sipKernel = NEO::SipKernel::getBindlessDebugSipKernel(*mockDevice);
+
+    EXPECT_NE(nullptr, &sipKernel);
+    EXPECT_EQ(SipKernelType::DbgBindless, sipKernel.getType());
+
+    EXPECT_FALSE(sipKernel.getStateSaveAreaHeader().empty());
+}
 } // namespace SipKernelTests

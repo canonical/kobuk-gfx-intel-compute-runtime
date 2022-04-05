@@ -1,16 +1,16 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/test/common/libult/linux/drm_mock.h"
+#include "shared/test/common/mocks/linux/mock_drm_allocation.h"
+#include "shared/test/common/test_macros/test.h"
 
-#include "opencl/test/unit_test/mocks/linux/mock_drm_allocation.h"
-#include "opencl/test/unit_test/os_interface/linux/drm_mock.h"
 #include "opencl/test/unit_test/utilities/file_logger_tests.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -27,7 +27,7 @@ TEST(FileLogger, GivenLogAllocationMemoryPoolFlagThenLogsCorrectInfo) {
     executionEnvironment->prepareRootDeviceEnvironments(1);
     DrmMock drm(*executionEnvironment->rootDeviceEnvironments[0]);
 
-    MockDrmAllocation allocation(GraphicsAllocation::AllocationType::BUFFER, MemoryPool::System64KBPages);
+    MockDrmAllocation allocation(AllocationType::BUFFER, MemoryPool::System64KBPages);
 
     allocation.setCpuPtrAndGpuAddress(&allocation, 0x12345);
 
@@ -63,6 +63,59 @@ TEST(FileLogger, GivenLogAllocationMemoryPoolFlagThenLogsCorrectInfo) {
     }
 }
 
+TEST(FileLogger, givenLogAllocationStdoutWhenLogAllocationThenLogToStdoutInsteadOfFileAndDoNotCreateFile) {
+    std::string testFile = "testfile";
+    DebugVariables flags;
+    flags.LogAllocationMemoryPool.set(true);
+    flags.LogAllocationStdout.set(true);
+    FullyEnabledFileLogger fileLogger(testFile, flags);
+
+    // Log file not created
+    bool logFileCreated = fileExists(fileLogger.getLogFileName());
+    EXPECT_FALSE(logFileCreated);
+    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
+    executionEnvironment->prepareRootDeviceEnvironments(1);
+    DrmMock drm(*executionEnvironment->rootDeviceEnvironments[0]);
+
+    MockDrmAllocation allocation(AllocationType::BUFFER, MemoryPool::System64KBPages);
+
+    allocation.setCpuPtrAndGpuAddress(&allocation, 0x12345);
+
+    MockBufferObject bo(&drm);
+    bo.handle = 4;
+
+    allocation.bufferObjects[0] = &bo;
+
+    testing::internal::CaptureStdout();
+    fileLogger.logAllocation(&allocation);
+    std::string output = testing::internal::GetCapturedStdout();
+
+    std::thread::id thisThread = std::this_thread::get_id();
+
+    std::stringstream threadIDCheck;
+    threadIDCheck << " ThreadID: " << thisThread;
+
+    std::stringstream memoryPoolCheck;
+    memoryPoolCheck << " MemoryPool: " << allocation.getMemoryPool();
+
+    std::stringstream gpuAddressCheck;
+    gpuAddressCheck << " GPU address: 0x" << std::hex << allocation.getGpuAddress();
+
+    std::stringstream rootDeviceIndexCheck;
+    rootDeviceIndexCheck << " Root device index: " << allocation.getRootDeviceIndex();
+
+    EXPECT_TRUE(output.find(threadIDCheck.str()) != std::string::npos);
+    EXPECT_TRUE(output.find(memoryPoolCheck.str()) != std::string::npos);
+    EXPECT_TRUE(output.find(gpuAddressCheck.str()) != std::string::npos);
+    EXPECT_TRUE(output.find(rootDeviceIndexCheck.str()) != std::string::npos);
+    EXPECT_TRUE(output.find("AllocationType: BUFFER") != std::string::npos);
+    EXPECT_TRUE(output.find("Handle: 4") != std::string::npos);
+    EXPECT_TRUE(output.find("\n") != std::string::npos);
+
+    logFileCreated = fileExists(fileLogger.getLogFileName());
+    EXPECT_FALSE(logFileCreated);
+}
+
 TEST(FileLogger, GivenDrmAllocationWithoutBOThenNoHandleLogged) {
     std::string testFile = "testfile";
     DebugVariables flags;
@@ -72,7 +125,7 @@ TEST(FileLogger, GivenDrmAllocationWithoutBOThenNoHandleLogged) {
     // Log file not created
     bool logFileCreated = fileExists(fileLogger.getLogFileName());
     EXPECT_FALSE(logFileCreated);
-    MockDrmAllocation allocation(GraphicsAllocation::AllocationType::BUFFER, MemoryPool::System64KBPages);
+    MockDrmAllocation allocation(AllocationType::BUFFER, MemoryPool::System64KBPages);
 
     fileLogger.logAllocation(&allocation);
 
@@ -103,7 +156,7 @@ TEST(FileLogger, GivenLogAllocationMemoryPoolFlagSetFalseThenAllocationIsNotLogg
     bool logFileCreated = fileExists(fileLogger.getLogFileName());
     EXPECT_FALSE(logFileCreated);
 
-    MockDrmAllocation allocation(GraphicsAllocation::AllocationType::BUFFER, MemoryPool::System64KBPages);
+    MockDrmAllocation allocation(AllocationType::BUFFER, MemoryPool::System64KBPages);
 
     fileLogger.logAllocation(&allocation);
 

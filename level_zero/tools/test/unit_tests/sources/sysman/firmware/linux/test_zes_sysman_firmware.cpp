@@ -6,6 +6,9 @@
  */
 
 #include "level_zero/tools/test/unit_tests/sources/sysman/firmware/linux/mock_zes_sysman_firmware.h"
+
+extern bool sysmanUltsEnable;
+
 using ::testing::_;
 namespace L0 {
 namespace ult {
@@ -20,6 +23,9 @@ class ZesFirmwareFixture : public SysmanDeviceFixture {
     FsAccess *pFsAccessOriginal = nullptr;
 
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::SetUp();
         pFsAccessOriginal = pLinuxSysmanImp->pFsAccess;
         pFsAccess = std::make_unique<NiceMock<Mock<FirmwareFsAccess>>>();
@@ -29,17 +35,11 @@ class ZesFirmwareFixture : public SysmanDeviceFixture {
         pMockFwInterface = std::make_unique<NiceMock<Mock<FirmwareInterface>>>();
         pLinuxSysmanImp->pFwUtilInterface = pMockFwInterface.get();
         ON_CALL(*pMockFwInterface.get(), fwDeviceInit())
-            .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockFwDeviceInit));
-        ON_CALL(*pMockFwInterface.get(), fwGetVersion(_))
-            .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockFwGetVersion));
-        ON_CALL(*pMockFwInterface.get(), opromGetVersion(_))
-            .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockOpromGetVersion));
+            .WillByDefault(::testing::Return(ZE_RESULT_SUCCESS));
         ON_CALL(*pMockFwInterface.get(), getFirstDevice(_))
-            .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockGetFirstDevice));
-        ON_CALL(*pMockFwInterface.get(), fwFlashGSC(_, _))
-            .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockFwFlash));
-        ON_CALL(*pMockFwInterface.get(), fwFlashOprom(_, _))
-            .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockFwFlash));
+            .WillByDefault(::testing::Return(ZE_RESULT_SUCCESS));
+        ON_CALL(*pMockFwInterface.get(), getDeviceSupportedFwTypes(_))
+            .WillByDefault(::testing::SetArgReferee<0>(mockSupportedFwTypes));
         ON_CALL(*pFsAccess.get(), read(_, _))
             .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<FirmwareFsAccess>::readValSuccess));
         for (const auto &handle : pSysmanDeviceImp->pFirmwareHandleContext->handleList) {
@@ -49,6 +49,9 @@ class ZesFirmwareFixture : public SysmanDeviceFixture {
         pSysmanDeviceImp->pFirmwareHandleContext->init();
     }
     void TearDown() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::TearDown();
         pLinuxSysmanImp->pFwUtilInterface = pFwUtilInterfaceOld;
         pLinuxSysmanImp->pFsAccess = pFsAccessOriginal;
@@ -107,6 +110,9 @@ TEST_F(ZesFirmwareFixture, GivenValidFirmwareHandleWhenGettingFirmwareProperties
     FirmwareImp *ptestFirmwareImp = new FirmwareImp(pSysmanDeviceImp->pFirmwareHandleContext->pOsSysman, mockSupportedFwTypes[0]);
     pSysmanDeviceImp->pFirmwareHandleContext->handleList.push_back(ptestFirmwareImp);
 
+    ON_CALL(*pMockFwInterface.get(), getFwVersion(_, _))
+        .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockGetFwVersion));
+
     auto handles = get_firmware_handles(mockHandleCount);
 
     zes_firmware_properties_t properties = {};
@@ -121,6 +127,9 @@ TEST_F(ZesFirmwareFixture, GivenValidFirmwareHandleWhenGettingFirmwareProperties
 TEST_F(ZesFirmwareFixture, GivenValidFirmwareHandleWhenGettingOpromPropertiesThenVersionIsReturned) {
     FirmwareImp *ptestFirmwareImp = new FirmwareImp(pSysmanDeviceImp->pFirmwareHandleContext->pOsSysman, mockSupportedFwTypes[1]);
     pSysmanDeviceImp->pFirmwareHandleContext->handleList.push_back(ptestFirmwareImp);
+
+    ON_CALL(*pMockFwInterface.get(), getFwVersion(_, _))
+        .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockGetFwVersion));
 
     auto handles = get_firmware_handles(mockHandleCount);
 
@@ -139,16 +148,32 @@ TEST_F(ZesFirmwareFixture, GivenFailedFirmwareInitializationWhenInitializingFirm
     }
     pSysmanDeviceImp->pFirmwareHandleContext->handleList.clear();
     ON_CALL(*pMockFwInterface.get(), fwDeviceInit())
-        .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockFwDeviceInitFail));
+        .WillByDefault(::testing::Return(ZE_RESULT_ERROR_UNKNOWN));
 
     pSysmanDeviceImp->pFirmwareHandleContext->init();
 
     EXPECT_EQ(0u, pSysmanDeviceImp->pFirmwareHandleContext->handleList.size());
 }
 
+TEST_F(ZesFirmwareFixture, GivenRepeatedFWTypesWhenInitializingFirmwareContextThenexpectNoHandles) {
+    for (const auto &handle : pSysmanDeviceImp->pFirmwareHandleContext->handleList) {
+        delete handle;
+    }
+    pSysmanDeviceImp->pFirmwareHandleContext->handleList.clear();
+    ON_CALL(*pFsAccess.get(), read(_, _))
+        .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<FirmwareFsAccess>::readMtdValSuccess));
+
+    pSysmanDeviceImp->pFirmwareHandleContext->init();
+
+    EXPECT_EQ(1u, pSysmanDeviceImp->pFirmwareHandleContext->handleList.size());
+}
+
 TEST_F(ZesFirmwareFixture, GivenValidFirmwareHandleWhenFlashingGscFirmwareThenSuccessIsReturned) {
     FirmwareImp *ptestFirmwareImp = new FirmwareImp(pSysmanDeviceImp->pFirmwareHandleContext->pOsSysman, mockSupportedFwTypes[0]);
     pSysmanDeviceImp->pFirmwareHandleContext->handleList.push_back(ptestFirmwareImp);
+
+    ON_CALL(*pMockFwInterface.get(), flashFirmware(_, _, _))
+        .WillByDefault(::testing::Return(ZE_RESULT_SUCCESS));
 
     auto handles = get_firmware_handles(mockHandleCount);
     uint8_t testImage[ZES_STRING_PROPERTY_SIZE] = {};
@@ -168,6 +193,9 @@ TEST_F(ZesFirmwareFixture, GivenValidFirmwareHandleWhenFlashingUnkownFirmwareThe
     FirmwareImp *ptestFirmwareImp = new FirmwareImp(pSysmanDeviceImp->pFirmwareHandleContext->pOsSysman, mockUnsupportedFwTypes[0]);
     pSysmanDeviceImp->pFirmwareHandleContext->handleList.push_back(ptestFirmwareImp);
 
+    ON_CALL(*pMockFwInterface.get(), flashFirmware(_, _, _))
+        .WillByDefault(::testing::Return(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE));
+
     uint8_t testImage[ZES_STRING_PROPERTY_SIZE] = {};
     memset(testImage, 0xA, ZES_STRING_PROPERTY_SIZE);
     auto handle = pSysmanDeviceImp->pFirmwareHandleContext->handleList[0]->toHandle();
@@ -183,7 +211,7 @@ TEST_F(ZesFirmwareFixture, GivenFirmwareInitializationFailureThenCreateHandleMus
     }
     pSysmanDeviceImp->pFirmwareHandleContext->handleList.clear();
     ON_CALL(*pMockFwInterface.get(), fwDeviceInit())
-        .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockFwDeviceInitFail));
+        .WillByDefault(::testing::Return(ZE_RESULT_ERROR_UNKNOWN));
     pSysmanDeviceImp->pFirmwareHandleContext->init();
     EXPECT_EQ(0u, pSysmanDeviceImp->pFirmwareHandleContext->handleList.size());
 }
@@ -193,10 +221,9 @@ TEST_F(ZesFirmwareFixture, GivenValidFirmwareHandleFirmwareLibraryCallFailureWhe
         delete handle;
     }
     pSysmanDeviceImp->pFirmwareHandleContext->handleList.clear();
-    ON_CALL(*pMockFwInterface.get(), fwGetVersion(_))
-        .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockFwGetVersionFailed));
-    ON_CALL(*pMockFwInterface.get(), opromGetVersion(_))
-        .WillByDefault(::testing::Invoke(pMockFwInterface.get(), &Mock<FirmwareInterface>::mockFwGetVersionFailed));
+    ON_CALL(*pMockFwInterface.get(), getFwVersion(_, _))
+        .WillByDefault(::testing::Return(ZE_RESULT_ERROR_UNINITIALIZED));
+
     pSysmanDeviceImp->pFirmwareHandleContext->init();
     auto handles = get_firmware_handles(mockHandleCount);
 
@@ -220,6 +247,9 @@ class ZesFirmwareUninitializedFixture : public SysmanDeviceFixture {
     FsAccess *pFsAccessOriginal = nullptr;
 
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::SetUp();
         pFsAccessOriginal = pLinuxSysmanImp->pFsAccess;
         pFsAccess = std::make_unique<NiceMock<Mock<FirmwareFsAccess>>>();
@@ -231,20 +261,14 @@ class ZesFirmwareUninitializedFixture : public SysmanDeviceFixture {
             .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<FirmwareFsAccess>::readValSuccess));
     }
     void TearDown() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::TearDown();
         pLinuxSysmanImp->pFwUtilInterface = pFwUtilInterfaceOld;
         pLinuxSysmanImp->pFsAccess = pFsAccessOriginal;
     }
 };
-
-TEST_F(ZesFirmwareUninitializedFixture, GivenFirmwareLibraryMissingThenCreateHandleMustFail) {
-    for (const auto &handle : pSysmanDeviceImp->pFirmwareHandleContext->handleList) {
-        delete handle;
-    }
-    pSysmanDeviceImp->pFirmwareHandleContext->handleList.clear();
-    pSysmanDeviceImp->pFirmwareHandleContext->init();
-    EXPECT_EQ(0u, pSysmanDeviceImp->pFirmwareHandleContext->handleList.size());
-}
 
 } // namespace ult
 } // namespace L0

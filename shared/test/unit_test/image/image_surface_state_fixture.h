@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,9 +13,8 @@
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/memory_manager/surface.h"
 #include "shared/test/common/fixtures/device_fixture.h"
-
-#include "opencl/test/unit_test/mocks/mock_gmm.h"
-#include "test.h"
+#include "shared/test/common/mocks/mock_gmm.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include <memory>
 
@@ -27,6 +26,7 @@ class ImageSurfaceStateTests : public DeviceFixture,
     ImageSurfaceStateTests() = default;
     void SetUp() override {
         DeviceFixture::SetUp();
+        mockGmm = std::make_unique<MockGmm>(pDevice->getGmmClientContext());
         gmmHelper = pDevice->getGmmHelper();
     }
 
@@ -34,9 +34,9 @@ class ImageSurfaceStateTests : public DeviceFixture,
         DeviceFixture::TearDown();
     }
 
-    MockGmm mockGmm;
+    std::unique_ptr<MockGmm> mockGmm;
     GmmHelper *gmmHelper = nullptr;
-    NEO::ImageInfo imageInfo;
+    NEO::ImageInfo imageInfo{};
 };
 
 } // namespace NEO

@@ -5,7 +5,7 @@
  *
  */
 
-#include "shared/source/os_interface/linux/memory_info_impl.h"
+#include "shared/source/os_interface/linux/memory_info.h"
 
 #include "level_zero/tools/source/sysman/memory/linux/os_memory_imp.h"
 
@@ -40,22 +40,22 @@ ze_result_t LinuxMemoryImp::getBandwidth(zes_mem_bandwidth_t *pBandwidth) {
 }
 
 ze_result_t LinuxMemoryImp::getState(zes_mem_state_t *pState) {
-    std::vector<drm_i915_memory_region_info> deviceRegions;
+    std::vector<NEO::MemoryRegion> deviceRegions;
     if (pDrm->queryMemoryInfo() == false) {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
-    auto memoryInfo = static_cast<NEO::MemoryInfoImpl *>(pDrm->getMemoryInfo());
+    auto memoryInfo = pDrm->getMemoryInfo();
     if (!memoryInfo) {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
-    for (auto region : memoryInfo->regions) {
-        if (region.region.memory_class == I915_MEMORY_CLASS_DEVICE) {
+    for (auto region : memoryInfo->getDrmRegionInfos()) {
+        if (region.region.memoryClass == I915_MEMORY_CLASS_DEVICE) {
             deviceRegions.push_back(region);
         }
     }
-    pState->free = deviceRegions[subdeviceId].unallocated_size;
-    pState->size = deviceRegions[subdeviceId].probed_size;
+    pState->free = deviceRegions[subdeviceId].unallocatedSize;
+    pState->size = deviceRegions[subdeviceId].probedSize;
     pState->health = ZES_MEM_HEALTH_OK;
 
     return ZE_RESULT_SUCCESS;

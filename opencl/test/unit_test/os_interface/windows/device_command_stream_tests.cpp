@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #include "shared/source/command_stream/aub_command_stream_receiver.h"
 #include "shared/source/command_stream/command_stream_receiver.h"
+#include "shared/source/command_stream/command_stream_receiver_with_aub_dump.h"
 #include "shared/source/command_stream/device_command_stream.h"
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/command_stream/preemption.h"
@@ -17,37 +18,33 @@
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/os_interface.h"
+#include "shared/source/os_interface/sys_calls_common.h"
 #include "shared/source/os_interface/windows/os_context_win.h"
+#include "shared/source/os_interface/windows/wddm_device_command_stream.h"
 #include "shared/source/os_interface/windows/wddm_memory_manager.h"
 #include "shared/source/os_interface/windows/wddm_memory_operations_handler.h"
 #include "shared/source/os_interface/windows/wddm_residency_controller.h"
 #include "shared/test/common/fixtures/device_fixture.h"
+#include "shared/test/common/fixtures/memory_management_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
+#include "shared/test/common/helpers/engine_descriptor_helper.h"
+#include "shared/test/common/helpers/execution_environment_helper.h"
+#include "shared/test/common/mocks/mock_builtins.h"
 #include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_gmm_page_table_mngr.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/mock_io_functions.h"
+#include "shared/test/common/mocks/mock_submissions_aggregator.h"
+#include "shared/test/common/mocks/mock_wddm_interface23.h"
+#include "shared/test/common/mocks/windows/mock_gdi_interface.h"
 #include "shared/test/common/mocks/windows/mock_wddm_direct_submission.h"
+#include "shared/test/common/os_interface/windows/mock_wddm_memory_manager.h"
 #include "shared/test/common/os_interface/windows/wddm_fixture.h"
+#include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/fixtures/mock_aub_center_fixture.h"
-#include "shared/test/unit_test/os_interface/windows/mock_gdi_interface.h"
 
-#include "opencl/source/command_stream/command_stream_receiver_with_aub_dump.h"
-#include "opencl/source/mem_obj/buffer.h"
-#include "opencl/source/os_interface/windows/wddm_device_command_stream.h"
-#include "opencl/source/platform/platform.h"
-#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
-#include "opencl/test/unit_test/fixtures/memory_management_fixture.h"
-#include "opencl/test/unit_test/helpers/execution_environment_helper.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
-#include "opencl/test/unit_test/mocks/mock_builtins.h"
-#include "opencl/test/unit_test/mocks/mock_gmm_page_table_mngr.h"
-#include "opencl/test/unit_test/mocks/mock_platform.h"
-#include "opencl/test/unit_test/mocks/mock_program.h"
-#include "opencl/test/unit_test/mocks/mock_submissions_aggregator.h"
-#include "opencl/test/unit_test/mocks/mock_wddm_interface23.h"
-#include "opencl/test/unit_test/os_interface/windows/mock_wddm_memory_manager.h"
-#include "test.h"
 
 #include "hw_cmds.h"
 
@@ -63,7 +60,7 @@ class WddmCommandStreamFixture {
 
     DebugManagerStateRestore stateRestore;
 
-    virtual void SetUp() {
+    void SetUp() {
         HardwareInfo *hwInfo = nullptr;
         DebugManager.flags.CsrDispatchMode.set(static_cast<uint32_t>(DispatchMode::ImmediateDispatch));
         auto executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
@@ -79,7 +76,7 @@ class WddmCommandStreamFixture {
         csr->getOsContext().ensureContextInitialized();
     }
 
-    virtual void TearDown() {
+    void TearDown() {
     }
 };
 
@@ -123,12 +120,12 @@ struct MockWddmCsr : public WddmCommandStreamReceiver<GfxFamily> {
             if (!initBlitterDirectSubmission) {
                 directSubmission = std::make_unique<
                     MockWddmDirectSubmission<GfxFamily, RenderDispatcher<GfxFamily>>>(device, osContext);
-                ret = directSubmission->initialize(true);
+                ret = directSubmission->initialize(true, false);
                 this->dispatchMode = DispatchMode::ImmediateDispatch;
             } else {
                 blitterDirectSubmission = std::make_unique<
                     MockWddmDirectSubmission<GfxFamily, BlitterDispatcher<GfxFamily>>>(device, osContext);
-                blitterDirectSubmission->initialize(true);
+                blitterDirectSubmission->initialize(true, false);
             }
         }
         return ret;
@@ -151,7 +148,7 @@ class WddmCommandStreamWithMockGdiFixture {
     DebugManagerStateRestore stateRestore;
     GraphicsAllocation *preemptionAllocation = nullptr;
 
-    virtual void SetUp() {
+    void SetUp() {
         HardwareInfo *hwInfo = nullptr;
         ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
         wddm = static_cast<WddmMock *>(executionEnvironment->rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Wddm>());
@@ -169,14 +166,14 @@ class WddmCommandStreamWithMockGdiFixture {
         this->csr->overrideRecorededCommandBuffer(*device);
     }
 
-    virtual void TearDown() {
+    void TearDown() {
         wddm = nullptr;
     }
 };
 
 using WddmCommandStreamTest = ::Test<WddmCommandStreamFixture>;
 using WddmCommandStreamMockGdiTest = ::Test<WddmCommandStreamWithMockGdiFixture>;
-using WddmDefaultTest = ::Test<ClDeviceFixture>;
+using WddmDefaultTest = ::Test<DeviceFixture>;
 struct DeviceCommandStreamTest : ::Test<MockAubCenterFixture>, DeviceFixture {
     void SetUp() override {
         DeviceFixture::SetUp();
@@ -251,10 +248,14 @@ TEST_F(WddmCommandStreamTest, givenPrintIndicesEnabledWhenFlushThenPrintIndices)
     const std::string engineType = EngineHelpers::engineTypeToString(csr->getOsContext().getEngineType());
     const std::string engineUsage = EngineHelpers::engineUsageToString(csr->getOsContext().getEngineUsage());
     std::ostringstream expectedValue;
-    expectedValue << "Submission to RootDevice Index: " << csr->getRootDeviceIndex()
+    expectedValue << SysCalls::getProcessId() << ": Submission to RootDevice Index: " << csr->getRootDeviceIndex()
                   << ", Sub-Devices Mask: " << csr->getOsContext().getDeviceBitfield().to_ulong()
                   << ", EngineId: " << csr->getOsContext().getEngineType()
                   << " (" << engineType << ", " << engineUsage << ")\n";
+
+    auto osContextWin = static_cast<OsContextWin *>(&csr->getOsContext());
+
+    expectedValue << SysCalls::getProcessId() << ": Wddm Submission with context handle " << osContextWin->getWddmContextHandle() << " and HwQueue handle " << osContextWin->getHwQueue().handle << "\n";
     EXPECT_STREQ(::testing::internal::GetCapturedStdout().c_str(), expectedValue.str().c_str());
 
     memoryManager->freeGraphicsMemory(commandBuffer);
@@ -305,18 +306,33 @@ TEST_F(WddmCommandStreamTest, givenWdmmWhenSubmitIsCalledThenCoherencyRequiredFl
     memoryManager->freeGraphicsMemory(commandBuffer);
 }
 
-TEST(WddmPreemptionHeaderTests, givenWddmCommandStreamReceiverWhenPreemptionIsOffWhenWorkloadIsSubmittedThenHeaderDoesntHavePreemptionFieldSet) {
+struct WddmPreemptionHeaderFixture {
+    void SetUp() {
+        executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
+        executionEnvironment->incRefInternal();
+        wddm = static_cast<WddmMock *>(executionEnvironment->rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Wddm>());
+    }
+
+    void TearDown() {
+        executionEnvironment->decRefInternal();
+    }
+
+    ExecutionEnvironment *executionEnvironment = nullptr;
     HardwareInfo *hwInfo = nullptr;
-    ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
+    WddmMock *wddm = nullptr;
+};
+
+using WddmPreemptionHeaderTests = ::Test<WddmPreemptionHeaderFixture>;
+
+TEST_F(WddmPreemptionHeaderTests, givenWddmCommandStreamReceiverWhenPreemptionIsOffWhenWorkloadIsSubmittedThenHeaderDoesntHavePreemptionFieldSet) {
     hwInfo->capabilityTable.defaultPreemptionMode = PreemptionMode::Disabled;
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(hwInfo);
-    auto wddm = static_cast<WddmMock *>(executionEnvironment->rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Wddm>());
     auto csr = std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment, 0, 1);
     executionEnvironment->memoryManager.reset(new MemoryManagerCreate<WddmMemoryManager>(false, false, *executionEnvironment));
     csr->overrideDispatchPolicy(DispatchMode::ImmediateDispatch);
-    OsContextWin osContext(*wddm, 0u, 1, HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
-                           PreemptionHelper::getDefaultPreemptionMode(*hwInfo),
-                           false);
+    OsContextWin osContext(*wddm, 0u,
+                           EngineDescriptorHelper::getDefaultDescriptor(HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
+                                                                        PreemptionHelper::getDefaultPreemptionMode(*hwInfo)));
     csr->setupContext(osContext);
 
     auto commandBuffer = executionEnvironment->memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{csr->getRootDeviceIndex(), MemoryConstants::pageSize});
@@ -331,18 +347,15 @@ TEST(WddmPreemptionHeaderTests, givenWddmCommandStreamReceiverWhenPreemptionIsOf
     executionEnvironment->memoryManager->freeGraphicsMemory(commandBuffer);
 }
 
-TEST(WddmPreemptionHeaderTests, givenWddmCommandStreamReceiverWhenPreemptionIsOnWhenWorkloadIsSubmittedThenHeaderDoesHavePreemptionFieldSet) {
-    HardwareInfo *hwInfo = nullptr;
-    ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
+TEST_F(WddmPreemptionHeaderTests, givenWddmCommandStreamReceiverWhenPreemptionIsOnWhenWorkloadIsSubmittedThenHeaderDoesHavePreemptionFieldSet) {
     hwInfo->capabilityTable.defaultPreemptionMode = PreemptionMode::MidThread;
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(hwInfo);
-    auto wddm = static_cast<WddmMock *>(executionEnvironment->rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Wddm>());
     auto csr = std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment, 0, 1);
     executionEnvironment->memoryManager.reset(new MemoryManagerCreate<WddmMemoryManager>(false, false, *executionEnvironment));
     csr->overrideDispatchPolicy(DispatchMode::ImmediateDispatch);
-    OsContextWin osContext(*wddm, 0u, 1, HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
-                           PreemptionHelper::getDefaultPreemptionMode(*hwInfo),
-                           false);
+    OsContextWin osContext(*wddm, 0u,
+                           EngineDescriptorHelper::getDefaultDescriptor(HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
+                                                                        PreemptionHelper::getDefaultPreemptionMode(*hwInfo)));
     csr->setupContext(osContext);
 
     auto commandBuffer = executionEnvironment->memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{csr->getRootDeviceIndex(), MemoryConstants::pageSize});
@@ -358,9 +371,7 @@ TEST(WddmPreemptionHeaderTests, givenWddmCommandStreamReceiverWhenPreemptionIsOn
     executionEnvironment->memoryManager->freeGraphicsMemory(commandBuffer);
 }
 
-TEST(WddmPreemptionHeaderTests, givenDeviceSupportingPreemptionWhenCommandStreamReceiverIsCreatedThenHeaderContainsPreemptionFieldSet) {
-    HardwareInfo *hwInfo = nullptr;
-    ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
+TEST_F(WddmPreemptionHeaderTests, givenDeviceSupportingPreemptionWhenCommandStreamReceiverIsCreatedThenHeaderContainsPreemptionFieldSet) {
     hwInfo->capabilityTable.defaultPreemptionMode = PreemptionMode::MidThread;
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(hwInfo);
     auto commandStreamReceiver = std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment, 0, 1);
@@ -369,9 +380,7 @@ TEST(WddmPreemptionHeaderTests, givenDeviceSupportingPreemptionWhenCommandStream
     EXPECT_TRUE(header->NeedsMidBatchPreEmptionSupport);
 }
 
-TEST(WddmPreemptionHeaderTests, givenDevicenotSupportingPreemptionWhenCommandStreamReceiverIsCreatedThenHeaderPreemptionFieldIsNotSet) {
-    HardwareInfo *hwInfo = nullptr;
-    ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
+TEST_F(WddmPreemptionHeaderTests, givenDevicenotSupportingPreemptionWhenCommandStreamReceiverIsCreatedThenHeaderPreemptionFieldIsNotSet) {
     hwInfo->capabilityTable.defaultPreemptionMode = PreemptionMode::Disabled;
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(hwInfo);
     auto commandStreamReceiver = std::make_unique<MockWddmCsr<DEFAULT_TEST_FAMILY_NAME>>(*executionEnvironment, 0, 1);
@@ -461,7 +470,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafDisabledWhenFlushIsCalledWithAll
     LinearStream cs(commandBuffer);
     BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
-    auto linearStreamAllocation = memoryManager->allocateGraphicsMemoryWithProperties({csr->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::LINEAR_STREAM, device->getDeviceBitfield()});
+    auto linearStreamAllocation = memoryManager->allocateGraphicsMemoryWithProperties({csr->getRootDeviceIndex(), MemoryConstants::pageSize, AllocationType::LINEAR_STREAM, device->getDeviceBitfield()});
     ASSERT_NE(nullptr, linearStreamAllocation);
     ResidencyContainer allocationsForResidency = {linearStreamAllocation};
 
@@ -496,7 +505,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafEnabledWhenFlushIsCalledWithResi
     LinearStream cs(commandBuffer);
     BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
-    auto linearStreamAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({csr->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::LINEAR_STREAM, device->getDeviceBitfield()}));
+    auto linearStreamAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({csr->getRootDeviceIndex(), MemoryConstants::pageSize, AllocationType::LINEAR_STREAM, device->getDeviceBitfield()}));
     ASSERT_NE(nullptr, linearStreamAllocation);
 
     csr->makeResident(*linearStreamAllocation);
@@ -520,7 +529,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafEnabledWhenFlushIsCalledWithAllo
     LinearStream cs(commandBuffer);
     BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
-    auto linearStreamAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({csr->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::LINEAR_STREAM, device->getDeviceBitfield()}));
+    auto linearStreamAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({csr->getRootDeviceIndex(), MemoryConstants::pageSize, AllocationType::LINEAR_STREAM, device->getDeviceBitfield()}));
     ASSERT_NE(nullptr, linearStreamAllocation);
     ResidencyContainer allocationsForResidency = {linearStreamAllocation};
 
@@ -541,7 +550,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafEnabledWhenFlushIsCalledWithAllo
     LinearStream cs(commandBuffer);
     BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
-    auto fillPatternAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({csr->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::FILL_PATTERN, device->getDeviceBitfield()}));
+    auto fillPatternAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({csr->getRootDeviceIndex(), MemoryConstants::pageSize, AllocationType::FILL_PATTERN, device->getDeviceBitfield()}));
     ASSERT_NE(nullptr, fillPatternAllocation);
     ResidencyContainer allocationsForResidency = {fillPatternAllocation};
 
@@ -562,7 +571,7 @@ TEST_F(WddmCommandStreamTest, givenWddmWithKmDafEnabledWhenFlushIsCalledWithAllo
     LinearStream cs(commandBuffer);
     BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
 
-    auto commandBufferAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({csr->getRootDeviceIndex(), MemoryConstants::pageSize, GraphicsAllocation::AllocationType::COMMAND_BUFFER, device->getDeviceBitfield()}));
+    auto commandBufferAllocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties({csr->getRootDeviceIndex(), MemoryConstants::pageSize, AllocationType::COMMAND_BUFFER, device->getDeviceBitfield()}));
     ASSERT_NE(nullptr, commandBufferAllocation);
     ResidencyContainer allocationsForResidency = {commandBufferAllocation};
 
@@ -772,7 +781,8 @@ TEST_F(WddmCommandStreamTest, givenTwoTemporaryAllocationsWhenCleanTemporaryAllo
     graphicsAllocation->updateTaskCount(1, csr->getOsContext().getContextId());
     graphicsAllocation2->updateTaskCount(100, csr->getOsContext().getContextId());
 
-    csr->waitForTaskCountAndCleanAllocationList(1, TEMPORARY_ALLOCATION);
+    const auto firstWaitResult = csr->waitForTaskCountAndCleanAllocationList(1, TEMPORARY_ALLOCATION);
+    EXPECT_EQ(WaitStatus::Ready, firstWaitResult);
     // graphicsAllocation2 still lives
     EXPECT_EQ(host_ptr2, graphicsAllocation2->getUnderlyingBuffer());
 
@@ -788,8 +798,10 @@ TEST_F(WddmCommandStreamTest, givenTwoTemporaryAllocationsWhenCleanTemporaryAllo
 
     auto fragment2 = hostPtrManager->getFragment({alignedPtr, csr->getRootDeviceIndex()});
     EXPECT_EQ(nullptr, fragment2);
+
     // destroy remaining allocation
-    csr->waitForTaskCountAndCleanAllocationList(100, TEMPORARY_ALLOCATION);
+    const auto secondWaitResult = csr->waitForTaskCountAndCleanAllocationList(100, TEMPORARY_ALLOCATION);
+    EXPECT_EQ(WaitStatus::Ready, secondWaitResult);
 }
 
 TEST_F(WddmCommandStreamMockGdiTest, WhenFlushingThenWddmMakeResidentIsCalledForResidencyAllocations) {
@@ -797,6 +809,7 @@ TEST_F(WddmCommandStreamMockGdiTest, WhenFlushingThenWddmMakeResidentIsCalledFor
     ASSERT_NE(nullptr, commandBuffer);
     LinearStream cs(commandBuffer);
 
+    wddm->callBaseMakeResident = true;
     csr->makeResident(*commandBuffer);
 
     EXPECT_EQ(1u, csr->getResidencyAllocations().size());
@@ -922,14 +935,13 @@ using WddmSimpleTest = ::testing::Test;
 
 HWTEST_F(WddmSimpleTest, givenDefaultWddmCsrWhenItIsCreatedThenBatchingIsTurnedOn) {
     DebugManager.flags.CsrDispatchMode.set(0);
-    ExecutionEnvironment *executionEnvironment = platform()->peekExecutionEnvironment();
+    HardwareInfo *hwInfo = nullptr;
+    ExecutionEnvironment *executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
     std::unique_ptr<MockDevice> device(Device::create<MockDevice>(executionEnvironment, 0u));
-    auto wddm = Wddm::createWddm(nullptr, *executionEnvironment->rootDeviceEnvironments[0].get());
-    executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
-    executionEnvironment->rootDeviceEnvironments[0]->osInterface->setDriverModel(std::unique_ptr<DriverModel>(wddm));
-    executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface = std::make_unique<WddmMemoryOperationsHandler>(wddm);
-    std::unique_ptr<MockWddmCsr<FamilyType>> mockCsr(new MockWddmCsr<FamilyType>(*executionEnvironment, 0, 1));
-    EXPECT_EQ(DispatchMode::BatchedDispatch, mockCsr->dispatchMode);
+    {
+        std::unique_ptr<MockWddmCsr<FamilyType>> mockCsr(new MockWddmCsr<FamilyType>(*executionEnvironment, 0, 1));
+        EXPECT_EQ(DispatchMode::BatchedDispatch, mockCsr->dispatchMode);
+    }
 }
 
 HWTEST_F(WddmDefaultTest, givenFtrWddmHwQueuesFlagWhenCreatingCsrThenPickWddmVersionBasingOnFtrFlag) {
@@ -969,13 +981,13 @@ HWTEST_P(WddmCsrCompressionParameterizedTest, givenEnabledCompressionWhenInitial
     std::unique_ptr<MockDevice> device(Device::create<MockDevice>(executionEnvironment, 1u));
     setCompressionEnabled(compressionEnabled, !compressionEnabled);
     myMockWddm = static_cast<WddmMock *>(executionEnvironment->rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Wddm>());
-    EXPECT_EQ(nullptr, executionEnvironment->rootDeviceEnvironments[index]->pageTableManager.get());
 
     MockWddmCsr<FamilyType> mockWddmCsr(*executionEnvironment, index, 1);
     mockWddmCsr.createPageTableManager();
-    ASSERT_NE(nullptr, executionEnvironment->rootDeviceEnvironments[index]->pageTableManager.get());
 
-    auto mockMngr = reinterpret_cast<MockGmmPageTableMngr *>(executionEnvironment->rootDeviceEnvironments[index]->pageTableManager.get());
+    ASSERT_NE(nullptr, mockWddmCsr.pageTableManager.get());
+
+    auto mockMngr = reinterpret_cast<MockGmmPageTableMngr *>(mockWddmCsr.pageTableManager.get());
     EXPECT_EQ(1u, mockMngr->setCsrHanleCalled);
     EXPECT_EQ(&mockWddmCsr, mockMngr->passedCsrHandle);
 
@@ -994,7 +1006,9 @@ HWTEST_F(WddmCsrCompressionTests, givenDisabledCompressionWhenInitializedThenDon
     setCompressionEnabled(false, false);
     myMockWddm = static_cast<WddmMock *>(executionEnvironment->rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Wddm>());
     MockWddmCsr<FamilyType> mockWddmCsr(*executionEnvironment, 1, device->getDeviceBitfield());
-    EXPECT_EQ(nullptr, executionEnvironment->rootDeviceEnvironments[1]->pageTableManager.get());
+    for (auto engine : executionEnvironment->memoryManager.get()->getRegisteredEngines()) {
+        EXPECT_EQ(nullptr, engine.commandStreamReceiver->pageTableManager.get());
+    }
 }
 
 INSTANTIATE_TEST_CASE_P(
@@ -1016,22 +1030,77 @@ HWTEST_F(WddmCsrCompressionTests, givenDisabledCompressionWhenFlushingThenDontIn
     device->resetCommandStreamReceiver(mockWddmCsr);
 
     auto memoryManager = executionEnvironment->memoryManager.get();
-
-    EXPECT_EQ(nullptr, executionEnvironment->rootDeviceEnvironments[1]->pageTableManager.get());
+    for (auto engine : memoryManager->getRegisteredEngines()) {
+        EXPECT_EQ(nullptr, engine.commandStreamReceiver->pageTableManager.get());
+    }
 
     auto graphicsAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{mockWddmCsr->getRootDeviceIndex(), MemoryConstants::pageSize});
     IndirectHeap cs(graphicsAllocation);
 
-    EXPECT_EQ(nullptr, executionEnvironment->rootDeviceEnvironments[1]->pageTableManager.get());
+    for (auto engine : memoryManager->getRegisteredEngines()) {
+        EXPECT_EQ(nullptr, engine.commandStreamReceiver->pageTableManager.get());
+    }
 
     DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
 
     mockWddmCsr->flushTask(cs, 0u, cs, cs, cs, 0u, dispatchFlags, *device);
 
-    EXPECT_EQ(nullptr, executionEnvironment->rootDeviceEnvironments[1]->pageTableManager.get());
+    for (auto engine : memoryManager->getRegisteredEngines()) {
+        EXPECT_EQ(nullptr, engine.commandStreamReceiver->pageTableManager.get());
+    }
 
     mockWddmCsr->flushBatchedSubmissions();
     memoryManager->freeGraphicsMemory(graphicsAllocation);
+}
+
+template <typename GfxFamily>
+struct MockWddmDrmDirectSubmissionDispatchCommandBuffer : public MockWddmDirectSubmission<GfxFamily, RenderDispatcher<GfxFamily>> {
+    MockWddmDrmDirectSubmissionDispatchCommandBuffer<GfxFamily>(Device &device, OsContext &osContext)
+        : MockWddmDirectSubmission<GfxFamily, RenderDispatcher<GfxFamily>>(device, osContext) {
+    }
+
+    bool dispatchCommandBuffer(BatchBuffer &batchBuffer, FlushStampTracker &flushStamp) override {
+        dispatchCommandBufferCalled++;
+        return false;
+    }
+
+    uint32_t dispatchCommandBufferCalled = 0;
+};
+
+TEST_F(WddmCommandStreamMockGdiTest, givenDirectSubmissionFailsThenFlushReturnsError) {
+    using MockSubmission = MockWddmDrmDirectSubmissionDispatchCommandBuffer<DEFAULT_TEST_FAMILY_NAME>;
+
+    DebugManager.flags.EnableDirectSubmission.set(1);
+
+    auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
+    hwInfo->capabilityTable.directSubmissionEngines.data[aub_stream::ENGINE_RCS].engineSupported = true;
+
+    std::unique_ptr<OsContext> osContext;
+    osContext.reset(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(), 0,
+                                      EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup, device->getDeviceBitfield())));
+    osContext->setDefaultContext(true);
+    csr->callParentInitDirectSubmission = false;
+
+    bool ret = csr->initDirectSubmission(*device.get(), *osContext.get());
+    EXPECT_TRUE(ret);
+    EXPECT_TRUE(csr->isDirectSubmissionEnabled());
+    EXPECT_FALSE(csr->isBlitterDirectSubmissionEnabled());
+
+    GraphicsAllocation *commandBuffer = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{csr->getRootDeviceIndex(), MemoryConstants::pageSize});
+    ASSERT_NE(nullptr, commandBuffer);
+    LinearStream cs(commandBuffer);
+    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0,
+                            nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(),
+                            &cs, commandBuffer->getUnderlyingBuffer(), false};
+
+    csr->directSubmission = std::make_unique<MockSubmission>(*device.get(), *osContext.get());
+    auto res = csr->flush(batchBuffer, csr->getResidencyAllocations());
+    EXPECT_EQ(NEO::SubmissionStatus::FAILED, res);
+
+    auto directSubmission = reinterpret_cast<MockSubmission *>(csr->directSubmission.get());
+    EXPECT_GT(directSubmission->dispatchCommandBufferCalled, 0u);
+
+    memoryManager->freeGraphicsMemory(commandBuffer);
 }
 
 TEST_F(WddmCommandStreamMockGdiTest, givenDirectSubmissionEnabledOnRcsWhenFlushingCommandBufferThenExpectDirectSubmissionUsed) {
@@ -1045,9 +1114,8 @@ TEST_F(WddmCommandStreamMockGdiTest, givenDirectSubmissionEnabledOnRcsWhenFlushi
     hwInfo->capabilityTable.directSubmissionEngines.data[aub_stream::ENGINE_RCS].engineSupported = true;
 
     std::unique_ptr<OsContext> osContext;
-    osContext.reset(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                      0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
-                                      false));
+    osContext.reset(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(), 0,
+                                      EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup, device->getDeviceBitfield())));
     osContext->setDefaultContext(true);
     csr->callParentInitDirectSubmission = false;
     bool ret = csr->initDirectSubmission(*device.get(), *osContext.get());
@@ -1084,8 +1152,7 @@ TEST_F(WddmCommandStreamMockGdiTest, givenDirectSubmissionEnabledOnBcsWhenFlushi
 
     std::unique_ptr<OsContext> osContext;
     osContext.reset(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(),
-                                      0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup,
-                                      false));
+                                      0, EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup, device->getDeviceBitfield())));
     csr->callParentInitDirectSubmission = false;
     csr->initBlitterDirectSubmission = true;
     bool ret = csr->initDirectSubmission(*device.get(), *osContext.get());
@@ -1129,6 +1196,7 @@ TEST_F(WddmCommandStreamTest, givenResidencyLoggingAvailableWhenFlushingCommandB
     NEO::IoFunctions::mockFcloseCalled = 0u;
 
     wddm->createPagingFenceLogger();
+    wddm->callBaseMakeResident = true;
 
     EXPECT_EQ(1u, NEO::IoFunctions::mockFopenCalled);
     EXPECT_EQ(1u, NEO::IoFunctions::mockVfptrinfCalled);

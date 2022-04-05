@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,14 +14,15 @@
 #include "shared/source/helpers/hw_info.h"
 
 namespace NEO {
-OsContext::OsContext(uint32_t contextId, DeviceBitfield deviceBitfield, EngineTypeUsage typeUsage, PreemptionMode preemptionMode, bool rootDevice)
+OsContext::OsContext(uint32_t contextId, const EngineDescriptor &engineDescriptor)
     : contextId(contextId),
-      deviceBitfield(deviceBitfield),
-      preemptionMode(preemptionMode),
-      numSupportedDevices(static_cast<uint32_t>(deviceBitfield.count())),
-      engineType(typeUsage.first),
-      engineUsage(typeUsage.second),
-      rootDevice(rootDevice) {}
+      deviceBitfield(engineDescriptor.deviceBitfield),
+      preemptionMode(engineDescriptor.preemptionMode),
+      numSupportedDevices(static_cast<uint32_t>(engineDescriptor.deviceBitfield.count())),
+      engineType(engineDescriptor.engineTypeUsage.first),
+      engineUsage(engineDescriptor.engineTypeUsage.second),
+      rootDevice(engineDescriptor.isRootDevice),
+      engineInstancedDevice(engineDescriptor.isEngineInstanced) {}
 
 bool OsContext::isImmediateContextInitializationEnabled(bool isDefaultEngine) const {
     if (DebugManager.flags.DeferOsContextInitialization.get() == 0) {
@@ -60,6 +61,10 @@ void OsContext::ensureContextInitialized() {
 
 bool OsContext::isDirectSubmissionAvailable(const HardwareInfo &hwInfo, bool &submitOnInit) {
     bool enableDirectSubmission = this->isDirectSubmissionSupported(hwInfo);
+
+    if (DebugManager.flags.SetCommandStreamReceiver.get() > 0) {
+        enableDirectSubmission = false;
+    }
 
     if (DebugManager.flags.EnableDirectSubmission.get() != -1) {
         enableDirectSubmission = DebugManager.flags.EnableDirectSubmission.get();

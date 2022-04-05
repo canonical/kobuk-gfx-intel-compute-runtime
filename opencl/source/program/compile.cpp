@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/compiler_interface/compiler_interface.h"
+#include "shared/source/compiler_interface/compiler_warnings/compiler_warnings.h"
 #include "shared/source/device/device.h"
 #include "shared/source/device_binary_format/elf/elf.h"
 #include "shared/source/device_binary_format/elf/elf_encoder.h"
@@ -15,7 +16,7 @@
 #include "shared/source/source_level_debugger/source_level_debugger.h"
 
 #include "opencl/source/cl_device/cl_device.h"
-#include "opencl/source/helpers/validators.h"
+#include "opencl/source/helpers/cl_validators.h"
 #include "opencl/source/platform/platform.h"
 
 #include "compiler_options.h"
@@ -36,8 +37,7 @@ cl_int Program::compile(
     auto defaultClDevice = deviceVector[0];
     UNRECOVERABLE_IF(defaultClDevice == nullptr);
     auto &defaultDevice = defaultClDevice->getDevice();
-    std::string internalOptions;
-    initInternalOptions(internalOptions);
+    auto internalOptions = getInternalOptions();
     std::unordered_map<uint32_t, bool> sourceLevelDebuggerNotified;
     do {
         if (numInputHeaders == 0) {
@@ -67,11 +67,11 @@ cl_int Program::compile(
         }
 
         options = (buildOptions != nullptr) ? buildOptions : "";
+        const auto shouldSuppressRebuildWarning{CompilerOptions::extract(CompilerOptions::noRecompiledFromIr, options)};
 
         for (const auto &optionString : {CompilerOptions::gtpinRera, CompilerOptions::greaterThan4gbBuffersRequired}) {
-            size_t pos = options.find(optionString.data());
-            if (pos != std::string::npos) {
-                options.erase(pos, optionString.length());
+            const auto wasExtracted{CompilerOptions::extract(optionString, options)};
+            if (wasExtracted) {
                 CompilerOptions::concatenateAppend(internalOptions, optionString);
             }
         }
@@ -138,6 +138,10 @@ cl_int Program::compile(
             }
         }
 
+        if (!this->getIsBuiltIn() && DebugManager.flags.InjectInternalBuildOptions.get() != "unk") {
+            NEO::CompilerOptions::concatenateAppend(internalOptions, NEO::DebugManager.flags.InjectInternalBuildOptions.get());
+        }
+
         inputArgs.src = ArrayRef<const char>(reinterpret_cast<const char *>(compileData.data()), compileData.size());
         inputArgs.apiOptions = ArrayRef<const char>(options.c_str(), options.length());
         inputArgs.internalOptions = ArrayRef<const char>(internalOptions.c_str(), internalOptions.length());
@@ -145,6 +149,10 @@ cl_int Program::compile(
         TranslationOutput compilerOuput;
         auto compilerErr = pCompilerInterface->compile(defaultDevice, inputArgs, compilerOuput);
         for (const auto &device : deviceVector) {
+            if (shouldWarnAboutRebuild && !shouldSuppressRebuildWarning) {
+                this->updateBuildLog(device->getRootDeviceIndex(), CompilerWarnings::recompiledFromIr.data(), CompilerWarnings::recompiledFromIr.length());
+            }
+
             this->updateBuildLog(device->getRootDeviceIndex(), compilerOuput.frontendCompilerLog.c_str(), compilerOuput.frontendCompilerLog.size());
             this->updateBuildLog(device->getRootDeviceIndex(), compilerOuput.backendCompilerLog.c_str(), compilerOuput.backendCompilerLog.size());
         }
@@ -156,9 +164,10 @@ cl_int Program::compile(
         this->irBinary = std::move(compilerOuput.intermediateRepresentation.mem);
         this->irBinarySize = compilerOuput.intermediateRepresentation.size;
         this->isSpirV = compilerOuput.intermediateCodeType == IGC::CodeType::spirV;
-        this->debugData = std::move(compilerOuput.debugData.mem);
-        this->debugDataSize = compilerOuput.debugData.size;
-
+        for (const auto &device : deviceVector) {
+            this->buildInfos[device->getRootDeviceIndex()].debugData = std::move(compilerOuput.debugData.mem);
+            this->buildInfos[device->getRootDeviceIndex()].debugDataSize = compilerOuput.debugData.size;
+        }
         updateNonUniformFlag();
     } while (false);
 

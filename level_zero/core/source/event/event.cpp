@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -79,28 +79,44 @@ ze_result_t EventPoolImp::initialize(DriverHandle *driver, Context *context, uin
     eventSize = static_cast<uint32_t>(alignUp(EventPacketsCount::eventPackets * hwHelper.getSingleTimestampPacketSize(), eventAlignment));
 
     size_t alignedSize = alignUp<size_t>(numEvents * eventSize, MemoryConstants::pageSize64k);
-    NEO::GraphicsAllocation::AllocationType allocationType = isEventPoolTimestampFlagSet() ? NEO::GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER
-                                                                                           : NEO::GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY;
+    NEO::AllocationType allocationType = isEventPoolTimestampFlagSet() ? NEO::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER
+                                                                       : NEO::AllocationType::BUFFER_HOST_MEMORY;
     if (this->devices.size() > 1) {
         useDeviceAlloc = false;
     }
 
-    if (useDeviceAlloc && !isEventPoolTimestampFlagSet()) {
-        allocationType = NEO::GraphicsAllocation::AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER;
+    if (useDeviceAlloc) {
+        allocationType = NEO::AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER;
     }
 
     eventPoolAllocations = std::make_unique<NEO::MultiGraphicsAllocation>(maxRootDeviceIndex);
 
-    NEO::AllocationProperties allocationProperties{*rootDeviceIndices.begin(), alignedSize, allocationType, systemMemoryBitfield};
-    allocationProperties.alignment = eventAlignment;
+    bool allocatedMemory = false;
 
-    std::vector<uint32_t> rootDeviceIndicesVector = {rootDeviceIndices.begin(), rootDeviceIndices.end()};
-    auto eventPoolPtr = driver->getMemoryManager()->createMultiGraphicsAllocationInSystemMemoryPool(rootDeviceIndicesVector,
-                                                                                                    allocationProperties,
-                                                                                                    *eventPoolAllocations);
+    if (useDeviceAlloc) {
+        NEO::AllocationProperties allocationProperties{*rootDeviceIndices.begin(), alignedSize, allocationType, devices[0]->getNEODevice()->getDeviceBitfield()};
+        allocationProperties.alignment = eventAlignment;
 
-    if (!eventPoolPtr) {
-        return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
+        auto graphicsAllocation = driver->getMemoryManager()->allocateGraphicsMemoryWithProperties(allocationProperties);
+        if (graphicsAllocation) {
+            eventPoolAllocations->addAllocation(graphicsAllocation);
+            allocatedMemory = true;
+        }
+
+    } else {
+        NEO::AllocationProperties allocationProperties{*rootDeviceIndices.begin(), alignedSize, allocationType, systemMemoryBitfield};
+        allocationProperties.alignment = eventAlignment;
+
+        std::vector<uint32_t> rootDeviceIndicesVector = {rootDeviceIndices.begin(), rootDeviceIndices.end()};
+        eventPoolPtr = driver->getMemoryManager()->createMultiGraphicsAllocationInSystemMemoryPool(rootDeviceIndicesVector,
+                                                                                                   allocationProperties,
+                                                                                                   *eventPoolAllocations);
+
+        allocatedMemory = (nullptr != eventPoolPtr);
+    }
+
+    if (!allocatedMemory) {
+        return ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY;
     }
     return ZE_RESULT_SUCCESS;
 }
@@ -138,14 +154,15 @@ ze_result_t Event::destroy() {
     return ZE_RESULT_SUCCESS;
 }
 
-EventPool *EventPool::create(DriverHandle *driver, Context *context, uint32_t numDevices, ze_device_handle_t *phDevices, const ze_event_pool_desc_t *desc) {
+EventPool *EventPool::create(DriverHandle *driver, Context *context, uint32_t numDevices, ze_device_handle_t *phDevices, const ze_event_pool_desc_t *desc, ze_result_t &result) {
     auto eventPool = std::make_unique<EventPoolImp>(desc);
     if (!eventPool) {
+        result = ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
         DEBUG_BREAK_IF(true);
         return nullptr;
     }
 
-    ze_result_t result = eventPool->initialize(driver, context, numDevices, phDevices);
+    result = eventPool->initialize(driver, context, numDevices, phDevices);
     if (result) {
         return nullptr;
     }

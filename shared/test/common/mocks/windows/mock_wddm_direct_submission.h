@@ -13,6 +13,7 @@ namespace NEO {
 template <typename GfxFamily, typename Dispatcher>
 struct MockWddmDirectSubmission : public WddmDirectSubmission<GfxFamily, Dispatcher> {
     using BaseClass = WddmDirectSubmission<GfxFamily, Dispatcher>;
+    using BaseClass::activeTiles;
     using BaseClass::allocateOsResources;
     using BaseClass::allocateResources;
     using BaseClass::commandBufferHeader;
@@ -34,6 +35,7 @@ struct MockWddmDirectSubmission : public WddmDirectSubmission<GfxFamily, Dispatc
     using BaseClass::submit;
     using BaseClass::switchRingBuffers;
     using BaseClass::updateTagValue;
+    using BaseClass::useNotifyForPostSync;
     using BaseClass::wddm;
     using BaseClass::WddmDirectSubmission;
     using typename BaseClass::RingBufferUse;

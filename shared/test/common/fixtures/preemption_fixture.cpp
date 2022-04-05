@@ -11,12 +11,10 @@
 #include "shared/source/helpers/hw_info.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/mocks/mock_device.h"
-
-#include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_kernel.h"
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "gtest/gtest.h"
+#include "patch_g7.h"
 
 using namespace NEO;
 
@@ -29,8 +27,8 @@ void DevicePreemptionTests::SetUp() {
     }
 
     device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
-    executionEnvironment.reset(new SPatchExecutionEnvironment);
-    memset(executionEnvironment.get(), 0, sizeof(SPatchExecutionEnvironment));
+    executionEnvironment.reset(new iOpenCL::SPatchExecutionEnvironment);
+    memset(executionEnvironment.get(), 0, sizeof(iOpenCL::SPatchExecutionEnvironment));
 
     ASSERT_NE(nullptr, device);
 

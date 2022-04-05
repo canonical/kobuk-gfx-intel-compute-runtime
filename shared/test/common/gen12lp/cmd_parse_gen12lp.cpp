@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -109,7 +109,7 @@ const char *CmdParse<GenGfxFamily>::getCommandNameHwSpecific(void *cmd) {
     }
 
     if (nullptr != genCmdCast<STATE_COMPUTE_MODE *>(cmd)) {
-        return "MEDIA_STATE_FLUSH";
+        return "STATE_COMPUTE_MODE";
     }
 
     if (nullptr != genCmdCast<GPGPU_CSR_BASE_ADDRESS *>(cmd)) {
@@ -128,5 +128,5 @@ template struct CmdParse<GenGfxFamily>;
 namespace NEO {
 template void HardwareParse::findHardwareCommands<TGLLPFamily>();
 template void HardwareParse::findHardwareCommands<TGLLPFamily>(IndirectHeap *);
-template const void *HardwareParse::getStatelessArgumentPointer<TGLLPFamily>(const Kernel &kernel, uint32_t indexArg, IndirectHeap &ioh, uint32_t rootDeviceIndex);
+template const void *HardwareParse::getStatelessArgumentPointer<TGLLPFamily>(const KernelInfo &kernelInfo, uint32_t indexArg, IndirectHeap &ioh, uint32_t rootDeviceIndex);
 } // namespace NEO

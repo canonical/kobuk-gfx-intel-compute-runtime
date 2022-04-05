@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,15 +7,14 @@
 
 #pragma once
 #include "shared/source/os_interface/linux/drm_memory_manager.h"
-
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
 
 #include <atomic>
 
 namespace NEO {
 extern off_t lseekReturn;
 extern std::atomic<int> lseekCalledCount;
-extern int closeInputFd;
+extern std::atomic<int> closeInputFd;
 extern std::atomic<int> closeCalledCount;
 extern std::vector<void *> mmapVector;
 
@@ -69,7 +68,8 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     using DrmMemoryManager::allocateGraphicsMemoryForNonSvmHostPtr;
     using DrmMemoryManager::allocateGraphicsMemoryWithAlignment;
     using DrmMemoryManager::allocateGraphicsMemoryWithHostPtr;
-    using DrmMemoryManager::allocateShareableMemory;
+    using DrmMemoryManager::allocateMemoryByKMD;
+    using DrmMemoryManager::allocationTypeForCompletionFence;
     using DrmMemoryManager::allocUserptr;
     using DrmMemoryManager::createAllocWithAlignment;
     using DrmMemoryManager::createAllocWithAlignmentFromUserptr;
@@ -81,6 +81,7 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     using DrmMemoryManager::getRootDeviceIndex;
     using DrmMemoryManager::getUserptrAlignment;
     using DrmMemoryManager::gfxPartitions;
+    using DrmMemoryManager::handleFenceCompletion;
     using DrmMemoryManager::lockResourceInLocalMemoryImpl;
     using DrmMemoryManager::memoryForPinBBs;
     using DrmMemoryManager::mmapFunction;
@@ -90,10 +91,12 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     using DrmMemoryManager::pushSharedBufferObject;
     using DrmMemoryManager::registerAllocationInOs;
     using DrmMemoryManager::releaseGpuRange;
+    using DrmMemoryManager::retrieveMmapOffsetForBufferObject;
     using DrmMemoryManager::setDomainCpu;
     using DrmMemoryManager::sharingBufferObjects;
     using DrmMemoryManager::supportsMultiStorageResources;
     using DrmMemoryManager::unlockResourceInLocalMemoryImpl;
+    using DrmMemoryManager::waitOnCompletionFence;
     using MemoryManager::allocateGraphicsMemoryInDevicePool;
     using MemoryManager::heapAssigner;
     using MemoryManager::registeredEngines;
@@ -109,7 +112,7 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     void forceLimitedRangeAllocator(uint64_t range);
     void overrideGfxPartition(GfxPartition *newGfxPartition);
 
-    DrmAllocation *allocate32BitGraphicsMemory(uint32_t rootDeviceIndex, size_t size, const void *ptr, GraphicsAllocation::AllocationType allocationType);
+    DrmAllocation *allocate32BitGraphicsMemory(uint32_t rootDeviceIndex, size_t size, const void *ptr, AllocationType allocationType);
     ~TestedDrmMemoryManager() override;
     size_t peekSharedBosSize() {
         size_t size = 0;
@@ -123,5 +126,53 @@ class TestedDrmMemoryManager : public MemoryManagerCreate<DrmMemoryManager> {
     }
     bool alignedMallocShouldFail = false;
     size_t alignedMallocSizeRequired = 0u;
+    uint32_t unreference(BufferObject *bo, bool synchronousDestroy) override {
+        std::unique_lock<std::mutex> lock(unreferenceMtx);
+        unreferenceCalled++;
+        unreferenceParamsPassed.push_back({bo, synchronousDestroy});
+        return DrmMemoryManager::unreference(bo, synchronousDestroy);
+    }
+    struct UnreferenceParams {
+        BufferObject *bo;
+        bool synchronousDestroy;
+    };
+    uint32_t unreferenceCalled = 0u;
+    StackVec<UnreferenceParams, 4> unreferenceParamsPassed{};
+    void releaseGpuRange(void *ptr, size_t size, uint32_t rootDeviceIndex) override {
+        std::unique_lock<std::mutex> lock(releaseGpuRangeMtx);
+        releaseGpuRangeCalled++;
+        DrmMemoryManager::releaseGpuRange(ptr, size, rootDeviceIndex);
+    }
+    uint32_t releaseGpuRangeCalled = 0u;
+    void alignedFreeWrapper(void *ptr) override {
+        std::unique_lock<std::mutex> lock(alignedFreeWrapperMtx);
+        alignedFreeWrapperCalled++;
+        DrmMemoryManager::alignedFreeWrapper(ptr);
+    }
+    void closeSharedHandle(GraphicsAllocation *gfxAllocation) override;
+    uint32_t alignedFreeWrapperCalled = 0u;
+    uint32_t callsToCloseSharedHandle = 0;
+
+  protected:
+    std::mutex unreferenceMtx;
+    std::mutex releaseGpuRangeMtx;
+    std::mutex alignedFreeWrapperMtx;
+    std::mutex callsToCloseSharedHandleMtx;
 };
+
+struct MockDrmGemCloseWorker : DrmGemCloseWorker {
+    using DrmGemCloseWorker::DrmGemCloseWorker;
+
+    void close(bool blocking) override {
+        wasBlocking = blocking;
+        DrmGemCloseWorker::close(blocking);
+    }
+    bool wasBlocking = false;
+};
+
+struct MockDrmMemoryManager : DrmMemoryManager {
+    using DrmMemoryManager::DrmMemoryManager;
+    using DrmMemoryManager::gemCloseWorker;
+};
+
 } // namespace NEO

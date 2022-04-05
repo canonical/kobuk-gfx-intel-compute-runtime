@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,7 +9,7 @@
 #include "shared/source/command_stream/csr_definitions.h"
 #include "shared/source/helpers/heap_helper.h"
 #include "shared/source/helpers/non_copyable_or_moveable.h"
-#include "shared/source/indirect_heap/indirect_heap.h"
+#include "shared/source/indirect_heap/indirect_heap_type.h"
 
 #include <cstdint>
 #include <limits>
@@ -20,10 +20,13 @@ namespace NEO {
 class Device;
 class GraphicsAllocation;
 class LinearStream;
+class AllocationsList;
+class IndirectHeap;
 
 using ResidencyContainer = std::vector<GraphicsAllocation *>;
 using CmdBufferContainer = std::vector<GraphicsAllocation *>;
-using HeapType = IndirectHeap::Type;
+using HeapContainer = std::vector<GraphicsAllocation *>;
+using HeapType = IndirectHeapType;
 
 enum class ErrorCode {
     SUCCESS = 0,
@@ -33,24 +36,13 @@ enum class ErrorCode {
 class CommandContainer : public NonCopyableOrMovableClass {
   public:
     static constexpr size_t defaultListCmdBufferSize = MemoryConstants::kiloByte * 256;
-    static constexpr size_t totalCmdBufferSize =
-        defaultListCmdBufferSize +
-        MemoryConstants::cacheLineSize +
-        CSRequirements::csOverfetchSize;
+    static constexpr size_t cmdBufferReservedSize = MemoryConstants::cacheLineSize +
+                                                    CSRequirements::csOverfetchSize;
+    static constexpr size_t totalCmdBufferSize = defaultListCmdBufferSize + cmdBufferReservedSize;
 
-    CommandContainer() {
-        for (auto &indirectHeap : indirectHeaps) {
-            indirectHeap = nullptr;
-        }
+    CommandContainer();
 
-        for (auto &allocationIndirectHeap : allocationIndirectHeaps) {
-            allocationIndirectHeap = nullptr;
-        }
-    }
-
-    CommandContainer(uint32_t maxNumAggregatedIdds) : CommandContainer() {
-        numIddsPerBlock = maxNumAggregatedIdds;
-    }
+    CommandContainer(uint32_t maxNumAggregatedIdds);
 
     CmdBufferContainer &getCmdBufferAllocations() { return cmdBufferAllocations; }
 
@@ -63,7 +55,7 @@ class CommandContainer : public NonCopyableOrMovableClass {
 
     LinearStream *getCommandStream() { return commandStream.get(); }
 
-    IndirectHeap *getIndirectHeap(HeapType heapType) { return indirectHeaps[heapType].get(); }
+    IndirectHeap *getIndirectHeap(HeapType heapType);
 
     HeapHelper *getHeapHelper() { return heapHelper.get(); }
 
@@ -77,7 +69,7 @@ class CommandContainer : public NonCopyableOrMovableClass {
 
     void *getHeapSpaceAllowGrow(HeapType heapType, size_t size);
 
-    ErrorCode initialize(Device *device);
+    ErrorCode initialize(Device *device, AllocationsList *reusableAllocationList);
 
     void prepareBindfulSsh();
 
@@ -85,7 +77,6 @@ class CommandContainer : public NonCopyableOrMovableClass {
 
     uint32_t slmSize = std::numeric_limits<uint32_t>::max();
     uint32_t nextIddInBlock = 0;
-    uint32_t lastSentNumGrfRequired = 0;
     bool lastPipelineSelectModeRequired = false;
     bool lastSentUseGlobalAtomics = false;
 
@@ -93,6 +84,10 @@ class CommandContainer : public NonCopyableOrMovableClass {
 
     IndirectHeap *getHeapWithRequiredSizeAndAlignment(HeapType heapType, size_t sizeRequired, size_t alignment);
     void allocateNextCommandBuffer();
+    void closeAndAllocateNextCommandBuffer();
+
+    void handleCmdBufferAllocations(size_t startIndex);
+    GraphicsAllocation *obtainNextCommandBufferAllocation();
 
     void reset();
 
@@ -108,12 +103,13 @@ class CommandContainer : public NonCopyableOrMovableClass {
     }
     HeapContainer sshAllocations;
 
-    bool getFlushTaskUsedForImmediate() { return isFlushTaskUsedForImmediate; }
+    bool getFlushTaskUsedForImmediate() const { return isFlushTaskUsedForImmediate; }
     void setFlushTaskUsedForImmediate(bool flushTaskUsedForImmediate) { isFlushTaskUsedForImmediate = flushTaskUsedForImmediate; }
 
   protected:
     void *iddBlock = nullptr;
     Device *device = nullptr;
+    AllocationsList *reusableAllocationList = nullptr;
     std::unique_ptr<HeapHelper> heapHelper;
 
     CmdBufferContainer cmdBufferAllocations;

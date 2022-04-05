@@ -8,9 +8,9 @@
 #include "shared/source/aub_mem_dump/page_table_entry_bits.h"
 #include "shared/source/command_stream/tbx_command_stream_receiver_hw.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -25,11 +25,12 @@ GEN12LPTEST_F(Gen12LPTbxCommandStreamReceiverTests, givenNullPtrGraphicsAlloctio
     EXPECT_EQ(expectedBits, bits);
 }
 
-GEN12LPTEST_F(Gen12LPTbxCommandStreamReceiverTests, givenGraphicsAlloctionWWhenGetPPGTTAdditionalBitsIsCalledThenAppropriateValueIsReturned) {
+GEN12LPTEST_F(Gen12LPTbxCommandStreamReceiverTests, givenGraphicsAlloctionWithLocalMemoryPoolWhenGetPPGTTAdditionalBitsIsCalledThenAppropriateValueIsReturned) {
     auto tbxCsr = std::make_unique<TbxCommandStreamReceiverHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
     MockGraphicsAllocation allocation(nullptr, 0);
+    allocation.overrideMemoryPool(MemoryPool::LocalMemory);
     auto bits = tbxCsr->getPPGTTAdditionalBits(&allocation);
-    constexpr uint64_t expectedBits = BIT(PageTableEntry::presentBit) | BIT(PageTableEntry::writableBit);
+    constexpr uint64_t expectedBits = BIT(PageTableEntry::presentBit) | BIT(PageTableEntry::writableBit) | BIT(PageTableEntry::localMemoryBit);
 
     EXPECT_EQ(expectedBits, bits);
 }

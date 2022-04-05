@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,21 +11,74 @@
 #include "shared/source/os_interface/device_factory.h"
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
 #include "shared/test/common/helpers/variable_backup.h"
+#include "shared/test/common/libult/create_command_stream.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/platform/platform.h"
-#include "opencl/test/unit_test/libult/create_command_stream.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
-#include "test.h"
 
 namespace NEO {
 bool operator==(const HardwareInfo &hwInfoIn, const HardwareInfo &hwInfoOut) {
     bool result = (0 == memcmp(&hwInfoIn.platform, &hwInfoOut.platform, sizeof(PLATFORM)));
-    result &= (0 == memcmp(&hwInfoIn.featureTable, &hwInfoOut.featureTable, sizeof(FeatureTable)));
-    result &= (0 == memcmp(&hwInfoIn.workaroundTable, &hwInfoOut.workaroundTable, sizeof(WorkaroundTable)));
-    result &= (0 == memcmp(&hwInfoIn.capabilityTable, &hwInfoOut.capabilityTable, sizeof(RuntimeCapabilityTable)));
+    result &= (hwInfoIn.featureTable.asHash() == hwInfoOut.featureTable.asHash());
+    result &= (hwInfoIn.workaroundTable.asHash() == hwInfoOut.workaroundTable.asHash());
+    result &= (hwInfoIn.capabilityTable == hwInfoOut.capabilityTable);
     return result;
+}
+
+TEST(PrepareDeviceEnvironmentTest, givenPrepareDeviceEnvironmentWhenCsrIsSetToVariousTypesThenFunctionReturnsExpectedValueOfHardwareInfo) {
+    const HardwareInfo *hwInfo = nullptr;
+    VariableBackup<UltHwConfig> backup{&ultHwConfig};
+    DebugManagerStateRestore stateRestorer;
+    ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc = false;
+    uint32_t expectedDevices = 1;
+    DebugManager.flags.CreateMultipleRootDevices.set(expectedDevices);
+    for (int productFamilyIndex = 0; productFamilyIndex < IGFX_MAX_PRODUCT; productFamilyIndex++) {
+        const char *hwPrefix = hardwarePrefix[productFamilyIndex];
+        auto hwInfoConfig = hwInfoConfigFactory[productFamilyIndex];
+        if (hwPrefix == nullptr || hwInfoConfig == nullptr) {
+            continue;
+        }
+        const std::string productFamily(hwPrefix);
+
+        for (int csrTypes = -1; csrTypes <= CSR_TYPES_NUM; csrTypes++) {
+            CommandStreamReceiverType csrType;
+            if (csrTypes != -1) {
+                csrType = static_cast<CommandStreamReceiverType>(csrTypes);
+                DebugManager.flags.SetCommandStreamReceiver.set(csrType);
+            } else {
+                csrType = CSR_HW;
+                DebugManager.flags.SetCommandStreamReceiver.set(-1);
+            }
+
+            DebugManager.flags.ProductFamilyOverride.set(productFamily);
+            platformsImpl->clear();
+            ExecutionEnvironment *exeEnv = constructPlatform()->peekExecutionEnvironment();
+
+            std::string pciPath = "0000:00:02.0";
+            exeEnv->rootDeviceEnvironments.resize(1u);
+            const auto ret = prepareDeviceEnvironment(*exeEnv, pciPath, 0u);
+            EXPECT_EQ(expectedDevices, exeEnv->rootDeviceEnvironments.size());
+            for (auto i = 0u; i < expectedDevices; i++) {
+                hwInfo = exeEnv->rootDeviceEnvironments[i]->getHardwareInfo();
+
+                switch (csrType) {
+                case CSR_HW:
+                case CSR_HW_WITH_AUB:
+                case CSR_TYPES_NUM:
+                    EXPECT_TRUE(ret);
+                    EXPECT_NE(nullptr, hwInfo);
+                    break;
+                default:
+                    EXPECT_FALSE(ret);
+                    break;
+                }
+            }
+        }
+    }
 }
 
 struct PrepareDeviceEnvironmentsTest : ::testing::Test {
@@ -46,7 +99,8 @@ HWTEST_F(PrepareDeviceEnvironmentsTest, givenPrepareDeviceEnvironmentsWhenCsrIsS
     DebugManager.flags.CreateMultipleRootDevices.set(expectedDevices);
     for (int productFamilyIndex = 0; productFamilyIndex < IGFX_MAX_PRODUCT; productFamilyIndex++) {
         const char *hwPrefix = hardwarePrefix[productFamilyIndex];
-        if (hwPrefix == nullptr) {
+        auto hwInfoConfig = hwInfoConfigFactory[productFamilyIndex];
+        if (hwPrefix == nullptr || hwInfoConfig == nullptr) {
             continue;
         }
         const std::string productFamily(hwPrefix);
@@ -117,7 +171,7 @@ HWTEST_F(PrepareDeviceEnvironmentsTest, givenUpperCaseProductFamilyOverrideFlagS
     PRODUCT_FAMILY productFamily;
 
     for (int productFamilyIndex = 0; productFamilyIndex < IGFX_MAX_PRODUCT; productFamilyIndex++) {
-        if (hardwarePrefix[productFamilyIndex]) {
+        if (hardwarePrefix[productFamilyIndex] && hwInfoConfigFactory[productFamilyIndex]) {
             hwPrefix = hardwarePrefix[productFamilyIndex];
             productFamily = static_cast<PRODUCT_FAMILY>(productFamilyIndex);
             break;
@@ -175,14 +229,14 @@ HWTEST_F(PrepareDeviceEnvironmentsTest, givenPrepareDeviceEnvironmentsAndUnknown
                 }
                 EXPECT_TRUE(i < IGFX_MAX_PRODUCT);
                 ASSERT_NE(nullptr, hardwarePrefix[i]);
-                HardwareInfo defaultHwInfo = DEFAULT_PLATFORM::hwInfo;
-                defaultHwInfo.featureTable = {};
-                defaultHwInfo.workaroundTable = {};
-                defaultHwInfo.gtSystemInfo = {};
-                hardwareInfoSetup[defaultHwInfo.platform.eProductFamily](&defaultHwInfo, true, 0x0);
-                HwInfoConfig *hwConfig = HwInfoConfig::get(defaultHwInfo.platform.eProductFamily);
-                hwConfig->configureHardwareCustom(&defaultHwInfo, nullptr);
-                EXPECT_EQ(0, memcmp(&defaultHwInfo.platform, &hwInfo->platform, sizeof(PLATFORM)));
+                HardwareInfo baseHwInfo = *defaultHwInfo;
+                baseHwInfo.featureTable = {};
+                baseHwInfo.workaroundTable = {};
+                baseHwInfo.gtSystemInfo = {};
+                hardwareInfoSetup[baseHwInfo.platform.eProductFamily](&baseHwInfo, true, 0x0);
+                HwInfoConfig *hwConfig = HwInfoConfig::get(baseHwInfo.platform.eProductFamily);
+                hwConfig->configureHardwareCustom(&baseHwInfo, nullptr);
+                EXPECT_EQ(0, memcmp(&baseHwInfo.platform, &hwInfo->platform, sizeof(PLATFORM)));
                 break;
             }
             default:
@@ -190,5 +244,21 @@ HWTEST_F(PrepareDeviceEnvironmentsTest, givenPrepareDeviceEnvironmentsAndUnknown
             }
         }
     }
+}
+
+TEST(MultiDeviceTests, givenCreateMultipleRootDevicesAndLimitAmountOfReturnedDevicesFlagWhenClGetDeviceIdsIsCalledThenLowerValueIsReturned) {
+    platformsImpl->clear();
+    VariableBackup<UltHwConfig> backup(&ultHwConfig);
+    ultHwConfig.useHwCsr = true;
+    ultHwConfig.forceOsAgnosticMemoryManager = false;
+    ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc = false;
+    DebugManagerStateRestore stateRestore;
+    DebugManager.flags.CreateMultipleRootDevices.set(2);
+    DebugManager.flags.LimitAmountOfReturnedDevices.set(1);
+    cl_uint numDevices = 0;
+
+    auto retVal = clGetDeviceIDs(nullptr, CL_DEVICE_TYPE_GPU, 0, nullptr, &numDevices);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(1u, numDevices);
 }
 } // namespace NEO

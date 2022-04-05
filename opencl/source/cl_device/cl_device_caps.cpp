@@ -1,10 +1,11 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/compiler_interface/oclc_extensions.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device/device.h"
 #include "shared/source/device/device_info.h"
@@ -16,7 +17,6 @@
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/helpers/cl_hw_helper.h"
-#include "opencl/source/platform/extensions.h"
 #include "opencl/source/sharings/sharing_factory.h"
 
 #include "driver_version.h"
@@ -103,7 +103,7 @@ void ClDevice::initializeCaps() {
     switch (enabledClVersion) {
     case 30:
         deviceInfo.clVersion = "OpenCL 3.0 NEO ";
-        deviceInfo.clCVersion = (isOcl21Conformant() ? "OpenCL C 3.0 " : "OpenCL C 1.2 ");
+        deviceInfo.clCVersion = "OpenCL C 1.2 ";
         deviceInfo.numericClVersion = CL_MAKE_VERSION(3, 0, 0);
         break;
     case 21:
@@ -197,7 +197,7 @@ void ClDevice::initializeCaps() {
         deviceExtensions += "cl_intel_media_block_io ";
     }
 
-    auto sharingAllowed = (getNumAvailableDevices() == 1u);
+    auto sharingAllowed = (getNumGenericSubDevices() <= 1u);
     if (sharingAllowed) {
         deviceExtensions += sharingFactory.getExtensions(driverInfo.get());
     }
@@ -245,8 +245,8 @@ void ClDevice::initializeCaps() {
     deviceInfo.deviceAvailable = CL_TRUE;
     deviceInfo.compilerAvailable = CL_TRUE;
     deviceInfo.parentDevice = nullptr;
-    deviceInfo.partitionMaxSubDevices = device.getNumAvailableDevices();
-    if (deviceInfo.partitionMaxSubDevices > 1) {
+    deviceInfo.partitionMaxSubDevices = device.getNumSubDevices();
+    if (deviceInfo.partitionMaxSubDevices > 0) {
         deviceInfo.partitionProperties[0] = CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN;
         deviceInfo.partitionProperties[1] = 0;
         deviceInfo.partitionAffinityDomain = CL_DEVICE_AFFINITY_DOMAIN_NUMA | CL_DEVICE_AFFINITY_DOMAIN_NEXT_PARTITIONABLE;
@@ -283,33 +283,19 @@ void ClDevice::initializeCaps() {
     deviceInfo.memBaseAddressAlign = 1024;
     deviceInfo.minDataTypeAlignSize = 128;
 
-    deviceInfo.deviceEnqueueSupport = isDeviceEnqueueSupported()
-                                          ? CL_DEVICE_QUEUE_SUPPORTED | CL_DEVICE_QUEUE_REPLACEABLE_DEFAULT
-                                          : 0u;
-    if (isDeviceEnqueueSupported()) {
-        deviceInfo.maxOnDeviceQueues = 1;
-        deviceInfo.maxOnDeviceEvents = 1024;
-        deviceInfo.queueOnDeviceMaxSize = 64 * MB;
-        deviceInfo.queueOnDevicePreferredSize = 128 * KB;
-        deviceInfo.queueOnDeviceProperties = CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
-    } else {
-        deviceInfo.maxOnDeviceQueues = 0;
-        deviceInfo.maxOnDeviceEvents = 0;
-        deviceInfo.queueOnDeviceMaxSize = 0;
-        deviceInfo.queueOnDevicePreferredSize = 0;
-        deviceInfo.queueOnDeviceProperties = 0;
-    }
-
     deviceInfo.preferredInteropUserSync = 1u;
 
-    device.reduceMaxMemAllocSize();
     // OpenCL 1.2 requires 128MB minimum
 
     deviceInfo.maxConstantBufferSize = sharedDeviceInfo.maxMemAllocSize;
 
     deviceInfo.maxWorkItemDimensions = 3;
 
-    deviceInfo.maxComputUnits = systemInfo.EUCount * getNumAvailableDevices();
+    deviceInfo.maxComputUnits = systemInfo.EUCount * std::max(getNumGenericSubDevices(), 1u);
+    if (device.isEngineInstanced()) {
+        deviceInfo.maxComputUnits /= systemInfo.CCSInfo.NumberOfCCSEnabled;
+    }
+
     deviceInfo.maxConstantArgs = 8;
     deviceInfo.maxSliceCount = systemInfo.SliceCount;
 
@@ -328,8 +314,8 @@ void ClDevice::initializeCaps() {
 
     deviceInfo.localMemType = CL_LOCAL;
 
-    deviceInfo.image3DMaxWidth = this->getHardwareCapabilities().image3DMaxWidth;
-    deviceInfo.image3DMaxHeight = this->getHardwareCapabilities().image3DMaxHeight;
+    deviceInfo.image3DMaxWidth = hwHelper.getMax3dImageWidthOrHeight();
+    deviceInfo.image3DMaxHeight = hwHelper.getMax3dImageWidthOrHeight();
 
     // cl_khr_image2d_from_buffer
     deviceInfo.imagePitchAlignment = hwHelper.getPitchAlignmentForImage(&hwInfo);
@@ -376,18 +362,13 @@ void ClDevice::initializeCaps() {
         }
     }
 
-    const std::vector<std::vector<EngineControl>> &queueFamilies = this->getDevice().getEngineGroups();
-    for (size_t queueFamilyIndex = 0u; queueFamilyIndex < queueFamilies.size(); queueFamilyIndex++) {
-        const std::vector<EngineControl> &enginesInFamily = queueFamilies.at(queueFamilyIndex);
-        if (enginesInFamily.size() > 0) {
-            const auto engineGroupType = static_cast<EngineGroupType>(queueFamilyIndex);
-            cl_queue_family_properties_intel properties = {};
-            properties.capabilities = getQueueFamilyCapabilities(engineGroupType);
-            properties.count = static_cast<cl_uint>(enginesInFamily.size());
-            properties.properties = deviceInfo.queueOnHostProperties;
-            getQueueFamilyName(properties.name, CL_QUEUE_FAMILY_MAX_NAME_SIZE_INTEL, engineGroupType);
-            deviceInfo.queueFamilyProperties.push_back(properties);
-        }
+    for (auto &engineGroup : this->getDevice().getRegularEngineGroups()) {
+        cl_queue_family_properties_intel properties = {};
+        properties.capabilities = getQueueFamilyCapabilities(engineGroup.engineGroupType);
+        properties.count = static_cast<cl_uint>(engineGroup.engines.size());
+        properties.properties = deviceInfo.queueOnHostProperties;
+        getQueueFamilyName(properties.name, engineGroup.engineGroupType);
+        deviceInfo.queueFamilyProperties.push_back(properties);
     }
     auto &clHwHelper = NEO::ClHwHelper::get(hwInfo.platform.eRenderCoreFamily);
     const std::vector<uint32_t> &supportedThreadArbitrationPolicies = clHwHelper.getSupportedThreadArbitrationPolicies();
@@ -423,14 +404,7 @@ void ClDevice::initializeCaps() {
     deviceInfo.deviceMemCapabilities = hwInfoConfig->getDeviceMemCapabilities();
     deviceInfo.singleDeviceSharedMemCapabilities = hwInfoConfig->getSingleDeviceSharedMemCapabilities();
     deviceInfo.crossDeviceSharedMemCapabilities = hwInfoConfig->getCrossDeviceSharedMemCapabilities();
-    deviceInfo.sharedSystemMemCapabilities = hwInfoConfig->getSharedSystemMemCapabilities();
-    if (DebugManager.flags.EnableSharedSystemUsmSupport.get() != -1) {
-        if (DebugManager.flags.EnableSharedSystemUsmSupport.get() == 0) {
-            deviceInfo.sharedSystemMemCapabilities = 0u;
-        } else {
-            deviceInfo.sharedSystemMemCapabilities = CL_UNIFIED_SHARED_MEMORY_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS_INTEL;
-        }
-    }
+    deviceInfo.sharedSystemMemCapabilities = hwInfoConfig->getSharedSystemMemCapabilities(&hwInfo);
 
     initializeOsSpecificCaps();
     getOpenclCFeaturesList(hwInfo, deviceInfo.openclCFeatures);
@@ -459,11 +433,6 @@ void ClDevice::initializeOpenclCAllVersions() {
     deviceInfo.openclCAllVersions.push_back(openClCVersion);
     openClCVersion.version = CL_MAKE_VERSION(1, 2, 0);
     deviceInfo.openclCAllVersions.push_back(openClCVersion);
-
-    if (isOcl21Conformant()) {
-        openClCVersion.version = CL_MAKE_VERSION(2, 0, 0);
-        deviceInfo.openclCAllVersions.push_back(openClCVersion);
-    }
 
     if (enabledClVersion == 30) {
         openClCVersion.version = CL_MAKE_VERSION(3, 0, 0);

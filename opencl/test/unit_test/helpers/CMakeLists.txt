@@ -9,6 +9,7 @@ set(IGDRCL_SRCS_tests_helpers
     ${CMAKE_CURRENT_SOURCE_DIR}/api_specific_config_ocl_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/base_object_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cl_helper_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cl_hw_parse.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cmd_buffer_validator.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cmd_buffer_validator_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_info_builder_tests.cpp
@@ -20,8 +21,7 @@ set(IGDRCL_SRCS_tests_helpers
     ${CMAKE_CURRENT_SOURCE_DIR}/heap_assigner_ocl_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_default_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_tests.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_tests.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/kernel_filename_helper.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_tests_dg2_or_below.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kmd_notify_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_management_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_properties_helpers_tests.cpp
@@ -37,13 +37,38 @@ set(IGDRCL_SRCS_tests_helpers
     ${CMAKE_CURRENT_SOURCE_DIR}/timestamp_packet_tests.h
     ${CMAKE_CURRENT_SOURCE_DIR}/transfer_properties_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ult_limits.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/uint16_sse4_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/validator_tests.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/aligned_memory_tests.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/debug_manager_state_restore.h
-    ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/unit_test_helper.h
-    ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/unit_test_helper.inl
 )
+
+if(MSVC OR COMPILER_SUPPORTS_SSE42)
+  list(APPEND IGDRCL_SRCS_tests_helpers
+       ${CMAKE_CURRENT_SOURCE_DIR}/uint16_sse4_tests.cpp
+  )
+endif()
+
+if(TESTS_XEHP_AND_LATER)
+  list(APPEND IGDRCL_SRCS_tests_helpers
+       ${CMAKE_CURRENT_SOURCE_DIR}/aub_helper_hw_tests_xehp_and_later.cpp
+       ${CMAKE_CURRENT_SOURCE_DIR}/engine_node_helper_tests_xehp_and_later.cpp
+       ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_tests_xehp_and_later.cpp
+       ${CMAKE_CURRENT_SOURCE_DIR}/test_preamble_xehp_and_later.cpp
+  )
+endif()
+
+if(TESTS_DG2_AND_LATER)
+  list(APPEND IGDRCL_SRCS_tests_helpers
+       ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_tests_dg2_and_later.cpp
+       ${CMAKE_CURRENT_SOURCE_DIR}/test_preamble_dg2_and_later.cpp
+  )
+endif()
+
+if(TESTS_PVC_AND_LATER)
+  list(APPEND IGDRCL_SRCS_tests_helpers
+       ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_tests_pvc_and_later.cpp
+  )
+endif()
 
 get_property(NEO_CORE_PREAMBLE_TESTS GLOBAL PROPERTY NEO_CORE_PREAMBLE_TESTS)
 

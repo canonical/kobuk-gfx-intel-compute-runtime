@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -31,7 +31,7 @@ struct UnitTestHelper {
 
     static uint32_t getDefaultSshUsage();
 
-    static uint32_t getAppropriateThreadArbitrationPolicy(uint32_t policy);
+    static uint32_t getAppropriateThreadArbitrationPolicy(int32_t policy);
 
     static auto getCoherencyTypeSupported(COHERENCY_TYPE coherencyType) -> decltype(coherencyType);
 
@@ -47,7 +47,14 @@ struct UnitTestHelper {
 
     static uint64_t getAtomicMemoryAddress(const typename GfxFamily::MI_ATOMIC &atomic);
 
-    static bool requiresTimestampPacketsInSystemMemory();
+    static bool requiresTimestampPacketsInSystemMemory(HardwareInfo &hwInfo);
+
+    static void setExtraMidThreadPreemptionFlag(HardwareInfo &hwInfo, bool value);
+
+    static uint32_t getDebugModeRegisterOffset();
+    static uint32_t getDebugModeRegisterValue();
+    static uint32_t getTdCtlRegisterOffset();
+    static uint32_t getTdCtlRegisterValue();
 
     static const bool tiledImagesSupported;
 
@@ -58,6 +65,12 @@ struct UnitTestHelper {
     static const bool useFullRowForLocalIdsGeneration;
 
     static const bool additionalMiFlushDwRequired;
+
+    static uint64_t getPipeControlPostSyncAddress(const typename GfxFamily::PIPE_CONTROL &pipeControl);
+    static bool getPipeControlHdcPipelineFlush(const typename GfxFamily::PIPE_CONTROL &pipeControl);
+    static void setPipeControlHdcPipelineFlush(typename GfxFamily::PIPE_CONTROL &pipeControl, bool hdcPipelineFlush);
+
+    static void adjustKernelDescriptorForImplicitArgs(KernelDescriptor &kernelDescriptor);
 };
 
 } // namespace NEO

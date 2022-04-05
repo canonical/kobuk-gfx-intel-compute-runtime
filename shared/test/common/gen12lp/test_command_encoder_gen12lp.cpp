@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,8 +11,7 @@
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/fixtures/device_fixture.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "reg_configs_common.h"
 
@@ -20,19 +19,22 @@ using namespace NEO;
 
 using CommandEncoderTest = Test<DeviceFixture>;
 
-GEN12LPTEST_F(CommandEncoderTest, givenAdjustStateComputeModeThenStateComputeModeShowsNonCoherencySet) {
+GEN12LPTEST_F(CommandEncoderTest, WhenAdjustComputeModeIsCalledThenStateComputeModeShowsNonCoherencySet) {
     using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
     using FORCE_NON_COHERENT = typename STATE_COMPUTE_MODE::FORCE_NON_COHERENT;
 
     CommandContainer cmdContainer;
 
-    auto ret = cmdContainer.initialize(pDevice);
+    auto ret = cmdContainer.initialize(pDevice, nullptr);
     ASSERT_EQ(ErrorCode::SUCCESS, ret);
 
     auto usedSpaceBefore = cmdContainer.getCommandStream()->getUsed();
 
     // Adjust the State Compute Mode which sets FORCE_NON_COHERENT_FORCE_GPU_NON_COHERENT
-    EncodeStates<FamilyType>::adjustStateComputeMode(*cmdContainer.getCommandStream(), cmdContainer.lastSentNumGrfRequired, nullptr, false, 0, *defaultHwInfo);
+    StreamProperties properties{};
+    properties.stateComputeMode.setProperties(false, GrfConfig::DefaultGrfNumber, 0, *defaultHwInfo);
+    NEO::EncodeComputeMode<FamilyType>::programComputeModeCommand(*cmdContainer.getCommandStream(),
+                                                                  properties.stateComputeMode, *defaultHwInfo);
 
     auto usedSpaceAfter = cmdContainer.getCommandStream()->getUsed();
     ASSERT_GT(usedSpaceAfter, usedSpaceBefore);
@@ -51,7 +53,7 @@ GEN12LPTEST_F(CommandEncoderTest, givenAdjustStateComputeModeThenStateComputeMod
 
 GEN12LPTEST_F(CommandEncoderTest, givenCommandContainerWhenEncodeL3StateThenDoNotDispatchMMIOCommand) {
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice);
+    cmdContainer.initialize(pDevice, nullptr);
     EncodeL3State<FamilyType>::encode(cmdContainer, false);
 
     GenCmdList commands;
@@ -73,17 +75,21 @@ GEN12LPTEST_F(CommandEncoderTest, givenVariousEngineTypesWhenEncodeSBAThenAdditi
 
     CommandContainer cmdContainer;
 
-    auto ret = cmdContainer.initialize(pDevice);
+    auto ret = cmdContainer.initialize(pDevice, nullptr);
     ASSERT_EQ(ErrorCode::SUCCESS, ret);
 
     {
         STATE_BASE_ADDRESS sba;
-        EncodeStateBaseAddress<FamilyType>::encode(cmdContainer, sba);
+        EncodeStateBaseAddress<FamilyType>::encode(cmdContainer, sba, false);
 
         GenCmdList commands;
         CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer.getCommandStream()->getCpuBase(), 0), cmdContainer.getCommandStream()->getUsed());
         auto itorLRI = find<PIPELINE_SELECT *>(commands.begin(), commands.end());
-        EXPECT_NE(itorLRI, commands.end());
+        if (HwInfoConfig::get(defaultHwInfo->platform.eProductFamily)->is3DPipelineSelectWARequired()) {
+            EXPECT_NE(itorLRI, commands.end());
+        } else {
+            EXPECT_EQ(itorLRI, commands.end());
+        }
     }
 
     cmdContainer.reset();
@@ -92,7 +98,7 @@ GEN12LPTEST_F(CommandEncoderTest, givenVariousEngineTypesWhenEncodeSBAThenAdditi
         static_cast<MockOsContext *>(pDevice->getDefaultEngine().osContext)->engineType = aub_stream::ENGINE_CCS;
 
         STATE_BASE_ADDRESS sba;
-        EncodeStateBaseAddress<FamilyType>::encode(cmdContainer, sba);
+        EncodeStateBaseAddress<FamilyType>::encode(cmdContainer, sba, false);
 
         GenCmdList commands;
         CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer.getCommandStream()->getCpuBase(), 0), cmdContainer.getCommandStream()->getUsed());
@@ -101,25 +107,11 @@ GEN12LPTEST_F(CommandEncoderTest, givenVariousEngineTypesWhenEncodeSBAThenAdditi
     }
 }
 
-GEN12LPTEST_F(CommandEncoderTest, givenVariousEngineTypesWhenEstimateCommandBufferSizeThenRcsHasAdditionalPipelineSelectWASize) {
-    using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
-    using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
-
-    auto sizeWA = EncodeDispatchKernel<FamilyType>::estimateEncodeDispatchKernelCmdsSize(pDevice, Vec3<size_t>(0, 0, 0), Vec3<size_t>(1, 1, 1), false);
-    static_cast<MockOsContext *>(pDevice->getDefaultEngine().osContext)->engineType = aub_stream::ENGINE_CCS;
-    auto size = EncodeDispatchKernel<FamilyType>::estimateEncodeDispatchKernelCmdsSize(pDevice, Vec3<size_t>(0, 0, 0), Vec3<size_t>(1, 1, 1), false);
-
-    auto expectedDiff = 2 * PreambleHelper<FamilyType>::getCmdSizeForPipelineSelect(pDevice->getHardwareInfo());
-    auto diff = sizeWA - size;
-
-    EXPECT_EQ(expectedDiff, diff);
-}
-
 GEN12LPTEST_F(CommandEncoderTest, GivenGen12LpWhenProgrammingL3StateOnThenExpectNoCommandsDispatched) {
     using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
 
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice);
+    cmdContainer.initialize(pDevice, nullptr);
 
     EncodeL3State<FamilyType>::encode(cmdContainer, true);
 
@@ -133,7 +125,7 @@ GEN12LPTEST_F(CommandEncoderTest, GivenGen12LpWhenProgrammingL3StateOnThenExpect
 GEN12LPTEST_F(CommandEncoderTest, GivenGen12LpWhenProgrammingL3StateOffThenExpectNoCommandsDispatched) {
     using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice);
+    cmdContainer.initialize(pDevice, nullptr);
 
     EncodeL3State<FamilyType>::encode(cmdContainer, false);
 

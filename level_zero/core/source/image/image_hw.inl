@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,9 +14,9 @@
 #include "shared/source/image/image_surface_state.h"
 #include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/memory_manager.h"
-#include "shared/source/utilities/compiler_support.h"
 
 #include "level_zero/core/source/helpers/properties_parser.h"
+#include "level_zero/core/source/hw_helpers/l0_hw_helper.h"
 #include "level_zero/core/source/image/image_formats.h"
 #include "level_zero/core/source/image/image_hw.h"
 
@@ -71,7 +71,6 @@ ze_result_t ImageCoreFamily<gfxCoreFamily>::initialize(Device *device, const ze_
     imgInfo.linearStorage = surfaceType == RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_1D;
     imgInfo.plane = lookupTable.imageProperties.isPlanarExtension ? static_cast<GMM_YUV_PLANE>(lookupTable.imageProperties.planeIndex + 1u) : GMM_NO_PLANE;
     imgInfo.useLocalMemory = false;
-    imgInfo.preferRenderCompression = false;
 
     if (!isImageView) {
         if (lookupTable.isSharedHandle) {
@@ -79,7 +78,7 @@ ze_result_t ImageCoreFamily<gfxCoreFamily>::initialize(Device *device, const ze_
                 return ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION;
             }
             if (lookupTable.sharedHandleType.isDMABUFHandle) {
-                NEO::AllocationProperties properties(device->getRootDeviceIndex(), true, imgInfo, NEO::GraphicsAllocation::AllocationType::SHARED_IMAGE, device->getNEODevice()->getDeviceBitfield());
+                NEO::AllocationProperties properties(device->getRootDeviceIndex(), true, imgInfo, NEO::AllocationType::SHARED_IMAGE, device->getNEODevice()->getDeviceBitfield());
                 allocation = device->getNEODevice()->getMemoryManager()->createGraphicsAllocationFromSharedHandle(lookupTable.sharedHandleType.fd, properties, false, false);
                 device->getNEODevice()->getMemoryManager()->closeSharedHandle(allocation);
             } else if (lookupTable.sharedHandleType.isNTHandle) {
@@ -87,10 +86,12 @@ ze_result_t ImageCoreFamily<gfxCoreFamily>::initialize(Device *device, const ze_
                 if (!verifyResult) {
                     return ZE_RESULT_ERROR_INVALID_ARGUMENT;
                 }
-                allocation = device->getNEODevice()->getMemoryManager()->createGraphicsAllocationFromNTHandle(lookupTable.sharedHandleType.ntHnadle, device->getNEODevice()->getRootDeviceIndex());
+                allocation = device->getNEODevice()->getMemoryManager()->createGraphicsAllocationFromNTHandle(lookupTable.sharedHandleType.ntHnadle, device->getNEODevice()->getRootDeviceIndex(), NEO::AllocationType::SHARED_IMAGE);
             }
         } else {
-            NEO::AllocationProperties properties(device->getRootDeviceIndex(), true, imgInfo, NEO::GraphicsAllocation::AllocationType::IMAGE, device->getNEODevice()->getDeviceBitfield());
+            NEO::AllocationProperties properties(device->getRootDeviceIndex(), true, imgInfo, NEO::AllocationType::IMAGE, device->getNEODevice()->getDeviceBitfield());
+
+            properties.flags.preferCompressed = isSuitableForCompression(lookupTable, imgInfo);
 
             allocation = device->getNEODevice()->getMemoryManager()->allocateGraphicsMemoryWithProperties(properties);
         }
@@ -141,7 +142,7 @@ ze_result_t ImageCoreFamily<gfxCoreFamily>::initialize(Device *device, const ze_
 
         surfaceState.setNumberOfMultisamples(RENDER_SURFACE_STATE::NUMBER_OF_MULTISAMPLES::NUMBER_OF_MULTISAMPLES_MULTISAMPLECOUNT_1);
 
-        if (gmm && gmm->isCompressionEnabled) {
+        if (allocation->isCompressionEnabled()) {
             NEO::EncodeSurfaceState<GfxFamily>::setImageAuxParamsForCCS(&surfaceState, gmm);
         }
     }
@@ -182,7 +183,7 @@ ze_result_t ImageCoreFamily<gfxCoreFamily>::initialize(Device *device, const ze_
 
         redescribedSurfaceState.setNumberOfMultisamples(RENDER_SURFACE_STATE::NUMBER_OF_MULTISAMPLES::NUMBER_OF_MULTISAMPLES_MULTISAMPLECOUNT_1);
 
-        if (gmm && gmm->isCompressionEnabled) {
+        if (allocation->isCompressionEnabled()) {
             NEO::EncodeSurfaceState<GfxFamily>::setImageAuxParamsForCCS(&redescribedSurfaceState, gmm);
         }
     }
@@ -203,8 +204,7 @@ void ImageCoreFamily<gfxCoreFamily>::copySurfaceStateToSSH(void *surfaceStateHea
              &surfaceState, sizeof(RENDER_SURFACE_STATE));
     if (isMediaBlockArg) {
         RENDER_SURFACE_STATE *dstRss = static_cast<RENDER_SURFACE_STATE *>(destSurfaceState);
-        uint32_t elSize = static_cast<uint32_t>(imgInfo.surfaceFormat->ImageElementSizeInBytes);
-        dstRss->setWidth(static_cast<uint32_t>((imgInfo.imgDesc.imageWidth * elSize) / sizeof(uint32_t)));
+        NEO::setWidthForMediaBlockSurfaceState<GfxFamily>(dstRss, imgInfo);
     }
 }
 
@@ -218,6 +218,18 @@ void ImageCoreFamily<gfxCoreFamily>::copyRedescribedSurfaceStateToSSH(void *surf
     auto destSurfaceState = ptrOffset(surfaceStateHeap, surfaceStateOffset);
     memcpy_s(destSurfaceState, sizeof(RENDER_SURFACE_STATE),
              &redescribedSurfaceState, sizeof(RENDER_SURFACE_STATE));
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+bool ImageCoreFamily<gfxCoreFamily>::isSuitableForCompression(const StructuresLookupTable &structuresLookupTable, const NEO::ImageInfo &imgInfo) {
+    auto &hwInfo = device->getHwInfo();
+    auto &l0HwHelper = L0HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+
+    if (structuresLookupTable.uncompressedHint) {
+        return false;
+    }
+
+    return (l0HwHelper.imageCompressionSupported(hwInfo) && !imgInfo.linearStorage);
 }
 
 } // namespace L0

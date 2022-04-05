@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -28,9 +28,8 @@ class RefCounter {
     }
 
     void inc() {
-        CT curr = ++val;
+        [[maybe_unused]] CT curr = ++val;
         DEBUG_BREAK_IF(curr < 1);
-        UNUSED_VARIABLE(curr);
     }
 
     bool dec() {
@@ -175,4 +174,24 @@ template <typename DerivedClass>
 inline ReferenceTrackedObject<DerivedClass>::~ReferenceTrackedObject() {
     DEBUG_BREAK_IF(refInternal.peek() > 1);
 }
+
+template <typename RefTrackedObj>
+class DecRefInternalAtScopeEnd final {
+  public:
+    DecRefInternalAtScopeEnd(RefTrackedObj &obj) : object{obj} {
+    }
+
+    ~DecRefInternalAtScopeEnd() {
+        object.decRefInternal();
+    }
+
+    DecRefInternalAtScopeEnd(const DecRefInternalAtScopeEnd &) = delete;
+    DecRefInternalAtScopeEnd(DecRefInternalAtScopeEnd &&) = delete;
+    DecRefInternalAtScopeEnd &operator=(const DecRefInternalAtScopeEnd &) = delete;
+    DecRefInternalAtScopeEnd &operator=(DecRefInternalAtScopeEnd &&) = delete;
+
+  private:
+    RefTrackedObj &object;
+};
+
 } // namespace NEO

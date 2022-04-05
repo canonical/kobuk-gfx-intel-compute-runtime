@@ -12,6 +12,7 @@
 #include "shared/source/device/sub_device.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/test/common/helpers/variable_backup.h"
+#include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/unit_test/fixtures/mock_aub_center_fixture.h"
 
 namespace NEO {
@@ -27,9 +28,9 @@ extern CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executio
                                                   const DeviceBitfield deviceBitfield);
 
 struct MockSubDevice : public SubDevice {
+    using Device::allEngines;
     using Device::createEngines;
     using Device::engineInstancedType;
-    using Device::engines;
     using SubDevice::engineInstanced;
     using SubDevice::getDeviceBitfield;
     using SubDevice::getGlobalMemorySize;
@@ -46,19 +47,22 @@ struct MockSubDevice : public SubDevice {
 
 class MockDevice : public RootDevice {
   public:
+    using Device::addEngineToEngineGroup;
+    using Device::allEngines;
     using Device::commandStreamReceivers;
     using Device::createDeviceInternals;
     using Device::createEngine;
     using Device::createSubDevices;
+    using Device::deviceBitfield;
     using Device::deviceInfo;
-    using Device::engineGroups;
     using Device::engineInstanced;
     using Device::engineInstancedType;
-    using Device::engines;
     using Device::executionEnvironment;
     using Device::getGlobalMemorySize;
     using Device::initializeCaps;
     using Device::isDebuggerActive;
+    using Device::regularEngineGroups;
+    using Device::rootCsrCreated;
     using Device::rtMemoryBackedBuffer;
     using RootDevice::createEngines;
     using RootDevice::defaultEngineIndex;
@@ -91,18 +95,25 @@ class MockDevice : public RootDevice {
         }
     }
 
+    size_t getMaxParameterSizeFromIGC() const override {
+        if (callBaseGetMaxParameterSizeFromIGC) {
+            return Device::getMaxParameterSizeFromIGC();
+        }
+        return maxParameterSizeFromIGC;
+    }
+
     const char *getProductAbbrev() const;
 
     template <typename T>
     UltCommandStreamReceiver<T> &getUltCommandStreamReceiver() {
-        return reinterpret_cast<UltCommandStreamReceiver<T> &>(*engines[defaultEngineIndex].commandStreamReceiver);
+        return reinterpret_cast<UltCommandStreamReceiver<T> &>(*allEngines[defaultEngineIndex].commandStreamReceiver);
     }
 
     template <typename T>
     UltCommandStreamReceiver<T> &getUltCommandStreamReceiverFromIndex(uint32_t index) {
-        return reinterpret_cast<UltCommandStreamReceiver<T> &>(*engines[index].commandStreamReceiver);
+        return reinterpret_cast<UltCommandStreamReceiver<T> &>(*allEngines[index].commandStreamReceiver);
     }
-    CommandStreamReceiver &getGpgpuCommandStreamReceiver() const { return *engines[defaultEngineIndex].commandStreamReceiver; }
+    CommandStreamReceiver &getGpgpuCommandStreamReceiver() const { return *allEngines[defaultEngineIndex].commandStreamReceiver; }
     void resetCommandStreamReceiver(CommandStreamReceiver *newCsr);
     void resetCommandStreamReceiver(CommandStreamReceiver *newCsr, uint32_t engineIndex);
 
@@ -118,8 +129,7 @@ class MockDevice : public RootDevice {
         return createDeviceInternals(device);
     }
 
-    template <typename T>
-    static T *createWithNewExecutionEnvironment(const HardwareInfo *pHwInfo, uint32_t rootDeviceIndex = 0) {
+    static ExecutionEnvironment *prepareExecutionEnvironment(const HardwareInfo *pHwInfo, uint32_t rootDeviceIndex) {
         ExecutionEnvironment *executionEnvironment = new ExecutionEnvironment();
         auto numRootDevices = DebugManager.flags.CreateMultipleRootDevices.get() ? DebugManager.flags.CreateMultipleRootDevices.get() : rootDeviceIndex + 1;
         executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
@@ -127,6 +137,13 @@ class MockDevice : public RootDevice {
         for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
             executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(pHwInfo);
         }
+        executionEnvironment->calculateMaxOsContextCount();
+        return executionEnvironment;
+    }
+
+    template <typename T>
+    static T *createWithNewExecutionEnvironment(const HardwareInfo *pHwInfo, uint32_t rootDeviceIndex = 0) {
+        auto executionEnvironment = prepareExecutionEnvironment(pHwInfo, rootDeviceIndex);
         return createWithExecutionEnvironment<T>(pHwInfo, executionEnvironment, rootDeviceIndex);
     }
 
@@ -149,10 +166,25 @@ class MockDevice : public RootDevice {
         return isDebuggerActiveReturn;
     }
 
+    void allocateRTDispatchGlobals(uint32_t maxBvhLevels) override {
+        if (rtDispatchGlobalsForceAllocation == true) {
+            rtDispatchGlobals[maxBvhLevels] = new MockGraphicsAllocation();
+        } else {
+            Device::allocateRTDispatchGlobals(maxBvhLevels);
+        }
+    }
+
+    void setRTDispatchGlobalsForceAllocation() {
+        rtDispatchGlobalsForceAllocation = true;
+    }
+
     static decltype(&createCommandStream) createCommandStreamReceiverFunc;
 
     bool isDebuggerActiveParentCall = true;
     bool isDebuggerActiveReturn = false;
+    bool rtDispatchGlobalsForceAllocation = false;
+    bool callBaseGetMaxParameterSizeFromIGC = false;
+    size_t maxParameterSizeFromIGC = 0u;
 };
 
 template <>

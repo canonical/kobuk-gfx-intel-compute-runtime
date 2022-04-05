@@ -8,6 +8,8 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/api_specific_config.h"
 
+#include "opencl/source/os_interface/ocl_reg_path.h"
+
 namespace NEO {
 bool ApiSpecificConfig::isStatelessCompressionSupported() {
     return true;
@@ -29,7 +31,15 @@ ApiSpecificConfig::ApiType ApiSpecificConfig::getApiType() {
     return ApiSpecificConfig::OCL;
 }
 
-const char *ApiSpecificConfig::getAubPrefixForSpecificApi() {
-    return "ocl_";
+std::string ApiSpecificConfig::getName() {
+    return "ocl";
+}
+
+uint64_t ApiSpecificConfig::getReducedMaxAllocSize(uint64_t maxAllocSize) {
+    return maxAllocSize / 2;
+}
+
+const char *ApiSpecificConfig::getRegistryPath() {
+    return oclRegPath;
 }
 } // namespace NEO

@@ -6,10 +6,13 @@
  */
 
 #include "shared/source/built_ins/built_ins.h"
+#include "shared/source/helpers/local_memory_access_modes.h"
 #include "shared/source/memory_manager/allocations_list.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
+#include "shared/test/common/test_macros/test.h"
+#include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/source/helpers/dispatch_info.h"
@@ -18,7 +21,6 @@
 #include "opencl/test/unit_test/gen_common/gen_commands_common_validation.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
-#include "test.h"
 
 #include "reg_configs_common.h"
 
@@ -428,7 +430,7 @@ HWTEST_F(EnqueueWriteBufferTypeTest, givenForcedCpuCopyWhenEnqueueWriteCompresse
 
     allocation->overrideMemoryPool(MemoryPool::SystemCpuInaccessible);
     void *ptr = srcBuffer->getCpuAddressForMemoryTransfer();
-    allocation->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
+    MockBuffer::setAllocationType(allocation, pDevice->getRootDeviceEnvironment().getGmmClientContext(), true);
 
     retVal = mockCmdQ->enqueueWriteBuffer(buffer.get(),
                                           CL_FALSE,
@@ -444,7 +446,7 @@ HWTEST_F(EnqueueWriteBufferTypeTest, givenForcedCpuCopyWhenEnqueueWriteCompresse
     EXPECT_FALSE(allocation->isLocked());
     EXPECT_FALSE(mockCmdQ->cpuDataTransferHandlerCalled);
 
-    allocation->setAllocationType(GraphicsAllocation::AllocationType::BUFFER);
+    MockBuffer::setAllocationType(allocation, pDevice->getRootDeviceEnvironment().getGmmClientContext(), false);
 
     retVal = mockCmdQ->enqueueWriteBuffer(buffer.get(),
                                           CL_FALSE,
@@ -512,7 +514,7 @@ struct EnqueueWriteBufferHw : public ::testing::Test {
         if (is32bit) {
             GTEST_SKIP();
         }
-        device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+        device = std::make_unique<MockClDevice>(MockClDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
         context.reset(new MockContext(device.get()));
     }
 
@@ -523,9 +525,9 @@ struct EnqueueWriteBufferHw : public ::testing::Test {
     uint64_t smallSize = 4ull * MemoryConstants::gigaByte - 1;
 };
 
-using EnqeueReadWriteStatelessTest = EnqueueWriteBufferHw;
+using EnqueueReadWriteStatelessTest = EnqueueWriteBufferHw;
 
-HWTEST_F(EnqeueReadWriteStatelessTest, WhenWritingBufferStatelessThenSuccessIsReturned) {
+HWTEST_F(EnqueueReadWriteStatelessTest, WhenWritingBufferStatelessThenSuccessIsReturned) {
 
     auto pCmdQ = std::make_unique<CommandQueueStateless<FamilyType>>(context.get(), device.get());
     void *missAlignedPtr = reinterpret_cast<void *>(0x1041);
@@ -543,9 +545,9 @@ HWTEST_F(EnqeueReadWriteStatelessTest, WhenWritingBufferStatelessThenSuccessIsRe
     EXPECT_EQ(CL_SUCCESS, retVal);
 }
 
-using EnqeueWriteBufferStatefulTest = EnqueueWriteBufferHw;
+using EnqueueWriteBufferStatefulTest = EnqueueWriteBufferHw;
 
-HWTEST_F(EnqeueWriteBufferStatefulTest, WhenWritingBufferStatefulThenSuccessIsReturned) {
+HWTEST_F(EnqueueWriteBufferStatefulTest, WhenWritingBufferStatefulThenSuccessIsReturned) {
 
     auto pCmdQ = std::make_unique<CommandQueueStateful<FamilyType>>(context.get(), device.get());
     void *missAlignedPtr = reinterpret_cast<void *>(0x1041);
@@ -561,4 +563,38 @@ HWTEST_F(EnqeueWriteBufferStatefulTest, WhenWritingBufferStatefulThenSuccessIsRe
                                             nullptr);
 
     EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+HWTEST_F(EnqueueWriteBufferHw, givenHostPtrIsFromMappedBufferWhenWriteBufferIsCalledThenReuseGraphicsAllocation) {
+    DebugManagerStateRestore restore{};
+    DebugManager.flags.DisableZeroCopyForBuffers.set(1);
+    DebugManager.flags.DoCpuCopyOnWriteBuffer.set(0);
+
+    MockCommandQueueHw<FamilyType> queue(context.get(), device.get(), nullptr);
+    auto &csr = device->getUltCommandStreamReceiver<FamilyType>();
+
+    BufferDefaults::context = context.get();
+    auto bufferForMap = clUniquePtr(BufferHelper<>::create());
+    auto bufferForRead = clUniquePtr(BufferHelper<>::create());
+
+    cl_int retVal{};
+    void *mappedPtr = queue.enqueueMapBuffer(bufferForMap.get(), CL_TRUE, CL_MAP_READ, 0, bufferForMap->getSize(), 0, nullptr, nullptr, retVal);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, mappedPtr);
+    EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+
+    MapOperationsHandler *mapOperationsHandler = context->getMapOperationsStorage().getHandlerIfExists(bufferForMap.get());
+    EXPECT_NE(nullptr, mapOperationsHandler);
+    MapInfo mapInfo{};
+    EXPECT_TRUE(mapOperationsHandler->find(mappedPtr, mapInfo));
+    EXPECT_NE(nullptr, mapInfo.graphicsAllocation);
+
+    auto unmappedPtr = std::make_unique<char[]>(bufferForRead->getSize());
+    retVal = queue.enqueueWriteBuffer(bufferForRead.get(), CL_TRUE, 0, bufferForRead->getSize(), unmappedPtr.get(), nullptr, 0, 0, nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(1u, csr.createAllocationForHostSurfaceCalled);
+
+    retVal = queue.enqueueWriteBuffer(bufferForRead.get(), CL_TRUE, 0, bufferForRead->getSize(), mappedPtr, nullptr, 0, 0, nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(1u, csr.createAllocationForHostSurfaceCalled);
 }

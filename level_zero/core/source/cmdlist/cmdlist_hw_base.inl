@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,7 @@
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/command_stream/preemption.h"
+#include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/source/helpers/simd_helper.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
@@ -20,8 +21,6 @@
 
 #include "level_zero/core/source/kernel/kernel_imp.h"
 
-#include "pipe_control_args.h"
-
 #include <algorithm>
 
 namespace L0 {
@@ -31,32 +30,6 @@ template <GFXCORE_FAMILY gfxCoreFamily>
 size_t CommandListCoreFamily<gfxCoreFamily>::getReserveSshSize() {
     auto &helper = NEO::HwHelper::get(device->getHwInfo().platform.eRenderCoreFamily);
     return helper.getRenderSurfaceStateSize();
-}
-
-template <GFXCORE_FAMILY gfxCoreFamily>
-ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendBarrier(ze_event_handle_t hSignalEvent,
-                                                                uint32_t numWaitEvents,
-                                                                ze_event_handle_t *phWaitEvents) {
-
-    ze_result_t ret = addEventsToCmdList(numWaitEvents, phWaitEvents);
-    if (ret) {
-        return ret;
-    }
-    appendEventForProfiling(hSignalEvent, true);
-
-    if (!hSignalEvent) {
-        if (isCopyOnly()) {
-            NEO::MiFlushArgs args;
-            NEO::EncodeMiFlushDW<GfxFamily>::programMiFlushDw(*commandContainer.getCommandStream(), 0, 0, args);
-        } else {
-            NEO::PipeControlArgs args;
-            NEO::MemorySynchronizationCommands<GfxFamily>::addPipeControl(*commandContainer.getCommandStream(), args);
-        }
-    } else {
-        appendSignalEventPostWalker(hSignalEvent);
-    }
-
-    return ZE_RESULT_SUCCESS;
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
@@ -95,9 +68,6 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(z
         kernel->setGroupCount(pThreadGroupDimensions->groupCountX,
                               pThreadGroupDimensions->groupCountY,
                               pThreadGroupDimensions->groupCountZ);
-        kernel->patchWorkDim(pThreadGroupDimensions->groupCountX,
-                             pThreadGroupDimensions->groupCountY,
-                             pThreadGroupDimensions->groupCountZ);
     }
 
     if (isIndirect && pThreadGroupDimensions) {
@@ -120,8 +90,9 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(z
         this->indirectAllocationsAllowed = true;
     }
 
-    if (!containsAnyKernel) {
-        containsCooperativeKernelsFlag = isCooperative;
+    bool isMixingRegularAndCooperativeKernelsAllowed = NEO::DebugManager.flags.AllowMixingRegularAndCooperativeKernels.get();
+    if ((!containsAnyKernel) || isMixingRegularAndCooperativeKernelsAllowed) {
+        containsCooperativeKernelsFlag = (containsCooperativeKernelsFlag || isCooperative);
     } else if (containsCooperativeKernelsFlag != isCooperative) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
@@ -137,7 +108,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(z
 
     KernelImp *kernelImp = static_cast<KernelImp *>(kernel);
     this->containsStatelessUncachedResource |= kernelImp->getKernelRequiresUncachedMocs();
-    uint32_t partitionCount = 0;
+    this->requiresQueueUncachedMocs |= kernelImp->getKernelRequiresQueueUncachedMocs();
 
     NEO::Device *neoDevice = device->getNEODevice();
 
@@ -145,36 +116,45 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(z
         neoDevice->getRootDeviceEnvironment().tagsManager->insertTag<GfxFamily, NEO::SWTags::KernelNameTag>(
             *commandContainer.getCommandStream(),
             *neoDevice,
-            kernel->getKernelDescriptor().kernelMetadata.kernelName.c_str());
+            kernel->getKernelDescriptor().kernelMetadata.kernelName.c_str(), 0u);
     }
 
-    updateStreamProperties(*kernel, false);
-
-    NEO::EncodeDispatchKernel<GfxFamily>::encode(commandContainer,
-                                                 reinterpret_cast<const void *>(pThreadGroupDimensions),
-                                                 isIndirect,
-                                                 isPredicate,
-                                                 kernel,
-                                                 0,
-                                                 false,
-                                                 false,
-                                                 neoDevice,
-                                                 commandListPreemptionMode,
-                                                 this->containsStatelessUncachedResource,
-                                                 false,
-                                                 partitionCount,
-                                                 internalUsage);
+    updateStreamProperties(*kernel, false, isCooperative);
+    NEO::EncodeDispatchKernelArgs dispatchKernelArgs{
+        0,                                                      //eventAddress
+        neoDevice,                                              //device
+        kernel,                                                 //dispatchInterface
+        reinterpret_cast<const void *>(pThreadGroupDimensions), //pThreadGroupDimensions
+        commandListPreemptionMode,                              //preemptionMode
+        0,                                                      //partitionCount
+        isIndirect,                                             //isIndirect
+        isPredicate,                                            //isPredicate
+        false,                                                  //isTimestampEvent
+        false,                                                  //L3FlushEnable
+        this->containsStatelessUncachedResource,                //requiresUncachedMocs
+        false,                                                  //useGlobalAtomics
+        internalUsage,                                          //isInternal
+        isCooperative                                           //isCooperative
+    };
+    NEO::EncodeDispatchKernel<GfxFamily>::encode(commandContainer, dispatchKernelArgs);
+    this->containsStatelessUncachedResource = dispatchKernelArgs.requiresUncachedMocs;
 
     if (neoDevice->getDebugger()) {
         auto *ssh = commandContainer.getIndirectHeap(NEO::HeapType::SURFACE_STATE);
         auto surfaceStateSpace = neoDevice->getDebugger()->getDebugSurfaceReservedSurfaceState(*ssh);
-        auto debugSurface = device->getDebugSurface();
-        auto mocs = device->getMOCS(false, false);
         auto surfaceState = GfxFamily::cmdInitRenderSurfaceState;
-        NEO::EncodeSurfaceState<GfxFamily>::encodeBuffer(&surfaceState, debugSurface->getGpuAddress(),
-                                                         debugSurface->getUnderlyingBufferSize(), mocs,
-                                                         false, false, false, neoDevice->getNumAvailableDevices(),
-                                                         debugSurface, neoDevice->getGmmHelper(), kernelImp->getKernelDescriptor().kernelAttributes.flags.useGlobalAtomics, 1u);
+
+        NEO::EncodeSurfaceStateArgs args;
+        args.outMemory = &surfaceState;
+        args.graphicsAddress = device->getDebugSurface()->getGpuAddress();
+        args.size = device->getDebugSurface()->getUnderlyingBufferSize();
+        args.mocs = device->getMOCS(false, false);
+        args.numAvailableDevices = neoDevice->getNumGenericSubDevices();
+        args.allocation = device->getDebugSurface();
+        args.gmmHelper = neoDevice->getGmmHelper();
+        args.useGlobalAtomics = kernelImp->getKernelDescriptor().kernelAttributes.flags.useGlobalAtomics;
+        args.areMultipleSubDevicesInContext = false;
+        NEO::EncodeSurfaceState<GfxFamily>::encodeBuffer(args);
         *reinterpret_cast<typename GfxFamily::RENDER_SURFACE_STATE *>(surfaceStateSpace) = surfaceState;
     }
 
@@ -191,6 +171,33 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(z
     }
 
     return ZE_RESULT_SUCCESS;
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+void CommandListCoreFamily<gfxCoreFamily>::appendMultiPartitionPrologue(uint32_t partitionDataSize) {}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+void CommandListCoreFamily<gfxCoreFamily>::appendMultiPartitionEpilogue() {}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+void CommandListCoreFamily<gfxCoreFamily>::appendComputeBarrierCommand() {
+    NEO::PipeControlArgs args = createBarrierFlags();
+    NEO::MemorySynchronizationCommands<GfxFamily>::addPipeControl(*commandContainer.getCommandStream(), args);
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+inline NEO::PipeControlArgs CommandListCoreFamily<gfxCoreFamily>::createBarrierFlags() {
+    NEO::PipeControlArgs args;
+    return args;
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+inline void CommandListCoreFamily<gfxCoreFamily>::appendMultiTileBarrier(NEO::Device &neoDevice) {
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+inline size_t CommandListCoreFamily<gfxCoreFamily>::estimateBufferSizeMultiTileBarrier(const NEO::HardwareInfo &hwInfo) {
+    return 0;
 }
 
 } // namespace L0

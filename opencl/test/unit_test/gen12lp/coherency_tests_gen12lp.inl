@@ -1,19 +1,18 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_stream/command_stream_receiver_hw.h"
-#include "shared/source/gen12lp/helpers_gen12lp.h"
-#include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
+#include "shared/test/common/libult/gen12lp/special_ult_helper_gen12lp.h"
+#include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_device.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 
@@ -24,6 +23,7 @@ struct Gen12LpCoherencyRequirements : public ::testing::Test {
 
     struct myCsr : public CommandStreamReceiverHw<TGLLPFamily> {
         using CommandStreamReceiver::commandStream;
+        using CommandStreamReceiver::streamProperties;
         myCsr(ExecutionEnvironment &executionEnvironment) : CommandStreamReceiverHw<TGLLPFamily>(executionEnvironment, 0, 1){};
         CsrSizeRequestFlags *getCsrRequestFlags() { return &csrSizeRequestFlags; }
     };
@@ -33,9 +33,10 @@ struct Gen12LpCoherencyRequirements : public ::testing::Test {
     }
 
     void overrideCoherencyRequest(bool reqestChanged, bool requireCoherency, bool hasSharedHandles) {
-        csr->getCsrRequestFlags()->coherencyRequestChanged = reqestChanged;
         csr->getCsrRequestFlags()->hasSharedHandles = hasSharedHandles;
         flags.requiresCoherency = requireCoherency;
+        csr->streamProperties.stateComputeMode.isCoherencyRequired.value = requireCoherency;
+        csr->streamProperties.stateComputeMode.isCoherencyRequired.isDirty = reqestChanged;
         if (hasSharedHandles) {
             makeResidentSharedAlloc();
         }
@@ -45,9 +46,9 @@ struct Gen12LpCoherencyRequirements : public ::testing::Test {
         device.reset(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
         csr = new myCsr(*device->executionEnvironment);
         device->resetCommandStreamReceiver(csr);
-        AllocationProperties properties(device->getRootDeviceIndex(), false, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, {});
+        AllocationProperties properties(device->getRootDeviceIndex(), false, MemoryConstants::pageSize, AllocationType::SHARED_BUFFER, false, {});
 
-        alloc = device->getMemoryManager()->createGraphicsAllocationFromSharedHandle((osHandle)123, properties, false, false);
+        alloc = device->getMemoryManager()->createGraphicsAllocationFromSharedHandle(static_cast<osHandle>(123), properties, false, false);
     }
 
     void TearDown() override {
@@ -62,66 +63,66 @@ struct Gen12LpCoherencyRequirements : public ::testing::Test {
 
 GEN12LPTEST_F(Gen12LpCoherencyRequirements, GivenNoSharedHandlesWhenGettingCmdSizeThenSizeIsCorrect) {
     auto cmdsSize = sizeof(STATE_COMPUTE_MODE);
-    auto &hwHelper = HwHelper::get(device->getHardwareInfo().platform.eRenderCoreFamily);
-    if (hwHelper.is3DPipelineSelectWARequired(device->getHardwareInfo())) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(device->getHardwareInfo().platform.eProductFamily);
+    if (hwInfoConfig.is3DPipelineSelectWARequired()) {
         cmdsSize += 2 * sizeof(PIPELINE_SELECT);
-        if (Gen12LPHelpers::pipeControlWaRequired(device->getHardwareInfo().platform.eProductFamily)) {
+        if (SpecialUltHelperGen12lp::isPipeControlWArequired(device->getHardwareInfo().platform.eProductFamily)) {
             cmdsSize += 2 * sizeof(PIPE_CONTROL);
         }
     }
 
     overrideCoherencyRequest(false, false, false);
-    auto retSize = csr->getCmdSizeForComputeMode();
-    EXPECT_EQ(0u, retSize);
+    EXPECT_FALSE(csr->streamProperties.stateComputeMode.isDirty());
 
     overrideCoherencyRequest(false, true, false);
-    retSize = csr->getCmdSizeForComputeMode();
-    EXPECT_EQ(0u, retSize);
+    EXPECT_FALSE(csr->streamProperties.stateComputeMode.isDirty());
 
     overrideCoherencyRequest(true, true, false);
-    retSize = csr->getCmdSizeForComputeMode();
+    auto retSize = csr->getCmdSizeForComputeMode();
+    EXPECT_TRUE(csr->streamProperties.stateComputeMode.isDirty());
     EXPECT_EQ(cmdsSize, retSize);
 
     overrideCoherencyRequest(true, false, false);
     retSize = csr->getCmdSizeForComputeMode();
+    EXPECT_TRUE(csr->streamProperties.stateComputeMode.isDirty());
     EXPECT_EQ(cmdsSize, retSize);
 }
 
 GEN12LPTEST_F(Gen12LpCoherencyRequirements, GivenSharedHandlesWhenGettingCmdSizeThenSizeIsCorrect) {
     auto cmdsSize = sizeof(STATE_COMPUTE_MODE) + sizeof(PIPE_CONTROL);
-    auto &hwHelper = HwHelper::get(device->getHardwareInfo().platform.eRenderCoreFamily);
-    if (hwHelper.is3DPipelineSelectWARequired(device->getHardwareInfo())) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(device->getHardwareInfo().platform.eProductFamily);
+    if (hwInfoConfig.is3DPipelineSelectWARequired()) {
         cmdsSize += 2 * sizeof(PIPELINE_SELECT);
-        if (Gen12LPHelpers::pipeControlWaRequired(device->getHardwareInfo().platform.eProductFamily)) {
+        if (SpecialUltHelperGen12lp::isPipeControlWArequired(device->getHardwareInfo().platform.eProductFamily)) {
             cmdsSize += 2 * sizeof(PIPE_CONTROL);
         }
     }
 
     overrideCoherencyRequest(false, false, true);
-    auto retSize = csr->getCmdSizeForComputeMode();
-    EXPECT_EQ(cmdsSize, retSize);
+    EXPECT_FALSE(csr->streamProperties.stateComputeMode.isDirty());
 
     overrideCoherencyRequest(false, true, true);
-    retSize = csr->getCmdSizeForComputeMode();
-    EXPECT_EQ(cmdsSize, retSize);
+    EXPECT_FALSE(csr->streamProperties.stateComputeMode.isDirty());
 
     overrideCoherencyRequest(true, true, true);
-    retSize = csr->getCmdSizeForComputeMode();
+    auto retSize = csr->getCmdSizeForComputeMode();
+    EXPECT_TRUE(csr->streamProperties.stateComputeMode.isDirty());
     EXPECT_EQ(cmdsSize, retSize);
 
     overrideCoherencyRequest(true, false, true);
     retSize = csr->getCmdSizeForComputeMode();
+    EXPECT_TRUE(csr->streamProperties.stateComputeMode.isDirty());
     EXPECT_EQ(cmdsSize, retSize);
 }
 
 GEN12LPTEST_F(Gen12LpCoherencyRequirements, GivenNoSharedHandlesThenCoherencyCmdValuesAreCorrect) {
     auto cmdsSize = sizeof(STATE_COMPUTE_MODE);
     auto cmdsSizeWABeginOffset = 0;
-    auto &hwHelper = HwHelper::get(device->getHardwareInfo().platform.eRenderCoreFamily);
-    if (hwHelper.is3DPipelineSelectWARequired(device->getHardwareInfo())) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(device->getHardwareInfo().platform.eProductFamily);
+    if (hwInfoConfig.is3DPipelineSelectWARequired()) {
         cmdsSizeWABeginOffset += sizeof(PIPELINE_SELECT);
         cmdsSize += sizeof(PIPELINE_SELECT);
-        if (Gen12LPHelpers::pipeControlWaRequired(device->getHardwareInfo().platform.eProductFamily)) {
+        if (SpecialUltHelperGen12lp::isPipeControlWArequired(device->getHardwareInfo().platform.eProductFamily)) {
             cmdsSizeWABeginOffset += sizeof(PIPE_CONTROL);
             cmdsSize += sizeof(PIPE_CONTROL);
         }
@@ -157,11 +158,11 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, GivenNoSharedHandlesThenCoherencyCmd
 GEN12LPTEST_F(Gen12LpCoherencyRequirements, GivenSharedHandlesThenCoherencyCmdValuesAreCorrect) {
     auto cmdsSize = sizeof(STATE_COMPUTE_MODE) + sizeof(PIPE_CONTROL);
     auto cmdsSizeWABeginOffset = 0;
-    auto &hwHelper = HwHelper::get(device->getHardwareInfo().platform.eRenderCoreFamily);
-    if (hwHelper.is3DPipelineSelectWARequired(device->getHardwareInfo())) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(device->getHardwareInfo().platform.eProductFamily);
+    if (hwInfoConfig.is3DPipelineSelectWARequired()) {
         cmdsSizeWABeginOffset += sizeof(PIPELINE_SELECT);
         cmdsSize += sizeof(PIPELINE_SELECT);
-        if (Gen12LPHelpers::pipeControlWaRequired(device->getHardwareInfo().platform.eProductFamily)) {
+        if (SpecialUltHelperGen12lp::isPipeControlWArequired(device->getHardwareInfo().platform.eProductFamily)) {
             cmdsSizeWABeginOffset += sizeof(PIPE_CONTROL);
             cmdsSize += sizeof(PIPE_CONTROL);
         }
@@ -219,7 +220,7 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, givenCoherencyRequirementWithoutShar
         hwParser.parseCommands<FamilyType>(csr->commandStream, startOffset);
         bool foundOne = false;
 
-        STATE_COMPUTE_MODE::FORCE_NON_COHERENT expectedCoherentValue = expectCoherent ? STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_DISABLED : STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_GPU_NON_COHERENT;
+        STATE_COMPUTE_MODE::FORCE_NON_COHERENT expectedCoherentValue = STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_GPU_NON_COHERENT;
         uint32_t expectedCoherentMask = FamilyType::stateComputeModeForceNonCoherentMask;
 
         for (auto it = hwParser.cmdList.begin(); it != hwParser.cmdList.end(); it++) {
@@ -230,7 +231,7 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, givenCoherencyRequirementWithoutShar
                 EXPECT_FALSE(foundOne);
                 foundOne = true;
                 auto pc = genCmdCast<PIPE_CONTROL *>(*(++it));
-                if (!expectPipeControl && !Gen12LPHelpers::pipeControlWaRequired(device->getHardwareInfo().platform.eProductFamily)) {
+                if (!expectPipeControl && !SpecialUltHelperGen12lp::isPipeControlWArequired(device->getHardwareInfo().platform.eProductFamily)) {
                     EXPECT_EQ(nullptr, pc);
                 } else {
                     EXPECT_NE(nullptr, pc);
@@ -252,21 +253,10 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, givenCoherencyRequirementWithoutShar
     flushTask(false);
     findCmd(false, false, false); // not changed
 
-    flushTask(true);
-    findCmd(true, true, false); // changed
-
-    flushTask(true);
-    findCmd(false, true, false); // not changed
-
-    flushTask(false);
-    findCmd(true, false, false); // changed
-
-    flushTask(false);
-    findCmd(false, false, false); // not changed
     csr->getMemoryManager()->freeGraphicsMemory(graphicAlloc);
 }
 
-GEN12LPTEST_F(Gen12LpCoherencyRequirements, givenCoherencyRequirementWithSharedHandlesWhenFlushTaskCalledThenAlwaysProgramCmds) {
+GEN12LPTEST_F(Gen12LpCoherencyRequirements, givenSharedHandlesWhenFlushTaskCalledThenProgramPipeControlWhenNeeded) {
     auto startOffset = csr->commandStream.getUsed();
     auto graphicsAlloc = csr->getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{csr->getRootDeviceIndex(), MemoryConstants::pageSize});
     IndirectHeap stream(graphicsAlloc);
@@ -279,13 +269,12 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, givenCoherencyRequirementWithSharedH
         csr->flushTask(stream, 0, stream, stream, stream, 0, flags, *device);
     };
 
-    auto flushTaskAndFindCmds = [&](bool expectCoherent) {
+    auto flushTaskAndFindCmds = [&](bool expectCoherent, bool valueChanged) {
         flushTask(expectCoherent);
         HardwareParse hwParser;
         hwParser.parseCommands<FamilyType>(csr->commandStream, startOffset);
         bool foundOne = false;
-
-        STATE_COMPUTE_MODE::FORCE_NON_COHERENT expectedCoherentValue = expectCoherent ? STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_DISABLED : STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_GPU_NON_COHERENT;
+        STATE_COMPUTE_MODE::FORCE_NON_COHERENT expectedCoherentValue = STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_GPU_NON_COHERENT;
         uint32_t expectedCoherentMask = FamilyType::stateComputeModeForceNonCoherentMask;
 
         for (auto it = hwParser.cmdList.begin(); it != hwParser.cmdList.end(); it++) {
@@ -299,15 +288,11 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, givenCoherencyRequirementWithSharedH
                 EXPECT_NE(nullptr, pc);
             }
         }
-        EXPECT_TRUE(foundOne);
+        EXPECT_EQ(valueChanged, foundOne);
     };
 
-    flushTaskAndFindCmds(false); // first time
-    flushTaskAndFindCmds(false); // not changed
-    flushTaskAndFindCmds(true);  // changed
-    flushTaskAndFindCmds(true);  // not changed
-    flushTaskAndFindCmds(false); // changed
-    flushTaskAndFindCmds(false); // not changed
+    flushTaskAndFindCmds(false, true);  // first time
+    flushTaskAndFindCmds(false, false); // not changed
 
     csr->getMemoryManager()->freeGraphicsMemory(graphicsAlloc);
 }
@@ -321,6 +306,7 @@ GEN12LPTEST_F(Gen12LpCoherencyRequirements, givenFlushWithoutSharedHandlesWhenPr
     EXPECT_TRUE(csr->getCsrRequestFlags()->hasSharedHandles);
     auto startOffset = csr->commandStream.getUsed();
 
+    csr->streamProperties.stateComputeMode.isCoherencyRequired.set(true);
     csr->flushTask(stream, 0, stream, stream, stream, 0, flags, *device);
     EXPECT_TRUE(csr->getCsrRequestFlags()->hasSharedHandles);
 

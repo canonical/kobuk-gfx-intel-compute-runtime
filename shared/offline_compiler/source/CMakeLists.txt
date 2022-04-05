@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2020-2021 Intel Corporation
+# Copyright (C) 2020-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -23,21 +23,29 @@ set(CLOC_LIB_SRCS_LIB
     ${NEO_SHARED_DIRECTORY}/device_binary_format/elf/elf_encoder.cpp
     ${NEO_SHARED_DIRECTORY}/device_binary_format/elf/elf_encoder.h
     ${NEO_SHARED_DIRECTORY}/device_binary_format/elf/ocl_elf.h
-    ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}/devices.inl
+    ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}devices.inl
+    ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}devices_additional.inl
     ${NEO_SHARED_DIRECTORY}/dll/devices/devices_base.inl
+    ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}/product_config.inl
+    ${NEO_SHARED_DIRECTORY}/dll/devices/product_config_base.inl
+    ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}platforms.h
     ${NEO_SHARED_DIRECTORY}/helpers/abort.cpp
+    ${NEO_SHARED_DIRECTORY}/helpers/compiler_hw_info_config.h
+    ${NEO_SHARED_DIRECTORY}/helpers/compiler_hw_info_config.cpp
+    ${NEO_SHARED_DIRECTORY}/helpers/compiler_hw_info_config_base.inl
+    ${NEO_SHARED_DIRECTORY}/helpers/compiler_hw_info_config_bdw_and_later.inl
     ${NEO_SHARED_DIRECTORY}/helpers/compiler_options_parser.cpp
     ${NEO_SHARED_DIRECTORY}/helpers/compiler_options_parser.h
     ${NEO_SHARED_DIRECTORY}/helpers/debug_helpers.cpp
     ${NEO_SHARED_DIRECTORY}/helpers/file_io.cpp
     ${NEO_SHARED_DIRECTORY}/helpers/hw_info.cpp
     ${NEO_SHARED_DIRECTORY}/helpers/hw_info.h
-    ${NEO_SHARED_DIRECTORY}/helpers${BRANCH_DIR_SUFFIX}/hw_info_extended.cpp
-    ${NEO_SHARED_DIRECTORY}/kernel${BRANCH_DIR_SUFFIX}/kernel_descriptor.cpp
-    ${NEO_SHARED_DIRECTORY}/kernel${BRANCH_DIR_SUFFIX}/kernel_descriptor.h
+    ${NEO_SHARED_DIRECTORY}/helpers${BRANCH_DIR_SUFFIX}hw_info_extended.cpp
+    ${NEO_SHARED_DIRECTORY}/kernel${BRANCH_DIR_SUFFIX}kernel_descriptor.cpp
+    ${NEO_SHARED_DIRECTORY}/kernel${BRANCH_DIR_SUFFIX}kernel_descriptor.h
     ${NEO_SHARED_DIRECTORY}/os_interface/os_library.h
-    ${NEO_SOURCE_DIR}/opencl/source/platform/extensions.cpp
-    ${NEO_SOURCE_DIR}/opencl/source/platform/extensions.h
+    ${NEO_SHARED_DIRECTORY}/compiler_interface/oclc_extensions.cpp
+    ${NEO_SHARED_DIRECTORY}/compiler_interface/oclc_extensions.h
     ${OCLOC_DIRECTORY}/source/decoder/binary_decoder.cpp
     ${OCLOC_DIRECTORY}/source/decoder/binary_decoder.h
     ${OCLOC_DIRECTORY}/source/decoder/binary_encoder.cpp
@@ -46,13 +54,13 @@ set(CLOC_LIB_SRCS_LIB
     ${OCLOC_DIRECTORY}/source/decoder/helper.h
     ${OCLOC_DIRECTORY}/source/decoder/iga_wrapper.h
     ${OCLOC_DIRECTORY}/source/decoder/translate_platform_base.h
-    ${OCLOC_DIRECTORY}/source/${BRANCH_DIR_SUFFIX}/extra_settings.cpp
     ${OCLOC_DIRECTORY}/source/multi_command.cpp
     ${OCLOC_DIRECTORY}/source/multi_command.h
     ${OCLOC_DIRECTORY}/source/ocloc_api.cpp
     ${OCLOC_DIRECTORY}/source/ocloc_api.h
     ${OCLOC_DIRECTORY}/source/ocloc_arg_helper.cpp
     ${OCLOC_DIRECTORY}/source/ocloc_arg_helper.h
+    ${OCLOC_DIRECTORY}/source/ocloc_error_code.h
     ${OCLOC_DIRECTORY}/source/ocloc_fatbinary.cpp
     ${OCLOC_DIRECTORY}/source/ocloc_fatbinary.h
     ${OCLOC_DIRECTORY}/source/ocloc_validator.cpp
@@ -61,6 +69,9 @@ set(CLOC_LIB_SRCS_LIB
     ${OCLOC_DIRECTORY}/source/offline_compiler.h
     ${OCLOC_DIRECTORY}/source/offline_compiler_helper.cpp
     ${OCLOC_DIRECTORY}/source/offline_compiler_options.cpp
+    ${OCLOC_DIRECTORY}/source/offline_linker.cpp
+    ${OCLOC_DIRECTORY}/source/offline_linker.h
+    ${OCLOC_DIRECTORY}/source/queries.h
     ${OCLOC_DIRECTORY}/source/utilities/get_git_version_info.h
     ${OCLOC_DIRECTORY}/source/utilities/get_git_version_info.cpp
     ${NEO_SOURCE_DIR}/shared/source/device_binary_format/device_binary_format_zebin.cpp
@@ -71,7 +82,7 @@ set(CLOC_LIB_SRCS_LIB
 if(${IGA_HEADERS_AVAILABLE})
   set(CLOC_LIB_SRCS_LIB ${CLOC_LIB_SRCS_LIB}
       ${OCLOC_DIRECTORY}/source/decoder/iga_wrapper.cpp
-      ${OCLOC_DIRECTORY}/source/decoder${BRANCH_DIR_SUFFIX}/translate_platform.cpp
+      ${OCLOC_DIRECTORY}/source/decoder${BRANCH_DIR_SUFFIX}translate_platform.cpp
   )
 else()
   set(CLOC_LIB_SRCS_LIB ${CLOC_LIB_SRCS_LIB}
@@ -81,16 +92,16 @@ endif()
 
 if(WIN32)
   list(APPEND CLOC_LIB_SRCS_LIB
+       ${NEO_SHARED_DIRECTORY}/dll/windows/options_windows.cpp
        ${NEO_SHARED_DIRECTORY}/os_interface/windows/os_library_win.cpp
        ${NEO_SHARED_DIRECTORY}/os_interface/windows/os_library_win.h
-       ${NEO_SOURCE_DIR}/opencl/source/dll/windows/options_windows.cpp
   )
 else()
   list(APPEND CLOC_LIB_SRCS_LIB
+       ${NEO_SHARED_DIRECTORY}/dll/linux/options_linux.cpp
        ${NEO_SHARED_DIRECTORY}/os_interface/linux/os_library_linux.cpp
        ${NEO_SHARED_DIRECTORY}/os_interface/linux/os_library_linux.h
        ${NEO_SHARED_DIRECTORY}/os_interface/linux/sys_calls_linux.cpp
-       ${NEO_SOURCE_DIR}/opencl/source/dll/linux/options_linux.cpp
        ${OCLOC_DIRECTORY}/source/linux/os_library_ocloc_helper.cpp
   )
 endif()
@@ -102,39 +113,45 @@ set(CLOC_LIB_LIB_FLAGS_DEFINITIONS
     -DALL_SUPPORTED_PRODUCT_FAMILIES=${ALL_SUPPORTED_PRODUCT_FAMILIES}
 )
 
-set(RUNTIME_GENX_CPP_FILES
+set(NEO_SHARED_COREX_CPP_FILES
     hw_info
 )
 
 macro(macro_for_each_platform)
   foreach(BRANCH_DIR ${BRANCH_DIR_LIST})
     foreach(BRANCH ${BRANCH_DIR_LIST})
-      set(SRC_FILE ${NEO_SOURCE_DIR}/opencl/source${BRANCH}${GEN_TYPE_LOWER}/definitions${BRANCH_DIR_SUFFIX}hw_info_config_${PLATFORM_IT_LOWER}.inl)
-      if(EXISTS ${SRC_FILE})
-        list(APPEND CLOC_LIB_SRCS_LIB ${SRC_FILE})
+      foreach(SRC_FILE ${NEO_SOURCE_DIR}/shared/source${BRANCH}${CORE_TYPE_LOWER}/definitions${BRANCH_DIR_SUFFIX}hw_info_setup_${PLATFORM_IT_LOWER}.inl
+                ${NEO_SOURCE_DIR}/shared/source${BRANCH}${CORE_TYPE_LOWER}${BRANCH_DIR}hw_info_${PLATFORM_IT_LOWER}.cpp
+                ${NEO_SOURCE_DIR}/shared/source${BRANCH}${CORE_TYPE_LOWER}/compiler_hw_info_config_${PLATFORM_IT_LOWER}.inl
+        )
+        if(EXISTS ${SRC_FILE})
+          list(APPEND CLOC_LIB_SRCS_LIB ${SRC_FILE})
+        endif()
+      endforeach()
+
+      if(WIN32)
+        set(SRC_FILE ${NEO_SOURCE_DIR}/shared/source${BRANCH}${CORE_TYPE_LOWER}${BRANCH_DIR}windows/hw_info_extra_${PLATFORM_IT_LOWER}.cpp)
+        if(EXISTS ${SRC_FILE})
+          list(APPEND CLOC_LIB_SRCS_LIB ${SRC_FILE})
+        endif()
+      else()
+        set(SRC_FILE ${NEO_SOURCE_DIR}/shared/source${BRANCH}${CORE_TYPE_LOWER}${BRANCH_DIR}linux/hw_info_extra_${PLATFORM_IT_LOWER}.cpp)
+        if(EXISTS ${SRC_FILE})
+          list(APPEND CLOC_LIB_SRCS_LIB ${SRC_FILE})
+        endif()
       endif()
-      set(SRC_FILE ${NEO_SOURCE_DIR}/opencl/source${BRANCH}${GEN_TYPE_LOWER}${BRANCH_DIR}hw_info_${PLATFORM_IT_LOWER}.inl)
-      if(EXISTS ${SRC_FILE})
-        list(APPEND CLOC_LIB_SRCS_LIB ${SRC_FILE})
-      endif()
+
     endforeach()
   endforeach()
 endmacro()
 
-macro(macro_for_each_gen)
-  foreach(SRC_IT ${RUNTIME_GENX_CPP_FILES})
+macro(macro_for_each_core_type)
+  foreach(SRC_IT ${NEO_SHARED_COREX_CPP_FILES})
     foreach(BRANCH_DIR ${BRANCH_DIR_LIST})
       foreach(BRANCH ${BRANCH_DIR_LIST})
-        set(SRC_FILE ${NEO_SOURCE_DIR}/opencl/source${BRANCH}${GEN_TYPE_LOWER}${BRANCH_DIR}${SRC_IT})
-        string(REGEX REPLACE "/$" "" _BRANCH_FILENAME_SUFFIX "${BRANCH_DIR}")
-        string(REGEX REPLACE "^/" "_" _BRANCH_FILENAME_SUFFIX "${_BRANCH_FILENAME_SUFFIX}")
-
-        if(EXISTS ${SRC_FILE}_${GEN_TYPE_LOWER}${_BRANCH_FILENAME_SUFFIX}.cpp)
-          list(APPEND CLOC_LIB_SRCS_LIB ${SRC_FILE}_${GEN_TYPE_LOWER}${_BRANCH_FILENAME_SUFFIX}.cpp)
-        endif()
-        set(SRC_FILE ${NEO_SHARED_DIRECTORY}${BRANCH}${GEN_TYPE_LOWER}${BRANCH_DIR}enable_${GEN_TYPE_LOWER}${_BRANCH_FILENAME_SUFFIX}.cpp)
-        if(EXISTS ${SRC_FILE})
-          list(APPEND CLOC_LIB_SRCS_LIB ${SRC_FILE})
+        set(SRC_FILE ${NEO_SOURCE_DIR}/shared/source${BRANCH}${CORE_TYPE_LOWER}${BRANCH_DIR}${SRC_IT})
+        if(EXISTS ${SRC_FILE}_${CORE_TYPE_LOWER}.cpp)
+          list(APPEND CLOC_LIB_SRCS_LIB ${SRC_FILE}_${CORE_TYPE_LOWER}.cpp)
         endif()
       endforeach()
     endforeach()
@@ -142,7 +159,7 @@ macro(macro_for_each_gen)
   apply_macro_for_each_platform()
 endmacro()
 
-apply_macro_for_each_gen("SUPPORTED")
+apply_macro_for_each_core_type("SUPPORTED")
 
 set(CLOC_LIB_SRCS
     ${CLOC_LIB_SRCS_LIB}
@@ -167,7 +184,7 @@ set(CLOC_LIB_INCLUDES
 target_include_directories(${OCLOC_NAME}_lib BEFORE PRIVATE ${CLOC_LIB_INCLUDES})
 target_include_directories(${OCLOC_NAME}_lib BEFORE PRIVATE ${IGA_INCLUDE_DIR})
 
-target_compile_definitions(${OCLOC_NAME}_lib PUBLIC ${CLOC_LIB_LIB_FLAGS_DEFINITIONS} ${SUPPORTED_GEN_FLAGS_DEFINITONS} DEFAULT_PLATFORM=${DEFAULT_SUPPORTED_PLATFORM}
+target_compile_definitions(${OCLOC_NAME}_lib PUBLIC ${CLOC_LIB_LIB_FLAGS_DEFINITIONS} ${SUPPORTED_CORE_FLAGS_DEFINITONS} DEFAULT_PLATFORM=${DEFAULT_SUPPORTED_PLATFORM}
                            IGA_LIBRARY_NAME=${CMAKE_SHARED_LIBRARY_PREFIX}${IGA_LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}
 )
 target_compile_definitions(${OCLOC_NAME}_lib PUBLIC ${NEO__IGC_COMPILE_DEFINITIONS})

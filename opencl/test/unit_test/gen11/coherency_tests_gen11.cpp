@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,10 +10,9 @@
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
+#include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_device.h"
-
-#include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 
@@ -22,12 +21,14 @@ struct Gen11CoherencyRequirements : public ::testing::Test {
 
     struct myCsr : public CommandStreamReceiverHw<ICLFamily> {
         using CommandStreamReceiver::commandStream;
+        using CommandStreamReceiver::streamProperties;
         myCsr(ExecutionEnvironment &executionEnvironment) : CommandStreamReceiverHw<ICLFamily>(executionEnvironment, 0, 1){};
         CsrSizeRequestFlags *getCsrRequestFlags() { return &csrSizeRequestFlags; }
     };
 
     void overrideCoherencyRequest(bool requestChanged, bool requireCoherency) {
-        csr->getCsrRequestFlags()->coherencyRequestChanged = requestChanged;
+        csr->streamProperties.stateComputeMode.isCoherencyRequired.isDirty = requestChanged;
+        csr->streamProperties.stateComputeMode.isCoherencyRequired.value = requireCoherency;
         flags.requiresCoherency = requireCoherency;
     }
 
@@ -43,22 +44,17 @@ struct Gen11CoherencyRequirements : public ::testing::Test {
 };
 
 GEN11TEST_F(Gen11CoherencyRequirements, GivenSettingsWhenCoherencyRequestedThenProgrammingIsCorrect) {
-    auto lriSize = sizeof(MI_LOAD_REGISTER_IMM);
     overrideCoherencyRequest(false, false);
-    auto retSize = csr->getCmdSizeForComputeMode();
-    EXPECT_EQ(0u, retSize);
+    EXPECT_FALSE(csr->streamProperties.stateComputeMode.isDirty());
 
     overrideCoherencyRequest(false, true);
-    retSize = csr->getCmdSizeForComputeMode();
-    EXPECT_EQ(0u, retSize);
+    EXPECT_FALSE(csr->streamProperties.stateComputeMode.isDirty());
 
     overrideCoherencyRequest(true, true);
-    retSize = csr->getCmdSizeForComputeMode();
-    EXPECT_EQ(lriSize, retSize);
+    EXPECT_TRUE(csr->streamProperties.stateComputeMode.isDirty());
 
     overrideCoherencyRequest(true, false);
-    retSize = csr->getCmdSizeForComputeMode();
-    EXPECT_EQ(lriSize, retSize);
+    EXPECT_TRUE(csr->streamProperties.stateComputeMode.isDirty());
 }
 
 GEN11TEST_F(Gen11CoherencyRequirements, GivenSettingsWhenCoherencyRequestedThenHdcModeCmdValuesAreCorrect) {
@@ -72,14 +68,14 @@ GEN11TEST_F(Gen11CoherencyRequirements, GivenSettingsWhenCoherencyRequestedThenH
 
     overrideCoherencyRequest(true, false);
     csr->programComputeMode(stream, flags, *defaultHwInfo);
-    EXPECT_EQ(csr->getCmdSizeForComputeMode(), stream.getUsed());
+    EXPECT_EQ(lriSize, stream.getUsed());
 
     auto cmd = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(stream.getCpuBase());
     EXPECT_TRUE(memcmp(&expectedCmd, cmd, lriSize) == 0);
 
     overrideCoherencyRequest(true, true);
     csr->programComputeMode(stream, flags, *defaultHwInfo);
-    EXPECT_EQ(csr->getCmdSizeForComputeMode() * 2, stream.getUsed());
+    EXPECT_EQ(lriSize * 2, stream.getUsed());
 
     cmd = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(ptrOffset(stream.getCpuBase(), lriSize));
     expectedCmd.setDataDword(DwordBuilder::build(gen11HdcModeRegister::forceNonCoherentEnableBit, true, false));

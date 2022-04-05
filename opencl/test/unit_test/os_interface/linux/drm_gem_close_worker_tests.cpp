@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,16 +9,16 @@
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/os_interface/linux/drm_buffer_object.h"
+#include "shared/source/os_interface/linux/drm_command_stream.h"
 #include "shared/source/os_interface/linux/drm_gem_close_worker.h"
 #include "shared/source/os_interface/linux/drm_memory_manager.h"
 #include "shared/source/os_interface/linux/drm_memory_operations_handler.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
+#include "shared/test/common/os_interface/linux/device_command_stream_fixture.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/mem_obj/buffer.h"
-#include "opencl/source/os_interface/linux/drm_command_stream.h"
-#include "opencl/test/unit_test/os_interface/linux/device_command_stream_fixture.h"
-#include "test.h"
 
 #include "drm/i915_drm.h"
 #include "gmock/gmock.h"
@@ -34,11 +34,12 @@ using namespace NEO;
 
 class DrmMockForWorker : public Drm {
   public:
+    using Drm::setupIoctlHelper;
     std::mutex mutex;
     std::atomic<int> gem_close_cnt;
     std::atomic<int> gem_close_expected;
     std::atomic<std::thread::id> ioctl_caller_thread_id;
-    DrmMockForWorker() : Drm(std::make_unique<HwDeviceIdDrm>(mockFd, mockPciPath), *platform()->peekExecutionEnvironment()->rootDeviceEnvironments[0]) {
+    DrmMockForWorker(RootDeviceEnvironment &rootDeviceEnvironment) : Drm(std::make_unique<HwDeviceIdDrm>(mockFd, mockPciPath), rootDeviceEnvironment) {
     }
     int ioctl(unsigned long request, void *arg) override {
         if (_IOC_TYPE(request) == DRM_IOCTL_BASE) {
@@ -66,7 +67,10 @@ class DrmGemCloseWorkerFixture {
     uint32_t deadCnt = deadCntInit;
 
     void SetUp() {
-        this->drmMock = new DrmMockForWorker;
+        this->drmMock = new DrmMockForWorker(*executionEnvironment.rootDeviceEnvironments[0]);
+
+        auto hwInfo = executionEnvironment.rootDeviceEnvironments[0]->getHardwareInfo();
+        drmMock->setupIoctlHelper(hwInfo->platform.eProductFamily);
 
         executionEnvironment.rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
         executionEnvironment.rootDeviceEnvironments[0]->osInterface->setDriverModel(std::unique_ptr<DriverModel>(drmMock));
@@ -93,7 +97,7 @@ class DrmGemCloseWorkerFixture {
     class DrmAllocationWrapper : public DrmAllocation {
       public:
         DrmAllocationWrapper(BufferObject *bo)
-            : DrmAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN, bo, nullptr, 0, (osHandle)0u, MemoryPool::MemoryNull) {
+            : DrmAllocation(0, AllocationType::UNKNOWN, bo, nullptr, 0, static_cast<osHandle>(0u), MemoryPool::MemoryNull) {
         }
     };
     MockExecutionEnvironment executionEnvironment;

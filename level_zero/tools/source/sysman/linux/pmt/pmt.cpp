@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,11 +9,12 @@
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
 
+#include "level_zero/tools/source/sysman/sysman_imp.h"
+
 #include <algorithm>
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
-#include <sys/mman.h>
 
 namespace L0 {
 const std::string PlatformMonitoringTech::baseTelemSysFS("/sys/class/intel_pmt");
@@ -21,29 +22,47 @@ const std::string PlatformMonitoringTech::telem("telem");
 uint32_t PlatformMonitoringTech::rootDeviceTelemNodeIndex = 0;
 
 ze_result_t PlatformMonitoringTech::readValue(const std::string key, uint32_t &value) {
-    if (mappedMemory == nullptr) {
-        return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
-    }
-
     auto offset = keyOffsetMap.find(key);
     if (offset == keyOffsetMap.end()) {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
-    value = *reinterpret_cast<uint32_t *>(mappedMemory + offset->second);
-    return ZE_RESULT_SUCCESS;
+    int fd = this->openFunction(telemetryDeviceEntry.c_str(), O_RDONLY);
+    if (fd == -1) {
+        return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
+    }
+
+    ze_result_t res = ZE_RESULT_SUCCESS;
+    if (this->preadFunction(fd, &value, sizeof(uint32_t), baseOffset + offset->second) != sizeof(uint32_t)) {
+        res = ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
+    }
+
+    if (this->closeFunction(fd) < 0) {
+        return ZE_RESULT_ERROR_UNKNOWN;
+    }
+
+    return res;
 }
 
 ze_result_t PlatformMonitoringTech::readValue(const std::string key, uint64_t &value) {
-    if (mappedMemory == nullptr) {
-        return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
-    }
-
     auto offset = keyOffsetMap.find(key);
     if (offset == keyOffsetMap.end()) {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
-    value = *reinterpret_cast<uint64_t *>(mappedMemory + offset->second);
-    return ZE_RESULT_SUCCESS;
+    int fd = this->openFunction(telemetryDeviceEntry.c_str(), O_RDONLY);
+    if (fd == -1) {
+        return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
+    }
+
+    ze_result_t res = ZE_RESULT_SUCCESS;
+    if (this->preadFunction(fd, &value, sizeof(uint64_t), baseOffset + offset->second) != sizeof(uint64_t)) {
+        res = ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
+    }
+
+    if (this->closeFunction(fd) < 0) {
+        return ZE_RESULT_ERROR_UNKNOWN;
+    }
+
+    return res;
 }
 
 bool compareTelemNodes(std::string &telemNode1, std::string &telemNode2) {
@@ -116,7 +135,7 @@ ze_result_t PlatformMonitoringTech::init(FsAccess *pFsAccess, const std::string 
         return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
     }
 
-    std::string telemetryDeviceEntry = baseTelemSysFSNode + "/" + telem;
+    telemetryDeviceEntry = baseTelemSysFSNode + "/" + telem;
     if (!pFsAccess->fileExists(telemetryDeviceEntry)) {
         NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr,
                               "Telemetry support not available. No file %s\n", telemetryDeviceEntry.c_str());
@@ -137,14 +156,6 @@ ze_result_t PlatformMonitoringTech::init(FsAccess *pFsAccess, const std::string 
         return result;
     }
 
-    std::string sizePath = baseTelemSysFSNode + std::string("/size");
-    result = pFsAccess->read(sizePath, size);
-    if (ZE_RESULT_SUCCESS != result) {
-        NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr,
-                              "Telemetry sysfs entry not available %s\n", sizePath.c_str());
-        return result;
-    }
-
     std::string offsetPath = baseTelemSysFSNode + std::string("/offset");
     result = pFsAccess->read(offsetPath, baseOffset);
     if (ZE_RESULT_SUCCESS != result) {
@@ -153,30 +164,6 @@ ze_result_t PlatformMonitoringTech::init(FsAccess *pFsAccess, const std::string 
         return result;
     }
 
-    int fd = this->openFunction(static_cast<const char *>(telemetryDeviceEntry.c_str()), O_RDONLY);
-    if (fd == -1) {
-        NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr,
-                              "Failure opening telemetry file %s : %s \n", telemetryDeviceEntry.c_str(), strerror(errno));
-        return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
-    }
-
-    mappedMemory = static_cast<char *>(this->mmapFunction(nullptr, static_cast<size_t>(size), PROT_READ, MAP_SHARED, fd, 0));
-    if (mappedMemory == MAP_FAILED) {
-        NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr,
-                              "Failure mapping telemetry file %s : %s \n", telemetryDeviceEntry.c_str(), strerror(errno));
-        this->closeFunction(fd);
-        return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
-    }
-
-    if (this->closeFunction(fd) == -1) {
-        NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr,
-                              "Failure closing telemetry file %s : %s \n", telemetryDeviceEntry.c_str(), strerror(errno));
-        this->munmapFunction(mappedMemory, size);
-        mappedMemory = nullptr;
-        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-    }
-
-    mappedMemory += baseOffset;
     return ZE_RESULT_SUCCESS;
 }
 
@@ -199,21 +186,18 @@ void PlatformMonitoringTech::create(const std::vector<ze_device_handle_t> &devic
                                     std::map<uint32_t, L0::PlatformMonitoringTech *> &mapOfSubDeviceIdToPmtObject) {
     if (ZE_RESULT_SUCCESS == PlatformMonitoringTech::enumerateRootTelemIndex(pFsAccess, rootPciPathOfGpuDevice)) {
         for (const auto &deviceHandle : deviceHandles) {
-            ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
-            Device::fromHandle(deviceHandle)->getProperties(&deviceProperties);
-            auto pPmt = new PlatformMonitoringTech(pFsAccess, deviceProperties.flags & ZE_DEVICE_PROPERTY_FLAG_SUBDEVICE,
-                                                   deviceProperties.subdeviceId);
+            uint32_t subdeviceId = 0;
+            ze_bool_t onSubdevice = false;
+            SysmanDeviceImp::getSysmanDeviceInfo(deviceHandle, subdeviceId, onSubdevice);
+            auto pPmt = new PlatformMonitoringTech(pFsAccess, onSubdevice, subdeviceId);
             UNRECOVERABLE_IF(nullptr == pPmt);
-            PlatformMonitoringTech::doInitPmtObject(pFsAccess, deviceProperties.subdeviceId, pPmt,
+            PlatformMonitoringTech::doInitPmtObject(pFsAccess, subdeviceId, pPmt,
                                                     rootPciPathOfGpuDevice, mapOfSubDeviceIdToPmtObject);
         }
     }
 }
 
 PlatformMonitoringTech::~PlatformMonitoringTech() {
-    if (mappedMemory != nullptr) {
-        this->munmapFunction(mappedMemory - baseOffset, size);
-    }
 }
 
 } // namespace L0

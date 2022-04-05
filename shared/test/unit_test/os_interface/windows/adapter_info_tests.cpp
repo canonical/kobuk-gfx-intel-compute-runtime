@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -12,10 +12,9 @@
 #include "shared/source/os_interface/windows/wddm/adapter_factory_dxgi.h"
 #include "shared/source/os_interface/windows/wddm/adapter_info.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
-
-#include "opencl/test/unit_test/os_interface/windows/ult_dxcore_factory.h"
-#include "opencl/test/unit_test/os_interface/windows/ult_dxgi_factory.h"
-#include "test.h"
+#include "shared/test/common/os_interface/windows/ult_dxcore_factory.h"
+#include "shared/test/common/os_interface/windows/ult_dxgi_factory.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include <memory>
 
@@ -131,7 +130,7 @@ TEST(IsAllowedDeviceId, whenDebugKeyNotSetThenReturnTrue) {
     EXPECT_TRUE(NEO::isAllowedDeviceId(0xdeadbeef));
 }
 
-TEST(IsAllowedDeviceId, whenDebugKeySetThenExpectSpecificValue) {
+TEST(IsAllowedDeviceId, whenForceDeviceIdDebugKeySetThenExpectSpecificValue) {
     DebugManagerStateRestore rest;
     DebugManager.flags.ForceDeviceId.set("167");
     EXPECT_FALSE(NEO::isAllowedDeviceId(0xdeadbeef));
@@ -143,12 +142,34 @@ TEST(IsAllowedDeviceId, whenDebugKeySetThenExpectSpecificValue) {
     EXPECT_TRUE(NEO::isAllowedDeviceId(0x167));
 }
 
-TEST(IsAllowedDeviceId, whenDebugKeySetThenTreatAsHex) {
+TEST(IsAllowedDeviceId, whenForceDeviceIdDebugKeySetThenTreatAsHex) {
     DebugManagerStateRestore rest;
 
     DebugManager.flags.ForceDeviceId.set("167");
     EXPECT_FALSE(NEO::isAllowedDeviceId(167));
 
     DebugManager.flags.ForceDeviceId.set("167");
+    EXPECT_TRUE(NEO::isAllowedDeviceId(0x167));
+}
+
+TEST(IsAllowedDeviceId, whenFilterDeviceIdDebugKeySetThenExpectSpecificValue) {
+    DebugManagerStateRestore rest;
+    DebugManager.flags.FilterDeviceId.set("167");
+    EXPECT_FALSE(NEO::isAllowedDeviceId(0xdeadbeef));
+
+    DebugManager.flags.FilterDeviceId.set("1678");
+    EXPECT_FALSE(NEO::isAllowedDeviceId(0x167));
+
+    DebugManager.flags.FilterDeviceId.set("167");
+    EXPECT_TRUE(NEO::isAllowedDeviceId(0x167));
+}
+
+TEST(IsAllowedDeviceId, whenFilterDeviceIdDebugKeySetThenTreatAsHex) {
+    DebugManagerStateRestore rest;
+
+    DebugManager.flags.FilterDeviceId.set("167");
+    EXPECT_FALSE(NEO::isAllowedDeviceId(167));
+
+    DebugManager.flags.FilterDeviceId.set("167");
     EXPECT_TRUE(NEO::isAllowedDeviceId(0x167));
 }

@@ -10,5 +10,5 @@
 namespace NEO {
 namespace ImplicitScaling {
 bool apiSupport = true;
-}
+} // namespace ImplicitScaling
 } // namespace NEO

@@ -1,12 +1,12 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
-#include "test.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/test/unit_tests/fixtures/host_pointer_manager_fixture.h"
@@ -81,7 +81,7 @@ TEST_F(HostPointerManagerTest, givenPointerRegisteredWhenSvmAllocationExistsThen
     size_t usmSize = MemoryConstants::pageSize;
     void *usmBuffer = hostDriverHandle->getMemoryManager()->allocateSystemMemory(usmSize, usmSize);
     NEO::GraphicsAllocation *usmAllocation = hostDriverHandle->getMemoryManager()->allocateGraphicsMemoryWithProperties(
-        {device->getRootDeviceIndex(), false, usmSize, NEO::GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY, false, neoDevice->getDeviceBitfield()},
+        {device->getRootDeviceIndex(), false, usmSize, NEO::AllocationType::BUFFER_HOST_MEMORY, false, neoDevice->getDeviceBitfield()},
         usmBuffer);
     ASSERT_NE(nullptr, usmAllocation);
 
@@ -111,7 +111,7 @@ TEST_F(HostPointerManagerTest, givenSvmAllocationExistsWhenGettingExistingAlloca
     size_t usmSize = MemoryConstants::pageSize;
     void *usmBuffer = hostDriverHandle->getMemoryManager()->allocateSystemMemory(usmSize, usmSize);
     NEO::GraphicsAllocation *usmAllocation = hostDriverHandle->getMemoryManager()->allocateGraphicsMemoryWithProperties(
-        {device->getRootDeviceIndex(), false, usmSize, NEO::GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY, false, neoDevice->getDeviceBitfield()},
+        {device->getRootDeviceIndex(), false, usmSize, NEO::AllocationType::BUFFER_HOST_MEMORY, false, neoDevice->getDeviceBitfield()},
         usmBuffer);
     ASSERT_NE(nullptr, usmAllocation);
 
@@ -390,12 +390,8 @@ TEST_F(HostPointerManagerTest, givenNoPointerRegisteredWhenAllocationCreationFai
 TEST_F(HostPointerManagerTest, givenHostAllocationImportedWhenMakingResidentAddressThenAllocationMadeResident) {
     void *testPtr = heapPointer;
 
-    EXPECT_CALL(*mockMemoryInterface, makeResident(_, _))
-        .Times(1)
-        .WillRepeatedly(::testing::Return(NEO::MemoryOperationsStatus::SUCCESS));
-    EXPECT_CALL(*mockMemoryInterface, evict(_, _))
-        .Times(1)
-        .WillRepeatedly(::testing::Return(NEO::MemoryOperationsStatus::SUCCESS));
+    mockMemoryInterface->makeResidentResult = NEO::MemoryOperationsStatus::SUCCESS;
+    mockMemoryInterface->evictResult = NEO::MemoryOperationsStatus::SUCCESS;
 
     auto result = context->makeMemoryResident(device, testPtr, MemoryConstants::pageSize);
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, result);
@@ -414,6 +410,9 @@ TEST_F(HostPointerManagerTest, givenHostAllocationImportedWhenMakingResidentAddr
 
     result = context->evictMemory(device, testPtr, MemoryConstants::pageSize);
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, result);
+
+    EXPECT_EQ(1u, mockMemoryInterface->makeResidentCalled);
+    EXPECT_EQ(1u, mockMemoryInterface->evictCalled);
 }
 
 TEST_F(HostPointerManagerTest, givenMisalignedPointerRegisteredWhenGettingRelativeOffsetAddressThenRetrieveMisalignedPointerAsBaseAddress) {

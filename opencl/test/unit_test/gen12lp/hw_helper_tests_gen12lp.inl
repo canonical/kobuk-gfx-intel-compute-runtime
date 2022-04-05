@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,13 +7,13 @@
 
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/hw_helper_tests.h"
+#include "shared/test/common/libult/gen12lp/special_ult_helper_gen12lp.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
 
 #include "opencl/source/helpers/cl_hw_helper.h"
-#include "opencl/test/unit_test/gen12lp/special_ult_helper_gen12lp.h"
-#include "opencl/test/unit_test/helpers/hw_helper_tests.h"
 #include "opencl/test/unit_test/mocks/mock_cl_hw_helper.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 
 #include "engine_node.h"
@@ -39,28 +39,6 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, WhenGettingMaxBarriersPerSliceThenCorrectSize
     EXPECT_EQ(32u, helper.getMaxBarrierRegisterPerSlice());
 }
 
-GEN12LPTEST_F(HwHelperTestGen12Lp, givenGen12LpSkuWhenGettingCapabilityCoherencyFlagThenExpectValidValue) {
-    auto &helper = HwHelper::get(renderCoreFamily);
-    bool coherency = false;
-    helper.setCapabilityCoherencyFlag(&hardwareInfo, coherency);
-
-    const bool checkDone = SpecialUltHelperGen12lp::additionalCoherencyCheck(hardwareInfo.platform.eProductFamily, coherency);
-    if (checkDone) {
-        return;
-    }
-
-    if (hardwareInfo.platform.eProductFamily == IGFX_TIGERLAKE_LP) {
-        hardwareInfo.platform.usRevId = helper.getHwRevIdFromStepping(REVISION_A1, hardwareInfo);
-        helper.setCapabilityCoherencyFlag(&hardwareInfo, coherency);
-        EXPECT_TRUE(coherency);
-        hardwareInfo.platform.usRevId = helper.getHwRevIdFromStepping(REVISION_A0, hardwareInfo);
-        helper.setCapabilityCoherencyFlag(&hardwareInfo, coherency);
-        EXPECT_FALSE(coherency);
-    } else {
-        EXPECT_TRUE(coherency);
-    }
-}
-
 GEN12LPTEST_F(HwHelperTestGen12Lp, WhenGettingPitchAlignmentForImageThenCorrectValueIsReturned) {
     auto &helper = HwHelper::get(renderCoreFamily);
     auto stepping = hardwareInfo.platform.usRevId;
@@ -73,42 +51,11 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, WhenGettingPitchAlignmentForImageThenCorrectV
 }
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, WhenAdjustingDefaultEngineTypeThenRcsIsSet) {
-    hardwareInfo.featureTable.ftrCCSNode = false;
+    hardwareInfo.featureTable.flags.ftrCCSNode = false;
 
     auto &helper = HwHelper::get(renderCoreFamily);
     helper.adjustDefaultEngineType(&hardwareInfo);
     EXPECT_EQ(aub_stream::ENGINE_RCS, hardwareInfo.capabilityTable.defaultEngineType);
-}
-
-GEN12LPTEST_F(HwHelperTestGen12Lp, givenGen12LpPlatformWhenSetupHardwareCapabilitiesIsCalledThenShouldSetCorrectValues) {
-    HardwareCapabilities hwCaps = {0};
-
-    auto &hwHelper = HwHelper::get(renderCoreFamily);
-    hwHelper.setupHardwareCapabilities(&hwCaps, hardwareInfo);
-
-    EXPECT_EQ(2048u, hwCaps.image3DMaxHeight);
-    EXPECT_EQ(2048u, hwCaps.image3DMaxWidth);
-    EXPECT_TRUE(hwCaps.isStatelesToStatefullWithOffsetSupported);
-}
-
-GEN12LPTEST_F(HwHelperTestGen12Lp, givenCompressionFtrEnabledWhenAskingForPageTableManagerThenReturnCorrectValue) {
-    auto &helper = HwHelper::get(renderCoreFamily);
-
-    hardwareInfo.capabilityTable.ftrRenderCompressedBuffers = false;
-    hardwareInfo.capabilityTable.ftrRenderCompressedImages = false;
-    EXPECT_FALSE(helper.isPageTableManagerSupported(hardwareInfo));
-
-    hardwareInfo.capabilityTable.ftrRenderCompressedBuffers = true;
-    hardwareInfo.capabilityTable.ftrRenderCompressedImages = false;
-    EXPECT_TRUE(helper.isPageTableManagerSupported(hardwareInfo));
-
-    hardwareInfo.capabilityTable.ftrRenderCompressedBuffers = false;
-    hardwareInfo.capabilityTable.ftrRenderCompressedImages = true;
-    EXPECT_TRUE(helper.isPageTableManagerSupported(hardwareInfo));
-
-    hardwareInfo.capabilityTable.ftrRenderCompressedBuffers = true;
-    hardwareInfo.capabilityTable.ftrRenderCompressedImages = true;
-    EXPECT_TRUE(helper.isPageTableManagerSupported(hardwareInfo));
 }
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenDifferentSizesOfAllocationWhenCheckingCompressionPreferenceThenReturnCorrectValue) {
@@ -116,18 +63,19 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenDifferentSizesOfAllocationWhenCheckingCo
 
     const size_t sizesToCheck[] = {128, 256, 512, 1023, 1024, 1025};
     for (size_t size : sizesToCheck) {
-        EXPECT_FALSE(helper.isBufferSizeSuitableForRenderCompression(size, *defaultHwInfo));
+        EXPECT_FALSE(helper.isBufferSizeSuitableForCompression(size, *defaultHwInfo));
     }
 }
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeNotSetAndBcsInfoSetWhenGetGpgpuEnginesThenReturnThreeRcsEnginesAndOneBcsEngine) {
     HardwareInfo hwInfo = *defaultHwInfo;
-    hwInfo.featureTable.ftrCCSNode = false;
+    hwInfo.featureTable.flags.ftrCCSNode = false;
     hwInfo.featureTable.ftrBcsInfo = 1;
+    hwInfo.capabilityTable.blitterOperationsSupported = true;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_RCS;
 
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
-    EXPECT_EQ(4u, device->engines.size());
+    EXPECT_EQ(4u, device->allEngines.size());
     auto &engines = HwHelperHw<FamilyType>::get().getGpgpuEngineInstances(hwInfo);
     EXPECT_EQ(4u, engines.size());
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[0].first);
@@ -138,12 +86,12 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeNotSetAndBcsInfoSetWhenGetGpgp
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeNotSetAndCcsDefualtEngineWhenGetGpgpuEnginesThenReturnTwoRcsEnginesAndOneCcs) {
     HardwareInfo hwInfo = *defaultHwInfo;
-    hwInfo.featureTable.ftrCCSNode = false;
+    hwInfo.featureTable.flags.ftrCCSNode = false;
     hwInfo.featureTable.ftrBcsInfo = 0;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
 
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
-    EXPECT_EQ(3u, device->engines.size());
+    EXPECT_EQ(3u, device->allEngines.size());
     auto &engines = HwHelperHw<FamilyType>::get().getGpgpuEngineInstances(hwInfo);
     EXPECT_EQ(3u, engines.size());
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[0].first);
@@ -153,12 +101,12 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeNotSetAndCcsDefualtEngineWhenG
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeNotSetWhenGetGpgpuEnginesThenReturnThreeRcsEngines) {
     HardwareInfo hwInfo = *defaultHwInfo;
-    hwInfo.featureTable.ftrCCSNode = false;
+    hwInfo.featureTable.flags.ftrCCSNode = false;
     hwInfo.featureTable.ftrBcsInfo = 0;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_RCS;
 
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
-    EXPECT_EQ(3u, device->engines.size());
+    EXPECT_EQ(3u, device->allEngines.size());
     auto &engines = HwHelperHw<FamilyType>::get().getGpgpuEngineInstances(hwInfo);
 
     EXPECT_EQ(3u, engines.size());
@@ -169,29 +117,29 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeNotSetWhenGetGpgpuEnginesThenR
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeSetWhenGetGpgpuEnginesThenReturnTwoRcsAndCcsEngines) {
     HardwareInfo hwInfo = *defaultHwInfo;
-    hwInfo.featureTable.ftrCCSNode = true;
+    hwInfo.featureTable.flags.ftrCCSNode = true;
     hwInfo.featureTable.ftrBcsInfo = 0;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
 
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
-    EXPECT_EQ(4u, device->engines.size());
+    EXPECT_EQ(4u, device->allEngines.size());
     auto &engines = HwHelperHw<FamilyType>::get().getGpgpuEngineInstances(hwInfo);
     EXPECT_EQ(4u, engines.size());
-    EXPECT_EQ(aub_stream::ENGINE_RCS, engines[0].first);
+    EXPECT_EQ(aub_stream::ENGINE_CCS, engines[0].first);
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[1].first);
-    EXPECT_EQ(aub_stream::ENGINE_CCS, engines[2].first);
+    EXPECT_EQ(aub_stream::ENGINE_RCS, engines[2].first);
     EXPECT_EQ(aub_stream::ENGINE_CCS, engines[3].first);
 }
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeSetFtrGpGpuMidThreadLevelPreemptSetWhenGetGpgpuEnginesThenReturn2RcsAndCcsEngines) {
     HardwareInfo hwInfo = *defaultHwInfo;
-    hwInfo.featureTable.ftrCCSNode = true;
+    hwInfo.featureTable.flags.ftrCCSNode = true;
     hwInfo.featureTable.ftrBcsInfo = 0;
-    hwInfo.featureTable.ftrGpGpuMidThreadLevelPreempt = true;
+    hwInfo.featureTable.flags.ftrGpGpuMidThreadLevelPreempt = true;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
 
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
-    EXPECT_EQ(3u, device->engines.size());
+    EXPECT_EQ(3u, device->allEngines.size());
     auto &engines = HwHelperHw<FamilyType>::get().getGpgpuEngineInstances(hwInfo);
     EXPECT_EQ(3u, engines.size());
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[0].first);
@@ -201,29 +149,29 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeSetFtrGpGpuMidThreadLevelPreem
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeSetFtrGpGpuMidThreadLevelPreemptNotSetWhenGetGpgpuEnginesThenReturn2RcsAnd2CcsEngines) {
     HardwareInfo hwInfo = *defaultHwInfo;
-    hwInfo.featureTable.ftrCCSNode = true;
+    hwInfo.featureTable.flags.ftrCCSNode = true;
     hwInfo.featureTable.ftrBcsInfo = 0;
-    hwInfo.featureTable.ftrGpGpuMidThreadLevelPreempt = false;
+    hwInfo.featureTable.flags.ftrGpGpuMidThreadLevelPreempt = false;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
 
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
-    EXPECT_EQ(4u, device->engines.size());
+    EXPECT_EQ(4u, device->allEngines.size());
     auto &engines = HwHelperHw<FamilyType>::get().getGpgpuEngineInstances(hwInfo);
     EXPECT_EQ(4u, engines.size());
-    EXPECT_EQ(aub_stream::ENGINE_RCS, engines[0].first);
+    EXPECT_EQ(aub_stream::ENGINE_CCS, engines[0].first);
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[1].first);
-    EXPECT_EQ(aub_stream::ENGINE_CCS, engines[2].first);
+    EXPECT_EQ(aub_stream::ENGINE_RCS, engines[2].first);
     EXPECT_EQ(aub_stream::ENGINE_CCS, engines[3].first);
 }
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenFtrCcsNodeSetAndDefaultRcsWhenGetGpgpuEnginesThenReturnAppropriateNumberOfRcsEngines) {
     HardwareInfo hwInfo = *defaultHwInfo;
-    hwInfo.featureTable.ftrCCSNode = true;
+    hwInfo.featureTable.flags.ftrCCSNode = true;
     hwInfo.featureTable.ftrBcsInfo = 0;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_RCS;
 
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
-    EXPECT_EQ(3u, device->engines.size());
+    EXPECT_EQ(3u, device->allEngines.size());
     auto &engines = HwHelperHw<FamilyType>::get().getGpgpuEngineInstances(hwInfo);
     EXPECT_EQ(3u, engines.size());
     EXPECT_EQ(aub_stream::ENGINE_RCS, engines[0].first);
@@ -245,7 +193,7 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenTgllpWhenIsFusedEuDispatchEnabledIsCalle
         {false, true, 1}};
 
     for (auto &[expectedResult, wa, debugKey] : testParams) {
-        waTable.waDisableFusedThreadScheduling = wa;
+        waTable.flags.waDisableFusedThreadScheduling = wa;
         DebugManager.flags.CFEFusedEUDispatch.set(debugKey);
         EXPECT_EQ(expectedResult, helper.isFusedEuDispatchEnabled(hardwareInfo));
     }
@@ -272,7 +220,7 @@ GEN12LPTEST_F(HwHelperTestsGen12LpBuffer, givenCompressedBufferThenCheckResource
 
     buffer.reset(Buffer::create(context.get(), 0, MemoryConstants::cacheLineSize, nullptr, retVal));
 
-    buffer->getGraphicsAllocation(rootDeviceIndex)->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
+    MockBuffer::setAllocationType(buffer->getGraphicsAllocation(rootDeviceIndex), context->getDevice(0)->getRootDeviceEnvironment().getGmmClientContext(), true);
 
     EXPECT_FALSE(helper.checkResourceCompatibility(*buffer->getGraphicsAllocation(rootDeviceIndex)));
 }
@@ -282,7 +230,7 @@ GEN12LPTEST_F(HwHelperTestsGen12LpBuffer, givenBufferThenCheckResourceCompatibil
 
     buffer.reset(Buffer::create(context.get(), 0, MemoryConstants::cacheLineSize, nullptr, retVal));
 
-    buffer->getGraphicsAllocation(rootDeviceIndex)->setAllocationType(GraphicsAllocation::AllocationType::BUFFER);
+    buffer->getGraphicsAllocation(rootDeviceIndex)->setAllocationType(AllocationType::BUFFER);
 
     EXPECT_TRUE(helper.checkResourceCompatibility(*buffer->getGraphicsAllocation(rootDeviceIndex)));
 }
@@ -321,25 +269,6 @@ GEN12LPTEST_F(MemorySynchronizatiopCommandsTests, whenSettingCacheFlushExtraFiel
     MemorySynchronizationCommands<FamilyType>::setCacheFlushExtraProperties(args);
     EXPECT_TRUE(args.hdcPipelineFlush);
     EXPECT_FALSE(args.constantCacheInvalidationEnable);
-}
-
-GEN12LPTEST_F(HwHelperTestGen12Lp, givenUnknownProductFamilyWhenGettingIsWorkaroundRequiredThenFalseIsReturned) {
-    HwHelper &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
-    uint32_t steppings[] = {
-        REVISION_A0,
-        REVISION_B,
-        REVISION_C,
-        CommonConstants::invalidStepping};
-    hardwareInfo.platform.eProductFamily = IGFX_UNKNOWN;
-
-    for (auto stepping : steppings) {
-        hardwareInfo.platform.usRevId = hwHelper.getHwRevIdFromStepping(stepping, hardwareInfo);
-
-        EXPECT_FALSE(hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_B, hardwareInfo));
-        EXPECT_FALSE(hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_C, hardwareInfo));
-        EXPECT_FALSE(hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_D, hardwareInfo));
-        EXPECT_FALSE(hwHelper.isWorkaroundRequired(REVISION_B, REVISION_A0, hardwareInfo));
-    }
 }
 
 GEN12LPTEST_F(HwHelperTestGen12Lp, givenGen12WhenCallIsPackedSupportedThenReturnTrue) {
@@ -397,17 +326,17 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenAllocationTypeWithCpuAccessRequiredWhenC
     DebugManagerStateRestore restore;
     DebugManager.flags.ForceLocalMemoryAccessMode.set(static_cast<int32_t>(LocalMemoryAccessMode::CpuAccessDisallowed));
 
-    const GraphicsAllocation::AllocationType allocationTypesToUseSystemMemory[] = {
-        GraphicsAllocation::AllocationType::COMMAND_BUFFER,
-        GraphicsAllocation::AllocationType::CONSTANT_SURFACE,
-        GraphicsAllocation::AllocationType::GLOBAL_SURFACE,
-        GraphicsAllocation::AllocationType::INTERNAL_HEAP,
-        GraphicsAllocation::AllocationType::LINEAR_STREAM,
-        GraphicsAllocation::AllocationType::PIPE,
-        GraphicsAllocation::AllocationType::PRINTF_SURFACE,
-        GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER,
-        GraphicsAllocation::AllocationType::RING_BUFFER,
-        GraphicsAllocation::AllocationType::SEMAPHORE_BUFFER};
+    const AllocationType allocationTypesToUseSystemMemory[] = {
+        AllocationType::COMMAND_BUFFER,
+        AllocationType::CONSTANT_SURFACE,
+        AllocationType::GLOBAL_SURFACE,
+        AllocationType::INTERNAL_HEAP,
+        AllocationType::LINEAR_STREAM,
+        AllocationType::PIPE,
+        AllocationType::PRINTF_SURFACE,
+        AllocationType::TIMESTAMP_PACKET_TAG_BUFFER,
+        AllocationType::RING_BUFFER,
+        AllocationType::SEMAPHORE_BUFFER};
 
     MockMemoryManager mockMemoryManager;
     for (auto allocationType : allocationTypesToUseSystemMemory) {
@@ -420,7 +349,7 @@ GEN12LPTEST_F(HwHelperTestGen12Lp, givenAllocationTypeWithCpuAccessRequiredWhenC
     }
 
     AllocationData allocData{};
-    AllocationProperties properties(mockRootDeviceIndex, true, 10, GraphicsAllocation::AllocationType::BUFFER, false, mockDeviceBitfield);
+    AllocationProperties properties(mockRootDeviceIndex, true, 10, AllocationType::BUFFER, false, mockDeviceBitfield);
     mockMemoryManager.getAllocationData(allocData, properties, nullptr, mockMemoryManager.createStorageInfoFromProperties(properties));
     EXPECT_FALSE(allocData.flags.requiresCpuAccess);
     EXPECT_FALSE(allocData.flags.useSystemMemory);
@@ -485,4 +414,18 @@ HWTEST2_F(HwHelperTestGen12Lp, WhenGettingDeviceIpVersionThenMakeCorrectDeviceIp
 GEN12LPTEST_F(HwHelperTestGen12Lp, WhenGettingSupportedDeviceFeatureCapabilitiesThenReturnCorrectValue) {
     cl_device_feature_capabilities_intel expectedCapabilities = CL_DEVICE_FEATURE_FLAG_DP4A_INTEL;
     EXPECT_EQ(expectedCapabilities, ClHwHelper::get(renderCoreFamily).getSupportedDeviceFeatureCapabilities());
+}
+
+GEN12LPTEST_F(HwHelperTestGen12Lp, givenLocalMemoryFeatureDisabledWhenIsLocalMemoryEnabledIsCalledThenTrueIsReturned) {
+    hardwareInfo.featureTable.flags.ftrLocalMemory = true;
+
+    auto &helper = reinterpret_cast<HwHelperHw<FamilyType> &>(HwHelperHw<FamilyType>::get());
+    EXPECT_TRUE(helper.isLocalMemoryEnabled(hardwareInfo));
+}
+
+GEN12LPTEST_F(HwHelperTestGen12Lp, givenLocalMemoryFeatureEnabledWhenIsLocalMemoryEnabledIsCalledThenFalseIsReturned) {
+    hardwareInfo.featureTable.flags.ftrLocalMemory = false;
+
+    auto &helper = reinterpret_cast<HwHelperHw<FamilyType> &>(HwHelperHw<FamilyType>::get());
+    EXPECT_FALSE(helper.isLocalMemoryEnabled(hardwareInfo));
 }

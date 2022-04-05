@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,11 +9,10 @@
 #include "shared/source/memory_manager/migration_sync_data.h"
 #include "shared/source/memory_manager/multi_graphics_allocation.h"
 #include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/mock_migration_sync_data.h"
 #include "shared/test/common/mocks/mock_multi_graphics_allocation.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 
 #include "gtest/gtest.h"
 
@@ -21,7 +20,7 @@ using namespace NEO;
 
 TEST(MultiGraphicsAllocationTest, whenCreatingMultiGraphicsAllocationThenTheAllocationIsObtainableAsADefault) {
     GraphicsAllocation graphicsAllocation(1, // rootDeviceIndex
-                                          GraphicsAllocation::AllocationType::BUFFER,
+                                          AllocationType::BUFFER,
                                           nullptr, 0, 0, MemoryPool::System4KBPages, 0);
 
     MockMultiGraphicsAllocation multiGraphicsAllocation(1);
@@ -37,10 +36,10 @@ TEST(MultiGraphicsAllocationTest, whenCreatingMultiGraphicsAllocationThenTheAllo
 
 TEST(MultiGraphicsAllocationTest, givenMultiGraphicsAllocationWhenAddingMultipleGraphicsAllocationsThenTheyAreObtainableByRootDeviceIndex) {
     GraphicsAllocation graphicsAllocation0(0, // rootDeviceIndex
-                                           GraphicsAllocation::AllocationType::BUFFER,
+                                           AllocationType::BUFFER,
                                            nullptr, 0, 0, MemoryPool::System4KBPages, 0);
     GraphicsAllocation graphicsAllocation1(1, // rootDeviceIndex
-                                           GraphicsAllocation::AllocationType::BUFFER,
+                                           AllocationType::BUFFER,
                                            nullptr, 0, 0, MemoryPool::System4KBPages, 0);
 
     MockMultiGraphicsAllocation multiGraphicsAllocation(1);
@@ -54,7 +53,7 @@ TEST(MultiGraphicsAllocationTest, givenMultiGraphicsAllocationWhenAddingMultiple
 }
 
 TEST(MultiGraphicsAllocationTest, givenMultiGraphicsAllocationWhenGettingAllocationTypeThenReturnAllocationTypeFromDefaultAllocation) {
-    auto expectedAllocationType = GraphicsAllocation::AllocationType::BUFFER;
+    auto expectedAllocationType = AllocationType::BUFFER;
     GraphicsAllocation graphicsAllocation(1, // rootDeviceIndex
                                           expectedAllocationType,
                                           nullptr, 0, 0, MemoryPool::System4KBPages, 0);
@@ -67,7 +66,7 @@ TEST(MultiGraphicsAllocationTest, givenMultiGraphicsAllocationWhenGettingAllocat
 }
 
 TEST(MultiGraphicsAllocationTest, givenMultiGraphicsAllocationWhenGettingCoherencyStatusThenReturnCoherencyStatusFromDefaultAllocation) {
-    auto expectedAllocationType = GraphicsAllocation::AllocationType::BUFFER;
+    auto expectedAllocationType = AllocationType::BUFFER;
     GraphicsAllocation graphicsAllocation(1, // rootDeviceIndex
                                           expectedAllocationType,
                                           nullptr, 0, 0, MemoryPool::System4KBPages, 0);
@@ -90,7 +89,7 @@ TEST(MultiGraphicsAllocationTest, WhenCreatingMultiGraphicsAllocationWithoutGrap
 TEST(MultiGraphicsAllocationTest, givenMultiGraphicsAllocationWhenRemovingGraphicsAllocationThenTheAllocationIsNoLongerAvailable) {
     uint32_t rootDeviceIndex = 1u;
     GraphicsAllocation graphicsAllocation(rootDeviceIndex,
-                                          GraphicsAllocation::AllocationType::BUFFER,
+                                          AllocationType::BUFFER,
                                           nullptr, 0, 0, MemoryPool::System4KBPages, 0);
 
     MockMultiGraphicsAllocation multiGraphicsAllocation(rootDeviceIndex);
@@ -127,7 +126,7 @@ TEST_F(MultiGraphicsAllocationTests, whenCreatingMultiGraphicsAllocationWithShar
     AllocationProperties allocationProperties{0u,
                                               true, //allocateMemory
                                               MemoryConstants::pageSize,
-                                              GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY,
+                                              AllocationType::BUFFER_HOST_MEMORY,
                                               false, //multiOsContextCapable
                                               false, //isMultiStorageAllocationParam
                                               systemMemoryBitfield};
@@ -150,7 +149,7 @@ TEST_F(MultiGraphicsAllocationTests, whenCreatingMultiGraphicsAllocationWithExis
     AllocationProperties allocationProperties{0u,
                                               false, //allocateMemory
                                               MemoryConstants::pageSize,
-                                              GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY,
+                                              AllocationType::BUFFER_HOST_MEMORY,
                                               false, //multiOsContextCapable
                                               false, //isMultiStorageAllocationParam
                                               systemMemoryBitfield};
@@ -171,7 +170,7 @@ TEST_F(MultiGraphicsAllocationTests, whenCreatingMultiGraphicsAllocationWithSepa
     AllocationProperties allocationProperties{0u,
                                               true, //allocateMemory
                                               MemoryConstants::pageSize,
-                                              GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY,
+                                              AllocationType::BUFFER_HOST_MEMORY,
                                               false, //multiOsContextCapable
                                               false, //isMultiStorageAllocationParam
                                               systemMemoryBitfield};
@@ -191,7 +190,7 @@ TEST_F(MultiGraphicsAllocationTests, givenMultiGraphicsAllocationThatRequiresMig
     AllocationProperties allocationProperties{0u,
                                               true, //allocateMemory
                                               MemoryConstants::pageSize,
-                                              GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY,
+                                              AllocationType::BUFFER_HOST_MEMORY,
                                               false, //multiOsContextCapable
                                               false, //isMultiStorageAllocationParam
                                               systemMemoryBitfield};
@@ -223,7 +222,7 @@ struct MigrationSyncDataTests : public MultiGraphicsAllocationTests {
         AllocationProperties allocationProperties{0u,
                                                   true, //allocateMemory
                                                   MemoryConstants::pageSize,
-                                                  GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY,
+                                                  AllocationType::BUFFER_HOST_MEMORY,
                                                   false, //multiOsContextCapable
                                                   false, //isMultiStorageAllocationParam
                                                   systemMemoryBitfield};

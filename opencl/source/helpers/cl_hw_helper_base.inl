@@ -6,10 +6,10 @@
  */
 
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/source/program/kernel_info.h"
 
 #include "opencl/source/helpers/cl_hw_helper.h"
 #include "opencl/source/helpers/dispatch_info.h"
-#include "opencl/source/program/kernel_info.h"
 
 namespace NEO {
 
@@ -34,7 +34,7 @@ inline bool ClHwHelperHw<GfxFamily>::hasStatelessAccessToBuffer(const KernelInfo
 }
 
 template <typename GfxFamily>
-inline bool ClHwHelperHw<GfxFamily>::allowRenderCompressionForContext(const ClDevice &clDevice, const Context &context) const {
+inline bool ClHwHelperHw<GfxFamily>::allowCompressionForContext(const ClDevice &clDevice, const Context &context) const {
     return true;
 }
 
@@ -53,6 +53,11 @@ bool ClHwHelperHw<GfxFamily>::isSupportedKernelThreadArbitrationPolicy() const {
 template <typename GfxFamily>
 std::vector<uint32_t> ClHwHelperHw<GfxFamily>::getSupportedThreadArbitrationPolicies() const {
     return std::vector<uint32_t>{CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_OLDEST_FIRST_INTEL, CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_ROUND_ROBIN_INTEL, CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_AFTER_DEPENDENCY_ROUND_ROBIN_INTEL};
+}
+
+template <typename GfxFamily>
+bool ClHwHelperHw<GfxFamily>::allowImageCompression(cl_image_format format) const {
+    return true;
 }
 
 } // namespace NEO

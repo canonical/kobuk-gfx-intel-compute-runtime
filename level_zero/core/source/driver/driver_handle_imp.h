@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -35,6 +35,7 @@ struct DriverHandleImp : public DriverHandle {
     NEO::MemoryManager *getMemoryManager() override;
     void setMemoryManager(NEO::MemoryManager *memoryManager) override;
     MOCKABLE_VIRTUAL void *importFdHandle(ze_device_handle_t hDevice, ze_ipc_memory_flags_t flags, uint64_t handle, NEO::GraphicsAllocation **pAlloc);
+    MOCKABLE_VIRTUAL void *importNTHandle(ze_device_handle_t hDevice, void *handle);
     ze_result_t checkMemoryAccessFromDevice(Device *device, const void *ptr) override;
     NEO::SVMAllocsManager *getSvmAllocsManager() override;
     ze_result_t initialize(std::vector<std::unique_ptr<NEO::Device>> neoDevices);
@@ -62,7 +63,7 @@ struct DriverHandleImp : public DriverHandle {
                                                                      uintptr_t *gpuAddress) override;
     NEO::GraphicsAllocation *getPeerAllocation(Device *device,
                                                NEO::SvmAllocationData *allocData,
-                                               void *ptr,
+                                               void *basePtr,
                                                uintptr_t *peerGpuAddress);
     void createHostPointerManager();
     void sortNeoDevices(std::vector<std::unique_ptr<NEO::Device>> &neoDevices);
@@ -85,7 +86,13 @@ struct DriverHandleImp : public DriverHandle {
         {ZE_FLOAT_ATOMICS_EXT_NAME, ZE_FLOAT_ATOMICS_EXT_VERSION_CURRENT},
         {ZE_RELAXED_ALLOCATION_LIMITS_EXP_NAME, ZE_RELAXED_ALLOCATION_LIMITS_EXP_VERSION_CURRENT},
         {ZE_MODULE_PROGRAM_EXP_NAME, ZE_MODULE_PROGRAM_EXP_VERSION_CURRENT},
-        {ZE_GLOBAL_OFFSET_EXP_NAME, ZE_GLOBAL_OFFSET_EXP_VERSION_CURRENT}};
+        {ZE_KERNEL_SCHEDULING_HINTS_EXP_NAME, ZE_SCHEDULING_HINTS_EXP_VERSION_CURRENT},
+        {ZE_GLOBAL_OFFSET_EXP_NAME, ZE_GLOBAL_OFFSET_EXP_VERSION_CURRENT},
+        {ZE_PCI_PROPERTIES_EXT_NAME, ZE_PCI_PROPERTIES_EXT_VERSION_CURRENT},
+        {ZE_MEMORY_COMPRESSION_HINTS_EXT_NAME, ZE_MEMORY_COMPRESSION_HINTS_EXT_VERSION_CURRENT},
+        {ZE_IMAGE_VIEW_EXP_NAME, ZE_IMAGE_VIEW_EXP_VERSION_CURRENT},
+        {ZE_IMAGE_MEMORY_PROPERTIES_EXP_NAME, ZE_IMAGE_MEMORY_PROPERTIES_EXP_VERSION_CURRENT},
+        {ZE_MEMORY_FREE_POLICIES_EXT_NAME, ZE_MEMORY_FREE_POLICIES_EXT_VERSION_CURRENT}};
 
     uint64_t uuidTimestamp = 0u;
 
@@ -96,11 +103,14 @@ struct DriverHandleImp : public DriverHandle {
 
     std::set<uint32_t> rootDeviceIndices = {};
     std::map<uint32_t, NEO::DeviceBitfield> deviceBitfields;
+    void updateRootDeviceBitFields(std::unique_ptr<NEO::Device> &neoDevice);
+    void enableRootDeviceDebugger(std::unique_ptr<NEO::Device> &neoDevice);
 
     // Environment Variables
     bool enableProgramDebugging = false;
     bool enableSysman = false;
     bool enablePciIdDeviceOrder = false;
+    uint8_t powerHint = 0;
 };
 
 extern struct DriverHandleImp *GlobalDriver;

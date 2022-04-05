@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,8 +7,7 @@
 
 #include "shared/source/kernel/kernel_arg_descriptor.h"
 #include "shared/source/kernel/kernel_descriptor.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 TEST(KernelDescriptor, WhenDefaultInitializedThenValuesAreCleared) {
     NEO::KernelDescriptor desc;
@@ -36,7 +35,7 @@ TEST(KernelDescriptor, WhenDefaultInitializedThenValuesAreCleared) {
     EXPECT_EQ(2U, desc.kernelAttributes.workgroupDimensionsOrder[2]);
     EXPECT_EQ(0U, desc.kernelAttributes.gpuPointerSize);
     EXPECT_EQ(8U, desc.kernelAttributes.simdSize);
-    EXPECT_EQ(3U, desc.kernelAttributes.numLocalIdChannels);
+    EXPECT_EQ(0U, desc.kernelAttributes.numLocalIdChannels);
 
     EXPECT_EQ(0U, desc.entryPoints.skipPerThreadDataLoad);
     EXPECT_EQ(0U, desc.entryPoints.skipSetFFIDGP);
@@ -83,8 +82,6 @@ TEST(KernelDescriptor, WhenDefaultInitializedThenValuesAreCleared) {
     EXPECT_TRUE(desc.kernelMetadata.kernelName.empty());
     EXPECT_TRUE(desc.kernelMetadata.kernelLanguageAttributes.empty());
     EXPECT_TRUE(desc.kernelMetadata.printfStringsMap.empty());
-    EXPECT_TRUE(desc.kernelMetadata.deviceSideEnqueueChildrenKernelsIdOffset.empty());
-    EXPECT_EQ(0U, desc.kernelMetadata.deviceSideEnqueueBlockInterfaceDescriptorOffset);
     EXPECT_TRUE(desc.kernelMetadata.allByValueKernelArguments.empty());
     EXPECT_EQ(0U, desc.kernelMetadata.compiledSubGroupsNumber);
     EXPECT_EQ(0U, desc.kernelMetadata.requiredSubGroupSize);
@@ -108,9 +105,4 @@ TEST(KernelDescriptorAttributesSupportsBuffersBiggerThan4Gb, GivenStatefulBuffer
     EXPECT_FALSE(desc.kernelAttributes.supportsBuffersBiggerThan4Gb());
     desc.kernelAttributes.bufferAddressingMode = NEO::KernelDescriptor::BindlessAndStateless;
     EXPECT_FALSE(desc.kernelAttributes.supportsBuffersBiggerThan4Gb());
-}
-
-TEST(KernelDescriptorTest, givenExtendedInfoWhenAskingForSpecialPipelineSelectModeThenReturnFalse) {
-    NEO::ExtendedInfoBase extendedInfo;
-    EXPECT_FALSE(extendedInfo.specialPipelineSelectModeRequired());
 }

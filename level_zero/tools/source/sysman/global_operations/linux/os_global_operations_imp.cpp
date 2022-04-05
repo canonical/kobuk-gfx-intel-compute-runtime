@@ -7,6 +7,8 @@
 
 #include "level_zero/tools/source/sysman/global_operations/linux/os_global_operations_imp.h"
 
+#include "shared/source/os_interface/device_factory.h"
+
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/tools/source/sysman/global_operations/global_operations_imp.h"
 #include "level_zero/tools/source/sysman/linux/fs_access.h"
@@ -84,21 +86,19 @@ void LinuxGlobalOperationsImp::getVendorName(char (&vendorName)[ZES_STRING_PROPE
 
 void LinuxGlobalOperationsImp::getDriverVersion(char (&driverVersion)[ZES_STRING_PROPERTY_SIZE]) {
     std::string strVal;
+    std::strncpy(driverVersion, unknown.c_str(), ZES_STRING_PROPERTY_SIZE);
     ze_result_t result = pFsAccess->read(agamaVersionFile, strVal);
-    if (ZE_RESULT_SUCCESS == result) {
-        std::strncpy(driverVersion, strVal.c_str(), ZES_STRING_PROPERTY_SIZE);
-        return;
-    } else if ((result != ZE_RESULT_ERROR_NOT_AVAILABLE) && (result != ZE_RESULT_SUCCESS)) {
-        std::strncpy(driverVersion, unknown.c_str(), ZES_STRING_PROPERTY_SIZE);
-        return;
-    } else {
-        result = pFsAccess->read(srcVersionFile, strVal);
-        if (ZE_RESULT_SUCCESS != result) {
-            std::strncpy(driverVersion, unknown.c_str(), ZES_STRING_PROPERTY_SIZE);
+    if (ZE_RESULT_SUCCESS != result) {
+        if (ZE_RESULT_ERROR_NOT_AVAILABLE != result) {
             return;
         }
-        std::strncpy(driverVersion, strVal.c_str(), ZES_STRING_PROPERTY_SIZE);
+        result = pFsAccess->read(srcVersionFile, strVal);
+        if (ZE_RESULT_SUCCESS != result) {
+            return;
+        }
     }
+    std::strncpy(driverVersion, strVal.c_str(), ZES_STRING_PROPERTY_SIZE);
+    return;
 }
 
 static void getPidFdsForOpenDevice(ProcfsAccess *pProcfsAccess, SysfsAccess *pSysfsAccess, const ::pid_t pid, std::vector<int> &deviceFds) {
@@ -119,6 +119,49 @@ static void getPidFdsForOpenDevice(ProcfsAccess *pProcfsAccess, SysfsAccess *pSy
             deviceFds.push_back(fd);
         }
     }
+}
+
+void LinuxGlobalOperationsImp::releaseSysmanDeviceResources() {
+    pLinuxSysmanImp->getSysmanDeviceImp()->pEngineHandleContext->releaseEngines();
+    pLinuxSysmanImp->getSysmanDeviceImp()->pRasHandleContext->releaseRasHandles();
+    pLinuxSysmanImp->getSysmanDeviceImp()->pDiagnosticsHandleContext->releaseDiagnosticsHandles();
+    pLinuxSysmanImp->getSysmanDeviceImp()->pFirmwareHandleContext->releaseFwHandles();
+    pLinuxSysmanImp->releasePmtObject();
+    pLinuxSysmanImp->releaseFwUtilInterface();
+    pLinuxSysmanImp->releaseLocalDrmHandle();
+}
+
+void LinuxGlobalOperationsImp::releaseDeviceResources() {
+    releaseSysmanDeviceResources();
+    auto device = static_cast<DeviceImp *>(getDevice());
+    device->releaseResources();
+    executionEnvironment->memoryManager->releaseDeviceSpecificMemResources(rootDeviceIndex);
+    executionEnvironment->releaseRootDeviceEnvironmentResources(executionEnvironment->rootDeviceEnvironments[rootDeviceIndex].get());
+    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex].reset();
+}
+
+void LinuxGlobalOperationsImp::reInitSysmanDeviceResources() {
+    pLinuxSysmanImp->getSysmanDeviceImp()->updateSubDeviceHandlesLocally();
+    pLinuxSysmanImp->createPmtHandles();
+    pLinuxSysmanImp->getSysmanDeviceImp()->pRasHandleContext->init(pLinuxSysmanImp->getSysmanDeviceImp()->deviceHandles);
+    pLinuxSysmanImp->getSysmanDeviceImp()->pEngineHandleContext->init();
+    pLinuxSysmanImp->getSysmanDeviceImp()->pDiagnosticsHandleContext->init(pLinuxSysmanImp->getSysmanDeviceImp()->deviceHandles);
+    pLinuxSysmanImp->getSysmanDeviceImp()->pFirmwareHandleContext->init();
+}
+
+ze_result_t LinuxGlobalOperationsImp::initDevice() {
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    auto device = static_cast<DeviceImp *>(getDevice());
+
+    auto neoDevice = NEO::DeviceFactory::createDevice(*executionEnvironment, devicePciBdf, rootDeviceIndex);
+    if (neoDevice == nullptr) {
+        return ZE_RESULT_ERROR_DEVICE_LOST;
+    }
+    static_cast<L0::DriverHandleImp *>(device->getDriverHandle())->updateRootDeviceBitFields(neoDevice);
+    static_cast<L0::DriverHandleImp *>(device->getDriverHandle())->enableRootDeviceDebugger(neoDevice);
+    Device::deviceReinit(device->getDriverHandle(), device, neoDevice, &result);
+    reInitSysmanDeviceResources();
+    return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t LinuxGlobalOperationsImp::reset(ze_bool_t force) {
@@ -161,10 +204,8 @@ ze_result_t LinuxGlobalOperationsImp::reset(ze_bool_t force) {
         }
     }
 
-    pLinuxSysmanImp->getSysmanDeviceImp()->pEngineHandleContext->releaseEngines();
-    pLinuxSysmanImp->getSysmanDeviceImp()->pRasHandleContext->releaseRasHandles();
-    pLinuxSysmanImp->releasePmtObject();
-    static_cast<DeviceImp *>(getDevice())->releaseResources();
+    ExecutionEnvironmentRefCountRestore restorer(executionEnvironment);
+    releaseDeviceResources();
     for (auto &&fd : myPidFds) {
         // Close open filedescriptors to the device
         // before unbinding device.
@@ -229,7 +270,7 @@ ze_result_t LinuxGlobalOperationsImp::reset(ze_bool_t force) {
         return result;
     }
 
-    return ZE_RESULT_SUCCESS;
+    return initDevice();
 }
 
 // Processes in the form of clients are present in sysfs like this:
@@ -286,9 +327,9 @@ ze_result_t LinuxGlobalOperationsImp::scanProcessesState(std::vector<zes_process
 
         if (ZE_RESULT_SUCCESS != result) {
             if (ZE_RESULT_ERROR_NOT_AVAILABLE == result) {
-                //update the result as Success as ZE_RESULT_ERROR_NOT_AVAILABLE is expected if the "realClientPidPath" folder is empty
-                //this condition(when encountered) must not prevent the information accumulated for other clientIds
-                //this situation occurs when there is no call modifying result,
+                // update the result as Success as ZE_RESULT_ERROR_NOT_AVAILABLE is expected if the "realClientPidPath" folder is empty
+                // this condition(when encountered) must not prevent the information accumulated for other clientIds
+                // this situation occurs when there is no call modifying result,
                 result = ZE_RESULT_SUCCESS;
                 continue;
             } else {
@@ -302,10 +343,10 @@ ze_result_t LinuxGlobalOperationsImp::scanProcessesState(std::vector<zes_process
         result = pSysfsAccess->scanDirEntries(busyDirForEngines, engineNums);
         if (ZE_RESULT_SUCCESS != result) {
             if (ZE_RESULT_ERROR_NOT_AVAILABLE == result) {
-                //update the result as Success as ZE_RESULT_ERROR_NOT_AVAILABLE is expected if the "realClientPidPath" folder is empty
-                //this condition(when encountered) must not prevent the information accumulated for other clientIds
-                //this situation occurs when there is no call modifying result,
-                //Here its seen when the last element of clientIds returns ZE_RESULT_ERROR_NOT_AVAILABLE for some reason.
+                // update the result as Success as ZE_RESULT_ERROR_NOT_AVAILABLE is expected if the "realClientPidPath" folder is empty
+                // this condition(when encountered) must not prevent the information accumulated for other clientIds
+                // this situation occurs when there is no call modifying result,
+                // Here its seen when the last element of clientIds returns ZE_RESULT_ERROR_NOT_AVAILABLE for some reason.
                 engineType = ZES_ENGINE_TYPE_FLAG_OTHER; // When busy node is absent assign engine type with ZES_ENGINE_TYPE_FLAG_OTHER
             } else {
                 return result;
@@ -408,7 +449,10 @@ LinuxGlobalOperationsImp::LinuxGlobalOperationsImp(OsSysman *pOsSysman) {
     pProcfsAccess = &pLinuxSysmanImp->getProcfsAccess();
     pFsAccess = &pLinuxSysmanImp->getFsAccess();
     pDevice = pLinuxSysmanImp->getDeviceHandle();
-    pFwInterface = pLinuxSysmanImp->getFwUtilInterface();
+    auto device = static_cast<DeviceImp *>(pDevice);
+    devicePciBdf = device->getNEODevice()->getRootDeviceEnvironment().osInterface->getDriverModel()->as<NEO::Drm>()->getPciPath();
+    executionEnvironment = device->getNEODevice()->getExecutionEnvironment();
+    rootDeviceIndex = device->getNEODevice()->getRootDeviceIndex();
 }
 
 OsGlobalOperations *OsGlobalOperations::create(OsSysman *pOsSysman) {

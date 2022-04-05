@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,8 +10,6 @@
 #include "shared/source/gen8/reg_configs.h"
 #include "shared/source/helpers/preamble.h"
 #include "shared/test/unit_test/preamble/preamble_fixture.h"
-
-#include "opencl/test/unit_test/fixtures/platform_fixture.h"
 
 using namespace NEO;
 
@@ -76,14 +74,21 @@ BDWTEST_F(ThreadArbitrationGen8, givenPolicyWhenThreadArbitrationProgrammedThenD
     typedef BDWFamily::MI_LOAD_REGISTER_IMM MI_LOAD_REGISTER_IMM;
     LinearStream &cs = linearStream;
 
-    PreambleHelper<BDWFamily>::programThreadArbitration(&cs, ThreadArbitrationPolicy::RoundRobin);
+    StreamProperties streamProperties{};
+    streamProperties.stateComputeMode.threadArbitrationPolicy.set(ThreadArbitrationPolicy::RoundRobin);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(linearStream, streamProperties.stateComputeMode, *defaultHwInfo);
 
     EXPECT_EQ(0u, cs.getUsed());
 
     MockDevice device;
     EXPECT_EQ(0u, PreambleHelper<BDWFamily>::getAdditionalCommandsSize(device));
-    EXPECT_EQ(0u, PreambleHelper<BDWFamily>::getThreadArbitrationCommandsSize());
-    EXPECT_EQ(0u, HwHelperHw<BDWFamily>::get().getDefaultThreadArbitrationPolicy());
+    EXPECT_EQ(ThreadArbitrationPolicy::AgeBased, HwHelperHw<BDWFamily>::get().getDefaultThreadArbitrationPolicy());
+}
+
+BDWTEST_F(ThreadArbitrationGen8, whenGetSupportThreadArbitrationPoliciesIsCalledThenEmptyVectorIsReturned) {
+    auto supportedPolicies = PreambleHelper<BDWFamily>::getSupportedThreadArbitrationPolicies();
+
+    EXPECT_EQ(0u, supportedPolicies.size());
 }
 
 typedef PreambleFixture Gen8UrbEntryAllocationSize;
@@ -98,8 +103,7 @@ BDWTEST_F(PreambleVfeState, WhenProgrammingVfeStateThenProgrammingIsCorrect) {
     LinearStream &cs = linearStream;
     auto pVfeCmd = PreambleHelper<BDWFamily>::getSpaceForVfeState(&linearStream, *defaultHwInfo, EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<BDWFamily>::programVfeState(pVfeCmd, *defaultHwInfo, 0u, 0, 168u,
-                                               AdditionalKernelExecInfo::NotApplicable, emptyProperties);
+    PreambleHelper<BDWFamily>::programVfeState(pVfeCmd, *defaultHwInfo, 0u, 0, 168u, emptyProperties);
 
     parseCommands<BDWFamily>(cs);
 

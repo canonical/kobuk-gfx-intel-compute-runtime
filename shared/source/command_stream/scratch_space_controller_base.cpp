@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -47,7 +47,7 @@ void ScratchSpaceControllerBase::setRequiredScratchSpace(void *sshBaseAddress,
 }
 
 void ScratchSpaceControllerBase::createScratchSpaceAllocation() {
-    scratchAllocation = getMemoryManager()->allocateGraphicsMemoryWithProperties({rootDeviceIndex, scratchSizeBytes, GraphicsAllocation::AllocationType::SCRATCH_SURFACE, this->csrAllocationStorage.getDeviceBitfield()});
+    scratchAllocation = getMemoryManager()->allocateGraphicsMemoryWithProperties({rootDeviceIndex, scratchSizeBytes, AllocationType::SCRATCH_SURFACE, this->csrAllocationStorage.getDeviceBitfield()});
     UNRECOVERABLE_IF(scratchAllocation == nullptr);
 }
 
@@ -74,7 +74,7 @@ uint64_t ScratchSpaceControllerBase::getScratchPatchAddress() {
 }
 
 void ScratchSpaceControllerBase::reserveHeap(IndirectHeap::Type heapType, IndirectHeap *&indirectHeap) {
-    if (heapType == IndirectHeap::SURFACE_STATE) {
+    if (heapType == IndirectHeap::Type::SURFACE_STATE) {
         auto &hwHelper = HwHelper::get(executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->getHardwareInfo()->platform.eRenderCoreFamily);
         auto surfaceStateSize = hwHelper.getRenderSurfaceStateSize();
         indirectHeap->getSpace(surfaceStateSize);

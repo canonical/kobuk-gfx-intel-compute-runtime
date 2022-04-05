@@ -13,15 +13,17 @@
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/mock_os_library.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/command_queue/command_queue_hw.h"
-#include "test.h"
 
 #include <memory>
 
 HWTEST_F(CommandStreamReceiverWithActiveDebuggerTest, givenCsrWithActiveDebuggerAndDisabledPreemptionWhenFlushTaskIsCalledThenSipKernelIsMadeResident) {
 
     auto mockCsr = createCSR<FamilyType>();
+    auto sipType = SipKernel::getSipKernelType(device->getDevice());
+    SipKernel::initSipKernel(sipType, device->getDevice());
 
     CommandQueueHw<FamilyType> commandQueue(nullptr, device.get(), 0, false);
     auto &commandStream = commandQueue.getCS(4096u);

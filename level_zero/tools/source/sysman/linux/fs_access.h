@@ -55,6 +55,7 @@ class FsAccess {
   protected:
     FsAccess();
     decltype(&NEO::SysCalls::access) accessSyscall = NEO::SysCalls::access;
+    decltype(&stat) statSyscall = stat;
 };
 
 class ProcfsAccess : private FsAccess {
@@ -104,7 +105,7 @@ class SysfsAccess : protected FsAccess {
     ze_result_t write(const std::string file, std::vector<std::string> val);
 
     MOCKABLE_VIRTUAL ze_result_t scanDirEntries(const std::string path, std::vector<std::string> &list);
-    ze_result_t readSymLink(const std::string path, std::string &buf) override;
+    MOCKABLE_VIRTUAL ze_result_t readSymLink(const std::string path, std::string &buf) override;
     ze_result_t getRealPath(const std::string path, std::string &buf) override;
     MOCKABLE_VIRTUAL ze_result_t bindDevice(const std::string device);
     MOCKABLE_VIRTUAL ze_result_t unbindDevice(const std::string device);

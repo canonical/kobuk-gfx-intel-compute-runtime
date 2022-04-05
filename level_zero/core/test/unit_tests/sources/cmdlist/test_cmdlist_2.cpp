@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,10 +7,10 @@
 
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/image/image_hw.h"
+#include "level_zero/core/test/unit_tests/fixtures/cmdlist_fixture.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 
@@ -22,10 +22,16 @@ template <GFXCORE_FAMILY gfxCoreFamily>
 class MockCommandListHw : public WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>> {
   public:
     MockCommandListHw() : WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>() {}
+    MockCommandListHw(bool failOnFirst) : WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>(), failOnFirstCopy(failOnFirst) {}
 
-    AlignedAllocationData getAlignedAllocation(L0::Device *device, const void *buffer, uint64_t bufferSize) override {
-        return {0, 0, nullptr, true};
+    AlignedAllocationData getAlignedAllocation(L0::Device *device, const void *buffer, uint64_t bufferSize, bool allowHostCopy) override {
+        getAlignedAllocationCalledTimes++;
+        if (buffer) {
+            return {0, 0, &alignedAlloc, true};
+        }
+        return {0, 0, nullptr, false};
     }
+
     ze_result_t appendMemoryCopyKernelWithGA(void *dstPtr,
                                              NEO::GraphicsAllocation *dstPtrAlloc,
                                              uint64_t dstOffset,
@@ -40,6 +46,10 @@ class MockCommandListHw : public WhiteBox<::L0::CommandListCoreFamily<gfxCoreFam
         appendMemoryCopyKernelWithGACalledTimes++;
         if (isStateless)
             appendMemoryCopyKernelWithGAStatelessCalledTimes++;
+        if (failOnFirstCopy &&
+            (appendMemoryCopyKernelWithGACalledTimes == 1 || appendMemoryCopyKernelWithGAStatelessCalledTimes == 1)) {
+            return ZE_RESULT_ERROR_UNKNOWN;
+        }
         return ZE_RESULT_SUCCESS;
     }
     ze_result_t appendMemoryCopyBlit(uintptr_t dstPtr,
@@ -49,6 +59,9 @@ class MockCommandListHw : public WhiteBox<::L0::CommandListCoreFamily<gfxCoreFam
                                      uint64_t srcOffset,
                                      uint64_t size) override {
         appendMemoryCopyBlitCalledTimes++;
+        if (failOnFirstCopy && appendMemoryCopyBlitCalledTimes == 1) {
+            return ZE_RESULT_ERROR_UNKNOWN;
+        }
         return ZE_RESULT_SUCCESS;
     }
 
@@ -57,10 +70,10 @@ class MockCommandListHw : public WhiteBox<::L0::CommandListCoreFamily<gfxCoreFam
                                            size_t srcOffset,
                                            size_t dstOffset,
                                            ze_copy_region_t srcRegion,
-                                           ze_copy_region_t dstRegion, Vec3<size_t> copySize,
+                                           ze_copy_region_t dstRegion, const Vec3<size_t> &copySize,
                                            size_t srcRowPitch, size_t srcSlicePitch,
                                            size_t dstRowPitch, size_t dstSlicePitch,
-                                           Vec3<size_t> srcSize, Vec3<size_t> dstSize, ze_event_handle_t hSignalEvent,
+                                           const Vec3<size_t> &srcSize, const Vec3<size_t> &dstSize, ze_event_handle_t hSignalEvent,
                                            uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) override {
         appendMemoryCopyBlitRegionCalledTimes++;
         return ZE_RESULT_SUCCESS;
@@ -95,11 +108,11 @@ class MockCommandListHw : public WhiteBox<::L0::CommandListCoreFamily<gfxCoreFam
     }
     ze_result_t appendCopyImageBlit(NEO::GraphicsAllocation *src,
                                     NEO::GraphicsAllocation *dst,
-                                    Vec3<size_t> srcOffsets, Vec3<size_t> dstOffsets,
+                                    const Vec3<size_t> &srcOffsets, const Vec3<size_t> &dstOffsets,
                                     size_t srcRowPitch, size_t srcSlicePitch,
                                     size_t dstRowPitch, size_t dstSlicePitch,
-                                    size_t bytesPerPixel, Vec3<size_t> copySize,
-                                    Vec3<size_t> srcSize, Vec3<size_t> dstSize, ze_event_handle_t hSignalEvent) override {
+                                    size_t bytesPerPixel, const Vec3<size_t> &copySize,
+                                    const Vec3<size_t> &srcSize, const Vec3<size_t> &dstSize, ze_event_handle_t hSignalEvent) override {
         appendCopyImageBlitCalledTimes++;
         appendImageRegionCopySize = copySize;
         appendImageRegionSrcOrigin = srcOffsets;
@@ -114,14 +127,47 @@ class MockCommandListHw : public WhiteBox<::L0::CommandListCoreFamily<gfxCoreFam
     uint32_t appendMemoryCopyKernel3dCalledTimes = 0;
     uint32_t appendBlitFillCalledTimes = 0;
     uint32_t appendCopyImageBlitCalledTimes = 0;
+    uint32_t getAlignedAllocationCalledTimes = 0;
     Vec3<size_t> appendImageRegionCopySize = {0, 0, 0};
     Vec3<size_t> appendImageRegionSrcOrigin = {9, 9, 9};
     Vec3<size_t> appendImageRegionDstOrigin = {9, 9, 9};
+    bool failOnFirstCopy = false;
+    uint8_t mockAlignedAllocData[2 * MemoryConstants::pageSize]{};
+    void *alignedDataPtr = alignUp(mockAlignedAllocData, MemoryConstants::pageSize);
+    NEO::MockGraphicsAllocation alignedAlloc{alignedDataPtr, reinterpret_cast<uint64_t>(alignedDataPtr), MemoryConstants::pageSize};
 };
 
-using Platforms = IsAtLeastProduct<IGFX_SKYLAKE>;
+HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyCalledWithNullDstPtrThenAppendMemoryCopyWithappendMemoryCopyReturnsError, IsAtLeastSkl) {
+    MockCommandListHw<gfxCoreFamily> cmdList;
+    cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
+    void *srcPtr = reinterpret_cast<void *>(0x1234);
+    void *dstPtr = nullptr;
+    ze_result_t ret = cmdList.appendMemoryCopy(dstPtr, srcPtr, 0x1001, nullptr, 0, nullptr);
+    EXPECT_GT(cmdList.getAlignedAllocationCalledTimes, 0u);
+    EXPECT_EQ(ret, ZE_RESULT_ERROR_UNKNOWN);
+}
 
-HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyCalledThenAppendMemoryCopyWithappendMemoryCopyKernelWithGACalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyCalledWithNullSrcPtrThenAppendMemoryCopyWithappendMemoryCopyReturnsError, IsAtLeastSkl) {
+    MockCommandListHw<gfxCoreFamily> cmdList;
+    cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
+    void *srcPtr = nullptr;
+    void *dstPtr = reinterpret_cast<void *>(0x2345);
+    ze_result_t ret = cmdList.appendMemoryCopy(dstPtr, srcPtr, 0x1001, nullptr, 0, nullptr);
+    EXPECT_GT(cmdList.getAlignedAllocationCalledTimes, 0u);
+    EXPECT_EQ(ret, ZE_RESULT_ERROR_UNKNOWN);
+}
+
+HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyCalledWithNullSrcPtrAndDstPtrThenAppendMemoryCopyWithappendMemoryCopyReturnsError, IsAtLeastSkl) {
+    MockCommandListHw<gfxCoreFamily> cmdList;
+    cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
+    void *srcPtr = nullptr;
+    void *dstPtr = nullptr;
+    ze_result_t ret = cmdList.appendMemoryCopy(dstPtr, srcPtr, 0x1001, nullptr, 0, nullptr);
+    EXPECT_GT(cmdList.getAlignedAllocationCalledTimes, 0u);
+    EXPECT_EQ(ret, ZE_RESULT_ERROR_UNKNOWN);
+}
+
+HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyCalledThenAppendMemoryCopyWithappendMemoryCopyKernelWithGACalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
     void *srcPtr = reinterpret_cast<void *>(0x1234);
@@ -131,7 +177,7 @@ HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyCalledThenAppendMemor
     EXPECT_EQ(cmdList.appendMemoryCopyBlitCalledTimes, 0u);
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListWhen4GByteMemoryCopyCalledThenAppendMemoryCopyWithappendMemoryCopyKernelWithGAStatelessCalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListWhen4GByteMemoryCopyCalledThenAppendMemoryCopyWithappendMemoryCopyKernelWithGAStatelessCalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
     void *srcPtr = reinterpret_cast<void *>(0x1234);
@@ -142,7 +188,7 @@ HWTEST2_F(CommandListCreate, givenCommandListWhen4GByteMemoryCopyCalledThenAppen
     EXPECT_EQ(cmdList.appendMemoryCopyBlitCalledTimes, 0u);
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyCalledThenAppendMemoryCopyWithappendMemoryCopyWithBliterCalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyCalledThenAppendMemoryCopyWithappendMemoryCopyWithBliterCalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::Copy, 0u);
     void *srcPtr = reinterpret_cast<void *>(0x1234);
@@ -152,7 +198,7 @@ HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyCalledThenAppendMemor
     EXPECT_GT(cmdList.appendMemoryCopyBlitCalledTimes, 0u);
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyRegionCalledThenAppendMemoryCopyWithappendMemoryCopyWithBliterCalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyRegionCalledThenAppendMemoryCopyWithappendMemoryCopyWithBliterCalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::Copy, 0u);
     void *srcPtr = reinterpret_cast<void *>(0x1234);
@@ -163,14 +209,14 @@ HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyRegionCalledThenAppen
     EXPECT_GT(cmdList.appendMemoryCopyBlitRegionCalledTimes, 0u);
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListWhenPageFaultCopyCalledThenappendPageFaultCopyWithappendMemoryCopyKernelWithGACalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListWhenPageFaultCopyCalledThenappendPageFaultCopyWithappendMemoryCopyKernelWithGACalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     size_t size = (sizeof(uint32_t) * 4);
     cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
-    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x1234), size, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
-    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x2345), size, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
     cmdList.appendPageFaultCopy(&mockAllocationDst, &mockAllocationSrc, size, false);
@@ -178,14 +224,28 @@ HWTEST2_F(CommandListCreate, givenCommandListWhenPageFaultCopyCalledThenappendPa
     EXPECT_EQ(cmdList.appendMemoryCopyKernelWithGAStatelessCalledTimes, 0u);
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListWhenPageFaultCopyCalledThenappendPageFaultCopyWithappendMemoryCopyKernelWithGACalledForMiddleAndRightSizesAreCalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListWhenPageFaultCopyCalledWithCopyEngineThenappendPageFaultCopyWithappendMemoryCopyKernelWithGACalled, IsAtLeastSkl) {
+    MockCommandListHw<gfxCoreFamily> cmdList;
+    size_t size = (sizeof(uint32_t) * 4);
+    cmdList.initialize(device, NEO::EngineGroupType::Copy, 0u);
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
+                                                  reinterpret_cast<void *>(0x1234), size, 0, sizeof(uint32_t),
+                                                  MemoryPool::System4KBPages);
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
+                                                  reinterpret_cast<void *>(0x2345), size, 0, sizeof(uint32_t),
+                                                  MemoryPool::System4KBPages);
+    cmdList.appendPageFaultCopy(&mockAllocationDst, &mockAllocationSrc, size, false);
+    EXPECT_EQ(cmdList.appendMemoryCopyBlitCalledTimes, 1u);
+}
+
+HWTEST2_F(CommandListCreate, givenCommandListWhenPageFaultCopyCalledThenappendPageFaultCopyWithappendMemoryCopyKernelWithGACalledForMiddleAndRightSizesAreCalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     size_t size = ((sizeof(uint32_t) * 4) + 1);
     cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
-    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x1234), size, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
-    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x2345), size, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
     cmdList.appendPageFaultCopy(&mockAllocationDst, &mockAllocationSrc, size, false);
@@ -193,14 +253,57 @@ HWTEST2_F(CommandListCreate, givenCommandListWhenPageFaultCopyCalledThenappendPa
     EXPECT_EQ(cmdList.appendMemoryCopyKernelWithGAStatelessCalledTimes, 0u);
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListWhen4GBytePageFaultCopyCalledThenPageFaultCopyWithappendMemoryCopyKernelWithGAStatelessCalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListWhenPageFaultCopyCalledAndErrorOnMidCopyThenappendPageFaultCopyWithappendMemoryCopyKernelWithGACalledForMiddleIsCalled, IsAtLeastSkl) {
+    MockCommandListHw<gfxCoreFamily> cmdList(true);
+    size_t size = ((sizeof(uint32_t) * 4) + 1);
+    cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
+                                                  reinterpret_cast<void *>(0x1234), size, 0, sizeof(uint32_t),
+                                                  MemoryPool::System4KBPages);
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
+                                                  reinterpret_cast<void *>(0x2345), size, 0, sizeof(uint32_t),
+                                                  MemoryPool::System4KBPages);
+    cmdList.appendPageFaultCopy(&mockAllocationDst, &mockAllocationSrc, size, false);
+    EXPECT_EQ(cmdList.appendMemoryCopyKernelWithGACalledTimes, 1u);
+    EXPECT_EQ(cmdList.appendMemoryCopyKernelWithGAStatelessCalledTimes, 0u);
+}
+
+HWTEST2_F(CommandListCreate, givenCommandListWhenPageFaultCopyCalledWithCopyEngineThenappendPageFaultCopyWithappendMemoryCopyCalledOnlyOnce, IsAtLeastSkl) {
+    MockCommandListHw<gfxCoreFamily> cmdList;
+    size_t size = ((sizeof(uint32_t) * 4) + 1);
+    cmdList.initialize(device, NEO::EngineGroupType::Copy, 0u);
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
+                                                  reinterpret_cast<void *>(0x1234), size, 0, sizeof(uint32_t),
+                                                  MemoryPool::System4KBPages);
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
+                                                  reinterpret_cast<void *>(0x2345), size, 0, sizeof(uint32_t),
+                                                  MemoryPool::System4KBPages);
+    cmdList.appendPageFaultCopy(&mockAllocationDst, &mockAllocationSrc, size, false);
+    EXPECT_EQ(cmdList.appendMemoryCopyBlitCalledTimes, 1u);
+}
+
+HWTEST2_F(CommandListCreate, givenCommandListWhenPageFaultCopyCalledWithCopyEngineAndErrorOnMidOperationThenappendPageFaultCopyWithappendMemoryCopyKernelWithGACalledForMiddleIsCalled, IsAtLeastSkl) {
+    MockCommandListHw<gfxCoreFamily> cmdList(true);
+    size_t size = ((sizeof(uint32_t) * 4) + 1);
+    cmdList.initialize(device, NEO::EngineGroupType::Copy, 0u);
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
+                                                  reinterpret_cast<void *>(0x1234), size, 0, sizeof(uint32_t),
+                                                  MemoryPool::System4KBPages);
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
+                                                  reinterpret_cast<void *>(0x2345), size, 0, sizeof(uint32_t),
+                                                  MemoryPool::System4KBPages);
+    cmdList.appendPageFaultCopy(&mockAllocationDst, &mockAllocationSrc, size, false);
+    EXPECT_EQ(cmdList.appendMemoryCopyBlitCalledTimes, 1u);
+}
+
+HWTEST2_F(CommandListCreate, givenCommandListWhen4GBytePageFaultCopyCalledThenPageFaultCopyWithappendMemoryCopyKernelWithGAStatelessCalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     size_t size = 0x100000000;
     cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
-    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x1234), size, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
-    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x100003456), size, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
     cmdList.appendPageFaultCopy(&mockAllocationDst, &mockAllocationSrc, size, false);
@@ -208,14 +311,14 @@ HWTEST2_F(CommandListCreate, givenCommandListWhen4GBytePageFaultCopyCalledThenPa
     EXPECT_EQ(cmdList.appendMemoryCopyKernelWithGAStatelessCalledTimes, 1u);
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListWhen4GBytePageFaultCopyCalledThenPageFaultCopyWithappendMemoryCopyKernelWithGAStatelessCalledForMiddleAndRightSizesAreCalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListWhen4GBytePageFaultCopyCalledThenPageFaultCopyWithappendMemoryCopyKernelWithGAStatelessCalledForMiddleAndRightSizesAreCalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     size_t size = 0x100000001;
     cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
-    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x1234), size, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
-    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x100003456), size, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
     cmdList.appendPageFaultCopy(&mockAllocationDst, &mockAllocationSrc, size, false);
@@ -223,7 +326,7 @@ HWTEST2_F(CommandListCreate, givenCommandListWhen4GBytePageFaultCopyCalledThenPa
     EXPECT_EQ(cmdList.appendMemoryCopyKernelWithGAStatelessCalledTimes, 2u);
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListAnd3DWhbufferenMemoryCopyRegionCalledThenCopyKernel3DCalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListAnd3DWhbufferenMemoryCopyRegionCalledThenCopyKernel3DCalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
     void *srcPtr = reinterpret_cast<void *>(0x1234);
@@ -235,7 +338,7 @@ HWTEST2_F(CommandListCreate, givenCommandListAnd3DWhbufferenMemoryCopyRegionCall
     EXPECT_GT(cmdList.appendMemoryCopyKernel3dCalledTimes, 0u);
 }
 
-HWTEST2_F(CommandListCreate, givenImmediateCommandListWhenAppendingMemoryCopyThenSuccessIsReturned, Platforms) {
+HWTEST2_F(CommandListCreate, givenImmediateCommandListWhenAppendingMemoryCopyThenSuccessIsReturned, IsAtLeastSkl) {
     const ze_command_queue_desc_t desc = {};
     bool internalEngine = true;
 
@@ -258,7 +361,7 @@ HWTEST2_F(CommandListCreate, givenImmediateCommandListWhenAppendingMemoryCopyThe
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
-HWTEST2_F(CommandListCreate, givenImmediateCommandListWhenAppendingMemoryCopyWithInvalidEventThenInvalidArgumentErrorIsReturned, Platforms) {
+HWTEST2_F(CommandListCreate, givenImmediateCommandListWhenAppendingMemoryCopyWithInvalidEventThenInvalidArgumentErrorIsReturned, IsAtLeastSkl) {
     const ze_command_queue_desc_t desc = {};
     bool internalEngine = true;
 
@@ -281,7 +384,7 @@ HWTEST2_F(CommandListCreate, givenImmediateCommandListWhenAppendingMemoryCopyWit
     ASSERT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, result);
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListAndHostPointersWhenMemoryCopyCalledThenPipeControlWithDcFlushAdded, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListAndHostPointersWhenMemoryCopyCalledThenPipeControlWithDcFlushAdded, IsAtLeastSkl) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
     ze_result_t result;
@@ -304,10 +407,10 @@ HWTEST2_F(CommandListCreate, givenCommandListAndHostPointersWhenMemoryCopyCalled
         cmd = genCmdCast<PIPE_CONTROL *>(*itor);
         itor = find<PIPE_CONTROL *>(++itor, genCmdList.end());
     }
-    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), cmd->getDcFlushEnable());
+    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), cmd->getDcFlushEnable());
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListAnd2DWhbufferenMemoryCopyRegionCalledThenCopyKernel2DCalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListAnd2DWhbufferenMemoryCopyRegionCalledThenCopyKernel2DCalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
     void *srcPtr = reinterpret_cast<void *>(0x1234);
@@ -319,7 +422,22 @@ HWTEST2_F(CommandListCreate, givenCommandListAnd2DWhbufferenMemoryCopyRegionCall
     EXPECT_GT(cmdList.appendMemoryCopyKernel2dCalledTimes, 0u);
 }
 
-HWTEST2_F(CommandListCreate, givenCopyOnlyCommandListWhenAppendMemoryFillCalledThenAppendBlitFillCalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenImmediateCommandListWithFlushTaskEnabledWhenAppendingMemoryCopyRegionThenSuccessIsReturned, IsAtLeastXeHpCore) {
+    DebugManagerStateRestore restorer;
+    NEO::DebugManager.flags.EnableFlushTaskSubmission.set(1);
+
+    MockCommandListHw<gfxCoreFamily> cmdList;
+    cmdList.cmdListType = CommandList::CommandListType::TYPE_IMMEDIATE;
+    cmdList.initialize(device, NEO::EngineGroupType::Compute, 0u);
+    void *srcPtr = reinterpret_cast<void *>(0x1234);
+    void *dstPtr = reinterpret_cast<void *>(0x2345);
+    ze_copy_region_t dstRegion = {4, 4, 4, 2, 2, 2};
+    ze_copy_region_t srcRegion = {4, 4, 4, 2, 2, 2};
+    auto result = cmdList.appendMemoryCopyRegion(dstPtr, &dstRegion, 0, 0, srcPtr, &srcRegion, 0, 0, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+}
+
+HWTEST2_F(CommandListCreate, givenCopyOnlyCommandListWhenAppendMemoryFillCalledThenAppendBlitFillCalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::Copy, 0u);
     void *dstPtr = reinterpret_cast<void *>(0x1234);
@@ -328,7 +446,7 @@ HWTEST2_F(CommandListCreate, givenCopyOnlyCommandListWhenAppendMemoryFillCalledT
     EXPECT_GT(cmdList.appendBlitFillCalledTimes, 0u);
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListWhenAppendMemoryFillCalledThenAppendBlitFillNotCalled, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListWhenAppendMemoryFillCalledThenAppendBlitFillNotCalled, IsAtLeastSkl) {
     MockCommandListHw<gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
     void *dstPtr = reinterpret_cast<void *>(0x1234);
@@ -337,7 +455,7 @@ HWTEST2_F(CommandListCreate, givenCommandListWhenAppendMemoryFillCalledThenAppen
     EXPECT_EQ(cmdList.appendBlitFillCalledTimes, 0u);
 }
 
-HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyWithSignalEventsThenSemaphoreWaitAndPipeControlAreFound, Platforms) {
+HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyWithSignalEventsThenSemaphoreWaitAndPipeControlAreFound, IsAtLeastSkl) {
     using SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
@@ -350,8 +468,8 @@ HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyWithSignalEventsThenS
 
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 2;
-    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc));
-
+    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     std::vector<ze_event_handle_t> events;
 
     ze_event_desc_t eventDesc = {};
@@ -377,7 +495,7 @@ HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyWithSignalEventsThenS
     EXPECT_NE(cmdList.end(), itor);
     itor++;
     itor = find<PIPE_CONTROL *>(itor, cmdList.end());
-    if (MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed()) {
+    if (MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo)) {
         EXPECT_NE(cmdList.end(), itor);
     } else {
         EXPECT_EQ(cmdList.end(), itor);
@@ -399,8 +517,8 @@ HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyWithSignalEventScopeS
 
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 1;
-    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc));
-
+    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     ze_event_desc_t eventDesc = {};
     eventDesc.index = 0;
     eventDesc.signal = ZE_EVENT_SCOPE_FLAG_DEVICE;
@@ -445,8 +563,8 @@ HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyWithSignalEventScopeS
 
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 1;
-    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc));
-
+    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     ze_event_desc_t eventDesc = {};
     eventDesc.index = 0;
     auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
@@ -478,7 +596,7 @@ HWTEST2_F(CommandListCreate, givenCommandListWhenMemoryCopyWithSignalEventScopeS
 
     auto it = *(iterator.end() - 1);
     auto cmd1 = genCmdCast<PIPE_CONTROL *>(*it);
-    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), cmd1->getDcFlushEnable());
+    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), cmd1->getDcFlushEnable());
 }
 
 using ImageSupport = IsWithinProducts<IGFX_SKYLAKE, IGFX_TIGERLAKE_LP>;
@@ -804,10 +922,10 @@ HWTEST2_F(CommandListCreate, givenCopyCommandListWhenCopyRegionWithinMaxBlitSize
     ze_copy_region_t dstRegion = srcRegion;
     Vec3<size_t> srcSize = {0x1000, 0x100, 1};
     Vec3<size_t> dstSize = {0x100, 0x100, 1};
-    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
-    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
     size_t rowPitch = copySize.x;
@@ -824,7 +942,7 @@ HWTEST2_F(CommandListCreate, givenCopyCommandListWhenCopyRegionWithinMaxBlitSize
     EXPECT_EQ(cmdList.end(), itor);
 }
 
-HWTEST2_F(CommandListCreate, givenCopyCommandListWhenCopyRegionWithinMaxBlitSizeThenOffsetAndSizeAreInPixels, BlitBlockCopyPlatforms) {
+HWTEST2_F(CommandListCreate, givenCopyCommandListWhenCopyRegionWithinMaxBlitSizeThenDestinationCoordinatesAreCorrectlySet, BlitBlockCopyPlatforms) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using XY_COPY_BLT = typename GfxFamily::XY_COPY_BLT;
 
@@ -837,10 +955,10 @@ HWTEST2_F(CommandListCreate, givenCopyCommandListWhenCopyRegionWithinMaxBlitSize
     ze_copy_region_t dstRegion = srcRegion;
     Vec3<size_t> srcSize = {0x1000, 0x100, 1};
     Vec3<size_t> dstSize = {0x100, 0x100, 1};
-    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
-    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
     size_t rowPitch = copySize.x;
@@ -853,8 +971,8 @@ HWTEST2_F(CommandListCreate, givenCopyCommandListWhenCopyRegionWithinMaxBlitSize
         cmdList, ptrOffset(commandList->commandContainer.getCommandStream()->getCpuBase(), 0), commandList->commandContainer.getCommandStream()->getUsed()));
     auto itor = find<XY_COPY_BLT *>(cmdList.begin(), cmdList.end());
     auto cmd = genCmdCast<XY_COPY_BLT *>(*itor);
-    EXPECT_EQ(cmd->getDestinationX1CoordinateLeft(), offsetX / bytesPerPixel);
-    EXPECT_EQ(cmd->getDestinationX2CoordinateRight(), (offsetX + static_cast<uint32_t>(copySize.x)) / bytesPerPixel);
+    EXPECT_EQ(cmd->getDestinationX2CoordinateRight(), static_cast<uint32_t>(copySize.x) / bytesPerPixel);
+    EXPECT_EQ(cmd->getDestinationY2CoordinateBottom(), static_cast<uint32_t>(copySize.y));
 }
 HWTEST2_F(CommandListCreate, givenCopyCommandListWhenCopyRegionGreaterThanMaxBlitSizeThenMoreThanOneBlitCommandHasBeenSpown, BlitBlockCopyPlatforms) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
@@ -869,10 +987,10 @@ HWTEST2_F(CommandListCreate, givenCopyCommandListWhenCopyRegionGreaterThanMaxBli
     ze_copy_region_t dstRegion = srcRegion;
     Vec3<size_t> srcSize = {2 * BlitterConstants::maxBlitWidth, 2 * BlitterConstants::maxBlitHeight, 1};
     Vec3<size_t> dstSize = srcSize;
-    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
-    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                                   reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                                   MemoryPool::System4KBPages);
     size_t rowPitch = copySize.x;
@@ -893,7 +1011,7 @@ class MockCommandListForRegionSize : public WhiteBox<::L0::CommandListCoreFamily
   public:
     MockCommandListForRegionSize() : WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>() {}
 
-    AlignedAllocationData getAlignedAllocation(L0::Device *device, const void *buffer, uint64_t bufferSize) override {
+    AlignedAllocationData getAlignedAllocation(L0::Device *device, const void *buffer, uint64_t bufferSize, bool allowHostCopy) override {
         return {0, 0, nullptr, true};
     }
     ze_result_t appendMemoryCopyBlitRegion(NEO::GraphicsAllocation *srcAllocation,
@@ -901,10 +1019,10 @@ class MockCommandListForRegionSize : public WhiteBox<::L0::CommandListCoreFamily
                                            size_t srcOffset,
                                            size_t dstOffset,
                                            ze_copy_region_t srcRegion,
-                                           ze_copy_region_t dstRegion, Vec3<size_t> copySize,
+                                           ze_copy_region_t dstRegion, const Vec3<size_t> &copySize,
                                            size_t srcRowPitch, size_t srcSlicePitch,
                                            size_t dstRowPitch, size_t dstSlicePitch,
-                                           Vec3<size_t> srcSize, Vec3<size_t> dstSize, ze_event_handle_t hSignalEvent,
+                                           const Vec3<size_t> &srcSize, const Vec3<size_t> &dstSize, ze_event_handle_t hSignalEvent,
                                            uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) override {
         this->srcSize = srcSize;
         this->dstSize = dstSize;
@@ -913,7 +1031,7 @@ class MockCommandListForRegionSize : public WhiteBox<::L0::CommandListCoreFamily
     Vec3<size_t> srcSize = {0, 0, 0};
     Vec3<size_t> dstSize = {0, 0, 0};
 };
-HWTEST2_F(CommandListCreate, givenZeroAsPitchAndSlicePitchWhenMemoryCopyRegionCalledThenSizesEqualOffsetPlusCopySize, Platforms) {
+HWTEST2_F(CommandListCreate, givenZeroAsPitchAndSlicePitchWhenMemoryCopyRegionCalledThenSizesEqualOffsetPlusCopySize, IsAtLeastSkl) {
     MockCommandListForRegionSize<gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::Copy, 0u);
     void *srcPtr = reinterpret_cast<void *>(0x1234);
@@ -932,7 +1050,7 @@ HWTEST2_F(CommandListCreate, givenZeroAsPitchAndSlicePitchWhenMemoryCopyRegionCa
     EXPECT_EQ(cmdList.srcSize.z, srcRegion.depth + srcRegion.originZ);
 }
 
-HWTEST2_F(CommandListCreate, givenPitchAndSlicePitchWhenMemoryCopyRegionCalledThenSizesAreBasedOnPitch, Platforms) {
+HWTEST2_F(CommandListCreate, givenPitchAndSlicePitchWhenMemoryCopyRegionCalledThenSizesAreBasedOnPitch, IsAtLeastSkl) {
     MockCommandListForRegionSize<gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::Copy, 0u);
     void *srcPtr = reinterpret_cast<void *>(0x1234);
@@ -957,5 +1075,45 @@ HWTEST2_F(CommandListCreate, givenCommandListThenSshCorrectlyReserved, Supported
     auto size = helper.getRenderSurfaceStateSize();
     EXPECT_EQ(commandList.getReserveSshSize(), size);
 }
+
+using CommandListAppendMemoryCopyBlit = Test<CommandListFixture>;
+
+HWTEST2_F(CommandListAppendMemoryCopyBlit, whenAppendMemoryCopyBlitIsAppendedAndNoSpaceIsAvailableThenNextCommandBufferIsCreated, IsAtLeastSkl) {
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+    using POST_SYNC_OPERATION = typename PIPE_CONTROL::POST_SYNC_OPERATION;
+    using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
+
+    uint64_t size = 1024;
+
+    ze_result_t res = ZE_RESULT_SUCCESS;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::Copy, 0u, res));
+
+    auto firstBatchBufferAllocation = commandList->commandContainer.getCommandStream()->getGraphicsAllocation();
+
+    auto useSize = commandList->commandContainer.getCommandStream()->getAvailableSpace();
+    useSize -= sizeof(MI_BATCH_BUFFER_END);
+    commandList->commandContainer.getCommandStream()->getSpace(useSize);
+
+    NEO::MockGraphicsAllocation mockAllocationSrc(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
+                                                  reinterpret_cast<void *>(0x1234), size, 0, sizeof(uint32_t),
+                                                  MemoryPool::System4KBPages);
+    void *srcPtr = reinterpret_cast<void *>(mockAllocationSrc.getGpuAddress());
+    NEO::MockGraphicsAllocation mockAllocationDst(0, NEO::AllocationType::INTERNAL_HOST_MEMORY,
+                                                  reinterpret_cast<void *>(0x2345), size, 0, sizeof(uint32_t),
+                                                  MemoryPool::System4KBPages);
+
+    void *dstPtr = reinterpret_cast<void *>(mockAllocationDst.getGpuAddress());
+
+    auto result = commandList->appendMemoryCopy(dstPtr,
+                                                srcPtr,
+                                                size,
+                                                nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    auto secondBatchBufferAllocation = commandList->commandContainer.getCommandStream()->getGraphicsAllocation();
+
+    EXPECT_NE(firstBatchBufferAllocation, secondBatchBufferAllocation);
+}
+
 } // namespace ult
 } // namespace L0

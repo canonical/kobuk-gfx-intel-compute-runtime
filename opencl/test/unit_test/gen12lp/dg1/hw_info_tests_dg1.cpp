@@ -8,9 +8,9 @@
 #include "shared/source/helpers/hw_info.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/test/unit_test/helpers/gtest_helpers.h"
-#include "test.h"
 using namespace NEO;
 
 template <typename T>
@@ -22,9 +22,9 @@ TYPED_TEST(Dg1HwInfoTests, WhenSetupHardwareInfoWithSetupFeatureTableFlagTrueOrF
     HardwareInfo hwInfo = *defaultHwInfo;
     FeatureTable &featureTable = hwInfo.featureTable;
 
-    EXPECT_FALSE(featureTable.ftrLocalMemory);
+    EXPECT_FALSE(featureTable.flags.ftrLocalMemory);
     TypeParam::setupHardwareInfo(&hwInfo, false);
-    EXPECT_FALSE(featureTable.ftrLocalMemory);
+    EXPECT_FALSE(featureTable.flags.ftrLocalMemory);
     TypeParam::setupHardwareInfo(&hwInfo, true);
-    EXPECT_TRUE(featureTable.ftrLocalMemory);
+    EXPECT_TRUE(featureTable.flags.ftrLocalMemory);
 }

@@ -9,18 +9,14 @@
 
 #include "shared/source/helpers/string.h"
 
-namespace L0 {
+#include "level_zero/core/source/device/device_imp.h"
 
-void OsDiagnostics::getSupportedDiagTests(std::vector<std::string> &supportedDiagTests, OsSysman *pOsSysman) {
-    LinuxSysmanImp *pLinuxSysmanImp = static_cast<LinuxSysmanImp *>(pOsSysman);
-    FirmwareUtil *pFwInterface = pLinuxSysmanImp->getFwUtilInterface();
-    if (pFwInterface != nullptr) {
-        getSupportedDiagTestsFromFW(pFwInterface, supportedDiagTests);
-    }
-}
+namespace L0 {
+const std::string LinuxDiagnosticsImp::deviceDir("device");
 
 void LinuxDiagnosticsImp::osGetDiagProperties(zes_diag_properties_t *pProperties) {
-    pProperties->onSubdevice = false;
+    pProperties->onSubdevice = isSubdevice;
+    pProperties->subdeviceId = subdeviceId;
     pProperties->haveTests = 0; // osGetDiagTests is Unsupported
     strncpy_s(pProperties->name, ZES_STRING_PROPERTY_SIZE, osDiagType.c_str(), osDiagType.size());
     return;
@@ -35,9 +31,15 @@ ze_result_t LinuxDiagnosticsImp::osRunDiagTests(uint32_t start, uint32_t end, ze
 }
 
 LinuxDiagnosticsImp::LinuxDiagnosticsImp(OsSysman *pOsSysman, const std::string &diagTests, ze_bool_t onSubdevice, uint32_t subdeviceId) : osDiagType(diagTests), isSubdevice(onSubdevice), subdeviceId(subdeviceId) {
-    LinuxSysmanImp *pLinuxSysmanImp = static_cast<LinuxSysmanImp *>(pOsSysman);
+    pLinuxSysmanImp = static_cast<LinuxSysmanImp *>(pOsSysman);
     pFwInterface = pLinuxSysmanImp->getFwUtilInterface();
     pSysfsAccess = &pLinuxSysmanImp->getSysfsAccess();
+    pFsAccess = &pLinuxSysmanImp->getFsAccess();
+    pProcfsAccess = &pLinuxSysmanImp->getProcfsAccess();
+    pDevice = pLinuxSysmanImp->getDeviceHandle();
+    auto device = static_cast<DeviceImp *>(pDevice);
+    executionEnvironment = device->getNEODevice()->getExecutionEnvironment();
+    rootDeviceIndex = device->getNEODevice()->getRootDeviceIndex();
 }
 
 std::unique_ptr<OsDiagnostics> OsDiagnostics::create(OsSysman *pOsSysman, const std::string &diagTests, ze_bool_t onSubdevice, uint32_t subdeviceId) {

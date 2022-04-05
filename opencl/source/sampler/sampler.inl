@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/helpers/populate_factory.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/utilities/numeric.h"
 
 #include <algorithm>
@@ -17,6 +18,8 @@ void SamplerHw<GfxFamily>::setArg(void *memory, const HardwareInfo &hwInfo) {
     using SAMPLER_STATE = typename GfxFamily::SAMPLER_STATE;
     auto samplerState = reinterpret_cast<SAMPLER_STATE *>(memory);
     samplerState->setNonNormalizedCoordinateEnable(!this->normalizedCoordinates);
+
+    samplerState->setLodPreclampMode(SAMPLER_STATE::LOD_PRECLAMP_MODE::LOD_PRECLAMP_MODE_OGL);
 
     auto addressControlModeX = SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP;
     auto addressControlModeY = SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP;
@@ -87,16 +90,6 @@ void SamplerHw<GfxFamily>::setArg(void *memory, const HardwareInfo &hwInfo) {
     samplerState->setMinLod(minLodValue.getRawAccess());
     samplerState->setMaxLod(maxLodValue.getRawAccess());
 
-    appendSamplerStateParams(samplerState, hwInfo);
-}
-
-template <typename GfxFamily>
-void SamplerHw<GfxFamily>::appendSamplerStateParams(typename GfxFamily::SAMPLER_STATE *state, const HardwareInfo &hwInfo) {
-}
-
-template <typename GfxFamily>
-size_t SamplerHw<GfxFamily>::getSamplerStateSize() {
-    using SAMPLER_STATE = typename GfxFamily::SAMPLER_STATE;
-    return sizeof(SAMPLER_STATE);
+    HwInfoConfig::get(hwInfo.platform.eProductFamily)->adjustSamplerState(samplerState, hwInfo);
 }
 } // namespace NEO

@@ -11,6 +11,8 @@
 #include "level_zero/tools/test/unit_tests/sources/sysman/windows/mock_kmd_sys_manager.h"
 #include "level_zero/tools/test/unit_tests/sources/sysman/windows/mock_sysman_fixture.h"
 
+extern bool sysmanUltsEnable;
+
 using ::testing::Matcher;
 
 namespace L0 {
@@ -26,6 +28,9 @@ class SysmanEventsFixture : public SysmanDeviceFixture {
     GlobalOperations *pGlobalOperationsOld = nullptr;
 
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::SetUp();
     }
 
@@ -51,6 +56,9 @@ class SysmanEventsFixture : public SysmanDeviceFixture {
     }
 
     void TearDown() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         if (nullptr != pEventsImp->pOsEvents) {
             delete pEventsImp->pOsEvents;
         }
@@ -64,26 +72,26 @@ class SysmanEventsFixture : public SysmanDeviceFixture {
 
 TEST_F(SysmanEventsFixture, GivenValidDeviceHandleWhenListeningForResetRequiredEventsThenEventListenAPIReturnsAfterTimingOutWithNoEvent) {
     init(true);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, zesDeviceEventRegister(device->toHandle(), ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, zesDeviceEventRegister(device->toHandle(), ZES_EVENT_TYPE_FLAG_DEVICE_DETACH));
     zes_device_handle_t *phDevices = new zes_device_handle_t[1];
     phDevices[0] = device->toHandle();
     uint32_t numDeviceEvents = 0;
     zes_event_type_flags_t *pDeviceEvents = new zes_event_type_flags_t[1];
     EXPECT_EQ(ZE_RESULT_SUCCESS, zesDriverEventListen(driverHandle->toHandle(), 100u, 1u, phDevices, &numDeviceEvents, pDeviceEvents));
-    EXPECT_EQ(0u, numDeviceEvents);
+    EXPECT_EQ(1u, numDeviceEvents);
     delete[] phDevices;
     delete[] pDeviceEvents;
 }
 
 TEST_F(SysmanEventsFixture, GivenValidDeviceHandleWhenListeningForResetRequiredEventsThenEventListenAPIReturnsAfterReceivingEventOnInfiniteWait) {
     init(true);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, zesDeviceEventRegister(device->toHandle(), ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, zesDeviceEventRegister(device->toHandle(), ZES_EVENT_TYPE_FLAG_DEVICE_DETACH));
     zes_device_handle_t *phDevices = new zes_device_handle_t[1];
     phDevices[0] = device->toHandle();
     uint32_t numDeviceEvents = 0;
     zes_event_type_flags_t *pDeviceEvents = new zes_event_type_flags_t[1];
 
-    pKmdSysManager->signalEvent(ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED);
+    pKmdSysManager->signalEvent(ZES_EVENT_TYPE_FLAG_DEVICE_DETACH);
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, zesDriverEventListen(driverHandle->toHandle(), INFINITE, 1u, phDevices, &numDeviceEvents, pDeviceEvents));
     EXPECT_EQ(1u, numDeviceEvents);
@@ -93,18 +101,18 @@ TEST_F(SysmanEventsFixture, GivenValidDeviceHandleWhenListeningForResetRequiredE
 
 TEST_F(SysmanEventsFixture, GivenValidDeviceHandleWhenListeningForResetRequiredEventsThenEventListenAPIReturnsAfterReceivingEventOnInfiniteWaitMultipleTimes) {
     init(true);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, zesDeviceEventRegister(device->toHandle(), ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, zesDeviceEventRegister(device->toHandle(), ZES_EVENT_TYPE_FLAG_DEVICE_DETACH));
     zes_device_handle_t *phDevices = new zes_device_handle_t[1];
     phDevices[0] = device->toHandle();
     uint32_t numDeviceEvents = 0;
     zes_event_type_flags_t *pDeviceEvents = new zes_event_type_flags_t[1];
 
-    pKmdSysManager->signalEvent(ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED);
+    pKmdSysManager->signalEvent(ZES_EVENT_TYPE_FLAG_DEVICE_DETACH);
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, zesDriverEventListen(driverHandle->toHandle(), INFINITE, 1u, phDevices, &numDeviceEvents, pDeviceEvents));
     EXPECT_EQ(1u, numDeviceEvents);
 
-    pKmdSysManager->signalEvent(ZES_EVENT_TYPE_FLAG_DEVICE_RESET_REQUIRED);
+    pKmdSysManager->signalEvent(ZES_EVENT_TYPE_FLAG_DEVICE_DETACH);
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, zesDriverEventListen(driverHandle->toHandle(), INFINITE, 1u, phDevices, &numDeviceEvents, pDeviceEvents));
     EXPECT_EQ(1u, numDeviceEvents);

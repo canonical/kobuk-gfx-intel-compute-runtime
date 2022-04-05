@@ -1,15 +1,20 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/command_stream/wait_status.h"
 #include "shared/source/memory_manager/allocations_list.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/mocks/mock_timestamp_container.h"
+#include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/api/api.h"
@@ -20,66 +25,35 @@
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
-#include "opencl/test/unit_test/mocks/mock_timestamp_container.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
-#include "test.h"
 
 #include <cinttypes>
 
 using namespace NEO;
-
 struct BcsBufferTests : public ::testing::Test {
-    class BcsMockContext : public MockContext {
-      public:
-        BcsMockContext(ClDevice *device) : MockContext(device) {
-            bcsOsContext.reset(OsContext::create(nullptr, 0, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_CCS, EngineUsage::Regular}, PreemptionMode::Disabled, false));
-            bcsCsr.reset(createCommandStream(*device->getExecutionEnvironment(), device->getRootDeviceIndex(), device->getDeviceBitfield()));
-            bcsCsr->setupContext(*bcsOsContext);
-            bcsCsr->initializeTagAllocation();
-            bcsCsr->createGlobalFenceAllocation();
-
-            auto mockBlitMemoryToAllocation = [this](const Device &device, GraphicsAllocation *memory, size_t offset, const void *hostPtr,
-                                                     Vec3<size_t> size) -> BlitOperationResult {
-                auto blitProperties = BlitProperties::constructPropertiesForReadWrite(BlitterConstants::BlitDirection::HostPtrToBuffer,
-                                                                                      *bcsCsr, memory, nullptr,
-                                                                                      hostPtr,
-                                                                                      memory->getGpuAddress(), 0,
-                                                                                      0, 0, size, 0, 0, 0, 0);
-
-                BlitPropertiesContainer container;
-                container.push_back(blitProperties);
-                bcsCsr->blitBuffer(container, true, false, const_cast<Device &>(device));
-
-                return BlitOperationResult::Success;
-            };
-            blitMemoryToAllocationFuncBackup = mockBlitMemoryToAllocation;
-        }
-
-        std::unique_ptr<OsContext> bcsOsContext;
-        std::unique_ptr<CommandStreamReceiver> bcsCsr;
-        VariableBackup<BlitHelperFunctions::BlitMemoryToAllocationFunc> blitMemoryToAllocationFuncBackup{
-            &BlitHelperFunctions::blitMemoryToAllocation};
-    };
-
     template <typename FamilyType>
     class MyMockCsr : public UltCommandStreamReceiver<FamilyType> {
       public:
         using UltCommandStreamReceiver<FamilyType>::UltCommandStreamReceiver;
 
-        void waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait,
-                                                   bool useQuickKmdSleep, bool forcePowerSavingMode) override {
+        WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait,
+                                                         bool useQuickKmdSleep, bool forcePowerSavingMode) override {
             EXPECT_EQ(this->latestFlushedTaskCount, taskCountToWait);
             EXPECT_EQ(0u, flushStampToWait);
             EXPECT_FALSE(useQuickKmdSleep);
             EXPECT_FALSE(forcePowerSavingMode);
+            EXPECT_EQ(1u, this->activePartitions);
             waitForTaskCountWithKmdNotifyFallbackCalled++;
+
+            return WaitStatus::Ready;
         }
 
-        void waitForTaskCountAndCleanTemporaryAllocationList(uint32_t requiredTaskCount) override {
+        WaitStatus waitForTaskCountAndCleanTemporaryAllocationList(uint32_t requiredTaskCount) override {
             EXPECT_EQ(1u, waitForTaskCountWithKmdNotifyFallbackCalled);
             EXPECT_EQ(this->latestFlushedTaskCount, requiredTaskCount);
             waitForTaskCountAndCleanAllocationListCalled++;
+
+            return WaitStatus::Ready;
         }
 
         uint32_t waitForTaskCountAndCleanAllocationListCalled = 0;
@@ -97,20 +71,17 @@ struct BcsBufferTests : public ::testing::Test {
         DebugManager.flags.EnableBlitterForEnqueueOperations.set(1);
         DebugManager.flags.ForceGpgpuSubmissionForBcsEnqueue.set(1);
         DebugManager.flags.PreferCopyEngineForCopyBufferToBuffer.set(1);
-        device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
-        auto &capabilityTable = device->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable;
-        bool createBcsEngine = !capabilityTable.blitterOperationsSupported;
-        capabilityTable.blitterOperationsSupported = true;
+        auto hwInfo = *defaultHwInfo;
+        hwInfo.capabilityTable.blitterOperationsSupported = true;
+        device = std::make_unique<MockClDevice>(MockClDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
 
-        if (createBcsEngine) {
-            auto &engine = device->getEngine(getChosenEngineType(device->getHardwareInfo()), EngineUsage::LowPriority);
-            bcsOsContext.reset(OsContext::create(nullptr, 1, device->getDeviceBitfield(), EngineTypeUsage{aub_stream::ENGINE_BCS, EngineUsage::Regular}, PreemptionMode::Disabled, false));
-            engine.osContext = bcsOsContext.get();
-            engine.commandStreamReceiver->setupContext(*bcsOsContext);
+        if (!HwInfoConfig::get(defaultHwInfo->platform.eProductFamily)->isBlitterFullySupported(device->getHardwareInfo())) {
+            GTEST_SKIP();
         }
 
         bcsMockContext = std::make_unique<BcsMockContext>(device.get());
         commandQueue.reset(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
+        bcsCsr = static_cast<MockCommandQueueHw<FamilyType> *>(commandQueue.get())->bcsEngines[0]->commandStreamReceiver;
     }
 
     template <typename FamilyType>
@@ -125,15 +96,16 @@ struct BcsBufferTests : public ::testing::Test {
     std::unique_ptr<MockClDevice> device;
     std::unique_ptr<BcsMockContext> bcsMockContext;
     std::unique_ptr<CommandQueue> commandQueue;
+    CommandStreamReceiver *bcsCsr;
     uint32_t hostPtr = 0;
     cl_int retVal = CL_SUCCESS;
 };
 
 HWTEST_TEMPLATED_F(BcsBufferTests, givenBufferWithInitializationDataAndBcsCsrWhenCreatingThenUseBlitOperation) {
     auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(bcsMockContext->bcsCsr.get());
-    auto newMemoryManager = new MockMemoryManager(true, true, *device->getExecutionEnvironment());
-    device->getExecutionEnvironment()->memoryManager.reset(newMemoryManager);
-    bcsMockContext->memoryManager = newMemoryManager;
+
+    static_cast<MockMemoryManager *>(device->getExecutionEnvironment()->memoryManager.get())->enable64kbpages[0] = true;
+    static_cast<MockMemoryManager *>(device->getExecutionEnvironment()->memoryManager.get())->localMemorySupported[0] = true;
 
     EXPECT_EQ(0u, bcsCsr->blitBufferCalled);
     auto bufferForBlt = clUniquePtr(Buffer::create(bcsMockContext.get(), CL_MEM_COPY_HOST_PTR, 2000, &hostPtr, retVal));
@@ -142,7 +114,11 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBufferWithInitializationDataAndBcsCsrWhe
 
 HWTEST_TEMPLATED_F(BcsBufferTests, givenBufferWithNotDefaultRootDeviceIndexAndBcsCsrWhenCreatingThenUseBlitOperation) {
     auto rootDeviceIndex = 1u;
-    std::unique_ptr<MockClDevice> newDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr, rootDeviceIndex));
+    auto hwInfo = *defaultHwInfo;
+    hwInfo.capabilityTable.blitterOperationsSupported = true;
+
+    REQUIRE_FULL_BLITTER_OR_SKIP(&hwInfo);
+    std::unique_ptr<MockClDevice> newDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, rootDeviceIndex));
     std::unique_ptr<BcsMockContext> newBcsMockContext = std::make_unique<BcsMockContext>(newDevice.get());
 
     auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(newBcsMockContext->bcsCsr.get());
@@ -155,11 +131,33 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBufferWithNotDefaultRootDeviceIndexAndBc
     EXPECT_EQ(1u, bcsCsr->blitBufferCalled);
 }
 
+using NoBcsBufferTests = ::testing::Test;
+HWTEST_F(NoBcsBufferTests, givenProductWithNoFullyBlitterSupportWhenCreatingBufferWithCopyHostPtrThenDontUseBlitOperation) {
+    uint32_t hostPtr = 0;
+    auto rootDeviceIndex = 1u;
+    auto hwInfo = *defaultHwInfo;
+    hwInfo.capabilityTable.blitterOperationsSupported = false;
+
+    EXPECT_FALSE(HwInfoConfig::get(hwInfo.platform.eProductFamily)->isBlitterFullySupported(hwInfo));
+    std::unique_ptr<MockClDevice> newDevice = std::make_unique<MockClDevice>(MockClDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, rootDeviceIndex));
+    std::unique_ptr<BcsMockContext> newBcsMockContext = std::make_unique<BcsMockContext>(newDevice.get());
+
+    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(newBcsMockContext->bcsCsr.get());
+
+    static_cast<MockMemoryManager *>(newDevice->getExecutionEnvironment()->memoryManager.get())->enable64kbpages[rootDeviceIndex] = true;
+    static_cast<MockMemoryManager *>(newDevice->getExecutionEnvironment()->memoryManager.get())->localMemorySupported[rootDeviceIndex] = true;
+
+    EXPECT_EQ(0u, bcsCsr->blitBufferCalled);
+    cl_int retVal = 0;
+    auto bufferForBlt = clUniquePtr(Buffer::create(newBcsMockContext.get(), CL_MEM_COPY_HOST_PTR, sizeof(hostPtr), &hostPtr, retVal));
+    EXPECT_EQ(0u, bcsCsr->blitBufferCalled);
+}
+
 HWTEST_TEMPLATED_F(BcsBufferTests, givenBcsSupportedWhenEnqueueBufferOperationIsCalledThenUseBcsCsr) {
     DebugManager.flags.EnableBlitterForEnqueueOperations.set(0);
     auto mockCmdQueue = static_cast<MockCommandQueueHw<FamilyType> *>(commandQueue.get());
-    auto bcsEngine = mockCmdQueue->bcsEngine;
-    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getBcsCommandStreamReceiver());
+    auto bcsEngine = mockCmdQueue->bcsEngines[0];
+    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(bcsEngine->commandStreamReceiver);
 
     auto bufferForBlt0 = clUniquePtr(Buffer::create(bcsMockContext.get(), CL_MEM_READ_WRITE, 1, nullptr, retVal));
     auto bufferForBlt1 = clUniquePtr(Buffer::create(bcsMockContext.get(), CL_MEM_READ_WRITE, 1, nullptr, retVal));
@@ -171,7 +169,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBcsSupportedWhenEnqueueBufferOperationIs
     size_t region[] = {1, 2, 1};
 
     DebugManager.flags.EnableBlitterForEnqueueOperations.set(0);
-    mockCmdQueue->bcsEngine = nullptr;
+    mockCmdQueue->clearBcsEngines();
+    mockCmdQueue->clearBcsStates();
     commandQueue->enqueueWriteBuffer(bufferForBlt0.get(), CL_TRUE, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
     commandQueue->enqueueReadBuffer(bufferForBlt0.get(), CL_TRUE, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
     commandQueue->enqueueCopyBuffer(bufferForBlt0.get(), bufferForBlt1.get(), 0, 1, 1, 0, nullptr, nullptr);
@@ -186,7 +185,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBcsSupportedWhenEnqueueBufferOperationIs
                                         MemoryConstants::cacheLineSize, 0, nullptr, nullptr);
 
     DebugManager.flags.EnableBlitterForEnqueueOperations.set(1);
-    mockCmdQueue->bcsEngine = nullptr;
+    mockCmdQueue->clearBcsEngines();
+    mockCmdQueue->clearBcsStates();
     commandQueue->enqueueWriteBuffer(bufferForBlt0.get(), CL_TRUE, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
     commandQueue->enqueueReadBuffer(bufferForBlt0.get(), CL_TRUE, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
     commandQueue->enqueueCopyBuffer(bufferForBlt0.get(), bufferForBlt1.get(), 0, 1, 1, 0, nullptr, nullptr);
@@ -201,7 +201,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBcsSupportedWhenEnqueueBufferOperationIs
                                         MemoryConstants::cacheLineSize, 0, nullptr, nullptr);
 
     DebugManager.flags.EnableBlitterForEnqueueOperations.set(0);
-    mockCmdQueue->bcsEngine = bcsEngine;
+    mockCmdQueue->bcsEngines[0] = bcsEngine;
+    mockCmdQueue->clearBcsStates();
     commandQueue->enqueueWriteBuffer(bufferForBlt0.get(), CL_TRUE, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
     commandQueue->enqueueReadBuffer(bufferForBlt0.get(), CL_TRUE, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
     commandQueue->enqueueCopyBuffer(bufferForBlt0.get(), bufferForBlt1.get(), 0, 1, 1, 0, nullptr, nullptr);
@@ -217,7 +218,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBcsSupportedWhenEnqueueBufferOperationIs
     commandQueue->enqueueSVMMemcpy(CL_TRUE, bufferForBlt0.get(), bufferForBlt1.get(), 1, 0, nullptr, nullptr);
 
     DebugManager.flags.EnableBlitterForEnqueueOperations.set(-1);
-    mockCmdQueue->bcsEngine = bcsEngine;
+    mockCmdQueue->bcsEngines[0] = bcsEngine;
+    mockCmdQueue->clearBcsStates();
     commandQueue->enqueueWriteBuffer(bufferForBlt0.get(), CL_TRUE, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
     commandQueue->enqueueReadBuffer(bufferForBlt0.get(), CL_TRUE, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
     commandQueue->enqueueCopyBuffer(bufferForBlt0.get(), bufferForBlt1.get(), 0, 1, 1, 0, nullptr, nullptr);
@@ -235,7 +237,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBcsSupportedWhenEnqueueBufferOperationIs
     EXPECT_EQ(7u, bcsCsr->blitBufferCalled);
 
     DebugManager.flags.EnableBlitterForEnqueueOperations.set(1);
-    mockCmdQueue->bcsEngine = bcsEngine;
+    mockCmdQueue->bcsEngines[0] = bcsEngine;
+    mockCmdQueue->clearBcsStates();
     commandQueue->enqueueWriteBuffer(bufferForBlt0.get(), CL_TRUE, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(8u, bcsCsr->blitBufferCalled);
     commandQueue->enqueueReadBuffer(bufferForBlt0.get(), CL_TRUE, 0, 1, &hostPtr, nullptr, 0, nullptr, nullptr);
@@ -291,7 +294,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenDebugFlagSetWhenDispatchingBlitCommandsT
 }
 
 HWTEST_TEMPLATED_F(BcsBufferTests, givenBcsSupportedWhenQueueIsBlockedThenDispatchBlitWhenUnblocked) {
-    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getBcsCommandStreamReceiver());
+    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
 
     auto bufferForBlt0 = clUniquePtr(Buffer::create(bcsMockContext.get(), CL_MEM_READ_WRITE, 1, nullptr, retVal));
     auto bufferForBlt1 = clUniquePtr(Buffer::create(bcsMockContext.get(), CL_MEM_READ_WRITE, 1, nullptr, retVal));
@@ -357,7 +360,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBuffersWhenCopyBufferCalledThenUseBcs) {
     cmdQ->enqueueCopyBuffer(bufferForBlt0.get(), bufferForBlt1.get(), 0, 0, 1, 0, nullptr, nullptr);
 
     HardwareParse hwParser;
-    hwParser.parseCommands<FamilyType>(commandQueue->getBcsCommandStreamReceiver()->getCS(0));
+    hwParser.parseCommands<FamilyType>(bcsCsr->getCS(0));
     auto commandItor = find<XY_COPY_BLT *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
     EXPECT_NE(hwParser.cmdList.end(), commandItor);
     auto copyBltCmd = genCmdCast<XY_COPY_BLT *>(*commandItor);
@@ -382,7 +385,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBuffersWhenCopyBufferRectCalledThenUseBc
     cmdQ->enqueueCopyBufferRect(bufferForBlt0.get(), bufferForBlt1.get(), bufferOrigin, hostOrigin, region,
                                 0, 0, 0, 0, 0, nullptr, nullptr);
     HardwareParse hwParser;
-    hwParser.parseCommands<FamilyType>(commandQueue->getBcsCommandStreamReceiver()->getCS(0));
+    hwParser.parseCommands<FamilyType>(bcsCsr->getCS(0));
     auto commandItor = find<XY_COPY_BLT *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
     EXPECT_NE(hwParser.cmdList.end(), commandItor);
     auto copyBltCmd = genCmdCast<XY_COPY_BLT *>(*commandItor);
@@ -401,7 +404,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenDstHostPtrWhenEnqueueSVMMemcpyThenEnqueu
     cmdQ->enqueueSVMMemcpy(true, pDstSVM.get(), pSrcSVM, 1, 0, nullptr, nullptr);
 
     HardwareParse hwParser;
-    hwParser.parseCommands<FamilyType>(commandQueue->getBcsCommandStreamReceiver()->getCS(0));
+    hwParser.parseCommands<FamilyType>(bcsCsr->getCS(0));
     auto commandItor = find<XY_COPY_BLT *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
     EXPECT_NE(hwParser.cmdList.end(), commandItor);
     auto copyBltCmd = genCmdCast<XY_COPY_BLT *>(*commandItor);
@@ -422,7 +425,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenSrcHostPtrWhenEnqueueSVMMemcpyThenEnqueu
     cmdQ->enqueueSVMMemcpy(true, pDstSVM, pSrcSVM.get(), 1, 0, nullptr, nullptr);
 
     HardwareParse hwParser;
-    hwParser.parseCommands<FamilyType>(commandQueue->getBcsCommandStreamReceiver()->getCS(0));
+    hwParser.parseCommands<FamilyType>(bcsCsr->getCS(0));
     auto commandItor = find<XY_COPY_BLT *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
     EXPECT_NE(hwParser.cmdList.end(), commandItor);
     auto copyBltCmd = genCmdCast<XY_COPY_BLT *>(*commandItor);
@@ -434,7 +437,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenSrcHostPtrWhenEnqueueSVMMemcpyThenEnqueu
 }
 
 HWTEST_TEMPLATED_F(BcsBufferTests, givenBlockedBlitEnqueueWhenUnblockingThenMakeResidentAllTimestampPackets) {
-    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getBcsCommandStreamReceiver());
+    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
     bcsCsr->storeMakeResidentAllocations = true;
 
     auto mockCmdQ = static_cast<MockCommandQueueHw<FamilyType> *>(commandQueue.get());
@@ -443,7 +446,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBlockedBlitEnqueueWhenUnblockingThenMake
     bufferForBlt->forceDisallowCPUCopy = true;
 
     TimestampPacketContainer previousTimestampPackets;
-    mockCmdQ->obtainNewTimestampPacketNodes(1, previousTimestampPackets, false, true);
+    mockCmdQ->obtainNewTimestampPacketNodes(1, previousTimestampPackets, false, *bcsCsr);
     auto dependencyFromPreviousEnqueue = mockCmdQ->timestampPacketContainer->peekNodes()[0];
 
     auto event = make_releaseable<Event>(mockCmdQ, CL_COMMAND_READ_BUFFER, 0, 0);
@@ -491,7 +494,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenMapAllocationWhenEnqueueingReadOrWriteBu
     EXPECT_EQ(mapAllocation, mockCmdQ->kernelParams.transferAllocation);
 }
 
-HWTEST_TEMPLATED_F(BcsBufferTests, givenWriteBufferEnqueueWhenProgrammingCommandStreamThenAddSemaphoreWait) {
+HWTEST_TEMPLATED_F(BcsBufferTests, givenWriteBufferEnqueueWithGpgpuSubmissionWhenProgrammingCommandStreamThenDoNotAddSemaphoreWaitOnGpgpu) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
@@ -505,7 +508,6 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenWriteBufferEnqueueWhenProgrammingCommand
     void *hostPtr = reinterpret_cast<void *>(0x12340000);
 
     cmdQ->enqueueWriteBuffer(buffer.get(), true, 0, 1, hostPtr, nullptr, 0, nullptr, nullptr);
-    auto timestampPacketNode = cmdQ->timestampPacketContainer->peekNodes().at(0);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(*cmdQ->peekCommandStream());
@@ -517,15 +519,13 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenWriteBufferEnqueueWhenProgrammingCommand
                 continue;
             }
             semaphoresCount++;
-            auto dataAddress = TimestampPacketHelper::getContextEndGpuAddress(*timestampPacketNode);
-            EXPECT_EQ(dataAddress, semaphoreCmd->getSemaphoreGraphicsAddress());
         }
     }
-    EXPECT_EQ(1u, semaphoresCount);
+    EXPECT_EQ(0u, semaphoresCount);
     EXPECT_EQ(initialTaskCount + 1, queueCsr->peekTaskCount());
 }
 
-HWTEST_TEMPLATED_F(BcsBufferTests, givenReadBufferEnqueueWhenProgrammingCommandStreamThenAddSemaphoreWait) {
+HWTEST_TEMPLATED_F(BcsBufferTests, givenReadBufferEnqueueWithGpgpuSubmissionWhenProgrammingCommandStreamThenDoNotAddSemaphoreWaitOnGpgpu) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
@@ -539,7 +539,6 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenReadBufferEnqueueWhenProgrammingCommandS
     void *hostPtr = reinterpret_cast<void *>(0x12340000);
 
     cmdQ->enqueueWriteBuffer(buffer.get(), true, 0, 1, hostPtr, nullptr, 0, nullptr, nullptr);
-    auto timestampPacketNode = cmdQ->timestampPacketContainer->peekNodes().at(0);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(*cmdQ->peekCommandStream());
@@ -551,11 +550,9 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenReadBufferEnqueueWhenProgrammingCommandS
                 continue;
             }
             semaphoresCount++;
-            auto dataAddress = TimestampPacketHelper::getContextEndGpuAddress(*timestampPacketNode);
-            EXPECT_EQ(dataAddress, semaphoreCmd->getSemaphoreGraphicsAddress());
         }
     }
-    EXPECT_EQ(1u, semaphoresCount);
+    EXPECT_EQ(0u, semaphoresCount);
     EXPECT_EQ(initialTaskCount + 1, queueCsr->peekTaskCount());
 }
 
@@ -566,7 +563,7 @@ void BcsBufferTests::waitForCacheFlushFromBcsTest(MockCommandQueueHw<FamilyType>
 
     bool isCacheFlushForBcsRequired = commandQueue.isCacheFlushForBcsRequired();
 
-    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue.getBcsCommandStreamReceiver());
+    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
 
     cl_int retVal = CL_SUCCESS;
     auto buffer = clUniquePtr<Buffer>(Buffer::create(bcsMockContext.get(), CL_MEM_READ_WRITE, 1, nullptr, retVal));
@@ -585,11 +582,9 @@ void BcsBufferTests::waitForCacheFlushFromBcsTest(MockCommandQueueHw<FamilyType>
 
     for (auto &pipeControl : gpgpuPipeControls) {
         auto pipeControlCmd = genCmdCast<PIPE_CONTROL *>(*pipeControl);
-        uint64_t addressHigh = static_cast<uint64_t>(pipeControlCmd->getAddressHigh()) << 32;
-        uint64_t addressLow = pipeControlCmd->getAddress();
-        cacheFlushWriteAddress = addressHigh | addressLow;
+        cacheFlushWriteAddress = NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControlCmd);
         if (cacheFlushWriteAddress != 0) {
-            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pipeControlCmd->getDcFlushEnable());
+            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), pipeControlCmd->getDcFlushEnable());
             EXPECT_TRUE(pipeControlCmd->getCommandStreamerStallEnable());
             EXPECT_EQ(isCacheFlushForBcsRequired, 0u == pipeControlCmd->getImmediateData());
             break;
@@ -629,10 +624,10 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenPipeControlRequestWhenDispatchingBlitEnq
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
-    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(cmdQ->getBcsCommandStreamReceiver());
+    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
 
     auto queueCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(cmdQ->gpgpuEngine->commandStreamReceiver);
-    queueCsr->stallingPipeControlOnNextFlushRequired = true;
+    queueCsr->stallingCommandsOnNextFlushRequired = true;
 
     cl_int retVal = CL_SUCCESS;
     auto buffer = clUniquePtr<Buffer>(Buffer::create(bcsMockContext.get(), CL_MEM_READ_WRITE, 1, nullptr, retVal));
@@ -652,9 +647,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenPipeControlRequestWhenDispatchingBlitEnq
             }
 
             EXPECT_TRUE(pipeControlCmd->getCommandStreamerStallEnable());
-            auto addressLow = static_cast<uint64_t>(pipeControlCmd->getAddress());
-            auto addressHigh = static_cast<uint64_t>(pipeControlCmd->getAddressHigh());
-            pipeControlWriteAddress = (addressHigh << 32) | addressLow;
+            pipeControlWriteAddress = NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControlCmd);
             break;
         }
     }
@@ -705,7 +698,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBarrierWhenReleasingMultipleBlockedEnque
 
                 stallingPipeControlFound = true;
                 EXPECT_TRUE(pipeControlCmd->getCommandStreamerStallEnable());
-                EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pipeControlCmd->getDcFlushEnable());
+                EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), pipeControlCmd->getDcFlushEnable());
                 break;
             }
         }
@@ -714,9 +707,9 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBarrierWhenReleasingMultipleBlockedEnque
     };
 
     auto &csrStream = cmdQ->getGpgpuCommandStreamReceiver().getCS(0);
-    EXPECT_TRUE(cmdQ->getGpgpuCommandStreamReceiver().isStallingPipeControlOnNextFlushRequired());
+    EXPECT_TRUE(cmdQ->getGpgpuCommandStreamReceiver().isStallingCommandsOnNextFlushRequired());
     userEvent0.setStatus(CL_COMPLETE);
-    EXPECT_FALSE(cmdQ->getGpgpuCommandStreamReceiver().isStallingPipeControlOnNextFlushRequired());
+    EXPECT_FALSE(cmdQ->getGpgpuCommandStreamReceiver().isStallingCommandsOnNextFlushRequired());
     EXPECT_TRUE(pipeControlLookup(csrStream, 0));
 
     auto csrOffset = csrStream.getUsed();
@@ -730,10 +723,10 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenPipeControlRequestWhenDispatchingBlocked
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
-    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(cmdQ->getBcsCommandStreamReceiver());
+    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
 
     auto queueCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(cmdQ->gpgpuEngine->commandStreamReceiver);
-    queueCsr->stallingPipeControlOnNextFlushRequired = true;
+    queueCsr->stallingCommandsOnNextFlushRequired = true;
 
     cl_int retVal = CL_SUCCESS;
     auto buffer = clUniquePtr<Buffer>(Buffer::create(bcsMockContext.get(), CL_MEM_READ_WRITE, 1, nullptr, retVal));
@@ -786,7 +779,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBufferOperationWithoutKernelWhenEstimati
 HWTEST_TEMPLATED_F(BcsBufferTests, givenOutputTimestampPacketWhenBlitCalledThenProgramMiFlushDwWithDataWrite) {
     using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
 
-    auto csr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getBcsCommandStreamReceiver());
+    auto csr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
     cl_int retVal = CL_SUCCESS;
 
@@ -827,7 +820,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenOutputTimestampPacketWhenBlitCalledThenP
 }
 
 HWTEST_TEMPLATED_F(BcsBufferTests, givenInputAndOutputTimestampPacketWhenBlitCalledThenMakeThemResident) {
-    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getBcsCommandStreamReceiver());
+    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
     cl_int retVal = CL_SUCCESS;
@@ -865,7 +858,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBlockingWriteBufferWhenUsingBcsThenCallW
     EngineControl bcsEngineControl = {myMockCsr, bcsMockContext->bcsOsContext.get()};
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
-    cmdQ->bcsEngine = &bcsEngineControl;
+    cmdQ->clearBcsEngines();
+    cmdQ->bcsEngines[0] = &bcsEngineControl;
     auto &gpgpuCsr = cmdQ->getGpgpuCommandStreamReceiver();
     myMockCsr->gpgpuCsr = &gpgpuCsr;
 
@@ -904,7 +898,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBlockingReadBufferRectWhenUsingBcsThenCa
     EngineControl bcsEngineControl = {myMockCsr, bcsMockContext->bcsOsContext.get()};
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
-    cmdQ->bcsEngine = &bcsEngineControl;
+    cmdQ->clearBcsEngines();
+    cmdQ->bcsEngines[0] = &bcsEngineControl;
     auto &gpgpuCsr = cmdQ->getGpgpuCommandStreamReceiver();
     myMockCsr->gpgpuCsr = &gpgpuCsr;
 
@@ -951,7 +946,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBlockingWriteBufferRectWhenUsingBcsThenC
     EngineControl bcsEngineControl = {myMockCsr, bcsMockContext->bcsOsContext.get()};
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
-    cmdQ->bcsEngine = &bcsEngineControl;
+    cmdQ->clearBcsEngines();
+    cmdQ->bcsEngines[0] = &bcsEngineControl;
     auto &gpgpuCsr = cmdQ->getGpgpuCommandStreamReceiver();
     myMockCsr->gpgpuCsr = &gpgpuCsr;
 
@@ -998,7 +994,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBlockingReadBufferWhenUsingBcsThenCallWa
     EngineControl bcsEngineControl = {myMockCsr, bcsMockContext->bcsOsContext.get()};
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
-    cmdQ->bcsEngine = &bcsEngineControl;
+    cmdQ->clearBcsEngines();
+    cmdQ->bcsEngines[0] = &bcsEngineControl;
     auto &gpgpuCsr = cmdQ->getGpgpuCommandStreamReceiver();
     myMockCsr->gpgpuCsr = &gpgpuCsr;
 
@@ -1037,7 +1034,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBlockingSVMMemcpyAndEnqueuReadBufferIsCa
     EngineControl bcsEngineControl = {myMockCsr, bcsMockContext->bcsOsContext.get()};
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
-    cmdQ->bcsEngine = &bcsEngineControl;
+    cmdQ->clearBcsEngines();
+    cmdQ->bcsEngines[0] = &bcsEngineControl;
     auto &gpgpuCsr = cmdQ->getGpgpuCommandStreamReceiver();
     myMockCsr->gpgpuCsr = &gpgpuCsr;
 
@@ -1070,7 +1068,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenSrcHostPtrBlockingEnqueueSVMMemcpyAndEnq
     EngineControl bcsEngineControl = {myMockCsr, bcsMockContext->bcsOsContext.get()};
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
-    cmdQ->bcsEngine = &bcsEngineControl;
+    cmdQ->clearBcsEngines();
+    cmdQ->bcsEngines[0] = &bcsEngineControl;
     auto &gpgpuCsr = cmdQ->getGpgpuCommandStreamReceiver();
     myMockCsr->gpgpuCsr = &gpgpuCsr;
 
@@ -1103,7 +1102,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenDstHostPtrAndSrcHostPtrBlockingEnqueueSV
     EngineControl bcsEngineControl = {myMockCsr, bcsMockContext->bcsOsContext.get()};
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
-    cmdQ->bcsEngine = &bcsEngineControl;
+    cmdQ->clearBcsEngines();
+    cmdQ->bcsEngines[0] = &bcsEngineControl;
     auto &gpgpuCsr = cmdQ->getGpgpuCommandStreamReceiver();
     myMockCsr->gpgpuCsr = &gpgpuCsr;
 
@@ -1135,7 +1135,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenSvmToSvmCopyWhenEnqueueSVMMemcpyThenSvmM
     cmdQ->enqueueSVMMemcpy(false, pDstSVM, pSrcSVM, 256, 0, nullptr, nullptr);
 
     HardwareParse hwParser;
-    hwParser.parseCommands<FamilyType>(commandQueue->getBcsCommandStreamReceiver()->getCS(0));
+    hwParser.parseCommands<FamilyType>(bcsCsr->getCS(0));
     auto commandItor = find<XY_COPY_BLT *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
     EXPECT_NE(hwParser.cmdList.end(), commandItor);
     auto copyBltCmd = genCmdCast<XY_COPY_BLT *>(*commandItor);
@@ -1157,7 +1157,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenSvmToSvmCopyTypeWhenEnqueueNonBlockingSV
     EngineControl bcsEngineControl = {myMockCsr, bcsMockContext->bcsOsContext.get()};
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
-    cmdQ->bcsEngine = &bcsEngineControl;
+    cmdQ->clearBcsEngines();
+    cmdQ->bcsEngines[0] = &bcsEngineControl;
     auto &gpgpuCsr = cmdQ->getGpgpuCommandStreamReceiver();
     myMockCsr->gpgpuCsr = &gpgpuCsr;
 
@@ -1185,6 +1186,9 @@ struct BcsSvmTests : public BcsBufferTests {
         }
         REQUIRE_SVM_OR_SKIP(defaultHwInfo);
         BcsBufferTests::SetUpT<FamilyType>();
+        if (IsSkipped()) {
+            GTEST_SKIP();
+        }
 
         deviceMemAlloc = clDeviceMemAllocINTEL(bcsMockContext.get(), device.get(), nullptr, allocSize, 0u, &retVal);
         ASSERT_NE(nullptr, deviceMemAlloc);
@@ -1256,7 +1260,7 @@ HWTEST_TEMPLATED_F(BcsSvmTests, givenSVMMAllocationWithOffsetWhenUsingBcsThenPro
                     builtinOpParams.dstSvmAlloc = dstGpuAllocation;
                     builtinOpParams.dstOffset = {ptrDiff(pDstPtr, builtinOpParams.dstPtr), 0, 0};
 
-                    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getBcsCommandStreamReceiver());
+                    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
 
                     auto blitProperties = ClBlitProperties::constructProperties(BlitterConstants::BlitDirection::BufferToBuffer,
                                                                                 *bcsCsr, builtinOpParams);
@@ -1285,7 +1289,8 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBlockedEnqueueWhenUsingBcsThenWaitForVal
     EngineControl bcsEngineControl = {myMockCsr, bcsMockContext->bcsOsContext.get()};
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
-    cmdQ->bcsEngine = &bcsEngineControl;
+    cmdQ->clearBcsEngines();
+    cmdQ->bcsEngines[0] = &bcsEngineControl;
     auto &gpgpuCsr = cmdQ->getGpgpuCommandStreamReceiver();
     myMockCsr->gpgpuCsr = &gpgpuCsr;
 
@@ -1307,7 +1312,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBlockedEnqueueWhenUsingBcsThenWaitForVal
 }
 
 HWTEST_TEMPLATED_F(BcsBufferTests, givenDebugFlagSetToOneWhenEnqueueingCopyLocalBufferToLocalBufferThenUseBlitter) {
-    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getBcsCommandStreamReceiver());
+    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
     MockGraphicsAllocation srcGraphicsAllocation{};
     MockGraphicsAllocation dstGraphicsAllocation{};
     MockBuffer srcMemObj{srcGraphicsAllocation};
@@ -1342,13 +1347,13 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBcsQueueWhenEnqueueingCopyBufferToBuffer
 
     cl_command_queue_properties properties[] = {
         CL_QUEUE_FAMILY_INTEL,
-        device->getDevice().getIndexOfNonEmptyEngineGroup(EngineGroupType::Copy),
+        device->getDevice().getEngineGroupIndexFromEngineGroupType(EngineGroupType::Copy),
         CL_QUEUE_INDEX_INTEL,
         0,
         0,
     };
     MockCommandQueueHw<FamilyType> queue(bcsMockContext.get(), device.get(), properties);
-    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(queue.getBcsCommandStreamReceiver());
+    auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
     MockGraphicsAllocation srcGraphicsAllocation{};
     MockGraphicsAllocation dstGraphicsAllocation{};
     MockBuffer srcMemObj{srcGraphicsAllocation};

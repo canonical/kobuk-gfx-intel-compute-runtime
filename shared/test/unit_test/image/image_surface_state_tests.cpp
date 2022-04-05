@@ -1,10 +1,11 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/unit_test/image/image_surface_state_fixture.h"
 
 using namespace NEO;
@@ -36,7 +37,7 @@ HWTEST_F(ImageSurfaceStateTests, givenImageInfoWhenSetImageSurfaceStateThenPrope
 
     const uint64_t gpuAddress = 0x000001a78a8a8000;
 
-    setImageSurfaceState<FamilyType>(castSurfaceState, imageInfo, &mockGmm, *gmmHelper, cubeFaceIndex, gpuAddress, surfaceOffsets, true);
+    setImageSurfaceState<FamilyType>(castSurfaceState, imageInfo, mockGmm.get(), *gmmHelper, cubeFaceIndex, gpuAddress, surfaceOffsets, true);
 
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     using SURFACE_FORMAT = typename RENDER_SURFACE_STATE::SURFACE_FORMAT;
@@ -46,9 +47,9 @@ HWTEST_F(ImageSurfaceStateTests, givenImageInfoWhenSetImageSurfaceStateThenPrope
     EXPECT_EQ(castSurfaceState->getMinimumArrayElement(), cubeFaceIndex);
     EXPECT_EQ(castSurfaceState->getSurfaceQpitch(), imageInfo.qPitch >> RENDER_SURFACE_STATE::tagSURFACEQPITCH::SURFACEQPITCH_BIT_SHIFT);
     EXPECT_EQ(castSurfaceState->getSurfaceArray(), true);
-    EXPECT_EQ(castSurfaceState->getSurfaceHorizontalAlignment(), static_cast<typename RENDER_SURFACE_STATE::SURFACE_HORIZONTAL_ALIGNMENT>(mockGmm.gmmResourceInfo->getHAlignSurfaceState()));
-    EXPECT_EQ(castSurfaceState->getSurfaceVerticalAlignment(), static_cast<typename RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT>(mockGmm.gmmResourceInfo->getVAlignSurfaceState()));
-    EXPECT_EQ(castSurfaceState->getTileMode(), mockGmm.gmmResourceInfo->getTileModeSurfaceState());
+    EXPECT_EQ(castSurfaceState->getSurfaceHorizontalAlignment(), static_cast<typename RENDER_SURFACE_STATE::SURFACE_HORIZONTAL_ALIGNMENT>(mockGmm->gmmResourceInfo->getHAlignSurfaceState()));
+    EXPECT_EQ(castSurfaceState->getSurfaceVerticalAlignment(), static_cast<typename RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT>(mockGmm->gmmResourceInfo->getVAlignSurfaceState()));
+    EXPECT_EQ(castSurfaceState->getTileMode(), mockGmm->gmmResourceInfo->getTileModeSurfaceState());
     EXPECT_EQ(castSurfaceState->getMemoryObjectControlState(), gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_IMAGE));
     EXPECT_EQ(castSurfaceState->getCoherencyType(), RENDER_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT);
     EXPECT_EQ(castSurfaceState->getMultisampledSurfaceStorageFormat(), RENDER_SURFACE_STATE::MULTISAMPLED_SURFACE_STORAGE_FORMAT::MULTISAMPLED_SURFACE_STORAGE_FORMAT_MSS);
@@ -72,7 +73,7 @@ HWTEST_F(ImageSurfaceStateTests, givenImageInfoWhenSetImageSurfaceStateThenPrope
 
     setImageSurfaceState<FamilyType>(castSurfaceState, imageInfo, nullptr, *gmmHelper, cubeFaceIndex, gpuAddress, surfaceOffsets, false);
 
-    EXPECT_EQ(castSurfaceState->getSurfaceHorizontalAlignment(), RENDER_SURFACE_STATE::SURFACE_HORIZONTAL_ALIGNMENT_HALIGN_4);
+    EXPECT_EQ(castSurfaceState->getSurfaceHorizontalAlignment(), RENDER_SURFACE_STATE::SURFACE_HORIZONTAL_ALIGNMENT_HALIGN_DEFAULT);
     EXPECT_EQ(castSurfaceState->getSurfaceVerticalAlignment(), RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT_VALIGN_4);
 
     EXPECT_EQ(castSurfaceState->getShaderChannelSelectAlpha(), RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_ALPHA);
@@ -101,43 +102,15 @@ HWTEST_F(ImageSurfaceStateTests, givenGmmWhenSetAuxParamsForCCSThenAuxiliarySurf
     auto size = sizeof(typename FamilyType::RENDER_SURFACE_STATE);
     auto surfaceState = std::make_unique<char[]>(size);
     auto castSurfaceState = reinterpret_cast<typename FamilyType::RENDER_SURFACE_STATE *>(surfaceState.get());
-    EncodeSurfaceState<FamilyType>::setImageAuxParamsForCCS(castSurfaceState, &mockGmm);
+    EncodeSurfaceState<FamilyType>::setImageAuxParamsForCCS(castSurfaceState, mockGmm.get());
 
-    mockGmm.isCompressionEnabled = true;
-    EXPECT_TRUE(EncodeSurfaceState<FamilyType>::isAuxModeEnabled(castSurfaceState, &mockGmm));
+    mockGmm->isCompressionEnabled = true;
+    EXPECT_TRUE(EncodeSurfaceState<FamilyType>::isAuxModeEnabled(castSurfaceState, mockGmm.get()));
 }
 
-HWTEST_F(ImageSurfaceStateTests, givenHwInfoAndSurfaceStateWhenCheckIfArrayNeededThenFalseReturned) {
-    EXPECT_FALSE(checkIfArrayNeeded<FamilyType>(ImageType::Image2D, &pDevice->getHardwareInfo()));
-}
-
-HWTEST_F(ImageSurfaceStateTests, givenImage2DTypeWhenCheckIfArrayNeededReturnsTureThenArrayFlagIsSet) {
-    if (!checkIfArrayNeeded<FamilyType>(ImageType::Image2D, &pDevice->getHardwareInfo())) {
-        GTEST_SKIP();
-    }
-    auto size = sizeof(typename FamilyType::RENDER_SURFACE_STATE);
-    auto surfaceState = std::make_unique<char[]>(size);
-    auto castSurfaceState = reinterpret_cast<typename FamilyType::RENDER_SURFACE_STATE *>(surfaceState.get());
-
-    imageInfo.imgDesc.imageType = ImageType::Image2D;
-    imageInfo.imgDesc.imageDepth = 1;
-    imageInfo.imgDesc.imageArraySize = 1;
-    SurfaceOffsets surfaceOffsets = {0, 0, 0, 0};
-    const uint32_t cubeFaceIndex = __GMM_NO_CUBE_MAP;
-    SurfaceFormatInfo surfaceFormatInfo;
-    surfaceFormatInfo.GenxSurfaceFormat = GFX3DSTATE_SURFACEFORMAT::GFX3DSTATE_SURFACEFORMAT_A32_FLOAT;
-    imageInfo.surfaceFormat = &surfaceFormatInfo;
-
-    const uint64_t gpuAddress = 0x000001a78a8a8000;
-
-    setImageSurfaceState<FamilyType>(castSurfaceState, imageInfo, &mockGmm, *gmmHelper, cubeFaceIndex, gpuAddress, surfaceOffsets, true);
-    EXPECT_TRUE(castSurfaceState->getSurfaceArray());
-}
-
-HWTEST_F(ImageSurfaceStateTests, givenImage2DTypeWhenCheckIfArrayNeededReturnsFalseThenArrayFlagIsNotSet) {
-    if (checkIfArrayNeeded<FamilyType>(ImageType::Image2D, &pDevice->getHardwareInfo())) {
-        GTEST_SKIP();
-    }
+HWTEST_F(ImageSurfaceStateTests, givenImage2DWhen2dImageWAIsEnabledThenArrayFlagIsSet) {
+    DebugManagerStateRestore debugSettingsRestore;
+    DebugManager.flags.Force2dImageAsArray.set(1);
     auto size = sizeof(typename FamilyType::RENDER_SURFACE_STATE);
     auto surfaceState = std::make_unique<char[]>(size);
     auto castSurfaceState = reinterpret_cast<typename FamilyType::RENDER_SURFACE_STATE *>(surfaceState.get());
@@ -154,6 +127,158 @@ HWTEST_F(ImageSurfaceStateTests, givenImage2DTypeWhenCheckIfArrayNeededReturnsFa
 
     const uint64_t gpuAddress = 0x000001a78a8a8000;
 
-    setImageSurfaceState<FamilyType>(castSurfaceState, imageInfo, &mockGmm, *gmmHelper, cubeFaceIndex, gpuAddress, surfaceOffsets, true);
+    setImageSurfaceState<FamilyType>(castSurfaceState, imageInfo, mockGmm.get(), *gmmHelper, cubeFaceIndex, gpuAddress, surfaceOffsets, true);
+    EXPECT_TRUE(castSurfaceState->getSurfaceArray());
+}
+
+HWTEST_F(ImageSurfaceStateTests, givenImage2DWhen2dImageWAIsDisabledThenArrayFlagIsNotSet) {
+    DebugManagerStateRestore debugSettingsRestore;
+    DebugManager.flags.Force2dImageAsArray.set(0);
+    auto size = sizeof(typename FamilyType::RENDER_SURFACE_STATE);
+    auto surfaceState = std::make_unique<char[]>(size);
+    auto castSurfaceState = reinterpret_cast<typename FamilyType::RENDER_SURFACE_STATE *>(surfaceState.get());
+
+    imageInfo.imgDesc.imageType = ImageType::Image2D;
+    imageInfo.imgDesc.imageDepth = 1;
+    imageInfo.imgDesc.imageArraySize = 1;
+    imageInfo.qPitch = 0;
+    SurfaceOffsets surfaceOffsets = {0, 0, 0, 0};
+    const uint32_t cubeFaceIndex = __GMM_NO_CUBE_MAP;
+    SurfaceFormatInfo surfaceFormatInfo;
+    surfaceFormatInfo.GenxSurfaceFormat = GFX3DSTATE_SURFACEFORMAT::GFX3DSTATE_SURFACEFORMAT_A32_FLOAT;
+    imageInfo.surfaceFormat = &surfaceFormatInfo;
+
+    const uint64_t gpuAddress = 0x000001a78a8a8000;
+
+    setImageSurfaceState<FamilyType>(castSurfaceState, imageInfo, mockGmm.get(), *gmmHelper, cubeFaceIndex, gpuAddress, surfaceOffsets, true);
     EXPECT_FALSE(castSurfaceState->getSurfaceArray());
+}
+
+HWTEST_F(ImageSurfaceStateTests, givenImage2DArrayOfSize1When2dImageWAIsEnabledThenArrayFlagIsSet) {
+    DebugManagerStateRestore debugSettingsRestore;
+    DebugManager.flags.Force2dImageAsArray.set(1);
+    auto size = sizeof(typename FamilyType::RENDER_SURFACE_STATE);
+    auto surfaceState = std::make_unique<char[]>(size);
+    auto castSurfaceState = reinterpret_cast<typename FamilyType::RENDER_SURFACE_STATE *>(surfaceState.get());
+
+    imageInfo.imgDesc.imageType = ImageType::Image2DArray;
+    imageInfo.imgDesc.imageDepth = 1;
+    imageInfo.imgDesc.imageArraySize = 1;
+    imageInfo.qPitch = 0;
+    SurfaceOffsets surfaceOffsets = {0, 0, 0, 0};
+    const uint32_t cubeFaceIndex = __GMM_NO_CUBE_MAP;
+    SurfaceFormatInfo surfaceFormatInfo;
+    surfaceFormatInfo.GenxSurfaceFormat = GFX3DSTATE_SURFACEFORMAT::GFX3DSTATE_SURFACEFORMAT_A32_FLOAT;
+    imageInfo.surfaceFormat = &surfaceFormatInfo;
+
+    const uint64_t gpuAddress = 0x000001a78a8a8000;
+
+    setImageSurfaceState<FamilyType>(castSurfaceState, imageInfo, mockGmm.get(), *gmmHelper, cubeFaceIndex, gpuAddress, surfaceOffsets, true);
+    EXPECT_TRUE(castSurfaceState->getSurfaceArray());
+}
+
+HWTEST_F(ImageSurfaceStateTests, givenImage2DArrayOfSize1When2dImageWAIsDisabledThenArrayFlagIsNotSet) {
+    DebugManagerStateRestore debugSettingsRestore;
+    DebugManager.flags.Force2dImageAsArray.set(0);
+    auto size = sizeof(typename FamilyType::RENDER_SURFACE_STATE);
+    auto surfaceState = std::make_unique<char[]>(size);
+    auto castSurfaceState = reinterpret_cast<typename FamilyType::RENDER_SURFACE_STATE *>(surfaceState.get());
+
+    imageInfo.imgDesc.imageType = ImageType::Image2DArray;
+    imageInfo.imgDesc.imageDepth = 1;
+    imageInfo.imgDesc.imageArraySize = 1;
+    imageInfo.qPitch = 0;
+    SurfaceOffsets surfaceOffsets = {0, 0, 0, 0};
+    const uint32_t cubeFaceIndex = __GMM_NO_CUBE_MAP;
+    SurfaceFormatInfo surfaceFormatInfo;
+    surfaceFormatInfo.GenxSurfaceFormat = GFX3DSTATE_SURFACEFORMAT::GFX3DSTATE_SURFACEFORMAT_A32_FLOAT;
+    imageInfo.surfaceFormat = &surfaceFormatInfo;
+
+    const uint64_t gpuAddress = 0x000001a78a8a8000;
+
+    setImageSurfaceState<FamilyType>(castSurfaceState, imageInfo, mockGmm.get(), *gmmHelper, cubeFaceIndex, gpuAddress, surfaceOffsets, true);
+    EXPECT_FALSE(castSurfaceState->getSurfaceArray());
+}
+
+HWTEST_F(ImageSurfaceStateTests, givenImage1DWhen2dImageWAIsEnabledThenArrayFlagIsNotSet) {
+    DebugManagerStateRestore debugSettingsRestore;
+    DebugManager.flags.Force2dImageAsArray.set(1);
+    auto size = sizeof(typename FamilyType::RENDER_SURFACE_STATE);
+    auto surfaceState = std::make_unique<char[]>(size);
+    auto castSurfaceState = reinterpret_cast<typename FamilyType::RENDER_SURFACE_STATE *>(surfaceState.get());
+
+    imageInfo.imgDesc.imageType = ImageType::Image1D;
+    imageInfo.imgDesc.imageDepth = 1;
+    imageInfo.imgDesc.imageArraySize = 1;
+    imageInfo.qPitch = 0;
+    SurfaceOffsets surfaceOffsets = {0, 0, 0, 0};
+    const uint32_t cubeFaceIndex = __GMM_NO_CUBE_MAP;
+    SurfaceFormatInfo surfaceFormatInfo;
+    surfaceFormatInfo.GenxSurfaceFormat = GFX3DSTATE_SURFACEFORMAT::GFX3DSTATE_SURFACEFORMAT_A32_FLOAT;
+    imageInfo.surfaceFormat = &surfaceFormatInfo;
+
+    const uint64_t gpuAddress = 0x000001a78a8a8000;
+
+    setImageSurfaceState<FamilyType>(castSurfaceState, imageInfo, mockGmm.get(), *gmmHelper, cubeFaceIndex, gpuAddress, surfaceOffsets, true);
+    EXPECT_FALSE(castSurfaceState->getSurfaceArray());
+}
+
+struct ImageWidthTest : ImageSurfaceStateTests {
+
+    struct ImageWidthParams {
+        uint32_t imageWidth;
+        uint32_t expectedWidthInDwords;
+    };
+
+    template <typename FamilyType>
+    void verifyProgramming(typename FamilyType::RENDER_SURFACE_STATE &renderSurfaceState, const std::array<ImageWidthParams, 6> &params) {
+        for (auto &param : params) {
+            imageInfo.imgDesc.imageWidth = param.imageWidth;
+            setWidthForMediaBlockSurfaceState<FamilyType>(&renderSurfaceState, imageInfo);
+            EXPECT_EQ(param.expectedWidthInDwords, renderSurfaceState.getWidth());
+        }
+    }
+};
+
+HWTEST_F(ImageWidthTest, givenMediaBlockWhenProgrammingWidthInSurfaceStateThenCorrectValueIsProgrammed) {
+    SurfaceFormatInfo surfaceFormatInfo{};
+    imageInfo.surfaceFormat = &surfaceFormatInfo;
+
+    auto renderSurfaceState = FamilyType::cmdInitRenderSurfaceState;
+    {
+        surfaceFormatInfo.ImageElementSizeInBytes = 1u;
+        constexpr std::array<ImageWidthParams, 6> params = {{
+            {1, 1},
+            {2, 1},
+            {3, 1},
+            {4, 1},
+            {5, 2},
+            {6, 2},
+        }};
+        verifyProgramming<FamilyType>(renderSurfaceState, params);
+    }
+    {
+        surfaceFormatInfo.ImageElementSizeInBytes = 2u;
+        constexpr std::array<ImageWidthParams, 6> params = {{
+            {1, 1},
+            {2, 1},
+            {3, 2},
+            {4, 2},
+            {5, 3},
+            {6, 3},
+        }};
+        verifyProgramming<FamilyType>(renderSurfaceState, params);
+    }
+    {
+        surfaceFormatInfo.ImageElementSizeInBytes = 4u;
+        constexpr std::array<ImageWidthParams, 6> params = {{
+            {1, 1},
+            {2, 2},
+            {3, 3},
+            {4, 4},
+            {5, 5},
+            {6, 6},
+        }};
+        verifyProgramming<FamilyType>(renderSurfaceState, params);
+    }
 }

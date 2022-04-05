@@ -1,35 +1,37 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/command_stream/aub_command_stream_receiver_hw.h"
+#include "shared/source/command_stream/command_stream_receiver_with_aub_dump.h"
+#include "shared/source/command_stream/command_stream_receiver_with_aub_dump.inl"
 #include "shared/source/command_stream/preemption.h"
 #include "shared/source/command_stream/tbx_command_stream_receiver_hw.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/helpers/flush_stamp.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/timestamp_packet.h"
+#include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/utilities/tag_allocator.h"
 #include "shared/test/common/fixtures/device_fixture.h"
+#include "shared/test/common/helpers/engine_descriptor_helper.h"
+#include "shared/test/common/libult/ult_command_stream_receiver.h"
+#include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_aub_center.h"
+#include "shared/test/common/mocks/mock_aub_csr.h"
 #include "shared/test/common/mocks/mock_aub_manager.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
+#include "shared/test/common/mocks/mock_os_context.h"
+#include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/fixtures/mock_aub_center_fixture.h"
 
-#include "opencl/source/command_stream/aub_command_stream_receiver_hw.h"
-#include "opencl/source/command_stream/command_stream_receiver_with_aub_dump.h"
-#include "opencl/source/command_stream/command_stream_receiver_with_aub_dump.inl"
 #include "opencl/source/helpers/dispatch_info.h"
 #include "opencl/source/platform/platform.h"
-#include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
-#include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
-#include "opencl/test/unit_test/mocks/mock_aub_csr.h"
-#include "opencl/test/unit_test/mocks/mock_os_context.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -40,14 +42,14 @@ struct MyMockCsr : UltCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME> {
         : UltCommandStreamReceiver(executionEnvironment, rootDeviceIndex, deviceBitfield) {
     }
 
-    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
+    SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
         flushParametrization.wasCalled = true;
         flushParametrization.receivedBatchBuffer = &batchBuffer;
         flushParametrization.receivedEngine = osContext->getEngineType();
         flushParametrization.receivedAllocationsForResidency = &allocationsForResidency;
         processResidency(allocationsForResidency, 0u);
         flushStamp->setStamp(flushParametrization.flushStampToReturn);
-        return true;
+        return SubmissionStatus::SUCCESS;
     }
 
     void makeResident(GraphicsAllocation &gfxAllocation) override {
@@ -69,10 +71,20 @@ struct MyMockCsr : UltCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME> {
         }
     }
 
-    AubSubCaptureStatus checkAndActivateAubSubCapture(const MultiDispatchInfo &dispatchInfo) override {
+    AubSubCaptureStatus checkAndActivateAubSubCapture(const std::string &kernelName) override {
         checkAndActivateAubSubCaptureParameterization.wasCalled = true;
-        checkAndActivateAubSubCaptureParameterization.receivedDispatchInfo = &dispatchInfo;
+        checkAndActivateAubSubCaptureParameterization.kernelName = &kernelName;
         return {false, false};
+    }
+
+    bool expectMemory(const void *gfxAddress, const void *srcAddress,
+                      size_t length, uint32_t compareOperation) override {
+        expectMemoryParameterization.wasCalled = true;
+        expectMemoryParameterization.gfxAddress = gfxAddress;
+        expectMemoryParameterization.srcAddress = srcAddress;
+        expectMemoryParameterization.length = length;
+        expectMemoryParameterization.compareOperation = compareOperation;
+        return true;
     }
 
     struct FlushParameterization {
@@ -100,8 +112,16 @@ struct MyMockCsr : UltCommandStreamReceiver<DEFAULT_TEST_FAMILY_NAME> {
 
     struct CheckAndActivateAubSubCaptureParameterization {
         bool wasCalled = false;
-        const MultiDispatchInfo *receivedDispatchInfo = nullptr;
+        const std::string *kernelName = nullptr;
     } checkAndActivateAubSubCaptureParameterization;
+
+    struct ExpectMemoryParameterization {
+        bool wasCalled = false;
+        const void *gfxAddress = nullptr;
+        const void *srcAddress = nullptr;
+        size_t length = 0;
+        uint32_t compareOperation = AubMemDump::CmdServicesMemTraceMemoryCompare::CompareOperationValues::CompareEqual;
+    } expectMemoryParameterization;
 };
 
 template <typename BaseCSR>
@@ -132,11 +152,10 @@ struct CommandStreamReceiverWithAubDumpTest : public ::testing::TestWithParam<bo
         csrWithAubDump = new MyMockCsrWithAubDump<MyMockCsr>(createAubCSR, *executionEnvironment, deviceBitfield);
         ASSERT_NE(nullptr, csrWithAubDump);
 
-        auto osContext = executionEnvironment->memoryManager->createAndRegisterOsContext(csrWithAubDump,
-                                                                                         EngineTypeUsage{getChosenEngineType(DEFAULT_TEST_PLATFORM::hwInfo), EngineUsage::Regular},
-                                                                                         deviceBitfield,
-                                                                                         PreemptionHelper::getDefaultPreemptionMode(DEFAULT_TEST_PLATFORM::hwInfo),
-                                                                                         false);
+        auto engineDescriptor = EngineDescriptorHelper::getDefaultDescriptor({getChosenEngineType(DEFAULT_TEST_PLATFORM::hwInfo), EngineUsage::Regular},
+                                                                             PreemptionHelper::getDefaultPreemptionMode(DEFAULT_TEST_PLATFORM::hwInfo));
+
+        auto osContext = executionEnvironment->memoryManager->createAndRegisterOsContext(csrWithAubDump, engineDescriptor);
         csrWithAubDump->setupContext(*osContext);
     }
 
@@ -171,8 +190,8 @@ HWTEST_F(CommandStreamReceiverWithAubDumpSimpleTest, givenCsrWithAubDumpWhenSett
     CommandStreamReceiverWithAUBDump<UltCommandStreamReceiver<FamilyType>> csrWithAubDump("aubfile", *executionEnvironment, 0, deviceBitfield);
 
     auto hwInfo = executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo();
-    MockOsContext osContext(0, 1, HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
-                            PreemptionHelper::getDefaultPreemptionMode(*hwInfo), false);
+    MockOsContext osContext(0, EngineDescriptorHelper::getDefaultDescriptor(HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
+                                                                            PreemptionHelper::getDefaultPreemptionMode(*hwInfo)));
 
     csrWithAubDump.setupContext(osContext);
     EXPECT_EQ(&osContext, &csrWithAubDump.getOsContext());
@@ -236,6 +255,59 @@ HWTEST_F(CommandStreamReceiverWithAubDumpSimpleTest, givenCsrWithAubDumpWhenWait
     csrWithAubDump.waitForTaskCountWithKmdNotifyFallback(1, 0, false, false);
 }
 
+HWTEST_F(CommandStreamReceiverWithAubDumpSimpleTest, givenCsrWithAubDumpWhenPollForCompletionCalledThenAubCsrPollForCompletionCalled) {
+    auto executionEnvironment = pDevice->getExecutionEnvironment();
+    executionEnvironment->initializeMemoryManager();
+
+    auto gmmHelper = executionEnvironment->rootDeviceEnvironments[0]->getGmmHelper();
+    MockAubCenter *mockAubCenter = new MockAubCenter(defaultHwInfo.get(), *gmmHelper, false, "file_name.aub", CommandStreamReceiverType::CSR_HW_WITH_AUB);
+    mockAubCenter->aubManager = std::unique_ptr<MockAubManager>(new MockAubManager());
+
+    executionEnvironment->rootDeviceEnvironments[0]->aubCenter = std::unique_ptr<MockAubCenter>(mockAubCenter);
+    DeviceBitfield deviceBitfield(1);
+    CommandStreamReceiverWithAUBDump<UltCommandStreamReceiver<FamilyType>> csrWithAubDump("file_name.aub", *executionEnvironment, 0, deviceBitfield);
+    csrWithAubDump.initializeTagAllocation();
+
+    csrWithAubDump.aubCSR.reset(nullptr);
+    csrWithAubDump.pollForCompletion();
+
+    auto mockAubCsr = new MockAubCsr<FamilyType>("file_name.aub", false, *executionEnvironment, 0, deviceBitfield);
+    mockAubCsr->initializeTagAllocation();
+    csrWithAubDump.aubCSR.reset(mockAubCsr);
+
+    EXPECT_FALSE(mockAubCsr->pollForCompletionCalled);
+    csrWithAubDump.pollForCompletion();
+    EXPECT_TRUE(mockAubCsr->pollForCompletionCalled);
+}
+
+HWTEST_P(CommandStreamReceiverWithAubDumpTest, givenCommandStreamReceiverWithAubDumpWhenExpectMemoryIsCalledThenBothCommandStreamReceiversAreCalled) {
+    uint32_t compareOperation = AubMemDump::CmdServicesMemTraceMemoryCompare::CompareOperationValues::CompareEqual;
+    uint8_t buffer[0x10000]{};
+    size_t length = sizeof(buffer);
+
+    auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{csrWithAubDump->getRootDeviceIndex(), false, length}, buffer);
+    ASSERT_NE(nullptr, gfxAllocation);
+
+    csrWithAubDump->makeResidentHostPtrAllocation(gfxAllocation);
+    csrWithAubDump->expectMemory(reinterpret_cast<void *>(gfxAllocation->getGpuAddress()), buffer, length, compareOperation);
+
+    EXPECT_TRUE(csrWithAubDump->expectMemoryParameterization.wasCalled);
+    EXPECT_EQ(reinterpret_cast<void *>(gfxAllocation->getGpuAddress()), csrWithAubDump->expectMemoryParameterization.gfxAddress);
+    EXPECT_EQ(buffer, csrWithAubDump->expectMemoryParameterization.srcAddress);
+    EXPECT_EQ(length, csrWithAubDump->expectMemoryParameterization.length);
+    EXPECT_EQ(compareOperation, csrWithAubDump->expectMemoryParameterization.compareOperation);
+
+    if (createAubCSR) {
+        EXPECT_TRUE(csrWithAubDump->getAubMockCsr().expectMemoryParameterization.wasCalled);
+        EXPECT_EQ(reinterpret_cast<void *>(gfxAllocation->getGpuAddress()), csrWithAubDump->getAubMockCsr().expectMemoryParameterization.gfxAddress);
+        EXPECT_EQ(buffer, csrWithAubDump->getAubMockCsr().expectMemoryParameterization.srcAddress);
+        EXPECT_EQ(length, csrWithAubDump->getAubMockCsr().expectMemoryParameterization.length);
+        EXPECT_EQ(compareOperation, csrWithAubDump->getAubMockCsr().expectMemoryParameterization.compareOperation);
+    }
+
+    memoryManager->freeGraphicsMemoryImpl(gfxAllocation);
+}
+
 HWTEST_F(CommandStreamReceiverWithAubDumpSimpleTest, givenCsrWithAubDumpWhenCreatingAubCsrThenInitializeTagAllocation) {
     auto executionEnvironment = pDevice->getExecutionEnvironment();
     executionEnvironment->initializeMemoryManager();
@@ -245,12 +317,21 @@ HWTEST_F(CommandStreamReceiverWithAubDumpSimpleTest, givenCsrWithAubDumpWhenCrea
     mockAubCenter->aubManager = std::unique_ptr<MockAubManager>(new MockAubManager());
 
     executionEnvironment->rootDeviceEnvironments[0]->aubCenter = std::unique_ptr<MockAubCenter>(mockAubCenter);
-    DeviceBitfield deviceBitfield(1);
+
+    uint32_t subDevicesCount = 4;
+
+    DeviceBitfield deviceBitfield = maxNBitValue(subDevicesCount);
     CommandStreamReceiverWithAUBDump<UltCommandStreamReceiver<FamilyType>> csrWithAubDump("file_name.aub", *executionEnvironment, 0, deviceBitfield);
 
     EXPECT_NE(nullptr, csrWithAubDump.aubCSR->getTagAllocation());
     EXPECT_NE(nullptr, csrWithAubDump.aubCSR->getTagAddress());
-    EXPECT_EQ(std::numeric_limits<uint32_t>::max(), *csrWithAubDump.aubCSR->getTagAddress());
+
+    auto tagAddressToInitialize = csrWithAubDump.aubCSR->getTagAddress();
+
+    for (uint32_t i = 0; i < subDevicesCount; i++) {
+        EXPECT_EQ(std::numeric_limits<uint32_t>::max(), *tagAddressToInitialize);
+        tagAddressToInitialize = ptrOffset(tagAddressToInitialize, csrWithAubDump.aubCSR->getPostSyncWriteOffset());
+    }
 }
 
 HWTEST_F(CommandStreamReceiverWithAubDumpSimpleTest, givenAubCsrWithHwWhenAddingCommentThenAddCommentToAubManager) {
@@ -298,8 +379,8 @@ struct CommandStreamReceiverTagTests : public ::testing::Test {
     bool isTimestampPacketNodeReleasable(Args &&...args) {
         CsrT csr(std::forward<Args>(args)...);
         auto hwInfo = csr.peekExecutionEnvironment().rootDeviceEnvironments[0]->getHardwareInfo();
-        MockOsContext osContext(0, 1, HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
-                                PreemptionHelper::getDefaultPreemptionMode(*hwInfo), false);
+        MockOsContext osContext(0, EngineDescriptorHelper::getDefaultDescriptor(HwHelper::get(hwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0],
+                                                                                PreemptionHelper::getDefaultPreemptionMode(*hwInfo)));
         csr.setupContext(osContext);
 
         auto allocator = csr.getTimestampPacketAllocator();
@@ -511,6 +592,7 @@ HWTEST_P(CommandStreamReceiverWithAubDumpTest, givenCommandStreamReceiverWithAub
     EXPECT_EQ(1u, csrWithAubDump->peekLatestSentTaskCount());
     if (createAubCSR) {
         EXPECT_EQ(csrWithAubDump->peekLatestSentTaskCount(), csrWithAubDump->getAubMockCsr().peekLatestSentTaskCount());
+        EXPECT_EQ(csrWithAubDump->peekLatestSentTaskCount(), csrWithAubDump->getAubMockCsr().peekLatestFlushedTaskCount());
     }
 
     memoryManager->freeGraphicsMemoryImpl(commandBuffer);
@@ -536,17 +618,15 @@ HWTEST_P(CommandStreamReceiverWithAubDumpTest, givenCommandStreamReceiverWithAub
 }
 
 HWTEST_P(CommandStreamReceiverWithAubDumpTest, givenCommandStreamReceiverWithAubDumpWhenCheckAndActivateAubSubCaptureIsCalledThenBaseCsrCommandStreamReceiverIsCalled) {
-    const DispatchInfo dispatchInfo;
-    MultiDispatchInfo multiDispatchInfo;
-    multiDispatchInfo.push(dispatchInfo);
-    csrWithAubDump->checkAndActivateAubSubCapture(multiDispatchInfo);
+    std::string kernelName = "";
+    csrWithAubDump->checkAndActivateAubSubCapture(kernelName);
 
     EXPECT_TRUE(csrWithAubDump->checkAndActivateAubSubCaptureParameterization.wasCalled);
-    EXPECT_EQ(&multiDispatchInfo, csrWithAubDump->checkAndActivateAubSubCaptureParameterization.receivedDispatchInfo);
+    EXPECT_EQ(&kernelName, csrWithAubDump->checkAndActivateAubSubCaptureParameterization.kernelName);
 
     if (createAubCSR) {
         EXPECT_TRUE(csrWithAubDump->getAubMockCsr().checkAndActivateAubSubCaptureParameterization.wasCalled);
-        EXPECT_EQ(&multiDispatchInfo, csrWithAubDump->getAubMockCsr().checkAndActivateAubSubCaptureParameterization.receivedDispatchInfo);
+        EXPECT_EQ(&kernelName, csrWithAubDump->getAubMockCsr().checkAndActivateAubSubCaptureParameterization.kernelName);
     }
 }
 

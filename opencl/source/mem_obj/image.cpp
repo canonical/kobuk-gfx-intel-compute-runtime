@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -18,15 +18,15 @@
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/memory_manager/memory_manager.h"
-#include "shared/source/utilities/compiler_support.h"
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/cl_device/cl_device_get_cap.inl"
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/context/context.h"
+#include "opencl/source/helpers/cl_hw_helper.h"
+#include "opencl/source/helpers/cl_memory_properties_helpers.h"
 #include "opencl/source/helpers/get_info_status_mapper.h"
 #include "opencl/source/helpers/gmm_types_converter.h"
-#include "opencl/source/helpers/memory_properties_helpers.h"
 #include "opencl/source/helpers/mipmap.h"
 #include "opencl/source/helpers/surface_formats.h"
 #include "opencl/source/mem_obj/buffer.h"
@@ -164,7 +164,7 @@ Image *Image::create(Context *context,
         switch (imageDesc->image_type) {
         case CL_MEM_OBJECT_IMAGE3D:
             imageDepth = imageDesc->image_depth;
-            CPP_ATTRIBUTE_FALLTHROUGH;
+            [[fallthrough]];
         case CL_MEM_OBJECT_IMAGE2D:
         case CL_MEM_OBJECT_IMAGE2D_ARRAY:
             imageHeight = imageDesc->image_height;
@@ -197,11 +197,13 @@ Image *Image::create(Context *context,
 
         auto hostPtrRowPitch = imageDesc->image_row_pitch ? imageDesc->image_row_pitch : imageWidth * surfaceFormat->surfaceFormat.ImageElementSizeInBytes;
         auto hostPtrSlicePitch = imageDesc->image_slice_pitch ? imageDesc->image_slice_pitch : hostPtrRowPitch * imageHeight;
+        auto &clHwHelper = ClHwHelper::get(context->getDevice(0)->getHardwareInfo().platform.eRenderCoreFamily);
         imgInfo.linearStorage = !defaultHwHelper.tilingAllowed(context->isSharedContext, Image::isImage1d(*imageDesc),
                                                                memoryProperties.flags.forceLinearStorage);
-        imgInfo.preferRenderCompression = MemObjHelper::isSuitableForRenderCompression(!imgInfo.linearStorage, memoryProperties,
-                                                                                       *context, true);
-        imgInfo.preferRenderCompression &= !Image::isFormatRedescribable(surfaceFormat->OCLImageFormat);
+        bool preferCompression = MemObjHelper::isSuitableForCompression(!imgInfo.linearStorage, memoryProperties,
+                                                                        *context, true);
+        preferCompression &= clHwHelper.allowImageCompression(surfaceFormat->OCLImageFormat);
+        preferCompression &= !clHwHelper.isFormatRedescribable(surfaceFormat->OCLImageFormat);
 
         if (!context->getDevice(0)->getSharedDeviceInfo().imageSupport && !imgInfo.linearStorage) {
             errcodeRet = CL_INVALID_OPERATION;
@@ -263,7 +265,6 @@ Image *Image::create(Context *context,
                 allocationInfo[rootDeviceIndex].zeroCopyAllowed = true;
                 hostPtr = parentBuffer->getHostPtr();
                 hostPtrToSet = const_cast<void *>(hostPtr);
-                parentBuffer->incRefInternal();
                 GmmTypesConverter::queryImgFromBufferParams(imgInfo, allocationInfo[rootDeviceIndex].memory);
 
                 UNRECOVERABLE_IF(imgInfo.offset != 0);
@@ -272,7 +273,7 @@ Image *Image::create(Context *context,
                 if (memoryManager->peekVirtualPaddingSupport() && (imageDesc->image_type == CL_MEM_OBJECT_IMAGE2D) && (allocationInfo[rootDeviceIndex].memory->getUnderlyingBuffer() != 0)) {
                     // Retrieve sizes from GMM and apply virtual padding if buffer storage is not big enough
                     auto queryGmmImgInfo(imgInfo);
-                    auto gmm = std::make_unique<Gmm>(clientContext, queryGmmImgInfo, StorageInfo{});
+                    auto gmm = std::make_unique<Gmm>(clientContext, queryGmmImgInfo, StorageInfo{}, preferCompression);
                     auto gmmAllocationSize = gmm->gmmResourceInfo->getSizeAllocation();
                     if (gmmAllocationSize > allocationInfo[rootDeviceIndex].memory->getUnderlyingBufferSize()) {
                         allocationInfo[rootDeviceIndex].memory = memoryManager->createGraphicsAllocationWithPadding(allocationInfo[rootDeviceIndex].memory, gmmAllocationSize);
@@ -290,6 +291,7 @@ Image *Image::create(Context *context,
                                                                                                                   memoryProperties, hwInfo,
                                                                                                                   context->getDeviceBitfieldForAllocation(rootDeviceIndex),
                                                                                                                   context->isSingleDeviceContext());
+                        allocProperties.flags.preferCompressed = preferCompression;
 
                         allocationInfo[rootDeviceIndex].memory = memoryManager->allocateGraphicsMemoryWithProperties(allocProperties, hostPtr);
 
@@ -302,10 +304,10 @@ Image *Image::create(Context *context,
                             }
                         }
                     } else {
-                        gmm = new Gmm(clientContext, imgInfo, StorageInfo{});
+                        gmm = new Gmm(clientContext, imgInfo, StorageInfo{}, preferCompression);
                         allocationInfo[rootDeviceIndex].memory = memoryManager->allocateGraphicsMemoryWithProperties({rootDeviceIndex,
                                                                                                                       false, // allocateMemory
-                                                                                                                      imgInfo.size, GraphicsAllocation::AllocationType::SHARED_CONTEXT_IMAGE,
+                                                                                                                      imgInfo.size, AllocationType::SHARED_CONTEXT_IMAGE,
                                                                                                                       false, // isMultiStorageAllocation
                                                                                                                       context->getDeviceBitfieldForAllocation(rootDeviceIndex)},
                                                                                                                      hostPtr);
@@ -316,10 +318,11 @@ Image *Image::create(Context *context,
                         if (allocationInfo[rootDeviceIndex].memory) {
                             AllocationProperties properties{rootDeviceIndex,
                                                             false, // allocateMemory
-                                                            hostPtrMinSize, GraphicsAllocation::AllocationType::MAP_ALLOCATION,
+                                                            hostPtrMinSize, AllocationType::MAP_ALLOCATION,
                                                             false, // isMultiStorageAllocation
                                                             context->getDeviceBitfieldForAllocation(rootDeviceIndex)};
                             properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = true;
+                            properties.flags.preferCompressed = preferCompression;
                             allocationInfo[rootDeviceIndex].mapAllocation = memoryManager->allocateGraphicsMemoryWithProperties(properties, hostPtr);
                         }
                     }
@@ -329,6 +332,7 @@ Image *Image::create(Context *context,
                                                                                                               memoryProperties, hwInfo,
                                                                                                               context->getDeviceBitfieldForAllocation(rootDeviceIndex),
                                                                                                               context->isSingleDeviceContext());
+                    allocProperties.flags.preferCompressed = preferCompression;
                     allocationInfo[rootDeviceIndex].memory = memoryManager->allocateGraphicsMemoryWithProperties(allocProperties);
 
                     if (allocationInfo[rootDeviceIndex].memory && MemoryPool::isSystemMemoryPool(allocationInfo[rootDeviceIndex].memory->getMemoryPool())) {
@@ -344,7 +348,7 @@ Image *Image::create(Context *context,
             }
 
             if (parentBuffer == nullptr) {
-                allocationInfo[rootDeviceIndex].memory->setAllocationType(GraphicsAllocation::AllocationType::IMAGE);
+                allocationInfo[rootDeviceIndex].memory->setAllocationType(AllocationType::IMAGE);
             }
 
             allocationInfo[rootDeviceIndex].memory->setMemObjectsAllocationWithWritableFlags(!memoryProperties.flags.readOnly &&
@@ -381,13 +385,11 @@ Image *Image::create(Context *context,
 
             auto &hwInfo = *memoryManager->peekExecutionEnvironment().rootDeviceEnvironments[rootDeviceIndex]->getHardwareInfo();
 
-            if (context->isProvidingPerformanceHints() && HwHelper::renderCompressedImagesSupported(hwInfo)) {
-                if (allocationInfo[rootDeviceIndex].memory->getDefaultGmm()) {
-                    if (allocationInfo[rootDeviceIndex].memory->getDefaultGmm()->isCompressionEnabled) {
-                        context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, IMAGE_IS_COMPRESSED, image);
-                    } else {
-                        context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, IMAGE_IS_NOT_COMPRESSED, image);
-                    }
+            if (context->isProvidingPerformanceHints() && HwHelper::compressedImagesSupported(hwInfo)) {
+                if (allocationInfo[rootDeviceIndex].memory->isCompressionEnabled()) {
+                    context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, IMAGE_IS_COMPRESSED, image);
+                } else {
+                    context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, IMAGE_IS_NOT_COMPRESSED, image);
                 }
             }
 
@@ -463,6 +465,10 @@ Image *Image::create(Context *context,
                 image->mapAllocations.addAllocation(allocationInfo[rootDeviceIndex].mapAllocation);
             }
         }
+        if (((imageDesc->image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER) || (imageDesc->image_type == CL_MEM_OBJECT_IMAGE2D)) && (parentBuffer != nullptr)) {
+            parentBuffer->incRefInternal();
+        }
+
         if (errcodeRet != CL_SUCCESS) {
             image->release();
             image = nullptr;
@@ -498,7 +504,7 @@ Image *Image::createSharedImage(Context *context, SharingHandler *sharingHandler
     auto rootDeviceIndex = context->getDevice(0)->getRootDeviceIndex();
     auto size = multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex)->getUnderlyingBufferSize();
     auto sharedImage = createImageHw(
-        context, MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
+        context, ClMemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
         flags, flagsIntel, size, nullptr,
         surfaceFormat->OCLImageFormat, Image::convertDescriptor(imgInfo.imgDesc), false,
         std::move(multiGraphicsAllocation), false, baseMipLevel, mipCount, surfaceFormat);
@@ -727,7 +733,7 @@ void Image::calculateHostPtrOffset(size_t *imageOffset, const size_t *origin, co
     case CL_MEM_OBJECT_IMAGE1D_BUFFER:
     case CL_MEM_OBJECT_IMAGE2D:
         DEBUG_BREAK_IF(slicePitch != 0 && slicePitch < computedImageRowPitch * region[1]);
-        CPP_ATTRIBUTE_FALLTHROUGH;
+        [[fallthrough]];
     case CL_MEM_OBJECT_IMAGE2D_ARRAY:
     case CL_MEM_OBJECT_IMAGE3D:
         *imageOffset = origin[2] * computedImageSlicePitch + origin[1] * computedImageRowPitch + origin[0] * bytesPerPixel;
@@ -758,7 +764,7 @@ cl_int Image::getImageParams(Context *context,
     imgInfo.imgDesc = Image::convertDescriptor(imageDescriptor);
     imgInfo.surfaceFormat = &surfaceFormat->surfaceFormat;
 
-    auto gmm = std::make_unique<Gmm>(clientContext, imgInfo, StorageInfo{});
+    auto gmm = std::make_unique<Gmm>(clientContext, imgInfo, StorageInfo{}, false);
 
     *imageRowPitch = imgInfo.rowPitch;
     *imageSlicePitch = imgInfo.slicePitch;
@@ -971,8 +977,8 @@ Image *Image::redescribeFillImage() {
     imageFormatNew.image_channel_data_type = surfaceFormat->OCLImageFormat.image_channel_data_type;
 
     DEBUG_BREAK_IF(nullptr == createFunction);
-    MemoryProperties memoryProperties = MemoryPropertiesHelper::createMemoryProperties(flags | CL_MEM_USE_HOST_PTR, flagsIntel, 0,
-                                                                                       &context->getDevice(0)->getDevice());
+    MemoryProperties memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags | CL_MEM_USE_HOST_PTR, flagsIntel, 0,
+                                                                                         &context->getDevice(0)->getDevice());
     auto image = createFunction(context,
                                 memoryProperties,
                                 flags | CL_MEM_USE_HOST_PTR,
@@ -1002,19 +1008,6 @@ static const uint32_t redescribeTableBytes[] = {
     7   // {CL_RGBA, CL_UNSIGNED_INT32}    16 byte
 };
 
-bool Image::isFormatRedescribable(cl_image_format format) {
-    const ArrayRef<const ClSurfaceFormatInfo> readWriteSurfaceFormats = SurfaceFormats::readWrite();
-    for (auto indexInRedescribeTable = 0u; indexInRedescribeTable < sizeof(redescribeTableBytes) / sizeof(uint32_t); indexInRedescribeTable++) {
-        const uint32_t formatIndex = redescribeTableBytes[indexInRedescribeTable];
-        const cl_image_format nonRedescribableFormat = readWriteSurfaceFormats[formatIndex].OCLImageFormat;
-        if (nonRedescribableFormat.image_channel_data_type == format.image_channel_data_type &&
-            nonRedescribableFormat.image_channel_order == format.image_channel_order) {
-            return false;
-        }
-    }
-    return true;
-}
-
 Image *Image::redescribe() {
     const uint32_t bytesPerPixel = this->surfaceFormatInfo.surfaceFormat.NumChannels * surfaceFormatInfo.surfaceFormat.PerChannelSizeInBytes;
     const uint32_t exponent = Math::log2(bytesPerPixel);
@@ -1028,8 +1021,8 @@ Image *Image::redescribe() {
     imageFormatNew.image_channel_data_type = surfaceFormat->OCLImageFormat.image_channel_data_type;
 
     DEBUG_BREAK_IF(nullptr == createFunction);
-    MemoryProperties memoryProperties = MemoryPropertiesHelper::createMemoryProperties(flags | CL_MEM_USE_HOST_PTR, flagsIntel, 0,
-                                                                                       &context->getDevice(0)->getDevice());
+    MemoryProperties memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags | CL_MEM_USE_HOST_PTR, flagsIntel, 0,
+                                                                                         &context->getDevice(0)->getDevice());
     auto image = createFunction(context,
                                 memoryProperties,
                                 flags | CL_MEM_USE_HOST_PTR,
@@ -1092,7 +1085,7 @@ cl_int Image::writeNV12Planes(const void *hostPtr, size_t hostPtrRowPitch, uint3
     // Create NV12 UV Plane image
     std::unique_ptr<Image> imageYPlane(Image::create(
         context,
-        MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
+        ClMemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
         flags,
         0,
         surfaceFormat,
@@ -1116,7 +1109,7 @@ cl_int Image::writeNV12Planes(const void *hostPtr, size_t hostPtrRowPitch, uint3
     // Create NV12 UV Plane image
     std::unique_ptr<Image> imageUVPlane(Image::create(
         context,
-        MemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
+        ClMemoryPropertiesHelper::createMemoryProperties(flags, 0, 0, &context->getDevice(0)->getDevice()),
         flags,
         0,
         surfaceFormat,
@@ -1185,16 +1178,16 @@ cl_mem Image::validateAndCreateImage(cl_context context,
     MemoryProperties memoryProperties{};
     cl_mem_flags_intel emptyFlagsIntel = 0;
     cl_mem_alloc_flags_intel allocflags = 0;
-    if ((false == MemoryPropertiesHelper::parseMemoryProperties(nullptr, memoryProperties, flags, emptyFlagsIntel, allocflags,
-                                                                MemoryPropertiesHelper::ObjType::IMAGE, *pContext)) ||
+    if ((false == ClMemoryPropertiesHelper::parseMemoryProperties(nullptr, memoryProperties, flags, emptyFlagsIntel, allocflags,
+                                                                  MemoryPropertiesHelper::ObjType::IMAGE, *pContext)) ||
         (false == MemObjHelper::validateMemoryPropertiesForImage(memoryProperties, flags, emptyFlagsIntel, imageDesc->mem_object,
                                                                  *pContext))) {
         errcodeRet = CL_INVALID_VALUE;
         return nullptr;
     }
 
-    if ((false == MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                                MemoryPropertiesHelper::ObjType::IMAGE, *pContext)) ||
+    if ((false == ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                  MemoryPropertiesHelper::ObjType::IMAGE, *pContext)) ||
         (false == MemObjHelper::validateMemoryPropertiesForImage(memoryProperties, flags, flagsIntel, imageDesc->mem_object,
                                                                  *pContext))) {
         errcodeRet = CL_INVALID_PROPERTY;
@@ -1438,6 +1431,35 @@ size_t Image::calculateOffsetForMapping(const MemObjOffsetArray &origin) const {
 cl_int Image::validateRegionAndOrigin(const size_t *origin, const size_t *region, const cl_image_desc &imgDesc) {
     if (region[0] == 0 || region[1] == 0 || region[2] == 0) {
         return CL_INVALID_VALUE;
+    }
+
+    if (origin[0] + region[0] > imgDesc.image_width) {
+        return CL_INVALID_VALUE;
+    }
+
+    if (imgDesc.image_type == CL_MEM_OBJECT_IMAGE2D || imgDesc.image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY ||
+        imgDesc.image_type == CL_MEM_OBJECT_IMAGE3D) {
+        if (origin[1] + region[1] > imgDesc.image_height) {
+            return CL_INVALID_VALUE;
+        }
+    }
+
+    if (imgDesc.image_type == CL_MEM_OBJECT_IMAGE3D) {
+        if (origin[2] + region[2] > imgDesc.image_depth) {
+            return CL_INVALID_VALUE;
+        }
+    }
+
+    if (imgDesc.image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+        if (origin[1] + region[1] > imgDesc.image_array_size) {
+            return CL_INVALID_VALUE;
+        }
+    }
+
+    if (imgDesc.image_type == CL_MEM_OBJECT_IMAGE2D_ARRAY) {
+        if (origin[2] + region[2] > imgDesc.image_array_size) {
+            return CL_INVALID_VALUE;
+        }
     }
 
     bool notMipMapped = (false == isMipMapped(imgDesc));

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -34,6 +34,7 @@ StorageInfo MemoryManager::createStorageInfoFromProperties(const AllocationPrope
     }
 
     StorageInfo storageInfo{preferredTile, allTilesValue};
+    storageInfo.subDeviceBitfield = properties.subDevicesBitfield;
     storageInfo.isLockable = GraphicsAllocation::isLockable(properties.allocationType);
     storageInfo.cpuVisibleSegment = GraphicsAllocation::isCpuAccessRequired(properties.allocationType);
 
@@ -41,13 +42,12 @@ StorageInfo MemoryManager::createStorageInfoFromProperties(const AllocationPrope
                                           sizeof(storageInfo.resourceTag));
 
     switch (properties.allocationType) {
-    case GraphicsAllocation::AllocationType::KERNEL_ISA:
-    case GraphicsAllocation::AllocationType::KERNEL_ISA_INTERNAL:
-    case GraphicsAllocation::AllocationType::DEBUG_MODULE_AREA: {
+    case AllocationType::KERNEL_ISA:
+    case AllocationType::KERNEL_ISA_INTERNAL:
+    case AllocationType::DEBUG_MODULE_AREA: {
         auto placeIsaOnMultiTile = (properties.subDevicesBitfield.count() != 1);
 
-        if (executionEnvironment.isDebuggingEnabled() &&
-            executionEnvironment.rootDeviceEnvironments[properties.rootDeviceIndex]->debugger.get()) {
+        if (executionEnvironment.isDebuggingEnabled()) {
             placeIsaOnMultiTile = false;
         }
 
@@ -64,24 +64,34 @@ StorageInfo MemoryManager::createStorageInfoFromProperties(const AllocationPrope
             storageInfo.tileInstanced = false;
         }
     } break;
-    case GraphicsAllocation::AllocationType::DEBUG_CONTEXT_SAVE_AREA:
-    case GraphicsAllocation::AllocationType::PRIVATE_SURFACE:
-    case GraphicsAllocation::AllocationType::WORK_PARTITION_SURFACE:
+    case AllocationType::DEBUG_CONTEXT_SAVE_AREA:
+    case AllocationType::WORK_PARTITION_SURFACE:
         storageInfo.cloningOfPageTables = false;
         storageInfo.memoryBanks = allTilesValue;
         storageInfo.tileInstanced = true;
         break;
-    case GraphicsAllocation::AllocationType::COMMAND_BUFFER:
-    case GraphicsAllocation::AllocationType::INTERNAL_HEAP:
-    case GraphicsAllocation::AllocationType::LINEAR_STREAM:
+    case AllocationType::PRIVATE_SURFACE:
+        storageInfo.cloningOfPageTables = false;
+
+        if (properties.subDevicesBitfield.count() == 1) {
+            storageInfo.memoryBanks = preferredTile;
+            storageInfo.pageTablesVisibility = preferredTile;
+        } else {
+            storageInfo.memoryBanks = allTilesValue;
+            storageInfo.tileInstanced = true;
+        }
+        break;
+    case AllocationType::COMMAND_BUFFER:
+    case AllocationType::INTERNAL_HEAP:
+    case AllocationType::LINEAR_STREAM:
         storageInfo.cloningOfPageTables = properties.flags.multiOsContextCapable;
         storageInfo.memoryBanks = preferredTile;
         if (!properties.flags.multiOsContextCapable) {
             storageInfo.pageTablesVisibility = preferredTile;
         }
         break;
-    case GraphicsAllocation::AllocationType::SCRATCH_SURFACE:
-    case GraphicsAllocation::AllocationType::PREEMPTION:
+    case AllocationType::SCRATCH_SURFACE:
+    case AllocationType::PREEMPTION:
         if (properties.flags.multiOsContextCapable) {
             storageInfo.cloningOfPageTables = false;
             storageInfo.memoryBanks = allTilesValue;
@@ -91,23 +101,35 @@ StorageInfo MemoryManager::createStorageInfoFromProperties(const AllocationPrope
             storageInfo.pageTablesVisibility = preferredTile;
         }
         break;
-    case GraphicsAllocation::AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER:
-        if (properties.flags.multiOsContextCapable) {
-            storageInfo.cloningOfPageTables = true;
-        } else {
+    case AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER:
+        storageInfo.cloningOfPageTables = true;
+        if (!properties.flags.multiOsContextCapable) {
             storageInfo.pageTablesVisibility = preferredTile;
-            storageInfo.cloningOfPageTables = false;
         }
         break;
-    case GraphicsAllocation::AllocationType::BUFFER:
-    case GraphicsAllocation::AllocationType::BUFFER_COMPRESSED:
-    case GraphicsAllocation::AllocationType::SVM_GPU:
+    case AllocationType::BUFFER:
+    case AllocationType::SVM_GPU: {
+        auto colouringPolicy = properties.colouringPolicy;
+        auto granularity = properties.colouringGranularity;
+
+        if (DebugManager.flags.MultiStoragePolicy.get() != -1) {
+            colouringPolicy = static_cast<ColouringPolicy>(DebugManager.flags.MultiStoragePolicy.get());
+        }
+
+        if (DebugManager.flags.MultiStorageGranularity.get() != -1) {
+            granularity = DebugManager.flags.MultiStorageGranularity.get() * MemoryConstants::kiloByte;
+        }
+
+        DEBUG_BREAK_IF(colouringPolicy == ColouringPolicy::DeviceCountBased && granularity != MemoryConstants::pageSize64k);
+
         if (this->supportsMultiStorageResources &&
             properties.multiStorageResource &&
-            properties.size >= deviceCount * MemoryConstants::pageSize64k &&
+            properties.size >= deviceCount * granularity &&
             properties.subDevicesBitfield.count() != 1u) {
             storageInfo.memoryBanks = allTilesValue;
             storageInfo.multiStorage = true;
+            storageInfo.colouringPolicy = colouringPolicy;
+            storageInfo.colouringGranularity = granularity;
             if (DebugManager.flags.OverrideMultiStoragePlacement.get() != -1) {
                 storageInfo.memoryBanks = DebugManager.flags.OverrideMultiStoragePlacement.get();
             }
@@ -119,13 +141,46 @@ StorageInfo MemoryManager::createStorageInfoFromProperties(const AllocationPrope
             storageInfo.tileInstanced = true;
         }
         storageInfo.localOnlyRequired = true;
+
+        if (properties.flags.shareable) {
+            storageInfo.isLockable = false;
+        }
         break;
-    case GraphicsAllocation::AllocationType::UNIFIED_SHARED_MEMORY:
+    }
+    case AllocationType::UNIFIED_SHARED_MEMORY:
         storageInfo.memoryBanks = allTilesValue;
         break;
     default:
         break;
     }
+
+    bool forceLocalMemoryForDirectSubmission = properties.flags.multiOsContextCapable;
+    switch (DebugManager.flags.DirectSubmissionForceLocalMemoryStorageMode.get()) {
+    case 0:
+        forceLocalMemoryForDirectSubmission = false;
+        break;
+    case 2:
+        forceLocalMemoryForDirectSubmission = true;
+        break;
+    default:
+        break;
+    }
+
+    if (forceLocalMemoryForDirectSubmission) {
+        if (properties.allocationType == AllocationType::COMMAND_BUFFER ||
+            properties.allocationType == AllocationType::RING_BUFFER ||
+            properties.allocationType == AllocationType::SEMAPHORE_BUFFER) {
+            storageInfo.memoryBanks = {};
+            for (auto bank = 0u; bank < deviceCount; bank++) {
+                if (allTilesValue.test(bank)) {
+                    storageInfo.memoryBanks.set(bank);
+                    break;
+                }
+            }
+            UNRECOVERABLE_IF(storageInfo.memoryBanks.none());
+        }
+    }
+
     return storageInfo;
 }
 uint32_t StorageInfo::getNumBanks() const {

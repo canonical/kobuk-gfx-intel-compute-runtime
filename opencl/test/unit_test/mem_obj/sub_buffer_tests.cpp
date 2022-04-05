@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -99,7 +99,8 @@ TEST_F(SubBufferTest, GivenAlignmentThatIsHigherThen4BytesWhenCheckedForValidity
     cl_buffer_region region3 = {8, 4};
     EXPECT_TRUE(buffer->isValidSubBufferOffset(region3.origin));
 
-    buffer->getGraphicsAllocation(context.getDevice(0)->getRootDeviceIndex())->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
+    MockBuffer::setAllocationType(buffer->getGraphicsAllocation(context.getDevice(0)->getRootDeviceIndex()), context.getDevice(0)->getRootDeviceEnvironment().getGmmClientContext(), true);
+
     EXPECT_FALSE(buffer->isValidSubBufferOffset(region.origin));
     EXPECT_FALSE(buffer->isValidSubBufferOffset(region2.origin));
     cl_buffer_region region4 = {1025, 4};
@@ -215,6 +216,30 @@ TEST_F(SubBufferTest, givenBufferWithNoHostPtrWhenSubbufferGetsMapPtrThenExpectB
     EXPECT_EQ(bufferMapPtr, mapPtr);
 
     subBuffer->release();
+    buffer->release();
+}
+
+TEST_F(SubBufferTest, givenSubBuffersWithMultipleDevicesWhenReleaseAllSubBuffersThenMainBufferProperlyDereferenced) {
+    MockDefaultContext ctx;
+    Buffer *buffer = Buffer::create(&ctx, CL_MEM_READ_WRITE,
+                                    MemoryConstants::pageSize, nullptr, retVal);
+    ASSERT_NE(nullptr, buffer);
+    ASSERT_EQ(CL_SUCCESS, retVal);
+
+    Buffer *subBuffers[8];
+    for (int i = 0; i < 8; i++) {
+        cl_buffer_region region = {static_cast<size_t>(i * 4), 4};
+        subBuffers[i] = buffer->createSubBuffer(CL_MEM_READ_WRITE, 0, &region, retVal);
+        EXPECT_EQ(3u, subBuffers[i]->getMultiGraphicsAllocation().getGraphicsAllocations().size());
+    }
+
+    EXPECT_EQ(9, buffer->getRefInternalCount());
+
+    for (int i = 0; i < 8; i++) {
+        subBuffers[i]->release();
+    }
+
+    EXPECT_EQ(1, buffer->getRefInternalCount());
     buffer->release();
 }
 

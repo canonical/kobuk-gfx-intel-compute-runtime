@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MIT
 #
 
-set(SHARED_BUIILINS_PROJECTS_FOLDER "built_ins")
+set(SHARED_BUILTINS_PROJECTS_FOLDER "built_ins")
 set(NEO_CORE_SRCS_BUILT_INS
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
     ${CMAKE_CURRENT_SOURCE_DIR}/built_ins_storage.cpp
@@ -14,6 +14,7 @@ set(NEO_CORE_SRCS_BUILT_INS
     ${CMAKE_CURRENT_SOURCE_DIR}/sip.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sip.h
     ${CMAKE_CURRENT_SOURCE_DIR}/sip_kernel_type.h
+    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}unknown_built_in_name.cpp
 )
 
 add_subdirectory(builtinops)

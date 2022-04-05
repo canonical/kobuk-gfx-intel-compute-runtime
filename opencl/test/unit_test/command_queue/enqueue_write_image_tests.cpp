@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,16 +10,17 @@
 #include "shared/source/memory_manager/migration_sync_data.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/libult/ult_command_stream_receiver.h"
+#include "shared/test/common/mocks/mock_builtins.h"
+#include "shared/test/common/mocks/mock_gmm_resource_info.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/test/unit_test/command_queue/enqueue_write_image_fixture.h"
 #include "opencl/test/unit_test/fixtures/one_mip_level_image_fixture.h"
 #include "opencl/test/unit_test/gen_common/gen_commands_common_validation.h"
-#include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
 #include "opencl/test/unit_test/mocks/mock_builtin_dispatch_info_builder.h"
-#include "opencl/test/unit_test/mocks/mock_builtins.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
-#include "test.h"
 
 #include "reg_configs_common.h"
 
@@ -183,7 +184,7 @@ HWTEST_F(EnqueueWriteImageTest, WhenWritingImageThenSurfaceStateIsProgrammedCorr
 
     auto index = mockCmdQ->storedMultiDispatchInfo.begin()->getKernel()->getKernelInfo().getArgDescriptorAt(1).template as<ArgDescImage>().bindful / sizeof(RENDER_SURFACE_STATE);
 
-    const auto &surfaceState = getSurfaceState<FamilyType>(&pCmdQ->getIndirectHeap(IndirectHeap::SURFACE_STATE, 0), static_cast<uint32_t>(index));
+    const auto &surfaceState = getSurfaceState<FamilyType>(&pCmdQ->getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 0), static_cast<uint32_t>(index));
 
     // EnqueueWriteImage uses  multi-byte copies depending on per-pixel-size-in-bytes
     const auto &imageDesc = dstImage->getImageDesc();
@@ -192,7 +193,7 @@ HWTEST_F(EnqueueWriteImageTest, WhenWritingImageThenSurfaceStateIsProgrammedCorr
     EXPECT_NE(0u, surfaceState.getSurfacePitch());
     EXPECT_NE(0u, surfaceState.getSurfaceType());
     EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_FORMAT_R32_UINT, surfaceState.getSurfaceFormat());
-    EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_HORIZONTAL_ALIGNMENT_HALIGN_4, surfaceState.getSurfaceHorizontalAlignment());
+    EXPECT_EQ(MockGmmResourceInfo::getHAlignSurfaceStateResult, surfaceState.getSurfaceHorizontalAlignment());
     EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT_VALIGN_4, surfaceState.getSurfaceVerticalAlignment());
     EXPECT_EQ(dstAllocation->getGpuAddress(), surfaceState.getSurfaceBaseAddress());
 }
@@ -206,43 +207,6 @@ HWTEST_F(EnqueueWriteImageTest, WhenWritingImageThenOnePipelineSelectIsProgramme
 HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueWriteImageTest, WhenWritingImageThenMediaVfeStateIsCorrect) {
     enqueueWriteImage<FamilyType>();
     validateMediaVFEState<FamilyType>(&pDevice->getHardwareInfo(), cmdMediaVfeState, cmdList, itorMediaVfeState);
-}
-
-HWTEST_F(EnqueueWriteImageTest, givenDeviceWithBlitterSupportWhenEnqueueWriteImageThenBlitEnqueueImageAllowedReturnsCorrectResult) {
-    DebugManagerStateRestore restorer;
-    DebugManager.flags.OverrideInvalidEngineWithDefault.set(1);
-    DebugManager.flags.EnableBlitterForEnqueueOperations.set(1);
-    DebugManager.flags.EnableBlitterForEnqueueImageOperations.set(1);
-
-    auto hwInfo = pClDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
-    auto &hwHelper = HwHelper::get(hwInfo->platform.eRenderCoreFamily);
-    hwInfo->capabilityTable.blitterOperationsSupported = true;
-    size_t origin[] = {0, 0, 0};
-    auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pClDevice, nullptr);
-    std::unique_ptr<Image> image(Image2dHelper<>::create(context));
-    {
-        size_t region[] = {BlitterConstants::maxBlitWidth + 1, BlitterConstants::maxBlitHeight, 1};
-        EnqueueWriteImageHelper<>::enqueueWriteImage(mockCmdQ.get(), image.get(), CL_FALSE, origin, region);
-        EXPECT_FALSE(mockCmdQ->isBlitEnqueueImageAllowed);
-    }
-    {
-        size_t region[] = {BlitterConstants::maxBlitWidth, BlitterConstants::maxBlitHeight, 1};
-        EnqueueWriteImageHelper<>::enqueueWriteImage(mockCmdQ.get(), image.get(), CL_FALSE, origin, region);
-        EXPECT_TRUE(mockCmdQ->isBlitEnqueueImageAllowed);
-    }
-    {
-        DebugManager.flags.EnableBlitterForEnqueueImageOperations.set(-1);
-        size_t region[] = {BlitterConstants::maxBlitWidth, BlitterConstants::maxBlitHeight, 1};
-        EnqueueWriteImageHelper<>::enqueueWriteImage(mockCmdQ.get(), image.get(), CL_FALSE, origin, region);
-        auto supportExpected = hwHelper.isBlitterForImagesSupported(*hwInfo);
-        EXPECT_EQ(supportExpected, mockCmdQ->isBlitEnqueueImageAllowed);
-    }
-    {
-        DebugManager.flags.EnableBlitterForEnqueueImageOperations.set(0);
-        size_t region[] = {BlitterConstants::maxBlitWidth, BlitterConstants::maxBlitHeight, 1};
-        EnqueueWriteImageHelper<>::enqueueWriteImage(mockCmdQ.get(), image.get(), CL_FALSE, origin, region);
-        EXPECT_FALSE(mockCmdQ->isBlitEnqueueImageAllowed);
-    }
 }
 
 HWTEST_F(EnqueueWriteImageTest, GivenImage1DarrayWhenReadWriteImageIsCalledThenHostPtrSizeIsCalculatedProperly) {
@@ -278,10 +242,9 @@ HWTEST_F(EnqueueWriteImageTest, GivenImage1DarrayWhenWriteImageIsCalledThenRowPi
         pCmdQ->getClDevice());
 
     // substitute original builder with mock builder
-    auto oldBuilder = builtIns->setBuiltinDispatchInfoBuilder(
+    auto oldBuilder = pClExecutionEnvironment->setBuiltinDispatchInfoBuilder(
+        rootDeviceIndex,
         copyBuiltIn,
-        pCmdQ->getContext(),
-        pCmdQ->getDevice(),
         std::unique_ptr<NEO::BuiltinDispatchInfoBuilder>(new MockBuiltinDispatchInfoBuilder(*builtIns, pCmdQ->getClDevice(), &origBuilder)));
 
     std::unique_ptr<Image> image;
@@ -300,10 +263,9 @@ HWTEST_F(EnqueueWriteImageTest, GivenImage1DarrayWhenWriteImageIsCalledThenRowPi
     EXPECT_EQ(params->srcRowPitch, slicePitch);
 
     // restore original builder and retrieve mock builder
-    auto newBuilder = builtIns->setBuiltinDispatchInfoBuilder(
+    auto newBuilder = pClExecutionEnvironment->setBuiltinDispatchInfoBuilder(
+        rootDeviceIndex,
         copyBuiltIn,
-        pCmdQ->getContext(),
-        pCmdQ->getDevice(),
         std::move(oldBuilder));
     EXPECT_NE(nullptr, newBuilder);
 }
@@ -461,10 +423,9 @@ HWTEST_P(MipMapWriteImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalle
         pCmdQ->getClDevice());
 
     // substitute original builder with mock builder
-    auto oldBuilder = builtIns->setBuiltinDispatchInfoBuilder(
+    auto oldBuilder = pClExecutionEnvironment->setBuiltinDispatchInfoBuilder(
+        rootDeviceIndex,
         EBuiltInOps::CopyBufferToImage3d,
-        pCmdQ->getContext(),
-        pCmdQ->getDevice(),
         std::unique_ptr<NEO::BuiltinDispatchInfoBuilder>(new MockBuiltinDispatchInfoBuilder(*builtIns, pCmdQ->getClDevice(), &origBuilder)));
 
     cl_int retVal = CL_SUCCESS;
@@ -529,10 +490,9 @@ HWTEST_P(MipMapWriteImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalle
     EXPECT_EQ(expectedMipLevel, params->dstMipLevel);
 
     // restore original builder and retrieve mock builder
-    auto newBuilder = builtIns->setBuiltinDispatchInfoBuilder(
+    auto newBuilder = pClExecutionEnvironment->setBuiltinDispatchInfoBuilder(
+        rootDeviceIndex,
         EBuiltInOps::CopyBufferToImage3d,
-        pCmdQ->getContext(),
-        pCmdQ->getDevice(),
         std::move(oldBuilder));
     EXPECT_NE(nullptr, newBuilder);
 }

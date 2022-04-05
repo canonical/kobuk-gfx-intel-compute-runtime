@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -61,8 +61,7 @@ void ImageHw<GfxFamily>::setImageArg(void *memory, bool setAsMediaBlockImage, ui
     } else {
         setImageSurfaceStateDimensions<GfxFamily>(surfaceState, imgInfo, cubeFaceIndex, surfaceType);
         if (setAsMediaBlockImage) {
-            uint32_t elSize = static_cast<uint32_t>(getSurfaceFormatInfo().surfaceFormat.ImageElementSizeInBytes);
-            surfaceState->setWidth(static_cast<uint32_t>((getImageDesc().image_width * elSize) / sizeof(uint32_t)));
+            setWidthForMediaBlockSurfaceState<GfxFamily>(surfaceState, imgInfo);
         }
     }
 
@@ -88,7 +87,7 @@ void ImageHw<GfxFamily>::setImageArg(void *memory, bool setAsMediaBlockImage, ui
 
     if (imageDesc.num_samples > 1) {
         setAuxParamsForMultisamples(surfaceState);
-    } else if (gmm && gmm->isCompressionEnabled) {
+    } else if (graphicsAllocation->isCompressionEnabled()) {
         EncodeSurfaceState<GfxFamily>::setImageAuxParamsForCCS(surfaceState, gmm);
     } else {
         EncodeSurfaceState<GfxFamily>::disableCompressionFlags(surfaceState);
@@ -167,7 +166,7 @@ void ImageHw<GfxFamily>::setMediaImageArg(void *memory, uint32_t rootDeviceIndex
     state.setXOffsetForVCr(0);
     state.setYOffsetForVCr(0);
 
-    setSurfaceMemoryObjectControlStateIndexToMocsTable(
+    setSurfaceMemoryObjectControlState(
         reinterpret_cast<void *>(&state),
         gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_IMAGE));
 
@@ -199,6 +198,28 @@ void ImageHw<GfxFamily>::transformImage3dTo2dArray(void *memory) {
     auto surfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(memory);
     surfaceState->setSurfaceType(SURFACE_TYPE::SURFACE_TYPE_SURFTYPE_2D);
     surfaceState->setSurfaceArray(true);
+}
+
+template <typename GfxFamily>
+inline void ImageHw<GfxFamily>::setMediaSurfaceRotation(void *memory) {
+    using MEDIA_SURFACE_STATE = typename GfxFamily::MEDIA_SURFACE_STATE;
+    using SURFACE_FORMAT = typename MEDIA_SURFACE_STATE::SURFACE_FORMAT;
+
+    auto surfaceState = reinterpret_cast<MEDIA_SURFACE_STATE *>(memory);
+
+    surfaceState->setRotation(MEDIA_SURFACE_STATE::ROTATION_NO_ROTATION_OR_0_DEGREE);
+    surfaceState->setXOffset(0);
+    surfaceState->setYOffset(0);
+}
+
+template <typename GfxFamily>
+inline void ImageHw<GfxFamily>::setSurfaceMemoryObjectControlState(void *memory, uint32_t value) {
+    using MEDIA_SURFACE_STATE = typename GfxFamily::MEDIA_SURFACE_STATE;
+    using SURFACE_FORMAT = typename MEDIA_SURFACE_STATE::SURFACE_FORMAT;
+
+    auto surfaceState = reinterpret_cast<MEDIA_SURFACE_STATE *>(memory);
+
+    surfaceState->setSurfaceMemoryObjectControlState(value);
 }
 
 } // namespace NEO

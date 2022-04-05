@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -57,13 +57,11 @@ GEN11TEST_F(Gen11UrbEntryAllocationSize, WhenPreambleRetrievesUrbEntryAllocation
 typedef PreambleVfeState Gen11PreambleVfeState;
 GEN11TEST_F(Gen11PreambleVfeState, GivenWaOffWhenProgrammingVfeStateThenProgrammingIsCorrect) {
     typedef typename ICLFamily::PIPE_CONTROL PIPE_CONTROL;
-    testWaTable->waSendMIFLUSHBeforeVFE = 0;
+    testWaTable->flags.waSendMIFLUSHBeforeVFE = 0;
     LinearStream &cs = linearStream;
-    auto pVfeCmd = PreambleHelper<ICLFamily>::getSpaceForVfeState(&linearStream, pPlatform->getClDevice(0)->getHardwareInfo(), EngineGroupType::RenderCompute);
+    auto pVfeCmd = PreambleHelper<ICLFamily>::getSpaceForVfeState(&linearStream, pDevice->getHardwareInfo(), EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<ICLFamily>::programVfeState(pVfeCmd, pPlatform->getClDevice(0)->getHardwareInfo(), 0u, 0, 168u,
-                                               AdditionalKernelExecInfo::NotApplicable,
-                                               emptyProperties);
+    PreambleHelper<ICLFamily>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 168u, emptyProperties);
 
     parseCommands<ICLFamily>(cs);
 
@@ -79,13 +77,11 @@ GEN11TEST_F(Gen11PreambleVfeState, GivenWaOffWhenProgrammingVfeStateThenProgramm
 
 GEN11TEST_F(Gen11PreambleVfeState, GivenWaOnWhenProgrammingVfeStateThenProgrammingIsCorrect) {
     typedef typename ICLFamily::PIPE_CONTROL PIPE_CONTROL;
-    testWaTable->waSendMIFLUSHBeforeVFE = 1;
+    testWaTable->flags.waSendMIFLUSHBeforeVFE = 1;
     LinearStream &cs = linearStream;
-    auto pVfeCmd = PreambleHelper<ICLFamily>::getSpaceForVfeState(&linearStream, pPlatform->getClDevice(0)->getHardwareInfo(), EngineGroupType::RenderCompute);
+    auto pVfeCmd = PreambleHelper<ICLFamily>::getSpaceForVfeState(&linearStream, pDevice->getHardwareInfo(), EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<ICLFamily>::programVfeState(pVfeCmd, pPlatform->getClDevice(0)->getHardwareInfo(), 0u, 0, 168u,
-                                               AdditionalKernelExecInfo::NotApplicable,
-                                               emptyProperties);
+    PreambleHelper<ICLFamily>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 168u, emptyProperties);
 
     parseCommands<ICLFamily>(cs);
 
@@ -119,7 +115,7 @@ GEN11TEST_F(PreemptionWatermarkGen11, WhenPreambleIsCreatedThenWorkAroundsIsNotP
 }
 
 typedef PreambleFixture ThreadArbitrationGen11;
-GEN11TEST_F(ThreadArbitrationGen11, givenPreambleWhenItIsProgrammedThenThreadArbitrationIsSet) {
+GEN11TEST_F(ThreadArbitrationGen11, givenPreambleWhenItIsProgrammedThenThreadArbitrationIsNotSet) {
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.ForcePreemptionMode.set(static_cast<int32_t>(PreemptionMode::Disabled));
     typedef ICLFamily::MI_LOAD_REGISTER_IMM MI_LOAD_REGISTER_IMM;
@@ -128,8 +124,30 @@ GEN11TEST_F(ThreadArbitrationGen11, givenPreambleWhenItIsProgrammedThenThreadArb
     uint32_t l3Config = PreambleHelper<FamilyType>::getL3Config(*defaultHwInfo, true);
     MockDevice mockDevice;
     PreambleHelper<FamilyType>::programPreamble(&linearStream, mockDevice, l3Config,
-                                                ThreadArbitrationPolicy::RoundRobin,
                                                 nullptr);
+
+    parseCommands<FamilyType>(cs);
+
+    auto ppC = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+    ASSERT_EQ(cmdList.end(), ppC);
+
+    auto cmd = findMmioCmd<FamilyType>(cmdList.begin(), cmdList.end(), RowChickenReg4::address);
+    ASSERT_EQ(nullptr, cmd);
+
+    MockDevice device;
+    EXPECT_EQ(0u, PreambleHelper<ICLFamily>::getAdditionalCommandsSize(device));
+}
+
+GEN11TEST_F(ThreadArbitrationGen11, whenThreadArbitrationPolicyIsProgrammedThenCorrectValuesAreSet) {
+    DebugManagerStateRestore dbgRestore;
+    DebugManager.flags.ForcePreemptionMode.set(static_cast<int32_t>(PreemptionMode::Disabled));
+    typedef ICLFamily::MI_LOAD_REGISTER_IMM MI_LOAD_REGISTER_IMM;
+    typedef ICLFamily::PIPE_CONTROL PIPE_CONTROL;
+    LinearStream &cs = linearStream;
+    MockDevice mockDevice;
+    StreamProperties streamProperties{};
+    streamProperties.stateComputeMode.threadArbitrationPolicy.set(ThreadArbitrationPolicy::RoundRobin);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(linearStream, streamProperties.stateComputeMode, *defaultHwInfo);
 
     parseCommands<FamilyType>(cs);
 
@@ -143,9 +161,50 @@ GEN11TEST_F(ThreadArbitrationGen11, givenPreambleWhenItIsProgrammedThenThreadArb
 
     MockDevice device;
     EXPECT_EQ(0u, PreambleHelper<ICLFamily>::getAdditionalCommandsSize(device));
-    EXPECT_EQ(sizeof(MI_LOAD_REGISTER_IMM) + sizeof(PIPE_CONTROL), PreambleHelper<ICLFamily>::getThreadArbitrationCommandsSize());
 }
 
 GEN11TEST_F(ThreadArbitrationGen11, GivenDefaultWhenProgrammingPreambleThenArbitrationPolicyIsRoundRobin) {
     EXPECT_EQ(ThreadArbitrationPolicy::RoundRobinAfterDependency, HwHelperHw<ICLFamily>::get().getDefaultThreadArbitrationPolicy());
+}
+
+GEN11TEST_F(ThreadArbitrationGen11, whenGetSupportThreadArbitrationPoliciesIsCalledThenAllPoliciesAreReturned) {
+    auto supportedPolicies = PreambleHelper<ICLFamily>::getSupportedThreadArbitrationPolicies();
+
+    EXPECT_EQ(3u, supportedPolicies.size());
+    EXPECT_NE(supportedPolicies.end(), std::find(supportedPolicies.begin(),
+                                                 supportedPolicies.end(),
+                                                 ThreadArbitrationPolicy::AgeBased));
+    EXPECT_NE(supportedPolicies.end(), std::find(supportedPolicies.begin(),
+                                                 supportedPolicies.end(),
+                                                 ThreadArbitrationPolicy::RoundRobin));
+    EXPECT_NE(supportedPolicies.end(), std::find(supportedPolicies.begin(),
+                                                 supportedPolicies.end(),
+                                                 ThreadArbitrationPolicy::RoundRobinAfterDependency));
+}
+using PreambleFixtureGen11 = PreambleFixture;
+GEN11TEST_F(PreambleFixtureGen11, whenKernelDebuggingCommandsAreProgrammedThenCorrectRegisterAddressesAndValuesAreSet) {
+    typedef typename FamilyType::MI_LOAD_REGISTER_IMM MI_LOAD_REGISTER_IMM;
+
+    auto bufferSize = PreambleHelper<FamilyType>::getKernelDebuggingCommandsSize(true);
+    auto buffer = std::unique_ptr<char[]>(new char[bufferSize]);
+
+    LinearStream stream(buffer.get(), bufferSize);
+    PreambleHelper<FamilyType>::programKernelDebugging(&stream);
+
+    HardwareParse hwParser;
+    hwParser.parseCommands<FamilyType>(stream);
+    auto cmdList = hwParser.getCommandsList<MI_LOAD_REGISTER_IMM>();
+
+    ASSERT_EQ(2u, cmdList.size());
+
+    auto it = cmdList.begin();
+
+    MI_LOAD_REGISTER_IMM *pCmd = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(*it);
+    EXPECT_EQ(0x20d8u, pCmd->getRegisterOffset());
+    EXPECT_EQ((1u << 5) | (1u << 21), pCmd->getDataDword());
+    it++;
+
+    pCmd = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(*it);
+    EXPECT_EQ(0xe400u, pCmd->getRegisterOffset());
+    EXPECT_EQ((1u << 7) | (1u << 4), pCmd->getDataDword());
 }

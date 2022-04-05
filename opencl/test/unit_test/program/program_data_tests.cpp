@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,7 +10,11 @@
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/program/program_info_from_patchtokens.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_csr.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/compiler_interface/linker_mock.h"
 #include "shared/test/unit_test/device_binary_format/patchtokens_tests.h"
 
@@ -18,11 +22,8 @@
 #include "opencl/source/program/program.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
-#include "opencl/test/unit_test/mocks/mock_csr.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 #include "opencl/test/unit_test/program/program_with_source.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -459,11 +460,19 @@ TEST_F(ProgramDataTest, GivenProgramWith32bitPointerOptWhenProgramScopeConstantB
     EXPECT_EQ(nullptr, prog->getConstantSurface(pContext->getDevice(0)->getRootDeviceIndex()));
     ProgramInfo programInfo;
     programInfo.prepareLinkerInputStorage();
+
     NEO::LinkerInput::RelocationInfo relocInfo;
     relocInfo.relocationSegment = NEO::SegmentType::GlobalConstants;
-    relocInfo.symbolSegment = NEO::SegmentType::GlobalConstants;
     relocInfo.offset = 0U;
     relocInfo.type = NEO::LinkerInput::RelocationInfo::Type::Address;
+    relocInfo.symbolName = "GlobalConstantPointer";
+
+    NEO::SymbolInfo symbol = {};
+    symbol.offset = 0U;
+    symbol.size = 8U;
+    symbol.segment = NEO::SegmentType::GlobalConstants;
+
+    programInfo.linkerInput->addSymbol("GlobalConstantPointer", symbol);
     programInfo.linkerInput->addDataRelocationInfo(relocInfo);
     programInfo.linkerInput->setPointerSize(LinkerInput::Traits::PointerSize::Ptr32bit);
 
@@ -479,7 +488,7 @@ TEST_F(ProgramDataTest, GivenProgramWith32bitPointerOptWhenProgramScopeConstantB
     programInfo.globalConstants.initData = constantSurface.mockGfxAllocation.getUnderlyingBuffer();
 
     pProgram->setLinkerInput(pClDevice->getRootDeviceIndex(), std::move(programInfo.linkerInput));
-    pProgram->linkBinary(&pClDevice->getDevice(), programInfo.globalConstants.initData, programInfo.globalVariables.initData);
+    pProgram->linkBinary(&pClDevice->getDevice(), programInfo.globalConstants.initData, programInfo.globalVariables.initData, {}, prog->externalFunctions);
     uint32_t expectedAddr = static_cast<uint32_t>(constantSurface.getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddressToPatch());
     EXPECT_EQ(expectedAddr, constantSurfaceStorage[0]);
     EXPECT_EQ(sentinel, constantSurfaceStorage[1]);
@@ -499,10 +508,17 @@ TEST_F(ProgramDataTest, GivenProgramWith32bitPointerOptWhenProgramScopeGlobalPoi
     ProgramInfo programInfo;
     programInfo.prepareLinkerInputStorage();
     NEO::LinkerInput::RelocationInfo relocInfo;
-    relocInfo.relocationSegment = NEO::SegmentType::GlobalVariables;
-    relocInfo.symbolSegment = NEO::SegmentType::GlobalVariables;
     relocInfo.offset = 0U;
     relocInfo.type = NEO::LinkerInput::RelocationInfo::Type::Address;
+    relocInfo.relocationSegment = NEO::SegmentType::GlobalVariables;
+    relocInfo.symbolName = "GlobalVariablePointer";
+
+    NEO::SymbolInfo symbol = {};
+    symbol.offset = 0U;
+    symbol.size = 8U;
+    symbol.segment = NEO::SegmentType::GlobalVariables;
+
+    programInfo.linkerInput->addSymbol("GlobalVariablePointer", symbol);
     programInfo.linkerInput->addDataRelocationInfo(relocInfo);
     programInfo.linkerInput->setPointerSize(LinkerInput::Traits::PointerSize::Ptr32bit);
 
@@ -518,7 +534,7 @@ TEST_F(ProgramDataTest, GivenProgramWith32bitPointerOptWhenProgramScopeGlobalPoi
     programInfo.globalVariables.initData = globalSurface.mockGfxAllocation.getUnderlyingBuffer();
 
     pProgram->setLinkerInput(pClDevice->getRootDeviceIndex(), std::move(programInfo.linkerInput));
-    pProgram->linkBinary(&pClDevice->getDevice(), programInfo.globalConstants.initData, programInfo.globalVariables.initData);
+    pProgram->linkBinary(&pClDevice->getDevice(), programInfo.globalConstants.initData, programInfo.globalVariables.initData, {}, prog->externalFunctions);
     uint32_t expectedAddr = static_cast<uint32_t>(globalSurface.getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddressToPatch());
     EXPECT_EQ(expectedAddr, globalSurfaceStorage[0]);
     EXPECT_EQ(sentinel, globalSurfaceStorage[1]);
@@ -545,7 +561,7 @@ TEST(ProgramLinkBinaryTest, whenLinkerInputEmptyThenLinkSuccessful) {
     auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
     MockProgram program{nullptr, false, toClDeviceVector(*device)};
     program.setLinkerInput(device->getRootDeviceIndex(), std::move(linkerInput));
-    auto ret = program.linkBinary(&device->getDevice(), nullptr, nullptr);
+    auto ret = program.linkBinary(&device->getDevice(), nullptr, nullptr, {}, program.externalFunctions);
     EXPECT_EQ(CL_SUCCESS, ret);
 }
 
@@ -570,7 +586,7 @@ TEST(ProgramLinkBinaryTest, whenLinkerUnresolvedExternalThenLinkFailedAndBuildLo
 
     std::string buildLog = program.getBuildLog(device->getRootDeviceIndex());
     EXPECT_TRUE(buildLog.empty());
-    auto ret = program.linkBinary(&device->getDevice(), nullptr, nullptr);
+    auto ret = program.linkBinary(&device->getDevice(), nullptr, nullptr, {}, program.externalFunctions);
     EXPECT_NE(CL_SUCCESS, ret);
     program.getKernelInfoArray(rootDeviceIndex).clear();
     buildLog = program.getBuildLog(rootDeviceIndex);
@@ -617,7 +633,7 @@ TEST_F(ProgramDataTest, whenLinkerInputValidThenIsaIsProperlyPatched) {
     buildInfo.globalSurface = new MockGraphicsAllocation(globalVariablesBuffer.data(), globalVariablesBuffer.size());
     buildInfo.constantSurface = new MockGraphicsAllocation(globalConstantsBuffer.data(), globalConstantsBuffer.size());
 
-    auto ret = program.linkBinary(&pClDevice->getDevice(), globalConstantsInitData.data(), globalVariablesInitData.data());
+    auto ret = program.linkBinary(&pClDevice->getDevice(), globalConstantsInitData.data(), globalVariablesInitData.data(), {}, program.externalFunctions);
     EXPECT_EQ(CL_SUCCESS, ret);
 
     linkerInput.reset(static_cast<WhiteBox<LinkerInput> *>(buildInfo.linkerInput.release()));
@@ -665,7 +681,7 @@ TEST_F(ProgramDataTest, whenRelocationsAreNotNeededThenIsaIsPreserved) {
     buildInfo.globalSurface = new MockGraphicsAllocation(globalVariablesBuffer.data(), globalVariablesBuffer.size());
     buildInfo.constantSurface = new MockGraphicsAllocation(globalConstantsBuffer.data(), globalConstantsBuffer.size());
 
-    auto ret = program.linkBinary(&pClDevice->getDevice(), globalConstantsInitData.data(), globalVariablesInitData.data());
+    auto ret = program.linkBinary(&pClDevice->getDevice(), globalConstantsInitData.data(), globalVariablesInitData.data(), {}, program.externalFunctions);
     EXPECT_EQ(CL_SUCCESS, ret);
     EXPECT_EQ(kernelHeapData, kernelHeap);
 
@@ -674,4 +690,124 @@ TEST_F(ProgramDataTest, whenRelocationsAreNotNeededThenIsaIsPreserved) {
     buildInfo.globalSurface = nullptr;
     delete buildInfo.constantSurface;
     buildInfo.constantSurface = nullptr;
+}
+
+TEST(ProgramStringSectionTest, WhenConstStringBufferIsPresentThenUseItForLinking) {
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    auto rootDeviceIndex = device->getRootDeviceIndex();
+
+    MockProgram program{nullptr, false, toClDeviceVector(*device)};
+
+    uint8_t kernelHeapData[64] = {};
+    MockGraphicsAllocation kernelIsa(kernelHeapData, 64);
+
+    KernelInfo kernelInfo = {};
+    kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "onlyKernel";
+    kernelInfo.heapInfo.pKernelHeap = kernelHeapData;
+    kernelInfo.heapInfo.KernelHeapSize = 64;
+    kernelInfo.kernelAllocation = &kernelIsa;
+
+    program.getKernelInfoArray(rootDeviceIndex).push_back(&kernelInfo);
+
+    auto linkerInput = std::make_unique<WhiteBox<LinkerInput>>();
+    linkerInput->relocations.push_back({{".str", 0x8, LinkerInput::RelocationInfo::Type::Address, SegmentType::Instructions}});
+    linkerInput->symbols.insert({".str", {0x0, 0x8, SegmentType::GlobalStrings}});
+    linkerInput->traits.requiresPatchingOfInstructionSegments = true;
+
+    program.setLinkerInput(rootDeviceIndex, std::move(linkerInput));
+
+    auto isaCpuPtr = reinterpret_cast<char *>(kernelInfo.getGraphicsAllocation()->getUnderlyingBuffer());
+    auto patchAddr = ptrOffset(isaCpuPtr, 0x8);
+
+    const char constStringData[] = "Hello World!\n";
+    auto stringsAddr = reinterpret_cast<uintptr_t>(constStringData);
+
+    auto ret = program.linkBinary(&device->getDevice(), nullptr, nullptr, {constStringData, sizeof(constStringData)}, program.externalFunctions);
+    EXPECT_EQ(CL_SUCCESS, ret);
+    EXPECT_EQ(static_cast<size_t>(stringsAddr), *reinterpret_cast<size_t *>(patchAddr));
+
+    program.getKernelInfoArray(rootDeviceIndex).clear();
+}
+
+TEST(ProgramImplicitArgsTest, givenImplicitRelocationAndStackCallsThenKernelRequiresImplicitArgs) {
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    auto rootDeviceIndex = device->getRootDeviceIndex();
+    MockProgram program{nullptr, false, toClDeviceVector(*device)};
+    KernelInfo kernelInfo = {};
+    kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "onlyKernel";
+    kernelInfo.kernelDescriptor.kernelAttributes.flags.useStackCalls = true;
+    uint8_t kernelHeapData[64] = {};
+    kernelInfo.heapInfo.pKernelHeap = kernelHeapData;
+    kernelInfo.heapInfo.KernelHeapSize = 64;
+    MockGraphicsAllocation kernelIsa(kernelHeapData, 64);
+    kernelInfo.kernelAllocation = &kernelIsa;
+    program.getKernelInfoArray(rootDeviceIndex).push_back(&kernelInfo);
+
+    auto linkerInput = std::make_unique<WhiteBox<LinkerInput>>();
+    linkerInput->relocations.push_back({{implicitArgsRelocationSymbolNames[0], 0x8, LinkerInput::RelocationInfo::Type::AddressLow, SegmentType::Instructions}});
+    linkerInput->traits.requiresPatchingOfInstructionSegments = true;
+    program.setLinkerInput(rootDeviceIndex, std::move(linkerInput));
+    auto ret = program.linkBinary(&device->getDevice(), nullptr, nullptr, {}, program.externalFunctions);
+    EXPECT_EQ(CL_SUCCESS, ret);
+
+    EXPECT_TRUE(kernelInfo.kernelDescriptor.kernelAttributes.flags.requiresImplicitArgs);
+    program.getKernelInfoArray(rootDeviceIndex).clear();
+}
+
+TEST(ProgramImplicitArgsTest, givenImplicitRelocationAndEnabledDebuggerThenKernelRequiresImplicitArgs) {
+    if (!defaultHwInfo->capabilityTable.debuggerSupported) {
+        GTEST_SKIP();
+    }
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.EnableMockSourceLevelDebugger.set(1);
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+
+    EXPECT_NE(nullptr, device->getDebugger());
+    auto rootDeviceIndex = device->getRootDeviceIndex();
+    MockProgram program{nullptr, false, toClDeviceVector(*device)};
+    KernelInfo kernelInfo = {};
+    kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "onlyKernel";
+    kernelInfo.kernelDescriptor.kernelAttributes.flags.useStackCalls = false;
+    uint8_t kernelHeapData[64] = {};
+    kernelInfo.heapInfo.pKernelHeap = kernelHeapData;
+    kernelInfo.heapInfo.KernelHeapSize = 64;
+    MockGraphicsAllocation kernelIsa(kernelHeapData, 64);
+    kernelInfo.kernelAllocation = &kernelIsa;
+    program.getKernelInfoArray(rootDeviceIndex).push_back(&kernelInfo);
+
+    auto linkerInput = std::make_unique<WhiteBox<LinkerInput>>();
+    linkerInput->relocations.push_back({{implicitArgsRelocationSymbolNames[0], 0x8, LinkerInput::RelocationInfo::Type::AddressLow, SegmentType::Instructions}});
+    linkerInput->traits.requiresPatchingOfInstructionSegments = true;
+    program.setLinkerInput(rootDeviceIndex, std::move(linkerInput));
+    auto ret = program.linkBinary(&device->getDevice(), nullptr, nullptr, {}, program.externalFunctions);
+    EXPECT_EQ(CL_SUCCESS, ret);
+
+    EXPECT_TRUE(kernelInfo.kernelDescriptor.kernelAttributes.flags.requiresImplicitArgs);
+    program.getKernelInfoArray(rootDeviceIndex).clear();
+}
+
+TEST(ProgramImplicitArgsTest, givenImplicitRelocationAndNoStackCallsAndDisabledDebuggerThenKernelDoesntRequireImplicitArgs) {
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    EXPECT_EQ(nullptr, device->getDebugger());
+    auto rootDeviceIndex = device->getRootDeviceIndex();
+    MockProgram program{nullptr, false, toClDeviceVector(*device)};
+    KernelInfo kernelInfo = {};
+    kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "onlyKernel";
+    kernelInfo.kernelDescriptor.kernelAttributes.flags.useStackCalls = false;
+    uint8_t kernelHeapData[64] = {};
+    kernelInfo.heapInfo.pKernelHeap = kernelHeapData;
+    kernelInfo.heapInfo.KernelHeapSize = 64;
+    MockGraphicsAllocation kernelIsa(kernelHeapData, 64);
+    kernelInfo.kernelAllocation = &kernelIsa;
+    program.getKernelInfoArray(rootDeviceIndex).push_back(&kernelInfo);
+
+    auto linkerInput = std::make_unique<WhiteBox<LinkerInput>>();
+    linkerInput->relocations.push_back({{implicitArgsRelocationSymbolNames[0], 0x8, LinkerInput::RelocationInfo::Type::AddressLow, SegmentType::Instructions}});
+    linkerInput->traits.requiresPatchingOfInstructionSegments = true;
+    program.setLinkerInput(rootDeviceIndex, std::move(linkerInput));
+    auto ret = program.linkBinary(&device->getDevice(), nullptr, nullptr, {}, program.externalFunctions);
+    EXPECT_EQ(CL_SUCCESS, ret);
+
+    EXPECT_FALSE(kernelInfo.kernelDescriptor.kernelAttributes.flags.requiresImplicitArgs);
+    program.getKernelInfoArray(rootDeviceIndex).clear();
 }

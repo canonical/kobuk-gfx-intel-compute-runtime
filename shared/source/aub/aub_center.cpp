@@ -11,6 +11,7 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
+#include "shared/source/os_interface/hw_info_config.h"
 
 #include "third_party/aub_stream/headers/aub_manager.h"
 #include "third_party/aub_stream/headers/aubstream.h"
@@ -21,7 +22,7 @@ extern aub_stream::AubManager *createAubManager(uint32_t productFamily, uint32_t
 AubCenter::AubCenter(const HardwareInfo *pHwInfo, const GmmHelper &gmmHelper, bool localMemoryEnabled, const std::string &aubFileName, CommandStreamReceiverType csrType) {
     if (DebugManager.flags.UseAubStream.get()) {
         auto devicesCount = HwHelper::getSubDevicesCount(pHwInfo);
-        auto memoryBankSize = AubHelper::getMemBankSize(pHwInfo);
+        auto memoryBankSize = AubHelper::getPerTileLocalMemorySize(pHwInfo);
         CommandStreamReceiverType type = csrType;
         if (DebugManager.flags.SetCommandStreamReceiver.get() >= CommandStreamReceiverType::CSR_HW) {
             type = static_cast<CommandStreamReceiverType>(DebugManager.flags.SetCommandStreamReceiver.get());
@@ -30,7 +31,8 @@ AubCenter::AubCenter(const HardwareInfo *pHwInfo, const GmmHelper &gmmHelper, bo
         aubStreamMode = getAubStreamMode(aubFileName, type);
 
         auto &hwHelper = HwHelper::get(pHwInfo->platform.eRenderCoreFamily);
-        stepping = hwHelper.getAubStreamSteppingFromHwRevId(*pHwInfo);
+        const auto &hwInfoConfig = *HwInfoConfig::get(pHwInfo->platform.eProductFamily);
+        stepping = hwInfoConfig.getAubStreamSteppingFromHwRevId(*pHwInfo);
 
         aub_stream::MMIOList extraMmioList = hwHelper.getExtraMmioList(*pHwInfo, gmmHelper);
         aub_stream::MMIOList debugMmioList = AubHelper::getAdditionalMmioList();

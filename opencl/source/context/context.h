@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,7 +8,9 @@
 #pragma once
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/common_types.h"
+#include "shared/source/helpers/string.h"
 #include "shared/source/helpers/vec.h"
+#include "shared/source/unified_memory/unified_memory.h"
 
 #include "opencl/source/cl_device/cl_device_vector.h"
 #include "opencl/source/context/context_type.h"
@@ -16,6 +18,7 @@
 #include "opencl/source/gtpin/gtpin_notify.h"
 #include "opencl/source/helpers/base_object.h"
 #include "opencl/source/helpers/destructor_callbacks.h"
+#include "opencl/source/mem_obj/map_operations_handler.h"
 
 #include <list>
 #include <map>
@@ -27,12 +30,10 @@ class AsyncEventsHandler;
 struct BuiltInKernel;
 class CommandQueue;
 class Device;
-class DeviceQueue;
 class MemObj;
 class MemoryManager;
 class SharingFunctions;
 class SVMAllocsManager;
-class SchedulerKernel;
 class Program;
 class Platform;
 
@@ -93,12 +94,27 @@ class Context : public BaseObject<_cl_context> {
         return svmAllocsManager;
     }
 
+    auto &getMapOperationsStorage() { return mapOperationsStorage; }
+
+    cl_int tryGetExistingHostPtrAllocation(const void *ptr,
+                                           size_t size,
+                                           uint32_t rootDeviceIndex,
+                                           GraphicsAllocation *&allocation,
+                                           InternalMemoryType &memoryType,
+                                           bool &isCpuCopyAllowed);
+    cl_int tryGetExistingSvmAllocation(const void *ptr,
+                                       size_t size,
+                                       uint32_t rootDeviceIndex,
+                                       GraphicsAllocation *&allocation,
+                                       InternalMemoryType &memoryType,
+                                       bool &isCpuCopyAllowed);
+    cl_int tryGetExistingMapAllocation(const void *ptr,
+                                       size_t size,
+                                       GraphicsAllocation *&allocation);
+
     const std::set<uint32_t> &getRootDeviceIndices() const;
 
     uint32_t getMaxRootDeviceIndex() const;
-
-    DeviceQueue *getDefaultDeviceQueue();
-    void setDefaultDeviceQueue(DeviceQueue *queue);
 
     CommandQueue *getSpecialQueue(uint32_t rootDeviceIndex);
     void setSpecialQueue(CommandQueue *commandQueue, uint32_t rootDeviceIndex);
@@ -115,7 +131,7 @@ class Context : public BaseObject<_cl_context> {
         DEBUG_BREAK_IF(contextCallback == nullptr);
         DEBUG_BREAK_IF(driverDiagnostics == nullptr);
         char hint[DriverDiagnostics::maxHintStringSize];
-        snprintf(hint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[performanceHint], std::forward<Args>(args)..., 0);
+        snprintf_s(hint, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::maxHintStringSize, DriverDiagnostics::hintFormat[performanceHint], std::forward<Args>(args)..., 0);
         if (driverDiagnostics->validFlags(flags)) {
             if (contextCallback) {
                 contextCallback(hint, &flags, sizeof(flags), userData);
@@ -145,8 +161,6 @@ class Context : public BaseObject<_cl_context> {
     bool isSingleDeviceContext();
 
     ContextType peekContextType() const { return contextType; }
-
-    MOCKABLE_VIRTUAL SchedulerKernel &getSchedulerKernel();
 
     bool isDeviceAssociated(const ClDevice &clDevice) const;
     ClDevice *getSubDeviceByIndex(uint32_t subDeviceIndex) const;
@@ -191,7 +205,6 @@ class Context : public BaseObject<_cl_context> {
     std::vector<std::unique_ptr<SharingFunctions>> sharingFunctions;
     ClDeviceVector devices;
     ContextDestructorCallbacks destructorCallbacks;
-    std::unique_ptr<BuiltInKernel> schedulerBuiltIn;
 
     const cl_context_properties *properties = nullptr;
     size_t numProperties = 0u;
@@ -199,8 +212,8 @@ class Context : public BaseObject<_cl_context> {
     void *userData = nullptr;
     MemoryManager *memoryManager = nullptr;
     SVMAllocsManager *svmAllocsManager = nullptr;
+    MapOperationsStorage mapOperationsStorage = {};
     StackVec<CommandQueue *, 1> specialQueues;
-    DeviceQueue *defaultDeviceQueue = nullptr;
     DriverDiagnostics *driverDiagnostics = nullptr;
 
     uint32_t maxRootDeviceIndex = std::numeric_limits<uint32_t>::max();

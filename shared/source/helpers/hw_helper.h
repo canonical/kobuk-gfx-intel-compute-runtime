@@ -1,22 +1,21 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include "shared/source/aub_mem_dump/aub_mem_dump.h"
 #include "shared/source/built_ins/sip.h"
 #include "shared/source/command_container/command_encoder.h"
-#include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/commands/bxml_generator_glue.h"
 #include "shared/source/helpers/aux_translation.h"
+#include "shared/source/helpers/definitions/engine_group_types.h"
 #include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/helpers/options.h"
 #include "shared/source/utilities/stackvec.h"
 
-#include "aub_mem_dump.h"
-#include "engine_group_types.h"
 #include "hw_cmds.h"
 #include "third_party/aub_stream/headers/aubstream.h"
 
@@ -28,23 +27,17 @@ namespace NEO {
 class GmmHelper;
 class GraphicsAllocation;
 class TagAllocatorBase;
+class LinearSteram;
 class Gmm;
 struct AllocationData;
 struct AllocationProperties;
+struct EncodeSurfaceStateArgs;
 struct EngineControl;
-struct HardwareCapabilities;
 struct RootDeviceEnvironment;
 struct PipeControlArgs;
 
-enum class LocalMemoryAccessMode {
-    Default = 0,
-    CpuAccessAllowed = 1,
-    CpuAccessDisallowed = 3
-};
-
 class HwHelper {
   public:
-    using EngineInstancesContainer = StackVec<EngineTypeUsage, 32>;
     static HwHelper &get(GFXCORE_FAMILY gfxCore);
     virtual uint32_t getBindingTableStateSurfaceStatePointer(const void *pBindingTable, uint32_t index) = 0;
     virtual size_t getBindingTableStateSize() const = 0;
@@ -55,29 +48,23 @@ class HwHelper {
     virtual uint32_t getComputeUnitsUsedForScratch(const HardwareInfo *pHwInfo) const = 0;
     virtual uint32_t getPitchAlignmentForImage(const HardwareInfo *hwInfo) const = 0;
     virtual uint32_t getMaxNumSamplers() const = 0;
-    virtual void setCapabilityCoherencyFlag(const HardwareInfo *pHwInfo, bool &coherencyFlag) = 0;
     virtual void adjustDefaultEngineType(HardwareInfo *pHwInfo) = 0;
-    virtual void setupHardwareCapabilities(HardwareCapabilities *caps, const HardwareInfo &hwInfo) = 0;
     virtual bool isL3Configurable(const HardwareInfo &hwInfo) = 0;
     virtual SipKernelType getSipKernelType(bool debuggingActive) const = 0;
     virtual bool isLocalMemoryEnabled(const HardwareInfo &hwInfo) const = 0;
-    virtual bool isPageTableManagerSupported(const HardwareInfo &hwInfo) const = 0;
     virtual bool is1MbAlignmentSupported(const HardwareInfo &hwInfo, bool isCompressionEnabled) const = 0;
     virtual bool isFenceAllocationRequired(const HardwareInfo &hwInfo) const = 0;
     virtual const AubMemDump::LrcaHelper &getCsTraits(aub_stream::EngineType engineType) const = 0;
     virtual bool hvAlign4Required() const = 0;
     virtual bool preferSmallWorkgroupSizeForKernel(const size_t size, const HardwareInfo &hwInfo) const = 0;
-    virtual bool isBufferSizeSuitableForRenderCompression(const size_t size, const HardwareInfo &hwInfo) const = 0;
-    virtual bool obtainBlitterPreference(const HardwareInfo &hwInfo) const = 0;
+    virtual bool isBufferSizeSuitableForCompression(const size_t size, const HardwareInfo &hwInfo) const = 0;
     virtual bool checkResourceCompatibility(GraphicsAllocation &graphicsAllocation) = 0;
-    virtual bool allowRenderCompression(const HardwareInfo &hwInfo) const = 0;
-    virtual bool allowStatelessCompression(const HardwareInfo &hwInfo) const = 0;
     virtual bool isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo, const GraphicsAllocation &allocation) const = 0;
-    virtual LocalMemoryAccessMode getLocalMemoryAccessMode(const HardwareInfo &hwInfo) const = 0;
-    static bool renderCompressedBuffersSupported(const HardwareInfo &hwInfo);
-    static bool renderCompressedImagesSupported(const HardwareInfo &hwInfo);
+    static bool compressedBuffersSupported(const HardwareInfo &hwInfo);
+    static bool compressedImagesSupported(const HardwareInfo &hwInfo);
     static bool cacheFlushAfterWalkerSupported(const HardwareInfo &hwInfo);
     virtual bool timestampPacketWriteSupported() const = 0;
+    virtual bool isTimestampWaitSupported() const = 0;
     virtual size_t getRenderSurfaceStateSize() const = 0;
     virtual void setRenderSurfaceStateForBuffer(const RootDeviceEnvironment &rootDeviceEnvironment,
                                                 void *surfaceStateBuffer,
@@ -91,12 +78,11 @@ class HwHelper {
                                                 bool forceNonAuxMode,
                                                 bool useL1Cache) = 0;
     virtual const EngineInstancesContainer getGpgpuEngineInstances(const HardwareInfo &hwInfo) const = 0;
-    virtual EngineGroupType getEngineGroupType(aub_stream::EngineType engineType, const HardwareInfo &hwInfo) const = 0;
+    virtual EngineGroupType getEngineGroupType(aub_stream::EngineType engineType, EngineUsage engineUsage, const HardwareInfo &hwInfo) const = 0;
     virtual const StackVec<size_t, 3> getDeviceSubGroupSizes() const = 0;
     virtual const StackVec<uint32_t, 6> getThreadsPerEUConfigs() const = 0;
     virtual bool getEnableLocalMemory(const HardwareInfo &hwInfo) const = 0;
     virtual std::string getExtensions() const = 0;
-    virtual std::string getDeviceMemoryName() const = 0;
     static uint32_t getMaxThreadsForVfe(const HardwareInfo &hwInfo);
     virtual uint32_t getMetricsLibraryGenId() const = 0;
     virtual uint32_t getMocsIndex(const GmmHelper &gmmHelper, bool l3enabled, bool l1enabled) const = 0;
@@ -107,44 +93,38 @@ class HwHelper {
     virtual uint32_t alignSlmSize(uint32_t slmSize) = 0;
     virtual uint32_t computeSlmValues(const HardwareInfo &hwInfo, uint32_t slmSize) = 0;
 
-    virtual bool isForceEmuInt32DivRemSPWARequired(const HardwareInfo &hwInfo) = 0;
     virtual bool isWaDisableRccRhwoOptimizationRequired() const = 0;
     virtual bool isAdditionalFeatureFlagRequired(const FeatureTable *featureTable) const = 0;
     virtual uint32_t getMinimalSIMDSize() = 0;
-    virtual uint32_t getHwRevIdFromStepping(uint32_t stepping, const HardwareInfo &hwInfo) const = 0;
-    virtual uint32_t getSteppingFromHwRevId(const HardwareInfo &hwInfo) const = 0;
-    virtual uint32_t getAubStreamSteppingFromHwRevId(const HardwareInfo &hwInfo) const = 0;
     virtual bool isWorkaroundRequired(uint32_t lowestSteppingWithBug, uint32_t steppingWithFix, const HardwareInfo &hwInfo) const = 0;
     virtual bool isOffsetToSkipSetFFIDGPWARequired(const HardwareInfo &hwInfo) const = 0;
-    virtual bool is3DPipelineSelectWARequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isFusedEuDispatchEnabled(const HardwareInfo &hwInfo) const = 0;
     virtual uint64_t getGpuTimeStampInNS(uint64_t timeStamp, double frequency) const = 0;
     virtual uint32_t getBindlessSurfaceExtendedMessageDescriptorValue(uint32_t surfStateOffset) const = 0;
     virtual void setExtraAllocationData(AllocationData &allocationData, const AllocationProperties &properties, const HardwareInfo &hwInfo) const = 0;
     virtual bool isBankOverrideRequired(const HardwareInfo &hwInfo) const = 0;
-    virtual bool isSpecialWorkgroupSizeRequired(const HardwareInfo &hwInfo, bool isSimulation) const = 0;
     virtual uint32_t getGlobalTimeStampBits() const = 0;
-    virtual uint32_t getDefaultThreadArbitrationPolicy() const = 0;
-    virtual bool heapInLocalMem(const HardwareInfo &hwInfo) const = 0;
+    virtual int32_t getDefaultThreadArbitrationPolicy() const = 0;
     virtual bool useOnlyGlobalTimestamps() const = 0;
     virtual bool useSystemMemoryPlacementForISA(const HardwareInfo &hwInfo) const = 0;
     virtual bool packedFormatsSupported() const = 0;
-    virtual bool isCooperativeDispatchSupported(const EngineGroupType engineGroupType, const PRODUCT_FAMILY productFamily) const = 0;
+    virtual bool isAssignEngineRoundRobinSupported() const = 0;
+    virtual bool isRcsAvailable(const HardwareInfo &hwInfo) const = 0;
+    virtual bool isCooperativeDispatchSupported(const EngineGroupType engineGroupType, const HardwareInfo &hwInfo) const = 0;
+    virtual uint32_t adjustMaxWorkGroupCount(uint32_t maxWorkGroupCount, const EngineGroupType engineGroupType,
+                                             const HardwareInfo &hwInfo, bool isEngineInstanced) const = 0;
     virtual size_t getMaxFillPaternSizeForCopyEngine() const = 0;
+    virtual size_t getSipKernelMaxDbgSurfaceSize(const HardwareInfo &hwInfo) const = 0;
     virtual bool isCopyOnlyEngineType(EngineGroupType type) const = 0;
-    virtual void adjustAddressWidthForCanonize(uint32_t &addressWidth) const = 0;
     virtual bool isSipWANeeded(const HardwareInfo &hwInfo) const = 0;
-    virtual bool isDisableOverdispatchAvailable(const HardwareInfo &hwInfo) const = 0;
     virtual bool isCpuImageTransferPreferred(const HardwareInfo &hwInfo) const = 0;
     virtual bool isKmdMigrationSupported(const HardwareInfo &hwInfo) const = 0;
-    virtual bool isNewResidencyModelSupported() const = 0;
-    virtual bool isDirectSubmissionSupported(const HardwareInfo &hwInfo) const = 0;
+    virtual bool isCooperativeEngineSupported(const HardwareInfo &hwInfo) const = 0;
     virtual aub_stream::MMIOList getExtraMmioList(const HardwareInfo &hwInfo, const GmmHelper &gmmHelper) const = 0;
     virtual uint32_t getDefaultRevisionId(const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getNumCacheRegions() const = 0;
     virtual bool isSubDeviceEngineSupported(const HardwareInfo &hwInfo, const DeviceBitfield &deviceBitfield, aub_stream::EngineType engineType) const = 0;
     virtual uint32_t getPlanarYuvMaxHeight() const = 0;
-    virtual bool isBlitterForImagesSupported(const HardwareInfo &hwInfo) const = 0;
     virtual size_t getPreemptionAllocationAlignment() const = 0;
     virtual std::unique_ptr<TagAllocatorBase> createTimestampPacketAllocator(const std::vector<uint32_t> &rootDeviceIndices, MemoryManager *memoryManager,
                                                                              size_t initialTagCount, CommandStreamReceiverType csrType,
@@ -152,16 +132,35 @@ class HwHelper {
     virtual size_t getTimestampPacketAllocatorAlignment() const = 0;
     virtual size_t getSingleTimestampPacketSize() const = 0;
     virtual void applyAdditionalCompressionSettings(Gmm &gmm, bool isNotCompressed) const = 0;
-    virtual void applyRenderCompressionFlag(Gmm &gmm, uint32_t isRenderCompressed) const = 0;
-    virtual bool additionalPipeControlArgsRequired() const = 0;
+    virtual void applyRenderCompressionFlag(Gmm &gmm, uint32_t isCompressed) const = 0;
+    virtual bool unTypedDataPortCacheFlushRequired() const = 0;
+    virtual bool isEngineTypeRemappingToHwSpecificRequired() const = 0;
 
     static uint32_t getSubDevicesCount(const HardwareInfo *pHwInfo);
-    static uint32_t getGpgpuEnginesCount(const HardwareInfo &hwInfo);
     static uint32_t getCopyEnginesCount(const HardwareInfo &hwInfo);
 
-  protected:
-    virtual LocalMemoryAccessMode getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const = 0;
+    virtual bool isSipKernelAsHexadecimalArrayPreferred() const = 0;
+    virtual void setSipKernelData(uint32_t *&sipKernelBinary, size_t &kernelBinarySize) const = 0;
+    virtual void adjustPreemptionSurfaceSize(size_t &csrSize) const = 0;
+    virtual size_t getSamplerStateSize() const = 0;
 
+    virtual bool isScratchSpaceSurfaceStateAccessible() const = 0;
+    virtual uint64_t getRenderSurfaceStateBaseAddress(void *renderSurfaceState) const = 0;
+    virtual uint32_t getRenderSurfaceStatePitch(void *renderSurfaceState) const = 0;
+    virtual size_t getMax3dImageWidthOrHeight() const = 0;
+    virtual uint64_t getMaxMemAllocSize() const = 0;
+    virtual bool isStatelesToStatefullWithOffsetSupported() const = 0;
+    virtual void encodeBufferSurfaceState(EncodeSurfaceStateArgs &args) = 0;
+    virtual bool disableL3CacheForDebug(const HardwareInfo &hwInfo) const = 0;
+    virtual bool isRevisionSpecificBinaryBuiltinRequired() const = 0;
+    virtual bool forceNonGpuCoherencyWA(bool requiresCoherency) const = 0;
+    virtual bool platformSupportsImplicitScaling(const NEO::HardwareInfo &hwInfo) const = 0;
+    virtual bool isLinuxCompletionFenceSupported() const = 0;
+    virtual size_t getBatchBufferEndSize() const = 0;
+    virtual const void *getBatchBufferEndReference() const = 0;
+    virtual bool isPlatformFlushTaskEnabled(const NEO::HardwareInfo &hwInfo) const = 0;
+
+  protected:
     HwHelper() = default;
 };
 
@@ -200,11 +199,24 @@ class HwHelperHw : public HwHelper {
         return sizeof(RENDER_SURFACE_STATE);
     }
 
+    size_t getSamplerStateSize() const override {
+        using SAMPLER_STATE = typename GfxFamily::SAMPLER_STATE;
+        return sizeof(SAMPLER_STATE);
+    }
+
     uint32_t getBindlessSurfaceExtendedMessageDescriptorValue(uint32_t surfStateOffset) const override {
         using DataPortBindlessSurfaceExtendedMessageDescriptor = typename GfxFamily::DataPortBindlessSurfaceExtendedMessageDescriptor;
         DataPortBindlessSurfaceExtendedMessageDescriptor messageExtDescriptor = {};
         messageExtDescriptor.setBindlessSurfaceOffset(surfStateOffset);
         return messageExtDescriptor.getBindlessSurfaceOffsetToPatch();
+    }
+
+    uint64_t getRenderSurfaceStateBaseAddress(void *renderSurfaceState) const override {
+        return reinterpret_cast<typename GfxFamily::RENDER_SURFACE_STATE *>(renderSurfaceState)->getSurfaceBaseAddress();
+    }
+
+    uint32_t getRenderSurfaceStatePitch(void *renderSurfaceState) const override {
+        return reinterpret_cast<typename GfxFamily::RENDER_SURFACE_STATE *>(renderSurfaceState)->getSurfacePitch();
     }
 
     const AubMemDump::LrcaHelper &getCsTraits(aub_stream::EngineType engineType) const override;
@@ -219,11 +231,7 @@ class HwHelperHw : public HwHelper {
 
     uint32_t getMaxNumSamplers() const override;
 
-    void setCapabilityCoherencyFlag(const HardwareInfo *pHwInfo, bool &coherencyFlag) override;
-
     void adjustDefaultEngineType(HardwareInfo *pHwInfo) override;
-
-    void setupHardwareCapabilities(HardwareCapabilities *caps, const HardwareInfo &hwInfo) override;
 
     bool isL3Configurable(const HardwareInfo &hwInfo) override;
 
@@ -231,19 +239,15 @@ class HwHelperHw : public HwHelper {
 
     bool isLocalMemoryEnabled(const HardwareInfo &hwInfo) const override;
 
-    bool heapInLocalMem(const HardwareInfo &hwInfo) const override;
-
     bool hvAlign4Required() const override;
 
-    bool isBufferSizeSuitableForRenderCompression(const size_t size, const HardwareInfo &hwInfo) const override;
-
-    bool obtainBlitterPreference(const HardwareInfo &hwInfo) const override;
+    bool isBufferSizeSuitableForCompression(const size_t size, const HardwareInfo &hwInfo) const override;
 
     bool checkResourceCompatibility(GraphicsAllocation &graphicsAllocation) override;
 
     bool timestampPacketWriteSupported() const override;
 
-    bool isPageTableManagerSupported(const HardwareInfo &hwInfo) const override;
+    bool isTimestampWaitSupported() const override;
 
     bool is1MbAlignmentSupported(const HardwareInfo &hwInfo, bool isCompressionEnabled) const override;
 
@@ -265,7 +269,7 @@ class HwHelperHw : public HwHelper {
 
     const EngineInstancesContainer getGpgpuEngineInstances(const HardwareInfo &hwInfo) const override;
 
-    EngineGroupType getEngineGroupType(aub_stream::EngineType engineType, const HardwareInfo &hwInfo) const override;
+    EngineGroupType getEngineGroupType(aub_stream::EngineType engineType, EngineUsage engineUsage, const HardwareInfo &hwInfo) const override;
 
     const StackVec<size_t, 3> getDeviceSubGroupSizes() const override;
 
@@ -274,8 +278,6 @@ class HwHelperHw : public HwHelper {
     bool getEnableLocalMemory(const HardwareInfo &hwInfo) const override;
 
     std::string getExtensions() const override;
-
-    std::string getDeviceMemoryName() const override;
 
     uint32_t getMetricsLibraryGenId() const override;
 
@@ -293,23 +295,13 @@ class HwHelperHw : public HwHelper {
 
     static AuxTranslationMode getAuxTranslationMode(const HardwareInfo &hwInfo);
 
-    uint32_t getHwRevIdFromStepping(uint32_t stepping, const HardwareInfo &hwInfo) const override;
-
-    uint32_t getSteppingFromHwRevId(const HardwareInfo &hwInfo) const override;
-
-    uint32_t getAubStreamSteppingFromHwRevId(const HardwareInfo &hwInfo) const override;
-
     bool isWorkaroundRequired(uint32_t lowestSteppingWithBug, uint32_t steppingWithFix, const HardwareInfo &hwInfo) const override;
 
     bool isOffsetToSkipSetFFIDGPWARequired(const HardwareInfo &hwInfo) const override;
 
-    bool is3DPipelineSelectWARequired(const HardwareInfo &hwInfo) const override;
-
     bool isFusedEuDispatchEnabled(const HardwareInfo &hwInfo) const override;
 
     static bool isForceDefaultRCSEngineWARequired(const HardwareInfo &hwInfo);
-
-    bool isForceEmuInt32DivRemSPWARequired(const HardwareInfo &hwInfo) override;
 
     bool isWaDisableRccRhwoOptimizationRequired() const override;
 
@@ -319,23 +311,15 @@ class HwHelperHw : public HwHelper {
 
     uint64_t getGpuTimeStampInNS(uint64_t timeStamp, double frequency) const override;
 
-    bool isSpecialWorkgroupSizeRequired(const HardwareInfo &hwInfo, bool isSimulation) const override;
-
     uint32_t getGlobalTimeStampBits() const override;
 
     void setExtraAllocationData(AllocationData &allocationData, const AllocationProperties &properties, const HardwareInfo &hwInfo) const override;
 
-    bool allowRenderCompression(const HardwareInfo &hwInfo) const override;
-
-    bool allowStatelessCompression(const HardwareInfo &hwInfo) const override;
-
     bool isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo, const GraphicsAllocation &allocation) const override;
-
-    LocalMemoryAccessMode getLocalMemoryAccessMode(const HardwareInfo &hwInfo) const override;
 
     bool isBankOverrideRequired(const HardwareInfo &hwInfo) const override;
 
-    uint32_t getDefaultThreadArbitrationPolicy() const override;
+    int32_t getDefaultThreadArbitrationPolicy() const override;
 
     bool useOnlyGlobalTimestamps() const override;
 
@@ -343,23 +327,24 @@ class HwHelperHw : public HwHelper {
 
     bool packedFormatsSupported() const override;
 
-    bool isCooperativeDispatchSupported(const EngineGroupType engineGroupType, const PRODUCT_FAMILY productFamily) const override;
+    bool isRcsAvailable(const HardwareInfo &hwInfo) const override;
+
+    bool isCooperativeDispatchSupported(const EngineGroupType engineGroupType, const HardwareInfo &hwInfo) const override;
+
+    uint32_t adjustMaxWorkGroupCount(uint32_t maxWorkGroupCount, const EngineGroupType engineGroupType,
+                                     const HardwareInfo &hwInfo, bool isEngineInstanced) const override;
 
     size_t getMaxFillPaternSizeForCopyEngine() const override;
 
+    size_t getSipKernelMaxDbgSurfaceSize(const HardwareInfo &hwInfo) const override;
+
     bool isKmdMigrationSupported(const HardwareInfo &hwInfo) const override;
 
-    bool isNewResidencyModelSupported() const override;
-
-    bool isDirectSubmissionSupported(const HardwareInfo &hwInfo) const override;
+    bool isCooperativeEngineSupported(const HardwareInfo &hwInfo) const override;
 
     bool isCopyOnlyEngineType(EngineGroupType type) const override;
 
-    void adjustAddressWidthForCanonize(uint32_t &addressWidth) const override;
-
     bool isSipWANeeded(const HardwareInfo &hwInfo) const override;
-
-    bool isDisableOverdispatchAvailable(const HardwareInfo &hwInfo) const override;
 
     bool isCpuImageTransferPreferred(const HardwareInfo &hwInfo) const override;
 
@@ -373,8 +358,6 @@ class HwHelperHw : public HwHelper {
 
     uint32_t getPlanarYuvMaxHeight() const override;
 
-    bool isBlitterForImagesSupported(const HardwareInfo &hwInfo) const override;
-
     size_t getPreemptionAllocationAlignment() const override;
 
     std::unique_ptr<TagAllocatorBase> createTimestampPacketAllocator(const std::vector<uint32_t> &rootDeviceIndices, MemoryManager *memoryManager,
@@ -383,18 +366,42 @@ class HwHelperHw : public HwHelper {
     size_t getTimestampPacketAllocatorAlignment() const override;
 
     size_t getSingleTimestampPacketSize() const override;
+    static size_t getSingleTimestampPacketSizeHw();
 
     void applyAdditionalCompressionSettings(Gmm &gmm, bool isNotCompressed) const override;
 
     bool preferSmallWorkgroupSizeForKernel(const size_t size, const HardwareInfo &hwInfo) const override;
 
-    void applyRenderCompressionFlag(Gmm &gmm, uint32_t isRenderCompressed) const override;
+    void applyRenderCompressionFlag(Gmm &gmm, uint32_t isCompressed) const override;
 
-    bool additionalPipeControlArgsRequired() const override;
+    bool unTypedDataPortCacheFlushRequired() const override;
+
+    bool isAssignEngineRoundRobinSupported() const override;
+
+    bool isEngineTypeRemappingToHwSpecificRequired() const override;
+
+    bool isSipKernelAsHexadecimalArrayPreferred() const override;
+
+    void setSipKernelData(uint32_t *&sipKernelBinary, size_t &kernelBinarySize) const override;
+
+    void adjustPreemptionSurfaceSize(size_t &csrSize) const override;
+
+    bool isScratchSpaceSurfaceStateAccessible() const override;
+
+    size_t getMax3dImageWidthOrHeight() const override;
+    uint64_t getMaxMemAllocSize() const override;
+    bool isStatelesToStatefullWithOffsetSupported() const override;
+    void encodeBufferSurfaceState(EncodeSurfaceStateArgs &args) override;
+    bool disableL3CacheForDebug(const HardwareInfo &hwInfo) const override;
+    bool isRevisionSpecificBinaryBuiltinRequired() const override;
+    bool forceNonGpuCoherencyWA(bool requiresCoherency) const override;
+    bool platformSupportsImplicitScaling(const NEO::HardwareInfo &hwInfo) const override;
+    bool isLinuxCompletionFenceSupported() const override;
+    size_t getBatchBufferEndSize() const override;
+    const void *getBatchBufferEndReference() const override;
+    bool isPlatformFlushTaskEnabled(const NEO::HardwareInfo &hwInfo) const override;
 
   protected:
-    LocalMemoryAccessMode getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const override;
-
     static const AuxTranslationMode defaultAuxTranslationMode;
     HwHelperHw() = default;
 };
@@ -430,27 +437,47 @@ struct MemorySynchronizationCommands {
                                                           uint64_t immediateData,
                                                           const HardwareInfo &hwInfo,
                                                           PipeControlArgs &args);
+    static void setPipeControlAndProgramPostSyncOperation(void *&commandsBuffer,
+                                                          POST_SYNC_OPERATION operation,
+                                                          uint64_t gpuAddress,
+                                                          uint64_t immediateData,
+                                                          const HardwareInfo &hwInfo,
+                                                          PipeControlArgs &args);
+
     static void addPipeControlWithPostSync(LinearStream &commandStream,
                                            POST_SYNC_OPERATION operation,
                                            uint64_t gpuAddress,
                                            uint64_t immediateData,
                                            PipeControlArgs &args);
+    static void setPipeControlWithPostSync(void *&commandsBuffer,
+                                           POST_SYNC_OPERATION operation,
+                                           uint64_t gpuAddress,
+                                           uint64_t immediateData,
+                                           PipeControlArgs &args);
+
     static void setPostSyncExtraProperties(PipeControlArgs &args, const HardwareInfo &hwInfo);
+    static void setPipeControlWAFlags(PIPE_CONTROL &pipeControl);
 
     static void addPipeControlWA(LinearStream &commandStream, uint64_t gpuAddress, const HardwareInfo &hwInfo);
+    static void setPipeControlWA(void *&commandsBuffer, uint64_t gpuAddress, const HardwareInfo &hwInfo);
+
     static void addAdditionalSynchronization(LinearStream &commandStream, uint64_t gpuAddress, const HardwareInfo &hwInfo);
+    static void setAdditionalSynchronization(void *&commandsBuffer, uint64_t gpuAddress, const HardwareInfo &hwInfo);
 
     static void addPipeControl(LinearStream &commandStream, PipeControlArgs &args);
+    static void setPipeControl(PIPE_CONTROL &pipeControl, PipeControlArgs &args);
+
     static void addPipeControlWithCSStallOnly(LinearStream &commandStream);
 
-    static bool isDcFlushAllowed();
+    static bool getDcFlushEnable(bool isFlushPreferred, const HardwareInfo &hwInfo);
 
-    static void addFullCacheFlush(LinearStream &commandStream);
+    static void addFullCacheFlush(LinearStream &commandStream, const HardwareInfo &hwInfo);
     static void setCacheFlushExtraProperties(PipeControlArgs &args);
 
     static size_t getSizeForPipeControlWithPostSyncOperation(const HardwareInfo &hwInfo);
+    static size_t getSizeForPipeControlWA(const HardwareInfo &hwInfo);
     static size_t getSizeForSinglePipeControl();
-    static size_t getSizeForSingleSynchronization(const HardwareInfo &hwInfo);
+    static size_t getSizeForSingleAdditionalSynchronization(const HardwareInfo &hwInfo);
     static size_t getSizeForAdditonalSynchronization(const HardwareInfo &hwInfo);
     static size_t getSizeForFullCacheFlush();
 
@@ -458,7 +485,6 @@ struct MemorySynchronizationCommands {
     static bool isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo);
 
   protected:
-    static void setPipeControl(PIPE_CONTROL &pipeControl, PipeControlArgs &args);
     static void setPipeControlExtraProperties(PIPE_CONTROL &pipeControl, PipeControlArgs &args);
 };
 

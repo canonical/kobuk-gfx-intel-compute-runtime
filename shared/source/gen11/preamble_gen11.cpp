@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,7 +7,7 @@
 
 #include "shared/source/command_stream/csr_definitions.h"
 #include "shared/source/helpers/pipeline_select_helper.h"
-#include "shared/source/helpers/preamble_bdw_plus.inl"
+#include "shared/source/helpers/preamble_bdw_and_later.inl"
 
 #include "reg_configs_common.h"
 
@@ -55,7 +55,7 @@ void PreambleHelper<ICLFamily>::addPipeControlBeforeVfeCmd(LinearStream *pComman
     PIPE_CONTROL cmd = ICLFamily::cmdInitPipeControl;
     cmd.setCommandStreamerStallEnable(true);
 
-    if (hwInfo->workaroundTable.waSendMIFLUSHBeforeVFE) {
+    if (hwInfo->workaroundTable.flags.waSendMIFLUSHBeforeVFE) {
         cmd.setRenderTargetCacheFlushEnable(true);
         cmd.setDepthCacheFlushEnable(true);
         cmd.setDcFlushEnable(true);
@@ -64,25 +64,15 @@ void PreambleHelper<ICLFamily>::addPipeControlBeforeVfeCmd(LinearStream *pComman
 }
 
 template <>
-void PreambleHelper<ICLFamily>::programThreadArbitration(LinearStream *pCommandStream, uint32_t requiredThreadArbitrationPolicy) {
-    UNRECOVERABLE_IF(requiredThreadArbitrationPolicy == ThreadArbitrationPolicy::NotPresent);
-
-    auto pipeControl = pCommandStream->getSpaceForCmd<PIPE_CONTROL>();
-    PIPE_CONTROL cmd = ICLFamily::cmdInitPipeControl;
-    cmd.setCommandStreamerStallEnable(true);
-    *pipeControl = cmd;
-
-    LriHelper<ICLFamily>::program(pCommandStream,
-                                  RowChickenReg4::address,
-                                  RowChickenReg4::regDataForArbitrationPolicy[requiredThreadArbitrationPolicy],
-                                  false);
+std::vector<int32_t> PreambleHelper<ICLFamily>::getSupportedThreadArbitrationPolicies() {
+    std::vector<int32_t> retVal;
+    int32_t policySize = sizeof(RowChickenReg4::regDataForArbitrationPolicy) /
+                         sizeof(RowChickenReg4::regDataForArbitrationPolicy[0]);
+    for (int32_t i = 0; i < policySize; i++) {
+        retVal.push_back(i);
+    }
+    return retVal;
 }
-
-template <>
-size_t PreambleHelper<ICLFamily>::getThreadArbitrationCommandsSize() {
-    return sizeof(MI_LOAD_REGISTER_IMM) + sizeof(PIPE_CONTROL);
-}
-
 template <>
 size_t PreambleHelper<ICLFamily>::getAdditionalCommandsSize(const Device &device) {
     size_t totalSize = PreemptionHelper::getRequiredPreambleSize<ICLFamily>(device);

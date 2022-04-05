@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -55,12 +55,14 @@ void populateKernelDescriptor(KernelDescriptor &dst, const SPatchExecutionEnviro
     dst.kernelAttributes.simdSize = execEnv.LargestCompiledSIMDSize;
     dst.kernelAttributes.barrierCount = execEnv.HasBarriers;
 
-    dst.kernelAttributes.flags.usesDeviceSideEnqueue = (0 != execEnv.HasDeviceEnqueue);
+    dst.kernelAttributes.flags.requiresDisabledEUFusion = (0 != execEnv.RequireDisableEUFusion);
     dst.kernelAttributes.flags.requiresDisabledMidThreadPreemption = (0 != execEnv.DisableMidThreadPreemption);
-    dst.kernelAttributes.flags.usesFencesForReadWriteImages = (0 != execEnv.UsesFencesForReadWriteImages);
     dst.kernelAttributes.flags.requiresSubgroupIndependentForwardProgress = (0 != execEnv.SubgroupIndependentForwardProgressRequired);
     dst.kernelAttributes.flags.useGlobalAtomics = (0 != execEnv.HasGlobalAtomics);
+    dst.kernelAttributes.flags.usesFencesForReadWriteImages = (0 != execEnv.UsesFencesForReadWriteImages);
+    dst.kernelAttributes.flags.usesSpecialPipelineSelectMode = (0 != execEnv.HasDPAS);
     dst.kernelAttributes.flags.usesStatelessWrites = (0 != execEnv.StatelessWritesCount);
+    dst.kernelAttributes.flags.useStackCalls = (0 != execEnv.HasStackCalls);
 
     dst.kernelMetadata.compiledSubGroupsNumber = execEnv.CompiledSubGroupsNumber;
     readExtendedInfo(dst.extendedInfo, execEnv);
@@ -84,10 +86,6 @@ void populateKernelDescriptor(KernelDescriptor &dst, const SPatchAllocateLocalSu
 void populateKernelDescriptor(KernelDescriptor &dst, const SPatchMediaVFEState &token, uint32_t slot) {
     UNRECOVERABLE_IF(slot >= 2U);
     dst.kernelAttributes.perThreadScratchSize[slot] = token.PerThreadScratchSpace;
-}
-
-void populateKernelDescriptor(KernelDescriptor &dst, const SPatchInterfaceDescriptorData &token) {
-    dst.kernelMetadata.deviceSideEnqueueBlockInterfaceDescriptorOffset = token.Offset;
 }
 
 void populateKernelDescriptor(KernelDescriptor &dst, const SPatchThreadPayload &token) {
@@ -469,7 +467,6 @@ void populateKernelDescriptor(KernelDescriptor &dst, const PatchTokenBinary::Ker
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateLocalSurface);
     populateKernelDescriptorIfNotNull(dst, src.tokens.mediaVfeState[0], 0);
     populateKernelDescriptorIfNotNull(dst, src.tokens.mediaVfeState[1], 1);
-    populateKernelDescriptorIfNotNull(dst, src.tokens.interfaceDescriptorData);
     populateKernelDescriptorIfNotNull(dst, src.tokens.threadPayload);
     populateKernelDescriptorIfNotNull(dst, src.tokens.dataParameterStream);
     populateKernelDescriptorIfNotNull(dst, src.tokens.kernelAttributesInfo);
@@ -480,7 +477,7 @@ void populateKernelDescriptor(KernelDescriptor &dst, const PatchTokenBinary::Ker
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateStatelessEventPoolSurface);
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateStatelessDefaultDeviceQueueSurface);
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateSyncBuffer);
-
+    populateKernelDescriptorRtDispatchGlobals(dst, src);
     dst.payloadMappings.explicitArgs.resize(src.tokens.kernelArgs.size());
     dst.explicitArgsExtendedMetadata.resize(src.tokens.kernelArgs.size());
 
@@ -514,15 +511,19 @@ void populateKernelDescriptor(KernelDescriptor &dst, const PatchTokenBinary::Ker
     dst.payloadMappings.implicitArgs.privateMemorySize = getOffset(src.tokens.crossThreadPayloadArgs.privateMemoryStatelessSize);
     dst.payloadMappings.implicitArgs.localMemoryStatelessWindowSize = getOffset(src.tokens.crossThreadPayloadArgs.localMemoryStatelessWindowSize);
     dst.payloadMappings.implicitArgs.localMemoryStatelessWindowStartAddres = getOffset(src.tokens.crossThreadPayloadArgs.localMemoryStatelessWindowStartAddress);
-    for (auto &childSimdSize : src.tokens.crossThreadPayloadArgs.childBlockSimdSize) {
-        dst.kernelMetadata.deviceSideEnqueueChildrenKernelsIdOffset.push_back({childSimdSize->ArgumentNumber, childSimdSize->Offset});
-    }
+    dst.payloadMappings.implicitArgs.implicitArgsBuffer = getOffset(src.tokens.crossThreadPayloadArgs.implicitArgsBufferOffset);
 
     if (src.tokens.gtpinInfo) {
         dst.external.igcInfoForGtpin = (src.tokens.gtpinInfo + 1);
     }
 
+    dst.kernelAttributes.binaryFormat = DeviceBinaryFormat::Patchtokens;
     dst.kernelAttributes.gpuPointerSize = gpuPointerSizeInBytes;
+    dst.kernelAttributes.flags.requiresImplicitArgs = src.tokens.crossThreadPayloadArgs.implicitArgsBufferOffset != nullptr;
+
+    if (DebugManager.flags.UpdateCrossThreadDataSize.get()) {
+        dst.updateCrossThreadDataSize();
+    }
 }
 
 } // namespace NEO

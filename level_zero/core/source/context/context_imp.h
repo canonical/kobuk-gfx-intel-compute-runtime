@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,10 +7,13 @@
 
 #pragma once
 
+#include "shared/source/os_interface/os_interface.h"
+
 #include "level_zero/core/source/context/context.h"
 #include "level_zero/core/source/driver/driver_handle_imp.h"
 
 namespace L0 {
+struct StructuresLookupTable;
 
 struct ContextImp : Context {
     ContextImp(DriverHandle *driverHandle);
@@ -33,6 +36,9 @@ struct ContextImp : Context {
                                size_t alignment,
                                void **ptr) override;
     ze_result_t freeMem(const void *ptr) override;
+    ze_result_t freeMem(const void *ptr, bool blocking) override;
+    ze_result_t freeMemExt(const ze_memory_free_ext_desc_t *pMemFreeDesc,
+                           void *ptr) override;
     ze_result_t makeMemoryResident(ze_device_handle_t hDevice,
                                    void *ptr,
                                    size_t size) override;
@@ -119,8 +125,12 @@ struct ContextImp : Context {
     std::map<uint32_t, NEO::DeviceBitfield> deviceBitfields;
 
     bool isDeviceDefinedForThisContext(Device *inDevice);
+    bool isShareableMemory(const void *exportDesc, bool exportableMemory, NEO::Device *neoDevice) override;
+    void *getMemHandlePtr(ze_device_handle_t hDevice, uint64_t handle, ze_ipc_memory_flags_t flags) override;
 
   protected:
+    bool isAllocationSuitableForCompression(const StructuresLookupTable &structuresLookupTable, Device &device, size_t allocSize);
+
     std::map<ze_device_handle_t, Device *> devices;
     DriverHandleImp *driverHandle = nullptr;
 };

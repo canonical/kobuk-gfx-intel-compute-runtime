@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #include "opencl/source/cl_device/cl_device.h"
 
+#include "shared/source/compiler_interface/oclc_extensions.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device/device.h"
 #include "shared/source/device/sub_device.h"
@@ -18,12 +19,11 @@
 #include "shared/source/source_level_debugger/source_level_debugger.h"
 
 #include "opencl/source/helpers/cl_hw_helper.h"
-#include "opencl/source/platform/extensions.h"
 #include "opencl/source/platform/platform.h"
 
 namespace NEO {
 
-ClDevice::ClDevice(Device &device, Platform *platform) : device(device), platformId(platform) {
+ClDevice::ClDevice(Device &device, ClDevice &rootClDevice, Platform *platform) : device(device), rootClDevice(rootClDevice), platformId(platform) {
     device.incRefInternal();
     device.setSpecializedDevice(this);
     deviceExtensions.reserve(1000);
@@ -35,30 +35,31 @@ ClDevice::ClDevice(Device &device, Platform *platform) : device(device), platfor
     compilerExtensions = convertEnabledExtensionsToCompilerInternalOptions(deviceInfo.deviceExtensions, emptyOpenClCFeatures);
     compilerExtensionsWithFeatures = convertEnabledExtensionsToCompilerInternalOptions(deviceInfo.deviceExtensions, deviceInfo.openclCFeatures);
 
-    auto numAvailableDevices = device.getNumAvailableDevices();
-    if (numAvailableDevices > 1) {
-        for (uint32_t i = 0; i < numAvailableDevices; i++) {
-            auto &coreSubDevice = static_cast<SubDevice &>(*device.getDeviceById(i));
-            auto pClSubDevice = std::make_unique<ClDevice>(coreSubDevice, platform);
-            pClSubDevice->incRefInternal();
-            pClSubDevice->decRefApi();
-
-            auto &deviceInfo = pClSubDevice->deviceInfo;
-            deviceInfo.parentDevice = this;
-            deviceInfo.partitionMaxSubDevices = 0;
-            deviceInfo.partitionProperties[0] = 0;
-            deviceInfo.partitionAffinityDomain = 0;
-            deviceInfo.partitionType[0] = CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN;
-            deviceInfo.partitionType[1] = CL_DEVICE_AFFINITY_DOMAIN_NUMA;
-            deviceInfo.partitionType[2] = 0;
-
-            subDevices.push_back(std::move(pClSubDevice));
+    for (auto &subDevice : device.getSubDevices()) {
+        if (!subDevice) {
+            continue;
         }
+
+        auto pClSubDevice = std::make_unique<ClDevice>(*subDevice, rootClDevice, platform);
+        pClSubDevice->incRefInternal();
+        pClSubDevice->decRefApi();
+
+        auto &deviceInfo = pClSubDevice->deviceInfo;
+        deviceInfo.parentDevice = this;
+        deviceInfo.partitionType[0] = CL_DEVICE_PARTITION_BY_AFFINITY_DOMAIN;
+        deviceInfo.partitionType[1] = CL_DEVICE_AFFINITY_DOMAIN_NUMA;
+        deviceInfo.partitionType[2] = 0;
+
+        subDevices.push_back(std::move(pClSubDevice));
     }
+
     if (getSharedDeviceInfo().debuggerActive && getSourceLevelDebugger()) {
         auto osInterface = device.getRootDeviceEnvironment().osInterface.get();
         getSourceLevelDebugger()->notifyNewDevice(osInterface ? osInterface->getDriverModel()->getDeviceHandle() : 0);
     }
+}
+
+ClDevice::ClDevice(Device &device, Platform *platformId) : ClDevice(device, *this, platformId) {
 }
 
 ClDevice::~ClDevice() {
@@ -90,12 +91,6 @@ unique_ptr_if_unused<ClDevice> ClDevice::decRefInternal() {
     return pParentDevice->decRefInternal();
 }
 
-bool ClDevice::isOcl21Conformant() const {
-    auto &hwInfo = device.getHardwareInfo();
-    return (hwInfo.capabilityTable.supportsOcl21Features && hwInfo.capabilityTable.supportsDeviceEnqueue &&
-            hwInfo.capabilityTable.supportsPipes && hwInfo.capabilityTable.supportsIndependentForwardProgress);
-}
-
 void ClDevice::retainApi() {
     auto parentDeviceId = deviceInfo.parentDevice;
     if (parentDeviceId) {
@@ -118,11 +113,26 @@ const DeviceInfo &ClDevice::getSharedDeviceInfo() const {
     return device.getDeviceInfo();
 }
 
-ClDevice *ClDevice::getDeviceById(uint32_t deviceId) {
-    UNRECOVERABLE_IF(deviceId >= getNumAvailableDevices());
-    if (subDevices.empty()) {
-        return this;
+ClDevice *ClDevice::getSubDevice(uint32_t deviceId) const {
+    UNRECOVERABLE_IF(deviceId >= subDevices.size());
+    return subDevices[deviceId].get();
+}
+
+ClDevice *ClDevice::getNearestGenericSubDevice(uint32_t deviceId) {
+    /*
+    * EngineInstanced: Upper level
+    * Generic SubDevice: 'this'
+    * RootCsr Device: Next level SubDevice (generic)
+    */
+
+    if (getDevice().isEngineInstanced()) {
+        return rootClDevice.getNearestGenericSubDevice(Math::log2(static_cast<uint32_t>(getDeviceBitfield().to_ulong())));
     }
+
+    if (subDevices.empty() || !getDevice().hasRootCsr()) {
+        return const_cast<ClDevice *>(this);
+    }
+    UNRECOVERABLE_IF(deviceId >= subDevices.size());
     return subDevices[deviceId].get();
 }
 
@@ -136,9 +146,7 @@ SelectorCopyEngine &ClDevice::getSelectorCopyEngine() { return device.getSelecto
 MemoryManager *ClDevice::getMemoryManager() const { return device.getMemoryManager(); }
 GmmHelper *ClDevice::getGmmHelper() const { return device.getGmmHelper(); }
 GmmClientContext *ClDevice::getGmmClientContext() const { return device.getGmmClientContext(); }
-double ClDevice::getProfilingTimerResolution() { return device.getProfilingTimerResolution(); }
 double ClDevice::getPlatformHostTimerResolution() const { return device.getPlatformHostTimerResolution(); }
-bool ClDevice::isSimulation() const { return device.isSimulation(); }
 GFXCORE_FAMILY ClDevice::getRenderCoreFamily() const { return device.getRenderCoreFamily(); }
 PerformanceCounters *ClDevice::getPerformanceCounters() { return device.getPerformanceCounters(); }
 PreemptionMode ClDevice::getPreemptionMode() const { return device.getPreemptionMode(); }
@@ -147,11 +155,11 @@ Debugger *ClDevice::getDebugger() { return device.getDebugger(); }
 SourceLevelDebugger *ClDevice::getSourceLevelDebugger() { return device.getSourceLevelDebugger(); }
 ExecutionEnvironment *ClDevice::getExecutionEnvironment() const { return device.getExecutionEnvironment(); }
 const RootDeviceEnvironment &ClDevice::getRootDeviceEnvironment() const { return device.getRootDeviceEnvironment(); }
-const HardwareCapabilities &ClDevice::getHardwareCapabilities() const { return device.getHardwareCapabilities(); }
 bool ClDevice::isFullRangeSvm() const { return device.isFullRangeSvm(); }
 bool ClDevice::areSharedSystemAllocationsAllowed() const { return device.areSharedSystemAllocationsAllowed(); }
 uint32_t ClDevice::getRootDeviceIndex() const { return device.getRootDeviceIndex(); }
-uint32_t ClDevice::getNumAvailableDevices() const { return device.getNumAvailableDevices(); }
+uint32_t ClDevice::getNumGenericSubDevices() const { return device.getNumGenericSubDevices(); }
+uint32_t ClDevice::getNumSubDevices() const { return static_cast<uint32_t>(subDevices.size()); }
 
 ClDeviceVector::ClDeviceVector(const cl_device_id *devices,
                                cl_uint numDevices) {
@@ -178,13 +186,6 @@ const std::string &ClDevice::peekCompilerExtensionsWithFeatures() const {
 }
 DeviceBitfield ClDevice::getDeviceBitfield() const {
     return device.getDeviceBitfield();
-}
-
-bool ClDevice::isDeviceEnqueueSupported() const {
-    if (DebugManager.flags.ForceDeviceEnqueueSupport.get() != -1) {
-        return DebugManager.flags.ForceDeviceEnqueueSupport.get();
-    }
-    return device.getHardwareInfo().capabilityTable.supportsDeviceEnqueue;
 }
 
 bool ClDevice::arePipesSupported() const {
@@ -234,7 +235,7 @@ cl_command_queue_capabilities_intel ClDevice::getQueueFamilyCapabilities(EngineG
     return CL_QUEUE_DEFAULT_CAPABILITIES_INTEL;
 }
 
-void ClDevice::getQueueFamilyName(char *outputName, size_t maxOutputNameLength, EngineGroupType type) {
+void ClDevice::getQueueFamilyName(char *outputName, EngineGroupType type) {
     std::string name{};
 
     const auto &clHwHelper = ClHwHelper::get(getHardwareInfo().platform.eRenderCoreFamily);
@@ -257,8 +258,8 @@ void ClDevice::getQueueFamilyName(char *outputName, size_t maxOutputNameLength, 
         }
     }
 
-    UNRECOVERABLE_IF(name.length() > maxOutputNameLength + 1);
-    strncpy_s(outputName, maxOutputNameLength, name.c_str(), name.size());
+    UNRECOVERABLE_IF(name.size() >= CL_QUEUE_FAMILY_MAX_NAME_SIZE_INTEL);
+    strncpy_s(outputName, CL_QUEUE_FAMILY_MAX_NAME_SIZE_INTEL, name.c_str(), name.size());
 }
 Platform *ClDevice::getPlatform() const {
     return castToObject<Platform>(platformId);

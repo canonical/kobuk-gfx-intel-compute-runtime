@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,17 +13,15 @@
 
 namespace NEO {
 
-OsContext *OsContextWin::create(OSInterface *osInterface, uint32_t contextId, DeviceBitfield deviceBitfield,
-                                EngineTypeUsage typeUsage, PreemptionMode preemptionMode, bool rootDevice) {
+OsContext *OsContextWin::create(OSInterface *osInterface, uint32_t contextId, const EngineDescriptor &engineDescriptor) {
     if (osInterface) {
-        return new OsContextWin(*osInterface->getDriverModel()->as<Wddm>(), contextId, deviceBitfield, typeUsage, preemptionMode, rootDevice);
+        return new OsContextWin(*osInterface->getDriverModel()->as<Wddm>(), contextId, engineDescriptor);
     }
-    return new OsContext(contextId, deviceBitfield, typeUsage, preemptionMode, rootDevice);
+    return new OsContext(contextId, engineDescriptor);
 }
 
-OsContextWin::OsContextWin(Wddm &wddm, uint32_t contextId, DeviceBitfield deviceBitfield,
-                           EngineTypeUsage typeUsage, PreemptionMode preemptionMode, bool rootDevice)
-    : OsContext(contextId, deviceBitfield, typeUsage, preemptionMode, rootDevice),
+OsContextWin::OsContextWin(Wddm &wddm, uint32_t contextId, const EngineDescriptor &engineDescriptor)
+    : OsContext(contextId, engineDescriptor),
       wddm(wddm),
       residencyController(wddm, contextId) {}
 
@@ -40,8 +38,15 @@ void OsContextWin::initializeContext() {
     UNRECOVERABLE_IF(!residencyController.isInitialized());
 };
 
+void OsContextWin::reInitializeContext() {
+    if (contextInitialized && (false == this->wddm.skipResourceCleanup())) {
+        wddm.destroyContext(wddmContextHandle);
+    }
+    UNRECOVERABLE_IF(!wddm.createContext(*this));
+};
+
 OsContextWin::~OsContextWin() {
-    if (contextInitialized) {
+    if (contextInitialized && (false == this->wddm.skipResourceCleanup())) {
         wddm.getWddmInterface()->destroyHwQueue(hardwareQueue.handle);
         wddm.getWddmInterface()->destroyMonitorFence(residencyController.getMonitoredFence());
         wddm.destroyContext(wddmContextHandle);

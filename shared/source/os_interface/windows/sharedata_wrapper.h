@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -51,22 +51,8 @@ struct SKU_FEATURE_TABLE_KMD : SKU_FEATURE_TABLE_GMM {
     bool FtrDesktop : 1;
     bool FtrChannelSwizzlingXOREnabled : 1;
 
-    bool FtrGtBigDie : 1;
-    bool FtrGtMediumDie : 1;
-    bool FtrGtSmallDie : 1;
-
-    bool FtrGT1 : 1;
-    bool FtrGT1_5 : 1;
-    bool FtrGT2 : 1;
-    bool FtrGT2_5 : 1;
-    bool FtrGT3 : 1;
-    bool FtrGT4 : 1;
-
     bool FtrIVBM0M1Platform : 1;
     bool FtrSGTPVSKUStrapPresent : 1;
-    bool FtrGTA : 1;
-    bool FtrGTC : 1;
-    bool FtrGTX : 1;
     bool Ftr5Slice : 1;
 
     bool FtrGpGpuMidBatchPreempt : 1;
@@ -101,9 +87,6 @@ struct SKU_FEATURE_TABLE_KMD : SKU_FEATURE_TABLE_GMM {
     bool FtrFbcBlitterTracking : 1;
     bool FtrFbcCpuTracking : 1;
 
-    bool FtrVcs2 : 1;
-    bool FtrVEBOX : 1;
-    bool FtrSingleVeboxSlice : 1;
     bool FtrULT : 1;
     bool FtrLCIA : 1;
     bool FtrGttCacheInvalidation : 1;
@@ -116,7 +99,6 @@ struct SKU_FEATURE_TABLE_KMD : SKU_FEATURE_TABLE_GMM {
     bool FtrCrystalwell : 1;
     bool FtrLLCBypass : 1;
     bool FtrDisplayEngineS3d : 1;
-    bool FtrVERing : 1;
     bool FtrWddm2GpuMmu : 1;
     bool FtrWddm2_1_64kbPages : 1;
     bool FtrWddmHwQueues : 1;
@@ -186,7 +168,10 @@ typedef struct __GMM_GFX_PARTITIONING {
         uint64_t Base, Limit;
     } Standard,
         Standard64KB,
+        Reserved0,
+        Reserved1,
         SVM,
+        Reserved2,
         Heap32[4];
 } GMM_GFX_PARTITIONING;
 

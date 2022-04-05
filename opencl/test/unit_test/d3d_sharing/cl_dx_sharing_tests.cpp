@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/utilities/arrayref.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/sharings/d3d/cl_d3d_api.h"
 #include "opencl/source/sharings/d3d/d3d_buffer.h"
@@ -15,9 +16,7 @@
 #include "opencl/test/unit_test/fixtures/platform_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_d3d_objects.h"
-#include "test.h"
 
-#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 static const DXGI_FORMAT DXGIformats[] = {
@@ -146,7 +145,7 @@ struct clIntelSharingFormatQueryDX1X : public PlatformFixture, public ::testing:
     std::vector<DXGI_FORMAT> retrievedFormats;
     ArrayRef<const DXGI_FORMAT> availableFormats;
 
-    NiceMock<MockD3DSharingFunctions<T>> *mockSharingFcns;
+    MockD3DSharingFunctions<T> *mockSharingFcns;
     MockContext *context;
     cl_uint numImageFormats;
     cl_int retVal;
@@ -155,11 +154,11 @@ struct clIntelSharingFormatQueryDX1X : public PlatformFixture, public ::testing:
     void SetUp() override {
         PlatformFixture::SetUp();
         context = new MockContext(pPlatform->getClDevice(0));
-        mockSharingFcns = new NiceMock<MockD3DSharingFunctions<T>>();
+        mockSharingFcns = new MockD3DSharingFunctions<T>();
         context->setSharingFunctions(mockSharingFcns);
 
-        auto checkFormat = [](DXGI_FORMAT format, UINT *pFormat) -> bool { *pFormat = D3D11_FORMAT_SUPPORT_BUFFER | D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_TEXTURE3D; return true; };
-        ON_CALL(*mockSharingFcns, checkFormatSupport(::testing::_, ::testing::_)).WillByDefault(::testing::Invoke(checkFormat));
+        mockSharingFcns->checkFormatSupportSetParam1 = true;
+        mockSharingFcns->checkFormatSupportParamsSet.pFormat = D3D11_FORMAT_SUPPORT_BUFFER | D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_TEXTURE3D;
 
         availableFormats = ArrayRef<const DXGI_FORMAT>(DXGIformats);
         retrievedFormats.assign(availableFormats.size(), DXGI_FORMAT_UNKNOWN);
@@ -273,8 +272,6 @@ TEST_F(clIntelSharingFormatQueryDX11, givenValidParametersWhenRequestedDX11Textu
 }
 
 TEST_F(clIntelSharingFormatQueryDX11, givenValidParametersWhenRequestingDX11TextureFormatsForPlane1ThenPlanarFormatsAreReturned) {
-    ON_CALL(*mockSharingFcns, memObjectFormatSupport(::testing::_, ::testing::_)).WillByDefault(::testing::Return(true));
-
     retVal = clGetSupportedD3D11TextureFormatsINTEL(context, CL_MEM_READ_WRITE, CL_MEM_OBJECT_IMAGE2D, 1,
                                                     static_cast<cl_uint>(retrievedFormats.size()),
                                                     &retrievedFormats[0], &numImageFormats);

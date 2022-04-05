@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,7 +16,7 @@ namespace NEO {
 namespace Elf {
 
 template <ELF_IDENTIFIER_CLASS NumBits>
-ElfEncoder<NumBits>::ElfEncoder(bool addUndefSectionHeader, bool addHeaderSectionNamesSection, uint64_t defaultDataAlignemnt)
+ElfEncoder<NumBits>::ElfEncoder(bool addUndefSectionHeader, bool addHeaderSectionNamesSection, typename ElfSectionHeaderTypes<NumBits>::AddrAlign defaultDataAlignemnt)
     : addUndefSectionHeader(addUndefSectionHeader), addHeaderSectionNamesSection(addHeaderSectionNamesSection), defaultDataAlignment(defaultDataAlignemnt) {
     // add special strings
     UNRECOVERABLE_IF(defaultDataAlignment == 0);
@@ -70,7 +70,7 @@ ElfSectionHeader<NumBits> &ElfEncoder<NumBits>::appendSection(SECTION_HEADER_TYP
     section.flags = static_cast<decltype(section.flags)>(SHF_NONE);
     section.offset = 0U;
     section.name = appendSectionName(sectionLabel);
-    section.addralign = 8U;
+    section.addralign = defaultDataAlignment;
     switch (sectionType) {
     case SHT_REL:
         section.entsize = sizeof(ElfRel<NumBits>);
@@ -97,6 +97,14 @@ ElfProgramHeader<NumBits> &ElfEncoder<NumBits>::appendSegment(PROGRAM_HEADER_TYP
     segment.align = static_cast<decltype(segment.align)>(defaultDataAlignment);
     appendSegment(segment, segmentData);
     return *programHeaders.rbegin();
+}
+
+template <ELF_IDENTIFIER_CLASS NumBits>
+void ElfEncoder<NumBits>::appendProgramHeaderLoad(size_t sectionId, uint64_t vAddr, uint64_t segSize) {
+    programSectionLookupTable.push_back({programHeaders.size(), sectionId});
+    auto &programHeader = appendSegment(PROGRAM_HEADER_TYPE::PT_LOAD, {});
+    programHeader.vAddr = static_cast<decltype(programHeader.vAddr)>(vAddr);
+    programHeader.memSz = static_cast<decltype(programHeader.memSz)>(segSize);
 }
 
 template <ELF_IDENTIFIER_CLASS NumBits>
@@ -159,6 +167,12 @@ std::vector<uint8_t> ElfEncoder<NumBits>::encode() const {
     ret.insert(ret.end(), reinterpret_cast<uint8_t *>(&elfFileHeader), reinterpret_cast<uint8_t *>(&elfFileHeader + 1));
     ret.resize(programHeadersOffset, 0U);
 
+    for (auto &progSecLookup : programSectionLookupTable) {
+        programHeaders[progSecLookup.programId].offset = sectionHeaders[progSecLookup.sectionId].offset;
+        programHeaders[progSecLookup.programId].fileSz = sectionHeaders[progSecLookup.sectionId].size;
+    }
+
+    std::sort(programHeaders.begin(), programHeaders.end(), [](auto &p1, auto &p2) { return p1.vAddr < p2.vAddr; });
     for (auto &programHeader : programHeaders) {
         if (0 != programHeader.fileSz) {
             programHeader.offset = static_cast<decltype(programHeader.offset)>(programHeader.offset + dataOffset);

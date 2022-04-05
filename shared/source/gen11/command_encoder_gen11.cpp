@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,12 +9,14 @@
 #include "shared/source/gen11/hw_cmds_base.h"
 #include "shared/source/gen11/reg_configs.h"
 
+#include "reg_configs_common.h"
+
 using Family = NEO::ICLFamily;
 
 #include "shared/source/command_container/command_encoder.inl"
-#include "shared/source/command_container/command_encoder_bdw_plus.inl"
-#include "shared/source/command_container/encode_compute_mode_bdw_plus.inl"
-#include "shared/source/command_container/image_surface_state/compression_params_bdw_plus.inl"
+#include "shared/source/command_container/command_encoder_bdw_and_later.inl"
+#include "shared/source/command_container/encode_compute_mode_bdw_and_later.inl"
+#include "shared/source/command_container/image_surface_state/compression_params_bdw_and_later.inl"
 
 namespace NEO {
 
@@ -38,6 +40,36 @@ void EncodeSurfaceState<Family>::setFlagsForMediaCompression(R_SURFACE_STATE *su
     }
 }
 
+template <typename Family>
+size_t EncodeComputeMode<Family>::getCmdSizeForComputeMode(const HardwareInfo &hwInfo, bool hasSharedHandles, bool isRcs) {
+    return sizeof(typename Family::PIPE_CONTROL) + 2u * sizeof(typename Family::MI_LOAD_REGISTER_IMM);
+}
+
+template <>
+void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties,
+                                                          const HardwareInfo &hwInfo) {
+    using PIPE_CONTROL = typename Family::PIPE_CONTROL;
+
+    if (properties.threadArbitrationPolicy.isDirty) {
+        auto pipeControl = csr.getSpaceForCmd<PIPE_CONTROL>();
+        PIPE_CONTROL cmd = Family::cmdInitPipeControl;
+        cmd.setCommandStreamerStallEnable(true);
+        *pipeControl = cmd;
+
+        LriHelper<Family>::program(&csr,
+                                   RowChickenReg4::address,
+                                   RowChickenReg4::regDataForArbitrationPolicy[properties.threadArbitrationPolicy.value],
+                                   false);
+    }
+    if (properties.isCoherencyRequired.isDirty) {
+        auto nonCoherentEnable = !properties.isCoherencyRequired.value;
+        LriHelper<Family>::program(&csr,
+                                   gen11HdcModeRegister::address,
+                                   DwordBuilder::build(gen11HdcModeRegister::forceNonCoherentEnableBit, true, nonCoherentEnable),
+                                   false);
+    }
+}
+
 template struct EncodeDispatchKernel<Family>;
 template struct EncodeStates<Family>;
 template struct EncodeMath<Family>;
@@ -58,4 +90,6 @@ template struct EncodeWA<Family>;
 template struct EncodeMiArbCheck<Family>;
 template struct EncodeComputeMode<Family>;
 template struct EncodeEnableRayTracing<Family>;
+template struct EncodeNoop<Family>;
+template struct EncodeStoreMemory<Family>;
 } // namespace NEO

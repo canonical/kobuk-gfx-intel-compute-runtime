@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -25,6 +25,7 @@ struct MockCompilerDebugVars {
         bindful,
         bindless
     };
+    bool shouldReturnInvalidTranslationOutput = false;
     bool forceBuildFailure = false;
     bool forceCreateFailure = false;
     bool forceRegisterFail = false;
@@ -120,6 +121,11 @@ struct MockGTSystemInfo : MockCIF<IGC::GTSystemInfoTagOCL> {
 };
 
 struct MockIgcFeaturesAndWorkarounds : MockCIF<IGC::IgcFeaturesAndWorkaroundsTagOCL> {
+    uint32_t GetMaxOCLParamSize() const override {
+        return this->maxOCLParamSize;
+    };
+
+    uint32_t maxOCLParamSize = 0;
 };
 
 struct MockIgcOclTranslationCtx : MockCIF<IGC::IgcOclTranslationCtxTagOCL> {
@@ -185,7 +191,7 @@ struct MockOclTranslationOutput : MockCIF<IGC::OclTranslationOutputTagOCL> {
     MockCIFBuffer *debugData = nullptr;
 };
 
-struct MockIgcOclDeviceCtx : MockCIF<IGC::IgcOclDeviceCtx<2>> {
+struct MockIgcOclDeviceCtx : MockCIF<IGC::IgcOclDeviceCtxTagOCL> {
     static CIF::ICIF *Create(CIF::InterfaceId_t intId, CIF::Version_t version);
 
     MockIgcOclDeviceCtx();
@@ -209,7 +215,7 @@ struct MockIgcOclDeviceCtx : MockCIF<IGC::IgcOclDeviceCtx<2>> {
         if (getIgcDebugVars().failCreateIgcFeWaInterface) {
             return nullptr;
         }
-        return igcFeWa;
+        return igcFtrWa;
     }
 
     IGC::IgcOclTranslationCtxBase *CreateTranslationCtxImpl(CIF::Version_t ver,
@@ -227,7 +233,7 @@ struct MockIgcOclDeviceCtx : MockCIF<IGC::IgcOclDeviceCtx<2>> {
 
     MockCIFPlatform *platform = nullptr;
     MockGTSystemInfo *gtSystemInfo = nullptr;
-    MockIgcFeaturesAndWorkarounds *igcFeWa = nullptr;
+    MockIgcFeaturesAndWorkarounds *igcFtrWa = nullptr;
     MockCompilerDebugVars debugVars;
 
     using TranslationOpT = std::pair<IGC::CodeType::CodeType_t, IGC::CodeType::CodeType_t>;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,24 +9,24 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/gmm_helper/gmm_interface.h"
 #include "shared/source/gmm_helper/resource_info.h"
+#include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/utilities/debug_settings_reader.h"
+#include "shared/test/common/helpers/custom_event_listener.h"
 #include "shared/test/common/helpers/default_hw_info.inl"
+#include "shared/test/common/helpers/kernel_binary_helper.h"
 #include "shared/test/common/helpers/memory_leak_listener.h"
 #include "shared/test/common/helpers/test_files.h"
 #include "shared/test/common/helpers/ult_hw_config.inl"
+#include "shared/test/common/libult/global_environment.h"
+#include "shared/test/common/libult/signal_utils.h"
+#include "shared/test/common/mocks/mock_gmm.h"
 #include "shared/test/common/mocks/mock_gmm_client_context.h"
 #include "shared/test/common/mocks/mock_sip.h"
 #include "shared/test/common/test_macros/test_checks_shared.h"
+#include "shared/test/unit_test/base_ult_config_listener.h"
+#include "shared/test/unit_test/test_stats.h"
 #include "shared/test/unit_test/tests_configuration.h"
-
-#include "opencl/source/os_interface/ocl_reg_path.h"
-#include "opencl/test/unit_test/custom_event_listener.h"
-#include "opencl/test/unit_test/global_environment.h"
-#include "opencl/test/unit_test/helpers/kernel_binary_helper.h"
-#include "opencl/test/unit_test/mocks/mock_gmm.h"
-#include "opencl/test/unit_test/mocks/mock_program.h"
-#include "opencl/test/unit_test/ult_config_listener.h"
 
 #include "gmock/gmock.h"
 
@@ -49,7 +49,6 @@ namespace NEO {
 extern const char *hardwarePrefix[];
 extern const HardwareInfo *hardwareInfoTable[IGFX_MAX_PRODUCT];
 
-extern const unsigned int ultIterationMaxTime;
 extern bool useMockGmm;
 extern TestMode testMode;
 extern const char *executionDirectorySuffix;
@@ -66,17 +65,12 @@ bool disabled = false;
 } // namespace NEO
 
 using namespace NEO;
-TestEnvironment *gEnvironment;
 
-PRODUCT_FAMILY productFamily = DEFAULT_TEST_PLATFORM::hwInfo.platform.eProductFamily;
-GFXCORE_FAMILY renderCoreFamily = DEFAULT_TEST_PLATFORM::hwInfo.platform.eRenderCoreFamily;
-
-extern std::string lastTest;
+extern PRODUCT_FAMILY productFamily;
+extern GFXCORE_FAMILY renderCoreFamily;
 bool generateRandomInput = false;
 
 void applyWorkarounds() {
-    platformsImpl = new std::vector<std::unique_ptr<Platform>>;
-    platformsImpl->reserve(1);
     {
         std::ofstream f;
         const std::string fileName("_tmp_");
@@ -121,38 +115,6 @@ void applyWorkarounds() {
         NEO::FileLoggerInstance();
     }
 }
-#ifdef __linux__
-void handle_SIGALRM(int signal) {
-    std::cout << "Tests timeout on: " << lastTest << std::endl;
-    abort();
-}
-void handle_SIGSEGV(int signal) {
-    std::cout << "SIGSEGV on: " << lastTest << std::endl;
-    abort();
-}
-struct sigaction oldSigAbrt;
-void handle_SIGABRT(int signal) {
-    std::cout << "SIGABRT on: " << lastTest << std::endl;
-    // restore signal handler to abort
-    if (sigaction(SIGABRT, &oldSigAbrt, nullptr) == -1) {
-        std::cout << "FATAL: cannot fatal SIGABRT handler" << std::endl;
-        std::cout << "FATAL: try SEGV" << std::endl;
-        uint8_t *ptr = nullptr;
-        *ptr = 0;
-        std::cout << "FATAL: still alive, call exit()" << std::endl;
-        exit(-1);
-    }
-    raise(signal);
-}
-#else
-LONG WINAPI UltExceptionFilter(
-    _In_ struct _EXCEPTION_POINTERS *exceptionInfo) {
-    std::cout << "UnhandledException: 0x" << std::hex << exceptionInfo->ExceptionRecord->ExceptionCode << std::dec
-              << " on test: " << lastTest
-              << std::endl;
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-#endif
 
 std::string getHardwarePrefix() {
     std::string s = hardwarePrefix[defaultHwInfo->platform.eProductFamily];
@@ -183,14 +145,14 @@ std::string getRunPath(char *argv0) {
 int main(int argc, char **argv) {
     int retVal = 0;
     bool useDefaultListener = false;
-    bool enable_alarm = true;
+    bool enableAbrt = true;
+    bool enableAlarm = true;
+    bool enableSegv = true;
     bool setupFeatureTableAndWorkaroundTable = testMode == TestMode::AubTests ? true : false;
-
+    bool showTestStats = false;
     applyWorkarounds();
 
 #if defined(__linux__)
-    bool enable_segv = true;
-    bool enable_abrt = true;
     if (getenv("IGDRCL_TEST_SELF_EXEC") == nullptr) {
         std::string wd = getRunPath(argv[0]);
         char *ldLibraryPath = getenv("LD_LIBRARY_PATH");
@@ -224,7 +186,9 @@ int main(int argc, char **argv) {
         } else if (!strcmp("--enable_default_listener", argv[i])) {
             useDefaultListener = true;
         } else if (!strcmp("--disable_alarm", argv[i])) {
-            enable_alarm = false;
+            enableAlarm = false;
+        } else if (!strcmp("--show_test_stats", argv[i])) {
+            showTestStats = true;
         } else if (!strcmp("--disable_pagefaulting_tests", argv[i])) { //disable tests which raise page fault signal during execution
             NEO::PagaFaultManagerTestConfig::disabled = true;
         } else if (!strcmp("--tbx", argv[i])) {
@@ -290,7 +254,7 @@ int main(int argc, char **argv) {
             generateRandomInput = true;
         } else if (!strcmp("--read-config", argv[i]) && (testMode == TestMode::AubTests || testMode == TestMode::AubTestsWithTbx)) {
             if (DebugManager.registryReadAvailable()) {
-                DebugManager.setReaderImpl(SettingsReader::create(oclRegPath));
+                DebugManager.setReaderImpl(SettingsReader::create(ApiSpecificConfig::getRegistryPath()));
                 DebugManager.injectSettingsFromReader();
             }
         } else if (!strcmp("--dump_buffer_format", argv[i]) && testMode == TestMode::AubTests) {
@@ -304,6 +268,11 @@ int main(int argc, char **argv) {
             std::transform(dumpImageFormat.begin(), dumpImageFormat.end(), dumpImageFormat.begin(), ::toupper);
             DebugManager.flags.AUBDumpImageFormat.set(dumpImageFormat);
         }
+    }
+
+    if (showTestStats) {
+        std::cout << getTestStats() << std::endl;
+        return 0;
     }
 
     productFamily = hwInfoForTests.platform.eProductFamily;
@@ -381,7 +350,7 @@ int main(int argc, char **argv) {
     }
 
     listeners.Append(new MemoryLeakListener);
-    listeners.Append(new UltConfigListener);
+    listeners.Append(new BaseUltConfigListener);
 
     gEnvironment = reinterpret_cast<TestEnvironment *>(::testing::AddGlobalTestEnvironment(new TestEnvironment));
 
@@ -400,47 +369,21 @@ int main(int argc, char **argv) {
     gEnvironment->setMockFileNames(fclDebugVars.fileName, igcDebugVars.fileName);
     gEnvironment->setDefaultDebugVars(fclDebugVars, igcDebugVars, hwInfoForTests);
 
-#if defined(__linux__)
-    //ULTs timeout
-    if (enable_alarm) {
-        unsigned int alarmTime = NEO::ultIterationMaxTime * ::testing::GTEST_FLAG(repeat);
-
-        struct sigaction sa;
-        sa.sa_handler = &handle_SIGALRM;
-        sa.sa_flags = SA_RESTART;
-        sigfillset(&sa.sa_mask);
-        if (sigaction(SIGALRM, &sa, NULL) == -1) {
-            printf("FATAL ERROR: cannot intercept SIGALRM\n");
-            return -2;
-        }
-        alarm(alarmTime);
-        std::cout << "set timeout to: " << alarmTime << std::endl;
+    int sigOut = setAlarm(enableAlarm);
+    if (sigOut != 0) {
+        return sigOut;
     }
 
-    if (enable_segv) {
-        struct sigaction sa;
-        sa.sa_handler = &handle_SIGSEGV;
-        sa.sa_flags = SA_RESTART;
-        sigfillset(&sa.sa_mask);
-        if (sigaction(SIGSEGV, &sa, NULL) == -1) {
-            printf("FATAL ERROR: cannot intercept SIGSEGV\n");
-            return -2;
-        }
+    sigOut = setSegv(enableSegv);
+    if (sigOut != 0) {
+        return sigOut;
     }
 
-    if (enable_abrt) {
-        struct sigaction sa;
-        sa.sa_handler = &handle_SIGABRT;
-        sa.sa_flags = SA_RESTART;
-        sigfillset(&sa.sa_mask);
-        if (sigaction(SIGABRT, &sa, &oldSigAbrt) == -1) {
-            printf("FATAL ERROR: cannot intercept SIGABRT\n");
-            return -2;
-        }
+    sigOut = setAbrt(enableAbrt);
+    if (sigOut != 0) {
+        return sigOut;
     }
-#else
-    SetUnhandledExceptionFilter(&UltExceptionFilter);
-#endif
+
     if (useMockGmm) {
         GmmHelper::createGmmContextWrapperFunc = GmmClientContext::create<MockGmmClientContext>;
     } else {
@@ -450,8 +393,6 @@ int main(int argc, char **argv) {
     NEO::MockSipData::mockSipKernel.reset(new NEO::MockSipKernel());
 
     retVal = RUN_ALL_TESTS();
-
-    delete platformsImpl;
 
     return retVal;
 }

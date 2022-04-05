@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2021 Intel Corporation
+# Copyright (C) 2018-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -8,8 +8,10 @@ set(IGDRCL_SRCS_tests_command_queue
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
     ${CMAKE_CURRENT_SOURCE_DIR}/blit_enqueue_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/buffer_operations_fixture.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/command_enqueue_fixture.h
     ${CMAKE_CURRENT_SOURCE_DIR}/command_queue_hw_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/command_queue_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/csr_selection_args_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_walker_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/enqueue_barrier_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/enqueue_command_without_kernel_tests.cpp
@@ -87,14 +89,27 @@ set(IGDRCL_SRCS_tests_command_queue
     ${CMAKE_CURRENT_SOURCE_DIR}/ooq_task_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/read_write_buffer_cpu_copy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sync_buffer_handler_tests.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/walker_partition_tests_xehp_plus.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/work_group_size_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/zero_size_enqueue_tests.cpp
 )
 
-if(TESTS_XEHP_PLUS)
+if(TESTS_XEHP_AND_LATER)
   list(APPEND IGDRCL_SRCS_tests_command_queue
-       ${CMAKE_CURRENT_SOURCE_DIR}/walker_partition_tests_xehp_plus.cpp
+       ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_walker_tests_xehp_and_later.cpp
+       ${CMAKE_CURRENT_SOURCE_DIR}/enqueue_resource_barier_tests_xehp_and_later.cpp
+  )
+endif()
+
+if(TESTS_DG2_AND_LATER)
+  list(APPEND IGDRCL_SRCS_tests_command_queue
+       ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_walker_tests_dg2_and_later.cpp
+       ${CMAKE_CURRENT_SOURCE_DIR}/enqueue_command_without_kernel_tests_dg2_and_later.cpp
+  )
+endif()
+
+if(TESTS_PVC_AND_LATER)
+  list(APPEND IGDRCL_SRCS_tests_command_queue
+       ${CMAKE_CURRENT_SOURCE_DIR}/command_queue_tests_pvc_and_later.cpp
   )
 endif()
 

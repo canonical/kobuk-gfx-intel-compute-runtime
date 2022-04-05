@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -26,6 +26,7 @@ struct ZebinSections {
     StackVec<SectionHeaderData *, 1> zeInfoSections;
     StackVec<SectionHeaderData *, 1> globalDataSections;
     StackVec<SectionHeaderData *, 1> constDataSections;
+    StackVec<SectionHeaderData *, 1> constDataStringSections;
     StackVec<SectionHeaderData *, 1> symtabSections;
     StackVec<SectionHeaderData *, 1> spirvSections;
     StackVec<SectionHeaderData *, 1> noteIntelGTSections;
@@ -35,6 +36,7 @@ using UniqueNode = StackVec<const NEO::Yaml::Node *, 1>;
 struct ZeInfoKernelSections {
     UniqueNode nameNd;
     UniqueNode executionEnvNd;
+    UniqueNode debugEnvNd;
     UniqueNode payloadArgumentsNd;
     UniqueNode bindingTableIndicesNd;
     UniqueNode perThreadPayloadArgumentsNd;
@@ -52,6 +54,10 @@ DecodeError validateZeInfoKernelSectionsCount(const ZeInfoKernelSections &outZeI
 DecodeError readZeInfoExecutionEnvironment(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node,
                                            NEO::Elf::ZebinKernelMetadata::Types::Kernel::ExecutionEnv::ExecutionEnvBaseT &outExecEnv,
                                            ConstStringRef context, std::string &outErrReason, std::string &outWarning);
+DecodeError readZeInfoDebugEnvironment(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node,
+                                       NEO::Elf::ZebinKernelMetadata::Types::Kernel::DebugEnv::DebugEnvBaseT &outDebugEnv,
+                                       ConstStringRef context,
+                                       std::string &outErrReason, std::string &outWarning);
 DecodeError readZeInfoExperimentalProperties(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node,
                                              NEO::Elf::ZebinKernelMetadata::Types::Kernel::ExecutionEnv::ExperimentalPropertiesBaseT &outExperimentalProperties,
                                              ConstStringRef context,
@@ -78,7 +84,7 @@ DecodeError readZeInfoPerThreadPayloadArguments(const NEO::Yaml::YamlParser &par
 using ZeInfoPayloadArguments = StackVec<NEO::Elf::ZebinKernelMetadata::Types::Kernel::PayloadArgument::PayloadArgumentBaseT, 32>;
 DecodeError readZeInfoPayloadArguments(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node,
                                        ZeInfoPayloadArguments &ouPayloadArguments,
-                                       uint32_t &outMaxPayloadArgumentIndex,
+                                       int32_t &outMaxPayloadArgumentIndex,
                                        int32_t &outMaxSamplerIndex,
                                        ConstStringRef context,
                                        std::string &outErrReason, std::string &outWarning);
@@ -94,6 +100,11 @@ DecodeError readZeInfoPerThreadMemoryBuffers(const NEO::Yaml::YamlParser &parser
                                              ZeInfoPerThreadMemoryBuffers &outPerThreadMemoryBuffers,
                                              ConstStringRef context,
                                              std::string &outErrReason, std::string &outWarning);
+using ZeInfoGlobalHostAccessTables = StackVec<NEO::Elf::ZebinKernelMetadata::Types::GlobalHostAccessTable::globalHostAccessTableT, 32>;
+DecodeError readZeInfoGlobalHostAceessTable(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node,
+                                            ZeInfoGlobalHostAccessTables &outDeviceNameToHostTable,
+                                            ConstStringRef context,
+                                            std::string &outErrReason, std::string &outWarning);
 
 NEO::DecodeError populateArgDescriptor(const NEO::Elf::ZebinKernelMetadata::Types::Kernel::PerThreadPayloadArgument::PerThreadPayloadArgumentBaseT &src, NEO::KernelDescriptor &dst, const uint32_t grfSize,
                                        std::string &outErrReason, std::string &outWarning);
@@ -106,4 +117,6 @@ NEO::DecodeError populateKernelDescriptor(NEO::ProgramInfo &dst, NEO::Elf::Elf<N
 
 NEO::DecodeError populateZeInfoVersion(NEO::Elf::ZebinKernelMetadata::Types::Version &dst,
                                        NEO::Yaml::YamlParser &yamlParser, const NEO::Yaml::Node &versionNd, std::string &outErrReason, std::string &outWarning);
+
+NEO::DecodeError populateExternalFunctionsMetadata(NEO::ProgramInfo &dst, NEO::Yaml::YamlParser &yamlParser, const NEO::Yaml::Node &functionNd, std::string &outErrReason, std::string &outWarning);
 } // namespace NEO

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,33 +10,13 @@
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/test/common/helpers/default_hw_info.h"
-
-#include "opencl/test/unit_test/os_interface/linux/drm_mock.h"
-#include "test.h"
+#include "shared/test/common/libult/linux/drm_mock.h"
+#include "shared/test/common/mocks/linux/mock_drm_allocation.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "gtest/gtest.h"
 
 using namespace NEO;
-
-TEST(DrmQueryTest, GivenGtMaxFreqFileExistsWhenFrequencyIsQueriedThenValidValueIsReturned) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-    int expectedMaxFrequency = 1000;
-
-    DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
-    auto hwInfo = *defaultHwInfo;
-
-    std::string gtMaxFreqFile = "test_files/linux/devices/device/drm/card1/gt_max_freq_mhz";
-
-    EXPECT_TRUE(fileExists(gtMaxFreqFile));
-    drm.setPciPath("device");
-
-    int maxFrequency = 0;
-    int ret = drm.getMaxGpuFrequency(hwInfo, maxFrequency);
-    EXPECT_EQ(0, ret);
-
-    EXPECT_EQ(expectedMaxFrequency, maxFrequency);
-}
 
 TEST(DrmQueryTest, WhenCallingIsDebugAttachAvailableThenReturnValueIsFalse) {
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
@@ -47,48 +27,6 @@ TEST(DrmQueryTest, WhenCallingIsDebugAttachAvailableThenReturnValueIsFalse) {
     EXPECT_FALSE(drm.isDebugAttachAvailable());
 }
 
-TEST(DrmQueryTest, GivenDrmWhenQueryingTopologyInfoCorrectMaxValuesAreSet) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-
-    *executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo() = *NEO::defaultHwInfo.get();
-    DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
-
-    Drm::QueryTopologyData topologyData = {};
-
-    EXPECT_TRUE(drm.queryTopology(*executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo(), topologyData));
-
-    EXPECT_EQ(drm.storedSVal, topologyData.sliceCount);
-    EXPECT_EQ(drm.storedSSVal, topologyData.subSliceCount);
-    EXPECT_EQ(drm.storedEUVal, topologyData.euCount);
-
-    EXPECT_EQ(drm.storedSVal, topologyData.maxSliceCount);
-    EXPECT_EQ(drm.storedSSVal / drm.storedSVal, topologyData.maxSubSliceCount);
-    EXPECT_EQ(drm.storedEUVal / drm.storedSSVal, topologyData.maxEuCount);
-}
-
-TEST(DrmQueryTest, givenDrmWhenGettingSliceMappingsThenCorrectMappingReturned) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-
-    *executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo() = *NEO::defaultHwInfo.get();
-    DrmMock drmMock{*executionEnvironment->rootDeviceEnvironments[0]};
-
-    Drm::QueryTopologyData topologyData = {};
-
-    EXPECT_TRUE(drmMock.queryTopology(*executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo(), topologyData));
-
-    auto device0SliceMapping = drmMock.getSliceMappings(0);
-    auto device1SliceMapping = drmMock.getSliceMappings(1);
-
-    ASSERT_EQ(static_cast<size_t>(topologyData.maxSliceCount), device0SliceMapping.size());
-    EXPECT_EQ(0u, device1SliceMapping.size());
-
-    for (int i = 0; i < topologyData.maxSliceCount; i++) {
-        EXPECT_EQ(i, device0SliceMapping[i]);
-    }
-}
-
 using HwConfigTopologyQuery = ::testing::Test;
 
 HWTEST2_F(HwConfigTopologyQuery, WhenGettingTopologyFailsThenSetMaxValuesBasedOnSubsliceIoctlQuery, MatchAny) {
@@ -97,8 +35,6 @@ HWTEST2_F(HwConfigTopologyQuery, WhenGettingTopologyFailsThenSetMaxValuesBasedOn
 
     *executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo() = *NEO::defaultHwInfo.get();
     auto drm = new DrmMock(*executionEnvironment->rootDeviceEnvironments[0]);
-
-    drm->setGtType(GTTYPE_GT1);
 
     auto osInterface = std::make_unique<OSInterface>();
     osInterface->setDriverModel(std::unique_ptr<Drm>(drm));
@@ -124,14 +60,21 @@ HWTEST2_F(HwConfigTopologyQuery, WhenGettingTopologyFailsThenSetMaxValuesBasedOn
     EXPECT_EQ(static_cast<uint32_t>(drm->storedSSVal), outHwInfo.gtSystemInfo.SubSliceCount);
 }
 
-TEST(DrmQueryTest, givenIoctlWhenParseToStringThenProperStringIsReturned) {
-    for (auto ioctlCodeString : ioctlCodeStringMap) {
-        EXPECT_STREQ(IoctlHelper::getIoctlString(ioctlCodeString.first).c_str(), ioctlCodeString.second);
-    }
+TEST(DrmQueryTest, WhenCallingQueryPageFaultSupportThenReturnFalse) {
+    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
+    executionEnvironment->prepareRootDeviceEnvironments(1);
+    DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
+
+    drm.queryPageFaultSupport();
+
+    EXPECT_FALSE(drm.hasPageFaultSupport());
 }
 
-TEST(DrmQueryTest, givenIoctlParamWhenParseToStringThenProperStringIsReturned) {
-    for (auto ioctlParamCodeString : ioctlParamCodeStringMap) {
-        EXPECT_STREQ(IoctlHelper::getIoctlParamString(ioctlParamCodeString.first).c_str(), ioctlParamCodeString.second);
-    }
+TEST(DrmQueryTest, givenDrmAllocationWhenShouldAllocationFaultIsCalledThenReturnFalse) {
+    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
+    executionEnvironment->prepareRootDeviceEnvironments(1);
+    DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
+
+    MockDrmAllocation allocation(AllocationType::BUFFER, MemoryPool::MemoryNull);
+    EXPECT_FALSE(allocation.shouldAllocationPageFault(&drm));
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,14 +9,15 @@
 #include "shared/source/compiler_interface/compiler_interface.inl"
 #include "shared/source/helpers/file_io.h"
 #include "shared/source/helpers/hw_info.h"
+#include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/test_files.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/libult/global_environment.h"
 #include "shared/test/common/mocks/mock_cif.h"
 #include "shared/test/common/mocks/mock_compiler_interface.h"
 #include "shared/test/common/mocks/mock_compilers.h"
-
-#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
-#include "opencl/test/unit_test/global_environment.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "gmock/gmock.h"
 #include "hw_cmds.h"
@@ -33,11 +34,11 @@ const char *gCBadDompilerDllName = "libbad_compiler.so";
 #error "Unknown OS!"
 #endif
 
-class CompilerInterfaceTest : public ClDeviceFixture,
+class CompilerInterfaceTest : public DeviceFixture,
                               public ::testing::Test {
   public:
     void SetUp() override {
-        ClDeviceFixture::SetUp();
+        DeviceFixture::SetUp();
 
         // create the compiler interface
         this->pCompilerInterface = new MockCompilerInterface();
@@ -48,7 +49,7 @@ class CompilerInterfaceTest : public ClDeviceFixture,
         std::string testFile;
 
         testFile.append(clFiles);
-        testFile.append("CopyBuffer_simd16.cl");
+        testFile.append("CopyBuffer_simd32.cl");
 
         pSource = loadDataFromFile(
             testFile.c_str(),
@@ -58,13 +59,12 @@ class CompilerInterfaceTest : public ClDeviceFixture,
         ASSERT_NE(nullptr, pSource);
 
         inputArgs.src = ArrayRef<char>(pSource.get(), sourceSize);
-        inputArgs.internalOptions = ArrayRef<const char>(pClDevice->peekCompilerExtensions().c_str(), pClDevice->peekCompilerExtensions().size());
     }
 
     void TearDown() override {
         pSource.reset();
 
-        ClDeviceFixture::TearDown();
+        DeviceFixture::TearDown();
     }
 
     MockCompilerInterface *pCompilerInterface;
@@ -138,7 +138,7 @@ TEST(CompilerInterface, WhenInitializeIsCalledThenFailIfOneOfRequiredCompilersIs
 
 TEST(CompilerInterfaceCreateInstance, WhenInitializeFailedThenReturnNull) {
     struct FailInitializeCompilerInterface : CompilerInterface {
-        bool initialize(std::unique_ptr<CompilerCache> cache, bool requireFcl) override {
+        bool initialize(std::unique_ptr<CompilerCache> &&cache, bool requireFcl) override {
             return false;
         }
     };
@@ -157,19 +157,6 @@ TEST_F(CompilerInterfaceTest, WhenPreferredIntermediateRepresentationSpecifiedTh
     auto err = pCompilerInterface->build(*pDevice, inputArgs, translationOutput);
     EXPECT_EQ(IGC::CodeType::llvmLl, translationOutput.intermediateCodeType);
     EXPECT_EQ(TranslationOutput::ErrorCode::Success, err);
-}
-
-TEST_F(CompilerInterfaceTest, WhenBuildIsInvokedThenFclReceivesListOfExtensionsInInternalOptions) {
-    std::string receivedInternalOptions;
-
-    auto debugVars = NEO::getFclDebugVars();
-    debugVars.receivedInternalOptionsOutput = &receivedInternalOptions;
-    gEnvironment->fclPushDebugVars(debugVars);
-    TranslationOutput translationOutput = {};
-    auto err = pCompilerInterface->build(*pDevice, inputArgs, translationOutput);
-    EXPECT_EQ(TranslationOutput::ErrorCode::Success, err);
-    EXPECT_THAT(receivedInternalOptions, testing::HasSubstr(pClDevice->peekCompilerExtensions()));
-    gEnvironment->fclPopDebugVars();
 }
 
 TEST_F(CompilerInterfaceTest, whenCompilerIsNotAvailableThenBuildFailsGracefully) {
@@ -220,7 +207,7 @@ TEST_F(CompilerInterfaceTest, GivenOptionsWhenCompilingToIsaThenSuccessIsReturne
 
 TEST_F(CompilerInterfaceTest, WhenCompilingToIrThenSuccessIsReturned) {
     MockCompilerDebugVars fclDebugVars;
-    retrieveBinaryKernelFilename(fclDebugVars.fileName, "CopyBuffer_simd16_", ".bc");
+    retrieveBinaryKernelFilename(fclDebugVars.fileName, "CopyBuffer_simd32_", ".bc");
     gEnvironment->fclPushDebugVars(fclDebugVars);
     TranslationOutput translationOutput = {};
     auto err = pCompilerInterface->compile(*pDevice, inputArgs, translationOutput);
@@ -246,20 +233,6 @@ TEST_F(CompilerInterfaceTest, GivenProgramCreatedFromIrWhenCompileIsCalledThenDo
     inputArgs.srcType = IGC::CodeType::oclGenBin;
     err = pCompilerInterface->compile(*pDevice, inputArgs, translationOutput);
     EXPECT_EQ(TranslationOutput::ErrorCode::AlreadyCompiled, err);
-}
-
-TEST_F(CompilerInterfaceTest, WhenCompileIsInvokedThenFclReceivesListOfExtensionsInInternalOptions) {
-    std::string receivedInternalOptions;
-
-    MockCompilerDebugVars fclDebugVars;
-    retrieveBinaryKernelFilename(fclDebugVars.fileName, "CopyBuffer_simd16_", ".bc");
-    fclDebugVars.receivedInternalOptionsOutput = &receivedInternalOptions;
-    gEnvironment->fclPushDebugVars(fclDebugVars);
-    TranslationOutput translationOutput = {};
-    auto err = pCompilerInterface->compile(*pDevice, inputArgs, translationOutput);
-    EXPECT_EQ(TranslationOutput::ErrorCode::Success, err);
-    EXPECT_THAT(receivedInternalOptions, testing::HasSubstr(pClDevice->peekCompilerExtensions()));
-    gEnvironment->fclPopDebugVars();
 }
 
 TEST_F(CompilerInterfaceTest, whenCompilerIsNotAvailableThenCompileFailsGracefully) {
@@ -312,21 +285,19 @@ TEST_F(CompilerInterfaceTest, GivenForceBuildFailureWhenLinkingIrThenLinkFailure
     gEnvironment->igcPopDebugVars();
 }
 
-TEST_F(CompilerInterfaceTest, WhenLinkIsCalledThenLlvmBcIsUsedAsIntermediateRepresentation) {
+TEST_F(CompilerInterfaceTest, WhenLinkIsCalledThenOclGenBinIsTheTranslationTarget) {
     // link only from .ll to gen ISA
     MockCompilerDebugVars igcDebugVars;
-    retrieveBinaryKernelFilename(igcDebugVars.fileName, "CopyBuffer_simd16_", ".bc");
+    retrieveBinaryKernelFilename(igcDebugVars.fileName, "CopyBuffer_simd32_", ".bc");
     gEnvironment->igcPushDebugVars(igcDebugVars);
     TranslationOutput translationOutput = {};
     auto err = pCompilerInterface->link(*pDevice, inputArgs, translationOutput);
     gEnvironment->igcPopDebugVars();
     ASSERT_EQ(TranslationOutput::ErrorCode::Success, err);
-    ASSERT_EQ(2U, pCompilerInterface->requestedTranslationCtxs.size());
+    ASSERT_EQ(1u, pCompilerInterface->requestedTranslationCtxs.size());
 
-    MockCompilerInterface::TranslationOpT firstTranslation = {IGC::CodeType::elf, IGC::CodeType::llvmBc},
-                                          secondTranslation = {IGC::CodeType::llvmBc, IGC::CodeType::oclGenBin};
-    EXPECT_EQ(firstTranslation, pCompilerInterface->requestedTranslationCtxs[0]);
-    EXPECT_EQ(secondTranslation, pCompilerInterface->requestedTranslationCtxs[1]);
+    MockCompilerInterface::TranslationOpT translation = {IGC::CodeType::elf, IGC::CodeType::oclGenBin};
+    EXPECT_EQ(translation, pCompilerInterface->requestedTranslationCtxs[0]);
 }
 
 TEST_F(CompilerInterfaceTest, whenCompilerIsNotAvailableThenLinkFailsGracefully) {
@@ -384,7 +355,7 @@ TEST_F(CompilerInterfaceTest, GivenForceBuildFailureWhenCreatingLibraryThenLinkF
 TEST_F(CompilerInterfaceTest, WhenCreateLibraryIsCalledThenLlvmBcIsUsedAsIntermediateRepresentation) {
     // create library from .ll to IR
     MockCompilerDebugVars igcDebugVars;
-    retrieveBinaryKernelFilename(igcDebugVars.fileName, "CopyBuffer_simd16_", ".bc");
+    retrieveBinaryKernelFilename(igcDebugVars.fileName, "CopyBuffer_simd32_", ".bc");
     gEnvironment->igcPushDebugVars(igcDebugVars);
     TranslationOutput translationOutput = {};
     auto err = pCompilerInterface->createLibrary(*pDevice, inputArgs, translationOutput);
@@ -659,7 +630,7 @@ TEST(LoadCompilerTest, whenCouldNotLoadLibraryThenReturnFalseAndNullOutputs) {
     MockCompilerEnableGuard mock;
     std::unique_ptr<NEO::OsLibrary> retLib;
     CIF::RAII::UPtr_t<CIF::CIFMain> retMain;
-    bool retVal = loadCompiler<IGC::IgcOclDeviceCtx>("falseName.notRealLib", retLib, retMain);
+    bool retVal = loadCompiler<IGC::IgcOclDeviceCtx>("_falseName.notRealLib", retLib, retMain);
     EXPECT_FALSE(retVal);
     EXPECT_EQ(nullptr, retLib.get());
     EXPECT_EQ(nullptr, retMain.get());
@@ -902,7 +873,7 @@ TEST_F(CompilerInterfaceTest, GivenRequestForNewIgcTranslationCtxWhenCouldNotPop
     setIgcDebugVars(prevDebugVars);
 }
 
-TEST_F(CompilerInterfaceTest, givenNoDbgKeyForceUseDifferentPlatformWhenRequestForNewTranslationCtxThenUseDefaultPlatform) {
+HWTEST_F(CompilerInterfaceTest, givenNoDbgKeyForceUseDifferentPlatformWhenRequestForNewTranslationCtxThenUseDefaultPlatform) {
     auto device = this->pDevice;
     auto retIgc = pCompilerInterface->createIgcTranslationCtx(*device, IGC::CodeType::spirV, IGC::CodeType::oclGenBin);
     EXPECT_NE(nullptr, retIgc);
@@ -917,7 +888,7 @@ TEST_F(CompilerInterfaceTest, givenNoDbgKeyForceUseDifferentPlatformWhenRequestF
     EXPECT_EQ(device->getHardwareInfo().gtSystemInfo.ThreadCount, igcSysInfo->GetThreadCount());
 }
 
-TEST_F(CompilerInterfaceTest, givenDbgKeyForceUseDifferentPlatformWhenRequestForNewTranslationCtxThenUseDbgKeyPlatform) {
+HWTEST_F(CompilerInterfaceTest, givenDbgKeyForceUseDifferentPlatformWhenRequestForNewTranslationCtxThenUseDbgKeyPlatform) {
     DebugManagerStateRestore dbgRestore;
     auto dbgProdFamily = DEFAULT_TEST_PLATFORM::hwInfo.platform.eProductFamily;
     std::string dbgPlatformString(hardwarePrefix[dbgProdFamily]);
@@ -1023,9 +994,18 @@ TEST_F(CompilerInterfaceTest, whenIgcReturnsErrorThenGetSipKernelBinaryFailsGrac
     gEnvironment->igcPopDebugVars();
 }
 
+TEST_F(CompilerInterfaceTest, whenGetIgcDeviceCtxReturnsNullptrThenGetSipKernelBinaryFailsGracefully) {
+    pCompilerInterface->failGetIgcDeviceCtx = true;
+
+    std::vector<char> sipBinary;
+    std::vector<char> stateAreaHeader;
+    auto err = pCompilerInterface->getSipKernelBinary(*this->pDevice, SipKernelType::Csr, sipBinary, stateAreaHeader);
+    EXPECT_EQ(TranslationOutput::ErrorCode::UnknownError, err);
+}
+
 TEST_F(CompilerInterfaceTest, whenEverythingIsOkThenGetSipKernelReturnsIgcsOutputAsSipBinary) {
     MockCompilerDebugVars igcDebugVars;
-    retrieveBinaryKernelFilename(igcDebugVars.fileName, "CopyBuffer_simd16_", ".bc");
+    retrieveBinaryKernelFilename(igcDebugVars.fileName, "CopyBuffer_simd32_", ".bc");
     gEnvironment->igcPushDebugVars(igcDebugVars);
     std::vector<char> sipBinary;
     std::vector<char> stateAreaHeader;
@@ -1059,9 +1039,7 @@ TEST_F(CompilerInterfaceTest, whenRequestingSipKernelBinaryThenProperSystemRouti
     gEnvironment->igcPopDebugVars();
 }
 
-TEST_F(CompilerInterfaceTest, givenUseBindlessDebugSipWhenRequestingSipKernelBinaryThenProperSystemRoutineIsSelectedFromCompiler) {
-    DebugManagerStateRestore dbgRestore;
-    DebugManager.flags.UseBindlessDebugSip.set(true);
+TEST_F(CompilerInterfaceTest, WhenRequestingBindlessDebugSipThenProperSystemRoutineIsSelectedFromCompiler) {
     MockCompilerDebugVars igcDebugVars;
     gEnvironment->igcPushDebugVars(igcDebugVars);
     std::vector<char> sipBinary;
@@ -1072,16 +1050,16 @@ TEST_F(CompilerInterfaceTest, givenUseBindlessDebugSipWhenRequestingSipKernelBin
     EXPECT_EQ(IGC::SystemRoutineType::contextSaveRestore, getIgcDebugVars().typeOfSystemRoutine);
     EXPECT_EQ(MockCompilerDebugVars::SipAddressingType::bindful, getIgcDebugVars().receivedSipAddressingType);
 
-    err = pCompilerInterface->getSipKernelBinary(*this->pDevice, SipKernelType::DbgCsr, sipBinary, stateAreaHeader);
-    EXPECT_EQ(TranslationOutput::ErrorCode::Success, err);
-    EXPECT_NE(0U, sipBinary.size());
-    EXPECT_EQ(IGC::SystemRoutineType::debug, getIgcDebugVars().typeOfSystemRoutine);
-    EXPECT_EQ(MockCompilerDebugVars::SipAddressingType::bindless, getIgcDebugVars().receivedSipAddressingType);
-
     err = pCompilerInterface->getSipKernelBinary(*this->pDevice, SipKernelType::DbgCsrLocal, sipBinary, stateAreaHeader);
     EXPECT_EQ(TranslationOutput::ErrorCode::Success, err);
     EXPECT_NE(0U, sipBinary.size());
     EXPECT_EQ(IGC::SystemRoutineType::debugSlm, getIgcDebugVars().typeOfSystemRoutine);
+    EXPECT_EQ(MockCompilerDebugVars::SipAddressingType::bindful, getIgcDebugVars().receivedSipAddressingType);
+
+    err = pCompilerInterface->getSipKernelBinary(*this->pDevice, SipKernelType::DbgBindless, sipBinary, stateAreaHeader);
+    EXPECT_EQ(TranslationOutput::ErrorCode::Success, err);
+    EXPECT_NE(0U, sipBinary.size());
+    EXPECT_EQ(IGC::SystemRoutineType::debug, getIgcDebugVars().typeOfSystemRoutine);
     EXPECT_EQ(MockCompilerDebugVars::SipAddressingType::bindless, getIgcDebugVars().receivedSipAddressingType);
 
     gEnvironment->igcPopDebugVars();
@@ -1105,6 +1083,12 @@ TEST_F(CompilerInterfaceTest, whenCompilerIsNotAvailableThenGetSpecializationCon
     NEO::SpecConstantInfo sci;
     auto err = pCompilerInterface->getSpecConstantsInfo(*pDevice, ArrayRef<char>{}, sci);
     EXPECT_EQ(TranslationOutput::ErrorCode::CompilerNotAvailable, err);
+}
+
+TEST_F(CompilerInterfaceTest, givenCompilerInterfacewhenGettingIgcFeaturesAndWorkaroundsThenValidPointerIsReturned) {
+    auto igcFeaturesAndWorkarounds = pCompilerInterface->getIgcFeaturesAndWorkarounds(*pDevice);
+    EXPECT_NE(igcFeaturesAndWorkarounds, nullptr);
+    EXPECT_EQ(igcFeaturesAndWorkarounds->GetMaxOCLParamSize(), 0u);
 }
 
 TEST_F(CompilerInterfaceTest, GivenRequestForNewFclTranslationCtxWhenInterfaceVersionAbove4ThenPopulatePlatformInfo) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -25,8 +25,8 @@ BlitProperties BlitProperties::constructPropertiesForReadWrite(BlitterConstants:
                                                                GraphicsAllocation *memObjAllocation,
                                                                GraphicsAllocation *preallocatedHostAllocation,
                                                                const void *hostPtr, uint64_t memObjGpuVa,
-                                                               uint64_t hostAllocGpuVa, Vec3<size_t> hostPtrOffset,
-                                                               Vec3<size_t> copyOffset, Vec3<size_t> copySize,
+                                                               uint64_t hostAllocGpuVa, const Vec3<size_t> &hostPtrOffset,
+                                                               const Vec3<size_t> &copyOffset, Vec3<size_t> copySize,
                                                                size_t hostRowPitch, size_t hostSlicePitch,
                                                                size_t gpuRowPitch, size_t gpuSlicePitch) {
     GraphicsAllocation *hostAllocation = nullptr;
@@ -94,7 +94,7 @@ BlitProperties BlitProperties::constructPropertiesForReadWrite(BlitterConstants:
 }
 
 BlitProperties BlitProperties::constructPropertiesForCopy(GraphicsAllocation *dstAllocation, GraphicsAllocation *srcAllocation,
-                                                          Vec3<size_t> dstOffset, Vec3<size_t> srcOffset, Vec3<size_t> copySize,
+                                                          const Vec3<size_t> &dstOffset, const Vec3<size_t> &srcOffset, Vec3<size_t> copySize,
                                                           size_t srcRowPitch, size_t srcSlicePitch,
                                                           size_t dstRowPitch, size_t dstSlicePitch, GraphicsAllocation *clearColorAllocation) {
     copySize.y = copySize.y ? copySize.y : 1;
@@ -149,7 +149,7 @@ void BlitProperties::setupDependenciesForAuxTranslation(BlitPropertiesContainer 
         blitPropertiesContainer[i + numObjects].outputTimestampPacket = timestampPacketDependencies.nonAuxToAuxNodes.peekNodes()[i];
     }
 
-    gpguCsr.requestStallingPipeControlOnNextFlush();
+    gpguCsr.requestStallingCommandsOnNextFlush();
     auto nodesAllocator = gpguCsr.getTimestampPacketAllocator();
     timestampPacketDependencies.barrierNodes.add(nodesAllocator->getTag());
 
@@ -166,16 +166,15 @@ void BlitProperties::setupDependenciesForAuxTranslation(BlitPropertiesContainer 
 }
 
 BlitOperationResult BlitHelper::blitMemoryToAllocation(const Device &device, GraphicsAllocation *memory, size_t offset, const void *hostPtr,
-                                                       Vec3<size_t> size) {
+                                                       const Vec3<size_t> &size) {
     auto memoryBanks = memory->storageInfo.getMemoryBanks();
     return blitMemoryToAllocationBanks(device, memory, offset, hostPtr, size, memoryBanks);
 }
 
 BlitOperationResult BlitHelper::blitMemoryToAllocationBanks(const Device &device, GraphicsAllocation *memory, size_t offset, const void *hostPtr,
-                                                            Vec3<size_t> size, DeviceBitfield memoryBanks) {
+                                                            const Vec3<size_t> &size, DeviceBitfield memoryBanks) {
     const auto &hwInfo = device.getHardwareInfo();
-    auto isBlitterRequired = HwHelper::get(hwInfo.platform.eRenderCoreFamily).isBlitCopyRequiredForLocalMemory(hwInfo, *memory);
-    if (!hwInfo.capabilityTable.blitterOperationsSupported && !isBlitterRequired) {
+    if (!hwInfo.capabilityTable.blitterOperationsSupported) {
         return BlitOperationResult::Unsupported;
     }
 
@@ -189,10 +188,11 @@ BlitOperationResult BlitHelper::blitMemoryToAllocationBanks(const Device &device
         }
 
         UNRECOVERABLE_IF(!pRootDevice->getDeviceBitfield().test(tileId));
-        auto pDeviceForBlit = pRootDevice->getDeviceById(tileId);
+        auto pDeviceForBlit = pRootDevice->getNearestGenericSubDevice(tileId);
 
         auto &selectorCopyEngine = pDeviceForBlit->getSelectorCopyEngine();
-        auto bcsEngine = pDeviceForBlit->tryGetEngine(EngineHelpers::getBcsEngineType(hwInfo, selectorCopyEngine), EngineUsage::Regular);
+        auto deviceBitfield = pDeviceForBlit->getDeviceBitfield();
+        auto bcsEngine = pDeviceForBlit->tryGetEngine(EngineHelpers::getBcsEngineType(hwInfo, deviceBitfield, selectorCopyEngine, true), EngineUsage::Regular);
         if (!bcsEngine) {
             return BlitOperationResult::Unsupported;
         }
@@ -206,7 +206,7 @@ BlitOperationResult BlitHelper::blitMemoryToAllocationBanks(const Device &device
                                                             hostPtr,
                                                             (memory->getGpuAddress() + offset),
                                                             0, 0, 0, size, 0, 0, 0, 0));
-        bcsEngine->commandStreamReceiver->blitBuffer(blitPropertiesContainer, true, false, *pDeviceForBlit);
+        bcsEngine->commandStreamReceiver->flushBcsTask(blitPropertiesContainer, true, false, *pDeviceForBlit);
     }
 
     return BlitOperationResult::Success;

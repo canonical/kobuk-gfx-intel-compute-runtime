@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -60,7 +60,7 @@ void DriverImp::initialize(ze_result_t *result) {
             *result = ZE_RESULT_SUCCESS;
 
             if (envVariables.metrics) {
-                *result = MetricContext::enableMetricApi();
+                *result = MetricDeviceContext::enableMetricApi();
                 if (*result != ZE_RESULT_SUCCESS) {
                     delete GlobalDriver;
                     GlobalDriverHandle = nullptr;
@@ -115,6 +115,10 @@ ze_result_t driverHandleGet(uint32_t *pCount, ze_driver_handle_t *phDriverHandle
 static DriverImp driverImp;
 Driver *Driver::driver = &driverImp;
 
-ze_result_t init(ze_init_flags_t flags) { return Driver::get()->driverInit(flags); }
-
+ze_result_t init(ze_init_flags_t flags) {
+    if (flags && !(flags & ZE_INIT_FLAG_GPU_ONLY))
+        return ZE_RESULT_ERROR_UNINITIALIZED;
+    else
+        return Driver::get()->driverInit(flags);
+}
 } // namespace L0

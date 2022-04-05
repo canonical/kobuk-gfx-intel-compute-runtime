@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,8 +11,7 @@
 #include "shared/test/common/fixtures/command_container_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_dispatch_kernel_encoder_interface.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "hw_cmds.h"
 
@@ -26,31 +25,98 @@ XE_HP_CORE_TEST_F(CommandEncodeXeHpCoreTest, whenProgrammingStateComputeModeThen
 
     StateComputeModeProperties properties;
     auto pLinearStream = std::make_unique<LinearStream>(buffer, sizeof(buffer));
-    EncodeComputeMode<FamilyType>::adjustComputeMode(*pLinearStream, nullptr, properties, *defaultHwInfo);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(*pLinearStream, properties, *defaultHwInfo);
     auto pScm = reinterpret_cast<STATE_COMPUTE_MODE *>(pLinearStream->getCpuBase());
-    EXPECT_EQ(0u, pScm->getMaskBits());
-    EXPECT_EQ(STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_DISABLED, pScm->getForceNonCoherent());
-    EXPECT_FALSE(pScm->getLargeGrfMode());
-
-    properties.isCoherencyRequired.value = 0;
-    properties.largeGrfMode.value = 1;
-    pLinearStream = std::make_unique<LinearStream>(buffer, sizeof(buffer));
-    EncodeComputeMode<FamilyType>::adjustComputeMode(*pLinearStream, nullptr, properties, *defaultHwInfo);
-    pScm = reinterpret_cast<STATE_COMPUTE_MODE *>(pLinearStream->getCpuBase());
-    EXPECT_EQ(0u, pScm->getMaskBits());
-    EXPECT_EQ(STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_DISABLED, pScm->getForceNonCoherent());
-    EXPECT_FALSE(pScm->getLargeGrfMode());
-
-    properties.isCoherencyRequired.isDirty = true;
-    properties.largeGrfMode.isDirty = true;
-    pLinearStream = std::make_unique<LinearStream>(buffer, sizeof(buffer));
-    EncodeComputeMode<FamilyType>::adjustComputeMode(*pLinearStream, nullptr, properties, *defaultHwInfo);
-    pScm = reinterpret_cast<STATE_COMPUTE_MODE *>(pLinearStream->getCpuBase());
     auto expectedMask = FamilyType::stateComputeModeForceNonCoherentMask |
                         FamilyType::stateComputeModeLargeGrfModeMask;
     EXPECT_EQ(expectedMask, pScm->getMaskBits());
     EXPECT_EQ(STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_GPU_NON_COHERENT, pScm->getForceNonCoherent());
+    EXPECT_FALSE(pScm->getLargeGrfMode());
+
+    properties.isCoherencyRequired.value = 1;
+    properties.largeGrfMode.value = 1;
+    pLinearStream = std::make_unique<LinearStream>(buffer, sizeof(buffer));
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(*pLinearStream, properties, *defaultHwInfo);
+    pScm = reinterpret_cast<STATE_COMPUTE_MODE *>(pLinearStream->getCpuBase());
+    EXPECT_EQ(expectedMask, pScm->getMaskBits());
+    EXPECT_EQ(STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_DISABLED, pScm->getForceNonCoherent());
     EXPECT_TRUE(pScm->getLargeGrfMode());
+}
+
+XE_HP_CORE_TEST_F(CommandEncodeXeHpCoreTest, givenForceDisableMultiAtomicsWhenDebugFlagIsZeroThenExpectForceDisableMultiAtomicsSetToFalse) {
+    using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
+
+    DebugManagerStateRestore dbgRestorer;
+    DebugManager.flags.ForceMultiGpuAtomics.set(0);
+
+    uint8_t buffer[64]{};
+
+    StateComputeModeProperties properties;
+    LinearStream cmdStream(buffer, sizeof(buffer));
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo);
+    auto scmCommand = reinterpret_cast<STATE_COMPUTE_MODE *>(cmdStream.getCpuBase());
+
+    uint32_t expectedMaskBits = FamilyType::stateComputeModeForceNonCoherentMask | FamilyType::stateComputeModeLargeGrfModeMask |
+                                FamilyType::stateComputeModeForceDisableSupportMultiGpuAtomics;
+    EXPECT_EQ(expectedMaskBits, scmCommand->getMaskBits());
+    EXPECT_FALSE(scmCommand->getForceDisableSupportForMultiGpuAtomics());
+}
+
+XE_HP_CORE_TEST_F(CommandEncodeXeHpCoreTest, givenForceDisableMultiAtomicsWhenDebugFlagIsOneThenExpectForceDisableMultiAtomicsSetToTrue) {
+    using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
+
+    DebugManagerStateRestore dbgRestorer;
+    DebugManager.flags.ForceMultiGpuAtomics.set(1);
+
+    uint8_t buffer[64]{};
+
+    StateComputeModeProperties properties;
+    LinearStream cmdStream(buffer, sizeof(buffer));
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo);
+    auto scmCommand = reinterpret_cast<STATE_COMPUTE_MODE *>(cmdStream.getCpuBase());
+
+    uint32_t expectedMaskBits = FamilyType::stateComputeModeForceNonCoherentMask | FamilyType::stateComputeModeLargeGrfModeMask |
+                                FamilyType::stateComputeModeForceDisableSupportMultiGpuAtomics;
+    EXPECT_EQ(expectedMaskBits, scmCommand->getMaskBits());
+    EXPECT_TRUE(scmCommand->getForceDisableSupportForMultiGpuAtomics());
+}
+
+XE_HP_CORE_TEST_F(CommandEncodeXeHpCoreTest, givenForceDisableMultiPartialWritesWhenDebugFlagIsZeroThenExpectForceDisableMultiPartialWritesSetToFalse) {
+    using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
+
+    DebugManagerStateRestore dbgRestorer;
+    DebugManager.flags.ForceMultiGpuPartialWrites.set(0);
+
+    uint8_t buffer[64]{};
+
+    StateComputeModeProperties properties;
+    LinearStream cmdStream(buffer, sizeof(buffer));
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo);
+    auto scmCommand = reinterpret_cast<STATE_COMPUTE_MODE *>(cmdStream.getCpuBase());
+
+    uint32_t expectedMaskBits = FamilyType::stateComputeModeForceNonCoherentMask | FamilyType::stateComputeModeLargeGrfModeMask |
+                                FamilyType::stateComputeModeForceDisableSupportMultiGpuPartialWrites;
+    EXPECT_EQ(expectedMaskBits, scmCommand->getMaskBits());
+    EXPECT_FALSE(scmCommand->getForceDisableSupportForMultiGpuAtomics());
+}
+
+XE_HP_CORE_TEST_F(CommandEncodeXeHpCoreTest, givenForceDisableMultiPartialWritesWhenDebugFlagIsOneThenExpectForceDisableMultiPartialWritesSetToTrue) {
+    using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
+
+    DebugManagerStateRestore dbgRestorer;
+    DebugManager.flags.ForceMultiGpuPartialWrites.set(1);
+
+    uint8_t buffer[64]{};
+
+    StateComputeModeProperties properties;
+    LinearStream cmdStream(buffer, sizeof(buffer));
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo);
+    auto scmCommand = reinterpret_cast<STATE_COMPUTE_MODE *>(cmdStream.getCpuBase());
+
+    uint32_t expectedMaskBits = FamilyType::stateComputeModeForceNonCoherentMask | FamilyType::stateComputeModeLargeGrfModeMask |
+                                FamilyType::stateComputeModeForceDisableSupportMultiGpuPartialWrites;
+    EXPECT_EQ(expectedMaskBits, scmCommand->getMaskBits());
+    EXPECT_TRUE(scmCommand->getForceDisableSupportForMultiGpuPartialWrites());
 }
 
 struct EncodeKernelGlobalAtomicsFixture : public CommandEncodeStatesFixture, public ::testing::Test {
@@ -88,14 +154,15 @@ XE_HP_CORE_TEST_F(EncodeKernelGlobalAtomicsTestWithImplicitScalingTests, givenCl
     uint32_t dims[] = {2, 1, 1};
     std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
     cmdContainer->slmSize = 1;
-    EXPECT_CALL(*dispatchInterface.get(), getSlmTotalSize()).WillRepeatedly(::testing::Return(cmdContainer->slmSize));
     cmdContainer->setDirtyStateForAllHeaps(false);
+    dispatchInterface->getSlmTotalSizeResult = cmdContainer->slmSize;
 
     bool requiresUncachedMocs = false;
     bool useGlobalAtomics = true;
-    uint32_t partitionCount = 0;
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dims, false, false, dispatchInterface.get(), 0, false, false,
-                                             pDevice, NEO::PreemptionMode::Disabled, requiresUncachedMocs, useGlobalAtomics, partitionCount, false);
+    EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
+    dispatchArgs.useGlobalAtomics = useGlobalAtomics;
+    dispatchArgs.partitionCount = 2;
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
 
     EXPECT_TRUE(cmdContainer->lastSentUseGlobalAtomics);
 
@@ -114,15 +181,17 @@ XE_HP_CORE_TEST_F(EncodeKernelGlobalAtomicsTestWithImplicitScalingTests, givenCl
     uint32_t dims[] = {2, 1, 1};
     std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
     cmdContainer->slmSize = 1;
-    EXPECT_CALL(*dispatchInterface.get(), getSlmTotalSize()).WillRepeatedly(::testing::Return(cmdContainer->slmSize));
     cmdContainer->setDirtyStateForAllHeaps(false);
+    dispatchInterface->getSlmTotalSizeResult = cmdContainer->slmSize;
 
     bool requiresUncachedMocs = false;
     bool useGlobalAtomics = true;
     cmdContainer->lastSentUseGlobalAtomics = true;
-    uint32_t partitionCount = 0;
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dims, false, false, dispatchInterface.get(), 0, false, false,
-                                             pDevice, NEO::PreemptionMode::Disabled, requiresUncachedMocs, useGlobalAtomics, partitionCount, false);
+    EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
+    dispatchArgs.useGlobalAtomics = useGlobalAtomics;
+    dispatchArgs.partitionCount = 2;
+
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
 
     EXPECT_TRUE(cmdContainer->lastSentUseGlobalAtomics);
 
@@ -138,15 +207,17 @@ XE_HP_CORE_TEST_F(EncodeKernelGlobalAtomicsTestWithImplicitScalingTests, givenCl
     uint32_t dims[] = {2, 1, 1};
     std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
     cmdContainer->slmSize = 1;
-    EXPECT_CALL(*dispatchInterface.get(), getSlmTotalSize()).WillRepeatedly(::testing::Return(cmdContainer->slmSize));
     cmdContainer->setDirtyStateForAllHeaps(false);
+    dispatchInterface->getSlmTotalSizeResult = cmdContainer->slmSize;
 
     bool requiresUncachedMocs = false;
     bool useGlobalAtomics = false;
     cmdContainer->lastSentUseGlobalAtomics = true;
-    uint32_t partitionCount = 0;
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dims, false, false, dispatchInterface.get(), 0, false, false,
-                                             pDevice, NEO::PreemptionMode::Disabled, requiresUncachedMocs, useGlobalAtomics, partitionCount, false);
+    EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
+    dispatchArgs.useGlobalAtomics = useGlobalAtomics;
+    dispatchArgs.partitionCount = 2;
+
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
 
     EXPECT_FALSE(cmdContainer->lastSentUseGlobalAtomics);
 
@@ -165,15 +236,17 @@ XE_HP_CORE_TEST_F(EncodeKernelGlobalAtomicsTestWithImplicitScalingTests, givenCl
     uint32_t dims[] = {2, 1, 1};
     std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
     cmdContainer->slmSize = 1;
-    EXPECT_CALL(*dispatchInterface.get(), getSlmTotalSize()).WillRepeatedly(::testing::Return(cmdContainer->slmSize));
     cmdContainer->setDirtyStateForAllHeaps(false);
+    dispatchInterface->getSlmTotalSizeResult = cmdContainer->slmSize;
 
     bool requiresUncachedMocs = true;
     bool useGlobalAtomics = false;
     cmdContainer->lastSentUseGlobalAtomics = true;
-    uint32_t partitionCount = 0;
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dims, false, false, dispatchInterface.get(), 0, false, false,
-                                             pDevice, NEO::PreemptionMode::Disabled, requiresUncachedMocs, useGlobalAtomics, partitionCount, false);
+    EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
+    dispatchArgs.useGlobalAtomics = useGlobalAtomics;
+    dispatchArgs.partitionCount = 2;
+
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
 
     EXPECT_FALSE(cmdContainer->lastSentUseGlobalAtomics);
 
@@ -192,14 +265,16 @@ XE_HP_CORE_TEST_F(EncodeKernelGlobalAtomicsTestWithImplicitScalingTests, givenCl
     uint32_t dims[] = {2, 1, 1};
     std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
     cmdContainer->slmSize = 1;
-    EXPECT_CALL(*dispatchInterface.get(), getSlmTotalSize()).WillRepeatedly(::testing::Return(cmdContainer->slmSize));
     cmdContainer->setDirtyStateForAllHeaps(false);
+    dispatchInterface->getSlmTotalSizeResult = cmdContainer->slmSize;
 
     bool requiresUncachedMocs = false;
     bool useGlobalAtomics = false;
-    uint32_t partitionCount = 0;
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dims, false, false, dispatchInterface.get(), 0, false, false,
-                                             pDevice, NEO::PreemptionMode::Disabled, requiresUncachedMocs, useGlobalAtomics, partitionCount, false);
+    EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
+    dispatchArgs.useGlobalAtomics = useGlobalAtomics;
+    dispatchArgs.partitionCount = 2;
+
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -226,14 +301,15 @@ XE_HP_CORE_TEST_F(EncodeKernelGlobalAtomicsTestWithNoImplicitScalingTests, given
     uint32_t dims[] = {2, 1, 1};
     std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
     cmdContainer->slmSize = 1;
-    EXPECT_CALL(*dispatchInterface.get(), getSlmTotalSize()).WillRepeatedly(::testing::Return(cmdContainer->slmSize));
     cmdContainer->setDirtyStateForAllHeaps(false);
+    dispatchInterface->getSlmTotalSizeResult = cmdContainer->slmSize;
 
     bool requiresUncachedMocs = false;
     bool useGlobalAtomics = true;
-    uint32_t partitionCount = 0;
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dims, false, false, dispatchInterface.get(), 0, false, false,
-                                             pDevice, NEO::PreemptionMode::Disabled, requiresUncachedMocs, useGlobalAtomics, partitionCount, false);
+    EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
+    dispatchArgs.useGlobalAtomics = useGlobalAtomics;
+
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
 
     EXPECT_FALSE(cmdContainer->lastSentUseGlobalAtomics);
     GenCmdList commands;

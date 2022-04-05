@@ -9,8 +9,7 @@
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/fixtures/direct_submission_fixture.h"
 #include "shared/test/common/mocks/mock_direct_submission_hw.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "hw_cmds.h"
 
@@ -38,7 +37,7 @@ XE_HP_CORE_TEST_F(DirectSubmissionTestXE_HP_CORE, givenBlitterUsedWhenDispatchin
 
     uint64_t exptectedJumpAddress = directSubmission.ringCommandStream.getGraphicsAllocation()->getGpuAddress();
     exptectedJumpAddress += sizeof(MI_BATCH_BUFFER_START);
-    EXPECT_EQ(exptectedJumpAddress, bbStart->getBatchBufferStartAddressGraphicsaddress472());
+    EXPECT_EQ(exptectedJumpAddress, bbStart->getBatchBufferStartAddress());
 }
 
 XE_HP_CORE_TEST_F(DirectSubmissionTestXE_HP_CORE, givenBlitterUsedWhenDispatchingPrefetchDisableTrueThenExpectArbCheckCmd) {

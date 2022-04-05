@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -12,10 +12,9 @@
 #include "shared/source/helpers/aux_translation.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/non_copyable_or_moveable.h"
+#include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/utilities/tag_allocator.h"
-
-#include "pipe_control_args.h"
 
 #include <cstdint>
 #include <vector>
@@ -40,8 +39,8 @@ class TimestampPackets : public TagTypeBase {
     };
 
   public:
-    static constexpr GraphicsAllocation::AllocationType getAllocationType() {
-        return GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER;
+    static constexpr AllocationType getAllocationType() {
+        return AllocationType::TIMESTAMP_PACKET_TAG_BUFFER;
     }
 
     static constexpr TagNodeType getTagNodeType() { return TagNodeType::TimestampPacket; }
@@ -71,6 +70,9 @@ class TimestampPackets : public TagTypeBase {
     uint64_t getContextEndValue(uint32_t packetIndex) const { return static_cast<uint64_t>(packets[packetIndex].contextEnd); }
     uint64_t getGlobalEndValue(uint32_t packetIndex) const { return static_cast<uint64_t>(packets[packetIndex].globalEnd); }
 
+    void const *getContextEndAddress(uint32_t packetIndex) const { return static_cast<void const *>(&packets[packetIndex].contextEnd); }
+    void const *getContextStartAddress(uint32_t packetIndex) const { return static_cast<void const *>(&packets[packetIndex].contextStart); }
+
   protected:
     Packet packets[TimestampPacketSizeControl::preferredPacketCount];
 };
@@ -86,7 +88,7 @@ class TimestampPacketContainer : public NonCopyableClass {
     TimestampPacketContainer &operator=(TimestampPacketContainer &&) = default;
     MOCKABLE_VIRTUAL ~TimestampPacketContainer();
 
-    const std::vector<TagNodeBase *> &peekNodes() const { return timestampPacketNodes; }
+    const StackVec<TagNodeBase *, 32u> &peekNodes() const { return timestampPacketNodes; }
     void add(TagNodeBase *timestampPacketNode);
     void swapNodes(TimestampPacketContainer &timestampPacketContainer);
     void assignAndIncrementNodesRefCounts(const TimestampPacketContainer &inputTimestampPacketContainer);
@@ -94,7 +96,7 @@ class TimestampPacketContainer : public NonCopyableClass {
     void moveNodesToNewContainer(TimestampPacketContainer &timestampPacketContainer);
 
   protected:
-    std::vector<TagNodeBase *> timestampPacketNodes;
+    StackVec<TagNodeBase *, 32u> timestampPacketNodes;
 };
 
 struct TimestampPacketDependencies : public NonCopyableClass {
@@ -171,7 +173,8 @@ struct TimestampPacketHelper {
             UNRECOVERABLE_IF(timestampPacketDependencies->cacheFlushNodes.peekNodes().size() != 1);
             auto cacheFlushTimestampPacketGpuAddress = getContextEndGpuAddress(*timestampPacketDependencies->cacheFlushNodes.peekNodes()[0]);
 
-            PipeControlArgs args(true);
+            PipeControlArgs args;
+            args.dcFlushEnable = MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo);
             MemorySynchronizationCommands<GfxFamily>::addPipeControlAndProgramPostSyncOperation(
                 cmdStream, GfxFamily::PIPE_CONTROL::POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA,
                 cacheFlushTimestampPacketGpuAddress, 0, hwInfo, args);

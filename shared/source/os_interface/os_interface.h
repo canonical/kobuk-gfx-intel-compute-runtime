@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #pragma once
 #include "shared/source/helpers/debug_helpers.h"
+#include "shared/source/helpers/driver_model_type.h"
 #include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/os_interface/driver_info.h"
 
@@ -18,9 +19,7 @@
 namespace NEO {
 class ExecutionEnvironment;
 class MemoryManager;
-enum class DriverModelType { UNKNOWN,
-                             WDDM,
-                             DRM };
+class OsContext;
 
 class HwDeviceId : public NonCopyableClass {
   public:
@@ -78,10 +77,17 @@ class DriverModel : public NonCopyableClass {
     }
 
     virtual PhysicalDevicePciBusInfo getPciBusInfo() const = 0;
+    virtual PhyicalDevicePciSpeedInfo getPciSpeedInfo() const = 0;
 
     virtual size_t getMaxMemAllocSize() const {
         return std::numeric_limits<size_t>::max();
     }
+
+    virtual bool skipResourceCleanup() const {
+        return false;
+    }
+
+    virtual bool isGpuHangDetected(OsContext &osContext) = 0;
 
   protected:
     DriverModelType driverModelType;
@@ -108,6 +114,7 @@ class OSInterface : public NonCopyableClass {
     static bool gpuIdleImplicitFlush;
     static bool requiresSupportForWddmTrimNotification;
     static std::vector<std::unique_ptr<HwDeviceId>> discoverDevices(ExecutionEnvironment &executionEnvironment);
+    static std::vector<std::unique_ptr<HwDeviceId>> discoverDevice(ExecutionEnvironment &executionEnvironment, std::string &osPciPath);
 
   protected:
     std::unique_ptr<DriverModel> driverModel = nullptr;

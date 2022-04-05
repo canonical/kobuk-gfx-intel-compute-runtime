@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,12 +8,38 @@
 #include "opencl/test/unit_test/offline_compiler/ocloc_fatbinary_tests.h"
 
 #include "shared/offline_compiler/source/ocloc_arg_helper.h"
+#include "shared/offline_compiler/source/ocloc_error_code.h"
+#include "shared/source/device_binary_format/ar/ar.h"
+#include "shared/source/device_binary_format/ar/ar_decoder.h"
+#include "shared/source/device_binary_format/elf/elf_decoder.h"
+#include "shared/source/device_binary_format/elf/ocl_elf.h"
 #include "shared/source/helpers/hw_helper.h"
 
 #include <algorithm>
 #include <unordered_set>
 
 namespace NEO {
+
+auto searchInArchiveByFilename(const Ar::Ar &archive, const ConstStringRef &name) {
+    const auto isSearchedFile = [&name](const auto &file) {
+        return file.fileName == name;
+    };
+
+    const auto &arFiles = archive.files;
+    return std::find_if(arFiles.begin(), arFiles.end(), isSearchedFile);
+}
+
+std::string prepareTwoDevices(MockOclocArgHelper *argHelper) {
+    auto allEnabledDeviceConfigs = argHelper->getAllSupportedDeviceConfigs();
+    if (allEnabledDeviceConfigs.size() < 2) {
+        return {};
+    }
+
+    const auto cfg1 = argHelper->parseProductConfigFromValue(allEnabledDeviceConfigs[0].config);
+    const auto cfg2 = argHelper->parseProductConfigFromValue(allEnabledDeviceConfigs[1].config);
+
+    return cfg1 + "," + cfg2;
+}
 
 TEST(OclocFatBinaryRequestedFatBinary, WhenDeviceArgMissingThenReturnsFalse) {
     const char *args[] = {"ocloc", "-aaa", "*", "-device", "*"};
@@ -39,6 +65,11 @@ TEST(OclocFatBinaryRequestedFatBinary, GivenDeviceArgProvidedWhenFatBinaryFormat
     const char *rangeGenFrom[] = {"ocloc", "-device", "gen0-"};
     const char *rangeGenTo[] = {"ocloc", "-device", "-gen5"};
     const char *rangeGenBounds[] = {"ocloc", "-device", "gen0-gen5"};
+    const char *rangeConfigBounds[] = {"ocloc", "-device", "9-11"};
+    const char *manyConfigs[] = {"ocloc", "-device", "9.0,11"};
+    const char *rangeConfigFrom[] = {"ocloc", "-device", "10.1-"};
+    const char *rangeConfigTo[] = {"ocloc", "-device", "-11.2"};
+    const char *rangeConfigsBoundsSecond[] = {"ocloc", "-device", "11.2-12.2"};
 
     EXPECT_TRUE(NEO::requestedFatBinary(3, allPlatforms, argHelper.get()));
     EXPECT_TRUE(NEO::requestedFatBinary(3, manyPlatforms, argHelper.get()));
@@ -49,6 +80,141 @@ TEST(OclocFatBinaryRequestedFatBinary, GivenDeviceArgProvidedWhenFatBinaryFormat
     EXPECT_TRUE(NEO::requestedFatBinary(3, rangeGenFrom, argHelper.get()));
     EXPECT_TRUE(NEO::requestedFatBinary(3, rangeGenTo, argHelper.get()));
     EXPECT_TRUE(NEO::requestedFatBinary(3, rangeGenBounds, argHelper.get()));
+    EXPECT_TRUE(NEO::requestedFatBinary(3, rangeConfigBounds, argHelper.get()));
+    EXPECT_TRUE(NEO::requestedFatBinary(3, manyConfigs, argHelper.get()));
+    EXPECT_TRUE(NEO::requestedFatBinary(3, rangeConfigFrom, argHelper.get()));
+    EXPECT_TRUE(NEO::requestedFatBinary(3, rangeConfigTo, argHelper.get()));
+    EXPECT_TRUE(NEO::requestedFatBinary(3, rangeConfigsBoundsSecond, argHelper.get()));
+}
+
+TEST(OclocFatBinaryRequestedFatBinary, GivenDeviceArgToFatBinaryWhenConfigMatchesMoreThanOneProductThenTrueIsReturned) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledDeviceConfigs = argHelper->getAllSupportedDeviceConfigs();
+
+    std::string configNum0 = argHelper->parseProductConfigFromValue(allEnabledDeviceConfigs[allEnabledDeviceConfigs.size() / 2].config);
+    auto major_pos = configNum0.find(".");
+    auto cutMinorAndRevision = configNum0.substr(0, major_pos);
+    auto matchedConfigs = getAllMatchedConfigs(cutMinorAndRevision, argHelper.get());
+
+    if (matchedConfigs.size() < 2) {
+        GTEST_SKIP();
+    }
+
+    const char *fewConfigs[] = {"ocloc", "-device", cutMinorAndRevision.c_str()};
+    EXPECT_TRUE(NEO::requestedFatBinary(3, fewConfigs, argHelper.get()));
+}
+
+TEST(OclocFatBinaryRequestedFatBinary, GivenDeviceArgAsSingleProductConfigThenFatBinaryIsNotRequested) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledDeviceConfigs = argHelper->getAllSupportedDeviceConfigs();
+
+    for (auto &deviceConfig : allEnabledDeviceConfigs) {
+        std::string configStr = argHelper->parseProductConfigFromValue(deviceConfig.config);
+        const char *singleConfig[] = {"ocloc", "-device", configStr.c_str()};
+        EXPECT_FALSE(NEO::requestedFatBinary(3, singleConfig, argHelper.get()));
+    }
+}
+
+TEST(OclocFatBinaryRequestedFatBinary, WhenPlatformIsProvidedButDoesNotContainMoreThanOneProductThenReturnFalse) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    const char *skl[] = {"ocloc", "-device", "skl"};
+    EXPECT_FALSE(NEO::requestedFatBinary(3, skl, argHelper.get()));
+}
+
+TEST(OclocFatBinaryToProductConfigStrings, GivenListOfProductIdsThenReturnsListOfStrings) {
+    auto platforms = NEO::getAllSupportedTargetPlatforms();
+    auto names = NEO::toProductNames(platforms);
+    EXPECT_EQ(names.size(), platforms.size());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenDifferentDeviceArgWhenCheckIfPlatformsAbbreviationIsPassedThenReturnCorrectValue) {
+    auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
+    auto allEnabledDeviceConfigs = oclocArgHelperWithoutInput->getAllSupportedDeviceConfigs();
+
+    if (allEnabledPlatforms.size() < 3 || allEnabledDeviceConfigs.size() < 3) {
+        GTEST_SKIP();
+    }
+
+    auto platform0 = allEnabledPlatforms[0];
+    ConstStringRef platformName0(hardwarePrefix[platform0], strlen(hardwarePrefix[platform0]));
+    auto platform1 = allEnabledPlatforms[1];
+    ConstStringRef platformName1(hardwarePrefix[platform1], strlen(hardwarePrefix[platform1]));
+
+    auto deviceMapConfig0 = allEnabledDeviceConfigs[0];
+    auto configNumConvention0 = oclocArgHelperWithoutInput->parseProductConfigFromValue(deviceMapConfig0.config);
+    auto deviceMapConfig1 = allEnabledDeviceConfigs[1];
+    auto configNumConvention1 = oclocArgHelperWithoutInput->parseProductConfigFromValue(deviceMapConfig1.config);
+
+    auto twoPlatforms = platformName0.str() + "," + platformName1.str();
+    auto configsRange = configNumConvention0 + "-" + configNumConvention1;
+    auto gen = std::to_string(deviceMapConfig0.hwInfo->platform.eRenderCoreFamily);
+
+    EXPECT_TRUE(isDeviceWithPlatformAbbreviation(platformName0, oclocArgHelperWithoutInput.get()));
+    EXPECT_TRUE(isDeviceWithPlatformAbbreviation(ConstStringRef(twoPlatforms), oclocArgHelperWithoutInput.get()));
+    EXPECT_FALSE(isDeviceWithPlatformAbbreviation(ConstStringRef(configsRange), oclocArgHelperWithoutInput.get()));
+    EXPECT_FALSE(isDeviceWithPlatformAbbreviation(ConstStringRef(gen), oclocArgHelperWithoutInput.get()));
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenAsterixThenReturnAllEnabledConfigs) {
+    auto expected = oclocArgHelperWithoutInput->getAllSupportedDeviceConfigs();
+    auto got = NEO::getTargetConfigsForFatbinary("*", oclocArgHelperWithoutInput.get());
+
+    EXPECT_EQ(got.size(), expected.size());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenProductConfigWhenConfigIsUndefinedThenReturnEmptyList) {
+    auto got = NEO::getTargetConfigsForFatbinary("0.0.0", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+
+    got = NEO::getTargetConfigsForFatbinary("0.0", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+
+    got = NEO::getTargetConfigsForFatbinary("0", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenProductConfigOpenRangeToWhenConfigIsUndefinedThenReturnEmptyList) {
+    auto got = NEO::getTargetConfigsForFatbinary("-0.0.0", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+
+    got = NEO::getTargetConfigsForFatbinary("-0.0", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+
+    got = NEO::getTargetConfigsForFatbinary("-0", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenProductConfigOpenRangeFromWhenConfigIsUndefinedThenReturnEmptyList) {
+    auto got = NEO::getTargetConfigsForFatbinary("0.0.0-", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+
+    got = NEO::getTargetConfigsForFatbinary("0.0-", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+
+    got = NEO::getTargetConfigsForFatbinary("0-", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenProductConfigClosedRangeWhenAnyOfConfigIsUndefinedOrIncorrectThenReturnEmptyList) {
+    auto allEnabledDeviceConfigs = oclocArgHelperWithoutInput->getAllSupportedDeviceConfigs();
+    if (allEnabledDeviceConfigs.size() < 2) {
+        GTEST_SKIP();
+    }
+
+    auto deviceMapConfig0 = allEnabledDeviceConfigs[0];
+    auto config0Str = oclocArgHelperWithoutInput->parseProductConfigFromValue(deviceMapConfig0.config);
+
+    auto got = NEO::getTargetConfigsForFatbinary("1.2-" + config0Str, oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+
+    got = NEO::getTargetConfigsForFatbinary(config0Str + "-1.2", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+
+    got = NEO::getTargetConfigsForFatbinary("1.a.c-" + config0Str, oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+
+    got = NEO::getTargetConfigsForFatbinary(config0Str + "-1.a.c", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
 }
 
 TEST(OclocFatBinaryRequestedFatBinary, GivenDeviceArgProvidedWhenUnknownGenNameIsPassedThenRequestedFatBinaryReturnsFalse) {
@@ -71,12 +237,6 @@ TEST(OclocFatBinaryRequestedFatBinary, GivenDeviceArgProvidedWhenKnownGenNameIsP
     EXPECT_TRUE(NEO::requestedFatBinary(3, genFromFamilyName, argHelper.get()));
 }
 
-TEST(OclocFatBinaryRequestedFatBinary, WhenDeviceArgProvidedButDoesnNotContainFatbinaryArgFormatThenReturnsFalse) {
-    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
-    const char *skl[] = {"ocloc", "-device", "skl"};
-    EXPECT_FALSE(NEO::requestedFatBinary(3, skl, argHelper.get()));
-}
-
 TEST(OclocFatBinaryGetAllSupportedTargetPlatforms, WhenRequestedThenReturnsAllPlatformsWithNonNullHardwarePrefixes) {
     auto platforms = NEO::getAllSupportedTargetPlatforms();
     std::unordered_set<uint32_t> platformsSet(platforms.begin(), platforms.end());
@@ -87,12 +247,6 @@ TEST(OclocFatBinaryGetAllSupportedTargetPlatforms, WhenRequestedThenReturnsAllPl
             EXPECT_EQ(0U, platformsSet.count(static_cast<PRODUCT_FAMILY>(productId))) << productId;
         }
     }
-}
-
-TEST(OclocFatBinaryToProductNames, GivenListOfProductIdsThenReturnsListOfHardwarePrefixes) {
-    auto platforms = NEO::getAllSupportedTargetPlatforms();
-    auto names = NEO::toProductNames(platforms);
-    EXPECT_EQ(names.size(), platforms.size());
 }
 
 TEST(OclocFatBinaryAsProductId, GivenEnabledPlatformNameThenReturnsProperPlatformId) {
@@ -122,8 +276,20 @@ TEST(OclocFatBinaryAsGfxCoreIdList, GivenEnabledGfxCoreNameThenReturnsNonEmptyLi
         if (nullptr != NEO::familyName[coreId]) {
             EXPECT_TRUE(argHelper->isGen(ConstStringRef(NEO::familyName[coreId]).str()));
             std::string caseInsensitive = NEO::familyName[coreId];
-            std::transform(caseInsensitive.begin(), caseInsensitive.begin() + 1, caseInsensitive.begin(), ::tolower);
+            std::transform(caseInsensitive.begin(), caseInsensitive.end(), caseInsensitive.begin(), ::tolower);
             EXPECT_TRUE(argHelper->isGen(caseInsensitive));
+
+            auto findCore = caseInsensitive.find("_core");
+            if (findCore != std::string::npos) {
+                caseInsensitive = caseInsensitive.substr(0, findCore);
+                EXPECT_TRUE(argHelper->isGen(caseInsensitive));
+            }
+
+            auto findUnderline = caseInsensitive.find("_");
+            if (findUnderline != std::string::npos) {
+                caseInsensitive.erase(std::remove(caseInsensitive.begin(), caseInsensitive.end(), '_'), caseInsensitive.end());
+                EXPECT_TRUE(argHelper->isGen(caseInsensitive));
+            }
         }
     }
 }
@@ -146,8 +312,20 @@ TEST(OclocFatBinaryAsGfxCoreIdList, GivenEnabledGfxCoreNameThenReturnsNonNullIGF
         if (nullptr != NEO::familyName[coreId]) {
             EXPECT_EQ(argHelper->returnIGFXforGen(ConstStringRef(NEO::familyName[coreId]).str()), coreId);
             std::string caseInsensitive = NEO::familyName[coreId];
-            std::transform(caseInsensitive.begin(), caseInsensitive.begin() + 1, caseInsensitive.begin(), ::tolower);
+            std::transform(caseInsensitive.begin(), caseInsensitive.end(), caseInsensitive.begin(), ::tolower);
             EXPECT_EQ(argHelper->returnIGFXforGen(caseInsensitive), coreId);
+
+            auto findCore = caseInsensitive.find("_core");
+            if (findCore != std::string::npos) {
+                caseInsensitive = caseInsensitive.substr(0, findCore);
+                EXPECT_EQ(argHelper->returnIGFXforGen(caseInsensitive), coreId);
+            }
+
+            auto findUnderline = caseInsensitive.find("_");
+            if (findUnderline != std::string::npos) {
+                caseInsensitive.erase(std::remove(caseInsensitive.begin(), caseInsensitive.end(), '_'), caseInsensitive.end());
+                EXPECT_EQ(argHelper->returnIGFXforGen(caseInsensitive), coreId);
+            }
         }
     }
 }
@@ -162,53 +340,10 @@ TEST(OclocFatBinaryAsGfxCoreIdList, GivenDisabledGfxCoreNameThenReturnsNullIGFX)
     EXPECT_EQ(argHelper->returnIGFXforGen(ConstStringRef("gen2").str()), 0u);
 }
 
-TEST(OclocFatBinaryAppendPlatformsForGfxCore, GivenCoreIdThenAppendsEnabledProductIdsThatMatch) {
-    auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
-    auto platform0 = allEnabledPlatforms[0];
-    auto gfxCore0 = NEO::hardwareInfoTable[platform0]->platform.eRenderCoreFamily;
-    std::vector<PRODUCT_FAMILY> appendedPlatforms;
-    NEO::appendPlatformsForGfxCore(gfxCore0, allEnabledPlatforms, appendedPlatforms);
-    std::unordered_set<uint32_t> appendedPlatformsSet(appendedPlatforms.begin(), appendedPlatforms.end());
-    EXPECT_EQ(1U, appendedPlatformsSet.count(platform0));
-    for (auto platformId : allEnabledPlatforms) {
-        if (gfxCore0 == NEO::hardwareInfoTable[platformId]->platform.eRenderCoreFamily) {
-            EXPECT_EQ(1U, appendedPlatformsSet.count(platformId)) << platformId;
-        } else {
-            EXPECT_EQ(0U, appendedPlatformsSet.count(platformId)) << platformId;
-        }
-    }
-
-    NEO::appendPlatformsForGfxCore(gfxCore0, allEnabledPlatforms, appendedPlatforms);
-    EXPECT_EQ(2 * appendedPlatformsSet.size(), appendedPlatforms.size());
-}
-
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenAsterixThenReturnAllEnabledPlatforms) {
-    auto allEnabledPlatformsIds = NEO::getAllSupportedTargetPlatforms();
-    auto expected = NEO::toProductNames(allEnabledPlatformsIds);
-    auto got = NEO::getTargetPlatformsForFatbinary("*", oclocArgHelperWithoutInput.get());
-    EXPECT_EQ(expected, got);
-}
-
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenGenThenReturnAllEnabledPlatformsThatMatch) {
-    auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
-    auto platform0 = allEnabledPlatforms[0];
-    auto gfxCore0 = NEO::hardwareInfoTable[platform0]->platform.eRenderCoreFamily;
-    std::string genName = NEO::familyName[gfxCore0];
-    if (genName[0] == 'G') {
-        genName[0] = 'g';
-    }
-
-    std::vector<PRODUCT_FAMILY> platformsForGen;
-    NEO::appendPlatformsForGfxCore(gfxCore0, allEnabledPlatforms, platformsForGen);
-    auto expected = NEO::toProductNames(platformsForGen);
-    auto got = NEO::getTargetPlatformsForFatbinary(genName, oclocArgHelperWithoutInput.get());
-    EXPECT_EQ(expected, got);
-}
-
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenMutiplePlatformThenReturnThosePlatforms) {
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenMutiplePlatformThenReturnThosePlatforms) {
     auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
     if (allEnabledPlatforms.size() < 2) {
-        return;
+        GTEST_SKIP();
     }
     auto platform0 = allEnabledPlatforms[0];
     std::string platform0Name = NEO::hardwarePrefix[platform0];
@@ -220,10 +355,10 @@ TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenMutiplePlatformThenRet
     EXPECT_EQ(expected, got);
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenPlatformOpenRangeFromThenReturnAllEnabledPlatformsThatMatch) {
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenPlatformOpenRangeFromThenReturnAllEnabledPlatformsThatMatch) {
     auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
     if (allEnabledPlatforms.size() < 3) {
-        return;
+        GTEST_SKIP();
     }
     auto platform0 = allEnabledPlatforms[allEnabledPlatforms.size() / 2];
     std::string platformName = NEO::hardwarePrefix[platform0];
@@ -236,10 +371,10 @@ TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenPlatformOpenRangeFromT
     EXPECT_EQ(expected, got);
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenPlatformOpenRangeToThenReturnAllEnabledPlatformsThatMatch) {
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenPlatformOpenRangeToThenReturnAllEnabledPlatformsThatMatch) {
     auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
     if (allEnabledPlatforms.size() < 3) {
-        return;
+        GTEST_SKIP();
     }
     auto platform0 = allEnabledPlatforms[allEnabledPlatforms.size() / 2];
     std::string platformName = NEO::hardwarePrefix[platform0];
@@ -252,10 +387,10 @@ TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenPlatformOpenRangeToThe
     EXPECT_EQ(expected, got);
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenPlatformClosedRangeThenReturnAllEnabledPlatformsThatMatch) {
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenPlatformClosedRangeThenReturnAllEnabledPlatformsThatMatch) {
     auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
     if (allEnabledPlatforms.size() < 4) {
-        return;
+        GTEST_SKIP();
     }
     auto platformFrom = allEnabledPlatforms[1];
     auto platformTo = allEnabledPlatforms[allEnabledPlatforms.size() - 2];
@@ -282,136 +417,220 @@ std::vector<GFXCORE_FAMILY> getEnabledCores() {
     return ret;
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenGenOpenRangeFromThenReturnAllEnabledPlatformsThatMatch) {
-    auto allSupportedPlatforms = NEO::getAllSupportedTargetPlatforms();
-
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenArchitectureThenReturnAllEnabledConfigsThatMatch) {
     auto allEnabledCores = getEnabledCores();
     if (allEnabledCores.size() < 3) {
-        return;
+        GTEST_SKIP();
     }
-    auto core0 = allEnabledCores[allEnabledCores.size() / 2];
-    std::string genName = NEO::familyName[core0];
-    if (genName[0] == 'G') {
-        genName[0] = 'g';
+    auto core = allEnabledCores[allEnabledCores.size() / 2];
+    std::string coreName = NEO::familyName[core];
+    if (coreName[0] == 'G') {
+        coreName[0] = 'g';
     }
 
-    std::vector<PRODUCT_FAMILY> expectedPlatforms;
+    std::vector<DeviceMapping> expected;
+    oclocArgHelperWithoutInput->getProductConfigsForGfxCoreFamily(core, expected);
+    auto got = NEO::getTargetConfigsForFatbinary(coreName, oclocArgHelperWithoutInput.get());
+
+    EXPECT_EQ(expected.size(), got.size());
+    for (unsigned int i = 0; i < got.size(); i++) {
+        EXPECT_TRUE(expected[i] == got[i]);
+    }
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenArchitectureOpenRangeFromThenReturnAllEnabledConfigsThatMatch) {
+    auto allEnabledCores = getEnabledCores();
+    if (allEnabledCores.size() < 3) {
+        GTEST_SKIP();
+    }
+    auto core0 = allEnabledCores[allEnabledCores.size() / 2];
+    std::string coreName = NEO::familyName[core0];
+    if (coreName[0] == 'G') {
+        coreName[0] = 'g';
+    }
+
+    std::vector<DeviceMapping> expected;
     unsigned int coreIt = core0;
     while (coreIt < static_cast<unsigned int>(IGFX_MAX_CORE)) {
-        NEO::appendPlatformsForGfxCore(static_cast<GFXCORE_FAMILY>(coreIt), allSupportedPlatforms, expectedPlatforms);
+        oclocArgHelperWithoutInput->getProductConfigsForGfxCoreFamily(static_cast<GFXCORE_FAMILY>(coreIt), expected);
         ++coreIt;
     }
 
-    auto expected = NEO::toProductNames(expectedPlatforms);
-    auto got = NEO::getTargetPlatformsForFatbinary(genName + "-", oclocArgHelperWithoutInput.get());
-    EXPECT_EQ(expected, got);
+    auto got = NEO::getTargetConfigsForFatbinary(coreName + "-", oclocArgHelperWithoutInput.get());
+    EXPECT_EQ(expected.size(), got.size());
+    for (unsigned int i = 0; i < got.size(); i++) {
+        EXPECT_TRUE(expected[i] == got[i]);
+    }
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenGenOpenRangeToThenReturnAllEnabledPlatformsThatMatch) {
-    auto allSupportedPlatforms = NEO::getAllSupportedTargetPlatforms();
-
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenArchitectureOpenRangeToThenReturnAllEnabledConfigsThatMatch) {
     auto allEnabledCores = getEnabledCores();
     if (allEnabledCores.size() < 3) {
-        return;
-    }
-    auto core0 = allEnabledCores[allEnabledCores.size() / 2];
-    std::string genName = NEO::familyName[core0];
-    if (genName[0] == 'G') {
-        genName[0] = 'g';
+        GTEST_SKIP();
     }
 
-    std::vector<PRODUCT_FAMILY> expectedPlatforms;
+    auto core0 = allEnabledCores[allEnabledCores.size() / 2];
+    std::string coreName = NEO::familyName[core0];
+    if (coreName[0] == 'G') {
+        coreName[0] = 'g';
+    }
+
+    std::vector<DeviceMapping> expected;
     unsigned int coreIt = IGFX_UNKNOWN_CORE;
     ++coreIt;
     while (coreIt <= static_cast<unsigned int>(core0)) {
-        NEO::appendPlatformsForGfxCore(static_cast<GFXCORE_FAMILY>(coreIt), allSupportedPlatforms, expectedPlatforms);
+        oclocArgHelperWithoutInput->getProductConfigsForGfxCoreFamily(static_cast<GFXCORE_FAMILY>(coreIt), expected);
         ++coreIt;
     }
 
-    auto expected = NEO::toProductNames(expectedPlatforms);
-    auto got = NEO::getTargetPlatformsForFatbinary("-" + genName, oclocArgHelperWithoutInput.get());
-    EXPECT_EQ(expected, got);
+    auto got = NEO::getTargetConfigsForFatbinary("-" + coreName, oclocArgHelperWithoutInput.get());
+    EXPECT_EQ(expected.size(), got.size());
+    for (unsigned int i = 0; i < got.size(); i++) {
+        EXPECT_TRUE(expected[i] == got[i]);
+    }
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenGenClosedRangeThenReturnAllEnabledPlatformsThatMatch) {
-    auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenArchitectureClosedRangeThenReturnAllEnabledConfigsThatMatch) {
     auto allEnabledCores = getEnabledCores();
     if (allEnabledCores.size() < 4) {
-        return;
+        GTEST_SKIP();
     }
-    auto genFrom = allEnabledCores[1];
-    auto genTo = allEnabledCores[allEnabledCores.size() - 2];
-    std::string genNameFrom = NEO::familyName[genFrom];
-    if (genNameFrom[0] == 'G') {
-        genNameFrom[0] = 'g';
+    auto coreFrom = allEnabledCores[1];
+    auto coreTo = allEnabledCores[allEnabledCores.size() - 2];
+    std::string coreNameFrom = NEO::familyName[coreFrom];
+    if (coreNameFrom[0] == 'G') {
+        coreNameFrom[0] = 'g';
     }
-    std::string genNameTo = NEO::familyName[genTo];
-    if (genNameTo[0] == 'G') {
-        genNameTo[0] = 'g';
-    }
-
-    std::vector<PRODUCT_FAMILY> expectedPlatforms;
-    auto genIt = genFrom;
-    while (genIt <= genTo) {
-        NEO::appendPlatformsForGfxCore(static_cast<GFXCORE_FAMILY>(genIt), allEnabledPlatforms, expectedPlatforms);
-        genIt = static_cast<GFXCORE_FAMILY>(static_cast<unsigned int>(genIt) + 1);
+    std::string coreNameTo = NEO::familyName[coreTo];
+    if (coreNameTo[0] == 'G') {
+        coreNameTo[0] = 'g';
     }
 
-    auto expected = NEO::toProductNames(expectedPlatforms);
-    auto got = NEO::getTargetPlatformsForFatbinary(genNameFrom + "-" + genNameTo, oclocArgHelperWithoutInput.get());
-    EXPECT_EQ(expected, got);
+    std::vector<DeviceMapping> expected;
+    auto coreIt = coreFrom;
+    while (coreIt <= coreTo) {
+        oclocArgHelperWithoutInput->getProductConfigsForGfxCoreFamily(static_cast<GFXCORE_FAMILY>(coreIt), expected);
+        coreIt = static_cast<GFXCORE_FAMILY>(static_cast<unsigned int>(coreIt) + 1);
+    }
 
-    got = NEO::getTargetPlatformsForFatbinary(genNameTo + "-" + genNameFrom, oclocArgHelperWithoutInput.get()); // swap min with max implicitly
-    EXPECT_EQ(expected, got);
+    auto got = NEO::getTargetConfigsForFatbinary(coreNameFrom + "-" + coreNameTo, oclocArgHelperWithoutInput.get());
+    EXPECT_EQ(expected.size(), got.size());
+    for (unsigned int i = 0; i < got.size(); i++) {
+        EXPECT_TRUE(expected[i] == got[i]);
+    }
+
+    got = NEO::getTargetConfigsForFatbinary(coreNameTo + "-" + coreNameFrom, oclocArgHelperWithoutInput.get()); // swap min with max implicitly
+    EXPECT_EQ(expected.size(), got.size());
+    for (unsigned int i = 0; i < got.size(); i++) {
+        EXPECT_TRUE(expected[i] == got[i]);
+    }
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenUnkownGenThenReturnEmptyList) {
-    auto got = NEO::getTargetPlatformsForFatbinary("gen0", oclocArgHelperWithoutInput.get());
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenUnkownArchitectureThenReturnEmptyList) {
+    auto got = NEO::getTargetConfigsForFatbinary("gen0", oclocArgHelperWithoutInput.get());
     EXPECT_TRUE(got.empty());
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenMutiplePlatformWhenAnyOfPlatformsIsUnknownThenReturnEmptyList) {
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenMutiplePlatformWhenSecondPlatformsIsUnknownThenReturnErrorMessage) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
     auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
     auto platform0 = allEnabledPlatforms[0];
     std::string platform0Name = NEO::hardwarePrefix[platform0];
 
-    auto got = NEO::getTargetPlatformsForFatbinary(platform0Name + ",unk", oclocArgHelperWithoutInput.get());
+    auto platformTarget = platform0Name + ",unk";
+
+    std::stringstream resString;
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-device",
+        platformTarget};
+
+    testing::internal::CaptureStdout();
+    int retVal = buildFatBinary(argv, argHelper.get());
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_NE(retVal, NEO::OclocErrorCode::SUCCESS);
+
+    resString << "Unknown device : unk\n";
+    resString << "Failed to parse target devices from : " << platformTarget << "\n";
+    EXPECT_STREQ(output.c_str(), resString.str().c_str());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenClosedRangeTooExtensiveWhenConfigIsValidThenErrorMessageAndFailIsReturned) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledDeviceConfigs = argHelper->getAllSupportedDeviceConfigs();
+    if (allEnabledDeviceConfigs.size() < 4) {
+        GTEST_SKIP();
+    }
+    std::string configNum0 = argHelper->parseProductConfigFromValue(allEnabledDeviceConfigs[0].config);
+    std::string configNum1 = argHelper->parseProductConfigFromValue(allEnabledDeviceConfigs[1].config);
+    std::string configNum2 = argHelper->parseProductConfigFromValue(allEnabledDeviceConfigs[2].config);
+
+    std::stringstream configString;
+    configString << configNum0 << "-" << configNum1 << "-" << configNum2;
+
+    std::stringstream resString;
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-device",
+        configString.str()};
+
+    testing::internal::CaptureStdout();
+    int retVal = buildFatBinary(argv, argHelper.get());
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_NE(retVal, NEO::OclocErrorCode::SUCCESS);
+    resString << "Invalid range : " << configString.str() << " - should be from-to or -to or from-"
+              << "\n";
+    resString << "Failed to parse target devices from : " << configString.str() << "\n";
+    EXPECT_STREQ(output.c_str(), resString.str().c_str());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenClosedRangeTooExtensiveWhenPlatformIsValidThenErrorMessageAndReturnEmptyList) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
+    if (allEnabledPlatforms.size() < 4) {
+        GTEST_SKIP();
+    }
+    auto platform0 = allEnabledPlatforms[0];
+    std::string platform0Name = NEO::hardwarePrefix[platform0];
+    auto platform1 = allEnabledPlatforms[1];
+    std::string platform1Name = NEO::hardwarePrefix[platform1];
+    auto platform2 = allEnabledPlatforms[2];
+    std::string platform2Name = NEO::hardwarePrefix[platform2];
+    std::string platformsTarget = platform0Name + "-" + platform1Name + "-" + platform2Name;
+
+    std::string resString = "Invalid range : " + platformsTarget + " - should be from-to or -to or from-\n";
+
+    testing::internal::CaptureStdout();
+    auto got = NEO::getTargetPlatformsForFatbinary(platformsTarget, argHelper.get());
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_STREQ(output.c_str(), resString.c_str());
     EXPECT_TRUE(got.empty());
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenPlatformOpenRangeFromWhenPlatformsIsUnkownThenReturnEmptyList) {
-    auto got = NEO::getTargetPlatformsForFatbinary("unk-", oclocArgHelperWithoutInput.get());
-    EXPECT_TRUE(got.empty());
-}
-
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenPlatformOpenRangeToWhenPlatformsIsUnkownThenReturnEmptyList) {
-    auto got = NEO::getTargetPlatformsForFatbinary("-unk", oclocArgHelperWithoutInput.get());
-    EXPECT_TRUE(got.empty());
-}
-
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenPlatformClosedRangeWhenAnyOfPlatformsIsUnkownThenReturnEmptyList) {
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenPlatformClosedRangeWhenSecondPlatformIsUnkownThenReturnEmptyList) {
     auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
     auto platform0 = allEnabledPlatforms[0];
     std::string platform0Name = NEO::hardwarePrefix[platform0];
 
-    auto got = NEO::getTargetPlatformsForFatbinary("unk-" + platform0Name, oclocArgHelperWithoutInput.get());
-    EXPECT_TRUE(got.empty());
-
-    got = NEO::getTargetPlatformsForFatbinary(platform0Name + "-unk", oclocArgHelperWithoutInput.get());
+    auto got = NEO::getTargetPlatformsForFatbinary(platform0Name + "-unk", oclocArgHelperWithoutInput.get());
     EXPECT_TRUE(got.empty());
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenGenOpenRangeFromWhenGenIsUnknownThenReturnEmptyList) {
-    auto got = NEO::getTargetPlatformsForFatbinary("gen2-", oclocArgHelperWithoutInput.get());
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenGenOpenRangeFromWhenGenIsUnknownThenReturnEmptyList) {
+    auto got = NEO::getTargetConfigsForFatbinary("gen2-", oclocArgHelperWithoutInput.get());
     EXPECT_TRUE(got.empty());
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenGenOpenRangeToWhenGenIsUnknownThenReturnEmptyList) {
-    auto got = NEO::getTargetPlatformsForFatbinary("-gen2", oclocArgHelperWithoutInput.get());
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenGenOpenRangeToWhenGenIsUnknownThenReturnEmptyList) {
+    auto got = NEO::getTargetConfigsForFatbinary("-gen2", oclocArgHelperWithoutInput.get());
     EXPECT_TRUE(got.empty());
 }
 
-TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenGenClosedRangeWhenAnyOfGensIsUnknownThenReturnEmptyList) {
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenGenClosedRangeWhenAnyOfGensIsUnknownThenReturnEmptyList) {
     auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
     auto platform0 = allEnabledPlatforms[0];
     auto gfxCore0 = NEO::hardwareInfoTable[platform0]->platform.eRenderCoreFamily;
@@ -420,10 +639,596 @@ TEST_F(OclocFatBinaryGetTargetPlatformsForFatbinary, GivenGenClosedRangeWhenAnyO
         genName[0] = 'g';
     }
 
-    auto got = NEO::getTargetPlatformsForFatbinary("gen2-" + genName, oclocArgHelperWithoutInput.get());
+    auto got = NEO::getTargetConfigsForFatbinary("gen2-" + genName, oclocArgHelperWithoutInput.get());
     EXPECT_TRUE(got.empty());
 
-    got = NEO::getTargetPlatformsForFatbinary(genName + "-gen2", oclocArgHelperWithoutInput.get());
+    got = NEO::getTargetConfigsForFatbinary(genName + "-gen2", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+
+    got = NEO::getTargetConfigsForFatbinary(genName + ",gen2", oclocArgHelperWithoutInput.get());
+    EXPECT_TRUE(got.empty());
+
+    got = NEO::getTargetConfigsForFatbinary("gen2," + genName, oclocArgHelperWithoutInput.get());
     EXPECT_TRUE(got.empty());
 }
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenTwoPlatformsWhenFatBinaryBuildIsInvokedThenSuccessIsReturned) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
+    if (allEnabledPlatforms.size() < 3) {
+        GTEST_SKIP();
+    }
+
+    auto platform0 = allEnabledPlatforms[0];
+    ConstStringRef platformName0(hardwarePrefix[platform0], strlen(hardwarePrefix[platform0]));
+    auto platform1 = allEnabledPlatforms[1];
+    ConstStringRef platformName1(hardwarePrefix[platform1], strlen(hardwarePrefix[platform1]));
+
+    std::vector<ConstStringRef> expected{platformName0, platformName1};
+
+    std::string platformsTarget = platformName0.str() + "," + platformName1.str();
+
+    auto got = NEO::getTargetPlatformsForFatbinary(platformsTarget, argHelper.get());
+    EXPECT_EQ(expected, got);
+
+    auto platformRev0 = std::to_string(hardwareInfoTable[platform0]->platform.usRevId);
+    auto platformRev1 = std::to_string(hardwareInfoTable[platform1]->platform.usRevId);
+    std::vector<std::string> platformsRevision{platformRev0, platformRev1};
+    std::stringstream resString;
+
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-device",
+        platformsTarget};
+
+    testing::internal::CaptureStdout();
+    int retVal = buildFatBinary(argv, argHelper.get());
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(retVal, NEO::OclocErrorCode::SUCCESS);
+
+    for (uint32_t i = 0; i < got.size(); i++) {
+        resString << "Build succeeded for : " << expected[i].str() + "." + platformsRevision[i] + ".\n";
+    }
+
+    EXPECT_STREQ(output.c_str(), resString.str().c_str());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenPlatformsClosedRangeWhenFatBinaryBuildIsInvokedThenSuccessIsReturned) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
+    if (allEnabledPlatforms.size() < 4) {
+        GTEST_SKIP();
+    }
+
+    auto platformFrom = allEnabledPlatforms[0];
+    ConstStringRef platformNameFrom(hardwarePrefix[platformFrom], strlen(hardwarePrefix[platformFrom]));
+    auto platformTo = allEnabledPlatforms[allEnabledPlatforms.size() / 2];
+    ConstStringRef platformNameTo(hardwarePrefix[platformTo], strlen(hardwarePrefix[platformTo]));
+
+    if (platformFrom > platformTo) {
+        std::swap(platformFrom, platformTo);
+    }
+
+    std::vector<PRODUCT_FAMILY> requestedPlatforms;
+    auto from = std::find(allEnabledPlatforms.begin(), allEnabledPlatforms.end(), platformFrom);
+    auto to = std::find(allEnabledPlatforms.begin(), allEnabledPlatforms.end(), platformTo) + 1;
+    requestedPlatforms.insert(requestedPlatforms.end(), from, to);
+
+    auto expected = toProductNames(requestedPlatforms);
+
+    std::string platformsTarget = platformNameFrom.str() + "-" + platformNameTo.str();
+
+    auto got = NEO::getTargetPlatformsForFatbinary(platformsTarget, argHelper.get());
+    EXPECT_EQ(expected, got);
+
+    std::vector<std::string> platformsRevisions;
+
+    for (auto platform : requestedPlatforms) {
+        platformsRevisions.push_back(std::to_string(hardwareInfoTable[platform]->platform.usRevId));
+    }
+
+    std::stringstream resString;
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-device",
+        platformsTarget};
+
+    testing::internal::CaptureStdout();
+    int retVal = buildFatBinary(argv, argHelper.get());
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(retVal, NEO::OclocErrorCode::SUCCESS);
+
+    for (uint32_t i = 0; i < got.size(); i++) {
+        resString << "Build succeeded for : " << expected[i].str() + "." + platformsRevisions[i] + ".\n";
+    }
+
+    EXPECT_STREQ(output.c_str(), resString.str().c_str());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenPlatformsOpenRangeToWhenFatBinaryBuildIsInvokedThenSuccessIsReturned) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
+    if (allEnabledPlatforms.size() < 4) {
+        GTEST_SKIP();
+    }
+
+    auto platformTo = allEnabledPlatforms[0];
+    ConstStringRef platformNameTo(hardwarePrefix[platformTo], strlen(hardwarePrefix[platformTo]));
+
+    std::vector<PRODUCT_FAMILY> requestedPlatforms;
+    auto platformToId = std::find(allEnabledPlatforms.begin(), allEnabledPlatforms.end(), platformTo);
+    assert(platformToId != allEnabledPlatforms.end());
+
+    requestedPlatforms.insert(requestedPlatforms.end(), allEnabledPlatforms.begin(), platformToId + 1);
+
+    auto expected = toProductNames(requestedPlatforms);
+
+    std::string platformsTarget = "-" + platformNameTo.str();
+
+    auto got = NEO::getTargetPlatformsForFatbinary(platformsTarget, argHelper.get());
+    EXPECT_EQ(expected, got);
+
+    std::vector<std::string> platformsRevisions;
+
+    for (auto platform : requestedPlatforms) {
+        platformsRevisions.push_back(std::to_string(hardwareInfoTable[platform]->platform.usRevId));
+    }
+
+    std::stringstream resString;
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-device",
+        platformsTarget};
+
+    testing::internal::CaptureStdout();
+    int retVal = buildFatBinary(argv, argHelper.get());
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(retVal, NEO::OclocErrorCode::SUCCESS);
+
+    for (uint32_t i = 0; i < got.size(); i++) {
+        resString << "Build succeeded for : " << expected[i].str() + "." + platformsRevisions[i] + ".\n";
+    }
+
+    EXPECT_STREQ(output.c_str(), resString.str().c_str());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenPlatformsOpenRangeFromWhenFatBinaryBuildIsInvokedThenSuccessIsReturned) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledPlatforms = NEO::getAllSupportedTargetPlatforms();
+    if (allEnabledPlatforms.size() < 4) {
+        GTEST_SKIP();
+    }
+
+    auto platformFrom = allEnabledPlatforms[0];
+    ConstStringRef platformNameFrom(hardwarePrefix[platformFrom], strlen(hardwarePrefix[platformFrom]));
+
+    std::vector<PRODUCT_FAMILY> requestedPlatforms;
+    auto platformToId = std::find(allEnabledPlatforms.begin(), allEnabledPlatforms.end(), platformFrom);
+    assert(platformToId != allEnabledPlatforms.end());
+
+    requestedPlatforms.insert(requestedPlatforms.end(), platformToId, allEnabledPlatforms.end());
+
+    auto expected = toProductNames(requestedPlatforms);
+
+    std::string platformsTarget = platformNameFrom.str() + "-";
+
+    auto got = NEO::getTargetPlatformsForFatbinary(platformsTarget, argHelper.get());
+    EXPECT_EQ(expected, got);
+
+    std::vector<std::string> platformsRevisions;
+
+    for (auto platform : requestedPlatforms) {
+        platformsRevisions.push_back(std::to_string(hardwareInfoTable[platform]->platform.usRevId));
+    }
+
+    std::stringstream resString;
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-device",
+        platformsTarget};
+
+    testing::internal::CaptureStdout();
+    int retVal = buildFatBinary(argv, argHelper.get());
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(retVal, NEO::OclocErrorCode::SUCCESS);
+
+    for (uint32_t i = 0; i < got.size(); i++) {
+        resString << "Build succeeded for : " << expected[i].str() + "." + platformsRevisions[i] + ".\n";
+    }
+
+    EXPECT_STREQ(output.c_str(), resString.str().c_str());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenTwoConfigsWhenFatBinaryBuildIsInvokedThenSuccessIsReturned) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledDeviceConfigs = argHelper->getAllSupportedDeviceConfigs();
+    if (allEnabledDeviceConfigs.size() < 2) {
+        GTEST_SKIP();
+    }
+    auto config0 = allEnabledDeviceConfigs[0];
+    auto config1 = allEnabledDeviceConfigs[1];
+
+    auto configStr0 = argHelper->parseProductConfigFromValue(config0.config);
+    auto configStr1 = argHelper->parseProductConfigFromValue(config1.config);
+
+    std::vector<std::string> targets{configStr0, configStr1};
+    std::vector<DeviceMapping> expected;
+
+    for (auto &target : targets) {
+        auto configFirstEl = argHelper->findConfigMatch(target, true);
+
+        auto configLastEl = argHelper->findConfigMatch(target, false);
+        for (auto &deviceConfig : allEnabledDeviceConfigs) {
+            if (deviceConfig.config >= configFirstEl && deviceConfig.config <= configLastEl) {
+                expected.push_back(deviceConfig);
+            }
+        }
+    }
+
+    auto configsTarget = configStr0 + "," + configStr1;
+    auto got = NEO::getTargetConfigsForFatbinary(configsTarget, argHelper.get());
+
+    EXPECT_EQ(expected.size(), got.size());
+    for (unsigned int i = 0; i < got.size(); i++) {
+        EXPECT_TRUE(expected[i] == got[i]);
+    }
+
+    std::stringstream resString;
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-device",
+        configsTarget};
+
+    testing::internal::CaptureStdout();
+    int retVal = buildFatBinary(argv, argHelper.get());
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(retVal, NEO::OclocErrorCode::SUCCESS);
+
+    for (auto deviceConfig : expected) {
+        auto targetConfig = argHelper->parseProductConfigFromValue(deviceConfig.config);
+        resString << "Build succeeded for : " << targetConfig + ".\n";
+    }
+
+    EXPECT_STREQ(output.c_str(), resString.str().c_str());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenProductConfigOpenRangeFromWhenFatBinaryBuildIsInvokedThenSuccessIsReturned) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledDeviceConfigs = argHelper->getAllSupportedDeviceConfigs();
+    if (allEnabledDeviceConfigs.size() < 2) {
+        GTEST_SKIP();
+    }
+    auto deviceMapConfig = allEnabledDeviceConfigs[allEnabledDeviceConfigs.size() / 2];
+    auto configNumConvention = argHelper->parseProductConfigFromValue(deviceMapConfig.config);
+
+    std::vector<DeviceMapping> expected;
+    auto configFrom = std::find_if(allEnabledDeviceConfigs.begin(),
+                                   allEnabledDeviceConfigs.end(),
+                                   [&cf = deviceMapConfig](const DeviceMapping &c) -> bool { return cf.config == c.config; });
+
+    expected.insert(expected.end(), configFrom, allEnabledDeviceConfigs.end());
+
+    auto configsTarget = configNumConvention + "-";
+    auto got = NEO::getTargetConfigsForFatbinary(configsTarget, argHelper.get());
+
+    EXPECT_EQ(expected.size(), got.size());
+    for (unsigned int i = 0; i < got.size(); i++) {
+        EXPECT_TRUE(expected[i] == got[i]);
+    }
+
+    std::stringstream resString;
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-device",
+        configsTarget};
+
+    testing::internal::CaptureStdout();
+    int retVal = buildFatBinary(argv, argHelper.get());
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(retVal, NEO::OclocErrorCode::SUCCESS);
+
+    for (auto deviceConfig : expected) {
+        auto targetConfig = argHelper->parseProductConfigFromValue(deviceConfig.config);
+        resString << "Build succeeded for : " << targetConfig + ".\n";
+    }
+
+    EXPECT_STREQ(output.c_str(), resString.str().c_str());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenProductConfigOpenRangeToWhenFatBinaryBuildIsInvokedThenSuccessIsReturned) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledDeviceConfigs = argHelper->getAllSupportedDeviceConfigs();
+    if (allEnabledDeviceConfigs.size() < 2) {
+        GTEST_SKIP();
+    }
+
+    auto deviceMapConfig = allEnabledDeviceConfigs[allEnabledDeviceConfigs.size() / 2];
+    auto configNumConvention = argHelper->parseProductConfigFromValue(deviceMapConfig.config);
+
+    std::vector<DeviceMapping> expected;
+    for (auto &deviceConfig : allEnabledDeviceConfigs) {
+        if (deviceConfig.config <= deviceMapConfig.config) {
+            expected.push_back(deviceConfig);
+        }
+    }
+    auto configsTarget = "-" + configNumConvention;
+    auto got = NEO::getTargetConfigsForFatbinary(configsTarget, argHelper.get());
+
+    EXPECT_EQ(expected.size(), got.size());
+    for (unsigned int i = 0; i < got.size(); i++) {
+        EXPECT_TRUE(expected[i] == got[i]);
+    }
+
+    std::stringstream resString;
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-device",
+        configsTarget};
+
+    testing::internal::CaptureStdout();
+    int retVal = buildFatBinary(argv, argHelper.get());
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(retVal, NEO::OclocErrorCode::SUCCESS);
+
+    for (auto deviceConfig : expected) {
+        auto targetConfig = argHelper->parseProductConfigFromValue(deviceConfig.config);
+        resString << "Build succeeded for : " << targetConfig + ".\n";
+    }
+
+    EXPECT_STREQ(output.c_str(), resString.str().c_str());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenProductConfigClosedRangeWhenFatBinaryBuildIsInvokedThenSuccessIsReturned) {
+    std::unique_ptr<OclocArgHelper> argHelper = std::make_unique<OclocArgHelper>();
+    auto allEnabledDeviceConfigs = argHelper->getAllSupportedDeviceConfigs();
+    if (allEnabledDeviceConfigs.size() < 4) {
+        GTEST_SKIP();
+    }
+
+    auto deviceMapConfigFrom = allEnabledDeviceConfigs[1];
+    auto deviceMapConfigTo = allEnabledDeviceConfigs[allEnabledDeviceConfigs.size() - 2];
+    auto configFromNumConvention = argHelper->parseProductConfigFromValue(deviceMapConfigFrom.config);
+    auto configToNumConvention = argHelper->parseProductConfigFromValue(deviceMapConfigTo.config);
+
+    std::vector<DeviceMapping> expected;
+
+    for (auto &deviceConfig : allEnabledDeviceConfigs) {
+        if (deviceConfig.config >= deviceMapConfigFrom.config && deviceConfig.config <= deviceMapConfigTo.config) {
+            expected.push_back(deviceConfig);
+        }
+    }
+    auto configsTarget = configFromNumConvention + "-" + configToNumConvention;
+    auto got = NEO::getTargetConfigsForFatbinary(configsTarget, argHelper.get()); // swap min with max implicitly
+    EXPECT_EQ(expected.size(), got.size());
+    for (unsigned int i = 0; i < got.size(); i++) {
+        EXPECT_TRUE(expected[i] == got[i]);
+    }
+    got = NEO::getTargetConfigsForFatbinary(configToNumConvention + "-" + configFromNumConvention, argHelper.get()); // swap min with max implicitly
+
+    EXPECT_EQ(expected.size(), got.size());
+    for (unsigned int i = 0; i < got.size(); i++) {
+        EXPECT_TRUE(expected[i] == got[i]);
+    }
+
+    std::stringstream resString;
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        "test_files/copybuffer.cl",
+        "-device",
+        configsTarget};
+
+    testing::internal::CaptureStdout();
+    int retVal = buildFatBinary(argv, argHelper.get());
+    auto output = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(retVal, NEO::OclocErrorCode::SUCCESS);
+
+    for (auto deviceConfig : expected) {
+        auto targetConfig = argHelper->parseProductConfigFromValue(deviceConfig.config);
+        resString << "Build succeeded for : " << targetConfig + ".\n";
+    }
+
+    EXPECT_STREQ(output.c_str(), resString.str().c_str());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenArgsWhenCorrectDeviceNumerationIsProvidedWithoutRevisionThenTargetsAreFound) {
+    auto allEnabledDeviceConfigs = oclocArgHelperWithoutInput->getAllSupportedDeviceConfigs();
+    if (allEnabledDeviceConfigs.size() < 2) {
+        GTEST_SKIP();
+    }
+
+    std::string configNum0 = oclocArgHelperWithoutInput->parseProductConfigFromValue(allEnabledDeviceConfigs[0].config);
+    auto major_pos = configNum0.find(".");
+    auto minor_pos = configNum0.find(".", ++major_pos);
+    auto cutRevision = configNum0.substr(0, minor_pos);
+
+    auto got = NEO::getTargetConfigsForFatbinary(ConstStringRef(cutRevision), oclocArgHelperWithoutInput.get());
+    EXPECT_FALSE(got.empty());
+}
+
+TEST_F(OclocFatBinaryGetTargetConfigsForFatbinary, GivenArgsWhenCorrectDeviceNumerationIsProvidedWithoutMinorAndRevisionThenTargetsAreFound) {
+    auto allEnabledDeviceConfigs = oclocArgHelperWithoutInput->getAllSupportedDeviceConfigs();
+    if (allEnabledDeviceConfigs.size() < 2) {
+        GTEST_SKIP();
+    }
+
+    std::string configNum0 = oclocArgHelperWithoutInput->parseProductConfigFromValue(allEnabledDeviceConfigs[0].config);
+    auto major_pos = configNum0.find(".");
+    auto cutMinorAndRevision = configNum0.substr(0, major_pos);
+
+    auto got = NEO::getTargetConfigsForFatbinary(ConstStringRef(cutMinorAndRevision), oclocArgHelperWithoutInput.get());
+    EXPECT_FALSE(got.empty());
+}
+
+TEST_F(OclocFatBinaryTest, GivenSpirvInputWhenFatBinaryIsRequestedThenArchiveContainsGenericIrFileWithSpirvContent) {
+    const auto devices = prepareTwoDevices(&mockArgHelper);
+    if (devices.empty()) {
+        GTEST_SKIP();
+    }
+
+    const std::vector<std::string> args = {
+        "ocloc",
+        "-output",
+        outputArchiveName,
+        "-file",
+        spirvFilename,
+        "-output_no_suffix",
+        "-spirv_input",
+        "-device",
+        devices};
+
+    const auto buildResult = buildFatBinary(args, &mockArgHelper);
+    ASSERT_EQ(OclocErrorCode::SUCCESS, buildResult);
+    ASSERT_EQ(1u, mockArgHelper.interceptedFiles.count(outputArchiveName));
+
+    const auto &rawArchive = mockArgHelper.interceptedFiles[outputArchiveName];
+    const auto archiveBytes = ArrayRef<const std::uint8_t>::fromAny(rawArchive.data(), rawArchive.size());
+
+    std::string outErrReason{};
+    std::string outWarning{};
+    const auto decodedArchive = NEO::Ar::decodeAr(archiveBytes, outErrReason, outWarning);
+
+    ASSERT_NE(nullptr, decodedArchive.magic);
+    ASSERT_TRUE(outErrReason.empty());
+    ASSERT_TRUE(outWarning.empty());
+
+    const auto spirvFileIt = searchInArchiveByFilename(decodedArchive, archiveGenericIrName);
+    ASSERT_NE(decodedArchive.files.end(), spirvFileIt);
+
+    const auto elf = Elf::decodeElf<Elf::EI_CLASS_64>(spirvFileIt->fileData, outErrReason, outWarning);
+    ASSERT_NE(nullptr, elf.elfFileHeader);
+    ASSERT_TRUE(outErrReason.empty());
+    ASSERT_TRUE(outWarning.empty());
+
+    const auto isSpirvSection = [](const auto &section) {
+        return section.header && section.header->type == Elf::SHT_OPENCL_SPIRV;
+    };
+
+    const auto spirvSectionIt = std::find_if(elf.sectionHeaders.begin(), elf.sectionHeaders.end(), isSpirvSection);
+    ASSERT_NE(elf.sectionHeaders.end(), spirvSectionIt);
+
+    ASSERT_EQ(spirvFileContent.size() + 1, spirvSectionIt->header->size);
+    const auto isSpirvDataEqualsInputFileData = std::memcmp(spirvFileContent.data(), spirvSectionIt->data.begin(), spirvFileContent.size()) == 0;
+    EXPECT_TRUE(isSpirvDataEqualsInputFileData);
+}
+
+TEST_F(OclocFatBinaryTest, GivenSpirvInputAndExcludeIrFlagWhenFatBinaryIsRequestedThenArchiveDoesNotContainGenericIrFile) {
+    const auto devices = prepareTwoDevices(&mockArgHelper);
+    if (devices.empty()) {
+        GTEST_SKIP();
+    }
+
+    const std::vector<std::string> args = {
+        "ocloc",
+        "-output",
+        outputArchiveName,
+        "-file",
+        spirvFilename,
+        "-output_no_suffix",
+        "-spirv_input",
+        "-exclude_ir",
+        "-device",
+        devices};
+
+    const auto buildResult = buildFatBinary(args, &mockArgHelper);
+    ASSERT_EQ(OclocErrorCode::SUCCESS, buildResult);
+    ASSERT_EQ(1u, mockArgHelper.interceptedFiles.count(outputArchiveName));
+
+    const auto &rawArchive = mockArgHelper.interceptedFiles[outputArchiveName];
+    const auto archiveBytes = ArrayRef<const std::uint8_t>::fromAny(rawArchive.data(), rawArchive.size());
+
+    std::string outErrReason{};
+    std::string outWarning{};
+    const auto decodedArchive = NEO::Ar::decodeAr(archiveBytes, outErrReason, outWarning);
+
+    ASSERT_NE(nullptr, decodedArchive.magic);
+    ASSERT_TRUE(outErrReason.empty());
+    ASSERT_TRUE(outWarning.empty());
+
+    const auto spirvFileIt = searchInArchiveByFilename(decodedArchive, archiveGenericIrName);
+    EXPECT_EQ(decodedArchive.files.end(), spirvFileIt);
+}
+
+TEST_F(OclocFatBinaryTest, GivenClInputFileWhenFatBinaryIsRequestedThenArchiveDoesNotContainGenericIrFile) {
+    const auto devices = prepareTwoDevices(&mockArgHelper);
+    if (devices.empty()) {
+        GTEST_SKIP();
+    }
+
+    const std::string clFilename = "some_kernel.cl";
+    mockArgHelperFilesMap[clFilename] = "__kernel void some_kernel(){}";
+
+    const std::vector<std::string> args = {
+        "ocloc",
+        "-output",
+        outputArchiveName,
+        "-file",
+        clFilename,
+        "-output_no_suffix",
+        "-device",
+        devices};
+
+    const auto buildResult = buildFatBinary(args, &mockArgHelper);
+    ASSERT_EQ(OclocErrorCode::SUCCESS, buildResult);
+    ASSERT_EQ(1u, mockArgHelper.interceptedFiles.count(outputArchiveName));
+
+    const auto &rawArchive = mockArgHelper.interceptedFiles[outputArchiveName];
+    const auto archiveBytes = ArrayRef<const std::uint8_t>::fromAny(rawArchive.data(), rawArchive.size());
+
+    std::string outErrReason{};
+    std::string outWarning{};
+    const auto decodedArchive = NEO::Ar::decodeAr(archiveBytes, outErrReason, outWarning);
+
+    ASSERT_NE(nullptr, decodedArchive.magic);
+    ASSERT_TRUE(outErrReason.empty());
+    ASSERT_TRUE(outWarning.empty());
+
+    const auto spirvFileIt = searchInArchiveByFilename(decodedArchive, archiveGenericIrName);
+    EXPECT_EQ(decodedArchive.files.end(), spirvFileIt);
+}
+
+TEST_F(OclocFatBinaryTest, GivenEmptyFileWhenAppendingGenericIrThenInvalidFileIsReturned) {
+    Ar::ArEncoder ar;
+    std::string emptyFile{"empty_file.spv"};
+    mockArgHelperFilesMap[emptyFile] = "";
+    mockArgHelper.shouldLoadDataFromFileReturnZeroSize = true;
+
+    ::testing::internal::CaptureStdout();
+    const auto errorCode{appendGenericIr(ar, emptyFile, &mockArgHelper)};
+    const auto output{::testing::internal::GetCapturedStdout()};
+
+    EXPECT_EQ(OclocErrorCode::INVALID_FILE, errorCode);
+    EXPECT_EQ("Error! Couldn't read input file!\n", output);
+}
+
+TEST_F(OclocFatBinaryTest, GivenInvalidIrFileWhenAppendingGenericIrThenInvalidFileIsReturned) {
+    Ar::ArEncoder ar;
+    std::string dummyFile{"dummy_file.spv"};
+    mockArgHelperFilesMap[dummyFile] = "This is not IR!";
+
+    ::testing::internal::CaptureStdout();
+    const auto errorCode{appendGenericIr(ar, dummyFile, &mockArgHelper)};
+    const auto output{::testing::internal::GetCapturedStdout()};
+
+    EXPECT_EQ(OclocErrorCode::INVALID_FILE, errorCode);
+
+    const auto expectedErrorMessage{"Error! Input file is not in supported generic IR format! "
+                                    "Currently supported format is SPIR-V.\n"};
+    EXPECT_EQ(expectedErrorMessage, output);
+}
+
 } // namespace NEO

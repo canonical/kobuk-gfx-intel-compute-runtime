@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,21 +7,21 @@
 
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/source_level_debugger/source_level_debugger.h"
+#include "shared/test/common/helpers/kernel_binary_helper.h"
+#include "shared/test/common/helpers/kernel_filename_helper.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/test_macros/mock_method_macros.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/program/program.h"
 #include "opencl/test/unit_test/fixtures/enqueue_handler_fixture.h"
-#include "opencl/test/unit_test/helpers/kernel_binary_helper.h"
-#include "opencl/test/unit_test/helpers/kernel_filename_helper.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/program/program_from_binary.h"
-#include "test.h"
 
 #include "compiler_options.h"
-#include "gmock/gmock.h"
 
 using namespace NEO;
 using namespace ::testing;
@@ -35,6 +35,9 @@ class EnqueueDebugKernelTest : public ProgramSimpleFixture,
         ProgramSimpleFixture::SetUp();
         device = pClDevice;
         pDevice->executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]->debugger.reset(new SourceLevelDebugger(nullptr));
+
+        auto sipType = SipKernel::getSipKernelType(*pDevice);
+        SipKernel::initSipKernel(sipType, *pDevice);
 
         if (pDevice->getHardwareInfo().platform.eRenderCoreFamily >= IGFX_GEN9_CORE) {
             pDevice->deviceInfo.debuggerActive = true;
@@ -97,7 +100,7 @@ HWTEST_F(EnqueueDebugKernelTest, givenDebugKernelWhenEnqueuedThenSSHAndBtiAreCor
         std::unique_ptr<MockCommandQueueHw<FamilyType>> mockCmdQ(new MockCommandQueueHw<FamilyType>(&context, pClDevice, 0));
 
         size_t gws[] = {1, 1, 1};
-        auto &ssh = mockCmdQ->getIndirectHeap(IndirectHeap::SURFACE_STATE, 4096u);
+        auto &ssh = mockCmdQ->getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 4096u);
         void *surfaceStates = ssh.getSpace(0);
 
         mockCmdQ->enqueueKernel(debugKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
@@ -122,7 +125,7 @@ HWTEST_F(EnqueueDebugKernelTest, givenDebugKernelWhenEnqueuedThenSurfaceStateFor
         std::unique_ptr<MockCommandQueueHw<FamilyType>> mockCmdQ(new MockCommandQueueHw<FamilyType>(&context, pClDevice, 0));
 
         size_t gws[] = {1, 1, 1};
-        auto &ssh = mockCmdQ->getIndirectHeap(IndirectHeap::SURFACE_STATE, 4096u);
+        auto &ssh = mockCmdQ->getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 4096u);
         mockCmdQ->enqueueKernel(debugKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
         auto debugSurfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(ssh.getCpuBase());
@@ -144,14 +147,26 @@ HWTEST_F(EnqueueDebugKernelTest, givenDebugKernelWhenEnqueuedThenSurfaceStateFor
 }
 
 template <typename GfxFamily>
-class GMockCommandQueueHw : public CommandQueueHw<GfxFamily> {
+class MockCommandQueueHwSetupDebugSurface : public CommandQueueHw<GfxFamily> {
     typedef CommandQueueHw<GfxFamily> BaseClass;
 
   public:
-    GMockCommandQueueHw(Context *context, ClDevice *device, cl_queue_properties *properties) : BaseClass(context, device, properties, false) {
+    MockCommandQueueHwSetupDebugSurface(Context *context, ClDevice *device, cl_queue_properties *properties) : BaseClass(context, device, properties, false) {
     }
 
-    MOCK_METHOD1(setupDebugSurface, bool(Kernel *kernel));
+    bool setupDebugSurface(Kernel *kernel) override {
+        setupDebugSurfaceCalled++;
+        setupDebugSurfaceParamsPassed.push_back({kernel});
+        return setupDebugSurfaceResult;
+    }
+
+    struct SetupDebugSurfaceParams {
+        Kernel *kernel = nullptr;
+    };
+
+    StackVec<SetupDebugSurfaceParams, 1> setupDebugSurfaceParamsPassed{};
+    uint32_t setupDebugSurfaceCalled = 0u;
+    bool setupDebugSurfaceResult = true;
 };
 
 HWTEST_F(EnqueueDebugKernelSimpleTest, givenKernelFromProgramWithDebugEnabledWhenEnqueuedThenDebugSurfaceIsSetup) {
@@ -159,17 +174,19 @@ HWTEST_F(EnqueueDebugKernelSimpleTest, givenKernelFromProgramWithDebugEnabledWhe
     program.enableKernelDebug();
     std::unique_ptr<MockDebugKernel> kernel(MockKernel::create<MockDebugKernel>(*pDevice, &program));
     kernel->initialize();
-    std::unique_ptr<GMockCommandQueueHw<FamilyType>> mockCmdQ(new GMockCommandQueueHw<FamilyType>(context, pClDevice, 0));
-    mockCmdQ->getGpgpuCommandStreamReceiver().allocateDebugSurface(SipKernel::maxDbgSurfaceSize);
+    std::unique_ptr<MockCommandQueueHwSetupDebugSurface<FamilyType>> mockCmdQ(new MockCommandQueueHwSetupDebugSurface<FamilyType>(context, pClDevice, 0));
+    auto hwInfo = *NEO::defaultHwInfo.get();
+    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    mockCmdQ->getGpgpuCommandStreamReceiver().allocateDebugSurface(hwHelper.getSipKernelMaxDbgSurfaceSize(hwInfo));
+    mockCmdQ->setupDebugSurfaceParamsPassed.clear();
 
     EXPECT_TRUE(isValidOffset(kernel->getKernelInfo().kernelDescriptor.payloadMappings.implicitArgs.systemThreadSurfaceAddress.bindful));
-
-    EXPECT_CALL(*mockCmdQ.get(), setupDebugSurface(kernel.get())).Times(1).RetiresOnSaturation();
 
     size_t gws[] = {1, 1, 1};
     mockCmdQ->enqueueKernel(kernel.get(), 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
-    ::testing::Mock::VerifyAndClearExpectations(mockCmdQ.get());
+    EXPECT_EQ(1u, mockCmdQ->setupDebugSurfaceCalled);
+    EXPECT_EQ(kernel.get(), mockCmdQ->setupDebugSurfaceParamsPassed[0].kernel);
 }
 
 HWTEST_F(EnqueueDebugKernelSimpleTest, givenKernelWithoutSystemThreadSurfaceWhenEnqueuedThenDebugSurfaceIsNotSetup) {
@@ -180,28 +197,24 @@ HWTEST_F(EnqueueDebugKernelSimpleTest, givenKernelWithoutSystemThreadSurfaceWhen
 
     EXPECT_FALSE(isValidOffset(kernel->getKernelInfo().kernelDescriptor.payloadMappings.implicitArgs.systemThreadSurfaceAddress.bindful));
 
-    std::unique_ptr<GMockCommandQueueHw<FamilyType>> mockCmdQ(new GMockCommandQueueHw<FamilyType>(context, pClDevice, 0));
-
-    EXPECT_CALL(*mockCmdQ.get(), setupDebugSurface(kernel.get())).Times(0).RetiresOnSaturation();
+    std::unique_ptr<MockCommandQueueHwSetupDebugSurface<FamilyType>> mockCmdQ(new MockCommandQueueHwSetupDebugSurface<FamilyType>(context, pClDevice, 0));
 
     size_t gws[] = {1, 1, 1};
     mockCmdQ->enqueueKernel(kernel.get(), 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
-    ::testing::Mock::VerifyAndClearExpectations(mockCmdQ.get());
+    EXPECT_EQ(0u, mockCmdQ->setupDebugSurfaceCalled);
 }
 
 HWTEST_F(EnqueueDebugKernelSimpleTest, givenKernelFromProgramWithoutDebugEnabledWhenEnqueuedThenDebugSurfaceIsNotSetup) {
     MockProgram program(context, false, toClDeviceVector(*pClDevice));
     std::unique_ptr<MockDebugKernel> kernel(MockKernel::create<MockDebugKernel>(*pDevice, &program));
-    std::unique_ptr<NiceMock<GMockCommandQueueHw<FamilyType>>> mockCmdQ(new NiceMock<GMockCommandQueueHw<FamilyType>>(context, pClDevice, nullptr));
-
-    EXPECT_CALL(*mockCmdQ.get(), setupDebugSurface(kernel.get())).Times(0);
+    std::unique_ptr<MockCommandQueueHwSetupDebugSurface<FamilyType>> mockCmdQ(new MockCommandQueueHwSetupDebugSurface<FamilyType>(context, pClDevice, nullptr));
 
     size_t gws[] = {1, 1, 1};
     mockCmdQ->enqueueKernel(kernel.get(), 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
 
-    ::testing::Mock::VerifyAndClearExpectations(mockCmdQ.get());
     EXPECT_EQ(nullptr, mockCmdQ->getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation());
+    EXPECT_EQ(0u, mockCmdQ->setupDebugSurfaceCalled);
 }
 
 using ActiveDebuggerTest = EnqueueDebugKernelTest;

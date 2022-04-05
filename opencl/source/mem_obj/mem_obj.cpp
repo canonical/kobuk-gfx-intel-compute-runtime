@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -62,9 +62,14 @@ MemObj::~MemObj() {
     if (allocatedMapPtr != nullptr) {
         needWait = true;
     }
-    if (mapOperationsHandler.size() > 0 && !getCpuAddressForMapping()) {
-        needWait = true;
+
+    if (auto mapOperationsHandler = getMapOperationsHandlerIfExists(); mapOperationsHandler != nullptr) {
+        if (mapOperationsHandler->size() > 0 && !getCpuAddressForMapping()) {
+            needWait = true;
+        }
+        context->getMapOperationsStorage().removeHandler(this);
     }
+
     if (!destructorCallbacks.empty()) {
         needWait = true;
     }
@@ -98,13 +103,16 @@ MemObj::~MemObj() {
                 if (associatedMemObject->getGraphicsAllocation(graphicsAllocation->getRootDeviceIndex()) != graphicsAllocation) {
                     destroyGraphicsAllocation(graphicsAllocation, false);
                 }
-                associatedMemObject->decRefInternal();
             }
+        }
+        if (associatedMemObject) {
+            associatedMemObject->decRefInternal();
         }
         if (!associatedMemObject) {
             releaseAllocatedMapPtr();
         }
     }
+
     destructorCallbacks.invoke(this);
 
     context->decRefInternal();
@@ -124,7 +132,6 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
     cl_context ctx = nullptr;
     uint64_t internalHandle = 0llu;
     auto allocation = getMultiGraphicsAllocation().getDefaultGraphicsAllocation();
-    Gmm *gmm;
     cl_bool usesCompression;
 
     switch (paramName) {
@@ -172,7 +179,7 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
 
     case CL_MEM_MAP_COUNT:
         srcParamSize = sizeof(mapCount);
-        mapCount = static_cast<cl_uint>(mapOperationsHandler.size());
+        mapCount = static_cast<cl_uint>(getMapOperationsHandler().size());
         srcParam = &mapCount;
         break;
 
@@ -189,12 +196,7 @@ cl_int MemObj::getMemObjectInfo(cl_mem_info paramName,
         break;
 
     case CL_MEM_USES_COMPRESSION_INTEL:
-        gmm = allocation->getDefaultGmm();
-        if (gmm != nullptr) {
-            usesCompression = gmm->isCompressionEnabled;
-        } else {
-            usesCompression = allocation->getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED;
-        }
+        usesCompression = allocation->isCompressionEnabled();
         srcParam = &usesCompression;
         srcParamSize = sizeof(cl_bool);
         break;
@@ -371,7 +373,7 @@ void *MemObj::getBasePtrForMap(uint32_t rootDeviceIndex) {
             }
             AllocationProperties properties{rootDeviceIndex,
                                             false, // allocateMemory
-                                            getSize(), GraphicsAllocation::AllocationType::MAP_ALLOCATION,
+                                            getSize(), AllocationType::MAP_ALLOCATION,
                                             false, //isMultiStorageAllocation
                                             context->getDeviceBitfieldForAllocation(rootDeviceIndex)};
 
@@ -382,11 +384,26 @@ void *MemObj::getBasePtrForMap(uint32_t rootDeviceIndex) {
     }
 }
 
+MapOperationsHandler &MemObj::getMapOperationsHandler() {
+    return context->getMapOperationsStorage().getHandler(this);
+}
+
+MapOperationsHandler *MemObj::getMapOperationsHandlerIfExists() {
+    return context->getMapOperationsStorage().getHandlerIfExists(this);
+}
+
 bool MemObj::addMappedPtr(void *ptr, size_t ptrLength, cl_map_flags &mapFlags,
                           MemObjSizeArray &size, MemObjOffsetArray &offset,
-                          uint32_t mipLevel) {
-    return mapOperationsHandler.add(ptr, ptrLength, mapFlags, size, offset,
-                                    mipLevel);
+                          uint32_t mipLevel, GraphicsAllocation *graphicsAllocation) {
+    return getMapOperationsHandler().add(ptr, ptrLength, mapFlags, size, offset, mipLevel, graphicsAllocation);
+}
+
+bool MemObj::findMappedPtr(void *mappedPtr, MapInfo &outMapInfo) {
+    return getMapOperationsHandler().find(mappedPtr, outMapInfo);
+}
+
+void MemObj::removeMappedPtr(void *mappedPtr) {
+    getMapOperationsHandler().remove(mappedPtr);
 }
 
 bool MemObj::isTiledAllocation() const {
@@ -398,8 +415,7 @@ bool MemObj::isTiledAllocation() const {
 bool MemObj::mappingOnCpuAllowed() const {
     auto graphicsAllocation = multiGraphicsAllocation.getDefaultGraphicsAllocation();
     return !isTiledAllocation() && !peekSharingHandler() && !isMipMapped(this) && !DebugManager.flags.DisableZeroCopyForBuffers.get() &&
-           !(graphicsAllocation->getDefaultGmm() && graphicsAllocation->getDefaultGmm()->isCompressionEnabled) &&
-           MemoryPool::isSystemMemoryPool(graphicsAllocation->getMemoryPool());
+           !graphicsAllocation->isCompressionEnabled() && MemoryPool::isSystemMemoryPool(graphicsAllocation->getMemoryPool());
 }
 
 void MemObj::storeProperties(const cl_mem_properties *properties) {

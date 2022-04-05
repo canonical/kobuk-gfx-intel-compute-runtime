@@ -9,6 +9,8 @@
 
 #include "mock_sysfs_standby.h"
 
+extern bool sysmanUltsEnable;
+
 using ::testing::_;
 using ::testing::Matcher;
 
@@ -25,8 +27,12 @@ class ZesStandbyFixture : public SysmanDeviceFixture {
     std::unique_ptr<Mock<StandbySysfsAccess>> ptestSysfsAccess;
     zes_standby_handle_t hSysmanStandby = {};
     SysfsAccess *pOriginalSysfsAccess = nullptr;
+    std::vector<ze_device_handle_t> deviceHandles;
 
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::SetUp();
         ptestSysfsAccess = std::make_unique<NiceMock<Mock<StandbySysfsAccess>>>();
         pOriginalSysfsAccess = pLinuxSysmanImp->pSysfsAccess;
@@ -43,7 +49,6 @@ class ZesStandbyFixture : public SysmanDeviceFixture {
         }
         pSysmanDeviceImp->pStandbyHandleContext->handleList.clear();
         uint32_t subDeviceCount = 0;
-        std::vector<ze_device_handle_t> deviceHandles;
         // We received a device handle. Check for subdevices in this device
         Device::fromHandle(device->toHandle())->getSubDevices(&subDeviceCount, nullptr);
         if (subDeviceCount == 0) {
@@ -55,6 +60,9 @@ class ZesStandbyFixture : public SysmanDeviceFixture {
         pSysmanDeviceImp->pStandbyHandleContext->init(deviceHandles);
     }
     void TearDown() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         pLinuxSysmanImp->pSysfsAccess = pOriginalSysfsAccess;
         SysmanDeviceFixture::TearDown();
     }
@@ -251,12 +259,61 @@ TEST_F(ZesStandbyFixture, GivenOnSubdeviceNotSetWhenValidatingosStandbyGetProper
     delete pLinuxStandbyImp;
 }
 
+TEST_F(ZesStandbyFixture, GivenValidStandbyHandleWhenCallingzesStandbySetModeDefaultWithLegacyPathThenVerifySysmanzesySetModeCallSucceeds) {
+    for (auto handle : pSysmanDeviceImp->pStandbyHandleContext->handleList) {
+        delete handle;
+    }
+    pSysmanDeviceImp->pStandbyHandleContext->handleList.clear();
+    ptestSysfsAccess->directoryExistsResult = false;
+    pSysmanDeviceImp->pStandbyHandleContext->init(deviceHandles);
+
+    auto handles = get_standby_handles(mockHandleCount);
+
+    for (auto hSysmanStandby : handles) {
+        zes_standby_promo_mode_t mode;
+        ptestSysfsAccess->setVal(standbyModeFile, standbyModeNever);
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesStandbyGetMode(hSysmanStandby, &mode));
+        EXPECT_EQ(ZES_STANDBY_PROMO_MODE_NEVER, mode);
+
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesStandbySetMode(hSysmanStandby, ZES_STANDBY_PROMO_MODE_DEFAULT));
+
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesStandbyGetMode(hSysmanStandby, &mode));
+        EXPECT_EQ(ZES_STANDBY_PROMO_MODE_DEFAULT, mode);
+    }
+}
+
+TEST_F(ZesStandbyFixture, GivenValidStandbyHandleWhenCallingzesStandbySetModeNeverWithLegacyPathThenVerifySysmanzesySetModeCallSucceeds) {
+    for (auto handle : pSysmanDeviceImp->pStandbyHandleContext->handleList) {
+        delete handle;
+    }
+    pSysmanDeviceImp->pStandbyHandleContext->handleList.clear();
+    ptestSysfsAccess->directoryExistsResult = false;
+    pSysmanDeviceImp->pStandbyHandleContext->init(deviceHandles);
+
+    auto handles = get_standby_handles(mockHandleCount);
+
+    for (auto hSysmanStandby : handles) {
+        zes_standby_promo_mode_t mode;
+        ptestSysfsAccess->setVal(standbyModeFile, standbyModeDefault);
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesStandbyGetMode(hSysmanStandby, &mode));
+        EXPECT_EQ(ZES_STANDBY_PROMO_MODE_DEFAULT, mode);
+
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesStandbySetMode(hSysmanStandby, ZES_STANDBY_PROMO_MODE_NEVER));
+
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesStandbyGetMode(hSysmanStandby, &mode));
+        EXPECT_EQ(ZES_STANDBY_PROMO_MODE_NEVER, mode);
+    }
+}
+
 class ZesStandbyMultiDeviceFixture : public SysmanMultiDeviceFixture {
     std::unique_ptr<Mock<StandbySysfsAccess>> ptestSysfsAccess;
     SysfsAccess *pOriginalSysfsAccess = nullptr;
 
   protected:
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanMultiDeviceFixture::SetUp();
         mockSubDeviceHandleCount = subDeviceCount;
         ptestSysfsAccess = std::make_unique<NiceMock<Mock<StandbySysfsAccess>>>();
@@ -283,6 +340,9 @@ class ZesStandbyMultiDeviceFixture : public SysmanMultiDeviceFixture {
         pSysmanDeviceImp->pStandbyHandleContext->init(deviceHandles);
     }
     void TearDown() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         pLinuxSysmanImp->pSysfsAccess = pOriginalSysfsAccess;
         SysmanMultiDeviceFixture::TearDown();
     }

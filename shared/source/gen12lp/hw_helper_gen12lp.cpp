@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,11 +10,10 @@
 
 using Family = NEO::TGLLPFamily;
 
-#include "shared/source/gen12lp/helpers_gen12lp.h"
 #include "shared/source/helpers/flat_batch_buffer_helper_hw.inl"
 #include "shared/source/helpers/hw_helper_base.inl"
-#include "shared/source/helpers/hw_helper_bdw_plus.inl"
-#include "shared/source/helpers/hw_helper_tgllp_plus.inl"
+#include "shared/source/helpers/hw_helper_bdw_and_later.inl"
+#include "shared/source/helpers/hw_helper_tgllp_and_later.inl"
 #include "shared/source/os_interface/hw_info_config.h"
 
 #include "engine_node.h"
@@ -22,28 +21,13 @@ using Family = NEO::TGLLPFamily;
 namespace NEO {
 
 template <>
-void HwHelperHw<Family>::setupHardwareCapabilities(HardwareCapabilities *caps, const HardwareInfo &hwInfo) {
-    caps->image3DMaxHeight = 2048;
-    caps->image3DMaxWidth = 2048;
-    //With statefull messages we have an allocation cap of 4GB
-    //Reason to subtract 8KB is that driver may pad the buffer with addition pages for over fetching..
-    caps->maxMemAllocSize = (4ULL * MemoryConstants::gigaByte) - (8ULL * MemoryConstants::kiloByte);
-    caps->isStatelesToStatefullWithOffsetSupported = true;
+size_t HwHelperHw<Family>::getMax3dImageWidthOrHeight() const {
+    return 2048;
 }
 
 template <>
 bool HwHelperHw<Family>::isOffsetToSkipSetFFIDGPWARequired(const HardwareInfo &hwInfo) const {
-    return Gen12LPHelpers::isOffsetToSkipSetFFIDGPWARequired(hwInfo);
-}
-
-template <>
-bool HwHelperHw<Family>::is3DPipelineSelectWARequired(const HardwareInfo &hwInfo) const {
-    return Gen12LPHelpers::is3DPipelineSelectWARequired(hwInfo);
-}
-
-template <>
-bool HwHelperHw<Family>::isForceEmuInt32DivRemSPWARequired(const HardwareInfo &hwInfo) {
-    return Gen12LPHelpers::isForceEmuInt32DivRemSPWARequired(hwInfo);
+    return isWorkaroundRequired(REVISION_A0, REVISION_B, hwInfo);
 }
 
 template <>
@@ -53,7 +37,7 @@ bool HwHelperHw<Family>::isWaDisableRccRhwoOptimizationRequired() const {
 
 template <>
 bool HwHelperHw<Family>::isAdditionalFeatureFlagRequired(const FeatureTable *featureTable) const {
-    return featureTable->ftrGpGpuMidThreadLevelPreempt;
+    return featureTable->flags.ftrGpGpuMidThreadLevelPreempt;
 }
 
 template <>
@@ -66,109 +50,26 @@ uint32_t HwHelperHw<Family>::getComputeUnitsUsedForScratch(const HardwareInfo *p
 
 template <>
 bool HwHelperHw<Family>::isLocalMemoryEnabled(const HardwareInfo &hwInfo) const {
-    return Gen12LPHelpers::isLocalMemoryEnabled(hwInfo);
+    return hwInfo.featureTable.flags.ftrLocalMemory;
 }
 
 template <>
-bool HwHelperHw<Family>::isPageTableManagerSupported(const HardwareInfo &hwInfo) const {
-    return hwInfo.capabilityTable.ftrRenderCompressedBuffers || hwInfo.capabilityTable.ftrRenderCompressedImages;
-}
-
-template <>
-uint32_t HwHelperHw<Family>::getHwRevIdFromStepping(uint32_t stepping, const HardwareInfo &hwInfo) const {
-    if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_TIGERLAKE_LP) {
-        switch (stepping) {
-        case REVISION_A0:
-            return 0x0;
-        case REVISION_B:
-            return 0x1;
-        case REVISION_C:
-            return 0x3;
-        }
-    } else if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_ROCKETLAKE) {
-        switch (stepping) {
-        case REVISION_A0:
-            return 0x0;
-        case REVISION_B:
-            return 0x1;
-        case REVISION_C:
-            return 0x4;
-        }
-    } else if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_ALDERLAKE_S) {
-        switch (stepping) {
-        case REVISION_A0:
-            return 0x0;
-        case REVISION_B:
-            return 0x4;
-        }
+bool HwHelperHw<Family>::isBufferSizeSuitableForCompression(const size_t size, const HardwareInfo &hwInfo) const {
+    if (DebugManager.flags.OverrideBufferSuitableForRenderCompression.get() != -1) {
+        return !!DebugManager.flags.OverrideBufferSuitableForRenderCompression.get();
     }
-    return Gen12LPHelpers::getHwRevIdFromStepping(stepping, hwInfo);
-}
-
-template <>
-uint32_t HwHelperHw<Family>::getSteppingFromHwRevId(const HardwareInfo &hwInfo) const {
-    if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_TIGERLAKE_LP) {
-        switch (hwInfo.platform.usRevId) {
-        case 0x0:
-            return REVISION_A0;
-        case 0x1:
-            return REVISION_B;
-        case 0x3:
-            return REVISION_C;
-        }
-    } else if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_ROCKETLAKE) {
-        switch (hwInfo.platform.usRevId) {
-        case 0x0:
-            return REVISION_A0;
-        case 0x1:
-            return REVISION_B;
-        case 0x4:
-            return REVISION_C;
-        }
-    } else if (hwInfo.platform.eProductFamily == PRODUCT_FAMILY::IGFX_ALDERLAKE_S) {
-        switch (hwInfo.platform.usRevId) {
-        case 0x0:
-            return REVISION_A0;
-        case 0x4:
-            return REVISION_B;
-        }
-    }
-    return Gen12LPHelpers::getSteppingFromHwRevId(hwInfo);
-}
-
-template <>
-bool HwHelperHw<Family>::isBufferSizeSuitableForRenderCompression(const size_t size, const HardwareInfo &hwInfo) const {
     return false;
 }
 
 template <>
 bool HwHelperHw<Family>::checkResourceCompatibility(GraphicsAllocation &graphicsAllocation) {
-    if (graphicsAllocation.getAllocationType() == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED) {
-        return false;
-    }
-    return true;
-}
-
-template <>
-void HwHelperHw<Family>::setCapabilityCoherencyFlag(const HardwareInfo *pHwInfo, bool &coherencyFlag) {
-    coherencyFlag = true;
-    HwHelper &hwHelper = HwHelper::get(pHwInfo->platform.eRenderCoreFamily);
-    if (pHwInfo->platform.eProductFamily == IGFX_TIGERLAKE_LP && hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_B, *pHwInfo)) {
-        //stepping A devices - turn off coherency
-        coherencyFlag = false;
-    }
-
-    Gen12LPHelpers::adjustCoherencyFlag(pHwInfo->platform.eProductFamily, coherencyFlag);
+    return !graphicsAllocation.isCompressionEnabled();
 }
 
 template <>
 uint32_t HwHelperHw<Family>::getPitchAlignmentForImage(const HardwareInfo *hwInfo) const {
-    if (Gen12LPHelpers::imagePitchAlignmentWaRequired(hwInfo->platform.eProductFamily)) {
-        HwHelper &hwHelper = HwHelper::get(hwInfo->platform.eRenderCoreFamily);
-        if (hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_B, *hwInfo)) {
-            return 64u;
-        }
-        return 4u;
+    if (HwInfoConfig::get(hwInfo->platform.eProductFamily)->imagePitchAlignmentWARequired(*hwInfo)) {
+        return 64u;
     }
     return 4u;
 }
@@ -179,28 +80,30 @@ uint32_t HwHelperHw<Family>::getMetricsLibraryGenId() const {
 }
 
 template <>
-const HwHelper::EngineInstancesContainer HwHelperHw<Family>::getGpgpuEngineInstances(const HardwareInfo &hwInfo) const {
+const EngineInstancesContainer HwHelperHw<Family>::getGpgpuEngineInstances(const HardwareInfo &hwInfo) const {
     auto defaultEngine = getChosenEngineType(hwInfo);
 
-    EngineInstancesContainer engines = {
-        {aub_stream::ENGINE_RCS, EngineUsage::Regular},
-        {aub_stream::ENGINE_RCS, EngineUsage::LowPriority}, // low priority
-        {defaultEngine, EngineUsage::Internal},             // internal usage
-    };
+    EngineInstancesContainer engines;
 
-    if (defaultEngine == aub_stream::EngineType::ENGINE_CCS && hwInfo.featureTable.ftrCCSNode && !hwInfo.featureTable.ftrGpGpuMidThreadLevelPreempt) {
+    if (defaultEngine == aub_stream::EngineType::ENGINE_CCS && hwInfo.featureTable.flags.ftrCCSNode && !hwInfo.featureTable.flags.ftrGpGpuMidThreadLevelPreempt) {
         engines.push_back({aub_stream::ENGINE_CCS, EngineUsage::Regular});
     }
 
-    if (hwInfo.featureTable.ftrBcsInfo.test(0)) {
-        engines.push_back({aub_stream::ENGINE_BCS, EngineUsage::Regular});
+    engines.push_back({aub_stream::ENGINE_RCS, EngineUsage::Regular});
+    engines.push_back({aub_stream::ENGINE_RCS, EngineUsage::LowPriority}); // low priority
+    engines.push_back({defaultEngine, EngineUsage::Internal});             // internal usage
+
+    if (hwInfo.capabilityTable.blitterOperationsSupported) {
+        if (hwInfo.featureTable.ftrBcsInfo.test(0)) {
+            engines.push_back({aub_stream::ENGINE_BCS, EngineUsage::Regular});
+        }
     }
 
     return engines;
 };
 
 template <>
-EngineGroupType HwHelperHw<Family>::getEngineGroupType(aub_stream::EngineType engineType, const HardwareInfo &hwInfo) const {
+EngineGroupType HwHelperHw<Family>::getEngineGroupType(aub_stream::EngineType engineType, EngineUsage engineUsage, const HardwareInfo &hwInfo) const {
     switch (engineType) {
     case aub_stream::ENGINE_RCS:
         return EngineGroupType::RenderCompute;
@@ -210,20 +113,6 @@ EngineGroupType HwHelperHw<Family>::getEngineGroupType(aub_stream::EngineType en
         return EngineGroupType::Copy;
     default:
         UNRECOVERABLE_IF(true);
-    }
-}
-
-template <>
-void MemorySynchronizationCommands<Family>::addPipeControlWA(LinearStream &commandStream, uint64_t gpuAddress, const HardwareInfo &hwInfo) {
-    using PIPE_CONTROL = typename Family::PIPE_CONTROL;
-    if (Gen12LPHelpers::pipeControlWaRequired(hwInfo.platform.eProductFamily)) {
-        HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-        if (hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_B, hwInfo)) {
-            PIPE_CONTROL cmd = Family::cmdInitPipeControl;
-            cmd.setCommandStreamerStallEnable(true);
-            auto pipeControl = static_cast<Family::PIPE_CONTROL *>(commandStream.getSpace(sizeof(PIPE_CONTROL)));
-            *pipeControl = cmd;
-        }
     }
 }
 
@@ -273,29 +162,33 @@ uint32_t HwHelperHw<Family>::getMocsIndex(const GmmHelper &gmmHelper, bool l3ena
 }
 
 template <>
-bool MemorySynchronizationCommands<TGLLPFamily>::isPipeControlWArequired(const HardwareInfo &hwInfo) {
-    HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-    return (Gen12LPHelpers::pipeControlWaRequired(hwInfo.platform.eProductFamily)) && hwHelper.isWorkaroundRequired(REVISION_A0, REVISION_B, hwInfo);
+bool MemorySynchronizationCommands<Family>::isPipeControlWArequired(const HardwareInfo &hwInfo) {
+    return HwInfoConfig::get(hwInfo.platform.eProductFamily)->pipeControlWARequired(hwInfo);
 }
 
 template <>
-bool MemorySynchronizationCommands<TGLLPFamily>::isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo) {
-    return MemorySynchronizationCommands<TGLLPFamily>::isPipeControlWArequired(hwInfo);
+bool MemorySynchronizationCommands<Family>::isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo) {
+    return MemorySynchronizationCommands<Family>::isPipeControlWArequired(hwInfo);
 }
 
 template <>
-void HwHelperHw<TGLLPFamily>::setExtraAllocationData(AllocationData &allocationData, const AllocationProperties &properties, const HardwareInfo &hwInfo) const {
-    HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-    if (hwHelper.getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed) {
+void HwHelperHw<Family>::setExtraAllocationData(AllocationData &allocationData, const AllocationProperties &properties, const HardwareInfo &hwInfo) const {
+    const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    if (hwInfoConfig.getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed) {
         if (GraphicsAllocation::isCpuAccessRequired(properties.allocationType)) {
             allocationData.flags.useSystemMemory = true;
         }
     }
-    if (IGFX_DG1 == hwInfo.platform.eProductFamily) {
-        if (properties.allocationType == GraphicsAllocation::AllocationType::BUFFER) {
+    if (HwInfoConfig::get(hwInfo.platform.eProductFamily)->isStorageInfoAdjustmentRequired()) {
+        if (properties.allocationType == AllocationType::BUFFER && !properties.flags.preferCompressed && !properties.flags.shareable) {
             allocationData.storageInfo.isLockable = true;
         }
     }
+}
+
+template <>
+bool HwHelperHw<Family>::forceNonGpuCoherencyWA(bool requiresCoherency) const {
+    return false;
 }
 
 template class HwHelperHw<Family>;

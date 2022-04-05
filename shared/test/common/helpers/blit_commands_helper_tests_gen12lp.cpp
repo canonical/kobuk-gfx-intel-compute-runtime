@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,9 +10,8 @@
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/helpers/blit_commands_helper_tests.inl"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_gmm.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
-
-#include "opencl/test/unit_test/mocks/mock_gmm.h"
 
 #include "gtest/gtest.h"
 
@@ -23,53 +22,53 @@ using namespace NEO;
 using BlitTests = Test<DeviceFixture>;
 
 HWTEST2_F(BlitTests, givenOneBytePerPixelWhenAppendColorDepthThenCorrectDepthIsSet, IsGen12LP) {
-    using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
-    auto bltCmd = FamilyType::cmdInitXyCopyBlt;
+    using XY_BLOCK_COPY_BLT = typename FamilyType::XY_BLOCK_COPY_BLT;
+    auto bltCmd = FamilyType::cmdInitXyBlockCopyBlt;
     BlitProperties properties = {};
     properties.bytesPerPixel = 1;
     BlitCommandsHelper<FamilyType>::appendColorDepth(properties, bltCmd);
-    EXPECT_EQ(bltCmd.getColorDepth(), XY_COPY_BLT::COLOR_DEPTH::COLOR_DEPTH_8_BIT_COLOR);
+    EXPECT_EQ(bltCmd.getColorDepth(), XY_BLOCK_COPY_BLT::COLOR_DEPTH::COLOR_DEPTH_8_BIT_COLOR);
 }
 
 HWTEST2_F(BlitTests, givenTwoBytePerPixelWhenAppendColorDepthThenCorrectDepthIsSet, IsGen12LP) {
-    using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
-    auto bltCmd = FamilyType::cmdInitXyCopyBlt;
+    using XY_BLOCK_COPY_BLT = typename FamilyType::XY_BLOCK_COPY_BLT;
+    auto bltCmd = FamilyType::cmdInitXyBlockCopyBlt;
     BlitProperties properties = {};
     properties.bytesPerPixel = 2;
     BlitCommandsHelper<FamilyType>::appendColorDepth(properties, bltCmd);
-    EXPECT_EQ(bltCmd.getColorDepth(), XY_COPY_BLT::COLOR_DEPTH::COLOR_DEPTH_16_BIT_COLOR);
+    EXPECT_EQ(bltCmd.getColorDepth(), XY_BLOCK_COPY_BLT::COLOR_DEPTH::COLOR_DEPTH_16_BIT_COLOR);
 }
 
 HWTEST2_F(BlitTests, givenFourBytePerPixelWhenAppendColorDepthThenCorrectDepthIsSet, IsGen12LP) {
-    using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
-    auto bltCmd = FamilyType::cmdInitXyCopyBlt;
+    using XY_BLOCK_COPY_BLT = typename FamilyType::XY_BLOCK_COPY_BLT;
+    auto bltCmd = FamilyType::cmdInitXyBlockCopyBlt;
     BlitProperties properties = {};
     properties.bytesPerPixel = 4;
     BlitCommandsHelper<FamilyType>::appendColorDepth(properties, bltCmd);
-    EXPECT_EQ(bltCmd.getColorDepth(), XY_COPY_BLT::COLOR_DEPTH::COLOR_DEPTH_32_BIT_COLOR);
+    EXPECT_EQ(bltCmd.getColorDepth(), XY_BLOCK_COPY_BLT::COLOR_DEPTH::COLOR_DEPTH_32_BIT_COLOR);
 }
 
 HWTEST2_F(BlitTests, givenEightBytePerPixelWhenAppendColorDepthThenCorrectDepthIsSet, IsGen12LP) {
-    using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
-    auto bltCmd = FamilyType::cmdInitXyCopyBlt;
+    using XY_BLOCK_COPY_BLT = typename FamilyType::XY_BLOCK_COPY_BLT;
+    auto bltCmd = FamilyType::cmdInitXyBlockCopyBlt;
     BlitProperties properties = {};
     properties.bytesPerPixel = 8;
     BlitCommandsHelper<FamilyType>::appendColorDepth(properties, bltCmd);
-    EXPECT_EQ(bltCmd.getColorDepth(), XY_COPY_BLT::COLOR_DEPTH::COLOR_DEPTH_64_BIT_COLOR);
+    EXPECT_EQ(bltCmd.getColorDepth(), XY_BLOCK_COPY_BLT::COLOR_DEPTH::COLOR_DEPTH_64_BIT_COLOR);
 }
 
 HWTEST2_F(BlitTests, givenSixteenBytePerPixelWhenAppendColorDepthThenCorrectDepthIsSet, IsGen12LP) {
-    using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
-    auto bltCmd = FamilyType::cmdInitXyCopyBlt;
+    using XY_BLOCK_COPY_BLT = typename FamilyType::XY_BLOCK_COPY_BLT;
+    auto bltCmd = FamilyType::cmdInitXyBlockCopyBlt;
     BlitProperties properties = {};
     properties.bytesPerPixel = 16;
     BlitCommandsHelper<FamilyType>::appendColorDepth(properties, bltCmd);
-    EXPECT_EQ(bltCmd.getColorDepth(), XY_COPY_BLT::COLOR_DEPTH::COLOR_DEPTH_128_BIT_COLOR);
+    EXPECT_EQ(bltCmd.getColorDepth(), XY_BLOCK_COPY_BLT::COLOR_DEPTH::COLOR_DEPTH_128_BIT_COLOR);
 }
 
 HWTEST2_F(BlitTests, givenIncorrectBytePerPixelWhenAppendColorDepthThenAbortIsThrown, IsGen12LP) {
-    using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
-    auto bltCmd = FamilyType::cmdInitXyCopyBlt;
+    using XY_BLOCK_COPY_BLT = typename FamilyType::XY_BLOCK_COPY_BLT;
+    auto bltCmd = FamilyType::cmdInitXyBlockCopyBlt;
     BlitProperties properties = {};
     properties.bytesPerPixel = 48;
     EXPECT_THROW(BlitCommandsHelper<FamilyType>::appendColorDepth(properties, bltCmd), std::exception);
@@ -77,11 +76,11 @@ HWTEST2_F(BlitTests, givenIncorrectBytePerPixelWhenAppendColorDepthThenAbortIsTh
 
 HWTEST2_F(BlitTests, givenSrcAndDestinationImagesWhenAppendSliceOffsetsThenAdressAreCorectOffseted, IsGen12LP) {
     using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
-    auto gmm = std::make_unique<MockGmm>();
-    MockGraphicsAllocation mockAllocationSrc(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    auto gmm = std::make_unique<MockGmm>(pDevice->getGmmClientContext());
+    MockGraphicsAllocation mockAllocationSrc(0, AllocationType::INTERNAL_HOST_MEMORY,
                                              reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                              MemoryPool::System4KBPages);
-    MockGraphicsAllocation mockAllocationDst(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocationDst(0, AllocationType::INTERNAL_HOST_MEMORY,
                                              reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                              MemoryPool::System4KBPages);
     mockAllocationSrc.setGmm(gmm.get(), 0);
@@ -116,10 +115,10 @@ HWTEST2_F(BlitTests, givenSrcAndDestinationImagesWhenAppendSliceOffsetsThenAdres
 HWTEST2_F(BlitTests, givenInputAndDefaultSlicePitchWhenAppendBlitCommandsForImagesThenSlicePitchesAreCorrect, IsGen12LP) {
     using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
 
-    MockGraphicsAllocation mockAllocationSrc(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocationSrc(0, AllocationType::INTERNAL_HOST_MEMORY,
                                              reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                              MemoryPool::System4KBPages);
-    MockGraphicsAllocation mockAllocationDst(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocationDst(0, AllocationType::INTERNAL_HOST_MEMORY,
                                              reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                              MemoryPool::System4KBPages);
     auto bltCmd = FamilyType::cmdInitXyCopyBlt;
@@ -174,16 +173,16 @@ struct MyMockResourecInfo : public GmmResourceInfo {
 
 HWTEST2_F(BlitTests, givenTiledSrcAndDestinationImagesWhenAppendImageCommandsThenPitchIsValueFromGmm, IsGen12LP) {
     using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
-    auto gmm = std::make_unique<MockGmm>();
+    auto gmm = std::make_unique<MockGmm>(pDevice->getGmmClientContext());
     GMM_RESCREATE_PARAMS gmmParams = {};
     auto myResourecInfo = std::make_unique<MyMockResourecInfo>(pDevice->getRootDeviceEnvironment().getGmmClientContext(), &gmmParams);
     myResourecInfo->pitch = 0x100;
     myResourecInfo->flags.Info.TiledY = 1;
     gmm->gmmResourceInfo.reset(myResourecInfo.release());
-    MockGraphicsAllocation mockAllocationSrc(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocationSrc(0, AllocationType::INTERNAL_HOST_MEMORY,
                                              reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                              MemoryPool::System4KBPages);
-    MockGraphicsAllocation mockAllocationDst(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocationDst(0, AllocationType::INTERNAL_HOST_MEMORY,
                                              reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                              MemoryPool::System4KBPages);
     mockAllocationSrc.setGmm(gmm.get(), 0);
@@ -205,16 +204,16 @@ HWTEST2_F(BlitTests, givenTiledSrcAndDestinationImagesWhenAppendImageCommandsThe
 
 HWTEST2_F(BlitTests, givenLinearSrcAndDestinationImagesWhenAppendImageCommandsThenPitchIsValueFromProperties, IsGen12LP) {
     using XY_COPY_BLT = typename FamilyType::XY_COPY_BLT;
-    auto gmm = std::make_unique<MockGmm>();
+    auto gmm = std::make_unique<MockGmm>(pDevice->getGmmClientContext());
     GMM_RESCREATE_PARAMS gmmParams = {};
     auto myResourecInfo = std::make_unique<MyMockResourecInfo>(pDevice->getRootDeviceEnvironment().getGmmClientContext(), &gmmParams);
     myResourecInfo->pitch = 0x100;
     myResourecInfo->flags.Info.Linear = 1;
     gmm->gmmResourceInfo.reset(myResourecInfo.release());
-    MockGraphicsAllocation mockAllocationSrc(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocationSrc(0, AllocationType::INTERNAL_HOST_MEMORY,
                                              reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                              MemoryPool::System4KBPages);
-    MockGraphicsAllocation mockAllocationDst(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+    MockGraphicsAllocation mockAllocationDst(0, AllocationType::INTERNAL_HOST_MEMORY,
                                              reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                              MemoryPool::System4KBPages);
     mockAllocationSrc.setGmm(gmm.get(), 0);
@@ -256,7 +255,7 @@ HWTEST2_F(BlitTests, givenGen12LpPlatformWhenDispatchPreBlitCommandThenMiFlushDw
     auto miFlushBuffer = std::make_unique<MI_FLUSH_DW>();
     LinearStream linearStream(miFlushBuffer.get(), EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite());
 
-    BlitCommandsHelper<FamilyType>::dispatchPreBlitCommand(linearStream);
+    BlitCommandsHelper<FamilyType>::dispatchPreBlitCommand(linearStream, *defaultHwInfo);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(linearStream);

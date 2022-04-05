@@ -9,8 +9,7 @@
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/fixtures/device_fixture.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 
@@ -147,7 +146,7 @@ HWTEST_F(CommandEncoderMathTest, WhenReservingCommandThenBitfieldSetCorrectly) {
     GenCmdList commands;
     CommandContainer cmdContainer;
 
-    cmdContainer.initialize(pDevice);
+    cmdContainer.initialize(pDevice, nullptr);
 
     EncodeMath<FamilyType>::commandReserve(cmdContainer);
 
@@ -177,7 +176,7 @@ HWTEST_F(CommandEncoderMathTest, givenOffsetAndValueWhenEncodeBitwiseAndValIsCal
 
     GenCmdList commands;
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice);
+    cmdContainer.initialize(pDevice, nullptr);
     constexpr uint32_t regOffset = 0x2000u;
     constexpr uint32_t immVal = 0xbaau;
     constexpr uint64_t dstAddress = 0xDEADCAF0u;
@@ -223,13 +222,13 @@ HWTEST_F(CommandEncoderMathTest, WhenSettingGroupSizeIndirectThenCommandsAreCorr
     using MI_STORE_REGISTER_MEM = typename FamilyType::MI_STORE_REGISTER_MEM;
 
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice);
+    cmdContainer.initialize(pDevice, nullptr);
 
     CrossThreadDataOffset offsets[3] = {0, sizeof(uint32_t), 2 * sizeof(uint32_t)};
     uint32_t crossThreadAdress[3] = {};
     uint32_t lws[3] = {2, 1, 1};
 
-    EncodeIndirectParams<FamilyType>::setGlobalWorkSizeIndirect(cmdContainer, offsets, crossThreadAdress, lws);
+    EncodeIndirectParams<FamilyType>::setGlobalWorkSizeIndirect(cmdContainer, offsets, reinterpret_cast<uint64_t>(crossThreadAdress), lws);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer.getCommandStream()->getCpuBase(), 0), cmdContainer.getCommandStream()->getUsed());
@@ -249,12 +248,12 @@ HWTEST_F(CommandEncoderMathTest, WhenSettingGroupCountIndirectThenCommandsAreCor
     using MI_STORE_REGISTER_MEM = typename FamilyType::MI_STORE_REGISTER_MEM;
 
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice);
+    cmdContainer.initialize(pDevice, nullptr);
 
     CrossThreadDataOffset offsets[3] = {0, sizeof(uint32_t), 2 * sizeof(uint32_t)};
     uint32_t crossThreadAdress[3] = {};
 
-    EncodeIndirectParams<FamilyType>::setGroupCountIndirect(cmdContainer, offsets, crossThreadAdress);
+    EncodeIndirectParams<FamilyType>::setGroupCountIndirect(cmdContainer, offsets, reinterpret_cast<uint64_t>(crossThreadAdress));
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer.getCommandStream()->getCpuBase(), 0), cmdContainer.getCommandStream()->getUsed());

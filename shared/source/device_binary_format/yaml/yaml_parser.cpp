@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -22,6 +22,7 @@ std::string constructYamlError(size_t lineNumber, const char *lineBeg, const cha
 }
 
 inline Node &addNode(NodesCache &outNodes, Node &parent) {
+    UNRECOVERABLE_IF(outNodes.size() >= outNodes.capacity()); // resize must not grow
     parent.firstChildId = static_cast<NodeId>(outNodes.size());
     parent.lastChildId = static_cast<NodeId>(outNodes.size());
     outNodes.resize(outNodes.size() + 1);
@@ -33,6 +34,7 @@ inline Node &addNode(NodesCache &outNodes, Node &parent) {
 }
 
 inline Node &addNode(NodesCache &outNodes, Node &prevSibling, Node &parent) {
+    UNRECOVERABLE_IF(outNodes.size() >= outNodes.capacity()); // resize must not grow
     prevSibling.nextSiblingId = static_cast<NodeId>(outNodes.size());
     outNodes.resize(outNodes.size() + 1);
     auto &curr = *outNodes.rbegin();
@@ -106,6 +108,43 @@ bool tokenizeEndLine(ConstStringRef text, LinesCache &outLines, TokensCache &out
     return true;
 }
 
+bool isValidInlineCollectionFormat(const char *context, const char *contextEnd) {
+    auto consumeAlphaNum = [](const char *&text) {
+        while (isAlphaNumeric(*text)) {
+            text++;
+        }
+    };
+
+    bool endNum = false;
+    bool endCollection = false;
+    context++; // skip '['
+    while (context < contextEnd && *context != '\n') {
+        if (isWhitespace(*context)) {
+            context++;
+        } else if (false == endNum) {
+            if (isAlphaNumeric(*context)) {
+                consumeAlphaNum(context);
+                endNum = true;
+            } else {
+                return false;
+            }
+        } else if (false == endCollection) {
+            if (*context == ',') {
+                context++;
+                endNum = false;
+            } else if (*context == ']') {
+                context++;
+                endCollection = true;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    return endCollection;
+}
+
 bool tokenize(ConstStringRef text, LinesCache &outLines, TokensCache &outTokens, std::string &outErrReason, std::string &outWarning) {
     if (text.empty()) {
         outWarning.append("NEO::Yaml : input text is empty\n");
@@ -116,6 +155,7 @@ bool tokenize(ConstStringRef text, LinesCache &outLines, TokensCache &outTokens,
     context.isParsingIdent = true;
 
     while (context.pos < context.end) {
+        reserveBasedOnEstimates(outTokens, text.begin(), text.end(), context.pos);
         switch (context.pos[0]) {
         case ' ':
             context.lineIndent += context.isParsingIdent ? 1 : 0;
@@ -149,6 +189,7 @@ bool tokenize(ConstStringRef text, LinesCache &outLines, TokensCache &outTokens,
             break;
         }
         case '\n': {
+            reserveBasedOnEstimates(outLines, text.begin(), text.end(), context.pos);
             if (false == tokenizeEndLine(text, outLines, outTokens, outErrReason, outWarning, context)) {
                 return false;
             }
@@ -195,12 +236,34 @@ bool tokenize(ConstStringRef text, LinesCache &outLines, TokensCache &outTokens,
             context.isParsingIdent = false;
             break;
         }
+        case '[':
+            if (false == isValidInlineCollectionFormat(context.pos, text.end())) {
+                outErrReason = constructYamlError(outLines.size(), context.lineBeginPos, context.pos, inlineCollectionYamlErrorMsg.data());
+                return false;
+            }
+            context.lineTraits.hasInlineDataMarkers = true;
+            outTokens.push_back(Token(ConstStringRef(context.pos, 1), Token::CollectionBeg));
+            ++context.pos;
+            break;
+        case ']':
+            if (false == context.lineTraits.hasInlineDataMarkers) {
+                outErrReason = constructYamlError(outLines.size(), context.lineBeginPos, context.pos, inlineCollectionYamlErrorMsg.data());
+                return false;
+            }
+            outTokens.push_back(Token(ConstStringRef(context.pos, 1), Token::CollectionEnd));
+            ++context.pos;
+            break;
+        case ',':
+            if (false == context.lineTraits.hasInlineDataMarkers) {
+                outErrReason = constructYamlError(outLines.size(), context.lineBeginPos, context.pos, inlineCollectionYamlErrorMsg.data());
+                return false;
+            }
+            outTokens.push_back(Token(ConstStringRef(context.pos, 1), Token::SingleCharacter));
+            ++context.pos;
+            break;
         case '{':
         case '}':
-        case '[':
-        case ']':
-        case ',':
-            outErrReason = constructYamlError(outLines.size(), context.lineBeginPos, context.pos, "NEO::Yaml : Inline collections are not supported yet");
+            outErrReason = constructYamlError(outLines.size(), context.lineBeginPos, context.pos, "NEO::Yaml : Inline dictionaries are not supported");
             return false;
         case ':':
             context.lineTraits.hasDictionaryEntry = true;
@@ -245,6 +308,7 @@ bool tokenize(ConstStringRef text, LinesCache &outLines, TokensCache &outTokens,
 }
 
 void finalizeNode(NodeId nodeId, const TokensCache &tokens, NodesCache &outNodes, std::string &outErrReason, std::string &outWarning) {
+    outNodes.reserve(outNodes.size() + 1);
     auto &node = outNodes[nodeId];
     if (invalidTokenId != node.key) {
         return;
@@ -290,14 +354,17 @@ bool buildTree(const LinesCache &lines, const TokensCache &tokens, NodesCache &o
             ++lineId;
             continue;
         }
+        reserveBasedOnEstimates(outNodes, static_cast<TokenId>(0), static_cast<TokenId>(tokens.size()), lines[lineId].first);
 
         auto currLineIndent = lines[lineId].indent;
         if (currLineIndent == outNodes.rbegin()->indent) {
+            outNodes.reserve(outNodes.size() + 1);
             auto &prev = *outNodes.rbegin();
             auto &parent = outNodes[*nesting.rbegin()];
             auto &curr = addNode(outNodes, prev, parent);
             curr.indent = currLineIndent;
         } else if (currLineIndent > outNodes.rbegin()->indent) {
+            outNodes.reserve(outNodes.size() + 1);
             auto &parent = *outNodes.rbegin();
             auto &curr = addNode(outNodes, parent);
             curr.indent = currLineIndent;
@@ -313,6 +380,7 @@ bool buildTree(const LinesCache &lines, const TokensCache &tokens, NodesCache &o
                 outErrReason = constructYamlError(lineId, tokens[lines[lineId].first].pos, tokens[lines[lineId].first].pos + 1, "Invalid indentation");
                 return false;
             } else {
+                outNodes.reserve(outNodes.size() + 1);
                 auto &prev = outNodes[*nesting.rbegin()];
                 auto &parent = outNodes[prev.parentId];
                 auto &curr = addNode(outNodes, prev, parent);
@@ -320,29 +388,45 @@ bool buildTree(const LinesCache &lines, const TokensCache &tokens, NodesCache &o
             }
         }
 
-        if (lines[lineId].traits.hasInlineDataMarkers) {
-            outErrReason = "Inline collections are not supported yet\n";
-            return false;
-        } else {
-            if (Line::LineType::DictionaryEntry == lines[lineId].lineType) {
-                auto numTokensInLine = lines[lineId].last - lines[lineId].first + 1;
-                outNodes.rbegin()->key = lines[lineId].first;
-                UNRECOVERABLE_IF(numTokensInLine < 3); // at least key, : and \n
-                if (('#' != tokens[lines[lineId].first + 2]) && ('\n' != tokens[lines[lineId].first + 2])) {
-                    outNodes.rbegin()->value = lines[lineId].first + 2;
+        if (Line::LineType::DictionaryEntry == lines[lineId].lineType) {
+            auto numTokensInLine = lines[lineId].last - lines[lineId].first + 1;
+            outNodes.rbegin()->key = lines[lineId].first;
+            UNRECOVERABLE_IF(numTokensInLine < 3); // at least key, : and \n
+
+            if (lines[lineId].traits.hasInlineDataMarkers) {
+                auto collectionBeg = lines[lineId].first + 2;
+                auto collectionEnd = lines[lineId].last - 1;
+                UNRECOVERABLE_IF(tokens[collectionBeg].traits.type != Token::Type::CollectionBeg || tokens[collectionEnd].traits.type != Token::Type::CollectionEnd);
+
+                auto &parentNode = *outNodes.rbegin();
+                Node *lastAddedNode = nullptr;
+                for (auto currTokenId = collectionBeg + 1; currTokenId < collectionEnd; currTokenId += 2) {
+                    auto tokenType = tokens[currTokenId].traits.type;
+                    UNRECOVERABLE_IF(tokenType != Token::Type::LiteralNumber && tokenType != Token::Type::LiteralString);
+
+                    if (lastAddedNode == nullptr) {
+                        lastAddedNode = &addNode(outNodes, parentNode);
+                    } else {
+                        lastAddedNode = &addNode(outNodes, *lastAddedNode, parentNode);
+                    }
+                    lastAddedNode->indent = currLineIndent + 1;
+                    lastAddedNode->value = currTokenId;
                 }
-            } else {
-                auto numTokensInLine = lines[lineId].last - lines[lineId].first + 1;
-                (void)numTokensInLine;
-                UNRECOVERABLE_IF(numTokensInLine < 2); // at least : - and \n
-                UNRECOVERABLE_IF(Line::LineType::ListEntry != lines[lineId].lineType);
-                UNRECOVERABLE_IF('-' != tokens[lines[lineId].first]);
-                if (('#' != tokens[lines[lineId].first + 1]) && ('\n' != tokens[lines[lineId].first + 1])) {
-                    outNodes.rbegin()->value = lines[lineId].first + 1;
-                }
+                nesting.push_back(parentNode.id);
+            } else if (('#' != tokens[lines[lineId].first + 2]) && ('\n' != tokens[lines[lineId].first + 2])) {
+                outNodes.rbegin()->value = lines[lineId].first + 2;
             }
-            ++lineId;
+        } else {
+            auto numTokensInLine = lines[lineId].last - lines[lineId].first + 1;
+            (void)numTokensInLine;
+            UNRECOVERABLE_IF(numTokensInLine < 2); // at least : - and \n
+            UNRECOVERABLE_IF(Line::LineType::ListEntry != lines[lineId].lineType);
+            UNRECOVERABLE_IF('-' != tokens[lines[lineId].first]);
+            if (('#' != tokens[lines[lineId].first + 1]) && ('\n' != tokens[lines[lineId].first + 1])) {
+                outNodes.rbegin()->value = lines[lineId].first + 1;
+            }
         }
+        ++lineId;
     }
 
     while (false == nesting.empty()) {

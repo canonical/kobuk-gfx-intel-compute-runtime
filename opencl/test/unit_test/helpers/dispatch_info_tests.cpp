@@ -1,16 +1,17 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
+
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/helpers/dispatch_info.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/context_fixture.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
-#include "test.h"
 
 #include "gtest/gtest.h"
 
@@ -265,46 +266,32 @@ TEST_F(DispatchInfoTest, WhenSettingValuesInDispatchInfoThenThoseValuesAreSet) {
     EXPECT_EQ(swgs, dispatchInfo.getStartOfWorkgroups());
 }
 
-TEST_F(DispatchInfoTest, givenKernelWhenMultiDispatchInfoIsCreatedThenQueryParentAndMainKernel) {
-    std::unique_ptr<MockParentKernel> parentKernel(MockParentKernel::create(*pContext));
+TEST_F(DispatchInfoTest, givenKernelWhenMultiDispatchInfoIsCreatedThenQueryMainKernel) {
     std::unique_ptr<MockKernel> baseKernel(MockKernel::create(*pDevice, pProgram));
     std::unique_ptr<MockKernel> builtInKernel(MockKernel::create(*pDevice, pProgram));
     builtInKernel->isBuiltIn = true;
-    DispatchInfo parentKernelDispatchInfo(pClDevice, parentKernel.get(), 1, {1, 1, 1}, {1, 1, 1}, {1, 1, 1});
     DispatchInfo baseDispatchInfo(pClDevice, baseKernel.get(), 1, {1, 1, 1}, {1, 1, 1}, {1, 1, 1});
     DispatchInfo builtInDispatchInfo(pClDevice, builtInKernel.get(), 1, {1, 1, 1}, {1, 1, 1}, {1, 1, 1});
 
     {
-        MultiDispatchInfo multiDispatchInfo(parentKernel.get());
-        multiDispatchInfo.push(parentKernelDispatchInfo);
-        EXPECT_EQ(parentKernel.get(), multiDispatchInfo.peekParentKernel());
-        EXPECT_EQ(parentKernel.get(), multiDispatchInfo.peekMainKernel());
-    }
-
-    {
         MultiDispatchInfo multiDispatchInfo(baseKernel.get());
         multiDispatchInfo.push(builtInDispatchInfo);
-        EXPECT_EQ(nullptr, multiDispatchInfo.peekParentKernel());
         EXPECT_EQ(baseKernel.get(), multiDispatchInfo.peekMainKernel()); // dont pick builtin kernel
 
         multiDispatchInfo.push(baseDispatchInfo);
-        EXPECT_EQ(nullptr, multiDispatchInfo.peekParentKernel());
         EXPECT_EQ(baseKernel.get(), multiDispatchInfo.peekMainKernel());
     }
 
     {
         MultiDispatchInfo multiDispatchInfo;
-        EXPECT_EQ(nullptr, multiDispatchInfo.peekParentKernel());
         EXPECT_EQ(nullptr, multiDispatchInfo.peekMainKernel());
 
         multiDispatchInfo.push(builtInDispatchInfo);
-        EXPECT_EQ(nullptr, multiDispatchInfo.peekParentKernel());
         EXPECT_EQ(builtInKernel.get(), multiDispatchInfo.peekMainKernel());
     }
 
     {
         MultiDispatchInfo multiDispatchInfo;
-        multiDispatchInfo.push(parentKernelDispatchInfo);
         multiDispatchInfo.push(baseDispatchInfo);
         multiDispatchInfo.push(builtInDispatchInfo);
 

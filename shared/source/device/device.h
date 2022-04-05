@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -12,19 +12,19 @@
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/bindless_heaps_helper.h"
 #include "shared/source/helpers/common_types.h"
+#include "shared/source/helpers/definitions/engine_group_types.h"
 #include "shared/source/helpers/engine_control.h"
 #include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/helpers/hw_info.h"
+#include "shared/source/os_interface/hw_info_config.h"
+#include "shared/source/os_interface/performance_counters.h"
 #include "shared/source/program/sync_buffer_handler.h"
-
-#include "opencl/source/os_interface/performance_counters.h"
-
-#include "engine_group_types.h"
 
 namespace NEO {
 class OSTime;
 class SourceLevelDebugger;
 class SubDevice;
+struct PhysicalDevicePciBusInfo;
 
 struct SelectorCopyEngine : NonCopyableOrMovableClass {
     std::atomic<bool> isMainUsed = false;
@@ -33,6 +33,13 @@ struct SelectorCopyEngine : NonCopyableOrMovableClass {
 
 class Device : public ReferenceTrackedObject<Device> {
   public:
+    using EnginesT = std::vector<EngineControl>;
+    struct EngineGroupT {
+        EngineGroupType engineGroupType;
+        EnginesT engines;
+    };
+    using EngineGroupsT = std::vector<EngineGroupT>;
+
     Device &operator=(const Device &) = delete;
     Device(const Device &) = delete;
     ~Device() override;
@@ -56,19 +63,20 @@ class Device : public ReferenceTrackedObject<Device> {
     const DeviceInfo &getDeviceInfo() const;
     EngineControl *tryGetEngine(aub_stream::EngineType engineType, EngineUsage engineUsage);
     EngineControl &getEngine(aub_stream::EngineType engineType, EngineUsage engineUsage);
-    std::vector<std::vector<EngineControl>> &getEngineGroups() {
-        return this->engineGroups;
+    EngineGroupsT &getRegularEngineGroups() {
+        return this->regularEngineGroups;
     }
-    const std::vector<EngineControl> *getNonEmptyEngineGroup(size_t index) const;
-    size_t getIndexOfNonEmptyEngineGroup(EngineGroupType engineGroupType) const;
+    size_t getEngineGroupIndexFromEngineGroupType(EngineGroupType engineGroupType) const;
     EngineControl &getEngine(uint32_t index);
     EngineControl &getDefaultEngine();
+    EngineControl &getNextEngineForCommandQueue();
     EngineControl &getInternalEngine();
+    EngineControl *getInternalCopyEngine();
     SelectorCopyEngine &getSelectorCopyEngine();
     MemoryManager *getMemoryManager() const;
     GmmHelper *getGmmHelper() const;
     GmmClientContext *getGmmClientContext() const;
-    OSTime *getOSTime() const { return osTime.get(); };
+    OSTime *getOSTime() const;
     double getProfilingTimerResolution();
     uint64_t getProfilingTimerClock();
     double getPlatformHostTimerResolution() const;
@@ -79,19 +87,16 @@ class Device : public ReferenceTrackedObject<Device> {
     MOCKABLE_VIRTUAL bool isDebuggerActive() const;
     Debugger *getDebugger() const { return getRootDeviceEnvironment().debugger.get(); }
     NEO::SourceLevelDebugger *getSourceLevelDebugger();
-    const std::vector<EngineControl> &getEngines() const;
+    const EnginesT &getAllEngines() const;
     const std::string getDeviceName(const HardwareInfo &hwInfo) const;
 
     ExecutionEnvironment *getExecutionEnvironment() const { return executionEnvironment; }
     const RootDeviceEnvironment &getRootDeviceEnvironment() const { return *executionEnvironment->rootDeviceEnvironments[getRootDeviceIndex()]; }
     RootDeviceEnvironment &getRootDeviceEnvironmentRef() const { return *executionEnvironment->rootDeviceEnvironments[getRootDeviceIndex()]; }
-    const HardwareCapabilities &getHardwareCapabilities() const { return hardwareCapabilities; }
     bool isFullRangeSvm() const {
         return getRootDeviceEnvironment().isFullRangeSvm();
     }
-    bool areSharedSystemAllocationsAllowed() const {
-        return this->deviceInfo.sharedSystemAllocationsSupport;
-    }
+    bool areSharedSystemAllocationsAllowed() const;
     template <typename SpecializedDeviceT>
     void setSpecializedDevice(SpecializedDeviceT *specializedDevice) {
         this->specializedDevice = reinterpret_cast<uintptr_t>(specializedDevice);
@@ -104,27 +109,35 @@ class Device : public ReferenceTrackedObject<Device> {
     BuiltIns *getBuiltIns() const;
     void allocateSyncBufferHandler();
 
-    virtual uint32_t getRootDeviceIndex() const = 0;
-    uint32_t getNumAvailableDevices() const;
-    virtual Device *getDeviceById(uint32_t deviceId) const;
+    uint32_t getRootDeviceIndex() const {
+        return this->rootDeviceIndex;
+    }
+    uint32_t getNumGenericSubDevices() const;
+    Device *getSubDevice(uint32_t deviceId) const;
+    Device *getNearestGenericSubDevice(uint32_t deviceId);
     virtual Device *getRootDevice() const = 0;
     DeviceBitfield getDeviceBitfield() const { return deviceBitfield; };
     uint32_t getNumSubDevices() const { return numSubDevices; }
     virtual bool isSubDevice() const = 0;
+    bool hasRootCsr() const { return rootCsrCreated; }
+    bool isEngineInstanced() const { return engineInstanced; }
 
     BindlessHeapsHelper *getBindlessHeapsHelper() const;
 
     static decltype(&PerformanceCounters::create) createPerformanceCountersFunc;
     std::unique_ptr<SyncBufferHandler> syncBufferHandler;
     GraphicsAllocation *getRTMemoryBackedBuffer() { return rtMemoryBackedBuffer; }
-    void initializeRayTracing();
-    void reduceMaxMemAllocSize();
+    GraphicsAllocation *getRTDispatchGlobals(uint32_t maxBvhLevels);
+    bool rayTracingIsInitialized() const { return rtMemoryBackedBuffer != nullptr; }
+    void initializeRayTracing(uint32_t maxBvhLevels);
 
-    virtual uint64_t getGlobalMemorySize(uint32_t deviceBitfield) const;
+    uint64_t getGlobalMemorySize(uint32_t deviceBitfield) const;
+    const std::vector<SubDevice *> getSubDevices() const { return subdevices; }
+    bool getUuid(std::array<uint8_t, HwInfoConfig::uuidSize> &uuid);
 
   protected:
     Device() = delete;
-    Device(ExecutionEnvironment *executionEnvironment);
+    Device(ExecutionEnvironment *executionEnvironment, const uint32_t rootDeviceIndex);
 
     MOCKABLE_VIRTUAL void initializeCaps();
 
@@ -141,11 +154,11 @@ class Device : public ReferenceTrackedObject<Device> {
     virtual bool createEngines();
 
     void addEngineToEngineGroup(EngineControl &engine);
-    bool engineSupported(const EngineTypeUsage &engineTypeUsage) const;
     MOCKABLE_VIRTUAL bool createEngine(uint32_t deviceCsrIndex, EngineTypeUsage engineTypeUsage);
     MOCKABLE_VIRTUAL std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const;
     MOCKABLE_VIRTUAL SubDevice *createSubDevice(uint32_t subDeviceIndex);
     MOCKABLE_VIRTUAL SubDevice *createEngineInstancedSubDevice(uint32_t subDeviceIndex, aub_stream::EngineType engineType);
+    MOCKABLE_VIRTUAL size_t getMaxParameterSizeFromIGC() const;
     double getPercentOfGlobalMemoryAvailable() const;
     virtual void createBindlessHeapsHelper() {}
     bool createSubDevices();
@@ -154,15 +167,15 @@ class Device : public ReferenceTrackedObject<Device> {
     virtual bool genericSubDevicesAllowed();
     bool engineInstancedSubDevicesAllowed();
     void setAsEngineInstanced();
+    MOCKABLE_VIRTUAL void allocateRTDispatchGlobals(uint32_t maxBvhLevels);
+    void finalizeRayTracing();
 
     DeviceInfo deviceInfo = {};
 
-    HardwareCapabilities hardwareCapabilities = {};
-    std::unique_ptr<OSTime> osTime;
     std::unique_ptr<PerformanceCounters> performanceCounters;
     std::vector<std::unique_ptr<CommandStreamReceiver>> commandStreamReceivers;
-    std::vector<EngineControl> engines;
-    std::vector<std::vector<EngineControl>> engineGroups;
+    EnginesT allEngines;
+    EngineGroupsT regularEngineGroups;
     std::vector<SubDevice *> subdevices;
 
     PreemptionMode preemptionMode;
@@ -170,8 +183,14 @@ class Device : public ReferenceTrackedObject<Device> {
     aub_stream::EngineType engineInstancedType = aub_stream::EngineType::NUM_ENGINES;
     uint32_t defaultEngineIndex = 0;
     uint32_t numSubDevices = 0;
+    std::atomic_uint32_t regularCommandQueuesCreatedWithinDeviceCount{0};
+    std::bitset<8> availableEnginesForCommandQueueusRoundRobin = 0;
+    uint32_t queuesPerEngineCount = 1;
+    void initializeEngineRoundRobinControls();
     bool hasGenericSubDevices = false;
     bool engineInstanced = false;
+    bool rootCsrCreated = false;
+    const uint32_t rootDeviceIndex;
 
     SelectorCopyEngine selectorCopyEngine = {};
 
@@ -180,11 +199,16 @@ class Device : public ReferenceTrackedObject<Device> {
     uintptr_t specializedDevice = reinterpret_cast<uintptr_t>(nullptr);
 
     GraphicsAllocation *rtMemoryBackedBuffer = nullptr;
-    GraphicsAllocation *rtDispatchGlobals = nullptr;
+    std::vector<GraphicsAllocation *> rtDispatchGlobals;
+    struct {
+        bool isValid = false;
+        std::array<uint8_t, HwInfoConfig::uuidSize> id;
+    } uuid;
+    bool generateUuidFromPciBusInfo(const PhysicalDevicePciBusInfo &pciBusInfo, std::array<uint8_t, HwInfoConfig::uuidSize> &uuid);
 };
 
 inline EngineControl &Device::getDefaultEngine() {
-    return engines[defaultEngineIndex];
+    return allEngines[defaultEngineIndex];
 }
 
 inline MemoryManager *Device::getMemoryManager() const {

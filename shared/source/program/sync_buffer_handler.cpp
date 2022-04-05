@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -28,8 +28,9 @@ void SyncBufferHandler::makeResident(CommandStreamReceiver &csr) {
 
 void SyncBufferHandler::allocateNewBuffer() {
     AllocationProperties allocationProperties{device.getRootDeviceIndex(), true, bufferSize,
-                                              GraphicsAllocation::AllocationType::LINEAR_STREAM,
-                                              false, false, device.getDeviceBitfield()};
+                                              AllocationType::LINEAR_STREAM,
+                                              (device.getNumGenericSubDevices() > 1u), /* multiOsContextCapable */
+                                              false, device.getDeviceBitfield()};
     graphicsAllocation = memoryManager.allocateGraphicsMemoryWithProperties(allocationProperties);
     UNRECOVERABLE_IF(graphicsAllocation == nullptr);
 

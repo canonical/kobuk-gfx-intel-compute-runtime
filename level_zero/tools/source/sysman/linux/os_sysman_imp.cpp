@@ -9,55 +9,77 @@
 
 #include "level_zero/tools/source/sysman/linux/fs_access.h"
 
+#include "sysman/linux/firmware_util/firmware_util.h"
+
 namespace L0 {
 
 ze_result_t LinuxSysmanImp::init() {
-    pXmlParser = XmlParser::create();
-    pFwUtilInterface = FirmwareUtil::create();
     pFsAccess = FsAccess::create();
-    UNRECOVERABLE_IF(nullptr == pFsAccess);
+    DEBUG_BREAK_IF(nullptr == pFsAccess);
 
-    pProcfsAccess = ProcfsAccess::create();
-    UNRECOVERABLE_IF(nullptr == pProcfsAccess);
+    if (pProcfsAccess == nullptr) {
+        pProcfsAccess = ProcfsAccess::create();
+    }
+    DEBUG_BREAK_IF(nullptr == pProcfsAccess);
 
-    pDevice = Device::fromHandle(pParentSysmanDeviceImp->hCoreDevice);
-    UNRECOVERABLE_IF(nullptr == pDevice);
-    NEO::OSInterface &OsInterface = pDevice->getOsInterface();
-    pDrm = OsInterface.getDriverModel()->as<NEO::Drm>();
+    auto result = initLocalDeviceAndDrmHandles();
+    if (ZE_RESULT_SUCCESS != result) {
+        return result;
+    }
     int myDeviceFd = pDrm->getFileDescriptor();
     std::string myDeviceName;
-    ze_result_t result = pProcfsAccess->getFileName(pProcfsAccess->myProcessId(), myDeviceFd, myDeviceName);
+    result = pProcfsAccess->getFileName(pProcfsAccess->myProcessId(), myDeviceFd, myDeviceName);
     if (ZE_RESULT_SUCCESS != result) {
         return result;
     }
 
-    pSysfsAccess = SysfsAccess::create(myDeviceName);
-    UNRECOVERABLE_IF(nullptr == pSysfsAccess);
+    if (pSysfsAccess == nullptr) {
+        pSysfsAccess = SysfsAccess::create(myDeviceName);
+    }
+    DEBUG_BREAK_IF(nullptr == pSysfsAccess);
 
+    pPmuInterface = PmuInterface::create(this);
+
+    DEBUG_BREAK_IF(nullptr == pPmuInterface);
+
+    return createPmtHandles();
+}
+
+void LinuxSysmanImp::createFwUtilInterface() {
     std::string realRootPath;
-    result = pSysfsAccess->getRealPath("device", realRootPath);
+    auto result = pSysfsAccess->getRealPath("device", realRootPath);
+    if (ZE_RESULT_SUCCESS != result) {
+        return;
+    }
+    auto rootPciPathOfGpuDevice = getPciRootPortDirectoryPath(realRootPath);
+    auto loc = realRootPath.find_last_of('/');
+    pFwUtilInterface = FirmwareUtil::create(realRootPath.substr(loc + 1, std::string::npos));
+}
+
+ze_result_t LinuxSysmanImp::createPmtHandles() {
+    std::string realRootPath;
+    auto result = pSysfsAccess->getRealPath("device", realRootPath);
     if (ZE_RESULT_SUCCESS != result) {
         return result;
     }
     auto rootPciPathOfGpuDevice = getPciRootPortDirectoryPath(realRootPath);
     PlatformMonitoringTech::create(pParentSysmanDeviceImp->deviceHandles, pFsAccess, rootPciPathOfGpuDevice, mapOfSubDeviceIdToPmtObject);
-
-    pPmuInterface = PmuInterface::create(this);
-    UNRECOVERABLE_IF(nullptr == pPmuInterface);
-
-    return ZE_RESULT_SUCCESS;
+    return result;
 }
 
 PmuInterface *LinuxSysmanImp::getPmuInterface() {
     return pPmuInterface;
 }
 
-XmlParser *LinuxSysmanImp::getXmlParser() {
-    return pXmlParser;
+FirmwareUtil *LinuxSysmanImp::getFwUtilInterface() {
+    if (pFwUtilInterface == nullptr) {
+        createFwUtilInterface();
+    }
+    return pFwUtilInterface;
 }
 
-FirmwareUtil *LinuxSysmanImp::getFwUtilInterface() {
-    return pFwUtilInterface;
+PRODUCT_FAMILY LinuxSysmanImp::getProductFamily() {
+    return pDevice->getNEODevice()->getHardwareInfo().platform.eProductFamily;
 }
 
 FsAccess &LinuxSysmanImp::getFsAccess() {
@@ -75,9 +97,27 @@ SysfsAccess &LinuxSysmanImp::getSysfsAccess() {
     return *pSysfsAccess;
 }
 
+ze_result_t LinuxSysmanImp::initLocalDeviceAndDrmHandles() {
+    pDevice = Device::fromHandle(pParentSysmanDeviceImp->hCoreDevice);
+    DEBUG_BREAK_IF(nullptr == pDevice);
+    NEO::OSInterface &OsInterface = pDevice->getOsInterface();
+    if (OsInterface.getDriverModel()->getDriverModelType() != NEO::DriverModelType::DRM) {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    }
+    pDrm = OsInterface.getDriverModel()->as<NEO::Drm>();
+    return ZE_RESULT_SUCCESS;
+}
+
 NEO::Drm &LinuxSysmanImp::getDrm() {
+    if (pDrm == nullptr) {
+        initLocalDeviceAndDrmHandles();
+    }
     UNRECOVERABLE_IF(nullptr == pDrm);
     return *pDrm;
+}
+
+void LinuxSysmanImp::releaseLocalDrmHandle() {
+    pDrm = nullptr;
 }
 
 Device *LinuxSysmanImp::getDeviceHandle() {
@@ -126,6 +166,12 @@ void LinuxSysmanImp::releasePmtObject() {
     }
     mapOfSubDeviceIdToPmtObject.clear();
 }
+void LinuxSysmanImp::releaseFwUtilInterface() {
+    if (nullptr != pFwUtilInterface) {
+        delete pFwUtilInterface;
+        pFwUtilInterface = nullptr;
+    }
+}
 
 LinuxSysmanImp::~LinuxSysmanImp() {
     if (nullptr != pSysfsAccess) {
@@ -140,18 +186,11 @@ LinuxSysmanImp::~LinuxSysmanImp() {
         delete pFsAccess;
         pFsAccess = nullptr;
     }
-    if (nullptr != pXmlParser) {
-        delete pXmlParser;
-        pXmlParser = nullptr;
-    }
-    if (nullptr != pFwUtilInterface) {
-        delete pFwUtilInterface;
-        pFwUtilInterface = nullptr;
-    }
     if (nullptr != pPmuInterface) {
         delete pPmuInterface;
         pPmuInterface = nullptr;
     }
+    releaseFwUtilInterface();
     releasePmtObject();
 }
 

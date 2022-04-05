@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/helpers/blit_commands_helper.h"
+#include "shared/source/utilities/wait_util.h"
 
 #include "opencl/source/built_ins/aux_translation_builtin.h"
 #include "opencl/source/command_queue/enqueue_barrier.h"
@@ -134,6 +135,40 @@ bool CommandQueueHw<Family>::isCacheFlushForBcsRequired() const {
     return true;
 }
 
+template <typename TSPacketType>
+inline bool waitForTimestampsWithinContainer(TimestampPacketContainer *container, CommandStreamReceiver &csr) {
+    bool waited = false;
+
+    if (container) {
+        for (const auto &timestamp : container->peekNodes()) {
+            for (uint32_t i = 0; i < timestamp->getPacketsUsed(); i++) {
+                while (timestamp->getContextEndValue(i) == 1) {
+                    csr.downloadAllocation(*timestamp->getBaseGraphicsAllocation()->getGraphicsAllocation(csr.getRootDeviceIndex()));
+                    WaitUtils::waitFunctionWithPredicate<const TSPacketType>(static_cast<TSPacketType const *>(timestamp->getContextEndAddress(i)), 1u, std::not_equal_to<TSPacketType>());
+                }
+                waited = true;
+            }
+        }
+    }
+
+    return waited;
+}
+
+template <typename Family>
+bool CommandQueueHw<Family>::waitForTimestamps(uint32_t taskCount) {
+    using TSPacketType = typename Family::TimestampPacketType;
+    bool waited = false;
+
+    if (isWaitForTimestampsEnabled()) {
+        waited = waitForTimestampsWithinContainer<TSPacketType>(timestampPacketContainer.get(), getGpgpuCommandStreamReceiver());
+        if (isOOQEnabled()) {
+            waitForTimestampsWithinContainer<TSPacketType>(deferredTimestampPackets.get(), getGpgpuCommandStreamReceiver());
+        }
+    }
+
+    return waited;
+}
+
 template <typename Family>
 void CommandQueueHw<Family>::setupBlitAuxTranslation(MultiDispatchInfo &multiDispatchInfo) {
     multiDispatchInfo.begin()->dispatchInitCommands.registerMethod(
@@ -155,12 +190,14 @@ bool CommandQueueHw<Family>::obtainTimestampPacketForCacheFlush(bool isCacheFlus
 }
 
 template <typename Family>
-bool CommandQueueHw<Family>::isGpgpuSubmissionForBcsRequired(bool queueBlocked) const {
-    if (queueBlocked) {
+bool CommandQueueHw<Family>::isGpgpuSubmissionForBcsRequired(bool queueBlocked, TimestampPacketDependencies &timestampPacketDependencies) const {
+    if (queueBlocked || timestampPacketDependencies.barrierNodes.peekNodes().size() > 0u) {
         return true;
     }
 
-    bool required = (latestSentEnqueueType != EnqueueProperties::Operation::Blit) && (latestSentEnqueueType != EnqueueProperties::Operation::None);
+    bool required = (latestSentEnqueueType != EnqueueProperties::Operation::Blit) &&
+                    (latestSentEnqueueType != EnqueueProperties::Operation::None) &&
+                    (isCacheFlushForBcsRequired() || !getGpgpuCommandStreamReceiver().isLatestTaskCountFlushed());
 
     if (DebugManager.flags.ForceGpgpuSubmissionForBcsEnqueue.get() == 1) {
         required = true;

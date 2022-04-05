@@ -3,24 +3,24 @@ components:
     dest_dir: gmmlib
     type: git
     branch: gmmlib
-    revision: intel-gmmlib-21.2.1
+    revision: intel-gmmlib-22.0.2
     repository: https://github.com/intel/gmmlib.git
   igc:
     dest_dir: igc
     type: git
     branch: igc
-    revision: ab89555dac67c25316a9a214600887376842f417
+    revision: f7e609a51755cc46e91431f501fcfbfdd19d97b2
     repository: https://github.com/intel/intelgraphicscompiler
   igsc:
     dest_dir: igsc
     type: git
     branch: igsc
-    revision: V0.2.3
+    revision: V0.2.4-5
     repository: https://github.com/intel/igsc.git
   infra:
-    branch: infra
+    branch: master
     dest_dir: infra
-    revision: ca0f1ceef319d7f8d4d6b4e3237c61cc67c69348
+    revision: 8c742efc96cb8a0a85fd5e089fe95fbd5f8fdc36
     type: git
   internal:
     branch: master
@@ -30,14 +30,14 @@ components:
   kmdaf:
     branch: kmdaf
     dest_dir: kmdaf
-    revision: f3bb2f527767ec4e032fab6b8bf460dbc7531f4a
+    revision: 0485b5dc951ddd09298c68dd7e520f51ba6db569
     type: git
   level_zero:
-    branch: master
     dest_dir: level_zero
-    repository: https://github.com/oneapi-src/level-zero
-    revision: v1.4.1
     type: git
+    branch: master
+    revision: v1.7.15
+    repository: https://github.com/oneapi-src/level-zero
   libva:
     dest_dir: libva
     type: git
@@ -48,11 +48,11 @@ components:
     dest_dir: wdk
     type: git
     branch: wdk
-    revision: ea9d6f9b757307608e21f780bbd59e1345a3fdba-1746
+    revision: 5e00a0c1148dfea10b3a934521597896c8e7d32d-1885
   wsl:
     branch: wsl
     dest_dir: wsl
     revision: 56430997dac34ca0e9e18c177636234cac26ad54
     type: git
-converter: M-1750
+converter: M-1885
 version: '1'

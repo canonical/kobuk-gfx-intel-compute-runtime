@@ -53,7 +53,7 @@ SurfaceInfo *getDumpSurfaceInfo(GraphicsAllocation &gfxAllocation, DumpFormat du
         surfaceInfo->format = SURFACE_FORMAT::SURFACE_FORMAT_RAW;
         surfaceInfo->tilingType = RENDER_SURFACE_STATE::TILE_MODE_LINEAR;
         surfaceInfo->surftype = RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_BUFFER;
-        surfaceInfo->compressed = GraphicsAllocation::AllocationType::BUFFER_COMPRESSED == gfxAllocation.getAllocationType();
+        surfaceInfo->compressed = gfxAllocation.isCompressionEnabled();
         surfaceInfo->dumpType = (AubAllocDump::DumpFormat::BUFFER_TRE == dumpFormat) ? dumpType::tre : dumpType::bin;
     } else if (isImageDumpFormat(dumpFormat)) {
         auto gmm = gfxAllocation.getDefaultGmm();
@@ -68,7 +68,7 @@ SurfaceInfo *getDumpSurfaceInfo(GraphicsAllocation &gfxAllocation, DumpFormat du
         surfaceInfo->format = gmm->gmmResourceInfo->getResourceFormatSurfaceState();
         surfaceInfo->tilingType = gmm->gmmResourceInfo->getTileModeSurfaceState();
         surfaceInfo->surftype = getImageSurfaceTypeFromGmmResourceType<GfxFamily>(gmm->gmmResourceInfo->getResourceType());
-        surfaceInfo->compressed = gmm->isCompressionEnabled;
+        surfaceInfo->compressed = gfxAllocation.isCompressionEnabled();
         surfaceInfo->dumpType = (AubAllocDump::DumpFormat::IMAGE_TRE == dumpFormat) ? dumpType::tre : dumpType::bmp;
     }
 
@@ -163,7 +163,7 @@ template <typename GfxFamily>
 void dumpImageInTreFormat(GraphicsAllocation &gfxAllocation, AubMemDump::AubFileStream *stream, uint32_t context) {
     using RENDER_SURFACE_STATE = typename GfxFamily::RENDER_SURFACE_STATE;
     auto gmm = gfxAllocation.getDefaultGmm();
-    if ((gmm->gmmResourceInfo->getNumSamples() > 1) || (gmm->isCompressionEnabled)) {
+    if ((gmm->gmmResourceInfo->getNumSamples() > 1) || (gfxAllocation.isCompressionEnabled())) {
         DEBUG_BREAK_IF(true); //unsupported
         return;
     }

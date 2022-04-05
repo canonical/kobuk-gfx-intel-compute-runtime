@@ -15,6 +15,7 @@
 namespace NEO {
 namespace IoFunctions {
 extern uint32_t mockFopenCalled;
+extern uint32_t failAfterNFopenCount;
 extern FILE *mockFopenReturned;
 extern uint32_t mockVfptrinfCalled;
 extern uint32_t mockFcloseCalled;
@@ -25,11 +26,16 @@ extern long int mockFtellReturn;
 extern uint32_t mockRewindCalled;
 extern uint32_t mockFreadCalled;
 extern size_t mockFreadReturn;
+extern uint32_t mockFwriteCalled;
+extern size_t mockFwriteReturn;
 
 extern std::unordered_map<std::string, std::string> *mockableEnvValues;
 
 inline FILE *mockFopen(const char *filename, const char *mode) {
     mockFopenCalled++;
+    if (failAfterNFopenCount > 0 && failAfterNFopenCount < mockFopenCalled) {
+        return NULL;
+    }
     return mockFopenReturned;
 }
 
@@ -68,6 +74,11 @@ inline void mockRewind(FILE *stream) {
 inline size_t mockFread(void *ptr, size_t size, size_t count, FILE *stream) {
     mockFreadCalled++;
     return mockFreadReturn;
+}
+
+inline size_t mockFwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    mockFwriteCalled++;
+    return mockFwriteReturn;
 }
 
 } // namespace IoFunctions

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -72,6 +72,9 @@ void setHwInfoValuesFromConfig(const uint64_t hwInfoConfig, HardwareInfo &hwInfo
     hwInfoIn.gtSystemInfo.SubSliceCount = subSlicePerSliceCount * sliceCount;
     hwInfoIn.gtSystemInfo.DualSubSliceCount = subSlicePerSliceCount * sliceCount;
     hwInfoIn.gtSystemInfo.EUCount = euPerSubSliceCount * subSlicePerSliceCount * sliceCount;
+    for (uint32_t slice = 0; slice < hwInfoIn.gtSystemInfo.SliceCount; slice++) {
+        hwInfoIn.gtSystemInfo.SliceInfo[slice].Enabled = true;
+    }
 }
 
 bool parseHwInfoConfigString(const std::string &hwInfoConfigStr, uint64_t &hwInfoConfig) {

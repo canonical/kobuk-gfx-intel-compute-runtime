@@ -1,11 +1,13 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "level_zero/tools/source/sysman/linux/firmware_util/firmware_util_imp.h"
+
+#include "shared/source/utilities/directory.h"
 
 namespace L0 {
 const std::string fwUtilLibraryFile = "libigsc.so.0";
@@ -20,6 +22,7 @@ const std::string fwImageOpromInit = "igsc_image_oprom_init";
 const std::string fwImageOpromType = "igsc_image_oprom_type";
 const std::string fwDeviceOpromUpdate = "igsc_device_oprom_update";
 const std::string fwDeviceOpromVersion = "igsc_device_oprom_version";
+const std::string fwDeviceClose = "igsc_device_close";
 
 pIgscDeviceInitByDevice deviceInitByDevice;
 pIgscDeviceGetDeviceInfo deviceGetDeviceInfo;
@@ -32,13 +35,7 @@ pIgscImageOpromInit imageOpromInit;
 pIgscImageOpromType imageOpromType;
 pIgscDeviceOpromUpdate deviceOpromUpdate;
 pIgscDeviceOpromVersion deviceOpromVersion;
-
-template <class T>
-bool FirmwareUtilImp::getSymbolAddr(const std::string name, T &proc) {
-    void *addr = libraryHandle->getProcAddress(name);
-    proc = reinterpret_cast<T>(addr);
-    return nullptr != proc;
-}
+pIgscDeviceClose deviceClose;
 
 bool FirmwareUtilImp::loadEntryPoints() {
     bool ok = getSymbolAddr(fwDeviceInitByDevice, deviceInitByDevice);
@@ -52,6 +49,9 @@ bool FirmwareUtilImp::loadEntryPoints() {
     ok = ok && getSymbolAddr(fwImageOpromType, imageOpromType);
     ok = ok && getSymbolAddr(fwDeviceOpromUpdate, deviceOpromUpdate);
     ok = ok && getSymbolAddr(fwDeviceOpromVersion, deviceOpromVersion);
+    ok = ok && getSymbolAddr(fwDeviceClose, deviceClose);
+    ok = ok && loadEntryPointsExt();
+
     return ok;
 }
 
@@ -68,13 +68,23 @@ ze_result_t FirmwareUtilImp::getFirstDevice(igsc_device_info *info) {
     }
 
     info->name[0] = '\0';
-    ret = deviceItreatorNext(iter, info);
-    if (ret == IGSC_SUCCESS) {
-        deviceItreatorDestroy(iter);
-        return ZE_RESULT_SUCCESS;
-    }
+    do {
+        ret = deviceItreatorNext(iter, info);
+        if (ret != IGSC_SUCCESS) {
+            deviceItreatorDestroy(iter);
+            return ZE_RESULT_ERROR_UNINITIALIZED;
+        }
+        if (info->domain == domain &&
+            info->bus == bus &&
+            info->dev == device &&
+            info->func == function) {
+            fwDevicePath.assign(info->name);
+            break;
+        }
+    } while (1);
+
     deviceItreatorDestroy(iter);
-    return ZE_RESULT_ERROR_UNKNOWN;
+    return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t FirmwareUtilImp::fwDeviceInit() {
@@ -84,8 +94,6 @@ ze_result_t FirmwareUtilImp::fwDeviceInit() {
     if (result != ZE_RESULT_SUCCESS) {
         return result;
     }
-    fwDevicePath.assign(info.name);
-
     ret = deviceInitByDevice(&fwDeviceHandle, fwDevicePath.c_str());
     if (ret != 0) {
         return ZE_RESULT_ERROR_UNINITIALIZED;
@@ -164,17 +172,20 @@ ze_result_t FirmwareUtilImp::fwFlashOprom(void *pImage, uint32_t size) {
     return ZE_RESULT_SUCCESS;
 }
 
-FirmwareUtilImp::FirmwareUtilImp(){};
+FirmwareUtilImp::FirmwareUtilImp(const std::string &pciBDF) {
+    NEO::parseBdfString(pciBDF.c_str(), domain, bus, device, function);
+};
 
 FirmwareUtilImp::~FirmwareUtilImp() {
     if (nullptr != libraryHandle) {
+        deviceClose(&fwDeviceHandle);
         delete libraryHandle;
         libraryHandle = nullptr;
     }
 };
 
-FirmwareUtil *FirmwareUtil::create() {
-    FirmwareUtilImp *pFwUtilImp = new FirmwareUtilImp();
+FirmwareUtil *FirmwareUtil::create(const std::string &pciBDF) {
+    FirmwareUtilImp *pFwUtilImp = new FirmwareUtilImp(pciBDF);
     UNRECOVERABLE_IF(nullptr == pFwUtilImp);
     pFwUtilImp->libraryHandle = NEO::OsLibrary::load(fwUtilLibraryFile);
     if (pFwUtilImp->libraryHandle == nullptr || pFwUtilImp->loadEntryPoints() == false) {

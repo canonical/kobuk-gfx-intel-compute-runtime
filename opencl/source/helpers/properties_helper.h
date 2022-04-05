@@ -17,6 +17,7 @@
 namespace NEO {
 class MemObj;
 class Buffer;
+class GraphicsAllocation;
 
 struct EventsRequest {
     EventsRequest() = delete;
@@ -26,6 +27,7 @@ struct EventsRequest {
 
     void fillCsrDependenciesForTimestampPacketContainer(CsrDependencies &csrDeps, CommandStreamReceiver &currentCsr, CsrDependencies::DependenciesType depsType) const;
     void fillCsrDependenciesForTaskCountContainer(CsrDependencies &csrDeps, CommandStreamReceiver &currentCsr) const;
+    void setupBcsCsrForOutputEvent(CommandStreamReceiver &bcsCsr) const;
 
     cl_uint numEventsInWaitList;
     const cl_event *eventWaitList;
@@ -68,5 +70,6 @@ struct MapInfo {
     void *ptr = nullptr;
     uint32_t mipLevel = 0;
     bool readOnly = false;
+    GraphicsAllocation *graphicsAllocation = nullptr;
 };
 } // namespace NEO

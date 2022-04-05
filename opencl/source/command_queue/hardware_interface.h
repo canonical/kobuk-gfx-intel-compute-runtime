@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -28,12 +28,10 @@ template <class T>
 class TagNode;
 
 template <typename GfxFamily>
-using WALKER_TYPE = typename GfxFamily::WALKER_TYPE;
-
-template <typename GfxFamily>
 class HardwareInterface {
   public:
     using INTERFACE_DESCRIPTOR_DATA = typename GfxFamily::INTERFACE_DESCRIPTOR_DATA;
+    using WALKER_TYPE = typename GfxFamily::WALKER_TYPE;
 
     static void dispatchWalker(
         CommandQueue &commandQueue,
@@ -51,7 +49,6 @@ class HardwareInterface {
         CommandQueue &commandQueue,
         const MultiDispatchInfo &multiDispatchInfo,
         size_t &totalInterfaceDescriptorTableSize,
-        Kernel *parentKernel,
         IndirectHeap *dsh,
         LinearStream *commandStream);
 
@@ -77,7 +74,8 @@ class HardwareInterface {
         LinearStream *commandStream,
         CommandQueue &commandQueue,
         DebugPauseState confirmationTrigger,
-        DebugPauseState waitCondition);
+        DebugPauseState waitCondition,
+        const HardwareInfo &hwInfo);
 
     static void programWalker(
         LinearStream &commandStream,
@@ -94,11 +92,11 @@ class HardwareInterface {
         uint32_t &interfaceDescriptorIndex,
         const DispatchInfo &dispatchInfo,
         size_t offsetInterfaceDescriptorTable,
-        Vec3<size_t> &numberOfWorkgroups,
-        Vec3<size_t> &startOfWorkgroups);
+        const Vec3<size_t> &numberOfWorkgroups,
+        const Vec3<size_t> &startOfWorkgroups);
 
-    static WALKER_TYPE<GfxFamily> *allocateWalkerSpace(LinearStream &commandStream,
-                                                       const Kernel &kernel);
+    static WALKER_TYPE *allocateWalkerSpace(LinearStream &commandStream,
+                                            const Kernel &kernel);
 
     static void obtainIndirectHeaps(CommandQueue &commandQueue, const MultiDispatchInfo &multiDispatchInfo,
                                     bool blockedQueue, IndirectHeap *&dsh, IndirectHeap *&ioh, IndirectHeap *&ssh);

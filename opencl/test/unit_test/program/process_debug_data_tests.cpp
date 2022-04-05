@@ -1,13 +1,14 @@
 /*
- * Copyright (C) 2018-2020 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/test/common/test_macros/test.h"
+
 #include "opencl/test/unit_test/mocks/mock_program.h"
 #include "opencl/test/unit_test/program/program_tests.h"
-#include "test.h"
 
 #include "program_debug_data.h"
 
@@ -61,8 +62,8 @@ TEST_F(ProgramTests, GivenProgramWithDebugDataForTwoKernelsWhenPorcessedThenDebu
     char *genIsa2 = (ptrOffset(vIsa2, visaSize));
     memset(genIsa2, 20, genIsaSize);
 
-    program->debugData = makeCopy(debugData.get(), debugDataSize);
-    program->debugDataSize = debugDataSize;
+    program->buildInfos[rootDeviceIndex].debugData = makeCopy(debugData.get(), debugDataSize);
+    program->buildInfos[rootDeviceIndex].debugDataSize = debugDataSize;
 
     program->addKernelInfo(kernelInfo1, rootDeviceIndex);
     program->addKernelInfo(kernelInfo2, rootDeviceIndex);
@@ -70,13 +71,13 @@ TEST_F(ProgramTests, GivenProgramWithDebugDataForTwoKernelsWhenPorcessedThenDebu
     program->processDebugData(rootDeviceIndex);
     EXPECT_EQ(genIsaSize, kernelInfo1->debugData.genIsaSize);
     EXPECT_EQ(visaSize, kernelInfo1->debugData.vIsaSize);
-    EXPECT_EQ(ptrDiff(vIsa1, debugData.get()), ptrDiff(kernelInfo1->debugData.vIsa, program->getDebugData()));
-    EXPECT_EQ(ptrDiff(genIsa1, debugData.get()), ptrDiff(kernelInfo1->debugData.genIsa, program->getDebugData()));
+    EXPECT_EQ(ptrDiff(vIsa1, debugData.get()), ptrDiff(kernelInfo1->debugData.vIsa, program->getDebugData(rootDeviceIndex)));
+    EXPECT_EQ(ptrDiff(genIsa1, debugData.get()), ptrDiff(kernelInfo1->debugData.genIsa, program->getDebugData(rootDeviceIndex)));
 
     EXPECT_EQ(genIsaSize, kernelInfo2->debugData.genIsaSize);
     EXPECT_EQ(visaSize, kernelInfo2->debugData.vIsaSize);
-    EXPECT_EQ(ptrDiff(vIsa2, debugData.get()), ptrDiff(kernelInfo2->debugData.vIsa, program->getDebugData()));
-    EXPECT_EQ(ptrDiff(genIsa2, debugData.get()), ptrDiff(kernelInfo2->debugData.genIsa, program->getDebugData()));
+    EXPECT_EQ(ptrDiff(vIsa2, debugData.get()), ptrDiff(kernelInfo2->debugData.vIsa, program->getDebugData(rootDeviceIndex)));
+    EXPECT_EQ(ptrDiff(genIsa2, debugData.get()), ptrDiff(kernelInfo2->debugData.genIsa, program->getDebugData(rootDeviceIndex)));
 }
 
 TEST_F(ProgramTests, GivenProgramWithoutDebugDataWhenPorcessedThenDebugDataIsNotSetInKernelInfo) {
@@ -91,5 +92,5 @@ TEST_F(ProgramTests, GivenProgramWithoutDebugDataWhenPorcessedThenDebugDataIsNot
 
     EXPECT_EQ(0u, kernelInfo1->debugData.genIsaSize);
     EXPECT_EQ(0u, kernelInfo1->debugData.vIsaSize);
-    EXPECT_EQ(nullptr, program->getDebugData());
+    EXPECT_EQ(nullptr, program->getDebugData(rootDeviceIndex));
 }

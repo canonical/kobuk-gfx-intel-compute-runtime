@@ -5,7 +5,7 @@
  *
  */
 
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/helpers/properties_parser.h"
 
@@ -117,6 +117,106 @@ TEST(L0StructuresLookupTableTests, givenL0StructuresWithNTHandleWhenPrepareLooku
     EXPECT_TRUE(l0LookupTable.sharedHandleType.isSupportedHandle);
     EXPECT_TRUE(l0LookupTable.sharedHandleType.isNTHandle);
     EXPECT_EQ(l0LookupTable.sharedHandleType.ntHnadle, importNTHandle.handle);
+}
+
+TEST(L0StructuresLookupTableTests, givenL0StructuresWithSupportedExportHandlesWhenPrepareLookupTableThenProperFieldsInLookupTableAreSet) {
+    ze_external_memory_import_win32_handle_t exportStruct = {};
+    exportStruct.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_EXPORT_DESC;
+    exportStruct.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_WIN32;
+
+    StructuresLookupTable l0LookupTable = {};
+    auto result = prepareL0StructuresLookupTable(l0LookupTable, &exportStruct);
+
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+
+    EXPECT_TRUE(l0LookupTable.exportMemory);
+    exportStruct.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+
+    l0LookupTable = {};
+    result = prepareL0StructuresLookupTable(l0LookupTable, &exportStruct);
+
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+
+    EXPECT_TRUE(l0LookupTable.exportMemory);
+}
+
+TEST(L0StructuresLookupTableTests, givenL0StructuresWithSupportedCompressionHintsWhenPrepareLookupTableThenProperFieldsInLookupTableAreSet) {
+    {
+        ze_external_memory_import_win32_handle_t exportStruct = {};
+        exportStruct.stype = ZE_STRUCTURE_TYPE_MEMORY_COMPRESSION_HINTS_EXT_DESC;
+        exportStruct.flags = ZE_MEMORY_COMPRESSION_HINTS_EXT_FLAG_COMPRESSED;
+
+        StructuresLookupTable l0LookupTable = {};
+        auto result = prepareL0StructuresLookupTable(l0LookupTable, &exportStruct);
+
+        EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+        EXPECT_TRUE(l0LookupTable.compressedHint);
+        EXPECT_FALSE(l0LookupTable.uncompressedHint);
+    }
+
+    {
+        ze_external_memory_import_win32_handle_t exportStruct = {};
+        exportStruct.stype = ZE_STRUCTURE_TYPE_MEMORY_COMPRESSION_HINTS_EXT_DESC;
+        exportStruct.flags = ZE_MEMORY_COMPRESSION_HINTS_EXT_FLAG_UNCOMPRESSED;
+
+        StructuresLookupTable l0LookupTable = {};
+        auto result = prepareL0StructuresLookupTable(l0LookupTable, &exportStruct);
+
+        EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+        EXPECT_FALSE(l0LookupTable.compressedHint);
+        EXPECT_TRUE(l0LookupTable.uncompressedHint);
+    }
+
+    {
+        ze_external_memory_import_win32_handle_t exportStruct = {};
+        exportStruct.stype = ZE_STRUCTURE_TYPE_MEMORY_COMPRESSION_HINTS_EXT_DESC;
+        exportStruct.flags = ZE_MEMORY_COMPRESSION_HINTS_EXT_FLAG_COMPRESSED | ZE_MEMORY_COMPRESSION_HINTS_EXT_FLAG_UNCOMPRESSED;
+
+        StructuresLookupTable l0LookupTable = {};
+        auto result = prepareL0StructuresLookupTable(l0LookupTable, &exportStruct);
+
+        EXPECT_EQ(result, ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION);
+    }
+}
+
+TEST(L0StructuresLookupTableTests, givenL0StructuresWithUnsupportedExportHandlesWhenPrepareLookupTableThenUnsuppoertedErrorIsReturned) {
+    ze_external_memory_import_win32_handle_t exportStruct = {};
+    exportStruct.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_EXPORT_DESC;
+    exportStruct.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_D3D11_TEXTURE;
+
+    StructuresLookupTable l0LookupTable = {};
+    auto result = prepareL0StructuresLookupTable(l0LookupTable, &exportStruct);
+
+    EXPECT_EQ(result, ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION);
+
+    EXPECT_FALSE(l0LookupTable.exportMemory);
+    exportStruct.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_FD;
+
+    l0LookupTable = {};
+    result = prepareL0StructuresLookupTable(l0LookupTable, &exportStruct);
+
+    EXPECT_EQ(result, ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION);
+
+    EXPECT_FALSE(l0LookupTable.exportMemory);
+}
+
+TEST(L0StructuresLookupTableTests, givenL0StructuresWithSupportedExportHandlesAndImageDescWhenPrepareLookupTableThenUnsupportedErrorIsReturned) {
+    ze_image_desc_t imageDesc = {};
+    imageDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+
+    ze_external_memory_import_win32_handle_t exportStruct = {};
+    exportStruct.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_EXPORT_DESC;
+    exportStruct.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_WIN32;
+
+    exportStruct.pNext = &imageDesc;
+
+    StructuresLookupTable l0LookupTable = {};
+    auto result = prepareL0StructuresLookupTable(l0LookupTable, &exportStruct);
+
+    EXPECT_EQ(result, ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION);
+
+    EXPECT_TRUE(l0LookupTable.exportMemory);
+    EXPECT_TRUE(l0LookupTable.areImageProperties);
 }
 
 TEST(L0StructuresLookupTableTests, givenL0StructuresWithUnsuportedOptionsWhenPrepareLookupTableThenProperFieldsInLookupTableAreSet) {

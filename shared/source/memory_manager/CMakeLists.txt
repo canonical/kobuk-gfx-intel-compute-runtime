@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019-2021 Intel Corporation
+# Copyright (C) 2019-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -9,6 +9,8 @@ set(NEO_CORE_MEMORY_MANAGER
     ${CMAKE_CURRENT_SOURCE_DIR}/address_mapper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/address_mapper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/allocations_list.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/allocations_list.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/allocation_type.h
     ${CMAKE_CURRENT_SOURCE_DIR}/alignment_selector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/alignment_selector.h
     ${CMAKE_CURRENT_SOURCE_DIR}/allocation_properties.h
@@ -23,7 +25,6 @@ set(NEO_CORE_MEMORY_MANAGER
     ${CMAKE_CURRENT_SOURCE_DIR}/definitions/storage_info.h
     ${CMAKE_CURRENT_SOURCE_DIR}/eviction_status.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx_partition.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/${BRANCH_DIR_SUFFIX}/gfx_partition_init_additional_range.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx_partition.h
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics_allocation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics_allocation.h

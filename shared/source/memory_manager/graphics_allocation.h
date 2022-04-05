@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,9 +7,11 @@
 
 #pragma once
 
+#include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/ptr_math.h"
+#include "shared/source/memory_manager/allocation_type.h"
 #include "shared/source/memory_manager/definitions/engine_limits.h"
 #include "shared/source/memory_manager/definitions/storage_info.h"
 #include "shared/source/memory_manager/host_ptr_defines.h"
@@ -29,6 +31,7 @@ namespace NEO {
 
 using osHandle = unsigned int;
 inline osHandle toOsHandle(const void *handle) {
+
     return static_cast<osHandle>(castToUint64(handle));
 }
 
@@ -51,54 +54,10 @@ struct AubInfo {
 
 class GraphicsAllocation : public IDNode<GraphicsAllocation> {
   public:
-    enum class AllocationType {
-        UNKNOWN = 0,
-        BUFFER,
-        BUFFER_COMPRESSED,
-        BUFFER_HOST_MEMORY,
-        COMMAND_BUFFER,
-        CONSTANT_SURFACE,
-        DEVICE_QUEUE_BUFFER,
-        EXTERNAL_HOST_PTR,
-        FILL_PATTERN,
-        GLOBAL_SURFACE,
-        IMAGE,
-        INDIRECT_OBJECT_HEAP,
-        INSTRUCTION_HEAP,
-        INTERNAL_HEAP,
-        INTERNAL_HOST_MEMORY,
-        KERNEL_ISA,
-        KERNEL_ISA_INTERNAL,
-        LINEAR_STREAM,
-        MAP_ALLOCATION,
-        MCS,
-        PIPE,
-        PREEMPTION,
-        PRINTF_SURFACE,
-        PRIVATE_SURFACE,
-        PROFILING_TAG_BUFFER,
-        SCRATCH_SURFACE,
-        SHARED_BUFFER,
-        SHARED_CONTEXT_IMAGE,
-        SHARED_IMAGE,
-        SHARED_RESOURCE_COPY,
-        SURFACE_STATE_HEAP,
-        SVM_CPU,
-        SVM_GPU,
-        SVM_ZERO_COPY,
-        TAG_BUFFER,
-        GLOBAL_FENCE,
-        TIMESTAMP_PACKET_TAG_BUFFER,
-        WRITE_COMBINED,
-        RING_BUFFER,
-        SEMAPHORE_BUFFER,
-        DEBUG_CONTEXT_SAVE_AREA,
-        DEBUG_SBA_TRACKING_BUFFER,
-        DEBUG_MODULE_AREA,
-        UNIFIED_SHARED_MEMORY,
-        WORK_PARTITION_SURFACE,
-        GPU_TIMESTAMP_DEVICE_BUFFER,
-        COUNT
+    enum UsmInitialPlacement {
+        DEFAULT,
+        CPU,
+        GPU
     };
 
     ~GraphicsAllocation() override;
@@ -126,7 +85,7 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
 
     void setCpuPtrAndGpuAddress(void *cpuPtr, uint64_t gpuAddress) {
         this->cpuPtr = cpuPtr;
-        this->gpuAddress = gpuAddress;
+        this->gpuAddress = GmmHelper::canonize(gpuAddress);
     }
     size_t getUnderlyingBufferSize() const { return size; }
     void setSize(size_t size) { this->size = size; }
@@ -228,19 +187,19 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
                allocationType == AllocationType::RING_BUFFER ||
                allocationType == AllocationType::SEMAPHORE_BUFFER ||
                allocationType == AllocationType::DEBUG_CONTEXT_SAVE_AREA ||
+               allocationType == AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER ||
                allocationType == AllocationType::DEBUG_MODULE_AREA;
     }
     static bool isLockable(AllocationType allocationType) {
         return isCpuAccessRequired(allocationType) ||
                isIsaAllocationType(allocationType) ||
                allocationType == AllocationType::BUFFER_HOST_MEMORY ||
-               allocationType == AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER ||
                allocationType == AllocationType::SHARED_RESOURCE_COPY;
     }
 
-    static bool isIsaAllocationType(GraphicsAllocation::AllocationType type) {
-        return type == GraphicsAllocation::AllocationType::KERNEL_ISA ||
-               type == GraphicsAllocation::AllocationType::KERNEL_ISA_INTERNAL ||
+    static bool isIsaAllocationType(AllocationType type) {
+        return type == AllocationType::KERNEL_ISA ||
+               type == AllocationType::KERNEL_ISA_INTERNAL ||
                type == AllocationType::DEBUG_MODULE_AREA;
     }
 
@@ -267,6 +226,9 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     void setGmm(Gmm *gmm, uint32_t handleId) {
         gmms[handleId] = gmm;
     }
+    void resizeGmms(uint32_t size) {
+        gmms.resize(size);
+    }
 
     uint32_t getNumGmms() const {
         return static_cast<uint32_t>(gmms.size());
@@ -278,6 +240,8 @@ class GraphicsAllocation : public IDNode<GraphicsAllocation> {
     bool isAllocationLockable() const;
 
     const AubInfo &getAubInfo() const { return aubInfo; }
+
+    bool isCompressionEnabled() const;
 
     OsHandleStorage fragmentsStorage;
     StorageInfo storageInfo = {};

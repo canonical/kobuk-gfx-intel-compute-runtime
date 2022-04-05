@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,11 +9,11 @@
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/test_configuration/aub_tests/aub_tests_configuration.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/test/unit_test/aub_tests/command_queue/command_enqueue_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "test.h"
 
 #include <memory>
 
@@ -116,7 +116,7 @@ HWTEST_F(AUBReadBuffer, GivenReserveCanonicalGpuAddressWhenReadingBufferThenExpe
 
     cl_float srcMemory[] = {1.0f, 2.0f, 3.0f, 4.0f};
     cl_float dstMemory[] = {0.0f, 0.0f, 0.0f, 0.0f};
-    GraphicsAllocation *srcAllocation = new MockGraphicsAllocation(0, GraphicsAllocation::AllocationType::UNKNOWN,
+    GraphicsAllocation *srcAllocation = new MockGraphicsAllocation(0, AllocationType::UNKNOWN,
                                                                    srcMemory,
                                                                    0xFFFF800400001000,
                                                                    0xFFFF800400001000,
@@ -124,7 +124,7 @@ HWTEST_F(AUBReadBuffer, GivenReserveCanonicalGpuAddressWhenReadingBufferThenExpe
                                                                    MemoryPool::MemoryNull, MemoryManager::maxOsContextCount);
     std::unique_ptr<Buffer> srcBuffer(Buffer::createBufferHw(
         &context,
-        MemoryPropertiesHelper::createMemoryProperties(CL_MEM_USE_HOST_PTR, 0, 0, &context.getDevice(0)->getDevice()),
+        ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_USE_HOST_PTR, 0, 0, &context.getDevice(0)->getDevice()),
         CL_MEM_USE_HOST_PTR,
         0,
         sizeof(srcMemory),

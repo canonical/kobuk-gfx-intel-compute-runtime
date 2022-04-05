@@ -1,12 +1,15 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/command_container/implicit_scaling.h"
+#include "shared/source/compiler_interface/compiler_interface.h"
 #include "shared/source/debugger/debugger.h"
 #include "shared/source/device/device.h"
+#include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/memory_manager/memory_manager.h"
@@ -18,6 +21,15 @@
 namespace NEO {
 
 static const char *spirvWithVersion = "SPIR-V_1.2 ";
+
+size_t Device::getMaxParameterSizeFromIGC() const {
+    CompilerInterface *compilerInterface = getCompilerInterface();
+    if (nullptr != compilerInterface) {
+        auto igcFtrWa = compilerInterface->getIgcFeaturesAndWorkarounds(*this);
+        return igcFtrWa->GetMaxOCLParamSize();
+    }
+    return 0;
+}
 
 void Device::initializeCaps() {
     auto &hwInfo = getHardwareInfo();
@@ -35,11 +47,6 @@ void Device::initializeCaps() {
     }
     if (ocl21FeaturesEnabled) {
         addressing32bitAllowed = false;
-    }
-
-    deviceInfo.sharedSystemAllocationsSupport = hwInfoConfig->getSharedSystemMemCapabilities();
-    if (DebugManager.flags.EnableSharedSystemUsmSupport.get() != -1) {
-        deviceInfo.sharedSystemAllocationsSupport = DebugManager.flags.EnableSharedSystemUsmSupport.get();
     }
 
     deviceInfo.vendorId = 0x8086;
@@ -71,8 +78,17 @@ void Device::initializeCaps() {
     deviceInfo.globalMemSize = alignDown(deviceInfo.globalMemSize, MemoryConstants::pageSize);
     deviceInfo.maxMemAllocSize = std::min(deviceInfo.globalMemSize, deviceInfo.maxMemAllocSize); // if globalMemSize was reduced for 32b
 
-    if (!deviceInfo.sharedSystemAllocationsSupport) {
-        deviceInfo.maxMemAllocSize = std::min(deviceInfo.maxMemAllocSize, this->hardwareCapabilities.maxMemAllocSize);
+    uint32_t subDeviceCount = HwHelper::getSubDevicesCount(&getHardwareInfo());
+
+    if (((NEO::ImplicitScalingHelper::isImplicitScalingEnabled(
+            getDeviceBitfield(), true))) &&
+        (!isSubDevice()) && (subDeviceCount > 1)) {
+        deviceInfo.maxMemAllocSize = deviceInfo.globalMemSize;
+    }
+
+    if (!areSharedSystemAllocationsAllowed()) {
+        deviceInfo.maxMemAllocSize = ApiSpecificConfig::getReducedMaxAllocSize(deviceInfo.maxMemAllocSize);
+        deviceInfo.maxMemAllocSize = std::min(deviceInfo.maxMemAllocSize, hwHelper.getMaxMemAllocSize());
     }
 
     // Some specific driver model configurations may impose additional limitations
@@ -101,11 +117,11 @@ void Device::initializeCaps() {
                             ? CommonConstants::maximalSimdSize
                             : hwHelper.getMinimalSIMDSize();
 
-    deviceInfo.maxNumEUsPerSubSlice = (systemInfo.EuCountPerPoolMin == 0 || hwInfo.featureTable.ftrPooledEuEnabled == 0)
+    deviceInfo.maxNumEUsPerSubSlice = (systemInfo.EuCountPerPoolMin == 0 || hwInfo.featureTable.flags.ftrPooledEuEnabled == 0)
                                           ? (systemInfo.EUCount / systemInfo.SubSliceCount)
                                           : systemInfo.EuCountPerPoolMin;
     if (systemInfo.DualSubSliceCount != 0) {
-        deviceInfo.maxNumEUsPerDualSubSlice = (systemInfo.EuCountPerPoolMin == 0 || hwInfo.featureTable.ftrPooledEuEnabled == 0)
+        deviceInfo.maxNumEUsPerDualSubSlice = (systemInfo.EuCountPerPoolMin == 0 || hwInfo.featureTable.flags.ftrPooledEuEnabled == 0)
                                                   ? (systemInfo.EUCount / systemInfo.DualSubSliceCount)
                                                   : systemInfo.EuCountPerPoolMin;
 
@@ -166,18 +182,11 @@ void Device::initializeCaps() {
     deviceName << " [0x" << std::hex << std::setw(4) << std::setfill('0') << hwInfo.platform.usDeviceID << "]";
 
     deviceInfo.name = deviceName.str();
-}
 
-void Device::reduceMaxMemAllocSize() {
-    deviceInfo.maxMemAllocSize = std::min(deviceInfo.globalMemSize, getGlobalMemorySize(1u));
-
-    if (!deviceInfo.sharedSystemAllocationsSupport) {
-        deviceInfo.maxMemAllocSize /= 2;
-        deviceInfo.maxMemAllocSize = std::min(deviceInfo.maxMemAllocSize, this->hardwareCapabilities.maxMemAllocSize);
+    size_t maxParameterSizeFromIgc = getMaxParameterSizeFromIGC();
+    if (maxParameterSizeFromIgc > 0) {
+        deviceInfo.maxParameterSize = maxParameterSizeFromIgc;
     }
-
-    // OpenCL 1.2 requires 128MB minimum
-    deviceInfo.maxMemAllocSize = std::max(deviceInfo.maxMemAllocSize, static_cast<uint64_t>(128llu * MB));
 }
 
 } // namespace NEO

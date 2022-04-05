@@ -9,6 +9,8 @@
 #include "level_zero/tools/test/unit_tests/sources/sysman/memory/windows/mock_memory.h"
 #include "level_zero/tools/test/unit_tests/sources/sysman/windows/mock_sysman_fixture.h"
 
+extern bool sysmanUltsEnable;
+
 namespace L0 {
 namespace ult {
 
@@ -18,6 +20,9 @@ class SysmanDeviceMemoryFixture : public SysmanDeviceFixture {
     Mock<MemoryKmdSysManager> *pKmdSysManager = nullptr;
     KmdSysManager *pOriginalKmdSysManager = nullptr;
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::SetUp();
 
         pMemoryManagerOld = device->getDriverHandle()->getMemoryManager();
@@ -55,6 +60,9 @@ class SysmanDeviceMemoryFixture : public SysmanDeviceFixture {
     }
 
     void TearDown() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         device->getDriverHandle()->setMemoryManager(pMemoryManagerOld);
         SysmanDeviceFixture::TearDown();
         pWddmSysmanImp->pKmdSysManager = pOriginalKmdSysManager;
@@ -153,7 +161,7 @@ TEST_F(SysmanDeviceMemoryFixture, GivenValidMemoryHandleWhenCallingGettingProper
         ze_result_t result = zesMemoryGetProperties(handle, &properties);
 
         EXPECT_EQ(result, ZE_RESULT_SUCCESS);
-        EXPECT_EQ(properties.type, ZES_MEM_TYPE_DDR5);
+        EXPECT_EQ(properties.type, ZES_MEM_TYPE_GDDR6);
         EXPECT_EQ(properties.location, ZES_MEM_LOC_DEVICE);
         EXPECT_FALSE(properties.onSubdevice);
         EXPECT_EQ(properties.subdeviceId, 0u);
@@ -163,7 +171,7 @@ TEST_F(SysmanDeviceMemoryFixture, GivenValidMemoryHandleWhenCallingGettingProper
     }
 }
 
-TEST_F(SysmanDeviceMemoryFixture, GivenValidMemoryHandleWhenGettingStateThenCallSucceeds) {
+TEST_F(SysmanDeviceMemoryFixture, DISABLED_GivenValidMemoryHandleWhenGettingStateThenCallSucceeds) {
     setLocalSupportedAndReinit(true);
     auto handles = get_memory_handles(memoryHandleComponentCount);
 
@@ -189,9 +197,9 @@ TEST_F(SysmanDeviceMemoryFixture, GivenValidMemoryHandleWhenGettingBandwidthThen
         ze_result_t result = zesMemoryGetBandwidth(handle, &bandwidth);
 
         EXPECT_EQ(result, ZE_RESULT_SUCCESS);
-        EXPECT_EQ(bandwidth.maxBandwidth, pKmdSysManager->mockMemoryMaxBandwidth);
-        EXPECT_EQ(bandwidth.readCounter, pKmdSysManager->mockMemoryCurrentBandwidth * MbpsToBytesPerSecond);
-        EXPECT_EQ(bandwidth.writeCounter, 0u);
+        EXPECT_EQ(bandwidth.maxBandwidth, pKmdSysManager->mockMemoryMaxBandwidth * MbpsToBytesPerSecond);
+        EXPECT_EQ(bandwidth.readCounter, pKmdSysManager->mockMemoryCurrentBandwidthRead);
+        EXPECT_EQ(bandwidth.writeCounter, pKmdSysManager->mockMemoryCurrentBandwidthWrite);
         EXPECT_GT(bandwidth.timestamp, 0u);
     }
 }

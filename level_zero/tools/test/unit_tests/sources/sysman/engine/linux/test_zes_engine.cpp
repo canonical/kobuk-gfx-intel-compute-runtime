@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,6 +8,8 @@
 #include "level_zero/tools/test/unit_tests/sources/sysman/linux/mock_sysman_fixture.h"
 
 #include "mock_engine.h"
+
+extern bool sysmanUltsEnable;
 
 using ::testing::Matcher;
 using ::testing::Return;
@@ -29,6 +31,9 @@ class ZesEngineFixture : public SysmanDeviceFixture {
     FsAccess *pFsAccessOriginal = nullptr;
 
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::SetUp();
         pMemoryManagerOriginal = device->getDriverHandle()->getMemoryManager();
         pMemoryManager = std::make_unique<::testing::NiceMock<MockMemoryManagerInEngineSysman>>(*neoDevice->getExecutionEnvironment());
@@ -45,6 +50,7 @@ class ZesEngineFixture : public SysmanDeviceFixture {
 
         EngineHandleContext *pEngineHandleContext = pSysmanDeviceImp->pEngineHandleContext;
         pDrm = std::make_unique<NiceMock<Mock<EngineNeoDrm>>>(const_cast<NEO::RootDeviceEnvironment &>(neoDevice->getRootDeviceEnvironment()));
+        pDrm->setupIoctlHelper(neoDevice->getRootDeviceEnvironment().getHardwareInfo()->platform.eProductFamily);
         pPmuInterface = std::make_unique<NiceMock<Mock<MockPmuInterfaceImp>>>(pLinuxSysmanImp);
         pOriginalDrm = pLinuxSysmanImp->pDrm;
         pOriginalPmuInterface = pLinuxSysmanImp->pPmuInterface;
@@ -67,6 +73,9 @@ class ZesEngineFixture : public SysmanDeviceFixture {
     }
 
     void TearDown() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::TearDown();
         device->getDriverHandle()->setMemoryManager(pMemoryManagerOriginal);
         pLinuxSysmanImp->pDrm = pOriginalDrm;
@@ -218,8 +227,11 @@ TEST_F(ZesEngineFixture, GivenValidOsSysmanPointerWhenRetrievingEngineTypeAndIns
 TEST_F(ZesEngineFixture, givenEngineInfoQuerySupportedWhenQueryingEngineInfoThenEngineInfoIsCreatedWithEngines) {
     auto drm = std::make_unique<DrmMockEngine>((const_cast<NEO::RootDeviceEnvironment &>(neoDevice->getRootDeviceEnvironment())));
     ASSERT_NE(nullptr, drm);
+    std::vector<MemoryRegion> memRegions{
+        {{I915_MEMORY_CLASS_SYSTEM, 0}, 1024, 0}};
+    drm->memoryInfo.reset(new MemoryInfo(memRegions));
     drm->sysmanQueryEngineInfo();
-    auto engineInfo = static_cast<EngineInfoImpl *>(drm->getEngineInfo());
+    auto engineInfo = drm->getEngineInfo();
     ASSERT_NE(nullptr, engineInfo);
     EXPECT_EQ(2u, engineInfo->engines.size());
 }
@@ -227,8 +239,11 @@ TEST_F(ZesEngineFixture, givenEngineInfoQuerySupportedWhenQueryingEngineInfoThen
 TEST_F(ZesEngineFixture, GivenEngineInfoWithVideoQuerySupportedWhenQueryingEngineInfoWithVideoThenEngineInfoIsCreatedWithEngines) {
     auto drm = std::make_unique<DrmMockEngine>((const_cast<NEO::RootDeviceEnvironment &>(neoDevice->getRootDeviceEnvironment())));
     ASSERT_NE(nullptr, drm);
+    std::vector<MemoryRegion> memRegions{
+        {{I915_MEMORY_CLASS_SYSTEM, 0}, 1024, 0}};
+    drm->memoryInfo.reset(new MemoryInfo(memRegions));
     drm->sysmanQueryEngineInfo();
-    auto engineInfo = static_cast<EngineInfoImpl *>(drm->getEngineInfo());
+    auto engineInfo = drm->getEngineInfo();
     ASSERT_NE(nullptr, engineInfo);
     EXPECT_EQ(2u, engineInfo->engines.size());
 }

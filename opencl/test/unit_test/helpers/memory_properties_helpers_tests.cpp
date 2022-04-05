@@ -1,83 +1,103 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/helpers/memory_properties_helpers.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
 
-#include "opencl/source/helpers/memory_properties_helpers.h"
+#include "opencl/source/helpers/cl_memory_properties_helpers.h"
 #include "opencl/source/mem_obj/mem_obj_helper.h"
+#include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 
 #include "CL/cl_ext_intel.h"
 #include "gtest/gtest.h"
+#include "memory_properties_flags.h"
 
 using namespace NEO;
+
+TEST(MemoryProperties, givenResource48BitMemoryPropertySetWhenGetAllocationPropertiesCalledThenSetAllocationPropertyToo) {
+    UltDeviceFactory deviceFactory{1, 0};
+    MemoryProperties memoryProperties{};
+    memoryProperties.pDevice = deviceFactory.rootDevices[0];
+    memoryProperties.flags.resource48Bit = true;
+
+    DeviceBitfield deviceBitfield{0xf};
+
+    HardwareInfo hwInfo(*defaultHwInfo);
+
+    auto allocationProperties = MemoryPropertiesHelper::getAllocationProperties(0, memoryProperties, true, 0, AllocationType::BUFFER,
+                                                                                false, hwInfo, deviceBitfield, false);
+
+    EXPECT_EQ(1u, allocationProperties.flags.resource48Bit);
+}
 
 TEST(MemoryProperties, givenValidPropertiesWhenCreateMemoryPropertiesThenTrueIsReturned) {
     UltDeviceFactory deviceFactory{1, 0};
     auto pDevice = deviceFactory.rootDevices[0];
     MemoryProperties properties;
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_READ_WRITE, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_READ_WRITE, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.readWrite);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_WRITE_ONLY, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_WRITE_ONLY, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.writeOnly);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_READ_ONLY, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_READ_ONLY, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.readOnly);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_USE_HOST_PTR, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_USE_HOST_PTR, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.useHostPtr);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_ALLOC_HOST_PTR, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_ALLOC_HOST_PTR, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.allocHostPtr);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_COPY_HOST_PTR, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_COPY_HOST_PTR, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.copyHostPtr);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_HOST_WRITE_ONLY, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_HOST_WRITE_ONLY, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.hostWriteOnly);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_HOST_READ_ONLY, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_HOST_READ_ONLY, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.hostReadOnly);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_HOST_NO_ACCESS, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_HOST_NO_ACCESS, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.hostNoAccess);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_KERNEL_READ_AND_WRITE, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_KERNEL_READ_AND_WRITE, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.kernelReadAndWrite);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_ACCESS_FLAGS_UNRESTRICTED_INTEL, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_ACCESS_FLAGS_UNRESTRICTED_INTEL, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.accessFlagsUnrestricted);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_NO_ACCESS_INTEL, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_NO_ACCESS_INTEL, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.noAccess);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(0, CL_MEM_LOCALLY_UNCACHED_RESOURCE, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(0, CL_MEM_LOCALLY_UNCACHED_RESOURCE, 0, pDevice);
     EXPECT_TRUE(properties.flags.locallyUncachedResource);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(0, CL_MEM_LOCALLY_UNCACHED_SURFACE_STATE_RESOURCE, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(0, CL_MEM_LOCALLY_UNCACHED_SURFACE_STATE_RESOURCE, 0, pDevice);
     EXPECT_TRUE(properties.flags.locallyUncachedInSurfaceState);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(CL_MEM_FORCE_HOST_MEMORY_INTEL, 0, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(CL_MEM_FORCE_HOST_MEMORY_INTEL, 0, 0, pDevice);
     EXPECT_TRUE(properties.flags.forceHostMemory);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(0, 0, CL_MEM_ALLOC_WRITE_COMBINED_INTEL, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(0, 0, CL_MEM_ALLOC_WRITE_COMBINED_INTEL, pDevice);
     EXPECT_TRUE(properties.allocFlags.allocWriteCombined);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(0, 0, CL_MEM_ALLOC_INITIAL_PLACEMENT_DEVICE_INTEL, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(0, 0, CL_MEM_ALLOC_INITIAL_PLACEMENT_DEVICE_INTEL, pDevice);
     EXPECT_TRUE(properties.allocFlags.usmInitialPlacementGpu);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(0, 0, CL_MEM_ALLOC_INITIAL_PLACEMENT_HOST_INTEL, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(0, 0, CL_MEM_ALLOC_INITIAL_PLACEMENT_HOST_INTEL, pDevice);
     EXPECT_TRUE(properties.allocFlags.usmInitialPlacementCpu);
 
-    properties = MemoryPropertiesHelper::createMemoryProperties(0, CL_MEM_48BIT_RESOURCE_INTEL, 0, pDevice);
+    properties = ClMemoryPropertiesHelper::createMemoryProperties(0, CL_MEM_48BIT_RESOURCE_INTEL, 0, pDevice);
     EXPECT_TRUE(properties.flags.resource48Bit);
 }
 
@@ -90,22 +110,22 @@ TEST(MemoryProperties, givenClMemForceLinearStorageFlagWhenCreateMemoryPropertie
 
     flags |= CL_MEM_FORCE_LINEAR_STORAGE_INTEL;
     flagsIntel = 0;
-    memoryProperties = MemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
     EXPECT_TRUE(memoryProperties.flags.forceLinearStorage);
 
     flags = 0;
     flagsIntel |= CL_MEM_FORCE_LINEAR_STORAGE_INTEL;
-    memoryProperties = MemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
     EXPECT_TRUE(memoryProperties.flags.forceLinearStorage);
 
     flags |= CL_MEM_FORCE_LINEAR_STORAGE_INTEL;
     flagsIntel |= CL_MEM_FORCE_LINEAR_STORAGE_INTEL;
-    memoryProperties = MemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
     EXPECT_TRUE(memoryProperties.flags.forceLinearStorage);
 
     flags = 0;
     flagsIntel = 0;
-    memoryProperties = MemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
     EXPECT_FALSE(memoryProperties.flags.forceLinearStorage);
 }
 
@@ -118,23 +138,75 @@ TEST(MemoryProperties, givenClAllowUnrestrictedSizeFlagWhenCreateMemoryPropertie
 
     flags |= CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL;
     flagsIntel = 0;
-    memoryProperties = MemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
     EXPECT_TRUE(memoryProperties.flags.allowUnrestrictedSize);
 
     flags = 0;
     flagsIntel |= CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL;
-    memoryProperties = MemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
     EXPECT_TRUE(memoryProperties.flags.allowUnrestrictedSize);
 
     flags |= CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL;
     flagsIntel |= CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL;
-    memoryProperties = MemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
     EXPECT_TRUE(memoryProperties.flags.allowUnrestrictedSize);
 
     flags = 0;
     flagsIntel = 0;
-    memoryProperties = MemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
     EXPECT_FALSE(memoryProperties.flags.allowUnrestrictedSize);
+}
+
+TEST(MemoryProperties, givenClCompressedHintFlagWhenCreateMemoryPropertiesThenReturnProperValue) {
+    MemoryProperties memoryProperties;
+    UltDeviceFactory deviceFactory{1, 0};
+    auto pDevice = deviceFactory.rootDevices[0];
+
+    cl_mem_flags flags = CL_MEM_COMPRESSED_HINT_INTEL;
+    cl_mem_flags_intel flagsIntel = 0;
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    EXPECT_TRUE(memoryProperties.flags.compressedHint);
+
+    flags = 0;
+    flagsIntel |= CL_MEM_COMPRESSED_HINT_INTEL;
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    EXPECT_TRUE(memoryProperties.flags.compressedHint);
+
+    flags |= CL_MEM_COMPRESSED_HINT_INTEL;
+    flagsIntel |= CL_MEM_COMPRESSED_HINT_INTEL;
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    EXPECT_TRUE(memoryProperties.flags.compressedHint);
+
+    flags = 0;
+    flagsIntel = 0;
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    EXPECT_FALSE(memoryProperties.flags.compressedHint);
+}
+
+TEST(MemoryProperties, givenClUncompressedHintFlagWhenCreateMemoryPropertiesThenReturnProperValue) {
+    MemoryProperties memoryProperties;
+    UltDeviceFactory deviceFactory{1, 0};
+    auto pDevice = deviceFactory.rootDevices[0];
+
+    cl_mem_flags flags = CL_MEM_UNCOMPRESSED_HINT_INTEL;
+    cl_mem_flags_intel flagsIntel = 0;
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    EXPECT_TRUE(memoryProperties.flags.uncompressedHint);
+
+    flags = 0;
+    flagsIntel |= CL_MEM_UNCOMPRESSED_HINT_INTEL;
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    EXPECT_TRUE(memoryProperties.flags.uncompressedHint);
+
+    flags |= CL_MEM_UNCOMPRESSED_HINT_INTEL;
+    flagsIntel |= CL_MEM_UNCOMPRESSED_HINT_INTEL;
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    EXPECT_TRUE(memoryProperties.flags.uncompressedHint);
+
+    flags = 0;
+    flagsIntel = 0;
+    memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
+    EXPECT_FALSE(memoryProperties.flags.uncompressedHint);
 }
 
 struct MemoryPropertiesHelperTests : ::testing::Test {
@@ -146,34 +218,36 @@ struct MemoryPropertiesHelperTests : ::testing::Test {
 };
 
 TEST_F(MemoryPropertiesHelperTests, givenNullPropertiesWhenParsingMemoryPropertiesThenTrueIsReturned) {
-    EXPECT_TRUE(MemoryPropertiesHelper::parseMemoryProperties(nullptr, memoryProperties, flags, flagsIntel, allocflags,
-                                                              MemoryPropertiesHelper::ObjType::UNKNOWN, context));
+    EXPECT_TRUE(ClMemoryPropertiesHelper::parseMemoryProperties(nullptr, memoryProperties, flags, flagsIntel, allocflags,
+                                                                MemoryPropertiesHelper::ObjType::UNKNOWN, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenEmptyPropertiesWhenParsingMemoryPropertiesThenTrueIsReturned) {
     cl_mem_properties_intel properties[] = {0};
 
-    EXPECT_TRUE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                              MemoryPropertiesHelper::ObjType::UNKNOWN, context));
-    EXPECT_TRUE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                              MemoryPropertiesHelper::ObjType::BUFFER, context));
-    EXPECT_TRUE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                              MemoryPropertiesHelper::ObjType::IMAGE, context));
+    EXPECT_TRUE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                MemoryPropertiesHelper::ObjType::UNKNOWN, context));
+    EXPECT_TRUE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                MemoryPropertiesHelper::ObjType::BUFFER, context));
+    EXPECT_TRUE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                MemoryPropertiesHelper::ObjType::IMAGE, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenValidPropertiesWhenParsingMemoryPropertiesThenTrueIsReturned) {
     cl_mem_properties_intel properties[] = {
         CL_MEM_FLAGS,
         CL_MEM_READ_WRITE | CL_MEM_WRITE_ONLY | CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR | CL_MEM_COPY_HOST_PTR |
-            CL_MEM_USE_HOST_PTR | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS,
+            CL_MEM_USE_HOST_PTR | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_NO_ACCESS | CL_MEM_COMPRESSED_HINT_INTEL |
+            CL_MEM_UNCOMPRESSED_HINT_INTEL,
         CL_MEM_FLAGS_INTEL,
-        CL_MEM_LOCALLY_UNCACHED_RESOURCE | CL_MEM_LOCALLY_UNCACHED_SURFACE_STATE_RESOURCE,
+        CL_MEM_LOCALLY_UNCACHED_RESOURCE | CL_MEM_LOCALLY_UNCACHED_SURFACE_STATE_RESOURCE | CL_MEM_COMPRESSED_HINT_INTEL |
+            CL_MEM_UNCOMPRESSED_HINT_INTEL,
         CL_MEM_ALLOC_FLAGS_INTEL,
         CL_MEM_ALLOC_WRITE_COMBINED_INTEL, CL_MEM_ALLOC_DEFAULT_INTEL,
         0};
 
-    EXPECT_TRUE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                              MemoryPropertiesHelper::ObjType::UNKNOWN, context));
+    EXPECT_TRUE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                MemoryPropertiesHelper::ObjType::UNKNOWN, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenValidPropertiesWhenParsingMemoryPropertiesForBufferThenTrueIsReturned) {
@@ -184,8 +258,8 @@ TEST_F(MemoryPropertiesHelperTests, givenValidPropertiesWhenParsingMemoryPropert
         MemObjHelper::validFlagsForBufferIntel,
         0};
 
-    EXPECT_TRUE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                              MemoryPropertiesHelper::ObjType::BUFFER, context));
+    EXPECT_TRUE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                MemoryPropertiesHelper::ObjType::BUFFER, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenValidPropertiesWhenParsingMemoryPropertiesForImageThenTrueIsReturned) {
@@ -196,8 +270,8 @@ TEST_F(MemoryPropertiesHelperTests, givenValidPropertiesWhenParsingMemoryPropert
         MemObjHelper::validFlagsForImageIntel,
         0};
 
-    EXPECT_TRUE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                              MemoryPropertiesHelper::ObjType::IMAGE, context));
+    EXPECT_TRUE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                MemoryPropertiesHelper::ObjType::IMAGE, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenInvalidPropertiesWhenParsingMemoryPropertiesThenFalseIsReturned) {
@@ -205,12 +279,12 @@ TEST_F(MemoryPropertiesHelperTests, givenInvalidPropertiesWhenParsingMemoryPrope
         (1 << 30), CL_MEM_ALLOC_HOST_PTR | CL_MEM_COPY_HOST_PTR | CL_MEM_USE_HOST_PTR,
         0};
 
-    EXPECT_FALSE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                               MemoryPropertiesHelper::ObjType::UNKNOWN, context));
-    EXPECT_FALSE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                               MemoryPropertiesHelper::ObjType::BUFFER, context));
-    EXPECT_FALSE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                               MemoryPropertiesHelper::ObjType::IMAGE, context));
+    EXPECT_FALSE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                 MemoryPropertiesHelper::ObjType::UNKNOWN, context));
+    EXPECT_FALSE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                 MemoryPropertiesHelper::ObjType::BUFFER, context));
+    EXPECT_FALSE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                 MemoryPropertiesHelper::ObjType::IMAGE, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenInvalidPropertiesWhenParsingMemoryPropertiesForImageThenFalseIsReturned) {
@@ -221,8 +295,8 @@ TEST_F(MemoryPropertiesHelperTests, givenInvalidPropertiesWhenParsingMemoryPrope
         MemObjHelper::validFlagsForBufferIntel,
         0};
 
-    EXPECT_FALSE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                               MemoryPropertiesHelper::ObjType::IMAGE, context));
+    EXPECT_FALSE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                 MemoryPropertiesHelper::ObjType::IMAGE, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenInvalidFlagsWhenParsingMemoryPropertiesForImageThenFalseIsReturned) {
@@ -233,8 +307,8 @@ TEST_F(MemoryPropertiesHelperTests, givenInvalidFlagsWhenParsingMemoryProperties
         MemObjHelper::validFlagsForImageIntel,
         0};
 
-    EXPECT_FALSE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                               MemoryPropertiesHelper::ObjType::IMAGE, context));
+    EXPECT_FALSE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                 MemoryPropertiesHelper::ObjType::IMAGE, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenInvalidFlagsIntelWhenParsingMemoryPropertiesForImageThenFalseIsReturned) {
@@ -245,8 +319,8 @@ TEST_F(MemoryPropertiesHelperTests, givenInvalidFlagsIntelWhenParsingMemoryPrope
         (1 << 30),
         0};
 
-    EXPECT_FALSE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                               MemoryPropertiesHelper::ObjType::IMAGE, context));
+    EXPECT_FALSE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                 MemoryPropertiesHelper::ObjType::IMAGE, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenInvalidPropertiesWhenParsingMemoryPropertiesForBufferThenFalseIsReturned) {
@@ -257,8 +331,8 @@ TEST_F(MemoryPropertiesHelperTests, givenInvalidPropertiesWhenParsingMemoryPrope
         MemObjHelper::validFlagsForImageIntel,
         0};
 
-    EXPECT_FALSE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                               MemoryPropertiesHelper::ObjType::BUFFER, context));
+    EXPECT_FALSE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                 MemoryPropertiesHelper::ObjType::BUFFER, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenInvalidFlagsWhenParsingMemoryPropertiesForBufferThenFalseIsReturned) {
@@ -269,8 +343,8 @@ TEST_F(MemoryPropertiesHelperTests, givenInvalidFlagsWhenParsingMemoryProperties
         MemObjHelper::validFlagsForBufferIntel,
         0};
 
-    EXPECT_FALSE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                               MemoryPropertiesHelper::ObjType::BUFFER, context));
+    EXPECT_FALSE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                 MemoryPropertiesHelper::ObjType::BUFFER, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenInvalidFlagsIntelWhenParsingMemoryPropertiesForBufferThenFalseIsReturned) {
@@ -281,12 +355,12 @@ TEST_F(MemoryPropertiesHelperTests, givenInvalidFlagsIntelWhenParsingMemoryPrope
         (1 << 30),
         0};
 
-    EXPECT_FALSE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                               MemoryPropertiesHelper::ObjType::BUFFER, context));
+    EXPECT_FALSE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                 MemoryPropertiesHelper::ObjType::BUFFER, context));
 }
 
 TEST_F(MemoryPropertiesHelperTests, givenDifferentParametersWhenCallingFillCachePolicyInPropertiesThenFlushL3FlagsAreCorrectlySet) {
-    AllocationProperties allocationProperties{mockRootDeviceIndex, 0, GraphicsAllocation::AllocationType::BUFFER, mockDeviceBitfield};
+    AllocationProperties allocationProperties{mockRootDeviceIndex, 0, AllocationType::BUFFER, mockDeviceBitfield};
 
     for (auto uncached : ::testing::Bool()) {
         for (auto readOnly : ::testing::Bool()) {
@@ -329,8 +403,98 @@ TEST_F(MemoryPropertiesHelperTests, givenMemFlagsWithFlagsAndPropertiesWhenParsi
         cl_mem_properties_intel properties[] = {
             CL_MEM_FLAGS, testInput.flagsProperties,
             0};
-        EXPECT_TRUE(MemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
-                                                                  MemoryPropertiesHelper::ObjType::UNKNOWN, context));
+        EXPECT_TRUE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                    MemoryPropertiesHelper::ObjType::UNKNOWN, context));
         EXPECT_EQ(testInput.expectedResult, flags);
+    }
+}
+
+TEST_F(MemoryPropertiesHelperTests, WhenAdjustingDeviceBitfieldThenCorrectBitfieldIsReturned) {
+    UltClDeviceFactory deviceFactory{2, 4};
+    auto memoryPropertiesRootDevice0 = ClMemoryPropertiesHelper::createMemoryProperties(0, 0, 0, &deviceFactory.rootDevices[0]->getDevice());
+    auto memoryPropertiesRootDevice0Tile0 = ClMemoryPropertiesHelper::createMemoryProperties(0, 0, 0, &deviceFactory.subDevices[0]->getDevice());
+    auto memoryPropertiesRootDevice0Tile1 = ClMemoryPropertiesHelper::createMemoryProperties(0, 0, 0, &deviceFactory.subDevices[1]->getDevice());
+    auto memoryPropertiesRootDevice1 = ClMemoryPropertiesHelper::createMemoryProperties(0, 0, 0, &deviceFactory.rootDevices[1]->getDevice());
+    auto memoryPropertiesRootDevice1Tile0 = ClMemoryPropertiesHelper::createMemoryProperties(0, 0, 0, &deviceFactory.subDevices[4]->getDevice());
+    auto memoryPropertiesRootDevice1Tile1 = ClMemoryPropertiesHelper::createMemoryProperties(0, 0, 0, &deviceFactory.subDevices[5]->getDevice());
+
+    DeviceBitfield devicesInContextBitfield0001{0b1};
+    DeviceBitfield devicesInContextBitfield0101{0b101};
+    DeviceBitfield devicesInContextBitfield1010{0b1010};
+    DeviceBitfield devicesInContextBitfield1111{0b1111};
+
+    MemoryProperties memoryPropertiesToProcess[] = {
+        memoryPropertiesRootDevice0, memoryPropertiesRootDevice0Tile0, memoryPropertiesRootDevice0Tile1,
+        memoryPropertiesRootDevice1, memoryPropertiesRootDevice1Tile0, memoryPropertiesRootDevice1Tile1};
+
+    DeviceBitfield devicesInContextBitfields[] = {devicesInContextBitfield0001, devicesInContextBitfield0101,
+                                                  devicesInContextBitfield1010, devicesInContextBitfield1111};
+    uint32_t rootDevicesToProcess[] = {0, 1, 2};
+
+    EXPECT_EQ(0b1u, MemoryPropertiesHelper::adjustDeviceBitfield(0, memoryPropertiesRootDevice0Tile0, devicesInContextBitfield1111).to_ulong());
+    EXPECT_EQ(0b10u, MemoryPropertiesHelper::adjustDeviceBitfield(0, memoryPropertiesRootDevice0Tile1, devicesInContextBitfield1111).to_ulong());
+    EXPECT_EQ(0b1111u, MemoryPropertiesHelper::adjustDeviceBitfield(1, memoryPropertiesRootDevice0Tile0, devicesInContextBitfield1111).to_ulong());
+    EXPECT_EQ(0b1111u, MemoryPropertiesHelper::adjustDeviceBitfield(1, memoryPropertiesRootDevice0Tile1, devicesInContextBitfield1111).to_ulong());
+
+    EXPECT_EQ(0b101u, MemoryPropertiesHelper::adjustDeviceBitfield(0, memoryPropertiesRootDevice0, devicesInContextBitfield0101).to_ulong());
+    EXPECT_EQ(0b1010u, MemoryPropertiesHelper::adjustDeviceBitfield(0, memoryPropertiesRootDevice0, devicesInContextBitfield1010).to_ulong());
+    EXPECT_EQ(0b1111u, MemoryPropertiesHelper::adjustDeviceBitfield(0, memoryPropertiesRootDevice0, devicesInContextBitfield1111).to_ulong());
+
+    for (auto processedRootDevice : rootDevicesToProcess) {
+        for (auto devicesInContextBitfield : devicesInContextBitfields) {
+            for (auto &memoryProperties : memoryPropertiesToProcess) {
+                auto expectedDeviceBitfield = devicesInContextBitfield;
+                if (processedRootDevice == memoryProperties.pDevice->getRootDeviceIndex()) {
+                    expectedDeviceBitfield &= memoryProperties.pDevice->getDeviceBitfield();
+                }
+                auto adjustedDeviceBitfield = MemoryPropertiesHelper::adjustDeviceBitfield(
+                    processedRootDevice, memoryProperties, devicesInContextBitfield);
+                EXPECT_EQ(expectedDeviceBitfield, adjustedDeviceBitfield);
+            }
+        }
+    }
+}
+
+TEST_F(MemoryPropertiesHelperTests, WhenCallingGetInitialPlacementThenCorrectValueIsReturned) {
+    MemoryProperties memoryProperties{};
+    EXPECT_EQ(GraphicsAllocation::UsmInitialPlacement::CPU, MemoryPropertiesHelper::getUSMInitialPlacement(memoryProperties));
+
+    memoryProperties.allocFlags.usmInitialPlacementCpu = false;
+    memoryProperties.allocFlags.usmInitialPlacementGpu = false;
+    EXPECT_EQ(GraphicsAllocation::UsmInitialPlacement::CPU, MemoryPropertiesHelper::getUSMInitialPlacement(memoryProperties));
+
+    memoryProperties.allocFlags.usmInitialPlacementCpu = false;
+    memoryProperties.allocFlags.usmInitialPlacementGpu = true;
+    EXPECT_EQ(GraphicsAllocation::UsmInitialPlacement::GPU, MemoryPropertiesHelper::getUSMInitialPlacement(memoryProperties));
+
+    memoryProperties.allocFlags.usmInitialPlacementCpu = true;
+    memoryProperties.allocFlags.usmInitialPlacementGpu = false;
+    EXPECT_EQ(GraphicsAllocation::UsmInitialPlacement::CPU, MemoryPropertiesHelper::getUSMInitialPlacement(memoryProperties));
+
+    memoryProperties.allocFlags.usmInitialPlacementCpu = true;
+    memoryProperties.allocFlags.usmInitialPlacementGpu = true;
+    EXPECT_EQ(GraphicsAllocation::UsmInitialPlacement::CPU, MemoryPropertiesHelper::getUSMInitialPlacement(memoryProperties));
+}
+
+TEST_F(MemoryPropertiesHelperTests, givenUsmInitialPlacementSetWhenCallingHasInitialPlacementCpuThenCorrectValueIsReturned) {
+    DebugManagerStateRestore restorer;
+    MemoryProperties memoryProperties{};
+
+    for (auto intialPlacement : {-1, 0, 1}) {
+        DebugManager.flags.UsmInitialPlacement.set(intialPlacement);
+        if (intialPlacement == 1) {
+            EXPECT_EQ(GraphicsAllocation::UsmInitialPlacement::GPU, MemoryPropertiesHelper::getUSMInitialPlacement(memoryProperties));
+        } else {
+            EXPECT_EQ(GraphicsAllocation::UsmInitialPlacement::CPU, MemoryPropertiesHelper::getUSMInitialPlacement(memoryProperties));
+        }
+    }
+}
+
+TEST_F(MemoryPropertiesHelperTests, WhenCallingSetInitialPlacementThenCorrectValueIsSetInAllocationProperties) {
+    AllocationProperties allocationProperties{mockRootDeviceIndex, 0, AllocationType::UNIFIED_SHARED_MEMORY, mockDeviceBitfield};
+
+    for (auto initialPlacement : {GraphicsAllocation::UsmInitialPlacement::CPU, GraphicsAllocation::UsmInitialPlacement::GPU}) {
+        MemoryPropertiesHelper::setUSMInitialPlacement(allocationProperties, initialPlacement);
+        EXPECT_EQ(initialPlacement, allocationProperties.usmInitialPlacement);
     }
 }

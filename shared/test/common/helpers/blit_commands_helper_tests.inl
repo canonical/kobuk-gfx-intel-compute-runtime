@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,8 +9,7 @@
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 
@@ -33,12 +32,12 @@ class GivenLinearStreamWhenCallDispatchBlitMemoryColorFillThenCorrectDepthIsProg
     void TestBodyImpl(size_t patternSize, COLOR_DEPTH expectedDepth) {
         uint32_t streamBuffer[100] = {};
         LinearStream stream(streamBuffer, sizeof(streamBuffer));
-        MockGraphicsAllocation mockAllocation(0, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+        MockGraphicsAllocation mockAllocation(0, AllocationType::INTERNAL_HOST_MEMORY,
                                               reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
                                               MemoryPool::System4KBPages);
         uint32_t patternToCommand[4];
         memset(patternToCommand, 4, patternSize);
-        BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, patternToCommand, patternSize, stream, mockAllocation.getUnderlyingBufferSize(), *device->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]);
+        BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, 0, patternToCommand, patternSize, stream, mockAllocation.getUnderlyingBufferSize(), *device->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]);
         GenCmdList cmdList;
         ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
             cmdList, ptrOffset(stream.getCpuBase(), 0), stream.getUsed()));

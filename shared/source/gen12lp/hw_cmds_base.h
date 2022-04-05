@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -22,6 +22,8 @@ namespace NEO {
 struct GEN12LP {
 #include "shared/source/generated/gen12lp/hw_cmds_generated_gen12lp.inl"
 
+    static constexpr bool supportsSampler = true;
+    static constexpr bool isUsingGenericMediaStateClear = true;
     static constexpr uint32_t stateComputeModeForceNonCoherentMask = (0b11u << 3);
 
     struct DataPortBindlessSurfaceExtendedMessageDescriptor {
@@ -88,6 +90,7 @@ struct TGLLPFamily : public GEN12LP {
     static const MI_USER_INTERRUPT cmdInitUserInterrupt;
     static const L3_CONTROL cmdInitL3ControlWithoutPostSync;
     static const L3_CONTROL cmdInitL3ControlWithPostSync;
+    static const XY_BLOCK_COPY_BLT cmdInitXyBlockCopyBlt;
     static const XY_COPY_BLT cmdInitXyCopyBlt;
     static const MI_FLUSH_DW cmdInitMiFlushDw;
     static const XY_FAST_COLOR_BLT cmdInitXyColorBlt;

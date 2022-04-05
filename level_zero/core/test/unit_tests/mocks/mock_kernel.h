@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,6 +9,7 @@
 #include "shared/source/device_binary_format/patchtokens_decoder.h"
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/source/kernel/kernel_descriptor_from_patchtokens.h"
+#include "shared/test/common/test_macros/mock_method_macros.h"
 
 #include "level_zero/core/source/kernel/kernel_hw.h"
 #include "level_zero/core/source/kernel/kernel_imp.h"
@@ -52,6 +53,7 @@ struct WhiteBox<::L0::Kernel> : public ::L0::KernelImp {
     using ::L0::KernelImp::perThreadDataForWholeThreadGroup;
     using ::L0::KernelImp::perThreadDataSize;
     using ::L0::KernelImp::perThreadDataSizeForWholeThreadGroup;
+    using ::L0::KernelImp::pImplicitArgs;
     using ::L0::KernelImp::printfBuffer;
     using ::L0::KernelImp::requiredWorkgroupOrder;
     using ::L0::KernelImp::residencyContainer;
@@ -63,8 +65,6 @@ struct WhiteBox<::L0::Kernel> : public ::L0::KernelImp {
                                NEO::GraphicsAllocation *alloc) override {}
 
     void evaluateIfRequiresGenerationOfLocalIdsByRuntime(const NEO::KernelDescriptor &kernelDescriptor) override {}
-
-    std::unique_ptr<Kernel> clone() const override { return nullptr; }
 
     WhiteBox() : ::L0::KernelImp(nullptr) {}
 };
@@ -92,14 +92,13 @@ struct WhiteBoxKernelHw : public KernelHw<gfxCoreFamily> {
 
     void evaluateIfRequiresGenerationOfLocalIdsByRuntime(const NEO::KernelDescriptor &kernelDescriptor) override {}
 
-    std::unique_ptr<Kernel> clone() const override { return nullptr; }
-
     WhiteBoxKernelHw() : ::L0::KernelHw<gfxCoreFamily>(nullptr) {}
 };
 
 template <>
 struct Mock<::L0::Kernel> : public WhiteBox<::L0::Kernel> {
     using BaseClass = WhiteBox<::L0::Kernel>;
+    ADDMETHOD_NOBASE(getProperties, ze_result_t, ZE_RESULT_SUCCESS, (ze_kernel_properties_t * pKernelProperties))
 
     Mock() : BaseClass(nullptr) {
         NEO::PatchTokenBinary::KernelFromPatchtokens kernelTokens;
@@ -112,7 +111,7 @@ struct Mock<::L0::Kernel> : public WhiteBox<::L0::Kernel> {
 
         this->kernelImmData = &immutableData;
 
-        auto allocation = new NEO::GraphicsAllocation(0, NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+        auto allocation = new NEO::GraphicsAllocation(0, NEO::AllocationType::KERNEL_ISA,
                                                       nullptr, 0, 0, 4096,
                                                       MemoryPool::System4KBPages);
 
@@ -128,9 +127,6 @@ struct Mock<::L0::Kernel> : public WhiteBox<::L0::Kernel> {
 
     void setBufferSurfaceState(uint32_t argIndex, void *address, NEO::GraphicsAllocation *alloc) override {}
     void evaluateIfRequiresGenerationOfLocalIdsByRuntime(const NEO::KernelDescriptor &kernelDescriptor) override {}
-    std::unique_ptr<Kernel> clone() const override {
-        return nullptr;
-    }
     ze_result_t setArgBufferWithAlloc(uint32_t argIndex, uintptr_t argVal, NEO::GraphicsAllocation *allocation) override {
         return ZE_RESULT_SUCCESS;
     }

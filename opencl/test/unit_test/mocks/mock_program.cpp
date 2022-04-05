@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -18,7 +18,6 @@
 
 #include "opencl/source/context/context.h"
 #include "opencl/source/program/create.inl"
-#include "opencl/source/program/kernel_info.h"
 #include "opencl/test/unit_test/helpers/ult_limits.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 
@@ -29,15 +28,16 @@ ClDeviceVector toClDeviceVector(ClDevice &clDevice) {
     return deviceVector;
 }
 
-int MockProgram::initInternalOptionsCalled = 0;
+int MockProgram::getInternalOptionsCalled = 0;
 
 std::string MockProgram::getCachedFileName() const {
+    CompilerCache cache(CompilerCacheConfig{});
     auto hwInfo = this->context->getDevice(0)->getHardwareInfo();
     auto input = ArrayRef<const char>(this->sourceCode.c_str(), this->sourceCode.size());
     auto opts = ArrayRef<const char>(this->options.c_str(), this->options.size());
-    auto internalOptions = getInitInternalOptions();
+    auto internalOptions = getInternalOptions();
     auto internalOpts = ArrayRef<const char>(internalOptions.c_str(), internalOptions.size());
-    return CompilerCache::getCachedFileName(hwInfo, input, opts, internalOpts);
+    return cache.getCachedFileName(hwInfo, input, opts, internalOpts);
 }
 
 } // namespace NEO

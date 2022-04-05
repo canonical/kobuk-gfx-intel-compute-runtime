@@ -1,11 +1,13 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include "shared/source/kernel/debug_data.h"
+
 #include "level_zero/core/source/debugger/debugger_l0.h"
 #include "level_zero/core/test/unit_tests/white_box.h"
 
@@ -41,9 +43,47 @@ class MockDebuggerL0Hw : public L0::DebuggerL0Hw<GfxFamily> {
         L0::DebuggerL0Hw<GfxFamily>::programSbaTrackingCommands(cmdStream, sba);
     }
 
+    void registerElf(NEO::DebugData *debugData, NEO::GraphicsAllocation *isaAllocation) override {
+        registerElfCount++;
+        lastReceivedElf = debugData->vIsa;
+        L0::DebuggerL0Hw<GfxFamily>::registerElf(debugData, isaAllocation);
+    }
+
+    bool attachZebinModuleToSegmentAllocations(const StackVec<NEO::GraphicsAllocation *, 32> &allocs, uint32_t &moduleHandle) override {
+        segmentCountWithAttachedModuleHandle = static_cast<uint32_t>(allocs.size());
+        if (std::numeric_limits<uint32_t>::max() != moduleHandleToReturn) {
+            moduleHandle = moduleHandleToReturn;
+            return true;
+        }
+        return L0::DebuggerL0Hw<GfxFamily>::attachZebinModuleToSegmentAllocations(allocs, moduleHandle);
+    }
+
+    bool removeZebinModule(uint32_t moduleHandle) override {
+        removedZebinModuleHandle = moduleHandle;
+        return L0::DebuggerL0Hw<GfxFamily>::removeZebinModule(moduleHandle);
+    }
+
+    void notifyCommandQueueCreated() override {
+        commandQueueCreatedCount++;
+        L0::DebuggerL0Hw<GfxFamily>::notifyCommandQueueCreated();
+    }
+
+    void notifyCommandQueueDestroyed() override {
+        commandQueueDestroyedCount++;
+        L0::DebuggerL0Hw<GfxFamily>::notifyCommandQueueDestroyed();
+    }
+
     uint32_t captureStateBaseAddressCount = 0;
     uint32_t programSbaTrackingCommandsCount = 0;
     uint32_t getSbaTrackingCommandsSizeCount = 0;
+    uint32_t registerElfCount = 0;
+    uint32_t commandQueueCreatedCount = 0;
+    uint32_t commandQueueDestroyedCount = 0;
+    const char *lastReceivedElf = nullptr;
+
+    uint32_t segmentCountWithAttachedModuleHandle = 0;
+    uint32_t removedZebinModuleHandle = 0;
+    uint32_t moduleHandleToReturn = std::numeric_limits<uint32_t>::max();
 };
 
 template <uint32_t productFamily, typename GfxFamily>

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -30,7 +30,7 @@ zetMetricGet(
     zet_metric_group_handle_t hMetricGroup,
     uint32_t *pCount,
     zet_metric_handle_t *phMetrics) {
-    return L0::MetricGroup::fromHandle(hMetricGroup)->getMetric(pCount, phMetrics);
+    return L0::MetricGroup::fromHandle(hMetricGroup)->metricGet(pCount, phMetrics);
 }
 
 ZE_DLLEXPORT ze_result_t ZE_APICALL
@@ -115,7 +115,7 @@ zetMetricQueryCreate(
     zet_metric_query_pool_handle_t hMetricQueryPool,
     uint32_t index,
     zet_metric_query_handle_t *phMetricQuery) {
-    return L0::MetricQueryPool::fromHandle(hMetricQueryPool)->createMetricQuery(index, phMetricQuery);
+    return L0::MetricQueryPool::fromHandle(hMetricQueryPool)->metricQueryCreate(index, phMetricQuery);
 }
 
 ZE_DLLEXPORT ze_result_t ZE_APICALL

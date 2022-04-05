@@ -1,26 +1,31 @@
 #
-# Copyright (C) 2018-2021 Intel Corporation
+# Copyright (C) 2018-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
 
 add_library(${BUILTINS_BINARIES_BINDFUL_LIB_NAME} OBJECT EXCLUDE_FROM_ALL builtins_binary.cmake)
 add_library(${BUILTINS_BINARIES_BINDLESS_LIB_NAME} OBJECT EXCLUDE_FROM_ALL builtins_binary.cmake)
+target_compile_definitions(${BUILTINS_BINARIES_BINDFUL_LIB_NAME} PUBLIC MOCKABLE_VIRTUAL=)
+target_compile_definitions(${BUILTINS_BINARIES_BINDLESS_LIB_NAME} PUBLIC MOCKABLE_VIRTUAL=)
 
 # Add builtins sources
 add_subdirectory(registry)
 
 list(APPEND BIND_MODES
      "bindful"
-     #            "bindless"
+     "bindless"
 )
 
 set(GENERATED_BUILTINS
-    "aux_translation"
     "copy_buffer_rect"
     "copy_buffer_to_buffer"
     "copy_kernel_timestamps"
     "fill_buffer"
+)
+
+set(GENERATED_BUILTINS_AUX_TRANSLATION
+    "aux_translation"
 )
 
 set(GENERATED_BUILTINS_IMAGES
@@ -52,7 +57,7 @@ endif()
 
 foreach(MODE ${BIND_MODES})
   get_property(GENERATED_BUILTINS_CPPS_${MODE} GLOBAL PROPERTY GENERATED_BUILTINS_CPPS_${MODE})
-  source_group("generated files\\${GEN_TYPE_LOWER}" FILES GENERATED_BUILTINS_CPPS_${MODE})
+  source_group("generated files\\${CORE_TYPE_LOWER}" FILES GENERATED_BUILTINS_CPPS_${MODE})
 endforeach()
 
 if(COMPILE_BUILT_INS)
@@ -62,7 +67,7 @@ endif()
 
 set_target_properties(${BUILTINS_BINARIES_BINDFUL_LIB_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 set_target_properties(${BUILTINS_BINARIES_BINDFUL_LIB_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
-set_target_properties(${BUILTINS_BINARIES_BINDFUL_LIB_NAME} PROPERTIES FOLDER "${SHARED_SOURCE_PROJECTS_FOLDER}/${SHARED_BUIILINS_PROJECTS_FOLDER}")
+set_target_properties(${BUILTINS_BINARIES_BINDFUL_LIB_NAME} PROPERTIES FOLDER "${SHARED_SOURCE_PROJECTS_FOLDER}/${SHARED_BUILTINS_PROJECTS_FOLDER}")
 
 target_include_directories(${BUILTINS_BINARIES_BINDFUL_LIB_NAME} PRIVATE
                            ${ENGINE_NODE_DIR}
@@ -80,7 +85,7 @@ endif()
 
 set_target_properties(${BUILTINS_BINARIES_BINDLESS_LIB_NAME} PROPERTIES LINKER_LANGUAGE CXX)
 set_target_properties(${BUILTINS_BINARIES_BINDLESS_LIB_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
-set_target_properties(${BUILTINS_BINARIES_BINDLESS_LIB_NAME} PROPERTIES FOLDER "${SHARED_SOURCE_PROJECTS_FOLDER}/${SHARED_BUIILINS_PROJECTS_FOLDER}")
+set_target_properties(${BUILTINS_BINARIES_BINDLESS_LIB_NAME} PROPERTIES FOLDER "${SHARED_SOURCE_PROJECTS_FOLDER}/${SHARED_BUILTINS_PROJECTS_FOLDER}")
 
 target_include_directories(${BUILTINS_BINARIES_BINDLESS_LIB_NAME} PRIVATE
                            ${ENGINE_NODE_DIR}

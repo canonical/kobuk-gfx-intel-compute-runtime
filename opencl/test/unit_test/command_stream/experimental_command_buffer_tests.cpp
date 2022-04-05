@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,11 +11,11 @@
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_experimental_command_buffer.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/test/unit_test/fixtures/multi_root_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
-#include "test.h"
 
 #include "gtest/gtest.h"
 
@@ -81,7 +81,7 @@ HWTEST_F(MockExperimentalCommandBufferTest, givenEnabledExperimentalCmdBufferWhe
     ASSERT_NE(bbList.end(), it);
     bbStart = reinterpret_cast<MI_BATCH_BUFFER_START *>(*it);
     ASSERT_NE(nullptr, bbStart);
-    EXPECT_EQ(exCmdBufferGpuAddr, bbStart->getBatchBufferStartAddressGraphicsaddress472());
+    EXPECT_EQ(exCmdBufferGpuAddr, bbStart->getBatchBufferStartAddress());
     EXPECT_EQ(MI_BATCH_BUFFER_START::SECOND_LEVEL_BATCH_BUFFER_SECOND_LEVEL_BATCH, bbStart->getSecondLevelBatchBuffer());
 
     MI_BATCH_BUFFER_END *bbEnd = nullptr;
@@ -100,23 +100,19 @@ HWTEST_F(MockExperimentalCommandBufferTest, givenEnabledExperimentalCmdBufferWhe
         ASSERT_NE(nullptr, pipeControl);
         EXPECT_EQ(1u, pipeControl->getCommandStreamerStallEnable());
         it++;
-    }
-
-    if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
-        it++;
+        if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
+            it++;
+        }
     }
 
     //2nd PIPE_CONTROL with ts addr
     uint64_t timeStampAddress = mockExCmdBuffer->timestamps->getGpuAddress();
-    uint32_t expectedTsAddress = static_cast<uint32_t>(timeStampAddress & 0x0000FFFFFFFFULL);
-    uint32_t expectedTsAddressHigh = static_cast<uint32_t>(timeStampAddress >> 32);
     ASSERT_NE(end, it);
     pipeControl = genCmdCast<PIPE_CONTROL *>(*it);
     ASSERT_NE(nullptr, pipeControl);
     EXPECT_EQ(1u, pipeControl->getCommandStreamerStallEnable());
     EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, pipeControl->getPostSyncOperation());
-    EXPECT_EQ(expectedTsAddress, pipeControl->getAddress());
-    EXPECT_EQ(expectedTsAddressHigh, pipeControl->getAddressHigh());
+    EXPECT_EQ(timeStampAddress, NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControl));
 
     if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
         it++;
@@ -138,24 +134,20 @@ HWTEST_F(MockExperimentalCommandBufferTest, givenEnabledExperimentalCmdBufferWhe
         pipeControl = genCmdCast<PIPE_CONTROL *>(*it);
         ASSERT_NE(nullptr, pipeControl);
         EXPECT_EQ(1u, pipeControl->getCommandStreamerStallEnable());
-    }
-
-    if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
-        it++;
+        if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
+            it++;
+        }
     }
 
     //4th PIPE_CONTROL with ts addr
     timeStampAddress = mockExCmdBuffer->timestamps->getGpuAddress() + sizeof(uint64_t);
-    expectedTsAddress = static_cast<uint32_t>(timeStampAddress & 0x0000FFFFFFFFULL);
-    expectedTsAddressHigh = static_cast<uint32_t>(timeStampAddress >> 32);
     it++;
     ASSERT_NE(end, it);
     pipeControl = genCmdCast<PIPE_CONTROL *>(*it);
     ASSERT_NE(nullptr, pipeControl);
     EXPECT_EQ(1u, pipeControl->getCommandStreamerStallEnable());
     EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, pipeControl->getPostSyncOperation());
-    EXPECT_EQ(expectedTsAddress, pipeControl->getAddress());
-    EXPECT_EQ(expectedTsAddressHigh, pipeControl->getAddressHigh());
+    EXPECT_EQ(timeStampAddress, NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControl));
 
     if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
         it++;
@@ -228,7 +220,7 @@ HWTEST_F(MockExperimentalCommandBufferTest, givenEnabledExperimentalCmdBufferWhe
     ASSERT_NE(bbList.end(), it);
     bbStart = reinterpret_cast<MI_BATCH_BUFFER_START *>(*it);
     ASSERT_NE(nullptr, bbStart);
-    EXPECT_EQ(exCmdBufferGpuAddr, bbStart->getBatchBufferStartAddressGraphicsaddress472());
+    EXPECT_EQ(exCmdBufferGpuAddr, bbStart->getBatchBufferStartAddress());
     EXPECT_EQ(MI_BATCH_BUFFER_START::SECOND_LEVEL_BATCH_BUFFER_SECOND_LEVEL_BATCH, bbStart->getSecondLevelBatchBuffer());
 
     PIPE_CONTROL *pipeControl = nullptr;
@@ -239,33 +231,30 @@ HWTEST_F(MockExperimentalCommandBufferTest, givenEnabledExperimentalCmdBufferWhe
     GenCmdList::iterator end = hwParserExCmdBuffer.cmdList.end();
     if (MemorySynchronizationCommands<FamilyType>::isPipeControlWArequired(pDevice->getHardwareInfo())) {
         it++;
+        if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
+            it++;
+        }
     }
-    if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
-        it++;
-    }
+
     //2nd PIPE_CONTROL
     uint64_t timeStampAddress = mockExCmdBuffer->timestamps->getGpuAddress() + 2 * sizeof(uint64_t);
-    uint32_t expectedTsAddress = static_cast<uint32_t>(timeStampAddress & 0x0000FFFFFFFFULL);
-    uint32_t expectedTsAddressHigh = static_cast<uint32_t>(timeStampAddress >> 32);
     ASSERT_NE(end, it);
     pipeControl = genCmdCast<PIPE_CONTROL *>(*it);
     ASSERT_NE(nullptr, pipeControl);
     EXPECT_EQ(1u, pipeControl->getCommandStreamerStallEnable());
     EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, pipeControl->getPostSyncOperation());
-    EXPECT_EQ(expectedTsAddress, pipeControl->getAddress());
-    EXPECT_EQ(expectedTsAddressHigh, pipeControl->getAddressHigh());
+    EXPECT_EQ(timeStampAddress, NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControl));
     //omit SEMAPHORE_WAIT and 3rd PIPE_CONTROL
     if (MemorySynchronizationCommands<FamilyType>::isPipeControlWArequired(pDevice->getHardwareInfo())) {
         it++;
+        if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
+            it++;
+        }
     }
-    if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
-        it++;
-    }
+
     it++;
     //get 4th PIPE_CONTROL
     timeStampAddress = mockExCmdBuffer->timestamps->getGpuAddress() + 3 * sizeof(uint64_t);
-    expectedTsAddress = static_cast<uint32_t>(timeStampAddress & 0x0000FFFFFFFFULL);
-    expectedTsAddressHigh = static_cast<uint32_t>(timeStampAddress >> 32);
     it++;
     if (UnitTestHelper<FamilyType>::isAdditionalSynchronizationRequired()) {
         it++;
@@ -275,8 +264,7 @@ HWTEST_F(MockExperimentalCommandBufferTest, givenEnabledExperimentalCmdBufferWhe
     ASSERT_NE(nullptr, pipeControl);
     EXPECT_EQ(1u, pipeControl->getCommandStreamerStallEnable());
     EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, pipeControl->getPostSyncOperation());
-    EXPECT_EQ(expectedTsAddress, pipeControl->getAddress());
-    EXPECT_EQ(expectedTsAddressHigh, pipeControl->getAddressHigh());
+    EXPECT_EQ(timeStampAddress, NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControl));
 }
 
 HWTEST_F(MockExperimentalCommandBufferTest, givenEnabledExperimentalCmdBufferWhenMemoryManagerAlreadyStoresAllocationThenUseItForLinearSteam) {
@@ -287,9 +275,9 @@ HWTEST_F(MockExperimentalCommandBufferTest, givenEnabledExperimentalCmdBufferWhe
 
     //Make two allocations, since CSR will try to reuse it also
     auto rootDeviceIndex = pDevice->getRootDeviceIndex();
-    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties({rootDeviceIndex, 3 * MemoryConstants::pageSize64k, GraphicsAllocation::AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()});
+    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties({rootDeviceIndex, 3 * MemoryConstants::pageSize64k, AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()});
     storage->storeAllocation(std::unique_ptr<GraphicsAllocation>(allocation), REUSABLE_ALLOCATION);
-    allocation = memoryManager->allocateGraphicsMemoryWithProperties({rootDeviceIndex, 3 * MemoryConstants::pageSize64k, GraphicsAllocation::AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()});
+    allocation = memoryManager->allocateGraphicsMemoryWithProperties({rootDeviceIndex, 3 * MemoryConstants::pageSize64k, AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()});
     storage->storeAllocation(std::unique_ptr<GraphicsAllocation>(allocation), REUSABLE_ALLOCATION);
 
     MockExperimentalCommandBuffer *mockExCmdBuffer = static_cast<MockExperimentalCommandBuffer *>(commandStreamReceiver.experimentalCmdBuffer.get());
@@ -329,7 +317,7 @@ HWTEST_F(MockExperimentalCommandBufferTest, givenEnabledExperimentalCmdBufferWhe
     ASSERT_NE(bbList.end(), it);
     bbStart = reinterpret_cast<MI_BATCH_BUFFER_START *>(*it);
     ASSERT_NE(nullptr, bbStart);
-    EXPECT_EQ(oldExCmdBufferGpuAddr, bbStart->getBatchBufferStartAddressGraphicsaddress472());
+    EXPECT_EQ(oldExCmdBufferGpuAddr, bbStart->getBatchBufferStartAddress());
     EXPECT_EQ(MI_BATCH_BUFFER_START::SECOND_LEVEL_BATCH_BUFFER_SECOND_LEVEL_BATCH, bbStart->getSecondLevelBatchBuffer());
 
     flushTask(commandStreamReceiver);
@@ -351,7 +339,7 @@ HWTEST_F(MockExperimentalCommandBufferTest, givenEnabledExperimentalCmdBufferWhe
     ASSERT_NE(bbList.end(), it);
     bbStart = reinterpret_cast<MI_BATCH_BUFFER_START *>(*it);
     ASSERT_NE(nullptr, bbStart);
-    EXPECT_EQ(newExCmdBufferGpuAddr, bbStart->getBatchBufferStartAddressGraphicsaddress472());
+    EXPECT_EQ(newExCmdBufferGpuAddr, bbStart->getBatchBufferStartAddress());
     EXPECT_EQ(MI_BATCH_BUFFER_START::SECOND_LEVEL_BATCH_BUFFER_SECOND_LEVEL_BATCH, bbStart->getSecondLevelBatchBuffer());
 }
 

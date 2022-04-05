@@ -8,9 +8,9 @@
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/gen_common/reg_configs_common.h"
 #include "shared/source/helpers/preamble.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/cmdqueue/cmdqueue_hw.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdqueue.h"
@@ -28,10 +28,10 @@ XEHPTEST_F(CommandQueueDebugCommandsForSldXeHP, givenSteppingA0OrBWhenGlobalSipI
     using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
     ze_command_queue_desc_t queueDesc = {};
     ze_result_t returnValue;
-    HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
-    std::array<uint32_t, 2> revisions = {hwHelper.getHwRevIdFromStepping(REVID::REVISION_A0, hwInfo),
-                                         hwHelper.getHwRevIdFromStepping(REVID::REVISION_B, hwInfo)};
+    std::array<uint32_t, 2> revisions = {hwInfoConfig.getHwRevIdFromStepping(REVID::REVISION_A0, hwInfo),
+                                         hwInfoConfig.getHwRevIdFromStepping(REVID::REVISION_B, hwInfo)};
 
     for (auto revision : revisions) {
         hwInfo.platform.usRevId = revision;
@@ -70,7 +70,7 @@ XEHPTEST_F(CommandQueueDebugCommandsForSldXeHP, givenSteppingA0OrBWhenGlobalSipI
                 if (miLoad->getRegisterOffset() == GlobalSipRegister<FamilyType>::registerOffset) {
                     globalSip.push_back(miLoad);
                     globalSipFound++;
-                } else if (miLoad->getRegisterOffset() == DebugModeRegisterOffset<FamilyType>::registerOffset) {
+                } else if (miLoad->getRegisterOffset() == 0x20d8u) {
                     debugModeFound++;
                 } else if (miLoad->getRegisterOffset() == TdDebugControlRegisterOffset<FamilyType>::registerOffset) {
                     tdCtlFound++;
@@ -107,10 +107,10 @@ XEHPTEST_F(CommandQueueDebugCommandsDebuggerL0XeHP, givenSteppingA0OrBWhenGlobal
     using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
     ze_command_queue_desc_t queueDesc = {};
     ze_result_t returnValue;
-    HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
-    std::array<uint32_t, 2> revisions = {hwHelper.getHwRevIdFromStepping(REVID::REVISION_A0, hwInfo),
-                                         hwHelper.getHwRevIdFromStepping(REVID::REVISION_B, hwInfo)};
+    std::array<uint32_t, 2> revisions = {hwInfoConfig.getHwRevIdFromStepping(REVID::REVISION_A0, hwInfo),
+                                         hwInfoConfig.getHwRevIdFromStepping(REVID::REVISION_B, hwInfo)};
 
     for (auto revision : revisions) {
         hwInfo.platform.usRevId = revision;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,25 +11,24 @@
 #include "shared/source/aub_mem_dump/aub_alloc_dump.inl"
 #include "shared/source/aub_mem_dump/page_table_entry_bits.h"
 #include "shared/source/command_stream/aub_command_stream_receiver.h"
+#include "shared/source/command_stream/command_stream_receiver_with_aub_dump.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/aligned_memory.h"
+#include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/engine_node_helper.h"
+#include "shared/source/helpers/hardware_context_controller.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/populate_factory.h"
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/memory_manager/memory_banks.h"
 #include "shared/source/memory_manager/physical_address_allocator.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/os_context.h"
-
-#include "opencl/source/command_stream/command_stream_receiver_with_aub_dump.h"
-#include "opencl/source/helpers/dispatch_info.h"
-#include "opencl/source/helpers/hardware_context_controller.h"
-#include "opencl/source/os_interface/ocl_reg_path.h"
 
 #include <cstring>
 
@@ -69,6 +68,8 @@ TbxCommandStreamReceiverHw<GfxFamily>::~TbxCommandStreamReceiverHw() {
 
 template <typename GfxFamily>
 void TbxCommandStreamReceiverHw<GfxFamily>::initializeEngine() {
+    isEngineInitialized = true;
+
     if (hardwareContextController) {
         hardwareContextController->initialize();
         return;
@@ -162,6 +163,7 @@ CommandStreamReceiver *TbxCommandStreamReceiverHw<GfxFamily>::create(const std::
     TbxCommandStreamReceiverHw<GfxFamily> *csr;
     auto &hwInfo = *(executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->getHardwareInfo());
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
     if (withAubDump) {
         auto localMemoryEnabled = hwHelper.getEnableLocalMemory(hwInfo);
         auto fullName = AUBCommandStreamReceiver::createFullFilePath(hwInfo, baseName, rootDeviceIndex);
@@ -179,7 +181,7 @@ CommandStreamReceiver *TbxCommandStreamReceiverHw<GfxFamily>::create(const std::
         UNRECOVERABLE_IF(nullptr == subCaptureCommon);
 
         if (subCaptureCommon->subCaptureMode > AubSubCaptureManager::SubCaptureMode::Off) {
-            csr->subCaptureManager = std::make_unique<AubSubCaptureManager>(fullName, *subCaptureCommon, oclRegPath);
+            csr->subCaptureManager = std::make_unique<AubSubCaptureManager>(fullName, *subCaptureCommon, ApiSpecificConfig::getRegistryPath());
         }
 
         if (csr->aubManager) {
@@ -197,14 +199,14 @@ CommandStreamReceiver *TbxCommandStreamReceiverHw<GfxFamily>::create(const std::
         csr->stream->open(nullptr);
 
         // Add the file header.
-        bool streamInitialized = csr->stream->init(hwHelper.getAubStreamSteppingFromHwRevId(hwInfo), csr->aubDeviceId);
+        bool streamInitialized = csr->stream->init(hwInfoConfig.getAubStreamSteppingFromHwRevId(hwInfo), csr->aubDeviceId);
         csr->streamInitialized = streamInitialized;
     }
     return csr;
 }
 
 template <typename GfxFamily>
-bool TbxCommandStreamReceiverHw<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
+SubmissionStatus TbxCommandStreamReceiverHw<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
     if (subCaptureManager) {
         if (aubManager) {
             aubManager->pause(false);
@@ -241,7 +243,7 @@ bool TbxCommandStreamReceiverHw<GfxFamily>::flush(BatchBuffer &batchBuffer, Resi
         }
     }
 
-    submitBatchBuffer(
+    submitBatchBufferTbx(
         batchBufferGpuAddress, pBatchBuffer, sizeBatchBuffer,
         this->getMemoryBank(batchBuffer.commandBufferAllocation),
         this->getPPGTTAdditionalBits(batchBuffer.commandBufferAllocation),
@@ -252,11 +254,11 @@ bool TbxCommandStreamReceiverHw<GfxFamily>::flush(BatchBuffer &batchBuffer, Resi
         subCaptureManager->disableSubCapture();
     }
 
-    return true;
+    return SubmissionStatus::SUCCESS;
 }
 
 template <typename GfxFamily>
-void TbxCommandStreamReceiverHw<GfxFamily>::submitBatchBuffer(uint64_t batchBufferGpuAddress, const void *batchBuffer, size_t batchBufferSize, uint32_t memoryBank, uint64_t entryBits, bool overrideRingHead) {
+void TbxCommandStreamReceiverHw<GfxFamily>::submitBatchBufferTbx(uint64_t batchBufferGpuAddress, const void *batchBuffer, size_t batchBufferSize, uint32_t memoryBank, uint64_t entryBits, bool overrideRingHead) {
     if (hardwareContextController) {
         if (batchBufferSize) {
             hardwareContextController->submit(batchBufferGpuAddress, batchBuffer, batchBufferSize, memoryBank, MemoryConstants::pageSize64k, overrideRingHead);
@@ -323,7 +325,7 @@ void TbxCommandStreamReceiverHw<GfxFamily>::submitBatchBuffer(uint64_t batchBuff
 
         // Add our BBS
         auto bbs = GfxFamily::cmdInitBatchBufferStart;
-        bbs.setBatchBufferStartAddressGraphicsaddress472(static_cast<uint64_t>(batchBufferGpuAddress));
+        bbs.setBatchBufferStartAddress(static_cast<uint64_t>(batchBufferGpuAddress));
         bbs.setAddressSpaceIndicator(MI_BATCH_BUFFER_START::ADDRESS_SPACE_INDICATOR_PPGTT);
         *(MI_BATCH_BUFFER_START *)pTail = bbs;
         pTail = ((MI_BATCH_BUFFER_START *)pTail) + 1;
@@ -405,6 +407,7 @@ void TbxCommandStreamReceiverHw<GfxFamily>::pollForCompletion() {
 
 template <typename GfxFamily>
 void TbxCommandStreamReceiverHw<GfxFamily>::writeMemory(uint64_t gpuAddress, void *cpuAddress, size_t size, uint32_t memoryBank, uint64_t entryBits) {
+    UNRECOVERABLE_IF(!isEngineInitialized);
 
     AubHelperHw<GfxFamily> aubHelperHw(this->localMemoryEnabled);
 
@@ -418,6 +421,8 @@ void TbxCommandStreamReceiverHw<GfxFamily>::writeMemory(uint64_t gpuAddress, voi
 
 template <typename GfxFamily>
 bool TbxCommandStreamReceiverHw<GfxFamily>::writeMemory(GraphicsAllocation &gfxAllocation) {
+    UNRECOVERABLE_IF(!isEngineInitialized);
+
     if (!this->isTbxWritable(gfxAllocation)) {
         return false;
     }
@@ -465,13 +470,22 @@ bool TbxCommandStreamReceiverHw<GfxFamily>::expectMemory(const void *gfxAddress,
 }
 
 template <typename GfxFamily>
-void TbxCommandStreamReceiverHw<GfxFamily>::flushSubmissionsAndDownloadAllocations() {
+void TbxCommandStreamReceiverHw<GfxFamily>::flushSubmissionsAndDownloadAllocations(uint32_t taskCountToWait) {
     this->flushBatchedSubmissions();
 
-    while (*this->getTagAddress() < this->latestFlushedTaskCount) {
-        downloadAllocation(*this->getTagAllocation());
+    if (this->latestFlushedTaskCount < taskCountToWait) {
+        this->flushTagUpdate();
     }
 
+    volatile uint32_t *pollAddress = this->getTagAddress();
+    for (uint32_t i = 0; i < this->activePartitions; i++) {
+        while (*pollAddress < this->latestFlushedTaskCount) {
+            downloadAllocation(*this->getTagAllocation());
+        }
+        pollAddress = ptrOffset(pollAddress, this->postSyncWriteOffset);
+    }
+
+    auto lockCSR = this->obtainUniqueOwnership();
     for (GraphicsAllocation *graphicsAllocation : this->allocationsForDownload) {
         downloadAllocation(*graphicsAllocation);
     }
@@ -479,14 +493,14 @@ void TbxCommandStreamReceiverHw<GfxFamily>::flushSubmissionsAndDownloadAllocatio
 }
 
 template <typename GfxFamily>
-void TbxCommandStreamReceiverHw<GfxFamily>::waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) {
-    flushSubmissionsAndDownloadAllocations();
-    BaseClass::waitForTaskCountWithKmdNotifyFallback(taskCountToWait, flushStampToWait, useQuickKmdSleep, forcePowerSavingMode);
+WaitStatus TbxCommandStreamReceiverHw<GfxFamily>::waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) {
+    flushSubmissionsAndDownloadAllocations(taskCountToWait);
+    return BaseClass::waitForTaskCountWithKmdNotifyFallback(taskCountToWait, flushStampToWait, useQuickKmdSleep, forcePowerSavingMode);
 }
 
 template <typename GfxFamily>
-bool TbxCommandStreamReceiverHw<GfxFamily>::waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) {
-    flushSubmissionsAndDownloadAllocations();
+WaitStatus TbxCommandStreamReceiverHw<GfxFamily>::waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) {
+    flushSubmissionsAndDownloadAllocations(taskCountToWait);
     return BaseClass::waitForCompletionWithTimeout(enableTimeout, timeoutMicroseconds, taskCountToWait);
 }
 
@@ -535,9 +549,14 @@ void TbxCommandStreamReceiverHw<GfxFamily>::downloadAllocation(GraphicsAllocatio
 
 template <typename GfxFamily>
 void TbxCommandStreamReceiverHw<GfxFamily>::downloadAllocations() {
-    while (*this->getTagAddress() < this->latestFlushedTaskCount) {
-        downloadAllocation(*this->getTagAllocation());
+    volatile uint32_t *pollAddress = this->getTagAddress();
+    for (uint32_t i = 0; i < this->activePartitions; i++) {
+        while (*pollAddress < this->latestFlushedTaskCount) {
+            downloadAllocation(*this->getTagAllocation());
+        }
+        pollAddress = ptrOffset(pollAddress, this->postSyncWriteOffset);
     }
+    auto lockCSR = this->obtainUniqueOwnership();
     for (GraphicsAllocation *graphicsAllocation : this->allocationsForDownload) {
         downloadAllocation(*graphicsAllocation);
     }
@@ -555,12 +574,11 @@ bool TbxCommandStreamReceiverHw<GfxFamily>::getpollNotEqualValueForPollForComple
 }
 
 template <typename GfxFamily>
-AubSubCaptureStatus TbxCommandStreamReceiverHw<GfxFamily>::checkAndActivateAubSubCapture(const MultiDispatchInfo &dispatchInfo) {
+AubSubCaptureStatus TbxCommandStreamReceiverHw<GfxFamily>::checkAndActivateAubSubCapture(const std::string &kernelName) {
     if (!subCaptureManager) {
         return {false, false};
     }
 
-    std::string kernelName = (dispatchInfo.empty() ? "" : dispatchInfo.peekMainKernel()->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName);
     auto status = subCaptureManager->checkAndActivateSubCapture(kernelName);
     if (status.isActive && !status.wasActiveInPreviousEnqueue) {
         dumpTbxNonWritable = true;

@@ -11,17 +11,14 @@
 #include "shared/source/os_interface/linux/os_library_linux.h"
 #endif
 #include "shared/source/os_interface/os_library.h"
-
-#include "opencl/test/unit_test/fixtures/memory_management_fixture.h"
-#include "test.h"
+#include "shared/test/common/fixtures/memory_management_fixture.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "gtest/gtest.h"
 
 #include <memory>
 
 namespace Os {
-extern const char *frontEndDllName;
-extern const char *igcDllName;
 extern const char *testDllName;
 } // namespace Os
 const std::string fakeLibName = "_fake_library_name_";

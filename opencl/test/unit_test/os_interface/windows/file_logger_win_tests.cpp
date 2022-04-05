@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,10 +9,10 @@
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/test/common/fixtures/mock_execution_environment_gmm_fixture.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/test/unit_test/os_interface/windows/mock_wddm_allocation.h"
 #include "opencl/test/unit_test/utilities/file_logger_tests.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -28,9 +28,9 @@ TEST_F(FileLoggerTests, GivenLogAllocationMemoryPoolFlagThenLogsCorrectInfo) {
     bool logFileCreated = fileExists(fileLogger.getLogFileName());
     EXPECT_FALSE(logFileCreated);
 
-    MockWddmAllocation allocation;
+    MockWddmAllocation allocation(getGmmClientContext());
     allocation.handle = 4;
-    allocation.setAllocationType(GraphicsAllocation::AllocationType::BUFFER);
+    allocation.setAllocationType(AllocationType::BUFFER);
     allocation.memoryPool = MemoryPool::System64KBPages;
     allocation.getDefaultGmm()->resourceParams.Flags.Info.NonLocalOnly = 0;
     allocation.setGpuAddress(0x12345);
@@ -72,9 +72,11 @@ TEST_F(FileLoggerTests, GivenLogAllocationMemoryPoolFlagSetFalseThenAllocationIs
     bool logFileCreated = fileExists(fileLogger.getLogFileName());
     EXPECT_FALSE(logFileCreated);
 
-    MockWddmAllocation allocation;
+    auto executionEnvironment = std::unique_ptr<ExecutionEnvironment>(MockDevice::prepareExecutionEnvironment(defaultHwInfo.get(), 0u));
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+    MockWddmAllocation allocation(executionEnvironment->rootDeviceEnvironments[0]->getGmmClientContext());
     allocation.handle = 4;
-    allocation.setAllocationType(GraphicsAllocation::AllocationType::BUFFER);
+    allocation.setAllocationType(AllocationType::BUFFER);
     allocation.memoryPool = MemoryPool::System64KBPages;
     allocation.getDefaultGmm()->resourceParams.Flags.Info.NonLocalOnly = 0;
 

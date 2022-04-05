@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -18,15 +18,17 @@ namespace NEO {
 #pragma pack(1)
 struct RingSemaphoreData {
     uint32_t QueueWorkCount;
-    uint8_t ReservedCacheline[60];
+    uint8_t ReservedCacheline0[60];
     uint32_t tagAllocation;
-    uint8_t ReservedCacheline2[60];
+    uint8_t ReservedCacheline1[60];
     uint32_t DiagnosticModeCounter;
     uint32_t Reserved0Uint32;
-    uint64_t Reserved0Uint64;
-    uint8_t ReservedCacheline3[48];
+    uint64_t Reserved1Uint64;
+    uint8_t ReservedCacheline2[48];
+    uint64_t miFlushSpace;
+    uint8_t ReservedCacheline3[56];
 };
-static_assert((64u * 3) == sizeof(RingSemaphoreData), "Invalid size for RingSemaphoreData");
+static_assert((64u * 4) == sizeof(RingSemaphoreData), "Invalid size for RingSemaphoreData");
 #pragma pack()
 
 using DirectSubmissionAllocations = StackVec<GraphicsAllocation *, 8>;
@@ -57,13 +59,13 @@ class DirectSubmissionHw {
 
     virtual ~DirectSubmissionHw();
 
-    bool initialize(bool submitOnInit);
+    bool initialize(bool submitOnInit, bool useNotify);
 
-    bool stopRingBuffer();
+    MOCKABLE_VIRTUAL bool stopRingBuffer();
 
     bool startRingBuffer();
 
-    bool dispatchCommandBuffer(BatchBuffer &batchBuffer, FlushStampTracker &flushStamp);
+    MOCKABLE_VIRTUAL bool dispatchCommandBuffer(BatchBuffer &batchBuffer, FlushStampTracker &flushStamp);
 
     static std::unique_ptr<DirectSubmissionHw<GfxFamily, Dispatcher>> create(Device &device, OsContext &osContext);
 
@@ -71,13 +73,14 @@ class DirectSubmissionHw {
     static constexpr size_t prefetchSize = 8 * MemoryConstants::cacheLineSize;
     static constexpr size_t prefetchNoops = prefetchSize / sizeof(uint32_t);
     bool allocateResources();
-    void deallocateResources();
+    MOCKABLE_VIRTUAL void deallocateResources();
     MOCKABLE_VIRTUAL bool makeResourcesResident(DirectSubmissionAllocations &allocations);
     virtual bool allocateOsResources() = 0;
     virtual bool submit(uint64_t gpuAddress, size_t size) = 0;
     virtual bool handleResidency() = 0;
     virtual void handleNewResourcesSubmission();
     virtual size_t getSizeNewResourceHandler();
+    virtual void handleStopRingBuffer(){};
     virtual uint64_t switchRingBuffers();
     virtual void handleSwitchRingBuffers() = 0;
     GraphicsAllocation *switchRingBuffersAllocations();
@@ -110,11 +113,15 @@ class DirectSubmissionHw {
 
     uint64_t getCommandBufferPositionGpuAddress(void *position);
 
+    void dispatchPartitionRegisterConfiguration();
+    size_t getSizePartitionRegisterConfigurationSection();
+
     void createDiagnostic();
     void initDiagnostic(bool &submitOnInit);
     MOCKABLE_VIRTUAL void performDiagnosticMode();
     void dispatchDiagnosticModeSection();
     size_t getDiagnosticModeSection();
+    void setPostSyncOffset();
 
     enum RingBufferUse : uint32_t {
         FirstBuffer,
@@ -135,6 +142,7 @@ class DirectSubmissionHw {
     GraphicsAllocation *ringBuffer = nullptr;
     GraphicsAllocation *ringBuffer2 = nullptr;
     GraphicsAllocation *semaphores = nullptr;
+    GraphicsAllocation *workPartitionAllocation = nullptr;
     void *semaphorePtr = nullptr;
     volatile RingSemaphoreData *semaphoreData = nullptr;
     volatile void *workloadModeOneStoreAddress = nullptr;
@@ -143,10 +151,15 @@ class DirectSubmissionHw {
     RingBufferUse currentRingBuffer = RingBufferUse::FirstBuffer;
     uint32_t workloadMode = 0;
     uint32_t workloadModeOneExpectedValue = 0u;
+    uint32_t activeTiles = 1u;
+    uint32_t postSyncOffset = 0u;
 
     bool ringStart = false;
     bool disableCpuCacheFlush = true;
     bool disableCacheFlush = false;
     bool disableMonitorFence = false;
+    bool partitionedMode = false;
+    bool partitionConfigSet = true;
+    bool useNotifyForPostSync = false;
 };
 } // namespace NEO

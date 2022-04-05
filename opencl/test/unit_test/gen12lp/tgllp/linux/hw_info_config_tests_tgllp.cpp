@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,10 +8,10 @@
 #include "shared/source/command_stream/preemption.h"
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/os_interface.h"
+#include "shared/test/common/helpers/hw_helper_tests.h"
+#include "shared/test/common/libult/linux/drm_mock.h"
 
 #include "opencl/test/unit_test/helpers/gtest_helpers.h"
-#include "opencl/test/unit_test/helpers/hw_helper_tests.h"
-#include "opencl/test/unit_test/os_interface/linux/drm_mock.h"
 #include "opencl/test/unit_test/os_interface/linux/hw_info_config_linux_tests.h"
 
 using namespace NEO;
@@ -24,7 +24,6 @@ struct HwInfoConfigTestLinuxTgllp : HwInfoConfigTestLinux {
         osInterface->setDriverModel(std::unique_ptr<DriverModel>(drm));
 
         drm->storedDeviceID = 0xFF20;
-        drm->setGtType(GTTYPE_GT1);
     }
 };
 
@@ -36,7 +35,7 @@ TGLLPTEST_F(HwInfoConfigTestLinuxTgllp, GivenTGLLPWhenConfigureHardwareCustomThe
 
     int ret = hwInfoConfig->configureHwInfoDrm(&pInHwInfo, &outHwInfo, osInterface);
     EXPECT_EQ(0, ret);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGpGpuMidThreadLevelPreempt);
+    EXPECT_FALSE(outHwInfo.featureTable.flags.ftrGpGpuMidThreadLevelPreempt);
 }
 
 TGLLPTEST_F(HwInfoConfigTestLinuxTgllp, configureHwInfo) {
@@ -49,16 +48,7 @@ TGLLPTEST_F(HwInfoConfigTestLinuxTgllp, configureHwInfo) {
     EXPECT_EQ((uint32_t)drm->storedSSVal, outHwInfo.gtSystemInfo.SubSliceCount);
     EXPECT_EQ(1u, outHwInfo.gtSystemInfo.SliceCount);
 
-    EXPECT_EQ(GTTYPE_GT1, outHwInfo.platform.eGTType);
-    EXPECT_TRUE(outHwInfo.featureTable.ftrGT1);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGT1_5);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGT2);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGT3);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGT4);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGTA);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGTC);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrGTX);
-    EXPECT_FALSE(outHwInfo.featureTable.ftrTileY);
+    EXPECT_FALSE(outHwInfo.featureTable.flags.ftrTileY);
 }
 
 TGLLPTEST_F(HwInfoConfigTestLinuxTgllp, negative) {
@@ -96,7 +86,7 @@ TYPED_TEST(TgllpHwInfoTests, gtSetupIsCorrect) {
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     DrmMock drm(*executionEnvironment->rootDeviceEnvironments[0]);
     GT_SYSTEM_INFO &gtSystemInfo = hwInfo.gtSystemInfo;
-    DeviceDescriptor device = {0, &hwInfo, &TypeParam::setupHardwareInfo, GTTYPE_GT1};
+    DeviceDescriptor device = {0, &hwInfo, &TypeParam::setupHardwareInfo};
 
     int ret = drm.setupHardwareInfo(&device, false);
 

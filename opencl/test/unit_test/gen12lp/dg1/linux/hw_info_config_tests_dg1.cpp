@@ -8,8 +8,7 @@
 #include "shared/source/command_stream/preemption.h"
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/os_interface.h"
-
-#include "opencl/test/unit_test/helpers/hw_helper_tests.h"
+#include "shared/test/common/helpers/hw_helper_tests.h"
 
 using HwHelperTestGen12Lp = HwHelperTest;
 
@@ -21,7 +20,7 @@ DG1TEST_F(HwHelperTestGen12Lp, GivenDG1WhenConfigureHardwareCustomThenMTPIsNotSe
     PreemptionHelper::adjustDefaultPreemptionMode(hardwareInfo.capabilityTable, true, true, true);
 
     hwInfoConfig->configureHardwareCustom(&hardwareInfo, &osIface);
-    EXPECT_FALSE(hardwareInfo.featureTable.ftrGpGpuMidThreadLevelPreempt);
+    EXPECT_FALSE(hardwareInfo.featureTable.flags.ftrGpGpuMidThreadLevelPreempt);
 }
 
 DG1TEST_F(HwHelperTestGen12Lp, GivenDG1WhenConfigureHardwareCustomThenKmdNotifyIsEnabled) {

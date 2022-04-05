@@ -31,30 +31,21 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBuffer(
     cl_uint numEventsInWaitList,
     const cl_event *eventWaitList,
     cl_event *event) {
+    const cl_command_type cmdType = CL_COMMAND_WRITE_BUFFER;
+
+    CsrSelectionArgs csrSelectionArgs{cmdType, {}, buffer, device->getRootDeviceIndex(), &size};
+    CommandStreamReceiver &csr = selectCsrForBuiltinOperation(csrSelectionArgs);
 
     auto rootDeviceIndex = getDevice().getRootDeviceIndex();
-
-    const cl_command_type cmdType = CL_COMMAND_WRITE_BUFFER;
     auto isMemTransferNeeded = buffer->isMemObjZeroCopy() ? buffer->checkIfMemoryTransferIsRequired(offset, 0, ptr, cmdType) : true;
     bool isCpuCopyAllowed = bufferCpuCopyAllowed(buffer, cmdType, blockingWrite, size, const_cast<void *>(ptr),
                                                  numEventsInWaitList, eventWaitList);
-
     InternalMemoryType memoryType = InternalMemoryType::NOT_SPECIFIED;
-    //check if we are dealing with SVM pointer here for which we already have an allocation
-    if (!mapAllocation && this->getContext().getSVMAllocsManager()) {
-        auto svmEntry = this->getContext().getSVMAllocsManager()->getSVMAlloc(ptr);
-        if (svmEntry) {
-            memoryType = svmEntry->memoryType;
-            if ((svmEntry->gpuAllocations.getGraphicsAllocation(rootDeviceIndex)->getGpuAddress() + svmEntry->size) < (castToUint64(ptr) + size)) {
-                return CL_INVALID_OPERATION;
-            }
 
-            if (isCpuCopyAllowed) {
-                if (svmEntry->memoryType == DEVICE_UNIFIED_MEMORY) {
-                    isCpuCopyAllowed = false;
-                }
-            }
-            mapAllocation = svmEntry->cpuAllocation ? svmEntry->cpuAllocation : svmEntry->gpuAllocations.getGraphicsAllocation(rootDeviceIndex);
+    if (!mapAllocation) {
+        cl_int retVal = getContext().tryGetExistingHostPtrAllocation(ptr, size, rootDeviceIndex, mapAllocation, memoryType, isCpuCopyAllowed);
+        if (retVal != CL_SUCCESS) {
+            return retVal;
         }
     }
 
@@ -82,21 +73,14 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBuffer(
     MemObjSurface bufferSurf(buffer);
     GeneralSurface mapSurface;
     Surface *surfaces[] = {&bufferSurf, nullptr};
-    auto blitAllowed = blitEnqueueAllowed(cmdType);
 
     if (mapAllocation) {
         surfaces[1] = &mapSurface;
         mapSurface.setGraphicsAllocation(mapAllocation);
-        //get offset between base cpu ptr of map allocation and dst ptr
-        if ((memoryType != DEVICE_UNIFIED_MEMORY) && (memoryType != SHARED_UNIFIED_MEMORY)) {
-            size_t srcOffset = ptrDiff(srcPtr, mapAllocation->getUnderlyingBuffer());
-            srcPtr = reinterpret_cast<void *>(mapAllocation->getGpuAddress() + srcOffset);
-        }
+        srcPtr = convertAddressWithOffsetToGpuVa(srcPtr, memoryType, *mapAllocation);
     } else {
         surfaces[1] = &hostPtrSurf;
         if (size != 0) {
-
-            auto &csr = getCommandStreamReceiver(blitAllowed);
             bool status = csr.createAllocationForHostSurface(hostPtrSurf, false);
             if (!status) {
                 return CL_OUT_OF_RESOURCES;
@@ -116,7 +100,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteBuffer(
     dc.transferAllocation = mapAllocation ? mapAllocation : hostPtrSurf.getAllocation();
 
     MultiDispatchInfo dispatchInfo(dc);
-    dispatchBcsOrGpgpuEnqueue<CL_COMMAND_WRITE_BUFFER>(dispatchInfo, surfaces, eBuiltInOps, numEventsInWaitList, eventWaitList, event, blockingWrite, blitAllowed);
+    dispatchBcsOrGpgpuEnqueue<CL_COMMAND_WRITE_BUFFER>(dispatchInfo, surfaces, eBuiltInOps, numEventsInWaitList, eventWaitList, event, blockingWrite, csr);
 
     if (context->isProvidingPerformanceHints()) {
         context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, CL_ENQUEUE_WRITE_BUFFER_REQUIRES_COPY_DATA, static_cast<cl_mem>(buffer));

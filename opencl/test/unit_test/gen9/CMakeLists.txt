@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2021 Intel Corporation
+# Copyright (C) 2018-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -16,14 +16,11 @@ if(TESTS_GEN9)
       ${CMAKE_CURRENT_SOURCE_DIR}/image_tests_gen9.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/kernel_tests_gen9.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/sampler_tests_gen9.cpp
-      ${CMAKE_CURRENT_SOURCE_DIR}/scheduler_source_tests_gen9.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/sip_tests_gen9.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/test_device_caps_gen9.cpp
-      ${CMAKE_CURRENT_SOURCE_DIR}/test_device_queue_hw_gen9.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/test_platform_caps_gen9.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/test_preemption_gen9.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/test_sample_gen9.cpp
-      ${NEO_SOURCE_DIR}/shared/test/common/gen9/unit_test_helper_gen9.cpp
   )
 
   get_property(NEO_CORE_TESTS_GEN9 GLOBAL PROPERTY NEO_CORE_TESTS_GEN9)

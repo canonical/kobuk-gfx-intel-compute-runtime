@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,13 +21,15 @@ namespace Elf {
 
 template <ELF_IDENTIFIER_CLASS NumBits = EI_CLASS_64>
 struct ElfEncoder {
-    ElfEncoder(bool addUndefSectionHeader = true, bool addHeaderSectionNamesSection = true, uint64_t defaultDataAlignment = 8U);
+    ElfEncoder(bool addUndefSectionHeader = true, bool addHeaderSectionNamesSection = true,
+               typename ElfSectionHeaderTypes<NumBits>::AddrAlign defaultDataAlignment = 8U);
 
     void appendSection(const ElfSectionHeader<NumBits> &sectionHeader, const ArrayRef<const uint8_t> sectionData);
     void appendSegment(const ElfProgramHeader<NumBits> &programHeader, const ArrayRef<const uint8_t> segmentData);
 
     ElfSectionHeader<NumBits> &appendSection(SECTION_HEADER_TYPE sectionType, ConstStringRef sectionLabel, const ArrayRef<const uint8_t> sectionData);
     ElfProgramHeader<NumBits> &appendSegment(PROGRAM_HEADER_TYPE segmentType, const ArrayRef<const uint8_t> segmentData);
+    void appendProgramHeaderLoad(size_t sectionId, uint64_t vAddr, uint64_t segSize);
 
     template <typename SectionHeaderEnumT>
     ElfSectionHeader<NumBits> &appendSection(SectionHeaderEnumT sectionType, ConstStringRef sectionLabel, const ArrayRef<const uint8_t> sectionData) {
@@ -51,13 +53,18 @@ struct ElfEncoder {
   protected:
     bool addUndefSectionHeader = false;
     bool addHeaderSectionNamesSection = false;
-    uint64_t defaultDataAlignment = 8U;
+    typename ElfSectionHeaderTypes<NumBits>::AddrAlign defaultDataAlignment = 8U;
     uint64_t maxDataAlignmentNeeded = 1U;
     ElfFileHeader<NumBits> elfFileHeader;
     StackVec<ElfProgramHeader<NumBits>, 32> programHeaders;
     StackVec<ElfSectionHeader<NumBits>, 32> sectionHeaders;
     std::vector<uint8_t> data;
     std::vector<char> stringTable;
+    struct ProgramSectionID {
+        size_t programId;
+        size_t sectionId;
+    };
+    StackVec<ProgramSectionID, 32> programSectionLookupTable;
     struct {
         uint32_t shStrTab = 0;
         uint32_t undef = 0;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -168,6 +168,14 @@ struct CommandList : _ze_command_list_handle_t {
         commandListPerThreadScratchSize = size;
     }
 
+    uint32_t getCommandListPerThreadPrivateScratchSize() const {
+        return commandListPerThreadPrivateScratchSize;
+    }
+
+    void setCommandListPerThreadPrivateScratchSize(uint32_t size) {
+        commandListPerThreadPrivateScratchSize = size;
+    }
+
     uint32_t getCommandListSLMEnable() const {
         return commandListSLMEnabled;
     }
@@ -180,10 +188,6 @@ struct CommandList : _ze_command_list_handle_t {
         return commandListPreemptionMode;
     }
 
-    uint32_t getThreadArbitrationPolicy() const {
-        return threadArbitrationPolicy;
-    }
-
     UnifiedMemoryControls getUnifiedMemoryControls() const {
         return unifiedMemoryControls;
     }
@@ -191,6 +195,8 @@ struct CommandList : _ze_command_list_handle_t {
     bool hasIndirectAllocationsAllowed() const {
         return indirectAllocationsAllowed;
     }
+
+    void handleIndirectAllocationResidency();
 
     NEO::PreemptionMode obtainFunctionPreemptionMode(Kernel *kernel);
 
@@ -216,12 +222,6 @@ struct CommandList : _ze_command_list_handle_t {
         TYPE_IMMEDIATE = 1u
     };
 
-    CommandQueue *cmdQImmediate = nullptr;
-    NEO::CommandStreamReceiver *csr = nullptr;
-    uint32_t cmdListType = CommandListType::TYPE_REGULAR;
-    Device *device = nullptr;
-    std::vector<Kernel *> printfFunctionContainer;
-
     virtual ze_result_t executeCommandListImmediate(bool performMigration) = 0;
     virtual ze_result_t initialize(Device *device, NEO::EngineGroupType engineGroupType, ze_command_list_flags_t flags) = 0;
     virtual ~CommandList();
@@ -241,30 +241,43 @@ struct CommandList : _ze_command_list_handle_t {
         return commandsToPatch;
     }
 
+    void makeResidentAndMigrate(bool);
+    void migrateSharedAllocations();
+
+    std::vector<Kernel *> printfFunctionContainer;
+    CommandQueue *cmdQImmediate = nullptr;
+    NEO::CommandStreamReceiver *csr = nullptr;
+    Device *device = nullptr;
+    NEO::PreemptionMode commandListPreemptionMode = NEO::PreemptionMode::Initial;
+    uint32_t cmdListType = CommandListType::TYPE_REGULAR;
+    uint32_t commandListPerThreadScratchSize = 0u;
+    uint32_t commandListPerThreadPrivateScratchSize = 0u;
+    uint32_t partitionCount = 1;
+    bool isFlushTaskSubmissionEnabled = false;
     bool isSyncModeQueue = false;
     bool commandListSLMEnabled = false;
-    uint32_t commandListPerThreadScratchSize = 0u;
-    NEO::PreemptionMode commandListPreemptionMode = NEO::PreemptionMode::Initial;
-    uint32_t threadArbitrationPolicy = NEO::ThreadArbitrationPolicy::RoundRobin;
-    bool isFlushTaskSubmissionEnabled = false;
+    bool requiresQueueUncachedMocs = false;
 
   protected:
-    std::map<const void *, NEO::GraphicsAllocation *> hostPtrMap;
-    NEO::EngineGroupType engineGroupType;
-    ze_command_list_flags_t flags = 0u;
-    UnifiedMemoryControls unifiedMemoryControls;
-    bool indirectAllocationsAllowed = false;
-    bool internalUsage = false;
-    bool containsCooperativeKernelsFlag = false;
     NEO::GraphicsAllocation *getAllocationFromHostPtrMap(const void *buffer, uint64_t bufferSize);
-    NEO::GraphicsAllocation *getHostPtrAlloc(const void *buffer, uint64_t bufferSize);
-    bool containsStatelessUncachedResource = false;
+    NEO::GraphicsAllocation *getHostPtrAlloc(const void *buffer, uint64_t bufferSize, bool hostCopyAllowed);
+
+    std::map<const void *, NEO::GraphicsAllocation *> hostPtrMap;
+    std::vector<NEO::GraphicsAllocation *> ownedPrivateAllocations;
+    std::vector<NEO::GraphicsAllocation *> patternAllocations;
 
     NEO::StreamProperties requiredStreamState{};
     NEO::StreamProperties finalStreamState{};
     CommandsToPatch commandsToPatch{};
 
-    std::vector<NEO::GraphicsAllocation *> ownedPrivateAllocations;
+    ze_command_list_flags_t flags = 0u;
+    UnifiedMemoryControls unifiedMemoryControls;
+
+    NEO::EngineGroupType engineGroupType;
+    bool indirectAllocationsAllowed = false;
+    bool internalUsage = false;
+    bool containsCooperativeKernelsFlag = false;
+    bool containsStatelessUncachedResource = false;
 };
 
 using CommandListAllocatorFn = CommandList *(*)(uint32_t);

@@ -5,16 +5,16 @@
  *
  */
 
+#include "shared/test/common/helpers/execution_environment_helper.h"
+#include "shared/test/common/mocks/mock_builtins.h"
+#include "shared/test/common/mocks/mock_csr.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/mock_os_library.h"
 #include "shared/test/common/mocks/mock_sip.h"
+#include "shared/test/common/mocks/mock_source_level_debugger.h"
+#include "shared/test/common/test_macros/test.h"
 
-#include "opencl/test/unit_test/helpers/execution_environment_helper.h"
-#include "opencl/test/unit_test/mocks/mock_builtins.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
-#include "opencl/test/unit_test/mocks/mock_csr.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
-#include "opencl/test/unit_test/mocks/mock_source_level_debugger.h"
-#include "test.h"
 
 #include <memory>
 

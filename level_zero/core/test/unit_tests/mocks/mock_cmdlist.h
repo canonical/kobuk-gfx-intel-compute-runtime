@@ -1,11 +1,13 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include "shared/test/common/test_macros/mock_method_macros.h"
+
 #include "level_zero/core/source/cmdlist/cmdlist_hw.h"
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
 #include "level_zero/core/test/unit_tests/mock.h"
@@ -33,16 +35,21 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::appendLaunchKernelWithParams;
     using BaseClass::appendMemoryCopyBlit;
     using BaseClass::appendMemoryCopyBlitRegion;
+    using BaseClass::appendMultiTileBarrier;
     using BaseClass::appendSignalEventPostWalker;
     using BaseClass::appendWriteKernelTimestamp;
     using BaseClass::applyMemoryRangesBarrier;
     using BaseClass::clearCommandsToPatch;
+    using BaseClass::cmdQImmediate;
+    using BaseClass::commandContainer;
     using BaseClass::commandListPerThreadScratchSize;
     using BaseClass::commandListPreemptionMode;
     using BaseClass::commandsToPatch;
     using BaseClass::containsAnyKernel;
     using BaseClass::containsCooperativeKernelsFlag;
+    using BaseClass::csr;
     using BaseClass::engineGroupType;
+    using BaseClass::estimateBufferSizeMultiTileBarrier;
     using BaseClass::finalStreamState;
     using BaseClass::flags;
     using BaseClass::getAlignedAllocation;
@@ -51,6 +58,8 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::hostPtrMap;
     using BaseClass::indirectAllocationsAllowed;
     using BaseClass::initialize;
+    using BaseClass::partitionCount;
+    using BaseClass::patternAllocations;
     using BaseClass::requiredStreamState;
     using BaseClass::unifiedMemoryControls;
     using BaseClass::updateStreamProperties;
@@ -67,8 +76,11 @@ struct WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using BaseClass = L0::CommandListCoreFamilyImmediate<gfxCoreFamily>;
     using BaseClass::clearCommandsToPatch;
+    using BaseClass::cmdQImmediate;
     using BaseClass::commandsToPatch;
+    using BaseClass::csr;
     using BaseClass::finalStreamState;
+    using BaseClass::partitionCount;
     using BaseClass::requiredStreamState;
 
     WhiteBox() : BaseClass(BaseClass::defaultNumIddsPerBlock) {}
@@ -78,35 +90,18 @@ template <>
 struct WhiteBox<::L0::CommandList> : public ::L0::CommandListImp {
     using BaseClass = ::L0::CommandListImp;
     using BaseClass::BaseClass;
+    using BaseClass::cmdQImmediate;
     using BaseClass::commandContainer;
     using BaseClass::commandListPreemptionMode;
+    using BaseClass::csr;
     using BaseClass::initialize;
+    using BaseClass::partitionCount;
 
     WhiteBox(Device *device);
     ~WhiteBox() override;
 };
 
 using CommandList = WhiteBox<::L0::CommandList>;
-
-#define ADDMETHOD_NOBASE(funcName, retType, defaultReturn, funcParams) \
-    retType funcName##Result = defaultReturn;                          \
-    uint32_t funcName##Called = 0u;                                    \
-    retType funcName funcParams override {                             \
-        funcName##Called++;                                            \
-        return funcName##Result;                                       \
-    }
-
-#define ADDMETHOD(funcName, retType, callBase, defaultReturn, funcParams, invokeParams) \
-    retType funcName##Result = defaultReturn;                                           \
-    bool funcName##CallBase = callBase;                                                 \
-    uint32_t funcName##Called = 0u;                                                     \
-    retType funcName funcParams override {                                              \
-        funcName##Called++;                                                             \
-        if (funcName##CallBase) {                                                       \
-            return BaseClass::funcName invokeParams;                                    \
-        }                                                                               \
-        return funcName##Result;                                                        \
-    }
 
 struct MockCommandList : public CommandList {
     using BaseClass = CommandList;
@@ -340,10 +335,11 @@ struct MockCommandList : public CommandList {
                       NEO::EngineGroupType engineGroupType,
                       ze_command_list_flags_t flags));
 
+    ADDMETHOD_NOBASE_VOIDRETURN(appendMultiPartitionPrologue, (uint32_t partitionDataSize));
+    ADDMETHOD_NOBASE_VOIDRETURN(appendMultiPartitionEpilogue, (void));
+
     uint8_t *batchBuffer = nullptr;
     NEO::GraphicsAllocation *mockAllocation = nullptr;
 };
-#undef ADDMETHOD
-#undef ADDMETHOD_NOBASE
 } // namespace ult
 } // namespace L0

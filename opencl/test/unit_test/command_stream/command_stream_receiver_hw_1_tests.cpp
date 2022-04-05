@@ -1,17 +1,26 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/scratch_space_controller.h"
 #include "shared/source/command_stream/scratch_space_controller_base.h"
+#include "shared/source/command_stream/wait_status.h"
 #include "shared/source/helpers/constants.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/mocks/mock_command_stream_receiver.h"
+#include "shared/test/common/mocks/mock_csr.h"
 #include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/mocks/mock_os_context.h"
+#include "shared/test/common/mocks/mock_timestamp_container.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
+#include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/event/user_event.h"
@@ -19,19 +28,13 @@
 #include "opencl/test/unit_test/command_stream/command_stream_receiver_hw_fixture.h"
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
-#include "opencl/test/unit_test/mocks/mock_csr.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
-#include "opencl/test/unit_test/mocks/mock_os_context.h"
-#include "opencl/test/unit_test/mocks/mock_timestamp_container.h"
-#include "test.h"
 
 using namespace NEO;
 
 HWCMDTEST_F(IGFX_GEN8_CORE, UltCommandStreamReceiverTest, givenPreambleSentAndThreadArbitrationPolicyNotChangedWhenEstimatingPreambleCmdSizeThenReturnItsValue) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.isPreambleSent = true;
-    commandStreamReceiver.requiredThreadArbitrationPolicy = commandStreamReceiver.lastSentThreadArbitrationPolicy;
     auto expectedCmdSize = sizeof(typename FamilyType::PIPE_CONTROL) + sizeof(typename FamilyType::MEDIA_VFE_STATE);
     EXPECT_EQ(expectedCmdSize, commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice));
 }
@@ -78,7 +81,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, UltCommandStreamReceiverTest, givenNotSentStateSipWh
 HWTEST_F(UltCommandStreamReceiverTest, givenCsrWhenProgramStateSipIsCalledThenIsStateSipCalledIsSetToTrue) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
 
-    auto requiredSize = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*pDevice);
+    auto requiredSize = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*pDevice, commandStreamReceiver.isRcs());
     StackVec<char, 4096> buffer(requiredSize);
     LinearStream cmdStream(buffer.begin(), buffer.size());
 
@@ -96,8 +99,29 @@ HWTEST_F(UltCommandStreamReceiverTest, givenSentStateSipFlagSetWhenGetRequiredSt
     commandStreamReceiver.isStateSipSent = true;
     auto sizeWhenSipIsSent = commandStreamReceiver.getRequiredCmdStreamSize(dispatchFlags, *pDevice);
 
-    auto sizeForStateSip = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*pDevice);
+    auto sizeForStateSip = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*pDevice, commandStreamReceiver.isRcs());
     EXPECT_EQ(sizeForStateSip, sizeWithStateSipIsNotSent - sizeWhenSipIsSent);
+}
+
+HWTEST_F(UltCommandStreamReceiverTest, whenGetCmdSizeForPerDssBackedBufferIsCalledThenCorrectResultIsReturned) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.usePerDssBackedBuffer = false;
+    commandStreamReceiver.isPerDssBackedBufferSent = true;
+    auto basicSize = commandStreamReceiver.getRequiredCmdStreamSize(dispatchFlags, *pDevice);
+
+    {
+        dispatchFlags.usePerDssBackedBuffer = true;
+        commandStreamReceiver.isPerDssBackedBufferSent = true;
+        auto newSize = commandStreamReceiver.getRequiredCmdStreamSize(dispatchFlags, *pDevice);
+        EXPECT_EQ(basicSize, newSize);
+    }
+    {
+        dispatchFlags.usePerDssBackedBuffer = true;
+        commandStreamReceiver.isPerDssBackedBufferSent = false;
+        auto newSize = commandStreamReceiver.getRequiredCmdStreamSize(dispatchFlags, *pDevice);
+        EXPECT_EQ(basicSize, newSize - commandStreamReceiver.getCmdSizeForPerDssBackedBuffer(pDevice->getHardwareInfo()));
+    }
 }
 
 HWTEST_F(UltCommandStreamReceiverTest, givenSentStateSipFlagSetAndSourceLevelDebuggerIsActiveWhenGetRequiredStateSipCmdSizeIsCalledThenStateSipCmdSizeIsIncluded) {
@@ -111,40 +135,51 @@ HWTEST_F(UltCommandStreamReceiverTest, givenSentStateSipFlagSetAndSourceLevelDeb
     commandStreamReceiver.isStateSipSent = true;
     auto sizeWithSourceKernelDebugging = commandStreamReceiver.getRequiredCmdStreamSize(dispatchFlags, *pDevice);
 
-    auto sizeForStateSip = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*pDevice);
+    auto sizeForStateSip = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*pDevice, commandStreamReceiver.isRcs());
     EXPECT_EQ(sizeForStateSip, sizeWithSourceKernelDebugging - sizeWithoutSourceKernelDebugging - PreambleHelper<FamilyType>::getKernelDebuggingCommandsSize(true));
     pDevice->setDebuggerActive(false);
 }
 
-HWTEST_F(UltCommandStreamReceiverTest, givenPreambleSentAndThreadArbitrationPolicyChangedWhenEstimatingPreambleCmdSizeThenResultDependsOnPolicyProgrammingCmdSize) {
+HWTEST_F(UltCommandStreamReceiverTest, givenPreambleSentAndThreadArbitrationPolicyChangedWhenEstimatingFlushTaskSizeThenResultDependsOnPolicyProgrammingCmdSize) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.isPreambleSent = true;
 
-    commandStreamReceiver.requiredThreadArbitrationPolicy = commandStreamReceiver.lastSentThreadArbitrationPolicy;
-    auto policyNotChanged = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
+    auto policyNotChangedPreamble = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
+    auto policyNotChangedFlush = commandStreamReceiver.getRequiredCmdStreamSize(flushTaskFlags, *pDevice);
 
-    commandStreamReceiver.requiredThreadArbitrationPolicy = commandStreamReceiver.lastSentThreadArbitrationPolicy + 1;
-    auto policyChanged = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
+    commandStreamReceiver.streamProperties.stateComputeMode.threadArbitrationPolicy.isDirty = true;
+    commandStreamReceiver.streamProperties.stateComputeMode.isCoherencyRequired.isDirty = true;
+    auto policyChangedPreamble = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
+    auto policyChangedFlush = commandStreamReceiver.getRequiredCmdStreamSize(flushTaskFlags, *pDevice);
 
-    auto actualDifference = policyChanged - policyNotChanged;
-    auto expectedDifference = PreambleHelper<FamilyType>::getThreadArbitrationCommandsSize();
-    EXPECT_EQ(expectedDifference, actualDifference);
+    auto actualDifferenceForPreamble = policyChangedPreamble - policyNotChangedPreamble;
+    auto actualDifferenceForFlush = policyChangedFlush - policyNotChangedFlush;
+    auto expectedDifference = EncodeComputeMode<FamilyType>::getCmdSizeForComputeMode(*defaultHwInfo, false, commandStreamReceiver.isRcs());
+    EXPECT_EQ(0u, actualDifferenceForPreamble);
+    EXPECT_EQ(expectedDifference, actualDifferenceForFlush);
 }
 
-HWTEST_F(UltCommandStreamReceiverTest, givenPreambleSentWhenEstimatingPreambleCmdSizeThenResultDependsOnPolicyProgrammingAndAdditionalCmdsSize) {
+HWTEST_F(UltCommandStreamReceiverTest, givenPreambleSentWhenEstimatingFlushTaskSizeThenResultDependsOnAdditionalCmdsSize) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
-    commandStreamReceiver.requiredThreadArbitrationPolicy = commandStreamReceiver.lastSentThreadArbitrationPolicy;
 
     commandStreamReceiver.isPreambleSent = false;
-    auto preambleNotSent = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
+    auto preambleNotSentPreamble = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
+    auto preambleNotSentFlush = commandStreamReceiver.getRequiredCmdStreamSize(flushTaskFlags, *pDevice);
 
     commandStreamReceiver.isPreambleSent = true;
-    auto preambleSent = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
+    auto preambleSentPreamble = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
+    auto preambleSentFlush = commandStreamReceiver.getRequiredCmdStreamSize(flushTaskFlags, *pDevice);
 
-    auto actualDifference = preambleNotSent - preambleSent;
-    auto expectedDifference = PreambleHelper<FamilyType>::getThreadArbitrationCommandsSize() + PreambleHelper<FamilyType>::getAdditionalCommandsSize(*pDevice);
+    auto actualDifferenceForPreamble = preambleNotSentPreamble - preambleSentPreamble;
+    auto actualDifferenceForFlush = preambleNotSentFlush - preambleSentFlush;
 
-    EXPECT_EQ(expectedDifference, actualDifference);
+    commandStreamReceiver.isPreambleSent = false;
+    auto expectedDifferenceForPreamble = PreambleHelper<FamilyType>::getAdditionalCommandsSize(*pDevice);
+    auto expectedDifferenceForFlush = expectedDifferenceForPreamble + commandStreamReceiver.getCmdSizeForL3Config() +
+                                      PreambleHelper<FamilyType>::getCmdSizeForPipelineSelect(pDevice->getHardwareInfo());
+
+    EXPECT_EQ(expectedDifferenceForPreamble, actualDifferenceForPreamble);
+    EXPECT_EQ(expectedDifferenceForFlush, actualDifferenceForFlush);
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, UltCommandStreamReceiverTest, givenMediaVfeStateDirtyEstimatingPreambleCmdSizeThenResultDependsVfeStateProgrammingCmdSize) {
@@ -177,7 +212,6 @@ HWTEST_F(UltCommandStreamReceiverTest, givenCommandStreamReceiverInInitialStateW
 
 HWTEST_F(UltCommandStreamReceiverTest, givenPreambleSentAndForceSemaphoreDelayBetweenWaitsFlagWhenEstimatingPreambleCmdSizeThenResultIsExpected) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
-    commandStreamReceiver.requiredThreadArbitrationPolicy = commandStreamReceiver.lastSentThreadArbitrationPolicy;
     DebugManagerStateRestore debugManagerStateRestore;
 
     DebugManager.flags.ForceSemaphoreDelayBetweenWaits.set(-1);
@@ -194,12 +228,12 @@ HWTEST_F(UltCommandStreamReceiverTest, givenPreambleSentAndForceSemaphoreDelayBe
     auto preambleSent = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
 
     auto actualDifferenceWhenSemaphoreDelayNotReprogrammed = preambleNotSentAndSemaphoreDelayNotReprogrammed - preambleSent;
-    auto expectedDifference = PreambleHelper<FamilyType>::getThreadArbitrationCommandsSize() + PreambleHelper<FamilyType>::getAdditionalCommandsSize(*pDevice);
+    auto expectedDifference = PreambleHelper<FamilyType>::getAdditionalCommandsSize(*pDevice);
 
     EXPECT_EQ(expectedDifference, actualDifferenceWhenSemaphoreDelayNotReprogrammed);
 
     auto actualDifferenceWhenSemaphoreDelayReprogrammed = preambleNotSentAndSemaphoreDelayReprogrammed - preambleSent;
-    expectedDifference = PreambleHelper<FamilyType>::getThreadArbitrationCommandsSize() + PreambleHelper<FamilyType>::getAdditionalCommandsSize(*pDevice) + PreambleHelper<FamilyType>::getSemaphoreDelayCommandSize();
+    expectedDifference = PreambleHelper<FamilyType>::getAdditionalCommandsSize(*pDevice) + PreambleHelper<FamilyType>::getSemaphoreDelayCommandSize();
 
     EXPECT_EQ(expectedDifference, actualDifferenceWhenSemaphoreDelayReprogrammed);
 }
@@ -432,6 +466,24 @@ HWTEST_F(UltCommandStreamReceiverTest, givenComputeOverrideDisableWhenComputeSup
     EXPECT_FALSE(startInContext);
 }
 
+HWTEST_F(UltCommandStreamReceiverTest, givenSinglePartitionWhenCallingWaitKmdNotifyThenExpectImplicitBusyLoopWaitCalled) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    commandStreamReceiver.callBaseWaitForCompletionWithTimeout = false;
+    commandStreamReceiver.returnWaitForCompletionWithTimeout = NEO::WaitStatus::NotReady;
+
+    commandStreamReceiver.waitForTaskCountWithKmdNotifyFallback(0, 0, false, false);
+    EXPECT_EQ(2u, commandStreamReceiver.waitForCompletionWithTimeoutTaskCountCalled);
+}
+
+HWTEST_F(UltCommandStreamReceiverTest, givenMultiplePartitionsWhenCallingWaitKmdNotifyThenExpectExplicitBusyLoopWaitCalled) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    commandStreamReceiver.callBaseWaitForCompletionWithTimeout = false;
+    commandStreamReceiver.returnWaitForCompletionWithTimeout = NEO::WaitStatus::NotReady;
+
+    commandStreamReceiver.waitForTaskCountWithKmdNotifyFallback(0, 0, false, false);
+    EXPECT_EQ(2u, commandStreamReceiver.waitForCompletionWithTimeoutTaskCountCalled);
+}
+
 typedef UltCommandStreamReceiverTest CommandStreamReceiverFlushTests;
 
 HWTEST_F(CommandStreamReceiverFlushTests, WhenAddingBatchBufferEndThenBatchBufferEndIsAppendedCorrectly) {
@@ -445,14 +497,6 @@ HWTEST_F(CommandStreamReceiverFlushTests, WhenAddingBatchBufferEndThenBatchBuffe
         ptrOffset(commandStream.getCpuBase(), usedPrevious));
     EXPECT_NE(nullptr, batchBufferEnd);
 }
-
-HWTEST_F(CommandStreamReceiverFlushTests, WhenAligningCommandStreamReceiverToCacheLineSizeThenItIsAlignedCorrectly) {
-    commandStream.getSpace(sizeof(uint32_t));
-    CommandStreamReceiverHw<FamilyType>::alignToCacheLine(commandStream);
-
-    EXPECT_EQ(0u, commandStream.getUsed() % MemoryConstants::cacheLineSize);
-}
-
 typedef Test<ClDeviceFixture> CommandStreamReceiverHwTest;
 
 HWTEST_F(CommandStreamReceiverHwTest, givenCsrHwWhenTypeIsCheckedThenCsrHwIsReturned) {
@@ -574,17 +618,17 @@ HWTEST2_F(CommandStreamReceiverHwTest, whenProgramVFEStateIsCalledThenCorrectCom
     UltDeviceFactory deviceFactory{1, 0};
     auto pDevice = deviceFactory.rootDevices[0];
     auto pHwInfo = pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
-    auto &hwHelper = HwHelper::get(pHwInfo->platform.eRenderCoreFamily);
+    const auto &hwInfoConfig = *HwInfoConfig::get(pHwInfo->platform.eProductFamily);
 
     uint8_t memory[1 * KB];
     auto mockCsr = std::make_unique<MockCsrHw2<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(),
                                                             pDevice->getDeviceBitfield());
-    MockOsContext osContext{0, 8, EngineTypeUsage{aub_stream::ENGINE_CCS, EngineUsage::Regular}, PreemptionMode::Disabled, false};
+    MockOsContext osContext{0, EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_CCS, EngineUsage::Regular}, DeviceBitfield(0))};
     mockCsr->setupContext(osContext);
 
     uint32_t revisions[] = {REVISION_A0, REVISION_B};
     for (auto revision : revisions) {
-        pHwInfo->platform.usRevId = hwHelper.getHwRevIdFromStepping(revision, *pHwInfo);
+        pHwInfo->platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(revision, *pHwInfo);
 
         {
             auto flags = DispatchFlagsHelper::createDefaultDispatchFlags();
@@ -593,7 +637,7 @@ HWTEST2_F(CommandStreamReceiverHwTest, whenProgramVFEStateIsCalledThenCorrectCom
             mockCsr->programVFEState(commandStream, flags, 10);
             auto pCommand = reinterpret_cast<CFE_STATE *>(&memory);
 
-            auto expectedDisableOverdispatch = hwHelper.isDisableOverdispatchAvailable(*pHwInfo);
+            auto expectedDisableOverdispatch = hwInfoConfig.isDisableOverdispatchAvailable(*pHwInfo);
             EXPECT_EQ(expectedDisableOverdispatch, pCommand->getComputeOverdispatchDisable());
         }
         {
@@ -825,10 +869,10 @@ HWTEST_F(BcsTests, givenTimestampPacketWriteRequestWhenEstimatingSizeForCommands
     auto expectedSizeWithTimestampPacketWrite = expectedBaseSize + EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
     auto expectedSizeWithoutTimestampPacketWrite = expectedBaseSize;
 
-    auto estimatedSizeWithTimestampPacketWrite = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
-        {1, 1, 1}, csrDependencies, true, false, pClDevice->getRootDeviceEnvironment());
-    auto estimatedSizeWithoutTimestampPacketWrite = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
-        {1, 1, 1}, csrDependencies, false, false, pClDevice->getRootDeviceEnvironment());
+    auto estimatedSizeWithTimestampPacketWrite = BlitCommandsHelper<FamilyType>::estimateBlitCommandSize(
+        {1, 1, 1}, csrDependencies, true, false, false, pClDevice->getRootDeviceEnvironment());
+    auto estimatedSizeWithoutTimestampPacketWrite = BlitCommandsHelper<FamilyType>::estimateBlitCommandSize(
+        {1, 1, 1}, csrDependencies, false, false, false, pClDevice->getRootDeviceEnvironment());
 
     EXPECT_EQ(expectedSizeWithTimestampPacketWrite, estimatedSizeWithTimestampPacketWrite);
     EXPECT_EQ(expectedSizeWithoutTimestampPacketWrite, estimatedSizeWithoutTimestampPacketWrite);
@@ -846,12 +890,12 @@ HWTEST_F(BcsTests, givenTimestampPacketWriteRequestWhenEstimatingSizeForCommands
         expectedBaseSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
     }
 
-    auto expectedSizeWithTimestampPacketWriteAndProfiling = expectedBaseSize + 4 * sizeof(typename FamilyType::MI_STORE_REGISTER_MEM);
+    auto expectedSizeWithTimestampPacketWriteAndProfiling = expectedBaseSize + BlitCommandsHelper<FamilyType>::getProfilingMmioCmdsSize();
 
-    auto estimatedSizeWithTimestampPacketWrite = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
-        {1, 1, 1}, csrDependencies, true, false, pClDevice->getRootDeviceEnvironment());
-    auto estimatedSizeWithTimestampPacketWriteAndProfiling = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
-        {1, 1, 1}, csrDependencies, true, true, pClDevice->getRootDeviceEnvironment());
+    auto estimatedSizeWithTimestampPacketWrite = BlitCommandsHelper<FamilyType>::estimateBlitCommandSize(
+        {1, 1, 1}, csrDependencies, true, false, false, pClDevice->getRootDeviceEnvironment());
+    auto estimatedSizeWithTimestampPacketWriteAndProfiling = BlitCommandsHelper<FamilyType>::estimateBlitCommandSize(
+        {1, 1, 1}, csrDependencies, true, true, false, pClDevice->getRootDeviceEnvironment());
 
     EXPECT_EQ(expectedSizeWithTimestampPacketWriteAndProfiling, estimatedSizeWithTimestampPacketWriteAndProfiling);
     EXPECT_EQ(expectedBaseSize, estimatedSizeWithTimestampPacketWrite);
@@ -880,10 +924,46 @@ HWTEST_F(BcsTests, givenBltSizeAndCsrDependenciesWhenEstimatingCommandSizeThenAd
         expectedSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
     }
 
-    auto estimatedSize = BlitCommandsHelper<FamilyType>::estimateBlitCommandsSize(
-        {1, 1, 1}, csrDependencies, false, false, pClDevice->getRootDeviceEnvironment());
+    auto estimatedSize = BlitCommandsHelper<FamilyType>::estimateBlitCommandSize(
+        {1, 1, 1}, csrDependencies, false, false, false, pClDevice->getRootDeviceEnvironment());
 
     EXPECT_EQ(expectedSize, estimatedSize);
+}
+
+HWTEST_F(BcsTests, givenImageAndBufferWhenEstimateBlitCommandSizeThenReturnCorrectCommandSize) {
+
+    for (auto isImage : {false, true}) {
+        auto expectedSize = sizeof(typename FamilyType::MI_ARB_CHECK);
+        expectedSize += isImage ? sizeof(typename FamilyType::XY_BLOCK_COPY_BLT) : sizeof(typename FamilyType::XY_COPY_BLT);
+
+        if (BlitCommandsHelper<FamilyType>::miArbCheckWaRequired()) {
+            expectedSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+        }
+        if (BlitCommandsHelper<FamilyType>::preBlitCommandWARequired()) {
+            expectedSize += EncodeMiFlushDW<FamilyType>::getMiFlushDwCmdSizeForDataWrite();
+        }
+
+        auto estimatedSize = BlitCommandsHelper<FamilyType>::estimateBlitCommandSize(
+            {1, 1, 1}, csrDependencies, false, false, isImage, pClDevice->getRootDeviceEnvironment());
+
+        EXPECT_EQ(expectedSize, estimatedSize);
+    }
+}
+
+HWTEST_F(BcsTests, givenImageAndBufferBlitDirectionsWhenIsImageOperationIsCalledThenReturnCorrectValue) {
+
+    BlitProperties blitProperties{};
+    std::pair<bool, BlitterConstants::BlitDirection> params[] = {{false, BlitterConstants::BlitDirection::HostPtrToBuffer},
+                                                                 {false, BlitterConstants::BlitDirection::BufferToHostPtr},
+                                                                 {false, BlitterConstants::BlitDirection::BufferToBuffer},
+                                                                 {true, BlitterConstants::BlitDirection::HostPtrToImage},
+                                                                 {true, BlitterConstants::BlitDirection::ImageToHostPtr},
+                                                                 {true, BlitterConstants::BlitDirection::ImageToImage}};
+
+    for (auto [isImageDirection, blitDirection] : params) {
+        blitProperties.blitDirection = blitDirection;
+        EXPECT_EQ(isImageDirection, blitProperties.isImageOperation());
+    }
 }
 
 HWTEST_F(BcsTests, givenBltSizeWithLeftoverWhenDispatchedThenProgramAllRequiredCommands) {
@@ -915,7 +995,7 @@ HWTEST_F(BcsTests, givenBltSizeWithLeftoverWhenDispatchedThenProgramAllRequiredC
     }
 
     EXPECT_EQ(expectedResursiveLockCount, csr.recursiveLockCounter.load());
-    blitBuffer(&csr, blitProperties, true, *pDevice);
+    flushBcsTask(&csr, blitProperties, true, *pDevice);
     EXPECT_EQ(newTaskCount, csr.taskCount);
     EXPECT_EQ(newTaskCount, csr.latestFlushedTaskCount);
     EXPECT_EQ(newTaskCount, csr.latestSentTaskCount);
@@ -1130,7 +1210,7 @@ HWTEST_P(BcsDetaliedTestsWithParams, givenBltSizeWithLeftoverWhenDispatchedThenP
     );
 
     memoryManager->returnFakeAllocation = false;
-    blitBuffer(&csr, blitProperties, true, *pDevice);
+    flushBcsTask(&csr, blitProperties, true, *pDevice);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(csr.commandStream);
@@ -1232,7 +1312,7 @@ HWTEST_P(BcsDetaliedTestsWithParams, givenBltSizeWithLeftoverWhenDispatchedThenP
     );
 
     memoryManager->returnFakeAllocation = false;
-    blitBuffer(&csr, blitProperties, true, *pDevice);
+    flushBcsTask(&csr, blitProperties, true, *pDevice);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(csr.commandStream);
@@ -1320,7 +1400,7 @@ HWTEST_P(BcsDetaliedTestsWithParams, givenBltSizeWithLeftoverWhenDispatchedThenP
                                                                      buffer2SlicePitch,            //dstSlicePitch
                                                                      csr.getClearColorAllocation() //clearColorAllocation
     );
-    blitBuffer(&csr, blitProperties, true, *pDevice);
+    flushBcsTask(&csr, blitProperties, true, *pDevice);
 
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(csr.commandStream);
@@ -1380,3 +1460,57 @@ INSTANTIATE_TEST_CASE_P(BcsDetaliedTest,
                         ::testing::Combine(
                             ::testing::ValuesIn(BlitterProperties),
                             ::testing::Values(BlitterConstants::BlitDirection::HostPtrToBuffer, BlitterConstants::BlitDirection::BufferToHostPtr)));
+
+HWCMDTEST_F(IGFX_GEN8_CORE, UltCommandStreamReceiverTest, WhenProgrammingActivePartitionsThenExpectNoAction) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    size_t expectedCmdSize = 0;
+    EXPECT_EQ(expectedCmdSize, commandStreamReceiver.getCmdSizeForActivePartitionConfig());
+    size_t usedBefore = commandStreamReceiver.commandStream.getUsed();
+    commandStreamReceiver.programActivePartitionConfig(commandStreamReceiver.commandStream);
+    size_t usedAfter = commandStreamReceiver.commandStream.getUsed();
+    EXPECT_EQ(usedBefore, usedAfter);
+}
+
+HWCMDTEST_F(IGFX_GEN8_CORE, UltCommandStreamReceiverTest, givenBarrierNodeSetWhenProgrammingBarrierCommandThenExpectPostSyncPipeControl) {
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+
+    auto &hwInfo = pDevice->getHardwareInfo();
+    auto commandStreamReceiver = &pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    auto &commandStreamCSR = commandStreamReceiver->getCS();
+
+    TagNodeBase *tagNode = commandStreamReceiver->getTimestampPacketAllocator()->getTag();
+    uint64_t gpuAddress = TimestampPacketHelper::getContextEndGpuAddress(*tagNode);
+
+    TimestampPacketDependencies timestampPacketDependencies;
+    timestampPacketDependencies.barrierNodes.add(tagNode);
+
+    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+    dispatchFlags.barrierTimestampPacketNodes = &timestampPacketDependencies.barrierNodes;
+
+    size_t expectedCmdSize = MemorySynchronizationCommands<FamilyType>::getSizeForPipeControlWithPostSyncOperation(hwInfo);
+    size_t estimatedCmdSize = commandStreamReceiver->getCmdSizeForStallingCommands(dispatchFlags);
+    EXPECT_EQ(expectedCmdSize, estimatedCmdSize);
+
+    commandStreamReceiver->programStallingCommandsForBarrier(commandStreamCSR, dispatchFlags);
+    EXPECT_EQ(estimatedCmdSize, commandStreamCSR.getUsed());
+
+    parseCommands<FamilyType>(commandStreamCSR, 0);
+    findHardwareCommands<FamilyType>();
+    auto cmdItor = cmdList.begin();
+
+    if (MemorySynchronizationCommands<FamilyType>::isPipeControlWArequired(hwInfo)) {
+        PIPE_CONTROL *pipeControl = genCmdCast<PIPE_CONTROL *>(*cmdItor);
+        ASSERT_NE(nullptr, pipeControl);
+        cmdItor++;
+        if (MemorySynchronizationCommands<FamilyType>::getSizeForSingleAdditionalSynchronization(hwInfo) > 0) {
+            cmdItor++;
+        }
+    }
+    PIPE_CONTROL *pipeControl = genCmdCast<PIPE_CONTROL *>(*cmdItor);
+    ASSERT_NE(nullptr, pipeControl);
+    EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, pipeControl->getPostSyncOperation());
+    EXPECT_TRUE(pipeControl->getCommandStreamerStallEnable());
+    EXPECT_EQ(0u, pipeControl->getImmediateData());
+    EXPECT_EQ(gpuAddress, UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControl));
+}

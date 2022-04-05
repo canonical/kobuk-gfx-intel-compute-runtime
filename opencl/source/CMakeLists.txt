@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2021 Intel Corporation
+# Copyright (C) 2018-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -15,32 +15,22 @@ endif()
 project(neo)
 set(MSVC_DEF_ADDITIONAL_EXPORTS "")
 set(OPENCL_RUNTIME_PROJECTS_FOLDER "opencl runtime")
-set(OPENCL_BUIILINS_PROJECTS_FOLDER "built_ins")
+set(OPENCL_BUILTINS_PROJECTS_FOLDER "built_ins")
 
-if(NOT TARGET ${BIKSIM_LIB_NAME})
-  add_subdirectory(builtin_kernels_simulation)
-endif()
-
-hide_subdir(builtin_kernels_simulation)
 hide_subdir(dll)
 
 add_library(${NEO_STATIC_LIB_NAME} STATIC EXCLUDE_FROM_ALL
             ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
-            ${CMAKE_CURRENT_SOURCE_DIR}/enable_gens.cmake
-            $<TARGET_OBJECTS:${BIKSIM_LIB_NAME}>
+            ${CMAKE_CURRENT_SOURCE_DIR}/enable_cores.cmake
 )
 
 add_subdirectories()
-include(enable_gens.cmake)
+include(enable_cores.cmake)
 
 if(WIN32)
   if("${IGDRCL_OPTION__BITS}" STREQUAL "32")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /SAFESEH:NO")
   endif()
-endif()
-
-if(DEFINED AUB_STREAM_PROJECT_NAME)
-  target_link_libraries(${NEO_STATIC_LIB_NAME} ${AUB_STREAM_PROJECT_NAME})
 endif()
 
 target_include_directories(${NEO_STATIC_LIB_NAME} PRIVATE
@@ -58,7 +48,6 @@ target_include_directories(${NEO_STATIC_LIB_NAME} PUBLIC
                            ${NEO__IGC_INCLUDE_DIR}
                            ${THIRD_PARTY_DIR}
                            ${NEO__GMM_INCLUDE_DIR}
-                           ${CMAKE_CURRENT_SOURCE_DIR}/os_interface/create_command_stream_receiver_${DRIVER_MODEL}
 )
 
 target_compile_definitions(${NEO_STATIC_LIB_NAME} PUBLIC
@@ -71,14 +60,12 @@ if(WIN32 OR NOT DISABLE_WDDM_LINUX)
 endif()
 
 if(WIN32)
-  set(IGDRCL_EXTRA_LIBS Ws2_32)
   target_include_directories(${NEO_STATIC_LIB_NAME} PUBLIC
                              ${NEO_SHARED_DIRECTORY}/os_interface/windows
                              ${NEO_SOURCE_DIR}/opencl/source/os_interface/windows
   )
   target_compile_definitions(${NEO_STATIC_LIB_NAME} PUBLIC OGL=1)
 else()
-  set(IGDRCL_EXTRA_LIBS dl pthread)
   target_include_directories(${NEO_STATIC_LIB_NAME} PUBLIC
                              ${NEO_SHARED_DIRECTORY}/os_interface/linux
                              ${NEO_SOURCE_DIR}/opencl/source/os_interface/linux
@@ -88,7 +75,7 @@ endif()
 
 target_compile_definitions(${NEO_STATIC_LIB_NAME} PUBLIC GMM_LIB_DLL DEFAULT_PLATFORM=${DEFAULT_SUPPORTED_PLATFORM})
 
-list(APPEND LIB_FLAGS_DEFINITIONS -DCIF_HEADERS_ONLY_BUILD ${SUPPORTED_GEN_FLAGS_DEFINITONS})
+list(APPEND LIB_FLAGS_DEFINITIONS -DCIF_HEADERS_ONLY_BUILD ${SUPPORTED_CORE_FLAGS_DEFINITONS})
 
 target_compile_definitions(${NEO_STATIC_LIB_NAME} PUBLIC ${LIB_FLAGS_DEFINITIONS})
 
@@ -123,7 +110,6 @@ if(${GENERATE_EXECUTABLE})
        $<TARGET_OBJECTS:${BUILTINS_SOURCES_LIB_NAME}>
        $<TARGET_OBJECTS:${BUILTINS_VME_LIB_NAME}>
        $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDFUL_LIB_NAME}>
-       $<TARGET_OBJECTS:${SCHEDULER_BINARY_LIB_NAME}>
   )
 
   if(DEFINED AUB_STREAM_PROJECT_NAME)
@@ -160,19 +146,19 @@ if(${GENERATE_EXECUTABLE})
   endif()
 
   if(NOT DISABLED_GTPIN_SUPPORT)
-    macro(macro_for_each_gen)
+    macro(macro_for_each_core_type)
       foreach(BRANCH_DIR ${BRANCH_DIR_LIST})
-        if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR}${GEN_TYPE_LOWER}/gtpin_setup_${GEN_TYPE_LOWER}.cpp)
-          target_sources(${NEO_DYNAMIC_LIB_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR}${GEN_TYPE_LOWER}/gtpin_setup_${GEN_TYPE_LOWER}.cpp)
+        if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR}${CORE_TYPE_LOWER}/gtpin_setup_${CORE_TYPE_LOWER}.cpp)
+          target_sources(${NEO_DYNAMIC_LIB_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR}${CORE_TYPE_LOWER}/gtpin_setup_${CORE_TYPE_LOWER}.cpp)
         endif()
       endforeach()
     endmacro()
-    apply_macro_for_each_gen("SUPPORTED")
+    apply_macro_for_each_core_type("SUPPORTED")
   endif()
 
   add_subdirectory(dll)
 
-  target_link_libraries(${NEO_DYNAMIC_LIB_NAME} ${NEO_STATIC_LIB_NAME} ${NEO_SHARED_LIB} ${NEO_STATIC_LIB_NAME} ${NEO_SHARED_LIB} ${IGDRCL_EXTRA_LIBS})
+  target_link_libraries(${NEO_DYNAMIC_LIB_NAME} ${NEO_STATIC_LIB_NAME} ${NEO_SHARED_LIB} ${NEO_STATIC_LIB_NAME} ${NEO_SHARED_LIB} ${NEO_EXTRA_LIBS})
 
   target_include_directories(${NEO_DYNAMIC_LIB_NAME} BEFORE PRIVATE
                              ${CMAKE_CURRENT_BINARY_DIR}
@@ -214,9 +200,7 @@ endif()
 create_project_source_tree(${NEO_STATIC_LIB_NAME})
 
 if(UNIX AND NOT (TARGET clang-tidy))
-  add_custom_target(clang-tidy
-                    DEPENDS scheduler
-  )
+  add_custom_target(clang-tidy)
   add_custom_command(
                      TARGET clang-tidy
                      POST_BUILD
@@ -225,5 +209,3 @@ if(UNIX AND NOT (TARGET clang-tidy))
                      WORKING_DIRECTORY ${NEO_SOURCE_DIR}
   )
 endif()
-
-set(IGDRCL_EXTRA_LIBS ${IGDRCL_EXTRA_LIBS} PARENT_SCOPE)

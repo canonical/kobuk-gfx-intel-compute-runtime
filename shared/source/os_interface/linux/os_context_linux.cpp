@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,25 +11,23 @@
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/engine_node_helper.h"
-#include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/os_interface/os_interface.h"
 
 namespace NEO {
 
-OsContext *OsContextLinux::create(OSInterface *osInterface, uint32_t contextId, DeviceBitfield deviceBitfield,
-                                  EngineTypeUsage typeUsage, PreemptionMode preemptionMode, bool rootDevice) {
+OsContext *OsContextLinux::create(OSInterface *osInterface, uint32_t contextId, const EngineDescriptor &engineDescriptor) {
     if (osInterface) {
-        return new OsContextLinux(*osInterface->getDriverModel()->as<Drm>(), contextId, deviceBitfield, typeUsage, preemptionMode, rootDevice);
+        return new OsContextLinux(*osInterface->getDriverModel()->as<Drm>(), contextId, engineDescriptor);
     }
-    return new OsContext(contextId, deviceBitfield, typeUsage, preemptionMode, rootDevice);
+    return new OsContext(contextId, engineDescriptor);
 }
 
-OsContextLinux::OsContextLinux(Drm &drm, uint32_t contextId, DeviceBitfield deviceBitfield,
-                               EngineTypeUsage typeUsage, PreemptionMode preemptionMode, bool rootDevice)
-    : OsContext(contextId, deviceBitfield, typeUsage, preemptionMode, rootDevice),
+OsContextLinux::OsContextLinux(Drm &drm, uint32_t contextId, const EngineDescriptor &engineDescriptor)
+    : OsContext(contextId, engineDescriptor),
       drm(drm) {}
 
 void OsContextLinux::initializeContext() {
@@ -47,15 +45,23 @@ void OsContextLinux::initializeContext() {
         this->drmVmIds.resize(deviceBitfield.size(), 0);
     }
 
+    const auto numberOfCCS = drm.getRootDeviceEnvironment().getHardwareInfo()->gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
+    const bool debuggableContext = drm.isContextDebugSupported() && drm.getRootDeviceEnvironment().executionEnvironment.isDebuggingEnabled() && !isInternalEngine();
+    const bool debuggableContextCooperative = debuggableContext && numberOfCCS > 0;
+
     for (auto deviceIndex = 0u; deviceIndex < deviceBitfield.size(); deviceIndex++) {
         if (deviceBitfield.test(deviceIndex)) {
             auto drmVmId = drm.getVirtualMemoryAddressSpace(deviceIndex);
-            auto drmContextId = drm.createDrmContext(drmVmId, drm.isVmBindAvailable());
+            auto drmContextId = drm.createDrmContext(drmVmId, drm.isVmBindAvailable(), isCooperativeEngine() || debuggableContextCooperative);
             if (drm.areNonPersistentContextsSupported()) {
                 drm.setNonPersistentContext(drmContextId);
             }
 
-            if (drm.getRootDeviceEnvironment().executionEnvironment.isDebuggingEnabled() && !isInternalEngine()) {
+            if (drm.getRootDeviceEnvironment().executionEnvironment.isDebuggingEnabled()) {
+                drm.setUnrecoverableContext(drmContextId);
+            }
+
+            if (debuggableContext) {
                 drm.setContextDebugFlag(drmContextId);
             }
 
@@ -63,14 +69,14 @@ void OsContextLinux::initializeContext() {
                 drm.setLowPriorityContextParam(drmContextId);
             }
 
-            this->engineFlag = drm.bindDrmContext(drmContextId, deviceIndex, engineType, engineInstancedDevice);
+            this->engineFlag = drm.bindDrmContext(drmContextId, deviceIndex, engineType, isEngineInstanced());
             this->drmContextIds.push_back(drmContextId);
 
             if (drm.isPerContextVMRequired()) {
-                auto ret = drm.queryVmId(drmContextId, drmVmId);
+                [[maybe_unused]] auto ret = drm.queryVmId(drmContextId, drmVmId);
                 DEBUG_BREAK_IF(drmVmId == 0);
                 DEBUG_BREAK_IF(ret != 0);
-                UNUSED_VARIABLE(ret);
+
                 UNRECOVERABLE_IF(this->drmVmIds.size() <= deviceIndex);
                 this->drmVmIds[deviceIndex] = drmVmId;
             }
@@ -79,8 +85,8 @@ void OsContextLinux::initializeContext() {
 }
 
 bool OsContextLinux::isDirectSubmissionSupported(const HardwareInfo &hwInfo) const {
-    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-    return this->getDrm().isVmBindAvailable() && hwHelper.isDirectSubmissionSupported(hwInfo);
+    auto hwInfoConfig = HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    return this->getDrm().isVmBindAvailable() && hwInfoConfig->isDirectSubmissionSupported(hwInfo);
 }
 
 Drm &OsContextLinux::getDrm() const {
@@ -95,11 +101,15 @@ void OsContextLinux::waitForPagingFence() {
     }
 }
 
+void OsContextLinux::reInitializeContext() {}
+
 OsContextLinux::~OsContextLinux() {
     if (contextInitialized) {
         for (auto drmContextId : drmContextIds) {
             drm.destroyDrmContext(drmContextId);
         }
     }
+    drmContextIds.clear();
+    drmVmIds.clear();
 }
 } // namespace NEO

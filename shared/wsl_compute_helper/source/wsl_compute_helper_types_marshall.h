@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -1058,23 +1058,10 @@ template <typename _SKU_FEATURE_TABLET>
 inline void marshall(TOKSTR__SKU_FEATURE_TABLE &dst, const _SKU_FEATURE_TABLET &src) {
     dst = {};
     dst.FtrDesktop.setValue(src.FtrDesktop);
-    dst.FtrVERing.setValue(src.FtrVERing);
-    dst.FtrVcs2.setValue(src.FtrVcs2);
-    dst.FtrGtBigDie.setValue(src.FtrGtBigDie);
-    dst.FtrGtMediumDie.setValue(src.FtrGtMediumDie);
-    dst.FtrGtSmallDie.setValue(src.FtrGtSmallDie);
-    dst.FtrGT1.setValue(src.FtrGT1);
-    dst.FtrGT1_5.setValue(src.FtrGT1_5);
-    dst.FtrGT2.setValue(src.FtrGT2);
-    dst.FtrGT2_5.setValue(src.FtrGT2_5);
-    dst.FtrGT3.setValue(src.FtrGT3);
-    dst.FtrGT4.setValue(src.FtrGT4);
     dst.FtrULT.setValue(src.FtrULT);
     dst.FtrIVBM0M1Platform.setValue(src.FtrIVBM0M1Platform);
     dst.FtrChannelSwizzlingXOREnabled.setValue(src.FtrChannelSwizzlingXOREnabled);
-    dst.FtrGTA.setValue(src.FtrGTA);
-    dst.FtrGTC.setValue(src.FtrGTC);
-    dst.FtrGTX.setValue(src.FtrGTX);
+
     dst.Ftr5Slice.setValue(src.Ftr5Slice);
     dst.FtrLCIA.setValue(src.FtrLCIA);
     dst.FtrResourceStreamer.setValue(src.FtrResourceStreamer);
@@ -1130,12 +1117,10 @@ inline void marshall(TOKSTR__SKU_FEATURE_TABLE &dst, const _SKU_FEATURE_TABLET &
     dst.FtrFbc2AddressTranslation.setValue(src.FtrFbc2AddressTranslation);
     dst.FtrFbcBlitterTracking.setValue(src.FtrFbcBlitterTracking);
     dst.FtrFbcCpuTracking.setValue(src.FtrFbcCpuTracking);
-    dst.FtrVEBOX.setValue(src.FtrVEBOX);
     dst.FtrRendComp.setValue(src.FtrRendComp);
     dst.FtrDisplayYTiling.setValue(src.FtrDisplayYTiling);
     dst.FtrS3D.setValue(src.FtrS3D);
     dst.FtrDisplayEngineS3d.setValue(src.FtrDisplayEngineS3d);
-    dst.FtrSingleVeboxSlice.setValue(src.FtrSingleVeboxSlice);
     dst.FtrSimulationMode.setValue(src.FtrSimulationMode);
     dst.FtrEnableGuC.setValue(src.FtrEnableGuC);
     dst.FtrVgt.setValue(src.FtrVgt);
@@ -1198,7 +1183,6 @@ inline void marshall(TOKSTR__WA_TABLE &dst, const _WA_TABLET &src) {
     dst.WaMemTypeIsMaxOfPatAndMocs.setValue(src.WaMemTypeIsMaxOfPatAndMocs);
     dst.WaGttPat0GttWbOverOsIommuEllcOnly.setValue(src.WaGttPat0GttWbOverOsIommuEllcOnly);
     dst.WaAddDummyPageForDisplayPrefetch.setValue(src.WaAddDummyPageForDisplayPrefetch);
-    dst.WaDefaultTile4.setValue(src.WaDefaultTile4);
     dst.WaLLCCachingUnsupported.setValue(src.WaLLCCachingUnsupported);
     dst.WaDoubleFastClearWidthAlignment.setValue(src.WaDoubleFastClearWidthAlignment);
     dst.WaCompressedResourceRequiresConstVA21.setValue(src.WaCompressedResourceRequiresConstVA21);
@@ -1412,23 +1396,9 @@ inline void marshall(TOKSTR__ADAPTER_INFO &dst, const _ADAPTER_INFOT &src) {
     dst.GfxPlatform.usRevId_PCH.setValue(src.GfxPlatform.usRevId_PCH);
     dst.GfxPlatform.eGTType.setValue(src.GfxPlatform.eGTType);
     dst.SkuTable.FtrDesktop.setValue(src.SkuTable.FtrDesktop);
-    dst.SkuTable.FtrVERing.setValue(src.SkuTable.FtrVERing);
-    dst.SkuTable.FtrVcs2.setValue(src.SkuTable.FtrVcs2);
-    dst.SkuTable.FtrGtBigDie.setValue(src.SkuTable.FtrGtBigDie);
-    dst.SkuTable.FtrGtMediumDie.setValue(src.SkuTable.FtrGtMediumDie);
-    dst.SkuTable.FtrGtSmallDie.setValue(src.SkuTable.FtrGtSmallDie);
-    dst.SkuTable.FtrGT1.setValue(src.SkuTable.FtrGT1);
-    dst.SkuTable.FtrGT1_5.setValue(src.SkuTable.FtrGT1_5);
-    dst.SkuTable.FtrGT2.setValue(src.SkuTable.FtrGT2);
-    dst.SkuTable.FtrGT2_5.setValue(src.SkuTable.FtrGT2_5);
-    dst.SkuTable.FtrGT3.setValue(src.SkuTable.FtrGT3);
-    dst.SkuTable.FtrGT4.setValue(src.SkuTable.FtrGT4);
     dst.SkuTable.FtrULT.setValue(src.SkuTable.FtrULT);
     dst.SkuTable.FtrIVBM0M1Platform.setValue(src.SkuTable.FtrIVBM0M1Platform);
     dst.SkuTable.FtrChannelSwizzlingXOREnabled.setValue(src.SkuTable.FtrChannelSwizzlingXOREnabled);
-    dst.SkuTable.FtrGTA.setValue(src.SkuTable.FtrGTA);
-    dst.SkuTable.FtrGTC.setValue(src.SkuTable.FtrGTC);
-    dst.SkuTable.FtrGTX.setValue(src.SkuTable.FtrGTX);
     dst.SkuTable.Ftr5Slice.setValue(src.SkuTable.Ftr5Slice);
     dst.SkuTable.FtrLCIA.setValue(src.SkuTable.FtrLCIA);
     dst.SkuTable.FtrResourceStreamer.setValue(src.SkuTable.FtrResourceStreamer);
@@ -1484,12 +1454,10 @@ inline void marshall(TOKSTR__ADAPTER_INFO &dst, const _ADAPTER_INFOT &src) {
     dst.SkuTable.FtrFbc2AddressTranslation.setValue(src.SkuTable.FtrFbc2AddressTranslation);
     dst.SkuTable.FtrFbcBlitterTracking.setValue(src.SkuTable.FtrFbcBlitterTracking);
     dst.SkuTable.FtrFbcCpuTracking.setValue(src.SkuTable.FtrFbcCpuTracking);
-    dst.SkuTable.FtrVEBOX.setValue(src.SkuTable.FtrVEBOX);
     dst.SkuTable.FtrRendComp.setValue(src.SkuTable.FtrRendComp);
     dst.SkuTable.FtrDisplayYTiling.setValue(src.SkuTable.FtrDisplayYTiling);
     dst.SkuTable.FtrS3D.setValue(src.SkuTable.FtrS3D);
     dst.SkuTable.FtrDisplayEngineS3d.setValue(src.SkuTable.FtrDisplayEngineS3d);
-    dst.SkuTable.FtrSingleVeboxSlice.setValue(src.SkuTable.FtrSingleVeboxSlice);
     dst.SkuTable.FtrSimulationMode.setValue(src.SkuTable.FtrSimulationMode);
     dst.SkuTable.FtrEnableGuC.setValue(src.SkuTable.FtrEnableGuC);
     dst.SkuTable.FtrVgt.setValue(src.SkuTable.FtrVgt);
@@ -1538,7 +1506,6 @@ inline void marshall(TOKSTR__ADAPTER_INFO &dst, const _ADAPTER_INFOT &src) {
     dst.WaTable.WaMemTypeIsMaxOfPatAndMocs.setValue(src.WaTable.WaMemTypeIsMaxOfPatAndMocs);
     dst.WaTable.WaGttPat0GttWbOverOsIommuEllcOnly.setValue(src.WaTable.WaGttPat0GttWbOverOsIommuEllcOnly);
     dst.WaTable.WaAddDummyPageForDisplayPrefetch.setValue(src.WaTable.WaAddDummyPageForDisplayPrefetch);
-    dst.WaTable.WaDefaultTile4.setValue(src.WaTable.WaDefaultTile4);
     dst.WaTable.WaLLCCachingUnsupported.setValue(src.WaTable.WaLLCCachingUnsupported);
     dst.WaTable.WaDoubleFastClearWidthAlignment.setValue(src.WaTable.WaDoubleFastClearWidthAlignment);
     dst.WaTable.WaCompressedResourceRequiresConstVA21.setValue(src.WaTable.WaCompressedResourceRequiresConstVA21);
@@ -2556,6 +2523,8 @@ inline void marshall(TOKSTR_GMM_RESOURCE_FLAG_REC &dst, const GMM_RESOURCE_FLAG_
     dst.Wa.DisableDisplayCcsClearColor.setValue(src.Wa.DisableDisplayCcsClearColor);
     dst.Wa.DisableDisplayCcsCompression.setValue(src.Wa.DisableDisplayCcsCompression);
     dst.Wa.PreGen12FastClearOnly.setValue(src.Wa.PreGen12FastClearOnly);
+    dst.Wa.ForceStdAllocAlign.setValue(src.Wa.ForceStdAllocAlign);
+    dst.Wa.DeniableLocalOnlyForCompression.setValue(src.Wa.DeniableLocalOnlyForCompression);
 }
 template <>
 struct Marshaller<TOK_S_GMM_RESOURCE_FLAG_REC> {
@@ -2828,6 +2797,8 @@ inline void marshall(TOKSTR_GMM_TEXTURE_INFO_REC &dst, const GMM_TEXTURE_INFO_RE
     dst.Flags.Wa.DisableDisplayCcsClearColor.setValue(src.Flags.Wa.DisableDisplayCcsClearColor);
     dst.Flags.Wa.DisableDisplayCcsCompression.setValue(src.Flags.Wa.DisableDisplayCcsCompression);
     dst.Flags.Wa.PreGen12FastClearOnly.setValue(src.Flags.Wa.PreGen12FastClearOnly);
+    dst.Flags.Wa.ForceStdAllocAlign.setValue(src.Flags.Wa.ForceStdAllocAlign);
+    dst.Flags.Wa.DeniableLocalOnlyForCompression.setValue(src.Flags.Wa.DeniableLocalOnlyForCompression);
     dst.BaseWidth.setValue(src.BaseWidth);
     dst.BaseHeight.setValue(src.BaseHeight);
     dst.Depth.setValue(src.Depth);
@@ -3039,6 +3010,8 @@ inline void marshall(TOKSTR_GmmResourceInfoCommonStruct &dst, const GmmResourceI
     dst.Surf.Flags.Wa.DisableDisplayCcsClearColor.setValue(src.Surf.Flags.Wa.DisableDisplayCcsClearColor);
     dst.Surf.Flags.Wa.DisableDisplayCcsCompression.setValue(src.Surf.Flags.Wa.DisableDisplayCcsCompression);
     dst.Surf.Flags.Wa.PreGen12FastClearOnly.setValue(src.Surf.Flags.Wa.PreGen12FastClearOnly);
+    dst.Surf.Flags.Wa.ForceStdAllocAlign.setValue(src.Surf.Flags.Wa.ForceStdAllocAlign);
+    dst.Surf.Flags.Wa.DeniableLocalOnlyForCompression.setValue(src.Surf.Flags.Wa.DeniableLocalOnlyForCompression);
     dst.Surf.BaseWidth.setValue(src.Surf.BaseWidth);
     dst.Surf.BaseHeight.setValue(src.Surf.BaseHeight);
     dst.Surf.Depth.setValue(src.Surf.Depth);
@@ -3216,6 +3189,8 @@ inline void marshall(TOKSTR_GmmResourceInfoCommonStruct &dst, const GmmResourceI
     dst.AuxSurf.Flags.Wa.DisableDisplayCcsClearColor.setValue(src.AuxSurf.Flags.Wa.DisableDisplayCcsClearColor);
     dst.AuxSurf.Flags.Wa.DisableDisplayCcsCompression.setValue(src.AuxSurf.Flags.Wa.DisableDisplayCcsCompression);
     dst.AuxSurf.Flags.Wa.PreGen12FastClearOnly.setValue(src.AuxSurf.Flags.Wa.PreGen12FastClearOnly);
+    dst.AuxSurf.Flags.Wa.ForceStdAllocAlign.setValue(src.AuxSurf.Flags.Wa.ForceStdAllocAlign);
+    dst.AuxSurf.Flags.Wa.DeniableLocalOnlyForCompression.setValue(src.AuxSurf.Flags.Wa.DeniableLocalOnlyForCompression);
     dst.AuxSurf.BaseWidth.setValue(src.AuxSurf.BaseWidth);
     dst.AuxSurf.BaseHeight.setValue(src.AuxSurf.BaseHeight);
     dst.AuxSurf.Depth.setValue(src.AuxSurf.Depth);
@@ -3393,6 +3368,8 @@ inline void marshall(TOKSTR_GmmResourceInfoCommonStruct &dst, const GmmResourceI
     dst.AuxSecSurf.Flags.Wa.DisableDisplayCcsClearColor.setValue(src.AuxSecSurf.Flags.Wa.DisableDisplayCcsClearColor);
     dst.AuxSecSurf.Flags.Wa.DisableDisplayCcsCompression.setValue(src.AuxSecSurf.Flags.Wa.DisableDisplayCcsCompression);
     dst.AuxSecSurf.Flags.Wa.PreGen12FastClearOnly.setValue(src.AuxSecSurf.Flags.Wa.PreGen12FastClearOnly);
+    dst.AuxSecSurf.Flags.Wa.ForceStdAllocAlign.setValue(src.AuxSecSurf.Flags.Wa.ForceStdAllocAlign);
+    dst.AuxSecSurf.Flags.Wa.DeniableLocalOnlyForCompression.setValue(src.AuxSecSurf.Flags.Wa.DeniableLocalOnlyForCompression);
     dst.AuxSecSurf.BaseWidth.setValue(src.AuxSecSurf.BaseWidth);
     dst.AuxSecSurf.BaseHeight.setValue(src.AuxSecSurf.BaseHeight);
     dst.AuxSecSurf.Depth.setValue(src.AuxSecSurf.Depth);
@@ -3598,6 +3575,8 @@ inline void marshall(TOKSTR_GmmResourceInfoWinStruct &dst, const GmmResourceInfo
     dst.GmmResourceInfoCommon.Surf.Flags.Wa.DisableDisplayCcsClearColor.setValue(src.GmmResourceInfoCommon.Surf.Flags.Wa.DisableDisplayCcsClearColor);
     dst.GmmResourceInfoCommon.Surf.Flags.Wa.DisableDisplayCcsCompression.setValue(src.GmmResourceInfoCommon.Surf.Flags.Wa.DisableDisplayCcsCompression);
     dst.GmmResourceInfoCommon.Surf.Flags.Wa.PreGen12FastClearOnly.setValue(src.GmmResourceInfoCommon.Surf.Flags.Wa.PreGen12FastClearOnly);
+    dst.GmmResourceInfoCommon.Surf.Flags.Wa.ForceStdAllocAlign.setValue(src.GmmResourceInfoCommon.Surf.Flags.Wa.ForceStdAllocAlign);
+    dst.GmmResourceInfoCommon.Surf.Flags.Wa.DeniableLocalOnlyForCompression.setValue(src.GmmResourceInfoCommon.Surf.Flags.Wa.DeniableLocalOnlyForCompression);
     dst.GmmResourceInfoCommon.Surf.BaseWidth.setValue(src.GmmResourceInfoCommon.Surf.BaseWidth);
     dst.GmmResourceInfoCommon.Surf.BaseHeight.setValue(src.GmmResourceInfoCommon.Surf.BaseHeight);
     dst.GmmResourceInfoCommon.Surf.Depth.setValue(src.GmmResourceInfoCommon.Surf.Depth);
@@ -3775,6 +3754,8 @@ inline void marshall(TOKSTR_GmmResourceInfoWinStruct &dst, const GmmResourceInfo
     dst.GmmResourceInfoCommon.AuxSurf.Flags.Wa.DisableDisplayCcsClearColor.setValue(src.GmmResourceInfoCommon.AuxSurf.Flags.Wa.DisableDisplayCcsClearColor);
     dst.GmmResourceInfoCommon.AuxSurf.Flags.Wa.DisableDisplayCcsCompression.setValue(src.GmmResourceInfoCommon.AuxSurf.Flags.Wa.DisableDisplayCcsCompression);
     dst.GmmResourceInfoCommon.AuxSurf.Flags.Wa.PreGen12FastClearOnly.setValue(src.GmmResourceInfoCommon.AuxSurf.Flags.Wa.PreGen12FastClearOnly);
+    dst.GmmResourceInfoCommon.AuxSurf.Flags.Wa.ForceStdAllocAlign.setValue(src.GmmResourceInfoCommon.AuxSurf.Flags.Wa.ForceStdAllocAlign);
+    dst.GmmResourceInfoCommon.AuxSurf.Flags.Wa.DeniableLocalOnlyForCompression.setValue(src.GmmResourceInfoCommon.AuxSurf.Flags.Wa.DeniableLocalOnlyForCompression);
     dst.GmmResourceInfoCommon.AuxSurf.BaseWidth.setValue(src.GmmResourceInfoCommon.AuxSurf.BaseWidth);
     dst.GmmResourceInfoCommon.AuxSurf.BaseHeight.setValue(src.GmmResourceInfoCommon.AuxSurf.BaseHeight);
     dst.GmmResourceInfoCommon.AuxSurf.Depth.setValue(src.GmmResourceInfoCommon.AuxSurf.Depth);
@@ -3952,6 +3933,8 @@ inline void marshall(TOKSTR_GmmResourceInfoWinStruct &dst, const GmmResourceInfo
     dst.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.DisableDisplayCcsClearColor.setValue(src.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.DisableDisplayCcsClearColor);
     dst.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.DisableDisplayCcsCompression.setValue(src.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.DisableDisplayCcsCompression);
     dst.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.PreGen12FastClearOnly.setValue(src.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.PreGen12FastClearOnly);
+    dst.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.ForceStdAllocAlign.setValue(src.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.ForceStdAllocAlign);
+    dst.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.DeniableLocalOnlyForCompression.setValue(src.GmmResourceInfoCommon.AuxSecSurf.Flags.Wa.DeniableLocalOnlyForCompression);
     dst.GmmResourceInfoCommon.AuxSecSurf.BaseWidth.setValue(src.GmmResourceInfoCommon.AuxSecSurf.BaseWidth);
     dst.GmmResourceInfoCommon.AuxSecSurf.BaseHeight.setValue(src.GmmResourceInfoCommon.AuxSecSurf.BaseHeight);
     dst.GmmResourceInfoCommon.AuxSecSurf.Depth.setValue(src.GmmResourceInfoCommon.AuxSecSurf.Depth);

@@ -1,12 +1,14 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/command_stream/wait_status.h"
 #include "shared/test/common/mocks/mock_command_stream_receiver.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/event/user_event.h"
 #include "opencl/test/unit_test/fixtures/multi_root_device_fixture.h"
@@ -14,7 +16,8 @@
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
-#include "test.h"
+
+#include "test_traits_common.h"
 
 using namespace NEO;
 
@@ -84,11 +87,11 @@ HWTEST_F(MultiRootDeviceCommandStreamReceiverBufferTests, givenMultipleEventInMu
 
         auto semaphoreCmd0 = genCmdCast<MI_SEMAPHORE_WAIT *>(*(semaphores[0]));
         EXPECT_EQ(4u, semaphoreCmd0->getSemaphoreDataDword());
-        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ2->getCommandStreamReceiver(false).getTagAddress()), semaphoreCmd0->getSemaphoreGraphicsAddress());
+        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ2->getGpgpuCommandStreamReceiver().getTagAddress()), semaphoreCmd0->getSemaphoreGraphicsAddress());
 
         auto semaphoreCmd1 = genCmdCast<MI_SEMAPHORE_WAIT *>(*(semaphores[1]));
         EXPECT_EQ(7u, semaphoreCmd1->getSemaphoreDataDword());
-        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ2->getCommandStreamReceiver(false).getTagAddress()), semaphoreCmd1->getSemaphoreGraphicsAddress());
+        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ2->getGpgpuCommandStreamReceiver().getTagAddress()), semaphoreCmd1->getSemaphoreGraphicsAddress());
     }
 
     {
@@ -112,11 +115,11 @@ HWTEST_F(MultiRootDeviceCommandStreamReceiverBufferTests, givenMultipleEventInMu
 
         auto semaphoreCmd0 = genCmdCast<MI_SEMAPHORE_WAIT *>(*(semaphores[0]));
         EXPECT_EQ(15u, semaphoreCmd0->getSemaphoreDataDword());
-        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ1->getCommandStreamReceiver(false).getTagAddress()), semaphoreCmd0->getSemaphoreGraphicsAddress());
+        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ1->getGpgpuCommandStreamReceiver().getTagAddress()), semaphoreCmd0->getSemaphoreGraphicsAddress());
 
         auto semaphoreCmd1 = genCmdCast<MI_SEMAPHORE_WAIT *>(*(semaphores[1]));
         EXPECT_EQ(20u, semaphoreCmd1->getSemaphoreDataDword());
-        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ1->getCommandStreamReceiver(false).getTagAddress()), semaphoreCmd1->getSemaphoreGraphicsAddress());
+        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ1->getGpgpuCommandStreamReceiver().getTagAddress()), semaphoreCmd1->getSemaphoreGraphicsAddress());
     }
     alignedFree(svmPtr);
 }
@@ -187,15 +190,15 @@ HWTEST_F(MultiRootDeviceCommandStreamReceiverTests, givenMultipleEventInMultiRoo
 
         auto semaphoreCmd0 = genCmdCast<MI_SEMAPHORE_WAIT *>(*(semaphores[0]));
         EXPECT_EQ(4u, semaphoreCmd0->getSemaphoreDataDword());
-        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ2->getCommandStreamReceiver(false).getTagAddress()), semaphoreCmd0->getSemaphoreGraphicsAddress());
+        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ2->getGpgpuCommandStreamReceiver().getTagAddress()), semaphoreCmd0->getSemaphoreGraphicsAddress());
 
         auto semaphoreCmd1 = genCmdCast<MI_SEMAPHORE_WAIT *>(*(semaphores[1]));
         EXPECT_EQ(21u, semaphoreCmd1->getSemaphoreDataDword());
-        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ3->getCommandStreamReceiver(false).getTagAddress()), semaphoreCmd1->getSemaphoreGraphicsAddress());
+        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ3->getGpgpuCommandStreamReceiver().getTagAddress()), semaphoreCmd1->getSemaphoreGraphicsAddress());
 
         auto semaphoreCmd2 = genCmdCast<MI_SEMAPHORE_WAIT *>(*(semaphores[2]));
         EXPECT_EQ(7u, semaphoreCmd2->getSemaphoreDataDword());
-        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ2->getCommandStreamReceiver(false).getTagAddress()), semaphoreCmd2->getSemaphoreGraphicsAddress());
+        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ2->getGpgpuCommandStreamReceiver().getTagAddress()), semaphoreCmd2->getSemaphoreGraphicsAddress());
     }
 
     {
@@ -212,15 +215,15 @@ HWTEST_F(MultiRootDeviceCommandStreamReceiverTests, givenMultipleEventInMultiRoo
 
         auto semaphoreCmd0 = genCmdCast<MI_SEMAPHORE_WAIT *>(*(semaphores[0]));
         EXPECT_EQ(15u, semaphoreCmd0->getSemaphoreDataDword());
-        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ1->getCommandStreamReceiver(false).getTagAddress()), semaphoreCmd0->getSemaphoreGraphicsAddress());
+        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ1->getGpgpuCommandStreamReceiver().getTagAddress()), semaphoreCmd0->getSemaphoreGraphicsAddress());
 
         auto semaphoreCmd1 = genCmdCast<MI_SEMAPHORE_WAIT *>(*(semaphores[1]));
         EXPECT_EQ(20u, semaphoreCmd1->getSemaphoreDataDword());
-        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ1->getCommandStreamReceiver(false).getTagAddress()), semaphoreCmd1->getSemaphoreGraphicsAddress());
+        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ1->getGpgpuCommandStreamReceiver().getTagAddress()), semaphoreCmd1->getSemaphoreGraphicsAddress());
 
         auto semaphoreCmd2 = genCmdCast<MI_SEMAPHORE_WAIT *>(*(semaphores[2]));
         EXPECT_EQ(21u, semaphoreCmd2->getSemaphoreDataDword());
-        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ3->getCommandStreamReceiver(false).getTagAddress()), semaphoreCmd2->getSemaphoreGraphicsAddress());
+        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ3->getGpgpuCommandStreamReceiver().getTagAddress()), semaphoreCmd2->getSemaphoreGraphicsAddress());
     }
 
     {
@@ -246,14 +249,15 @@ HWTEST_F(MultiRootDeviceCommandStreamReceiverTests, givenMultipleEventInMultiRoo
 
         auto semaphoreCmd0 = genCmdCast<MI_SEMAPHORE_WAIT *>(*(semaphores[0]));
         EXPECT_EQ(15u, semaphoreCmd0->getSemaphoreDataDword());
-        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ1->getCommandStreamReceiver(false).getTagAddress()), semaphoreCmd0->getSemaphoreGraphicsAddress());
+        EXPECT_EQ(reinterpret_cast<uint64_t>(pCmdQ1->getGpgpuCommandStreamReceiver().getTagAddress()), semaphoreCmd0->getSemaphoreGraphicsAddress());
     }
 }
 
 struct CrossDeviceDependenciesTests : public ::testing::Test {
 
     void SetUp() override {
-
+        VariableBackup<HardwareInfo> backupHwInfo(defaultHwInfo.get());
+        defaultHwInfo->capabilityTable.blitterOperationsSupported = true;
         deviceFactory = std::make_unique<UltClDeviceFactory>(3, 0);
         auto device1 = deviceFactory->rootDevices[1];
         auto device2 = deviceFactory->rootDevices[2];
@@ -310,7 +314,7 @@ HWTEST_F(CrossDeviceDependenciesTests, givenMultipleEventInMultiRootDeviceEnviro
 
         EventsRequest eventsRequest(numEventsInWaitList, eventWaitList, nullptr);
         CsrDependencies csrDeps;
-        eventsRequest.fillCsrDependenciesForTaskCountContainer(csrDeps, pCmdQ1->getCommandStreamReceiver(false));
+        eventsRequest.fillCsrDependenciesForTaskCountContainer(csrDeps, pCmdQ1->getGpgpuCommandStreamReceiver());
 
         EXPECT_EQ(0u, csrDeps.taskCountContainer.size());
         EXPECT_EQ(0u, TimestampPacketHelper::getRequiredCmdStreamSizeForTaskCountContainer<FamilyType>(csrDeps));
@@ -336,7 +340,7 @@ HWTEST_F(CrossDeviceDependenciesTests, givenMultipleEventInMultiRootDeviceEnviro
 
         EventsRequest eventsRequest(numEventsInWaitList, eventWaitList, nullptr);
         CsrDependencies csrDeps;
-        eventsRequest.fillCsrDependenciesForTaskCountContainer(csrDeps, pCmdQ2->getCommandStreamReceiver(false));
+        eventsRequest.fillCsrDependenciesForTaskCountContainer(csrDeps, pCmdQ2->getGpgpuCommandStreamReceiver());
 
         EXPECT_EQ(3u, csrDeps.taskCountContainer.size());
         EXPECT_EQ(3u * sizeof(MI_SEMAPHORE_WAIT), TimestampPacketHelper::getRequiredCmdStreamSizeForTaskCountContainer<FamilyType>(csrDeps));
@@ -502,7 +506,7 @@ HWTEST_F(CrossDeviceDependenciesTests, givenWaitListWithEventBlockedByUserEventW
     DebugManager.flags.EnableBlitterForEnqueueOperations.set(true);
 
     for (auto &rootDeviceEnvironment : deviceFactory->rootDevices[0]->getExecutionEnvironment()->rootDeviceEnvironments) {
-        rootDeviceEnvironment->getMutableHardwareInfo()->capabilityTable.blitterOperationsSupported = true;
+        REQUIRE_FULL_BLITTER_OR_SKIP(rootDeviceEnvironment->getHardwareInfo());
     }
 
     auto clCmdQ1 = clCreateCommandQueue(context.get(), deviceFactory->rootDevices[1], {}, nullptr);
@@ -512,12 +516,6 @@ HWTEST_F(CrossDeviceDependenciesTests, givenWaitListWithEventBlockedByUserEventW
     pCmdQ2 = castToObject<CommandQueue>(clCmdQ2);
     ASSERT_NE(nullptr, pCmdQ1);
     ASSERT_NE(nullptr, pCmdQ2);
-
-    if (!pCmdQ1->getBcsCommandStreamReceiver()) {
-        pCmdQ1->release();
-        pCmdQ2->release();
-        GTEST_SKIP();
-    }
 
     UserEvent userEvent1(&pCmdQ1->getContext());
 
@@ -608,7 +606,7 @@ HWTEST_F(CrossDeviceDependenciesTests, givenWaitListWithEventBlockedByUserEventW
     }
     {
         HardwareParse csHwParser;
-        csHwParser.parseCommands<FamilyType>(pCmdQ1->getBcsCommandStreamReceiver()->getCS(0));
+        csHwParser.parseCommands<FamilyType>(pCmdQ1->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)->getCS(0));
         auto semaphores = findAll<MI_SEMAPHORE_WAIT *>(csHwParser.cmdList.begin(), csHwParser.cmdList.end());
 
         EXPECT_LE(1u, semaphores.size());
@@ -625,7 +623,7 @@ HWTEST_F(CrossDeviceDependenciesTests, givenWaitListWithEventBlockedByUserEventW
     }
     {
         HardwareParse csHwParser;
-        csHwParser.parseCommands<FamilyType>(pCmdQ2->getBcsCommandStreamReceiver()->getCS(0));
+        csHwParser.parseCommands<FamilyType>(pCmdQ2->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)->getCS(0));
         auto semaphores = findAll<MI_SEMAPHORE_WAIT *>(csHwParser.cmdList.begin(), csHwParser.cmdList.end());
 
         EXPECT_LE(1u, semaphores.size());
@@ -638,6 +636,7 @@ HWTEST_F(CrossDeviceDependenciesTests, givenWaitListWithEventBlockedByUserEventW
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenStaticPartitioningEnabledWhenFlushingTaskThenWorkPartitionAllocationIsMadeResident) {
     DebugManagerStateRestore restore{};
     DebugManager.flags.EnableStaticPartitioning.set(1);
+    DebugManager.flags.EnableImplicitScaling.set(1);
     DebugManager.flags.ForcePreemptionMode.set(PreemptionMode::Disabled);
     UltDeviceFactory deviceFactory{1, 2};
     MockDevice *device = deviceFactory.rootDevices[0];
@@ -667,6 +666,60 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenStaticPartitioningEnabledWhen
     EXPECT_TRUE(found);
 }
 
+HWTEST_F(CommandStreamReceiverFlushTaskTests, givenEnqueueWithoutArbitrationPolicyWhenPolicyIsAlreadyProgrammedThenReuse) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto &csrThreadArbitrationPolicy = commandStreamReceiver.streamProperties.stateComputeMode.threadArbitrationPolicy.value;
+
+    int32_t sentThreadArbitrationPolicy = ThreadArbitrationPolicy::RoundRobinAfterDependency;
+
+    flushTaskFlags.threadArbitrationPolicy = sentThreadArbitrationPolicy;
+
+    flushTask(commandStreamReceiver);
+
+    EXPECT_EQ(csrThreadArbitrationPolicy, sentThreadArbitrationPolicy);
+
+    flushTaskFlags.threadArbitrationPolicy = ThreadArbitrationPolicy::NotPresent;
+
+    flushTask(commandStreamReceiver);
+
+    EXPECT_EQ(csrThreadArbitrationPolicy, sentThreadArbitrationPolicy);
+}
+
+struct PreambleThreadArbitrationMatcher {
+    template <PRODUCT_FAMILY productFamily>
+    static constexpr bool isMatched() {
+        if constexpr (HwMapper<productFamily>::GfxProduct::supportsCmdSet(IGFX_GEN8_CORE)) {
+            return TestTraits<NEO::ToGfxCoreFamily<productFamily>::get()>::implementsPreambleThreadArbitration;
+        }
+        return false;
+    }
+};
+
+HWTEST2_F(CommandStreamReceiverFlushTaskTests, givenPolicyValueChangedWhenFlushingTaskThenProgramThreadArbitrationPolicy, PreambleThreadArbitrationMatcher) {
+    using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
+    auto &hwHelper = HwHelper::get(pDevice->getHardwareInfo().platform.eRenderCoreFamily);
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    commandStreamReceiver.isPreambleSent = true;
+
+    flushTask(commandStreamReceiver);
+    size_t parsingOffset = commandStreamReceiver.commandStream.getUsed();
+    for (auto arbitrationChanged : ::testing::Bool()) {
+        commandStreamReceiver.streamProperties.stateComputeMode.threadArbitrationPolicy.value =
+            arbitrationChanged ? -1 : hwHelper.getDefaultThreadArbitrationPolicy();
+
+        flushTask(commandStreamReceiver);
+        HardwareParse csHwParser;
+        csHwParser.parseCommands<FamilyType>(commandStreamReceiver.commandStream, parsingOffset);
+        auto miLoadRegisterCommandsCount = findAll<MI_LOAD_REGISTER_IMM *>(csHwParser.cmdList.begin(), csHwParser.cmdList.end()).size();
+        if (arbitrationChanged) {
+            EXPECT_GE(miLoadRegisterCommandsCount, 1u);
+        } else {
+            EXPECT_EQ(0u, miLoadRegisterCommandsCount);
+        }
+        parsingOffset = commandStreamReceiver.commandStream.getUsed();
+    }
+}
+
 namespace CpuIntrinsicsTests {
 extern volatile uint32_t *pauseAddress;
 extern uint32_t pauseValue;
@@ -686,6 +739,6 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenTagValueNotMeetingTaskCountTo
     CpuIntrinsicsTests::pauseAddress = mockCsr->tagAddress;
     CpuIntrinsicsTests::pauseValue = taskCountToWait;
 
-    bool ret = mockCsr->waitForCompletionWithTimeout(false, 1, taskCountToWait);
-    EXPECT_TRUE(ret);
+    const auto ret = mockCsr->waitForCompletionWithTimeout(false, 1, taskCountToWait);
+    EXPECT_EQ(NEO::WaitStatus::Ready, ret);
 }

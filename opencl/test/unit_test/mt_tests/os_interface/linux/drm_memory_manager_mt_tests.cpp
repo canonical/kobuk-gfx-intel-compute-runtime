@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,8 +11,7 @@
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/test/common/mocks/linux/mock_drm_memory_manager.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
-
-#include "opencl/test/unit_test/os_interface/linux/device_command_stream_fixture.h"
+#include "shared/test/common/os_interface/linux/device_command_stream_fixture.h"
 
 #include "gtest/gtest.h"
 
@@ -25,6 +24,7 @@ using namespace NEO;
 TEST(DrmMemoryManagerTest, givenDrmMemoryManagerWhenSharedAllocationIsCreatedFromMultipleThreadsThenSingleBoIsReused) {
     class MockDrm : public Drm {
       public:
+        using Drm::setupIoctlHelper;
         MockDrm(int fd, RootDeviceEnvironment &rootDeviceEnvironment) : Drm(std::make_unique<HwDeviceIdDrm>(fd, ""), rootDeviceEnvironment) {}
 
         int ioctl(unsigned long request, void *arg) override {
@@ -38,6 +38,7 @@ TEST(DrmMemoryManagerTest, givenDrmMemoryManagerWhenSharedAllocationIsCreatedFro
     MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
     executionEnvironment.rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
     auto mock = new MockDrm(0, *executionEnvironment.rootDeviceEnvironments[0]);
+    mock->setupIoctlHelper(defaultHwInfo->platform.eProductFamily);
     executionEnvironment.rootDeviceEnvironments[0]->osInterface->setDriverModel(std::unique_ptr<DriverModel>(mock));
     executionEnvironment.rootDeviceEnvironments[0]->memoryOperationsInterface = DrmMemoryOperationsHandler::create(*mock, 0u);
 
@@ -53,7 +54,7 @@ TEST(DrmMemoryManagerTest, givenDrmMemoryManagerWhenSharedAllocationIsCreatedFro
 
     auto createFunction = [&]() {
         size_t indexFree = index++;
-        AllocationProperties properties(0, false, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, {});
+        AllocationProperties properties(0, false, MemoryConstants::pageSize, AllocationType::SHARED_BUFFER, false, {});
         createdAllocations[indexFree] = memoryManager->createGraphicsAllocationFromSharedHandle(handle, properties, false, false);
         EXPECT_NE(nullptr, createdAllocations[indexFree]);
         EXPECT_GE(1u, memoryManager->peekSharedBosSize());
@@ -77,6 +78,7 @@ TEST(DrmMemoryManagerTest, givenDrmMemoryManagerWhenSharedAllocationIsCreatedFro
 TEST(DrmMemoryManagerTest, givenMultipleThreadsWhenSharedAllocationIsCreatedThenPrimeFdToHandleDoesNotRaceWithClose) {
     class MockDrm : public Drm {
       public:
+        using Drm::setupIoctlHelper;
         MockDrm(int fd, RootDeviceEnvironment &rootDeviceEnvironment) : Drm(std::make_unique<HwDeviceIdDrm>(fd, ""), rootDeviceEnvironment) {
             primeFdHandle = 1;
             closeHandle = 1;
@@ -108,6 +110,7 @@ TEST(DrmMemoryManagerTest, givenMultipleThreadsWhenSharedAllocationIsCreatedThen
     MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
     executionEnvironment.rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
     auto mock = new MockDrm(0, *executionEnvironment.rootDeviceEnvironments[0]);
+    mock->setupIoctlHelper(defaultHwInfo->platform.eProductFamily);
     executionEnvironment.rootDeviceEnvironments[0]->osInterface->setDriverModel(std::unique_ptr<DriverModel>(mock));
     executionEnvironment.rootDeviceEnvironments[0]->memoryOperationsInterface = DrmMemoryOperationsHandler::create(*mock, 0u);
 
@@ -122,7 +125,7 @@ TEST(DrmMemoryManagerTest, givenMultipleThreadsWhenSharedAllocationIsCreatedThen
 
     auto createFunction = [&]() {
         size_t indexFree = index++;
-        AllocationProperties properties(0, false, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::SHARED_BUFFER, false, {});
+        AllocationProperties properties(0, false, MemoryConstants::pageSize, AllocationType::SHARED_BUFFER, false, {});
         createdAllocations[indexFree] = memoryManager->createGraphicsAllocationFromSharedHandle(handle, properties, false, false);
         EXPECT_NE(nullptr, createdAllocations[indexFree]);
 

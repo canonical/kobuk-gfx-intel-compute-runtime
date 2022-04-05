@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2021 Intel Corporation
+# Copyright (C) 2018-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -11,11 +11,9 @@ set(IGDRCL_SRCS_tests_memory_manager
     ${CMAKE_CURRENT_SOURCE_DIR}/internal_allocation_storage_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_manager_multi_device_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_manager_tests.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/memory_manager_allocate_in_device_pool_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_manager_allocate_in_preferred_pool_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/migraton_controller_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/surface_tests.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/storage_info_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/unified_memory_manager_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/unified_memory_token_tests.cpp
 )
@@ -31,13 +29,6 @@ endif()
 if(UNIX)
   get_property(NEO_CORE_PAGE_FAULT_MANAGER_LINUX_TESTS GLOBAL PROPERTY NEO_CORE_PAGE_FAULT_MANAGER_LINUX_TESTS)
   list(APPEND IGDRCL_SRCS_tests_memory_manager ${NEO_CORE_PAGE_FAULT_MANAGER_LINUX_TESTS})
-endif()
-
-if(TESTS_XEHP_PLUS)
-  list(APPEND IGDRCL_SRCS_tests_memory_manager
-       ${CMAKE_CURRENT_SOURCE_DIR}/memory_manager_tests_xehp_plus.cpp
-       ${CMAKE_CURRENT_SOURCE_DIR}/memory_manager_tests_xehp_plus.h
-  )
 endif()
 
 target_sources(igdrcl_tests PRIVATE ${IGDRCL_SRCS_tests_memory_manager})

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,11 +8,11 @@
 #include "shared/source/device/device.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -70,7 +70,7 @@ GEN12LPTEST_F(BufferTestsTgllp, givenConstantSurfaceWhenProgrammingSurfaceStateT
         nullptr,
         retVal));
     ASSERT_EQ(CL_SUCCESS, retVal);
-    buffer->getGraphicsAllocation(0)->setAllocationType(GraphicsAllocation::AllocationType::CONSTANT_SURFACE);
+    buffer->getGraphicsAllocation(0)->setAllocationType(AllocationType::CONSTANT_SURFACE);
 
     typename FamilyType::RENDER_SURFACE_STATE surfaceState = {};
     buffer->setArgStateful(&surfaceState, false, false, false, false, context->getDevice(0)->getDevice(), false, 1u);

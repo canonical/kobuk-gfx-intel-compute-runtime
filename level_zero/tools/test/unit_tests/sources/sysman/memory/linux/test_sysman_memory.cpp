@@ -8,20 +8,22 @@
 #include "level_zero/tools/source/sysman/memory/linux/os_memory_imp.h"
 #include "level_zero/tools/source/sysman/sysman_imp.h"
 #include "level_zero/tools/test/unit_tests/sources/sysman/linux/mock_sysman_fixture.h"
+#include "level_zero/tools/test/unit_tests/sources/sysman/memory/linux/mock_memory.h"
 
 #include "gtest/gtest.h"
 
+extern bool sysmanUltsEnable;
+
 namespace L0 {
 namespace ult {
-
-struct MockMemoryManagerSysman : public MemoryManagerMock {
-    MockMemoryManagerSysman(NEO::ExecutionEnvironment &executionEnvironment) : MemoryManagerMock(const_cast<NEO::ExecutionEnvironment &>(executionEnvironment)) {}
-};
 
 constexpr uint32_t memoryHandleComponentCount = 1u;
 class SysmanDeviceMemoryFixture : public SysmanDeviceFixture {
   protected:
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::SetUp();
 
         pMemoryManagerOld = device->getDriverHandle()->getMemoryManager();
@@ -48,6 +50,9 @@ class SysmanDeviceMemoryFixture : public SysmanDeviceFixture {
     }
 
     void TearDown() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         device->getDriverHandle()->setMemoryManager(pMemoryManagerOld);
         SysmanDeviceFixture::TearDown();
         if (pMemoryManager != nullptr) {

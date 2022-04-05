@@ -5,9 +5,8 @@
  *
  */
 
-#include "test.h"
-
-#include "aub_mem_dump.h"
+#include "shared/source/aub_mem_dump/aub_mem_dump.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include <memory>
 

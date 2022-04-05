@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -22,6 +22,8 @@
 
 #include "CL/cl.h"
 
+static_assert(NEO::HwInfoConfig::uuidSize == ZE_MAX_DEVICE_UUID_SIZE);
+
 struct _ze_device_handle_t {};
 namespace NEO {
 class Device;
@@ -34,14 +36,20 @@ namespace L0 {
 struct DriverHandle;
 struct BuiltinFunctionsLib;
 struct ExecutionEnvironment;
-struct MetricContext;
+class MetricDeviceContext;
 struct SysmanDevice;
 struct DebugSession;
 
 enum class ModuleType;
 
 struct Device : _ze_device_handle_t {
-    virtual uint32_t getRootDeviceIndex() = 0;
+    uint32_t getRootDeviceIndex() const {
+        return neoDevice->getRootDeviceIndex();
+    }
+    NEO::Device *getNEODevice() const {
+        return this->neoDevice;
+    }
+
     virtual ze_result_t canAccessPeer(ze_device_handle_t hPeerDevice, ze_bool_t *value) = 0;
     virtual ze_result_t createCommandList(const ze_command_list_desc_t *desc,
                                           ze_command_list_handle_t *commandList) = 0;
@@ -62,6 +70,7 @@ struct Device : _ze_device_handle_t {
     virtual ze_result_t getP2PProperties(ze_device_handle_t hPeerDevice,
                                          ze_device_p2p_properties_t *pP2PProperties) = 0;
     virtual ze_result_t getKernelProperties(ze_device_module_properties_t *pKernelProperties) = 0;
+    virtual ze_result_t getPciProperties(ze_pci_ext_properties_t *pPciProperties) = 0;
     virtual ze_result_t getMemoryProperties(uint32_t *pCount, ze_device_memory_properties_t *pMemProperties) = 0;
     virtual ze_result_t getMemoryAccessProperties(ze_device_memory_access_properties_t *pMemAccessProperties) = 0;
     virtual ze_result_t getProperties(ze_device_properties_t *pDeviceProperties) = 0;
@@ -88,17 +97,19 @@ struct Device : _ze_device_handle_t {
     virtual uint32_t getMaxNumHwThreads() const = 0;
 
     virtual NEO::HwHelper &getHwHelper() = 0;
-    virtual bool isMultiDeviceCapable() const = 0;
+    bool isImplicitScalingCapable() const {
+        return implicitScalingCapable;
+    }
     virtual const NEO::HardwareInfo &getHwInfo() const = 0;
     virtual NEO::OSInterface &getOsInterface() = 0;
     virtual uint32_t getPlatformInfo() const = 0;
-    virtual MetricContext &getMetricContext() = 0;
+    virtual MetricDeviceContext &getMetricDeviceContext() = 0;
     virtual DebugSession *getDebugSession(const zet_debug_config_t &config) = 0;
     virtual DebugSession *createDebugSession(const zet_debug_config_t &config, ze_result_t &result) = 0;
     virtual void removeDebugSession() = 0;
 
-    virtual ze_result_t activateMetricGroups(uint32_t count,
-                                             zet_metric_group_handle_t *phMetricGroups) = 0;
+    virtual ze_result_t activateMetricGroupsDeferred(uint32_t count,
+                                                     zet_metric_group_handle_t *phMetricGroups) = 0;
     virtual void activateMetricGroups() = 0;
 
     virtual DriverHandle *getDriverHandle() = 0;
@@ -108,11 +119,12 @@ struct Device : _ze_device_handle_t {
 
     inline ze_device_handle_t toHandle() { return this; }
 
-    static Device *create(DriverHandle *driverHandle, NEO::Device *neoDevice, uint32_t currentDeviceMask, bool isSubDevice, ze_result_t *returnValue);
+    static Device *create(DriverHandle *driverHandle, NEO::Device *neoDevice, bool isSubDevice, ze_result_t *returnValue);
+    static Device *create(DriverHandle *driverHandle, NEO::Device *neoDevice, bool isSubDevice, ze_result_t *returnValue, L0::Device *deviceL0);
+    static Device *deviceReinit(DriverHandle *driverHandle, L0::Device *device, std::unique_ptr<NEO::Device> &neoDevice, ze_result_t *returnValue);
 
     virtual NEO::PreemptionMode getDevicePreemptionMode() const = 0;
     virtual const NEO::DeviceInfo &getDeviceInfo() const = 0;
-    virtual NEO::Device *getNEODevice() = 0;
     NEO::SourceLevelDebugger *getSourceLevelDebugger() { return getNEODevice()->getSourceLevelDebugger(); }
     DebuggerL0 *getL0Debugger() {
         auto debugger = getNEODevice()->getDebugger();
@@ -127,12 +139,17 @@ struct Device : _ze_device_handle_t {
     virtual NEO::GraphicsAllocation *allocateManagedMemoryFromHostPtr(void *buffer,
                                                                       size_t size, struct CommandList *commandList) = 0;
 
-    virtual NEO::GraphicsAllocation *allocateMemoryFromHostPtr(const void *buffer, size_t size) = 0;
+    virtual NEO::GraphicsAllocation *allocateMemoryFromHostPtr(const void *buffer, size_t size, bool hostCopyAllowed) = 0;
     virtual void setSysmanHandle(SysmanDevice *pSysmanDevice) = 0;
     virtual SysmanDevice *getSysmanHandle() = 0;
     virtual ze_result_t getCsrForOrdinalAndIndex(NEO::CommandStreamReceiver **csr, uint32_t ordinal, uint32_t index) = 0;
     virtual ze_result_t getCsrForLowPriority(NEO::CommandStreamReceiver **csr) = 0;
-    virtual ze_result_t mapOrdinalForAvailableEngineGroup(uint32_t *ordinal) = 0;
+    virtual NEO::GraphicsAllocation *obtainReusableAllocation(size_t requiredSize, NEO::AllocationType type) = 0;
+    virtual void storeReusableAllocation(NEO::GraphicsAllocation &alloc) = 0;
+
+  protected:
+    NEO::Device *neoDevice = nullptr;
+    bool implicitScalingCapable = false;
 };
 
 } // namespace L0

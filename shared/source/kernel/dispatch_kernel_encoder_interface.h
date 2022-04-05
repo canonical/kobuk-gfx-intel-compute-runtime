@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,6 +11,7 @@
 
 namespace NEO {
 class GraphicsAllocation;
+struct ImplicitArgs;
 struct KernelDescriptor;
 
 enum class SlmPolicy {
@@ -44,5 +45,7 @@ struct DispatchKernelEncoderI {
 
     virtual uint32_t getRequiredWorkgroupOrder() const = 0;
     virtual bool requiresGenerationOfLocalIdsByRuntime() const = 0;
+
+    virtual ImplicitArgs *getImplicitArgs() const = 0;
 };
 } // namespace NEO

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -24,9 +24,8 @@ struct HardwareInfo;
 
 class OsContext : public ReferenceTrackedObject<OsContext> {
   public:
-    OsContext(uint32_t contextId, DeviceBitfield deviceBitfield, EngineTypeUsage typeUsage, PreemptionMode preemptionMode, bool rootDevice);
-    static OsContext *create(OSInterface *osInterface, uint32_t contextId, DeviceBitfield deviceBitfield,
-                             EngineTypeUsage typeUsage, PreemptionMode preemptionMode, bool rootDevice);
+    OsContext(uint32_t contextId, const EngineDescriptor &engineDescriptor);
+    static OsContext *create(OSInterface *osInterface, uint32_t contextId, const EngineDescriptor &engineDescriptor);
 
     bool isImmediateContextInitializationEnabled(bool isDefaultEngine) const;
     bool isInitialized() const { return contextInitialized; }
@@ -41,7 +40,9 @@ class OsContext : public ReferenceTrackedObject<OsContext> {
     bool isRegular() const { return engineUsage == EngineUsage::Regular; }
     bool isLowPriority() const { return engineUsage == EngineUsage::LowPriority; }
     bool isInternalEngine() const { return engineUsage == EngineUsage::Internal; }
+    bool isCooperativeEngine() const { return engineUsage == EngineUsage::Cooperative; }
     bool isRootDevice() const { return rootDevice; }
+    bool isEngineInstanced() const { return engineInstancedDevice; }
     virtual bool isDirectSubmissionSupported(const HardwareInfo &hwInfo) const { return false; }
     bool isDefaultContext() const { return defaultContext; }
     void setDefaultContext(bool value) { defaultContext = value; }
@@ -53,6 +54,9 @@ class OsContext : public ReferenceTrackedObject<OsContext> {
                                              aub_stream::EngineType contextEngineType,
                                              bool &startOnInit,
                                              bool &startInContext);
+    virtual void reInitializeContext() {}
+    uint8_t getUmdPowerHintValue() { return powerHintValue; }
+    void setUmdPowerHintValue(uint8_t powerHintValue) { this->powerHintValue = powerHintValue; }
 
   protected:
     virtual void initializeContext() {}
@@ -69,5 +73,6 @@ class OsContext : public ReferenceTrackedObject<OsContext> {
     std::once_flag contextInitializedFlag = {};
     bool contextInitialized = false;
     bool engineInstancedDevice = false;
+    uint8_t powerHintValue = 0;
 };
 } // namespace NEO

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -73,6 +73,10 @@ uint8_t GmmClientContext::getSurfaceStateCompressionFormat(GMM_RESOURCE_FORMAT f
 
 uint8_t GmmClientContext::getMediaSurfaceStateCompressionFormat(GMM_RESOURCE_FORMAT format) {
     return clientContext->GetMediaSurfaceStateCompressionFormat(format);
+}
+
+void GmmClientContext::setGmmDeviceInfo(GMM_DEVICE_INFO *deviceInfo) {
+    clientContext->GmmSetDeviceInfo(deviceInfo);
 }
 
 } // namespace NEO

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2020-2021 Intel Corporation
+# Copyright (C) 2020-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -8,7 +8,7 @@ link_libraries(${ASAN_LIBS} ${TSAN_LIBS})
 
 set(TARGET_NAME ${TARGET_NAME_L0}_core_tests)
 
-include(gen_kernel.cmake)
+include(${NEO_SOURCE_DIR}/cmake/setup_ult_global_flags.cmake)
 
 function(ADD_SUPPORTED_TEST_PRODUCT_FAMILIES_DEFINITION)
   set(L0_TESTED_PRODUCT_FAMILIES ${ALL_TESTED_PRODUCT_FAMILY})
@@ -20,57 +20,27 @@ ADD_SUPPORTED_TEST_PRODUCT_FAMILIES_DEFINITION()
 
 add_executable(${TARGET_NAME}
                ${NEO_SOURCE_DIR}/level_zero/core/source/dll/disallow_deferred_deleter.cpp
-               ${NEO_SOURCE_DIR}/shared/test/common/mocks/ult_device_factory.cpp
-               ${NEO_SOURCE_DIR}/shared/test/common/mocks/ult_device_factory.h
-               ${NEO_SOURCE_DIR}/opencl/test/unit_test/global_environment.cpp
                ${NEO_SOURCE_DIR}/level_zero/tools/test/unit_tests/sources/debug/debug_session_helper.cpp
-               ${NEO_SOURCE_DIR}/opencl/test/unit_test/helpers/kernel_binary_helper_hash_value.cpp
 )
 
 target_sources(${TARGET_NAME} PRIVATE
-               ${CMAKE_CURRENT_LIST_DIR}/gen_kernel.cmake
                ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
                ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/mock.h
-               ${CMAKE_CURRENT_SOURCE_DIR}/test_mode.h
                ${CMAKE_CURRENT_SOURCE_DIR}/white_box.h
                ${NEO_SHARED_TEST_DIRECTORY}/unit_test/tests_configuration.h
-               ${NEO_SHARED_TEST_DIRECTORY}/common/test_configuration/unit_tests/ult_configuration.cpp
+               ${NEO_SOURCE_DIR}/level_zero/core/test/common/gen_kernel.cmake
 )
 
 target_sources(${TARGET_NAME} PRIVATE
-               ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/libult/create_command_stream.cpp
-               ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/libult/io_functions.cpp
-               ${NEO_SOURCE_DIR}/opencl/test/unit_test/global_environment.cpp
                $<TARGET_OBJECTS:${L0_MOCKABLE_LIB_NAME}>
-               $<TARGET_OBJECTS:igdrcl_libult_common>
+               $<TARGET_OBJECTS:neo_libult_common>
+               $<TARGET_OBJECTS:neo_libult_cs>
+               $<TARGET_OBJECTS:neo_libult>
+               $<TARGET_OBJECTS:neo_shared_mocks>
+               $<TARGET_OBJECTS:neo_unit_tests_config>
+               $<TARGET_OBJECTS:l0_libult>
 )
-
-if(UNIX)
-  target_sources(${TARGET_NAME} PRIVATE
-                 ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/os_interface/linux/create_drm_memory_manager.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/os_interface/linux/drm_neo_create.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/os_interface/linux/options.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/os_interface/linux/sys_calls_linux_ult.cpp
-  )
-  if(NOT DISABLE_WDDM_LINUX)
-    target_sources(${TARGET_NAME} PRIVATE
-                   ${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory.cpp
-                   ${NEO_SHARED_DIRECTORY}/os_interface/windows/wddm/wddm_create.cpp
-    )
-
-  endif()
-else()
-  target_sources(${TARGET_NAME} PRIVATE
-                 ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/os_interface/windows/create_wddm_memory_manager.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/os_interface/windows/options.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/os_interface/windows/sys_calls.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/os_interface/windows/ult_dxcore_factory.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/os_interface/windows/ult_dxgi_factory.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/os_interface/windows/wddm_calls.cpp
-                 ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/os_interface/windows/wddm_create.cpp
-  )
-endif()
 
 set_property(TARGET ${TARGET_NAME} APPEND_STRING PROPERTY COMPILE_FLAGS ${ASAN_FLAGS})
 set_target_properties(${TARGET_NAME} PROPERTIES FOLDER ${TARGET_NAME_L0})
@@ -87,6 +57,8 @@ target_include_directories(${TARGET_NAME}
                            $<TARGET_PROPERTY:${TARGET_NAME_L0},SOURCE_DIR>/../../../../instrumentation/inc/common/instrumentation/api/
                            $<TARGET_PROPERTY:${TARGET_NAME_L0},SOURCE_DIR>/core/os_interface
                            ${NEO_SHARED_TEST_DIRECTORY}/common/test_macros/header${BRANCH_DIR_SUFFIX}
+                           ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/includes${BRANCH_DIR_SUFFIX}
+                           ${NEO_SHARED_TEST_DIRECTORY}/common/test_configuration/unit_tests
 )
 
 if(UNIX)
@@ -95,7 +67,6 @@ if(UNIX)
                              PRIVATE
                              $<TARGET_PROPERTY:${TARGET_NAME_L0},SOURCE_DIR>/core/os_interface/linux
                              $<TARGET_PROPERTY:${TARGET_NAME_L0},SOURCE_DIR>/tools/linux
-                             ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/linux
   )
 else()
   target_include_directories(${TARGET_NAME}
@@ -103,49 +74,33 @@ else()
                              PRIVATE
                              $<TARGET_PROPERTY:${TARGET_NAME_L0},SOURCE_DIR>/core/os_interface/windows
                              $<TARGET_PROPERTY:${TARGET_NAME_L0},SOURCE_DIR>/tools/windows
-                             ${COMPUTE_RUNTIME_DIR}/opencl/test/unit_test/windows
   )
 endif()
 
-if(UNIX)
-  target_link_libraries(${TARGET_NAME} pthread rt)
-else()
+if(WIN32)
   target_link_libraries(${TARGET_NAME} dbghelp)
   add_dependencies(${TARGET_NAME} mock_gdi)
 endif()
 
 target_link_libraries(${TARGET_NAME}
-                      ${NEO_STATICALLY_LINKED_LIBRARIES_MOCKABLE}
-                      compute_runtime_mockable_extra
+                      ${NEO_SHARED_MOCKABLE_LIB_NAME}
                       ${HW_LIBS_ULT}
                       gmock-gtest
+                      ${NEO_EXTRA_LIBS}
 )
 
 target_sources(${TARGET_NAME} PRIVATE
                $<TARGET_OBJECTS:mock_gmm>
                $<TARGET_OBJECTS:${TARGET_NAME_L0}_fixtures>
                $<TARGET_OBJECTS:${TARGET_NAME_L0}_mocks>
-               $<TARGET_OBJECTS:${BUILTINS_SPIRV_LIB_NAME}>
                $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDFUL_LIB_NAME}>
                $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDLESS_LIB_NAME}>
 )
-
-set(TEST_MODULES
-    ${CMAKE_CURRENT_SOURCE_DIR}/test_modules/test_kernel.cl
-)
-
-macro(macro_for_each_gen)
-  foreach(PLATFORM_TYPE ${PLATFORM_TYPES})
-    if(${GEN_TYPE}_HAS_${PLATFORM_TYPE})
-      get_family_name_with_type(${GEN_TYPE} ${PLATFORM_TYPE})
-      string(TOLOWER ${PLATFORM_TYPE} PLATFORM_TYPE_LOWER)
-      set(PLATFORM_LOWER ${DEFAULT_SUPPORTED_${GEN_TYPE}_${PLATFORM_TYPE}_PLATFORM})
-      level_zero_gen_kernels(level_zero_test_kernels_${family_name_with_type} ${PLATFORM_LOWER} ${family_name_with_type} "-g" ${TEST_MODULES})
-      add_dependencies(${TARGET_NAME} level_zero_test_kernels_${family_name_with_type})
-    endif()
-  endforeach()
-endmacro()
-apply_macro_for_each_gen("TESTED")
+if(TARGET ${BUILTINS_SPIRV_LIB_NAME})
+  target_sources(${TARGET_NAME} PRIVATE
+                 $<TARGET_OBJECTS:${BUILTINS_SPIRV_LIB_NAME}>
+  )
+endif()
 
 option(L0_ULT_VERBOSE "Use the default/verbose test output" OFF)
 if(NOT L0_ULT_VERBOSE)
@@ -168,6 +123,6 @@ if(MSVC)
   )
 endif()
 
-add_dependencies(unit_tests ${TARGET_NAME})
+add_dependencies(unit_tests ${TARGET_NAME} prepare_test_kernels_for_l0)
 
 create_source_tree(${TARGET_NAME} ${L0_ROOT_DIR}/..)

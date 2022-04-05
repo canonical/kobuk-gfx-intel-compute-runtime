@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,17 +9,16 @@
 
 #include "shared/source/os_interface/linux/allocator_helper.h"
 #include "shared/source/os_interface/linux/drm_memory_manager.h"
-
-#include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
-#include "opencl/test/unit_test/mocks/mock_host_ptr_manager.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
+#include "shared/test/common/mocks/mock_allocation_properties.h"
+#include "shared/test/common/mocks/mock_host_ptr_manager.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
 
 #include <atomic>
 
 namespace NEO {
 off_t lseekReturn = 4096u;
 std::atomic<int> lseekCalledCount(0);
-int closeInputFd = 0;
+std::atomic<int> closeInputFd(0);
 std::atomic<int> closeCalledCount(0);
 std::vector<void *> mmapVector(64);
 
@@ -71,7 +70,7 @@ void TestedDrmMemoryManager::forceLimitedRangeAllocator(uint64_t range) {
 }
 void TestedDrmMemoryManager::overrideGfxPartition(GfxPartition *newGfxPartition) { gfxPartitions[0].reset(newGfxPartition); }
 
-DrmAllocation *TestedDrmMemoryManager::allocate32BitGraphicsMemory(uint32_t rootDeviceIndex, size_t size, const void *ptr, GraphicsAllocation::AllocationType allocationType) {
+DrmAllocation *TestedDrmMemoryManager::allocate32BitGraphicsMemory(uint32_t rootDeviceIndex, size_t size, const void *ptr, AllocationType allocationType) {
     bool allocateMemory = ptr == nullptr;
     AllocationData allocationData;
     MockAllocationProperties properties(rootDeviceIndex, allocateMemory, size, allocationType);
@@ -79,6 +78,13 @@ DrmAllocation *TestedDrmMemoryManager::allocate32BitGraphicsMemory(uint32_t root
     bool useLocalMemory = !allocationData.flags.useSystemMemory && this->localMemorySupported[rootDeviceIndex];
     return allocate32BitGraphicsMemoryImpl(allocationData, useLocalMemory);
 }
+
+void TestedDrmMemoryManager::closeSharedHandle(GraphicsAllocation *gfxAllocation) {
+    std::unique_lock<std::mutex> lock(callsToCloseSharedHandleMtx);
+    DrmMemoryManager::closeSharedHandle(gfxAllocation);
+    callsToCloseSharedHandle++;
+}
+
 TestedDrmMemoryManager::~TestedDrmMemoryManager() {
     DrmMemoryManager::commonCleanup();
 }

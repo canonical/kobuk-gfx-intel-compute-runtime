@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
@@ -17,8 +18,6 @@
 namespace NEO {
 template <typename GfxFamily>
 void setFilterMode(typename GfxFamily::RENDER_SURFACE_STATE *surfaceState, const HardwareInfo *hwInfo);
-template <typename GfxFamily>
-bool checkIfArrayNeeded(ImageType type, const HardwareInfo *hwInfo);
 
 template <typename GfxFamily>
 inline void setImageSurfaceState(typename GfxFamily::RENDER_SURFACE_STATE *surfaceState, const ImageInfo &imageInfo, Gmm *gmm, GmmHelper &gmmHelper, uint32_t cubeFaceIndex, uint64_t gpuAddress, const SurfaceOffsets &surfaceOffsets, bool isNV12Format) {
@@ -35,9 +34,11 @@ inline void setImageSurfaceState(typename GfxFamily::RENDER_SURFACE_STATE *surfa
                         (imageInfo.imgDesc.imageType == ImageType::Image2DArray ||
                          imageInfo.imgDesc.imageType == ImageType::Image1DArray);
 
+    isImageArray |= (imageInfo.imgDesc.imageType == ImageType::Image2D || imageInfo.imgDesc.imageType == ImageType::Image2DArray) && DebugManager.flags.Force2dImageAsArray.get() == 1;
+
     uint32_t renderTargetViewExtent = static_cast<uint32_t>(imageCount);
     uint32_t minimumArrayElement = 0;
-    auto hAlign = RENDER_SURFACE_STATE::SURFACE_HORIZONTAL_ALIGNMENT_HALIGN_4;
+    auto hAlign = RENDER_SURFACE_STATE::SURFACE_HORIZONTAL_ALIGNMENT_HALIGN_DEFAULT;
     auto vAlign = RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT_VALIGN_4;
 
     if (gmm) {
@@ -50,7 +51,6 @@ inline void setImageSurfaceState(typename GfxFamily::RENDER_SURFACE_STATE *surfa
         renderTargetViewExtent = 1;
         minimumArrayElement = cubeFaceIndex;
     }
-    isImageArray |= checkIfArrayNeeded<GfxFamily>(imageInfo.imgDesc.imageType, gmmHelper.getHardwareInfo());
 
     surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE);
     surfaceState->setAuxiliarySurfacePitch(1u);
@@ -108,15 +108,27 @@ inline void setImageSurfaceStateDimensions(typename GfxFamily::RENDER_SURFACE_ST
         imageHeight = 1;
     }
 
+    auto imageWidth = imageInfo.imgDesc.imageWidth;
+    if (imageWidth == 0) {
+        imageWidth = 1;
+    }
+
     if (cubeFaceIndex != __GMM_NO_CUBE_MAP) {
         imageCount = __GMM_MAX_CUBE_FACE - cubeFaceIndex;
     }
 
-    surfaceState->setWidth(static_cast<uint32_t>(imageInfo.imgDesc.imageWidth));
+    surfaceState->setWidth(static_cast<uint32_t>(imageWidth));
     surfaceState->setHeight(static_cast<uint32_t>(imageHeight));
     surfaceState->setDepth(static_cast<uint32_t>(imageCount));
     surfaceState->setSurfacePitch(static_cast<uint32_t>(imageInfo.imgDesc.imageRowPitch));
     surfaceState->setSurfaceType(surfaceType);
+}
+
+template <typename GfxFamily>
+inline void setWidthForMediaBlockSurfaceState(typename GfxFamily::RENDER_SURFACE_STATE *surfaceState, const ImageInfo &imageInfo) {
+    auto elSize = imageInfo.surfaceFormat->ImageElementSizeInBytes;
+    auto numDwords = static_cast<uint32_t>(Math::divideAndRoundUp(imageInfo.imgDesc.imageWidth * elSize, sizeof(uint32_t)));
+    surfaceState->setWidth(numDwords);
 }
 
 template <typename GfxFamily>

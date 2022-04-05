@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -63,10 +63,18 @@ struct KernelImmutableData {
 
     const NEO::KernelInfo *getKernelInfo() const { return kernelInfo; }
 
-  protected:
+    void setIsaCopiedToAllocation() {
+        isaCopiedToAllocation = true;
+    }
+
+    bool isIsaCopiedToAllocation() const {
+        return isaCopiedToAllocation;
+    }
+
     MOCKABLE_VIRTUAL void createRelocatedDebugData(NEO::GraphicsAllocation *globalConstBuffer,
                                                    NEO::GraphicsAllocation *globalVarBuffer);
 
+  protected:
     Device *device = nullptr;
     NEO::KernelInfo *kernelInfo = nullptr;
     NEO::KernelDescriptor *kernelDescriptor = nullptr;
@@ -82,6 +90,8 @@ struct KernelImmutableData {
     std::unique_ptr<uint8_t[]> dynamicStateHeapTemplate = nullptr;
 
     std::vector<NEO::GraphicsAllocation *> residencyContainer;
+
+    bool isaCopiedToAllocation = false;
 };
 
 struct Kernel : _ze_kernel_handle_t, virtual NEO::DispatchKernelEncoderI {
@@ -116,15 +126,13 @@ struct Kernel : _ze_kernel_handle_t, virtual NEO::DispatchKernelEncoderI {
     virtual ze_result_t setGlobalOffsetExp(uint32_t offsetX, uint32_t offsetY, uint32_t offsetZ) = 0;
     virtual void patchGlobalOffset() = 0;
 
-    virtual void patchWorkDim(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
-
-    virtual ze_result_t suggestMaxCooperativeGroupCount(uint32_t *totalGroupCount) = 0;
+    virtual ze_result_t suggestMaxCooperativeGroupCount(uint32_t *totalGroupCount, NEO::EngineGroupType engineGroupType,
+                                                        bool isEngineInstanced) = 0;
     virtual ze_result_t setCacheConfig(ze_cache_config_flags_t flags) = 0;
 
     virtual ze_result_t getProfileInfo(zet_profile_properties_t *pProfileProperties) = 0;
 
     virtual const KernelImmutableData *getImmutableData() const = 0;
-    virtual std::unique_ptr<Kernel> clone() const = 0;
 
     virtual const std::vector<NEO::GraphicsAllocation *> &getResidencyContainer() const = 0;
 
@@ -141,6 +149,9 @@ struct Kernel : _ze_kernel_handle_t, virtual NEO::DispatchKernelEncoderI {
     virtual void patchCrossthreadDataWithPrivateAllocation(NEO::GraphicsAllocation *privateAllocation) = 0;
 
     virtual NEO::GraphicsAllocation *getPrivateMemoryGraphicsAllocation() = 0;
+
+    virtual ze_result_t setSchedulingHintExp(ze_scheduling_hint_exp_desc_t *pHint) = 0;
+    virtual int32_t getSchedulingHintExp() = 0;
 
     Kernel() = default;
     Kernel(const Kernel &) = delete;

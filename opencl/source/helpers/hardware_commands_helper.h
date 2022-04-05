@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,8 +7,8 @@
 
 #pragma once
 #include "shared/source/built_ins/built_ins.h"
+#include "shared/source/helpers/per_thread_data.h"
 
-#include "opencl/source/helpers/per_thread_data.h"
 #include "opencl/source/kernel/kernel.h"
 
 #include <algorithm>
@@ -23,10 +23,8 @@ struct CrossThreadInfo;
 struct MultiDispatchInfo;
 
 template <typename GfxFamily>
-using WALKER_TYPE = typename GfxFamily::WALKER_TYPE;
-
-template <typename GfxFamily>
 struct HardwareCommandsHelper : public PerThreadDataHelper {
+    using WALKER_TYPE = typename GfxFamily::WALKER_TYPE;
     using BINDING_TABLE_STATE = typename GfxFamily::BINDING_TABLE_STATE;
     using RENDER_SURFACE_STATE = typename GfxFamily::RENDER_SURFACE_STATE;
     using INTERFACE_DESCRIPTOR_DATA = typename GfxFamily::INTERFACE_DESCRIPTOR_DATA;
@@ -38,12 +36,6 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         uint64_t offsetInterfaceDescriptor,
         INTERFACE_DESCRIPTOR_DATA *inlineInterfaceDescriptor);
 
-    static void setGrfInfo(
-        INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor,
-        const Kernel &kernel,
-        const size_t &sizeCrossThreadData,
-        const size_t &sizePerThreadData);
-
     inline static uint32_t additionalSizeRequiredDsh();
 
     static size_t sendInterfaceDescriptorData(
@@ -53,7 +45,7 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         size_t sizeCrossThreadData,
         size_t sizePerThreadData,
         size_t bindingTablePointer,
-        size_t offsetSamplerState,
+        [[maybe_unused]] size_t offsetSamplerState,
         uint32_t numSamplers,
         uint32_t numThreadsPerThreadGroup,
         const Kernel &kernel,
@@ -75,7 +67,7 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         IndirectHeap &indirectHeap,
         Kernel &kernel,
         bool inlineDataProgrammingRequired,
-        WALKER_TYPE<GfxFamily> *walkerCmd,
+        WALKER_TYPE *walkerCmd,
         uint32_t &sizeCrossThreadData);
 
     static size_t sendIndirectState(
@@ -90,7 +82,7 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         const uint64_t offsetInterfaceDescriptorTable,
         uint32_t &interfaceDescriptorIndex,
         PreemptionMode preemptionMode,
-        WALKER_TYPE<GfxFamily> *walkerCmd,
+        WALKER_TYPE *walkerCmd,
         INTERFACE_DESCRIPTOR_DATA *inlineInterfaceDescriptor,
         bool localIdsGenerationByRuntime,
         const Device &device);
@@ -114,7 +106,7 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
         size_t &sizePerThreadDataTotal,
         size_t &localWorkItems);
 
-    inline static bool resetBindingTablePrefetch(Kernel &kernel);
+    inline static bool resetBindingTablePrefetch();
 
     static size_t getSizeRequiredCS();
     static size_t getSizeRequiredForCacheFlush(const CommandQueue &commandQueue, const Kernel *kernel, uint64_t postSyncAddress);
@@ -134,9 +126,8 @@ struct HardwareCommandsHelper : public PerThreadDataHelper {
     static size_t getTotalSizeRequiredSSH(
         const MultiDispatchInfo &multiDispatchInfo);
 
-    static size_t getSshSizeForExecutionModel(const Kernel &kernel);
     static void setInterfaceDescriptorOffset(
-        WALKER_TYPE<GfxFamily> *walkerCmd,
+        WALKER_TYPE *walkerCmd,
         uint32_t &interfaceDescriptorIndex);
 
     static void programCacheFlushAfterWalkerCommand(LinearStream *commandStream, const CommandQueue &commandQueue, const Kernel *kernel, uint64_t postSyncAddress);

@@ -1,21 +1,21 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/kernel_binary_helper.h"
+#include "shared/test/common/helpers/kernel_filename_helper.h"
+#include "shared/test/common/libult/global_environment.h"
+#include "shared/test/common/mocks/mock_source_level_debugger.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/test/unit_test/fixtures/program_fixture.h"
-#include "opencl/test/unit_test/global_environment.h"
-#include "opencl/test/unit_test/helpers/kernel_binary_helper.h"
-#include "opencl/test/unit_test/helpers/kernel_filename_helper.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
-#include "opencl/test/unit_test/mocks/mock_source_level_debugger.h"
 #include "opencl/test/unit_test/program/program_from_binary.h"
 #include "opencl/test/unit_test/program/program_tests.h"
-#include "test.h"
 
 #include "compiler_options.h"
 #include "gmock/gmock.h"
@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace NEO;
 
@@ -53,8 +54,8 @@ TEST(ProgramFromBinary, givenBinaryWithDebugDataWhenCreatingProgramFromBinaryThe
     cl_int retVal = program->createProgramFromBinary(pBinary.get(), binarySize, *device);
 
     EXPECT_EQ(CL_SUCCESS, retVal);
-    EXPECT_NE(nullptr, program->getDebugData());
-    EXPECT_NE(0u, program->getDebugDataSize());
+    EXPECT_NE(nullptr, program->getDebugData(device->getRootDeviceIndex()));
+    EXPECT_NE(0u, program->getDebugDataSize(device->getRootDeviceIndex()));
 }
 
 class ProgramWithKernelDebuggingTest : public ProgramFixture,
@@ -230,46 +231,51 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsLinke
     cl_int retVal = pProgram->compile(pProgram->getDevices(), nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    auto program = std::unique_ptr<GMockProgram>(new GMockProgram(&mockContext, false, mockContext.getDevices()));
+    auto program = std::unique_ptr<MockProgramAppendKernelDebugOptions>(new MockProgramAppendKernelDebugOptions(&mockContext, false, mockContext.getDevices()));
     program->enableKernelDebug();
-
-    EXPECT_CALL(*program, appendKernelDebugOptions(::testing::_, ::testing::_)).Times(static_cast<int>(mockContext.getRootDeviceIndices().size()));
 
     cl_program clProgramToLink = pProgram;
     retVal = program->link(pProgram->getDevices(), nullptr, 1, &clProgramToLink);
     EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(static_cast<unsigned int>(mockContext.getRootDeviceIndices().size()), program->appendKernelDebugOptionsCalled);
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsBuiltThenDebuggerIsNotifiedWithKernelDebugData) {
+    const size_t rootDeviceIndicesSize = mockContext.getRootDeviceIndices().size();
+    std::vector<MockSourceLevelDebugger *> sourceLevelDebugger(rootDeviceIndicesSize, nullptr);
+    size_t i = 0;
+
     for (auto &rootDeviceIndex : mockContext.getRootDeviceIndices()) {
-        GMockSourceLevelDebugger *sourceLevelDebugger = new GMockSourceLevelDebugger(nullptr);
-        ON_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).WillByDefault(::testing::Return(false));
-        ON_CALL(*sourceLevelDebugger, isOptimizationDisabled()).WillByDefault(::testing::Return(false));
-
-        EXPECT_CALL(*sourceLevelDebugger, isOptimizationDisabled()).Times(1);
-        EXPECT_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).Times(1);
-        EXPECT_CALL(*sourceLevelDebugger, notifyKernelDebugData(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(1);
-
-        sourceLevelDebugger->setActive(true);
-        pDevice->executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->debugger.reset(sourceLevelDebugger);
+        sourceLevelDebugger[i] = new MockSourceLevelDebugger(nullptr);
+        sourceLevelDebugger[i]->setActive(true);
+        pDevice->executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->debugger.reset(sourceLevelDebugger[i]);
+        i++;
     }
 
     cl_int retVal = pProgram->build(pProgram->getDevices(), nullptr, false);
     EXPECT_EQ(CL_SUCCESS, retVal);
+
+    for (auto &el : sourceLevelDebugger) {
+        EXPECT_EQ(1u, el->isOptimizationDisabledCalled);
+        EXPECT_EQ(false, el->isOptimizationDisabledResult);
+
+        EXPECT_EQ(1u, el->notifySourceCodeCalled);
+        EXPECT_EQ(false, el->notifySourceCodeResult);
+
+        EXPECT_EQ(1u, el->notifyKernelDebugDataCalled);
+    }
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsLinkedThenDebuggerIsNotifiedWithKernelDebugData) {
+    const size_t rootDeviceIndicesSize = mockContext.getRootDeviceIndices().size();
+    std::vector<MockSourceLevelDebugger *> sourceLevelDebugger(rootDeviceIndicesSize, nullptr);
+    size_t i = 0;
+
     for (auto &rootDeviceIndex : mockContext.getRootDeviceIndices()) {
-        GMockSourceLevelDebugger *sourceLevelDebugger = new GMockSourceLevelDebugger(nullptr);
-        ON_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).WillByDefault(::testing::Return(false));
-        ON_CALL(*sourceLevelDebugger, isOptimizationDisabled()).WillByDefault(::testing::Return(false));
-
-        EXPECT_CALL(*sourceLevelDebugger, isOptimizationDisabled()).Times(2);
-        EXPECT_CALL(*sourceLevelDebugger, notifySourceCode(::testing::_, ::testing::_, ::testing::_)).Times(1);
-        EXPECT_CALL(*sourceLevelDebugger, notifyKernelDebugData(::testing::_, ::testing::_, ::testing::_, ::testing::_)).Times(1);
-
-        sourceLevelDebugger->setActive(true);
-        pDevice->executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->debugger.reset(sourceLevelDebugger);
+        sourceLevelDebugger[i] = new MockSourceLevelDebugger(nullptr);
+        sourceLevelDebugger[i]->setActive(true);
+        pDevice->executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->debugger.reset(sourceLevelDebugger[i]);
+        i++;
     }
 
     cl_int retVal = pProgram->compile(pProgram->getDevices(), nullptr,
@@ -280,6 +286,16 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsLinke
     retVal = pProgram->link(pProgram->getDevices(), nullptr,
                             1, &program);
     EXPECT_EQ(CL_SUCCESS, retVal);
+
+    for (auto &el : sourceLevelDebugger) {
+        EXPECT_EQ(2u, el->isOptimizationDisabledCalled);
+        EXPECT_EQ(false, el->isOptimizationDisabledResult);
+
+        EXPECT_EQ(1u, el->notifySourceCodeCalled);
+        EXPECT_EQ(false, el->notifySourceCodeResult);
+
+        EXPECT_EQ(1u, el->notifyKernelDebugDataCalled);
+    }
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenProgramWithKernelDebugEnabledWhenBuiltThenPatchTokenAllocateSipSurfaceHasSizeGreaterThanZero) {
@@ -321,9 +337,9 @@ TEST_F(ProgramWithKernelDebuggingTest, givenKernelDebugEnabledWhenProgramIsBuilt
     auto retVal = pProgram->build(pProgram->getDevices(), nullptr, false);
     EXPECT_EQ(CL_SUCCESS, retVal);
 
-    auto debugData = pProgram->getDebugData();
+    auto debugData = pProgram->getDebugData(pDevice->getRootDeviceIndex());
     EXPECT_NE(nullptr, debugData);
-    EXPECT_NE(0u, pProgram->getDebugDataSize());
+    EXPECT_NE(0u, pProgram->getDebugDataSize(pDevice->getRootDeviceIndex()));
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenProgramWithKernelDebugEnabledWhenProcessDebugDataIsCalledThenKernelInfosAreFilledWithDebugData) {
@@ -336,4 +352,16 @@ TEST_F(ProgramWithKernelDebuggingTest, givenProgramWithKernelDebugEnabledWhenPro
 
     EXPECT_NE(0u, kernelInfo->debugData.vIsaSize);
     EXPECT_NE(nullptr, kernelInfo->debugData.vIsa);
+}
+
+TEST_F(ProgramWithKernelDebuggingTest, givenProgramWithNonZebinaryFormatAndKernelDebugEnabledWhenProgramIsBuiltThenProcessDebugDataIsCalledAndDebuggerNotified) {
+    MockSourceLevelDebugger *sourceLevelDebugger = new MockSourceLevelDebugger;
+    pDevice->executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]->debugger.reset(sourceLevelDebugger);
+    pProgram->enableKernelDebug();
+
+    cl_int retVal = pProgram->build(pProgram->getDevices(), nullptr, false);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_FALSE(pProgram->wasCreateDebugZebinCalled);
+    EXPECT_TRUE(pProgram->wasProcessDebugDataCalled);
+    EXPECT_EQ(1u, sourceLevelDebugger->notifyKernelDebugDataCalled);
 }

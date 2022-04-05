@@ -8,14 +8,13 @@
 #pragma once
 #include "shared/source/built_ins/built_ins.h"
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/source/helpers/dispatch_info_builder.h"
 #include "opencl/source/kernel/kernel_objects_for_aux_translation.h"
 #include "opencl/source/mem_obj/buffer.h"
-
-#include "pipe_control_args.h"
 
 #include <memory>
 
@@ -80,8 +79,9 @@ class BuiltInOp<EBuiltInOps::AuxTranslation> : public BuiltinDispatchInfoBuilder
     using RegisteredMethodDispatcherT = RegisteredMethodDispatcher<DispatchInfo::DispatchCommandMethodT,
                                                                    DispatchInfo::EstimateCommandsMethodT>;
     template <typename GfxFamily, bool dcFlush>
-    static void dispatchPipeControl(LinearStream &linearStream, TimestampPacketDependencies *, const HardwareInfo &) {
-        PipeControlArgs args(dcFlush);
+    static void dispatchPipeControl(LinearStream &linearStream, TimestampPacketDependencies *, const HardwareInfo &hwInfo) {
+        PipeControlArgs args;
+        args.dcFlushEnable = MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(dcFlush, hwInfo);
         MemorySynchronizationCommands<GfxFamily>::addPipeControl(linearStream, args);
     }
 

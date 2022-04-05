@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 
@@ -28,9 +28,9 @@ HWTEST2_F(DevicePropertyTest, givenReturnedDevicePropertiesThenExpectedPropertie
     EXPECT_EQ(ZE_DEVICE_PROPERTY_FLAG_INTEGRATED, deviceProps.flags & ZE_DEVICE_PROPERTY_FLAG_INTEGRATED);
 }
 
-using DeviceQueueGroupTest = Test<DeviceFixture>;
+using CommandQueueGroupTest = Test<DeviceFixture>;
 
-HWTEST2_F(DeviceQueueGroupTest, givenCommandQueuePropertiesCallThenCorrectNumberOfGroupsIsReturned, IsGen9) {
+HWTEST2_F(CommandQueueGroupTest, givenCommandQueuePropertiesCallThenCorrectNumberOfGroupsIsReturned, IsGen9) {
     uint32_t count = 0;
     ze_result_t res = device->getCommandQueueGroupProperties(&count, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
@@ -48,7 +48,7 @@ HWTEST2_F(DeviceQueueGroupTest, givenCommandQueuePropertiesCallThenCorrectNumber
     EXPECT_EQ(properties.maxMemoryFillPatternSize, std::numeric_limits<size_t>::max());
 }
 
-HWTEST2_F(DeviceQueueGroupTest, givenQueueGroupsReturnedThenCommandListIsCreatedCorrectly, IsGen9) {
+HWTEST2_F(CommandQueueGroupTest, givenQueueGroupsReturnedThenCommandListIsCreatedCorrectly, IsGen9) {
     uint32_t count = 0;
     ze_result_t res = device->getCommandQueueGroupProperties(&count, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
@@ -66,7 +66,7 @@ HWTEST2_F(DeviceQueueGroupTest, givenQueueGroupsReturnedThenCommandListIsCreated
     EXPECT_EQ(properties.maxMemoryFillPatternSize, std::numeric_limits<size_t>::max());
 
     ze_context_handle_t hContext;
-    ze_context_desc_t contextDesc;
+    ze_context_desc_t contextDesc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
     res = driverHandle->createContext(&contextDesc, 0u, nullptr, &hContext);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     L0::Context *context = Context::fromHandle(hContext);

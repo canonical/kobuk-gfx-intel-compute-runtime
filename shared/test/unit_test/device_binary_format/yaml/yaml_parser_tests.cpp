@@ -1,13 +1,12 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2021 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/device_binary_format/yaml/yaml_parser.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include <limits>
 #include <stdexcept>
@@ -164,6 +163,11 @@ TEST(YamlIsMatched, WhenTextIsTooShortThenReturnFalse) {
     EXPECT_TRUE(NEO::Yaml::isMatched(text, text.begin() + 1, "bc"));
 
     EXPECT_FALSE(NEO::Yaml::isMatched(text, text.begin(), "bcd"));
+}
+
+TEST(YamlIsValidInlineCollectionFormat, WhenEndIsReachedThenReturnFalse) {
+    const char coll[8] = "[ 1, 2 ";
+    EXPECT_FALSE(NEO::Yaml::isValidInlineCollectionFormat(coll, coll + 7));
 }
 
 TEST(YamlConsumeNumberOrSign, GivenValidNumberOrSignThenReturnProperEndingPosition) {
@@ -411,50 +415,82 @@ TEST(YamlTokenize, WhenTextIsNotPartOfACollectionThenEmitsError) {
     EXPECT_TRUE(warnings.empty()) << warnings;
 }
 
-TEST(YamlTokenize, GivenInlineCollectionThenReturnErrorAsUnsupported) {
+TEST(YamlTokenize, GivenInlineDictionariesThenEmitsError) {
     NEO::Yaml::LinesCache lines;
     NEO::Yaml::TokensCache tokens;
     std::string warnings;
     std::string errors;
-    bool success = NEO::Yaml::tokenize("[\n", lines, tokens, errors, warnings);
+
+    bool success = NEO::Yaml::tokenize("{\n", lines, tokens, errors, warnings);
     EXPECT_FALSE(success);
-    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : [[] <-- parser position on error. Reason : NEO::Yaml : Inline collections are not supported yet\n", errors.c_str());
+    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : [{] <-- parser position on error. Reason : NEO::Yaml : Inline dictionaries are not supported\n", errors.c_str());
     EXPECT_TRUE(warnings.empty()) << warnings;
 
     lines.clear();
     tokens.clear();
     warnings.clear();
     errors.clear();
-    success = NEO::Yaml::tokenize("]\n", lines, tokens, errors, warnings);
-    EXPECT_FALSE(success);
-    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : []] <-- parser position on error. Reason : NEO::Yaml : Inline collections are not supported yet\n", errors.c_str());
-    EXPECT_TRUE(warnings.empty()) << warnings;
 
-    lines.clear();
-    tokens.clear();
-    warnings.clear();
-    errors.clear();
-    success = NEO::Yaml::tokenize("{\n", lines, tokens, errors, warnings);
-    EXPECT_FALSE(success);
-    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : [{] <-- parser position on error. Reason : NEO::Yaml : Inline collections are not supported yet\n", errors.c_str());
-    EXPECT_TRUE(warnings.empty()) << warnings;
-
-    lines.clear();
-    tokens.clear();
-    warnings.clear();
-    errors.clear();
     success = NEO::Yaml::tokenize("}\n", lines, tokens, errors, warnings);
     EXPECT_FALSE(success);
-    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : [}] <-- parser position on error. Reason : NEO::Yaml : Inline collections are not supported yet\n", errors.c_str());
+    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : [}] <-- parser position on error. Reason : NEO::Yaml : Inline dictionaries are not supported\n", errors.c_str());
+    EXPECT_TRUE(warnings.empty()) << warnings;
+}
+
+TEST(YamlTokenize, GivenInvalidInlineCollectionThenEmitsError) {
+    NEO::Yaml::LinesCache lines;
+    NEO::Yaml::TokensCache tokens;
+    std::string warnings;
+    std::string errors;
+
+    bool success = NEO::Yaml::tokenize("]\n", lines, tokens, errors, warnings);
+    EXPECT_FALSE(success);
+    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : []] <-- parser position on error. Reason : NEO::Yaml : Inline collection is not in valid regex format - ^\\[(\\s*(\\d|\\w)+,?)+\\s*\\]\\s*\\n\n", errors.c_str());
     EXPECT_TRUE(warnings.empty()) << warnings;
 
     lines.clear();
     tokens.clear();
     warnings.clear();
     errors.clear();
-    success = NEO::Yaml::tokenize("a , b\n", lines, tokens, errors, warnings);
+
+    success = NEO::Yaml::tokenize(",\n", lines, tokens, errors, warnings);
     EXPECT_FALSE(success);
-    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : [a ,] <-- parser position on error. Reason : NEO::Yaml : Inline collections are not supported yet\n", errors.c_str());
+    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : [,] <-- parser position on error. Reason : NEO::Yaml : Inline collection is not in valid regex format - ^\\[(\\s*(\\d|\\w)+,?)+\\s*\\]\\s*\\n\n", errors.c_str());
+    EXPECT_TRUE(warnings.empty()) << warnings;
+
+    lines.clear();
+    tokens.clear();
+    warnings.clear();
+    errors.clear();
+
+    success = NEO::Yaml::tokenize("[123,32,,]\n", lines, tokens, errors, warnings);
+    EXPECT_FALSE(success);
+    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : [[] <-- parser position on error. Reason : NEO::Yaml : Inline collection is not in valid regex format - ^\\[(\\s*(\\d|\\w)+,?)+\\s*\\]\\s*\\n\n", errors.c_str());
+    EXPECT_TRUE(warnings.empty()) << warnings;
+
+    lines.clear();
+    tokens.clear();
+    warnings.clear();
+    errors.clear();
+
+    success = NEO::Yaml::tokenize("[1,2,3,4]]\n", lines, tokens, errors, warnings);
+    EXPECT_FALSE(success);
+    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : [[] <-- parser position on error. Reason : NEO::Yaml : Inline collection is not in valid regex format - ^\\[(\\s*(\\d|\\w)+,?)+\\s*\\]\\s*\\n\n", errors.c_str());
+    EXPECT_TRUE(warnings.empty()) << warnings;
+
+    lines.clear();
+    tokens.clear();
+    warnings.clear();
+    errors.clear();
+
+    success = NEO::Yaml::tokenize("[[1,2,3,4]\n", lines, tokens, errors, warnings);
+    EXPECT_FALSE(success);
+    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : [[] <-- parser position on error. Reason : NEO::Yaml : Inline collection is not in valid regex format - ^\\[(\\s*(\\d|\\w)+,?)+\\s*\\]\\s*\\n\n", errors.c_str());
+    EXPECT_TRUE(warnings.empty()) << warnings;
+
+    success = NEO::Yaml::tokenize("[1 2 3 4]\n", lines, tokens, errors, warnings);
+    EXPECT_FALSE(success);
+    EXPECT_STREQ("NEO::Yaml : Could not parse line : [0] : [[] <-- parser position on error. Reason : NEO::Yaml : Inline collection is not in valid regex format - ^\\[(\\s*(\\d|\\w)+,?)+\\s*\\]\\s*\\n\n", errors.c_str());
     EXPECT_TRUE(warnings.empty()) << warnings;
 }
 
@@ -1061,22 +1097,6 @@ TEST(YamlBuildTree, GivenEmptyLinesThenSkipsThem) {
     EXPECT_STREQ("NEO::Yaml : Text has no data\n", warnings.c_str());
 }
 
-TEST(YamlBuildTree, GivenInlineCollectionsThenReturnsFalseAsUnsupported) {
-    NEO::Yaml::LinesCache lines = {
-        Line{NEO::Yaml::Line::LineType::Empty, 0, 0, 0, {}},
-        Line{NEO::Yaml::Line::LineType::ListEntry, 0, 0, 0, {}},
-        Line{NEO::Yaml::Line::LineType::FileSection, 0, 0, 0, {}},
-    };
-    lines[1].traits.hasInlineDataMarkers = true;
-    NEO::Yaml::TokensCache tokens;
-    NEO::Yaml::NodesCache tree;
-    std::string errors, warnings;
-    bool success = NEO::Yaml::buildTree(lines, tokens, tree, errors, warnings);
-    EXPECT_FALSE(success);
-    EXPECT_TRUE(warnings.empty()) << warnings;
-    EXPECT_STREQ("Inline collections are not supported yet\n", errors.c_str());
-}
-
 template <typename ContainerT, typename IndexT>
 auto at(ContainerT &container, IndexT index) -> decltype(std::declval<ContainerT>()[0]) & {
     if (index >= container.size()) {
@@ -1299,6 +1319,60 @@ TEST(YamlBuildTree, GivenNestedCollectionsThenProperlyCreatesChildNodes) {
     EXPECT_STREQ("flavors", at(tokens, appleFlavors.key).cstrref().str().c_str());
     EXPECT_STREQ("sweet", at(tokens, appleFlavorsSweet.value).cstrref().str().c_str());
     EXPECT_STREQ("bitter", at(tokens, appleFlavorsBitter.value).cstrref().str().c_str());
+}
+
+TEST(YamlBuildTree, GivenInlineCollectionThenProperlyCreatesChildNodes) {
+    ConstStringRef yaml =
+        R"===(
+      banana : yellow
+      kiwi : green
+      apple : [ red, green, blue ]
+      pear : pearish
+)===";
+
+    NEO::Yaml::LinesCache lines;
+    NEO::Yaml::TokensCache tokens;
+    std::string warnings;
+    std::string errors;
+    bool success = NEO::Yaml::tokenize(yaml, lines, tokens, errors, warnings);
+    ASSERT_TRUE(success);
+    EXPECT_TRUE(warnings.empty()) << warnings;
+    EXPECT_TRUE(errors.empty()) << errors;
+
+    NEO::Yaml::NodesCache treeNodes;
+    success = NEO::Yaml::buildTree(lines, tokens, treeNodes, errors, warnings);
+    EXPECT_TRUE(success);
+    EXPECT_TRUE(warnings.empty()) << warnings;
+    EXPECT_TRUE(errors.empty()) << errors;
+
+    ASSERT_EQ(8U, treeNodes.size());
+    auto &rootNode = *treeNodes.begin();
+    ASSERT_EQ(4U, rootNode.numChildren);
+    auto &banana = at(treeNodes, rootNode.firstChildId);
+    auto &kiwi = at(treeNodes, banana.nextSiblingId);
+    auto &apple = at(treeNodes, kiwi.nextSiblingId);
+    auto &appleRed = at(treeNodes, apple.firstChildId);
+    auto &appleGreen = at(treeNodes, appleRed.nextSiblingId);
+    auto &appleBlue = at(treeNodes, appleGreen.nextSiblingId);
+    auto &pear = at(treeNodes, apple.nextSiblingId);
+
+    EXPECT_STREQ("banana", at(tokens, banana.key).cstrref().str().c_str());
+    EXPECT_STREQ("yellow", at(tokens, banana.value).cstrref().str().c_str());
+
+    EXPECT_STREQ("kiwi", at(tokens, kiwi.key).cstrref().str().c_str());
+    EXPECT_STREQ("green", at(tokens, kiwi.value).cstrref().str().c_str());
+
+    EXPECT_STREQ("apple", at(tokens, apple.key).cstrref().str().c_str());
+    EXPECT_EQ(NEO::Yaml::invalidTokenId, apple.value);
+    EXPECT_STREQ("red", at(tokens, appleRed.value).cstrref().str().c_str());
+    EXPECT_EQ(NEO::Yaml::invalidTokenId, appleRed.key);
+    EXPECT_STREQ("green", at(tokens, appleGreen.value).cstrref().str().c_str());
+    EXPECT_EQ(NEO::Yaml::invalidTokenId, appleGreen.key);
+    EXPECT_STREQ("blue", at(tokens, appleBlue.value).cstrref().str().c_str());
+    EXPECT_EQ(NEO::Yaml::invalidTokenId, appleBlue.key);
+
+    EXPECT_STREQ("pear", at(tokens, pear.key).cstrref().str().c_str());
+    EXPECT_STREQ("pearish", at(tokens, pear.value).cstrref().str().c_str());
 }
 
 TEST(YamlBuildTree, WhenTabsAreUsedAfterIndentWasParsedThenTreatThemAsSeparators) {
@@ -2886,4 +2960,38 @@ kernels:
             EXPECT_EQ(0U, argIndex);
         }
     }
+}
+
+TEST(ReserveBasedOnEstimates, WhenContainerNotFullThenDontGrow) {
+    StackVec<int, 7> container;
+    size_t beg = 0U;
+    size_t pos = 10U;
+    size_t end = 1000U;
+    bool reservedAdditionalMem = reserveBasedOnEstimates(container, beg, end, pos);
+    EXPECT_FALSE(reservedAdditionalMem);
+    EXPECT_EQ(7U, container.capacity());
+}
+
+TEST(ReserveBasedOnEstimates, WhenContainerFullButPosIsBegThenDontGrow) {
+    StackVec<int, 7> container;
+    container.resize(7U);
+    ASSERT_EQ(container.capacity(), container.size());
+    size_t beg = 0U;
+    size_t pos = 0U;
+    size_t end = 1000U;
+    bool reservedAdditionalMem = reserveBasedOnEstimates(container, beg, end, pos);
+    EXPECT_FALSE(reservedAdditionalMem);
+    EXPECT_EQ(7U, container.capacity());
+}
+
+TEST(ReserveBasedOnEstimates, WhenContainerFullThenGrowBasedOnPos) {
+    StackVec<int, 7> container;
+    container.resize(7U);
+    ASSERT_EQ(container.capacity(), container.size());
+    size_t beg = 0U;
+    size_t pos = 25U;
+    size_t end = 1000U;
+    bool reservedAdditionalMem = reserveBasedOnEstimates(container, beg, end, pos);
+    EXPECT_TRUE(reservedAdditionalMem);
+    EXPECT_EQ(280U, container.capacity());
 }

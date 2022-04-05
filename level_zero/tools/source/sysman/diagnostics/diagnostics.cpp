@@ -12,20 +12,23 @@
 namespace L0 {
 class OsDiagnostics;
 DiagnosticsHandleContext::~DiagnosticsHandleContext() {
+    releaseDiagnosticsHandles();
+}
+
+void DiagnosticsHandleContext::releaseDiagnosticsHandles() {
     for (Diagnostics *pDiagnostics : handleList) {
         delete pDiagnostics;
     }
     handleList.clear();
 }
-
 void DiagnosticsHandleContext::createHandle(ze_device_handle_t deviceHandle, const std::string &diagTests) {
     Diagnostics *pDiagnostics = new DiagnosticsImp(pOsSysman, diagTests, deviceHandle);
     handleList.push_back(pDiagnostics);
 }
 
 void DiagnosticsHandleContext::init(std::vector<ze_device_handle_t> &deviceHandles) {
+    OsDiagnostics::getSupportedDiagTestsFromFW(pOsSysman, supportedDiagTests);
     for (const auto &deviceHandle : deviceHandles) {
-        OsDiagnostics::getSupportedDiagTests(supportedDiagTests, pOsSysman);
         for (const std::string &diagTests : supportedDiagTests) {
             createHandle(deviceHandle, diagTests);
         }

@@ -10,6 +10,8 @@
 
 #include "mock_pci.h"
 
+extern bool sysmanUltsEnable;
+
 namespace L0 {
 namespace ult {
 
@@ -18,6 +20,9 @@ class SysmanDevicePciFixture : public SysmanDeviceFixture {
     Mock<PciKmdSysManager> *pKmdSysManager = nullptr;
     KmdSysManager *pOriginalKmdSysManager = nullptr;
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         SysmanDeviceFixture::SetUp();
 
         pMemoryManagerOld = device->getDriverHandle()->getMemoryManager();
@@ -46,6 +51,9 @@ class SysmanDevicePciFixture : public SysmanDeviceFixture {
     }
 
     void TearDown() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         device->getDriverHandle()->setMemoryManager(pMemoryManagerOld);
         SysmanDeviceFixture::TearDown();
         pWddmSysmanImp->pKmdSysManager = pOriginalKmdSysManager;
@@ -117,27 +125,26 @@ TEST_F(SysmanDevicePciFixture, GivenValidSysmanHandleWhenCallingzetSysmanPciGetB
     EXPECT_EQ(ZE_RESULT_SUCCESS, zesDevicePciGetBars(device, &count, nullptr));
     EXPECT_NE(count, 0u);
 
-    zes_pci_bar_properties_t *pBarProps = new zes_pci_bar_properties_t[count];
-    zes_pci_bar_properties_1_2_t *props1_2 = new zes_pci_bar_properties_1_2_t;
-    memset(props1_2, 0, sizeof(zes_pci_bar_properties_1_2_t));
-
+    std::vector<zes_pci_bar_properties_t> pBarProps(count);
+    std::vector<zes_pci_bar_properties_1_2_t> props1_2(count);
     for (uint32_t i = 0; i < count; i++) {
-        pBarProps[i].pNext = static_cast<void *>(props1_2);
-        pBarProps[i].stype = zes_structure_type_t::ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES_1_2;
+        props1_2[i].stype = ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES_1_2;
+        props1_2[i].pNext = nullptr;
+        pBarProps[i].stype = ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES;
+        pBarProps[i].pNext = static_cast<void *>(&props1_2[i]);
     }
 
-    EXPECT_EQ(ZE_RESULT_SUCCESS, zesDevicePciGetBars(device, &count, pBarProps));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, zesDevicePciGetBars(device, &count, pBarProps.data()));
 
-    EXPECT_EQ(props1_2->resizableBarSupported, true);
-    EXPECT_EQ(props1_2->resizableBarEnabled, true);
-
-    delete[] pBarProps;
-    pBarProps = nullptr;
-    delete props1_2;
-    props1_2 = nullptr;
+    for (uint32_t i = 0; i < count; i++) {
+        EXPECT_EQ(pBarProps[i].stype, zes_structure_type_t::ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES);
+        EXPECT_EQ(props1_2[i].stype, zes_structure_type_t::ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES_1_2);
+        EXPECT_EQ(props1_2[i].resizableBarSupported, true);
+        EXPECT_EQ(props1_2[i].resizableBarEnabled, true);
+    }
 }
 
-TEST_F(SysmanDevicePciFixture, GivenValidSysmanHandleWhenCallingzetSysmanPciGetBarsThenVerifyzetSysmanPciGetBarsCallSucceedsWith1_2ExtensionWithNullPtr) {
+TEST_F(SysmanDevicePciFixture, GivenValidSysmanHandleWhenCallingPciGetBarsThenVerifyAPICallSucceedsWith1_2ExtensionWithNullPtr) {
     uint32_t count = 0;
     EXPECT_EQ(ZE_RESULT_SUCCESS, zesDevicePciGetBars(device, &count, nullptr));
     EXPECT_NE(count, 0u);
@@ -146,7 +153,7 @@ TEST_F(SysmanDevicePciFixture, GivenValidSysmanHandleWhenCallingzetSysmanPciGetB
 
     for (uint32_t i = 0; i < count; i++) {
         pBarProps[i].pNext = nullptr;
-        pBarProps[i].stype = zes_structure_type_t::ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES_1_2;
+        pBarProps[i].stype = zes_structure_type_t::ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES;
     }
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, zesDevicePciGetBars(device, &count, pBarProps));
@@ -160,24 +167,22 @@ TEST_F(SysmanDevicePciFixture, GivenValidSysmanHandleWhenCallingzetSysmanPciGetB
     EXPECT_EQ(ZE_RESULT_SUCCESS, zesDevicePciGetBars(device, &count, nullptr));
     EXPECT_NE(count, 0u);
 
-    zes_pci_bar_properties_t *pBarProps = new zes_pci_bar_properties_t[count];
-    zes_pci_bar_properties_1_2_t *props1_2 = new zes_pci_bar_properties_1_2_t;
-    memset(props1_2, 0, sizeof(zes_pci_bar_properties_1_2_t));
-
+    std::vector<zes_pci_bar_properties_t> pBarProps(count);
+    std::vector<zes_pci_bar_properties_1_2_t> props1_2(count);
     for (uint32_t i = 0; i < count; i++) {
-        pBarProps[i].pNext = static_cast<void *>(props1_2);
-        pBarProps[i].stype = ZES_STRUCTURE_TYPE_PCI_STATE;
+        props1_2[i].stype = ZES_STRUCTURE_TYPE_PCI_STATE;
+        props1_2[i].pNext = nullptr;
+        pBarProps[i].stype = ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES;
+        pBarProps[i].pNext = static_cast<void *>(&props1_2[i]);
     }
 
-    EXPECT_EQ(ZE_RESULT_SUCCESS, zesDevicePciGetBars(device, &count, pBarProps));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, zesDevicePciGetBars(device, &count, pBarProps.data()));
 
-    EXPECT_EQ(props1_2->resizableBarSupported, false);
-    EXPECT_EQ(props1_2->resizableBarEnabled, false);
-
-    delete[] pBarProps;
-    pBarProps = nullptr;
-    delete props1_2;
-    props1_2 = nullptr;
+    for (uint32_t i = 0; i < count; i++) {
+        EXPECT_EQ(pBarProps[i].stype, zes_structure_type_t::ZES_STRUCTURE_TYPE_PCI_BAR_PROPERTIES);
+        EXPECT_LE(pBarProps[i].type, ZES_PCI_BAR_TYPE_MEM);
+        EXPECT_EQ(props1_2[i].stype, zes_structure_type_t::ZES_STRUCTURE_TYPE_PCI_STATE);
+    }
 }
 
 TEST_F(SysmanDevicePciFixture, GivenValidSysmanHandleWhenCallingzetSysmanPciGetStatsWithLocalMemoryThenVerifyzetSysmanPciGetBarsCallSucceeds) {

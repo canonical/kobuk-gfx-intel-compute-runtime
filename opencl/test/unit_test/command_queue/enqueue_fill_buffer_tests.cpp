@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,6 +13,9 @@
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/libult/ult_command_stream_receiver.h"
+#include "shared/test/common/mocks/mock_allocation_properties.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/source/command_queue/command_queue.h"
@@ -20,10 +23,7 @@
 #include "opencl/test/unit_test/command_queue/enqueue_fill_buffer_fixture.h"
 #include "opencl/test/unit_test/command_queue/enqueue_fixture.h"
 #include "opencl/test/unit_test/gen_common/gen_commands_common_validation.h"
-#include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
-#include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
-#include "test.h"
 
 #include "reg_configs_common.h"
 
@@ -304,7 +304,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, WhenFillingBufferThenArgumentZeroShouldMatch
     ASSERT_NE(nullptr, kernel);
 
     // Determine where the argument is
-    auto pArgument = (void **)getStatelessArgumentPointer<FamilyType>(*kernel, 0u, pCmdQ->getIndirectHeap(IndirectHeap::INDIRECT_OBJECT, 0), rootDeviceIndex);
+    auto pArgument = (void **)getStatelessArgumentPointer<FamilyType>(kernel->getKernelInfo(), 0u, pCmdQ->getIndirectHeap(IndirectHeap::Type::INDIRECT_OBJECT, 0), rootDeviceIndex);
 
     EXPECT_EQ((void *)((uintptr_t)buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress()), *pArgument);
 
@@ -337,7 +337,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, WhenFillingBufferThenArgumentTwoShouldMatchP
     ASSERT_NE(nullptr, kernel);
 
     // Determine where the argument is
-    auto pArgument = (void **)getStatelessArgumentPointer<FamilyType>(*kernel, 2u, pCmdQ->getIndirectHeap(IndirectHeap::INDIRECT_OBJECT, 0), rootDeviceIndex);
+    auto pArgument = (void **)getStatelessArgumentPointer<FamilyType>(kernel->getKernelInfo(), 2u, pCmdQ->getIndirectHeap(IndirectHeap::Type::INDIRECT_OBJECT, 0), rootDeviceIndex);
     EXPECT_NE(nullptr, *pArgument);
 
     context.getMemoryManager()->freeGraphicsMemory(patternAllocation);
@@ -520,7 +520,7 @@ HWTEST_F(EnqueueFillBufferCmdTests, givenEnqueueFillBufferWhenPatternAllocationI
     GraphicsAllocation *patternAllocation = csr.getAllocationsForReuse().peekHead();
     ASSERT_NE(nullptr, patternAllocation);
 
-    EXPECT_EQ(GraphicsAllocation::AllocationType::FILL_PATTERN, patternAllocation->getAllocationType());
+    EXPECT_EQ(AllocationType::FILL_PATTERN, patternAllocation->getAllocationType());
 }
 
 struct EnqueueFillBufferHw : public ::testing::Test {
@@ -529,7 +529,7 @@ struct EnqueueFillBufferHw : public ::testing::Test {
         if (is32bit) {
             GTEST_SKIP();
         }
-        device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+        device = std::make_unique<MockClDevice>(MockClDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
         context.reset(new MockContext(device.get()));
     }
 
@@ -544,9 +544,9 @@ struct EnqueueFillBufferHw : public ::testing::Test {
     uint64_t smallSize = 4ull * MemoryConstants::gigaByte - 1;
 };
 
-using EnqeueFillBufferStatelessTest = EnqueueFillBufferHw;
+using EnqueueFillBufferStatelessTest = EnqueueFillBufferHw;
 
-HWTEST_F(EnqeueFillBufferStatelessTest, givenBuffersWhenFillingBufferStatelessThenSuccessIsReturned) {
+HWTEST_F(EnqueueFillBufferStatelessTest, givenBuffersWhenFillingBufferStatelessThenSuccessIsReturned) {
     auto pCmdQ = std::make_unique<CommandQueueStateless<FamilyType>>(context.get(), device.get());
     dstBuffer.size = static_cast<size_t>(bigSize);
     auto retVal = pCmdQ->enqueueFillBuffer(
@@ -562,9 +562,9 @@ HWTEST_F(EnqeueFillBufferStatelessTest, givenBuffersWhenFillingBufferStatelessTh
     ASSERT_EQ(CL_SUCCESS, retVal);
 }
 
-using EnqeueFillBufferStatefullTest = EnqueueFillBufferHw;
+using EnqueueFillBufferStatefullTest = EnqueueFillBufferHw;
 
-HWTEST_F(EnqeueFillBufferStatefullTest, givenBuffersWhenFillingBufferStatefullThenSuccessIsReturned) {
+HWTEST_F(EnqueueFillBufferStatefullTest, givenBuffersWhenFillingBufferStatefullThenSuccessIsReturned) {
     auto pCmdQ = std::make_unique<CommandQueueStateful<FamilyType>>(context.get(), device.get());
     dstBuffer.size = static_cast<size_t>(smallSize);
     auto retVal = pCmdQ->enqueueFillBuffer(

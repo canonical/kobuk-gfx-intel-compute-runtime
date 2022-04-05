@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -19,10 +19,11 @@
 #include <functional>
 
 namespace NEO {
-class Device;
 class Buffer;
 class ClDevice;
+class Device;
 class MemoryManager;
+struct EncodeSurfaceStateArgs;
 
 using BufferCreatFunc = Buffer *(*)(Context *context,
                                     MemoryProperties memoryProperties,
@@ -131,9 +132,7 @@ class Buffer : public MemObj {
                                 bool useGlobalAtomics,
                                 bool areMultipleSubDevicesInContext);
 
-    static void provideCompressionHint(GraphicsAllocation::AllocationType allocationType,
-                                       Context *context,
-                                       Buffer *buffer);
+    static void provideCompressionHint(bool compressionEnabled, Context *context, Buffer *buffer);
 
     BufferCreatFunc createFunction = nullptr;
     bool isSubBuffer();
@@ -187,12 +186,13 @@ class Buffer : public MemObj {
                             MemoryManager *memMngr,
                             uint32_t rootDeviceIndex,
                             bool forceCopyHostPtr);
-    static GraphicsAllocation::AllocationType getGraphicsAllocationType(const MemoryProperties &properties, Context &context,
-                                                                        bool renderCompressedBuffers, bool localMemoryEnabled,
-                                                                        bool preferCompression);
+    static AllocationType getGraphicsAllocationTypeAndCompressionPreference(const MemoryProperties &properties, Context &context,
+                                                                            bool &compressionEnabled, bool localMemoryEnabled);
     static bool isReadOnlyMemoryPermittedByFlags(const MemoryProperties &properties);
 
     void transferData(void *dst, void *src, size_t copySize, size_t copyOffset);
+
+    void appendSurfaceStateArgs(EncodeSurfaceStateArgs &args);
 };
 
 template <typename GfxFamily>
@@ -214,7 +214,6 @@ class BufferHw : public Buffer {
 
     void setArgStateful(void *memory, bool forceNonAuxMode, bool disableL3, bool alignSizeForAuxTranslation,
                         bool isReadOnlyArgument, const Device &device, bool useGlobalAtomics, bool areMultipleSubDevicesInContext) override;
-    void appendSurfaceStateExt(void *memory);
 
     static Buffer *create(Context *context,
                           MemoryProperties memoryProperties,

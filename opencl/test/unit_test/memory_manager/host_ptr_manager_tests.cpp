@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,14 +10,14 @@
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/os_interface/os_context.h"
-
-#include "opencl/test/unit_test/fixtures/memory_manager_fixture.h"
-#include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
-#include "opencl/test/unit_test/mocks/mock_csr.h"
-#include "opencl/test/unit_test/mocks/mock_host_ptr_manager.h"
-#include "opencl/test/unit_test/mocks/mock_internal_allocation_storage.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
-#include "test.h"
+#include "shared/test/common/fixtures/memory_manager_fixture.h"
+#include "shared/test/common/helpers/engine_descriptor_helper.h"
+#include "shared/test/common/mocks/mock_allocation_properties.h"
+#include "shared/test/common/mocks/mock_csr.h"
+#include "shared/test/common/mocks/mock_host_ptr_manager.h"
+#include "shared/test/common/mocks/mock_internal_allocation_storage.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 
@@ -919,7 +919,7 @@ HWTEST_F(HostPtrAllocationTest, givenOverlappingFragmentsWhenCheckIsCalledThenWa
     uint32_t csr1GpuTag = taskCountNotReady;
     csr0->tagAddress = &csr0GpuTag;
     csr1->tagAddress = &csr1GpuTag;
-    auto osContext = memoryManager->createAndRegisterOsContext(csr1.get(), EngineTypeUsage{aub_stream::EngineType::ENGINE_RCS, EngineUsage::LowPriority}, 0, PreemptionMode::Disabled, false);
+    auto osContext = memoryManager->createAndRegisterOsContext(csr1.get(), EngineDescriptorHelper::getDefaultDescriptor({aub_stream::EngineType::ENGINE_RCS, EngineUsage::LowPriority}));
     csr1->setupContext(*osContext);
 
     void *cpuPtr = reinterpret_cast<void *>(0x100004);

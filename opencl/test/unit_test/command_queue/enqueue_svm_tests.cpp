@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,7 +14,10 @@
 #include "shared/source/os_interface/device_factory.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_svm_manager.h"
+#include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/page_fault_manager/mock_cpu_page_fault_manager.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
@@ -23,13 +26,10 @@
 #include "opencl/test/unit_test/command_queue/enqueue_map_buffer_fixture.h"
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
-#include "opencl/test/unit_test/libult/ult_command_stream_receiver.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
-#include "opencl/test/unit_test/mocks/mock_svm_manager.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -55,6 +55,18 @@ struct EnqueueSvmTest : public ClDeviceFixture,
         context->getSVMAllocsManager()->freeSVMAlloc(ptrSVM);
         CommandQueueFixture::TearDown();
         ClDeviceFixture::TearDown();
+    }
+
+    std::pair<ReleaseableObjectPtr<Buffer>, void *> createBufferAndMapItOnGpu() {
+        DebugManagerStateRestore restore{};
+        DebugManager.flags.DisableZeroCopyForBuffers.set(1);
+
+        BufferDefaults::context = this->context;
+        ReleaseableObjectPtr<Buffer> buffer = clUniquePtr(BufferHelper<>::create());
+        void *mappedPtr = pCmdQ->enqueueMapBuffer(buffer.get(), CL_TRUE, CL_MAP_READ, 0, buffer->getSize(), 0, nullptr, nullptr, retVal);
+        EXPECT_EQ(CL_SUCCESS, retVal);
+        EXPECT_NE(nullptr, mappedPtr);
+        return {std::move(buffer), mappedPtr};
     }
 
     cl_int retVal = CL_SUCCESS;
@@ -727,7 +739,7 @@ TEST_F(EnqueueSvmTest, givenEnqueueSVMMemFillWhenPatternAllocationIsObtainedThen
     GraphicsAllocation *patternAllocation = csr.getAllocationsForReuse().peekHead();
     ASSERT_NE(nullptr, patternAllocation);
 
-    EXPECT_EQ(GraphicsAllocation::AllocationType::FILL_PATTERN, patternAllocation->getAllocationType());
+    EXPECT_EQ(AllocationType::FILL_PATTERN, patternAllocation->getAllocationType());
 }
 
 TEST_F(EnqueueSvmTest, GivenSvmAllocationWhenEnqueingKernelThenSuccessIsReturned) {
@@ -1035,7 +1047,7 @@ HWTEST_F(EnqueueSvmTestLocalMemory, givenSvmAllocWithoutFlagsWhenMappingSvmThenM
     EXPECT_FALSE(svmMap->readOnlyMap);
 }
 
-HWTEST_F(EnqueueSvmTestLocalMemory, givenEnabledLocalMemoryWhenEnqeueMapValidSvmPtrThenExpectSingleWalker) {
+HWTEST_F(EnqueueSvmTestLocalMemory, givenEnabledLocalMemoryWhenEnqueueMapValidSvmPtrThenExpectSingleWalker) {
     using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
     MockCommandQueueHw<FamilyType> queue(context.get(), pClDevice, nullptr);
     LinearStream &stream = queue.getCS(0x1000);
@@ -1075,7 +1087,7 @@ HWTEST_F(EnqueueSvmTestLocalMemory, givenEnabledLocalMemoryWhenEnqeueMapValidSvm
     clReleaseEvent(event);
 }
 
-HWTEST_F(EnqueueSvmTestLocalMemory, givenEnabledLocalMemoryWhenEnqeueMapSvmPtrTwiceThenExpectSingleWalker) {
+HWTEST_F(EnqueueSvmTestLocalMemory, givenEnabledLocalMemoryWhenEnqueueMapSvmPtrTwiceThenExpectSingleWalker) {
     using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
     MockCommandQueueHw<FamilyType> queue(context.get(), pClDevice, nullptr);
     LinearStream &stream = queue.getCS(0x1000);
@@ -1392,7 +1404,7 @@ HWTEST_F(EnqueueSvmTest, whenInternalAllocationsAreAddedToResidencyContainerThen
     svmManager->freeSVMAlloc(unifiedMemoryPtr);
 }
 
-HWTEST_F(EnqueueSvmTest, whenInternalAllocationIsTriedToBeAddedTwiceToResidencyContainerThenOnlyOnceIsAdded) {
+HWTEST_F(EnqueueSvmTest, whenInternalAllocationIsTriedToBeAddedTwiceToResidencyContainerThenItIsAdded) {
     SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::DEVICE_UNIFIED_MEMORY, context->getRootDeviceIndices(), context->getDeviceBitfields());
     unifiedMemoryProperties.device = pDevice;
     auto allocationSize = 4096u;
@@ -1416,7 +1428,7 @@ HWTEST_F(EnqueueSvmTest, whenInternalAllocationIsTriedToBeAddedTwiceToResidencyC
     svmManager->addInternalAllocationsToResidencyContainer(pDevice->getRootDeviceIndex(),
                                                            residencyContainer,
                                                            InternalMemoryType::DEVICE_UNIFIED_MEMORY);
-    EXPECT_EQ(1u, residencyContainer.size());
+    EXPECT_EQ(2u, residencyContainer.size());
 
     svmManager->freeSVMAlloc(unifiedMemoryPtr);
 }
@@ -1468,7 +1480,7 @@ HWTEST_F(createHostUnifiedMemoryAllocationTest,
 
     auto alignedSize = alignUp<size_t>(allocationSize, MemoryConstants::pageSize64k);
     auto memoryManager = context.getMemoryManager();
-    auto allocationType = GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY;
+    auto allocationType = AllocationType::BUFFER_HOST_MEMORY;
     auto maxRootDeviceIndex = numDevices - 1u;
 
     std::vector<uint32_t> rootDeviceIndices;
@@ -1514,7 +1526,7 @@ HWTEST_F(createHostUnifiedMemoryAllocationTest,
 
     auto alignedSize = alignUp<size_t>(allocationSize, MemoryConstants::pageSize64k);
     auto memoryManager = context.getMemoryManager();
-    auto allocationType = GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY;
+    auto allocationType = AllocationType::BUFFER_HOST_MEMORY;
     auto maxRootDeviceIndex = numDevices - 1u;
 
     std::vector<uint32_t> rootDeviceIndices;
@@ -1914,4 +1926,136 @@ TEST_F(EnqueueSvmTest, givenPageFaultManagerWhenEnqueueMemFillThenAllocIsDecommi
     EXPECT_EQ(static_cast<MockPageFaultManager *>(mockMemoryManager->getPageFaultManager())->transferToGpuCalled, 1);
 
     context->memoryManager = memoryManager;
+}
+
+HWTEST_F(EnqueueSvmTest, givenCopyFromMappedPtrToSvmAllocWhenCallingSvmMemcpyThenReuseMappedAllocations) {
+    constexpr size_t size = 1u;
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    {
+        auto [buffer, mappedPtr] = createBufferAndMapItOnGpu();
+        std::ignore = buffer;
+        EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+        retVal = this->pCmdQ->enqueueSVMMemcpy(
+            false,     // cl_bool  blocking_copy
+            ptrSVM,    // void *dst_ptr
+            mappedPtr, // const void *src_ptr
+            size,      // size_t size
+            0,         // cl_uint num_events_in_wait_list
+            nullptr,   // cl_evebt *event_wait_list
+            nullptr    // cL_event *event
+        );
+        EXPECT_EQ(CL_SUCCESS, retVal);
+        EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+    }
+    {
+        auto notMappedPtr = std::make_unique<char[]>(size);
+        EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+        retVal = this->pCmdQ->enqueueSVMMemcpy(
+            false,              // cl_bool  blocking_copy
+            ptrSVM,             // void *dst_ptr
+            notMappedPtr.get(), // const void *src_ptr
+            size,               // size_t size
+            0,                  // cl_uint num_events_in_wait_list
+            nullptr,            // cl_evebt *event_wait_list
+            nullptr             // cL_event *event
+        );
+        EXPECT_EQ(CL_SUCCESS, retVal);
+        EXPECT_EQ(1u, csr.createAllocationForHostSurfaceCalled);
+    }
+}
+
+HWTEST_F(EnqueueSvmTest, givenCopyFromSvmAllocToMappedPtrWhenCallingSvmMemcpyThenReuseMappedAllocations) {
+    constexpr size_t size = 1u;
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    {
+        auto [buffer, mappedPtr] = createBufferAndMapItOnGpu();
+        std::ignore = buffer;
+        EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+        retVal = this->pCmdQ->enqueueSVMMemcpy(
+            false,     // cl_bool  blocking_copy
+            mappedPtr, // void *dst_ptr
+            ptrSVM,    // const void *src_ptr
+            size,      // size_t size
+            0,         // cl_uint num_events_in_wait_list
+            nullptr,   // cl_evebt *event_wait_list
+            nullptr    // cL_event *event
+        );
+        EXPECT_EQ(CL_SUCCESS, retVal);
+        EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+    }
+    {
+        auto notMappedPtr = std::make_unique<char[]>(size);
+        EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+        retVal = this->pCmdQ->enqueueSVMMemcpy(
+            false,              // cl_bool  blocking_copy
+            notMappedPtr.get(), // void *dst_ptr
+            ptrSVM,             // const void *src_ptr
+            size,               // size_t size
+            0,                  // cl_uint num_events_in_wait_list
+            nullptr,            // cl_evebt *event_wait_list
+            nullptr             // cL_event *event
+        );
+        EXPECT_EQ(CL_SUCCESS, retVal);
+        EXPECT_EQ(1u, csr.createAllocationForHostSurfaceCalled);
+    }
+}
+
+HWTEST_F(EnqueueSvmTest, givenCopyFromMappedPtrToMappedPtrWhenCallingSvmMemcpyThenReuseMappedAllocations) {
+    constexpr size_t size = 1u;
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    {
+        auto [buffer1, mappedPtr1] = createBufferAndMapItOnGpu();
+        auto [buffer2, mappedPtr2] = createBufferAndMapItOnGpu();
+        std::ignore = buffer1;
+        std::ignore = buffer2;
+        EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+        retVal = this->pCmdQ->enqueueSVMMemcpy(
+            false,      // cl_bool  blocking_copy
+            mappedPtr2, // void *dst_ptr
+            mappedPtr1, // const void *src_ptr
+            size,       // size_t size
+            0,          // cl_uint num_events_in_wait_list
+            nullptr,    // cl_evebt *event_wait_list
+            nullptr     // cL_event *event
+        );
+        EXPECT_EQ(CL_SUCCESS, retVal);
+        EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+    }
+    {
+        auto [buffer, mappedPtr] = createBufferAndMapItOnGpu();
+        std::ignore = buffer;
+        auto notMappedPtr = std::make_unique<char[]>(size);
+        EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+        retVal = this->pCmdQ->enqueueSVMMemcpy(
+            false,              // cl_bool  blocking_copy
+            mappedPtr,          // void *dst_ptr
+            notMappedPtr.get(), // const void *src_ptr
+            size,               // size_t size
+            0,                  // cl_uint num_events_in_wait_list
+            nullptr,            // cl_evebt *event_wait_list
+            nullptr             // cL_event *event
+        );
+        EXPECT_EQ(CL_SUCCESS, retVal);
+        EXPECT_EQ(1u, csr.createAllocationForHostSurfaceCalled);
+    }
+    {
+        auto notMappedPtr = std::make_unique<char[]>(size);
+        auto [buffer, mappedPtr] = createBufferAndMapItOnGpu();
+        std::ignore = buffer;
+        EXPECT_EQ(1u, csr.createAllocationForHostSurfaceCalled);
+        retVal = this->pCmdQ->enqueueSVMMemcpy(
+            false,              // cl_bool  blocking_copy
+            notMappedPtr.get(), // void *dst_ptr
+            mappedPtr,          // const void *src_ptr
+            size,               // size_t size
+            0,                  // cl_uint num_events_in_wait_list
+            nullptr,            // cl_evebt *event_wait_list
+            nullptr             // cL_event *event
+        );
+        EXPECT_EQ(CL_SUCCESS, retVal);
+        EXPECT_EQ(2u, csr.createAllocationForHostSurfaceCalled);
+    }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,7 +17,7 @@ constexpr size_t globalSshAllocationSize = 4 * MemoryConstants::pageSize64k;
 constexpr size_t borderColorAlphaOffset = alignUp(4 * sizeof(float), MemoryConstants::cacheLineSize);
 using BindlesHeapType = BindlessHeapsHelper::BindlesHeapType;
 
-BindlessHeapsHelper::BindlessHeapsHelper(MemoryManager *memManager, bool isMultiOsContextCapable, const uint32_t rootDeviceIndex) : memManager(memManager), isMultiOsContextCapable(isMultiOsContextCapable), rootDeviceIndex(rootDeviceIndex) {
+BindlessHeapsHelper::BindlessHeapsHelper(MemoryManager *memManager, bool isMultiOsContextCapable, const uint32_t rootDeviceIndex, DeviceBitfield deviceBitfield) : memManager(memManager), isMultiOsContextCapable(isMultiOsContextCapable), rootDeviceIndex(rootDeviceIndex), deviceBitfield(deviceBitfield) {
     for (auto heapType = 0; heapType < BindlesHeapType::NUM_HEAP_TYPES; heapType++) {
         auto allocInFrontWindow = heapType != BindlesHeapType::GLOBAL_DSH;
         auto heapAllocation = getHeapAllocation(MemoryConstants::pageSize64k, MemoryConstants::pageSize64k, allocInFrontWindow);
@@ -43,8 +43,8 @@ BindlessHeapsHelper::~BindlessHeapsHelper() {
 }
 
 GraphicsAllocation *BindlessHeapsHelper::getHeapAllocation(size_t heapSize, size_t alignment, bool allocInFrontWindow) {
-    auto allocationType = GraphicsAllocation::AllocationType::LINEAR_STREAM;
-    NEO::AllocationProperties properties{rootDeviceIndex, true, heapSize, allocationType, isMultiOsContextCapable, false};
+    auto allocationType = AllocationType::LINEAR_STREAM;
+    NEO::AllocationProperties properties{rootDeviceIndex, true, heapSize, allocationType, isMultiOsContextCapable, deviceBitfield};
     properties.flags.use32BitFrontWindow = allocInFrontWindow;
     properties.alignment = alignment;
 

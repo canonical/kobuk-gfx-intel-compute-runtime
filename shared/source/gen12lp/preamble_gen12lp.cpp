@@ -1,17 +1,15 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_stream/csr_definitions.h"
-#include "shared/source/gen12lp/helpers_gen12lp.h"
 #include "shared/source/helpers/engine_node_helper.h"
-#include "shared/source/helpers/preamble_bdw_plus.inl"
-
-#include "pipe_control_args.h"
-#include "reg_configs_common.h"
+#include "shared/source/helpers/pipe_control_args.h"
+#include "shared/source/helpers/preamble_bdw_and_later.inl"
+#include "shared/source/os_interface/hw_info_config.h"
 
 namespace NEO {
 
@@ -52,7 +50,7 @@ void PreambleHelper<TGLLPFamily>::programPipelineSelect(LinearStream *pCommandSt
     cmd.setPipelineSelection(pipeline);
     cmd.setMediaSamplerDopClockGateEnable(!pipelineSelectArgs.mediaSamplerRequired);
 
-    Gen12LPHelpers::setAdditionalPipelineSelectFields(&cmd, pipelineSelectArgs, hwInfo);
+    HwInfoConfig::get(hwInfo.platform.eProductFamily)->setAdditionalPipelineSelectFields(&cmd, pipelineSelectArgs, hwInfo);
 
     *pCmd = cmd;
 }
@@ -62,7 +60,7 @@ void PreambleHelper<TGLLPFamily>::addPipeControlBeforeVfeCmd(LinearStream *pComm
     auto pipeControl = pCommandStream->getSpaceForCmd<PIPE_CONTROL>();
     PIPE_CONTROL cmd = TGLLPFamily::cmdInitPipeControl;
     cmd.setCommandStreamerStallEnable(true);
-    if (hwInfo->workaroundTable.waSendMIFLUSHBeforeVFE) {
+    if (hwInfo->workaroundTable.flags.waSendMIFLUSHBeforeVFE) {
         if (engineGroupType != EngineGroupType::Compute) {
             cmd.setRenderTargetCacheFlushEnable(true);
             cmd.setDepthCacheFlushEnable(true);
@@ -83,9 +81,9 @@ uint32_t PreambleHelper<TGLLPFamily>::getUrbEntryAllocationSize() {
 }
 
 template <>
-void PreambleHelper<TGLLPFamily>::programAdditionalFieldsInVfeState(VFE_STATE_TYPE *mediaVfeState, const HardwareInfo &hwInfo) {
+void PreambleHelper<TGLLPFamily>::programAdditionalFieldsInVfeState(VFE_STATE_TYPE *mediaVfeState, const HardwareInfo &hwInfo, bool disableEUFusion) {
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-    if (!hwHelper.isFusedEuDispatchEnabled(hwInfo)) {
+    if (!hwHelper.isFusedEuDispatchEnabled(hwInfo) || disableEUFusion) {
         mediaVfeState->setDisableSlice0Subslice2(true);
     }
     if (DebugManager.flags.MediaVfeStateMaxSubSlices.get() != -1) {

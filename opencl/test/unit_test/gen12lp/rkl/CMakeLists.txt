@@ -1,12 +1,12 @@
 #
-# Copyright (C) 2020-2021 Intel Corporation
+# Copyright (C) 2020-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
 
 if(TESTS_RKL)
   set(IGDRCL_SRCS_tests_gen12lp_rkl_excludes
-      ${CMAKE_CURRENT_SOURCE_DIR}/excludes_rkl.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/excludes_ocl_rkl.cpp
   )
   set_property(GLOBAL APPEND PROPERTY IGDRCL_SRCS_tests_excludes ${IGDRCL_SRCS_tests_gen12lp_rkl_excludes})
 
@@ -14,6 +14,7 @@ if(TESTS_RKL)
       ${IGDRCL_SRCS_tests_gen12lp_rkl_excludes}
       ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
       ${CMAKE_CURRENT_SOURCE_DIR}/test_hw_helper_rkl.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/test_hw_info_config_rkl.cpp
   )
   target_sources(igdrcl_tests PRIVATE ${IGDRCL_SRCS_tests_gen12lp_rkl})
   add_subdirectories()

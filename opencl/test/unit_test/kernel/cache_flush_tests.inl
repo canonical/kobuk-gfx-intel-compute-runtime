@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,8 +10,11 @@
 #include "shared/source/helpers/l3_range.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_allocation_properties.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/command_queue/gpgpu_walker.h"
@@ -21,9 +24,7 @@
 #include "opencl/test/unit_test/helpers/cmd_buffer_validator.h"
 #include "opencl/test/unit_test/helpers/hardware_commands_helper_tests.h"
 #include "opencl/test/unit_test/helpers/static_size3.h"
-#include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -93,9 +94,9 @@ class GivenCacheFlushAfterWalkerEnabledAndProperSteppingIsSetWhenKernelArgIsSetA
 
         DebugManagerStateRestore dbgRestore;
         DebugManager.flags.EnableCacheFlushAfterWalker.set(1);
-        auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+        const auto &hwInfoConfig = *HwInfoConfig::get(hardwareInfo.platform.eProductFamily);
         auto stepping = (isA0Stepping ? REVISION_A0 : REVISION_A1);
-        hardwareInfo.platform.usRevId = hwHelper.getHwRevIdFromStepping(stepping, hardwareInfo);
+        hardwareInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(stepping, hardwareInfo);
         pDevice->executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]->setHwInfo(&hardwareInfo);
 
         CommandQueueHw<FamilyType> cmdQ(nullptr, pClDevice, 0, false);
@@ -215,9 +216,9 @@ class GivenCacheFlushAfterWalkerEnabledAndProperSteppingIsSetWhenAllocationRequi
         DebugManagerStateRestore restore;
         DebugManager.flags.EnableCacheFlushAfterWalker.set(1);
         DebugManager.flags.EnableTimestampPacket.set(0);
-        auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+        const auto &hwInfoConfig = *HwInfoConfig::get(hardwareInfo.platform.eProductFamily);
         auto stepping = (isA0Stepping ? REVISION_A0 : REVISION_A1);
-        hardwareInfo.platform.usRevId = hwHelper.getHwRevIdFromStepping(stepping, hardwareInfo);
+        hardwareInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(stepping, hardwareInfo);
         pDevice->executionEnvironment->rootDeviceEnvironments[pDevice->getRootDeviceIndex()]->setHwInfo(&hardwareInfo);
 
         MockKernelWithInternals mockKernel(*pClDevice, context, true);
@@ -237,9 +238,9 @@ class GivenCacheFlushAfterWalkerEnabledAndProperSteppingIsSetWhenAllocationRequi
         ASSERT_NE(nullptr, svmAllocation);
         svmAllocation->setFlushL3Required(true);
 
-        mockKernel.kernelInfo.kernelAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties(pDevice->getRootDeviceIndex(), true, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::INTERNAL_HEAP));
+        mockKernel.kernelInfo.kernelAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties(pDevice->getRootDeviceIndex(), true, MemoryConstants::pageSize, AllocationType::INTERNAL_HEAP));
         mockKernel.mockKernel->kernelArgRequiresCacheFlush.resize(1);
-        mockKernel.mockKernel->setArgSvmAlloc(0, svm, svmAllocation);
+        mockKernel.mockKernel->setArgSvmAlloc(0, svm, svmAllocation, 0u);
 
         cmdQ->getUltCommandStreamReceiver().timestampPacketWriteEnabled = false;
 
@@ -292,9 +293,9 @@ class GivenCacheFlushAfterWalkerAndTimestampPacketsEnabledWhenAllocationRequires
         auto svmAllocation = svmManager.getSVMAlloc(svm)->gpuAllocations.getGraphicsAllocation(pDevice->getRootDeviceIndex());
         svmAllocation->setFlushL3Required(true);
 
-        mockKernel.kernelInfo.kernelAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties(pDevice->getRootDeviceIndex(), true, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::INTERNAL_HEAP));
+        mockKernel.kernelInfo.kernelAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties(pDevice->getRootDeviceIndex(), true, MemoryConstants::pageSize, AllocationType::INTERNAL_HEAP));
         mockKernel.mockKernel->kernelArgRequiresCacheFlush.resize(1);
-        mockKernel.mockKernel->setArgSvmAlloc(0, svm, svmAllocation);
+        mockKernel.mockKernel->setArgSvmAlloc(0, svm, svmAllocation, 0);
 
         cmdQ->enqueueKernel(mockKernel, 1, nullptr, StatickSize3<16, 1, 1>(), StatickSize3<16, 1, 1>(), 0, nullptr, nullptr);
 
@@ -350,9 +351,9 @@ class GivenCacheFlushAfterWalkerDisabledAndProperSteppingIsSetWhenAllocationRequ
         ASSERT_NE(nullptr, svmAllocation);
         svmAllocation->setFlushL3Required(true);
 
-        mockKernel.kernelInfo.kernelAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties(pDevice->getRootDeviceIndex(), true, MemoryConstants::pageSize, GraphicsAllocation::AllocationType::INTERNAL_HEAP));
+        mockKernel.kernelInfo.kernelAllocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties(pDevice->getRootDeviceIndex(), true, MemoryConstants::pageSize, AllocationType::INTERNAL_HEAP));
         mockKernel.mockKernel->kernelArgRequiresCacheFlush.resize(1);
-        mockKernel.mockKernel->setArgSvmAlloc(0, svm, svmAllocation);
+        mockKernel.mockKernel->setArgSvmAlloc(0, svm, svmAllocation, 0u);
 
         cmdQ->enqueueKernel(mockKernel, 1, nullptr, StatickSize3<16, 1, 1>(), StatickSize3<16, 1, 1>(), 0, nullptr, nullptr);
 

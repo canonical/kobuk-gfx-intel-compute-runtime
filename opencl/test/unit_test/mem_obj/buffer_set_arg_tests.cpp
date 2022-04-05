@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,6 +11,7 @@
 #include "shared/source/memory_manager/surface.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
@@ -19,7 +20,6 @@
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
-#include "test.h"
 
 #include "gtest/gtest.h"
 
@@ -159,14 +159,13 @@ HWTEST_F(BufferSetArgTest, givenSetArgBufferWithNullArgStatelessThenDontProgramN
     EXPECT_EQ(memcmp(sshOriginal, surfaceStateHeap, sizeof(surfaceStateHeap)), 0);
 }
 
-HWTEST_F(BufferSetArgTest, givenNonPureStatefulArgWhenRenderCompressedBufferIsSetThenSetNonAuxMode) {
+HWTEST_F(BufferSetArgTest, givenNonPureStatefulArgWhenCompressedBufferIsSetThenSetNonAuxMode) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
     pKernelInfo->argAsPtr(0).bindful = 0;
 
     auto graphicsAllocation = buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex());
-    graphicsAllocation->setAllocationType(GraphicsAllocation::AllocationType::BUFFER_COMPRESSED);
-    graphicsAllocation->setDefaultGmm(new Gmm(pDevice->getGmmClientContext(), graphicsAllocation->getUnderlyingBuffer(), buffer->getSize(), 0, false));
+    graphicsAllocation->setDefaultGmm(new Gmm(pDevice->getGmmClientContext(), graphicsAllocation->getUnderlyingBuffer(), buffer->getSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
     graphicsAllocation->getDefaultGmm()->isCompressionEnabled = true;
     cl_mem clMem = buffer;
 
@@ -274,7 +273,8 @@ TEST_F(BufferSetArgTest, GivenSvmPointerWhenSettingKernelArgThenAddressToPatchIs
     retVal = pKernel->setArgSvmAlloc(
         0,
         ptrSVM,
-        pSvmAlloc);
+        pSvmAlloc,
+        0u);
     ASSERT_EQ(CL_SUCCESS, retVal);
 
     auto pKernelArg = (void **)(pKernel->getCrossThreadData() +

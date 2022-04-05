@@ -13,9 +13,8 @@
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/test_macros/test.h"
 #include "shared/test/common/test_macros/test_checks_shared.h"
-
-#include "test.h"
 
 namespace NEO {
 bool prepareDeviceEnvironments(ExecutionEnvironment &executionEnvironment);
@@ -42,28 +41,6 @@ HWTEST_F(PrepareDeviceEnvironmentsTests, whenPrepareDeviceEnvironmentsIsCalledTh
     EXPECT_NE(nullptr, executionEnvironment.rootDeviceEnvironments[0]->getGmmHelper());
 }
 
-HWTEST_F(PrepareDeviceEnvironmentsTests, Given32bitApplicationWhenPrepareDeviceEnvironmentsIsCalledThenFalseIsReturned) {
-    REQUIRE_32BIT_OR_SKIP();
-    DebugManagerStateRestore restore;
-    DebugManager.flags.NodeOrdinal.set(0); // Dont disable RCS
-
-    NEO::ExecutionEnvironment executionEnviornment;
-
-    auto returnValue = NEO::prepareDeviceEnvironments(executionEnviornment);
-
-    switch (::productFamily) {
-    case IGFX_UNKNOWN:
-#ifdef SUPPORT_XE_HP_SDV
-    case IGFX_XE_HP_SDV:
-#endif
-        EXPECT_FALSE(returnValue);
-        break;
-    default:
-        EXPECT_TRUE(returnValue);
-        break;
-    }
-}
-
 HWTEST_F(PrepareDeviceEnvironmentsTests, givenRcsAndCcsNotSupportedWhenInitializingThenReturnFalse) {
     REQUIRE_64BIT_OR_SKIP();
 
@@ -74,7 +51,7 @@ HWTEST_F(PrepareDeviceEnvironmentsTests, givenRcsAndCcsNotSupportedWhenInitializ
     hwInfoConfig->configureHardwareCustom(&hwInfo, nullptr);
 
     bool expectedValue = false;
-    if (hwInfo.featureTable.ftrRcsNode || hwInfo.featureTable.ftrCCSNode) {
+    if (hwInfo.featureTable.flags.ftrRcsNode || hwInfo.featureTable.flags.ftrCCSNode) {
         expectedValue = true;
     }
 

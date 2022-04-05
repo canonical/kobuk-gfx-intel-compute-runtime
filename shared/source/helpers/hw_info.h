@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -24,9 +24,12 @@ struct RuntimeCapabilityTable {
     DirectSubmissionProperyEngines directSubmissionEngines;
     KmdNotifyProperties kmdNotifyProperties;
     uint64_t gpuAddressSpace;
+    uint64_t sharedSystemMemCapabilities;
     double defaultProfilingTimerResolution;
     size_t requiredPreemptionSurfaceSize;
     bool (*isSimulation)(unsigned short);
+    const char *platformType;
+    const char *deviceName;
     PreemptionMode defaultPreemptionMode;
     aub_stream::EngineType defaultEngineType;
     uint32_t maxRenderFrequency;
@@ -49,9 +52,6 @@ struct RuntimeCapabilityTable {
     bool ftrRenderCompressedImages;
     bool ftr64KBpages;
     bool instrumentationEnabled;
-    bool forceStatelessCompilationFor32Bit;
-    const char *platformType;
-    const char *deviceName;
     bool debuggerSupported;
     bool supportsVme;
     bool supportCacheFlushAfterWalker;
@@ -65,15 +65,77 @@ struct RuntimeCapabilityTable {
     bool levelZeroSupported;
     bool isIntegratedDevice;
     bool supportsMediaBlock;
+    bool p2pAccessSupported;
+    bool p2pAtomicAccessSupported;
     bool fusedEuEnabled;
 };
 
-struct HardwareCapabilities {
-    size_t image3DMaxWidth;
-    size_t image3DMaxHeight;
-    uint64_t maxMemAllocSize;
-    bool isStatelesToStatefullWithOffsetSupported;
-};
+inline bool operator==(const RuntimeCapabilityTable &lhs, const RuntimeCapabilityTable &rhs) {
+    bool result = 1;
+
+    for (size_t i = 0; i < (sizeof(lhs.directSubmissionEngines.data) / sizeof(*lhs.directSubmissionEngines.data)); ++i) {
+        result &= (lhs.directSubmissionEngines.data[i].engineSupported == rhs.directSubmissionEngines.data[i].engineSupported);
+        result &= (lhs.directSubmissionEngines.data[i].submitOnInit == rhs.directSubmissionEngines.data[i].submitOnInit);
+        result &= (lhs.directSubmissionEngines.data[i].useNonDefault == rhs.directSubmissionEngines.data[i].useNonDefault);
+        result &= (lhs.directSubmissionEngines.data[i].useRootDevice == rhs.directSubmissionEngines.data[i].useRootDevice);
+        result &= (lhs.directSubmissionEngines.data[i].useInternal == rhs.directSubmissionEngines.data[i].useInternal);
+        result &= (lhs.directSubmissionEngines.data[i].useLowPriority == rhs.directSubmissionEngines.data[i].useLowPriority);
+    }
+
+    result &= (lhs.kmdNotifyProperties.delayKmdNotifyMicroseconds == rhs.kmdNotifyProperties.delayKmdNotifyMicroseconds);
+    result &= (lhs.kmdNotifyProperties.delayQuickKmdSleepMicroseconds == rhs.kmdNotifyProperties.delayQuickKmdSleepMicroseconds);
+    result &= (lhs.kmdNotifyProperties.delayQuickKmdSleepForSporadicWaitsMicroseconds == rhs.kmdNotifyProperties.delayQuickKmdSleepForSporadicWaitsMicroseconds);
+    result &= (lhs.kmdNotifyProperties.enableQuickKmdSleepForDirectSubmission == rhs.kmdNotifyProperties.enableQuickKmdSleepForDirectSubmission);
+    result &= (lhs.kmdNotifyProperties.delayQuickKmdSleepForDirectSubmissionMicroseconds == rhs.kmdNotifyProperties.delayQuickKmdSleepForDirectSubmissionMicroseconds);
+    result &= (lhs.kmdNotifyProperties.enableKmdNotify == rhs.kmdNotifyProperties.enableKmdNotify);
+    result &= (lhs.kmdNotifyProperties.enableQuickKmdSleep == rhs.kmdNotifyProperties.enableQuickKmdSleep);
+    result &= (lhs.kmdNotifyProperties.enableQuickKmdSleepForSporadicWaits == rhs.kmdNotifyProperties.enableQuickKmdSleepForSporadicWaits);
+    result &= (lhs.gpuAddressSpace == rhs.gpuAddressSpace);
+    result &= (lhs.sharedSystemMemCapabilities == rhs.sharedSystemMemCapabilities);
+    result &= (lhs.defaultProfilingTimerResolution == rhs.defaultProfilingTimerResolution);
+    result &= (lhs.requiredPreemptionSurfaceSize == rhs.requiredPreemptionSurfaceSize);
+    result &= (lhs.isSimulation == rhs.isSimulation);
+    result &= (lhs.defaultPreemptionMode == rhs.defaultPreemptionMode);
+    result &= (lhs.defaultEngineType == rhs.defaultEngineType);
+    result &= (lhs.maxRenderFrequency == rhs.maxRenderFrequency);
+    result &= (lhs.clVersionSupport == rhs.clVersionSupport);
+    result &= (lhs.aubDeviceId == rhs.aubDeviceId);
+    result &= (lhs.extraQuantityThreadsPerEU == rhs.extraQuantityThreadsPerEU);
+    result &= (lhs.slmSize == rhs.slmSize);
+    result &= (lhs.grfSize == rhs.grfSize);
+    result &= (lhs.timestampValidBits == rhs.timestampValidBits);
+    result &= (lhs.kernelTimestampValidBits == rhs.kernelTimestampValidBits);
+    result &= (lhs.blitterOperationsSupported == rhs.blitterOperationsSupported);
+    result &= (lhs.ftrSupportsInteger64BitAtomics == rhs.ftrSupportsInteger64BitAtomics);
+    result &= (lhs.ftrSupportsFP64 == rhs.ftrSupportsFP64);
+    result &= (lhs.ftrSupports64BitMath == rhs.ftrSupports64BitMath);
+    result &= (lhs.ftrSvm == rhs.ftrSvm);
+    result &= (lhs.ftrSupportsCoherency == rhs.ftrSupportsCoherency);
+    result &= (lhs.ftrSupportsVmeAvcTextureSampler == rhs.ftrSupportsVmeAvcTextureSampler);
+    result &= (lhs.ftrSupportsVmeAvcPreemption == rhs.ftrSupportsVmeAvcPreemption);
+    result &= (lhs.ftrRenderCompressedBuffers == rhs.ftrRenderCompressedBuffers);
+    result &= (lhs.ftrRenderCompressedImages == rhs.ftrRenderCompressedImages);
+    result &= (lhs.ftr64KBpages == rhs.ftr64KBpages);
+    result &= (lhs.instrumentationEnabled == rhs.instrumentationEnabled);
+    result &= (lhs.platformType == rhs.platformType);
+    result &= (lhs.deviceName == rhs.deviceName);
+    result &= (lhs.debuggerSupported == rhs.debuggerSupported);
+    result &= (lhs.supportsVme == rhs.supportsVme);
+    result &= (lhs.supportCacheFlushAfterWalker == rhs.supportCacheFlushAfterWalker);
+    result &= (lhs.supportsImages == rhs.supportsImages);
+    result &= (lhs.supportsDeviceEnqueue == rhs.supportsDeviceEnqueue);
+    result &= (lhs.supportsPipes == rhs.supportsPipes);
+    result &= (lhs.supportsOcl21Features == rhs.supportsOcl21Features);
+    result &= (lhs.supportsOnDemandPageFaults == rhs.supportsOnDemandPageFaults);
+    result &= (lhs.supportsIndependentForwardProgress == rhs.supportsIndependentForwardProgress);
+    result &= (lhs.hostPtrTrackingEnabled == rhs.hostPtrTrackingEnabled);
+    result &= (lhs.levelZeroSupported == rhs.levelZeroSupported);
+    result &= (lhs.isIntegratedDevice == rhs.isIntegratedDevice);
+    result &= (lhs.supportsMediaBlock == rhs.supportsMediaBlock);
+    result &= (lhs.fusedEuEnabled == rhs.fusedEuEnabled);
+
+    return result;
+}
 
 struct HardwareInfo {
     HardwareInfo() = default;

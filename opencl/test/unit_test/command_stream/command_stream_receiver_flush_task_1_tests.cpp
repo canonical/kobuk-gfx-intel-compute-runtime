@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,15 +11,15 @@
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
 #include "shared/test/common/helpers/ult_hw_helper.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
+#include "shared/test/common/mocks/mock_csr.h"
+#include "shared/test/common/mocks/mock_submissions_aggregator.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/command_queue/gpgpu_walker.h"
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
-#include "opencl/test/unit_test/mocks/mock_csr.h"
 #include "opencl/test/unit_test/mocks/mock_event.h"
-#include "opencl/test/unit_test/mocks/mock_submissions_aggregator.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -70,14 +70,14 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenForceImplicitFlushDebugVariab
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenOverrideThreadArbitrationPolicyDebugVariableSetWhenFlushingThenRequestRequiredMode) {
     DebugManagerStateRestore restore;
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
-    commandStreamReceiver.requiredThreadArbitrationPolicy = ThreadArbitrationPolicy::AgeBased;
-    commandStreamReceiver.lastSentThreadArbitrationPolicy = ThreadArbitrationPolicy::AgeBased;
 
     DebugManager.flags.OverrideThreadArbitrationPolicy.set(ThreadArbitrationPolicy::RoundRobin);
 
-    flushTask(commandStreamReceiver);
+    EXPECT_EQ(-1, commandStreamReceiver.streamProperties.stateComputeMode.threadArbitrationPolicy.value);
 
-    EXPECT_EQ(ThreadArbitrationPolicy::RoundRobin, commandStreamReceiver.lastSentThreadArbitrationPolicy);
+    flushTask(commandStreamReceiver);
+    EXPECT_EQ(ThreadArbitrationPolicy::RoundRobin,
+              commandStreamReceiver.streamProperties.stateComputeMode.threadArbitrationPolicy.value);
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, WhenFlushingTaskThenTaskCountIsIncremented) {
@@ -188,6 +188,8 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeAndMidThread
 
     DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionMode::MidThread;
+    auto sipType = SipKernel::getSipKernelType(*pDevice);
+    SipKernel::initSipKernel(sipType, *pDevice);
 
     mockCsr.flushTask(commandStream,
                       0,
@@ -219,6 +221,8 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInDefaultModeAndMidThreadP
 
     DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionMode::MidThread;
+    auto sipType = SipKernel::getSipKernelType(*pDevice);
+    SipKernel::initSipKernel(sipType, *pDevice);
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -243,11 +247,11 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInDefaultModeAndMidThreadP
 HWTEST_F(CommandStreamReceiverFlushTaskTests, whenFlushThenCommandBufferAlreadyHasProperTaskCountsAndIsNotIncludedInResidencyVector) {
     struct MockCsrFlushCmdBuffer : public MockCommandStreamReceiver {
         using MockCommandStreamReceiver::MockCommandStreamReceiver;
-        bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
+        NEO::SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
             EXPECT_EQ(batchBuffer.commandBufferAllocation->getResidencyTaskCount(this->osContext->getContextId()), this->taskCount + 1);
             EXPECT_EQ(batchBuffer.commandBufferAllocation->getTaskCount(this->osContext->getContextId()), this->taskCount + 1);
             EXPECT_EQ(std::find(allocationsForResidency.begin(), allocationsForResidency.end(), batchBuffer.commandBufferAllocation), allocationsForResidency.end());
-            return true;
+            return NEO::SubmissionStatus::SUCCESS;
         }
     };
 
@@ -425,7 +429,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, whenSamplerCach
     commandStreamReceiver.setSamplerCacheFlushRequired(CommandStreamReceiver::SamplerCacheFlushState::samplerCacheFlushNotRequired);
     configureCSRtoNonDirtyState<FamilyType>(false);
     commandStreamReceiver.taskLevel = taskLevel;
-    waTable->waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
+    waTable->flags.waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
     flushTask(commandStreamReceiver);
 
     EXPECT_EQ(commandStreamReceiver.commandStream.getUsed(), 0u);
@@ -445,7 +449,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, whenSamplerCacheFlushBeforeThenSen
     commandStreamReceiver.taskLevel = taskLevel;
     NEO::WorkaroundTable *waTable = &pDevice->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable;
 
-    waTable->waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
+    waTable->flags.waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
 
     flushTask(commandStreamReceiver);
 
@@ -468,7 +472,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, whenSamplerCach
     commandStreamReceiver.taskLevel = taskLevel;
     NEO::WorkaroundTable *waTable = &pDevice->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable;
 
-    waTable->waSamplerCacheFlushBetweenRedescribedSurfaceReads = false;
+    waTable->flags.waSamplerCacheFlushBetweenRedescribedSurfaceReads = false;
 
     flushTask(commandStreamReceiver);
 
@@ -489,7 +493,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, whenSamplerCacheFlushAfterThenSend
     commandStreamReceiver.taskLevel = taskLevel;
     NEO::WorkaroundTable *waTable = &pDevice->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable;
 
-    waTable->waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
+    waTable->flags.waSamplerCacheFlushBetweenRedescribedSurfaceReads = true;
 
     flushTask(commandStreamReceiver);
 
@@ -543,7 +547,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, WhenFlushingTas
     flushTask(commandStreamReceiver);
 
     auto &commandStreamCSR = commandStreamReceiver.commandStream;
-    HardwareParse::parseCommands<FamilyType>(commandStreamCSR, 0);
+    parseCommands<FamilyType>(commandStreamCSR, 0);
     HardwareParse::findHardwareCommands<FamilyType>();
 
     ASSERT_NE(nullptr, cmdStateBaseAddress);
@@ -575,7 +579,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenStateBaseAddressWhenItIsRequi
     EXPECT_NE(stateBaseAddressItor, pipeControlItor);
     auto pipeControlCmd = (typename FamilyType::PIPE_CONTROL *)*pipeControlItor;
     EXPECT_TRUE(pipeControlCmd->getTextureCacheInvalidationEnable());
-    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pipeControlCmd->getDcFlushEnable());
+    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), pipeControlCmd->getDcFlushEnable());
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenNotApplicableL3ConfigWhenFlushingTaskThenDontReloadSba) {
@@ -767,8 +771,8 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenPreambleSentAndMediaSamplerRe
     flushTask(commandStreamReceiver);
     parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
 
-    auto &hwHelper = HwHelper::get(pDevice->getHardwareInfo().platform.eRenderCoreFamily);
-    if (hwHelper.is3DPipelineSelectWARequired(pDevice->getHardwareInfo())) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(pDevice->getHardwareInfo().platform.eProductFamily);
+    if (hwInfoConfig.is3DPipelineSelectWARequired()) {
         EXPECT_NE(nullptr, getCommand<typename FamilyType::PIPELINE_SELECT>());
     } else {
         EXPECT_EQ(nullptr, getCommand<typename FamilyType::PIPELINE_SELECT>());
@@ -927,24 +931,29 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEnoughMemoryOnlyForPreambleWh
     typedef typename FamilyType::MI_BATCH_BUFFER_START MI_BATCH_BUFFER_START;
     typedef typename FamilyType::MI_BATCH_BUFFER_END MI_BATCH_BUFFER_END;
 
-    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    hardwareInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 1;
+    auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hardwareInfo, 0u));
+    auto &commandStreamReceiver = mockDevice->getUltCommandStreamReceiver<FamilyType>();
+
     commandStreamReceiver.timestampPacketWriteEnabled = false;
     // Force a PIPE_CONTROL through a taskLevel transition
     taskLevel = commandStreamReceiver.peekTaskLevel() + 1;
 
-    commandStreamReceiver.lastSentCoherencyRequest = 0;
+    commandStreamReceiver.streamProperties.stateComputeMode.isCoherencyRequired.value = 0;
     auto l3Config = PreambleHelper<FamilyType>::getL3Config(pDevice->getHardwareInfo(), false);
     commandStreamReceiver.lastSentL3Config = l3Config;
 
     auto &csrCS = commandStreamReceiver.getCS();
-    size_t sizeNeededForPreamble = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
-    size_t sizeNeeded = commandStreamReceiver.getRequiredCmdStreamSize(flushTaskFlags, *pDevice);
+    size_t sizeNeededForPreamble = commandStreamReceiver.getRequiredCmdSizeForPreamble(*mockDevice);
+    size_t sizeNeeded = commandStreamReceiver.getRequiredCmdStreamSize(flushTaskFlags, *mockDevice);
     sizeNeeded -= sizeof(MI_BATCH_BUFFER_START); // no task to submit
     sizeNeeded += sizeof(MI_BATCH_BUFFER_END);   // no task to submit, add BBE to CSR stream
     sizeNeeded = alignUp(sizeNeeded, MemoryConstants::cacheLineSize);
 
     csrCS.getSpace(csrCS.getAvailableSpace() - sizeNeededForPreamble);
 
+    commandStreamReceiver.streamProperties.stateComputeMode.setProperties(flushTaskFlags.requiresCoherency, flushTaskFlags.numGrfRequired,
+                                                                          flushTaskFlags.threadArbitrationPolicy, *defaultHwInfo);
     flushTask(commandStreamReceiver);
 
     EXPECT_EQ(sizeNeeded, csrCS.getUsed());
@@ -956,25 +965,29 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEnoughMemoryOnlyForPreambleAn
     typedef typename FamilyType::MI_BATCH_BUFFER_START MI_BATCH_BUFFER_START;
     typedef typename FamilyType::MI_BATCH_BUFFER_END MI_BATCH_BUFFER_END;
 
-    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    hardwareInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 1;
+    auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hardwareInfo, 0u));
+    auto &commandStreamReceiver = mockDevice->getUltCommandStreamReceiver<FamilyType>();
+
     commandStreamReceiver.timestampPacketWriteEnabled = false;
     // Force a PIPE_CONTROL through a taskLevel transition
     taskLevel = commandStreamReceiver.peekTaskLevel() + 1;
-    commandStreamReceiver.lastSentCoherencyRequest = 0;
 
-    auto l3Config = PreambleHelper<FamilyType>::getL3Config(pDevice->getHardwareInfo(), false);
+    auto l3Config = PreambleHelper<FamilyType>::getL3Config(mockDevice->getHardwareInfo(), false);
     commandStreamReceiver.lastSentL3Config = l3Config;
 
     auto &csrCS = commandStreamReceiver.getCS();
-    size_t sizeNeededForPreamble = commandStreamReceiver.getRequiredCmdSizeForPreamble(*pDevice);
+    size_t sizeNeededForPreamble = commandStreamReceiver.getRequiredCmdSizeForPreamble(*mockDevice);
     size_t sizeNeededForStateBaseAddress = sizeof(STATE_BASE_ADDRESS) + sizeof(PIPE_CONTROL);
-    size_t sizeNeeded = commandStreamReceiver.getRequiredCmdStreamSize(flushTaskFlags, *pDevice);
+    size_t sizeNeeded = commandStreamReceiver.getRequiredCmdStreamSize(flushTaskFlags, *mockDevice);
     sizeNeeded -= sizeof(MI_BATCH_BUFFER_START); // no task to submit
     sizeNeeded += sizeof(MI_BATCH_BUFFER_END);   // no task to submit, add BBE to CSR stream
     sizeNeeded = alignUp(sizeNeeded, MemoryConstants::cacheLineSize);
 
     csrCS.getSpace(csrCS.getAvailableSpace() - sizeNeededForPreamble - sizeNeededForStateBaseAddress);
 
+    commandStreamReceiver.streamProperties.stateComputeMode.setProperties(flushTaskFlags.requiresCoherency, flushTaskFlags.numGrfRequired,
+                                                                          flushTaskFlags.threadArbitrationPolicy, *defaultHwInfo);
     flushTask(commandStreamReceiver);
 
     EXPECT_EQ(sizeNeeded, csrCS.getUsed());
@@ -988,18 +1001,20 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEnoughMemoryOnlyForPreambleAn
 
     commandStream.getSpace(sizeof(PIPE_CONTROL));
 
-    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    hardwareInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 1;
+    auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hardwareInfo, 0u));
+    auto &commandStreamReceiver = mockDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.timestampPacketWriteEnabled = false;
     // Force a PIPE_CONTROL through a taskLevel transition
     taskLevel = commandStreamReceiver.peekTaskLevel() + 1;
 
-    commandStreamReceiver.lastSentCoherencyRequest = 0;
+    commandStreamReceiver.streamProperties.stateComputeMode.isCoherencyRequired.value = 0;
 
-    auto l3Config = PreambleHelper<FamilyType>::getL3Config(pDevice->getHardwareInfo(), false);
+    auto l3Config = PreambleHelper<FamilyType>::getL3Config(mockDevice->getHardwareInfo(), false);
     commandStreamReceiver.lastSentL3Config = l3Config;
 
     auto &csrCS = commandStreamReceiver.getCS();
-    size_t sizeNeeded = commandStreamReceiver.getRequiredCmdStreamSizeAligned(flushTaskFlags, *pDevice);
+    size_t sizeNeeded = commandStreamReceiver.getRequiredCmdStreamSizeAligned(flushTaskFlags, *mockDevice);
 
     csrCS.getSpace(csrCS.getAvailableSpace() - sizeNeeded);
     auto expectedBase = csrCS.getCpuBase();
@@ -1007,7 +1022,19 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEnoughMemoryOnlyForPreambleAn
     // This case handles when we have *just* enough space
     auto expectedUsed = csrCS.getUsed() + sizeNeeded;
 
-    flushTask(commandStreamReceiver, flushTaskFlags.blocking, 0, flushTaskFlags.requiresCoherency, flushTaskFlags.lowPriority);
+    flushTaskFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(mockDevice->getHardwareInfo());
+
+    commandStreamReceiver.streamProperties.stateComputeMode.setProperties(flushTaskFlags.requiresCoherency, flushTaskFlags.numGrfRequired,
+                                                                          flushTaskFlags.threadArbitrationPolicy, *defaultHwInfo);
+    commandStreamReceiver.flushTask(
+        commandStream,
+        0,
+        dsh,
+        ioh,
+        ssh,
+        taskLevel,
+        flushTaskFlags,
+        *mockDevice);
 
     // Verify that we didn't grab a new CS buffer
     EXPECT_EQ(expectedUsed, csrCS.getUsed());
@@ -1023,9 +1050,9 @@ struct CommandStreamReceiverHwLog : public UltCommandStreamReceiver<FamilyType> 
           flushCount(0) {
     }
 
-    bool flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
+    SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
         ++flushCount;
-        return true;
+        return SubmissionStatus::SUCCESS;
     }
 
     int flushCount;
@@ -1063,7 +1090,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBothCsWhenFlushingTaskThenCha
 
     // Expect to see address based on startOffset of task
     auto expectedAddress = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ptrOffset(commandStream.getCpuBase(), startOffset)));
-    EXPECT_EQ(expectedAddress, bbs->getBatchBufferStartAddressGraphicsaddress472());
+    EXPECT_EQ(expectedAddress, bbs->getBatchBufferStartAddress());
 
     // MI_BATCH_BUFFER_START from UMD must be PPGTT for security reasons
     EXPECT_EQ(MI_BATCH_BUFFER_START::ADDRESS_SPACE_INDICATOR_PPGTT, bbs->getAddressSpaceIndicator());
@@ -1137,7 +1164,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, GivenBlockingWh
     auto blocking = true;
     auto &commandStreamTask = commandQueue.getCS(1024);
     auto &commandStreamCSR = commandStreamReceiver->getCS();
-    commandStreamReceiver->lastSentCoherencyRequest = 0;
+    commandStreamReceiver->streamProperties.stateComputeMode.isCoherencyRequired.value = 0;
 
     DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(pDevice->getHardwareInfo());
@@ -1215,11 +1242,11 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, GivenBlockingWh
 
             // Verify that the dcFlushEnabled bit is not set in PC
             auto pCmd = reinterpret_cast<PIPE_CONTROL *>(pipeControlTask);
-            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pCmd->getDcFlushEnable());
+            EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), pCmd->getDcFlushEnable());
         }
     } else {
         auto pCmd = reinterpret_cast<PIPE_CONTROL *>(*itorPC);
-        EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pCmd->getDcFlushEnable());
+        EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), pCmd->getDcFlushEnable());
     }
 }
 
@@ -1263,7 +1290,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelRequiringDCFlush
 
     // Verify that the dcFlushEnabled bit is set in PC
     auto pCmdWA = reinterpret_cast<PIPE_CONTROL *>(*itorPC);
-    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::isDcFlushAllowed(), pCmdWA->getDcFlushEnable());
+    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), pCmdWA->getDcFlushEnable());
 
     buffer->release();
 }
@@ -1277,21 +1304,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWhenCallFlushTas
 
     DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
 
-    uint32_t beforeFlushRequiredThreadArbitrationPolicy = mockCsr->requiredThreadArbitrationPolicy;
-
-    mockCsr->flushTask(commandStream,
-                       0,
-                       dsh,
-                       ioh,
-                       ssh,
-                       taskLevel,
-                       dispatchFlags,
-                       *pDevice);
-
-    EXPECT_EQ(beforeFlushRequiredThreadArbitrationPolicy, mockCsr->requiredThreadArbitrationPolicy);
-
     dispatchFlags.threadArbitrationPolicy = ThreadArbitrationPolicy::RoundRobin;
-    mockCsr->requiredThreadArbitrationPolicy = ThreadArbitrationPolicy::NotPresent;
 
     mockCsr->flushTask(commandStream,
                        0,
@@ -1302,7 +1315,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDispatchFlagsWhenCallFlushTas
                        dispatchFlags,
                        *pDevice);
 
-    EXPECT_EQ(dispatchFlags.threadArbitrationPolicy, mockCsr->requiredThreadArbitrationPolicy);
+    EXPECT_EQ(dispatchFlags.threadArbitrationPolicy, mockCsr->streamProperties.stateComputeMode.threadArbitrationPolicy.value);
 }
 
 class CommandStreamReceiverFlushTaskMemoryCompressionTests : public UltCommandStreamReceiverTest,

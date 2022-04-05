@@ -40,6 +40,7 @@ struct DebugSession : _zet_debug_session_handle_t {
     virtual ze_result_t readRegisters(ze_device_thread_t thread, uint32_t type, uint32_t start, uint32_t count, void *pRegisterValues) = 0;
     virtual ze_result_t writeRegisters(ze_device_thread_t thread, uint32_t type, uint32_t start, uint32_t count, void *pRegisterValues) = 0;
     static ze_result_t getRegisterSetProperties(Device *device, uint32_t *pCount, zet_debug_regset_properties_t *pRegisterSetProperties);
+    MOCKABLE_VIRTUAL bool areRequestedThreadsStopped(ze_device_thread_t thread);
 
     Device *getConnectedDevice() { return connectedDevice; }
 
@@ -68,9 +69,13 @@ struct DebugSession : _zet_debug_session_handle_t {
         return threadMatch && euMatch && subsliceMatch && sliceMatch;
     }
 
+    static void printBitmask(uint8_t *bitmask, size_t bitmaskSize);
+
     virtual ze_device_thread_t convertToPhysical(ze_device_thread_t thread, uint32_t &deviceIndex);
     virtual EuThread::ThreadId convertToThreadId(ze_device_thread_t thread);
     virtual ze_device_thread_t convertToApi(EuThread::ThreadId threadId);
+
+    ze_result_t sanityMemAccessThreadCheck(ze_device_thread_t thread, const zet_debug_memory_space_desc_t *desc);
 
   protected:
     DebugSession(const zet_debug_config_t &config, Device *device);
@@ -78,8 +83,13 @@ struct DebugSession : _zet_debug_session_handle_t {
 
     virtual bool isBindlessSystemRoutine();
     virtual bool readModuleDebugArea() = 0;
+    virtual ze_result_t readSbaBuffer(EuThread::ThreadId threadId, SbaTrackedAddresses &sbaBuffer) = 0;
 
-    std::vector<ze_device_thread_t> getSingleThreads(ze_device_thread_t physicalThread, const NEO::HardwareInfo &hwInfo);
+    void fillDevicesFromThread(ze_device_thread_t thread, std::vector<uint8_t> &devices);
+
+    std::vector<EuThread::ThreadId> getSingleThreadsForDevice(uint32_t deviceIndex, ze_device_thread_t physicalThread, const NEO::HardwareInfo &hwInfo);
+
+    size_t getPerThreadScratchOffset(size_t ptss, EuThread::ThreadId threadId);
 
     DebugAreaHeader debugArea;
 

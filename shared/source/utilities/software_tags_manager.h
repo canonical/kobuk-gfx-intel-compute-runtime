@@ -1,11 +1,13 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include "shared/source/command_container/command_encoder.h"
+#include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/utilities/software_tags.h"
@@ -37,8 +39,10 @@ class SWTagsManager {
     template <typename GfxFamily>
     static size_t estimateSpaceForSWTags();
 
-    static const unsigned int MAX_TAG_COUNT = 20;
-    static const unsigned int MAX_TAG_HEAP_SIZE = 1024;
+    static const unsigned int MAX_TAG_COUNT = 200;
+    static const unsigned int MAX_TAG_HEAP_SIZE = 16384;
+    unsigned int currentCallCount = 0;
+    unsigned int getCurrentHeapOffset() { return currentHeapOffset; }
 
   private:
     void allocateBXMLHeap(Device &device);
@@ -54,32 +58,26 @@ class SWTagsManager {
 
 template <typename GfxFamily>
 void SWTagsManager::insertBXMLHeapAddress(LinearStream &cmdStream) {
-    using MI_STORE_DATA_IMM = typename GfxFamily::MI_STORE_DATA_IMM;
-
     auto ptr = reinterpret_cast<SWTags::BXMLHeapInfo *>(memoryManager->lockResource(bxmlHeap));
-    MI_STORE_DATA_IMM storeDataImm = GfxFamily::cmdInitStoreDataImm;
-    storeDataImm.setAddress(bxmlHeap->getGpuAddress());
-    storeDataImm.setDwordLength(MI_STORE_DATA_IMM::DWORD_LENGTH::DWORD_LENGTH_STORE_DWORD);
-    storeDataImm.setDataDword0(ptr->magicNumber);
+    EncodeStoreMemory<GfxFamily>::programStoreDataImm(cmdStream,
+                                                      bxmlHeap->getGpuAddress(),
+                                                      ptr->magicNumber,
+                                                      0,
+                                                      false,
+                                                      false);
     memoryManager->unlockResource(bxmlHeap);
-
-    auto sdiSpace = cmdStream.getSpaceForCmd<MI_STORE_DATA_IMM>();
-    *sdiSpace = storeDataImm;
 }
 
 template <typename GfxFamily>
 void SWTagsManager::insertSWTagHeapAddress(LinearStream &cmdStream) {
-    using MI_STORE_DATA_IMM = typename GfxFamily::MI_STORE_DATA_IMM;
-
     auto ptr = reinterpret_cast<SWTags::BXMLHeapInfo *>(memoryManager->lockResource(tagHeap));
-    MI_STORE_DATA_IMM storeDataImm = GfxFamily::cmdInitStoreDataImm;
-    storeDataImm.setAddress(tagHeap->getGpuAddress());
-    storeDataImm.setDwordLength(MI_STORE_DATA_IMM::DWORD_LENGTH::DWORD_LENGTH_STORE_DWORD);
-    storeDataImm.setDataDword0(ptr->magicNumber);
+    EncodeStoreMemory<GfxFamily>::programStoreDataImm(cmdStream,
+                                                      tagHeap->getGpuAddress(),
+                                                      ptr->magicNumber,
+                                                      0,
+                                                      false,
+                                                      false);
     memoryManager->unlockResource(tagHeap);
-
-    auto sdiSpace = cmdStream.getSpaceForCmd<MI_STORE_DATA_IMM>();
-    *sdiSpace = storeDataImm;
 }
 
 template <typename GfxFamily, typename Tag, typename... Params>
@@ -88,7 +86,7 @@ void SWTagsManager::insertTag(LinearStream &cmdStream, Device &device, Params...
 
     unsigned int tagSize = sizeof(Tag);
 
-    if (currentTagCount >= MAX_TAG_COUNT || currentHeapOffset + tagSize > MAX_TAG_HEAP_SIZE) {
+    if (currentTagCount >= MAX_TAG_COUNT || getCurrentHeapOffset() + tagSize > MAX_TAG_HEAP_SIZE) {
         return;
     }
     ++currentTagCount;
@@ -113,10 +111,9 @@ void SWTagsManager::insertTag(LinearStream &cmdStream, Device &device, Params...
 
 template <typename GfxFamily>
 size_t SWTagsManager::estimateSpaceForSWTags() {
-    using MI_STORE_DATA_IMM = typename GfxFamily::MI_STORE_DATA_IMM;
     using MI_NOOP = typename GfxFamily::MI_NOOP;
 
-    return 2 * sizeof(MI_STORE_DATA_IMM) + 2 * MAX_TAG_COUNT * sizeof(MI_NOOP);
+    return 2 * EncodeStoreMemory<GfxFamily>::getStoreDataImmSize() + 2 * MAX_TAG_COUNT * sizeof(MI_NOOP);
 }
 
 } // namespace NEO

@@ -34,7 +34,7 @@ using Gen9PreemptionTests = DevicePreemptionTests;
 GEN9TEST_F(Gen9PreemptionTests, whenMidThreadPreemptionIsNotAvailableThenDoesNotProgramPreamble) {
     device->setPreemptionMode(PreemptionMode::ThreadGroup);
 
-    size_t requiredSize = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*device);
+    size_t requiredSize = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*device, false);
     EXPECT_EQ(0U, requiredSize);
 
     LinearStream cmdStream{nullptr, 0};
@@ -52,7 +52,7 @@ GEN9TEST_F(Gen9PreemptionTests, whenMidThreadPreemptionIsAvailableThenStateSipIs
     uint64_t minCsrAlignment = 2 * 256 * MemoryConstants::kiloByte;
     MockGraphicsAllocation csrSurface((void *)minCsrAlignment, minCsrSize);
 
-    size_t requiredCmdStreamSize = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*device);
+    size_t requiredCmdStreamSize = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*device, false);
     size_t expectedPreambleSize = sizeof(STATE_SIP);
     EXPECT_EQ(expectedPreambleSize, requiredCmdStreamSize);
 
@@ -80,7 +80,7 @@ GEN9TEST_F(Gen9PreemptionTests, givenMidBatchPreemptionWhenProgrammingWaCmdsBegi
 GEN9TEST_F(Gen9PreemptionTests, givenThreadGroupPreemptionNoWaSetWhenProgrammingWaCmdsBeginThenExpectNoCmd) {
     size_t expectedSize = 0;
     device->setPreemptionMode(PreemptionMode::ThreadGroup);
-    device->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable.waModifyVFEStateAfterGPGPUPreemption = false;
+    device->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable.flags.waModifyVFEStateAfterGPGPUPreemption = false;
     size_t size = PreemptionHelper::getPreemptionWaCsSize<FamilyType>(*device);
     EXPECT_EQ(expectedSize, size);
 }
@@ -89,7 +89,7 @@ GEN9TEST_F(Gen9PreemptionTests, givenThreadGroupPreemptionWaSetWhenProgrammingWa
     typedef typename FamilyType::MI_LOAD_REGISTER_IMM MI_LOAD_REGISTER_IMM;
     size_t expectedSize = 2 * sizeof(MI_LOAD_REGISTER_IMM);
     device->setPreemptionMode(PreemptionMode::ThreadGroup);
-    device->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable.waModifyVFEStateAfterGPGPUPreemption = true;
+    device->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable.flags.waModifyVFEStateAfterGPGPUPreemption = true;
     size_t size = PreemptionHelper::getPreemptionWaCsSize<FamilyType>(*device);
     EXPECT_EQ(expectedSize, size);
 }
@@ -97,7 +97,7 @@ GEN9TEST_F(Gen9PreemptionTests, givenThreadGroupPreemptionWaSetWhenProgrammingWa
 GEN9TEST_F(Gen9PreemptionTests, givenMidThreadPreemptionNoWaSetWhenProgrammingWaCmdsBeginThenExpectNoCmd) {
     size_t expectedSize = 0;
     device->setPreemptionMode(PreemptionMode::MidThread);
-    device->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable.waModifyVFEStateAfterGPGPUPreemption = false;
+    device->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable.flags.waModifyVFEStateAfterGPGPUPreemption = false;
     size_t size = PreemptionHelper::getPreemptionWaCsSize<FamilyType>(*device);
     EXPECT_EQ(expectedSize, size);
 }
@@ -106,7 +106,7 @@ GEN9TEST_F(Gen9PreemptionTests, givenMidThreadPreemptionWaSetWhenProgrammingWaCm
     typedef typename FamilyType::MI_LOAD_REGISTER_IMM MI_LOAD_REGISTER_IMM;
     size_t expectedSize = 2 * sizeof(MI_LOAD_REGISTER_IMM);
     device->setPreemptionMode(PreemptionMode::MidThread);
-    device->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable.waModifyVFEStateAfterGPGPUPreemption = true;
+    device->getRootDeviceEnvironment().getMutableHardwareInfo()->workaroundTable.flags.waModifyVFEStateAfterGPGPUPreemption = true;
     size_t size = PreemptionHelper::getPreemptionWaCsSize<FamilyType>(*device);
     EXPECT_EQ(expectedSize, size);
 }
@@ -143,7 +143,7 @@ GEN9TEST_F(Gen9PreemptionTests, givenMidThreadPreemptionModeWhenStateSipIsProgra
     auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
 
     mockDevice->setPreemptionMode(PreemptionMode::MidThread);
-    auto cmdSizePreemptionMidThread = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*mockDevice);
+    auto cmdSizePreemptionMidThread = PreemptionHelper::getRequiredStateSipCmdSize<FamilyType>(*mockDevice, false);
 
     StackVec<char, 4096> preemptionBuffer;
     preemptionBuffer.resize(cmdSizePreemptionMidThread);

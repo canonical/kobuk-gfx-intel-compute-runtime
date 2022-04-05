@@ -33,12 +33,20 @@ constexpr DebugFunctionalityLevel globalDebugFunctionalityLevel = DebugFunctiona
         NEO::printDebugString(flag, __VA_ARGS__);
 
 namespace NEO {
+
+template <typename StreamT, typename... Args>
+void flushDebugStream(StreamT stream, Args &&...args) {
+    fflush(stream);
+}
+
 template <typename... Args>
 void printDebugString(bool showDebugLogs, Args &&...args) {
     if (showDebugLogs) {
         fprintf(std::forward<Args>(args)...);
+        flushDebugStream(args...);
     }
 }
+
 #if defined(__clang__)
 #define NO_SANITIZE __attribute__((no_sanitize("undefined")))
 #else
@@ -47,7 +55,6 @@ void printDebugString(bool showDebugLogs, Args &&...args) {
 
 class Kernel;
 class GraphicsAllocation;
-struct MultiDispatchInfo;
 class SettingsReader;
 
 template <typename T>
@@ -71,6 +78,8 @@ struct DebugVariables {
     struct DEBUGGER_LOG_BITMASK {
         constexpr static int32_t LOG_INFO{1};
         constexpr static int32_t LOG_ERROR{1 << 1};
+        constexpr static int32_t LOG_THREADS{1 << 2};
+        constexpr static int32_t LOG_MEM{1 << 3};
         constexpr static int32_t DUMP_ELF{1 << 10};
     };
 
@@ -141,9 +150,19 @@ extern DebugSettingsManager<globalDebugFunctionalityLevel> DebugManager;
         PRINT_DEBUGGER_LOG(stdout, "\nINFO: " STR, __VA_ARGS__)                                                   \
     }
 
+#define PRINT_DEBUGGER_THREAD_LOG(STR, ...)                                                                          \
+    if (NEO::DebugManager.flags.DebuggerLogBitmask.get() & NEO::DebugVariables::DEBUGGER_LOG_BITMASK::LOG_THREADS) { \
+        PRINT_DEBUGGER_LOG(stdout, "\nTHREAD INFO: " STR, __VA_ARGS__)                                               \
+    }
+
 #define PRINT_DEBUGGER_ERROR_LOG(STR, ...)                                                                         \
     if (NEO::DebugManager.flags.DebuggerLogBitmask.get() & NEO::DebugVariables::DEBUGGER_LOG_BITMASK::LOG_ERROR) { \
         PRINT_DEBUGGER_LOG(stderr, "\nERROR: " STR, __VA_ARGS__)                                                   \
+    }
+
+#define PRINT_DEBUGGER_MEM_ACCESS_LOG(STR, ...)                                                                  \
+    if (NEO::DebugManager.flags.DebuggerLogBitmask.get() & NEO::DebugVariables::DEBUGGER_LOG_BITMASK::LOG_MEM) { \
+        PRINT_DEBUGGER_LOG(stdout, "\nINFO: " STR, __VA_ARGS__)                                                  \
     }
 
 template <DebugFunctionalityLevel DebugLevel>

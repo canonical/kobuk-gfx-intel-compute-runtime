@@ -5,42 +5,28 @@
  *
  */
 
-#include "shared/source/ail/ail_configuration.h"
-#include "shared/source/ail/ail_configuration.inl"
+#include "shared/source/command_stream/aub_command_stream_receiver_hw.h"
+#include "shared/source/command_stream/command_stream_receiver_hw.h"
+#include "shared/source/command_stream/tbx_command_stream_receiver_hw.h"
 #include "shared/source/gen12lp/hw_cmds.h"
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/source/helpers/populate_factory.h"
 
-#include <map>
 namespace NEO {
 
 extern HwHelper *hwHelperFactory[IGFX_MAX_CORE];
 
-typedef TGLLPFamily Family;
+using Family = TGLLPFamily;
 static auto gfxFamily = IGFX_GEN12LP_CORE;
 
 struct EnableCoreGen12LP {
     EnableCoreGen12LP() {
         hwHelperFactory[gfxFamily] = &HwHelperHw<Family>::get();
+        populateFactoryTable<AUBCommandStreamReceiverHw<Family>>();
+        populateFactoryTable<CommandStreamReceiverHw<Family>>();
+        populateFactoryTable<TbxCommandStreamReceiverHw<Family>>();
     }
 };
 
 static EnableCoreGen12LP enable;
-
-extern AILConfiguration *ailConfigurationTable[IGFX_MAX_PRODUCT];
-
-#ifdef SUPPORT_DG1
-std::map<std::string_view, std::vector<AILEnumeration>> applicationMapDG1 = {};
-
-template <>
-void AILConfigurationHw<IGFX_DG1>::applyExt(RuntimeCapabilityTable &runtimeCapabilityTable) {
-}
-
-static EnableAIL<IGFX_DG1> enableDG1;
-#endif
-
-#ifdef SUPPORT_TGLLP
-std::map<std::string_view, std::vector<AILEnumeration>> applicationMapTGLLP = {};
-
-static EnableAIL<IGFX_TIGERLAKE_LP> enableTgllp;
-#endif
 } // namespace NEO

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,9 +13,6 @@
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/memory_manager/memory_manager.h"
-
-#include "opencl/source/helpers/convert_color.h"
-#include "opencl/source/helpers/dispatch_info_builder.h"
 
 #include "compiler_options.h"
 
@@ -46,7 +43,7 @@ const SipKernel &BuiltIns::getSipKernel(SipKernelType type, Device &device) {
         UNRECOVERABLE_IF(ret != TranslationOutput::ErrorCode::Success);
         UNRECOVERABLE_IF(sipBinary.size() == 0);
 
-        const auto allocType = GraphicsAllocation::AllocationType::KERNEL_ISA_INTERNAL;
+        const auto allocType = AllocationType::KERNEL_ISA_INTERNAL;
 
         AllocationProperties properties = {device.getRootDeviceIndex(), sipBinary.size(), allocType, device.getDeviceBitfield()};
         properties.flags.use32BitFrontWindow = false;

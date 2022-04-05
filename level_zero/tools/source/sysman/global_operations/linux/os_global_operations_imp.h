@@ -37,9 +37,11 @@ class LinuxGlobalOperationsImp : public OsGlobalOperations, NEO::NonCopyableOrMo
     SysfsAccess *pSysfsAccess = nullptr;
     LinuxSysmanImp *pLinuxSysmanImp = nullptr;
     Device *pDevice = nullptr;
-    FirmwareUtil *pFwInterface = nullptr;
-
     int resetTimeout = 10000; // in milliseconds
+    void releaseSysmanDeviceResources();
+    void releaseDeviceResources();
+    ze_result_t initDevice();
+    void reInitSysmanDeviceResources();
 
   private:
     static const std::string deviceDir;
@@ -50,6 +52,22 @@ class LinuxGlobalOperationsImp : public OsGlobalOperations, NEO::NonCopyableOrMo
     static const std::string srcVersionFile;
     static const std::string agamaVersionFile;
     static const std::string ueventWedgedFile;
+    std::string devicePciBdf = "";
+    NEO::ExecutionEnvironment *executionEnvironment = nullptr;
+    uint32_t rootDeviceIndex = 0u;
+};
+
+class ExecutionEnvironmentRefCountRestore {
+  public:
+    ExecutionEnvironmentRefCountRestore() = delete;
+    ExecutionEnvironmentRefCountRestore(NEO::ExecutionEnvironment *executionEnvironmentRecevied) {
+        executionEnvironment = executionEnvironmentRecevied;
+        executionEnvironment->incRefInternal();
+    }
+    ~ExecutionEnvironmentRefCountRestore() {
+        executionEnvironment->decRefInternal();
+    }
+    NEO::ExecutionEnvironment *executionEnvironment = nullptr;
 };
 
 } // namespace L0

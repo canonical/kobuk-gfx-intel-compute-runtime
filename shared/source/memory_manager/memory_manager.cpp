@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -27,9 +27,9 @@
 #include "shared/source/memory_manager/deferred_deleter.h"
 #include "shared/source/memory_manager/host_ptr_manager.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/os_interface/os_interface.h"
-#include "shared/source/utilities/compiler_support.h"
 #include "shared/source/utilities/stackvec.h"
 
 #include <algorithm>
@@ -73,6 +73,7 @@ MemoryManager::~MemoryManager() {
     for (auto &engine : registeredEngines) {
         engine.osContext->decRefInternal();
     }
+    registeredEngines.clear();
     if (reservedMemory) {
         MemoryManager::alignedFreeWrapper(reservedMemory);
     }
@@ -143,12 +144,10 @@ GraphicsAllocation *MemoryManager::createGraphicsAllocationWithPadding(GraphicsA
 }
 
 GraphicsAllocation *MemoryManager::createPaddedAllocation(GraphicsAllocation *inputGraphicsAllocation, size_t sizeWithPadding) {
-    return allocateGraphicsMemoryWithProperties({inputGraphicsAllocation->getRootDeviceIndex(), sizeWithPadding, GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY, systemMemoryBitfield});
+    return allocateGraphicsMemoryWithProperties({inputGraphicsAllocation->getRootDeviceIndex(), sizeWithPadding, AllocationType::INTERNAL_HOST_MEMORY, systemMemoryBitfield});
 }
 
-void *MemoryManager::createMultiGraphicsAllocationInSystemMemoryPool(std::vector<uint32_t> &rootDeviceIndices, AllocationProperties &properties, MultiGraphicsAllocation &multiGraphicsAllocation) {
-    void *ptr = nullptr;
-
+void *MemoryManager::createMultiGraphicsAllocationInSystemMemoryPool(std::vector<uint32_t> &rootDeviceIndices, AllocationProperties &properties, MultiGraphicsAllocation &multiGraphicsAllocation, void *ptr) {
     properties.flags.forceSystemMemory = true;
     for (auto &rootDeviceIndex : rootDeviceIndices) {
         if (multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex)) {
@@ -196,6 +195,10 @@ void MemoryManager::freeSystemMemory(void *ptr) {
 }
 
 void MemoryManager::freeGraphicsMemory(GraphicsAllocation *gfxAllocation) {
+    freeGraphicsMemory(gfxAllocation, false);
+}
+
+void MemoryManager::freeGraphicsMemory(GraphicsAllocation *gfxAllocation, bool isImportedAllocation) {
     if (!gfxAllocation) {
         return;
     }
@@ -214,8 +217,9 @@ void MemoryManager::freeGraphicsMemory(GraphicsAllocation *gfxAllocation) {
     }
 
     getLocalMemoryUsageBankSelector(gfxAllocation->getAllocationType(), gfxAllocation->getRootDeviceIndex())->freeOnBanks(gfxAllocation->storageInfo.getMemoryBanks(), gfxAllocation->getUnderlyingBufferSize());
-    freeGraphicsMemoryImpl(gfxAllocation);
+    freeGraphicsMemoryImpl(gfxAllocation, isImportedAllocation);
 }
+
 //if not in use destroy in place
 //if in use pass to temporary allocation list that is cleaned on blocking calls
 void MemoryManager::checkGpuUsageAndDestroyGraphicsAllocations(GraphicsAllocation *gfxAllocation) {
@@ -261,14 +265,24 @@ bool MemoryManager::isMemoryBudgetExhausted() const {
     return false;
 }
 
+void MemoryManager::updateLatestContextIdForRootDevice(uint32_t rootDeviceIndex) {
+    // rootDeviceIndexToContextId map would contain the first entry for context for each rootDevice
+    auto entry = rootDeviceIndexToContextId.insert(std::pair<uint32_t, uint32_t>(rootDeviceIndex, latestContextId));
+    if (entry.second == false) {
+        if (latestContextId == std::numeric_limits<uint32_t>::max()) {
+            // If we are here, it means we are reinitializing the contextId.
+            latestContextId = entry.first->second;
+        }
+    }
+}
+
 OsContext *MemoryManager::createAndRegisterOsContext(CommandStreamReceiver *commandStreamReceiver,
-                                                     EngineTypeUsage typeUsage,
-                                                     DeviceBitfield deviceBitfield,
-                                                     PreemptionMode preemptionMode,
-                                                     bool rootDevice) {
+                                                     const EngineDescriptor &engineDescriptor) {
+    auto rootDeviceIndex = commandStreamReceiver->getRootDeviceIndex();
+    updateLatestContextIdForRootDevice(rootDeviceIndex);
+
     auto contextId = ++latestContextId;
-    auto osContext = OsContext::create(peekExecutionEnvironment().rootDeviceEnvironments[commandStreamReceiver->getRootDeviceIndex()]->osInterface.get(),
-                                       contextId, deviceBitfield, typeUsage, preemptionMode, rootDevice);
+    auto osContext = OsContext::create(peekExecutionEnvironment().rootDeviceEnvironments[rootDeviceIndex]->osInterface.get(), contextId, engineDescriptor);
     osContext->incRefInternal();
 
     registeredEngines.emplace_back(commandStreamReceiver, osContext);
@@ -278,7 +292,7 @@ OsContext *MemoryManager::createAndRegisterOsContext(CommandStreamReceiver *comm
 
 bool MemoryManager::getAllocationData(AllocationData &allocationData, const AllocationProperties &properties, const void *hostPtr, const StorageInfo &storageInfo) {
     UNRECOVERABLE_IF(hostPtr == nullptr && !properties.flags.allocateMemory);
-    UNRECOVERABLE_IF(properties.allocationType == GraphicsAllocation::AllocationType::UNKNOWN);
+    UNRECOVERABLE_IF(properties.allocationType == AllocationType::UNKNOWN);
 
     auto hwInfo = executionEnvironment.rootDeviceEnvironments[properties.rootDeviceIndex]->getHardwareInfo();
     auto &hwHelper = HwHelper::get(hwInfo->platform.eRenderCoreFamily);
@@ -289,17 +303,16 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
     bool mayRequireL3Flush = false;
 
     switch (properties.allocationType) {
-    case GraphicsAllocation::AllocationType::BUFFER:
-    case GraphicsAllocation::AllocationType::BUFFER_COMPRESSED:
-    case GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY:
-    case GraphicsAllocation::AllocationType::CONSTANT_SURFACE:
-    case GraphicsAllocation::AllocationType::GLOBAL_SURFACE:
-    case GraphicsAllocation::AllocationType::PIPE:
-    case GraphicsAllocation::AllocationType::PRINTF_SURFACE:
-    case GraphicsAllocation::AllocationType::PRIVATE_SURFACE:
-    case GraphicsAllocation::AllocationType::SCRATCH_SURFACE:
-    case GraphicsAllocation::AllocationType::WORK_PARTITION_SURFACE:
-    case GraphicsAllocation::AllocationType::WRITE_COMBINED:
+    case AllocationType::BUFFER:
+    case AllocationType::BUFFER_HOST_MEMORY:
+    case AllocationType::CONSTANT_SURFACE:
+    case AllocationType::GLOBAL_SURFACE:
+    case AllocationType::PIPE:
+    case AllocationType::PRINTF_SURFACE:
+    case AllocationType::PRIVATE_SURFACE:
+    case AllocationType::SCRATCH_SURFACE:
+    case AllocationType::WORK_PARTITION_SURFACE:
+    case AllocationType::WRITE_COMBINED:
         allow64KbPages = true;
         allow32Bit = true;
     default:
@@ -307,66 +320,64 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
     }
 
     switch (properties.allocationType) {
-    case GraphicsAllocation::AllocationType::SVM_GPU:
-    case GraphicsAllocation::AllocationType::SVM_ZERO_COPY:
-    case GraphicsAllocation::AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER:
-    case GraphicsAllocation::AllocationType::PREEMPTION:
+    case AllocationType::SVM_GPU:
+    case AllocationType::SVM_ZERO_COPY:
+    case AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER:
+    case AllocationType::PREEMPTION:
         allow64KbPages = true;
     default:
         break;
     }
 
     switch (properties.allocationType) {
-    case GraphicsAllocation::AllocationType::BUFFER:
-    case GraphicsAllocation::AllocationType::BUFFER_COMPRESSED:
-    case GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY:
-    case GraphicsAllocation::AllocationType::WRITE_COMBINED:
+    case AllocationType::BUFFER:
+    case AllocationType::BUFFER_HOST_MEMORY:
+    case AllocationType::WRITE_COMBINED:
         forcePin = true;
     default:
         break;
     }
 
     switch (properties.allocationType) {
-    case GraphicsAllocation::AllocationType::BUFFER:
-    case GraphicsAllocation::AllocationType::BUFFER_COMPRESSED:
-    case GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY:
-    case GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR:
-    case GraphicsAllocation::AllocationType::GLOBAL_SURFACE:
-    case GraphicsAllocation::AllocationType::IMAGE:
-    case GraphicsAllocation::AllocationType::MAP_ALLOCATION:
-    case GraphicsAllocation::AllocationType::PIPE:
-    case GraphicsAllocation::AllocationType::SHARED_BUFFER:
-    case GraphicsAllocation::AllocationType::SHARED_IMAGE:
-    case GraphicsAllocation::AllocationType::SHARED_RESOURCE_COPY:
-    case GraphicsAllocation::AllocationType::SVM_CPU:
-    case GraphicsAllocation::AllocationType::SVM_GPU:
-    case GraphicsAllocation::AllocationType::SVM_ZERO_COPY:
-    case GraphicsAllocation::AllocationType::WRITE_COMBINED:
+    case AllocationType::BUFFER:
+    case AllocationType::BUFFER_HOST_MEMORY:
+    case AllocationType::EXTERNAL_HOST_PTR:
+    case AllocationType::GLOBAL_SURFACE:
+    case AllocationType::IMAGE:
+    case AllocationType::MAP_ALLOCATION:
+    case AllocationType::PIPE:
+    case AllocationType::SHARED_BUFFER:
+    case AllocationType::SHARED_IMAGE:
+    case AllocationType::SHARED_RESOURCE_COPY:
+    case AllocationType::SVM_CPU:
+    case AllocationType::SVM_GPU:
+    case AllocationType::SVM_ZERO_COPY:
+    case AllocationType::WRITE_COMBINED:
         mayRequireL3Flush = true;
     default:
         break;
     }
 
     switch (properties.allocationType) {
-    case GraphicsAllocation::AllocationType::COMMAND_BUFFER:
-    case GraphicsAllocation::AllocationType::RING_BUFFER:
-    case GraphicsAllocation::AllocationType::SEMAPHORE_BUFFER:
-    case GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY:
-    case GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER:
-    case GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR:
-    case GraphicsAllocation::AllocationType::FILL_PATTERN:
-    case GraphicsAllocation::AllocationType::MAP_ALLOCATION:
-    case GraphicsAllocation::AllocationType::MCS:
-    case GraphicsAllocation::AllocationType::PROFILING_TAG_BUFFER:
-    case GraphicsAllocation::AllocationType::SHARED_CONTEXT_IMAGE:
-    case GraphicsAllocation::AllocationType::SVM_CPU:
-    case GraphicsAllocation::AllocationType::SVM_ZERO_COPY:
-    case GraphicsAllocation::AllocationType::TAG_BUFFER:
-    case GraphicsAllocation::AllocationType::GLOBAL_FENCE:
-    case GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY:
-    case GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER:
-    case GraphicsAllocation::AllocationType::DEBUG_CONTEXT_SAVE_AREA:
-    case GraphicsAllocation::AllocationType::DEBUG_SBA_TRACKING_BUFFER:
+    case AllocationType::COMMAND_BUFFER:
+    case AllocationType::RING_BUFFER:
+    case AllocationType::SEMAPHORE_BUFFER:
+    case AllocationType::BUFFER_HOST_MEMORY:
+    case AllocationType::EXTERNAL_HOST_PTR:
+    case AllocationType::FILL_PATTERN:
+    case AllocationType::MAP_ALLOCATION:
+    case AllocationType::MCS:
+    case AllocationType::PROFILING_TAG_BUFFER:
+    case AllocationType::SHARED_CONTEXT_IMAGE:
+    case AllocationType::SVM_CPU:
+    case AllocationType::SVM_ZERO_COPY:
+    case AllocationType::TAG_BUFFER:
+    case AllocationType::GLOBAL_FENCE:
+    case AllocationType::INTERNAL_HOST_MEMORY:
+    case AllocationType::TIMESTAMP_PACKET_TAG_BUFFER:
+    case AllocationType::DEBUG_CONTEXT_SAVE_AREA:
+    case AllocationType::DEBUG_SBA_TRACKING_BUFFER:
+    case AllocationType::SW_TAG_BUFFER:
         allocationData.flags.useSystemMemory = true;
     default:
         break;
@@ -377,26 +388,25 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
     }
 
     switch (properties.allocationType) {
-    case GraphicsAllocation::AllocationType::COMMAND_BUFFER:
-    case GraphicsAllocation::AllocationType::DEVICE_QUEUE_BUFFER:
-    case GraphicsAllocation::AllocationType::IMAGE:
-    case GraphicsAllocation::AllocationType::INDIRECT_OBJECT_HEAP:
-    case GraphicsAllocation::AllocationType::INSTRUCTION_HEAP:
-    case GraphicsAllocation::AllocationType::INTERNAL_HEAP:
-    case GraphicsAllocation::AllocationType::KERNEL_ISA:
-    case GraphicsAllocation::AllocationType::KERNEL_ISA_INTERNAL:
-    case GraphicsAllocation::AllocationType::LINEAR_STREAM:
-    case GraphicsAllocation::AllocationType::MCS:
-    case GraphicsAllocation::AllocationType::PREEMPTION:
-    case GraphicsAllocation::AllocationType::SCRATCH_SURFACE:
-    case GraphicsAllocation::AllocationType::WORK_PARTITION_SURFACE:
-    case GraphicsAllocation::AllocationType::SHARED_CONTEXT_IMAGE:
-    case GraphicsAllocation::AllocationType::SHARED_IMAGE:
-    case GraphicsAllocation::AllocationType::SHARED_RESOURCE_COPY:
-    case GraphicsAllocation::AllocationType::SURFACE_STATE_HEAP:
-    case GraphicsAllocation::AllocationType::TIMESTAMP_PACKET_TAG_BUFFER:
-    case GraphicsAllocation::AllocationType::DEBUG_MODULE_AREA:
-    case GraphicsAllocation::AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER:
+    case AllocationType::COMMAND_BUFFER:
+    case AllocationType::IMAGE:
+    case AllocationType::INDIRECT_OBJECT_HEAP:
+    case AllocationType::INSTRUCTION_HEAP:
+    case AllocationType::INTERNAL_HEAP:
+    case AllocationType::KERNEL_ISA:
+    case AllocationType::KERNEL_ISA_INTERNAL:
+    case AllocationType::LINEAR_STREAM:
+    case AllocationType::MCS:
+    case AllocationType::PREEMPTION:
+    case AllocationType::SCRATCH_SURFACE:
+    case AllocationType::WORK_PARTITION_SURFACE:
+    case AllocationType::SHARED_CONTEXT_IMAGE:
+    case AllocationType::SHARED_IMAGE:
+    case AllocationType::SHARED_RESOURCE_COPY:
+    case AllocationType::SURFACE_STATE_HEAP:
+    case AllocationType::TIMESTAMP_PACKET_TAG_BUFFER:
+    case AllocationType::DEBUG_MODULE_AREA:
+    case AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER:
         allocationData.flags.resource48Bit = true;
         break;
     default:
@@ -404,6 +414,7 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
     }
 
     allocationData.flags.shareable = properties.flags.shareable;
+    allocationData.flags.isUSMDeviceMemory = properties.flags.isUSMDeviceAllocation;
     allocationData.flags.requiresCpuAccess = GraphicsAllocation::isCpuAccessRequired(properties.allocationType);
     allocationData.flags.allocateMemory = properties.flags.allocateMemory;
     allocationData.flags.allow32Bit = allow32Bit;
@@ -412,18 +423,24 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
     allocationData.flags.uncacheable = properties.flags.uncacheable;
     allocationData.flags.flushL3 =
         (mayRequireL3Flush ? properties.flags.flushL3RequiredForRead | properties.flags.flushL3RequiredForWrite : 0u);
-    allocationData.flags.preferRenderCompressed = CompressionSelector::preferRenderCompressedBuffer(properties, *hwInfo);
+    allocationData.flags.preferCompressed = properties.flags.preferCompressed;
+    allocationData.flags.preferCompressed |= CompressionSelector::preferCompressedAllocation(properties, *hwInfo);
     allocationData.flags.multiOsContextCapable = properties.flags.multiOsContextCapable;
+    allocationData.usmInitialPlacement = properties.usmInitialPlacement;
 
-    if (properties.allocationType == GraphicsAllocation::AllocationType::DEBUG_MODULE_AREA) {
+    if (properties.allocationType == AllocationType::DEBUG_CONTEXT_SAVE_AREA) {
+        allocationData.flags.zeroMemory = 1;
+    }
+
+    if (properties.allocationType == AllocationType::DEBUG_MODULE_AREA) {
         allocationData.flags.use32BitFrontWindow = true;
     } else {
         allocationData.flags.use32BitFrontWindow = properties.flags.use32BitFrontWindow;
     }
 
     allocationData.hostPtr = hostPtr;
-    if (properties.allocationType == GraphicsAllocation::AllocationType::KERNEL_ISA ||
-        properties.allocationType == GraphicsAllocation::AllocationType::KERNEL_ISA_INTERNAL) {
+    if (properties.allocationType == AllocationType::KERNEL_ISA ||
+        properties.allocationType == AllocationType::KERNEL_ISA_INTERNAL) {
         allocationData.size = properties.size + hwHelper.getPaddingForISAAllocation();
     } else {
         allocationData.size = properties.size;
@@ -450,6 +467,9 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
 
     overrideAllocationData(allocationData, properties);
     allocationData.flags.isUSMHostAllocation = properties.flags.isUSMHostAllocation;
+
+    allocationData.storageInfo.systemMemoryPlacement = allocationData.flags.useSystemMemory;
+
     return true;
 }
 
@@ -480,7 +500,7 @@ GraphicsAllocation *MemoryManager::allocateInternalGraphicsMemoryWithHostCopy(ui
                                                                               size_t size) {
     NEO::AllocationProperties copyProperties{rootDeviceIndex,
                                              size,
-                                             NEO::GraphicsAllocation::AllocationType::INTERNAL_HOST_MEMORY,
+                                             NEO::AllocationType::INTERNAL_HOST_MEMORY,
                                              bitField};
     copyProperties.alignment = MemoryConstants::pageSize;
     auto allocation = this->allocateGraphicsMemoryWithProperties(copyProperties);
@@ -491,22 +511,28 @@ GraphicsAllocation *MemoryManager::allocateInternalGraphicsMemoryWithHostCopy(ui
 }
 
 bool MemoryManager::mapAuxGpuVA(GraphicsAllocation *graphicsAllocation) {
-    auto index = graphicsAllocation->getRootDeviceIndex();
-    if (executionEnvironment.rootDeviceEnvironments[index]->pageTableManager.get()) {
-        return executionEnvironment.rootDeviceEnvironments[index]->pageTableManager->updateAuxTable(graphicsAllocation->getGpuAddress(), graphicsAllocation->getDefaultGmm(), true);
+    bool ret = false;
+    for (auto engine : registeredEngines) {
+        if (engine.commandStreamReceiver->pageTableManager.get()) {
+            ret = engine.commandStreamReceiver->pageTableManager->updateAuxTable(graphicsAllocation->getGpuAddress(), graphicsAllocation->getDefaultGmm(), true);
+            if (!ret) {
+                break;
+            }
+        }
     }
-    return false;
+    return ret;
 }
 
 GraphicsAllocation *MemoryManager::allocateGraphicsMemory(const AllocationData &allocationData) {
-    if (allocationData.type == GraphicsAllocation::AllocationType::IMAGE || allocationData.type == GraphicsAllocation::AllocationType::SHARED_RESOURCE_COPY) {
+    if (allocationData.type == AllocationType::IMAGE || allocationData.type == AllocationType::SHARED_RESOURCE_COPY) {
         UNRECOVERABLE_IF(allocationData.imgInfo == nullptr);
         return allocateGraphicsMemoryForImage(allocationData);
     }
-    if (allocationData.flags.shareable) {
-        return allocateShareableMemory(allocationData);
+    if (allocationData.flags.shareable || allocationData.flags.isUSMDeviceMemory) {
+        return allocateMemoryByKMD(allocationData);
     }
-    if (useNonSvmHostPtrAlloc(allocationData.type, allocationData.rootDeviceIndex)) {
+    if (((false == allocationData.flags.isUSMHostAllocation) || (nullptr == allocationData.hostPtr)) &&
+        (useNonSvmHostPtrAlloc(allocationData.type, allocationData.rootDeviceIndex) || isNonSvmBuffer(allocationData.hostPtr, allocationData.type, allocationData.rootDeviceIndex))) {
         auto allocation = allocateGraphicsMemoryForNonSvmHostPtr(allocationData);
         if (allocation) {
             allocation->setFlushL3Required(allocationData.flags.flushL3);
@@ -519,7 +545,7 @@ GraphicsAllocation *MemoryManager::allocateGraphicsMemory(const AllocationData &
     if (use32Allocator || isAllocationOnLimitedGPU ||
         (force32bitAllocations && allocationData.flags.allow32Bit && is64bit)) {
         auto hwInfo = executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getHardwareInfo();
-        bool useLocalMem = heapAssigner.useExternal32BitHeap(allocationData.type) ? HwHelper::get(hwInfo->platform.eRenderCoreFamily).heapInLocalMem(*hwInfo) : false;
+        bool useLocalMem = heapAssigner.useExternal32BitHeap(allocationData.type) ? HwInfoConfig::get(hwInfo->platform.eProductFamily)->heapInLocalMem(*hwInfo) : false;
         return allocate32BitGraphicsMemoryImpl(allocationData, useLocalMem);
     }
     if (allocationData.flags.isUSMHostAllocation && allocationData.hostPtr) {
@@ -538,7 +564,8 @@ GraphicsAllocation *MemoryManager::allocateGraphicsMemory(const AllocationData &
 }
 
 GraphicsAllocation *MemoryManager::allocateGraphicsMemoryForImage(const AllocationData &allocationData) {
-    auto gmm = std::make_unique<Gmm>(executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getGmmClientContext(), *allocationData.imgInfo, allocationData.storageInfo);
+    auto gmm = std::make_unique<Gmm>(executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getGmmClientContext(), *allocationData.imgInfo,
+                                     allocationData.storageInfo, allocationData.flags.preferCompressed);
 
     // AllocationData needs to be reconfigured for System Memory paths
     AllocationData allocationDataWithSize = allocationData;
@@ -558,30 +585,29 @@ EngineControlContainer &MemoryManager::getRegisteredEngines() {
     return registeredEngines;
 }
 
-bool MemoryManager::isExternalAllocation(GraphicsAllocation::AllocationType allocationType) {
-    if (allocationType == GraphicsAllocation::AllocationType::BUFFER ||
-        allocationType == GraphicsAllocation::AllocationType::BUFFER_COMPRESSED ||
-        allocationType == GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY ||
-        allocationType == GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR ||
-        allocationType == GraphicsAllocation::AllocationType::FILL_PATTERN ||
-        allocationType == GraphicsAllocation::AllocationType::IMAGE ||
-        allocationType == GraphicsAllocation::AllocationType::MAP_ALLOCATION ||
-        allocationType == GraphicsAllocation::AllocationType::PIPE ||
-        allocationType == GraphicsAllocation::AllocationType::SHARED_BUFFER ||
-        allocationType == GraphicsAllocation::AllocationType::SHARED_CONTEXT_IMAGE ||
-        allocationType == GraphicsAllocation::AllocationType::SHARED_IMAGE ||
-        allocationType == GraphicsAllocation::AllocationType::SHARED_RESOURCE_COPY ||
-        allocationType == GraphicsAllocation::AllocationType::SVM_CPU ||
-        allocationType == GraphicsAllocation::AllocationType::SVM_GPU ||
-        allocationType == GraphicsAllocation::AllocationType::SVM_ZERO_COPY ||
-        allocationType == GraphicsAllocation::AllocationType::UNIFIED_SHARED_MEMORY ||
-        allocationType == GraphicsAllocation::AllocationType::WRITE_COMBINED) {
+bool MemoryManager::isExternalAllocation(AllocationType allocationType) {
+    if (allocationType == AllocationType::BUFFER ||
+        allocationType == AllocationType::BUFFER_HOST_MEMORY ||
+        allocationType == AllocationType::EXTERNAL_HOST_PTR ||
+        allocationType == AllocationType::FILL_PATTERN ||
+        allocationType == AllocationType::IMAGE ||
+        allocationType == AllocationType::MAP_ALLOCATION ||
+        allocationType == AllocationType::PIPE ||
+        allocationType == AllocationType::SHARED_BUFFER ||
+        allocationType == AllocationType::SHARED_CONTEXT_IMAGE ||
+        allocationType == AllocationType::SHARED_IMAGE ||
+        allocationType == AllocationType::SHARED_RESOURCE_COPY ||
+        allocationType == AllocationType::SVM_CPU ||
+        allocationType == AllocationType::SVM_GPU ||
+        allocationType == AllocationType::SVM_ZERO_COPY ||
+        allocationType == AllocationType::UNIFIED_SHARED_MEMORY ||
+        allocationType == AllocationType::WRITE_COMBINED) {
         return true;
     }
     return false;
 }
 
-LocalMemoryUsageBankSelector *MemoryManager::getLocalMemoryUsageBankSelector(GraphicsAllocation::AllocationType allocationType, uint32_t rootDeviceIndex) {
+LocalMemoryUsageBankSelector *MemoryManager::getLocalMemoryUsageBankSelector(AllocationType allocationType, uint32_t rootDeviceIndex) {
     if (isExternalAllocation(allocationType)) {
         return externalLocalMemoryUsageBankSelector[rootDeviceIndex].get();
     }
@@ -662,10 +688,18 @@ bool MemoryManager::copyMemoryToAllocation(GraphicsAllocation *graphicsAllocatio
     for (auto i = 0u; i < graphicsAllocation->storageInfo.getNumBanks(); ++i) {
         memcpy_s(ptrOffset(static_cast<uint8_t *>(graphicsAllocation->getUnderlyingBuffer()) + i * graphicsAllocation->getUnderlyingBufferSize(), destinationOffset),
                  (graphicsAllocation->getUnderlyingBufferSize() - destinationOffset), memoryToCopy, sizeToCopy);
+        if (graphicsAllocation->getAllocationType() != AllocationType::DEBUG_CONTEXT_SAVE_AREA) {
+            break;
+        }
     }
     return true;
 }
 
+bool MemoryManager::copyMemoryToAllocationBanks(GraphicsAllocation *graphicsAllocation, size_t destinationOffset, const void *memoryToCopy, size_t sizeToCopy, DeviceBitfield handleMask) {
+    memcpy_s(ptrOffset(static_cast<uint8_t *>(graphicsAllocation->getUnderlyingBuffer()), destinationOffset),
+             (graphicsAllocation->getUnderlyingBufferSize() - destinationOffset), memoryToCopy, sizeToCopy);
+    return true;
+}
 void MemoryManager::waitForEnginesCompletion(GraphicsAllocation &graphicsAllocation) {
     for (auto &engine : getRegisteredEngines()) {
         auto osContextId = engine.osContext->getContextId();
@@ -704,9 +738,9 @@ bool MemoryManager::isHostPointerTrackingEnabled(uint32_t rootDeviceIndex) {
     return (peekExecutionEnvironment().rootDeviceEnvironments[rootDeviceIndex]->getHardwareInfo()->capabilityTable.hostPtrTrackingEnabled | is32bit);
 }
 
-bool MemoryManager::useNonSvmHostPtrAlloc(GraphicsAllocation::AllocationType allocationType, uint32_t rootDeviceIndex) {
-    bool isExternalHostPtrAlloc = (allocationType == GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR);
-    bool isMapAlloc = (allocationType == GraphicsAllocation::AllocationType::MAP_ALLOCATION);
+bool MemoryManager::useNonSvmHostPtrAlloc(AllocationType allocationType, uint32_t rootDeviceIndex) {
+    bool isExternalHostPtrAlloc = (allocationType == AllocationType::EXTERNAL_HOST_PTR);
+    bool isMapAlloc = (allocationType == AllocationType::MAP_ALLOCATION);
 
     if (forceNonSvmForExternalHostPtr && isExternalHostPtrAlloc) {
         return true;
@@ -730,7 +764,7 @@ bool MemoryManager::isCopyRequired(ImageInfo &imgInfo, const void *hostPtr) {
     switch (imgInfo.imgDesc.imageType) {
     case ImageType::Image3D:
         imageDepth = imgInfo.imgDesc.imageDepth;
-        CPP_ATTRIBUTE_FALLTHROUGH;
+        [[fallthrough]];
     case ImageType::Image2D:
     case ImageType::Image2DArray:
         imageHeight = imgInfo.imgDesc.imageHeight;
@@ -771,7 +805,7 @@ void MemoryManager::overrideAllocationData(AllocationData &allocationData, const
 
     int32_t directRingPlacement = DebugManager.flags.DirectSubmissionBufferPlacement.get();
     int32_t directRingAddressing = DebugManager.flags.DirectSubmissionBufferAddressing.get();
-    if (properties.allocationType == GraphicsAllocation::AllocationType::RING_BUFFER) {
+    if (properties.allocationType == AllocationType::RING_BUFFER) {
         if (directRingPlacement != -1) {
             if (directRingPlacement == 0) {
                 allocationData.flags.requiresCpuAccess = true;
@@ -792,7 +826,7 @@ void MemoryManager::overrideAllocationData(AllocationData &allocationData, const
     }
     int32_t directSemaphorePlacement = DebugManager.flags.DirectSubmissionSemaphorePlacement.get();
     int32_t directSemaphoreAddressing = DebugManager.flags.DirectSubmissionSemaphoreAddressing.get();
-    if (properties.allocationType == GraphicsAllocation::AllocationType::SEMAPHORE_BUFFER) {
+    if (properties.allocationType == AllocationType::SEMAPHORE_BUFFER) {
         if (directSemaphorePlacement != -1) {
             if (directSemaphorePlacement == 0) {
                 allocationData.flags.requiresCpuAccess = true;
@@ -812,10 +846,10 @@ void MemoryManager::overrideAllocationData(AllocationData &allocationData, const
     }
 }
 
-bool MemoryManager::isAllocationTypeToCapture(GraphicsAllocation::AllocationType type) const {
+bool MemoryManager::isAllocationTypeToCapture(AllocationType type) const {
     switch (type) {
-    case GraphicsAllocation::AllocationType::SCRATCH_SURFACE:
-    case GraphicsAllocation::AllocationType::PRIVATE_SURFACE:
+    case AllocationType::SCRATCH_SURFACE:
+    case AllocationType::PRIVATE_SURFACE:
         return true;
     default:
         break;
@@ -825,7 +859,7 @@ bool MemoryManager::isAllocationTypeToCapture(GraphicsAllocation::AllocationType
 
 bool MemoryManager::isLocalMemoryUsedForIsa(uint32_t rootDeviceIndex) {
     std::call_once(checkIsaPlacementOnceFlags[rootDeviceIndex], [&] {
-        AllocationProperties properties = {rootDeviceIndex, 0x1000, GraphicsAllocation::AllocationType::KERNEL_ISA, 1};
+        AllocationProperties properties = {rootDeviceIndex, 0x1000, AllocationType::KERNEL_ISA, 1};
         AllocationData data;
         getAllocationData(data, properties, nullptr, StorageInfo());
         isaInLocalMemory[rootDeviceIndex] = !data.flags.useSystemMemory;
@@ -841,5 +875,14 @@ bool MemoryTransferHelper::transferMemoryToAllocation(bool useBlitter, const Dev
         }
     }
     return device.getMemoryManager()->copyMemoryToAllocation(dstAllocation, dstOffset, srcMemory, srcSize);
+}
+bool MemoryTransferHelper::transferMemoryToAllocationBanks(const Device &device, GraphicsAllocation *dstAllocation, size_t dstOffset, const void *srcMemory,
+                                                           size_t srcSize, DeviceBitfield dstMemoryBanks) {
+    auto blitSuccess = BlitHelper::blitMemoryToAllocationBanks(device, dstAllocation, dstOffset, srcMemory, {srcSize, 1, 1}, dstMemoryBanks) == BlitOperationResult::Success;
+
+    if (!blitSuccess) {
+        return device.getMemoryManager()->copyMemoryToAllocationBanks(dstAllocation, dstOffset, srcMemory, srcSize, dstMemoryBanks);
+    }
+    return true;
 }
 } // namespace NEO

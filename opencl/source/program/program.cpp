@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,11 +10,13 @@
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/compiler_interface/compiler_interface.h"
 #include "shared/source/compiler_interface/intermediate_representations.h"
+#include "shared/source/compiler_interface/oclc_extensions.h"
 #include "shared/source/device_binary_format/device_binary_formats.h"
 #include "shared/source/device_binary_format/elf/elf_encoder.h"
 #include "shared/source/device_binary_format/elf/ocl_elf.h"
 #include "shared/source/device_binary_format/patchtokens_decoder.h"
 #include "shared/source/helpers/api_specific_config.h"
+#include "shared/source/helpers/compiler_hw_info_config.h"
 #include "shared/source/helpers/compiler_options_parser.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/hw_helper.h"
@@ -22,14 +24,13 @@
 #include "shared/source/helpers/string.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/os_context.h"
+#include "shared/source/program/kernel_info.h"
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/context/context.h"
-#include "opencl/source/platform/extensions.h"
 #include "opencl/source/platform/platform.h"
-#include "opencl/source/program/block_kernel_manager.h"
-#include "opencl/source/program/kernel_info.h"
 
 #include "compiler_options.h"
 
@@ -44,7 +45,6 @@ Program::Program(Context *context, bool isBuiltIn, const ClDeviceVector &clDevic
     if (this->context && !this->isBuiltIn) {
         this->context->incRefInternal();
     }
-    blockKernelManager = new BlockKernelManager();
 
     maxRootDeviceIndex = 0;
 
@@ -53,12 +53,10 @@ Program::Program(Context *context, bool isBuiltIn, const ClDeviceVector &clDevic
             maxRootDeviceIndex = device->getRootDeviceIndex();
         }
         deviceBuildInfos[device] = {};
-        if (device->getNumAvailableDevices() > 1) {
-            for (auto i = 0u; i < device->getNumAvailableDevices(); i++) {
-                auto subDevice = device->getDeviceById(i);
-                if (isDeviceAssociated(*subDevice)) {
-                    deviceBuildInfos[device].associatedSubDevices.push_back(subDevice);
-                }
+        for (auto i = 0u; i < device->getNumSubDevices(); i++) {
+            auto subDevice = device->getSubDevice(i);
+            if (isDeviceAssociated(*subDevice)) {
+                deviceBuildInfos[device].associatedSubDevices.push_back(subDevice);
             }
         }
     }
@@ -66,10 +64,10 @@ Program::Program(Context *context, bool isBuiltIn, const ClDeviceVector &clDevic
     buildInfos.resize(maxRootDeviceIndex + 1);
     kernelDebugEnabled = clDevices[0]->isDebuggerActive();
 }
-void Program::initInternalOptions(std::string &internalOptions) const {
+std::string Program::getInternalOptions() const {
     auto pClDevice = clDevices[0];
     auto force32BitAddressess = pClDevice->getSharedDeviceInfo().force32BitAddressess;
-    internalOptions = getOclVersionCompilerInternalOption(pClDevice->getEnabledClVersion());
+    auto internalOptions = getOclVersionCompilerInternalOption(pClDevice->getEnabledClVersion());
 
     if (force32BitAddressess && !isBuiltIn) {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::arch32bit);
@@ -84,7 +82,7 @@ void Program::initInternalOptions(std::string &internalOptions) const {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::bindlessMode);
     }
 
-    auto enableStatelessToStatefullWithOffset = pClDevice->getHardwareCapabilities().isStatelesToStatefullWithOffsetSupported;
+    auto enableStatelessToStatefullWithOffset = HwHelper::get(pClDevice->getHardwareInfo().platform.eRenderCoreFamily).isStatelesToStatefullWithOffsetSupported();
     if (DebugManager.flags.EnableStatelessToStatefulBufferOffsetOpt.get() != -1) {
         enableStatelessToStatefullWithOffset = DebugManager.flags.EnableStatelessToStatefulBufferOffsetOpt.get() != 0;
     }
@@ -94,8 +92,8 @@ void Program::initInternalOptions(std::string &internalOptions) const {
     }
 
     auto &hwInfo = pClDevice->getHardwareInfo();
-    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-    if (hwHelper.isForceEmuInt32DivRemSPWARequired(hwInfo)) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    if (hwInfoConfig.isForceEmuInt32DivRemSPWARequired(hwInfo)) {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::forceEmuInt32DivRemSP);
     }
 
@@ -104,6 +102,8 @@ void Program::initInternalOptions(std::string &internalOptions) const {
     }
 
     CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::preserveVec3Type);
+
+    return internalOptions;
 }
 
 Program::~Program() {
@@ -111,9 +111,6 @@ Program::~Program() {
         cleanCurrentKernelInfo(i);
     }
 
-    freeBlockResources();
-
-    delete blockKernelManager;
     for (const auto &buildInfo : buildInfos) {
         if (buildInfo.constantSurface) {
             if ((nullptr != context) && (nullptr != context->getSVMAllocsManager()) && (context->getSVMAllocsManager()->getSVMAlloc(reinterpret_cast<const void *>(buildInfo.constantSurface->getGpuAddress())))) {
@@ -166,10 +163,11 @@ cl_int Program::createProgramFromBinary(
         auto hwInfo = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->getHardwareInfo();
         auto productAbbreviation = hardwarePrefix[hwInfo->platform.eProductFamily];
 
-        TargetDevice targetDevice = {};
-        targetDevice.coreFamily = hwInfo->platform.eRenderCoreFamily;
-        targetDevice.stepping = hwInfo->platform.usRevId;
-        targetDevice.maxPointerSizeInBytes = sizeof(uintptr_t);
+        auto copyHwInfo = *hwInfo;
+        const auto &compilerHwInfoConfig = *CompilerHwInfoConfig::get(copyHwInfo.platform.eProductFamily);
+        compilerHwInfoConfig.adjustHwInfoForIgc(copyHwInfo);
+
+        TargetDevice targetDevice = targetDeviceFromHwInfo(*hwInfo);
         std::string decodeErrors;
         std::string decodeWarnings;
         auto singleDeviceBinary = unpackSingleDeviceBinary(archive, ConstStringRef(productAbbreviation, strlen(productAbbreviation)), targetDevice,
@@ -189,8 +187,8 @@ cl_int Program::createProgramFromBinary(
             this->options = singleDeviceBinary.buildOptions.str();
 
             if (false == singleDeviceBinary.debugData.empty()) {
-                this->debugData = makeCopy(reinterpret_cast<const char *>(singleDeviceBinary.debugData.begin()), singleDeviceBinary.debugData.size());
-                this->debugDataSize = singleDeviceBinary.debugData.size();
+                this->buildInfos[rootDeviceIndex].debugData = makeCopy(reinterpret_cast<const char *>(singleDeviceBinary.debugData.begin()), singleDeviceBinary.debugData.size());
+                this->buildInfos[rootDeviceIndex].debugDataSize = singleDeviceBinary.debugData.size();
             }
             bool forceRebuildBuiltInFromIr = isBuiltIn && DebugManager.flags.RebuildPrecompiledKernels.get();
             if ((false == singleDeviceBinary.deviceBinary.empty()) && (false == forceRebuildBuiltInFromIr)) {
@@ -200,6 +198,7 @@ cl_int Program::createProgramFromBinary(
                 this->buildInfos[rootDeviceIndex].packedDeviceBinarySize = archive.size();
             } else {
                 this->isCreatedFromBinary = false;
+                this->shouldWarnAboutRebuild = true;
             }
 
             switch (singleDeviceBinary.format) {
@@ -301,83 +300,6 @@ const char *Program::getBuildLog(uint32_t rootDeviceIndex) const {
     return currentLog.c_str();
 }
 
-void Program::separateBlockKernels(uint32_t rootDeviceIndex) {
-    if ((0 == buildInfos[rootDeviceIndex].parentKernelInfoArray.size()) && (0 == buildInfos[rootDeviceIndex].subgroupKernelInfoArray.size())) {
-        return;
-    }
-
-    auto allKernelInfos(buildInfos[rootDeviceIndex].kernelInfoArray);
-    buildInfos[rootDeviceIndex].kernelInfoArray.clear();
-    for (auto &i : allKernelInfos) {
-        auto end = i->kernelDescriptor.kernelMetadata.kernelName.rfind("_dispatch_");
-        if (end != std::string::npos) {
-            bool baseKernelFound = false;
-            std::string baseKernelName(i->kernelDescriptor.kernelMetadata.kernelName, 0, end);
-            for (auto &j : buildInfos[rootDeviceIndex].parentKernelInfoArray) {
-                if (j->kernelDescriptor.kernelMetadata.kernelName.compare(baseKernelName) == 0) {
-                    baseKernelFound = true;
-                    break;
-                }
-            }
-            if (!baseKernelFound) {
-                for (auto &j : buildInfos[rootDeviceIndex].subgroupKernelInfoArray) {
-                    if (j->kernelDescriptor.kernelMetadata.kernelName.compare(baseKernelName) == 0) {
-                        baseKernelFound = true;
-                        break;
-                    }
-                }
-            }
-            if (baseKernelFound) {
-                //Parent or subgroup kernel found -> child kernel
-                blockKernelManager->addBlockKernelInfo(i);
-            } else {
-                buildInfos[rootDeviceIndex].kernelInfoArray.push_back(i);
-            }
-        } else {
-            //Regular kernel found
-            buildInfos[rootDeviceIndex].kernelInfoArray.push_back(i);
-        }
-    }
-    allKernelInfos.clear();
-}
-
-void Program::allocateBlockPrivateSurfaces(const ClDevice &clDevice) {
-    auto rootDeviceIndex = clDevice.getRootDeviceIndex();
-    size_t blockCount = blockKernelManager->getCount();
-
-    for (uint32_t i = 0; i < blockCount; i++) {
-        const KernelInfo *info = blockKernelManager->getBlockKernelInfo(i);
-
-        auto perHwThreadPrivateMemorySize = info->kernelDescriptor.kernelAttributes.perHwThreadPrivateMemorySize;
-        if (perHwThreadPrivateMemorySize > 0 && blockKernelManager->getPrivateSurface(i) == nullptr) {
-            auto privateSize = static_cast<size_t>(KernelHelper::getPrivateSurfaceSize(perHwThreadPrivateMemorySize, clDevice.getSharedDeviceInfo().computeUnitsUsedForScratch));
-
-            auto *privateSurface = this->executionEnvironment.memoryManager->allocateGraphicsMemoryWithProperties(
-                {rootDeviceIndex, privateSize, GraphicsAllocation::AllocationType::PRIVATE_SURFACE, clDevice.getDeviceBitfield()});
-            blockKernelManager->pushPrivateSurface(privateSurface, i);
-        }
-    }
-}
-
-void Program::freeBlockResources() {
-    size_t blockCount = blockKernelManager->getCount();
-
-    for (uint32_t i = 0; i < blockCount; i++) {
-
-        auto *privateSurface = blockKernelManager->getPrivateSurface(i);
-
-        if (privateSurface != nullptr) {
-            blockKernelManager->pushPrivateSurface(nullptr, i);
-            this->executionEnvironment.memoryManager->freeGraphicsMemory(privateSurface);
-        }
-        auto kernelInfo = blockKernelManager->getBlockKernelInfo(i);
-        DEBUG_BREAK_IF(!kernelInfo->kernelAllocation);
-        if (kernelInfo->kernelAllocation) {
-            this->executionEnvironment.memoryManager->freeGraphicsMemory(kernelInfo->kernelAllocation);
-        }
-    }
-}
-
 void Program::cleanCurrentKernelInfo(uint32_t rootDeviceIndex) {
     auto &buildInfo = buildInfos[rootDeviceIndex];
     for (auto &kernelInfo : buildInfo.kernelInfoArray) {
@@ -390,7 +312,21 @@ void Program::cleanCurrentKernelInfo(uint32_t rootDeviceIndex) {
                 }
             }
 
-            this->executionEnvironment.memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(kernelInfo->kernelAllocation);
+            if (executionEnvironment.memoryManager->isKernelBinaryReuseEnabled()) {
+                auto lock = executionEnvironment.memoryManager->lockKernelAllocationMap();
+                auto kernelName = kernelInfo->kernelDescriptor.kernelMetadata.kernelName;
+                auto &storedBinaries = executionEnvironment.memoryManager->getKernelAllocationMap();
+                auto kernelAllocations = storedBinaries.find(kernelName);
+                if (kernelAllocations != storedBinaries.end()) {
+                    kernelAllocations->second.reuseCounter--;
+                    if (kernelAllocations->second.reuseCounter == 0) {
+                        this->executionEnvironment.memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(kernelAllocations->second.kernelAllocation);
+                        storedBinaries.erase(kernelAllocations);
+                    }
+                }
+            } else {
+                this->executionEnvironment.memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(kernelInfo->kernelAllocation);
+            }
         }
         delete kernelInfo;
     }
@@ -425,7 +361,7 @@ void Program::updateNonUniformFlag(const Program **inputPrograms, size_t numInpu
     this->allowNonUniform = allowNonUniform;
 }
 
-void Program::replaceDeviceBinary(std::unique_ptr<char[]> newBinary, size_t newBinarySize, uint32_t rootDeviceIndex) {
+void Program::replaceDeviceBinary(std::unique_ptr<char[]> &&newBinary, size_t newBinarySize, uint32_t rootDeviceIndex) {
     if (isAnyPackedDeviceBinaryFormat(ArrayRef<const uint8_t>(reinterpret_cast<uint8_t *>(newBinary.get()), newBinarySize))) {
         this->buildInfos[rootDeviceIndex].packedDeviceBinary = std::move(newBinary);
         this->buildInfos[rootDeviceIndex].packedDeviceBinarySize = newBinarySize;
@@ -450,17 +386,14 @@ cl_int Program::packDeviceBinary(ClDevice &clDevice) {
     }
 
     auto hwInfo = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->getHardwareInfo();
-    auto gfxCore = hwInfo->platform.eRenderCoreFamily;
-    auto stepping = hwInfo->platform.usRevId;
 
     if (nullptr != this->buildInfos[rootDeviceIndex].unpackedDeviceBinary.get()) {
-        SingleDeviceBinary singleDeviceBinary;
+        SingleDeviceBinary singleDeviceBinary = {};
+        singleDeviceBinary.targetDevice = NEO::targetDeviceFromHwInfo(*hwInfo);
         singleDeviceBinary.buildOptions = this->options;
-        singleDeviceBinary.targetDevice.coreFamily = gfxCore;
-        singleDeviceBinary.targetDevice.stepping = stepping;
         singleDeviceBinary.deviceBinary = ArrayRef<const uint8_t>(reinterpret_cast<const uint8_t *>(this->buildInfos[rootDeviceIndex].unpackedDeviceBinary.get()), this->buildInfos[rootDeviceIndex].unpackedDeviceBinarySize);
         singleDeviceBinary.intermediateRepresentation = ArrayRef<const uint8_t>(reinterpret_cast<const uint8_t *>(this->irBinary.get()), this->irBinarySize);
-        singleDeviceBinary.debugData = ArrayRef<const uint8_t>(reinterpret_cast<const uint8_t *>(this->debugData.get()), this->debugDataSize);
+        singleDeviceBinary.debugData = ArrayRef<const uint8_t>(reinterpret_cast<const uint8_t *>(this->buildInfos[rootDeviceIndex].debugData.get()), this->buildInfos[rootDeviceIndex].debugDataSize);
 
         std::string packWarnings;
         std::string packErrors;

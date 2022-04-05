@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,9 +8,8 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/test/common/fixtures/front_window_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
-
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
-#include "test.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/test_macros/test.h"
 
 namespace NEO {
 
@@ -72,7 +71,7 @@ TEST_F(FrontWindowAllocatorTests, givenInitializedHeapsWhenUseExternalAllocatorF
 }
 
 TEST_F(FrontWindowAllocatorTests, givenLinearStreamAllocWhenSelectingHeapWithFrontWindowThenCorrectIndexReturned) {
-    GraphicsAllocation allocation{0, GraphicsAllocation::AllocationType::LINEAR_STREAM, nullptr, 0, 0, 0, MemoryPool::MemoryNull};
+    GraphicsAllocation allocation{0, AllocationType::LINEAR_STREAM, nullptr, 0, 0, 0, MemoryPool::MemoryNull};
     EXPECT_EQ(HeapIndex::HEAP_EXTERNAL_FRONT_WINDOW, memManager->selectHeap(&allocation, true, true, true));
 }
 

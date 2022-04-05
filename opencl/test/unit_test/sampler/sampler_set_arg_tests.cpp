@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/utilities/numeric.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/helpers/sampler_helpers.h"
 #include "opencl/source/kernel/kernel.h"
@@ -16,7 +17,6 @@
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -127,6 +127,7 @@ HWTEST_F(SamplerSetArgTest, WhenSettingKernelArgSamplerThenSamplerStatesAreCorre
     EXPECT_EQ(SAMPLER_STATE::MIN_MODE_FILTER_NEAREST, samplerState->getMinModeFilter());
     EXPECT_EQ(SAMPLER_STATE::MAG_MODE_FILTER_NEAREST, samplerState->getMagModeFilter());
     EXPECT_EQ(SAMPLER_STATE::MIP_MODE_FILTER_NEAREST, samplerState->getMipModeFilter());
+    EXPECT_EQ(SAMPLER_STATE::LOD_PRECLAMP_MODE::LOD_PRECLAMP_MODE_OGL, samplerState->getLodPreclampMode());
 
     std::vector<Surface *> surfaces;
     pKernel->getResidency(surfaces);

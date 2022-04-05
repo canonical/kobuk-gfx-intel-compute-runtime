@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -41,6 +41,20 @@ ze_result_t DriverHandleImp::createContext(const ze_context_desc_t *desc,
         return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
     }
 
+    if (desc->pNext) {
+        const ze_base_desc_t *expDesc = reinterpret_cast<const ze_base_desc_t *>(desc->pNext);
+        if (expDesc->stype == ZE_STRUCTURE_TYPE_POWER_SAVING_HINT_EXP_DESC) {
+            const ze_context_power_saving_hint_exp_desc_t *powerHintExpDesc =
+                reinterpret_cast<const ze_context_power_saving_hint_exp_desc_t *>(expDesc);
+            if (powerHintExpDesc->hint == ZE_POWER_SAVING_HINT_TYPE_MIN || powerHintExpDesc->hint <= ZE_POWER_SAVING_HINT_TYPE_MAX) {
+                powerHint = static_cast<uint8_t>(powerHintExpDesc->hint);
+            } else {
+                delete context;
+                return ZE_RESULT_ERROR_INVALID_ENUMERATION;
+            }
+        }
+    }
+
     *phContext = context->toHandle();
 
     if (numDevices == 0) {
@@ -76,7 +90,7 @@ NEO::SVMAllocsManager *DriverHandleImp::getSvmAllocsManager() {
 }
 
 ze_result_t DriverHandleImp::getApiVersion(ze_api_version_t *version) {
-    *version = ZE_API_VERSION_1_1;
+    *version = ZE_API_VERSION_1_3;
     return ZE_RESULT_SUCCESS;
 }
 
@@ -139,6 +153,28 @@ DriverHandleImp::~DriverHandleImp() {
     }
 }
 
+void DriverHandleImp::updateRootDeviceBitFields(std::unique_ptr<NEO::Device> &neoDevice) {
+    const auto rootDeviceIndex = neoDevice->getRootDeviceIndex();
+    auto entry = this->deviceBitfields.find(rootDeviceIndex);
+    entry->second = neoDevice->getDeviceBitfield();
+}
+
+void DriverHandleImp::enableRootDeviceDebugger(std::unique_ptr<NEO::Device> &neoDevice) {
+    const auto rootDeviceIndex = neoDevice->getRootDeviceIndex();
+    auto rootDeviceEnvironment = neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[rootDeviceIndex].get();
+
+    if (enableProgramDebugging) {
+        if (neoDevice->getDebugger() != nullptr) {
+            NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr,
+                                  "%s", "Source Level Debugger cannot be used with Environment Variable enabling program debugging.\n");
+            UNRECOVERABLE_IF(neoDevice->getDebugger() != nullptr && enableProgramDebugging);
+        }
+        rootDeviceEnvironment->getMutableHardwareInfo()->capabilityTable.fusedEuEnabled = false;
+
+        rootDeviceEnvironment->debugger = DebuggerL0::create(neoDevice.get());
+    }
+}
+
 ze_result_t DriverHandleImp::initialize(std::vector<std::unique_ptr<NEO::Device>> neoDevices) {
     bool multiOsContextDriver = false;
     for (auto &neoDevice : neoDevices) {
@@ -155,27 +191,18 @@ ze_result_t DriverHandleImp::initialize(std::vector<std::unique_ptr<NEO::Device>
         }
 
         const auto rootDeviceIndex = neoDevice->getRootDeviceIndex();
-        auto rootDeviceEnvironment = neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[rootDeviceIndex].get();
 
-        if (enableProgramDebugging) {
-            if (neoDevice->getDebugger() != nullptr) {
-                NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr,
-                                      "%s", "Source Level Debugger cannot be used with Environment Variable enabling program debugging.\n");
-                UNRECOVERABLE_IF(neoDevice->getDebugger() != nullptr && enableProgramDebugging);
-            }
-            rootDeviceEnvironment->debugger = DebuggerL0::create(neoDevice.get());
-        }
+        enableRootDeviceDebugger(neoDevice);
 
         this->rootDeviceIndices.insert(rootDeviceIndex);
         this->deviceBitfields.insert({rootDeviceIndex, neoDevice->getDeviceBitfield()});
 
         auto pNeoDevice = neoDevice.release();
 
-        auto subDevicesMask = static_cast<uint32_t>(rootDeviceEnvironment->deviceAffinityMask.getGenericSubDevicesMask().to_ulong());
-        auto device = Device::create(this, pNeoDevice, subDevicesMask, false, &returnValue);
+        auto device = Device::create(this, pNeoDevice, false, &returnValue);
         this->devices.push_back(device);
 
-        multiOsContextDriver |= device->isMultiDeviceCapable();
+        multiOsContextDriver |= device->isImplicitScalingCapable();
         if (returnValue != ZE_RESULT_SUCCESS) {
             return returnValue;
         }
@@ -244,10 +271,16 @@ ze_result_t DriverHandleImp::getDevice(uint32_t *pCount, ze_device_handle_t *phD
 bool DriverHandleImp::findAllocationDataForRange(const void *buffer,
                                                  size_t size,
                                                  NEO::SvmAllocationData **allocData) {
+
+    size_t offset = 0;
+    if (size > 0) {
+        offset = size - 1;
+    }
+
     // Make sure the host buffer does not overlap any existing allocation
     const char *baseAddress = reinterpret_cast<const char *>(buffer);
     NEO::SvmAllocationData *beginAllocData = svmAllocsManager->getSVMAlloc(baseAddress);
-    NEO::SvmAllocationData *endAllocData = svmAllocsManager->getSVMAlloc(baseAddress + size - 1);
+    NEO::SvmAllocationData *endAllocData = svmAllocsManager->getSVMAlloc(baseAddress + offset);
 
     if (allocData) {
         if (beginAllocData) {
@@ -388,7 +421,7 @@ void *DriverHandleImp::importFdHandle(ze_device_handle_t hDevice, ze_ipc_memory_
     NEO::osHandle osHandle = static_cast<NEO::osHandle>(handle);
     NEO::AllocationProperties unifiedMemoryProperties{neoDevice->getRootDeviceIndex(),
                                                       MemoryConstants::pageSize,
-                                                      NEO::GraphicsAllocation::AllocationType::BUFFER,
+                                                      NEO::AllocationType::BUFFER,
                                                       neoDevice->getDeviceBitfield()};
     unifiedMemoryProperties.subDevicesBitfield = neoDevice->getDeviceBitfield();
     NEO::GraphicsAllocation *alloc =
@@ -406,6 +439,7 @@ void *DriverHandleImp::importFdHandle(ze_device_handle_t hDevice, ze_ipc_memory_
     allocData.size = alloc->getUnderlyingBufferSize();
     allocData.memoryType = InternalMemoryType::DEVICE_UNIFIED_MEMORY;
     allocData.device = neoDevice;
+    allocData.isImportedAllocation = true;
     if (flags & ZE_DEVICE_MEM_ALLOC_FLAG_BIAS_UNCACHED) {
         allocData.allocationFlagsProperty.flags.locallyUncachedResource = 1;
     }
@@ -425,21 +459,17 @@ void *DriverHandleImp::importFdHandle(ze_device_handle_t hDevice, ze_ipc_memory_
 
 NEO::GraphicsAllocation *DriverHandleImp::getPeerAllocation(Device *device,
                                                             NEO::SvmAllocationData *allocData,
-                                                            void *ptr,
+                                                            void *basePtr,
                                                             uintptr_t *peerGpuAddress) {
-    if (NEO::DebugManager.flags.EnableCrossDeviceAccess.get() != 1) {
-        return nullptr;
-    }
-
     DeviceImp *deviceImp = static_cast<DeviceImp *>(device);
+    NEO::GraphicsAllocation *alloc = nullptr;
 
     NEO::SvmAllocationData *peerAllocData = nullptr;
     void *peerPtr = nullptr;
-    NEO::GraphicsAllocation *alloc = nullptr;
 
     std::unique_lock<NEO::SpinLock> lock(deviceImp->peerAllocationsMutex);
 
-    auto iter = deviceImp->peerAllocations.allocations.find(ptr);
+    auto iter = deviceImp->peerAllocations.allocations.find(basePtr);
     if (iter != deviceImp->peerAllocations.allocations.end()) {
         peerAllocData = &iter->second;
         alloc = peerAllocData->gpuAllocations.getDefaultGraphicsAllocation();
@@ -450,9 +480,14 @@ NEO::GraphicsAllocation *DriverHandleImp::getPeerAllocation(Device *device,
         UNRECOVERABLE_IF(alloc == nullptr);
         uint64_t handle = alloc->peekInternalHandle(this->getMemoryManager());
         ze_ipc_memory_flags_t flags = {};
+
         peerPtr = this->importFdHandle(device, flags, handle, &alloc);
+        if (peerPtr == nullptr) {
+            return nullptr;
+        }
+
         peerAllocData = this->getSvmAllocsManager()->getSVMAlloc(peerPtr);
-        deviceImp->peerAllocations.allocations.insert(std::make_pair(ptr, *peerAllocData));
+        deviceImp->peerAllocations.allocations.insert(std::make_pair(basePtr, *peerAllocData));
     }
 
     if (peerGpuAddress) {
@@ -460,6 +495,27 @@ NEO::GraphicsAllocation *DriverHandleImp::getPeerAllocation(Device *device,
     }
 
     return alloc;
+}
+
+void *DriverHandleImp::importNTHandle(ze_device_handle_t hDevice, void *handle) {
+    auto neoDevice = Device::fromHandle(hDevice)->getNEODevice();
+
+    auto alloc = this->getMemoryManager()->createGraphicsAllocationFromNTHandle(handle, neoDevice->getRootDeviceIndex(), NEO::AllocationType::SHARED_BUFFER);
+
+    if (alloc == nullptr) {
+        return nullptr;
+    }
+
+    NEO::SvmAllocationData allocData(neoDevice->getRootDeviceIndex());
+    allocData.gpuAllocations.addAllocation(alloc);
+    allocData.cpuAllocation = nullptr;
+    allocData.size = alloc->getUnderlyingBufferSize();
+    allocData.memoryType = InternalMemoryType::DEVICE_UNIFIED_MEMORY;
+    allocData.device = neoDevice;
+
+    this->getSvmAllocsManager()->insertSVMAlloc(allocData);
+
+    return reinterpret_cast<void *>(alloc->getGpuAddress());
 }
 
 ze_result_t DriverHandleImp::checkMemoryAccessFromDevice(Device *device, const void *ptr) {

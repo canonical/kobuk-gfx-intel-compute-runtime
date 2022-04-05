@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,7 +8,9 @@
 #include "level_zero/core/source/device/device_imp.h"
 
 #include "shared/source/built_ins/sip.h"
+#include "shared/source/command_container/implicit_scaling.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/device/device.h"
 #include "shared/source/device/device_info.h"
 #include "shared/source/device/sub_device.h"
 #include "shared/source/execution_environment/execution_environment.h"
@@ -28,14 +30,11 @@
 #include "shared/source/source_level_debugger/source_level_debugger.h"
 #include "shared/source/utilities/debug_settings_reader_creator.h"
 
-#include "opencl/source/mem_obj/mem_obj.h"
-#include "opencl/source/os_interface/ocl_reg_path.h"
-#include "opencl/source/program/program.h"
-
 #include "level_zero/core/source/builtin/builtin_functions_lib.h"
 #include "level_zero/core/source/cache/cache_reservation.h"
 #include "level_zero/core/source/cmdlist/cmdlist.h"
 #include "level_zero/core/source/cmdqueue/cmdqueue.h"
+#include "level_zero/core/source/context/context_imp.h"
 #include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/source/event/event.h"
 #include "level_zero/core/source/hw_helpers/l0_hw_helper.h"
@@ -47,17 +46,11 @@
 #include "level_zero/tools/source/metrics/metric.h"
 #include "level_zero/tools/source/sysman/sysman.h"
 
-#include "hw_helpers.h"
-
 namespace NEO {
 bool releaseFP64Override();
 } // namespace NEO
 
 namespace L0 {
-
-uint32_t DeviceImp::getRootDeviceIndex() {
-    return neoDevice->getRootDeviceIndex();
-}
 
 DriverHandle *DeviceImp::getDriverHandle() {
     return this->driverHandle;
@@ -71,16 +64,79 @@ ze_result_t DeviceImp::canAccessPeer(ze_device_handle_t hPeerDevice, ze_bool_t *
     *value = false;
 
     DeviceImp *pPeerDevice = static_cast<DeviceImp *>(Device::fromHandle(hPeerDevice));
-    if (this->getNEODevice()->getRootDeviceIndex() == pPeerDevice->getNEODevice()->getRootDeviceIndex()) {
-        *value = true;
-    }
+    uint32_t peerRootDeviceIndex = pPeerDevice->getNEODevice()->getRootDeviceIndex();
 
-    if (NEO::DebugManager.flags.EnableCrossDeviceAccess.get() == 1) {
+    if (this->crossAccessEnabledDevices.find(peerRootDeviceIndex) != this->crossAccessEnabledDevices.end()) {
+        *value = this->crossAccessEnabledDevices[peerRootDeviceIndex];
+    } else if (this->getNEODevice()->getRootDeviceIndex() == peerRootDeviceIndex) {
         *value = true;
-    }
+    } else {
+        ze_command_list_handle_t commandList = nullptr;
+        ze_command_list_desc_t listDescriptor = {};
+        listDescriptor.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+        listDescriptor.pNext = nullptr;
+        listDescriptor.flags = 0;
+        listDescriptor.commandQueueGroupOrdinal = 0;
 
-    if (NEO::DebugManager.flags.EnableCrossDeviceAccess.get() == 0) {
-        *value = false;
+        ze_command_queue_handle_t commandQueue = nullptr;
+        ze_command_queue_desc_t queueDescriptor = {};
+        queueDescriptor.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+        queueDescriptor.pNext = nullptr;
+        queueDescriptor.flags = 0;
+        queueDescriptor.mode = ZE_COMMAND_QUEUE_MODE_DEFAULT;
+        queueDescriptor.priority = ZE_COMMAND_QUEUE_PRIORITY_NORMAL;
+        queueDescriptor.ordinal = 0;
+        queueDescriptor.index = 0;
+
+        this->createCommandList(&listDescriptor, &commandList);
+        this->createCommandQueue(&queueDescriptor, &commandQueue);
+
+        auto driverHandle = this->getDriverHandle();
+        DriverHandleImp *driverHandleImp = static_cast<DriverHandleImp *>(driverHandle);
+
+        ze_context_handle_t context;
+        ze_context_desc_t contextDesc = {};
+        contextDesc.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
+        driverHandleImp->createContext(&contextDesc, 0u, nullptr, &context);
+        ContextImp *contextImp = static_cast<ContextImp *>(context);
+
+        void *memory = nullptr;
+        void *peerMemory = nullptr;
+
+        ze_device_mem_alloc_desc_t deviceDesc = {};
+        deviceDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+        deviceDesc.ordinal = 0;
+        deviceDesc.flags = 0;
+        deviceDesc.pNext = nullptr;
+
+        ze_device_mem_alloc_desc_t peerDeviceDesc = {};
+        peerDeviceDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+        peerDeviceDesc.ordinal = 0;
+        peerDeviceDesc.flags = 0;
+        peerDeviceDesc.pNext = nullptr;
+
+        contextImp->allocDeviceMem(this->toHandle(), &deviceDesc, 8, 1, &memory);
+        contextImp->allocDeviceMem(hPeerDevice, &peerDeviceDesc, 8, 1, &peerMemory);
+
+        auto ret = L0::CommandList::fromHandle(commandList)->appendMemoryCopy(peerMemory, memory, 8, nullptr, 0, nullptr);
+        L0::CommandList::fromHandle(commandList)->close();
+
+        if (ret == ZE_RESULT_SUCCESS) {
+            ret = L0::CommandQueue::fromHandle(commandQueue)->executeCommandLists(1, &commandList, nullptr, true);
+            if (ret == ZE_RESULT_SUCCESS) {
+                this->crossAccessEnabledDevices[peerRootDeviceIndex] = true;
+                pPeerDevice->crossAccessEnabledDevices[this->getNEODevice()->getRootDeviceIndex()] = true;
+                L0::CommandQueue::fromHandle(commandQueue)->synchronize(std::numeric_limits<uint64_t>::max());
+                *value = true;
+            }
+        }
+
+        contextImp->freeMem(peerMemory);
+        contextImp->freeMem(memory);
+
+        L0::Context::fromHandle(context)->destroy();
+        L0::CommandQueue::fromHandle(commandQueue)->destroy();
+        L0::CommandList::fromHandle(commandList)->destroy();
     }
 
     return ZE_RESULT_SUCCESS;
@@ -88,22 +144,28 @@ ze_result_t DeviceImp::canAccessPeer(ze_device_handle_t hPeerDevice, ze_bool_t *
 
 ze_result_t DeviceImp::createCommandList(const ze_command_list_desc_t *desc,
                                          ze_command_list_handle_t *commandList) {
+    auto &engineGroups = getActiveDevice()->getRegularEngineGroups();
+    if (desc->commandQueueGroupOrdinal >= engineGroups.size()) {
+        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    }
     auto productFamily = neoDevice->getHardwareInfo().platform.eProductFamily;
-    uint32_t engineGroupIndex = desc->commandQueueGroupOrdinal;
-    mapOrdinalForAvailableEngineGroup(&engineGroupIndex);
     ze_result_t returnValue = ZE_RESULT_SUCCESS;
-    *commandList = CommandList::create(productFamily, this, static_cast<NEO::EngineGroupType>(engineGroupIndex), desc->flags, returnValue);
+    auto engineGroupType = engineGroups[desc->commandQueueGroupOrdinal].engineGroupType;
+    *commandList = CommandList::create(productFamily, this, engineGroupType, desc->flags, returnValue);
 
     return returnValue;
 }
 
 ze_result_t DeviceImp::createCommandListImmediate(const ze_command_queue_desc_t *desc,
                                                   ze_command_list_handle_t *phCommandList) {
+    auto &engineGroups = getActiveDevice()->getRegularEngineGroups();
+    if (desc->ordinal >= engineGroups.size()) {
+        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    }
     auto productFamily = neoDevice->getHardwareInfo().platform.eProductFamily;
-    uint32_t engineGroupIndex = desc->ordinal;
-    mapOrdinalForAvailableEngineGroup(&engineGroupIndex);
+    auto engineGroupType = engineGroups[desc->ordinal].engineGroupType;
     ze_result_t returnValue = ZE_RESULT_SUCCESS;
-    *phCommandList = CommandList::createImmediate(productFamily, this, desc, false, static_cast<NEO::EngineGroupType>(engineGroupIndex), returnValue);
+    *phCommandList = CommandList::createImmediate(productFamily, this, desc, false, engineGroupType, returnValue);
 
     return returnValue;
 }
@@ -113,9 +175,15 @@ ze_result_t DeviceImp::createCommandQueue(const ze_command_queue_desc_t *desc,
     auto &platform = neoDevice->getHardwareInfo().platform;
 
     NEO::CommandStreamReceiver *csr = nullptr;
-    uint32_t engineGroupIndex = desc->ordinal;
-    mapOrdinalForAvailableEngineGroup(&engineGroupIndex);
-    if (desc->priority == ZE_COMMAND_QUEUE_PRIORITY_PRIORITY_LOW) {
+    auto &engineGroups = getActiveDevice()->getRegularEngineGroups();
+    if (desc->ordinal >= engineGroups.size()) {
+        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+
+    auto &hwHelper = NEO::HwHelper::get(platform.eRenderCoreFamily);
+    bool isCopyOnly = hwHelper.isCopyOnlyEngineType(engineGroups[desc->ordinal].engineGroupType);
+
+    if (desc->priority == ZE_COMMAND_QUEUE_PRIORITY_PRIORITY_LOW && !isCopyOnly) {
         getCsrForLowPriority(&csr);
     } else {
         auto ret = getCsrForOrdinalAndIndex(&csr, desc->ordinal, desc->index);
@@ -127,10 +195,6 @@ ze_result_t DeviceImp::createCommandQueue(const ze_command_queue_desc_t *desc,
     UNRECOVERABLE_IF(csr == nullptr);
 
     ze_result_t returnValue = ZE_RESULT_SUCCESS;
-
-    auto &hwHelper = NEO::HwHelper::get(platform.eRenderCoreFamily);
-    bool isCopyOnly = hwHelper.isCopyOnlyEngineType(static_cast<NEO::EngineGroupType>(engineGroupIndex));
-
     *commandQueue = CommandQueue::create(platform.eProductFamily, this, csr, desc, isCopyOnly, false, returnValue);
 
     return returnValue;
@@ -139,47 +203,39 @@ ze_result_t DeviceImp::createCommandQueue(const ze_command_queue_desc_t *desc,
 ze_result_t DeviceImp::getCommandQueueGroupProperties(uint32_t *pCount,
                                                       ze_command_queue_group_properties_t *pCommandQueueGroupProperties) {
     NEO::Device *activeDevice = getActiveDevice();
-    auto &engineGroups = activeDevice->getEngineGroups();
-    auto numEngineGroups = static_cast<uint32_t>(std::count_if(std::begin(engineGroups), std::end(engineGroups), [](const auto &engines) {
-        return !engines.empty();
-    }));
+    auto &engineGroups = activeDevice->getRegularEngineGroups();
+    uint32_t numEngineGroups = static_cast<uint32_t>(engineGroups.size());
 
     if (*pCount == 0) {
         *pCount = numEngineGroups;
         return ZE_RESULT_SUCCESS;
     }
 
-    *pCount = std::min(numEngineGroups, *pCount);
-    for (uint32_t i = 0, engineGroupCount = 0;
-         i < static_cast<uint32_t>(NEO::EngineGroupType::MaxEngineGroups) && engineGroupCount < *pCount;
-         i++) {
+    const auto &hardwareInfo = this->neoDevice->getHardwareInfo();
+    auto &hwHelper = NEO::HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+    auto &l0HwHelper = L0HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
 
-        if (engineGroups[i].empty()) {
-            continue;
+    *pCount = std::min(numEngineGroups, *pCount);
+    for (uint32_t i = 0; i < *pCount; i++) {
+        if (engineGroups[i].engineGroupType == NEO::EngineGroupType::RenderCompute) {
+            pCommandQueueGroupProperties[i].flags = ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE |
+                                                    ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY |
+                                                    ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_METRICS |
+                                                    ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COOPERATIVE_KERNELS;
+            pCommandQueueGroupProperties[i].maxMemoryFillPatternSize = std::numeric_limits<size_t>::max();
         }
-        const auto &hardwareInfo = this->neoDevice->getHardwareInfo();
-        if (i == static_cast<uint32_t>(NEO::EngineGroupType::RenderCompute)) {
-            pCommandQueueGroupProperties[engineGroupCount].flags = ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE |
-                                                                   ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY |
-                                                                   ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COOPERATIVE_KERNELS |
-                                                                   ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_METRICS;
-            pCommandQueueGroupProperties[engineGroupCount].maxMemoryFillPatternSize = std::numeric_limits<size_t>::max();
+        if (engineGroups[i].engineGroupType == NEO::EngineGroupType::Compute) {
+            pCommandQueueGroupProperties[i].flags = ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE |
+                                                    ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY |
+                                                    ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COOPERATIVE_KERNELS;
+            pCommandQueueGroupProperties[i].maxMemoryFillPatternSize = std::numeric_limits<size_t>::max();
         }
-        if (i == static_cast<uint32_t>(NEO::EngineGroupType::Compute)) {
-            pCommandQueueGroupProperties[engineGroupCount].flags = ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE |
-                                                                   ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY |
-                                                                   ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COOPERATIVE_KERNELS;
-            pCommandQueueGroupProperties[engineGroupCount].maxMemoryFillPatternSize = std::numeric_limits<size_t>::max();
+        if (engineGroups[i].engineGroupType == NEO::EngineGroupType::Copy) {
+            pCommandQueueGroupProperties[i].flags = ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY;
+            pCommandQueueGroupProperties[i].maxMemoryFillPatternSize = hwHelper.getMaxFillPaternSizeForCopyEngine();
         }
-        if (i == static_cast<uint32_t>(NEO::EngineGroupType::Copy)) {
-            auto &hwHelper = NEO::HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
-            pCommandQueueGroupProperties[engineGroupCount].flags = ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COPY;
-            pCommandQueueGroupProperties[engineGroupCount].maxMemoryFillPatternSize = hwHelper.getMaxFillPaternSizeForCopyEngine();
-        }
-        auto &l0HwHelper = L0HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
-        l0HwHelper.setAdditionalGroupProperty(pCommandQueueGroupProperties[engineGroupCount], i);
-        pCommandQueueGroupProperties[engineGroupCount].numQueues = static_cast<uint32_t>(engineGroups[i].size());
-        engineGroupCount++;
+        l0HwHelper.setAdditionalGroupProperty(pCommandQueueGroupProperties[i], engineGroups[i].engineGroupType);
+        pCommandQueueGroupProperties[i].numQueues = static_cast<uint32_t>(engineGroups[i].engines.size());
     }
 
     return ZE_RESULT_SUCCESS;
@@ -248,7 +304,37 @@ ze_result_t DeviceImp::getComputeProperties(ze_device_compute_properties_t *pCom
 
 ze_result_t DeviceImp::getP2PProperties(ze_device_handle_t hPeerDevice,
                                         ze_device_p2p_properties_t *pP2PProperties) {
-    pP2PProperties->flags = 0;
+
+    DeviceImp *peerDevice = static_cast<DeviceImp *>(Device::fromHandle(hPeerDevice));
+    if (this->getNEODevice()->getHardwareInfo().capabilityTable.p2pAccessSupported &&
+        peerDevice->getNEODevice()->getHardwareInfo().capabilityTable.p2pAccessSupported) {
+        pP2PProperties->flags = ZE_DEVICE_P2P_PROPERTY_FLAG_ACCESS;
+        if (this->getNEODevice()->getHardwareInfo().capabilityTable.p2pAtomicAccessSupported &&
+            peerDevice->getNEODevice()->getHardwareInfo().capabilityTable.p2pAtomicAccessSupported) {
+            pP2PProperties->flags |= ZE_DEVICE_P2P_PROPERTY_FLAG_ATOMICS;
+        }
+    }
+
+    return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t DeviceImp::getPciProperties(ze_pci_ext_properties_t *pPciProperties) {
+    if (!driverInfo) {
+        return ZE_RESULT_ERROR_UNINITIALIZED;
+    }
+    auto pciBusInfo = driverInfo->getPciBusInfo();
+    auto isPciValid = [&](auto pci) -> bool {
+        return (pci.pciDomain != NEO::PhysicalDevicePciBusInfo::InvalidValue &&
+                pci.pciBus != NEO::PhysicalDevicePciBusInfo::InvalidValue &&
+                pci.pciDevice != NEO::PhysicalDevicePciBusInfo::InvalidValue &&
+                pci.pciFunction != NEO::PhysicalDevicePciBusInfo::InvalidValue);
+    };
+    if (!isPciValid(pciBusInfo)) {
+        return ZE_RESULT_ERROR_UNINITIALIZED;
+    }
+    pPciProperties->address = {pciBusInfo.pciDomain, pciBusInfo.pciBus,
+                               pciBusInfo.pciDevice, pciBusInfo.pciFunction};
+    pPciProperties->maxSpeed = pciMaxSpeed;
     return ZE_RESULT_SUCCESS;
 }
 
@@ -267,14 +353,19 @@ ze_result_t DeviceImp::getMemoryProperties(uint32_t *pCount, ze_device_memory_pr
     }
 
     const auto &deviceInfo = this->neoDevice->getDeviceInfo();
-
-    strcpy_s(pMemProperties->name, ZE_MAX_DEVICE_NAME, getHwHelper().getDeviceMemoryName().c_str());
     auto &hwInfo = this->getHwInfo();
     auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    strcpy_s(pMemProperties->name, ZE_MAX_DEVICE_NAME, hwInfoConfig.getDeviceMemoryName().c_str());
     pMemProperties->maxClockRate = hwInfoConfig.getDeviceMemoryMaxClkRate(&hwInfo);
     pMemProperties->maxBusWidth = deviceInfo.addressBits;
-    pMemProperties->totalSize = deviceInfo.globalMemSize;
+    if (this->isImplicitScalingCapable() ||
+        this->getNEODevice()->getNumGenericSubDevices() == 0) {
+        pMemProperties->totalSize = deviceInfo.globalMemSize;
+    } else {
+        pMemProperties->totalSize = deviceInfo.globalMemSize / this->numSubDevices;
+    }
 
+    pMemProperties->flags = 0;
     return ZE_RESULT_SUCCESS;
 }
 
@@ -283,12 +374,23 @@ ze_result_t DeviceImp::getMemoryAccessProperties(ze_device_memory_access_propert
     auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
     pMemAccessProperties->hostAllocCapabilities =
         static_cast<ze_memory_access_cap_flags_t>(hwInfoConfig.getHostMemCapabilities(&hwInfo));
+
     pMemAccessProperties->deviceAllocCapabilities =
-        ZE_MEMORY_ACCESS_CAP_FLAG_RW | ZE_MEMORY_ACCESS_CAP_FLAG_ATOMIC;
+        static_cast<ze_memory_access_cap_flags_t>(hwInfoConfig.getDeviceMemCapabilities());
+
     pMemAccessProperties->sharedSingleDeviceAllocCapabilities =
-        ZE_MEMORY_ACCESS_CAP_FLAG_RW | ZE_MEMORY_ACCESS_CAP_FLAG_ATOMIC;
-    pMemAccessProperties->sharedCrossDeviceAllocCapabilities = 0;
-    pMemAccessProperties->sharedSystemAllocCapabilities = 0;
+        static_cast<ze_memory_access_cap_flags_t>(hwInfoConfig.getSingleDeviceSharedMemCapabilities());
+
+    pMemAccessProperties->sharedCrossDeviceAllocCapabilities = {};
+    if (this->getNEODevice()->getHardwareInfo().capabilityTable.p2pAccessSupported) {
+        pMemAccessProperties->sharedCrossDeviceAllocCapabilities |= ZE_MEMORY_ACCESS_CAP_FLAG_RW | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT;
+        if (this->getNEODevice()->getHardwareInfo().capabilityTable.p2pAtomicAccessSupported) {
+            pMemAccessProperties->sharedCrossDeviceAllocCapabilities |= ZE_MEMORY_ACCESS_CAP_FLAG_ATOMIC | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT_ATOMIC;
+        }
+    }
+
+    pMemAccessProperties->sharedSystemAllocCapabilities =
+        static_cast<ze_memory_access_cap_flags_t>(hwInfoConfig.getSharedSystemMemCapabilities(&hwInfo));
 
     return ZE_RESULT_SUCCESS;
 }
@@ -349,17 +451,38 @@ ze_result_t DeviceImp::getKernelProperties(ze_device_module_properties_t *pKerne
 
     pKernelProperties->printfBufferSize = static_cast<uint32_t>(this->neoDevice->getDeviceInfo().printfBufferSize);
 
-    if (pKernelProperties->pNext) {
+    auto &hwInfo = this->getHwInfo();
+    auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
+
+    void *pNext = pKernelProperties->pNext;
+    while (pNext) {
         ze_base_desc_t *extendedProperties = reinterpret_cast<ze_base_desc_t *>(pKernelProperties->pNext);
         if (extendedProperties->stype == ZE_STRUCTURE_TYPE_FLOAT_ATOMIC_EXT_PROPERTIES) {
             ze_float_atomic_ext_properties_t *floatProperties =
                 reinterpret_cast<ze_float_atomic_ext_properties_t *>(extendedProperties);
-            auto &hwInfo = this->getHwInfo();
-            auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
             hwInfoConfig.getKernelExtendedProperties(&floatProperties->fp16Flags,
                                                      &floatProperties->fp32Flags,
                                                      &floatProperties->fp64Flags);
+        } else if (extendedProperties->stype == ZE_STRUCTURE_TYPE_SCHEDULING_HINT_EXP_PROPERTIES) {
+            ze_scheduling_hint_exp_properties_t *hintProperties =
+                reinterpret_cast<ze_scheduling_hint_exp_properties_t *>(extendedProperties);
+            auto supportedThreadArbitrationPolicies = hwInfoConfig.getKernelSupportedThreadArbitrationPolicies();
+            hintProperties->schedulingHintFlags = 0;
+            for (auto &p : supportedThreadArbitrationPolicies) {
+                switch (p) {
+                case NEO::ThreadArbitrationPolicy::AgeBased:
+                    hintProperties->schedulingHintFlags |= ZE_SCHEDULING_HINT_EXP_FLAG_OLDEST_FIRST;
+                    break;
+                case NEO::ThreadArbitrationPolicy::RoundRobin:
+                    hintProperties->schedulingHintFlags |= ZE_SCHEDULING_HINT_EXP_FLAG_ROUND_ROBIN;
+                    break;
+                case NEO::ThreadArbitrationPolicy::RoundRobinAfterDependency:
+                    hintProperties->schedulingHintFlags |= ZE_SCHEDULING_HINT_EXP_FLAG_STALL_BASED_ROUND_ROBIN;
+                    break;
+                }
+            }
         }
+        pNext = const_cast<void *>(extendedProperties->pNext);
     }
 
     return ZE_RESULT_SUCCESS;
@@ -378,12 +501,18 @@ ze_result_t DeviceImp::getProperties(ze_device_properties_t *pDeviceProperties) 
 
     pDeviceProperties->flags = 0u;
 
-    uint32_t rootDeviceIndex = this->neoDevice->getRootDeviceIndex();
+    std::array<uint8_t, NEO::HwInfoConfig::uuidSize> deviceUuid;
+    if (this->neoDevice->getUuid(deviceUuid)) {
+        std::copy_n(std::begin(deviceUuid), ZE_MAX_DEVICE_UUID_SIZE, std::begin(pDeviceProperties->uuid.id));
+    } else {
 
-    memset(pDeviceProperties->uuid.id, 0, ZE_MAX_DEVICE_UUID_SIZE);
-    memcpy_s(pDeviceProperties->uuid.id, sizeof(uint32_t), &pDeviceProperties->vendorId, sizeof(pDeviceProperties->vendorId));
-    memcpy_s(pDeviceProperties->uuid.id + sizeof(uint32_t), sizeof(uint32_t), &pDeviceProperties->deviceId, sizeof(pDeviceProperties->deviceId));
-    memcpy_s(pDeviceProperties->uuid.id + (2 * sizeof(uint32_t)), sizeof(uint32_t), &rootDeviceIndex, sizeof(rootDeviceIndex));
+        uint32_t rootDeviceIndex = this->neoDevice->getRootDeviceIndex();
+
+        memset(pDeviceProperties->uuid.id, 0, ZE_MAX_DEVICE_UUID_SIZE);
+        memcpy_s(pDeviceProperties->uuid.id, sizeof(uint32_t), &deviceInfo.vendorId, sizeof(deviceInfo.vendorId));
+        memcpy_s(pDeviceProperties->uuid.id + sizeof(uint32_t), sizeof(uint32_t), &hardwareInfo.platform.usDeviceID, sizeof(hardwareInfo.platform.usDeviceID));
+        memcpy_s(pDeviceProperties->uuid.id + (2 * sizeof(uint32_t)), sizeof(uint32_t), &rootDeviceIndex, sizeof(rootDeviceIndex));
+    }
 
     pDeviceProperties->subdeviceId = isSubdevice ? static_cast<NEO::SubDevice *>(neoDevice)->getSubDeviceIndex() : 0;
 
@@ -407,7 +536,11 @@ ze_result_t DeviceImp::getProperties(ze_device_properties_t *pDeviceProperties) 
         pDeviceProperties->numSubslicesPerSlice = hardwareInfo.gtSystemInfo.SubSliceCount / hardwareInfo.gtSystemInfo.SliceCount;
     }
 
-    pDeviceProperties->numSlices = hardwareInfo.gtSystemInfo.SliceCount * ((this->numSubDevices > 0) ? this->numSubDevices : 1);
+    pDeviceProperties->numSlices = hardwareInfo.gtSystemInfo.SliceCount;
+
+    if (isImplicitScalingCapable()) {
+        pDeviceProperties->numSlices *= neoDevice->getNumGenericSubDevices();
+    }
 
     if ((NEO::DebugManager.flags.UseCyclesPerSecondTimer.get() == 1) ||
         (pDeviceProperties->stype == ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES_1_2)) {
@@ -591,6 +724,13 @@ ze_result_t DeviceImp::getDeviceImageProperties(ze_device_image_properties_t *pD
 
 ze_result_t DeviceImp::getDebugProperties(zet_device_debug_properties_t *pDebugProperties) {
     bool isDebugAttachAvailable = getOsInterface().isDebugAttachAvailable();
+    auto &stateSaveAreaHeader = NEO::SipKernel::getBindlessDebugSipKernel(*this->getNEODevice()).getStateSaveAreaHeader();
+
+    if (stateSaveAreaHeader.size() == 0) {
+        PRINT_DEBUGGER_INFO_LOG("Context state save area header missing", "");
+        isDebugAttachAvailable = false;
+    }
+
     if (isDebugAttachAvailable && !isSubdevice) {
         pDebugProperties->flags = zet_device_debug_property_flag_t::ZET_DEVICE_DEBUG_PROPERTY_FLAG_ATTACH;
     } else {
@@ -601,12 +741,12 @@ ze_result_t DeviceImp::getDebugProperties(zet_device_debug_properties_t *pDebugP
 
 ze_result_t DeviceImp::systemBarrier() { return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE; }
 
-ze_result_t DeviceImp::activateMetricGroups(uint32_t count,
-                                            zet_metric_group_handle_t *phMetricGroups) {
+ze_result_t DeviceImp::activateMetricGroupsDeferred(uint32_t count,
+                                                    zet_metric_group_handle_t *phMetricGroups) {
     ze_result_t result = ZE_RESULT_ERROR_UNKNOWN;
-    if (this->isMultiDeviceCapable()) {
+    if (!this->isSubdevice && this->isImplicitScalingCapable()) {
         for (auto subDevice : this->subDevices) {
-            result = subDevice->getMetricContext().activateMetricGroupsDeferred(count, phMetricGroups);
+            result = subDevice->getMetricDeviceContext().activateMetricGroupsDeferred(count, phMetricGroups);
             if (result != ZE_RESULT_SUCCESS)
                 break;
         }
@@ -636,19 +776,42 @@ uint32_t DeviceImp::getPlatformInfo() const {
     return hardwareInfo.platform.eRenderCoreFamily;
 }
 
-MetricContext &DeviceImp::getMetricContext() { return *metricContext; }
+MetricDeviceContext &DeviceImp::getMetricDeviceContext() { return *metricContext; }
 
 void DeviceImp::activateMetricGroups() {
     if (metricContext != nullptr) {
-        metricContext->activateMetricGroups();
+        if (metricContext->isImplicitScalingCapable()) {
+            for (uint32_t i = 0; i < numSubDevices; i++) {
+                subDevices[i]->getMetricDeviceContext().activateMetricGroups();
+            }
+        } else {
+            metricContext->activateMetricGroups();
+        }
     }
 }
 uint32_t DeviceImp::getMaxNumHwThreads() const { return maxNumHwThreads; }
 
 const NEO::HardwareInfo &DeviceImp::getHwInfo() const { return neoDevice->getHardwareInfo(); }
 
-Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, uint32_t currentDeviceMask, bool isSubDevice, ze_result_t *returnValue) {
-    auto device = new DeviceImp;
+// Use this method to reinitialize L0::Device *device, that was created during zeInit, with the help of Device::create
+Device *Device::deviceReinit(DriverHandle *driverHandle, L0::Device *device, std::unique_ptr<NEO::Device> &neoDevice, ze_result_t *returnValue) {
+    auto pNeoDevice = neoDevice.release();
+
+    return Device::create(driverHandle, pNeoDevice, false, returnValue, device);
+}
+
+Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, bool isSubDevice, ze_result_t *returnValue) {
+    return Device::create(driverHandle, neoDevice, isSubDevice, returnValue, nullptr);
+}
+
+Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, bool isSubDevice, ze_result_t *returnValue, L0::Device *deviceL0) {
+    L0::DeviceImp *device = nullptr;
+    if (deviceL0 == nullptr) {
+        device = new DeviceImp;
+    } else {
+        device = static_cast<L0::DeviceImp *>(deviceL0);
+    }
+
     UNRECOVERABLE_IF(device == nullptr);
 
     device->setDriverHandle(driverHandle);
@@ -657,67 +820,73 @@ Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, uint3
     device->neoDevice = neoDevice;
     neoDevice->incRefInternal();
 
+    auto &hwInfo = neoDevice->getHardwareInfo();
+    auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+
     device->execEnvironment = (void *)neoDevice->getExecutionEnvironment();
-    device->metricContext = MetricContext::create(*device);
+    device->allocationsForReuse = std::make_unique<NEO::AllocationsList>();
+    bool platformImplicitScaling = hwHelper.platformSupportsImplicitScaling(hwInfo);
+    device->implicitScalingCapable = NEO::ImplicitScalingHelper::isImplicitScalingEnabled(neoDevice->getDeviceBitfield(), platformImplicitScaling);
+    device->metricContext = MetricDeviceContext::create(*device);
     device->builtins = BuiltinFunctionsLib::create(
         device, neoDevice->getBuiltIns());
     device->cacheReservation = CacheReservation::create(*device);
-    device->maxNumHwThreads = NEO::HwHelper::getMaxThreadsForVfe(neoDevice->getHardwareInfo());
+    device->maxNumHwThreads = NEO::HwHelper::getMaxThreadsForVfe(hwInfo);
+
+    auto osInterface = neoDevice->getRootDeviceEnvironment().osInterface.get();
+    device->driverInfo.reset(NEO::DriverInfo::create(&hwInfo, osInterface));
+
+    auto debugSurfaceSize = hwHelper.getSipKernelMaxDbgSurfaceSize(hwInfo);
+    std::vector<char> stateSaveAreaHeader;
+
+    if (neoDevice->getCompilerInterface()) {
+        if (neoDevice->getPreemptionMode() == NEO::PreemptionMode::MidThread || neoDevice->getDebugger()) {
+            bool ret = NEO::SipKernel::initSipKernel(NEO::SipKernel::getSipKernelType(*neoDevice), *neoDevice);
+            UNRECOVERABLE_IF(!ret);
+
+            stateSaveAreaHeader = NEO::SipKernel::getSipKernel(*neoDevice).getStateSaveAreaHeader();
+            debugSurfaceSize = NEO::SipKernel::getSipKernel(*neoDevice).getStateSaveAreaSize(neoDevice);
+        }
+    } else {
+        *returnValue = ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
+    }
 
     const bool allocateDebugSurface = (device->getL0Debugger() || neoDevice->getDeviceInfo().debuggerActive) && !isSubDevice;
     NEO::GraphicsAllocation *debugSurface = nullptr;
-
     if (allocateDebugSurface) {
         debugSurface = neoDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties(
             {device->getRootDeviceIndex(), true,
-             NEO::SipKernel::maxDbgSurfaceSize,
-             NEO::GraphicsAllocation::AllocationType::DEBUG_CONTEXT_SAVE_AREA,
+             debugSurfaceSize,
+             NEO::AllocationType::DEBUG_CONTEXT_SAVE_AREA,
              false,
              false,
              device->getNEODevice()->getDeviceBitfield()});
         device->setDebugSurface(debugSurface);
     }
 
-    if (device->neoDevice->getNumAvailableDevices() == 1) {
-        device->numSubDevices = 0;
-    } else {
-        for (uint32_t i = 0; i < device->neoDevice->getNumAvailableDevices(); i++) {
-
-            if (!((1UL << i) & currentDeviceMask)) {
-                continue;
-            }
-
-            ze_device_handle_t subDevice = Device::create(driverHandle,
-                                                          device->neoDevice->getDeviceById(i),
-                                                          0,
-                                                          true, returnValue);
-            if (subDevice == nullptr) {
-                return nullptr;
-            }
-            static_cast<DeviceImp *>(subDevice)->isSubdevice = true;
-            static_cast<DeviceImp *>(subDevice)->setDebugSurface(debugSurface);
-            device->subDevices.push_back(static_cast<Device *>(subDevice));
-        }
-        device->numSubDevices = static_cast<uint32_t>(device->subDevices.size());
-    }
-
-    if (neoDevice->getCompilerInterface()) {
+    if (debugSurface && stateSaveAreaHeader.size() > 0) {
         auto &hwInfo = neoDevice->getHardwareInfo();
-        if (neoDevice->getPreemptionMode() == NEO::PreemptionMode::MidThread || neoDevice->getDebugger()) {
-            bool ret = NEO::SipKernel::initSipKernel(NEO::SipKernel::getSipKernelType(*neoDevice), *neoDevice);
-            UNRECOVERABLE_IF(!ret);
-
-            auto &stateSaveAreaHeader = NEO::SipKernel::getSipKernel(*neoDevice).getStateSaveAreaHeader();
-            if (debugSurface && stateSaveAreaHeader.size() > 0) {
-                auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-                NEO::MemoryTransferHelper::transferMemoryToAllocation(hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo, *debugSurface),
-                                                                      *neoDevice, debugSurface, 0, stateSaveAreaHeader.data(),
-                                                                      stateSaveAreaHeader.size());
-            }
-        }
-    } else {
-        *returnValue = ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
+        NEO::MemoryTransferHelper::transferMemoryToAllocation(hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo, *debugSurface),
+                                                              *neoDevice, debugSurface, 0, stateSaveAreaHeader.data(),
+                                                              stateSaveAreaHeader.size());
     }
+
+    for (auto &neoSubDevice : neoDevice->getSubDevices()) {
+        if (!neoSubDevice) {
+            continue;
+        }
+
+        ze_device_handle_t subDevice = Device::create(driverHandle,
+                                                      neoSubDevice,
+                                                      true, returnValue, nullptr);
+        if (subDevice == nullptr) {
+            return nullptr;
+        }
+        static_cast<DeviceImp *>(subDevice)->isSubdevice = true;
+        static_cast<DeviceImp *>(subDevice)->setDebugSurface(debugSurface);
+        device->subDevices.push_back(static_cast<Device *>(subDevice));
+    }
+    device->numSubDevices = static_cast<uint32_t>(device->subDevices.size());
 
     auto supportDualStorageSharedMemory = neoDevice->getMemoryManager()->isLocalMemorySupported(device->neoDevice->getRootDeviceIndex());
     if (NEO::DebugManager.flags.AllocateSharedAllocationsWithCpuAndGpuStorage.get() != -1) {
@@ -734,7 +903,14 @@ Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, uint3
         ze_result_t resultValue = ZE_RESULT_SUCCESS;
         device->pageFaultCommandList =
             CommandList::createImmediate(
-                device->neoDevice->getHardwareInfo().platform.eProductFamily, device, &cmdQueueDesc, true, NEO::EngineGroupType::RenderCompute, resultValue);
+                device->neoDevice->getHardwareInfo().platform.eProductFamily, device, &cmdQueueDesc, true, NEO::EngineGroupType::Copy, resultValue);
+    }
+
+    if (osInterface) {
+        auto pciSpeedInfo = osInterface->getDriverModel()->getPciSpeedInfo();
+        device->pciMaxSpeed.genVersion = pciSpeedInfo.genVersion;
+        device->pciMaxSpeed.maxBandwidth = pciSpeedInfo.maxBandwidth;
+        device->pciMaxSpeed.width = pciSpeedInfo.width;
     }
 
     if (device->getSourceLevelDebugger()) {
@@ -742,11 +918,8 @@ Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, uint3
         device->getSourceLevelDebugger()
             ->notifyNewDevice(osInterface ? osInterface->getDriverModel()->getDeviceHandle() : 0);
     }
-
-    if (static_cast<DriverHandleImp *>(driverHandle)->enableSysman && !isSubDevice) {
-        device->setSysmanHandle(L0::SysmanDeviceHandleContext::init(device->toHandle()));
-    }
-
+    device->createSysmanHandle(isSubDevice);
+    device->resourcesReleased = false;
     return device;
 }
 
@@ -761,6 +934,7 @@ void DeviceImp::releaseResources() {
     for (uint32_t i = 0; i < this->numSubDevices; i++) {
         delete this->subDevices[i];
     }
+    this->subDevices.clear();
     this->numSubDevices = 0;
 
     if (this->pageFaultCommandList) {
@@ -770,6 +944,11 @@ void DeviceImp::releaseResources() {
     metricContext.reset();
     builtins.reset();
     cacheReservation.reset();
+
+    if (allocationsForReuse.get()) {
+        allocationsForReuse->freeAllGraphicsAllocations(neoDevice);
+        allocationsForReuse.reset();
+    }
 
     if (getSourceLevelDebugger()) {
         getSourceLevelDebugger()->notifyDeviceDestruction();
@@ -807,10 +986,6 @@ NEO::PreemptionMode DeviceImp::getDevicePreemptionMode() const {
 
 const NEO::DeviceInfo &DeviceImp::getDeviceInfo() const {
     return neoDevice->getDeviceInfo();
-}
-
-NEO::Device *DeviceImp::getNEODevice() {
-    return neoDevice;
 }
 
 NEO::GraphicsAllocation *DeviceImp::allocateManagedMemoryFromHostPtr(void *buffer, size_t size, struct CommandList *commandList) {
@@ -853,7 +1028,7 @@ NEO::GraphicsAllocation *DeviceImp::allocateManagedMemoryFromHostPtr(void *buffe
     }
 
     allocation = neoDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties(
-        {getRootDeviceIndex(), false, size, NEO::GraphicsAllocation::AllocationType::BUFFER_HOST_MEMORY, false, neoDevice->getDeviceBitfield()},
+        {getRootDeviceIndex(), false, size, NEO::AllocationType::BUFFER_HOST_MEMORY, false, neoDevice->getDeviceBitfield()},
         buffer);
 
     if (allocation == nullptr) {
@@ -871,14 +1046,14 @@ NEO::GraphicsAllocation *DeviceImp::allocateManagedMemoryFromHostPtr(void *buffe
     return allocation;
 }
 
-NEO::GraphicsAllocation *DeviceImp::allocateMemoryFromHostPtr(const void *buffer, size_t size) {
+NEO::GraphicsAllocation *DeviceImp::allocateMemoryFromHostPtr(const void *buffer, size_t size, bool hostCopyAllowed) {
     NEO::AllocationProperties properties = {getRootDeviceIndex(), false, size,
-                                            NEO::GraphicsAllocation::AllocationType::EXTERNAL_HOST_PTR,
+                                            NEO::AllocationType::EXTERNAL_HOST_PTR,
                                             false, neoDevice->getDeviceBitfield()};
     properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = true;
     auto allocation = neoDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties(properties,
                                                                                           buffer);
-    if (allocation == nullptr) {
+    if (allocation == nullptr && hostCopyAllowed) {
         allocation = neoDevice->getMemoryManager()->allocateInternalGraphicsMemoryWithHostCopy(neoDevice->getRootDeviceIndex(),
                                                                                                neoDevice->getDeviceBitfield(),
                                                                                                buffer,
@@ -888,52 +1063,45 @@ NEO::GraphicsAllocation *DeviceImp::allocateMemoryFromHostPtr(const void *buffer
     return allocation;
 }
 
+NEO::GraphicsAllocation *DeviceImp::obtainReusableAllocation(size_t requiredSize, NEO::AllocationType type) {
+    auto alloc = allocationsForReuse->detachAllocation(requiredSize, nullptr, nullptr, type);
+    if (alloc == nullptr)
+        return nullptr;
+    else
+        return alloc.release();
+}
+
+void DeviceImp::storeReusableAllocation(NEO::GraphicsAllocation &alloc) {
+    allocationsForReuse->pushFrontOne(alloc);
+}
+
 ze_result_t DeviceImp::getCsrForOrdinalAndIndex(NEO::CommandStreamReceiver **csr, uint32_t ordinal, uint32_t index) {
-    if (ordinal >= static_cast<uint32_t>(NEO::EngineGroupType::MaxEngineGroups)) {
+    auto &engineGroups = getActiveDevice()->getRegularEngineGroups();
+    if ((ordinal >= engineGroups.size()) ||
+        (index >= engineGroups[ordinal].engines.size())) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
-    uint32_t engineGroupIndex = ordinal;
-    auto ret = mapOrdinalForAvailableEngineGroup(&engineGroupIndex);
-    if (ret != ZE_RESULT_SUCCESS) {
-        return ret;
-    }
-    NEO::Device *activeDevice = getActiveDevice();
-    if (index >= activeDevice->getEngineGroups()[engineGroupIndex].size()) {
-        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-    *csr = activeDevice->getEngineGroups()[engineGroupIndex][index].commandStreamReceiver;
+    *csr = engineGroups[ordinal].engines[index].commandStreamReceiver;
     return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t DeviceImp::getCsrForLowPriority(NEO::CommandStreamReceiver **csr) {
     NEO::Device *activeDevice = getActiveDevice();
-    for (auto &it : activeDevice->getEngines()) {
-        if (it.osContext->isLowPriority()) {
-            *csr = it.commandStreamReceiver;
-            return ZE_RESULT_SUCCESS;
+    if (this->implicitScalingCapable) {
+        *csr = activeDevice->getDefaultEngine().commandStreamReceiver;
+        return ZE_RESULT_SUCCESS;
+    } else {
+        for (auto &it : activeDevice->getAllEngines()) {
+            if (it.osContext->isLowPriority()) {
+                *csr = it.commandStreamReceiver;
+                return ZE_RESULT_SUCCESS;
+            }
         }
+        // if the code falls through, we have no low priority context created by neoDevice.
     }
-    // if the code falls through, we have no low priority context created by neoDevice.
     UNRECOVERABLE_IF(true);
     return ZE_RESULT_ERROR_UNKNOWN;
 }
-
-ze_result_t DeviceImp::mapOrdinalForAvailableEngineGroup(uint32_t *ordinal) {
-    NEO::Device *activeDevice = getActiveDevice();
-    const auto &engines = activeDevice->getEngineGroups();
-    uint32_t numNonEmptyGroups = 0;
-    uint32_t i = 0;
-    for (; i < engines.size() && numNonEmptyGroups <= *ordinal; i++) {
-        if (!engines[i].empty()) {
-            numNonEmptyGroups++;
-        }
-    }
-    if (*ordinal + 1 > numNonEmptyGroups) {
-        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-    *ordinal = i - 1;
-    return ZE_RESULT_SUCCESS;
-};
 
 DebugSession *DeviceImp::getDebugSession(const zet_debug_config_t &config) {
     return debugSession.get();
@@ -949,7 +1117,7 @@ DebugSession *DeviceImp::createDebugSession(const zet_debug_config_t &config, ze
     return debugSession.get();
 }
 
-bool DeviceImp::toPhysicalSliceId(const NEO::TopologyMap &topologyMap, uint32_t &slice, uint32_t &deviceIndex) {
+bool DeviceImp::toPhysicalSliceId(const NEO::TopologyMap &topologyMap, uint32_t &slice, uint32_t &subslice, uint32_t &deviceIndex) {
     auto hwInfo = neoDevice->getRootDeviceEnvironment().getHardwareInfo();
     uint32_t subDeviceCount = NEO::HwHelper::getSubDevicesCount(hwInfo);
     auto deviceBitfield = neoDevice->getDeviceBitfield();
@@ -959,6 +1127,11 @@ bool DeviceImp::toPhysicalSliceId(const NEO::TopologyMap &topologyMap, uint32_t 
         for (uint32_t i = 0; i < topologyMap.size(); i++) {
             if (sliceId < topologyMap.at(i).sliceIndices.size()) {
                 slice = topologyMap.at(i).sliceIndices[sliceId];
+
+                if (topologyMap.at(i).sliceIndices.size() == 1) {
+                    uint32_t subsliceId = subslice;
+                    subslice = topologyMap.at(i).subsliceIndices[subsliceId];
+                }
                 deviceIndex = i;
                 return true;
             }
@@ -972,6 +1145,11 @@ bool DeviceImp::toPhysicalSliceId(const NEO::TopologyMap &topologyMap, uint32_t 
             if (slice < topologyMap.at(subDeviceIndex).sliceIndices.size()) {
                 deviceIndex = subDeviceIndex;
                 slice = topologyMap.at(subDeviceIndex).sliceIndices[slice];
+
+                if (topologyMap.at(subDeviceIndex).sliceIndices.size() == 1) {
+                    uint32_t subsliceId = subslice;
+                    subslice = topologyMap.at(subDeviceIndex).subsliceIndices[subsliceId];
+                }
                 return true;
             }
         }
@@ -980,7 +1158,7 @@ bool DeviceImp::toPhysicalSliceId(const NEO::TopologyMap &topologyMap, uint32_t 
     return false;
 }
 
-bool DeviceImp::toApiSliceId(const NEO::TopologyMap &topologyMap, uint32_t &slice, uint32_t deviceIndex) {
+bool DeviceImp::toApiSliceId(const NEO::TopologyMap &topologyMap, uint32_t &slice, uint32_t &subslice, uint32_t deviceIndex) {
     auto deviceBitfield = neoDevice->getDeviceBitfield();
 
     if (isSubdevice) {
@@ -1000,12 +1178,41 @@ bool DeviceImp::toApiSliceId(const NEO::TopologyMap &topologyMap, uint32_t &slic
             if (static_cast<uint32_t>(topologyMap.at(deviceIndex).sliceIndices[i]) == slice) {
                 apiSliceId += i;
                 slice = apiSliceId;
+                if (topologyMap.at(deviceIndex).sliceIndices.size() == 1) {
+                    for (uint32_t subsliceApiId = 0; subsliceApiId < topologyMap.at(deviceIndex).subsliceIndices.size(); subsliceApiId++) {
+                        if (static_cast<uint32_t>(topologyMap.at(deviceIndex).subsliceIndices[subsliceApiId]) == subslice) {
+                            subslice = subsliceApiId;
+                        }
+                    }
+                }
                 return true;
             }
         }
     }
 
     return false;
+}
+
+NEO::Device *DeviceImp::getActiveDevice() const {
+    if (neoDevice->getNumGenericSubDevices() > 1u) {
+        if (isImplicitScalingCapable()) {
+            return this->neoDevice;
+        }
+        return this->neoDevice->getSubDevice(0);
+    }
+    return this->neoDevice;
+}
+
+uint32_t DeviceImp::getPhysicalSubDeviceId() {
+    if (!neoDevice->isSubDevice()) {
+        uint32_t deviceBitField = static_cast<uint32_t>(neoDevice->getDeviceBitfield().to_ulong());
+        if (neoDevice->getDeviceBitfield().count() > 1) {
+            // Clear all set bits other than the right most bit
+            deviceBitField &= ~deviceBitField + 1;
+        }
+        return Math::log2(deviceBitField);
+    }
+    return static_cast<NEO::SubDevice *>(neoDevice)->getSubDeviceIndex();
 }
 
 } // namespace L0

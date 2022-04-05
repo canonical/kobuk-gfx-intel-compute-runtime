@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -40,20 +40,38 @@ WddmMock::~WddmMock() {
 bool WddmMock::makeResident(const D3DKMT_HANDLE *handles, uint32_t count, bool cantTrimFurther, uint64_t *numberOfBytesToTrim, size_t totalSize) {
     makeResidentResult.called++;
     makeResidentResult.handleCount = count;
-    for (auto i = 0u; i < count; i++) {
-        makeResidentResult.handlePack.push_back(handles[i]);
+    makeResidentResult.cantTrimFurther = cantTrimFurther;
+    makeResidentResult.totalSize = totalSize;
+    if (handles) {
+        for (size_t i = 0; i < count; i++) {
+            makeResidentResult.handlePack.push_back(handles[i]);
+        }
     }
+    makeResidentParamsPassed.push_back(makeResidentResult);
     if (callBaseMakeResident) {
-        return makeResidentResult.success = Wddm::makeResident(handles, count, cantTrimFurther, numberOfBytesToTrim, totalSize);
-    } else {
-        makeResidentResult.success = makeResidentStatus;
-        return makeResidentStatus;
+        return Wddm::makeResident(handles, count, cantTrimFurther, numberOfBytesToTrim, totalSize);
     }
+    if (numberOfBytesToTrim != nullptr) {
+        *numberOfBytesToTrim = makeResidentNumberOfBytesToTrim;
+    }
+    if (makeResidentResult.called <= makeResidentResults.size()) {
+        return makeResidentResults[makeResidentResult.called - 1];
+    }
+    return makeResidentStatus;
 }
-
 bool WddmMock::evict(const D3DKMT_HANDLE *handles, uint32_t num, uint64_t &sizeToTrim) {
-    makeNonResidentResult.called++;
-    return makeNonResidentResult.success = Wddm::evict(handles, num, sizeToTrim);
+    evictResult.called++;
+    if (callBaseEvict) {
+        evictStatus = Wddm::evict(handles, num, sizeToTrim);
+    }
+    return evictStatus;
+}
+NTSTATUS WddmMock::createAllocationsAndMapGpuVa(OsHandleStorage &osHandles) {
+    createAllocationsAndMapGpuVaResult.called++;
+    if (callBaseCreateAllocationsAndMapGpuVa) {
+        createAllocationsAndMapGpuVaStatus = Wddm::createAllocationsAndMapGpuVa(osHandles);
+    }
+    return createAllocationsAndMapGpuVaStatus;
 }
 bool WddmMock::mapGpuVirtualAddress(WddmAllocation *allocation) {
     D3DGPU_VIRTUAL_ADDRESS minimumAddress = gfxPartition.Standard.Base;
@@ -89,7 +107,7 @@ NTSTATUS WddmMock::createAllocation(WddmAllocation *wddmAllocation) {
     }
     return false;
 }
-NTSTATUS WddmMock::createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKMT_HANDLE &outHandle, D3DKMT_HANDLE &outResourceHandle, D3DKMT_HANDLE *outSharedHandle) {
+NTSTATUS WddmMock::createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKMT_HANDLE &outHandle, D3DKMT_HANDLE &outResourceHandle, uint64_t *outSharedHandle) {
     createAllocationResult.called++;
     if (callBaseDestroyAllocations) {
         createAllocationStatus = Wddm::createAllocation(alignedCpuPtr, gmm, outHandle, outResourceHandle, outSharedHandle);
@@ -234,15 +252,14 @@ bool WddmMock::waitFromCpu(uint64_t lastFenceValue, const MonitoredFence &monito
     return waitFromCpuResult.success = Wddm::waitFromCpu(lastFenceValue, monitoredFence);
 }
 
-void *WddmMock::virtualAlloc(void *inPtr, size_t size, unsigned long flags, unsigned long type) {
-    void *address = Wddm::virtualAlloc(inPtr, size, flags, type);
+void *WddmMock::virtualAlloc(void *inPtr, size_t size, bool topDownHint) {
+    void *address = Wddm::virtualAlloc(inPtr, size, topDownHint);
     virtualAllocAddress = reinterpret_cast<uintptr_t>(address);
     return address;
 }
 
-int WddmMock::virtualFree(void *ptr, size_t size, unsigned long flags) {
-    int success = Wddm::virtualFree(ptr, size, flags);
-    return success;
+void WddmMock::virtualFree(void *ptr, size_t size) {
+    Wddm::virtualFree(ptr, size);
 }
 
 void WddmMock::releaseReservedAddress(void *reservedAddress) {
@@ -309,16 +326,4 @@ bool WddmMock::setAllocationPriority(const D3DKMT_HANDLE *handles, uint32_t allo
         return status;
     }
     return setAllocationPriorityResult.success;
-}
-
-void *GmockWddm::virtualAllocWrapper(void *inPtr, size_t size, uint32_t flags, uint32_t type) {
-    void *tmp = reinterpret_cast<void *>(virtualAllocAddress);
-    size += MemoryConstants::pageSize;
-    size -= size % MemoryConstants::pageSize;
-    virtualAllocAddress += size;
-    return tmp;
-}
-
-GmockWddm::GmockWddm(RootDeviceEnvironment &rootDeviceEnvironment) : WddmMock(rootDeviceEnvironment) {
-    virtualAllocAddress = NEO::windowsMinAddress;
 }

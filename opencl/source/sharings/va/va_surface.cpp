@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -113,7 +113,7 @@ Image *VASurface::createSharedVaSurface(Context *context, VASharingFunctions *sh
 
     AllocationProperties properties(context->getDevice(0)->getRootDeviceIndex(),
                                     false, // allocateMemory
-                                    imgInfo, GraphicsAllocation::AllocationType::SHARED_IMAGE,
+                                    imgInfo, AllocationType::SHARED_IMAGE,
                                     context->getDeviceBitfieldForAllocation(context->getDevice(0)->getRootDeviceIndex()));
 
     auto alloc = memoryManager->createGraphicsAllocationFromSharedHandle(sharedHandle, properties, false, false);
@@ -154,15 +154,17 @@ Image *VASurface::createSharedVaSurface(Context *context, VASharingFunctions *sh
 }
 
 void VASurface::synchronizeObject(UpdateData &updateData) {
-    if (!interopUserSync) {
-        sharingFunctions->syncSurface(*surfaceId);
-    }
     updateData.synchronizationStatus = SynchronizeStatus::ACQUIRE_SUCCESFUL;
+    if (!interopUserSync) {
+        if (sharingFunctions->syncSurface(surfaceId) != VA_STATUS_SUCCESS) {
+            updateData.synchronizationStatus = SYNCHRONIZE_ERROR;
+        }
+    }
 }
 
 void VASurface::getMemObjectInfo(size_t &paramValueSize, void *&paramValue) {
-    paramValueSize = sizeof(surfaceId);
-    paramValue = &surfaceId;
+    paramValueSize = sizeof(surfaceIdPtr);
+    paramValue = &surfaceIdPtr;
 }
 
 bool VASurface::validate(cl_mem_flags flags, cl_uint plane) {

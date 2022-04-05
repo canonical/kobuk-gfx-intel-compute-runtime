@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -23,6 +23,8 @@
 
 #include "sku_info.h"
 
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
 
@@ -52,20 +54,20 @@ enum class HeapIndex : uint32_t;
 unsigned int readEnablePreemptionRegKey();
 unsigned int getPid();
 bool isShutdownInProgress();
+CREATECONTEXT_PVTDATA initPrivateData(OsContextWin &osContext);
 
 class Wddm : public DriverModel {
   public:
     static constexpr DriverModelType driverModelType = DriverModelType::WDDM;
+    static constexpr std::uint64_t gpuHangIndication{std::numeric_limits<std::uint64_t>::max()};
 
     typedef HRESULT(WINAPI *CreateDXGIFactoryFcn)(REFIID riid, void **ppFactory);
     typedef HRESULT(WINAPI *DXCoreCreateAdapterFactoryFcn)(REFIID riid, void **ppFactory);
     typedef void(WINAPI *GetSystemInfoFcn)(SYSTEM_INFO *pSystemInfo);
-    typedef BOOL(WINAPI *VirtualFreeFcn)(LPVOID ptr, SIZE_T size, DWORD flags);
-    typedef LPVOID(WINAPI *VirtualAllocFcn)(LPVOID inPtr, SIZE_T size, DWORD flags, DWORD type);
 
     virtual ~Wddm();
 
-    static Wddm *createWddm(std::unique_ptr<HwDeviceIdWddm> hwDeviceId, RootDeviceEnvironment &rootDeviceEnvironment);
+    static Wddm *createWddm(std::unique_ptr<HwDeviceIdWddm> &&hwDeviceId, RootDeviceEnvironment &rootDeviceEnvironment);
     bool init();
 
     MOCKABLE_VIRTUAL bool evict(const D3DKMT_HANDLE *handleList, uint32_t numOfHandles, uint64_t &sizeToTrim);
@@ -75,8 +77,9 @@ class Wddm : public DriverModel {
     MOCKABLE_VIRTUAL D3DGPU_VIRTUAL_ADDRESS reserveGpuVirtualAddress(D3DGPU_VIRTUAL_ADDRESS minimumAddress, D3DGPU_VIRTUAL_ADDRESS maximumAddress, D3DGPU_SIZE_T size);
     MOCKABLE_VIRTUAL bool createContext(OsContextWin &osContext);
     MOCKABLE_VIRTUAL void applyAdditionalContextFlags(CREATECONTEXT_PVTDATA &privateData, OsContextWin &osContext, const HardwareInfo &hwInfo);
+    MOCKABLE_VIRTUAL void applyAdditionalMapGPUVAFields(D3DDDI_MAPGPUVIRTUALADDRESS &MapGPUVA, Gmm *gmm);
     MOCKABLE_VIRTUAL bool freeGpuVirtualAddress(D3DGPU_VIRTUAL_ADDRESS &gpuPtr, uint64_t size);
-    MOCKABLE_VIRTUAL NTSTATUS createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKMT_HANDLE &outHandle, D3DKMT_HANDLE &outResourceHandle, D3DKMT_HANDLE *outSharedHandle);
+    MOCKABLE_VIRTUAL NTSTATUS createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKMT_HANDLE &outHandle, D3DKMT_HANDLE &outResourceHandle, uint64_t *outSharedHandle);
     MOCKABLE_VIRTUAL bool createAllocation(const Gmm *gmm, D3DKMT_HANDLE &outHandle);
     MOCKABLE_VIRTUAL NTSTATUS createAllocationsAndMapGpuVa(OsHandleStorage &osHandles);
     MOCKABLE_VIRTUAL bool destroyAllocations(const D3DKMT_HANDLE *handles, uint32_t allocationCount, D3DKMT_HANDLE resourceHandle);
@@ -87,12 +90,13 @@ class Wddm : public DriverModel {
     MOCKABLE_VIRTUAL void *lockResource(const D3DKMT_HANDLE &handle, bool applyMakeResidentPriorToLock, size_t size);
     MOCKABLE_VIRTUAL void unlockResource(const D3DKMT_HANDLE &handle);
     MOCKABLE_VIRTUAL void kmDafLock(D3DKMT_HANDLE handle);
-    MOCKABLE_VIRTUAL bool isKmDafEnabled() const { return featureTable->ftrKmdDaf; }
+    MOCKABLE_VIRTUAL bool isKmDafEnabled() const { return featureTable->flags.ftrKmdDaf; }
 
     MOCKABLE_VIRTUAL bool setAllocationPriority(const D3DKMT_HANDLE *handles, uint32_t allocationCount, uint32_t priority);
 
     MOCKABLE_VIRTUAL bool destroyContext(D3DKMT_HANDLE context);
     MOCKABLE_VIRTUAL bool queryAdapterInfo();
+    MOCKABLE_VIRTUAL NTSTATUS createNTHandle(const D3DKMT_HANDLE *resourceHandle, HANDLE *ntHandle);
 
     MOCKABLE_VIRTUAL bool submit(uint64_t commandBuffer, size_t size, void *commandHeader, WddmSubmitArguments &submitArguments);
     MOCKABLE_VIRTUAL bool waitFromCpu(uint64_t lastFenceValue, const MonitoredFence &monitoredFence);
@@ -103,12 +107,17 @@ class Wddm : public DriverModel {
     MOCKABLE_VIRTUAL void releaseReservedAddress(void *reservedAddress);
     MOCKABLE_VIRTUAL bool reserveValidAddressRange(size_t size, void *&reservedMem);
 
-    MOCKABLE_VIRTUAL void *virtualAlloc(void *inPtr, size_t size, unsigned long flags, unsigned long type);
-    MOCKABLE_VIRTUAL int virtualFree(void *ptr, size_t size, unsigned long flags);
+    MOCKABLE_VIRTUAL void *virtualAlloc(void *inPtr, size_t size, bool topDownHint);
+    MOCKABLE_VIRTUAL void virtualFree(void *ptr, size_t size);
 
     MOCKABLE_VIRTUAL bool isShutdownInProgress();
 
+    bool isGpuHangDetected(OsContext &osContext) override;
+
     bool configureDeviceAddressSpace();
+    const FeatureTable &getFeatureTable() const {
+        return *featureTable;
+    }
 
     GT_SYSTEM_INFO *getGtSysInfo() const {
         DEBUG_BREAK_IF(!gtSystemInfo);
@@ -186,12 +195,15 @@ class Wddm : public DriverModel {
     PhysicalDevicePciBusInfo getPciBusInfo() const override;
 
     size_t getMaxMemAllocSize() const override;
+    bool skipResourceCleanup() const override;
 
     static std::vector<std::unique_ptr<HwDeviceId>> discoverDevices(ExecutionEnvironment &executionEnvironment);
 
     ADAPTER_BDF getAdapterBDF() const {
         return adapterBDF;
     }
+
+    PhyicalDevicePciSpeedInfo getPciSpeedInfo() const override;
 
   protected:
     std::unique_ptr<HwDeviceIdWddm> hwDeviceId;
@@ -223,7 +235,7 @@ class Wddm : public DriverModel {
     std::unique_ptr<GmmMemory> gmmMemory;
     uintptr_t minAddress = 0;
 
-    Wddm(std::unique_ptr<HwDeviceIdWddm> hwDeviceId, RootDeviceEnvironment &rootDeviceEnvironment);
+    Wddm(std::unique_ptr<HwDeviceIdWddm> &&hwDeviceId, RootDeviceEnvironment &rootDeviceEnvironment);
     MOCKABLE_VIRTUAL bool waitOnGPU(D3DKMT_HANDLE context);
     bool createDevice(PreemptionMode preemptionMode);
     bool createPagingQueue();
@@ -233,12 +245,11 @@ class Wddm : public DriverModel {
     MOCKABLE_VIRTUAL void createPagingFenceLogger();
 
     static GetSystemInfoFcn getSystemInfo;
-    static VirtualFreeFcn virtualFreeFnc;
-    static VirtualAllocFcn virtualAllocFnc;
 
     std::unique_ptr<KmDafListener> kmDafListener;
     std::unique_ptr<WddmInterface> wddmInterface;
     std::unique_ptr<WddmResidentAllocationsContainer> temporaryResources;
     std::unique_ptr<WddmResidencyLogger> residencyLogger;
+    std::unique_ptr<OSMemory> osMemory;
 };
 } // namespace NEO

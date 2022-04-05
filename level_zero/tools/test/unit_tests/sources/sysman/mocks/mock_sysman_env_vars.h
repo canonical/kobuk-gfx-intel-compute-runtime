@@ -7,8 +7,9 @@
 
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/mocks/mock_io_functions.h"
+#include "shared/test/common/test_macros/test.h"
 
-#include "test.h"
+extern bool sysmanUltsEnable;
 
 using namespace NEO;
 
@@ -20,6 +21,9 @@ namespace ult {
 class SysmanEnabledFixture : public ::testing::Test {
   public:
     void SetUp() override {
+        if (!sysmanUltsEnable) {
+            GTEST_SKIP();
+        }
         mockableEnvValues = std::make_unique<envVariableMap>();
         (*mockableEnvValues)["ZES_ENABLE_SYSMAN"] = "1";
         mockableEnvValuesBackup = std::make_unique<VariableBackup<envVariableMap *>>(&IoFunctions::mockableEnvValues, mockableEnvValues.get());

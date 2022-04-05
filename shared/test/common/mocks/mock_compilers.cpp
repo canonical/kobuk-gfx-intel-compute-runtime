@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -78,7 +78,7 @@ void MockCompilerEnableGuard::Enable() {
         if (fclDebugVars == nullptr) {
             fclDebugVars.reset(new MockCompilerDebugVars);
         }
-        if (fclDebugVars == nullptr) {
+        if (igcDebugVars == nullptr) {
             igcDebugVars.reset(new MockCompilerDebugVars);
         }
 
@@ -137,6 +137,11 @@ bool CIF_GET_INTERFACE_CLASS(IgcOclDeviceCtx, 2)::GetSystemRoutine(IGC::SystemRo
                                                                    CIF::Builtins::BufferSimple *stateSaveAreaHeaderInit) {
     return true;
 }
+
+const char *CIF_GET_INTERFACE_CLASS(IgcOclDeviceCtx, 3)::GetIGCRevision() {
+    return "";
+}
+
 // Platform stubs
 Platform<0>::~Platform() {}
 
@@ -329,6 +334,12 @@ IGC::OclTranslationOutputBase *CIF_GET_INTERFACE_CLASS(FclOclTranslationCtx, 1):
     return nullptr;
 }
 
+void CIF_GET_INTERFACE_CLASS(FclOclTranslationCtx, 2)::GetFclOptions(CIF::Builtins::BufferSimple *options) {
+}
+
+void CIF_GET_INTERFACE_CLASS(FclOclTranslationCtx, 2)::GetFclInternalOptions(CIF::Builtins::BufferSimple *internalOptions) {
+}
+
 // MockFclOclDeviceCtx
 FclOclDeviceCtx<0>::~FclOclDeviceCtx() {}
 
@@ -460,7 +471,7 @@ void translate(bool usingIgc, CIF::Builtins::BufferSimple *src, CIF::Builtins::B
 MockIgcOclDeviceCtx::MockIgcOclDeviceCtx() {
     platform = new MockCIFPlatform;
     gtSystemInfo = new MockGTSystemInfo;
-    igcFeWa = new MockIgcFeaturesAndWorkarounds;
+    igcFtrWa = new MockIgcFeaturesAndWorkarounds;
 }
 
 MockIgcOclDeviceCtx::~MockIgcOclDeviceCtx() {
@@ -470,8 +481,8 @@ MockIgcOclDeviceCtx::~MockIgcOclDeviceCtx() {
     if (gtSystemInfo != nullptr) {
         gtSystemInfo->Release();
     }
-    if (igcFeWa != nullptr) {
-        igcFeWa->Release();
+    if (igcFtrWa != nullptr) {
+        igcFtrWa->Release();
     }
 }
 
@@ -516,6 +527,10 @@ IGC::OclTranslationOutputBase *MockIgcOclTranslationCtx::TranslateImpl(
     CIF::Builtins::BufferSimple *internalOptions,
     CIF::Builtins::BufferSimple *tracingOptions,
     uint32_t tracingOptionsCount) {
+    if (igcDebugVars->shouldReturnInvalidTranslationOutput) {
+        return nullptr;
+    }
+
     auto out = new MockOclTranslationOutput();
     translate(true, src, options, internalOptions, out);
     return out;
@@ -529,6 +544,10 @@ IGC::OclTranslationOutputBase *MockIgcOclTranslationCtx::TranslateImpl(
     CIF::Builtins::BufferSimple *tracingOptions,
     uint32_t tracingOptionsCount,
     void *gtpinInput) {
+    if (igcDebugVars->shouldReturnInvalidTranslationOutput) {
+        return nullptr;
+    }
+
     auto out = new MockOclTranslationOutput();
     translate(true, src, options, internalOptions, out);
     return out;
@@ -551,6 +570,10 @@ IGC::OclTranslationOutputBase *MockIgcOclTranslationCtx::TranslateImpl(
     CIF::Builtins::BufferSimple *tracingOptions,
     uint32_t tracingOptionsCount,
     void *gtPinInput) {
+    if (igcDebugVars->shouldReturnInvalidTranslationOutput) {
+        return nullptr;
+    }
+
     auto out = new MockOclTranslationOutput();
     translate(true, src, options, internalOptions, out);
     return out;
@@ -613,6 +636,10 @@ IGC::OclTranslationOutputBase *MockFclOclTranslationCtx::TranslateImpl(
     CIF::Builtins::BufferSimple *internalOptions,
     CIF::Builtins::BufferSimple *tracingOptions,
     uint32_t tracingOptionsCount) {
+    if (fclDebugVars->shouldReturnInvalidTranslationOutput) {
+        return nullptr;
+    }
+
     auto out = new MockOclTranslationOutput();
     translate(false, src, options, internalOptions, out);
     return out;

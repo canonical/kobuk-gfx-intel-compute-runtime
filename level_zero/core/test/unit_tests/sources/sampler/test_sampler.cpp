@@ -1,13 +1,12 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/utilities/numeric.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/sampler/sampler_hw.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
@@ -64,6 +63,8 @@ HWTEST2_P(SamplerCreateTest, givenDifferentDescriptorValuesThenSamplerIsCorrectl
 
     sampler->initialize(device, &desc);
 
+    EXPECT_EQ(SAMPLER_STATE::LOD_PRECLAMP_MODE::LOD_PRECLAMP_MODE_OGL, sampler->samplerState.getLodPreclampMode());
+
     if (isNormalized == static_cast<ze_bool_t>(true)) {
         EXPECT_FALSE(sampler->samplerState.getNonNormalizedCoordinateEnable());
     } else {
@@ -85,11 +86,11 @@ HWTEST2_P(SamplerCreateTest, givenDifferentDescriptorValuesThenSamplerIsCorrectl
         EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_WRAP,
                   sampler->samplerState.getTczAddressControlMode());
     } else if (addressMode == ZE_SAMPLER_ADDRESS_MODE_CLAMP) {
-        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP_BORDER,
+        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP,
                   sampler->samplerState.getTcxAddressControlMode());
-        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP_BORDER,
+        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP,
                   sampler->samplerState.getTcyAddressControlMode());
-        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP_BORDER,
+        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP,
                   sampler->samplerState.getTczAddressControlMode());
     } else if (addressMode == ZE_SAMPLER_ADDRESS_MODE_MIRROR) {
         EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_MIRROR,
@@ -99,11 +100,11 @@ HWTEST2_P(SamplerCreateTest, givenDifferentDescriptorValuesThenSamplerIsCorrectl
         EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_MIRROR,
                   sampler->samplerState.getTczAddressControlMode());
     } else if (addressMode == ZE_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER) {
-        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP,
+        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP_BORDER,
                   sampler->samplerState.getTcxAddressControlMode());
-        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP,
+        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP_BORDER,
                   sampler->samplerState.getTcyAddressControlMode());
-        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP,
+        EXPECT_EQ(SAMPLER_STATE::TEXTURE_COORDINATE_MODE_CLAMP_BORDER,
                   sampler->samplerState.getTczAddressControlMode());
     }
 

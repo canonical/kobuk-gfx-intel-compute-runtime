@@ -6,10 +6,9 @@
  */
 
 #include "shared/source/helpers/cache_flush.inl"
+#include "shared/source/helpers/pipe_control_args.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw.h"
-
-#include "pipe_control_args.h"
 
 namespace L0 {
 
@@ -20,10 +19,11 @@ void CommandListCoreFamily<gfxCoreFamily>::applyMemoryRangesBarrier(uint32_t num
 
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
 
-    auto &hwInfo = commandContainer.getDevice()->getHardwareInfo();
+    const auto &hwInfo = this->device->getHwInfo();
     bool supportL3Control = hwInfo.capabilityTable.supportCacheFlushAfterWalker;
     if (!supportL3Control) {
-        NEO::PipeControlArgs args(true);
+        NEO::PipeControlArgs args;
+        args.dcFlushEnable = NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo);
         NEO::MemorySynchronizationCommands<GfxFamily>::addPipeControl(*commandContainer.getCommandStream(),
                                                                       args);
     } else {
@@ -70,7 +70,7 @@ void CommandListCoreFamily<gfxCoreFamily>::applyMemoryRangesBarrier(uint32_t num
 
             NEO::flushGpuCache<GfxFamily>(commandStream, subranges,
                                           postSyncAddressToFlush,
-                                          device->getHwInfo());
+                                          hwInfo);
         }
     }
 }

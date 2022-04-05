@@ -9,9 +9,9 @@
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/helpers/blit_commands_helper.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
+#include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
 
@@ -24,7 +24,7 @@ HWTEST_F(EncodeMiFlushDWTest, GivenLinearStreamWhenCllaedEncodeWithNoPostSyncThe
     LinearStream stream(&gfxAllocation);
 
     MiFlushArgs args;
-    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, 0, 0, args);
+    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, 0, 0, args, *defaultHwInfo);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, stream.getCpuBase(), stream.getUsed());
@@ -47,7 +47,7 @@ HWTEST_F(EncodeMiFlushDWTest, GivenLinearStreamWhenCllaedEncodeWithPostSyncDataT
 
     MiFlushArgs args;
     args.commandWithPostSync = true;
-    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, args);
+    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, args, *defaultHwInfo);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, stream.getCpuBase(), stream.getUsed());
@@ -79,7 +79,7 @@ HWTEST_F(EncodeMiFlushDWTest, GivenLinearStreamWhenCllaedEncodeWithTimestampFasl
 
     MiFlushArgs args;
     args.commandWithPostSync = true;
-    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, args);
+    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, args, *defaultHwInfo);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, stream.getCpuBase(), stream.getUsed());
@@ -111,7 +111,7 @@ HWTEST_F(EncodeMiFlushDWTest, GivenLinearStreamWhenCllaedEncodeWithTimestampTrue
     MiFlushArgs args;
     args.timeStampOperation = true;
     args.commandWithPostSync = true;
-    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, args);
+    EncodeMiFlushDW<FamilyType>::programMiFlushDw(stream, address, data, args, *defaultHwInfo);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, stream.getCpuBase(), stream.getUsed());

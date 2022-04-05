@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,8 +7,10 @@
 
 #include "shared/test/common/mocks/mock_command_stream_receiver.h"
 
-bool MockCommandStreamReceiver::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
-    return true;
+volatile uint32_t MockCommandStreamReceiver::mockTagAddress[MockCommandStreamReceiver::tagSize];
+
+SubmissionStatus MockCommandStreamReceiver::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
+    return SubmissionStatus::SUCCESS;
 }
 
 CompletionStamp MockCommandStreamReceiver::flushTask(

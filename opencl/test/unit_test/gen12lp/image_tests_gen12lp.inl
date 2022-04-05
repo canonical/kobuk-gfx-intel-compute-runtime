@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,14 +10,14 @@
 #include "shared/source/image/image_surface_state.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/test/common/helpers/variable_backup.h"
+#include "shared/test/common/libult/gen12lp/special_ult_helper_gen12lp.h"
+#include "shared/test/common/mocks/mock_allocation_properties.h"
+#include "shared/test/common/mocks/mock_gmm.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/platform/platform.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
-#include "opencl/test/unit_test/gen12lp/special_ult_helper_gen12lp.h"
-#include "opencl/test/unit_test/mocks/mock_allocation_properties.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_gmm.h"
-#include "test.h"
 
 #include <functional>
 
@@ -94,7 +94,7 @@ GEN12LPTEST_F(ImageClearColorFixture, givenMcsAllocationWhenSetArgIsCalledWithUn
 
     auto surfaceState = FamilyType::cmdInitRenderSurfaceState;
     auto imageHw = static_cast<ImageHw<FamilyType> *>(image.get());
-    mcsAlloc->setDefaultGmm(new Gmm(context->getDevice(0)->getGmmClientContext(), nullptr, 1, 0, false));
+    mcsAlloc->setDefaultGmm(new Gmm(context->getDevice(0)->getGmmClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
     surfaceState.setSurfaceBaseAddress(0xABCDEF1000);
     imageHw->setMcsSurfaceInfo(msi);
     imageHw->setMcsAllocation(mcsAlloc);
@@ -110,7 +110,7 @@ GEN12LPTEST_F(ImageClearColorFixture, givenMcsAllocationWhenSetArgIsCalledWithUn
     EXPECT_EQ(surfaceState.getAuxiliarySurfaceMode(), AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_MCS_LCE);
 }
 
-GEN12LPTEST_F(gen12LpImageTests, givenRenderCompressionThenSurfaceStateParamsAreSetForRenderCompression) {
+GEN12LPTEST_F(gen12LpImageTests, givenCompressionThenSurfaceStateParamsAreSetForCompression) {
     MockContext context;
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     cl_image_desc imgDesc = Image2dDefaults::imageDesc;
@@ -155,17 +155,4 @@ GEN12LPTEST_F(gen12LpImageTests, givenMediaCompressionThenSurfaceStateParamsAreS
 
     EXPECT_TRUE(surfaceState.getMemoryCompressionEnable());
     EXPECT_EQ(surfaceState.getAuxiliarySurfaceMode(), RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE);
-}
-
-using Gen12lpRenderSurfaceStateDataTests = ::testing::Test;
-
-GEN12LPTEST_F(Gen12lpRenderSurfaceStateDataTests, WhenMemoryObjectControlStateIndexToMocsTablesIsSetThenValueIsShifted) {
-    using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
-    auto surfaceState = FamilyType::cmdInitRenderSurfaceState;
-
-    uint32_t value = 4;
-    surfaceState.setMemoryObjectControlStateIndexToMocsTables(value);
-
-    EXPECT_EQ(surfaceState.TheStructure.Common.MemoryObjectControlStateIndexToMocsTables, value >> 1);
-    EXPECT_EQ(surfaceState.getMemoryObjectControlStateIndexToMocsTables(), value);
 }

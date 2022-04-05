@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,8 +14,7 @@
 #include "shared/test/common/mocks/mock_compilers.h"
 #include "shared/test/common/mocks/mock_io_functions.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/source/driver/driver_imp.h"
@@ -34,8 +33,33 @@ TEST(zeInit, whenCallingZeInitThenInitializeOnDriverIsCalled) {
 
     auto result = zeInit(ZE_INIT_FLAG_GPU_ONLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-
     EXPECT_EQ(1u, driver.initCalledCount);
+}
+
+TEST(zeInit, whenCallingZeInitWithNoFlagsThenInitializeOnDriverIsCalled) {
+    Mock<Driver> driver;
+
+    auto result = zeInit(0);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(1u, driver.initCalledCount);
+}
+
+TEST(zeInit, whenCallingZeInitWithoutGpuOnlyFlagThenInitializeOnDriverIsNotCalled) {
+    Mock<Driver> driver;
+
+    auto result = zeInit(ZE_INIT_FLAG_VPU_ONLY);
+    EXPECT_EQ(ZE_RESULT_ERROR_UNINITIALIZED, result);
+    EXPECT_EQ(0u, driver.initCalledCount);
+}
+
+using DriverHandleImpTest = Test<DeviceFixture>;
+TEST_F(DriverHandleImpTest, givenDriverImpWhenCallingupdateRootDeviceBitFieldsThendeviceBitfieldsAreUpdatedInAccordanceWithNeoDevice) {
+    auto hwInfo = *NEO::defaultHwInfo;
+    auto newNeoDevice = std::unique_ptr<NEO::Device>(NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo, 0));
+    driverHandle->updateRootDeviceBitFields(newNeoDevice);
+    const auto rootDeviceIndex = neoDevice->getRootDeviceIndex();
+    auto entry = driverHandle->deviceBitfields.find(rootDeviceIndex);
+    EXPECT_EQ(newNeoDevice->getDeviceBitfield(), entry->second);
 }
 
 using DriverVersionTest = Test<DeviceFixture>;
@@ -122,6 +146,84 @@ TEST_F(DriverVersionTest, whenCallingGetDriverPropertiesRepeatedlyThenTheSameUui
 
         EXPECT_EQ(0, memcmp(properties.uuid.id, newProperties.uuid.id, sizeof(uint64_t)));
     }
+}
+
+using ImportNTHandle = Test<DeviceFixture>;
+
+class MemoryManagerNTHandleMock : public NEO::OsAgnosticMemoryManager {
+  public:
+    MemoryManagerNTHandleMock(NEO::ExecutionEnvironment &executionEnvironment) : NEO::OsAgnosticMemoryManager(executionEnvironment) {}
+
+    NEO::GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex, AllocationType allocType) override {
+        auto graphicsAllocation = createMemoryAllocation(allocType, nullptr, reinterpret_cast<void *>(1), 1,
+                                                         4096u, reinterpret_cast<uint64_t>(handle), MemoryPool::SystemCpuInaccessible,
+                                                         rootDeviceIndex, false, false, false);
+        graphicsAllocation->setSharedHandle(static_cast<osHandle>(reinterpret_cast<uint64_t>(handle)));
+        graphicsAllocation->set32BitAllocation(false);
+        graphicsAllocation->setDefaultGmm(new Gmm(executionEnvironment.rootDeviceEnvironments[0]->getGmmClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
+        return graphicsAllocation;
+    }
+};
+
+HWTEST_F(ImportNTHandle, givenNTHandleWhenCreatingDeviceMemoryThenSuccessIsReturned) {
+    using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
+
+    ze_device_mem_alloc_desc_t devProperties = {};
+    devProperties.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_PROPERTIES;
+
+    uint64_t imageHandle = 0x1;
+    ze_external_memory_import_win32_handle_t importNTHandle = {};
+    importNTHandle.handle = &imageHandle;
+    importNTHandle.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_WIN32;
+    importNTHandle.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_WIN32;
+    devProperties.pNext = &importNTHandle;
+
+    NEO::MockDevice *neoDevice = nullptr;
+    neoDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
+    NEO::MemoryManager *prevMemoryManager = driverHandle->getMemoryManager();
+    NEO::MemoryManager *currMemoryManager = new MemoryManagerNTHandleMock(*neoDevice->executionEnvironment);
+    driverHandle->setMemoryManager(currMemoryManager);
+    neoDevice->injectMemoryManager(currMemoryManager);
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    auto device = L0::Device::create(driverHandle.get(), neoDevice, false, &result);
+
+    context->addDeviceAndSubDevices(device);
+
+    void *ptr;
+
+    result = context->allocDeviceMem(device, &devProperties, 100, 1, &ptr);
+
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+
+    auto alloc = driverHandle->getSvmAllocsManager()->getSVMAlloc(ptr);
+
+    ASSERT_EQ(alloc->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex())->peekSharedHandle(), NEO::toOsHandle(importNTHandle.handle));
+    result = context->freeMem(ptr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+
+    driverHandle->setMemoryManager(prevMemoryManager);
+    delete device;
+}
+
+HWTEST_F(ImportNTHandle, givenNotExistingNTHandleWhenCreatingDeviceMemoryThenErrorIsReturned) {
+    using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
+
+    ze_device_mem_alloc_desc_t devProperties = {};
+    devProperties.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_PROPERTIES;
+
+    uint64_t imageHandle = 0x1;
+    ze_external_memory_import_win32_handle_t importNTHandle = {};
+    importNTHandle.handle = &imageHandle;
+    importNTHandle.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_WIN32;
+    importNTHandle.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_WIN32;
+    devProperties.pNext = &importNTHandle;
+
+    void *ptr;
+
+    auto result = context->allocDeviceMem(device, &devProperties, 100, 1, &ptr);
+
+    EXPECT_EQ(result, ZE_RESULT_ERROR_INVALID_ARGUMENT);
 }
 
 TEST(DriverTestFamilySupport, whenInitializingDriverOnSupportedFamilyThenDriverIsCreated) {
@@ -279,8 +381,8 @@ TEST(DriverTest, givenInvalidCompilerEnvironmentThenDependencyUnavailableErrorIs
     DriverImp driverImp;
     auto oldFclDllName = Os::frontEndDllName;
     auto oldIgcDllName = Os::igcDllName;
-    Os::frontEndDllName = "invalidFCL";
-    Os::igcDllName = "invalidIGC";
+    Os::frontEndDllName = "_invalidFCL";
+    Os::igcDllName = "_invalidIGC";
     driverImp.initialize(&result);
     EXPECT_EQ(result, ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE);
 
@@ -464,7 +566,7 @@ TEST_F(DriverHandleTest, whenQueryingForApiVersionThenExpectedVersionIsReturned)
     ze_api_version_t version = {};
     ze_result_t result = driverHandle->getApiVersion(&version);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    EXPECT_EQ(ZE_API_VERSION_1_1, version);
+    EXPECT_EQ(ZE_API_VERSION_1_3, version);
 }
 
 TEST_F(DriverHandleTest, whenQueryingForDevicesWithCountGreaterThanZeroAndNullDevicePointerThenNullHandleIsReturned) {

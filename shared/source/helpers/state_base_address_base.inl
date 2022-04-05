@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/command_stream/memory_compression_state.h"
+#include "shared/source/gmm_helper/cache_settings_helper.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/cache_policy.h"
 #include "shared/source/helpers/constants.h"
@@ -37,23 +38,21 @@ void StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(
 
     *stateBaseAddress = GfxFamily::cmdInitStateBaseAddress;
     bool overrideBindlessSurfaceStateBase = true;
+
+    const auto surfaceStateCount = getMaxBindlessSurfaceStates();
+    stateBaseAddress->setBindlessSurfaceStateSize(surfaceStateCount);
+
     if (useGlobalHeapsBaseAddress) {
         stateBaseAddress->setDynamicStateBaseAddressModifyEnable(true);
         stateBaseAddress->setDynamicStateBufferSizeModifyEnable(true);
         stateBaseAddress->setDynamicStateBaseAddress(globalHeapsBaseAddress);
         stateBaseAddress->setDynamicStateBufferSize(MemoryConstants::pageSize64k);
 
-        stateBaseAddress->setIndirectObjectBaseAddressModifyEnable(true);
-        stateBaseAddress->setIndirectObjectBufferSizeModifyEnable(true);
-        stateBaseAddress->setIndirectObjectBaseAddress(indirectObjectHeapBaseAddress);
-        stateBaseAddress->setIndirectObjectBufferSize(MemoryConstants::sizeOf4GBinPageEntities);
-
         stateBaseAddress->setSurfaceStateBaseAddressModifyEnable(true);
         stateBaseAddress->setSurfaceStateBaseAddress(globalHeapsBaseAddress);
 
         stateBaseAddress->setBindlessSurfaceStateBaseAddressModifyEnable(true);
         stateBaseAddress->setBindlessSurfaceStateBaseAddress(globalHeapsBaseAddress);
-        stateBaseAddress->setBindlessSurfaceStateSize(MemoryConstants::sizeOf4GBinPageEntities);
 
         overrideBindlessSurfaceStateBase = false;
     } else {
@@ -64,25 +63,23 @@ void StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(
             stateBaseAddress->setDynamicStateBufferSize(dsh->getHeapSizeInPages());
         }
 
-        if (ioh) {
-            stateBaseAddress->setIndirectObjectBaseAddressModifyEnable(true);
-            stateBaseAddress->setIndirectObjectBufferSizeModifyEnable(true);
-            stateBaseAddress->setIndirectObjectBaseAddress(ioh->getHeapGpuBase());
-            stateBaseAddress->setIndirectObjectBufferSize(ioh->getHeapSizeInPages());
-        }
-
         if (ssh) {
             stateBaseAddress->setSurfaceStateBaseAddressModifyEnable(true);
             stateBaseAddress->setSurfaceStateBaseAddress(ssh->getHeapGpuBase());
         }
     }
 
+    appendIohParameters(stateBaseAddress, ioh, useGlobalHeapsBaseAddress, indirectObjectHeapBaseAddress);
+
     if (setInstructionStateBaseAddress) {
         stateBaseAddress->setInstructionBaseAddressModifyEnable(true);
         stateBaseAddress->setInstructionBaseAddress(instructionHeapBaseAddress);
         stateBaseAddress->setInstructionBufferSizeModifyEnable(true);
         stateBaseAddress->setInstructionBufferSize(MemoryConstants::sizeOf4GBinPageEntities);
-        stateBaseAddress->setInstructionMemoryObjectControlState(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_STATE_HEAP_BUFFER));
+
+        auto resourceUsage = CacheSettingsHelper::getGmmUsageType(AllocationType::INTERNAL_HEAP, DebugManager.flags.DisableCachingForHeaps.get(), *gmmHelper->getHardwareInfo());
+
+        stateBaseAddress->setInstructionMemoryObjectControlState(gmmHelper->getMOCS(resourceUsage));
     }
 
     if (setGeneralStateBaseAddress) {

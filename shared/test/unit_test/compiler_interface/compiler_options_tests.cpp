@@ -5,7 +5,7 @@
  *
  */
 
-#include "test.h"
+#include "shared/test/common/test_macros/test.h"
 
 #include "compiler_options.h"
 
@@ -43,6 +43,28 @@ TEST(CompilerOptions, WhenConcatenateAppendIsCalledThenAddsSpaceAsSeparatorOnlyI
     expected += " ";
     expected += NEO::CompilerOptions::fastRelaxedMath.data();
     EXPECT_STREQ(expected.c_str(), concatenated.c_str());
+}
+
+TEST(CompilerOptions, WhenTryingToExtractNonexistentOptionThenFalseIsReturnedAndStringIsNotModified) {
+    const std::string optionsInput{"-ze-allow-zebin -cl-intel-has-buffer-offset-arg"};
+
+    std::string options{optionsInput};
+    const bool wasExtracted{NEO::CompilerOptions::extract(NEO::CompilerOptions::noRecompiledFromIr, options)};
+
+    EXPECT_FALSE(wasExtracted);
+    EXPECT_EQ(optionsInput, options);
+}
+
+TEST(CompilerOptions, WhenTryingToExtractOptionThatExistsThenTrueIsReturnedAndStringIsModified) {
+    const std::string optionsInput{"-ze-allow-zebin -Wno-recompiled-from-ir -cl-intel-has-buffer-offset-arg"};
+
+    std::string options{optionsInput};
+    const bool wasExtracted{NEO::CompilerOptions::extract(NEO::CompilerOptions::noRecompiledFromIr, options)};
+
+    EXPECT_TRUE(wasExtracted);
+
+    const std::string expectedOptions{"-ze-allow-zebin  -cl-intel-has-buffer-offset-arg"};
+    EXPECT_EQ(expectedOptions, options);
 }
 
 TEST(CompilerOptions, WhenCheckingForPresenceOfOptionThenRejectsSubstrings) {

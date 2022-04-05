@@ -18,14 +18,14 @@ HwHelper &HwHelper::get(GFXCORE_FAMILY gfxCore) {
     return *hwHelperFactory[gfxCore];
 }
 
-bool HwHelper::renderCompressedBuffersSupported(const HardwareInfo &hwInfo) {
+bool HwHelper::compressedBuffersSupported(const HardwareInfo &hwInfo) {
     if (DebugManager.flags.RenderCompressedBuffersEnabled.get() != -1) {
         return !!DebugManager.flags.RenderCompressedBuffersEnabled.get();
     }
     return hwInfo.capabilityTable.ftrRenderCompressedBuffers;
 }
 
-bool HwHelper::renderCompressedImagesSupported(const HardwareInfo &hwInfo) {
+bool HwHelper::compressedImagesSupported(const HardwareInfo &hwInfo) {
     if (DebugManager.flags.RenderCompressedImagesEnabled.get() != -1) {
         return !!DebugManager.flags.RenderCompressedImagesEnabled.get();
     }
@@ -65,17 +65,4 @@ uint32_t HwHelper::getSubDevicesCount(const HardwareInfo *pHwInfo) {
     }
 }
 
-uint32_t HwHelper::getGpgpuEnginesCount(const HardwareInfo &hwInfo) {
-    uint32_t enginesCount = 0;
-
-    if (hwInfo.featureTable.ftrCCSNode) {
-        enginesCount += hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
-    }
-
-    if (hwInfo.featureTable.ftrRcsNode) {
-        enginesCount += 1;
-    }
-
-    return enginesCount;
-}
 } // namespace NEO

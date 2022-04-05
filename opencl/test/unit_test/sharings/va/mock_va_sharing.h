@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -27,6 +27,7 @@ class VASharingFunctionsMock : public VASharingFunctions {
     uint16_t derivedImageHeight = 256;
     uint16_t derivedImageWidth = 256;
     VAStatus queryImageFormatsReturnStatus = VA_STATUS_SUCCESS;
+    VAStatus syncSurfaceReturnStatus = VA_STATUS_SUCCESS;
 
     bool isValidDisplayCalled = false;
     bool deriveImageCalled = false;
@@ -34,7 +35,7 @@ class VASharingFunctionsMock : public VASharingFunctions {
     bool syncSurfaceCalled = false;
     bool extGetSurfaceHandleCalled = false;
     bool exportSurfaceHandleCalled = false;
-
+    VASurfaceID syncedSurfaceID = 0;
     osHandle acquiredVaHandle = 0;
 
     bool haveExportSurfaceHandle = false;
@@ -109,7 +110,8 @@ class VASharingFunctionsMock : public VASharingFunctions {
 
     VAStatus syncSurface(VASurfaceID vaSurface) override {
         syncSurfaceCalled = true;
-        return VA_STATUS_SUCCESS;
+        syncedSurfaceID = vaSurface;
+        return syncSurfaceReturnStatus;
     }
 
     VAStatus queryImageFormats(VADisplay vaDisplay, VAImageFormat *formatList, int *numFormats) override {

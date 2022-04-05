@@ -11,7 +11,6 @@
 #include "shared/source/memory_manager/unified_memory_manager.h"
 
 #include "opencl/extensions/public/cl_ext_private.h"
-#include "opencl/source/helpers/memory_properties_helpers.h"
 #include "opencl/source/mem_obj/mem_obj.h"
 
 #include "CL/cl.h"
@@ -39,8 +38,8 @@ class MemObjHelper {
                                                                      const HardwareInfo &hwInfo, DeviceBitfield subDevicesBitfieldParam, bool deviceOnlyVisibilty);
     static bool checkMemFlagsForSubBuffer(cl_mem_flags flags);
     static SVMAllocsManager::SvmAllocationProperties getSvmAllocationProperties(cl_mem_flags flags);
-    static bool isSuitableForRenderCompression(bool renderCompressed, const MemoryProperties &properties, Context &context,
-                                               bool preferCompression);
+    static bool isSuitableForCompression(bool compressionSupported, const MemoryProperties &properties, Context &context,
+                                         bool preferCompression);
 
   protected:
     static bool validateExtraMemoryProperties(const MemoryProperties &memoryProperties, cl_mem_flags flags,

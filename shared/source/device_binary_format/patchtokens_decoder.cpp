@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -284,30 +284,23 @@ inline void decodeKernelDataParameterToken(const SPatchDataParameterBuffer *toke
     case DATA_PARAMETER_PARENT_EVENT:
         crossthread.parentEvent = token;
         break;
-    case DATA_PARAMETER_CHILD_BLOCK_SIMD_SIZE:
-        crossthread.childBlockSimdSize.push_back(token);
-        break;
     case DATA_PARAMETER_PREFERRED_WORKGROUP_MULTIPLE:
         crossthread.preferredWorkgroupMultiple = token;
         break;
+    case DATA_PARAMETER_IMPL_ARG_BUFFER:
+        out.tokens.crossThreadPayloadArgs.implicitArgsBufferOffset = token;
+        break;
 
     case DATA_PARAMETER_NUM_HARDWARE_THREADS:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case DATA_PARAMETER_PRINTF_SURFACE_SIZE:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case DATA_PARAMETER_IMAGE_SRGB_CHANNEL_ORDER:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case DATA_PARAMETER_STAGE_IN_GRID_ORIGIN:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case DATA_PARAMETER_STAGE_IN_GRID_SIZE:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case DATA_PARAMETER_LOCAL_ID:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case DATA_PARAMETER_EXECUTION_MASK:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case DATA_PARAMETER_VME_IMAGE_TYPE:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case DATA_PARAMETER_VME_MB_SKIP_BLOCK_TYPE:
+    case DATA_PARAMETER_CHILD_BLOCK_SIMD_SIZE:
         // ignored intentionally
         break;
     }
@@ -321,6 +314,9 @@ inline bool decodeToken(const SPatchItemHeader *token, KernelFromPatchtokens &ou
         out.unhandledTokens.push_back(token);
         break;
     }
+    case PATCH_TOKEN_INTERFACE_DESCRIPTOR_DATA:
+        PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "Ignored kernel-scope Patch Token: %d\n", token->Token);
+        break;
     case PATCH_TOKEN_SAMPLER_STATE_ARRAY:
         assignToken(out.tokens.samplerStateArray, token);
         break;
@@ -338,9 +334,6 @@ inline bool decodeToken(const SPatchItemHeader *token, KernelFromPatchtokens &ou
         break;
     case PATCH_TOKEN_MEDIA_INTERFACE_DESCRIPTOR_LOAD:
         assignToken(out.tokens.mediaInterfaceDescriptorLoad, token);
-        break;
-    case PATCH_TOKEN_INTERFACE_DESCRIPTOR_DATA:
-        assignToken(out.tokens.interfaceDescriptorData, token);
         break;
     case PATCH_TOKEN_THREAD_PAYLOAD:
         assignToken(out.tokens.threadPayload, token);
@@ -397,17 +390,15 @@ inline bool decodeToken(const SPatchItemHeader *token, KernelFromPatchtokens &ou
     case PATCH_TOKEN_KERNEL_ARGUMENT_INFO:
         assignArgInfo(out, token);
         break;
+    case PATCH_TOKEN_GLOBAL_HOST_ACCESS_TABLE:
+        assignToken(out.tokens.hostAccessTable, token);
+        break;
 
     case PATCH_TOKEN_SAMPLER_KERNEL_ARGUMENT:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case PATCH_TOKEN_IMAGE_MEMORY_OBJECT_KERNEL_ARGUMENT:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case PATCH_TOKEN_GLOBAL_MEMORY_OBJECT_KERNEL_ARGUMENT:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case PATCH_TOKEN_STATELESS_GLOBAL_MEMORY_OBJECT_KERNEL_ARGUMENT:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case PATCH_TOKEN_STATELESS_CONSTANT_MEMORY_OBJECT_KERNEL_ARGUMENT:
-        CPP_ATTRIBUTE_FALLTHROUGH;
     case PATCH_TOKEN_STATELESS_DEVICE_QUEUE_KERNEL_ARGUMENT:
         assignArg(out, token);
         break;

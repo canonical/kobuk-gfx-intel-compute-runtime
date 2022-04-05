@@ -1,11 +1,14 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include "shared/source/helpers/blit_commands_helper.h"
+#include "shared/test/common/helpers/variable_backup.h"
+
 #include "opencl/source/context/context.h"
 #include "opencl/source/sharings/sharing_factory.h"
 #include "opencl/test/unit_test/mocks/ult_cl_device_factory.h"
@@ -15,6 +18,7 @@
 namespace NEO {
 
 class AsyncEventsHandler;
+class OsContext;
 
 class MockContext : public Context {
   public:
@@ -47,8 +51,6 @@ class MockContext : public Context {
     void registerSharingWithId(SharingFunctions *sharing, SharingType sharingId);
     std::unique_ptr<AsyncEventsHandler> &getAsyncEventsHandlerUniquePtr();
     void initializeWithDevices(const ClDeviceVector &devices, bool noSpecialQueue);
-
-    SchedulerKernel &getSchedulerKernel() override;
 
   private:
     ClDevice *pDevice = nullptr;
@@ -94,4 +96,14 @@ struct MockUnrestrictiveContextMultiGPU : MockContext {
     ClDevice *pSubDevice11 = nullptr;
 };
 
+class BcsMockContext : public MockContext {
+  public:
+    BcsMockContext(ClDevice *device);
+    ~BcsMockContext() override;
+
+    std::unique_ptr<OsContext> bcsOsContext;
+    std::unique_ptr<CommandStreamReceiver> bcsCsr;
+    VariableBackup<BlitHelperFunctions::BlitMemoryToAllocationFunc> blitMemoryToAllocationFuncBackup{
+        &BlitHelperFunctions::blitMemoryToAllocation};
+};
 } // namespace NEO

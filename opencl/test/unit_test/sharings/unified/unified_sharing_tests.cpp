@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,15 +7,16 @@
 
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/test_macros/test.h"
 
+#include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/sharings/unified/enable_unified.h"
 #include "opencl/source/sharings/unified/unified_buffer.h"
 #include "opencl/source/sharings/unified/unified_sharing.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
-#include "opencl/test/unit_test/mocks/mock_memory_manager.h"
 #include "opencl/test/unit_test/sharings/unified/unified_sharing_fixtures.h"
-#include "test.h"
 
 using namespace NEO;
 
@@ -163,7 +164,7 @@ struct UnifiedSharingCreateAllocationTests : UnifiedSharingTestsWithMemoryManage
     struct MemoryManagerCheckingAllocationMethod : MockMemoryManager {
         using MockMemoryManager::MockMemoryManager;
 
-        GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex) override {
+        GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex, AllocationType allocType) override {
             this->createFromNTHandleCalled = true;
             this->handle = toOsHandle(handle);
             return nullptr;
@@ -199,7 +200,7 @@ TEST_F(UnifiedSharingCreateAllocationTests, givenWindowsNtHandleWhenCreateGraphi
     UnifiedSharingMemoryDescription desc{};
     desc.handle = reinterpret_cast<void *>(0x1234);
     desc.type = UnifiedSharingHandleType::Win32Nt;
-    GraphicsAllocation::AllocationType allocationType = GraphicsAllocation::AllocationType::SHARED_IMAGE;
+    AllocationType allocationType = AllocationType::SHARED_IMAGE;
     MockSharingHandler::createGraphicsAllocation(this->context.get(), desc, allocationType);
 
     EXPECT_TRUE(memoryManager->createFromNTHandleCalled);
@@ -211,7 +212,7 @@ TEST_F(UnifiedSharingCreateAllocationTests, givenWindowsSharedHandleWhenCreateGr
     UnifiedSharingMemoryDescription desc{};
     desc.handle = reinterpret_cast<void *>(0x1234);
     desc.type = UnifiedSharingHandleType::Win32Shared;
-    GraphicsAllocation::AllocationType allocationType = GraphicsAllocation::AllocationType::SHARED_IMAGE;
+    AllocationType allocationType = AllocationType::SHARED_IMAGE;
     MockSharingHandler::createGraphicsAllocation(this->context.get(), desc, allocationType);
 
     EXPECT_FALSE(memoryManager->createFromNTHandleCalled);
@@ -225,7 +226,7 @@ TEST_F(UnifiedSharingCreateAllocationTests, givenLinuxSharedHandleWhenCreateGrap
     UnifiedSharingMemoryDescription desc{};
     desc.handle = reinterpret_cast<void *>(0x1234);
     desc.type = UnifiedSharingHandleType::LinuxFd;
-    GraphicsAllocation::AllocationType allocationType = GraphicsAllocation::AllocationType::SHARED_IMAGE;
+    AllocationType allocationType = AllocationType::SHARED_IMAGE;
     MockSharingHandler::createGraphicsAllocation(this->context.get(), desc, allocationType);
 
     EXPECT_FALSE(memoryManager->createFromNTHandleCalled);
