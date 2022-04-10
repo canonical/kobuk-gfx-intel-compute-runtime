@@ -6,7 +6,6 @@
 override_dh_auto_configure:
 	dh_auto_configure -- \
 		-DCMAKE_BUILD_TYPE=Release \
-		-DSUPPORT_XE_HP_SDV=0 -DSUPPORT_XE_HP_CORE=0 -DSUPPORT_XE_HPC_CORE=0 -DSUPPORT_XE_HPG_CORE=0 \
 		-Wno-dev
 
 override_dh_gencontrol:
