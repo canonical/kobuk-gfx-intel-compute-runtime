@@ -1,11 +1,11 @@
-intel-compute-runtime (22.14.22890-1) UNRELEASED; urgency=medium
+intel-compute-runtime (22.14.22890-1) experimental; urgency=medium
 
   * New upstream release.
   * correct-getters-in-generated-commands.diff: Fix XE_HP tests, drop
     the cmake config to disable XE_HP support.
   * patches: Refreshed, added a new file to typos.patch.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Wed, 06 Apr 2022 14:27:19 +0300
+ -- Timo Aaltonen <tjaalton@debian.org>  Sun, 10 Apr 2022 12:17:13 +0300
 
 intel-compute-runtime (22.13.22789-1) experimental; urgency=medium
 
