@@ -9,11 +9,9 @@ Date:   Mon Apr 4 15:23:32 2022 +0000
     Related-To: NEO-6475
     Signed-off-by: Mateusz Jablonski <mateusz.jablonski@intel.com>
 
-diff --git a/shared/source/generated/gen12lp/hw_cmds_generated_gen12lp.inl b/shared/source/generated/gen12lp/hw_cmds_generated_gen12lp.inl
-index 0d1ad5807..ae257bc29 100644
 --- a/shared/source/generated/gen12lp/hw_cmds_generated_gen12lp.inl
 +++ b/shared/source/generated/gen12lp/hw_cmds_generated_gen12lp.inl
-@@ -5262,9 +5262,9 @@ typedef struct tagL3_FLUSH_ADDRESS_RANGE {
+@@ -5262,9 +5262,9 @@ typedef struct tagL3_FLUSH_ADDRESS_RANGE
  
      inline uint64_t getAddressLow(bool isA0Stepping) const {
          if (isA0Stepping) {
@@ -25,11 +23,9 @@ index 0d1ad5807..ae257bc29 100644
          }
      }
  
-diff --git a/shared/source/generated/xe_hp_core/hw_cmds_generated_xe_hp_core.inl b/shared/source/generated/xe_hp_core/hw_cmds_generated_xe_hp_core.inl
-index d290b733c..b2aea223a 100644
 --- a/shared/source/generated/xe_hp_core/hw_cmds_generated_xe_hp_core.inl
 +++ b/shared/source/generated/xe_hp_core/hw_cmds_generated_xe_hp_core.inl
-@@ -6804,7 +6804,7 @@ typedef struct tagL3_FLUSH_ADDRESS_RANGE {
+@@ -6804,7 +6804,7 @@ typedef struct tagL3_FLUSH_ADDRESS_RANGE
      }
  
      inline uint64_t getAddressLow() const {
