@@ -1,5 +1,6 @@
-intel-compute-runtime (22.13.22789-2) UNRELEASED; urgency=medium
+intel-compute-runtime (22.14.22890-1) UNRELEASED; urgency=medium
 
+  * New upstream release.
   * correct-getters-in-generated-commands.diff: Fix XE_HP tests, drop
     the cmake config to disable XE_HP support.
 
