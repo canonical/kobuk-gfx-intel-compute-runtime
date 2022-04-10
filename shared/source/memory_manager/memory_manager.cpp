@@ -407,6 +407,8 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
     case AllocationType::TIMESTAMP_PACKET_TAG_BUFFER:
     case AllocationType::DEBUG_MODULE_AREA:
     case AllocationType::GPU_TIMESTAMP_DEVICE_BUFFER:
+    case AllocationType::RING_BUFFER:
+    case AllocationType::SEMAPHORE_BUFFER:
         allocationData.flags.resource48Bit = true;
         break;
     default:
@@ -707,7 +709,7 @@ void MemoryManager::waitForEnginesCompletion(GraphicsAllocation &graphicsAllocat
         if (graphicsAllocation.isUsedByOsContext(osContextId) &&
             engine.commandStreamReceiver->getTagAllocation() != nullptr &&
             allocationTaskCount > *engine.commandStreamReceiver->getTagAddress()) {
-            engine.commandStreamReceiver->waitForCompletionWithTimeout(false, TimeoutControls::maxTimeout, allocationTaskCount);
+            engine.commandStreamReceiver->waitForCompletionWithTimeout(WaitParams{false, false, TimeoutControls::maxTimeout}, allocationTaskCount);
         }
     }
 }
@@ -716,7 +718,7 @@ void MemoryManager::cleanTemporaryAllocationListOnAllEngines(bool waitForComplet
     for (auto &engine : getRegisteredEngines()) {
         auto csr = engine.commandStreamReceiver;
         if (waitForCompletion) {
-            csr->waitForCompletionWithTimeout(false, 0, csr->peekLatestSentTaskCount());
+            csr->waitForCompletionWithTimeout(WaitParams{false, false, 0}, csr->peekLatestSentTaskCount());
         }
         csr->getInternalAllocationStorage()->cleanAllocationList(*csr->getTagAddress(), AllocationUsage::TEMPORARY_ALLOCATION);
     }

@@ -9,6 +9,7 @@
 #include "shared/source/os_interface/driver_info.h"
 #include "shared/source/utilities/arrayref.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "opencl/source/api/api.h"
 #include "opencl/source/mem_obj/image.h"
@@ -147,6 +148,7 @@ TYPED_TEST_P(D3DTests, givenNV12FormatAndEvenPlaneWhen2dCreatedThenSetPlaneParam
 
     auto image = std::unique_ptr<Image>(D3DTexture<TypeParam>::create2d(this->context, reinterpret_cast<D3DTexture2d *>(&this->dummyD3DTexture), CL_MEM_READ_WRITE, 4, nullptr));
     ASSERT_NE(nullptr, image.get());
+    EXPECT_EQ(GMM_PLANE_Y, image->getPlane());
 
     auto expectedFormat = D3DTexture<TypeParam>::findYuvSurfaceFormatInfo(DXGI_FORMAT_NV12, ImagePlane::PLANE_Y, CL_MEM_READ_WRITE);
     EXPECT_TRUE(memcmp(expectedFormat, &image->getSurfaceFormatInfo(), sizeof(SurfaceFormatInfo)) == 0);
@@ -232,6 +234,7 @@ TYPED_TEST_P(D3DTests, givenNV12FormatAndOddPlaneWhen2dCreatedThenSetPlaneParams
 
     auto image = std::unique_ptr<Image>(D3DTexture<TypeParam>::create2d(this->context, reinterpret_cast<D3DTexture2d *>(&this->dummyD3DTexture), CL_MEM_READ_WRITE, 7, nullptr));
     ASSERT_NE(nullptr, image.get());
+    EXPECT_EQ(GMM_PLANE_U, image->getPlane());
 
     auto expectedFormat = D3DTexture<TypeParam>::findYuvSurfaceFormatInfo(DXGI_FORMAT_NV12, ImagePlane::PLANE_UV, CL_MEM_READ_WRITE);
     EXPECT_TRUE(memcmp(expectedFormat, &image->getSurfaceFormatInfo(), sizeof(SurfaceFormatInfo)) == 0);
@@ -831,26 +834,26 @@ TEST(D3DSurfaceTest, givenD3DSurfaceWhenInvalidMemObjectIsPassedToValidateUpdate
 TEST(D3D9, givenD3D9BuilderAndExtensionEnableTrueWhenGettingExtensionsThenCorrectExtensionsListIsReturned) {
     auto builderFactory = std::make_unique<D3DSharingBuilderFactory<D3DTypesHelper::D3D9>>();
     builderFactory.get()->extensionEnabled = true;
-    EXPECT_THAT(builderFactory->getExtensions(nullptr), testing::HasSubstr(std::string("cl_intel_dx9_media_sharing")));
-    EXPECT_THAT(builderFactory->getExtensions(nullptr), testing::HasSubstr(std::string("cl_khr_dx9_media_sharing")));
+    EXPECT_TRUE(hasSubstr(builderFactory->getExtensions(nullptr), std::string("cl_intel_dx9_media_sharing")));
+    EXPECT_TRUE(hasSubstr(builderFactory->getExtensions(nullptr), std::string("cl_khr_dx9_media_sharing")));
 }
 
 TEST(D3D9, givenD3D9BuilderAndExtensionEnableFalseWhenGettingExtensionsThenDx9MediaSheringExtensionsAreNotReturned) {
     auto builderFactory = std::make_unique<D3DSharingBuilderFactory<D3DTypesHelper::D3D9>>();
     builderFactory.get()->extensionEnabled = false;
-    EXPECT_THAT(builderFactory->getExtensions(nullptr), testing::Not(testing::HasSubstr(std::string("cl_intel_dx9_media_sharing"))));
-    EXPECT_THAT(builderFactory->getExtensions(nullptr), testing::Not(testing::HasSubstr(std::string("cl_khr_dx9_media_sharing"))));
+    EXPECT_FALSE(hasSubstr(builderFactory->getExtensions(nullptr), std::string("cl_intel_dx9_media_sharing")));
+    EXPECT_FALSE(hasSubstr(builderFactory->getExtensions(nullptr), std::string("cl_khr_dx9_media_sharing")));
 }
 
 TEST(D3D10, givenD3D10BuilderWhenGettingExtensionsThenCorrectExtensionsListIsReturned) {
     auto builderFactory = std::make_unique<D3DSharingBuilderFactory<D3DTypesHelper::D3D10>>();
-    EXPECT_THAT(builderFactory->getExtensions(nullptr), testing::HasSubstr(std::string("cl_khr_d3d10_sharing")));
+    EXPECT_TRUE(hasSubstr(builderFactory->getExtensions(nullptr), std::string("cl_khr_d3d10_sharing")));
 }
 
 TEST(D3D11, givenD3D11BuilderWhenGettingExtensionsThenCorrectExtensionsListIsReturned) {
     auto builderFactory = std::make_unique<D3DSharingBuilderFactory<D3DTypesHelper::D3D11>>();
-    EXPECT_THAT(builderFactory->getExtensions(nullptr), testing::HasSubstr(std::string("cl_khr_d3d11_sharing")));
-    EXPECT_THAT(builderFactory->getExtensions(nullptr), testing::HasSubstr(std::string("cl_intel_d3d11_nv12_media_sharing")));
+    EXPECT_TRUE(hasSubstr(builderFactory->getExtensions(nullptr), std::string("cl_khr_d3d11_sharing")));
+    EXPECT_TRUE(hasSubstr(builderFactory->getExtensions(nullptr), std::string("cl_intel_d3d11_nv12_media_sharing")));
 }
 
 TEST(D3DSharingFactory, givenEnabledFormatQueryAndFactoryWithD3DSharingsWhenGettingExtensionFunctionAddressThenFormatQueryFunctionsAreReturned) {

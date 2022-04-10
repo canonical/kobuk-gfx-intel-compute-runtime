@@ -29,6 +29,25 @@ TEST(LinearStreamCtorTest, whenProvidedAllArgumentsThenExpectSameValuesSet) {
     EXPECT_EQ(gfxAllocation, linearStream.getGraphicsAllocation());
 }
 
+TEST(LinearStreamSimpleTest, givenLinearStreamWithoutGraphicsAllocationWhenGettingGpuBaseThenValueSetAsGpuBaseIsReturned) {
+    uint32_t pCmdBuffer[1024]{};
+    LinearStream linearStream(pCmdBuffer, 1000);
+
+    EXPECT_EQ(0u, linearStream.getGpuBase());
+
+    linearStream.setGpuBase(0x1234000);
+    EXPECT_EQ(0x1234000u, linearStream.getGpuBase());
+}
+
+TEST(LinearStreamSimpleTest, givenLinearStreamWithGraphicsAllocationWhenGettingGpuBaseThenGpuAddressFromGraphicsAllocationIsReturned) {
+    MockGraphicsAllocation gfxAllocation;
+    gfxAllocation.setCpuPtrAndGpuAddress(nullptr, 0x5555000);
+    uint32_t pCmdBuffer[1024]{};
+    LinearStream linearStream(&gfxAllocation, pCmdBuffer, 1000);
+
+    EXPECT_EQ(0x5555000u, linearStream.getGpuBase());
+}
+
 TEST_F(LinearStreamTest, GivenSizeZeroWhenGettingSpaceUsedThenNonNullPointerIsReturned) {
     EXPECT_NE(nullptr, linearStream.getSpace(0));
 }
@@ -134,7 +153,7 @@ TEST_F(LinearStreamTest, givenLinearStreamWithoutCmdContainerWhenOneByteLeftInSt
 using CommandContainerLinearStreamTest = Test<DeviceFixture>;
 TEST_F(CommandContainerLinearStreamTest, givenLinearStreamWithCmdContainerWhenOneByteLeftInStreamThenGetSpaceThrowAbort) {
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice, nullptr);
+    cmdContainer.initialize(pDevice, nullptr, true);
     auto stream = reinterpret_cast<MyLinearStreamMock *>(cmdContainer.getCommandStream());
     stream->sizeUsed = stream->getMaxAvailableSpace() - 1;
     EXPECT_THROW(stream->getSpace(1), std::exception);
@@ -142,7 +161,7 @@ TEST_F(CommandContainerLinearStreamTest, givenLinearStreamWithCmdContainerWhenOn
 
 TEST_F(CommandContainerLinearStreamTest, givenLinearStreamWithCmdContainerWhenThereIsNoSpaceForCommandAndBBEndThenNewCmdBufferAllocated) {
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice, nullptr);
+    cmdContainer.initialize(pDevice, nullptr, true);
     auto &hwInfo = pDevice->getHardwareInfo();
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
     auto stream = reinterpret_cast<MyLinearStreamMock *>(cmdContainer.getCommandStream());
@@ -155,7 +174,7 @@ TEST_F(CommandContainerLinearStreamTest, givenLinearStreamWithCmdContainerWhenTh
 
 TEST_F(CommandContainerLinearStreamTest, givenLinearStreamWithCmdContainerWhenThereIsNoSpaceForCommandAndBBEndThenLinearStreamHasNewAllocation) {
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice, nullptr);
+    cmdContainer.initialize(pDevice, nullptr, true);
     auto &hwInfo = pDevice->getHardwareInfo();
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
     auto stream = reinterpret_cast<MyLinearStreamMock *>(cmdContainer.getCommandStream());
@@ -169,7 +188,7 @@ TEST_F(CommandContainerLinearStreamTest, givenLinearStreamWithCmdContainerWhenTh
 
 TEST_F(CommandContainerLinearStreamTest, givenLinearStreamWithCmdContainerWhenThereIsNoSpaceForCommandAndBBEndThenGetSpaceReturnPtrFromNewAllocation) {
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice, nullptr);
+    cmdContainer.initialize(pDevice, nullptr, true);
     auto &hwInfo = pDevice->getHardwareInfo();
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
     auto stream = reinterpret_cast<MyLinearStreamMock *>(cmdContainer.getCommandStream());
@@ -182,7 +201,7 @@ TEST_F(CommandContainerLinearStreamTest, givenLinearStreamWithCmdContainerWhenTh
 
 TEST_F(CommandContainerLinearStreamTest, givenLinearStreamWithCmdContainerWhenThereIsSpaceForCommandAndBBEndThenNewCmdBufferIsNotAllocated) {
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice, nullptr);
+    cmdContainer.initialize(pDevice, nullptr, true);
     auto &hwInfo = pDevice->getHardwareInfo();
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
     auto stream = reinterpret_cast<MyLinearStreamMock *>(cmdContainer.getCommandStream());
@@ -195,7 +214,7 @@ TEST_F(CommandContainerLinearStreamTest, givenLinearStreamWithCmdContainerWhenTh
 
 TEST_F(CommandContainerLinearStreamTest, givenLinearStreamWithCmdContainerWhenThereIsNoSpaceForCommandAndBBEndThenBBEndAddedAtEndOfStream) {
     CommandContainer cmdContainer;
-    cmdContainer.initialize(pDevice, nullptr);
+    cmdContainer.initialize(pDevice, nullptr, true);
     auto &hwInfo = pDevice->getHardwareInfo();
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
     auto stream = reinterpret_cast<MyLinearStreamMock *>(cmdContainer.getCommandStream());

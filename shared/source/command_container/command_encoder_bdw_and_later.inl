@@ -248,6 +248,7 @@ void EncodeMediaInterfaceDescriptorLoad<Family>::encode(CommandContainer &contai
     *mediaStateFlush = Family::cmdInitMediaStateFlush;
 
     auto iddOffset = static_cast<uint32_t>(ptrDiff(container.getIddBlock(), heapBase));
+
     iddOffset += ApiSpecificConfig::getBindlessConfiguration() ? static_cast<uint32_t>(container.getDevice()->getBindlessHeapsHelper()->getHeap(BindlessHeapsHelper::GLOBAL_DSH)->getGraphicsAllocation()->getGpuAddress() -
                                                                                        container.getDevice()->getBindlessHeapsHelper()->getHeap(BindlessHeapsHelper::GLOBAL_DSH)->getGraphicsAllocation()->getGpuBaseAddress())
                                                                : 0;
@@ -424,6 +425,16 @@ inline void EncodeWA<GfxFamily>::addPipeControlPriorToNonPipelinedStateCommand(L
 }
 
 template <typename GfxFamily>
+inline void EncodeWA<GfxFamily>::addPipeControlBeforeStateBaseAddress(LinearStream &commandStream,
+                                                                      const HardwareInfo &hwInfo, bool isRcs) {
+    PipeControlArgs args;
+    args.dcFlushEnable = MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo);
+    args.textureCacheInvalidationEnable = true;
+
+    NEO::EncodeWA<GfxFamily>::addPipeControlPriorToNonPipelinedStateCommand(commandStream, args, hwInfo, isRcs);
+}
+
+template <typename GfxFamily>
 inline void EncodeSurfaceState<GfxFamily>::encodeExtraBufferParams(EncodeSurfaceStateArgs &args) {
     auto surfaceState = reinterpret_cast<R_SURFACE_STATE *>(args.outMemory);
     encodeExtraCacheSettings(surfaceState, *args.gmmHelper->getHardwareInfo());
@@ -481,5 +492,8 @@ inline void EncodeStoreMemory<Family>::programStoreDataImm(MI_STORE_DATA_IMM *cm
 template <typename Family>
 inline void EncodeMiArbCheck<Family>::adjust(MI_ARB_CHECK &miArbCheck) {
 }
+
+template <typename Family>
+void EncodeDispatchKernel<Family>::setupPostSyncMocs(WALKER_TYPE &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment) {}
 
 } // namespace NEO

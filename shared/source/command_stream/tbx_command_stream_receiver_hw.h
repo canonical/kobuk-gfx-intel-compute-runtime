@@ -43,10 +43,10 @@ class TbxCommandStreamReceiverHw : public CommandStreamReceiverSimulatedHw<GfxFa
 
     SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
 
-    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) override;
-    WaitStatus waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) override;
+    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, QueueThrottle throttle) override;
+    WaitStatus waitForCompletionWithTimeout(const WaitParams &params, uint32_t taskCountToWait) override;
     void downloadAllocations() override;
-    void downloadAllocation(GraphicsAllocation &gfxAllocation) override;
+    void downloadAllocationTbx(GraphicsAllocation &gfxAllocation);
 
     void processEviction() override;
     void processResidency(const ResidencyContainer &allocationsForResidency, uint32_t handleId) override;

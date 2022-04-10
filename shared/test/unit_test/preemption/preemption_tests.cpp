@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,7 +16,7 @@
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 
-#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 
 using namespace NEO;
 
@@ -326,9 +326,9 @@ HWCMDTEST_F(IGFX_GEN8_CORE, MidThreadPreemptionTests, givenDirtyCsrStateWhenStat
 
         csr.flushTask(commandStream,
                       0,
-                      *heap.get(),
-                      *heap.get(),
-                      *heap.get(),
+                      heap.get(),
+                      heap.get(),
+                      heap.get(),
                       0,
                       dispatchFlags,
                       *mockDevice);
@@ -376,9 +376,9 @@ HWCMDTEST_F(IGFX_GEN8_CORE, MidThreadPreemptionTests, WhenProgrammingPreemptionT
 
         csr.flushTask(commandStream,
                       0,
-                      *heap.get(),
-                      *heap.get(),
-                      *heap.get(),
+                      heap.get(),
+                      heap.get(),
+                      heap.get(),
                       0,
                       dispatchFlags,
                       *mockDevice);

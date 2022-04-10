@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "shared/source/command_stream/wait_status.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
@@ -44,35 +45,35 @@ void CommandListCoreFamilyImmediate<gfxCoreFamily>::updateDispatchFlagsWithRequi
 template <GFXCORE_FAMILY gfxCoreFamily>
 ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::executeCommandListImmediateWithFlushTask(bool performMigration) {
     NEO::DispatchFlags dispatchFlags(
-        {},                                                          //csrDependencies
-        nullptr,                                                     //barrierTimestampPacketNodes
-        {},                                                          //pipelineSelectArgs
-        nullptr,                                                     //flushStampReference
-        NEO::QueueThrottle::MEDIUM,                                  //throttle
-        this->getCommandListPreemptionMode(),                        //preemptionMode
-        GrfConfig::NotApplicable,                                    //numGrfRequired
-        NEO::L3CachingSettings::l3CacheOn,                           //l3CacheSettings
-        NEO::ThreadArbitrationPolicy::NotPresent,                    //threadArbitrationPolicy
-        NEO::AdditionalKernelExecInfo::NotApplicable,                //additionalKernelExecInfo
-        NEO::KernelExecutionType::NotApplicable,                     //kernelExecutionType
-        NEO::MemoryCompressionState::NotApplicable,                  //memoryCompressionState
-        NEO::QueueSliceCount::defaultSliceCount,                     //sliceCount
-        this->isSyncModeQueue,                                       //blocking
-        this->isSyncModeQueue,                                       //dcFlush
-        this->getCommandListSLMEnable(),                             //useSLM
-        this->isSyncModeQueue,                                       //guardCommandBufferWithPipeControl
-        false,                                                       //GSBA32BitRequired
-        false,                                                       //requiresCoherency
-        false,                                                       //lowPriority
-        true,                                                        //implicitFlush
-        this->csr->isNTo1SubmissionModelEnabled(),                   //outOfOrderExecutionAllowed
-        false,                                                       //epilogueRequired
-        false,                                                       //usePerDssBackedBuffer
-        false,                                                       //useSingleSubdevice
-        false,                                                       //useGlobalAtomics
-        this->device->getNEODevice()->getNumGenericSubDevices() > 1, //areMultipleSubDevicesInContext
-        false,                                                       //memoryMigrationRequired
-        false                                                        //textureCacheFlush
+        {},                                                          // csrDependencies
+        nullptr,                                                     // barrierTimestampPacketNodes
+        {},                                                          // pipelineSelectArgs
+        nullptr,                                                     // flushStampReference
+        NEO::QueueThrottle::MEDIUM,                                  // throttle
+        this->getCommandListPreemptionMode(),                        // preemptionMode
+        GrfConfig::NotApplicable,                                    // numGrfRequired
+        NEO::L3CachingSettings::l3CacheOn,                           // l3CacheSettings
+        NEO::ThreadArbitrationPolicy::NotPresent,                    // threadArbitrationPolicy
+        NEO::AdditionalKernelExecInfo::NotApplicable,                // additionalKernelExecInfo
+        NEO::KernelExecutionType::NotApplicable,                     // kernelExecutionType
+        NEO::MemoryCompressionState::NotApplicable,                  // memoryCompressionState
+        NEO::QueueSliceCount::defaultSliceCount,                     // sliceCount
+        this->isSyncModeQueue,                                       // blocking
+        this->isSyncModeQueue,                                       // dcFlush
+        this->getCommandListSLMEnable(),                             // useSLM
+        this->isSyncModeQueue,                                       // guardCommandBufferWithPipeControl
+        false,                                                       // GSBA32BitRequired
+        false,                                                       // requiresCoherency
+        false,                                                       // lowPriority
+        true,                                                        // implicitFlush
+        this->csr->isNTo1SubmissionModelEnabled(),                   // outOfOrderExecutionAllowed
+        false,                                                       // epilogueRequired
+        false,                                                       // usePerDssBackedBuffer
+        false,                                                       // useSingleSubdevice
+        false,                                                       // useGlobalAtomics
+        this->device->getNEODevice()->getNumGenericSubDevices() > 1, // areMultipleSubDevicesInContext
+        false,                                                       // memoryMigrationRequired
+        false                                                        // textureCacheFlush
     );
     this->updateDispatchFlagsWithRequiredStreamState(dispatchFlags);
 
@@ -101,19 +102,34 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::executeCommandListImm
         this->migrateSharedAllocations();
     }
 
+    auto ioh = (this->commandContainer.getIndirectHeap(NEO::IndirectHeap::Type::INDIRECT_OBJECT));
+    NEO::IndirectHeap *dsh = nullptr;
+    NEO::IndirectHeap *ssh = nullptr;
+
+    if (!NEO::ApiSpecificConfig::getBindlessConfiguration()) {
+        dsh = (this->commandContainer.getIndirectHeap(NEO::IndirectHeap::Type::DYNAMIC_STATE));
+        ssh = (this->commandContainer.getIndirectHeap(NEO::IndirectHeap::Type::SURFACE_STATE));
+    } else {
+        dsh = this->device->getNEODevice()->getBindlessHeapsHelper()->getHeap(NEO::BindlessHeapsHelper::BindlesHeapType::GLOBAL_DSH);
+        ssh = this->device->getNEODevice()->getBindlessHeapsHelper()->getHeap(NEO::BindlessHeapsHelper::BindlesHeapType::GLOBAL_SSH);
+    }
+
     auto completionStamp = this->csr->flushTask(
         *commandStream,
         commandStreamStart,
-        *(this->commandContainer.getIndirectHeap(NEO::IndirectHeap::Type::DYNAMIC_STATE)),
-        *(this->commandContainer.getIndirectHeap(NEO::IndirectHeap::Type::INDIRECT_OBJECT)),
-        *(this->commandContainer.getIndirectHeap(NEO::IndirectHeap::Type::SURFACE_STATE)),
+        dsh,
+        ioh,
+        ssh,
         this->csr->peekTaskLevel(),
         dispatchFlags,
         *(this->device->getNEODevice()));
 
     if (this->isSyncModeQueue) {
         auto timeoutMicroseconds = NEO::TimeoutControls::maxTimeout;
-        this->csr->waitForCompletionWithTimeout(false, timeoutMicroseconds, completionStamp.taskCount);
+        const auto waitStatus = this->csr->waitForCompletionWithTimeout(NEO::WaitParams{false, false, timeoutMicroseconds}, completionStamp.taskCount);
+        if (waitStatus == NEO::WaitStatus::GpuHang) {
+            return ZE_RESULT_ERROR_DEVICE_LOST;
+        }
         this->csr->getInternalAllocationStorage()->cleanAllocationList(completionStamp.taskCount, NEO::AllocationUsage::TEMPORARY_ALLOCATION);
     }
 
@@ -180,7 +196,10 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendBarrier(
             this->csr->flushNonKernelTask(nullptr, 0, 0, args, false, false, false);
             if (this->isSyncModeQueue) {
                 auto timeoutMicroseconds = NEO::TimeoutControls::maxTimeout;
-                this->csr->waitForCompletionWithTimeout(false, timeoutMicroseconds, this->csr->peekTaskCount());
+                const auto waitStatus = this->csr->waitForCompletionWithTimeout(NEO::WaitParams{false, false, timeoutMicroseconds}, this->csr->peekTaskCount());
+                if (waitStatus == NEO::WaitStatus::GpuHang) {
+                    return ZE_RESULT_ERROR_DEVICE_LOST;
+                }
             }
         } else {
             ret = CommandListCoreFamilyImmediate<gfxCoreFamily>::appendSignalEvent(hSignalEvent);
@@ -263,7 +282,10 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendSignalEvent(ze_
         this->csr->flushNonKernelTask(&event->getAllocation(this->device), event->getGpuAddress(this->device), Event::STATE_SIGNALED, args, false, false, false);
         if (this->isSyncModeQueue) {
             auto timeoutMicroseconds = NEO::TimeoutControls::maxTimeout;
-            this->csr->waitForCompletionWithTimeout(false, timeoutMicroseconds, this->csr->peekTaskCount());
+            const auto waitStatus = this->csr->waitForCompletionWithTimeout(NEO::WaitParams{false, false, timeoutMicroseconds}, this->csr->peekTaskCount());
+            if (waitStatus == NEO::WaitStatus::GpuHang) {
+                return ZE_RESULT_ERROR_DEVICE_LOST;
+            }
         }
     }
     return ret;
@@ -289,7 +311,10 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendEventReset(ze_e
         this->csr->flushNonKernelTask(&event->getAllocation(this->device), event->getGpuAddress(this->device), Event::STATE_CLEARED, args, false, false, false);
         if (this->isSyncModeQueue) {
             auto timeoutMicroseconds = NEO::TimeoutControls::maxTimeout;
-            this->csr->waitForCompletionWithTimeout(false, timeoutMicroseconds, this->csr->peekTaskCount());
+            const auto waitStatus = this->csr->waitForCompletionWithTimeout(NEO::WaitParams{false, false, timeoutMicroseconds}, this->csr->peekTaskCount());
+            if (waitStatus == NEO::WaitStatus::GpuHang) {
+                return ZE_RESULT_ERROR_DEVICE_LOST;
+            }
         }
     }
     return ret;
@@ -310,41 +335,11 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendPageFaultCopy(N
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendWaitOnEvents(uint32_t numEvents, ze_event_handle_t *phWaitEvents) {
-    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
-    ze_result_t ret = ZE_RESULT_SUCCESS;
-    bool isTimestampEvent = false;
-
-    for (uint32_t i = 0; i < numEvents; i++) {
-        auto event = Event::fromHandle(phWaitEvents[i]);
-        isTimestampEvent |= (event->isEventTimestampFlagSet()) ? true : false;
+    if (this->isFlushTaskSubmissionEnabled) {
+        checkAvailableSpace();
     }
-
-    if (isTimestampEvent) {
-        if (this->isFlushTaskSubmissionEnabled) {
-            checkAvailableSpace();
-        }
-        ret = CommandListCoreFamily<gfxCoreFamily>::appendWaitOnEvents(numEvents, phWaitEvents);
-        return flushImmediate(ret, true);
-    } else {
-        bool dcFlushRequired = false;
-        const auto &hwInfo = this->device->getHwInfo();
-        if (NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo)) {
-            for (uint32_t i = 0; i < numEvents; i++) {
-                auto event = Event::fromHandle(phWaitEvents[i]);
-                dcFlushRequired |= (!event->waitScope) ? false : true;
-            }
-        }
-
-        NEO::PipeControlArgs args;
-        args.dcFlushEnable = dcFlushRequired;
-        for (uint32_t i = 0; i < numEvents; i++) {
-            auto event = Event::fromHandle(phWaitEvents[i]);
-            bool isStartOfDispatch = (i == 0);
-            bool isEndOfDispatch = (i == numEvents - 1);
-            this->csr->flushNonKernelTask(&event->getAllocation(this->device), event->getGpuAddress(this->device), Event::STATE_CLEARED, args, true, isStartOfDispatch, isEndOfDispatch);
-        }
-    }
-    return ret;
+    auto ret = CommandListCoreFamily<gfxCoreFamily>::appendWaitOnEvents(numEvents, phWaitEvents);
+    return flushImmediate(ret, true);
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>

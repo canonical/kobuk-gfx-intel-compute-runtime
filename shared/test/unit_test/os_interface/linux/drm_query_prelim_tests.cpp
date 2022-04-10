@@ -31,7 +31,7 @@ TEST(DrmQueryTest, givenDirectSubmissionActiveWhenCreateDrmContextThenProperFlag
 
     drm.createDrmContext(0, true, false);
 
-    EXPECT_TRUE(drm.receivedContextCreateFlags & DrmPrelimHelper::getULLSContextCreateFlag());
+    EXPECT_TRUE(drm.receivedContextCreateFlags & DrmPrelimHelper::getLongRunningContextCreateFlag());
 }
 
 TEST(DrmQueryTest, givenDirectSubmissionDisabledAndDirectSubmissionDrmContextSetWhenCreateDrmContextThenProperFlagIsSet) {
@@ -44,7 +44,7 @@ TEST(DrmQueryTest, givenDirectSubmissionDisabledAndDirectSubmissionDrmContextSet
 
     drm.createDrmContext(0, false, false);
 
-    EXPECT_TRUE(drm.receivedContextCreateFlags & DrmPrelimHelper::getULLSContextCreateFlag());
+    EXPECT_TRUE(drm.receivedContextCreateFlags & DrmPrelimHelper::getLongRunningContextCreateFlag());
 }
 
 TEST(DrmQueryTest, givenDirectSubmissionActiveAndDirectSubmissionDrmContextSetZeroWhenCreateDrmContextThenProperFlagIsNotSet) {
@@ -57,7 +57,7 @@ TEST(DrmQueryTest, givenDirectSubmissionActiveAndDirectSubmissionDrmContextSetZe
 
     drm.createDrmContext(0, true, false);
 
-    EXPECT_FALSE(drm.receivedContextCreateFlags & DrmPrelimHelper::getULLSContextCreateFlag());
+    EXPECT_FALSE(drm.receivedContextCreateFlags & DrmPrelimHelper::getLongRunningContextCreateFlag());
 }
 
 TEST(DrmQueryTest, givenCooperativeEngineWhenCreateDrmContextThenRunAloneContextIsRequested) {
@@ -207,6 +207,15 @@ TEST(DrmQueryTest, givenCreateContextWithAccessCounterWhenDrmContextIsCreatedThe
         EXPECT_EQ(0u, paramAcc->trigger);
         EXPECT_EQ(static_cast<uint8_t>(granularity), paramAcc->granularity);
     }
+}
+
+TEST(DrmQueryTest, WhenCallingIsDebugAttachAvailableThenReturnValueIsTrue) {
+    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
+    executionEnvironment->prepareRootDeviceEnvironments(1);
+    DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
+    drm.allowDebugAttachCallBase = true;
+
+    EXPECT_TRUE(drm.isDebugAttachAvailable());
 }
 
 struct BufferObjectMock : public BufferObject {

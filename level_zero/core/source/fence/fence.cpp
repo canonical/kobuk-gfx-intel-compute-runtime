@@ -11,14 +11,13 @@
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/memory_manager/memory_manager.h"
-#include "shared/source/utilities/wait_util.h"
 
 namespace L0 {
 
 Fence *Fence::create(CommandQueueImp *cmdQueue, const ze_fence_desc_t *desc) {
     auto fence = new Fence(cmdQueue);
     UNRECOVERABLE_IF(fence == nullptr);
-    fence->reset();
+    fence->reset(!!(desc->flags & ZE_FENCE_FLAG_SIGNALED));
     return fence;
 }
 
@@ -37,8 +36,12 @@ ze_result_t Fence::assignTaskCountFromCsr() {
     return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t Fence::reset() {
-    taskCount = std::numeric_limits<uint32_t>::max();
+ze_result_t Fence::reset(bool signaled) {
+    if (signaled) {
+        taskCount = 0;
+    } else {
+        taskCount = std::numeric_limits<uint32_t>::max();
+    }
     return ZE_RESULT_SUCCESS;
 }
 
@@ -68,8 +71,6 @@ ze_result_t Fence::hostSynchronize(uint64_t timeout) {
         if (ret == ZE_RESULT_SUCCESS) {
             return ZE_RESULT_SUCCESS;
         }
-
-        NEO::WaitUtils::waitFunction(nullptr, 0u);
 
         currentTime = std::chrono::high_resolution_clock::now();
         elapsedTimeSinceGpuHangCheck = std::chrono::duration_cast<std::chrono::microseconds>(currentTime - lastHangCheckTime);

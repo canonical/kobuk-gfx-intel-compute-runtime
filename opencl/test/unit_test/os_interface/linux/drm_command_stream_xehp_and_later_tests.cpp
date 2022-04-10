@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/command_container/command_encoder.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/os_interface/linux/drm_command_stream.h"
 #include "shared/source/os_interface/linux/drm_memory_manager.h"
@@ -21,9 +22,8 @@
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/os_interface/linux/device_command_stream_fixture.h"
 #include "shared/test/common/os_interface/linux/drm_buffer_object_fixture.h"
+#include "shared/test/common/os_interface/linux/drm_command_stream_fixture.h"
 #include "shared/test/common/test_macros/test.h"
-
-#include "opencl/test/unit_test/os_interface/linux/drm_command_stream_fixture.h"
 
 using namespace NEO;
 
@@ -51,10 +51,10 @@ struct DrmCommandStreamMultiTileMemExecFixture {
         executionEnvironment->prepareRootDeviceEnvironments(1u);
         executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
         executionEnvironment->initializeMemoryManager();
-        device.reset(MockDevice::create<MockDevice>(executionEnvironment, 0));
 
-        osContext = std::make_unique<OsContextLinux>(*mock, 0u, EngineDescriptorHelper::getDefaultDescriptor(device->getDeviceBitfield()));
-        osContext->ensureContextInitialized();
+        VariableBackup<UltHwConfig> backup(&ultHwConfig);
+        ultHwConfig.useHwCsr = true;
+        device.reset(MockDevice::create<MockDevice>(executionEnvironment, 0));
     }
 
     void TearDown() {
@@ -64,7 +64,6 @@ struct DrmCommandStreamMultiTileMemExecFixture {
     DebugManagerStateRestore dbgRestore;
     std::unique_ptr<VariableBackup<bool>> osLocalMemoryBackup;
     std::unique_ptr<MockDevice> device;
-    std::unique_ptr<OsContext> osContext;
     MockExecutionEnvironment *executionEnvironment = nullptr;
     DrmMockCustom *mock = nullptr;
     DrmMemoryManager *memoryManager = nullptr;
@@ -76,7 +75,6 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, DrmCommandStreamMultiTileMemExecTest, GivenDrmSuppo
     auto *testCsr = new TestedDrmCommandStreamReceiver<FamilyType>(*executionEnvironment, 0, device->getDeviceBitfield());
     device->resetCommandStreamReceiver(testCsr);
     EXPECT_EQ(2u, testCsr->activePartitions);
-    testCsr->setupContext(*osContext.get());
 
     mock->completionFenceSupported = true;
     mock->isVmBindAvailableCall.callParent = false;

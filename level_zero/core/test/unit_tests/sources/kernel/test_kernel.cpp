@@ -62,6 +62,31 @@ TEST_F(KernelInitTest, givenKernelToInitWhenItHasUnknownArgThenUnknowKernelArgHa
     EXPECT_EQ(mockKernelImmData->getDescriptor().payloadMappings.explicitArgs[0].type, NEO::ArgDescriptor::ArgTUnknown);
 }
 
+using KernelBaseAddressTests = Test<ModuleImmutableDataFixture>;
+TEST_F(KernelBaseAddressTests, whenQueryingKernelBaseAddressThenCorrectAddressIsReturned) {
+    uint32_t perHwThreadPrivateMemorySizeRequested = 32u;
+
+    std::unique_ptr<MockImmutableData> mockKernelImmData =
+        std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
+
+    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, false, mockKernelImmData.get());
+    std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
+    kernel = std::make_unique<ModuleImmutableDataFixture::MockKernel>(module.get());
+    ze_kernel_desc_t desc = {};
+    desc.pKernelName = kernelName.c_str();
+    mockKernelImmData->resizeExplicitArgs(1);
+    kernel->initialize(&desc);
+
+    uint64_t baseAddress = 0;
+    ze_result_t res = kernel->getBaseAddress(nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    res = kernel->getBaseAddress(&baseAddress);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    EXPECT_NE(baseAddress, 0u);
+    EXPECT_EQ(baseAddress, kernel->getImmutableData()->getKernelInfo()->kernelAllocation->getGpuAddress());
+}
+
 TEST(KernelArgTest, givenKernelWhenSetArgUnknownCalledThenSuccessRteurned) {
     Mock<Kernel> mockKernel;
     EXPECT_EQ(mockKernel.setArgUnknown(0, 0, nullptr), ZE_RESULT_SUCCESS);
@@ -779,6 +804,7 @@ TEST_F(KernelImmutableDataTests, whenHasRTCallsIsTrueAndNoRTDispatchGlobalsIsAll
 
     immDataVector->push_back(std::move(mockKernelImmutableData));
 
+    neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[neoDevice->getRootDeviceIndex()]->bindlessHeapsHelper.reset(nullptr);
     neoDevice->injectMemoryManager(currMemoryManager);
 
     EXPECT_EQ(ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY, kernel->initialize(&kernelDesc));
@@ -1068,7 +1094,7 @@ TEST_F(KernelPropertiesTests, whenPassingPreferredGroupSizeStructToGetProperties
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
     auto &hwHelper = NEO::HwHelper::get(module->getDevice()->getHwInfo().platform.eRenderCoreFamily);
-    if (hwHelper.isFusedEuDispatchEnabled(module->getDevice()->getHwInfo())) {
+    if (hwHelper.isFusedEuDispatchEnabled(module->getDevice()->getHwInfo(), false)) {
         EXPECT_EQ(preferredGroupProperties.preferredMultiple, static_cast<uint32_t>(kernel->getImmutableData()->getKernelInfo()->getMaxSimdSize()) * 2);
     } else {
         EXPECT_EQ(preferredGroupProperties.preferredMultiple, static_cast<uint32_t>(kernel->getImmutableData()->getKernelInfo()->getMaxSimdSize()));

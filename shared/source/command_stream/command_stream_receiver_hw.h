@@ -43,7 +43,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
 
     CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
-                              const IndirectHeap &dsh, const IndirectHeap &ioh, const IndirectHeap &ssh,
+                              const IndirectHeap *dsh, const IndirectHeap *ioh, const IndirectHeap *ssh,
                               uint32_t taskLevel, DispatchFlags &dispatchFlags, Device &device) override;
 
     void forcePipeControl(NEO::LinearStream &commandStreamCSR);
@@ -78,14 +78,14 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     bool isPipelineSelectAlreadyProgrammed() const;
     void programComputeMode(LinearStream &csr, DispatchFlags &dispatchFlags, const HardwareInfo &hwInfo);
 
-    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) override;
+    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, QueueThrottle throttle) override;
 
     void collectStateBaseAddresPatchInfo(
         uint64_t commandBufferAddress,
         uint64_t commandOffset,
-        const LinearStream &dsh,
-        const LinearStream &ioh,
-        const LinearStream &ssh,
+        const LinearStream *dsh,
+        const LinearStream *ioh,
+        const LinearStream *ssh,
         uint64_t generalStateBase);
 
     void collectStateBaseAddresIohPatchInfo(uint64_t commandBufferAddress, uint64_t commandOffset, const LinearStream &ioh);
@@ -166,7 +166,6 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     size_t getCmdSizeForPrologue() const;
 
     void addClearSLMWorkAround(typename GfxFamily::PIPE_CONTROL *pCmd);
-    void addPipeControlBeforeStateBaseAddress(LinearStream &commandStream);
     void addPipeControlBeforeStateSip(LinearStream &commandStream, Device &device);
     void addPipeControlBefore3dState(LinearStream &commandStream, DispatchFlags &dispatchFlags);
     size_t getSshHeapSize();
@@ -179,6 +178,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     bool checkPlatformSupportsNewResourceImplicitFlush() const;
     bool checkPlatformSupportsGpuIdleImplicitFlush() const;
     void configurePostSyncWriteOffset();
+    void unregisterDirectSubmissionFromController();
 
     HeapDirtyState dshState;
     HeapDirtyState iohState;

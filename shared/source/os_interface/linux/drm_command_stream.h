@@ -43,6 +43,7 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
                              uint32_t rootDeviceIndex,
                              const DeviceBitfield deviceBitfield,
                              gemCloseWorkerMode mode = gemCloseWorkerMode::gemCloseWorkerActive);
+    ~DrmCommandStreamReceiver();
 
     SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
     MOCKABLE_VIRTUAL void processResidency(const ResidencyContainer &allocationsForResidency, uint32_t handleId) override;
@@ -61,6 +62,10 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
         gemCloseWorkerOperationMode = gemCloseWorkerMode::gemCloseWorkerInactive;
     }
 
+    uint64_t getCompletionAddress() override;
+
+    uint32_t getCompletionValue(const GraphicsAllocation &gfxAllocation) override;
+
     void printBOsForSubmit(ResidencyContainer &allocationsForResidency, GraphicsAllocation &cmdBufferAllocation);
 
     using CommandStreamReceiver::pageTableManager;
@@ -69,6 +74,7 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
     MOCKABLE_VIRTUAL int flushInternal(const BatchBuffer &batchBuffer, const ResidencyContainer &allocationsForResidency);
     MOCKABLE_VIRTUAL int exec(const BatchBuffer &batchBuffer, uint32_t vmHandleId, uint32_t drmContextId, uint32_t index);
     MOCKABLE_VIRTUAL int waitUserFence(uint32_t waitValue);
+    MOCKABLE_VIRTUAL void readBackAllocation(void *source);
     bool isUserFenceWaitActive();
 
     std::vector<BufferObject *> residency;
@@ -76,6 +82,7 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
     Drm *drm;
     gemCloseWorkerMode gemCloseWorkerOperationMode;
 
+    volatile uint32_t reserved = 0;
     int32_t kmdWaitTimeout = -1;
 
     bool useUserFenceWait = true;

@@ -891,6 +891,10 @@ bool Drm::sysmanQueryEngineInfo() {
     return Drm::queryEngineInfo(true);
 }
 
+bool Drm::isDebugAttachAvailable() {
+    return ioctlHelper->isDebugAttachAvailable();
+}
+
 int getMaxGpuFrequencyOfDevice(Drm &drm, std::string &sysFsPciPath, int &maxGpuFrequency) {
     maxGpuFrequency = 0;
     std::string clockSysFsPath = sysFsPciPath + "/gt_max_freq_mhz";
@@ -1409,7 +1413,7 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
         if (bind) {
             std::unique_lock<std::mutex> lock;
 
-            auto vmBindExtSyncFence = ioctlHelper->createVmBindExtSyncFence();
+            auto vmBindExtUserFence = ioctlHelper->createVmBindExtUserFence();
 
             if (drm->useVMBindImmediate()) {
                 lock = drm->lockBindFenceMutex();
@@ -1419,8 +1423,8 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
                     auto address = castToUint64(drm->getFenceAddr(vmHandleId));
                     auto value = drm->getNextFenceVal(vmHandleId);
 
-                    ioctlHelper->fillVmBindExtSyncFence(vmBindExtSyncFence, address, value, nextExtension);
-                    vmBind.extensions = castToUint64(vmBindExtSyncFence.get());
+                    ioctlHelper->fillVmBindExtUserFence(vmBindExtUserFence, address, value, nextExtension);
+                    vmBind.extensions = castToUint64(vmBindExtUserFence.get());
                 }
             }
 
@@ -1530,6 +1534,9 @@ PhyicalDevicePciSpeedInfo Drm::getPciSpeedInfo() const {
         linkWidthStream << pathPrefix << fileName;
 
         int fd = NEO::SysCalls::open(linkWidthStream.str().c_str(), O_RDONLY);
+        if (fd == 0) {
+            return false;
+        }
         ssize_t bytesRead = NEO::SysCalls::pread(fd, readString.data(), readString.size() - 1, 0);
         NEO::SysCalls::close(fd);
         if (bytesRead <= 0) {
@@ -1578,7 +1585,7 @@ PhyicalDevicePciSpeedInfo Drm::getPciSpeedInfo() const {
 
     constexpr double gigaBitsPerSecondToBytesPerSecondMultiplier = 125000000;
     const auto maxSpeedWithEncodingLoss = maxSpeed * gigaBitsPerSecondToBytesPerSecondMultiplier * maxSpeedToGenAndEncodingLossMapping[maxSpeed].second;
-    pciSpeedInfo.maxBandwidth = maxSpeedWithEncodingLoss * pciSpeedInfo.width;
+    pciSpeedInfo.maxBandwidth = static_cast<int64_t>(maxSpeedWithEncodingLoss * pciSpeedInfo.width);
 
     return pciSpeedInfo;
 }

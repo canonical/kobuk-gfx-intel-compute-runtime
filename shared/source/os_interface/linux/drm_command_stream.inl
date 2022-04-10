@@ -81,6 +81,13 @@ DrmCommandStreamReceiver<GfxFamily>::DrmCommandStreamReceiver(ExecutionEnvironme
 }
 
 template <typename GfxFamily>
+inline DrmCommandStreamReceiver<GfxFamily>::~DrmCommandStreamReceiver() {
+    if (this->isUpdateTagFromWaitEnabled()) {
+        this->waitForCompletionWithTimeout(WaitParams{false, false, 0}, this->peekTaskCount());
+    }
+}
+
+template <typename GfxFamily>
 SubmissionStatus DrmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) {
     this->printDeviceIndex();
     DrmAllocation *alloc = static_cast<DrmAllocation *>(batchBuffer.commandBufferAllocation);
@@ -146,6 +153,14 @@ SubmissionStatus DrmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBu
     } else {
         this->flushStamp->setStamp(bb->peekHandle());
     }
+
+    auto readBackMode = DebugManager.flags.ReadBackCommandBufferAllocation.get();
+    bool readBackAllowed = ((batchBuffer.commandBufferAllocation->isAllocatedInLocalMemoryPool() && readBackMode == 1) || readBackMode == 2);
+
+    if (readBackAllowed) {
+        readBackAllocation(ptrOffset(batchBuffer.commandBufferAllocation->getUnderlyingBuffer(), batchBuffer.startOffset));
+    }
+
     auto ret = this->flushInternal(batchBuffer, allocationsForResidency);
 
     if (this->gemCloseWorkerOperationMode == gemCloseWorkerMode::gemCloseWorkerActive) {
@@ -158,6 +173,11 @@ SubmissionStatus DrmCommandStreamReceiver<GfxFamily>::flush(BatchBuffer &batchBu
     }
 
     return SubmissionStatus::SUCCESS;
+}
+
+template <typename GfxFamily>
+void DrmCommandStreamReceiver<GfxFamily>::readBackAllocation(void *source) {
+    reserved = *reinterpret_cast<volatile uint32_t *>(source);
 }
 
 template <typename GfxFamily>
@@ -296,4 +316,19 @@ inline bool DrmCommandStreamReceiver<GfxFamily>::isUserFenceWaitActive() {
     return (this->drm->isVmBindAvailable() && useUserFenceWait);
 }
 
+template <typename GfxFamily>
+uint64_t DrmCommandStreamReceiver<GfxFamily>::getCompletionAddress() {
+    uint64_t completionFenceAddress = castToUint64(const_cast<uint32_t *>(getTagAddress()));
+    if (completionFenceAddress == 0) {
+        return 0;
+    }
+    completionFenceAddress += Drm::completionFenceOffset;
+    return completionFenceAddress;
+}
+
+template <typename GfxFamily>
+uint32_t DrmCommandStreamReceiver<GfxFamily>::getCompletionValue(const GraphicsAllocation &gfxAllocation) {
+    auto osContextId = osContext->getContextId();
+    return gfxAllocation.getTaskCount(osContextId);
+}
 } // namespace NEO

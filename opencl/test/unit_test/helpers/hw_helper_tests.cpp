@@ -1061,7 +1061,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HwHelperTest, WhenIsFusedEuDispatchEnabledIsCalledTh
         GTEST_SKIP();
     }
     auto &helper = HwHelper::get(renderCoreFamily);
-    EXPECT_FALSE(helper.isFusedEuDispatchEnabled(hardwareInfo));
+    EXPECT_FALSE(helper.isFusedEuDispatchEnabled(hardwareInfo, false));
 }
 
 HWTEST_F(PipeControlHelperTests, WhenGettingPipeControSizeForCacheFlushThenReturnCorrectValue) {
@@ -1474,4 +1474,16 @@ HWTEST_F(HwHelperTest, GivenHwInfoWhenGetBatchBufferEndSizeCalledThenCorrectSize
 HWTEST_F(HwHelperTest, GivenHwInfoWhenGetBatchBufferEndReferenceCalledThenCorrectPtrReturned) {
     const auto &hwHelper = HwHelper::get(renderCoreFamily);
     EXPECT_EQ(hwHelper.getBatchBufferEndReference(), reinterpret_cast<const void *>(&FamilyType::cmdInitBatchBufferEnd));
+}
+
+HWTEST_F(HwHelperTest, givenHwHelperWhenPassingCopyEngineTypeThenItsCopyOnly) {
+    EXPECT_TRUE(EngineHelper::isCopyOnlyEngineType(EngineGroupType::Copy));
+}
+
+HWTEST_F(HwHelperTest, givenHwHelperWhenPassingLinkedCopyEngineTypeThenItsCopyOnly) {
+    EXPECT_TRUE(EngineHelper::isCopyOnlyEngineType(EngineGroupType::LinkedCopy));
+}
+
+HWTEST_F(HwHelperTest, givenHwHelperWhenPassingComputeEngineTypeThenItsNotCopyOnly) {
+    EXPECT_FALSE(EngineHelper::isCopyOnlyEngineType(EngineGroupType::Compute));
 }

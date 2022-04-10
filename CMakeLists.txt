@@ -446,6 +446,9 @@ message(STATUS "i915 includes dir: ${I915_INCLUDES_DIR}")
 
 # Enable/Disable BuiltIns compilation during build
 set(COMPILE_BUILT_INS TRUE CACHE BOOL "Enable built-in kernels compilation")
+if(NOT DEFINED NEO_KERNELS_BIN_DIR)
+  get_filename_component(NEO_KERNELS_BIN_DIR "${NEO_SOURCE_DIR}/../kernels_bin/" ABSOLUTE)
+endif()
 
 # Changing the default executable and library output directories
 set(IGDRCL_OUTPUT_DIR "${IGDRCL_OPTION__OUTPUT_DIR}")
@@ -615,6 +618,7 @@ else()
   endif()
   check_cxx_compiler_flag(-msse4.2 COMPILER_SUPPORTS_SSE42)
   check_cxx_compiler_flag(-mavx2 COMPILER_SUPPORTS_AVX2)
+  check_cxx_compiler_flag(-march=armv8-a+simd COMPILER_SUPPORTS_NEON)
 endif()
 
 if(NOT MSVC)

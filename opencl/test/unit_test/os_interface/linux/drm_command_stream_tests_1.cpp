@@ -33,16 +33,17 @@
 #include "shared/test/common/mocks/mock_gmm_page_table_mngr.h"
 #include "shared/test/common/mocks/mock_host_ptr_manager.h"
 #include "shared/test/common/mocks/mock_submissions_aggregator.h"
+#include "shared/test/common/os_interface/linux/drm_command_stream_fixture.h"
 #include "shared/test/common/test_macros/test.h"
+#include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
-#include "opencl/test/unit_test/os_interface/linux/drm_command_stream_fixture.h"
 
 #include "drm/i915_drm.h"
-#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 
 using namespace NEO;
 
@@ -161,7 +162,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenPrintIndicesEnabledWhenFlushThenPr
                   << ", Sub-Devices Mask: " << csr->getOsContext().getDeviceBitfield().to_ulong()
                   << ", EngineId: " << csr->getOsContext().getEngineType()
                   << " (" << engineType << ", " << engineUsage << ")\n";
-    EXPECT_THAT(::testing::internal::GetCapturedStdout(), ::testing::HasSubstr(expectedValue.str()));
+    EXPECT_TRUE(hasSubstr(::testing::internal::GetCapturedStdout(), expectedValue.str()));
 }
 
 HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenDrmContextIdWhenFlushingThenSetIdToAllExecBuffersAndObjects) {
@@ -482,7 +483,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamBatchingTests, givenCsrWhenDispatchPolicyIsSe
     DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(device->getHardwareInfo());
 
-    csr->flushTask(cs, 0u, cs, cs, cs, 0u, dispatchFlags, *device);
+    csr->flushTask(cs, 0u, &cs, &cs, &cs, 0u, dispatchFlags, *device);
 
     //make sure command buffer is recorded
     auto &cmdBuffers = mockedSubmissionsAggregator->peekCommandBuffers();
@@ -548,7 +549,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamBatchingTests, givenRecordedCommandBufferWhen
     dispatchFlags.preemptionMode = PreemptionHelper::getDefaultPreemptionMode(device->getHardwareInfo());
     dispatchFlags.guardCommandBufferWithPipeControl = true;
 
-    csr->flushTask(cs, 0u, cs, cs, cs, 0u, dispatchFlags, *device);
+    csr->flushTask(cs, 0u, &cs, &cs, &cs, 0u, dispatchFlags, *device);
 
     auto &cmdBuffers = mockedSubmissionsAggregator->peekCommandBuffers();
     auto storedCommandBuffer = cmdBuffers.peekHead();

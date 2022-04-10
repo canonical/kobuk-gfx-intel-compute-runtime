@@ -200,7 +200,7 @@ function(neo_gen_kernels platform_name_with_type platform_name revision_id suffi
       list(APPEND kernels_to_compile ${output_files})
     else()
       foreach(_file_name "spv" "bin" "gen")
-        set(_file_prebuilt "${NEO_SOURCE_DIR}/../kernels_bin/${suffix}/${revision_id}/test_files/${NEO_ARCH}/${basename}_${suffix}.${_file_name}")
+        set(_file_prebuilt "${NEO_KERNELS_BIN_DIR}/${suffix}/${revision_id}/test_files/${NEO_ARCH}/${basename}_${suffix}.${_file_name}")
         add_custom_command(
                            OUTPUT ${outputpath_base}.${_file_name}
                            COMMAND ${CMAKE_COMMAND} -E make_directory ${outputdir}
@@ -246,7 +246,7 @@ function(neo_gen_kernels_with_options platform_name_with_type platform_name revi
         list(APPEND kernels_to_compile ${output_files})
       else()
         foreach(_file_name "spv" "bin" "gen")
-          set(_file_prebuilt "${NEO_SOURCE_DIR}/../kernels_bin/${suffix}/${revision_id}/test_files/${NEO_ARCH}/${basename}_${suffix}.${_file_name}${argwospaces}")
+          set(_file_prebuilt "${NEO_KERNELS_BIN_DIR}/${suffix}/${revision_id}/test_files/${NEO_ARCH}/${basename}_${suffix}.${_file_name}${argwospaces}")
           add_custom_command(
                              OUTPUT ${outputpath_base}.${_file_name}${argwospaces}
                              COMMAND ${CMAKE_COMMAND} -E make_directory ${outputdir}
@@ -299,7 +299,7 @@ function(neo_gen_kernels_with_internal_options platform_name_with_type platform_
     list(APPEND kernels_to_compile_${platform_name_with_type}_${revision_id} ${output_files})
   else()
     foreach(_file_name "spv" "bin" "gen")
-      set(_file_prebuilt "${NEO_SOURCE_DIR}/../kernels_bin/${suffix}/${revision_id}/test_files/${NEO_ARCH}/${basename}_${suffix}.${_file_name}")
+      set(_file_prebuilt "${NEO_KERNELS_BIN_DIR}/${suffix}/${revision_id}/test_files/${NEO_ARCH}/${basename}_${suffix}.${_file_name}")
       add_custom_command(
                          OUTPUT ${outputpath_base}.${_file_name}
                          COMMAND ${CMAKE_COMMAND} -E make_directory ${outputdir}
@@ -347,7 +347,7 @@ function(neo_gen_kernel_with_kernel_debug_options platform_name_with_type platfo
     list(APPEND kernels_to_compile_${platform_name_with_type}_${revision_id} ${output_files})
   else()
     foreach(_file_name "spv" "bin" "gen" "dbg")
-      set(_file_prebuilt "${NEO_SOURCE_DIR}/../kernels_bin/${suffix}/${revision_id}/test_files/${NEO_ARCH}/${argwospaces}_${suffix}.${_file_name}")
+      set(_file_prebuilt "${NEO_KERNELS_BIN_DIR}/${suffix}/${revision_id}/test_files/${NEO_ARCH}/${argwospaces}_${suffix}.${_file_name}")
       add_custom_command(
                          OUTPUT ${outputpath_base}.${_file_name}
                          COMMAND ${CMAKE_COMMAND} -E make_directory ${outputdir}
@@ -484,6 +484,14 @@ macro(macro_for_each_core_type)
           neo_gen_kernels(${family_name_with_type} ${PLATFORM_LOWER} ${REVISION_ID} ${family_name_with_type} ${PLATFORM_TEST_KERNELS})
           neo_gen_kernels_with_options(${family_name_with_type} ${PLATFORM_LOWER} ${REVISION_ID} ${family_name_with_type} ${TEST_KERNEL} ${TEST_KERNEL_options})
         endforeach()
+
+        #compile gen specific kernels if any were found
+        file(GLOB_RECURSE ${CORE_TYPE_LOWER}_TEST_KERNELS test_files/*.${CORE_TYPE_LOWER})
+        if(NOT "${${CORE_TYPE_LOWER}_TEST_KERNELS}" STREQUAL "")
+          foreach(REVISION_ID ${${PLATFORM_TYPE}_${CORE_TYPE}_REVISIONS})
+            neo_gen_kernels(${family_name_with_type} ${PLATFORM_LOWER} ${REVISION_ID} ${family_name_with_type} ${${CORE_TYPE_LOWER}_TEST_KERNELS})
+          endforeach()
+        endif()
 
         # Compile platform specific kernels if any were found
         file(GLOB_RECURSE ${PLATFORM_LOWER}_TEST_KERNELS test_files/*.${PLATFORM_LOWER})

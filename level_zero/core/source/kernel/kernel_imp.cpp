@@ -213,6 +213,13 @@ void KernelImmutableData::createRelocatedDebugData(NEO::GraphicsAllocation *glob
     }
 }
 
+ze_result_t KernelImp::getBaseAddress(uint64_t *baseAddress) {
+    if (baseAddress) {
+        *baseAddress = NEO::GmmHelper::decanonize(this->kernelImmData->getKernelInfo()->kernelAllocation->getGpuAddress());
+    }
+    return ZE_RESULT_SUCCESS;
+}
+
 uint32_t KernelImmutableData::getIsaSize() const {
     return static_cast<uint32_t>(isaGraphicsAllocation->getUnderlyingBufferSize());
 }
@@ -731,7 +738,7 @@ ze_result_t KernelImp::getProperties(ze_kernel_properties_t *pKernelProperties) 
 
             preferredGroupSizeProperties->preferredMultiple = this->kernelImmData->getKernelInfo()->getMaxSimdSize();
             auto &hwHelper = NEO::HwHelper::get(this->module->getDevice()->getHwInfo().platform.eRenderCoreFamily);
-            if (hwHelper.isFusedEuDispatchEnabled(this->module->getDevice()->getHwInfo())) {
+            if (hwHelper.isFusedEuDispatchEnabled(this->module->getDevice()->getHwInfo(), kernelDescriptor.kernelAttributes.flags.requiresDisabledEUFusion)) {
                 preferredGroupSizeProperties->preferredMultiple *= 2;
             }
         }

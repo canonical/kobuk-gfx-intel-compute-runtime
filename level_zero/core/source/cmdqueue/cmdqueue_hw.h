@@ -33,7 +33,8 @@ struct CommandQueueHw : public CommandQueueImp {
                                 void *phCommands,
                                 ze_fence_handle_t hFence) override;
 
-    void dispatchTaskCountWrite(NEO::LinearStream &commandStream, bool flushDataCache) override;
+    void dispatchTaskCountPostSync(NEO::LinearStream &commandStream, const NEO::HardwareInfo &hwInfo);
+    bool isDispatchTaskCountPostSyncRequired(ze_fence_handle_t hFence) const;
 
     void programStateBaseAddress(uint64_t gsba, bool useLocalMemoryForIndirectHeap, NEO::LinearStream &commandStream, bool cachedMOCSAllowed);
     size_t estimateStateBaseAddressCmdSize();
@@ -41,8 +42,6 @@ struct CommandQueueHw : public CommandQueueImp {
 
     MOCKABLE_VIRTUAL size_t estimateFrontEndCmdSizeForMultipleCommandLists(bool isFrontEndStateDirty, uint32_t numCommandLists,
                                                                            ze_command_list_handle_t *phCommandLists);
-    MOCKABLE_VIRTUAL size_t estimateStateComputeModeCmdSizeForMultipleCommandLists(uint32_t numCommandLists,
-                                                                                   ze_command_list_handle_t *phCommandLists);
     size_t estimateFrontEndCmdSize();
     size_t estimatePipelineSelect();
     void programPipelineSelect(NEO::LinearStream &commandStream);

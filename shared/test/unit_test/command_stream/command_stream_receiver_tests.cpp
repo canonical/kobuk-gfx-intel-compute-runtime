@@ -27,12 +27,12 @@
 #include "shared/test/common/mocks/mock_internal_allocation_storage.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-#include "shared/test/common/test_macros/matchers.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/common/test_macros/test_checks_shared.h"
 #include "shared/test/unit_test/direct_submission/direct_submission_controller_mock.h"
+#include "shared/test/unit_test/helpers/gtest_helpers.h"
 
-#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 
 #include <chrono>
 #include <functional>
@@ -63,6 +63,13 @@ struct CommandStreamReceiverTest : public DeviceFixture,
     MemoryManager *memoryManager;
     InternalAllocationStorage *internalAllocationStorage;
 };
+
+TEST_F(CommandStreamReceiverTest, givenOsAgnosticCsrWhenGettingCompletionValueOrAddressThenZeroIsReturned) {
+    EXPECT_EQ(0u, commandStreamReceiver->getCompletionAddress());
+
+    MockGraphicsAllocation allocation{};
+    EXPECT_EQ(0u, commandStreamReceiver->getCompletionValue(allocation));
+}
 
 HWTEST_F(CommandStreamReceiverTest, WhenCreatingCsrThenDefaultValuesAreSet) {
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
@@ -301,6 +308,7 @@ HWTEST_F(CommandStreamReceiverTest, givenGpuHangWhenWaititingForTaskCountThenGpu
     constexpr auto taskCountToWait = 1;
     const auto waitStatus = csr.waitForTaskCount(taskCountToWait);
     EXPECT_EQ(WaitStatus::GpuHang, waitStatus);
+    EXPECT_TRUE(csr.downloadAllocationCalled);
 }
 
 HWTEST_F(CommandStreamReceiverTest, givenGpuHangAndNonEmptyAllocationsListWhenCallingWaitForTaskCountAndCleanAllocationListThenWaitIsCalledAndGpuHangIsReturned) {
@@ -558,6 +566,21 @@ HWTEST_F(CommandStreamReceiverTest, givenUpdateTaskCountFromWaitWhenCheckTaskCou
     {
         DebugManager.flags.UpdateTaskCountFromWait.set(3);
         EXPECT_TRUE(csr.isUpdateTagFromWaitEnabled());
+    }
+}
+
+HWTEST_F(CommandStreamReceiverTest, givenUpdateTaskCountFromWaitWhenCheckIfEnabledThenCanBeEnabledOnlyWithDirectSubmission) {
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto &hwHelper = HwHelper::get(csr.peekHwInfo().platform.eRenderCoreFamily);
+
+    {
+        csr.directSubmissionAvailable = true;
+        EXPECT_EQ(csr.isUpdateTagFromWaitEnabled(), hwHelper.isUpdateTaskCountFromWaitSupported());
+    }
+
+    {
+        csr.directSubmissionAvailable = false;
+        EXPECT_FALSE(csr.isUpdateTagFromWaitEnabled());
     }
 }
 
@@ -1243,7 +1266,7 @@ TEST(CommandStreamReceiverSimpleTest, givenPrintfTagAllocationAddressFlagEnabled
     char expectedStr[128];
     snprintf(expectedStr, 128, "\nCreated tag allocation %p for engine %u\n", csr.getTagAddress(), csr.getOsContext().getEngineType());
 
-    EXPECT_THAT(output, testing::HasSubstr(std::string(expectedStr)));
+    EXPECT_TRUE(hasSubstr(output, std::string(expectedStr)));
 }
 
 TEST(CommandStreamReceiverSimpleTest, givenGpuIdleImplicitFlushCheckDisabledWhenGpuIsIdleThenReturnFalse) {
@@ -1466,7 +1489,7 @@ TEST_F(CreateAllocationForHostSurfaceTest, givenReadOnlyHostPointerWhenAllocatio
     ASSERT_NE(nullptr, allocation);
 
     EXPECT_NE(memory, allocation->getUnderlyingBuffer());
-    EXPECT_THAT(allocation->getUnderlyingBuffer(), MemCompare(memory, size));
+    EXPECT_EQ(0, memcmp(allocation->getUnderlyingBuffer(), memory, size));
 
     allocation->updateTaskCount(commandStreamReceiver->peekLatestFlushedTaskCount(), commandStreamReceiver->getOsContext().getContextId());
 

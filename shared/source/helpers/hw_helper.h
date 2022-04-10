@@ -8,7 +8,6 @@
 #pragma once
 #include "shared/source/aub_mem_dump/aub_mem_dump.h"
 #include "shared/source/built_ins/sip.h"
-#include "shared/source/command_container/command_encoder.h"
 #include "shared/source/commands/bxml_generator_glue.h"
 #include "shared/source/helpers/aux_translation.h"
 #include "shared/source/helpers/definitions/engine_group_types.h"
@@ -27,7 +26,7 @@ namespace NEO {
 class GmmHelper;
 class GraphicsAllocation;
 class TagAllocatorBase;
-class LinearSteram;
+class LinearStream;
 class Gmm;
 struct AllocationData;
 struct AllocationProperties;
@@ -65,6 +64,7 @@ class HwHelper {
     static bool cacheFlushAfterWalkerSupported(const HardwareInfo &hwInfo);
     virtual bool timestampPacketWriteSupported() const = 0;
     virtual bool isTimestampWaitSupported() const = 0;
+    virtual bool isUpdateTaskCountFromWaitSupported() const = 0;
     virtual size_t getRenderSurfaceStateSize() const = 0;
     virtual void setRenderSurfaceStateForBuffer(const RootDeviceEnvironment &rootDeviceEnvironment,
                                                 void *surfaceStateBuffer,
@@ -98,7 +98,7 @@ class HwHelper {
     virtual uint32_t getMinimalSIMDSize() = 0;
     virtual bool isWorkaroundRequired(uint32_t lowestSteppingWithBug, uint32_t steppingWithFix, const HardwareInfo &hwInfo) const = 0;
     virtual bool isOffsetToSkipSetFFIDGPWARequired(const HardwareInfo &hwInfo) const = 0;
-    virtual bool isFusedEuDispatchEnabled(const HardwareInfo &hwInfo) const = 0;
+    virtual bool isFusedEuDispatchEnabled(const HardwareInfo &hwInfo, bool disableEUFusionForKernel) const = 0;
     virtual uint64_t getGpuTimeStampInNS(uint64_t timeStamp, double frequency) const = 0;
     virtual uint32_t getBindlessSurfaceExtendedMessageDescriptorValue(uint32_t surfStateOffset) const = 0;
     virtual void setExtraAllocationData(AllocationData &allocationData, const AllocationProperties &properties, const HardwareInfo &hwInfo) const = 0;
@@ -115,7 +115,6 @@ class HwHelper {
                                              const HardwareInfo &hwInfo, bool isEngineInstanced) const = 0;
     virtual size_t getMaxFillPaternSizeForCopyEngine() const = 0;
     virtual size_t getSipKernelMaxDbgSurfaceSize(const HardwareInfo &hwInfo) const = 0;
-    virtual bool isCopyOnlyEngineType(EngineGroupType type) const = 0;
     virtual bool isSipWANeeded(const HardwareInfo &hwInfo) const = 0;
     virtual bool isCpuImageTransferPreferred(const HardwareInfo &hwInfo) const = 0;
     virtual bool isKmdMigrationSupported(const HardwareInfo &hwInfo) const = 0;
@@ -249,6 +248,8 @@ class HwHelperHw : public HwHelper {
 
     bool isTimestampWaitSupported() const override;
 
+    bool isUpdateTaskCountFromWaitSupported() const override;
+
     bool is1MbAlignmentSupported(const HardwareInfo &hwInfo, bool isCompressionEnabled) const override;
 
     bool isFenceAllocationRequired(const HardwareInfo &hwInfo) const override;
@@ -299,7 +300,7 @@ class HwHelperHw : public HwHelper {
 
     bool isOffsetToSkipSetFFIDGPWARequired(const HardwareInfo &hwInfo) const override;
 
-    bool isFusedEuDispatchEnabled(const HardwareInfo &hwInfo) const override;
+    bool isFusedEuDispatchEnabled(const HardwareInfo &hwInfo, bool disableEUFusionForKernel) const override;
 
     static bool isForceDefaultRCSEngineWARequired(const HardwareInfo &hwInfo);
 
@@ -341,8 +342,6 @@ class HwHelperHw : public HwHelper {
     bool isKmdMigrationSupported(const HardwareInfo &hwInfo) const override;
 
     bool isCooperativeEngineSupported(const HardwareInfo &hwInfo) const override;
-
-    bool isCopyOnlyEngineType(EngineGroupType type) const override;
 
     bool isSipWANeeded(const HardwareInfo &hwInfo) const override;
 
@@ -461,8 +460,8 @@ struct MemorySynchronizationCommands {
     static void addPipeControlWA(LinearStream &commandStream, uint64_t gpuAddress, const HardwareInfo &hwInfo);
     static void setPipeControlWA(void *&commandsBuffer, uint64_t gpuAddress, const HardwareInfo &hwInfo);
 
-    static void addAdditionalSynchronization(LinearStream &commandStream, uint64_t gpuAddress, const HardwareInfo &hwInfo);
-    static void setAdditionalSynchronization(void *&commandsBuffer, uint64_t gpuAddress, const HardwareInfo &hwInfo);
+    static void addAdditionalSynchronization(LinearStream &commandStream, uint64_t gpuAddress, bool acquire, const HardwareInfo &hwInfo);
+    static void setAdditionalSynchronization(void *&commandsBuffer, uint64_t gpuAddress, bool acquire, const HardwareInfo &hwInfo);
 
     static void addPipeControl(LinearStream &commandStream, PipeControlArgs &args);
     static void setPipeControl(PIPE_CONTROL &pipeControl, PipeControlArgs &args);

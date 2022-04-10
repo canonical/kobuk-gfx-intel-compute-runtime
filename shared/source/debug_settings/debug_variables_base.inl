@@ -70,7 +70,7 @@ DECLARE_DEBUG_VARIABLE(bool, EnableResourceTags, false, "Enable resource tagging
 DECLARE_DEBUG_VARIABLE(bool, DoNotFreeResources, false, "true: driver stops freeing resources")
 DECLARE_DEBUG_VARIABLE(bool, AllowMixingRegularAndCooperativeKernels, false, "true: driver allows mixing regular and cooperative kernels in a single command list and in a single execute")
 DECLARE_DEBUG_VARIABLE(bool, AllowPatchingVfeStateInCommandLists, false, "true: MEDIA_VFE_STATE may be programmed in a command list")
-DECLARE_DEBUG_VARIABLE(bool, PrintMemoryRegionSizes, false, "print memory bank type, instance and it's size")
+DECLARE_DEBUG_VARIABLE(bool, PrintMemoryRegionSizes, false, "print memory bank type, instance and its size")
 DECLARE_DEBUG_VARIABLE(bool, UpdateCrossThreadDataSize, false, "Turn on cross thread data size calculation for PATCH TOKEN binary")
 DECLARE_DEBUG_VARIABLE(bool, UseNewQueryTopoIoctl, true, "Use DRM_I915_QUERY_COMPUTE_SLICES")
 DECLARE_DEBUG_VARIABLE(bool, DisableGpuHangDetection, false, "Disable GPU hang detection")
@@ -119,6 +119,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, GpuScratchRegWriteRegisterData, 0, "register dat
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideSlmAllocationSize, -1, "-1: default, >=0: program value for shared local memory size")
 DECLARE_DEBUG_VARIABLE(int32_t, DebuggerLogBitmask, 0, "0: logs disabled, 1 - INFO, 2 - ERROR, 1<<10 - Dump elf, see DebugVariables::DEBUGGER_LOG_BITMASK")
 DECLARE_DEBUG_VARIABLE(int32_t, DebuggerOptDisable, -1, "-1: default from debugger query, 0: do not add opt-disable, 1: add opt-disable")
+DECLARE_DEBUG_VARIABLE(int32_t, DebuggerForceSbaTrackingMode, -1, "-1: default, 0: per context address spaces, 1: single address space")
 DECLARE_DEBUG_VARIABLE(int32_t, DebugApiUsed, 0, "0: default L0 Debug API not used, 1: L0 Debug API used")
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideCsrAllocationSize, -1, "-1: default, >0: use value for size of CSR allocation")
 DECLARE_DEBUG_VARIABLE(int32_t, CFEComputeOverdispatchDisable, -1, "Set Compute Overdispatch Disable field in CFE_STATE, -1: do not set.")
@@ -197,6 +198,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, OverrideTimestampEvents, -1, "-1: default (based
 DECLARE_DEBUG_VARIABLE(int32_t, ForcePreParserEnabledForMiArbCheck, -1, "-1: default , 0: PreParser disabled, 1: PreParser enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, BatchBufferStartPrepatchingWaEnabled, -1, "-1: default , 0: disabled, 1: enabled. WA applies valid VA pointing to 'self' instead of 0x0. This mitigates incorrect VA preparsing.")
 DECLARE_DEBUG_VARIABLE(int32_t, SetVmAdviseAtomicAttribute, -1, "-1: default - atomic system, 0: atomic none, 1: atomic device, 2: atomic system)")
+DECLARE_DEBUG_VARIABLE(int32_t, ReadBackCommandBufferAllocation, -1, "Read command buffer allocation back on the host side. -1: default, 0 - disabled, 1 - local memory only, 2 - local and system memory")
 DECLARE_DEBUG_VARIABLE(bool, DisableScratchPages, false, "Disable scratch pages during VM creations")
 /*LOGGING FLAGS*/
 DECLARE_DEBUG_VARIABLE(int32_t, PrintDriverDiagnostics, -1, "prints driver diagnostics messages to standard output, value corresponds to hint level")
@@ -234,6 +236,7 @@ DECLARE_DEBUG_VARIABLE(bool, PrintBlitDispatchDetails, false, "Print blit dispat
 DECLARE_DEBUG_VARIABLE(bool, PrintIoctlTimes, false, "Print ioctl times")
 DECLARE_DEBUG_VARIABLE(bool, PrintIoctlEntries, false, "Print ioctl being called")
 DECLARE_DEBUG_VARIABLE(bool, PrintUmdSharedMigration, false, "Print log message when shared allocation is being migrated by UMD")
+DECLARE_DEBUG_VARIABLE(bool, PrintImageBlitBlockCopyCmdDetails, false, "Prints XY_BLOCK_COPY_BLT command details")
 
 /*PERFORMANCE FLAGS*/
 DECLARE_DEBUG_VARIABLE(bool, DisableZeroCopyForBuffers, false, "When active all buffer allocations will not share memory with CPU.")
@@ -283,7 +286,12 @@ DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionNewResourceTlbFlush, -1, "-1: dr
 DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionDisableMonitorFence, -1, "Disable dispatching monitor fence commands")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableDirectSubmissionController, -1, "Enable direct submission terminating after given timeout, -1: default, 0: disabled, 1: enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionControllerTimeout, -1, "Set direct submission controller timeout, -1: default 5 ms, >=0: timeout in ms")
-DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionForceLocalMemoryStorageMode, -1, "Force first memory bank storage for command/ring/semaphore buffer, -1: default - for multiOsContextCapable engine, 0: disabled, 1: for multiOsContextCapable engine, 2: for all engines")
+DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionForceLocalMemoryStorageMode, -1, "Force local memory storage for command/ring/semaphore buffer, -1: default - for all engines, 0: disabled, 1: for multiOsContextCapable engine, 2: for all engines")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableRingSwitchTagUpdateWa, -1, "-1: default, 0 - disable, 1 - enable. If enabled, completionRingBuffers wont be updated if ring is not runnning.")
+DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionReadBackCommandBuffer, -1, "-1: default - disabled, 0 - disable, 1 - enable. If enabled, read first dword of cmd buffer after handling residency.")
+DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionReadBackRingBuffer, -1, "-1: default - disabled, 0 - disable, 1 - enable. If enabled, read first dword of ring buffer after handling residency.")
+DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionInsertExtraMiMemFenceCommands, -1, "-1: default, 0 - disable, 1 - enable. If enabled, add extra MI_MEM_FENCE instructions with acquire bit set")
+DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionInsertSfenceInstructionPriorToSubmission, -1, "-1: default, 0 - disable, 1 - Instert _mm_sfence before unlocking semaphore only, 2 - insert before and after semaphore")
 
 /* IMPLICIT SCALING */
 DECLARE_DEBUG_VARIABLE(int32_t, EnableWalkerPartition, -1, "-1: default, 0: disable, 1: enable, Enables Walker Partitioning via WPARID.")

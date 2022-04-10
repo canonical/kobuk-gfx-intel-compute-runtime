@@ -82,7 +82,7 @@ class CommandStreamReceiver {
     virtual SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) = 0;
 
     virtual CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
-                                      const IndirectHeap &dsh, const IndirectHeap &ioh, const IndirectHeap &ssh,
+                                      const IndirectHeap *dsh, const IndirectHeap *ioh, const IndirectHeap *ssh,
                                       uint32_t taskLevel, DispatchFlags &dispatchFlags, Device &device) = 0;
 
     virtual bool flushBatchedSubmissions() = 0;
@@ -160,9 +160,9 @@ class CommandStreamReceiver {
     void requestStallingCommandsOnNextFlush() { stallingCommandsOnNextFlushRequired = true; }
     bool isStallingCommandsOnNextFlushRequired() const { return stallingCommandsOnNextFlushRequired; }
 
-    virtual WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) = 0;
-    virtual WaitStatus waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait);
-    WaitStatus baseWaitFunction(volatile uint32_t *pollAddress, bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait);
+    virtual WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, QueueThrottle throttle) = 0;
+    virtual WaitStatus waitForCompletionWithTimeout(const WaitParams &params, uint32_t taskCountToWait);
+    WaitStatus baseWaitFunction(volatile uint32_t *pollAddress, const WaitParams &params, uint32_t taskCountToWait);
     MOCKABLE_VIRTUAL bool testTaskCountReady(volatile uint32_t *pollAddress, uint32_t taskCountToWait);
     virtual void downloadAllocations(){};
 
@@ -235,7 +235,7 @@ class CommandStreamReceiver {
         return scratchSpaceController.get();
     }
 
-    virtual void downloadAllocation(GraphicsAllocation &gfxAllocation){};
+    void downloadAllocation(GraphicsAllocation &gfxAllocation);
 
     void registerInstructionCacheFlush() {
         auto mutex = obtainUniqueOwnership();
@@ -319,11 +319,20 @@ class CommandStreamReceiver {
 
     MOCKABLE_VIRTUAL bool isGpuHangDetected() const;
 
+    virtual uint64_t getCompletionAddress() {
+        return 0;
+    }
+
+    virtual uint32_t getCompletionValue(const GraphicsAllocation &gfxAllocation) {
+        return 0;
+    }
+
   protected:
     void cleanupResources();
     void printDeviceIndex();
     void checkForNewResources(uint32_t submittedTaskCount, uint32_t allocationTaskCount, GraphicsAllocation &gfxAllocation);
     bool checkImplicitFlushForGpuIdle();
+    void downloadTagAllocation();
     MOCKABLE_VIRTUAL std::unique_lock<MutexType> obtainHostPtrSurfaceCreationLock();
 
     std::unique_ptr<FlushStampTracker> flushStamp;
@@ -356,6 +365,7 @@ class CommandStreamReceiver {
     SpinLock debugPauseStateLock;
     static void *asyncDebugBreakConfirmation(void *arg);
     std::function<void()> debugConfirmationFunction = []() { std::cin.get(); };
+    std::function<void(GraphicsAllocation &)> downloadAllocationImpl;
 
     GraphicsAllocation *tagAllocation = nullptr;
     GraphicsAllocation *globalFenceAllocation = nullptr;

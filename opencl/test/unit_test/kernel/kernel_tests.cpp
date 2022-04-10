@@ -25,6 +25,7 @@
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/mock_timestamp_container.h"
 #include "shared/test/common/test_macros/test.h"
+#include "shared/test/unit_test/helpers/gtest_helpers.h"
 #include "shared/test/unit_test/page_fault_manager/mock_cpu_page_fault_manager.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
@@ -35,7 +36,6 @@
 #include "opencl/source/mem_obj/image.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/multi_root_device_fixture.h"
-#include "opencl/test/unit_test/helpers/gtest_helpers.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
@@ -315,6 +315,10 @@ TEST_F(KernelTests, GivenRequiredDisabledEUFusionFlagWhenGettingPrefferedWorkGro
     kernelInfo.kernelDescriptor.kernelAttributes.flags.requiresDisabledEUFusion = true;
     MockKernel kernel(pProgram, kernelInfo, *pClDevice);
 
+    auto &hwHelper = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
+    bool fusedDispatchEnabled = hwHelper.isFusedEuDispatchEnabled(*defaultHwInfo, true);
+    auto expectedValue = kernelInfo.getMaxSimdSize() * (fusedDispatchEnabled ? 2 : 1);
+
     cl_kernel_info paramName = CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE;
     size_t paramValue;
     size_t paramValueSize = sizeof(paramValue);
@@ -328,9 +332,35 @@ TEST_F(KernelTests, GivenRequiredDisabledEUFusionFlagWhenGettingPrefferedWorkGro
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(paramValueSize, paramValueSizeRet);
 
-    EXPECT_EQ(kernelInfo.getMaxSimdSize(), paramValue);
+    EXPECT_EQ(expectedValue, paramValue);
+}
 
-    kernelInfo.kernelDescriptor.kernelAttributes.flags.requiresDisabledEUFusion = false;
+TEST_F(KernelTests, GivenCFEFusedEUDispatchEnabledAndRequiredDisabledUEFusionWhenGettingPrefferedWorkGroupSizeMultipleThenCorectValueIsReturned) {
+    DebugManagerStateRestore dbgRestorer;
+    DebugManager.flags.CFEFusedEUDispatch.set(0);
+
+    KernelInfo kernelInfo = {};
+    kernelInfo.kernelDescriptor.kernelAttributes.flags.requiresDisabledEUFusion = true;
+    MockKernel kernel(pProgram, kernelInfo, *pClDevice);
+
+    auto &hwHelper = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
+    bool fusedDispatchEnabled = hwHelper.isFusedEuDispatchEnabled(*defaultHwInfo, true);
+    auto expectedValue = kernelInfo.getMaxSimdSize() * (fusedDispatchEnabled ? 2 : 1);
+
+    cl_kernel_info paramName = CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE;
+    size_t paramValue;
+    size_t paramValueSize = sizeof(paramValue);
+    size_t paramValueSizeRet = 0;
+
+    retVal = kernel.getWorkGroupInfo(
+        paramName,
+        paramValueSize,
+        &paramValue,
+        &paramValueSizeRet);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(paramValueSize, paramValueSizeRet);
+
+    EXPECT_EQ(expectedValue, paramValue);
 }
 
 TEST_F(KernelTests, GivenInvalidParamNameWhenGettingWorkGroupInfoThenInvalidValueErrorIsReturned) {
@@ -508,7 +538,7 @@ class CommandStreamReceiverMock : public CommandStreamReceiver {
         return NEO::SubmissionStatus::SUCCESS;
     }
 
-    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool quickKmdSleep, bool forcePowerSavingMode) override {
+    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool quickKmdSleep, QueueThrottle throttle) override {
         return WaitStatus::Ready;
     }
     uint32_t flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override { return taskCount; };
@@ -516,9 +546,9 @@ class CommandStreamReceiverMock : public CommandStreamReceiver {
     CompletionStamp flushTask(
         LinearStream &commandStream,
         size_t commandStreamStart,
-        const IndirectHeap &dsh,
-        const IndirectHeap &ioh,
-        const IndirectHeap &ssh,
+        const IndirectHeap *dsh,
+        const IndirectHeap *ioh,
+        const IndirectHeap *ssh,
         uint32_t taskLevel,
         DispatchFlags &dispatchFlags,
         Device &device) override {

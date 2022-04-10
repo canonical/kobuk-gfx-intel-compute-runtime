@@ -90,12 +90,6 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::reset() {
     clearCommandsToPatch();
     commandListSLMEnabled = false;
 
-    if (device->isImplicitScalingCapable() && !this->internalUsage) {
-        this->partitionCount = static_cast<uint32_t>(this->device->getNEODevice()->getDeviceBitfield().count());
-    } else {
-        this->partitionCount = 1;
-    }
-
     if (!isCopyOnly()) {
         if (!NEO::ApiSpecificConfig::getBindlessConfiguration()) {
             programStateBaseAddress(commandContainer, false);
@@ -120,7 +114,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::initialize(Device *device, NEO
     this->engineGroupType = engineGroupType;
     this->flags = flags;
 
-    if (device->isImplicitScalingCapable() && !this->internalUsage) {
+    if (device->isImplicitScalingCapable() && !this->internalUsage && !isCopyOnly()) {
         this->partitionCount = static_cast<uint32_t>(this->device->getNEODevice()->getDeviceBitfield().count());
     }
 
@@ -135,7 +129,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::initialize(Device *device, NEO
 
     commandContainer.setReservedSshSize(getReserveSshSize());
     DeviceImp *deviceImp = static_cast<DeviceImp *>(device);
-    auto returnValue = commandContainer.initialize(deviceImp->getActiveDevice(), deviceImp->allocationsForReuse.get());
+    auto returnValue = commandContainer.initialize(deviceImp->getActiveDevice(), deviceImp->allocationsForReuse.get(), !isCopyOnly());
     ze_result_t returnType = parseErrorCode(returnValue);
     if (returnType == ZE_RESULT_SUCCESS) {
         if (!isCopyOnly()) {
@@ -304,8 +298,11 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendEventReset(ze_event_hand
         callId = neoDevice->getRootDeviceEnvironment().tagsManager->currentCallCount;
     }
 
-    if (event->isEventTimestampFlagSet()) {
+    if (event->useContextEndOffset()) {
         baseAddr += event->getContextEndOffset();
+    }
+
+    if (event->isEventTimestampFlagSet()) {
         packetsToReset = EventPacketsCount::eventPackets;
     }
     event->resetPackets();
@@ -1673,6 +1670,8 @@ void CommandListCoreFamily<gfxCoreFamily>::appendSignalEventPostWalker(ze_event_
             if (this->partitionCount > 1) {
                 args.workloadPartitionOffset = true;
                 event->setPacketsInUse(this->partitionCount);
+                event->setPartitionedEvent(true);
+                baseAddr += event->getContextEndOffset();
             }
             NEO::MemorySynchronizationCommands<GfxFamily>::addPipeControlAndProgramPostSyncOperation(
                 *commandContainer.getCommandStream(),
@@ -1816,7 +1815,11 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendSignalEvent(ze_event_han
         callId = neoDevice->getRootDeviceEnvironment().tagsManager->currentCallCount;
     }
     size_t eventSignalOffset = 0;
-    if (event->isEventTimestampFlagSet()) {
+    if (this->partitionCount > 1) {
+        event->setPartitionedEvent(true);
+        event->setPacketsInUse(this->partitionCount);
+    }
+    if (event->useContextEndOffset()) {
         eventSignalOffset = event->getContextEndOffset();
     }
 
@@ -1830,10 +1833,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendSignalEvent(ze_event_han
         NEO::PipeControlArgs args;
         bool applyScope = event->signalScope;
         args.dcFlushEnable = NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(applyScope, hwInfo);
-        if (this->partitionCount > 1) {
-            args.workloadPartitionOffset = true;
-            event->setPacketsInUse(this->partitionCount);
-        }
+        args.workloadPartitionOffset = event->isPartitionedEvent();
         if (applyScope || event->isEventTimestampFlagSet()) {
             NEO::MemorySynchronizationCommands<GfxFamily>::addPipeControlAndProgramPostSyncOperation(
                 *commandContainer.getCommandStream(),
@@ -1888,29 +1888,13 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendWaitOnEvents(uint32_t nu
     bool dcFlushRequired = false;
 
     const auto &hwInfo = this->device->getHwInfo();
+
     if (NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo)) {
         for (uint32_t i = 0; i < numEvents; i++) {
             auto event = Event::fromHandle(phEvent[i]);
             dcFlushRequired |= !!event->waitScope;
         }
     }
-
-    size_t estimatedBufferSize = 0;
-    if (dcFlushRequired) {
-        if (isCopyOnly()) {
-            estimatedBufferSize += NEO::EncodeMiFlushDW<GfxFamily>::getMiFlushDwCmdSizeForDataWrite();
-        } else {
-            estimatedBufferSize += NEO::MemorySynchronizationCommands<GfxFamily>::getSizeForSinglePipeControl();
-        }
-    }
-    for (uint32_t i = 0; i < numEvents; i++) {
-        auto event = Event::fromHandle(phEvent[i]);
-        uint32_t packetsToWait = event->getPacketsInUse();
-        for (uint32_t i = 0u; i < packetsToWait; i++) {
-            estimatedBufferSize += NEO::EncodeSempahore<GfxFamily>::getSizeMiSemaphoreWait();
-        }
-    }
-
     if (dcFlushRequired) {
         if (isCopyOnly()) {
             NEO::MiFlushArgs args;
@@ -1928,7 +1912,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendWaitOnEvents(uint32_t nu
         gpuAddr = event->getGpuAddress(this->device);
         uint32_t packetsToWait = event->getPacketsInUse();
 
-        if (event->isEventTimestampFlagSet()) {
+        if (event->useContextEndOffset()) {
             gpuAddr += event->getContextEndOffset();
         }
         for (uint32_t i = 0u; i < packetsToWait; i++) {
@@ -2022,9 +2006,7 @@ void CommandListCoreFamily<gfxCoreFamily>::appendEventForProfiling(ze_event_hand
             NEO::MemorySynchronizationCommands<GfxFamily>::addPipeControl(*commandContainer.getCommandStream(), args);
 
             uint64_t baseAddr = event->getGpuAddress(this->device);
-            NEO::MemorySynchronizationCommands<GfxFamily>::addAdditionalSynchronization(*commandContainer.getCommandStream(),
-                                                                                        baseAddr,
-                                                                                        hwInfo);
+            NEO::MemorySynchronizationCommands<GfxFamily>::addAdditionalSynchronization(*commandContainer.getCommandStream(), baseAddr, false, hwInfo);
             appendWriteKernelTimestamp(hEvent, beforeWalker, true);
         }
     }
@@ -2226,10 +2208,9 @@ void CommandListCoreFamily<gfxCoreFamily>::updateStreamProperties(Kernel &kernel
     auto &kernelAttributes = kernel.getKernelDescriptor().kernelAttributes;
     if (!containsAnyKernel) {
         requiredStreamState.frontEndState.setProperties(isCooperative, kernelAttributes.flags.requiresDisabledEUFusion, disableOverdispatch, -1, hwInfo);
-        requiredStreamState.stateComputeMode.setProperties(false, kernelAttributes.numGrfRequired, kernel.getSchedulingHintExp(), hwInfo);
         finalStreamState = requiredStreamState;
+        requiredStreamState.stateComputeMode.setProperties(false, kernelAttributes.numGrfRequired, kernel.getSchedulingHintExp(), hwInfo);
         containsAnyKernel = true;
-        return;
     }
 
     finalStreamState.frontEndState.setProperties(isCooperative, kernelAttributes.flags.requiresDisabledEUFusion, disableOverdispatch, -1, hwInfo);
@@ -2280,11 +2261,9 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::setGlobalWorkSizeIndirect(NEO:
 template <GFXCORE_FAMILY gfxCoreFamily>
 void CommandListCoreFamily<gfxCoreFamily>::programStateBaseAddress(NEO::CommandContainer &container, bool genericMediaStateClearRequired) {
     const auto &hwInfo = this->device->getHwInfo();
-    NEO::PipeControlArgs args;
-    args.dcFlushEnable = NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo);
-    args.hdcPipelineFlush = true;
-    args.textureCacheInvalidationEnable = true;
-    NEO::MemorySynchronizationCommands<GfxFamily>::addPipeControl(*commandContainer.getCommandStream(), args);
+    bool isRcs = (this->engineGroupType == NEO::EngineGroupType::RenderCompute);
+
+    NEO::EncodeWA<GfxFamily>::addPipeControlBeforeStateBaseAddress(*commandContainer.getCommandStream(), hwInfo, isRcs);
 
     STATE_BASE_ADDRESS sba;
     NEO::EncodeStateBaseAddress<GfxFamily>::encode(commandContainer, sba, this->partitionCount > 1);

@@ -61,9 +61,9 @@ HWCMDTEST_F(IGFX_GEN8_CORE, UltCommandStreamReceiverTest, givenNotSentStateSipWh
 
         csr.flushTask(commandStream,
                       0,
-                      heap,
-                      heap,
-                      heap,
+                      &heap,
+                      &heap,
+                      &heap,
                       0,
                       dispatchFlags,
                       mockDevice->getDevice());
@@ -471,7 +471,7 @@ HWTEST_F(UltCommandStreamReceiverTest, givenSinglePartitionWhenCallingWaitKmdNot
     commandStreamReceiver.callBaseWaitForCompletionWithTimeout = false;
     commandStreamReceiver.returnWaitForCompletionWithTimeout = NEO::WaitStatus::NotReady;
 
-    commandStreamReceiver.waitForTaskCountWithKmdNotifyFallback(0, 0, false, false);
+    commandStreamReceiver.waitForTaskCountWithKmdNotifyFallback(0, 0, false, QueueThrottle::MEDIUM);
     EXPECT_EQ(2u, commandStreamReceiver.waitForCompletionWithTimeoutTaskCountCalled);
 }
 
@@ -480,7 +480,7 @@ HWTEST_F(UltCommandStreamReceiverTest, givenMultiplePartitionsWhenCallingWaitKmd
     commandStreamReceiver.callBaseWaitForCompletionWithTimeout = false;
     commandStreamReceiver.returnWaitForCompletionWithTimeout = NEO::WaitStatus::NotReady;
 
-    commandStreamReceiver.waitForTaskCountWithKmdNotifyFallback(0, 0, false, false);
+    commandStreamReceiver.waitForTaskCountWithKmdNotifyFallback(0, 0, false, QueueThrottle::MEDIUM);
     EXPECT_EQ(2u, commandStreamReceiver.waitForCompletionWithTimeoutTaskCountCalled);
 }
 

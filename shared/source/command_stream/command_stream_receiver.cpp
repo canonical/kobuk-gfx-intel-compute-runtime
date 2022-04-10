@@ -169,7 +169,8 @@ void CommandStreamReceiver::makeResidentHostPtrAllocation(GraphicsAllocation *gf
 WaitStatus CommandStreamReceiver::waitForTaskCount(uint32_t requiredTaskCount) {
     auto address = getTagAddress();
     if (address) {
-        return baseWaitFunction(address, false, 0, requiredTaskCount);
+        this->downloadTagAllocation();
+        return baseWaitFunction(address, WaitParams{false, false, 0}, requiredTaskCount);
     }
 
     return WaitStatus::Ready;
@@ -277,7 +278,7 @@ void CommandStreamReceiver::cleanupResources() {
     }
 
     if (tagsMultiAllocation) {
-        //Null tag address to prevent waiting for tag update when freeing it
+        // Null tag address to prevent waiting for tag update when freeing it
         tagAllocation = nullptr;
         tagAddress = nullptr;
         DEBUG_BREAK_IF(tagAllocation != nullptr);
@@ -316,7 +317,7 @@ void CommandStreamReceiver::cleanupResources() {
     }
 }
 
-WaitStatus CommandStreamReceiver::waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) {
+WaitStatus CommandStreamReceiver::waitForCompletionWithTimeout(const WaitParams &params, uint32_t taskCountToWait) {
     uint32_t latestSentTaskCount = this->latestFlushedTaskCount;
     if (latestSentTaskCount < taskCountToWait) {
         if (!this->flushBatchedSubmissions()) {
@@ -325,10 +326,10 @@ WaitStatus CommandStreamReceiver::waitForCompletionWithTimeout(bool enableTimeou
         }
     }
 
-    return baseWaitFunction(getTagAddress(), enableTimeout, timeoutMicroseconds, taskCountToWait);
+    return baseWaitFunction(getTagAddress(), params, taskCountToWait);
 }
 
-WaitStatus CommandStreamReceiver::baseWaitFunction(volatile uint32_t *pollAddress, bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) {
+WaitStatus CommandStreamReceiver::baseWaitFunction(volatile uint32_t *pollAddress, const WaitParams &params, uint32_t taskCountToWait) {
     std::chrono::microseconds elapsedTimeSinceGpuHangCheck{0};
     std::chrono::high_resolution_clock::time_point waitStartTime, lastHangCheckTime, currentTime;
     int64_t timeDiff = 0;
@@ -337,14 +338,13 @@ WaitStatus CommandStreamReceiver::baseWaitFunction(volatile uint32_t *pollAddres
     if (latestSentTaskCount < taskCountToWait) {
         this->flushTagUpdate();
     }
-
     volatile uint32_t *partitionAddress = pollAddress;
 
     waitStartTime = std::chrono::high_resolution_clock::now();
     lastHangCheckTime = waitStartTime;
     for (uint32_t i = 0; i < activePartitions; i++) {
-        while (*partitionAddress < taskCountToWait && timeDiff <= timeoutMicroseconds) {
-            if (WaitUtils::waitFunction(partitionAddress, taskCountToWait)) {
+        while (*partitionAddress < taskCountToWait && timeDiff <= params.waitTimeout) {
+            if (!params.indefinitelyPoll && WaitUtils::waitFunction(partitionAddress, taskCountToWait)) {
                 break;
             }
 
@@ -358,7 +358,7 @@ WaitStatus CommandStreamReceiver::baseWaitFunction(volatile uint32_t *pollAddres
                 }
             }
 
-            if (enableTimeout) {
+            if (params.enableTimeout) {
                 timeDiff = std::chrono::duration_cast<std::chrono::microseconds>(currentTime - waitStartTime).count();
             }
         }
@@ -366,7 +366,15 @@ WaitStatus CommandStreamReceiver::baseWaitFunction(volatile uint32_t *pollAddres
         partitionAddress = ptrOffset(partitionAddress, this->postSyncWriteOffset);
     }
 
-    return testTaskCountReady(pollAddress, taskCountToWait) ? WaitStatus::Ready : WaitStatus::NotReady;
+    partitionAddress = pollAddress;
+    for (uint32_t i = 0; i < activePartitions; i++) {
+        if (*partitionAddress < taskCountToWait) {
+            return WaitStatus::NotReady;
+        }
+        partitionAddress = ptrOffset(partitionAddress, this->postSyncWriteOffset);
+    }
+
+    return WaitStatus::Ready;
 }
 
 void CommandStreamReceiver::setTagAllocation(GraphicsAllocation *allocation) {
@@ -453,6 +461,12 @@ ResidencyContainer &CommandStreamReceiver::getEvictionAllocations() {
 AubSubCaptureStatus CommandStreamReceiver::checkAndActivateAubSubCapture(const std::string &kernelName) { return {false, false}; }
 
 void CommandStreamReceiver::addAubComment(const char *comment) {}
+
+void CommandStreamReceiver::downloadAllocation(GraphicsAllocation &gfxAllocation) {
+    if (this->downloadAllocationImpl) {
+        this->downloadAllocationImpl(gfxAllocation);
+    }
+}
 
 void CommandStreamReceiver::startControllingDirectSubmissions() {
     auto controller = this->executionEnvironment.directSubmissionController.get();
@@ -798,9 +812,16 @@ bool CommandStreamReceiver::checkImplicitFlushForGpuIdle() {
     return false;
 }
 
+void CommandStreamReceiver::downloadTagAllocation() {
+    if (this->getTagAllocation()) {
+        this->downloadAllocation(*this->getTagAllocation());
+    }
+}
+
 bool CommandStreamReceiver::testTaskCountReady(volatile uint32_t *pollAddress, uint32_t taskCountToWait) {
+    this->downloadTagAllocation();
     for (uint32_t i = 0; i < activePartitions; i++) {
-        if (*pollAddress < taskCountToWait) {
+        if (!WaitUtils::waitFunction(pollAddress, taskCountToWait)) {
             return false;
         }
 

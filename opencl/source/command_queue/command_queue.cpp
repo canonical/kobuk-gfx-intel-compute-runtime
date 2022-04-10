@@ -256,12 +256,10 @@ WaitStatus CommandQueue::waitUntilComplete(uint32_t gpgpuTaskCountToWait, Range<
     DBG_LOG(LogTaskCounts, __FUNCTION__, "Line: ", __LINE__, "Current taskCount:", getHwTag());
 
     if (!skipWait) {
-        bool forcePowerSavingMode = this->throttle == QueueThrottle::LOW;
-
         waitStatus = getGpgpuCommandStreamReceiver().waitForTaskCountWithKmdNotifyFallback(gpgpuTaskCountToWait,
                                                                                            flushStampToWait,
                                                                                            useQuickKmdSleep,
-                                                                                           forcePowerSavingMode);
+                                                                                           this->getThrottle());
         if (waitStatus == WaitStatus::GpuHang) {
             return WaitStatus::GpuHang;
         }
@@ -276,7 +274,7 @@ WaitStatus CommandQueue::waitUntilComplete(uint32_t gpgpuTaskCountToWait, Range<
     for (const CopyEngineState &copyEngine : copyEnginesToWait) {
         auto bcsCsr = getBcsCommandStreamReceiver(copyEngine.engineType);
 
-        waitStatus = bcsCsr->waitForTaskCountWithKmdNotifyFallback(copyEngine.taskCount, 0, false, false);
+        waitStatus = bcsCsr->waitForTaskCountWithKmdNotifyFallback(copyEngine.taskCount, 0, false, this->getThrottle());
         if (waitStatus == WaitStatus::GpuHang) {
             return WaitStatus::GpuHang;
         }
@@ -953,7 +951,7 @@ void CommandQueue::overrideEngine(aub_stream::EngineType engineType, EngineUsage
     const HardwareInfo &hwInfo = getDevice().getHardwareInfo();
     const HwHelper &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
     const EngineGroupType engineGroupType = hwHelper.getEngineGroupType(engineType, engineUsage, hwInfo);
-    const bool isEngineCopyOnly = hwHelper.isCopyOnlyEngineType(engineGroupType);
+    const bool isEngineCopyOnly = EngineHelper::isCopyOnlyEngineType(engineGroupType);
 
     if (isEngineCopyOnly) {
         std::fill(bcsEngines.begin(), bcsEngines.end(), nullptr);
@@ -983,6 +981,16 @@ void CommandQueue::aubCaptureHook(bool &blocking, bool &clearAllDependencies, co
         for (auto &dispatchInfo : multiDispatchInfo) {
             auto &kernelName = dispatchInfo.getKernel()->getKernelInfo().kernelDescriptor.kernelMetadata.kernelName;
             getGpgpuCommandStreamReceiver().addAubComment(kernelName.c_str());
+        }
+    }
+}
+
+void CommandQueue::assignDataToOverwrittenBcsNode(TagNodeBase *node) {
+    std::array<uint32_t, 8u> timestampData;
+    timestampData.fill(std::numeric_limits<uint32_t>::max());
+    if (node->refCountFetchSub(0) <= 2) { //One ref from deferred container and one from bcs barrier container it is going to be released from
+        for (uint32_t i = 0; i < node->getPacketsUsed(); i++) {
+            node->assignDataToAllTimestamps(i, timestampData.data());
         }
     }
 }
@@ -1063,12 +1071,8 @@ void CommandQueue::setupBarrierTimestampForBcsEngines(aub_stream::EngineType eng
 
             // Save latest timestamp (override previous, if any).
             if (!bcsTimestampPacketContainers[currentBcsIndex].lastBarrierToWaitFor.peekNodes().empty()) {
-                std::array<uint32_t, 8u> timestampData;
-                timestampData.fill(std::numeric_limits<uint32_t>::max());
                 for (auto &node : bcsTimestampPacketContainers[currentBcsIndex].lastBarrierToWaitFor.peekNodes()) {
-                    for (uint32_t i = 0; i < node->getPacketsUsed(); i++) {
-                        node->assignDataToAllTimestamps(i, timestampData.data());
-                    }
+                    this->assignDataToOverwrittenBcsNode(node);
                 }
             }
             TimestampPacketContainer newContainer{};

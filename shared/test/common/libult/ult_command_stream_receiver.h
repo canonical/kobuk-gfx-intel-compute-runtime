@@ -119,6 +119,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::timestampPacketWriteEnabled;
     using BaseClass::CommandStreamReceiver::useGpuIdleImplicitFlush;
     using BaseClass::CommandStreamReceiver::useNewResourceImplicitFlush;
+    using BaseClass::CommandStreamReceiver::useNotifyEnableForPostSync;
     using BaseClass::CommandStreamReceiver::userPauseConfirmation;
     using BaseClass::CommandStreamReceiver::waitForTaskCountAndCleanAllocationList;
 
@@ -127,6 +128,12 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
                              const DeviceBitfield deviceBitfield)
         : BaseClass(executionEnvironment, rootDeviceIndex, deviceBitfield), recursiveLockCounter(0),
           recordedDispatchFlags(DispatchFlagsHelper::createDefaultDispatchFlags()) {
+        this->downloadAllocationImpl = [this](GraphicsAllocation &graphicsAllocation) {
+            this->downloadAllocationUlt(graphicsAllocation);
+        };
+    }
+    ~UltCommandStreamReceiver() {
+        this->downloadAllocationImpl = nullptr;
     }
     static CommandStreamReceiver *create(bool withAubDump,
                                          ExecutionEnvironment &executionEnvironment,
@@ -154,7 +161,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     }
 
     CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
-                              const IndirectHeap &dsh, const IndirectHeap &ioh, const IndirectHeap &ssh,
+                              const IndirectHeap *dsh, const IndirectHeap *ioh, const IndirectHeap *ssh,
                               uint32_t taskLevel, DispatchFlags &dispatchFlags, Device &device) override {
         recordedDispatchFlags = dispatchFlags;
         this->lastFlushedCommandStream = &commandStream;
@@ -170,17 +177,20 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         downloadAllocationCalled = true;
     }
 
-    void downloadAllocation(GraphicsAllocation &gfxAllocation) override {
+    void downloadAllocationUlt(GraphicsAllocation &gfxAllocation) {
         downloadAllocationCalled = true;
     }
 
-    WaitStatus waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) override {
+    WaitStatus waitForCompletionWithTimeout(const WaitParams &params, uint32_t taskCountToWait) override {
         latestWaitForCompletionWithTimeoutTaskCount.store(taskCountToWait);
         waitForCompletionWithTimeoutTaskCountCalled++;
         if (callBaseWaitForCompletionWithTimeout) {
-            return BaseClass::waitForCompletionWithTimeout(enableTimeout, timeoutMicroseconds, taskCountToWait);
+            return BaseClass::waitForCompletionWithTimeout(params, taskCountToWait);
         }
         return returnWaitForCompletionWithTimeout;
+    }
+    WaitStatus waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) {
+        return waitForCompletionWithTimeout(WaitParams{false, enableTimeout, timeoutMicroseconds}, taskCountToWait);
     }
 
     void overrideCsrSizeReqFlags(CsrSizeRequestFlags &flags) { this->csrSizeRequestFlags = flags; }
@@ -335,7 +345,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     bool recordFlusheBatchBuffer = false;
     bool checkAndActivateAubSubCaptureCalled = false;
     bool addAubCommentCalled = false;
-    bool downloadAllocationCalled = false;
+    std::atomic_bool downloadAllocationCalled = false;
     bool flushBatchedSubmissionsCalled = false;
     bool initProgrammingFlagsCalled = false;
     bool multiOsContextCapable = false;

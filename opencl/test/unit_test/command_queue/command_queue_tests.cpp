@@ -50,7 +50,6 @@
 #include "opencl/test/unit_test/mocks/mock_mdi.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 
-#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 using namespace NEO;
@@ -961,7 +960,7 @@ class CommandStreamReceiverHwMock : public CommandStreamReceiverHw<GfxFamily> {
                                 const DeviceBitfield deviceBitfield)
         : CommandStreamReceiverHw<GfxFamily>(executionEnvironment, rootDeviceIndex, deviceBitfield) {}
 
-    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool forcePowerSavingMode) override {
+    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, QueueThrottle throttle) override {
         waitForTaskCountWithKmdNotifyFallbackCounter++;
         return waitForTaskCountWithKmdNotifyFallbackReturnValue;
     }
@@ -2133,6 +2132,19 @@ TEST_F(CommandQueueWithTimestampPacketTests, givenOutOfOrderQueueWhenSetupBarrie
     queue.setupBarrierTimestampForBcsEngines(aub_stream::EngineType::ENGINE_BCS, dependencies);
     EXPECT_EQ(1u, dependencies.barrierNodes.peekNodes().size());
     auto barrierNode = dependencies.barrierNodes.peekNodes()[0];
+    EXPECT_EQ(1u, barrierNode->getContextEndValue(0u));
+    dependencies.moveNodesToNewContainer(*queue.getDeferredTimestampPackets());
+    queue.getGpgpuCommandStreamReceiver().requestStallingCommandsOnNextFlush();
+    barrierNode->incRefCount();
+    barrierNode->incRefCount();
+    barrierNode->incRefCount();
+    barrierNode->incRefCount();
+
+    queue.setupBarrierTimestampForBcsEngines(aub_stream::EngineType::ENGINE_BCS, dependencies);
+    EXPECT_EQ(1u, barrierNode->getContextEndValue(0u));
+    EXPECT_EQ(1u, dependencies.barrierNodes.peekNodes().size());
+    barrierNode->refCountFetchSub(4u);
+    barrierNode = dependencies.barrierNodes.peekNodes()[0];
     EXPECT_EQ(1u, barrierNode->getContextEndValue(0u));
     dependencies.moveNodesToNewContainer(*queue.getDeferredTimestampPackets());
     queue.getGpgpuCommandStreamReceiver().requestStallingCommandsOnNextFlush();

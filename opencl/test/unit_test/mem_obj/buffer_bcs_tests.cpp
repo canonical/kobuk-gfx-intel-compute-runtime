@@ -15,6 +15,7 @@
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/mock_timestamp_container.h"
 #include "shared/test/common/test_macros/test.h"
+#include "shared/test/unit_test/helpers/gtest_helpers.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/api/api.h"
@@ -37,11 +38,11 @@ struct BcsBufferTests : public ::testing::Test {
         using UltCommandStreamReceiver<FamilyType>::UltCommandStreamReceiver;
 
         WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait,
-                                                         bool useQuickKmdSleep, bool forcePowerSavingMode) override {
+                                                         bool useQuickKmdSleep, QueueThrottle throttle) override {
             EXPECT_EQ(this->latestFlushedTaskCount, taskCountToWait);
             EXPECT_EQ(0u, flushStampToWait);
             EXPECT_FALSE(useQuickKmdSleep);
-            EXPECT_FALSE(forcePowerSavingMode);
+            EXPECT_EQ(throttle, QueueThrottle::MEDIUM);
             EXPECT_EQ(1u, this->activePartitions);
             waitForTaskCountWithKmdNotifyFallbackCalled++;
 
@@ -290,7 +291,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenDebugFlagSetWhenDispatchingBlitCommandsT
              maxBlitWidth, 1, hostPtrAddr, bufferGpuAddr,
              (copySize - maxBlitWidth), 1, ptrOffset(hostPtrAddr, maxBlitWidth), ptrOffset(bufferGpuAddr, maxBlitWidth));
 
-    EXPECT_THAT(output, testing::HasSubstr(std::string(expectedStr)));
+    EXPECT_TRUE(hasSubstr(output, std::string(expectedStr)));
 }
 
 HWTEST_TEMPLATED_F(BcsBufferTests, givenBcsSupportedWhenQueueIsBlockedThenDispatchBlitWhenUnblocked) {

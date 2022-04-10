@@ -6,9 +6,11 @@
  */
 
 #pragma once
+
 #include "shared/source/command_container/cmdcontainer.h"
 #include "shared/source/debugger/debugger.h"
 #include "shared/source/execution_environment/execution_environment.h"
+#include "shared/source/gmm_helper/gmm_lib.h"
 #include "shared/source/helpers/definitions/mi_flush_args.h"
 #include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/helpers/register_offsets.h"
@@ -93,6 +95,8 @@ struct EncodeDispatchKernel {
     static void adjustBindingTablePrefetch(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t samplerCount, uint32_t bindingTableEntryCount);
 
     static void adjustTimestampPacket(WALKER_TYPE &walkerCmd, const HardwareInfo &hwInfo);
+
+    static void setupPostSyncMocs(WALKER_TYPE &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment);
 };
 
 template <typename GfxFamily>
@@ -118,13 +122,19 @@ template <typename GfxFamily>
 struct EncodeMath {
     using MI_MATH_ALU_INST_INLINE = typename GfxFamily::MI_MATH_ALU_INST_INLINE;
     using MI_MATH = typename GfxFamily::MI_MATH;
+    constexpr static size_t streamCommandSize = sizeof(MI_MATH) + sizeof(MI_MATH_ALU_INST_INLINE) * NUM_ALU_INST_FOR_READ_MODIFY_WRITE;
 
     static uint32_t *commandReserve(CommandContainer &container);
+    static uint32_t *commandReserve(LinearStream &cmdStream);
     static void greaterThan(CommandContainer &container,
                             AluRegisters firstOperandRegister,
                             AluRegisters secondOperandRegister,
                             AluRegisters finalResultRegister);
     static void addition(CommandContainer &container,
+                         AluRegisters firstOperandRegister,
+                         AluRegisters secondOperandRegister,
+                         AluRegisters finalResultRegister);
+    static void addition(LinearStream &cmdStream,
                          AluRegisters firstOperandRegister,
                          AluRegisters secondOperandRegister,
                          AluRegisters finalResultRegister);
@@ -267,7 +277,8 @@ struct EncodeSurfaceState {
                                                    const void *srcKernelSsh, size_t srcKernelSshSize,
                                                    size_t numberOfBindingTableStates, size_t offsetOfBindingTable);
 
-    static void appendImageCompressionParams(R_SURFACE_STATE *surfaceState, GraphicsAllocation *allocation, GmmHelper *gmmHelper, bool imageFromBuffer);
+    static void appendImageCompressionParams(R_SURFACE_STATE *surfaceState, GraphicsAllocation *allocation, GmmHelper *gmmHelper,
+                                             bool imageFromBuffer, GMM_YUV_PLANE_ENUM plane);
     static void setCoherencyType(R_SURFACE_STATE *surfaceState, COHERENCY_TYPE coherencyType);
     static void setBufferAuxParamsForCCS(R_SURFACE_STATE *surfaceState);
     static void setImageAuxParamsForCCS(R_SURFACE_STATE *surfaceState, Gmm *gmm);
@@ -299,6 +310,8 @@ struct EncodeWA {
     static void addPipeControlPriorToNonPipelinedStateCommand(LinearStream &commandStream, PipeControlArgs args,
                                                               const HardwareInfo &hwInfo, bool isRcs);
     static void setAdditionalPipeControlFlagsForNonPipelineStateCommand(PipeControlArgs &args);
+
+    static void addPipeControlBeforeStateBaseAddress(LinearStream &commandStream, const HardwareInfo &hwInfo, bool isRcs);
 };
 
 template <typename GfxFamily>

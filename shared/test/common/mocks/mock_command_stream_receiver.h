@@ -18,7 +18,7 @@
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
 
-#include "gmock/gmock.h"
+#include "gtest/gtest.h"
 
 #include <optional>
 #include <vector>
@@ -52,9 +52,9 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
         memset(const_cast<uint32_t *>(CommandStreamReceiver::tagAddress), 0xFFFFFFFF, tagSize * sizeof(uint32_t));
     }
 
-    WaitStatus waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) override {
+    WaitStatus waitForCompletionWithTimeout(const WaitParams &params, uint32_t taskCountToWait) override {
         waitForCompletionWithTimeoutCalled++;
-        return NEO::WaitStatus::Ready;
+        return waitForCompletionWithTimeoutReturnValue;
     }
     SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
 
@@ -90,9 +90,9 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
     CompletionStamp flushTask(
         LinearStream &commandStream,
         size_t commandStreamStart,
-        const IndirectHeap &dsh,
-        const IndirectHeap &ioh,
-        const IndirectHeap &ssh,
+        const IndirectHeap *dsh,
+        const IndirectHeap *ioh,
+        const IndirectHeap *ssh,
         uint32_t taskLevel,
         DispatchFlags &dispatchFlags,
         Device &device) override;
@@ -104,7 +104,11 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
         return true;
     }
 
-    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool quickKmdSleep, bool forcePowerSavingMode) override {
+    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool quickKmdSleep, QueueThrottle throttle) override {
+        return WaitStatus::Ready;
+    }
+
+    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool quickKmdSleep, bool forcePowerSavingMode) {
         return WaitStatus::Ready;
     }
 
@@ -167,6 +171,7 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
     bool programComputeBarrierCommandCalled = false;
     std::optional<bool> isGpuHangDetectedReturnValue{};
     std::optional<bool> testTaskCountReadyReturnValue{};
+    WaitStatus waitForCompletionWithTimeoutReturnValue{WaitStatus::Ready};
 };
 
 class MockCommandStreamReceiverWithFailingSubmitBatch : public MockCommandStreamReceiver {
@@ -246,8 +251,8 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
     }
 
     CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
-                              const IndirectHeap &dsh, const IndirectHeap &ioh,
-                              const IndirectHeap &ssh, uint32_t taskLevel, DispatchFlags &dispatchFlags, Device &device) override {
+                              const IndirectHeap *dsh, const IndirectHeap *ioh,
+                              const IndirectHeap *ssh, uint32_t taskLevel, DispatchFlags &dispatchFlags, Device &device) override {
         passedDispatchFlags = dispatchFlags;
 
         recordedCommandBuffer = std::unique_ptr<CommandBuffer>(new CommandBuffer(device));

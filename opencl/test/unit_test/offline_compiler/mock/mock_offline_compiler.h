@@ -11,6 +11,7 @@
 
 #include "opencl/test/unit_test/offline_compiler/mock/mock_argument_helper.h"
 
+#include <optional>
 #include <string>
 
 namespace NEO {
@@ -47,6 +48,8 @@ class MockOfflineCompiler : public OfflineCompiler {
     using OfflineCompiler::sourceCode;
     using OfflineCompiler::storeBinary;
     using OfflineCompiler::updateBuildLog;
+    using OfflineCompiler::useGenFile;
+    using OfflineCompiler::useLlvmBc;
     using OfflineCompiler::useLlvmText;
     using OfflineCompiler::useOptionsSuffix;
 
@@ -63,6 +66,16 @@ class MockOfflineCompiler : public OfflineCompiler {
 
     void storeGenBinary(const void *pSrc, const size_t srcSize) {
         OfflineCompiler::storeBinary(genBinary, genBinarySize, pSrc, srcSize);
+    }
+
+    int build() override {
+        ++buildCalledCount;
+
+        if (buildReturnValue.has_value()) {
+            return *buildReturnValue;
+        }
+
+        return OfflineCompiler::build();
     }
 
     int buildSourceCode() override {
@@ -94,5 +107,8 @@ class MockOfflineCompiler : public OfflineCompiler {
     uint32_t generateElfBinaryCalled = 0u;
     uint32_t writeOutAllFilesCalled = 0u;
     std::unique_ptr<MockOclocArgHelper> uniqueHelper;
+    int buildCalledCount{0};
+    std::optional<int> buildReturnValue{};
 };
+
 } // namespace NEO

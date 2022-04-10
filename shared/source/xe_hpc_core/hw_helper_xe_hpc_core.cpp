@@ -173,7 +173,7 @@ size_t HwHelperHw<Family>::getPaddingForISAAllocation() const {
 template <>
 size_t MemorySynchronizationCommands<Family>::getSizeForSingleAdditionalSynchronization(const HardwareInfo &hwInfo) {
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
-    auto programGlobalFenceAsMiMemFenceCommandInCommandStream = hwInfoConfig.isGlobalFenceAsMiMemFenceCommandInCommandStreamRequired(hwInfo);
+    auto programGlobalFenceAsMiMemFenceCommandInCommandStream = hwInfoConfig.isGlobalFenceInCommandStreamRequired(hwInfo);
     if (DebugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.get() != -1) {
         programGlobalFenceAsMiMemFenceCommandInCommandStream = !!DebugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.get();
     }
@@ -186,18 +186,22 @@ size_t MemorySynchronizationCommands<Family>::getSizeForSingleAdditionalSynchron
 }
 
 template <>
-void MemorySynchronizationCommands<Family>::setAdditionalSynchronization(void *&commandsBuffer, uint64_t gpuAddress, const HardwareInfo &hwInfo) {
+void MemorySynchronizationCommands<Family>::setAdditionalSynchronization(void *&commandsBuffer, uint64_t gpuAddress, bool acquire, const HardwareInfo &hwInfo) {
     using MI_MEM_FENCE = typename Family::MI_MEM_FENCE;
     using MI_SEMAPHORE_WAIT = typename Family::MI_SEMAPHORE_WAIT;
 
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
-    auto programGlobalFenceAsMiMemFenceCommandInCommandStream = hwInfoConfig.isGlobalFenceAsMiMemFenceCommandInCommandStreamRequired(hwInfo);
+    auto programGlobalFenceAsMiMemFenceCommandInCommandStream = hwInfoConfig.isGlobalFenceInCommandStreamRequired(hwInfo);
     if (DebugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.get() != -1) {
         programGlobalFenceAsMiMemFenceCommandInCommandStream = !!DebugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.get();
     }
     if (programGlobalFenceAsMiMemFenceCommandInCommandStream) {
         MI_MEM_FENCE miMemFence = Family::cmdInitMemFence;
-        miMemFence.setFenceType(Family::MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_RELEASE);
+        if (acquire) {
+            miMemFence.setFenceType(Family::MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_ACQUIRE);
+        } else {
+            miMemFence.setFenceType(Family::MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_RELEASE);
+        }
         *reinterpret_cast<MI_MEM_FENCE *>(commandsBuffer) = miMemFence;
         commandsBuffer = ptrOffset(commandsBuffer, sizeof(MI_MEM_FENCE));
     } else {
@@ -239,13 +243,13 @@ void HwHelperHw<Family>::setExtraAllocationData(AllocationData &allocationData, 
         allocationData.flags.useSystemMemory = false;
     }
 
-    bool forceLocalMemoryForDirectSubmission = properties.flags.multiOsContextCapable;
+    bool forceLocalMemoryForDirectSubmission = true;
     switch (DebugManager.flags.DirectSubmissionForceLocalMemoryStorageMode.get()) {
     case 0:
         forceLocalMemoryForDirectSubmission = false;
         break;
-    case 2:
-        forceLocalMemoryForDirectSubmission = true;
+    case 1:
+        forceLocalMemoryForDirectSubmission = properties.flags.multiOsContextCapable;
         break;
     default:
         break;
@@ -257,7 +261,6 @@ void HwHelperHw<Family>::setExtraAllocationData(AllocationData &allocationData, 
             properties.allocationType == AllocationType::SEMAPHORE_BUFFER) {
             allocationData.flags.useSystemMemory = false;
             allocationData.flags.requiresCpuAccess = true;
-            allocationData.flags.resource48Bit = true;
         }
     }
 
@@ -376,11 +379,6 @@ uint32_t HwHelperHw<Family>::computeSlmValues(const HardwareInfo &hwInfo, uint32
 template <>
 int32_t HwHelperHw<Family>::getDefaultThreadArbitrationPolicy() const {
     return ThreadArbitrationPolicy::RoundRobinAfterDependency;
-}
-
-template <>
-bool HwHelperHw<Family>::isCopyOnlyEngineType(EngineGroupType type) const {
-    return (EngineGroupType::Copy == type || EngineGroupType::LinkedCopy == type);
 }
 
 template <>

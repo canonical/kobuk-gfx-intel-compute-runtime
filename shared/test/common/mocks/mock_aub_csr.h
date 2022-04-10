@@ -62,7 +62,7 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
     using AUBCommandStreamReceiverHw<GfxFamily>::AUBCommandStreamReceiverHw;
 
     CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
-                              const IndirectHeap &dsh, const IndirectHeap &ioh, const IndirectHeap &ssh,
+                              const IndirectHeap *dsh, const IndirectHeap *ioh, const IndirectHeap *ssh,
                               uint32_t taskLevel, DispatchFlags &dispatchFlags, Device &device) override {
         recordedDispatchFlags = dispatchFlags;
 
@@ -122,7 +122,7 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
         expectMemoryCompressedCalled = true;
         return AUBCommandStreamReceiverHw<GfxFamily>::expectMemoryCompressed(gfxAddress, srcAddress, length);
     }
-    WaitStatus waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) override {
+    WaitStatus waitForCompletionWithTimeout(const WaitParams &params, uint32_t taskCountToWait) override {
         return NEO::WaitStatus::Ready;
     }
     void addAubComment(const char *message) override {

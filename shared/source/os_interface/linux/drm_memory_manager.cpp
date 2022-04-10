@@ -231,10 +231,10 @@ bool DrmMemoryManager::setMemAdvise(GraphicsAllocation *gfxAllocation, MemAdvise
     return drmAllocation->setMemAdvise(&this->getDrm(rootDeviceIndex), flags);
 }
 
-bool DrmMemoryManager::setMemPrefetch(GraphicsAllocation *gfxAllocation, uint32_t rootDeviceIndex) {
+bool DrmMemoryManager::setMemPrefetch(GraphicsAllocation *gfxAllocation, uint32_t subDeviceId, uint32_t rootDeviceIndex) {
     auto drmAllocation = static_cast<DrmAllocation *>(gfxAllocation);
 
-    return drmAllocation->setMemPrefetch(&this->getDrm(rootDeviceIndex));
+    return drmAllocation->setMemPrefetch(&this->getDrm(rootDeviceIndex), subDeviceId);
 }
 
 NEO::BufferObject *DrmMemoryManager::allocUserptr(uintptr_t address, size_t size, uint64_t flags, uint32_t rootDeviceIndex) {
@@ -1526,14 +1526,13 @@ void DrmMemoryManager::waitOnCompletionFence(GraphicsAllocation *allocation) {
 
             uint32_t activeHwContexts = csr->getActivePartitions();
             auto osContextId = osContext->getContextId();
-            auto allocationTaskCount = allocation->getTaskCount(osContextId);
-            uint64_t completionFenceAddress = castToUint64(const_cast<uint32_t *>(csr->getTagAddress()));
+            auto allocationTaskCount = csr->getCompletionValue(*allocation);
+            uint64_t completionFenceAddress = csr->getCompletionAddress();
             if (completionFenceAddress == 0) {
                 continue;
             }
 
             if (allocation->isUsedByOsContext(osContextId)) {
-                completionFenceAddress += Drm::completionFenceOffset;
                 Drm &drm = getDrm(csr->getRootDeviceIndex());
                 auto &ctxVector = static_cast<const OsContextLinux *>(osContext)->getDrmContextIds();
 
@@ -1671,7 +1670,7 @@ GraphicsAllocation *DrmMemoryManager::createSharedUnifiedMemoryAllocation(const 
     auto memoryInfo = drm.getMemoryInfo();
     const bool useBooMmap = memoryInfo && allocationData.useMmapObject;
 
-    if (not useBooMmap) {
+    if (!useBooMmap) {
         return nullptr;
     }
 
@@ -1749,7 +1748,7 @@ DrmAllocation *DrmMemoryManager::createUSMHostAllocationFromSharedHandle(osHandl
     }
 
     const bool useBooMmap = this->getDrm(properties.rootDeviceIndex).getMemoryInfo() && properties.useMmapObject;
-    if (not useBooMmap) {
+    if (!useBooMmap) {
         auto bo = new BufferObject(&getDrm(properties.rootDeviceIndex), openFd.handle, properties.size, maxOsContextCount);
         bo->setAddress(properties.gpuAddress);
 

@@ -200,11 +200,11 @@ std::unique_ptr<uint8_t[]> IoctlHelperUpstream::createVmBindExtSetPat() {
 
 void IoctlHelperUpstream::fillVmBindExtSetPat(const std::unique_ptr<uint8_t[]> &vmBindExtSetPat, uint64_t patIndex, uint64_t nextExtension) {}
 
-std::unique_ptr<uint8_t[]> IoctlHelperUpstream::createVmBindExtSyncFence() {
+std::unique_ptr<uint8_t[]> IoctlHelperUpstream::createVmBindExtUserFence() {
     return {};
 }
 
-void IoctlHelperUpstream::fillVmBindExtSyncFence(const std::unique_ptr<uint8_t[]> &vmBindExtSyncFence, uint64_t fenceAddress, uint64_t fenceValue, uint64_t nextExtension) {}
+void IoctlHelperUpstream::fillVmBindExtUserFence(const std::unique_ptr<uint8_t[]> &vmBindExtUserFence, uint64_t fenceAddress, uint64_t fenceValue, uint64_t nextExtension) {}
 
 std::optional<uint64_t> IoctlHelperUpstream::getCopyClassSaturatePCIECapability() {
     return std::nullopt;
@@ -244,6 +244,10 @@ bool IoctlHelperUpstream::isContextDebugSupported(Drm *drm) {
 
 int IoctlHelperUpstream::setContextDebugFlag(Drm *drm, uint32_t drmContextId) {
     return 0;
+}
+
+bool IoctlHelperUpstream::isDebugAttachAvailable() {
+    return false;
 }
 
 } // namespace NEO

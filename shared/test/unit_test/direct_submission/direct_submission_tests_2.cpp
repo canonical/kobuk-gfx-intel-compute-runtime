@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,7 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/direct_submission/dispatchers/render_dispatcher.h"
 #include "shared/source/helpers/flush_stamp.h"
+#include "shared/source/utilities/cpuintrinsics.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/fixtures/direct_submission_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
@@ -22,6 +23,10 @@
 #include "shared/test/common/mocks/mock_direct_submission_hw.h"
 #include "shared/test/common/mocks/mock_io_functions.h"
 #include "shared/test/common/test_macros/test.h"
+
+namespace CpuIntrinsicsTests {
+extern std::atomic<uint32_t> sfenceCounter;
+} // namespace CpuIntrinsicsTests
 
 using DirectSubmissionTest = Test<DirectSubmissionFixture>;
 
@@ -650,4 +655,76 @@ HWTEST_F(DirectSubmissionDispatchBufferTest,
         }
     }
     EXPECT_TRUE(foundFenceUpdate);
+}
+
+HWTEST_F(DirectSubmissionDispatchBufferTest,
+         givenReadBackCommandBufferDebugFlagEnabledWhenDispatchWorkloadCalledThenFirstDwordOfCommandBufferIsRead) {
+
+    DebugManagerStateRestore restorer{};
+
+    DebugManager.flags.DirectSubmissionReadBackCommandBuffer.set(1);
+    using Dispatcher = BlitterDispatcher<FamilyType>;
+
+    FlushStampTracker flushStamp(true);
+
+    MockDirectSubmissionHw<FamilyType, Dispatcher> directSubmission(*pDevice,
+                                                                    *osContext.get());
+    bool ret = directSubmission.initialize(true, true);
+    EXPECT_TRUE(ret);
+
+    uint32_t expectedValue = 0xDEADBEEF;
+    directSubmission.reserved = 0u;
+    reinterpret_cast<uint32_t *>(commandBuffer->getUnderlyingBuffer())[0] = expectedValue;
+
+    ret = directSubmission.dispatchCommandBuffer(batchBuffer, flushStamp);
+    EXPECT_TRUE(ret);
+
+    EXPECT_EQ(expectedValue, directSubmission.reserved);
+}
+
+HWTEST_F(DirectSubmissionDispatchBufferTest,
+         givenReadBackRingBufferDebugFlagEnabledWhenDispatchWorkloadCalledThenFirstDwordOfRingBufferIsRead) {
+
+    DebugManagerStateRestore restorer{};
+
+    DebugManager.flags.DirectSubmissionReadBackRingBuffer.set(1);
+    using Dispatcher = BlitterDispatcher<FamilyType>;
+
+    FlushStampTracker flushStamp(true);
+
+    MockDirectSubmissionHw<FamilyType, Dispatcher> directSubmission(*pDevice,
+                                                                    *osContext.get());
+    bool ret = directSubmission.initialize(true, true);
+    EXPECT_TRUE(ret);
+
+    directSubmission.reserved = 0u;
+
+    ret = directSubmission.dispatchCommandBuffer(batchBuffer, flushStamp);
+    EXPECT_TRUE(ret);
+    auto expectedValue = reinterpret_cast<uint32_t *>(directSubmission.ringCommandStream.getSpace(0))[0];
+    EXPECT_EQ(expectedValue, directSubmission.reserved);
+}
+
+HWTEST_F(DirectSubmissionDispatchBufferTest, givenDebugFlagSetWhenDispatchingWorkloadThenProgramSfenceInstruction) {
+    DebugManagerStateRestore restorer{};
+
+    DebugManager.flags.DirectSubmissionInsertSfenceInstructionPriorToSubmission.set(1);
+    using Dispatcher = BlitterDispatcher<FamilyType>;
+
+    FlushStampTracker flushStamp(true);
+
+    MockDirectSubmissionHw<FamilyType, Dispatcher> directSubmission(*pDevice, *osContext.get());
+    EXPECT_TRUE(directSubmission.initialize(true, true));
+
+    auto initialCounterValue = CpuIntrinsicsTests::sfenceCounter.load();
+
+    EXPECT_TRUE(directSubmission.dispatchCommandBuffer(batchBuffer, flushStamp));
+
+    EXPECT_EQ(initialCounterValue + 1, CpuIntrinsicsTests::sfenceCounter);
+
+    DebugManager.flags.DirectSubmissionInsertSfenceInstructionPriorToSubmission.set(2);
+
+    EXPECT_TRUE(directSubmission.dispatchCommandBuffer(batchBuffer, flushStamp));
+
+    EXPECT_EQ(initialCounterValue + 3, CpuIntrinsicsTests::sfenceCounter);
 }
