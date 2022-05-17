@@ -4,6 +4,7 @@ intel-compute-runtime (21.32.20609-3) UNRELEASED; urgency=medium
     time. Tighten dependencies on the llvm version used to build igc.
   * Manually activate the ldconfig trigger for unversioned libocloc.so.
   * Enable all hardening flags.
+  * control: Bump policy to 4.6.1.
 
  -- Andreas Beckmann <anbe@debian.org>  Tue, 17 May 2022 11:28:06 +0200
 
