@@ -1,4 +1,4 @@
-intel-compute-runtime (21.32.20609-3) UNRELEASED; urgency=medium
+intel-compute-runtime (21.32.20609-3) unstable; urgency=medium
 
   * control, rules: Tighten dependencies on the igc version used at build
     time. Tighten dependencies on the llvm version used to build igc.
@@ -6,7 +6,7 @@ intel-compute-runtime (21.32.20609-3) UNRELEASED; urgency=medium
   * Enable all hardening flags.
   * control: Bump policy to 4.6.1.
 
- -- Andreas Beckmann <anbe@debian.org>  Tue, 17 May 2022 11:28:06 +0200
+ -- Andreas Beckmann <anbe@debian.org>  Sun, 22 May 2022 14:47:21 +0200
 
 intel-compute-runtime (21.32.20609-2) unstable; urgency=medium
 
