@@ -1,8 +1,9 @@
-intel-compute-runtime (22.14.22890-2) UNRELEASED; urgency=medium
+intel-compute-runtime (22.14.22890-2) unstable; urgency=medium
 
   * Merge changes from 21.32.20609-3.
+  * Upload to unstable.
 
- -- Andreas Beckmann <anbe@debian.org>  Thu, 16 Jun 2022 00:58:51 +0200
+ -- Andreas Beckmann <anbe@debian.org>  Sat, 18 Jun 2022 03:46:24 +0200
 
 intel-compute-runtime (22.14.22890-1) experimental; urgency=medium
 
