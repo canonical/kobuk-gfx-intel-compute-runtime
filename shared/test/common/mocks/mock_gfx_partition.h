@@ -5,9 +5,9 @@
  *
  */
 
-#include "shared/source/memory_manager/gfx_partition.h"
+#pragma once
 
-#include "gtest/gtest.h"
+#include "shared/source/memory_manager/gfx_partition.h"
 
 using namespace NEO;
 
@@ -75,7 +75,7 @@ class MockGfxPartitionBasic : public GfxPartition {
 
 class FailedInitGfxPartition : public MockGfxPartition {
   public:
-    virtual bool init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToReserve, uint32_t rootDeviceIndex, size_t numRootDevices, bool useFrontWindowPool) override {
+    bool init(uint64_t gpuAddressSpace, size_t cpuAddressRangeSizeToReserve, uint32_t rootDeviceIndex, size_t numRootDevices, bool useFrontWindowPool) override {
         return false;
     }
 };

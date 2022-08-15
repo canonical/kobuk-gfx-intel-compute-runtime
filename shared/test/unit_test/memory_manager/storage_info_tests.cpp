@@ -17,7 +17,7 @@
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 using namespace NEO;
 
@@ -376,6 +376,33 @@ TEST_F(MultiDeviceStorageInfoTest, givenReadOnlyBufferToBeCopiedAcrossTilesWhenD
     EXPECT_TRUE(storageInfo.cloningOfPageTables);
     EXPECT_FALSE(storageInfo.tileInstanced);
     EXPECT_EQ(3u, storageInfo.getNumBanks());
+}
+
+TEST_F(MultiDeviceStorageInfoTest, givenUnifiedSharedMemoryWhenMultiStoragePlacementIsOverridenThenSpecifiedBanksAreUsed) {
+    DebugManagerStateRestore restorer;
+    auto proposedTiles = allTilesMask;
+    proposedTiles[0] = 0;
+
+    DebugManager.flags.OverrideMultiStoragePlacement.set(proposedTiles.to_ulong());
+
+    AllocationProperties properties{mockRootDeviceIndex, false, 512 * KB, AllocationType::UNIFIED_SHARED_MEMORY, true, allTilesMask};
+
+    auto storageInfo = memoryManager->createStorageInfoFromProperties(properties);
+
+    EXPECT_EQ(proposedTiles, storageInfo.memoryBanks);
+}
+
+TEST_F(MultiDeviceStorageInfoTest, givenUnifiedSharedMemoryOnMultiTileWhenKmdMigrationIsEnabledThenAllTilesAreUsed) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.UseKmdMigration.set(1);
+
+    AllocationProperties properties{mockRootDeviceIndex, false, 512 * KB, AllocationType::UNIFIED_SHARED_MEMORY, true, allTilesMask};
+
+    auto storageInfo = memoryManager->createStorageInfoFromProperties(properties);
+
+    EXPECT_TRUE(properties.subDevicesBitfield.count() > 1);
+
+    EXPECT_EQ(allTilesMask, storageInfo.memoryBanks);
 }
 
 TEST_F(MultiDeviceStorageInfoTest, givenLeastOccupiedBankAndOtherBitsEnabledInSubDeviceBitfieldWhenCreateStorageInfoThenTakeLeastOccupiedBankAsMemoryBank) {

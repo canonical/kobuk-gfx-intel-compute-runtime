@@ -9,15 +9,13 @@
 #include "shared/source/os_interface/linux/ioctl_helper.h"
 #include "shared/source/os_interface/linux/sys_calls.h"
 #include "shared/test/common/libult/linux/drm_mock.h"
+#include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/common/os_interface/linux/sys_calls_linux_ult.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 #include "level_zero/tools/source/metrics/os_metric_ip_sampling.h"
-
-#include "device_ids_configs.h"
-#include "hw_cmds.h"
 
 namespace NEO {
 namespace SysCalls {
@@ -30,8 +28,10 @@ namespace L0 {
 namespace ult {
 
 class IoctlHelperPrelim20Mock : public NEO::IoctlHelperPrelim20 {
-
-    bool getEuStallProperties(std::array<uint64_t, 10u> &properties, uint64_t dssBufferSize, uint64_t samplingRate, uint64_t pollPeriod, uint64_t engineInstance) override {
+  public:
+    using NEO::IoctlHelperPrelim20::IoctlHelperPrelim20;
+    bool getEuStallProperties(std::array<uint64_t, 12u> &properties, uint64_t dssBufferSize, uint64_t samplingRate,
+                              uint64_t pollPeriod, uint64_t engineInstance, uint64_t notifyNReports) override {
         return false;
     }
 };
@@ -44,14 +44,14 @@ class DrmPrelimMock : public DrmMock {
                                                            &inputHwInfo->workaroundTable, &inputHwInfo->gtSystemInfo, inputHwInfo->capabilityTable);
         customHwInfo->gtSystemInfo.MaxDualSubSlicesSupported = 64;
         rootDeviceEnvironment.setHwInfo(customHwInfo.get());
-        setupIoctlHelper(rootDeviceEnvironment.getHardwareInfo()->platform.eProductFamily);
+        this->ioctlHelper = std::make_unique<IoctlHelperPrelim20>(*this);
         if (invokeQueryEngineInfo) {
-            queryEngineInfo();
+            queryEngineInfo(); // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
         }
     }
 
     bool queryEngineInfo() override {
-        uint16_t computeEngineClass = getIoctlHelper()->getComputeEngineClass();
+        uint16_t computeEngineClass = getIoctlHelper()->getDrmParamValue(DrmParam::EngineClassCompute);
         std::vector<EngineCapabilities> engines(4);
         engines[0].engine = {computeEngineClass, 0};
         engines[0].capabilities = 0;
@@ -64,15 +64,15 @@ class DrmPrelimMock : public DrmMock {
 
         std::vector<DistanceInfo> distances(4);
         distances[0].engine = engines[0].engine;
-        distances[0].region = {I915_MEMORY_CLASS_DEVICE, 0};
+        distances[0].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 0};
         distances[1].engine = engines[1].engine;
-        distances[1].region = {I915_MEMORY_CLASS_DEVICE, 1};
+        distances[1].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 1};
         distances[2].engine = engines[2].engine;
-        distances[2].region = {I915_MEMORY_CLASS_DEVICE, 2};
+        distances[2].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 2};
         distances[3].engine = engines[3].engine;
-        distances[3].region = {I915_MEMORY_CLASS_DEVICE, 3};
+        distances[3].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 3};
 
-        std::vector<drm_i915_query_item> queryItems{distances.size()};
+        std::vector<QueryItem> queryItems{distances.size()};
         for (auto i = 0u; i < distances.size(); i++) {
             queryItems[i].length = sizeof(drm_i915_query_engine_info);
         }
@@ -82,16 +82,16 @@ class DrmPrelimMock : public DrmMock {
     }
 
     bool queryEngineInfo1SubDevice() {
-        uint16_t computeEngineClass = getIoctlHelper()->getComputeEngineClass();
+        uint16_t computeEngineClass = getIoctlHelper()->getDrmParamValue(DrmParam::EngineClassCompute);
         std::vector<EngineCapabilities> engines(1);
         engines[0].engine = {computeEngineClass, 0};
         engines[0].capabilities = 0;
 
         std::vector<DistanceInfo> distances(1);
         distances[0].engine = engines[0].engine;
-        distances[0].region = {I915_MEMORY_CLASS_DEVICE, 0};
+        distances[0].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 0};
 
-        std::vector<drm_i915_query_item> queryItems{distances.size()};
+        std::vector<QueryItem> queryItems{distances.size()};
         for (auto i = 0u; i < distances.size(); i++) {
             queryItems[i].length = sizeof(drm_i915_query_engine_info);
         }
@@ -100,13 +100,9 @@ class DrmPrelimMock : public DrmMock {
         return true;
     }
 
-    void getPrelimVersion(std::string &prelimVersion) override {
-        prelimVersion = "2.0";
-    }
-
     void setIoctlHelperPrelim20Mock() {
         backUpIoctlHelper = std::move(ioctlHelper);
-        ioctlHelper = static_cast<std::unique_ptr<NEO::IoctlHelper>>(std::make_unique<IoctlHelperPrelim20Mock>());
+        ioctlHelper = static_cast<std::unique_ptr<NEO::IoctlHelper>>(std::make_unique<IoctlHelperPrelim20Mock>(*this));
     }
 
     void restoreIoctlHelperPrelim20() {
@@ -150,6 +146,15 @@ HWTEST2_F(MetricIpSamplingLinuxTestPrelim, givenGetTimestampFrequencyFailsWhenSt
     auto drm = static_cast<DrmPrelimMock *>(device->getOsInterface().getDriverModel()->as<NEO::Drm>());
     VariableBackup<int> backupCsTimeStampFrequency(&drm->storedCsTimestampFrequency, 0);
     VariableBackup<int> backupStoredRetVal(&drm->storedRetVal, -1);
+
+    uint32_t notifyEveryNReports = 0, samplingPeriodNs = 10000;
+    EXPECT_EQ(metricIpSamplingOsInterface->startMeasurement(notifyEveryNReports, samplingPeriodNs), ZE_RESULT_ERROR_UNKNOWN);
+}
+
+HWTEST2_F(MetricIpSamplingLinuxTestPrelim, givenGetTimestampFrequencyReturnsFrequencyEqualZeroWhenStartMeasurementIsCalledThenReturnFailure, IsPVC) {
+
+    auto drm = static_cast<DrmPrelimMock *>(device->getOsInterface().getDriverModel()->as<NEO::Drm>());
+    VariableBackup<int> backupCsTimeStampFrequency(&drm->storedCsTimestampFrequency, 0);
 
     uint32_t notifyEveryNReports = 0, samplingPeriodNs = 10000;
     EXPECT_EQ(metricIpSamplingOsInterface->startMeasurement(notifyEveryNReports, samplingPeriodNs), ZE_RESULT_ERROR_UNKNOWN);
@@ -266,7 +271,7 @@ HWTEST2_F(MetricIpSamplingLinuxTestPrelim, GivenSupportedProductFamilyAndUnsuppo
 
     auto hwInfo = neoDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->platform.eProductFamily = productFamily;
-    hwInfo->platform.usDeviceID = NEO::PVC_XL_IDS.front();
+    hwInfo->platform.usDeviceID = NEO::pvcXlDeviceIds.front();
     EXPECT_FALSE(metricIpSamplingOsInterface->isDependencyAvailable());
 }
 
@@ -275,7 +280,7 @@ HWTEST2_F(MetricIpSamplingLinuxTestPrelim, GivenSupportedProductFamilyAndSupport
     auto hwInfo = neoDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->platform.eProductFamily = productFamily;
 
-    for (auto deviceId : NEO::PVC_XT_IDS) {
+    for (const auto &deviceId : NEO::pvcXtDeviceIds) {
         hwInfo->platform.usDeviceID = deviceId;
         EXPECT_TRUE(metricIpSamplingOsInterface->isDependencyAvailable());
     }
@@ -285,7 +290,7 @@ HWTEST2_F(MetricIpSamplingLinuxTestPrelim, GivenDriverOpenFailsWhenIsDependencyA
 
     auto hwInfo = neoDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->platform.eProductFamily = productFamily;
-    hwInfo->platform.usDeviceID = NEO::PVC_XT_IDS.front();
+    hwInfo->platform.usDeviceID = NEO::pvcXtDeviceIds.front();
 
     auto drm = static_cast<DrmPrelimMock *>(device->getOsInterface().getDriverModel()->as<NEO::Drm>());
     VariableBackup<int> backupCsTimeStampFrequency(&drm->storedCsTimestampFrequency, 0);
@@ -298,7 +303,7 @@ HWTEST2_F(MetricIpSamplingLinuxTestPrelim, GivenIoctlHelperFailsWhenIsDependency
 
     auto hwInfo = neoDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->platform.eProductFamily = productFamily;
-    hwInfo->platform.usDeviceID = NEO::PVC_XT_IDS.front();
+    hwInfo->platform.usDeviceID = NEO::pvcXtDeviceIds.front();
 
     auto drm = static_cast<DrmPrelimMock *>(device->getOsInterface().getDriverModel()->as<NEO::Drm>());
 

@@ -108,7 +108,7 @@ HWTEST_F(EnqueueReadImageTest, givenCommandQueueAndFailingAllocationForHostSurfa
     auto failCsr = std::make_unique<CreateAllocationForHostSurfaceFailCsr<FamilyType>>(*pDevice->getExecutionEnvironment(), pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
 
     failCsr->setupContext(*pDevice->getDefaultEngine().osContext);
-    CommandStreamReceiver *oldCommandStreamReceiver = cmdQ.gpgpuEngine->commandStreamReceiver;
+    CommandStreamReceiver *oldCommandStreamReceiver = &cmdQ.getGpgpuCommandStreamReceiver();
     cmdQ.gpgpuEngine->commandStreamReceiver = failCsr.get();
 
     auto srcImage = Image2dHelper<>::create(context);
@@ -132,7 +132,7 @@ HWTEST_F(EnqueueReadImageTest, givenCommandQueueAndFailingAllocationForHostSurfa
     auto failCsr = std::make_unique<CreateAllocationForHostSurfaceFailCsr<FamilyType>>(*pDevice->getExecutionEnvironment(), pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
 
     failCsr->setupContext(*pDevice->getDefaultEngine().osContext);
-    CommandStreamReceiver *oldCommandStreamReceiver = cmdQ.gpgpuEngine->commandStreamReceiver;
+    CommandStreamReceiver *oldCommandStreamReceiver = &cmdQ.getGpgpuCommandStreamReceiver();
     cmdQ.gpgpuEngine->commandStreamReceiver = failCsr.get();
 
     auto srcImage = Image2dHelper<>::create(context);
@@ -175,7 +175,7 @@ HWTEST_F(EnqueueReadImageTest, givenCommandQueueAndPtrCopyAllowedForHostSurfaceW
     auto cmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pClDevice, nullptr);
 
     csr->setupContext(*pDevice->getDefaultEngine().osContext);
-    CommandStreamReceiver *oldCommandStreamReceiver = cmdQ->gpgpuEngine->commandStreamReceiver;
+    CommandStreamReceiver *oldCommandStreamReceiver = &cmdQ->getGpgpuCommandStreamReceiver();
     cmdQ->gpgpuEngine->commandStreamReceiver = csr.get();
     csr->initializeTagAllocation();
 
@@ -199,7 +199,7 @@ HWTEST_F(EnqueueReadImageTest, givenGpuHangAndCommandQueueAndPtrCopyAllowedForHo
     cmdQ->waitForAllEnginesReturnValue = WaitStatus::GpuHang;
 
     csr->setupContext(*pDevice->getDefaultEngine().osContext);
-    CommandStreamReceiver *oldCommandStreamReceiver = cmdQ->gpgpuEngine->commandStreamReceiver;
+    CommandStreamReceiver *oldCommandStreamReceiver = &cmdQ->getGpgpuCommandStreamReceiver();
     cmdQ->gpgpuEngine->commandStreamReceiver = csr.get();
     csr->initializeTagAllocation();
 
@@ -640,21 +640,21 @@ HWTEST_F(EnqueueReadImageTest, WhenReadingImageThenSurfaceStateIsCorrect) {
 
     // BufferToImage kernel uses BTI=1 for destSurface
     uint32_t bindingTableIndex = 0;
-    const auto &surfaceState = getSurfaceState<FamilyType>(&pCmdQ->getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 0), bindingTableIndex);
+    const auto surfaceState = getSurfaceState<FamilyType>(&pCmdQ->getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 0), bindingTableIndex);
 
     // EnqueueReadImage uses multi-byte copies depending on per-pixel-size-in-bytes
     const auto &imageDesc = srcImage->getImageDesc();
-    EXPECT_EQ(imageDesc.image_width, surfaceState.getWidth());
-    EXPECT_EQ(imageDesc.image_height, surfaceState.getHeight());
-    EXPECT_NE(0u, surfaceState.getSurfacePitch());
-    EXPECT_NE(0u, surfaceState.getSurfaceType());
-    EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_FORMAT_R32_UINT, surfaceState.getSurfaceFormat());
-    EXPECT_EQ(MockGmmResourceInfo::getHAlignSurfaceStateResult, surfaceState.getSurfaceHorizontalAlignment());
-    EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT_VALIGN_4, surfaceState.getSurfaceVerticalAlignment());
-    EXPECT_EQ(srcAllocation->getGpuAddress(), surfaceState.getSurfaceBaseAddress());
+    EXPECT_EQ(imageDesc.image_width, surfaceState->getWidth());
+    EXPECT_EQ(imageDesc.image_height, surfaceState->getHeight());
+    EXPECT_NE(0u, surfaceState->getSurfacePitch());
+    EXPECT_NE(0u, surfaceState->getSurfaceType());
+    EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_FORMAT_R32_UINT, surfaceState->getSurfaceFormat());
+    EXPECT_EQ(MockGmmResourceInfo::getHAlignSurfaceStateResult, surfaceState->getSurfaceHorizontalAlignment());
+    EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT_VALIGN_4, surfaceState->getSurfaceVerticalAlignment());
+    EXPECT_EQ(srcAllocation->getGpuAddress(), surfaceState->getSurfaceBaseAddress());
 }
 
-HWTEST_F(EnqueueReadImageTest, WhenReadingImageThenPipelineSelectIsProgrammed) {
+HWTEST2_F(EnqueueReadImageTest, WhenReadingImageThenPipelineSelectIsProgrammed, IsAtMostXeHpcCore) {
     enqueueReadImage<FamilyType>();
     int numCommands = getNumberOfPipelineSelectsThatEnablePipelineSelect<FamilyType>();
     EXPECT_EQ(1, numCommands);
@@ -910,7 +910,7 @@ HWTEST_F(EnqueueReadImageTest, givenCommandQueueWhenEnqueueReadImageWithMapAlloc
     size_t region[] = {imageDesc.image_width, imageDesc.image_height, imageDesc.image_array_size};
     size_t rowPitch = srcImage->getHostPtrRowPitch();
     size_t slicePitch = srcImage->getHostPtrSlicePitch();
-    GraphicsAllocation mapAllocation{0, AllocationType::UNKNOWN, nullptr, 0, 0, 0, MemoryPool::MemoryNull};
+    GraphicsAllocation mapAllocation{0, AllocationType::UNKNOWN, nullptr, 0, 0, MemoryPool::MemoryNull, MemoryManager::maxOsContextCount, 0llu};
 
     EnqueueReadImageHelper<>::enqueueReadImage(mockCmdQ.get(), srcImage.get(), CL_TRUE, origin, region, rowPitch, slicePitch, dstPtr, &mapAllocation);
 
@@ -956,7 +956,7 @@ typedef EnqueueReadImageMipMapTest MipMapReadImageTest;
 HWTEST_P(MipMapReadImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalledThenProperMipLevelIsSet) {
     auto builtIns = new MockBuiltins();
     pCmdQ->getDevice().getExecutionEnvironment()->rootDeviceEnvironments[pCmdQ->getDevice().getRootDeviceIndex()]->builtins.reset(builtIns);
-    auto image_type = (cl_mem_object_type)GetParam();
+    auto imageType = (cl_mem_object_type)GetParam();
     auto &origBuilder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(
         EBuiltInOps::CopyImage3dToBuffer,
         pCmdQ->getClDevice());
@@ -970,7 +970,7 @@ HWTEST_P(MipMapReadImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalled
     cl_int retVal = CL_SUCCESS;
     cl_image_desc imageDesc = {};
     uint32_t expectedMipLevel = 3;
-    imageDesc.image_type = image_type;
+    imageDesc.image_type = imageType;
     imageDesc.num_mip_levels = 10;
     imageDesc.image_width = 4;
     imageDesc.image_height = 1;
@@ -978,7 +978,7 @@ HWTEST_P(MipMapReadImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalled
     size_t origin[] = {0, 0, 0, 0};
     size_t region[] = {imageDesc.image_width, 1, 1};
     std::unique_ptr<Image> image;
-    switch (image_type) {
+    switch (imageType) {
     case CL_MEM_OBJECT_IMAGE1D:
         origin[1] = expectedMipLevel;
         image = std::unique_ptr<Image>(ImageHelper<Image1dDefaults>::create(context, &imageDesc));

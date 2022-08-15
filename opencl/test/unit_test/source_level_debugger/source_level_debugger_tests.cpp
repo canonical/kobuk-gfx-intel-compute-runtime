@@ -18,7 +18,7 @@
 #include "shared/test/common/libult/source_level_debugger_library.h"
 #include "shared/test/common/mocks/mock_gmm_helper.h"
 #include "shared/test/common/mocks/mock_source_level_debugger.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "opencl/source/platform/platform.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
@@ -665,6 +665,7 @@ TEST(SourceLevelDebugger, givenTwoRootDevicesWhenSecondIsCreatedThenCreatingNewS
         executionEnvironment->prepareRootDeviceEnvironments(2);
         for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
             executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(defaultHwInfo.get());
+            executionEnvironment->rootDeviceEnvironments[i]->initGmm();
         }
         auto device1 = std::make_unique<MockClDevice>(Device::create<MockDevice>(executionEnvironment, 0u));
         EXPECT_NE(nullptr, executionEnvironment->memoryManager);
@@ -688,6 +689,7 @@ TEST(SourceLevelDebugger, givenMultipleRootDevicesWhenCreatedThenUseDedicatedSou
         executionEnvironment->prepareRootDeviceEnvironments(2);
         for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
             executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(defaultHwInfo.get());
+            executionEnvironment->rootDeviceEnvironments[i]->initGmm();
         }
         auto device1 = std::make_unique<MockClDevice>(Device::create<MockDevice>(executionEnvironment, 0u));
         auto sourceLevelDebugger = device1->getDebugger();
@@ -705,8 +707,14 @@ TEST(SourceLevelDebugger, whenCaptureSBACalledThenNoCommandsAreAddedToStream) {
     container.initialize(device.get(), nullptr, true);
 
     NEO::Debugger::SbaAddresses sbaAddresses = {};
-    debugger.captureStateBaseAddress(container, sbaAddresses);
+    debugger.captureStateBaseAddress(*container.getCommandStream(), sbaAddresses);
     EXPECT_EQ(0u, container.getCommandStream()->getUsed());
+}
+
+TEST(SourceLevelDebugger, whenGetSbaTrackingCommandsSizeQueriedThenZeroIsReturned) {
+    auto debugger = std::make_unique<SourceLevelDebugger>(new DebuggerLibrary);
+    auto size = debugger->getSbaTrackingCommandsSize(3);
+    EXPECT_EQ(0u, size);
 }
 
 TEST(SourceLevelDebugger, givenEnableMockSourceLevelDebuggerWhenInitializingExecEnvThenActiveDebuggerWithEmptyInterfaceIsCreated) {

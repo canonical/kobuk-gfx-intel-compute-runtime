@@ -5,15 +5,16 @@
  *
  */
 
-#include "shared/source/helpers/compiler_hw_info_config.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/os_interface/hw_info_config.h"
+#include "shared/source/xe_hpc_core/hw_cmds_pvc.h"
+#include "shared/source/xe_hpc_core/pvc/device_ids_configs_pvc.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/helpers/gtest_helpers.h"
 
-#include "device_ids_configs_pvc.h"
 #include "gtest/gtest.h"
 
 using namespace NEO;
@@ -80,11 +81,6 @@ PVCTEST_F(PvcHwInfoConfig, givenHwInfoConfigAndProgramExtendedPipeControlPriorTo
     EXPECT_TRUE(isBasicWARequired);
 }
 
-using CompilerHwInfoConfigHelperTestsPvc = ::testing::Test;
-PVCTEST_F(CompilerHwInfoConfigHelperTestsPvc, givenPvcWhenIsForceToStatelessRequiredIsCalledThenReturnsTrue) {
-    EXPECT_TRUE(CompilerHwInfoConfig::get(productFamily)->isForceToStatelessRequired());
-}
-
 using PvcHwInfo = ::testing::Test;
 
 PVCTEST_F(PvcHwInfo, givenPvcWhenConfiguringThenDisableCccs) {
@@ -110,12 +106,12 @@ PVCTEST_F(PvcHwInfo, givenDeviceIdThenProperMaxThreadsForWorkgroupIsReturned) {
     HardwareInfo hwInfo = *defaultHwInfo;
     auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
-    for (auto &deviceId : PVC_XL_IDS) {
+    for (const auto &deviceId : pvcXlDeviceIds) {
         hwInfo.platform.usDeviceID = deviceId;
         EXPECT_EQ(64u, hwInfoConfig.getMaxThreadsForWorkgroupInDSSOrSS(hwInfo, 64u, 64u));
     }
 
-    for (auto &deviceId : PVC_XT_IDS) {
+    for (const auto &deviceId : pvcXtDeviceIds) {
         hwInfo.platform.usDeviceID = deviceId;
         uint32_t numThreadsPerEU = hwInfo.gtSystemInfo.ThreadCount / hwInfo.gtSystemInfo.EUCount;
         EXPECT_EQ(64u * numThreadsPerEU, hwInfoConfig.getMaxThreadsForWorkgroupInDSSOrSS(hwInfo, 64u, 64u));
@@ -126,34 +122,49 @@ PVCTEST_F(PvcHwInfo, givenVariousValuesWhenConvertingHwRevIdAndSteppingThenConve
     auto hwInfo = *defaultHwInfo;
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
-    std::vector<unsigned short> deviceIds = PVC_XL_IDS;
-    deviceIds.insert(deviceIds.end(), PVC_XT_IDS.begin(), PVC_XT_IDS.end());
-
     for (uint32_t testValue = 0; testValue < 0xFF; testValue++) {
-        for (auto deviceId : deviceIds) {
-            hwInfo.platform.usDeviceID = deviceId;
-            auto hwRevIdFromStepping = hwInfoConfig.getHwRevIdFromStepping(testValue, hwInfo);
-            if (hwRevIdFromStepping != CommonConstants::invalidStepping) {
-                hwInfo.platform.usRevId = hwRevIdFromStepping;
-                EXPECT_EQ(testValue, hwInfoConfig.getSteppingFromHwRevId(hwInfo));
+        for (const auto &pvc : {pvcXlDeviceIds, pvcXtDeviceIds}) {
+            for (const auto &deviceId : pvc) {
+                hwInfo.platform.usDeviceID = deviceId;
+                auto hwRevIdFromStepping = hwInfoConfig.getHwRevIdFromStepping(testValue, hwInfo);
+                if (hwRevIdFromStepping != CommonConstants::invalidStepping) {
+                    hwInfo.platform.usRevId = hwRevIdFromStepping;
+                    EXPECT_EQ(testValue, hwInfoConfig.getSteppingFromHwRevId(hwInfo));
+                }
             }
         }
-
         hwInfo.platform.usRevId = testValue;
         auto steppingFromHwRevId = hwInfoConfig.getSteppingFromHwRevId(hwInfo);
         if (steppingFromHwRevId != CommonConstants::invalidStepping) {
             bool anyMatchAfterConversionFromStepping = false;
-            for (auto deviceId : deviceIds) {
-                hwInfo.platform.usDeviceID = deviceId;
-                auto hwRevId = hwInfoConfig.getHwRevIdFromStepping(steppingFromHwRevId, hwInfo);
-                EXPECT_NE(CommonConstants::invalidStepping, hwRevId);
-                // expect values to match. 0x1 and 0x0 translate to the same stepping so they are interpreted as a match too.
-                if (((testValue & PVC::pvcSteppingBits) == (hwRevId & PVC::pvcSteppingBits)) ||
-                    (((testValue & PVC::pvcSteppingBits) == 0x1) && ((hwRevId & PVC::pvcSteppingBits) == 0x0))) {
-                    anyMatchAfterConversionFromStepping = true;
+            for (const auto &pvc : {pvcXlDeviceIds, pvcXtDeviceIds}) {
+                for (const auto &deviceId : pvc) {
+                    hwInfo.platform.usDeviceID = deviceId;
+                    auto hwRevId = hwInfoConfig.getHwRevIdFromStepping(steppingFromHwRevId, hwInfo);
+                    EXPECT_NE(CommonConstants::invalidStepping, hwRevId);
+                    // expect values to match. 0x1 and 0x0 translate to the same stepping so they are interpreted as a match too.
+                    if (((testValue & PVC::pvcSteppingBits) == (hwRevId & PVC::pvcSteppingBits)) ||
+                        (((testValue & PVC::pvcSteppingBits) == 0x1) && ((hwRevId & PVC::pvcSteppingBits) == 0x0))) {
+                        anyMatchAfterConversionFromStepping = true;
+                    }
                 }
             }
             EXPECT_TRUE(anyMatchAfterConversionFromStepping);
         }
+    }
+}
+
+PVCTEST_F(PvcHwInfo, givenPvcHwInfoConfigWhenIsIpSamplingSupportedThenCorrectResultIsReturned) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
+    auto hwInfo = *defaultHwInfo;
+
+    for (const auto &deviceId : pvcXlDeviceIds) {
+        hwInfo.platform.usDeviceID = deviceId;
+        EXPECT_FALSE(hwInfoConfig.isIpSamplingSupported(hwInfo));
+    }
+
+    for (const auto &deviceId : pvcXtDeviceIds) {
+        hwInfo.platform.usDeviceID = deviceId;
+        EXPECT_TRUE(hwInfoConfig.isIpSamplingSupported(hwInfo));
     }
 }

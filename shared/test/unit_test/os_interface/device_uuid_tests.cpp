@@ -8,24 +8,16 @@
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/mock_hw_info_config_hw.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_driver_model.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 namespace NEO {
-
-template <PRODUCT_FAMILY gfxProduct>
-class MockHwInfoConfigHw : public HwInfoConfigHw<gfxProduct> {
-  public:
-    bool getUuid(Device *device, std::array<uint8_t, HwInfoConfig::uuidSize> &uuid) const override {
-        return false;
-    }
-};
-
 struct MultipleDeviceBdfUuidTest : public ::testing::Test {
 
     std::unique_ptr<UltDeviceFactory> createDevices(PhysicalDevicePciBusInfo &pciBusInfo, uint32_t numSubDevices) {
@@ -113,10 +105,10 @@ HWTEST2_F(MultipleDeviceBdfUuidTest, GivenIncorrectBdfWhenRetrievingDeviceUuidFr
 
     setupMockHwInfoConfig<productFamily>();
     VariableBackup<HwInfoConfig *> backupHwInfoConfig(&hwInfoConfigFactory[productFamily], mockHwInfoConfig.get());
-    PhysicalDevicePciBusInfo pciBusInfo(PhysicalDevicePciBusInfo::InvalidValue,
-                                        PhysicalDevicePciBusInfo::InvalidValue,
-                                        PhysicalDevicePciBusInfo::InvalidValue,
-                                        PhysicalDevicePciBusInfo::InvalidValue);
+    PhysicalDevicePciBusInfo pciBusInfo(PhysicalDevicePciBusInfo::invalidValue,
+                                        PhysicalDevicePciBusInfo::invalidValue,
+                                        PhysicalDevicePciBusInfo::invalidValue,
+                                        PhysicalDevicePciBusInfo::invalidValue);
     const auto deviceFactory = createDevices(pciBusInfo, 2);
 
     std::array<uint8_t, 16> uuid;
@@ -218,22 +210,5 @@ HWTEST2_F(DeviceUuidEnablementTest, GivenEnableChipsetUniqueUUIDIsDisabledWhenDe
 
     EXPECT_EQ(true, deviceFactory->rootDevices[0]->getUuid(uuid));
     EXPECT_FALSE(0 == std::memcmp(uuid.data(), expectedUuid.data(), 16));
-}
-
-using DeviceTest = Test<DeviceFixture>;
-
-HWTEST2_F(DeviceTest, GivenDeviceWhenGenerateUuidThenValidValuesAreSet, MatchAny) {
-
-    std::array<uint8_t, NEO::HwInfoConfig::uuidSize> uuid, expectedUuid;
-    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-    device->generateUuid(uuid);
-    uint32_t rootDeviceIndex = device->getRootDeviceIndex();
-
-    expectedUuid.fill(0);
-    memcpy_s(&expectedUuid[0], sizeof(uint32_t), &device->getDeviceInfo().vendorId, sizeof(device->getDeviceInfo().vendorId));
-    memcpy_s(&expectedUuid[4], sizeof(uint32_t), &device->getHardwareInfo().platform.usDeviceID, sizeof(device->getHardwareInfo().platform.usDeviceID));
-    memcpy_s(&expectedUuid[8], sizeof(uint32_t), &rootDeviceIndex, sizeof(rootDeviceIndex));
-
-    EXPECT_EQ(memcmp(&uuid, &expectedUuid, NEO::HwInfoConfig::uuidSize), 0);
 }
 } // namespace NEO

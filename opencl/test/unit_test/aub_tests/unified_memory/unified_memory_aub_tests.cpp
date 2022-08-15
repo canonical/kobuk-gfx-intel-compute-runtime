@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "opencl/test/unit_test/aub_tests/fixtures/unified_memory_fixture.h"
 
@@ -64,9 +64,6 @@ HWTEST_F(UnifiedMemoryAubTest, givenSharedMemoryAllocWhenWriteIntoGPUPartThenVal
 
     expectNotEqualMemory<FamilyType>(unifiedMemoryPtr, unifiedMemoryPtr, dataSize);
     expectMemory<FamilyType>(unifiedMemoryPtr, input.data(), dataSize);
-
-    auto mockRead = reinterpret_cast<char *>(unifiedMemoryPtr)[0];
-    mockRead = 0;
 
     expectMemory<FamilyType>(unifiedMemoryPtr, unifiedMemoryPtr, dataSize);
 

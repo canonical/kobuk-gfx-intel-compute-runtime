@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -44,7 +44,6 @@ class SysmanDeviceFanFixture : public SysmanDeviceFixture {
         }
 
         pSysmanDeviceImp->pFanHandleContext->handleList.clear();
-        pSysmanDeviceImp->pFanHandleContext->init();
     }
     void TearDown() override {
         if (!sysmanUltsEnable) {
@@ -54,7 +53,7 @@ class SysmanDeviceFanFixture : public SysmanDeviceFixture {
         pWddmSysmanImp->pKmdSysManager = pOriginalKmdSysManager;
     }
 
-    std::vector<zes_fan_handle_t> get_fan_handles() {
+    std::vector<zes_fan_handle_t> getFanHandles() {
         uint32_t count = 0;
         EXPECT_EQ(zesDeviceEnumFans(device->toHandle(), &count, nullptr), ZE_RESULT_SUCCESS);
         std::vector<zes_fan_handle_t> handles(count, nullptr);
@@ -101,7 +100,7 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanPropertiesAllowS
     // Setting allow set calls or not
     init(true, true);
 
-    auto handles = get_fan_handles();
+    auto handles = getFanHandles();
 
     for (auto handle : handles) {
         zes_fan_properties_t properties;
@@ -123,7 +122,7 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanPropertiesAllowS
     // Setting allow set calls or not
     init(false, true);
 
-    auto handles = get_fan_handles();
+    auto handles = getFanHandles();
 
     for (auto handle : handles) {
         zes_fan_properties_t properties = {};
@@ -146,7 +145,7 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanPropertiesAllowS
     // Setting allow set calls or not
     init(true, true);
 
-    auto handles = get_fan_handles();
+    auto handles = getFanHandles();
 
     for (auto handle : handles) {
         zes_fan_properties_t properties;
@@ -168,7 +167,7 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanConfigThenUnsupp
     // Setting allow set calls or not
     init(true, true);
 
-    auto handles = get_fan_handles();
+    auto handles = getFanHandles();
 
     for (auto handle : handles) {
         zes_fan_config_t fanConfig;
@@ -176,14 +175,14 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanConfigThenUnsupp
     }
 }
 
-TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingDefaultModeThenUnsupportedIsReturned) {
+TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingDefaultModeThenSupportedIsReturned) {
     // Setting allow set calls or not
     init(true, true);
 
-    auto handles = get_fan_handles();
+    auto handles = getFanHandles();
 
     for (auto handle : handles) {
-        EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesFanSetDefaultMode(handle));
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesFanSetDefaultMode(handle));
     }
 }
 
@@ -191,7 +190,7 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingFixedSpeedModeThenU
     // Setting allow set calls or not
     init(true, true);
 
-    auto handles = get_fan_handles();
+    auto handles = getFanHandles();
 
     for (auto handle : handles) {
         zes_fan_speed_t fanSpeed = {0};
@@ -199,14 +198,27 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingFixedSpeedModeThenU
     }
 }
 
-TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingTheSpeedTableModeThenUnsupportedIsReturned) {
+TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingTheSpeedTableModeWithNumberOfPointsZeroThenUnsupportedIsReturned) {
     // Setting allow set calls or not
     init(true, true);
 
-    auto handles = get_fan_handles();
+    auto handles = getFanHandles();
 
     for (auto handle : handles) {
         zes_fan_speed_table_t fanSpeedTable = {0};
+        EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, zesFanSetSpeedTableMode(handle, &fanSpeedTable));
+    }
+}
+
+TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenSettingTheSpeedTableModeWithGreaterThanMaxNumberOfPointsThenUnsupportedIsReturned) {
+    // Setting allow set calls or not
+    init(true, true);
+
+    auto handles = getFanHandles();
+
+    for (auto handle : handles) {
+        zes_fan_speed_table_t fanSpeedTable = {0};
+        fanSpeedTable.numPoints = 20; // Setting number of control points greater than max number of control points (10)
         EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, zesFanSetSpeedTableMode(handle, &fanSpeedTable));
     }
 }
@@ -215,7 +227,7 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanSpeedWithRPMUnit
     // Setting allow set calls or not
     init(true, true);
 
-    auto handles = get_fan_handles();
+    auto handles = getFanHandles();
 
     for (auto handle : handles) {
         zes_fan_speed_units_t unit = zes_fan_speed_units_t::ZES_FAN_SPEED_UNITS_RPM;
@@ -231,7 +243,7 @@ TEST_F(SysmanDeviceFanFixture, GivenValidFanHandleWhenGettingFanSpeedWithPercent
     // Setting allow set calls or not
     init(true, true);
 
-    auto handles = get_fan_handles();
+    auto handles = getFanHandles();
 
     for (auto handle : handles) {
         zes_fan_speed_units_t unit = zes_fan_speed_units_t::ZES_FAN_SPEED_UNITS_PERCENT;

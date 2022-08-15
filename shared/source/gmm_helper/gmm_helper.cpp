@@ -7,6 +7,7 @@
 
 #include "shared/source/gmm_helper/gmm_helper.h"
 
+#include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/gmm_helper/client_context/gmm_client_context.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/hw_helper.h"
@@ -18,8 +19,6 @@
 #include <algorithm>
 
 namespace NEO {
-
-uint32_t GmmHelper::addressWidth = 48;
 
 GmmClientContext *GmmHelper::getClientContext() const {
     return gmmClientContext.get();
@@ -41,15 +40,23 @@ uint32_t GmmHelper::getMOCS(uint32_t type) const {
 
 GmmHelper::GmmHelper(OSInterface *osInterface, const HardwareInfo *pHwInfo) : hwInfo(pHwInfo) {
     auto hwInfoAddressWidth = Math::log2(hwInfo->capabilityTable.gpuAddressSpace + 1);
-    GmmHelper::addressWidth = std::max(hwInfoAddressWidth, static_cast<uint32_t>(48));
+    addressWidth = std::max(hwInfoAddressWidth, 48u);
 
     gmmClientContext = GmmHelper::createGmmContextWrapperFunc(osInterface, const_cast<HardwareInfo *>(pHwInfo));
     UNRECOVERABLE_IF(!gmmClientContext);
 }
 
+uint64_t GmmHelper::canonize(uint64_t address) {
+    return static_cast<int64_t>(address << (64 - addressWidth)) >> (64 - addressWidth);
+}
+
+uint64_t GmmHelper::decanonize(uint64_t address) {
+    return (address & maxNBitValue(addressWidth));
+}
+
 bool GmmHelper::isValidCanonicalGpuAddress(uint64_t address) {
-    auto decanonizedAddress = NEO::GmmHelper::decanonize(address);
-    auto canonizedAddress = NEO::GmmHelper::canonize(decanonizedAddress);
+    auto decanonizedAddress = this->decanonize(address);
+    auto canonizedAddress = this->canonize(decanonizedAddress);
 
     if (address == canonizedAddress) {
         return true;

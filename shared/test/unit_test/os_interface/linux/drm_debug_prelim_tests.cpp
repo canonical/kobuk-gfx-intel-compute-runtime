@@ -11,7 +11,7 @@
 #include "shared/test/common/libult/linux/drm_query_mock.h"
 #include "shared/test/common/mocks/linux/mock_drm_allocation.h"
 #include "shared/test/common/mocks/linux/mock_drm_memory_manager.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "gtest/gtest.h"
@@ -24,9 +24,8 @@ struct DrmDebugPrelimTest : public ::testing::Test {
         executionEnvironment = std::make_unique<ExecutionEnvironment>();
         executionEnvironment->prepareRootDeviceEnvironments(1);
         executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
-    }
-
-    void TearDown() override {
+        executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+        executionEnvironment->initializeMemoryManager();
     }
 
   protected:
@@ -67,7 +66,7 @@ TEST_F(DrmDebugPrelimTest, GivenUnsupportedUUIDRegisterIoctlWhenRegisteringClass
 TEST_F(DrmDebugPrelimTest, GivenNoClassesRegisteredWhenRegisteringResourceThenRegisterUUIDIoctlIsNotCalledAndZeroHandleReturned) {
     DrmQueryMock drm(*executionEnvironment->rootDeviceEnvironments[0]);
 
-    auto registeredHandle = drm.registerResource(Drm::ResourceClass::Isa, nullptr, 0);
+    auto registeredHandle = drm.registerResource(DrmResourceClass::Isa, nullptr, 0);
     EXPECT_EQ(0u, registeredHandle);
     EXPECT_EQ(0u, drm.ioctlCallsCount);
 }
@@ -79,7 +78,7 @@ TEST_F(DrmDebugPrelimTest, GivenDrmWhenRegisteringResourceWithoutDataThenRegiste
     EXPECT_TRUE(result);
 
     const auto handle = drm.context.uuidHandle;
-    auto registeredHandle = drm.registerResource(Drm::ResourceClass::Isa, nullptr, 0);
+    auto registeredHandle = drm.registerResource(DrmResourceClass::Isa, nullptr, 0);
 
     EXPECT_EQ(handle + 1, drm.context.uuidHandle);
     EXPECT_EQ(handle, registeredHandle);
@@ -90,7 +89,7 @@ TEST_F(DrmDebugPrelimTest, GivenDrmWhenRegisteringResourceWithoutDataThenRegiste
     EXPECT_EQ(nullptr, receivedUuid->ptr);
     EXPECT_EQ(0u, receivedUuid->size);
     EXPECT_TRUE(hasSubstr(std::string(receivedUuid->uuid), std::string("00000000-0000-0000")));
-    EXPECT_EQ(drm.classHandles[static_cast<uint32_t>(Drm::ResourceClass::Isa)], receivedUuid->uuidClass);
+    EXPECT_EQ(drm.classHandles[static_cast<uint32_t>(DrmResourceClass::Isa)], receivedUuid->uuidClass);
 }
 
 TEST_F(DrmDebugPrelimTest, GivenDrmWhenRegisteringResourceWithDataThenRegisterUUIDIoctlIsCalledWithCorrectData) {
@@ -102,7 +101,7 @@ TEST_F(DrmDebugPrelimTest, GivenDrmWhenRegisteringResourceWithDataThenRegisterUU
     auto handle = drm.context.uuidHandle;
     uint64_t data = 0x12345678;
 
-    auto registeredHandle = drm.registerResource(Drm::ResourceClass::Isa, &data, sizeof(uint64_t));
+    auto registeredHandle = drm.registerResource(DrmResourceClass::Isa, &data, sizeof(uint64_t));
 
     EXPECT_EQ(handle + 1, drm.context.uuidHandle);
     EXPECT_EQ(handle, registeredHandle);
@@ -113,7 +112,7 @@ TEST_F(DrmDebugPrelimTest, GivenDrmWhenRegisteringResourceWithDataThenRegisterUU
     EXPECT_EQ(&data, receivedUuid->ptr);
     EXPECT_EQ(sizeof(uint64_t), receivedUuid->size);
     EXPECT_TRUE(hasSubstr(std::string(receivedUuid->uuid), std::string("00000000-0000-0000")));
-    EXPECT_EQ(drm.classHandles[static_cast<uint32_t>(Drm::ResourceClass::Isa)], receivedUuid->uuidClass);
+    EXPECT_EQ(drm.classHandles[static_cast<uint32_t>(DrmResourceClass::Isa)], receivedUuid->uuidClass);
     EXPECT_EQ(0u, receivedUuid->flags);
     EXPECT_EQ(0u, receivedUuid->extensions);
 }
@@ -125,7 +124,7 @@ TEST_F(DrmDebugPrelimTest, GivenDrmWhenUnregisteringResourceThenUnregisterUUIDIo
     EXPECT_TRUE(result);
 
     uint64_t data = 0x12345678;
-    auto registeredHandle = drm.registerResource(Drm::ResourceClass::Isa, &data, sizeof(uint64_t));
+    auto registeredHandle = drm.registerResource(DrmResourceClass::Isa, &data, sizeof(uint64_t));
 
     drm.unregisterResource(registeredHandle);
 
@@ -144,7 +143,7 @@ TEST_F(DrmDebugPrelimTest, GivenDrmWhenNotifyFirstCommandQueueCreatedCalledThenC
     DrmQueryMock drm(*executionEnvironment->rootDeviceEnvironments[0]);
 
     auto handle = drm.context.uuidHandle;
-    auto registeredHandle = drm.notifyFirstCommandQueueCreated();
+    auto registeredHandle = drm.notifyFirstCommandQueueCreated(nullptr, 0);
 
     EXPECT_EQ(handle + 1, drm.context.uuidHandle);
     EXPECT_EQ(handle, registeredHandle);
@@ -152,8 +151,7 @@ TEST_F(DrmDebugPrelimTest, GivenDrmWhenNotifyFirstCommandQueueCreatedCalledThenC
     const auto &receivedUuid = drm.context.receivedRegisterUuid;
     ASSERT_TRUE(receivedUuid);
     EXPECT_EQ(DrmPrelimHelper::getStringUuidClass(), receivedUuid->uuidClass);
-    EXPECT_EQ(receivedUuid->size, strlen(uuidL0CommandQueueName));
-    EXPECT_EQ(0, memcmp(reinterpret_cast<const char *>(receivedUuid->ptr), uuidL0CommandQueueName, receivedUuid->size));
+    EXPECT_EQ(receivedUuid->size, 0u);
     EXPECT_EQ(0, memcmp(receivedUuid->uuid, uuidL0CommandQueueHash, sizeof(receivedUuid->uuid)));
 }
 
@@ -185,7 +183,7 @@ TEST_F(DrmDebugPrelimTest, GivenDrmWhenRegisteringElfResourceWithoutDataThenRegi
     EXPECT_TRUE(result);
 
     auto handle = drm.context.uuidHandle;
-    auto registeredHandle = drm.registerResource(Drm::ResourceClass::Elf, nullptr, 0);
+    auto registeredHandle = drm.registerResource(DrmResourceClass::Elf, nullptr, 0);
 
     EXPECT_EQ(handle + 1, drm.context.uuidHandle);
     EXPECT_EQ(handle, registeredHandle);
@@ -199,6 +197,7 @@ TEST(DrmPrelimTest, givenContextDebugAvailableWhenCheckedForSupportThenTrueIsRet
     executionEnvironment->setDebuggingEnabled();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->calculateMaxOsContextCount();
     executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
 
@@ -222,6 +221,7 @@ TEST(DrmPrelimTest, givenContextDebugNotAvailableWhenCheckedForSupportThenTrueIs
     executionEnvironment->setDebuggingEnabled();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->calculateMaxOsContextCount();
     executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
 
@@ -240,13 +240,9 @@ TEST(DrmPrelimTest, givenContextDebugNotAvailableWhenCheckedForSupportThenTrueIs
 }
 
 TEST_F(DrmDebugPrelimTest, givenAddedBindExtHandlesInBoWhenBindingWithinDefaultEngineContextThenExtensionsArePassedToVmBindIoctl) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
-    executionEnvironment->initializeMemoryManager();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
 
-    MockBufferObject bo(&drm, 0, 0, 1);
+    MockBufferObject bo(&drm, 3, 0, 0, 1);
     bo.addBindExtHandle(4);
     bo.addBindExtHandle(5);
 
@@ -264,13 +260,9 @@ TEST_F(DrmDebugPrelimTest, givenAddedBindExtHandlesInBoWhenBindingWithinDefaultE
 }
 
 TEST_F(DrmDebugPrelimTest, givenAddedBindExtHandlesInBoWhenBindingWithinInternalContextThenExtensionsAreNotPassedToVmBindIoctl) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
-    executionEnvironment->initializeMemoryManager();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
 
-    MockBufferObject bo(&drm, 0, 0, 1);
+    MockBufferObject bo(&drm, 3, 0, 0, 1);
     bo.addBindExtHandle(4);
     bo.addBindExtHandle(5);
 
@@ -282,13 +274,9 @@ TEST_F(DrmDebugPrelimTest, givenAddedBindExtHandlesInBoWhenBindingWithinInternal
 }
 
 TEST_F(DrmDebugPrelimTest, givenAddedBindExtHandlesInBoWhenBindingWithinCopyEngineContextThenExtensionsAreNotPassedToVmBindIoctl) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
-    executionEnvironment->initializeMemoryManager();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
 
-    MockBufferObject bo(&drm, 0, 0, 1);
+    MockBufferObject bo(&drm, 3, 0, 0, 1);
     bo.addBindExtHandle(4);
     bo.addBindExtHandle(5);
 
@@ -302,13 +290,10 @@ TEST_F(DrmDebugPrelimTest, givenAddedBindExtHandlesInBoWhenBindingWithinCopyEngi
 }
 
 HWTEST_F(DrmDebugPrelimTest, givenAddedBindExtHandlesInBoWhenUnbindingThenExtensionsAreNotSet) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
-    executionEnvironment->initializeMemoryManager();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
+    drm.queryAndSetVmBindPatIndexProgrammingSupport();
 
-    MockBufferObject bo(&drm, 0, 0, 1);
+    MockBufferObject bo(&drm, 3, 0, 0, 1);
     bo.addBindExtHandle(4);
     bo.addBindExtHandle(5);
 
@@ -318,7 +303,7 @@ HWTEST_F(DrmDebugPrelimTest, givenAddedBindExtHandlesInBoWhenUnbindingThenExtens
     EXPECT_NE(0u, drm.context.receivedVmBind.value().extensions);
 
     bo.unbind(&osContext, 0);
-    if (HwHelperHw<FamilyType>::get().getNumCacheRegions() > 0) {
+    if (HwInfoConfig::get(defaultHwInfo->platform.eProductFamily)->isVmBindPatIndexProgrammingSupported()) {
         EXPECT_NE(0u, drm.context.receivedVmUnbind.value().extensions);
     } else {
         EXPECT_EQ(0u, drm.context.receivedVmUnbind.value().extensions);
@@ -331,6 +316,7 @@ TEST(DrmPrelimTest, givenProgramDebuggingAndContextDebugAvailableAndCCSEnginesWh
     executionEnvironment->setDebuggingEnabled();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->calculateMaxOsContextCount();
     executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
 
@@ -352,6 +338,7 @@ TEST(DrmPrelimTest, givenProgramDebuggingAndContextDebugAvailableAndCCSEnginesWh
     executionEnvironment->setDebuggingEnabled();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->calculateMaxOsContextCount();
     executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
 

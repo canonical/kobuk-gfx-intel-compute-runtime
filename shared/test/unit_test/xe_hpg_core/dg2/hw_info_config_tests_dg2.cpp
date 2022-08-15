@@ -6,11 +6,14 @@
  */
 
 #include "shared/source/command_stream/stream_properties.h"
+#include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/os_interface/hw_info_config.h"
+#include "shared/test/common/fixtures/product_config_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/xe_hpg_core/dg2/product_configs_dg2.h"
 
 using namespace NEO;
 
@@ -26,11 +29,26 @@ DG2TEST_F(HwInfoConfigTestDg2, whenConvertingTimestampsToCsDomainThenGpuTicksAre
     EXPECT_EQ(expectedGpuTicks, gpuTicks);
 }
 
-DG2TEST_F(HwInfoConfigTestDg2, givenDg2ConfigWhenSetupHardwareInfoMultiTileThenGtSystemInfoIsSetCorrect) {
+DG2TEST_F(HwInfoConfigTestDg2, givenDg2ConfigWhenSetupHardwareInfoBaseThenGtSystemInfoIsCorrect) {
+    HardwareInfo hwInfo = *defaultHwInfo;
+    GT_SYSTEM_INFO &gtSystemInfo = hwInfo.gtSystemInfo;
+    Dg2HwConfig::setupHardwareInfoBase(&hwInfo, false);
+
+    EXPECT_EQ(336u, gtSystemInfo.TotalVsThreads);
+    EXPECT_EQ(336u, gtSystemInfo.TotalHsThreads);
+    EXPECT_EQ(336u, gtSystemInfo.TotalDsThreads);
+    EXPECT_EQ(336u, gtSystemInfo.TotalGsThreads);
+    EXPECT_EQ(64u, gtSystemInfo.TotalPsThreadsWindowerRange);
+    EXPECT_EQ(8u, gtSystemInfo.CsrSizeInMb);
+    EXPECT_FALSE(gtSystemInfo.IsL3HashModeEnabled);
+    EXPECT_FALSE(gtSystemInfo.IsDynamicallyPopulated);
+}
+
+DG2TEST_F(HwInfoConfigTestDg2, givenDg2ConfigWhenSetupHardwareInfoThenGtSystemInfoIsCorrect) {
     HardwareInfo hwInfo = *defaultHwInfo;
     GT_SYSTEM_INFO &gtSystemInfo = hwInfo.gtSystemInfo;
 
-    DG2_CONFIG::setupHardwareInfoMultiTile(&hwInfo, false, false);
+    Dg2HwConfig::setupHardwareInfo(&hwInfo, false);
     EXPECT_EQ(8u, gtSystemInfo.CsrSizeInMb);
     EXPECT_FALSE(gtSystemInfo.IsL3HashModeEnabled);
     EXPECT_FALSE(gtSystemInfo.IsDynamicallyPopulated);
@@ -361,4 +379,127 @@ DG2TEST_F(HwInfoConfigTestDg2, givenNotEnabledSliceWhenComputeUnitsUsedForScratc
     auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
 
     EXPECT_THROW(hwHelper.getComputeUnitsUsedForScratch(&hwInfo), std::exception);
+}
+
+HWTEST_EXCLUDE_PRODUCT(HwHelperTestXeHpgCore, givenHwHelperWhenCheckTimestampWaitSupportThenReturnFalse, IGFX_DG2);
+DG2TEST_F(HwInfoConfigTestDg2, givenDG2WhenCheckingIsTimestampWaitSupportedForEventsThenReturnTrue) {
+    HardwareInfo hwInfo = *defaultHwInfo;
+    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
+    EXPECT_TRUE(hwInfoConfig.isTimestampWaitSupportedForEvents());
+    EXPECT_TRUE(hwHelper.isTimestampWaitSupportedForEvents(hwInfo));
+}
+
+DG2TEST_F(ProductConfigTests, givenDg2G10DeviceIdsWhenConfigIsCheckedThenCorrectValueIsReturned) {
+    for (const auto &deviceId : dg2G10DeviceIds) {
+        hwInfo.platform.usDeviceID = deviceId;
+
+        EXPECT_TRUE(DG2::isG10(hwInfo));
+        EXPECT_FALSE(DG2::isG11(hwInfo));
+        EXPECT_FALSE(DG2::isG12(hwInfo));
+    }
+}
+
+DG2TEST_F(ProductConfigTests, givenDg2G11DeviceIdsWhenConfigIsCheckedThenCorrectValueIsReturned) {
+    for (const auto &deviceId : dg2G11DeviceIds) {
+        hwInfo.platform.usDeviceID = deviceId;
+
+        EXPECT_FALSE(DG2::isG10(hwInfo));
+        EXPECT_TRUE(DG2::isG11(hwInfo));
+        EXPECT_FALSE(DG2::isG12(hwInfo));
+    }
+}
+
+DG2TEST_F(ProductConfigTests, givenDg2G12DeviceIdsWhenConfigIsCheckedThenCorrectValueIsReturned) {
+    for (const auto &deviceId : dg2G12DeviceIds) {
+        hwInfo.platform.usDeviceID = deviceId;
+
+        EXPECT_FALSE(DG2::isG10(hwInfo));
+        EXPECT_FALSE(DG2::isG11(hwInfo));
+        EXPECT_TRUE(DG2::isG12(hwInfo));
+    }
+}
+
+DG2TEST_F(ProductConfigTests, givenInvalidRevisionIdWhenDeviceIdIsDefaultThenUnknownIsaIsReturned) {
+    hwInfo.platform.usDeviceID = 0;
+    hwInfo.platform.usRevId = CommonConstants::invalidRevisionID;
+
+    productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
+    EXPECT_EQ(productConfig, AOT::UNKNOWN_ISA);
+}
+
+DG2TEST_F(ProductConfigTests, givenDg2G10DeviceIdWhenDifferentRevisionIsPassedThenCorrectProductConfigIsReturned) {
+    for (const auto &deviceId : dg2G10DeviceIds) {
+        hwInfo.platform.usDeviceID = deviceId;
+
+        hwInfo.platform.usRevId = 0x0;
+        productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
+        EXPECT_EQ(productConfig, AOT::DG2_G10_A0);
+
+        hwInfo.platform.usRevId = 0x1;
+        productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
+        EXPECT_EQ(productConfig, AOT::DG2_G10_A1);
+
+        hwInfo.platform.usRevId = 0x4;
+        productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
+        EXPECT_EQ(productConfig, AOT::DG2_G10_B0);
+
+        hwInfo.platform.usRevId = 0x8;
+        productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
+        EXPECT_EQ(productConfig, AOT::DG2_G10_C0);
+    }
+}
+
+DG2TEST_F(ProductConfigTests, givenDg2DeviceIdWhenIncorrectRevisionIsPassedThenCorrectProductConfigIsReturned) {
+    for (const auto &dg2 : {dg2G10DeviceIds, dg2G11DeviceIds}) {
+        for (const auto &deviceId : dg2) {
+            hwInfo.platform.usDeviceID = deviceId;
+            hwInfo.platform.usRevId = CommonConstants::invalidRevisionID;
+            productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
+            EXPECT_EQ(productConfig, AOT::UNKNOWN_ISA);
+        }
+    }
+}
+
+DG2TEST_F(ProductConfigTests, givenDg2G11DeviceIdWhenDifferentRevisionIsPassedThenCorrectProductConfigIsReturned) {
+    for (const auto &deviceId : dg2G11DeviceIds) {
+        hwInfo.platform.usDeviceID = deviceId;
+
+        hwInfo.platform.usRevId = 0x0;
+        productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
+        EXPECT_EQ(productConfig, AOT::DG2_G11_A0);
+
+        hwInfo.platform.usRevId = 0x4;
+        productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
+        EXPECT_EQ(productConfig, AOT::DG2_G11_B0);
+
+        hwInfo.platform.usRevId = 0x5;
+        productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
+        EXPECT_EQ(productConfig, AOT::DG2_G11_B1);
+    }
+}
+
+DG2TEST_F(ProductConfigTests, givenDg2G12DeviceIdWhenGetProductConfigThenCorrectConfigIsReturned) {
+    for (const auto &deviceId : dg2G12DeviceIds) {
+        hwInfo.platform.usDeviceID = deviceId;
+        productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
+        EXPECT_EQ(productConfig, AOT::DG2_G12_A0);
+    }
+}
+
+DG2TEST_F(ProductConfigTests, givenNotSetDeviceAndRevisionIdWhenGetProductConfigThenUnknownIsaIsReturned) {
+    hwInfo.platform.usRevId = 0x0;
+    hwInfo.platform.usDeviceID = 0x0;
+
+    productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
+    EXPECT_EQ(productConfig, AOT::UNKNOWN_ISA);
+}
+
+DG2TEST_F(HwInfoConfigTestDg2, givenHwInfoConfigWhenAskedIfStorageInfoAdjustmentIsRequiredThenTrueIsReturned) {
+    auto hwInfoConfig = HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    if constexpr (is32bit) {
+        EXPECT_TRUE(hwInfoConfig->isStorageInfoAdjustmentRequired());
+    } else {
+        EXPECT_FALSE(hwInfoConfig->isStorageInfoAdjustmentRequired());
+    }
 }

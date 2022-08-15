@@ -13,6 +13,7 @@
 #include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
 
+#include "level_zero/core/source/cmdqueue/cmdqueue.h"
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/tools/source/metrics/metric.h"
@@ -114,6 +115,13 @@ CommandList *CommandList::createImmediate(uint32_t productFamily, Device *device
         commandList->internalUsage = internalUsage;
         commandList->cmdListType = CommandListType::TYPE_IMMEDIATE;
         commandList->isSyncModeQueue = (desc->mode == ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS);
+        if (!(NEO::EngineGroupType::Copy == engineType) && !internalUsage) {
+            const auto &hwInfo = device->getHwInfo();
+            commandList->isFlushTaskSubmissionEnabled = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily).isPlatformFlushTaskEnabled(hwInfo);
+            if (NEO::DebugManager.flags.EnableFlushTaskSubmission.get() != -1) {
+                commandList->isFlushTaskSubmissionEnabled = !!NEO::DebugManager.flags.EnableFlushTaskSubmission.get();
+            }
+        }
         returnValue = commandList->initialize(device, engineType, desc->flags);
         if (returnValue != ZE_RESULT_SUCCESS) {
             commandList->destroy();
@@ -130,6 +138,7 @@ CommandList *CommandList::createImmediate(uint32_t productFamily, Device *device
 
         commandList->cmdQImmediate = commandQueue;
         commandList->csr = csr;
+        commandList->isTbxMode = (csr->getType() == NEO::CommandStreamReceiverType::CSR_TBX) || (csr->getType() == NEO::CommandStreamReceiverType::CSR_TBX_WITH_AUB);
         commandList->commandListPreemptionMode = device->getDevicePreemptionMode();
         return commandList;
     }

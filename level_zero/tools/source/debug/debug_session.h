@@ -1,12 +1,14 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
-#include "level_zero/core/source/debugger/debugger_l0.h"
+#include "shared/source/debugger/debugger_l0.h"
+#include "shared/source/os_interface/os_thread.h"
+
 #include "level_zero/tools/source/debug/eu_thread.h"
 #include <level_zero/ze_api.h>
 #include <level_zero/zet_api.h>
@@ -71,11 +73,30 @@ struct DebugSession : _zet_debug_session_handle_t {
 
     static void printBitmask(uint8_t *bitmask, size_t bitmaskSize);
 
-    virtual ze_device_thread_t convertToPhysical(ze_device_thread_t thread, uint32_t &deviceIndex);
+    virtual uint32_t getDeviceIndexFromApiThread(ze_device_thread_t thread);
+    virtual ze_device_thread_t convertToPhysicalWithinDevice(ze_device_thread_t thread, uint32_t deviceIndex);
     virtual EuThread::ThreadId convertToThreadId(ze_device_thread_t thread);
     virtual ze_device_thread_t convertToApi(EuThread::ThreadId threadId);
 
     ze_result_t sanityMemAccessThreadCheck(ze_device_thread_t thread, const zet_debug_memory_space_desc_t *desc);
+
+    struct ThreadHelper {
+        void close() {
+            threadActive.store(false);
+
+            if (thread) {
+                while (!threadFinished.load()) {
+                    thread->yield();
+                }
+
+                thread->join();
+                thread.reset();
+            }
+        }
+        std::unique_ptr<NEO::Thread> thread;
+        std::atomic<bool> threadActive{true};
+        std::atomic<bool> threadFinished{false};
+    };
 
   protected:
     DebugSession(const zet_debug_config_t &config, Device *device);
@@ -83,7 +104,7 @@ struct DebugSession : _zet_debug_session_handle_t {
 
     virtual bool isBindlessSystemRoutine();
     virtual bool readModuleDebugArea() = 0;
-    virtual ze_result_t readSbaBuffer(EuThread::ThreadId threadId, SbaTrackedAddresses &sbaBuffer) = 0;
+    virtual ze_result_t readSbaBuffer(EuThread::ThreadId threadId, NEO::SbaTrackedAddresses &sbaBuffer) = 0;
 
     void fillDevicesFromThread(ze_device_thread_t thread, std::vector<uint8_t> &devices);
 
@@ -91,7 +112,7 @@ struct DebugSession : _zet_debug_session_handle_t {
 
     size_t getPerThreadScratchOffset(size_t ptss, EuThread::ThreadId threadId);
 
-    DebugAreaHeader debugArea;
+    NEO::DebugAreaHeader debugArea;
 
     Device *connectedDevice = nullptr;
     std::map<uint64_t, std::unique_ptr<EuThread>> allThreads;

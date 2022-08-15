@@ -139,11 +139,6 @@ size_t HardwareCommandsHelper<GfxFamily>::sendCrossThreadData(
 }
 
 template <typename GfxFamily>
-bool HardwareCommandsHelper<GfxFamily>::resetBindingTablePrefetch() {
-    return !EncodeSurfaceState<GfxFamily>::doBindingTablePrefetch();
-}
-
-template <typename GfxFamily>
 void HardwareCommandsHelper<GfxFamily>::setInterfaceDescriptorOffset(
     WALKER_TYPE *walkerCmd,
     uint32_t &interfaceDescriptorIndex) {
@@ -156,7 +151,7 @@ void HardwareCommandsHelper<GfxFamily>::programCacheFlushAfterWalkerCommand(Line
     const auto &hwInfo = commandQueue.getDevice().getHardwareInfo();
     PipeControlArgs args;
     args.dcFlushEnable = MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo);
-    MemorySynchronizationCommands<GfxFamily>::addPipeControl(*commandStream, args);
+    MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(*commandStream, args);
 }
 
 } // namespace NEO

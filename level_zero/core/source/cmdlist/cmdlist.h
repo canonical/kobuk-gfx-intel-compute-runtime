@@ -8,24 +8,32 @@
 #pragma once
 
 #include "shared/source/command_container/cmdcontainer.h"
-#include "shared/source/command_stream/preemption_mode.h"
 #include "shared/source/command_stream/stream_properties.h"
-#include "shared/source/command_stream/thread_arbitration_policy.h"
+#include "shared/source/unified_memory/unified_memory.h"
 
-#include "level_zero/core/source/cmdqueue/cmdqueue.h"
-#include "level_zero/core/source/device/device.h"
-#include "level_zero/core/source/kernel/kernel.h"
 #include <level_zero/ze_api.h>
 #include <level_zero/zet_api.h>
 
+#include <map>
 #include <vector>
 
 struct _ze_command_list_handle_t {};
 
 namespace L0 {
+struct Device;
 struct EventPool;
 struct Event;
 struct Kernel;
+struct CommandQueue;
+
+struct CmdListKernelLaunchParams {
+    bool isIndirect = false;
+    bool isPredicate = false;
+    bool isCooperative = false;
+    bool isKernelSplitOperation = false;
+    bool isBuiltInKernel = false;
+    bool isDestinationAllocationInSystemMemory = false;
+};
 
 struct CommandList : _ze_command_list_handle_t {
     static constexpr uint32_t defaultNumIddsPerBlock = 64u;
@@ -75,8 +83,9 @@ struct CommandList : _ze_command_list_handle_t {
     virtual ze_result_t appendImageCopy(ze_image_handle_t hDstImage, ze_image_handle_t hSrcImage,
                                         ze_event_handle_t hEvent, uint32_t numWaitEvents,
                                         ze_event_handle_t *phWaitEvents) = 0;
-    virtual ze_result_t appendLaunchKernel(ze_kernel_handle_t hKernel, const ze_group_count_t *pThreadGroupDimensions,
-                                           ze_event_handle_t hEvent, uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) = 0;
+    virtual ze_result_t appendLaunchKernel(ze_kernel_handle_t hKernel, const ze_group_count_t *threadGroupDimensions,
+                                           ze_event_handle_t hEvent, uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents,
+                                           const CmdListKernelLaunchParams &launchParams) = 0;
     virtual ze_result_t appendLaunchCooperativeKernel(ze_kernel_handle_t hKernel,
                                                       const ze_group_count_t *pLaunchFuncArgs,
                                                       ze_event_handle_t hSignalEvent,
@@ -118,6 +127,8 @@ struct CommandList : _ze_command_list_handle_t {
     virtual ze_result_t appendMemoryCopyFromContext(void *dstptr, ze_context_handle_t hContextSrc,
                                                     const void *srcptr, size_t size, ze_event_handle_t hSignalEvent,
                                                     uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) = 0;
+
+    virtual void *asMutable() { return nullptr; };
 
     virtual ze_result_t reserveSpace(size_t size, void **ptr) = 0;
     virtual ze_result_t reset() = 0;
@@ -257,12 +268,14 @@ struct CommandList : _ze_command_list_handle_t {
     uint32_t partitionCount = 1;
     bool isFlushTaskSubmissionEnabled = false;
     bool isSyncModeQueue = false;
+    bool isTbxMode = false;
     bool commandListSLMEnabled = false;
     bool requiresQueueUncachedMocs = false;
 
   protected:
     NEO::GraphicsAllocation *getAllocationFromHostPtrMap(const void *buffer, uint64_t bufferSize);
     NEO::GraphicsAllocation *getHostPtrAlloc(const void *buffer, uint64_t bufferSize, bool hostCopyAllowed);
+    bool setupTimestampEventForMultiTile(Event *signalEvent);
 
     std::map<const void *, NEO::GraphicsAllocation *> hostPtrMap;
     std::vector<NEO::GraphicsAllocation *> ownedPrivateAllocations;

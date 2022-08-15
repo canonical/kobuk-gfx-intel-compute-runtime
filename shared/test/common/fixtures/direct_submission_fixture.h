@@ -5,6 +5,8 @@
  *
  */
 
+#pragma once
+
 #include "shared/source/os_interface/device_factory.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/fixtures/device_fixture.h"
@@ -24,11 +26,10 @@ struct DirectSubmissionFixture : public DeviceFixture {
         DeviceFixture::SetUp();
         DeviceFactory::prepareDeviceEnvironments(*pDevice->getExecutionEnvironment());
 
-        osContext.reset(OsContext::create(nullptr, 0u,
-                                          EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup, pDevice->getDeviceBitfield())));
+        osContext = pDevice->getDefaultEngine().osContext;
     }
 
-    std::unique_ptr<OsContext> osContext;
+    OsContext *osContext = nullptr;
 };
 
 struct DirectSubmissionDispatchBufferFixture : public DirectSubmissionFixture {

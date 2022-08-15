@@ -11,15 +11,12 @@
 #include "shared/source/device/device.h"
 #include "shared/source/direct_submission/direct_submission_hw.h"
 #include "shared/source/execution_environment/execution_environment.h"
-#include "shared/source/memory_manager/os_agnostic_memory_manager.h"
 #include "shared/source/memory_manager/surface.h"
-#include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
 #include "shared/test/common/mocks/mock_experimental_command_buffer.h"
 
 #include <map>
-#include <memory>
 #include <optional>
 
 namespace NEO {
@@ -44,6 +41,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::isBlitterDirectSubmissionEnabled;
     using BaseClass::isDirectSubmissionEnabled;
     using BaseClass::isPerDssBackedBufferSent;
+    using BaseClass::logicalStateHelper;
     using BaseClass::makeResident;
     using BaseClass::perDssBackedBuffer;
     using BaseClass::postInitFlagsSetup;
@@ -76,6 +74,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::debugPauseStateAddress;
     using BaseClass::CommandStreamReceiver::deviceBitfield;
     using BaseClass::CommandStreamReceiver::dispatchMode;
+    using BaseClass::CommandStreamReceiver::downloadAllocationImpl;
     using BaseClass::CommandStreamReceiver::executionEnvironment;
     using BaseClass::CommandStreamReceiver::experimentalCmdBuffer;
     using BaseClass::CommandStreamReceiver::flushStamp;
@@ -103,6 +102,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::mediaVfeStateDirty;
     using BaseClass::CommandStreamReceiver::newResources;
     using BaseClass::CommandStreamReceiver::osContext;
+    using BaseClass::CommandStreamReceiver::ownershipMutex;
     using BaseClass::CommandStreamReceiver::perfCounterAllocator;
     using BaseClass::CommandStreamReceiver::postSyncWriteOffset;
     using BaseClass::CommandStreamReceiver::profilingTimeStampAllocator;
@@ -122,6 +122,8 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::useNotifyEnableForPostSync;
     using BaseClass::CommandStreamReceiver::userPauseConfirmation;
     using BaseClass::CommandStreamReceiver::waitForTaskCountAndCleanAllocationList;
+    using BaseClass::CommandStreamReceiver::workPartitionAllocation;
+    ;
 
     UltCommandStreamReceiver(ExecutionEnvironment &executionEnvironment,
                              uint32_t rootDeviceIndex,
@@ -132,7 +134,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
             this->downloadAllocationUlt(graphicsAllocation);
         };
     }
-    ~UltCommandStreamReceiver() {
+    ~UltCommandStreamReceiver() override {
         this->downloadAllocationImpl = nullptr;
     }
     static CommandStreamReceiver *create(bool withAubDump,
@@ -147,9 +149,9 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         return nullptr;
     }
 
-    void makeSurfacePackNonResident(ResidencyContainer &allocationsForResidency) override {
+    void makeSurfacePackNonResident(ResidencyContainer &allocationsForResidency, bool clearAllocations) override {
         makeSurfacePackNonResidentCalled++;
-        BaseClass::makeSurfacePackNonResident(allocationsForResidency);
+        BaseClass::makeSurfacePackNonResident(allocationsForResidency, clearAllocations);
     }
 
     NEO::SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override {
@@ -175,6 +177,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
 
     void downloadAllocations() override {
         downloadAllocationCalled = true;
+        downloadAllocationsCalled = true;
     }
 
     void downloadAllocationUlt(GraphicsAllocation &gfxAllocation) {
@@ -189,8 +192,17 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         }
         return returnWaitForCompletionWithTimeout;
     }
+
     WaitStatus waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) {
         return waitForCompletionWithTimeout(WaitParams{false, enableTimeout, timeoutMicroseconds}, taskCountToWait);
+    }
+
+    WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, QueueThrottle throttle) override {
+        if (waitForTaskCountWithKmdNotifyFallbackReturnValue.has_value()) {
+            return *waitForTaskCountWithKmdNotifyFallbackReturnValue;
+        }
+
+        return BaseClass::waitForTaskCountWithKmdNotifyFallback(taskCountToWait, flushStampToWait, useQuickKmdSleep, throttle);
     }
 
     void overrideCsrSizeReqFlags(CsrSizeRequestFlags &flags) { this->csrSizeRequestFlags = flags; }
@@ -258,20 +270,20 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         return CommandStreamReceiverHw<GfxFamily>::obtainUniqueOwnership();
     }
 
-    uint32_t flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override {
+    std::optional<uint32_t> flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override {
         blitBufferCalled++;
         receivedBlitProperties = blitPropertiesContainer;
-        return CommandStreamReceiverHw<GfxFamily>::flushBcsTask(blitPropertiesContainer, blocking, profilingEnabled, device);
+
+        if (callBaseFlushBcsTask) {
+            return CommandStreamReceiverHw<GfxFamily>::flushBcsTask(blitPropertiesContainer, blocking, profilingEnabled, device);
+        } else {
+            return flushBcsTaskReturnValue;
+        }
     }
 
     bool createPerDssBackedBuffer(Device &device) override {
         createPerDssBackedBufferCalled++;
-        bool result = BaseClass::createPerDssBackedBuffer(device);
-        if (!perDssBackedBuffer) {
-            AllocationProperties properties{device.getRootDeviceIndex(), MemoryConstants::pageSize, AllocationType::INTERNAL_HEAP, device.getDeviceBitfield()};
-            perDssBackedBuffer = executionEnvironment.memoryManager->allocateGraphicsMemoryWithProperties(properties);
-        }
-        return result;
+        return BaseClass::createPerDssBackedBuffer(device);
     }
 
     bool isMultiOsContextCapable() const override {
@@ -281,12 +293,12 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         return multiOsContextCapable;
     }
 
-    bool initDirectSubmission(Device &device, OsContext &osContext) override {
+    bool initDirectSubmission() override {
         if (ultHwConfig.csrFailInitDirectSubmission) {
             return false;
         }
         initDirectSubmissionCalled++;
-        return BaseClass::CommandStreamReceiver::initDirectSubmission(device, osContext);
+        return BaseClass::CommandStreamReceiver::initDirectSubmission();
     }
 
     bool isDirectSubmissionEnabled() const override {
@@ -312,7 +324,10 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     bool createAllocationForHostSurface(HostPtrSurface &surface, bool requiresL3Flush) override {
         createAllocationForHostSurfaceCalled++;
         cpuCopyForHostPtrSurfaceAllowed = surface.peekIsPtrCopyAllowed();
-        return BaseClass::createAllocationForHostSurface(surface, requiresL3Flush);
+        auto status = BaseClass::createAllocationForHostSurface(surface, requiresL3Flush);
+        if (status)
+            surface.getAllocation()->hostPtrTaskCountAssignment--;
+        return status;
     }
 
     void ensureCommandBufferAllocation(LinearStream &commandStream, size_t minimumRequiredSize, size_t additionalAllocationSize) override {
@@ -346,6 +361,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     bool checkAndActivateAubSubCaptureCalled = false;
     bool addAubCommentCalled = false;
     std::atomic_bool downloadAllocationCalled = false;
+    std::atomic_bool downloadAllocationsCalled = false;
     bool flushBatchedSubmissionsCalled = false;
     bool initProgrammingFlagsCalled = false;
     bool multiOsContextCapable = false;
@@ -357,5 +373,9 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     bool shouldFailFlushBatchedSubmissions = false;
     bool shouldFlushBatchedSubmissionsReturnSuccess = false;
     WaitStatus returnWaitForCompletionWithTimeout = WaitStatus::Ready;
+    std::optional<WaitStatus> waitForTaskCountWithKmdNotifyFallbackReturnValue{};
+    bool callBaseFlushBcsTask{true};
+    std::optional<uint32_t> flushBcsTaskReturnValue{};
 };
+
 } // namespace NEO

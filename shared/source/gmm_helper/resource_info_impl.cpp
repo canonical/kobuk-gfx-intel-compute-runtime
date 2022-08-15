@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,15 +16,31 @@ GmmResourceInfo::GmmResourceInfo(GmmClientContext *clientContext, GMM_RESCREATE_
     createResourceInfo(resourceInfoPtr);
 }
 
-GmmResourceInfo::GmmResourceInfo(GmmClientContext *clientContext, GMM_RESOURCE_INFO *inputGmmResourceInfo) : clientContext(clientContext) {
-    auto resourceInfoPtr = clientContext->copyResInfoObject(inputGmmResourceInfo);
-    createResourceInfo(resourceInfoPtr);
+GmmResourceInfo::GmmResourceInfo(GmmClientContext *clientContext, GMM_RESOURCE_INFO *inputGmmResourceInfo) : GmmResourceInfo(clientContext, inputGmmResourceInfo, false) {}
+
+GmmResourceInfo::GmmResourceInfo(GmmClientContext *clientContext, GMM_RESOURCE_INFO *inputGmmResourceInfo, bool openingHandle) : clientContext(clientContext) {
+    if (openingHandle) {
+        decodeResourceInfo(inputGmmResourceInfo);
+    } else {
+        auto resourceInfoPtr = clientContext->copyResInfoObject(inputGmmResourceInfo);
+        createResourceInfo(resourceInfoPtr);
+    }
 }
 
-GmmResourceInfo::~GmmResourceInfo() {
-    if (this->clientContext && this->clientContext->getHandleAllocator()) {
-        this->clientContext->getHandleAllocator()->destroyHandle(this->handle);
-    }
+void GmmResourceInfo::decodeResourceInfo(GMM_RESOURCE_INFO *inputGmmResourceInfo) {
+    auto customDeleter = [this](GMM_RESOURCE_INFO *gmmResourceInfo) {
+        this->clientContext->destroyResInfoObject(gmmResourceInfo);
+    };
+
+    UNRECOVERABLE_IF(this->handle != nullptr);
+
+    auto resourceInfoPtr = this->clientContext->copyResInfoObject(inputGmmResourceInfo);
+    this->resourceInfo = UniquePtrType(resourceInfoPtr, customDeleter);
+
+    this->handle = this->clientContext->getHandleAllocator()->createHandle(inputGmmResourceInfo);
+    this->handleSize = this->clientContext->getHandleAllocator()->getHandleSize();
+
+    this->clientContext->getHandleAllocator()->openHandle(inputGmmResourceInfo, this->resourceInfo.get(), this->clientContext->getHandleAllocator()->getHandleSize());
 }
 
 void GmmResourceInfo::createResourceInfo(GMM_RESOURCE_INFO *resourceInfoPtr) {
@@ -39,6 +55,18 @@ void GmmResourceInfo::createResourceInfo(GMM_RESOURCE_INFO *resourceInfoPtr) {
     } else {
         this->handle = this->resourceInfo.get();
         this->handleSize = sizeof(GMM_RESOURCE_INFO);
+    }
+}
+
+void GmmResourceInfo::refreshHandle() {
+    if (this->clientContext && this->clientContext->getHandleAllocator()) {
+        this->clientContext->getHandleAllocator()->openHandle(this->handle, this->resourceInfo.get(), this->clientContext->getHandleAllocator()->getHandleSize());
+    }
+}
+
+GmmResourceInfo::~GmmResourceInfo() {
+    if (this->clientContext && this->clientContext->getHandleAllocator()) {
+        this->clientContext->getHandleAllocator()->destroyHandle(this->handle);
     }
 }
 

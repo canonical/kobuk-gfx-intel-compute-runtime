@@ -16,6 +16,7 @@ using IsXeHpCore = IsGfxCore<IGFX_XE_HP_CORE>;
 using IsXeHpgCore = IsGfxCore<IGFX_XE_HPG_CORE>;
 using IsXeHpcCore = IsGfxCore<IGFX_XE_HPC_CORE>;
 using IsNotXeHpcCore = IsNotGfxCore<IGFX_XE_HPC_CORE>;
+using IsNotXeHpgCore = IsNotGfxCore<IGFX_XE_HPG_CORE>;
 
 using IsAtMostGen11 = IsAtMostGfxCore<IGFX_GEN11LP_CORE>;
 
@@ -32,9 +33,13 @@ using IsAtLeastXeHpgCore = IsAtLeastGfxCore<IGFX_XE_HPG_CORE>;
 using IsAtMostXeHpgCore = IsAtMostGfxCore<IGFX_XE_HPG_CORE>;
 
 using IsAtLeastXeHpcCore = IsAtLeastGfxCore<IGFX_XE_HPC_CORE>;
+using IsAtMostXeHpcCore = IsAtMostGfxCore<IGFX_XE_HPC_CORE>;
 
+using isXeHpOrXeHpgCore = IsAnyGfxCores<IGFX_XE_HP_CORE, IGFX_XE_HPG_CORE>;
 using isXeHpOrXeHpcCore = IsAnyGfxCores<IGFX_XE_HP_CORE, IGFX_XE_HPC_CORE>;
 using isXeHpcOrXeHpgCore = IsAnyGfxCores<IGFX_XE_HPC_CORE, IGFX_XE_HPG_CORE>;
+
+using isNotXeHpOrXeHpcCore = IsNotAnyGfxCores<IGFX_XE_HP_CORE, IGFX_XE_HPC_CORE>;
 
 using IsSKL = IsProduct<IGFX_SKYLAKE>;
 using IsKBL = IsProduct<IGFX_KABYLAKE>;
@@ -54,9 +59,14 @@ using IsADLP = IsProduct<IGFX_ALDERLAKE_P>;
 using IsRKL = IsProduct<IGFX_ROCKETLAKE>;
 
 using IsXEHP = IsProduct<IGFX_XE_HP_SDV>;
+using IsNotXEHP = IsNotWithinProducts<IGFX_XE_HP_SDV, IGFX_XE_HP_SDV>;
 
 using IsDG2 = IsProduct<IGFX_DG2>;
 
 using IsPVC = IsProduct<IGFX_PVC>;
 
 using IsAtLeastSkl = IsAtLeastProduct<IGFX_SKYLAKE>;
+
+using IsAtMostDg2 = IsAtMostProduct<IGFX_DG2>;
+
+using IsNotPVC = IsNotWithinProducts<IGFX_PVC, IGFX_PVC>;

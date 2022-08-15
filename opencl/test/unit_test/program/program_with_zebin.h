@@ -20,10 +20,9 @@ class ProgramWithZebinFixture : public ProgramTests {
     std::unique_ptr<MockBuffer> globalSurface;
     std::unique_ptr<MockBuffer> constantSurface;
     const char strings[12] = "Hello olleH";
-    const char kernelName[8] = "kernel1";
     void SetUp() override;
     void TearDown() override;
     void addEmptyZebin(MockProgram *program);
     void populateProgramWithSegments(MockProgram *program);
-    ~ProgramWithZebinFixture() = default;
+    ~ProgramWithZebinFixture() override = default;
 };

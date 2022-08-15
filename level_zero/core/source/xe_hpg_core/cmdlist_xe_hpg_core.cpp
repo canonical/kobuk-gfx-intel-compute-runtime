@@ -12,6 +12,7 @@
 #include "level_zero/core/source/cmdlist/cmdlist_hw_xehp_and_later.inl"
 
 #include "cmdlist_extended.inl"
+#include "hw_cmds_xe_hpg_core_base.h"
 
 namespace L0 {
 

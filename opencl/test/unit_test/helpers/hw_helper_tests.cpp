@@ -11,6 +11,7 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/gmm_helper/resource_info.h"
 #include "shared/source/helpers/aligned_memory.h"
+#include "shared/source/helpers/logical_state_helper.h"
 #include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
@@ -21,6 +22,7 @@
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/mocks/mock_gmm.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/test_macros/test_checks_shared.h"
 
 #include "opencl/source/helpers/cl_hw_helper.h"
@@ -83,26 +85,43 @@ HWTEST_F(HwHelperTest, givenHwHelperWhenAskingForTimestampPacketAlignmentThenRet
     EXPECT_EQ(expectedAlignment, helper.getTimestampPacketAllocatorAlignment());
 }
 
-HWTEST_F(HwHelperTest, givenHwHelperWhenGettingISAPaddingThenCorrectValueIsReturned) {
+HWTEST_F(HwHelperTest, givenHwHelperWhenAskingForDevicePreemptionSupportInScmThenReturnFalse) {
+    auto &helper = HwHelper::get(renderCoreFamily);
+
+    EXPECT_FALSE(helper.isDevicePreemptionModeTrackedInScm());
+}
+
+HWTEST2_F(HwHelperTest, givenHwHelperWhenGettingISAPaddingThenCorrectValueIsReturned, IsAtMostXeHpgCore) {
     auto &hwHelper = HwHelper::get(pDevice->getHardwareInfo().platform.eRenderCoreFamily);
     EXPECT_EQ(hwHelper.getPaddingForISAAllocation(), 512u);
+}
+
+HWTEST_F(HwHelperTest, givenForceExtendedKernelIsaSizeSetWhenGettingISAPaddingThenCorrectValueIsReturned) {
+    DebugManagerStateRestore restore;
+    auto &hwHelper = HwHelper::get(pDevice->getHardwareInfo().platform.eRenderCoreFamily);
+
+    auto defaultPadding = hwHelper.getPaddingForISAAllocation();
+    for (int32_t valueToTest : {0, 1, 2, 10}) {
+        DebugManager.flags.ForceExtendedKernelIsaSize.set(valueToTest);
+        EXPECT_EQ(hwHelper.getPaddingForISAAllocation(), defaultPadding + MemoryConstants::pageSize * valueToTest);
+    }
 }
 
 HWTEST_F(HwHelperTest, WhenSettingRenderSurfaceStateForBufferThenL1CachePolicyIsSet) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     using SURFACE_TYPE = typename RENDER_SURFACE_STATE::SURFACE_TYPE;
-    class mockHwHelperHw : public HwHelperHw<FamilyType> {
+    class MockHwHelperHw : public HwHelperHw<FamilyType> {
       public:
         bool called = false;
         using HwHelperHw<FamilyType>::HwHelperHw;
-        mockHwHelperHw() {}
+        MockHwHelperHw() {}
         void setL1CachePolicy(bool useL1Cache, typename FamilyType::RENDER_SURFACE_STATE *surfaceState, const HardwareInfo *hwInfo) override {
             HwHelperHw<FamilyType>::setL1CachePolicy(useL1Cache, surfaceState, hwInfo);
             called = true;
         }
     };
 
-    mockHwHelperHw helper;
+    MockHwHelperHw helper;
     void *stateBuffer = alignedMalloc(sizeof(RENDER_SURFACE_STATE), sizeof(RENDER_SURFACE_STATE));
     ASSERT_NE(nullptr, stateBuffer);
     memset(stateBuffer, 0, sizeof(RENDER_SURFACE_STATE));
@@ -117,13 +136,13 @@ HWTEST_F(HwHelperTest, WhenSettingRenderSurfaceStateForBufferThenL1CachePolicyIs
     uint32_t pitch = 0x40;
     SURFACE_TYPE type = RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_BUFFER;
 
-    helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, stateBuffer, size, addr, offset, pitch, nullptr, false, type, false,
-                                          false);
+    helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, offset, pitch, nullptr, false, type, false,
+                                                   false);
     ASSERT_EQ(helper.called, true);
     helper.called = false;
 
-    helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, stateBuffer, size, addr, offset, pitch, nullptr, false, type, false,
-                                          true);
+    helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, offset, pitch, nullptr, false, type, false,
+                                                   true);
     ASSERT_EQ(helper.called, true);
     alignedFree(stateBuffer);
 }
@@ -278,9 +297,9 @@ HWTEST_F(PipeControlHelperTests, givenPostSyncWriteTimestampModeWhenHelperIsUsed
     HardwareInfo hardwareInfo = *defaultHwInfo;
 
     PipeControlArgs args;
-    MemorySynchronizationCommands<FamilyType>::addPipeControlAndProgramPostSyncOperation(
-        stream, PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, address, immediateData, hardwareInfo, args);
-    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForPipeControlWithPostSyncOperation(hardwareInfo) - sizeof(PIPE_CONTROL);
+    MemorySynchronizationCommands<FamilyType>::addBarrierWithPostSyncOperation(
+        stream, PostSyncMode::Timestamp, address, immediateData, hardwareInfo, args);
+    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hardwareInfo) - sizeof(PIPE_CONTROL);
     auto pipeControlLocationSize = additionalPcSize - MemorySynchronizationCommands<FamilyType>::getSizeForSingleAdditionalSynchronization(hardwareInfo);
     auto pipeControl = genCmdCast<PIPE_CONTROL *>(ptrOffset(stream.getCpuBase(), pipeControlLocationSize));
     ASSERT_NE(nullptr, pipeControl);
@@ -302,7 +321,7 @@ HWTEST_F(PipeControlHelperTests, givenDcFlushNotAllowedWhenProgrammingPipeContro
     PipeControlArgs args;
     args.dcFlushEnable = true;
 
-    MemorySynchronizationCommands<FamilyType>::addPipeControl(stream, args);
+    MemorySynchronizationCommands<FamilyType>::addSingleBarrier(stream, args);
 
     auto pipeControl = genCmdCast<PIPE_CONTROL *>(stream.getCpuBase());
     ASSERT_NE(nullptr, pipeControl);
@@ -327,9 +346,9 @@ HWTEST_F(PipeControlHelperTests, givenPostSyncWriteImmediateDataModeWhenHelperIs
     HardwareInfo hardwareInfo = *defaultHwInfo;
 
     PipeControlArgs args;
-    MemorySynchronizationCommands<FamilyType>::addPipeControlAndProgramPostSyncOperation(
-        stream, PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, address, immediateData, hardwareInfo, args);
-    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForPipeControlWithPostSyncOperation(hardwareInfo) - sizeof(PIPE_CONTROL);
+    MemorySynchronizationCommands<FamilyType>::addBarrierWithPostSyncOperation(
+        stream, PostSyncMode::ImmediateData, address, immediateData, hardwareInfo, args);
+    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hardwareInfo) - sizeof(PIPE_CONTROL);
     auto pipeControlLocationSize = additionalPcSize - MemorySynchronizationCommands<FamilyType>::getSizeForSingleAdditionalSynchronization(hardwareInfo);
     auto pipeControl = genCmdCast<PIPE_CONTROL *>(ptrOffset(stream.getCpuBase(), pipeControlLocationSize));
     ASSERT_NE(nullptr, pipeControl);
@@ -357,9 +376,9 @@ HWTEST_F(PipeControlHelperTests, givenNotifyEnableArgumentIsTrueWhenHelperIsUsed
 
     PipeControlArgs args;
     args.notifyEnable = true;
-    MemorySynchronizationCommands<FamilyType>::addPipeControlAndProgramPostSyncOperation(
-        stream, PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, address, immediateData, hardwareInfo, args);
-    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForPipeControlWithPostSyncOperation(hardwareInfo) - sizeof(PIPE_CONTROL);
+    MemorySynchronizationCommands<FamilyType>::addBarrierWithPostSyncOperation(
+        stream, PostSyncMode::ImmediateData, address, immediateData, hardwareInfo, args);
+    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hardwareInfo) - sizeof(PIPE_CONTROL);
     auto pipeControlLocationSize = additionalPcSize - MemorySynchronizationCommands<FamilyType>::getSizeForSingleAdditionalSynchronization(hardwareInfo);
     auto pipeControl = genCmdCast<PIPE_CONTROL *>(ptrOffset(stream.getCpuBase(), pipeControlLocationSize));
     ASSERT_NE(nullptr, pipeControl);
@@ -372,6 +391,42 @@ HWTEST_F(PipeControlHelperTests, WhenIsDcFlushAllowedIsCalledThenCorrectResultIs
     auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
     EXPECT_FALSE(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(false, *defaultHwInfo));
     EXPECT_EQ(hwInfoConfig.isDcFlushAllowed(), MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo));
+}
+
+HWTEST_F(PipeControlHelperTests, WhenPipeControlPostSyncTimestampUsedThenCorrectPostSyncUsed) {
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+
+    LinearStream stream(buffer.get(), 128);
+    uint64_t address = 0x1234567887654320;
+    uint64_t immediateData = 0x0;
+
+    PipeControlArgs args;
+    MemorySynchronizationCommands<FamilyType>::addSingleBarrier(
+        stream, PostSyncMode::Timestamp, address, immediateData, args);
+    auto pipeControl = genCmdCast<PIPE_CONTROL *>(stream.getCpuBase());
+    ASSERT_NE(nullptr, pipeControl);
+    EXPECT_EQ(address, NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControl));
+    EXPECT_EQ(immediateData, pipeControl->getImmediateData());
+    EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_TIMESTAMP, pipeControl->getPostSyncOperation());
+}
+
+HWTEST_F(PipeControlHelperTests, WhenPipeControlPostSyncWriteImmediateDataUsedThenCorrectPostSyncUsed) {
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+
+    LinearStream stream(buffer.get(), 128);
+    uint64_t address = 0x1234567887654320;
+    uint64_t immediateData = 0x1234;
+
+    PipeControlArgs args;
+    MemorySynchronizationCommands<FamilyType>::addSingleBarrier(
+        stream, PostSyncMode::ImmediateData, address, immediateData, args);
+    auto pipeControl = genCmdCast<PIPE_CONTROL *>(stream.getCpuBase());
+    ASSERT_NE(nullptr, pipeControl);
+    EXPECT_EQ(address, NEO::UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControl));
+    EXPECT_EQ(immediateData, pipeControl->getImmediateData());
+    EXPECT_EQ(PIPE_CONTROL::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA, pipeControl->getPostSyncOperation());
 }
 
 TEST(HwInfoTest, givenHwInfoWhenChosenEngineTypeQueriedThenDefaultIsReturned) {
@@ -410,7 +465,7 @@ HWTEST_F(HwHelperTest, givenCreatedSurfaceStateBufferWhenNoAllocationProvidedThe
     size_t offset = 0x1000;
     uint32_t pitch = 0x40;
     SURFACE_TYPE type = RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_BUFFER;
-    helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, stateBuffer, size, addr, offset, pitch, nullptr, false, type, true, false);
+    helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, offset, pitch, nullptr, false, type, true, false);
 
     RENDER_SURFACE_STATE *state = reinterpret_cast<RENDER_SURFACE_STATE *>(stateBuffer);
     EXPECT_EQ(length.SurfaceState.Depth + 1u, state->getDepth());
@@ -426,7 +481,7 @@ HWTEST_F(HwHelperTest, givenCreatedSurfaceStateBufferWhenNoAllocationProvidedThe
     size = 0x1003;
     length.Length = static_cast<uint32_t>(alignUp(size, 4) - 1);
     bool isReadOnly = false;
-    helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, nullptr, isReadOnly, type, true, false);
+    helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, nullptr, isReadOnly, type, true, false);
     EXPECT_EQ(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED), state->getMemoryObjectControlState());
     EXPECT_EQ(length.SurfaceState.Depth + 1u, state->getDepth());
     EXPECT_EQ(length.SurfaceState.Width + 1u, state->getWidth());
@@ -436,7 +491,7 @@ HWTEST_F(HwHelperTest, givenCreatedSurfaceStateBufferWhenNoAllocationProvidedThe
     size = 0x1000;
     addr = 0x2001;
     length.Length = static_cast<uint32_t>(size - 1);
-    helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, nullptr, isReadOnly, type, true, false);
+    helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, nullptr, isReadOnly, type, true, false);
     EXPECT_EQ(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED), state->getMemoryObjectControlState());
     EXPECT_EQ(length.SurfaceState.Depth + 1u, state->getDepth());
     EXPECT_EQ(length.SurfaceState.Width + 1u, state->getWidth());
@@ -447,7 +502,7 @@ HWTEST_F(HwHelperTest, givenCreatedSurfaceStateBufferWhenNoAllocationProvidedThe
     size = 0x1005;
     length.Length = static_cast<uint32_t>(alignUp(size, 4) - 1);
     isReadOnly = true;
-    helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, nullptr, isReadOnly, type, true, false);
+    helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, nullptr, isReadOnly, type, true, false);
     EXPECT_EQ(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER), state->getMemoryObjectControlState());
     EXPECT_EQ(length.SurfaceState.Depth + 1u, state->getDepth());
     EXPECT_EQ(length.SurfaceState.Width + 1u, state->getWidth());
@@ -480,9 +535,9 @@ HWTEST_F(HwHelperTest, givenCreatedSurfaceStateBufferWhenAllocationProvidedThenU
     size_t allocSize = size;
     length.Length = static_cast<uint32_t>(allocSize - 1);
     GraphicsAllocation allocation(0, AllocationType::UNKNOWN, cpuAddr, gpuAddr, 0u, allocSize, MemoryPool::MemoryNull, 0u);
-    allocation.setDefaultGmm(new Gmm(pDevice->getGmmClientContext(), allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
+    allocation.setDefaultGmm(new Gmm(pDevice->getGmmHelper(), allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
     SURFACE_TYPE type = RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_BUFFER;
-    helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, &allocation, false, type, true, false);
+    helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, &allocation, false, type, true, false);
     EXPECT_EQ(length.SurfaceState.Depth + 1u, state->getDepth());
     EXPECT_EQ(length.SurfaceState.Width + 1u, state->getWidth());
     EXPECT_EQ(length.SurfaceState.Height + 1u, state->getHeight());
@@ -517,10 +572,10 @@ HWTEST_F(HwHelperTest, givenCreatedSurfaceStateBufferWhenGmmAndAllocationCompres
     uint64_t gpuAddr = 0x4000u;
     size_t allocSize = size;
     GraphicsAllocation allocation(0, AllocationType::BUFFER, cpuAddr, gpuAddr, 0u, allocSize, MemoryPool::MemoryNull, 0u);
-    allocation.setDefaultGmm(new Gmm(rootDeviceEnvironment.getGmmClientContext(), allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
+    allocation.setDefaultGmm(new Gmm(rootDeviceEnvironment.getGmmHelper(), allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
     allocation.getDefaultGmm()->isCompressionEnabled = true;
     SURFACE_TYPE type = RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_BUFFER;
-    helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, &allocation, false, type, false, false);
+    helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, &allocation, false, type, false, false);
     EXPECT_EQ(RENDER_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT, state->getCoherencyType());
     EXPECT_TRUE(EncodeSurfaceState<FamilyType>::isAuxModeEnabled(state, allocation.getDefaultGmm()));
 
@@ -549,9 +604,9 @@ HWTEST_F(HwHelperTest, givenCreatedSurfaceStateBufferWhenGmmCompressionDisabledA
     uint64_t gpuAddr = 0x4000u;
     size_t allocSize = size;
     GraphicsAllocation allocation(0, AllocationType::BUFFER, cpuAddr, gpuAddr, 0u, allocSize, MemoryPool::MemoryNull, 1);
-    allocation.setDefaultGmm(new Gmm(rootDeviceEnvironment.getGmmClientContext(), allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
+    allocation.setDefaultGmm(new Gmm(rootDeviceEnvironment.getGmmHelper(), allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
     SURFACE_TYPE type = RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_BUFFER;
-    helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, &allocation, false, type, false, false);
+    helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, &allocation, false, type, false, false);
     EXPECT_EQ(UnitTestHelper<FamilyType>::getCoherencyTypeSupported(RENDER_SURFACE_STATE::COHERENCY_TYPE_IA_COHERENT), state->getCoherencyType());
     EXPECT_EQ(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE, state->getAuxiliarySurfaceMode());
 
@@ -582,9 +637,9 @@ HWTEST_F(HwHelperTest, givenOverrideMocsIndexForScratchSpaceWhenSurfaceStateIsPr
     uint64_t gpuAddr = 0x4000u;
     size_t allocSize = size;
     GraphicsAllocation allocation(0, AllocationType::BUFFER, cpuAddr, gpuAddr, 0u, allocSize, MemoryPool::MemoryNull, 1);
-    allocation.setDefaultGmm(new Gmm(rootDeviceEnvironment.getGmmClientContext(), allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
+    allocation.setDefaultGmm(new Gmm(rootDeviceEnvironment.getGmmHelper(), allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
     SURFACE_TYPE type = RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_BUFFER;
-    helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, &allocation, false, type, false, false);
+    helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, &allocation, false, type, false, false);
 
     auto mocsProgrammed = state->getMemoryObjectControlState() >> 1;
     EXPECT_EQ(1u, mocsProgrammed);
@@ -614,10 +669,10 @@ HWTEST_F(HwHelperTest, givenCreatedSurfaceStateBufferWhenGmmAndAllocationCompres
     uint64_t gpuAddr = 0x4000u;
     size_t allocSize = size;
     GraphicsAllocation allocation(0, AllocationType::BUFFER, cpuAddr, gpuAddr, 0u, allocSize, MemoryPool::MemoryNull, 1u);
-    allocation.setDefaultGmm(new Gmm(rootDeviceEnvironment.getGmmClientContext(), allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
+    allocation.setDefaultGmm(new Gmm(rootDeviceEnvironment.getGmmHelper(), allocation.getUnderlyingBuffer(), allocation.getUnderlyingBufferSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
     allocation.getDefaultGmm()->isCompressionEnabled = true;
     SURFACE_TYPE type = RENDER_SURFACE_STATE::SURFACE_TYPE_SURFTYPE_BUFFER;
-    helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, &allocation, false, type, true, false);
+    helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, 0, pitch, &allocation, false, type, true, false);
     EXPECT_EQ(UnitTestHelper<FamilyType>::getCoherencyTypeSupported(RENDER_SURFACE_STATE::COHERENCY_TYPE_IA_COHERENT), state->getCoherencyType());
     EXPECT_EQ(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_NONE, state->getAuxiliarySurfaceMode());
 
@@ -670,7 +725,7 @@ HWTEST_F(HwHelperTest, DISABLED_profilingCreationOfRenderSurfaceStateVsMemcpyOfC
 
     for (uint32_t i = 0; i < maxLoop; ++i) {
         auto t1 = std::chrono::high_resolution_clock::now();
-        helper.setRenderSurfaceStateForBuffer(rootDeviceEnvironment, surfaceStates[i], size, addr, 0, pitch, nullptr, false, type, true, false);
+        helper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, surfaceStates[i], size, addr, 0, pitch, nullptr, false, type, true, false);
         auto t2 = std::chrono::high_resolution_clock::now();
         timesCreate.push_back(t1);
         timesCreate.push_back(t2);
@@ -719,16 +774,16 @@ HWTEST_F(HwHelperTest, DISABLED_profilingCreationOfRenderSurfaceStateVsMemcpyOfC
 }
 
 HWTEST_F(HwHelperTest, WhenTestingIfL3ConfigProgrammableThenCorrectValueIsReturned) {
-    bool PreambleHelperL3Config;
+    bool preambleHelperL3Config;
     bool isL3Programmable;
     const HardwareInfo &hwInfo = *defaultHwInfo;
 
-    PreambleHelperL3Config =
+    preambleHelperL3Config =
         PreambleHelper<FamilyType>::isL3Configurable(*defaultHwInfo);
     isL3Programmable =
         HwHelperHw<FamilyType>::get().isL3Configurable(hwInfo);
 
-    EXPECT_EQ(PreambleHelperL3Config, isL3Programmable);
+    EXPECT_EQ(preambleHelperL3Config, isL3Programmable);
 }
 
 TEST(HwHelperCacheFlushTest, givenEnableCacheFlushFlagIsEnableWhenPlatformDoesNotSupportThenOverrideAndReturnSupportTrue) {
@@ -895,7 +950,7 @@ HWTEST_F(HwHelperTest, givenDebugFlagWhenCheckingIfBufferIsSuitableForCompressio
     EXPECT_TRUE(helper.isBufferSizeSuitableForCompression(KB + 1, *defaultHwInfo));
 }
 
-HWTEST_F(HwHelperTest, givenHwHelperWhenAskingForTilingSupportThenReturnValidValue) {
+HWTEST_F(HwHelperTest, givenHwHelperWhenIsLinearStoragePreferredThenReturnValidValue) {
     bool tilingSupported = UnitTestHelper<FamilyType>::tiledImagesSupported;
 
     const uint32_t numImageTypes = 6;
@@ -916,21 +971,21 @@ HWTEST_F(HwHelperTest, givenHwHelperWhenAskingForTilingSupportThenReturnValidVal
                            (imgTypes[i] == CL_MEM_OBJECT_IMAGE2D_ARRAY);
 
         // non shared context, dont force linear storage
-        EXPECT_EQ((tilingSupported & allowedType), helper.tilingAllowed(false, Image::isImage1d(imgDesc), false));
+        EXPECT_EQ((tilingSupported & allowedType), !helper.isLinearStoragePreferred(false, Image::isImage1d(imgDesc), false));
         {
             DebugManagerStateRestore restore;
             DebugManager.flags.ForceLinearImages.set(true);
             // non shared context, dont force linear storage + debug flag
-            EXPECT_FALSE(helper.tilingAllowed(false, Image::isImage1d(imgDesc), false));
+            EXPECT_TRUE(helper.isLinearStoragePreferred(false, Image::isImage1d(imgDesc), false));
         }
         // shared context, dont force linear storage
-        EXPECT_FALSE(helper.tilingAllowed(true, Image::isImage1d(imgDesc), false));
+        EXPECT_TRUE(helper.isLinearStoragePreferred(true, Image::isImage1d(imgDesc), false));
         // non shared context,  force linear storage
-        EXPECT_FALSE(helper.tilingAllowed(false, Image::isImage1d(imgDesc), true));
+        EXPECT_TRUE(helper.isLinearStoragePreferred(false, Image::isImage1d(imgDesc), true));
 
         // non shared context, dont force linear storage + create from buffer
         imgDesc.buffer = buffer.get();
-        EXPECT_FALSE(helper.tilingAllowed(false, Image::isImage1d(imgDesc), false));
+        EXPECT_TRUE(helper.isLinearStoragePreferred(false, Image::isImage1d(imgDesc), false));
     }
 }
 
@@ -939,7 +994,7 @@ HWTEST_F(HwHelperTest, WhenIsBankOverrideRequiredIsCalledThenFalseIsReturned) {
     EXPECT_FALSE(hwHelper.isBankOverrideRequired(hardwareInfo));
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, HwHelperTest, GivenVariousValuesWhenCallingGetBarriersCountFromHasBarrierThenCorrectValueIsReturned) {
+HWCMDTEST_F(IGFX_GEN8_CORE, HwHelperTest, GivenBarrierEncodingWhenCallingGetBarriersCountFromHasBarrierThenNumberOfBarriersIsReturned) {
     auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
     EXPECT_EQ(0u, hwHelper.getBarriersCountFromHasBarriers(0u));
     EXPECT_EQ(1u, hwHelper.getBarriersCountFromHasBarriers(1u));
@@ -981,79 +1036,6 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HwHelperTest, givenDefaultHwHelperHwWhenIsWorkaround
 HWTEST_F(HwHelperTest, givenDefaultHwHelperHwWhenMinimalSIMDSizeIsQueriedThen8IsReturned) {
     auto &helper = HwHelper::get(renderCoreFamily);
     EXPECT_EQ(8u, helper.getMinimalSIMDSize());
-}
-
-HWTEST_F(HwHelperTest, givenLockableAllocationWhenGettingIsBlitCopyRequiredForLocalMemoryThenCorrectValuesAreReturned) {
-    DebugManagerStateRestore restore{};
-    auto &helper = HwHelper::get(renderCoreFamily);
-    const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
-    HardwareInfo hwInfo = *defaultHwInfo;
-    hwInfo.capabilityTable.blitterOperationsSupported = true;
-
-    MockGraphicsAllocation graphicsAllocation;
-    graphicsAllocation.setAllocationType(AllocationType::BUFFER_HOST_MEMORY);
-    EXPECT_TRUE(GraphicsAllocation::isLockable(graphicsAllocation.getAllocationType()));
-    graphicsAllocation.overrideMemoryPool(MemoryPool::LocalMemory);
-
-    auto expectedDefaultValue = (hwInfoConfig.getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed);
-    EXPECT_EQ(expectedDefaultValue, helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-
-    DebugManager.flags.ForceLocalMemoryAccessMode.set(0);
-    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-    DebugManager.flags.ForceLocalMemoryAccessMode.set(1);
-    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-
-    DebugManager.flags.ForceLocalMemoryAccessMode.set(3);
-    EXPECT_TRUE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-    hwInfo.capabilityTable.blitterOperationsSupported = false;
-    EXPECT_TRUE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-
-    graphicsAllocation.overrideMemoryPool(MemoryPool::System64KBPages);
-    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-    hwInfo.capabilityTable.blitterOperationsSupported = true;
-    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-}
-
-HWTEST_F(HwHelperTest, givenNotLockableAllocationWhenGettingIsBlitCopyRequiredForLocalMemoryThenCorrectValuesAreReturned) {
-    DebugManagerStateRestore restore{};
-    auto &helper = HwHelper::get(renderCoreFamily);
-    HardwareInfo hwInfo = *defaultHwInfo;
-    hwInfo.capabilityTable.blitterOperationsSupported = true;
-
-    MockGraphicsAllocation graphicsAllocation;
-    graphicsAllocation.setAllocationType(AllocationType::SVM_GPU);
-    EXPECT_FALSE(GraphicsAllocation::isLockable(graphicsAllocation.getAllocationType()));
-    graphicsAllocation.overrideMemoryPool(MemoryPool::LocalMemory);
-
-    MockGmm mockGmm(pDevice->getGmmClientContext(), nullptr, 100, 100, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
-    mockGmm.resourceParams.Flags.Info.NotLockable = true;
-    graphicsAllocation.setDefaultGmm(&mockGmm);
-
-    EXPECT_TRUE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-
-    DebugManager.flags.ForceLocalMemoryAccessMode.set(0);
-    EXPECT_TRUE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-    DebugManager.flags.ForceLocalMemoryAccessMode.set(1);
-    EXPECT_TRUE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-
-    DebugManager.flags.ForceLocalMemoryAccessMode.set(3);
-    EXPECT_TRUE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-    hwInfo.capabilityTable.blitterOperationsSupported = false;
-    EXPECT_TRUE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-
-    graphicsAllocation.overrideMemoryPool(MemoryPool::System64KBPages);
-    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-    hwInfo.capabilityTable.blitterOperationsSupported = true;
-    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(hwInfo, graphicsAllocation));
-}
-
-HWTEST2_F(HwHelperTest, givenDefaultHwHelperHwWhenGettingIsBlitCopyRequiredForLocalMemoryThenFalseIsReturned, IsAtMostGen11) {
-    auto &helper = HwHelper::get(renderCoreFamily);
-    MockGraphicsAllocation graphicsAllocation;
-    graphicsAllocation.overrideMemoryPool(MemoryPool::LocalMemory);
-    graphicsAllocation.setAllocationType(AllocationType::BUFFER_HOST_MEMORY);
-
-    EXPECT_FALSE(helper.isBlitCopyRequiredForLocalMemory(*defaultHwInfo, graphicsAllocation));
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, HwHelperTest, WhenIsFusedEuDispatchEnabledIsCalledThenFalseIsReturned) {
@@ -1297,7 +1279,7 @@ TEST_F(HwHelperTest, givenGenHelperWhenKernelArgumentIsNotPureStatefulThenRequir
 
 HWTEST_F(HwHelperTest, whenSetCompressedFlagThenProperFlagSet) {
     auto &hwHelper = HwHelper::get(renderCoreFamily);
-    auto gmm = std::make_unique<MockGmm>(pDevice->getGmmClientContext());
+    auto gmm = std::make_unique<MockGmm>(pDevice->getGmmHelper());
     gmm->resourceParams.Flags.Info.RenderCompressed = 0;
 
     hwHelper.applyRenderCompressionFlag(*gmm, 1);
@@ -1476,6 +1458,12 @@ HWTEST_F(HwHelperTest, GivenHwInfoWhenGetBatchBufferEndReferenceCalledThenCorrec
     EXPECT_EQ(hwHelper.getBatchBufferEndReference(), reinterpret_cast<const void *>(&FamilyType::cmdInitBatchBufferEnd));
 }
 
+HWTEST_F(HwHelperTest, givenHwHelperWhenAskingForPatIndexWaThenReturnFalse) {
+    const auto &hwHelper = HwHelper::get(renderCoreFamily);
+
+    EXPECT_FALSE(hwHelper.isPatIndexFallbackWaRequired());
+}
+
 HWTEST_F(HwHelperTest, givenHwHelperWhenPassingCopyEngineTypeThenItsCopyOnly) {
     EXPECT_TRUE(EngineHelper::isCopyOnlyEngineType(EngineGroupType::Copy));
 }
@@ -1486,4 +1474,10 @@ HWTEST_F(HwHelperTest, givenHwHelperWhenPassingLinkedCopyEngineTypeThenItsCopyOn
 
 HWTEST_F(HwHelperTest, givenHwHelperWhenPassingComputeEngineTypeThenItsNotCopyOnly) {
     EXPECT_FALSE(EngineHelper::isCopyOnlyEngineType(EngineGroupType::Compute));
+}
+
+using LogicalStateHelperTest = ::testing::Test;
+
+HWTEST_F(LogicalStateHelperTest, whenCreatingLogicalStateHelperThenReturnNullptr) {
+    EXPECT_EQ(nullptr, LogicalStateHelper::create<FamilyType>());
 }

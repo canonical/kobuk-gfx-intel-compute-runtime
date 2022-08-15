@@ -16,7 +16,7 @@
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 
-#include "CL/cl_ext_intel.h"
+#include "CL/cl_ext.h"
 #include "gtest/gtest.h"
 #include "memory_properties_flags.h"
 
@@ -407,6 +407,18 @@ TEST_F(MemoryPropertiesHelperTests, givenMemFlagsWithFlagsAndPropertiesWhenParsi
                                                                     MemoryPropertiesHelper::ObjType::UNKNOWN, context));
         EXPECT_EQ(testInput.expectedResult, flags);
     }
+}
+
+TEST_F(MemoryPropertiesHelperTests, givenDmaBufWhenParsePropertiesThenHandleIsSet) {
+    cl_mem_properties_intel properties[] = {
+        CL_EXTERNAL_MEMORY_HANDLE_DMA_BUF_KHR,
+        0x1234u,
+        0};
+
+    EXPECT_TRUE(ClMemoryPropertiesHelper::parseMemoryProperties(properties, memoryProperties, flags, flagsIntel, allocflags,
+                                                                MemoryPropertiesHelper::ObjType::BUFFER, context));
+
+    EXPECT_EQ(memoryProperties.handle, 0x1234u);
 }
 
 TEST_F(MemoryPropertiesHelperTests, WhenAdjustingDeviceBitfieldThenCorrectBitfieldIsReturned) {

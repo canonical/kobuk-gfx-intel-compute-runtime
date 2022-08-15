@@ -13,7 +13,6 @@
 #include "shared/source/helpers/preamble.h"
 #include "shared/source/helpers/register_offsets.h"
 
-#include "hw_cmds.h"
 #include "reg_configs_common.h"
 
 #include <cstddef>
@@ -58,7 +57,7 @@ size_t PreambleHelper<GfxFamily>::getCmdSizeForPipelineSelect(const HardwareInfo
     size_t size = 0;
     using PIPELINE_SELECT = typename GfxFamily::PIPELINE_SELECT;
     size += sizeof(PIPELINE_SELECT);
-    if (MemorySynchronizationCommands<GfxFamily>::isPipeControlPriorToPipelineSelectWArequired(hwInfo)) {
+    if (MemorySynchronizationCommands<GfxFamily>::isBarrierlPriorToPipelineSelectWaRequired(hwInfo)) {
         size += sizeof(PIPE_CONTROL);
     }
     return size;
@@ -66,9 +65,9 @@ size_t PreambleHelper<GfxFamily>::getCmdSizeForPipelineSelect(const HardwareInfo
 
 template <typename GfxFamily>
 void PreambleHelper<GfxFamily>::programPreamble(LinearStream *pCommandStream, Device &device, uint32_t l3Config,
-                                                GraphicsAllocation *preemptionCsr) {
+                                                GraphicsAllocation *preemptionCsr, LogicalStateHelper *logicalStateHelper) {
     programL3(pCommandStream, l3Config);
-    programPreemption(pCommandStream, device, preemptionCsr);
+    programPreemption(pCommandStream, device, preemptionCsr, logicalStateHelper);
     if (device.isDebuggerActive()) {
         programKernelDebugging(pCommandStream);
     }
@@ -77,8 +76,8 @@ void PreambleHelper<GfxFamily>::programPreamble(LinearStream *pCommandStream, De
 }
 
 template <typename GfxFamily>
-void PreambleHelper<GfxFamily>::programPreemption(LinearStream *pCommandStream, Device &device, GraphicsAllocation *preemptionCsr) {
-    PreemptionHelper::programCsrBaseAddress<GfxFamily>(*pCommandStream, device, preemptionCsr);
+void PreambleHelper<GfxFamily>::programPreemption(LinearStream *pCommandStream, Device &device, GraphicsAllocation *preemptionCsr, LogicalStateHelper *logicalStateHelper) {
+    PreemptionHelper::programCsrBaseAddress<GfxFamily>(*pCommandStream, device, preemptionCsr, logicalStateHelper);
 }
 
 template <typename GfxFamily>

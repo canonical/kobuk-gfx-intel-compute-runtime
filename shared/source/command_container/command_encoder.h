@@ -14,20 +14,18 @@
 #include "shared/source/helpers/definitions/mi_flush_args.h"
 #include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/helpers/register_offsets.h"
-#include "shared/source/helpers/simd_helper.h"
-#include "shared/source/helpers/vec.h"
 #include "shared/source/kernel/dispatch_kernel_encoder_interface.h"
 #include "shared/source/kernel/kernel_arg_descriptor.h"
 
 #include "encode_surface_state_args.h"
 
-#include <algorithm>
-
 namespace NEO {
 
 class BindlessHeapsHelper;
 class GmmHelper;
+class LogicalStateHelper;
 class IndirectHeap;
+class LogicalStateHelper;
 class Gmm;
 struct HardwareInfo;
 struct StateComputeModeProperties;
@@ -36,17 +34,24 @@ struct EncodeDispatchKernelArgs {
     uint64_t eventAddress = 0ull;
     Device *device = nullptr;
     DispatchKernelEncoderI *dispatchInterface = nullptr;
-    const void *pThreadGroupDimensions = nullptr;
+    const void *threadGroupDimensions = nullptr;
     PreemptionMode preemptionMode = PreemptionMode::Initial;
     uint32_t partitionCount = 0u;
     bool isIndirect = false;
     bool isPredicate = false;
     bool isTimestampEvent = false;
-    bool L3FlushEnable = false;
     bool requiresUncachedMocs = false;
     bool useGlobalAtomics = false;
     bool isInternal = false;
     bool isCooperative = false;
+    bool isHostScopeSignalEvent = false;
+    bool isKernelUsingSystemAllocation = false;
+    bool isKernelDispatchedFromImmediateCmdList = false;
+};
+
+struct EncodeWalkerArgs {
+    KernelExecutionType kernelExecutionType = KernelExecutionType::Default;
+    bool requiredSystemFence = false;
 };
 
 template <typename GfxFamily>
@@ -58,11 +63,13 @@ struct EncodeDispatchKernel {
     static void encode(CommandContainer &container,
                        EncodeDispatchKernelArgs &args);
 
-    static void encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd, KernelExecutionType kernelExecutionType);
+    static void encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd, const EncodeWalkerArgs &walkerArgs);
 
-    static void appendAdditionalIDDFields(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, const HardwareInfo &hwInfo, const uint32_t threadsPerThreadGroup, uint32_t slmTotalSize, SlmPolicy slmPolicy);
+    static void appendAdditionalIDDFields(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, const HardwareInfo &hwInfo,
+                                          const uint32_t threadsPerThreadGroup, uint32_t slmTotalSize, SlmPolicy slmPolicy);
 
-    static void setGrfInfo(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, uint32_t numGrf, const size_t &sizeCrossThreadData, const size_t &sizePerThreadData);
+    static void setGrfInfo(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, uint32_t numGrf, const size_t &sizeCrossThreadData,
+                           const size_t &sizePerThreadData, const HardwareInfo &hwInfo);
 
     static void *getInterfaceDescriptor(CommandContainer &container, uint32_t &iddOffset);
 
@@ -86,7 +93,8 @@ struct EncodeDispatchKernel {
                                  bool localIdsGenerationByRuntime,
                                  bool inlineDataProgrammingRequired,
                                  bool isIndirect,
-                                 uint32_t requiredWorkGroupOrder);
+                                 uint32_t requiredWorkGroupOrder,
+                                 const HardwareInfo &hwInfo);
 
     static void programBarrierEnable(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t value, const HardwareInfo &hwInfo);
 
@@ -97,6 +105,10 @@ struct EncodeDispatchKernel {
     static void adjustTimestampPacket(WALKER_TYPE &walkerCmd, const HardwareInfo &hwInfo);
 
     static void setupPostSyncMocs(WALKER_TYPE &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment);
+
+    static void adjustWalkOrder(WALKER_TYPE &walkerCmd, uint32_t requiredWorkGroupOrder, const HardwareInfo &hwInfo);
+
+    static constexpr bool shouldUpdateGlobalAtomics(bool &currentVal, bool refVal, bool updateCurrent);
 };
 
 template <typename GfxFamily>
@@ -159,7 +171,8 @@ struct EncodeMathMMIO {
     static void encodeBitwiseAndVal(CommandContainer &container,
                                     uint32_t regOffset,
                                     uint32_t immVal,
-                                    uint64_t dstAddress);
+                                    uint64_t dstAddress,
+                                    bool workloadPartition);
 
     static void encodeAlu(MI_MATH_ALU_INST_INLINE *pAluParam, AluRegisters srcA, AluRegisters srcB, AluRegisters op, AluRegisters dest, AluRegisters result);
 
@@ -233,7 +246,7 @@ struct EncodeStateBaseAddress {
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
     static void encode(CommandContainer &container, STATE_BASE_ADDRESS &sbaCmd, bool multiOsContextCapable);
     static void encode(CommandContainer &container, STATE_BASE_ADDRESS &sbaCmd, uint32_t statelessMocsIndex, bool useGlobalAtomics, bool multiOsContextCapable);
-    static void setIohAddressForDebugger(NEO::Debugger::SbaAddresses &sbaAddress, const STATE_BASE_ADDRESS &sbaCmd);
+    static void setSbaAddressesForDebugger(NEO::Debugger::SbaAddresses &sbaAddress, const STATE_BASE_ADDRESS &sbaCmd);
     static size_t getRequiredSizeForStateBaseAddress(Device &device, CommandContainer &container);
 };
 
@@ -242,13 +255,9 @@ struct EncodeStoreMMIO {
     using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
 
     static const size_t size = sizeof(MI_STORE_REGISTER_MEM);
-    static void encode(LinearStream &csr, uint32_t offset, uint64_t address);
-    static void remapOffset(MI_STORE_REGISTER_MEM *pStoreRegMem);
-};
-template <typename GfxFamily>
-struct AppendStoreMMIO {
-    using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
-    static void appendRemap(MI_STORE_REGISTER_MEM *cmd);
+    static void encode(LinearStream &csr, uint32_t offset, uint64_t address, bool workloadPartition);
+    static void encode(MI_STORE_REGISTER_MEM *cmdBuffer, uint32_t offset, uint64_t address, bool workloadPartition);
+    static void appendFlags(MI_STORE_REGISTER_MEM *storeRegMem, bool workloadPartition);
 };
 
 template <typename GfxFamily>
@@ -295,8 +304,8 @@ struct EncodeComputeMode {
     static size_t getCmdSizeForComputeMode(const HardwareInfo &hwInfo, bool hasSharedHandles, bool isRcs);
     static void programComputeModeCommandWithSynchronization(LinearStream &csr, StateComputeModeProperties &properties,
                                                              const PipelineSelectArgs &args, bool hasSharedHandles,
-                                                             const HardwareInfo &hwInfo, bool isRcs);
-    static void programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo);
+                                                             const HardwareInfo &hwInfo, bool isRcs, LogicalStateHelper *logicalStateHelper);
+    static void programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo, LogicalStateHelper *logicalStateHelper);
 
     static void adjustPipelineSelect(CommandContainer &container, const NEO::KernelDescriptor &kernelDescriptor);
 };
@@ -312,6 +321,8 @@ struct EncodeWA {
     static void setAdditionalPipeControlFlagsForNonPipelineStateCommand(PipeControlArgs &args);
 
     static void addPipeControlBeforeStateBaseAddress(LinearStream &commandStream, const HardwareInfo &hwInfo, bool isRcs);
+
+    static void adjustCompressionFormatForPlanarImage(uint32_t &compressionFormat, GMM_YUV_PLANE_ENUM plane);
 };
 
 template <typename GfxFamily>
@@ -393,7 +404,7 @@ struct EncodeMiFlushDW {
 template <typename GfxFamily>
 struct EncodeMemoryPrefetch {
     static void programMemoryPrefetch(LinearStream &commandStream, const GraphicsAllocation &graphicsAllocation, uint32_t size, size_t offset, const HardwareInfo &hwInfo);
-    static size_t getSizeForMemoryPrefetch(size_t size);
+    static size_t getSizeForMemoryPrefetch(size_t size, const HardwareInfo &hwInfo);
 };
 
 template <typename GfxFamily>
@@ -407,7 +418,7 @@ struct EncodeMiArbCheck {
 
 template <typename GfxFamily>
 struct EncodeEnableRayTracing {
-    static void programEnableRayTracing(LinearStream &commandStream, GraphicsAllocation &backBuffer);
+    static void programEnableRayTracing(LinearStream &commandStream, uint64_t backBuffer);
     static void append3dStateBtd(void *ptr3dStateBtd);
 };
 
@@ -437,6 +448,13 @@ struct EncodeStoreMemory {
     static size_t getStoreDataImmSize() {
         return sizeof(MI_STORE_DATA_IMM);
     }
+};
+
+template <typename GfxFamily>
+struct EncodeMemoryFence {
+    static size_t getSystemMemoryFenceSize();
+
+    static void encodeSystemMemoryFence(LinearStream &commandStream, const GraphicsAllocation *globalFenceAllocation, LogicalStateHelper *logicalStateHelper);
 };
 
 } // namespace NEO

@@ -10,7 +10,7 @@
 #include "shared/test/common/libult/linux/drm_mock.h"
 #include "shared/test/common/mocks/linux/mock_drm_command_stream_receiver.h"
 #include "shared/test/common/mocks/linux/mock_drm_memory_manager.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
@@ -141,9 +141,9 @@ HWTEST_F(clCreateCommandQueueWithPropertiesLinux, givenPropertiesWithClQueueSlic
                        mdevice->getDevice());
     auto expectedSliceMask = drm->getSliceMask(newSliceCount);
     EXPECT_EQ(expectedSliceMask, drm->storedParamSseu);
-    drm_i915_gem_context_param_sseu sseu = {};
+    GemContextParamSseu sseu = {};
     EXPECT_EQ(0, drm->getQueueSliceCount(&sseu));
-    EXPECT_EQ(expectedSliceMask, sseu.slice_mask);
+    EXPECT_EQ(expectedSliceMask, sseu.sliceMask);
     EXPECT_EQ(newSliceCount, mockCsr->lastSentSliceCount);
 
     retVal = clReleaseCommandQueue(cmdQ);
@@ -188,9 +188,9 @@ HWTEST_F(clCreateCommandQueueWithPropertiesLinux, givenSameSliceCountAsRecentlyS
                        mdevice->getDevice());
     auto expectedSliceMask = drm->getSliceMask(newSliceCount);
     EXPECT_NE(expectedSliceMask, drm->storedParamSseu);
-    drm_i915_gem_context_param_sseu sseu = {};
+    GemContextParamSseu sseu = {};
     EXPECT_EQ(0, drm->getQueueSliceCount(&sseu));
-    EXPECT_NE(expectedSliceMask, sseu.slice_mask);
+    EXPECT_NE(expectedSliceMask, sseu.sliceMask);
 
     retVal = clReleaseCommandQueue(cmdQ);
     EXPECT_EQ(CL_SUCCESS, retVal);

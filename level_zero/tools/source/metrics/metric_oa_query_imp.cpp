@@ -19,6 +19,7 @@
 #include "level_zero/core/source/cmdlist/cmdlist_imp.h"
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/device/device_imp.h"
+#include "level_zero/core/source/driver/driver_handle.h"
 #include "level_zero/tools/source/metrics/metric_oa_enumeration_imp.h"
 #include "level_zero/tools/source/metrics/metric_oa_source.h"
 
@@ -170,7 +171,6 @@ void MetricsLibrary::release() {
     api = {};
     callbacks = {};
     context = {};
-    isWorkloadPartitionEnabled = false;
     initializationState = ZE_RESULT_ERROR_UNINITIALIZED;
 }
 
@@ -357,8 +357,6 @@ MetricsLibrary::createConfiguration(const zet_metric_group_handle_t metricGroupH
     // Metrics library configuration creation data.
     ConfigurationHandle_1_0 handle = {};
     ConfigurationCreateData_1_0 handleData = {};
-    handleData.HandleContext = context;
-    handleData.Type = ObjectType::ConfigurationHwCountersOa;
 
     // Check supported sampling types.
     const bool validSampling =
@@ -370,6 +368,9 @@ MetricsLibrary::createConfiguration(const zet_metric_group_handle_t metricGroupH
     const bool validActivate = isInitialized() && validSampling && metricGroup->activateMetricSet();
 
     if (validActivate) {
+        handleData.HandleContext = context;
+        handleData.Type = ObjectType::ConfigurationHwCountersOa;
+
         // Use metrics library to create configuration for the activated metric group.
         api.ConfigurationCreate(&handleData, &handle);
 
@@ -461,8 +462,6 @@ ze_result_t OaMetricQueryPoolImp::metricQueryPoolCreate(zet_context_handle_t hCo
 
             auto &subDevice = deviceImp.subDevices[i];
             auto &subDeviceMetricSource = subDevice->getMetricDeviceContext().getMetricSource<OaMetricSourceImp>();
-
-            subDeviceMetricSource.getMetricsLibrary().enableWorkloadPartition();
 
             zet_metric_group_handle_t metricGroupHandle = useMetricGroupSubDevice
                                                               ? metricGroups[subDeviceMetricSource.getSubDeviceIndex()]

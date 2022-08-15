@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -15,11 +15,15 @@ enum class MemoryCompressionState;
 class GmmHelper;
 class IndirectHeap;
 class LinearStream;
+class LogicalStateHelper;
 struct DispatchFlags;
+struct HardwareInfo;
 
 template <typename GfxFamily>
 struct StateBaseAddressHelper {
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
+
+    static void *getSpaceForSbaCmd(LinearStream &cmdStream);
 
     static void programStateBaseAddress(
         STATE_BASE_ADDRESS *stateBaseAddress,
@@ -38,7 +42,8 @@ struct StateBaseAddressHelper {
         bool isMultiOsContextCapable,
         MemoryCompressionState memoryCompressionState,
         bool useGlobalAtomics,
-        bool areMultipleSubDevicesInContext);
+        bool areMultipleSubDevicesInContext,
+        LogicalStateHelper *logicalStateHelper);
 
     static void appendIohParameters(STATE_BASE_ADDRESS *stateBaseAddress, const IndirectHeap *ioh, bool useGlobalHeapsBaseAddress, uint64_t indirectObjectHeapBaseAddress);
 
@@ -54,7 +59,7 @@ struct StateBaseAddressHelper {
         bool useGlobalAtomics,
         bool areMultipleSubDevicesInContext);
 
-    static void appendExtraCacheSettings(STATE_BASE_ADDRESS *stateBaseAddress, GmmHelper *gmmHelper);
+    static void appendExtraCacheSettings(STATE_BASE_ADDRESS *stateBaseAddress, const HardwareInfo *hwInfo);
 
     static void programBindingTableBaseAddress(LinearStream &commandStream, const IndirectHeap &ssh, GmmHelper *gmmHelper);
 

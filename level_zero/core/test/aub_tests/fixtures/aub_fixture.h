@@ -5,6 +5,8 @@
  *
  */
 
+#pragma once
+
 #include "shared/source/command_stream/aub_command_stream_receiver_hw.h"
 #include "shared/source/command_stream/command_stream_receiver_simulated_common_hw.h"
 #include "shared/source/command_stream/command_stream_receiver_with_aub_dump.h"
@@ -41,9 +43,9 @@ class AUBFixtureL0 {
   public:
     AUBFixtureL0();
     virtual ~AUBFixtureL0();
-    void SetUp();
-    void SetUp(const NEO::HardwareInfo *hardwareInfo, bool debuggingEnabled);
-    void TearDown();
+    void SetUp();                                                             // NOLINT(readability-identifier-naming)
+    void SetUp(const NEO::HardwareInfo *hardwareInfo, bool debuggingEnabled); // NOLINT(readability-identifier-naming)
+    void TearDown();                                                          // NOLINT(readability-identifier-naming)
     static void prepareCopyEngines(NEO::MockDevice &device, const std::string &filename);
 
     template <typename FamilyType>

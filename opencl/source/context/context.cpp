@@ -13,7 +13,6 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/get_info.h"
 #include "shared/source/helpers/ptr_math.h"
-#include "shared/source/helpers/string.h"
 #include "shared/source/memory_manager/deferred_deleter.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
@@ -26,7 +25,6 @@
 #include "opencl/source/helpers/surface_formats.h"
 #include "opencl/source/mem_obj/image.h"
 #include "opencl/source/platform/platform.h"
-#include "opencl/source/sharings/sharing.h"
 #include "opencl/source/sharings/sharing_factory.h"
 
 #include "d3d_sharing_functions.h"
@@ -45,6 +43,8 @@ Context::Context(
 }
 
 Context::~Context() {
+    gtpinNotifyContextDestroy((cl_context)this);
+
     delete[] properties;
 
     for (auto rootDeviceIndex = 0u; rootDeviceIndex < specialQueues.size(); rootDeviceIndex++) {
@@ -61,7 +61,6 @@ Context::~Context() {
     if (memoryManager && memoryManager->isAsyncDeleterEnabled()) {
         memoryManager->getDeferredDeleter()->removeClient();
     }
-    gtpinNotifyContextDestroy((cl_context)this);
     destructorCallbacks.invoke(this);
     for (auto &device : devices) {
         device->decRefInternal();
@@ -125,7 +124,7 @@ cl_int Context::tryGetExistingMapAllocation(const void *ptr,
     return CL_SUCCESS;
 }
 
-const std::set<uint32_t> &Context::getRootDeviceIndices() const {
+const RootDeviceIndicesContainer &Context::getRootDeviceIndices() const {
     return rootDeviceIndices;
 }
 
@@ -143,7 +142,7 @@ void Context::setSpecialQueue(CommandQueue *commandQueue, uint32_t rootDeviceInd
 void Context::overrideSpecialQueueAndDecrementRefCount(CommandQueue *commandQueue, uint32_t rootDeviceIndex) {
     setSpecialQueue(commandQueue, rootDeviceIndex);
     commandQueue->setIsSpecialCommandQueue(true);
-    //decrement ref count that special queue added
+    // decrement ref count that special queue added
     this->decRefInternal();
 };
 
@@ -215,9 +214,10 @@ bool Context::createImpl(const cl_context_properties *properties,
 
     bool containsDeviceWithSubdevices = false;
     for (const auto &device : inputDevices) {
-        rootDeviceIndices.insert(device->getRootDeviceIndex());
+        rootDeviceIndices.push_back(device->getRootDeviceIndex());
         containsDeviceWithSubdevices |= device->getNumGenericSubDevices() > 1;
     }
+    rootDeviceIndices.remove_duplicates();
 
     this->driverDiagnostics = driverDiagnostics.release();
     if (rootDeviceIndices.size() > 1 && containsDeviceWithSubdevices && !DebugManager.flags.EnableMultiRootDeviceContexts.get()) {
@@ -261,7 +261,7 @@ bool Context::createImpl(const cl_context_properties *properties,
 
     for (auto &device : devices) {
         if (!specialQueues[device->getRootDeviceIndex()]) {
-            auto commandQueue = CommandQueue::create(this, device, nullptr, true, errcodeRet); // NOLINT
+            auto commandQueue = CommandQueue::create(this, device, nullptr, true, errcodeRet); // NOLINT(clang-analyzer-cplusplus.NewDelete)
             DEBUG_BREAK_IF(commandQueue == nullptr);
             overrideSpecialQueueAndDecrementRefCount(commandQueue, device->getRootDeviceIndex());
         }
@@ -457,7 +457,7 @@ Platform *Context::getPlatformFromProperties(const cl_context_properties *proper
         propertiesCurrent += 2;
         if (CL_CONTEXT_PLATFORM == propertyType) {
             Platform *pPlatform = nullptr;
-            errcode = validateObject(WithCastToInternal(reinterpret_cast<cl_platform_id>(propertyValue), &pPlatform));
+            errcode = validateObject(withCastToInternal(reinterpret_cast<cl_platform_id>(propertyValue), &pPlatform));
             return pPlatform;
         }
     }

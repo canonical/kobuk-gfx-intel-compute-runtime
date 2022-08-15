@@ -301,18 +301,18 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferRectTest, WhenCopyingBufferRect2DTh
     enqueueCopyBufferRect2D<FamilyType>();
 
     auto *cmdSBA = (STATE_BASE_ADDRESS *)cmdStateBaseAddress;
-    auto &IDD = *(INTERFACE_DESCRIPTOR_DATA *)cmdInterfaceDescriptorData;
+    auto &idd = *(INTERFACE_DESCRIPTOR_DATA *)cmdInterfaceDescriptorData;
 
     // Validate the kernel start pointer.  Technically, a kernel can start at address 0 but let's force a value.
-    auto kernelStartPointer = ((uint64_t)IDD.getKernelStartPointerHigh() << 32) + IDD.getKernelStartPointer();
+    auto kernelStartPointer = ((uint64_t)idd.getKernelStartPointerHigh() << 32) + idd.getKernelStartPointer();
     EXPECT_LE(kernelStartPointer, cmdSBA->getInstructionBufferSize() * MemoryConstants::pageSize);
 
-    EXPECT_NE(0u, IDD.getNumberOfThreadsInGpgpuThreadGroup());
-    EXPECT_NE(0u, IDD.getCrossThreadConstantDataReadLength());
-    EXPECT_NE(0u, IDD.getConstantIndirectUrbEntryReadLength());
+    EXPECT_NE(0u, idd.getNumberOfThreadsInGpgpuThreadGroup());
+    EXPECT_NE(0u, idd.getCrossThreadConstantDataReadLength());
+    EXPECT_NE(0u, idd.getConstantIndirectUrbEntryReadLength());
 }
 
-HWTEST_F(EnqueueCopyBufferRectTest, WhenCopyingBufferRect2DThenNumberOfPipelineSelectsIsOne) {
+HWTEST2_F(EnqueueCopyBufferRectTest, WhenCopyingBufferRect2DThenNumberOfPipelineSelectsIsOne, IsAtMostXeHpcCore) {
     enqueueCopyBufferRect2D<FamilyType>();
     int numCommands = getNumberOfPipelineSelectsThatEnablePipelineSelect<FamilyType>();
     EXPECT_EQ(1, numCommands);
@@ -426,18 +426,18 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueCopyBufferRectTest, WhenCopyingBufferRect3DTh
     enqueueCopyBufferRect3D<FamilyType>();
 
     auto *cmdSBA = (STATE_BASE_ADDRESS *)cmdStateBaseAddress;
-    auto &IDD = *(INTERFACE_DESCRIPTOR_DATA *)cmdInterfaceDescriptorData;
+    auto &idd = *(INTERFACE_DESCRIPTOR_DATA *)cmdInterfaceDescriptorData;
 
     // Validate the kernel start pointer.  Technically, a kernel can start at address 0 but let's force a value.
-    auto kernelStartPointer = ((uint64_t)IDD.getKernelStartPointerHigh() << 32) + IDD.getKernelStartPointer();
+    auto kernelStartPointer = ((uint64_t)idd.getKernelStartPointerHigh() << 32) + idd.getKernelStartPointer();
     EXPECT_LE(kernelStartPointer, cmdSBA->getInstructionBufferSize() * MemoryConstants::pageSize);
 
-    EXPECT_NE(0u, IDD.getNumberOfThreadsInGpgpuThreadGroup());
-    EXPECT_NE(0u, IDD.getCrossThreadConstantDataReadLength());
-    EXPECT_NE(0u, IDD.getConstantIndirectUrbEntryReadLength());
+    EXPECT_NE(0u, idd.getNumberOfThreadsInGpgpuThreadGroup());
+    EXPECT_NE(0u, idd.getCrossThreadConstantDataReadLength());
+    EXPECT_NE(0u, idd.getConstantIndirectUrbEntryReadLength());
 }
 
-HWTEST_F(EnqueueCopyBufferRectTest, WhenCopyingBufferRect3DThenNumberOfPipelineSelectsIsOne) {
+HWTEST2_F(EnqueueCopyBufferRectTest, WhenCopyingBufferRect3DThenNumberOfPipelineSelectsIsOne, IsAtMostXeHpcCore) {
     enqueueCopyBufferRect3D<FamilyType>();
     int numCommands = getNumberOfPipelineSelectsThatEnablePipelineSelect<FamilyType>();
     EXPECT_EQ(1, numCommands);

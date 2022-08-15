@@ -7,13 +7,12 @@
 
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/stream_properties.h"
+#include "shared/source/xe_hp_core/hw_cmds.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/fixtures/command_container_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_dispatch_kernel_encoder_interface.h"
 #include "shared/test/common/test_macros/test.h"
-
-#include "hw_cmds.h"
 
 using namespace NEO;
 
@@ -25,7 +24,7 @@ XE_HP_CORE_TEST_F(CommandEncodeXeHpCoreTest, whenProgrammingStateComputeModeThen
 
     StateComputeModeProperties properties;
     auto pLinearStream = std::make_unique<LinearStream>(buffer, sizeof(buffer));
-    EncodeComputeMode<FamilyType>::programComputeModeCommand(*pLinearStream, properties, *defaultHwInfo);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(*pLinearStream, properties, *defaultHwInfo, nullptr);
     auto pScm = reinterpret_cast<STATE_COMPUTE_MODE *>(pLinearStream->getCpuBase());
     auto expectedMask = FamilyType::stateComputeModeForceNonCoherentMask |
                         FamilyType::stateComputeModeLargeGrfModeMask;
@@ -36,7 +35,7 @@ XE_HP_CORE_TEST_F(CommandEncodeXeHpCoreTest, whenProgrammingStateComputeModeThen
     properties.isCoherencyRequired.value = 1;
     properties.largeGrfMode.value = 1;
     pLinearStream = std::make_unique<LinearStream>(buffer, sizeof(buffer));
-    EncodeComputeMode<FamilyType>::programComputeModeCommand(*pLinearStream, properties, *defaultHwInfo);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(*pLinearStream, properties, *defaultHwInfo, nullptr);
     pScm = reinterpret_cast<STATE_COMPUTE_MODE *>(pLinearStream->getCpuBase());
     EXPECT_EQ(expectedMask, pScm->getMaskBits());
     EXPECT_EQ(STATE_COMPUTE_MODE::FORCE_NON_COHERENT_FORCE_DISABLED, pScm->getForceNonCoherent());
@@ -53,7 +52,7 @@ XE_HP_CORE_TEST_F(CommandEncodeXeHpCoreTest, givenForceDisableMultiAtomicsWhenDe
 
     StateComputeModeProperties properties;
     LinearStream cmdStream(buffer, sizeof(buffer));
-    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo, nullptr);
     auto scmCommand = reinterpret_cast<STATE_COMPUTE_MODE *>(cmdStream.getCpuBase());
 
     uint32_t expectedMaskBits = FamilyType::stateComputeModeForceNonCoherentMask | FamilyType::stateComputeModeLargeGrfModeMask |
@@ -72,7 +71,7 @@ XE_HP_CORE_TEST_F(CommandEncodeXeHpCoreTest, givenForceDisableMultiAtomicsWhenDe
 
     StateComputeModeProperties properties;
     LinearStream cmdStream(buffer, sizeof(buffer));
-    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo, nullptr);
     auto scmCommand = reinterpret_cast<STATE_COMPUTE_MODE *>(cmdStream.getCpuBase());
 
     uint32_t expectedMaskBits = FamilyType::stateComputeModeForceNonCoherentMask | FamilyType::stateComputeModeLargeGrfModeMask |
@@ -91,7 +90,7 @@ XE_HP_CORE_TEST_F(CommandEncodeXeHpCoreTest, givenForceDisableMultiPartialWrites
 
     StateComputeModeProperties properties;
     LinearStream cmdStream(buffer, sizeof(buffer));
-    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo, nullptr);
     auto scmCommand = reinterpret_cast<STATE_COMPUTE_MODE *>(cmdStream.getCpuBase());
 
     uint32_t expectedMaskBits = FamilyType::stateComputeModeForceNonCoherentMask | FamilyType::stateComputeModeLargeGrfModeMask |
@@ -110,7 +109,7 @@ XE_HP_CORE_TEST_F(CommandEncodeXeHpCoreTest, givenForceDisableMultiPartialWrites
 
     StateComputeModeProperties properties;
     LinearStream cmdStream(buffer, sizeof(buffer));
-    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(cmdStream, properties, *defaultHwInfo, nullptr);
     auto scmCommand = reinterpret_cast<STATE_COMPUTE_MODE *>(cmdStream.getCpuBase());
 
     uint32_t expectedMaskBits = FamilyType::stateComputeModeForceNonCoherentMask | FamilyType::stateComputeModeLargeGrfModeMask |

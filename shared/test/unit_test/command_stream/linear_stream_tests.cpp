@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/command_stream/linear_stream.h"
+#include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/fixtures/linear_stream_fixture.h"
@@ -41,11 +42,14 @@ TEST(LinearStreamSimpleTest, givenLinearStreamWithoutGraphicsAllocationWhenGetti
 
 TEST(LinearStreamSimpleTest, givenLinearStreamWithGraphicsAllocationWhenGettingGpuBaseThenGpuAddressFromGraphicsAllocationIsReturned) {
     MockGraphicsAllocation gfxAllocation;
-    gfxAllocation.setCpuPtrAndGpuAddress(nullptr, 0x5555000);
+    auto gmmHelper = std::make_unique<GmmHelper>(nullptr, defaultHwInfo.get());
+    auto canonizedGpuAddress = gmmHelper->canonize(0x5555000);
+
+    gfxAllocation.setCpuPtrAndGpuAddress(nullptr, canonizedGpuAddress);
     uint32_t pCmdBuffer[1024]{};
     LinearStream linearStream(&gfxAllocation, pCmdBuffer, 1000);
 
-    EXPECT_EQ(0x5555000u, linearStream.getGpuBase());
+    EXPECT_EQ(canonizedGpuAddress, linearStream.getGpuBase());
 }
 
 TEST_F(LinearStreamTest, GivenSizeZeroWhenGettingSpaceUsedThenNonNullPointerIsReturned) {
@@ -62,7 +66,7 @@ TEST_F(LinearStreamTest, GivenNullBufferWhenGettingSpaceThenAssert) {
 }
 
 TEST_F(LinearStreamTest, GivenBadBufferPtrWhenGettingSpaceThenAssert) {
-    int64_t ptr = -1;
+    int64_t ptr = 0;
     linearStream.replaceBuffer(reinterpret_cast<void *>(ptr), 100);
     EXPECT_THROW(linearStream.getSpace(1), std::exception);
 }

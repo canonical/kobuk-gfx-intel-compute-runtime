@@ -11,7 +11,7 @@
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/mocks/mock_csr.h"
 #include "shared/test/common/mocks/mock_os_context.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
@@ -96,7 +96,7 @@ HWTEST2_F(CommandStreamReceiverFlushTaskDg2AndLaterTests, givenProgramExtendedPi
     dispatchFlags.threadArbitrationPolicy = hwHelper.getDefaultThreadArbitrationPolicy();
 
     commandStreamReceiver.streamProperties.stateComputeMode.setProperties(dispatchFlags.requiresCoherency, dispatchFlags.numGrfRequired,
-                                                                          dispatchFlags.threadArbitrationPolicy, *defaultHwInfo);
+                                                                          dispatchFlags.threadArbitrationPolicy, PreemptionMode::Disabled, *defaultHwInfo);
     auto cmdSizeForAllCommands = commandStreamReceiver.getRequiredCmdStreamSize(dispatchFlags, *pDevice);
     commandStreamReceiver.flushTask(commandStream,
                                     0,
@@ -109,16 +109,16 @@ HWTEST2_F(CommandStreamReceiverFlushTaskDg2AndLaterTests, givenProgramExtendedPi
 
     parseCommands<FamilyType>(commandStreamReceiver.getCS(0));
 
-    auto _3dStateBtdIterator = find<_3DSTATE_BTD *>(cmdList.begin(), cmdList.end());
-    auto _3dStateBtdCmd = genCmdCast<_3DSTATE_BTD *>(*_3dStateBtdIterator);
+    auto cmd3dStateBtdIterator = find<_3DSTATE_BTD *>(cmdList.begin(), cmdList.end());
+    auto cmd3dStateBtdCmd = genCmdCast<_3DSTATE_BTD *>(*cmd3dStateBtdIterator);
 
-    ASSERT_NE(nullptr, _3dStateBtdCmd);
-    EXPECT_EQ(RayTracingHelper::getMemoryBackedFifoSizeToPatch(), _3dStateBtdCmd->getBtdStateBody().getPerDssMemoryBackedBufferSize());
-    EXPECT_EQ(allocation->getGpuAddressToPatch(), _3dStateBtdCmd->getBtdStateBody().getMemoryBackedBufferBasePointer());
+    ASSERT_NE(nullptr, cmd3dStateBtdCmd);
+    EXPECT_EQ(RayTracingHelper::getMemoryBackedFifoSizeToPatch(), cmd3dStateBtdCmd->getBtdStateBody().getPerDssMemoryBackedBufferSize());
+    EXPECT_EQ(allocation->getGpuAddressToPatch(), cmd3dStateBtdCmd->getBtdStateBody().getMemoryBackedBufferBasePointer());
     EXPECT_TRUE(commandStreamReceiver.isPerDssBackedBufferSent);
 
-    --_3dStateBtdIterator;
-    auto pipeControlCmd = genCmdCast<PIPE_CONTROL *>(*_3dStateBtdIterator);
+    --cmd3dStateBtdIterator;
+    auto pipeControlCmd = genCmdCast<PIPE_CONTROL *>(*cmd3dStateBtdIterator);
 
     EXPECT_TRUE(UnitTestHelper<FamilyType>::getPipeControlHdcPipelineFlush(*pipeControlCmd));
     EXPECT_TRUE(pipeControlCmd->getAmfsFlushEnable());

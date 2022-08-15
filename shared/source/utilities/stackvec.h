@@ -9,6 +9,7 @@
 
 #include "shared/source/helpers/debug_helpers.h"
 
+#include <algorithm>
 #include <cinttypes>
 #include <cstddef>
 #include <iterator>
@@ -30,9 +31,9 @@ struct StackVecSize {
 
 template <typename DataType, size_t OnStackCapacity,
           typename StackSizeT = typename StackVecSize<OnStackCapacity>::SizeT>
-class StackVec {
+class StackVec { // NOLINT(clang-analyzer-optin.performance.Padding)
   public:
-    using value_type = DataType; // NOLINT
+    using value_type = DataType;
     using SizeT = StackSizeT;
     using iterator = DataType *;
     using const_iterator = const DataType *;
@@ -225,7 +226,7 @@ class StackVec {
         clearStackObjects();
     }
 
-    void push_back(const DataType &v) { // NOLINT
+    void push_back(const DataType &v) { // NOLINT(readability-identifier-naming)
         if (onStackSize == onStackCaps) {
             ensureDynamicMem();
         }
@@ -239,7 +240,23 @@ class StackVec {
         ++onStackSize;
     }
 
-    void pop_back() { // NOLINT
+    void sort() {
+        std::sort(this->begin(), this->end());
+    }
+
+    void remove_duplicates() { // NOLINT(readability-identifier-naming)
+        if (1 >= this->size()) {
+            return;
+        }
+        this->sort();
+        const auto last = std::unique(this->begin(), this->end());
+        auto currentEnd = this->end();
+        while (last != currentEnd--) {
+            this->pop_back();
+        }
+    }
+
+    void pop_back() { // NOLINT(readability-identifier-naming)
         if (usesDynamicMem()) {
             dynamicMem->pop_back();
             return;
@@ -449,3 +466,5 @@ bool operator!=(const StackVec<T, LhsStackCaps> &lhs,
                 const StackVec<T, RhsStackCaps> &rhs) {
     return false == (lhs == rhs);
 }
+
+using RootDeviceIndicesContainer = StackVec<uint32_t, 16>;

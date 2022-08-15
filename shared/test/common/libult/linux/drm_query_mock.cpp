@@ -11,30 +11,42 @@
 
 #include "gtest/gtest.h"
 
-int DrmQueryMock::handleRemainingRequests(unsigned long request, void *arg) {
-    if (request == DRM_IOCTL_I915_QUERY && arg) {
+DrmQueryMock::DrmQueryMock(RootDeviceEnvironment &rootDeviceEnvironment, const HardwareInfo *inputHwInfo) : DrmMock(rootDeviceEnvironment) {
+    rootDeviceEnvironment.setHwInfo(inputHwInfo);
+    context.hwInfo = rootDeviceEnvironment.getHardwareInfo();
+    callBaseIsVmBindAvailable = true;
+
+    this->ioctlHelper = std::make_unique<IoctlHelperPrelim20>(*this);
+
+    EXPECT_TRUE(queryMemoryInfo());
+    EXPECT_EQ(2u + virtualMemoryIds.size(), ioctlCallsCount);
+    ioctlCallsCount = 0;
+}
+
+int DrmQueryMock::handleRemainingRequests(DrmIoctl request, void *arg) {
+    if (request == DrmIoctl::Query && arg) {
         if (i915QuerySuccessCount == 0) {
             return EINVAL;
         }
         i915QuerySuccessCount--;
 
-        auto query = static_cast<drm_i915_query *>(arg);
-        if (query->items_ptr == 0) {
+        auto query = static_cast<Query *>(arg);
+        if (query->itemsPtr == 0) {
             return EINVAL;
         }
 
-        for (auto i = 0u; i < query->num_items; ++i) {
-            const auto queryItem = reinterpret_cast<drm_i915_query_item *>(query->items_ptr) + i;
+        for (auto i = 0u; i < query->numItems; ++i) {
+            const auto queryItem = reinterpret_cast<QueryItem *>(query->itemsPtr) + i;
             if (!this->handleQueryItem(queryItem)) {
                 return EINVAL;
             }
         }
 
         return 0;
-    } else if (request == DRM_IOCTL_I915_GEM_CONTEXT_SETPARAM && receivedContextParamRequest.param == I915_CONTEXT_PARAM_ENGINES) {
+    } else if (request == DrmIoctl::GemContextSetparam && receivedContextParamRequest.param == I915_CONTEXT_PARAM_ENGINES) {
         EXPECT_LE(receivedContextParamRequest.size, sizeof(receivedContextParamEngines));
         memcpy(&receivedContextParamEngines, reinterpret_cast<const void *>(receivedContextParamRequest.value), receivedContextParamRequest.size);
-        auto srcBalancer = reinterpret_cast<const i915_context_engines_load_balance *>(receivedContextParamEngines.extensions);
+        auto srcBalancer = reinterpret_cast<const I915::i915_context_engines_load_balance *>(receivedContextParamEngines.extensions);
         if (srcBalancer) {
             EXPECT_EQ(static_cast<__u32>(I915_CONTEXT_ENGINES_EXT_LOAD_BALANCE), srcBalancer->base.name);
             auto balancerSize = ptrDiff(srcBalancer->engines + srcBalancer->num_siblings, srcBalancer);

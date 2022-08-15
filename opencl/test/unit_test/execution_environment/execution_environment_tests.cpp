@@ -261,6 +261,7 @@ TEST(ExecutionEnvironment, givenMultipleRootDevicesWhenTheyAreCreatedThenReuseMe
     executionEnvironment->prepareRootDeviceEnvironments(2);
     for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
         executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(defaultHwInfo.get());
+        executionEnvironment->rootDeviceEnvironments[i]->initGmm();
     }
     std::unique_ptr<MockDevice> device(Device::create<MockDevice>(executionEnvironment, 0u));
     auto &commandStreamReceiver = device->getGpgpuCommandStreamReceiver();
@@ -269,6 +270,55 @@ TEST(ExecutionEnvironment, givenMultipleRootDevicesWhenTheyAreCreatedThenReuseMe
     std::unique_ptr<MockDevice> device2(Device::create<MockDevice>(executionEnvironment, 1u));
     EXPECT_NE(&commandStreamReceiver, &device2->getGpgpuCommandStreamReceiver());
     EXPECT_EQ(memoryManager, device2->getMemoryManager());
+}
+
+uint64_t isDriverAvaliableCounter = 0u;
+
+class DriverModelMock : public DriverModel {
+  public:
+    DriverModelMock(DriverModelType driverModelType) : DriverModel(driverModelType) {
+    }
+
+    bool isDriverAvaliable() override {
+        isDriverAvaliableCounter++;
+        return true;
+    }
+    void setGmmInputArgs(void *args) override {
+    }
+
+    uint32_t getDeviceHandle() const override {
+        return 0;
+    }
+
+    PhysicalDevicePciBusInfo getPciBusInfo() const override {
+        return {};
+    }
+    PhyicalDevicePciSpeedInfo getPciSpeedInfo() const override {
+        return {};
+    }
+
+    bool skipResourceCleanup() const {
+        return skipResourceCleanupVar;
+    }
+
+    bool isGpuHangDetected(OsContext &osContext) override {
+        return false;
+    }
+};
+
+TEST(ExecutionEnvironment, givenRootDeviceWhenPrepareForCleanupThenIsDriverAvaliableIsCalled) {
+    VariableBackup<uint64_t> varBackup = &isDriverAvaliableCounter;
+    ExecutionEnvironment *executionEnvironment = platform()->peekExecutionEnvironment();
+
+    std::unique_ptr<OSInterface> osInterface = std::make_unique<OSInterface>();
+    osInterface->setDriverModel(std::make_unique<DriverModelMock>(DriverModelType::UNKNOWN));
+
+    executionEnvironment->prepareRootDeviceEnvironments(1);
+    executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::move(osInterface);
+
+    executionEnvironment->prepareForCleanup();
+
+    EXPECT_EQ(1u, isDriverAvaliableCounter);
 }
 
 TEST(ExecutionEnvironment, givenUnproperSetCsrFlagValueWhenInitializingMemoryManagerThenCreateDefaultMemoryManager) {

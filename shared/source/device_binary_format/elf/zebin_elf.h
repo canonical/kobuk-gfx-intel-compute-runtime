@@ -28,7 +28,8 @@ enum SHT_ZEBIN : uint32_t {
     SHT_ZEBIN_SPIRV = 0xff000009,      // .spv.kernel section, value the same as SHT_OPENCL_SPIRV
     SHT_ZEBIN_ZEINFO = 0xff000011,     // .ze_info section
     SHT_ZEBIN_GTPIN_INFO = 0xff000012, // .gtpin_info section
-    SHT_ZEBIN_VISA_ASM = 0xff000013    // .visaasm sections
+    SHT_ZEBIN_VISA_ASM = 0xff000013,   // .visaasm sections
+    SHT_ZEBIN_MISC = 0xff000014        // .misc section
 };
 
 enum RELOC_TYPE_ZEBIN : uint32_t {
@@ -41,6 +42,7 @@ enum RELOC_TYPE_ZEBIN : uint32_t {
 
 namespace SectionsNamesZebin {
 static constexpr ConstStringRef textPrefix = ".text.";
+static constexpr ConstStringRef functions = ".text.Intel_Symbol_Table_Void_Program";
 static constexpr ConstStringRef dataConst = ".data.const";
 static constexpr ConstStringRef dataGlobalConst = ".data.global_const";
 static constexpr ConstStringRef dataGlobal = ".data.global";
@@ -54,6 +56,7 @@ static constexpr ConstStringRef debugAbbrev = ".debug_abbrev";
 static constexpr ConstStringRef zeInfo = ".ze_info";
 static constexpr ConstStringRef gtpinInfo = ".gtpin_info";
 static constexpr ConstStringRef noteIntelGT = ".note.intelgt.compat";
+static constexpr ConstStringRef buildOptions = ".misc.buildOptions";
 static constexpr ConstStringRef vIsaAsmPrefix = ".visaasm.";
 static constexpr ConstStringRef externalFunctions = "Intel_Symbol_Table_Void_Program";
 } // namespace SectionsNamesZebin
@@ -127,7 +130,6 @@ static constexpr ConstStringRef perThreadMemoryBuffers("per_thread_memory_buffer
 static constexpr ConstStringRef experimentalProperties("experimental_properties");
 
 namespace ExecutionEnv {
-static constexpr ConstStringRef actualKernelStartOffset("actual_kernel_start_offset");
 static constexpr ConstStringRef barrierCount("barrier_count");
 static constexpr ConstStringRef disableMidThreadPreemption("disable_mid_thread_preemption");
 static constexpr ConstStringRef grfCount("grf_count");
@@ -175,6 +177,7 @@ static constexpr ConstStringRef enqueuedLocalSize("enqueued_local_size");
 static constexpr ConstStringRef privateBaseStateless("private_base_stateless");
 static constexpr ConstStringRef argByvalue("arg_byvalue");
 static constexpr ConstStringRef argBypointer("arg_bypointer");
+static constexpr ConstStringRef bufferAddress("buffer_address");
 static constexpr ConstStringRef bufferOffset("buffer_offset");
 static constexpr ConstStringRef printfBuffer("printf_buffer");
 static constexpr ConstStringRef workDimensions("work_dimensions");
@@ -313,12 +316,10 @@ static constexpr WorkgroupWalkOrderDimensionsT workgroupWalkOrderDimensions = {0
 } // namespace Defaults
 
 static constexpr ConstStringRef required[] = {
-    Tags::Kernel::ExecutionEnv::actualKernelStartOffset,
     Tags::Kernel::ExecutionEnv::grfCount,
     Tags::Kernel::ExecutionEnv::simdSize};
 
 struct ExecutionEnvBaseT {
-    ActualKernelStartOffsetT actualKernelStartOffset = -1;
     BarrierCountT barrierCount = Defaults::barrierCount;
     DisableMidThreadPreemptionT disableMidThreadPreemption = Defaults::disableMidThreadPreemption;
     GrfCountT grfCount = -1;
@@ -374,6 +375,7 @@ enum ArgType : uint8_t {
     ArgTypePrivateBaseStateless,
     ArgTypeArgByvalue,
     ArgTypeArgBypointer,
+    ArgTypeBufferAddress,
     ArgTypeBufferOffset,
     ArgTypePrintfBuffer,
     ArgTypeWorkDimensions,

@@ -1,14 +1,13 @@
 /*
- * Copyright (C) 2020 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "level_zero/core/test/unit_tests/mocks/mock_l0_debugger.h"
+#include "shared/test/unit_test/mocks/mock_l0_debugger.h"
 
 namespace NEO {
-
 struct SKLFamily;
 using GfxFamily = SKLFamily;
 } // namespace NEO

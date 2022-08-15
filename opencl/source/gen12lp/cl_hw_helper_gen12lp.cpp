@@ -1,16 +1,15 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/gen12lp/hw_cmds.h"
 #include "shared/source/helpers/populate_factory.h"
 
 #include "opencl/source/helpers/cl_hw_helper_base.inl"
 #include "opencl/source/helpers/cl_hw_helper_bdw_and_later.inl"
-
-#include "hw_cmds.h"
 
 namespace NEO {
 
@@ -24,7 +23,7 @@ void populateFactoryTable<ClHwHelperHw<Family>>() {
 }
 
 template <>
-cl_device_feature_capabilities_intel ClHwHelperHw<Family>::getSupportedDeviceFeatureCapabilities() const {
+cl_device_feature_capabilities_intel ClHwHelperHw<Family>::getSupportedDeviceFeatureCapabilities(const HardwareInfo &hwInfo) const {
     return CL_DEVICE_FEATURE_FLAG_DP4A_INTEL;
 }
 

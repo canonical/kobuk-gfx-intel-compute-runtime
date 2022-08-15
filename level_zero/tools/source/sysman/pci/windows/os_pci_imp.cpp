@@ -7,6 +7,10 @@
 
 #include "sysman/pci/windows/os_pci_imp.h"
 
+#include "shared/source/memory_manager/memory_manager.h"
+
+#include "level_zero/core/source/driver/driver_handle.h"
+
 namespace L0 {
 
 ze_result_t WddmPciImp::getProperties(zes_pci_properties_t *properties) {
@@ -73,7 +77,7 @@ ze_result_t WddmPciImp::getPciBdf(zes_pci_properties_t &pciProperties) {
     return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t WddmPciImp::getMaxLinkSpeed(double &maxLinkSpeed) {
+void WddmPciImp::getMaxLinkCaps(double &maxLinkSpeed, int32_t &maxLinkWidth) {
     uint32_t valueSmall = 0;
     KmdSysman::RequestProperty request;
     KmdSysman::ResponseProperty response;
@@ -86,35 +90,24 @@ ze_result_t WddmPciImp::getMaxLinkSpeed(double &maxLinkSpeed) {
     ze_result_t status = pKmdSysManager->requestSingle(request, response);
 
     if (status != ZE_RESULT_SUCCESS) {
-        return status;
+        maxLinkSpeed = 0;
+    } else {
+        memcpy_s(&valueSmall, sizeof(uint32_t), response.dataBuffer, sizeof(uint32_t));
+        maxLinkSpeed = convertPciGenToLinkSpeed(valueSmall);
     }
 
-    memcpy_s(&valueSmall, sizeof(uint32_t), response.dataBuffer, sizeof(uint32_t));
-    maxLinkSpeed = convertPciGenToLinkSpeed(valueSmall);
-
-    return status;
-}
-
-ze_result_t WddmPciImp::getMaxLinkWidth(int32_t &maxLinkwidth) {
-    uint32_t valueSmall = 0;
-    KmdSysman::RequestProperty request;
-    KmdSysman::ResponseProperty response;
-
-    request.commandId = KmdSysman::Command::Get;
-    request.componentId = KmdSysman::Component::PciComponent;
     request.requestId = KmdSysman::Requests::Pci::MaxLinkWidth;
-    request.paramInfo = (isLmemSupported) ? KmdSysman::PciDomainsType::PciRootPort : KmdSysman::PciDomainsType::PciCurrentDevice;
-
-    ze_result_t status = pKmdSysManager->requestSingle(request, response);
+    status = pKmdSysManager->requestSingle(request, response);
 
     if (status != ZE_RESULT_SUCCESS) {
-        return status;
+        maxLinkWidth = -1;
+        return;
     }
 
     memcpy_s(&valueSmall, sizeof(uint32_t), response.dataBuffer, sizeof(uint32_t));
-    maxLinkwidth = static_cast<int32_t>(valueSmall);
+    maxLinkWidth = static_cast<int32_t>(valueSmall);
 
-    return status;
+    return;
 }
 
 ze_result_t WddmPciImp::getState(zes_pci_state_t *state) {

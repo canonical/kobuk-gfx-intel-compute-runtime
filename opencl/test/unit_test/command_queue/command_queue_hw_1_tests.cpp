@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_builtins.h"
@@ -32,24 +33,24 @@ HWTEST_F(CommandQueueHwTest, WhenConstructingTwoCommandQueuesThenOnlyOneDebugSur
 
     MockCommandQueueHw<FamilyType> mockCmdQueueHw1(context, device.get(), nullptr);
 
-    auto dbgSurface = device->getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation();
+    auto dbgSurface = mockCmdQueueHw1.getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation();
     EXPECT_NE(dbgSurface, nullptr);
 
     MockCommandQueueHw<FamilyType> mockCmdQueueHw2(context, device.get(), nullptr);
-    EXPECT_EQ(dbgSurface, device->getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation());
+    EXPECT_EQ(dbgSurface, mockCmdQueueHw1.getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation());
 }
 
 HWTEST_F(CommandQueueHwTest, givenNoTimestampPacketsWhenWaitForTimestampsThenNoWaitAndTagIsNotUpdated) {
     DebugManagerStateRestore restorer;
     DebugManager.flags.EnableTimestampPacket.set(0);
-    DebugManager.flags.EnableTimestampWait.set(4);
+    DebugManager.flags.EnableTimestampWaitForQueues.set(4);
     ExecutionEnvironment *executionEnvironment = platform()->peekExecutionEnvironment();
     auto device = std::make_unique<MockClDevice>(MockDevice::create<MockDeviceWithDebuggerActive>(executionEnvironment, 0u));
     device->getUltCommandStreamReceiver<FamilyType>().timestampPacketWriteEnabled = false;
     MockCommandQueueHw<FamilyType> cmdQ(context, device.get(), nullptr);
     auto taskCount = device->getUltCommandStreamReceiver<FamilyType>().peekLatestFlushedTaskCount();
 
-    cmdQ.waitForTimestamps(101u);
+    cmdQ.waitForTimestamps({}, 101u);
 
     EXPECT_EQ(device->getUltCommandStreamReceiver<FamilyType>().peekLatestFlushedTaskCount(), taskCount);
 }
@@ -63,7 +64,7 @@ HWTEST_F(CommandQueueHwTest, WhenDebugSurfaceIsAllocatedThenBufferIsZeroed) {
 
     MockCommandQueueHw<FamilyType> mockCmdQueueHw1(context, device.get(), nullptr);
 
-    auto dbgSurface = device->getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation();
+    auto dbgSurface = mockCmdQueueHw1.getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation();
     EXPECT_NE(dbgSurface, nullptr);
     auto mem = dbgSurface->getUnderlyingBuffer();
     ASSERT_NE(nullptr, mem);
@@ -96,7 +97,7 @@ HWTEST_F(CommandQueueHwTest, WhenConstructingCommandQueueDebugOnButIgcDoesNotRet
 
     MockCommandQueueHw<FamilyType> mockCmdQueueHw1(context, device.get(), nullptr);
 
-    auto dbgSurface = device->getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation();
+    auto dbgSurface = mockCmdQueueHw1.getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation();
     EXPECT_NE(dbgSurface, nullptr);
 
     auto &stateSaveAreaHeader = SipKernel::getSipKernel(device->getDevice()).getStateSaveAreaHeader();
@@ -106,7 +107,7 @@ HWTEST_F(CommandQueueHwTest, WhenConstructingCommandQueueDebugOnButIgcDoesNotRet
 HWTEST_F(CommandQueueHwTest, givenMultiDispatchInfoWhenAskingForAuxTranslationThenCheckMemObjectsCountAndDebugFlag) {
     DebugManagerStateRestore restore;
     MockBuffer buffer;
-    KernelObjsForAuxTranslation kernelObjects;
+    auto emptyKernelObjsForAuxTranslation = std::make_unique<KernelObjsForAuxTranslation>();
     MultiDispatchInfo multiDispatchInfo;
     HardwareInfo *hwInfo = pClDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->getMutableHardwareInfo();
 
@@ -118,10 +119,12 @@ HWTEST_F(CommandQueueHwTest, givenMultiDispatchInfoWhenAskingForAuxTranslationTh
 
     EXPECT_FALSE(mockCmdQueueHw.isBlitAuxTranslationRequired(multiDispatchInfo));
 
-    multiDispatchInfo.setKernelObjsForAuxTranslation(kernelObjects);
+    multiDispatchInfo.setKernelObjsForAuxTranslation(std::move(emptyKernelObjsForAuxTranslation));
     EXPECT_FALSE(mockCmdQueueHw.isBlitAuxTranslationRequired(multiDispatchInfo));
 
-    kernelObjects.insert({KernelObjForAuxTranslation::Type::MEM_OBJ, &buffer});
+    auto kernelObjsForAuxTranslation = std::make_unique<KernelObjsForAuxTranslation>();
+    kernelObjsForAuxTranslation->insert({KernelObjForAuxTranslation::Type::MEM_OBJ, &buffer});
+    multiDispatchInfo.setKernelObjsForAuxTranslation(std::move(kernelObjsForAuxTranslation));
     EXPECT_TRUE(mockCmdQueueHw.isBlitAuxTranslationRequired(multiDispatchInfo));
 
     hwInfo->capabilityTable.blitterOperationsSupported = false;
@@ -352,7 +355,7 @@ HWTEST_F(CommandQueueHwTest, GivenEventWhenEnqueuingBlockedMapUnmapOperationThen
     // CommandQueue has retained this event, release it
     returnEvent->release();
     pHwQ->virtualEvent = nullptr;
-    delete returnEvent;
+    delete returnEvent; // NOLINT(clang-analyzer-cplusplus.NewDelete)
     buffer->decRefInternal();
 }
 
@@ -365,7 +368,7 @@ HWTEST_F(CommandQueueHwTest, GivenEventWhenEnqueuingBlockedMapUnmapOperationThen
     pHwQ->virtualEvent = nullptr;
 
     pHwQ->virtualEvent = &event;
-    //virtual event from regular event to stored in previousVirtualEvent
+    // virtual event from regular event to stored in previousVirtualEvent
     pHwQ->virtualEvent->incRefInternal();
 
     MockEventBuilder eventBuilder(returnEvent);
@@ -428,7 +431,7 @@ HWTEST_F(CommandQueueHwTest, GivenEventsWaitlistOnBlockingWhenMappingBufferThenW
     struct MockEvent : UserEvent {
         MockEvent(Context *ctx, uint32_t updateCountBeforeCompleted)
             : UserEvent(ctx),
-              updateCount(0), updateCountBeforeCompleted(updateCountBeforeCompleted) {
+              updateCountBeforeCompleted(updateCountBeforeCompleted) {
             this->updateTaskCount(0, 0);
             this->taskLevel = 0;
         }
@@ -441,7 +444,7 @@ HWTEST_F(CommandQueueHwTest, GivenEventsWaitlistOnBlockingWhenMappingBufferThenW
             unblockEventsBlockedByThis(executionStatus);
         }
 
-        uint32_t updateCount;
+        uint32_t updateCount = 0;
         uint32_t updateCountBeforeCompleted;
     };
 
@@ -462,7 +465,7 @@ HWTEST_F(CommandQueueHwTest, GivenNotCompleteUserEventPassedToEnqueueWhenEventIs
     auto mockCSR = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
     pDevice->resetCommandStreamReceiver(mockCSR);
 
-    auto userEvent = make_releaseable<UserEvent>(context);
+    auto userEvent = makeReleaseable<UserEvent>(context);
     KernelInfo kernelInfo;
     MockKernelWithInternals mockKernelWithInternals(*pClDevice);
     auto mockKernel = mockKernelWithInternals.mockKernel;
@@ -501,7 +504,7 @@ HWTEST_F(CommandQueueHwTest, whenReleaseQueueCalledThenFlushIsCalled) {
     mockCmdQ->incRefInternal();
     releaseQueue(mockCmdQ, retVal);
     EXPECT_TRUE(mockCmdQ->flushCalled);
-    //this call will release the queue
+    // this call will release the queue
     mockCmdQ->decRefInternal();
 }
 
@@ -641,7 +644,7 @@ HWTEST_F(CommandQueueHwRefCountTest, givenBlockedCmdQWhenNewBlockedEnqueueReplac
     // UserEvent is set to complete and event tree is unblocked, queue has only 1 refference to itself after this operation
     EXPECT_EQ(2, mockCmdQ->getRefInternalCount());
 
-    //this call will release the queue
+    // this call will release the queue
     releaseQueue(mockCmdQ, retVal);
 }
 
@@ -667,7 +670,7 @@ HWTEST_F(CommandQueueHwRefCountTest, givenBlockedCmdQWithOutputEventAsVirtualEve
 
     mockCmdQ->enqueueKernel(mockKernel, 1, &offset, &size, &size, 1, &blockedEvent, &eventOut);
 
-    //output event increments
+    // output event increments
     EXPECT_EQ(3, mockCmdQ->getRefInternalCount());
 
     mockCmdQ->enqueueKernel(mockKernel, 1, &offset, &size, &size, 1, &blockedEvent, nullptr);
@@ -712,7 +715,7 @@ HWTEST_F(CommandQueueHwRefCountTest, givenSeriesOfBlockedEnqueuesWhenEveryEventI
 
     mockCmdQ->enqueueKernel(mockKernel, 1, &offset, &size, &size, 1, &blockedEvent, &eventOut);
 
-    //output event increments refCount
+    // output event increments refCount
     EXPECT_EQ(3, mockCmdQ->getRefInternalCount());
 
     mockCmdQ->enqueueKernel(mockKernel, 1, &offset, &size, &size, 1, &blockedEvent, nullptr);
@@ -762,7 +765,7 @@ HWTEST_F(CommandQueueHwRefCountTest, givenSeriesOfBlockedEnqueuesWhenCmdQIsRelea
 
     mockCmdQ->enqueueKernel(mockKernel, 1, &offset, &size, &size, 1, &blockedEvent, &eventOut);
 
-    //output event increments refCount
+    // output event increments refCount
     EXPECT_EQ(3, mockCmdQ->getRefInternalCount());
 
     mockCmdQ->enqueueKernel(mockKernel, 1, &offset, &size, &size, 1, &blockedEvent, nullptr);
@@ -792,14 +795,14 @@ HWTEST_F(CommandQueueHwTest, GivenEventThatIsNotCompletedWhenFinishIsCalledAndIt
     DebugManager.flags.EnableAsyncEventsHandler.set(false);
 
     struct ClbFuncTempStruct {
-        static void CL_CALLBACK ClbFuncT(cl_event e, cl_int execStatus, void *valueForUpdate) {
+        static void CL_CALLBACK clbFuncT(cl_event e, cl_int execStatus, void *valueForUpdate) {
             *((cl_int *)valueForUpdate) = 1;
         }
     };
-    auto Value = 0u;
+    auto value = 0u;
 
     auto ev = new Event(this->pCmdQ, CL_COMMAND_COPY_BUFFER, 3, CompletionStamp::notReady + 1);
-    clSetEventCallback(ev, CL_COMPLETE, ClbFuncTempStruct::ClbFuncT, &Value);
+    clSetEventCallback(ev, CL_COMPLETE, ClbFuncTempStruct::clbFuncT, &value);
 
     auto &csr = this->pCmdQ->getGpgpuCommandStreamReceiver();
     EXPECT_GT(3u, csr.peekTaskCount());
@@ -808,7 +811,7 @@ HWTEST_F(CommandQueueHwTest, GivenEventThatIsNotCompletedWhenFinishIsCalledAndIt
     ASSERT_EQ(CL_SUCCESS, ret);
 
     ev->updateExecutionStatus();
-    EXPECT_EQ(1u, Value);
+    EXPECT_EQ(1u, value);
     ev->decRefInternal();
 }
 
@@ -825,14 +828,14 @@ HWTEST_F(CommandQueueHwTest, GivenMultiTileQueueWhenEventNotCompletedAndFinishIs
     *ptrOffset(tagAddress, 32) = *tagAddress;
 
     struct ClbFuncTempStruct {
-        static void CL_CALLBACK ClbFuncT(cl_event e, cl_int execStatus, void *valueForUpdate) {
+        static void CL_CALLBACK clbFuncT(cl_event e, cl_int execStatus, void *valueForUpdate) {
             *static_cast<cl_int *>(valueForUpdate) = 1;
         }
     };
     auto value = 0u;
 
     auto ev = new Event(this->pCmdQ, CL_COMMAND_COPY_BUFFER, 3, CompletionStamp::notReady + 1);
-    clSetEventCallback(ev, CL_COMPLETE, ClbFuncTempStruct::ClbFuncT, &value);
+    clSetEventCallback(ev, CL_COMPLETE, ClbFuncTempStruct::clbFuncT, &value);
     EXPECT_GT(3u, csr.peekTaskCount());
 
     *tagAddress = CompletionStamp::notReady + 1;
@@ -972,7 +975,7 @@ HWTEST_F(CommandQueueHwTest, givenBlockedInOrderCmdQueueAndAsynchronouslyComplet
     *mockCSR->getTagAddress() = 0u;
     cmdQHw->taskLevel = 23;
     cmdQHw->enqueueKernel(mockKernel, 1, &offset, &size, &size, 1, &blockedEvent, nullptr);
-    //new virtual event is created on enqueue, bind it to the created virtual event
+    // new virtual event is created on enqueue, bind it to the created virtual event
     EXPECT_NE(cmdQHw->virtualEvent, virtualEvent);
 
     EXPECT_EQ(virtualEvent->peekExecutionStatus(), CL_QUEUED);
@@ -983,7 +986,7 @@ HWTEST_F(CommandQueueHwTest, givenBlockedInOrderCmdQueueAndAsynchronouslyComplet
     // +1 for next level after virtualEvent is unblocked
     // +1 as virtualEvent was a parent for event with actual command that is being submitted
     EXPECT_EQ(virtualEventTaskLevel + 2, cmdQHw->taskLevel);
-    //command being submitted was dependant only on virtual event hence only +1
+    // command being submitted was dependant only on virtual event hence only +1
     EXPECT_EQ(virtualEventTaskLevel + 1, mockCSR->lastTaskLevelToFlushTask);
     *mockCSR->getTagAddress() = initialHardwareTag;
     virtualEvent->decRefInternal();
@@ -1089,7 +1092,7 @@ HWTEST_F(CommandQueueHwTest, givenKernelSplitEnqueueReadBufferWhenBlockedThenEnq
     std::map<GraphicsAllocation *, uint32_t>::iterator it = csr.makeResidentAllocations.begin();
     for (; it != csr.makeResidentAllocations.end(); it++) {
         uint32_t expected = 1u;
-        //Buffer surface will be added three times (for each kernel from split and as a base range of enqueueReadBuffer call)
+        // Buffer surface will be added three times (for each kernel from split and as a base range of enqueueReadBuffer call)
         if (it->first == bufferAllocation) {
             expected = 3u;
         }

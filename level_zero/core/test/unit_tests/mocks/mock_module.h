@@ -11,7 +11,6 @@
 #include "shared/test/common/test_macros/mock_method_macros.h"
 
 #include "level_zero/core/source/module/module_imp.h"
-#include "level_zero/core/test/unit_tests/mock.h"
 #include "level_zero/core/test/unit_tests/white_box.h"
 
 #include "gtest/gtest.h"
@@ -25,6 +24,7 @@ struct WhiteBox<::L0::Module> : public ::L0::ModuleImp {
     using BaseClass::copyPatchedSegments;
     using BaseClass::device;
     using BaseClass::exportedFunctionsSurface;
+    using BaseClass::importedSymbolAllocations;
     using BaseClass::isFullyLinked;
     using BaseClass::kernelImmDatas;
     using BaseClass::symbols;
@@ -75,6 +75,7 @@ struct MockModuleTranslationUnit : public L0::ModuleTranslationUnit {
 struct MockModule : public L0::ModuleImp {
     using ModuleImp::debugEnabled;
     using ModuleImp::debugModuleHandle;
+    using ModuleImp::getModuleAllocations;
     using ModuleImp::kernelImmDatas;
     using ModuleImp::populateHostGlobalSymbolsMap;
     using ModuleImp::symbols;
@@ -86,7 +87,7 @@ struct MockModule : public L0::ModuleImp {
         maxGroupSize = 32;
     };
 
-    ~MockModule() = default;
+    ~MockModule() override = default;
 
     const KernelImmutableData *getKernelImmutableData(const char *functionName) const override {
         return kernelImmData;

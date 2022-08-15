@@ -94,6 +94,7 @@ class WddmMock : public Wddm {
         }
         return verifyAdapterLuidReturnValue;
     }
+    LUID getAdapterLuid() { return hwDeviceId->getAdapterLuid(); }
     bool setAllocationPriority(const D3DKMT_HANDLE *handles, uint32_t allocationCount, uint32_t priority) override;
 
     bool configureDeviceAddressSpace() {
@@ -123,7 +124,7 @@ class WddmMock : public Wddm {
 
     void resetGdi(Gdi *gdi);
     bool makeResident(const D3DKMT_HANDLE *handles, uint32_t count, bool cantTrimFurther, uint64_t *numberOfBytesToTrim, size_t totalSize) override;
-    bool evict(const D3DKMT_HANDLE *handles, uint32_t num, uint64_t &sizeToTrim) override;
+    bool evict(const D3DKMT_HANDLE *handles, uint32_t num, uint64_t &sizeToTrim, bool evictNeeded) override;
     NTSTATUS createAllocationsAndMapGpuVa(OsHandleStorage &osHandles) override;
 
     WddmMockHelpers::MakeResidentCall makeResidentResult;
@@ -164,6 +165,7 @@ class WddmMock : public Wddm {
     NTSTATUS createAllocationStatus = STATUS_SUCCESS;
     bool verifyAdapterLuidReturnValue = true;
     bool callBaseVerifyAdapterLuid = false;
+    LUID mockAdaperLuid = {0, 0};
     bool mapGpuVaStatus = true;
     bool callBaseDestroyAllocations = true;
     bool failOpenSharedHandle = false;
@@ -175,5 +177,6 @@ class WddmMock : public Wddm {
     bool callBaseCreatePagingLogger = true;
     bool shutdownStatus = false;
     bool callBaseSetAllocationPriority = true;
+    bool callBaseWaitFromCpu = true;
 };
 } // namespace NEO

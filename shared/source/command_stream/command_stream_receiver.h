@@ -13,7 +13,6 @@
 #include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/command_stream/submission_status.h"
 #include "shared/source/command_stream/submissions_aggregator.h"
-#include "shared/source/command_stream/thread_arbitration_policy.h"
 #include "shared/source/command_stream/wait_status.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/blit_commands_helper.h"
@@ -21,15 +20,15 @@
 #include "shared/source/helpers/completion_stamp.h"
 #include "shared/source/helpers/flat_batch_buffer_helper.h"
 #include "shared/source/helpers/options.h"
-#include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
-#include "shared/source/kernel/grf_config.h"
 #include "shared/source/os_interface/os_thread.h"
 #include "shared/source/utilities/spinlock.h"
+#include "shared/source/utilities/stackvec.h"
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace NEO {
 class AllocationsList;
@@ -49,7 +48,9 @@ class OSInterface;
 class ScratchSpaceController;
 class HwPerfCounter;
 class HwTimeStamps;
+class GmmHelper;
 class TagAllocatorBase;
+class LogicalStateHelper;
 
 template <typename TSize>
 class TimestampPackets;
@@ -58,19 +59,21 @@ template <typename T1>
 class TagAllocator;
 
 enum class DispatchMode {
-    DeviceDefault = 0,          //default for given device
-    ImmediateDispatch,          //everything is submitted to the HW immediately
-    AdaptiveDispatch,           //dispatching is handled to async thread, which combines batch buffers basing on load (not implemented)
-    BatchedDispatchWithCounter, //dispatching is batched, after n commands there is implicit flush (not implemented)
+    DeviceDefault = 0,          // default for given device
+    ImmediateDispatch,          // everything is submitted to the HW immediately
+    AdaptiveDispatch,           // dispatching is handled to async thread, which combines batch buffers basing on load (not implemented)
+    BatchedDispatchWithCounter, // dispatching is batched, after n commands there is implicit flush (not implemented)
     BatchedDispatch             // dispatching is batched, explicit clFlush is required
 };
 
 class CommandStreamReceiver {
   public:
+    static constexpr size_t startingResidencyContainerSize = 128;
+
     enum class SamplerCacheFlushState {
         samplerCacheFlushNotRequired,
-        samplerCacheFlushBefore, //add sampler cache flush before Walker with redescribed image
-        samplerCacheFlushAfter   //add sampler cache flush after Walker with redescribed image
+        samplerCacheFlushBefore, // add sampler cache flush before Walker with redescribed image
+        samplerCacheFlushAfter   // add sampler cache flush after Walker with redescribed image
     };
 
     using MutexType = std::recursive_mutex;
@@ -94,7 +97,7 @@ class CommandStreamReceiver {
     void makeResident(MultiGraphicsAllocation &gfxAllocation);
     MOCKABLE_VIRTUAL void makeResident(GraphicsAllocation &gfxAllocation);
     virtual void makeNonResident(GraphicsAllocation &gfxAllocation);
-    MOCKABLE_VIRTUAL void makeSurfacePackNonResident(ResidencyContainer &allocationsForResidency);
+    MOCKABLE_VIRTUAL void makeSurfacePackNonResident(ResidencyContainer &allocationsForResidency, bool clearAllocations);
     virtual void processResidency(const ResidencyContainer &allocationsForResidency, uint32_t handleId) {}
     virtual void processEviction();
     void makeResidentHostPtrAllocation(GraphicsAllocation *gfxAllocation);
@@ -115,7 +118,8 @@ class CommandStreamReceiver {
 
     LinearStream &getCS(size_t minRequiredSize = 1024u);
     OSInterface *getOSInterface() const;
-    ExecutionEnvironment &peekExecutionEnvironment() const { return executionEnvironment; };
+    ExecutionEnvironment &peekExecutionEnvironment() const { return executionEnvironment; }
+    GmmHelper *peekGmmHelper() const;
 
     MOCKABLE_VIRTUAL void setTagAllocation(GraphicsAllocation *allocation);
     GraphicsAllocation *getTagAllocation() const {
@@ -128,7 +132,7 @@ class CommandStreamReceiver {
     volatile uint32_t *getTagAddress() const { return tagAddress; }
     uint64_t getDebugPauseStateGPUAddress() const { return tagAllocation->getGpuAddress() + debugPauseStateAddressOffset; }
 
-    virtual bool waitForFlushStamp(FlushStamp &flushStampToWait) { return true; };
+    virtual bool waitForFlushStamp(FlushStamp &flushStampToWait) { return true; }
 
     uint32_t peekTaskCount() const { return taskCount; }
 
@@ -201,6 +205,7 @@ class CommandStreamReceiver {
 
     AllocationsList &getTemporaryAllocations();
     AllocationsList &getAllocationsForReuse();
+    AllocationsList &getDeferredAllocations();
     InternalAllocationStorage *getInternalAllocationStorage() const { return internalAllocationStorage.get(); }
     MOCKABLE_VIRTUAL bool createAllocationForHostSurface(HostPtrSurface &surface, bool requiresL3Flush);
     virtual size_t getPreferredTagPoolSize() const;
@@ -224,10 +229,9 @@ class CommandStreamReceiver {
         this->latestFlushedTaskCount = latestFlushedTaskCount;
     }
 
-    virtual uint32_t flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) = 0;
+    virtual std::optional<uint32_t> flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) = 0;
 
     virtual void flushTagUpdate() = 0;
-    virtual void flushNonKernelTask(GraphicsAllocation *eventAlloc, uint64_t immediateGpuAddress, uint64_t immediateData, PipeControlArgs &args, bool isWaitOnEvents, bool isStartOfDispatch, bool isEndOfDispatch) = 0;
     virtual void updateTagFromWait() = 0;
     virtual bool isUpdateTagFromWaitEnabled() = 0;
 
@@ -244,7 +248,7 @@ class CommandStreamReceiver {
 
     bool isLocalMemoryEnabled() const { return localMemoryEnabled; }
 
-    uint32_t getRootDeviceIndex() { return rootDeviceIndex; }
+    uint32_t getRootDeviceIndex() const { return rootDeviceIndex; }
 
     void startControllingDirectSubmissions();
 
@@ -252,7 +256,7 @@ class CommandStreamReceiver {
         return this->isDirectSubmissionEnabled() || isBlitterDirectSubmissionEnabled();
     }
 
-    virtual bool initDirectSubmission(Device &device, OsContext &osContext) {
+    virtual bool initDirectSubmission() {
         return true;
     }
 
@@ -316,23 +320,33 @@ class CommandStreamReceiver {
     virtual size_t getCmdsSizeForComputeBarrierCommand() const = 0;
 
     const HardwareInfo &peekHwInfo() const;
+    const RootDeviceEnvironment &peekRootDeviceEnvironment() const;
 
     MOCKABLE_VIRTUAL bool isGpuHangDetected() const;
 
-    virtual uint64_t getCompletionAddress() {
-        return 0;
+    uint64_t getCompletionAddress() const {
+        uint64_t completionFenceAddress = castToUint64(const_cast<uint32_t *>(getTagAddress()));
+        if (completionFenceAddress == 0) {
+            return 0;
+        }
+        completionFenceAddress += completionFenceOffset;
+        return completionFenceAddress;
     }
 
-    virtual uint32_t getCompletionValue(const GraphicsAllocation &gfxAllocation) {
-        return 0;
+    uint32_t getCompletionValue(const GraphicsAllocation &gfxAllocation);
+    DispatchMode getDispatchMode() const {
+        return this->dispatchMode;
     }
+
+    LogicalStateHelper *getLogicalStateHelper() const;
 
   protected:
     void cleanupResources();
     void printDeviceIndex();
     void checkForNewResources(uint32_t submittedTaskCount, uint32_t allocationTaskCount, GraphicsAllocation &gfxAllocation);
     bool checkImplicitFlushForGpuIdle();
-    void downloadTagAllocation();
+    void downloadTagAllocation(uint32_t taskCountToWait);
+    void printTagAddressContent(uint32_t taskCountToWait, int64_t waitTimeout, bool start);
     MOCKABLE_VIRTUAL std::unique_lock<MutexType> obtainHostPtrSurfaceCreationLock();
 
     std::unique_ptr<FlushStampTracker> flushStamp;
@@ -346,6 +360,7 @@ class CommandStreamReceiver {
     std::unique_ptr<TagAllocatorBase> perfCounterAllocator;
     std::unique_ptr<TagAllocatorBase> timestampPacketAllocator;
     std::unique_ptr<Thread> userPauseConfirmation;
+    std::unique_ptr<LogicalStateHelper> logicalStateHelper;
 
     ResidencyContainer residencyAllocations;
     ResidencyContainer evictionAllocations;
@@ -379,6 +394,7 @@ class CommandStreamReceiver {
 
     IndirectHeap *indirectHeap[IndirectHeap::Type::NUM_TYPES];
     OsContext *osContext = nullptr;
+    uint32_t *completionFenceValuePointer = nullptr;
 
     // current taskLevel.  Used for determining if a PIPE_CONTROL is needed.
     std::atomic<uint32_t> taskLevel{0};
@@ -404,6 +420,8 @@ class CommandStreamReceiver {
     uint32_t activePartitions = 1;
     uint32_t activePartitionsConfig = 1;
     uint32_t postSyncWriteOffset = 0;
+    uint32_t completionFenceOffset = 0;
+    uint32_t completionFenceValue = 0;
 
     const uint32_t rootDeviceIndex;
     const DeviceBitfield deviceBitfield;

@@ -9,19 +9,19 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/ptr_math.h"
+#include "shared/source/helpers/simd_helper.h"
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/source/kernel/kernel_descriptor_from_patchtokens.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/fixtures/command_container_fixture.h"
 #include "shared/test/common/fixtures/front_window_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_dispatch_kernel_encoder_interface.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/device_binary_format/patchtokens_tests.h"
 #include "shared/test/unit_test/helpers/gtest_helpers.h"
-
-#include "hw_cmds.h"
 
 using namespace NEO;
 
@@ -445,8 +445,8 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandEncodeStatesTest, givenForceBtpPrefetchModeDe
     uint32_t dims[] = {2, 1, 1};
     uint32_t numBindingTable = 1;
     uint32_t numSamplers = 1;
-    SAMPLER_STATE samplerState;
-    BINDING_TABLE_STATE bindingTable;
+    SAMPLER_STATE samplerState{};
+    BINDING_TABLE_STATE bindingTable{};
     std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
 
     dispatchInterface->kernelDescriptor.payloadMappings.bindingTable.numEntries = numBindingTable;
@@ -630,13 +630,13 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandEncodeStatesTest, givenDirtyHeapsWhenDispatch
     GenCmdList cmdList;
     CmdParse<FamilyType>::parseCommandBuffer(cmdList, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
 
-    auto itor = reverse_find<STATE_BASE_ADDRESS *>(cmdList.rbegin(), cmdList.rend());
+    auto itor = reverseFind<STATE_BASE_ADDRESS *>(cmdList.rbegin(), cmdList.rend());
     ASSERT_NE(cmdList.rend(), itor);
 
     auto cmdSba = genCmdCast<STATE_BASE_ADDRESS *>(*itor);
     EXPECT_NE(nullptr, cmdSba);
 
-    auto itorPc = reverse_find<PIPE_CONTROL *>(itor, cmdList.rend());
+    auto itorPc = reverseFind<PIPE_CONTROL *>(itor, cmdList.rend());
     ASSERT_NE(cmdList.rend(), itorPc);
 
     bool foundPcWithDCFlush = false;
@@ -850,7 +850,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, WalkerThreadTest, givenStartWorkGroupWhenIndirectIsF
     startWorkGroup[2] = 3u;
 
     EncodeDispatchKernel<FamilyType>::encodeThreadData(walkerCmd, startWorkGroup, numWorkGroups, workGroupSizes, simd, localIdDimensions,
-                                                       0, 0, true, false, false, requiredWorkGroupOrder);
+                                                       0, 0, true, false, false, requiredWorkGroupOrder, *defaultHwInfo);
     EXPECT_FALSE(walkerCmd.getIndirectParameterEnable());
     EXPECT_EQ(1u, walkerCmd.getThreadGroupIdXDimension());
     EXPECT_EQ(1u, walkerCmd.getThreadGroupIdYDimension());
@@ -876,7 +876,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, WalkerThreadTest, givenNoStartWorkGroupWhenIndirectI
     startWorkGroup[2] = 3u;
 
     EncodeDispatchKernel<FamilyType>::encodeThreadData(walkerCmd, nullptr, numWorkGroups, workGroupSizes, simd, localIdDimensions,
-                                                       0, 0, true, false, true, requiredWorkGroupOrder);
+                                                       0, 0, true, false, true, requiredWorkGroupOrder, *defaultHwInfo);
     EXPECT_TRUE(walkerCmd.getIndirectParameterEnable());
     EXPECT_EQ(0u, walkerCmd.getThreadGroupIdXDimension());
     EXPECT_EQ(0u, walkerCmd.getThreadGroupIdYDimension());
@@ -903,7 +903,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, WalkerThreadTest, givenStartWorkGroupWhenWorkGroupSm
     workGroupSizes[0] = 30u;
 
     EncodeDispatchKernel<FamilyType>::encodeThreadData(walkerCmd, startWorkGroup, numWorkGroups, workGroupSizes, simd, localIdDimensions,
-                                                       0, 0, true, false, false, requiredWorkGroupOrder);
+                                                       0, 0, true, false, false, requiredWorkGroupOrder, *defaultHwInfo);
     EXPECT_FALSE(walkerCmd.getIndirectParameterEnable());
     EXPECT_EQ(1u, walkerCmd.getThreadGroupIdXDimension());
     EXPECT_EQ(1u, walkerCmd.getThreadGroupIdYDimension());
@@ -928,7 +928,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, WalkerThreadTest, WhenThreadPerThreadGroupNotZeroThe
 
     uint32_t expectedThreadPerThreadGroup = 5u;
     EncodeDispatchKernel<FamilyType>::encodeThreadData(walkerCmd, startWorkGroup, numWorkGroups, workGroupSizes, simd, localIdDimensions,
-                                                       expectedThreadPerThreadGroup, 0, true, false, false, requiredWorkGroupOrder);
+                                                       expectedThreadPerThreadGroup, 0, true, false, false, requiredWorkGroupOrder, *defaultHwInfo);
     EXPECT_FALSE(walkerCmd.getIndirectParameterEnable());
     EXPECT_EQ(1u, walkerCmd.getThreadGroupIdXDimension());
     EXPECT_EQ(1u, walkerCmd.getThreadGroupIdYDimension());
@@ -953,7 +953,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, WalkerThreadTest, WhenExecutionMaskNotZeroThenExpect
 
     uint32_t expectedExecutionMask = 0xFFFFu;
     EncodeDispatchKernel<FamilyType>::encodeThreadData(walkerCmd, startWorkGroup, numWorkGroups, workGroupSizes, simd, localIdDimensions,
-                                                       0, expectedExecutionMask, true, false, false, requiredWorkGroupOrder);
+                                                       0, expectedExecutionMask, true, false, false, requiredWorkGroupOrder, *defaultHwInfo);
     EXPECT_FALSE(walkerCmd.getIndirectParameterEnable());
     EXPECT_EQ(1u, walkerCmd.getThreadGroupIdXDimension());
     EXPECT_EQ(1u, walkerCmd.getThreadGroupIdYDimension());
@@ -1230,8 +1230,8 @@ HWTEST_F(BindlessCommandEncodeStatesTest, givenGlobalBindlessHeapsWhenDispatchin
         false,
         false,
         false,
-        false,
         requiresUncachedMocs,
+        false,
         false,
         false,
         false};
@@ -1276,8 +1276,8 @@ HWTEST_F(BindlessCommandEncodeStatesTest, givenBindlessModeDisabledelWithSampler
         false,
         false,
         false,
-        false,
         requiresUncachedMocs,
+        false,
         false,
         false,
         false};

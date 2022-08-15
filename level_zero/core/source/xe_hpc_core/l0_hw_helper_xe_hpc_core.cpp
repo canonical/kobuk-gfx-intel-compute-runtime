@@ -5,13 +5,11 @@
  *
  */
 
-#include "shared/source/xe_hpc_core/hw_cmds_pvc.h"
+#include "shared/source/xe_hpc_core/hw_cmds_xe_hpc_core_base.h"
 
 #include "level_zero/core/source/helpers/l0_populate_factory.h"
 #include "level_zero/core/source/hw_helpers/l0_hw_helper_base.inl"
 #include "level_zero/core/source/hw_helpers/l0_hw_helper_pvc_and_later.inl"
-
-#include "hw_cmds.h"
 
 namespace L0 {
 
@@ -25,8 +23,8 @@ void populateFactoryTable<L0HwHelperHw<Family>>() {
 }
 
 template <>
-bool L0HwHelperHw<Family>::isIpSamplingSupported(const NEO::HardwareInfo &hwInfo) const {
-    return NEO::PVC::isXt(hwInfo);
+bool L0HwHelperHw<Family>::multiTileCapablePlatform() const {
+    return true;
 }
 
 template class L0HwHelperHw<Family>;

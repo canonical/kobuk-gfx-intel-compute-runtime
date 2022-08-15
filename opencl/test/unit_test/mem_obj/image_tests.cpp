@@ -771,10 +771,10 @@ TEST_P(CreateImageHostPtr, WhenCheckingAddressThenAlllocationDependsOnSizeRelati
         auto alignedRequiredSize = alignSizeWholePage(static_cast<void *>(pHostPtr), computedSize);
         auto alignedPtrSize = alignSizeWholePage(static_cast<void *>(pHostPtr), ptrSize);
 
-        size_t HalignReq = imageDesc.image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ? 64 : 1;
+        size_t halignReq = imageDesc.image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ? 64 : 1;
         auto rowPitch = imageDesc.image_width * elementSize;
         auto slicePitch = rowPitch * imageDesc.image_height;
-        auto requiredRowPitch = alignUp(imageDesc.image_width, HalignReq) * elementSize;
+        auto requiredRowPitch = alignUp(imageDesc.image_width, halignReq) * elementSize;
         auto requiredSlicePitch = requiredRowPitch * alignUp(imageDesc.image_height, 4);
 
         bool copyRequired = (alignedRequiredSize > alignedPtrSize) | (requiredRowPitch != rowPitch) | (slicePitch != requiredSlicePitch);
@@ -1699,7 +1699,7 @@ HWTEST_F(ImageTransformTest, givenSurfaceBaseAddressAndUnifiedSurfaceWhenSetUnif
     MockContext context;
     auto image = std::unique_ptr<Image>(ImageHelper<Image3dDefaults>::create(&context));
     auto surfaceState = FamilyType::cmdInitRenderSurfaceState;
-    auto gmm = std::unique_ptr<Gmm>(new Gmm(context.getDevice(0)->getGmmClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
+    auto gmm = std::unique_ptr<Gmm>(new Gmm(context.getDevice(0)->getGmmHelper(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
     uint64_t surfBsaseAddress = 0xABCDEF1000;
     surfaceState.setSurfaceBaseAddress(surfBsaseAddress);
     auto mockResource = reinterpret_cast<MockGmmResourceInfo *>(gmm->gmmResourceInfo.get());

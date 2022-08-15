@@ -6,8 +6,11 @@
  */
 
 #include "shared/source/aub_mem_dump/aub_mem_dump.h"
+#include "shared/source/helpers/cache_policy.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/os_interface/hw_info_config.h"
+
+#include "platforms.h"
 
 namespace NEO {
 
@@ -72,7 +75,17 @@ bool HwInfoConfigHw<IGFX_UNKNOWN>::overrideGfxPartitionLayoutForWsl() const {
 }
 
 template <>
-uint32_t HwInfoConfigHw<IGFX_UNKNOWN>::getDeviceMemoryMaxClkRate(const HardwareInfo *hwInfo) {
+uint32_t HwInfoConfigHw<IGFX_UNKNOWN>::getDeviceMemoryMaxClkRate(const HardwareInfo &hwInfo, const OSInterface *osIface, uint32_t subDeviceIndex) {
+    return 0;
+}
+
+template <>
+uint64_t HwInfoConfigHw<IGFX_UNKNOWN>::getDeviceMemoryPhysicalSizeInBytes(const OSInterface *osIface, uint32_t subDeviceIndex) {
+    return 0;
+}
+
+template <>
+uint64_t HwInfoConfigHw<IGFX_UNKNOWN>::getDeviceMemoryMaxBandWidthInBytesPerSecond(const HardwareInfo &hwInfo, const OSInterface *osIface, uint32_t subDeviceIndex) {
     return 0;
 }
 
@@ -104,6 +117,11 @@ bool HwInfoConfigHw<IGFX_UNKNOWN>::isPageTableManagerSupported(const HardwareInf
 template <>
 uint32_t HwInfoConfigHw<IGFX_UNKNOWN>::getHwRevIdFromStepping(uint32_t stepping, const HardwareInfo &hwInfo) const {
     return CommonConstants::invalidStepping;
+}
+
+template <>
+AOT::PRODUCT_CONFIG HwInfoConfigHw<IGFX_UNKNOWN>::getProductConfigFromHwInfo(const HardwareInfo &hwInfo) const {
+    return AOT::UNKNOWN_ISA;
 }
 
 template <>
@@ -322,4 +340,70 @@ bool HwInfoConfigHw<IGFX_UNKNOWN>::isComputeDispatchAllWalkerEnableInCfeStateReq
     return false;
 }
 
-} //namespace NEO
+template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isIpSamplingSupported(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isVmBindPatIndexProgrammingSupported() const {
+    return false;
+}
+
+template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isBFloat16ConversionSupported(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isMatrixMultiplyAccumulateSupported(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <>
+void HwInfoConfigHw<IGFX_UNKNOWN>::updateScmCommand(void *const commandPtr, const StateComputeModeProperties &properties) {
+}
+
+template <>
+void HwInfoConfigHw<IGFX_UNKNOWN>::updateIddCommand(void *const commandPtr, uint32_t numGrf, int32_t threadArbitrationPolicy) {
+}
+
+template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isGrfNumReportedWithScm() const {
+    return false;
+}
+template <>
+void HwInfoConfigHw<IGFX_UNKNOWN>::enableCompression(HardwareInfo *hwInfo) {
+}
+
+template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isCooperativeEngineSupported(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isTimestampWaitSupportedForEvents() const {
+    return false;
+}
+
+template <>
+uint64_t HwInfoConfigHw<IGFX_UNKNOWN>::getHostMemCapabilitiesValue() {
+    return 0;
+}
+
+template <>
+const char *L1CachePolicyHelper<IGFX_UNKNOWN>::getCachingPolicyOptions() {
+    return nullptr;
+}
+
+template <>
+uint32_t L1CachePolicyHelper<IGFX_UNKNOWN>::getDefaultL1CachePolicy() {
+    return 0u;
+}
+
+} // namespace NEO
+
+#include "shared/source/os_interface/hw_info_config.inl"
+
+template class NEO::HwInfoConfigHw<IGFX_UNKNOWN>;
+template struct NEO::L1CachePolicyHelper<IGFX_UNKNOWN>;

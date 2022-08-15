@@ -11,14 +11,18 @@
 #include "shared/source/os_interface/os_inc_base.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
+#include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/mocks/mock_compilers.h"
 #include "shared/test/common/mocks/mock_io_functions.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
+#include "level_zero/api/driver_experimental/public/zex_api.h"
+#include "level_zero/api/driver_experimental/public/zex_driver.h"
 #include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/source/driver/driver_imp.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
+#include "level_zero/core/test/unit_tests/fixtures/host_pointer_manager_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_driver.h"
 
 #include <bitset>
@@ -158,12 +162,37 @@ class MemoryManagerNTHandleMock : public NEO::OsAgnosticMemoryManager {
                                                          rootDeviceIndex, false, false, false);
         graphicsAllocation->setSharedHandle(static_cast<osHandle>(reinterpret_cast<uint64_t>(handle)));
         graphicsAllocation->set32BitAllocation(false);
-        graphicsAllocation->setDefaultGmm(new Gmm(executionEnvironment.rootDeviceEnvironments[0]->getGmmClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
+        graphicsAllocation->setDefaultGmm(new Gmm(executionEnvironment.rootDeviceEnvironments[0]->getGmmHelper(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
         return graphicsAllocation;
     }
 };
 
 HWTEST_F(ImportNTHandle, givenNTHandleWhenCreatingDeviceMemoryThenSuccessIsReturned) {
+    ze_device_mem_alloc_desc_t devProperties = {};
+    devProperties.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_PROPERTIES;
+
+    uint64_t imageHandle = 0x1;
+    ze_external_memory_import_win32_handle_t importNTHandle = {};
+    importNTHandle.handle = &imageHandle;
+    importNTHandle.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_WIN32;
+    importNTHandle.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_WIN32;
+    devProperties.pNext = &importNTHandle;
+
+    delete driverHandle->svmAllocsManager;
+    execEnv->memoryManager.reset(new MemoryManagerNTHandleMock(*execEnv));
+    driverHandle->setMemoryManager(execEnv->memoryManager.get());
+    driverHandle->svmAllocsManager = new NEO::SVMAllocsManager(execEnv->memoryManager.get(), false);
+
+    void *ptr;
+    auto result = context->allocDeviceMem(device, &devProperties, 100, 1, &ptr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    auto alloc = driverHandle->getSvmAllocsManager()->getSVMAlloc(ptr);
+    ASSERT_EQ(alloc->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex())->peekSharedHandle(), NEO::toOsHandle(importNTHandle.handle));
+    result = context->freeMem(ptr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+}
+
+HWTEST_F(ImportNTHandle, whenCallingCreateGraphicsAllocationFromMultipleSharedHandlesFromOsAgnosticMemoryManagerThenNullptrIsReturned) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
     ze_device_mem_alloc_desc_t devProperties = {};
@@ -176,33 +205,25 @@ HWTEST_F(ImportNTHandle, givenNTHandleWhenCreatingDeviceMemoryThenSuccessIsRetur
     importNTHandle.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_WIN32;
     devProperties.pNext = &importNTHandle;
 
-    NEO::MockDevice *neoDevice = nullptr;
-    auto executionEnvironment = NEO::MockDevice::prepareExecutionEnvironment(NEO::defaultHwInfo.get(), 0);
-    executionEnvironment->memoryManager.reset(new MemoryManagerNTHandleMock(*executionEnvironment));
+    delete driverHandle->svmAllocsManager;
+    execEnv->memoryManager.reset(new MemoryManagerNTHandleMock(*execEnv));
+    driverHandle->setMemoryManager(execEnv->memoryManager.get());
+    driverHandle->svmAllocsManager = new NEO::SVMAllocsManager(execEnv->memoryManager.get(), false);
 
-    neoDevice = NEO::MockDevice::createWithExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get(), executionEnvironment, 0);
-
-    driverHandle->setMemoryManager(executionEnvironment->memoryManager.get());
-
-    ze_result_t result = ZE_RESULT_SUCCESS;
-    auto device = L0::Device::create(driverHandle.get(), neoDevice, false, &result);
-
-    context->addDeviceAndSubDevices(device);
-
-    void *ptr;
-
-    result = context->allocDeviceMem(device, &devProperties, 100, 1, &ptr);
-
-    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
-
-    auto alloc = driverHandle->getSvmAllocsManager()->getSVMAlloc(ptr);
-
-    ASSERT_EQ(alloc->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex())->peekSharedHandle(), NEO::toOsHandle(importNTHandle.handle));
-    result = context->freeMem(ptr);
-    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
-
-    delete device;
+    std::vector<osHandle> handles{6, 7};
+    AllocationProperties properties = {device->getRootDeviceIndex(),
+                                       true,
+                                       MemoryConstants::pageSize,
+                                       AllocationType::BUFFER,
+                                       false,
+                                       device->getNEODevice()->getDeviceBitfield()};
+    bool requireSpecificBitness{};
+    bool isHostIpcAllocation{};
+    auto ptr = execEnv->memoryManager->createGraphicsAllocationFromMultipleSharedHandles(handles, properties, requireSpecificBitness, isHostIpcAllocation);
+    EXPECT_EQ(nullptr, ptr);
 }
+
+constexpr size_t invalidHandle = 0xffffffff;
 
 HWTEST_F(ImportNTHandle, givenNotExistingNTHandleWhenCreatingDeviceMemoryThenErrorIsReturned) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
@@ -210,9 +231,8 @@ HWTEST_F(ImportNTHandle, givenNotExistingNTHandleWhenCreatingDeviceMemoryThenErr
     ze_device_mem_alloc_desc_t devProperties = {};
     devProperties.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_PROPERTIES;
 
-    uint64_t imageHandle = 0x1;
     ze_external_memory_import_win32_handle_t importNTHandle = {};
-    importNTHandle.handle = &imageHandle;
+    importNTHandle.handle = reinterpret_cast<void *>(invalidHandle);
     importNTHandle.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_WIN32;
     importNTHandle.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_WIN32;
     devProperties.pNext = &importNTHandle;
@@ -265,7 +285,7 @@ TEST(DriverTest, givenNullEnvVariableWhenCreatingDriverThenEnableProgramDebuggin
     L0EnvVariables envVariables = {};
     envVariables.programDebugging = false;
 
-    auto driverHandle = whitebox_cast(DriverHandle::create(std::move(devices), envVariables, &returnValue));
+    auto driverHandle = whiteboxCast(DriverHandle::create(std::move(devices), envVariables, &returnValue));
     EXPECT_NE(nullptr, driverHandle);
 
     EXPECT_FALSE(driverHandle->enableProgramDebugging);
@@ -296,6 +316,10 @@ TEST(DriverImpTest, givenMissingMetricApiDependenciesWhenInitializingDriverImpTh
     NEO::MockCompilerEnableGuard mock(true);
     NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
     hwInfo.capabilityTable.levelZeroSupported = true;
+    const auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    if (hwInfoConfig.isIpSamplingSupported(hwInfo)) {
+        GTEST_SKIP();
+    }
 
     VariableBackup<uint32_t> mockGetenvCalledBackup(&IoFunctions::mockGetenvCalled, 0);
     std::unordered_map<std::string, std::string> mockableEnvs = {{"ZET_ENABLE_METRICS", "1"}};
@@ -362,7 +386,7 @@ TEST(DriverTest, givenProgramDebuggingEnvVarNonZeroWhenCreatingDriverThenEnableP
     L0EnvVariables envVariables = {};
     envVariables.programDebugging = true;
 
-    auto driverHandle = whitebox_cast(DriverHandle::create(std::move(devices), envVariables, &returnValue));
+    auto driverHandle = whiteboxCast(DriverHandle::create(std::move(devices), envVariables, &returnValue));
     EXPECT_NE(nullptr, driverHandle);
 
     EXPECT_TRUE(driverHandle->enableProgramDebugging);
@@ -440,6 +464,7 @@ struct DriverTestMultipleFamilyNoSupport : public ::testing::Test {
         executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
         for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
             executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(NEO::defaultHwInfo.get());
+            executionEnvironment->rootDeviceEnvironments[i]->initGmm();
         }
 
         for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
@@ -479,7 +504,7 @@ struct DriverHandleTest : public ::testing::Test {
         L0EnvVariables envVariables = {};
         envVariables.programDebugging = true;
 
-        driverHandle = whitebox_cast(DriverHandle::create(std::move(devices), envVariables, &returnValue));
+        driverHandle = whiteboxCast(DriverHandle::create(std::move(devices), envVariables, &returnValue));
         L0::GlobalDriverHandle = driverHandle;
     }
     void TearDown() override {
@@ -613,5 +638,66 @@ TEST(zeDriverGetIpcProperties, whenZeDriverGetIpcPropertiesIsCalledThenGetIPCPro
     EXPECT_EQ(expectedResult, result);
     EXPECT_EQ(1u, driverHandle.getIPCPropertiesCalled);
 }
+
+struct HostImportApiFixture : public HostPointerManagerFixure {
+    void SetUp() {
+        HostPointerManagerFixure::SetUp();
+
+        driverHandle = hostDriverHandle->toHandle();
+    }
+
+    void TearDown() {
+        HostPointerManagerFixure::TearDown();
+    }
+
+    ze_driver_handle_t driverHandle;
+};
+
+using DriverExperimentalApiTest = Test<HostImportApiFixture>;
+
+TEST_F(DriverExperimentalApiTest, whenRetrievingApiFunctionThenExpectProperPointer) {
+    decltype(&zexDriverImportExternalPointer) expectedImport = L0::zexDriverImportExternalPointer;
+    decltype(&zexDriverReleaseImportedPointer) expectedRelease = L0::zexDriverReleaseImportedPointer;
+    decltype(&zexDriverGetHostPointerBaseAddress) expectedGet = L0::zexDriverGetHostPointerBaseAddress;
+    decltype(&zexKernelGetBaseAddress) expectedKernelGetBaseAddress = L0::zexKernelGetBaseAddress;
+
+    void *funPtr = nullptr;
+
+    auto result = zeDriverGetExtensionFunctionAddress(driverHandle, "zexDriverImportExternalPointer", &funPtr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(expectedImport, reinterpret_cast<decltype(&zexDriverImportExternalPointer)>(funPtr));
+
+    result = zeDriverGetExtensionFunctionAddress(driverHandle, "zexDriverReleaseImportedPointer", &funPtr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(expectedRelease, reinterpret_cast<decltype(&zexDriverReleaseImportedPointer)>(funPtr));
+
+    result = zeDriverGetExtensionFunctionAddress(driverHandle, "zexDriverGetHostPointerBaseAddress", &funPtr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(expectedGet, reinterpret_cast<decltype(&zexDriverGetHostPointerBaseAddress)>(funPtr));
+
+    result = zeDriverGetExtensionFunctionAddress(driverHandle, "zexKernelGetBaseAddress", &funPtr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(expectedKernelGetBaseAddress, reinterpret_cast<decltype(&zexKernelGetBaseAddress)>(funPtr));
+}
+
+TEST_F(DriverExperimentalApiTest, givenHostPointerApiExistWhenImportingPtrThenExpectProperBehavior) {
+    void *basePtr = nullptr;
+    size_t offset = 0x20u;
+    size_t size = 0x100;
+    void *testPtr = ptrOffset(heapPointer, offset);
+
+    auto result = zexDriverImportExternalPointer(driverHandle, testPtr, size);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    void *offsetPtr = ptrOffset(testPtr, offset);
+
+    result = zexDriverGetHostPointerBaseAddress(driverHandle, offsetPtr, &basePtr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(testPtr, basePtr);
+
+    result = zexDriverReleaseImportedPointer(driverHandle, testPtr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+}
+
 } // namespace ult
 } // namespace L0

@@ -5,20 +5,25 @@
  *
  */
 
+#include "shared/source/debugger/debugger_l0.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/array_count.h"
 #include "shared/source/helpers/file_io.h"
+#include "shared/source/helpers/register_offsets.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/test_files.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_io_functions.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
+#include "level_zero/core/source/cmdqueue/cmdqueue.h"
+#include "level_zero/core/source/context/context_imp.h"
+#include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/source/module/module_imp.h"
 #include "level_zero/core/test/aub_tests/fixtures/aub_fixture.h"
-#include "level_zero/core/test/unit_tests/mocks/mock_driver_handle.h"
+#include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 
 namespace L0 {
 namespace ult {
@@ -126,19 +131,19 @@ HWTEST2_F(DebuggerSingleAddressSpaceAub, GivenSingleAddressSpaceWhenCmdListIsExe
     expectMMIO<FamilyType>(CS_GPR_R15 + 4, high);
 
     auto instructionHeapBaseAddress = neoDevice->getMemoryManager()->getInternalHeapBaseAddress(device->getRootDeviceIndex(), neoDevice->getMemoryManager()->isLocalMemoryUsedForIsa(neoDevice->getRootDeviceIndex()));
-    auto dynamicStateBaseAddress = NEO::GmmHelper::decanonize(commandList->commandContainer.getIndirectHeap(HeapType::DYNAMIC_STATE)->getGraphicsAllocation()->getGpuAddress());
-    auto surfaceStateBaseAddress = NEO::GmmHelper::decanonize(commandList->commandContainer.getIndirectHeap(HeapType::SURFACE_STATE)->getGraphicsAllocation()->getGpuAddress());
+    auto dynamicStateBaseAddress = commandList->commandContainer.getIndirectHeap(HeapType::DYNAMIC_STATE)->getGraphicsAllocation()->getGpuAddress();
+    auto surfaceStateBaseAddress = commandList->commandContainer.getIndirectHeap(HeapType::SURFACE_STATE)->getGraphicsAllocation()->getGpuAddress();
 
-    expectMemory<FamilyType>(reinterpret_cast<void *>(sbaAddress + offsetof(SbaTrackedAddresses, SurfaceStateBaseAddress)),
+    expectMemory<FamilyType>(reinterpret_cast<void *>(sbaAddress + offsetof(NEO::SbaTrackedAddresses, SurfaceStateBaseAddress)),
                              &surfaceStateBaseAddress, sizeof(surfaceStateBaseAddress));
 
-    expectMemory<FamilyType>(reinterpret_cast<void *>(sbaAddress + offsetof(SbaTrackedAddresses, DynamicStateBaseAddress)),
+    expectMemory<FamilyType>(reinterpret_cast<void *>(sbaAddress + offsetof(NEO::SbaTrackedAddresses, DynamicStateBaseAddress)),
                              &dynamicStateBaseAddress, sizeof(dynamicStateBaseAddress));
 
-    expectMemory<FamilyType>(reinterpret_cast<void *>(sbaAddress + offsetof(SbaTrackedAddresses, InstructionBaseAddress)),
+    expectMemory<FamilyType>(reinterpret_cast<void *>(sbaAddress + offsetof(NEO::SbaTrackedAddresses, InstructionBaseAddress)),
                              &instructionHeapBaseAddress, sizeof(instructionHeapBaseAddress));
 
-    expectMemory<FamilyType>(reinterpret_cast<void *>(sbaAddress + offsetof(SbaTrackedAddresses, BindlessSurfaceStateBaseAddress)),
+    expectMemory<FamilyType>(reinterpret_cast<void *>(sbaAddress + offsetof(NEO::SbaTrackedAddresses, BindlessSurfaceStateBaseAddress)),
                              &surfaceStateBaseAddress, sizeof(surfaceStateBaseAddress));
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, zeKernelDestroy(kernel));

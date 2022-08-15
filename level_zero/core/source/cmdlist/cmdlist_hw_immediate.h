@@ -23,9 +23,10 @@ struct CommandListCoreFamilyImmediate : public CommandListCoreFamily<gfxCoreFami
     using BaseClass::BaseClass;
 
     ze_result_t appendLaunchKernel(ze_kernel_handle_t hKernel,
-                                   const ze_group_count_t *pThreadGroupDimensions,
+                                   const ze_group_count_t *threadGroupDimensions,
                                    ze_event_handle_t hEvent, uint32_t numWaitEvents,
-                                   ze_event_handle_t *phWaitEvents) override;
+                                   ze_event_handle_t *phWaitEvents,
+                                   const CmdListKernelLaunchParams &launchParams) override;
 
     ze_result_t appendLaunchKernelIndirect(ze_kernel_handle_t hKernel,
                                            const ze_group_count_t *pDispatchArgumentsBuffer,
@@ -106,12 +107,22 @@ struct CommandListCoreFamilyImmediate : public CommandListCoreFamily<gfxCoreFami
                                       uint32_t numWaitEvents,
                                       ze_event_handle_t *phWaitEvents) override;
 
-    ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration);
+    ze_result_t appendMemoryRangesBarrier(uint32_t numRanges,
+                                          const size_t *pRangeSizes,
+                                          const void **pRanges,
+                                          ze_event_handle_t hSignalEvent,
+                                          uint32_t numWaitEvents,
+                                          ze_event_handle_t *phWaitEvents) override;
+
+    MOCKABLE_VIRTUAL ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration);
 
     void checkAvailableSpace();
     void updateDispatchFlagsWithRequiredStreamState(NEO::DispatchFlags &dispatchFlags);
 
     ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration);
+
+    void createLogicalStateHelper() override {}
+    NEO::LogicalStateHelper *getLogicalStateHelper() const override;
 };
 
 template <PRODUCT_FAMILY gfxProductFamily>

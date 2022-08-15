@@ -507,7 +507,7 @@ HWTEST2_F(BlitTests, whenPrintImageBlitBlockCopyCommandIsCalledThenCmdDetailsAre
     auto bltCmd = FamilyType::cmdInitXyBlockCopyBlt;
 
     testing::internal::CaptureStdout();
-    NEO::BlitCommandsHelper<FamilyType>::printImageBlitBlockCopyCommand(bltCmd);
+    NEO::BlitCommandsHelper<FamilyType>::printImageBlitBlockCopyCommand(bltCmd, 0);
 
     std::string output = testing::internal::GetCapturedStdout();
     std::string expectedOutput("");
@@ -528,8 +528,11 @@ HWTEST2_F(BlitTests, givenGen9AndGetBlitAllocationPropertiesThenCorrectValuesAre
     auto expectedtileType = tileType;
     auto expectedMipTailLod = mipTailLod;
     auto compressionDetails = 0u;
+    auto compressionType = 0u;
 
-    NEO::BlitCommandsHelper<FamilyType>::getBlitAllocationProperties(alloc, pitch, qPitch, tileType, mipTailLod, compressionDetails, pDevice->getRootDeviceEnvironment());
+    NEO::BlitCommandsHelper<FamilyType>::getBlitAllocationProperties(alloc, pitch, qPitch, tileType, mipTailLod, compressionDetails,
+                                                                     compressionType, pDevice->getRootDeviceEnvironment(),
+                                                                     GMM_YUV_PLANE_ENUM::GMM_NO_PLANE);
 
     EXPECT_EQ(expectedPitch, pitch);
     EXPECT_EQ(expectedQPitch, qPitch);

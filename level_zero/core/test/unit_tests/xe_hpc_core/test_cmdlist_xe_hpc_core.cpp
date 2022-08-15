@@ -8,8 +8,9 @@
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
+#include "level_zero/core/source/event/event.h"
 #include "level_zero/core/test/unit_tests/fixtures/module_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_module.h"
@@ -17,7 +18,15 @@
 namespace L0 {
 namespace ult {
 
-using CommandListAppendLaunchKernelXeHpcCore = Test<ModuleFixture>;
+struct LocalMemoryModuleFixture : public ModuleFixture {
+    void SetUp() {
+        DebugManager.flags.EnableLocalMemory.set(1);
+        ModuleFixture::SetUp();
+    }
+    DebugManagerStateRestore restore;
+};
+
+using CommandListAppendLaunchKernelXeHpcCore = Test<LocalMemoryModuleFixture>;
 HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore, givenKernelUsingSyncBufferWhenAppendLaunchCooperativeKernelIsCalledThenCorrectValueIsReturned, IsXeHpcCore) {
     auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
     auto &hwConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
@@ -34,8 +43,9 @@ HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore, givenKernelUsingSyncBufferWhen
     auto &kernelAttributes = kernel.immutableData.kernelDescriptor->kernelAttributes;
     kernelAttributes.flags.usesSyncBuffer = true;
     kernelAttributes.numGrfRequired = GrfConfig::DefaultGrfNumber;
-    bool isCooperative = true;
-    result = pCommandList->appendLaunchKernelWithParams(kernel.toHandle(), &groupCount, nullptr, false, false, isCooperative);
+    CmdListKernelLaunchParams launchParams = {};
+    launchParams.isCooperative = true;
+    result = pCommandList->appendLaunchKernelWithParams(&kernel, &groupCount, nullptr, launchParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     {
@@ -43,67 +53,16 @@ HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore, givenKernelUsingSyncBufferWhen
         VariableBackup<unsigned short> hwRevId{&hwInfo.platform.usRevId};
         engineGroupType = EngineGroupType::RenderCompute;
         hwRevId = hwConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
-        result = pCommandList->appendLaunchKernelWithParams(kernel.toHandle(), &groupCount, nullptr, false, false, isCooperative);
+        result = pCommandList->appendLaunchKernelWithParams(&kernel, &groupCount, nullptr, launchParams);
         EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, result);
 
         ze_group_count_t groupCount1{1, 1, 1};
-        result = pCommandList->appendLaunchKernelWithParams(kernel.toHandle(), &groupCount1, nullptr, false, false, isCooperative);
+        result = pCommandList->appendLaunchKernelWithParams(&kernel, &groupCount1, nullptr, launchParams);
         EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     }
 }
 
 using CommandListStatePrefetchXeHpcCore = Test<ModuleFixture>;
-
-HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenDebugFlagSetWhenPrefetchApiCalledThenProgramStatePrefetch, IsXeHpcCore) {
-    using STATE_PREFETCH = typename FamilyType::STATE_PREFETCH;
-    DebugManagerStateRestore restore;
-
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
-    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
-
-    constexpr size_t size = MemoryConstants::cacheLineSize * 2;
-    constexpr size_t alignment = MemoryConstants::pageSize64k;
-    constexpr size_t offset = MemoryConstants::cacheLineSize;
-    constexpr uint32_t mocsIndexForL3 = (2 << 1);
-    void *ptr = nullptr;
-
-    ze_device_mem_alloc_desc_t deviceDesc = {};
-    context->allocDeviceMem(device->toHandle(), &deviceDesc, size + offset, alignment, &ptr);
-    EXPECT_NE(nullptr, ptr);
-
-    auto hwInfo = device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
-    hwInfo->platform.usRevId |= FamilyType::pvcBaseDieRevMask;
-
-    auto cmdListBaseOffset = pCommandList->commandContainer.getCommandStream()->getUsed();
-
-    {
-        auto ret = pCommandList->appendMemoryPrefetch(ptrOffset(ptr, offset), size);
-        EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
-
-        EXPECT_EQ(cmdListBaseOffset, pCommandList->commandContainer.getCommandStream()->getUsed());
-    }
-
-    {
-        DebugManager.flags.AddStatePrefetchCmdToMemoryPrefetchAPI.set(1);
-
-        auto ret = pCommandList->appendMemoryPrefetch(ptrOffset(ptr, offset), size);
-        EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
-
-        EXPECT_EQ(cmdListBaseOffset + sizeof(STATE_PREFETCH), pCommandList->commandContainer.getCommandStream()->getUsed());
-
-        auto statePrefetchCmd = reinterpret_cast<STATE_PREFETCH *>(ptrOffset(pCommandList->commandContainer.getCommandStream()->getCpuBase(), cmdListBaseOffset));
-
-        EXPECT_EQ(statePrefetchCmd->getAddress(), reinterpret_cast<uint64_t>(ptrOffset(ptr, offset)));
-        EXPECT_FALSE(statePrefetchCmd->getKernelInstructionPrefetch());
-        EXPECT_EQ(mocsIndexForL3, statePrefetchCmd->getMemoryObjectControlState());
-        EXPECT_EQ(1u, statePrefetchCmd->getPrefetchSize());
-
-        EXPECT_EQ(reinterpret_cast<uint64_t>(ptr), pCommandList->commandContainer.getResidencyContainer().back()->getGpuAddress());
-    }
-
-    context->freeMem(ptr);
-}
 
 HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenUnifiedSharedMemoryWhenPrefetchApiCalledThenDontSetMemPrefetch, IsXeHpcCore) {
     auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
@@ -270,97 +229,9 @@ HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigr
     context->freeMem(ptr);
 }
 
-HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenCommandBufferIsExhaustedWhenPrefetchApiCalledThenProgramStatePrefetch, IsXeHpcCore) {
-    using STATE_PREFETCH = typename FamilyType::STATE_PREFETCH;
-    using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
-
-    DebugManagerStateRestore restore;
-
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
-    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
-
-    constexpr size_t size = MemoryConstants::cacheLineSize * 2;
-    constexpr size_t alignment = MemoryConstants::pageSize64k;
-    constexpr size_t offset = MemoryConstants::cacheLineSize;
-    constexpr uint32_t mocsIndexForL3 = (2 << 1);
-    void *ptr = nullptr;
-
-    ze_device_mem_alloc_desc_t deviceDesc = {};
-    context->allocDeviceMem(device->toHandle(), &deviceDesc, size + offset, alignment, &ptr);
-    EXPECT_NE(nullptr, ptr);
-
-    auto hwInfo = device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
-    hwInfo->platform.usRevId |= FamilyType::pvcBaseDieRevMask;
-
-    auto firstBatchBufferAllocation = pCommandList->commandContainer.getCommandStream()->getGraphicsAllocation();
-
-    auto useSize = pCommandList->commandContainer.getCommandStream()->getAvailableSpace();
-    useSize -= sizeof(MI_BATCH_BUFFER_END);
-    pCommandList->commandContainer.getCommandStream()->getSpace(useSize);
-
-    DebugManager.flags.AddStatePrefetchCmdToMemoryPrefetchAPI.set(1);
-
-    auto ret = pCommandList->appendMemoryPrefetch(ptrOffset(ptr, offset), size);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
-    auto secondBatchBufferAllocation = pCommandList->commandContainer.getCommandStream()->getGraphicsAllocation();
-
-    EXPECT_NE(firstBatchBufferAllocation, secondBatchBufferAllocation);
-
-    auto statePrefetchCmd = reinterpret_cast<STATE_PREFETCH *>(pCommandList->commandContainer.getCommandStream()->getCpuBase());
-
-    EXPECT_EQ(statePrefetchCmd->getAddress(), reinterpret_cast<uint64_t>(ptrOffset(ptr, offset)));
-    EXPECT_FALSE(statePrefetchCmd->getKernelInstructionPrefetch());
-    EXPECT_EQ(mocsIndexForL3, statePrefetchCmd->getMemoryObjectControlState());
-    EXPECT_EQ(1u, statePrefetchCmd->getPrefetchSize());
-
-    NEO::ResidencyContainer::iterator it = pCommandList->commandContainer.getResidencyContainer().end();
-    it--;
-    EXPECT_EQ(secondBatchBufferAllocation->getGpuAddress(), (*it)->getGpuAddress());
-    it--;
-    EXPECT_EQ(reinterpret_cast<uint64_t>(ptr), (*it)->getGpuAddress());
-
-    context->freeMem(ptr);
-}
-
 using CommandListEventFenceTestsXeHpcCore = Test<ModuleFixture>;
 
-HWTEST2_F(CommandListEventFenceTestsXeHpcCore, givenCommandListWithProfilingEventAfterCommandOnPvcRev00ThenMiFenceIsNotAdded, IsXeHpcCore) {
-    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
-    using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
-
-    if (defaultHwInfo->platform.eProductFamily != IGFX_PVC) {
-        GTEST_SKIP();
-    }
-
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
-    ze_event_pool_desc_t eventPoolDesc = {};
-    eventPoolDesc.count = 1;
-    eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
-
-    auto hwInfo = commandList->commandContainer.getDevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->getMutableHardwareInfo();
-    hwInfo->platform.usRevId = 0x00;
-
-    ze_event_desc_t eventDesc = {};
-    eventDesc.index = 0;
-    eventDesc.signal = 0;
-    eventDesc.wait = 0;
-    ze_result_t result = ZE_RESULT_SUCCESS;
-    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
-    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
-    commandList->appendEventForProfiling(event->toHandle(), false);
-
-    GenCmdList cmdList;
-    ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
-        cmdList, ptrOffset(commandList->commandContainer.getCommandStream()->getCpuBase(), 0), commandList->commandContainer.getCommandStream()->getUsed()));
-
-    auto itor = find<MI_MEM_FENCE *>(cmdList.begin(), cmdList.end());
-    EXPECT_EQ(cmdList.end(), itor);
-}
-
-HWTEST2_F(CommandListEventFenceTestsXeHpcCore, givenCommandListWithProfilingEventAfterCommandOnPvcRev03ThenMiFenceIsAdded, IsXeHpcCore) {
+HWTEST2_F(CommandListEventFenceTestsXeHpcCore, givenCommandListWithProfilingEventAfterCommandWhenRevId03ThenMiFenceIsAdded, IsXeHpcCore) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
 
@@ -381,7 +252,7 @@ HWTEST2_F(CommandListEventFenceTestsXeHpcCore, givenCommandListWithProfilingEven
     auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
-    commandList->appendEventForProfiling(event->toHandle(), false);
+    commandList->appendEventForProfiling(event.get(), false, false);
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
@@ -391,7 +262,7 @@ HWTEST2_F(CommandListEventFenceTestsXeHpcCore, givenCommandListWithProfilingEven
     EXPECT_NE(cmdList.end(), itor);
 }
 
-HWTEST2_F(CommandListEventFenceTestsXeHpcCore, givenCommandListWithRegularEventAfterCommandOnPvcRev03ThenMiFenceIsAdded, IsXeHpcCore) {
+HWTEST2_F(CommandListEventFenceTestsXeHpcCore, givenCommandListWithRegularEventAfterCommandWhenRevId03ThenMiFenceIsAdded, IsXeHpcCore) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
 
@@ -411,7 +282,7 @@ HWTEST2_F(CommandListEventFenceTestsXeHpcCore, givenCommandListWithRegularEventA
     auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
-    commandList->appendSignalEventPostWalker(event->toHandle());
+    commandList->appendSignalEventPostWalker(event.get(), false);
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
@@ -450,31 +321,408 @@ HWTEST2_F(CommandListAppendRangesBarrierXeHpcCore, givenCallToAppendRangesBarrie
     EXPECT_TRUE(pipeControlCmd->getUnTypedDataPortCacheFlush());
 }
 
-using CommandListAppendBarrierXeHpcCore = Test<DeviceFixture>;
+HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
+          givenHwSupportsSystemFenceWhenKernelNotUsingSystemMemoryAllocationsAndEventNotHostSignalScopeThenExpectsNoSystemFenceUsed, IsXeHpcCore) {
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
 
-HWTEST2_F(CommandListAppendBarrierXeHpcCore, givenCommandListWhenAppendingBarrierThenPipeControlIsProgrammedAndHdcAndUnTypedFlushesAreSet, IsPVC) {
-    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
-    using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
+    ze_result_t result = ZE_RESULT_SUCCESS;
+
+    auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto &hwConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
+
+    VariableBackup<unsigned short> hwRevId{&hwInfo.platform.usRevId};
+    hwRevId = hwConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
+
+    constexpr size_t size = 4096u;
+    constexpr size_t alignment = 4096u;
+    void *ptr = nullptr;
+
+    ze_device_mem_alloc_desc_t deviceDesc = {};
+    result = context->allocDeviceMem(device->toHandle(),
+                                     &deviceDesc,
+                                     size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(nullptr, ptr);
+
+    Mock<::L0::Kernel> kernel;
+    auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
+    kernel.module = mockModule.get();
+
+    auto allocData = driverHandle->getSvmAllocsManager()->getSVMAlloc(ptr);
+    ASSERT_NE(nullptr, allocData);
+    auto kernelAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
+    ASSERT_NE(nullptr, kernelAllocation);
+    kernel.residencyContainer.push_back(kernelAllocation);
+
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.count = 1;
+    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    ze_event_desc_t eventDesc = {};
+    eventDesc.index = 0;
+    eventDesc.signal = ZE_EVENT_SCOPE_FLAG_DEVICE;
+    eventDesc.wait = 0;
+    auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
+
+    kernel.setGroupSize(1, 1, 1);
+    ze_group_count_t groupCount{8, 1, 1};
     auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    commandList->initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
-    ze_result_t returnValue = commandList->appendBarrier(nullptr, 0, nullptr);
-    EXPECT_EQ(returnValue, ZE_RESULT_SUCCESS);
-    GenCmdList cmdList;
-    ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
-        cmdList, ptrOffset(commandList->commandContainer.getCommandStream()->getCpuBase(), 0), commandList->commandContainer.getCommandStream()->getUsed()));
+    result = commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
-    // PC for STATE_BASE_ADDRESS from list initialization
-    auto itor = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
-    EXPECT_NE(cmdList.end(), itor);
-    itor++;
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandList->appendLaunchKernelWithParams(&kernel, &groupCount, event.get(), launchParams);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
-    // PC for appendBarrier
-    itor = find<PIPE_CONTROL *>(itor, cmdList.end());
-    EXPECT_NE(cmdList.end(), itor);
+    GenCmdList commands;
+    ASSERT_TRUE(CmdParse<FamilyType>::parseCommandBuffer(
+        commands,
+        commandList->commandContainer.getCommandStream()->getCpuBase(),
+        commandList->commandContainer.getCommandStream()->getUsed()));
 
-    auto pipeControlCmd = reinterpret_cast<typename FamilyType::PIPE_CONTROL *>(*itor);
-    EXPECT_TRUE(pipeControlCmd->getHdcPipelineFlush());
-    EXPECT_TRUE(pipeControlCmd->getUnTypedDataPortCacheFlush());
+    auto itor = find<WALKER_TYPE *>(commands.begin(), commands.end());
+    ASSERT_NE(itor, commands.end());
+
+    auto walkerCmd = genCmdCast<WALKER_TYPE *>(*itor);
+    auto &postSyncData = walkerCmd->getPostSync();
+    EXPECT_FALSE(postSyncData.getSystemMemoryFenceRequest());
+
+    result = context->freeMem(ptr);
+    ASSERT_EQ(result, ZE_RESULT_SUCCESS);
+}
+
+HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
+          givenHwSupportsSystemFenceWhenKernelUsingUsmHostMemoryAllocationsAndEventNotHostSignalScopeThenExpectsNoSystemFenceUsed, IsXeHpcCore) {
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+
+    auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto &hwConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
+
+    VariableBackup<unsigned short> hwRevId{&hwInfo.platform.usRevId};
+    hwRevId = hwConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
+
+    constexpr size_t size = 4096u;
+    constexpr size_t alignment = 4096u;
+    void *ptr = nullptr;
+
+    ze_host_mem_alloc_desc_t hostDesc = {};
+    result = context->allocHostMem(&hostDesc, size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(nullptr, ptr);
+
+    Mock<::L0::Kernel> kernel;
+    auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
+    kernel.module = mockModule.get();
+
+    auto allocData = driverHandle->getSvmAllocsManager()->getSVMAlloc(ptr);
+    ASSERT_NE(nullptr, allocData);
+    auto kernelAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
+    ASSERT_NE(nullptr, kernelAllocation);
+    kernel.residencyContainer.push_back(kernelAllocation);
+
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.count = 1;
+    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    ze_event_desc_t eventDesc = {};
+    eventDesc.index = 0;
+    eventDesc.signal = ZE_EVENT_SCOPE_FLAG_DEVICE;
+    eventDesc.wait = 0;
+    auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
+
+    kernel.setGroupSize(1, 1, 1);
+    ze_group_count_t groupCount{8, 1, 1};
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    result = commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandList->appendLaunchKernelWithParams(&kernel, &groupCount, event.get(), launchParams);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    GenCmdList commands;
+    ASSERT_TRUE(CmdParse<FamilyType>::parseCommandBuffer(
+        commands,
+        commandList->commandContainer.getCommandStream()->getCpuBase(),
+        commandList->commandContainer.getCommandStream()->getUsed()));
+
+    auto itor = find<WALKER_TYPE *>(commands.begin(), commands.end());
+    ASSERT_NE(itor, commands.end());
+
+    auto walkerCmd = genCmdCast<WALKER_TYPE *>(*itor);
+    auto &postSyncData = walkerCmd->getPostSync();
+    EXPECT_FALSE(postSyncData.getSystemMemoryFenceRequest());
+
+    result = context->freeMem(ptr);
+    ASSERT_EQ(result, ZE_RESULT_SUCCESS);
+}
+
+HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
+          givenHwSupportsSystemFenceWhenMigrationOnComputeKernelUsingUsmSharedCpuMemoryAllocationsAndEventNotHostSignalScopeThenExpectsNoSystemFenceUsed, IsXeHpcCore) {
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+
+    auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto &hwConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
+
+    VariableBackup<unsigned short> hwRevId{&hwInfo.platform.usRevId};
+    hwRevId = hwConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
+
+    constexpr size_t size = 4096u;
+    constexpr size_t alignment = 4096u;
+    void *ptr = nullptr;
+
+    ze_host_mem_alloc_desc_t hostDesc = {};
+    ze_device_mem_alloc_desc_t deviceDesc = {};
+    result = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(nullptr, ptr);
+
+    auto allocData = driverHandle->getSvmAllocsManager()->getSVMAlloc(ptr);
+    ASSERT_NE(nullptr, allocData);
+    auto dstAllocation = allocData->cpuAllocation;
+    ASSERT_NE(nullptr, dstAllocation);
+    auto srcAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
+    ASSERT_NE(nullptr, srcAllocation);
+
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    result = commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+
+    result = commandList->appendPageFaultCopy(dstAllocation, srcAllocation, size, false);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_TRUE(commandList->usedKernelLaunchParams.isBuiltInKernel);
+    EXPECT_TRUE(commandList->usedKernelLaunchParams.isKernelSplitOperation);
+    EXPECT_TRUE(commandList->usedKernelLaunchParams.isDestinationAllocationInSystemMemory);
+
+    GenCmdList commands;
+    ASSERT_TRUE(CmdParse<FamilyType>::parseCommandBuffer(
+        commands,
+        commandList->commandContainer.getCommandStream()->getCpuBase(),
+        commandList->commandContainer.getCommandStream()->getUsed()));
+
+    auto itor = find<WALKER_TYPE *>(commands.begin(), commands.end());
+    ASSERT_NE(itor, commands.end());
+
+    auto walkerCmd = genCmdCast<WALKER_TYPE *>(*itor);
+    auto &postSyncData = walkerCmd->getPostSync();
+    EXPECT_FALSE(postSyncData.getSystemMemoryFenceRequest());
+
+    result = context->freeMem(ptr);
+    ASSERT_EQ(result, ZE_RESULT_SUCCESS);
+}
+
+HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
+          givenHwSupportsSystemFenceWhenKernelUsingIndirectSystemMemoryAllocationsAndEventNotHostSignalScopeThenExpectsNoSystemFenceUsed, IsXeHpcCore) {
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+
+    auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto &hwConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
+
+    VariableBackup<unsigned short> hwRevId{&hwInfo.platform.usRevId};
+    hwRevId = hwConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
+
+    constexpr size_t size = 4096u;
+    constexpr size_t alignment = 4096u;
+    void *ptr = nullptr;
+
+    ze_device_mem_alloc_desc_t deviceDesc = {};
+    result = context->allocDeviceMem(device->toHandle(),
+                                     &deviceDesc,
+                                     size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(nullptr, ptr);
+
+    Mock<::L0::Kernel> kernel;
+    auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
+    kernel.module = mockModule.get();
+
+    auto allocData = driverHandle->getSvmAllocsManager()->getSVMAlloc(ptr);
+    ASSERT_NE(nullptr, allocData);
+    auto kernelAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
+    ASSERT_NE(nullptr, kernelAllocation);
+    kernel.residencyContainer.push_back(kernelAllocation);
+
+    kernel.unifiedMemoryControls.indirectHostAllocationsAllowed = true;
+
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.count = 1;
+    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    ze_event_desc_t eventDesc = {};
+    eventDesc.index = 0;
+    eventDesc.signal = ZE_EVENT_SCOPE_FLAG_DEVICE;
+    eventDesc.wait = 0;
+    auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
+
+    kernel.setGroupSize(1, 1, 1);
+    ze_group_count_t groupCount{8, 1, 1};
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    result = commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandList->appendLaunchKernelWithParams(&kernel, &groupCount, event.get(), launchParams);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    GenCmdList commands;
+    ASSERT_TRUE(CmdParse<FamilyType>::parseCommandBuffer(
+        commands,
+        commandList->commandContainer.getCommandStream()->getCpuBase(),
+        commandList->commandContainer.getCommandStream()->getUsed()));
+
+    auto itor = find<WALKER_TYPE *>(commands.begin(), commands.end());
+    ASSERT_NE(itor, commands.end());
+
+    auto walkerCmd = genCmdCast<WALKER_TYPE *>(*itor);
+    auto &postSyncData = walkerCmd->getPostSync();
+    EXPECT_FALSE(postSyncData.getSystemMemoryFenceRequest());
+
+    result = context->freeMem(ptr);
+    ASSERT_EQ(result, ZE_RESULT_SUCCESS);
+}
+
+HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
+          givenHwSupportsSystemFenceWhenKernelUsingDeviceMemoryAllocationsAndEventHostSignalScopeThenExpectsSystemFenceUsed, IsXeHpcCore) {
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+
+    auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto &hwConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
+
+    VariableBackup<unsigned short> hwRevId{&hwInfo.platform.usRevId};
+    hwRevId = hwConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
+
+    constexpr size_t size = 4096u;
+    constexpr size_t alignment = 4096u;
+    void *ptr = nullptr;
+
+    ze_device_mem_alloc_desc_t deviceDesc = {};
+    result = context->allocDeviceMem(device->toHandle(),
+                                     &deviceDesc,
+                                     size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(nullptr, ptr);
+
+    Mock<::L0::Kernel> kernel;
+    auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
+    kernel.module = mockModule.get();
+
+    auto allocData = driverHandle->getSvmAllocsManager()->getSVMAlloc(ptr);
+    ASSERT_NE(nullptr, allocData);
+    auto kernelAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
+    ASSERT_NE(nullptr, kernelAllocation);
+    kernel.residencyContainer.push_back(kernelAllocation);
+
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.count = 1;
+    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    ze_event_desc_t eventDesc = {};
+    eventDesc.index = 0;
+    eventDesc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+    eventDesc.wait = 0;
+    auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
+
+    kernel.setGroupSize(1, 1, 1);
+    ze_group_count_t groupCount{8, 1, 1};
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    result = commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandList->appendLaunchKernelWithParams(&kernel, &groupCount, event.get(), launchParams);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    GenCmdList commands;
+    ASSERT_TRUE(CmdParse<FamilyType>::parseCommandBuffer(
+        commands,
+        commandList->commandContainer.getCommandStream()->getCpuBase(),
+        commandList->commandContainer.getCommandStream()->getUsed()));
+
+    auto itor = find<WALKER_TYPE *>(commands.begin(), commands.end());
+    ASSERT_NE(itor, commands.end());
+
+    auto walkerCmd = genCmdCast<WALKER_TYPE *>(*itor);
+    auto &postSyncData = walkerCmd->getPostSync();
+    EXPECT_FALSE(postSyncData.getSystemMemoryFenceRequest());
+
+    result = context->freeMem(ptr);
+    ASSERT_EQ(result, ZE_RESULT_SUCCESS);
+}
+
+HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
+          givenHwSupportsSystemFenceWhenKernelUsingUsmHostMemoryAllocationsAndEventHostSignalScopeThenExpectsSystemFenceUsed, IsXeHpcCore) {
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+
+    auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
+    auto &hwConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
+
+    VariableBackup<unsigned short> hwRevId{&hwInfo.platform.usRevId};
+    hwRevId = hwConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
+
+    constexpr size_t size = 4096u;
+    constexpr size_t alignment = 4096u;
+    void *ptr = nullptr;
+
+    ze_host_mem_alloc_desc_t hostDesc = {};
+    result = context->allocHostMem(&hostDesc, size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(nullptr, ptr);
+
+    Mock<::L0::Kernel> kernel;
+    auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
+    kernel.module = mockModule.get();
+
+    auto allocData = driverHandle->getSvmAllocsManager()->getSVMAlloc(ptr);
+    ASSERT_NE(nullptr, allocData);
+    auto kernelAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
+    ASSERT_NE(nullptr, kernelAllocation);
+    kernel.residencyContainer.push_back(kernelAllocation);
+
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.count = 1;
+    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    ze_event_desc_t eventDesc = {};
+    eventDesc.index = 0;
+    eventDesc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+    eventDesc.wait = 0;
+    auto event = std::unique_ptr<L0::Event>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
+
+    kernel.setGroupSize(1, 1, 1);
+    ze_group_count_t groupCount{8, 1, 1};
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    result = commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandList->appendLaunchKernelWithParams(&kernel, &groupCount, event.get(), launchParams);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    GenCmdList commands;
+    ASSERT_TRUE(CmdParse<FamilyType>::parseCommandBuffer(
+        commands,
+        commandList->commandContainer.getCommandStream()->getCpuBase(),
+        commandList->commandContainer.getCommandStream()->getUsed()));
+
+    auto itor = find<WALKER_TYPE *>(commands.begin(), commands.end());
+    ASSERT_NE(itor, commands.end());
+
+    auto walkerCmd = genCmdCast<WALKER_TYPE *>(*itor);
+    auto &postSyncData = walkerCmd->getPostSync();
+    EXPECT_TRUE(postSyncData.getSystemMemoryFenceRequest());
+
+    result = context->freeMem(ptr);
+    ASSERT_EQ(result, ZE_RESULT_SUCCESS);
 }
 
 } // namespace ult

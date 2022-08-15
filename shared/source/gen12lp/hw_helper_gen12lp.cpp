@@ -14,6 +14,7 @@ using Family = NEO::TGLLPFamily;
 #include "shared/source/helpers/hw_helper_base.inl"
 #include "shared/source/helpers/hw_helper_bdw_and_later.inl"
 #include "shared/source/helpers/hw_helper_tgllp_and_later.inl"
+#include "shared/source/helpers/logical_state_helper.inl"
 #include "shared/source/os_interface/hw_info_config.h"
 
 #include "engine_node.h"
@@ -131,12 +132,17 @@ EngineGroupType HwHelperHw<Family>::getEngineGroupType(aub_stream::EngineType en
 }
 
 template <>
-std::string HwHelperHw<Family>::getExtensions() const {
-    return "cl_intel_subgroup_local_block_io ";
+std::string HwHelperHw<Family>::getExtensions(const HardwareInfo &hwInfo) const {
+    std::string extensions;
+    extensions += "cl_intel_subgroup_local_block_io ";
+
+    return extensions;
 }
 
 template <>
-inline void MemorySynchronizationCommands<Family>::setPipeControlExtraProperties(PIPE_CONTROL &pipeControl, PipeControlArgs &args) {
+inline void MemorySynchronizationCommands<Family>::setBarrierExtraProperties(void *barrierCmd, PipeControlArgs &args) {
+    auto &pipeControl = *reinterpret_cast<typename Family::PIPE_CONTROL *>(barrierCmd);
+
     pipeControl.setHdcPipelineFlush(args.hdcPipelineFlush);
 
     if (DebugManager.flags.FlushAllCaches.get()) {
@@ -176,13 +182,13 @@ uint32_t HwHelperHw<Family>::getMocsIndex(const GmmHelper &gmmHelper, bool l3ena
 }
 
 template <>
-bool MemorySynchronizationCommands<Family>::isPipeControlWArequired(const HardwareInfo &hwInfo) {
+bool MemorySynchronizationCommands<Family>::isBarrierWaRequired(const HardwareInfo &hwInfo) {
     return HwInfoConfig::get(hwInfo.platform.eProductFamily)->pipeControlWARequired(hwInfo);
 }
 
 template <>
-bool MemorySynchronizationCommands<Family>::isPipeControlPriorToPipelineSelectWArequired(const HardwareInfo &hwInfo) {
-    return MemorySynchronizationCommands<Family>::isPipeControlWArequired(hwInfo);
+bool MemorySynchronizationCommands<Family>::isBarrierlPriorToPipelineSelectWaRequired(const HardwareInfo &hwInfo) {
+    return MemorySynchronizationCommands<Family>::isBarrierWaRequired(hwInfo);
 }
 
 template <>
@@ -209,4 +215,6 @@ template class HwHelperHw<Family>;
 template class FlatBatchBufferHelperHw<Family>;
 template struct MemorySynchronizationCommands<Family>;
 template struct LriHelper<Family>;
+
+template LogicalStateHelper *LogicalStateHelper::create<Family>();
 } // namespace NEO

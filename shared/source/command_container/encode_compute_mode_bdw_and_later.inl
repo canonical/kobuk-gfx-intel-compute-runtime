@@ -14,13 +14,13 @@ namespace NEO {
 template <typename Family>
 inline void EncodeComputeMode<Family>::programComputeModeCommandWithSynchronization(
     LinearStream &csr, StateComputeModeProperties &properties, const PipelineSelectArgs &args,
-    bool hasSharedHandles, const HardwareInfo &hwInfo, bool isRcs) {
+    bool hasSharedHandles, const HardwareInfo &hwInfo, bool isRcs, LogicalStateHelper *logicalStateHelper) {
 
-    EncodeComputeMode<Family>::programComputeModeCommand(csr, properties, hwInfo);
+    EncodeComputeMode<Family>::programComputeModeCommand(csr, properties, hwInfo, nullptr);
 }
 
 template <typename Family>
-inline void EncodeStoreMMIO<Family>::remapOffset(MI_STORE_REGISTER_MEM *pStoreRegMem) {
+inline void EncodeStoreMMIO<Family>::appendFlags(MI_STORE_REGISTER_MEM *storeRegMem, bool workloadPartition) {
 }
 
 template <typename Family>

@@ -17,10 +17,15 @@
 
 namespace L0 {
 
+struct KernelExt {
+    virtual ~KernelExt() = default;
+};
+
 struct KernelArgInfo {
     const void *value;
     uint32_t allocId;
     uint32_t allocIdMemoryManagerCounter;
+    bool isSetToNullptr = false;
 };
 
 struct KernelImp : Kernel {
@@ -138,14 +143,10 @@ struct KernelImp : Kernel {
 
     ze_result_t setCacheConfig(ze_cache_config_flags_t flags) override;
     bool usesRayTracing() {
-        return kernelImmData->getDescriptor().hasRTCalls();
+        return kernelImmData->getDescriptor().kernelAttributes.flags.hasRTCalls;
     }
 
-    ze_result_t getProfileInfo(zet_profile_properties_t *pProfileProperties) override {
-        pProfileProperties->flags = 0;
-        pProfileProperties->numTokens = 0;
-        return ZE_RESULT_SUCCESS;
-    }
+    ze_result_t getProfileInfo(zet_profile_properties_t *pProfileProperties) override;
 
     bool hasIndirectAccess() {
         return kernelHasIndirectAccess;
@@ -159,9 +160,11 @@ struct KernelImp : Kernel {
     }
 
     ze_result_t setSchedulingHintExp(ze_scheduling_hint_exp_desc_t *pHint) override;
-    int32_t getSchedulingHintExp() override;
+    int32_t getSchedulingHintExp() const override;
 
     NEO::ImplicitArgs *getImplicitArgs() const override { return pImplicitArgs.get(); }
+
+    KernelExt *getExtension(uint32_t extensionType);
 
   protected:
     KernelImp() = default;
@@ -221,6 +224,8 @@ struct KernelImp : Kernel {
 
     int32_t schedulingHintExpFlag = NEO::ThreadArbitrationPolicy::NotPresent;
     std::unique_ptr<NEO::ImplicitArgs> pImplicitArgs;
+
+    std::unique_ptr<KernelExt> pExtension;
 };
 
 } // namespace L0

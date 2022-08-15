@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -52,6 +52,8 @@ MockDevice::MockDevice(ExecutionEnvironment *executionEnvironment, uint32_t root
     }
     auto &hwInfo = getHardwareInfo();
     executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->setHwInfo(&hwInfo);
+    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->initGmm();
+
     initializeCaps();
     preemptionMode = PreemptionHelper::getDefaultPreemptionMode(hwInfo);
 }
@@ -94,6 +96,12 @@ void MockDevice::resetCommandStreamReceiver(CommandStreamReceiver *newCsr, uint3
     if (preemptionMode == PreemptionMode::MidThread || isDebuggerActive()) {
         commandStreamReceivers[engineIndex]->createPreemptionAllocation();
     }
+}
+
+bool MockDevice::verifyAdapterLuid() {
+    if (callBaseVerifyAdapterLuid)
+        return Device::verifyAdapterLuid();
+    return verifyAdapterLuidReturnValue;
 }
 
 bool MockSubDevice::createEngine(uint32_t deviceCsrIndex, EngineTypeUsage engineTypeUsage) {

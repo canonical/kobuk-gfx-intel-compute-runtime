@@ -7,9 +7,11 @@
 
 #pragma once
 
+#include "shared/source/helpers/ptr_math.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/utilities/numeric.h"
 
+#include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/sampler/sampler_hw.h"
 
 namespace L0 {
@@ -107,7 +109,9 @@ ze_result_t SamplerCoreFamily<gfxCoreFamily>::initialize(Device *device, const z
     samplerState.setMinLod(minLodValue.getRawAccess());
     samplerState.setMaxLod(maxLodValue.getRawAccess());
 
-    appendSamplerStateParams(&samplerState);
+    auto &hwInfo = device->getHwInfo();
+
+    NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily)->adjustSamplerState(&samplerState, hwInfo);
 
     return ZE_RESULT_SUCCESS;
 }

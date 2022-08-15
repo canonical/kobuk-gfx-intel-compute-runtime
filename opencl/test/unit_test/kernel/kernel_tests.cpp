@@ -24,7 +24,7 @@
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/mock_timestamp_container.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/unit_test/helpers/gtest_helpers.h"
 #include "shared/test/unit_test/page_fault_manager/mock_cpu_page_fault_manager.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
@@ -67,24 +67,24 @@ class KernelTests : public ProgramFromBinaryFixture {
         ASSERT_EQ(CL_SUCCESS, retVal);
 
         // create a kernel
-        pKernel = Kernel::create<MockKernel>(
+        kernel = Kernel::create<MockKernel>(
             pProgram,
             pProgram->getKernelInfoForKernel(kernelName),
             *pClDevice,
             &retVal);
 
         ASSERT_EQ(CL_SUCCESS, retVal);
-        ASSERT_NE(nullptr, pKernel);
+        ASSERT_NE(nullptr, kernel);
     }
 
     void TearDown() override {
-        delete pKernel;
-        pKernel = nullptr;
+        delete kernel;
+        kernel = nullptr;
         knownSource.reset();
         ProgramFromBinaryFixture::TearDown();
     }
 
-    MockKernel *pKernel = nullptr;
+    MockKernel *kernel = nullptr;
     cl_int retVal = CL_SUCCESS;
 };
 
@@ -100,15 +100,15 @@ TEST(KernelTest, WhenKernelIsCreatedThenCorrectMembersAreMemObjects) {
 }
 
 TEST_F(KernelTests, WhenKernelIsCreatedThenKernelHeapIsCorrect) {
-    EXPECT_EQ(pKernel->getKernelInfo().heapInfo.pKernelHeap, pKernel->getKernelHeap());
-    EXPECT_EQ(pKernel->getKernelInfo().heapInfo.KernelHeapSize, pKernel->getKernelHeapSize());
+    EXPECT_EQ(kernel->getKernelInfo().heapInfo.pKernelHeap, kernel->getKernelHeap());
+    EXPECT_EQ(kernel->getKernelInfo().heapInfo.KernelHeapSize, kernel->getKernelHeapSize());
 }
 
 TEST_F(KernelTests, GivenInvalidParamNameWhenGettingInfoThenInvalidValueErrorIsReturned) {
     size_t paramValueSizeRet = 0;
 
     // get size
-    retVal = pKernel->getInfo(
+    retVal = kernel->getInfo(
         0,
         0,
         nullptr,
@@ -121,7 +121,7 @@ TEST_F(KernelTests, GivenInvalidParametersWhenGettingInfoThenValueSizeRetIsNotUp
     size_t paramValueSizeRet = 0x1234;
 
     // get size
-    retVal = pKernel->getInfo(
+    retVal = kernel->getInfo(
         0,
         0,
         nullptr,
@@ -138,7 +138,7 @@ TEST_F(KernelTests, GivenKernelFunctionNameWhenGettingInfoThenKernelFunctionName
     size_t paramValueSizeRet = 0;
 
     // get size
-    retVal = pKernel->getInfo(
+    retVal = kernel->getInfo(
         paramName,
         paramValueSize,
         nullptr,
@@ -152,7 +152,7 @@ TEST_F(KernelTests, GivenKernelFunctionNameWhenGettingInfoThenKernelFunctionName
     // get the name
     paramValueSize = paramValueSizeRet;
 
-    retVal = pKernel->getInfo(
+    retVal = kernel->getInfo(
         paramName,
         paramValueSize,
         paramValue,
@@ -170,11 +170,11 @@ TEST_F(KernelTests, GivenKernelBinaryProgramIntelWhenGettingInfoThenKernelBinary
     size_t paramValueSize = 0;
     char *paramValue = nullptr;
     size_t paramValueSizeRet = 0;
-    const char *pKernelData = reinterpret_cast<const char *>(pKernel->getKernelHeap());
+    const char *pKernelData = reinterpret_cast<const char *>(kernel->getKernelHeap());
     EXPECT_NE(nullptr, pKernelData);
 
     // get size of kernel binary
-    retVal = pKernel->getInfo(
+    retVal = kernel->getInfo(
         paramName,
         paramValueSize,
         nullptr,
@@ -187,7 +187,7 @@ TEST_F(KernelTests, GivenKernelBinaryProgramIntelWhenGettingInfoThenKernelBinary
 
     // get kernel binary
     paramValueSize = paramValueSizeRet;
-    retVal = pKernel->getInfo(
+    retVal = kernel->getInfo(
         paramName,
         paramValueSize,
         paramValue,
@@ -206,14 +206,16 @@ TEST_F(KernelTests, givenBinaryWhenItIsQueriedForGpuAddressThenAbsoluteAddressIs
     size_t paramValueSize = sizeof(paramValue);
     size_t paramValueSizeRet = 0;
 
-    retVal = pKernel->getInfo(
+    retVal = kernel->getInfo(
         paramName,
         paramValueSize,
         &paramValue,
         &paramValueSizeRet);
 
     EXPECT_EQ(CL_SUCCESS, retVal);
-    auto expectedGpuAddress = GmmHelper::decanonize(pKernel->getKernelInfo().kernelAllocation->getGpuAddress());
+
+    auto gmmHelper = pDevice->getGmmHelper();
+    auto expectedGpuAddress = gmmHelper->decanonize(kernel->getKernelInfo().kernelAllocation->getGpuAddress());
     EXPECT_EQ(expectedGpuAddress, paramValue);
     EXPECT_EQ(paramValueSize, paramValueSizeRet);
 }
@@ -225,7 +227,7 @@ TEST_F(KernelTests, GivenKernelNumArgsWhenGettingInfoThenNumberOfKernelArgsIsRet
     size_t paramValueSizeRet = 0;
 
     // get size
-    retVal = pKernel->getInfo(
+    retVal = kernel->getInfo(
         paramName,
         paramValueSize,
         &paramValue,
@@ -244,7 +246,7 @@ TEST_F(KernelTests, GivenKernelProgramWhenGettingInfoThenProgramIsReturned) {
     cl_program prog = pProgram;
 
     // get size
-    retVal = pKernel->getInfo(
+    retVal = kernel->getInfo(
         paramName,
         paramValueSize,
         &paramValue,
@@ -263,7 +265,7 @@ TEST_F(KernelTests, GivenKernelContextWhenGettingInfoThenKernelContextIsReturned
     cl_context context = pContext;
 
     // get size
-    retVal = pKernel->getInfo(
+    retVal = kernel->getInfo(
         paramName,
         paramValueSize,
         &paramValue,
@@ -281,9 +283,9 @@ TEST_F(KernelTests, GivenKernelWorkGroupSizeWhenGettingWorkGroupInfoThenWorkGrou
     size_t paramValueSizeRet = 0;
 
     auto kernelMaxWorkGroupSize = pDevice->getDeviceInfo().maxWorkGroupSize - 1;
-    pKernel->maxKernelWorkGroupSize = static_cast<uint32_t>(kernelMaxWorkGroupSize);
+    kernel->maxKernelWorkGroupSize = static_cast<uint32_t>(kernelMaxWorkGroupSize);
 
-    retVal = pKernel->getWorkGroupInfo(
+    retVal = kernel->getWorkGroupInfo(
         paramName,
         paramValueSize,
         &paramValue,
@@ -300,7 +302,7 @@ TEST_F(KernelTests, GivenKernelCompileWorkGroupSizeWhenGettingWorkGroupInfoThenC
     size_t paramValueSize = sizeof(paramValue);
     size_t paramValueSizeRet = 0;
 
-    retVal = pKernel->getWorkGroupInfo(
+    retVal = kernel->getWorkGroupInfo(
         paramName,
         paramValueSize,
         &paramValue,
@@ -366,7 +368,7 @@ TEST_F(KernelTests, GivenCFEFusedEUDispatchEnabledAndRequiredDisabledUEFusionWhe
 TEST_F(KernelTests, GivenInvalidParamNameWhenGettingWorkGroupInfoThenInvalidValueErrorIsReturned) {
     size_t paramValueSizeRet = 0x1234u;
 
-    retVal = pKernel->getWorkGroupInfo(
+    retVal = kernel->getWorkGroupInfo(
         0,
         0,
         nullptr,
@@ -377,15 +379,15 @@ TEST_F(KernelTests, GivenInvalidParamNameWhenGettingWorkGroupInfoThenInvalidValu
 }
 
 TEST_F(KernelTests, WhenIsSingleSubdevicePreferredIsCalledThenCorrectValuesAreReturned) {
-    std::unique_ptr<MockKernel> pKernel{MockKernel::create<MockKernel>(pClDevice->getDevice(), pProgram)};
+    std::unique_ptr<MockKernel> kernel{MockKernel::create<MockKernel>(pClDevice->getDevice(), pProgram)};
     for (auto usesSyncBuffer : ::testing::Bool()) {
-        pKernel->getAllocatedKernelInfo()->kernelDescriptor.kernelAttributes.flags.usesSyncBuffer = usesSyncBuffer;
+        kernel->getAllocatedKernelInfo()->kernelDescriptor.kernelAttributes.flags.usesSyncBuffer = usesSyncBuffer;
         for (auto singleSubdevicePreferredInCurrentEnqueue : ::testing::Bool()) {
-            pKernel->singleSubdevicePreferredInCurrentEnqueue = singleSubdevicePreferredInCurrentEnqueue;
+            kernel->singleSubdevicePreferredInCurrentEnqueue = singleSubdevicePreferredInCurrentEnqueue;
 
-            EXPECT_EQ(usesSyncBuffer, pKernel->usesSyncBuffer());
+            EXPECT_EQ(usesSyncBuffer, kernel->usesSyncBuffer());
             auto expectedSingleSubdevicePreferredInCurrentEnqueue = singleSubdevicePreferredInCurrentEnqueue || usesSyncBuffer;
-            EXPECT_EQ(expectedSingleSubdevicePreferredInCurrentEnqueue, pKernel->isSingleSubdevicePreferred());
+            EXPECT_EQ(expectedSingleSubdevicePreferredInCurrentEnqueue, kernel->isSingleSubdevicePreferred());
         }
     }
 }
@@ -415,7 +417,7 @@ TEST_F(KernelFromBinaryTests, GivenKernelNumArgsWhenGettingInfoThenNumberOfKerne
     auto &kernelInfo = pProgram->getKernelInfoForKernel("test");
 
     // create a kernel
-    auto pKernel = Kernel::create(
+    auto kernel = Kernel::create(
         pProgram,
         kernelInfo,
         *pClDevice,
@@ -427,7 +429,7 @@ TEST_F(KernelFromBinaryTests, GivenKernelNumArgsWhenGettingInfoThenNumberOfKerne
     size_t paramValueSizeRet = 0;
 
     // get size
-    retVal = pKernel->getInfo(
+    retVal = kernel->getInfo(
         CL_KERNEL_NUM_ARGS,
         sizeof(cl_uint),
         &paramValue,
@@ -437,7 +439,7 @@ TEST_F(KernelFromBinaryTests, GivenKernelNumArgsWhenGettingInfoThenNumberOfKerne
     EXPECT_EQ(sizeof(cl_uint), paramValueSizeRet);
     EXPECT_EQ(3u, paramValue);
 
-    delete pKernel;
+    delete kernel;
 }
 
 TEST_F(KernelFromBinaryTests, WhenRegularKernelIsCreatedThenItIsNotBuiltIn) {
@@ -454,21 +456,21 @@ TEST_F(KernelFromBinaryTests, WhenRegularKernelIsCreatedThenItIsNotBuiltIn) {
     auto &kernelInfo = pProgram->getKernelInfoForKernel("simple_kernel_0");
 
     // create a kernel
-    auto pKernel = Kernel::create(
+    auto kernel = Kernel::create(
         pProgram,
         kernelInfo,
         *pClDevice,
         &retVal);
 
     ASSERT_EQ(CL_SUCCESS, retVal);
-    ASSERT_NE(nullptr, pKernel);
+    ASSERT_NE(nullptr, kernel);
 
     // get builtIn property
-    bool isBuiltIn = pKernel->isBuiltIn;
+    bool isBuiltIn = kernel->isBuiltIn;
 
     EXPECT_FALSE(isBuiltIn);
 
-    delete pKernel;
+    delete kernel;
 }
 
 TEST_F(KernelFromBinaryTests, givenArgumentDeclaredAsConstantWhenKernelIsCreatedThenArgumentIsMarkedAsReadOnly) {
@@ -503,7 +505,6 @@ class CommandStreamReceiverMock : public CommandStreamReceiver {
     TagAllocatorBase *getTimestampPacketAllocator() override { return nullptr; }
 
     void flushTagUpdate() override{};
-    void flushNonKernelTask(GraphicsAllocation *eventAlloc, uint64_t immediateGpuAddress, uint64_t immediateData, PipeControlArgs &args, bool isWaitOnEvents, bool startOfDispatch, bool endOfDispatch) override{};
     void updateTagFromWait() override{};
     bool isUpdateTagFromWaitEnabled() override { return false; };
 
@@ -541,7 +542,7 @@ class CommandStreamReceiverMock : public CommandStreamReceiver {
     WaitStatus waitForTaskCountWithKmdNotifyFallback(uint32_t taskCountToWait, FlushStamp flushStampToWait, bool quickKmdSleep, QueueThrottle throttle) override {
         return WaitStatus::Ready;
     }
-    uint32_t flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override { return taskCount; };
+    std::optional<uint32_t> flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override { return taskCount; };
 
     CompletionStamp flushTask(
         LinearStream &commandStream,
@@ -596,8 +597,8 @@ TEST_F(KernelPrivateSurfaceTest, WhenChangingResidencyThenCsrResidencySizeIsUpda
     // create kernel
     MockContext context;
     MockProgram program(&context, false, toClDeviceVector(*pClDevice));
-    MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
     // Test it
     auto executionEnvironment = pDevice->getExecutionEnvironment();
@@ -606,13 +607,13 @@ TEST_F(KernelPrivateSurfaceTest, WhenChangingResidencyThenCsrResidencySizeIsUpda
     csr->residency.clear();
     EXPECT_EQ(0u, csr->residency.size());
 
-    pKernel->makeResident(*csr.get());
+    kernel->makeResident(*csr.get());
     EXPECT_EQ(1u, csr->residency.size());
 
-    csr->makeSurfacePackNonResident(csr->getResidencyAllocations());
+    csr->makeSurfacePackNonResident(csr->getResidencyAllocations(), true);
     EXPECT_EQ(0u, csr->residency.size());
 
-    delete pKernel;
+    delete kernel;
 }
 
 TEST_F(KernelPrivateSurfaceTest, givenKernelWithPrivateSurfaceThatIsInUseByGpuWhenKernelIsBeingDestroyedThenAllocationIsAddedToDeferredFreeList) {
@@ -623,21 +624,23 @@ TEST_F(KernelPrivateSurfaceTest, givenKernelWithPrivateSurfaceThatIsInUseByGpuWh
 
     MockContext context;
     MockProgram program(&context, false, toClDeviceVector(*pClDevice));
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
-    pKernel->initialize();
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    kernel->initialize();
 
     auto &csr = pDevice->getGpgpuCommandStreamReceiver();
 
-    auto privateSurface = pKernel->privateSurface;
+    auto privateSurface = kernel->privateSurface;
     auto tagAddress = csr.getTagAddress();
 
     privateSurface->updateTaskCount(*tagAddress + 1, csr.getOsContext().getContextId());
 
     EXPECT_TRUE(csr.getTemporaryAllocations().peekIsEmpty());
-    pKernel.reset(nullptr);
+    EXPECT_TRUE(csr.getDeferredAllocations().peekIsEmpty());
+    kernel.reset(nullptr);
 
-    EXPECT_FALSE(csr.getTemporaryAllocations().peekIsEmpty());
-    EXPECT_EQ(csr.getTemporaryAllocations().peekHead(), privateSurface);
+    EXPECT_TRUE(csr.getTemporaryAllocations().peekIsEmpty());
+    EXPECT_FALSE(csr.getDeferredAllocations().peekIsEmpty());
+    EXPECT_EQ(csr.getDeferredAllocations().peekHead(), privateSurface);
 }
 
 TEST_F(KernelPrivateSurfaceTest, WhenPrivateSurfaceAllocationFailsThenOutOfResourcesErrorIsReturned) {
@@ -652,14 +655,14 @@ TEST_F(KernelPrivateSurfaceTest, WhenPrivateSurfaceAllocationFailsThenOutOfResou
     MockContext context;
     MockProgram program(&context, false, toClDeviceVector(*pClDevice));
     MemoryManagementFixture::InjectedFunction method = [&](size_t failureIndex) {
-        MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+        MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
         if (MemoryManagement::nonfailingAllocation == failureIndex) {
-            EXPECT_EQ(CL_SUCCESS, pKernel->initialize());
+            EXPECT_EQ(CL_SUCCESS, kernel->initialize());
         } else {
-            EXPECT_EQ(CL_OUT_OF_RESOURCES, pKernel->initialize());
+            EXPECT_EQ(CL_OUT_OF_RESOURCES, kernel->initialize());
         }
-        delete pKernel;
+        delete kernel;
     };
     auto f = new MemoryManagementFixture();
     f->SetUp();
@@ -680,13 +683,13 @@ TEST_F(KernelPrivateSurfaceTest, given32BitDeviceWhenKernelIsCreatedThenPrivateS
         // create kernel
         MockContext context;
         MockProgram program(&context, false, toClDeviceVector(*pClDevice));
-        MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+        MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
-        ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+        ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-        EXPECT_TRUE(pKernel->privateSurface->is32BitAllocation());
+        EXPECT_TRUE(kernel->privateSurface->is32BitAllocation());
 
-        delete pKernel;
+        delete kernel;
     }
 }
 
@@ -701,28 +704,28 @@ HWTEST_F(KernelPrivateSurfaceTest, givenStatefulKernelWhenKernelIsCreatedThenPri
     MockProgram program(&context, false, toClDeviceVector(*pClDevice));
 
     // create kernel
-    MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+    MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
     // setup surface state heap
     char surfaceStateHeap[0x80];
     pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
     pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_NE(0u, pKernel->getSurfaceStateHeapSize());
+    EXPECT_NE(0u, kernel->getSurfaceStateHeapSize());
 
-    auto bufferAddress = pKernel->privateSurface->getGpuAddress();
+    auto bufferAddress = kernel->privateSurface->getGpuAddress();
 
     typedef typename FamilyType::RENDER_SURFACE_STATE RENDER_SURFACE_STATE;
     auto surfaceState = reinterpret_cast<const RENDER_SURFACE_STATE *>(
-        ptrOffset(pKernel->getSurfaceStateHeap(),
+        ptrOffset(kernel->getSurfaceStateHeap(),
                   pKernelInfo->kernelDescriptor.payloadMappings.implicitArgs.privateMemoryAddress.bindful));
     auto surfaceAddress = surfaceState->getSurfaceBaseAddress();
 
     EXPECT_EQ(bufferAddress, surfaceAddress);
 
-    delete pKernel;
+    delete kernel;
 }
 
 TEST_F(KernelPrivateSurfaceTest, givenStatelessKernelWhenKernelIsCreatedThenPrivateMemorySurfaceStateIsNotPatched) {
@@ -741,15 +744,15 @@ TEST_F(KernelPrivateSurfaceTest, givenStatelessKernelWhenKernelIsCreatedThenPriv
     program.setConstantSurface(&gfxAlloc);
 
     // create kernel
-    MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+    MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_EQ(0u, pKernel->getSurfaceStateHeapSize());
-    EXPECT_EQ(nullptr, pKernel->getSurfaceStateHeap());
+    EXPECT_EQ(0u, kernel->getSurfaceStateHeapSize());
+    EXPECT_EQ(nullptr, kernel->getSurfaceStateHeap());
 
     program.setConstantSurface(nullptr);
-    delete pKernel;
+    delete kernel;
 }
 
 TEST_F(KernelPrivateSurfaceTest, givenNullDataParameterStreamWhenGettingConstantBufferSizeThenZeroIsReturned) {
@@ -772,12 +775,12 @@ TEST_F(KernelPrivateSurfaceTest, GivenKernelWhenPrivateSurfaceTooBigAndGpuPointe
 
     MockContext context;
     MockProgram program(&context, false, toClDeviceVector(*pClDevice));
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
     pKernelInfo->kernelDescriptor.kernelAttributes.gpuPointerSize = 4;
     pDevice->getMemoryManager()->setForce32BitAllocations(false);
     if (pDevice->getDeviceInfo().computeUnitsUsedForScratch == 0)
         pDevice->deviceInfo.computeUnitsUsedForScratch = 120;
-    EXPECT_EQ(CL_OUT_OF_RESOURCES, pKernel->initialize());
+    EXPECT_EQ(CL_OUT_OF_RESOURCES, kernel->initialize());
 }
 
 TEST_F(KernelPrivateSurfaceTest, GivenKernelWhenPrivateSurfaceTooBigAndGpuPointerSize4And32BitAllocationsThenReturnOutOfResources) {
@@ -787,12 +790,12 @@ TEST_F(KernelPrivateSurfaceTest, GivenKernelWhenPrivateSurfaceTooBigAndGpuPointe
 
     MockContext context;
     MockProgram program(&context, false, toClDeviceVector(*pClDevice));
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
     pKernelInfo->kernelDescriptor.kernelAttributes.gpuPointerSize = 4;
     pDevice->getMemoryManager()->setForce32BitAllocations(true);
     if (pDevice->getDeviceInfo().computeUnitsUsedForScratch == 0)
         pDevice->deviceInfo.computeUnitsUsedForScratch = 120;
-    EXPECT_EQ(CL_OUT_OF_RESOURCES, pKernel->initialize());
+    EXPECT_EQ(CL_OUT_OF_RESOURCES, kernel->initialize());
 }
 
 TEST_F(KernelPrivateSurfaceTest, GivenKernelWhenPrivateSurfaceTooBigAndGpuPointerSize8And32BitAllocationsThenReturnOutOfResources) {
@@ -802,12 +805,12 @@ TEST_F(KernelPrivateSurfaceTest, GivenKernelWhenPrivateSurfaceTooBigAndGpuPointe
 
     MockContext context;
     MockProgram program(&context, false, toClDeviceVector(*pClDevice));
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
     pKernelInfo->kernelDescriptor.kernelAttributes.gpuPointerSize = 8;
     pDevice->getMemoryManager()->setForce32BitAllocations(true);
     if (pDevice->getDeviceInfo().computeUnitsUsedForScratch == 0)
         pDevice->deviceInfo.computeUnitsUsedForScratch = 120;
-    EXPECT_EQ(CL_OUT_OF_RESOURCES, pKernel->initialize());
+    EXPECT_EQ(CL_OUT_OF_RESOURCES, kernel->initialize());
 }
 
 TEST_F(KernelGlobalSurfaceTest, givenBuiltInKernelWhenKernelIsCreatedThenGlobalSurfaceIsPatchedWithCpuAddress) {
@@ -818,23 +821,23 @@ TEST_F(KernelGlobalSurfaceTest, givenBuiltInKernelWhenKernelIsCreatedThenGlobalS
 
     char buffer[16];
 
-    GraphicsAllocation gfxAlloc(0, AllocationType::UNKNOWN, buffer, (uint64_t)buffer - 8u, 8, static_cast<osHandle>(1u), MemoryPool::MemoryNull);
+    GraphicsAllocation gfxAlloc(0, AllocationType::UNKNOWN, buffer, (uint64_t)buffer - 8u, 8, static_cast<osHandle>(1u), MemoryPool::MemoryNull, MemoryManager::maxOsContextCount);
     uint64_t bufferAddress = (uint64_t)gfxAlloc.getUnderlyingBuffer();
 
     // create kernel
     MockContext context;
     MockProgram program(&context, false, toClDeviceVector(*pClDevice));
     program.setGlobalSurface(&gfxAlloc);
-    MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+    MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
-    pKernel->isBuiltIn = true;
+    kernel->isBuiltIn = true;
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_EQ(bufferAddress, *(uint64_t *)pKernel->getCrossThreadData());
+    EXPECT_EQ(bufferAddress, *(uint64_t *)kernel->getCrossThreadData());
 
     program.setGlobalSurface(nullptr);
-    delete pKernel;
+    delete kernel;
 }
 
 TEST_F(KernelGlobalSurfaceTest, givenNDRangeKernelWhenKernelIsCreatedThenGlobalSurfaceIsPatchedWithBaseAddressOffset) {
@@ -844,22 +847,23 @@ TEST_F(KernelGlobalSurfaceTest, givenNDRangeKernelWhenKernelIsCreatedThenGlobalS
     pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = 32;
 
     char buffer[16];
-
-    GraphicsAllocation gfxAlloc(0, AllocationType::UNKNOWN, buffer, (uint64_t)buffer - 8u, 8, MemoryPool::MemoryNull, 0u);
+    auto gmmHelper = pDevice->getGmmHelper();
+    auto canonizedGpuAddress = gmmHelper->canonize(castToUint64(buffer));
+    GraphicsAllocation gfxAlloc(0, AllocationType::UNKNOWN, buffer, (uint64_t)buffer - 8u, 8, MemoryPool::MemoryNull, 0u, canonizedGpuAddress);
     uint64_t bufferAddress = gfxAlloc.getGpuAddress();
 
     // create kernel
     MockProgram program(toClDeviceVector(*pClDevice));
     program.setGlobalSurface(&gfxAlloc);
-    MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+    MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_EQ(bufferAddress, *(uint64_t *)pKernel->getCrossThreadData());
+    EXPECT_EQ(bufferAddress, *(uint64_t *)kernel->getCrossThreadData());
 
     program.setGlobalSurface(nullptr);
 
-    delete pKernel;
+    delete kernel;
 }
 
 HWTEST_F(KernelGlobalSurfaceTest, givenStatefulKernelWhenKernelIsCreatedThenGlobalMemorySurfaceStateIsPatchedWithCpuAddress) {
@@ -881,27 +885,27 @@ HWTEST_F(KernelGlobalSurfaceTest, givenStatefulKernelWhenKernelIsCreatedThenGlob
     program.setGlobalSurface(&gfxAlloc);
 
     // create kernel
-    MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+    MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
     // setup surface state heap
     char surfaceStateHeap[0x80];
     pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
     pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_NE(0u, pKernel->getSurfaceStateHeapSize());
+    EXPECT_NE(0u, kernel->getSurfaceStateHeapSize());
 
     typedef typename FamilyType::RENDER_SURFACE_STATE RENDER_SURFACE_STATE;
     auto surfaceState = reinterpret_cast<const RENDER_SURFACE_STATE *>(
-        ptrOffset(pKernel->getSurfaceStateHeap(),
+        ptrOffset(kernel->getSurfaceStateHeap(),
                   pKernelInfo->kernelDescriptor.payloadMappings.implicitArgs.globalVariablesSurfaceAddress.bindful));
     auto surfaceAddress = surfaceState->getSurfaceBaseAddress();
 
     EXPECT_EQ(bufferAddress, surfaceAddress);
 
     program.setGlobalSurface(nullptr);
-    delete pKernel;
+    delete kernel;
 }
 
 TEST_F(KernelGlobalSurfaceTest, givenStatelessKernelWhenKernelIsCreatedThenGlobalMemorySurfaceStateIsNotPatched) {
@@ -919,15 +923,15 @@ TEST_F(KernelGlobalSurfaceTest, givenStatelessKernelWhenKernelIsCreatedThenGloba
     program.setGlobalSurface(&gfxAlloc);
 
     // create kernel
-    MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+    MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_EQ(0u, pKernel->getSurfaceStateHeapSize());
-    EXPECT_EQ(nullptr, pKernel->getSurfaceStateHeap());
+    EXPECT_EQ(0u, kernel->getSurfaceStateHeapSize());
+    EXPECT_EQ(nullptr, kernel->getSurfaceStateHeap());
 
     program.setGlobalSurface(nullptr);
-    delete pKernel;
+    delete kernel;
 }
 
 TEST_F(KernelConstantSurfaceTest, givenBuiltInKernelWhenKernelIsCreatedThenConstantSurfaceIsPatchedWithCpuAddress) {
@@ -938,22 +942,22 @@ TEST_F(KernelConstantSurfaceTest, givenBuiltInKernelWhenKernelIsCreatedThenConst
 
     char buffer[16];
 
-    GraphicsAllocation gfxAlloc(0, AllocationType::UNKNOWN, buffer, (uint64_t)buffer - 8u, 8, static_cast<osHandle>(1u), MemoryPool::MemoryNull);
+    GraphicsAllocation gfxAlloc(0, AllocationType::UNKNOWN, buffer, (uint64_t)buffer - 8u, 8, static_cast<osHandle>(1u), MemoryPool::MemoryNull, MemoryManager::maxOsContextCount);
     uint64_t bufferAddress = (uint64_t)gfxAlloc.getUnderlyingBuffer();
 
     // create kernel
     MockProgram program(toClDeviceVector(*pClDevice));
     program.setConstantSurface(&gfxAlloc);
-    MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+    MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
-    pKernel->isBuiltIn = true;
+    kernel->isBuiltIn = true;
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_EQ(bufferAddress, *(uint64_t *)pKernel->getCrossThreadData());
+    EXPECT_EQ(bufferAddress, *(uint64_t *)kernel->getCrossThreadData());
 
     program.setConstantSurface(nullptr);
-    delete pKernel;
+    delete kernel;
 }
 
 TEST_F(KernelConstantSurfaceTest, givenNDRangeKernelWhenKernelIsCreatedThenConstantSurfaceIsPatchedWithBaseAddressOffset) {
@@ -963,22 +967,23 @@ TEST_F(KernelConstantSurfaceTest, givenNDRangeKernelWhenKernelIsCreatedThenConst
     pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = 32;
 
     char buffer[16];
-
-    GraphicsAllocation gfxAlloc(0, AllocationType::UNKNOWN, buffer, (uint64_t)buffer - 8u, 8, MemoryPool::MemoryNull, 0u);
+    auto gmmHelper = pDevice->getGmmHelper();
+    auto canonizedGpuAddress = gmmHelper->canonize(castToUint64(buffer));
+    GraphicsAllocation gfxAlloc(0, AllocationType::UNKNOWN, buffer, (uint64_t)buffer - 8u, 8, MemoryPool::MemoryNull, 0u, canonizedGpuAddress);
     uint64_t bufferAddress = gfxAlloc.getGpuAddress();
 
     // create kernel
     MockProgram program(toClDeviceVector(*pClDevice));
     program.setConstantSurface(&gfxAlloc);
-    MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+    MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_EQ(bufferAddress, *(uint64_t *)pKernel->getCrossThreadData());
+    EXPECT_EQ(bufferAddress, *(uint64_t *)kernel->getCrossThreadData());
 
     program.setConstantSurface(nullptr);
 
-    delete pKernel;
+    delete kernel;
 }
 
 HWTEST_F(KernelConstantSurfaceTest, givenStatefulKernelWhenKernelIsCreatedThenConstantMemorySurfaceStateIsPatchedWithCpuAddress) {
@@ -997,27 +1002,27 @@ HWTEST_F(KernelConstantSurfaceTest, givenStatefulKernelWhenKernelIsCreatedThenCo
     program.setConstantSurface(&gfxAlloc);
 
     // create kernel
-    MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+    MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
     // setup surface state heap
     char surfaceStateHeap[0x80];
     pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
     pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_NE(0u, pKernel->getSurfaceStateHeapSize());
+    EXPECT_NE(0u, kernel->getSurfaceStateHeapSize());
 
     typedef typename FamilyType::RENDER_SURFACE_STATE RENDER_SURFACE_STATE;
     auto surfaceState = reinterpret_cast<const RENDER_SURFACE_STATE *>(
-        ptrOffset(pKernel->getSurfaceStateHeap(),
+        ptrOffset(kernel->getSurfaceStateHeap(),
                   pKernelInfo->kernelDescriptor.payloadMappings.implicitArgs.globalConstantsSurfaceAddress.bindful));
     auto surfaceAddress = surfaceState->getSurfaceBaseAddress();
 
     EXPECT_EQ(bufferAddress, surfaceAddress);
 
     program.setConstantSurface(nullptr);
-    delete pKernel;
+    delete kernel;
 }
 
 TEST_F(KernelConstantSurfaceTest, givenStatelessKernelWhenKernelIsCreatedThenConstantMemorySurfaceStateIsNotPatched) {
@@ -1035,15 +1040,15 @@ TEST_F(KernelConstantSurfaceTest, givenStatelessKernelWhenKernelIsCreatedThenCon
     program.setConstantSurface(&gfxAlloc);
 
     // create kernel
-    MockKernel *pKernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
+    MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_EQ(0u, pKernel->getSurfaceStateHeapSize());
-    EXPECT_EQ(nullptr, pKernel->getSurfaceStateHeap());
+    EXPECT_EQ(0u, kernel->getSurfaceStateHeapSize());
+    EXPECT_EQ(nullptr, kernel->getSurfaceStateHeap());
 
     program.setConstantSurface(nullptr);
-    delete pKernel;
+    delete kernel;
 }
 
 typedef Test<ClDeviceFixture> KernelResidencyTest;
@@ -1070,14 +1075,14 @@ HWTEST_F(KernelResidencyTest, givenKernelWhenMakeResidentIsCalledThenKernelIsaIs
     MockProgram program(toClDeviceVector(*pClDevice));
     MockContext ctx;
     program.setContext(&ctx);
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
-    pKernel->setCrossThreadData(pCrossThreadData, sizeof(pCrossThreadData));
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
+    kernel->setCrossThreadData(pCrossThreadData, sizeof(pCrossThreadData));
 
     EXPECT_EQ(0u, commandStreamReceiver.makeResidentAllocations.size());
-    pKernel->makeResident(pDevice->getGpgpuCommandStreamReceiver());
+    kernel->makeResident(pDevice->getGpgpuCommandStreamReceiver());
     EXPECT_EQ(1u, commandStreamReceiver.makeResidentAllocations.size());
-    EXPECT_TRUE(commandStreamReceiver.isMadeResident(pKernel->getKernelInfo().getGraphicsAllocation()));
+    EXPECT_TRUE(commandStreamReceiver.isMadeResident(kernel->getKernelInfo().getGraphicsAllocation()));
 
     memoryManager->freeGraphicsMemory(pKernelInfo->kernelAllocation);
 }
@@ -1097,16 +1102,16 @@ HWTEST_F(KernelResidencyTest, givenKernelWhenMakeResidentIsCalledThenExportedFun
     program.buildInfos[pDevice->getRootDeviceIndex()].exportedFunctionsSurface = exportedFunctionsSurface.get();
     MockContext ctx;
     program.setContext(&ctx);
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
     EXPECT_EQ(0u, commandStreamReceiver.makeResidentAllocations.size());
-    pKernel->makeResident(pDevice->getGpgpuCommandStreamReceiver());
+    kernel->makeResident(pDevice->getGpgpuCommandStreamReceiver());
     EXPECT_TRUE(commandStreamReceiver.isMadeResident(program.buildInfos[pDevice->getRootDeviceIndex()].exportedFunctionsSurface));
 
     // check getResidency as well
     std::vector<NEO::Surface *> residencySurfaces;
-    pKernel->getResidency(residencySurfaces);
+    kernel->getResidency(residencySurfaces);
     std::unique_ptr<NEO::ExecutionEnvironment> mockCsrExecEnv = std::make_unique<ExecutionEnvironment>();
     mockCsrExecEnv->prepareRootDeviceEnvironments(1);
     mockCsrExecEnv->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
@@ -1138,15 +1143,15 @@ HWTEST_F(KernelResidencyTest, givenKernelWhenMakeResidentIsCalledThenGlobalBuffe
     MockContext ctx;
     program.setContext(&ctx);
     program.buildInfos[pDevice->getRootDeviceIndex()].globalSurface = new MockGraphicsAllocation();
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
     EXPECT_EQ(0u, commandStreamReceiver.makeResidentAllocations.size());
-    pKernel->makeResident(pDevice->getGpgpuCommandStreamReceiver());
+    kernel->makeResident(pDevice->getGpgpuCommandStreamReceiver());
     EXPECT_TRUE(commandStreamReceiver.isMadeResident(program.buildInfos[pDevice->getRootDeviceIndex()].globalSurface));
 
     std::vector<NEO::Surface *> residencySurfaces;
-    pKernel->getResidency(residencySurfaces);
+    kernel->getResidency(residencySurfaces);
     std::unique_ptr<NEO::ExecutionEnvironment> mockCsrExecEnv = std::make_unique<ExecutionEnvironment>();
     mockCsrExecEnv->prepareRootDeviceEnvironments(1);
     mockCsrExecEnv->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
@@ -1311,7 +1316,13 @@ HWTEST_F(KernelResidencyTest, givenSharedUnifiedMemoryAndNotRequiredMemSyncWhenM
 
     EXPECT_EQ(mockPageFaultManager->transferToCpuCalled, 0);
     auto gpuAllocation = unifiedMemoryGraphicsAllocation->gpuAllocations.getGraphicsAllocation(pDevice->getRootDeviceIndex());
-    mockKernel.mockKernel->kernelArguments[0] = {Kernel::kernelArgType::SVM_ALLOC_OBJ, gpuAllocation, unifiedMemoryAllocation, 4096u, gpuAllocation, sizeof(uintptr_t)};
+    mockKernel.mockKernel->kernelArguments[0] = {
+        sizeof(uintptr_t),
+        gpuAllocation,
+        unifiedMemoryAllocation,
+        4096u,
+        gpuAllocation,
+        Kernel::kernelArgType::SVM_ALLOC_OBJ};
     mockKernel.mockKernel->setUnifiedMemorySyncRequirement(false);
 
     mockKernel.mockKernel->makeResident(commandStreamReceiver);
@@ -1322,6 +1333,69 @@ HWTEST_F(KernelResidencyTest, givenSharedUnifiedMemoryAndNotRequiredMemSyncWhenM
     EXPECT_EQ(mockPageFaultManager->transferToGpuCalled, 0);
 
     EXPECT_EQ(0u, mockKernel.mockKernel->kernelUnifiedMemoryGfxAllocations.size());
+    svmAllocationsManager->freeSVMAlloc(unifiedMemoryAllocation);
+}
+
+class MockGeneralSurface : public GeneralSurface {
+  public:
+    using GeneralSurface::needsMigration;
+};
+
+HWTEST_F(KernelResidencyTest, givenSvmArgWhenKernelDoesNotRequireUnifiedMemorySyncThenSurfaceDoesNotNeedMigration) {
+    auto mockPageFaultManager = new MockPageFaultManager();
+    static_cast<MockMemoryManager *>(this->pDevice->getExecutionEnvironment()->memoryManager.get())->pageFaultManager.reset(mockPageFaultManager);
+    MockKernelWithInternals mockKernel(*this->pClDevice, nullptr, true);
+
+    auto svmAllocationsManager = mockKernel.mockContext->getSVMAllocsManager();
+    auto sharedProperties = SVMAllocsManager::UnifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY, mockKernel.mockContext->getRootDeviceIndices(), mockKernel.mockContext->getDeviceBitfields());
+    auto unifiedMemoryAllocation = svmAllocationsManager->createSharedUnifiedMemoryAllocation(4096u, sharedProperties, mockKernel.mockContext->getSpecialQueue(pDevice->getRootDeviceIndex()));
+    auto unifiedMemoryGraphicsAllocation = svmAllocationsManager->getSVMAlloc(unifiedMemoryAllocation);
+    mockPageFaultManager->insertAllocation(unifiedMemoryAllocation, 4096u, svmAllocationsManager, mockKernel.mockContext->getSpecialQueue(pDevice->getRootDeviceIndex()), {});
+
+    auto gpuAllocation = unifiedMemoryGraphicsAllocation->gpuAllocations.getGraphicsAllocation(pDevice->getRootDeviceIndex());
+    mockKernel.mockKernel->kernelArguments[0] = {
+        sizeof(uintptr_t),
+        gpuAllocation,
+        unifiedMemoryAllocation,
+        4096u,
+        gpuAllocation,
+        Kernel::kernelArgType::SVM_ALLOC_OBJ};
+    mockKernel.mockKernel->setUnifiedMemorySyncRequirement(false);
+    std::vector<NEO::Surface *> residencySurfaces;
+    mockKernel.mockKernel->getResidency(residencySurfaces);
+    EXPECT_FALSE(reinterpret_cast<MockGeneralSurface *>(residencySurfaces[0])->needsMigration);
+    for (auto surface : residencySurfaces) {
+        delete surface;
+    }
+    svmAllocationsManager->freeSVMAlloc(unifiedMemoryAllocation);
+}
+
+HWTEST_F(KernelResidencyTest, givenSvmArgWhenKernelRequireUnifiedMemorySyncThenSurfaceNeedMigration) {
+    auto mockPageFaultManager = new MockPageFaultManager();
+    static_cast<MockMemoryManager *>(this->pDevice->getExecutionEnvironment()->memoryManager.get())->pageFaultManager.reset(mockPageFaultManager);
+    MockKernelWithInternals mockKernel(*this->pClDevice, nullptr, true);
+
+    auto svmAllocationsManager = mockKernel.mockContext->getSVMAllocsManager();
+    auto sharedProperties = SVMAllocsManager::UnifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY, mockKernel.mockContext->getRootDeviceIndices(), mockKernel.mockContext->getDeviceBitfields());
+    auto unifiedMemoryAllocation = svmAllocationsManager->createSharedUnifiedMemoryAllocation(4096u, sharedProperties, mockKernel.mockContext->getSpecialQueue(pDevice->getRootDeviceIndex()));
+    auto unifiedMemoryGraphicsAllocation = svmAllocationsManager->getSVMAlloc(unifiedMemoryAllocation);
+    mockPageFaultManager->insertAllocation(unifiedMemoryAllocation, 4096u, svmAllocationsManager, mockKernel.mockContext->getSpecialQueue(pDevice->getRootDeviceIndex()), {});
+
+    auto gpuAllocation = unifiedMemoryGraphicsAllocation->gpuAllocations.getGraphicsAllocation(pDevice->getRootDeviceIndex());
+    mockKernel.mockKernel->kernelArguments[0] = {
+        sizeof(uintptr_t),
+        gpuAllocation,
+        unifiedMemoryAllocation,
+        4096u,
+        gpuAllocation,
+        Kernel::kernelArgType::SVM_ALLOC_OBJ};
+    mockKernel.mockKernel->setUnifiedMemorySyncRequirement(true);
+    std::vector<NEO::Surface *> residencySurfaces;
+    mockKernel.mockKernel->getResidency(residencySurfaces);
+    EXPECT_TRUE(reinterpret_cast<MockGeneralSurface *>(residencySurfaces[0])->needsMigration);
+    for (auto surface : residencySurfaces) {
+        delete surface;
+    }
     svmAllocationsManager->freeSVMAlloc(unifiedMemoryAllocation);
 }
 
@@ -1339,7 +1413,13 @@ HWTEST_F(KernelResidencyTest, givenSharedUnifiedMemoryRequiredMemSyncWhenMakeRes
 
     auto gpuAllocation = unifiedMemoryGraphicsAllocation->gpuAllocations.getGraphicsAllocation(pDevice->getRootDeviceIndex());
     EXPECT_EQ(mockPageFaultManager->transferToCpuCalled, 0);
-    mockKernel.mockKernel->kernelArguments[0] = {Kernel::kernelArgType::SVM_ALLOC_OBJ, gpuAllocation, unifiedMemoryAllocation, 4096u, gpuAllocation, sizeof(uintptr_t)};
+    mockKernel.mockKernel->kernelArguments[0] = {
+        sizeof(uintptr_t),
+        gpuAllocation,
+        unifiedMemoryAllocation,
+        4096u,
+        gpuAllocation,
+        Kernel::kernelArgType::SVM_ALLOC_OBJ};
     mockKernel.mockKernel->setUnifiedMemorySyncRequirement(true);
 
     mockKernel.mockKernel->makeResident(commandStreamReceiver);
@@ -1614,10 +1694,10 @@ HWTEST_F(KernelResidencyTest, givenKernelWithNoKernelArgLoadNorKernelArgStoreNor
     MockContext ctx;
     program.setContext(&ctx);
     program.buildInfos[pDevice->getRootDeviceIndex()].globalSurface = new MockGraphicsAllocation();
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_FALSE(pKernel->getHasIndirectAccess());
+    EXPECT_FALSE(kernel->getHasIndirectAccess());
 
     memoryManager->freeGraphicsMemory(pKernelInfo->kernelAllocation);
 }
@@ -1639,10 +1719,10 @@ HWTEST_F(KernelResidencyTest, givenKernelWithNoKernelArgLoadThenKernelHasIndirec
     MockContext ctx;
     program.setContext(&ctx);
     program.buildInfos[pDevice->getRootDeviceIndex()].globalSurface = new MockGraphicsAllocation();
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_TRUE(pKernel->getHasIndirectAccess());
+    EXPECT_TRUE(kernel->getHasIndirectAccess());
 
     memoryManager->freeGraphicsMemory(pKernelInfo->kernelAllocation);
 }
@@ -1664,10 +1744,10 @@ HWTEST_F(KernelResidencyTest, givenKernelWithNoKernelArgStoreThenKernelHasIndire
     MockContext ctx;
     program.setContext(&ctx);
     program.buildInfos[pDevice->getRootDeviceIndex()].globalSurface = new MockGraphicsAllocation();
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_TRUE(pKernel->getHasIndirectAccess());
+    EXPECT_TRUE(kernel->getHasIndirectAccess());
 
     memoryManager->freeGraphicsMemory(pKernelInfo->kernelAllocation);
 }
@@ -1689,10 +1769,10 @@ HWTEST_F(KernelResidencyTest, givenKernelWithNoKernelArgAtomicThenKernelHasIndir
     MockContext ctx;
     program.setContext(&ctx);
     program.buildInfos[pDevice->getRootDeviceIndex()].globalSurface = new MockGraphicsAllocation();
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
-    EXPECT_TRUE(pKernel->getHasIndirectAccess());
+    EXPECT_TRUE(kernel->getHasIndirectAccess());
 
     memoryManager->freeGraphicsMemory(pKernelInfo->kernelAllocation);
 }
@@ -1833,6 +1913,60 @@ HWTEST_F(KernelResidencyTest, givenSimpleKernelTunningAndNoAtomicsWhenPerformTun
     EXPECT_NE(mockKernel.mockKernel->isSingleSubdevicePreferred(), mockKernel.mockKernel->getKernelInfo().kernelDescriptor.kernelAttributes.flags.useGlobalAtomics);
 }
 
+HWTEST_F(KernelResidencyTest, givenSimpleKernelWhenExecEnvDoesNotHavePageFaultManagerThenPageFaultDoesNotMoveAllocation) {
+    auto mockPageFaultManager = std::make_unique<MockPageFaultManager>();
+    MockKernelWithInternals mockKernel(*this->pClDevice);
+
+    auto svmAllocationsManager = mockKernel.mockContext->getSVMAllocsManager();
+    auto sharedProperties = SVMAllocsManager::UnifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY, mockKernel.mockContext->getRootDeviceIndices(), mockKernel.mockContext->getDeviceBitfields());
+    auto unifiedMemoryAllocation = svmAllocationsManager->createSharedUnifiedMemoryAllocation(4096u, sharedProperties, mockKernel.mockContext->getSpecialQueue(pDevice->getRootDeviceIndex()));
+    auto unifiedMemoryGraphicsAllocation = svmAllocationsManager->getSVMAlloc(unifiedMemoryAllocation);
+    mockPageFaultManager->insertAllocation(reinterpret_cast<void *>(unifiedMemoryGraphicsAllocation->gpuAllocations.getDefaultGraphicsAllocation()->getGpuAddress()), 4096u, svmAllocationsManager, mockKernel.mockContext->getSpecialQueue(pDevice->getRootDeviceIndex()), {});
+
+    Kernel::SimpleKernelArgInfo kernelArgInfo;
+    kernelArgInfo.object = unifiedMemoryGraphicsAllocation->gpuAllocations.getDefaultGraphicsAllocation();
+    kernelArgInfo.type = Kernel::kernelArgType::SVM_ALLOC_OBJ;
+
+    std::vector<Kernel::SimpleKernelArgInfo> kernelArguments;
+    kernelArguments.resize(1);
+    kernelArguments[0] = kernelArgInfo;
+    mockKernel.kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.resize(1);
+    mockKernel.kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[0].as<ArgDescPointer>(true).accessedUsingStatelessAddressingMode = true;
+    mockKernel.mockKernel->setKernelArguments(kernelArguments);
+    mockKernel.mockKernel->kernelArgRequiresCacheFlush.resize(1);
+    EXPECT_EQ(mockPageFaultManager->transferToGpuCalled, 0);
+    svmAllocationsManager->freeSVMAlloc(unifiedMemoryAllocation);
+    static_cast<MockMemoryManager *>(this->pDevice->getExecutionEnvironment()->memoryManager.get())->pageFaultManager.reset();
+}
+
+HWTEST_F(KernelResidencyTest, givenSimpleKernelWhenIsUnifiedMemorySyncRequiredIsFalseThenPageFaultDoesNotMoveAllocation) {
+    auto mockPageFaultManager = new MockPageFaultManager();
+    static_cast<MockMemoryManager *>(this->pDevice->getExecutionEnvironment()->memoryManager.get())->pageFaultManager.reset(mockPageFaultManager);
+    MockKernelWithInternals mockKernel(*this->pClDevice);
+
+    auto svmAllocationsManager = mockKernel.mockContext->getSVMAllocsManager();
+    auto sharedProperties = SVMAllocsManager::UnifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY, mockKernel.mockContext->getRootDeviceIndices(), mockKernel.mockContext->getDeviceBitfields());
+    auto unifiedMemoryAllocation = svmAllocationsManager->createSharedUnifiedMemoryAllocation(4096u, sharedProperties, mockKernel.mockContext->getSpecialQueue(pDevice->getRootDeviceIndex()));
+    auto unifiedMemoryGraphicsAllocation = svmAllocationsManager->getSVMAlloc(unifiedMemoryAllocation);
+    mockPageFaultManager->insertAllocation(reinterpret_cast<void *>(unifiedMemoryGraphicsAllocation->gpuAllocations.getDefaultGraphicsAllocation()->getGpuAddress()), 4096u, svmAllocationsManager, mockKernel.mockContext->getSpecialQueue(pDevice->getRootDeviceIndex()), {});
+
+    Kernel::SimpleKernelArgInfo kernelArgInfo;
+    kernelArgInfo.object = unifiedMemoryGraphicsAllocation->gpuAllocations.getDefaultGraphicsAllocation();
+    kernelArgInfo.type = Kernel::kernelArgType::SVM_ALLOC_OBJ;
+
+    std::vector<Kernel::SimpleKernelArgInfo> kernelArguments;
+    kernelArguments.resize(1);
+    kernelArguments[0] = kernelArgInfo;
+    mockKernel.kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.resize(1);
+    mockKernel.kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[0].as<ArgDescPointer>(true).accessedUsingStatelessAddressingMode = true;
+    mockKernel.mockKernel->setKernelArguments(kernelArguments);
+    mockKernel.mockKernel->kernelArgRequiresCacheFlush.resize(1);
+    mockKernel.mockKernel->isUnifiedMemorySyncRequired = false;
+    EXPECT_EQ(mockPageFaultManager->transferToGpuCalled, 0);
+    svmAllocationsManager->freeSVMAlloc(unifiedMemoryAllocation);
+    static_cast<MockMemoryManager *>(this->pDevice->getExecutionEnvironment()->memoryManager.get())->pageFaultManager.reset();
+}
+
 TEST(KernelImageDetectionTests, givenKernelWithImagesOnlyWhenItIsAskedIfItHasImagesOnlyThenTrueIsReturned) {
     auto pKernelInfo = std::make_unique<MockKernelInfo>();
     pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = 1;
@@ -1937,11 +2071,11 @@ HWTEST_F(KernelResidencyTest, WhenMakingArgsResidentThenImageFromImageCheckIsCor
 
     auto program = std::make_unique<MockProgram>(toClDeviceVector(*pClDevice));
     program->setContext(&context);
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(program.get(), *pKernelInfo, *pClDevice));
+    std::unique_ptr<MockKernel> kernel(new MockKernel(program.get(), *pKernelInfo, *pClDevice));
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
-    pKernel->storeKernelArg(0, Kernel::IMAGE_OBJ, (cl_mem)imageY.get(), NULL, 0);
-    pKernel->makeResident(pDevice->getGpgpuCommandStreamReceiver());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
+    kernel->storeKernelArg(0, Kernel::IMAGE_OBJ, (cl_mem)imageY.get(), NULL, 0);
+    kernel->makeResident(pDevice->getGpgpuCommandStreamReceiver());
 
     EXPECT_FALSE(imageNV12->isImageFromImage());
     EXPECT_TRUE(imageY->isImageFromImage());
@@ -1958,17 +2092,17 @@ struct KernelExecutionEnvironmentTest : public Test<ClDeviceFixture> {
         pKernelInfo = std::make_unique<KernelInfo>();
         pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = 32;
 
-        pKernel = new MockKernel(program.get(), *pKernelInfo, *pClDevice);
-        ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+        kernel = new MockKernel(program.get(), *pKernelInfo, *pClDevice);
+        ASSERT_EQ(CL_SUCCESS, kernel->initialize());
     }
 
     void TearDown() override {
-        delete pKernel;
+        delete kernel;
 
         ClDeviceFixture::TearDown();
     }
 
-    MockKernel *pKernel;
+    MockKernel *kernel;
     std::unique_ptr<MockProgram> program;
     std::unique_ptr<KernelInfo> pKernelInfo;
     SPatchExecutionEnvironment executionEnvironment = {};
@@ -2737,8 +2871,21 @@ TEST(KernelTest, givenKernelLocalIdGenerationByRuntimeFalseWhenGettingStartOffse
     auto allocationOffset = mockKernel.kernelInfo.getGraphicsAllocation()->getGpuAddressToPatch();
 
     mockKernel.mockKernel->setStartOffset(128);
-    auto offset = mockKernel.mockKernel->getKernelStartOffset(false, true, false);
+    auto offset = mockKernel.mockKernel->getKernelStartAddress(false, true, false, false);
     EXPECT_EQ(allocationOffset + 256u, offset);
+    device->getMemoryManager()->freeGraphicsMemory(mockKernel.kernelInfo.getGraphicsAllocation());
+}
+
+TEST(KernelTest, givenFullAddressRequestWhenAskingForKernelStartAddressThenReturnFullAddress) {
+    auto device = clUniquePtr(new MockClDevice(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get())));
+
+    MockKernelWithInternals mockKernel(*device);
+
+    mockKernel.kernelInfo.createKernelAllocation(device->getDevice(), false);
+
+    auto address = mockKernel.mockKernel->getKernelStartAddress(false, true, false, true);
+    EXPECT_EQ(mockKernel.kernelInfo.getGraphicsAllocation()->getGpuAddress(), address);
+
     device->getMemoryManager()->freeGraphicsMemory(mockKernel.kernelInfo.getGraphicsAllocation());
 }
 
@@ -2753,7 +2900,7 @@ TEST(KernelTest, givenKernelLocalIdGenerationByRuntimeTrueAndLocalIdsUsedWhenGet
     auto allocationOffset = mockKernel.kernelInfo.getGraphicsAllocation()->getGpuAddressToPatch();
 
     mockKernel.mockKernel->setStartOffset(128);
-    auto offset = mockKernel.mockKernel->getKernelStartOffset(true, true, false);
+    auto offset = mockKernel.mockKernel->getKernelStartAddress(true, true, false, false);
     EXPECT_EQ(allocationOffset + 128u, offset);
     device->getMemoryManager()->freeGraphicsMemory(mockKernel.kernelInfo.getGraphicsAllocation());
 }
@@ -2769,7 +2916,7 @@ TEST(KernelTest, givenKernelLocalIdGenerationByRuntimeFalseAndLocalIdsNotUsedWhe
     auto allocationOffset = mockKernel.kernelInfo.getGraphicsAllocation()->getGpuAddressToPatch();
 
     mockKernel.mockKernel->setStartOffset(128);
-    auto offset = mockKernel.mockKernel->getKernelStartOffset(false, false, false);
+    auto offset = mockKernel.mockKernel->getKernelStartAddress(false, false, false, false);
     EXPECT_EQ(allocationOffset + 128u, offset);
     device->getMemoryManager()->freeGraphicsMemory(mockKernel.kernelInfo.getGraphicsAllocation());
 }
@@ -2874,25 +3021,25 @@ TEST(ArgTypeTraits, GivenDefaultInitializedArgTypeMetadataThenAddressSpaceIsGlob
 TEST_F(KernelTests, givenKernelWithSimdGreaterThan1WhenKernelCreatedThenMaxWorgGroupSizeEqualDeviceProperty) {
     auto pKernelInfo = std::make_unique<MockKernelInfo>();
     pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = 32;
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(pProgram, *pKernelInfo, *pClDevice));
+    std::unique_ptr<MockKernel> kernel(new MockKernel(pProgram, *pKernelInfo, *pClDevice));
 
     auto kernelMaxWorkGroupSize = pDevice->getDeviceInfo().maxWorkGroupSize;
-    EXPECT_EQ(pKernel->getMaxKernelWorkGroupSize(), kernelMaxWorkGroupSize);
+    EXPECT_EQ(kernel->getMaxKernelWorkGroupSize(), kernelMaxWorkGroupSize);
 }
 
 TEST_F(KernelTests, givenKernelWithSimdEqual1WhenKernelCreatedThenMaxWorgGroupSizeExualMaxHwThreadsPerWG) {
     auto pKernelInfo = std::make_unique<MockKernelInfo>();
     pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = 1;
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(pProgram, *pKernelInfo, *pClDevice));
+    std::unique_ptr<MockKernel> kernel(new MockKernel(pProgram, *pKernelInfo, *pClDevice));
 
     auto deviceMaxWorkGroupSize = pDevice->getDeviceInfo().maxWorkGroupSize;
     auto deviceInfo = pClDevice->getDevice().getDeviceInfo();
 
-    auto &hwInfoConfig = *HwInfoConfig::get(pKernel->getHardwareInfo().platform.eProductFamily);
-    auto maxThreadsPerWG = hwInfoConfig.getMaxThreadsForWorkgroupInDSSOrSS(pKernel->getHardwareInfo(), static_cast<uint32_t>(deviceInfo.maxNumEUsPerSubSlice), static_cast<uint32_t>(deviceInfo.maxNumEUsPerDualSubSlice));
+    auto &hwInfoConfig = *HwInfoConfig::get(kernel->getHardwareInfo().platform.eProductFamily);
+    auto maxThreadsPerWG = hwInfoConfig.getMaxThreadsForWorkgroupInDSSOrSS(kernel->getHardwareInfo(), static_cast<uint32_t>(deviceInfo.maxNumEUsPerSubSlice), static_cast<uint32_t>(deviceInfo.maxNumEUsPerDualSubSlice));
 
-    EXPECT_LT(pKernel->getMaxKernelWorkGroupSize(), deviceMaxWorkGroupSize);
-    EXPECT_EQ(pKernel->getMaxKernelWorkGroupSize(), maxThreadsPerWG);
+    EXPECT_LT(kernel->getMaxKernelWorkGroupSize(), deviceMaxWorkGroupSize);
+    EXPECT_EQ(kernel->getMaxKernelWorkGroupSize(), maxThreadsPerWG);
 }
 
 struct KernelLargeGrfTests : Test<ClDeviceFixture> {
@@ -2951,26 +3098,28 @@ HWTEST2_F(KernelConstantSurfaceTest, givenKernelWithConstantSurfaceWhenKernelIsC
     pKernelInfo->setGlobalConstantsSurface(8, 0, 0);
 
     char buffer[MemoryConstants::pageSize64k];
-    GraphicsAllocation gfxAlloc(0, AllocationType::CONSTANT_SURFACE, buffer,
-                                MemoryConstants::pageSize64k, static_cast<osHandle>(8), MemoryPool::MemoryNull, MemoryManager::maxOsContextCount);
+    auto gmmHelper = pDevice->getGmmHelper();
+    auto canonizedGpuAddress = gmmHelper->canonize(castToUint64(buffer));
+    GraphicsAllocation gfxAlloc(0, AllocationType::CONSTANT_SURFACE, buffer, MemoryConstants::pageSize64k,
+                                static_cast<osHandle>(8), MemoryPool::MemoryNull, MemoryManager::maxOsContextCount, canonizedGpuAddress);
 
     MockContext context(pClDevice);
     MockProgram program(&context, false, toClDeviceVector(*pClDevice));
     program.setConstantSurface(&gfxAlloc);
 
     // create kernel
-    std::unique_ptr<MockKernel> pKernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
+    std::unique_ptr<MockKernel> kernel(new MockKernel(&program, *pKernelInfo, *pClDevice));
 
     // setup surface state heap
     char surfaceStateHeap[0x80];
     pKernelInfo->heapInfo.SurfaceStateHeapSize = sizeof(surfaceStateHeap);
     pKernelInfo->heapInfo.pSsh = surfaceStateHeap;
 
-    ASSERT_EQ(CL_SUCCESS, pKernel->initialize());
+    ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     auto surfaceState = reinterpret_cast<const RENDER_SURFACE_STATE *>(
-        ptrOffset(pKernel->getSurfaceStateHeap(),
+        ptrOffset(kernel->getSurfaceStateHeap(),
                   pKernelInfo->kernelDescriptor.payloadMappings.implicitArgs.globalConstantsSurfaceAddress.bindful));
     auto actualMocs = surfaceState->getMemoryObjectControlState();
     const auto expectedMocs = context.getDevice(0)->getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST);
@@ -3109,4 +3258,26 @@ TEST_F(KernelImplicitArgsTest, givenKernelWithoutImplicitArgsWhenSettingKernelPa
     kernel.setNumWorkGroupsValues(3, 2, 1);
 
     EXPECT_EQ(nullptr, kernel.getImplicitArgs());
+}
+
+TEST_F(KernelTests, GivenCorrectAllocationTypeThenFunctionCheckingSystemMemoryReturnsTrue) {
+    std::vector<NEO::AllocationType> systemMemoryAllocationType = {
+        NEO::AllocationType::BUFFER_HOST_MEMORY,
+        NEO::AllocationType::EXTERNAL_HOST_PTR,
+        NEO::AllocationType::SVM_CPU,
+        NEO::AllocationType::SVM_ZERO_COPY};
+
+    for (uint32_t allocationTypeIndex = static_cast<uint32_t>(NEO::AllocationType::UNKNOWN);
+         allocationTypeIndex < static_cast<uint32_t>(NEO::AllocationType::COUNT);
+         allocationTypeIndex++) {
+        auto currentAllocationType = static_cast<NEO::AllocationType>(allocationTypeIndex);
+        bool ret = Kernel::graphicsAllocationTypeUseSystemMemory(currentAllocationType);
+        if (std::find(systemMemoryAllocationType.begin(),
+                      systemMemoryAllocationType.end(),
+                      currentAllocationType) != systemMemoryAllocationType.end()) {
+            EXPECT_TRUE(ret);
+        } else {
+            EXPECT_FALSE(ret);
+        }
+    }
 }

@@ -206,13 +206,18 @@ class MockCommandQueue : public CommandQueue {
     cl_int enqueueResourceBarrier(BarrierCommand *resourceBarrier, cl_uint numEventsInWaitList, const cl_event *eventWaitList,
                                   cl_event *event) override { return CL_SUCCESS; }
 
-    cl_int finish() override { return CL_SUCCESS; }
+    cl_int finish() override {
+        if (finishCalled) {
+            *finishCalled = true;
+        }
+        return CL_SUCCESS;
+    }
 
     cl_int flush() override { return CL_SUCCESS; }
 
     bool obtainTimestampPacketForCacheFlush(bool isCacheFlushRequired) const override { return isCacheFlushRequired; }
 
-    bool waitForTimestamps(uint32_t taskCount) override { return false; };
+    bool waitForTimestamps(Range<CopyEngineState> copyEnginesToWait, uint32_t taskCount) override { return false; };
 
     bool releaseIndirectHeapCalled = false;
 
@@ -227,6 +232,7 @@ class MockCommandQueue : public CommandQueue {
     std::atomic<uint32_t> latestTaskCountWaited{std::numeric_limits<uint32_t>::max()};
     std::optional<WaitStatus> waitUntilCompleteReturnValue{};
     int waitUntilCompleteCalledCount{0};
+    bool *finishCalled = nullptr;
 };
 
 template <typename GfxFamily>
@@ -257,6 +263,7 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     MockCommandQueueHw(Context *context,
                        ClDevice *device,
                        cl_queue_properties *properties) : BaseClass(context, device, properties, false) {
+        this->constructBcsEngine(false);
     }
 
     void clearBcsEngines() {
@@ -282,7 +289,7 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     }
 
     UltCommandStreamReceiver<GfxFamily> &getUltCommandStreamReceiver() {
-        return reinterpret_cast<UltCommandStreamReceiver<GfxFamily> &>(*BaseClass::gpgpuEngine->commandStreamReceiver);
+        return reinterpret_cast<UltCommandStreamReceiver<GfxFamily> &>(BaseClass::getGpgpuCommandStreamReceiver());
     }
 
     cl_int enqueueWriteImage(Image *dstImage,
@@ -347,6 +354,10 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
 
     WaitStatus waitUntilComplete(uint32_t gpgpuTaskCountToWait, Range<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool cleanTemporaryAllocationList, bool skipWait) override {
         latestTaskCountWaited = gpgpuTaskCountToWait;
+        if (waitUntilCompleteReturnValue.has_value()) {
+            return *waitUntilCompleteReturnValue;
+        }
+
         return BaseClass::waitUntilComplete(gpgpuTaskCountToWait, copyEnginesToWait, flushStampToWait, useQuickKmdSleep, cleanTemporaryAllocationList, skipWait);
     }
 
@@ -394,6 +405,7 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     std::atomic<uint32_t> latestTaskCountWaited{std::numeric_limits<uint32_t>::max()};
     bool flushCalled = false;
     std::optional<WaitStatus> waitForAllEnginesReturnValue{};
+    std::optional<WaitStatus> waitUntilCompleteReturnValue{};
     int waitForAllEnginesCalledCount{0};
 
     LinearStream *peekCommandStream() {

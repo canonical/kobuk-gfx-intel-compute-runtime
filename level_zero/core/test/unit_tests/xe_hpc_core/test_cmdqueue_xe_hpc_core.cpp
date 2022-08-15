@@ -9,7 +9,7 @@
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/mocks/mock_command_stream_receiver.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
@@ -45,9 +45,9 @@ struct CommandQueueCreateMultiOrdinalFixture : public DeviceFixture {
     L0::Device *device = nullptr;
 };
 
-using CommandQueueCommandsPvc = Test<DeviceFixture>;
+using CommandQueueCommandsXeHpc = Test<DeviceFixture>;
 
-HWTEST2_F(CommandQueueCommandsPvc, givenCommandQueueWhenExecutingCommandListsThenGlobalFenceAllocationIsResident, IsXeHpcCore) {
+HWTEST2_F(CommandQueueCommandsXeHpc, givenCommandQueueWhenExecutingCommandListsThenGlobalFenceAllocationIsResident, IsXeHpcCore) {
     using STATE_SYSTEM_MEM_FENCE_ADDRESS = typename FamilyType::STATE_SYSTEM_MEM_FENCE_ADDRESS;
     ze_command_queue_desc_t desc = {};
     MockCsrHw2<FamilyType> csr(*neoDevice->getExecutionEnvironment(), 0, neoDevice->getDeviceBitfield());
@@ -76,7 +76,7 @@ HWTEST2_F(CommandQueueCommandsPvc, givenCommandQueueWhenExecutingCommandListsThe
     commandQueue->destroy();
 }
 
-HWTEST2_F(CommandQueueCommandsPvc, givenCommandQueueWhenExecutingCommandListsThenStateSystemMemFenceAddressCmdIsGenerated, IsXeHpcCore) {
+HWTEST2_F(CommandQueueCommandsXeHpc, givenCommandQueueWhenExecutingCommandListsThenStateSystemMemFenceAddressCmdIsGenerated, IsXeHpcCore) {
     using STATE_SYSTEM_MEM_FENCE_ADDRESS = typename FamilyType::STATE_SYSTEM_MEM_FENCE_ADDRESS;
     ze_command_queue_desc_t desc = {};
     auto csr = neoDevice->getDefaultEngine().commandStreamReceiver;
@@ -105,7 +105,7 @@ HWTEST2_F(CommandQueueCommandsPvc, givenCommandQueueWhenExecutingCommandListsThe
     commandQueue->destroy();
 }
 
-HWTEST2_F(CommandQueueCommandsPvc, givenCommandQueueWhenExecutingCommandListsForTheSecondTimeThenStateSystemMemFenceAddressCmdIsNotGenerated, IsXeHpcCore) {
+HWTEST2_F(CommandQueueCommandsXeHpc, givenCommandQueueWhenExecutingCommandListsForTheSecondTimeThenStateSystemMemFenceAddressCmdIsNotGenerated, IsXeHpcCore) {
     using STATE_SYSTEM_MEM_FENCE_ADDRESS = typename FamilyType::STATE_SYSTEM_MEM_FENCE_ADDRESS;
     ze_command_queue_desc_t desc = {};
     auto csr = neoDevice->getDefaultEngine().commandStreamReceiver;
@@ -131,7 +131,7 @@ HWTEST2_F(CommandQueueCommandsPvc, givenCommandQueueWhenExecutingCommandListsFor
     commandQueue->destroy();
 }
 
-HWTEST2_F(CommandQueueCommandsPvc, givenLinkedCopyEngineOrdinalWhenCreatingThenSetAsCopyOnly, IsXeHpcCore) {
+HWTEST2_F(CommandQueueCommandsXeHpc, givenLinkedCopyEngineOrdinalWhenCreatingThenSetAsCopyOnly, IsXeHpcCore) {
     ze_result_t returnValue;
     auto hwInfo = *NEO::defaultHwInfo;
     hwInfo.featureTable.ftrBcsInfo.set(1, true);

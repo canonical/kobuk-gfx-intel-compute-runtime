@@ -35,7 +35,7 @@
 #include "shared/test/common/mocks/windows/mock_wddm_direct_submission.h"
 #include "shared/test/common/os_interface/windows/mock_wddm_memory_manager.h"
 #include "shared/test/common/os_interface/windows/wddm_fixture.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 namespace NEO {
 extern ApiSpecificConfig::ApiType apiTypeForUlts;
@@ -73,20 +73,20 @@ struct MockWddmCsrL0 : public WddmCommandStreamReceiver<GfxFamily> {
         recordedCommandBuffer = std::unique_ptr<CommandBuffer>(new CommandBuffer(device));
     }
 
-    bool initDirectSubmission(Device &device, OsContext &osContext) override {
+    bool initDirectSubmission() override {
         if (callParentInitDirectSubmission) {
-            return WddmCommandStreamReceiver<GfxFamily>::initDirectSubmission(device, osContext);
+            return WddmCommandStreamReceiver<GfxFamily>::initDirectSubmission();
         }
         bool ret = true;
         if (DebugManager.flags.EnableDirectSubmission.get() == 1) {
             if (!initBlitterDirectSubmission) {
                 directSubmission = std::make_unique<
-                    MockWddmDirectSubmission<GfxFamily, RenderDispatcher<GfxFamily>>>(device, osContext);
+                    MockWddmDirectSubmission<GfxFamily, RenderDispatcher<GfxFamily>>>(*this);
                 ret = directSubmission->initialize(true, false);
                 this->dispatchMode = DispatchMode::ImmediateDispatch;
             } else {
                 blitterDirectSubmission = std::make_unique<
-                    MockWddmDirectSubmission<GfxFamily, BlitterDispatcher<GfxFamily>>>(device, osContext);
+                    MockWddmDirectSubmission<GfxFamily, BlitterDispatcher<GfxFamily>>>(*this);
                 blitterDirectSubmission->initialize(true, false);
             }
         }

@@ -721,7 +721,7 @@ typedef struct tagPIPE_CONTROL {
             uint32_t DestinationAddressType : BITFIELD_RANGE(24, 24);
             uint32_t AmfsFlushEnable : BITFIELD_RANGE(25, 25);
             uint32_t FlushLlc : BITFIELD_RANGE(26, 26);
-            uint32_t Reserved_59 : BITFIELD_RANGE(27, 27);
+            uint32_t ProtectedMemoryDisable : BITFIELD_RANGE(27, 27);
             uint32_t TileCacheFlushEnable : BITFIELD_RANGE(28, 28);
             uint32_t CommandCacheInvalidateEnable : BITFIELD_RANGE(29, 29);
             uint32_t L3FabricFlush : BITFIELD_RANGE(30, 30);
@@ -969,6 +969,12 @@ typedef struct tagPIPE_CONTROL {
     }
     inline bool getFlushLlc() const {
         return TheStructure.Common.FlushLlc;
+    }
+    inline void setProtectedMemoryDisable(const bool value) {
+        TheStructure.Common.ProtectedMemoryDisable = value;
+    }
+    inline bool getProtectedMemoryDisable() const {
+        return TheStructure.Common.ProtectedMemoryDisable;
     }
     inline void setTileCacheFlushEnable(const bool value) {
         TheStructure.Common.TileCacheFlushEnable = value;
@@ -5166,7 +5172,8 @@ typedef struct tagINTERFACE_DESCRIPTOR_DATA {
             // DWORD 1
             uint64_t Reserved_32 : BITFIELD_RANGE(32, 63);
             // DWORD 2
-            uint32_t Reserved_64 : BITFIELD_RANGE(0, 6);
+            uint32_t Reserved_64 : BITFIELD_RANGE(0, 1);
+            uint32_t Reserved_66 : BITFIELD_RANGE(2, 6);
             uint32_t SoftwareExceptionEnable : BITFIELD_RANGE(7, 7);
             uint32_t Reserved_72 : BITFIELD_RANGE(8, 10);
             uint32_t MaskStackExceptionEnable : BITFIELD_RANGE(11, 11);
@@ -6855,7 +6862,8 @@ typedef struct tagSTATE_COMPUTE_MODE {
             uint32_t ForceNonCoherent : BITFIELD_RANGE(3, 4);
             uint32_t FastClearDisabledOnCompressedSurface : BITFIELD_RANGE(5, 5);
             uint32_t DisableSlmReadMergeOptimization : BITFIELD_RANGE(6, 6);
-            uint32_t Reserved_39 : BITFIELD_RANGE(7, 10);
+            uint32_t Reserved_39 : BITFIELD_RANGE(7, 9);
+            uint32_t Reserved_42 : BITFIELD_RANGE(10, 10);
             uint32_t DisableAtomicOnClearData : BITFIELD_RANGE(11, 11);
             uint32_t Reserved_44 : BITFIELD_RANGE(12, 12);
             uint32_t EuThreadSchedulingModeOverride : BITFIELD_RANGE(13, 14);
@@ -7085,7 +7093,7 @@ struct MI_MEM_FENCE {
     inline void setFenceType(const FENCE_TYPE value) {
         TheStructure.Common.FenceType = value;
     }
-    inline FENCE_TYPE getAFenceType() const {
+    inline FENCE_TYPE getFenceType() const {
         return static_cast<FENCE_TYPE>(TheStructure.Common.FenceType);
     }
 };

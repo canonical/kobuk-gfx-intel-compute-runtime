@@ -12,12 +12,12 @@
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_compilers.h"
 #include "shared/test/common/mocks/mock_elf.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/mocks/mock_l0_debugger.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/unit_test/compiler_interface/linker_mock.h"
 
 #include "level_zero/core/source/module/module_imp.h"
 #include "level_zero/core/test/unit_tests/fixtures/module_fixture.h"
-#include "level_zero/core/test/unit_tests/mocks/mock_l0_debugger.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_module.h"
 #include "level_zero/core/test/unit_tests/sources/debugger/l0_debugger_fixture.h"
 
@@ -211,8 +211,6 @@ TEST_F(ModuleWithSLDTest, GivenDebugDataWithSingleRelocationWhenInitializingModu
     auto debugger = new MockActiveSourceLevelDebugger(new MockOsLibrary);
     neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->debugger.reset(debugger);
 
-    createKernel();
-
     uint8_t binary[10];
     ze_module_desc_t moduleDesc = {};
     moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
@@ -239,9 +237,12 @@ TEST_F(ModuleWithSLDTest, GivenDebugDataWithSingleRelocationWhenInitializingModu
     moduleMock->kernelImmData = &kernelMock.immutableData;
     moduleMock->translationUnit->programInfo.kernelInfos.push_back(kernelInfo);
 
+    constexpr size_t mockVIsaSize = 0x10;
+    char mockVIsa[mockVIsaSize]{0};
+
     kernelInfo->kernelDescriptor.external.debugData = std::make_unique<NEO::DebugData>();
-    kernelInfo->kernelDescriptor.external.debugData->vIsa = kernel->getKernelDescriptor().external.debugData->vIsa;
-    kernelInfo->kernelDescriptor.external.debugData->vIsaSize = kernel->getKernelDescriptor().external.debugData->vIsaSize;
+    kernelInfo->kernelDescriptor.external.debugData->vIsa = mockVIsa;
+    kernelInfo->kernelDescriptor.external.debugData->vIsaSize = mockVIsaSize;
     kernelInfo->kernelDescriptor.external.debugData->genIsa = nullptr;
     kernelInfo->kernelDescriptor.external.debugData->genIsaSize = 0;
 
@@ -300,6 +301,7 @@ TEST_F(ModuleWithSLDTest, GivenDebugDataWithMultipleRelocationsWhenInitializingM
 using ModuleWithZebinAndSLDTest = Test<ModuleWithZebinFixture>;
 TEST_F(ModuleWithZebinAndSLDTest, GivenZebinThenCreateDebugZebinAndPassToSLD) {
     module->addEmptyZebin();
+    module->addSegments();
 
     auto debugger = new MockActiveSourceLevelDebugger(new MockOsLibrary);
     neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->debugger.reset(debugger);
@@ -417,7 +419,7 @@ TEST_F(KernelInitializeTest, givenDebuggingEnabledWhenKernelsAreInitializedThenA
     EXPECT_NE(0, memcmp(isa, &kernelHeap, sizeof(kernelHeap)));
 };
 
-HWTEST_F(ModuleWithDebuggerL0Test, GivenDebugDataWithRelocationsWhenInitializingModuleThenRegisterElfWithRelocatedElf) {
+HWTEST_F(ModuleWithDebuggerL0Test, GivenDebugDataWithRelocationsWhenInitializingModuleThenRegisterElfWithRelocatedElfAndModuleCreateNotified) {
     NEO::MockCompilerEnableGuard mock(true);
     auto cip = new NEO::MockCompilerInterfaceCaptureBuildOptions();
     neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]->compilerInterface.reset(cip);
@@ -456,12 +458,13 @@ HWTEST_F(ModuleWithDebuggerL0Test, GivenDebugDataWithRelocationsWhenInitializing
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
     EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
     EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
+    EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleCreateCount);
 
     EXPECT_NE(nullptr, kernelInfo->kernelDescriptor.external.relocatedDebugData.get());
     EXPECT_EQ(reinterpret_cast<char *>(kernelInfo->kernelDescriptor.external.relocatedDebugData.get()), getMockDebuggerL0Hw<FamilyType>()->lastReceivedElf);
 }
 
-HWTEST_F(ModuleWithDebuggerL0Test, GivenDebugDataWithoutRelocationsWhenInitializingModuleThenRegisterElfWithUnrelocatedElf) {
+HWTEST_F(ModuleWithDebuggerL0Test, GivenDebugDataWithoutRelocationsWhenInitializingModuleThenRegisterElfWithUnrelocatedElfAndModuleCreateNotified) {
     NEO::MockCompilerEnableGuard mock(true);
     auto cip = new NEO::MockCompilerInterfaceCaptureBuildOptions();
     neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]->compilerInterface.reset(cip);
@@ -506,12 +509,13 @@ HWTEST_F(ModuleWithDebuggerL0Test, GivenDebugDataWithoutRelocationsWhenInitializ
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
     EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
     EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
+    EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleCreateCount);
 
     EXPECT_EQ(nullptr, kernelInfo->kernelDescriptor.external.relocatedDebugData.get());
     EXPECT_EQ(kernelInfo->kernelDescriptor.external.debugData->vIsa, getMockDebuggerL0Hw<FamilyType>()->lastReceivedElf);
 }
 
-HWTEST_F(ModuleWithDebuggerL0Test, GivenNoDebugDataWhenInitializingModuleThenDoNotRegisterElf) {
+HWTEST_F(ModuleWithDebuggerL0Test, GivenNoDebugDataWhenInitializingModuleThenDoNotRegisterElfAndDoNotNotifyModuleCreate) {
     NEO::MockCompilerEnableGuard mock(true);
     auto cip = new NEO::MockCompilerInterfaceCaptureBuildOptions();
     neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]->compilerInterface.reset(cip);
@@ -542,11 +546,12 @@ HWTEST_F(ModuleWithDebuggerL0Test, GivenNoDebugDataWhenInitializingModuleThenDoN
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
     EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
+    EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleCreateCount);
 }
 
 using ModuleWithZebinAndL0DebuggerTest = Test<L0DebuggerHwFixture>;
 
-HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinDebugDataWhenInitializingModuleThenRegisterElf) {
+HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinDebugDataWhenInitializingModuleThenRegisterElfAndNotifyModuleCreate) {
     NEO::MockCompilerEnableGuard mock(true);
     auto cip = new NEO::MockCompilerInterfaceCaptureBuildOptions();
     neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[neoDevice->getRootDeviceIndex()]->compilerInterface.reset(cip);
@@ -560,6 +565,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinDebugDataWhenInitializingMo
     auto kernelInfo = std::make_unique<KernelInfo>();
     kernelInfo->heapInfo.KernelHeapSize = 1;
     kernelInfo->heapInfo.pKernelHeap = &kernelHeap;
+    kernelInfo->kernelDescriptor.kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram::kernelName;
 
     auto kernelImmutableData = ::std::make_unique<KernelImmutableData>(device);
     kernelImmutableData->initialize(kernelInfo.get(), device, 0, nullptr, nullptr, false);
@@ -580,9 +586,10 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinDebugDataWhenInitializingMo
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
     EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
     EXPECT_EQ(2u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
+    EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleCreateCount);
 }
 
-HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinNoDebugDataWhenInitializingModuleThenDoNotRegisterElf) {
+HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinNoDebugDataWhenInitializingModuleThenDoNotRegisterElfAndDoNotNotifyModuleCreate) {
     NEO::MockCompilerEnableGuard mock(true);
     auto cip = new NEO::MockCompilerInterfaceCaptureBuildOptions();
     neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[neoDevice->getRootDeviceIndex()]->compilerInterface.reset(cip);
@@ -599,6 +606,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinNoDebugDataWhenInitializing
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
     EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
+    EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleCreateCount);
 }
 
 HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinWhenModuleIsInitializedAndDestroyedThenModuleHandleIsAttachedAndRemoved) {
@@ -615,6 +623,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinWhenModuleIsInitializedAndD
     auto kernelInfo = std::make_unique<KernelInfo>();
     kernelInfo->heapInfo.KernelHeapSize = 1;
     kernelInfo->heapInfo.pKernelHeap = &kernelHeap;
+    kernelInfo->kernelDescriptor.kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram::kernelName;
 
     auto kernelImmutableData = ::std::make_unique<KernelImmutableData>(device);
     kernelImmutableData->initialize(kernelInfo.get(), device, 0, nullptr, nullptr, false);
@@ -659,6 +668,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenModuleDebugHandleZeroWhenInitial
     auto kernelInfo = std::make_unique<KernelInfo>();
     kernelInfo->heapInfo.KernelHeapSize = 1;
     kernelInfo->heapInfo.pKernelHeap = &kernelHeap;
+    kernelInfo->kernelDescriptor.kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram::kernelName;
 
     auto kernelImmutableData = ::std::make_unique<KernelImmutableData>(device);
     kernelImmutableData->initialize(kernelInfo.get(), device, 0, nullptr, nullptr, false);
@@ -689,7 +699,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenModuleDebugHandleZeroWhenInitial
 
 using NotifyModuleLoadTest = Test<ModuleFixture>;
 
-HWTEST_F(NotifyModuleLoadTest, givenDebuggingEnabledWhenModuleIsCreatedAndFullyLinkedThenIsaAllocationsAreCopiedAndResident) {
+HWTEST_F(NotifyModuleLoadTest, givenDebuggingEnabledWhenModuleIsCreatedAndFullyLinkedThenIsaAllocationsAreCopiedAndResidentOnlyForUserModules) {
     NEO::MockCompilerEnableGuard mock(true);
     auto cip = new NEO::MockCompilerInterfaceCaptureBuildOptions();
     neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[neoDevice->getRootDeviceIndex()]->compilerInterface.reset(cip);
@@ -715,19 +725,39 @@ HWTEST_F(NotifyModuleLoadTest, givenDebuggingEnabledWhenModuleIsCreatedAndFullyL
     moduleDesc.inputSize = size;
 
     ModuleBuildLog *moduleBuildLog = nullptr;
+    neoDevice->executionEnvironment->rootDeviceEnvironments[0]->osInterface.reset(nullptr);
 
     auto module = std::unique_ptr<L0::ModuleImp>(new L0::ModuleImp(device, moduleBuildLog, ModuleType::User));
     ASSERT_NE(nullptr, module.get());
 
     memoryOperationsHandler->makeResidentCalledCount = 0;
 
-    neoDevice->executionEnvironment->rootDeviceEnvironments[0]->osInterface.reset(nullptr);
     module->initialize(&moduleDesc, neoDevice);
 
-    EXPECT_EQ(4, memoryOperationsHandler->makeResidentCalledCount);
+    auto numIsaAllocations = static_cast<int>(module->getKernelImmutableDataVector().size());
+
+    auto expectedMakeResidentCallsCount = numIsaAllocations + 1; // const surface
+    if (module->getTranslationUnit()->programInfo.linkerInput) {
+        expectedMakeResidentCallsCount += numIsaAllocations;
+    }
+
+    EXPECT_EQ(expectedMakeResidentCallsCount, memoryOperationsHandler->makeResidentCalledCount);
 
     for (auto &ki : module->getKernelImmutableDataVector()) {
         EXPECT_TRUE(ki->isIsaCopiedToAllocation());
+    }
+
+    auto moduleBuiltin = std::unique_ptr<L0::ModuleImp>(new L0::ModuleImp(device, moduleBuildLog, ModuleType::Builtin));
+    ASSERT_NE(nullptr, moduleBuiltin.get());
+
+    memoryOperationsHandler->makeResidentCalledCount = 0;
+
+    moduleBuiltin->initialize(&moduleDesc, neoDevice);
+
+    EXPECT_EQ(0, memoryOperationsHandler->makeResidentCalledCount);
+
+    for (auto &ki : moduleBuiltin->getKernelImmutableDataVector()) {
+        EXPECT_FALSE(ki->isIsaCopiedToAllocation());
     }
 }
 
@@ -827,7 +857,7 @@ HWTEST_F(NotifyModuleLoadTest, givenDebuggingEnabledWhenModuleWithUnresolvedSymb
 
     auto linkerInput = std::make_unique<::WhiteBox<NEO::LinkerInput>>();
     linkerInput->traits.requiresPatchingOfInstructionSegments = true;
-    linkerInput->relocations.push_back({unresolvedRelocation});
+    linkerInput->textRelocations.push_back({unresolvedRelocation});
 
     module->getTranslationUnit()->programInfo.linkerInput = std::move(linkerInput);
     module->unresolvedExternalsInfo.push_back({unresolvedRelocation});
@@ -859,7 +889,10 @@ HWTEST_F(NotifyModuleLoadTest, givenDebuggingEnabledWhenModuleWithUnresolvedSymb
         EXPECT_TRUE(ki->isIsaCopiedToAllocation());
     }
 
-    EXPECT_EQ(4, memoryOperationsHandler->makeResidentCalledCount);
+    auto numIsaAllocations = module->getKernelImmutableDataVector().size();
+    EXPECT_NE(0u, numIsaAllocations);
+    auto expectedMakeResidentCallsCount = static_cast<int>(numIsaAllocations);
+    EXPECT_EQ(expectedMakeResidentCallsCount, memoryOperationsHandler->makeResidentCalledCount);
 }
 } // namespace ult
 } // namespace L0

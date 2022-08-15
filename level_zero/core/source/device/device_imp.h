@@ -8,27 +8,26 @@
 #pragma once
 
 #include "shared/source/helpers/topology_map.h"
-#include "shared/source/memory_manager/allocations_list.h"
 #include "shared/source/memory_manager/memadvise_flags.h"
+#include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/page_fault_manager/cpu_page_fault_manager.h"
-#include "shared/source/utilities/spinlock.h"
 
-#include "level_zero/core/source/builtin/builtin_functions_lib.h"
-#include "level_zero/core/source/cache/cache_reservation.h"
-#include "level_zero/core/source/cmdlist/cmdlist.h"
 #include "level_zero/core/source/device/device.h"
-#include "level_zero/core/source/driver/driver_handle.h"
-#include "level_zero/core/source/module/module.h"
-#include "level_zero/tools/source/debug/debug_session.h"
-#include "level_zero/tools/source/metrics/metric.h"
 
 #include <map>
 #include <mutex>
 
+namespace NEO {
+class AllocationsList;
+class DriverInfo;
+} // namespace NEO
+
 namespace L0 {
 struct SysmanDevice;
+class CacheReservation;
 
 struct DeviceImp : public Device {
+    DeviceImp();
     ze_result_t canAccessPeer(ze_device_handle_t hPeerDevice, ze_bool_t *value) override;
     ze_result_t createCommandList(const ze_command_list_desc_t *desc,
                                   ze_command_list_handle_t *commandList) override;
@@ -55,6 +54,8 @@ struct DeviceImp : public Device {
     ze_result_t setCacheAdvice(void *ptr, size_t regionSize, ze_cache_ext_region_t cacheRegion) override;
     ze_result_t imageGetProperties(const ze_image_desc_t *desc, ze_image_properties_t *pImageProperties) override;
     ze_result_t getDeviceImageProperties(ze_device_image_properties_t *pDeviceImageProperties) override;
+    uint32_t getCopyQueueGroupsFromSubDevice(uint32_t numberOfSubDeviceCopyEngineGroupsRequested,
+                                             ze_command_queue_group_properties_t *pCommandQueueGroupProperties);
     ze_result_t getCommandQueueGroupProperties(uint32_t *pCount,
                                                ze_command_queue_group_properties_t *pCommandQueueGroupProperties) override;
     ze_result_t getExternalMemoryProperties(ze_device_external_memory_properties_t *pExternalMemoryProperties) override;
@@ -104,9 +105,9 @@ struct DeviceImp : public Device {
 
     bool isSubdevice = false;
     void *execEnvironment = nullptr;
-    std::unique_ptr<BuiltinFunctionsLib> builtins = nullptr;
-    std::unique_ptr<MetricDeviceContext> metricContext = nullptr;
-    std::unique_ptr<CacheReservation> cacheReservation = nullptr;
+    std::unique_ptr<BuiltinFunctionsLib> builtins;
+    std::unique_ptr<MetricDeviceContext> metricContext;
+    std::unique_ptr<CacheReservation> cacheReservation;
     uint32_t maxNumHwThreads = 0;
     uint32_t numSubDevices = 0;
     std::vector<Device *> subDevices;
@@ -124,11 +125,20 @@ struct DeviceImp : public Device {
     std::unique_ptr<NEO::AllocationsList> allocationsForReuse;
     std::unique_ptr<NEO::DriverInfo> driverInfo;
     void createSysmanHandle(bool isSubDevice);
+    NEO::EngineGroupsT &getSubDeviceCopyEngineGroups();
+    void populateSubDeviceCopyEngineGroups();
+    bool isQueueGroupOrdinalValid(uint32_t ordinal);
+
+    using CmdListCreateFunPtrT = L0::CommandList *(*)(uint32_t, Device *, NEO::EngineGroupType, ze_command_list_flags_t, ze_result_t &);
+    CmdListCreateFunPtrT getCmdListCreateFunc(const ze_command_list_desc_t *desc);
 
   protected:
+    void adjustCommandQueueDesc(ze_command_queue_desc_t &desc);
+    NEO::EngineGroupsT subDeviceCopyEngineGroups{};
+
     NEO::GraphicsAllocation *debugSurface = nullptr;
     SysmanDevice *pSysmanDevice = nullptr;
-    std::unique_ptr<DebugSession> debugSession = nullptr;
+    std::unique_ptr<DebugSession> debugSession;
 };
 
 void handleGpuDomainTransferForHwWithHints(NEO::PageFaultManager *pageFaultHandler, void *allocPtr, NEO::PageFaultManager::PageFaultData &pageFaultData);

@@ -7,7 +7,7 @@
 
 #include "shared/source/command_stream/command_stream_receiver_hw_bdw_and_later.inl"
 #include "shared/source/command_stream/device_command_stream.h"
-#include "shared/source/gen8/hw_cmds.h"
+#include "shared/source/gen8/hw_cmds_base.h"
 #include "shared/source/helpers/blit_commands_helper_bdw_and_later.inl"
 #include "shared/source/helpers/populate_factory.h"
 
@@ -22,8 +22,8 @@ void populateFactoryTable<CommandStreamReceiverHw<Family>>() {
 }
 
 template <>
-void CommandStreamReceiverHw<Family>::addClearSLMWorkAround(Family::PIPE_CONTROL *pCmd) {
-    pCmd->setProtectedMemoryDisable(1);
+void CommandStreamReceiverHw<Family>::setClearSlmWorkAroundParameter(PipeControlArgs &args) {
+    args.protectedMemoryDisable = true;
 }
 
 template class CommandStreamReceiverHw<Family>;

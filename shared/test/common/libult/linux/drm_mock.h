@@ -11,10 +11,10 @@
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
+#include "shared/source/os_interface/linux/i915.h"
 #include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/mocks/linux/mock_drm_wrappers.h"
 #include "shared/test/common/os_interface/linux/device_command_stream_fixture.h"
-
-#include "gtest/gtest.h"
 
 #include <cstdio>
 #include <fstream>
@@ -24,7 +24,6 @@
 
 using namespace NEO;
 
-// Mock DRM class that responds to DRM_IOCTL_I915_GETPARAMs
 class DrmMock : public Drm {
   public:
     using Drm::bindAvailable;
@@ -33,6 +32,7 @@ class DrmMock : public Drm {
     using Drm::classHandles;
     using Drm::completionFenceSupported;
     using Drm::contextDebugSupported;
+    using Drm::deviceId;
     using Drm::engineInfo;
     using Drm::fenceVal;
     using Drm::generateElfUUID;
@@ -45,34 +45,22 @@ class DrmMock : public Drm {
     using Drm::pagingFence;
     using Drm::preemptionSupported;
     using Drm::query;
+    using Drm::queryAndSetVmBindPatIndexProgrammingSupport;
+    using Drm::queryDeviceIdAndRevision;
     using Drm::requirePerContextVM;
+    using Drm::revisionId;
     using Drm::setupIoctlHelper;
     using Drm::sliceCountChangeSupported;
     using Drm::systemInfo;
     using Drm::translateTopologyInfo;
     using Drm::virtualMemoryIds;
 
-    DrmMock(int fd, RootDeviceEnvironment &rootDeviceEnvironment) : Drm(std::make_unique<HwDeviceIdDrm>(fd, ""), rootDeviceEnvironment) {
-        sliceCountChangeSupported = true;
-
-        if (rootDeviceEnvironment.executionEnvironment.isDebuggingEnabled()) {
-            setPerContextVMRequired(true);
-        }
-
-        setupIoctlHelper(rootDeviceEnvironment.getHardwareInfo()->platform.eProductFamily);
-        if (!isPerContextVMRequired()) {
-            createVirtualMemoryAddressSpace(HwHelper::getSubDevicesCount(rootDeviceEnvironment.getHardwareInfo()));
-        }
-    }
+    DrmMock(int fd, RootDeviceEnvironment &rootDeviceEnvironment);
     DrmMock(RootDeviceEnvironment &rootDeviceEnvironment) : DrmMock(mockFd, rootDeviceEnvironment) {}
 
-    ~DrmMock() {
-        if (expectIoctlCallsOnDestruction) {
-            EXPECT_EQ(expectedIoctlCallsOnDestruction, ioctlCallsCount);
-        }
-    }
+    ~DrmMock() override;
 
-    int ioctl(unsigned long request, void *arg) override;
+    int ioctl(DrmIoctl request, void *arg) override;
     int getErrno() override {
         if (baseErrno) {
             return Drm::getErrno();
@@ -108,8 +96,6 @@ class DrmMock : public Drm {
         hwDeviceId = std::make_unique<HwDeviceIdDrm>(getFileDescriptor(), pciPath);
     }
 
-    void setDeviceID(int deviceId) { this->deviceId = deviceId; }
-    void setDeviceRevID(int revisionId) { this->revisionId = revisionId; }
     void setBindAvailable() {
         this->bindAvailable = true;
     }
@@ -131,6 +117,10 @@ class DrmMock : public Drm {
     }
 
     bool hasPageFaultSupport() const override {
+        if (DebugManager.flags.EnableRecoverablePageFaults.get() != -1) {
+            return !!DebugManager.flags.EnableRecoverablePageFaults.get();
+        }
+
         return pageFaultSupported;
     }
 
@@ -141,6 +131,13 @@ class DrmMock : public Drm {
         }
 
         return 0;
+    }
+
+    bool isVmBindAvailable() override {
+        if (callBaseIsVmBindAvailable) {
+            return Drm::isVmBindAvailable();
+        }
+        return bindAvailable;
     }
 
     static const int mockFd = 33;
@@ -167,10 +164,8 @@ class DrmMock : public Drm {
     int storedRetValForPooledEU = 0;
     int storedRetValForMinEUinPool = 0;
     int storedRetValForPersistant = 0;
-    int storedPreemptionSupport =
-        I915_SCHEDULER_CAP_ENABLED |
-        I915_SCHEDULER_CAP_PRIORITY |
-        I915_SCHEDULER_CAP_PREEMPTION;
+    int storedRetValForVmCreate = 0;
+    int storedPreemptionSupport = 0;
     int storedExecSoftPin = 0;
     int storedRetValForVmId = 1;
     int storedCsTimestampFrequency = 1000;
@@ -178,52 +173,54 @@ class DrmMock : public Drm {
     bool allowDebugAttach = false;
     bool allowDebugAttachCallBase = false;
     bool callBaseCreateDrmContext = true;
+    bool callBaseIsVmBindAvailable = false;
 
     bool capturedCooperativeContextRequest = false;
 
     uint32_t passedContextDebugId = std::numeric_limits<uint32_t>::max();
-    std::vector<drm_i915_reset_stats> resetStatsToReturn{};
+    std::vector<ResetStats> resetStatsToReturn{};
 
-    drm_i915_gem_context_create_ext_setparam receivedContextCreateSetParam = {};
+    GemContextCreateExtSetParam receivedContextCreateSetParam = {};
     uint32_t receivedContextCreateFlags = 0;
     uint32_t receivedDestroyContextId = 0;
     uint32_t ioctlCallsCount = 0;
 
     uint32_t receivedContextParamRequestCount = 0;
-    drm_i915_gem_context_param receivedContextParamRequest = {};
+    GemContextParam receivedContextParamRequest = {};
     uint64_t receivedRecoverableContextValue = std::numeric_limits<uint64_t>::max();
 
     bool queryPageFaultSupportCalled = false;
 
     //DRM_IOCTL_I915_GEM_EXECBUFFER2
-    std::vector<drm_i915_gem_execbuffer2> execBuffers{};
-    std::vector<drm_i915_gem_exec_object2> receivedBos{};
+    std::vector<MockExecBuffer> execBuffers{};
+    std::vector<MockExecObject> receivedBos{};
     //DRM_IOCTL_I915_GEM_CREATE
-    __u64 createParamsSize = 0;
-    __u32 createParamsHandle = 0;
+    uint64_t createParamsSize = 0;
+    uint32_t createParamsHandle = 0;
     //DRM_IOCTL_I915_GEM_SET_TILING
-    __u32 setTilingMode = 0;
-    __u32 setTilingHandle = 0;
-    __u32 setTilingStride = 0;
+    uint32_t setTilingMode = 0;
+    uint32_t setTilingHandle = 0;
+    uint32_t setTilingStride = 0;
     //DRM_IOCTL_PRIME_FD_TO_HANDLE
-    __u32 outputHandle = 0;
-    __s32 inputFd = 0;
+    uint32_t outputHandle = 0;
+    int32_t inputFd = 0;
     int fdToHandleRetVal = 0;
     //DRM_IOCTL_HANDLE_TO_FD
-    __s32 outputFd = 0;
+    int32_t outputFd = 0;
     //DRM_IOCTL_I915_GEM_USERPTR
-    __u32 returnHandle = 0;
-    __u64 gpuMemSize = 3u * MemoryConstants::gigaByte;
-    //DRM_IOCTL_I915_GEM_MMAP
-    uint64_t lockedPtr[4];
+    uint32_t returnHandle = 0;
+    uint64_t gpuMemSize = 3u * MemoryConstants::gigaByte;
     //DRM_IOCTL_I915_QUERY
-    drm_i915_query_item storedQueryItem = {};
+    QueryItem storedQueryItem = {};
     //DRM_IOCTL_I915_GEM_WAIT
-    drm_i915_gem_wait receivedGemWait = {};
+    GemWait receivedGemWait = {};
     //DRM_IOCTL_I915_GEM_CONTEXT_CREATE_EXT
     uint32_t storedDrmContextId{};
     //DRM_IOCTL_GEM_CLOSE
     int storedRetValForGemClose = 0;
+
+    GemVmControl receivedGemVmControl{};
+    uint32_t latestCreatedVmId = 0u;
 
     uint64_t storedGTTSize = 1ull << 47;
     uint64_t storedParamSseu = ULONG_MAX;
@@ -235,7 +232,7 @@ class DrmMock : public Drm {
     bool expectIoctlCallsOnDestruction = false;
     uint32_t expectedIoctlCallsOnDestruction = 0u;
 
-    virtual int handleRemainingRequests(unsigned long request, void *arg) { return -1; }
+    virtual int handleRemainingRequests(DrmIoctl request, void *arg) { return -1; }
 
     struct WaitUserFenceParams {
         uint32_t ctxId;
@@ -246,19 +243,46 @@ class DrmMock : public Drm {
         uint16_t flags;
     };
     StackVec<WaitUserFenceParams, 1> waitUserFenceParams;
+
+    bool storedGetDeviceMemoryMaxClockRateInMhzStatus = true;
+    bool useBaseGetDeviceMemoryMaxClockRateInMhz = true;
+    bool getDeviceMemoryMaxClockRateInMhz(uint32_t tileId, uint32_t &clkRate) override {
+
+        if (useBaseGetDeviceMemoryMaxClockRateInMhz == true) {
+            return Drm::getDeviceMemoryMaxClockRateInMhz(tileId, clkRate);
+        }
+
+        if (storedGetDeviceMemoryMaxClockRateInMhzStatus == true) {
+            clkRate = 800;
+        }
+        return storedGetDeviceMemoryMaxClockRateInMhzStatus;
+    }
+
+    bool storedGetDeviceMemoryPhysicalSizeInBytesStatus = true;
+    bool useBaseGetDeviceMemoryPhysicalSizeInBytes = true;
+    bool getDeviceMemoryPhysicalSizeInBytes(uint32_t tileId, uint64_t &physicalSize) override {
+        if (useBaseGetDeviceMemoryPhysicalSizeInBytes == true) {
+            return Drm::getDeviceMemoryPhysicalSizeInBytes(tileId, physicalSize);
+        }
+
+        if (storedGetDeviceMemoryPhysicalSizeInBytesStatus == true) {
+            physicalSize = 1024;
+        }
+        return storedGetDeviceMemoryPhysicalSizeInBytesStatus;
+    }
 };
 
 class DrmMockNonFailing : public DrmMock {
   public:
     using DrmMock::DrmMock;
-    int handleRemainingRequests(unsigned long request, void *arg) override { return 0; }
+    int handleRemainingRequests(DrmIoctl request, void *arg) override { return 0; }
 };
 
 class DrmMockReturnErrorNotSupported : public DrmMock {
   public:
     using DrmMock::DrmMock;
-    int ioctl(unsigned long request, void *arg) override {
-        if (request == DRM_IOCTL_I915_GEM_EXECBUFFER2) {
+    int ioctl(DrmIoctl request, void *arg) override {
+        if (request == DrmIoctl::GemExecbuffer2) {
             return -1;
         }
         return 0;
@@ -275,9 +299,9 @@ class DrmMockEngine : public DrmMock {
         rootDeviceEnvironment.setHwInfo(defaultHwInfo.get());
     }
 
-    int handleRemainingRequests(unsigned long request, void *arg) override;
+    int handleRemainingRequests(DrmIoctl request, void *arg) override;
 
-    void handleQueryItem(drm_i915_query_item *queryItem);
+    void handleQueryItem(QueryItem *queryItem);
     bool failQueryDeviceBlob = false;
 };
 
@@ -285,6 +309,7 @@ class DrmMockResources : public DrmMock {
   public:
     DrmMockResources(RootDeviceEnvironment &rootDeviceEnvironment) : DrmMock(mockFd, rootDeviceEnvironment) {
         setBindAvailable();
+        callBaseIsVmBindAvailable = true;
     }
 
     bool registerResourceClasses() override {
@@ -292,7 +317,7 @@ class DrmMockResources : public DrmMock {
         return true;
     }
 
-    uint32_t registerResource(ResourceClass classType, const void *data, size_t size) override {
+    uint32_t registerResource(DrmResourceClass classType, const void *data, size_t size) override {
         registeredClass = classType;
         memcpy_s(registeredData, sizeof(registeredData), data, size);
         registeredDataSize = size;
@@ -312,7 +337,7 @@ class DrmMockResources : public DrmMock {
         return bindAvailable;
     }
 
-    uint32_t notifyFirstCommandQueueCreated() override {
+    uint32_t notifyFirstCommandQueueCreated(const void *data, size_t size) override {
         ioctlCallsCount++;
         return 4;
     }
@@ -325,7 +350,7 @@ class DrmMockResources : public DrmMock {
 
     uint32_t unregisteredHandle = 0;
     uint32_t unregisterCalledCount = 0;
-    ResourceClass registeredClass = ResourceClass::MaxSize;
+    DrmResourceClass registeredClass = DrmResourceClass::MaxSize;
     bool registerClassesCalled = false;
     uint64_t registeredData[128];
     size_t registeredDataSize;

@@ -5,6 +5,8 @@
  *
  */
 
+#pragma once
+
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_gmm.h"
 #include "shared/test/common/test_macros/test.h"
@@ -86,7 +88,7 @@ class D3DTests : public PlatformFixture, public ::testing::Test {
         imgDesc.imageDepth = 1;
         imgDesc.imageType = ImageType::Image2D;
         auto imgInfo = MockGmm::initImgInfo(imgDesc, 0, nullptr);
-        gmm = MockGmm::queryImgParams(pPlatform->peekExecutionEnvironment()->rootDeviceEnvironments[0]->getGmmClientContext(), imgInfo, false).release();
+        gmm = MockGmm::queryImgParams(pPlatform->peekExecutionEnvironment()->rootDeviceEnvironments[0]->getGmmHelper(), imgInfo, false).release();
         mockGmmResInfo = static_cast<MockGmmResourceInfo *>(gmm->gmmResourceInfo.get());
 
         mockMM->forceGmm = gmm;

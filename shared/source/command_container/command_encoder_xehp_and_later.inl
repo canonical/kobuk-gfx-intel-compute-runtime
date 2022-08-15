@@ -37,14 +37,15 @@ constexpr size_t TimestampDestinationAddressAlignment = 16;
 
 template <typename Family>
 void EncodeDispatchKernel<Family>::setGrfInfo(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, uint32_t numGrf,
-                                              const size_t &sizeCrossThreadData, const size_t &sizePerThreadData) {}
+                                              const size_t &sizeCrossThreadData, const size_t &sizePerThreadData,
+                                              const HardwareInfo &hwInfo) {
+}
 
 template <typename Family>
 void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
                                           EncodeDispatchKernelArgs &args) {
     using SHARED_LOCAL_MEMORY_SIZE = typename Family::INTERFACE_DESCRIPTOR_DATA::SHARED_LOCAL_MEMORY_SIZE;
     using STATE_BASE_ADDRESS = typename Family::STATE_BASE_ADDRESS;
-    using MI_BATCH_BUFFER_END = typename Family::MI_BATCH_BUFFER_END;
     using INLINE_DATA = typename Family::INLINE_DATA;
 
     const HardwareInfo &hwInfo = args.device->getHardwareInfo();
@@ -56,9 +57,8 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
     auto pImplicitArgs = args.dispatchInterface->getImplicitArgs();
 
     LinearStream *listCmdBufferStream = container.getCommandStream();
-    size_t sshOffset = 0;
 
-    auto threadDims = static_cast<const uint32_t *>(args.pThreadGroupDimensions);
+    auto threadDims = static_cast<const uint32_t *>(args.threadGroupDimensions);
     const Vec3<size_t> threadStartVec{0, 0, 0};
     Vec3<size_t> threadDimsVec{0, 0, 0};
     if (!args.isIndirect) {
@@ -74,7 +74,12 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
     WALKER_TYPE walkerCmd = Family::cmdInitGpgpuWalker;
     auto &idd = walkerCmd.getInterfaceDescriptor();
 
-    EncodeDispatchKernel<Family>::setGrfInfo(&idd, kernelDescriptor.kernelAttributes.numGrfRequired, sizeCrossThreadData, sizePerThreadData);
+    EncodeDispatchKernel<Family>::setGrfInfo(&idd, kernelDescriptor.kernelAttributes.numGrfRequired, sizeCrossThreadData,
+                                             sizePerThreadData, hwInfo);
+    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    hwInfoConfig.updateIddCommand(&idd, kernelDescriptor.kernelAttributes.numGrfRequired,
+                                  args.dispatchInterface->getSchedulingHintExp());
+
     bool localIdsGenerationByRuntime = args.dispatchInterface->requiresGenerationOfLocalIdsByRuntime();
     auto requiredWorkgroupOrder = args.dispatchInterface->getRequiredWorkgroupOrder();
     bool inlineDataProgramming = EncodeDispatchKernel<Family>::inlineDataProgrammingRequired(kernelDescriptor);
@@ -105,11 +110,11 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
 
     auto bindingTableStateCount = kernelDescriptor.payloadMappings.bindingTable.numEntries;
     uint32_t bindingTablePointer = 0u;
-    if (kernelDescriptor.kernelAttributes.bufferAddressingMode == KernelDescriptor::BindfulAndStateless) {
+    if ((kernelDescriptor.kernelAttributes.bufferAddressingMode == KernelDescriptor::BindfulAndStateless) ||
+        kernelDescriptor.kernelAttributes.flags.usesImages) {
         container.prepareBindfulSsh();
         if (bindingTableStateCount > 0u) {
             auto ssh = container.getHeapWithRequiredSizeAndAlignment(HeapType::SURFACE_STATE, args.dispatchInterface->getSurfaceStateHeapDataSize(), BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE);
-            sshOffset = ssh->getUsed();
             bindingTablePointer = static_cast<uint32_t>(EncodeSurfaceState<Family>::pushBindingTableAndSurfaceStates(
                 *ssh, bindingTableStateCount,
                 args.dispatchInterface->getSurfaceStateHeapData(),
@@ -200,16 +205,13 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
         }
     }
 
-    bool requiresGlobalAtomicsUpdate = false;
-    if (args.partitionCount > 1) {
-        requiresGlobalAtomicsUpdate = container.lastSentUseGlobalAtomics != args.useGlobalAtomics;
-        container.lastSentUseGlobalAtomics = args.useGlobalAtomics;
-    }
+    if (shouldUpdateGlobalAtomics(container.lastSentUseGlobalAtomics, args.useGlobalAtomics, args.partitionCount > 1) ||
+        container.isAnyHeapDirty() ||
+        args.requiresUncachedMocs) {
 
-    if (container.isAnyHeapDirty() || args.requiresUncachedMocs || requiresGlobalAtomicsUpdate) {
         PipeControlArgs syncArgs;
         syncArgs.dcFlushEnable = MemorySynchronizationCommands<Family>::getDcFlushEnable(true, hwInfo);
-        MemorySynchronizationCommands<Family>::addPipeControl(*container.getCommandStream(), syncArgs);
+        MemorySynchronizationCommands<Family>::addSingleBarrier(*container.getCommandStream(), syncArgs);
         STATE_BASE_ADDRESS sbaCmd;
         auto gmmHelper = container.getDevice()->getGmmHelper();
         uint32_t statelessMocsIndex =
@@ -233,7 +235,8 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
                                                    localIdsGenerationByRuntime,
                                                    inlineDataProgramming,
                                                    args.isIndirect,
-                                                   requiredWorkgroupOrder);
+                                                   requiredWorkgroupOrder,
+                                                   hwInfo);
 
     using POSTSYNC_DATA = typename Family::POSTSYNC_DATA;
     auto &postSync = walkerCmd.getPostSync();
@@ -242,9 +245,9 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
         if (args.isTimestampEvent) {
             postSync.setOperation(POSTSYNC_DATA::OPERATION_WRITE_TIMESTAMP);
         } else {
-            uint32_t STATE_SIGNALED = 0u;
+            uint32_t stateSignaled = 0u;
             postSync.setOperation(POSTSYNC_DATA::OPERATION_WRITE_IMMEDIATE_DATA);
-            postSync.setImmediateData(STATE_SIGNALED);
+            postSync.setImmediateData(stateSignaled);
         }
         UNRECOVERABLE_IF(!(isAligned<TimestampDestinationAddressAlignment>(args.eventAddress)));
         postSync.setDestinationAddress(args.eventAddress);
@@ -261,7 +264,10 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
                                                             args.dispatchInterface->getSlmTotalSize(),
                                                             args.dispatchInterface->getSlmPolicy());
 
-    EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(hwInfo, walkerCmd, args.isCooperative ? KernelExecutionType::Concurrent : KernelExecutionType::Default);
+    EncodeWalkerArgs walkerArgs{
+        args.isCooperative ? KernelExecutionType::Concurrent : KernelExecutionType::Default,
+        args.isHostScopeSignalEvent && args.isKernelUsingSystemAllocation};
+    EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(hwInfo, walkerCmd, walkerArgs);
 
     PreemptionHelper::applyPreemptionWaCmdsBegin<Family>(listCmdBufferStream, *args.device);
 
@@ -275,8 +281,8 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
                                                           walkerCmd,
                                                           args.device->getDeviceBitfield(),
                                                           args.partitionCount,
-                                                          true,
-                                                          true,
+                                                          !container.getFlushTaskUsedForImmediate(),
+                                                          !args.isKernelDispatchedFromImmediateCmdList,
                                                           false,
                                                           workPartitionAllocationGpuVa,
                                                           hwInfo);
@@ -307,7 +313,7 @@ inline void EncodeDispatchKernel<Family>::setupPostSyncMocs(WALKER_TYPE &walkerC
 }
 
 template <typename Family>
-inline void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd, KernelExecutionType kernelExecutionType) {
+inline void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd, const EncodeWalkerArgs &walkerArgs) {
 }
 
 template <typename Family>
@@ -338,7 +344,7 @@ bool EncodeDispatchKernel<Family>::isRuntimeLocalIdsGenerationRequired(uint32_t 
             return true;
         }
 
-        //check if we need to follow kernel requirements
+        // check if we need to follow kernel requirements
         if (requireInputWalkOrder) {
             for (uint32_t dimension = 0; dimension < activeChannels - 1; dimension++) {
                 if (!Math::isPow2<size_t>(lws[walkOrder[dimension]])) {
@@ -360,7 +366,7 @@ bool EncodeDispatchKernel<Family>::isRuntimeLocalIdsGenerationRequired(uint32_t 
             return false;
         }
 
-        //kernel doesn't specify any walk order requirements, check if we have any compatible
+        // kernel doesn't specify any walk order requirements, check if we have any compatible
         for (uint32_t walkOrder = 0; walkOrder < HwWalkOrderHelper::walkOrderPossibilties; walkOrder++) {
             bool allDimensionsCompatible = true;
             for (uint32_t dimension = 0; dimension < activeChannels - 1; dimension++) {
@@ -390,7 +396,8 @@ void EncodeDispatchKernel<Family>::encodeThreadData(WALKER_TYPE &walkerCmd,
                                                     bool localIdsGenerationByRuntime,
                                                     bool inlineDataProgrammingRequired,
                                                     bool isIndirect,
-                                                    uint32_t requiredWorkGroupOrder) {
+                                                    uint32_t requiredWorkGroupOrder,
+                                                    const HardwareInfo &hwInfo) {
 
     if (isIndirect) {
         walkerCmd.setIndirectParameterEnable(true);
@@ -425,9 +432,9 @@ void EncodeDispatchKernel<Family>::encodeThreadData(WALKER_TYPE &walkerCmd,
         walkerCmd.setMessageSimd(DebugManager.flags.ForceSimdMessageSizeInWalker.get());
     }
 
-    //1) cross-thread inline data will be put into R1, but if kernel uses local ids, then cross-thread should be put further back
-    //so whenever local ids are driver or hw generated, reserve space by setting right values for emitLocalIds
-    //2) Auto-generation of local ids should be possible, when in fact local ids are used
+    // 1) cross-thread inline data will be put into R1, but if kernel uses local ids, then cross-thread should be put further back
+    // so whenever local ids are driver or hw generated, reserve space by setting right values for emitLocalIds
+    // 2) Auto-generation of local ids should be possible, when in fact local ids are used
     if (!localIdsGenerationByRuntime && localIdDimensions > 0) {
         UNRECOVERABLE_IF(localIdDimensions != 3);
         uint32_t emitLocalIdsForDim = (1 << 0) | (1 << 1) | (1 << 2);
@@ -440,13 +447,20 @@ void EncodeDispatchKernel<Family>::encodeThreadData(WALKER_TYPE &walkerCmd,
         walkerCmd.setGenerateLocalId(1);
         walkerCmd.setWalkOrder(requiredWorkGroupOrder);
     }
+    adjustWalkOrder(walkerCmd, requiredWorkGroupOrder, hwInfo);
     if (inlineDataProgrammingRequired == true) {
         walkerCmd.setEmitInlineParameter(1);
     }
 }
 
 template <typename Family>
-void EncodeStateBaseAddress<Family>::setIohAddressForDebugger(NEO::Debugger::SbaAddresses &sbaAddress, const STATE_BASE_ADDRESS &sbaCmd) {
+void EncodeStateBaseAddress<Family>::setSbaAddressesForDebugger(NEO::Debugger::SbaAddresses &sbaAddress, const STATE_BASE_ADDRESS &sbaCmd) {
+    sbaAddress.BindlessSurfaceStateBaseAddress = sbaCmd.getBindlessSurfaceStateBaseAddress();
+    sbaAddress.DynamicStateBaseAddress = sbaCmd.getDynamicStateBaseAddress();
+    sbaAddress.GeneralStateBaseAddress = sbaCmd.getGeneralStateBaseAddress();
+    sbaAddress.InstructionBaseAddress = sbaCmd.getInstructionBaseAddress();
+    sbaAddress.SurfaceStateBaseAddress = sbaCmd.getSurfaceStateBaseAddress();
+    sbaAddress.IndirectObjectBaseAddress = 0;
 }
 
 template <typename Family>
@@ -477,7 +491,8 @@ void EncodeStateBaseAddress<Family>::encode(CommandContainer &container, STATE_B
         multiOsContextCapable,
         MemoryCompressionState::NotApplicable,
         useGlobalAtomics,
-        1u);
+        1u,
+        nullptr);
 
     auto pCmd = reinterpret_cast<STATE_BASE_ADDRESS *>(container.getCommandStream()->getSpace(sizeof(STATE_BASE_ADDRESS)));
     *pCmd = sbaCmd;
@@ -519,7 +534,7 @@ size_t EncodeStateBaseAddress<Family>::getRequiredSizeForStateBaseAddress(Device
 }
 
 template <typename Family>
-void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo) {
+void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo, LogicalStateHelper *logicalStateHelper) {
     using STATE_COMPUTE_MODE = typename Family::STATE_COMPUTE_MODE;
     using FORCE_NON_COHERENT = typename STATE_COMPUTE_MODE::FORCE_NON_COHERENT;
 
@@ -624,7 +639,7 @@ void EncodeSurfaceState<Family>::encodeExtraBufferParams(EncodeSurfaceStateArgs 
     }
 
     if (DebugManager.flags.EnableStatelessCompressionWithUnifiedMemory.get()) {
-        if (args.allocation && !MemoryPool::isSystemMemoryPool(args.allocation->getMemoryPool())) {
+        if (args.allocation && !MemoryPoolHelper::isSystemMemoryPool(args.allocation->getMemoryPool())) {
             setCoherencyType(surfaceState, R_SURFACE_STATE::COHERENCY_TYPE_GPU_COHERENT);
             setBufferAuxParamsForCCS(surfaceState);
             compressionFormat = DebugManager.flags.FormatForStatelessCompressionWithUnifiedMemory.get();
@@ -686,7 +701,16 @@ inline void EncodeWA<Family>::addPipeControlPriorToNonPipelinedStateCommand(Line
         NEO::EncodeWA<Family>::setAdditionalPipeControlFlagsForNonPipelineStateCommand(args);
     }
 
-    MemorySynchronizationCommands<Family>::addPipeControl(commandStream, args);
+    MemorySynchronizationCommands<Family>::addSingleBarrier(commandStream, args);
+}
+
+template <typename Family>
+void EncodeWA<Family>::adjustCompressionFormatForPlanarImage(uint32_t &compressionFormat, GMM_YUV_PLANE_ENUM plane) {
+    if (plane == GMM_PLANE_Y) {
+        compressionFormat &= 0xf;
+    } else if ((plane == GMM_PLANE_U) || (plane == GMM_PLANE_V)) {
+        compressionFormat |= 0x10;
+    }
 }
 
 template <typename Family>
@@ -716,5 +740,14 @@ inline void EncodeMiArbCheck<Family>::adjust(MI_ARB_CHECK &miArbCheck) {
         miArbCheck.setPreParserDisable(!DebugManager.flags.ForcePreParserEnabledForMiArbCheck.get());
     }
 }
+
+template <typename Family>
+inline void EncodeStoreMMIO<Family>::appendFlags(MI_STORE_REGISTER_MEM *storeRegMem, bool workloadPartition) {
+    storeRegMem->setMmioRemapEnable(true);
+    storeRegMem->setWorkloadPartitionIdOffsetEnable(workloadPartition);
+}
+
+template <typename Family>
+void EncodeDispatchKernel<Family>::adjustWalkOrder(WALKER_TYPE &walkerCmd, uint32_t requiredWorkGroupOrder, const HardwareInfo &hwInfo) {}
 
 } // namespace NEO

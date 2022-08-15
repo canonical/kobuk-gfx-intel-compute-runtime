@@ -108,6 +108,11 @@ if(RELEASE_WITH_REGKEYS)
   add_definitions(-D_RELEASE_BUILD_WITH_REGKEYS)
 endif()
 
+if(ENABLE_DYNAMIC_MEMORY_TRACKING)
+  message(STATUS "Enabling dynamic memory tracking")
+  add_definitions(-DENABLE_DYNAMIC_MEMORY_TRACKING)
+endif()
+
 if(DEFINED NEO_EXTRA_DEFINES)
   string(REPLACE "," ";" NEO_EXTRA_DEFINES "${NEO_EXTRA_DEFINES}")
   foreach(_tmp ${NEO_EXTRA_DEFINES})
@@ -184,14 +189,16 @@ if(UNIX)
   check_cxx_compiler_flag(-fuse-ld=gold COMPILER_SUPPORTS_GOLD)
   if(NOT NEO_DISABLE_LD_LLD AND COMPILER_SUPPORTS_LLD AND __LD_LLD_FOUND)
     message(STATUS "Using linker: ld.lld")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld -Wl,--build-id=sha1")
   elseif(NOT NEO_DISABLE_LD_GOLD AND COMPILER_SUPPORTS_GOLD AND __LD_GOLD_FOUND)
     message(STATUS "Using linker: ld.gold")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold")
   else()
     message(STATUS "Using linker: default")
   endif()
-
+  if(ENABLE_DYNAMIC_MEMORY_TRACKING)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--export-dynamic")
+  endif()
   if(NEO_BUILD_DEBUG_SYMBOLS_PACKAGE)
     set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g")
@@ -236,6 +243,10 @@ if(NEO_SKIP_UNIT_TESTS)
   set(NEO_SKIP_OCL_UNIT_TESTS TRUE)
   set(NEO_SKIP_L0_UNIT_TESTS TRUE)
   set(NEO_SKIP_L0_BLACK_BOX_TESTS TRUE)
+endif()
+
+if(DEFINED DO_NOT_RUN_AUB_TESTS)
+  set(NEO_SKIP_AUB_TEST_RUN ${DO_NOT_RUN_AUB_TESTS})
 endif()
 
 # Set our build directory
@@ -354,6 +365,11 @@ if(NOT DEFINED KHRONOS_GL_HEADERS_DIR)
 endif()
 message(STATUS "Khronos OpenGL headers dir: ${KHRONOS_GL_HEADERS_DIR}")
 
+if(NOT DEFINED AOT_CONFIG_HEADERS_DIR)
+  get_filename_component(AOT_CONFIG_HEADERS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party${BRANCH_DIR_SUFFIX}aot_config_headers" ABSOLUTE)
+  message(STATUS "AOT config headers dir: ${AOT_CONFIG_HEADERS_DIR}")
+endif()
+
 if(NOT THIRD_PARTY_DIR)
   get_filename_component(THIRD_PARTY_DIR "../third_party/" ABSOLUTE)
 endif()
@@ -441,6 +457,16 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 # Get available platfroms
 include(platforms.cmake)
 
+if(UNIX)
+  # prelim headers detection
+  if(NOT ("${BRANCH_TYPE}" STREQUAL ""))
+    set(NEO_ENABLE_i915_PRELIM_DETECTION TRUE)
+  elseif(NOT DEFINED NEO_ENABLE_i915_PRELIM_DETECTION)
+    set(NEO_ENABLE_i915_PRELIM_DETECTION FALSE)
+  endif()
+  message(STATUS "i915 prelim headers detection: ${NEO_ENABLE_i915_PRELIM_DETECTION}")
+endif()
+
 get_filename_component(I915_INCLUDES_DIR "${NEO_SOURCE_DIR}/third_party${BRANCH_DIR_SUFFIX}uapi" ABSOLUTE)
 message(STATUS "i915 includes dir: ${I915_INCLUDES_DIR}")
 
@@ -507,7 +533,7 @@ if(MSVC)
   if(NOT CMAKE_CXX_FLAGS MATCHES "/WX")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /WX")
     if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /we4189")
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /we4189 /we4388")
     endif()
   endif()
 
@@ -554,6 +580,14 @@ else()
     endif()
   endif()
 
+endif()
+
+# increase the maximum number of sections in .obj files
+if(MSVC)
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /bigobj")
+  set(CMAKE_CXX_FLAGS_RELEASEINTERNAL "${CMAKE_CXX_FLAGS_RELEASEINTERNAL} /bigobj")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /bigobj")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj")
 endif()
 
 # setup variables needed for custom configuration type
@@ -658,7 +692,7 @@ if(NOT MSVC)
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-noexcept-type") # Added for gtest
     endif()
   endif()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Werror=vla")
 
   if(USE_SANITIZE_UB)
     check_cxx_compiler_flag(-fsanitize=undefined COMPILER_SUPPORTS_UNDEFINED_BEHAVIOR_SANITIZER)
@@ -723,6 +757,8 @@ endif()
 include_directories(${NEO_SHARED_DIRECTORY}/helpers/definitions${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SHARED_DIRECTORY}/memory_properties${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SHARED_DIRECTORY}/sku_info/definitions${BRANCH_DIR_SUFFIX})
+include_directories(${NEO_SHARED_DIRECTORY}/xe_hpc_core${BRANCH_DIR_SUFFIX})
+include_directories(${NEO_SHARED_DIRECTORY}/xe_hpg_core${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SOURCE_DIR}/opencl/source/command_queue/definitions${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SOURCE_DIR}/opencl/source/mem_obj/definitions${BRANCH_DIR_SUFFIX})
 include_directories(${NEO_SOURCE_DIR}/opencl/source/memory_manager/definitions${BRANCH_DIR_SUFFIX})
@@ -730,13 +766,25 @@ if(MSVC)
   include_directories(${NEO_SOURCE_DIR}/opencl/source/sharings/gl/windows/include)
 endif()
 
+macro(macro_for_each_platform)
+  string(TOLOWER ${PLATFORM_IT} PLATFORM_IT_LOWER)
+  foreach(PLATFORM_DIRECTORY ${NEO_SHARED_DIRECTORY}/${CORE_TYPE_LOWER}/${PLATFORM_IT_LOWER}/definitions${BRANCH_DIR_SUFFIX})
+    if(EXISTS ${PLATFORM_DIRECTORY})
+      include_directories(${PLATFORM_DIRECTORY})
+    endif()
+  endforeach()
+endmacro()
+
 macro(macro_for_each_core_type)
   foreach(PLATFORM_DIRECTORY ${NEO_SHARED_DIRECTORY}/${CORE_TYPE_LOWER}/definitions${BRANCH_DIR_SUFFIX} ${NEO_SOURCE_DIR}/opencl/source/${CORE_TYPE_LOWER}/definitions${BRANCH_DIR_SUFFIX})
     if(EXISTS ${PLATFORM_DIRECTORY})
       include_directories(${PLATFORM_DIRECTORY})
     endif()
   endforeach()
+
+  apply_macro_for_each_platform()
 endmacro()
+
 apply_macro_for_each_core_type("SUPPORTED")
 
 # Define where to put binaries
@@ -774,15 +822,6 @@ else()
   set(NEO_EXTRA_LIBS dl pthread rt)
 endif()
 
-if(UNIX)
-  # prelim headers detection
-  if(NOT ("${BRANCH_TYPE}" STREQUAL ""))
-    set(NEO_ENABLE_i915_PRELIM_DETECTION TRUE)
-  elseif(NOT DEFINED NEO_ENABLE_i915_PRELIM_DETECTION)
-    set(NEO_ENABLE_i915_PRELIM_DETECTION FALSE)
-  endif()
-  message(STATUS "i915 prelim headers detection: ${NEO_ENABLE_i915_PRELIM_DETECTION}")
-endif()
 add_subdirectory_unique(shared)
 
 if(NEO_BUILD_WITH_OCL)
@@ -799,9 +838,15 @@ endif()
 
 set(NEO_SCRIPT_PROJECTS_FOLDER "neo scripts")
 
+set(NEO_SHARED_BUILTINS_DIR "${NEO_SOURCE_DIR}/shared/source/built_ins/kernels")
+set(NEO_SHARED_TEST_FILES_DIR "${NEO_SOURCE_DIR}/shared/test/common/test_files")
+set(NEO_OPENCL_TEST_FILES_DIR "${NEO_SOURCE_DIR}/opencl/test/unit_test/test_files")
+
 configure_file(config.h.in ${NEO_BUILD_DIR}/config.h)
 configure_file(driver_version.h.in ${NEO_BUILD_DIR}/driver_version.h) # Put Driver version into define
 configure_file(lib_names.h.in ${NEO_BUILD_DIR}/lib_names.h)
+configure_file(test_files_setup.h.in ${NEO_BUILD_DIR}/test_files_setup.h)
+configure_file(hw_cmds_default.h.in ${NEO_BUILD_DIR}/hw_cmds_default.h)
 
 if(BUILD_WITH_L0)
   add_subdirectory_unique(level_zero)

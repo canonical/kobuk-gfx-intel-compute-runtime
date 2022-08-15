@@ -6,7 +6,6 @@
  */
 
 #pragma once
-#include "shared/source/helpers/compiler_hw_info_config.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 
 #include "opencl/source/command_queue/command_queue_hw.h"
@@ -106,7 +105,18 @@ struct CommandQueueStateless : public CommandQueueHw<FamilyType> {
         if (kernel->getKernelInfo().getArgDescriptorAt(0).is<ArgDescriptor::ArgTPointer>()) {
             EXPECT_FALSE(kernel->getKernelInfo().getArgDescriptorAt(0).as<ArgDescPointer>().isPureStateful());
         }
+
+        if (validateKernelSystemMemory) {
+            if (expectedKernelSystemMemory) {
+                EXPECT_TRUE(kernel->getDestinationAllocationInSystemMemory());
+            } else {
+                EXPECT_FALSE(kernel->getDestinationAllocationInSystemMemory());
+            }
+        }
     }
+
+    bool validateKernelSystemMemory = false;
+    bool expectedKernelSystemMemory = false;
 };
 
 template <typename FamilyType>
@@ -117,10 +127,21 @@ struct CommandQueueStateful : public CommandQueueHw<FamilyType> {
         auto kernel = dispatchInfo.begin()->getKernel();
         EXPECT_FALSE(kernel->getKernelInfo().kernelDescriptor.kernelAttributes.supportsBuffersBiggerThan4Gb());
 
-        if (HwHelperHw<FamilyType>::get().isStatelesToStatefullWithOffsetSupported()) {
+        if (HwHelperHw<FamilyType>::get().isStatelessToStatefulWithOffsetSupported()) {
             EXPECT_TRUE(kernel->allBufferArgsStateful);
         }
+
+        if (validateKernelSystemMemory) {
+            if (expectedKernelSystemMemory) {
+                EXPECT_TRUE(kernel->getDestinationAllocationInSystemMemory());
+            } else {
+                EXPECT_FALSE(kernel->getDestinationAllocationInSystemMemory());
+            }
+        }
     }
+
+    bool validateKernelSystemMemory = false;
+    bool expectedKernelSystemMemory = false;
 };
 
 } // namespace NEO

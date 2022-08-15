@@ -16,14 +16,12 @@
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 
-#include "gtest/gtest.h"
-
 #include <algorithm>
 
 class DrmCommandStreamTest : public ::testing::Test {
   public:
     template <typename GfxFamily>
-    void SetUpT() {
+    void setUpT() {
 
         //make sure this is disabled, we don't want to test this now
         DebugManager.flags.EnableForcePin.set(false);
@@ -35,6 +33,7 @@ class DrmCommandStreamTest : public ::testing::Test {
         executionEnvironment.rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
         executionEnvironment.rootDeviceEnvironments[0]->osInterface->setDriverModel(std::unique_ptr<DriverModel>(mock));
         executionEnvironment.rootDeviceEnvironments[0]->memoryOperationsInterface = DrmMemoryOperationsHandler::create(*mock, 0u);
+        executionEnvironment.rootDeviceEnvironments[0]->initGmm();
 
         mock->createVirtualMemoryAddressSpace(HwHelper::getSubDevicesCount(hwInfo));
         osContext = std::make_unique<OsContextLinux>(*mock, 0u,
@@ -62,7 +61,7 @@ class DrmCommandStreamTest : public ::testing::Test {
     }
 
     template <typename GfxFamily>
-    void TearDownT() {
+    void tearDownT() {
         memoryManager->waitForDeletions();
         memoryManager->peekGemCloseWorker()->close(true);
         delete csr;
@@ -72,7 +71,7 @@ class DrmCommandStreamTest : public ::testing::Test {
         }
         // Expect 1 call with DRM_IOCTL_I915_GEM_CONTEXT_DESTROY request on destroyDrmContext
         // Expect 1 call with DRM_IOCTL_GEM_CLOSE request on BufferObject close
-        mock->expectedIoctlCallsOnDestruction = mock->ioctlCallsCount + 2;
+        mock->expectedIoctlCallsOnDestruction = mock->ioctlCallsCount + 2 + static_cast<uint32_t>(mock->virtualMemoryIds.size());
         mock->expectIoctlCallsOnDestruction = true;
     }
 
@@ -99,7 +98,7 @@ class DrmCommandStreamEnhancedTemplate : public ::testing::Test {
     std::unique_ptr<MockDevice> device;
 
     template <typename GfxFamily>
-    void SetUpT() {
+    void setUpT() {
         executionEnvironment = new MockExecutionEnvironment();
         executionEnvironment->incRefInternal();
         executionEnvironment->initGmm();
@@ -129,8 +128,9 @@ class DrmCommandStreamEnhancedTemplate : public ::testing::Test {
     }
 
     template <typename GfxFamily>
-    void TearDownT() {
+    void tearDownT() {
         executionEnvironment->decRefInternal();
+        device.reset();
     }
 
     template <typename GfxFamily>
@@ -154,7 +154,7 @@ class DrmCommandStreamEnhancedTemplate : public ::testing::Test {
         friend DrmCommandStreamEnhancedTemplate<DrmType>;
 
       protected:
-        MockBufferObject(Drm *drm, size_t size) : BufferObject(drm, 1, 0, 16u) {
+        MockBufferObject(Drm *drm, size_t size) : BufferObject(drm, CommonConstants::unsupportedPatIndex, 1, 0, 16u) {
             this->size = alignUp(size, 4096);
         }
     };
@@ -179,7 +179,7 @@ class DrmCommandStreamEnhancedWithFailingExecTemplate : public ::testing::Test {
     std::unique_ptr<MockDevice> device;
 
     template <typename GfxFamily>
-    void SetUpT() {
+    void setUpT() {
         executionEnvironment = new MockExecutionEnvironment();
         executionEnvironment->incRefInternal();
         executionEnvironment->initGmm();
@@ -209,7 +209,7 @@ class DrmCommandStreamEnhancedWithFailingExecTemplate : public ::testing::Test {
     }
 
     template <typename GfxFamily>
-    void TearDownT() {
+    void tearDownT() {
         executionEnvironment->decRefInternal();
     }
 
@@ -234,7 +234,7 @@ class DrmCommandStreamEnhancedWithFailingExecTemplate : public ::testing::Test {
         friend DrmCommandStreamEnhancedTemplate<T>;
 
       protected:
-        MockBufferObject(Drm *drm, size_t size) : BufferObject(drm, 1, 0, 16u) {
+        MockBufferObject(Drm *drm, size_t size) : BufferObject(drm, CommonConstants::unsupportedPatIndex, 1, 0, 16u) {
             this->size = alignUp(size, 4096);
         }
     };

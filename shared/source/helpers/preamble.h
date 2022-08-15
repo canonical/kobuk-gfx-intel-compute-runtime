@@ -7,10 +7,7 @@
 
 #pragma once
 #include "shared/source/helpers/definitions/engine_group_types.h"
-#include "shared/source/helpers/pipeline_select_helper.h"
-#include "shared/source/kernel/kernel_execution_type.h"
 
-#include "engine_node.h"
 #include "igfxfmid.h"
 
 #include <cstddef>
@@ -24,6 +21,7 @@ class Device;
 struct DispatchFlags;
 class GraphicsAllocation;
 class LinearStream;
+class LogicalStateHelper;
 struct PipelineSelectArgs;
 struct StreamProperties;
 
@@ -38,7 +36,7 @@ struct PreambleHelper {
                                       const PipelineSelectArgs &pipelineSelectArgs,
                                       const HardwareInfo &hwInfo);
     static void appendProgramPipelineSelect(void *cmd, bool isSpecialModeSelected, const HardwareInfo &hwInfo);
-    static void programPreemption(LinearStream *pCommandStream, Device &device, GraphicsAllocation *preemptionCsr);
+    static void programPreemption(LinearStream *pCommandStream, Device &device, GraphicsAllocation *preemptionCsr, LogicalStateHelper *logicalStateHelper);
     static void addPipeControlBeforeVfeCmd(LinearStream *pCommandStream, const HardwareInfo *hwInfo, EngineGroupType engineGroupType);
     static void appendProgramVFEState(const HardwareInfo &hwInfo, const StreamProperties &streamProperties, void *cmd);
     static void *getSpaceForVfeState(LinearStream *pCommandStream,
@@ -49,11 +47,12 @@ struct PreambleHelper {
                                 uint32_t scratchSize,
                                 uint64_t scratchAddress,
                                 uint32_t maxFrontEndThreads,
-                                const StreamProperties &streamProperties);
+                                const StreamProperties &streamProperties,
+                                LogicalStateHelper *logicalStateHelper);
     static uint64_t getScratchSpaceAddressOffsetForVfeState(LinearStream *pCommandStream, void *pVfeState);
     static void programAdditionalFieldsInVfeState(VFE_STATE_TYPE *mediaVfeState, const HardwareInfo &hwInfo, bool disableEUFusion);
     static void programPreamble(LinearStream *pCommandStream, Device &device, uint32_t l3Config,
-                                GraphicsAllocation *preemptionCsr);
+                                GraphicsAllocation *preemptionCsr, LogicalStateHelper *logicalStateHelper);
     static void programKernelDebugging(LinearStream *pCommandStream);
     static void programSemaphoreDelay(LinearStream *pCommandStream);
     static uint32_t getL3Config(const HardwareInfo &hwInfo, bool useSLM);

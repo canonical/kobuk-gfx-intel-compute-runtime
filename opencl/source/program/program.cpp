@@ -73,8 +73,12 @@ std::string Program::getInternalOptions() const {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::arch32bit);
     }
 
-    if ((isBuiltIn && is32bit) || pClDevice->areSharedSystemAllocationsAllowed() ||
-        DebugManager.flags.DisableStatelessToStatefulOptimization.get()) {
+    auto &hwInfo = pClDevice->getHardwareInfo();
+    const auto &compilerHwInfoConfig = *CompilerHwInfoConfig::get(hwInfo.platform.eProductFamily);
+    auto forceToStatelessRequired = compilerHwInfoConfig.isForceToStatelessRequired();
+    auto disableStatelessToStatefulOptimization = DebugManager.flags.DisableStatelessToStatefulOptimization.get();
+
+    if ((isBuiltIn && is32bit) || forceToStatelessRequired || disableStatelessToStatefulOptimization) {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::greaterThan4gbBuffersRequired);
     }
 
@@ -82,16 +86,15 @@ std::string Program::getInternalOptions() const {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::bindlessMode);
     }
 
-    auto enableStatelessToStatefullWithOffset = HwHelper::get(pClDevice->getHardwareInfo().platform.eRenderCoreFamily).isStatelesToStatefullWithOffsetSupported();
+    auto enableStatelessToStatefulWithOffset = HwHelper::get(pClDevice->getHardwareInfo().platform.eRenderCoreFamily).isStatelessToStatefulWithOffsetSupported();
     if (DebugManager.flags.EnableStatelessToStatefulBufferOffsetOpt.get() != -1) {
-        enableStatelessToStatefullWithOffset = DebugManager.flags.EnableStatelessToStatefulBufferOffsetOpt.get() != 0;
+        enableStatelessToStatefulWithOffset = DebugManager.flags.EnableStatelessToStatefulBufferOffsetOpt.get() != 0;
     }
 
-    if (enableStatelessToStatefullWithOffset) {
+    if (enableStatelessToStatefulWithOffset) {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::hasBufferOffsetArg);
     }
 
-    auto &hwInfo = pClDevice->getHardwareInfo();
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
     if (hwInfoConfig.isForceEmuInt32DivRemSPWARequired(hwInfo)) {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::forceEmuInt32DivRemSP);
@@ -102,7 +105,7 @@ std::string Program::getInternalOptions() const {
     }
 
     CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::preserveVec3Type);
-
+    CompilerOptions::concatenateAppend(internalOptions, compilerHwInfoConfig.getCachingPolicyOptions());
     return internalOptions;
 }
 
@@ -164,10 +167,9 @@ cl_int Program::createProgramFromBinary(
         auto productAbbreviation = hardwarePrefix[hwInfo->platform.eProductFamily];
 
         auto copyHwInfo = *hwInfo;
-        const auto &compilerHwInfoConfig = *CompilerHwInfoConfig::get(copyHwInfo.platform.eProductFamily);
-        compilerHwInfoConfig.adjustHwInfoForIgc(copyHwInfo);
+        CompilerHwInfoConfig::get(copyHwInfo.platform.eProductFamily)->adjustHwInfoForIgc(copyHwInfo);
 
-        TargetDevice targetDevice = targetDeviceFromHwInfo(*hwInfo);
+        TargetDevice targetDevice = targetDeviceFromHwInfo(copyHwInfo);
         std::string decodeErrors;
         std::string decodeWarnings;
         auto singleDeviceBinary = unpackSingleDeviceBinary(archive, ConstStringRef(productAbbreviation, strlen(productAbbreviation)), targetDevice,
@@ -176,7 +178,8 @@ cl_int Program::createProgramFromBinary(
             PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s\n", decodeWarnings.c_str());
         }
 
-        if (singleDeviceBinary.intermediateRepresentation.empty() && singleDeviceBinary.deviceBinary.empty()) {
+        bool singleDeviceBinaryEmpty = singleDeviceBinary.intermediateRepresentation.empty() && singleDeviceBinary.deviceBinary.empty();
+        if (singleDeviceBinaryEmpty || (singleDeviceBinary.deviceBinary.empty() && DebugManager.flags.DisableKernelRecompilation.get())) {
             retVal = CL_INVALID_BINARY;
             PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s\n", decodeErrors.c_str());
         } else {
@@ -185,6 +188,9 @@ cl_int Program::createProgramFromBinary(
             this->irBinarySize = singleDeviceBinary.intermediateRepresentation.size();
             this->isSpirV = NEO::isSpirVBitcode(ArrayRef<const uint8_t>(reinterpret_cast<const uint8_t *>(this->irBinary.get()), this->irBinarySize));
             this->options = singleDeviceBinary.buildOptions.str();
+            if (singleDeviceBinary.format == NEO::DeviceBinaryFormat::Zebin) {
+                this->options += " " + NEO::CompilerOptions::allowZebin.str();
+            }
 
             if (false == singleDeviceBinary.debugData.empty()) {
                 this->buildInfos[rootDeviceIndex].debugData = makeCopy(reinterpret_cast<const char *>(singleDeviceBinary.debugData.begin()), singleDeviceBinary.debugData.size());
@@ -198,7 +204,7 @@ cl_int Program::createProgramFromBinary(
                 this->buildInfos[rootDeviceIndex].packedDeviceBinarySize = archive.size();
             } else {
                 this->isCreatedFromBinary = false;
-                this->shouldWarnAboutRebuild = true;
+                this->requiresRebuild = true;
             }
 
             switch (singleDeviceBinary.format) {
@@ -304,7 +310,7 @@ void Program::cleanCurrentKernelInfo(uint32_t rootDeviceIndex) {
     auto &buildInfo = buildInfos[rootDeviceIndex];
     for (auto &kernelInfo : buildInfo.kernelInfoArray) {
         if (kernelInfo->kernelAllocation) {
-            //register cache flush in all csrs where kernel allocation was used
+            // register cache flush in all csrs where kernel allocation was used
             for (auto &engine : this->executionEnvironment.memoryManager->getRegisteredEngines()) {
                 auto contextId = engine.osContext->getContextId();
                 if (kernelInfo->kernelAllocation->isUsedByOsContext(contextId)) {
@@ -334,10 +340,10 @@ void Program::cleanCurrentKernelInfo(uint32_t rootDeviceIndex) {
 }
 
 void Program::updateNonUniformFlag() {
-    //Look for -cl-std=CL substring and extract value behind which can be 1.2 2.0 2.1 and convert to value
+    // Look for -cl-std=CL substring and extract value behind which can be 1.2 2.0 2.1 and convert to value
     auto pos = options.find(clStdOptionName);
     if (pos == std::string::npos) {
-        programOptionVersion = 12u; //Default is 1.2
+        programOptionVersion = 12u; // Default is 1.2
     } else {
         std::stringstream ss{options.c_str() + pos + clStdOptionName.size()};
         uint32_t majorV = 0u, minorV = 0u;

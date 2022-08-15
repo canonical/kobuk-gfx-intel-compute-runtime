@@ -37,7 +37,8 @@ TEST_F(DrmDebugTest, whenRegisterResourceClassesCalledThenTrueIsReturned) {
 TEST_F(DrmDebugTest, whenRegisterResourceCalledThenImplementationIsEmpty) {
     DrmMock drmMock(*executionEnvironment->rootDeviceEnvironments[0]);
 
-    auto handle = drmMock.registerResource(Drm::ResourceClass::MaxSize, nullptr, 0);
+    drmMock.ioctlCallsCount = 0;
+    auto handle = drmMock.registerResource(DrmResourceClass::MaxSize, nullptr, 0);
     EXPECT_EQ(0u, handle);
     drmMock.unregisterResource(handle);
     EXPECT_EQ(0u, drmMock.ioctlCallsCount);
@@ -46,6 +47,7 @@ TEST_F(DrmDebugTest, whenRegisterResourceCalledThenImplementationIsEmpty) {
 TEST_F(DrmDebugTest, whenRegisterIsaCookieCalledThenImplementationIsEmpty) {
     DrmMock drmMock(*executionEnvironment->rootDeviceEnvironments[0]);
 
+    drmMock.ioctlCallsCount = 0;
     const uint32_t isaHandle = 2;
     auto handle = drmMock.registerIsaCookie(isaHandle);
     EXPECT_EQ(0u, handle);
@@ -54,6 +56,7 @@ TEST_F(DrmDebugTest, whenRegisterIsaCookieCalledThenImplementationIsEmpty) {
 
 TEST_F(DrmDebugTest, whenCheckingContextDebugSupportThenNoIoctlIsCalled) {
     DrmMock drmMock(*executionEnvironment->rootDeviceEnvironments[0]);
+    drmMock.ioctlCallsCount = 0;
     drmMock.checkContextDebugSupport();
     EXPECT_FALSE(drmMock.isContextDebugSupported());
 
@@ -62,8 +65,9 @@ TEST_F(DrmDebugTest, whenCheckingContextDebugSupportThenNoIoctlIsCalled) {
 
 TEST_F(DrmDebugTest, whenNotifyCommandQueueCreateDestroyAreCalledThenImplementationsAreEmpty) {
     DrmMock drmMock(*executionEnvironment->rootDeviceEnvironments[0]);
+    drmMock.ioctlCallsCount = 0;
 
-    auto handle = drmMock.notifyFirstCommandQueueCreated();
+    auto handle = drmMock.notifyFirstCommandQueueCreated(nullptr, 0);
     EXPECT_EQ(0u, handle);
     EXPECT_EQ(0u, drmMock.ioctlCallsCount);
 

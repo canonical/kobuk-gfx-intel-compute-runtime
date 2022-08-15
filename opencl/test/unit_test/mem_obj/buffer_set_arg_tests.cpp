@@ -11,7 +11,7 @@
 #include "shared/source/memory_manager/surface.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
@@ -165,7 +165,7 @@ HWTEST_F(BufferSetArgTest, givenNonPureStatefulArgWhenCompressedBufferIsSetThenS
     pKernelInfo->argAsPtr(0).bindful = 0;
 
     auto graphicsAllocation = buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex());
-    graphicsAllocation->setDefaultGmm(new Gmm(pDevice->getGmmClientContext(), graphicsAllocation->getUnderlyingBuffer(), buffer->getSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
+    graphicsAllocation->setDefaultGmm(new Gmm(pDevice->getGmmHelper(), graphicsAllocation->getUnderlyingBuffer(), buffer->getSize(), 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
     graphicsAllocation->getDefaultGmm()->isCompressionEnabled = true;
     cl_mem clMem = buffer;
 
@@ -267,13 +267,13 @@ TEST_F(BufferSetArgTest, GivenSvmPointerWhenSettingKernelArgThenAddressToPatchIs
 
     auto svmData = pContext->getSVMAllocsManager()->getSVMAlloc(ptrSVM);
     ASSERT_NE(nullptr, svmData);
-    GraphicsAllocation *pSvmAlloc = svmData->gpuAllocations.getGraphicsAllocation(pDevice->getRootDeviceIndex());
-    EXPECT_NE(nullptr, pSvmAlloc);
+    GraphicsAllocation *svmAllocation = svmData->gpuAllocations.getGraphicsAllocation(pDevice->getRootDeviceIndex());
+    EXPECT_NE(nullptr, svmAllocation);
 
     retVal = pKernel->setArgSvmAlloc(
         0,
         ptrSVM,
-        pSvmAlloc,
+        svmAllocation,
         0u);
     ASSERT_EQ(CL_SUCCESS, retVal);
 

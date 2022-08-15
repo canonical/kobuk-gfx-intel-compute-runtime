@@ -6,10 +6,12 @@
  */
 
 #include "shared/source/gen9/aub_mapper.h"
+#include "shared/source/gen9/hw_cmds_base.h"
 #include "shared/source/helpers/flat_batch_buffer_helper_hw.inl"
 #include "shared/source/helpers/hw_helper_base.inl"
 #include "shared/source/helpers/hw_helper_bdw_and_later.inl"
 #include "shared/source/helpers/hw_helper_bdw_to_icllp.inl"
+#include "shared/source/helpers/logical_state_helper.inl"
 
 #include <cstring>
 
@@ -43,10 +45,12 @@ uint32_t HwHelperHw<Family>::getDefaultRevisionId(const HardwareInfo &hwInfo) co
 }
 
 template <>
-bool MemorySynchronizationCommands<Family>::isPipeControlWArequired(const HardwareInfo &hwInfo) { return true; }
+bool MemorySynchronizationCommands<Family>::isBarrierWaRequired(const HardwareInfo &hwInfo) { return true; }
 
 template class HwHelperHw<Family>;
 template class FlatBatchBufferHelperHw<Family>;
 template struct MemorySynchronizationCommands<Family>;
 template struct LriHelper<Family>;
+
+template LogicalStateHelper *LogicalStateHelper::create<Family>();
 } // namespace NEO

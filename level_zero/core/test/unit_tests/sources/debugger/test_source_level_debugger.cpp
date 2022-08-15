@@ -11,8 +11,9 @@
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_compilers.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
+#include "level_zero/core/source/cmdlist/cmdlist.h"
 #include "level_zero/core/source/cmdqueue/cmdqueue_hw.h"
 #include "level_zero/core/source/fence/fence.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdqueue.h"
@@ -30,7 +31,7 @@ HWTEST2_F(CommandQueueDebugCommandsTest, givenDebuggingEnabledWhenCommandListIsE
     NEO::MockCompilerEnableGuard mock(true);
     ze_command_queue_desc_t queueDesc = {};
     ze_result_t returnValue;
-    auto commandQueue = whitebox_cast(CommandQueue::create(productFamily, deviceL0, device->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
+    auto commandQueue = whiteboxCast(CommandQueue::create(productFamily, deviceL0, device->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
     ASSERT_NE(nullptr, commandQueue->commandStream);
 
     auto usedSpaceBefore = commandQueue->commandStream->getUsed();
@@ -79,7 +80,7 @@ HWTEST2_F(CommandQueueDebugCommandsTest, givenDebuggingEnabledWhenCommandListIsE
 
     ze_command_queue_desc_t queueDesc = {};
     ze_result_t returnValue;
-    auto commandQueue = whitebox_cast(CommandQueue::create(productFamily, deviceL0, device->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
+    auto commandQueue = whiteboxCast(CommandQueue::create(productFamily, deviceL0, device->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
     ASSERT_NE(nullptr, commandQueue->commandStream);
 
     auto usedSpaceBefore = commandQueue->commandStream->getUsed();
@@ -243,12 +244,12 @@ TEST_F(DeviceWithDebuggerEnabledTest, givenSldDebuggerWhenGettingL0DebuggerThenN
 }
 
 struct TwoSubDevicesDebuggerEnabledTest : public ActiveDebuggerFixture, public ::testing::Test {
-    void SetUp() override { // NOLINT(readability-identifier-naming)
+    void SetUp() override {
         DebugManager.flags.CreateMultipleSubDevices.set(2);
         VariableBackup<bool> mockDeviceFlagBackup(&MockDevice::createSingleDevice, false);
         ActiveDebuggerFixture::SetUp();
     }
-    void TearDown() override { // NOLINT(readability-identifier-naming)
+    void TearDown() override {
         ActiveDebuggerFixture::TearDown();
     }
     DebugManagerStateRestore restorer;
@@ -286,11 +287,13 @@ TEST(Debugger, GivenLegacyDebuggerAndProgramDebuggingEnabledWhenInitializingDriv
 
     ::testing::internal::CaptureStderr();
     auto executionEnvironment = new NEO::ExecutionEnvironment();
+    executionEnvironment->incRefInternal();
     executionEnvironment->prepareRootDeviceEnvironments(1);
 
     executionEnvironment->rootDeviceEnvironments[0]->debugger.reset(new MockSourceLevelDebugger());
     auto hwInfo = *NEO::defaultHwInfo.get();
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(&hwInfo);
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
 
     executionEnvironment->setDebuggingEnabled();
@@ -306,6 +309,9 @@ TEST(Debugger, GivenLegacyDebuggerAndProgramDebuggingEnabledWhenInitializingDriv
     std::string output = testing::internal::GetCapturedStderr();
 
     EXPECT_EQ(std::string("Source Level Debugger cannot be used with Environment Variable enabling program debugging.\n"), output);
+
+    driverHandle.reset(nullptr);
+    executionEnvironment->decRefInternal();
 }
 
 } // namespace ult

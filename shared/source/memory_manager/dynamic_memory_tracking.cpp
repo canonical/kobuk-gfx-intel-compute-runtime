@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cxxabi.h>
 #include <dlfcn.h>
 #include <exception>
 #include <execinfo.h>
@@ -32,15 +33,23 @@ void collectBacktrace() {
     auto pointersCount = backtrace(addressess, backtraceBufferSize);
     functions = backtrace_symbols(addressess, pointersCount);
 
-    printf("\n backtrace collected -- START --");
+    printf("\n backtrace collected -- START --\n");
 
     for (int symbolId = 0; symbolId < pointersCount; symbolId++) {
         Dl_info info;
         dladdr(addressess[symbolId], &info);
-        printf("%s %s\n", functions[symbolId], info.dli_sname);
+        char *realname;
+        int status;
+        realname = abi::__cxa_demangle(info.dli_sname, 0, 0, &status);
+        if (realname) {
+            printf("%s %s\n", info.dli_fname, realname);
+        } else {
+            printf("%s %s\n", functions[symbolId], info.dli_sname);
+        }
+        free(realname);
     }
 
-    printf("\n backtrace collected -- END --");
+    printf(" backtrace collected -- END --");
 
     free(functions);
 }

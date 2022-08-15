@@ -8,10 +8,9 @@ set(NEO_CORE_OS_INTERFACE_LINUX
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
     ${CMAKE_CURRENT_SOURCE_DIR}/allocator_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cache_info.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/cache_info_impl.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cache_info.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/clos_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/clos_cache.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/clos_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/device_command_stream.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/device_time_drm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device_time_drm.h
@@ -42,18 +41,21 @@ set(NEO_CORE_OS_INTERFACE_LINUX
     ${CMAKE_CURRENT_SOURCE_DIR}/drm_memory_operations_handler_default.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/drm_memory_operations_handler_default.h
     ${CMAKE_CURRENT_SOURCE_DIR}/drm_memory_manager_create_multi_host_allocation.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}drm_query.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}drm_version.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/drm_wrappers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/drm_wrappers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_info_config_drm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_device_id.h
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_device_id_linux.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kmd_notify_properties_linux.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/linux_inc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/i915.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/i915_prelim.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/i915_upstream.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ioctl_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ioctl_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ioctl_helper_prelim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}ioctl_helper_getter.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/ioctl_strings.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/ioctl_strings_prelim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/engine_info.h
     ${CMAKE_CURRENT_SOURCE_DIR}/engine_info.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_info.h
@@ -96,6 +98,10 @@ if(SUPPORT_XEHP_AND_LATER)
   )
 endif()
 
+if(SUPPORT_PVC_AND_LATER)
+  list(APPEND NEO_CORE_OS_INTERFACE_LINUX ${CMAKE_CURRENT_SOURCE_DIR}/hw_info_config_xe_hpc_and_later.inl)
+endif()
+
 if(DISABLE_WDDM_LINUX)
   list(APPEND NEO_CORE_OS_INTERFACE_LINUX
        ${CMAKE_CURRENT_SOURCE_DIR}/hw_info_config_wddm_stub.cpp
@@ -114,11 +120,9 @@ if("${BRANCH_TYPE}" STREQUAL "")
   if(NOT NEO_ENABLE_i915_PRELIM_DETECTION)
     list(APPEND NEO_CORE_OS_INTERFACE_LINUX
          ${CMAKE_CURRENT_SOURCE_DIR}/ioctl_helper_getter_upstream.cpp
-         ${CMAKE_CURRENT_SOURCE_DIR}/ioctl_strings_upstream.cpp
     )
     list(REMOVE_ITEM NEO_CORE_OS_INTERFACE_LINUX
          ${CMAKE_CURRENT_SOURCE_DIR}/ioctl_helper_getter.cpp
-         ${CMAKE_CURRENT_SOURCE_DIR}/ioctl_strings_prelim.cpp
     )
   endif()
 endif()

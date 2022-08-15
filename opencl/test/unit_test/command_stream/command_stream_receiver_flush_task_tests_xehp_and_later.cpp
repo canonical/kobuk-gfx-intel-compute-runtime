@@ -15,7 +15,7 @@
 #include "shared/test/common/mocks/mock_debugger.h"
 #include "shared/test/common/mocks/mock_os_context.h"
 #include "shared/test/common/mocks/mock_submissions_aggregator.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
@@ -141,6 +141,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandStreamReceiverFlushTaskXeHPAndLaterTests, gi
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
 
     configureCSRtoNonDirtyState<FamilyType>(false);
+    commandStreamReceiver.isStateSipSent = false;
     flushTask(commandStreamReceiver);
     parseCommands<FamilyType>(commandStreamReceiver.getCS(0));
 
@@ -180,6 +181,7 @@ HWTEST2_F(CommandStreamReceiverFlushTaskXeHPAndLaterTests, givenProgramPipeContr
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
 
     configureCSRtoNonDirtyState<FamilyType>(false);
+    commandStreamReceiver.isStateSipSent = false;
     flushTask(commandStreamReceiver);
     parseCommands<FamilyType>(commandStreamReceiver.getCS(0));
 
@@ -339,7 +341,8 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandStreamReceiverFlushTaskXeHPAndLaterTests, gi
                                                                 false,
                                                                 MemoryCompressionState::NotApplicable,
                                                                 false,
-                                                                1u);
+                                                                1u,
+                                                                nullptr);
 
     EXPECT_FALSE(sbaCmd.getDynamicStateBaseAddressModifyEnable());
     EXPECT_FALSE(sbaCmd.getDynamicStateBufferSizeModifyEnable());
@@ -357,7 +360,8 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandStreamReceiverFlushTaskXeHPAndLaterTests, gi
     EXPECT_TRUE(sbaCmd.getGeneralStateBaseAddressModifyEnable());
     EXPECT_TRUE(sbaCmd.getGeneralStateBufferSizeModifyEnable());
     if constexpr (is64bit) {
-        EXPECT_EQ(GmmHelper::decanonize(internalHeapBase), sbaCmd.getGeneralStateBaseAddress());
+        auto gmmHelper = pDevice->getGmmHelper();
+        EXPECT_EQ(gmmHelper->decanonize(internalHeapBase), sbaCmd.getGeneralStateBaseAddress());
     } else {
         EXPECT_EQ(generalStateBase, sbaCmd.getGeneralStateBaseAddress());
     }
@@ -380,7 +384,7 @@ HWTEST2_F(CommandStreamReceiverFlushTaskXeHPAndLaterTests, whenFlushAllCachesVar
     LinearStream stream(buff, sizeof(PIPE_CONTROL) * 3);
 
     PipeControlArgs args;
-    MemorySynchronizationCommands<FamilyType>::addPipeControl(stream, args);
+    MemorySynchronizationCommands<FamilyType>::addSingleBarrier(stream, args);
 
     parseCommands<FamilyType>(stream, 0);
 
@@ -436,7 +440,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandStreamReceiverFlushTaskXeHPAndLaterTests, gi
 
     //we do level change that will emit PPC, fill all the space so only BB end fits.
     taskLevel++;
-    auto ppcSize = MemorySynchronizationCommands<FamilyType>::getSizeForSinglePipeControl();
+    auto ppcSize = MemorySynchronizationCommands<FamilyType>::getSizeForSingleBarrier();
     auto fillSize = MemoryConstants::cacheLineSize - ppcSize - sizeof(typename FamilyType::MI_BATCH_BUFFER_END);
     csrCommandStream.getSpace(fillSize);
     auto expectedUsedSize = 2 * MemoryConstants::cacheLineSize;

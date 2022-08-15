@@ -7,14 +7,15 @@
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/constants.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
+#include "shared/source/os_interface/linux/i915.h"
 #include "shared/source/os_interface/linux/ioctl_helper.h"
 #include "shared/source/os_interface/linux/sys_calls.h"
 #include "shared/source/os_interface/os_interface.h"
 
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/device/device_imp.h"
-#include "level_zero/core/source/hw_helpers/l0_hw_helper.h"
 #include "level_zero/tools/source/metrics/os_metric_ip_sampling.h"
 
 #include <algorithm>
@@ -55,7 +56,7 @@ ze_result_t MetricIpSamplingLinuxImp::getNearestSupportedSamplingUnit(uint32_t &
     const auto drm = device.getOsInterface().getDriverModel()->as<NEO::Drm>();
     int32_t gpuTimeStampfrequency = 0;
     int32_t ret = drm->getTimestampFrequency(gpuTimeStampfrequency);
-    if (ret < 0) {
+    if (ret < 0 || gpuTimeStampfrequency == 0) {
         return ZE_RESULT_ERROR_UNKNOWN;
     }
 
@@ -80,7 +81,7 @@ ze_result_t MetricIpSamplingLinuxImp::startMeasurement(uint32_t &notifyEveryNRep
 
     auto ioctlHelper = drm->getIoctlHelper();
     uint32_t euStallFdParameter = ioctlHelper->getEuStallFdParameter();
-    std::array<uint64_t, 10u> properties;
+    std::array<uint64_t, 12u> properties;
     auto engineInfo = drm->getEngineInfo();
     if (engineInfo == nullptr) {
         return ZE_RESULT_ERROR_UNKNOWN;
@@ -90,8 +91,10 @@ ze_result_t MetricIpSamplingLinuxImp::startMeasurement(uint32_t &notifyEveryNRep
         return ZE_RESULT_ERROR_UNKNOWN;
     }
 
+    notifyEveryNReports = std::max(notifyEveryNReports, 1u);
+
     if (!ioctlHelper->getEuStallProperties(properties, maxDssBufferSize, samplingUnit, defaultPollPeriodNs,
-                                           classInstance->engineInstance)) {
+                                           classInstance->engineInstance, notifyEveryNReports)) {
         return ZE_RESULT_ERROR_UNKNOWN;
     }
 
@@ -184,9 +187,9 @@ bool MetricIpSamplingLinuxImp::isNReportsAvailable() {
 bool MetricIpSamplingLinuxImp::isDependencyAvailable() {
 
     const auto &hardwareInfo = device.getNEODevice()->getHardwareInfo();
-    auto &l0HwHelper = L0HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+    const auto &hwInfoConfig = *NEO::HwInfoConfig::get(hardwareInfo.platform.eProductFamily);
 
-    if (!l0HwHelper.isIpSamplingSupported(hardwareInfo)) {
+    if (!hwInfoConfig.isIpSamplingSupported(hardwareInfo)) {
         return false;
     }
 

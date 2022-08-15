@@ -12,11 +12,13 @@
 #include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/kernel/grf_config.h"
-#include "shared/source/xe_hpc_core/hw_cmds_base.h"
+#include "shared/source/utilities/lookup_array.h"
+#include "shared/source/xe_hpc_core/hw_cmds_xe_hpc_core_base.h"
 
 using Family = NEO::XE_HPC_COREFamily;
 
 #include "shared/source/command_container/command_encoder_tgllp_and_later.inl"
+#include "shared/source/command_container/command_encoder_xe_hpc_core_and_later.inl"
 #include "shared/source/command_container/command_encoder_xe_hpg_core_and_later.inl"
 #include "shared/source/command_container/image_surface_state/compression_params_tgllp_and_later.inl"
 #include "shared/source/command_container/image_surface_state/compression_params_xehp_and_later.inl"
@@ -47,7 +49,7 @@ inline void EncodeAtomic<Family>::setMiAtomicAddress(MI_ATOMIC &atomic, uint64_t
 }
 
 template <>
-void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo) {
+void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo, LogicalStateHelper *logicalStateHelper) {
     using STATE_COMPUTE_MODE = typename Family::STATE_COMPUTE_MODE;
     using FORCE_NON_COHERENT = typename STATE_COMPUTE_MODE::FORCE_NON_COHERENT;
 
@@ -85,6 +87,9 @@ void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, Sta
 
     stateComputeMode.setMaskBits(maskBits);
 
+    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    hwInfoConfig.updateScmCommand(&stateComputeMode, properties);
+
     auto buffer = csr.getSpaceForCmd<STATE_COMPUTE_MODE>();
     *buffer = stateComputeMode;
 }
@@ -94,12 +99,7 @@ void EncodeMemoryPrefetch<Family>::programMemoryPrefetch(LinearStream &commandSt
     using STATE_PREFETCH = typename Family::STATE_PREFETCH;
     constexpr uint32_t mocsIndexForL3 = (2 << 1);
 
-    bool isBaseDieA0 = (hwInfo.platform.usRevId & Family::pvcBaseDieRevMask) == Family::pvcBaseDieA0Masked;
-
-    bool prefetch = !isBaseDieA0;
-    if (DebugManager.flags.EnableMemoryPrefetch.get() != -1) {
-        prefetch = !!DebugManager.flags.EnableMemoryPrefetch.get();
-    }
+    bool prefetch = HwInfoConfig::get(hwInfo.platform.eProductFamily)->allowMemoryPrefetch(hwInfo);
 
     if (!prefetch) {
         return;
@@ -138,11 +138,10 @@ void EncodeMemoryPrefetch<Family>::programMemoryPrefetch(LinearStream &commandSt
 }
 
 template <>
-size_t EncodeMemoryPrefetch<Family>::getSizeForMemoryPrefetch(size_t size) {
+size_t EncodeMemoryPrefetch<Family>::getSizeForMemoryPrefetch(size_t size, const HardwareInfo &hwInfo) {
     if (DebugManager.flags.EnableMemoryPrefetch.get() == 0) {
         return 0;
     }
-
     size = alignUp(size, MemoryConstants::pageSize64k);
 
     size_t count = size / MemoryConstants::pageSize64k;
@@ -168,35 +167,45 @@ template <>
 void EncodeDispatchKernel<Family>::programBarrierEnable(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor,
                                                         uint32_t value,
                                                         const HardwareInfo &hwInfo) {
-    interfaceDescriptor.setNumberOfBarriers(static_cast<INTERFACE_DESCRIPTOR_DATA::NUMBER_OF_BARRIERS>(value));
+    using BARRIERS = INTERFACE_DESCRIPTOR_DATA::NUMBER_OF_BARRIERS;
+    static const LookupArray<uint32_t, BARRIERS, 8> barrierLookupArray({{{0, BARRIERS::NUMBER_OF_BARRIERS_NONE},
+                                                                         {1, BARRIERS::NUMBER_OF_BARRIERS_B1},
+                                                                         {2, BARRIERS::NUMBER_OF_BARRIERS_B2},
+                                                                         {4, BARRIERS::NUMBER_OF_BARRIERS_B4},
+                                                                         {8, BARRIERS::NUMBER_OF_BARRIERS_B8},
+                                                                         {16, BARRIERS::NUMBER_OF_BARRIERS_B16},
+                                                                         {24, BARRIERS::NUMBER_OF_BARRIERS_B24},
+                                                                         {32, BARRIERS::NUMBER_OF_BARRIERS_B32}}});
+    BARRIERS numBarriers = barrierLookupArray.lookUp(value);
+    interfaceDescriptor.setNumberOfBarriers(numBarriers);
 }
 
 template <>
-void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd, KernelExecutionType kernelExecutionType) {
+void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd, const EncodeWalkerArgs &walkerArgs) {
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
-    auto programGlobalFenceAsPostSyncOperationInComputeWalker = hwInfoConfig.isGlobalFenceInCommandStreamRequired(hwInfo);
 
-    if (DebugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.get() != -1) {
-        programGlobalFenceAsPostSyncOperationInComputeWalker = !!DebugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.get();
+    auto programGlobalFenceAsPostSyncOperationInComputeWalker = hwInfoConfig.isGlobalFenceInCommandStreamRequired(hwInfo) &&
+                                                                walkerArgs.requiredSystemFence;
+    int32_t overrideProgramSystemMemoryFence = DebugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.get();
+    if (overrideProgramSystemMemoryFence != -1) {
+        programGlobalFenceAsPostSyncOperationInComputeWalker = !!overrideProgramSystemMemoryFence;
     }
-    if (programGlobalFenceAsPostSyncOperationInComputeWalker) {
-        auto &postSyncData = walkerCmd.getPostSync();
-        postSyncData.setSystemMemoryFenceRequest(true);
+    auto &postSyncData = walkerCmd.getPostSync();
+    postSyncData.setSystemMemoryFenceRequest(programGlobalFenceAsPostSyncOperationInComputeWalker);
+
+    int32_t forceL3PrefetchForComputeWalker = DebugManager.flags.ForceL3PrefetchForComputeWalker.get();
+    if (forceL3PrefetchForComputeWalker != -1) {
+        walkerCmd.setL3PrefetchDisable(!forceL3PrefetchForComputeWalker);
     }
 
-    if (DebugManager.flags.ForceL3PrefetchForComputeWalker.get() != -1) {
-        walkerCmd.setL3PrefetchDisable(!DebugManager.flags.ForceL3PrefetchForComputeWalker.get());
+    auto programComputeDispatchAllWalkerEnableInComputeWalker = hwInfoConfig.isComputeDispatchAllWalkerEnableInComputeWalkerRequired(hwInfo) &&
+                                                                walkerArgs.kernelExecutionType == KernelExecutionType::Concurrent;
+    int32_t overrideDispatchAllWalkerEnableInComputeWalker = DebugManager.flags.ComputeDispatchAllWalkerEnableInComputeWalker.get();
+    if (overrideDispatchAllWalkerEnableInComputeWalker != -1) {
+        programComputeDispatchAllWalkerEnableInComputeWalker = !!overrideDispatchAllWalkerEnableInComputeWalker;
     }
 
-    auto programComputeDispatchAllWalkerEnableInComputeWalker = hwInfoConfig.isComputeDispatchAllWalkerEnableInComputeWalkerRequired(hwInfo);
-    if (programComputeDispatchAllWalkerEnableInComputeWalker) {
-        if (kernelExecutionType == KernelExecutionType::Concurrent) {
-            walkerCmd.setComputeDispatchAllWalkerEnable(true);
-        }
-    }
-    if (DebugManager.flags.ComputeDispatchAllWalkerEnableInComputeWalker.get() != -1) {
-        walkerCmd.setComputeDispatchAllWalkerEnable(DebugManager.flags.ComputeDispatchAllWalkerEnableInComputeWalker.get());
-    }
+    walkerCmd.setComputeDispatchAllWalkerEnable(programComputeDispatchAllWalkerEnableInComputeWalker);
 }
 
 template <>
@@ -290,4 +299,5 @@ template struct EncodeWA<Family>;
 template struct EncodeEnableRayTracing<Family>;
 template struct EncodeNoop<Family>;
 template struct EncodeStoreMemory<Family>;
+template struct EncodeMemoryFence<Family>;
 } // namespace NEO

@@ -6,12 +6,10 @@
  */
 
 #include "shared/test/common/libult/linux/drm_mock.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "level_zero/tools/source/metrics/os_metric_ip_sampling.h"
 #include "level_zero/tools/test/unit_tests/sources/metrics/mock_metric_oa.h"
-
-#include "hw_cmds.h"
 
 namespace L0 {
 namespace ult {
@@ -51,7 +49,7 @@ HWTEST2_F(MetricIpSamplingLinuxTestUpstream, GivenSupportedProductFamilyAndSuppo
     auto hwInfo = neoDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->platform.eProductFamily = productFamily;
 
-    for (auto deviceId : NEO::PVC_XT_IDS) {
+    for (const auto &deviceId : NEO::pvcXtDeviceIds) {
         hwInfo->platform.usDeviceID = deviceId;
         EXPECT_FALSE(metricIpSamplingOsInterface->isDependencyAvailable());
     }

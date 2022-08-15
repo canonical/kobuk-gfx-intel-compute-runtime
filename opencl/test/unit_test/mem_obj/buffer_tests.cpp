@@ -19,7 +19,7 @@
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_gmm.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "opencl/extensions/public/cl_ext_private.h"
 #include "opencl/source/command_queue/command_queue_hw.h"
@@ -28,6 +28,7 @@
 #include "opencl/test/unit_test/fixtures/multi_root_device_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
+#include "opencl/test/unit_test/mocks/mock_platform.h"
 
 using namespace NEO;
 
@@ -354,7 +355,7 @@ TEST(Buffer, givenNullptrPassedToBufferCreateWhenNoSharedContextOrCompressedBuff
     std::unique_ptr<Buffer> buffer(Buffer::create(&ctx, flags, MemoryConstants::pageSize, nullptr, retVal));
 
     ASSERT_NE(nullptr, buffer.get());
-    if (MemoryPool::isSystemMemoryPool(buffer->getGraphicsAllocation(device->getRootDeviceIndex())->getMemoryPool())) {
+    if (MemoryPoolHelper::isSystemMemoryPool(buffer->getGraphicsAllocation(device->getRootDeviceIndex())->getMemoryPool())) {
         EXPECT_EQ(AllocationType::BUFFER_HOST_MEMORY, buffer->getGraphicsAllocation(device->getRootDeviceIndex())->getAllocationType());
     } else {
         EXPECT_EQ(AllocationType::BUFFER, buffer->getGraphicsAllocation(device->getRootDeviceIndex())->getAllocationType());
@@ -375,7 +376,7 @@ TEST(Buffer, givenHostPtrPassedToBufferCreateWhenMemUseHostPtrFlagisSetAndBuffer
     std::unique_ptr<Buffer> buffer(Buffer::create(&ctx, flags, MemoryConstants::pageSize, offsetedPtr, retVal));
     ASSERT_NE(nullptr, buffer.get());
 
-    auto mapAllocation = buffer->getMapAllocation(device.get()->getRootDeviceIndex());
+    auto mapAllocation = buffer->getMapAllocation(device->getRootDeviceIndex());
     EXPECT_NE(nullptr, mapAllocation);
     EXPECT_EQ(offsetedPtr, mapAllocation->getUnderlyingBuffer());
     EXPECT_EQ(AllocationType::MAP_ALLOCATION, mapAllocation->getAllocationType());
@@ -608,6 +609,7 @@ TEST(Buffer, givenClMemCopyHostPointerPassedToBufferCreateWhenAllocationIsNotInS
         EXPECT_LT(taskCount, taskCountSent);
     }
 }
+
 struct CompressedBuffersTests : public ::testing::Test {
     void SetUp() override {
         ExecutionEnvironment *executionEnvironment = MockDevice::prepareExecutionEnvironment(defaultHwInfo.get(), 0u);
@@ -689,7 +691,7 @@ TEST_F(CompressedBuffersTests, givenBufferNotCompressedAllocationAndNoHostPtrWhe
     buffer.reset(Buffer::create(context.get(), 0, bufferSize, nullptr, retVal));
     auto allocation = buffer->getGraphicsAllocation(device->getRootDeviceIndex());
     EXPECT_TRUE(buffer->isMemObjZeroCopy());
-    if (MemoryPool::isSystemMemoryPool(allocation->getMemoryPool())) {
+    if (MemoryPoolHelper::isSystemMemoryPool(allocation->getMemoryPool())) {
         EXPECT_EQ(allocation->getAllocationType(), AllocationType::BUFFER_HOST_MEMORY);
     } else {
         EXPECT_EQ(allocation->getAllocationType(), AllocationType::BUFFER);
@@ -823,7 +825,7 @@ TEST_F(CompressedBuffersCopyHostMemoryTests, givenBufferCreateWhenMemoryTransfer
     static_cast<MockMemoryManager *>(context->memoryManager)->forceCompressed = true;
     std::unique_ptr<Buffer> buffer(Buffer::create(context.get(), flags, bufferSize, hostPtr, retVal));
     EXPECT_NE(nullptr, mockCmdQ->writeMapAllocation);
-    EXPECT_EQ(buffer->getMapAllocation(device.get()->getRootDeviceIndex()), mockCmdQ->writeMapAllocation);
+    EXPECT_EQ(buffer->getMapAllocation(device->getRootDeviceIndex()), mockCmdQ->writeMapAllocation);
 }
 
 TEST_F(CompressedBuffersCopyHostMemoryTests, givenNonCompressedBufferWhenCopyFromHostPtrIsRequiredThenDontCallWriteBuffer) {
@@ -894,19 +896,19 @@ TEST_P(NoHostPtr, GivenValidFlagsWhenCreatingBufferThenBufferIsCreated) {
 }
 
 TEST_P(NoHostPtr, GivenNoHostPtrWhenHwBufferCreationFailsThenReturnNullptr) {
-    BufferFactoryFuncs BufferFuncsBackup[IGFX_MAX_CORE];
+    BufferFactoryFuncs bufferFuncsBackup[IGFX_MAX_CORE];
 
     for (uint32_t i = 0; i < IGFX_MAX_CORE; i++) {
-        BufferFuncsBackup[i] = bufferFactory[i];
+        bufferFuncsBackup[i] = bufferFactory[i];
         bufferFactory[i].createBufferFunction =
             [](Context *,
-               MemoryProperties,
+               const MemoryProperties &,
                cl_mem_flags,
                cl_mem_flags_intel,
                size_t,
                void *,
                void *,
-               MultiGraphicsAllocation,
+               MultiGraphicsAllocation &&,
                bool,
                bool,
                bool)
@@ -923,7 +925,7 @@ TEST_P(NoHostPtr, GivenNoHostPtrWhenHwBufferCreationFailsThenReturnNullptr) {
     EXPECT_EQ(nullptr, buffer);
 
     for (uint32_t i = 0; i < IGFX_MAX_CORE; i++) {
-        bufferFactory[i] = BufferFuncsBackup[i];
+        bufferFactory[i] = bufferFuncsBackup[i];
     }
 }
 
@@ -964,7 +966,7 @@ TEST_P(NoHostPtr, WhenGettingAllocationTypeThenCorrectBufferTypeIsReturned) {
     ASSERT_NE(nullptr, buffer);
 
     auto allocation = buffer->getGraphicsAllocation(pClDevice->getRootDeviceIndex());
-    if (MemoryPool::isSystemMemoryPool(allocation->getMemoryPool())) {
+    if (MemoryPoolHelper::isSystemMemoryPool(allocation->getMemoryPool())) {
         EXPECT_EQ(allocation->getAllocationType(), AllocationType::BUFFER_HOST_MEMORY);
     } else {
         EXPECT_EQ(allocation->getAllocationType(), AllocationType::BUFFER);
@@ -1193,6 +1195,14 @@ TEST_P(ValidHostPtr, GivenSvmHostPtrWhenCreatingBufferThenBufferIsCreatedCorrect
         delete bufferSvm;
         context->getSVMAllocsManager()->freeSVMAlloc(ptr);
     }
+}
+
+TEST_P(ValidHostPtr, WhenValidateInputAndCreateBufferThenCorrectBufferIsSet) {
+    auto buffer = BufferFunctions::validateInputAndCreateBuffer(context.get(), nullptr, flags, 0, g_scTestBufferSizeInBytes, pHostPtr, retVal);
+    EXPECT_EQ(retVal, CL_SUCCESS);
+    EXPECT_NE(nullptr, buffer);
+
+    clReleaseMemObject(buffer);
 }
 
 // Parameterized test that tests buffer creation with all flags that should be
@@ -1711,7 +1721,7 @@ HWTEST_F(BufferSetSurfaceTests, givenCompressedGmmResourceWhenSurfaceStateIsProg
 
     std::unique_ptr<Buffer> buffer(Buffer::create(&context, CL_MEM_READ_WRITE, 1, nullptr, retVal));
     auto graphicsAllocation = buffer->getGraphicsAllocation(rootDeviceIndex);
-    auto gmm = new Gmm(context.getDevice(0)->getGmmClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
+    auto gmm = new Gmm(context.getDevice(0)->getGmmHelper(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
     graphicsAllocation->setDefaultGmm(gmm);
     gmm->isCompressionEnabled = true;
 
@@ -1732,7 +1742,7 @@ HWTEST_F(BufferSetSurfaceTests, givenNonCompressedGmmResourceWhenSurfaceStateIsP
     auto retVal = CL_SUCCESS;
 
     std::unique_ptr<Buffer> buffer(Buffer::create(&context, CL_MEM_READ_WRITE, 1, nullptr, retVal));
-    auto gmm = new Gmm(context.getDevice(0)->getGmmClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
+    auto gmm = new Gmm(context.getDevice(0)->getGmmHelper(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
     buffer->getGraphicsAllocation(rootDeviceIndex)->setDefaultGmm(gmm);
     gmm->isCompressionEnabled = false;
 
@@ -1781,13 +1791,15 @@ HWTEST_F(BufferHwFromDeviceTests, givenMultiGraphicsAllocationWhenCreateBufferHw
     auto ptr = alignedMalloc(size, MemoryConstants::pageSize);
     MockGraphicsAllocation svmAlloc(ptr, size);
 
-    auto multiGraphicsAllocation = MultiGraphicsAllocation(device.get()->getRootDeviceIndex());
+    auto multiGraphicsAllocation = MultiGraphicsAllocation(device->getRootDeviceIndex());
     multiGraphicsAllocation.addAllocation(&svmAlloc);
-    auto buffer = std::unique_ptr<Buffer>(Buffer::createBufferHwFromDevice(device.get(), 0, 0, size, ptr, ptr, multiGraphicsAllocation, 0, true, false, false));
 
-    EXPECT_EQ(device.get()->getRootDeviceIndex(), 0u);
+    auto copyMultiGraphicsAllocation = multiGraphicsAllocation;
+    auto buffer = std::unique_ptr<Buffer>(Buffer::createBufferHwFromDevice(device.get(), 0, 0, size, ptr, ptr, std::move(copyMultiGraphicsAllocation), 0, true, false, false));
+
+    EXPECT_EQ(device->getRootDeviceIndex(), 0u);
     EXPECT_EQ(buffer->getMultiGraphicsAllocation().getGraphicsAllocations().size(), multiGraphicsAllocation.getGraphicsAllocations().size());
-    EXPECT_EQ(buffer->getMultiGraphicsAllocation().getGraphicsAllocation(device.get()->getRootDeviceIndex()), multiGraphicsAllocation.getGraphicsAllocation(device.get()->getRootDeviceIndex()));
+    EXPECT_EQ(buffer->getMultiGraphicsAllocation().getGraphicsAllocation(device->getRootDeviceIndex()), multiGraphicsAllocation.getGraphicsAllocation(device->getRootDeviceIndex()));
 
     alignedFree(ptr);
 }
@@ -1894,7 +1906,7 @@ HWTEST_F(BufferUnmapTest, givenBufferWithSharingHandlerWhenUnmappingThenUseNonBl
 
     auto gfxAllocation = buffer->getGraphicsAllocation(pDevice->getRootDeviceIndex());
     for (auto handleId = 0u; handleId < gfxAllocation->getNumGmms(); handleId++) {
-        gfxAllocation->setGmm(new MockGmm(pDevice->getGmmClientContext()), handleId);
+        gfxAllocation->setGmm(new MockGmm(pDevice->getGmmHelper()), handleId);
     }
 
     auto mappedPtr = clEnqueueMapBuffer(&cmdQ, buffer.get(), CL_TRUE, CL_MAP_WRITE, 0, 1, 0, nullptr, nullptr, &retVal);
@@ -2008,8 +2020,8 @@ TEST_F(MultiRootDeviceBufferTest, WhenBufferIsCreatedThenBufferMultiGraphicsAllo
 
     std::unique_ptr<Buffer> buffer1(Buffer::create(context.get(), 0, MemoryConstants::pageSize, nullptr, retVal));
 
-    EXPECT_TRUE(MemoryPool::isSystemMemoryPool(buffer1->getMultiGraphicsAllocation().getGraphicsAllocation(1u)->getMemoryPool()));
-    EXPECT_TRUE(MemoryPool::isSystemMemoryPool(buffer1->getMultiGraphicsAllocation().getGraphicsAllocation(2u)->getMemoryPool()));
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(buffer1->getMultiGraphicsAllocation().getGraphicsAllocation(1u)->getMemoryPool()));
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(buffer1->getMultiGraphicsAllocation().getGraphicsAllocation(2u)->getMemoryPool()));
 }
 
 TEST(MultiRootDeviceBufferTest2, WhenBufferIsCreatedThenSecondAndSubsequentAllocationsAreCreatedFromExisitingStorage) {
@@ -2063,4 +2075,21 @@ TEST_F(MultiRootDeviceBufferTest, givenNullptrGraphicsAllocationForRootDeviceInd
 
     address = buffer->getBufferAddress(0);
     EXPECT_EQ(reinterpret_cast<uint64_t>(buffer->getHostPtr()), address);
+}
+
+TEST(ResidencyTests, whenBuffersIsCreatedWithMakeResidentFlagThenItSuccessfulyCreates) {
+    VariableBackup<UltHwConfig> backup(&ultHwConfig);
+    ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc = false;
+    ultHwConfig.forceOsAgnosticMemoryManager = false;
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.MakeAllBuffersResident.set(true);
+
+    initPlatform();
+    auto device = platform()->getClDevice(0u);
+
+    MockContext context(device, false);
+    auto retValue = CL_SUCCESS;
+    auto clBuffer = clCreateBuffer(&context, 0u, 4096u, nullptr, &retValue);
+    ASSERT_EQ(retValue, CL_SUCCESS);
+    clReleaseMemObject(clBuffer);
 }

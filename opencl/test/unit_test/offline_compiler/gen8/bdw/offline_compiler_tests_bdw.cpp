@@ -6,6 +6,9 @@
  */
 
 #include "shared/source/compiler_interface/compiler_options/compiler_options.h"
+#include "shared/source/gen8/hw_cmds_bdw.h"
+#include "shared/test/common/helpers/test_files.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/helpers/gtest_helpers.h"
 
@@ -25,7 +28,7 @@ BDWTEST_F(MockOfflineCompilerBdwTests, givenDebugOptionAndBdwThenInternalOptionS
         "-options",
         "-g",
         "-file",
-        "test_files/copybuffer.cl",
+        clFiles + "copybuffer.cl",
         "-device",
         "bdw"};
 

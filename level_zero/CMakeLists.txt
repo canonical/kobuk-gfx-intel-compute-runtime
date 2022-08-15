@@ -75,25 +75,23 @@ if(BUILD_WITH_L0)
     endif()
   endif()
 
-  if(UNIX)
-    # Firmware Update Library
-    get_filename_component(IGSC_DIR_tmp "${NEO_SOURCE_DIR}/../igsc" ABSOLUTE)
+  # Firmware Update Library
+  get_filename_component(IGSC_DIR_tmp "${NEO_SOURCE_DIR}/../igsc" ABSOLUTE)
+  if(EXISTS "${IGSC_DIR_tmp}/lib/cmake")
+    find_package(igsc HINTS "${IGSC_DIR_tmp}/lib/cmake")
+  else()
+    find_package(igsc)
+  endif()
+  if(igsc_FOUND)
+    add_definitions(-DIGSC_PRESENT=1)
     if(EXISTS "${IGSC_DIR_tmp}/lib/cmake")
-      find_package(igsc HINTS "${IGSC_DIR_tmp}/lib/cmake")
-    else()
-      find_package(igsc)
+      get_filename_component(igsc_INCLUDE_DIR "${NEO_SOURCE_DIR}/../igsc/include" ABSOLUTE)
     endif()
-    if(igsc_FOUND)
-      add_definitions(-DIGSC_PRESENT=1)
-      if(EXISTS "${IGSC_DIR_tmp}/lib/cmake")
-        get_filename_component(igsc_INCLUDE_DIR "${NEO_SOURCE_DIR}/../igsc/include" ABSOLUTE)
-      endif()
-      message(STATUS "igsc Library headers directory: ${igsc_INCLUDE_DIR}")
-      message(STATUS "igsc version: ${igsc_VERSION}")
-      include_directories(SYSTEM ${igsc_INCLUDE_DIR})
-    else()
-      message(STATUS "igsc Library headers not available. Building without")
-    endif()
+    message(STATUS "igsc Library headers directory: ${igsc_INCLUDE_DIR}")
+    message(STATUS "igsc version: ${igsc_VERSION}")
+    include_directories(SYSTEM ${igsc_INCLUDE_DIR})
+  else()
+    message(STATUS "igsc Library headers not available. Building without")
   endif()
 
   if(UNIX)
@@ -237,6 +235,7 @@ if(BUILD_WITH_L0)
   if(WIN32)
     target_sources(${TARGET_NAME_L0}
                    PRIVATE
+                   ${NEO_SHARED_DIRECTORY}/dll/windows/debugger_l0_windows.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/windows/environment_variables.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/windows/options_windows.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/windows/os_interface.cpp
@@ -248,7 +247,7 @@ if(BUILD_WITH_L0)
                    ${NEO_SHARED_DIRECTORY}/os_interface/windows/wddm/wddm_calls.cpp
                    ${NEO_SHARED_DIRECTORY}/os_interface/windows/wddm/wddm_create.cpp
     )
-    target_link_libraries(${TARGET_NAME_L0}
+    target_link_libraries(${TARGET_NAME_L0} PRIVATE
                           dxgi
     )
     if(DEFINED L0_DLL_RC_FILE)
@@ -262,6 +261,7 @@ if(BUILD_WITH_L0)
                    ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}devices.inl
                    ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}devices_additional.inl
                    ${NEO_SHARED_DIRECTORY}/dll/devices/devices_base.inl
+                   ${NEO_SHARED_DIRECTORY}/dll/linux/debugger_l0_dll_linux.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/linux/drm_neo_create.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/linux/options_linux.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/linux/os_interface.cpp
@@ -374,7 +374,6 @@ if(BUILD_WITH_L0)
                                    L0_SOURCES_WINDOWS
                                    L0_SRCS_CACHE_RESERVATION
                                    L0_SRCS_COMPILER_INTERFACE
-                                   L0_SRCS_DEBUGGER
                                    L0_SRCS_DRIVER
                                    L0_SRCS_OCLOC_SHARED
     )
@@ -470,17 +469,18 @@ if(BUILD_WITH_L0)
   append_sources_from_properties(L0_SHARED_LIB_SRCS L0_SRCS_DLL NEO_CORE_SRCS_LINK NEO_SRCS_ENABLE_CORE)
   target_sources(${TARGET_NAME_L0} PRIVATE $<TARGET_OBJECTS:${L0_RELEASE_LIB_NAME}> ${L0_SHARED_LIB_SRCS})
 
-  target_link_libraries(${TARGET_NAME_L0}
+  target_link_libraries(${TARGET_NAME_L0} PRIVATE
                         ${NEO_SHARED_RELEASE_LIB_NAME}
                         ${NEO_EXTRA_LIBS} ${ASAN_LIBS} ${TSAN_LIBS}
   )
 
   if(UNIX)
-    target_link_libraries(${TARGET_NAME_L0} ${GMM_LINK_NAME})
-
-    set_property(TARGET ${TARGET_NAME_L0}
-                 APPEND_STRING PROPERTY LINK_FLAGS " -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/core/source/dll/linux/ze.exports"
-    )
+    target_link_libraries(${TARGET_NAME_L0} PRIVATE ${GMM_LINK_NAME})
+    if(NOT ENABLE_DYNAMIC_MEMORY_TRACKING)
+      set_property(TARGET ${TARGET_NAME_L0}
+                   APPEND_STRING PROPERTY LINK_FLAGS " -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/core/source/dll/linux/ze.exports"
+      )
+    endif()
   endif()
 
   create_source_tree(${TARGET_NAME_L0} ${L0_ROOT_DIR}/..)

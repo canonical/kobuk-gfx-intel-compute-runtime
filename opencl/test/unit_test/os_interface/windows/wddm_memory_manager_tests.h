@@ -18,7 +18,7 @@
 #include "shared/test/common/mocks/windows/mock_gdi_interface.h"
 #include "shared/test/common/os_interface/windows/mock_wddm_memory_manager.h"
 #include "shared/test/common/os_interface/windows/wddm_fixture.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "opencl/test/unit_test/mocks/mock_context.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
@@ -83,6 +83,7 @@ class MockWddmMemoryManagerFixture {
     ExecutionEnvironment *executionEnvironment;
     std::unique_ptr<MockWddmMemoryManager> memoryManager;
     std::unique_ptr<CommandStreamReceiver> csr;
+
     WddmMock *wddm = nullptr;
     MockWddmResidentAllocationsContainer *mockTemporaryResources;
     OsContext *osContext = nullptr;

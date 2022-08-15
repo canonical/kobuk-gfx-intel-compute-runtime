@@ -12,6 +12,7 @@
 #include "opencl/extensions/public/cl_ext_private.h"
 #include "opencl/source/context/context_type.h"
 #include "opencl/source/mem_obj/mem_obj.h"
+#include "opencl/source/sharings/unified/unified_buffer.h"
 
 #include "igfxfmid.h"
 #include "memory_properties_flags.h"
@@ -26,13 +27,13 @@ class MemoryManager;
 struct EncodeSurfaceStateArgs;
 
 using BufferCreatFunc = Buffer *(*)(Context *context,
-                                    MemoryProperties memoryProperties,
+                                    const MemoryProperties &memoryProperties,
                                     cl_mem_flags flags,
                                     cl_mem_flags_intel flagsIntel,
                                     size_t size,
                                     void *memoryStorage,
                                     void *hostPtr,
-                                    MultiGraphicsAllocation multiGraphicsAllocation,
+                                    MultiGraphicsAllocation &&multiGraphicsAllocation,
                                     bool zeroCopy,
                                     bool isHostPtrSVM,
                                     bool isImageRedescribed);
@@ -78,7 +79,7 @@ class Buffer : public MemObj {
                           cl_int &errcodeRet);
 
     static Buffer *create(Context *context,
-                          MemoryProperties properties,
+                          const MemoryProperties &properties,
                           cl_mem_flags flags,
                           cl_mem_flags_intel flagsIntel,
                           size_t size,
@@ -91,13 +92,13 @@ class Buffer : public MemObj {
                                       MultiGraphicsAllocation multiGraphicsAllocation);
 
     static Buffer *createBufferHw(Context *context,
-                                  MemoryProperties memoryProperties,
+                                  const MemoryProperties &memoryProperties,
                                   cl_mem_flags flags,
                                   cl_mem_flags_intel flagsIntel,
                                   size_t size,
                                   void *memoryStorage,
                                   void *hostPtr,
-                                  MultiGraphicsAllocation multiGraphicsAllocation,
+                                  MultiGraphicsAllocation &&multiGraphicsAllocation,
                                   bool zeroCopy,
                                   bool isHostPtrSVM,
                                   bool isImageRedescribed);
@@ -108,7 +109,7 @@ class Buffer : public MemObj {
                                             size_t size,
                                             void *memoryStorage,
                                             void *hostPtr,
-                                            MultiGraphicsAllocation multiGraphicsAllocation,
+                                            MultiGraphicsAllocation &&multiGraphicsAllocation,
                                             size_t offset,
                                             bool zeroCopy,
                                             bool isHostPtrSVM,
@@ -162,22 +163,24 @@ class Buffer : public MemObj {
 
     bool isCompressed(uint32_t rootDeviceIndex) const;
 
+    static bool validateHandleType(const MemoryProperties &memoryProperties, UnifiedSharingMemoryDescription &extMem);
+
   protected:
     Buffer(Context *context,
-           MemoryProperties memoryProperties,
+           const MemoryProperties &memoryProperties,
            cl_mem_flags flags,
            cl_mem_flags_intel flagsIntel,
            size_t size,
            void *memoryStorage,
            void *hostPtr,
-           MultiGraphicsAllocation multiGraphicsAllocation,
+           MultiGraphicsAllocation &&multiGraphicsAllocation,
            bool zeroCopy,
            bool isHostPtrSVM,
            bool isObjectRedescribed);
 
     Buffer();
 
-    static void checkMemory(MemoryProperties memoryProperties,
+    static void checkMemory(const MemoryProperties &memoryProperties,
                             size_t size,
                             void *hostPtr,
                             cl_int &errcodeRet,
@@ -199,13 +202,13 @@ template <typename GfxFamily>
 class BufferHw : public Buffer {
   public:
     BufferHw(Context *context,
-             MemoryProperties memoryProperties,
+             const MemoryProperties &memoryProperties,
              cl_mem_flags flags,
              cl_mem_flags_intel flagsIntel,
              size_t size,
              void *memoryStorage,
              void *hostPtr,
-             MultiGraphicsAllocation multiGraphicsAllocation,
+             MultiGraphicsAllocation &&multiGraphicsAllocation,
              bool zeroCopy,
              bool isHostPtrSVM,
              bool isObjectRedescribed)
@@ -216,13 +219,13 @@ class BufferHw : public Buffer {
                         bool isReadOnlyArgument, const Device &device, bool useGlobalAtomics, bool areMultipleSubDevicesInContext) override;
 
     static Buffer *create(Context *context,
-                          MemoryProperties memoryProperties,
+                          const MemoryProperties &memoryProperties,
                           cl_mem_flags flags,
                           cl_mem_flags_intel flagsIntel,
                           size_t size,
                           void *memoryStorage,
                           void *hostPtr,
-                          MultiGraphicsAllocation multiGraphicsAllocation,
+                          MultiGraphicsAllocation &&multiGraphicsAllocation,
                           bool zeroCopy,
                           bool isHostPtrSVM,
                           bool isObjectRedescribed) {

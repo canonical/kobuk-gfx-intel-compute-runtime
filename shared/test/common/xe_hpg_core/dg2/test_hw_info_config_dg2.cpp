@@ -1,12 +1,15 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/helpers/compiler_hw_info_config.h"
 #include "shared/source/os_interface/hw_info_config.h"
+#include "shared/source/xe_hpg_core/hw_cmds_dg2.h"
 #include "shared/test/common/fixtures/device_fixture.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
@@ -36,8 +39,11 @@ DG2TEST_F(TestDg2HwInfoConfig, givenDG2WithA0SteppingThenMaxThreadsForWorkgroupW
     const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
     auto hwInfo = pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_A0, *hwInfo);
-    auto isWARequired = hwInfoConfig.isMaxThreadsForWorkgroupWARequired(pDevice->getHardwareInfo());
-    EXPECT_TRUE(isWARequired);
+    for (const auto &devId : dg2G10DeviceIds) {
+        hwInfo->platform.usDeviceID = devId;
+        auto isWARequired = hwInfoConfig.isMaxThreadsForWorkgroupWARequired(pDevice->getHardwareInfo());
+        EXPECT_TRUE(isWARequired);
+    }
 }
 
 DG2TEST_F(TestDg2HwInfoConfig, givenDG2WithBSteppingThenMaxThreadsForWorkgroupWAIsNotRequired) {
@@ -57,4 +63,10 @@ DG2TEST_F(TestDg2HwInfoConfig, givenSteppingWhenAskingForLocalMemoryAccessModeTh
 
     hwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
     EXPECT_EQ(LocalMemoryAccessMode::Default, hwInfoConfig.getLocalMemoryAccessMode(hwInfo));
+}
+
+DG2TEST_F(TestDg2HwInfoConfig, givenDG2HwInfoConfigWhenCheckDirectSubmissionSupportedThenTrueIsReturned) {
+    auto hwInfo = *defaultHwInfo;
+    const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    EXPECT_TRUE(hwInfoConfig.isDirectSubmissionSupported(hwInfo));
 }

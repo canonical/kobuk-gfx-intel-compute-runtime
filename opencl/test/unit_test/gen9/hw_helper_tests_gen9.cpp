@@ -1,12 +1,14 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/gen9/hw_cmds.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/helpers/hw_helper_tests.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/unit_test/helpers/get_gpgpu_engines_tests.inl"
 
 #include "opencl/source/helpers/cl_hw_helper.h"
@@ -53,7 +55,7 @@ GEN9TEST_F(HwHelperTestGen9, WhenGettingDeviceIpVersionThenMakeCorrectDeviceIpVe
 }
 
 GEN9TEST_F(HwHelperTestGen9, WhenGettingSupportedDeviceFeatureCapabilitiesThenReturnCorrectValue) {
-    EXPECT_EQ(0u, ClHwHelper::get(renderCoreFamily).getSupportedDeviceFeatureCapabilities());
+    EXPECT_EQ(0u, ClHwHelper::get(renderCoreFamily).getSupportedDeviceFeatureCapabilities(*defaultHwInfo));
 }
 
 using MemorySynchronizatiopCommandsTestsGen9 = ::testing::Test;

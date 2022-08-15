@@ -6,9 +6,11 @@
  */
 
 #pragma once
-#include "shared/source/xe_hpc_core/hw_cmds_base.h"
 
-#include "device_ids_configs_pvc.h"
+#include "shared/source/xe_hpc_core/hw_cmds_xe_hpc_core_base.h"
+#include "shared/source/xe_hpc_core/pvc/device_ids_configs_pvc.h"
+
+#include <algorithm>
 
 namespace NEO {
 
@@ -27,34 +29,38 @@ struct PVC : public XE_HPC_COREFamily {
     static const RuntimeCapabilityTable capabilityTable;
     static void (*setupHardwareInfo)(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable, uint64_t hwInfoConfig);
     static void setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo);
-    static void setupHardwareInfoBase(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable, bool setupMultiTile);
+    static void setupHardwareInfoBase(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable);
+    static void setupHardwareInfoMultiTileBase(HardwareInfo *hwInfo, bool setupMultiTile);
     static void adjustHardwareInfo(HardwareInfo *hwInfo);
-    static bool isXlA0(const HardwareInfo &hwInfo);
-    static bool isAtMostXtA0(const HardwareInfo &hwInfo);
+
+    static constexpr uint8_t pvcBaseDieRevMask = 0b111000; // [3:5]
+    static constexpr uint8_t pvcBaseDieA0Masked = 0;       // [3:5] == 0
 
     static bool isXl(const HardwareInfo &hwInfo) {
-        auto it = std::find(PVC_XL_IDS.begin(), PVC_XL_IDS.end(), hwInfo.platform.usDeviceID);
-        if (it != PVC_XL_IDS.end()) {
-            return true;
-        }
-        return false;
+        auto it = std::find(pvcXlDeviceIds.begin(), pvcXlDeviceIds.end(), hwInfo.platform.usDeviceID);
+        return it != pvcXlDeviceIds.end();
     }
 
     static bool isXt(const HardwareInfo &hwInfo) {
-        auto it = std::find(PVC_XT_IDS.begin(), PVC_XT_IDS.end(), hwInfo.platform.usDeviceID);
-        if (it != PVC_XT_IDS.end()) {
-            return true;
-        }
-        return false;
+        auto it = std::find(pvcXtDeviceIds.begin(), pvcXtDeviceIds.end(), hwInfo.platform.usDeviceID);
+        return it != pvcXtDeviceIds.end();
     }
 
+    static bool isXlA0(const HardwareInfo &hwInfo) {
+        auto revId = hwInfo.platform.usRevId & pvcSteppingBits;
+        return (revId < 0x3);
+    }
+
+    static bool isAtMostXtA0(const HardwareInfo &hwInfo) {
+        auto revId = hwInfo.platform.usRevId & pvcSteppingBits;
+        return (revId <= 0x3);
+    }
     static constexpr uint32_t pvcSteppingBits = 0b111;
 };
 
-class PVC_CONFIG : public PVC {
+class PvcHwConfig : public PVC {
   public:
     static void setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable);
-    static void setupHardwareInfoMultiTile(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable, bool setupMultiTile);
     static const HardwareInfo hwInfo;
 
   private:

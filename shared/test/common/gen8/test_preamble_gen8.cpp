@@ -28,8 +28,8 @@ BDWTEST_F(BdwSlm, WhenL3ConfigIsDispatchedThenProperRegisterAddressAndValueArePr
     ASSERT_NE(cmdList.end(), itorLRI);
 
     const auto &lri = *reinterpret_cast<MI_LOAD_REGISTER_IMM *>(*itorLRI);
-    auto RegisterOffset = L3CNTLRegisterOffset<BDWFamily>::registerOffset;
-    EXPECT_EQ(RegisterOffset, lri.getRegisterOffset());
+    auto registerOffset = L3CNTLRegisterOffset<BDWFamily>::registerOffset;
+    EXPECT_EQ(registerOffset, lri.getRegisterOffset());
     EXPECT_EQ(1u, lri.getDataDword() & 1);
 }
 
@@ -77,7 +77,7 @@ BDWTEST_F(ThreadArbitrationGen8, givenPolicyWhenThreadArbitrationProgrammedThenD
 
     StreamProperties streamProperties{};
     streamProperties.stateComputeMode.threadArbitrationPolicy.set(ThreadArbitrationPolicy::RoundRobin);
-    EncodeComputeMode<FamilyType>::programComputeModeCommand(linearStream, streamProperties.stateComputeMode, *defaultHwInfo);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(linearStream, streamProperties.stateComputeMode, *defaultHwInfo, nullptr);
 
     EXPECT_EQ(0u, cs.getUsed());
 
@@ -104,7 +104,7 @@ BDWTEST_F(PreambleVfeState, WhenProgrammingVfeStateThenProgrammingIsCorrect) {
     LinearStream &cs = linearStream;
     auto pVfeCmd = PreambleHelper<BDWFamily>::getSpaceForVfeState(&linearStream, *defaultHwInfo, EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<BDWFamily>::programVfeState(pVfeCmd, *defaultHwInfo, 0u, 0, 168u, emptyProperties);
+    PreambleHelper<BDWFamily>::programVfeState(pVfeCmd, *defaultHwInfo, 0u, 0, 168u, emptyProperties, nullptr);
 
     parseCommands<BDWFamily>(cs);
 

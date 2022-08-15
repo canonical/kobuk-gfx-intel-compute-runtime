@@ -41,7 +41,7 @@ void StateBaseAddressHelper<GfxFamily>::appendStateBaseAddressParameters(
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
 
     if (setGeneralStateBaseAddress && is64bit) {
-        stateBaseAddress->setGeneralStateBaseAddress(GmmHelper::decanonize(internalHeapBase));
+        stateBaseAddress->setGeneralStateBaseAddress(gmmHelper->decanonize(internalHeapBase));
     }
 
     if (overrideBindlessSurfaceStateBase && ssh) {
@@ -86,7 +86,7 @@ void StateBaseAddressHelper<GfxFamily>::appendStateBaseAddressParameters(
         stateBaseAddress->setStatelessDataPortAccessMemoryObjectControlState(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST));
     }
 
-    appendExtraCacheSettings(stateBaseAddress, gmmHelper);
+    appendExtraCacheSettings(stateBaseAddress, gmmHelper->getHardwareInfo());
 }
 
 template <typename GfxFamily>

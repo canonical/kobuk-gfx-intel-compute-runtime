@@ -8,6 +8,7 @@
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/os_interface/windows/wddm/wddm.h"
 
+#include "level_zero/core/source/device/device.h"
 #include "level_zero/tools/source/metrics/metric_oa_enumeration_imp.h"
 #include "level_zero/tools/source/metrics/metric_oa_source.h"
 
@@ -21,7 +22,10 @@
 
 namespace L0 {
 
-const char *MetricEnumeration::getMetricsDiscoveryFilename() { return METRICS_DISCOVERY_NAME; }
+void MetricEnumeration::getMetricsDiscoveryFilename(std::vector<const char *> &names) const {
+    names.clear();
+    names.push_back(METRICS_DISCOVERY_NAME);
+}
 
 bool MetricEnumeration::getAdapterId(uint32_t &major, uint32_t &minor) {
 

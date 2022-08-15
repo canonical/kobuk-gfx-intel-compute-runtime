@@ -6,11 +6,11 @@
  */
 
 template <>
-void PreemptionHelper::programCsrBaseAddress<GfxFamily>(LinearStream &preambleCmdStream, Device &device, const GraphicsAllocation *preemptionCsr) {
+void PreemptionHelper::programCsrBaseAddress<GfxFamily>(LinearStream &preambleCmdStream, Device &device, const GraphicsAllocation *preemptionCsr, LogicalStateHelper *logicalStateHelper) {
 }
 
 template <>
-void PreemptionHelper::programStateSip<GfxFamily>(LinearStream &preambleCmdStream, Device &device) {
+void PreemptionHelper::programStateSip<GfxFamily>(LinearStream &preambleCmdStream, Device &device, LogicalStateHelper *logicalStateHelper) {
     using STATE_SIP = typename GfxFamily::STATE_SIP;
     using MI_LOAD_REGISTER_IMM = typename GfxFamily::MI_LOAD_REGISTER_IMM;
 
@@ -52,7 +52,7 @@ void PreemptionHelper::programStateSipEndWa<GfxFamily>(LinearStream &cmdStream, 
         if (hwHelper.isSipWANeeded(device.getHardwareInfo())) {
 
             NEO::PipeControlArgs args;
-            NEO::MemorySynchronizationCommands<GfxFamily>::addPipeControl(cmdStream, args);
+            NEO::MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(cmdStream, args);
 
             auto mmio = reinterpret_cast<MI_LOAD_REGISTER_IMM *>(cmdStream.getSpace(sizeof(MI_LOAD_REGISTER_IMM)));
             MI_LOAD_REGISTER_IMM cmd = GfxFamily::cmdInitLoadRegisterImm;

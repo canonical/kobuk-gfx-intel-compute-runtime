@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -19,8 +19,6 @@
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/kernel/kernel.h"
 #include "opencl/test/unit_test/fixtures/hello_world_fixture.h"
-
-#include "hw_cmds.h"
 
 using namespace NEO;
 
@@ -42,7 +40,7 @@ uint32_t cmdQueueMocs(CommandQueue *pCmdQ) {
     auto &csr = pCmdQHw->getGpgpuCommandStreamReceiver();
     HardwareParse hwParse;
     hwParse.parseCommands<FamilyType>(csr.getCS(0), 0);
-    auto itorCmd = reverse_find<STATE_BASE_ADDRESS *>(hwParse.cmdList.rbegin(), hwParse.cmdList.rend());
+    auto itorCmd = reverseFind<STATE_BASE_ADDRESS *>(hwParse.cmdList.rbegin(), hwParse.cmdList.rend());
     EXPECT_NE(hwParse.cmdList.rend(), itorCmd);
     auto sba = genCmdCast<STATE_BASE_ADDRESS *>(*itorCmd);
     EXPECT_NE(nullptr, sba);
@@ -209,7 +207,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, givenBuffersTha
     EXPECT_EQ(mocsCacheable, cmdQueueMocs<FamilyType>(pCmdQ));
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, givenBuffersThatAreUncachedButKernelDoesntHaveAnyStatelessAccessessThenSurfacesAreNotRecordedAsUncacheable) {
+HWCMDTEST_F(IGFX_GEN8_CORE, clMemLocallyUncachedResourceFixture, givenBuffersThatAreUncachedButKernelDoesntHaveAnyStatelessAccessesThenSurfacesAreNotRecordedAsUncacheable) {
     cl_int retVal = CL_SUCCESS;
 
     MockKernelWithInternals mockKernel(*this->pClDevice, context, true);

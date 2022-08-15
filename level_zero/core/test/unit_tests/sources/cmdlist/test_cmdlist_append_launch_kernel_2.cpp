@@ -13,9 +13,11 @@
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_compilers.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
+#include "level_zero/core/source/event/event.h"
 #include "level_zero/core/test/unit_tests/fixtures/module_fixture.h"
+#include "level_zero/core/test/unit_tests/fixtures/multi_tile_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_module.h"
 
@@ -395,7 +397,8 @@ HWTEST_F(CommandListAppendLaunchKernelSWTags, givenEnableSWTagsWhenAppendLaunchK
 
     auto usedSpaceBefore = cmdStream->getUsed();
 
-    auto result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr);
+    CmdListKernelLaunchParams launchParams = {};
+    auto result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr, launchParams);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
     auto usedSpaceAfter = cmdStream->getUsed();
@@ -802,11 +805,11 @@ HWTEST_F(CommandListArbitrationPolicyTest, whenCreatingCommandListThenDefaultThr
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
 
     ze_result_t returnValue;
-    auto commandList = std::unique_ptr<CommandList>(whitebox_cast(L0::CommandList::create(productFamily,
-                                                                                          device,
-                                                                                          NEO::EngineGroupType::RenderCompute,
-                                                                                          0u,
-                                                                                          returnValue)));
+    auto commandList = std::unique_ptr<CommandList>(whiteboxCast(L0::CommandList::create(productFamily,
+                                                                                         device,
+                                                                                         NEO::EngineGroupType::RenderCompute,
+                                                                                         0u,
+                                                                                         returnValue)));
     EXPECT_NE(nullptr, commandList);
     EXPECT_NE(nullptr, commandList->commandContainer.getCommandStream());
 
@@ -834,11 +837,11 @@ HWTEST_F(CommandListArbitrationPolicyTest, whenCreatingCommandListThenChosenThre
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
 
     ze_result_t returnValue;
-    auto commandList = std::unique_ptr<CommandList>(whitebox_cast(L0::CommandList::create(productFamily,
-                                                                                          device,
-                                                                                          NEO::EngineGroupType::RenderCompute,
-                                                                                          0u,
-                                                                                          returnValue)));
+    auto commandList = std::unique_ptr<CommandList>(whiteboxCast(L0::CommandList::create(productFamily,
+                                                                                         device,
+                                                                                         NEO::EngineGroupType::RenderCompute,
+                                                                                         0u,
+                                                                                         returnValue)));
     EXPECT_NE(nullptr, commandList);
     EXPECT_NE(nullptr, commandList->commandContainer.getCommandStream());
 
@@ -864,15 +867,14 @@ HWTEST_F(CommandListArbitrationPolicyTest, whenCommandListIsResetThenOriginalThr
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
 
     ze_result_t returnValue;
-    auto commandList = std::unique_ptr<CommandList>(whitebox_cast(L0::CommandList::create(productFamily,
-                                                                                          device,
-                                                                                          NEO::EngineGroupType::RenderCompute,
-                                                                                          0u,
-                                                                                          returnValue)));
+    auto commandList = std::unique_ptr<CommandList>(whiteboxCast(L0::CommandList::create(productFamily,
+                                                                                         device,
+                                                                                         NEO::EngineGroupType::RenderCompute,
+                                                                                         0u,
+                                                                                         returnValue)));
     EXPECT_NE(nullptr, commandList);
     EXPECT_NE(nullptr, commandList->commandContainer.getCommandStream());
 
-    bool found;
     uint64_t originalThreadArbitrationPolicy = std::numeric_limits<uint64_t>::max();
     {
         GenCmdList parsedCommandList;
@@ -890,7 +892,6 @@ HWTEST_F(CommandListArbitrationPolicyTest, whenCommandListIsResetThenOriginalThr
                 EXPECT_EQ(NEO::DebugControlReg2::getRegData(NEO::ThreadArbitrationPolicy::RoundRobin),
                           cmd->getDataDword());
                 originalThreadArbitrationPolicy = cmd->getDataDword();
-                found = false;
             }
         }
     }
@@ -938,6 +939,11 @@ struct CmdlistAppendLaunchKernelWithImplicitArgsTests : CmdlistAppendLaunchKerne
         expectedImplicitArgs.groupCountZ = 3;
     }
 
+    void TearDown() override {
+        commandList.reset(nullptr);
+        CmdlistAppendLaunchKernelTests::TearDown();
+    }
+
     template <typename FamilyType>
     void dispatchKernelWithImplicitArgs() {
         expectedImplicitArgs.globalSizeX = expectedImplicitArgs.localSizeX * expectedImplicitArgs.groupCountX;
@@ -978,7 +984,8 @@ struct CmdlistAppendLaunchKernelWithImplicitArgsTests : CmdlistAppendLaunchKerne
         indirectHeapAllocation = indirectHeap->getGraphicsAllocation();
 
         ze_group_count_t groupCount{expectedImplicitArgs.groupCountX, expectedImplicitArgs.groupCountY, expectedImplicitArgs.groupCountZ};
-        result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr);
+        CmdListKernelLaunchParams launchParams = {};
+        result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr, launchParams);
         EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
         implicitArgsProgrammingSize = ImplicitArgsHelper::getSizeForImplicitArgsPatching(&expectedImplicitArgs, *kernelDescriptor, neoDevice->getHardwareInfo());
@@ -1122,7 +1129,8 @@ HWTEST_F(CmdlistAppendLaunchKernelTests, givenKernelWithoutImplicitArgsWhenAppen
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     ze_group_count_t groupCount = {3, 2, 1};
-    result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr);
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr, launchParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     auto indirectHeap = commandList->commandContainer.getIndirectHeap(NEO::HeapType::INDIRECT_OBJECT);
@@ -1159,7 +1167,8 @@ HWTEST2_F(CmdlistAppendLaunchKernelTests, givenKernelWitchScratchAndPrivateWhenA
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     ze_group_count_t groupCount = {3, 2, 1};
-    result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr);
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr, launchParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     EXPECT_EQ(commandList->getCommandListPerThreadPrivateScratchSize(), static_cast<uint32_t>(0x100));
@@ -1217,25 +1226,27 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenCooperativeAndNonCooperativeKernel
 
     auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
     pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
-    bool isCooperative = false;
-    auto result = pCommandList->appendLaunchKernelWithParams(kernel.toHandle(), &groupCount, nullptr, false, false, isCooperative);
+    CmdListKernelLaunchParams launchParams = {};
+    launchParams.isCooperative = false;
+    auto result = pCommandList->appendLaunchKernelWithParams(&kernel, &groupCount, nullptr, launchParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    isCooperative = true;
-    result = pCommandList->appendLaunchKernelWithParams(kernel.toHandle(), &groupCount, nullptr, false, false, isCooperative);
+    launchParams.isCooperative = true;
+    result = pCommandList->appendLaunchKernelWithParams(&kernel, &groupCount, nullptr, launchParams);
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, result);
 
     pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
     pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
-    isCooperative = true;
-    result = pCommandList->appendLaunchKernelWithParams(kernel.toHandle(), &groupCount, nullptr, false, false, isCooperative);
+    launchParams.isCooperative = true;
+    result = pCommandList->appendLaunchKernelWithParams(&kernel, &groupCount, nullptr, launchParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    isCooperative = false;
-    result = pCommandList->appendLaunchKernelWithParams(kernel.toHandle(), &groupCount, nullptr, false, false, isCooperative);
+    launchParams.isCooperative = false;
+    result = pCommandList->appendLaunchKernelWithParams(&kernel, &groupCount, nullptr, launchParams);
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, result);
 }
 
 HWTEST2_F(CommandListAppendLaunchKernel, GivenDebugToggleSetWhenUpdateStreamPropertiesIsCalledThenCorrectThreadArbitrationPolicyIsSet, IsAtLeastSkl) {
     DebugManagerStateRestore restorer;
+    DebugManager.flags.ForceThreadArbitrationPolicyProgrammingWithScm.set(1);
 
     auto &hwHelper = NEO::HwHelper::get(device->getHwInfo().platform.eRenderCoreFamily);
     auto defaultThreadArbitrationPolicy = hwHelper.getDefaultThreadArbitrationPolicy();
@@ -1265,44 +1276,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, GivenDebugToggleSetWhenUpdateStreamProp
     EXPECT_EQ(defaultThreadArbitrationPolicy, pCommandList->finalStreamState.stateComputeMode.threadArbitrationPolicy.value);
 }
 
-struct MultiTileCommandListAppendLaunchFunctionXeHpCoreFixture : public MultiDeviceModuleFixture {
-    void SetUp() {
-        DebugManager.flags.EnableImplicitScaling.set(1);
-
-        MultiDeviceFixture::numRootDevices = 1u;
-        MultiDeviceFixture::numSubDevices = 4u;
-
-        MultiDeviceModuleFixture::SetUp();
-        createModuleFromBinary(0u);
-        createKernel(0u);
-
-        device = driverHandle->devices[0];
-
-        ze_context_handle_t hContext;
-        ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
-        ze_result_t res = device->getDriverHandle()->createContext(&desc, 0u, nullptr, &hContext);
-        EXPECT_EQ(ZE_RESULT_SUCCESS, res);
-        contextImp = static_cast<ContextImp *>(Context::fromHandle(hContext));
-
-        ze_result_t returnValue;
-        commandList = whitebox_cast(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue));
-        EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
-    }
-
-    void TearDown() {
-        commandList->destroy();
-        contextImp->destroy();
-
-        MultiDeviceModuleFixture::TearDown();
-    }
-
-    ContextImp *contextImp = nullptr;
-    WhiteBox<::L0::CommandList> *commandList = nullptr;
-    L0::Device *device = nullptr;
-    VariableBackup<bool> backup{&NEO::ImplicitScaling::apiSupport, true};
-};
-
-using MultiTileCommandListAppendLaunchFunctionXeHpCoreTest = Test<MultiTileCommandListAppendLaunchFunctionXeHpCoreFixture>;
+using MultiTileCommandListAppendLaunchFunctionXeHpCoreTest = Test<MultiTileCommandListAppendLaunchFunctionFixture>;
 
 HWCMDTEST_F(IGFX_XE_HP_CORE, MultiTileCommandListAppendLaunchFunctionXeHpCoreTest, givenImplicitScalingEnabledWhenAppendingKernelWithEventThenAllEventPacketsAreUsed) {
     ze_event_pool_desc_t eventPoolDesc = {};
@@ -1325,7 +1299,8 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, MultiTileCommandListAppendLaunchFunctionXeHpCoreTes
     EXPECT_EQ(4u, commandList->partitionCount);
 
     ze_group_count_t groupCount{256, 1, 1};
-    result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, hEventHandle, 0, nullptr);
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, hEventHandle, 0, nullptr, launchParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_EQ(4u, event->getPacketsInUse());
 
@@ -1339,7 +1314,8 @@ HWTEST2_F(MultiTileCommandListAppendLaunchFunctionXeHpCoreTest, givenCooperative
     auto result = commandListWithNonCooperativeKernel->initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     auto sizeBefore = commandListWithNonCooperativeKernel->commandContainer.getCommandStream()->getUsed();
-    result = commandListWithNonCooperativeKernel->appendLaunchKernelWithParams(kernel->toHandle(), &groupCount, nullptr, false, false, false);
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandListWithNonCooperativeKernel->appendLaunchKernelWithParams(kernel.get(), &groupCount, nullptr, launchParams);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     auto sizeAfter = commandListWithNonCooperativeKernel->commandContainer.getCommandStream()->getUsed();
     GenCmdList cmdList;
@@ -1353,7 +1329,8 @@ HWTEST2_F(MultiTileCommandListAppendLaunchFunctionXeHpCoreTest, givenCooperative
     result = commandListWithCooperativeKernel->initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     sizeBefore = commandListWithCooperativeKernel->commandContainer.getCommandStream()->getUsed();
-    result = commandListWithCooperativeKernel->appendLaunchKernelWithParams(kernel->toHandle(), &groupCount, nullptr, false, false, true);
+    launchParams.isCooperative = true;
+    result = commandListWithCooperativeKernel->appendLaunchKernelWithParams(kernel.get(), &groupCount, nullptr, launchParams);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     sizeAfter = commandListWithCooperativeKernel->commandContainer.getCommandStream()->getUsed();
     cmdList.clear();
@@ -1363,6 +1340,38 @@ HWTEST2_F(MultiTileCommandListAppendLaunchFunctionXeHpCoreTest, givenCooperative
     itorWalker = find<typename FamilyType::WALKER_TYPE *>(cmdList.begin(), cmdList.end());
     cmd = genCmdCast<typename FamilyType::WALKER_TYPE *>(*itorWalker);
     EXPECT_TRUE(cmd->getWorkloadPartitionEnable());
+}
+
+HWTEST2_F(MultiTileCommandListAppendLaunchFunctionXeHpCoreTest,
+          givenRegularCommandListWhenSynchronizationRequiredThenExpectJumpingBbStartCommandToSecondary, IsAtLeastXeHpCore) {
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+    using MI_BATCH_BUFFER_START = typename FamilyType::MI_BATCH_BUFFER_START;
+    DebugManager.flags.UsePipeControlAfterPartitionedWalker.set(1);
+
+    ze_group_count_t groupCount{128, 1, 1};
+
+    auto cmdStream = commandList->commandContainer.getCommandStream();
+
+    auto sizeBefore = cmdStream->getUsed();
+    CmdListKernelLaunchParams launchParams = {};
+    auto result = commandList->appendLaunchKernel(kernel.get(), &groupCount, nullptr, 0, nullptr, launchParams);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+    auto sizeAfter = cmdStream->getUsed();
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
+        cmdList,
+        ptrOffset(cmdStream->getCpuBase(), sizeBefore),
+        sizeAfter - sizeBefore));
+
+    auto itorWalker = find<WALKER_TYPE *>(cmdList.begin(), cmdList.end());
+    auto cmd = genCmdCast<WALKER_TYPE *>(*itorWalker);
+    EXPECT_TRUE(cmd->getWorkloadPartitionEnable());
+
+    auto itorBbStart = find<MI_BATCH_BUFFER_START *>(cmdList.begin(), cmdList.end());
+    ASSERT_NE(cmdList.end(), itorBbStart);
+    auto cmdBbStart = genCmdCast<MI_BATCH_BUFFER_START *>(*itorBbStart);
+    EXPECT_EQ(MI_BATCH_BUFFER_START::SECOND_LEVEL_BATCH_BUFFER::SECOND_LEVEL_BATCH_BUFFER_SECOND_LEVEL_BATCH, cmdBbStart->getSecondLevelBatchBuffer());
 }
 
 } // namespace ult

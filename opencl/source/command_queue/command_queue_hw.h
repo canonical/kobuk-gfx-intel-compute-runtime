@@ -9,7 +9,6 @@
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/command_stream/preemption.h"
 #include "shared/source/helpers/engine_control.h"
-#include "shared/source/helpers/hw_helper.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 
 #include "opencl/source/cl_device/cl_device.h"
@@ -62,39 +61,8 @@ class CommandQueueHw : public CommandQueue {
             this->gpgpuEngine = &device->getInternalEngine();
         }
 
-        auto &hwInfo = device->getDevice().getHardwareInfo();
-        auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-
-        auto assignEngineRoundRobin =
-            !internalUsage &&
-            !this->queueFamilySelected &&
-            !(clPriority & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_LOW_KHR)) &&
-            hwHelper.isAssignEngineRoundRobinSupported() &&
-            this->isAssignEngineRoundRobinEnabled();
-
-        if (assignEngineRoundRobin) {
-            this->gpgpuEngine = &device->getDevice().getNextEngineForCommandQueue();
-        }
-
-        if (getCmdQueueProperties<cl_queue_properties>(properties, CL_QUEUE_PROPERTIES) & static_cast<cl_queue_properties>(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE)) {
-            getGpgpuCommandStreamReceiver().overrideDispatchPolicy(DispatchMode::BatchedDispatch);
-            if (DebugManager.flags.CsrDispatchMode.get() != 0) {
-                getGpgpuCommandStreamReceiver().overrideDispatchPolicy(static_cast<DispatchMode>(DebugManager.flags.CsrDispatchMode.get()));
-            }
-            getGpgpuCommandStreamReceiver().enableNTo1SubmissionModel();
-        }
-
-        if (device->getDevice().getDebugger() && !getGpgpuCommandStreamReceiver().getDebugSurfaceAllocation()) {
-            auto maxDbgSurfaceSize = hwHelper.getSipKernelMaxDbgSurfaceSize(hwInfo);
-            auto debugSurface = getGpgpuCommandStreamReceiver().allocateDebugSurface(maxDbgSurfaceSize);
-            memset(debugSurface->getUnderlyingBuffer(), 0, debugSurface->getUnderlyingBufferSize());
-
-            auto &stateSaveAreaHeader = SipKernel::getSipKernel(device->getDevice()).getStateSaveAreaHeader();
-            if (stateSaveAreaHeader.size() > 0) {
-                NEO::MemoryTransferHelper::transferMemoryToAllocation(hwHelper.isBlitCopyRequiredForLocalMemory(hwInfo, *debugSurface),
-                                                                      device->getDevice(), debugSurface, 0, stateSaveAreaHeader.data(),
-                                                                      stateSaveAreaHeader.size());
-            }
+        if (gpgpuEngine) {
+            this->initializeGpgpuInternals();
         }
 
         uint64_t requestedSliceCount = getCmdQueueProperties<cl_command_queue_properties>(properties, CL_QUEUE_SLICE_COUNT_INTEL);
@@ -102,12 +70,20 @@ class CommandQueueHw : public CommandQueue {
             sliceCount = requestedSliceCount;
         }
 
-        gpgpuEngine->osContext->ensureContextInitialized();
-        gpgpuEngine->commandStreamReceiver->initDirectSubmission(device->getDevice(), *gpgpuEngine->osContext);
+        auto initializeGpgpu = false;
+
+        if (DebugManager.flags.DeferCmdQGpgpuInitialization.get() != -1) {
+            initializeGpgpu = !DebugManager.flags.DeferCmdQGpgpuInitialization.get();
+        }
+
+        if (initializeGpgpu) {
+            this->initializeGpgpu();
+        }
+
         for (const EngineControl *engine : bcsEngines) {
             if (engine != nullptr) {
                 engine->osContext->ensureContextInitialized();
-                engine->commandStreamReceiver->initDirectSubmission(device->getDevice(), *engine->osContext);
+                engine->commandStreamReceiver->initDirectSubmission();
             }
         }
     }
@@ -394,8 +370,7 @@ class CommandQueueHw : public CommandQueue {
                                       EventsRequest &eventsRequest,
                                       EventBuilder &eventBuilder,
                                       uint32_t taskLevel,
-                                      PrintfHandler *printfHandler,
-                                      CommandStreamReceiver *bcsCsr);
+                                      PrintfHandler *printfHandler);
 
     void enqueueBlocked(uint32_t commandType,
                         Surface **surfacesForResidency,
@@ -446,7 +421,7 @@ class CommandQueueHw : public CommandQueue {
 
     bool isCacheFlushCommand(uint32_t commandType) const override;
 
-    bool waitForTimestamps(uint32_t taskCount) override;
+    bool waitForTimestamps(Range<CopyEngineState> copyEnginesToWait, uint32_t taskCount) override;
 
     MOCKABLE_VIRTUAL bool isCacheFlushForBcsRequired() const;
 

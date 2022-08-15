@@ -1,10 +1,11 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/gen8/hw_cmds_base.h"
 #include "shared/source/helpers/state_base_address.h"
 #include "shared/source/helpers/state_base_address_bdw.inl"
 #include "shared/source/helpers/state_base_address_bdw_and_later.inl"
@@ -29,7 +30,8 @@ void StateBaseAddressHelper<BDWFamily>::programStateBaseAddress(
     bool isMultiOsContextCapable,
     MemoryCompressionState memoryCompressionState,
     bool useGlobalAtomics,
-    bool areMultipleSubDevicesInContext) {
+    bool areMultipleSubDevicesInContext,
+    LogicalStateHelper *logicalStateHelper) {
 
     *stateBaseAddress = BDWFamily::cmdInitStateBaseAddress;
 
@@ -64,7 +66,7 @@ void StateBaseAddressHelper<BDWFamily>::programStateBaseAddress(
         stateBaseAddress->setGeneralStateBaseAddressModifyEnable(true);
         stateBaseAddress->setGeneralStateBufferSizeModifyEnable(true);
         // GSH must be set to 0 for stateless
-        stateBaseAddress->setGeneralStateBaseAddress(GmmHelper::decanonize(generalStateBase));
+        stateBaseAddress->setGeneralStateBaseAddress(gmmHelper->decanonize(generalStateBase));
         stateBaseAddress->setGeneralStateBufferSize(0xfffff);
     }
 

@@ -323,12 +323,12 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenAllocatingIndirectStateRes
     auto usedBeforeSSH = ssh.getUsed();
 
     dsh.align(EncodeStates<FamilyType>::alignInterfaceDescriptorData);
-    size_t IDToffset = dsh.getUsed();
+    size_t idToffset = dsh.getUsed();
     dsh.getSpace(sizeof(INTERFACE_DESCRIPTOR_DATA));
 
     HardwareCommandsHelper<FamilyType>::sendMediaInterfaceDescriptorLoad(
         commandStream,
-        IDToffset,
+        idToffset,
         sizeof(INTERFACE_DESCRIPTOR_DATA));
     uint32_t interfaceDescriptorIndex = 0;
     auto isCcsUsed = EngineHelpers::isCcs(cmdQ.getGpgpuEngine().osContext->getEngineType());
@@ -340,10 +340,10 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenAllocatingIndirectStateRes
         ioh,
         ssh,
         *kernel,
-        kernel->getKernelStartOffset(true, kernelUsesLocalIds, isCcsUsed),
+        kernel->getKernelStartAddress(true, kernelUsesLocalIds, isCcsUsed, false),
         kernel->getKernelInfo().getMaxSimdSize(),
         localWorkSizes,
-        IDToffset,
+        idToffset,
         interfaceDescriptorIndex,
         pDevice->getPreemptionMode(),
         pWalkerCmd,
@@ -395,7 +395,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, givenKernelWithFourBindingTabl
         ioh,
         ssh,
         *mockKernelWithInternal->mockKernel,
-        mockKernelWithInternal->mockKernel->getKernelStartOffset(true, kernelUsesLocalIds, isCcsUsed),
+        mockKernelWithInternal->mockKernel->getKernelStartAddress(true, kernelUsesLocalIds, isCcsUsed, false),
         mockKernelWithInternal->mockKernel->getKernelInfo().getMaxSimdSize(),
         localWorkSizes,
         0,
@@ -441,7 +441,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, givenKernelWith100BindingTable
         ioh,
         ssh,
         *mockKernelWithInternal->mockKernel,
-        mockKernelWithInternal->mockKernel->getKernelStartOffset(true, kernelUsesLocalIds, isCcsUsed),
+        mockKernelWithInternal->mockKernel->getKernelStartAddress(true, kernelUsesLocalIds, isCcsUsed, false),
         mockKernelWithInternal->mockKernel->getKernelInfo().getMaxSimdSize(),
         localWorkSizes,
         0,
@@ -497,7 +497,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, whenSendingIndirectStateThenKe
     auto &ssh = cmdQ.getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 8192);
 
     dsh.align(EncodeStates<FamilyType>::alignInterfaceDescriptorData);
-    size_t IDToffset = dsh.getUsed();
+    size_t idToffset = dsh.getUsed();
     dsh.getSpace(sizeof(INTERFACE_DESCRIPTOR_DATA));
 
     KernelInfo modifiedKernelInfo = {};
@@ -520,10 +520,10 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, whenSendingIndirectStateThenKe
         ioh,
         ssh,
         mockKernel,
-        mockKernel.getKernelStartOffset(true, kernelUsesLocalIds, isCcsUsed),
+        mockKernel.getKernelStartAddress(true, kernelUsesLocalIds, isCcsUsed, false),
         modifiedKernelInfo.getMaxSimdSize(),
         localWorkSizes,
-        IDToffset,
+        idToffset,
         interfaceDescriptorIndex,
         pDevice->getPreemptionMode(),
         pWalkerCmd,
@@ -610,7 +610,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenSendingIndirectStateThenBi
         ioh,
         ssh,
         *kernel,
-        kernel->getKernelStartOffset(true, kernelUsesLocalIds, isCcsUsed),
+        kernel->getKernelStartAddress(true, kernelUsesLocalIds, isCcsUsed, false),
         kernel->getKernelInfo().getMaxSimdSize(),
         localWorkSizes,
         0,
@@ -719,7 +719,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, WhenGettingBindingTableStateTh
             ioh,
             ssh,
             *pKernel,
-            pKernel->getKernelStartOffset(true, kernelUsesLocalIds, isCcsUsed),
+            pKernel->getKernelStartAddress(true, kernelUsesLocalIds, isCcsUsed, false),
             pKernel->getKernelInfo().getMaxSimdSize(),
             localWorkSizes,
             0,
@@ -860,7 +860,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, GivenKernelWithInvalidSamplerS
         ioh,
         ssh,
         *mockKernelWithInternal->mockKernel,
-        mockKernelWithInternal->mockKernel->getKernelStartOffset(true, kernelUsesLocalIds, isCcsUsed),
+        mockKernelWithInternal->mockKernel->getKernelStartAddress(true, kernelUsesLocalIds, isCcsUsed, false),
         mockKernelWithInternal->mockKernel->getKernelInfo().getMaxSimdSize(),
         localWorkSizes,
         0,
@@ -884,7 +884,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, GivenKernelWithInvalidSamplerS
         ioh,
         ssh,
         *mockKernelWithInternal->mockKernel,
-        mockKernelWithInternal->mockKernel->getKernelStartOffset(true, kernelUsesLocalIds, isCcsUsed),
+        mockKernelWithInternal->mockKernel->getKernelStartAddress(true, kernelUsesLocalIds, isCcsUsed, false),
         mockKernelWithInternal->mockKernel->getKernelInfo().getMaxSimdSize(),
         localWorkSizes,
         0,
@@ -954,7 +954,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HardwareCommandsTest, GivenKernelWithSamplersWhenInd
         ioh,
         ssh,
         *mockKernelWithInternal->mockKernel,
-        mockKernelWithInternal->mockKernel->getKernelStartOffset(true, kernelUsesLocalIds, isCcsUsed),
+        mockKernelWithInternal->mockKernel->getKernelStartAddress(true, kernelUsesLocalIds, isCcsUsed, false),
         8,
         localWorkSizes,
         interfaceDescriptorTableOffset,

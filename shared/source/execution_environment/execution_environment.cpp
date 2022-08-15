@@ -31,7 +31,7 @@ void ExecutionEnvironment::releaseRootDeviceEnvironmentResources(RootDeviceEnvir
     }
     SipKernel::freeSipKernels(rootDeviceEnvironment, memoryManager.get());
     if (rootDeviceEnvironment->builtins.get()) {
-        rootDeviceEnvironment->builtins.get()->freeSipKernels(memoryManager.get());
+        rootDeviceEnvironment->builtins->freeSipKernels(memoryManager.get());
     }
 }
 
@@ -118,6 +118,14 @@ void ExecutionEnvironment::prepareRootDeviceEnvironments(uint32_t numRootDevices
     for (auto rootDeviceIndex = 0u; rootDeviceIndex < numRootDevices; rootDeviceIndex++) {
         if (!rootDeviceEnvironments[rootDeviceIndex]) {
             rootDeviceEnvironments[rootDeviceIndex] = std::make_unique<RootDeviceEnvironment>(*this);
+        }
+    }
+}
+
+void ExecutionEnvironment::prepareForCleanup() const {
+    for (auto &rootDeviceEnvironment : rootDeviceEnvironments) {
+        if (rootDeviceEnvironment) {
+            rootDeviceEnvironment->prepareForCleanup();
         }
     }
 }

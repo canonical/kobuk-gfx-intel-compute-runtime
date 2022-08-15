@@ -37,6 +37,7 @@ CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executionEnviro
 }
 
 bool prepareDeviceEnvironments(ExecutionEnvironment &executionEnvironment) {
+    auto retVal = true;
     if (executionEnvironment.rootDeviceEnvironments.size() == 0) {
         executionEnvironment.prepareRootDeviceEnvironments(1u);
     }
@@ -44,16 +45,24 @@ bool prepareDeviceEnvironments(ExecutionEnvironment &executionEnvironment) {
     if (currentHwInfo->platform.eProductFamily == IGFX_UNKNOWN && currentHwInfo->platform.eRenderCoreFamily == IGFX_UNKNOWN_CORE) {
         executionEnvironment.rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     }
+
     if (ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc) {
         uint32_t numRootDevices = DebugManager.flags.CreateMultipleRootDevices.get() != 0 ? DebugManager.flags.CreateMultipleRootDevices.get() : 1u;
         UltDeviceFactory::prepareDeviceEnvironments(executionEnvironment, numRootDevices);
-        return ultHwConfig.mockedPrepareDeviceEnvironmentsFuncResult;
+        retVal = ultHwConfig.mockedPrepareDeviceEnvironmentsFuncResult;
+    } else {
+        retVal = prepareDeviceEnvironmentsImpl(executionEnvironment);
     }
 
-    return prepareDeviceEnvironmentsImpl(executionEnvironment);
+    for (uint32_t rootDeviceIndex = 0u; rootDeviceIndex < executionEnvironment.rootDeviceEnvironments.size(); rootDeviceIndex++) {
+        executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->initGmm();
+    }
+
+    return retVal;
 }
 
 bool prepareDeviceEnvironment(ExecutionEnvironment &executionEnvironment, std::string &osPciPath, const uint32_t rootDeviceIndex) {
+    auto retVal = true;
     executionEnvironment.prepareRootDeviceEnvironment(rootDeviceIndex);
     auto currentHwInfo = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->getHardwareInfo();
     if (currentHwInfo->platform.eProductFamily == IGFX_UNKNOWN && currentHwInfo->platform.eRenderCoreFamily == IGFX_UNKNOWN_CORE) {
@@ -62,10 +71,16 @@ bool prepareDeviceEnvironment(ExecutionEnvironment &executionEnvironment, std::s
     if (ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc) {
         uint32_t numRootDevices = DebugManager.flags.CreateMultipleRootDevices.get() != 0 ? DebugManager.flags.CreateMultipleRootDevices.get() : 1u;
         UltDeviceFactory::prepareDeviceEnvironments(executionEnvironment, numRootDevices);
-        return ultHwConfig.mockedPrepareDeviceEnvironmentsFuncResult;
+        retVal = ultHwConfig.mockedPrepareDeviceEnvironmentsFuncResult;
+    } else {
+        retVal = prepareDeviceEnvironmentImpl(executionEnvironment, osPciPath, rootDeviceIndex);
     }
 
-    return prepareDeviceEnvironmentImpl(executionEnvironment, osPciPath, rootDeviceIndex);
+    for (uint32_t rootDeviceIndex = 0u; rootDeviceIndex < executionEnvironment.rootDeviceEnvironments.size(); rootDeviceIndex++) {
+        executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->initGmm();
+    }
+
+    return retVal;
 }
 const HardwareInfo *getDefaultHwInfo() {
     return defaultHwInfo.get();

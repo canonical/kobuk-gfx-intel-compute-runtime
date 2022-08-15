@@ -10,8 +10,6 @@
 #include "shared/source/helpers/flush_stamp.h"
 #include "shared/source/os_interface/os_time.h"
 #include "shared/source/os_interface/performance_counters.h"
-#include "shared/source/utilities/arrayref.h"
-#include "shared/source/utilities/hw_timestamps.h"
 #include "shared/source/utilities/idlist.h"
 #include "shared/source/utilities/iflist.h"
 
@@ -134,6 +132,7 @@ class Event : public BaseObject<_cl_event>, public IDNode<Event> {
     std::unique_ptr<FlushStampTracker> flushStamp;
     std::atomic<uint32_t> taskLevel;
 
+    uint32_t peekTaskLevel() const;
     void addChild(Event &e);
 
     virtual bool setStatus(cl_int status);
@@ -355,6 +354,7 @@ class Event : public BaseObject<_cl_event>, public IDNode<Event> {
 
     static void setExecutionStatusToAbortedDueToGpuHang(cl_event *first, cl_event *last);
 
+    bool isWaitForTimestampsEnabled() const;
     bool areTimestampsCompleted();
 
     bool currentCmdQVirtualEvent;

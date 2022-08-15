@@ -5,6 +5,8 @@
  *
  */
 
+#include "shared/source/xe_hpc_core/hw_cmds_xe_hpc_core_base.h"
+
 namespace NEO {
 struct XE_HPC_COREFamily;
 using Family = XE_HPC_COREFamily;
@@ -30,7 +32,6 @@ void PreambleHelper<Family>::appendProgramVFEState(const HardwareInfo &hwInfo, c
         const auto programComputeDispatchAllWalkerEnableInCfeState = hwInfoConfig.isComputeDispatchAllWalkerEnableInCfeStateRequired(hwInfo);
         if (programComputeDispatchAllWalkerEnableInCfeState && streamProperties.frontEndState.computeDispatchAllWalkerEnable.value > 0) {
             command->setComputeDispatchAllWalkerEnable(true);
-            command->setSingleSliceDispatchCcsMode(true);
         }
     }
 

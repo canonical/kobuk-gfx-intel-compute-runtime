@@ -23,9 +23,10 @@ link_libraries(${ASAN_LIBS} ${TSAN_LIBS})
 
 add_custom_target(prepare_test_kernels_for_ocl)
 add_dependencies(prepare_test_kernels_for_ocl ${BUILTINS_BINARIES_BINDFUL_LIB_NAME})
-add_custom_target(copy_test_files_per_product)
 add_custom_target(run_unit_tests ALL)
-add_dependencies(unit_tests copy_test_files_per_product)
+
+add_custom_target(run_ocl_tests)
+set_target_properties(run_ocl_tests PROPERTIES FOLDER ${PLATFORM_SPECIFIC_TEST_TARGETS_FOLDER})
 
 set(IGDRCL_SRCS_tests_local
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
@@ -40,7 +41,7 @@ hide_subdir(linux)
 if(UNIX)
   add_subdirectory(linux)
   add_custom_command(
-                     TARGET run_unit_tests
+                     TARGET run_ocl_tests
                      POST_BUILD
                      COMMAND echo running tests for linux dynamic library - .so in ${TargetDir}
                      COMMAND ${NEO_RUN_INTERCEPTOR_LIST} igdrcl_linux_dll_tests ${NEO_TESTS_LISTENER_OPTION}
@@ -85,10 +86,6 @@ if(USE_ASAN)
   set(GTEST_ENV "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan_suppressions.txt")
 endif()
 
-if(COMPILER_SUPPORTS_SSE42)
-  set_source_files_properties(helpers/uint16_sse4_tests.cpp PROPERTIES COMPILE_FLAGS -msse4.2)
-endif()
-
 target_link_libraries(igdrcl_tests ${NEO_MOCKABLE_LIB_NAME} ${NEO_SHARED_MOCKABLE_LIB_NAME})
 target_link_libraries(igdrcl_tests igdrcl_mocks)
 
@@ -108,50 +105,8 @@ target_link_libraries(igdrcl_tests gmock-gtest ${NEO_EXTRA_LIBS})
 
 set(BUILT_IN_KERNEL_DIR "${NEO_SOURCE_DIR}/shared/source/built_ins")
 
-function(neo_copy_test_files target product)
-  set(outputdir "${TargetDir}/${product}")
-  add_custom_target(${target})
-  add_custom_command(
-                     TARGET ${target}
-                     POST_BUILD
-                     COMMAND echo deleting and re-creating ${product} cache directory...
-                     COMMAND ${CMAKE_COMMAND} -E remove_directory ${outputdir}/cl_cache
-                     COMMAND ${CMAKE_COMMAND} -E make_directory ${outputdir}/cl_cache
-                     COMMAND echo copying built-in kernel files from ${BUILT_IN_KERNEL_DIR}/kernels to ${outputdir}/test_files
-                     COMMAND ${CMAKE_COMMAND} -E copy_directory ${BUILT_IN_KERNEL_DIR}/kernels ${outputdir}/test_files
-                     COMMAND echo copying test files from ${NEO_SOURCE_DIR}/opencl/test/unit_test/test_files to ${outputdir}/test_files
-                     COMMAND ${CMAKE_COMMAND} -E copy_directory ${NEO_SOURCE_DIR}/opencl/test/unit_test/test_files ${outputdir}/test_files
-                     COMMAND WORKING_DIRECTORY ${TargetDir}
-                     DEPENDS ${NEO_SOURCE_DIR}/opencl/test/unit_test/test_files
-  )
-  add_dependencies(${target} copy_compiler_files)
-  set_target_properties(${target} PROPERTIES FOLDER "${PLATFORM_SPECIFIC_TEST_TARGETS_FOLDER}/${product}")
-endfunction()
-
-function(neo_copy_test_files_with_revision target product revision_id)
-  set(outputdir "${TargetDir}/${product}/${revision_id}")
-  add_custom_target(${target})
-  add_dependencies(${target} copy_test_kernel_${product}_${revision_id})
-  add_custom_command(
-                     TARGET ${target}
-                     POST_BUILD
-                     COMMAND echo deleting and re-creating ${product} cache directory...
-                     COMMAND ${CMAKE_COMMAND} -E remove_directory ${outputdir}/cl_cache
-                     COMMAND ${CMAKE_COMMAND} -E make_directory ${outputdir}/cl_cache
-                     COMMAND echo copying built-in kernel files from ${BUILT_IN_KERNEL_DIR}/kernels to ${outputdir}/test_files
-                     COMMAND ${CMAKE_COMMAND} -E copy_directory ${BUILT_IN_KERNEL_DIR}/kernels ${outputdir}/test_files
-                     COMMAND echo copying test files from ${NEO_SOURCE_DIR}/opencl/test/unit_test/test_files to ${outputdir}/test_files
-                     COMMAND ${CMAKE_COMMAND} -E copy_directory ${NEO_SOURCE_DIR}/opencl/test/unit_test/test_files ${outputdir}/test_files
-                     COMMAND WORKING_DIRECTORY ${TargetDir}
-                     DEPENDS ${NEO_SOURCE_DIR}/opencl/test/unit_test/test_files
-  )
-  add_dependencies(${target} copy_compiler_files)
-  set_target_properties(${target} PROPERTIES FOLDER "${PLATFORM_SPECIFIC_TEST_TARGETS_FOLDER}/${product}/${revision_id}")
-endfunction()
-
 add_dependencies(unit_tests
                  igdrcl_tests
-                 test_dynamic_lib
                  prepare_test_kernels_for_ocl
                  prepare_test_kernels_for_shared
 )
@@ -163,7 +118,6 @@ if(UNIX)
 endif()
 
 set_target_properties(unit_tests PROPERTIES FOLDER ${OPENCL_TEST_PROJECTS_FOLDER})
-set_target_properties(copy_test_files_per_product PROPERTIES FOLDER ${OPENCL_TEST_PROJECTS_FOLDER})
 set_target_properties(prepare_test_kernels_for_ocl PROPERTIES FOLDER ${OPENCL_TEST_PROJECTS_FOLDER})
 set_target_properties(run_unit_tests PROPERTIES FOLDER ${OPENCL_TEST_PROJECTS_FOLDER})
 
@@ -360,32 +314,6 @@ function(neo_gen_kernel_with_kernel_debug_options platform_name_with_type platfo
   set(kernels_to_compile_${platform_name_with_type}_${revision_id} ${kernels_to_compile_${platform_name_with_type}_${revision_id}} PARENT_SCOPE)
 endfunction()
 
-function(neo_gen_kernel_from_ll platform_name_with_type platform_name suffix filepath output_name compile_options)
-  get_filename_component(filename ${filepath} NAME)
-  get_filename_component(basename ${filepath} NAME_WE)
-  get_filename_component(absolute_filepath ${filepath} ABSOLUTE)
-
-  set(outputdir "${TargetDir}/${suffix}/test_files/${NEO_ARCH}")
-  set(workdir "${CMAKE_CURRENT_SOURCE_DIR}/test_files/")
-
-  set(outputpath_base "${outputdir}/${output_name}_${suffix}")
-  set(output_files
-      ${outputpath_base}.bin
-      ${outputpath_base}.gen
-  )
-  string(CONCAT compile_options \" ${compile_options} \" )
-
-         add_custom_command(
-                     OUTPUT ${output_files}
-                     COMMAND ${ocloc_cmd_prefix} -q -file ${absolute_filepath} -output ${output_name} -device ${platform_name} -${NEO_BITS} -out_dir ${outputdir} -internal_options ${compile_options} -llvm_input
-                     WORKING_DIRECTORY ${workdir}
-                     DEPENDS ${filepath} ocloc
-  )
-
-  list(APPEND kernels_to_compile_${platform_name_with_type} ${output_files})
-  set(kernels_to_compile_${platform_name_with_type} ${kernels_to_compile_${platform_name_with_type}} PARENT_SCOPE)
-endfunction()
-
 set(TEST_KERNEL test_files/CopyBuffer_simd16.cl)
 
 set(TEST_KERNEL_options
@@ -528,7 +456,9 @@ macro(macro_for_each_core_type)
 
         foreach(file ${TEST_KERNEL_BINDLESS} ${BINDLESS_KERNELS_IMAGES})
           foreach(REVISION_ID ${${PLATFORM_TYPE}_${CORE_TYPE}_REVISIONS})
-            neo_gen_kernels_with_internal_options(${family_name_with_type} ${PLATFORM_LOWER} ${REVISION_ID} ${family_name_with_type} ${file} "bindless" ${TEST_KERNEL_BINDLESS_internal_options})
+            if(NOT ("${CORE_TYPE_LOWER}" STREQUAL "gen8"))
+              neo_gen_kernels_with_internal_options(${family_name_with_type} ${PLATFORM_LOWER} ${REVISION_ID} ${family_name_with_type} ${file} "bindless" ${TEST_KERNEL_BINDLESS_internal_options})
+            endif()
           endforeach()
         endforeach()
 

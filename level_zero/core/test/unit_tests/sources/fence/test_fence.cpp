@@ -7,7 +7,7 @@
 
 #include "shared/test/common/mocks/mock_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_csr.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "level_zero/core/source/fence/fence.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
@@ -97,7 +97,7 @@ TEST_F(FenceTest, GivenGpuHangWhenHostSynchronizeIsCalledThenDeviceLostIsReturne
     ze_fence_desc_t desc = {};
 
     std::unique_ptr<WhiteBox<L0::Fence>> fence;
-    fence.reset(whitebox_cast(Fence::create(&cmdqueue, &desc)));
+    fence.reset(whiteboxCast(Fence::create(&cmdqueue, &desc)));
     ASSERT_NE(nullptr, fence);
 
     fence->taskCount = 1;
@@ -118,7 +118,7 @@ TEST_F(FenceTest, GivenNoGpuHangAndOneNanosecondTimeoutWhenHostSynchronizeIsCall
     ze_fence_desc_t desc = {};
 
     std::unique_ptr<WhiteBox<L0::Fence>> fence;
-    fence.reset(whitebox_cast(Fence::create(&cmdqueue, &desc)));
+    fence.reset(whiteboxCast(Fence::create(&cmdqueue, &desc)));
     ASSERT_NE(nullptr, fence);
 
     fence->taskCount = 1;
@@ -138,7 +138,7 @@ TEST_F(FenceTest, GivenLongPeriodOfGpuCheckAndOneNanosecondTimeoutWhenHostSynchr
     ze_fence_desc_t desc = {};
 
     std::unique_ptr<WhiteBox<L0::Fence>> fence;
-    fence.reset(whitebox_cast(Fence::create(&cmdqueue, &desc)));
+    fence.reset(whiteboxCast(Fence::create(&cmdqueue, &desc)));
     ASSERT_NE(nullptr, fence);
 
     fence->taskCount = 1;
@@ -158,7 +158,7 @@ TEST_F(FenceTest, GivenSuccessfulQueryResultAndNoTimeoutWhenHostSynchronizeIsCal
     ze_fence_desc_t desc = {};
 
     std::unique_ptr<WhiteBox<L0::Fence>> fence;
-    fence.reset(whitebox_cast(Fence::create(&cmdqueue, &desc)));
+    fence.reset(whiteboxCast(Fence::create(&cmdqueue, &desc)));
     ASSERT_NE(nullptr, fence);
 
     fence->taskCount = 1;
@@ -205,7 +205,7 @@ TEST_F(FenceSynchronizeTest, givenCallToFenceHostSynchronizeWithTimeoutZeroAndTa
 
     Mock<CommandQueue> cmdQueue(device, csr.get());
     ze_fence_desc_t fenceDesc = {};
-    auto fence = std::unique_ptr<Fence>(whitebox_cast(Fence::create(&cmdQueue, &fenceDesc)));
+    auto fence = std::unique_ptr<Fence>(whiteboxCast(Fence::create(&cmdQueue, &fenceDesc)));
     EXPECT_NE(nullptr, fence);
 
     fence->taskCount = 1;
@@ -220,7 +220,7 @@ TEST_F(FenceSynchronizeTest, givenCallToFenceHostSynchronizeWithTimeoutNonZeroAn
 
     Mock<CommandQueue> cmdQueue(device, csr.get());
     ze_fence_desc_t fenceDesc = {};
-    auto fence = std::unique_ptr<Fence>(whitebox_cast(Fence::create(&cmdQueue, &fenceDesc)));
+    auto fence = std::unique_ptr<Fence>(whiteboxCast(Fence::create(&cmdQueue, &fenceDesc)));
     EXPECT_NE(nullptr, fence);
 
     fence->taskCount = 1;
@@ -242,7 +242,7 @@ TEST_F(FenceSynchronizeTest, givenInfiniteTimeoutWhenWaitingForFenceCompletionTh
     ze_fence_desc_t desc = {};
 
     std::unique_ptr<WhiteBox<L0::Fence>> fence;
-    fence.reset(whitebox_cast(Fence::create(&cmdqueue, &desc)));
+    fence.reset(whiteboxCast(Fence::create(&cmdqueue, &desc)));
     ASSERT_NE(nullptr, fence);
 
     fence->taskCount = 1;
@@ -300,6 +300,52 @@ HWTEST_F(FenceAubCsrTest, givenCallToFenceHostSynchronizeWithAubModeCsrReturnsSu
 
     ze_result_t result = fence->hostSynchronize(10);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+}
+
+TEST(zeFenceDestroy, WhenDestroyingFenceThenSuccessIsReturned) {
+    Mock<Fence> fence;
+
+    auto result = zeFenceDestroy(fence.toHandle());
+    EXPECT_EQ(1u, fence.destroyCalled);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+}
+
+TEST(zeFenceHostSynchronize, WhenSynchronizingFenceThenSuccessIsReturned) {
+    Mock<Fence> fence;
+
+    auto result = zeFenceHostSynchronize(fence.toHandle(), std::numeric_limits<uint32_t>::max());
+    EXPECT_EQ(1u, fence.hostSynchronizeCalled);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+}
+
+TEST_F(FenceTest, givenFenceNotEnqueuedThenStatusIsNotReady) {
+    auto csr = std::make_unique<MockCommandStreamReceiver>(*neoDevice->getExecutionEnvironment(), 0, neoDevice->getDeviceBitfield());
+    *csr->tagAddress = 0;
+    Mock<CommandQueue> cmdqueue(device, csr.get());
+    ze_fence_desc_t desc = {};
+
+    auto fence = whiteboxCast(Fence::create(&cmdqueue, &desc));
+    ASSERT_NE(fence, nullptr);
+    EXPECT_EQ(fence->queryStatus(), ZE_RESULT_NOT_READY);
+
+    delete fence;
+}
+
+TEST_F(FenceTest, givenFenceWhenResettingThenTaskCountIsReset) {
+    auto csr = std::make_unique<MockCommandStreamReceiver>(*neoDevice->getExecutionEnvironment(), 0, neoDevice->getDeviceBitfield());
+    Mock<CommandQueue> cmdqueue(device, csr.get());
+    ze_fence_desc_t desc = {};
+
+    auto fence = whiteboxCast(Fence::create(&cmdqueue, &desc));
+    ASSERT_NE(fence, nullptr);
+    EXPECT_EQ(std::numeric_limits<uint32_t>::max(), fence->taskCount);
+
+    fence->taskCount = 1;
+    auto result = fence->reset(false);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(std::numeric_limits<uint32_t>::max(), fence->taskCount);
+
+    delete fence;
 }
 
 } // namespace ult

@@ -5,7 +5,9 @@
  *
  */
 
+#include "shared/source/gen11/hw_cmds.h"
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/helpers/gtest_helpers.h"
 

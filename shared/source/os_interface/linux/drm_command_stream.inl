@@ -23,6 +23,7 @@
 #include "shared/source/os_interface/linux/drm_memory_manager.h"
 #include "shared/source/os_interface/linux/drm_memory_operations_handler.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
+#include "shared/source/os_interface/linux/drm_wrappers.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
 #include "shared/source/os_interface/os_interface.h"
 
@@ -37,6 +38,8 @@ DrmCommandStreamReceiver<GfxFamily>::DrmCommandStreamReceiver(ExecutionEnvironme
                                                               const DeviceBitfield deviceBitfield,
                                                               gemCloseWorkerMode mode)
     : BaseClass(executionEnvironment, rootDeviceIndex, deviceBitfield), gemCloseWorkerOperationMode(mode) {
+
+    this->completionFenceOffset = Drm::completionFenceOffset;
 
     auto rootDeviceEnvironment = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex].get();
 
@@ -209,7 +212,8 @@ int DrmCommandStreamReceiver<GfxFamily>::exec(const BatchBuffer &batchBuffer, ui
     BufferObject *bb = alloc->getBO();
     DEBUG_BREAK_IF(!bb);
 
-    auto execFlags = static_cast<OsContextLinux *>(osContext)->getEngineFlag() | I915_EXEC_NO_RELOC;
+    auto osContextLinux = static_cast<OsContextLinux *>(this->osContext);
+    auto execFlags = osContextLinux->getEngineFlag() | drm->getIoctlHelper()->getDrmParamValue(DrmParam::ExecNoReloc);
 
     // Residency hold all allocation except command buffer, hence + 1
     auto requiredSize = this->residency.size() + 1;
@@ -243,9 +247,12 @@ int DrmCommandStreamReceiver<GfxFamily>::exec(const BatchBuffer &batchBuffer, ui
 
 template <typename GfxFamily>
 void DrmCommandStreamReceiver<GfxFamily>::processResidency(const ResidencyContainer &inputAllocationsForResidency, uint32_t handleId) {
-    for (auto &alloc : inputAllocationsForResidency) {
-        auto drmAlloc = static_cast<DrmAllocation *>(alloc);
-        drmAlloc->makeBOsResident(osContext, handleId, &this->residency, false);
+
+    if ((!drm->isVmBindAvailable()) || (DebugManager.flags.PassBoundBOToExec.get() == 1)) {
+        for (auto &alloc : inputAllocationsForResidency) {
+            auto drmAlloc = static_cast<DrmAllocation *>(alloc);
+            drmAlloc->makeBOsResident(osContext, handleId, &this->residency, false);
+        }
     }
 }
 
@@ -314,21 +321,5 @@ bool DrmCommandStreamReceiver<GfxFamily>::isKmdWaitModeActive() {
 template <typename GfxFamily>
 inline bool DrmCommandStreamReceiver<GfxFamily>::isUserFenceWaitActive() {
     return (this->drm->isVmBindAvailable() && useUserFenceWait);
-}
-
-template <typename GfxFamily>
-uint64_t DrmCommandStreamReceiver<GfxFamily>::getCompletionAddress() {
-    uint64_t completionFenceAddress = castToUint64(const_cast<uint32_t *>(getTagAddress()));
-    if (completionFenceAddress == 0) {
-        return 0;
-    }
-    completionFenceAddress += Drm::completionFenceOffset;
-    return completionFenceAddress;
-}
-
-template <typename GfxFamily>
-uint32_t DrmCommandStreamReceiver<GfxFamily>::getCompletionValue(const GraphicsAllocation &gfxAllocation) {
-    auto osContextId = osContext->getContextId();
-    return gfxAllocation.getTaskCount(osContextId);
 }
 } // namespace NEO

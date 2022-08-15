@@ -1,23 +1,30 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#pragma once
+
 #include "shared/offline_compiler/source/ocloc_api.h"
 
 #include <level_zero/ze_api.h>
+
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <vector>
 
 std::vector<uint8_t> compileToSpirV(const std::string &src, const std::string &options, std::string &outCompilerLog) {
     std::vector<uint8_t> ret;
 
     const char *mainFileName = "main.cl";
-    const char *argv[] = {"ocloc", "-q", "-device", "skl", "-file", mainFileName, "", ""};
+    const char *argv[] = {"ocloc", "-q", "-spv_only", "-file", mainFileName, "", ""};
     uint32_t numArgs = sizeof(argv) / sizeof(argv[0]) - 2;
     if (options.size() > 0) {
-        argv[6] = "-options";
-        argv[7] = options.c_str();
+        argv[5] = "-options";
+        argv[6] = options.c_str();
         numArgs += 2;
     }
     const unsigned char *sources[] = {reinterpret_cast<const unsigned char *>(src.c_str())};
@@ -40,11 +47,11 @@ std::vector<uint8_t> compileToSpirV(const std::string &src, const std::string &o
     for (unsigned int i = 0; i < numOutputs; ++i) {
         std::string spvExtension = ".spv";
         std::string logFileName = "stdout.log";
-        auto nameLen = strlen(outputNames[i]);
-        if ((nameLen > spvExtension.size()) && (strstr(&outputNames[i][nameLen - spvExtension.size()], spvExtension.c_str()) != nullptr)) {
+        auto nameLen = std::strlen(outputNames[i]);
+        if ((nameLen > spvExtension.size()) && (std::strstr(&outputNames[i][nameLen - spvExtension.size()], spvExtension.c_str()) != nullptr)) {
             spirV = outputs[i];
             spirVlen = ouputLengths[i];
-        } else if ((nameLen >= logFileName.size()) && (strstr(outputNames[i], logFileName.c_str()) != nullptr)) {
+        } else if ((nameLen >= logFileName.size()) && (std::strstr(outputNames[i], logFileName.c_str()) != nullptr)) {
             log = reinterpret_cast<const char *>(outputs[i]);
             logLen = ouputLengths[i];
             break;
@@ -64,3 +71,20 @@ std::vector<uint8_t> compileToSpirV(const std::string &src, const std::string &o
     oclocFreeOutput(&numOutputs, &outputs, &ouputLengths, &outputNames);
     return ret;
 }
+
+const char *memcpyBytesTestKernelSrc = R"===(
+kernel void memcpy_bytes(__global char *dst, const __global char *src) {
+    unsigned int gid = get_global_id(0);
+    dst[gid] = src[gid];
+}
+)===";
+
+const char *memcpyBytesWithPrintfTestKernelSrc = R"==(
+__kernel void memcpy_bytes(__global uchar *dst, const __global uchar *src) {
+    unsigned int gid = get_global_id(0);
+    dst[gid] = (uchar)(src[gid] + gid);
+    if (gid == 0) {
+        printf("gid =  %d \n", gid);
+    }
+}
+)==";

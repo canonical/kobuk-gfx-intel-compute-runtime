@@ -24,7 +24,8 @@ bool HwHelperHw<Family>::isRcsAvailable(const HardwareInfo &hwInfo) const {
 
 template <>
 bool HwHelperHw<Family>::isCooperativeDispatchSupported(const EngineGroupType engineGroupType, const HardwareInfo &hwInfo) const {
-    if (isCooperativeEngineSupported(hwInfo)) {
+    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    if (hwInfoConfig.isCooperativeEngineSupported(hwInfo)) {
         if (engineGroupType == EngineGroupType::RenderCompute) {
             return false;
         }
@@ -37,26 +38,19 @@ bool HwHelperHw<Family>::isCooperativeDispatchSupported(const EngineGroupType en
 }
 
 template <>
-bool HwHelperHw<Family>::isTimestampWaitSupported() const {
-    return true;
-}
-
-template <>
-bool HwHelperHw<Family>::isUpdateTaskCountFromWaitSupported() const {
-    return true;
-}
-
-template <>
 uint32_t HwHelperHw<Family>::adjustMaxWorkGroupCount(uint32_t maxWorkGroupCount, const EngineGroupType engineGroupType,
                                                      const HardwareInfo &hwInfo, bool isEngineInstanced) const {
+    if ((DebugManager.flags.ForceTheoreticalMaxWorkGroupCount.get()) ||
+        (DebugManager.flags.OverrideMaxWorkGroupCount.get() != -1)) {
+        return maxWorkGroupCount;
+    }
     if (!isCooperativeDispatchSupported(engineGroupType, hwInfo)) {
         return 1u;
     }
-
-    bool requiresLimitation = this->isCooperativeEngineSupported(hwInfo) &&
+    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    bool requiresLimitation = hwInfoConfig.isCooperativeEngineSupported(hwInfo) &&
                               (engineGroupType != EngineGroupType::CooperativeCompute) &&
-                              (!isEngineInstanced) &&
-                              (DebugManager.flags.OverrideMaxWorkGroupCount.get() == -1);
+                              (!isEngineInstanced);
     if (requiresLimitation) {
         auto ccsCount = hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
         UNRECOVERABLE_IF(ccsCount == 0);
@@ -68,6 +62,14 @@ uint32_t HwHelperHw<Family>::adjustMaxWorkGroupCount(uint32_t maxWorkGroupCount,
 template <>
 bool HwHelperHw<Family>::isEngineTypeRemappingToHwSpecificRequired() const {
     return true;
+}
+
+template <>
+size_t HwHelperHw<Family>::getPaddingForISAAllocation() const {
+    if (DebugManager.flags.ForceExtendedKernelIsaSize.get() >= 1) {
+        return 0xE00 + (MemoryConstants::pageSize * DebugManager.flags.ForceExtendedKernelIsaSize.get());
+    }
+    return 0xE00;
 }
 
 } // namespace NEO

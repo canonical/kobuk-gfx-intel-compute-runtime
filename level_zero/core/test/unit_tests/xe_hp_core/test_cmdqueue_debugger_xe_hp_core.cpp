@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,9 +9,12 @@
 #include "shared/source/gen_common/reg_configs_common.h"
 #include "shared/source/helpers/preamble.h"
 #include "shared/source/os_interface/hw_info_config.h"
+#include "shared/source/xe_hp_core/hw_cmds.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 
+#include "level_zero/core/source/cmdlist/cmdlist.h"
 #include "level_zero/core/source/cmdqueue/cmdqueue_hw.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdqueue.h"
 #include "level_zero/core/test/unit_tests/sources/debugger/active_debugger_fixture.h"
@@ -36,7 +39,7 @@ XEHPTEST_F(CommandQueueDebugCommandsForSldXeHP, givenSteppingA0OrBWhenGlobalSipI
     for (auto revision : revisions) {
         hwInfo.platform.usRevId = revision;
 
-        auto commandQueue = whitebox_cast(CommandQueue::create(productFamily, deviceL0, device->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
+        auto commandQueue = whiteboxCast(CommandQueue::create(productFamily, deviceL0, device->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
         ASSERT_NE(nullptr, commandQueue->commandStream);
 
         ze_command_list_handle_t commandLists[] = {
@@ -115,7 +118,7 @@ XEHPTEST_F(CommandQueueDebugCommandsDebuggerL0XeHP, givenSteppingA0OrBWhenGlobal
     for (auto revision : revisions) {
         hwInfo.platform.usRevId = revision;
 
-        auto commandQueue = whitebox_cast(CommandQueue::create(productFamily, device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
+        auto commandQueue = whiteboxCast(CommandQueue::create(productFamily, device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
         ASSERT_NE(nullptr, commandQueue->commandStream);
 
         ze_command_list_handle_t commandLists[] = {

@@ -16,8 +16,6 @@
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/utilities/cpu_info.h"
 
-#include "hw_cmds.h"
-
 #include <cstring>
 
 namespace NEO {
@@ -73,20 +71,6 @@ int HwInfoConfig::configureHwInfoDrm(const HardwareInfo *inHwInfo, HardwareInfo 
     auto platform = &outHwInfo->platform;
     auto gtSystemInfo = &outHwInfo->gtSystemInfo;
     auto featureTable = &outHwInfo->featureTable;
-
-    int val = 0;
-    ret = drm->getDeviceID(val);
-    if (ret != 0 || val == 0) {
-        *outHwInfo = {};
-        return (ret == 0) ? -1 : ret;
-    }
-    platform->usDeviceID = static_cast<unsigned short>(val);
-    ret = drm->getDeviceRevID(val);
-    if (ret != 0) {
-        *outHwInfo = {};
-        return ret;
-    }
-    platform->usRevId = static_cast<unsigned short>(val);
 
     Drm::QueryTopologyData topologyData = {};
 

@@ -25,7 +25,7 @@
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/mock_os_context.h"
 #include "shared/test/common/mocks/mock_tbx_csr.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/unit_test/fixtures/mock_aub_center_fixture.h"
 
 #include <cstdint>
@@ -326,7 +326,7 @@ HWTEST_F(TbxCommandSteamSimpleTest, givenTbxCsrWhenCallingMakeSurfacePackNonResi
 
     ResidencyContainer allocationsForResidency{&allocation1, &allocation2, &allocation3};
 
-    tbxCsr.makeSurfacePackNonResident(allocationsForResidency);
+    tbxCsr.makeSurfacePackNonResident(allocationsForResidency, true);
     std::set<GraphicsAllocation *> expectedAllocationsForDownload = {&allocation1, &allocation3};
     EXPECT_EQ(expectedAllocationsForDownload, tbxCsr.allocationsForDownload);
 }
@@ -933,7 +933,10 @@ HWTEST_F(TbxCommandStreamTests, givenGraphicsAllocationWritableWhenDumpAllocatio
 
     auto memoryManager = pDevice->getMemoryManager();
     auto gfxAllocation = memoryManager->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), MemoryConstants::pageSize, AllocationType::BUFFER, pDevice->getDeviceBitfield()});
+
     gfxAllocation->setMemObjectsAllocationWithWritableFlags(true);
+    gfxAllocation->setDefaultGmm(new Gmm(pDevice->executionEnvironment->rootDeviceEnvironments[0]->getGmmHelper(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
+
     EXPECT_TRUE(AubAllocDump::isWritableBuffer(*gfxAllocation));
 
     tbxCsr.dumpAllocation(*gfxAllocation);
@@ -958,12 +961,13 @@ HWTEST_F(TbxCommandStreamTests, givenGraphicsAllocationWhenDumpAllocationIsCalle
 
     gfxAllocation->setMemObjectsAllocationWithWritableFlags(true);
     gfxAllocation->setAllocDumpable(false, false);
+    gfxAllocation->setDefaultGmm(new Gmm(pDevice->executionEnvironment->rootDeviceEnvironments[0]->getGmmHelper(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
 
     tbxCsr.dumpAllocation(*gfxAllocation);
     EXPECT_FALSE(mockHardwareContext->dumpSurfaceCalled);
     EXPECT_FALSE(gfxAllocation->isAllocDumpable());
 
-    auto &csrOsContext = tbxCsr.getOsContext();
+    auto &csrOsContext = static_cast<MockOsContext &>(tbxCsr.getOsContext());
     {
         // Non-BCS engine, BCS dump
         EXPECT_FALSE(EngineHelpers::isBcs(csrOsContext.getEngineType()));
@@ -989,7 +993,7 @@ HWTEST_F(TbxCommandStreamTests, givenGraphicsAllocationWhenDumpAllocationIsCalle
 
     {
         // BCS engine, Non-BCS dump
-        csrOsContext.getEngineType() = aub_stream::EngineType::ENGINE_BCS;
+        csrOsContext.engineType = aub_stream::EngineType::ENGINE_BCS;
         EXPECT_TRUE(EngineHelpers::isBcs(csrOsContext.getEngineType()));
         gfxAllocation->setAllocDumpable(true, false);
 
@@ -1001,7 +1005,7 @@ HWTEST_F(TbxCommandStreamTests, givenGraphicsAllocationWhenDumpAllocationIsCalle
 
     {
         // BCS engine, BCS dump
-        csrOsContext.getEngineType() = aub_stream::EngineType::ENGINE_BCS;
+        csrOsContext.engineType = aub_stream::EngineType::ENGINE_BCS;
         EXPECT_TRUE(EngineHelpers::isBcs(csrOsContext.getEngineType()));
         gfxAllocation->setAllocDumpable(true, true);
 
@@ -1030,6 +1034,7 @@ HWTEST_F(TbxCommandStreamTests, givenGraphicsAllocationWhenDumpAllocationIsCalle
 
     gfxAllocation->setMemObjectsAllocationWithWritableFlags(true);
     gfxAllocation->setAllocDumpable(false, false);
+    gfxAllocation->setDefaultGmm(new Gmm(pDevice->executionEnvironment->rootDeviceEnvironments[0]->getGmmHelper(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
 
     tbxCsr.dumpAllocation(*gfxAllocation);
     EXPECT_FALSE(mockHardwareContext->dumpSurfaceCalled);

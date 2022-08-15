@@ -16,11 +16,13 @@
 #include "shared/source/helpers/engine_control.h"
 #include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/helpers/hw_info.h"
+#include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/performance_counters.h"
 #include "shared/source/program/sync_buffer_handler.h"
 
 namespace NEO {
+class DebuggerL0;
 class OSTime;
 class SourceLevelDebugger;
 class SubDevice;
@@ -31,15 +33,22 @@ struct SelectorCopyEngine : NonCopyableOrMovableClass {
     std::atomic<uint32_t> selector = 0;
 };
 
+using EnginesT = std::vector<EngineControl>;
+struct EngineGroupT {
+    EngineGroupType engineGroupType;
+    EnginesT engines;
+};
+using EngineGroupsT = std::vector<EngineGroupT>;
+
+struct RTDispatchGlobalsInfo {
+    RTDispatchGlobalsInfo(GraphicsAllocation *rtDispatchGlobalsArrayAllocation)
+        : rtDispatchGlobalsArrayAllocation(rtDispatchGlobalsArrayAllocation){};
+    std::vector<GraphicsAllocation *> rtDispatchGlobals;  // per tile
+    GraphicsAllocation *rtDispatchGlobalsArrayAllocation; // above array as visible from device
+};
+
 class Device : public ReferenceTrackedObject<Device> {
   public:
-    using EnginesT = std::vector<EngineControl>;
-    struct EngineGroupT {
-        EngineGroupType engineGroupType;
-        EnginesT engines;
-    };
-    using EngineGroupsT = std::vector<EngineGroupT>;
-
     Device &operator=(const Device &) = delete;
     Device(const Device &) = delete;
     ~Device() override;
@@ -87,6 +96,7 @@ class Device : public ReferenceTrackedObject<Device> {
     MOCKABLE_VIRTUAL bool isDebuggerActive() const;
     Debugger *getDebugger() const { return getRootDeviceEnvironment().debugger.get(); }
     NEO::SourceLevelDebugger *getSourceLevelDebugger();
+    DebuggerL0 *getL0Debugger();
     const EnginesT &getAllEngines() const;
     const std::string getDeviceName(const HardwareInfo &hwInfo) const;
 
@@ -127,14 +137,18 @@ class Device : public ReferenceTrackedObject<Device> {
     static decltype(&PerformanceCounters::create) createPerformanceCountersFunc;
     std::unique_ptr<SyncBufferHandler> syncBufferHandler;
     GraphicsAllocation *getRTMemoryBackedBuffer() { return rtMemoryBackedBuffer; }
-    GraphicsAllocation *getRTDispatchGlobals(uint32_t maxBvhLevels);
+    RTDispatchGlobalsInfo *getRTDispatchGlobals(uint32_t maxBvhLevels);
     bool rayTracingIsInitialized() const { return rtMemoryBackedBuffer != nullptr; }
     void initializeRayTracing(uint32_t maxBvhLevels);
+    void allocateRTDispatchGlobals(uint32_t maxBvhLevels);
 
     uint64_t getGlobalMemorySize(uint32_t deviceBitfield) const;
     const std::vector<SubDevice *> getSubDevices() const { return subdevices; }
     bool getUuid(std::array<uint8_t, HwInfoConfig::uuidSize> &uuid);
     void generateUuid(std::array<uint8_t, HwInfoConfig::uuidSize> &uuid);
+    void getAdapterLuid(std::array<uint8_t, HwInfoConfig::luidSize> &luid);
+    MOCKABLE_VIRTUAL bool verifyAdapterLuid();
+    void getAdapterMask(uint32_t &nodeMask);
 
   protected:
     Device() = delete;
@@ -168,7 +182,6 @@ class Device : public ReferenceTrackedObject<Device> {
     virtual bool genericSubDevicesAllowed();
     bool engineInstancedSubDevicesAllowed();
     void setAsEngineInstanced();
-    MOCKABLE_VIRTUAL void allocateRTDispatchGlobals(uint32_t maxBvhLevels);
     void finalizeRayTracing();
 
     DeviceInfo deviceInfo = {};
@@ -200,7 +213,8 @@ class Device : public ReferenceTrackedObject<Device> {
     uintptr_t specializedDevice = reinterpret_cast<uintptr_t>(nullptr);
 
     GraphicsAllocation *rtMemoryBackedBuffer = nullptr;
-    std::vector<GraphicsAllocation *> rtDispatchGlobals;
+    std::vector<RTDispatchGlobalsInfo *> rtDispatchGlobalsInfos;
+
     struct {
         bool isValid = false;
         std::array<uint8_t, HwInfoConfig::uuidSize> id;

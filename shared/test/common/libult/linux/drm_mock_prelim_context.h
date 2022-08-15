@@ -31,11 +31,23 @@ struct CreateGemExt {
     uint64_t size{0};
     uint32_t handle{0};
 
+    struct SetParam {
+        uint32_t handle{0};
+        uint32_t size{0};
+        uint64_t param{0};
+    };
+    std::optional<SetParam> setParamExt{};
+
     struct MemoryClassInstance {
         uint16_t memoryClass{0};
         uint16_t memoryInstance{0};
     };
     std::vector<MemoryClassInstance> memoryRegions{};
+
+    struct VmPrivate {
+        std::optional<uint32_t> vmId{};
+    };
+    VmPrivate vmPrivateExt{};
 };
 
 struct GemContextParamAcc {
@@ -56,14 +68,18 @@ struct WaitUserFence {
 };
 
 struct UserFenceVmBindExt {
-    uint64_t addr;
-    uint64_t val;
-    uint64_t rsvd;
+    uint64_t addr{0};
+    uint64_t val{0};
+};
+
+struct VmAdvise {
+    uint32_t handle{0};
+    uint32_t flags{0};
 };
 
 struct UuidVmBindExt {
-    uint32_t handle;
-    uint64_t nextExtension;
+    uint32_t handle{0};
+    uint64_t nextExtension{0};
 };
 
 struct DrmMockPrelimContext {
@@ -106,6 +122,11 @@ struct DrmMockPrelimContext {
     size_t waitUserFenceCalled{0};
     std::optional<WaitUserFence> receivedWaitUserFence{};
 
+    std::optional<VmAdvise> receivedVmAdvise{};
+    int vmAdviseReturn{0};
+
+    int mmapOffsetReturn{0};
+
     uint32_t uuidHandle{1};
     std::optional<UuidControl> receivedRegisterUuid{};
     std::optional<UuidControl> receivedUnregisterUuid{};
@@ -114,11 +135,15 @@ struct DrmMockPrelimContext {
 
     std::optional<CreateGemExt> receivedCreateGemExt{};
     std::optional<GemContextParamAcc> receivedContextParamAcc{};
+    int gemCreateExtReturn{0};
 
     bool failDistanceInfoQuery{false};
     bool disableCcsSupport{false};
 
-    int handlePrelimRequest(unsigned long request, void *arg);
+    // Debugger ioctls
+    int debuggerOpenRetval = 10; // debugFd
+
+    int handlePrelimRequest(DrmIoctl request, void *arg);
     bool handlePrelimQueryItem(void *arg);
     void storeVmBindExtensions(uint64_t ptr, bool bind);
 };
@@ -137,8 +162,16 @@ uint32_t getEnablePageFaultVmCreateFlag();
 uint32_t getDisableScratchVmCreateFlag();
 uint64_t getU8WaitUserFenceFlag();
 uint64_t getU16WaitUserFenceFlag();
+uint64_t getU32WaitUserFenceFlag();
+uint64_t getU64WaitUserFenceFlag();
+uint64_t getGTEWaitUserFenceFlag();
+uint64_t getSoftWaitUserFenceFlag();
 uint64_t getCaptureVmBindFlag();
 uint64_t getImmediateVmBindFlag();
 uint64_t getMakeResidentVmBindFlag();
 uint64_t getSIPContextParamDebugFlag();
+uint64_t getMemoryRegionsParamFlag();
+uint32_t getVmAdviseNoneFlag();
+uint32_t getVmAdviseDeviceFlag();
+uint32_t getVmAdviseSystemFlag();
 }; // namespace DrmPrelimHelper

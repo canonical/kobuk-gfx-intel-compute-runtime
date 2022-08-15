@@ -118,7 +118,7 @@ HWTEST_P(PreemptionHwTest, GivenPreemptionModeIsChangingWhenGettingRequiredCmdSt
     PreemptionMode mode = GetParam();
     PreemptionMode differentPreemptionMode = static_cast<PreemptionMode>(0);
 
-    if (false == GetPreemptionTestHwDetails<FamilyType>().supportsPreemptionProgramming()) {
+    if (false == getPreemptionTestHwDetails<FamilyType>().supportsPreemptionProgramming()) {
         EXPECT_EQ(0U, PreemptionHelper::getRequiredCmdStreamSize<FamilyType>(mode, differentPreemptionMode));
         return;
     }
@@ -146,7 +146,7 @@ HWTEST_P(PreemptionHwTest, WhenProgrammingCmdStreamThenProperMiLoadRegisterImmCo
     PreemptionMode differentPreemptionMode = static_cast<PreemptionMode>(0);
     auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
 
-    if (false == GetPreemptionTestHwDetails<FamilyType>().supportsPreemptionProgramming()) {
+    if (false == getPreemptionTestHwDetails<FamilyType>().supportsPreemptionProgramming()) {
         LinearStream cmdStream(nullptr, 0U);
         PreemptionHelper::programCmdStream<FamilyType>(cmdStream, mode, differentPreemptionMode, nullptr);
         EXPECT_EQ(0U, cmdStream.getUsed());
@@ -154,7 +154,7 @@ HWTEST_P(PreemptionHwTest, WhenProgrammingCmdStreamThenProperMiLoadRegisterImmCo
     }
 
     using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
-    auto hwDetails = GetPreemptionTestHwDetails<FamilyType>();
+    auto hwDetails = getPreemptionTestHwDetails<FamilyType>();
 
     uint32_t defaultRegValue = hwDetails.defaultRegValue;
 
@@ -207,7 +207,7 @@ HWTEST_P(PreemptionTest, whenInNonMidThreadModeThenStateSipIsNotProgrammed) {
     StackVec<char, 4096> buffer(requiredSize);
     LinearStream cmdStream(buffer.begin(), buffer.size());
 
-    PreemptionHelper::programStateSip<FamilyType>(cmdStream, *mockDevice);
+    PreemptionHelper::programStateSip<FamilyType>(cmdStream, *mockDevice, nullptr);
     EXPECT_EQ(0u, cmdStream.getUsed());
 }
 
@@ -229,7 +229,7 @@ HWTEST_P(PreemptionTest, whenInNonMidThreadModeThenCsrBaseAddressIsNotProgrammed
     StackVec<char, 4096> buffer(requiredSize);
     LinearStream cmdStream(buffer.begin(), buffer.size());
 
-    PreemptionHelper::programCsrBaseAddress<FamilyType>(cmdStream, *mockDevice, nullptr);
+    PreemptionHelper::programCsrBaseAddress<FamilyType>(cmdStream, *mockDevice, nullptr, nullptr);
     EXPECT_EQ(0u, cmdStream.getUsed());
 }
 
@@ -272,7 +272,7 @@ HWTEST_F(MidThreadPreemptionTests, givenMidThreadPreemptionWhenFailingOnCsrSurfa
     };
     ExecutionEnvironment *executionEnvironment = MockDevice::prepareExecutionEnvironment(nullptr, 0u);
     executionEnvironment->memoryManager = std::make_unique<FailingMemoryManager>(*executionEnvironment);
-    if (executionEnvironment->memoryManager.get()->isLimitedGPU(0)) {
+    if (executionEnvironment->memoryManager->isLimitedGPU(0)) {
         GTEST_SKIP();
     }
 
@@ -383,7 +383,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, MidThreadPreemptionTests, WhenProgrammingPreemptionT
                       dispatchFlags,
                       *mockDevice);
 
-        auto hwDetails = GetPreemptionTestHwDetails<FamilyType>();
+        auto hwDetails = getPreemptionTestHwDetails<FamilyType>();
 
         HardwareParse hwParser;
         hwParser.parseCommands<FamilyType>(csr.getCS(0));

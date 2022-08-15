@@ -7,13 +7,15 @@
 
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/linear_stream.h"
+#include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/gmm_helper/gmm_lib.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
+#include "shared/source/memory_manager/memory_manager.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 using namespace NEO;
 using CommandEncoderTests = ::testing::Test;
@@ -54,12 +56,12 @@ HWTEST_F(CommandEncoderTests, whenEncodeMemoryPrefetchCalledThenDoNothing) {
     uint8_t buffer[MemoryConstants::pageSize] = {};
     LinearStream linearStream(buffer, sizeof(buffer));
 
-    GraphicsAllocation allocation(0, AllocationType::UNKNOWN, nullptr, 123, 456, 789, MemoryPool::LocalMemory);
+    GraphicsAllocation allocation(0, AllocationType::UNKNOWN, nullptr, 123, 456, 789, MemoryPool::LocalMemory, MemoryManager::maxOsContextCount);
 
     EncodeMemoryPrefetch<FamilyType>::programMemoryPrefetch(linearStream, allocation, 2, 0, *defaultHwInfo);
 
     EXPECT_EQ(0u, linearStream.getUsed());
-    EXPECT_EQ(0u, EncodeMemoryPrefetch<FamilyType>::getSizeForMemoryPrefetch(2));
+    EXPECT_EQ(0u, EncodeMemoryPrefetch<FamilyType>::getSizeForMemoryPrefetch(2, *defaultHwInfo));
 }
 
 HWCMDTEST_F(IGFX_GEN8_CORE, CommandEncoderTests, WhenAnyParameterIsProvidedThenRuntimeGenerationLocalIdsIsRequired) {
@@ -169,4 +171,23 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncoderTests, givenAtLeastXeHpPlatformWhenSe
         EncodeDispatchKernel<FamilyType>::setupPostSyncMocs(walkerCmd, rootDeviceEnvironment);
         EXPECT_EQ(expectedMocs, walkerCmd.getPostSync().getMocs());
     }
+}
+
+HWTEST2_F(CommandEncoderTests, givenRequiredWorkGroupOrderWhenCallAdjustWalkOrderThenWalkerIsNotChanged, IsAtMostXeHpcCore) {
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+
+    WALKER_TYPE walkerCmd{};
+    WALKER_TYPE walkerOnStart{};
+
+    uint32_t yOrder = 2u;
+    EncodeDispatchKernel<FamilyType>::adjustWalkOrder(walkerCmd, yOrder, *defaultHwInfo);
+    EXPECT_EQ(0, memcmp(&walkerOnStart, &walkerCmd, sizeof(WALKER_TYPE))); // no change
+
+    uint32_t linearOrder = 0u;
+    EncodeDispatchKernel<FamilyType>::adjustWalkOrder(walkerCmd, linearOrder, *defaultHwInfo);
+    EXPECT_EQ(0, memcmp(&walkerOnStart, &walkerCmd, sizeof(WALKER_TYPE))); // no change
+
+    uint32_t fakeOrder = 5u;
+    EncodeDispatchKernel<FamilyType>::adjustWalkOrder(walkerCmd, fakeOrder, *defaultHwInfo);
+    EXPECT_EQ(0, memcmp(&walkerOnStart, &walkerCmd, sizeof(WALKER_TYPE))); // no change
 }

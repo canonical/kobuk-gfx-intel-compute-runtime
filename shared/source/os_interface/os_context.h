@@ -13,7 +13,6 @@
 
 #include "engine_node.h"
 
-#include <memory>
 #include <mutex>
 
 namespace NEO {
@@ -35,7 +34,7 @@ class OsContext : public ReferenceTrackedObject<OsContext> {
     uint32_t getNumSupportedDevices() const { return numSupportedDevices; }
     DeviceBitfield getDeviceBitfield() const { return deviceBitfield; }
     PreemptionMode getPreemptionMode() const { return preemptionMode; }
-    aub_stream::EngineType &getEngineType() { return engineType; }
+    const aub_stream::EngineType &getEngineType() const { return engineType; }
     EngineUsage getEngineUsage() { return engineUsage; }
     bool isRegular() const { return engineUsage == EngineUsage::Regular; }
     bool isLowPriority() const { return engineUsage == EngineUsage::LowPriority; }

@@ -7,6 +7,7 @@
 
 #include "shared/source/helpers/engine_node_helper.h"
 
+#include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device/device.h"
 #include "shared/source/helpers/hw_helper.h"
 
@@ -76,6 +77,17 @@ bool isBcs(aub_stream::EngineType engineType) {
     return engineType == aub_stream::ENGINE_BCS || (engineType >= aub_stream::ENGINE_BCS1 && engineType <= aub_stream::ENGINE_BCS8);
 }
 
+bool isBcsVirtualEngineEnabled(aub_stream::EngineType engineType) {
+    bool useVirtualEnginesForBcs = engineType == aub_stream::EngineType::ENGINE_BCS ||
+                                   engineType == aub_stream::EngineType::ENGINE_BCS1;
+
+    if (DebugManager.flags.UseDrmVirtualEnginesForBcs.get() != -1) {
+        useVirtualEnginesForBcs = !!DebugManager.flags.UseDrmVirtualEnginesForBcs.get();
+    }
+
+    return useVirtualEnginesForBcs;
+}
+
 aub_stream::EngineType getBcsEngineType(const HardwareInfo &hwInfo, const DeviceBitfield &deviceBitfield, SelectorCopyEngine &selectorCopyEngine, bool internalUsage) {
     if (DebugManager.flags.ForceBcsEngineIndex.get() != -1) {
         auto index = DebugManager.flags.ForceBcsEngineIndex.get();
@@ -94,7 +106,7 @@ aub_stream::EngineType getBcsEngineType(const HardwareInfo &hwInfo, const Device
             return DebugManager.flags.ForceBCSForInternalCopyEngine.get() == 0 ? aub_stream::EngineType::ENGINE_BCS
                                                                                : static_cast<aub_stream::EngineType>(aub_stream::EngineType::ENGINE_BCS1 + DebugManager.flags.ForceBCSForInternalCopyEngine.get() - 1);
         }
-        return selectLinkCopyEngine(hwInfo, deviceBitfield, selectorCopyEngine.selector);
+        return aub_stream::ENGINE_BCS2;
     }
 
     const bool isMainCopyEngineAlreadyUsed = selectorCopyEngine.isMainUsed.exchange(true);

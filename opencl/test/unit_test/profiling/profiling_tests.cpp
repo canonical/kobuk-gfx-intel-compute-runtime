@@ -6,6 +6,8 @@
  */
 
 #include "shared/source/os_interface/os_interface.h"
+#include "shared/source/utilities/hw_timestamps.h"
+#include "shared/source/utilities/perf_counter.h"
 #include "shared/source/utilities/tag_allocator.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_timestamp_container.h"
@@ -14,9 +16,7 @@
 
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/command_queue/enqueue_common.h"
-#include "opencl/source/command_queue/enqueue_kernel.h"
 #include "opencl/source/command_queue/enqueue_marker.h"
-#include "opencl/source/command_queue/enqueue_migrate_mem_objects.h"
 #include "opencl/source/helpers/dispatch_info.h"
 #include "opencl/test/unit_test/command_queue/command_enqueue_fixture.h"
 #include "opencl/test/unit_test/event/event_fixture.h"
@@ -162,7 +162,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingTests, GivenCommandQueueWithProfolingWhenWa
     ASSERT_NE(cmdList.end(), itorGPGPUWalkerCmd);
 
     // Check PIPE_CONTROLs
-    auto itorBeforePC = reverse_find<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
+    auto itorBeforePC = reverseFind<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
     ASSERT_NE(cmdList.rbegin(), itorBeforePC);
     auto pBeforePC = genCmdCast<PIPE_CONTROL *>(*itorBeforePC);
     ASSERT_NE(nullptr, pBeforePC);
@@ -243,7 +243,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingTests, GivenCommandQueueWithProflingWhenWal
     ASSERT_NE(cmdList.end(), itorGPGPUWalkerCmd);
 
     // Check MI_STORE_REGISTER_MEMs
-    auto itorBeforeMI = reverse_find<MI_STORE_REGISTER_MEM *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
+    auto itorBeforeMI = reverseFind<MI_STORE_REGISTER_MEM *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
     ASSERT_NE(cmdList.rbegin(), itorBeforeMI);
     auto pBeforeMI = genCmdCast<MI_STORE_REGISTER_MEM *>(*itorBeforeMI);
     pBeforeMI = genCmdCast<MI_STORE_REGISTER_MEM *>(*itorBeforeMI);
@@ -290,7 +290,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingTests, GivenCommandQueueBlockedWithProfilin
         &ue, // user event not signaled
         &event);
 
-    //rseCommands<FamilyType>(*pCmdQ);
+    // rseCommands<FamilyType>(*pCmdQ);
     ASSERT_NE(nullptr, pCmdQ->virtualEvent);
     ASSERT_NE(nullptr, pCmdQ->virtualEvent->peekCommand());
     NEO::LinearStream *eventCommandStream = pCmdQ->virtualEvent->peekCommand()->getCommandStream();
@@ -303,7 +303,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingTests, GivenCommandQueueBlockedWithProfilin
     ASSERT_NE(cmdList.end(), itorGPGPUWalkerCmd);
 
     // Check PIPE_CONTROLs
-    auto itorBeforePC = reverse_find<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
+    auto itorBeforePC = reverseFind<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
     ASSERT_NE(cmdList.rbegin(), itorBeforePC);
     auto pBeforePC = genCmdCast<PIPE_CONTROL *>(*itorBeforePC);
     ASSERT_NE(nullptr, pBeforePC);
@@ -362,7 +362,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingTests, GivenCommandQueueBlockedWithProfilin
     ASSERT_NE(cmdList.end(), itorGPGPUWalkerCmd);
 
     // Check MI_STORE_REGISTER_MEMs
-    auto itorBeforeMI = reverse_find<MI_STORE_REGISTER_MEM *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
+    auto itorBeforeMI = reverseFind<MI_STORE_REGISTER_MEM *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
     ASSERT_NE(cmdList.rbegin(), itorBeforeMI);
     auto pBeforeMI = genCmdCast<MI_STORE_REGISTER_MEM *>(*itorBeforeMI);
     pBeforeMI = genCmdCast<MI_STORE_REGISTER_MEM *>(*itorBeforeMI);
@@ -482,42 +482,6 @@ HWTEST_F(ProfilingTests, givenMarkerEnqueueWhenBlockedEnqueueThenSetGpuPath) {
 
     eventObj->release();
     userEventObj->release();
-}
-
-HWTEST_F(ProfilingTests, givenMarkerEnqueueWhenBlockedEnqueueThenPipeControlsArePresentInCS) {
-    typedef typename FamilyType::PIPE_CONTROL PIPE_CONTROL;
-
-    cl_event event = nullptr;
-    cl_event userEvent = new UserEvent();
-    static_cast<CommandQueueHw<FamilyType> *>(pCmdQ)->enqueueMarkerWithWaitList(1, &userEvent, &event);
-
-    auto eventObj = static_cast<Event *>(event);
-    EXPECT_FALSE(eventObj->isCPUProfilingPath());
-
-    auto userEventObj = static_cast<UserEvent *>(userEvent);
-
-    pCmdQ->flush();
-    userEventObj->setStatus(CL_COMPLETE);
-    Event::waitForEvents(1, &event);
-
-    parseCommands<FamilyType>(*pCmdQ);
-
-    // Check PIPE_CONTROLs
-    auto itorFirstPC = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
-    ASSERT_NE(cmdList.end(), itorFirstPC);
-    auto pFirstPC = genCmdCast<PIPE_CONTROL *>(*itorFirstPC);
-    ASSERT_NE(nullptr, pFirstPC);
-
-    auto itorSecondPC = find<PIPE_CONTROL *>(itorFirstPC, cmdList.end());
-    ASSERT_NE(cmdList.end(), itorSecondPC);
-    auto pSecondPC = genCmdCast<PIPE_CONTROL *>(*itorSecondPC);
-    ASSERT_NE(nullptr, pSecondPC);
-
-    EXPECT_TRUE(static_cast<MockEvent<Event> *>(event)->calcProfilingData());
-
-    eventObj->release();
-    userEventObj->release();
-    pCmdQ->isQueueBlocked();
 }
 
 template <typename TagType>
@@ -709,7 +673,6 @@ struct ProfilingWithPerfCountersTests : public PerformanceCountersFixture, ::tes
 
     void SetUp(const NEO::HardwareInfo *hardwareInfo) {
         PerformanceCountersFixture::SetUp();
-        createPerfCounters();
 
         HardwareInfo hwInfo = *hardwareInfo;
         if (hwInfo.capabilityTable.defaultEngineType == aub_stream::EngineType::ENGINE_CCS) {
@@ -719,7 +682,7 @@ struct ProfilingWithPerfCountersTests : public PerformanceCountersFixture, ::tes
         pDevice = MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0);
         pClDevice = std::make_unique<ClDevice>(*pDevice, nullptr);
 
-        pDevice->setPerfCounters(performanceCountersBase.release());
+        pDevice->setPerfCounters(MockPerformanceCounters::create());
 
         context = std::make_unique<MockContext>(pClDevice.get());
 
@@ -818,7 +781,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingWithPerfCountersTests, GivenCommandQueueWit
     ASSERT_NE(cmdList.end(), itorGPGPUWalkerCmd);
 
     // Check PIPE_CONTROLs
-    auto itorBeforePC = reverse_find<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
+    auto itorBeforePC = reverseFind<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
     ASSERT_NE(cmdList.rbegin(), itorBeforePC);
     auto pBeforePC = genCmdCast<PIPE_CONTROL *>(*itorBeforePC);
     ASSERT_NE(nullptr, pBeforePC);
@@ -869,7 +832,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingWithPerfCountersTests, GivenCommandQueueWit
     ASSERT_NE(cmdList.end(), itorGPGPUWalkerCmd);
 
     // Check PIPE_CONTROLs
-    auto itorBeforePC = reverse_find<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
+    auto itorBeforePC = reverseFind<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
     ASSERT_NE(cmdList.rbegin(), itorBeforePC);
     auto pBeforePC = genCmdCast<PIPE_CONTROL *>(*itorBeforePC);
     ASSERT_NE(nullptr, pBeforePC);
@@ -909,7 +872,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingWithPerfCountersTests, GivenCommandQueueBlo
                                                                           &ue, // user event not signaled
                                                                           &event);
 
-    //rseCommands<FamilyType>(*pCmdQ);
+    // rseCommands<FamilyType>(*pCmdQ);
     ASSERT_NE(nullptr, pCmdQ->virtualEvent);
     ASSERT_NE(nullptr, pCmdQ->virtualEvent->peekCommand());
     NEO::LinearStream *eventCommandStream = pCmdQ->virtualEvent->peekCommand()->getCommandStream();
@@ -929,7 +892,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingWithPerfCountersTests, GivenCommandQueueBlo
     ASSERT_NE(cmdList.end(), itorGPGPUWalkerCmd);
 
     // Check PIPE_CONTROLs
-    auto itorBeforePC = reverse_find<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
+    auto itorBeforePC = reverseFind<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
     ASSERT_NE(cmdList.rbegin(), itorBeforePC);
     auto pBeforePC = genCmdCast<PIPE_CONTROL *>(*itorBeforePC);
     ASSERT_NE(nullptr, pBeforePC);
@@ -977,7 +940,7 @@ HWTEST_F(ProfilingWithPerfCountersTests, GivenCommandQueueWithProfilingPerfCount
     ASSERT_NE(cmdList.end(), itorGPGPUWalkerCmd);
 
     // Check PIPE_CONTROLs
-    auto itorBeforePC = reverse_find<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
+    auto itorBeforePC = reverseFind<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
     ASSERT_NE(cmdList.rbegin(), itorBeforePC);
     auto pBeforePC = genCmdCast<PIPE_CONTROL *>(*itorBeforePC);
     ASSERT_NE(nullptr, pBeforePC);
@@ -1103,7 +1066,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingWithPerfCountersOnCCSTests, givenCommandQue
     ASSERT_NE(cmdList.end(), itorGPGPUWalkerCmd);
 
     // check PIPE_CONTROLs
-    auto itorBeforePC = reverse_find<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
+    auto itorBeforePC = reverseFind<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
     ASSERT_NE(cmdList.rbegin(), itorBeforePC);
     auto pBeforePC = genCmdCast<PIPE_CONTROL *>(*itorBeforePC);
     ASSERT_NE(nullptr, pBeforePC);
@@ -1152,7 +1115,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, ProfilingWithPerfCountersOnCCSTests, givenCommandQue
     ASSERT_NE(cmdList.end(), itorGPGPUWalkerCmd);
 
     // check PIPE_CONTROLs
-    auto itorBeforePC = reverse_find<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
+    auto itorBeforePC = reverseFind<PIPE_CONTROL *>(rItorGPGPUWalkerCmd, cmdList.rbegin());
     ASSERT_NE(cmdList.rbegin(), itorBeforePC);
     auto pBeforePC = genCmdCast<PIPE_CONTROL *>(*itorBeforePC);
     ASSERT_NE(nullptr, pBeforePC);

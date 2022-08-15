@@ -21,6 +21,11 @@ uint32_t HwInfoConfigHw<gfxProduct>::getHwRevIdFromStepping(uint32_t stepping, c
 }
 
 template <>
+AOT::PRODUCT_CONFIG HwInfoConfigHw<gfxProduct>::getProductConfigFromHwInfo(const HardwareInfo &hwInfo) const {
+    return AOT::XEHP_SDV;
+}
+
+template <>
 uint32_t HwInfoConfigHw<gfxProduct>::getSteppingFromHwRevId(const HardwareInfo &hwInfo) const {
     switch (hwInfo.platform.usRevId) {
     case 0x0:
@@ -127,5 +132,10 @@ bool HwInfoConfigHw<gfxProduct>::extraParametersInvalid(const HardwareInfo &hwIn
 
 template <>
 bool HwInfoConfigHw<gfxProduct>::isBlitterForImagesSupported() const {
+    return true;
+}
+
+template <>
+bool HwInfoConfigHw<gfxProduct>::isImplicitScalingSupported(const HardwareInfo &hwInfo) const {
     return true;
 }

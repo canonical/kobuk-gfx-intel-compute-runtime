@@ -5,9 +5,12 @@
  *
  */
 
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 
 #include "opencl/test/unit_test/fixtures/platform_fixture.h"
+
+#include "hw_cmds_xe_hpc_core_base.h"
 
 using namespace NEO;
 

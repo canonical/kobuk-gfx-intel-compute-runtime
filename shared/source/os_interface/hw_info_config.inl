@@ -7,10 +7,16 @@
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/api_specific_config.h"
-#include "shared/source/helpers/driver_model_type.h"
+#include "shared/source/helpers/cache_policy.h"
+#include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/preamble.h"
+#include "shared/source/memory_manager/graphics_allocation.h"
+#include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/hw_info_config.h"
+#include "shared/source/unified_memory/usm_memory_support.h"
+
+#include <bitset>
 
 namespace NEO {
 
@@ -55,12 +61,24 @@ void HwInfoConfigHw<gfxProduct>::enableBlitterOperationsSupport(HardwareInfo *hw
 
 template <PRODUCT_FAMILY gfxProduct>
 uint64_t HwInfoConfigHw<gfxProduct>::getDeviceMemCapabilities() {
-    return (UNIFIED_SHARED_MEMORY_ACCESS | UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS);
+    uint64_t capabilities = UNIFIED_SHARED_MEMORY_ACCESS | UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS;
+
+    if (getConcurrentAccessMemCapabilitiesSupported(UsmAccessCapabilities::Device)) {
+        capabilities |= UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS | UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS;
+    }
+
+    return capabilities;
 }
 
 template <PRODUCT_FAMILY gfxProduct>
 uint64_t HwInfoConfigHw<gfxProduct>::getSingleDeviceSharedMemCapabilities() {
-    return (UNIFIED_SHARED_MEMORY_ACCESS | UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS);
+    uint64_t capabilities = UNIFIED_SHARED_MEMORY_ACCESS | UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS;
+
+    if (getConcurrentAccessMemCapabilitiesSupported(UsmAccessCapabilities::SharedSingleDevice)) {
+        capabilities |= UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS | UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS;
+    }
+
+    return capabilities;
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -76,7 +94,13 @@ uint64_t HwInfoConfigHw<gfxProduct>::getHostMemCapabilities(const HardwareInfo *
         supported = !!DebugManager.flags.EnableHostUsmSupport.get();
     }
 
-    return (supported ? getHostMemCapabilitiesValue() : 0);
+    uint64_t capabilities = getHostMemCapabilitiesValue();
+
+    if (getConcurrentAccessMemCapabilitiesSupported(UsmAccessCapabilities::Host)) {
+        capabilities |= UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS | UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS;
+    }
+
+    return (supported ? capabilities : 0);
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -91,8 +115,30 @@ uint64_t HwInfoConfigHw<gfxProduct>::getSharedSystemMemCapabilities(const Hardwa
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-uint32_t HwInfoConfigHw<gfxProduct>::getDeviceMemoryMaxClkRate(const HardwareInfo *hwInfo) {
+bool HwInfoConfigHw<gfxProduct>::getConcurrentAccessMemCapabilitiesSupported(UsmAccessCapabilities capability) {
+    auto supported = false;
+
+    if (DebugManager.flags.EnableUsmConcurrentAccessSupport.get() > 0) {
+        auto capabilityBitset = std::bitset<32>(DebugManager.flags.EnableUsmConcurrentAccessSupport.get());
+        supported = capabilityBitset.test(static_cast<uint32_t>(capability));
+    }
+
+    return supported;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+uint32_t HwInfoConfigHw<gfxProduct>::getDeviceMemoryMaxClkRate(const HardwareInfo &hwInfo, const OSInterface *osIface, uint32_t subDeviceIndex) {
     return 0u;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+uint64_t HwInfoConfigHw<gfxProduct>::getDeviceMemoryPhysicalSizeInBytes(const OSInterface *osIface, uint32_t subDeviceIndex) {
+    return 0;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+uint64_t HwInfoConfigHw<gfxProduct>::getDeviceMemoryMaxBandWidthInBytesPerSecond(const HardwareInfo &hwInfo, const OSInterface *osIface, uint32_t subDeviceIndex) {
+    return 0;
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -113,6 +159,12 @@ uint32_t HwInfoConfigHw<gfxProduct>::getMaxThreadsForWorkgroup(const HardwareInf
 
 template <PRODUCT_FAMILY gfxProduct>
 void HwInfoConfigHw<gfxProduct>::setForceNonCoherent(void *const commandPtr, const StateComputeModeProperties &properties) {}
+
+template <PRODUCT_FAMILY gfxProduct>
+void HwInfoConfigHw<gfxProduct>::updateScmCommand(void *const commandPtr, const StateComputeModeProperties &properties) {}
+
+template <PRODUCT_FAMILY gfxProduct>
+void HwInfoConfigHw<gfxProduct>::updateIddCommand(void *const commandPtr, uint32_t numGrf, int32_t threadArbitrationPolicy) {}
 
 template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isPageTableManagerSupported(const HardwareInfo &hwInfo) const {
@@ -210,6 +262,11 @@ bool HwInfoConfigHw<gfxProduct>::isAllocationSizeAdjustmentRequired(const Hardwa
 
 template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isPrefetchDisablingRequired(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isAssignEngineRoundRobinSupported() const {
     return false;
 }
 
@@ -319,6 +376,11 @@ bool HwInfoConfigHw<gfxProduct>::isGlobalFenceInCommandStreamRequired(const Hard
 }
 
 template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const {
+    return HwInfoConfigHw<gfxProduct>::isGlobalFenceInCommandStreamRequired(hwInfo);
+};
+
+template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isAdjustProgrammableIdPreferredSlmSizeRequired(const HardwareInfo &hwInfo) const {
     return false;
 }
@@ -331,6 +393,91 @@ uint32_t HwInfoConfigHw<gfxProduct>::getThreadEuRatioForScratch(const HardwareIn
 template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isComputeDispatchAllWalkerEnableInCfeStateRequired(const HardwareInfo &hwInfo) const {
     return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isVmBindPatIndexProgrammingSupported() const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isIpSamplingSupported(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isGrfNumReportedWithScm() const {
+    if (DebugManager.flags.ForceGrfNumProgrammingWithScm.get() != -1) {
+        return DebugManager.flags.ForceGrfNumProgrammingWithScm.get();
+    }
+    return true;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isThreadArbitrationPolicyReportedWithScm() const {
+    if (DebugManager.flags.ForceThreadArbitrationPolicyProgrammingWithScm.get() != -1) {
+        return DebugManager.flags.ForceThreadArbitrationPolicyProgrammingWithScm.get();
+    }
+    return true;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isCooperativeEngineSupported(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isTimestampWaitSupportedForEvents() const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isTilePlacementResourceWaRequired(const HardwareInfo &hwInfo) const {
+    if (DebugManager.flags.ForceTile0PlacementForTile1ResourcesWaActive.get() != -1) {
+        return DebugManager.flags.ForceTile0PlacementForTile1ResourcesWaActive.get();
+    }
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::allowMemoryPrefetch(const HardwareInfo &hwInfo) const {
+    if (DebugManager.flags.EnableMemoryPrefetch.get() != -1) {
+        return !!DebugManager.flags.EnableMemoryPrefetch.get();
+    }
+    return true;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isBcsReportWaRequired(const HardwareInfo &hwInfo) const {
+    if (DebugManager.flags.DoNotReportTile1BscWaActive.get() != -1) {
+        return DebugManager.flags.DoNotReportTile1BscWaActive.get();
+    }
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo, const GraphicsAllocation &allocation) const {
+    return allocation.isAllocatedInLocalMemoryPool() &&
+           (HwInfoConfig::get(hwInfo.platform.eProductFamily)->getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed ||
+            !allocation.isAllocationLockable());
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isImplicitScalingSupported(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isCpuCopyNecessary(const void *ptr, MemoryManager *memoryManager) const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isAdjustWalkOrderAvailable(const HardwareInfo &hwInfo) const { return false; }
+
+template <PRODUCT_FAMILY gfxProduct>
+uint32_t HwInfoConfigHw<gfxProduct>::getL1CachePolicy() const {
+    return L1CachePolicyHelper<gfxProduct>::getL1CachePolicy();
 }
 
 } // namespace NEO

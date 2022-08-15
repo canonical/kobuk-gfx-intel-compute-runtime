@@ -9,7 +9,9 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/state_base_address.h"
 #include "shared/source/os_interface/hw_info_config.h"
+#include "shared/source/xe_hpg_core/hw_cmds_dg2.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/mem_obj/buffer.h"
@@ -37,7 +39,7 @@ DG2TEST_F(CmdsProgrammingTestsDg2, givenL3ToL1DebugFlagWhenStatelessMocsIsProgra
 
     auto actualL1CachePolocy = static_cast<uint8_t>(stateBaseAddress->getL1CachePolicyL1CacheControl());
 
-    const uint8_t expectedL1CachePolicy = 0;
+    const uint8_t expectedL1CachePolicy = FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WBP;
     EXPECT_EQ(expectedL1CachePolicy, actualL1CachePolocy);
 }
 
@@ -87,7 +89,7 @@ DG2TEST_F(CmdsProgrammingTestsDg2, givenL1CachingOverrideWhenStateBaseAddressIsP
     memoryManager->freeGraphicsMemory(allocation);
 }
 
-DG2TEST_F(CmdsProgrammingTestsDg2, whenAppendingRssThenProgramWtL1CachePolicy) {
+DG2TEST_F(CmdsProgrammingTestsDg2, whenAppendingRssThenProgramWBPL1CachePolicy) {
     auto memoryManager = pDevice->getExecutionEnvironment()->memoryManager.get();
     size_t allocationSize = MemoryConstants::pageSize;
     AllocationProperties properties(pDevice->getRootDeviceIndex(), allocationSize, AllocationType::BUFFER, pDevice->getDeviceBitfield());
@@ -100,7 +102,7 @@ DG2TEST_F(CmdsProgrammingTestsDg2, whenAppendingRssThenProgramWtL1CachePolicy) {
     multiGraphicsAllocation.addAllocation(allocation);
 
     std::unique_ptr<BufferHw<FamilyType>> buffer(static_cast<BufferHw<FamilyType> *>(
-        BufferHw<FamilyType>::create(&context, {}, 0, 0, allocationSize, nullptr, nullptr, multiGraphicsAllocation, false, false, false)));
+        BufferHw<FamilyType>::create(&context, {}, 0, 0, allocationSize, nullptr, nullptr, std::move(multiGraphicsAllocation), false, false, false)));
 
     NEO::EncodeSurfaceStateArgs args;
     args.outMemory = &rssCmd;
@@ -141,7 +143,7 @@ DG2TEST_F(CmdsProgrammingTestsDg2, givenAlignedCacheableReadOnlyBufferThenChoseO
 
     auto actualL1CachePolocy = static_cast<uint8_t>(surfaceState.getL1CachePolicyL1CacheControl());
 
-    const uint8_t expectedL1CachePolicy = 0;
+    const uint8_t expectedL1CachePolicy = FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WBP;
     EXPECT_EQ(expectedL1CachePolicy, actualL1CachePolocy);
 
     alignedFree(ptr);

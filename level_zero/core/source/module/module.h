@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,9 +7,6 @@
 
 #pragma once
 
-#include "level_zero/core/source/context/context.h"
-#include "level_zero/core/source/kernel/kernel.h"
-#include "level_zero/core/source/module/module_build_log.h"
 #include <level_zero/ze_api.h>
 
 #include <set>
@@ -19,6 +16,8 @@ struct _ze_module_handle_t {};
 
 namespace L0 {
 struct Device;
+struct ModuleBuildLog;
+struct KernelImmutableData;
 
 enum class ModuleType {
     Builtin,
@@ -51,6 +50,7 @@ struct Module : _ze_module_handle_t {
     virtual uint32_t getMaxGroupSize() const = 0;
     virtual bool isDebugEnabled() const = 0;
     virtual bool shouldAllocatePrivateMemoryPerDispatch() const = 0;
+    virtual uint32_t getProfileFlags() const = 0;
     virtual void checkIfPrivateMemoryPerDispatchIsNeeded() = 0;
 
     Module() = default;

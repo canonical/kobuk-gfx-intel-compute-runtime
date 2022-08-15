@@ -16,7 +16,8 @@ using namespace NEO;
 
 TEST(QueueHelpersTest, givenCommandQueueWithoutVirtualEventWhenReleaseQueueIsCalledThenCmdQInternalRefCountIsNotDecremented) {
     cl_int retVal = CL_SUCCESS;
-    MockCommandQueue *cmdQ = new MockCommandQueue;
+    MockContext context;
+    MockCommandQueue *cmdQ = new MockCommandQueue(&context, context.getDevice(0), 0, false);
     EXPECT_EQ(1, cmdQ->getRefInternalCount());
 
     EXPECT_EQ(1, cmdQ->getRefInternalCount());
@@ -26,7 +27,7 @@ TEST(QueueHelpersTest, givenCommandQueueWithoutVirtualEventWhenReleaseQueueIsCal
 
     releaseQueue(cmdQ, retVal);
 
-    EXPECT_EQ(1, cmdQ->getRefInternalCount());
+    EXPECT_EQ(1, cmdQ->getRefInternalCount()); // NOLINT(clang-analyzer-cplusplus.NewDelete)
     cmdQ->decRefInternal();
 }
 

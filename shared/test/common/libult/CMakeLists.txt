@@ -21,6 +21,10 @@ macro(macro_for_each_platform)
       if(EXISTS ${SRC_FILE})
         list(APPEND neo_libult_common_SRCS_ENABLE_TESTED_HW ${SRC_FILE})
       endif()
+      set(SRC_FILE ${NEO_SHARED_TEST_DIRECTORY}/common${BRANCH_DIR}${CORE_TYPE_LOWER}${BRANCH}${PLATFORM_IT_LOWER}/mock_hw_info_config_${PLATFORM_IT_LOWER}.cpp)
+      if(EXISTS ${SRC_FILE})
+        list(APPEND neo_libult_common_SRCS_ENABLE_TESTED_HW ${SRC_FILE})
+      endif()
     endforeach()
   endforeach()
 endmacro()
@@ -39,6 +43,7 @@ macro(macro_for_each_core_type)
       set(SRC_FILE ${NEO_SHARED_TEST_DIRECTORY}/common/${BRANCH}${CORE_TYPE_LOWER}/unit_test_helper_${CORE_TYPE_LOWER}.cpp)
       if(EXISTS ${SRC_FILE})
         list(APPEND neo_libult_common_SRCS_ENABLE_TESTED_HW ${SRC_FILE})
+        include_directories(${NEO_SHARED_TEST_DIRECTORY}/common/${BRANCH}${CORE_TYPE_LOWER}/definitions${BRANCH_DIR_SUFFIX})
       endif()
       foreach(SRC_IT "enable_family_full_core_" "implicit_scaling_")
         set(SRC_FILE ${NEO_SHARED_DIRECTORY}${BRANCH}${CORE_TYPE_LOWER}${BRANCH_DIR}${SRC_IT}${CORE_TYPE_LOWER}.cpp)
@@ -77,7 +82,7 @@ set(neo_libult_common_SRCS_LIB_ULT
     ${NEO_SHARED_TEST_DIRECTORY}/common/fixtures/tbx_command_stream_fixture.h
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/execution_environment_helper.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/execution_environment_helper.h
-    ${NEO_SHARED_TEST_DIRECTORY}/common/helpers${BRANCH_DIR_SUFFIX}kernel_binary_helper_hash_value.cpp
+    ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/kernel_binary_helper_hash_value.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/kernel_binary_helper.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/kernel_binary_helper.h
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/kernel_filename_helper.h
@@ -85,6 +90,8 @@ set(neo_libult_common_SRCS_LIB_ULT
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/memory_leak_listener.h
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/memory_management.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/memory_management.h
+    ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/mock_hw_info_config_hw.cpp
+    ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/mock_hw_info_config_hw.h
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/sip_init.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/test_files.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/test_files.h
@@ -174,6 +181,7 @@ set(neo_libult_SRCS_LINUX
     ${NEO_SHARED_TEST_DIRECTORY}/common/mocks/linux/mock_drm_memory_manager.h
     ${NEO_SHARED_TEST_DIRECTORY}/common/mocks/mock_direct_submission_controller_enabled.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/os_interface/linux/create_drm_memory_manager.cpp
+    ${NEO_SHARED_TEST_DIRECTORY}/common/os_interface/linux/drm_memory_manager_fixture.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/os_interface/linux/drm_neo_create.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/os_interface/linux/options.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/os_interface/linux/sys_calls_linux_ult.cpp

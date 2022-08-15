@@ -233,7 +233,7 @@ TEST_F(EnqueueSvmTest, GivenValidParamsWhenFreeingSvmWithCallbackThenSuccessIsRe
         ClbHelper(bool &callbackWasCalled)
             : callbackWasCalled(callbackWasCalled) {}
 
-        static void CL_CALLBACK Clb(cl_command_queue queue, cl_uint numSvmPointers, void *svmPointers[], void *usrData) {
+        static void CL_CALLBACK clb(cl_command_queue queue, cl_uint numSvmPointers, void *svmPointers[], void *usrData) {
             ClbHelper *data = (ClbHelper *)usrData;
             data->callbackWasCalled = true;
         }
@@ -244,7 +244,7 @@ TEST_F(EnqueueSvmTest, GivenValidParamsWhenFreeingSvmWithCallbackThenSuccessIsRe
     retVal = this->pCmdQ->enqueueSVMFree(
         1,              // cl_uint num_svm_pointers
         svmPtrs,        // void *svm_pointers[]
-        ClbHelper::Clb, // (CL_CALLBACK  *pfn_free_func) (cl_command_queue queue, cl_uint num_svm_pointers, void *svm_pointers[])
+        ClbHelper::clb, // (CL_CALLBACK  *pfn_free_func) (cl_command_queue queue, cl_uint num_svm_pointers, void *svm_pointers[])
         &userData,      // void *user_data
         0,              // cl_uint num_events_in_wait_list
         nullptr,        // const cl_event *event_wait_list
@@ -263,7 +263,7 @@ TEST_F(EnqueueSvmTest, GivenValidParamsWhenFreeingSvmWithCallbackAndEventThenSuc
         ClbHelper(bool &callbackWasCalled)
             : callbackWasCalled(callbackWasCalled) {}
 
-        static void CL_CALLBACK Clb(cl_command_queue queue, cl_uint numSvmPointers, void *svmPointers[], void *usrData) {
+        static void CL_CALLBACK clb(cl_command_queue queue, cl_uint numSvmPointers, void *svmPointers[], void *usrData) {
             ClbHelper *data = (ClbHelper *)usrData;
             data->callbackWasCalled = true;
         }
@@ -275,7 +275,7 @@ TEST_F(EnqueueSvmTest, GivenValidParamsWhenFreeingSvmWithCallbackAndEventThenSuc
     retVal = this->pCmdQ->enqueueSVMFree(
         1,              // cl_uint num_svm_pointers
         svmPtrs,        // void *svm_pointers[]
-        ClbHelper::Clb, // (CL_CALLBACK  *pfn_free_func) (cl_command_queue queue, cl_uint num_svm_pointers, void *svm_pointers[])
+        ClbHelper::clb, // (CL_CALLBACK  *pfn_free_func) (cl_command_queue queue, cl_uint num_svm_pointers, void *svm_pointers[])
         &userData,      // void *user_data
         0,              // cl_uint num_events_in_wait_list
         nullptr,        // const cl_event *event_wait_list
@@ -668,7 +668,7 @@ TEST_F(EnqueueSvmTest, givenSvmToSvmCopyTypeWhenEnqueueBlockingSVMMemcpyThenSucc
 TEST_F(EnqueueSvmTest, GivenValidParamsWhenCopyingMemoryWithBlockingThenSuccessisReturned) {
     void *pDstSVM = ptrSVM;
     void *pSrcSVM = context->getSVMAllocsManager()->createSVMAlloc(256, {}, context->getRootDeviceIndices(), context->getDeviceBitfields());
-    auto uEvent = make_releaseable<UserEvent>();
+    auto uEvent = makeReleaseable<UserEvent>();
     cl_event eventWaitList[] = {uEvent.get()};
     retVal = this->pCmdQ->enqueueSVMMemcpy(
         false,         // cl_bool  blocking_copy
@@ -707,7 +707,7 @@ TEST_F(EnqueueSvmTest, GivenCoherencyWhenCopyingMemoryWithBlockingThenSuccessIsR
     SVMAllocsManager::SvmAllocationProperties svmProperties;
     svmProperties.coherent = true;
     void *pSrcSVM = context->getSVMAllocsManager()->createSVMAlloc(256, svmProperties, context->getRootDeviceIndices(), context->getDeviceBitfields());
-    auto uEvent = make_releaseable<UserEvent>();
+    auto uEvent = makeReleaseable<UserEvent>();
     cl_event eventWaitList[] = {uEvent.get()};
     retVal = this->pCmdQ->enqueueSVMMemcpy(
         false,         // cl_bool  blocking_copy
@@ -788,7 +788,7 @@ HWTEST_F(EnqueueSvmTest, givenSvmAllocWhenEnqueueSvmFillThenSuccesIsReturnedAndA
 TEST_F(EnqueueSvmTest, GivenValidParamsWhenFillingMemoryWithBlockingThenSuccessIsReturned) {
     const float pattern[1] = {1.2345f};
     const size_t patternSize = sizeof(pattern);
-    auto uEvent = make_releaseable<UserEvent>();
+    auto uEvent = makeReleaseable<UserEvent>();
     cl_event eventWaitList[] = {uEvent.get()};
     retVal = this->pCmdQ->enqueueSVMMemFill(
         ptrSVM,        // void *svm_ptr
@@ -816,7 +816,7 @@ HWTEST_F(EnqueueSvmTest, GivenGpuHangAndBlockingCallAndValidParamsWhenFillingMem
     const float pattern[1] = {1.2345f};
     const size_t patternSize = sizeof(pattern);
 
-    auto uEvent = make_releaseable<UserEvent>();
+    auto uEvent = makeReleaseable<UserEvent>();
     const cl_uint numOfEvents = 1;
     cl_event eventWaitList[numOfEvents] = {uEvent.get()};
 
@@ -888,14 +888,14 @@ TEST_F(EnqueueSvmTest, givenEnqueueSVMMemFillWhenPatternAllocationIsObtainedThen
 TEST_F(EnqueueSvmTest, GivenSvmAllocationWhenEnqueingKernelThenSuccessIsReturned) {
     auto svmData = context->getSVMAllocsManager()->getSVMAlloc(ptrSVM);
     ASSERT_NE(nullptr, svmData);
-    GraphicsAllocation *pSvmAlloc = svmData->gpuAllocations.getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
+    GraphicsAllocation *svmAllocation = svmData->gpuAllocations.getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
     EXPECT_NE(nullptr, ptrSVM);
 
     std::unique_ptr<MockProgram> program(Program::createBuiltInFromSource<MockProgram>("FillBufferBytes", context, context->getDevices(), &retVal));
     program->build(program->getDevices(), nullptr, false);
     std::unique_ptr<MockKernel> kernel(Kernel::create<MockKernel>(program.get(), program->getKernelInfoForKernel("FillBufferBytes"), *context->getDevice(0), &retVal));
 
-    kernel->setSvmKernelExecInfo(pSvmAlloc);
+    kernel->setSvmKernelExecInfo(svmAllocation);
 
     size_t offset = 0;
     size_t size = 1;
@@ -916,7 +916,7 @@ TEST_F(EnqueueSvmTest, GivenSvmAllocationWhenEnqueingKernelThenSuccessIsReturned
 TEST_F(EnqueueSvmTest, givenEnqueueTaskBlockedOnUserEventWhenItIsEnqueuedThenSurfacesAreMadeResident) {
     auto svmData = context->getSVMAllocsManager()->getSVMAlloc(ptrSVM);
     ASSERT_NE(nullptr, svmData);
-    GraphicsAllocation *pSvmAlloc = svmData->gpuAllocations.getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
+    GraphicsAllocation *svmAllocation = svmData->gpuAllocations.getGraphicsAllocation(context->getDevice(0)->getRootDeviceIndex());
     EXPECT_NE(nullptr, ptrSVM);
 
     auto program = clUniquePtr(Program::createBuiltInFromSource<MockProgram>("FillBufferBytes", context, context->getDevices(), &retVal));
@@ -927,9 +927,9 @@ TEST_F(EnqueueSvmTest, givenEnqueueTaskBlockedOnUserEventWhenItIsEnqueuedThenSur
     kernel->getResidency(allSurfaces);
     EXPECT_EQ(1u, allSurfaces.size());
 
-    kernel->setSvmKernelExecInfo(pSvmAlloc);
+    kernel->setSvmKernelExecInfo(svmAllocation);
 
-    auto uEvent = make_releaseable<UserEvent>();
+    auto uEvent = makeReleaseable<UserEvent>();
     cl_event eventWaitList[] = {uEvent.get()};
     size_t offset = 0;
     size_t size = 1;
@@ -1789,7 +1789,7 @@ HWTEST_F(createHostUnifiedMemoryAllocationTest,
     auto allocationType = AllocationType::BUFFER_HOST_MEMORY;
     auto maxRootDeviceIndex = numDevices - 1u;
 
-    std::vector<uint32_t> rootDeviceIndices;
+    RootDeviceIndicesContainer rootDeviceIndices;
     rootDeviceIndices.reserve(numDevices);
     rootDeviceIndices.push_back(0u);
     rootDeviceIndices.push_back(1u);
@@ -1835,7 +1835,7 @@ HWTEST_F(createHostUnifiedMemoryAllocationTest,
     auto allocationType = AllocationType::BUFFER_HOST_MEMORY;
     auto maxRootDeviceIndex = numDevices - 1u;
 
-    std::vector<uint32_t> rootDeviceIndices;
+    RootDeviceIndicesContainer rootDeviceIndices;
     rootDeviceIndices.reserve(numDevices);
     rootDeviceIndices.push_back(0u);
     rootDeviceIndices.push_back(2u);
@@ -2135,7 +2135,7 @@ HWTEST_F(EnqueueSvmTest, GivenDstHostPtrWhenHostPtrAllocationCreationFailsThenRe
     void *pSrcSVM = ptrSVM;
     MockCommandQueueHw<FamilyType> cmdQ(context, pClDevice, nullptr);
     auto failCsr = std::make_unique<FailCsr<FamilyType>>(*pDevice->getExecutionEnvironment(), pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    CommandStreamReceiver *oldCommandStreamReceiver = cmdQ.gpgpuEngine->commandStreamReceiver;
+    CommandStreamReceiver *oldCommandStreamReceiver = &cmdQ.getGpgpuCommandStreamReceiver();
     cmdQ.gpgpuEngine->commandStreamReceiver = failCsr.get();
     retVal = cmdQ.enqueueSVMMemcpy(
         false,   // cl_bool  blocking_copy
@@ -2156,7 +2156,7 @@ HWTEST_F(EnqueueSvmTest, GivenSrcHostPtrAndSizeZeroWhenHostPtrAllocationCreation
     void *pSrcSVM = srcHostPtr;
     MockCommandQueueHw<FamilyType> cmdQ(context, pClDevice, nullptr);
     auto failCsr = std::make_unique<FailCsr<FamilyType>>(*pDevice->getExecutionEnvironment(), pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    CommandStreamReceiver *oldCommandStreamReceiver = cmdQ.gpgpuEngine->commandStreamReceiver;
+    CommandStreamReceiver *oldCommandStreamReceiver = &cmdQ.getGpgpuCommandStreamReceiver();
     cmdQ.gpgpuEngine->commandStreamReceiver = failCsr.get();
     retVal = cmdQ.enqueueSVMMemcpy(
         false,   // cl_bool  blocking_copy
@@ -2178,7 +2178,7 @@ HWTEST_F(EnqueueSvmTest, givenDstHostPtrAndSrcHostPtrWhenHostPtrAllocationCreati
     void *pSrcSVM = srcHostPtr;
     MockCommandQueueHw<FamilyType> cmdQ(context, pClDevice, nullptr);
     auto failCsr = std::make_unique<FailCsr<FamilyType>>(*pDevice->getExecutionEnvironment(), pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    CommandStreamReceiver *oldCommandStreamReceiver = cmdQ.gpgpuEngine->commandStreamReceiver;
+    CommandStreamReceiver *oldCommandStreamReceiver = &cmdQ.getGpgpuCommandStreamReceiver();
     cmdQ.gpgpuEngine->commandStreamReceiver = failCsr.get();
     retVal = cmdQ.enqueueSVMMemcpy(
         false,   // cl_bool  blocking_copy

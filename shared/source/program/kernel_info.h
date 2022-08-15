@@ -10,15 +10,11 @@
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/source/program/heap_info.h"
 #include "shared/source/utilities/arrayref.h"
-#include "shared/source/utilities/const_stringref.h"
+#include "shared/source/utilities/stackvec.h"
 
-#include <algorithm>
-#include <array>
-#include <cmath>
 #include <cstdint>
-#include <map>
 #include <string>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace gtpin {

@@ -35,8 +35,8 @@ GraphicsAllocation *allocateGlobalsSurface(NEO::SVMAllocsManager *const svmAlloc
         svmProps.readOnly = constant;
         svmProps.hostPtrReadOnly = constant;
 
-        std::set<uint32_t> rootDeviceIndices;
-        rootDeviceIndices.insert(rootDeviceIndex);
+        RootDeviceIndicesContainer rootDeviceIndices;
+        rootDeviceIndices.push_back(rootDeviceIndex);
         std::map<uint32_t, DeviceBitfield> subDeviceBitfields;
         subDeviceBitfields.insert({rootDeviceIndex, deviceBitfield});
         auto ptr = svmAllocManager->createSVMAlloc(size, svmProps, rootDeviceIndices, subDeviceBitfields);
@@ -61,9 +61,9 @@ GraphicsAllocation *allocateGlobalsSurface(NEO::SVMAllocsManager *const svmAlloc
     }
 
     auto &hwInfo = device.getHardwareInfo();
-    auto &helper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
-    auto success = MemoryTransferHelper::transferMemoryToAllocation(helper.isBlitCopyRequiredForLocalMemory(hwInfo, *gpuAllocation),
+    auto success = MemoryTransferHelper::transferMemoryToAllocation(hwInfoConfig.isBlitCopyRequiredForLocalMemory(hwInfo, *gpuAllocation),
                                                                     device, gpuAllocation, 0, initData, size);
 
     UNRECOVERABLE_IF(!success);

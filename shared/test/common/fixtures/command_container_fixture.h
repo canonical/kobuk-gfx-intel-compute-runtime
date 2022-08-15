@@ -9,7 +9,7 @@
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/test/common/fixtures/device_fixture.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 namespace NEO {
 
@@ -35,23 +35,25 @@ class CommandEncodeStatesFixture : public DeviceFixture {
 
     EncodeDispatchKernelArgs createDefaultDispatchKernelArgs(Device *device,
                                                              DispatchKernelEncoderI *dispatchInterface,
-                                                             const void *pThreadGroupDimensions,
+                                                             const void *threadGroupDimensions,
                                                              bool requiresUncachedMocs) {
         EncodeDispatchKernelArgs args{
-            0,                        //eventAddress
-            device,                   //device
-            dispatchInterface,        //dispatchInterface
-            pThreadGroupDimensions,   //pThreadGroupDimensions
-            PreemptionMode::Disabled, //preemptionMode
-            1,                        //partitionCount
-            false,                    //isIndirect
-            false,                    //isPredicate
-            false,                    //isTimestampEvent
-            false,                    //L3FlushEnable
-            requiresUncachedMocs,     //requiresUncachedMocs
-            false,                    //useGlobalAtomics
-            false,                    //isInternal
-            false                     //isCooperative
+            0,                        // eventAddress
+            device,                   // device
+            dispatchInterface,        // dispatchInterface
+            threadGroupDimensions,    // threadGroupDimensions
+            PreemptionMode::Disabled, // preemptionMode
+            1,                        // partitionCount
+            false,                    // isIndirect
+            false,                    // isPredicate
+            false,                    // isTimestampEvent
+            requiresUncachedMocs,     // requiresUncachedMocs
+            false,                    // useGlobalAtomics
+            false,                    // isInternal
+            false,                    // isCooperative
+            false,                    // isHostScopeSignalEvent
+            false,                    // isKernelUsingSystemAllocation
+            false                     // isKernelDispatchedFromImmediateCmdList
         };
 
         return args;
@@ -61,7 +63,7 @@ class CommandEncodeStatesFixture : public DeviceFixture {
 } // namespace NEO
 
 struct WalkerThreadFixture {
-    void SetUp() {
+    void SetUp() { // NOLINT(readability-identifier-naming)
         startWorkGroup[0] = startWorkGroup[1] = startWorkGroup[2] = 0u;
         numWorkGroups[0] = numWorkGroups[1] = numWorkGroups[2] = 1u;
         workGroupSizes[0] = 32u;
@@ -70,7 +72,7 @@ struct WalkerThreadFixture {
         localIdDimensions = 3u;
         requiredWorkGroupOrder = 0u;
     }
-    void TearDown() {}
+    void TearDown() {} // NOLINT(readability-identifier-naming)
 
     uint32_t startWorkGroup[3];
     uint32_t numWorkGroups[3];

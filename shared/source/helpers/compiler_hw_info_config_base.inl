@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "shared/source/helpers/cache_policy.h"
 #include "shared/source/helpers/compiler_hw_info_config.h"
 
 namespace NEO {
@@ -23,5 +24,10 @@ bool CompilerHwInfoConfigHw<gfxProduct>::isStatelessToStatefulBufferOffsetSuppor
 template <PRODUCT_FAMILY gfxProduct>
 void CompilerHwInfoConfigHw<gfxProduct>::adjustHwInfoForIgc(HardwareInfo &hwInfo) const {
 }
+
+template <PRODUCT_FAMILY gfxProduct>
+const char *CompilerHwInfoConfigHw<gfxProduct>::getCachingPolicyOptions() const {
+    return L1CachePolicyHelper<gfxProduct>::getCachingPolicyOptions();
+};
 
 } // namespace NEO

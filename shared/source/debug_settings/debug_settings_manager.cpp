@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -15,11 +15,12 @@
 #include "shared/source/utilities/debug_settings_reader_creator.h"
 
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 
 namespace std {
-static std::string to_string(const std::string &arg) {
+static std::string to_string(const std::string &arg) { // NOLINT(readability-identifier-naming)
     return arg;
 }
 } // namespace std

@@ -48,8 +48,8 @@ class MockProgram : public Program {
     using Program::options;
     using Program::packDeviceBinary;
     using Program::Program;
+    using Program::requiresRebuild;
     using Program::setBuildStatus;
-    using Program::shouldWarnAboutRebuild;
     using Program::sourceCode;
     using Program::specConstantsIds;
     using Program::specConstantsSizes;
@@ -130,7 +130,7 @@ class MockProgram : public Program {
 
     cl_int rebuildProgramFromIr() {
         this->isCreatedFromBinary = false;
-        this->shouldWarnAboutRebuild = true;
+        this->requiresRebuild = true;
         setBuildStatus(CL_BUILD_NONE);
         std::unordered_map<std::string, BuiltinDispatchInfoBuilder *> builtins;
         return this->build(getDevices(), this->options.c_str(), false, builtins);
@@ -138,7 +138,7 @@ class MockProgram : public Program {
 
     cl_int recompile() {
         this->isCreatedFromBinary = false;
-        this->shouldWarnAboutRebuild = true;
+        this->requiresRebuild = true;
         setBuildStatus(CL_BUILD_NONE);
         return this->compile(getDevices(), this->options.c_str(), 0, nullptr, nullptr);
     }
@@ -189,6 +189,11 @@ class MockProgram : public Program {
         wasCreateDebugZebinCalled = true;
     }
 
+    void debugNotify(const ClDeviceVector &deviceVector, std::unordered_map<uint32_t, BuildPhase> &phasesReached) override {
+        Program::debugNotify(deviceVector, phasesReached);
+        wasDebuggerNotified = true;
+    }
+
     std::vector<NEO::ExternalFunctionInfo> externalFunctions;
     std::map<uint32_t, int> processGenBinaryCalledPerRootDevice;
     std::map<uint32_t, int> replaceDeviceBinaryCalledPerRootDevice;
@@ -198,6 +203,7 @@ class MockProgram : public Program {
     int isOptionValueValidOverride = -1;
     bool wasProcessDebugDataCalled = false;
     bool wasCreateDebugZebinCalled = false;
+    bool wasDebuggerNotified = false;
 };
 
 class MockProgramAppendKernelDebugOptions : public Program {

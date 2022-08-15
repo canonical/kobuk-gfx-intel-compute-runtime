@@ -11,8 +11,6 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/hw_helper.h"
 
-#include "hw_cmds.h"
-
 #include <algorithm>
 
 namespace NEO {
@@ -42,6 +40,10 @@ bool familyEnabled[IGFX_MAX_CORE] = {
 
 const HardwareInfo *hardwareInfoTable[IGFX_MAX_PRODUCT] = {};
 void (*hardwareInfoSetup[IGFX_MAX_PRODUCT])(HardwareInfo *, bool, uint64_t) = {
+    0x0,
+};
+
+void (*hardwareInfoBaseSetup[IGFX_MAX_PRODUCT])(HardwareInfo *, bool) = {
     0x0,
 };
 

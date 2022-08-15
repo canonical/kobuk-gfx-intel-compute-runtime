@@ -1,28 +1,30 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#pragma once
+
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_builtins.h"
 #include "shared/test/common/mocks/mock_compilers.h"
 #include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_l0_debugger.h"
 #include "shared/test/common/mocks/mock_memory_operations_handler.h"
 #include "shared/test/common/mocks/mock_sip.h"
 
-#include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
-#include "level_zero/core/test/unit_tests/mocks/mock_built_ins.h"
-#include "level_zero/core/test/unit_tests/mocks/mock_l0_debugger.h"
+#include "level_zero/core/test/unit_tests/mocks/mock_driver_handle.h"
 
 namespace L0 {
 namespace ult {
 
 struct L0DebuggerFixture {
-    void SetUp() {
+    void SetUp() { // NOLINT(readability-identifier-naming)
         NEO::MockCompilerEnableGuard mock(true);
         auto executionEnvironment = new NEO::ExecutionEnvironment();
-        auto mockBuiltIns = new MockBuiltins();
+        auto mockBuiltIns = new NEO::MockBuiltins();
         executionEnvironment->prepareRootDeviceEnvironments(1);
         executionEnvironment->rootDeviceEnvironments[0]->builtins.reset(mockBuiltIns);
         memoryOperationsHandler = new NEO::MockMemoryOperations();
@@ -38,6 +40,7 @@ struct L0DebuggerFixture {
         }
 
         executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(&hwInfo);
+        executionEnvironment->rootDeviceEnvironments[0]->initGmm();
         executionEnvironment->initializeMemoryManager();
 
         neoDevice = NEO::MockDevice::create<NEO::MockDevice>(executionEnvironment, 0u);
@@ -51,7 +54,7 @@ struct L0DebuggerFixture {
         device = driverHandle->devices[0];
     }
 
-    void TearDown() {
+    void TearDown() { // NOLINT(readability-identifier-naming)
     }
 
     std::unique_ptr<Mock<L0::DriverHandleImp>> driverHandle;
@@ -80,6 +83,28 @@ struct L0DebuggerHwFixture : public L0DebuggerFixture {
         return static_cast<MockDebuggerL0Hw<GfxFamily> *>(debuggerHw);
     }
     DebuggerL0 *debuggerHw = nullptr;
+};
+
+struct L0DebuggerPerContextAddressSpaceFixture : public L0DebuggerHwFixture {
+    void SetUp() {
+        NEO::DebugManager.flags.DebuggerForceSbaTrackingMode.set(0);
+        L0DebuggerHwFixture::SetUp();
+    }
+    void TearDown() {
+        L0DebuggerHwFixture::TearDown();
+    }
+    DebugManagerStateRestore restorer;
+};
+
+struct L0DebuggerHwParameterizedFixture : ::testing::TestWithParam<int>, public L0DebuggerHwFixture {
+    void SetUp() override {
+        NEO::DebugManager.flags.DebuggerForceSbaTrackingMode.set(GetParam());
+        L0DebuggerHwFixture::SetUp();
+    }
+    void TearDown() override {
+        L0DebuggerHwFixture::TearDown();
+    }
+    DebugManagerStateRestore restorer;
 };
 
 } // namespace ult

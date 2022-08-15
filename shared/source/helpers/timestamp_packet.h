@@ -17,7 +17,6 @@
 #include "shared/source/utilities/tag_allocator.h"
 
 #include <cstdint>
-#include <vector>
 
 namespace NEO {
 class CommandStreamReceiver;
@@ -147,7 +146,7 @@ struct TimestampPacketHelper {
 
     template <typename GfxFamily>
     static void programCsrDependenciesForForTaskCountContainer(LinearStream &cmdStream, const CsrDependencies &csrDependencies) {
-        auto taskCountContainer = csrDependencies.taskCountContainer;
+        auto &taskCountContainer = csrDependencies.taskCountContainer;
 
         for (auto &[taskCountPreviousRootDevice, tagAddressPreviousRootDevice] : taskCountContainer) {
             using COMPARE_OPERATION = typename GfxFamily::MI_SEMAPHORE_WAIT::COMPARE_OPERATION;
@@ -175,8 +174,8 @@ struct TimestampPacketHelper {
 
             PipeControlArgs args;
             args.dcFlushEnable = MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo);
-            MemorySynchronizationCommands<GfxFamily>::addPipeControlAndProgramPostSyncOperation(
-                cmdStream, GfxFamily::PIPE_CONTROL::POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA,
+            MemorySynchronizationCommands<GfxFamily>::addBarrierWithPostSyncOperation(
+                cmdStream, PostSyncMode::ImmediateData,
                 cacheFlushTimestampPacketGpuAddress, 0, hwInfo, args);
         }
 
@@ -190,7 +189,7 @@ struct TimestampPacketHelper {
         size_t size = count * TimestampPacketHelper::getRequiredCmdStreamSizeForNodeDependencyWithBlitEnqueue<GfxFamily>();
 
         if (auxTranslationDirection == AuxTranslationDirection::NonAuxToAux && cacheFlushForBcsRequired) {
-            size += MemorySynchronizationCommands<GfxFamily>::getSizeForPipeControlWithPostSyncOperation(hwInfo);
+            size += MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(hwInfo);
         }
 
         return size;

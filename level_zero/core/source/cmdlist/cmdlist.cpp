@@ -14,7 +14,11 @@
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/source/memory_manager/memory_manager.h"
 
+#include "level_zero/core/source/cmdqueue/cmdqueue.h"
 #include "level_zero/core/source/device/device_imp.h"
+#include "level_zero/core/source/driver/driver_handle_imp.h"
+#include "level_zero/core/source/event/event.h"
+#include "level_zero/core/source/kernel/kernel.h"
 
 namespace L0 {
 
@@ -179,6 +183,17 @@ void CommandList::handleIndirectAllocationResidency() {
                                                                          unifiedMemoryControls.generateMask());
         }
     }
+}
+
+bool CommandList::setupTimestampEventForMultiTile(Event *signalEvent) {
+    if (this->partitionCount > 1 &&
+        signalEvent) {
+        if (signalEvent->isEventTimestampFlagSet()) {
+            signalEvent->setPacketsInUse(this->partitionCount);
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace L0

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,7 +13,7 @@ extern bool sysmanUltsEnable;
 namespace L0 {
 namespace ult {
 const static int fakeFileDescriptor = 123;
-std::string rootPciPathOfGpuDevice = "/sys/devices/pci0000:89/0000:89:02.0/0000:8a:00.0";
+std::string gpuUpstreamPortPath = "/sys/devices/pci0000:89/0000:89:02.0/0000:8a:00.0";
 constexpr uint32_t handleComponentCountForSubDevices = 6u;
 constexpr uint32_t handleComponentCountForNoSubDevices = 2u;
 constexpr uint32_t invalidMaxTemperature = 125;
@@ -94,10 +94,6 @@ class SysmanMultiDeviceTemperatureFixture : public SysmanMultiDeviceFixture {
         pFsAccess = std::make_unique<NiceMock<Mock<TemperatureFsAccess>>>();
         pFsAccessOriginal = pLinuxSysmanImp->pFsAccess;
         pLinuxSysmanImp->pFsAccess = pFsAccess.get();
-        ON_CALL(*pFsAccess.get(), listDirectory(_, _))
-            .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<TemperatureFsAccess>::listDirectorySuccess));
-        ON_CALL(*pFsAccess.get(), getRealPath(_, _))
-            .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<TemperatureFsAccess>::getRealPathSuccess));
 
         uint32_t subDeviceCount = 0;
         Device::fromHandle(device->toHandle())->getSubDevices(&subDeviceCount, nullptr);
@@ -118,17 +114,17 @@ class SysmanMultiDeviceTemperatureFixture : public SysmanMultiDeviceFixture {
             pLinuxSysmanImp->mapOfSubDeviceIdToPmtObject.emplace(deviceProperties.subdeviceId, pPmt);
         }
 
-        pSysmanDeviceImp->pTempHandleContext->init(deviceHandles);
+        getTempHandles(0);
     }
     void TearDown() override {
         if (!sysmanUltsEnable) {
             GTEST_SKIP();
         }
-        SysmanMultiDeviceFixture::TearDown();
         pLinuxSysmanImp->pFsAccess = pFsAccessOriginal;
+        SysmanMultiDeviceFixture::TearDown();
     }
 
-    std::vector<zes_temp_handle_t> get_temp_handles(uint32_t count) {
+    std::vector<zes_temp_handle_t> getTempHandles(uint32_t count) {
         std::vector<zes_temp_handle_t> handles(count, nullptr);
         EXPECT_EQ(zesDeviceEnumTemperatureSensors(device->toHandle(), &count, handles.data()), ZE_RESULT_SUCCESS);
         return handles;
@@ -153,7 +149,7 @@ TEST_F(SysmanMultiDeviceTemperatureFixture, GivenComponentCountZeroWhenCallingZe
 }
 
 TEST_F(SysmanMultiDeviceTemperatureFixture, GivenValidTempHandleWhenGettingTemperatureThenValidTemperatureReadingsRetrieved) {
-    auto handles = get_temp_handles(handleComponentCountForSubDevices);
+    auto handles = getTempHandles(handleComponentCountForSubDevices);
     for (auto &deviceHandle : deviceHandles) {
         ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
         Device::fromHandle(deviceHandle)->getProperties(&deviceProperties);
@@ -172,7 +168,7 @@ TEST_F(SysmanMultiDeviceTemperatureFixture, GivenValidTempHandleWhenGettingTempe
 }
 
 TEST_F(SysmanMultiDeviceTemperatureFixture, GivenValidTempHandleWhenGettingTemperatureConfigThenUnsupportedIsReturned) {
-    auto handles = get_temp_handles(handleComponentCountForSubDevices);
+    auto handles = getTempHandles(handleComponentCountForSubDevices);
     for (auto handle : handles) {
         zes_temp_config_t config = {};
         EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesTemperatureGetConfig(handle, &config));
@@ -180,7 +176,7 @@ TEST_F(SysmanMultiDeviceTemperatureFixture, GivenValidTempHandleWhenGettingTempe
 }
 
 TEST_F(SysmanMultiDeviceTemperatureFixture, GivenValidTempHandleWhenSettingTemperatureConfigThenUnsupportedIsReturned) {
-    auto handles = get_temp_handles(handleComponentCountForSubDevices);
+    auto handles = getTempHandles(handleComponentCountForSubDevices);
     for (auto handle : handles) {
         zes_temp_config_t config = {};
         EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesTemperatureSetConfig(handle, &config));
@@ -189,7 +185,7 @@ TEST_F(SysmanMultiDeviceTemperatureFixture, GivenValidTempHandleWhenSettingTempe
 
 TEST_F(SysmanMultiDeviceTemperatureFixture, GivenCreatePmtObjectsWhenRootTileIndexEnumeratesSuccessfulThenValidatePmtObjectsReceivedAndBranches) {
     std::map<uint32_t, L0::PlatformMonitoringTech *> mapOfSubDeviceIdToPmtObject;
-    PlatformMonitoringTech::create(deviceHandles, pFsAccess.get(), rootPciPathOfGpuDevice, mapOfSubDeviceIdToPmtObject);
+    PlatformMonitoringTech::create(deviceHandles, pFsAccess.get(), gpuUpstreamPortPath, mapOfSubDeviceIdToPmtObject);
     uint32_t deviceHandlesIndex = 0;
     for (auto &subDeviceIdToPmtEntry : mapOfSubDeviceIdToPmtObject) {
         ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
@@ -214,10 +210,6 @@ class SysmanDeviceTemperatureFixture : public SysmanDeviceFixture {
         pFsAccess = std::make_unique<NiceMock<Mock<TemperatureFsAccess>>>();
         pFsAccessOriginal = pLinuxSysmanImp->pFsAccess;
         pLinuxSysmanImp->pFsAccess = pFsAccess.get();
-        ON_CALL(*pFsAccess.get(), listDirectory(_, _))
-            .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<TemperatureFsAccess>::listDirectorySuccess));
-        ON_CALL(*pFsAccess.get(), getRealPath(_, _))
-            .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<TemperatureFsAccess>::getRealPathSuccess));
 
         uint32_t subDeviceCount = 0;
         Device::fromHandle(device->toHandle())->getSubDevices(&subDeviceCount, nullptr);
@@ -238,17 +230,17 @@ class SysmanDeviceTemperatureFixture : public SysmanDeviceFixture {
             pLinuxSysmanImp->mapOfSubDeviceIdToPmtObject.emplace(deviceProperties.subdeviceId, pPmt);
         }
 
-        pSysmanDeviceImp->pTempHandleContext->init(deviceHandles);
+        getTempHandles(0);
     }
     void TearDown() override {
         if (!sysmanUltsEnable) {
             GTEST_SKIP();
         }
-        SysmanDeviceFixture::TearDown();
         pLinuxSysmanImp->pFsAccess = pFsAccessOriginal;
+        SysmanDeviceFixture::TearDown();
     }
 
-    std::vector<zes_temp_handle_t> get_temp_handles(uint32_t count) {
+    std::vector<zes_temp_handle_t> getTempHandles(uint32_t count) {
         std::vector<zes_temp_handle_t> handles(count, nullptr);
         EXPECT_EQ(zesDeviceEnumTemperatureSensors(device->toHandle(), &count, handles.data()), ZE_RESULT_SUCCESS);
         return handles;
@@ -256,7 +248,7 @@ class SysmanDeviceTemperatureFixture : public SysmanDeviceFixture {
 };
 
 TEST_F(SysmanDeviceTemperatureFixture, GivenValidTempHandleWhenGettingGPUAndGlobalTemperatureThenValidTemperatureReadingsRetrieved) {
-    auto handles = get_temp_handles(handleComponentCountForNoSubDevices);
+    auto handles = getTempHandles(handleComponentCountForNoSubDevices);
     for (auto &deviceHandle : deviceHandles) {
         ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
         Device::fromHandle(deviceHandle)->getProperties(&deviceProperties);
@@ -310,7 +302,7 @@ TEST_F(SysmanDeviceTemperatureFixture, GivenValidTempHandleAndPmtReadValueFailsW
     }
 
     pSysmanDeviceImp->pTempHandleContext->init(deviceHandles);
-    auto handles = get_temp_handles(handleComponentCountForNoSubDevices);
+    auto handles = getTempHandles(handleComponentCountForNoSubDevices);
     for (auto &handle : handles) {
         double temperature;
         ASSERT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesTemperatureGetState(handle, &temperature));
@@ -328,18 +320,15 @@ TEST_F(SysmanDeviceTemperatureFixture, GivenValidTempHandleWhenGettingUnsupporte
 }
 
 TEST_F(SysmanDeviceTemperatureFixture, GivenValidateEnumerateRootTelemIndexWhengetRealPathFailsThenFailureReturned) {
-    ON_CALL(*pFsAccess.get(), getRealPath(_, _))
-        .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<TemperatureFsAccess>::getRealPathFailure));
+    pFsAccess->mockErrorGetRealPath = ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
     EXPECT_EQ(ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE,
-              PlatformMonitoringTech::enumerateRootTelemIndex(pFsAccess.get(), rootPciPathOfGpuDevice));
-
-    ON_CALL(*pFsAccess.get(), listDirectory(_, _))
-        .WillByDefault(::testing::Invoke(pFsAccess.get(), &Mock<TemperatureFsAccess>::listDirectoryFailure));
+              PlatformMonitoringTech::enumerateRootTelemIndex(pFsAccess.get(), gpuUpstreamPortPath));
+    pFsAccess->mockErrorListDirectory = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_ERROR_NOT_AVAILABLE,
-              PlatformMonitoringTech::enumerateRootTelemIndex(pFsAccess.get(), rootPciPathOfGpuDevice));
+              PlatformMonitoringTech::enumerateRootTelemIndex(pFsAccess.get(), gpuUpstreamPortPath));
 
     std::map<uint32_t, L0::PlatformMonitoringTech *> mapOfSubDeviceIdToPmtObject;
-    PlatformMonitoringTech::create(deviceHandles, pFsAccess.get(), rootPciPathOfGpuDevice, mapOfSubDeviceIdToPmtObject);
+    PlatformMonitoringTech::create(deviceHandles, pFsAccess.get(), gpuUpstreamPortPath, mapOfSubDeviceIdToPmtObject);
     EXPECT_TRUE(mapOfSubDeviceIdToPmtObject.empty());
 }
 
@@ -353,7 +342,7 @@ TEST_F(SysmanDeviceTemperatureFixture, GivenValidatePmtReadValueWhenkeyOffsetMap
 
 TEST_F(SysmanDeviceTemperatureFixture, GivenCreatePmtObjectsWhenRootTileIndexEnumeratesSuccessfulThenValidatePmtObjectsReceivedAndBranches) {
     std::map<uint32_t, L0::PlatformMonitoringTech *> mapOfSubDeviceIdToPmtObject1;
-    PlatformMonitoringTech::create(deviceHandles, pFsAccess.get(), rootPciPathOfGpuDevice, mapOfSubDeviceIdToPmtObject1);
+    PlatformMonitoringTech::create(deviceHandles, pFsAccess.get(), gpuUpstreamPortPath, mapOfSubDeviceIdToPmtObject1);
     for (auto &subDeviceIdToPmtEntry : mapOfSubDeviceIdToPmtObject1) {
         EXPECT_NE(subDeviceIdToPmtEntry.second, nullptr);
         EXPECT_EQ(subDeviceIdToPmtEntry.first, 0u); // We know that subdeviceID is zero as core device didnt have any subdevices
@@ -363,7 +352,7 @@ TEST_F(SysmanDeviceTemperatureFixture, GivenCreatePmtObjectsWhenRootTileIndexEnu
     std::map<uint32_t, L0::PlatformMonitoringTech *> mapOfSubDeviceIdToPmtObject2;
     std::vector<ze_device_handle_t> testHandleVector;
     // If empty device handle vector is provided then empty map is retrieved
-    PlatformMonitoringTech::create(testHandleVector, pFsAccess.get(), rootPciPathOfGpuDevice, mapOfSubDeviceIdToPmtObject2);
+    PlatformMonitoringTech::create(testHandleVector, pFsAccess.get(), gpuUpstreamPortPath, mapOfSubDeviceIdToPmtObject2);
     EXPECT_TRUE(mapOfSubDeviceIdToPmtObject2.empty());
 }
 

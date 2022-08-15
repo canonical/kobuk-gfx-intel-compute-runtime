@@ -20,9 +20,16 @@ class MockBufferStorage {
   public:
     MockBufferStorage() : mockGfxAllocation(data, sizeof(data) / 2),
                           multiGfxAllocation(GraphicsAllocationHelper::toMultiGraphicsAllocation(&mockGfxAllocation)) {
+        initDevice();
     }
+
     MockBufferStorage(bool unaligned) : mockGfxAllocation(unaligned ? alignUp(&data, 4) : alignUp(&data, 64), sizeof(data) / 2),
                                         multiGfxAllocation(GraphicsAllocationHelper::toMultiGraphicsAllocation(&mockGfxAllocation)) {
+        initDevice();
+    }
+    void initDevice() {
+        VariableBackup<uint32_t> maxOsContextCountBackup(&MemoryManager::maxOsContextCount);
+        device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
     }
     ~MockBufferStorage() {
         if (mockGfxAllocation.getDefaultGmm()) {
@@ -31,7 +38,7 @@ class MockBufferStorage {
     }
     char data[128];
     MockGraphicsAllocation mockGfxAllocation;
-    std::unique_ptr<MockDevice> device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
+    std::unique_ptr<MockDevice> device;
     MultiGraphicsAllocation multiGfxAllocation;
 };
 
@@ -47,12 +54,12 @@ class MockBuffer : public MockBufferStorage, public Buffer {
 
     void setAllocationType(uint32_t rootDeviceIndex, bool compressed) {
         setAllocationType(multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex),
-                          device->getRootDeviceEnvironment().getGmmClientContext(), compressed);
+                          device->getRootDeviceEnvironment().getGmmHelper(), compressed);
     }
 
-    static void setAllocationType(GraphicsAllocation *graphicsAllocation, GmmClientContext *gmmClientContext, bool compressed) {
+    static void setAllocationType(GraphicsAllocation *graphicsAllocation, GmmHelper *gmmHelper, bool compressed) {
         if (compressed && !graphicsAllocation->getDefaultGmm()) {
-            graphicsAllocation->setDefaultGmm(new Gmm(gmmClientContext, nullptr, 0, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, compressed, {}, true));
+            graphicsAllocation->setDefaultGmm(new Gmm(gmmHelper, nullptr, 0, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, compressed, {}, true));
         }
 
         if (graphicsAllocation->getDefaultGmm()) {

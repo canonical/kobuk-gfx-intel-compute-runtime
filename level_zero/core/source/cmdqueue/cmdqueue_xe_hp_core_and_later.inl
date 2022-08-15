@@ -7,6 +7,7 @@
 
 #include "shared/source/command_container/implicit_scaling.h"
 #include "shared/source/command_stream/csr_definitions.h"
+#include "shared/source/command_stream/scratch_space_controller.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/hw_helper.h"
@@ -22,7 +23,6 @@ namespace L0 {
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 void CommandQueueHw<gfxCoreFamily>::programStateBaseAddress(uint64_t gsba, bool useLocalMemoryForIndirectHeap, NEO::LinearStream &commandStream, bool cachedMOCSAllowed) {
-    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
     if (NEO::ApiSpecificConfig::getBindlessConfiguration()) {
         NEO::Device *neoDevice = device->getNEODevice();
@@ -31,7 +31,8 @@ void CommandQueueHw<gfxCoreFamily>::programStateBaseAddress(uint64_t gsba, bool 
         bool isRcs = this->getCsr()->isRcs();
 
         NEO::EncodeWA<GfxFamily>::addPipeControlBeforeStateBaseAddress(commandStream, hwInfo, isRcs);
-        auto pSbaCmd = static_cast<STATE_BASE_ADDRESS *>(commandStream.getSpace(sizeof(STATE_BASE_ADDRESS)));
+        auto sbaCmdBuf = static_cast<STATE_BASE_ADDRESS *>(NEO::StateBaseAddressHelper<GfxFamily>::getSpaceForSbaCmd(commandStream));
+
         STATE_BASE_ADDRESS sbaCmd;
         bool multiOsContextCapable = device->isImplicitScalingCapable();
         NEO::StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(&sbaCmd,
@@ -50,23 +51,20 @@ void CommandQueueHw<gfxCoreFamily>::programStateBaseAddress(uint64_t gsba, bool 
                                                                         multiOsContextCapable,
                                                                         NEO::MemoryCompressionState::NotApplicable,
                                                                         false,
-                                                                        1u);
-        *pSbaCmd = sbaCmd;
+                                                                        1u,
+                                                                        nullptr);
+        *sbaCmdBuf = sbaCmd;
 
         auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
         if (hwInfoConfig.isAdditionalStateBaseAddressWARequired(hwInfo)) {
-            pSbaCmd = static_cast<STATE_BASE_ADDRESS *>(commandStream.getSpace(sizeof(STATE_BASE_ADDRESS)));
-            *pSbaCmd = sbaCmd;
+            sbaCmdBuf = static_cast<STATE_BASE_ADDRESS *>(commandStream.getSpace(sizeof(STATE_BASE_ADDRESS)));
+            *sbaCmdBuf = sbaCmd;
         }
 
         if (NEO::Debugger::isDebugEnabled(internalUsage) && device->getL0Debugger()) {
 
             NEO::Debugger::SbaAddresses sbaAddresses = {};
-            sbaAddresses.BindlessSurfaceStateBaseAddress = sbaCmd.getBindlessSurfaceStateBaseAddress();
-            sbaAddresses.DynamicStateBaseAddress = sbaCmd.getDynamicStateBaseAddress();
-            sbaAddresses.GeneralStateBaseAddress = sbaCmd.getGeneralStateBaseAddress();
-            sbaAddresses.InstructionBaseAddress = sbaCmd.getInstructionBaseAddress();
-            sbaAddresses.SurfaceStateBaseAddress = sbaCmd.getSurfaceStateBaseAddress();
+            NEO::EncodeStateBaseAddress<GfxFamily>::setSbaAddressesForDebugger(sbaAddresses, sbaCmd);
 
             device->getL0Debugger()->programSbaTrackingCommands(commandStream, sbaAddresses);
         }
@@ -85,7 +83,6 @@ void CommandQueueHw<gfxCoreFamily>::programStateBaseAddress(uint64_t gsba, bool 
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 size_t CommandQueueHw<gfxCoreFamily>::estimateStateBaseAddressCmdSize() {
-    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
     using _3DSTATE_BINDING_TABLE_POOL_ALLOC = typename GfxFamily::_3DSTATE_BINDING_TABLE_POOL_ALLOC;
@@ -138,7 +135,6 @@ void CommandQueueHw<gfxCoreFamily>::handleScratchSpace(NEO::HeapContainer &sshHe
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 void CommandQueueHw<gfxCoreFamily>::patchCommands(CommandList &commandList, uint64_t scratchAddress) {
-    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using CFE_STATE = typename GfxFamily::CFE_STATE;
 
     uint32_t lowScratchAddress = uint32_t(0xFFFFFFFF & scratchAddress);

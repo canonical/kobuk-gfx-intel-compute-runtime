@@ -32,7 +32,7 @@ set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/context/context_imp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/context/context_imp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/context/context.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/debugger/debug_manager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/debug_manager/debug_manager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device${BRANCH_DIR_SUFFIX}device_imp_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device/device.h
     ${CMAKE_CURRENT_SOURCE_DIR}/device/device_imp.cpp
@@ -61,6 +61,7 @@ set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_helpers/l0_hw_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_helpers/l0_hw_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel/kernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/kernel${BRANCH_DIR_SUFFIX}kernel_ext.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel/kernel.h
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel/kernel_hw.h
     ${CMAKE_CURRENT_SOURCE_DIR}/kernel/kernel_imp.cpp
@@ -96,6 +97,18 @@ if(SUPPORT_XEHP_AND_LATER)
   list(APPEND L0_RUNTIME_SOURCES
        ${CMAKE_CURRENT_SOURCE_DIR}/cmdlist/cmdlist_hw_xehp_and_later.inl
        ${CMAKE_CURRENT_SOURCE_DIR}/cmdqueue/cmdqueue_xe_hp_core_and_later.inl
+  )
+endif()
+
+if(SUPPORT_GEN12LP OR SUPPORT_XE_HP_CORE OR SUPPORT_XE_HPG_CORE)
+  list(APPEND L0_RUNTIME_SOURCES
+       ${CMAKE_CURRENT_SOURCE_DIR}/hw_helpers/l0_hw_helper_tgllp_plus.inl
+  )
+endif()
+
+if(SUPPORT_PVC_AND_LATER)
+  list(APPEND L0_RUNTIME_SOURCES
+       ${CMAKE_CURRENT_SOURCE_DIR}/hw_helpers/l0_hw_helper_pvc_and_later.inl
   )
 endif()
 

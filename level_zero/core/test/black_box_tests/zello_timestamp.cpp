@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,9 +21,9 @@ inline std::vector<uint8_t> loadBinaryFile(const std::string &filePath) {
     const size_t length = static_cast<size_t>(stream.tellg());
     stream.seekg(0, stream.beg);
 
-    std::vector<uint8_t> binary_file(length);
-    stream.read(reinterpret_cast<char *>(binary_file.data()), length);
-    return binary_file;
+    std::vector<uint8_t> binaryFile(length);
+    stream.read(reinterpret_cast<char *>(binaryFile.data()), length);
+    return binaryFile;
 }
 
 void createCmdQueueAndCmdList(ze_context_handle_t &context,
@@ -56,26 +56,6 @@ void createCmdQueueAndCmdList(ze_context_handle_t &context,
     ze_command_list_desc_t cmdListDesc = {ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC};
     cmdListDesc.commandQueueGroupOrdinal = cmdQueueDesc.ordinal;
     SUCCESS_OR_TERMINATE(zeCommandListCreate(context, device, &cmdListDesc, &cmdList));
-}
-
-void createEventPoolAndEvents(ze_context_handle_t &context,
-                              ze_device_handle_t &device,
-                              ze_event_pool_handle_t &eventPool,
-                              ze_event_pool_flag_t poolFlag,
-                              uint32_t poolSize,
-                              ze_event_handle_t *events) {
-    ze_event_pool_desc_t eventPoolDesc = {ZE_STRUCTURE_TYPE_EVENT_POOL_DESC};
-    ze_event_desc_t eventDesc = {ZE_STRUCTURE_TYPE_EVENT_DESC};
-    eventPoolDesc.count = poolSize;
-    eventPoolDesc.flags = poolFlag;
-    SUCCESS_OR_TERMINATE(zeEventPoolCreate(context, &eventPoolDesc, 1, &device, &eventPool));
-
-    for (uint32_t i = 0; i < poolSize; i++) {
-        eventDesc.index = i;
-        eventDesc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
-        eventDesc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
-        SUCCESS_OR_TERMINATE(zeEventCreate(eventPool, &eventDesc, events + i));
-    }
 }
 
 bool testWriteGlobalTimestamp(ze_context_handle_t &context,
@@ -123,7 +103,7 @@ bool testWriteGlobalTimestamp(ze_context_handle_t &context,
                                                        nullptr, 0, nullptr));
     SUCCESS_OR_TERMINATE(zeCommandListClose(cmdList));
     SUCCESS_OR_TERMINATE(zeCommandQueueExecuteCommandLists(cmdQueue, 1, &cmdList, nullptr));
-    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, std::numeric_limits<uint32_t>::max()));
+    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, std::numeric_limits<uint64_t>::max()));
 
     ze_device_properties_t devProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
     SUCCESS_OR_TERMINATE(zeDeviceGetProperties(device, &devProperties));
@@ -215,12 +195,12 @@ bool testKernelTimestampHostQuery(ze_context_handle_t &context,
 
     ze_event_pool_handle_t eventPool;
     ze_event_handle_t kernelTsEvent;
-    createEventPoolAndEvents(context, device, eventPool, ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP, 1, &kernelTsEvent);
+    createEventPoolAndEvents(context, device, eventPool, ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP, 1, &kernelTsEvent, ZE_EVENT_SCOPE_FLAG_HOST, ZE_EVENT_SCOPE_FLAG_HOST);
 
     SUCCESS_OR_TERMINATE(zeCommandListAppendLaunchKernel(cmdList, kernel, &dispatchTraits, kernelTsEvent, 0, nullptr));
     SUCCESS_OR_TERMINATE(zeCommandListClose(cmdList));
     SUCCESS_OR_TERMINATE(zeCommandQueueExecuteCommandLists(cmdQueue, 1, &cmdList, nullptr));
-    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, std::numeric_limits<uint32_t>::max()));
+    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, std::numeric_limits<uint64_t>::max()));
 
     ze_kernel_timestamp_result_t kernelTsResults;
     SUCCESS_OR_TERMINATE(zeEventQueryKernelTimestamp(kernelTsEvent, &kernelTsResults));
@@ -321,7 +301,7 @@ bool testKernelTimestampApendQuery(ze_context_handle_t &context,
 
     ze_event_pool_handle_t eventPool;
     ze_event_handle_t kernelTsEvent;
-    createEventPoolAndEvents(context, device, eventPool, ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP, 1, &kernelTsEvent);
+    createEventPoolAndEvents(context, device, eventPool, ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP, 1, &kernelTsEvent, ZE_EVENT_SCOPE_FLAG_HOST, ZE_EVENT_SCOPE_FLAG_HOST);
 
     SUCCESS_OR_TERMINATE(zeCommandListAppendLaunchKernel(cmdList, kernel, &dispatchTraits, kernelTsEvent, 0, nullptr));
     SUCCESS_OR_TERMINATE(zeCommandListAppendBarrier(cmdList, nullptr, 0u, nullptr));
@@ -329,7 +309,7 @@ bool testKernelTimestampApendQuery(ze_context_handle_t &context,
 
     SUCCESS_OR_TERMINATE(zeCommandListClose(cmdList));
     SUCCESS_OR_TERMINATE(zeCommandQueueExecuteCommandLists(cmdQueue, 1, &cmdList, nullptr));
-    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, std::numeric_limits<uint32_t>::max()));
+    SUCCESS_OR_TERMINATE(zeCommandQueueSynchronize(cmdQueue, std::numeric_limits<uint64_t>::max()));
 
     ze_kernel_timestamp_result_t *kernelTsResults = reinterpret_cast<ze_kernel_timestamp_result_t *>(timestampBuffer);
 

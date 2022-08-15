@@ -198,21 +198,21 @@ HWTEST_F(EnqueueWriteImageTest, WhenWritingImageThenSurfaceStateIsProgrammedCorr
 
     auto index = mockCmdQ->storedMultiDispatchInfo.begin()->getKernel()->getKernelInfo().getArgDescriptorAt(1).template as<ArgDescImage>().bindful / sizeof(RENDER_SURFACE_STATE);
 
-    const auto &surfaceState = getSurfaceState<FamilyType>(&pCmdQ->getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 0), static_cast<uint32_t>(index));
+    const auto surfaceState = getSurfaceState<FamilyType>(&pCmdQ->getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 0), static_cast<uint32_t>(index));
 
     // EnqueueWriteImage uses  multi-byte copies depending on per-pixel-size-in-bytes
     const auto &imageDesc = dstImage->getImageDesc();
-    EXPECT_EQ(imageDesc.image_width, surfaceState.getWidth());
-    EXPECT_EQ(imageDesc.image_height, surfaceState.getHeight());
-    EXPECT_NE(0u, surfaceState.getSurfacePitch());
-    EXPECT_NE(0u, surfaceState.getSurfaceType());
-    EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_FORMAT_R32_UINT, surfaceState.getSurfaceFormat());
-    EXPECT_EQ(MockGmmResourceInfo::getHAlignSurfaceStateResult, surfaceState.getSurfaceHorizontalAlignment());
-    EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT_VALIGN_4, surfaceState.getSurfaceVerticalAlignment());
-    EXPECT_EQ(dstAllocation->getGpuAddress(), surfaceState.getSurfaceBaseAddress());
+    EXPECT_EQ(imageDesc.image_width, surfaceState->getWidth());
+    EXPECT_EQ(imageDesc.image_height, surfaceState->getHeight());
+    EXPECT_NE(0u, surfaceState->getSurfacePitch());
+    EXPECT_NE(0u, surfaceState->getSurfaceType());
+    EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_FORMAT_R32_UINT, surfaceState->getSurfaceFormat());
+    EXPECT_EQ(MockGmmResourceInfo::getHAlignSurfaceStateResult, surfaceState->getSurfaceHorizontalAlignment());
+    EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT_VALIGN_4, surfaceState->getSurfaceVerticalAlignment());
+    EXPECT_EQ(dstAllocation->getGpuAddress(), surfaceState->getSurfaceBaseAddress());
 }
 
-HWTEST_F(EnqueueWriteImageTest, WhenWritingImageThenOnePipelineSelectIsProgrammed) {
+HWTEST2_F(EnqueueWriteImageTest, WhenWritingImageThenOnePipelineSelectIsProgrammed, IsAtMostXeHpcCore) {
     enqueueWriteImage<FamilyType>();
     int numCommands = getNumberOfPipelineSelectsThatEnablePipelineSelect<FamilyType>();
     EXPECT_EQ(1, numCommands);
@@ -428,7 +428,7 @@ HWTEST_F(EnqueueWriteImageTest, GivenImage1DThatIsZeroCopyWhenWriteImageWithTheS
 typedef EnqueueWriteImageMipMapTest MipMapWriteImageTest;
 
 HWTEST_P(MipMapWriteImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalledThenProperMipLevelIsSet) {
-    auto image_type = (cl_mem_object_type)GetParam();
+    auto imageType = (cl_mem_object_type)GetParam();
     auto builtIns = new MockBuiltins();
     pCmdQ->getDevice().getExecutionEnvironment()->rootDeviceEnvironments[pCmdQ->getDevice().getRootDeviceIndex()]->builtins.reset(builtIns);
 
@@ -445,7 +445,7 @@ HWTEST_P(MipMapWriteImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalle
     cl_int retVal = CL_SUCCESS;
     cl_image_desc imageDesc = {};
     uint32_t expectedMipLevel = 3;
-    imageDesc.image_type = image_type;
+    imageDesc.image_type = imageType;
     imageDesc.num_mip_levels = 10;
     imageDesc.image_width = 4;
     imageDesc.image_height = 1;
@@ -453,7 +453,7 @@ HWTEST_P(MipMapWriteImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalle
     size_t origin[] = {0, 0, 0, 0};
     size_t region[] = {imageDesc.image_width, 1, 1};
     std::unique_ptr<Image> image;
-    switch (image_type) {
+    switch (imageType) {
     case CL_MEM_OBJECT_IMAGE1D:
         origin[1] = expectedMipLevel;
         image = std::unique_ptr<Image>(ImageHelper<Image1dDefaults>::create(context, &imageDesc));
@@ -480,7 +480,7 @@ HWTEST_P(MipMapWriteImageTest, GivenImageWithMipLevelNonZeroWhenReadImageIsCalle
     EXPECT_NE(nullptr, image.get());
 
     auto hostPtrSize = Image::calculateHostPtrSize(region, image->getHostPtrRowPitch(), image->getHostPtrSlicePitch(),
-                                                   image->getSurfaceFormatInfo().surfaceFormat.ImageElementSizeInBytes, image_type);
+                                                   image->getSurfaceFormatInfo().surfaceFormat.ImageElementSizeInBytes, imageType);
     std::unique_ptr<uint32_t[]> ptr = std::unique_ptr<uint32_t[]>(new uint32_t[hostPtrSize]);
 
     retVal = pCmdQ->enqueueWriteImage(image.get(),

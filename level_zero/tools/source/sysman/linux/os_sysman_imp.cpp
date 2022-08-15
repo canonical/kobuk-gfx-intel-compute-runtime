@@ -7,14 +7,15 @@
 
 #include "level_zero/tools/source/sysman/linux/os_sysman_imp.h"
 
+#include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/device_factory.h"
 
 #include "level_zero/core/source/device/device_imp.h"
+#include "level_zero/core/source/driver/driver_handle_imp.h"
+#include "level_zero/tools/source/sysman/firmware_util/firmware_util.h"
 #include "level_zero/tools/source/sysman/linux/fs_access.h"
 
-#include "sysman/linux/firmware_util/firmware_util.h"
-
-#include <linux/pci_regs.h>
+#include "sysman/firmware_util/firmware_util.h"
 
 namespace L0 {
 
@@ -53,24 +54,25 @@ ze_result_t LinuxSysmanImp::init() {
 }
 
 void LinuxSysmanImp::createFwUtilInterface() {
-    std::string realRootPath;
-    auto result = pSysfsAccess->getRealPath("device", realRootPath);
-    if (ZE_RESULT_SUCCESS != result) {
+    ze_pci_ext_properties_t pPciProperties;
+    if (ZE_RESULT_SUCCESS != pDevice->getPciProperties(&pPciProperties)) {
         return;
     }
-    auto rootPciPathOfGpuDevice = getPciRootPortDirectoryPath(realRootPath);
-    auto loc = realRootPath.find_last_of('/');
-    pFwUtilInterface = FirmwareUtil::create(realRootPath.substr(loc + 1, std::string::npos));
+    uint16_t domain = static_cast<uint16_t>(pPciProperties.address.domain);
+    uint8_t bus = static_cast<uint8_t>(pPciProperties.address.bus);
+    uint8_t device = static_cast<uint8_t>(pPciProperties.address.device);
+    uint8_t function = static_cast<uint8_t>(pPciProperties.address.function);
+    pFwUtilInterface = FirmwareUtil::create(domain, bus, device, function);
 }
 
 ze_result_t LinuxSysmanImp::createPmtHandles() {
-    std::string realRootPath;
-    auto result = pSysfsAccess->getRealPath("device", realRootPath);
+    std::string gtDevicePCIPath;
+    auto result = pSysfsAccess->getRealPath("device", gtDevicePCIPath);
     if (ZE_RESULT_SUCCESS != result) {
         return result;
     }
-    auto rootPciPathOfGpuDevice = getPciRootPortDirectoryPath(realRootPath);
-    PlatformMonitoringTech::create(pParentSysmanDeviceImp->deviceHandles, pFsAccess, rootPciPathOfGpuDevice, mapOfSubDeviceIdToPmtObject);
+    auto gpuUpstreamPortPath = getPciCardBusDirectoryPath(gtDevicePCIPath);
+    PlatformMonitoringTech::create(pParentSysmanDeviceImp->deviceHandles, pFsAccess, gpuUpstreamPortPath, mapOfSubDeviceIdToPmtObject);
     return result;
 }
 
@@ -107,11 +109,11 @@ SysfsAccess &LinuxSysmanImp::getSysfsAccess() {
 ze_result_t LinuxSysmanImp::initLocalDeviceAndDrmHandles() {
     pDevice = Device::fromHandle(pParentSysmanDeviceImp->hCoreDevice);
     DEBUG_BREAK_IF(nullptr == pDevice);
-    NEO::OSInterface &OsInterface = pDevice->getOsInterface();
-    if (OsInterface.getDriverModel()->getDriverModelType() != NEO::DriverModelType::DRM) {
+    NEO::OSInterface &osInterface = pDevice->getOsInterface();
+    if (osInterface.getDriverModel()->getDriverModelType() != NEO::DriverModelType::DRM) {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
-    pDrm = OsInterface.getDriverModel()->as<NEO::Drm>();
+    pDrm = osInterface.getDriverModel()->as<NEO::Drm>();
     return ZE_RESULT_SUCCESS;
 }
 
@@ -135,12 +137,9 @@ SysmanDeviceImp *LinuxSysmanImp::getSysmanDeviceImp() {
     return pParentSysmanDeviceImp;
 }
 
-std::string LinuxSysmanImp::getPciRootPortDirectoryPath(std::string realPciPath) {
+static std::string modifyPathOnLevel(std::string realPciPath, uint8_t nLevel) {
     size_t loc;
-    // we need to change the absolute path to two levels up to get
-    // the Discrete card's root port.
-    // the root port is always at a fixed distance as defined in HW
-    uint8_t nLevel = 2;
+    // we need to change the absolute path to 'nLevel' levels up
     while (nLevel > 0) {
         loc = realPciPath.find_last_of('/');
         if (loc == std::string::npos) {
@@ -151,38 +150,36 @@ std::string LinuxSysmanImp::getPciRootPortDirectoryPath(std::string realPciPath)
     }
     return realPciPath;
 }
-
-static std::string modifyPathOnLevel(std::string path, uint8_t level) {
-    size_t loc = 0;
-    size_t count = 0;
-    std::string modifiedPath(path);
-    uint8_t nLevel = level;
-    do {
-        loc = path.find_first_of('/');
-        count = count + loc;
-        if (loc == std::string::npos) {
-            break;
-        }
-        path = path.substr(loc + 1, path.size());
-        nLevel--;
-    } while (nLevel > 0);
-    if (nLevel == 0) {
-        modifiedPath = modifiedPath.substr(0, (count + level - 1)); // need to adjust for  last '/' that the code encounters
-    }
-    return modifiedPath;
-}
-std::string LinuxSysmanImp::getPciRootPortDirectoryPathForReset(std::string realPciPath) {
+std::string getPciRootPortDirectoryPath(std::string realPciPath) {
     // the rootport is always the first pci folder after the pcie slot.
+    //    +-[0000:89]-+-00.0
+    // |           +-00.1
+    // |           +-00.2
+    // |           +-00.4
+    // |           \-02.0-[8a-8e]----00.0-[8b-8e]--+-01.0-[8c-8d]----00.0
+    // |                                           \-02.0-[8e]--+-00.0
+    // |                                                        +-00.1
+    // |                                                        \-00.2
     // /sys/devices/pci0000:89/0000:89:02.0/0000:8a:00.0/0000:8b:01.0/0000:8c:00.0
     // '/sys/devices/pci0000:89/0000:89:02.0/' will always be the same distance.
-    return modifyPathOnLevel(realPciPath, 5);
+    // from 0000:8c:00.0 i.e the 3rd PCI address from the gt tile
+    return modifyPathOnLevel(realPciPath, 3);
 }
 
 std::string LinuxSysmanImp::getPciCardBusDirectoryPath(std::string realPciPath) {
     // the cardbus is always the second pci folder after the pcie slot.
+    //    +-[0000:89]-+-00.0
+    // |           +-00.1
+    // |           +-00.2
+    // |           +-00.4
+    // |           \-02.0-[8a-8e]----00.0-[8b-8e]--+-01.0-[8c-8d]----00.0
+    // |                                           \-02.0-[8e]--+-00.0
+    // |                                                        +-00.1
+    // |                                                        \-00.2
     // /sys/devices/pci0000:89/0000:89:02.0/0000:8a:00.0/0000:8b:01.0/0000:8c:00.0
     // '/sys/devices/pci0000:89/0000:89:02.0/0000:8a:00.0/' will always be the same distance.
-    return modifyPathOnLevel(realPciPath, 6);
+    // from 0000:8c:00.0 i.e the 2nd PCI address from the gt tile.
+    return modifyPathOnLevel(realPciPath, 2);
 }
 
 PlatformMonitoringTech *LinuxSysmanImp::getPlatformMonitoringTechAccess(uint32_t subDeviceId) {
@@ -269,6 +266,11 @@ void LinuxSysmanImp::releaseSysmanDeviceResources() {
 }
 
 void LinuxSysmanImp::releaseDeviceResources() {
+    auto devicePtr = static_cast<DeviceImp *>(pDevice);
+    executionEnvironment = devicePtr->getNEODevice()->getExecutionEnvironment();
+    devicePciBdf = devicePtr->getNEODevice()->getRootDeviceEnvironment().osInterface->getDriverModel()->as<NEO::Drm>()->getPciPath();
+    rootDeviceIndex = devicePtr->getNEODevice()->getRootDeviceIndex();
+    pSysfsAccess->getRealPath(deviceDir, gtDevicePath);
     releaseSysmanDeviceResources();
     auto device = static_cast<DeviceImp *>(getDeviceHandle());
     executionEnvironment = device->getNEODevice()->getExecutionEnvironment();
@@ -285,8 +287,9 @@ void LinuxSysmanImp::reInitSysmanDeviceResources() {
     getSysmanDeviceImp()->pRasHandleContext->init(getSysmanDeviceImp()->deviceHandles);
     getSysmanDeviceImp()->pEngineHandleContext->init();
     if (!diagnosticsReset) {
-        getSysmanDeviceImp()->pDiagnosticsHandleContext->init(getSysmanDeviceImp()->deviceHandles);
+        getSysmanDeviceImp()->pDiagnosticsHandleContext->init();
     }
+    this->diagnosticsReset = false;
     getSysmanDeviceImp()->pFirmwareHandleContext->init();
 }
 
@@ -302,6 +305,7 @@ ze_result_t LinuxSysmanImp::initDevice() {
     static_cast<L0::DriverHandleImp *>(device->getDriverHandle())->enableRootDeviceDebugger(neoDevice);
     Device::deviceReinit(device->getDriverHandle(), device, neoDevice, &result);
     reInitSysmanDeviceResources();
+
     return ZE_RESULT_SUCCESS;
 }
 
@@ -312,20 +316,14 @@ ze_result_t LinuxSysmanImp::initDevice() {
 // in the bridge control register in the PCI configuration space of the bridge port upstream of the device.
 ze_result_t LinuxSysmanImp::osWarmReset() {
     std::string rootPortPath;
-    std::string realRootPath;
-    ze_result_t result = pSysfsAccess->getRealPath(deviceDir, realRootPath);
+    std::string cardBusPath = getPciCardBusDirectoryPath(gtDevicePath);
+    ze_result_t result = pFsAccess->write(cardBusPath + '/' + "remove", "1");
     if (ZE_RESULT_SUCCESS != result) {
         return result;
     }
-    auto device = static_cast<DeviceImp *>(pDevice);
-    executionEnvironment = device->getNEODevice()->getExecutionEnvironment();
-    devicePciBdf = device->getNEODevice()->getRootDeviceEnvironment().osInterface->getDriverModel()->as<NEO::Drm>()->getPciPath();
-    rootDeviceIndex = device->getNEODevice()->getRootDeviceIndex();
 
-    ExecutionEnvironmentRefCountRestore restorer(executionEnvironment);
-    releaseDeviceResources();
-
-    rootPortPath = getPciRootPortDirectoryPathForReset(realRootPath);
+    this->pSleepFunctionSecs(10); // Sleep for 10seconds to make sure that the config spaces of all devices are saved correctly
+    rootPortPath = getPciRootPortDirectoryPath(gtDevicePath);
 
     int fd, ret = 0;
     unsigned int offset = PCI_BRIDGE_CONTROL; // Bridge control offset in Header of PCI config space
@@ -339,28 +337,20 @@ ze_result_t LinuxSysmanImp::osWarmReset() {
     this->preadFunction(fd, &value, 0x01, offset);
     resetValue = value | PCI_BRIDGE_CTL_BUS_RESET;
     this->pwriteFunction(fd, &resetValue, 0x01, offset);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Sleep for 100 milliseconds just to make sure the change is propagated.
+    this->pSleepFunctionSecs(10); // Sleep for 10seconds just to make sure the change is propagated.
     this->pwriteFunction(fd, &value, 0x01, offset);
-    std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Sleep for 500 milliseconds
+    this->pSleepFunctionSecs(10); // Sleep for 10seconds to make sure the change is propagated. before rescan is done.
     ret = this->closeFunction(fd);
     if (ret < 0) {
         return ZE_RESULT_ERROR_UNKNOWN;
     }
 
-    std::string cardBusPath;
-    cardBusPath = getPciCardBusDirectoryPath(realRootPath);
-    // write 1 to remove
-    result = pFsAccess->write(cardBusPath + '/' + "remove", "1");
+    result = pFsAccess->write(rootPortPath + '/' + "rescan", "1");
     if (ZE_RESULT_SUCCESS != result) {
         return result;
     }
-
-    result = pFsAccess->write(realRootPath + '/' + "rescan", "1");
-    if (ZE_RESULT_SUCCESS != result) {
-        return result;
-    }
-
-    return initDevice();
+    this->pSleepFunctionSecs(10); // Sleep for 10seconds, allows the rescan to complete on all devices attached to the root port.
+    return result;
 }
 
 std::string LinuxSysmanImp::getAddressFromPath(std::string &rootPortPath) {
@@ -370,26 +360,14 @@ std::string LinuxSysmanImp::getAddressFromPath(std::string &rootPortPath) {
 }
 
 ze_result_t LinuxSysmanImp::osColdReset() {
-    const std::string slotPath("/sys/bus/pci/slots/");                       // holds the directories matching to the number of slots in the PC
-    std::string cardBusPath;                                                 // will hold the PCIe Root port directory path (the address of the PCIe slot).
-    std::string realRootPath;                                                // will hold the absolute real path (not symlink) to the selected Device
-    ze_result_t result = pSysfsAccess->getRealPath(deviceDir, realRootPath); // e.g realRootPath=/sys/devices/pci0000:89/0000:89:02.0/0000:8a:00.0/0000:8b:01.0/0000:8c:00.0
-    if (ZE_RESULT_SUCCESS != result) {
-        return result;
-    }
-    auto device = static_cast<DeviceImp *>(pDevice);
-    executionEnvironment = device->getNEODevice()->getExecutionEnvironment();
-    devicePciBdf = device->getNEODevice()->getRootDeviceEnvironment().osInterface->getDriverModel()->as<NEO::Drm>()->getPciPath();
-    rootDeviceIndex = device->getNEODevice()->getRootDeviceIndex();
+    const std::string slotPath("/sys/bus/pci/slots/"); // holds the directories matching to the number of slots in the PC
+    std::string cardBusPath;                           // will hold the PCIe Root port directory path (the address of the PCIe slot).                                           // will hold the absolute real path (not symlink) to the selected Device
 
-    ExecutionEnvironmentRefCountRestore restorer(executionEnvironment);
-    releaseDeviceResources();
-
-    cardBusPath = getPciCardBusDirectoryPath(realRootPath);    // e.g cardBusPath=/sys/devices/pci0000:89/0000:89:02.0/
+    cardBusPath = getPciCardBusDirectoryPath(gtDevicePath);    // e.g cardBusPath=/sys/devices/pci0000:89/0000:89:02.0/
     std::string rootAddress = getAddressFromPath(cardBusPath); // e.g rootAddress = 0000:8a:00.0
 
     std::vector<std::string> dir;
-    result = pFsAccess->listDirectory(slotPath, dir); // get list of slot directories from  /sys/bus/pci/slots/
+    ze_result_t result = pFsAccess->listDirectory(slotPath, dir); // get list of slot directories from  /sys/bus/pci/slots/
     if (ZE_RESULT_SUCCESS != result) {
         return result;
     }
@@ -409,7 +387,7 @@ ze_result_t LinuxSysmanImp::osColdReset() {
             if (ZE_RESULT_SUCCESS != result) {
                 return result;
             }
-            return initDevice();
+            return ZE_RESULT_SUCCESS;
         }
     }
     return ZE_RESULT_ERROR_DEVICE_LOST; // incase the reset fails inform upper layers.
@@ -418,6 +396,12 @@ ze_result_t LinuxSysmanImp::osColdReset() {
 OsSysman *OsSysman::create(SysmanDeviceImp *pParentSysmanDeviceImp) {
     LinuxSysmanImp *pLinuxSysmanImp = new LinuxSysmanImp(pParentSysmanDeviceImp);
     return static_cast<OsSysman *>(pLinuxSysmanImp);
+}
+std::vector<ze_device_handle_t> &LinuxSysmanImp::getDeviceHandles() {
+    return pParentSysmanDeviceImp->deviceHandles;
+}
+ze_device_handle_t LinuxSysmanImp::getCoreDeviceHandle() {
+    return pParentSysmanDeviceImp->hCoreDevice;
 }
 
 } // namespace L0

@@ -12,9 +12,9 @@
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/os_interface/linux/cache_info.h"
+#include "shared/source/os_interface/linux/drm_wrappers.h"
+#include "shared/source/os_interface/linux/i915_prelim.h"
 #include "shared/source/os_interface/linux/ioctl_helper.h"
-
-#include "third_party/uapi/prelim/drm/i915_drm.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -23,23 +23,19 @@
 
 namespace NEO {
 
-IoctlHelper *IoctlHelperPrelim20::clone() {
-    return new IoctlHelperPrelim20{};
-}
-
-bool IoctlHelperPrelim20::isVmBindAvailable(Drm *drm) {
+bool IoctlHelperPrelim20::isVmBindAvailable() {
     int vmBindSupported = 0;
-    drm_i915_getparam_t getParam = {};
+    GetParam getParam{};
     getParam.param = PRELIM_I915_PARAM_HAS_VM_BIND;
     getParam.value = &vmBindSupported;
-    int retVal = IoctlHelper::ioctl(drm, DRM_IOCTL_I915_GETPARAM, &getParam);
+    int retVal = IoctlHelper::ioctl(DrmIoctl::Getparam, &getParam);
     if (retVal) {
         return false;
     }
     return vmBindSupported;
 }
 
-uint32_t IoctlHelperPrelim20::createGemExt(Drm *drm, const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle) {
+uint32_t IoctlHelperPrelim20::createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, std::optional<uint32_t> vmId) {
     uint32_t regionsSize = static_cast<uint32_t>(memClassInstances.size());
     std::vector<prelim_drm_i915_gem_memory_class_instance> regions(regionsSize);
     for (uint32_t i = 0; i < regionsSize; i++) {
@@ -54,6 +50,13 @@ uint32_t IoctlHelperPrelim20::createGemExt(Drm *drm, const MemRegionsVec &memCla
     prelim_drm_i915_gem_create_ext_setparam setparamRegion{};
     setparamRegion.base.name = PRELIM_I915_GEM_CREATE_EXT_SETPARAM;
     setparamRegion.param = regionParam;
+
+    prelim_drm_i915_gem_create_ext_vm_private vmPrivate{};
+    if (vmId != std::nullopt) {
+        vmPrivate.base.name = PRELIM_I915_GEM_CREATE_EXT_VM_PRIVATE;
+        vmPrivate.vm_id = vmId.value();
+        setparamRegion.base.next_extension = reinterpret_cast<uintptr_t>(&vmPrivate);
+    }
 
     prelim_drm_i915_gem_create_ext createExt{};
     createExt.size = allocSize;
@@ -71,29 +74,17 @@ uint32_t IoctlHelperPrelim20::createGemExt(Drm *drm, const MemRegionsVec &memCla
         printDebugString(DebugManager.flags.PrintBOCreateDestroyResult.get(), stdout, "%s", " }\n");
     }
 
-    auto ret = IoctlHelper::ioctl(drm, PRELIM_DRM_IOCTL_I915_GEM_CREATE_EXT, &createExt);
+    auto ret = IoctlHelper::ioctl(DrmIoctl::GemCreateExt, &createExt);
 
     printDebugString(DebugManager.flags.PrintBOCreateDestroyResult.get(), stdout, "GEM_CREATE_EXT has returned: %d BO-%u with size: %lu\n", ret, createExt.handle, createExt.size);
     handle = createExt.handle;
     return ret;
 }
 
-std::vector<MemoryRegion> IoctlHelperPrelim20::translateToMemoryRegions(const std::vector<uint8_t> &regionInfo) {
-    auto *data = reinterpret_cast<const prelim_drm_i915_query_memory_regions *>(regionInfo.data());
-    auto memRegions = std::vector<MemoryRegion>(data->num_regions);
-    for (uint32_t i = 0; i < data->num_regions; i++) {
-        memRegions[i].probedSize = data->regions[i].probed_size;
-        memRegions[i].unallocatedSize = data->regions[i].unallocated_size;
-        memRegions[i].region.memoryClass = data->regions[i].region.memory_class;
-        memRegions[i].region.memoryInstance = data->regions[i].region.memory_instance;
-    }
-    return memRegions;
-}
-
-CacheRegion IoctlHelperPrelim20::closAlloc(Drm *drm) {
+CacheRegion IoctlHelperPrelim20::closAlloc() {
     struct prelim_drm_i915_gem_clos_reserve clos = {};
 
-    int ret = IoctlHelper::ioctl(drm, PRELIM_DRM_IOCTL_I915_GEM_CLOS_RESERVE, &clos);
+    int ret = IoctlHelper::ioctl(DrmIoctl::GemClosReserve, &clos);
     if (ret != 0) {
         int err = errno;
         printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "ioctl(I915_GEM_CLOS_RESERVE) failed with %d. errno=%d(%s)\n", ret, err, strerror(err));
@@ -104,14 +95,14 @@ CacheRegion IoctlHelperPrelim20::closAlloc(Drm *drm) {
     return static_cast<CacheRegion>(clos.clos_index);
 }
 
-uint16_t IoctlHelperPrelim20::closAllocWays(Drm *drm, CacheRegion closIndex, uint16_t cacheLevel, uint16_t numWays) {
+uint16_t IoctlHelperPrelim20::closAllocWays(CacheRegion closIndex, uint16_t cacheLevel, uint16_t numWays) {
     struct prelim_drm_i915_gem_cache_reserve cache = {};
 
     cache.clos_index = static_cast<uint16_t>(closIndex);
     cache.cache_level = cacheLevel;
     cache.num_ways = numWays;
 
-    int ret = IoctlHelper::ioctl(drm, PRELIM_DRM_IOCTL_I915_GEM_CACHE_RESERVE, &cache);
+    int ret = IoctlHelper::ioctl(DrmIoctl::GemCacheReserve, &cache);
     if (ret != 0) {
         int err = errno;
         PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "ioctl(I915_GEM_CACHE_RESERVE) failed with %d. errno=%d(%s)\n", ret, err, strerror(err));
@@ -121,12 +112,12 @@ uint16_t IoctlHelperPrelim20::closAllocWays(Drm *drm, CacheRegion closIndex, uin
     return cache.num_ways;
 }
 
-CacheRegion IoctlHelperPrelim20::closFree(Drm *drm, CacheRegion closIndex) {
+CacheRegion IoctlHelperPrelim20::closFree(CacheRegion closIndex) {
     struct prelim_drm_i915_gem_clos_free clos = {};
 
     clos.clos_index = static_cast<uint16_t>(closIndex);
 
-    int ret = IoctlHelper::ioctl(drm, PRELIM_DRM_IOCTL_I915_GEM_CLOS_FREE, &clos);
+    int ret = IoctlHelper::ioctl(DrmIoctl::GemClosFree, &clos);
     if (ret != 0) {
         int err = errno;
         printDebugString(DebugManager.flags.PrintDebugMessages.get(), stderr, "ioctl(I915_GEM_CLOS_FREE) failed with %d. errno=%d(%s)\n", ret, err, strerror(err));
@@ -137,7 +128,7 @@ CacheRegion IoctlHelperPrelim20::closFree(Drm *drm, CacheRegion closIndex) {
     return closIndex;
 }
 
-int IoctlHelperPrelim20::waitUserFence(Drm *drm, uint32_t ctxId, uint64_t address,
+int IoctlHelperPrelim20::waitUserFence(uint32_t ctxId, uint64_t address,
                                        uint64_t value, uint32_t dataWidth, int64_t timeout, uint16_t flags) {
     prelim_drm_i915_gem_wait_user_fence wait = {};
 
@@ -164,11 +155,7 @@ int IoctlHelperPrelim20::waitUserFence(Drm *drm, uint32_t ctxId, uint64_t addres
     wait.value = value;
     wait.timeout = timeout;
 
-    return IoctlHelper::ioctl(drm, PRELIM_DRM_IOCTL_I915_GEM_WAIT_USER_FENCE, &wait);
-}
-
-uint32_t IoctlHelperPrelim20::getHwConfigIoctlVal() {
-    return PRELIM_DRM_I915_QUERY_HWCONFIG_TABLE;
+    return IoctlHelper::ioctl(DrmIoctl::GemWaitUserFence, &wait);
 }
 
 uint32_t IoctlHelperPrelim20::getAtomicAdvise(bool isNonAtomic) {
@@ -179,7 +166,7 @@ uint32_t IoctlHelperPrelim20::getPreferredLocationAdvise() {
     return PRELIM_I915_VM_ADVISE_PREFERRED_LOCATION;
 }
 
-bool IoctlHelperPrelim20::setVmBoAdvise(Drm *drm, int32_t handle, uint32_t attribute, void *region) {
+bool IoctlHelperPrelim20::setVmBoAdvise(int32_t handle, uint32_t attribute, void *region) {
     prelim_drm_i915_gem_vm_advise vmAdvise{};
 
     vmAdvise.handle = handle;
@@ -188,7 +175,7 @@ bool IoctlHelperPrelim20::setVmBoAdvise(Drm *drm, int32_t handle, uint32_t attri
         vmAdvise.region = *reinterpret_cast<prelim_drm_i915_gem_memory_class_instance *>(region);
     }
 
-    int ret = IoctlHelper::ioctl(drm, PRELIM_DRM_IOCTL_I915_GEM_VM_ADVISE, &vmAdvise);
+    int ret = IoctlHelper::ioctl(DrmIoctl::GemVmAdvise, &vmAdvise);
     if (ret != 0) {
         int err = errno;
         PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "ioctl(PRELIM_DRM_I915_GEM_VM_ADVISE) failed with %d. errno=%d(%s)\n", ret, err, strerror(err));
@@ -198,14 +185,14 @@ bool IoctlHelperPrelim20::setVmBoAdvise(Drm *drm, int32_t handle, uint32_t attri
     return true;
 }
 
-bool IoctlHelperPrelim20::setVmPrefetch(Drm *drm, uint64_t start, uint64_t length, uint32_t region) {
+bool IoctlHelperPrelim20::setVmPrefetch(uint64_t start, uint64_t length, uint32_t region) {
     prelim_drm_i915_gem_vm_prefetch vmPrefetch{};
 
     vmPrefetch.length = length;
     vmPrefetch.region = region;
     vmPrefetch.start = start;
 
-    int ret = IoctlHelper::ioctl(drm, PRELIM_DRM_IOCTL_I915_GEM_VM_PREFETCH, &vmPrefetch);
+    int ret = IoctlHelper::ioctl(DrmIoctl::GemVmPrefetch, &vmPrefetch);
     if (ret != 0) {
         int err = errno;
         PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "ioctl(PRELIM_DRM_I915_GEM_VM_PREFETCH) failed with %d. errno=%d(%s)\n", ret, err, strerror(err));
@@ -219,40 +206,28 @@ uint32_t IoctlHelperPrelim20::getDirectSubmissionFlag() {
     return PRELIM_I915_CONTEXT_CREATE_FLAGS_LONG_RUNNING;
 }
 
-int32_t IoctlHelperPrelim20::getMemRegionsIoctlVal() {
-    return PRELIM_DRM_I915_QUERY_MEMORY_REGIONS;
-}
-
-int32_t IoctlHelperPrelim20::getEngineInfoIoctlVal() {
-    return PRELIM_DRM_I915_QUERY_ENGINE_INFO;
-}
-
-uint32_t IoctlHelperPrelim20::getComputeSlicesIoctlVal() {
-    return PRELIM_DRM_I915_QUERY_COMPUTE_SLICES;
-}
-
 uint16_t IoctlHelperPrelim20::getWaitUserFenceSoftFlag() {
     return PRELIM_I915_UFENCE_WAIT_SOFT;
 };
 
-int IoctlHelperPrelim20::execBuffer(Drm *drm, drm_i915_gem_execbuffer2 *execBuffer, uint64_t completionGpuAddress, uint32_t counterValue) {
+int IoctlHelperPrelim20::execBuffer(ExecBuffer *execBuffer, uint64_t completionGpuAddress, uint32_t counterValue) {
     prelim_drm_i915_gem_execbuffer_ext_user_fence fenceObject = {};
     if (completionGpuAddress != 0) {
         fenceObject.base.name = PRELIM_DRM_I915_GEM_EXECBUFFER_EXT_USER_FENCE;
         fenceObject.addr = completionGpuAddress;
         fenceObject.value = counterValue;
 
-        execBuffer->flags |= I915_EXEC_USE_EXTENSIONS;
-        execBuffer->num_cliprects = 0;
-        execBuffer->cliprects_ptr = castToUint64(&fenceObject);
+        auto &drmExecBuffer = *reinterpret_cast<drm_i915_gem_execbuffer2 *>(execBuffer->data);
+        drmExecBuffer.flags |= I915_EXEC_USE_EXTENSIONS;
+        drmExecBuffer.num_cliprects = 0;
+        drmExecBuffer.cliprects_ptr = castToUint64(&fenceObject);
     }
 
-    return IoctlHelper::ioctl(drm, DRM_IOCTL_I915_GEM_EXECBUFFER2, execBuffer);
+    return IoctlHelper::ioctl(DrmIoctl::GemExecbuffer2, execBuffer);
 }
 
-bool IoctlHelperPrelim20::completionFenceExtensionSupported(const HardwareInfo &hwInfo, const bool isVmBindAvailable) {
-    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-    return hwHelper.isLinuxCompletionFenceSupported() && isVmBindAvailable;
+bool IoctlHelperPrelim20::completionFenceExtensionSupported(const bool isVmBindAvailable) {
+    return isVmBindAvailable;
 }
 
 std::unique_ptr<uint8_t[]> IoctlHelperPrelim20::prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles) {
@@ -285,20 +260,6 @@ uint64_t IoctlHelperPrelim20::getFlagsForVmBind(bool bindCapture, bool bindImmed
     return flags;
 }
 
-std::vector<EngineCapabilities> IoctlHelperPrelim20::translateToEngineCaps(const std::vector<uint8_t> &data) {
-    auto engineInfo = reinterpret_cast<const prelim_drm_i915_query_engine_info *>(data.data());
-    std::vector<EngineCapabilities> engines;
-    engines.reserve(engineInfo->num_engines);
-    for (uint32_t i = 0; i < engineInfo->num_engines; i++) {
-        EngineCapabilities engine{};
-        engine.capabilities = engineInfo->engines[i].capabilities;
-        engine.engine.engineClass = engineInfo->engines[i].engine.engine_class;
-        engine.engine.engineInstance = engineInfo->engines[i].engine.engine_instance;
-        engines.push_back(engine);
-    }
-    return engines;
-}
-
 prelim_drm_i915_query_distance_info translateToi915(const DistanceInfo &distanceInfo) {
     prelim_drm_i915_query_distance_info dist{};
     dist.engine.engine_class = distanceInfo.engine.engineClass;
@@ -309,46 +270,45 @@ prelim_drm_i915_query_distance_info translateToi915(const DistanceInfo &distance
     return dist;
 }
 
-uint32_t IoctlHelperPrelim20::queryDistances(Drm *drm, std::vector<drm_i915_query_item> &queryItems, std::vector<DistanceInfo> &distanceInfos) {
+uint32_t IoctlHelperPrelim20::queryDistances(std::vector<QueryItem> &queryItems, std::vector<DistanceInfo> &distanceInfos) {
     std::vector<prelim_drm_i915_query_distance_info> i915Distances(distanceInfos.size());
     std::transform(distanceInfos.begin(), distanceInfos.end(), i915Distances.begin(), translateToi915);
 
     for (auto i = 0u; i < i915Distances.size(); i++) {
-        queryItems[i].query_id = PRELIM_DRM_I915_QUERY_DISTANCE_INFO;
+        queryItems[i].queryId = PRELIM_DRM_I915_QUERY_DISTANCE_INFO;
         queryItems[i].length = sizeof(prelim_drm_i915_query_distance_info);
         queryItems[i].flags = 0u;
-        queryItems[i].data_ptr = reinterpret_cast<__u64>(&i915Distances[i]);
+        queryItems[i].dataPtr = reinterpret_cast<uint64_t>(&i915Distances[i]);
     }
 
-    drm_i915_query query{};
-    query.items_ptr = reinterpret_cast<__u64>(queryItems.data());
-    query.num_items = static_cast<uint32_t>(queryItems.size());
-    auto ret = IoctlHelper::ioctl(drm, DRM_IOCTL_I915_QUERY, &query);
+    Query query{};
+    query.itemsPtr = reinterpret_cast<uint64_t>(queryItems.data());
+    query.numItems = static_cast<uint32_t>(queryItems.size());
+    auto ret = IoctlHelper::ioctl(DrmIoctl::Query, &query);
     for (auto i = 0u; i < i915Distances.size(); i++) {
         distanceInfos[i].distance = i915Distances[i].distance;
     }
     return ret;
 }
 
-int32_t IoctlHelperPrelim20::getComputeEngineClass() {
-    return PRELIM_I915_ENGINE_CLASS_COMPUTE;
-}
-
-std::optional<int> IoctlHelperPrelim20::getHasPageFaultParamId() {
-    return PRELIM_I915_PARAM_HAS_PAGE_FAULT;
+std::optional<DrmParam> IoctlHelperPrelim20::getHasPageFaultParamId() {
+    return DrmParam::ParamHasPageFault;
 };
 
-bool IoctlHelperPrelim20::getEuStallProperties(std::array<uint64_t, 10u> &properties, uint64_t dssBufferSize, uint64_t samplingRate, uint64_t pollPeriod, uint64_t engineInstance) {
-    properties[0] = PRELIM_DRM_I915_EU_STALL_PROP_BUF_SZ;
+bool IoctlHelperPrelim20::getEuStallProperties(std::array<uint64_t, 12u> &properties, uint64_t dssBufferSize, uint64_t samplingRate,
+                                               uint64_t pollPeriod, uint64_t engineInstance, uint64_t notifyNReports) {
+    properties[0] = prelim_drm_i915_eu_stall_property_id::PRELIM_DRM_I915_EU_STALL_PROP_BUF_SZ;
     properties[1] = dssBufferSize;
-    properties[2] = PRELIM_DRM_I915_EU_STALL_PROP_SAMPLE_RATE;
+    properties[2] = prelim_drm_i915_eu_stall_property_id::PRELIM_DRM_I915_EU_STALL_PROP_SAMPLE_RATE;
     properties[3] = samplingRate;
-    properties[4] = PRELIM_DRM_I915_EU_STALL_PROP_POLL_PERIOD;
+    properties[4] = prelim_drm_i915_eu_stall_property_id::PRELIM_DRM_I915_EU_STALL_PROP_POLL_PERIOD;
     properties[5] = pollPeriod;
-    properties[6] = PRELIM_DRM_I915_EU_STALL_PROP_ENGINE_CLASS;
-    properties[7] = PRELIM_I915_ENGINE_CLASS_COMPUTE;
-    properties[8] = PRELIM_DRM_I915_EU_STALL_PROP_ENGINE_INSTANCE;
+    properties[6] = prelim_drm_i915_eu_stall_property_id::PRELIM_DRM_I915_EU_STALL_PROP_ENGINE_CLASS;
+    properties[7] = prelim_drm_i915_gem_engine_class::PRELIM_I915_ENGINE_CLASS_COMPUTE;
+    properties[8] = prelim_drm_i915_eu_stall_property_id::PRELIM_DRM_I915_EU_STALL_PROP_ENGINE_INSTANCE;
     properties[9] = engineInstance;
+    properties[10] = prelim_drm_i915_eu_stall_property_id::PRELIM_DRM_I915_EU_STALL_PROP_EVENT_REPORT_COUNT;
+    properties[11] = notifyNReports;
 
     return true;
 }
@@ -374,7 +334,7 @@ std::unique_ptr<uint8_t[]> IoctlHelperPrelim20::createVmControlExtRegion(const s
     return {};
 }
 
-uint32_t IoctlHelperPrelim20::getFlagsForVmCreate(bool disableScratch, bool enablePageFault) {
+uint32_t IoctlHelperPrelim20::getFlagsForVmCreate(bool disableScratch, bool enablePageFault, bool useVmBind) {
     uint32_t flags = 0u;
     if (disableScratch) {
         flags |= PRELIM_I915_VM_CREATE_FLAGS_DISABLE_SCRATCH;
@@ -384,41 +344,45 @@ uint32_t IoctlHelperPrelim20::getFlagsForVmCreate(bool disableScratch, bool enab
         flags |= PRELIM_I915_VM_CREATE_FLAGS_ENABLE_PAGE_FAULT;
     }
 
+    if (useVmBind) {
+        flags |= PRELIM_I915_VM_CREATE_FLAGS_USE_VM_BIND;
+    }
+
     return flags;
 }
 
-uint32_t gemCreateContextExt(Drm *drm, drm_i915_gem_context_create_ext &gcc, drm_i915_gem_context_create_ext_setparam &extSetparam) {
+uint32_t gemCreateContextExt(IoctlHelper &ioctlHelper, GemContextCreateExt &gcc, GemContextCreateExtSetParam &extSetparam) {
     gcc.flags |= I915_CONTEXT_CREATE_FLAGS_USE_EXTENSIONS;
-    extSetparam.base.next_extension = gcc.extensions;
+    extSetparam.base.nextExtension = gcc.extensions;
     gcc.extensions = reinterpret_cast<uint64_t>(&extSetparam);
 
-    auto ioctlResult = IoctlHelper::ioctl(drm, DRM_IOCTL_I915_GEM_CONTEXT_CREATE_EXT, &gcc);
+    auto ioctlResult = ioctlHelper.ioctl(DrmIoctl::GemContextCreateExt, &gcc);
     UNRECOVERABLE_IF(ioctlResult != 0);
-    return gcc.ctx_id;
+    return gcc.contextId;
 }
 
-uint32_t gemCreateContextAcc(Drm *drm, drm_i915_gem_context_create_ext &gcc, uint16_t trigger, uint8_t granularity) {
+uint32_t gemCreateContextAcc(IoctlHelper &ioctlHelper, GemContextCreateExt &gcc, uint16_t trigger, uint8_t granularity) {
     prelim_drm_i915_gem_context_param_acc paramAcc = {};
     paramAcc.trigger = trigger;
     paramAcc.notify = 1;
     paramAcc.granularity = granularity;
 
-    i915_user_extension userExt = {};
+    DrmUserExtension userExt{};
     userExt.name = I915_CONTEXT_CREATE_EXT_SETPARAM;
 
-    drm_i915_gem_context_param ctxParam = {};
+    GemContextParam ctxParam = {};
     ctxParam.param = PRELIM_I915_CONTEXT_PARAM_ACC;
-    ctxParam.ctx_id = 0;
+    ctxParam.contextId = 0;
     ctxParam.size = sizeof(paramAcc);
     ctxParam.value = reinterpret_cast<uint64_t>(&paramAcc);
 
-    drm_i915_gem_context_create_ext_setparam extSetparam = {};
+    GemContextCreateExtSetParam extSetparam{};
     extSetparam.base = userExt;
     extSetparam.param = ctxParam;
 
-    return gemCreateContextExt(drm, gcc, extSetparam);
+    return gemCreateContextExt(ioctlHelper, gcc, extSetparam);
 }
-uint32_t IoctlHelperPrelim20::createContextWithAccessCounters(Drm *drm, drm_i915_gem_context_create_ext &gcc) {
+uint32_t IoctlHelperPrelim20::createContextWithAccessCounters(GemContextCreateExt &gcc) {
     uint16_t trigger = 0;
     if (DebugManager.flags.AccessCountersTrigger.get() != -1) {
         trigger = static_cast<uint16_t>(DebugManager.flags.AccessCountersTrigger.get());
@@ -427,34 +391,30 @@ uint32_t IoctlHelperPrelim20::createContextWithAccessCounters(Drm *drm, drm_i915
     if (DebugManager.flags.AccessCountersGranularity.get() != -1) {
         granularity = static_cast<uint8_t>(DebugManager.flags.AccessCountersGranularity.get());
     }
-    return gemCreateContextAcc(drm, gcc, trigger, granularity);
+    return gemCreateContextAcc(*this, gcc, trigger, granularity);
 }
 
-uint32_t IoctlHelperPrelim20::createCooperativeContext(Drm *drm, drm_i915_gem_context_create_ext &gcc) {
-    struct drm_i915_gem_context_create_ext_setparam extSetparam = {};
+uint32_t IoctlHelperPrelim20::createCooperativeContext(GemContextCreateExt &gcc) {
+    GemContextCreateExtSetParam extSetparam{};
     extSetparam.base.name = I915_CONTEXT_CREATE_EXT_SETPARAM;
     extSetparam.param.param = PRELIM_I915_CONTEXT_PARAM_RUNALONE;
-    return gemCreateContextExt(drm, gcc, extSetparam);
+    return gemCreateContextExt(*this, gcc, extSetparam);
 }
 
-std::unique_ptr<uint8_t[]> IoctlHelperPrelim20::createVmBindExtSetPat() {
-    return std::make_unique<uint8_t[]>(sizeof(prelim_drm_i915_vm_bind_ext_set_pat));
-};
+static_assert(sizeof(VmBindExtSetPatT) == sizeof(prelim_drm_i915_vm_bind_ext_set_pat), "Invalid size for VmBindExtSetPat");
 
-void IoctlHelperPrelim20::fillVmBindExtSetPat(const std::unique_ptr<uint8_t[]> &vmBindExtSetPat, uint64_t patIndex, uint64_t nextExtension) {
-    auto prelimVmBindExtSetPat = reinterpret_cast<prelim_drm_i915_vm_bind_ext_set_pat *>(vmBindExtSetPat.get());
+void IoctlHelperPrelim20::fillVmBindExtSetPat(VmBindExtSetPatT &vmBindExtSetPat, uint64_t patIndex, uint64_t nextExtension) {
+    auto prelimVmBindExtSetPat = reinterpret_cast<prelim_drm_i915_vm_bind_ext_set_pat *>(vmBindExtSetPat);
     UNRECOVERABLE_IF(!prelimVmBindExtSetPat);
     prelimVmBindExtSetPat->base.name = PRELIM_I915_VM_BIND_EXT_SET_PAT;
     prelimVmBindExtSetPat->pat_index = patIndex;
     prelimVmBindExtSetPat->base.next_extension = nextExtension;
 }
 
-std::unique_ptr<uint8_t[]> IoctlHelperPrelim20::createVmBindExtUserFence() {
-    return std::make_unique<uint8_t[]>(sizeof(prelim_drm_i915_vm_bind_ext_user_fence));
-}
+static_assert(sizeof(VmBindExtUserFenceT) == sizeof(prelim_drm_i915_vm_bind_ext_user_fence), "Invalid size for VmBindExtUserFence");
 
-void IoctlHelperPrelim20::fillVmBindExtUserFence(const std::unique_ptr<uint8_t[]> &vmBindExtUserFence, uint64_t fenceAddress, uint64_t fenceValue, uint64_t nextExtension) {
-    auto prelimVmBindExtUserFence = reinterpret_cast<prelim_drm_i915_vm_bind_ext_user_fence *>(vmBindExtUserFence.get());
+void IoctlHelperPrelim20::fillVmBindExtUserFence(VmBindExtUserFenceT &vmBindExtUserFence, uint64_t fenceAddress, uint64_t fenceValue, uint64_t nextExtension) {
+    auto prelimVmBindExtUserFence = reinterpret_cast<prelim_drm_i915_vm_bind_ext_user_fence *>(vmBindExtUserFence);
     UNRECOVERABLE_IF(!prelimVmBindExtUserFence);
     prelimVmBindExtUserFence->base.name = PRELIM_I915_VM_BIND_EXT_USER_FENCE;
     prelimVmBindExtUserFence->base.next_extension = nextExtension;
@@ -493,24 +453,24 @@ prelim_drm_i915_gem_vm_bind translateVmBindParamsToPrelimStruct(const VmBindPara
     return vmBind;
 }
 
-int IoctlHelperPrelim20::vmBind(Drm *drm, const VmBindParams &vmBindParams) {
+int IoctlHelperPrelim20::vmBind(const VmBindParams &vmBindParams) {
     auto prelimVmBind = translateVmBindParamsToPrelimStruct(vmBindParams);
-    return IoctlHelper::ioctl(drm, PRELIM_DRM_IOCTL_I915_GEM_VM_BIND, &prelimVmBind);
+    return IoctlHelper::ioctl(DrmIoctl::GemVmBind, &prelimVmBind);
 }
 
-int IoctlHelperPrelim20::vmUnbind(Drm *drm, const VmBindParams &vmBindParams) {
+int IoctlHelperPrelim20::vmUnbind(const VmBindParams &vmBindParams) {
     auto prelimVmBind = translateVmBindParamsToPrelimStruct(vmBindParams);
-    return IoctlHelper::ioctl(drm, PRELIM_DRM_IOCTL_I915_GEM_VM_UNBIND, &prelimVmBind);
+    return IoctlHelper::ioctl(DrmIoctl::GemVmUnbind, &prelimVmBind);
 }
 
-UuidRegisterResult IoctlHelperPrelim20::registerUuid(Drm *drm, const std::string &uuid, uint32_t uuidClass, uint64_t ptr, uint64_t size) {
+UuidRegisterResult IoctlHelperPrelim20::registerUuid(const std::string &uuid, uint32_t uuidClass, uint64_t ptr, uint64_t size) {
     prelim_drm_i915_uuid_control uuidControl = {};
     memcpy_s(uuidControl.uuid, sizeof(uuidControl.uuid), uuid.c_str(), uuid.size());
     uuidControl.uuid_class = uuidClass;
     uuidControl.ptr = ptr;
     uuidControl.size = size;
 
-    const auto retVal = IoctlHelper::ioctl(drm, PRELIM_DRM_IOCTL_I915_UUID_REGISTER, &uuidControl);
+    const auto retVal = IoctlHelper::ioctl(DrmIoctl::UuidRegister, &uuidControl);
 
     return {
         retVal,
@@ -518,40 +478,133 @@ UuidRegisterResult IoctlHelperPrelim20::registerUuid(Drm *drm, const std::string
     };
 }
 
-UuidRegisterResult IoctlHelperPrelim20::registerStringClassUuid(Drm *drm, const std::string &uuid, uint64_t ptr, uint64_t size) {
-    return registerUuid(drm, uuid, PRELIM_I915_UUID_CLASS_STRING, ptr, size);
+UuidRegisterResult IoctlHelperPrelim20::registerStringClassUuid(const std::string &uuid, uint64_t ptr, uint64_t size) {
+    return registerUuid(uuid, PRELIM_I915_UUID_CLASS_STRING, ptr, size);
 }
 
-int IoctlHelperPrelim20::unregisterUuid(Drm *drm, uint32_t handle) {
+int IoctlHelperPrelim20::unregisterUuid(uint32_t handle) {
     prelim_drm_i915_uuid_control uuidControl = {};
     uuidControl.handle = handle;
 
-    return IoctlHelper::ioctl(drm, PRELIM_DRM_IOCTL_I915_UUID_UNREGISTER, &uuidControl);
+    return IoctlHelper::ioctl(DrmIoctl::UuidUnregister, &uuidControl);
 }
 
-bool IoctlHelperPrelim20::isContextDebugSupported(Drm *drm) {
+bool IoctlHelperPrelim20::isContextDebugSupported() {
     drm_i915_gem_context_param ctxParam = {};
     ctxParam.size = 0;
     ctxParam.param = PRELIM_I915_CONTEXT_PARAM_DEBUG_FLAGS;
     ctxParam.ctx_id = 0;
     ctxParam.value = 0;
 
-    const auto retVal = IoctlHelper::ioctl(drm, DRM_IOCTL_I915_GEM_CONTEXT_GETPARAM, &ctxParam);
+    const auto retVal = IoctlHelper::ioctl(DrmIoctl::GemContextGetparam, &ctxParam);
     return retVal == 0 && ctxParam.value == (PRELIM_I915_CONTEXT_PARAM_DEBUG_FLAG_SIP << 32);
 }
 
-int IoctlHelperPrelim20::setContextDebugFlag(Drm *drm, uint32_t drmContextId) {
+int IoctlHelperPrelim20::setContextDebugFlag(uint32_t drmContextId) {
     drm_i915_gem_context_param ctxParam = {};
     ctxParam.size = 0;
     ctxParam.param = PRELIM_I915_CONTEXT_PARAM_DEBUG_FLAGS;
     ctxParam.ctx_id = drmContextId;
     ctxParam.value = PRELIM_I915_CONTEXT_PARAM_DEBUG_FLAG_SIP << 32 | PRELIM_I915_CONTEXT_PARAM_DEBUG_FLAG_SIP;
 
-    return IoctlHelper::ioctl(drm, DRM_IOCTL_I915_GEM_CONTEXT_SETPARAM, &ctxParam);
+    return IoctlHelper::ioctl(DrmIoctl::GemContextSetparam, &ctxParam);
 }
 
 bool IoctlHelperPrelim20::isDebugAttachAvailable() {
     return true;
 }
+
+unsigned int IoctlHelperPrelim20::getIoctlRequestValue(DrmIoctl ioctlRequest) const {
+    switch (ioctlRequest) {
+    case DrmIoctl::GemVmBind:
+        return PRELIM_DRM_IOCTL_I915_GEM_VM_BIND;
+    case DrmIoctl::GemVmUnbind:
+        return PRELIM_DRM_IOCTL_I915_GEM_VM_UNBIND;
+    case DrmIoctl::GemWaitUserFence:
+        return PRELIM_DRM_IOCTL_I915_GEM_WAIT_USER_FENCE;
+    case DrmIoctl::GemCreateExt:
+        return PRELIM_DRM_IOCTL_I915_GEM_CREATE_EXT;
+    case DrmIoctl::GemVmAdvise:
+        return PRELIM_DRM_IOCTL_I915_GEM_VM_ADVISE;
+    case DrmIoctl::GemVmPrefetch:
+        return PRELIM_DRM_IOCTL_I915_GEM_VM_PREFETCH;
+    case DrmIoctl::UuidRegister:
+        return PRELIM_DRM_IOCTL_I915_UUID_REGISTER;
+    case DrmIoctl::UuidUnregister:
+        return PRELIM_DRM_IOCTL_I915_UUID_UNREGISTER;
+    case DrmIoctl::DebuggerOpen:
+        return PRELIM_DRM_IOCTL_I915_DEBUGGER_OPEN;
+    case DrmIoctl::GemClosReserve:
+        return PRELIM_DRM_IOCTL_I915_GEM_CLOS_RESERVE;
+    case DrmIoctl::GemClosFree:
+        return PRELIM_DRM_IOCTL_I915_GEM_CLOS_FREE;
+    case DrmIoctl::GemCacheReserve:
+        return PRELIM_DRM_IOCTL_I915_GEM_CACHE_RESERVE;
+    default:
+        return getIoctlRequestValueBase(ioctlRequest);
+    }
+}
+
+int IoctlHelperPrelim20::getDrmParamValue(DrmParam drmParam) const {
+    switch (drmParam) {
+    case DrmParam::EngineClassCompute:
+        return prelim_drm_i915_gem_engine_class::PRELIM_I915_ENGINE_CLASS_COMPUTE;
+    case DrmParam::ParamHasVmBind:
+        return PRELIM_I915_PARAM_HAS_VM_BIND;
+    case DrmParam::ParamHasPageFault:
+        return PRELIM_I915_PARAM_HAS_PAGE_FAULT;
+    case DrmParam::QueryHwconfigTable:
+        return PRELIM_DRM_I915_QUERY_HWCONFIG_TABLE;
+    case DrmParam::QueryComputeSlices:
+        return PRELIM_DRM_I915_QUERY_COMPUTE_SLICES;
+    default:
+        return getDrmParamValueBase(drmParam);
+    }
+}
+std::string IoctlHelperPrelim20::getDrmParamString(DrmParam drmParam) const {
+    switch (drmParam) {
+    case DrmParam::ParamHasVmBind:
+        return "PRELIM_I915_PARAM_HAS_VM_BIND";
+    case DrmParam::ParamHasPageFault:
+        return "PRELIM_I915_PARAM_HAS_PAGE_FAULT";
+    default:
+        return getDrmParamStringBase(drmParam);
+    }
+}
+
+std::string IoctlHelperPrelim20::getIoctlString(DrmIoctl ioctlRequest) const {
+    switch (ioctlRequest) {
+    case DrmIoctl::GemVmBind:
+        return "PRELIM_DRM_IOCTL_I915_GEM_VM_BIND";
+    case DrmIoctl::GemVmUnbind:
+        return "PRELIM_DRM_IOCTL_I915_GEM_VM_UNBIND";
+    case DrmIoctl::GemWaitUserFence:
+        return "PRELIM_DRM_IOCTL_I915_GEM_WAIT_USER_FENCE";
+    case DrmIoctl::GemCreateExt:
+        return "PRELIM_DRM_IOCTL_I915_GEM_CREATE_EXT";
+    case DrmIoctl::GemVmAdvise:
+        return "PRELIM_DRM_IOCTL_I915_GEM_VM_ADVISE";
+    case DrmIoctl::GemVmPrefetch:
+        return "PRELIM_DRM_IOCTL_I915_GEM_VM_PREFETCH";
+    case DrmIoctl::UuidRegister:
+        return "PRELIM_DRM_IOCTL_I915_UUID_REGISTER";
+    case DrmIoctl::UuidUnregister:
+        return "PRELIM_DRM_IOCTL_I915_UUID_UNREGISTER";
+    case DrmIoctl::DebuggerOpen:
+        return "PRELIM_DRM_IOCTL_I915_DEBUGGER_OPEN";
+    case DrmIoctl::GemClosReserve:
+        return "PRELIM_DRM_IOCTL_I915_GEM_CLOS_RESERVE";
+    case DrmIoctl::GemClosFree:
+        return "PRELIM_DRM_IOCTL_I915_GEM_CLOS_FREE";
+    case DrmIoctl::GemCacheReserve:
+        return "PRELIM_DRM_IOCTL_I915_GEM_CACHE_RESERVE";
+    default:
+        return getIoctlStringBase(ioctlRequest);
+    }
+}
+
+static_assert(sizeof(MemoryClassInstance) == sizeof(prelim_drm_i915_gem_memory_class_instance));
+static_assert(offsetof(MemoryClassInstance, memoryClass) == offsetof(prelim_drm_i915_gem_memory_class_instance, memory_class));
+static_assert(offsetof(MemoryClassInstance, memoryInstance) == offsetof(prelim_drm_i915_gem_memory_class_instance, memory_instance));
 
 } // namespace NEO

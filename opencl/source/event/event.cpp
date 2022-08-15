@@ -13,6 +13,7 @@
 #include "shared/source/helpers/get_info.h"
 #include "shared/source/helpers/timestamp_packet.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
+#include "shared/source/utilities/perf_counter.h"
 #include "shared/source/utilities/range.h"
 #include "shared/source/utilities/stackvec.h"
 #include "shared/source/utilities/tag_allocator.h"
@@ -248,20 +249,20 @@ cl_ulong Event::getDelta(cl_ulong startTime,
 
     auto &hwInfo = cmdQueue->getDevice().getHardwareInfo();
 
-    cl_ulong Max = maxNBitValue(hwInfo.capabilityTable.kernelTimestampValidBits);
-    cl_ulong Delta = 0;
+    cl_ulong max = maxNBitValue(hwInfo.capabilityTable.kernelTimestampValidBits);
+    cl_ulong delta = 0;
 
-    startTime &= Max;
-    endTime &= Max;
+    startTime &= max;
+    endTime &= max;
 
     if (startTime > endTime) {
-        Delta = Max - startTime;
-        Delta += endTime;
+        delta = max - startTime;
+        delta += endTime;
     } else {
-        Delta = endTime - startTime;
+        delta = endTime - startTime;
     }
 
-    return Delta;
+    return delta;
 }
 
 void Event::calculateSubmitTimestampData() {
@@ -570,6 +571,7 @@ void Event::transitionExecutionStatus(int32_t newExecutionStatus) const {
 void Event::submitCommand(bool abortTasks) {
     std::unique_ptr<Command> cmdToProcess(cmdToSubmit.exchange(nullptr));
     if (cmdToProcess.get() != nullptr) {
+        getCommandQueue()->initializeBcsEngine(getCommandQueue()->isSpecial());
         auto lockCSR = getCommandQueue()->getGpgpuCommandStreamReceiver().obtainUniqueOwnership();
 
         if (this->isProfilingEnabled()) {
@@ -680,9 +682,36 @@ bool Event::isCompleted() {
     return cmdQueue->isCompleted(getCompletionStamp(), this->bcsState) || this->areTimestampsCompleted();
 }
 
+bool Event::isWaitForTimestampsEnabled() const {
+    const auto &hwInfo = cmdQueue->getDevice().getHardwareInfo();
+    const auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    auto enabled = cmdQueue->isTimestampWaitEnabled();
+    enabled &= hwHelper.isTimestampWaitSupportedForEvents(hwInfo);
+
+    switch (DebugManager.flags.EnableTimestampWaitForEvents.get()) {
+    case 0:
+        enabled = false;
+        break;
+    case 1:
+        enabled = cmdQueue->getGpgpuCommandStreamReceiver().isUpdateTagFromWaitEnabled();
+        break;
+    case 2:
+        enabled = cmdQueue->getGpgpuCommandStreamReceiver().isDirectSubmissionEnabled();
+        break;
+    case 3:
+        enabled = cmdQueue->getGpgpuCommandStreamReceiver().isAnyDirectSubmissionEnabled();
+        break;
+    case 4:
+        enabled = true;
+        break;
+    }
+
+    return enabled;
+}
+
 bool Event::areTimestampsCompleted() {
     if (this->timestampPacketContainer.get()) {
-        if (this->cmdQueue->isWaitForTimestampsEnabled()) {
+        if (this->isWaitForTimestampsEnabled()) {
             for (const auto &timestamp : this->timestampPacketContainer->peekNodes()) {
                 for (uint32_t i = 0; i < timestamp->getPacketsUsed(); i++) {
                     this->cmdQueue->getGpgpuCommandStreamReceiver().downloadAllocation(*timestamp->getBaseGraphicsAllocation()->getGraphicsAllocation(this->cmdQueue->getGpgpuCommandStreamReceiver().getRootDeviceIndex()));
@@ -868,6 +897,10 @@ bool Event::checkUserEventDependencies(cl_uint numEventsInWaitList, const cl_eve
         }
     }
     return userEventsDependencies;
+}
+
+uint32_t Event::peekTaskLevel() const {
+    return taskLevel;
 }
 
 } // namespace NEO

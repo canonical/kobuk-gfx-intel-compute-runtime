@@ -89,7 +89,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, XeHPAndLaterImageTests, givenCompressionWhenAppendi
 
     imageDesc.mem_object = clCreateBuffer(&context, CL_MEM_READ_WRITE, 128 * 256 * 4, nullptr, &retVal);
 
-    auto gmm = new Gmm(context.getDevice(0)->getGmmHelper()->getClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
+    auto gmm = new Gmm(context.getDevice(0)->getGmmHelper(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
     gmm->isCompressionEnabled = true;
 
     auto buffer = castToObject<Buffer>(imageDesc.mem_object);
@@ -130,7 +130,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, XeHPAndLaterImageTests, givenImageFromBufferWhenSet
 
     imageDesc.mem_object = clCreateBuffer(&context, CL_MEM_READ_WRITE, 128 * 256 * 4, nullptr, &retVal);
 
-    auto gmm = new Gmm(context.getDevice(0)->getGmmHelper()->getClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
+    auto gmm = new Gmm(context.getDevice(0)->getGmmHelper(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true);
     gmm->isCompressionEnabled = true;
 
     auto buffer = castToObject<Buffer>(imageDesc.mem_object);
@@ -173,7 +173,7 @@ HWTEST2_F(XeHPAndLaterImageTests, givenMcsAllocationWhenSetArgIsCalledWithUnifie
 
     auto surfaceState = FamilyType::cmdInitRenderSurfaceState;
     auto imageHw = static_cast<ImageHw<FamilyType> *>(image.get());
-    mcsAlloc->setDefaultGmm(new Gmm(context.getDevice(0)->getRootDeviceEnvironment().getGmmClientContext(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
+    mcsAlloc->setDefaultGmm(new Gmm(context.getDevice(0)->getRootDeviceEnvironment().getGmmHelper(), nullptr, 1, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, false, {}, true));
     surfaceState.setSurfaceBaseAddress(0xABCDEF1000);
     imageHw->setMcsSurfaceInfo(msi);
     imageHw->setMcsAllocation(mcsAlloc);
@@ -233,8 +233,11 @@ HWTEST2_F(ImageClearColorFixture, givenImageForXeHPAndLaterWhenCanonicalAddresFo
     auto gmm = imageHw->getGraphicsAllocation(context.getDevice(0)->getRootDeviceIndex())->getDefaultGmm();
     gmm->gmmResourceInfo->getResourceFlags()->Gpu.IndirectClearColor = 1;
     EXPECT_NO_THROW(EncodeSurfaceState<FamilyType>::setClearColorParams(&surfaceState, gmm));
+
     uint64_t nonCanonicalAddress = ((static_cast<uint64_t>(surfaceState.getClearColorAddressHigh()) << 32) | surfaceState.getClearColorAddress());
-    EXPECT_EQ(GmmHelper::decanonize(canonicalAddress), nonCanonicalAddress);
+    auto gmmHelper = context.getDevice(0)->getGmmHelper();
+
+    EXPECT_EQ(gmmHelper->decanonize(canonicalAddress), nonCanonicalAddress);
 }
 
 HWTEST2_F(XeHPAndLaterImageTests, givenMediaCompressionWhenAppendingNewAllocationThenNotZeroIsSetAsCompressionType, CompressionParamsSupportedMatcher) {
@@ -249,7 +252,8 @@ HWTEST2_F(XeHPAndLaterImageTests, givenMediaCompressionWhenAppendingNewAllocatio
     imageHw->getGraphicsAllocation(context.getDevice(0)->getRootDeviceIndex())->getDefaultGmm()->gmmResourceInfo->getResourceFlags()->Info.MediaCompressed = true;
     surfaceState.setAuxiliarySurfaceMode(RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
 
-    EncodeSurfaceState<FamilyType>::setImageAuxParamsForCCS(&surfaceState, imageHw->getGraphicsAllocation(context.getDevice(0)->getRootDeviceIndex())->getDefaultGmm());
+    EncodeSurfaceState<FamilyType>::setImageAuxParamsForCCS(&surfaceState,
+                                                            imageHw->getGraphicsAllocation(context.getDevice(0)->getRootDeviceIndex())->getDefaultGmm());
 
     imageHw->setImageArg(&surfaceState, false, 0, context.getDevice(0)->getRootDeviceIndex(), false);
 
@@ -279,7 +283,7 @@ HWTEST2_F(XeHPAndLaterImageTests, givenCompressionWhenAppendingNewAllocationThen
     gmm->gmmResourceInfo->getResourceFlags()->Info.RenderCompressed = true;
     gmm->isCompressionEnabled = true;
 
-    auto mcsGmm = new MockGmm(context.getDevice(0)->getGmmClientContext());
+    auto mcsGmm = new MockGmm(context.getDevice(0)->getGmmHelper());
     mcsGmm->isCompressionEnabled = true;
     mcsGmm->gmmResourceInfo->getResourceFlags()->Info.RenderCompressed = true;
     mcsGmm->gmmResourceInfo->getResourceFlags()->Gpu.UnifiedAuxSurface = true;

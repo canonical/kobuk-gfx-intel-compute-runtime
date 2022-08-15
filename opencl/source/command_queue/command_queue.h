@@ -17,7 +17,6 @@
 #include "opencl/source/helpers/enqueue_properties.h"
 #include "opencl/source/helpers/task_information.h"
 
-#include <atomic>
 #include <cstdint>
 
 namespace NEO {
@@ -202,10 +201,10 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     volatile uint32_t *getHwTagAddress() const;
 
-    bool isCompleted(uint32_t gpgpuTaskCount, CopyEngineState bcsState) const;
+    bool isCompleted(uint32_t gpgpuTaskCount, CopyEngineState bcsState);
 
     bool isWaitForTimestampsEnabled() const;
-    virtual bool waitForTimestamps(uint32_t taskCount) = 0;
+    virtual bool waitForTimestamps(Range<CopyEngineState> copyEnginesToWait, uint32_t taskCount) = 0;
 
     MOCKABLE_VIRTUAL bool isQueueBlocked();
 
@@ -222,15 +221,22 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
                                              cl_uint numEventsInWaitList,
                                              const cl_event *eventWaitList);
 
+    void initializeGpgpu() const;
+    void initializeGpgpuInternals() const;
     MOCKABLE_VIRTUAL CommandStreamReceiver &getGpgpuCommandStreamReceiver() const;
-    MOCKABLE_VIRTUAL CommandStreamReceiver *getBcsCommandStreamReceiver(aub_stream::EngineType bcsEngineType) const;
-    CommandStreamReceiver *getBcsForAuxTranslation() const;
-    MOCKABLE_VIRTUAL CommandStreamReceiver &selectCsrForBuiltinOperation(const CsrSelectionArgs &args) const;
+    MOCKABLE_VIRTUAL CommandStreamReceiver *getBcsCommandStreamReceiver(aub_stream::EngineType bcsEngineType);
+    CommandStreamReceiver *getBcsForAuxTranslation();
+    MOCKABLE_VIRTUAL CommandStreamReceiver &selectCsrForBuiltinOperation(const CsrSelectionArgs &args);
+    void constructBcsEngine(bool internalUsage);
+    MOCKABLE_VIRTUAL void initializeBcsEngine(bool internalUsage);
     Device &getDevice() const noexcept;
     ClDevice &getClDevice() const { return *device; }
     Context &getContext() const { return *context; }
     Context *getContextPtr() const { return context; }
-    EngineControl &getGpgpuEngine() const { return *gpgpuEngine; }
+    EngineControl &getGpgpuEngine() const {
+        this->initializeGpgpu();
+        return *gpgpuEngine;
+    }
 
     MOCKABLE_VIRTUAL LinearStream &getCS(size_t minRequiredSize);
     IndirectHeap &getIndirectHeap(IndirectHeap::Type heapType,
@@ -351,6 +357,8 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     bool isTextureCacheFlushNeeded(uint32_t commandType) const;
 
+    void finishBeforeRelease();
+
   protected:
     void *enqueueReadMemObjForMap(TransferProperties &transferProperties, EventsRequest &eventsRequest, cl_int &errcodeRet);
     cl_int enqueueWriteMemObjForUnmap(MemObj *memObj, void *mappedPtr, EventsRequest &eventsRequest);
@@ -387,7 +395,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     Context *context = nullptr;
     ClDevice *device = nullptr;
-    EngineControl *gpgpuEngine = nullptr;
+    mutable EngineControl *gpgpuEngine = nullptr;
     std::array<EngineControl *, bcsInfoMaskSize> bcsEngines = {};
     std::vector<aub_stream::EngineType> bcsEngineTypes = {};
 
@@ -408,6 +416,8 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     bool perfCountersEnabled = false;
 
     bool isCopyOnly = false;
+    bool bcsAllowed = false;
+    bool bcsInitialized = false;
 
     LinearStream *commandStream = nullptr;
 
@@ -416,6 +426,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     std::unique_ptr<TimestampPacketContainer> deferredTimestampPackets;
     std::unique_ptr<TimestampPacketContainer> timestampPacketContainer;
+
     struct BcsTimestampPacketContainers {
         TimestampPacketContainer lastBarrierToWaitFor;
         TimestampPacketContainer lastSignalledPacket;

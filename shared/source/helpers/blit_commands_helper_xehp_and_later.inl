@@ -63,10 +63,10 @@ void BlitCommandsHelper<GfxFamily>::appendBlitCommandsBlockCopy(const BlitProper
         blitCmd.setSourceCompressionFormat(compressionFormat);
     }
 
-    if (MemoryPool::isSystemMemoryPool(blitProperties.dstAllocation->getMemoryPool())) {
+    if (MemoryPoolHelper::isSystemMemoryPool(blitProperties.dstAllocation->getMemoryPool())) {
         blitCmd.setDestinationTargetMemory(XY_BLOCK_COPY_BLT::TARGET_MEMORY::TARGET_MEMORY_SYSTEM_MEM);
     }
-    if (MemoryPool::isSystemMemoryPool(blitProperties.srcAllocation->getMemoryPool())) {
+    if (MemoryPoolHelper::isSystemMemoryPool(blitProperties.srcAllocation->getMemoryPool())) {
         blitCmd.setSourceTargetMemory(XY_BLOCK_COPY_BLT::TARGET_MEMORY::TARGET_MEMORY_SYSTEM_MEM);
     }
 
@@ -136,7 +136,7 @@ void BlitCommandsHelper<GfxFamily>::appendBlitCommandsForFillBuffer(NEO::Graphic
         blitCmd.setDestinationCompressionFormat(compressionFormat);
     }
 
-    if (MemoryPool::isSystemMemoryPool(dstAlloc->getMemoryPool())) {
+    if (MemoryPoolHelper::isSystemMemoryPool(dstAlloc->getMemoryPool())) {
         blitCmd.setDestinationTargetMemory(XY_COLOR_BLT::DESTINATION_TARGET_MEMORY::DESTINATION_TARGET_MEMORY_SYSTEM_MEM);
     }
 
@@ -246,6 +246,7 @@ void BlitCommandsHelper<GfxFamily>::appendColorDepth(const BlitProperties &blitP
         switch (blitProperties.bytesPerPixel) {
         default:
             UNRECOVERABLE_IF(true);
+            break;
         case 1:
             blitCmd.setColorDepth(XY_BLOCK_COPY_BLT::COLOR_DEPTH::COLOR_DEPTH_8_BIT_COLOR);
             break;
@@ -266,7 +267,12 @@ void BlitCommandsHelper<GfxFamily>::appendColorDepth(const BlitProperties &blitP
 }
 
 template <typename GfxFamily>
-void BlitCommandsHelper<GfxFamily>::getBlitAllocationProperties(const GraphicsAllocation &allocation, uint32_t &pitch, uint32_t &qPitch, GMM_TILE_TYPE &tileType, uint32_t &mipTailLod, uint32_t &compressionDetails, const RootDeviceEnvironment &rootDeviceEnvironment) {
+void BlitCommandsHelper<GfxFamily>::getBlitAllocationProperties(const GraphicsAllocation &allocation, uint32_t &pitch, uint32_t &qPitch,
+                                                                GMM_TILE_TYPE &tileType, uint32_t &mipTailLod, uint32_t &compressionDetails,
+                                                                uint32_t &compressionType, const RootDeviceEnvironment &rootDeviceEnvironment,
+                                                                GMM_YUV_PLANE_ENUM plane) {
+    using XY_BLOCK_COPY_BLT = typename GfxFamily::XY_BLOCK_COPY_BLT;
+
     if (allocation.getDefaultGmm()) {
         auto gmmResourceInfo = allocation.getDefaultGmm()->gmmResourceInfo.get();
         mipTailLod = gmmResourceInfo->getMipTailStartLodSurfaceState();
@@ -285,14 +291,18 @@ void BlitCommandsHelper<GfxFamily>::getBlitAllocationProperties(const GraphicsAl
         auto gmmClientContext = rootDeviceEnvironment.getGmmClientContext();
         if (resInfo.MediaCompressed) {
             compressionDetails = gmmClientContext->getMediaSurfaceStateCompressionFormat(gmmResourceInfo->getResourceFormat());
+            EncodeWA<GfxFamily>::adjustCompressionFormatForPlanarImage(compressionDetails, plane);
+            compressionType = XY_BLOCK_COPY_BLT::COMPRESSION_TYPE::COMPRESSION_TYPE_MEDIA_COMPRESSION;
         } else if (resInfo.RenderCompressed) {
             compressionDetails = gmmClientContext->getSurfaceStateCompressionFormat(gmmResourceInfo->getResourceFormat());
+            compressionType = XY_BLOCK_COPY_BLT::COMPRESSION_TYPE::COMPRESSION_TYPE_3D_COMPRESSION;
         }
     }
 }
 
 template <typename GfxFamily>
 void BlitCommandsHelper<GfxFamily>::appendBlitCommandsForImages(const BlitProperties &blitProperties, typename GfxFamily::XY_BLOCK_COPY_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment, uint32_t &srcSlicePitch, uint32_t &dstSlicePitch) {
+    using COMPRESSION_TYPE = typename GfxFamily::XY_BLOCK_COPY_BLT::COMPRESSION_TYPE;
     auto srcTileType = GMM_NOT_TILED;
     auto dstTileType = GMM_NOT_TILED;
     auto srcAllocation = blitProperties.srcAllocation;
@@ -305,9 +315,13 @@ void BlitCommandsHelper<GfxFamily>::appendBlitCommandsForImages(const BlitProper
     auto dstMipTailLod = 0u;
     auto srcCompressionFormat = blitCmd.getSourceCompressionFormat();
     auto dstCompressionFormat = blitCmd.getDestinationCompressionFormat();
+    auto srcCompressionType = static_cast<uint32_t>(blitCmd.getSourceCompressionType());
+    auto dstCompressionType = static_cast<uint32_t>(blitCmd.getDestinationCompressionType());
 
-    getBlitAllocationProperties(*srcAllocation, srcRowPitch, srcQPitch, srcTileType, srcMipTailLod, srcCompressionFormat, rootDeviceEnvironment);
-    getBlitAllocationProperties(*dstAllocation, dstRowPitch, dstQPitch, dstTileType, dstMipTailLod, dstCompressionFormat, rootDeviceEnvironment);
+    getBlitAllocationProperties(*srcAllocation, srcRowPitch, srcQPitch, srcTileType, srcMipTailLod, srcCompressionFormat,
+                                srcCompressionType, rootDeviceEnvironment, blitProperties.srcPlane);
+    getBlitAllocationProperties(*dstAllocation, dstRowPitch, dstQPitch, dstTileType, dstMipTailLod, dstCompressionFormat,
+                                dstCompressionType, rootDeviceEnvironment, blitProperties.dstPlane);
 
     srcSlicePitch = std::max(srcSlicePitch, srcRowPitch * srcQPitch);
     dstSlicePitch = std::max(dstSlicePitch, dstRowPitch * dstQPitch);
@@ -326,6 +340,8 @@ void BlitCommandsHelper<GfxFamily>::appendBlitCommandsForImages(const BlitProper
     blitCmd.setDestinationSurfaceDepth(static_cast<uint32_t>(blitProperties.dstSize.z));
     blitCmd.setSourceCompressionFormat(srcCompressionFormat);
     blitCmd.setDestinationCompressionFormat(dstCompressionFormat);
+    blitCmd.setSourceCompressionType(static_cast<COMPRESSION_TYPE>(srcCompressionType));
+    blitCmd.setDestinationCompressionType(static_cast<COMPRESSION_TYPE>(dstCompressionType));
 
     appendTilingType(srcTileType, dstTileType, blitCmd);
     appendClearColor(blitProperties, blitCmd);
@@ -387,7 +403,8 @@ void BlitCommandsHelper<GfxFamily>::appendClearColor(const BlitProperties &blitP
 }
 
 template <typename GfxFamily>
-void BlitCommandsHelper<GfxFamily>::printImageBlitBlockCopyCommand(const typename GfxFamily::XY_BLOCK_COPY_BLT &blitCmd) {
+void BlitCommandsHelper<GfxFamily>::printImageBlitBlockCopyCommand(const typename GfxFamily::XY_BLOCK_COPY_BLT &blitCmd, const uint32_t sliceIndex) {
+    printf("Slice index: %u\n", sliceIndex);
     printf("ColorDepth: %u\n", blitCmd.getColorDepth());
     printf("SourcePitch: %u\n", blitCmd.getSourcePitch());
     printf("SourceTiling: %u\n", blitCmd.getSourceTiling());
@@ -424,7 +441,7 @@ void BlitCommandsHelper<GfxFamily>::printImageBlitBlockCopyCommand(const typenam
     printf("DestinationSurfaceDepth: %u\n", blitCmd.getDestinationSurfaceDepth());
     printf("DestinationHorizontalAlign: %u\n", blitCmd.getDestinationHorizontalAlign());
     printf("DestinationVerticalAlign: %u\n", blitCmd.getDestinationVerticalAlign());
-    printf("DestinationArrayIndex: %u\n", blitCmd.getDestinationArrayIndex());
+    printf("DestinationArrayIndex: %u\n\n", blitCmd.getDestinationArrayIndex());
 }
 
 } // namespace NEO

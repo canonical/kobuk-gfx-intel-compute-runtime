@@ -18,7 +18,7 @@
 #include "shared/test/common/mocks/mock_os_context.h"
 #include "shared/test/common/mocks/mock_submissions_aggregator.h"
 #include "shared/test/common/mocks/mock_svm_manager.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/mem_obj/buffer.h"
@@ -29,6 +29,7 @@
 #include "opencl/test/unit_test/mocks/mock_event.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
+#include "opencl/test/unit_test/mocks/mock_printf_handler.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 
 using namespace NEO;
@@ -995,9 +996,13 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWhenCommandA
 
     parseCommands<FamilyType>(commandStream);
     auto itorPipeControl = find<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+    if (MemorySynchronizationCommands<FamilyType>::isBarrierWaRequired(pDevice->getHardwareInfo())) {
+        itorPipeControl++;
+    }
     auto pipeControl = genCmdCast<typename FamilyType::PIPE_CONTROL *>(*itorPipeControl);
 
     mockCsr->flushBatchedSubmissions();
+
     EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), pipeControl->getDcFlushEnable());
 }
 
@@ -1027,9 +1032,13 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenCsrInBatchingModeWithOutOfOrd
 
     parseCommands<FamilyType>(commandStream);
     auto itorPipeControl = find<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+    if (MemorySynchronizationCommands<FamilyType>::isBarrierWaRequired(pDevice->getHardwareInfo())) {
+        itorPipeControl++;
+    }
     auto pipeControl = genCmdCast<typename FamilyType::PIPE_CONTROL *>(*itorPipeControl);
 
     mockCsr->flushBatchedSubmissions();
+
     EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), pipeControl->getDcFlushEnable());
 }
 
@@ -1119,6 +1128,18 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenUpdateTaskCountFromWaitSetWhe
 
     EXPECT_NE(itorPipeControl, cmdList.end());
     EXPECT_EQ(mockCsr->flushCalledCount, 1);
+}
+
+HWTEST_F(CommandStreamReceiverFlushTaskTests, givenGpuHangOnPrintEnqueueOutputWhenWaitingForEnginesThenGpuHangIsReported) {
+    MockCommandQueueHw<FamilyType> commandQueue(nullptr, pClDevice, nullptr);
+    commandQueue.waitUntilCompleteReturnValue = WaitStatus::Ready;
+
+    const auto blockedQueue{false};
+    const auto cleanTemporaryAllocationsList{false};
+    MockPrintfHandler printfHandler(*pClDevice);
+
+    const auto waitStatus = commandQueue.waitForAllEngines(blockedQueue, &printfHandler, cleanTemporaryAllocationsList);
+    EXPECT_EQ(WaitStatus::GpuHang, waitStatus);
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenEnabledDirectSubmissionUpdateTaskCountFromWaitSetWhenFlushTaskThenPipeControlAndBBSIsFlushed) {
@@ -1220,8 +1241,16 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenEpiloguePipeControlThenDcFlus
     ASSERT_NE(nullptr, cmdBuffer->epiloguePipeControlLocation);
     auto pipeControl = genCmdCast<PIPE_CONTROL *>(cmdBuffer->epiloguePipeControlLocation);
     ASSERT_NE(nullptr, pipeControl);
+    parseCommands<FamilyType>(commandStream);
+    auto itorPipeControl = find<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+    if (MemorySynchronizationCommands<FamilyType>::isBarrierWaRequired(pDevice->getHardwareInfo())) {
+        itorPipeControl++;
+    }
+    auto pipeControlCmdBuffer = genCmdCast<typename FamilyType::PIPE_CONTROL *>(*itorPipeControl);
+
     mockCsr->flushBatchedSubmissions();
-    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), pipeControl->getDcFlushEnable());
+
+    EXPECT_EQ(MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, *defaultHwInfo), pipeControlCmdBuffer->getDcFlushEnable());
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenEpiloguePipeControlWhendDcFlushDisabledByDebugFlagThenDcFlushIsDisabled) {
@@ -1817,6 +1846,50 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelWhenItIsUnblocke
     EXPECT_EQ(numGrfRequired, csr->savedDispatchFlags.numGrfRequired);
 }
 
+class MockCommandQueueInitializeBcs : public MockCommandQueue {
+  public:
+    MockCommandQueueInitializeBcs() : MockCommandQueue(nullptr, nullptr, 0, false) {}
+    MockCommandQueueInitializeBcs(Context &context) : MockCommandQueueInitializeBcs(&context, context.getDevice(0), nullptr, false) {}
+    MockCommandQueueInitializeBcs(Context *context, ClDevice *device, const cl_queue_properties *props, bool internalUsage)
+        : MockCommandQueue(context, device, props, internalUsage) {
+    }
+    void initializeBcsEngine(bool internalUsage) override {
+        if (initializeBcsEngineCalledTimes == 0) {
+            auto th = std::thread([&]() {
+                isCsrLocked = reinterpret_cast<MockCommandStreamReceiver *>(&this->getGpgpuCommandStreamReceiver())->isOwnershipMutexLocked();
+            });
+            th.join();
+        }
+        initializeBcsEngineCalledTimes++;
+        MockCommandQueue::initializeBcsEngine(internalUsage);
+    }
+    int initializeBcsEngineCalledTimes = 0;
+    bool isCsrLocked = false;
+};
+
+HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelWhenInitializeBcsCalledThenCrsIsNotLocked) {
+    MockContext mockContext;
+    auto csr = new MockCommandStreamReceiver(*pDevice->executionEnvironment, 0, pDevice->getDeviceBitfield());
+    pDevice->resetCommandStreamReceiver(csr);
+    uint32_t numGrfRequired = 666u;
+
+    auto pCmdQ = std::make_unique<MockCommandQueueInitializeBcs>(&mockContext, pClDevice, nullptr, false);
+    auto mockProgram = std::make_unique<MockProgram>(&mockContext, false, toClDeviceVector(*pClDevice));
+
+    auto pKernel = MockKernel::create(*pDevice, mockProgram.get(), numGrfRequired);
+    auto kernelInfos = MockKernel::toKernelInfoContainer(pKernel->getKernelInfo(), rootDeviceIndex);
+    MultiDeviceKernel multiDeviceKernel(MockMultiDeviceKernel::toKernelVector(pKernel), kernelInfos);
+    auto event = std::make_unique<MockEvent<Event>>(pCmdQ.get(), CL_COMMAND_MARKER, 0, 0);
+    auto cmdStream = new LinearStream(pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), 4096, AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()}));
+
+    auto blockedCommandsData = std::make_unique<KernelOperation>(cmdStream, *pCmdQ->getGpgpuCommandStreamReceiver().getInternalAllocationStorage());
+
+    std::vector<Surface *> surfaces;
+    event->setCommand(std::make_unique<CommandComputeKernel>(*pCmdQ, blockedCommandsData, surfaces, false, false, false, nullptr, pDevice->getPreemptionMode(), pKernel, 1));
+    event->submitCommand(false);
+    EXPECT_FALSE(pCmdQ->isCsrLocked);
+}
+
 HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDcFlushArgumentIsTrueWhenCallingAddPipeControlThenDcFlushIsEnabled) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
     std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
@@ -1824,7 +1897,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDcFlushArgumentIsTrueWhenCall
 
     PipeControlArgs args;
     args.dcFlushEnable = true;
-    MemorySynchronizationCommands<FamilyType>::addPipeControl(commandStream, args);
+    MemorySynchronizationCommands<FamilyType>::addSingleBarrier(commandStream, args);
     PIPE_CONTROL *pipeControl = genCmdCast<PIPE_CONTROL *>(buffer.get());
     ASSERT_NE(nullptr, pipeControl);
 
@@ -1838,7 +1911,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDcFlushArgumentIsFalseWhenCal
     LinearStream commandStream(buffer.get(), 128);
 
     PipeControlArgs args;
-    MemorySynchronizationCommands<FamilyType>::addPipeControl(commandStream, args);
+    MemorySynchronizationCommands<FamilyType>::addSingleBarrier(commandStream, args);
     PIPE_CONTROL *pipeControl = genCmdCast<PIPE_CONTROL *>(buffer.get());
     ASSERT_NE(nullptr, pipeControl);
 

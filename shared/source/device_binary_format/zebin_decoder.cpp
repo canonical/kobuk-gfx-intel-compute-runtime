@@ -123,6 +123,13 @@ DecodeError extractZebinSections(NEO::Elf::Elf<Elf::EI_CLASS_64> &elf, ZebinSect
                 outWarning.append("DeviceBinaryFormat::Zebin : Unhandled SHT_NOTE section : " + sectionName.str() + " currently supports only : " + NEO::Elf::SectionsNamesZebin::noteIntelGT.str() + ".\n");
             }
             break;
+        case NEO::Elf::SHT_ZEBIN_MISC:
+            if (sectionName == NEO::Elf::SectionsNamesZebin::buildOptions) {
+                out.buildOptionsSection.push_back(&elfSectionHeader);
+            } else {
+                outWarning.append("DeviceBinaryFormat::Zebin : unhandled SHT_ZEBIN_MISC section : " + sectionName.str() + " currently supports only : " + NEO::Elf::SectionsNamesZebin::buildOptions.str() + ".\n");
+            }
+            break;
         case NEO::Elf::SHT_STRTAB:
             // ignoring intentionally - section header names
             continue;
@@ -247,9 +254,7 @@ DecodeError readZeInfoExecutionEnvironment(const NEO::Yaml::YamlParser &parser, 
     bool validExecEnv = true;
     for (const auto &execEnvMetadataNd : parser.createChildrenRange(node)) {
         auto key = parser.readKey(execEnvMetadataNd);
-        if (NEO::Elf::ZebinKernelMetadata::Tags::Kernel::ExecutionEnv::actualKernelStartOffset == key) {
-            validExecEnv = validExecEnv & readZeInfoValueChecked(parser, execEnvMetadataNd, outExecEnv.actualKernelStartOffset, context, outErrReason);
-        } else if (NEO::Elf::ZebinKernelMetadata::Tags::Kernel::ExecutionEnv::barrierCount == key) {
+        if (NEO::Elf::ZebinKernelMetadata::Tags::Kernel::ExecutionEnv::barrierCount == key) {
             validExecEnv = validExecEnv & readZeInfoValueChecked(parser, execEnvMetadataNd, outExecEnv.barrierCount, context, outErrReason);
         } else if (NEO::Elf::ZebinKernelMetadata::Tags::Kernel::ExecutionEnv::disableMidThreadPreemption == key) {
             validExecEnv = validExecEnv & readZeInfoValueChecked(parser, execEnvMetadataNd, outExecEnv.disableMidThreadPreemption, context, outErrReason);
@@ -369,6 +374,8 @@ bool readEnumChecked(const Yaml::Token *token, NEO::Elf::ZebinKernelMetadata::Ty
         out = ArgTypeT::ArgTypeArgByvalue;
     } else if (tokenValue == PayloadArgument::ArgType::argBypointer) {
         out = ArgTypeT::ArgTypeArgBypointer;
+    } else if (tokenValue == PayloadArgument::ArgType::bufferAddress) {
+        out = ArgTypeT::ArgTypeBufferAddress;
     } else if (tokenValue == PayloadArgument::ArgType::bufferOffset) {
         out = ArgTypeT::ArgTypeBufferOffset;
     } else if (tokenValue == PayloadArgument::ArgType::printfBuffer) {
@@ -817,6 +824,9 @@ NEO::DecodeError populateArgDescriptor(const NEO::Elf::ZebinKernelMetadata::Type
         }
 
         argTraits.argByValSize = sizeof(void *);
+        if (dst.payloadMappings.explicitArgs[src.argIndex].is<NEO::ArgDescriptor::ArgTPointer>()) {
+            dst.payloadMappings.explicitArgs[src.argIndex].as<ArgDescPointer>().accessedUsingStatelessAddressingMode = false;
+        }
         switch (src.addrmode) {
         default:
             outErrReason.append("Invalid or missing memory addressing mode for arg idx : " + std::to_string(src.argIndex) + " in context of : " + dst.kernelMetadata.kernelName + ".\n");
@@ -830,6 +840,7 @@ NEO::DecodeError populateArgDescriptor(const NEO::Elf::ZebinKernelMetadata::Type
             }
             dst.payloadMappings.explicitArgs[src.argIndex].as<ArgDescPointer>(false).stateless = src.offset;
             dst.payloadMappings.explicitArgs[src.argIndex].as<ArgDescPointer>(false).pointerSize = src.size;
+            dst.payloadMappings.explicitArgs[src.argIndex].as<ArgDescPointer>(false).accessedUsingStatelessAddressingMode = true;
             break;
         case NEO::Elf::ZebinKernelMetadata::Types::Kernel::PayloadArgument::MemoryAddressingModeBindless:
             if (dst.payloadMappings.explicitArgs[src.argIndex].is<NEO::ArgDescriptor::ArgTPointer>()) {
@@ -904,6 +915,13 @@ NEO::DecodeError populateArgDescriptor(const NEO::Elf::ZebinKernelMetadata::Type
             outErrReason.append("DeviceBinaryFormat::Zebin : Invalid size for argument of type " + NEO::Elf::ZebinKernelMetadata::Tags::Kernel::PayloadArgument::ArgType::enqueuedLocalSize.str() + " in context of : " + dst.kernelMetadata.kernelName + ". Expected 4 or 8 or 12. Got : " + std::to_string(src.size) + "\n");
             return DecodeError::InvalidBinary;
         }
+        break;
+    }
+
+    case NEO::Elf::ZebinKernelMetadata::Types::Kernel::ArgTypeBufferAddress: {
+        auto &argAsPtr = dst.payloadMappings.explicitArgs[src.argIndex].as<ArgDescPointer>(true);
+        argAsPtr.stateless = src.offset;
+        argAsPtr.pointerSize = src.size;
         break;
     }
 

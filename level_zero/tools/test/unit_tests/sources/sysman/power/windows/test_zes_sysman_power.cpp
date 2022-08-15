@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2021 Intel Corporation
+ * Copyright (C) 2020-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -52,14 +52,13 @@ class SysmanDevicePowerFixture : public SysmanDeviceFixture {
             deviceHandles.resize(subDeviceCount, nullptr);
             Device::fromHandle(device->toHandle())->getSubDevices(&subDeviceCount, deviceHandles.data());
         }
-        pSysmanDeviceImp->pPowerHandleContext->init(deviceHandles, device->toHandle());
     }
     void TearDown() override {
         if (!sysmanUltsEnable) {
             GTEST_SKIP();
         }
-        SysmanDeviceFixture::TearDown();
         pWddmSysmanImp->pKmdSysManager = pOriginalKmdSysManager;
+        SysmanDeviceFixture::TearDown();
     }
 
     std::vector<zes_pwr_handle_t> get_power_handles(uint32_t count) {
@@ -294,6 +293,19 @@ TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandleWhenSettingPowerLimitsAllo
         EXPECT_EQ(newBurst.power, burst.power);
         EXPECT_EQ(newPeak.powerAC, peak.powerAC);
         EXPECT_EQ(newPeak.powerDC, peak.powerDC);
+    }
+}
+
+TEST_F(SysmanDevicePowerFixture, GivenValidPowerHandlesWhenCallingSetAndGetPowerLimitExtWhenHwmonInterfaceExistThenUnsupportedFeatureIsReturned) {
+    // Setting allow set calls or not
+    init(true);
+
+    auto handles = get_power_handles(powerHandleComponentCount);
+    for (auto handle : handles) {
+        uint32_t limitCount = 0;
+
+        EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesPowerGetLimitsExt(handle, &limitCount, nullptr));
+        EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesPowerSetLimitsExt(handle, &limitCount, nullptr));
     }
 }
 

@@ -71,6 +71,7 @@ StorageInfo MemoryManager::createStorageInfoFromProperties(const AllocationPrope
         storageInfo.tileInstanced = true;
         break;
     case AllocationType::PRIVATE_SURFACE:
+    case AllocationType::DEBUG_SBA_TRACKING_BUFFER:
         storageInfo.cloningOfPageTables = false;
 
         if (properties.subDevicesBitfield.count() == 1) {
@@ -149,6 +150,9 @@ StorageInfo MemoryManager::createStorageInfoFromProperties(const AllocationPrope
     }
     case AllocationType::UNIFIED_SHARED_MEMORY:
         storageInfo.memoryBanks = allTilesValue;
+        if (DebugManager.flags.OverrideMultiStoragePlacement.get() != -1) {
+            storageInfo.memoryBanks = DebugManager.flags.OverrideMultiStoragePlacement.get();
+        }
         break;
     default:
         break;

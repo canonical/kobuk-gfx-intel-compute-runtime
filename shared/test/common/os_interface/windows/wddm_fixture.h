@@ -27,7 +27,7 @@
 #include "shared/test/common/mocks/windows/mock_gdi_interface.h"
 #include "shared/test/common/mocks/windows/mock_gmm_memory_base.h"
 #include "shared/test/common/os_interface/windows/gdi_dll_fixture.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 namespace NEO {
 struct WddmFixture : public Test<MockExecutionEnvironmentGmmFixture> {
@@ -99,6 +99,11 @@ struct WddmFixtureWithMockGdiDll : public GdiDllFixture, public MockExecutionEnv
 };
 
 struct NoCleanupWddmMock : WddmMock {
+    using WddmMock::WddmMock;
+    bool isDriverAvaliable() override {
+        return false;
+    }
+
     bool skipResourceCleanup() {
         return true;
     }
@@ -109,7 +114,7 @@ struct WddmFixtureWithMockGdiDllWddmNoCleanup : public GdiDllFixture, public Moc
         MockExecutionEnvironmentGmmFixture::SetUp();
         GdiDllFixture::SetUp();
         rootDeviceEnvironment = executionEnvironment->rootDeviceEnvironments[0].get();
-        wddm = static_cast<NoCleanupWddmMock *>(Wddm::createWddm(nullptr, *rootDeviceEnvironment));
+        wddm = new NoCleanupWddmMock(*rootDeviceEnvironment);
         wddmMockInterface = new WddmMockInterface20(*wddm);
         wddm->wddmInterface.reset(wddmMockInterface);
         rootDeviceEnvironment->osInterface = std::make_unique<OSInterface>();

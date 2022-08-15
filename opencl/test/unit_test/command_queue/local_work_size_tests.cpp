@@ -8,7 +8,7 @@
 #include "shared/source/helpers/local_work_size.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_device.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "opencl/source/command_queue/cl_local_work_size.h"
 #include "opencl/source/helpers/dispatch_info.h"
@@ -34,10 +34,10 @@ TEST(localWorkSizeTest, givenDisableEUFusionWhenCreatingWorkSizeInfoThenCorrectM
 
     auto &hwHelper = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
     bool fusedDispatchEnabled = hwHelper.isFusedEuDispatchEnabled(*defaultHwInfo, true);
-    auto WGSMultiple = fusedDispatchEnabled ? 2 : 1;
+    auto wgsMultiple = fusedDispatchEnabled ? 2 : 1;
 
-    uint32_t maxBarriersPerHSlice = (defaultHwInfo.get()->platform.eRenderCoreFamily >= IGFX_GEN9_CORE) ? 32 : 16;
-    uint32_t expectedMinWGS = WGSMultiple * simdSize * numThreadsPerSubS / maxBarriersPerHSlice;
+    uint32_t maxBarriersPerHSlice = (defaultHwInfo->platform.eRenderCoreFamily >= IGFX_GEN9_CORE) ? 32 : 16;
+    uint32_t expectedMinWGS = wgsMultiple * simdSize * numThreadsPerSubS / maxBarriersPerHSlice;
     EXPECT_EQ(expectedMinWGS, wsInfo.minWorkGroupSize);
 }
 

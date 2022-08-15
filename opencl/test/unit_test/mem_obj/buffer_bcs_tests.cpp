@@ -14,7 +14,7 @@
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/mock_timestamp_container.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/unit_test/helpers/gtest_helpers.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
@@ -63,7 +63,7 @@ struct BcsBufferTests : public ::testing::Test {
     };
 
     template <typename FamilyType>
-    void SetUpT() {
+    void setUpT() {
         if (is32bit) {
             GTEST_SKIP();
         }
@@ -86,7 +86,7 @@ struct BcsBufferTests : public ::testing::Test {
     }
 
     template <typename FamilyType>
-    void TearDownT() {}
+    void tearDownT() {}
 
     template <typename FamilyType>
     void waitForCacheFlushFromBcsTest(MockCommandQueueHw<FamilyType> &commandQueue);
@@ -450,12 +450,12 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBlockedBlitEnqueueWhenUnblockingThenMake
     mockCmdQ->obtainNewTimestampPacketNodes(1, previousTimestampPackets, false, *bcsCsr);
     auto dependencyFromPreviousEnqueue = mockCmdQ->timestampPacketContainer->peekNodes()[0];
 
-    auto event = make_releaseable<Event>(mockCmdQ, CL_COMMAND_READ_BUFFER, 0, 0);
+    auto event = makeReleaseable<Event>(mockCmdQ, CL_COMMAND_READ_BUFFER, 0, 0);
     MockTimestampPacketContainer eventDependencyContainer(*bcsCsr->getTimestampPacketAllocator(), 1);
     auto eventDependency = eventDependencyContainer.getNode(0);
     event->addTimestampPacketNodes(eventDependencyContainer);
 
-    auto userEvent = make_releaseable<UserEvent>(bcsMockContext.get());
+    auto userEvent = makeReleaseable<UserEvent>(bcsMockContext.get());
     cl_event waitlist[] = {userEvent.get(), event.get()};
 
     commandQueue->enqueueReadBuffer(bufferForBlt.get(), CL_FALSE, 0, 1, &hostPtr, nullptr, 2, waitlist, nullptr);
@@ -500,7 +500,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenWriteBufferEnqueueWithGpgpuSubmissionWhe
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
 
-    auto queueCsr = cmdQ->gpgpuEngine->commandStreamReceiver;
+    auto queueCsr = &cmdQ->getGpgpuCommandStreamReceiver();
     auto initialTaskCount = queueCsr->peekTaskCount();
 
     cl_int retVal = CL_SUCCESS;
@@ -531,7 +531,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenReadBufferEnqueueWithGpgpuSubmissionWhen
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
 
-    auto queueCsr = cmdQ->gpgpuEngine->commandStreamReceiver;
+    auto queueCsr = &cmdQ->getGpgpuCommandStreamReceiver();
     auto initialTaskCount = queueCsr->peekTaskCount();
 
     cl_int retVal = CL_SUCCESS;
@@ -627,7 +627,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenPipeControlRequestWhenDispatchingBlitEnq
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
     auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
 
-    auto queueCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(cmdQ->gpgpuEngine->commandStreamReceiver);
+    auto queueCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(&cmdQ->getGpgpuCommandStreamReceiver());
     queueCsr->stallingCommandsOnNextFlushRequired = true;
 
     cl_int retVal = CL_SUCCESS;
@@ -726,7 +726,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenPipeControlRequestWhenDispatchingBlocked
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(bcsMockContext.get(), device.get(), nullptr));
     auto bcsCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(this->bcsCsr);
 
-    auto queueCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(cmdQ->gpgpuEngine->commandStreamReceiver);
+    auto queueCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(&cmdQ->getGpgpuCommandStreamReceiver());
     queueCsr->stallingCommandsOnNextFlushRequired = true;
 
     cl_int retVal = CL_SUCCESS;
@@ -769,7 +769,7 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenBufferOperationWithoutKernelWhenEstimati
     auto expectedSize = TimestampPacketHelper::getRequiredCmdStreamSizeForNodeDependencyWithBlitEnqueue<FamilyType>();
 
     if (cmdQ->isCacheFlushForBcsRequired()) {
-        expectedSize += MemorySynchronizationCommands<FamilyType>::getSizeForPipeControlWithPostSyncOperation(hwInfo);
+        expectedSize += MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hwInfo);
     }
 
     EXPECT_EQ(expectedSize, readBufferCmdsSize);
@@ -1181,12 +1181,12 @@ HWTEST_TEMPLATED_F(BcsBufferTests, givenSvmToSvmCopyTypeWhenEnqueueNonBlockingSV
 struct BcsSvmTests : public BcsBufferTests {
 
     template <typename FamilyType>
-    void SetUpT() {
+    void setUpT() {
         if (is32bit) {
             GTEST_SKIP();
         }
         REQUIRE_SVM_OR_SKIP(defaultHwInfo);
-        BcsBufferTests::SetUpT<FamilyType>();
+        BcsBufferTests::setUpT<FamilyType>();
         if (IsSkipped()) {
             GTEST_SKIP();
         }
@@ -1209,11 +1209,11 @@ struct BcsSvmTests : public BcsBufferTests {
     }
 
     template <typename FamilyType>
-    void TearDownT() {
+    void tearDownT() {
         if (IsSkipped()) {
             return;
         }
-        BcsBufferTests::TearDownT<FamilyType>();
+        BcsBufferTests::tearDownT<FamilyType>();
 
         clMemFreeINTEL(bcsMockContext.get(), sharedMemAlloc);
         clMemFreeINTEL(bcsMockContext.get(), hostMemAlloc);
@@ -1246,8 +1246,8 @@ HWTEST_TEMPLATED_F(BcsSvmTests, givenSVMMAllocationWithOffsetWhenUsingBcsThenPro
                     pSrcPtr = ptrOffset(pSrcPtr, srcOffset);
                     pDstPtr = ptrOffset(pDstPtr, dstOffset);
 
-                    auto dstSvmData = bcsMockContext.get()->getSVMAllocsManager()->getSVMAlloc(pDstPtr);
-                    auto srcSvmData = bcsMockContext.get()->getSVMAllocsManager()->getSVMAlloc(pSrcPtr);
+                    auto dstSvmData = bcsMockContext->getSVMAllocsManager()->getSVMAlloc(pDstPtr);
+                    auto srcSvmData = bcsMockContext->getSVMAllocsManager()->getSVMAlloc(pSrcPtr);
 
                     auto srcGpuAllocation = srcSvmData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
                     auto dstGpuAllocation = dstSvmData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());

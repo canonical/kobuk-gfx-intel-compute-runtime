@@ -7,13 +7,18 @@
 
 #pragma once
 
-#include "level_zero/core/source/driver/driver_handle.h"
+#include "shared/source/unified_memory/unified_memory.h"
+
 #include <level_zero/ze_api.h>
 #include <level_zero/zet_api.h>
 
 struct _ze_context_handle_t {
     virtual ~_ze_context_handle_t() = default;
 };
+
+namespace NEO {
+class Device;
+}
 
 namespace L0 {
 struct DriverHandle;
@@ -35,7 +40,7 @@ struct Context : _ze_context_handle_t {
         return ZE_MEMORY_TYPE_UNKNOWN;
     }
 
-    virtual ~Context() = default;
+    ~Context() override = default;
     virtual ze_result_t destroy() = 0;
     virtual ze_result_t getStatus() = 0;
     virtual DriverHandle *getDriverHandle() = 0;
@@ -71,6 +76,20 @@ struct Context : _ze_context_handle_t {
     virtual ze_result_t closeIpcMemHandle(const void *ptr) = 0;
     virtual ze_result_t getIpcMemHandle(const void *ptr,
                                         ze_ipc_mem_handle_t *pIpcHandle) = 0;
+    virtual ze_result_t
+    getIpcMemHandles(
+        const void *ptr,
+        uint32_t *numIpcHandles,
+        ze_ipc_mem_handle_t *pIpcHandles) = 0;
+
+    virtual ze_result_t
+    openIpcMemHandles(
+        ze_device_handle_t hDevice,
+        uint32_t numIpcHandles,
+        ze_ipc_mem_handle_t *pIpcHandles,
+        ze_ipc_memory_flags_t flags,
+        void **pptr) = 0;
+
     virtual ze_result_t openIpcMemHandle(ze_device_handle_t hDevice,
                                          ze_ipc_mem_handle_t handle,
                                          ze_ipc_memory_flags_t flags,

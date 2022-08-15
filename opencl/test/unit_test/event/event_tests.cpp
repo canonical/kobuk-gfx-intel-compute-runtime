@@ -10,6 +10,7 @@
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/source/os_interface/os_interface.h"
+#include "shared/source/utilities/hw_timestamps.h"
 #include "shared/source/utilities/perf_counter.h"
 #include "shared/source/utilities/tag_allocator.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
@@ -31,6 +32,7 @@
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_mdi.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
+#include "opencl/test/unit_test/mocks/mock_printf_handler.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 #include "opencl/test/unit_test/os_interface/mock_performance_counters.h"
 
@@ -144,6 +146,7 @@ TEST(Event, givenBcsCsrSetInEventWhenPeekingBcsTaskCountThenReturnCorrectTaskCou
         new MockClDevice{MockDevice::createWithNewExecutionEnvironment<MockAlignedMallocManagerDevice>(&hwInfo)}};
     MockContext context{device.get()};
     MockCommandQueue queue{context};
+    queue.constructBcsEngine(false);
     queue.updateBcsTaskCount(queue.bcsEngines[0]->getEngineType(), 19);
     Event event{&queue, CL_COMMAND_READ_BUFFER, 0, 0};
 
@@ -359,7 +362,7 @@ TEST_F(EventTest, GivenRetainAndReleaseEventWhenGettingClEventReferenceCountThen
     uint32_t tagEvent = 5;
 
     Event *pEvent = new Event(pCmdQ, CL_COMMAND_NDRANGE_KERNEL, 3, tagEvent);
-    ASSERT_NE(nullptr, pEvent);
+    ASSERT_NE(nullptr, pEvent); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
     pEvent->retain();
     auto retVal = pEvent->getReference();
@@ -373,7 +376,7 @@ TEST_F(EventTest, GivenRetainAndReleaseEventWhenGettingClEventReferenceCountThen
     EXPECT_EQ(2u, refCount);
 
     pEvent->release();
-    retVal = pEvent->getReference();
+    retVal = pEvent->getReference(); // NOLINT(clang-analyzer-cplusplus.NewDelete)
     EXPECT_EQ(1, retVal);
 
     delete pEvent;
@@ -383,7 +386,7 @@ TEST_F(EventTest, WhenGettingClEventContextThenCorrectValueIsReturned) {
     uint32_t tagEvent = 5;
 
     Event *pEvent = new Event(pCmdQ, CL_COMMAND_NDRANGE_KERNEL, 3, tagEvent);
-    ASSERT_NE(nullptr, pEvent);
+    ASSERT_NE(nullptr, pEvent); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
     cl_context context;
     size_t sizeReturned = 0;
@@ -565,8 +568,8 @@ TEST_F(InternalsEventTest, givenBlockedKernelWithPrintfWhenSubmittedThenPrintOut
 
     MockMultiDispatchInfo multiDispatchInfo(pClDevice, pKernel);
     std::unique_ptr<PrintfHandler> printfHandler(PrintfHandler::create(multiDispatchInfo, *pClDevice));
-    printfHandler.get()->prepareDispatch(multiDispatchInfo);
-    auto surface = printfHandler.get()->getSurface();
+    printfHandler->prepareDispatch(multiDispatchInfo);
+    auto surface = printfHandler->getSurface();
 
     auto printfSurface = reinterpret_cast<uint32_t *>(surface->getUnderlyingBuffer());
     printfSurface[0] = 8;
@@ -586,8 +589,107 @@ TEST_F(InternalsEventTest, givenBlockedKernelWithPrintfWhenSubmittedThenPrintOut
     EXPECT_FALSE(surface->isResident(pDevice->getDefaultEngine().osContext->getContextId()));
 }
 
+TEST_F(InternalsEventTest, givenGpuHangOnCmdQueueWaitFunctionAndBlockedKernelWithPrintfWhenSubmittedThenEventIsAbortedAndHangIsReported) {
+    MockCommandQueue mockCmdQueue(mockContext, pClDevice, nullptr, false);
+    mockCmdQueue.waitUntilCompleteReturnValue = WaitStatus::GpuHang;
+
+    testing::internal::CaptureStdout();
+    MockEvent<Event> event(&mockCmdQueue, CL_COMMAND_NDRANGE_KERNEL, 0, 0);
+
+    auto cmdStream = new LinearStream(pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), 4096, AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()}));
+    IndirectHeap *dsh = nullptr, *ioh = nullptr, *ssh = nullptr;
+    mockCmdQueue.allocateHeapMemory(IndirectHeap::Type::DYNAMIC_STATE, 4096u, dsh);
+    mockCmdQueue.allocateHeapMemory(IndirectHeap::Type::INDIRECT_OBJECT, 4096u, ioh);
+    mockCmdQueue.allocateHeapMemory(IndirectHeap::Type::SURFACE_STATE, 4096u, ssh);
+
+    auto blockedCommandsData = std::make_unique<KernelOperation>(cmdStream, *mockCmdQueue.getGpgpuCommandStreamReceiver().getInternalAllocationStorage());
+    blockedCommandsData->setHeaps(dsh, ioh, ssh);
+
+    std::string testString = "test";
+
+    MockKernelWithInternals mockKernelWithInternals(*pClDevice);
+    auto pKernel = mockKernelWithInternals.mockKernel;
+
+    auto &kernelInfo = mockKernelWithInternals.kernelInfo;
+    kernelInfo.kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::Patchtokens;
+    kernelInfo.setPrintfSurface(sizeof(uintptr_t), 0);
+    kernelInfo.addToPrintfStringsMap(0, testString);
+
+    uint64_t crossThread[10];
+    pKernel->setCrossThreadData(&crossThread, sizeof(uint64_t) * 8);
+
+    MockMultiDispatchInfo multiDispatchInfo(pClDevice, pKernel);
+    std::unique_ptr<PrintfHandler> printfHandler(PrintfHandler::create(multiDispatchInfo, *pClDevice));
+    printfHandler.get()->prepareDispatch(multiDispatchInfo);
+    auto surface = printfHandler.get()->getSurface();
+
+    auto printfSurface = reinterpret_cast<uint32_t *>(surface->getUnderlyingBuffer());
+    printfSurface[0] = 8;
+    printfSurface[1] = 0;
+
+    std::vector<Surface *> v;
+    PreemptionMode preemptionMode = pDevice->getPreemptionMode();
+    auto cmd = new CommandComputeKernel(mockCmdQueue, blockedCommandsData, v, false, false, false, std::move(printfHandler), preemptionMode, pKernel, 1);
+    event.setCommand(std::unique_ptr<Command>(cmd));
+
+    event.submitCommand(false);
+    EXPECT_EQ(Event::executionAbortedDueToGpuHang, event.peekExecutionStatus());
+
+    std::string output = testing::internal::GetCapturedStdout();
+    EXPECT_STREQ("test", output.c_str());
+}
+
+TEST_F(InternalsEventTest, givenGpuHangOnPrintingEnqueueOutputAndBlockedKernelWithPrintfWhenSubmittedThenEventIsAbortedAndHangIsReported) {
+    MockCommandQueue mockCmdQueue(mockContext, pClDevice, nullptr, false);
+
+    testing::internal::CaptureStdout();
+    MockEvent<Event> event(&mockCmdQueue, CL_COMMAND_NDRANGE_KERNEL, 0, 0);
+
+    auto cmdStream = new LinearStream(pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), 4096, AllocationType::COMMAND_BUFFER, pDevice->getDeviceBitfield()}));
+    IndirectHeap *dsh = nullptr, *ioh = nullptr, *ssh = nullptr;
+    mockCmdQueue.allocateHeapMemory(IndirectHeap::Type::DYNAMIC_STATE, 4096u, dsh);
+    mockCmdQueue.allocateHeapMemory(IndirectHeap::Type::INDIRECT_OBJECT, 4096u, ioh);
+    mockCmdQueue.allocateHeapMemory(IndirectHeap::Type::SURFACE_STATE, 4096u, ssh);
+
+    auto blockedCommandsData = std::make_unique<KernelOperation>(cmdStream, *mockCmdQueue.getGpgpuCommandStreamReceiver().getInternalAllocationStorage());
+    blockedCommandsData->setHeaps(dsh, ioh, ssh);
+
+    std::string testString = "test";
+
+    MockKernelWithInternals mockKernelWithInternals(*pClDevice);
+    auto pKernel = mockKernelWithInternals.mockKernel;
+
+    auto &kernelInfo = mockKernelWithInternals.kernelInfo;
+    kernelInfo.kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::Patchtokens;
+    kernelInfo.setPrintfSurface(sizeof(uintptr_t), 0);
+    kernelInfo.addToPrintfStringsMap(0, testString);
+
+    uint64_t crossThread[10];
+    pKernel->setCrossThreadData(&crossThread, sizeof(uint64_t) * 8);
+
+    MockMultiDispatchInfo multiDispatchInfo(pClDevice, pKernel);
+    std::unique_ptr<MockPrintfHandler> printfHandler(new MockPrintfHandler(*pClDevice));
+    printfHandler.get()->prepareDispatch(multiDispatchInfo);
+    auto surface = printfHandler.get()->getSurface();
+
+    auto printfSurface = reinterpret_cast<uint32_t *>(surface->getUnderlyingBuffer());
+    printfSurface[0] = 8;
+    printfSurface[1] = 0;
+
+    std::vector<Surface *> v;
+    PreemptionMode preemptionMode = pDevice->getPreemptionMode();
+    auto cmd = new CommandComputeKernel(mockCmdQueue, blockedCommandsData, v, false, false, false, std::move(printfHandler), preemptionMode, pKernel, 1);
+    event.setCommand(std::unique_ptr<Command>(cmd));
+
+    event.submitCommand(false);
+    EXPECT_EQ(Event::executionAbortedDueToGpuHang, event.peekExecutionStatus());
+
+    std::string output = testing::internal::GetCapturedStdout();
+    EXPECT_TRUE(output.empty());
+}
+
 TEST_F(InternalsEventTest, GivenMapOperationWhenSubmittingCommandsThenTaskLevelIsIncremented) {
-    auto pCmdQ = make_releaseable<MockCommandQueue>(mockContext, pClDevice, nullptr, false);
+    auto pCmdQ = makeReleaseable<MockCommandQueue>(mockContext, pClDevice, nullptr, false);
     MockEvent<Event> event(pCmdQ.get(), CL_COMMAND_NDRANGE_KERNEL, 0, 0);
 
     auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
@@ -608,7 +710,7 @@ TEST_F(InternalsEventTest, GivenMapOperationWhenSubmittingCommandsThenTaskLevelI
 }
 
 TEST_F(InternalsEventTest, GivenMapOperationNonZeroCopyBufferWhenSubmittingCommandsThenTaskLevelIsIncremented) {
-    auto pCmdQ = make_releaseable<MockCommandQueue>(mockContext, pClDevice, nullptr, false);
+    auto pCmdQ = makeReleaseable<MockCommandQueue>(mockContext, pClDevice, nullptr, false);
     MockEvent<Event> event(pCmdQ.get(), CL_COMMAND_NDRANGE_KERNEL, 0, 0);
 
     auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
@@ -676,7 +778,7 @@ TEST_P(InternalsEventProfilingTest, GivenProfilingWhenEventCreatedThenProfilingS
     std::unique_ptr<MockCommandQueue> pCmdQ(new MockCommandQueue(mockContext, pClDevice, props, false));
 
     std::unique_ptr<MockEvent<Event>> event(new MockEvent<Event>(pCmdQ.get(), GetParam(), 0, 0));
-    EXPECT_TRUE(event.get()->isProfilingEnabled());
+    EXPECT_TRUE(event->isProfilingEnabled());
 }
 
 INSTANTIATE_TEST_CASE_P(InternalsEventProfilingTest,
@@ -688,7 +790,7 @@ TEST_F(InternalsEventTest, GivenProfilingWhenUserEventCreatedThenProfilingNotSet
     std::unique_ptr<MockCommandQueue> pCmdQ(new MockCommandQueue(mockContext, pClDevice, props, false));
 
     std::unique_ptr<MockEvent<Event>> event(new MockEvent<Event>(pCmdQ.get(), CL_COMMAND_USER, 0, 0));
-    EXPECT_FALSE(event.get()->isProfilingEnabled());
+    EXPECT_FALSE(event->isProfilingEnabled());
 }
 
 TEST_F(InternalsEventTest, givenDeviceTimestampBaseNotEnabledWhenGetEventProfilingInfoThenCpuTimestampIsReturned) {
@@ -836,7 +938,7 @@ TEST_F(InternalsEventTest, GivenProfilingWHENMapOperationTHENTimesSet) {
 
 TEST_F(InternalsEventTest, GivenUnMapOperationWhenSubmittingCommandsThenTaskLevelIsIncremented) {
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
-    auto pCmdQ = make_releaseable<MockCommandQueue>(mockContext, pClDevice, props, false);
+    auto pCmdQ = makeReleaseable<MockCommandQueue>(mockContext, pClDevice, props, false);
     MockEvent<Event> event(pCmdQ.get(), CL_COMMAND_NDRANGE_KERNEL, 0, 0);
 
     auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
@@ -948,12 +1050,10 @@ struct InternalsEventWithPerfCountersTest
     void SetUp() override {
         PerformanceCountersFixture::SetUp();
         InternalsEventTest::SetUp();
-        createPerfCounters();
-        pDevice->setPerfCounters(performanceCountersBase.get());
+        pDevice->setPerfCounters(MockPerformanceCounters::create());
     }
 
     void TearDown() override {
-        performanceCountersBase.release();
         InternalsEventTest::TearDown();
         PerformanceCountersFixture::TearDown();
     }
@@ -1062,7 +1162,7 @@ HWTEST_F(EventTest, givenVirtualEventWhenCommandSubmittedThenLockCsrOccurs) {
 
     std::unique_ptr<MockCommandComputeKernel> command = std::make_unique<MockCommandComputeKernel>(*pCmdQ, kernelOperation, surfaces, kernel);
 
-    auto virtualEvent = make_releaseable<MockEvent>(pCmdQ, CL_COMMAND_NDRANGE_KERNEL, CompletionStamp::notReady, CompletionStamp::notReady);
+    auto virtualEvent = makeReleaseable<MockEvent>(pCmdQ, CL_COMMAND_NDRANGE_KERNEL, CompletionStamp::notReady, CompletionStamp::notReady);
 
     virtualEvent->setCommand(std::move(command));
 
@@ -1082,7 +1182,7 @@ HWTEST_F(EventTest, givenVirtualEventWhenSubmitCommandEventNotReadyAndEventWitho
                                                                   taskLevel, taskCount) {}
     };
 
-    auto virtualEvent = make_releaseable<MockEvent>(pCmdQ, CL_COMMAND_NDRANGE_KERNEL, CompletionStamp::notReady, CompletionStamp::notReady);
+    auto virtualEvent = makeReleaseable<MockEvent>(pCmdQ, CL_COMMAND_NDRANGE_KERNEL, CompletionStamp::notReady, CompletionStamp::notReady);
 
     virtualEvent->submitCommand(false);
 
@@ -1092,7 +1192,7 @@ HWTEST_F(EventTest, givenVirtualEventWhenSubmitCommandEventNotReadyAndEventWitho
 HWTEST_F(InternalsEventTest, GivenBufferWithoutZeroCopyWhenMappingOrUnmappingThenFlushPreviousTasksBeforeMappingOrUnmapping) {
     struct MockNonZeroCopyBuff : UnalignedBuffer {
         MockNonZeroCopyBuff(int32_t &executionStamp)
-            : executionStamp(executionStamp), dataTransferedStamp(-1) {
+            : executionStamp(executionStamp) {
             hostPtr = &dataTransferedStamp;
             memoryStorage = &executionStamp;
             size = sizeof(executionStamp);
@@ -1107,7 +1207,7 @@ HWTEST_F(InternalsEventTest, GivenBufferWithoutZeroCopyWhenMappingOrUnmappingThe
         }
 
         int32_t &executionStamp;
-        int32_t dataTransferedStamp;
+        int32_t dataTransferedStamp = -1;
     };
 
     int32_t executionStamp = 0;
@@ -1115,7 +1215,7 @@ HWTEST_F(InternalsEventTest, GivenBufferWithoutZeroCopyWhenMappingOrUnmappingThe
     pDevice->resetCommandStreamReceiver(csr);
 
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
-    auto pCmdQ = make_releaseable<MockCommandQueue>(mockContext, pClDevice, props, false);
+    auto pCmdQ = makeReleaseable<MockCommandQueue>(mockContext, pClDevice, props, false);
 
     MockNonZeroCopyBuff buffer(executionStamp);
 
@@ -1153,13 +1253,13 @@ HWTEST_F(InternalsEventTest, GivenBufferWithoutZeroCopyWhenMappingOrUnmappingThe
 
 TEST(EventCallback, WhenOverridingStatusThenEventUsesNewStatus) {
     struct ClbFuncTempStruct {
-        static void CL_CALLBACK ClbFuncT(cl_event e, cl_int status, void *retStatus) {
+        static void CL_CALLBACK clbFuncT(cl_event e, cl_int status, void *retStatus) {
             *((cl_int *)retStatus) = status;
         }
     };
 
     cl_int retStatus = 7;
-    Event::Callback clb(nullptr, ClbFuncTempStruct::ClbFuncT, CL_COMPLETE, &retStatus);
+    Event::Callback clb(nullptr, ClbFuncTempStruct::clbFuncT, CL_COMPLETE, &retStatus);
     EXPECT_EQ(CL_COMPLETE, clb.getCallbackExecutionStatusTarget());
     clb.execute();
     EXPECT_EQ(CL_COMPLETE, retStatus);
@@ -1235,7 +1335,7 @@ HWTEST_F(EventTest, WhenGettingHwTimeStampsThenValidPointerIsReturned) {
     HwTimeStamps *timeStamps = static_cast<TagNode<HwTimeStamps> *>(event->getHwTimeStampNode())->tagForCpuAccess;
     ASSERT_NE(nullptr, timeStamps);
 
-    //this should not cause any heap corruptions
+    // this should not cause any heap corruptions
     ASSERT_EQ(0ULL, timeStamps->GlobalStartTS);
     ASSERT_EQ(0ULL, timeStamps->ContextStartTS);
     ASSERT_EQ(0ULL, timeStamps->GlobalEndTS);
@@ -1387,7 +1487,7 @@ TEST(EventCallback, GivenEventWithCallbacksOnWhenPeekingHasCallbacksThenReturnTr
     DebugManagerStateRestore dbgRestore;
     DebugManager.flags.EnableAsyncEventsHandler.set(false);
     struct ClbFuncTempStruct {
-        static void CL_CALLBACK ClbFuncT(cl_event, cl_int, void *) {
+        static void CL_CALLBACK clbFuncT(cl_event, cl_int, void *) {
         }
     };
 
@@ -1405,38 +1505,29 @@ TEST(EventCallback, GivenEventWithCallbacksOnWhenPeekingHasCallbacksThenReturnTr
 
     {
         SmallMockEvent ev;
-        ev.addCallback(ClbFuncTempStruct::ClbFuncT, CL_SUBMITTED, nullptr);
+        ev.addCallback(ClbFuncTempStruct::clbFuncT, CL_SUBMITTED, nullptr);
         EXPECT_TRUE(ev.peekHasCallbacks());
         ev.decRefInternal();
     }
 
     {
         SmallMockEvent ev;
-        ev.addCallback(ClbFuncTempStruct::ClbFuncT, CL_RUNNING, nullptr);
+        ev.addCallback(ClbFuncTempStruct::clbFuncT, CL_RUNNING, nullptr);
         EXPECT_TRUE(ev.peekHasCallbacks());
         ev.decRefInternal();
     }
 
     {
         SmallMockEvent ev;
-        ev.addCallback(ClbFuncTempStruct::ClbFuncT, CL_COMPLETE, nullptr);
+        ev.addCallback(ClbFuncTempStruct::clbFuncT, CL_COMPLETE, nullptr);
         EXPECT_TRUE(ev.peekHasCallbacks());
         ev.decRefInternal();
     }
 
     {
         SmallMockEvent ev;
-        ev.addCallback(ClbFuncTempStruct::ClbFuncT, CL_SUBMITTED, nullptr);
-        ev.addCallback(ClbFuncTempStruct::ClbFuncT, CL_COMPLETE, nullptr);
-        EXPECT_TRUE(ev.peekHasCallbacks());
-        ev.decRefInternal();
-        ev.decRefInternal();
-    }
-
-    {
-        SmallMockEvent ev;
-        ev.addCallback(ClbFuncTempStruct::ClbFuncT, CL_RUNNING, nullptr);
-        ev.addCallback(ClbFuncTempStruct::ClbFuncT, CL_COMPLETE, nullptr);
+        ev.addCallback(ClbFuncTempStruct::clbFuncT, CL_SUBMITTED, nullptr);
+        ev.addCallback(ClbFuncTempStruct::clbFuncT, CL_COMPLETE, nullptr);
         EXPECT_TRUE(ev.peekHasCallbacks());
         ev.decRefInternal();
         ev.decRefInternal();
@@ -1444,9 +1535,18 @@ TEST(EventCallback, GivenEventWithCallbacksOnWhenPeekingHasCallbacksThenReturnTr
 
     {
         SmallMockEvent ev;
-        ev.addCallback(ClbFuncTempStruct::ClbFuncT, CL_SUBMITTED, nullptr);
-        ev.addCallback(ClbFuncTempStruct::ClbFuncT, CL_RUNNING, nullptr);
-        ev.addCallback(ClbFuncTempStruct::ClbFuncT, CL_COMPLETE, nullptr);
+        ev.addCallback(ClbFuncTempStruct::clbFuncT, CL_RUNNING, nullptr);
+        ev.addCallback(ClbFuncTempStruct::clbFuncT, CL_COMPLETE, nullptr);
+        EXPECT_TRUE(ev.peekHasCallbacks());
+        ev.decRefInternal();
+        ev.decRefInternal();
+    }
+
+    {
+        SmallMockEvent ev;
+        ev.addCallback(ClbFuncTempStruct::clbFuncT, CL_SUBMITTED, nullptr);
+        ev.addCallback(ClbFuncTempStruct::clbFuncT, CL_RUNNING, nullptr);
+        ev.addCallback(ClbFuncTempStruct::clbFuncT, CL_COMPLETE, nullptr);
         EXPECT_TRUE(ev.peekHasCallbacks());
         ev.decRefInternal();
         ev.decRefInternal();
@@ -1707,7 +1807,7 @@ TEST(EventsDebug, givenEventWhenTrackingOfParentsIsOffThenDoNotTrackParents) {
     event.setStatus(CL_COMPLETE);
 }
 
-TEST(CommandQueue, givenTimestampPacketWritesDisabledAndQueueHasTimestampPacketContainerThenCreateTheContainerForEvent) {
+TEST(EventTimestampTest, givenTimestampPacketWritesDisabledAndQueueHasTimestampPacketContainerThenCreateTheContainerForEvent) {
     DebugManagerStateRestore stateRestore;
     DebugManager.flags.EnableTimestampPacket.set(0);
 
@@ -1719,4 +1819,47 @@ TEST(CommandQueue, givenTimestampPacketWritesDisabledAndQueueHasTimestampPacketC
 
     MockEvent<Event> event{&queue, CL_COMMAND_MARKER, 0, 0};
     EXPECT_NE(nullptr, event.timestampPacketContainer);
+}
+
+TEST(EventTimestampTest, givenEnableTimestampWaitWhenCheckIsTimestampWaitEnabledThenReturnProperValue) {
+    DebugManagerStateRestore restorer;
+    VariableBackup<UltHwConfig> backup(&ultHwConfig);
+    ultHwConfig.useWaitForTimestamps = true;
+    MockContext context{};
+    auto mockDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    MockCommandQueue cmdQ(&context, mockDevice.get(), 0, false);
+
+    MockEvent<Event> event{&cmdQ, CL_COMMAND_MARKER, 0, 0};
+
+    {
+        DebugManager.flags.EnableTimestampWaitForEvents.set(-1);
+        const auto &hwInfo = mockDevice->getHardwareInfo();
+        const auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+        EXPECT_EQ(event.isWaitForTimestampsEnabled(), hwHelper.isTimestampWaitSupportedForEvents(hwInfo));
+    }
+
+    {
+        DebugManager.flags.EnableTimestampWaitForEvents.set(0);
+        EXPECT_FALSE(event.isWaitForTimestampsEnabled());
+    }
+
+    {
+        DebugManager.flags.EnableTimestampWaitForEvents.set(1);
+        EXPECT_EQ(event.isWaitForTimestampsEnabled(), cmdQ.getGpgpuCommandStreamReceiver().isUpdateTagFromWaitEnabled());
+    }
+
+    {
+        DebugManager.flags.EnableTimestampWaitForEvents.set(2);
+        EXPECT_EQ(event.isWaitForTimestampsEnabled(), cmdQ.getGpgpuCommandStreamReceiver().isDirectSubmissionEnabled());
+    }
+
+    {
+        DebugManager.flags.EnableTimestampWaitForEvents.set(3);
+        EXPECT_EQ(event.isWaitForTimestampsEnabled(), cmdQ.getGpgpuCommandStreamReceiver().isAnyDirectSubmissionEnabled());
+    }
+
+    {
+        DebugManager.flags.EnableTimestampWaitForEvents.set(4);
+        EXPECT_TRUE(event.isWaitForTimestampsEnabled());
+    }
 }

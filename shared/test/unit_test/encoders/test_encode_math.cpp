@@ -9,7 +9,7 @@
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/fixtures/device_fixture.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 using namespace NEO;
 
@@ -180,7 +180,7 @@ HWTEST_F(CommandEncoderMathTest, givenOffsetAndValueWhenEncodeBitwiseAndValIsCal
     constexpr uint32_t regOffset = 0x2000u;
     constexpr uint32_t immVal = 0xbaau;
     constexpr uint64_t dstAddress = 0xDEADCAF0u;
-    EncodeMathMMIO<FamilyType>::encodeBitwiseAndVal(cmdContainer, regOffset, immVal, dstAddress);
+    EncodeMathMMIO<FamilyType>::encodeBitwiseAndVal(cmdContainer, regOffset, immVal, dstAddress, false);
 
     CmdParse<FamilyType>::parseCommandBuffer(commands,
                                              ptrOffset(cmdContainer.getCommandStream()->getCpuBase(), 0),

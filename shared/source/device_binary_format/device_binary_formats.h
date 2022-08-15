@@ -7,13 +7,13 @@
 
 #pragma once
 
+#include "shared/source/helpers/product_config_helper.h"
 #include "shared/source/utilities/arrayref.h"
 #include "shared/source/utilities/const_stringref.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <igfxfmid.h>
-#include <memory>
 #include <vector>
 
 namespace NEO {
@@ -57,6 +57,7 @@ inline const char *asString(DecodeError err) {
 struct TargetDevice {
     GFXCORE_FAMILY coreFamily = IGFX_UNKNOWN_CORE;
     PRODUCT_FAMILY productFamily = IGFX_UNKNOWN;
+    AheadOfTimeConfig aotConfig = {0};
     uint32_t stepping = 0U;
     uint32_t maxPointerSizeInBytes = 4U;
     uint32_t grfSize = 32U;
@@ -68,6 +69,7 @@ struct SingleDeviceBinary {
     ArrayRef<const uint8_t> deviceBinary;
     ArrayRef<const uint8_t> debugData;
     ArrayRef<const uint8_t> intermediateRepresentation;
+    ArrayRef<const uint8_t> packedTargetDeviceBinary;
     ConstStringRef buildOptions;
     TargetDevice targetDevice;
 };

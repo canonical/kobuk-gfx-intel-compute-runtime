@@ -9,10 +9,11 @@
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_compiler_interface_spirv.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "level_zero/core/source/builtin/builtin_functions_lib_impl.h"
 #include "level_zero/core/source/device/device_imp.h"
+#include "level_zero/core/source/kernel/kernel.h"
 #include "level_zero/core/source/module/module.h"
 #include "level_zero/core/source/module/module_imp.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
@@ -93,7 +94,7 @@ HWTEST_F(TestBuiltinFunctionsLibImplImages, givenImageSupportThenEachBuiltinImag
     for (uint32_t builtId = 0; builtId < static_cast<uint32_t>(ImageBuiltin::COUNT); builtId++) {
         EXPECT_EQ(nullptr, mockBuiltinFunctionsLibImpl->imageBuiltins[builtId]);
     }
-    if (mockDevicePtr.get()->getHwInfo().capabilityTable.supportsImages) {
+    if (mockDevicePtr->getHwInfo().capabilityTable.supportsImages) {
         for (uint32_t builtId = 0; builtId < static_cast<uint32_t>(ImageBuiltin::COUNT); builtId++) {
             EXPECT_NE(nullptr, mockBuiltinFunctionsLibImpl->getImageFunction(static_cast<L0::ImageBuiltin>(builtId)));
             EXPECT_NE(nullptr, mockBuiltinFunctionsLibImpl->imageBuiltins[builtId]);
@@ -111,7 +112,7 @@ HWTEST_F(TestBuiltinFunctionsLibImplImages, givenImageSupportAndWrongIdWhenCalli
     for (uint32_t builtId = 0; builtId < static_cast<uint32_t>(ImageBuiltin::COUNT); builtId++) {
         EXPECT_EQ(nullptr, mockBuiltinFunctionsLibImpl->imageBuiltins[builtId]);
     }
-    if (mockDevicePtr.get()->getHwInfo().capabilityTable.supportsImages) {
+    if (mockDevicePtr->getHwInfo().capabilityTable.supportsImages) {
         uint32_t builtId = static_cast<uint32_t>(ImageBuiltin::COUNT) + 1;
         EXPECT_THROW(mockBuiltinFunctionsLibImpl->initBuiltinImageKernel(static_cast<L0::ImageBuiltin>(builtId)), std::exception);
     }

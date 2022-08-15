@@ -72,6 +72,13 @@ ze_result_t MetricEnumeration::initialize() {
         if (hMetricsDiscovery &&
             openMetricsDiscovery() == ZE_RESULT_SUCCESS &&
             cacheMetricInformation() == ZE_RESULT_SUCCESS) {
+
+            if (metricSource.isImplicitScalingCapable()) {
+                const auto &deviceImp = *static_cast<DeviceImp *>(&metricSource.getDevice());
+                for (size_t i = 0; i < deviceImp.numSubDevices; i++) {
+                    deviceImp.subDevices[i]->getMetricDeviceContext().getMetricSource<OaMetricSourceImp>().getMetricsLibrary().enableWorkloadPartition();
+                }
+            }
             initializationState = ZE_RESULT_SUCCESS;
         } else {
             initializationState = ZE_RESULT_ERROR_UNKNOWN;
@@ -84,18 +91,29 @@ ze_result_t MetricEnumeration::initialize() {
 
 ze_result_t MetricEnumeration::loadMetricsDiscovery() {
     // Load library.
-    hMetricsDiscovery.reset(OaMetricSourceImp::osLibraryLoadFunction(getMetricsDiscoveryFilename()));
+    std::vector<const char *> libnames;
+    getMetricsDiscoveryFilename(libnames);
 
-    // Load exported functions.
-    if (hMetricsDiscovery) {
-        openAdapterGroup = reinterpret_cast<MetricsDiscovery::OpenAdapterGroup_fn>(
-            hMetricsDiscovery->getProcAddress("OpenAdapterGroup"));
+    for (auto &name : libnames) {
+        hMetricsDiscovery.reset(OaMetricSourceImp::osLibraryLoadFunction(name));
+
+        // Load exported functions.
+        if (hMetricsDiscovery) {
+            openAdapterGroup = reinterpret_cast<MetricsDiscovery::OpenAdapterGroup_fn>(
+                hMetricsDiscovery->getProcAddress("OpenAdapterGroup"));
+        }
+
+        if (openAdapterGroup == nullptr) {
+            NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "cannot load %s exported functions\n", name);
+        } else {
+            NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "loaded %s exported functions\n", name);
+            break;
+        }
     }
 
     if (openAdapterGroup == nullptr) {
-        NEO::printDebugString(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "cannot load %s exported functions\n", MetricEnumeration::getMetricsDiscoveryFilename());
         cleanupMetricsDiscovery();
-        return ZE_RESULT_ERROR_NOT_AVAILABLE;
+        return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
     }
 
     // Return success if exported functions have been loaded.
@@ -232,6 +250,11 @@ ze_result_t MetricEnumeration::cacheMetricInformation() {
         }
 
         return result;
+    }
+
+    // Avoid repeated cacheing for the sub-device
+    if (getMetricGroupCount() > 0) {
+        return ZE_RESULT_SUCCESS;
     }
 
     DEBUG_BREAK_IF(pMetricsDevice == nullptr);

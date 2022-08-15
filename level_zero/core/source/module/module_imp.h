@@ -10,12 +10,8 @@
 #include "shared/source/compiler_interface/compiler_interface.h"
 #include "shared/source/compiler_interface/linker.h"
 #include "shared/source/program/program_info.h"
-#include "shared/source/utilities/const_stringref.h"
 
-#include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/module/module.h"
-
-#include "igfxfmid.h"
 
 #include <list>
 #include <memory>
@@ -34,6 +30,7 @@ extern NEO::ConstStringRef optLevel;
 extern NEO::ConstStringRef greaterThan4GbRequired;
 extern NEO::ConstStringRef hasBufferOffsetArg;
 extern NEO::ConstStringRef debugKernelEnable;
+extern NEO::ConstStringRef profileFlags;
 } // namespace BuildOptions
 
 struct ModuleTranslationUnit {
@@ -85,15 +82,7 @@ struct ModuleImp : public Module {
 
     ~ModuleImp() override;
 
-    ze_result_t destroy() override {
-        auto tempHandle = debugModuleHandle;
-        auto tempDevice = device;
-        delete this;
-        if (tempDevice->getL0Debugger() && tempHandle != 0) {
-            tempDevice->getL0Debugger()->removeZebinModule(tempHandle);
-        }
-        return ZE_RESULT_SUCCESS;
-    }
+    ze_result_t destroy() override;
 
     ze_result_t createKernel(const ze_kernel_desc_t *desc,
                              ze_kernel_handle_t *phFunction) override;
@@ -122,11 +111,13 @@ struct ModuleImp : public Module {
 
     void createBuildOptions(const char *pBuildFlags, std::string &buildOptions, std::string &internalBuildOptions);
     void createBuildExtraOptions(std::string &buildOptions, std::string &internalBuildOptions);
+    bool moveOptLevelOption(std::string &dstOptionsSet, std::string &srcOptionSet);
+    bool moveProfileFlagsOption(std::string &dstOptionsSet, std::string &srcOptionSet);
     void updateBuildLog(NEO::Device *neoDevice);
 
     Device *getDevice() const override { return device; }
 
-    bool linkBinary();
+    MOCKABLE_VIRTUAL bool linkBinary();
 
     bool initialize(const ze_module_desc_t *desc, NEO::Device *neoDevice);
 
@@ -136,11 +127,11 @@ struct ModuleImp : public Module {
         return allocatePrivateMemoryPerDispatch;
     }
 
+    uint32_t getProfileFlags() const override { return profileFlags; }
+
     ModuleTranslationUnit *getTranslationUnit() {
         return this->translationUnit.get();
     }
-
-    void moduleDependencyWalker(std::map<void *, std::map<void *, void *>> inDeps, void *moduleHandle, std::list<ModuleImp *> *outDeps);
 
   protected:
     void copyPatchedSegments(const NEO::Linker::PatchableSegments &isaSegmentsForPatching);
@@ -150,7 +141,9 @@ struct ModuleImp : public Module {
     void passDebugData();
     void createDebugZebin();
     void registerElfInDebuggerL0();
+    void notifyModuleCreate();
     bool populateHostGlobalSymbolsMap(std::unordered_map<std::string, std::string> &devToHostNameMapping);
+    StackVec<NEO::GraphicsAllocation *, 32> getModuleAllocations();
 
     Device *device = nullptr;
     PRODUCT_FAMILY productFamily{};
@@ -175,6 +168,10 @@ struct ModuleImp : public Module {
     NEO::Linker::UnresolvedExternals unresolvedExternalsInfo{};
     std::set<NEO::GraphicsAllocation *> importedSymbolAllocations{};
     uint32_t debugModuleHandle = 0;
+    uint32_t profileFlags = 0;
+
+    NEO::Linker::PatchableSegments isaSegmentsForPatching;
+    std::vector<std::vector<char>> patchedIsaTempStorage;
 };
 
 bool moveBuildOption(std::string &dstOptionsSet, std::string &srcOptionSet, NEO::ConstStringRef dstOptionName, NEO::ConstStringRef srcOptionName);

@@ -25,7 +25,8 @@ namespace NEO {
 
 template <typename Family>
 void EncodeDispatchKernel<Family>::setGrfInfo(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, uint32_t numGrf,
-                                              const size_t &sizeCrossThreadData, const size_t &sizePerThreadData) {
+                                              const size_t &sizeCrossThreadData, const size_t &sizePerThreadData,
+                                              const HardwareInfo &hwInfo) {
     auto grfSize = sizeof(typename Family::GRF);
     DEBUG_BREAK_IF((sizeCrossThreadData % grfSize) != 0);
     auto numGrfCrossThreadData = static_cast<uint32_t>(sizeCrossThreadData / grfSize);
@@ -46,7 +47,6 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
 
     using MEDIA_STATE_FLUSH = typename Family::MEDIA_STATE_FLUSH;
     using MEDIA_INTERFACE_DESCRIPTOR_LOAD = typename Family::MEDIA_INTERFACE_DESCRIPTOR_LOAD;
-    using MI_BATCH_BUFFER_END = typename Family::MI_BATCH_BUFFER_END;
     using STATE_BASE_ADDRESS = typename Family::STATE_BASE_ADDRESS;
 
     auto &kernelDescriptor = args.dispatchInterface->getKernelDescriptor();
@@ -58,9 +58,8 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
     const HardwareInfo &hwInfo = args.device->getHardwareInfo();
 
     LinearStream *listCmdBufferStream = container.getCommandStream();
-    size_t sshOffset = 0;
 
-    auto threadDims = static_cast<const uint32_t *>(args.pThreadGroupDimensions);
+    auto threadDims = static_cast<const uint32_t *>(args.threadGroupDimensions);
     const Vec3<size_t> threadStartVec{0, 0, 0};
     Vec3<size_t> threadDimsVec{0, 0, 0};
     if (!args.isIndirect) {
@@ -94,7 +93,6 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
         container.prepareBindfulSsh();
         if (bindingTableStateCount > 0u) {
             auto ssh = container.getHeapWithRequiredSizeAndAlignment(HeapType::SURFACE_STATE, args.dispatchInterface->getSurfaceStateHeapDataSize(), BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE);
-            sshOffset = ssh->getUsed();
             bindingTablePointer = static_cast<uint32_t>(EncodeSurfaceState<Family>::pushBindingTableAndSurfaceStates(
                 *ssh, bindingTableStateCount,
                 args.dispatchInterface->getSurfaceStateHeapData(),
@@ -126,7 +124,8 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
         EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(idd, samplerCount, bindingTableStateCount);
     }
 
-    EncodeDispatchKernel<Family>::setGrfInfo(&idd, kernelDescriptor.kernelAttributes.numGrfRequired, sizeCrossThreadData, sizePerThreadData);
+    EncodeDispatchKernel<Family>::setGrfInfo(&idd, kernelDescriptor.kernelAttributes.numGrfRequired, sizeCrossThreadData,
+                                             sizePerThreadData, hwInfo);
 
     uint32_t sizeThreadData = sizePerThreadDataForWholeGroup + sizeCrossThreadData;
     uint32_t sizeForImplicitArgsPatching = NEO::ImplicitArgsHelper::getSizeForImplicitArgsPatching(pImplicitArgs, kernelDescriptor, hwInfo);
@@ -173,7 +172,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
         if (dirtyHeaps) {
             syncArgs.hdcPipelineFlush = true;
         }
-        MemorySynchronizationCommands<Family>::addPipeControl(*container.getCommandStream(), syncArgs);
+        MemorySynchronizationCommands<Family>::addSingleBarrier(*container.getCommandStream(), syncArgs);
 
         if (dirtyHeaps || args.requiresUncachedMocs) {
             STATE_BASE_ADDRESS sba;
@@ -214,7 +213,8 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
                                                    true,
                                                    false,
                                                    args.isIndirect,
-                                                   args.dispatchInterface->getRequiredWorkgroupOrder());
+                                                   args.dispatchInterface->getRequiredWorkgroupOrder(),
+                                                   hwInfo);
 
     cmd.setPredicateEnable(args.isPredicate);
 
@@ -284,7 +284,8 @@ void EncodeDispatchKernel<Family>::encodeThreadData(WALKER_TYPE &walkerCmd,
                                                     bool localIdsGenerationByRuntime,
                                                     bool inlineDataProgrammingRequired,
                                                     bool isIndirect,
-                                                    uint32_t requiredWorkGroupOrder) {
+                                                    uint32_t requiredWorkGroupOrder,
+                                                    const HardwareInfo &hwInfo) {
 
     if (isIndirect) {
         walkerCmd.setIndirectParameterEnable(true);
@@ -329,7 +330,7 @@ void EncodeDispatchKernel<Family>::programBarrierEnable(INTERFACE_DESCRIPTOR_DAT
 }
 
 template <typename Family>
-inline void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd, KernelExecutionType kernelExecutionType) {}
+inline void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd, const EncodeWalkerArgs &walkerArgs) {}
 
 template <typename Family>
 void EncodeDispatchKernel<Family>::appendAdditionalIDDFields(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, const HardwareInfo &hwInfo, const uint32_t threadsPerThreadGroup, uint32_t slmTotalSize, SlmPolicy slmPolicy) {}
@@ -339,8 +340,13 @@ inline void EncodeComputeMode<Family>::adjustPipelineSelect(CommandContainer &co
 }
 
 template <typename Family>
-void EncodeStateBaseAddress<Family>::setIohAddressForDebugger(NEO::Debugger::SbaAddresses &sbaAddress, const STATE_BASE_ADDRESS &sbaCmd) {
+void EncodeStateBaseAddress<Family>::setSbaAddressesForDebugger(NEO::Debugger::SbaAddresses &sbaAddress, const STATE_BASE_ADDRESS &sbaCmd) {
     sbaAddress.IndirectObjectBaseAddress = sbaCmd.getIndirectObjectBaseAddress();
+    sbaAddress.BindlessSurfaceStateBaseAddress = sbaCmd.getBindlessSurfaceStateBaseAddress();
+    sbaAddress.DynamicStateBaseAddress = sbaCmd.getDynamicStateBaseAddress();
+    sbaAddress.GeneralStateBaseAddress = sbaCmd.getGeneralStateBaseAddress();
+    sbaAddress.InstructionBaseAddress = sbaCmd.getInstructionBaseAddress();
+    sbaAddress.SurfaceStateBaseAddress = sbaCmd.getSurfaceStateBaseAddress();
 }
 
 template <typename Family>
@@ -378,7 +384,8 @@ void EncodeStateBaseAddress<Family>::encode(CommandContainer &container, STATE_B
         false,
         MemoryCompressionState::NotApplicable,
         useGlobalAtomics,
-        1u);
+        1u,
+        nullptr);
 
     auto pCmd = reinterpret_cast<STATE_BASE_ADDRESS *>(container.getCommandStream()->getSpace(sizeof(STATE_BASE_ADDRESS)));
     *pCmd = sbaCmd;
@@ -421,7 +428,7 @@ inline size_t EncodeWA<GfxFamily>::getAdditionalPipelineSelectSize(Device &devic
 template <typename GfxFamily>
 inline void EncodeWA<GfxFamily>::addPipeControlPriorToNonPipelinedStateCommand(LinearStream &commandStream, PipeControlArgs args,
                                                                                const HardwareInfo &hwInfo, bool isRcs) {
-    MemorySynchronizationCommands<GfxFamily>::addPipeControl(commandStream, args);
+    MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(commandStream, args);
 }
 
 template <typename GfxFamily>
@@ -432,6 +439,10 @@ inline void EncodeWA<GfxFamily>::addPipeControlBeforeStateBaseAddress(LinearStre
     args.textureCacheInvalidationEnable = true;
 
     NEO::EncodeWA<GfxFamily>::addPipeControlPriorToNonPipelinedStateCommand(commandStream, args, hwInfo, isRcs);
+}
+
+template <typename GfxFamily>
+inline void EncodeWA<GfxFamily>::adjustCompressionFormatForPlanarImage(uint32_t &compressionFormat, GMM_YUV_PLANE_ENUM plane) {
 }
 
 template <typename GfxFamily>
@@ -466,7 +477,7 @@ void EncodeSempahore<Family>::programMiSemaphoreWait(MI_SEMAPHORE_WAIT *cmd,
 }
 
 template <typename GfxFamily>
-void EncodeEnableRayTracing<GfxFamily>::programEnableRayTracing(LinearStream &commandStream, GraphicsAllocation &backBuffer) {
+void EncodeEnableRayTracing<GfxFamily>::programEnableRayTracing(LinearStream &commandStream, uint64_t backBuffer) {
 }
 
 template <typename Family>
@@ -495,5 +506,8 @@ inline void EncodeMiArbCheck<Family>::adjust(MI_ARB_CHECK &miArbCheck) {
 
 template <typename Family>
 void EncodeDispatchKernel<Family>::setupPostSyncMocs(WALKER_TYPE &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment) {}
+
+template <typename Family>
+void EncodeDispatchKernel<Family>::adjustWalkOrder(WALKER_TYPE &walkerCmd, uint32_t requiredWorkGroupOrder, const HardwareInfo &hwInfo) {}
 
 } // namespace NEO

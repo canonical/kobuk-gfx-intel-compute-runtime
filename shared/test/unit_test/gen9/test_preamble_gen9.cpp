@@ -31,8 +31,8 @@ GEN9TEST_F(Gen9Slm, WhenL3ConfigIsDispatchedThenProperRegisterAddressAndValueAre
     ASSERT_NE(cmdList.end(), itorLRI);
 
     const auto &lri = *reinterpret_cast<MI_LOAD_REGISTER_IMM *>(*itorLRI);
-    auto RegisterOffset = L3CNTLRegisterOffset<FamilyType>::registerOffset;
-    EXPECT_EQ(RegisterOffset, lri.getRegisterOffset());
+    auto registerOffset = L3CNTLRegisterOffset<FamilyType>::registerOffset;
+    EXPECT_EQ(registerOffset, lri.getRegisterOffset());
     EXPECT_EQ(1u, lri.getDataDword() & 1);
 }
 
@@ -93,7 +93,7 @@ GEN9TEST_F(PreambleVfeState, GivenWaOffWhenProgrammingVfeStateThenProgrammingIsC
     LinearStream &cs = linearStream;
     auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, pDevice->getHardwareInfo(), EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 168u, emptyProperties);
+    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 168u, emptyProperties, nullptr);
 
     parseCommands<FamilyType>(cs);
 
@@ -113,7 +113,7 @@ GEN9TEST_F(PreambleVfeState, GivenWaOnWhenProgrammingVfeStateThenProgrammingIsCo
     LinearStream &cs = linearStream;
     auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, pDevice->getHardwareInfo(), EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 168u, emptyProperties);
+    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 168u, emptyProperties, nullptr);
 
     parseCommands<FamilyType>(cs);
 

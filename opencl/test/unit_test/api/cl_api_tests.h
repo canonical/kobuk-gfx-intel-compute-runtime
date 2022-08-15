@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,13 +11,12 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/mocks/mock_device.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
+#include "shared/test/unit_test/helpers/ult_limits.h"
 
 #include "opencl/source/api/api.h"
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/execution_environment/cl_execution_environment.h"
-#include "opencl/source/tracing/tracing_api.h"
-#include "opencl/test/unit_test/helpers/ult_limits.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
@@ -29,10 +28,13 @@ namespace NEO {
 template <uint32_t rootDeviceIndex = 1u>
 struct ApiFixture {
 
-    virtual void SetUp() {
+    virtual void SetUp() { // NOLINT(readability-identifier-naming)
         DebugManager.flags.CreateMultipleRootDevices.set(numRootDevices);
         executionEnvironment = new ClExecutionEnvironment();
         prepareDeviceEnvironments(*executionEnvironment);
+        for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
+            executionEnvironment->rootDeviceEnvironments[i]->initGmm();
+        }
         auto rootDevice = MockDevice::createWithExecutionEnvironment<MockDevice>(defaultHwInfo.get(), executionEnvironment, rootDeviceIndex);
         if (rootDeviceIndex != 0u) {
             rootDeviceEnvironmentBackup.swap(executionEnvironment->rootDeviceEnvironments[0]);
@@ -54,7 +56,7 @@ struct ApiFixture {
         ASSERT_NE(nullptr, pKernel);
     }
 
-    virtual void TearDown() {
+    virtual void TearDown() { // NOLINT(readability-identifier-naming)
         pMultiDeviceKernel->release();
         pCommandQueue->release();
         pContext->release();
@@ -102,8 +104,8 @@ struct api_tests : public ApiFixture<>,
 
 struct api_fixture_using_aligned_memory_manager {
   public:
-    virtual void SetUp();
-    virtual void TearDown();
+    virtual void SetUp();    // NOLINT(readability-identifier-naming)
+    virtual void TearDown(); // NOLINT(readability-identifier-naming)
 
     cl_int retVal;
     size_t retSize;

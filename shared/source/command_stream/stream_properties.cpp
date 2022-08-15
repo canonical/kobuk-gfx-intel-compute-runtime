@@ -8,18 +8,24 @@
 #include "shared/source/command_stream/stream_properties.h"
 
 #include "shared/source/command_stream/thread_arbitration_policy.h"
+#include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/kernel/grf_config.h"
+#include "shared/source/os_interface/hw_info_config.h"
 
 using namespace NEO;
 
-void StateComputeModeProperties::setProperties(bool requiresCoherency, uint32_t numGrfRequired, int32_t threadArbitrationPolicy,
+void StateComputeModeProperties::setProperties(bool requiresCoherency, uint32_t numGrfRequired, int32_t threadArbitrationPolicy, PreemptionMode devicePreemptionMode,
                                                const HardwareInfo &hwInfo) {
+    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+
     clearIsDirty();
 
     int32_t isCoherencyRequired = (requiresCoherency ? 1 : 0);
     this->isCoherencyRequired.set(isCoherencyRequired);
 
-    if (this->largeGrfMode.value == -1 || numGrfRequired != GrfConfig::NotApplicable) {
+    bool reportNumGrf = hwInfoConfig.isGrfNumReportedWithScm();
+    if (reportNumGrf && (this->largeGrfMode.value == -1 || numGrfRequired != GrfConfig::NotApplicable)) {
         int32_t largeGrfMode = (numGrfRequired == GrfConfig::LargeGrfNumber ? 1 : 0);
         this->largeGrfMode.set(largeGrfMode);
     }
@@ -40,15 +46,21 @@ void StateComputeModeProperties::setProperties(bool requiresCoherency, uint32_t 
                                              (NEO::DebugManager.flags.ForceDefaultThreadArbitrationPolicyIfNotSpecified.get() ||
                                               (this->threadArbitrationPolicy.value == ThreadArbitrationPolicy::NotPresent));
     if (setDefaultThreadArbitrationPolicy) {
-        auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
         threadArbitrationPolicy = hwHelper.getDefaultThreadArbitrationPolicy();
     }
     if (DebugManager.flags.OverrideThreadArbitrationPolicy.get() != -1) {
         threadArbitrationPolicy = DebugManager.flags.OverrideThreadArbitrationPolicy.get();
     }
-    this->threadArbitrationPolicy.set(threadArbitrationPolicy);
+    bool reportThreadArbitrationPolicy = hwInfoConfig.isThreadArbitrationPolicyReportedWithScm();
+    if (reportThreadArbitrationPolicy) {
+        this->threadArbitrationPolicy.set(threadArbitrationPolicy);
+    }
 
-    setPropertiesExtra();
+    if (hwHelper.isDevicePreemptionModeTrackedInScm()) {
+        this->devicePreemptionMode.set(static_cast<int32_t>(devicePreemptionMode));
+    }
+
+    setPropertiesExtra(reportNumGrf, reportThreadArbitrationPolicy);
 }
 
 void StateComputeModeProperties::setProperties(const StateComputeModeProperties &properties) {
@@ -59,13 +71,14 @@ void StateComputeModeProperties::setProperties(const StateComputeModeProperties 
     zPassAsyncComputeThreadLimit.set(properties.zPassAsyncComputeThreadLimit.value);
     pixelAsyncComputeThreadLimit.set(properties.pixelAsyncComputeThreadLimit.value);
     threadArbitrationPolicy.set(properties.threadArbitrationPolicy.value);
+    devicePreemptionMode.set(properties.devicePreemptionMode.value);
 
     setPropertiesExtra(properties);
 }
 
 bool StateComputeModeProperties::isDirty() const {
     return isCoherencyRequired.isDirty || largeGrfMode.isDirty || zPassAsyncComputeThreadLimit.isDirty ||
-           pixelAsyncComputeThreadLimit.isDirty || threadArbitrationPolicy.isDirty || isDirtyExtra();
+           pixelAsyncComputeThreadLimit.isDirty || threadArbitrationPolicy.isDirty || devicePreemptionMode.isDirty || isDirtyExtra();
 }
 
 void StateComputeModeProperties::clearIsDirty() {
@@ -74,6 +87,7 @@ void StateComputeModeProperties::clearIsDirty() {
     zPassAsyncComputeThreadLimit.isDirty = false;
     pixelAsyncComputeThreadLimit.isDirty = false;
     threadArbitrationPolicy.isDirty = false;
+    devicePreemptionMode.isDirty = false;
 
     clearIsDirtyExtra();
 }

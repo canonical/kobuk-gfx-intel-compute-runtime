@@ -12,6 +12,8 @@
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/unit_test/tests_configuration.h"
 
+#include "level_zero/core/source/cmdqueue/cmdqueue.h"
+#include "level_zero/core/source/context/context_imp.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_driver_handle.h"
 
@@ -50,6 +52,7 @@ void AUBFixtureL0::SetUp(const NEO::HardwareInfo *hardwareInfo, bool debuggingEn
     executionEnvironment = new NEO::ExecutionEnvironment();
     executionEnvironment->prepareRootDeviceEnvironments(1u);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(&hwInfo);
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
     if (debuggingEnabled) {
         executionEnvironment->setDebuggingEnabled();
@@ -82,7 +85,7 @@ void AUBFixtureL0::SetUp(const NEO::HardwareInfo *hardwareInfo, bool debuggingEn
     context = static_cast<ContextImp *>(Context::fromHandle(hContext));
 
     ze_result_t returnValue;
-    commandList.reset(ult::whitebox_cast(CommandList::create(hwInfo.platform.eProductFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)));
+    commandList.reset(ult::whiteboxCast(CommandList::create(hwInfo.platform.eProductFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)));
 
     returnValue = ZE_RESULT_ERROR_UNINITIALIZED;
     ze_command_queue_desc_t queueDesc = {};

@@ -15,6 +15,7 @@
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/heap_helper.h"
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/source/helpers/string.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
 #include "shared/source/memory_manager/allocations_list.h"
 #include "shared/source/memory_manager/memory_manager.h"
@@ -49,6 +50,8 @@ CommandContainer::CommandContainer() {
     for (auto &allocationIndirectHeap : allocationIndirectHeaps) {
         allocationIndirectHeap = nullptr;
     }
+
+    residencyContainer.reserve(startingResidencyContainerSize);
 }
 
 CommandContainer::CommandContainer(uint32_t maxNumAggregatedIdds) : CommandContainer() {
@@ -284,6 +287,7 @@ void CommandContainer::closeAndAllocateNextCommandBuffer() {
     auto ptr = commandStream->getSpace(0u);
     memcpy_s(ptr, bbEndSize, hwHelper.getBatchBufferEndReference(), bbEndSize);
     allocateNextCommandBuffer();
+    currentLinearStreamStartOffset = 0u;
 }
 
 void CommandContainer::prepareBindfulSsh() {

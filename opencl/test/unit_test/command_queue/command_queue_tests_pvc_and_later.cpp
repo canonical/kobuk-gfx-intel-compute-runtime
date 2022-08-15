@@ -9,7 +9,7 @@
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/test/unit_test/command_queue/command_queue_fixture.h"
@@ -84,6 +84,46 @@ HWTEST2_F(CommandQueuePvcAndLaterTests, givenAdditionalBcsWhenCreatingCommandQue
     EXPECT_EQ(1u, queue->countBcsEngines());
 }
 
+HWTEST2_F(CommandQueuePvcAndLaterTests, givenDeferCmdQBcsInitializationEnabledWhenCreateCommandQueueThenBcsCountIsZero, IsAtLeastXeHpcCore) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.DeferCmdQBcsInitialization.set(1u);
+
+    HardwareInfo hwInfo = *defaultHwInfo;
+    hwInfo.featureTable.ftrBcsInfo = maxNBitValue(9);
+    hwInfo.capabilityTable.blitterOperationsSupported = true;
+    MockDevice *device = MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0);
+    MockClDevice clDevice{device};
+    cl_device_id clDeviceId = static_cast<cl_device_id>(&clDevice);
+    ClDeviceVector clDevices{&clDeviceId, 1u};
+    cl_int retVal{};
+    auto context = std::unique_ptr<Context>{Context::create<Context>(nullptr, clDevices, nullptr, nullptr, retVal)};
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    auto queue = std::make_unique<MockCommandQueue>(*context);
+
+    EXPECT_EQ(0u, queue->countBcsEngines());
+}
+
+HWTEST2_F(CommandQueuePvcAndLaterTests, givenDeferCmdQBcsInitializationDisabledWhenCreateCommandQueueThenBcsIsInitialized, IsAtLeastXeHpcCore) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.DeferCmdQBcsInitialization.set(0u);
+
+    HardwareInfo hwInfo = *defaultHwInfo;
+    hwInfo.featureTable.ftrBcsInfo = maxNBitValue(9);
+    hwInfo.capabilityTable.blitterOperationsSupported = true;
+    MockDevice *device = MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0);
+    MockClDevice clDevice{device};
+    cl_device_id clDeviceId = static_cast<cl_device_id>(&clDevice);
+    ClDeviceVector clDevices{&clDeviceId, 1u};
+    cl_int retVal{};
+    auto context = std::unique_ptr<Context>{Context::create<Context>(nullptr, clDevices, nullptr, nullptr, retVal)};
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    auto queue = std::make_unique<MockCommandQueue>(*context);
+
+    EXPECT_NE(0u, queue->countBcsEngines());
+}
+
 HWTEST2_F(CommandQueuePvcAndLaterTests, givenQueueWithMainBcsIsReleasedWhenNewQueueIsCreatedThenMainBcsCanBeUsedAgain, IsAtLeastXeHpcCore) {
     HardwareInfo hwInfo = *defaultHwInfo;
     hwInfo.featureTable.ftrBcsInfo = maxNBitValue(9);
@@ -102,9 +142,9 @@ HWTEST2_F(CommandQueuePvcAndLaterTests, givenQueueWithMainBcsIsReleasedWhenNewQu
     auto queue4 = std::make_unique<MockCommandQueue>(*context);
 
     EXPECT_EQ(aub_stream::EngineType::ENGINE_BCS, queue1->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS)->getOsContext().getEngineType());
-    EXPECT_EQ(aub_stream::EngineType::ENGINE_BCS1, queue2->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS1)->getOsContext().getEngineType());
-    EXPECT_EQ(aub_stream::EngineType::ENGINE_BCS2, queue3->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS2)->getOsContext().getEngineType());
-    EXPECT_EQ(aub_stream::EngineType::ENGINE_BCS1, queue4->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS1)->getOsContext().getEngineType());
+    EXPECT_EQ(aub_stream::EngineType::ENGINE_BCS2, queue2->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS2)->getOsContext().getEngineType());
+    EXPECT_EQ(aub_stream::EngineType::ENGINE_BCS1, queue3->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS1)->getOsContext().getEngineType());
+    EXPECT_EQ(aub_stream::EngineType::ENGINE_BCS2, queue4->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS2)->getOsContext().getEngineType());
 
     // Releasing main BCS. Next creation should be able to grab it
     queue1.reset();
@@ -114,7 +154,7 @@ HWTEST2_F(CommandQueuePvcAndLaterTests, givenQueueWithMainBcsIsReleasedWhenNewQu
     // Releasing link BCS. Shouldn't change anything
     queue2.reset();
     queue2 = std::make_unique<MockCommandQueue>(*context);
-    EXPECT_EQ(aub_stream::EngineType::ENGINE_BCS2, queue2->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS2)->getOsContext().getEngineType());
+    EXPECT_EQ(aub_stream::EngineType::ENGINE_BCS1, queue2->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS1)->getOsContext().getEngineType());
 }
 
 HWTEST2_F(CommandQueuePvcAndLaterTests, givenCooperativeEngineUsageHintAndCcsWhenCreatingCommandQueueThenCreateQueueWithCooperativeEngine, IsAtLeastXeHpcCore) {
@@ -124,7 +164,6 @@ HWTEST2_F(CommandQueuePvcAndLaterTests, givenCooperativeEngineUsageHintAndCcsWhe
     auto hwInfo = *defaultHwInfo;
     hwInfo.featureTable.flags.ftrCCSNode = true;
     hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 4;
-    auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
     auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
     uint32_t revisions[] = {REVISION_A0, REVISION_B};
@@ -132,7 +171,7 @@ HWTEST2_F(CommandQueuePvcAndLaterTests, givenCooperativeEngineUsageHintAndCcsWhe
         auto hwRevId = hwInfoConfig.getHwRevIdFromStepping(revision, hwInfo);
         hwInfo.platform.usRevId = hwRevId;
         if (hwRevId == CommonConstants::invalidStepping ||
-            !hwHelper.isCooperativeEngineSupported(hwInfo)) {
+            !hwInfoConfig.isCooperativeEngineSupported(hwInfo)) {
             continue;
         }
 
@@ -144,10 +183,46 @@ HWTEST2_F(CommandQueuePvcAndLaterTests, givenCooperativeEngineUsageHintAndCcsWhe
         for (size_t i = 0; i < 4; i++) {
             propertiesCooperativeQueue[3] = i;
             auto pCommandQueue = std::make_unique<MockCommandQueueHw<FamilyType>>(&context, pDevice.get(), propertiesCooperativeQueue);
-            EXPECT_EQ(aub_stream::ENGINE_CCS + i, pCommandQueue->gpgpuEngine->osContext->getEngineType());
-            EXPECT_EQ(EngineUsage::Cooperative, pCommandQueue->gpgpuEngine->osContext->getEngineUsage());
+            EXPECT_EQ(aub_stream::ENGINE_CCS + i, pCommandQueue->getGpgpuEngine().osContext->getEngineType());
+            EXPECT_EQ(EngineUsage::Cooperative, pCommandQueue->getGpgpuEngine().osContext->getEngineUsage());
         }
     }
+}
+
+HWTEST2_F(CommandQueuePvcAndLaterTests, givenDeferCmdQGpgpuInitializationEnabledWhenCreateCommandQueueThenGpgpuIsNullptr, IsAtLeastXeHpcCore) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.DeferCmdQGpgpuInitialization.set(1u);
+
+    HardwareInfo hwInfo = *defaultHwInfo;
+    MockDevice *device = MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0);
+    MockClDevice clDevice{device};
+    cl_device_id clDeviceId = static_cast<cl_device_id>(&clDevice);
+    ClDeviceVector clDevices{&clDeviceId, 1u};
+    cl_int retVal{};
+    auto context = std::unique_ptr<Context>{Context::create<Context>(nullptr, clDevices, nullptr, nullptr, retVal)};
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    auto queue = std::make_unique<MockCommandQueueHw<FamilyType>>(context.get(), &clDevice, nullptr);
+
+    EXPECT_EQ(nullptr, queue->gpgpuEngine);
+}
+
+HWTEST2_F(CommandQueuePvcAndLaterTests, givenDeferCmdQGpgpuInitializationDisabledWhenCreateCommandQueueThenGpgpuIsnotNullptr, IsAtLeastXeHpcCore) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.DeferCmdQGpgpuInitialization.set(0u);
+
+    HardwareInfo hwInfo = *defaultHwInfo;
+    MockDevice *device = MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0);
+    MockClDevice clDevice{device};
+    cl_device_id clDeviceId = static_cast<cl_device_id>(&clDevice);
+    ClDeviceVector clDevices{&clDeviceId, 1u};
+    cl_int retVal{};
+    auto context = std::unique_ptr<Context>{Context::create<Context>(nullptr, clDevices, nullptr, nullptr, retVal)};
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    auto queue = std::make_unique<MockCommandQueueHw<FamilyType>>(context.get(), &clDevice, nullptr);
+
+    EXPECT_NE(nullptr, queue->gpgpuEngine);
 }
 
 struct BcsCsrSelectionCommandQueueTests : ::testing::Test {
@@ -455,10 +530,10 @@ HWTEST2_F(BcsCsrSelectionCommandQueueTests, givenMultipleEnginesInQueueWhenSelec
             aub_stream::ENGINE_BCS7,
             aub_stream::ENGINE_BCS8,
         });
-        EXPECT_EQ(queue->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS1), &queue->selectCsrForBuiltinOperation(args));
         EXPECT_EQ(queue->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS2), &queue->selectCsrForBuiltinOperation(args));
         EXPECT_EQ(queue->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS1), &queue->selectCsrForBuiltinOperation(args));
         EXPECT_EQ(queue->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS2), &queue->selectCsrForBuiltinOperation(args));
+        EXPECT_EQ(queue->getBcsCommandStreamReceiver(aub_stream::ENGINE_BCS1), &queue->selectCsrForBuiltinOperation(args));
     }
 }
 

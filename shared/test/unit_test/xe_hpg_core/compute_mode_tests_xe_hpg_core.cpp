@@ -18,7 +18,7 @@ using ComputeModeRequirementsXeHpgCore = ComputeModeRequirements;
 
 XE_HPG_CORETEST_F(ComputeModeRequirementsXeHpgCore, GivenVariousSettingsWhenComputeModeIsProgrammedThenThreadLimitsAreCorrectlySet) {
     DebugManagerStateRestore restorer;
-    SetUpImpl<FamilyType>();
+    setUpImpl<FamilyType>();
 
     using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
@@ -62,7 +62,7 @@ XE_HPG_CORETEST_F(ComputeModeRequirementsXeHpgCore, GivenVariousSettingsWhenComp
         DebugManager.flags.ForcePixelAsyncComputeThreadLimit.set(testValue.pixelThreadLimit);
 
         pCsr->streamProperties.stateComputeMode = {};
-        pCsr->streamProperties.stateComputeMode.setProperties(false, 0u, 0u, *defaultHwInfo);
+        pCsr->streamProperties.stateComputeMode.setProperties(false, 0u, 0u, PreemptionMode::Disabled, *defaultHwInfo);
         LinearStream stream(buff, 1024);
         pCsr->programComputeMode(stream, flags, *defaultHwInfo);
         EXPECT_EQ(cmdsSize, stream.getUsed());
@@ -83,7 +83,7 @@ XE_HPG_CORETEST_F(ComputeModeRequirementsXeHpgCore, GivenVariousSettingsWhenComp
     DebugManager.flags.ForcePixelAsyncComputeThreadLimit.set(-1);
 
     pCsr->streamProperties.stateComputeMode = {};
-    pCsr->streamProperties.stateComputeMode.setProperties(false, 0u, 0u, *defaultHwInfo);
+    pCsr->streamProperties.stateComputeMode.setProperties(false, 0u, 0u, PreemptionMode::Disabled, *defaultHwInfo);
     LinearStream stream(buff, 1024);
     pCsr->programComputeMode(stream, flags, *defaultHwInfo);
     EXPECT_EQ(cmdsSize, stream.getUsed());
@@ -99,7 +99,7 @@ XE_HPG_CORETEST_F(ComputeModeRequirementsXeHpgCore, GivenVariousSettingsWhenComp
 }
 
 XE_HPG_CORETEST_F(ComputeModeRequirementsXeHpgCore, givenComputeModeCmdSizeWhenLargeGrfModeChangeIsRequiredThenSCMCommandSizeIsCalculated) {
-    SetUpImpl<FamilyType>();
+    setUpImpl<FamilyType>();
     using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
@@ -120,7 +120,7 @@ XE_HPG_CORETEST_F(ComputeModeRequirementsXeHpgCore, givenComputeModeCmdSizeWhenL
 }
 
 XE_HPG_CORETEST_F(ComputeModeRequirementsXeHpgCore, givenCoherencyWithSharedHandlesWhenCommandSizeIsCalculatedThenCorrectCommandSizeIsReturned) {
-    SetUpImpl<FamilyType>();
+    setUpImpl<FamilyType>();
     using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
@@ -146,7 +146,7 @@ XE_HPG_CORETEST_F(ComputeModeRequirementsXeHpgCore, givenCoherencyWithSharedHand
 XE_HPG_CORETEST_F(ComputeModeRequirementsXeHpgCore, givenCoherencyWithoutSharedHandlesWhenCommandSizeIsCalculatedThenCorrectCommandSizeIsReturned) {
     using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    SetUpImpl<FamilyType>();
+    setUpImpl<FamilyType>();
 
     auto cmdsSize = sizeof(STATE_COMPUTE_MODE) + sizeof(PIPE_CONTROL);
 

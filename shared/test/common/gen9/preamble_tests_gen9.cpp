@@ -74,14 +74,14 @@ GEN9TEST_F(ThreadArbitrationGen9, givenPreambleWhenItIsProgrammedThenThreadArbit
     uint32_t l3Config = PreambleHelper<FamilyType>::getL3Config(*defaultHwInfo, true);
     MockDevice mockDevice;
     PreambleHelper<SKLFamily>::programPreamble(&linearStream, mockDevice, l3Config,
-                                               nullptr);
+                                               nullptr, nullptr);
 
     parseCommands<SKLFamily>(cs);
 
     auto ppC = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
     ASSERT_EQ(cmdList.end(), ppC);
 
-    auto itorLRI = reverse_find<MI_LOAD_REGISTER_IMM *>(cmdList.rbegin(), cmdList.rend());
+    auto itorLRI = reverseFind<MI_LOAD_REGISTER_IMM *>(cmdList.rbegin(), cmdList.rend());
     ASSERT_NE(cmdList.rend(), itorLRI);
 
     const auto &lri = *reinterpret_cast<MI_LOAD_REGISTER_IMM *>(*itorLRI);
@@ -101,14 +101,14 @@ GEN9TEST_F(ThreadArbitrationGen9, whenThreadArbitrationPolicyIsProgrammedThenCor
     MockDevice mockDevice;
     StreamProperties streamProperties{};
     streamProperties.stateComputeMode.threadArbitrationPolicy.set(ThreadArbitrationPolicy::RoundRobin);
-    EncodeComputeMode<FamilyType>::programComputeModeCommand(linearStream, streamProperties.stateComputeMode, *defaultHwInfo);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(linearStream, streamProperties.stateComputeMode, *defaultHwInfo, nullptr);
 
     parseCommands<SKLFamily>(cs);
 
     auto ppC = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
     ASSERT_NE(ppC, cmdList.end());
 
-    auto itorLRI = reverse_find<MI_LOAD_REGISTER_IMM *>(cmdList.rbegin(), cmdList.rend());
+    auto itorLRI = reverseFind<MI_LOAD_REGISTER_IMM *>(cmdList.rbegin(), cmdList.rend());
     ASSERT_NE(cmdList.rend(), itorLRI);
 
     const auto &lri = *reinterpret_cast<MI_LOAD_REGISTER_IMM *>(*itorLRI);

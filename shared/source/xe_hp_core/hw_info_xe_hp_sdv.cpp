@@ -84,7 +84,8 @@ const RuntimeCapabilityTable XE_HP_SDV::capabilityTable{
     true,                                                      // supportsMediaBlock
     true,                                                      // p2pAccessSupported
     false,                                                     // p2pAtomicAccessSupported
-    true                                                       // fusedEuEnabled
+    true,                                                      // fusedEuEnabled
+    true                                                       // l0DebuggerSupported;
 };
 
 WorkaroundTable XE_HP_SDV::workaroundTable = {};
@@ -128,19 +129,36 @@ void XE_HP_SDV::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo) {
     workaroundTable->flags.waEnablePreemptionGranularityControlByUMD = true;
 };
 
-const HardwareInfo XE_HP_SDV_CONFIG::hwInfo = {
+void XE_HP_SDV::setupHardwareInfoBase(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable) {
+    GT_SYSTEM_INFO *gtSysInfo = &hwInfo->gtSystemInfo;
+    gtSysInfo->ThreadCount = gtSysInfo->EUCount * XE_HP_SDV::threadsPerEu;
+    gtSysInfo->TotalVsThreads = 336;
+    gtSysInfo->TotalHsThreads = 336;
+    gtSysInfo->TotalDsThreads = 336;
+    gtSysInfo->TotalGsThreads = 336;
+    gtSysInfo->TotalPsThreadsWindowerRange = 64;
+    gtSysInfo->CsrSizeInMb = 8;
+    gtSysInfo->MaxEuPerSubSlice = XE_HP_SDV::maxEuPerSubslice;
+    gtSysInfo->MaxSlicesSupported = XE_HP_SDV::maxSlicesSupported;
+    gtSysInfo->MaxSubSlicesSupported = XE_HP_SDV::maxSubslicesSupported;
+    gtSysInfo->MaxDualSubSlicesSupported = XE_HP_SDV::maxDualSubslicesSupported;
+    gtSysInfo->IsL3HashModeEnabled = false;
+    gtSysInfo->IsDynamicallyPopulated = false;
+
+    if (setupFeatureTableAndWorkaroundTable) {
+        setupFeatureAndWorkaroundTable(hwInfo);
+    }
+}
+
+const HardwareInfo XehpSdvHwConfig::hwInfo = {
     &XE_HP_SDV::platform,
     &XE_HP_SDV::featureTable,
     &XE_HP_SDV::workaroundTable,
-    &XE_HP_SDV_CONFIG::gtSystemInfo,
+    &XehpSdvHwConfig::gtSystemInfo,
     XE_HP_SDV::capabilityTable,
 };
-GT_SYSTEM_INFO XE_HP_SDV_CONFIG::gtSystemInfo = {0};
-void XE_HP_SDV_CONFIG::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable) {
-    XE_HP_SDV_CONFIG::setupHardwareInfoMultiTile(hwInfo, setupFeatureTableAndWorkaroundTable, false);
-}
-
-void XE_HP_SDV_CONFIG::setupHardwareInfoMultiTile(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable, bool setupMultiTile) {
+GT_SYSTEM_INFO XehpSdvHwConfig::gtSystemInfo = {0};
+void XehpSdvHwConfig::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable) {
     GT_SYSTEM_INFO *gtSysInfo = &hwInfo->gtSystemInfo;
     gtSysInfo->CsrSizeInMb = 8;
     gtSysInfo->IsL3HashModeEnabled = false;
@@ -155,6 +173,7 @@ void XE_HP_SDV_CONFIG::setupHardwareInfoMultiTile(HardwareInfo *hwInfo, bool set
         gtSysInfo->MaxSlicesSupported = gtSysInfo->SliceCount;
         gtSysInfo->MaxSubSlicesSupported = gtSysInfo->SubSliceCount;
 
+        gtSysInfo->L3CacheSizeInKb = 1;
         gtSysInfo->L3BankCount = 1;
 
         gtSysInfo->CCSInfo.IsValid = true;
@@ -167,5 +186,6 @@ void XE_HP_SDV_CONFIG::setupHardwareInfoMultiTile(HardwareInfo *hwInfo, bool set
         XE_HP_SDV::setupFeatureAndWorkaroundTable(hwInfo);
     }
 };
+
 #include "hw_info_setup_xehp.inl"
 } // namespace NEO

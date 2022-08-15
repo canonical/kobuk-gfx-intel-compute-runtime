@@ -17,7 +17,7 @@
 #include "shared/test/common/mocks/mock_internal_allocation_storage.h"
 #include "shared/test/common/mocks/mock_os_context.h"
 #include "shared/test/common/mocks/mock_timestamp_container.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/event/user_event.h"
@@ -592,6 +592,7 @@ HWTEST_F(EnqueueHandlerTest, givenEnqueueHandlerWhenClSetKernelExecInfoAlreadySe
     }
     DebugManagerStateRestore stateRestore;
     DebugManager.flags.AUBDumpSubCaptureMode.set(static_cast<int32_t>(AubSubCaptureManager::SubCaptureMode::Filter));
+    DebugManager.flags.ForceThreadArbitrationPolicyProgrammingWithScm.set(1);
 
     MockKernelWithInternals kernelInternals(*pClDevice, context);
     Kernel *kernel = kernelInternals.mockKernel;
@@ -707,9 +708,9 @@ HWTEST_F(EnqueueHandlerTest, givenKernelUsingSyncBufferWhenEnqueuingKernelThenSs
         ClHardwareParse hwParser;
         hwParser.parseCommands<FamilyType>(*mockCmdQ);
 
-        auto &surfaceState = hwParser.getSurfaceState<FamilyType>(&surfaceStateHeap, 0);
+        auto surfaceState = hwParser.getSurfaceState<FamilyType>(&surfaceStateHeap, 0);
         auto pSyncBufferHandler = static_cast<MockSyncBufferHandler *>(pDevice->syncBufferHandler.get());
-        EXPECT_EQ(pSyncBufferHandler->graphicsAllocation->getGpuAddress(), surfaceState.getSurfaceBaseAddress());
+        EXPECT_EQ(pSyncBufferHandler->graphicsAllocation->getGpuAddress(), surfaceState->getSurfaceBaseAddress());
     }
 }
 

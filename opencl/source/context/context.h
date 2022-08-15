@@ -9,7 +9,6 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/common_types.h"
 #include "shared/source/helpers/string.h"
-#include "shared/source/helpers/vec.h"
 #include "shared/source/unified_memory/unified_memory.h"
 
 #include "opencl/source/cl_device/cl_device_vector.h"
@@ -20,17 +19,14 @@
 #include "opencl/source/helpers/destructor_callbacks.h"
 #include "opencl/source/mem_obj/map_operations_handler.h"
 
-#include <list>
 #include <map>
-#include <set>
 
 namespace NEO {
 
 class AsyncEventsHandler;
-struct BuiltInKernel;
 class CommandQueue;
 class Device;
-class MemObj;
+class Kernel;
 class MemoryManager;
 class SharingFunctions;
 class SVMAllocsManager;
@@ -112,7 +108,7 @@ class Context : public BaseObject<_cl_context> {
                                        size_t size,
                                        GraphicsAllocation *&allocation);
 
-    const std::set<uint32_t> &getRootDeviceIndices() const;
+    const RootDeviceIndicesContainer &getRootDeviceIndices() const;
 
     uint32_t getMaxRootDeviceIndex() const;
 
@@ -200,7 +196,7 @@ class Context : public BaseObject<_cl_context> {
 
     void setupContextType();
 
-    std::set<uint32_t> rootDeviceIndices = {};
+    RootDeviceIndicesContainer rootDeviceIndices;
     std::map<uint32_t, DeviceBitfield> deviceBitfields;
     std::vector<std::unique_ptr<SharingFunctions>> sharingFunctions;
     ClDeviceVector devices;

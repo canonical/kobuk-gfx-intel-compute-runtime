@@ -43,7 +43,6 @@ class SamplerSetArgFixture : public ClDeviceFixture {
 
         // setup kernel arg offsets
         pKernelInfo->addArgSampler(0, 0x40, 0x8, 0x10, 0x4);
-        pKernelInfo->addExtendedDeviceSideEnqueueDescriptor(0, 0x0);
 
         pKernelInfo->addArgSampler(1, 0x40);
 
@@ -311,10 +310,8 @@ HWTEST_F(SamplerSetArgTest, GivenFilteringNearestAndAddressingClampWhenSettingKe
     auto snapWaCrossThreadData = ptrOffset(crossThreadData, 0x4);
 
     unsigned int snapWaValue = 0xffffffff;
-    unsigned int objectId = SAMPLER_OBJECT_ID_SHIFT + pKernelInfo->argAsSmp(0).bindful;
 
     EXPECT_EQ(snapWaValue, *snapWaCrossThreadData);
-    EXPECT_EQ(objectId, *crossThreadData);
 }
 
 HWTEST_F(SamplerSetArgTest, GivenKernelWithoutObjIdOffsetWhenSettingArgThenObjIdNotPatched) {
@@ -426,7 +423,7 @@ HWTEST_P(NormalizedTest, WhenSettingKernelArgSamplerThenCoordsAreCorrect) {
 
     auto crossThreadData = reinterpret_cast<uint32_t *>(pKernel->getCrossThreadData());
     auto normalizedCoordsAddress = ptrOffset(crossThreadData, 0x10);
-    unsigned int normalizedCoordsValue = GetNormCoordsEnum(normalizedCoordinates);
+    unsigned int normalizedCoordsValue = getNormCoordsEnum(normalizedCoordinates);
 
     EXPECT_EQ(normalizedCoordsValue, *normalizedCoordsAddress);
 }
@@ -510,7 +507,7 @@ HWTEST_P(AddressingModeTest, WhenSettingKernelArgSamplerThenModesAreCorrect) {
     auto crossThreadData = reinterpret_cast<uint32_t *>(pKernel->getCrossThreadData());
     auto addressingModeAddress = ptrOffset(crossThreadData, 0x8);
 
-    unsigned int addresingValue = GetAddrModeEnum(addressingMode);
+    unsigned int addresingValue = getAddrModeEnum(addressingMode);
 
     EXPECT_EQ(addresingValue, *addressingModeAddress);
 }

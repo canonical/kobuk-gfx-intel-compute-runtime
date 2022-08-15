@@ -1,12 +1,11 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
-#include "level_zero/core/test/unit_tests/mock.h"
 
 #include "sysman/linux/pmt/pmt.h"
 
@@ -17,7 +16,7 @@ const std::string baseTelemSysFS("/sys/class/intel_pmt");
 const std::string telem("telem");
 const std::string telemNodeForSubdevice0("telem2");
 const std::string telemNodeForSubdevice1("telem3");
-std::string rootPciPathOfGpuDeviceInPmt = "/sys/devices/pci0000:89/0000:89:02.0/0000:8a:00.0";
+std::string gpuUpstreamPortPathInPmt = "/sys/devices/pci0000:89/0000:89:02.0/0000:8a:00.0";
 const std::string realPathTelem1 = "/sys/devices/pci0000:89/0000:89:02.0/0000:8a:00.0/0000:8b:02.0/0000:8e:00.1/pmt_telemetry.1.auto/intel_pmt/telem1";
 const std::string realPathTelem2 = "/sys/devices/pci0000:89/0000:89:02.0/0000:8a:00.0/0000:8b:02.0/0000:8e:00.1/pmt_telemetry.1.auto/intel_pmt/telem2";
 const std::string realPathTelem3 = "/sys/devices/pci0000:89/0000:89:02.0/0000:8a:00.0/0000:8b:02.0/0000:8e:00.1/pmt_telemetry.1.auto/intel_pmt/telem3";

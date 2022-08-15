@@ -19,10 +19,11 @@ TEST(DrmVmBindTest, givenBoRequiringImmediateBindWhenBindingThenImmediateFlagIsP
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
 
-    MockBufferObject bo(&drm, 0, 0, 1);
+    MockBufferObject bo(&drm, 3, 0, 0, 1);
     bo.requireImmediateBinding(true);
 
     OsContextLinux osContext(drm, 0u, EngineDescriptorHelper::getDefaultDescriptor());
@@ -36,12 +37,13 @@ TEST(DrmVmBindTest, givenBoRequiringExplicitResidencyWhenBindingThenMakeResident
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     drm.pageFaultSupported = true;
 
     for (auto requireResidency : {false, true}) {
-        MockBufferObject bo(&drm, 0, 0, 1);
+        MockBufferObject bo(&drm, 3, 0, 0, 1);
         bo.requireExplicitResidency(requireResidency);
 
         OsContextLinux osContext(drm, 0u, EngineDescriptorHelper::getDefaultDescriptor());
@@ -64,6 +66,7 @@ TEST(DrmVmBindTest, givenBoNotRequiringExplicitResidencyWhenCallingWaitForBindTh
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
 
     struct DrmQueryMockToTestWaitForBind : public DrmQueryMock {
@@ -80,7 +83,7 @@ TEST(DrmVmBindTest, givenBoNotRequiringExplicitResidencyWhenCallingWaitForBindTh
     drm.pageFaultSupported = true;
 
     for (auto requireResidency : {false, true}) {
-        MockBufferObject bo(&drm, 0, 0, 1);
+        MockBufferObject bo(&drm, 3, 0, 0, 1);
         bo.requireExplicitResidency(requireResidency);
 
         OsContextLinux osContext(drm, 0u, EngineDescriptorHelper::getDefaultDescriptor());
@@ -105,6 +108,7 @@ TEST(DrmVmBindTest, givenUseKmdMigrationWhenCallingBindBoOnUnifiedSharedMemoryTh
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
 
     DrmQueryMock drm(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -114,7 +118,7 @@ TEST(DrmVmBindTest, givenUseKmdMigrationWhenCallingBindBoOnUnifiedSharedMemoryTh
     osContext.ensureContextInitialized();
     uint32_t vmHandleId = 0;
 
-    MockBufferObject bo(&drm, 0, 0, 1);
+    MockBufferObject bo(&drm, 3, 0, 0, 1);
     MockDrmAllocation allocation(AllocationType::UNIFIED_SHARED_MEMORY, MemoryPool::LocalMemory);
     allocation.bufferObjects[0] = &bo;
 

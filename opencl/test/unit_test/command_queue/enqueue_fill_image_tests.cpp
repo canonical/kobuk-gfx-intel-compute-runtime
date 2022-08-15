@@ -200,18 +200,18 @@ HWTEST_F(EnqueueFillImageTest, WhenFillingImageThenSurfaceStateIsCorrect) {
     const auto &kernelInfo = mockCmdQ->storedMultiDispatchInfo.begin()->getKernel()->getKernelInfo();
     uint32_t index = static_cast<uint32_t>(kernelInfo.getArgDescriptorAt(0).template as<ArgDescImage>().bindful) / sizeof(RENDER_SURFACE_STATE);
 
-    const auto &surfaceState = getSurfaceState<FamilyType>(&pCmdQ->getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 0), index);
+    const auto surfaceState = getSurfaceState<FamilyType>(&pCmdQ->getIndirectHeap(IndirectHeap::Type::SURFACE_STATE, 0), index);
     const auto &imageDesc = image->getImageDesc();
-    EXPECT_EQ(imageDesc.image_width, surfaceState.getWidth());
-    EXPECT_EQ(imageDesc.image_height, surfaceState.getHeight());
-    EXPECT_NE(0u, surfaceState.getSurfacePitch());
-    EXPECT_NE(0u, surfaceState.getSurfaceType());
-    EXPECT_EQ(MockGmmResourceInfo::getHAlignSurfaceStateResult, surfaceState.getSurfaceHorizontalAlignment());
-    EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT_VALIGN_4, surfaceState.getSurfaceVerticalAlignment());
-    EXPECT_EQ(image->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress(), surfaceState.getSurfaceBaseAddress());
+    EXPECT_EQ(imageDesc.image_width, surfaceState->getWidth());
+    EXPECT_EQ(imageDesc.image_height, surfaceState->getHeight());
+    EXPECT_NE(0u, surfaceState->getSurfacePitch());
+    EXPECT_NE(0u, surfaceState->getSurfaceType());
+    EXPECT_EQ(MockGmmResourceInfo::getHAlignSurfaceStateResult, surfaceState->getSurfaceHorizontalAlignment());
+    EXPECT_EQ(RENDER_SURFACE_STATE::SURFACE_VERTICAL_ALIGNMENT_VALIGN_4, surfaceState->getSurfaceVerticalAlignment());
+    EXPECT_EQ(image->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress(), surfaceState->getSurfaceBaseAddress());
 }
 
-HWTEST_F(EnqueueFillImageTest, WhenFillingImageThenNumberOfPipelineSelectsIsOne) {
+HWTEST2_F(EnqueueFillImageTest, WhenFillingImageThenNumberOfPipelineSelectsIsOne, IsAtMostXeHpcCore) {
     enqueueFillImage<FamilyType>();
     int numCommands = getNumberOfPipelineSelectsThatEnablePipelineSelect<FamilyType>();
     EXPECT_EQ(1, numCommands);
@@ -225,15 +225,15 @@ HWCMDTEST_F(IGFX_GEN8_CORE, EnqueueFillImageTest, WhenFillingImageThenMediaVfeSt
 TEST_F(EnqueueFillImageTest, givenSrgbFormatWhenConvertingThenUseNormalizingFactor) {
     float *fillColor;
     int iFillColor[4] = {0};
-    float LessThanZeroArray[4] = {-1.0f, -1.0f, -1.0f, 1.0f};
-    float MoreThanOneArray[4] = {2.0f, 2.0f, 2.0f, 1.0f};
-    float NaNArray[4] = {NAN, NAN, NAN, 1.0f};
+    float lessThanZeroArray[4] = {-1.0f, -1.0f, -1.0f, 1.0f};
+    float moreThanOneArray[4] = {2.0f, 2.0f, 2.0f, 1.0f};
+    float naNArray[4] = {NAN, NAN, NAN, 1.0f};
     float distance;
 
     cl_image_format oldImageFormat = {CL_sRGBA, CL_UNORM_INT8};
     cl_image_format newImageFormat = {CL_RGBA, CL_UNSIGNED_INT8};
 
-    fillColor = LessThanZeroArray;
+    fillColor = lessThanZeroArray;
 
     convertFillColor(static_cast<const void *>(fillColor), iFillColor, oldImageFormat, newImageFormat);
 
@@ -243,7 +243,7 @@ TEST_F(EnqueueFillImageTest, givenSrgbFormatWhenConvertingThenUseNormalizingFact
     }
     EXPECT_EQ(255, iFillColor[3]);
 
-    fillColor = MoreThanOneArray;
+    fillColor = moreThanOneArray;
 
     convertFillColor(static_cast<const void *>(fillColor), iFillColor, oldImageFormat, newImageFormat);
 
@@ -253,7 +253,7 @@ TEST_F(EnqueueFillImageTest, givenSrgbFormatWhenConvertingThenUseNormalizingFact
     }
     EXPECT_EQ(255, iFillColor[3]);
 
-    fillColor = NaNArray;
+    fillColor = naNArray;
 
     convertFillColor(static_cast<const void *>(fillColor), iFillColor, oldImageFormat, newImageFormat);
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -26,7 +26,6 @@ bool DeferrableAllocationDeletion::apply() {
                     graphicsAllocation.releaseUsageInOsContext(contextId);
                 } else {
                     isStillUsed = true;
-                    engine.commandStreamReceiver->flushBatchedSubmissions();
                     engine.commandStreamReceiver->updateTagFromWait();
                 }
             }

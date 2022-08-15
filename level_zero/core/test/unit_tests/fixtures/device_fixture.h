@@ -10,14 +10,16 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_compilers.h"
 #include "shared/test/common/mocks/mock_device.h"
-#include "shared/test/common/mocks/mock_memory_manager.h"
 
-#include "level_zero/core/test/unit_tests/mocks/mock_built_ins.h"
-#include "level_zero/core/test/unit_tests/mocks/mock_driver_handle.h"
+#include "level_zero/core/source/context/context_imp.h"
+#include "level_zero/core/source/driver/driver_handle_imp.h"
+#include "level_zero/core/test/unit_tests/mocks/mock_device.h"
 
 class MockPageFaultManager;
 namespace NEO {
 struct UltDeviceFactory;
+class MockMemoryManager;
+class MemoryManagerMemHandleMock;
 } // namespace NEO
 
 namespace L0 {
@@ -26,68 +28,7 @@ struct Device;
 struct ContextImp;
 
 namespace ult {
-
-struct MockDriverModel : NEO::DriverModel {
-    size_t maxAllocSize;
-
-    MockDriverModel(size_t maxAllocSize) : NEO::DriverModel(NEO::DriverModelType::UNKNOWN), maxAllocSize(maxAllocSize) {}
-
-    void setGmmInputArgs(void *args) override {}
-    uint32_t getDeviceHandle() const override { return {}; }
-    PhysicalDevicePciBusInfo getPciBusInfo() const override { return {}; }
-    size_t getMaxMemAllocSize() const override {
-        return maxAllocSize;
-    }
-
-    bool isGpuHangDetected(NEO::OsContext &osContext) override {
-        return false;
-    }
-
-    PhyicalDevicePciSpeedInfo getPciSpeedInfo() const override { return {}; }
-};
-
-struct MockDriverModelWDDM : NEO::DriverModel {
-    size_t maxAllocSize;
-
-    MockDriverModelWDDM(size_t maxAllocSize) : NEO::DriverModel(NEO::DriverModelType::WDDM), maxAllocSize(maxAllocSize) {}
-
-    void setGmmInputArgs(void *args) override {}
-    uint32_t getDeviceHandle() const override { return {}; }
-    PhysicalDevicePciBusInfo getPciBusInfo() const override { return {}; }
-    size_t getMaxMemAllocSize() const override {
-        return maxAllocSize;
-    }
-    PhyicalDevicePciSpeedInfo getPciSpeedInfo() const override { return {}; }
-
-    bool isGpuHangDetected(NEO::OsContext &osContext) override {
-        return false;
-    }
-};
-
-struct MockDriverModelDRM : NEO::DriverModel {
-    size_t maxAllocSize;
-
-    MockDriverModelDRM(size_t maxAllocSize) : NEO::DriverModel(NEO::DriverModelType::DRM), maxAllocSize(maxAllocSize) {}
-
-    void setGmmInputArgs(void *args) override {}
-    uint32_t getDeviceHandle() const override { return {}; }
-    PhysicalDevicePciBusInfo getPciBusInfo() const override { return {}; }
-    size_t getMaxMemAllocSize() const override {
-        return maxAllocSize;
-    }
-    PhyicalDevicePciSpeedInfo getPciSpeedInfo() const override { return {}; }
-
-    bool isGpuHangDetected(NEO::OsContext &osContext) override {
-        return false;
-    }
-};
-
-struct ContextShareableMock : public L0::ContextImp {
-    ContextShareableMock(L0::DriverHandleImp *driverHandle) : L0::ContextImp(driverHandle) {}
-    bool isShareableMemory(const void *pNext, bool exportableMemory, NEO::Device *neoDevice) override {
-        return true;
-    }
-};
+class MockBuiltins;
 
 struct DeviceFixture {
     NEO::MockCompilerEnableGuard compilerMock = NEO::MockCompilerEnableGuard(true);
@@ -100,6 +41,7 @@ struct DeviceFixture {
     L0::Device *device = nullptr;
     L0::ContextImp *context = nullptr;
     MockBuiltins *mockBuiltIns = nullptr;
+    NEO::ExecutionEnvironment *execEnv = nullptr;
 };
 
 struct DriverHandleGetMemHandlePtrMock : public L0::DriverHandleImp {
@@ -122,15 +64,6 @@ struct DriverHandleGetMemHandlePtrMock : public L0::DriverHandleImp {
     bool failHandleLookup = false;
 };
 
-class MemoryManagerMemHandleMock : public MockMemoryManager {
-  public:
-    bool isNTHandle(osHandle handle, uint32_t rootDeviceIndex) override {
-        return NTHandle;
-    };
-
-    bool NTHandle = false;
-};
-
 struct GetMemHandlePtrTestFixture {
     NEO::MockCompilerEnableGuard compilerMock = NEO::MockCompilerEnableGuard(true);
     void SetUp();    // NOLINT(readability-identifier-naming)
@@ -144,6 +77,8 @@ struct GetMemHandlePtrTestFixture {
 };
 
 struct PageFaultDeviceFixture {
+    PageFaultDeviceFixture();
+    ~PageFaultDeviceFixture();
     NEO::MockCompilerEnableGuard compilerMock = NEO::MockCompilerEnableGuard(true);
     void SetUp();    // NOLINT(readability-identifier-naming)
     void TearDown(); // NOLINT(readability-identifier-naming)
@@ -177,14 +112,21 @@ struct SingleRootMultiSubDeviceFixture : public MultiDeviceFixture {
     NEO::Device *neoDevice = nullptr;
 };
 
+struct ImplicitScalingRootDevice : public SingleRootMultiSubDeviceFixture {
+    void SetUp() {
+        DebugManager.flags.EnableImplicitScaling.set(1);
+        SingleRootMultiSubDeviceFixture::SetUp();
+    }
+};
+
 struct ContextFixture : DeviceFixture {
     void SetUp();
     void TearDown();
 };
 
 struct MultipleDevicesWithCustomHwInfo {
-    void SetUp();
-    void TearDown() {}
+    void SetUp();      // NOLINT(readability-identifier-naming)
+    void TearDown() {} // NOLINT(readability-identifier-naming)
     NEO::HardwareInfo hwInfo;
     const uint32_t numSubslicesPerSlice = 4;
     const uint32_t numEuPerSubslice = 8;
@@ -198,6 +140,38 @@ struct MultipleDevicesWithCustomHwInfo {
 
     const uint32_t numRootDevices = 1u;
     const uint32_t numSubDevices = 2u;
+};
+
+struct SingleRootMultiSubDeviceFixtureWithImplicitScalingImpl : public MultiDeviceFixture {
+
+    SingleRootMultiSubDeviceFixtureWithImplicitScalingImpl(uint32_t copyEngineCount, uint32_t implicitScaling) : implicitScaling(implicitScaling), expectedCopyEngineCount(copyEngineCount){};
+    NEO::MockCompilerEnableGuard compilerMock = NEO::MockCompilerEnableGuard(true);
+
+    DebugManagerStateRestore restorer;
+    std::unique_ptr<Mock<L0::DriverHandleImp>> driverHandle;
+    std::vector<NEO::Device *> devices;
+    uint32_t numRootDevices = 1u;
+    uint32_t numSubDevices = 2u;
+    L0::ContextImp *context = nullptr;
+
+    L0::Device *device = nullptr;
+    NEO::Device *neoDevice = nullptr;
+    L0::DeviceImp *deviceImp = nullptr;
+
+    NEO::HardwareInfo hwInfo{};
+    const uint32_t implicitScaling;
+    const uint32_t expectedCopyEngineCount;
+    uint32_t expectedComputeEngineCount = 0;
+
+    uint32_t numEngineGroups = 0;
+    uint32_t subDeviceNumEngineGroups = 0;
+
+    void SetUp();
+    void TearDown();
+};
+template <uint32_t copyEngineCount, uint32_t implicitScalingArg>
+struct SingleRootMultiSubDeviceFixtureWithImplicitScaling : public SingleRootMultiSubDeviceFixtureWithImplicitScalingImpl {
+    SingleRootMultiSubDeviceFixtureWithImplicitScaling() : SingleRootMultiSubDeviceFixtureWithImplicitScalingImpl(copyEngineCount, implicitScalingArg){};
 };
 
 } // namespace ult

@@ -8,8 +8,6 @@
 #include "shared/source/command_stream/command_stream_receiver_hw_base.inl"
 #include "shared/source/helpers/address_patch.h"
 
-#include "hw_cmds.h"
-
 namespace NEO {
 
 template <typename GfxFamily>
@@ -25,12 +23,10 @@ inline void CommandStreamReceiverHw<GfxFamily>::programL3(LinearStream &csr, uin
     typedef typename GfxFamily::PIPE_CONTROL PIPE_CONTROL;
     if (csrSizeRequestFlags.l3ConfigChanged && this->isPreambleSent) {
         // Add a PIPE_CONTROL w/ CS_stall
-        auto pCmd = (PIPE_CONTROL *)csr.getSpace(sizeof(PIPE_CONTROL));
-        PIPE_CONTROL cmd = GfxFamily::cmdInitPipeControl;
-        cmd.setCommandStreamerStallEnable(true);
-        cmd.setDcFlushEnable(true);
-        addClearSLMWorkAround(&cmd);
-        *pCmd = cmd;
+        PipeControlArgs args = {};
+        args.dcFlushEnable = true;
+        setClearSlmWorkAroundParameter(args);
+        MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(csr, args);
 
         PreambleHelper<GfxFamily>::programL3(&csr, newL3Config);
         this->lastSentL3Config = newL3Config;
@@ -145,13 +141,13 @@ inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForStallingNoPostSyn
 
 template <typename GfxFamily>
 inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForStallingPostSyncCommands() const {
-    return MemorySynchronizationCommands<GfxFamily>::getSizeForPipeControlWithPostSyncOperation(peekHwInfo());
+    return MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(peekHwInfo());
 }
 
 template <typename GfxFamily>
 inline void CommandStreamReceiverHw<GfxFamily>::programStallingNoPostSyncCommandsForBarrier(LinearStream &cmdStream) {
     PipeControlArgs args;
-    MemorySynchronizationCommands<GfxFamily>::addPipeControl(cmdStream, args);
+    MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(cmdStream, args);
 }
 
 template <typename GfxFamily>
@@ -160,9 +156,9 @@ inline void CommandStreamReceiverHw<GfxFamily>::programStallingPostSyncCommandsF
     const auto &hwInfo = peekHwInfo();
     PipeControlArgs args;
     args.dcFlushEnable = MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo);
-    MemorySynchronizationCommands<GfxFamily>::addPipeControlAndProgramPostSyncOperation(
+    MemorySynchronizationCommands<GfxFamily>::addBarrierWithPostSyncOperation(
         cmdStream,
-        PIPE_CONTROL::POST_SYNC_OPERATION::POST_SYNC_OPERATION_WRITE_IMMEDIATE_DATA,
+        PostSyncMode::ImmediateData,
         barrierTimestampPacketGpuAddress,
         0,
         hwInfo,

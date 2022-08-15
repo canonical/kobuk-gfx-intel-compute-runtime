@@ -6,16 +6,12 @@
  */
 
 #pragma once
-#include "shared/source/command_stream/command_stream_receiver.h"
-#include "shared/source/command_stream/scratch_space_controller.h"
-#include "shared/source/command_stream/submissions_aggregator.h"
-#include "shared/source/helpers/constants.h"
-#include "shared/source/memory_manager/graphics_allocation.h"
-#include "shared/source/memory_manager/residency_container.h"
 
 #include "level_zero/core/source/cmdqueue/cmdqueue_imp.h"
 
-#include "igfxfmid.h"
+namespace NEO {
+class ScratchSpaceController;
+}
 
 namespace L0 {
 
@@ -34,7 +30,7 @@ struct CommandQueueHw : public CommandQueueImp {
                                 ze_fence_handle_t hFence) override;
 
     void dispatchTaskCountPostSync(NEO::LinearStream &commandStream, const NEO::HardwareInfo &hwInfo);
-    bool isDispatchTaskCountPostSyncRequired(ze_fence_handle_t hFence) const;
+    bool isDispatchTaskCountPostSyncRequired(ze_fence_handle_t hFence, bool containsAnyRegularCmdList) const;
 
     void programStateBaseAddress(uint64_t gsba, bool useLocalMemoryForIndirectHeap, NEO::LinearStream &commandStream, bool cachedMOCSAllowed);
     size_t estimateStateBaseAddressCmdSize();

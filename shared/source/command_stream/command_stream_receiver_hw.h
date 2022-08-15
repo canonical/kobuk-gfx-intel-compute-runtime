@@ -16,7 +16,7 @@
 #include "shared/source/helpers/dirty_state_helpers.h"
 #include "shared/source/helpers/hw_info.h"
 
-#include "hw_cmds.h"
+#include <optional>
 
 namespace NEO {
 template <typename GfxFamily>
@@ -96,15 +96,11 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
         return CommandStreamReceiverType::CSR_HW;
     }
 
-    uint32_t flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override;
+    std::optional<uint32_t> flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override;
 
     void flushTagUpdate() override;
-    void flushNonKernelTask(GraphicsAllocation *eventAlloc, uint64_t immediateGpuAddress, uint64_t immediateData, PipeControlArgs &args, bool isWaitOnEvent, bool isStartOfDispatch, bool isEndOfDispatch) override;
     void flushMiFlushDW();
-    void flushMiFlushDW(GraphicsAllocation *eventAlloc, uint64_t immediateGpuAddress, uint64_t immediateData);
     void flushPipeControl();
-    void flushPipeControl(GraphicsAllocation *eventAlloc, uint64_t immediateGpuAddress, uint64_t immediateData, PipeControlArgs &args);
-    void flushSemaphoreWait(GraphicsAllocation *eventAlloc, uint64_t immediateGpuAddress, uint64_t immediateData, PipeControlArgs &args, bool isStartOfDispatch, bool isEndOfDispatch);
     void flushSmallTask(LinearStream &commandStreamTask,
                         size_t commandStreamStartTask);
     void flushHandler(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency);
@@ -128,7 +124,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
 
     virtual bool isKmdWaitModeActive() { return true; }
 
-    bool initDirectSubmission(Device &device, OsContext &osContext) override;
+    bool initDirectSubmission() override;
     GraphicsAllocation *getClearColorAllocation() override;
 
     TagAllocatorBase *getTimestampPacketAllocator() override;
@@ -165,7 +161,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     void programEnginePrologue(LinearStream &csr);
     size_t getCmdSizeForPrologue() const;
 
-    void addClearSLMWorkAround(typename GfxFamily::PIPE_CONTROL *pCmd);
+    void setClearSlmWorkAroundParameter(PipeControlArgs &args);
     void addPipeControlBeforeStateSip(LinearStream &commandStream, Device &device);
     void addPipeControlBefore3dState(LinearStream &commandStream, DispatchFlags &dispatchFlags);
     size_t getSshHeapSize();
@@ -179,6 +175,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     bool checkPlatformSupportsGpuIdleImplicitFlush() const;
     void configurePostSyncWriteOffset();
     void unregisterDirectSubmissionFromController();
+    constexpr bool isGlobalAtomicsProgrammingRequired(bool currentValue) const;
 
     HeapDirtyState dshState;
     HeapDirtyState iohState;
@@ -192,6 +189,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     std::unique_ptr<DirectSubmissionHw<GfxFamily, BlitterDispatcher<GfxFamily>>> blitterDirectSubmission;
 
     size_t cmdStreamStart = 0;
+    uint32_t latestSentBcsWaValue = std::numeric_limits<uint32_t>::max();
 };
 
 } // namespace NEO

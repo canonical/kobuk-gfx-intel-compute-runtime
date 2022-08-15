@@ -50,7 +50,7 @@ if [ "${BUILD_SRPM}" == "1" ]; then
     get_l0_gpu_driver_version      # NEO_L0_VERSION_MAJOR.NEO_L0_VERSION_MINOR.NEO_L0_VERSION_PATCH
 
     VERSION="${NEO_L0_VERSION_MAJOR}.${NEO_L0_VERSION_MINOR}.${NEO_L0_VERSION_PATCH}.${API_VERSION}"
-    RELEASE="${API_VERSION_SRC}${API_RPM_MODEL_LINK}"
+    RELEASE="${NEO_L0_VERSION_HOTFIX}${API_VERSION_SRC}${API_RPM_MODEL_LINK}"
 
     RELEASE_WITH_REGKEYS="${RELEASE_WITH_REGKEYS:-FALSE}"
 
@@ -93,6 +93,7 @@ if [ "${BUILD_RPM}" == "1" ]; then
   if [ "${LOG_CCACHE_STATS}" == "1" ]; then
     ccache -z
   fi
+  export CCACHE_BASEDIR=$(readlink -m $BUILD_DIR/BUILD/compute-runtime-${VERSION}/)
   rpmbuild --rebuild ${REPO_DIR}/../output/SRPMS/intel-level-zero-gpu-${VERSION}*.src.rpm "${build_args[@]}"
   if [ "${LOG_CCACHE_STATS}" == "1" ]; then
     ccache -s

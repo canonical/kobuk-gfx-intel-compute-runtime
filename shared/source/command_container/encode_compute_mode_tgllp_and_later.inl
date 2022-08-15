@@ -8,6 +8,7 @@
 #pragma once
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/linear_stream.h"
+#include "shared/source/helpers/logical_state_helper.h"
 
 namespace NEO {
 
@@ -34,7 +35,7 @@ size_t EncodeComputeMode<Family>::getCmdSizeForComputeMode(const HardwareInfo &h
 template <typename Family>
 inline void EncodeComputeMode<Family>::programComputeModeCommandWithSynchronization(
     LinearStream &csr, StateComputeModeProperties &properties, const PipelineSelectArgs &args,
-    bool hasSharedHandles, const HardwareInfo &hwInfo, bool isRcs) {
+    bool hasSharedHandles, const HardwareInfo &hwInfo, bool isRcs, LogicalStateHelper *logicalStateHelper) {
 
     using PIPE_CONTROL = typename Family::PIPE_CONTROL;
 
@@ -50,19 +51,15 @@ inline void EncodeComputeMode<Family>::programComputeModeCommandWithSynchronizat
         NEO::EncodeWA<Family>::addPipeControlPriorToNonPipelinedStateCommand(csr, args, hwInfo, isRcs);
     }
 
-    EncodeComputeMode<Family>::programComputeModeCommand(csr, properties, hwInfo);
+    EncodeComputeMode<Family>::programComputeModeCommand(csr, properties, hwInfo, logicalStateHelper);
 
     if (hasSharedHandles) {
-        auto pc = csr.getSpaceForCmd<PIPE_CONTROL>();
-        *pc = Family::cmdInitPipeControl;
+        PipeControlArgs args;
+        args.csStallOnly = true;
+        MemorySynchronizationCommands<Family>::addSingleBarrier(csr, args);
     }
 
     NEO::EncodeWA<Family>::encodeAdditionalPipelineSelect(csr, args, false, hwInfo, isRcs);
-}
-
-template <typename Family>
-inline void EncodeStoreMMIO<Family>::remapOffset(MI_STORE_REGISTER_MEM *pStoreRegMem) {
-    pStoreRegMem->setMmioRemapEnable(true);
 }
 
 template <typename Family>

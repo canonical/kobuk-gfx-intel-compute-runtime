@@ -83,14 +83,40 @@ ze_result_t MetricDeviceContext::metricGroupGet(uint32_t *pCount, zet_metric_gro
     return result;
 }
 
-ze_result_t MetricDeviceContext::activateMetricGroupsDeferred(uint32_t count, zet_metric_group_handle_t *phMetricGroups) {
+void MetricDeviceContext::activateMetricGroupsDeferred(uint32_t count, zet_metric_group_handle_t *phMetricGroups) {
 
     // Activation: postpone until zetMetricStreamerOpen or zeCommandQueueExecuteCommandLists
     // Deactivation: execute immediately.
     if (phMetricGroups == nullptr) {
-        return deActivateAllDomains();
+        deActivateAllDomains();
+        return;
     }
 
+    auto isMetricGroupProvided = [phMetricGroups, count](const zet_metric_group_handle_t hMetricGroup) {
+        for (auto index = 0u; index < count; index++) {
+            if (hMetricGroup == phMetricGroups[index]) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // Deactive existing metric groups which are not provided in phMetricGroups
+    std::vector<uint32_t> deactivateList = {};
+    for (const auto &[domainId, metricGroupPair] : domains) {
+        const auto &hMetricGroup = metricGroupPair.first;
+        if (isMetricGroupProvided(hMetricGroup) == false) {
+            deActivateDomain(domainId);
+            deactivateList.push_back(domainId);
+        }
+    }
+
+    // Remove deactivated ones from the map
+    for (const auto &domainId : deactivateList) {
+        domains.erase(domainId);
+    }
+
+    // Activate-deferred new metric groups if any
     for (auto index = 0u; index < count; index++) {
 
         zet_metric_group_handle_t hMetricGroup = MetricGroup::fromHandle(phMetricGroups[index])->getMetricGroupForSubDevice(subDeviceIndex);
@@ -102,37 +128,33 @@ ze_result_t MetricDeviceContext::activateMetricGroupsDeferred(uint32_t count, ze
             continue;
         }
 
-        // Domain empty; So create new deactiavted association.
-        if (domains[domain].first == nullptr) {
-            domains[domain].first = hMetricGroup;
-            domains[domain].second = false;
-            continue;
-        }
-
-        // Attempt to overwrite a previous association is an error.
-        return ZE_RESULT_ERROR_UNKNOWN;
+        domains[domain].first = hMetricGroup;
+        domains[domain].second = false;
     }
-    return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t MetricDeviceContext::activateAllDomains() {
     for (auto &entry : domains) {
         auto &metricGroup = entry.second;
+        DEBUG_BREAK_IF(metricGroup.first == nullptr);
         MetricGroup::fromHandle(metricGroup.first)->activate();
         metricGroup.second = true;
     }
     return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t MetricDeviceContext::deActivateAllDomains() {
-    for (auto &entry : domains) {
-        auto &metricGroup = entry.second;
-        if (metricGroup.second == true) {
-            MetricGroup::fromHandle(metricGroup.first)->deactivate();
-        }
-        metricGroup = {};
+void MetricDeviceContext::deActivateDomain(uint32_t domain) {
+    auto &metricGroupPair = domains[domain];
+    if (metricGroupPair.second == true) {
+        MetricGroup::fromHandle(metricGroupPair.first)->deactivate();
     }
-    return ZE_RESULT_SUCCESS;
+}
+
+void MetricDeviceContext::deActivateAllDomains() {
+    for (auto &entry : domains) {
+        deActivateDomain(entry.first);
+    }
+    domains.clear();
 }
 
 ze_result_t MetricDeviceContext::appendMetricMemoryBarrier(CommandList &commandList) {

@@ -34,7 +34,7 @@ size_t EncodeWA<Family>::getAdditionalPipelineSelectSize(Device &device) {
 }
 
 template <>
-void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo) {
+void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo, LogicalStateHelper *logicalStateHelper) {
     using STATE_COMPUTE_MODE = typename Family::STATE_COMPUTE_MODE;
     using FORCE_NON_COHERENT = typename STATE_COMPUTE_MODE::FORCE_NON_COHERENT;
 
@@ -90,6 +90,11 @@ template <>
 void EncodeL3State<Family>::encode(CommandContainer &container, bool enableSLM) {
 }
 
+template <>
+void EncodeStoreMMIO<Family>::appendFlags(MI_STORE_REGISTER_MEM *storeRegMem, bool workloadPartition) {
+    storeRegMem->setMmioRemapEnable(true);
+}
+
 template struct EncodeDispatchKernel<Family>;
 template struct EncodeStates<Family>;
 template struct EncodeMath<Family>;
@@ -112,4 +117,5 @@ template struct EncodeComputeMode<Family>;
 template struct EncodeEnableRayTracing<Family>;
 template struct EncodeNoop<Family>;
 template struct EncodeStoreMemory<Family>;
+template struct EncodeMemoryFence<Family>;
 } // namespace NEO

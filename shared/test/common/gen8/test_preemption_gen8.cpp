@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,7 +16,7 @@
 using namespace NEO;
 
 template <>
-PreemptionTestHwDetails GetPreemptionTestHwDetails<BDWFamily>() {
+PreemptionTestHwDetails getPreemptionTestHwDetails<BDWFamily>() {
     PreemptionTestHwDetails ret;
     ret.modeToRegValueMap[PreemptionMode::ThreadGroup] = 0;
     ret.modeToRegValueMap[PreemptionMode::MidBatch] = (1 << 2);
@@ -32,7 +32,7 @@ GEN8TEST_F(Gen8PreemptionTests, whenProgramStateSipIsCalledThenNoCmdsAreProgramm
     EXPECT_EQ(0U, requiredSize);
 
     LinearStream cmdStream{nullptr, 0};
-    PreemptionHelper::programStateSip<FamilyType>(cmdStream, *device);
+    PreemptionHelper::programStateSip<FamilyType>(cmdStream, *device, nullptr);
     EXPECT_EQ(0U, cmdStream.getUsed());
 }
 

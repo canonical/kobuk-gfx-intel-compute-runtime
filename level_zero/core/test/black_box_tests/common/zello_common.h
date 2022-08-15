@@ -5,6 +5,8 @@
  *
  */
 
+#pragma once
+
 #include <level_zero/ze_api.h>
 
 #include <cstring>
@@ -14,6 +16,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+#define QTR(a) #a
+#define TOSTR(b) QTR(b)
 
 extern bool verbose;
 
@@ -102,6 +107,30 @@ inline bool isSyncQueueEnabled(int argc, char *argv[]) {
     return true;
 }
 
+inline bool isAubMode(int argc, char *argv[]) {
+    bool enabled = isParamEnabled(argc, argv, "-a", "--aub");
+    if (enabled == false) {
+        return false;
+    }
+
+    if (verbose) {
+        std::cerr << "Aub mode detected";
+    }
+
+    return true;
+}
+
+inline uint32_t getBufferLength(int argc, char *argv[], uint32_t defaultLength) {
+    uint32_t length = getParamValue(argc, argv, "-l", "--length", defaultLength);
+    if (length == defaultLength) {
+        return defaultLength;
+    }
+
+    std::cerr << "Buffer length detected = " << length << std::endl;
+
+    return length;
+}
+
 uint32_t getCommandQueueOrdinal(ze_device_handle_t &device) {
     uint32_t numQueueGroups = 0;
     SUCCESS_OR_TERMINATE(zeDeviceGetCommandQueueGroupProperties(device, &numQueueGroups, nullptr));
@@ -142,15 +171,17 @@ int32_t getCopyOnlyCommandQueueOrdinal(ze_device_handle_t &device) {
     return copyOnlyQueueGroupOrdinal;
 }
 
-ze_command_queue_handle_t createCommandQueue(ze_context_handle_t &context, ze_device_handle_t &device, uint32_t *ordinal) {
+ze_command_queue_handle_t createCommandQueue(ze_context_handle_t &context, ze_device_handle_t &device,
+                                             uint32_t *ordinal, ze_command_queue_mode_t mode,
+                                             ze_command_queue_priority_t priority) {
     ze_command_queue_handle_t cmdQueue;
     ze_command_queue_desc_t descriptor = {};
     descriptor.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
 
     descriptor.pNext = nullptr;
     descriptor.flags = 0;
-    descriptor.mode = ZE_COMMAND_QUEUE_MODE_DEFAULT;
-    descriptor.priority = ZE_COMMAND_QUEUE_PRIORITY_NORMAL;
+    descriptor.mode = mode;
+    descriptor.priority = priority;
 
     descriptor.ordinal = getCommandQueueOrdinal(device);
     descriptor.index = 0;
@@ -159,6 +190,10 @@ ze_command_queue_handle_t createCommandQueue(ze_context_handle_t &context, ze_de
         *ordinal = descriptor.ordinal;
     }
     return cmdQueue;
+}
+
+ze_command_queue_handle_t createCommandQueue(ze_context_handle_t &context, ze_device_handle_t &device, uint32_t *ordinal) {
+    return createCommandQueue(context, device, ordinal, ZE_COMMAND_QUEUE_MODE_DEFAULT, ZE_COMMAND_QUEUE_PRIORITY_NORMAL);
 }
 
 ze_result_t createCommandList(ze_context_handle_t &context, ze_device_handle_t &device, ze_command_list_handle_t &cmdList) {
@@ -220,8 +255,8 @@ std::vector<ze_device_handle_t> zelloInitContextAndGetDevices(ze_context_handle_
     }
 
     SUCCESS_OR_TERMINATE(zeDriverGet(&driverCount, &driverHandle));
-    ze_context_desc_t context_desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
-    SUCCESS_OR_TERMINATE(zeContextCreate(driverHandle, &context_desc, &context));
+    ze_context_desc_t contextDesc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
+    SUCCESS_OR_TERMINATE(zeContextCreate(driverHandle, &contextDesc, &context));
 
     uint32_t deviceCount = 0;
     SUCCESS_OR_TERMINATE(zeDeviceGet(driverHandle, &deviceCount, nullptr));
@@ -250,4 +285,140 @@ void initialize(ze_driver_handle_t &driver, ze_context_handle_t &context, ze_dev
 static inline void teardown(ze_context_handle_t context, ze_command_queue_handle_t cmdQueue) {
     SUCCESS_OR_TERMINATE(zeCommandQueueDestroy(cmdQueue));
     SUCCESS_OR_TERMINATE(zeContextDestroy(context));
+}
+
+inline void printDeviceProperties(const ze_device_properties_t &props) {
+    if (verbose) {
+        std::cout << "Device : "
+                  << "\n"
+                  << " * name : " << props.name << "\n"
+                  << " * type : " << ((props.type == ZE_DEVICE_TYPE_GPU) ? "GPU" : "FPGA") << "\n"
+                  << " * vendorId : " << std::hex << props.vendorId << "\n"
+                  << " * deviceId : " << std::hex << props.deviceId << "\n"
+                  << " * subdeviceId : " << std::dec << props.subdeviceId << "\n"
+                  << " * coreClockRate : " << props.coreClockRate << "\n"
+                  << " * maxMemAllocSize : " << props.maxMemAllocSize << "\n"
+                  << " * maxHardwareContexts : " << props.maxHardwareContexts << "\n"
+                  << " * isSubdevice : " << std::boolalpha << static_cast<bool>(!!(props.flags & ZE_DEVICE_PROPERTY_FLAG_SUBDEVICE)) << "\n"
+                  << " * eccMemorySupported : " << std::boolalpha << static_cast<bool>(!!(props.flags & ZE_DEVICE_PROPERTY_FLAG_ECC)) << "\n"
+                  << " * onDemandPageFaultsSupported : " << std::boolalpha << static_cast<bool>(!!(props.flags & ZE_DEVICE_PROPERTY_FLAG_ONDEMANDPAGING)) << "\n"
+                  << " * maxCommandQueuePriority  : " << props.maxCommandQueuePriority << "\n"
+                  << " * numThreadsPerEU  : " << props.numThreadsPerEU << "\n"
+                  << " * numEUsPerSubslice  : " << props.numEUsPerSubslice << "\n"
+                  << " * numSubslicesPerSlice  : " << props.numSubslicesPerSlice << "\n"
+                  << " * numSlices  : " << props.numSlices << "\n"
+                  << " * physicalEUSimdWidth  : " << props.physicalEUSimdWidth << "\n"
+                  << " * timerResolution : " << props.timerResolution << "\n";
+    }
+}
+
+inline void printCacheProperties(uint32_t index, const ze_device_cache_properties_t &props) {
+    if (verbose) {
+        std::cout << "Cache properties: \n"
+                  << index << "\n"
+                  << " * User Cache Control : " << std::boolalpha << static_cast<bool>(!!(props.flags & ZE_DEVICE_CACHE_PROPERTY_FLAG_USER_CONTROL)) << "\n"
+                  << " * cache size : " << props.cacheSize << "\n";
+    }
+}
+
+inline void printP2PProperties(const ze_device_p2p_properties_t &props, bool canAccessPeer, uint32_t device0Index, uint32_t device1Index) {
+    if (verbose) {
+        std::cout << " * P2P Properties device " << device0Index << " to peer " << device1Index << "\n";
+        std::cout << "\t* accessSupported: " << std::boolalpha << static_cast<bool>(!!(props.flags & ZE_DEVICE_P2P_PROPERTY_FLAG_ACCESS)) << "\n";
+        std::cout << "\t* atomicsSupported: " << std::boolalpha << static_cast<bool>(!!(props.flags & ZE_DEVICE_P2P_PROPERTY_FLAG_ATOMICS)) << "\n";
+        std::cout << "\t* canAccessPeer: " << std::boolalpha << static_cast<bool>(canAccessPeer) << "\n";
+    }
+}
+
+inline const std::vector<const char *> &getResourcesSearchLocations() {
+    static std::vector<const char *> locations {
+        "test_files/spv_modules/",
+#if defined(OS_DATADIR)
+            TOSTR(OS_DATADIR),
+#endif
+    };
+    return locations;
+}
+
+// read binary file into a non-NULL-terminated string
+template <typename SizeT>
+inline std::unique_ptr<char[]> readBinaryFile(const std::string &name, SizeT &outSize) {
+    for (const char *base : getResourcesSearchLocations()) {
+        std::string s(base);
+        std::ifstream file(s + name, std::ios_base::in | std::ios_base::binary);
+        if (false == file.good()) {
+            continue;
+        }
+
+        size_t length;
+        file.seekg(0, file.end);
+        length = static_cast<size_t>(file.tellg());
+        file.seekg(0, file.beg);
+
+        auto storage = std::make_unique<char[]>(length);
+        file.read(storage.get(), length);
+
+        outSize = static_cast<SizeT>(length);
+        return storage;
+    }
+    outSize = 0;
+    return nullptr;
+}
+
+// read text file into a NULL-terminated string
+template <typename SizeT>
+inline std::unique_ptr<char[]> readTextFile(const std::string &name, SizeT &outSize) {
+    for (const char *base : getResourcesSearchLocations()) {
+        std::string s(base);
+        std::ifstream file(s + name, std::ios_base::in);
+        if (false == file.good()) {
+            continue;
+        }
+
+        size_t length;
+        file.seekg(0, file.end);
+        length = static_cast<size_t>(file.tellg());
+        file.seekg(0, file.beg);
+
+        auto storage = std::make_unique<char[]>(length + 1);
+        file.read(storage.get(), length);
+        storage[length] = '\0';
+
+        outSize = static_cast<SizeT>(length);
+        return storage;
+    }
+    outSize = 0;
+    return nullptr;
+}
+
+template <typename T = uint8_t>
+inline bool validate(const void *expected, const void *tested, size_t len) {
+    bool resultsAreOk = true;
+    size_t offset = 0;
+
+    const T *expectedT = reinterpret_cast<const T *>(expected);
+    const T *testedT = reinterpret_cast<const T *>(tested);
+    uint32_t errorsCount = 0;
+    constexpr uint32_t errorsMax = 20;
+    while (offset < len) {
+        if (expectedT[offset] != testedT[offset]) {
+            resultsAreOk = false;
+            if (verbose == false) {
+                break;
+            }
+
+            std::cerr << "Data mismatch expectedU8[" << offset << "] != testedU8[" << offset
+                      << "]   ->    " << +expectedT[offset] << " != " << +testedT[offset]
+                      << std::endl;
+            ++errorsCount;
+            if (errorsCount >= errorsMax) {
+                std::cerr << "Found " << errorsCount
+                          << " data mismatches - skipping further comparison " << std::endl;
+                break;
+            }
+        }
+        ++offset;
+    }
+
+    return resultsAreOk;
 }

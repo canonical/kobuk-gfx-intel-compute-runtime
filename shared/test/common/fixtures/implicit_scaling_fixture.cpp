@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #include "shared/test/common/fixtures/implicit_scaling_fixture.h"
 
+#include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/test/common/helpers/default_hw_info.h"
@@ -21,7 +22,9 @@ void ImplicitScalingFixture::SetUp() {
 
     alignedMemory = alignedMalloc(bufferSize, 4096);
 
-    cmdBufferAlloc.setCpuPtrAndGpuAddress(alignedMemory, gpuVa);
+    auto gmmHelper = pDevice->getGmmHelper();
+    auto canonizedGpuAddress = gmmHelper->canonize(gpuVa);
+    cmdBufferAlloc.setCpuPtrAndGpuAddress(alignedMemory, canonizedGpuAddress);
 
     commandStream.replaceBuffer(alignedMemory, bufferSize);
     commandStream.replaceGraphicsAllocation(&cmdBufferAlloc);

@@ -29,8 +29,8 @@ GEN11TEST_F(IclSlm, WhenL3ConfigIsDispatchedThenProperRegisterAddressAndValueAre
     ASSERT_NE(cmdList.end(), itorLRI);
 
     const auto &lri = *reinterpret_cast<MI_LOAD_REGISTER_IMM *>(*itorLRI);
-    auto RegisterOffset = L3CNTLRegisterOffset<FamilyType>::registerOffset;
-    EXPECT_EQ(RegisterOffset, lri.getRegisterOffset());
+    auto registerOffset = L3CNTLRegisterOffset<FamilyType>::registerOffset;
+    EXPECT_EQ(registerOffset, lri.getRegisterOffset());
     EXPECT_EQ(0u, lri.getDataDword() & 1);
 }
 
@@ -62,7 +62,7 @@ GEN11TEST_F(Gen11PreambleVfeState, GivenWaOffWhenProgrammingVfeStateThenProgramm
     LinearStream &cs = linearStream;
     auto pVfeCmd = PreambleHelper<ICLFamily>::getSpaceForVfeState(&linearStream, pDevice->getHardwareInfo(), EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<ICLFamily>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 168u, emptyProperties);
+    PreambleHelper<ICLFamily>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 168u, emptyProperties, nullptr);
 
     parseCommands<ICLFamily>(cs);
 
@@ -82,7 +82,7 @@ GEN11TEST_F(Gen11PreambleVfeState, GivenWaOnWhenProgrammingVfeStateThenProgrammi
     LinearStream &cs = linearStream;
     auto pVfeCmd = PreambleHelper<ICLFamily>::getSpaceForVfeState(&linearStream, pDevice->getHardwareInfo(), EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<ICLFamily>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 168u, emptyProperties);
+    PreambleHelper<ICLFamily>::programVfeState(pVfeCmd, pDevice->getHardwareInfo(), 0u, 0, 168u, emptyProperties, nullptr);
 
     parseCommands<ICLFamily>(cs);
 
@@ -125,7 +125,7 @@ GEN11TEST_F(ThreadArbitrationGen11, givenPreambleWhenItIsProgrammedThenThreadArb
     uint32_t l3Config = PreambleHelper<FamilyType>::getL3Config(*defaultHwInfo, true);
     MockDevice mockDevice;
     PreambleHelper<FamilyType>::programPreamble(&linearStream, mockDevice, l3Config,
-                                                nullptr);
+                                                nullptr, nullptr);
 
     parseCommands<FamilyType>(cs);
 
@@ -148,7 +148,7 @@ GEN11TEST_F(ThreadArbitrationGen11, whenThreadArbitrationPolicyIsProgrammedThenC
     MockDevice mockDevice;
     StreamProperties streamProperties{};
     streamProperties.stateComputeMode.threadArbitrationPolicy.set(ThreadArbitrationPolicy::RoundRobin);
-    EncodeComputeMode<FamilyType>::programComputeModeCommand(linearStream, streamProperties.stateComputeMode, *defaultHwInfo);
+    EncodeComputeMode<FamilyType>::programComputeModeCommand(linearStream, streamProperties.stateComputeMode, *defaultHwInfo, nullptr);
 
     parseCommands<FamilyType>(cs);
 

@@ -40,7 +40,16 @@ size_t EncodeComputeMode<Family>::getCmdSizeForComputeMode(const HardwareInfo &h
 
 template <typename Family>
 void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties,
-                                                          const HardwareInfo &hwInfo) {
+                                                          const HardwareInfo &hwInfo, LogicalStateHelper *logicalStateHelper) {
+}
+
+template <>
+void EncodeStateBaseAddress<Family>::setSbaAddressesForDebugger(NEO::Debugger::SbaAddresses &sbaAddress, const STATE_BASE_ADDRESS &sbaCmd) {
+    sbaAddress.IndirectObjectBaseAddress = sbaCmd.getIndirectObjectBaseAddress();
+    sbaAddress.DynamicStateBaseAddress = sbaCmd.getDynamicStateBaseAddress();
+    sbaAddress.GeneralStateBaseAddress = sbaCmd.getGeneralStateBaseAddress();
+    sbaAddress.InstructionBaseAddress = sbaCmd.getInstructionBaseAddress();
+    sbaAddress.SurfaceStateBaseAddress = sbaCmd.getSurfaceStateBaseAddress();
 }
 
 template struct EncodeDispatchKernel<Family>;
@@ -65,4 +74,6 @@ template struct EncodeComputeMode<Family>;
 template struct EncodeEnableRayTracing<Family>;
 template struct EncodeNoop<Family>;
 template struct EncodeStoreMemory<Family>;
+template struct EncodeMemoryFence<Family>;
+
 } // namespace NEO

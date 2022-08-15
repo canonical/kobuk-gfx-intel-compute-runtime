@@ -18,11 +18,12 @@
 #include "shared/test/common/mocks/mock_driver_info.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_sip.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/unit_test/helpers/gtest_helpers.h"
+#include "shared/test/unit_test/helpers/raii_hw_helper.h"
 
 #include "opencl/source/helpers/cl_hw_helper.h"
 #include "opencl/test/unit_test/fixtures/device_info_fixture.h"
-#include "opencl/test/unit_test/helpers/raii_hw_helper.h"
 #include "opencl/test/unit_test/mocks/ult_cl_device_factory.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 
@@ -133,7 +134,7 @@ TEST_F(DeviceGetCapsTest, WhenCreatingDeviceThenCapsArePopulatedCorrectly) {
     EXPECT_GT(caps.openclCAllVersions.size(), 0u);
     EXPECT_GT(caps.openclCFeatures.size(), 0u);
     EXPECT_EQ(caps.extensionsWithVersion.size(), 0u);
-    EXPECT_STREQ("v2021-06-16-00", caps.latestConformanceVersionPassed);
+    EXPECT_STREQ("v2022-04-22-00", caps.latestConformanceVersionPassed);
 
     EXPECT_NE(nullptr, caps.spirVersions);
     EXPECT_NE(nullptr, caps.deviceExtensions);
@@ -1139,8 +1140,27 @@ TEST_F(DeviceGetCapsTest, givenSystemWithDriverInfoWhenGettingNameAndVersionThen
     EXPECT_STREQ(testVersion.c_str(), caps.driverVersion);
 }
 
+TEST_F(DeviceGetCapsTest, givenSystemWithDriverInfoWhenDebugVariableOverrideDeviceNameIsSpecifiedThenDeviceNameIsTakenFromDebugVariable) {
+    DebugManagerStateRestore restore;
+    const std::string testDeviceName = "testDeviceName";
+    const std::string debugDeviceName = "debugDeviceName";
+    DebugManager.flags.OverrideDeviceName.set(debugDeviceName);
+
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    DriverInfoMock *driverInfoMock = new DriverInfoMock();
+    driverInfoMock->setDeviceName(testDeviceName);
+
+    device->driverInfo.reset(driverInfoMock);
+    device->initializeCaps();
+
+    const auto &caps = device->getDeviceInfo();
+
+    EXPECT_STRNE(testDeviceName.c_str(), caps.name);
+    EXPECT_STREQ(debugDeviceName.c_str(), caps.name);
+}
+
 TEST_F(DeviceGetCapsTest, givenNoPciBusInfoThenPciBusInfoExtensionNotAvailable) {
-    const PhysicalDevicePciBusInfo pciBusInfo(PhysicalDevicePciBusInfo::InvalidValue, PhysicalDevicePciBusInfo::InvalidValue, PhysicalDevicePciBusInfo::InvalidValue, PhysicalDevicePciBusInfo::InvalidValue);
+    const PhysicalDevicePciBusInfo pciBusInfo(PhysicalDevicePciBusInfo::invalidValue, PhysicalDevicePciBusInfo::invalidValue, PhysicalDevicePciBusInfo::invalidValue, PhysicalDevicePciBusInfo::invalidValue);
 
     DriverInfoMock *driverInfoMock = new DriverInfoMock();
     driverInfoMock->setPciBusInfo(pciBusInfo);
@@ -1525,4 +1545,18 @@ HWTEST_F(DeviceGetCapsTest, givenDSSCountEqualZeroWhenDeviceCreatedThenMaxEuPerD
     auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&myHwInfo));
 
     EXPECT_EQ(device->sharedDeviceInfo.maxNumEUsPerSubSlice, device->sharedDeviceInfo.maxNumEUsPerDualSubSlice);
+}
+
+TEST_F(DeviceGetCapsTest, givenRootDeviceWithSubDevicesWhenQueriedForCacheSizeThenValueIsMultiplied) {
+    UltClDeviceFactory deviceFactory{1, 0};
+    auto singleRootDeviceCacheSize = deviceFactory.rootDevices[0]->deviceInfo.globalMemCacheSize;
+
+    for (uint32_t subDevicesCount : {2, 3, 4}) {
+        UltClDeviceFactory deviceFactory{1, subDevicesCount};
+        auto rootDeviceCacheSize = deviceFactory.rootDevices[0]->deviceInfo.globalMemCacheSize;
+        for (auto &subDevice : deviceFactory.rootDevices[0]->subDevices) {
+            EXPECT_EQ(singleRootDeviceCacheSize, subDevice->getDeviceInfo().globalMemCacheSize);
+            EXPECT_EQ(rootDeviceCacheSize, subDevice->getDeviceInfo().globalMemCacheSize * subDevicesCount);
+        }
+    }
 }

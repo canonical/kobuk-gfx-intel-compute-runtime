@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace NEO {
@@ -83,33 +84,34 @@ class DriverModel : public NonCopyableClass {
         return std::numeric_limits<size_t>::max();
     }
 
-    virtual bool skipResourceCleanup() const {
-        return false;
+    virtual bool isDriverAvaliable() {
+        return true;
     }
+
+    bool skipResourceCleanup() const {
+        return skipResourceCleanupVar;
+    }
+
+    virtual void cleanup() {}
 
     virtual bool isGpuHangDetected(OsContext &osContext) = 0;
 
   protected:
     DriverModelType driverModelType;
+    bool skipResourceCleanupVar = false;
 };
 
 class OSInterface : public NonCopyableClass {
   public:
-    virtual ~OSInterface() = default;
-    DriverModel *getDriverModel() const {
-        return driverModel.get();
-    };
+    virtual ~OSInterface();
+    DriverModel *getDriverModel() const;
 
-    void setDriverModel(std::unique_ptr<DriverModel> driverModel) {
-        this->driverModel = std::move(driverModel);
-    };
+    void setDriverModel(std::unique_ptr<DriverModel> driverModel);
 
     MOCKABLE_VIRTUAL bool isDebugAttachAvailable() const;
     static bool osEnabled64kbPages;
     static bool osEnableLocalMemory;
-    static bool are64kbPagesEnabled() {
-        return osEnabled64kbPages;
-    }
+    static bool are64kbPagesEnabled();
     static bool newResourceImplicitFlush;
     static bool gpuIdleImplicitFlush;
     static bool requiresSupportForWddmTrimNotification;
@@ -119,4 +121,5 @@ class OSInterface : public NonCopyableClass {
   protected:
     std::unique_ptr<DriverModel> driverModel = nullptr;
 };
+
 } // namespace NEO

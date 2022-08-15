@@ -31,7 +31,6 @@ namespace L0 {
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 void CommandQueueHw<gfxCoreFamily>::programStateBaseAddress(uint64_t gsba, bool useLocalMemoryForIndirectHeap, NEO::LinearStream &commandStream, bool cachedMOCSAllowed) {
-    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
 
     const auto &hwInfo = this->device->getHwInfo();
@@ -41,7 +40,7 @@ void CommandQueueHw<gfxCoreFamily>::programStateBaseAddress(uint64_t gsba, bool 
     NEO::EncodeWA<GfxFamily>::addPipeControlBeforeStateBaseAddress(commandStream, hwInfo, isRcs);
     NEO::EncodeWA<GfxFamily>::encodeAdditionalPipelineSelect(commandStream, {}, true, hwInfo, isRcs);
 
-    auto pSbaCmd = static_cast<STATE_BASE_ADDRESS *>(commandStream.getSpace(sizeof(STATE_BASE_ADDRESS)));
+    auto sbaCmdBuf = static_cast<STATE_BASE_ADDRESS *>(NEO::StateBaseAddressHelper<GfxFamily>::getSpaceForSbaCmd(commandStream));
     STATE_BASE_ADDRESS sbaCmd;
 
     bool useGlobalSshAndDsh = NEO::ApiSpecificConfig::getBindlessConfiguration();
@@ -69,19 +68,15 @@ void CommandQueueHw<gfxCoreFamily>::programStateBaseAddress(uint64_t gsba, bool 
                                                                     false,
                                                                     NEO::MemoryCompressionState::NotApplicable,
                                                                     false,
-                                                                    1u);
-    *pSbaCmd = sbaCmd;
+                                                                    1u,
+                                                                    nullptr);
+    *sbaCmdBuf = sbaCmd;
     csr->setGSBAStateDirty(false);
 
     if (NEO::Debugger::isDebugEnabled(internalUsage) && device->getL0Debugger()) {
 
         NEO::Debugger::SbaAddresses sbaAddresses = {};
-        sbaAddresses.BindlessSurfaceStateBaseAddress = sbaCmd.getBindlessSurfaceStateBaseAddress();
-        sbaAddresses.DynamicStateBaseAddress = sbaCmd.getDynamicStateBaseAddress();
-        sbaAddresses.GeneralStateBaseAddress = sbaCmd.getGeneralStateBaseAddress();
-        sbaAddresses.IndirectObjectBaseAddress = sbaCmd.getIndirectObjectBaseAddress();
-        sbaAddresses.InstructionBaseAddress = sbaCmd.getInstructionBaseAddress();
-        sbaAddresses.SurfaceStateBaseAddress = sbaCmd.getSurfaceStateBaseAddress();
+        NEO::EncodeStateBaseAddress<GfxFamily>::setSbaAddressesForDebugger(sbaAddresses, sbaCmd);
 
         device->getL0Debugger()->programSbaTrackingCommands(commandStream, sbaAddresses);
     }
@@ -91,7 +86,6 @@ void CommandQueueHw<gfxCoreFamily>::programStateBaseAddress(uint64_t gsba, bool 
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 size_t CommandQueueHw<gfxCoreFamily>::estimateStateBaseAddressCmdSize() {
-    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
     using PIPE_CONTROL = typename GfxFamily::PIPE_CONTROL;
 

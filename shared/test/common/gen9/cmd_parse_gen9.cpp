@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/test/common/cmd_parse/gen_cmd_parse.h"
-
-#include "gtest/gtest.h"
+#include "shared/source/gen9/hw_cmds_base.h"
 using GenStruct = NEO::GEN9;
 using GenGfxFamily = NEO::SKLFamily;
+
 #include "shared/test/common/cmd_parse/cmd_parse_base.inl"
 #include "shared/test/common/cmd_parse/cmd_parse_base_mi_arb.inl"
 #include "shared/test/common/cmd_parse/cmd_parse_gpgpu_walker.inl"
 #include "shared/test/common/cmd_parse/cmd_parse_sip.inl"
+#include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/cmd_parse/hw_parse.inl"
 
@@ -86,4 +86,5 @@ namespace NEO {
 template void HardwareParse::findHardwareCommands<SKLFamily>();
 template void HardwareParse::findHardwareCommands<SKLFamily>(IndirectHeap *);
 template const void *HardwareParse::getStatelessArgumentPointer<SKLFamily>(const KernelInfo &kernelInfo, uint32_t indexArg, IndirectHeap &ioh, uint32_t rootDeviceIndex);
+template const typename SKLFamily::RENDER_SURFACE_STATE *HardwareParse::getSurfaceState<SKLFamily>(IndirectHeap *ssh, uint32_t index);
 } // namespace NEO

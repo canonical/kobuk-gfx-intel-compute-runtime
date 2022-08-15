@@ -17,12 +17,14 @@ class TestedDrmCommandStreamReceiver : public DrmCommandStreamReceiver<GfxFamily
     using CommandStreamReceiver::activePartitions;
     using CommandStreamReceiver::clearColorAllocation;
     using CommandStreamReceiver::commandStream;
+    using CommandStreamReceiver::completionFenceValuePointer;
     using CommandStreamReceiver::createPreemptionAllocation;
     using CommandStreamReceiver::flushStamp;
     using CommandStreamReceiver::getTagAddress;
     using CommandStreamReceiver::getTagAllocation;
     using CommandStreamReceiver::globalFenceAllocation;
     using CommandStreamReceiver::latestSentTaskCount;
+    using CommandStreamReceiver::logicalStateHelper;
     using CommandStreamReceiver::makeResident;
     using CommandStreamReceiver::postSyncWriteOffset;
     using CommandStreamReceiver::tagAddress;
@@ -34,6 +36,7 @@ class TestedDrmCommandStreamReceiver : public DrmCommandStreamReceiver<GfxFamily
     using DrmCommandStreamReceiver<GfxFamily>::residency;
     using DrmCommandStreamReceiver<GfxFamily>::useContextForUserFenceWait;
     using DrmCommandStreamReceiver<GfxFamily>::useUserFenceWait;
+    using DrmCommandStreamReceiver<GfxFamily>::execObjectsStorage;
     using CommandStreamReceiverHw<GfxFamily>::directSubmission;
     using CommandStreamReceiverHw<GfxFamily>::blitterDirectSubmission;
     using CommandStreamReceiverHw<GfxFamily>::CommandStreamReceiver::lastSentSliceCount;
@@ -72,10 +75,6 @@ class TestedDrmCommandStreamReceiver : public DrmCommandStreamReceiver<GfxFamily
 
     void overrideSubmissionAggregator(SubmissionAggregator *newSubmissionsAggregator) {
         this->submissionAggregator.reset(newSubmissionsAggregator);
-    }
-
-    std::vector<drm_i915_gem_exec_object2> &getExecStorage() {
-        return this->execObjectsStorage;
     }
 
     bool createPreemptionAllocation() override {

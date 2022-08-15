@@ -8,10 +8,13 @@
 #pragma once
 #include "shared/source/helpers/aux_translation.h"
 
-#include "hw_cmds.h"
+#include <cstddef>
+#include <vector>
 
 namespace NEO {
 
+class CommandStreamReceiver;
+class LinearStream;
 struct KernelDescriptor;
 struct HardwareInfo;
 
@@ -71,6 +74,14 @@ struct UnitTestHelper {
     static void setPipeControlHdcPipelineFlush(typename GfxFamily::PIPE_CONTROL &pipeControl, bool hdcPipelineFlush);
 
     static void adjustKernelDescriptorForImplicitArgs(KernelDescriptor &kernelDescriptor);
+
+    static std::vector<bool> getProgrammedLargeGrfValues(CommandStreamReceiver &csr, LinearStream &linearStream);
+
+    static bool getWorkloadPartitionForStoreRegisterMemCmd(typename GfxFamily::MI_STORE_REGISTER_MEM &storeRegisterMem);
+
+    static bool timestampRegisterHighAddress();
+
+    static void validateSbaMocs(uint32_t expectedMocs, CommandStreamReceiver &csr);
 };
 
 } // namespace NEO

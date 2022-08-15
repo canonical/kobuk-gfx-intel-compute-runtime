@@ -82,23 +82,24 @@ void usage() {
                  "\n zello_sysman [OPTIONS]"
                  "\n"
                  "\n OPTIONS:"
-                 "\n  -p,   --pci                   selectively run pci black box test"
-                 "\n  -f,   --frequency             selectively run frequency black box test"
-                 "\n  -s,   --standby               selectively run standby black box test"
-                 "\n  -e,   --engine                selectively run engine black box test"
-                 "\n  -c,   --scheduler             selectively run scheduler black box test"
-                 "\n  -t,   --temperature           selectively run temperature black box test"
-                 "\n  -o,   --power                 selectively run power black box test"
-                 "\n  -m,   --memory                selectively run memory black box test"
-                 "\n  -g,   --global                selectively run device/global operations black box test"
-                 "\n  -R,   --ras                   selectively run ras black box test"
-                 "\n  -E,   --event                 set and listen to events black box test"
-                 "\n  -r,   --reset force|noforce   selectively run device reset test"
-                 "\n  -i,   --firmware <image>      selectively run device firmware test <image> is the firmware binary needed to flash"
-                 "\n  -F,   --fabricport            selectively run fabricport black box test"
-                 "\n  -d,   --diagnostics           selectively run diagnostics black box test"
-                 "\n  -P,   --performance           selectively run performance-factor black box test"
-                 "\n  -h,   --help                  display help message"
+                 "\n  -p,   --pci                                                     selectively run pci black box test"
+                 "\n  -f,   --frequency                                               selectively run frequency black box test"
+                 "\n  -s,   --standby                                                 selectively run standby black box test"
+                 "\n  -e,   --engine                                                  selectively run engine black box test"
+                 "\n  -c,   --scheduler                                               selectively run scheduler black box test"
+                 "\n  -t,   --temperature                                             selectively run temperature black box test"
+                 "\n  -o,   --power                                                   selectively run power black box test"
+                 "\n  -m,   --memory                                                  selectively run memory black box test"
+                 "\n  -g,   --global                                                  selectively run device/global operations black box test"
+                 "\n  -R,   --ras                                                     selectively run ras black box test"
+                 "\n  -E,   --event                                                   set and listen to events black box test"
+                 "\n  -r,   --reset force|noforce                                     selectively run device reset test"
+                 "\n  -i,   --firmware <image>                                        selectively run device firmware test <image> is the firmware binary needed to flash"
+                 "\n  -F,   --fabricport                                              selectively run fabricport black box test"
+                 "\n  -d,   --diagnostics                                             selectively run diagnostics black box test"
+                 "\n  -P,   --performance                                             selectively run performance black box test"
+                 "\n        [--setconfig <deviceNo subdevId engineFlags pFactor>]     optionally sets the performance factor for the particular handle"
+                 "\n  -h,   --help                                        display help message"
                  "\n"
                  "\n  All L0 Syman APIs that set values require root privileged execution"
                  "\n"
@@ -153,8 +154,8 @@ void testSysmanPower(ze_device_handle_t &device) {
         zes_power_properties_t properties;
         VALIDATECALL(zesPowerGetProperties(handle, &properties));
         if (verbose) {
-            std::cout << "properties.canControl = " << properties.canControl << std::endl;
-            std::cout << "properties.isEnergyThresholdSupported= " << properties.isEnergyThresholdSupported << std::endl;
+            std::cout << "properties.canControl = " << static_cast<uint32_t>(properties.canControl) << std::endl;
+            std::cout << "properties.isEnergyThresholdSupported= " << static_cast<uint32_t>(properties.isEnergyThresholdSupported) << std::endl;
             std::cout << "properties.defaultLimit= " << properties.defaultLimit << std::endl;
             std::cout << "properties.maxLimit =" << properties.maxLimit << std::endl;
             std::cout << "properties.minLimit =" << properties.minLimit << std::endl;
@@ -169,12 +170,12 @@ void testSysmanPower(ze_device_handle_t &device) {
         zes_power_burst_limit_t burstGetDefault = {};
         VALIDATECALL(zesPowerGetLimits(handle, &sustainedGetDefault, &burstGetDefault, nullptr));
         if (verbose) {
-            std::cout << "sustainedGetDefault.enabled = " << sustainedGetDefault.enabled << std::endl;
+            std::cout << "sustainedGetDefault.enabled = " << static_cast<uint32_t>(sustainedGetDefault.enabled) << std::endl;
             if (sustainedGetDefault.enabled) {
                 std::cout << "sustainedGetDefault.power = " << sustainedGetDefault.power << std::endl;
                 std::cout << "sustainedGetDefault.interval = " << sustainedGetDefault.interval << std::endl;
             }
-            std::cout << "burstGetDefault.enabled = " << burstGetDefault.enabled << std::endl;
+            std::cout << "burstGetDefault.enabled = " << static_cast<uint32_t>(burstGetDefault.enabled) << std::endl;
             if (burstGetDefault.enabled) {
                 std::cout << "burstGetDefault.power = " << burstGetDefault.power << std::endl;
             }
@@ -212,7 +213,36 @@ std::string getEngineFlagType(zes_engine_type_flags_t engineFlag) {
         return mgetEngineType.at(engineFlag);
 }
 
-void testSysmanPerformance(ze_device_handle_t &device) {
+zes_engine_type_flags_t getEngineFlagType(std::string engineFlagString) {
+    static const std::map<std::string, zes_engine_type_flags_t> mgetEngineType{
+        {"ZES_ENGINE_TYPE_FLAG_OTHER", ZES_ENGINE_TYPE_FLAG_OTHER},
+        {"ZES_ENGINE_TYPE_FLAG_COMPUTE", ZES_ENGINE_TYPE_FLAG_COMPUTE},
+        {"ZES_ENGINE_TYPE_FLAG_3D", ZES_ENGINE_TYPE_FLAG_3D},
+        {"ZES_ENGINE_TYPE_FLAG_MEDIA", ZES_ENGINE_TYPE_FLAG_MEDIA},
+        {"ZES_ENGINE_TYPE_FLAG_DMA", ZES_ENGINE_TYPE_FLAG_DMA},
+        {"ZES_ENGINE_TYPE_FLAG_RENDER", ZES_ENGINE_TYPE_FLAG_RENDER}};
+    auto i = mgetEngineType.find(engineFlagString);
+    if (i == mgetEngineType.end()) {
+        std::cout << "Engine type flag Unsupported" << std::endl;
+        return ZES_ENGINE_TYPE_FLAG_FORCE_UINT32;
+    } else
+        return mgetEngineType.at(engineFlagString);
+}
+
+void setPerformanceFactor(const zes_perf_handle_t &handle, const zes_perf_properties_t &properties, std::vector<std::string> &buf, bool &pFactorIsSet) {
+    uint32_t subdeviceId = static_cast<uint32_t>(std::stoi(buf[2]));
+    zes_engine_type_flags_t engineTypeFlag = getEngineFlagType(buf[3]);
+    double pFactor = static_cast<uint32_t>(std::stod(buf[4]));
+    if (properties.subdeviceId == subdeviceId && properties.engines == engineTypeFlag) {
+        if (properties.engines == engineTypeFlag) {
+            VALIDATECALL(zesPerformanceFactorSetConfig(handle, pFactor));
+            std::cout << "Performance factor is set successfully" << std::endl;
+            pFactorIsSet = true;
+        }
+    }
+}
+
+void testSysmanPerformance(ze_device_handle_t &device, std::vector<std::string> &buf, uint32_t &curDeviceIndex, bool &pFactorIsSet) {
     std::cout << std::endl
               << " ----  Performance-factor tests ---- " << std::endl;
     uint32_t count = 0;
@@ -228,9 +258,15 @@ void testSysmanPerformance(ze_device_handle_t &device) {
         zes_perf_properties_t properties;
         VALIDATECALL(zesPerformanceFactorGetProperties(handle, &properties));
         if (verbose) {
-            std::cout << "properties.onSubdevice = " << properties.onSubdevice << std::endl;
+            std::cout << "properties.onSubdevice = " << static_cast<uint32_t>(properties.onSubdevice) << std::endl;
             std::cout << "properties.subdeviceId = " << properties.subdeviceId << std::endl;
             std::cout << "properties.engines = " << getEngineFlagType(properties.engines) << std::endl;
+        }
+        if (buf.size() != 0) {
+            uint32_t deviceIndex = static_cast<uint32_t>(std::stoi(buf[1]));
+            if (deviceIndex == curDeviceIndex) {
+                setPerformanceFactor(handle, properties, buf, pFactorIsSet);
+            }
         }
         double originalFactor = 0;
         VALIDATECALL(zesPerformanceFactorGetConfig(handle, &originalFactor));
@@ -239,6 +275,7 @@ void testSysmanPerformance(ze_device_handle_t &device) {
         }
         std::cout << std::endl;
     }
+    curDeviceIndex++;
 }
 
 std::string getTemperatureSensorType(zes_temp_sensors_t type) {
@@ -347,8 +384,8 @@ void testSysmanFrequency(ze_device_handle_t &device) {
         VALIDATECALL(zesFrequencyGetProperties(handle, &freqProperties));
         if (verbose) {
             std::cout << "freqProperties.type = " << freqProperties.type << std::endl;
-            std::cout << "freqProperties.canControl = " << freqProperties.canControl << std::endl;
-            std::cout << "freqProperties.isThrottleEventSupported = " << freqProperties.isThrottleEventSupported << std::endl;
+            std::cout << "freqProperties.canControl = " << static_cast<uint32_t>(freqProperties.canControl) << std::endl;
+            std::cout << "freqProperties.isThrottleEventSupported = " << static_cast<uint32_t>(freqProperties.isThrottleEventSupported) << std::endl;
             std::cout << "freqProperties.min = " << freqProperties.min << std::endl;
             std::cout << "freqProperties.max = " << freqProperties.max << std::endl;
             if (freqProperties.onSubdevice) {
@@ -623,6 +660,15 @@ void testSysmanScheduler(ze_device_handle_t &device) {
     VALIDATECALL(zesDeviceEnumSchedulers(device, &count, handles.data()));
 
     for (const auto &handle : handles) {
+        zes_sched_properties_t pProperties = {};
+        VALIDATECALL(zesSchedulerGetProperties(handle, &pProperties));
+        if (verbose) {
+            std::cout << "On subdevice = " << static_cast<uint32_t>(pProperties.onSubdevice) << std::endl;
+            std::cout << "SubdeviceId = " << static_cast<uint32_t>(pProperties.subdeviceId) << std::endl;
+            std::cout << "Can control = " << static_cast<uint32_t>(pProperties.canControl) << std::endl;
+            std::cout << "Engines = " << static_cast<uint32_t>(pProperties.engines) << std::endl;
+            std::cout << "Supported Mode = " << static_cast<uint32_t>(pProperties.supportedModes) << std::endl;
+        }
         zes_sched_mode_t currentMode = {};
         VALIDATECALL(zesSchedulerGetCurrentMode(handle, &currentMode));
         if (verbose) {
@@ -724,7 +770,7 @@ void testSysmanMemory(ze_device_handle_t &device) {
         VALIDATECALL(zesMemoryGetProperties(handle, &memoryProperties));
         if (verbose) {
             std::cout << "Memory Type = " << getMemoryType(memoryProperties.type) << std::endl;
-            std::cout << "On Subdevice = " << memoryProperties.onSubdevice << std::endl;
+            std::cout << "On Subdevice = " << static_cast<uint32_t>(memoryProperties.onSubdevice) << std::endl;
             std::cout << "Subdevice Id = " << memoryProperties.subdeviceId << std::endl;
             std::cout << "Memory Size = " << memoryProperties.physicalSize << std::endl;
             std::cout << "Number of channels = " << memoryProperties.numChannels << std::endl;
@@ -774,19 +820,19 @@ void testSysmanFirmware(ze_device_handle_t &device, std::string imagePath) {
         VALIDATECALL(zesFirmwareGetProperties(handle, &fwProperties));
         if (verbose) {
             std::cout << "firmware name = " << fwProperties.name << std::endl;
-            std::cout << "On Subdevice = " << fwProperties.onSubdevice << std::endl;
+            std::cout << "On Subdevice = " << static_cast<uint32_t>(fwProperties.onSubdevice) << std::endl;
             std::cout << "Subdevice Id = " << fwProperties.subdeviceId << std::endl;
             std::cout << "firmware version = " << fwProperties.version << std::endl;
         }
         if (imagePath.size() != 0 && imgSize > 0) {
-            char img[imgSize];
-            imageFile.read(img, imgSize);
-            VALIDATECALL(zesFirmwareFlash(handle, img, static_cast<uint32_t>(imgSize)));
+            std::vector<char> img(imgSize);
+            imageFile.read(img.data(), imgSize);
+            VALIDATECALL(zesFirmwareFlash(handle, img.data(), static_cast<uint32_t>(imgSize)));
 
             VALIDATECALL(zesFirmwareGetProperties(handle, &fwProperties));
             if (verbose) {
                 std::cout << "firmware name = " << fwProperties.name << std::endl;
-                std::cout << "On Subdevice = " << fwProperties.onSubdevice << std::endl;
+                std::cout << "On Subdevice = " << static_cast<uint32_t>(fwProperties.onSubdevice) << std::endl;
                 std::cout << "Subdevice Id = " << fwProperties.subdeviceId << std::endl;
                 std::cout << "firmware version = " << fwProperties.version << std::endl;
             }
@@ -1068,6 +1114,23 @@ void testSysmanDiagnostics(ze_device_handle_t &device) {
     }
 }
 
+bool checkpFactorArguments(std::vector<ze_device_handle_t> &devices, std::vector<std::string> &buf) {
+    uint32_t deviceIndex = static_cast<uint32_t>(std::stoi(buf[1]));
+    if (deviceIndex >= devices.size()) {
+        return false;
+    }
+    uint32_t count = 0;
+    VALIDATECALL(zeDeviceGetSubDevices(devices[deviceIndex], &count, nullptr));
+    uint32_t subDeviceIndex = static_cast<uint32_t>(std::stoi(buf[2]));
+    if (count > 0 && subDeviceIndex >= count) {
+        return false;
+    }
+    zes_engine_type_flags_t engineTypeFlag = getEngineFlagType(buf[3]);
+    if (engineTypeFlag == ZES_ENGINE_TYPE_FLAG_FORCE_UINT32) {
+        return false;
+    }
+    return true;
+}
 bool validateGetenv(const char *name) {
     const char *env = getenv(name);
     if ((nullptr == env) || (0 == strcmp("0", env)))
@@ -1085,7 +1148,7 @@ int main(int argc, char *argv[]) {
     getDeviceHandles(driver, devices, argc, argv);
     int opt;
 
-    static struct option long_opts[] = {
+    static struct option longOpts[] = {
         {"help", no_argument, nullptr, 'h'},
         {"pci", no_argument, nullptr, 'p'},
         {"frequency", no_argument, nullptr, 'f'},
@@ -1102,11 +1165,14 @@ int main(int argc, char *argv[]) {
         {"fabricport", no_argument, nullptr, 'F'},
         {"firmware", optional_argument, nullptr, 'i'},
         {"diagnostics", no_argument, nullptr, 'd'},
-        {"performance", no_argument, nullptr, 'P'},
+        {"performance", optional_argument, nullptr, 'P'},
         {0, 0, 0, 0},
     };
     bool force = false;
-    while ((opt = getopt_long(argc, argv, "hdpPfsectogmrFEi:", long_opts, nullptr)) != -1) {
+    bool pFactorIsSet = true;
+    std::vector<std::string> buf;
+    uint32_t deviceIndex = 0;
+    while ((opt = getopt_long(argc, argv, "hdpPfsectogmrFEiS:", longOpts, nullptr)) != -1) {
         switch (opt) {
         case 'h':
             usage();
@@ -1118,9 +1184,30 @@ int main(int argc, char *argv[]) {
             });
             break;
         case 'P':
+            deviceIndex = 0;
+            while (optind < argc) {
+                buf.push_back(argv[optind]);
+                optind++;
+            }
+            if (buf.size() != 0 && (buf.size() != 5 || buf[0] != "--setconfig")) {
+                usage();
+                exit(0);
+            }
+            if (buf.size() != 0) {
+                if (checkpFactorArguments(devices, buf) == false) {
+                    std::cout << "Invalid arguments passed for setting performance factor" << std::endl;
+                    usage();
+                    exit(0);
+                }
+                pFactorIsSet = false;
+            }
             std::for_each(devices.begin(), devices.end(), [&](auto device) {
-                testSysmanPerformance(device);
+                testSysmanPerformance(device, buf, deviceIndex, pFactorIsSet);
             });
+            if (pFactorIsSet == false) {
+                std::cout << "Unable to set the Performance factor" << std::endl;
+            }
+            buf.clear();
             break;
         case 'f':
             std::for_each(devices.begin(), devices.end(), [&](auto device) {

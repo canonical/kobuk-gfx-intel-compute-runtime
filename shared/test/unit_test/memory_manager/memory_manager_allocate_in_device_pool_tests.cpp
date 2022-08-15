@@ -16,7 +16,7 @@
 #include "shared/test/common/mocks/mock_gmm.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 using namespace NEO;
 
@@ -272,10 +272,12 @@ HWTEST_F(MemoryManagerTests, givenEnabledLocalMemoryWhenAllocatingDebugAreaThenH
     }
     auto moduleDebugArea = osAgnosticMemoryManager.allocateGraphicsMemoryWithProperties(properties);
     auto gpuAddress = moduleDebugArea->getGpuAddress();
-    EXPECT_LE(GmmHelper::canonize(osAgnosticMemoryManager.getGfxPartition(0)->getHeapBase(expectedHeap)), gpuAddress);
-    EXPECT_GT(GmmHelper::canonize(osAgnosticMemoryManager.getGfxPartition(0)->getHeapLimit(expectedHeap)), gpuAddress);
-    EXPECT_EQ(GmmHelper::canonize(osAgnosticMemoryManager.getGfxPartition(0)->getHeapBase(expectedHeap)), moduleDebugArea->getGpuBaseAddress());
-    EXPECT_EQ(GmmHelper::canonize(osAgnosticMemoryManager.getGfxPartition(0)->getHeapBase(baseHeap)), moduleDebugArea->getGpuBaseAddress());
+    auto gmmHelper = osAgnosticMemoryManager.getGmmHelper(moduleDebugArea->getRootDeviceIndex());
+
+    EXPECT_LE(gmmHelper->canonize(osAgnosticMemoryManager.getGfxPartition(0)->getHeapBase(expectedHeap)), gpuAddress);
+    EXPECT_GT(gmmHelper->canonize(osAgnosticMemoryManager.getGfxPartition(0)->getHeapLimit(expectedHeap)), gpuAddress);
+    EXPECT_EQ(gmmHelper->canonize(osAgnosticMemoryManager.getGfxPartition(0)->getHeapBase(expectedHeap)), moduleDebugArea->getGpuBaseAddress());
+    EXPECT_EQ(gmmHelper->canonize(osAgnosticMemoryManager.getGfxPartition(0)->getHeapBase(baseHeap)), moduleDebugArea->getGpuBaseAddress());
 
     osAgnosticMemoryManager.freeGraphicsMemory(moduleDebugArea);
 }
@@ -732,7 +734,7 @@ HWTEST2_F(MemoryManagerDirectSubmissionImplicitScalingTest, givenDirectSubmissio
     }
 }
 
-HWTEST2_F(MemoryManagerDirectSubmissionImplicitScalingTest, givenDirectSubmissionForceLocalMemoryStorageEnabledForAllEnginesWhenAllocatingMemoryForCommandOrRingOrSemaphoreBufferThenFirstBankIsSelected, IsXeHpcCore) {
+HWTEST2_F(MemoryManagerDirectSubmissionImplicitScalingTest, givenDirectSubmissionForceLocalMemoryStorageEnabledForAllEnginesWhenAllocatingMemoryForCommandOrRingOrSemaphoreBufferThenFirstBankIsSelected, IsPVC) {
     DebugManager.flags.DirectSubmissionForceLocalMemoryStorageMode.set(2);
     for (auto &multiTile : ::testing::Bool()) {
         for (auto &allocationType : {AllocationType::COMMAND_BUFFER, AllocationType::RING_BUFFER, AllocationType::SEMAPHORE_BUFFER}) {
@@ -750,7 +752,7 @@ HWTEST2_F(MemoryManagerDirectSubmissionImplicitScalingTest, givenDirectSubmissio
     }
 }
 
-HWTEST2_F(MemoryManagerDirectSubmissionImplicitScalingTest, givenDirectSubmissionForceLocalMemoryStorageDefaultModeWhenAllocatingMemoryForCommandOrRingOrSemaphoreBufferThenFirstBankIsSelected, IsXeHpcCore) {
+HWTEST2_F(MemoryManagerDirectSubmissionImplicitScalingTest, givenDirectSubmissionForceLocalMemoryStorageDefaultModeWhenAllocatingMemoryForCommandOrRingOrSemaphoreBufferThenFirstBankIsSelected, IsPVC) {
     DebugManager.flags.DirectSubmissionForceLocalMemoryStorageMode.set(-1);
     for (auto &multiTile : ::testing::Bool()) {
         for (auto &allocationType : {AllocationType::COMMAND_BUFFER, AllocationType::RING_BUFFER, AllocationType::SEMAPHORE_BUFFER}) {

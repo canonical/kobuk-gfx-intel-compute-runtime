@@ -9,6 +9,11 @@
 
 #include "shared/test/unit_test/os_interface/linux/drm_mock_impl.h"
 
+using NEO::I915::drm_drawable_t;
+using NEO::I915::drm_handle_t;
+using NEO::I915::drm_tex_region;
+using NEO::I915::drm_vblank_seq_type;
+
 namespace PROD_DG1 {
 #undef DRM_IOCTL_I915_GEM_CREATE_EXT
 #undef __I915_EXEC_UNKNOWN_FLAGS
@@ -24,8 +29,8 @@ class DrmMockProdDg1 : public DrmTipMock {
         rootDeviceEnvironment.setHwInfo(inputHwInfo);
     }
 
-    void handleQueryItem(drm_i915_query_item *queryItem) override {
-        switch (queryItem->query_id) {
+    void handleQueryItem(QueryItem *queryItem) override {
+        switch (queryItem->queryId) {
         case DRM_I915_QUERY_MEMORY_REGIONS:
             if (queryMemoryRegionInfoSuccessCount == 0) {
                 queryItem->length = -EINVAL;
@@ -38,13 +43,13 @@ class DrmMockProdDg1 : public DrmTipMock {
                     queryItem->length = regionInfoSize;
                 } else {
                     EXPECT_EQ(regionInfoSize, queryItem->length);
-                    auto queryMemoryRegionInfo = reinterpret_cast<PROD_DG1::drm_i915_query_memory_regions *>(queryItem->data_ptr);
+                    auto queryMemoryRegionInfo = reinterpret_cast<PROD_DG1::drm_i915_query_memory_regions *>(queryItem->dataPtr);
                     EXPECT_EQ(0u, queryMemoryRegionInfo->num_regions);
                     queryMemoryRegionInfo->num_regions = numberOfRegions;
-                    queryMemoryRegionInfo->regions[0].region.memory_class = I915_MEMORY_CLASS_SYSTEM;
+                    queryMemoryRegionInfo->regions[0].region.memory_class = drm_i915_gem_memory_class::I915_MEMORY_CLASS_SYSTEM;
                     queryMemoryRegionInfo->regions[0].region.memory_instance = 1;
                     queryMemoryRegionInfo->regions[0].probed_size = 2 * MemoryConstants::gigaByte;
-                    queryMemoryRegionInfo->regions[1].region.memory_class = I915_MEMORY_CLASS_DEVICE;
+                    queryMemoryRegionInfo->regions[1].region.memory_class = drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE;
                     queryMemoryRegionInfo->regions[1].region.memory_instance = 1;
                     queryMemoryRegionInfo->regions[1].probed_size = 2 * MemoryConstants::gigaByte;
                 }
@@ -53,8 +58,8 @@ class DrmMockProdDg1 : public DrmTipMock {
         }
     }
 
-    int handleKernelSpecificRequests(unsigned long request, void *arg) override {
-        if (request == DRM_IOCTL_I915_GEM_CREATE_EXT) {
+    int handleKernelSpecificRequests(DrmIoctl request, void *arg) override {
+        if (request == DrmIoctl::DG1GemCreateExt) {
             auto createExtParams = static_cast<drm_i915_gem_create_ext *>(arg);
             if (createExtParams->size == 0) {
                 return EINVAL;
@@ -70,7 +75,7 @@ class DrmMockProdDg1 : public DrmTipMock {
                 return EINVAL;
             }
             numRegions = regionParam->size;
-            memRegions = *reinterpret_cast<drm_i915_gem_memory_class_instance *>(regionParam->data);
+            memRegions = *reinterpret_cast<MemoryClassInstance *>(regionParam->data);
             return gemCreateExtRetVal;
         }
         return -1;

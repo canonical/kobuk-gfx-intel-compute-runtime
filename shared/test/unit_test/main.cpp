@@ -29,6 +29,8 @@
 #include "shared/test/unit_test/tests_configuration.h"
 
 #include "gmock/gmock.h"
+#include "hw_cmds_default.h"
+#include "test_files_setup.h"
 
 #include <algorithm>
 #include <fstream>
@@ -112,7 +114,7 @@ void applyWorkarounds() {
 
     //Create FileLogger to prevent false memory leaks
     {
-        NEO::FileLoggerInstance();
+        NEO::fileLoggerInstance();
     }
 }
 
@@ -150,6 +152,8 @@ int main(int argc, char **argv) {
     bool enableSegv = true;
     bool setupFeatureTableAndWorkaroundTable = testMode == TestMode::AubTests ? true : false;
     bool showTestStats = false;
+    bool dumpTestStats = false;
+    std::string dumpTestStatsFileName = "";
     applyWorkarounds();
 
 #if defined(__linux__)
@@ -189,6 +193,10 @@ int main(int argc, char **argv) {
             enableAlarm = false;
         } else if (!strcmp("--show_test_stats", argv[i])) {
             showTestStats = true;
+        } else if (!strcmp("--dump_test_stats", argv[i])) {
+            dumpTestStats = true;
+            ++i;
+            dumpTestStatsFileName = std::string(argv[i]);
         } else if (!strcmp("--disable_pagefaulting_tests", argv[i])) { //disable tests which raise page fault signal during execution
             NEO::PagaFaultManagerTestConfig::disabled = true;
         } else if (!strcmp("--tbx", argv[i])) {
@@ -270,11 +278,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (showTestStats) {
-        std::cout << getTestStats() << std::endl;
-        return 0;
-    }
-
     productFamily = hwInfoForTests.platform.eProductFamily;
     renderCoreFamily = hwInfoForTests.platform.eRenderCoreFamily;
     uint32_t threadsPerEu = hwInfoConfigFactory[productFamily]->threadsPerEu;
@@ -319,7 +322,12 @@ int main(int argc, char **argv) {
     testBinaryFiles.append(testFiles);
     testFiles = testBinaryFiles;
 
-    std::string executionDirectory(hardwarePrefix[productFamily]);
+    std::string nClFiles = NEO_SHARED_TEST_FILES_DIR;
+    nClFiles.append("/");
+    clFiles = nClFiles;
+
+    std::string executionDirectory("shared/");
+    executionDirectory += hardwarePrefix[productFamily];
     executionDirectory += NEO::executionDirectorySuffix; // _aub for aub_tests, empty otherwise
     executionDirectory += "/";
     executionDirectory += std::to_string(revId);
@@ -393,6 +401,17 @@ int main(int argc, char **argv) {
     NEO::MockSipData::mockSipKernel.reset(new NEO::MockSipKernel());
 
     retVal = RUN_ALL_TESTS();
+
+    if (showTestStats) {
+        std::cout << getTestStats() << std::endl;
+    }
+
+    if (dumpTestStats) {
+        std::ofstream dumpTestStatsFile;
+        dumpTestStatsFile.open(dumpTestStatsFileName);
+        dumpTestStatsFile << getTestStatsJson();
+        dumpTestStatsFile.close();
+    }
 
     return retVal;
 }

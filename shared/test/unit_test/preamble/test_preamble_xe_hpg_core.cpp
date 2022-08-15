@@ -12,7 +12,7 @@
 #include "shared/source/helpers/preamble.h"
 #include "shared/source/utilities/stackvec.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 using PreambleTest = ::testing::Test;
 
@@ -55,7 +55,7 @@ HWTEST2_F(PreambleTest, givenDisableEUFusionWhenProgramVFEStateThenFusedEUDispat
     auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&stream, *defaultHwInfo.get(), EngineGroupType::RenderCompute);
     StreamProperties props;
     props.frontEndState.disableEUFusion.set(true);
-    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, *defaultHwInfo.get(), 0, 0, 0, props);
+    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, *defaultHwInfo.get(), 0, 0, 0, props, nullptr);
 
     auto cfeCmd = reinterpret_cast<CFE_STATE *>(pVfeCmd);
     EXPECT_EQ(1u, cfeCmd->getFusedEuDispatch());

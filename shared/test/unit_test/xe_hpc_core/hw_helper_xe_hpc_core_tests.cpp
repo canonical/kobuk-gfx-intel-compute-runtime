@@ -8,7 +8,10 @@
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/hw_helper_tests.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
+
+#include "hw_cmds_xe_hpc_core_base.h"
 
 using namespace NEO;
 using HwHelperXeHpcCoreTest = ::testing::Test;
@@ -54,12 +57,19 @@ XE_HPC_CORETEST_F(HwHelperXeHpcCoreTest, WhenGettingIsCpuImageTransferPreferredT
     EXPECT_TRUE(hwHelper.isCpuImageTransferPreferred(*defaultHwInfo));
 }
 
-XE_HPC_CORETEST_F(HwHelperXeHpcCoreTest, givenHwHelperWhenGettingISAPaddingThenCorrectValueIsReturned) {
-    auto &hwHelper = NEO::HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
-    EXPECT_EQ(hwHelper.getPaddingForISAAllocation(), 3584u);
-}
-
 XE_HPC_CORETEST_F(HwHelperXeHpcCoreTest, givenHwHelperWhenGettingIfRevisionSpecificBinaryBuiltinIsRequiredThenTrueIsReturned) {
     auto &hwHelper = NEO::HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
     EXPECT_TRUE(hwHelper.isRevisionSpecificBinaryBuiltinRequired());
+}
+
+XE_HPC_CORETEST_F(HwHelperXeHpcCoreTest, givenHwHelperWhenCheckTimestampWaitSupportThenReturnTrue) {
+    auto &helper = HwHelper::get(renderCoreFamily);
+    EXPECT_TRUE(helper.isTimestampWaitSupportedForQueues());
+    EXPECT_TRUE(helper.isTimestampWaitSupportedForEvents(*defaultHwInfo));
+}
+
+XE_HPC_CORETEST_F(HwHelperXeHpcCoreTest, givenXeHPCPlatformWhenCheckAssignEngineRoundRobinSupportedThenReturnTrue) {
+    auto hwInfo = *defaultHwInfo;
+    auto &hwHelper = HwHelperHw<FamilyType>::get();
+    EXPECT_EQ(hwHelper.isAssignEngineRoundRobinSupported(hwInfo), HwInfoConfig::get(hwInfo.platform.eProductFamily)->isAssignEngineRoundRobinSupported());
 }

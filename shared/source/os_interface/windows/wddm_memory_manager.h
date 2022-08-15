@@ -44,6 +44,7 @@ class WddmMemoryManager : public MemoryManager {
     void freeGraphicsMemoryImpl(GraphicsAllocation *gfxAllocation, bool isImportedAllocation) override;
     void handleFenceCompletion(GraphicsAllocation *allocation) override;
 
+    GraphicsAllocation *createGraphicsAllocationFromMultipleSharedHandles(std::vector<osHandle> handles, AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override;
     GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override;
     GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex, AllocationType allocType) override;
 
@@ -70,6 +71,7 @@ class WddmMemoryManager : public MemoryManager {
     void *reserveCpuAddressRange(size_t size, uint32_t rootDeviceIndex) override;
     void releaseReservedCpuAddressRange(void *reserved, size_t size, uint32_t rootDeviceIndex) override;
     bool isCpuCopyRequired(const void *ptr) override;
+    bool isWCMemory(const void *ptr) override;
 
     AddressRange reserveGpuAddress(size_t size, uint32_t rootDeviceIndex) override { return AddressRange{0, 0}; };
     void freeGpuAddress(AddressRange addressRange, uint32_t rootDeviceIndex) override{};
@@ -77,6 +79,7 @@ class WddmMemoryManager : public MemoryManager {
     bool isNTHandle(osHandle handle, uint32_t rootDeviceIndex) override;
     void releaseDeviceSpecificMemResources(uint32_t rootDeviceIndex) override{};
     void createDeviceSpecificMemResources(uint32_t rootDeviceIndex) override{};
+    void registerAllocationInOs(GraphicsAllocation *allocation) override;
 
   protected:
     GraphicsAllocation *createGraphicsAllocation(OsHandleStorage &handleStorage, const AllocationData &allocationData) override;

@@ -7,11 +7,14 @@
 
 #pragma once
 
-#include "shared/source/os_interface/os_library.h"
+#include "shared/source/memory_manager/graphics_allocation.h"
 
 #include "level_zero/api/extensions/public/ze_exp_ext.h"
 #include "level_zero/core/source/driver/driver_handle.h"
 #include "level_zero/core/source/get_extension_function_lookup_map.h"
+
+#include <map>
+#include <mutex>
 
 namespace L0 {
 class HostPointerManager;
@@ -35,6 +38,7 @@ struct DriverHandleImp : public DriverHandle {
     NEO::MemoryManager *getMemoryManager() override;
     void setMemoryManager(NEO::MemoryManager *memoryManager) override;
     MOCKABLE_VIRTUAL void *importFdHandle(ze_device_handle_t hDevice, ze_ipc_memory_flags_t flags, uint64_t handle, NEO::GraphicsAllocation **pAlloc);
+    MOCKABLE_VIRTUAL void *importFdHandles(ze_device_handle_t hDevice, ze_ipc_memory_flags_t flags, std::vector<NEO::osHandle> handles, NEO::GraphicsAllocation **pAlloc);
     MOCKABLE_VIRTUAL void *importNTHandle(ze_device_handle_t hDevice, void *handle);
     ze_result_t checkMemoryAccessFromDevice(Device *device, const void *ptr) override;
     NEO::SVMAllocsManager *getSvmAllocsManager() override;
@@ -56,11 +60,11 @@ struct DriverHandleImp : public DriverHandle {
     ze_result_t releaseImportedPointer(void *ptr) override;
     ze_result_t getHostPointerBaseAddress(void *ptr, void **baseAddress) override;
 
-    virtual NEO::GraphicsAllocation *findHostPointerAllocation(void *ptr, size_t size, uint32_t rootDeviceIndex) override;
-    virtual NEO::GraphicsAllocation *getDriverSystemMemoryAllocation(void *ptr,
-                                                                     size_t size,
-                                                                     uint32_t rootDeviceIndex,
-                                                                     uintptr_t *gpuAddress) override;
+    NEO::GraphicsAllocation *findHostPointerAllocation(void *ptr, size_t size, uint32_t rootDeviceIndex) override;
+    NEO::GraphicsAllocation *getDriverSystemMemoryAllocation(void *ptr,
+                                                             size_t size,
+                                                             uint32_t rootDeviceIndex,
+                                                             uintptr_t *gpuAddress) override;
     NEO::GraphicsAllocation *getPeerAllocation(Device *device,
                                                NEO::SvmAllocationData *allocData,
                                                void *basePtr,
@@ -90,9 +94,8 @@ struct DriverHandleImp : public DriverHandle {
         {ZE_GLOBAL_OFFSET_EXP_NAME, ZE_GLOBAL_OFFSET_EXP_VERSION_CURRENT},
         {ZE_PCI_PROPERTIES_EXT_NAME, ZE_PCI_PROPERTIES_EXT_VERSION_CURRENT},
         {ZE_MEMORY_COMPRESSION_HINTS_EXT_NAME, ZE_MEMORY_COMPRESSION_HINTS_EXT_VERSION_CURRENT},
-        {ZE_IMAGE_VIEW_EXP_NAME, ZE_IMAGE_VIEW_EXP_VERSION_CURRENT},
-        {ZE_IMAGE_MEMORY_PROPERTIES_EXP_NAME, ZE_IMAGE_MEMORY_PROPERTIES_EXP_VERSION_CURRENT},
-        {ZE_MEMORY_FREE_POLICIES_EXT_NAME, ZE_MEMORY_FREE_POLICIES_EXT_VERSION_CURRENT}};
+        {ZE_MEMORY_FREE_POLICIES_EXT_NAME, ZE_MEMORY_FREE_POLICIES_EXT_VERSION_CURRENT},
+        {ZE_DEVICE_MEMORY_PROPERTIES_EXT_NAME, ZE_DEVICE_MEMORY_PROPERTIES_EXT_VERSION_CURRENT}};
 
     uint64_t uuidTimestamp = 0u;
 
@@ -101,7 +104,7 @@ struct DriverHandleImp : public DriverHandle {
 
     uint32_t numDevices = 0;
 
-    std::set<uint32_t> rootDeviceIndices = {};
+    RootDeviceIndicesContainer rootDeviceIndices;
     std::map<uint32_t, NEO::DeviceBitfield> deviceBitfields;
     void updateRootDeviceBitFields(std::unique_ptr<NEO::Device> &neoDevice);
     void enableRootDeviceDebugger(std::unique_ptr<NEO::Device> &neoDevice);

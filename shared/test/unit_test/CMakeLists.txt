@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019-2021 Intel Corporation
+# Copyright (C) 2019-2022 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -37,6 +37,8 @@ if(NOT NEO_SKIP_UNIT_TESTS)
                  $<TARGET_OBJECTS:neo_shared_mocks>
   )
 
+  add_dependencies(${TARGET_NAME} test_dynamic_lib)
+
   set_property(TARGET ${TARGET_NAME} APPEND_STRING PROPERTY COMPILE_FLAGS ${ASAN_FLAGS})
   set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "${SHARED_TEST_PROJECTS_FOLDER}")
 
@@ -62,6 +64,10 @@ if(NOT NEO_SKIP_UNIT_TESTS)
                           VS_DEBUGGER_COMMAND_ARGUMENTS "--gtest_filter=* --gtest_catch_exceptions=0 --enable_default_listener --disable_pagefaulting_tests"
                           VS_DEBUGGER_WORKING_DIRECTORY "$(OutDir)"
     )
+  endif()
+
+  if(COMPILER_SUPPORTS_SSE42)
+    set_source_files_properties(helpers/uint16_sse4_tests.cpp PROPERTIES COMPILE_FLAGS -msse4.2)
   endif()
 
   add_subdirectory(${NEO_SHARED_TEST_DIRECTORY}/common "${NEO_BUILD_DIR}/shared/test/common")

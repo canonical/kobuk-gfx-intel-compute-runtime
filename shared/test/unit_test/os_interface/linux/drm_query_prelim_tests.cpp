@@ -9,20 +9,15 @@
 #include "shared/source/os_interface/linux/os_context_linux.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
+#include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/libult/linux/drm_mock_prelim_context.h"
 #include "shared/test/common/libult/linux/drm_query_mock.h"
 #include "shared/test/common/mocks/linux/mock_drm_allocation.h"
+#include "shared/test/common/os_interface/linux/sys_calls_linux_ult.h"
 
 #include "gtest/gtest.h"
 
 using namespace NEO;
-
-namespace NEO {
-namespace SysCalls {
-extern uint32_t vmFlags;
-extern uint64_t ioctlVmCreateExtensionArg;
-} // namespace SysCalls
-} // namespace NEO
 
 TEST(DrmQueryTest, givenDirectSubmissionActiveWhenCreateDrmContextThenProperFlagIsSet) {
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
@@ -70,12 +65,12 @@ TEST(DrmQueryTest, givenCooperativeEngineWhenCreateDrmContextThenRunAloneContext
     const auto &extSetparam = drm.receivedContextCreateSetParam;
 
     EXPECT_EQ(static_cast<uint32_t>(I915_CONTEXT_CREATE_EXT_SETPARAM), extSetparam.base.name);
-    EXPECT_EQ(0u, extSetparam.base.next_extension);
+    EXPECT_EQ(0u, extSetparam.base.nextExtension);
     EXPECT_EQ(0u, extSetparam.base.flags);
 
     EXPECT_EQ(static_cast<uint64_t>(DrmPrelimHelper::getRunAloneContextParam()), extSetparam.param.param);
     EXPECT_EQ(0u, extSetparam.param.size);
-    EXPECT_EQ(0u, extSetparam.param.ctx_id);
+    EXPECT_EQ(0u, extSetparam.param.contextId);
     EXPECT_EQ(0u, extSetparam.param.value);
 }
 
@@ -98,12 +93,12 @@ TEST(DrmQueryTest, givenForceRunAloneContextFlagSetWhenCreateDrmContextThenRunAl
 
         auto extSetparam = drm.receivedContextCreateSetParam;
         EXPECT_EQ(static_cast<uint32_t>(I915_CONTEXT_CREATE_EXT_SETPARAM), extSetparam.base.name);
-        EXPECT_EQ(0u, extSetparam.base.next_extension);
+        EXPECT_EQ(0u, extSetparam.base.nextExtension);
         EXPECT_EQ(0u, extSetparam.base.flags);
 
         EXPECT_EQ(static_cast<uint64_t>(DrmPrelimHelper::getRunAloneContextParam()), extSetparam.param.param);
         EXPECT_EQ(0u, extSetparam.param.size);
-        EXPECT_EQ(0u, extSetparam.param.ctx_id);
+        EXPECT_EQ(0u, extSetparam.param.contextId);
         EXPECT_EQ(0u, extSetparam.param.value);
     }
 }
@@ -124,12 +119,12 @@ TEST(DrmQueryTest, givenCreateContextWithAccessCountersWhenDrmContextIsCreatedTh
     auto extSetparam = drm.receivedContextCreateSetParam;
 
     EXPECT_EQ(static_cast<uint32_t>(I915_CONTEXT_CREATE_EXT_SETPARAM), extSetparam.base.name);
-    EXPECT_EQ(0u, extSetparam.base.next_extension);
+    EXPECT_EQ(0u, extSetparam.base.nextExtension);
     EXPECT_EQ(0u, extSetparam.base.flags);
 
     EXPECT_EQ(static_cast<uint64_t>(DrmPrelimHelper::getAccContextParam()), extSetparam.param.param);
     EXPECT_EQ(DrmPrelimHelper::getAccContextParamSize(), extSetparam.param.size);
-    EXPECT_EQ(0u, extSetparam.param.ctx_id);
+    EXPECT_EQ(0u, extSetparam.param.contextId);
     EXPECT_NE(0u, extSetparam.param.value);
 
     auto paramAcc = drm.context.receivedContextParamAcc;
@@ -158,12 +153,12 @@ TEST(DrmQueryTest, givenCreateContextWithAccessCounterWhenDrmContextIsCreatedThe
         auto extSetparam = drm.receivedContextCreateSetParam;
 
         EXPECT_EQ(static_cast<uint32_t>(I915_CONTEXT_CREATE_EXT_SETPARAM), extSetparam.base.name);
-        EXPECT_EQ(0u, extSetparam.base.next_extension);
+        EXPECT_EQ(0u, extSetparam.base.nextExtension);
         EXPECT_EQ(0u, extSetparam.base.flags);
 
         EXPECT_EQ(static_cast<uint64_t>(DrmPrelimHelper::getAccContextParam()), extSetparam.param.param);
         EXPECT_EQ(DrmPrelimHelper::getAccContextParamSize(), extSetparam.param.size);
-        EXPECT_EQ(0u, extSetparam.param.ctx_id);
+        EXPECT_EQ(0u, extSetparam.param.contextId);
         EXPECT_NE(0u, extSetparam.param.value);
 
         auto paramAcc = drm.context.receivedContextParamAcc;
@@ -193,12 +188,12 @@ TEST(DrmQueryTest, givenCreateContextWithAccessCounterWhenDrmContextIsCreatedThe
         auto extSetparam = drm.receivedContextCreateSetParam;
 
         EXPECT_EQ(static_cast<uint32_t>(I915_CONTEXT_CREATE_EXT_SETPARAM), extSetparam.base.name);
-        EXPECT_EQ(0u, extSetparam.base.next_extension);
+        EXPECT_EQ(0u, extSetparam.base.nextExtension);
         EXPECT_EQ(0u, extSetparam.base.flags);
 
         EXPECT_EQ(static_cast<uint64_t>(DrmPrelimHelper::getAccContextParam()), extSetparam.param.param);
         EXPECT_EQ(DrmPrelimHelper::getAccContextParamSize(), extSetparam.param.size);
-        EXPECT_EQ(0u, extSetparam.param.ctx_id);
+        EXPECT_EQ(0u, extSetparam.param.contextId);
         EXPECT_NE(0u, extSetparam.param.value);
 
         auto paramAcc = drm.context.receivedContextParamAcc;
@@ -235,7 +230,7 @@ TEST(DrmBufferObjectTestPrelim, givenDisableScratchPagesWhenCreateDrmVirtualMemo
     uint32_t vmId = 0;
     drm.createDrmVirtualMemory(vmId);
 
-    EXPECT_TRUE(NEO::SysCalls::vmFlags & DrmPrelimHelper::getDisableScratchVmCreateFlag());
+    EXPECT_TRUE(drm.receivedGemVmControl.flags & DrmPrelimHelper::getDisableScratchVmCreateFlag());
 }
 
 TEST(DrmBufferObjectTestPrelim, givenLocalMemoryDisabledWhenCreateDrmVirtualMemoryThenVmRegionExtensionIsNotPassed) {
@@ -250,7 +245,7 @@ TEST(DrmBufferObjectTestPrelim, givenLocalMemoryDisabledWhenCreateDrmVirtualMemo
     uint32_t vmId = 0;
     drm.createDrmVirtualMemory(vmId);
 
-    EXPECT_EQ(NEO::SysCalls::ioctlVmCreateExtensionArg, 0ull);
+    EXPECT_EQ(drm.receivedGemVmControl.extensions, 0ull);
 }
 
 TEST(DrmBufferObjectTestPrelim, givenLocalMemoryEnabledWhenCreateDrmVirtualMemoryThenVmRegionExtensionIsPassed) {
@@ -271,16 +266,17 @@ TEST(DrmBufferObjectTestPrelim, givenLocalMemoryEnabledWhenCreateDrmVirtualMemor
     uint32_t vmId = 0;
     drm.createDrmVirtualMemory(vmId);
 
-    EXPECT_NE(NEO::SysCalls::ioctlVmCreateExtensionArg, 0ull);
+    EXPECT_NE(drm.receivedGemVmControl.extensions, 0ull);
 }
 
 TEST(DrmBufferObjectTestPrelim, givenBufferObjectSetToColourWithBindWhenBindingThenSetProperAddressAndSize) {
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
-    BufferObjectMock bo(&drm, 1, 0, 1);
+    BufferObjectMock bo(&drm, 3, 1, 0, 1);
     bo.setColourWithBind();
     bo.setColourChunk(MemoryConstants::pageSize64k);
     bo.addColouringAddress(0xffeeffee);
@@ -302,7 +298,7 @@ TEST(DrmBufferObjectTestPrelim, givenPageFaultNotSupportedWhenCallingCreateDrmVi
     uint32_t vmId = 0;
     drm.createDrmVirtualMemory(vmId);
 
-    EXPECT_FALSE(NEO::SysCalls::vmFlags & DrmPrelimHelper::getEnablePageFaultVmCreateFlag());
+    EXPECT_FALSE(drm.receivedGemVmControl.flags & DrmPrelimHelper::getEnablePageFaultVmCreateFlag());
 
     drm.destroyDrmVirtualMemory(vmId);
 }
@@ -318,15 +314,19 @@ TEST(DrmBufferObjectTestPrelim, givenPageFaultSupportedWhenVmBindIsAvailableThen
         drm.bindAvailable = vmBindAvailable;
 
         uint32_t vmId = 0;
+        drm.ioctlCount.gemVmCreate = 0;
         drm.createDrmVirtualMemory(vmId);
+        EXPECT_EQ(1, drm.ioctlCount.gemVmCreate.load());
 
         if (drm.isVmBindAvailable()) {
-            EXPECT_TRUE(NEO::SysCalls::vmFlags & DrmPrelimHelper::getEnablePageFaultVmCreateFlag());
+            EXPECT_TRUE(drm.receivedGemVmControl.flags & DrmPrelimHelper::getEnablePageFaultVmCreateFlag());
         } else {
-            EXPECT_FALSE(NEO::SysCalls::vmFlags & DrmPrelimHelper::getEnablePageFaultVmCreateFlag());
+            EXPECT_FALSE(drm.receivedGemVmControl.flags & DrmPrelimHelper::getEnablePageFaultVmCreateFlag());
         }
 
+        drm.ioctlCount.gemVmDestroy = 0;
         drm.destroyDrmVirtualMemory(vmId);
+        EXPECT_EQ(1, drm.ioctlCount.gemVmDestroy.load());
     }
 }
 
@@ -334,9 +334,10 @@ TEST(DrmBufferObjectTestPrelim, givenBufferObjectMarkedForCaptureWhenBindingThen
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
-    BufferObjectMock bo(&drm, 1, 0, 1);
+    BufferObjectMock bo(&drm, 3, 1, 0, 1);
     OsContextLinux osContext(drm, 0u, EngineDescriptorHelper::getDefaultDescriptor());
     osContext.ensureContextInitialized();
     bo.markForCapture();
@@ -353,9 +354,10 @@ TEST(DrmBufferObjectTestPrelim, givenNoActiveDirectSubmissionAndForceUseImmediat
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
-    BufferObjectMock bo(&drm, 1, 0, 1);
+    BufferObjectMock bo(&drm, 3, 1, 0, 1);
     OsContextLinux osContext(drm, 0u, EngineDescriptorHelper::getDefaultDescriptor());
     osContext.ensureContextInitialized();
 
@@ -369,10 +371,11 @@ TEST(DrmBufferObjectTestPrelim, whenBindingThenImmediateFlagIsSetAndExtensionLis
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     drm.setDirectSubmissionActive(true);
-    BufferObjectMock bo(&drm, 1, 0, 1);
+    BufferObjectMock bo(&drm, 3, 1, 0, 1);
     OsContextLinux osContext(drm, 0u, EngineDescriptorHelper::getDefaultDescriptor());
     osContext.ensureContextInitialized();
     osContext.setDirectSubmissionActive();

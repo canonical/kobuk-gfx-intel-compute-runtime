@@ -19,7 +19,7 @@ TEST(DrmTest, whenQueryingEngineInfoThenSingleIoctlIsCalled) {
     EXPECT_NE(nullptr, drm);
 
     drm->queryEngineInfo();
-    EXPECT_EQ(1u, drm->ioctlCallsCount);
+    EXPECT_EQ(1u + drm->virtualMemoryIds.size(), drm->ioctlCallsCount);
 }
 
 TEST(EngineInfoTest, givenEngineInfoQuerySupportedWhenQueryingEngineInfoThenEngineInfoIsCreatedWithEngines) {
@@ -30,9 +30,9 @@ TEST(EngineInfoTest, givenEngineInfoQuerySupportedWhenQueryingEngineInfoThenEngi
 
     std::vector<MemoryRegion> memRegions{
         {{0, 0}, 0, 0}};
-    drm->memoryInfo.reset(new MemoryInfo(memRegions));
+    drm->memoryInfo.reset(new MemoryInfo(memRegions, *drm));
     drm->queryEngineInfo();
-    EXPECT_EQ(2u, drm->ioctlCallsCount);
+    EXPECT_EQ(2u + drm->virtualMemoryIds.size(), drm->ioctlCallsCount);
     auto engineInfo = drm->getEngineInfo();
 
     ASSERT_NE(nullptr, engineInfo);
@@ -46,7 +46,7 @@ TEST(EngineInfoTest, whenQueryingEngineInfoWithoutMemoryInfoThenEngineInfoCreate
     ASSERT_NE(nullptr, drm);
 
     drm->queryEngineInfo();
-    EXPECT_EQ(2u, drm->ioctlCallsCount);
+    EXPECT_EQ(2u + drm->virtualMemoryIds.size(), drm->ioctlCallsCount);
     auto engineInfo = drm->getEngineInfo();
 
     ASSERT_NE(nullptr, engineInfo);
@@ -56,12 +56,13 @@ TEST(EngineInfoTest, whenCreateEngineInfoWithRcsThenCorrectHwInfoSet) {
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     auto drm = std::make_unique<DrmMockEngine>(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto ioctlHelper = drm->getIoctlHelper();
 
     auto hwInfo = *defaultHwInfo.get();
     std::vector<EngineCapabilities> engines(2);
-    engines[0].engine = {I915_ENGINE_CLASS_RENDER, 0};
+    engines[0].engine = {static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassRender)), 0};
     engines[0].capabilities = 0;
-    engines[1].engine = {I915_ENGINE_CLASS_COPY, 0};
+    engines[1].engine = {static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassCopy)), 0};
     engines[1].capabilities = 0;
     auto engineInfo = std::make_unique<EngineInfo>(drm.get(), &hwInfo, engines);
 
@@ -76,13 +77,14 @@ TEST(EngineInfoTest, whenCreateEngineInfoWithCcsThenCorrectHwInfoSet) {
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     auto drm = std::make_unique<DrmMockEngine>(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto ioctlHelper = drm->getIoctlHelper();
 
     auto hwInfo = *defaultHwInfo.get();
     std::vector<EngineCapabilities> engines(2);
-    uint16_t ccsClass = drm->getIoctlHelper()->getComputeEngineClass();
+    uint16_t ccsClass = ioctlHelper->getDrmParamValue(DrmParam::EngineClassCompute);
     engines[0].engine = {ccsClass, 0};
     engines[0].capabilities = 0;
-    engines[1].engine = {I915_ENGINE_CLASS_COPY, 0};
+    engines[1].engine = {static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassCopy)), 0};
     engines[1].capabilities = 0;
     auto engineInfo = std::make_unique<EngineInfo>(drm.get(), &hwInfo, engines);
 
@@ -97,29 +99,30 @@ TEST(EngineInfoTest, whenGetEngineInstanceAndTileThenCorrectValuesReturned) {
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     auto drm = std::make_unique<DrmMockEngine>(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto ioctlHelper = drm->getIoctlHelper();
 
     auto hwInfo = *defaultHwInfo.get();
     std::vector<EngineCapabilities> engines(4);
-    engines[0].engine = {I915_ENGINE_CLASS_RENDER, 0};
+    engines[0].engine = {static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassRender)), 0};
     engines[0].capabilities = 0;
-    engines[1].engine = {I915_ENGINE_CLASS_COPY, 0};
+    engines[1].engine = {static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassCopy)), 0};
     engines[1].capabilities = 0;
-    engines[2].engine = {I915_ENGINE_CLASS_RENDER, 1};
+    engines[2].engine = {static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassRender)), 1};
     engines[2].capabilities = 0;
-    engines[3].engine = {I915_ENGINE_CLASS_COPY, 1};
+    engines[3].engine = {static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassCopy)), 1};
     engines[3].capabilities = 0;
 
     std::vector<DistanceInfo> distances(4);
     distances[0].engine = engines[0].engine;
-    distances[0].region = {I915_MEMORY_CLASS_DEVICE, 0};
+    distances[0].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 0};
     distances[1].engine = engines[1].engine;
-    distances[1].region = {I915_MEMORY_CLASS_DEVICE, 0};
+    distances[1].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 0};
     distances[2].engine = engines[2].engine;
-    distances[2].region = {I915_MEMORY_CLASS_DEVICE, 1};
+    distances[2].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 1};
     distances[3].engine = engines[3].engine;
-    distances[3].region = {I915_MEMORY_CLASS_DEVICE, 1};
+    distances[3].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 1};
 
-    std::vector<drm_i915_query_item> queryItems{distances.size()};
+    std::vector<QueryItem> queryItems{distances.size()};
     for (auto i = 0u; i < distances.size(); i++) {
         queryItems[i].length = sizeof(drm_i915_query_engine_info);
     }
@@ -140,36 +143,37 @@ TEST(EngineInfoTest, whenGetEngineInstanceAndTileThenCorrectValuesReturned) {
     EXPECT_EQ(0u, engineInfo->getEngineTileIndex(engines[0].engine));
     EXPECT_EQ(1u, engineInfo->getEngineTileIndex(engines[2].engine));
 
-    EXPECT_EQ(0u, engineInfo->getEngineTileIndex({I915_ENGINE_CLASS_RENDER, 2}));
+    EXPECT_EQ(0u, engineInfo->getEngineTileIndex({static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassRender)), 2}));
 }
 
 TEST(EngineInfoTest, whenCreateEngineInfoAndInvalidQueryThenNoEnginesSet) {
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     auto drm = std::make_unique<DrmMockEngine>(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto ioctlHelper = drm->getIoctlHelper();
 
     auto hwInfo = *defaultHwInfo.get();
     std::vector<EngineCapabilities> engines(4);
-    engines[0].engine = {I915_ENGINE_CLASS_RENDER, 0};
+    engines[0].engine = {static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassRender)), 0};
     engines[0].capabilities = 0;
-    engines[1].engine = {I915_ENGINE_CLASS_COPY, 0};
+    engines[1].engine = {static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassCopy)), 0};
     engines[1].capabilities = 0;
-    engines[2].engine = {I915_ENGINE_CLASS_RENDER, 1};
+    engines[2].engine = {static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassRender)), 1};
     engines[2].capabilities = 0;
-    engines[3].engine = {I915_ENGINE_CLASS_COPY, 1};
+    engines[3].engine = {static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassCopy)), 1};
     engines[3].capabilities = 0;
 
     std::vector<DistanceInfo> distances(4);
     distances[0].engine = engines[0].engine;
-    distances[0].region = {I915_MEMORY_CLASS_DEVICE, 0};
+    distances[0].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 0};
     distances[1].engine = engines[1].engine;
-    distances[1].region = {I915_MEMORY_CLASS_DEVICE, 0};
+    distances[1].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 0};
     distances[2].engine = engines[2].engine;
-    distances[2].region = {I915_MEMORY_CLASS_DEVICE, 1};
+    distances[2].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 1};
     distances[3].engine = engines[3].engine;
-    distances[3].region = {I915_MEMORY_CLASS_DEVICE, 1};
+    distances[3].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 1};
 
-    std::vector<drm_i915_query_item> queryItems{distances.size()};
+    std::vector<QueryItem> queryItems{distances.size()};
     for (auto i = 0u; i < distances.size(); i++) {
         queryItems[i].length = -1;
     }
@@ -181,12 +185,13 @@ TEST(EngineInfoTest, whenEmptyEngineInfoCreatedThen0TileReturned) {
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
     auto drm = std::make_unique<DrmMockEngine>(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto ioctlHelper = drm->getIoctlHelper();
 
     auto hwInfo = *defaultHwInfo.get();
     std::vector<DistanceInfo> distances;
     std::vector<EngineCapabilities> engines;
-    std::vector<drm_i915_query_item> queryItems;
+    std::vector<QueryItem> queryItems;
 
     auto engineInfo = std::make_unique<EngineInfo>(drm.get(), &hwInfo, 0, distances, queryItems, engines);
-    EXPECT_EQ(0u, engineInfo->getEngineTileIndex({I915_ENGINE_CLASS_RENDER, 1}));
+    EXPECT_EQ(0u, engineInfo->getEngineTileIndex({static_cast<uint16_t>(ioctlHelper->getDrmParamValue(DrmParam::EngineClassRender)), 1}));
 }

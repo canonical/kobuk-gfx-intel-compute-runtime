@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/built_ins/built_ins.h"
+#include "shared/source/built_ins/sip.h"
 #include "shared/source/command_stream/preemption.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
@@ -19,7 +20,7 @@
 using namespace NEO;
 
 template <>
-PreemptionTestHwDetails GetPreemptionTestHwDetails<SKLFamily>() {
+PreemptionTestHwDetails getPreemptionTestHwDetails<SKLFamily>() {
     PreemptionTestHwDetails ret;
     ret.modeToRegValueMap[PreemptionMode::ThreadGroup] = DwordBuilder::build(1, true) | DwordBuilder::build(2, true, false);
     ret.modeToRegValueMap[PreemptionMode::MidBatch] = DwordBuilder::build(2, true) | DwordBuilder::build(1, true, false);
@@ -38,7 +39,7 @@ GEN9TEST_F(Gen9PreemptionTests, whenMidThreadPreemptionIsNotAvailableThenDoesNot
     EXPECT_EQ(0U, requiredSize);
 
     LinearStream cmdStream{nullptr, 0};
-    PreemptionHelper::programStateSip<FamilyType>(cmdStream, *device);
+    PreemptionHelper::programStateSip<FamilyType>(cmdStream, *device, nullptr);
     EXPECT_EQ(0U, cmdStream.getUsed());
 }
 
@@ -60,7 +61,7 @@ GEN9TEST_F(Gen9PreemptionTests, whenMidThreadPreemptionIsAvailableThenStateSipIs
     ASSERT_LE(requiredCmdStreamSize, streamStorage.size());
 
     LinearStream cmdStream{streamStorage.begin(), streamStorage.size()};
-    PreemptionHelper::programStateSip<FamilyType>(cmdStream, *device);
+    PreemptionHelper::programStateSip<FamilyType>(cmdStream, *device, nullptr);
 
     HardwareParse hwParsePreamble;
     hwParsePreamble.parseCommands<FamilyType>(cmdStream);
@@ -149,7 +150,7 @@ GEN9TEST_F(Gen9PreemptionTests, givenMidThreadPreemptionModeWhenStateSipIsProgra
     preemptionBuffer.resize(cmdSizePreemptionMidThread);
     LinearStream preemptionStream(&*preemptionBuffer.begin(), preemptionBuffer.size());
 
-    PreemptionHelper::programStateSip<FamilyType>(preemptionStream, *mockDevice);
+    PreemptionHelper::programStateSip<FamilyType>(preemptionStream, *mockDevice, nullptr);
 
     HardwareParse hwParserOnlyPreemption;
     hwParserOnlyPreemption.parseCommands<FamilyType>(preemptionStream, 0);

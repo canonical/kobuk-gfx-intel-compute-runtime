@@ -8,8 +8,10 @@
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/os_interface/device_factory.h"
+#include "shared/source/xe_hpc_core/hw_cmds_pvc.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
@@ -35,16 +37,33 @@ PVCTEST_F(WalkerDispatchTestsPvc, givenPvcWhenEncodeAdditionalWalkerFieldsThenPo
     auto &postSyncData = walkerCmd.getPostSync();
     auto hwInfo = *defaultHwInfo;
 
+    EncodeWalkerArgs walkerArgs{KernelExecutionType::Default, true};
     for (auto &testInput : testInputs) {
-        for (auto &deviceId : PVC_XL_IDS) {
+        for (auto &deviceId : pvcXlDeviceIds) {
             hwInfo.platform.usDeviceID = deviceId;
             hwInfo.platform.usRevId = testInput.revisionId;
             DebugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(
                 testInput.programGlobalFenceAsPostSyncOperationInComputeWalker);
 
             postSyncData.setSystemMemoryFenceRequest(false);
-            EncodeDispatchKernel<FamilyType>::encodeAdditionalWalkerFields(hwInfo, walkerCmd, KernelExecutionType::Default);
+            EncodeDispatchKernel<FamilyType>::encodeAdditionalWalkerFields(hwInfo, walkerCmd, walkerArgs);
             EXPECT_EQ(testInput.expectSystemMemoryFenceRequest, postSyncData.getSystemMemoryFenceRequest());
         }
+    }
+}
+
+PVCTEST_F(WalkerDispatchTestsPvc, givenPvcSupportsSystemMemoryFenceWhenNoSystemFenceRequiredThenEncodedWalkerFenceFieldSetToFalse) {
+    auto walkerCmd = FamilyType::cmdInitGpgpuWalker;
+    auto &postSyncData = walkerCmd.getPostSync();
+    auto hwInfo = *defaultHwInfo;
+    hwInfo.platform.usRevId = 0x3;
+
+    EncodeWalkerArgs walkerArgs{KernelExecutionType::Default, false};
+    for (auto &deviceId : pvcXlDeviceIds) {
+        hwInfo.platform.usDeviceID = deviceId;
+
+        postSyncData.setSystemMemoryFenceRequest(true);
+        EncodeDispatchKernel<FamilyType>::encodeAdditionalWalkerFields(hwInfo, walkerCmd, walkerArgs);
+        EXPECT_FALSE(postSyncData.getSystemMemoryFenceRequest());
     }
 }

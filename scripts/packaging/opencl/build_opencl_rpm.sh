@@ -50,7 +50,7 @@ if [ "${BUILD_SRPM}" == "1" ]; then
     get_api_version     # API_VERSION-API_VERSION_SRC and API_RPM_MODEL_LINK
 
     VERSION="${NEO_OCL_VERSION_MAJOR}.${NEO_OCL_VERSION_MINOR}.${NEO_OCL_VERSION_BUILD}.${API_VERSION}"
-    RELEASE="${API_VERSION_SRC}${API_RPM_MODEL_LINK}"
+    RELEASE="${NEO_OCL_VERSION_HOTFIX}${API_VERSION_SRC}${API_RPM_MODEL_LINK}"
 
     RELEASE_WITH_REGKEYS="${RELEASE_WITH_REGKEYS:-FALSE}"
 
@@ -98,6 +98,7 @@ if [ "${BUILD_RPM}" == "1" ]; then
   if [ "${LOG_CCACHE_STATS}" == "1" ]; then
     ccache -z
   fi
+  export CCACHE_BASEDIR=$(readlink -m $BUILD_DIR/BUILD/compute-runtime-${VERSION}/)
   rpmbuild --rebuild ${REPO_DIR}/../output/SRPMS/intel-opencl-${VERSION}*.src.rpm "${build_args[@]}"
   if [ "${LOG_CCACHE_STATS}" == "1" ]; then
     ccache -s

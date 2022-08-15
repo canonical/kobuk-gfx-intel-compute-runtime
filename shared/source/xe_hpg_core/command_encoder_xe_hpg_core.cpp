@@ -11,7 +11,8 @@
 #include "shared/source/command_container/encode_compute_mode_tgllp_and_later.inl"
 #include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/os_interface/hw_info_config.h"
-#include "shared/source/xe_hpg_core/hw_cmds_base.h"
+#include "shared/source/utilities/lookup_array.h"
+#include "shared/source/xe_hpg_core/hw_cmds_xe_hpg_core_base.h"
 
 using Family = NEO::XE_HPG_COREFamily;
 
@@ -102,21 +103,25 @@ void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCR
 
 template <>
 void EncodeDispatchKernel<Family>::programBarrierEnable(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t value, const HardwareInfo &hwInfo) {
-    interfaceDescriptor.setNumberOfBarriers(static_cast<INTERFACE_DESCRIPTOR_DATA::NUMBER_OF_BARRIERS>(value));
+    using BARRIERS = INTERFACE_DESCRIPTOR_DATA::NUMBER_OF_BARRIERS;
+    static const LookupArray<uint32_t, BARRIERS, 2> barrierLookupArray({{{0, BARRIERS::NUMBER_OF_BARRIERS_NONE},
+                                                                         {1, BARRIERS::NUMBER_OF_BARRIERS_B1}}});
+    BARRIERS numBarriers = barrierLookupArray.lookUp(value);
+    interfaceDescriptor.setNumberOfBarriers(numBarriers);
 }
 
 template <>
-void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd, KernelExecutionType kernelExecutionType) {
-    if (HwInfoConfig::get(hwInfo.platform.eProductFamily)->isPrefetchDisablingRequired(hwInfo)) {
-        walkerCmd.setL3PrefetchDisable(true);
+void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd, const EncodeWalkerArgs &walkerArgs) {
+    bool l3PrefetchDisable = HwInfoConfig::get(hwInfo.platform.eProductFamily)->isPrefetchDisablingRequired(hwInfo);
+    int32_t overrideL3PrefetchDisable = DebugManager.flags.ForceL3PrefetchForComputeWalker.get();
+    if (overrideL3PrefetchDisable != -1) {
+        l3PrefetchDisable = !overrideL3PrefetchDisable;
     }
-    if (DebugManager.flags.ForceL3PrefetchForComputeWalker.get() != -1) {
-        walkerCmd.setL3PrefetchDisable(!DebugManager.flags.ForceL3PrefetchForComputeWalker.get());
-    }
+    walkerCmd.setL3PrefetchDisable(l3PrefetchDisable);
 }
 
 template <>
-void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo) {
+void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo, LogicalStateHelper *logicalStateHelper) {
     using STATE_COMPUTE_MODE = typename Family::STATE_COMPUTE_MODE;
     using FORCE_NON_COHERENT = typename STATE_COMPUTE_MODE::FORCE_NON_COHERENT;
     using PIXEL_ASYNC_COMPUTE_THREAD_LIMIT = typename STATE_COMPUTE_MODE::PIXEL_ASYNC_COMPUTE_THREAD_LIMIT;
@@ -168,6 +173,18 @@ void EncodeSurfaceState<Family>::appendParamsForImageFromBuffer(R_SURFACE_STATE 
     }
 }
 
+template <>
+void EncodeDispatchKernel<Family>::adjustWalkOrder(WALKER_TYPE &walkerCmd, uint32_t requiredWorkGroupOrder, const HardwareInfo &hwInfo) {
+    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    if (hwInfoConfig.isAdjustWalkOrderAvailable(hwInfo)) {
+        if (HwWalkOrderHelper::compatibleDimensionOrders[requiredWorkGroupOrder] == HwWalkOrderHelper::linearWalk) {
+            walkerCmd.setDispatchWalkOrder(WALKER_TYPE::DISPATCH_WALK_ORDER::LINERAR_WALKER);
+        } else if (HwWalkOrderHelper::compatibleDimensionOrders[requiredWorkGroupOrder] == HwWalkOrderHelper::yOrderWalk) {
+            walkerCmd.setDispatchWalkOrder(WALKER_TYPE::DISPATCH_WALK_ORDER::Y_ORDER_WALKER);
+        }
+    }
+}
+
 template struct EncodeDispatchKernel<Family>;
 template struct EncodeStates<Family>;
 template struct EncodeMath<Family>;
@@ -189,4 +206,5 @@ template struct EncodeWA<Family>;
 template struct EncodeEnableRayTracing<Family>;
 template struct EncodeNoop<Family>;
 template struct EncodeStoreMemory<Family>;
+template struct EncodeMemoryFence<Family>;
 } // namespace NEO

@@ -8,8 +8,7 @@
 #pragma once
 #include "shared/source/command_stream/device_command_stream.h"
 #include "shared/source/os_interface/linux/drm_gem_close_worker.h"
-
-#include "drm/i915_drm.h"
+#include "shared/source/os_interface/linux/ioctl_helper.h"
 
 #include <vector>
 
@@ -43,10 +42,10 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
                              uint32_t rootDeviceIndex,
                              const DeviceBitfield deviceBitfield,
                              gemCloseWorkerMode mode = gemCloseWorkerMode::gemCloseWorkerActive);
-    ~DrmCommandStreamReceiver();
+    ~DrmCommandStreamReceiver() override;
 
     SubmissionStatus flush(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency) override;
-    MOCKABLE_VIRTUAL void processResidency(const ResidencyContainer &allocationsForResidency, uint32_t handleId) override;
+    void processResidency(const ResidencyContainer &allocationsForResidency, uint32_t handleId) override;
     void makeNonResident(GraphicsAllocation &gfxAllocation) override;
     bool waitForFlushStamp(FlushStamp &flushStampToWait) override;
     bool isKmdWaitModeActive() override;
@@ -62,10 +61,6 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
         gemCloseWorkerOperationMode = gemCloseWorkerMode::gemCloseWorkerInactive;
     }
 
-    uint64_t getCompletionAddress() override;
-
-    uint32_t getCompletionValue(const GraphicsAllocation &gfxAllocation) override;
-
     void printBOsForSubmit(ResidencyContainer &allocationsForResidency, GraphicsAllocation &cmdBufferAllocation);
 
     using CommandStreamReceiver::pageTableManager;
@@ -78,7 +73,7 @@ class DrmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> {
     bool isUserFenceWaitActive();
 
     std::vector<BufferObject *> residency;
-    std::vector<drm_i915_gem_exec_object2> execObjectsStorage;
+    std::vector<ExecObject> execObjectsStorage;
     Drm *drm;
     gemCloseWorkerMode gemCloseWorkerOperationMode;
 

@@ -6,10 +6,13 @@
  */
 
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
+
+#include "hw_cmds_xe_hpg_core_base.h"
 
 using namespace NEO;
 
@@ -38,12 +41,19 @@ XE_HPG_CORETEST_F(XeHpgCoreDeviceCaps, givenXeHpgCoreWhenCheckExtensionsThenDevi
 }
 
 XE_HPG_CORETEST_F(XeHpgCoreDeviceCaps, giveDeviceExtensionsWhenDeviceCapsInitializedThenAddProperExtensions) {
+    auto &hwInfoConfig = *HwInfoConfig::get(pClDevice->getHardwareInfo().platform.eProductFamily);
     const auto &caps = pClDevice->getDeviceInfo();
 
     EXPECT_TRUE(hasSubstr(caps.deviceExtensions, std::string("cl_intel_create_buffer_with_properties")));
     EXPECT_TRUE(hasSubstr(caps.deviceExtensions, std::string("cl_intel_dot_accumulate")));
     EXPECT_TRUE(hasSubstr(caps.deviceExtensions, std::string("cl_intel_subgroup_local_block_io")));
-    EXPECT_TRUE(hasSubstr(caps.deviceExtensions, std::string("cl_intel_subgroup_matrix_multiply_accumulate")));
+
+    bool expectMatrixMultiplyAccumulateExtensions = hwInfoConfig.isMatrixMultiplyAccumulateSupported(pClDevice->getHardwareInfo());
+    EXPECT_EQ(expectMatrixMultiplyAccumulateExtensions, hasSubstr(caps.deviceExtensions, std::string("cl_intel_subgroup_matrix_multiply_accumulate")));
+    EXPECT_EQ(expectMatrixMultiplyAccumulateExtensions, hasSubstr(caps.deviceExtensions, std::string("cl_intel_subgroup_split_matrix_multiply_accumulate")));
+
+    bool expectBFloat16ConversionsExtension = hwInfoConfig.isBFloat16ConversionSupported(pClDevice->getHardwareInfo());
+    EXPECT_EQ(expectBFloat16ConversionsExtension, hasSubstr(caps.deviceExtensions, std::string("cl_intel_bfloat16_conversions")));
 }
 
 XE_HPG_CORETEST_F(XeHpgCoreDeviceCaps, givenXeHpgCoreWhenCheckingCapsThenDeviceDoesNotSupportIndependentForwardProgress) {

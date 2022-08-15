@@ -1,9 +1,11 @@
 /*
- * Copyright (C) 2021 Intel Corporation
+ * Copyright (C) 2021-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
+
+#pragma once
 
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/helpers/state_base_address.h"
@@ -11,7 +13,8 @@
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
-#include "shared/test/common/test_macros/test.h"
+
+#include "gtest/gtest.h"
 
 struct SBATest : public NEO::DeviceFixture, public ::testing::Test {
     void SetUp() override {

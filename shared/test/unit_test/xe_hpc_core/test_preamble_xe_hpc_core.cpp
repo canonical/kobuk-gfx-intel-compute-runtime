@@ -26,7 +26,7 @@ XE_HPC_CORETEST_F(PreambleCfeState, givenXeHpcCoreAndSetDebugFlagWhenPreambleCfe
     uint64_t expectedAddress = 1 << CFE_STATE::SCRATCHSPACEBUFFER_BIT_SHIFT;
     auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, *defaultHwInfo, EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, *defaultHwInfo, 0u, expectedAddress, 16u, emptyProperties);
+    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, *defaultHwInfo, 0u, expectedAddress, 16u, emptyProperties, nullptr);
 
     parseCommands<FamilyType>(linearStream);
     auto cfeStateIt = find<CFE_STATE *>(cmdList.begin(), cmdList.end());
@@ -34,6 +34,28 @@ XE_HPC_CORETEST_F(PreambleCfeState, givenXeHpcCoreAndSetDebugFlagWhenPreambleCfe
 
     auto cfeState = reinterpret_cast<CFE_STATE *>(*cfeStateIt);
 
+    EXPECT_EQ(expectedValue, cfeState->getComputeDispatchAllWalkerEnable());
+    EXPECT_FALSE(cfeState->getSingleSliceDispatchCcsMode());
+}
+
+XE_HPC_CORETEST_F(PreambleCfeState, givenKernelExecutionTypeConcurrentAndRevisionBWhenCallingProgramVFEStateThenAllWalkerProperlyProgrammed) {
+    using CFE_STATE = typename FamilyType::CFE_STATE;
+    auto hwInfo = *defaultHwInfo;
+
+    const auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    hwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
+
+    auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, hwInfo, EngineGroupType::RenderCompute);
+    StreamProperties streamProperties{};
+    streamProperties.frontEndState.setProperties(true, false, false, false, hwInfo);
+
+    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, hwInfo, 0u, 0, 0, streamProperties, nullptr);
+    parseCommands<FamilyType>(linearStream);
+    auto cfeStateIt = find<CFE_STATE *>(cmdList.begin(), cmdList.end());
+    ASSERT_NE(cmdList.end(), cfeStateIt);
+    auto cfeState = reinterpret_cast<CFE_STATE *>(*cfeStateIt);
+
+    uint32_t expectedValue = hwInfoConfig.isComputeDispatchAllWalkerEnableInCfeStateRequired(hwInfo);
     EXPECT_EQ(expectedValue, cfeState->getComputeDispatchAllWalkerEnable());
     EXPECT_FALSE(cfeState->getSingleSliceDispatchCcsMode());
 }
@@ -52,7 +74,7 @@ XE_HPC_CORETEST_F(PreambleCfeState, givenNotSetDebugFlagWhenPreambleCfeStateIsPr
     uint32_t expectedMaxThreads = HwHelper::getMaxThreadsForVfe(*defaultHwInfo);
     auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, *defaultHwInfo, EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, *defaultHwInfo, 0u, expectedAddress, expectedMaxThreads, emptyProperties);
+    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, *defaultHwInfo, 0u, expectedAddress, expectedMaxThreads, emptyProperties, nullptr);
     uint32_t maximumNumberOfThreads = cfeState->getMaximumNumberOfThreads();
 
     EXPECT_EQ(numberOfWalkers, cfeState->getNumberOfWalkers());
@@ -79,7 +101,7 @@ XE_HPC_CORETEST_F(PreambleCfeState, givenSetDebugFlagWhenPreambleCfeStateIsProgr
     uint64_t expectedAddress = 1 << CFE_STATE::SCRATCHSPACEBUFFER_BIT_SHIFT;
     auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, *defaultHwInfo, EngineGroupType::RenderCompute);
     StreamProperties emptyProperties{};
-    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, *defaultHwInfo, 0u, expectedAddress, 16u, emptyProperties);
+    PreambleHelper<FamilyType>::programVfeState(pVfeCmd, *defaultHwInfo, 0u, expectedAddress, 16u, emptyProperties, nullptr);
 
     parseCommands<FamilyType>(linearStream);
     auto cfeStateIt = find<CFE_STATE *>(cmdList.begin(), cmdList.end());

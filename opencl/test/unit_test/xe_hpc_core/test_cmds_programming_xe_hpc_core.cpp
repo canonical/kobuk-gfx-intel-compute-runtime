@@ -9,11 +9,14 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/state_base_address.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
+
+#include "hw_cmds_xe_hpc_core_base.h"
 
 using namespace NEO;
 using CmdsProgrammingTestsXeHpcCore = UltCommandStreamReceiverTest;
@@ -99,7 +102,7 @@ XE_HPC_CORETEST_F(CmdsProgrammingTestsXeHpcCore, whenAppendingRssThenProgramWtL1
     multiGraphicsAllocation.addAllocation(allocation);
 
     std::unique_ptr<BufferHw<FamilyType>> buffer(static_cast<BufferHw<FamilyType> *>(
-        BufferHw<FamilyType>::create(&context, {}, 0, 0, allocationSize, nullptr, nullptr, multiGraphicsAllocation, false, false, false)));
+        BufferHw<FamilyType>::create(&context, {}, 0, 0, allocationSize, nullptr, nullptr, std::move(multiGraphicsAllocation), false, false, false)));
 
     NEO::EncodeSurfaceStateArgs args;
     args.outMemory = &rssCmd;

@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2019-2021 Intel Corporation
+ * Copyright (C) 2019-2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/built_ins/built_ins.h"
+#include "shared/source/built_ins/sip.h"
 #include "shared/source/command_stream/preemption.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
@@ -17,7 +18,7 @@
 using namespace NEO;
 
 template <>
-PreemptionTestHwDetails GetPreemptionTestHwDetails<ICLFamily>() {
+PreemptionTestHwDetails getPreemptionTestHwDetails<ICLFamily>() {
     PreemptionTestHwDetails ret;
     ret.modeToRegValueMap[PreemptionMode::ThreadGroup] = DwordBuilder::build(1, true) | DwordBuilder::build(2, true, false);
     ret.modeToRegValueMap[PreemptionMode::MidBatch] = DwordBuilder::build(2, true) | DwordBuilder::build(1, true, false);
@@ -54,7 +55,7 @@ GEN11TEST_F(Gen11PreemptionTests, whenMidThreadPreemptionIsAvailableThenStateSip
     ASSERT_LE(requiredCmdStreamSize, streamStorage.size());
 
     LinearStream cmdStream{streamStorage.begin(), streamStorage.size()};
-    PreemptionHelper::programStateSip<FamilyType>(cmdStream, *device);
+    PreemptionHelper::programStateSip<FamilyType>(cmdStream, *device, nullptr);
 
     HardwareParse hwParsePreamble;
     hwParsePreamble.parseCommands<FamilyType>(cmdStream);

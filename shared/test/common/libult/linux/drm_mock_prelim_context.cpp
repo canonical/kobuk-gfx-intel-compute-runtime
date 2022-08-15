@@ -8,12 +8,14 @@
 #include "shared/test/common/libult/linux/drm_mock_prelim_context.h"
 
 #include "shared/source/helpers/basic_math.h"
+#include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/helpers/string.h"
-#include "shared/source/os_interface/linux/cache_info_impl.h"
+#include "shared/source/os_interface/linux/cache_info.h"
+#include "shared/source/os_interface/linux/drm_wrappers.h"
+#include "shared/source/os_interface/linux/i915_prelim.h"
 #include "shared/test/common/libult/linux/drm_mock_helper.h"
 
-#include "third_party/uapi/prelim/drm/i915_drm.h"
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -35,10 +37,10 @@ constexpr std::array<uint64_t, 9> copyEnginesCapsMap = {{
 
 } // namespace
 
-int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) {
+int DrmMockPrelimContext::handlePrelimRequest(DrmIoctl request, void *arg) {
     switch (request) {
-    case DRM_IOCTL_I915_GETPARAM: {
-        auto gp = static_cast<drm_i915_getparam_t *>(arg);
+    case DrmIoctl::Getparam: {
+        auto gp = static_cast<GetParam *>(arg);
         if (gp->param == PRELIM_I915_PARAM_HAS_PAGE_FAULT) {
             *gp->value = hasPageFaultQueryValue;
             return hasPageFaultQueryReturn;
@@ -48,16 +50,16 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
             return vmBindQueryReturn;
         }
     } break;
-    case DRM_IOCTL_I915_GEM_CONTEXT_GETPARAM: {
-        auto gp = static_cast<drm_i915_gem_context_param *>(arg);
+    case DrmIoctl::GemContextGetparam: {
+        auto gp = static_cast<GemContextParam *>(arg);
         if (gp->param == PRELIM_I915_CONTEXT_PARAM_DEBUG_FLAGS) {
             gp->value = contextDebugSupported ? PRELIM_I915_CONTEXT_PARAM_DEBUG_FLAG_SIP << 32 : 0;
             return 0;
         }
     } break;
-    case DRM_IOCTL_I915_GEM_CONTEXT_CREATE_EXT: {
-        auto create = static_cast<drm_i915_gem_context_create_ext *>(arg);
-        auto setParam = reinterpret_cast<drm_i915_gem_context_create_ext_setparam *>(create->extensions);
+    case DrmIoctl::GemContextCreateExt: {
+        auto create = static_cast<GemContextCreateExt *>(arg);
+        auto setParam = reinterpret_cast<GemContextCreateExtSetParam *>(create->extensions);
         if (setParam->param.param == PRELIM_I915_CONTEXT_PARAM_ACC) {
             const auto paramAcc = reinterpret_cast<prelim_drm_i915_gem_context_param_acc *>(setParam->param.value);
             receivedContextParamAcc = GemContextParamAcc{paramAcc->trigger, paramAcc->notify, paramAcc->granularity};
@@ -66,12 +68,12 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
         }
         return 0;
     } break;
-    case DRM_IOCTL_I915_GEM_MMAP_OFFSET: {
-        auto mmap_arg = static_cast<drm_i915_gem_mmap_offset *>(arg);
-        mmap_arg->offset = 0;
-        return 0;
+    case DrmIoctl::GemMmapOffset: {
+        auto mmapArg = static_cast<GemMmapOffset *>(arg);
+        mmapArg->offset = 0;
+        return mmapOffsetReturn;
     } break;
-    case PRELIM_DRM_IOCTL_I915_GEM_CLOS_RESERVE: {
+    case DrmIoctl::GemClosReserve: {
         auto closReserveArg = static_cast<prelim_drm_i915_gem_clos_reserve *>(arg);
         closIndex++;
         if (closIndex == 0) {
@@ -80,7 +82,7 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
         closReserveArg->clos_index = closIndex;
         return 0;
     } break;
-    case PRELIM_DRM_IOCTL_I915_GEM_CLOS_FREE: {
+    case DrmIoctl::GemClosFree: {
         auto closFreeArg = static_cast<prelim_drm_i915_gem_clos_free *>(arg);
         if (closFreeArg->clos_index > closIndex) {
             return EINVAL;
@@ -88,13 +90,12 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
         closIndex--;
         return 0;
     } break;
-    case PRELIM_DRM_IOCTL_I915_GEM_CACHE_RESERVE: {
+    case DrmIoctl::GemCacheReserve: {
         auto cacheReserveArg = static_cast<prelim_drm_i915_gem_cache_reserve *>(arg);
         if (cacheReserveArg->clos_index > closIndex) {
             return EINVAL;
         }
-        auto cacheInfoImpl = static_cast<const CacheInfoImpl *>(cacheInfo);
-        auto maxReservationNumWays = cacheInfoImpl ? cacheInfoImpl->getMaxReservationNumWays() : maxNumWays;
+        auto maxReservationNumWays = cacheInfo ? cacheInfo->getMaxReservationNumWays() : maxNumWays;
         if (cacheReserveArg->num_ways > maxReservationNumWays) {
             return EINVAL;
         }
@@ -105,7 +106,7 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
         allocNumWays += cacheReserveArg->num_ways;
         return 0;
     } break;
-    case PRELIM_DRM_IOCTL_I915_GEM_VM_BIND: {
+    case DrmIoctl::GemVmBind: {
         vmBindCalled++;
         const auto vmBind = reinterpret_cast<prelim_drm_i915_gem_vm_bind *>(arg);
         receivedVmBind = VmBindParams{
@@ -120,7 +121,7 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
         storeVmBindExtensions(vmBind->extensions, true);
         return vmBindReturn;
     } break;
-    case PRELIM_DRM_IOCTL_I915_GEM_VM_UNBIND: {
+    case DrmIoctl::GemVmUnbind: {
         vmUnbindCalled++;
         const auto vmBind = reinterpret_cast<prelim_drm_i915_gem_vm_bind *>(arg);
         receivedVmUnbind = VmBindParams{
@@ -135,15 +136,11 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
         storeVmBindExtensions(vmBind->extensions, false);
         return vmUnbindReturn;
     } break;
-    case PRELIM_DRM_IOCTL_I915_GEM_CREATE_EXT: {
+    case DrmIoctl::GemCreateExt: {
         auto createExt = static_cast<prelim_drm_i915_gem_create_ext *>(arg);
         if (createExt->size == 0) {
             return EINVAL;
         }
-
-        constexpr uint32_t createExtHandle{1u};
-        createExt->handle = createExtHandle;
-        receivedCreateGemExt = CreateGemExt{createExt->size, createExtHandle};
 
         auto extension = reinterpret_cast<prelim_drm_i915_gem_create_ext_setparam *>(createExt->extensions);
         if (!extension) {
@@ -159,23 +156,40 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
             return EINVAL;
         }
 
-        auto data = reinterpret_cast<prelim_drm_i915_gem_memory_class_instance *>(extension->param.data);
+        prelim_drm_i915_gem_create_ext_vm_private *vmPrivateExt = nullptr;
+        if (extension->base.next_extension != 0) {
+            vmPrivateExt = reinterpret_cast<prelim_drm_i915_gem_create_ext_vm_private *>(extension->base.next_extension);
+            if (vmPrivateExt->base.name != PRELIM_I915_GEM_CREATE_EXT_VM_PRIVATE) {
+                return EINVAL;
+            }
+        }
+
+        auto data = reinterpret_cast<MemoryClassInstance *>(extension->param.data);
         if (!data) {
             return EINVAL;
         }
 
+        constexpr uint32_t createExtHandle{1u};
+        createExt->handle = createExtHandle;
+        receivedCreateGemExt = CreateGemExt{createExt->size, createExtHandle};
+        receivedCreateGemExt->setParamExt = CreateGemExt::SetParam{extension->param.handle, extension->param.size, extension->param.param};
+        if (vmPrivateExt != nullptr) {
+            receivedCreateGemExt->vmPrivateExt = CreateGemExt::VmPrivate{vmPrivateExt->vm_id};
+        }
+
         receivedCreateGemExt->memoryRegions.clear();
         for (uint32_t i = 0; i < extension->param.size; i++) {
-            receivedCreateGemExt->memoryRegions.push_back({data[i].memory_class, data[i].memory_instance});
+            receivedCreateGemExt->memoryRegions.push_back({data[i].memoryClass, data[i].memoryInstance});
         }
 
         const auto firstMemoryRegion = receivedCreateGemExt->memoryRegions[0];
-        if ((firstMemoryRegion.memoryClass != PRELIM_I915_MEMORY_CLASS_SYSTEM) && (firstMemoryRegion.memoryClass != PRELIM_I915_MEMORY_CLASS_DEVICE)) {
+        if ((firstMemoryRegion.memoryClass != prelim_drm_i915_gem_memory_class::PRELIM_I915_MEMORY_CLASS_SYSTEM) && (firstMemoryRegion.memoryClass != prelim_drm_i915_gem_memory_class::PRELIM_I915_MEMORY_CLASS_DEVICE)) {
             return EINVAL;
         }
-        return 0;
+
+        return gemCreateExtReturn;
     } break;
-    case PRELIM_DRM_IOCTL_I915_GEM_WAIT_USER_FENCE: {
+    case DrmIoctl::GemWaitUserFence: {
         waitUserFenceCalled++;
         const auto wait = reinterpret_cast<prelim_drm_i915_gem_wait_user_fence *>(arg);
         receivedWaitUserFence = WaitUserFence{
@@ -190,16 +204,21 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
         };
         return 0;
     } break;
-    case DRM_IOCTL_I915_GEM_CONTEXT_SETPARAM: {
-        const auto req = reinterpret_cast<drm_i915_gem_context_param *>(arg);
+    case DrmIoctl::GemContextSetparam: {
+        const auto req = reinterpret_cast<GemContextParam *>(arg);
         if (req->param == PRELIM_I915_CONTEXT_PARAM_DEBUG_FLAGS) {
             receivedSetContextParamValue = req->value;
-            receivedSetContextParamCtxId = req->ctx_id;
+            receivedSetContextParamCtxId = req->contextId;
         }
 
         return !contextDebugSupported ? EINVAL : 0;
     } break;
-    case PRELIM_DRM_IOCTL_I915_UUID_REGISTER: {
+    case DrmIoctl::GemVmAdvise: {
+        const auto req = reinterpret_cast<prelim_drm_i915_gem_vm_advise *>(arg);
+        receivedVmAdvise = VmAdvise{req->handle, req->attribute};
+        return vmAdviseReturn;
+    } break;
+    case DrmIoctl::UuidRegister: {
         auto uuidControl = reinterpret_cast<prelim_drm_i915_uuid_control *>(arg);
 
         if (uuidControl->uuid_class != uint32_t(PRELIM_I915_UUID_CLASS_STRING) && uuidControl->uuid_class > uuidHandle) {
@@ -220,7 +239,7 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
         memcpy_s(receivedRegisterUuid->uuid, sizeof(receivedRegisterUuid->uuid), uuidControl->uuid, sizeof(uuidControl->uuid));
         return uuidControlReturn;
     } break;
-    case PRELIM_DRM_IOCTL_I915_UUID_UNREGISTER: {
+    case DrmIoctl::UuidUnregister: {
         auto uuidControl = reinterpret_cast<prelim_drm_i915_uuid_control *>(arg);
         receivedUnregisterUuid = UuidControl{
             {},
@@ -235,6 +254,12 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
         return uuidControlReturn;
     } break;
 
+    case DrmIoctl::DebuggerOpen: {
+        auto debuggerOpen = reinterpret_cast<prelim_drm_i915_debugger_open_param *>(arg);
+        if (debuggerOpen->pid != 0 && debuggerOpen->events == 0) {
+            return debuggerOpenRetval;
+        }
+    } break;
     default:
         return -1;
     }
@@ -243,45 +268,45 @@ int DrmMockPrelimContext::handlePrelimRequest(unsigned long request, void *arg) 
 }
 
 bool DrmMockPrelimContext::handlePrelimQueryItem(void *arg) {
-    auto queryItem = reinterpret_cast<drm_i915_query_item *>(arg);
+    auto queryItem = reinterpret_cast<QueryItem *>(arg);
 
     auto &gtSystemInfo = hwInfo->gtSystemInfo;
     const auto numberOfCCS = gtSystemInfo.CCSInfo.IsValid && !disableCcsSupport ? gtSystemInfo.CCSInfo.NumberOfCCSEnabled : 0u;
 
-    switch (queryItem->query_id) {
-    case PRELIM_DRM_I915_QUERY_ENGINE_INFO: {
+    switch (queryItem->queryId) {
+    case DRM_I915_QUERY_ENGINE_INFO: {
         auto numberOfTiles = gtSystemInfo.MultiTileArchInfo.IsValid ? gtSystemInfo.MultiTileArchInfo.TileCount : 1u;
         uint32_t numberOfEngines = numberOfTiles * (4u + numberOfCCS + static_cast<uint32_t>(supportedCopyEnginesMask.count()));
-        int engineInfoSize = sizeof(prelim_drm_i915_query_engine_info) + numberOfEngines * sizeof(prelim_drm_i915_engine_info);
+        int engineInfoSize = sizeof(drm_i915_query_engine_info) + numberOfEngines * sizeof(drm_i915_engine_info);
         if (queryItem->length == 0) {
             queryItem->length = engineInfoSize;
         } else {
             EXPECT_EQ(engineInfoSize, queryItem->length);
-            auto queryEngineInfo = reinterpret_cast<prelim_drm_i915_query_engine_info *>(queryItem->data_ptr);
+            auto queryEngineInfo = reinterpret_cast<drm_i915_query_engine_info *>(queryItem->dataPtr);
             EXPECT_EQ(0u, queryEngineInfo->num_engines);
             queryEngineInfo->num_engines = numberOfEngines;
             auto p = queryEngineInfo->engines;
             for (uint32_t tile = 0u; tile < numberOfTiles; tile++) {
-                p++->engine = {I915_ENGINE_CLASS_RENDER, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, 0)};
+                p++->engine = {drm_i915_gem_engine_class::I915_ENGINE_CLASS_RENDER, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, 0)};
                 for (uint32_t i = 0u; i < supportedCopyEnginesMask.size(); i++) {
                     if (supportedCopyEnginesMask.test(i)) {
                         auto copyEngineInfo = p++;
-                        copyEngineInfo->engine = {I915_ENGINE_CLASS_COPY, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, i)};
+                        copyEngineInfo->engine = {drm_i915_gem_engine_class::I915_ENGINE_CLASS_COPY, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, i)};
                         copyEngineInfo->capabilities = copyEnginesCapsMap[i];
                     }
                 }
-                p++->engine = {I915_ENGINE_CLASS_VIDEO, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, 0)};
-                p++->engine = {I915_ENGINE_CLASS_VIDEO, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, 0)};
-                p++->engine = {I915_ENGINE_CLASS_VIDEO_ENHANCE, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, 0)};
+                p++->engine = {drm_i915_gem_engine_class::I915_ENGINE_CLASS_VIDEO, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, 0)};
+                p++->engine = {drm_i915_gem_engine_class::I915_ENGINE_CLASS_VIDEO, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, 0)};
+                p++->engine = {drm_i915_gem_engine_class::I915_ENGINE_CLASS_VIDEO_ENHANCE, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, 0)};
                 for (auto i = 0u; i < numberOfCCS; i++) {
-                    p++->engine = {PRELIM_I915_ENGINE_CLASS_COMPUTE, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, i)};
+                    p++->engine = {prelim_drm_i915_gem_engine_class::PRELIM_I915_ENGINE_CLASS_COMPUTE, DrmMockHelper::getEngineOrMemoryInstanceValue(tile, i)};
                 }
             }
         }
         break;
     }
 
-    case PRELIM_DRM_I915_QUERY_MEMORY_REGIONS: {
+    case DRM_I915_QUERY_MEMORY_REGIONS: {
         if (queryMemoryRegionInfoSuccessCount == 0) {
             queryItem->length = -EINVAL;
             return true;
@@ -292,19 +317,19 @@ bool DrmMockPrelimContext::handlePrelimQueryItem(void *arg) {
         auto numberOfLocalMemories = gtSystemInfo.MultiTileArchInfo.IsValid ? gtSystemInfo.MultiTileArchInfo.TileCount : 0u;
         auto numberOfRegions = 1u + numberOfLocalMemories;
 
-        int regionInfoSize = sizeof(prelim_drm_i915_query_memory_regions) + numberOfRegions * sizeof(prelim_drm_i915_memory_region_info);
+        int regionInfoSize = sizeof(drm_i915_query_memory_regions) + numberOfRegions * sizeof(drm_i915_memory_region_info);
         if (queryItem->length == 0) {
             queryItem->length = regionInfoSize;
         } else {
             EXPECT_EQ(regionInfoSize, queryItem->length);
-            auto queryMemoryRegionInfo = reinterpret_cast<prelim_drm_i915_query_memory_regions *>(queryItem->data_ptr);
+            auto queryMemoryRegionInfo = reinterpret_cast<drm_i915_query_memory_regions *>(queryItem->dataPtr);
             EXPECT_EQ(0u, queryMemoryRegionInfo->num_regions);
             queryMemoryRegionInfo->num_regions = numberOfRegions;
-            queryMemoryRegionInfo->regions[0].region.memory_class = PRELIM_I915_MEMORY_CLASS_SYSTEM;
+            queryMemoryRegionInfo->regions[0].region.memory_class = prelim_drm_i915_gem_memory_class::PRELIM_I915_MEMORY_CLASS_SYSTEM;
             queryMemoryRegionInfo->regions[0].region.memory_instance = 1;
             queryMemoryRegionInfo->regions[0].probed_size = 2 * MemoryConstants::gigaByte;
             for (auto tile = 0u; tile < numberOfLocalMemories; tile++) {
-                queryMemoryRegionInfo->regions[1 + tile].region.memory_class = PRELIM_I915_MEMORY_CLASS_DEVICE;
+                queryMemoryRegionInfo->regions[1 + tile].region.memory_class = prelim_drm_i915_gem_memory_class::PRELIM_I915_MEMORY_CLASS_DEVICE;
                 queryMemoryRegionInfo->regions[1 + tile].region.memory_instance = DrmMockHelper::getEngineOrMemoryInstanceValue(tile, 0);
                 queryMemoryRegionInfo->regions[1 + tile].probed_size = 2 * MemoryConstants::gigaByte;
             }
@@ -313,16 +338,17 @@ bool DrmMockPrelimContext::handlePrelimQueryItem(void *arg) {
 
     case PRELIM_DRM_I915_QUERY_DISTANCE_INFO: {
         if (failDistanceInfoQuery) {
+            queryItem->length = -EINVAL;
             return false;
         }
 
-        auto queryDistanceInfo = reinterpret_cast<prelim_drm_i915_query_distance_info *>(queryItem->data_ptr);
+        auto queryDistanceInfo = reinterpret_cast<prelim_drm_i915_query_distance_info *>(queryItem->dataPtr);
         switch (queryDistanceInfo->region.memory_class) {
-        case PRELIM_I915_MEMORY_CLASS_SYSTEM:
+        case prelim_drm_i915_gem_memory_class::PRELIM_I915_MEMORY_CLASS_SYSTEM:
             EXPECT_EQ(sizeof(prelim_drm_i915_query_distance_info), static_cast<size_t>(queryItem->length));
             queryDistanceInfo->distance = -1;
             break;
-        case PRELIM_I915_MEMORY_CLASS_DEVICE: {
+        case prelim_drm_i915_gem_memory_class::PRELIM_I915_MEMORY_CLASS_DEVICE: {
             EXPECT_EQ(sizeof(prelim_drm_i915_query_distance_info), static_cast<size_t>(queryItem->length));
 
             auto engineTile = DrmMockHelper::getTileFromEngineOrMemoryInstance(queryDistanceInfo->engine.engine_instance);
@@ -349,21 +375,21 @@ bool DrmMockPrelimContext::handlePrelimQueryItem(void *arg) {
                         static_cast<uint16_t>(std::ceil(maxSlices / 8.0));
 
         if (queryItem->length == 0) {
-            queryItem->length = static_cast<int32_t>(sizeof(drm_i915_query_topology_info) + dataSize);
+            queryItem->length = static_cast<int32_t>(sizeof(QueryTopologyInfo) + dataSize);
             break;
         } else {
-            auto topologyArg = reinterpret_cast<drm_i915_query_topology_info *>(queryItem->data_ptr);
+            auto topologyArg = reinterpret_cast<QueryTopologyInfo *>(queryItem->dataPtr);
             if (failRetTopology) {
                 return false;
             }
-            topologyArg->max_slices = maxSlices;
-            topologyArg->max_subslices = maxSubslices;
-            topologyArg->max_eus_per_subslice = maxEuPerSubslice;
+            topologyArg->maxSlices = maxSlices;
+            topologyArg->maxSubslices = maxSubslices;
+            topologyArg->maxEusPerSubslice = maxEuPerSubslice;
 
-            topologyArg->subslice_stride = static_cast<uint16_t>(std::ceil(maxSubslices / 8.0));
-            topologyArg->eu_stride = static_cast<uint16_t>(std::ceil(maxEuPerSubslice / 8.0));
-            topologyArg->subslice_offset = static_cast<uint16_t>(std::ceil(maxSlices / 8.0));
-            topologyArg->eu_offset = static_cast<uint16_t>(std::ceil(maxSubslices / 8.0)) * maxSlices;
+            topologyArg->subsliceStride = static_cast<uint16_t>(std::ceil(maxSubslices / 8.0));
+            topologyArg->euStride = static_cast<uint16_t>(std::ceil(maxEuPerSubslice / 8.0));
+            topologyArg->subsliceOffset = static_cast<uint16_t>(std::ceil(maxSlices / 8.0));
+            topologyArg->euOffset = static_cast<uint16_t>(std::ceil(maxSubslices / 8.0)) * maxSlices;
 
             int threadData = (threadsPerEu == 8) ? 0xff : 0x7f;
 
@@ -375,9 +401,9 @@ bool DrmMockPrelimContext::handlePrelimQueryItem(void *arg) {
                 }
             }
 
-            DEBUG_BREAK_IF(ptrDiff(data, topologyArg->data) != topologyArg->subslice_offset);
+            DEBUG_BREAK_IF(ptrDiff(data, topologyArg->data) != topologyArg->subsliceOffset);
 
-            data = ptrOffset(topologyArg->data, topologyArg->subslice_offset);
+            data = ptrOffset(topologyArg->data, topologyArg->subsliceOffset);
             for (uint32_t sliceId = 0; sliceId < maxSlices; sliceId++) {
                 for (uint32_t i = 0; i < maxSubslices; i++) {
                     data[0] |= 1 << (i % 8);
@@ -388,9 +414,9 @@ bool DrmMockPrelimContext::handlePrelimQueryItem(void *arg) {
                 }
             }
 
-            DEBUG_BREAK_IF(ptrDiff(data, topologyArg->data) != topologyArg->eu_offset);
-            auto size = dataSize - topologyArg->eu_offset;
-            memset(ptrOffset(topologyArg->data, topologyArg->eu_offset), threadData, size);
+            DEBUG_BREAK_IF(ptrDiff(data, topologyArg->data) != topologyArg->euOffset);
+            auto size = dataSize - topologyArg->euOffset;
+            memset(ptrOffset(topologyArg->data, topologyArg->euOffset), threadData, size);
         }
     } break;
 
@@ -407,7 +433,7 @@ void DrmMockPrelimContext::storeVmBindExtensions(uint64_t ptr, bool bind) {
     }
 
     size_t uuidIndex{0};
-    auto baseExt = reinterpret_cast<i915_user_extension *>(ptr);
+    auto baseExt = reinterpret_cast<DrmUserExtension *>(ptr);
     while (baseExt) {
         if (baseExt->name == PRELIM_I915_VM_BIND_EXT_USER_FENCE) {
             const auto *ext = reinterpret_cast<prelim_drm_i915_vm_bind_ext_user_fence *>(baseExt);
@@ -424,7 +450,7 @@ void DrmMockPrelimContext::storeVmBindExtensions(uint64_t ptr, bool bind) {
             }
         }
 
-        baseExt = reinterpret_cast<i915_user_extension *>(baseExt->next_extension);
+        baseExt = reinterpret_cast<DrmUserExtension *>(baseExt->nextExtension);
     }
 }
 
@@ -437,7 +463,7 @@ uint32_t DrmPrelimHelper::getDistanceInfoQueryId() {
 }
 
 uint32_t DrmPrelimHelper::getComputeEngineClass() {
-    return PRELIM_I915_ENGINE_CLASS_COMPUTE;
+    return prelim_drm_i915_gem_engine_class::PRELIM_I915_ENGINE_CLASS_COMPUTE;
 }
 
 uint32_t DrmPrelimHelper::getStringUuidClass() {
@@ -480,6 +506,22 @@ uint64_t DrmPrelimHelper::getU16WaitUserFenceFlag() {
     return PRELIM_I915_UFENCE_WAIT_U16;
 }
 
+uint64_t DrmPrelimHelper::getU32WaitUserFenceFlag() {
+    return PRELIM_I915_UFENCE_WAIT_U32;
+}
+
+uint64_t DrmPrelimHelper::getU64WaitUserFenceFlag() {
+    return PRELIM_I915_UFENCE_WAIT_U64;
+}
+
+uint64_t DrmPrelimHelper::getGTEWaitUserFenceFlag() {
+    return PRELIM_I915_UFENCE_WAIT_GTE;
+}
+
+uint64_t DrmPrelimHelper::getSoftWaitUserFenceFlag() {
+    return PRELIM_I915_UFENCE_WAIT_SOFT;
+}
+
 uint64_t DrmPrelimHelper::getCaptureVmBindFlag() {
     return PRELIM_I915_GEM_VM_BIND_CAPTURE;
 }
@@ -494,4 +536,20 @@ uint64_t DrmPrelimHelper::getMakeResidentVmBindFlag() {
 
 uint64_t DrmPrelimHelper::getSIPContextParamDebugFlag() {
     return PRELIM_I915_CONTEXT_PARAM_DEBUG_FLAG_SIP;
+}
+
+uint64_t DrmPrelimHelper::getMemoryRegionsParamFlag() {
+    return PRELIM_I915_OBJECT_PARAM | PRELIM_I915_PARAM_MEMORY_REGIONS;
+}
+
+uint32_t DrmPrelimHelper::getVmAdviseNoneFlag() {
+    return PRELIM_I915_VM_ADVISE_ATOMIC_NONE;
+}
+
+uint32_t DrmPrelimHelper::getVmAdviseDeviceFlag() {
+    return PRELIM_I915_VM_ADVISE_ATOMIC_DEVICE;
+}
+
+uint32_t DrmPrelimHelper::getVmAdviseSystemFlag() {
+    return PRELIM_I915_VM_ADVISE_ATOMIC_SYSTEM;
 }

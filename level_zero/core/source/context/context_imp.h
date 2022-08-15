@@ -7,13 +7,17 @@
 
 #pragma once
 
-#include "shared/source/os_interface/os_interface.h"
+#include "shared/source/helpers/common_types.h"
+#include "shared/source/utilities/stackvec.h"
 
 #include "level_zero/core/source/context/context.h"
-#include "level_zero/core/source/driver/driver_handle_imp.h"
+
+#include <map>
 
 namespace L0 {
 struct StructuresLookupTable;
+struct DriverHandleImp;
+struct Device;
 
 struct ContextImp : Context {
     ContextImp(DriverHandle *driverHandle);
@@ -57,6 +61,21 @@ struct ContextImp : Context {
                                  ze_ipc_mem_handle_t handle,
                                  ze_ipc_memory_flags_t flags,
                                  void **ptr) override;
+
+    ze_result_t
+    getIpcMemHandles(
+        const void *ptr,
+        uint32_t *numIpcHandles,
+        ze_ipc_mem_handle_t *pIpcHandles) override;
+
+    ze_result_t
+    openIpcMemHandles(
+        ze_device_handle_t hDevice,
+        uint32_t numIpcHandles,
+        ze_ipc_mem_handle_t *pIpcHandles,
+        ze_ipc_memory_flags_t flags,
+        void **pptr) override;
+
     ze_result_t getMemAllocProperties(const void *ptr,
                                       ze_memory_allocation_properties_t *pMemAllocProperties,
                                       ze_device_handle_t *phDevice) override;
@@ -117,13 +136,13 @@ struct ContextImp : Context {
                             const ze_image_desc_t *desc,
                             ze_image_handle_t *phImage) override;
 
-    void addDeviceAndSubDevices(Device *device);
-
-    std::map<ze_device_handle_t, Device *> &getDevices() {
+    std::map<uint32_t, ze_device_handle_t> &getDevices() {
         return devices;
     }
 
-    std::set<uint32_t> rootDeviceIndices = {};
+    void freePeerAllocations(const void *ptr, bool blocking, Device *device);
+
+    RootDeviceIndicesContainer rootDeviceIndices;
     std::map<uint32_t, NEO::DeviceBitfield> deviceBitfields;
 
     bool isDeviceDefinedForThisContext(Device *inDevice);
@@ -133,7 +152,7 @@ struct ContextImp : Context {
   protected:
     bool isAllocationSuitableForCompression(const StructuresLookupTable &structuresLookupTable, Device &device, size_t allocSize);
 
-    std::map<ze_device_handle_t, Device *> devices;
+    std::map<uint32_t, ze_device_handle_t> devices;
     DriverHandleImp *driverHandle = nullptr;
 };
 

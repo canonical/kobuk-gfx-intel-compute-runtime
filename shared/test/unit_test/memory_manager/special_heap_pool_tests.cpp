@@ -30,8 +30,11 @@ TEST_F(FrontWindowAllocatorTests, givenAllocateInFrontWindowPoolFlagWhenAllocate
     allocData.size = MemoryConstants::kiloByte;
     auto allocation(memManager->allocate32BitGraphicsMemoryImpl(allocData, false));
     auto heap = memManager->heapAssigner.get32BitHeapIndex(allocData.type, false, *defaultHwInfo, true);
-    EXPECT_EQ(GmmHelper::canonize(memManager->getGfxPartition(0)->getHeapMinimalAddress(heap)), allocation->getGpuAddress());
-    EXPECT_LT(ptrOffset(allocation->getGpuAddress(), allocation->getUnderlyingBufferSize()), GmmHelper::canonize(memManager->getGfxPartition(0)->getHeapLimit(heap)));
+    auto gmmHelper = memManager->getGmmHelper(allocData.rootDeviceIndex);
+
+    EXPECT_EQ(gmmHelper->canonize(memManager->getGfxPartition(0)->getHeapMinimalAddress(heap)), allocation->getGpuAddress());
+    EXPECT_LT(ptrOffset(allocation->getGpuAddress(), allocation->getUnderlyingBufferSize()), gmmHelper->canonize(memManager->getGfxPartition(0)->getHeapLimit(heap)));
+
     memManager->freeGraphicsMemory(allocation);
 }
 
@@ -71,7 +74,7 @@ TEST_F(FrontWindowAllocatorTests, givenInitializedHeapsWhenUseExternalAllocatorF
 }
 
 TEST_F(FrontWindowAllocatorTests, givenLinearStreamAllocWhenSelectingHeapWithFrontWindowThenCorrectIndexReturned) {
-    GraphicsAllocation allocation{0, AllocationType::LINEAR_STREAM, nullptr, 0, 0, 0, MemoryPool::MemoryNull};
+    GraphicsAllocation allocation{0, AllocationType::LINEAR_STREAM, nullptr, 0, 0, 0, MemoryPool::MemoryNull, MemoryManager::maxOsContextCount};
     EXPECT_EQ(HeapIndex::HEAP_EXTERNAL_FRONT_WINDOW, memManager->selectHeap(&allocation, true, true, true));
 }
 

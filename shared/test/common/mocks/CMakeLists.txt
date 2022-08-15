@@ -15,6 +15,7 @@ set_property(GLOBAL PROPERTY NEO_CORE_tests_compiler_mocks ${NEO_CORE_tests_comp
 
 set(NEO_CORE_tests_mocks
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+    ${CMAKE_CURRENT_SOURCE_DIR}/debugger_l0_create.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_allocation_properties.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_aub_center.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_aub_csr.h
@@ -52,6 +53,8 @@ set(NEO_CORE_tests_mocks
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_gfx_partition.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_gfx_partition.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_gmm.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/mock_gmm_client_context.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mock_gmm_client_context.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_gmm_client_context_base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_gmm_client_context_base.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_gmm_page_table_mngr.h
@@ -64,6 +67,8 @@ set(NEO_CORE_tests_mocks
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_io_functions.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_kernel_info.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_kernel_info.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/mock_l0_debugger.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/mock_logical_state_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_lrca_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_memory_manager.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_memory_operations_handler.h
@@ -81,10 +86,9 @@ set(NEO_CORE_tests_mocks
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_tbx_csr.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_tbx_stream.h
     ${CMAKE_CURRENT_SOURCE_DIR}/mock_timestamp_container.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/mock_timestamp_packet.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ult_device_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ult_device_factory.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/mock_gmm_client_context.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mock_gmm_client_context.h
 )
 
 if(WIN32)
@@ -99,6 +103,7 @@ if(WIN32)
        ${CMAKE_CURRENT_SOURCE_DIR}/windows/mock_gdi_interface.cpp
        ${CMAKE_CURRENT_SOURCE_DIR}/windows/mock_gdi_interface.h
        ${CMAKE_CURRENT_SOURCE_DIR}/windows/mock_wddm_direct_submission.h
+       ${CMAKE_CURRENT_SOURCE_DIR}/windows/mock_wddm_eudebug.h
   )
 else()
   list(APPEND NEO_CORE_tests_mocks
@@ -106,7 +111,10 @@ else()
        ${CMAKE_CURRENT_SOURCE_DIR}/linux/mock_drm_allocation.h
        ${CMAKE_CURRENT_SOURCE_DIR}/linux/mock_drm_command_stream_receiver.h
        ${CMAKE_CURRENT_SOURCE_DIR}/linux/mock_drm_memory_manager.h
+       ${CMAKE_CURRENT_SOURCE_DIR}/linux/mock_drm_wrappers.cpp
+       ${CMAKE_CURRENT_SOURCE_DIR}/linux/mock_drm_wrappers.h
        ${CMAKE_CURRENT_SOURCE_DIR}/linux/mock_os_context_linux.h
+       ${CMAKE_CURRENT_SOURCE_DIR}/linux/mock_os_time_linux.h
   )
 endif()
 

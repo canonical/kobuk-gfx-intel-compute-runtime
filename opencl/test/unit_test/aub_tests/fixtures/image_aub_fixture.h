@@ -5,6 +5,8 @@
  *
  */
 
+#pragma once
+
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 
 #include "opencl/test/unit_test/aub_tests/command_queue/command_enqueue_fixture.h"
@@ -33,7 +35,7 @@ struct ImageAubFixture : public ClDeviceFixture, public AUBCommandStreamFixture 
 
             hardwareInfo = *defaultHwInfo;
             hardwareInfo.capabilityTable.blitterOperationsSupported = true;
-            ClDeviceFixture::SetUpImpl(&hardwareInfo);
+            ClDeviceFixture::setUpImpl(&hardwareInfo);
         } else {
             ClDeviceFixture::SetUp();
         }
@@ -48,7 +50,7 @@ struct ImageAubFixture : public ClDeviceFixture, public AUBCommandStreamFixture 
         CommandStreamFixture::SetUp(pCmdQ);
     }
 
-    void TearDown() {
+    void TearDown() override {
         if (pCmdQ) {
             auto blocked = pCmdQ->isQueueBlocked();
             UNRECOVERABLE_IF(blocked);

@@ -13,8 +13,6 @@
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/helpers/hw_info.h"
 
-#include "gtest/gtest.h"
-
 #include <string>
 
 namespace NEO {
@@ -30,7 +28,7 @@ class MockTbxCsr : public TbxCommandStreamReceiverHw<GfxFamily> {
             this->downloadAllocationTbxMock(gfxAllocation);
         };
     }
-    ~MockTbxCsr() {
+    ~MockTbxCsr() override {
         this->downloadAllocationImpl = nullptr;
     }
 
@@ -89,7 +87,7 @@ struct MockTbxCsrRegisterDownloadedAllocations : TbxCommandStreamReceiverHw<GfxF
             this->downloadAllocationTbxMock(gfxAllocation);
         };
     }
-    ~MockTbxCsrRegisterDownloadedAllocations() {
+    ~MockTbxCsrRegisterDownloadedAllocations() override {
         this->downloadAllocationImpl = nullptr;
     }
     void downloadAllocationTbxMock(GraphicsAllocation &gfxAllocation) {

@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/command_stream/preemption_mode.h"
 #include "shared/source/command_stream/stream_property.h"
 
 namespace NEO {
@@ -15,8 +16,9 @@ struct StateComputeModeProperties {
     StreamProperty zPassAsyncComputeThreadLimit{};
     StreamProperty pixelAsyncComputeThreadLimit{};
     StreamProperty threadArbitrationPolicy{};
+    StreamProperty devicePreemptionMode{};
 
-    void setProperties(bool requiresCoherency, uint32_t numGrfRequired, int32_t threadArbitrationPolicy, const HardwareInfo &hwInfo);
+    void setProperties(bool requiresCoherency, uint32_t numGrfRequired, int32_t threadArbitrationPolicy, PreemptionMode devicePreemptionMode, const HardwareInfo &hwInfo);
     void setProperties(const StateComputeModeProperties &properties);
     bool isDirty() const;
 
@@ -24,7 +26,7 @@ struct StateComputeModeProperties {
     void clearIsDirty();
 
     bool isDirtyExtra() const;
-    void setPropertiesExtra();
+    void setPropertiesExtra(bool reportNumGrf, bool reportThreadArbitrationPolicy);
     void setPropertiesExtra(const StateComputeModeProperties &properties);
     void clearIsDirtyExtra();
 };

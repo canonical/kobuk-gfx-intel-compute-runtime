@@ -13,7 +13,7 @@ namespace NEO {
 struct RootDeviceEnvironment;
 class DrmMemoryOperationsHandlerBind : public DrmMemoryOperationsHandler {
   public:
-    DrmMemoryOperationsHandlerBind(RootDeviceEnvironment &rootDeviceEnvironment, uint32_t rootDeviceIndex);
+    DrmMemoryOperationsHandlerBind(const RootDeviceEnvironment &rootDeviceEnvironment, uint32_t rootDeviceIndex);
     ~DrmMemoryOperationsHandlerBind() override;
 
     MemoryOperationsStatus makeResidentWithinOsContext(OsContext *osContext, ArrayRef<GraphicsAllocation *> gfxAllocations, bool evictable) override;
@@ -25,13 +25,20 @@ class DrmMemoryOperationsHandlerBind : public DrmMemoryOperationsHandler {
     MemoryOperationsStatus mergeWithResidencyContainer(OsContext *osContext, ResidencyContainer &residencyContainer) override;
     std::unique_lock<std::mutex> lockHandlerIfUsed() override;
 
-    void evictUnusedAllocations(bool waitForCompletion, bool isLockNeeded) override;
+    MemoryOperationsStatus evictUnusedAllocations(bool waitForCompletion, bool isLockNeeded) override;
+
+    uint32_t getRootDeviceIndex() {
+        return this->rootDeviceIndex;
+    }
+    void setRootDeviceIndex(uint32_t index) {
+        this->rootDeviceIndex = index;
+    }
 
   protected:
     MOCKABLE_VIRTUAL int evictImpl(OsContext *osContext, GraphicsAllocation &gfxAllocation, DeviceBitfield deviceBitfield);
-    void evictUnusedAllocationsImpl(std::vector<GraphicsAllocation *> &allocationsForEviction, bool waitForCompletion);
+    MemoryOperationsStatus evictUnusedAllocationsImpl(std::vector<GraphicsAllocation *> &allocationsForEviction, bool waitForCompletion);
 
-    RootDeviceEnvironment &rootDeviceEnvironment;
+    const RootDeviceEnvironment &rootDeviceEnvironment;
     uint32_t rootDeviceIndex = 0;
 };
 } // namespace NEO

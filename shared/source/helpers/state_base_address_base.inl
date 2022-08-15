@@ -12,8 +12,7 @@
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/state_base_address.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
-
-#include "hw_cmds.h"
+#include "shared/source/os_interface/hw_info_config.h"
 
 namespace NEO {
 template <typename GfxFamily>
@@ -34,7 +33,8 @@ void StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(
     bool isMultiOsContextCapable,
     MemoryCompressionState memoryCompressionState,
     bool useGlobalAtomics,
-    bool areMultipleSubDevicesInContext) {
+    bool areMultipleSubDevicesInContext,
+    LogicalStateHelper *logicalStateHelper) {
 
     *stateBaseAddress = GfxFamily::cmdInitStateBaseAddress;
     bool overrideBindlessSurfaceStateBase = true;
@@ -86,7 +86,7 @@ void StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(
         stateBaseAddress->setGeneralStateBaseAddressModifyEnable(true);
         stateBaseAddress->setGeneralStateBufferSizeModifyEnable(true);
         // GSH must be set to 0 for stateless
-        stateBaseAddress->setGeneralStateBaseAddress(GmmHelper::decanonize(generalStateBase));
+        stateBaseAddress->setGeneralStateBaseAddress(gmmHelper->decanonize(generalStateBase));
         stateBaseAddress->setGeneralStateBufferSize(0xfffff);
     }
 
@@ -103,6 +103,8 @@ void StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(
 }
 
 template <typename GfxFamily>
-void StateBaseAddressHelper<GfxFamily>::appendExtraCacheSettings(STATE_BASE_ADDRESS *stateBaseAddress, GmmHelper *gmmHelper) {}
+void *StateBaseAddressHelper<GfxFamily>::getSpaceForSbaCmd(LinearStream &cmdStream) {
+    return cmdStream.getSpace(sizeof(STATE_BASE_ADDRESS));
+}
 
 } // namespace NEO

@@ -38,15 +38,14 @@ size_t EncodeComputeMode<Family>::getCmdSizeForComputeMode(const HardwareInfo &h
 
 template <typename Family>
 void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties,
-                                                          const HardwareInfo &hwInfo) {
+                                                          const HardwareInfo &hwInfo, LogicalStateHelper *logicalStateHelper) {
     using PIPE_CONTROL = typename Family::PIPE_CONTROL;
     UNRECOVERABLE_IF(properties.threadArbitrationPolicy.value == ThreadArbitrationPolicy::NotPresent);
 
     if (properties.threadArbitrationPolicy.isDirty) {
-        auto pipeControl = csr.getSpaceForCmd<PIPE_CONTROL>();
-        PIPE_CONTROL cmd = SKLFamily::cmdInitPipeControl;
-        cmd.setCommandStreamerStallEnable(true);
-        *pipeControl = cmd;
+        PipeControlArgs args;
+        args.csStallOnly = true;
+        MemorySynchronizationCommands<Family>::addSingleBarrier(csr, args);
 
         LriHelper<SKLFamily>::program(&csr,
                                       DebugControlReg2::address,
@@ -77,4 +76,5 @@ template struct EncodeComputeMode<Family>;
 template struct EncodeEnableRayTracing<Family>;
 template struct EncodeNoop<Family>;
 template struct EncodeStoreMemory<Family>;
+template struct EncodeMemoryFence<Family>;
 } // namespace NEO

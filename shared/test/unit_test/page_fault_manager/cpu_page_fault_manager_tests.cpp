@@ -195,7 +195,7 @@ TEST_F(PageFaultManagerTest, givenUnifiedMemoryAllocsWhenMovingToGpuDomainWithPr
 
     std::string output = testing::internal::GetCapturedStdout(); // stop capturing
 
-    std::string expectedString = "UMD transferring shared allocation";
+    std::string expectedString = "UMD transferred shared allocation";
     uint32_t occurrences = 0u;
     uint32_t expectedOccurrences = 1u;
     size_t idx = output.find(expectedString);
@@ -290,7 +290,7 @@ TEST_F(PageFaultManagerTest, givenUnifiedMemoryAllocWhenMoveToGpuDomainWithPrint
 
     std::string output = testing::internal::GetCapturedStdout(); // stop capturing
 
-    std::string expectedString = "UMD transferring shared allocation";
+    std::string expectedString = "UMD transferred shared allocation";
     uint32_t occurrences = 0u;
     uint32_t expectedOccurrences = 1u;
     size_t idx = output.find(expectedString);
@@ -488,7 +488,7 @@ TEST_F(PageFaultManagerTest, whenVerifyingPagefaultWithPrintUsmSharedMigrationDe
     EXPECT_EQ(pageFaultManager->accessAllowedSize, 10u);
     EXPECT_TRUE(pageFaultManager->isAubWritable);
 
-    std::string expectedString = "UMD transferring shared allocation";
+    std::string expectedString = "UMD transferred shared allocation";
     uint32_t occurrences = 0u;
     uint32_t expectedOccurrences = 1u;
     size_t idx = output.find(expectedString);
@@ -527,7 +527,7 @@ TEST_F(PageFaultManagerTest, givenTbxWhenVerifyingPagefaultWithPrintUsmSharedMig
     EXPECT_EQ(pageFaultManager->accessAllowedSize, 10u);
     EXPECT_TRUE(pageFaultManager->isAubWritable);
 
-    std::string expectedString = "UMD transferring shared allocation";
+    std::string expectedString = "UMD transferred shared allocation";
     uint32_t occurrences = 0u;
     uint32_t expectedOccurrences = 1u;
     size_t idx = output.find(expectedString);
@@ -622,7 +622,7 @@ TEST_F(PageFaultManagerTest, givenAllocationMovedToGpuDomainWhenVerifyingPagefau
 TEST_F(PageFaultManagerTest, givenUnifiedMemoryAllocWhenSetAubWritableIsCalledThenAllocIsAubWritable) {
     REQUIRE_SVM_OR_SKIP(executionEnvironment.rootDeviceEnvironments[0]->getHardwareInfo());
 
-    std::set<uint32_t> rootDeviceIndices{mockRootDeviceIndex};
+    RootDeviceIndicesContainer rootDeviceIndices = {mockRootDeviceIndex};
     std::map<uint32_t, DeviceBitfield> deviceBitfields{{mockRootDeviceIndex, mockDeviceBitfield}};
 
     auto properties = SVMAllocsManager::UnifiedMemoryProperties(InternalMemoryType::SHARED_UNIFIED_MEMORY, rootDeviceIndices, deviceBitfields);

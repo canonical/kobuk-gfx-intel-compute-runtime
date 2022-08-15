@@ -10,16 +10,15 @@
 #include "shared/source/os_interface/hw_info_config.inl"
 #include "shared/source/os_interface/hw_info_config_dg2_and_later.inl"
 #include "shared/source/os_interface/hw_info_config_xehp_and_later.inl"
+#include "shared/source/xe_hpc_core/hw_cmds_pvc.h"
 
-#include "hw_cmds.h"
+#include "platforms.h"
 
 namespace NEO {
 constexpr static auto gfxProduct = IGFX_PVC;
 
-#include "shared/source/xe_hpc_core/os_agnostic_hw_info_config_pvc.inl"
 #include "shared/source/xe_hpc_core/os_agnostic_hw_info_config_xe_hpc_core.inl"
-
-#include "os_agnostic_hw_info_config_pvc_extra.inl"
+#include "shared/source/xe_hpc_core/pvc/os_agnostic_hw_info_config_pvc.inl"
 
 template <>
 int HwInfoConfigHw<gfxProduct>::configureHardwareCustom(HardwareInfo *hwInfo, OSInterface *osIface) {

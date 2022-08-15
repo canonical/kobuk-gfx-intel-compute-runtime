@@ -6,12 +6,15 @@
  */
 
 #include "shared/source/os_interface/hw_info_config.h"
+#include "shared/source/xe_hpc_core/hw_cmds_xe_hpc_core_base.h"
 #include "shared/source/xe_hpc_core/hw_info.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/helpers/unit_test_helper.inl"
 #include "shared/test/common/helpers/unit_test_helper_xehp_and_later.inl"
 
 using Family = NEO::XE_HPC_COREFamily;
+
+#include "unit_test_helper_xe_hpc_core_extra.inl"
 
 namespace NEO {
 

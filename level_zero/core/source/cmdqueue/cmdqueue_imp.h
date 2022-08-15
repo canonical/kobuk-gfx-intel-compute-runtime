@@ -7,11 +7,9 @@
 
 #pragma once
 
-#include "shared/source/command_stream/csr_definitions.h"
+#include "shared/source/command_container/cmdcontainer.h"
 #include "shared/source/command_stream/submission_status.h"
-#include "shared/source/command_stream/submissions_aggregator.h"
-#include "shared/source/helpers/constants.h"
-#include "shared/source/indirect_heap/indirect_heap.h"
+#include "shared/source/command_stream/wait_status.h"
 
 #include "level_zero/core/source/cmdqueue/cmdqueue.h"
 
@@ -38,7 +36,7 @@ struct CommandQueueImp : public CommandQueue {
 
         ze_result_t initialize(Device *device, size_t sizeRequested);
         void destroy(Device *device);
-        void switchBuffers(NEO::CommandStreamReceiver *csr);
+        NEO::WaitStatus switchBuffers(NEO::CommandStreamReceiver *csr);
 
         NEO::GraphicsAllocation *getCurrentBufferAllocation() {
             return buffers[bufferUse];
@@ -78,7 +76,7 @@ struct CommandQueueImp : public CommandQueue {
 
     NEO::CommandStreamReceiver *getCsr() { return csr; }
 
-    void reserveLinearStreamSize(size_t size);
+    MOCKABLE_VIRTUAL NEO::WaitStatus reserveLinearStreamSize(size_t size);
     ze_command_queue_mode_t getSynchronousMode() const;
     virtual bool getPreemptionCmdProgramming() = 0;
 

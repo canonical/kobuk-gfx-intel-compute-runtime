@@ -5,9 +5,11 @@
  *
  */
 
+#include "shared/source/xe_hpg_core/hw_cmds_dg2.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;

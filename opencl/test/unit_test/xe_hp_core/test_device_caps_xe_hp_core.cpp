@@ -7,7 +7,7 @@
 
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/os_interface/hw_info_config.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
@@ -55,6 +55,7 @@ XE_HP_CORE_TEST_F(XE_HP_COREDeviceCaps, givenXE_HP_COREWhenDeviceCapsInitialized
     EXPECT_TRUE(hasSubstr(caps.deviceExtensions, std::string("cl_intel_subgroup_local_block_io")));
     EXPECT_TRUE(hasSubstr(caps.deviceExtensions, std::string("cl_intel_subgroup_matrix_multiply_accumulate")));
     EXPECT_TRUE(hasSubstr(caps.deviceExtensions, std::string("cl_intel_subgroup_split_matrix_multiply_accumulate")));
+    EXPECT_TRUE(hasSubstr(caps.deviceExtensions, std::string("cl_intel_bfloat16_conversions")));
 }
 
 XE_HP_CORE_TEST_F(XE_HP_COREDeviceCaps, givenXE_HP_COREWhenCheckingCapsThenDeviceDoesNotSupportIndependentForwardProgress) {

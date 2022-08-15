@@ -60,16 +60,16 @@ ze_result_t LinuxFrequencyImp::osFrequencySetRange(const zes_freq_range_t *pLimi
     double newMin = round(pLimits->min);
     double newMax = round(pLimits->max);
     if (newMax == -1 && newMin == -1) {
-        double MaxDefault = 0, MinDefault = 0;
+        double maxDefault = 0, minDefault = 0;
         ze_result_t result1, result2, result;
-        result1 = pSysfsAccess->read(maxDefaultFreqFile, MaxDefault);
-        result2 = pSysfsAccess->read(minDefaultFreqFile, MinDefault);
+        result1 = pSysfsAccess->read(maxDefaultFreqFile, maxDefault);
+        result2 = pSysfsAccess->read(minDefaultFreqFile, minDefault);
         if (result1 == ZE_RESULT_SUCCESS && result2 == ZE_RESULT_SUCCESS) {
-            result = setMax(MaxDefault);
+            result = setMax(maxDefault);
             if (ZE_RESULT_SUCCESS != result) {
                 return result;
             }
-            return setMin(MinDefault);
+            return setMin(minDefault);
         }
     }
     double currentMax = 0.0;
@@ -245,7 +245,7 @@ ze_result_t LinuxFrequencyImp::setMax(double max) {
         }
         return result;
     }
-    return ZE_RESULT_SUCCESS;
+    return pSysfsAccess->write(boostFreqFile, max);
 }
 
 ze_result_t LinuxFrequencyImp::getRequest(double &request) {
@@ -338,6 +338,7 @@ void LinuxFrequencyImp::init() {
         minFreqFile = baseDir + "rps_min_freq_mhz";
         minDefaultFreqFile = baseDir + ".defaults/rps_min_freq_mhz";
         maxFreqFile = baseDir + "rps_max_freq_mhz";
+        boostFreqFile = baseDir + "rps_boost_freq_mhz";
         maxDefaultFreqFile = baseDir + ".defaults/rps_max_freq_mhz";
         requestFreqFile = baseDir + "punit_req_freq_mhz";
         tdpFreqFile = baseDir + "rapl_PL1_freq_mhz";
@@ -345,14 +346,15 @@ void LinuxFrequencyImp::init() {
         efficientFreqFile = baseDir + "rps_RP1_freq_mhz";
         maxValFreqFile = baseDir + "rps_RP0_freq_mhz";
         minValFreqFile = baseDir + "rps_RPn_freq_mhz";
-        throttleReasonStatusFile = "throttle_reason_status";
-        throttleReasonPL1File = "throttle_reason_pl1";
-        throttleReasonPL2File = "throttle_reason_pl2";
-        throttleReasonPL4File = "throttle_reason_pl4";
-        throttleReasonThermalFile = "throttle_reason_thermal";
+        throttleReasonStatusFile = baseDir + "throttle_reason_status";
+        throttleReasonPL1File = baseDir + "throttle_reason_pl1";
+        throttleReasonPL2File = baseDir + "throttle_reason_pl2";
+        throttleReasonPL4File = baseDir + "throttle_reason_pl4";
+        throttleReasonThermalFile = baseDir + "throttle_reason_thermal";
     } else {
         minFreqFile = "gt_min_freq_mhz";
         maxFreqFile = "gt_max_freq_mhz";
+        boostFreqFile = "gt_boost_freq_mhz";
         requestFreqFile = "gt_cur_freq_mhz";
         tdpFreqFile = "rapl_PL1_freq_mhz";
         actualFreqFile = "gt_act_freq_mhz";

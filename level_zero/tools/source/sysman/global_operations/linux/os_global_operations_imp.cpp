@@ -16,6 +16,7 @@
 #include <level_zero/zet_api.h>
 
 #include <chrono>
+#include <cstring>
 #include <time.h>
 
 namespace L0 {
@@ -105,6 +106,12 @@ ze_result_t LinuxGlobalOperationsImp::reset(ze_bool_t force) {
     if (!pSysfsAccess->isRootUser()) {
         return ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS;
     }
+    ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
+    pDevice->getProperties(&deviceProperties);
+    auto devicePtr = static_cast<DeviceImp *>(pDevice);
+    NEO::ExecutionEnvironment *executionEnvironment = devicePtr->getNEODevice()->getExecutionEnvironment();
+    auto restorer = std::make_unique<L0::ExecutionEnvironmentRefCountRestore>(executionEnvironment);
+    pLinuxSysmanImp->releaseDeviceResources();
     std::string resetPath;
     std::string resetName;
     ze_result_t result = ZE_RESULT_SUCCESS;
@@ -138,25 +145,20 @@ ze_result_t LinuxGlobalOperationsImp::reset(ze_bool_t force) {
     pSysfsAccess->getRealPath(deviceDir, resetName);
     resetName = pFsAccess->getBaseName(resetName);
 
-    ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
-    pDevice->getProperties(&deviceProperties);
     if (!(deviceProperties.flags & ZE_DEVICE_PROPERTY_FLAG_INTEGRATED)) {
         result = pSysfsAccess->unbindDevice(resetName);
         if (ZE_RESULT_SUCCESS != result) {
             return result;
         }
-        return pLinuxSysmanImp->osWarmReset();
-    }
-
-    pSysfsAccess->getRealPath(functionLevelReset, resetPath);
-    // Must run as root. Verify permission to perform reset.
-    result = pFsAccess->canWrite(resetPath);
-    if (ZE_RESULT_SUCCESS != result) {
+        result = pLinuxSysmanImp->osWarmReset();
+        if (ZE_RESULT_SUCCESS == result) {
+            return pLinuxSysmanImp->initDevice();
+        }
         return result;
     }
 
-    ExecutionEnvironmentRefCountRestore restorer(executionEnvironment);
-    pLinuxSysmanImp->releaseDeviceResources();
+    pSysfsAccess->getRealPath(functionLevelReset, resetPath);
+
     for (auto &&fd : myPidFds) {
         // Close open filedescriptors to the device
         // before unbinding device.
@@ -185,7 +187,6 @@ ze_result_t LinuxGlobalOperationsImp::reset(ze_bool_t force) {
         std::vector<int> fds;
         pLinuxSysmanImp->getPidFdsForOpenDevice(pProcfsAccess, pSysfsAccess, pid, fds);
         if (!fds.empty()) {
-
             // Kill all processes that have the device open.
             pProcfsAccess->kill(pid);
             deviceUsingPids.push_back(pid);
@@ -200,9 +201,9 @@ ze_result_t LinuxGlobalOperationsImp::reset(ze_bool_t force) {
     for (auto &&pid : deviceUsingPids) {
         while (pProcfsAccess->isAlive(pid)) {
             if (std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() > resetTimeout) {
+
                 return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
             }
-
             struct ::timespec timeout = {.tv_sec = 0, .tv_nsec = 1000};
             ::nanosleep(&timeout, NULL);
             end = std::chrono::steady_clock::now();
@@ -402,7 +403,6 @@ LinuxGlobalOperationsImp::LinuxGlobalOperationsImp(OsSysman *pOsSysman) {
     pDevice = pLinuxSysmanImp->getDeviceHandle();
     auto device = static_cast<DeviceImp *>(pDevice);
     devicePciBdf = device->getNEODevice()->getRootDeviceEnvironment().osInterface->getDriverModel()->as<NEO::Drm>()->getPciPath();
-    executionEnvironment = device->getNEODevice()->getExecutionEnvironment();
     rootDeviceIndex = device->getNEODevice()->getRootDeviceIndex();
 }
 

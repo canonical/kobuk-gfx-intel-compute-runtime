@@ -15,12 +15,15 @@
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
+
+#include "hw_cmds_xe_hpg_core_base.h"
 
 using namespace NEO;
 
@@ -38,7 +41,7 @@ struct BlitXeHpgCoreTests : public ::testing::Test {
         clDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
     }
 
-    uint32_t flushBcsTask(CommandStreamReceiver *csr, const BlitProperties &blitProperties, bool blocking, Device &device) {
+    std::optional<uint32_t> flushBcsTask(CommandStreamReceiver *csr, const BlitProperties &blitProperties, bool blocking, Device &device) {
         BlitPropertiesContainer blitPropertiesContainer;
         blitPropertiesContainer.push_back(blitProperties);
 
@@ -176,9 +179,9 @@ XE_HPG_CORETEST_F(BlitXeHpgCoreTests, givenBufferWhenProgrammingBltCommandThenSe
 
     cl_int retVal = CL_SUCCESS;
     auto bufferInSystemPool = clUniquePtr<Buffer>(Buffer::create(&context, CL_MEM_FORCE_HOST_MEMORY_INTEL, 2048, nullptr, retVal));
-    EXPECT_TRUE(MemoryPool::isSystemMemoryPool(bufferInSystemPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(bufferInSystemPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
     auto bufferInLocalPool = clUniquePtr<Buffer>(Buffer::create(&context, CL_MEM_READ_WRITE, 2048, nullptr, retVal));
-    EXPECT_FALSE(MemoryPool::isSystemMemoryPool(bufferInLocalPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
+    EXPECT_FALSE(MemoryPoolHelper::isSystemMemoryPool(bufferInLocalPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
 
     {
         auto blitProperties = BlitProperties::constructPropertiesForCopy(bufferInSystemPool->getGraphicsAllocation(clDevice->getRootDeviceIndex()),
@@ -227,9 +230,9 @@ XE_HPG_CORETEST_F(BlitXeHpgCoreTests, givenBufferWhenProgrammingBltCommandThenSe
 
     cl_int retVal = CL_SUCCESS;
     auto bufferInSystemPool = clUniquePtr<Buffer>(Buffer::create(&context, CL_MEM_FORCE_HOST_MEMORY_INTEL, 2048, nullptr, retVal));
-    EXPECT_TRUE(MemoryPool::isSystemMemoryPool(bufferInSystemPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(bufferInSystemPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
     auto bufferInLocalPool = clUniquePtr<Buffer>(Buffer::create(&context, CL_MEM_READ_WRITE, 2048, nullptr, retVal));
-    EXPECT_FALSE(MemoryPool::isSystemMemoryPool(bufferInLocalPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
+    EXPECT_FALSE(MemoryPoolHelper::isSystemMemoryPool(bufferInLocalPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
 
     {
         auto blitProperties = BlitProperties::constructPropertiesForCopy(bufferInSystemPool->getGraphicsAllocation(clDevice->getRootDeviceIndex()),
@@ -278,9 +281,9 @@ XE_HPG_CORETEST_F(BlitXeHpgCoreTests, givenBufferWhenProgrammingBltCommandThenSe
 
     cl_int retVal = CL_SUCCESS;
     auto bufferInSystemPool = clUniquePtr<Buffer>(Buffer::create(&context, CL_MEM_FORCE_HOST_MEMORY_INTEL, 2048, nullptr, retVal));
-    EXPECT_TRUE(MemoryPool::isSystemMemoryPool(bufferInSystemPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(bufferInSystemPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
     auto bufferInLocalPool = clUniquePtr<Buffer>(Buffer::create(&context, CL_MEM_READ_WRITE, 2048, nullptr, retVal));
-    EXPECT_FALSE(MemoryPool::isSystemMemoryPool(bufferInLocalPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
+    EXPECT_FALSE(MemoryPoolHelper::isSystemMemoryPool(bufferInLocalPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
 
     DebugManager.flags.OverrideBlitterTargetMemory.set(0u);
     {
@@ -350,9 +353,9 @@ XE_HPG_CORETEST_F(BlitXeHpgCoreTests, givenBufferWhenProgrammingBltCommandAndRev
 
     cl_int retVal = CL_SUCCESS;
     auto bufferInSystemPool = clUniquePtr<Buffer>(Buffer::create(&context, CL_MEM_FORCE_HOST_MEMORY_INTEL, 2048, nullptr, retVal));
-    EXPECT_TRUE(MemoryPool::isSystemMemoryPool(bufferInSystemPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(bufferInSystemPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
     auto bufferInLocalPool = clUniquePtr<Buffer>(Buffer::create(&context, CL_MEM_READ_WRITE, 2048, nullptr, retVal));
-    EXPECT_FALSE(MemoryPool::isSystemMemoryPool(bufferInLocalPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
+    EXPECT_FALSE(MemoryPoolHelper::isSystemMemoryPool(bufferInLocalPool->getGraphicsAllocation(clDevice->getRootDeviceIndex())->getMemoryPool()));
 
     {
         auto blitProperties = BlitProperties::constructPropertiesForCopy(bufferInSystemPool->getGraphicsAllocation(clDevice->getRootDeviceIndex()),

@@ -5,11 +5,12 @@
  *
  */
 
+#include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/blit_commands_helper.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 using namespace NEO;
 
@@ -29,12 +30,21 @@ class GivenLinearStreamWhenCallDispatchBlitMemoryColorFillThenCorrectDepthIsProg
     using XY_COLOR_BLT = typename FamilyType::XY_COLOR_BLT;
     using COLOR_DEPTH = typename XY_COLOR_BLT::COLOR_DEPTH;
     GivenLinearStreamWhenCallDispatchBlitMemoryColorFillThenCorrectDepthIsProgrammed(Device *device) : device(device) {}
-    void TestBodyImpl(size_t patternSize, COLOR_DEPTH expectedDepth) {
+    void TestBodyImpl(size_t patternSize, COLOR_DEPTH expectedDepth) { // NOLINT(readability-identifier-naming)
         uint32_t streamBuffer[100] = {};
         LinearStream stream(streamBuffer, sizeof(streamBuffer));
-        MockGraphicsAllocation mockAllocation(0, AllocationType::INTERNAL_HOST_MEMORY,
-                                              reinterpret_cast<void *>(0x1234), 0x1000, 0, sizeof(uint32_t),
-                                              MemoryPool::System4KBPages);
+        auto size = 0x1000;
+        auto ptr = reinterpret_cast<void *>(0x1234);
+        auto gmmHelper = device->getGmmHelper();
+        auto canonizedGpuAddress = gmmHelper->canonize(castToUint64(ptr));
+        MockGraphicsAllocation mockAllocation(0,
+                                              AllocationType::INTERNAL_HOST_MEMORY,
+                                              ptr,
+                                              size,
+                                              0u,
+                                              MemoryPool::System4KBPages,
+                                              MemoryManager::maxOsContextCount,
+                                              canonizedGpuAddress);
         uint32_t patternToCommand[4];
         memset(patternToCommand, 4, patternSize);
         BlitCommandsHelper<FamilyType>::dispatchBlitMemoryColorFill(&mockAllocation, 0, patternToCommand, patternSize, stream, mockAllocation.getUnderlyingBufferSize(), *device->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]);

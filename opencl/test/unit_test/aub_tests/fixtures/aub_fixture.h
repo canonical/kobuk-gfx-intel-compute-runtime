@@ -23,8 +23,6 @@
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 
-#include "gtest/gtest.h"
-
 #include <sstream>
 
 namespace NEO {
@@ -69,6 +67,7 @@ class AUBFixture : public CommandQueueHwFixture {
         executionEnvironment = platform()->peekExecutionEnvironment();
         executionEnvironment->prepareRootDeviceEnvironments(1u);
         executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(&hwInfo);
+        executionEnvironment->rootDeviceEnvironments[0]->initGmm();
         executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface = std::make_unique<MockMemoryOperationsHandler>();
 
         auto pDevice = MockDevice::create<MockDevice>(executionEnvironment, rootDeviceIndex);

@@ -55,9 +55,9 @@ void PrintfHandler::prepareDispatch(const MultiDispatchInfo &multiDispatchInfo) 
     printfSurface = device.getMemoryManager()->allocateGraphicsMemoryWithProperties({rootDeviceIndex, printfSurfaceSize, AllocationType::PRINTF_SURFACE, device.getDeviceBitfield()});
 
     auto &hwInfo = device.getHardwareInfo();
-    auto &helper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
-    MemoryTransferHelper::transferMemoryToAllocation(helper.isBlitCopyRequiredForLocalMemory(hwInfo, *printfSurface),
+    MemoryTransferHelper::transferMemoryToAllocation(hwInfoConfig.isBlitCopyRequiredForLocalMemory(hwInfo, *printfSurface),
                                                      device.getDevice(), printfSurface, 0, printfSurfaceInitialDataSizePtr.get(),
                                                      sizeof(*printfSurfaceInitialDataSizePtr.get()));
 
@@ -85,7 +85,7 @@ void PrintfHandler::makeResident(CommandStreamReceiver &commandStreamReceiver) {
     commandStreamReceiver.makeResident(*printfSurface);
 }
 
-void PrintfHandler::printEnqueueOutput() {
+bool PrintfHandler::printEnqueueOutput() {
     auto &hwInfo = device.getHardwareInfo();
 
     auto usesStringMap = kernel->getDescriptor().kernelAttributes.usesStringMap();
@@ -94,9 +94,7 @@ void PrintfHandler::printEnqueueOutput() {
     auto printfOutputSize = static_cast<uint32_t>(printfSurface->getUnderlyingBufferSize());
     std::unique_ptr<uint8_t[]> printfOutputDecompressed;
 
-    auto &helper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-
-    if (hwInfoConfig.allowStatelessCompression(hwInfo) || helper.isBlitCopyRequiredForLocalMemory(hwInfo, *printfSurface)) {
+    if (hwInfoConfig.allowStatelessCompression(hwInfo) || hwInfoConfig.isBlitCopyRequiredForLocalMemory(hwInfo, *printfSurface)) {
         printfOutputDecompressed = std::make_unique<uint8_t[]>(printfOutputSize);
         printfOutputBuffer = printfOutputDecompressed.get();
         auto &bcsEngine = device.getEngine(EngineHelpers::getBcsEngineType(hwInfo, device.getDeviceBitfield(), device.getSelectorCopyEngine(), true), EngineUsage::Regular);
@@ -108,11 +106,18 @@ void PrintfHandler::printEnqueueOutput() {
                                                             printfOutputDecompressed.get(),
                                                             printfSurface->getGpuAddress(),
                                                             0, 0, 0, Vec3<size_t>(printfOutputSize, 0, 0), 0, 0, 0, 0));
-        bcsEngine.commandStreamReceiver->flushBcsTask(blitPropertiesContainer, true, false, device.getDevice());
+
+        const auto newTaskCount = bcsEngine.commandStreamReceiver->flushBcsTask(blitPropertiesContainer, true, false, device.getDevice());
+        if (!newTaskCount) {
+            return false;
+        }
     }
 
     PrintFormatter printFormatter(printfOutputBuffer, printfOutputSize, kernel->is32Bit(),
                                   usesStringMap ? &kernel->getDescriptor().kernelMetadata.printfStringsMap : nullptr);
     printFormatter.printKernelOutput();
+
+    return true;
 }
+
 } // namespace NEO

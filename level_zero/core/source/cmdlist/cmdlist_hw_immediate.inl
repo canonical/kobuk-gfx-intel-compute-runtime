@@ -10,11 +10,17 @@
 #include "shared/source/command_stream/wait_status.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
+#include "shared/source/helpers/logical_state_helper.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
 
 namespace L0 {
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+NEO::LogicalStateHelper *CommandListCoreFamilyImmediate<gfxCoreFamily>::getLogicalStateHelper() const {
+    return this->csr->getLogicalStateHelper();
+}
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 void CommandListCoreFamilyImmediate<gfxCoreFamily>::checkAvailableSpace() {
@@ -114,6 +120,12 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::executeCommandListImm
         ssh = this->device->getNEODevice()->getBindlessHeapsHelper()->getHeap(NEO::BindlessHeapsHelper::BindlesHeapType::GLOBAL_SSH);
     }
 
+    if (this->device->getL0Debugger()) {
+        UNRECOVERABLE_IF(!NEO::Debugger::isDebugEnabled(this->internalUsage));
+        this->csr->makeResident(*this->device->getL0Debugger()->getSbaTrackingBuffer(this->csr->getOsContext().getContextId()));
+        this->csr->makeResident(*this->device->getDebugSurface());
+    }
+
     auto completionStamp = this->csr->flushTask(
         *commandStream,
         commandStreamStart,
@@ -143,14 +155,17 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::executeCommandListImm
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendLaunchKernel(
-    ze_kernel_handle_t hKernel, const ze_group_count_t *pThreadGroupDimensions,
-    ze_event_handle_t hSignalEvent, uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) {
+    ze_kernel_handle_t hKernel, const ze_group_count_t *threadGroupDimensions,
+    ze_event_handle_t hSignalEvent, uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents,
+    const CmdListKernelLaunchParams &launchParams) {
 
     if (this->isFlushTaskSubmissionEnabled) {
         checkAvailableSpace();
     }
-    auto ret = CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernel(hKernel, pThreadGroupDimensions,
-                                                                        hSignalEvent, numWaitEvents, phWaitEvents);
+
+    auto ret = CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernel(hKernel, threadGroupDimensions,
+                                                                        hSignalEvent, numWaitEvents, phWaitEvents,
+                                                                        launchParams);
     return flushImmediate(ret, true);
 }
 
@@ -173,39 +188,12 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendBarrier(
     uint32_t numWaitEvents,
     ze_event_handle_t *phWaitEvents) {
     ze_result_t ret = ZE_RESULT_SUCCESS;
-    bool isTimestampEvent = false;
-    for (uint32_t i = 0; i < numWaitEvents; i++) {
-        auto event = Event::fromHandle(phWaitEvents[i]);
-        isTimestampEvent |= (event->isEventTimestampFlagSet()) ? true : false;
-    }
-    if (hSignalEvent) {
-        auto signalEvent = Event::fromHandle(hSignalEvent);
-        isTimestampEvent |= signalEvent->isEventTimestampFlagSet();
-    }
 
-    if (isTimestampEvent) {
-        if (this->isFlushTaskSubmissionEnabled) {
-            checkAvailableSpace();
-        }
-        ret = CommandListCoreFamily<gfxCoreFamily>::appendBarrier(hSignalEvent, numWaitEvents, phWaitEvents);
-        return flushImmediate(ret, true);
-    } else {
-        ret = CommandListCoreFamilyImmediate<gfxCoreFamily>::appendWaitOnEvents(numWaitEvents, phWaitEvents);
-        if (!hSignalEvent) {
-            NEO::PipeControlArgs args;
-            this->csr->flushNonKernelTask(nullptr, 0, 0, args, false, false, false);
-            if (this->isSyncModeQueue) {
-                auto timeoutMicroseconds = NEO::TimeoutControls::maxTimeout;
-                const auto waitStatus = this->csr->waitForCompletionWithTimeout(NEO::WaitParams{false, false, timeoutMicroseconds}, this->csr->peekTaskCount());
-                if (waitStatus == NEO::WaitStatus::GpuHang) {
-                    return ZE_RESULT_ERROR_DEVICE_LOST;
-                }
-            }
-        } else {
-            ret = CommandListCoreFamilyImmediate<gfxCoreFamily>::appendSignalEvent(hSignalEvent);
-        }
+    if (this->isFlushTaskSubmissionEnabled) {
+        checkAvailableSpace();
     }
-    return ret;
+    ret = CommandListCoreFamily<gfxCoreFamily>::appendBarrier(hSignalEvent, numWaitEvents, phWaitEvents);
+    return flushImmediate(ret, true);
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
@@ -266,58 +254,24 @@ template <GFXCORE_FAMILY gfxCoreFamily>
 ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendSignalEvent(ze_event_handle_t hSignalEvent) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     ze_result_t ret = ZE_RESULT_SUCCESS;
-    auto event = Event::fromHandle(hSignalEvent);
-    bool isTimestampEvent = event->isEventTimestampFlagSet();
 
-    if (isTimestampEvent) {
-        if (this->isFlushTaskSubmissionEnabled) {
-            checkAvailableSpace();
-        }
-        ret = CommandListCoreFamily<gfxCoreFamily>::appendSignalEvent(hSignalEvent);
-        return flushImmediate(ret, true);
-    } else {
-        const auto &hwInfo = this->device->getHwInfo();
-        NEO::PipeControlArgs args;
-        args.dcFlushEnable = NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(event->signalScope, hwInfo);
-        this->csr->flushNonKernelTask(&event->getAllocation(this->device), event->getGpuAddress(this->device), Event::STATE_SIGNALED, args, false, false, false);
-        if (this->isSyncModeQueue) {
-            auto timeoutMicroseconds = NEO::TimeoutControls::maxTimeout;
-            const auto waitStatus = this->csr->waitForCompletionWithTimeout(NEO::WaitParams{false, false, timeoutMicroseconds}, this->csr->peekTaskCount());
-            if (waitStatus == NEO::WaitStatus::GpuHang) {
-                return ZE_RESULT_ERROR_DEVICE_LOST;
-            }
-        }
+    if (this->isFlushTaskSubmissionEnabled) {
+        checkAvailableSpace();
     }
-    return ret;
+    ret = CommandListCoreFamily<gfxCoreFamily>::appendSignalEvent(hSignalEvent);
+    return flushImmediate(ret, true);
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendEventReset(ze_event_handle_t hSignalEvent) {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     ze_result_t ret = ZE_RESULT_SUCCESS;
-    auto event = Event::fromHandle(hSignalEvent);
-    bool isTimestampEvent = event->isEventTimestampFlagSet();
 
-    if (isTimestampEvent) {
-        if (this->isFlushTaskSubmissionEnabled) {
-            checkAvailableSpace();
-        }
-        ret = CommandListCoreFamily<gfxCoreFamily>::appendEventReset(hSignalEvent);
-        return flushImmediate(ret, true);
-    } else {
-        const auto &hwInfo = this->device->getHwInfo();
-        NEO::PipeControlArgs args;
-        args.dcFlushEnable = NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(event->signalScope, hwInfo);
-        this->csr->flushNonKernelTask(&event->getAllocation(this->device), event->getGpuAddress(this->device), Event::STATE_CLEARED, args, false, false, false);
-        if (this->isSyncModeQueue) {
-            auto timeoutMicroseconds = NEO::TimeoutControls::maxTimeout;
-            const auto waitStatus = this->csr->waitForCompletionWithTimeout(NEO::WaitParams{false, false, timeoutMicroseconds}, this->csr->peekTaskCount());
-            if (waitStatus == NEO::WaitStatus::GpuHang) {
-                return ZE_RESULT_ERROR_DEVICE_LOST;
-            }
-        }
+    if (this->isFlushTaskSubmissionEnabled) {
+        checkAvailableSpace();
     }
-    return ret;
+    ret = CommandListCoreFamily<gfxCoreFamily>::appendEventReset(hSignalEvent);
+    return flushImmediate(ret, true);
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
@@ -421,6 +375,20 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendImageCopyToMemo
     }
     auto ret = CommandListCoreFamily<gfxCoreFamily>::appendImageCopyToMemory(dstPtr, hSrcImage, pSrcRegion, hSignalEvent,
                                                                              numWaitEvents, phWaitEvents);
+    return flushImmediate(ret, true);
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendMemoryRangesBarrier(uint32_t numRanges,
+                                                                                     const size_t *pRangeSizes,
+                                                                                     const void **pRanges,
+                                                                                     ze_event_handle_t hSignalEvent,
+                                                                                     uint32_t numWaitEvents,
+                                                                                     ze_event_handle_t *phWaitEvents) {
+    if (this->isFlushTaskSubmissionEnabled) {
+        checkAvailableSpace();
+    }
+    auto ret = CommandListCoreFamily<gfxCoreFamily>::appendMemoryRangesBarrier(numRanges, pRangeSizes, pRanges, hSignalEvent, numWaitEvents, phWaitEvents);
     return flushImmediate(ret, true);
 }
 

@@ -8,6 +8,7 @@
 #pragma once
 
 #include "shared/source/command_container/implicit_scaling.h"
+#include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/file_io.h"
 #include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/program/kernel_info.h"
@@ -61,14 +62,17 @@ struct ModuleImmutableDataFixture : public DeviceFixture {
                 device->getNEODevice()->getMemoryManager()->freeGraphicsMemory(&*isaGraphicsAllocation);
                 isaGraphicsAllocation.release();
             }
+            auto ptr = reinterpret_cast<void *>(0x1234);
+            auto gmmHelper = std::make_unique<GmmHelper>(nullptr, defaultHwInfo.get());
+            auto canonizedGpuAddress = gmmHelper->canonize(castToUint64(ptr));
             isaGraphicsAllocation.reset(new NEO::MockGraphicsAllocation(0,
                                                                         NEO::AllocationType::KERNEL_ISA,
-                                                                        reinterpret_cast<void *>(0x1234),
+                                                                        ptr,
                                                                         0x1000,
-                                                                        0,
-                                                                        sizeof(uint32_t),
-                                                                        MemoryPool::System4KBPages));
-
+                                                                        0u,
+                                                                        MemoryPool::System4KBPages,
+                                                                        MemoryManager::maxOsContextCount,
+                                                                        canonizedGpuAddress));
             kernelInfo->kernelAllocation = isaGraphicsAllocation.get();
         }
 
@@ -103,7 +107,7 @@ struct ModuleImmutableDataFixture : public DeviceFixture {
             mockKernelImmData->setDevice(device);
         }
 
-        ~MockModule() {
+        ~MockModule() override {
         }
 
         const KernelImmutableData *getKernelImmutableData(const char *functionName) const override {
@@ -189,6 +193,7 @@ struct ModuleImmutableDataFixture : public DeviceFixture {
     }
 
     void TearDown() {
+        module.reset(nullptr);
         DeviceFixture::TearDown();
     }
 
@@ -238,6 +243,8 @@ struct ModuleFixture : public DeviceFixture {
     }
 
     void TearDown() {
+        kernel.reset(nullptr);
+        module.reset(nullptr);
         DeviceFixture::TearDown();
     }
 
@@ -287,6 +294,10 @@ struct MultiDeviceModuleFixture : public MultiDeviceFixture {
     }
 
     void TearDown() {
+        kernel.reset(nullptr);
+        for (auto &module : modules) {
+            module.reset(nullptr);
+        }
         MultiDeviceFixture::TearDown();
     }
 
@@ -305,19 +316,23 @@ struct ModuleWithZebinFixture : public DeviceFixture {
         MockImmutableData(L0::Device *device) {
 
             auto mockKernelDescriptor = new NEO::KernelDescriptor;
-            mockKernelDescriptor->kernelMetadata.kernelName = "kernel";
+            mockKernelDescriptor->kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram::kernelName;
             kernelDescriptor = mockKernelDescriptor;
             this->device = device;
+            auto ptr = reinterpret_cast<void *>(0x1234);
+            auto gmmHelper = device->getNEODevice()->getGmmHelper();
+            auto canonizedGpuAddress = gmmHelper->canonize(castToUint64(ptr));
             isaGraphicsAllocation.reset(new NEO::MockGraphicsAllocation(0,
                                                                         NEO::AllocationType::KERNEL_ISA,
-                                                                        reinterpret_cast<void *>(0x1234),
+                                                                        ptr,
                                                                         0x1000,
-                                                                        0,
-                                                                        sizeof(uint32_t),
-                                                                        MemoryPool::System4KBPages));
+                                                                        0u,
+                                                                        MemoryPool::System4KBPages,
+                                                                        MemoryManager::maxOsContextCount,
+                                                                        canonizedGpuAddress));
         }
 
-        ~MockImmutableData() {
+        ~MockImmutableData() override {
             delete kernelDescriptor;
         }
     };
@@ -332,20 +347,25 @@ struct ModuleWithZebinFixture : public DeviceFixture {
 
         void addSegments() {
             kernelImmDatas.push_back(std::make_unique<MockImmutableData>(device));
+            auto ptr = reinterpret_cast<void *>(0x1234);
+            auto gmmHelper = device->getNEODevice()->getGmmHelper();
+            auto canonizedGpuAddress = gmmHelper->canonize(castToUint64(ptr));
             translationUnit->globalVarBuffer = new NEO::MockGraphicsAllocation(0,
                                                                                NEO::AllocationType::GLOBAL_SURFACE,
-                                                                               reinterpret_cast<void *>(0x1234),
+                                                                               ptr,
                                                                                0x1000,
-                                                                               0,
-                                                                               sizeof(uint32_t),
-                                                                               MemoryPool::System4KBPages);
+                                                                               0u,
+                                                                               MemoryPool::System4KBPages,
+                                                                               MemoryManager::maxOsContextCount,
+                                                                               canonizedGpuAddress);
             translationUnit->globalConstBuffer = new NEO::MockGraphicsAllocation(0,
                                                                                  NEO::AllocationType::GLOBAL_SURFACE,
-                                                                                 reinterpret_cast<void *>(0x1234),
+                                                                                 ptr,
                                                                                  0x1000,
-                                                                                 0,
-                                                                                 sizeof(uint32_t),
-                                                                                 MemoryPool::System4KBPages);
+                                                                                 0u,
+                                                                                 MemoryPool::System4KBPages,
+                                                                                 MemoryManager::maxOsContextCount,
+                                                                                 canonizedGpuAddress);
 
             translationUnit->programInfo.globalStrings.initData = &strings;
             translationUnit->programInfo.globalStrings.size = sizeof(strings);
@@ -363,7 +383,7 @@ struct ModuleWithZebinFixture : public DeviceFixture {
                      zebin.storage.data(), zebin.storage.size());
         }
 
-        ~MockModuleWithZebin() {
+        ~MockModuleWithZebin() override {
         }
 
         const char strings[12] = "Hello olleH";
@@ -375,6 +395,7 @@ struct ModuleWithZebinFixture : public DeviceFixture {
     }
 
     void TearDown() {
+        module.reset(nullptr);
         DeviceFixture::TearDown();
     }
     std::unique_ptr<MockModuleWithZebin> module;

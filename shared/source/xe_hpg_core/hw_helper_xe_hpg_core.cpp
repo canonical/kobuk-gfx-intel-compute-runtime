@@ -6,7 +6,7 @@
  */
 
 #include "shared/source/xe_hpg_core/aub_mapper.h"
-#include "shared/source/xe_hpg_core/hw_cmds.h"
+#include "shared/source/xe_hpg_core/hw_cmds_xe_hpg_core_base.h"
 
 using Family = NEO::XE_HPG_COREFamily;
 
@@ -17,6 +17,7 @@ using Family = NEO::XE_HPG_COREFamily;
 #include "shared/source/helpers/hw_helper_dg2_and_later.inl"
 #include "shared/source/helpers/hw_helper_tgllp_and_later.inl"
 #include "shared/source/helpers/hw_helper_xehp_and_later.inl"
+#include "shared/source/helpers/logical_state_helper.inl"
 
 namespace NEO {
 template <>
@@ -78,17 +79,34 @@ bool HwHelperHw<Family>::isBankOverrideRequired(const HardwareInfo &hwInfo) cons
 }
 
 template <>
+size_t MemorySynchronizationCommands<Family>::getSizeForSingleAdditionalSynchronizationForDirectSubmission(const HardwareInfo &hwInfo) {
+    return EncodeSempahore<Family>::getSizeMiSemaphoreWait();
+}
+
+template <>
+void MemorySynchronizationCommands<Family>::addAdditionalSynchronizationForDirectSubmission(LinearStream &commandStream, uint64_t gpuAddress, bool acquire, const HardwareInfo &hwInfo) {
+    using MI_SEMAPHORE_WAIT = typename Family::MI_SEMAPHORE_WAIT;
+
+    EncodeSempahore<Family>::addMiSemaphoreWaitCommand(commandStream, gpuAddress, EncodeSempahore<Family>::invalidHardwareTag, MI_SEMAPHORE_WAIT::COMPARE_OPERATION::COMPARE_OPERATION_SAD_NOT_EQUAL_SDD);
+}
+
+template <>
 const StackVec<uint32_t, 6> HwHelperHw<Family>::getThreadsPerEUConfigs() const {
     return {4, 8};
 }
 
 template <>
-std::string HwHelperHw<Family>::getExtensions() const {
+std::string HwHelperHw<Family>::getExtensions(const HardwareInfo &hwInfo) const {
     std::string extensions;
     extensions += "cl_intel_create_buffer_with_properties ";
     extensions += "cl_intel_dot_accumulate ";
     extensions += "cl_intel_subgroup_local_block_io ";
-    extensions += "cl_intel_subgroup_matrix_multiply_accumulate ";
+
+    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    if (hwInfoConfig.isMatrixMultiplyAccumulateSupported(hwInfo)) {
+        extensions += "cl_intel_subgroup_matrix_multiply_accumulate ";
+        extensions += "cl_intel_subgroup_split_matrix_multiply_accumulate ";
+    }
 
     return extensions;
 }
@@ -125,12 +143,15 @@ bool HwHelperHw<Family>::disableL3CacheForDebug(const HardwareInfo &hwInfo) cons
 }
 
 template <>
-inline bool HwHelperHw<Family>::isLinuxCompletionFenceSupported() const {
-    return true;
+bool HwHelperHw<Family>::isTimestampWaitSupportedForEvents(const HardwareInfo &hwInfo) const {
+    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    return hwInfoConfig.isTimestampWaitSupportedForEvents();
 }
 
 template class HwHelperHw<Family>;
 template class FlatBatchBufferHelperHw<Family>;
 template struct MemorySynchronizationCommands<Family>;
 template struct LriHelper<Family>;
+
+template LogicalStateHelper *LogicalStateHelper::create<Family>();
 } // namespace NEO

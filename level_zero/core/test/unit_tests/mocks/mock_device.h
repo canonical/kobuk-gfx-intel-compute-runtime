@@ -7,6 +7,7 @@
 
 #pragma once
 #include "shared/source/device/device.h"
+#include "shared/source/memory_manager/allocations_list.h"
 #include "shared/test/common/test_macros/mock_method_macros.h"
 
 #include "level_zero/core/source/device/device_imp.h"
@@ -98,6 +99,7 @@ struct Mock<Device> : public Device {
 template <>
 struct Mock<L0::DeviceImp> : public L0::DeviceImp {
     using Base = L0::DeviceImp;
+    using Base::adjustCommandQueueDesc;
     using Base::debugSession;
     using Base::implicitScalingCapable;
 

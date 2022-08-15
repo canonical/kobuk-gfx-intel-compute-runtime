@@ -5,10 +5,14 @@
  *
  */
 
+#include "shared/source/gen12lp/hw_cmds_dg1.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
+
+#include "platforms.h"
 
 using namespace NEO;
 
@@ -132,4 +136,9 @@ DG1TEST_F(Dg1HwInfo, givenDg1WhenObtainingFullBlitterSupportThenReturnFalse) {
 DG1TEST_F(Dg1HwInfo, whenOverrideGfxPartitionLayoutForWslThenReturnTrue) {
     auto hwInfoConfig = HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
     EXPECT_TRUE(hwInfoConfig->overrideGfxPartitionLayoutForWsl());
+}
+
+DG1TEST_F(Dg1HwInfo, givenHwInfoConfigWhenGetProductConfigThenCorrectMatchIsFound) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    EXPECT_EQ(hwInfoConfig.getProductConfigFromHwInfo(*defaultHwInfo), AOT::DG1);
 }

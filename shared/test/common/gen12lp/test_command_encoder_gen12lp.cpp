@@ -11,7 +11,7 @@
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/fixtures/device_fixture.h"
-#include "shared/test/common/test_macros/test.h"
+#include "shared/test/common/test_macros/hw_test.h"
 
 #include "reg_configs_common.h"
 
@@ -32,9 +32,9 @@ GEN12LPTEST_F(CommandEncoderTest, WhenAdjustComputeModeIsCalledThenStateComputeM
 
     // Adjust the State Compute Mode which sets FORCE_NON_COHERENT_FORCE_GPU_NON_COHERENT
     StreamProperties properties{};
-    properties.stateComputeMode.setProperties(false, GrfConfig::DefaultGrfNumber, 0, *defaultHwInfo);
+    properties.stateComputeMode.setProperties(false, GrfConfig::DefaultGrfNumber, 0, PreemptionMode::Disabled, *defaultHwInfo);
     NEO::EncodeComputeMode<FamilyType>::programComputeModeCommand(*cmdContainer.getCommandStream(),
-                                                                  properties.stateComputeMode, *defaultHwInfo);
+                                                                  properties.stateComputeMode, *defaultHwInfo, nullptr);
 
     auto usedSpaceAfter = cmdContainer.getCommandStream()->getUsed();
     ASSERT_GT(usedSpaceAfter, usedSpaceBefore);

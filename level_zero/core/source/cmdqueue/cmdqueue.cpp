@@ -11,12 +11,15 @@
 #include "shared/source/command_stream/queue_throttle.h"
 #include "shared/source/command_stream/wait_status.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/debugger/debugger_l0.h"
 #include "shared/source/memory_manager/memory_manager.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw.h"
 #include "level_zero/core/source/cmdqueue/cmdqueue_imp.h"
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/device/device_imp.h"
+#include "level_zero/core/source/driver/driver_handle_imp.h"
+#include "level_zero/core/source/kernel/kernel.h"
 
 #include "igfxfmid.h"
 
@@ -60,21 +63,26 @@ ze_result_t CommandQueueImp::initialize(bool copyOnly, bool isInternal) {
             partitionCount = csr->getActivePartitions();
         }
         if (NEO::Debugger::isDebugEnabled(internalUsage) && device->getL0Debugger()) {
-            device->getL0Debugger()->notifyCommandQueueCreated();
+            device->getL0Debugger()->notifyCommandQueueCreated(device->getNEODevice());
         }
     }
     return returnValue;
 }
 
-void CommandQueueImp::reserveLinearStreamSize(size_t size) {
+NEO::WaitStatus CommandQueueImp::reserveLinearStreamSize(size_t size) {
+    auto waitStatus{NEO::WaitStatus::Ready};
+
     UNRECOVERABLE_IF(commandStream == nullptr);
     if (commandStream->getAvailableSpace() < size) {
-        buffers.switchBuffers(csr);
+        waitStatus = buffers.switchBuffers(csr);
+
         NEO::GraphicsAllocation *nextBufferAllocation = buffers.getCurrentBufferAllocation();
         commandStream->replaceBuffer(nextBufferAllocation->getUnderlyingBuffer(),
                                      defaultQueueCmdBufferSize);
         commandStream->replaceGraphicsAllocation(nextBufferAllocation);
     }
+
+    return waitStatus;
 }
 
 NEO::SubmissionStatus CommandQueueImp::submitBatchBuffer(size_t offset, NEO::ResidencyContainer &residencyContainer, void *endingCmdPtr,
@@ -91,6 +99,8 @@ NEO::SubmissionStatus CommandQueueImp::submitBatchBuffer(size_t offset, NEO::Res
     csr->setActivePartitions(partitionCount);
     auto ret = csr->submitBatchBuffer(batchBuffer, csr->getResidencyAllocations());
     if (ret != NEO::SubmissionStatus::SUCCESS) {
+        commandStream->getGraphicsAllocation()->updateTaskCount(csr->peekTaskCount(), csr->getOsContext().getContextId());
+        commandStream->getGraphicsAllocation()->updateResidencyTaskCount(csr->peekTaskCount(), csr->getOsContext().getContextId());
         return ret;
     }
 
@@ -179,7 +189,7 @@ CommandQueue *CommandQueue::create(uint32_t productFamily, Device *device, NEO::
         osContext.reInitializeContext();
     }
     osContext.ensureContextInitialized();
-    csr->initDirectSubmission(*device->getNEODevice(), osContext);
+    csr->initDirectSubmission();
     return commandQueue;
 }
 
@@ -230,18 +240,21 @@ void CommandQueueImp::CommandBufferManager::destroy(Device *device) {
     }
 }
 
-void CommandQueueImp::CommandBufferManager::switchBuffers(NEO::CommandStreamReceiver *csr) {
+NEO::WaitStatus CommandQueueImp::CommandBufferManager::switchBuffers(NEO::CommandStreamReceiver *csr) {
     if (bufferUse == BUFFER_ALLOCATION::FIRST) {
         bufferUse = BUFFER_ALLOCATION::SECOND;
     } else {
         bufferUse = BUFFER_ALLOCATION::FIRST;
     }
 
+    auto waitStatus{NEO::WaitStatus::Ready};
     auto completionId = flushId[bufferUse];
     if (completionId.second != 0u) {
         UNRECOVERABLE_IF(csr == nullptr);
-        csr->waitForTaskCountWithKmdNotifyFallback(completionId.first, completionId.second, false, NEO::QueueThrottle::MEDIUM);
+        waitStatus = csr->waitForTaskCountWithKmdNotifyFallback(completionId.first, completionId.second, false, NEO::QueueThrottle::MEDIUM);
     }
+
+    return waitStatus;
 }
 
 } // namespace L0
