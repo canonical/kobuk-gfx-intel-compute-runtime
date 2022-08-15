@@ -1,6 +1,8 @@
 intel-compute-runtime (22.31.23852-1) UNRELEASED; urgency=medium
 
   * New upstream release.
+  * patches: Drop correct-getters-in-generated-commands.diff (upstream),
+    refresh typos.patch.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Mon, 15 Aug 2022 16:54:19 +0300
 

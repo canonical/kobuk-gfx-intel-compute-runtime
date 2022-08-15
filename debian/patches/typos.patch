@@ -23,7 +23,7 @@ Description: fix typos found by Lintian
                                  paths to outputs .bin files
 --- a/shared/source/compiler_interface/linker.cpp
 +++ b/shared/source/compiler_interface/linker.cpp
-@@ -448,7 +448,7 @@ std::string constructRelocationsDebugMes
+@@ -445,7 +445,7 @@ std::string constructRelocationsDebugMes
          return "";
      }
      std::stringstream stream;
@@ -54,7 +54,7 @@ Description: fix typos found by Lintian
      EXPECT_STREQ("GLOBAL_CONSTANTS", NEO::asString(NEO::SegmentType::GlobalConstants));
      EXPECT_STREQ("GLOBAL_VARIABLES", NEO::asString(NEO::SegmentType::GlobalVariables));
      EXPECT_STREQ("INSTRUCTIONS", NEO::asString(NEO::SegmentType::Instructions));
-@@ -1843,7 +1843,7 @@ TEST(RelocationsDebugMessageTests, given
+@@ -1906,7 +1906,7 @@ TEST(RelocationsDebugMessageTests, given
      auto message = NEO::constructRelocationsDebugMessage(symbols);
  
      std::stringstream expected;
@@ -65,7 +65,7 @@ Description: fix typos found by Lintian
              expected << " * \"foo\" [1024 bytes] INSTRUCTIONS_SEGMENT@64 -> 0x1000 GPUVA\n";
 --- a/opencl/test/unit_test/offline_compiler/offline_compiler_tests.cpp
 +++ b/opencl/test/unit_test/offline_compiler/offline_compiler_tests.cpp
-@@ -380,7 +380,7 @@ Usage: ocloc multi <file_name>
+@@ -382,7 +382,7 @@ Usage: ocloc multi <file_name>
                  '-file <filename> -device <device_type> [compile_options]'.
                  See 'ocloc compile --help' for available compile_options.
                  Results of subsequent compilations will be dumped into 
@@ -76,7 +76,7 @@ Description: fix typos found by Lintian
                                  paths to outputs .bin files
 --- a/opencl/test/unit_test/offline_compiler/ocloc_api_tests.cpp
 +++ b/opencl/test/unit_test/offline_compiler/ocloc_api_tests.cpp
-@@ -140,7 +140,7 @@ TEST(OclocApiTests, GivenInvalidQueryWhe
+@@ -176,7 +176,7 @@ TEST(OclocApiTests, GivenInvalidQueryWhe
      std::string output = testing::internal::GetCapturedStdout();
  
      EXPECT_EQ(retVal, NEO::OclocErrorCode::INVALID_COMMAND_LINE);
@@ -84,17 +84,10 @@ Description: fix typos found by Lintian
 +    EXPECT_STREQ("Error: Invalid command line. Unknown argument unknown_query.", output.c_str());
  }
  
- TEST(OclocApiTests, WhenGoodFamilyNameIsProvidedThenSuccessIsReturned) {
-@@ -519,4 +519,4 @@ TEST(OclocApiTests, GivenInvalidParamete
-     const std::string expectedExecuteError{"Error: Linker cannot be executed due to unsuccessful initialization!\n"};
-     const std::string expectedErrorMessage = expectedInitError + expectedExecuteError;
-     EXPECT_EQ(expectedErrorMessage, output);
--}
-\ No newline at end of file
-+}
+ TEST(OclocApiTests, givenNoAcronymWhenIdsCommandIsInvokeThenErrorIsReported) {
 --- a/shared/offline_compiler/source/offline_compiler.cpp
 +++ b/shared/offline_compiler/source/offline_compiler.cpp
-@@ -121,7 +121,7 @@ int OfflineCompiler::query(size_t numArg
+@@ -136,7 +136,7 @@ int OfflineCompiler::query(size_t numArg
      } else if ("--help" == arg) {
          printQueryHelp(helper);
      } else {
