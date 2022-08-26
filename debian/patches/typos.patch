@@ -74,25 +74,4 @@ Description: fix typos found by Lintian
  
    -output_file_list             Name of optional file containing 
                                  paths to outputs .bin files
---- a/opencl/test/unit_test/offline_compiler/ocloc_api_tests.cpp
-+++ b/opencl/test/unit_test/offline_compiler/ocloc_api_tests.cpp
-@@ -176,7 +176,7 @@ TEST(OclocApiTests, GivenInvalidQueryWhe
-     std::string output = testing::internal::GetCapturedStdout();
- 
-     EXPECT_EQ(retVal, NEO::OclocErrorCode::INVALID_COMMAND_LINE);
--    EXPECT_STREQ("Error: Invalid command line. Uknown argument unknown_query.", output.c_str());
-+    EXPECT_STREQ("Error: Invalid command line. Unknown argument unknown_query.", output.c_str());
- }
- 
- TEST(OclocApiTests, givenNoAcronymWhenIdsCommandIsInvokeThenErrorIsReported) {
---- a/shared/offline_compiler/source/offline_compiler.cpp
-+++ b/shared/offline_compiler/source/offline_compiler.cpp
-@@ -136,7 +136,7 @@ int OfflineCompiler::query(size_t numArg
-     } else if ("--help" == arg) {
-         printQueryHelp(helper);
-     } else {
--        helper->printf("Error: Invalid command line. Uknown argument %s.", arg.c_str());
-+        helper->printf("Error: Invalid command line. Unknown argument %s.", arg.c_str());
-         retVal = INVALID_COMMAND_LINE;
-     }
  
