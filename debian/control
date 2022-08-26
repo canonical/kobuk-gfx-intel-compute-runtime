@@ -20,7 +20,7 @@ Vcs-Browser: https://salsa.debian.org/opencl-team/intel-compute-runtime
 Vcs-Git: https://salsa.debian.org/opencl-team/intel-compute-runtime.git
 
 Package: intel-opencl-icd
-Architecture: any-amd64 any-i386
+Architecture: any-amd64
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
