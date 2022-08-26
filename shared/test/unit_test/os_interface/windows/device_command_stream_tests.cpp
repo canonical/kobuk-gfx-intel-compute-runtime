@@ -26,6 +26,7 @@
 #include "shared/source/os_interface/windows/wddm_residency_controller.h"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/fixtures/memory_management_fixture.h"
+#include "shared/test/common/fixtures/mock_aub_center_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
@@ -38,11 +39,10 @@
 #include "shared/test/common/mocks/mock_submissions_aggregator.h"
 #include "shared/test/common/mocks/mock_wddm_interface23.h"
 #include "shared/test/common/mocks/windows/mock_gdi_interface.h"
-#include "shared/test/common/mocks/windows/mock_wddm_direct_submission.h"
 #include "shared/test/common/os_interface/windows/mock_wddm_memory_manager.h"
 #include "shared/test/common/os_interface/windows/wddm_fixture.h"
 #include "shared/test/common/test_macros/hw_test.h"
-#include "shared/test/unit_test/fixtures/mock_aub_center_fixture.h"
+#include "shared/test/unit_test/mocks/windows/mock_wddm_direct_submission.h"
 
 #include "hw_cmds.h"
 
@@ -58,7 +58,7 @@ class WddmCommandStreamFixture {
 
     DebugManagerStateRestore stateRestore;
 
-    void SetUp() {
+    void setUp() {
         HardwareInfo *hwInfo = nullptr;
         DebugManager.flags.CsrDispatchMode.set(static_cast<uint32_t>(DispatchMode::ImmediateDispatch));
         auto executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
@@ -74,7 +74,7 @@ class WddmCommandStreamFixture {
         csr->getOsContext().ensureContextInitialized();
     }
 
-    void TearDown() {
+    void tearDown() {
     }
 };
 
@@ -176,13 +176,13 @@ using WddmCommandStreamTest = ::Test<WddmCommandStreamFixture>;
 using WddmDefaultTest = ::Test<DeviceFixture>;
 struct DeviceCommandStreamTest : ::Test<MockAubCenterFixture>, DeviceFixture {
     void SetUp() override {
-        DeviceFixture::SetUp();
-        MockAubCenterFixture::SetUp();
+        DeviceFixture::setUp();
+        MockAubCenterFixture::setUp();
         setMockAubCenter(pDevice->getRootDeviceEnvironmentRef());
     }
     void TearDown() override {
-        MockAubCenterFixture::TearDown();
-        DeviceFixture::TearDown();
+        MockAubCenterFixture::tearDown();
+        DeviceFixture::tearDown();
     }
 };
 
@@ -307,13 +307,13 @@ TEST_F(WddmCommandStreamTest, givenWdmmWhenSubmitIsCalledThenCoherencyRequiredFl
 }
 
 struct WddmPreemptionHeaderFixture {
-    void SetUp() {
+    void setUp() {
         executionEnvironment = getExecutionEnvironmentImpl(hwInfo, 1);
         executionEnvironment->incRefInternal();
         wddm = static_cast<WddmMock *>(executionEnvironment->rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Wddm>());
     }
 
-    void TearDown() {
+    void tearDown() {
         executionEnvironment->decRefInternal();
     }
 
@@ -864,6 +864,7 @@ HWTEST_TEMPLATED_F(WddmCommandStreamMockGdiTest, givenRecordedCommandBufferWhenI
         csrSurfaceCount = 2;
     }
     csrSurfaceCount += mockCsr->globalFenceAllocation ? 1 : 0;
+    csrSurfaceCount += mockCsr->getKernelArgsBufferAllocation() ? 1 : 0;
 
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);
     mockCsr->useNewResourceImplicitFlush = false;

@@ -177,6 +177,24 @@ struct PrimeHandle {
     int32_t fileDescriptor;
 };
 
+#pragma pack(1)
+template <uint32_t numEngines>
+struct ContextParamEngines {
+    uint64_t extensions;
+    EngineClassInstance engines[numEngines];
+};
+
+template <uint32_t numEngines>
+struct ContextEnginesLoadBalance {
+    DrmUserExtension base;
+    uint16_t engineIndex;
+    uint16_t numSiblings;
+    uint32_t flags;
+    uint64_t reserved;
+    EngineClassInstance engines[numEngines];
+};
+#pragma pack()
+
 struct DrmVersion {
     int versionMajor;
     int versionMinor;
@@ -224,9 +242,23 @@ enum class DrmIoctl {
     GemClosReserve,
     GemClosFree,
     GemCacheReserve,
+    SyncobjCreate,
+    SyncobjWait,
+    SyncobjDestroy,
+    Version,
 };
 
 enum class DrmParam {
+    ContextCreateExtSetparam,
+    ContextCreateFlagsUseExtensions,
+    ContextEnginesExtLoadBalance,
+    ContextParamEngines,
+    ContextParamGttSize,
+    ContextParamPersistence,
+    ContextParamPriority,
+    ContextParamRecoverable,
+    ContextParamSseu,
+    ContextParamVm,
     EngineClassRender,
     EngineClassCompute,
     EngineClassCopy,
@@ -240,6 +272,8 @@ enum class DrmParam {
     ExecRender,
     MemoryClassDevice,
     MemoryClassSystem,
+    MmapOffsetWb,
+    MmapOffsetWc,
     ParamChipsetId,
     ParamRevision,
     ParamHasExecSoftpin,
@@ -255,6 +289,8 @@ enum class DrmParam {
     QueryHwconfigTable,
     QueryComputeSlices,
     QueryMemoryRegions,
+    QueryTopologyInfo,
+    SchedulerCapPreemption,
     TilingNone,
     TilingY,
 };

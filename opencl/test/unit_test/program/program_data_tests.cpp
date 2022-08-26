@@ -10,14 +10,14 @@
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/program/program_info_from_patchtokens.h"
+#include "shared/test/common/compiler_interface/linker_mock.h"
+#include "shared/test/common/device_binary_format/patchtokens_tests.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/mocks/mock_csr.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/test_macros/test.h"
-#include "shared/test/unit_test/compiler_interface/linker_mock.h"
-#include "shared/test/unit_test/device_binary_format/patchtokens_tests.h"
-#include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "opencl/source/platform/platform.h"
 #include "opencl/source/program/program.h"
@@ -37,8 +37,8 @@ class ProgramDataTestBase : public testing::Test,
                             public PlatformFixture,
                             public ProgramFixture {
 
-    using ContextFixture::SetUp;
-    using PlatformFixture::SetUp;
+    using ContextFixture::setUp;
+    using PlatformFixture::setUp;
 
   public:
     ProgramDataTestBase() {
@@ -51,24 +51,24 @@ class ProgramDataTestBase : public testing::Test,
     void buildAndDecodeProgramPatchList();
 
     void SetUp() override {
-        PlatformFixture::SetUp();
+        PlatformFixture::setUp();
         pClDevice = pPlatform->getClDevice(0);
         rootDeviceIndex = pClDevice->getRootDeviceIndex();
         cl_device_id device = pClDevice;
 
-        ContextFixture::SetUp(1, &device);
-        ProgramFixture::SetUp();
+        ContextFixture::setUp(1, &device);
+        ProgramFixture::setUp();
 
-        CreateProgramWithSource(
+        createProgramWithSource(
             pContext,
             "CopyBuffer_simd16.cl");
     }
 
     void TearDown() override {
         knownSource.reset();
-        ProgramFixture::TearDown();
-        ContextFixture::TearDown();
-        PlatformFixture::TearDown();
+        ProgramFixture::tearDown();
+        ContextFixture::tearDown();
+        PlatformFixture::tearDown();
     }
 
     size_t setupConstantAllocation() {
@@ -456,7 +456,7 @@ TEST(ProgramScopeMetadataTest, WhenPatchingGlobalSurfaceThenPickProperSourceBuff
 }
 
 TEST_F(ProgramDataTest, GivenProgramWith32bitPointerOptWhenProgramScopeConstantBufferPatchTokensAreReadThenConstantPointerOffsetIsPatchedWith32bitPointer) {
-    CreateProgramWithSource(pContext, "CopyBuffer_simd16.cl");
+    createProgramWithSource(pContext, "CopyBuffer_simd16.cl");
     ASSERT_NE(nullptr, pProgram);
 
     MockProgram *prog = pProgram;
@@ -502,7 +502,7 @@ TEST_F(ProgramDataTest, GivenProgramWith32bitPointerOptWhenProgramScopeConstantB
 }
 
 TEST_F(ProgramDataTest, GivenProgramWith32bitPointerOptWhenProgramScopeGlobalPointerPatchTokensAreReadThenGlobalPointerOffsetIsPatchedWith32bitPointer) {
-    CreateProgramWithSource(pContext, "CopyBuffer_simd16.cl");
+    createProgramWithSource(pContext, "CopyBuffer_simd16.cl");
     ASSERT_NE(nullptr, pProgram);
 
     MockProgram *prog = pProgram;

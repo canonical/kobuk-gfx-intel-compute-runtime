@@ -239,11 +239,11 @@ HWTEST_F(CommandListCreate, givenUseCsrImmediateSubmissionEnabledForCopyImmediat
 
 class CommandListImmediateFlushTaskTests : public DeviceFixture {
   public:
-    void SetUp() {
-        DeviceFixture::SetUp();
+    void setUp() {
+        DeviceFixture::setUp();
     }
-    void TearDown() {
-        DeviceFixture::TearDown();
+    void tearDown() {
+        DeviceFixture::tearDown();
     }
     DebugManagerStateRestore restorer;
 };

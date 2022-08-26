@@ -104,22 +104,22 @@ HWTEST2_F(CommandQueueGroupTest, givenBlitterSupportAndCCSThenThreeQueueGroupsAr
     }
 }
 
-class DeviceCopyQueueGroupFixture : public DeviceFixture {
+class DeviceCopyQueueGroupXeHpCoreFixture : public DeviceFixture {
   public:
-    void SetUp() {
+    void setUp() {
         DebugManager.flags.EnableBlitterOperationsSupport.set(0);
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
     }
 
-    void TearDown() {
-        DeviceFixture::TearDown();
+    void tearDown() {
+        DeviceFixture::tearDown();
     }
     DebugManagerStateRestore restorer;
 };
 
-using DeviceCopyQueueGroupTest = Test<DeviceCopyQueueGroupFixture>;
+using DeviceCopyQueueGroupXeHpCoreTest = Test<DeviceCopyQueueGroupXeHpCoreFixture>;
 
-HWTEST2_F(DeviceCopyQueueGroupTest,
+HWTEST2_F(DeviceCopyQueueGroupXeHpCoreTest,
           givenBlitterSupportAndEnableBlitterOperationsSupportSetToZeroThenNoCopyEngineIsReturned, IsXeHpCore) {
     const uint32_t rootDeviceIndex = 0u;
     NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();

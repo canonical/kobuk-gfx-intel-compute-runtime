@@ -19,7 +19,7 @@
 using namespace NEO;
 
 struct RawBinarySipFixture : public DeviceFixture {
-    void SetUp() {
+    void setUp() {
         DebugManager.flags.LoadBinarySipFromFile.set("dummy_file.bin");
 
         backupSipInitType = std::make_unique<VariableBackup<bool>>(&MockSipData::useMockSip, false);
@@ -37,11 +37,11 @@ struct RawBinarySipFixture : public DeviceFixture {
         backupFcloseCalled = std::make_unique<VariableBackup<uint32_t>>(&IoFunctions::mockFcloseCalled, 0u);
         backupFailAfterNFopenCount = std::make_unique<VariableBackup<uint32_t>>(&IoFunctions::failAfterNFopenCount, 0u);
 
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
     }
 
-    void TearDown() {
-        DeviceFixture::TearDown();
+    void tearDown() {
+        DeviceFixture::tearDown();
     }
 
     DebugManagerStateRestore dbgRestorer;

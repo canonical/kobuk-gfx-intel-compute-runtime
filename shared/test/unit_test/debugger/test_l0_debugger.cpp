@@ -568,11 +568,11 @@ HWTEST_F(L0DebuggerMultiSubDeviceTest, givenMultiSubDevicesWhenSbaTrackingBuffer
 struct L0DebuggerSimpleParameterizedTest : public ::testing::TestWithParam<int>, DeviceFixture {
     void SetUp() override {
         NEO::DebugManager.flags.DebuggerForceSbaTrackingMode.set(GetParam());
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
     }
 
     void TearDown() override {
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
     }
 
     DebugManagerStateRestore restorer;

@@ -21,7 +21,7 @@ using namespace NEO;
 struct KernelSLMAndBarrierTest : public ClDeviceFixture,
                                  public ::testing::TestWithParam<uint32_t> {
     void SetUp() override {
-        ClDeviceFixture::SetUp();
+        ClDeviceFixture::setUp();
         program = std::make_unique<MockProgram>(toClDeviceVector(*pClDevice));
 
         kernelInfo.setCrossThreadDataSize(sizeof(crossThreadData));
@@ -34,7 +34,7 @@ struct KernelSLMAndBarrierTest : public ClDeviceFixture,
         kernelInfo.kernelDescriptor.kernelAttributes.simdSize = 32;
     }
     void TearDown() override {
-        ClDeviceFixture::TearDown();
+        ClDeviceFixture::tearDown();
     }
 
     uint32_t simd;
@@ -67,6 +67,7 @@ HWCMDTEST_P(IGFX_GEN8_CORE, KernelSLMAndBarrierTest, GivenStaticSlmSizeWhenProgr
     // After creating Mock Kernel now create Indirect Heap
     auto &indirectHeap = cmdQ.getIndirectHeap(IndirectHeap::Type::DYNAMIC_STATE, 8192);
 
+    const uint32_t threadGroupCount = 1u;
     uint64_t interfaceDescriptorOffset = indirectHeap.getUsed();
 
     size_t offsetInterfaceDescriptorData = HardwareCommandsHelper<FamilyType>::sendInterfaceDescriptorData(
@@ -78,6 +79,7 @@ HWCMDTEST_P(IGFX_GEN8_CORE, KernelSLMAndBarrierTest, GivenStaticSlmSizeWhenProgr
         0,
         0,
         0,
+        threadGroupCount,
         1,
         kernel,
         4u,
@@ -154,6 +156,7 @@ HWTEST_F(KernelSLMAndBarrierTest, GivenInterfaceDescriptorProgrammedWhenOverride
     CommandQueueHw<FamilyType> cmdQ(nullptr, pClDevice, 0, false);
     auto &indirectHeap = cmdQ.getIndirectHeap(IndirectHeap::Type::DYNAMIC_STATE, 8192);
 
+    const uint32_t threadGroupCount = 1u;
     uint64_t interfaceDescriptorOffset = indirectHeap.getUsed();
     INTERFACE_DESCRIPTOR_DATA interfaceDescriptorData;
 
@@ -166,6 +169,7 @@ HWTEST_F(KernelSLMAndBarrierTest, GivenInterfaceDescriptorProgrammedWhenOverride
         0,
         0,
         0,
+        threadGroupCount,
         1,
         kernel,
         4u,

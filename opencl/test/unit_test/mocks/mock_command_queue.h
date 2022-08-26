@@ -206,12 +206,7 @@ class MockCommandQueue : public CommandQueue {
     cl_int enqueueResourceBarrier(BarrierCommand *resourceBarrier, cl_uint numEventsInWaitList, const cl_event *eventWaitList,
                                   cl_event *event) override { return CL_SUCCESS; }
 
-    cl_int finish() override {
-        if (finishCalled) {
-            *finishCalled = true;
-        }
-        return CL_SUCCESS;
-    }
+    cl_int finish() override { return CL_SUCCESS; }
 
     cl_int flush() override { return CL_SUCCESS; }
 
@@ -232,7 +227,6 @@ class MockCommandQueue : public CommandQueue {
     std::atomic<uint32_t> latestTaskCountWaited{std::numeric_limits<uint32_t>::max()};
     std::optional<WaitStatus> waitUntilCompleteReturnValue{};
     int waitUntilCompleteCalledCount{0};
-    bool *finishCalled = nullptr;
 };
 
 template <typename GfxFamily>
@@ -382,6 +376,18 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
         isBlitEnqueueImageAllowed = BaseClass::blitEnqueueImageAllowed(origin, region, image);
         return isBlitEnqueueImageAllowed;
     }
+    bool isQueueBlocked() override {
+        if (setQueueBlocked != -1) {
+            return setQueueBlocked;
+        }
+        return BaseClass::isQueueBlocked();
+    }
+    bool isGpgpuSubmissionForBcsRequired(bool queueBlocked, TimestampPacketDependencies &timestampPacketDependencies) const override {
+        if (forceGpgpuSubmissionForBcsRequired != -1) {
+            return forceGpgpuSubmissionForBcsRequired;
+        }
+        return BaseClass::isGpgpuSubmissionForBcsRequired(queueBlocked, timestampPacketDependencies);
+    }
 
     unsigned int lastCommandType;
     std::vector<Kernel *> lastEnqueuedKernels;
@@ -396,6 +402,8 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     bool notifyEnqueueSVMMemcpyCalled = false;
     bool cpuDataTransferHandlerCalled = false;
     bool useBcsCsrOnNotifyEnabled = false;
+    int setQueueBlocked = -1;
+    int forceGpgpuSubmissionForBcsRequired = -1;
     mutable bool isBlitEnqueueImageAllowed = false;
     struct OverrideReturnValue {
         bool enabled = false;

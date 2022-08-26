@@ -138,8 +138,8 @@ ze_result_t LinuxMemoryImp::readMcChannelCounters(uint64_t &readCounters, uint64
         }
     }
     // PMT counters returns number of transactions that have occured and each tranaction is of 64 bytes
-    // Multiplying 64(tranaction size) with number of transactions gives the total reads or writes in bytes
-    constexpr uint64_t transactionSize = 64;
+    // Multiplying 32(tranaction size) with number of transactions gives the total reads or writes in bytes
+    constexpr uint64_t transactionSize = 32;
     readCounters = (counterValues[0] + counterValues[2]) * transactionSize; // Read counters are summation of total IDI_READS and DISPLAY_VC1_READS
     writeCounters = (counterValues[1]) * transactionSize;                   // Write counters are summation of IDI_WRITES
     return result;
@@ -154,7 +154,7 @@ void LinuxMemoryImp::getHbmFrequency(PRODUCT_FAMILY productFamily, unsigned shor
         if (stepping == REVISION_B) {
             const std::string baseDir = "gt/gt" + std::to_string(subdeviceId) + "/";
             // Calculating bandwidth based on HBM max frequency
-            const std::string hbmRP0FreqFile = baseDir + "hbm_RP0_freq_mhz";
+            const std::string hbmRP0FreqFile = baseDir + "mem_RP0_freq_mhz";
             uint64_t hbmFreqValue = 0;
             ze_result_t result = pSysfsAccess->read(hbmRP0FreqFile, hbmFreqValue);
             if (ZE_RESULT_SUCCESS == result) {

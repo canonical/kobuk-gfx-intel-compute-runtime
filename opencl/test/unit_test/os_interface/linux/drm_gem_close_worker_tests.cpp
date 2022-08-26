@@ -8,6 +8,7 @@
 #include "shared/source/command_stream/device_command_stream.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/helpers/aligned_memory.h"
+#include "shared/source/os_interface/linux/drm_allocation.h"
 #include "shared/source/os_interface/linux/drm_buffer_object.h"
 #include "shared/source/os_interface/linux/drm_command_stream.h"
 #include "shared/source/os_interface/linux/drm_gem_close_worker.h"
@@ -59,7 +60,7 @@ class DrmGemCloseWorkerFixture {
     DrmMockForWorker *drmMock;
     uint32_t deadCnt = deadCntInit;
 
-    void SetUp() { // NOLINT(readability-identifier-naming)
+    void setUp() {
         this->drmMock = new DrmMockForWorker(*executionEnvironment.rootDeviceEnvironments[0]);
 
         auto hwInfo = executionEnvironment.rootDeviceEnvironments[0]->getHardwareInfo();
@@ -78,7 +79,7 @@ class DrmGemCloseWorkerFixture {
         this->drmMock->gem_close_expected = 0;
     }
 
-    void TearDown() { // NOLINT(readability-identifier-naming)
+    void tearDown() {
         if (this->drmMock->gem_close_expected >= 0) {
             EXPECT_EQ(this->drmMock->gem_close_expected, this->drmMock->gem_close_cnt);
         }

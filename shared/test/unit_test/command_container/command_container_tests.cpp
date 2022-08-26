@@ -24,10 +24,10 @@ class CommandContainerTest : public DeviceFixture,
   public:
     void SetUp() override {
         ::testing::Test::SetUp();
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
     }
     void TearDown() override {
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
         ::testing::Test::TearDown();
     }
 };
@@ -219,7 +219,7 @@ TEST_F(CommandContainerTest, givenCmdContainerWithAllocsListWhenAllocateAndReset
     auto cmdBuffer1 = cmdBufferAllocs[1];
 
     cmdContainer->reset();
-    EXPECT_EQ(memoryManager->handleFenceCompletionCalled, 1u);
+    EXPECT_EQ(memoryManager->handleFenceCompletionCalled, 0u);
     EXPECT_EQ(cmdBufferAllocs.size(), 1u);
     EXPECT_EQ(cmdBufferAllocs[0], cmdBuffer0);
     EXPECT_FALSE(allocList.peekIsEmpty());
@@ -231,7 +231,7 @@ TEST_F(CommandContainerTest, givenCmdContainerWithAllocsListWhenAllocateAndReset
     EXPECT_TRUE(allocList.peekIsEmpty());
 
     cmdContainer.reset();
-    EXPECT_EQ(memoryManager->handleFenceCompletionCalled, 3u);
+    EXPECT_EQ(memoryManager->handleFenceCompletionCalled, 0u);
     EXPECT_FALSE(allocList.peekIsEmpty());
     allocList.freeAllGraphicsAllocations(pDevice);
 }
@@ -554,11 +554,11 @@ class CommandContainerHeaps : public DeviceFixture,
                               public ::testing::TestWithParam<IndirectHeap::Type> {
   public:
     void SetUp() override {
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
     }
 
     void TearDown() override {
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
     }
 };
 

@@ -97,23 +97,8 @@ ze_result_t SysmanDeviceImp::init() {
     if (ZE_RESULT_SUCCESS != result) {
         return result;
     }
-    if (pPci) {
-        pPci->init();
-    }
     if (pEngineHandleContext) {
         pEngineHandleContext->init();
-    }
-    if (pSchedulerHandleContext) {
-        pSchedulerHandleContext->init(deviceHandles);
-    }
-    if (pMemoryHandleContext) {
-        pMemoryHandleContext->init(deviceHandles);
-    }
-    if (pGlobalOperations) {
-        pGlobalOperations->init();
-    }
-    if (pEvents) {
-        pEvents->init();
     }
     return result;
 }

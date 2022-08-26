@@ -29,7 +29,7 @@
 namespace L0 {
 namespace ult {
 
-using ContextCreateCommandQueueTest = Test<ContextFixture>;
+using ContextCreateCommandQueueTest = Test<DeviceFixture>;
 
 TEST_F(ContextCreateCommandQueueTest, givenCallToContextCreateCommandQueueThenCallSucceeds) {
     ze_command_queue_desc_t desc = {};
@@ -122,7 +122,6 @@ HWTEST_TEMPLATED_F(AubCsrTest, givenAubCsrWhenCallingExecuteCommandListsThenPoll
 
     auto aubCsr = static_cast<NEO::UltAubCommandStreamReceiver<FamilyType> *>(csr);
     CommandQueue *queue = static_cast<CommandQueue *>(L0::CommandQueue::fromHandle(commandQueue));
-    queue->setCommandQueuePreemptionMode(PreemptionMode::Disabled);
     EXPECT_EQ(aubCsr->pollForCompletionCalled, 0u);
 
     std::unique_ptr<L0::CommandList> commandList(L0::CommandList::create(productFamily, device, NEO::EngineGroupType::Compute, 0u, returnValue));
@@ -135,7 +134,7 @@ HWTEST_TEMPLATED_F(AubCsrTest, givenAubCsrWhenCallingExecuteCommandListsThenPoll
     L0::CommandQueue::fromHandle(commandQueue)->destroy();
 }
 
-using CommandQueueSynchronizeTest = Test<ContextFixture>;
+using CommandQueueSynchronizeTest = Test<DeviceFixture>;
 using MultiTileCommandQueueSynchronizeTest = Test<SingleRootMultiSubDeviceFixture>;
 
 template <typename GfxFamily>
@@ -504,7 +503,7 @@ HWTEST_F(CommandQueueSynchronizeTest, givenSynchronousCommandQueueWhenTagUpdateF
     L0::CommandQueue::fromHandle(commandQueue)->destroy();
 }
 
-using CommandQueuePowerHintTest = Test<ContextFixture>;
+using CommandQueuePowerHintTest = Test<DeviceFixture>;
 
 HWTEST_F(CommandQueuePowerHintTest, givenDriverHandleWithPowerHintAndOsContextPowerHintUnsetThenSuccessIsReturned) {
     auto csr = std::unique_ptr<TestCmdQueueCsr<FamilyType>>(new TestCmdQueueCsr<FamilyType>(*device->getNEODevice()->getExecutionEnvironment(),
@@ -704,10 +703,10 @@ struct DeviceWithDualStorage : Test<DeviceFixture> {
         NEO::MockCompilerEnableGuard mock(true);
         DebugManager.flags.EnableLocalMemory.set(1);
         DebugManager.flags.AllocateSharedAllocationsWithCpuAndGpuStorage.set(1);
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
     }
     void TearDown() override {
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
     }
     DebugManagerStateRestore restorer;
 };

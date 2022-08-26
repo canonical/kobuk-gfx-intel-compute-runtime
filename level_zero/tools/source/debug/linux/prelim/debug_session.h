@@ -12,6 +12,7 @@
 #include "shared/source/os_interface/linux/sys_calls.h"
 
 #include "level_zero/core/source/device/device.h"
+#include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/tools/source/debug/debug_session.h"
 #include "level_zero/tools/source/debug/debug_session_imp.h"
 
@@ -28,6 +29,9 @@ struct EngineClassInstance;
 namespace L0 {
 
 struct DebugSessionLinux : DebugSessionImp {
+
+    friend struct TileDebugSessionLinux;
+
     ~DebugSessionLinux() override;
     DebugSessionLinux(const zet_debug_config_t &config, Device *device, int debugFd);
 
@@ -103,6 +107,7 @@ struct DebugSessionLinux : DebugSessionImp {
         uint64_t elfUuidHandle;
         uint64_t vmHandle;
         bool tileInstanced = false;
+        bool perKernelModule = true;
 
         uint64_t moduleBegin;
         uint64_t moduleEnd;
@@ -114,10 +119,10 @@ struct DebugSessionLinux : DebugSessionImp {
     };
 
     struct Module {
-        std::unordered_set<uint64_t> loadAddresses;
+        std::unordered_set<uint64_t> loadAddresses[NEO::EngineLimits::maxHandleCount];
         uint64_t elfUuidHandle;
         uint32_t segmentCount;
-        int segmentVmBindCounter;
+        int segmentVmBindCounter[NEO::EngineLimits::maxHandleCount];
     };
 
     static bool apiEventCompare(const zet_debug_event_t &event1, const zet_debug_event_t &event2) {
@@ -137,7 +142,7 @@ struct DebugSessionLinux : DebugSessionImp {
         std::unordered_map<uint64_t, BindInfo> vmToStateBaseAreaBindInfo;
         std::unordered_map<uint64_t, uint32_t> vmToTile;
 
-        std::unordered_map<uint64_t, std::unique_ptr<IsaAllocation>> isaMap;
+        std::unordered_map<uint64_t, std::unique_ptr<IsaAllocation>> isaMap[NEO::EngineLimits::maxHandleCount];
         std::unordered_map<uint64_t, uint64_t> elfMap;
         std::unordered_map<uint64_t, ContextHandle> lrcToContextHandle;
 
@@ -145,12 +150,11 @@ struct DebugSessionLinux : DebugSessionImp {
         uint64_t contextStateSaveAreaGpuVa = 0;
         uint64_t stateBaseAreaGpuVa = 0;
 
-        std::vector<std::pair<zet_debug_event_t, prelim_drm_i915_debug_event_ack>> eventsToAck;
-
         std::unordered_map<uint64_t, Module> uuidToModule;
     };
 
     static ze_result_t translateDebuggerOpenErrno(int error);
+
     constexpr static uint64_t invalidClientHandle = std::numeric_limits<uint64_t>::max();
     constexpr static uint64_t invalidHandle = std::numeric_limits<uint64_t>::max();
 
@@ -182,7 +186,7 @@ struct DebugSessionLinux : DebugSessionImp {
             eventToAck.flags = 0;
             debugEvent.flags = ZET_DEBUG_EVENT_FLAG_NEED_ACK;
 
-            clientHandleToConnection[clientHandle]->eventsToAck.push_back(
+            eventsToAck.push_back(
                 std::pair<zet_debug_event_t, prelim_drm_i915_debug_event_ack>(debugEvent, eventToAck));
         }
 
@@ -211,6 +215,7 @@ struct DebugSessionLinux : DebugSessionImp {
     void handleContextParamEvent(prelim_drm_i915_debug_event_context_param *contextParam);
     void handleAttentionEvent(prelim_drm_i915_debug_event_eu_attention *attention);
     void handleEnginesEvent(prelim_drm_i915_debug_event_engines *engines);
+    bool ackIsaEvents(uint32_t deviceIndex, uint64_t isaVa);
 
     void extractUuidData(uint64_t client, const UuidData &uuidData);
     uint64_t extractVaFromUuidString(std::string &uuid);
@@ -227,6 +232,12 @@ struct DebugSessionLinux : DebugSessionImp {
     ze_result_t getElfOffset(const zet_debug_memory_space_desc_t *desc, size_t size, const char *&elfData, uint64_t &offset);
     ze_result_t readElfSpace(const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer,
                              const char *&elfData, const uint64_t offset);
+    bool tryReadElf(const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, ze_result_t &status);
+
+    bool tryWriteIsa(uint32_t deviceIndex, const zet_debug_memory_space_desc_t *desc, size_t size, const void *buffer, ze_result_t &status);
+    bool tryReadIsa(uint32_t deviceIndex, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, ze_result_t &status);
+    bool tryAccessIsa(uint32_t deviceIndex, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, bool write, ze_result_t &status);
+    ze_result_t accessDefaultMemForThreadAll(const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, bool write);
 
     bool readSystemRoutineIdent(EuThread *thread, uint64_t vmHandle, SIP::sr_ident &srIdent) override;
 
@@ -240,6 +251,7 @@ struct DebugSessionLinux : DebugSessionImp {
     std::mutex internalEventThreadMutex;
     std::condition_variable internalEventCondition;
     std::queue<std::unique_ptr<uint64_t[]>> internalEventQueue;
+    std::vector<std::pair<zet_debug_event_t, prelim_drm_i915_debug_event_ack>> eventsToAck;
 
     int fd = 0;
     int ioctl(unsigned long request, void *arg);
@@ -252,6 +264,48 @@ struct DebugSessionLinux : DebugSessionImp {
     uint64_t euControlInterruptSeqno[NEO::EngineLimits::maxHandleCount];
 
     std::unordered_map<uint64_t, std::unique_ptr<ClientConnection>> clientHandleToConnection;
+};
+
+struct TileDebugSessionLinux : DebugSessionLinux {
+    TileDebugSessionLinux(zet_debug_config_t config, Device *device, DebugSessionImp *rootDebugSession) : DebugSessionLinux(config, device, 0),
+                                                                                                          rootDebugSession(reinterpret_cast<DebugSessionLinux *>(rootDebugSession)){};
+    ~TileDebugSessionLinux() override = default;
+
+    bool closeConnection() override { return true; };
+    ze_result_t initialize() override { return ZE_RESULT_SUCCESS; };
+
+    ze_result_t interrupt(ze_device_thread_t thread) override;
+
+    ze_result_t resume(ze_device_thread_t thread) override;
+    ze_result_t readMemory(ze_device_thread_t thread, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer) override;
+    ze_result_t writeMemory(ze_device_thread_t thread, const zet_debug_memory_space_desc_t *desc, size_t size, const void *buffer) override;
+    ze_result_t acknowledgeEvent(const zet_debug_event_t *event) override;
+    ze_result_t readRegisters(ze_device_thread_t thread, uint32_t type, uint32_t start, uint32_t count, void *pRegisterValues) override;
+    ze_result_t writeRegisters(ze_device_thread_t thread, uint32_t type, uint32_t start, uint32_t count, void *pRegisterValues) override;
+
+  protected:
+    void startAsyncThread() override { UNRECOVERABLE_IF(true); };
+
+    bool readModuleDebugArea() override { return true; };
+
+    uint64_t getContextStateSaveAreaGpuVa(uint64_t memoryHandle) override {
+        return 0;
+    };
+
+    void readStateSaveAreaHeader() override{};
+
+    ze_result_t readGpuMemory(uint64_t vmHandle, char *output, size_t size, uint64_t gpuVa) override {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    };
+    ze_result_t writeGpuMemory(uint64_t vmHandle, const char *input, size_t size, uint64_t gpuVa) override {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    };
+
+    ze_result_t readSbaBuffer(EuThread::ThreadId threadId, NEO::SbaTrackedAddresses &sbaBuffer) override {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    };
+
+    DebugSessionLinux *rootDebugSession = nullptr;
 };
 
 } // namespace L0

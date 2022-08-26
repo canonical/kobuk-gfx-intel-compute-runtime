@@ -62,17 +62,17 @@ static constexpr ConstStringRef externalFunctions = "Intel_Symbol_Table_Void_Pro
 } // namespace SectionsNamesZebin
 
 static constexpr ConstStringRef IntelGtNoteOwnerName = "IntelGT";
-struct IntelGTNote : ElfNoteSection {
-    char ownerName[8];
-    uint32_t desc;
-};
-static_assert(sizeof(IntelGTNote) == 0x18, "");
 enum IntelGTSectionType : uint32_t {
     ProductFamily = 1,
     GfxCore = 2,
-    TargetMetadata = 3
+    TargetMetadata = 3,
+    ZebinVersion = 4,
+    LastSupported = ZebinVersion
 };
-
+struct IntelGTNote {
+    IntelGTSectionType type;
+    ArrayRef<const uint8_t> data;
+};
 struct ZebinTargetFlags {
     union {
         struct {
@@ -168,6 +168,10 @@ static constexpr ConstStringRef accessType("access_type");
 static constexpr ConstStringRef samplerIndex("sampler_index");
 static constexpr ConstStringRef sourceOffset("source_offset");
 static constexpr ConstStringRef slmArgAlignment("slm_alignment");
+static constexpr ConstStringRef imageType("image_type");
+static constexpr ConstStringRef imageTransformable("image_transformable");
+static constexpr ConstStringRef samplerType("sampler_type");
+
 namespace ArgType {
 static constexpr ConstStringRef localSize("local_size");
 static constexpr ConstStringRef groupCount("group_count");
@@ -182,7 +186,64 @@ static constexpr ConstStringRef bufferOffset("buffer_offset");
 static constexpr ConstStringRef printfBuffer("printf_buffer");
 static constexpr ConstStringRef workDimensions("work_dimensions");
 static constexpr ConstStringRef implicitArgBuffer("implicit_arg_buffer");
+namespace Image {
+static constexpr ConstStringRef width("image_width");
+static constexpr ConstStringRef height("image_height");
+static constexpr ConstStringRef depth("image_depth");
+static constexpr ConstStringRef channelDataType("image_channel_data_type");
+static constexpr ConstStringRef channelOrder("image_channel_order");
+static constexpr ConstStringRef arraySize("image_array_size");
+static constexpr ConstStringRef numSamples("image_num_samples");
+static constexpr ConstStringRef numMipLevels("image_num_mip_levels");
+static constexpr ConstStringRef flatBaseOffset("flat_image_baseoffset");
+static constexpr ConstStringRef flatWidth("flat_image_width");
+static constexpr ConstStringRef flatHeight("flat_image_height");
+static constexpr ConstStringRef flatPitch("flat_image_pitch");
+} // namespace Image
+namespace Sampler {
+static constexpr ConstStringRef snapWa("sampler_snap_wa");
+static constexpr ConstStringRef normCoords("sampler_normalized");
+static constexpr ConstStringRef addrMode("sampler_address");
+namespace Vme {
+static constexpr ConstStringRef blockType("vme_mb_block_type");
+static constexpr ConstStringRef subpixelMode("vme_subpixel_mode");
+static constexpr ConstStringRef sadAdjustMode("vme_sad_adjust_mode");
+static constexpr ConstStringRef searchPathType("vme_search_path_type");
+} // namespace Vme
+} // namespace Sampler
 } // namespace ArgType
+namespace ImageType {
+static constexpr ConstStringRef imageTypeBuffer("image_buffer");
+static constexpr ConstStringRef imageType1D("image_1d");
+static constexpr ConstStringRef imageType1DArray("image_1d_array");
+static constexpr ConstStringRef imageType2D("image_2d");
+static constexpr ConstStringRef imageType2DArray("image_2d_array");
+static constexpr ConstStringRef imageType3D("image_3d");
+static constexpr ConstStringRef imageTypeCube("image_cube_array");
+static constexpr ConstStringRef imageTypeCubeArray("image_buffer");
+static constexpr ConstStringRef imageType2DDepth("image_2d_depth");
+static constexpr ConstStringRef imageType2DArrayDepth("image_2d_array_depth");
+static constexpr ConstStringRef imageType2DMSAA("image_2d_msaa");
+static constexpr ConstStringRef imageType2DMSAADepth("image_2d_msaa_depth");
+static constexpr ConstStringRef imageType2DArrayMSAA("image_2d_array_msaa");
+static constexpr ConstStringRef imageType2DArrayMSAADepth("image_2d_array_msaa_depth");
+static constexpr ConstStringRef imageType2DMedia("image_2d_media");
+static constexpr ConstStringRef imageType2DMediaBlock("image_2d_media_block");
+} // namespace ImageType
+namespace SamplerType {
+static constexpr ConstStringRef samplerTypeTexture("texture");
+static constexpr ConstStringRef samplerType8x8("sample_8x8");
+static constexpr ConstStringRef samplerType2DConsolve8x8("sample_8x8_2dconvolve");
+static constexpr ConstStringRef samplerTypeErode8x8("sample_8x8_erode");
+static constexpr ConstStringRef samplerTypeDilate8x8("sample_8x8_dilate");
+static constexpr ConstStringRef samplerTypeMinMaxFilter8x8("sample_8x8_minmaxfilter");
+static constexpr ConstStringRef samplerTypeCentroid8x8("sample_8x8_centroid");
+static constexpr ConstStringRef samplerTypeBoolCentroid8x8("sample_8x8_bool_centroid");
+static constexpr ConstStringRef samplerTypeBoolSum8x8("sample_8x8_bool_sum");
+static constexpr ConstStringRef samplerTypeVD("vd");
+static constexpr ConstStringRef samplerTypeVE("ve");
+static constexpr ConstStringRef samplerTypeVME("vme");
+} // namespace SamplerType
 namespace MemoryAddressingMode {
 static constexpr ConstStringRef stateless("stateless");
 static constexpr ConstStringRef stateful("stateful");
@@ -379,7 +440,27 @@ enum ArgType : uint8_t {
     ArgTypeBufferOffset,
     ArgTypePrintfBuffer,
     ArgTypeWorkDimensions,
-    ArgTypeImplicitArgBuffer
+    ArgTypeImplicitArgBuffer,
+    ArgTypeImageWidth,
+    ArgTypeImageHeight,
+    ArgTypeImageDepth,
+    ArgTypeImageChannelDataType,
+    ArgTypeImageChannelOrder,
+    ArgTypeImageArraySize,
+    ArgTypeImageNumSamples,
+    ArgTypeImageMipLevels,
+    ArgTypeImageFlatBaseOffset,
+    ArgTypeImageFlatWidth,
+    ArgTypeImageFlatHeight,
+    ArgTypeImageFlatPitch,
+    ArgTypeSamplerSnapWa,
+    ArgTypeSamplerNormCoords,
+    ArgTypeSamplerAddrMode,
+    ArgTypeVmeMbBlockType,
+    ArgTypeVmeSubpixelMode,
+    ArgTypeVmeSadAdjustMode,
+    ArgTypeVmeSearchPathType,
+    ArgTypeMax
 };
 
 namespace PerThreadPayloadArgument {
@@ -407,6 +488,7 @@ enum MemoryAddressingMode : uint8_t {
     MemoryAddressingModeStateless,
     MemoryAddressingModeBindless,
     MemoryAddressingModeSharedLocalMemory,
+    MemoryAddressIngModeMax
 };
 
 enum AddressSpace : uint8_t {
@@ -416,6 +498,7 @@ enum AddressSpace : uint8_t {
     AddressSpaceConstant,
     AddressSpaceImage,
     AddressSpaceSampler,
+    AddressSpaceMax
 };
 
 enum AccessType : uint8_t {
@@ -423,6 +506,45 @@ enum AccessType : uint8_t {
     AccessTypeReadonly = 1,
     AccessTypeWriteonly,
     AccessTypeReadwrite,
+    AccessTypeMax
+};
+
+enum ImageType : uint8_t {
+    ImageTypeUnknown,
+    ImageTypeBuffer,
+    ImageType1D,
+    ImageType1DArray,
+    ImageType2D,
+    ImageType2DArray,
+    ImageType3D,
+    ImageTypeCube,
+    ImageTypeCubeArray,
+    ImageType2DDepth,
+    ImageType2DArrayDepth,
+    ImageType2DMSAA,
+    ImageType2DMSAADepth,
+    ImageType2DArrayMSAA,
+    ImageType2DArrayMSAADepth,
+    ImageType2DMedia,
+    ImageType2DMediaBlock,
+    ImageTypeMax
+};
+
+enum SamplerType : uint8_t {
+    SamplerTypeUnknown,
+    SamplerTypeTexture,
+    SamplerType8x8,
+    SamplerType2DConvolve8x8,
+    SamplerTypeErode8x8,
+    SamplerTypeDilate8x8,
+    SamplerTypeMinMaxFilter8x8,
+    SamplerTypeCentroid8x8,
+    SamplerTypeBoolCentroid8x8,
+    SamplerTypeBoolSum8x8,
+    SamplerTypeVME,
+    SamplerTypeVE,
+    SamplerTypeVD,
+    SamplerTypeMax
 };
 
 using ArgTypeT = ArgType;
@@ -454,6 +576,9 @@ struct PayloadArgumentBaseT {
     AccessTypeT accessType = AccessTypeUnknown;
     SamplerIndexT samplerIndex = Defaults::samplerIndex;
     SlmAlignmentT slmArgAlignment = Defaults::slmArgAlignment;
+    ImageType imageType = ImageTypeUnknown;
+    bool imageTransformable = false;
+    SamplerType samplerType = SamplerTypeUnknown;
 };
 
 } // namespace PayloadArgument
@@ -472,14 +597,16 @@ enum AllocationType : uint8_t {
     AllocationTypeUnknown = 0,
     AllocationTypeGlobal,
     AllocationTypeScratch,
-    AllocationTypeSlm
+    AllocationTypeSlm,
+    AllocationTypeMax
 };
 
 enum MemoryUsage : uint8_t {
     MemoryUsageUnknown = 0,
     MemoryUsagePrivateSpace,
     MemoryUsageSpillFillSpace,
-    MemoryUsageSingleSpace
+    MemoryUsageSingleSpace,
+    MemoryUsageMax
 };
 
 using SizeT = int32_t;

@@ -141,6 +141,10 @@ bool IoctlHelper::setDomainCpu(uint32_t handle, bool writeEnable) {
     return this->ioctl(DrmIoctl::GemSetDomain, &setDomain) == 0u;
 }
 
+uint32_t IoctlHelper::getFlagsForPrimeHandleToFd() const {
+    return DRM_CLOEXEC | DRM_RDWR;
+}
+
 unsigned int IoctlHelper::getIoctlRequestValueBase(DrmIoctl ioctlRequest) const {
     switch (ioctlRequest) {
     case DrmIoctl::Getparam:
@@ -193,6 +197,26 @@ unsigned int IoctlHelper::getIoctlRequestValueBase(DrmIoctl ioctlRequest) const 
 
 int IoctlHelper::getDrmParamValueBase(DrmParam drmParam) const {
     switch (drmParam) {
+    case DrmParam::ContextCreateExtSetparam:
+        return I915_CONTEXT_CREATE_EXT_SETPARAM;
+    case DrmParam::ContextCreateFlagsUseExtensions:
+        return I915_CONTEXT_CREATE_FLAGS_USE_EXTENSIONS;
+    case DrmParam::ContextEnginesExtLoadBalance:
+        return I915_CONTEXT_ENGINES_EXT_LOAD_BALANCE;
+    case DrmParam::ContextParamEngines:
+        return I915_CONTEXT_PARAM_ENGINES;
+    case DrmParam::ContextParamGttSize:
+        return I915_CONTEXT_PARAM_GTT_SIZE;
+    case DrmParam::ContextParamPersistence:
+        return I915_CONTEXT_PARAM_PERSISTENCE;
+    case DrmParam::ContextParamPriority:
+        return I915_CONTEXT_PARAM_PRIORITY;
+    case DrmParam::ContextParamRecoverable:
+        return I915_CONTEXT_PARAM_RECOVERABLE;
+    case DrmParam::ContextParamSseu:
+        return I915_CONTEXT_PARAM_SSEU;
+    case DrmParam::ContextParamVm:
+        return I915_CONTEXT_PARAM_VM;
     case DrmParam::EngineClassRender:
         return drm_i915_gem_engine_class::I915_ENGINE_CLASS_RENDER;
     case DrmParam::EngineClassCopy:
@@ -217,6 +241,10 @@ int IoctlHelper::getDrmParamValueBase(DrmParam drmParam) const {
         return drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE;
     case DrmParam::MemoryClassSystem:
         return drm_i915_gem_memory_class::I915_MEMORY_CLASS_SYSTEM;
+    case DrmParam::MmapOffsetWb:
+        return I915_MMAP_OFFSET_WB;
+    case DrmParam::MmapOffsetWc:
+        return I915_MMAP_OFFSET_WC;
     case DrmParam::ParamChipsetId:
         return I915_PARAM_CHIPSET_ID;
     case DrmParam::ParamRevision:
@@ -239,6 +267,10 @@ int IoctlHelper::getDrmParamValueBase(DrmParam drmParam) const {
         return DRM_I915_QUERY_ENGINE_INFO;
     case DrmParam::QueryMemoryRegions:
         return DRM_I915_QUERY_MEMORY_REGIONS;
+    case DrmParam::QueryTopologyInfo:
+        return DRM_I915_QUERY_TOPOLOGY_INFO;
+    case DrmParam::SchedulerCapPreemption:
+        return I915_SCHEDULER_CAP_PREEMPTION;
     case DrmParam::TilingNone:
         return I915_TILING_NONE;
     case DrmParam::TilingY:

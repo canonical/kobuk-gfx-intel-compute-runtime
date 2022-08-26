@@ -39,7 +39,7 @@ std::pair<bool, bool> HwInfoConfigHw<gfxProduct>::isPipeControlPriorToNonPipelin
 
 template <>
 void HwInfoConfigHw<gfxProduct>::adjustSamplerState(void *sampler, const HardwareInfo &hwInfo) {
-    using SAMPLER_STATE = typename XE_HPC_COREFamily::SAMPLER_STATE;
+    using SAMPLER_STATE = typename XeHpcCoreFamily::SAMPLER_STATE;
 
     auto samplerState = reinterpret_cast<SAMPLER_STATE *>(sampler);
     if (DebugManager.flags.ForceSamplerLowFilteringPrecision.get()) {
@@ -52,4 +52,9 @@ void HwInfoConfigHw<gfxProduct>::getKernelExtendedProperties(uint32_t *fp16, uin
     *fp16 = (FP_ATOMIC_EXT_FLAG_GLOBAL_LOAD_STORE | FP_ATOMIC_EXT_FLAG_GLOBAL_ADD | FP_ATOMIC_EXT_FLAG_GLOBAL_MIN_MAX);
     *fp32 = (FP_ATOMIC_EXT_FLAG_GLOBAL_LOAD_STORE | FP_ATOMIC_EXT_FLAG_GLOBAL_ADD | FP_ATOMIC_EXT_FLAG_GLOBAL_MIN_MAX);
     *fp64 = (FP_ATOMIC_EXT_FLAG_GLOBAL_LOAD_STORE | FP_ATOMIC_EXT_FLAG_GLOBAL_ADD | FP_ATOMIC_EXT_FLAG_GLOBAL_MIN_MAX);
+}
+
+template <>
+bool HwInfoConfigHw<gfxProduct>::isPrefetcherDisablingInDirectSubmissionRequired() const {
+    return false;
 }

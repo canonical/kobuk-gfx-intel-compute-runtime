@@ -16,6 +16,7 @@
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/fixtures/memory_management_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/raii_hw_helper.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
@@ -27,7 +28,6 @@
 #include "shared/test/common/mocks/mock_os_context.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/common/test_macros/test_checks_shared.h"
-#include "shared/test/unit_test/helpers/raii_hw_helper.h"
 
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/event/event.h"
@@ -58,15 +58,15 @@ struct CommandQueueMemoryDevice
     : public MemoryManagementFixture,
       public ClDeviceFixture {
 
-    void SetUp() override {
-        MemoryManagementFixture::SetUp();
-        ClDeviceFixture::SetUp();
+    void setUp() {
+        MemoryManagementFixture::setUp();
+        ClDeviceFixture::setUp();
     }
 
-    void TearDown() override {
-        ClDeviceFixture::TearDown();
+    void tearDown() {
+        ClDeviceFixture::tearDown();
         platformsImpl->clear();
-        MemoryManagementFixture::TearDown();
+        MemoryManagementFixture::tearDown();
     }
 };
 
@@ -76,25 +76,25 @@ struct CommandQueueTest
       public CommandQueueFixture,
       ::testing::TestWithParam<uint64_t /*cl_command_queue_properties*/> {
 
-    using CommandQueueFixture::SetUp;
-    using ContextFixture::SetUp;
+    using CommandQueueFixture::setUp;
+    using ContextFixture::setUp;
 
     CommandQueueTest() {
     }
 
     void SetUp() override {
-        CommandQueueMemoryDevice::SetUp();
+        CommandQueueMemoryDevice::setUp();
         properties = GetParam();
 
         cl_device_id device = pClDevice;
-        ContextFixture::SetUp(1, &device);
-        CommandQueueFixture::SetUp(pContext, pClDevice, properties);
+        ContextFixture::setUp(1, &device);
+        CommandQueueFixture::setUp(pContext, pClDevice, properties);
     }
 
     void TearDown() override {
-        CommandQueueFixture::TearDown();
-        ContextFixture::TearDown();
-        CommandQueueMemoryDevice::TearDown();
+        CommandQueueFixture::tearDown();
+        ContextFixture::tearDown();
+        CommandQueueMemoryDevice::tearDown();
     }
 
     cl_command_queue_properties properties;
@@ -183,18 +183,18 @@ struct GetTagTest : public ClDeviceFixture,
                     public CommandStreamFixture,
                     public ::testing::Test {
 
-    using CommandQueueFixture::SetUp;
+    using CommandQueueFixture::setUp;
 
     void SetUp() override {
-        ClDeviceFixture::SetUp();
-        CommandQueueFixture::SetUp(nullptr, pClDevice, 0);
-        CommandStreamFixture::SetUp(pCmdQ);
+        ClDeviceFixture::setUp();
+        CommandQueueFixture::setUp(nullptr, pClDevice, 0);
+        CommandStreamFixture::setUp(pCmdQ);
     }
 
     void TearDown() override {
-        CommandStreamFixture::TearDown();
-        CommandQueueFixture::TearDown();
-        ClDeviceFixture::TearDown();
+        CommandStreamFixture::tearDown();
+        CommandQueueFixture::tearDown();
+        ClDeviceFixture::tearDown();
     }
 };
 
@@ -386,13 +386,13 @@ TEST(CommandQueue, givenCmdQueueBlockedByAbortedVirtualEventWhenUnblockingThenUp
 struct CommandQueueCommandStreamTest : public CommandQueueMemoryDevice,
                                        public ::testing::Test {
     void SetUp() override {
-        CommandQueueMemoryDevice::SetUp();
+        CommandQueueMemoryDevice::setUp();
         context.reset(new MockContext(pClDevice));
     }
 
     void TearDown() override {
         context.reset();
-        CommandQueueMemoryDevice::TearDown();
+        CommandQueueMemoryDevice::tearDown();
     }
     std::unique_ptr<MockContext> context;
 };
@@ -584,13 +584,13 @@ HWTEST_F(CommandQueueCommandStreamTest, givenMultiDispatchInfoWithSingleKernelWi
 struct CommandQueueIndirectHeapTest : public CommandQueueMemoryDevice,
                                       public ::testing::TestWithParam<IndirectHeap::Type> {
     void SetUp() override {
-        CommandQueueMemoryDevice::SetUp();
+        CommandQueueMemoryDevice::setUp();
         context.reset(new MockContext(pClDevice));
     }
 
     void TearDown() override {
         context.reset();
-        CommandQueueMemoryDevice::TearDown();
+        CommandQueueMemoryDevice::tearDown();
     }
     std::unique_ptr<MockContext> context;
 };
@@ -1529,17 +1529,6 @@ TEST(CommandQueueDestructorTest, whenCommandQueueIsDestroyedThenDestroysTimestam
     EXPECT_EQ(2, context->getRefInternalCount());
     context->release();
     EXPECT_EQ(1, context->getRefInternalCount()); // NOLINT(clang-analyzer-cplusplus.NewDelete)
-}
-
-TEST(CommandQueueDestructorTest, GivenCommandQueueWhenDeletedThenFinishIsCalled) {
-    auto context = std::make_unique<MockContext>();
-    EXPECT_EQ(1, context->getRefInternalCount());
-    auto queue = new MockCommandQueue(context.get(), context->getDevice(0), nullptr, false);
-    cl_int ret = 0;
-    bool finishCalled = false;
-    queue->finishCalled = &finishCalled;
-    releaseQueue(queue, ret);
-    EXPECT_TRUE(finishCalled); // NOLINT
 }
 
 TEST(CommandQueuePropertiesTests, whenGetEngineIsCalledThenQueueEngineIsReturned) {

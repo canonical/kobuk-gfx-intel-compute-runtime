@@ -13,6 +13,7 @@
 #include "shared/source/memory_manager/surface.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/os_interface/os_context.h"
+#include "shared/test/common/device_binary_format/patchtokens_tests.h"
 #include "shared/test/common/fixtures/memory_management_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/kernel_binary_helper.h"
@@ -21,7 +22,6 @@
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/test_macros/hw_test.h"
-#include "shared/test/unit_test/device_binary_format/patchtokens_tests.h"
 #include "shared/test/unit_test/page_fault_manager/mock_cpu_page_fault_manager.h"
 
 #include "opencl/source/api/api.h"
@@ -158,17 +158,17 @@ struct MockResidentTestsPageFaultManager : public MockPageFaultManager {
 };
 
 class GTPinFixture : public ContextFixture, public MemoryManagementFixture {
-    using ContextFixture::SetUp;
+    using ContextFixture::setUp;
 
   public:
-    void SetUp() override {
+    void setUp() {
         DebugManager.flags.GTPinAllocateBufferInSharedMemory.set(false);
         setUpImpl();
     }
 
     void setUpImpl() {
         platformsImpl->clear();
-        MemoryManagementFixture::SetUp();
+        MemoryManagementFixture::setUp();
         constructPlatform();
         pPlatform = platform();
         auto executionEnvironment = pPlatform->peekExecutionEnvironment();
@@ -182,7 +182,7 @@ class GTPinFixture : public ContextFixture, public MemoryManagementFixture {
         pDevice = pPlatform->getClDevice(0);
         rootDeviceIndex = pDevice->getRootDeviceIndex();
         cl_device_id device = pDevice;
-        ContextFixture::SetUp(1, &device);
+        ContextFixture::setUp(1, &device);
 
         driverServices.bufferAllocate = nullptr;
         driverServices.bufferDeallocate = nullptr;
@@ -200,10 +200,10 @@ class GTPinFixture : public ContextFixture, public MemoryManagementFixture {
         kernelOffset = 0;
     }
 
-    void TearDown() override {
-        ContextFixture::TearDown();
+    void tearDown() {
+        ContextFixture::tearDown();
         platformsImpl->clear();
-        MemoryManagementFixture::TearDown();
+        MemoryManagementFixture::tearDown();
         NEO::isGTPinInitialized = false;
     }
 
@@ -2391,13 +2391,13 @@ HWTEST_F(GTPinTests, givenGtPinInitializedWhenSubmittingKernelCommandThenFlushed
 
 class GTPinFixtureWithLocalMemory : public GTPinFixture {
   public:
-    void SetUp() override {
+    void setUp() {
         DebugManager.flags.EnableLocalMemory.set(true);
         DebugManager.flags.GTPinAllocateBufferInSharedMemory.set(true);
         GTPinFixture::setUpImpl();
     }
-    void TearDown() override {
-        GTPinFixture::TearDown();
+    void tearDown() {
+        GTPinFixture::tearDown();
     }
     DebugManagerStateRestore restore;
 };

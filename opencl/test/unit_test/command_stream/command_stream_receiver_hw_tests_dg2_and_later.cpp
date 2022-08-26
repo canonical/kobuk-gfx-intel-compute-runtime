@@ -24,13 +24,13 @@ struct CommandStreamReceiverHwTestDg2AndLater : public ClDeviceFixture,
                                                 public ::testing::Test {
 
     void SetUp() override {
-        ClDeviceFixture::SetUp();
-        HardwareParse::SetUp();
+        ClDeviceFixture::setUp();
+        HardwareParse::setUp();
     }
 
     void TearDown() override {
-        HardwareParse::TearDown();
-        ClDeviceFixture::TearDown();
+        HardwareParse::tearDown();
+        ClDeviceFixture::tearDown();
     }
 };
 

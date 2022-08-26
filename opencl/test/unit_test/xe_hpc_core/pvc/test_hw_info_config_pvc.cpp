@@ -11,9 +11,9 @@
 #include "shared/source/xe_hpc_core/pvc/device_ids_configs_pvc.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
-#include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "gtest/gtest.h"
 
@@ -123,8 +123,8 @@ PVCTEST_F(PvcHwInfo, givenVariousValuesWhenConvertingHwRevIdAndSteppingThenConve
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
     for (uint32_t testValue = 0; testValue < 0xFF; testValue++) {
-        for (const auto &pvc : {pvcXlDeviceIds, pvcXtDeviceIds}) {
-            for (const auto &deviceId : pvc) {
+        for (const auto *pvc : {&pvcXlDeviceIds, &pvcXtDeviceIds}) {
+            for (const auto &deviceId : *pvc) {
                 hwInfo.platform.usDeviceID = deviceId;
                 auto hwRevIdFromStepping = hwInfoConfig.getHwRevIdFromStepping(testValue, hwInfo);
                 if (hwRevIdFromStepping != CommonConstants::invalidStepping) {
@@ -137,8 +137,8 @@ PVCTEST_F(PvcHwInfo, givenVariousValuesWhenConvertingHwRevIdAndSteppingThenConve
         auto steppingFromHwRevId = hwInfoConfig.getSteppingFromHwRevId(hwInfo);
         if (steppingFromHwRevId != CommonConstants::invalidStepping) {
             bool anyMatchAfterConversionFromStepping = false;
-            for (const auto &pvc : {pvcXlDeviceIds, pvcXtDeviceIds}) {
-                for (const auto &deviceId : pvc) {
+            for (const auto *pvc : {&pvcXlDeviceIds, &pvcXtDeviceIds}) {
+                for (const auto &deviceId : *pvc) {
                     hwInfo.platform.usDeviceID = deviceId;
                     auto hwRevId = hwInfoConfig.getHwRevIdFromStepping(steppingFromHwRevId, hwInfo);
                     EXPECT_NE(CommonConstants::invalidStepping, hwRevId);

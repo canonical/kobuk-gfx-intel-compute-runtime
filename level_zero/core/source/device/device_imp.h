@@ -72,8 +72,9 @@ struct DeviceImp : public Device {
     uint32_t getPlatformInfo() const override;
     MetricDeviceContext &getMetricDeviceContext() override;
     DebugSession *getDebugSession(const zet_debug_config_t &config) override;
+    void setDebugSession(DebugSession *session);
     DebugSession *createDebugSession(const zet_debug_config_t &config, ze_result_t &result) override;
-    void removeDebugSession() override { debugSession.release(); }
+    void removeDebugSession() override;
 
     uint32_t getMaxNumHwThreads() const override;
     ze_result_t activateMetricGroupsDeferred(uint32_t count,
@@ -133,7 +134,7 @@ struct DeviceImp : public Device {
     CmdListCreateFunPtrT getCmdListCreateFunc(const ze_command_list_desc_t *desc);
 
   protected:
-    void adjustCommandQueueDesc(ze_command_queue_desc_t &desc);
+    void adjustCommandQueueDesc(uint32_t &ordinal, uint32_t &index);
     NEO::EngineGroupsT subDeviceCopyEngineGroups{};
 
     NEO::GraphicsAllocation *debugSurface = nullptr;

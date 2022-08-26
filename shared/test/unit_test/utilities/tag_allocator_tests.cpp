@@ -27,7 +27,7 @@ using namespace NEO;
 struct TagAllocatorTest : public Test<MemoryAllocatorFixture> {
     void SetUp() override {
         DebugManager.flags.CreateMultipleSubDevices.set(4);
-        MemoryAllocatorFixture::SetUp();
+        MemoryAllocatorFixture::setUp();
     }
 
     const DeviceBitfield deviceBitfield{0xf};

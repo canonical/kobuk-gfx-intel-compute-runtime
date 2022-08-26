@@ -15,7 +15,7 @@
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_device.h"
-#include "shared/test/unit_test/utilities/base_object_utils.h"
+#include "shared/test/common/utilities/base_object_utils.h"
 
 #include "opencl/extensions/public/cl_ext_private.h"
 #include "opencl/source/cl_device/cl_device.h"
@@ -48,7 +48,7 @@ struct CopyEngineXeHPAndLater : public MulticontextAubFixture, public ::testing:
         DebugManager.flags.RenderCompressedBuffersEnabled.set(true);
         DebugManager.flags.RenderCompressedImagesEnabled.set(true);
 
-        MulticontextAubFixture::SetUp(numTiles, EnabledCommandStreamers::Single, true);
+        MulticontextAubFixture::setUp(numTiles, EnabledCommandStreamers::Single, true);
 
         defaultCommandQueue = commandQueues[0][0].get();
         bcsCsr = tileDevices[0]->getNearestGenericSubDevice(0)->getEngine(bcsEngineType, EngineUsage::Regular).commandStreamReceiver;
@@ -67,7 +67,7 @@ struct CopyEngineXeHPAndLater : public MulticontextAubFixture, public ::testing:
     }
 
     void TearDown() override {
-        MulticontextAubFixture::TearDown();
+        MulticontextAubFixture::tearDown();
     }
 
     virtual bool compressionSupported() const {

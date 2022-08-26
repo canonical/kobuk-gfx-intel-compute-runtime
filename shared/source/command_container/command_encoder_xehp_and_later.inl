@@ -42,8 +42,7 @@ void EncodeDispatchKernel<Family>::setGrfInfo(INTERFACE_DESCRIPTOR_DATA *pInterf
 }
 
 template <typename Family>
-void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
-                                          EncodeDispatchKernelArgs &args) {
+void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDispatchKernelArgs &args, LogicalStateHelper *logicalStateHelper) {
     using SHARED_LOCAL_MEMORY_SIZE = typename Family::INTERFACE_DESCRIPTOR_DATA::SHARED_LOCAL_MEMORY_SIZE;
     using STATE_BASE_ADDRESS = typename Family::STATE_BASE_ADDRESS;
     using INLINE_DATA = typename Family::INLINE_DATA;
@@ -258,7 +257,8 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container,
 
     walkerCmd.setPredicateEnable(args.isPredicate);
 
-    EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(idd, hwInfo);
+    auto threadGroupCount = walkerCmd.getThreadGroupIdXDimension() * walkerCmd.getThreadGroupIdYDimension() * walkerCmd.getThreadGroupIdZDimension();
+    EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(idd, hwInfo, threadGroupCount, kernelDescriptor.kernelAttributes.numGrfRequired);
 
     EncodeDispatchKernel<Family>::appendAdditionalIDDFields(&idd, hwInfo, threadsPerThreadGroup,
                                                             args.dispatchInterface->getSlmTotalSize(),
@@ -474,45 +474,47 @@ template <typename Family>
 void EncodeStateBaseAddress<Family>::encode(CommandContainer &container, STATE_BASE_ADDRESS &sbaCmd, uint32_t statelessMocsIndex, bool useGlobalAtomics, bool multiOsContextCapable) {
     auto gmmHelper = container.getDevice()->getRootDeviceEnvironment().getGmmHelper();
 
-    StateBaseAddressHelper<Family>::programStateBaseAddress(
-        &sbaCmd,
-        container.isHeapDirty(HeapType::DYNAMIC_STATE) ? container.getIndirectHeap(HeapType::DYNAMIC_STATE) : nullptr,
-        container.isHeapDirty(HeapType::INDIRECT_OBJECT) ? container.getIndirectHeap(HeapType::INDIRECT_OBJECT) : nullptr,
-        container.isHeapDirty(HeapType::SURFACE_STATE) ? container.getIndirectHeap(HeapType::SURFACE_STATE) : nullptr,
-        0,
-        true,
-        statelessMocsIndex,
-        container.getIndirectObjectHeapBaseAddress(),
-        container.getInstructionHeapBaseAddress(),
-        0,
-        true,
-        false,
-        gmmHelper,
-        multiOsContextCapable,
-        MemoryCompressionState::NotApplicable,
-        useGlobalAtomics,
-        1u,
-        nullptr);
+    auto dsh = container.isHeapDirty(HeapType::DYNAMIC_STATE) ? container.getIndirectHeap(HeapType::DYNAMIC_STATE) : nullptr;
+    auto ioh = container.isHeapDirty(HeapType::INDIRECT_OBJECT) ? container.getIndirectHeap(HeapType::INDIRECT_OBJECT) : nullptr;
+    auto ssh = container.isHeapDirty(HeapType::SURFACE_STATE) ? container.getIndirectHeap(HeapType::SURFACE_STATE) : nullptr;
 
-    auto pCmd = reinterpret_cast<STATE_BASE_ADDRESS *>(container.getCommandStream()->getSpace(sizeof(STATE_BASE_ADDRESS)));
-    *pCmd = sbaCmd;
+    StateBaseAddressHelperArgs<Family> args = {
+        0,                                            // generalStateBase
+        container.getIndirectObjectHeapBaseAddress(), // indirectObjectHeapBaseAddress
+        container.getInstructionHeapBaseAddress(),    // instructionHeapBaseAddress
+        0,                                            // globalHeapsBaseAddress
+        &sbaCmd,                                      // stateBaseAddressCmd
+        dsh,                                          // dsh
+        ioh,                                          // ioh
+        ssh,                                          // ssh
+        gmmHelper,                                    // gmmHelper
+        statelessMocsIndex,                           // statelessMocsIndex
+        NEO::MemoryCompressionState::NotApplicable,   // memoryCompressionState
+        true,                                         // setInstructionStateBaseAddress
+        true,                                         // setGeneralStateBaseAddress
+        false,                                        // useGlobalHeapsBaseAddress
+        multiOsContextCapable,                        // isMultiOsContextCapable
+        useGlobalAtomics,                             // useGlobalAtomics
+        false                                         // areMultipleSubDevicesInContext
+    };
+
+    StateBaseAddressHelper<Family>::programStateBaseAddress(args);
+
+    auto cmdSpace = StateBaseAddressHelper<Family>::getSpaceForSbaCmd(*container.getCommandStream());
+    *cmdSpace = sbaCmd;
 
     auto &hwInfo = container.getDevice()->getHardwareInfo();
     auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
     if (hwInfoConfig.isAdditionalStateBaseAddressWARequired(hwInfo)) {
-        pCmd = reinterpret_cast<STATE_BASE_ADDRESS *>(container.getCommandStream()->getSpace(sizeof(STATE_BASE_ADDRESS)));
-        *pCmd = sbaCmd;
+        cmdSpace = StateBaseAddressHelper<Family>::getSpaceForSbaCmd(*container.getCommandStream());
+        *cmdSpace = sbaCmd;
     }
 
     if (container.isHeapDirty(HeapType::SURFACE_STATE)) {
         auto heap = container.getIndirectHeap(HeapType::SURFACE_STATE);
-        auto cmd = Family::cmdInitStateBindingTablePoolAlloc;
-        cmd.setBindingTablePoolBaseAddress(heap->getHeapGpuBase());
-        cmd.setBindingTablePoolBufferSize(heap->getHeapSizeInPages());
-        cmd.setSurfaceObjectControlStateIndexToMocsTables(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_STATE_HEAP_BUFFER));
-
-        auto buffer = container.getCommandStream()->getSpace(sizeof(cmd));
-        *(typename Family::_3DSTATE_BINDING_TABLE_POOL_ALLOC *)buffer = cmd;
+        StateBaseAddressHelper<Family>::programBindingTableBaseAddress(*container.getCommandStream(),
+                                                                       *heap,
+                                                                       gmmHelper);
     }
 }
 

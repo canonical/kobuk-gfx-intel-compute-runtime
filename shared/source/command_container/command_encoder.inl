@@ -672,7 +672,7 @@ void EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(INTERFACE_DESCRIPT
 }
 
 template <typename Family>
-void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo) {}
+void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo, const uint32_t threadGroupCount, const uint32_t numGrf) {}
 
 template <typename Family>
 constexpr bool EncodeDispatchKernel<Family>::shouldUpdateGlobalAtomics(bool &currentVal, bool refVal, bool updateCurrent) { return false; }
@@ -886,5 +886,13 @@ size_t EncodeMemoryFence<Family>::getSystemMemoryFenceSize() {
 template <typename Family>
 void EncodeMemoryFence<Family>::encodeSystemMemoryFence(LinearStream &commandStream, const GraphicsAllocation *globalFenceAllocation, LogicalStateHelper *logicalStateHelper) {
 }
+
+template <typename Family>
+size_t EncodeKernelArgsBuffer<Family>::getKernelArgsBufferCmdsSize(const GraphicsAllocation *kernelArgsBufferAllocation, LogicalStateHelper *logicalStateHelper) {
+    return 0;
+}
+
+template <typename Family>
+void EncodeKernelArgsBuffer<Family>::encodeKernelArgsBufferCmds(const GraphicsAllocation *kernelArgsBufferAllocation, LogicalStateHelper *logicalStateHelper) {}
 
 } // namespace NEO

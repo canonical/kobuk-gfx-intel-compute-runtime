@@ -9,11 +9,11 @@
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/os_interface/hw_info_config.h"
-#include "shared/test/common/fixtures/product_config_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/common/xe_hpg_core/dg2/product_configs_dg2.h"
+#include "shared/test/unit_test/fixtures/product_config_fixture.h"
 
 using namespace NEO;
 
@@ -342,12 +342,12 @@ DG2TEST_F(HwInfoConfigTestDg2, givenDg2WhenSetForceNonCoherentThenProperFlagSet)
     properties.isCoherencyRequired.set(false);
     hwInfoConfig->setForceNonCoherent(&stateComputeMode, properties);
     EXPECT_EQ(FORCE_NON_COHERENT::FORCE_NON_COHERENT_FORCE_GPU_NON_COHERENT, stateComputeMode.getForceNonCoherent());
-    EXPECT_EQ(XE_HPG_COREFamily::stateComputeModeForceNonCoherentMask, stateComputeMode.getMaskBits());
+    EXPECT_EQ(XeHpgCoreFamily::stateComputeModeForceNonCoherentMask, stateComputeMode.getMaskBits());
 
     properties.isCoherencyRequired.set(true);
     hwInfoConfig->setForceNonCoherent(&stateComputeMode, properties);
     EXPECT_EQ(FORCE_NON_COHERENT::FORCE_NON_COHERENT_FORCE_DISABLED, stateComputeMode.getForceNonCoherent());
-    EXPECT_EQ(XE_HPG_COREFamily::stateComputeModeForceNonCoherentMask, stateComputeMode.getMaskBits());
+    EXPECT_EQ(XeHpgCoreFamily::stateComputeModeForceNonCoherentMask, stateComputeMode.getMaskBits());
 }
 
 DG2TEST_F(HwInfoConfigTestDg2, givenEnabledSliceInNonStandardConfigWhenComputeUnitsUsedForScratchThenProperCalculationIsReturned) {
@@ -451,8 +451,8 @@ DG2TEST_F(ProductConfigTests, givenDg2G10DeviceIdWhenDifferentRevisionIsPassedTh
 }
 
 DG2TEST_F(ProductConfigTests, givenDg2DeviceIdWhenIncorrectRevisionIsPassedThenCorrectProductConfigIsReturned) {
-    for (const auto &dg2 : {dg2G10DeviceIds, dg2G11DeviceIds}) {
-        for (const auto &deviceId : dg2) {
+    for (const auto *dg2 : {&dg2G10DeviceIds, &dg2G11DeviceIds}) {
+        for (const auto &deviceId : *dg2) {
             hwInfo.platform.usDeviceID = deviceId;
             hwInfo.platform.usRevId = CommonConstants::invalidRevisionID;
             productConfig = hwInfoConfig->getProductConfigFromHwInfo(hwInfo);
@@ -502,4 +502,10 @@ DG2TEST_F(HwInfoConfigTestDg2, givenHwInfoConfigWhenAskedIfStorageInfoAdjustment
     } else {
         EXPECT_FALSE(hwInfoConfig->isStorageInfoAdjustmentRequired());
     }
+}
+
+DG2TEST_F(HwInfoConfigTestDg2, givenHwInfoConfigWhenGettingEvictWhenNecessaryFlagSupportedThenExpectTrue) {
+    HardwareInfo hwInfo = *defaultHwInfo;
+    const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    EXPECT_TRUE(hwInfoConfig.isEvictionWhenNecessaryFlagSupported());
 }

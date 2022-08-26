@@ -8,7 +8,7 @@
 #include "shared/source/xe_hpc_core/aub_mapper.h"
 #include "shared/source/xe_hpc_core/hw_cmds_xe_hpc_core_base.h"
 
-using Family = NEO::XE_HPC_COREFamily;
+using Family = NEO::XeHpcCoreFamily;
 
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
@@ -113,13 +113,6 @@ void HwHelperHw<Family>::adjustDefaultEngineType(HardwareInfo *pHwInfo) {
 template <>
 bool HwHelperHw<Family>::isLinearStoragePreferred(bool isSharedContext, bool isImage1d, bool forceLinearStorage) {
     return true;
-}
-
-template <>
-uint32_t HwHelperHw<Family>::calculateAvailableThreadCount(PRODUCT_FAMILY family, uint32_t grfCount, uint32_t euCount,
-                                                           uint32_t threadsPerEu) {
-    auto maxThreadsPerEuCount = 1024u / grfCount;
-    return maxThreadsPerEuCount * euCount;
 }
 
 template <>
@@ -287,7 +280,6 @@ std::string HwHelperHw<Family>::getExtensions(const HardwareInfo &hwInfo) const 
     extensions += "cl_intel_create_buffer_with_properties ";
     extensions += "cl_intel_dot_accumulate ";
     extensions += "cl_intel_subgroup_local_block_io ";
-    extensions += "cl_intel_subgroup_matrix_multiply_accumulate_for_PVC ";
     extensions += "cl_khr_subgroup_named_barrier ";
     extensions += "cl_intel_subgroup_extended_block_read ";
     extensions += "cl_intel_subgroup_matrix_multiply_accumulate ";

@@ -60,8 +60,7 @@ struct EncodeDispatchKernel {
     using INTERFACE_DESCRIPTOR_DATA = typename GfxFamily::INTERFACE_DESCRIPTOR_DATA;
     using BINDING_TABLE_STATE = typename GfxFamily::BINDING_TABLE_STATE;
 
-    static void encode(CommandContainer &container,
-                       EncodeDispatchKernelArgs &args);
+    static void encode(CommandContainer &container, EncodeDispatchKernelArgs &args, LogicalStateHelper *logicalStateHelper);
 
     static void encodeAdditionalWalkerFields(const HardwareInfo &hwInfo, WALKER_TYPE &walkerCmd, const EncodeWalkerArgs &walkerArgs);
 
@@ -98,7 +97,7 @@ struct EncodeDispatchKernel {
 
     static void programBarrierEnable(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t value, const HardwareInfo &hwInfo);
 
-    static void adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo);
+    static void adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo, const uint32_t threadGroupCount, const uint32_t numGrf);
 
     static void adjustBindingTablePrefetch(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t samplerCount, uint32_t bindingTableEntryCount);
 
@@ -455,6 +454,13 @@ struct EncodeMemoryFence {
     static size_t getSystemMemoryFenceSize();
 
     static void encodeSystemMemoryFence(LinearStream &commandStream, const GraphicsAllocation *globalFenceAllocation, LogicalStateHelper *logicalStateHelper);
+};
+
+template <typename GfxFamily>
+struct EncodeKernelArgsBuffer {
+    static size_t getKernelArgsBufferCmdsSize(const GraphicsAllocation *kernelArgsBufferAllocation, LogicalStateHelper *logicalStateHelper);
+
+    static void encodeKernelArgsBufferCmds(const GraphicsAllocation *kernelArgsBufferAllocation, LogicalStateHelper *logicalStateHelper);
 };
 
 } // namespace NEO

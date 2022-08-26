@@ -10,7 +10,7 @@
 #include "shared/source/command_stream/wait_status.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/ptr_math.h"
-#include "shared/test/unit_test/utilities/base_object_utils.h"
+#include "shared/test/common/utilities/base_object_utils.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/event/user_event.h"
@@ -29,18 +29,18 @@ struct EventTest
       public CommandStreamFixture,
       public ::testing::Test {
 
-    using CommandQueueFixture::SetUp;
+    using CommandQueueFixture::setUp;
 
     void SetUp() override {
-        ClDeviceFixture::SetUp();
-        CommandQueueFixture::SetUp(&mockContext, pClDevice, 0);
-        CommandStreamFixture::SetUp(pCmdQ);
+        ClDeviceFixture::setUp();
+        CommandQueueFixture::setUp(&mockContext, pClDevice, 0);
+        CommandStreamFixture::setUp(pCmdQ);
     }
 
     void TearDown() override {
-        CommandStreamFixture::TearDown();
-        CommandQueueFixture::TearDown();
-        ClDeviceFixture::TearDown();
+        CommandStreamFixture::tearDown();
+        CommandQueueFixture::tearDown();
+        ClDeviceFixture::tearDown();
     }
     MockContext mockContext;
 };
@@ -53,13 +53,13 @@ struct InternalsEventTest
     }
 
     void SetUp() override {
-        ClDeviceFixture::SetUp();
+        ClDeviceFixture::setUp();
         mockContext = new MockContext(pClDevice);
     }
 
     void TearDown() override {
         delete mockContext;
-        ClDeviceFixture::TearDown();
+        ClDeviceFixture::tearDown();
     }
 
     MockContext *mockContext = nullptr;
@@ -123,7 +123,7 @@ class MockEventTests : public HelloWorldTest<HelloWorldFixtureFactory> {
             uEvent->setStatus(-1);
             uEvent.reset();
         }
-        HelloWorldFixture::TearDown();
+        HelloWorldFixture::tearDown();
     }
 
   protected:

@@ -345,6 +345,8 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
 
     programPreemption(commandStreamCSR, dispatchFlags);
 
+    EncodeKernelArgsBuffer<GfxFamily>::encodeKernelArgsBufferCmds(kernelArgsBufferAllocation, logicalStateHelper.get());
+
     if (stallingCommandsOnNextFlushRequired) {
         programStallingCommandsForBarrier(commandStreamCSR, dispatchFlags);
     }
@@ -401,38 +403,43 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
         }
 
         auto stateBaseAddressCmdOffset = commandStreamCSR.getUsed();
-        auto pCmd = static_cast<STATE_BASE_ADDRESS *>(StateBaseAddressHelper<GfxFamily>::getSpaceForSbaCmd(commandStreamCSR));
-        STATE_BASE_ADDRESS cmd;
+        auto stateBaseAddressCmdBuffer = StateBaseAddressHelper<GfxFamily>::getSpaceForSbaCmd(commandStreamCSR);
         auto instructionHeapBaseAddress = getMemoryManager()->getInternalHeapBaseAddress(rootDeviceIndex, getMemoryManager()->isLocalMemoryUsedForIsa(rootDeviceIndex));
-        StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(
-            &cmd,
-            dsh,
-            ioh,
-            ssh,
-            newGSHbase,
-            true,
-            mocsIndex,
-            getMemoryManager()->getInternalHeapBaseAddress(rootDeviceIndex, ioh->getGraphicsAllocation()->isAllocatedInLocalMemoryPool()),
-            instructionHeapBaseAddress,
-            0,
-            true,
-            false,
-            device.getGmmHelper(),
-            isMultiOsContextCapable(),
-            memoryCompressionState,
-            dispatchFlags.useGlobalAtomics,
-            dispatchFlags.areMultipleSubDevicesInContext,
-            logicalStateHelper.get());
+        uint64_t indirectObjectStateBaseAddress = getMemoryManager()->getInternalHeapBaseAddress(rootDeviceIndex, ioh->getGraphicsAllocation()->isAllocatedInLocalMemoryPool());
 
-        if (pCmd) {
-            *pCmd = cmd;
+        STATE_BASE_ADDRESS stateBaseAddressCmd;
+
+        StateBaseAddressHelperArgs<GfxFamily> args = {
+            newGSHbase,                                  // generalStateBase
+            indirectObjectStateBaseAddress,              // indirectObjectHeapBaseAddress
+            instructionHeapBaseAddress,                  // instructionHeapBaseAddress
+            0,                                           // globalHeapsBaseAddress
+            &stateBaseAddressCmd,                        // stateBaseAddressCmd
+            dsh,                                         // dsh
+            ioh,                                         // ioh
+            ssh,                                         // ssh
+            device.getGmmHelper(),                       // gmmHelper
+            mocsIndex,                                   // statelessMocsIndex
+            memoryCompressionState,                      // memoryCompressionState
+            true,                                        // setInstructionStateBaseAddress
+            true,                                        // setGeneralStateBaseAddress
+            false,                                       // useGlobalHeapsBaseAddress
+            isMultiOsContextCapable(),                   // isMultiOsContextCapable
+            dispatchFlags.useGlobalAtomics,              // useGlobalAtomics
+            dispatchFlags.areMultipleSubDevicesInContext // areMultipleSubDevicesInContext
+        };
+
+        StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(args);
+
+        if (stateBaseAddressCmdBuffer) {
+            *stateBaseAddressCmdBuffer = stateBaseAddressCmd;
         }
 
-        programAdditionalStateBaseAddress(commandStreamCSR, cmd, device);
+        programAdditionalStateBaseAddress(commandStreamCSR, stateBaseAddressCmd, device);
 
         if (debuggingEnabled && !device.getDebugger()->isLegacy()) {
             NEO::Debugger::SbaAddresses sbaAddresses = {};
-            NEO::EncodeStateBaseAddress<GfxFamily>::setSbaAddressesForDebugger(sbaAddresses, cmd);
+            NEO::EncodeStateBaseAddress<GfxFamily>::setSbaAddressesForDebugger(sbaAddresses, stateBaseAddressCmd);
             device.getDebugger()->captureStateBaseAddress(commandStreamCSR, sbaAddresses);
         }
 
@@ -537,6 +544,10 @@ CompletionStamp CommandStreamReceiverHw<GfxFamily>::flushTask(
 
     if (workPartitionAllocation) {
         makeResident(*workPartitionAllocation);
+    }
+
+    if (kernelArgsBufferAllocation) {
+        makeResident(*kernelArgsBufferAllocation);
     }
 
     if (logicalStateHelper) {
@@ -865,6 +876,8 @@ size_t CommandStreamReceiverHw<GfxFamily>::getRequiredCmdStreamSize(const Dispat
 
     size += TimestampPacketHelper::getRequiredCmdStreamSize<GfxFamily>(dispatchFlags.csrDependencies);
     size += TimestampPacketHelper::getRequiredCmdStreamSizeForTaskCountContainer<GfxFamily>(dispatchFlags.csrDependencies);
+
+    size += EncodeKernelArgsBuffer<GfxFamily>::getKernelArgsBufferCmdsSize(kernelArgsBufferAllocation, logicalStateHelper.get());
 
     if (stallingCommandsOnNextFlushRequired) {
         size += getCmdSizeForStallingCommands(dispatchFlags);
@@ -1452,4 +1465,9 @@ template <typename GfxFamily>
 constexpr bool CommandStreamReceiverHw<GfxFamily>::isGlobalAtomicsProgrammingRequired(bool currentVal) const {
     return false;
 }
+
+template <typename GfxFamily>
+void CommandStreamReceiverHw<GfxFamily>::createKernelArgsBufferAllocation() {
+}
+
 } // namespace NEO

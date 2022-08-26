@@ -18,13 +18,13 @@
 #include "shared/test/common/helpers/custom_event_listener.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.inl"
+#include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/ult_hw_config.inl"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/libult/signal_utils.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/os_interface/linux/device_command_stream_fixture.h"
 #include "shared/test/common/test_macros/hw_test.h"
-#include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/platform/platform.h"
@@ -54,7 +54,7 @@ using namespace NEO;
 
 class DrmTestsFixture {
   public:
-    void SetUp() { // NOLINT(readability-identifier-naming)
+    void setUp() {
         if (deviceDescriptorTable[0].deviceId == 0) {
             GTEST_SKIP();
         }
@@ -63,7 +63,7 @@ class DrmTestsFixture {
         rootDeviceEnvironment = executionEnvironment.rootDeviceEnvironments[0].get();
     }
 
-    void TearDown() { // NOLINT(readability-identifier-naming)
+    void tearDown() {
     }
     ExecutionEnvironment executionEnvironment;
     RootDeviceEnvironment *rootDeviceEnvironment = nullptr;
@@ -551,7 +551,7 @@ TEST_F(DrmTests, GivenUnknownDeviceWhenCreatingDrmThenNullIsReturned) {
     auto drm = DrmWrap::createDrm(*rootDeviceEnvironment);
     EXPECT_EQ(drm, nullptr);
     std::string errStr = ::testing::internal::GetCapturedStderr();
-    EXPECT_TRUE(hasSubstr(errStr, std::string("FATAL: Unknown device: deviceId: ffffffff, revisionId: ffff")));
+    EXPECT_TRUE(hasSubstr(errStr, std::string("FATAL: Unknown device: deviceId: ffff, revisionId: ffff")));
     ::testing::internal::GetCapturedStdout();
 }
 

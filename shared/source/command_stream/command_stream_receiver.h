@@ -160,6 +160,7 @@ class CommandStreamReceiver {
     GraphicsAllocation *getPreemptionAllocation() const { return preemptionAllocation; }
     GraphicsAllocation *getGlobalFenceAllocation() const { return globalFenceAllocation; }
     GraphicsAllocation *getWorkPartitionAllocation() const { return workPartitionAllocation; }
+    GraphicsAllocation *getKernelArgsBufferAllocation() const { return kernelArgsBufferAllocation; }
 
     void requestStallingCommandsOnNextFlush() { stallingCommandsOnNextFlushRequired = true; }
     bool isStallingCommandsOnNextFlushRequired() const { return stallingCommandsOnNextFlushRequired; }
@@ -192,6 +193,7 @@ class CommandStreamReceiver {
     MOCKABLE_VIRTUAL bool createGlobalFenceAllocation();
     MOCKABLE_VIRTUAL bool createPreemptionAllocation();
     MOCKABLE_VIRTUAL bool createPerDssBackedBuffer(Device &device);
+    virtual void createKernelArgsBufferAllocation() = 0;
     MOCKABLE_VIRTUAL std::unique_lock<MutexType> obtainUniqueOwnership();
 
     bool peekTimestampPacketWriteEnabled() const { return timestampPacketWriteEnabled; }
@@ -340,6 +342,22 @@ class CommandStreamReceiver {
 
     LogicalStateHelper *getLogicalStateHelper() const;
 
+    bool getPreambleSetFlag() const {
+        return isPreambleSent;
+    }
+
+    void setPreambleSetFlag(bool value) {
+        isPreambleSent = value;
+    }
+
+    PreemptionMode getPreemptionMode() const {
+        return lastPreemptionMode;
+    }
+
+    void setPreemptionMode(PreemptionMode value) {
+        lastPreemptionMode = value;
+    }
+
   protected:
     void cleanupResources();
     void printDeviceIndex();
@@ -389,6 +407,7 @@ class CommandStreamReceiver {
     GraphicsAllocation *perDssBackedBuffer = nullptr;
     GraphicsAllocation *clearColorAllocation = nullptr;
     GraphicsAllocation *workPartitionAllocation = nullptr;
+    GraphicsAllocation *kernelArgsBufferAllocation = nullptr;
 
     MultiGraphicsAllocation *tagsMultiAllocation = nullptr;
 

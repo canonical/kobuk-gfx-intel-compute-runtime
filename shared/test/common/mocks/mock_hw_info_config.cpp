@@ -392,6 +392,11 @@ uint64_t HwInfoConfigHw<IGFX_UNKNOWN>::getHostMemCapabilitiesValue() {
 }
 
 template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isEvictionWhenNecessaryFlagSupported() const {
+    return true;
+}
+
+template <>
 const char *L1CachePolicyHelper<IGFX_UNKNOWN>::getCachingPolicyOptions() {
     return nullptr;
 }
@@ -399,6 +404,11 @@ const char *L1CachePolicyHelper<IGFX_UNKNOWN>::getCachingPolicyOptions() {
 template <>
 uint32_t L1CachePolicyHelper<IGFX_UNKNOWN>::getDefaultL1CachePolicy() {
     return 0u;
+}
+
+template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isPrefetcherDisablingInDirectSubmissionRequired() const {
+    return true;
 }
 
 } // namespace NEO

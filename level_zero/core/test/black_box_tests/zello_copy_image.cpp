@@ -13,8 +13,6 @@
 #include <iostream>
 #include <memory>
 
-bool verbose = false;
-
 void testAppendImageCopy(ze_context_handle_t &context, ze_device_handle_t &device, bool &validRet) {
     const size_t width = 32;
     const size_t height = 24;
@@ -108,7 +106,10 @@ void testAppendImageCopy(ze_context_handle_t &context, ze_device_handle_t &devic
 }
 
 int main(int argc, char *argv[]) {
+    const std::string blackBoxName = "Zello Copy Image";
     verbose = isVerbose(argc, argv);
+    bool aubMode = isAubMode(argc, argv);
+
     ze_context_handle_t context = nullptr;
     auto devices = zelloInitContextAndGetDevices(context);
     auto device = devices[0];
@@ -116,13 +117,13 @@ int main(int argc, char *argv[]) {
 
     ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
     SUCCESS_OR_TERMINATE(zeDeviceGetProperties(device, &deviceProperties));
-    std::cout << "Device : \n"
-              << " * name : " << deviceProperties.name << "\n"
-              << " * vendorId : " << std::hex << deviceProperties.vendorId << "\n";
+    printDeviceProperties(deviceProperties);
 
     testAppendImageCopy(context, device, outputValidationSuccessful);
-
     SUCCESS_OR_TERMINATE(zeContextDestroy(context));
-    std::cout << "\nZello Copy Image Results validation " << (outputValidationSuccessful ? "PASSED" : "FAILED") << "\n";
+
+    printResult(aubMode, outputValidationSuccessful, blackBoxName);
+
+    outputValidationSuccessful = aubMode ? true : outputValidationSuccessful;
     return (outputValidationSuccessful ? 0 : 1);
 }

@@ -99,6 +99,16 @@ TEST(IoctlHelperUpstreamTest, whenGettingDrmParamValueThenPropertValueIsReturned
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = std::make_unique<DrmTipMock>(*executionEnvironment->rootDeviceEnvironments[0]);
     IoctlHelperUpstream ioctlHelper{*drm};
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ContextCreateExtSetparam), static_cast<int>(I915_CONTEXT_CREATE_EXT_SETPARAM));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ContextCreateFlagsUseExtensions), static_cast<int>(I915_CONTEXT_CREATE_FLAGS_USE_EXTENSIONS));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ContextEnginesExtLoadBalance), static_cast<int>(I915_CONTEXT_ENGINES_EXT_LOAD_BALANCE));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ContextParamEngines), static_cast<int>(I915_CONTEXT_PARAM_ENGINES));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ContextParamGttSize), static_cast<int>(I915_CONTEXT_PARAM_GTT_SIZE));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ContextParamPersistence), static_cast<int>(I915_CONTEXT_PARAM_PERSISTENCE));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ContextParamPriority), static_cast<int>(I915_CONTEXT_PARAM_PRIORITY));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ContextParamRecoverable), static_cast<int>(I915_CONTEXT_PARAM_RECOVERABLE));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ContextParamSseu), static_cast<int>(I915_CONTEXT_PARAM_SSEU));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ContextParamVm), static_cast<int>(I915_CONTEXT_PARAM_VM));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::EngineClassCompute), 4);
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::EngineClassRender), static_cast<int>(drm_i915_gem_engine_class::I915_ENGINE_CLASS_RENDER));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::EngineClassCopy), static_cast<int>(drm_i915_gem_engine_class::I915_ENGINE_CLASS_COPY));
@@ -112,6 +122,8 @@ TEST(IoctlHelperUpstreamTest, whenGettingDrmParamValueThenPropertValueIsReturned
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ExecRender), static_cast<int>(I915_EXEC_RENDER));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::MemoryClassDevice), static_cast<int>(drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::MemoryClassSystem), static_cast<int>(drm_i915_gem_memory_class::I915_MEMORY_CLASS_SYSTEM));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::MmapOffsetWb), static_cast<int>(I915_MMAP_OFFSET_WB));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::MmapOffsetWc), static_cast<int>(I915_MMAP_OFFSET_WC));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ParamChipsetId), static_cast<int>(I915_PARAM_CHIPSET_ID));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ParamRevision), static_cast<int>(I915_PARAM_REVISION));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::ParamHasExecSoftpin), static_cast<int>(I915_PARAM_HAS_EXEC_SOFTPIN));
@@ -124,7 +136,9 @@ TEST(IoctlHelperUpstreamTest, whenGettingDrmParamValueThenPropertValueIsReturned
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::QueryEngineInfo), static_cast<int>(DRM_I915_QUERY_ENGINE_INFO));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::QueryHwconfigTable), static_cast<int>(DRM_I915_QUERY_HWCONFIG_TABLE));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::QueryMemoryRegions), static_cast<int>(DRM_I915_QUERY_MEMORY_REGIONS));
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::QueryTopologyInfo), static_cast<int>(DRM_I915_QUERY_TOPOLOGY_INFO));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::QueryComputeSlices), 0);
+    EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::SchedulerCapPreemption), static_cast<int>(I915_SCHEDULER_CAP_PREEMPTION));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::TilingNone), static_cast<int>(I915_TILING_NONE));
     EXPECT_EQ(ioctlHelper.getDrmParamValue(DrmParam::TilingY), static_cast<int>(I915_TILING_Y));
 }

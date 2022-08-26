@@ -49,13 +49,13 @@ class ExportBufferTests : public ClDeviceFixture,
   protected:
     void SetUp() override {
         flags = CL_MEM_READ_WRITE;
-        ClDeviceFixture::SetUp();
+        ClDeviceFixture::setUp();
         context.reset(new MockContext(pClDevice));
     }
 
     void TearDown() override {
         context.reset();
-        ClDeviceFixture::TearDown();
+        ClDeviceFixture::tearDown();
     }
 
     cl_int retVal = CL_SUCCESS;
@@ -71,13 +71,13 @@ struct ValidExportHostPtr
     typedef ExportBufferTests BaseClass;
 
     using ExportBufferTests::SetUp;
-    using MemoryManagementFixture::SetUp;
+    using MemoryManagementFixture::setUp;
 
     ValidExportHostPtr() {
     }
 
     void SetUp() override {
-        MemoryManagementFixture::SetUp();
+        MemoryManagementFixture::setUp();
         BaseClass::SetUp();
 
         ASSERT_NE(nullptr, pDevice);
@@ -86,7 +86,7 @@ struct ValidExportHostPtr
     void TearDown() override {
         delete buffer;
         BaseClass::TearDown();
-        MemoryManagementFixture::TearDown();
+        MemoryManagementFixture::tearDown();
     }
 
     Buffer *createBuffer() {

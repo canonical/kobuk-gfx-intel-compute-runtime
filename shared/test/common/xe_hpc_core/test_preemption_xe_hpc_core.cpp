@@ -6,12 +6,12 @@
  */
 
 #include "shared/source/helpers/hw_helper.h"
-#include "shared/test/common/fixtures/preemption_fixture.h"
+#include "shared/test/unit_test/fixtures/preemption_fixture.h"
 
 using namespace NEO;
 
 template <>
-PreemptionTestHwDetails getPreemptionTestHwDetails<XE_HPC_COREFamily>() {
+PreemptionTestHwDetails getPreemptionTestHwDetails<XeHpcCoreFamily>() {
     PreemptionTestHwDetails ret;
     ret.modeToRegValueMap[PreemptionMode::ThreadGroup] = DwordBuilder::build(1, true) | DwordBuilder::build(2, true, false);
     ret.modeToRegValueMap[PreemptionMode::MidBatch] = DwordBuilder::build(2, true) | DwordBuilder::build(1, true, false);

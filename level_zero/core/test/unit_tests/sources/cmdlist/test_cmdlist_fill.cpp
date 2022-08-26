@@ -65,7 +65,7 @@ class AppendFillFixture : public DeviceFixture {
         uint32_t numberOfCallsToAppendLaunchKernelWithParams = 0;
     };
 
-    void SetUp() {
+    void setUp() {
         dstPtr = new uint8_t[allocSize];
         immediateDstPtr = new uint8_t[allocSize];
 
@@ -79,7 +79,7 @@ class AppendFillFixture : public DeviceFixture {
         device = driverHandle->devices[0];
     }
 
-    void TearDown() {
+    void tearDown() {
         delete[] immediateDstPtr;
         delete[] dstPtr;
     }
@@ -98,10 +98,10 @@ class AppendFillFixture : public DeviceFixture {
 };
 
 struct MultiTileAppendFillFixture : public AppendFillFixture {
-    void SetUp() {
+    void setUp() {
         DebugManager.flags.CreateMultipleSubDevices.set(2);
         DebugManager.flags.EnableImplicitScaling.set(1);
-        AppendFillFixture::SetUp();
+        AppendFillFixture::setUp();
     }
 
     DebugManagerStateRestore restorer;

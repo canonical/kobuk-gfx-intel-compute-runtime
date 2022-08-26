@@ -16,11 +16,11 @@ struct Test
       public ::testing::Test {
 
     void SetUp() override {
-        Fixture::SetUp();
+        Fixture::setUp();
     }
 
     void TearDown() override {
-        Fixture::TearDown();
+        Fixture::tearDown();
     }
 };
 

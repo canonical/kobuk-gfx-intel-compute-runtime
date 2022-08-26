@@ -247,10 +247,10 @@ struct TwoSubDevicesDebuggerEnabledTest : public ActiveDebuggerFixture, public :
     void SetUp() override {
         DebugManager.flags.CreateMultipleSubDevices.set(2);
         VariableBackup<bool> mockDeviceFlagBackup(&MockDevice::createSingleDevice, false);
-        ActiveDebuggerFixture::SetUp();
+        ActiveDebuggerFixture::setUp();
     }
     void TearDown() override {
-        ActiveDebuggerFixture::TearDown();
+        ActiveDebuggerFixture::tearDown();
     }
     DebugManagerStateRestore restorer;
 };

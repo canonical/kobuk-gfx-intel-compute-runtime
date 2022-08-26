@@ -17,11 +17,11 @@
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/product_config_helper.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/mocks/mock_compilers.h"
+#include "shared/test/common/mocks/mock_modules_zebin.h"
 #include "shared/test/common/test_macros/hw_test.h"
-#include "shared/test/unit_test/device_binary_format/zebin_tests.h"
-#include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "compiler_options.h"
 #include "environment.h"
@@ -752,10 +752,10 @@ TEST_F(OfflineCompilerTests, givenFamilyAcronymWhenIdsCommandIsInvokeThenSuccess
         testing::internal::CaptureStdout();
         int retVal = OfflineCompiler::queryAcronymIds(argv.size(), argv, oclocArgHelperWithoutInput.get());
         std::string output = testing::internal::GetCapturedStdout();
-        expectedOutput << "Matched ids:";
+        expectedOutput << "Matched ids:\n";
 
         for (const auto &prefix : expected) {
-            expectedOutput << "\n" + prefix;
+            expectedOutput << prefix << "\n";
         }
         EXPECT_STREQ(expectedOutput.str().c_str(), output.c_str());
         EXPECT_EQ(OclocErrorCode::SUCCESS, retVal);
@@ -786,10 +786,10 @@ TEST_F(OfflineCompilerTests, givenReleaseAcronymWhenIdsCommandIsInvokeThenSucces
         testing::internal::CaptureStdout();
         int retVal = OfflineCompiler::queryAcronymIds(argv.size(), argv, oclocArgHelperWithoutInput.get());
         std::string output = testing::internal::GetCapturedStdout();
-        expectedOutput << "Matched ids:";
+        expectedOutput << "Matched ids:\n";
 
         for (const auto &prefix : expected) {
-            expectedOutput << "\n" + prefix;
+            expectedOutput << prefix << "\n";
         }
         EXPECT_STREQ(expectedOutput.str().c_str(), output.c_str());
         EXPECT_EQ(OclocErrorCode::SUCCESS, retVal);
@@ -820,10 +820,10 @@ TEST_F(OfflineCompilerTests, givenProductAcronymWhenIdsCommandIsInvokeThenSucces
         testing::internal::CaptureStdout();
         int retVal = OfflineCompiler::queryAcronymIds(argv.size(), argv, oclocArgHelperWithoutInput.get());
         std::string output = testing::internal::GetCapturedStdout();
-        expectedOutput << "Matched ids:";
+        expectedOutput << "Matched ids:\n";
 
         for (const auto &prefix : expected) {
-            expectedOutput << "\n" + prefix;
+            expectedOutput << prefix << "\n";
         }
         EXPECT_STREQ(expectedOutput.str().c_str(), output.c_str());
         EXPECT_EQ(OclocErrorCode::SUCCESS, retVal);

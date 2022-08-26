@@ -14,14 +14,14 @@ using namespace NEO;
 
 class CommandSetMMIOFixture : public DeviceFixture {
   public:
-    void SetUp() {
-        DeviceFixture::SetUp();
+    void setUp() {
+        DeviceFixture::setUp();
         cmdContainer = std::make_unique<CommandContainer>();
         cmdContainer->initialize(pDevice, nullptr, true);
     }
-    void TearDown() {
+    void tearDown() {
         cmdContainer.reset();
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
     }
     std::unique_ptr<CommandContainer> cmdContainer;
 };

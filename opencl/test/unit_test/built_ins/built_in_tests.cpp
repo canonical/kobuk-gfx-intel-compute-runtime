@@ -14,6 +14,7 @@
 #include "shared/source/helpers/hash.h"
 #include "shared/source/helpers/string.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/test_files.h"
 #include "shared/test/common/libult/global_environment.h"
 #include "shared/test/common/mocks/mock_builtins.h"
@@ -23,8 +24,7 @@
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/common/test_macros/test.h"
-#include "shared/test/unit_test/helpers/gtest_helpers.h"
-#include "shared/test/unit_test/utilities/base_object_utils.h"
+#include "shared/test/common/utilities/base_object_utils.h"
 
 #include "opencl/source/built_ins/aux_translation_builtin.h"
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
@@ -58,8 +58,8 @@ class BuiltInTests
       public ContextFixture,
       public ::testing::Test {
 
-    using BuiltInFixture::SetUp;
-    using ContextFixture::SetUp;
+    using BuiltInFixture::setUp;
+    using ContextFixture::setUp;
 
   public:
     BuiltInTests() {
@@ -70,17 +70,17 @@ class BuiltInTests
 
     void SetUp() override {
         DebugManager.flags.ForceAuxTranslationMode.set(static_cast<int32_t>(AuxTranslationMode::Builtin));
-        ClDeviceFixture::SetUp();
+        ClDeviceFixture::setUp();
         cl_device_id device = pClDevice;
-        ContextFixture::SetUp(1, &device);
-        BuiltInFixture::SetUp(pDevice);
+        ContextFixture::setUp(1, &device);
+        BuiltInFixture::setUp(pDevice);
     }
 
     void TearDown() override {
         allBuiltIns.clear();
-        BuiltInFixture::TearDown();
-        ContextFixture::TearDown();
-        ClDeviceFixture::TearDown();
+        BuiltInFixture::tearDown();
+        ContextFixture::tearDown();
+        ClDeviceFixture::tearDown();
     }
 
     void appendBuiltInStringFromFile(std::string builtInFile, size_t &size) {

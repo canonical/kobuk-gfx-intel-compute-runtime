@@ -264,14 +264,17 @@ ze_result_t ContextImp::allocSharedMem(ze_device_handle_t hDevice,
         unifiedMemoryProperties.allocationFlags.allocFlags.usmInitialPlacementCpu = 1;
     }
 
+    void *usmPtr = nullptr;
     if (hostDesc->flags & ZEX_HOST_MEM_ALLOC_FLAG_USE_HOST_PTR) {
         unifiedMemoryProperties.allocationFlags.hostptr = reinterpret_cast<uintptr_t>(*ptr);
+        usmPtr = this->driverHandle->svmAllocsManager->createHostUnifiedMemoryAllocation(size,
+                                                                                         unifiedMemoryProperties);
+    } else {
+        usmPtr =
+            this->driverHandle->svmAllocsManager->createSharedUnifiedMemoryAllocation(size,
+                                                                                      unifiedMemoryProperties,
+                                                                                      static_cast<void *>(neoDevice->getSpecializedDevice<L0::Device>()));
     }
-
-    auto usmPtr =
-        this->driverHandle->svmAllocsManager->createSharedUnifiedMemoryAllocation(size,
-                                                                                  unifiedMemoryProperties,
-                                                                                  static_cast<void *>(neoDevice->getSpecializedDevice<L0::Device>()));
 
     if (usmPtr == nullptr) {
         return ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY;
@@ -522,6 +525,9 @@ ze_result_t EventPoolImp::getIpcHandle(ze_ipc_event_pool_handle_t *pIpcHandle) {
     // For the event pool, this contains:
     // - the number of events the pool has.
     // - the id for the device used during pool creation
+    if (!this->isShareableEventMemory) {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    }
 
     uint64_t handle = this->eventPoolAllocations->getDefaultGraphicsAllocation()->peekInternalHandle(this->context->getDriverHandle()->getMemoryManager());
 

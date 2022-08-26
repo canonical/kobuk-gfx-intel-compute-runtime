@@ -48,7 +48,7 @@ extern bool copyInputArgs;
 
 struct GmmTests : public MockExecutionEnvironmentGmmFixtureTest {
     void SetUp() override {
-        MockExecutionEnvironmentGmmFixture::SetUp();
+        MockExecutionEnvironmentGmmFixture::setUp();
         rootDeviceEnvironment = executionEnvironment->rootDeviceEnvironments[0].get();
         localPlatformDevice = rootDeviceEnvironment->getMutableHardwareInfo();
     }
@@ -1409,7 +1409,7 @@ struct GmmLocalMemoryTests : public ::testing::Test, MockExecutionEnvironmentGmm
         localPlatformDevice.featureTable.flags.ftrLocalMemory = true;
     }
     void SetUp() override {
-        MockExecutionEnvironmentGmmFixture::SetUp();
+        MockExecutionEnvironmentGmmFixture::setUp();
         executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(&localPlatformDevice);
         executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     }

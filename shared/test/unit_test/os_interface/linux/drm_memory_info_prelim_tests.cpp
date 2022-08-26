@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/memory_manager/memory_banks.h"
+#include "shared/source/os_interface/linux/i915.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/libult/linux/drm_mock_helper.h"
@@ -85,7 +86,7 @@ TEST(MemoryInfoPrelim, givenNewMemoryInfoQuerySupportedWhenQueryingMemoryInfoThe
 }
 
 struct DrmVmTestFixture {
-    void SetUp() { // NOLINT(readability-identifier-naming)
+    void setUp() {
         executionEnvironment = std::make_unique<ExecutionEnvironment>();
         executionEnvironment->prepareRootDeviceEnvironments(1);
         executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
@@ -103,7 +104,7 @@ struct DrmVmTestFixture {
         ASSERT_NE(nullptr, drm);
     }
 
-    void TearDown() {} // NOLINT(readability-identifier-naming)
+    void tearDown() {}
 
     DebugManagerStateRestore restorer;
     std::unique_ptr<ExecutionEnvironment> executionEnvironment;

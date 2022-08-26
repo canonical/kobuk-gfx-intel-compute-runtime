@@ -10,6 +10,8 @@
 
 #include "level_zero/tools/source/sysman/power/os_power.h"
 
+#include "igfxfmid.h"
+
 #include <memory>
 #include <string>
 
@@ -27,6 +29,7 @@ class LinuxPowerImp : public OsPower, NEO::NonCopyableOrMovableClass {
     ze_result_t setEnergyThreshold(double threshold) override;
     ze_result_t getLimitsExt(uint32_t *pCount, zes_power_limit_ext_desc_t *pSustained) override;
     ze_result_t setLimitsExt(uint32_t *pCount, zes_power_limit_ext_desc_t *pSustained) override;
+    ze_result_t getPropertiesExt(zes_power_ext_properties_t *pExtPoperties) override;
 
     bool isPowerModuleSupported() override;
     bool isHwmonDir(std::string name);
@@ -41,15 +44,18 @@ class LinuxPowerImp : public OsPower, NEO::NonCopyableOrMovableClass {
 
   private:
     std::string i915HwmonDir;
+    std::string criticalPowerLimit;
     static const std::string hwmonDir;
     static const std::string i915;
     static const std::string sustainedPowerLimit;
-    static const std::string criticalPowerLimit;
+    static const std::string sustainedPowerLimitInterval;
     static const std::string energyCounterNode;
     static const std::string defaultPowerLimit;
     bool canControl = false;
     bool isSubdevice = false;
     uint32_t subdeviceId = 0;
+    uint32_t powerLimitCount = 0;
+    PRODUCT_FAMILY productFamily{};
 
     ze_result_t getErrorCode(ze_result_t result) {
         if (result == ZE_RESULT_ERROR_NOT_AVAILABLE) {

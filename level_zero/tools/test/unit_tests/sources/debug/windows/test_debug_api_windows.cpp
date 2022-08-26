@@ -99,15 +99,15 @@ struct MockDebugSessionWindows : DebugSessionWindows {
 };
 
 struct DebugApiWindowsFixture : public DeviceFixture {
-    void SetUp() {
-        DeviceFixture::SetUp();
+    void setUp() {
+        DeviceFixture::setUp();
         mockWddm = new WddmEuDebugInterfaceMock(*neoDevice->executionEnvironment->rootDeviceEnvironments[0]);
         neoDevice->executionEnvironment->rootDeviceEnvironments[0]->osInterface.reset(new NEO::OSInterface);
         neoDevice->executionEnvironment->rootDeviceEnvironments[0]->osInterface->setDriverModel(std::unique_ptr<DriverModel>(mockWddm));
     }
 
-    void TearDown() {
-        DeviceFixture::TearDown();
+    void tearDown() {
+        DeviceFixture::tearDown();
     }
     static constexpr uint8_t bufferSize = 16;
     WddmEuDebugInterfaceMock *mockWddm = nullptr;
@@ -186,6 +186,21 @@ TEST_F(DebugApiWindowsTest, givenDebugAttachIsNotAvailableWhenGetDebugProperties
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_EQ(0u, debugProperties.flags);
+}
+
+TEST_F(DebugApiWindowsTest, GivenRootDeviceWhenDebugSessionIsCreatedForTheSecondTimeThenSuccessIsReturned) {
+    zet_debug_config_t config = {};
+    config.pid = 0x1234;
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    auto sessionMock = device->createDebugSession(config, result);
+    ASSERT_NE(nullptr, sessionMock);
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    auto sessionMock2 = device->createDebugSession(config, result);
+    EXPECT_EQ(sessionMock, sessionMock2);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
 using isDebugSupportedProduct = IsWithinProducts<IGFX_DG1, IGFX_PVC>;
@@ -662,8 +677,8 @@ TEST_F(DebugApiWindowsTest, givenModuleDestroyNotificationeEventTypeWhenReadAndH
     mockWddm->eventQueue[0].readEventType = DBGUMD_READ_EVENT_MODULE_CREATE_NOTIFICATION;
     mockWddm->eventQueue[0].seqNo = 123u;
     mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.ModuleCreateEventParams.IsModuleCreate = false;
-    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.ModuleCreateEventParams.hElfAddressPtr = 0x12345678;
-    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.ModuleCreateEventParams.ElfModulesize = 0x1000;
+    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.ModuleCreateEventParams.hElfAddressPtr = 0xDEADDEAD;
+    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.ModuleCreateEventParams.ElfModulesize = 1;
     mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.ModuleCreateEventParams.LoadAddress = 0x80000000;
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, session->readAndHandleEvent(100));
@@ -1097,7 +1112,7 @@ TEST_F(DebugApiWindowsTest, WhenCallingReadMemoryForSingleThreadThenMemoryIsRead
     EXPECT_EQ(ZE_RESULT_SUCCESS, retVal);
 }
 
-TEST_F(DebugApiWindowsTest, WhenCallingReadMemoryForElfThenUnsupportedFeatureIsReturned) {
+TEST_F(DebugApiWindowsTest, WhenCallingReadMemoryForElfThenElfisRead) {
     auto session = std::make_unique<MockDebugSessionWindows>(zet_debug_config_t{0x1234}, device);
     ASSERT_NE(nullptr, session);
     session->wddm = mockWddm;
@@ -1114,7 +1129,7 @@ TEST_F(DebugApiWindowsTest, WhenCallingReadMemoryForElfThenUnsupportedFeatureIsR
     MockDebugSessionWindows::ElfRange elf = {elfVaStart, elfVaEnd};
     session->allElfs.push_back(elf);
     char output[bufferSize] = {0};
-
+    mockWddm->elfData = elfData;
     ze_device_thread_t thread;
     thread.slice = UINT32_MAX;
     thread.subslice = UINT32_MAX;
@@ -1123,9 +1138,18 @@ TEST_F(DebugApiWindowsTest, WhenCallingReadMemoryForElfThenUnsupportedFeatureIsR
     zet_debug_memory_space_desc_t desc;
     desc.address = elfVaStart;
     desc.type = ZET_DEBUG_MEMORY_SPACE_TYPE_DEFAULT;
+
+    mockWddm->escapeReturnStatus = DBGUMD_RETURN_INVALID_ARGS;
     auto retVal = session->readMemory(thread, &desc, bufferSize, output);
+    ASSERT_EQ(1u, mockWddm->dbgUmdEscapeActionCalled[DBGUMD_ACTION_READ_UMD_MEMORY]);
+    ASSERT_NE(ZE_RESULT_SUCCESS, retVal);
+
+    mockWddm->escapeReturnStatus = DBGUMD_RETURN_ESCAPE_SUCCESS;
+    retVal = session->readMemory(thread, &desc, bufferSize, output);
     ASSERT_EQ(0u, mockWddm->dbgUmdEscapeActionCalled[DBGUMD_ACTION_READ_GFX_MEMORY]);
-    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, retVal);
+    ASSERT_EQ(2u, mockWddm->dbgUmdEscapeActionCalled[DBGUMD_ACTION_READ_UMD_MEMORY]);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, retVal);
+    EXPECT_EQ(memcmp(output, elfData, bufferSize), 0);
 
     desc.address = elfVaEnd - 1;
     retVal = session->readMemory(thread, &desc, bufferSize, output);

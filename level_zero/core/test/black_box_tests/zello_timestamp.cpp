@@ -7,9 +7,6 @@
 
 #include "zello_common.h"
 
-extern bool verbose;
-bool verbose = false;
-
 inline std::vector<uint8_t> loadBinaryFile(const std::string &filePath) {
     std::ifstream stream(filePath, std::ios::binary);
     if (!stream.good()) {
@@ -226,6 +223,8 @@ bool testKernelTimestampHostQuery(ze_context_handle_t &context,
     SUCCESS_OR_TERMINATE(zeEventPoolDestroy(eventPool));
     SUCCESS_OR_TERMINATE(zeCommandListDestroy(cmdList));
     SUCCESS_OR_TERMINATE(zeCommandQueueDestroy(cmdQueue));
+    SUCCESS_OR_TERMINATE(zeKernelDestroy(kernel));
+    SUCCESS_OR_TERMINATE(zeModuleDestroy(module));
     return true;
 }
 
@@ -344,28 +343,23 @@ bool testKernelTimestampApendQuery(ze_context_handle_t &context,
     SUCCESS_OR_TERMINATE(zeEventPoolDestroy(eventPool));
     SUCCESS_OR_TERMINATE(zeCommandListDestroy(cmdList));
     SUCCESS_OR_TERMINATE(zeCommandQueueDestroy(cmdQueue));
+    SUCCESS_OR_TERMINATE(zeKernelDestroy(kernel));
+    SUCCESS_OR_TERMINATE(zeModuleDestroy(module));
     return true;
 }
 
-void printResult(bool result, std::string &currentTest) {
-    std::cout << "\nZello Timestamp: " << currentTest.c_str()
-              << "  Results validation "
-              << (result ? "PASSED" : "FAILED")
-              << std::endl
-              << std::endl;
-}
-
 int main(int argc, char *argv[]) {
+    const std::string blackBoxName("Zello Timestamp");
     verbose = isVerbose(argc, argv);
+    bool aubMode = isAubMode(argc, argv);
+
     ze_context_handle_t context = nullptr;
     auto devices = zelloInitContextAndGetDevices(context);
     auto device = devices[0];
 
     ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
     SUCCESS_OR_TERMINATE(zeDeviceGetProperties(device, &deviceProperties));
-    std::cout << "Device : \n"
-              << " * name : " << deviceProperties.name << "\n"
-              << " * vendorId : " << std::hex << deviceProperties.vendorId << "\n";
+    printDeviceProperties(deviceProperties);
 
     bool result;
     std::string currentTest;
@@ -373,13 +367,16 @@ int main(int argc, char *argv[]) {
     currentTest = "Test Append Write of Global Timestamp: Default Device Properties Structure";
     deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
     result = testKernelTimestampApendQuery(context, device, deviceProperties);
-    printResult(result, currentTest);
-    currentTest = "Test Append Write of Global Timestamp: V1.2 (and later) Device Properties Structure";
-    deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES_1_2};
-    result = testKernelTimestampApendQuery(context, device, deviceProperties);
-    printResult(result, currentTest);
+    printResult(aubMode, result, blackBoxName, currentTest);
+
+    if (result || aubMode) {
+        currentTest = "Test Append Write of Global Timestamp: V1.2 (and later) Device Properties Structure";
+        deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES_1_2};
+        result = testKernelTimestampApendQuery(context, device, deviceProperties);
+        printResult(aubMode, result, blackBoxName, currentTest);
+    }
 
     SUCCESS_OR_TERMINATE(zeContextDestroy(context));
-
+    result = aubMode ? true : result;
     return result ? 0 : 1;
 }

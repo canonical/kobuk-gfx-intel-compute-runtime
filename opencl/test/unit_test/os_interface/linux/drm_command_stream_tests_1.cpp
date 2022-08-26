@@ -18,6 +18,7 @@
 #include "shared/source/os_interface/linux/drm_buffer_object.h"
 #include "shared/source/os_interface/linux/drm_command_stream.h"
 #include "shared/source/os_interface/linux/drm_memory_operations_handler_default.h"
+#include "shared/source/os_interface/linux/i915.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/os_interface/os_interface.h"
@@ -27,6 +28,7 @@
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/helpers/execution_environment_helper.h"
+#include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/mocks/linux/mock_drm_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_gmm.h"
@@ -35,7 +37,6 @@
 #include "shared/test/common/mocks/mock_submissions_aggregator.h"
 #include "shared/test/common/os_interface/linux/drm_command_stream_fixture.h"
 #include "shared/test/common/test_macros/hw_test.h"
-#include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
@@ -496,6 +497,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamBatchingTests, givenCsrWhenDispatchPolicyIsSe
     size_t csrSurfaceCount = (device->getPreemptionMode() == PreemptionMode::MidThread) ? 2 : 0;
     csrSurfaceCount += testedCsr->globalFenceAllocation ? 1 : 0;
     csrSurfaceCount += testedCsr->clearColorAllocation ? 1 : 0;
+    csrSurfaceCount += testedCsr->getKernelArgsBufferAllocation() ? 1 : 0;
 
     auto recordedCmdBuffer = cmdBuffers.peekHead();
     EXPECT_EQ(3u + csrSurfaceCount, recordedCmdBuffer->surfaces.size());
@@ -570,6 +572,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamBatchingTests, givenRecordedCommandBufferWhen
     size_t csrSurfaceCount = (device->getPreemptionMode() == PreemptionMode::MidThread) ? 2 : 0;
     csrSurfaceCount += testedCsr->globalFenceAllocation ? 1 : 0;
     csrSurfaceCount += testedCsr->clearColorAllocation ? 1 : 0;
+    csrSurfaceCount += testedCsr->getKernelArgsBufferAllocation() ? 1 : 0;
 
     //validate that submited command buffer has what we want
     EXPECT_EQ(3u + csrSurfaceCount, this->mock->execBuffer.getBufferCount());

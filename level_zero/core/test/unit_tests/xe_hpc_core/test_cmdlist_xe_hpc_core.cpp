@@ -8,20 +8,22 @@
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/memory_manager/mock_prefetch_manager.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
 #include "level_zero/core/source/event/event.h"
 #include "level_zero/core/test/unit_tests/fixtures/module_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
+#include "level_zero/core/test/unit_tests/mocks/mock_cmdqueue.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_module.h"
 
 namespace L0 {
 namespace ult {
 
 struct LocalMemoryModuleFixture : public ModuleFixture {
-    void SetUp() {
+    void setUp() {
         DebugManager.flags.EnableLocalMemory.set(1);
-        ModuleFixture::SetUp();
+        ModuleFixture::setUp();
     }
     DebugManagerStateRestore restore;
 };
@@ -64,7 +66,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore, givenKernelUsingSyncBufferWhen
 
 using CommandListStatePrefetchXeHpcCore = Test<ModuleFixture>;
 
-HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenUnifiedSharedMemoryWhenPrefetchApiCalledThenDontSetMemPrefetch, IsXeHpcCore) {
+HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenUnifiedSharedMemoryWhenPrefetchApiIsCalledThenDontRequestMemoryPrefetchByDefault, IsXeHpcCore) {
     auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
     auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
@@ -75,20 +77,19 @@ HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenUnifiedSharedMemoryWhenPrefetc
 
     ze_device_mem_alloc_desc_t deviceDesc = {};
     ze_host_mem_alloc_desc_t hostDesc = {};
-    auto res = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, size, alignment, &ptr);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    result = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_NE(nullptr, ptr);
 
-    auto ret = pCommandList->appendMemoryPrefetch(ptr, size);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
+    result = pCommandList->appendMemoryPrefetch(ptr, size);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
-    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
-    EXPECT_FALSE(memoryManager->setMemPrefetchCalled);
+    EXPECT_FALSE(pCommandList->isMemoryPrefetchRequested());
 
     context->freeMem(ptr);
 }
 
-HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsWhenPrefetchApiCalledThenDontCallSetMemPrefetchByDefault, IsXeHpcCore) {
+HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsWhenPrefetchApiIsCalledThenRequestMemoryPrefetch, IsXeHpcCore) {
     DebugManagerStateRestore restore;
     DebugManager.flags.AppendMemoryPrefetchForKmdMigratedSharedAllocations.set(1);
 
@@ -102,60 +103,195 @@ HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigr
 
     ze_device_mem_alloc_desc_t deviceDesc = {};
     ze_host_mem_alloc_desc_t hostDesc = {};
-    auto res = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, size, alignment, &ptr);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    result = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_NE(nullptr, ptr);
 
-    auto ret = pCommandList->appendMemoryPrefetch(ptr, size);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
+    result = pCommandList->appendMemoryPrefetch(ptr, size);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
-    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
-    EXPECT_FALSE(memoryManager->setMemPrefetchCalled);
+    EXPECT_TRUE(pCommandList->isMemoryPrefetchRequested());
 
     context->freeMem(ptr);
 }
 
-HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsSetWhenPrefetchApiCalledOnUnifiedSharedMemoryThenCallSetMemPrefetch, IsXeHpcCore) {
+HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsSetWhenPrefetchApiIsCalledOnUnifiedSharedMemoryThenAppendAllocationForPrefetch, IsXeHpcCore) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.AppendMemoryPrefetchForKmdMigratedSharedAllocations.set(1);
+    DebugManager.flags.UseKmdMigration.set(1);
+
+    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
+    memoryManager->prefetchManager.reset(new MockPrefetchManager());
+
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+
+    size_t size = 10;
+    size_t alignment = 1u;
+    void *ptr = nullptr;
+
+    ze_device_mem_alloc_desc_t deviceDesc = {};
+    ze_host_mem_alloc_desc_t hostDesc = {};
+    result = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(nullptr, ptr);
+
+    result = pCommandList->appendMemoryPrefetch(ptr, size);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    EXPECT_TRUE(pCommandList->isMemoryPrefetchRequested());
+
+    auto prefetchManager = static_cast<MockPrefetchManager *>(memoryManager->prefetchManager.get());
+    EXPECT_EQ(1u, prefetchManager->allocations.size());
+
+    context->freeMem(ptr);
+}
+
+HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsSetWhenPrefetchApiIsCalledOnUnifiedDeviceMemoryThenDontAppendAllocationForPrefetch, IsXeHpcCore) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.AppendMemoryPrefetchForKmdMigratedSharedAllocations.set(1);
+    DebugManager.flags.UseKmdMigration.set(1);
+
+    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
+    memoryManager->prefetchManager.reset(new MockPrefetchManager());
+
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+
+    size_t size = 10;
+    size_t alignment = 1u;
+    void *ptr = nullptr;
+
+    ze_device_mem_alloc_desc_t deviceDesc = {};
+    result = context->allocDeviceMem(device->toHandle(), &deviceDesc, size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(nullptr, ptr);
+
+    result = pCommandList->appendMemoryPrefetch(ptr, size);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    EXPECT_TRUE(pCommandList->isMemoryPrefetchRequested());
+
+    auto prefetchManager = static_cast<MockPrefetchManager *>(memoryManager->prefetchManager.get());
+    EXPECT_EQ(0u, prefetchManager->allocations.size());
+
+    context->freeMem(ptr);
+}
+
+HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsSetWhenPrefetchApiIsCalledOnUnifiedHostMemoryThenDontAppendAllocationForPrefetch, IsXeHpcCore) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.AppendMemoryPrefetchForKmdMigratedSharedAllocations.set(1);
+    DebugManager.flags.UseKmdMigration.set(1);
+
+    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
+    memoryManager->prefetchManager.reset(new MockPrefetchManager());
+
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+
+    size_t size = 10;
+    size_t alignment = 1u;
+    void *ptr = nullptr;
+
+    ze_host_mem_alloc_desc_t hostDesc = {};
+    result = context->allocHostMem(&hostDesc, size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(nullptr, ptr);
+
+    result = pCommandList->appendMemoryPrefetch(ptr, size);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    EXPECT_TRUE(pCommandList->isMemoryPrefetchRequested());
+
+    auto prefetchManager = static_cast<MockPrefetchManager *>(memoryManager->prefetchManager.get());
+    EXPECT_EQ(0u, prefetchManager->allocations.size());
+
+    context->freeMem(ptr);
+}
+
+HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsSetWhenPrefetchApiIsCalledOnUnifiedDeviceMemoryThenDontCallSetMemPrefetchOnTheAssociatedDevice, IsXeHpcCore) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+    using POSTSYNC_DATA = typename FamilyType::POSTSYNC_DATA;
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+
     DebugManagerStateRestore restore;
     DebugManager.flags.AppendMemoryPrefetchForKmdMigratedSharedAllocations.set(1);
     DebugManager.flags.UseKmdMigration.set(1);
 
     EXPECT_EQ(0b0001u, neoDevice->deviceBitfield.to_ulong());
 
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
-    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
+    memoryManager->prefetchManager.reset(new MockPrefetchManager());
+
+    createKernel();
+    ze_result_t returnValue;
+    ze_command_queue_desc_t queueDesc = {};
+    auto commandList = CommandList::createImmediate(productFamily, device, &queueDesc, false, NEO::EngineGroupType::RenderCompute, returnValue);
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.count = 1;
+    eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
+
+    ze_event_desc_t eventDesc = {};
+    eventDesc.index = 0;
+
+    auto eventPool = std::unique_ptr<EventPool>(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, returnValue));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+    auto event = std::unique_ptr<Event>(Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
 
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
 
     ze_device_mem_alloc_desc_t deviceDesc = {};
-    ze_host_mem_alloc_desc_t hostDesc = {};
-    auto res = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, size, alignment, &ptr);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    auto result = context->allocDeviceMem(device->toHandle(), &deviceDesc, size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_NE(nullptr, ptr);
 
-    auto ret = pCommandList->appendMemoryPrefetch(ptr, size);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
+    result = commandList->appendMemoryPrefetch(ptr, size);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
-    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
-    EXPECT_TRUE(memoryManager->setMemPrefetchCalled);
-    EXPECT_EQ(0u, memoryManager->memPrefetchSubDeviceId);
+    ze_group_count_t groupCount{1, 1, 1};
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, event->toHandle(), 0, nullptr, launchParams);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    EXPECT_FALSE(memoryManager->setMemPrefetchCalled);
 
     context->freeMem(ptr);
+    commandList->destroy();
 }
 
-HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsSetWhenPrefetchApiCalledOnUnifiedSharedMemoryThenCallSetMemPrefetchOnTheAssociatedDevice, IsXeHpcCore) {
+HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsSetWhenPrefetchApiIsCalledOnUnifiedSharedMemoryThenCallSetMemPrefetchOnTheAssociatedDevice, IsXeHpcCore) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+    using POSTSYNC_DATA = typename FamilyType::POSTSYNC_DATA;
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+
     DebugManagerStateRestore restore;
     DebugManager.flags.AppendMemoryPrefetchForKmdMigratedSharedAllocations.set(1);
     DebugManager.flags.UseKmdMigration.set(1);
 
     neoDevice->deviceBitfield = 0b0010;
 
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
-    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
+    memoryManager->prefetchManager.reset(new MockPrefetchManager());
+
+    createKernel();
+    ze_result_t returnValue;
+    ze_command_queue_desc_t queueDesc = {};
+    auto commandList = CommandList::createImmediate(productFamily, device, &queueDesc, false, NEO::EngineGroupType::RenderCompute, returnValue);
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.count = 1;
+    eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
+
+    ze_event_desc_t eventDesc = {};
+    eventDesc.index = 0;
+
+    auto eventPool = std::unique_ptr<EventPool>(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, returnValue));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+    auto event = std::unique_ptr<Event>(Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
 
     size_t size = 10;
     size_t alignment = 1u;
@@ -163,70 +299,91 @@ HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigr
 
     ze_device_mem_alloc_desc_t deviceDesc = {};
     ze_host_mem_alloc_desc_t hostDesc = {};
-    auto res = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, size, alignment, &ptr);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    auto result = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_NE(nullptr, ptr);
 
-    auto ret = pCommandList->appendMemoryPrefetch(ptr, size);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
+    result = commandList->appendMemoryPrefetch(ptr, size);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
-    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
+    ze_group_count_t groupCount{1, 1, 1};
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, event->toHandle(), 0, nullptr, launchParams);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
     EXPECT_TRUE(memoryManager->setMemPrefetchCalled);
     EXPECT_EQ(1u, memoryManager->memPrefetchSubDeviceId);
 
     context->freeMem(ptr);
+    commandList->destroy();
 }
 
-HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsSetWhenPrefetchApiCalledOnUnifiedDeviceMemoryThenDontCallSetMemPrefetch, IsXeHpcCore) {
+HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsSetWhenPrefetchApiIsCalledOnUnifiedSharedMemoryThenCallMigrateAllocationsToGpu, IsXeHpcCore) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+    using POSTSYNC_DATA = typename FamilyType::POSTSYNC_DATA;
+    using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
+
     DebugManagerStateRestore restore;
     DebugManager.flags.AppendMemoryPrefetchForKmdMigratedSharedAllocations.set(1);
     DebugManager.flags.UseKmdMigration.set(1);
 
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
-    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+    neoDevice->deviceBitfield = 0b1000;
+
+    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
+    memoryManager->prefetchManager.reset(new MockPrefetchManager());
+
+    createKernel();
+    ze_result_t returnValue;
+    ze_command_queue_desc_t queueDesc = {};
+
+    ze_command_list_handle_t commandListHandle = CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)->toHandle();
+    auto commandList = CommandList::fromHandle(commandListHandle);
+    auto commandQueue = CommandQueue::create(productFamily, device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue);
+
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.count = 1;
+    eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
+
+    ze_event_desc_t eventDesc = {};
+    eventDesc.index = 0;
+
+    auto eventPool = std::unique_ptr<EventPool>(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, returnValue));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+    auto event = std::unique_ptr<Event>(Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
 
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
 
     ze_device_mem_alloc_desc_t deviceDesc = {};
-    context->allocDeviceMem(device->toHandle(), &deviceDesc, size, alignment, &ptr);
-    EXPECT_NE(nullptr, ptr);
-
-    auto ret = pCommandList->appendMemoryPrefetch(ptr, size);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
-
-    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
-    EXPECT_FALSE(memoryManager->setMemPrefetchCalled);
-
-    context->freeMem(ptr);
-}
-
-HWTEST2_F(CommandListStatePrefetchXeHpcCore, givenAppendMemoryPrefetchForKmdMigratedSharedAllocationsSetWhenPrefetchApiCalledOnUnifiedHostMemoryThenDontCallSetMemPrefetch, IsXeHpcCore) {
-    DebugManagerStateRestore restore;
-    DebugManager.flags.AppendMemoryPrefetchForKmdMigratedSharedAllocations.set(1);
-    DebugManager.flags.UseKmdMigration.set(1);
-
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
-    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
-
-    size_t size = 10;
-    size_t alignment = 1u;
-    void *ptr = nullptr;
-
     ze_host_mem_alloc_desc_t hostDesc = {};
-    context->allocHostMem(&hostDesc, size, alignment, &ptr);
+    auto result = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_NE(nullptr, ptr);
 
-    auto ret = pCommandList->appendMemoryPrefetch(ptr, size);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
+    result = commandList->appendMemoryPrefetch(ptr, size);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
-    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
-    EXPECT_FALSE(memoryManager->setMemPrefetchCalled);
+    auto prefetchManager = static_cast<MockPrefetchManager *>(memoryManager->prefetchManager.get());
+    EXPECT_EQ(1u, prefetchManager->allocations.size());
+
+    ze_group_count_t groupCount{1, 1, 1};
+    CmdListKernelLaunchParams launchParams = {};
+    result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, event->toHandle(), 0, nullptr, launchParams);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    result = commandQueue->executeCommandLists(1, &commandListHandle, nullptr, true);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    EXPECT_TRUE(memoryManager->setMemPrefetchCalled);
+    EXPECT_EQ(3u, memoryManager->memPrefetchSubDeviceId);
+
+    EXPECT_TRUE(prefetchManager->migrateAllocationsToGpuCalled);
+    EXPECT_EQ(0u, prefetchManager->allocations.size());
 
     context->freeMem(ptr);
+    commandList->destroy();
+    commandQueue->destroy();
 }
 
 using CommandListEventFenceTestsXeHpcCore = Test<ModuleFixture>;

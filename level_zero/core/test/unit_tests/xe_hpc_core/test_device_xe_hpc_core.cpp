@@ -365,12 +365,12 @@ HWTEST2_F(CommandQueueGroupTest, givenBlitterDisabledAndAllBcsSetThenTwoQueueGro
 
 class DeviceCopyQueueGroupXeHpcFixture : public DeviceFixture {
   public:
-    void SetUp() {
+    void setUp() {
         DebugManager.flags.EnableBlitterOperationsSupport.set(0);
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
     }
-    void TearDown() {
-        DeviceFixture::TearDown();
+    void tearDown() {
+        DeviceFixture::tearDown();
     }
     DebugManagerStateRestore restorer;
 };

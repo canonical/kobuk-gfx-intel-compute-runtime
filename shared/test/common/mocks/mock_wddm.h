@@ -28,6 +28,8 @@ constexpr auto virtualAllocAddress = is64bit ? 0x7FFFF0000000 : 0xFF000000;
 class WddmMock : public Wddm {
   public:
     using Wddm::adapterBDF;
+    using Wddm::additionalAdapterInfoOptions;
+    using Wddm::adjustEvictNeededParameter;
     using Wddm::createPagingFenceLogger;
     using Wddm::currentPagingFenceValue;
     using Wddm::dedicatedVideoMemory;
@@ -35,6 +37,7 @@ class WddmMock : public Wddm {
     using Wddm::deviceRegistryPath;
     using Wddm::enablePreemptionRegValue;
     using Wddm::featureTable;
+    using Wddm::forceEvictOnlyIfNecessary;
     using Wddm::getSystemInfo;
     using Wddm::gmmMemory;
     using Wddm::hwDeviceId;
@@ -42,8 +45,11 @@ class WddmMock : public Wddm {
     using Wddm::minAddress;
     using Wddm::pagingFenceAddress;
     using Wddm::pagingQueue;
+    using Wddm::platformSupportsEvictWhenNecessary;
+    using Wddm::populateAdditionalAdapterInfoOptions;
     using Wddm::residencyLogger;
     using Wddm::rootDeviceEnvironment;
+    using Wddm::setPlatformSupportEvictWhenNecessaryFlag;
     using Wddm::temporaryResources;
     using Wddm::timestampFrequency;
     using Wddm::wddmInterface;
@@ -99,7 +105,7 @@ class WddmMock : public Wddm {
 
     bool configureDeviceAddressSpace() {
         configureDeviceAddressSpaceResult.called++;
-        //create context cant be called before configureDeviceAddressSpace
+        // create context cant be called before configureDeviceAddressSpace
         if (createContextResult.called > 0) {
             return configureDeviceAddressSpaceResult.success = false;
         } else {

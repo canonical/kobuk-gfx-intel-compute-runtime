@@ -61,7 +61,7 @@ void EncodeDispatchKernel<Family>::programBarrierEnable(INTERFACE_DESCRIPTOR_DAT
 }
 
 template <>
-void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo) {
+void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo, const uint32_t threadGroupCount, const uint32_t numGrf) {
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
     if (hwInfoConfig.isDisableOverdispatchAvailable(hwInfo)) {
         interfaceDescriptor.setThreadGroupDispatchSize(INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_1);
@@ -104,4 +104,5 @@ template struct EncodeEnableRayTracing<Family>;
 template struct EncodeNoop<Family>;
 template struct EncodeStoreMemory<Family>;
 template struct EncodeMemoryFence<Family>;
+template struct EncodeKernelArgsBuffer<Family>;
 } // namespace NEO

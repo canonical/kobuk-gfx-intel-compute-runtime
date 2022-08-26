@@ -42,8 +42,8 @@ using namespace NEO;
 using WalkerDispatchTest = ::testing::Test;
 
 struct XeHPAndLaterDispatchWalkerBasicFixture : public LinearStreamFixture {
-    void SetUp() override {
-        LinearStreamFixture::SetUp();
+    void setUp() {
+        LinearStreamFixture::setUp();
         memset(globalOffsets, 0, sizeof(globalOffsets));
         memset(startWorkGroups, 0, sizeof(startWorkGroups));
 

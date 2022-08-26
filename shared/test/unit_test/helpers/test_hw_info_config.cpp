@@ -82,7 +82,7 @@ HWTEST_F(HwInfoConfigTest, givenForceThreadArbitrationPolicyProgrammingWithScmFl
     EXPECT_TRUE(hwInfoConfig.isThreadArbitrationPolicyReportedWithScm());
 }
 
-HWTEST2_F(HwInfoConfigTest, givenHwInfoConfigWhenIsImplicitScalingSupportedThenExpectFalse, isNotXeHpOrXeHpcCore) {
+HWTEST2_F(HwInfoConfigTest, givenHwInfoConfigWhenIsImplicitScalingSupportedThenExpectFalse, IsNotXeHpOrXeHpcCore) {
     const auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
     EXPECT_FALSE(hwInfoConfig.isImplicitScalingSupported(*defaultHwInfo));
 }
@@ -160,4 +160,9 @@ HWTEST2_F(HwInfoConfigTest, givenPlatformWithUnsupportedL1CachePoliciesWhenGetL1
     auto hwInfoConfig = HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
     EXPECT_EQ(0u, hwInfoConfig->getL1CachePolicy());
+}
+
+HWTEST_F(HwInfoConfigTest, givenHwInfoConfigWhenIsPrefetcherDisablingInDirectSubmissionRequiredThenTrueIsReturned) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    EXPECT_TRUE(hwInfoConfig.isPrefetcherDisablingInDirectSubmissionRequired());
 }

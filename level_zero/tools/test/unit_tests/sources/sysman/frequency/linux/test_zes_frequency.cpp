@@ -57,12 +57,6 @@ class SysmanDeviceFrequencyFixture : public SysmanDeviceFixture {
         pSysfsAccess->setVal(efficientFreqFile, efficient);
         pSysfsAccess->setVal(maxValFreqFile, maxVal);
         pSysfsAccess->setVal(minValFreqFile, minVal);
-        ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-            .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getVal));
-        ON_CALL(*pSysfsAccess.get(), write(_, _))
-            .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::setVal));
-        ON_CALL(*pSysfsAccess.get(), directoryExists(_))
-            .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::mockDirectoryExistsSuccess));
 
         // delete handles created in initial SysmanDeviceHandleContext::init() call
         for (auto handle : pSysmanDeviceImp->pFrequencyHandleContext->handleList) {
@@ -206,14 +200,12 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleAndCorrectCountWhe
 TEST_F(SysmanDeviceFrequencyFixture, GivenValidateFrequencyGetRangeWhengetMaxAndgetMinFailsThenFrequencyGetRangeCallReturnsNegativeValuesForRange) {
     auto pFrequencyImp = std::make_unique<FrequencyImp>(pOsSysman, device->toHandle(), ZES_FREQ_DOMAIN_GPU);
     zes_freq_range_t limit = {};
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValReturnErrorNotAvailable));
+    pSysfsAccess->mockReadDoubleValResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_SUCCESS, pFrequencyImp->frequencyGetRange(&limit));
     EXPECT_EQ(-1, limit.max);
     EXPECT_EQ(-1, limit.min);
 
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValReturnErrorNotAvailable));
+    pSysfsAccess->mockReadDoubleValResult = ZE_RESULT_ERROR_UNKNOWN;
     EXPECT_EQ(ZE_RESULT_SUCCESS, pFrequencyImp->frequencyGetRange(&limit));
     EXPECT_EQ(-1, limit.max);
     EXPECT_EQ(-1, limit.min);
@@ -236,12 +228,10 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyLimitsWhenCallingFrequen
     // Verify that Max must be within range.
     limits.min = minFreq;
     limits.max = 600.0;
-    ON_CALL(*pSysfsAccess.get(), write(_, _))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::setValMinReturnErrorNotAvailable));
+    pSysfsAccess->mockWriteMinResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, pFrequencyImp->frequencySetRange(&limits));
 
-    ON_CALL(*pSysfsAccess.get(), write(_, _))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::setValMinReturnErrorUnknown));
+    pSysfsAccess->mockWriteMinResult = ZE_RESULT_ERROR_UNKNOWN;
     EXPECT_EQ(ZE_RESULT_ERROR_UNKNOWN, pFrequencyImp->frequencySetRange(&limits));
 }
 
@@ -252,12 +242,10 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyLimitsWhenCallingFrequen
     // Verify that Max must be within range.
     limits.min = 900.0;
     limits.max = maxFreq;
-    ON_CALL(*pSysfsAccess.get(), write(_, _))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::setValMaxReturnErrorNotAvailable));
+    pSysfsAccess->mockWriteMaxResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, pFrequencyImp->frequencySetRange(&limits));
 
-    ON_CALL(*pSysfsAccess.get(), write(_, _))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::setValMaxReturnErrorUnknown));
+    pSysfsAccess->mockWriteMaxResult = ZE_RESULT_ERROR_UNKNOWN;
     EXPECT_EQ(ZE_RESULT_ERROR_UNKNOWN, pFrequencyImp->frequencySetRange(&limits));
 }
 
@@ -338,12 +326,8 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleWhenCallingzesFreq
 }
 
 TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleWhenCallingzesFrequencyGetStateWithLegacyPathThenVerifyzesFrequencyGetStateTestCallSucceeds) {
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValLegacy));
-    ON_CALL(*pSysfsAccess.get(), write(_, _))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::setValLegacy));
-    ON_CALL(*pSysfsAccess.get(), directoryExists(_))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::mockDirectoryExistsFailure));
+    pSysfsAccess->isLegacy = true;
+    pSysfsAccess->directoryExistsResult = false;
     for (auto handle : pSysmanDeviceImp->pFrequencyHandleContext->handleList) {
         delete handle;
     }
@@ -583,12 +567,8 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleWhenCallingzesFreq
 }
 
 TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleWhenCallingzesFrequencySetRangeWithLegacyPathThenVerifyzesFrequencySetRangeTestCallSucceeds) {
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValLegacy));
-    ON_CALL(*pSysfsAccess.get(), write(_, _))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::setValLegacy));
-    ON_CALL(*pSysfsAccess.get(), directoryExists(_))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::mockDirectoryExistsFailure));
+    pSysfsAccess->isLegacy = true;
+    pSysfsAccess->directoryExistsResult = false;
     for (auto handle : pSysmanDeviceImp->pFrequencyHandleContext->handleList) {
         delete handle;
     }
@@ -612,43 +592,38 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleWhenCallingzesFreq
 TEST_F(SysmanDeviceFrequencyFixture, GivenValidStatePointerWhenValidatingfrequencyGetStateWhenOneOfTheFrequencyStateThenNegativeValueIsReturned) {
     auto pFrequencyImp = std::make_unique<FrequencyImp>(pOsSysman, device->toHandle(), ZES_FREQ_DOMAIN_GPU);
     zes_freq_state_t state = {};
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValRequestReturnErrorNotAvailable));
+    pSysfsAccess->mockReadRequestResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_SUCCESS, pFrequencyImp->frequencyGetState(&state));
     EXPECT_EQ(-1, state.request);
 
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValRequestReturnErrorUnknown));
+    pSysfsAccess->mockReadRequestResult = ZE_RESULT_ERROR_UNKNOWN;
     EXPECT_EQ(ZE_RESULT_SUCCESS, pFrequencyImp->frequencyGetState(&state));
     EXPECT_EQ(-1, state.request);
 
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValTdpReturnErrorNotAvailable));
+    pSysfsAccess->mockReadRequestResult = ZE_RESULT_SUCCESS;
+    pSysfsAccess->mockReadTdpResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_SUCCESS, pFrequencyImp->frequencyGetState(&state));
     EXPECT_EQ(-1, state.tdp);
 
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValTdpReturnErrorUnknown));
+    pSysfsAccess->mockReadTdpResult = ZE_RESULT_ERROR_UNKNOWN;
     EXPECT_EQ(ZE_RESULT_SUCCESS, pFrequencyImp->frequencyGetState(&state));
     EXPECT_EQ(-1, state.tdp);
 
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValEfficientReturnErrorNotAvailable));
+    pSysfsAccess->mockReadTdpResult = ZE_RESULT_SUCCESS;
+    pSysfsAccess->mockReadEfficientResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_SUCCESS, pFrequencyImp->frequencyGetState(&state));
     EXPECT_EQ(-1, state.efficient);
 
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValEfficientReturnErrorUnknown));
+    pSysfsAccess->mockReadEfficientResult = ZE_RESULT_ERROR_UNKNOWN;
     EXPECT_EQ(ZE_RESULT_SUCCESS, pFrequencyImp->frequencyGetState(&state));
     EXPECT_EQ(-1, state.efficient);
 
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValActualReturnErrorNotAvailable));
+    pSysfsAccess->mockReadEfficientResult = ZE_RESULT_SUCCESS;
+    pSysfsAccess->mockReadActualResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_SUCCESS, pFrequencyImp->frequencyGetState(&state));
     EXPECT_EQ(-1, state.actual);
 
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValActualReturnErrorUnknown));
+    pSysfsAccess->mockReadActualResult = ZE_RESULT_ERROR_UNKNOWN;
     EXPECT_EQ(ZE_RESULT_SUCCESS, pFrequencyImp->frequencyGetState(&state));
     EXPECT_EQ(-1, state.actual);
 }
@@ -662,44 +637,37 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenThrottleTimeStructPointerWhenCallingfr
 TEST_F(SysmanDeviceFrequencyFixture, GivengetMinFunctionReturnsErrorWhenValidatinggetMinFailuresThenAPIReturnsErrorAccordingly) {
     PublicLinuxFrequencyImp linuxFrequencyImp(pOsSysman, 0, 0, ZES_FREQ_DOMAIN_GPU);
     double min = 0;
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValReturnErrorNotAvailable));
+    pSysfsAccess->mockReadDoubleValResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, linuxFrequencyImp.getMin(min));
 
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getValReturnErrorUnknown));
+    pSysfsAccess->mockReadDoubleValResult = ZE_RESULT_ERROR_UNKNOWN;
     EXPECT_EQ(ZE_RESULT_ERROR_UNKNOWN, linuxFrequencyImp.getMin(min));
 }
 
 TEST_F(SysmanDeviceFrequencyFixture, GivengetMinValFunctionReturnsErrorWhenValidatinggetMinValFailuresThenAPIReturnsErrorAccordingly) {
     PublicLinuxFrequencyImp linuxFrequencyImp(pOsSysman, 0, 0, ZES_FREQ_DOMAIN_GPU);
     double val = 0;
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getMinValReturnErrorNotAvailable));
+    pSysfsAccess->mockReadMinValResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, linuxFrequencyImp.getMinVal(val));
 
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getMinValReturnErrorUnknown));
+    pSysfsAccess->mockReadMinValResult = ZE_RESULT_ERROR_UNKNOWN;
     EXPECT_EQ(ZE_RESULT_ERROR_UNKNOWN, linuxFrequencyImp.getMinVal(val));
 }
 
 TEST_F(SysmanDeviceFrequencyFixture, GivengetMaxValFunctionReturnsErrorWhenValidatinggetMaxValFailuresThenAPIReturnsErrorAccordingly) {
     PublicLinuxFrequencyImp linuxFrequencyImp(pOsSysman, 0, 0, ZES_FREQ_DOMAIN_GPU);
     double val = 0;
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getMaxValReturnErrorNotAvailable));
+    pSysfsAccess->mockReadMaxValResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, linuxFrequencyImp.getMaxVal(val));
 
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getMaxValReturnErrorUnknown));
+    pSysfsAccess->mockReadMaxValResult = ZE_RESULT_ERROR_UNKNOWN;
     EXPECT_EQ(ZE_RESULT_ERROR_UNKNOWN, linuxFrequencyImp.getMaxVal(val));
 }
 
 TEST_F(SysmanDeviceFrequencyFixture, GivengetMaxValFunctionReturnsErrorWhenValidatingosFrequencyGetPropertiesThenAPIBehavesAsExpected) {
     zes_freq_properties_t properties = {};
     PublicLinuxFrequencyImp linuxFrequencyImp(pOsSysman, 0, 0, ZES_FREQ_DOMAIN_GPU);
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getMaxValReturnErrorNotAvailable));
+    pSysfsAccess->mockReadMaxValResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_SUCCESS, linuxFrequencyImp.osFrequencyGetProperties(properties));
     EXPECT_EQ(0, properties.canControl);
 }
@@ -707,8 +675,7 @@ TEST_F(SysmanDeviceFrequencyFixture, GivengetMaxValFunctionReturnsErrorWhenValid
 TEST_F(SysmanDeviceFrequencyFixture, GivengetMinValFunctionReturnsErrorWhenValidatingosFrequencyGetPropertiesThenAPIBehavesAsExpected) {
     zes_freq_properties_t properties = {};
     PublicLinuxFrequencyImp linuxFrequencyImp(pOsSysman, 0, 0, ZES_FREQ_DOMAIN_GPU);
-    ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-        .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::getMinValReturnErrorNotAvailable));
+    pSysfsAccess->mockReadMinValResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
     EXPECT_EQ(ZE_RESULT_SUCCESS, linuxFrequencyImp.osFrequencyGetProperties(properties));
     EXPECT_EQ(0, properties.canControl);
 }
@@ -732,8 +699,7 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleWhenCallingzesFreq
         // value, the new Max must be set before the new Min
         limits.min = newMin;
         limits.max = maxFreq;
-        ON_CALL(*pSysfsAccess.get(), read(_, Matcher<double &>(_)))
-            .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::setValMaxReturnErrorNotAvailable));
+        pSysfsAccess->mockReadMaxResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
         EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesFrequencySetRange(handle, &limits));
     }
 }
@@ -750,8 +716,7 @@ TEST_F(SysmanDeviceFrequencyFixture, GivenValidFrequencyHandleWhenCallingzesFreq
         // value, the new Max must be set before the new Min
         limits.min = newMin;
         limits.max = maxFreq;
-        ON_CALL(*pSysfsAccess.get(), write(_, _))
-            .WillByDefault(::testing::Invoke(pSysfsAccess.get(), &Mock<FrequencySysfsAccess>::setValMaxReturnErrorNotAvailable));
+        pSysfsAccess->mockWriteMaxResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
         EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesFrequencySetRange(handle, &limits));
     }
 }

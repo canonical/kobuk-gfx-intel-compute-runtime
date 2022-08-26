@@ -418,10 +418,7 @@ ze_result_t KernelImp::suggestMaxCooperativeGroupCount(uint32_t *totalGroupCount
     }
     auto &hwHelper = NEO::HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
     auto &descriptor = kernelImmData->getDescriptor();
-    auto availableThreadCount = hwHelper.calculateAvailableThreadCount(
-        hardwareInfo.platform.eProductFamily,
-        descriptor.kernelAttributes.numGrfRequired,
-        hardwareInfo.gtSystemInfo.EUCount, hardwareInfo.gtSystemInfo.ThreadCount / hardwareInfo.gtSystemInfo.EUCount);
+    auto availableThreadCount = hwHelper.calculateAvailableThreadCount(hardwareInfo, descriptor.kernelAttributes.numGrfRequired);
 
     auto barrierCount = descriptor.kernelAttributes.barrierCount;
     const uint32_t workDim = 3;
@@ -675,6 +672,14 @@ ze_result_t KernelImp::setArgImage(uint32_t argIndex, size_t argSize, const void
     auto imageInfo = image->getImageInfo();
     auto clChannelType = getClChannelDataType(image->getImageDesc().format);
     auto clChannelOrder = getClChannelOrder(image->getImageDesc().format);
+
+    // If the Module was built from a SPIRv, then the supported channel data type must be in the CL types otherwise it is unsupported.
+    ModuleImp *moduleImp = reinterpret_cast<ModuleImp *>(this->module);
+    if (moduleImp->isSPIRv()) {
+        if (static_cast<int>(clChannelType) == CL_INVALID_VALUE) {
+            return ZE_RESULT_ERROR_UNSUPPORTED_IMAGE_FORMAT;
+        }
+    }
     NEO::patchNonPointer<uint32_t, size_t>(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize), arg.metadataPayload.imgWidth, imageInfo.imgDesc.imageWidth);
     NEO::patchNonPointer<uint32_t, size_t>(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize), arg.metadataPayload.imgHeight, imageInfo.imgDesc.imageHeight);
     NEO::patchNonPointer<uint32_t, size_t>(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize), arg.metadataPayload.imgDepth, imageInfo.imgDesc.imageDepth);
@@ -906,22 +911,28 @@ ze_result_t KernelImp::initialize(const ze_kernel_desc_t *desc) {
 
     if (this->usesRayTracing()) {
         uint32_t bvhLevels = NEO::RayTracingHelper::maxBvhLevels;
-        neoDevice->initializeRayTracing(bvhLevels);
-        auto rtDispatchGlobalsInfo = neoDevice->getRTDispatchGlobals(bvhLevels);
-        if (rtDispatchGlobalsInfo == nullptr) {
-            return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
+        auto arg = this->getImmutableData()->getDescriptor().payloadMappings.implicitArgs.rtDispatchGlobals;
+        if (arg.pointerSize == 0) {
+            // kernel is allocating its own RTDispatchGlobals manually
+            neoDevice->initializeRayTracing(0);
+        } else {
+            neoDevice->initializeRayTracing(bvhLevels);
+            auto rtDispatchGlobalsInfo = neoDevice->getRTDispatchGlobals(bvhLevels);
+            if (rtDispatchGlobalsInfo == nullptr) {
+                return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
+            }
+
+            for (auto rtDispatchGlobals : rtDispatchGlobalsInfo->rtDispatchGlobals) {
+                this->residencyContainer.push_back(rtDispatchGlobals);
+            }
+
+            auto address = rtDispatchGlobalsInfo->rtDispatchGlobals[0]->getGpuAddressToPatch();
+            NEO::patchPointer(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize),
+                              arg,
+                              static_cast<uintptr_t>(address));
+
+            this->residencyContainer.push_back(neoDevice->getRTMemoryBackedBuffer());
         }
-
-        for (auto rtDispatchGlobals : rtDispatchGlobalsInfo->rtDispatchGlobals) {
-            this->residencyContainer.push_back(rtDispatchGlobals);
-        }
-
-        auto address = rtDispatchGlobalsInfo->rtDispatchGlobals[0]->getGpuAddressToPatch();
-        NEO::patchPointer(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize),
-                          this->getImmutableData()->getDescriptor().payloadMappings.implicitArgs.rtDispatchGlobals,
-                          static_cast<uintptr_t>(address));
-
-        this->residencyContainer.push_back(neoDevice->getRTMemoryBackedBuffer());
     }
 
     return ZE_RESULT_SUCCESS;

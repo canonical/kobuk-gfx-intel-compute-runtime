@@ -275,6 +275,25 @@ TEST_F(EventPoolCreate, GivenDeviceThenEventPoolIsCreated) {
     eventPool->destroy();
 }
 
+class MemoryManagerEventPoolIPCMock : public NEO::MockMemoryManager {
+  public:
+    MemoryManagerEventPoolIPCMock(NEO::ExecutionEnvironment &executionEnvironment) : NEO::MockMemoryManager(executionEnvironment) {}
+    void *createMultiGraphicsAllocationInSystemMemoryPool(RootDeviceIndicesContainer &rootDeviceIndices, AllocationProperties &properties, NEO::MultiGraphicsAllocation &multiGraphicsAllocation) override {
+        alloc = new NEO::MockGraphicsAllocation(&buffer, sizeof(buffer));
+        alloc->isShareableHostMemory = true;
+        multiGraphicsAllocation.addAllocation(alloc);
+        return reinterpret_cast<void *>(alloc->getUnderlyingBuffer());
+    };
+    void freeGraphicsMemoryImpl(NEO::GraphicsAllocation *gfxAllocation) override {
+        delete gfxAllocation;
+    };
+    void freeGraphicsMemoryImpl(GraphicsAllocation *gfxAllocation, bool isImportedAllocation) override {
+        delete gfxAllocation;
+    };
+    char buffer[64];
+    NEO::MockGraphicsAllocation *alloc;
+};
+
 using EventPoolIPCHandleTests = Test<DeviceFixture>;
 
 TEST_F(EventPoolIPCHandleTests, whenGettingIpcHandleForEventPoolThenHandleAndNumberOfEventsAreReturnedInHandle) {
@@ -282,11 +301,14 @@ TEST_F(EventPoolIPCHandleTests, whenGettingIpcHandleForEventPoolThenHandleAndNum
     ze_event_pool_desc_t eventPoolDesc = {
         ZE_STRUCTURE_TYPE_EVENT_POOL_DESC,
         nullptr,
-        ZE_EVENT_POOL_FLAG_HOST_VISIBLE,
+        ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_IPC,
         numEvents};
 
     auto deviceHandle = device->toHandle();
     ze_result_t result = ZE_RESULT_SUCCESS;
+    auto curMemoryManager = driverHandle->getMemoryManager();
+    MemoryManagerEventPoolIPCMock *mockMemoryManager = new MemoryManagerEventPoolIPCMock(*neoDevice->executionEnvironment);
+    driverHandle->setMemoryManager(mockMemoryManager);
     auto eventPool = EventPool::create(driverHandle.get(), context, 1, &deviceHandle, &eventPoolDesc, result);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_NE(nullptr, eventPool);
@@ -305,6 +327,30 @@ TEST_F(EventPoolIPCHandleTests, whenGettingIpcHandleForEventPoolThenHandleAndNum
 
     res = eventPool->destroy();
     EXPECT_EQ(res, ZE_RESULT_SUCCESS);
+    delete mockMemoryManager;
+    driverHandle->setMemoryManager(curMemoryManager);
+}
+
+TEST_F(EventPoolIPCHandleTests, whenGettingIpcHandleForEventPoolWhenHostShareableMemoryIsFalseThenUnsuportedIsReturned) {
+    uint32_t numEvents = 4;
+    ze_event_pool_desc_t eventPoolDesc = {
+        ZE_STRUCTURE_TYPE_EVENT_POOL_DESC,
+        nullptr,
+        ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_IPC,
+        numEvents};
+
+    auto deviceHandle = device->toHandle();
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    auto eventPool = EventPool::create(driverHandle.get(), context, 1, &deviceHandle, &eventPoolDesc, result);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(nullptr, eventPool);
+
+    ze_ipc_event_pool_handle_t ipcHandle = {};
+    ze_result_t res = eventPool->getIpcHandle(&ipcHandle);
+    EXPECT_EQ(res, ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+
+    res = eventPool->destroy();
+    EXPECT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
 TEST_F(EventPoolIPCHandleTests, whenOpeningIpcHandleForEventPoolThenEventPoolIsCreatedAndEventSizesAreTheSame) {
@@ -312,11 +358,14 @@ TEST_F(EventPoolIPCHandleTests, whenOpeningIpcHandleForEventPoolThenEventPoolIsC
     ze_event_pool_desc_t eventPoolDesc = {
         ZE_STRUCTURE_TYPE_EVENT_POOL_DESC,
         nullptr,
-        ZE_EVENT_POOL_FLAG_HOST_VISIBLE,
+        ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_IPC,
         numEvents};
 
     auto deviceHandle = device->toHandle();
     ze_result_t result = ZE_RESULT_SUCCESS;
+    auto curMemoryManager = driverHandle->getMemoryManager();
+    MemoryManagerEventPoolIPCMock *mockMemoryManager = new MemoryManagerEventPoolIPCMock(*neoDevice->executionEnvironment);
+    driverHandle->setMemoryManager(mockMemoryManager);
     auto eventPool = EventPool::create(driverHandle.get(), context, 1, &deviceHandle, &eventPoolDesc, result);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_NE(nullptr, eventPool);
@@ -338,6 +387,45 @@ TEST_F(EventPoolIPCHandleTests, whenOpeningIpcHandleForEventPoolThenEventPoolIsC
 
     res = eventPool->destroy();
     EXPECT_EQ(res, ZE_RESULT_SUCCESS);
+    delete mockMemoryManager;
+    driverHandle->setMemoryManager(curMemoryManager);
+}
+
+TEST_F(EventPoolIPCHandleTests, GivenEventPoolWithIPCEventFlagAndDeviceMemoryThenShareableEventMemoryIsTrue) {
+    ze_event_pool_desc_t eventPoolDesc = {
+        ZE_STRUCTURE_TYPE_EVENT_POOL_DESC,
+        nullptr,
+        ZE_EVENT_POOL_FLAG_IPC,
+        1};
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    std::unique_ptr<L0::EventPool> eventPool(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    ASSERT_NE(nullptr, eventPool);
+    L0::EventPoolImp *eventPoolImp = reinterpret_cast<L0::EventPoolImp *>(eventPool.get());
+
+    EXPECT_TRUE(eventPoolImp->isShareableEventMemory);
+}
+
+TEST_F(EventPoolIPCHandleTests, GivenEventPoolWithIPCEventFlagAndHostMemoryThenShareableEventMemoryIsFalse) {
+    ze_event_pool_desc_t eventPoolDesc = {
+        ZE_STRUCTURE_TYPE_EVENT_POOL_DESC,
+        nullptr,
+        ZE_EVENT_POOL_FLAG_IPC | ZE_EVENT_POOL_FLAG_HOST_VISIBLE,
+        1};
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    std::unique_ptr<L0::EventPool> eventPool(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    ASSERT_NE(nullptr, eventPool);
+
+    auto allocation = &eventPool->getAllocation();
+    ASSERT_NE(nullptr, allocation);
+
+    uint32_t minAllocationSize = eventPool->getEventSize();
+    EXPECT_GE(allocation->getGraphicsAllocation(device->getNEODevice()->getRootDeviceIndex())->getUnderlyingBufferSize(),
+              minAllocationSize);
+    EXPECT_FALSE(allocation->getGraphicsAllocation(device->getNEODevice()->getRootDeviceIndex())->isShareableHostMemory);
 }
 
 using EventPoolOpenIPCHandleFailTests = Test<DeviceFixture>;
@@ -347,11 +435,14 @@ TEST_F(EventPoolOpenIPCHandleFailTests, givenFailureToAllocateMemoryWhenOpeningI
     ze_event_pool_desc_t eventPoolDesc = {
         ZE_STRUCTURE_TYPE_EVENT_POOL_DESC,
         nullptr,
-        ZE_EVENT_POOL_FLAG_HOST_VISIBLE,
+        ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_IPC,
         numEvents};
 
     auto deviceHandle = device->toHandle();
     ze_result_t result = ZE_RESULT_SUCCESS;
+    auto originalMemoryManager = driverHandle->getMemoryManager();
+    MemoryManagerEventPoolIPCMock *mockMemoryManager = new MemoryManagerEventPoolIPCMock(*neoDevice->executionEnvironment);
+    driverHandle->setMemoryManager(mockMemoryManager);
     auto eventPool = EventPool::create(driverHandle.get(), context, 1, &deviceHandle, &eventPoolDesc, result);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_NE(nullptr, eventPool);
@@ -378,6 +469,8 @@ TEST_F(EventPoolOpenIPCHandleFailTests, givenFailureToAllocateMemoryWhenOpeningI
 
     res = eventPool->destroy();
     EXPECT_EQ(res, ZE_RESULT_SUCCESS);
+    delete mockMemoryManager;
+    driverHandle->setMemoryManager(originalMemoryManager);
 }
 
 class MultiDeviceEventPoolOpenIPCHandleFailTestsMemoryManager : public FailMemoryManager {
@@ -412,11 +505,15 @@ TEST_F(MultiDeviceEventPoolOpenIPCHandleFailTests,
     ze_event_pool_desc_t eventPoolDesc = {
         ZE_STRUCTURE_TYPE_EVENT_POOL_DESC,
         nullptr,
-        ZE_EVENT_POOL_FLAG_HOST_VISIBLE,
+        ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_IPC,
         numEvents};
 
     auto deviceHandle = driverHandle->devices[0]->toHandle();
     ze_result_t result = ZE_RESULT_SUCCESS;
+    NEO::MockDevice *neoDevice = static_cast<NEO::MockDevice *>(driverHandle->devices[0]->getNEODevice());
+    auto originalMemoryManager = driverHandle->getMemoryManager();
+    MemoryManagerEventPoolIPCMock *mockMemoryManager = new MemoryManagerEventPoolIPCMock(*neoDevice->executionEnvironment);
+    driverHandle->setMemoryManager(mockMemoryManager);
     auto eventPool = EventPool::create(driverHandle.get(), context, 1, &deviceHandle, &eventPoolDesc, result);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_NE(nullptr, eventPool);
@@ -430,7 +527,6 @@ TEST_F(MultiDeviceEventPoolOpenIPCHandleFailTests,
         NEO::MemoryManager *currMemoryManager = nullptr;
 
         prevMemoryManager = driverHandle->getMemoryManager();
-        NEO::MockDevice *neoDevice = static_cast<NEO::MockDevice *>(driverHandle->devices[0]->getNEODevice());
         currMemoryManager = new MultiDeviceEventPoolOpenIPCHandleFailTestsMemoryManager(*neoDevice->executionEnvironment);
         driverHandle->setMemoryManager(currMemoryManager);
 
@@ -444,6 +540,8 @@ TEST_F(MultiDeviceEventPoolOpenIPCHandleFailTests,
 
     res = eventPool->destroy();
     EXPECT_EQ(res, ZE_RESULT_SUCCESS);
+    delete mockMemoryManager;
+    driverHandle->setMemoryManager(originalMemoryManager);
 }
 
 TEST_F(EventPoolCreate, GivenNullptrDeviceAndNumberOfDevicesWhenCreatingEventPoolThenReturnError) {
@@ -616,7 +714,7 @@ TEST_F(EventCreate, givenAnEventCreateWithInvalidIndexUsingThisEventPoolThenErro
     ASSERT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, value);
 }
 
-HWTEST2_F(EventCreate, givenPlatformSupportMultTileWhenDebugKeyIsSetToNotUseContextEndThenDoNotUseContextEndOffset, isXeHpOrXeHpcCore) {
+HWTEST2_F(EventCreate, givenPlatformSupportMultTileWhenDebugKeyIsSetToNotUseContextEndThenDoNotUseContextEndOffset, IsXeHpOrXeHpcCore) {
     DebugManagerStateRestore restorer;
     NEO::DebugManager.flags.UseContextEndOffsetForEventCompletion.set(0);
 
@@ -653,7 +751,7 @@ HWTEST2_F(EventCreate, givenPlatformSupportMultTileWhenDebugKeyIsSetToNotUseCont
     event->destroy();
 }
 
-HWTEST2_F(EventCreate, givenPlatformNotSupportsMultTileWhenDebugKeyIsSetToUseContextEndThenUseContextEndOffset, isNotXeHpOrXeHpcCore) {
+HWTEST2_F(EventCreate, givenPlatformNotSupportsMultTileWhenDebugKeyIsSetToUseContextEndThenUseContextEndOffset, IsNotXeHpOrXeHpcCore) {
     DebugManagerStateRestore restorer;
     NEO::DebugManager.flags.UseContextEndOffsetForEventCompletion.set(1);
 
@@ -693,7 +791,7 @@ HWTEST2_F(EventCreate, givenPlatformNotSupportsMultTileWhenDebugKeyIsSetToUseCon
 class EventSynchronizeTest : public Test<DeviceFixture> {
   public:
     void SetUp() override {
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
         ze_event_pool_desc_t eventPoolDesc = {};
         eventPoolDesc.count = 1;
         eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE;
@@ -714,7 +812,7 @@ class EventSynchronizeTest : public Test<DeviceFixture> {
     void TearDown() override {
         event.reset(nullptr);
         eventPool.reset(nullptr);
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
     }
 
     std::unique_ptr<L0::EventPool> eventPool = nullptr;
@@ -1037,7 +1135,7 @@ struct EventCreateAllocationResidencyTest : public ::testing::Test {
 class TimestampEventCreate : public Test<DeviceFixture> {
   public:
     void SetUp() override {
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
         ze_event_pool_desc_t eventPoolDesc = {};
         eventPoolDesc.count = 1;
         eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
@@ -1058,7 +1156,7 @@ class TimestampEventCreate : public Test<DeviceFixture> {
     void TearDown() override {
         event.reset(nullptr);
         eventPool.reset(nullptr);
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
     }
 
     std::unique_ptr<L0::EventPool> eventPool;
@@ -1172,7 +1270,7 @@ TEST_F(TimestampEventCreate, givenEventWithStaticPartitionOffThenQueryTimestampE
 class TimestampDeviceEventCreate : public Test<DeviceFixture> {
   public:
     void SetUp() override {
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
         ze_event_pool_desc_t eventPoolDesc = {};
         eventPoolDesc.count = 1;
         eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
@@ -1193,7 +1291,7 @@ class TimestampDeviceEventCreate : public Test<DeviceFixture> {
     void TearDown() override {
         event.reset(nullptr);
         eventPool.reset(nullptr);
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
     }
 
     std::unique_ptr<L0::EventPool> eventPool;
@@ -1418,6 +1516,47 @@ TEST_F(TimestampEventCreate, givenTimeStampEventUsedOnTwoKernelsWhenL3FlushSetOn
     EXPECT_EQ(static_cast<uint64_t>(kernelStartValue), results.global.kernelStart);
     EXPECT_EQ(static_cast<uint64_t>(kernelEndValue), results.context.kernelEnd);
     EXPECT_EQ(static_cast<uint64_t>(kernelEndValue), results.global.kernelEnd);
+}
+
+TEST_F(TimestampEventCreate, givenOverflowingTimeStampDataOnTwoKernelsWhenQueryKernelTimestampIsCalledOverflowIsObserved) {
+    typename MockTimestampPackets32::Packet packetData[4] = {};
+    event->hostAddress = packetData;
+
+    uint32_t maxTimeStampValue = std::numeric_limits<uint32_t>::max();
+
+    //1st kernel 1st packet (overflowing context timestamp)
+    packetData[0].contextStart = maxTimeStampValue - 1;
+    packetData[0].contextEnd = maxTimeStampValue + 1;
+    packetData[0].globalStart = maxTimeStampValue - 2;
+    packetData[0].globalEnd = maxTimeStampValue - 1;
+
+    //2nd kernel 1st packet (overflowing global timestamp)
+    packetData[1].contextStart = maxTimeStampValue - 2;
+    packetData[1].contextEnd = maxTimeStampValue - 1;
+    packetData[1].globalStart = maxTimeStampValue - 1;
+    packetData[1].globalEnd = maxTimeStampValue + 1;
+
+    //2nd kernel 2nd packet (overflowing context timestamp)
+    memcpy(&packetData[2], &packetData[0], sizeof(MockTimestampPackets32::Packet));
+    packetData[2].contextStart = maxTimeStampValue;
+    packetData[2].contextEnd = maxTimeStampValue + 2;
+
+    EXPECT_EQ(1u, event->getPacketsUsedInLastKernel());
+
+    event->increaseKernelCount();
+    event->setPacketsInUse(2u);
+
+    ze_kernel_timestamp_result_t results;
+    event->queryKernelTimestamp(&results);
+
+    auto &hwHelper = HwHelper::get(device->getHwInfo().platform.eRenderCoreFamily);
+    if (hwHelper.useOnlyGlobalTimestamps() == false) {
+        EXPECT_EQ(static_cast<uint64_t>(maxTimeStampValue - 2), results.context.kernelStart);
+        EXPECT_EQ(static_cast<uint64_t>(maxTimeStampValue + 2), results.context.kernelEnd);
+    }
+
+    EXPECT_EQ(static_cast<uint64_t>(maxTimeStampValue - 2), results.global.kernelStart);
+    EXPECT_EQ(static_cast<uint64_t>(maxTimeStampValue + 1), results.global.kernelEnd);
 }
 
 HWTEST_EXCLUDE_PRODUCT(TimestampEventCreate, givenEventTimestampsWhenQueryKernelTimestampThenCorrectDataAreSet, IGFX_GEN12LP_CORE);
@@ -1701,18 +1840,18 @@ TEST_F(EventPoolCreateNegativeTest, whenInitializingEventPoolButMemoryManagerFai
 
 class EventFixture : public DeviceFixture {
   public:
-    void SetUp() {
-        DeviceFixture::SetUp();
+    void setUp() {
+        DeviceFixture::setUp();
 
         auto hDevice = device->toHandle();
         ze_result_t result = ZE_RESULT_SUCCESS;
         eventPool = whiteboxCast(EventPool::create(device->getDriverHandle(), context, 1, &hDevice, &eventPoolDesc, result));
     }
 
-    void TearDown() {
+    void tearDown() {
         eventPool->destroy();
 
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
     }
 
     ze_event_pool_desc_t eventPoolDesc = {
@@ -1869,16 +2008,16 @@ TEST_F(EventTests, WhenSettingL3FlushOnEventThenSetOnParticularKernel) {
 }
 
 struct EventSizeFixture : public DeviceFixture {
-    void SetUp() {
-        DeviceFixture::SetUp();
+    void setUp() {
+        DeviceFixture::setUp();
         hDevice = device->toHandle();
     }
 
-    void TearDown() {
+    void tearDown() {
         eventObj0.reset(nullptr);
         eventObj1.reset(nullptr);
         eventPool.reset(nullptr);
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
     }
 
     void createEvents() {

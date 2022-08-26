@@ -12,18 +12,18 @@
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/program/program_initialization.h"
+#include "shared/test/common/compiler_interface/linker_mock.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_elf.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_modules_zebin.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-#include "shared/test/unit_test/device_binary_format/zebin_tests.h"
-#include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "RelocationInfo.h"
 #include "gtest/gtest.h"
-#include "linker_mock.h"
 
 #include <string>
 
@@ -901,7 +901,7 @@ TEST(LinkerInputTests, GivenGlobalAndLocalElfSymbolsWhenDecodingThenOnlyGlobalSy
     EXPECT_TRUE(linkerInput.getTraits().exportsFunctions);
 }
 
-TEST(LinkerInputTests, GivenGlobalFunctionsInTwoSegementsWhenDecodingThenUnrecoverableIsCalled) {
+TEST(LinkerInputTests, GivenGlobalFunctionsInTwoSegmentsWhenDecodingThenUnrecoverableIsCalled) {
     NEO::LinkerInput linkerInput = {};
     NEO::Elf::ElfFileHeader<NEO::Elf::EI_CLASS_64> header;
     MockElf<NEO::Elf::EI_CLASS_64> elf64;
@@ -1252,12 +1252,12 @@ TEST(LinkerTests, givenValidSymbolsAndRelocationsThenInstructionSegmentsArePrope
     relocCPartLow.r_offset = 36;
     relocCPartLow.r_type = vISA::GenRelocType::R_SYM_ADDR_32;
 
-    vISA::GenRelocEntry relocIgnore = {};
-    relocIgnore.r_symbol[0] = 'X';
-    relocIgnore.r_offset = 36;
-    relocIgnore.r_type = vISA::GenRelocType::R_PER_THREAD_PAYLOAD_OFFSET_32;
+    vISA::GenRelocEntry relocPerThreadPayloadOffset = {};
+    relocPerThreadPayloadOffset.r_symbol[0] = 'X';
+    relocPerThreadPayloadOffset.r_offset = 44;
+    relocPerThreadPayloadOffset.r_type = vISA::GenRelocType::R_PER_THREAD_PAYLOAD_OFFSET_32;
 
-    vISA::GenRelocEntry relocs[] = {relocA, relocB, relocC, relocCPartHigh, relocCPartLow, relocIgnore};
+    vISA::GenRelocEntry relocs[] = {relocA, relocB, relocC, relocCPartHigh, relocCPartLow, relocPerThreadPayloadOffset};
     constexpr uint32_t numRelocations = sizeof(relocs) / sizeof(relocs[0]);
     bool decodeRelocSuccess = linkerInput.decodeRelocationTable(&relocs, numRelocations, 0);
     EXPECT_TRUE(decodeRelocSuccess);
@@ -1284,6 +1284,10 @@ TEST(LinkerTests, givenValidSymbolsAndRelocationsThenInstructionSegmentsArePrope
     NEO::Linker::KernelDescriptorsT kernelDescriptors;
     NEO::Linker::ExternalFunctionsT externalFunctions;
 
+    KernelDescriptor kd;
+    kd.kernelAttributes.crossThreadDataSize = 0x20;
+    kernelDescriptors.push_back(&kd);
+
     auto linkResult = linker.link(
         globalVarSegment, globalConstSegment, exportedFuncSegment, {},
         patchableGlobalVarSeg, patchableConstVarSeg, patchableInstructionSegments, unresolvedExternals,
@@ -1295,7 +1299,7 @@ TEST(LinkerTests, givenValidSymbolsAndRelocationsThenInstructionSegmentsArePrope
 
     ASSERT_EQ(1U, relocatedSymbols.count(symGlobalVariable.s_name));
     ASSERT_EQ(1U, relocatedSymbols.count(symGlobalConstant.s_name));
-    ASSERT_EQ(1U, relocatedSymbols.count(symGlobalVariable.s_name));
+    ASSERT_EQ(1U, relocatedSymbols.count(symExportedFunc.s_name));
 
     EXPECT_EQ(relocatedSymbols[symGlobalVariable.s_name].gpuAddress, globalVarSegment.gpuAddress + symGlobalVariable.s_offset);
     EXPECT_EQ(relocatedSymbols[symGlobalConstant.s_name].gpuAddress, globalConstSegment.gpuAddress + symGlobalConstant.s_offset);
@@ -1315,6 +1319,9 @@ TEST(LinkerTests, givenValidSymbolsAndRelocationsThenInstructionSegmentsArePrope
     EXPECT_EQ(funcAddressHigh, *reinterpret_cast<const uint32_t *>(instructionSegment.data() + relocCPartHigh.r_offset));
     EXPECT_EQ(initData, *reinterpret_cast<const uint32_t *>(instructionSegment.data() + relocCPartHigh.r_offset - sizeof(uint32_t)));
     EXPECT_EQ(initData, *reinterpret_cast<const uint32_t *>(instructionSegment.data() + relocCPartHigh.r_offset + sizeof(uint32_t)));
+
+    auto perThreadPayloadOffsetPatchedValue = *reinterpret_cast<uint32_t *>(instructionSegment.data() + relocPerThreadPayloadOffset.r_offset);
+    EXPECT_EQ(kd.kernelAttributes.crossThreadDataSize, perThreadPayloadOffsetPatchedValue);
 }
 
 TEST(LinkerTests, givenInvalidSymbolOffsetWhenPatchingInstructionsThenRelocationFails) {
@@ -2453,7 +2460,8 @@ TEST(LinkerTests, givenRelaWhenPatchingInstructionsSegmentThenAddendIsAdded) {
     segmentToPatch.segmentSize = sizeof(segmentData);
 
     NEO::Linker::UnresolvedExternals unresolvedExternals;
-    linker.patchInstructionsSegments({segmentToPatch}, unresolvedExternals);
+    NEO::Linker::KernelDescriptorsT kernelDescriptors;
+    linker.patchInstructionsSegments({segmentToPatch}, unresolvedExternals, kernelDescriptors);
     EXPECT_EQ(static_cast<uint64_t>(rela.addend + symValue), segmentData);
 }
 
@@ -2483,4 +2491,31 @@ TEST(LinkerTests, givenRelaWhenPatchingDataSegmentThenAddendIsAdded) {
     NEO::Linker::UnresolvedExternals unresolvedExternals;
     linker.patchDataSegments({}, globalConstantsSegmentInfo, {}, &globalConstantsPatchableSegment, unresolvedExternals, device.get(), &globalConstantSegmentData, nullptr);
     EXPECT_EQ(static_cast<uint64_t>(rela.addend + symValue), globalConstantSegmentData);
+}
+
+TEST(LinkerTests, givenPerThreadPayloadOffsetRelocationWhenPatchingInstructionSegmentsThenPatchItWithCTDSize) {
+    WhiteBox<NEO::LinkerInput> linkerInput;
+    linkerInput.traits.requiresPatchingOfInstructionSegments = true;
+    NEO::LinkerInput::RelocationInfo rel;
+    rel.offset = 0x4;
+    rel.type = NEO::LinkerInput::RelocationInfo::Type::PerThreadPayloadOffset;
+    rel.relocationSegment = NEO::SegmentType::Instructions;
+    linkerInput.textRelocations.push_back({rel});
+
+    NEO::Linker::KernelDescriptorsT kernelDescriptors;
+    KernelDescriptor kd;
+    kd.kernelAttributes.crossThreadDataSize = 0x20;
+    kernelDescriptors.push_back(&kd);
+
+    WhiteBox<NEO::Linker> linker(linkerInput);
+
+    uint64_t segmentData{0};
+    NEO::Linker::PatchableSegment segmentToPatch;
+    segmentToPatch.hostPointer = reinterpret_cast<void *>(&segmentData);
+    segmentToPatch.segmentSize = sizeof(segmentData);
+
+    NEO::Linker::UnresolvedExternals unresolvedExternals;
+    linker.patchInstructionsSegments({segmentToPatch}, unresolvedExternals, kernelDescriptors);
+    auto perThreadPayloadOffsetPatchedValue = reinterpret_cast<uint32_t *>(ptrOffset(segmentToPatch.hostPointer, static_cast<size_t>(rel.offset)));
+    EXPECT_EQ(kd.kernelAttributes.crossThreadDataSize, static_cast<uint32_t>(*perThreadPayloadOffsetPatchedValue));
 }

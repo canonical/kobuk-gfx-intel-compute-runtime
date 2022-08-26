@@ -14,7 +14,7 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_csr.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-#include "shared/test/unit_test/utilities/base_object_utils.h"
+#include "shared/test/common/utilities/base_object_utils.h"
 
 #include "opencl/test/unit_test/command_queue/enqueue_fixture.h"
 #include "opencl/test/unit_test/fixtures/hello_world_fixture.h"
@@ -118,12 +118,12 @@ struct EnqueueKernelTypeTest : public HelloWorldFixture<HelloWorldFixtureFactory
     }
 
     void SetUp() override {
-        ParentClass::SetUp();
-        ClHardwareParse::SetUp();
+        ParentClass::setUp();
+        ClHardwareParse::setUp();
     }
     void TearDown() override {
-        ClHardwareParse::TearDown();
-        ParentClass::TearDown();
+        ClHardwareParse::tearDown();
+        ParentClass::tearDown();
     }
     size_t globalWorkSize[3];
     size_t localWorkSize[3];

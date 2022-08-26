@@ -13,13 +13,13 @@
 #include "shared/source/program/kernel_info.h"
 #include "shared/source/program/kernel_info_from_patchtokens.h"
 #include "shared/source/utilities/stackvec.h"
+#include "shared/test/common/compiler_interface/linker_mock.h"
+#include "shared/test/common/device_binary_format/patchtokens_tests.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/test_macros/hw_test.h"
-#include "shared/test/unit_test/compiler_interface/linker_mock.h"
-#include "shared/test/unit_test/device_binary_format/patchtokens_tests.h"
 
 #include "level_zero/core/source/image/image_format_desc_helper.h"
 #include "level_zero/core/source/image/image_hw.h"
@@ -51,7 +51,7 @@ TEST_F(KernelInitTest, givenKernelToInitWhenItHasUnknownArgThenUnknowKernelArgHa
     std::unique_ptr<MockImmutableData> mockKernelImmData =
         std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
 
-    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, false, mockKernelImmData.get());
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, false, mockKernelImmData.get());
     std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
     kernel = std::make_unique<ModuleImmutableDataFixture::MockKernel>(module.get());
     ze_kernel_desc_t desc = {};
@@ -69,7 +69,7 @@ TEST_F(KernelBaseAddressTests, whenQueryingKernelBaseAddressThenCorrectAddressIs
     std::unique_ptr<MockImmutableData> mockKernelImmData =
         std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
 
-    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, false, mockKernelImmData.get());
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, false, mockKernelImmData.get());
     std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
     kernel = std::make_unique<ModuleImmutableDataFixture::MockKernel>(module.get());
     ze_kernel_desc_t desc = {};
@@ -332,6 +332,105 @@ HWTEST2_F(SetKernelArg, givenImageAndKernelWhenSetArgImageThenCrossThreadDataIsS
     EXPECT_EQ(getClChannelOrder(desc.format), *reinterpret_cast<const cl_channel_order *>(pChannelOrder));
 }
 
+HWTEST2_F(SetKernelArg, givenImageAndKernelFromNativeWhenSetArgImageCalledThenSuccessAndInvalidChannelType, ImageSupport) {
+    createKernel();
+
+    auto &imageArg = const_cast<NEO::ArgDescImage &>(kernel->kernelImmData->getDescriptor().payloadMappings.explicitArgs[3].as<NEO::ArgDescImage>());
+    imageArg.metadataPayload.imgWidth = 0x1c;
+    imageArg.metadataPayload.imgHeight = 0x18;
+    imageArg.metadataPayload.imgDepth = 0x14;
+
+    imageArg.metadataPayload.arraySize = 0x10;
+    imageArg.metadataPayload.numSamples = 0xc;
+    imageArg.metadataPayload.channelDataType = 0x8;
+    imageArg.metadataPayload.channelOrder = 0x4;
+    imageArg.metadataPayload.numMipLevels = 0x0;
+
+    imageArg.metadataPayload.flatWidth = 0x30;
+    imageArg.metadataPayload.flatHeight = 0x2c;
+    imageArg.metadataPayload.flatPitch = 0x28;
+    imageArg.metadataPayload.flatBaseOffset = 0x20;
+
+    ze_image_desc_t desc = {};
+
+    desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    desc.type = ZE_IMAGE_TYPE_3D;
+    desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_10_10_10_2;
+    desc.format.type = ZE_IMAGE_FORMAT_TYPE_UINT;
+    desc.width = 11;
+    desc.height = 13;
+    desc.depth = 17;
+
+    desc.format.x = ZE_IMAGE_FORMAT_SWIZZLE_A;
+    desc.format.y = ZE_IMAGE_FORMAT_SWIZZLE_0;
+    desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_1;
+    desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
+
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto ret = imageHW->initialize(device, &desc);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
+
+    auto handle = imageHW->toHandle();
+    L0::ModuleImp *moduleImp = (L0::ModuleImp *)(module.get());
+    EXPECT_FALSE(moduleImp->isSPIRv());
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, kernel->setArgImage(3, sizeof(imageHW.get()), &handle));
+
+    auto crossThreadData = kernel->getCrossThreadData();
+
+    auto pChannelDataType = ptrOffset(crossThreadData, imageArg.metadataPayload.channelDataType);
+    int channelDataType = (int)(*reinterpret_cast<const cl_channel_type *>(pChannelDataType));
+    EXPECT_EQ(CL_INVALID_VALUE, channelDataType);
+}
+
+HWTEST2_F(SetKernelArg, givenImageAndKernelFromSPIRvWhenSetArgImageCalledThenUnsupportedReturned, ImageSupport) {
+    createKernel();
+
+    auto &imageArg = const_cast<NEO::ArgDescImage &>(kernel->kernelImmData->getDescriptor().payloadMappings.explicitArgs[3].as<NEO::ArgDescImage>());
+    imageArg.metadataPayload.imgWidth = 0x1c;
+    imageArg.metadataPayload.imgHeight = 0x18;
+    imageArg.metadataPayload.imgDepth = 0x14;
+
+    imageArg.metadataPayload.arraySize = 0x10;
+    imageArg.metadataPayload.numSamples = 0xc;
+    imageArg.metadataPayload.channelDataType = 0x8;
+    imageArg.metadataPayload.channelOrder = 0x4;
+    imageArg.metadataPayload.numMipLevels = 0x0;
+
+    imageArg.metadataPayload.flatWidth = 0x30;
+    imageArg.metadataPayload.flatHeight = 0x2c;
+    imageArg.metadataPayload.flatPitch = 0x28;
+    imageArg.metadataPayload.flatBaseOffset = 0x20;
+
+    ze_image_desc_t desc = {};
+
+    desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    desc.type = ZE_IMAGE_TYPE_3D;
+    desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_10_10_10_2;
+    desc.format.type = ZE_IMAGE_FORMAT_TYPE_UINT;
+    desc.width = 11;
+    desc.height = 13;
+    desc.depth = 17;
+
+    desc.format.x = ZE_IMAGE_FORMAT_SWIZZLE_A;
+    desc.format.y = ZE_IMAGE_FORMAT_SWIZZLE_0;
+    desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_1;
+    desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
+
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto ret = imageHW->initialize(device, &desc);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
+
+    auto handle = imageHW->toHandle();
+
+    WhiteBox<::L0::Module> *moduleImp = whiteboxCast(module.get());
+    moduleImp->builtFromSPIRv = true;
+    EXPECT_TRUE(moduleImp->isSPIRv());
+    kernel->module = moduleImp;
+
+    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_IMAGE_FORMAT, kernel->setArgImage(3, sizeof(imageHW.get()), &handle));
+}
+
 HWTEST2_F(SetKernelArg, givenSamplerAndKernelWhenSetArgSamplerThenCrossThreadDataIsSet, ImageSupport) {
     createKernel();
 
@@ -379,18 +478,7 @@ HWTEST2_F(SetKernelArg, givenBufferArgumentWhichHasNotBeenAllocatedByRuntimeThen
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, res);
 }
 
-class KernelImmutableDataFixture : public ModuleImmutableDataFixture {
-  public:
-    void SetUp() {
-        ModuleImmutableDataFixture::SetUp();
-    }
-
-    void TearDown() {
-        ModuleImmutableDataFixture::TearDown();
-    }
-};
-
-using KernelImmutableDataTests = Test<KernelImmutableDataFixture>;
+using KernelImmutableDataTests = Test<ModuleImmutableDataFixture>;
 
 TEST_F(KernelImmutableDataTests, givenKernelInitializedWithNoPrivateMemoryThenPrivateMemoryIsNull) {
     uint32_t perHwThreadPrivateMemorySizeRequested = 0u;
@@ -398,7 +486,7 @@ TEST_F(KernelImmutableDataTests, givenKernelInitializedWithNoPrivateMemoryThenPr
 
     std::unique_ptr<MockImmutableData> mockKernelImmData = std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
 
-    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
 
     std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
     kernel = std::make_unique<ModuleImmutableDataFixture::MockKernel>(module.get());
@@ -414,7 +502,7 @@ TEST_F(KernelImmutableDataTests, givenKernelInitializedWithPrivateMemoryThenPriv
 
     std::unique_ptr<MockImmutableData> mockKernelImmData = std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
 
-    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
 
     std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
     kernel = std::make_unique<ModuleImmutableDataFixture::MockKernel>(module.get());
@@ -442,7 +530,8 @@ TEST_F(KernelImmutableDataIsaCopyTests, whenUserKernelIsCreatedThenIsaIsCopiedWh
 
     std::unique_ptr<MockImmutableData> mockKernelImmData = std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
 
-    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
+    auto additionalSections = {ZebinTestData::appendElfAdditionalSection::GLOBAL};
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get(), additionalSections);
 
     size_t copyForGlobalSurface = 1u;
     auto copyForIsa = module->getKernelImmutableDataVector().size();
@@ -468,7 +557,7 @@ TEST_F(KernelImmutableDataIsaCopyTests, whenImmutableDataIsInitializedForUserKer
     bool isInternal = false;
 
     std::unique_ptr<MockImmutableData> mockKernelImmData = std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
-    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
 
     uint32_t previouscopyMemoryToAllocationCalledTimes =
         mockMemoryManager->copyMemoryToAllocationCalledTimes;
@@ -491,7 +580,7 @@ TEST_F(KernelImmutableDataIsaCopyTests, whenImmutableDataIsInitializedForInterna
     bool isInternal = true;
 
     std::unique_ptr<MockImmutableData> mockKernelImmData = std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
-    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
 
     uint32_t previouscopyMemoryToAllocationCalledTimes =
         mockMemoryManager->copyMemoryToAllocationCalledTimes;
@@ -521,7 +610,8 @@ TEST_F(KernelImmutableDataTests, givenInternalModuleWhenKernelIsCreatedThenIsaIs
     size_t previouscopyMemoryToAllocationCalledTimes =
         mockMemoryManager->copyMemoryToAllocationCalledTimes;
 
-    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
+    auto additionalSections = {ZebinTestData::appendElfAdditionalSection::GLOBAL};
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get(), additionalSections);
 
     size_t copyForGlobalSurface = 1u;
     size_t copyForPatchingIsa = 0u;
@@ -602,20 +692,13 @@ TEST_F(KernelImmutableDataTests, givenInternalModuleWhenKernelIsCreatedIsaIsNotC
 }
 
 TEST_F(KernelImmutableDataTests, givenKernelInitializedWithPrivateMemoryThenContainerHasOneExtraSpaceForAllocation) {
-    std::string testFile;
-    retrieveBinaryKernelFilenameApiSpecific(testFile, binaryFilename + "_", ".bin");
-
-    size_t size = 0;
-    auto src = loadDataFromFile(
-        testFile.c_str(),
-        size);
-    ASSERT_NE(0u, size);
-    ASSERT_NE(nullptr, src);
+    auto zebinData = std::make_unique<ZebinTestData::ZebinWithL0TestCommonModule>(device->getHwInfo());
+    const auto &src = zebinData->storage;
 
     ze_module_desc_t moduleDesc = {};
     moduleDesc.format = ZE_MODULE_FORMAT_NATIVE;
-    moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(src.get());
-    moduleDesc.inputSize = size;
+    moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(src.data());
+    moduleDesc.inputSize = src.size();
     ModuleBuildLog *moduleBuildLog = nullptr;
 
     uint32_t perHwThreadPrivateMemorySizeRequested = 32u;
@@ -658,20 +741,12 @@ TEST_F(KernelImmutableDataTests, givenKernelInitializedWithPrivateMemoryThenCont
 }
 
 TEST_F(KernelImmutableDataTests, givenKernelWithPrivateMemoryBiggerThanGlobalMemoryThenPrivateMemoryIsNotAllocated) {
-    std::string testFile;
-    retrieveBinaryKernelFilenameApiSpecific(testFile, binaryFilename + "_", ".bin");
-
-    size_t size = 0;
-    auto src = loadDataFromFile(
-        testFile.c_str(),
-        size);
-    ASSERT_NE(0u, size);
-    ASSERT_NE(nullptr, src);
-
+    auto zebinData = std::make_unique<ZebinTestData::ZebinWithL0TestCommonModule>(device->getHwInfo());
+    const auto &src = zebinData->storage;
     ze_module_desc_t moduleDesc = {};
     moduleDesc.format = ZE_MODULE_FORMAT_NATIVE;
-    moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(src.get());
-    moduleDesc.inputSize = size;
+    moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(src.data());
+    moduleDesc.inputSize = src.size();
     ModuleBuildLog *moduleBuildLog = nullptr;
 
     uint32_t perHwThreadPrivateMemorySizeRequested = std::numeric_limits<uint32_t>::max();
@@ -732,6 +807,49 @@ TEST_F(KernelImmutableDataTests, whenHasRTCallsIsTrueThenRayTracingIsInitialized
 
     auto rtDispatchGlobals = neoDevice->getRTDispatchGlobals(NEO::RayTracingHelper::maxBvhLevels);
     EXPECT_NE(nullptr, rtDispatchGlobals);
+}
+
+TEST_F(KernelImmutableDataTests, whenHasRTCallsIsTrueAndPatchTokenPointerSizeIsZeroThenRayTracingIsInitialized) {
+    static_cast<OsAgnosticMemoryManager *>(device->getNEODevice()->getMemoryManager())->turnOnFakingBigAllocations();
+
+    KernelDescriptor mockDescriptor = {};
+    mockDescriptor.kernelAttributes.flags.hasRTCalls = true;
+    mockDescriptor.kernelMetadata.kernelName = "rt_test";
+    for (auto i = 0u; i < 3u; i++) {
+        mockDescriptor.kernelAttributes.requiredWorkgroupSize[i] = 0;
+    }
+
+    std::unique_ptr<MockImmutableData> mockKernelImmutableData =
+        std::make_unique<MockImmutableData>(32u);
+    mockKernelImmutableData->kernelDescriptor = &mockDescriptor;
+    mockDescriptor.payloadMappings.implicitArgs.rtDispatchGlobals.pointerSize = 0;
+
+    ModuleBuildLog *moduleBuildLog = nullptr;
+    module = std::make_unique<MockModule>(device,
+                                          moduleBuildLog,
+                                          ModuleType::User,
+                                          32u,
+                                          mockKernelImmutableData.get());
+    module->maxGroupSize = 10;
+
+    std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
+    kernel = std::make_unique<ModuleImmutableDataFixture::MockKernel>(module.get());
+
+    ze_kernel_desc_t kernelDesc = {};
+    kernelDesc.pKernelName = "rt_test";
+
+    auto immDataVector =
+        const_cast<std::vector<std::unique_ptr<KernelImmutableData>> *>(&module->getKernelImmutableDataVector());
+
+    immDataVector->push_back(std::move(mockKernelImmutableData));
+
+    auto result = kernel->initialize(&kernelDesc);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(nullptr, module->getDevice()->getNEODevice()->getRTMemoryBackedBuffer());
+
+    // Application is expected to allocate its own RTDispatchGlobals manually in this case.
+    auto rtDispatchGlobals = neoDevice->getRTDispatchGlobals(NEO::RayTracingHelper::maxBvhLevels);
+    EXPECT_EQ(nullptr, rtDispatchGlobals);
 }
 
 HWTEST2_F(KernelImmutableDataTests, whenHasRTCallsIsTrueAndNoRTDispatchGlobalsIsAllocatedThenRayTracingIsNotInitialized, IsAtLeastXeHpgCore) {
@@ -956,7 +1074,7 @@ TEST_F(KernelIndirectPropertiesFromIGCTests, whenInitializingKernelWithNoKernelL
     std::unique_ptr<MockImmutableData> mockKernelImmData =
         std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
 
-    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
 
     std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
     kernel = std::make_unique<ModuleImmutableDataFixture::MockKernel>(module.get());
@@ -983,7 +1101,7 @@ TEST_F(KernelIndirectPropertiesFromIGCTests, whenInitializingKernelWithKernelLoa
     std::unique_ptr<MockImmutableData> mockKernelImmData =
         std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
 
-    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, isInternal, mockKernelImmData.get());
 
     {
         std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
@@ -1041,7 +1159,7 @@ class KernelPropertiesTests : public ModuleFixture, public ::testing::Test {
         using KernelImp::kernelHasIndirectAccess;
     };
     void SetUp() override {
-        ModuleFixture::SetUp();
+        ModuleFixture::setUp();
 
         ze_kernel_desc_t kernelDesc = {};
         kernelDesc.pKernelName = kernelName.c_str();
@@ -1055,7 +1173,7 @@ class KernelPropertiesTests : public ModuleFixture, public ::testing::Test {
 
     void TearDown() override {
         Kernel::fromHandle(kernelHandle)->destroy();
-        ModuleFixture::TearDown();
+        ModuleFixture::tearDown();
     }
 
     ze_kernel_handle_t kernelHandle;
@@ -2147,7 +2265,7 @@ TEST_F(ImportHostPointerSetKernelArg, givenHostPointerImportedWhenSettingKernelA
 class KernelGlobalWorkOffsetTests : public ModuleFixture, public ::testing::Test {
   public:
     void SetUp() override {
-        ModuleFixture::SetUp();
+        ModuleFixture::setUp();
 
         ze_kernel_desc_t kernelDesc = {};
         kernelDesc.pKernelName = kernelName.c_str();
@@ -2160,7 +2278,7 @@ class KernelGlobalWorkOffsetTests : public ModuleFixture, public ::testing::Test
 
     void TearDown() override {
         Kernel::fromHandle(kernelHandle)->destroy();
-        ModuleFixture::TearDown();
+        ModuleFixture::tearDown();
     }
 
     ze_kernel_handle_t kernelHandle;
@@ -2207,7 +2325,7 @@ TEST_F(KernelWorkDimTests, givenGroupCountsWhenPatchingWorkDimThenCrossThreadDat
     std::unique_ptr<MockImmutableData> mockKernelImmData =
         std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
 
-    createModuleFromBinary(perHwThreadPrivateMemorySizeRequested, false, mockKernelImmData.get());
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, false, mockKernelImmData.get());
     auto kernel = std::make_unique<MockKernel>(module.get());
     createKernel(kernel.get());
     kernel->setCrossThreadData(sizeof(uint32_t));
@@ -2342,7 +2460,7 @@ TEST_F(KernelPatchtokensPrintfStringMapTests, givenKernelWithPrintfStringsMapUsa
     std::string expectedString("test123");
     kernelDescriptor->kernelMetadata.printfStringsMap.insert(std::make_pair(0u, expectedString));
 
-    createModuleFromBinary(0u, false, mockKernelImmData.get());
+    createModuleFromMockBinary(0u, false, mockKernelImmData.get());
 
     auto kernel = std::make_unique<MockKernel>(module.get());
 
@@ -2370,7 +2488,7 @@ TEST_F(KernelPatchtokensPrintfStringMapTests, givenKernelWithPrintfStringsMapUsa
     std::string expectedString("test123");
     kernelDescriptor->kernelMetadata.printfStringsMap.insert(std::make_pair(0u, expectedString));
 
-    createModuleFromBinary(0u, false, mockKernelImmData.get());
+    createModuleFromMockBinary(0u, false, mockKernelImmData.get());
 
     auto kernel = std::make_unique<MockKernel>(module.get());
 
@@ -2398,7 +2516,7 @@ TEST_F(KernelPatchtokensPrintfStringMapTests, givenKernelWithPrintfStringsMapUsa
     std::string expectedString("test123");
     kernelDescriptor->kernelMetadata.printfStringsMap.insert(std::make_pair(0u, expectedString));
 
-    createModuleFromBinary(0u, false, mockKernelImmData.get());
+    createModuleFromMockBinary(0u, false, mockKernelImmData.get());
 
     auto kernel = std::make_unique<MockKernel>(module.get());
 
@@ -2422,7 +2540,7 @@ TEST_F(KernelImplicitArgTests, givenKernelWithImplicitArgsWhenInitializeThenPrin
     mockKernelImmData->kernelDescriptor->kernelAttributes.flags.requiresImplicitArgs = true;
     mockKernelImmData->kernelDescriptor->kernelAttributes.flags.usesPrintf = false;
 
-    createModuleFromBinary(0u, false, mockKernelImmData.get());
+    createModuleFromMockBinary(0u, false, mockKernelImmData.get());
 
     auto kernel = std::make_unique<MockKernel>(module.get());
 
@@ -2445,7 +2563,7 @@ TEST_F(KernelImplicitArgTests, givenImplicitArgsRequiredWhenCreatingKernelThenIm
 
     mockKernelImmData->kernelDescriptor->kernelAttributes.flags.requiresImplicitArgs = true;
 
-    createModuleFromBinary(0u, false, mockKernelImmData.get());
+    createModuleFromMockBinary(0u, false, mockKernelImmData.get());
 
     auto kernel = std::make_unique<MockKernel>(module.get());
 
@@ -2465,7 +2583,7 @@ TEST_F(KernelImplicitArgTests, givenKernelWithImplicitArgsWhenSettingKernelParam
     mockKernelImmData->kernelDescriptor->kernelAttributes.flags.requiresImplicitArgs = true;
     auto simd = mockKernelImmData->kernelDescriptor->kernelAttributes.simdSize;
 
-    createModuleFromBinary(0u, false, mockKernelImmData.get());
+    createModuleFromMockBinary(0u, false, mockKernelImmData.get());
 
     auto kernel = std::make_unique<MockKernel>(module.get());
 

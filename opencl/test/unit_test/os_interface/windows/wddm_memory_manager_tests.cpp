@@ -29,7 +29,7 @@
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/mock_os_context.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-#include "shared/test/unit_test/utilities/base_object_utils.h"
+#include "shared/test/common/utilities/base_object_utils.h"
 
 #include "opencl/source/helpers/cl_memory_properties_helpers.h"
 #include "opencl/source/mem_obj/buffer.h"
@@ -43,8 +43,8 @@
 using namespace NEO;
 using namespace ::testing;
 
-void WddmMemoryManagerFixture::SetUp() {
-    GdiDllFixture::SetUp();
+void WddmMemoryManagerFixture::setUp() {
+    GdiDllFixture::setUp();
 
     executionEnvironment = platform()->peekExecutionEnvironment();
     rootDeviceEnvironment = executionEnvironment->rootDeviceEnvironments[rootDeviceIndex].get();
@@ -809,6 +809,19 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenFreeAllocFromSharedHandl
     memoryManager->freeGraphicsMemory(gpuAllocation);
     lastDestroyed = getMockLastDestroyedResHandleFcn();
     EXPECT_EQ(lastDestroyed, expectedDestroyHandle);
+}
+
+TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerWhenAllocFromHostPtrIsCalledThenResourceHandleIsNotCreated) {
+    auto size = 13u;
+    auto hostPtr = reinterpret_cast<const void *>(0x10001);
+
+    AllocationData allocationData{};
+    allocationData.size = size;
+    allocationData.hostPtr = hostPtr;
+    auto allocation = static_cast<WddmAllocation *>(memoryManager->allocateGraphicsMemoryForNonSvmHostPtr(allocationData));
+
+    EXPECT_EQ(0u, allocation->resourceHandle);
+    memoryManager->freeGraphicsMemory(allocation);
 }
 
 TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerSizeZeroWhenCreateFromSharedHandleIsCalledThenUpdateSize) {

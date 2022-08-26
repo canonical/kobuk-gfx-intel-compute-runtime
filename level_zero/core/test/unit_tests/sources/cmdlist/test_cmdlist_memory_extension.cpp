@@ -25,8 +25,8 @@ namespace ult {
 
 class CommandListMemoryExtensionFixture : public DeviceFixture {
   public:
-    void SetUp() {
-        DeviceFixture::SetUp();
+    void setUp() {
+        DeviceFixture::setUp();
         ze_result_t returnValue;
         commandList.reset(whiteboxCast(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)));
 
@@ -52,12 +52,12 @@ class CommandListMemoryExtensionFixture : public DeviceFixture {
         EXPECT_NE(nullptr, ptr);
     }
 
-    void TearDown() {
+    void tearDown() {
         context->freeMem(ptr);
         event.reset(nullptr);
         eventPool.reset(nullptr);
         commandList.reset(nullptr);
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
     }
 
     std::unique_ptr<L0::ult::CommandList> commandList;

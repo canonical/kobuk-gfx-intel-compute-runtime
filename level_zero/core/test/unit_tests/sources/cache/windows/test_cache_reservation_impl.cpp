@@ -17,14 +17,14 @@ namespace ult {
 
 class CacheReservationFixture : public DeviceFixture {
   public:
-    void SetUp() {
-        DeviceFixture::SetUp();
+    void setUp() {
+        DeviceFixture::setUp();
         auto deviceImp = static_cast<DeviceImp *>(device);
         ASSERT_NE(nullptr, deviceImp->cacheReservation.get());
         cache = deviceImp->cacheReservation.get();
     }
-    void TearDown() {
-        DeviceFixture::TearDown();
+    void tearDown() {
+        DeviceFixture::tearDown();
     }
     CacheReservation *cache = nullptr;
 };

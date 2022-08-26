@@ -24,20 +24,20 @@ struct FinishFixture : public ClDeviceFixture,
                        public CommandStreamFixture,
                        public HardwareParse {
 
-    void SetUp() override {
-        ClDeviceFixture::SetUp();
-        CommandQueueHwFixture::SetUp(pClDevice, 0);
+    void setUp() {
+        ClDeviceFixture::setUp();
+        CommandQueueHwFixture::setUp(pClDevice, 0);
         ASSERT_NE(nullptr, pCmdQ);
-        CommandStreamFixture::SetUp(pCmdQ);
+        CommandStreamFixture::setUp(pCmdQ);
         ASSERT_NE(nullptr, pCS);
-        HardwareParse::SetUp();
+        HardwareParse::setUp();
     }
 
-    void TearDown() override {
-        HardwareParse::TearDown();
-        CommandStreamFixture::TearDown();
-        CommandQueueHwFixture::TearDown();
-        ClDeviceFixture::TearDown();
+    void tearDown() {
+        HardwareParse::tearDown();
+        CommandStreamFixture::tearDown();
+        CommandQueueHwFixture::tearDown();
+        ClDeviceFixture::tearDown();
     }
 };
 

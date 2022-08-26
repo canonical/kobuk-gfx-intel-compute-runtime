@@ -14,9 +14,6 @@
 #include <iomanip>
 #include <iostream>
 
-extern bool verbose;
-bool verbose = false;
-
 const char *source = R"===(
 __kernel void test_printf(__global char *dst, __global char *src){
     uint gid = get_global_id(0);
@@ -24,7 +21,7 @@ __kernel void test_printf(__global char *dst, __global char *src){
 }
 )===";
 
-void testPrintfKernel(ze_context_handle_t context, ze_device_handle_t &device) {
+void testPrintfKernel(ze_context_handle_t &context, ze_device_handle_t &device) {
     ze_module_handle_t module;
     ze_kernel_handle_t kernel;
     ze_command_queue_handle_t cmdQueue;
@@ -103,9 +100,7 @@ int main(int argc, char *argv[]) {
 
     ze_device_properties_t deviceProperties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
     SUCCESS_OR_TERMINATE(zeDeviceGetProperties(device, &deviceProperties));
-    std::cout << "Device : \n"
-              << " * name : " << deviceProperties.name << "\n"
-              << " * vendorId : " << std::hex << deviceProperties.vendorId << "\n";
+    printDeviceProperties(deviceProperties);
 
     testPrintfKernel(context, device);
 

@@ -39,7 +39,7 @@
 struct GT_SYSTEM_INFO;
 
 namespace NEO {
-#define I915_CONTEXT_PRIVATE_PARAM_BOOST 0x80000000
+constexpr uint32_t contextPrivateParamBoost = 0x80000000;
 
 enum class AllocationType;
 class BufferObject;
@@ -329,9 +329,6 @@ class Drm : public DriverModel {
 
     RootDeviceEnvironment &rootDeviceEnvironment;
     uint64_t uuid = 0;
-
-    int deviceId = 0;
-    int revisionId = 0;
 
     bool sliceCountChangeSupported = false;
     bool preemptionSupported = false;

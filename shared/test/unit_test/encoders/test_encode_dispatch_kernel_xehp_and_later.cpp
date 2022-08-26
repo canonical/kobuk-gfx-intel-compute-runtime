@@ -16,13 +16,13 @@
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
-#include "shared/test/common/fixtures/command_container_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/mocks/mock_device.h"
-#include "shared/test/common/mocks/mock_dispatch_kernel_encoder_interface.h"
 #include "shared/test/common/test_macros/test.h"
+#include "shared/test/unit_test/fixtures/command_container_fixture.h"
+#include "shared/test/unit_test/mocks/mock_dispatch_kernel_encoder_interface.h"
 
 #include <memory>
 
@@ -42,7 +42,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenSlmTotalSizeGraterTha
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
 
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -69,7 +69,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenSimdSizeWhenDispatchi
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -92,7 +92,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenSlmTotalSizeEqualZero
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -126,7 +126,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenOverrideSlmTotalSizeD
         cmdContainer->reset();
 
         EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-        EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+        EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
         GenCmdList commands;
         CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -164,7 +164,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenStatelessBufferAndIma
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -201,7 +201,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givennumBindingTableOneWhe
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -238,7 +238,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, giveNumBindingTableZeroWhe
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -284,7 +284,7 @@ HWTEST2_F(CommandEncodeStatesTest, giveNumSamplersOneWhenDispatchKernelThensampl
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -316,7 +316,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenEventAllocationWhenDi
     dispatchArgs.eventAddress = eventAddress;
     dispatchArgs.isTimestampEvent = true;
 
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -339,7 +339,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenEventAddressWhenEncod
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
     dispatchArgs.eventAddress = eventAddress;
     dispatchArgs.isTimestampEvent = true;
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -365,7 +365,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenCleanHeapsWhenDispatc
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -405,7 +405,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenForceBtpPrefetchModeD
 
         bool requiresUncachedMocs = false;
         EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-        EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+        EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
         GenCmdList commands;
         CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -436,7 +436,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenForceBtpPrefetchModeD
 
         bool requiresUncachedMocs = false;
         EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-        EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+        EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
         GenCmdList commands;
         CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -458,7 +458,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenForceBtpPrefetchModeD
 
         bool requiresUncachedMocs = false;
         EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-        EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+        EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
         GenCmdList commands;
         CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -497,7 +497,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenInlineDataRequiredWhe
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
 
@@ -524,7 +524,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenInlineDataRequiredIsF
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -551,7 +551,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenInlineDataRequiredAnd
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -580,7 +580,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenInlineDataRequiredAnd
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -614,12 +614,12 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenInterfaceDescriptorDa
     uint32_t revisions[] = {REVISION_A0, REVISION_B};
     for (auto revision : revisions) {
         hwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(revision, hwInfo);
-        EncodeDispatchKernel<FamilyType>::adjustInterfaceDescriptorData(iddArg, hwInfo);
+        EncodeDispatchKernel<FamilyType>::adjustInterfaceDescriptorData(iddArg, hwInfo, 0, 0);
 
         if (hwInfoConfig.isDisableOverdispatchAvailable(hwInfo)) {
-            EXPECT_EQ(3u, iddArg.getThreadGroupDispatchSize());
+            EXPECT_EQ(INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_1, iddArg.getThreadGroupDispatchSize());
         } else {
-            EXPECT_EQ(0u, iddArg.getThreadGroupDispatchSize());
+            EXPECT_EQ(INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_8, iddArg.getThreadGroupDispatchSize());
         }
     }
 }
@@ -629,13 +629,16 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenInterfaceDescriptorDa
 
     INTERFACE_DESCRIPTOR_DATA iddArg;
     iddArg = FamilyType::cmdInitInterfaceDescriptorData;
+    iddArg.setNumberOfThreadsInGpgpuThreadGroup(1u);
+
     const uint32_t forceThreadGroupDispatchSize = 1;
     const uint32_t defaultThreadGroupDispatchSize = iddArg.getThreadGroupDispatchSize();
+    const uint32_t threadGroupCount = 1u;
 
     DebugManagerStateRestore restorer;
     DebugManager.flags.ForceThreadGroupDispatchSize.set(forceThreadGroupDispatchSize);
 
-    EncodeDispatchKernel<FamilyType>::adjustInterfaceDescriptorData(iddArg, pDevice->getHardwareInfo());
+    EncodeDispatchKernel<FamilyType>::adjustInterfaceDescriptorData(iddArg, pDevice->getHardwareInfo(), threadGroupCount, 1);
 
     EXPECT_NE(defaultThreadGroupDispatchSize, iddArg.getThreadGroupDispatchSize());
     EXPECT_EQ(forceThreadGroupDispatchSize, iddArg.getThreadGroupDispatchSize());
@@ -933,17 +936,17 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, WalkerThreadTestXeHPAndLater, WhenExecutionMaskNotZ
 }
 
 struct CommandEncodeStatesImplicitScalingFixture : public CommandEncodeStatesFixture {
-    void SetUp() {
+    void setUp() {
         DebugManager.flags.CreateMultipleSubDevices.set(2);
         osLocalMemoryBackup = std::make_unique<VariableBackup<bool>>(&OSInterface::osEnableLocalMemory, true);
         mockDeviceBackup = std::make_unique<VariableBackup<bool>>(&MockDevice::createSingleDevice, false);
         apiSupportBackup = std::make_unique<VariableBackup<bool>>(&ImplicitScaling::apiSupport, true);
 
-        CommandEncodeStatesFixture::SetUp();
+        CommandEncodeStatesFixture::setUp();
     }
 
-    void TearDown() {
-        CommandEncodeStatesFixture::TearDown();
+    void tearDown() {
+        CommandEncodeStatesFixture::tearDown();
     }
 
     DebugManagerStateRestore restorer;
@@ -968,7 +971,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesImplicitScaling,
     dispatchArgs.eventAddress = eventAddress;
     dispatchArgs.partitionCount = 2;
 
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
     size_t usedBuffer = cmdContainer->getCommandStream()->getUsed();
     EXPECT_EQ(2u, dispatchArgs.partitionCount);
 
@@ -987,13 +990,13 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesImplicitScaling,
 }
 
 struct CommandEncodeStatesDynamicImplicitScalingFixture : CommandEncodeStatesImplicitScalingFixture {
-    void SetUp() {
+    void setUp() {
         DebugManager.flags.EnableStaticPartitioning.set(0);
-        CommandEncodeStatesImplicitScalingFixture::SetUp();
+        CommandEncodeStatesImplicitScalingFixture::setUp();
     }
 
-    void TearDown() {
-        CommandEncodeStatesImplicitScalingFixture::TearDown();
+    void tearDown() {
+        CommandEncodeStatesImplicitScalingFixture::tearDown();
     }
 
     DebugManagerStateRestore restore{};
@@ -1013,7 +1016,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesDynamicImplicitScaling, givenImp
 
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
     dispatchArgs.isInternal = isInternal;
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     size_t containerUsedAfterBase = cmdContainer->getCommandStream()->getUsed();
 
@@ -1026,7 +1029,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesDynamicImplicitScaling, givenImp
     EXPECT_EQ(16u, baseWalkerCmd->getThreadGroupIdXDimension());
 
     dispatchArgs.partitionCount = 2;
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     size_t total = cmdContainer->getCommandStream()->getUsed();
     size_t partitionedWalkerSize = total - containerUsedAfterBase;
@@ -1076,7 +1079,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesDynamicImplicitScaling, givenImp
     dispatchArgs.isInternal = isInternal;
     dispatchArgs.partitionCount = 2;
 
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     EXPECT_EQ(2u, dispatchArgs.partitionCount);
     size_t partitionedWalkerSize = cmdContainer->getCommandStream()->getUsed();
@@ -1174,7 +1177,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesDynamicImplicitScaling,
     dispatchArgs.isInternal = isInternal;
     dispatchArgs.partitionCount = 2;
 
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     EXPECT_EQ(2u, dispatchArgs.partitionCount);
     size_t partitionedWalkerSize = cmdContainer->getCommandStream()->getUsed();
@@ -1232,7 +1235,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesDynamicImplicitScaling, givenImp
     dispatchArgs.isInternal = isInternal;
     dispatchArgs.partitionCount = 2;
 
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     size_t internalWalkerSize = cmdContainer->getCommandStream()->getUsed();
 
@@ -1259,7 +1262,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenNonTimestampEventWhen
     dispatchArgs.eventAddress = eventAddress;
     dispatchArgs.isTimestampEvent = true;
 
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
@@ -1285,7 +1288,7 @@ HWTEST2_F(CommandEncodeStatesTest,
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
 
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands,
@@ -1315,7 +1318,7 @@ HWTEST2_F(CommandEncodeStatesTest,
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
 
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands,
@@ -1342,7 +1345,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest,
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
 
-    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs);
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands,

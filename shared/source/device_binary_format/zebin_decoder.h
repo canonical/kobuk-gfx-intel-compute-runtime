@@ -45,8 +45,9 @@ struct ZeInfoKernelSections {
     UniqueNode experimentalPropertiesNd;
 };
 
-bool validateTargetDevice(const Elf::Elf<Elf::EI_CLASS_64> &elf, const TargetDevice &targetDevice);
-std::vector<const Elf::IntelGTNote *> getIntelGTNotes(const Elf::Elf<Elf::EI_CLASS_64> &elf);
+bool validateTargetDevice(const Elf::Elf<Elf::EI_CLASS_64> &elf, const TargetDevice &targetDevice, std::string &outErrReason, std::string &outWarning);
+DecodeError validateZeInfoVersion(const Elf::ZebinKernelMetadata::Types::Version &receivedZeInfoVersion, std::string &outErrReason, std::string &outWarning);
+DecodeError getIntelGTNotes(const Elf::Elf<Elf::EI_CLASS_64> &elf, std::vector<Elf::IntelGTNote> &intelGTNotes, std::string &outErrReason, std::string &outWarning);
 
 DecodeError extractZebinSections(NEO::Elf::Elf<Elf::EI_CLASS_64> &elf, ZebinSections &out, std::string &outErrReason, std::string &outWarning);
 DecodeError validateZebinSectionsCount(const ZebinSections &sections, std::string &outErrReason, std::string &outWarning);
@@ -63,18 +64,10 @@ DecodeError readZeInfoExperimentalProperties(const NEO::Yaml::YamlParser &parser
                                              NEO::Elf::ZebinKernelMetadata::Types::Kernel::ExecutionEnv::ExperimentalPropertiesBaseT &outExperimentalProperties,
                                              ConstStringRef context,
                                              std::string &outErrReason, std::string &outWarning);
-bool readEnumChecked(const Yaml::Token *token, NEO::Elf::ZebinKernelMetadata::Types::Kernel::ArgType &out,
-                     ConstStringRef context, std::string &outErrReason);
-bool readEnumChecked(const Yaml::Token *token, NEO::Elf::ZebinKernelMetadata::Types::Kernel::PayloadArgument::MemoryAddressingMode &out,
-                     ConstStringRef context, std::string &outErrReason);
-bool readEnumChecked(const Yaml::Token *token, NEO::Elf::ZebinKernelMetadata::Types::Kernel::PayloadArgument::AddressSpace &out,
-                     ConstStringRef context, std::string &outErrReason);
-bool readEnumChecked(const Yaml::Token *token, NEO::Elf::ZebinKernelMetadata::Types::Kernel::PayloadArgument::AccessType &out,
-                     ConstStringRef context, std::string &outErrReason);
-bool readEnumChecked(const Yaml::Token *token, NEO::Elf::ZebinKernelMetadata::Types::Kernel::PerThreadMemoryBuffer::AllocationType &out,
-                     ConstStringRef context, std::string &outErrReason);
-bool readEnumChecked(const Yaml::Token *token, NEO::Elf::ZebinKernelMetadata::Types::Kernel::PerThreadMemoryBuffer::MemoryUsage &out,
-                     ConstStringRef context, std::string &outErrReason);
+template <typename T>
+bool readEnumChecked(ConstStringRef enumString, T &outValue, ConstStringRef kernelName, std::string &outErrReason);
+template <typename T>
+bool readZeInfoEnumChecked(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node, T &outValue, ConstStringRef kernelName, std::string &outErrReason);
 
 using ZeInfoPerThreadPayloadArguments = StackVec<NEO::Elf::ZebinKernelMetadata::Types::Kernel::PerThreadPayloadArgument::PerThreadPayloadArgumentBaseT, 2>;
 DecodeError readZeInfoPerThreadPayloadArguments(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node,
@@ -116,8 +109,10 @@ NEO::DecodeError populateArgDescriptor(const NEO::Elf::ZebinKernelMetadata::Type
 NEO::DecodeError populateKernelDescriptor(NEO::ProgramInfo &dst, NEO::Elf::Elf<NEO::Elf::EI_CLASS_64> &elf, NEO::ZebinSections &zebinSections,
                                           NEO::Yaml::YamlParser &yamlParser, const NEO::Yaml::Node &kernelNd, std::string &outErrReason, std::string &outWarning);
 
-NEO::DecodeError populateZeInfoVersion(NEO::Elf::ZebinKernelMetadata::Types::Version &dst,
-                                       NEO::Yaml::YamlParser &yamlParser, const NEO::Yaml::Node &versionNd, std::string &outErrReason, std::string &outWarning);
+NEO::DecodeError readZeInfoVersionFromZeInfo(NEO::Elf::ZebinKernelMetadata::Types::Version &dst,
+                                             NEO::Yaml::YamlParser &yamlParser, const NEO::Yaml::Node &versionNd, std::string &outErrReason, std::string &outWarning);
+
+NEO::DecodeError populateZeInfoVersion(NEO::Elf::ZebinKernelMetadata::Types::Version &dst, ConstStringRef &versionStr, std::string &outErrReason);
 
 NEO::DecodeError populateExternalFunctionsMetadata(NEO::ProgramInfo &dst, NEO::Yaml::YamlParser &yamlParser, const NEO::Yaml::Node &functionNd, std::string &outErrReason, std::string &outWarning);
 } // namespace NEO

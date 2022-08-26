@@ -14,7 +14,7 @@
 #include "shared/source/utilities/lookup_array.h"
 #include "shared/source/xe_hpg_core/hw_cmds_xe_hpg_core_base.h"
 
-using Family = NEO::XE_HPG_COREFamily;
+using Family = NEO::XeHpgCoreFamily;
 
 #include "shared/source/command_container/command_encoder_tgllp_and_later.inl"
 #include "shared/source/command_container/command_encoder_xe_hpg_core_and_later.inl"
@@ -85,7 +85,7 @@ void EncodeDispatchKernel<Family>::appendAdditionalIDDFields(INTERFACE_DESCRIPTO
 }
 
 template <>
-void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo) {
+void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo, const uint32_t threadGroupCount, const uint32_t numGrf) {
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
     if (hwInfoConfig.isDisableOverdispatchAvailable(hwInfo)) {
         if (interfaceDescriptor.getNumberOfThreadsInGpgpuThreadGroup() == 1) {
@@ -207,4 +207,5 @@ template struct EncodeEnableRayTracing<Family>;
 template struct EncodeNoop<Family>;
 template struct EncodeStoreMemory<Family>;
 template struct EncodeMemoryFence<Family>;
+template struct EncodeKernelArgsBuffer<Family>;
 } // namespace NEO

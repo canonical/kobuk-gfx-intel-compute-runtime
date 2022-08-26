@@ -12,6 +12,7 @@
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/logical_state_helper.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
+#include "shared/source/memory_manager/prefetch_manager.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
 
@@ -92,7 +93,7 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::executeCommandListImm
 
     this->handleIndirectAllocationResidency();
 
-    this->csr->setRequiredScratchSizes(this->getCommandListPerThreadScratchSize(), this->getCommandListPerThreadScratchSize());
+    this->csr->setRequiredScratchSizes(this->getCommandListPerThreadScratchSize(), this->getCommandListPerThreadPrivateScratchSize());
 
     if (performMigration) {
         auto deviceImp = static_cast<DeviceImp *>(this->device);
@@ -106,6 +107,12 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::executeCommandListImm
 
     if (performMigration) {
         this->migrateSharedAllocations();
+    }
+
+    if (this->performMemoryPrefetch) {
+        auto prefetchManager = this->device->getDriverHandle()->getMemoryManager()->getPrefetchManager();
+        prefetchManager->migrateAllocationsToGpu(*this->device->getDriverHandle()->getSvmAllocsManager(), *this->device->getNEODevice());
+        this->performMemoryPrefetch = false;
     }
 
     auto ioh = (this->commandContainer.getIndirectHeap(NEO::IndirectHeap::Type::INDIRECT_OBJECT));

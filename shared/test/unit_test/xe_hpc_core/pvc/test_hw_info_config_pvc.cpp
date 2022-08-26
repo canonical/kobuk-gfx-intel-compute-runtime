@@ -63,3 +63,14 @@ PVCTEST_F(PVCHwInfoConfig, givenPvcHwInfoWhenIsIpSamplingSupportedThenCorrectRes
         EXPECT_TRUE(hwInfoConfig.isIpSamplingSupported(hwInfo));
     }
 }
+
+PVCTEST_F(PVCHwInfoConfig, givenHwInfoConfigWhenGettingEvictWhenNecessaryFlagSupportedThenExpectTrue) {
+    HardwareInfo hwInfo = *defaultHwInfo;
+    const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    EXPECT_TRUE(hwInfoConfig.isEvictionWhenNecessaryFlagSupported());
+}
+
+PVCTEST_F(PVCHwInfoConfig, givenPVCHwInfoConfigWhenIsPrefetcherDisablingInDirectSubmissionRequiredThenFalseIsReturned) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
+    EXPECT_FALSE(hwInfoConfig.isPrefetcherDisablingInDirectSubmissionRequired());
+}

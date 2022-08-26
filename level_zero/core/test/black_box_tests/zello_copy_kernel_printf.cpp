@@ -14,11 +14,9 @@
 #include <iostream>
 #include <memory>
 
-bool verbose = false;
-
 int main(int argc, char *argv[]) {
+    const std::string blackBoxName = "Zello Copy With Printf";
     verbose = isVerbose(argc, argv);
-
     bool aubMode = isAubMode(argc, argv);
 
     // X. Prepare spirV
@@ -107,11 +105,11 @@ int main(int argc, char *argv[]) {
                                                        allocSize, nullptr,
                                                        0, nullptr));
 
-    // copying of data must finish before running the user function
+    // copying of data must finish before running the user kernel
     SUCCESS_OR_TERMINATE(zeCommandListAppendBarrier(
         cmdList, nullptr, 0, nullptr));
 
-    // 3. Encode run user function
+    // 3. Set arguments for user kernel
     SUCCESS_OR_TERMINATE(zeKernelSetArgumentValue(kernel, 0, sizeof(dstBuffer), &dstBuffer));
     SUCCESS_OR_TERMINATE(zeKernelSetArgumentValue(kernel, 1, sizeof(srcBuffer), &srcBuffer));
 
@@ -175,10 +173,7 @@ int main(int argc, char *argv[]) {
     delete[] initDataDst;
     delete[] readBackData;
 
-    if (aubMode == false) {
-        std::cout << "\nZello Copy Kernel With Printf Results validation " << (outputValidationSuccessful ? "PASSED" : "FAILED")
-                  << std::endl;
-    }
+    printResult(aubMode, outputValidationSuccessful, blackBoxName);
     int resultOnFailure = aubMode ? 0 : 1;
     return outputValidationSuccessful ? 0 : resultOnFailure;
 }

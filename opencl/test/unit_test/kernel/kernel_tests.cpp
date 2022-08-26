@@ -19,15 +19,15 @@
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/fixtures/memory_management_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/mock_timestamp_container.h"
 #include "shared/test/common/test_macros/hw_test.h"
-#include "shared/test/unit_test/helpers/gtest_helpers.h"
+#include "shared/test/common/utilities/base_object_utils.h"
 #include "shared/test/unit_test/page_fault_manager/mock_cpu_page_fault_manager.h"
-#include "shared/test/unit_test/utilities/base_object_utils.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/source/helpers/cl_hw_helper.h"
@@ -56,7 +56,7 @@ class KernelTests : public ProgramFromBinaryFixture {
 
   protected:
     void SetUp() override {
-        ProgramFromBinaryFixture::SetUp("CopyBuffer_simd32", "CopyBuffer");
+        ProgramFromBinaryFixture::setUp("CopyBuffer_simd32", "CopyBuffer");
         ASSERT_NE(nullptr, pProgram);
         ASSERT_EQ(CL_SUCCESS, retVal);
 
@@ -394,17 +394,17 @@ TEST_F(KernelTests, WhenIsSingleSubdevicePreferredIsCalledThenCorrectValuesAreRe
 
 class KernelFromBinaryTest : public ProgramSimpleFixture {
   public:
-    void SetUp() override {
-        ProgramSimpleFixture::SetUp();
+    void setUp() {
+        ProgramSimpleFixture::setUp();
     }
-    void TearDown() override {
-        ProgramSimpleFixture::TearDown();
+    void tearDown() {
+        ProgramSimpleFixture::tearDown();
     }
 };
 typedef Test<KernelFromBinaryTest> KernelFromBinaryTests;
 
 TEST_F(KernelFromBinaryTests, GivenKernelNumArgsWhenGettingInfoThenNumberOfKernelArgsIsReturned) {
-    CreateProgramFromBinary(pContext, pContext->getDevices(), "kernel_num_args");
+    createProgramFromBinary(pContext, pContext->getDevices(), "kernel_num_args");
 
     ASSERT_NE(nullptr, pProgram);
     retVal = pProgram->build(
@@ -443,7 +443,7 @@ TEST_F(KernelFromBinaryTests, GivenKernelNumArgsWhenGettingInfoThenNumberOfKerne
 }
 
 TEST_F(KernelFromBinaryTests, WhenRegularKernelIsCreatedThenItIsNotBuiltIn) {
-    CreateProgramFromBinary(pContext, pContext->getDevices(), "simple_kernels");
+    createProgramFromBinary(pContext, pContext->getDevices(), "simple_kernels");
 
     ASSERT_NE(nullptr, pProgram);
     retVal = pProgram->build(
@@ -474,7 +474,7 @@ TEST_F(KernelFromBinaryTests, WhenRegularKernelIsCreatedThenItIsNotBuiltIn) {
 }
 
 TEST_F(KernelFromBinaryTests, givenArgumentDeclaredAsConstantWhenKernelIsCreatedThenArgumentIsMarkedAsReadOnly) {
-    CreateProgramFromBinary(pContext, pContext->getDevices(), "simple_kernels");
+    createProgramFromBinary(pContext, pContext->getDevices(), "simple_kernels");
 
     ASSERT_NE(nullptr, pProgram);
     retVal = pProgram->build(
@@ -507,6 +507,7 @@ class CommandStreamReceiverMock : public CommandStreamReceiver {
     void flushTagUpdate() override{};
     void updateTagFromWait() override{};
     bool isUpdateTagFromWaitEnabled() override { return false; };
+    void createKernelArgsBufferAllocation() override {}
 
     bool isMultiOsContextCapable() const override { return false; }
 
@@ -665,9 +666,9 @@ TEST_F(KernelPrivateSurfaceTest, WhenPrivateSurfaceAllocationFailsThenOutOfResou
         delete kernel;
     };
     auto f = new MemoryManagementFixture();
-    f->SetUp();
+    f->setUp();
     f->injectFailures(method);
-    f->TearDown();
+    f->tearDown();
     delete f;
 }
 
@@ -2086,7 +2087,7 @@ HWTEST_F(KernelResidencyTest, WhenMakingArgsResidentThenImageFromImageCheckIsCor
 
 struct KernelExecutionEnvironmentTest : public Test<ClDeviceFixture> {
     void SetUp() override {
-        ClDeviceFixture::SetUp();
+        ClDeviceFixture::setUp();
 
         program = std::make_unique<MockProgram>(toClDeviceVector(*pClDevice));
         pKernelInfo = std::make_unique<KernelInfo>();
@@ -2099,7 +2100,7 @@ struct KernelExecutionEnvironmentTest : public Test<ClDeviceFixture> {
     void TearDown() override {
         delete kernel;
 
-        ClDeviceFixture::TearDown();
+        ClDeviceFixture::tearDown();
     }
 
     MockKernel *kernel;
@@ -2164,7 +2165,7 @@ struct KernelCrossThreadTests : Test<ClDeviceFixture> {
     }
 
     void SetUp() override {
-        ClDeviceFixture::SetUp();
+        ClDeviceFixture::setUp();
         program = std::make_unique<MockProgram>(toClDeviceVector(*pClDevice));
 
         pKernelInfo = std::make_unique<MockKernelInfo>();
@@ -2174,7 +2175,7 @@ struct KernelCrossThreadTests : Test<ClDeviceFixture> {
 
     void TearDown() override {
 
-        ClDeviceFixture::TearDown();
+        ClDeviceFixture::tearDown();
     }
 
     std::unique_ptr<MockProgram> program;
@@ -3044,14 +3045,14 @@ TEST_F(KernelTests, givenKernelWithSimdEqual1WhenKernelCreatedThenMaxWorgGroupSi
 
 struct KernelLargeGrfTests : Test<ClDeviceFixture> {
     void SetUp() override {
-        ClDeviceFixture::SetUp();
+        ClDeviceFixture::setUp();
         program = std::make_unique<MockProgram>(toClDeviceVector(*pClDevice));
         pKernelInfo = std::make_unique<KernelInfo>();
         pKernelInfo->kernelDescriptor.kernelAttributes.crossThreadDataSize = 64;
     }
 
     void TearDown() override {
-        ClDeviceFixture::TearDown();
+        ClDeviceFixture::tearDown();
     }
 
     std::unique_ptr<MockProgram> program;

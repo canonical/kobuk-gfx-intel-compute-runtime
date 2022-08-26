@@ -85,6 +85,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::reset() {
     removeHostPtrAllocations();
     commandContainer.reset();
     containsStatelessUncachedResource = false;
+    performMemoryPrefetch = false;
     indirectAllocationsAllowed = false;
     unifiedMemoryControls.indirectHostAllocationsAllowed = false;
     unifiedMemoryControls.indirectSharedAllocationsAllowed = false;
@@ -1540,7 +1541,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendMemoryFill(void *ptr,
             return ZE_RESULT_ERROR_UNKNOWN;
         }
 
-        uint32_t value = *(reinterpret_cast<uint32_t *>(const_cast<void *>(pattern)));
+        uint32_t value = *(reinterpret_cast<const unsigned char *>(pattern));
         builtinFunction->setArgBufferWithAlloc(0, dstAllocation.alignedAllocationPtr, dstAllocation.alloc);
         builtinFunction->setArgumentValue(1, sizeof(dstAllocation.offset), &dstAllocation.offset);
         builtinFunction->setArgumentValue(2, sizeof(value), &value);

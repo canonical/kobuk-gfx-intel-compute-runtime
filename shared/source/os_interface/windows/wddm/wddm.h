@@ -10,6 +10,7 @@
 #include "shared/source/command_stream/preemption_mode.h"
 #include "shared/source/gmm_helper/gmm_lib.h"
 #include "shared/source/helpers/debug_helpers.h"
+#include "shared/source/helpers/topology_map.h"
 #include "shared/source/memory_manager/gfx_partition.h"
 #include "shared/source/os_interface/driver_info.h"
 #include "shared/source/os_interface/os_context.h"
@@ -23,6 +24,7 @@
 
 #include "sku_info.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -35,6 +37,7 @@ namespace NEO {
 class Gdi;
 class Gmm;
 class GmmMemory;
+class HwInfoConfig;
 class OsContextWin;
 class SettingsReader;
 class WddmAllocation;
@@ -205,36 +208,16 @@ class Wddm : public DriverModel {
     }
 
     PhyicalDevicePciSpeedInfo getPciSpeedInfo() const override;
+    bool buildTopologyMapping();
+    const TopologyMap &getTopologyMap();
+
+    uint32_t getAdditionalAdapterInfoOptions() const {
+        return additionalAdapterInfoOptions;
+    }
 
   protected:
-    std::unique_ptr<HwDeviceIdWddm> hwDeviceId;
-    D3DKMT_HANDLE device = 0;
-    D3DKMT_HANDLE pagingQueue = 0;
-    D3DKMT_HANDLE pagingQueueSyncObject = 0;
-
-    uint64_t *pagingFenceAddress = nullptr;
-    std::atomic<std::uint64_t> currentPagingFenceValue{0};
-
-    // Adapter information
-    std::unique_ptr<PLATFORM> gfxPlatform;
-    std::unique_ptr<GT_SYSTEM_INFO> gtSystemInfo;
-    std::unique_ptr<FeatureTable> featureTable;
-    std::unique_ptr<WorkaroundTable> workaroundTable;
-    GMM_GFX_PARTITIONING gfxPartition{};
-    ADAPTER_BDF adapterBDF{};
-    uint64_t systemSharedMemory = 0;
-    uint64_t dedicatedVideoMemory = 0;
-    uint32_t maxRenderFrequency = 0;
-    uint32_t timestampFrequency = 0u;
-    bool instrumentationEnabled = false;
-    std::string deviceRegistryPath;
-    RootDeviceEnvironment &rootDeviceEnvironment;
-    unsigned int enablePreemptionRegValue = 1;
-
-    unsigned long hwContextId = 0;
-    uintptr_t maximumApplicationAddress = 0;
-    std::unique_ptr<GmmMemory> gmmMemory;
-    uintptr_t minAddress = 0;
+    TopologyMap topologyMap;
+    bool translateTopologyInfo(TopologyMapping &mapping);
 
     Wddm(std::unique_ptr<HwDeviceIdWddm> &&hwDeviceId, RootDeviceEnvironment &rootDeviceEnvironment);
     MOCKABLE_VIRTUAL bool waitOnGPU(D3DKMT_HANDLE context);
@@ -245,13 +228,64 @@ class Wddm : public DriverModel {
     void getDeviceState();
     MOCKABLE_VIRTUAL void createPagingFenceLogger();
     bool setLowPriorityContextParam(D3DKMT_HANDLE contextHandle);
+    bool adjustEvictNeededParameter(bool evictNeeded) {
+        if (evictNeeded == false && platformSupportsEvictWhenNecessary == false) {
+            evictNeeded = true;
+        }
+        if (forceEvictOnlyIfNecessary != -1) {
+            evictNeeded = !forceEvictOnlyIfNecessary;
+        }
+        return evictNeeded;
+    }
+    void setPlatformSupportEvictWhenNecessaryFlag(const HwInfoConfig &hwInfoConfig);
+    void populateAdditionalAdapterInfoOptions(const ADAPTER_INFO_KMD &adapterInfo);
 
-    static GetSystemInfoFcn getSystemInfo;
+    GMM_GFX_PARTITIONING gfxPartition{};
+    ADAPTER_BDF adapterBDF{};
 
+    std::string deviceRegistryPath;
+
+    std::atomic<std::uint64_t> currentPagingFenceValue{0};
+
+    uint64_t systemSharedMemory = 0;
+    uint64_t dedicatedVideoMemory = 0;
+
+    // Adapter information
+    std::unique_ptr<PLATFORM> gfxPlatform;
+    std::unique_ptr<GT_SYSTEM_INFO> gtSystemInfo;
+    std::unique_ptr<FeatureTable> featureTable;
+    std::unique_ptr<WorkaroundTable> workaroundTable;
+
+    std::unique_ptr<HwDeviceIdWddm> hwDeviceId;
+    std::unique_ptr<GmmMemory> gmmMemory;
     std::unique_ptr<KmDafListener> kmDafListener;
     std::unique_ptr<WddmInterface> wddmInterface;
     std::unique_ptr<WddmResidentAllocationsContainer> temporaryResources;
     std::unique_ptr<WddmResidencyLogger> residencyLogger;
     std::unique_ptr<OSMemory> osMemory;
+
+    static GetSystemInfoFcn getSystemInfo;
+    RootDeviceEnvironment &rootDeviceEnvironment;
+
+    uint64_t *pagingFenceAddress = nullptr;
+
+    uintptr_t maximumApplicationAddress = 0;
+    uintptr_t minAddress = 0;
+
+    unsigned long hwContextId = 0;
+
+    D3DKMT_HANDLE device = 0;
+    D3DKMT_HANDLE pagingQueue = 0;
+    D3DKMT_HANDLE pagingQueueSyncObject = 0;
+
+    uint32_t maxRenderFrequency = 0;
+    uint32_t timestampFrequency = 0u;
+    uint32_t additionalAdapterInfoOptions = 0u;
+    int32_t forceEvictOnlyIfNecessary = -1;
+
+    unsigned int enablePreemptionRegValue = 1;
+
+    bool platformSupportsEvictWhenNecessary = false;
+    bool instrumentationEnabled = false;
 };
 } // namespace NEO

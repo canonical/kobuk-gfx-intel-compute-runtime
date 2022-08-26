@@ -640,14 +640,14 @@ TEST(zeDriverGetIpcProperties, whenZeDriverGetIpcPropertiesIsCalledThenGetIPCPro
 }
 
 struct HostImportApiFixture : public HostPointerManagerFixure {
-    void SetUp() {
-        HostPointerManagerFixure::SetUp();
+    void setUp() {
+        HostPointerManagerFixure::setUp();
 
         driverHandle = hostDriverHandle->toHandle();
     }
 
-    void TearDown() {
-        HostPointerManagerFixure::TearDown();
+    void tearDown() {
+        HostPointerManagerFixure::tearDown();
     }
 
     ze_driver_handle_t driverHandle;

@@ -42,7 +42,7 @@ class VaSharingTests : public ::testing::Test, public PlatformFixture {
   public:
     void SetUp() override {
         rootDeviceIndex = context.getDevice(0)->getRootDeviceIndex();
-        PlatformFixture::SetUp();
+        PlatformFixture::setUp();
         vaSharing = new MockVaSharing;
         context.setSharingFunctions(&vaSharing->sharingFunctions);
         vaSharing->sharingFunctions.querySupportedVaImageFormats(VADisplay(1));
@@ -57,7 +57,7 @@ class VaSharingTests : public ::testing::Test, public PlatformFixture {
         }
         context.releaseSharingFunctions(SharingType::VA_SHARING);
         delete vaSharing;
-        PlatformFixture::TearDown();
+        PlatformFixture::tearDown();
     }
 
     void updateAcquiredHandle(unsigned int handle) {

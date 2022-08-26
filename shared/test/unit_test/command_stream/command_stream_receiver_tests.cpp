@@ -20,6 +20,7 @@
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
+#include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_csr.h"
@@ -31,7 +32,6 @@
 #include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/test_macros/test_checks_shared.h"
 #include "shared/test/unit_test/direct_submission/direct_submission_controller_mock.h"
-#include "shared/test/unit_test/helpers/gtest_helpers.h"
 
 #include "gtest/gtest.h"
 
@@ -48,7 +48,7 @@ using namespace std::chrono_literals;
 struct CommandStreamReceiverTest : public DeviceFixture,
                                    public ::testing::Test {
     void SetUp() override {
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
 
         commandStreamReceiver = &pDevice->getGpgpuCommandStreamReceiver();
         ASSERT_NE(nullptr, commandStreamReceiver);
@@ -57,7 +57,7 @@ struct CommandStreamReceiverTest : public DeviceFixture,
     }
 
     void TearDown() override {
-        DeviceFixture::TearDown();
+        DeviceFixture::tearDown();
     }
 
     CommandStreamReceiver *commandStreamReceiver = nullptr;
@@ -665,7 +665,7 @@ HWTEST_F(CommandStreamReceiverTest, givenUpdateTaskCountFromWaitInMultiRootDevic
 }
 
 struct InitDirectSubmissionFixture {
-    void SetUp() { // NOLINT(readability-identifier-naming)
+    void setUp() {
         DebugManager.flags.EnableDirectSubmission.set(1);
         executionEnvironment = new MockExecutionEnvironment();
         DeviceFactory::prepareDeviceEnvironments(*executionEnvironment);
@@ -675,7 +675,7 @@ struct InitDirectSubmissionFixture {
         device.reset(new MockDevice(executionEnvironment, 0u));
     }
 
-    void TearDown() {} // NOLINT(readability-identifier-naming)
+    void tearDown() {}
 
     DebugManagerStateRestore restore;
     MockExecutionEnvironment *executionEnvironment;
@@ -2096,4 +2096,18 @@ HWTEST_F(CommandStreamReceiverTest, givenMultipleActivePartitionsWhenWaitLogIsEn
                    << " " << tagValue << std::endl;
 
     EXPECT_STREQ(expectedOutput.str().c_str(), output.c_str());
+}
+
+TEST_F(CommandStreamReceiverTest, givenPreambleFlagIsSetWhenGettingFlagStateThenExpectCorrectState) {
+    EXPECT_FALSE(commandStreamReceiver->getPreambleSetFlag());
+    commandStreamReceiver->setPreambleSetFlag(true);
+    EXPECT_TRUE(commandStreamReceiver->getPreambleSetFlag());
+}
+
+TEST_F(CommandStreamReceiverTest, givenPreemptionSentIsInitialWhenSettingPreemptionToNewModeThenExpectCorrectPreemption) {
+    PreemptionMode mode = PreemptionMode::Initial;
+    EXPECT_EQ(mode, commandStreamReceiver->getPreemptionMode());
+    mode = PreemptionMode::ThreadGroup;
+    commandStreamReceiver->setPreemptionMode(mode);
+    EXPECT_EQ(mode, commandStreamReceiver->getPreemptionMode());
 }

@@ -14,6 +14,7 @@
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
+#include "shared/test/common/helpers/raii_hw_helper.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_csr.h"
@@ -21,7 +22,6 @@
 #include "shared/test/common/mocks/mock_hw_helper.h"
 #include "shared/test/common/mocks/mock_submissions_aggregator.h"
 #include "shared/test/common/test_macros/hw_test.h"
-#include "shared/test/unit_test/helpers/raii_hw_helper.h"
 
 #include "opencl/test/unit_test/fixtures/ult_command_stream_receiver_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
@@ -1213,24 +1213,26 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, givenCsrWhenGen
     auto gmmHelper = pDevice->getGmmHelper();
 
     typename FamilyType::STATE_BASE_ADDRESS sbaCmd;
-    StateBaseAddressHelper<FamilyType>::programStateBaseAddress(&sbaCmd,
-                                                                &dsh,
-                                                                &ioh,
-                                                                &ssh,
-                                                                generalStateBaseAddress,
-                                                                true,
-                                                                0,
-                                                                0,
-                                                                generalStateBaseAddress,
-                                                                0,
-                                                                true,
-                                                                false,
-                                                                gmmHelper,
-                                                                false,
-                                                                MemoryCompressionState::NotApplicable,
-                                                                false,
-                                                                1u,
-                                                                nullptr);
+    StateBaseAddressHelperArgs<FamilyType> args = {
+        generalStateBaseAddress,               // generalStateBase
+        0,                                     // indirectObjectHeapBaseAddress
+        generalStateBaseAddress,               // instructionHeapBaseAddress
+        0,                                     // globalHeapsBaseAddress
+        &sbaCmd,                               // stateBaseAddressCmd
+        &dsh,                                  // dsh
+        &ioh,                                  // ioh
+        &ssh,                                  // ssh
+        gmmHelper,                             // gmmHelper
+        0,                                     // statelessMocsIndex
+        MemoryCompressionState::NotApplicable, // memoryCompressionState
+        true,                                  // setInstructionStateBaseAddress
+        true,                                  // setGeneralStateBaseAddress
+        false,                                 // useGlobalHeapsBaseAddress
+        false,                                 // isMultiOsContextCapable
+        false,                                 // useGlobalAtomics
+        false                                  // areMultipleSubDevicesInContext
+    };
+    StateBaseAddressHelper<FamilyType>::programStateBaseAddress(args);
 
     EXPECT_NE(generalStateBaseAddress, sbaCmd.getGeneralStateBaseAddress());
     EXPECT_EQ(gmmHelper->decanonize(generalStateBaseAddress), sbaCmd.getGeneralStateBaseAddress());
@@ -1240,24 +1242,26 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenNonZeroGeneralStateBaseAddres
     uint64_t generalStateBaseAddress = 0x80010000ull;
 
     typename FamilyType::STATE_BASE_ADDRESS sbaCmd;
-    StateBaseAddressHelper<FamilyType>::programStateBaseAddress(&sbaCmd,
-                                                                &dsh,
-                                                                &ioh,
-                                                                &ssh,
-                                                                generalStateBaseAddress,
-                                                                false,
-                                                                0,
-                                                                0,
-                                                                generalStateBaseAddress,
-                                                                0,
-                                                                true,
-                                                                false,
-                                                                pDevice->getGmmHelper(),
-                                                                false,
-                                                                MemoryCompressionState::NotApplicable,
-                                                                false,
-                                                                1u,
-                                                                nullptr);
+    StateBaseAddressHelperArgs<FamilyType> args = {
+        generalStateBaseAddress,               // generalStateBase
+        0,                                     // indirectObjectHeapBaseAddress
+        generalStateBaseAddress,               // instructionHeapBaseAddress
+        0,                                     // globalHeapsBaseAddress
+        &sbaCmd,                               // stateBaseAddressCmd
+        &dsh,                                  // dsh
+        &ioh,                                  // ioh
+        &ssh,                                  // ssh
+        pDevice->getGmmHelper(),               // gmmHelper
+        0,                                     // statelessMocsIndex
+        MemoryCompressionState::NotApplicable, // memoryCompressionState
+        true,                                  // setInstructionStateBaseAddress
+        false,                                 // setGeneralStateBaseAddress
+        false,                                 // useGlobalHeapsBaseAddress
+        false,                                 // isMultiOsContextCapable
+        false,                                 // useGlobalAtomics
+        false                                  // areMultipleSubDevicesInContext
+    };
+    StateBaseAddressHelper<FamilyType>::programStateBaseAddress(args);
 
     EXPECT_EQ(0ull, sbaCmd.getGeneralStateBaseAddress());
     EXPECT_EQ(0u, sbaCmd.getGeneralStateBufferSize());
@@ -1269,24 +1273,26 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenNonZeroInternalHeapBaseAddres
     uint64_t internalHeapBaseAddress = 0x80010000ull;
 
     typename FamilyType::STATE_BASE_ADDRESS sbaCmd;
-    StateBaseAddressHelper<FamilyType>::programStateBaseAddress(&sbaCmd,
-                                                                &dsh,
-                                                                &ioh,
-                                                                &ssh,
-                                                                internalHeapBaseAddress,
-                                                                true,
-                                                                0,
-                                                                internalHeapBaseAddress,
-                                                                0,
-                                                                0,
-                                                                false,
-                                                                false,
-                                                                pDevice->getGmmHelper(),
-                                                                false,
-                                                                MemoryCompressionState::NotApplicable,
-                                                                false,
-                                                                1u,
-                                                                nullptr);
+    StateBaseAddressHelperArgs<FamilyType> args = {
+        internalHeapBaseAddress,               // generalStateBase
+        internalHeapBaseAddress,               // indirectObjectHeapBaseAddress
+        0,                                     // instructionHeapBaseAddress
+        0,                                     // globalHeapsBaseAddress
+        &sbaCmd,                               // stateBaseAddressCmd
+        &dsh,                                  // dsh
+        &ioh,                                  // ioh
+        &ssh,                                  // ssh
+        pDevice->getGmmHelper(),               // gmmHelper
+        0,                                     // statelessMocsIndex
+        MemoryCompressionState::NotApplicable, // memoryCompressionState
+        false,                                 // setInstructionStateBaseAddress
+        true,                                  // setGeneralStateBaseAddress
+        false,                                 // useGlobalHeapsBaseAddress
+        false,                                 // isMultiOsContextCapable
+        false,                                 // useGlobalAtomics
+        false                                  // areMultipleSubDevicesInContext
+    };
+    StateBaseAddressHelper<FamilyType>::programStateBaseAddress(args);
 
     EXPECT_FALSE(sbaCmd.getInstructionBaseAddressModifyEnable());
     EXPECT_EQ(0ull, sbaCmd.getInstructionBaseAddress());
@@ -1302,25 +1308,26 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandStreamReceiverFlushTaskTests, givenSbaProgram
     uint64_t instructionHeapBase = 0x10000;
     uint64_t generalStateBase = 0x30000;
     typename FamilyType::STATE_BASE_ADDRESS sbaCmd;
-
-    StateBaseAddressHelper<FamilyType>::programStateBaseAddress(&sbaCmd,
-                                                                nullptr,
-                                                                nullptr,
-                                                                nullptr,
-                                                                generalStateBase,
-                                                                true,
-                                                                0,
-                                                                internalHeapBase,
-                                                                instructionHeapBase,
-                                                                0,
-                                                                true,
-                                                                false,
-                                                                pDevice->getGmmHelper(),
-                                                                false,
-                                                                MemoryCompressionState::NotApplicable,
-                                                                false,
-                                                                1u,
-                                                                nullptr);
+    StateBaseAddressHelperArgs<FamilyType> args = {
+        generalStateBase,                      // generalStateBase
+        internalHeapBase,                      // indirectObjectHeapBaseAddress
+        instructionHeapBase,                   // instructionHeapBaseAddress
+        0,                                     // globalHeapsBaseAddress
+        &sbaCmd,                               // stateBaseAddressCmd
+        nullptr,                               // dsh
+        nullptr,                               // ioh
+        nullptr,                               // ssh
+        pDevice->getGmmHelper(),               // gmmHelper
+        0,                                     // statelessMocsIndex
+        MemoryCompressionState::NotApplicable, // memoryCompressionState
+        true,                                  // setInstructionStateBaseAddress
+        true,                                  // setGeneralStateBaseAddress
+        false,                                 // useGlobalHeapsBaseAddress
+        false,                                 // isMultiOsContextCapable
+        false,                                 // useGlobalAtomics
+        false                                  // areMultipleSubDevicesInContext
+    };
+    StateBaseAddressHelper<FamilyType>::programStateBaseAddress(args);
 
     EXPECT_FALSE(sbaCmd.getDynamicStateBaseAddressModifyEnable());
     EXPECT_FALSE(sbaCmd.getDynamicStateBufferSizeModifyEnable());

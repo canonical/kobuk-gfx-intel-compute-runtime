@@ -8,6 +8,7 @@
 #include "shared/source/helpers/file_io.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/os_interface/device_factory.h"
+#include "shared/source/os_interface/linux/i915.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
 #include "shared/source/os_interface/linux/os_inc.h"
 #include "shared/source/os_interface/os_interface.h"
@@ -18,9 +19,9 @@
 #include "shared/test/common/helpers/test_files.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/libult/linux/drm_mock.h"
-#include "shared/test/common/mocks/linux/mock_os_context_linux.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/os_interface/linux/sys_calls_linux_ult.h"
+#include "shared/test/unit_test/mocks/linux/mock_os_context_linux.h"
 
 #include "gtest/gtest.h"
 
@@ -281,20 +282,21 @@ TEST(DrmTest, givenSysfsNodeReadFailsWithImproperDataWhenGetDeviceMemoryMaxClock
 TEST(DrmTest, WhenGettingRevisionIdThenCorrectIdIsReturned) {
     auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
     executionEnvironment->prepareRootDeviceEnvironments(1);
-    DrmMock *pDrm = new DrmMock(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto pDrm = std::make_unique<DrmMock>(*executionEnvironment->rootDeviceEnvironments[0]);
     EXPECT_NE(nullptr, pDrm);
+
+    auto hwInfo = pDrm->getRootDeviceEnvironment().getMutableHardwareInfo();
 
     pDrm->storedDeviceID = 0x1234;
     pDrm->storedDeviceRevID = 0xB;
-    pDrm->deviceId = 0;
-    pDrm->revisionId = 0;
+
+    hwInfo->platform.usDeviceID = 0;
+    hwInfo->platform.usRevId = 0;
 
     EXPECT_TRUE(pDrm->queryDeviceIdAndRevision());
 
-    EXPECT_EQ(pDrm->storedDeviceID, pDrm->deviceId);
-    EXPECT_EQ(pDrm->storedDeviceRevID, pDrm->revisionId);
-
-    delete pDrm;
+    EXPECT_EQ(pDrm->storedDeviceID, hwInfo->platform.usDeviceID);
+    EXPECT_EQ(pDrm->storedDeviceRevID, hwInfo->platform.usRevId);
 }
 
 TEST(DrmTest, GivenDrmWhenAskedForGttSizeThenReturnCorrectValue) {
@@ -1365,6 +1367,10 @@ TEST(DrmTest, givenSetupIoctlHelperWhenCalledTwiceThenIoctlHelperIsSetOnlyOnce) 
 TEST(DrmWrapperTest, WhenGettingDrmIoctlGetparamValueThenIoctlHelperIsNotNeeded) {
     EXPECT_EQ(getIoctlRequestValue(DrmIoctl::Getparam, nullptr), static_cast<unsigned int>(DRM_IOCTL_I915_GETPARAM));
     EXPECT_THROW(getIoctlRequestValue(DrmIoctl::DG1GemCreateExt, nullptr), std::runtime_error);
+}
+
+TEST(DrmWrapperTest, WhenGettingDrmIoctlVersionValueThenIoctlHelperIsNotNeeded) {
+    EXPECT_EQ(getIoctlRequestValue(DrmIoctl::Version, nullptr), static_cast<unsigned int>(DRM_IOCTL_VERSION));
 }
 
 TEST(DrmWrapperTest, WhenGettingChipsetIdParamValueThenIoctlHelperIsNotNeeded) {

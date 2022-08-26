@@ -105,6 +105,7 @@ bool Wddm::init() {
     if (hwConfig->configureHwInfoWddm(hardwareInfo.get(), hardwareInfo.get(), nullptr)) {
         return false;
     }
+    setPlatformSupportEvictWhenNecessaryFlag(*hwConfig);
 
     auto preemptionMode = PreemptionHelper::getDefaultPreemptionMode(*hardwareInfo);
     rootDeviceEnvironment.setHwInfo(hardwareInfo.get());
@@ -130,7 +131,99 @@ bool Wddm::init() {
         gmmMemory.reset(GmmMemory::create(rootDeviceEnvironment.getGmmClientContext()));
     }
 
+    if (rootDeviceEnvironment.executionEnvironment.isDebuggingEnabled()) {
+        if (!buildTopologyMapping()) {
+            return false;
+        }
+    }
+
     return configureDeviceAddressSpace();
+}
+
+void Wddm::setPlatformSupportEvictWhenNecessaryFlag(const HwInfoConfig &hwInfoConfig) {
+    platformSupportsEvictWhenNecessary = hwInfoConfig.isEvictionWhenNecessaryFlagSupported();
+    int32_t overridePlatformSupportsEvictWhenNecessary =
+        DebugManager.flags.PlaformSupportEvictWhenNecessaryFlag.get();
+    if (overridePlatformSupportsEvictWhenNecessary != -1) {
+        platformSupportsEvictWhenNecessary = !!overridePlatformSupportsEvictWhenNecessary;
+    }
+    forceEvictOnlyIfNecessary = DebugManager.flags.ForceEvictOnlyIfNecessaryFlag.get();
+}
+
+bool Wddm::buildTopologyMapping() {
+    auto hwInfo = rootDeviceEnvironment.getHardwareInfo();
+
+    bool ret = true;
+    UNRECOVERABLE_IF(hwInfo->gtSystemInfo.MultiTileArchInfo.TileCount > 1);
+    TopologyMapping mapping;
+    if (!translateTopologyInfo(mapping)) {
+        ret = false;
+        return ret;
+    }
+    this->topologyMap[0] = mapping;
+
+    return ret;
+}
+
+bool Wddm::translateTopologyInfo(TopologyMapping &mapping) {
+    int sliceCount = 0;
+    int subSliceCount = 0;
+    uint32_t dualSubSliceCount = 0;
+    int euCount = 0;
+    std::vector<int> sliceIndices;
+    auto gtSystemInfo = rootDeviceEnvironment.getHardwareInfo()->gtSystemInfo;
+    sliceIndices.reserve(gtSystemInfo.SliceCount);
+
+    for (uint32_t x = 0; x < gtSystemInfo.MaxSlicesSupported; x++) {
+        if (!gtSystemInfo.SliceInfo[x].Enabled) {
+            continue;
+        }
+        sliceIndices.push_back(x);
+        sliceCount++;
+
+        std::vector<int> subSliceIndices;
+        subSliceIndices.reserve((gtSystemInfo.SliceInfo[x].DualSubSliceEnabledCount) * GT_MAX_SUBSLICE_PER_DSS);
+
+        // subSliceIndex is used to track the index number of subslices from all DSS in this slice
+        int subSliceIndex = -1;
+        for (uint32_t dss = 0; dss < GT_MAX_DUALSUBSLICE_PER_SLICE; dss++) {
+            if (!gtSystemInfo.SliceInfo[x].DSSInfo[dss].Enabled) {
+                subSliceIndex += 2;
+                continue;
+            }
+            dualSubSliceCount++;
+
+            for (uint32_t y = 0; y < GT_MAX_SUBSLICE_PER_DSS; y++) {
+                subSliceIndex++;
+                if (!gtSystemInfo.SliceInfo[x].DSSInfo[dss].SubSlice[y].Enabled) {
+                    continue;
+                }
+                subSliceCount++;
+                subSliceIndices.push_back(subSliceIndex);
+
+                euCount += gtSystemInfo.SliceInfo[x].DSSInfo[dss].SubSlice[y].EuEnabledCount;
+            }
+        }
+
+        // single slice available
+        if (sliceCount == 1) {
+            mapping.subsliceIndices = std::move(subSliceIndices);
+        }
+    }
+
+    if (sliceIndices.size()) {
+        mapping.sliceIndices = std::move(sliceIndices);
+    }
+
+    if (sliceCount != 1) {
+        mapping.subsliceIndices.clear();
+    }
+
+    return (sliceCount && subSliceCount && euCount);
+}
+
+const TopologyMap &Wddm::getTopologyMap() {
+    return topologyMap;
 }
 
 bool Wddm::queryAdapterInfo() {
@@ -178,6 +271,8 @@ bool Wddm::queryAdapterInfo() {
         maxRenderFrequency = adapterInfo.MaxRenderFreq;
         timestampFrequency = adapterInfo.GfxTimeStampFreq;
         instrumentationEnabled = adapterInfo.Caps.InstrumentationIsEnabled != 0;
+
+        populateAdditionalAdapterInfoOptions(adapterInfo);
     }
 
     return status == STATUS_SUCCESS;
@@ -366,7 +461,7 @@ bool Wddm::evict(const D3DKMT_HANDLE *handleList, uint32_t numOfHandles, uint64_
     evict.hDevice = device;
     evict.NumAllocations = numOfHandles;
     evict.NumBytesToTrim = 0;
-    evict.Flags.EvictOnlyIfNecessary = evictNeeded ? 0 : 1;
+    evict.Flags.EvictOnlyIfNecessary = adjustEvictNeededParameter(evictNeeded) ? 0 : 1;
 
     status = getGdi()->evict(&evict);
 
@@ -512,7 +607,7 @@ NTSTATUS Wddm::createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKM
     createAllocation.NumAllocations = 1;
     createAllocation.Flags.CreateShared = outSharedHandle ? TRUE : FALSE;
     createAllocation.Flags.NtSecuritySharing = outSharedHandle ? TRUE : FALSE;
-    createAllocation.Flags.CreateResource = outSharedHandle || alignedCpuPtr ? TRUE : FALSE;
+    createAllocation.Flags.CreateResource = outSharedHandle ? TRUE : FALSE;
     createAllocation.pAllocationInfo2 = &allocationInfo;
     createAllocation.hDevice = device;
 

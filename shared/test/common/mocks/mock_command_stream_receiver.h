@@ -64,6 +64,8 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
 
     bool isMultiOsContextCapable() const override { return multiOsContextCapable; }
 
+    void createKernelArgsBufferAllocation() override {}
+
     bool isGpuHangDetected() const override {
         if (isGpuHangDetectedReturnValue.has_value()) {
             return *isGpuHangDetectedReturnValue;
@@ -221,6 +223,7 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
     using CommandStreamReceiverHw<GfxFamily>::postInitFlagsSetup;
     using CommandStreamReceiverHw<GfxFamily>::programL3;
     using CommandStreamReceiverHw<GfxFamily>::programVFEState;
+    using CommandStreamReceiverHw<GfxFamily>::createKernelArgsBufferAllocation;
     using CommandStreamReceiver::activePartitions;
     using CommandStreamReceiver::activePartitionsConfig;
     using CommandStreamReceiver::clearColorAllocation;
@@ -305,7 +308,7 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
 
     bool skipBlitCalls = false;
     bool storeFlushedTaskStream = false;
-    std::unique_ptr<uint8_t> storedTaskStream;
+    std::unique_ptr<uint8_t[]> storedTaskStream;
     size_t storedTaskStreamSize = 0;
 
     int flushCalledCount = 0;

@@ -9,8 +9,8 @@
 #include "shared/source/gmm_helper/client_context/gmm_client_context.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/state_base_address.h"
+#include "shared/test/common/fixtures/preamble_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
-#include "shared/test/unit_test/preamble/preamble_fixture.h"
 
 #include "opencl/source/helpers/hardware_commands_helper.h"
 #include "opencl/source/mem_obj/buffer.h"
@@ -23,8 +23,7 @@
 using namespace NEO;
 
 using ThreadArbitrationXeHPAndLater = PreambleFixture;
-using Platforms = IsWithinGfxCore<IGFX_XE_HP_CORE, IGFX_XE_HPG_CORE>;
-HWTEST2_F(ThreadArbitrationXeHPAndLater, whenGetDefaultThreadArbitrationPolicyIsCalledThenCorrectPolicyIsReturned, Platforms) {
+HWTEST2_F(ThreadArbitrationXeHPAndLater, whenGetDefaultThreadArbitrationPolicyIsCalledThenCorrectPolicyIsReturned, IsXeHpOrXeHpgCore) {
     EXPECT_EQ(ThreadArbitrationPolicy::AgeBased, HwHelperHw<FamilyType>::get().getDefaultThreadArbitrationPolicy());
 }
 
@@ -462,8 +461,26 @@ HWTEST2_F(StateBaseAddressXeHPAndLaterTests, givenMemoryCompressionEnabledWhenAp
 
     for (auto memoryCompressionState : {MemoryCompressionState::NotApplicable, MemoryCompressionState::Disabled, MemoryCompressionState::Enabled}) {
         auto sbaCmd = FamilyType::cmdInitStateBaseAddress;
-        StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(&sbaCmd, &indirectHeap, true, 0,
-                                                                             pDevice->getRootDeviceEnvironment().getGmmHelper(), false, memoryCompressionState, true, false, 1u);
+        StateBaseAddressHelperArgs<FamilyType> args = {
+            0,                                                  // generalStateBase
+            0,                                                  // indirectObjectHeapBaseAddress
+            0,                                                  // instructionHeapBaseAddress
+            0,                                                  // globalHeapsBaseAddress
+            &sbaCmd,                                            // stateBaseAddressCmd
+            nullptr,                                            // dsh
+            nullptr,                                            // ioh
+            &indirectHeap,                                      // ssh
+            pDevice->getRootDeviceEnvironment().getGmmHelper(), // gmmHelper
+            0,                                                  // statelessMocsIndex
+            memoryCompressionState,                             // memoryCompressionState
+            false,                                              // setInstructionStateBaseAddress
+            true,                                               // setGeneralStateBaseAddress
+            false,                                              // useGlobalHeapsBaseAddress
+            false,                                              // isMultiOsContextCapable
+            false,                                              // useGlobalAtomics
+            false                                               // areMultipleSubDevicesInContext
+        };
+        StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args, true);
         if (memoryCompressionState == MemoryCompressionState::Enabled) {
             EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::ENABLE_MEMORY_COMPRESSION_FOR_ALL_STATELESS_ACCESSES_ENABLED, sbaCmd.getEnableMemoryCompressionForAllStatelessAccesses());
         } else {
@@ -482,9 +499,26 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, StateBaseAddressXeHPAndLaterTests, givenNonZeroInte
     IndirectHeap indirectHeap(allocation, 1);
     auto sbaCmd = FamilyType::cmdInitStateBaseAddress;
     uint64_t ihba = 0x80010000ull;
-    StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(&sbaCmd, &indirectHeap, false, ihba,
-                                                                         pDevice->getRootDeviceEnvironment().getGmmHelper(), false,
-                                                                         MemoryCompressionState::NotApplicable, true, false, 1u);
+    StateBaseAddressHelperArgs<FamilyType> args = {
+        0,                                                  // generalStateBase
+        ihba,                                               // indirectObjectHeapBaseAddress
+        0,                                                  // instructionHeapBaseAddress
+        0,                                                  // globalHeapsBaseAddress
+        &sbaCmd,                                            // stateBaseAddressCmd
+        nullptr,                                            // dsh
+        nullptr,                                            // ioh
+        &indirectHeap,                                      // ssh
+        pDevice->getRootDeviceEnvironment().getGmmHelper(), // gmmHelper
+        0,                                                  // statelessMocsIndex
+        MemoryCompressionState::NotApplicable,              // memoryCompressionState
+        false,                                              // setInstructionStateBaseAddress
+        false,                                              // setGeneralStateBaseAddress
+        false,                                              // useGlobalHeapsBaseAddress
+        false,                                              // isMultiOsContextCapable
+        false,                                              // useGlobalAtomics
+        false                                               // areMultipleSubDevicesInContext
+    };
+    StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args, true);
     EXPECT_EQ(0ull, sbaCmd.getGeneralStateBaseAddress());
     memoryManager->freeGraphicsMemory(allocation);
 }

@@ -1002,12 +1002,18 @@ HWCMDTEST_F(IGFX_GEN8_CORE, HwHelperTest, GivenBarrierEncodingWhenCallingGetBarr
 
 HWCMDTEST_F(IGFX_GEN8_CORE, HwHelperTest, GivenVariousValuesWhenCallingCalculateAvailableThreadCountThenCorrectValueIsReturned) {
     auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
-    auto result = hwHelper.calculateAvailableThreadCount(
-        hardwareInfo.platform.eProductFamily,
-        0,
-        hardwareInfo.gtSystemInfo.EUCount,
-        hardwareInfo.gtSystemInfo.ThreadCount / hardwareInfo.gtSystemInfo.EUCount);
+    auto result = hwHelper.calculateAvailableThreadCount(hardwareInfo, 0);
     EXPECT_EQ(hardwareInfo.gtSystemInfo.ThreadCount, result);
+}
+
+HWCMDTEST_F(IGFX_GEN8_CORE, HwHelperTest, GivenModifiedGtSystemInfoWhenCallingCalculateAvailableThreadCountThenCorrectValueIsReturned) {
+    auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+    auto hwInfo = hardwareInfo;
+    for (auto threadCount : {1u, 5u, 9u}) {
+        hwInfo.gtSystemInfo.ThreadCount = threadCount;
+        auto result = hwHelper.calculateAvailableThreadCount(hwInfo, 0);
+        EXPECT_EQ(threadCount, result);
+    }
 }
 
 HWTEST_F(HwHelperTest, givenDefaultHwHelperHwWhenIsOffsetToSkipSetFFIDGPWARequiredCalledThenFalseIsReturned) {
@@ -1387,14 +1393,12 @@ TEST(HwHelperTests, whenBlitterSupportIsDisabledThenDontExposeAnyBcsEngine) {
     }
 }
 
-using NotXeHPOrDG2 = AreNotGfxCores<IGFX_XE_HP_CORE, IGFX_XE_HPG_CORE>;
-HWTEST2_F(HwHelperTest, givenNotAtsOrDg2WhenDisableL3ForDebugCalledThenFalseIsReturned, NotXeHPOrDG2) {
+HWTEST2_F(HwHelperTest, givenNotXeHpOrXeHpgCoreWhenDisableL3ForDebugCalledThenFalseIsReturned, IsNotXeHpOrXeHpgCore) {
     const auto &hwHelper = HwHelper::get(renderCoreFamily);
     EXPECT_FALSE(hwHelper.disableL3CacheForDebug(*defaultHwInfo));
 }
 
-using ATSOrDG2 = IsWithinGfxCore<IGFX_XE_HP_CORE, IGFX_XE_HPG_CORE>;
-HWTEST2_F(HwHelperTest, givenAtsOrDg2WhenDisableL3ForDebugCalledThenTrueIsReturned, ATSOrDG2) {
+HWTEST2_F(HwHelperTest, givenXeHpOrXeHpgCoreWhenDisableL3ForDebugCalledThenTrueIsReturned, IsXeHpOrXeHpgCore) {
     const auto &hwHelper = HwHelper::get(renderCoreFamily);
     EXPECT_TRUE(hwHelper.disableL3CacheForDebug(*defaultHwInfo));
 }
@@ -1480,4 +1484,31 @@ using LogicalStateHelperTest = ::testing::Test;
 
 HWTEST_F(LogicalStateHelperTest, whenCreatingLogicalStateHelperThenReturnNullptr) {
     EXPECT_EQ(nullptr, LogicalStateHelper::create<FamilyType>());
+}
+
+HWTEST2_F(HwHelperTest, GivenVariousValuesAndXeHpOrXeHpgCoreWhenCallingCalculateAvailableThreadCountThenCorrectValueIsReturned, IsXeHpOrXeHpgCore) {
+    std::array<std::pair<uint32_t, uint32_t>, 3> grfTestInputs = {{{64, 8},
+                                                                   {128, 8},
+                                                                   {256, 4}}};
+
+    const auto &hwInfo = *defaultHwInfo;
+    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    for (const auto &[grfCount, expectedThreadCountPerEu] : grfTestInputs) {
+        auto expected = expectedThreadCountPerEu * hwInfo.gtSystemInfo.EUCount;
+        auto result = hwHelper.calculateAvailableThreadCount(hwInfo, grfCount);
+        EXPECT_EQ(expected, result);
+    }
+}
+
+HWTEST2_F(HwHelperTest, GivenModifiedGtSystemInfoAndXeHpOrXeHpgCoreWhenCallingCalculateAvailableThreadCountThenCorrectValueIsReturned, IsXeHpOrXeHpgCore) {
+    std::array<std::tuple<uint32_t, uint32_t, uint32_t>, 3> testInputs = {{{1, 64, 1},
+                                                                           {5, 128, 5},
+                                                                           {8, 256, 4}}};
+    auto &hwHelper = HwHelper::get(hardwareInfo.platform.eRenderCoreFamily);
+    auto hwInfo = hardwareInfo;
+    for (const auto &[threadCount, grfCount, expectedThreadCount] : testInputs) {
+        hwInfo.gtSystemInfo.ThreadCount = threadCount;
+        auto result = hwHelper.calculateAvailableThreadCount(hwInfo, grfCount);
+        EXPECT_EQ(expectedThreadCount, result);
+    }
 }

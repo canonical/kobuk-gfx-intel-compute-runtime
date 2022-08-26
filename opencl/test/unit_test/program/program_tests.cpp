@@ -26,18 +26,18 @@
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/memory_manager/surface.h"
 #include "shared/source/os_interface/os_context.h"
+#include "shared/test/common/device_binary_format/patchtokens_tests.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/kernel_binary_helper.h"
 #include "shared/test/common/libult/global_environment.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_compiler_interface.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_modules_zebin.h"
 #include "shared/test/common/test_macros/hw_test.h"
-#include "shared/test/unit_test/device_binary_format/patchtokens_tests.h"
-#include "shared/test/unit_test/device_binary_format/zebin_tests.h"
-#include "shared/test/unit_test/helpers/gtest_helpers.h"
-#include "shared/test/unit_test/utilities/base_object_utils.h"
+#include "shared/test/common/utilities/base_object_utils.h"
 
 #include "opencl/source/gtpin/gtpin_notify.h"
 #include "opencl/source/helpers/hardware_commands_helper.h"
@@ -63,14 +63,14 @@
 using namespace NEO;
 
 void ProgramTests::SetUp() {
-    ClDeviceFixture::SetUp();
+    ClDeviceFixture::setUp();
     cl_device_id device = pClDevice;
-    ContextFixture::SetUp(1, &device);
+    ContextFixture::setUp(1, &device);
 }
 
 void ProgramTests::TearDown() {
-    ContextFixture::TearDown();
-    ClDeviceFixture::TearDown();
+    ContextFixture::tearDown();
+    ClDeviceFixture::tearDown();
 }
 
 class NoCompilerInterfaceRootDeviceEnvironment : public RootDeviceEnvironment {
@@ -235,7 +235,7 @@ TEST_F(ProgramFromBinaryTest, GivenProgramWithNoExecutableCodeWhenGettingNumKern
     size_t paramValueSize = sizeof(paramValue);
     size_t paramValueSizeRet = 0;
 
-    CreateProgramFromBinary(pContext, pContext->getDevices(), binaryFileName);
+    createProgramFromBinary(pContext, pContext->getDevices(), binaryFileName);
     MockProgram *p = pProgram;
     p->setBuildStatus(CL_BUILD_NONE);
 
@@ -287,7 +287,7 @@ TEST_F(ProgramFromBinaryTest, GivenProgramWithNoExecutableCodeWhenGettingKernelN
     size_t paramValueSize = sizeof(size_t *);
     size_t paramValueSizeRet = 0;
 
-    CreateProgramFromBinary(pContext, pContext->getDevices(), binaryFileName);
+    createProgramFromBinary(pContext, pContext->getDevices(), binaryFileName);
     MockProgram *p = pProgram;
     p->setBuildStatus(CL_BUILD_NONE);
 
@@ -555,7 +555,7 @@ TEST_F(ProgramFromBinaryTest, GivenGlobalVariableTotalSizeSetWhenGettingBuildGlo
     EXPECT_EQ(globalVarSize, 0u);
 
     // Set GlobalVariableTotalSize as 1024
-    CreateProgramFromBinary(pContext, pContext->getDevices(), binaryFileName);
+    createProgramFromBinary(pContext, pContext->getDevices(), binaryFileName);
     MockProgram *p = pProgram;
     ProgramInfo programInfo;
 
@@ -723,7 +723,7 @@ TEST_F(ProgramFromSourceTest, GivenSpecificParamatersWhenBuildingProgramThenSucc
     KernelBinaryHelper kbHelper(binaryFileName, true);
     auto device = pPlatform->getClDevice(0);
 
-    CreateProgramWithSource(
+    createProgramWithSource(
         pContext,
         sourceFileName);
 
@@ -1006,7 +1006,7 @@ TEST_F(ProgramFromSourceTest, GivenDifferentCommpilerOptionsWhenBuildingProgramT
 
     auto rootDeviceIndex = pContext->getDevice(0)->getRootDeviceIndex();
 
-    CreateProgramWithSource(
+    createProgramWithSource(
         pContext,
         sourceFileName);
 
@@ -1068,7 +1068,7 @@ TEST_F(ProgramFromSourceTest, GivenEmptyProgramWhenCreatingProgramThenInvalidVal
 }
 
 TEST_F(ProgramFromSourceTest, GivenSpecificParamatersWhenCompilingProgramThenSuccessOrCorrectErrorCodeIsReturned) {
-    CreateProgramWithSource(
+    createProgramWithSource(
         pContext,
         sourceFileName);
 
@@ -1271,7 +1271,7 @@ TEST_F(ProgramFromSourceTest, GivenAdvancedOptionsWhenCreatingProgramThenSuccess
 }
 
 TEST_F(ProgramFromSourceTest, GivenSpecificParamatersWhenLinkingProgramThenSuccessOrCorrectErrorCodeIsReturned) {
-    CreateProgramWithSource(
+    createProgramWithSource(
         pContext,
         sourceFileName);
 
@@ -1370,11 +1370,11 @@ TEST_F(ProgramFromSourceTest, GivenInvalidOptionsWhenCreatingLibraryThenCorrectE
 
 class PatchTokenFromBinaryTest : public ProgramSimpleFixture {
   public:
-    void SetUp() override {
-        ProgramSimpleFixture::SetUp();
+    void setUp() {
+        ProgramSimpleFixture::setUp();
     }
-    void TearDown() override {
-        ProgramSimpleFixture::TearDown();
+    void tearDown() {
+        ProgramSimpleFixture::tearDown();
     }
 };
 using PatchTokenTests = Test<PatchTokenFromBinaryTest>;
@@ -1399,7 +1399,7 @@ class CommandStreamReceiverMock : public UltCommandStreamReceiver<FamilyType> {
 };
 
 HWTEST_F(PatchTokenTests, givenKernelRequiringConstantAllocationWhenMakeResidentIsCalledThenConstantAllocationIsMadeResident) {
-    CreateProgramFromBinary(pContext, pContext->getDevices(), "test_constant_memory");
+    createProgramFromBinary(pContext, pContext->getDevices(), "test_constant_memory");
 
     ASSERT_NE(nullptr, pProgram);
     retVal = pProgram->build(
@@ -1462,7 +1462,7 @@ HWTEST_F(PatchTokenTests, givenKernelRequiringConstantAllocationWhenMakeResident
 }
 
 TEST_F(PatchTokenTests, WhenBuildingProgramThenGwsIsSet) {
-    CreateProgramFromBinary(pContext, pContext->getDevices(), "kernel_data_param");
+    createProgramFromBinary(pContext, pContext->getDevices(), "kernel_data_param");
 
     ASSERT_NE(nullptr, pProgram);
     retVal = pProgram->build(
@@ -1479,37 +1479,10 @@ TEST_F(PatchTokenTests, WhenBuildingProgramThenGwsIsSet) {
     ASSERT_NE(static_cast<uint32_t>(-1), pKernelInfo->kernelDescriptor.payloadMappings.dispatchTraits.globalWorkSize[2]);
 }
 
-TEST_F(PatchTokenTests, WhenBuildingProgramThenLwsIsSet) {
-    CreateProgramFromBinary(pContext, pContext->getDevices(), "kernel_data_param");
-
-    ASSERT_NE(nullptr, pProgram);
-    retVal = pProgram->build(
-        pProgram->getDevices(),
-        nullptr,
-        false);
-
-    ASSERT_EQ(CL_SUCCESS, retVal);
-
-    auto pKernelInfo = pProgram->getKernelInfo("test", rootDeviceIndex);
-
-    ASSERT_NE(static_cast<uint32_t>(-1), pKernelInfo->kernelDescriptor.payloadMappings.dispatchTraits.localWorkSize[0]);
-    ASSERT_NE(static_cast<uint32_t>(-1), pKernelInfo->kernelDescriptor.payloadMappings.dispatchTraits.localWorkSize[1]);
-    ASSERT_NE(static_cast<uint32_t>(-1), pKernelInfo->kernelDescriptor.payloadMappings.dispatchTraits.localWorkSize[2]);
-
-    pKernelInfo = pProgram->getKernelInfo("test_get_local_size", rootDeviceIndex);
-
-    ASSERT_NE(static_cast<uint32_t>(-1), pKernelInfo->kernelDescriptor.payloadMappings.dispatchTraits.localWorkSize[0]);
-    ASSERT_NE(static_cast<uint32_t>(-1), pKernelInfo->kernelDescriptor.payloadMappings.dispatchTraits.localWorkSize[1]);
-    ASSERT_NE(static_cast<uint32_t>(-1), pKernelInfo->kernelDescriptor.payloadMappings.dispatchTraits.localWorkSize[2]);
-    ASSERT_NE(static_cast<uint32_t>(-1), pKernelInfo->kernelDescriptor.payloadMappings.dispatchTraits.localWorkSize2[0]);
-    ASSERT_NE(static_cast<uint32_t>(-1), pKernelInfo->kernelDescriptor.payloadMappings.dispatchTraits.localWorkSize2[1]);
-    ASSERT_NE(static_cast<uint32_t>(-1), pKernelInfo->kernelDescriptor.payloadMappings.dispatchTraits.localWorkSize2[2]);
-}
-
 TEST_F(PatchTokenTests, WhenBuildingProgramThenConstantKernelArgsAreAvailable) {
     // PATCH_TOKEN_STATELESS_CONSTANT_MEMORY_OBJECT_KERNEL_ARGUMENT
 
-    CreateProgramFromBinary(pContext, pContext->getDevices(), "test_basic_constant");
+    createProgramFromBinary(pContext, pContext->getDevices(), "test_basic_constant");
 
     ASSERT_NE(nullptr, pProgram);
     retVal = pProgram->build(
@@ -1549,7 +1522,7 @@ TEST_F(PatchTokenTests, GivenVmeKernelWhenBuildingKernelThenArgAvailable) {
     }
     // PATCH_TOKEN_INLINE_VME_SAMPLER_INFO token indicates a VME kernel.
 
-    CreateProgramFromBinary(pContext, pContext->getDevices(), "vme_kernels");
+    createProgramFromBinary(pContext, pContext->getDevices(), "vme_kernels");
 
     ASSERT_NE(nullptr, pProgram);
     retVal = pProgram->build(
@@ -1576,11 +1549,11 @@ TEST_F(PatchTokenTests, GivenVmeKernelWhenBuildingKernelThenArgAvailable) {
 
 class ProgramPatchTokenFromBinaryTest : public ProgramSimpleFixture {
   public:
-    void SetUp() override {
-        ProgramSimpleFixture::SetUp();
+    void setUp() {
+        ProgramSimpleFixture::setUp();
     }
-    void TearDown() override {
-        ProgramSimpleFixture::TearDown();
+    void tearDown() {
+        ProgramSimpleFixture::tearDown();
     }
 };
 typedef Test<ProgramPatchTokenFromBinaryTest> ProgramPatchTokenTests;
@@ -1674,7 +1647,7 @@ TEST(ProgramFromBinaryTests, givenEmptyProgramThenErrorIsReturned) {
 using ProgramWithDebugSymbolsTests = Test<ProgramSimpleFixture>;
 
 TEST_F(ProgramWithDebugSymbolsTests, GivenProgramCreatedWithDashGOptionWhenGettingProgramBinariesThenDebugDataIsIncluded) {
-    CreateProgramFromBinary(pContext, pContext->getDevices(), "CopyBuffer_simd16", "-g");
+    createProgramFromBinary(pContext, pContext->getDevices(), "CopyBuffer_simd16", "-g");
 
     ASSERT_NE(nullptr, pProgram);
 
@@ -2119,7 +2092,7 @@ TEST_F(ProgramTests, GivenNullContextWhenCreatingProgramFromGenBinaryThenSuccess
 
 TEST_F(ProgramTests, givenValidZebinPrepareLinkerInput) {
     ZebinTestData::ValidEmptyProgram zebin;
-    const std::string validZeInfo = std::string("version :\'") + toString(zeInfoDecoderVersion) + R"===('
+    const std::string validZeInfo = std::string("version :\'") + versionToString(zeInfoDecoderVersion) + R"===('
 kernels:
     - name : some_kernel
       execution_env :
@@ -3003,7 +2976,7 @@ TEST_F(ProgramBinTest, givenPrintProgramBinaryProcessingTimeSetWhenBuildProgramT
     DebugManager.flags.PrintProgramBinaryProcessingTime.set(true);
     testing::internal::CaptureStdout();
 
-    CreateProgramFromBinary(pContext, pContext->getDevices(), "kernel_data_param");
+    createProgramFromBinary(pContext, pContext->getDevices(), "kernel_data_param");
 
     auto retVal = pProgram->build(
         pProgram->getDevices(),

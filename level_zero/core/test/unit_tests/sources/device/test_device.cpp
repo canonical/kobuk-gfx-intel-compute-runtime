@@ -1096,7 +1096,7 @@ TEST_F(DeviceTest, givenNodeOrdinalFlagWhenCallAdjustCommandQueueDescThenDescOrd
     engineGroups.push_back(engineGroupRender);
 
     uint32_t expectedOrdinal = 1u;
-    deviceImp->adjustCommandQueueDesc(desc);
+    deviceImp->adjustCommandQueueDesc(desc.ordinal, desc.index);
     EXPECT_EQ(desc.ordinal, expectedOrdinal);
 }
 
@@ -1141,7 +1141,7 @@ HWTEST_F(DeviceTest, givenNodeOrdinalFlagWhenCallAdjustCommandQueueDescThenDescO
 
     uint32_t expectedOrdinal = 1u;
     uint32_t expectedIndex = 2u;
-    deviceImp->adjustCommandQueueDesc(desc);
+    deviceImp->adjustCommandQueueDesc(desc.ordinal, desc.index);
     EXPECT_EQ(desc.ordinal, expectedOrdinal);
     EXPECT_EQ(desc.index, expectedIndex);
 }
@@ -1155,7 +1155,7 @@ TEST_F(DeviceTest, givenNodeOrdinalFlagNotSetWhenCallAdjustCommandQueueDescThenD
     ze_command_queue_desc_t desc = {};
     EXPECT_EQ(desc.ordinal, 0u);
 
-    deviceImp->adjustCommandQueueDesc(desc);
+    deviceImp->adjustCommandQueueDesc(desc.ordinal, desc.index);
     EXPECT_EQ(desc.ordinal, 0u);
 }
 
@@ -2148,6 +2148,42 @@ TEST_F(MultipleDevicesP2PDevice0Access0Atomic0Device1Access0Atomic0Test, WhenCal
 
     EXPECT_FALSE(p2pProperties.flags & ZE_DEVICE_P2P_PROPERTY_FLAG_ACCESS);
     EXPECT_FALSE(p2pProperties.flags & ZE_DEVICE_P2P_PROPERTY_FLAG_ATOMICS);
+}
+
+TEST_F(MultipleDevicesP2PDevice0Access0Atomic0Device1Access0Atomic0Test, WhenCallingGetP2PPropertiesWithBandwidthPropertiesExtensionThenPropertiesSet) {
+    L0::Device *device0 = driverHandle->devices[0];
+    L0::Device *device1 = driverHandle->devices[1];
+
+    ze_device_p2p_properties_t p2pProperties = {};
+    ze_device_p2p_bandwidth_exp_properties_t p2pBandwidthProps = {};
+
+    p2pProperties.pNext = &p2pBandwidthProps;
+    p2pBandwidthProps.stype = ZE_STRUCTURE_TYPE_DEVICE_P2P_BANDWIDTH_EXP_PROPERTIES;
+    p2pBandwidthProps.pNext = nullptr;
+
+    device0->getP2PProperties(device1, &p2pProperties);
+
+    EXPECT_EQ(0u, p2pBandwidthProps.logicalBandwidth);
+    EXPECT_EQ(0u, p2pBandwidthProps.physicalBandwidth);
+    EXPECT_EQ(ZE_BANDWIDTH_UNIT_UNKNOWN, p2pBandwidthProps.bandwidthUnit);
+
+    EXPECT_EQ(0u, p2pBandwidthProps.logicalLatency);
+    EXPECT_EQ(0u, p2pBandwidthProps.physicalLatency);
+    EXPECT_EQ(ZE_LATENCY_UNIT_UNKNOWN, p2pBandwidthProps.latencyUnit);
+}
+
+TEST_F(MultipleDevicesP2PDevice0Access0Atomic0Device1Access0Atomic0Test, WhenCallingGetP2PPropertiesWithPNextStypeNotSetThenGetP2PPropertiesReturnsSuccessfully) {
+    L0::Device *device0 = driverHandle->devices[0];
+    L0::Device *device1 = driverHandle->devices[1];
+
+    ze_device_p2p_properties_t p2pProperties = {};
+    ze_device_p2p_bandwidth_exp_properties_t p2pBandwidthProps = {};
+
+    p2pProperties.pNext = &p2pBandwidthProps;
+
+    auto res = device0->getP2PProperties(device1, &p2pProperties);
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 }
 
 using MultipleDevicesP2PDevice0Access0Atomic0Device1Access1Atomic0Test = MultipleDevicesP2PFixture<0, 0, 1, 0>;
@@ -3227,14 +3263,14 @@ TEST_F(zeDeviceSystemBarrierTest, whenCallingSystemBarrierThenReturnErrorUnsuppo
 
 template <bool osLocalMemory, bool apiSupport, int32_t enablePartitionWalker, int32_t enableImplicitScaling>
 struct MultiSubDeviceFixture : public DeviceFixture {
-    void SetUp() {
+    void setUp() {
         DebugManager.flags.CreateMultipleSubDevices.set(2);
         DebugManager.flags.EnableWalkerPartition.set(enablePartitionWalker);
         DebugManager.flags.EnableImplicitScaling.set(enableImplicitScaling);
         osLocalMemoryBackup = std::make_unique<VariableBackup<bool>>(&NEO::OSInterface::osEnableLocalMemory, osLocalMemory);
         apiSupportBackup = std::make_unique<VariableBackup<bool>>(&NEO::ImplicitScaling::apiSupport, apiSupport);
 
-        DeviceFixture::SetUp();
+        DeviceFixture::setUp();
 
         deviceImp = reinterpret_cast<L0::DeviceImp *>(device);
         subDevice = neoDevice->getSubDevice(0);

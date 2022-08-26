@@ -13,13 +13,13 @@ struct CommandStreamReceiverHwTest : public ClDeviceFixture,
                                      public ::testing::Test {
 
     void SetUp() override {
-        ClDeviceFixture::SetUp();
-        HardwareParse::SetUp();
+        ClDeviceFixture::setUp();
+        HardwareParse::setUp();
     }
 
     void TearDown() override {
-        HardwareParse::TearDown();
-        ClDeviceFixture::TearDown();
+        HardwareParse::tearDown();
+        ClDeviceFixture::tearDown();
     }
 
     void givenKernelWithSlmWhenPreviousNOSLML3WasSentThenProgramL3WithSLML3ConfigImpl();

@@ -15,7 +15,7 @@
 #include "shared/source/utilities/lookup_array.h"
 #include "shared/source/xe_hpc_core/hw_cmds_xe_hpc_core_base.h"
 
-using Family = NEO::XE_HPC_COREFamily;
+using Family = NEO::XeHpcCoreFamily;
 
 #include "shared/source/command_container/command_encoder_tgllp_and_later.inl"
 #include "shared/source/command_container/command_encoder_xe_hpc_core_and_later.inl"
@@ -31,10 +31,40 @@ void EncodeDispatchKernel<Family>::adjustTimestampPacket(WALKER_TYPE &walkerCmd,
 }
 
 template <>
-void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo) {
+void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo, const uint32_t threadGroupCount, const uint32_t numGrf) {
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+
     if (hwInfoConfig.isDisableOverdispatchAvailable(hwInfo)) {
         interfaceDescriptor.setThreadGroupDispatchSize(INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_1);
+
+        if (hwInfo.gtSystemInfo.SliceCount % 2 == 0) {
+            UNRECOVERABLE_IF(numGrf == 0u);
+
+            constexpr uint32_t maxThreadsInTGForTGDispatchSize8 = 16u;
+            constexpr uint32_t maxThreadsInTGForTGDispatchSize4 = 32u;
+            uint32_t availableThreadCount = hwHelper.calculateAvailableThreadCount(hwInfo, numGrf);
+            uint32_t numberOfThreadsInThreadGroup = interfaceDescriptor.getNumberOfThreadsInGpgpuThreadGroup();
+            uint32_t dispatchedTotalThreadCount = numberOfThreadsInThreadGroup * threadGroupCount;
+
+            UNRECOVERABLE_IF(numberOfThreadsInThreadGroup == 0u);
+
+            if (dispatchedTotalThreadCount <= availableThreadCount) {
+                interfaceDescriptor.setThreadGroupDispatchSize(INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_1);
+            } else if (numberOfThreadsInThreadGroup <= maxThreadsInTGForTGDispatchSize8) {
+                interfaceDescriptor.setThreadGroupDispatchSize(INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_8);
+            } else if (numberOfThreadsInThreadGroup <= maxThreadsInTGForTGDispatchSize4) {
+                interfaceDescriptor.setThreadGroupDispatchSize(INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_4);
+            } else {
+                interfaceDescriptor.setThreadGroupDispatchSize(INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_2);
+            }
+
+            uint32_t exponent = INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_1 - interfaceDescriptor.getThreadGroupDispatchSize();
+            uint32_t threadGroupDispatchSize = 1u << exponent;
+            if ((dispatchedTotalThreadCount % (numberOfThreadsInThreadGroup * threadGroupDispatchSize)) != 0) {
+                interfaceDescriptor.setThreadGroupDispatchSize(INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_1);
+            }
+        }
     }
 
     if (DebugManager.flags.ForceThreadGroupDispatchSize.get() != -1) {
@@ -300,4 +330,5 @@ template struct EncodeEnableRayTracing<Family>;
 template struct EncodeNoop<Family>;
 template struct EncodeStoreMemory<Family>;
 template struct EncodeMemoryFence<Family>;
+template struct EncodeKernelArgsBuffer<Family>;
 } // namespace NEO
