@@ -43,11 +43,13 @@ Description: Intel graphics compute runtime for OpenCL
  stacks supporting the GEN graphics hardware architecture.
  .
  Supported platforms - OpenCL 3.0, Production:
-  - Intel Core Processors with Gen9 GPU (Skylake, Kaby Lake, Coffee Lake)
+  - DG1
+  - Intel Core Processors with Gen9 GPU (Skylake)
+  - Intel Core Processors with Gen9.5 GPU (Kaby Lake, Coffee Lake)
   - Intel Core Processors with Gen11 GPU (Ice Lake)
   - Intel Core Processors with Xe LP (Gen12) GPU (Tiger Lake, Rocket Lake)
+  - Intel Core Processors with Xe (Gen12.2) GPU (Alder Lake)
+  - Intel Atom Processors with Gen11 GPU (Elkhart Lake)
  Supported platforms - OpenCL 3.0, Maintenance:
   - Intel Core Processors with Gen8 GPU (Broadwell)
   - Intel Atom Processors with Gen9 GPU (Apollo Lake, Gemini Lake)
- Supported platforms - OpenCL 3.0, Early Support:
-  - Intel Atom Processors with Gen11 GPU (Elkhart Lake)

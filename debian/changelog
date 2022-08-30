@@ -14,7 +14,7 @@ intel-compute-runtime (22.34.24023-1) unstable; urgency=medium
 
 intel-compute-runtime (22.31.23852-1) unstable; urgency=medium
 
-  * New upstream release.
+  * New upstream release.  (Closes: #1016951)
   * patches: Drop correct-getters-in-generated-commands.diff (upstream),
     refresh typos.patch.
   * control: Bump i-g-c build-depends.
