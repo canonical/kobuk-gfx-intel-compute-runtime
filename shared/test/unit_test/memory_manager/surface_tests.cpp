@@ -9,15 +9,16 @@
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
+#include "shared/test/common/mocks/mock_cpu_page_fault_manager.h"
 #include "shared/test/common/mocks/mock_csr.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/test_macros/hw_test.h"
-#include "shared/test/unit_test/page_fault_manager/mock_cpu_page_fault_manager.h"
 
 #include "gtest/gtest.h"
 
+#include <memory>
 #include <type_traits>
 
 using namespace NEO;
@@ -64,12 +65,12 @@ HWTEST_TYPED_TEST(SurfaceTest, GivenSurfaceWhenInterfaceIsUsedThenSurfaceBehaves
     auto osContext = executionEnvironment->memoryManager->createAndRegisterOsContext(csr.get(), EngineDescriptorHelper::getDefaultDescriptor(engine, PreemptionHelper::getDefaultPreemptionMode(hwInfo)));
     csr->setupContext(*osContext);
 
-    Surface *surface = createSurface::create<TypeParam>(this->data,
-                                                        &this->gfxAllocation);
-    ASSERT_NE(nullptr, surface); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    std::unique_ptr<Surface> surface{createSurface::create<TypeParam>(this->data,
+                                                                      &this->gfxAllocation)};
+    ASSERT_NE(nullptr, surface);
 
-    Surface *duplicatedSurface = surface->duplicate();
-    ASSERT_NE(nullptr, duplicatedSurface); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    std::unique_ptr<Surface> duplicatedSurface{surface->duplicate()};
+    ASSERT_NE(nullptr, duplicatedSurface);
 
     surface->makeResident(*csr);
 
@@ -77,9 +78,6 @@ HWTEST_TYPED_TEST(SurfaceTest, GivenSurfaceWhenInterfaceIsUsedThenSurfaceBehaves
         std::is_same<TypeParam, GeneralSurface>::value) {
         EXPECT_EQ(1u, csr->madeResidentGfxAllocations.size());
     }
-
-    delete duplicatedSurface;
-    delete surface;
 }
 
 TEST(HostPtrSurfaceTest, givenHostPtrSurfaceWhenCreatedWithoutSpecifyingPtrCopyAllowanceThenPtrCopyIsNotAllowed) {

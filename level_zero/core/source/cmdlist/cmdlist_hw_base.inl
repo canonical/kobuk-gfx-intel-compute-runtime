@@ -10,6 +10,7 @@
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/command_stream/preemption.h"
+#include "shared/source/helpers/pause_on_gpu_properties.h"
 #include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/source/helpers/simd_helper.h"
@@ -39,8 +40,11 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
                                                                                const CmdListKernelLaunchParams &launchParams) {
     UNRECOVERABLE_IF(kernel == nullptr);
     const auto &kernelDescriptor = kernel->getKernelDescriptor();
+    if (kernelDescriptor.kernelAttributes.flags.isInvalid) {
+        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    }
     appendEventForProfiling(event, true, false);
-    const auto functionImmutableData = kernel->getImmutableData();
+    const auto kernelImmutableData = kernel->getImmutableData();
     auto perThreadScratchSize = std::max<std::uint32_t>(this->getCommandListPerThreadScratchSize(),
                                                         kernel->getImmutableData()->getDescriptor().kernelAttributes.perThreadScratchSize[0]);
     this->setCommandListPerThreadScratchSize(perThreadScratchSize);
@@ -48,7 +52,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     auto slmEnable = (kernel->getImmutableData()->getDescriptor().kernelAttributes.slmInlineSize > 0);
     this->setCommandListSLMEnable(slmEnable);
 
-    auto kernelPreemptionMode = obtainFunctionPreemptionMode(kernel);
+    auto kernelPreemptionMode = obtainKernelPreemptionMode(kernel);
     commandListPreemptionMode = std::min(commandListPreemptionMode, kernelPreemptionMode);
 
     kernel->patchGlobalOffset();
@@ -116,12 +120,15 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
             kernel->getKernelDescriptor().kernelMetadata.kernelName.c_str(), 0u);
     }
 
-    updateStreamProperties(*kernel, false, launchParams.isCooperative);
+    std::list<void *> additionalCommands;
+
+    updateStreamProperties(*kernel, launchParams.isCooperative);
     NEO::EncodeDispatchKernelArgs dispatchKernelArgs{
         0,                                                     // eventAddress
         neoDevice,                                             // device
         kernel,                                                // dispatchInterface
         reinterpret_cast<const void *>(threadGroupDimensions), // threadGroupDimensions
+        &additionalCommands,                                   // additionalCommands
         commandListPreemptionMode,                             // preemptionMode
         0,                                                     // partitionCount
         launchParams.isIndirect,                               // isIndirect
@@ -133,7 +140,8 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         launchParams.isCooperative,                            // isCooperative
         false,                                                 // isHostScopeSignalEvent
         false,                                                 // isKernelUsingSystemAllocation
-        cmdListType == CommandListType::TYPE_IMMEDIATE         // isKernelDispatchedFromImmediateCmdList
+        cmdListType == CommandListType::TYPE_IMMEDIATE,        // isKernelDispatchedFromImmediateCmdList
+        engineGroupType == NEO::EngineGroupType::RenderCompute // isRcs
     };
 
     NEO::EncodeDispatchKernel<GfxFamily>::encode(commandContainer, dispatchKernelArgs, getLogicalStateHelper());
@@ -152,22 +160,37 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         args.numAvailableDevices = neoDevice->getNumGenericSubDevices();
         args.allocation = device->getDebugSurface();
         args.gmmHelper = neoDevice->getGmmHelper();
-        args.useGlobalAtomics = kernelImp->getKernelDescriptor().kernelAttributes.flags.useGlobalAtomics;
+        args.useGlobalAtomics = kernelDescriptor.kernelAttributes.flags.useGlobalAtomics;
         args.areMultipleSubDevicesInContext = false;
+        args.isDebuggerActive = true;
         NEO::EncodeSurfaceState<GfxFamily>::encodeBuffer(args);
         *reinterpret_cast<typename GfxFamily::RENDER_SURFACE_STATE *>(surfaceStateSpace) = surfaceState;
     }
 
     appendSignalEventPostWalker(event, false);
 
-    commandContainer.addToResidencyContainer(functionImmutableData->getIsaGraphicsAllocation());
+    commandContainer.addToResidencyContainer(kernelImmutableData->getIsaGraphicsAllocation());
     auto &residencyContainer = kernel->getResidencyContainer();
     for (auto resource : residencyContainer) {
         commandContainer.addToResidencyContainer(resource);
     }
 
-    if (functionImmutableData->getDescriptor().kernelAttributes.flags.usesPrintf) {
-        storePrintfFunction(kernel);
+    if (kernelImmutableData->getDescriptor().kernelAttributes.flags.usesPrintf) {
+        storePrintfKernel(kernel);
+    }
+
+    if (NEO::PauseOnGpuProperties::pauseModeAllowed(NEO::DebugManager.flags.PauseOnEnqueue.get(), neoDevice->debugExecutionCounter.load(), NEO::PauseOnGpuProperties::PauseMode::BeforeWorkload)) {
+        commandsToPatch.push_back({0x0, additionalCommands.front(), CommandToPatch::PauseOnEnqueuePipeControlStart});
+        additionalCommands.pop_front();
+        commandsToPatch.push_back({0x0, additionalCommands.front(), CommandToPatch::PauseOnEnqueueSemaphoreStart});
+        additionalCommands.pop_front();
+    }
+
+    if (NEO::PauseOnGpuProperties::pauseModeAllowed(NEO::DebugManager.flags.PauseOnEnqueue.get(), neoDevice->debugExecutionCounter.load(), NEO::PauseOnGpuProperties::PauseMode::AfterWorkload)) {
+        commandsToPatch.push_back({0x0, additionalCommands.front(), CommandToPatch::PauseOnEnqueuePipeControlEnd});
+        additionalCommands.pop_front();
+        commandsToPatch.push_back({0x0, additionalCommands.front(), CommandToPatch::PauseOnEnqueueSemaphoreEnd});
+        additionalCommands.pop_front();
     }
 
     return ZE_RESULT_SUCCESS;

@@ -120,12 +120,9 @@ TEST_F(L0DebuggerLinuxTest, givenLinuxOSWhenL0DebuggerIsCreatedAddressModeIsNotS
 }
 
 TEST(L0DebuggerLinux, givenVmBindAndPerContextVmEnabledInDrmWhenInitializingDebuggingInOsThenRegisterResourceClassesIsCalled) {
-    auto executionEnvironment = std::make_unique<NEO::ExecutionEnvironment>();
+    auto executionEnvironment = std::make_unique<NEO::MockExecutionEnvironment>();
 
-    executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->setDebuggingEnabled();
-
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     executionEnvironment->initializeMemoryManager();
     auto osInterface = new OSInterface();
     auto drmMock = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -142,12 +139,9 @@ TEST(L0DebuggerLinux, givenVmBindAndPerContextVmEnabledInDrmWhenInitializingDebu
 }
 
 TEST(L0DebuggerLinux, givenVmBindNotAvailableInDrmWhenInitializingDebuggingInOsThenRegisterResourceClassesIsNotCalled) {
-    auto executionEnvironment = std::make_unique<NEO::ExecutionEnvironment>();
+    auto executionEnvironment = std::make_unique<NEO::MockExecutionEnvironment>();
 
-    executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->setDebuggingEnabled();
-
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     executionEnvironment->initializeMemoryManager();
     auto osInterface = new OSInterface();
     auto drmMock = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -164,12 +158,9 @@ TEST(L0DebuggerLinux, givenVmBindNotAvailableInDrmWhenInitializingDebuggingInOsT
 }
 
 TEST(L0DebuggerLinux, givenPerContextVmNotEnabledWhenInitializingDebuggingInOsThenRegisterResourceClassesIsNotCalled) {
-    auto executionEnvironment = std::make_unique<NEO::ExecutionEnvironment>();
+    auto executionEnvironment = std::make_unique<NEO::MockExecutionEnvironment>();
 
-    executionEnvironment->prepareRootDeviceEnvironments(1);
     executionEnvironment->setDebuggingEnabled();
-
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     executionEnvironment->initializeMemoryManager();
     auto osInterface = new OSInterface();
     auto drmMock = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -367,6 +358,89 @@ HWTEST_F(L0DebuggerLinuxMultitileTest, givenDebuggingEnabledWhenCommandQueuesCre
     for (uint32_t index = 0; index < neoDevice->getNumSubDevices(); index++) {
         EXPECT_EQ(0u, debuggerL0Hw->uuidL0CommandQueueHandle[index]);
     }
+}
+
+HWTEST_F(L0DebuggerLinuxMultitileTest, givenDebuggingEnabledWhenCommandQueueCreatedOnRootDeviceThenDebuggerIsNotifiedForAllSubdevices) {
+    auto debuggerL0Hw = static_cast<MockDebuggerL0Hw<FamilyType> *>(device->getL0Debugger());
+    drmMock->ioctlCallsCount = 0;
+    neoDevice->getDefaultEngine().commandStreamReceiver->getOsContext().ensureContextInitialized();
+
+    EXPECT_EQ(2u, debuggerL0Hw->uuidL0CommandQueueHandle.size());
+
+    ze_command_queue_desc_t queueDesc = {};
+    ze_result_t returnValue;
+
+    auto commandQueue1 = CommandQueue::create(productFamily, device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue);
+    EXPECT_EQ(2u, drmMock->ioctlCallsCount);
+    EXPECT_EQ(1u, debuggerL0Hw->commandQueueCreatedCount);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+
+    for (uint32_t index = 0; index < neoDevice->getNumSubDevices(); index++) {
+        EXPECT_NE(0u, debuggerL0Hw->uuidL0CommandQueueHandle[index]);
+    }
+
+    commandQueue1->destroy();
+    EXPECT_EQ(1u, debuggerL0Hw->commandQueueDestroyedCount);
+
+    for (uint32_t index = 0; index < neoDevice->getNumSubDevices(); index++) {
+        EXPECT_EQ(0u, debuggerL0Hw->uuidL0CommandQueueHandle[index]);
+    }
+}
+
+HWTEST_F(L0DebuggerLinuxMultitileTest, givenSubDeviceFilteredByAffinityMaskWhenCommandQueueCreatedThenDebuggerIsNotifiedWithCorrectDeviceIndex) {
+
+    DebugManagerStateRestore restorer;
+    NEO::DebugManager.flags.ZE_AFFINITY_MASK.set("0.1");
+
+    auto executionEnvironment = new NEO::ExecutionEnvironment();
+    auto mockBuiltIns = new NEO::MockBuiltins();
+
+    executionEnvironment->prepareRootDeviceEnvironments(1);
+    executionEnvironment->parseAffinityMask();
+
+    executionEnvironment->setDebuggingEnabled();
+    executionEnvironment->rootDeviceEnvironments[0]->builtins.reset(mockBuiltIns);
+    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(&hwInfo);
+    executionEnvironment->initializeMemoryManager();
+    auto osInterface = new OSInterface();
+    auto drmMock = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
+    executionEnvironment->rootDeviceEnvironments[0]->osInterface.reset(osInterface);
+    executionEnvironment->rootDeviceEnvironments[0]->osInterface->setDriverModel(std::unique_ptr<Drm>(drmMock));
+
+    auto neoDevice = NEO::MockDevice::create<NEO::MockDevice>(executionEnvironment, 0u);
+
+    NEO::DeviceVector devices;
+    devices.push_back(std::unique_ptr<NEO::Device>(neoDevice));
+    auto driverHandle = std::make_unique<Mock<L0::DriverHandleImp>>();
+    driverHandle->enableProgramDebugging = true;
+
+    driverHandle->initialize(std::move(devices));
+    auto device = driverHandle->devices[0];
+
+    EXPECT_FALSE(neoDevice->isSubDevice());
+
+    auto debuggerL0Hw = static_cast<MockDebuggerL0Hw<FamilyType> *>(device->getL0Debugger());
+    drmMock->ioctlCallsCount = 0;
+    neoDevice->getDefaultEngine().commandStreamReceiver->getOsContext().ensureContextInitialized();
+
+    EXPECT_EQ(1u, debuggerL0Hw->uuidL0CommandQueueHandle.size());
+
+    ze_command_queue_desc_t queueDesc = {};
+    ze_result_t returnValue;
+
+    auto commandQueue1 = CommandQueue::create(productFamily, device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue);
+    EXPECT_EQ(1u, debuggerL0Hw->commandQueueCreatedCount);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+    EXPECT_NE(0u, debuggerL0Hw->uuidL0CommandQueueHandle[0]);
+
+    auto notification = reinterpret_cast<const NEO::DebuggerL0::CommandQueueNotification *>(drmMock->capturedCmdQData.get());
+    EXPECT_EQ(sizeof(NEO::DebuggerL0::CommandQueueNotification), drmMock->capturedCmdQSize);
+    EXPECT_EQ(1u, notification->subDeviceIndex);
+    EXPECT_EQ(0u, notification->subDeviceCount);
+
+    commandQueue1->destroy();
+    EXPECT_EQ(1u, debuggerL0Hw->commandQueueDestroyedCount);
+    EXPECT_EQ(1u, drmMock->unregisterCalledCount);
 }
 } // namespace ult
 } // namespace L0

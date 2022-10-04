@@ -8,6 +8,7 @@
 #include "opencl/source/command_queue/command_queue.h"
 
 #include "shared/source/command_stream/command_stream_receiver.h"
+#include "shared/source/debugger/debugger_l0.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/array_count.h"
 #include "shared/source/helpers/engine_node_helper.h"
@@ -60,7 +61,7 @@ CommandQueue *CommandQueue::create(Context *context,
 }
 
 CommandQueue::CommandQueue(Context *context, ClDevice *device, const cl_queue_properties *properties, bool internalUsage)
-    : context(context), device(device) {
+    : context(context), device(device), isInternalUsage(internalUsage) {
     if (context) {
         context->incRefInternal();
     }
@@ -90,6 +91,10 @@ CommandQueue::CommandQueue(Context *context, ClDevice *device, const cl_queue_pr
         if (!deferCmdQBcsInitialization) {
             this->constructBcsEngine(internalUsage);
         }
+
+        if (NEO::Debugger::isDebugEnabled(internalUsage) && device->getDevice().getL0Debugger()) {
+            device->getDevice().getL0Debugger()->notifyCommandQueueCreated(&device->getDevice());
+        }
     }
 
     storeProperties(properties);
@@ -113,9 +118,10 @@ CommandQueue::~CommandQueue() {
             device->getPerformanceCounters()->shutdown();
         }
 
-        if (auto mainBcs = bcsEngines[0]; mainBcs != nullptr) {
-            auto &selectorCopyEngine = device->getNearestGenericSubDevice(0)->getSelectorCopyEngine();
-            EngineHelpers::releaseBcsEngineType(mainBcs->getEngineType(), selectorCopyEngine);
+        this->releaseMainCopyEngine();
+
+        if (NEO::Debugger::isDebugEnabled(isInternalUsage) && device->getDevice().getL0Debugger()) {
+            device->getDevice().getL0Debugger()->notifyCommandQueueDestroyed(&device->getDevice());
         }
     }
 
@@ -162,11 +168,10 @@ void CommandQueue::initializeGpgpu() const {
 
 void CommandQueue::initializeGpgpuInternals() const {
     auto &hwInfo = device->getDevice().getHardwareInfo();
-    auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
     if (device->getDevice().getDebugger() && !this->gpgpuEngine->commandStreamReceiver->getDebugSurfaceAllocation()) {
-        auto maxDbgSurfaceSize = hwHelper.getSipKernelMaxDbgSurfaceSize(hwInfo);
+        auto maxDbgSurfaceSize = NEO::SipKernel::getSipKernel(device->getDevice()).getStateSaveAreaSize(&device->getDevice());
         auto debugSurface = this->gpgpuEngine->commandStreamReceiver->allocateDebugSurface(maxDbgSurfaceSize);
         memset(debugSurface->getUnderlyingBuffer(), 0, debugSurface->getUnderlyingBufferSize());
 
@@ -305,6 +310,56 @@ void CommandQueue::constructBcsEngine(bool internalUsage) {
 
 void CommandQueue::initializeBcsEngine(bool internalUsage) {
     constructBcsEngine(internalUsage);
+}
+
+void CommandQueue::constructBcsEnginesForSplit() {
+    if (this->bcsSplitInitialized) {
+        return;
+    }
+
+    if (DebugManager.flags.SplitBcsMask.get() > 0) {
+        this->splitEngines = DebugManager.flags.SplitBcsMask.get();
+    }
+
+    for (uint32_t i = 0; i < bcsInfoMaskSize; i++) {
+        if (this->splitEngines.test(i) && !bcsEngines[i]) {
+            auto &neoDevice = device->getNearestGenericSubDevice(0)->getDevice();
+            auto engineType = EngineHelpers::mapBcsIndexToEngineType(i, true);
+            bcsEngines[i] = neoDevice.tryGetEngine(engineType, EngineUsage::Regular);
+            bcsEngineTypes.push_back(engineType);
+            if (bcsEngines[i]) {
+                bcsEngines[i]->osContext->ensureContextInitialized();
+                bcsEngines[i]->commandStreamReceiver->initDirectSubmission();
+            }
+        }
+    }
+
+    this->bcsSplitInitialized = true;
+}
+
+void CommandQueue::prepareHostPtrSurfaceForSplit(bool split, GraphicsAllocation &allocation) {
+    if (split) {
+        for (const auto bcsEngine : this->bcsEngines) {
+            if (bcsEngine) {
+                if (allocation.getTaskCount(bcsEngine->commandStreamReceiver->getOsContext().getContextId()) == GraphicsAllocation::objectNotUsed) {
+                    allocation.updateTaskCount(0u, bcsEngine->commandStreamReceiver->getOsContext().getContextId());
+                }
+            }
+        }
+    }
+}
+
+CommandStreamReceiver &CommandQueue::selectCsrForHostPtrAllocation(bool split, CommandStreamReceiver &csr) {
+    return split ? getGpgpuCommandStreamReceiver() : csr;
+}
+
+void CommandQueue::releaseMainCopyEngine() {
+    if (auto mainBcs = bcsEngines[0]; mainBcs != nullptr) {
+        auto &selectorCopyEngineSubDevice = device->getNearestGenericSubDevice(0)->getSelectorCopyEngine();
+        EngineHelpers::releaseBcsEngineType(mainBcs->getEngineType(), selectorCopyEngineSubDevice);
+        auto &selectorCopyEngine = device->getSelectorCopyEngine();
+        EngineHelpers::releaseBcsEngineType(mainBcs->getEngineType(), selectorCopyEngine);
+    }
 }
 
 Device &CommandQueue::getDevice() const noexcept {
@@ -1153,14 +1208,18 @@ WaitStatus CommandQueue::waitForAllEngines(bool blockedQueue, PrintfHandler *pri
         }
     }
 
-    auto waitedOnTimestamps = waitForTimestamps(activeBcsStates, taskCount);
+    auto waitStatus = WaitStatus::NotReady;
+    auto waitedOnTimestamps = waitForTimestamps(activeBcsStates, taskCount, waitStatus);
+    if (waitStatus == WaitStatus::GpuHang) {
+        return WaitStatus::GpuHang;
+    }
 
     TimestampPacketContainer nodesToRelease;
     if (deferredTimestampPackets) {
         deferredTimestampPackets->swapNodes(nodesToRelease);
     }
 
-    const auto waitStatus = waitUntilComplete(taskCount, activeBcsStates, flushStamp->peekStamp(), false, cleanTemporaryAllocationsList, waitedOnTimestamps);
+    waitStatus = waitUntilComplete(taskCount, activeBcsStates, flushStamp->peekStamp(), false, cleanTemporaryAllocationsList, waitedOnTimestamps);
 
     if (printfHandler) {
         if (!printfHandler->printEnqueueOutput()) {

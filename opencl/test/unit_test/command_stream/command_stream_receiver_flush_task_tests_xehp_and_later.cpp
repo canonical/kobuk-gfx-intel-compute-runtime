@@ -278,17 +278,6 @@ HWTEST2_F(CommandStreamReceiverFlushTaskXeHPAndLaterTests, givenSBACommandToProg
     auto stateBaseAddressItor = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
     auto pipeControlItor = find<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), stateBaseAddressItor);
     EXPECT_NE(stateBaseAddressItor, pipeControlItor);
-
-    auto pipeControlCmd = reinterpret_cast<typename FamilyType::PIPE_CONTROL *>(*pipeControlItor);
-    EXPECT_TRUE(UnitTestHelper<FamilyType>::getPipeControlHdcPipelineFlush(*pipeControlCmd));
-    if constexpr (TestTraits<gfxCoreFamily>::isUnTypedDataPortCacheFlushSupported) {
-        EXPECT_TRUE(pipeControlCmd->getUnTypedDataPortCacheFlush());
-    }
-    EXPECT_FALSE(pipeControlCmd->getAmfsFlushEnable());
-    EXPECT_FALSE(pipeControlCmd->getInstructionCacheInvalidateEnable());
-    EXPECT_FALSE(pipeControlCmd->getTextureCacheInvalidationEnable());
-    EXPECT_FALSE(pipeControlCmd->getConstantCacheInvalidationEnable());
-    EXPECT_FALSE(pipeControlCmd->getStateCacheInvalidationEnable());
 }
 
 HWCMDTEST_F(IGFX_XE_HP_CORE, CommandStreamReceiverFlushTaskXeHPAndLaterTests, whenNotReprogrammingSshButInitProgrammingFlagsThenBindingTablePoolIsProgrammed) {
@@ -315,65 +304,6 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandStreamReceiverFlushTaskXeHPAndLaterTests, wh
     EXPECT_NE(nullptr, stateBaseAddress);
     bindingTablePoolAlloc = hwParser.getCommand<typename FamilyType::_3DSTATE_BINDING_TABLE_POOL_ALLOC>();
     EXPECT_NE(nullptr, bindingTablePoolAlloc);
-}
-
-HWCMDTEST_F(IGFX_XE_HP_CORE, CommandStreamReceiverFlushTaskXeHPAndLaterTests, givenNoHeapsProvidedWhenSBAIsProgrammedThenBaseAddressesAreNotSetAndBindlessSurfaceStateSizeSetToMax) {
-    using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
-    DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
-
-    uint64_t instructionHeapBase = 0x10000;
-    uint64_t internalHeapBase = 0x10000;
-    uint64_t generalStateBase = 0x30000;
-    STATE_BASE_ADDRESS sbaCmd;
-    StateBaseAddressHelperArgs<FamilyType> args = {
-        generalStateBase,                      // generalStateBase
-        internalHeapBase,                      // indirectObjectHeapBaseAddress
-        instructionHeapBase,                   // instructionHeapBaseAddress
-        0,                                     // globalHeapsBaseAddress
-        &sbaCmd,                               // stateBaseAddressCmd
-        nullptr,                               // dsh
-        nullptr,                               // ioh
-        nullptr,                               // ssh
-        pDevice->getGmmHelper(),               // gmmHelper
-        0,                                     // statelessMocsIndex
-        MemoryCompressionState::NotApplicable, // memoryCompressionState
-        true,                                  // setInstructionStateBaseAddress
-        true,                                  // setGeneralStateBaseAddress
-        false,                                 // useGlobalHeapsBaseAddress
-        false,                                 // isMultiOsContextCapable
-        false,                                 // useGlobalAtomics
-        false                                  // areMultipleSubDevicesInContext
-    };
-    StateBaseAddressHelper<FamilyType>::programStateBaseAddress(args);
-
-    EXPECT_FALSE(sbaCmd.getDynamicStateBaseAddressModifyEnable());
-    EXPECT_FALSE(sbaCmd.getDynamicStateBufferSizeModifyEnable());
-    EXPECT_EQ(0u, sbaCmd.getDynamicStateBaseAddress());
-    EXPECT_EQ(0u, sbaCmd.getDynamicStateBufferSize());
-
-    EXPECT_FALSE(sbaCmd.getSurfaceStateBaseAddressModifyEnable());
-    EXPECT_EQ(0u, sbaCmd.getSurfaceStateBaseAddress());
-
-    EXPECT_TRUE(sbaCmd.getInstructionBaseAddressModifyEnable());
-    EXPECT_EQ(instructionHeapBase, sbaCmd.getInstructionBaseAddress());
-    EXPECT_TRUE(sbaCmd.getInstructionBufferSizeModifyEnable());
-    EXPECT_EQ(MemoryConstants::sizeOf4GBinPageEntities, sbaCmd.getInstructionBufferSize());
-
-    EXPECT_TRUE(sbaCmd.getGeneralStateBaseAddressModifyEnable());
-    EXPECT_TRUE(sbaCmd.getGeneralStateBufferSizeModifyEnable());
-    if constexpr (is64bit) {
-        auto gmmHelper = pDevice->getGmmHelper();
-        EXPECT_EQ(gmmHelper->decanonize(internalHeapBase), sbaCmd.getGeneralStateBaseAddress());
-    } else {
-        EXPECT_EQ(generalStateBase, sbaCmd.getGeneralStateBaseAddress());
-    }
-    EXPECT_EQ(0xfffffu, sbaCmd.getGeneralStateBufferSize());
-
-    EXPECT_EQ(0u, sbaCmd.getBindlessSurfaceStateBaseAddress());
-    EXPECT_FALSE(sbaCmd.getBindlessSurfaceStateBaseAddressModifyEnable());
-
-    auto surfaceStateCount = StateBaseAddressHelper<FamilyType>::getMaxBindlessSurfaceStates();
-    EXPECT_EQ(surfaceStateCount, sbaCmd.getBindlessSurfaceStateSize());
 }
 
 using isXeHPOrAbove = IsAtLeastProduct<IGFX_XE_HP_SDV>;
@@ -442,7 +372,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandStreamReceiverFlushTaskXeHPAndLaterTests, gi
 
     //we do level change that will emit PPC, fill all the space so only BB end fits.
     taskLevel++;
-    auto ppcSize = MemorySynchronizationCommands<FamilyType>::getSizeForSingleBarrier();
+    auto ppcSize = MemorySynchronizationCommands<FamilyType>::getSizeForSingleBarrier(false);
     auto fillSize = MemoryConstants::cacheLineSize - ppcSize - sizeof(typename FamilyType::MI_BATCH_BUFFER_END);
     csrCommandStream.getSpace(fillSize);
     auto expectedUsedSize = 2 * MemoryConstants::cacheLineSize;

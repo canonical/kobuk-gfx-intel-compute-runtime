@@ -26,6 +26,7 @@ struct StateBaseAddressHelperArgs {
     uint64_t indirectObjectHeapBaseAddress = 0;
     uint64_t instructionHeapBaseAddress = 0;
     uint64_t globalHeapsBaseAddress = 0;
+    uint64_t surfaceStateBaseAddress = 0;
 
     STATE_BASE_ADDRESS *stateBaseAddressCmd = nullptr;
 
@@ -33,6 +34,7 @@ struct StateBaseAddressHelperArgs {
     const IndirectHeap *ioh = nullptr;
     const IndirectHeap *ssh = nullptr;
     GmmHelper *gmmHelper = nullptr;
+    const HardwareInfo *hwInfo = nullptr;
 
     uint32_t statelessMocsIndex = 0;
     MemoryCompressionState memoryCompressionState;
@@ -43,6 +45,8 @@ struct StateBaseAddressHelperArgs {
     bool isMultiOsContextCapable = false;
     bool useGlobalAtomics = false;
     bool areMultipleSubDevicesInContext = false;
+    bool overrideSurfaceStateBaseAddress = false;
+    bool isDebuggerActive = false;
 };
 
 template <typename GfxFamily>
@@ -52,18 +56,24 @@ struct StateBaseAddressHelper {
     static STATE_BASE_ADDRESS *getSpaceForSbaCmd(LinearStream &cmdStream);
 
     static void programStateBaseAddress(StateBaseAddressHelperArgs<GfxFamily> &args);
+    static inline void programStateBaseAddressIntoCommandStream(StateBaseAddressHelperArgs<GfxFamily> &args,
+                                                                LinearStream &commandStream);
 
     static void appendIohParameters(StateBaseAddressHelperArgs<GfxFamily> &args);
 
     static void appendStateBaseAddressParameters(StateBaseAddressHelperArgs<GfxFamily> &args,
                                                  bool overrideBindlessSurfaceStateBase);
 
-    static void appendExtraCacheSettings(STATE_BASE_ADDRESS *stateBaseAddress, const HardwareInfo *hwInfo);
+    static void appendExtraCacheSettings(StateBaseAddressHelperArgs<GfxFamily> &args);
 
     static void programBindingTableBaseAddress(LinearStream &commandStream, const IndirectHeap &ssh, GmmHelper *gmmHelper);
 
     static void programBindingTableBaseAddress(LinearStream &commandStream, uint64_t baseAddress, uint32_t sizeInPages, GmmHelper *gmmHelper);
 
     static uint32_t getMaxBindlessSurfaceStates();
+
+  private:
+    static inline void programStateBaseAddressIntoCommandStreamBase(StateBaseAddressHelperArgs<GfxFamily> &args,
+                                                                    LinearStream &commandStream);
 };
 } // namespace NEO

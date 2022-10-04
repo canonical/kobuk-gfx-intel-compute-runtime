@@ -11,6 +11,8 @@
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/source/os_interface/windows/wddm_debug.h"
 
+#include "level_zero/core/source/hw_helpers/l0_hw_helper.h"
+
 #include "common/StateSaveAreaHeader.h"
 
 namespace L0 {
@@ -112,6 +114,8 @@ void *DebugSessionWindows::asyncThreadFunction(void *arg) {
 
     while (self->asyncThread.threadActive) {
         self->readAndHandleEvent(100);
+        self->sendInterrupts();
+        self->generateEventsAndResumeStoppedThreads();
     }
 
     PRINT_DEBUGGER_INFO_LOG("Debugger async thread closing\n", "");
@@ -221,7 +225,38 @@ ze_result_t DebugSessionWindows::handleModuleCreateEvent(uint32_t seqNo, DBGUMD_
 }
 
 ze_result_t DebugSessionWindows::handleEuAttentionBitsEvent(DBGUMD_READ_EVENT_EU_ATTN_BIT_SET_PARAMS &euAttentionBitsParams) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    PRINT_DEBUGGER_INFO_LOG("DBGUMD_READ_EVENT_EU_ATTN_BIT_SET_PARAMS: hContextHandle=0x%llX LRCA=%d BitMaskSizeInBytes=%d BitmaskArrayPtr=0x%llX\n",
+                            euAttentionBitsParams.hContextHandle, euAttentionBitsParams.LRCA,
+                            euAttentionBitsParams.BitMaskSizeInBytes, euAttentionBitsParams.BitmaskArrayPtr);
+
+    auto hwInfo = connectedDevice->getHwInfo();
+    auto &l0HwHelper = L0HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+
+    auto threadsWithAttention = l0HwHelper.getThreadsFromAttentionBitmask(hwInfo, 0u,
+                                                                          reinterpret_cast<uint8_t *>(euAttentionBitsParams.BitmaskArrayPtr),
+                                                                          euAttentionBitsParams.BitMaskSizeInBytes);
+
+    printBitmask(reinterpret_cast<uint8_t *>(euAttentionBitsParams.BitmaskArrayPtr), euAttentionBitsParams.BitMaskSizeInBytes);
+
+    PRINT_DEBUGGER_THREAD_LOG("ATTENTION received for thread count = %d\n", (int)threadsWithAttention.size());
+
+    uint64_t memoryHandle = DebugSessionWindows::invalidHandle;
+    {
+        std::unique_lock<std::mutex> lock(asyncThreadMutex);
+        if (allContexts.empty()) {
+            return ZE_RESULT_ERROR_UNINITIALIZED;
+        }
+        memoryHandle = *allContexts.begin();
+    }
+
+    for (auto &threadId : threadsWithAttention) {
+        PRINT_DEBUGGER_THREAD_LOG("ATTENTION event for thread: %s\n", EuThread::toString(threadId).c_str());
+        markPendingInterruptsOrAddToNewlyStoppedFromRaisedAttention(threadId, memoryHandle);
+    }
+
+    checkTriggerEventsForAttention();
+
+    return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t DebugSessionWindows::handleAllocationDataEvent(uint32_t seqNo, DBGUMD_READ_EVENT_READ_ALLOCATION_DATA_PARAMS &allocationDataParams) {
@@ -303,11 +338,13 @@ ze_result_t DebugSessionWindows::readAllocationDebugData(uint32_t seqNo, uint64_
 ze_result_t DebugSessionWindows::handleCreateDebugDataEvent(DBGUMD_READ_EVENT_CREATE_DEBUG_DATA_PARAMS &createDebugDataParams) {
     PRINT_DEBUGGER_INFO_LOG("DBGUMD_READ_EVENT_CREATE_DEBUG_DATA_PARAMS: Type: %d BufferPtr: 0x%llX DataSize: 0x%lX\n", createDebugDataParams.DebugDataType, createDebugDataParams.DataBufferPtr, createDebugDataParams.DataSize);
     if (createDebugDataParams.DebugDataType == ELF_BINARY) {
-        std::unique_lock<std::mutex> lock(asyncThreadMutex);
-        ElfRange elf;
-        elf.startVA = createDebugDataParams.DataBufferPtr;
-        elf.endVA = elf.startVA + createDebugDataParams.DataSize;
-        allElfs.push_back(elf);
+        if (createDebugDataParams.DataBufferPtr && createDebugDataParams.DataSize) {
+            std::unique_lock<std::mutex> lock(asyncThreadMutex);
+            ElfRange elf = {};
+            elf.startVA = createDebugDataParams.DataBufferPtr;
+            elf.endVA = elf.startVA + createDebugDataParams.DataSize;
+            allElfs.push_back(elf);
+        }
     } else if (createDebugDataParams.DebugDataType == static_cast<uint32_t>(NEO::DebugDataType::CMD_QUEUE_CREATED)) {
         zet_debug_event_t debugEvent = {};
         debugEvent.type = ZET_DEBUG_EVENT_TYPE_PROCESS_ENTRY;
@@ -339,7 +376,7 @@ ze_result_t DebugSessionWindows::acknowledgeEventImp(uint32_t seqNo, uint32_t ev
         return DebugSessionWindows::translateEscapeReturnStatusToZeResult(escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus);
     }
 
-    PRINT_DEBUGGER_INFO_LOG("DBGUMD_ACTION_ACKNOWLEDGE_EVENT - Success\n", status, escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus);
+    PRINT_DEBUGGER_INFO_LOG("DBGUMD_ACTION_ACKNOWLEDGE_EVENT - Success\n");
     return ZE_RESULT_SUCCESS;
 }
 
@@ -483,11 +520,51 @@ ze_result_t DebugSessionWindows::acknowledgeEvent(const zet_debug_event_t *event
 }
 
 ze_result_t DebugSessionWindows::resumeImp(const std::vector<EuThread::ThreadId> &threads, uint32_t deviceIndex) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    auto hwInfo = connectedDevice->getHwInfo();
+    auto &l0HwHelper = L0HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+    std::unique_ptr<uint8_t[]> bitmask;
+    size_t bitmaskSize = 0;
+    l0HwHelper.getAttentionBitmaskForSingleThreads(threads, hwInfo, bitmask, bitmaskSize);
+    applyResumeWa(bitmask.get(), bitmaskSize);
+    printBitmask(bitmask.get(), bitmaskSize);
+
+    KM_ESCAPE_INFO escapeInfo = {0};
+    escapeInfo.KmEuDbgL0EscapeInfo.EscapeActionType = DBGUMD_ACTION_EU_CONTROL_CLR_ATT_BIT;
+    escapeInfo.KmEuDbgL0EscapeInfo.EuControlClrAttBitParams.BitmaskArrayPtr = reinterpret_cast<uint64_t>(bitmask.get());
+    escapeInfo.KmEuDbgL0EscapeInfo.EuControlClrAttBitParams.BitMaskSizeInBytes = static_cast<uint32_t>(bitmaskSize);
+
+    auto status = runEscape(escapeInfo);
+    if (STATUS_SUCCESS != status) {
+        PRINT_DEBUGGER_ERROR_LOG("DBGUMD_ACTION_EU_CONTROL_CLR_ATT_BIT: Failed - Status: 0x%llX EscapeReturnStatus: %d\n", status, escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus);
+        return DebugSessionWindows::translateNtStatusToZeResult(status);
+    }
+
+    if (DBGUMD_RETURN_ESCAPE_SUCCESS != escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus) {
+        PRINT_DEBUGGER_ERROR_LOG("DBGUMD_ACTION_EU_CONTROL_CLR_ATT_BIT: Failed - Status: 0x%llX EscapeReturnStatus: %d\n", status, escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus);
+        return DebugSessionWindows::translateEscapeReturnStatusToZeResult(escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus);
+    }
+
+    PRINT_DEBUGGER_INFO_LOG("DBGUMD_ACTION_EU_CONTROL_CLR_ATT_BIT - Success\n");
+    return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t DebugSessionWindows::interruptImp(uint32_t deviceIndex) {
-    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    KM_ESCAPE_INFO escapeInfo = {0};
+    escapeInfo.KmEuDbgL0EscapeInfo.EscapeActionType = DBGUMD_ACTION_EU_CONTROL_INT_ALL;
+
+    auto status = runEscape(escapeInfo);
+    if (STATUS_SUCCESS != status) {
+        PRINT_DEBUGGER_ERROR_LOG("DBGUMD_ACTION_EU_CONTROL_INT_ALL: Failed - Status: 0x%llX EscapeReturnStatus: %d\n", status, escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus);
+        return DebugSessionWindows::translateNtStatusToZeResult(status);
+    }
+
+    if (DBGUMD_RETURN_ESCAPE_SUCCESS != escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus) {
+        PRINT_DEBUGGER_ERROR_LOG("DBGUMD_ACTION_EU_CONTROL_INT_ALL: Failed - Status: 0x%llX EscapeReturnStatus: %d\n", status, escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus);
+        return DebugSessionWindows::translateEscapeReturnStatusToZeResult(escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus);
+    }
+
+    PRINT_DEBUGGER_INFO_LOG("DBGUMD_ACTION_EU_CONTROL_INT_ALL - Success\n");
+    return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t DebugSessionWindows::readGpuMemory(uint64_t memoryHandle, char *output, size_t size, uint64_t gpuVa) {
@@ -531,10 +608,7 @@ ze_result_t DebugSessionWindows::writeGpuMemory(uint64_t memoryHandle, const cha
 }
 
 void DebugSessionWindows::enqueueApiEvent(zet_debug_event_t &debugEvent) {
-}
-
-bool DebugSessionWindows::readSystemRoutineIdent(EuThread *thread, uint64_t vmHandle, SIP::sr_ident &srMagic) {
-    return false;
+    pushApiEvent(debugEvent, 0, 0);
 }
 
 ze_result_t DebugSessionWindows::readSbaBuffer(EuThread::ThreadId threadId, NEO::SbaTrackedAddresses &sbaBuffer) {

@@ -35,11 +35,6 @@ HWTEST_F(HwInfoConfigTest, givenHwInfoConfigWhenIsGlobalFenceInCommandStreamRequ
     EXPECT_FALSE(hwInfoConfig.isGlobalFenceInCommandStreamRequired(*defaultHwInfo));
 }
 
-HWTEST_F(HwInfoConfigTest, givenHwInfoConfigWhenIsSpecialPipelineSelectModeChangedThenFalseIsReturned) {
-    const auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
-    EXPECT_FALSE(hwInfoConfig.isSpecialPipelineSelectModeChanged(*defaultHwInfo));
-}
-
 HWTEST_F(HwInfoConfigTest, givenHwInfoConfigWhenIsSystolicModeConfigurabledThenFalseIsReturned) {
     const auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
     EXPECT_FALSE(hwInfoConfig.isSystolicModeConfigurable(*defaultHwInfo));
@@ -50,9 +45,9 @@ HWTEST_F(HwInfoConfigTest, givenHwInfoConfigWhenGetThreadEuRatioForScratchThen8I
     EXPECT_EQ(8u, hwInfoConfig.getThreadEuRatioForScratch(*defaultHwInfo));
 }
 
-HWTEST_F(HwInfoConfigTest, whenIsGrfNumReportedWithScmIsQueriedThenTrueIsReturned) {
+HWTEST_F(HwInfoConfigTest, givenDefaultSettingWhenIsGrfNumReportedIsCalledThenScmSupportProductValueIsReturned) {
     const auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
-    EXPECT_TRUE(hwInfoConfig.isGrfNumReportedWithScm());
+    EXPECT_EQ(hwInfoConfig.getScmPropertyLargeGrfModeSupport(), hwInfoConfig.isGrfNumReportedWithScm());
 }
 
 HWTEST_F(HwInfoConfigTest, givenForceGrfNumProgrammingWithScmFlagSetWhenIsGrfNumReportedWithScmIsQueriedThenCorrectValueIsReturned) {
@@ -66,9 +61,9 @@ HWTEST_F(HwInfoConfigTest, givenForceGrfNumProgrammingWithScmFlagSetWhenIsGrfNum
     EXPECT_TRUE(hwInfoConfig.isGrfNumReportedWithScm());
 }
 
-HWTEST_F(HwInfoConfigTest, whenIsThreadArbitrationPolicyReportedWithScmIsQueriedThenTrueIsReturned) {
+HWTEST_F(HwInfoConfigTest, givenDefaultSettingWhenIsThreadArbitrationPolicyReportedIsCalledThenScmSupportProductValueReturned) {
     const auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
-    EXPECT_TRUE(hwInfoConfig.isThreadArbitrationPolicyReportedWithScm());
+    EXPECT_EQ(hwInfoConfig.getScmPropertyThreadArbitrationPolicySupport(), hwInfoConfig.isThreadArbitrationPolicyReportedWithScm());
 }
 
 HWTEST_F(HwInfoConfigTest, givenForceThreadArbitrationPolicyProgrammingWithScmFlagSetWhenIsThreadArbitrationPolicyReportedWithScmIsQueriedThenCorrectValueIsReturned) {
@@ -104,30 +99,45 @@ HWTEST_F(HwInfoConfigTest, givenHwInfoConfigWhenIsAdjustWalkOrderAvailableCallTh
 
 HWTEST2_F(HwInfoConfigTest, givenAtMostXeHPWhenGetCachingPolicyOptionsThenReturnNullptr, IsAtMostXeHpCore) {
     auto compilerHwInfoConfig = CompilerHwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
-    EXPECT_EQ(compilerHwInfoConfig->getCachingPolicyOptions(), nullptr);
+    EXPECT_EQ(compilerHwInfoConfig->getCachingPolicyOptions(false), nullptr);
+    EXPECT_EQ(compilerHwInfoConfig->getCachingPolicyOptions(true), nullptr);
 }
 
-HWTEST2_F(HwInfoConfigTest, givenAtLeastDG2WhenGetCachingPolicyOptionsThenReturnWriteByPassPolicyOption, IsAtLeastXeHpgCore) {
+HWTEST2_F(HwInfoConfigTest, givenAtLeastXeHpgCoreWhenGetCachingPolicyOptionsThenReturnWriteByPassPolicyOption, IsAtLeastXeHpgCore) {
     auto compilerHwInfoConfig = CompilerHwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
     const char *expectedStr = "-cl-store-cache-default=2 -cl-load-cache-default=4";
-    EXPECT_EQ(0, memcmp(compilerHwInfoConfig->getCachingPolicyOptions(), expectedStr, strlen(expectedStr)));
+    EXPECT_EQ(0, memcmp(compilerHwInfoConfig->getCachingPolicyOptions(false), expectedStr, strlen(expectedStr)));
+    EXPECT_EQ(0, memcmp(compilerHwInfoConfig->getCachingPolicyOptions(true), expectedStr, strlen(expectedStr)));
 }
 
-HWTEST2_F(HwInfoConfigTest, givenAtLeastDG2WhenGetCachingPolicyOptionsThenReturnWriteBackPolicyOption, IsAtLeastXeHpgCore) {
+HWTEST2_F(HwInfoConfigTest, givenAtLeastXeHpgCoreWhenGetCachingPolicyOptionsThenReturnWriteBackPolicyOption, IsAtLeastXeHpgCore) {
     DebugManagerStateRestore restorer;
     DebugManager.flags.OverrideL1CachePolicyInSurfaceStateAndStateless.set(2);
 
     auto compilerHwInfoConfig = CompilerHwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
     const char *expectedStr = "-cl-store-cache-default=7 -cl-load-cache-default=4";
-    EXPECT_EQ(0, memcmp(compilerHwInfoConfig->getCachingPolicyOptions(), expectedStr, strlen(expectedStr)));
+    EXPECT_EQ(0, memcmp(compilerHwInfoConfig->getCachingPolicyOptions(false), expectedStr, strlen(expectedStr)));
+    EXPECT_EQ(0, memcmp(compilerHwInfoConfig->getCachingPolicyOptions(true), expectedStr, strlen(expectedStr)));
+}
+
+HWTEST2_F(HwInfoConfigTest, givenAtLeastXeHpgCoreAndDebugFlagSetForceAllResourcesUncachedWhenGetCachingPolicyOptionsThenReturnUncachedPolicyOption, IsAtLeastXeHpgCore) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.OverrideL1CachePolicyInSurfaceStateAndStateless.set(2);
+    DebugManager.flags.ForceAllResourcesUncached.set(true);
+
+    auto compilerHwInfoConfig = CompilerHwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    const char *expectedStr = "-cl-store-cache-default=1 -cl-load-cache-default=1";
+    EXPECT_EQ(0, memcmp(compilerHwInfoConfig->getCachingPolicyOptions(false), expectedStr, strlen(expectedStr)));
+    EXPECT_EQ(0, memcmp(compilerHwInfoConfig->getCachingPolicyOptions(true), expectedStr, strlen(expectedStr)));
 }
 
 HWTEST2_F(HwInfoConfigTest, givenCachePolicyWithoutCorrespondingBuildOptionWhenGetCachingPolicyOptionsThenReturnNullptr, IsAtLeastXeHpgCore) {
     DebugManagerStateRestore restorer;
-    DebugManager.flags.OverrideL1CachePolicyInSurfaceStateAndStateless.set(1);
+    DebugManager.flags.OverrideL1CachePolicyInSurfaceStateAndStateless.set(5);
 
     auto compilerHwInfoConfig = CompilerHwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
-    EXPECT_EQ(nullptr, compilerHwInfoConfig->getCachingPolicyOptions());
+    EXPECT_EQ(nullptr, compilerHwInfoConfig->getCachingPolicyOptions(false));
+    EXPECT_EQ(nullptr, compilerHwInfoConfig->getCachingPolicyOptions(true));
 }
 
 HWTEST2_F(HwInfoConfigTest, givenHwInfoConfigAndDebugFlagWhenGetL1CachePolicyThenReturnCorrectPolicy, IsAtLeastXeHpgCore) {
@@ -136,33 +146,53 @@ HWTEST2_F(HwInfoConfigTest, givenHwInfoConfigAndDebugFlagWhenGetL1CachePolicyThe
     auto hwInfoConfig = HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
     DebugManager.flags.OverrideL1CachePolicyInSurfaceStateAndStateless.set(0);
-    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WBP, hwInfoConfig->getL1CachePolicy());
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WBP, hwInfoConfig->getL1CachePolicy(false));
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WBP, hwInfoConfig->getL1CachePolicy(true));
 
     DebugManager.flags.OverrideL1CachePolicyInSurfaceStateAndStateless.set(2);
-    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WB, hwInfoConfig->getL1CachePolicy());
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WB, hwInfoConfig->getL1CachePolicy(false));
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WB, hwInfoConfig->getL1CachePolicy(true));
 
     DebugManager.flags.OverrideL1CachePolicyInSurfaceStateAndStateless.set(3);
-    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WT, hwInfoConfig->getL1CachePolicy());
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WT, hwInfoConfig->getL1CachePolicy(false));
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WT, hwInfoConfig->getL1CachePolicy(true));
 
     DebugManager.flags.OverrideL1CachePolicyInSurfaceStateAndStateless.set(4);
-    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WS, hwInfoConfig->getL1CachePolicy());
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WS, hwInfoConfig->getL1CachePolicy(false));
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WS, hwInfoConfig->getL1CachePolicy(true));
+
+    DebugManager.flags.ForceAllResourcesUncached.set(true);
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_UC, hwInfoConfig->getL1CachePolicy(false));
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_UC, hwInfoConfig->getL1CachePolicy(true));
 }
 
 HWTEST2_F(HwInfoConfigTest, givenHwInfoConfigWhenGetL1CachePolicyThenReturnWriteByPass, IsAtLeastXeHpgCore) {
     auto hwInfo = *defaultHwInfo;
     auto hwInfoConfig = HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
-    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WBP, hwInfoConfig->getL1CachePolicy());
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WBP, hwInfoConfig->getL1CachePolicy(false));
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WBP, hwInfoConfig->getL1CachePolicy(true));
 }
 
 HWTEST2_F(HwInfoConfigTest, givenPlatformWithUnsupportedL1CachePoliciesWhenGetL1CachePolicyThenReturnZero, IsAtMostXeHpCore) {
     auto hwInfo = *defaultHwInfo;
     auto hwInfoConfig = HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
-    EXPECT_EQ(0u, hwInfoConfig->getL1CachePolicy());
+    EXPECT_EQ(0u, hwInfoConfig->getL1CachePolicy(false));
+    EXPECT_EQ(0u, hwInfoConfig->getL1CachePolicy(true));
 }
 
 HWTEST_F(HwInfoConfigTest, givenHwInfoConfigWhenIsPrefetcherDisablingInDirectSubmissionRequiredThenTrueIsReturned) {
     const auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
     EXPECT_TRUE(hwInfoConfig.isPrefetcherDisablingInDirectSubmissionRequired());
+}
+
+HWTEST2_F(HwInfoConfigTest, givenHwInfoConfigWhenIsStatefulAddressingModeSupportedThenReturnTrue, HasStatefulSupport) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
+    EXPECT_TRUE(hwInfoConfig.isStatefulAddressingModeSupported());
+}
+
+HWTEST2_F(HwInfoConfigTest, givenHwInfoConfigWhenIsPlatformQueryNotSupportedThenReturnFalse, IsAtMostDg2) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
+    EXPECT_FALSE(hwInfoConfig.isPlatformQuerySupported());
 }

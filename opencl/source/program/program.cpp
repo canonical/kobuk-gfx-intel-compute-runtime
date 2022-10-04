@@ -9,6 +9,7 @@
 
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/compiler_interface/compiler_interface.h"
+#include "shared/source/compiler_interface/compiler_options.h"
 #include "shared/source/compiler_interface/intermediate_representations.h"
 #include "shared/source/compiler_interface/oclc_extensions.h"
 #include "shared/source/device_binary_format/device_binary_formats.h"
@@ -31,8 +32,6 @@
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/context/context.h"
 #include "opencl/source/platform/platform.h"
-
-#include "compiler_options.h"
 
 #include <sstream>
 
@@ -105,7 +104,8 @@ std::string Program::getInternalOptions() const {
     }
 
     CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::preserveVec3Type);
-    CompilerOptions::concatenateAppend(internalOptions, compilerHwInfoConfig.getCachingPolicyOptions());
+    auto isDebuggerActive = pClDevice->getDevice().isDebuggerActive() || pClDevice->getDevice().getDebugger() != nullptr;
+    CompilerOptions::concatenateAppend(internalOptions, compilerHwInfoConfig.getCachingPolicyOptions(isDebuggerActive));
     return internalOptions;
 }
 
@@ -192,10 +192,9 @@ cl_int Program::createProgramFromBinary(
                 this->options += " " + NEO::CompilerOptions::allowZebin.str();
             }
 
-            if (false == singleDeviceBinary.debugData.empty()) {
-                this->buildInfos[rootDeviceIndex].debugData = makeCopy(reinterpret_cast<const char *>(singleDeviceBinary.debugData.begin()), singleDeviceBinary.debugData.size());
-                this->buildInfos[rootDeviceIndex].debugDataSize = singleDeviceBinary.debugData.size();
-            }
+            this->buildInfos[rootDeviceIndex].debugData = makeCopy(reinterpret_cast<const char *>(singleDeviceBinary.debugData.begin()), singleDeviceBinary.debugData.size());
+            this->buildInfos[rootDeviceIndex].debugDataSize = singleDeviceBinary.debugData.size();
+
             bool forceRebuildBuiltInFromIr = isBuiltIn && DebugManager.flags.RebuildPrecompiledKernels.get();
             if ((false == singleDeviceBinary.deviceBinary.empty()) && (false == forceRebuildBuiltInFromIr)) {
                 this->buildInfos[rootDeviceIndex].unpackedDeviceBinary = makeCopy<char>(reinterpret_cast<const char *>(singleDeviceBinary.deviceBinary.begin()), singleDeviceBinary.deviceBinary.size());
@@ -497,6 +496,29 @@ void Program::prependFilePathToOptions(const std::string &filename) {
         // Add "-s" flag first so it will be ignored by clang in case the options already have this flag set.
         options = std::string("-s ") + filename + " " + options;
     }
+}
+
+const std::vector<ConstStringRef> Program::internalOptionsToExtract = {CompilerOptions::gtpinRera,
+                                                                       CompilerOptions::defaultGrf,
+                                                                       CompilerOptions::largeGrf,
+                                                                       CompilerOptions::greaterThan4gbBuffersRequired,
+                                                                       CompilerOptions::numThreadsPerEu};
+
+bool Program::isFlagOption(ConstStringRef option) {
+    if (option == CompilerOptions::numThreadsPerEu) {
+        return false;
+    }
+    return true;
+}
+
+bool Program::isOptionValueValid(ConstStringRef option, ConstStringRef value) {
+    if (option == CompilerOptions::numThreadsPerEu) {
+        const auto &threadCounts = clDevices[0]->getSharedDeviceInfo().threadsPerEUConfigs;
+        if (std::find(threadCounts.begin(), threadCounts.end(), atoi(value.data())) != threadCounts.end()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 const ClDeviceVector &Program::getDevicesInProgram() const {

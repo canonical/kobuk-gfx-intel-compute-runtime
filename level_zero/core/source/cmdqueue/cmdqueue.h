@@ -12,12 +12,15 @@
 #include <level_zero/ze_api.h>
 
 #include <atomic>
+#include <mutex>
 
 struct _ze_command_queue_handle_t {};
 
 namespace NEO {
 class CommandStreamReceiver;
 }
+
+struct UnifiedMemoryControls;
 
 namespace L0 {
 struct Device;
@@ -49,17 +52,23 @@ struct CommandQueue : _ze_command_queue_handle_t {
         return static_cast<CommandQueue *>(handle);
     }
 
+    virtual void handleIndirectAllocationResidency(UnifiedMemoryControls unifiedMemoryControls, std::unique_lock<std::mutex> &lockForIndirect) = 0;
+
     ze_command_queue_handle_t toHandle() { return this; }
 
     bool peekIsCopyOnlyCommandQueue() const { return this->isCopyOnlyCommandQueue; }
 
   protected:
+    bool frontEndTrackingEnabled() const;
+
     uint32_t partitionCount = 1;
     uint32_t activeSubDevices = 1;
     bool preemptionCmdSyncProgramming = true;
     bool commandQueueDebugCmdsProgrammed = false;
     bool isCopyOnlyCommandQueue = false;
     bool internalUsage = false;
+    bool multiReturnPointCommandList = false;
+    bool pipelineSelectStateTracking = false;
 };
 
 using CommandQueueAllocatorFn = CommandQueue *(*)(Device *device, NEO::CommandStreamReceiver *csr,

@@ -52,17 +52,20 @@ CommandContainer::CommandContainer() {
     }
 
     residencyContainer.reserve(startingResidencyContainerSize);
+
+    if (DebugManager.flags.RemoveUserFenceInCmdlistResetAndDestroy.get() != -1) {
+        isHandleFenceCompletionRequired = !static_cast<bool>(DebugManager.flags.RemoveUserFenceInCmdlistResetAndDestroy.get());
+    }
 }
 
 CommandContainer::CommandContainer(uint32_t maxNumAggregatedIdds) : CommandContainer() {
     numIddsPerBlock = maxNumAggregatedIdds;
 }
 
-ErrorCode CommandContainer::initialize(Device *device, AllocationsList *reusableAllocationList, bool requireHeaps) {
+CommandContainer::ErrorCode CommandContainer::initialize(Device *device, AllocationsList *reusableAllocationList, bool requireHeaps) {
     this->device = device;
     this->reusableAllocationList = reusableAllocationList;
-
-    size_t alignedSize = alignUp<size_t>(totalCmdBufferSize, MemoryConstants::pageSize64k);
+    size_t alignedSize = alignUp<size_t>(this->getTotalCmdBufferSize(), MemoryConstants::pageSize64k);
 
     auto cmdBufferAllocation = this->obtainNextCommandBufferAllocation();
 
@@ -143,8 +146,12 @@ void CommandContainer::reset() {
     this->handleCmdBufferAllocations(1u);
     cmdBufferAllocations.erase(cmdBufferAllocations.begin() + 1, cmdBufferAllocations.end());
 
-    commandStream->replaceBuffer(cmdBufferAllocations[0]->getUnderlyingBuffer(),
-                                 defaultListCmdBufferSize);
+    auto cmdlistCmdBufferSize = defaultListCmdBufferSize;
+    if (DebugManager.flags.OverrideCmdListCmdBufferSizeInKb.get() > 0) {
+        cmdlistCmdBufferSize = static_cast<size_t>(DebugManager.flags.OverrideCmdListCmdBufferSizeInKb.get()) * MemoryConstants::kiloByte;
+    }
+
+    commandStream->replaceBuffer(cmdBufferAllocations[0]->getUnderlyingBuffer(), cmdlistCmdBufferSize);
     commandStream->replaceGraphicsAllocation(cmdBufferAllocations[0]);
     addToResidencyContainer(commandStream->getGraphicsAllocation());
 
@@ -163,6 +170,15 @@ void CommandContainer::reset() {
     nextIddInBlock = this->getNumIddPerBlock();
     lastPipelineSelectModeRequired = false;
     lastSentUseGlobalAtomics = false;
+}
+
+size_t CommandContainer::getTotalCmdBufferSize() {
+    auto totalCommandBufferSize = totalCmdBufferSize;
+    if (DebugManager.flags.OverrideCmdListCmdBufferSizeInKb.get() > 0) {
+        totalCommandBufferSize = static_cast<size_t>(DebugManager.flags.OverrideCmdListCmdBufferSizeInKb.get()) * MemoryConstants::kiloByte;
+        totalCommandBufferSize += cmdBufferReservedSize;
+    }
+    return totalCommandBufferSize;
 }
 
 void *CommandContainer::getHeapSpaceAllowGrow(HeapType heapType,
@@ -236,7 +252,12 @@ IndirectHeap *CommandContainer::getHeapWithRequiredSizeAndAlignment(HeapType hea
 void CommandContainer::handleCmdBufferAllocations(size_t startIndex) {
     for (size_t i = startIndex; i < cmdBufferAllocations.size(); i++) {
         if (this->reusableAllocationList) {
+
+            if (isHandleFenceCompletionRequired) {
+                this->device->getMemoryManager()->handleFenceCompletion(cmdBufferAllocations[i]);
+            }
             reusableAllocationList->pushFrontOne(*cmdBufferAllocations[i]);
+
         } else {
             this->device->getMemoryManager()->freeGraphicsMemory(cmdBufferAllocations[i]);
         }
@@ -244,7 +265,7 @@ void CommandContainer::handleCmdBufferAllocations(size_t startIndex) {
 }
 
 GraphicsAllocation *CommandContainer::obtainNextCommandBufferAllocation() {
-    size_t alignedSize = alignUp<size_t>(totalCmdBufferSize, MemoryConstants::pageSize64k);
+    size_t alignedSize = alignUp<size_t>(this->getTotalCmdBufferSize(), MemoryConstants::pageSize64k);
 
     GraphicsAllocation *cmdBufferAllocation = nullptr;
     if (this->reusableAllocationList) {
@@ -271,7 +292,7 @@ void CommandContainer::allocateNextCommandBuffer() {
 
     cmdBufferAllocations.push_back(cmdBufferAllocation);
 
-    size_t alignedSize = alignUp<size_t>(totalCmdBufferSize, MemoryConstants::pageSize64k);
+    size_t alignedSize = alignUp<size_t>(this->getTotalCmdBufferSize(), MemoryConstants::pageSize64k);
     commandStream->replaceBuffer(cmdBufferAllocation->getUnderlyingBuffer(), alignedSize - cmdBufferReservedSize);
     commandStream->replaceGraphicsAllocation(cmdBufferAllocation);
 
@@ -292,11 +313,10 @@ void CommandContainer::closeAndAllocateNextCommandBuffer() {
 void CommandContainer::prepareBindfulSsh() {
     if (ApiSpecificConfig::getBindlessConfiguration()) {
         if (allocationIndirectHeaps[IndirectHeap::Type::SURFACE_STATE] == nullptr) {
-            size_t alignedSize = alignUp<size_t>(totalCmdBufferSize, MemoryConstants::pageSize64k);
-            constexpr size_t heapSize = 65536u;
+            constexpr size_t heapSize = MemoryConstants::pageSize64k;
             allocationIndirectHeaps[IndirectHeap::Type::SURFACE_STATE] = heapHelper->getHeapAllocation(IndirectHeap::Type::SURFACE_STATE,
                                                                                                        heapSize,
-                                                                                                       alignedSize,
+                                                                                                       MemoryConstants::pageSize64k,
                                                                                                        device->getRootDeviceIndex());
             UNRECOVERABLE_IF(!allocationIndirectHeaps[IndirectHeap::Type::SURFACE_STATE]);
             residencyContainer.push_back(allocationIndirectHeaps[IndirectHeap::Type::SURFACE_STATE]);

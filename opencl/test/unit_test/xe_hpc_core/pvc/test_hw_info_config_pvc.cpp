@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/xe_hpc_core/hw_cmds_pvc.h"
@@ -21,20 +22,6 @@ using namespace NEO;
 
 using PvcHwInfoConfig = ::testing::Test;
 
-PVCTEST_F(PvcHwInfoConfig, givenErrorneousConfigStringThenThrow) {
-    HardwareInfo hwInfo = *defaultHwInfo;
-    GT_SYSTEM_INFO &gtSystemInfo = hwInfo.gtSystemInfo;
-
-    uint64_t config = 0xdeadbeef;
-    gtSystemInfo = {0};
-    EXPECT_ANY_THROW(hardwareInfoSetup[productFamily](&hwInfo, false, config));
-    EXPECT_EQ(0u, gtSystemInfo.SliceCount);
-    EXPECT_EQ(0u, gtSystemInfo.SubSliceCount);
-    EXPECT_EQ(0u, gtSystemInfo.DualSubSliceCount);
-    EXPECT_EQ(0u, gtSystemInfo.EUCount);
-    EXPECT_EQ(0u, gtSystemInfo.ThreadCount);
-}
-
 PVCTEST_F(PvcHwInfoConfig, givenPvcWhenCallingGetDeviceMemoryNameThenHbmIsReturned) {
     auto hwInfoConfig = HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
     auto deviceMemoryName = hwInfoConfig->getDeviceMemoryName();
@@ -42,12 +29,19 @@ PVCTEST_F(PvcHwInfoConfig, givenPvcWhenCallingGetDeviceMemoryNameThenHbmIsReturn
 }
 
 PVCTEST_F(PvcHwInfoConfig, givenHwInfoConfigWhenAdditionalKernelExecInfoSupportCheckedThenCorrectValueIsReturned) {
-    const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
+    auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
     auto hwInfo = *defaultHwInfo;
     EXPECT_FALSE(hwInfoConfig.isDisableOverdispatchAvailable(hwInfo));
 
+    FrontEndPropertiesSupport fePropertiesSupport{};
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, hwInfo);
+    EXPECT_FALSE(fePropertiesSupport.disableOverdispatch);
+
     hwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
     EXPECT_TRUE(hwInfoConfig.isDisableOverdispatchAvailable(hwInfo));
+
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, hwInfo);
+    EXPECT_TRUE(fePropertiesSupport.disableOverdispatch);
 }
 
 PVCTEST_F(PvcHwInfoConfig, givenHwInfoConfigWhenAskedIfPipeControlPriorToNonPipelinedStateCommandsWARequiredThenTrueIsReturned) {
@@ -57,14 +51,20 @@ PVCTEST_F(PvcHwInfoConfig, givenHwInfoConfigWhenAskedIfPipeControlPriorToNonPipe
 
     const auto &[isBasicWARequired, isExtendedWARequired] = hwInfoConfig.isPipeControlPriorToNonPipelinedStateCommandsWARequired(hwInfo, isRcs);
 
-    EXPECT_TRUE(isBasicWARequired);
-    EXPECT_TRUE(isExtendedWARequired);
+    EXPECT_FALSE(isBasicWARequired);
+    EXPECT_FALSE(isExtendedWARequired);
 }
 
 PVCTEST_F(PvcHwInfoConfig, givenPvcHwInfoConfigWhenCheckDirectSubmissionSupportedThenTrueIsReturned) {
     const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
     auto hwInfo = *defaultHwInfo;
     EXPECT_TRUE(hwInfoConfig.isDirectSubmissionSupported(hwInfo));
+}
+
+PVCTEST_F(PvcHwInfoConfig, givenPvcHwInfoConfigWhenCheckCopyEngineSelectorEnabledThenFalseIsReturned) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
+    auto hwInfo = *defaultHwInfo;
+    EXPECT_FALSE(hwInfoConfig.isCopyEngineSelectorEnabled(hwInfo));
 }
 
 PVCTEST_F(PvcHwInfoConfig, givenHwInfoConfigAndProgramExtendedPipeControlPriorToNonPipelinedStateCommandDisabledWhenAskedIfPipeControlPriorToNonPipelinedStateCommandsWARequiredThenFalseIsReturned) {
@@ -78,7 +78,7 @@ PVCTEST_F(PvcHwInfoConfig, givenHwInfoConfigAndProgramExtendedPipeControlPriorTo
     const auto &[isBasicWARequired, isExtendedWARequired] = hwInfoConfig.isPipeControlPriorToNonPipelinedStateCommandsWARequired(hwInfo, isRcs);
 
     EXPECT_FALSE(isExtendedWARequired);
-    EXPECT_TRUE(isBasicWARequired);
+    EXPECT_FALSE(isBasicWARequired);
 }
 
 using PvcHwInfo = ::testing::Test;

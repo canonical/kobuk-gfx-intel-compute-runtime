@@ -20,11 +20,13 @@
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_walk_order.h"
+#include "shared/source/helpers/pause_on_gpu_properties.h"
 #include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/helpers/pipeline_select_helper.h"
 #include "shared/source/helpers/ray_tracing_helper.h"
 #include "shared/source/helpers/simd_helper.h"
 #include "shared/source/helpers/state_base_address.h"
+#include "shared/source/helpers/state_base_address_xehp_and_later.inl"
 #include "shared/source/kernel/dispatch_kernel_encoder_interface.h"
 #include "shared/source/kernel/implicit_args.h"
 #include "shared/source/kernel/kernel_descriptor.h"
@@ -64,9 +66,9 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
         threadDimsVec = {threadDims[0], threadDims[1], threadDims[2]};
     }
 
-    bool specialModeRequired = kernelDescriptor.kernelAttributes.flags.usesSpecialPipelineSelectMode;
-    if (PreambleHelper<Family>::isSpecialPipelineSelectModeChanged(container.lastPipelineSelectModeRequired, specialModeRequired, hwInfo)) {
-        container.lastPipelineSelectModeRequired = specialModeRequired;
+    bool systolicModeRequired = kernelDescriptor.kernelAttributes.flags.usesSystolicPipelineSelectMode;
+    if (container.systolicModeSupport && (container.lastPipelineSelectModeRequired != systolicModeRequired)) {
+        container.lastPipelineSelectModeRequired = systolicModeRequired;
         EncodeComputeMode<Family>::adjustPipelineSelect(container, kernelDescriptor);
     }
 
@@ -77,7 +79,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
                                              sizePerThreadData, hwInfo);
     auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
     hwInfoConfig.updateIddCommand(&idd, kernelDescriptor.kernelAttributes.numGrfRequired,
-                                  args.dispatchInterface->getSchedulingHintExp());
+                                  kernelDescriptor.kernelAttributes.threadArbitrationPolicy);
 
     bool localIdsGenerationByRuntime = args.dispatchInterface->requiresGenerationOfLocalIdsByRuntime();
     auto requiredWorkgroupOrder = args.dispatchInterface->getRequiredWorkgroupOrder();
@@ -215,9 +217,26 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
         auto gmmHelper = container.getDevice()->getGmmHelper();
         uint32_t statelessMocsIndex =
             args.requiresUncachedMocs ? (gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED) >> 1) : (gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) >> 1);
-        EncodeStateBaseAddress<Family>::encode(container, sbaCmd, statelessMocsIndex, args.useGlobalAtomics, args.partitionCount > 1);
+
+        EncodeStateBaseAddressArgs<Family> encodeStateBaseAddressArgs = {
+            &container,
+            sbaCmd,
+            statelessMocsIndex,
+            args.useGlobalAtomics,
+            args.partitionCount > 1,
+            args.isRcs};
+        EncodeStateBaseAddress<Family>::encode(encodeStateBaseAddressArgs);
         container.setDirtyStateForAllHeaps(false);
         args.requiresUncachedMocs = false;
+    }
+
+    if (NEO::PauseOnGpuProperties::pauseModeAllowed(NEO::DebugManager.flags.PauseOnEnqueue.get(), args.device->debugExecutionCounter.load(), NEO::PauseOnGpuProperties::PauseMode::BeforeWorkload)) {
+        void *commandBuffer = listCmdBufferStream->getSpace(MemorySynchronizationCommands<Family>::getSizeForBarrierWithPostSyncOperation(hwInfo, false));
+        args.additionalCommands->push_back(commandBuffer);
+
+        using MI_SEMAPHORE_WAIT = typename Family::MI_SEMAPHORE_WAIT;
+        MI_SEMAPHORE_WAIT *semaphoreCommand = listCmdBufferStream->getSpaceForCmd<MI_SEMAPHORE_WAIT>();
+        args.additionalCommands->push_back(reinterpret_cast<void *>(semaphoreCommand));
     }
 
     walkerCmd.setIndirectDataStartAddress(static_cast<uint32_t>(offsetThreadData));
@@ -293,6 +312,15 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
     }
 
     PreemptionHelper::applyPreemptionWaCmdsEnd<Family>(listCmdBufferStream, *args.device);
+
+    if (NEO::PauseOnGpuProperties::pauseModeAllowed(NEO::DebugManager.flags.PauseOnEnqueue.get(), args.device->debugExecutionCounter.load(), NEO::PauseOnGpuProperties::PauseMode::AfterWorkload)) {
+        void *commandBuffer = listCmdBufferStream->getSpace(MemorySynchronizationCommands<Family>::getSizeForBarrierWithPostSyncOperation(hwInfo, false));
+        args.additionalCommands->push_back(commandBuffer);
+
+        using MI_SEMAPHORE_WAIT = typename Family::MI_SEMAPHORE_WAIT;
+        MI_SEMAPHORE_WAIT *semaphoreCommand = listCmdBufferStream->getSpaceForCmd<MI_SEMAPHORE_WAIT>();
+        args.additionalCommands->push_back(semaphoreCommand);
+    }
 }
 
 template <typename Family>
@@ -464,62 +492,52 @@ void EncodeStateBaseAddress<Family>::setSbaAddressesForDebugger(NEO::Debugger::S
 }
 
 template <typename Family>
-void EncodeStateBaseAddress<Family>::encode(CommandContainer &container, STATE_BASE_ADDRESS &sbaCmd, bool multiOsContextCapable) {
-    auto gmmHelper = container.getDevice()->getRootDeviceEnvironment().getGmmHelper();
-    uint32_t statelessMocsIndex = (gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) >> 1);
-    EncodeStateBaseAddress<Family>::encode(container, sbaCmd, statelessMocsIndex, false, multiOsContextCapable);
-}
+void EncodeStateBaseAddress<Family>::encode(EncodeStateBaseAddressArgs<Family> &args) {
+    auto &device = *args.container->getDevice();
+    auto gmmHelper = device.getRootDeviceEnvironment().getGmmHelper();
 
-template <typename Family>
-void EncodeStateBaseAddress<Family>::encode(CommandContainer &container, STATE_BASE_ADDRESS &sbaCmd, uint32_t statelessMocsIndex, bool useGlobalAtomics, bool multiOsContextCapable) {
-    auto gmmHelper = container.getDevice()->getRootDeviceEnvironment().getGmmHelper();
+    auto dsh = args.container->isHeapDirty(HeapType::DYNAMIC_STATE) ? args.container->getIndirectHeap(HeapType::DYNAMIC_STATE) : nullptr;
+    auto ioh = args.container->isHeapDirty(HeapType::INDIRECT_OBJECT) ? args.container->getIndirectHeap(HeapType::INDIRECT_OBJECT) : nullptr;
+    auto ssh = args.container->isHeapDirty(HeapType::SURFACE_STATE) ? args.container->getIndirectHeap(HeapType::SURFACE_STATE) : nullptr;
+    auto isDebuggerActive = device.isDebuggerActive() || device.getDebugger() != nullptr;
 
-    auto dsh = container.isHeapDirty(HeapType::DYNAMIC_STATE) ? container.getIndirectHeap(HeapType::DYNAMIC_STATE) : nullptr;
-    auto ioh = container.isHeapDirty(HeapType::INDIRECT_OBJECT) ? container.getIndirectHeap(HeapType::INDIRECT_OBJECT) : nullptr;
-    auto ssh = container.isHeapDirty(HeapType::SURFACE_STATE) ? container.getIndirectHeap(HeapType::SURFACE_STATE) : nullptr;
-
-    StateBaseAddressHelperArgs<Family> args = {
-        0,                                            // generalStateBase
-        container.getIndirectObjectHeapBaseAddress(), // indirectObjectHeapBaseAddress
-        container.getInstructionHeapBaseAddress(),    // instructionHeapBaseAddress
-        0,                                            // globalHeapsBaseAddress
-        &sbaCmd,                                      // stateBaseAddressCmd
-        dsh,                                          // dsh
-        ioh,                                          // ioh
-        ssh,                                          // ssh
-        gmmHelper,                                    // gmmHelper
-        statelessMocsIndex,                           // statelessMocsIndex
-        NEO::MemoryCompressionState::NotApplicable,   // memoryCompressionState
-        true,                                         // setInstructionStateBaseAddress
-        true,                                         // setGeneralStateBaseAddress
-        false,                                        // useGlobalHeapsBaseAddress
-        multiOsContextCapable,                        // isMultiOsContextCapable
-        useGlobalAtomics,                             // useGlobalAtomics
-        false                                         // areMultipleSubDevicesInContext
+    StateBaseAddressHelperArgs<Family> stateBaseAddressHelperArgs = {
+        0,                                                  // generalStateBase
+        args.container->getIndirectObjectHeapBaseAddress(), // indirectObjectHeapBaseAddress
+        args.container->getInstructionHeapBaseAddress(),    // instructionHeapBaseAddress
+        0,                                                  // globalHeapsBaseAddress
+        0,                                                  // surfaceStateBaseAddress
+        &args.sbaCmd,                                       // stateBaseAddressCmd
+        dsh,                                                // dsh
+        ioh,                                                // ioh
+        ssh,                                                // ssh
+        gmmHelper,                                          // gmmHelper
+        &args.container->getDevice()->getHardwareInfo(),    // hwInfo
+        args.statelessMocsIndex,                            // statelessMocsIndex
+        NEO::MemoryCompressionState::NotApplicable,         // memoryCompressionState
+        true,                                               // setInstructionStateBaseAddress
+        true,                                               // setGeneralStateBaseAddress
+        false,                                              // useGlobalHeapsBaseAddress
+        args.multiOsContextCapable,                         // isMultiOsContextCapable
+        args.useGlobalAtomics,                              // useGlobalAtomics
+        false,                                              // areMultipleSubDevicesInContext
+        false,                                              // overrideSurfaceStateBaseAddress
+        isDebuggerActive                                    // isDebuggerActive
     };
 
-    StateBaseAddressHelper<Family>::programStateBaseAddress(args);
+    StateBaseAddressHelper<Family>::programStateBaseAddressIntoCommandStream(stateBaseAddressHelperArgs,
+                                                                             *args.container->getCommandStream());
 
-    auto cmdSpace = StateBaseAddressHelper<Family>::getSpaceForSbaCmd(*container.getCommandStream());
-    *cmdSpace = sbaCmd;
-
-    auto &hwInfo = container.getDevice()->getHardwareInfo();
-    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
-    if (hwInfoConfig.isAdditionalStateBaseAddressWARequired(hwInfo)) {
-        cmdSpace = StateBaseAddressHelper<Family>::getSpaceForSbaCmd(*container.getCommandStream());
-        *cmdSpace = sbaCmd;
-    }
-
-    if (container.isHeapDirty(HeapType::SURFACE_STATE)) {
-        auto heap = container.getIndirectHeap(HeapType::SURFACE_STATE);
-        StateBaseAddressHelper<Family>::programBindingTableBaseAddress(*container.getCommandStream(),
+    if (args.container->isHeapDirty(HeapType::SURFACE_STATE)) {
+        auto heap = args.container->getIndirectHeap(HeapType::SURFACE_STATE);
+        StateBaseAddressHelper<Family>::programBindingTableBaseAddress(*args.container->getCommandStream(),
                                                                        *heap,
                                                                        gmmHelper);
     }
 }
 
 template <typename Family>
-size_t EncodeStateBaseAddress<Family>::getRequiredSizeForStateBaseAddress(Device &device, CommandContainer &container) {
+size_t EncodeStateBaseAddress<Family>::getRequiredSizeForStateBaseAddress(Device &device, CommandContainer &container, bool isRcs) {
     auto &hwInfo = device.getHardwareInfo();
     auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
 
@@ -569,16 +587,15 @@ void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, Sta
 
 template <typename Family>
 void EncodeComputeMode<Family>::adjustPipelineSelect(CommandContainer &container, const NEO::KernelDescriptor &kernelDescriptor) {
-    using PIPELINE_SELECT = typename Family::PIPELINE_SELECT;
-    auto pipelineSelectCmd = Family::cmdInitPipelineSelect;
-    auto isSpecialModeSelected = kernelDescriptor.kernelAttributes.flags.usesSpecialPipelineSelectMode;
+    auto &hwInfo = container.getDevice()->getHardwareInfo();
 
-    PreambleHelper<Family>::appendProgramPipelineSelect(&pipelineSelectCmd, isSpecialModeSelected, container.getDevice()->getHardwareInfo());
+    PipelineSelectArgs pipelineSelectArgs;
+    pipelineSelectArgs.systolicPipelineSelectMode = kernelDescriptor.kernelAttributes.flags.usesSystolicPipelineSelectMode;
+    pipelineSelectArgs.systolicPipelineSelectSupport = container.systolicModeSupport;
 
-    pipelineSelectCmd.setPipelineSelection(PIPELINE_SELECT::PIPELINE_SELECTION_GPGPU);
-
-    auto buffer = container.getCommandStream()->getSpace(sizeof(pipelineSelectCmd));
-    *(decltype(pipelineSelectCmd) *)buffer = pipelineSelectCmd;
+    PreambleHelper<Family>::programPipelineSelect(container.getCommandStream(),
+                                                  pipelineSelectArgs,
+                                                  hwInfo);
 }
 
 template <typename Family>
@@ -603,7 +620,7 @@ size_t EncodeMiFlushDW<Family>::getMiFlushDwWaSize() {
 }
 
 template <typename Family>
-bool EncodeSurfaceState<Family>::doBindingTablePrefetch() {
+bool EncodeSurfaceState<Family>::isBindingTablePrefetchPreferred() {
     return false;
 }
 
@@ -627,7 +644,7 @@ void EncodeSurfaceState<Family>::encodeExtraBufferParams(EncodeSurfaceStateArgs 
         surfaceState->setMemoryObjectControlState(args.gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST));
     }
 
-    encodeExtraCacheSettings(surfaceState, *args.gmmHelper->getHardwareInfo());
+    encodeExtraCacheSettings(surfaceState, args);
 
     encodeImplicitScalingParams(args);
 
@@ -677,7 +694,7 @@ inline void EncodeWA<Family>::encodeAdditionalPipelineSelect(LinearStream &strea
                                                              const HardwareInfo &hwInfo, bool isRcs) {}
 
 template <typename Family>
-inline size_t EncodeWA<Family>::getAdditionalPipelineSelectSize(Device &device) {
+inline size_t EncodeWA<Family>::getAdditionalPipelineSelectSize(Device &device, bool isRcs) {
     return 0u;
 }
 template <typename Family>

@@ -6,13 +6,14 @@
  */
 
 #pragma once
+
 #include "shared/source/command_stream/csr_deps.h"
 #include "shared/source/command_stream/csr_properties_flags.h"
 #include "shared/source/command_stream/memory_compression_state.h"
+#include "shared/source/command_stream/preemption_mode.h"
 #include "shared/source/command_stream/queue_throttle.h"
 #include "shared/source/command_stream/thread_arbitration_policy.h"
 #include "shared/source/helpers/constants.h"
-#include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/pipeline_select_args.h"
 #include "shared/source/kernel/grf_config.h"
 #include "shared/source/kernel/kernel_execution_type.h"
@@ -123,7 +124,7 @@ struct CsrSizeRequestFlags {
     bool preemptionRequestChanged = false;
     bool mediaSamplerConfigChanged = false;
     bool hasSharedHandles = false;
-    bool specialPipelineSelectModeChanged = false;
+    bool systolicPipelineSelectMode = false;
     bool activePartitionsChanged = false;
 };
 } // namespace NEO

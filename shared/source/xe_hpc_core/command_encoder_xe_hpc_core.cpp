@@ -33,7 +33,6 @@ void EncodeDispatchKernel<Family>::adjustTimestampPacket(WALKER_TYPE &walkerCmd,
 template <>
 void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, const HardwareInfo &hwInfo, const uint32_t threadGroupCount, const uint32_t numGrf) {
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
-    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
 
     if (hwInfoConfig.isDisableOverdispatchAvailable(hwInfo)) {
         interfaceDescriptor.setThreadGroupDispatchSize(INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_1);
@@ -43,6 +42,7 @@ void EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(INTERFACE_DESCR
 
             constexpr uint32_t maxThreadsInTGForTGDispatchSize8 = 16u;
             constexpr uint32_t maxThreadsInTGForTGDispatchSize4 = 32u;
+            auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
             uint32_t availableThreadCount = hwHelper.calculateAvailableThreadCount(hwInfo, numGrf);
             uint32_t numberOfThreadsInThreadGroup = interfaceDescriptor.getNumberOfThreadsInGpgpuThreadGroup();
             uint32_t dispatchedTotalThreadCount = numberOfThreadsInThreadGroup * threadGroupCount;
@@ -297,9 +297,6 @@ void EncodeDispatchKernel<Family>::appendAdditionalIDDFields(INTERFACE_DESCRIPTO
 template <>
 void EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t samplerCount, uint32_t bindingTableEntryCount) {
     auto enablePrefetch = EncodeSurfaceState<Family>::doBindingTablePrefetch();
-    if (DebugManager.flags.ForceBtpPrefetchMode.get() != -1) {
-        enablePrefetch = static_cast<bool>(DebugManager.flags.ForceBtpPrefetchMode.get());
-    }
 
     if (enablePrefetch) {
         interfaceDescriptor.setBindingTableEntryCount(std::min(bindingTableEntryCount, 31u));

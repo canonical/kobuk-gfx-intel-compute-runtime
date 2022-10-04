@@ -60,6 +60,7 @@ struct MockDebugSession : public L0::DebugSessionImp {
     using L0::DebugSessionImp::newlyStoppedThreads;
     using L0::DebugSessionImp::pendingInterrupts;
     using L0::DebugSessionImp::readStateSaveAreaHeader;
+    using L0::DebugSessionImp::tileAttachEnabled;
     using L0::DebugSessionImp::tileSessions;
 
     MockDebugSession(const zet_debug_config_t &config, L0::Device *device) : DebugSessionImp(config, device) {
@@ -81,12 +82,16 @@ struct MockDebugSession : public L0::DebugSessionImp {
 
             for (uint32_t i = 0; i < numTiles; i++) {
                 auto subDevice = connectedDevice->getNEODevice()->getSubDevice(i)->getSpecializedDevice<Device>();
-                tileSessions[i] = std::pair<DebugSession *, bool>{new MockDebugSession(config, subDevice), false};
+                tileSessions[i] = std::pair<DebugSessionImp *, bool>{new MockDebugSession(config, subDevice), false};
             }
         }
 
         return ZE_RESULT_SUCCESS;
     }
+
+    void attachTile() override { attachTileCalled = true; };
+    void detachTile() override { detachTileCalled = true; };
+    void cleanRootSessionAfterDetach(uint32_t deviceIndex) override { cleanRootSessionDeviceIndices.push_back(deviceIndex); };
 
     ze_result_t readEvent(uint64_t timeout, zet_debug_event_t *event) override {
         return ZE_RESULT_SUCCESS;
@@ -224,7 +229,7 @@ struct MockDebugSession : public L0::DebugSessionImp {
         if (returnStateSaveAreaGpuVa) {
             return reinterpret_cast<uint64_t>(this->stateSaveAreaHeader.data());
         }
-        return DebugSessionImp::getContextStateSaveAreaGpuVa(memoryHandle);
+        return 0;
     };
 
     int64_t getTimeDifferenceMilliseconds(std::chrono::high_resolution_clock::time_point time) override {
@@ -274,6 +279,10 @@ struct MockDebugSession : public L0::DebugSessionImp {
 
     int returnTimeDiff = -1;
     bool returnStateSaveAreaGpuVa = true;
+
+    bool attachTileCalled = false;
+    bool detachTileCalled = false;
+    std::vector<uint32_t> cleanRootSessionDeviceIndices;
 };
 
 using DebugSessionTest = ::testing::Test;
@@ -1550,6 +1559,41 @@ TEST_F(MultiTileDebugSessionTest, givenTwoDevicesInRequestsWhenSendingInterrupts
     EXPECT_EQ(2u, sessionMock->expectedAttentionEvents);
 }
 
+TEST_F(MultiTileDebugSessionTest, givenTileAttachEnabledWhenSendingInterruptsThenInterruptIsSentWithCorrectDeviceIndex) {
+    DebugManagerStateRestore restorer;
+    NEO::DebugManager.flags.ExperimentalEnableTileAttach.set(1);
+    zet_debug_config_t config = {};
+    config.pid = 0x1234;
+
+    L0::Device *device = driverHandle->devices[0];
+    L0::DeviceImp *deviceImp = static_cast<DeviceImp *>(device);
+
+    auto sessionMock = std::make_unique<MockDebugSession>(config, deviceImp);
+
+    sessionMock->interruptImpResult = ZE_RESULT_SUCCESS;
+    sessionMock->tileAttachEnabled = true;
+    sessionMock->initialize();
+
+    auto tileSession1 = static_cast<MockDebugSession *>(sessionMock->tileSessions[1].first);
+    auto tileSession0 = static_cast<MockDebugSession *>(sessionMock->tileSessions[0].first);
+
+    ze_device_thread_t apiThread = {0, 0, 0, 0};
+
+    auto result = tileSession1->interrupt(apiThread);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    result = tileSession0->interrupt(apiThread);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    tileSession1->sendInterrupts();
+    tileSession0->sendInterrupts();
+
+    EXPECT_TRUE(tileSession1->interruptSent);
+    EXPECT_TRUE(tileSession0->interruptSent);
+    EXPECT_EQ(1u, tileSession1->interruptedDevices[0]);
+    EXPECT_EQ(0u, tileSession0->interruptedDevices[0]);
+}
+
 TEST_F(MultiTileDebugSessionTest, givenAllSlicesInRequestWhenSendingInterruptsThenTwoInterruptsCalled) {
     zet_debug_config_t config = {};
     config.pid = 0x1234;
@@ -1679,6 +1723,45 @@ TEST_F(MultiTileDebugSessionTest, givenAllSlicesInRequestWhenAllInterruptsReturn
 
     EXPECT_EQ(ZET_DEBUG_EVENT_TYPE_THREAD_UNAVAILABLE, sessionMock->events[0].type);
     EXPECT_TRUE(DebugSession::areThreadsEqual(apiThread, sessionMock->events[0].info.thread.thread));
+}
+
+TEST_F(MultiTileDebugSessionTest, GivenMultitileDeviceWhenCallingAreRequestedThreadsStoppedThenCorrectValueIsReturned) {
+    zet_debug_config_t config = {};
+    config.pid = 0x1234;
+
+    L0::Device *device = driverHandle->devices[0];
+    L0::DeviceImp *deviceImp = static_cast<DeviceImp *>(device);
+
+    auto sessionMock = std::make_unique<MockDebugSession>(config, deviceImp);
+    ASSERT_NE(nullptr, sessionMock);
+
+    ze_device_thread_t thread = {0, 0, 0, 0};
+    ze_device_thread_t allSlices = {UINT32_MAX, 0, 0, 0};
+
+    sessionMock->allThreads[EuThread::ThreadId(0, thread)]->stopThread(1u);
+    sessionMock->allThreads[EuThread::ThreadId(1, thread)]->stopThread(1u);
+
+    auto stopped = sessionMock->areRequestedThreadsStopped(thread);
+    EXPECT_TRUE(stopped);
+
+    stopped = sessionMock->areRequestedThreadsStopped(allSlices);
+    EXPECT_FALSE(stopped);
+
+    for (uint32_t i = 0; i < sliceCount; i++) {
+        EuThread::ThreadId threadId(0, i, 0, 0, 0);
+        sessionMock->allThreads[threadId]->stopThread(1u);
+    }
+
+    stopped = sessionMock->areRequestedThreadsStopped(allSlices);
+    EXPECT_FALSE(stopped);
+
+    for (uint32_t i = 0; i < sliceCount; i++) {
+        EuThread::ThreadId threadId(1, i, 0, 0, 0);
+        sessionMock->allThreads[threadId]->stopThread(1u);
+    }
+
+    stopped = sessionMock->areRequestedThreadsStopped(allSlices);
+    EXPECT_TRUE(stopped);
 }
 
 struct DebugSessionRegistersAccess {
@@ -2399,6 +2482,7 @@ TEST_F(MultiTileDebugSessionTest, givenTileAttachEnabledWhenAttachingToTileDevic
 
     auto subDevice0 = neoDevice->getSubDevice(0)->getSpecializedDevice<Device>();
     auto subDevice1 = neoDevice->getSubDevice(1)->getSpecializedDevice<Device>();
+    auto tileSession1 = static_cast<MockDebugSession *>(sessionMock->tileSessions[1].first);
 
     auto result = zetDebugAttach(subDevice0->toHandle(), &config, &debugSession0);
 
@@ -2410,6 +2494,7 @@ TEST_F(MultiTileDebugSessionTest, givenTileAttachEnabledWhenAttachingToTileDevic
 
     EXPECT_NE(nullptr, deviceImp->getDebugSession(config));
 
+    EXPECT_FALSE(tileSession1->attachTileCalled);
     result = zetDebugAttach(subDevice1->toHandle(), &config, &debugSession1);
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
@@ -2417,12 +2502,18 @@ TEST_F(MultiTileDebugSessionTest, givenTileAttachEnabledWhenAttachingToTileDevic
 
     EXPECT_TRUE(sessionMock->tileSessions[1].second);
     EXPECT_EQ(sessionMock->tileSessions[1].first, L0::DebugSession::fromHandle(debugSession1));
+    EXPECT_TRUE(tileSession1->attachTileCalled);
+    EXPECT_FALSE(tileSession1->detachTileCalled);
 
     result = zetDebugDetach(debugSession1);
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_NE(nullptr, deviceImp->getDebugSession(config));
     EXPECT_FALSE(sessionMock->tileSessions[1].second);
+
+    EXPECT_TRUE(tileSession1->detachTileCalled);
+    ASSERT_EQ(1u, sessionMock->cleanRootSessionDeviceIndices.size());
+    EXPECT_EQ(1u, sessionMock->cleanRootSessionDeviceIndices[0]);
 
     result = zetDebugDetach(debugSession0);
 

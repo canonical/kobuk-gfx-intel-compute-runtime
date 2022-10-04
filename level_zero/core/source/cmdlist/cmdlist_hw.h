@@ -10,6 +10,7 @@
 #include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/helpers/vec.h"
 #include "shared/source/kernel/kernel_arg_descriptor.h"
+#include "shared/source/memory_manager/memory_pool.h"
 
 #include "level_zero/core/source/builtin/builtin_functions_lib.h"
 #include "level_zero/core/source/cmdlist/cmdlist_imp.h"
@@ -80,22 +81,22 @@ struct CommandListCoreFamily : CommandListImp {
     ze_result_t appendImageCopy(ze_image_handle_t hDstImage, ze_image_handle_t hSrcImage,
                                 ze_event_handle_t hEvent, uint32_t numWaitEvents,
                                 ze_event_handle_t *phWaitEvents) override;
-    ze_result_t appendLaunchKernel(ze_kernel_handle_t hKernel,
+    ze_result_t appendLaunchKernel(ze_kernel_handle_t kernelHandle,
                                    const ze_group_count_t *threadGroupDimensions,
                                    ze_event_handle_t hEvent, uint32_t numWaitEvents,
                                    ze_event_handle_t *phWaitEvents,
                                    const CmdListKernelLaunchParams &launchParams) override;
-    ze_result_t appendLaunchCooperativeKernel(ze_kernel_handle_t hKernel,
-                                              const ze_group_count_t *pLaunchFuncArgs,
+    ze_result_t appendLaunchCooperativeKernel(ze_kernel_handle_t kernelHandle,
+                                              const ze_group_count_t *launchKernelArgs,
                                               ze_event_handle_t hSignalEvent,
                                               uint32_t numWaitEvents,
                                               ze_event_handle_t *phWaitEvents) override;
-    ze_result_t appendLaunchKernelIndirect(ze_kernel_handle_t hKernel,
+    ze_result_t appendLaunchKernelIndirect(ze_kernel_handle_t kernelHandle,
                                            const ze_group_count_t *pDispatchArgumentsBuffer,
                                            ze_event_handle_t hEvent, uint32_t numWaitEvents,
                                            ze_event_handle_t *phWaitEvents) override;
     ze_result_t appendLaunchMultipleKernelsIndirect(uint32_t numKernels,
-                                                    const ze_kernel_handle_t *phKernels,
+                                                    const ze_kernel_handle_t *kernelHandles,
                                                     const uint32_t *pNumLaunchArguments,
                                                     const ze_group_count_t *pLaunchArgumentsBuffer,
                                                     ze_event_handle_t hEvent,
@@ -156,10 +157,13 @@ struct CommandListCoreFamily : CommandListImp {
                                             uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) override;
     void appendMultiPartitionPrologue(uint32_t partitionDataSize) override;
     void appendMultiPartitionEpilogue() override;
+    void appendEventForProfilingAllWalkers(Event *event, bool beforeWalker);
+    ze_result_t addEventsToCmdList(uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents);
 
     ze_result_t reserveSpace(size_t size, void **ptr) override;
     ze_result_t reset() override;
     ze_result_t executeCommandListImmediate(bool performMigration) override;
+    ze_result_t executeCommandListImmediateImpl(bool performMigration, L0::CommandQueue *cmdQImmediate);
     size_t getReserveSshSize();
 
   protected:
@@ -228,9 +232,21 @@ struct CommandListCoreFamily : CommandListImp {
                                         const ze_group_count_t *threadGroupDimensions,
                                         Event *event,
                                         const CmdListKernelLaunchParams &launchParams);
+
+    ze_result_t appendUnalignedFillKernel(bool isStateless,
+                                          uint32_t unalignedSize,
+                                          const AlignedAllocationData &dstAllocation,
+                                          const void *pattern,
+                                          Event *signalEvent,
+                                          const CmdListKernelLaunchParams &launchParams);
+
     ze_result_t prepareIndirectParams(const ze_group_count_t *threadGroupDimensions);
-    void updateStreamProperties(Kernel &kernel, bool isMultiOsContextCapable, bool isCooperative);
+    void updateStreamProperties(Kernel &kernel, bool isCooperative);
     void clearCommandsToPatch();
+
+    size_t getTotalSizeForCopyRegion(const ze_copy_region_t *region, uint32_t pitch, uint32_t slicePitch);
+    bool isAppendSplitNeeded(void *dstPtr, const void *srcPtr, size_t size);
+    bool isAppendSplitNeeded(NEO::MemoryPool dstPool, NEO::MemoryPool srcPool, size_t size);
 
     void applyMemoryRangesBarrier(uint32_t numRanges, const size_t *pRangeSizes,
                                   const void **pRanges);
@@ -240,7 +256,6 @@ struct CommandListCoreFamily : CommandListImp {
     void appendWriteKernelTimestamp(Event *event, bool beforeWalker, bool maskLsb, bool workloadPartition);
     void adjustWriteKernelTimestamp(uint64_t globalAddress, uint64_t contextAddress, bool maskLsb, uint32_t mask, bool workloadPartition);
     void appendEventForProfiling(Event *event, bool beforeWalker, bool workloadPartition);
-    void appendEventForProfilingAllWalkers(Event *event, bool beforeWalker);
     void appendEventForProfilingCopyCommand(Event *event, bool beforeWalker);
     void appendSignalEventPostWalker(Event *event, bool workloadPartition);
     virtual void programStateBaseAddress(NEO::CommandContainer &container, bool genericMediaStateClearRequired);
@@ -248,10 +263,8 @@ struct CommandListCoreFamily : CommandListImp {
     NEO::PipeControlArgs createBarrierFlags();
     void appendMultiTileBarrier(NEO::Device &neoDevice);
     size_t estimateBufferSizeMultiTileBarrier(const NEO::HardwareInfo &hwInfo);
-
     uint64_t getInputBufferSize(NEO::ImageType imageType, uint64_t bytesPerPixel, const ze_image_region_t *region);
     MOCKABLE_VIRTUAL AlignedAllocationData getAlignedAllocation(Device *device, const void *buffer, uint64_t bufferSize, bool hostCopyAllowed);
-    ze_result_t addEventsToCmdList(uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents);
     void addFlushRequiredCommand(bool flushOperationRequired, Event *signalEvent);
 
     virtual void createLogicalStateHelper();

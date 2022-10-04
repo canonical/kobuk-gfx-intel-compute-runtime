@@ -88,11 +88,6 @@ bool HwInfoConfigHw<gfxProduct>::isDisableOverdispatchAvailable(const HardwareIn
 }
 
 template <>
-bool HwInfoConfigHw<gfxProduct>::isSpecialPipelineSelectModeChanged(const HardwareInfo &hwInfo) const {
-    return PVC::isAtMostXtA0(hwInfo);
-}
-
-template <>
 bool HwInfoConfigHw<gfxProduct>::isSystolicModeConfigurable(const HardwareInfo &hwInfo) const {
     return PVC::isAtMostXtA0(hwInfo);
 }
@@ -166,6 +161,11 @@ bool HwInfoConfigHw<gfxProduct>::isBlitCopyRequiredForLocalMemory(const Hardware
 }
 
 template <>
+bool HwInfoConfigHw<gfxProduct>::isBlitSplitEnqueueWARequired(const HardwareInfo &hwInfo) const {
+    return true;
+}
+
+template <>
 bool HwInfoConfigHw<gfxProduct>::isImplicitScalingSupported(const HardwareInfo &hwInfo) const {
     return getSteppingFromHwRevId(hwInfo) >= REVISION_B;
 }
@@ -181,13 +181,18 @@ bool HwInfoConfigHw<gfxProduct>::isComputeDispatchAllWalkerEnableInComputeWalker
 }
 
 template <>
+bool HwInfoConfigHw<gfxProduct>::isCopyEngineSelectorEnabled(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <>
 uint32_t HwInfoConfigHw<gfxProduct>::getThreadEuRatioForScratch(const HardwareInfo &hwInfo) const {
     return PVC::isXlA0(hwInfo) ? 8u : 16u;
 }
 
 template <>
 bool HwInfoConfigHw<gfxProduct>::isComputeDispatchAllWalkerEnableInCfeStateRequired(const HardwareInfo &hwInfo) const {
-    return true;
+    return getSteppingFromHwRevId(hwInfo) >= REVISION_B;
 }
 
 template <>
@@ -198,4 +203,9 @@ bool HwInfoConfigHw<gfxProduct>::isIpSamplingSupported(const HardwareInfo &hwInf
 template <>
 void HwInfoConfigHw<gfxProduct>::adjustNumberOfCcs(HardwareInfo &hwInfo) const {
     hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 1;
+}
+
+template <>
+bool HwInfoConfigHw<gfxProduct>::isStatefulAddressingModeSupported() const {
+    return false;
 }

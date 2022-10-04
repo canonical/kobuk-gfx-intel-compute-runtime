@@ -10,11 +10,22 @@
 #include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/command_stream/thread_arbitration_policy.h"
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/test_macros/test.h"
 
 using namespace NEO;
+
+struct MockFrontEndProperties : public FrontEndProperties {
+    using FrontEndProperties::frontEndPropertiesSupport;
+    using FrontEndProperties::propertiesSupportLoaded;
+};
+
+struct MockPipelineSelectProperties : public PipelineSelectProperties {
+    using PipelineSelectProperties::pipelineSelectPropertiesSupport;
+    using PipelineSelectProperties::propertiesSupportLoaded;
+};
 
 TEST(StreamPropertiesTests, whenPropertyValueIsChangedThenProperStateIsSet) {
     NEO::StreamProperty streamProperty;
@@ -45,15 +56,36 @@ TEST(StreamPropertiesTests, whenPropertyValueIsChangedThenProperStateIsSet) {
 
 TEST(StreamPropertiesTests, whenSettingCooperativeKernelPropertiesThenCorrectValueIsSet) {
     StreamProperties properties;
+
+    FrontEndPropertiesSupport frontEndPropertiesSupport = {};
+    auto hwInfoConfig = HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    hwInfoConfig->fillFrontEndPropertiesSupportStructure(frontEndPropertiesSupport, *defaultHwInfo);
+
     for (auto isEngineInstanced : ::testing::Bool()) {
         for (auto isCooperativeKernel : ::testing::Bool()) {
             for (auto disableOverdispatch : ::testing::Bool()) {
                 for (auto disableEUFusion : ::testing::Bool()) {
                     properties.frontEndState.setProperties(isCooperativeKernel, disableEUFusion, disableOverdispatch, isEngineInstanced, *defaultHwInfo);
-                    EXPECT_EQ(isCooperativeKernel, properties.frontEndState.computeDispatchAllWalkerEnable.value);
-                    EXPECT_EQ(disableEUFusion, properties.frontEndState.disableEUFusion.value);
-                    EXPECT_EQ(disableOverdispatch, properties.frontEndState.disableOverdispatch.value);
-                    EXPECT_EQ(isEngineInstanced, properties.frontEndState.singleSliceDispatchCcsMode.value);
+                    if (frontEndPropertiesSupport.computeDispatchAllWalker) {
+                        EXPECT_EQ(isCooperativeKernel, properties.frontEndState.computeDispatchAllWalkerEnable.value);
+                    } else {
+                        EXPECT_EQ(-1, properties.frontEndState.computeDispatchAllWalkerEnable.value);
+                    }
+                    if (frontEndPropertiesSupport.disableEuFusion) {
+                        EXPECT_EQ(disableEUFusion, properties.frontEndState.disableEUFusion.value);
+                    } else {
+                        EXPECT_EQ(-1, properties.frontEndState.disableEUFusion.value);
+                    }
+                    if (frontEndPropertiesSupport.disableOverdispatch) {
+                        EXPECT_EQ(disableOverdispatch, properties.frontEndState.disableOverdispatch.value);
+                    } else {
+                        EXPECT_EQ(-1, properties.frontEndState.disableOverdispatch.value);
+                    }
+                    if (frontEndPropertiesSupport.singleSliceDispatchCcsMode) {
+                        EXPECT_EQ(isEngineInstanced, properties.frontEndState.singleSliceDispatchCcsMode.value);
+                    } else {
+                        EXPECT_EQ(-1, properties.frontEndState.singleSliceDispatchCcsMode.value);
+                    }
                 }
             }
         }
@@ -65,7 +97,9 @@ TEST(StreamPropertiesTests, whenSettingStateComputeModePropertiesThenCorrectValu
     DebugManager.flags.ForceGrfNumProgrammingWithScm.set(1);
     DebugManager.flags.ForceThreadArbitrationPolicyProgrammingWithScm.set(1);
 
-    auto isDevicePreemptionModeTrackedInScm = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).isDevicePreemptionModeTrackedInScm();
+    StateComputeModePropertiesSupport scmPropertiesSupport = {};
+    auto hwInfoConfig = HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    hwInfoConfig->fillScmPropertiesSupportStructure(scmPropertiesSupport);
 
     int32_t threadArbitrationPolicyValues[] = {
         ThreadArbitrationPolicy::AgeBased, ThreadArbitrationPolicy::RoundRobin,
@@ -80,12 +114,16 @@ TEST(StreamPropertiesTests, whenSettingStateComputeModePropertiesThenCorrectValu
                 for (auto threadArbitrationPolicy : threadArbitrationPolicyValues) {
                     properties.stateComputeMode.setProperties(requiresCoherency, largeGrf ? 256 : 128, threadArbitrationPolicy, preemptionMode, *defaultHwInfo);
                     EXPECT_EQ(largeGrf, properties.stateComputeMode.largeGrfMode.value);
-                    EXPECT_EQ(requiresCoherency, properties.stateComputeMode.isCoherencyRequired.value);
+                    if (scmPropertiesSupport.coherencyRequired) {
+                        EXPECT_EQ(requiresCoherency, properties.stateComputeMode.isCoherencyRequired.value);
+                    } else {
+                        EXPECT_EQ(-1, properties.stateComputeMode.isCoherencyRequired.value);
+                    }
                     EXPECT_EQ(-1, properties.stateComputeMode.zPassAsyncComputeThreadLimit.value);
                     EXPECT_EQ(-1, properties.stateComputeMode.pixelAsyncComputeThreadLimit.value);
                     EXPECT_EQ(threadArbitrationPolicy, properties.stateComputeMode.threadArbitrationPolicy.value);
 
-                    if (isDevicePreemptionModeTrackedInScm) {
+                    if (scmPropertiesSupport.devicePreemptionMode) {
                         EXPECT_EQ(preemptionMode, static_cast<PreemptionMode>(properties.stateComputeMode.devicePreemptionMode.value));
                     } else {
                         EXPECT_EQ(-1, properties.stateComputeMode.devicePreemptionMode.value);
@@ -98,19 +136,31 @@ TEST(StreamPropertiesTests, whenSettingStateComputeModePropertiesThenCorrectValu
     for (auto forceZPassAsyncComputeThreadLimit : ::testing::Bool()) {
         DebugManager.flags.ForceZPassAsyncComputeThreadLimit.set(forceZPassAsyncComputeThreadLimit);
         properties.stateComputeMode.setProperties(false, 0u, 0u, PreemptionMode::MidBatch, *defaultHwInfo);
-        EXPECT_EQ(forceZPassAsyncComputeThreadLimit, properties.stateComputeMode.zPassAsyncComputeThreadLimit.value);
+        if (scmPropertiesSupport.zPassAsyncComputeThreadLimit) {
+            EXPECT_EQ(forceZPassAsyncComputeThreadLimit, properties.stateComputeMode.zPassAsyncComputeThreadLimit.value);
+        } else {
+            EXPECT_EQ(-1, properties.stateComputeMode.zPassAsyncComputeThreadLimit.value);
+        }
     }
 
     for (auto forcePixelAsyncComputeThreadLimit : ::testing::Bool()) {
         DebugManager.flags.ForcePixelAsyncComputeThreadLimit.set(forcePixelAsyncComputeThreadLimit);
         properties.stateComputeMode.setProperties(false, 0u, 0u, PreemptionMode::MidBatch, *defaultHwInfo);
-        EXPECT_EQ(forcePixelAsyncComputeThreadLimit, properties.stateComputeMode.pixelAsyncComputeThreadLimit.value);
+        if (scmPropertiesSupport.pixelAsyncComputeThreadLimit) {
+            EXPECT_EQ(forcePixelAsyncComputeThreadLimit, properties.stateComputeMode.pixelAsyncComputeThreadLimit.value);
+        } else {
+            EXPECT_EQ(-1, properties.stateComputeMode.pixelAsyncComputeThreadLimit.value);
+        }
     }
 
     for (auto threadArbitrationPolicy : threadArbitrationPolicyValues) {
         DebugManager.flags.OverrideThreadArbitrationPolicy.set(threadArbitrationPolicy);
         properties.stateComputeMode.setProperties(false, 0u, 0u, PreemptionMode::MidBatch, *defaultHwInfo);
-        EXPECT_EQ(threadArbitrationPolicy, properties.stateComputeMode.threadArbitrationPolicy.value);
+        if (scmPropertiesSupport.threadArbitrationPolicy) {
+            EXPECT_EQ(threadArbitrationPolicy, properties.stateComputeMode.threadArbitrationPolicy.value);
+        } else {
+            EXPECT_EQ(-1, properties.stateComputeMode.threadArbitrationPolicy.value);
+        }
     }
 }
 
@@ -146,11 +196,15 @@ void verifyIsDirty() {
 }
 
 TEST(StreamPropertiesTests, givenVariousStatesOfStateComputeModePropertiesWhenIsDirtyIsQueriedThenCorrectValueIsReturned) {
-    verifyIsDirty<StateComputeModeProperties, &getAllStateComputeModeProperties>();
+    verifyIsDirty<StateComputeModeProperties, getAllStateComputeModeProperties>();
 }
 
 TEST(StreamPropertiesTests, givenVariousStatesOfFrontEndPropertiesWhenIsDirtyIsQueriedThenCorrectValueIsReturned) {
     verifyIsDirty<FrontEndProperties, getAllFrontEndProperties>();
+}
+
+TEST(StreamPropertiesTests, givenVariousStatesOfPipelineSelectPropertiesWhenIsDirtyIsQueriedThenCorrectValueIsReturned) {
+    verifyIsDirty<PipelineSelectProperties, getAllPipelineSelectProperties>();
 }
 
 template <typename PropertiesT, getAllPropertiesFunctionPtr<PropertiesT> getAllProperties>
@@ -195,4 +249,89 @@ TEST(StreamPropertiesTests, givenOtherStateComputeModePropertiesStructWhenSetPro
 
 TEST(StreamPropertiesTests, givenOtherFrontEndPropertiesStructWhenSetPropertiesIsCalledThenCorrectValuesAreSet) {
     verifySettingPropertiesFromOtherStruct<FrontEndProperties, getAllFrontEndProperties>();
+}
+
+TEST(StreamPropertiesTests, givenOtherPipelineSelectPropertiesStructWhenSetPropertiesIsCalledThenCorrectValuesAreSet) {
+    verifySettingPropertiesFromOtherStruct<PipelineSelectProperties, getAllPipelineSelectProperties>();
+}
+
+TEST(StreamPropertiesTests, givenSingleDispatchCcsFrontEndPropertyWhenSettingPropertyAndCheckIfSupportedThenExpectCorrectState) {
+    FrontEndPropertiesSupport fePropertiesSupport{};
+    auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, *defaultHwInfo);
+
+    MockFrontEndProperties feProperties{};
+    EXPECT_FALSE(feProperties.propertiesSupportLoaded);
+
+    int32_t engineInstancedDevice = 1;
+
+    feProperties.setPropertySingleSliceDispatchCcsMode(engineInstancedDevice, *defaultHwInfo);
+    EXPECT_TRUE(feProperties.propertiesSupportLoaded);
+    if (fePropertiesSupport.singleSliceDispatchCcsMode) {
+        EXPECT_TRUE(feProperties.singleSliceDispatchCcsMode.isDirty);
+        EXPECT_EQ(engineInstancedDevice, feProperties.singleSliceDispatchCcsMode.value);
+    } else {
+        EXPECT_FALSE(feProperties.singleSliceDispatchCcsMode.isDirty);
+        EXPECT_EQ(-1, feProperties.singleSliceDispatchCcsMode.value);
+    }
+
+    feProperties.frontEndPropertiesSupport.singleSliceDispatchCcsMode = true;
+    engineInstancedDevice = 2;
+
+    feProperties.setPropertySingleSliceDispatchCcsMode(engineInstancedDevice, *defaultHwInfo);
+    EXPECT_TRUE(feProperties.singleSliceDispatchCcsMode.isDirty);
+    EXPECT_EQ(engineInstancedDevice, feProperties.singleSliceDispatchCcsMode.value);
+}
+
+TEST(StreamPropertiesTests, whenSettingPipelineSelectPropertiesThenCorrectValueIsSet) {
+    StreamProperties properties;
+
+    PipelineSelectPropertiesSupport pipelineSelectPropertiesSupport = {};
+    auto hwInfoConfig = HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    hwInfoConfig->fillPipelineSelectPropertiesSupportStructure(pipelineSelectPropertiesSupport, *defaultHwInfo);
+
+    for (auto modeSelected : ::testing::Bool()) {
+        for (auto mediaSamplerDopClockGate : ::testing::Bool()) {
+            for (auto systolicMode : ::testing::Bool()) {
+                properties.pipelineSelect.setProperties(modeSelected, mediaSamplerDopClockGate, systolicMode, *defaultHwInfo);
+
+                if (pipelineSelectPropertiesSupport.modeSelected) {
+                    EXPECT_EQ(modeSelected, properties.pipelineSelect.modeSelected.value);
+                } else {
+                    EXPECT_EQ(-1, properties.pipelineSelect.modeSelected.value);
+                }
+                if (pipelineSelectPropertiesSupport.mediaSamplerDopClockGate) {
+                    EXPECT_EQ(mediaSamplerDopClockGate, properties.pipelineSelect.mediaSamplerDopClockGate.value);
+                } else {
+                    EXPECT_EQ(-1, properties.pipelineSelect.mediaSamplerDopClockGate.value);
+                }
+                if (pipelineSelectPropertiesSupport.systolicMode) {
+                    EXPECT_EQ(systolicMode, properties.pipelineSelect.systolicMode.value);
+                } else {
+                    EXPECT_EQ(-1, properties.pipelineSelect.systolicMode.value);
+                }
+            }
+        }
+    }
+}
+
+TEST(StreamPropertiesTests, givenModeSelectPipelineSelectPropertyNotSupportedWhenSettingPropertyAndCheckIfDirtyThenExpectCleanState) {
+    MockPipelineSelectProperties pipeProperties{};
+    pipeProperties.propertiesSupportLoaded = true;
+    pipeProperties.pipelineSelectPropertiesSupport.modeSelected = false;
+    pipeProperties.pipelineSelectPropertiesSupport.mediaSamplerDopClockGate = true;
+    pipeProperties.pipelineSelectPropertiesSupport.systolicMode = true;
+
+    constexpr bool constState = false;
+    bool changingState = false;
+    pipeProperties.setProperties(changingState, constState, constState, *defaultHwInfo);
+
+    // expect dirty as media and systolic changes from initial registered
+    EXPECT_TRUE(pipeProperties.isDirty());
+
+    changingState = !changingState;
+    pipeProperties.setProperties(changingState, constState, constState, *defaultHwInfo);
+
+    // expect clean as changed modeSelected is not supported
+    EXPECT_FALSE(pipeProperties.isDirty());
 }

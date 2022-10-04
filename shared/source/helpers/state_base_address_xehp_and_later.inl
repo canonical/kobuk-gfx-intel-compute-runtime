@@ -15,6 +15,18 @@
 namespace NEO {
 
 template <typename GfxFamily>
+void StateBaseAddressHelper<GfxFamily>::programStateBaseAddressIntoCommandStream(StateBaseAddressHelperArgs<GfxFamily> &args,
+                                                                                 NEO::LinearStream &commandStream) {
+    StateBaseAddressHelper<GfxFamily>::programStateBaseAddressIntoCommandStreamBase(args, commandStream);
+
+    auto &hwInfoConfig = *HwInfoConfig::get(args.hwInfo->platform.eProductFamily);
+    if (hwInfoConfig.isAdditionalStateBaseAddressWARequired(*args.hwInfo)) {
+        auto cmdSpace = StateBaseAddressHelper<GfxFamily>::getSpaceForSbaCmd(commandStream);
+        *cmdSpace = *args.stateBaseAddressCmd;
+    }
+}
+
+template <typename GfxFamily>
 void setSbaStatelessCompressionParams(typename GfxFamily::STATE_BASE_ADDRESS *stateBaseAddress, MemoryCompressionState memoryCompressionState) {
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
 
@@ -74,11 +86,17 @@ void StateBaseAddressHelper<GfxFamily>::appendStateBaseAddressParameters(
         setSbaStatelessCompressionParams<GfxFamily>(args.stateBaseAddressCmd, args.memoryCompressionState);
     }
 
-    if (args.stateBaseAddressCmd->getStatelessDataPortAccessMemoryObjectControlState() == args.gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) && DebugManager.flags.ForceL1Caching.get() != 0) {
-        args.stateBaseAddressCmd->setStatelessDataPortAccessMemoryObjectControlState(args.gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST));
+    bool l3MocsEnabled = (args.stateBaseAddressCmd->getStatelessDataPortAccessMemoryObjectControlState() >> 1) == (args.gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) >> 1);
+    bool constMocsAllowed = (l3MocsEnabled && (DebugManager.flags.ForceL1Caching.get() != 0));
+
+    if (constMocsAllowed) {
+        auto constMocsIndex = args.gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST);
+        GmmHelper::applyMocsEncryptionBit(constMocsIndex);
+
+        args.stateBaseAddressCmd->setStatelessDataPortAccessMemoryObjectControlState(constMocsIndex);
     }
 
-    appendExtraCacheSettings(args.stateBaseAddressCmd, args.gmmHelper->getHardwareInfo());
+    appendExtraCacheSettings(args);
 }
 
 template <typename GfxFamily>

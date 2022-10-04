@@ -60,8 +60,10 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::hostPtrMap;
     using BaseClass::indirectAllocationsAllowed;
     using BaseClass::initialize;
+    using BaseClass::multiReturnPointCommandList;
     using BaseClass::partitionCount;
     using BaseClass::patternAllocations;
+    using BaseClass::pipelineSelectStateTracking;
     using BaseClass::requiredStreamState;
     using BaseClass::unifiedMemoryControls;
     using BaseClass::updateStreamProperties;
@@ -80,23 +82,23 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     }
 
     ze_result_t appendLaunchMultipleKernelsIndirect(uint32_t numKernels,
-                                                    const ze_kernel_handle_t *phKernels,
+                                                    const ze_kernel_handle_t *kernelHandles,
                                                     const uint32_t *pNumLaunchArguments,
                                                     const ze_group_count_t *pLaunchArgumentsBuffer,
                                                     ze_event_handle_t hEvent,
                                                     uint32_t numWaitEvents,
                                                     ze_event_handle_t *phWaitEvents) override {
         appendEventMultipleKernelIndirectEventHandleValue = hEvent;
-        return BaseClass::appendLaunchMultipleKernelsIndirect(numKernels, phKernels, pNumLaunchArguments, pLaunchArgumentsBuffer,
+        return BaseClass::appendLaunchMultipleKernelsIndirect(numKernels, kernelHandles, pNumLaunchArguments, pLaunchArgumentsBuffer,
                                                               hEvent, numWaitEvents, phWaitEvents);
     }
 
-    ze_result_t appendLaunchKernelIndirect(ze_kernel_handle_t hKernel,
+    ze_result_t appendLaunchKernelIndirect(ze_kernel_handle_t kernelHandle,
                                            const ze_group_count_t *pDispatchArgumentsBuffer,
                                            ze_event_handle_t hEvent, uint32_t numWaitEvents,
                                            ze_event_handle_t *phWaitEvents) override {
         appendEventKernelIndirectEventHandleValue = hEvent;
-        return BaseClass::appendLaunchKernelIndirect(hKernel, pDispatchArgumentsBuffer,
+        return BaseClass::appendLaunchKernelIndirect(kernelHandle, pDispatchArgumentsBuffer,
                                                      hEvent, numWaitEvents, phWaitEvents);
     }
 
@@ -120,7 +122,9 @@ struct WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>
     using BaseClass::csr;
     using BaseClass::finalStreamState;
     using BaseClass::isFlushTaskSubmissionEnabled;
+    using BaseClass::multiReturnPointCommandList;
     using BaseClass::partitionCount;
+    using BaseClass::pipelineSelectStateTracking;
     using BaseClass::requiredStreamState;
 
     WhiteBox() : BaseClass(BaseClass::defaultNumIddsPerBlock) {}
@@ -130,6 +134,7 @@ template <GFXCORE_FAMILY gfxCoreFamily>
 struct MockCommandListImmediate : public CommandListCoreFamilyImmediate<gfxCoreFamily> {
     using CommandListCoreFamilyImmediate<gfxCoreFamily>::requiredStreamState;
     using CommandListCoreFamilyImmediate<gfxCoreFamily>::containsAnyKernel;
+    using CommandListCoreFamilyImmediate<gfxCoreFamily>::indirectAllocationsAllowed;
 };
 
 template <>
@@ -141,8 +146,11 @@ struct WhiteBox<::L0::CommandList> : public ::L0::CommandListImp {
     using BaseClass::commandListPreemptionMode;
     using BaseClass::csr;
     using BaseClass::initialize;
+    using BaseClass::isFlushTaskSubmissionEnabled;
+    using BaseClass::multiReturnPointCommandList;
     using BaseClass::nonImmediateLogicalStateHelper;
     using BaseClass::partitionCount;
+    using BaseClass::pipelineSelectStateTracking;
 
     WhiteBox(Device *device);
     ~WhiteBox() override;
@@ -160,29 +168,29 @@ struct MockCommandList : public CommandList {
     ADDMETHOD_NOBASE(destroy, ze_result_t, ZE_RESULT_SUCCESS, ());
 
     ADDMETHOD_NOBASE(appendLaunchKernel, ze_result_t, ZE_RESULT_SUCCESS,
-                     (ze_kernel_handle_t hFunction,
+                     (ze_kernel_handle_t kernelHandle,
                       const ze_group_count_t *threadGroupDimensions,
                       ze_event_handle_t hEvent, uint32_t numWaitEvents,
                       ze_event_handle_t *phWaitEvents,
                       const CmdListKernelLaunchParams &launchParams));
 
     ADDMETHOD_NOBASE(appendLaunchCooperativeKernel, ze_result_t, ZE_RESULT_SUCCESS,
-                     (ze_kernel_handle_t hKernel,
-                      const ze_group_count_t *pLaunchFuncArgs,
+                     (ze_kernel_handle_t kernelHandle,
+                      const ze_group_count_t *launchKernelArgs,
                       ze_event_handle_t hSignalEvent,
                       uint32_t numWaitEvents,
                       ze_event_handle_t *phWaitEvents));
 
     ADDMETHOD_NOBASE(appendLaunchKernelIndirect, ze_result_t, ZE_RESULT_SUCCESS,
-                     (ze_kernel_handle_t hFunction,
+                     (ze_kernel_handle_t kernelHandle,
                       const ze_group_count_t *pDispatchArgumentsBuffer,
                       ze_event_handle_t hEvent,
                       uint32_t numWaitEvents,
                       ze_event_handle_t *phWaitEvents));
 
     ADDMETHOD_NOBASE(appendLaunchMultipleKernelsIndirect, ze_result_t, ZE_RESULT_SUCCESS,
-                     (uint32_t numFunctions,
-                      const ze_kernel_handle_t *phFunctions,
+                     (uint32_t numKernels,
+                      const ze_kernel_handle_t *kernelHandles,
                       const uint32_t *pNumLaunchArguments,
                       const ze_group_count_t *pLaunchArgumentsBuffer,
                       ze_event_handle_t hEvent,
@@ -502,14 +510,14 @@ class MockCommandListForAppendLaunchKernel : public WhiteBox<::L0::CommandListCo
 
   public:
     CmdListHelper cmdListHelper;
-    ze_result_t appendLaunchKernel(ze_kernel_handle_t hKernel,
+    ze_result_t appendLaunchKernel(ze_kernel_handle_t kernelHandle,
                                    const ze_group_count_t *threadGroupDimensions,
                                    ze_event_handle_t hEvent,
                                    uint32_t numWaitEvents,
                                    ze_event_handle_t *phWaitEvents,
                                    const CmdListKernelLaunchParams &launchParams) override {
 
-        const auto kernel = Kernel::fromHandle(hKernel);
+        const auto kernel = Kernel::fromHandle(kernelHandle);
         cmdListHelper.isaAllocation = kernel->getIsaAllocation();
         cmdListHelper.residencyContainer = kernel->getResidencyContainer();
         cmdListHelper.groupSize = kernel->getGroupSize();

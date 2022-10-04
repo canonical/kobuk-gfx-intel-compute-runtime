@@ -9,7 +9,7 @@ target_sources(neo_shared_tests PRIVATE
                ${CMAKE_CURRENT_SOURCE_DIR}/address_mapper_tests.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/alignment_selector_tests.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/deferrable_allocation_deletion_tests.cpp
-               ${CMAKE_CURRENT_SOURCE_DIR}/deferred_deleter_mt_tests.cpp
+               ${CMAKE_CURRENT_SOURCE_DIR}/deferred_deleter_tests.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/gfx_partition_tests.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/graphics_allocation_tests.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/host_ptr_manager_tests.cpp
@@ -27,6 +27,7 @@ target_sources(neo_shared_tests PRIVATE
                ${CMAKE_CURRENT_SOURCE_DIR}/storage_info_tests.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/surface_tests.cpp
                ${CMAKE_CURRENT_SOURCE_DIR}/unified_memory_manager_cache_tests.cpp
+               ${CMAKE_CURRENT_SOURCE_DIR}/unified_memory_manager_tests.cpp
 )
 
 add_subdirectories()

@@ -15,6 +15,7 @@
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdqueue.h"
+#include "level_zero/core/test/unit_tests/mocks/mock_event.h"
 
 namespace L0 {
 namespace ult {
@@ -184,6 +185,14 @@ HWTEST_F(CommandListAppendEventReset, givenCmdlistWhenAppendingEventResetThenEve
     }
 }
 
+HWTEST_F(CommandListAppendEventReset, givenCmdlistWhenAppendingEventResetThenIsCompletedResetted) {
+    MockEvent event;
+    event.isCompleted = true;
+    auto result = commandList->appendEventReset(event.toHandle());
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_FALSE(event.isCompleted);
+}
+
 HWTEST2_F(CommandListAppendEventReset, givenImmediateCmdlistWhenAppendingEventResetThenCommandsAreExecuted, IsAtLeastSkl) {
     const ze_command_queue_desc_t desc = {};
     bool internalEngine = true;
@@ -327,7 +336,7 @@ HWTEST2_F(CommandListAppendEventReset,
     auto gpuAddress = event->getGpuAddress(device) + event->getContextEndOffset();
     auto &hwInfo = device->getNEODevice()->getHardwareInfo();
 
-    size_t expectedSize = NEO::MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(hwInfo) +
+    size_t expectedSize = NEO::MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(hwInfo, false) +
                           ((packets - 1) * sizeof(MI_STORE_DATA_IMM)) +
                           commandList->estimateBufferSizeMultiTileBarrier(hwInfo);
     size_t usedSize = cmdStream->getUsed();

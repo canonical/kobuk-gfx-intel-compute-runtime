@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/test/common/mocks/mock_command_stream_receiver.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
@@ -52,8 +53,8 @@ HWTEST2_F(MultiTileCopyEngineCommandListTest, GivenMultiTileDeviceWhenCreatingCo
 
 using CommandListExecuteImmediate = Test<DeviceFixture>;
 HWTEST2_F(CommandListExecuteImmediate, whenExecutingCommandListImmediateWithFlushTaskThenRequiredStreamStateIsCorrectlyReported, IsAtLeastSkl) {
-    auto &hwHelper = NEO::HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
-    auto &hwInfoConfig = *NEO::HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    auto &hwHelper = NEO::HwHelper::get(device->getHwInfo().platform.eRenderCoreFamily);
+    auto &hwInfoConfig = *NEO::HwInfoConfig::get(device->getHwInfo().platform.eProductFamily);
     std::unique_ptr<L0::CommandList> commandList;
     const ze_command_queue_desc_t desc = {};
     ze_result_t returnValue;
@@ -70,12 +71,22 @@ HWTEST2_F(CommandListExecuteImmediate, whenExecutingCommandListImmediateWithFlus
     commandListImmediate.requiredStreamState.stateComputeMode.threadArbitrationPolicy.value = NEO::ThreadArbitrationPolicy::RoundRobin;
     commandListImmediate.executeCommandListImmediateWithFlushTask(false);
 
-    int expectedDisableOverdispatch = hwInfoConfig.isDisableOverdispatchAvailable(*defaultHwInfo);
-    bool expectedIsCoherencyRequired = hwHelper.forceNonGpuCoherencyWA(true);
-    int expectedLargeGrfMode = hwInfoConfig.isGrfNumReportedWithScm() ? 1 : -1;
-    int expectedThreadArbitrationPolicy = hwInfoConfig.isThreadArbitrationPolicyReportedWithScm() ? NEO::ThreadArbitrationPolicy::RoundRobin : -1;
-    EXPECT_EQ(1, currentCsrStreamProperties.frontEndState.computeDispatchAllWalkerEnable.value);
-    EXPECT_EQ(1, currentCsrStreamProperties.frontEndState.disableEUFusion.value);
+    NEO::StateComputeModePropertiesSupport scmPropertiesSupport = {};
+    hwInfoConfig.fillScmPropertiesSupportStructure(scmPropertiesSupport);
+    NEO::FrontEndPropertiesSupport frontEndPropertiesSupport = {};
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(frontEndPropertiesSupport, device->getHwInfo());
+
+    int expectedDisableOverdispatch = frontEndPropertiesSupport.disableOverdispatch;
+    int32_t expectedIsCoherencyRequired = scmPropertiesSupport.coherencyRequired ? hwHelper.forceNonGpuCoherencyWA(true) : -1;
+    int expectedLargeGrfMode = scmPropertiesSupport.largeGrfMode ? 1 : -1;
+    int expectedThreadArbitrationPolicy = scmPropertiesSupport.threadArbitrationPolicy ? NEO::ThreadArbitrationPolicy::RoundRobin : -1;
+
+    int expectedComputeDispatchAllWalkerEnable = frontEndPropertiesSupport.computeDispatchAllWalker ? 1 : -1;
+    int expectedDisableEuFusion = frontEndPropertiesSupport.disableEuFusion ? 1 : -1;
+    expectedDisableOverdispatch = frontEndPropertiesSupport.disableOverdispatch ? expectedDisableOverdispatch : -1;
+
+    EXPECT_EQ(expectedComputeDispatchAllWalkerEnable, currentCsrStreamProperties.frontEndState.computeDispatchAllWalkerEnable.value);
+    EXPECT_EQ(expectedDisableEuFusion, currentCsrStreamProperties.frontEndState.disableEUFusion.value);
     EXPECT_EQ(expectedDisableOverdispatch, currentCsrStreamProperties.frontEndState.disableOverdispatch.value);
     EXPECT_EQ(expectedIsCoherencyRequired, currentCsrStreamProperties.stateComputeMode.isCoherencyRequired.value);
     EXPECT_EQ(expectedLargeGrfMode, currentCsrStreamProperties.stateComputeMode.largeGrfMode.value);
@@ -89,12 +100,18 @@ HWTEST2_F(CommandListExecuteImmediate, whenExecutingCommandListImmediateWithFlus
     commandListImmediate.requiredStreamState.stateComputeMode.threadArbitrationPolicy.value = NEO::ThreadArbitrationPolicy::AgeBased;
     commandListImmediate.executeCommandListImmediateWithFlushTask(false);
 
-    expectedLargeGrfMode = hwInfoConfig.isGrfNumReportedWithScm() ? 0 : -1;
-    expectedThreadArbitrationPolicy = hwInfoConfig.isThreadArbitrationPolicyReportedWithScm() ? NEO::ThreadArbitrationPolicy::AgeBased : -1;
-    EXPECT_EQ(0, currentCsrStreamProperties.frontEndState.computeDispatchAllWalkerEnable.value);
-    EXPECT_EQ(0, currentCsrStreamProperties.frontEndState.disableEUFusion.value);
-    EXPECT_EQ(0, currentCsrStreamProperties.frontEndState.disableOverdispatch.value);
-    EXPECT_EQ(0, currentCsrStreamProperties.stateComputeMode.isCoherencyRequired.value);
+    expectedLargeGrfMode = scmPropertiesSupport.largeGrfMode ? 0 : -1;
+    expectedIsCoherencyRequired = scmPropertiesSupport.coherencyRequired ? 0 : -1;
+    expectedThreadArbitrationPolicy = scmPropertiesSupport.threadArbitrationPolicy ? NEO::ThreadArbitrationPolicy::AgeBased : -1;
+
+    expectedComputeDispatchAllWalkerEnable = frontEndPropertiesSupport.computeDispatchAllWalker ? 0 : -1;
+    expectedDisableOverdispatch = frontEndPropertiesSupport.disableOverdispatch ? 0 : -1;
+    expectedDisableEuFusion = frontEndPropertiesSupport.disableEuFusion ? 0 : -1;
+
+    EXPECT_EQ(expectedComputeDispatchAllWalkerEnable, currentCsrStreamProperties.frontEndState.computeDispatchAllWalkerEnable.value);
+    EXPECT_EQ(expectedDisableEuFusion, currentCsrStreamProperties.frontEndState.disableEUFusion.value);
+    EXPECT_EQ(expectedDisableOverdispatch, currentCsrStreamProperties.frontEndState.disableOverdispatch.value);
+    EXPECT_EQ(expectedIsCoherencyRequired, currentCsrStreamProperties.stateComputeMode.isCoherencyRequired.value);
     EXPECT_EQ(expectedLargeGrfMode, currentCsrStreamProperties.stateComputeMode.largeGrfMode.value);
     EXPECT_EQ(expectedThreadArbitrationPolicy, currentCsrStreamProperties.stateComputeMode.threadArbitrationPolicy.value);
 }
@@ -629,6 +646,52 @@ HWTEST2_F(CommandListTest, givenComputeCommandListWhenMemoryFillInUsmDeviceThenB
 TEST(CommandList, whenAsMutableIsCalledNullptrIsReturned) {
     MockCommandList cmdList;
     EXPECT_EQ(nullptr, cmdList.asMutable());
+}
+class MockCommandQueueIndirectAccess : public Mock<CommandQueue> {
+  public:
+    MockCommandQueueIndirectAccess(L0::Device *device, NEO::CommandStreamReceiver *csr, const ze_command_queue_desc_t *desc) : Mock(device, csr, desc) {}
+    void handleIndirectAllocationResidency(UnifiedMemoryControls unifiedMemoryControls, std::unique_lock<std::mutex> &lockForIndirect) override {
+        handleIndirectAllocationResidencyCalledTimes++;
+    }
+    uint32_t handleIndirectAllocationResidencyCalledTimes = 0;
+};
+
+HWTEST2_F(CommandListTest, givenCmdListWithIndirectAccessWhenExecutingCommandListImmediateWithFlushTaskThenHandleIndirectAccessCalled, IsAtLeastSkl) {
+    ze_command_queue_desc_t desc = {};
+    desc.mode = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
+
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::createImmediate(productFamily, device, &desc, false, NEO::EngineGroupType::RenderCompute, returnValue));
+    auto &commandListImmediate = static_cast<MockCommandListImmediate<gfxCoreFamily> &>(*commandList);
+
+    MockCommandStreamReceiver mockCommandStreamReceiver(*neoDevice->executionEnvironment, neoDevice->getRootDeviceIndex(), neoDevice->getDeviceBitfield());
+    MockCommandQueueIndirectAccess mockCommandQueue(device, &mockCommandStreamReceiver, &desc);
+
+    auto oldCommandQueue = commandList->cmdQImmediate;
+    commandList->cmdQImmediate = &mockCommandQueue;
+    commandListImmediate.indirectAllocationsAllowed = true;
+    commandListImmediate.executeCommandListImmediateWithFlushTask(false);
+    EXPECT_EQ(mockCommandQueue.handleIndirectAllocationResidencyCalledTimes, 1u);
+    commandList->cmdQImmediate = oldCommandQueue;
+}
+
+HWTEST2_F(CommandListTest, givenCmdListWithNoIndirectAccessWhenExecutingCommandListImmediateWithFlushTaskThenHandleIndirectAccessNotCalled, IsAtLeastSkl) {
+    ze_command_queue_desc_t desc = {};
+    desc.mode = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
+
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::createImmediate(productFamily, device, &desc, false, NEO::EngineGroupType::RenderCompute, returnValue));
+    auto &commandListImmediate = static_cast<MockCommandListImmediate<gfxCoreFamily> &>(*commandList);
+
+    MockCommandStreamReceiver mockCommandStreamReceiver(*neoDevice->executionEnvironment, neoDevice->getRootDeviceIndex(), neoDevice->getDeviceBitfield());
+    MockCommandQueueIndirectAccess mockCommandQueue(device, &mockCommandStreamReceiver, &desc);
+
+    auto oldCommandQueue = commandList->cmdQImmediate;
+    commandList->cmdQImmediate = &mockCommandQueue;
+    commandListImmediate.indirectAllocationsAllowed = false;
+    commandListImmediate.executeCommandListImmediateWithFlushTask(false);
+    EXPECT_EQ(mockCommandQueue.handleIndirectAllocationResidencyCalledTimes, 0u);
+    commandList->cmdQImmediate = oldCommandQueue;
 }
 
 } // namespace ult

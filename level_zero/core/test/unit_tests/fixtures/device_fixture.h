@@ -31,7 +31,7 @@ namespace ult {
 class MockBuiltins;
 
 struct DeviceFixture {
-    NEO::MockCompilerEnableGuard compilerMock = NEO::MockCompilerEnableGuard(true);
+
     void setUp();
     void tearDown();
     void setupWithExecutionEnvironment(NEO::ExecutionEnvironment &executionEnvironment);
@@ -45,7 +45,7 @@ struct DeviceFixture {
 };
 
 struct DriverHandleGetMemHandlePtrMock : public L0::DriverHandleImp {
-    void *importFdHandle(ze_device_handle_t hDevice, ze_ipc_memory_flags_t flags, uint64_t handle, NEO::GraphicsAllocation **pAloc) override {
+    void *importFdHandle(NEO::Device *neoDevice, ze_ipc_memory_flags_t flags, uint64_t handle, NEO::GraphicsAllocation **pAloc) override {
         if (failHandleLookup) {
             return nullptr;
         }
@@ -65,7 +65,7 @@ struct DriverHandleGetMemHandlePtrMock : public L0::DriverHandleImp {
 };
 
 struct GetMemHandlePtrTestFixture {
-    NEO::MockCompilerEnableGuard compilerMock = NEO::MockCompilerEnableGuard(true);
+
     void setUp();
     void tearDown();
     NEO::MemoryManager *prevMemoryManager = nullptr;
@@ -79,7 +79,7 @@ struct GetMemHandlePtrTestFixture {
 struct PageFaultDeviceFixture {
     PageFaultDeviceFixture();
     ~PageFaultDeviceFixture();
-    NEO::MockCompilerEnableGuard compilerMock = NEO::MockCompilerEnableGuard(true);
+
     void setUp();
     void tearDown();
 
@@ -93,7 +93,7 @@ struct PageFaultDeviceFixture {
 };
 
 struct MultiDeviceFixture {
-    NEO::MockCompilerEnableGuard compilerMock = NEO::MockCompilerEnableGuard(true);
+
     void setUp();
     void tearDown();
 
@@ -134,13 +134,12 @@ struct MultipleDevicesWithCustomHwInfo {
     std::unique_ptr<UltDeviceFactory> deviceFactory;
 
     const uint32_t numRootDevices = 1u;
-    const uint32_t numSubDevices = 2u;
+    uint32_t numSubDevices = 2u;
 };
 
 struct SingleRootMultiSubDeviceFixtureWithImplicitScalingImpl : public MultiDeviceFixture {
 
     SingleRootMultiSubDeviceFixtureWithImplicitScalingImpl(uint32_t copyEngineCount, uint32_t implicitScaling) : implicitScaling(implicitScaling), expectedCopyEngineCount(copyEngineCount){};
-    NEO::MockCompilerEnableGuard compilerMock = NEO::MockCompilerEnableGuard(true);
 
     DebugManagerStateRestore restorer;
     std::unique_ptr<Mock<L0::DriverHandleImp>> driverHandle;

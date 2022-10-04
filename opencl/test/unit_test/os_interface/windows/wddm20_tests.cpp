@@ -816,11 +816,11 @@ TEST_F(Wddm20Tests, GivenMultipleHandlesWhenMakingResidentThenBytesToTrimIsCorre
 
 TEST_F(Wddm20Tests, WhenMakingNonResidentAndEvictNotNeededThenEvictIsCalledWithProperFlagSet) {
     DebugManagerStateRestore restorer{};
-    DebugManager.flags.PlaformSupportEvictWhenNecessaryFlag.set(1);
+    DebugManager.flags.PlaformSupportEvictIfNecessaryFlag.set(1);
 
     auto productFamily = rootDeviceEnvironment->getHardwareInfo()->platform.eProductFamily;
     HwInfoConfig *hwConfig = HwInfoConfig::get(productFamily);
-    wddm->setPlatformSupportEvictWhenNecessaryFlag(*hwConfig);
+    wddm->setPlatformSupportEvictIfNecessaryFlag(*hwConfig);
 
     D3DKMT_HANDLE handle = (D3DKMT_HANDLE)0x1234;
 
@@ -1383,15 +1383,6 @@ TEST_F(Wddm20Tests, givenWddmWhenDiscoverDevicesAndFilterDeviceIdIsTheSameAsTheE
     EXPECT_NE(nullptr, hwDeviceIds[0].get());
 }
 
-TEST_F(Wddm20Tests, givenWddmWhenDiscoverDevicesAndForceDeviceIdIsTheSameAsTheExistingDeviceThenReturnTheAdapter) {
-    DebugManagerStateRestore stateRestore;
-    DebugManager.flags.ForceDeviceId.set("1234"); // Existing device Id
-    ExecutionEnvironment executionEnvironment;
-    auto hwDeviceIds = OSInterface::discoverDevices(executionEnvironment);
-    EXPECT_EQ(1u, hwDeviceIds.size());
-    EXPECT_NE(nullptr, hwDeviceIds[0].get());
-}
-
 TEST_F(WddmTest, WhenFeatureFlagHwQueueIsDisabledThenReturnWddm20Version) {
     wddm->featureTable->flags.ftrWddmHwQueues = 0;
     EXPECT_EQ(WddmVersion::WDDM_2_0, wddm->getWddmVersion());
@@ -1606,6 +1597,17 @@ TEST_F(WddmTest, GivenResidencyLoggingEnabledWhenMakeResidentFailThenExpectTrimR
     //3 - one for open log, second for report allocations, 3rd for trim size
     EXPECT_EQ(3u, NEO::IoFunctions::mockVfptrinfCalled);
     EXPECT_FALSE(logger->makeResidentCall);
+}
+
+TEST_F(WddmTest, GivenInvalidHandleAndCantTrimFurtherSetToTrueWhenCallingMakeResidentThenFalseIsReturned) {
+    wddm->callBaseMakeResident = true;
+
+    D3DKMT_HANDLE handle = INVALID_HANDLE;
+    uint64_t bytesToTrim = 4 * 4096;
+
+    bool retVal = wddm->makeResident(&handle, 1, true, &bytesToTrim, 0x1000);
+
+    EXPECT_FALSE(retVal);
 }
 
 TEST_F(WddmTest, GivenResidencyLoggingEnabledWhenEnterWaitCalledThenExpectInternalFlagOn) {

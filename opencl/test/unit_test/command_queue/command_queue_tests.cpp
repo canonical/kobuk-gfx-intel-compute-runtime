@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/command_stream/command_stream_receiver.h"
+#include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/command_stream/wait_status.h"
 #include "shared/source/helpers/array_count.h"
 #include "shared/source/helpers/basic_math.h"
@@ -2418,6 +2419,8 @@ HWTEST_F(KernelExecutionTypesTests, givenKernelWithDifferentExecutionTypeWhileDo
     size_t gws[3] = {63, 0, 0};
     auto &mockCsr = device->getUltCommandStreamReceiver<FamilyType>();
 
+    mockCsr.feSupportFlags.computeDispatchAllWalker = true;
+
     pKernel->setKernelExecutionType(CL_KERNEL_EXEC_INFO_CONCURRENT_TYPE_INTEL);
     mockCmdQ->enqueueKernel(pKernel, 1, nullptr, gws, nullptr, 0, nullptr, nullptr);
     EXPECT_EQ(mockCsr.lastKernelExecutionType, KernelExecutionType::Concurrent);
@@ -2638,6 +2641,36 @@ HWTEST_F(CommandQueueOnSpecificEngineTests, givenNotInitializedCcsOsContextWhenC
     MockCommandQueueHw<FamilyType> queue(&context, context.getDevice(0), properties);
     ASSERT_EQ(&osContext, queue.gpgpuEngine->osContext);
     EXPECT_TRUE(osContext.isInitialized());
+}
+
+TEST_F(MultiTileFixture, givenMultiSubDeviceAndCommandQueueUsingMainCopyEngineWhenReleaseMainCopyEngineThenDeviceAndSubdeviceSelectorReset) {
+    REQUIRE_BLITTER_OR_SKIP(defaultHwInfo.get());
+
+    auto device = platform()->getClDevice(0);
+    auto subDevice = device->getSubDevice(0);
+
+    const cl_device_id deviceId = device;
+    auto returnStatus = CL_SUCCESS;
+    auto context = clCreateContext(nullptr, 1, &deviceId, nullptr, nullptr, &returnStatus);
+    EXPECT_EQ(CL_SUCCESS, returnStatus);
+    EXPECT_NE(nullptr, context);
+
+    auto commandQueue = clCreateCommandQueueWithProperties(context, device, nullptr, &returnStatus);
+    EXPECT_EQ(CL_SUCCESS, returnStatus);
+    EXPECT_NE(nullptr, commandQueue);
+
+    auto neoQueue = castToObject<CommandQueue>(commandQueue);
+
+    device->getSelectorCopyEngine().isMainUsed.store(true);
+    subDevice->getSelectorCopyEngine().isMainUsed.store(true);
+
+    neoQueue->releaseMainCopyEngine();
+
+    EXPECT_FALSE(device->getSelectorCopyEngine().isMainUsed.load());
+    EXPECT_FALSE(subDevice->getSelectorCopyEngine().isMainUsed.load());
+
+    clReleaseCommandQueue(commandQueue);
+    clReleaseContext(context);
 }
 
 TEST_F(MultiTileFixture, givenSubDeviceWhenQueueIsCreatedThenItContainsProperDevice) {

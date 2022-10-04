@@ -28,6 +28,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass = CommandStreamReceiverHw<GfxFamily>;
 
   public:
+    using BaseClass::addPipeControlBefore3dState;
     using BaseClass::blitterDirectSubmission;
     using BaseClass::checkPlatformSupportsGpuIdleImplicitFlush;
     using BaseClass::checkPlatformSupportsNewResourceImplicitFlush;
@@ -37,6 +38,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::getCmdSizeForPrologue;
     using BaseClass::getScratchPatchAddress;
     using BaseClass::getScratchSpaceController;
+    using BaseClass::handleFrontEndStateTransition;
     using BaseClass::indirectHeap;
     using BaseClass::iohState;
     using BaseClass::isBlitterDirectSubmissionEnabled;
@@ -79,6 +81,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::downloadAllocationImpl;
     using BaseClass::CommandStreamReceiver::executionEnvironment;
     using BaseClass::CommandStreamReceiver::experimentalCmdBuffer;
+    using BaseClass::CommandStreamReceiver::feSupportFlags;
     using BaseClass::CommandStreamReceiver::flushStamp;
     using BaseClass::CommandStreamReceiver::globalFenceAllocation;
     using BaseClass::CommandStreamReceiver::gpuHangCheckPeriod;
@@ -90,13 +93,14 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::isEnginePrologueSent;
     using BaseClass::CommandStreamReceiver::isPreambleSent;
     using BaseClass::CommandStreamReceiver::isStateSipSent;
+    using BaseClass::CommandStreamReceiver::lastAdditionalKernelExecInfo;
     using BaseClass::CommandStreamReceiver::lastKernelExecutionType;
     using BaseClass::CommandStreamReceiver::lastMediaSamplerConfig;
     using BaseClass::CommandStreamReceiver::lastMemoryCompressionState;
     using BaseClass::CommandStreamReceiver::lastPreemptionMode;
     using BaseClass::CommandStreamReceiver::lastSentL3Config;
     using BaseClass::CommandStreamReceiver::lastSentUseGlobalAtomics;
-    using BaseClass::CommandStreamReceiver::lastSpecialPipelineSelectMode;
+    using BaseClass::CommandStreamReceiver::lastSystolicPipelineSelectMode;
     using BaseClass::CommandStreamReceiver::lastVmeSubslicesConfig;
     using BaseClass::CommandStreamReceiver::latestFlushedTaskCount;
     using BaseClass::CommandStreamReceiver::latestSentStatelessMocsConfig;
@@ -114,6 +118,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::scratchSpaceController;
     using BaseClass::CommandStreamReceiver::stallingCommandsOnNextFlushRequired;
     using BaseClass::CommandStreamReceiver::submissionAggregator;
+    using BaseClass::CommandStreamReceiver::systolicModeConfigurable;
     using BaseClass::CommandStreamReceiver::tagAddress;
     using BaseClass::CommandStreamReceiver::taskCount;
     using BaseClass::CommandStreamReceiver::taskLevel;
@@ -125,7 +130,6 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::userPauseConfirmation;
     using BaseClass::CommandStreamReceiver::waitForTaskCountAndCleanAllocationList;
     using BaseClass::CommandStreamReceiver::workPartitionAllocation;
-    ;
 
     UltCommandStreamReceiver(ExecutionEnvironment &executionEnvironment,
                              uint32_t rootDeviceIndex,

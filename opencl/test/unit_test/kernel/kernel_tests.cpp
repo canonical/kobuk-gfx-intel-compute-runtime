@@ -22,12 +22,12 @@
 #include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
+#include "shared/test/common/mocks/mock_cpu_page_fault_manager.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/mock_timestamp_container.h"
 #include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/utilities/base_object_utils.h"
-#include "shared/test/unit_test/page_fault_manager/mock_cpu_page_fault_manager.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/source/helpers/cl_hw_helper.h"
@@ -580,6 +580,7 @@ class CommandStreamReceiverMock : public CommandStreamReceiver {
     }
 
     void postInitFlagsSetup() override {}
+    void initializeDeviceWithFirstSubmission() override {}
 
     std::map<const void *, size_t> residency;
     std::unique_ptr<ExecutionEnvironment> mockExecutionEnvironment;
@@ -2028,7 +2029,7 @@ TEST(KernelImageDetectionTests, givenKernelWithNoImagesWhenItIsAskedIfItHasImage
 HWTEST_F(KernelResidencyTest, WhenMakingArgsResidentThenImageFromImageCheckIsCorrect) {
     ASSERT_NE(nullptr, pDevice);
 
-    //create NV12 image
+    // create NV12 image
     cl_mem_flags flags = CL_MEM_READ_ONLY | CL_MEM_HOST_NO_ACCESS;
     cl_image_format imageFormat;
     imageFormat.image_channel_data_type = CL_UNORM_INT8;
@@ -2049,7 +2050,7 @@ HWTEST_F(KernelResidencyTest, WhenMakingArgsResidentThenImageFromImageCheckIsCor
                       flags, 0, surfaceFormat, &imageDesc, nullptr, retVal));
     EXPECT_EQ(imageNV12->getMediaPlaneType(), 0u);
 
-    //create Y plane
+    // create Y plane
     imageFormat.image_channel_order = CL_R;
     flags = CL_MEM_READ_ONLY;
     surfaceFormat = Image::getSurfaceFormatFromTable(
@@ -2931,7 +2932,7 @@ TEST(KernelTest, whenKernelIsInitializedThenThreadArbitrationPolicyIsSetToDefaul
 
     auto &mockKernel = *mockKernelWithInternals.mockKernel;
     auto &hwHelper = HwHelper::get(deviceFactory.rootDevices[0]->getHardwareInfo().platform.eRenderCoreFamily);
-    EXPECT_EQ(hwHelper.getDefaultThreadArbitrationPolicy(), mockKernel.threadArbitrationPolicy);
+    EXPECT_EQ(hwHelper.getDefaultThreadArbitrationPolicy(), mockKernel.getDescriptor().kernelAttributes.threadArbitrationPolicy);
 }
 
 TEST(KernelTest, givenKernelWhenSettingAdditinalKernelExecInfoThenCorrectValueIsSet) {
@@ -3281,4 +3282,22 @@ TEST_F(KernelTests, GivenCorrectAllocationTypeThenFunctionCheckingSystemMemoryRe
             EXPECT_FALSE(ret);
         }
     }
+}
+
+TEST(KernelTest, givenKernelWithNumThreadsRequiredPatchTokenWhenQueryingEuThreadCountThenEuThreadCountIsReturned) {
+    cl_int retVal = CL_SUCCESS;
+    KernelInfo kernelInfo = {};
+
+    kernelInfo.kernelDescriptor.kernelAttributes.numThreadsRequired = 123U;
+    auto rootDeviceIndex = 0u;
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(NEO::defaultHwInfo.get(), rootDeviceIndex));
+    auto program = std::make_unique<MockProgram>(toClDeviceVector(*device));
+    MockKernel kernel(program.get(), kernelInfo, *device);
+
+    cl_uint euThreadCount;
+    size_t paramRetSize;
+    retVal = kernel.getWorkGroupInfo(CL_KERNEL_EU_THREAD_COUNT_INTEL, sizeof(cl_uint), &euThreadCount, &paramRetSize);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(sizeof(cl_uint), paramRetSize);
+    EXPECT_EQ(123U, euThreadCount);
 }

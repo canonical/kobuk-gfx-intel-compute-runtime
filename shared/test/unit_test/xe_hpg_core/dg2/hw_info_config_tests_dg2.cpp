@@ -54,26 +54,65 @@ DG2TEST_F(HwInfoConfigTestDg2, givenDg2ConfigWhenSetupHardwareInfoThenGtSystemIn
     EXPECT_FALSE(gtSystemInfo.IsDynamicallyPopulated);
 }
 
-DG2TEST_F(HwInfoConfigTestDg2, givenHwInfoErrorneousConfigStringThenThrow) {
-    HardwareInfo hwInfo = *defaultHwInfo;
-    GT_SYSTEM_INFO &gtSystemInfo = hwInfo.gtSystemInfo;
+DG2TEST_F(HwInfoConfigTestDg2, givenG10DevIdWhenAdditionalKernelExecInfoSupportCheckedThenCorrectValueIsReturned) {
+    auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    HardwareInfo myHwInfo = *defaultHwInfo;
+    myHwInfo.platform.usDeviceID = dg2G10DeviceIds[0];
+    EXPECT_FALSE(hwInfoConfig.isDisableOverdispatchAvailable(myHwInfo));
 
-    uint64_t config = 0xdeadbeef;
-    gtSystemInfo = {0};
-    EXPECT_ANY_THROW(hardwareInfoSetup[productFamily](&hwInfo, false, config));
-    EXPECT_EQ(0u, gtSystemInfo.SliceCount);
-    EXPECT_EQ(0u, gtSystemInfo.SubSliceCount);
-    EXPECT_EQ(0u, gtSystemInfo.DualSubSliceCount);
-    EXPECT_EQ(0u, gtSystemInfo.EUCount);
+    FrontEndPropertiesSupport fePropertiesSupport{};
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, myHwInfo);
+    EXPECT_FALSE(fePropertiesSupport.disableOverdispatch);
+
+    myHwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_B, myHwInfo);
+    EXPECT_TRUE(hwInfoConfig.isDisableOverdispatchAvailable(myHwInfo));
+
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, myHwInfo);
+    EXPECT_TRUE(fePropertiesSupport.disableOverdispatch);
 }
 
-DG2TEST_F(HwInfoConfigTestDg2, givenHwInfoConfigWhenAdditionalKernelExecInfoSupportCheckedThenCorrectValueIsReturned) {
-    const auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
-    auto hwInfo = *defaultHwInfo;
-    EXPECT_FALSE(hwInfoConfig.isDisableOverdispatchAvailable(hwInfo));
+DG2TEST_F(HwInfoConfigTestDg2, givenG11DevIdWhenIsDisableOverdispatchAvailableCalledThenTrueReturnedForAllSteppings) {
+    FrontEndPropertiesSupport fePropertiesSupport{};
+    auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    HardwareInfo myHwInfo = *defaultHwInfo;
 
-    hwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
-    EXPECT_TRUE(hwInfoConfig.isDisableOverdispatchAvailable(hwInfo));
+    myHwInfo.platform.usDeviceID = dg2G11DeviceIds[0];
+    myHwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_A0, myHwInfo);
+    EXPECT_TRUE(hwInfoConfig.isDisableOverdispatchAvailable(myHwInfo));
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, myHwInfo);
+    EXPECT_TRUE(fePropertiesSupport.disableOverdispatch);
+
+    myHwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_B, myHwInfo);
+    EXPECT_TRUE(hwInfoConfig.isDisableOverdispatchAvailable(myHwInfo));
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, myHwInfo);
+    EXPECT_TRUE(fePropertiesSupport.disableOverdispatch);
+
+    myHwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_C, myHwInfo);
+    EXPECT_TRUE(hwInfoConfig.isDisableOverdispatchAvailable(myHwInfo));
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, myHwInfo);
+    EXPECT_TRUE(fePropertiesSupport.disableOverdispatch);
+}
+
+DG2TEST_F(HwInfoConfigTestDg2, givenG12DevIdWhenIsDisableOverdispatchAvailableCalledThenTrueReturnedForAllSteppings) {
+    FrontEndPropertiesSupport fePropertiesSupport{};
+    auto &hwInfoConfig = *HwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
+    HardwareInfo myHwInfo = *defaultHwInfo;
+
+    myHwInfo.platform.usDeviceID = dg2G12DeviceIds[0];
+    myHwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_A0, myHwInfo);
+    EXPECT_TRUE(hwInfoConfig.isDisableOverdispatchAvailable(myHwInfo));
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, myHwInfo);
+    EXPECT_TRUE(fePropertiesSupport.disableOverdispatch);
+
+    myHwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_B, myHwInfo);
+    EXPECT_TRUE(hwInfoConfig.isDisableOverdispatchAvailable(myHwInfo));
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, myHwInfo);
+    EXPECT_TRUE(fePropertiesSupport.disableOverdispatch);
+
+    myHwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_C, myHwInfo);
+    EXPECT_TRUE(hwInfoConfig.isDisableOverdispatchAvailable(myHwInfo));
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, myHwInfo);
+    EXPECT_TRUE(fePropertiesSupport.disableOverdispatch);
 }
 
 DG2TEST_F(HwInfoConfigTestDg2, whenAdjustingDefaultEngineTypeThenSelectEngineTypeBasedOnRevisionId) {
@@ -504,8 +543,8 @@ DG2TEST_F(HwInfoConfigTestDg2, givenHwInfoConfigWhenAskedIfStorageInfoAdjustment
     }
 }
 
-DG2TEST_F(HwInfoConfigTestDg2, givenHwInfoConfigWhenGettingEvictWhenNecessaryFlagSupportedThenExpectTrue) {
+DG2TEST_F(HwInfoConfigTestDg2, givenHwInfoConfigWhenGettingEvictIfNecessaryFlagSupportedThenExpectTrue) {
     HardwareInfo hwInfo = *defaultHwInfo;
     const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
-    EXPECT_TRUE(hwInfoConfig.isEvictionWhenNecessaryFlagSupported());
+    EXPECT_TRUE(hwInfoConfig.isEvictionIfNecessaryFlagSupported());
 }

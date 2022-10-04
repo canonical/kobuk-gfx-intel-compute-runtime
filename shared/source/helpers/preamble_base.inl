@@ -119,4 +119,10 @@ uint32_t PreambleHelper<GfxFamily>::getScratchSizeValueToProgramMediaVfeState(ui
     return valueToProgram;
 }
 
+template <typename GfxFamily>
+bool PreambleHelper<GfxFamily>::isSystolicModeConfigurable(const HardwareInfo &hwInfo) {
+    const auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
+    return hwInfoConfig.isSystolicModeConfigurable(hwInfo);
+}
+
 } // namespace NEO

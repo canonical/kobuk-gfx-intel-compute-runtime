@@ -10,9 +10,9 @@
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_command_stream_receiver.h"
+#include "shared/test/common/mocks/mock_cpu_page_fault_manager.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/test_macros/hw_test.h"
-#include "shared/test/unit_test/page_fault_manager/mock_cpu_page_fault_manager.h"
 
 #include "level_zero/core/source/cmdqueue/cmdqueue_imp.h"
 #include "level_zero/core/source/event/event.h"
@@ -31,9 +31,20 @@ TEST_F(ContextCommandListCreate, whenCreatingCommandListFromContextThenSuccessIs
 
     ze_result_t result = context->createCommandList(device, &desc, &hCommandList);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(Context::fromHandle(CommandList::fromHandle(hCommandList)->hContext), context);
 
     L0::CommandList *commandList = L0::CommandList::fromHandle(hCommandList);
     commandList->destroy();
+}
+
+TEST_F(ContextCommandListCreate, givenInvalidDescWhenCreatingCommandListFromContextThenErrorIsReturned) {
+    ze_command_list_desc_t desc = {};
+    desc.commandQueueGroupOrdinal = 0xffff;
+    ze_command_list_handle_t hCommandList = {};
+
+    ze_result_t result = context->createCommandList(device, &desc, &hCommandList);
+    EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, result);
+    EXPECT_EQ(CommandList::fromHandle(hCommandList), nullptr);
 }
 
 TEST_F(ContextCommandListCreate, whenCreatingCommandListImmediateFromContextThenSuccessIsReturned) {
@@ -42,9 +53,20 @@ TEST_F(ContextCommandListCreate, whenCreatingCommandListImmediateFromContextThen
 
     ze_result_t result = context->createCommandListImmediate(device, &desc, &hCommandList);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(Context::fromHandle(CommandList::fromHandle(hCommandList)->hContext), context);
 
     L0::CommandList *commandList = L0::CommandList::fromHandle(hCommandList);
     commandList->destroy();
+}
+
+TEST_F(ContextCommandListCreate, givenInvalidDescWhenCreatingCommandListImmediateFromContextThenErrorIsReturned) {
+    ze_command_queue_desc_t desc = {};
+    desc.ordinal = 0xffff;
+    ze_command_list_handle_t hCommandList = {};
+
+    ze_result_t result = context->createCommandListImmediate(device, &desc, &hCommandList);
+    EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, result);
+    EXPECT_EQ(CommandList::fromHandle(hCommandList), nullptr);
 }
 
 HWTEST2_F(ContextCommandListCreate, givenImmediateCmdListWhenGettingLogicalStateHelperThenReturnFromCsr, MatchAny) {
@@ -1977,6 +1999,13 @@ HWTEST2_F(CommandListCreate, givenNullEventWhenAppendEventAfterWalkerThenNothing
     commandList->appendSignalEventPostWalker(nullptr, false);
 
     EXPECT_EQ(commandList->commandContainer.getCommandStream()->getUsed(), usedBefore);
+}
+
+TEST_F(CommandListCreate, givenCreatedCommandListWhenGettingMultiReturnPointFlagThenDefaultValuseIsFalse) {
+    ze_result_t returnValue;
+    std::unique_ptr<L0::ult::CommandList> commandList(whiteboxCast(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)));
+    ASSERT_NE(nullptr, commandList.get());
+    EXPECT_FALSE(commandList->multiReturnPointCommandList);
 }
 
 } // namespace ult

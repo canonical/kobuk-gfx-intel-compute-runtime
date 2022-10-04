@@ -85,12 +85,6 @@ HWTEST_F(HwHelperTest, givenHwHelperWhenAskingForTimestampPacketAlignmentThenRet
     EXPECT_EQ(expectedAlignment, helper.getTimestampPacketAllocatorAlignment());
 }
 
-HWTEST_F(HwHelperTest, givenHwHelperWhenAskingForDevicePreemptionSupportInScmThenReturnFalse) {
-    auto &helper = HwHelper::get(renderCoreFamily);
-
-    EXPECT_FALSE(helper.isDevicePreemptionModeTrackedInScm());
-}
-
 HWTEST2_F(HwHelperTest, givenHwHelperWhenGettingISAPaddingThenCorrectValueIsReturned, IsAtMostXeHpgCore) {
     auto &hwHelper = HwHelper::get(pDevice->getHardwareInfo().platform.eRenderCoreFamily);
     EXPECT_EQ(hwHelper.getPaddingForISAAllocation(), 512u);
@@ -193,7 +187,7 @@ TEST_F(HwHelperTest, givenEngineTypeRcsWhenCsTraitsAreQueiredThenCorrectNameInTr
     EXPECT_NE(nullptr, &helper);
 
     auto &csTraits = helper.getCsTraits(aub_stream::ENGINE_RCS);
-    EXPECT_STREQ("RCS", csTraits.name);
+    EXPECT_STREQ("RCS", csTraits.name.c_str());
 }
 
 using isTglLpOrBelow = IsAtMostProduct<IGFX_TIGERLAKE_LP>;
@@ -299,7 +293,7 @@ HWTEST_F(PipeControlHelperTests, givenPostSyncWriteTimestampModeWhenHelperIsUsed
     PipeControlArgs args;
     MemorySynchronizationCommands<FamilyType>::addBarrierWithPostSyncOperation(
         stream, PostSyncMode::Timestamp, address, immediateData, hardwareInfo, args);
-    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hardwareInfo) - sizeof(PIPE_CONTROL);
+    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hardwareInfo, false) - sizeof(PIPE_CONTROL);
     auto pipeControlLocationSize = additionalPcSize - MemorySynchronizationCommands<FamilyType>::getSizeForSingleAdditionalSynchronization(hardwareInfo);
     auto pipeControl = genCmdCast<PIPE_CONTROL *>(ptrOffset(stream.getCpuBase(), pipeControlLocationSize));
     ASSERT_NE(nullptr, pipeControl);
@@ -348,7 +342,7 @@ HWTEST_F(PipeControlHelperTests, givenPostSyncWriteImmediateDataModeWhenHelperIs
     PipeControlArgs args;
     MemorySynchronizationCommands<FamilyType>::addBarrierWithPostSyncOperation(
         stream, PostSyncMode::ImmediateData, address, immediateData, hardwareInfo, args);
-    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hardwareInfo) - sizeof(PIPE_CONTROL);
+    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hardwareInfo, false) - sizeof(PIPE_CONTROL);
     auto pipeControlLocationSize = additionalPcSize - MemorySynchronizationCommands<FamilyType>::getSizeForSingleAdditionalSynchronization(hardwareInfo);
     auto pipeControl = genCmdCast<PIPE_CONTROL *>(ptrOffset(stream.getCpuBase(), pipeControlLocationSize));
     ASSERT_NE(nullptr, pipeControl);
@@ -378,7 +372,7 @@ HWTEST_F(PipeControlHelperTests, givenNotifyEnableArgumentIsTrueWhenHelperIsUsed
     args.notifyEnable = true;
     MemorySynchronizationCommands<FamilyType>::addBarrierWithPostSyncOperation(
         stream, PostSyncMode::ImmediateData, address, immediateData, hardwareInfo, args);
-    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hardwareInfo) - sizeof(PIPE_CONTROL);
+    auto additionalPcSize = MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hardwareInfo, false) - sizeof(PIPE_CONTROL);
     auto pipeControlLocationSize = additionalPcSize - MemorySynchronizationCommands<FamilyType>::getSizeForSingleAdditionalSynchronization(hardwareInfo);
     auto pipeControl = genCmdCast<PIPE_CONTROL *>(ptrOffset(stream.getCpuBase(), pipeControlLocationSize));
     ASSERT_NE(nullptr, pipeControl);
@@ -1511,4 +1505,14 @@ HWTEST2_F(HwHelperTest, GivenModifiedGtSystemInfoAndXeHpOrXeHpgCoreWhenCallingCa
         auto result = hwHelper.calculateAvailableThreadCount(hwInfo, grfCount);
         EXPECT_EQ(expectedThreadCount, result);
     }
+}
+
+HWTEST2_F(HwHelperTest, givenAtMostGen12lpPlatformWhenGettingMinimalScratchSpaceSizeThen1024IsReturned, IsAtMostGen12lp) {
+    const auto &hwHelper = HwHelper::get(renderCoreFamily);
+    EXPECT_EQ(1024U, hwHelper.getMinimalScratchSpaceSize());
+}
+
+HWTEST2_F(HwHelperTest, givenAtLeastXeHpPlatformWhenGettingMinimalScratchSpaceSizeThen64IsReturned, IsAtLeastXeHpCore) {
+    const auto &hwHelper = HwHelper::get(renderCoreFamily);
+    EXPECT_EQ(64U, hwHelper.getMinimalScratchSpaceSize());
 }

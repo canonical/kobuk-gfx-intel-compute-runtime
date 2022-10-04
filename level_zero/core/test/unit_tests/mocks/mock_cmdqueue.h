@@ -28,13 +28,15 @@ struct WhiteBox<::L0::CommandQueue> : public ::L0::CommandQueueImp {
     using BaseClass::csr;
     using BaseClass::device;
     using BaseClass::preemptionCmdSyncProgramming;
-    using BaseClass::printfFunctionContainer;
+    using BaseClass::printfKernelContainer;
     using BaseClass::submitBatchBuffer;
     using BaseClass::synchronizeByPollingForTaskCount;
     using BaseClass::taskCount;
     using CommandQueue::activeSubDevices;
     using CommandQueue::internalUsage;
+    using CommandQueue::multiReturnPointCommandList;
     using CommandQueue::partitionCount;
+    using CommandQueue::pipelineSelectStateTracking;
 
     WhiteBox(Device *device, NEO::CommandStreamReceiver *csr,
              const ze_command_queue_desc_t *desc);
@@ -60,12 +62,16 @@ template <GFXCORE_FAMILY gfxCoreFamily>
 struct MockCommandQueueHw : public L0::CommandQueueHw<gfxCoreFamily> {
     using BaseClass = ::L0::CommandQueueHw<gfxCoreFamily>;
     using BaseClass::commandStream;
-    using BaseClass::printfFunctionContainer;
+    using BaseClass::prepareAndSubmitBatchBuffer;
+    using BaseClass::printfKernelContainer;
     using L0::CommandQueue::activeSubDevices;
     using L0::CommandQueue::internalUsage;
+    using L0::CommandQueue::multiReturnPointCommandList;
     using L0::CommandQueue::partitionCount;
+    using L0::CommandQueue::pipelineSelectStateTracking;
     using L0::CommandQueue::preemptionCmdSyncProgramming;
     using L0::CommandQueueImp::csr;
+    using typename BaseClass::CommandListExecutionContext;
 
     MockCommandQueueHw(L0::Device *device, NEO::CommandStreamReceiver *csr, const ze_command_queue_desc_t *desc) : L0::CommandQueueHw<gfxCoreFamily>(device, csr, desc) {
     }

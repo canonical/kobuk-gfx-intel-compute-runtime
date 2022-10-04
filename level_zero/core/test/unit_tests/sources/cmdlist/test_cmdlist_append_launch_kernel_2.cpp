@@ -25,7 +25,7 @@ namespace L0 {
 namespace ult {
 struct CommandListAppendLaunchKernelSWTags : public Test<ModuleFixture> {
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
+
         NEO::DebugManager.flags.EnableSWTags.set(true);
         ModuleFixture::setUp();
     }
@@ -35,7 +35,7 @@ struct CommandListAppendLaunchKernelSWTags : public Test<ModuleFixture> {
 
 struct CommandListDualStorage : public Test<ModuleFixture> {
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
+
         DebugManager.flags.EnableLocalMemory.set(1);
         DebugManager.flags.AllocateSharedAllocationsWithCpuAndGpuStorage.set(1);
         ModuleFixture::setUp();
@@ -1261,24 +1261,24 @@ HWTEST2_F(CommandListAppendLaunchKernel, GivenDebugToggleSetWhenUpdateStreamProp
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
     // initial kernel with no policy preference
-    pCommandList->updateStreamProperties(kernel, false, false);
+    pCommandList->updateStreamProperties(kernel, false);
     EXPECT_EQ(defaultThreadArbitrationPolicy, pCommandList->finalStreamState.stateComputeMode.threadArbitrationPolicy.value);
 
     // policy changed to non-default state
     pCommandList->finalStreamState.stateComputeMode.threadArbitrationPolicy.value = nonDefaultThreadArbitrationPolicy;
     // another kernel with no policy preference - do not update policy
-    pCommandList->updateStreamProperties(kernel, false, false);
+    pCommandList->updateStreamProperties(kernel, false);
     EXPECT_EQ(nonDefaultThreadArbitrationPolicy, pCommandList->finalStreamState.stateComputeMode.threadArbitrationPolicy.value);
 
     // another kernel with no policy preference, this time with debug toggle set - update policy back to default value
     DebugManager.flags.ForceDefaultThreadArbitrationPolicyIfNotSpecified.set(true);
-    pCommandList->updateStreamProperties(kernel, false, false);
+    pCommandList->updateStreamProperties(kernel, false);
     EXPECT_EQ(defaultThreadArbitrationPolicy, pCommandList->finalStreamState.stateComputeMode.threadArbitrationPolicy.value);
 }
 
-using MultiTileCommandListAppendLaunchFunctionXeHpCoreTest = Test<MultiTileCommandListAppendLaunchFunctionFixture>;
+using MultiTileCommandListAppendLaunchKernelXeHpCoreTest = Test<MultiTileCommandListAppendLaunchKernelFixture>;
 
-HWCMDTEST_F(IGFX_XE_HP_CORE, MultiTileCommandListAppendLaunchFunctionXeHpCoreTest, givenImplicitScalingEnabledWhenAppendingKernelWithEventThenAllEventPacketsAreUsed) {
+HWCMDTEST_F(IGFX_XE_HP_CORE, MultiTileCommandListAppendLaunchKernelXeHpCoreTest, givenImplicitScalingEnabledWhenAppendingKernelWithEventThenAllEventPacketsAreUsed) {
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
     eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
@@ -1307,7 +1307,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, MultiTileCommandListAppendLaunchFunctionXeHpCoreTes
     EXPECT_EQ(4u, commandList->partitionCount);
 }
 
-HWTEST2_F(MultiTileCommandListAppendLaunchFunctionXeHpCoreTest, givenCooperativeKernelWhenAppendingKernelsThenDoNotUseImplicitScaling, IsAtLeastXeHpCore) {
+HWTEST2_F(MultiTileCommandListAppendLaunchKernelXeHpCoreTest, givenCooperativeKernelWhenAppendingKernelsThenDoNotUseImplicitScaling, IsAtLeastXeHpCore) {
     ze_group_count_t groupCount{1, 1, 1};
 
     auto commandListWithNonCooperativeKernel = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
@@ -1342,7 +1342,7 @@ HWTEST2_F(MultiTileCommandListAppendLaunchFunctionXeHpCoreTest, givenCooperative
     EXPECT_TRUE(cmd->getWorkloadPartitionEnable());
 }
 
-HWTEST2_F(MultiTileCommandListAppendLaunchFunctionXeHpCoreTest,
+HWTEST2_F(MultiTileCommandListAppendLaunchKernelXeHpCoreTest,
           givenRegularCommandListWhenSynchronizationRequiredThenExpectJumpingBbStartCommandToSecondary, IsAtLeastXeHpCore) {
     using WALKER_TYPE = typename FamilyType::WALKER_TYPE;
     using MI_BATCH_BUFFER_START = typename FamilyType::MI_BATCH_BUFFER_START;

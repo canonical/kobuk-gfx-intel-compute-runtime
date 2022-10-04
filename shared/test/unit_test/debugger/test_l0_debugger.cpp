@@ -120,6 +120,34 @@ TEST(Debugger, givenDebuggingEnabledInExecEnvWhenAllocatingIsaThenSingleBankIsUs
     neoDevice->getMemoryManager()->freeGraphicsMemory(allocation);
 }
 
+TEST(Debugger, givenTileAttachAndDebuggingEnabledInExecEnvWhenAllocatingIsaThenMultipleBanksAreUsed) {
+    DebugManagerStateRestore restorer;
+    NEO::DebugManager.flags.ExperimentalEnableTileAttach.set(1);
+
+    auto executionEnvironment = new NEO::ExecutionEnvironment();
+    executionEnvironment->prepareRootDeviceEnvironments(1);
+    executionEnvironment->setDebuggingEnabled();
+
+    auto hwInfo = *NEO::defaultHwInfo.get();
+    hwInfo.featureTable.flags.ftrLocalMemory = true;
+    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(&hwInfo);
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+    executionEnvironment->initializeMemoryManager();
+
+    std::unique_ptr<NEO::MockDevice> neoDevice(NEO::MockDevice::create<NEO::MockDevice>(executionEnvironment, 0u));
+
+    auto allocation = neoDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties(
+        {neoDevice->getRootDeviceIndex(), 4096, NEO::AllocationType::KERNEL_ISA, DeviceBitfield{3}});
+
+    if (allocation->getMemoryPool() == MemoryPool::LocalMemory) {
+        EXPECT_EQ(3u, allocation->storageInfo.getMemoryBanks());
+    } else {
+        EXPECT_EQ(0u, allocation->storageInfo.getMemoryBanks());
+    }
+
+    neoDevice->getMemoryManager()->freeGraphicsMemory(allocation);
+}
+
 TEST(Debugger, WhenInitializingDebuggerL0ThenCapabilitiesAreAdjustedAndDebuggerIsCreated) {
     auto executionEnvironment = new NEO::ExecutionEnvironment();
     executionEnvironment->incRefInternal();
@@ -190,7 +218,7 @@ HWTEST_F(L0DebuggerTest, givenDebuggerWithoutMemoryOperationsHandlerWhenNotifyin
                                   MemoryPool::System4KBPages, MemoryManager::maxOsContextCount);
     allocs.push_back(&alloc);
 
-    debugger->notifyModuleLoadAllocations(allocs);
+    debugger->notifyModuleLoadAllocations(pDevice, allocs);
 }
 
 HWTEST_F(L0DebuggerTest, givenDebuggerWhenCreatedThenModuleHeapDebugAreaIsCreated) {
@@ -333,7 +361,7 @@ HWTEST_F(PerContextAddressSpaceL0DebuggerTest, givenCanonizedGpuVasWhenProgrammi
     sbaAddresses.DynamicStateBaseAddress = dsba;
     sbaAddresses.BindlessSurfaceStateBaseAddress = ssba;
 
-    debugger->programSbaTrackingCommands(cmdStream, sbaAddresses);
+    debugger->captureStateBaseAddress(cmdStream, sbaAddresses);
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(cmdList, cmdStream.getCpuBase(), cmdStream.getUsed()));
@@ -422,7 +450,7 @@ HWTEST_F(PerContextAddressSpaceL0DebuggerTest, givenNonZeroGpuVasWhenProgramming
     sbaAddresses.DynamicStateBaseAddress = dsba;
     sbaAddresses.BindlessSurfaceStateBaseAddress = ssba;
 
-    debugger->programSbaTrackingCommands(cmdStream, sbaAddresses);
+    debugger->captureStateBaseAddress(cmdStream, sbaAddresses);
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(cmdList, cmdStream.getCpuBase(), cmdStream.getUsed()));
@@ -595,7 +623,7 @@ HWTEST2_P(L0DebuggerSimpleParameterizedTest, givenZeroGpuVasWhenProgrammingSbaTr
     sbaAddresses.GeneralStateBaseAddress = gsba;
     sbaAddresses.SurfaceStateBaseAddress = ssba;
 
-    debugger->programSbaTrackingCommands(cmdStream, sbaAddresses);
+    debugger->captureStateBaseAddress(cmdStream, sbaAddresses);
 
     EXPECT_EQ(0u, cmdStream.getUsed());
 }

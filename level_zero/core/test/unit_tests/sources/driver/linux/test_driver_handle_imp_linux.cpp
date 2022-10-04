@@ -12,6 +12,7 @@
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/test/common/mocks/mock_compilers.h"
 #include "shared/test/common/mocks/mock_driver_model.h"
+#include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
 
 #include "level_zero/core/source/driver/driver_imp.h"
@@ -32,7 +33,7 @@ class TestDriverMockDrm : public Drm {
 class DriverLinuxFixture : public ::testing::Test {
   public:
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
+
         auto executionEnvironment = new NEO::ExecutionEnvironment();
         executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
         NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
@@ -82,7 +83,7 @@ class DriverLinuxWithPciOrderTests : public DriverLinuxFixture {
 };
 
 TEST_F(DriverLinuxWithPciOrderTests, GivenEnvironmentVariableForDeviceOrderAccordingToPciSetWhenRetrievingNeoDevicesThenNeoDevicesAccordingToBusOrderRetrieved) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     DriverHandleImp *driverHandle = new DriverHandleImp;
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, driverHandle->initialize(std::move(devices)));
@@ -112,7 +113,7 @@ class DriverLinuxWithouthPciOrderTests : public DriverLinuxFixture {
 };
 
 TEST_F(DriverLinuxWithouthPciOrderTests, GivenNoEnvironmentVariableForDeviceOrderAccordingToPciSetWhenRetrievingNeoDevicesThenNeoDevicesAreNotSorted) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     DriverHandleImp *driverHandle = new DriverHandleImp;
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, driverHandle->initialize(std::move(devices)));
@@ -134,7 +135,6 @@ class DriverPciOrderWitSimilarBusLinuxFixture : public ::testing::Test {
         DebugManagerStateRestore restorer;
         DebugManager.flags.ZE_ENABLE_PCI_ID_DEVICE_ORDER.set(1);
 
-        NEO::MockCompilerEnableGuard mock(true);
         auto executionEnvironment = new NEO::ExecutionEnvironment();
         executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
         NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
@@ -171,7 +171,7 @@ class DriverPciOrderWitSimilarBusLinuxFixture : public ::testing::Test {
 };
 
 TEST_F(DriverPciOrderWitSimilarBusLinuxFixture, GivenEnvironmentVariableForDeviceOrderAccordingToPciSetWhenRetrievingNeoDevicesThenNeoDevicesAccordingToBusOrderRetrieved) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     DriverHandleImp *driverHandle = new DriverHandleImp;
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, driverHandle->initialize(std::move(devices)));
@@ -193,7 +193,6 @@ class DriverPciOrderWitDifferentDeviceLinuxFixture : public ::testing::Test {
         DebugManagerStateRestore restorer;
         DebugManager.flags.ZE_ENABLE_PCI_ID_DEVICE_ORDER.set(1);
 
-        NEO::MockCompilerEnableGuard mock(true);
         auto executionEnvironment = new NEO::ExecutionEnvironment();
         executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
         NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
@@ -230,7 +229,7 @@ class DriverPciOrderWitDifferentDeviceLinuxFixture : public ::testing::Test {
 };
 
 TEST_F(DriverPciOrderWitDifferentDeviceLinuxFixture, GivenEnvironmentVariableForDeviceOrderAccordingToPciSetWhenRetrievingNeoDevicesThenNeoDevicesAccordingToBusOrderRetrieved) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     DriverHandleImp *driverHandle = new DriverHandleImp;
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, driverHandle->initialize(std::move(devices)));
@@ -252,7 +251,6 @@ class DriverPciOrderWitSimilarBusAndDeviceLinuxFixture : public ::testing::Test 
         DebugManagerStateRestore restorer;
         DebugManager.flags.ZE_ENABLE_PCI_ID_DEVICE_ORDER.set(1);
 
-        NEO::MockCompilerEnableGuard mock(true);
         auto executionEnvironment = new NEO::ExecutionEnvironment();
         executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
         NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
@@ -289,7 +287,7 @@ class DriverPciOrderWitSimilarBusAndDeviceLinuxFixture : public ::testing::Test 
 };
 
 TEST_F(DriverPciOrderWitSimilarBusAndDeviceLinuxFixture, GivenEnvironmentVariableForDeviceOrderAccordingToPciSetWhenRetrievingNeoDevicesThenNeoDevicesAccordingToBusOrderRetrieved) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     DriverHandleImp *driverHandle = new DriverHandleImp;
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, driverHandle->initialize(std::move(devices)));
@@ -311,13 +309,7 @@ class DriverPciOrderWitSimilarBDFLinuxFixture : public ::testing::Test {
         DebugManagerStateRestore restorer;
         DebugManager.flags.ZE_ENABLE_PCI_ID_DEVICE_ORDER.set(1);
 
-        NEO::MockCompilerEnableGuard mock(true);
-        auto executionEnvironment = new NEO::ExecutionEnvironment();
-        executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
-        NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
-        for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
-            executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(&hwInfo);
-        }
+        auto executionEnvironment = new NEO::MockExecutionEnvironment(NEO::defaultHwInfo.get(), true, numRootDevices);
         for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
             executionEnvironment->rootDeviceEnvironments[i]->memoryOperationsInterface = std::make_unique<NEO::DrmMemoryOperationsHandlerBind>(*executionEnvironment->rootDeviceEnvironments[i], i);
         }
@@ -348,7 +340,7 @@ class DriverPciOrderWitSimilarBDFLinuxFixture : public ::testing::Test {
 };
 
 TEST_F(DriverPciOrderWitSimilarBDFLinuxFixture, GivenEnvironmentVariableForDeviceOrderAccordingToPciSetWhenRetrievingNeoDevicesThenNeoDevicesAccordingToDomainOrderRetrieved) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     DriverHandleImp *driverHandle = new DriverHandleImp;
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, driverHandle->initialize(std::move(devices)));
@@ -370,7 +362,6 @@ class DriverPciOrderSortDoesNothing : public ::testing::Test {
         DebugManagerStateRestore restorer;
         DebugManager.flags.ZE_ENABLE_PCI_ID_DEVICE_ORDER.set(1);
 
-        NEO::MockCompilerEnableGuard mock(true);
         auto executionEnvironment = new NEO::ExecutionEnvironment();
         executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
         NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
@@ -407,7 +398,7 @@ class DriverPciOrderSortDoesNothing : public ::testing::Test {
 };
 
 TEST_F(DriverPciOrderSortDoesNothing, GivenEnvironmentVariableForDeviceOrderAccordingToPciSetThenVerifyCaseSortDoesNothing) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     DriverHandleImp *driverHandle = new DriverHandleImp;
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, driverHandle->initialize(std::move(devices)));
@@ -426,7 +417,7 @@ TEST_F(DriverPciOrderSortDoesNothing, GivenEnvironmentVariableForDeviceOrderAcco
 class DriverWDDMLinuxFixture : public ::testing::Test {
   public:
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
+
         executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
         NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
         for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
@@ -451,7 +442,7 @@ class DriverWDDMLinuxFixture : public ::testing::Test {
 };
 
 TEST_F(DriverWDDMLinuxFixture, ClearPciSortFlagToVerifyCodeCoverageOnly) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     DriverHandleImp *driverHandle = new DriverHandleImp;
     EXPECT_EQ(ZE_RESULT_SUCCESS, driverHandle->initialize(std::move(devices)));
     DebugManagerStateRestore restorer;

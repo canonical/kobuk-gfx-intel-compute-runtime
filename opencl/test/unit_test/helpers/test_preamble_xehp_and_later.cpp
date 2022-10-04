@@ -443,86 +443,6 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, XeHpCommandStreamReceiverFlushTaskTests, givenMultE
 
 using StateBaseAddressXeHPAndLaterTests = XeHpCommandStreamReceiverFlushTaskTests;
 
-struct CompressionParamsSupportedMatcher {
-    template <PRODUCT_FAMILY productFamily>
-    static constexpr bool isMatched() {
-        if constexpr (HwMapper<productFamily>::GfxProduct::supportsCmdSet(IGFX_XE_HP_CORE)) {
-            return TestTraits<NEO::ToGfxCoreFamily<productFamily>::get()>::surfaceStateCompressionParamsSupported;
-        }
-        return false;
-    }
-};
-
-HWTEST2_F(StateBaseAddressXeHPAndLaterTests, givenMemoryCompressionEnabledWhenAppendingSbaThenEnableStatelessCompressionForAllStatelessAccesses, CompressionParamsSupportedMatcher) {
-    auto memoryManager = pDevice->getExecutionEnvironment()->memoryManager.get();
-    AllocationProperties properties(pDevice->getRootDeviceIndex(), 1, AllocationType::BUFFER, pDevice->getDeviceBitfield());
-    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties);
-    IndirectHeap indirectHeap(allocation, 1);
-
-    for (auto memoryCompressionState : {MemoryCompressionState::NotApplicable, MemoryCompressionState::Disabled, MemoryCompressionState::Enabled}) {
-        auto sbaCmd = FamilyType::cmdInitStateBaseAddress;
-        StateBaseAddressHelperArgs<FamilyType> args = {
-            0,                                                  // generalStateBase
-            0,                                                  // indirectObjectHeapBaseAddress
-            0,                                                  // instructionHeapBaseAddress
-            0,                                                  // globalHeapsBaseAddress
-            &sbaCmd,                                            // stateBaseAddressCmd
-            nullptr,                                            // dsh
-            nullptr,                                            // ioh
-            &indirectHeap,                                      // ssh
-            pDevice->getRootDeviceEnvironment().getGmmHelper(), // gmmHelper
-            0,                                                  // statelessMocsIndex
-            memoryCompressionState,                             // memoryCompressionState
-            false,                                              // setInstructionStateBaseAddress
-            true,                                               // setGeneralStateBaseAddress
-            false,                                              // useGlobalHeapsBaseAddress
-            false,                                              // isMultiOsContextCapable
-            false,                                              // useGlobalAtomics
-            false                                               // areMultipleSubDevicesInContext
-        };
-        StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args, true);
-        if (memoryCompressionState == MemoryCompressionState::Enabled) {
-            EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::ENABLE_MEMORY_COMPRESSION_FOR_ALL_STATELESS_ACCESSES_ENABLED, sbaCmd.getEnableMemoryCompressionForAllStatelessAccesses());
-        } else {
-            EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::ENABLE_MEMORY_COMPRESSION_FOR_ALL_STATELESS_ACCESSES_DISABLED, sbaCmd.getEnableMemoryCompressionForAllStatelessAccesses());
-        }
-    }
-
-    memoryManager->freeGraphicsMemory(allocation);
-}
-
-HWCMDTEST_F(IGFX_XE_HP_CORE, StateBaseAddressXeHPAndLaterTests, givenNonZeroInternalHeapBaseAddressWhenSettingIsDisabledThenExpectCommandValueZero) {
-    auto memoryManager = pDevice->getExecutionEnvironment()->memoryManager.get();
-    AllocationProperties properties(pDevice->getRootDeviceIndex(), 1, AllocationType::BUFFER, pDevice->getDeviceBitfield());
-    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(properties);
-
-    IndirectHeap indirectHeap(allocation, 1);
-    auto sbaCmd = FamilyType::cmdInitStateBaseAddress;
-    uint64_t ihba = 0x80010000ull;
-    StateBaseAddressHelperArgs<FamilyType> args = {
-        0,                                                  // generalStateBase
-        ihba,                                               // indirectObjectHeapBaseAddress
-        0,                                                  // instructionHeapBaseAddress
-        0,                                                  // globalHeapsBaseAddress
-        &sbaCmd,                                            // stateBaseAddressCmd
-        nullptr,                                            // dsh
-        nullptr,                                            // ioh
-        &indirectHeap,                                      // ssh
-        pDevice->getRootDeviceEnvironment().getGmmHelper(), // gmmHelper
-        0,                                                  // statelessMocsIndex
-        MemoryCompressionState::NotApplicable,              // memoryCompressionState
-        false,                                              // setInstructionStateBaseAddress
-        false,                                              // setGeneralStateBaseAddress
-        false,                                              // useGlobalHeapsBaseAddress
-        false,                                              // isMultiOsContextCapable
-        false,                                              // useGlobalAtomics
-        false                                               // areMultipleSubDevicesInContext
-    };
-    StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args, true);
-    EXPECT_EQ(0ull, sbaCmd.getGeneralStateBaseAddress());
-    memoryManager->freeGraphicsMemory(allocation);
-}
-
 namespace {
 
 template <typename FamilyType, typename CommandStreamReceiverType>
@@ -622,27 +542,22 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, RenderSurfaceStateXeHPAndLaterTests, givenSpecificP
 
 using PipelineSelectTest = ::testing::Test;
 
-HWCMDTEST_F(IGFX_XE_HP_CORE, PipelineSelectTest, whenCallingIsSpecialPipelineSelectModeChangedThenReturnCorrectValue) {
-    using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
-    bool oldPipelineSelectSpecialMode = true;
-    bool newPipelineSelectSpecialMode = false;
-
-    auto result = PreambleHelper<FamilyType>::isSpecialPipelineSelectModeChanged(oldPipelineSelectSpecialMode, newPipelineSelectSpecialMode, *defaultHwInfo);
-    EXPECT_TRUE(result);
-}
-
 HWTEST2_F(PipelineSelectTest, WhenProgramPipelineSelectThenProperMaskIsSet, IsWithinXeGfxFamily) {
     using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
     PIPELINE_SELECT cmd = FamilyType::cmdInitPipelineSelect;
     LinearStream pipelineSelectStream(&cmd, sizeof(cmd));
-    PreambleHelper<FamilyType>::programPipelineSelect(&pipelineSelectStream, {}, *defaultHwInfo);
+
+    PipelineSelectArgs pipelineArgs = {};
+    pipelineArgs.systolicPipelineSelectSupport = PreambleHelper<FamilyType>::isSystolicModeConfigurable(*defaultHwInfo);
+
+    PreambleHelper<FamilyType>::programPipelineSelect(&pipelineSelectStream, pipelineArgs, *defaultHwInfo);
 
     auto expectedMask = pipelineSelectEnablePipelineSelectMaskBits;
     if constexpr (FamilyType::isUsingMediaSamplerDopClockGate) {
         expectedMask |= pipelineSelectMediaSamplerDopClockGateMaskBits;
     }
 
-    if (PreambleHelper<FamilyType>::isSystolicModeConfigurable(*defaultHwInfo)) {
+    if (pipelineArgs.systolicPipelineSelectSupport) {
         expectedMask |= pipelineSelectSystolicModeEnableMaskBits;
     }
 

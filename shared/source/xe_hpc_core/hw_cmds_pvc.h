@@ -27,6 +27,42 @@ struct PVC : public XeHpcCoreFamily {
     static const uint32_t maxSubslicesSupported = 64;
     static const uint32_t maxDualSubslicesSupported = 64;
     static const RuntimeCapabilityTable capabilityTable;
+
+    struct FrontEndStateSupport {
+        static constexpr bool scratchSize = true;
+        static constexpr bool privateScratchSize = true;
+        static constexpr bool computeDispatchAllWalker = true;
+        static constexpr bool disableEuFusion = false;
+        static constexpr bool disableOverdispatch = true;
+        static constexpr bool singleSliceDispatchCcsMode = true;
+    };
+
+    struct StateComputeModeStateSupport {
+        static constexpr bool threadArbitrationPolicy = true;
+        static constexpr bool coherencyRequired = true;
+        static constexpr bool largeGrfMode = true;
+        static constexpr bool zPassAsyncComputeThreadLimit = false;
+        static constexpr bool pixelAsyncComputeThreadLimit = false;
+        static constexpr bool devicePreemptionMode = false;
+    };
+
+    struct StateBaseAddressStateSupport {
+        static constexpr bool globalAtomics = false;
+        static constexpr bool statelessMocs = true;
+    };
+
+    struct PipelineSelectStateSupport {
+        static constexpr bool modeSelected = true;
+        static constexpr bool mediaSamplerDopClockGate = false;
+        static constexpr bool systolicMode = true;
+    };
+
+    struct PreemptionDebugSupport {
+        static constexpr bool preemptionMode = true;
+        static constexpr bool stateSip = true;
+        static constexpr bool csrSurface = false;
+    };
+
     static void (*setupHardwareInfo)(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable, uint64_t hwInfoConfig);
     static void setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo);
     static void setupHardwareInfoBase(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable);

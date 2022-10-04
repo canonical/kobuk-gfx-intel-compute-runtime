@@ -138,13 +138,13 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     size_t getCmdsSizeForComputeBarrierCommand() const override {
         return getCmdSizeForStallingNoPostSyncCommands();
     }
+    void initializeDeviceWithFirstSubmission() override;
 
   protected:
     void programPreemption(LinearStream &csr, DispatchFlags &dispatchFlags);
     void programL3(LinearStream &csr, uint32_t &newL3Config);
     void programPreamble(LinearStream &csr, Device &device, uint32_t &newL3Config);
     void programPipelineSelect(LinearStream &csr, PipelineSelectArgs &pipelineSelectArgs);
-    void programAdditionalStateBaseAddress(LinearStream &csr, typename GfxFamily::STATE_BASE_ADDRESS &cmd, Device &device);
     void programEpilogue(LinearStream &csr, Device &device, void **batchBufferEndLocation, DispatchFlags &dispatchFlags);
     void programEpliogueCommands(LinearStream &csr, const DispatchFlags &dispatchFlags);
     void programMediaSampler(LinearStream &csr, DispatchFlags &dispatchFlags);
@@ -177,6 +177,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     void unregisterDirectSubmissionFromController();
     constexpr bool isGlobalAtomicsProgrammingRequired(bool currentValue) const;
     void createKernelArgsBufferAllocation() override;
+    void handleFrontEndStateTransition(DispatchFlags &dispatchFlags);
 
     HeapDirtyState dshState;
     HeapDirtyState iohState;

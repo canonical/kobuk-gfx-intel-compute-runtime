@@ -153,10 +153,6 @@ std::string HwInfoConfigHw<IGFX_UNKNOWN>::getDeviceMemoryName() const {
 }
 
 template <>
-void HwInfoConfigHw<IGFX_UNKNOWN>::setAdditionalPipelineSelectFields(void *pipelineSelectCmd, const PipelineSelectArgs &pipelineSelectArgs, const HardwareInfo &hwInfo) {
-}
-
-template <>
 bool HwInfoConfigHw<IGFX_UNKNOWN>::isDefaultEngineTypeAdjustmentRequired(const HardwareInfo &hwInfo) const {
     return false;
 }
@@ -306,18 +302,13 @@ bool HwInfoConfigHw<IGFX_UNKNOWN>::programAllStateComputeCommandFields() const {
 }
 
 template <>
-bool HwInfoConfigHw<IGFX_UNKNOWN>::isSpecialPipelineSelectModeChanged(const HardwareInfo &hwInfo) const {
-    return false;
-}
-
-template <>
-bool HwInfoConfigHw<IGFX_UNKNOWN>::isSystolicModeConfigurable(const HardwareInfo &hwInfo) const {
-    return false;
-}
-
-template <>
 bool HwInfoConfigHw<IGFX_UNKNOWN>::isComputeDispatchAllWalkerEnableInComputeWalkerRequired(const HardwareInfo &hwInfo) const {
     return false;
+}
+
+template <>
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isCopyEngineSelectorEnabled(const HardwareInfo &hwInfo) const {
+    return true;
 }
 
 template <>
@@ -333,11 +324,6 @@ bool HwInfoConfigHw<IGFX_UNKNOWN>::isAdjustProgrammableIdPreferredSlmSizeRequire
 template <>
 uint32_t HwInfoConfigHw<IGFX_UNKNOWN>::getThreadEuRatioForScratch(const HardwareInfo &hwInfo) const {
     return 8u;
-}
-
-template <>
-bool HwInfoConfigHw<IGFX_UNKNOWN>::isComputeDispatchAllWalkerEnableInCfeStateRequired(const HardwareInfo &hwInfo) const {
-    return false;
 }
 
 template <>
@@ -369,10 +355,6 @@ void HwInfoConfigHw<IGFX_UNKNOWN>::updateIddCommand(void *const commandPtr, uint
 }
 
 template <>
-bool HwInfoConfigHw<IGFX_UNKNOWN>::isGrfNumReportedWithScm() const {
-    return false;
-}
-template <>
 void HwInfoConfigHw<IGFX_UNKNOWN>::enableCompression(HardwareInfo *hwInfo) {
 }
 
@@ -392,17 +374,17 @@ uint64_t HwInfoConfigHw<IGFX_UNKNOWN>::getHostMemCapabilitiesValue() {
 }
 
 template <>
-bool HwInfoConfigHw<IGFX_UNKNOWN>::isEvictionWhenNecessaryFlagSupported() const {
+bool HwInfoConfigHw<IGFX_UNKNOWN>::isEvictionIfNecessaryFlagSupported() const {
     return true;
 }
 
 template <>
-const char *L1CachePolicyHelper<IGFX_UNKNOWN>::getCachingPolicyOptions() {
+const char *L1CachePolicyHelper<IGFX_UNKNOWN>::getCachingPolicyOptions(bool isDebuggerActive) {
     return nullptr;
 }
 
 template <>
-uint32_t L1CachePolicyHelper<IGFX_UNKNOWN>::getDefaultL1CachePolicy() {
+uint32_t L1CachePolicyHelper<IGFX_UNKNOWN>::getDefaultL1CachePolicy(bool isDebuggerActive) {
     return 0u;
 }
 
@@ -410,6 +392,62 @@ template <>
 bool HwInfoConfigHw<IGFX_UNKNOWN>::isPrefetcherDisablingInDirectSubmissionRequired() const {
     return true;
 }
+
+template <>
+uint32_t L1CachePolicyHelper<IGFX_UNKNOWN>::getL1CachePolicy(bool isDebuggerActive) {
+    return L1CachePolicyHelper<IGFX_UNKNOWN>::getDefaultL1CachePolicy(isDebuggerActive);
+}
+
+template <>
+uint32_t L1CachePolicyHelper<IGFX_UNKNOWN>::getUncachedL1CachePolicy() {
+    return 1u;
+}
+
+struct UnknownProduct {
+    struct FrontEndStateSupport {
+        static constexpr bool scratchSize = false;
+        static constexpr bool privateScratchSize = false;
+        static constexpr bool computeDispatchAllWalker = false;
+
+        static constexpr bool disableEuFusion = false;
+        static constexpr bool disableOverdispatch = false;
+        static constexpr bool singleSliceDispatchCcsMode = false;
+    };
+
+    struct StateComputeModeStateSupport {
+        static constexpr bool threadArbitrationPolicy = false;
+        static constexpr bool coherencyRequired = false;
+        static constexpr bool largeGrfMode = false;
+        static constexpr bool zPassAsyncComputeThreadLimit = false;
+        static constexpr bool pixelAsyncComputeThreadLimit = false;
+        static constexpr bool devicePreemptionMode = false;
+    };
+
+    struct StateBaseAddressStateSupport {
+        static constexpr bool globalAtomics = false;
+        static constexpr bool statelessMocs = false;
+    };
+
+    struct PipelineSelectStateSupport {
+        static constexpr bool modeSelected = false;
+        static constexpr bool mediaSamplerDopClockGate = false;
+        static constexpr bool systolicMode = false;
+    };
+
+    struct PreemptionDebugSupport {
+        static constexpr bool preemptionMode = false;
+        static constexpr bool stateSip = false;
+        static constexpr bool csrSurface = false;
+    };
+};
+
+template <>
+struct HwMapper<IGFX_UNKNOWN> {
+    enum { gfxFamily = IGFX_UNKNOWN_CORE };
+
+    static const char *abbreviation;
+    using GfxProduct = UnknownProduct;
+};
 
 } // namespace NEO
 

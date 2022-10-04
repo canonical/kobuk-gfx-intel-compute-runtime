@@ -23,15 +23,14 @@
 #include "shared/test/common/mocks/mock_gmm_client_context.h"
 #include "shared/test/common/mocks/mock_sip.h"
 #include "shared/test/common/test_macros/test_checks_shared.h"
-#include "shared/test/unit_test/test_stats.h"
-#include "shared/test/unit_test/tests_configuration.h"
+#include "shared/test/common/test_stats.h"
+#include "shared/test/common/tests_configuration.h"
 
 #include "opencl/source/os_interface/ocl_reg_path.h"
 #include "opencl/source/platform/platform.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 #include "opencl/test/unit_test/ult_config_listener.h"
 
-#include "gmock/gmock.h"
 #include "hw_cmds_default.h"
 #include "test_files_setup.h"
 
@@ -89,20 +88,6 @@ void applyWorkarounds() {
         std::stringstream ss("1");
         int val;
         ss >> val;
-    }
-    {
-        class BaseClass {
-          public:
-            int method(int param) { return 1; }
-        };
-        class MockClass : public BaseClass {
-          public:
-            MOCK_METHOD1(method, int(int param));
-        };
-        ::testing::NiceMock<MockClass> mockObj;
-        EXPECT_CALL(mockObj, method(::testing::_))
-            .Times(1);
-        mockObj.method(2);
     }
 
     //intialize rand
@@ -183,15 +168,7 @@ int main(int argc, char **argv) {
     }
 #endif
 
-    {
-        std::string envVar = std::string("NEO_") + executionName + "_DISABLE_TEST_ALARM";
-        char *envValue = getenv(envVar.c_str());
-        if (envValue != nullptr) {
-            enableAlarm = false;
-        }
-    }
-
-    ::testing::InitGoogleMock(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
     HardwareInfo hwInfoForTests = DEFAULT_TEST_PLATFORM::hwInfo;
 
     uint32_t euPerSubSlice = 0;

@@ -35,7 +35,7 @@ namespace L0 {
 namespace ult {
 
 struct DriverHandleGetFdMock : public L0::DriverHandleImp {
-    void *importFdHandle(ze_device_handle_t hDevice, ze_ipc_memory_flags_t flags, uint64_t handle, NEO::GraphicsAllocation **pAloc) override {
+    void *importFdHandle(NEO::Device *neoDevice, ze_ipc_memory_flags_t flags, uint64_t handle, NEO::GraphicsAllocation **pAloc) override {
         if (mockFd == allocationMap.second) {
             return allocationMap.first;
         }
@@ -106,7 +106,7 @@ struct ContextFdMock : public L0::ContextImp {
 
 struct MemoryExportImportTest : public ::testing::Test {
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
+
         neoDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
         auto mockBuiltIns = new MockBuiltins();
         neoDevice->executionEnvironment->rootDeviceEnvironments[0]->builtins.reset(mockBuiltIns);
@@ -140,7 +140,7 @@ struct DriverHandleGetMemHandleMock : public L0::DriverHandleImp {
         }
         return nullptr;
     }
-    void *importFdHandle(ze_device_handle_t hDevice, ze_ipc_memory_flags_t flags, uint64_t handle, NEO::GraphicsAllocation **pAloc) override {
+    void *importFdHandle(NEO::Device *neoDevice, ze_ipc_memory_flags_t flags, uint64_t handle, NEO::GraphicsAllocation **pAloc) override {
         if (mockFd == allocationFdMap.second) {
             return allocationFdMap.first;
         }
@@ -215,7 +215,7 @@ struct ContextMemHandleMock : public L0::ContextImp {
 
 struct MemoryExportImportWSLTest : public ::testing::Test {
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
+
         neoDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
         auto mockBuiltIns = new MockBuiltins();
         neoDevice->executionEnvironment->rootDeviceEnvironments[0]->builtins.reset(mockBuiltIns);
@@ -314,7 +314,7 @@ struct ContextHandleMock : public L0::ContextImp {
 
 struct MemoryExportImportWinHandleTest : public ::testing::Test {
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
+
         neoDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
         auto mockBuiltIns = new MockBuiltins();
         neoDevice->executionEnvironment->rootDeviceEnvironments[0]->builtins.reset(mockBuiltIns);
@@ -342,7 +342,7 @@ struct MemoryExportImportWinHandleTest : public ::testing::Test {
 };
 
 struct DriverHandleGetIpcHandleMock : public DriverHandleImp {
-    void *importFdHandle(ze_device_handle_t hDevice, ze_ipc_memory_flags_t flags, uint64_t handle, NEO::GraphicsAllocation **pAlloc) override {
+    void *importFdHandle(NEO::Device *neoDevice, ze_ipc_memory_flags_t flags, uint64_t handle, NEO::GraphicsAllocation **pAlloc) override {
         EXPECT_EQ(handle, static_cast<uint64_t>(mockFd));
         if (mockFd == allocationMap.second) {
             return allocationMap.first;
@@ -557,7 +557,7 @@ struct ContextIpcMock : public L0::ContextImp {
 
 struct MemoryOpenIpcHandleTest : public ::testing::Test {
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
+
         neoDevice =
             NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
         auto mockBuiltIns = new MockBuiltins();
@@ -689,7 +689,6 @@ struct MemoryExportImportImplicitScalingTest : public ::testing::Test {
         DebugManagerStateRestore restorer;
         DebugManager.flags.EnableImplicitScaling.set(1);
 
-        NEO::MockCompilerEnableGuard mock(true);
         neoDevice =
             NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
         auto mockBuiltIns = new MockBuiltins();

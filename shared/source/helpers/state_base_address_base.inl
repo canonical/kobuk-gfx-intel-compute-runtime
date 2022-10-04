@@ -15,6 +15,15 @@
 #include "shared/source/os_interface/hw_info_config.h"
 
 namespace NEO {
+
+template <typename GfxFamily>
+void StateBaseAddressHelper<GfxFamily>::programStateBaseAddressIntoCommandStreamBase(StateBaseAddressHelperArgs<GfxFamily> &args,
+                                                                                     NEO::LinearStream &commandStream) {
+    StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(args);
+    auto cmdSpace = StateBaseAddressHelper<GfxFamily>::getSpaceForSbaCmd(commandStream);
+    *cmdSpace = *args.stateBaseAddressCmd;
+}
+
 template <typename GfxFamily>
 void StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(
     StateBaseAddressHelperArgs<GfxFamily> &args) {
@@ -73,11 +82,18 @@ void StateBaseAddressHelper<GfxFamily>::programStateBaseAddress(
         args.stateBaseAddressCmd->setGeneralStateBufferSize(0xfffff);
     }
 
+    if (args.overrideSurfaceStateBaseAddress) {
+        args.stateBaseAddressCmd->setSurfaceStateBaseAddressModifyEnable(true);
+        args.stateBaseAddressCmd->setSurfaceStateBaseAddress(args.surfaceStateBaseAddress);
+    }
+
     if (DebugManager.flags.OverrideStatelessMocsIndex.get() != -1) {
         args.statelessMocsIndex = DebugManager.flags.OverrideStatelessMocsIndex.get();
     }
 
     args.statelessMocsIndex = args.statelessMocsIndex << 1;
+
+    GmmHelper::applyMocsEncryptionBit(args.statelessMocsIndex);
 
     args.stateBaseAddressCmd->setStatelessDataPortAccessMemoryObjectControlState(args.statelessMocsIndex);
 

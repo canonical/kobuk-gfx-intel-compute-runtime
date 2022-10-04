@@ -77,6 +77,7 @@ class CommandStreamReceiver {
     };
 
     using MutexType = std::recursive_mutex;
+    using TimeType = std::chrono::high_resolution_clock::time_point;
     CommandStreamReceiver(ExecutionEnvironment &executionEnvironment,
                           uint32_t rootDeviceIndex,
                           const DeviceBitfield deviceBitfield);
@@ -98,7 +99,7 @@ class CommandStreamReceiver {
     MOCKABLE_VIRTUAL void makeResident(GraphicsAllocation &gfxAllocation);
     virtual void makeNonResident(GraphicsAllocation &gfxAllocation);
     MOCKABLE_VIRTUAL void makeSurfacePackNonResident(ResidencyContainer &allocationsForResidency, bool clearAllocations);
-    virtual void processResidency(const ResidencyContainer &allocationsForResidency, uint32_t handleId) {}
+    virtual bool processResidency(const ResidencyContainer &allocationsForResidency, uint32_t handleId) { return true; }
     virtual void processEviction();
     void makeResidentHostPtrAllocation(GraphicsAllocation *gfxAllocation);
 
@@ -194,7 +195,7 @@ class CommandStreamReceiver {
     MOCKABLE_VIRTUAL bool createPreemptionAllocation();
     MOCKABLE_VIRTUAL bool createPerDssBackedBuffer(Device &device);
     virtual void createKernelArgsBufferAllocation() = 0;
-    MOCKABLE_VIRTUAL std::unique_lock<MutexType> obtainUniqueOwnership();
+    [[nodiscard]] MOCKABLE_VIRTUAL std::unique_lock<MutexType> obtainUniqueOwnership();
 
     bool peekTimestampPacketWriteEnabled() const { return timestampPacketWriteEnabled; }
 
@@ -325,6 +326,7 @@ class CommandStreamReceiver {
     const RootDeviceEnvironment &peekRootDeviceEnvironment() const;
 
     MOCKABLE_VIRTUAL bool isGpuHangDetected() const;
+    MOCKABLE_VIRTUAL bool checkGpuHangDetected(TimeType currentTime, TimeType &lastHangCheckTime) const;
 
     uint64_t getCompletionAddress() const {
         uint64_t completionFenceAddress = castToUint64(const_cast<uint32_t *>(getTagAddress()));
@@ -358,6 +360,8 @@ class CommandStreamReceiver {
         lastPreemptionMode = value;
     }
 
+    virtual void initializeDeviceWithFirstSubmission() = 0;
+
   protected:
     void cleanupResources();
     void printDeviceIndex();
@@ -365,7 +369,7 @@ class CommandStreamReceiver {
     bool checkImplicitFlushForGpuIdle();
     void downloadTagAllocation(uint32_t taskCountToWait);
     void printTagAddressContent(uint32_t taskCountToWait, int64_t waitTimeout, bool start);
-    MOCKABLE_VIRTUAL std::unique_lock<MutexType> obtainHostPtrSurfaceCreationLock();
+    [[nodiscard]] MOCKABLE_VIRTUAL std::unique_lock<MutexType> obtainHostPtrSurfaceCreationLock();
 
     std::unique_ptr<FlushStampTracker> flushStamp;
     std::unique_ptr<SubmissionAggregator> submissionAggregator;
@@ -388,6 +392,7 @@ class CommandStreamReceiver {
 
     LinearStream commandStream;
     StreamProperties streamProperties{};
+    FrontEndPropertiesSupport feSupportFlags{};
 
     // offset for debug state is 1kbyte, tag writes can use multiple offsets for multiple partitions and each offset can vary per platform
     const uint64_t debugPauseStateAddressOffset = MemoryConstants::kiloByte;
@@ -460,7 +465,7 @@ class CommandStreamReceiver {
     bool timestampPacketWriteEnabled = false;
     bool staticWorkPartitioningEnabled = false;
     bool nTo1SubmissionModelEnabled = false;
-    bool lastSpecialPipelineSelectMode = false;
+    bool lastSystolicPipelineSelectMode = false;
     bool requiresInstructionCacheFlush = false;
 
     bool localMemoryEnabled = false;
@@ -471,6 +476,7 @@ class CommandStreamReceiver {
     bool useGpuIdleImplicitFlush = false;
     bool lastSentUseGlobalAtomics = false;
     bool useNotifyEnableForPostSync = false;
+    bool systolicModeConfigurable = false;
 };
 
 typedef CommandStreamReceiver *(*CommandStreamReceiverCreateFunc)(bool withAubDump,

@@ -144,7 +144,7 @@ size_t HardwareCommandsHelper<GfxFamily>::sendInterfaceDescriptorData(
                                                 sizeCrossThreadData, sizePerThreadData, hardwareInfo);
     auto &hwInfoConfig = *HwInfoConfig::get(hardwareInfo.platform.eProductFamily);
     hwInfoConfig.updateIddCommand(&interfaceDescriptor, kernelDescriptor.kernelAttributes.numGrfRequired,
-                                  kernel.getThreadArbitrationPolicy());
+                                  kernelDescriptor.kernelAttributes.threadArbitrationPolicy);
 
     EncodeDispatchKernel<GfxFamily>::appendAdditionalIDDFields(&interfaceDescriptor, hardwareInfo, threadsPerThreadGroup,
                                                                slmTotalSize, SlmPolicy::SlmPolicyNone);
@@ -251,10 +251,9 @@ size_t HardwareCommandsHelper<GfxFamily>::sendIndirectState(
 
     uint64_t offsetInterfaceDescriptor = offsetInterfaceDescriptorTable + interfaceDescriptorIndex * sizeof(INTERFACE_DESCRIPTOR_DATA);
 
-    auto bindingTablePrefetchSize = std::min(31u, static_cast<uint32_t>(kernel.getNumberOfBindingTableStates()));
-
-    if (!EncodeSurfaceState<GfxFamily>::doBindingTablePrefetch()) {
-        bindingTablePrefetchSize = 0;
+    auto bindingTablePrefetchSize = 0;
+    if (EncodeSurfaceState<GfxFamily>::doBindingTablePrefetch()) {
+        bindingTablePrefetchSize = std::min(31u, static_cast<uint32_t>(kernel.getNumberOfBindingTableStates()));
     }
 
     HardwareCommandsHelper<GfxFamily>::sendInterfaceDescriptorData(

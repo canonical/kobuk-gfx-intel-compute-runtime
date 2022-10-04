@@ -69,7 +69,6 @@ else()
   target_include_directories(${NEO_STATIC_LIB_NAME} PUBLIC
                              ${NEO_SHARED_DIRECTORY}/os_interface/linux
                              ${NEO_SOURCE_DIR}/opencl/source/os_interface/linux
-                             ${I915_INCLUDES_DIR}
   )
 endif()
 
@@ -109,6 +108,7 @@ if(${GENERATE_EXECUTABLE})
        $<TARGET_OBJECTS:${SHARINGS_ENABLE_LIB_NAME}>
        $<TARGET_OBJECTS:${BUILTINS_SOURCES_LIB_NAME}>
        $<TARGET_OBJECTS:${BUILTINS_VME_LIB_NAME}>
+       $<TARGET_OBJECTS:${BUILTINS_BINARIES_STATELESS_LIB_NAME}>
        $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDFUL_LIB_NAME}>
   )
 

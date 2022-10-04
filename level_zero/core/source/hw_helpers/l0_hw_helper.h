@@ -30,6 +30,8 @@ struct EventPool;
 class L0HwHelper {
   public:
     static L0HwHelper &get(GFXCORE_FAMILY gfxCore);
+    static bool enableMultiReturnPointCommandList();
+    static bool enablePipelineSelectStateTracking();
     virtual void setAdditionalGroupProperty(ze_command_queue_group_properties_t &groupProperty, NEO::EngineGroupT &group) const = 0;
     virtual L0::Event *createEvent(L0::EventPool *eventPool, const ze_event_desc_t *desc, L0::Device *device) const = 0;
 
@@ -41,6 +43,7 @@ class L0HwHelper {
     virtual void getAttentionBitmaskForSingleThreads(const std::vector<EuThread::ThreadId> &threads, const NEO::HardwareInfo &hwInfo, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize) const = 0;
     virtual std::vector<EuThread::ThreadId> getThreadsFromAttentionBitmask(const NEO::HardwareInfo &hwInfo, uint32_t tile, const uint8_t *bitmask, const size_t bitmaskSize) const = 0;
     virtual bool multiTileCapablePlatform() const = 0;
+    virtual bool alwaysAllocateEventInLocalMem() const = 0;
 
   protected:
     L0HwHelper() = default;
@@ -64,6 +67,7 @@ class L0HwHelperHw : public L0HwHelper {
     void getAttentionBitmaskForSingleThreads(const std::vector<EuThread::ThreadId> &threads, const NEO::HardwareInfo &hwInfo, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize) const override;
     std::vector<EuThread::ThreadId> getThreadsFromAttentionBitmask(const NEO::HardwareInfo &hwInfo, uint32_t tile, const uint8_t *bitmask, const size_t bitmaskSize) const override;
     bool multiTileCapablePlatform() const override;
+    bool alwaysAllocateEventInLocalMem() const override;
 };
 
 } // namespace L0

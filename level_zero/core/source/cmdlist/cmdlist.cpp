@@ -30,15 +30,15 @@ CommandList::~CommandList() {
     if (this->cmdListType == CommandListType::TYPE_REGULAR || !this->isFlushTaskSubmissionEnabled) {
         removeHostPtrAllocations();
     }
-    printfFunctionContainer.clear();
+    printfKernelContainer.clear();
 }
 
-void CommandList::storePrintfFunction(Kernel *kernel) {
-    auto it = std::find(this->printfFunctionContainer.begin(), this->printfFunctionContainer.end(),
+void CommandList::storePrintfKernel(Kernel *kernel) {
+    auto it = std::find(this->printfKernelContainer.begin(), this->printfKernelContainer.end(),
                         kernel);
 
-    if (it == this->printfFunctionContainer.end()) {
-        this->printfFunctionContainer.push_back(kernel);
+    if (it == this->printfKernelContainer.end()) {
+        this->printfKernelContainer.push_back(kernel);
     }
 }
 
@@ -131,7 +131,7 @@ void CommandList::eraseResidencyContainerEntry(NEO::GraphicsAllocation *allocati
     }
 }
 
-NEO::PreemptionMode CommandList::obtainFunctionPreemptionMode(Kernel *kernel) {
+NEO::PreemptionMode CommandList::obtainKernelPreemptionMode(Kernel *kernel) {
     NEO::PreemptionFlags flags = NEO::PreemptionHelper::createPreemptionLevelFlags(*device->getNEODevice(), &kernel->getImmutableData()->getDescriptor());
     return NEO::PreemptionHelper::taskPreemptionMode(device->getDevicePreemptionMode(), flags);
 }
@@ -160,28 +160,6 @@ void CommandList::migrateSharedAllocations() {
     if (this->unifiedMemoryControls.indirectSharedAllocationsAllowed) {
         auto pageFaultManager = device->getDriverHandle()->getMemoryManager()->getPageFaultManager();
         pageFaultManager->moveAllocationsWithinUMAllocsManagerToGpuDomain(this->device->getDriverHandle()->getSvmAllocsManager());
-    }
-}
-
-void CommandList::handleIndirectAllocationResidency() {
-    bool indirectAllocationsAllowed = this->hasIndirectAllocationsAllowed();
-    NEO::Device *neoDevice = this->device->getNEODevice();
-    if (indirectAllocationsAllowed) {
-        auto svmAllocsManager = this->device->getDriverHandle()->getSvmAllocsManager();
-        auto submitAsPack = this->device->getDriverHandle()->getMemoryManager()->allowIndirectAllocationsAsPack(neoDevice->getRootDeviceIndex());
-        if (NEO::DebugManager.flags.MakeIndirectAllocationsResidentAsPack.get() != -1) {
-            submitAsPack = !!NEO::DebugManager.flags.MakeIndirectAllocationsResidentAsPack.get();
-        }
-
-        if (submitAsPack) {
-            svmAllocsManager->makeIndirectAllocationsResident(*(this->csr), this->csr->peekTaskCount() + 1u);
-        } else {
-            UnifiedMemoryControls unifiedMemoryControls = this->getUnifiedMemoryControls();
-
-            svmAllocsManager->addInternalAllocationsToResidencyContainer(neoDevice->getRootDeviceIndex(),
-                                                                         this->commandContainer.getResidencyContainer(),
-                                                                         unifiedMemoryControls.generateMask());
-        }
     }
 }
 

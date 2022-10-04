@@ -43,6 +43,7 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
     using CommandStreamReceiver::tagAddress;
     using CommandStreamReceiver::tagsMultiAllocation;
     using CommandStreamReceiver::taskCount;
+    using CommandStreamReceiver::timestampPacketAllocator;
     using CommandStreamReceiver::useGpuIdleImplicitFlush;
     using CommandStreamReceiver::useNewResourceImplicitFlush;
 
@@ -167,6 +168,7 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
         }
         return isLocked;
     }
+    void initializeDeviceWithFirstSubmission() override {}
 
     static constexpr size_t tagSize = 256;
     static volatile uint32_t mockTagAddress[tagSize];
@@ -229,6 +231,7 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
     using CommandStreamReceiver::clearColorAllocation;
     using CommandStreamReceiver::commandStream;
     using CommandStreamReceiver::dispatchMode;
+    using CommandStreamReceiver::feSupportFlags;
     using CommandStreamReceiver::globalFenceAllocation;
     using CommandStreamReceiver::isPreambleSent;
     using CommandStreamReceiver::latestFlushedTaskCount;

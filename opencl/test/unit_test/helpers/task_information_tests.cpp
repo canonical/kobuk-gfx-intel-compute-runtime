@@ -294,7 +294,7 @@ HWTEST_F(DispatchFlagsTests, givenCommandComputeKernelWhenSubmitThenPassCorrectD
     std::unique_ptr<Command> command(new CommandComputeKernel(*mockCmdQ, kernelOperation, surfaces, flushDC, slmUsed, ndRangeKernel, nullptr, preemptionMode, kernel, 1));
     command->submit(20, false);
 
-    EXPECT_FALSE(mockCsr->passedDispatchFlags.pipelineSelectArgs.specialPipelineSelectMode);
+    EXPECT_FALSE(mockCsr->passedDispatchFlags.pipelineSelectArgs.systolicPipelineSelectMode);
     EXPECT_EQ(kernel.mockKernel->isVmeKernel(), mockCsr->passedDispatchFlags.pipelineSelectArgs.mediaSamplerRequired);
     EXPECT_EQ(mockCmdQ->flushStamp->getStampReference(), mockCsr->passedDispatchFlags.flushStampReference);
     EXPECT_EQ(mockCmdQ->getThrottle(), mockCsr->passedDispatchFlags.throttle);
@@ -342,7 +342,7 @@ HWTEST_F(DispatchFlagsTests, givenClCommandCopyImageWhenSubmitThenFlushTextureCa
     std::unique_ptr<Command> command(new CommandComputeKernel(*mockCmdQ, kernelOperation, surfaces, flushDC, slmUsed, commandType, nullptr, preemptionMode, kernel, 1));
     command->submit(20, false);
 
-    EXPECT_FALSE(mockCsr->passedDispatchFlags.pipelineSelectArgs.specialPipelineSelectMode);
+    EXPECT_FALSE(mockCsr->passedDispatchFlags.pipelineSelectArgs.systolicPipelineSelectMode);
     EXPECT_EQ(kernel.mockKernel->isVmeKernel(), mockCsr->passedDispatchFlags.pipelineSelectArgs.mediaSamplerRequired);
     EXPECT_EQ(mockCmdQ->flushStamp->getStampReference(), mockCsr->passedDispatchFlags.flushStampReference);
     EXPECT_EQ(mockCmdQ->getThrottle(), mockCsr->passedDispatchFlags.throttle);
@@ -430,5 +430,6 @@ HWTEST_F(DispatchFlagsTests, givenCommandComputeKernelWhenSubmitThenPassCorrectD
 
     EXPECT_TRUE(mockCsr->passedDispatchFlags.epilogueRequired);
     EXPECT_EQ(1234u, mockCsr->passedDispatchFlags.engineHints);
-    EXPECT_EQ(kernel.mockKernel->getThreadArbitrationPolicy(), mockCsr->passedDispatchFlags.threadArbitrationPolicy);
+    auto expectedThreadArbitrationPolicy = kernel.mockKernel->getDescriptor().kernelAttributes.threadArbitrationPolicy;
+    EXPECT_EQ(expectedThreadArbitrationPolicy, mockCsr->passedDispatchFlags.threadArbitrationPolicy);
 }

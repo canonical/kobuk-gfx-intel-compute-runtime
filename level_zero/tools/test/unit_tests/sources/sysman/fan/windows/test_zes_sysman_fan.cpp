@@ -33,9 +33,6 @@ class SysmanDeviceFanFixture : public SysmanDeviceFixture {
         pKmdSysManager->allowSetCalls = allowSetCalls;
         pKmdSysManager->fanSupported = fanSupported;
 
-        EXPECT_CALL(*pKmdSysManager, escape(_, _, _, _, _))
-            .WillRepeatedly(::testing::Invoke(pKmdSysManager.get(), &Mock<FanKmdSysManager>::mock_escape));
-
         pOriginalKmdSysManager = pWddmSysmanImp->pKmdSysManager;
         pWddmSysmanImp->pKmdSysManager = pKmdSysManager.get();
 
@@ -49,8 +46,8 @@ class SysmanDeviceFanFixture : public SysmanDeviceFixture {
         if (!sysmanUltsEnable) {
             GTEST_SKIP();
         }
-        SysmanDeviceFixture::TearDown();
         pWddmSysmanImp->pKmdSysManager = pOriginalKmdSysManager;
+        SysmanDeviceFixture::TearDown();
     }
 
     std::vector<zes_fan_handle_t> getFanHandles() {

@@ -128,7 +128,6 @@ class MockKernel : public Kernel {
     using Kernel::privateSurface;
     using Kernel::singleSubdevicePreferredInCurrentEnqueue;
     using Kernel::svmAllocationsRequireCacheFlush;
-    using Kernel::threadArbitrationPolicy;
     using Kernel::unifiedMemoryControls;
 
     using Kernel::slmSizes;
@@ -244,7 +243,7 @@ class MockKernel : public Kernel {
     void makeResident(CommandStreamReceiver &commandStreamReceiver) override;
     void getResidency(std::vector<Surface *> &dst) override;
 
-    void setSpecialPipelineSelectMode(bool value) { specialPipelineSelectMode = value; }
+    void setSystolicPipelineSelectMode(bool value) { systolicPipelineSelectMode = value; }
 
     bool requiresCacheFlushCommand(const CommandQueue &commandQueue) const override;
 

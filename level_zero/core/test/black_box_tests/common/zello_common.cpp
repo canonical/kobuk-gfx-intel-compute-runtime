@@ -8,6 +8,7 @@
 #include "zello_common.h"
 
 #include <bitset>
+#include <iomanip>
 
 bool verbose;
 
@@ -31,6 +32,9 @@ int getParamValue(int argc, char *argv[], const char *shortName, const char *lon
     for (; arg != argE; ++arg) {
         if ((0 == strcmp(*arg, shortName)) || (0 == strcmp(*arg, longName))) {
             arg++;
+            if (arg == argE) {
+                break;
+            }
             return atoi(*arg);
         }
     }
@@ -328,9 +332,11 @@ void printDeviceProperties(const ze_device_properties_t &props) {
                   << "\n"
                   << " * name : " << props.name << "\n"
                   << " * type : " << ((props.type == ZE_DEVICE_TYPE_GPU) ? "GPU" : "FPGA") << "\n"
-                  << " * vendorId : " << std::hex << props.vendorId << "\n"
-                  << " * deviceId : " << std::hex << props.deviceId << "\n"
-                  << " * subdeviceId : " << std::dec << props.subdeviceId << "\n"
+                  << std::hex
+                  << " * vendorId : 0x" << std::setw(4) << std::setfill('0') << props.vendorId << "\n"
+                  << " * deviceId : 0x" << std::setw(4) << std::setfill('0') << props.deviceId << "\n"
+                  << std::dec
+                  << " * subdeviceId : " << props.subdeviceId << "\n"
                   << " * coreClockRate : " << props.coreClockRate << "\n"
                   << " * maxMemAllocSize : " << props.maxMemAllocSize << "\n"
                   << " * maxHardwareContexts : " << props.maxHardwareContexts << "\n"
@@ -347,8 +353,10 @@ void printDeviceProperties(const ze_device_properties_t &props) {
     } else {
         std::cout << "Device : \n"
                   << " * name : " << props.name << "\n"
-                  << " * vendorId : " << std::hex << props.vendorId << "\n"
-                  << " * deviceId : " << std::hex << props.deviceId << std::dec << "\n";
+                  << std::hex
+                  << " * vendorId : 0x" << std::setw(4) << std::setfill('0') << props.vendorId << "\n"
+                  << " * deviceId : 0x" << std::setw(4) << std::setfill('0') << props.deviceId << "\n"
+                  << std::dec;
     }
 }
 

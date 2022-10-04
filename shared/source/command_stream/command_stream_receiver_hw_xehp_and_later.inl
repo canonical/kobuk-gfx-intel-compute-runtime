@@ -30,7 +30,7 @@ template <typename GfxFamily>
 size_t CommandStreamReceiverHw<GfxFamily>::getRequiredStateBaseAddressSize(const Device &device) const {
     size_t size = sizeof(typename GfxFamily::STATE_BASE_ADDRESS);
     size += sizeof(typename GfxFamily::_3DSTATE_BINDING_TABLE_POOL_ALLOC);
-    size += sizeof(PIPE_CONTROL);
+    size += MemorySynchronizationCommands<GfxFamily>::getSizeForSingleBarrier(false);
 
     auto &hwInfo = *device.getRootDeviceEnvironment().getHardwareInfo();
     auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
@@ -46,10 +46,12 @@ size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForL3Config() const { retur
 
 template <typename GfxFamily>
 void CommandStreamReceiverHw<GfxFamily>::programPipelineSelect(LinearStream &commandStream, PipelineSelectArgs &pipelineSelectArgs) {
-    if (csrSizeRequestFlags.mediaSamplerConfigChanged || csrSizeRequestFlags.specialPipelineSelectModeChanged || !isPreambleSent) {
-        PreambleHelper<GfxFamily>::programPipelineSelect(&commandStream, pipelineSelectArgs, peekHwInfo());
+    if (csrSizeRequestFlags.mediaSamplerConfigChanged || csrSizeRequestFlags.systolicPipelineSelectMode || !isPreambleSent) {
+        auto &hwInfo = peekHwInfo();
+        PreambleHelper<GfxFamily>::programPipelineSelect(&commandStream, pipelineSelectArgs, hwInfo);
         this->lastMediaSamplerConfig = pipelineSelectArgs.mediaSamplerRequired;
-        this->lastSpecialPipelineSelectMode = pipelineSelectArgs.specialPipelineSelectMode;
+        this->lastSystolicPipelineSelectMode = pipelineSelectArgs.systolicPipelineSelectMode;
+        this->streamProperties.pipelineSelect.setProperties(true, this->lastMediaSamplerConfig, this->lastSystolicPipelineSelectMode, hwInfo);
     }
 }
 
@@ -157,7 +159,7 @@ inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForStallingNoPostSyn
                                                                   false,
                                                                   false);
     } else {
-        return sizeof(typename GfxFamily::PIPE_CONTROL);
+        return MemorySynchronizationCommands<GfxFamily>::getSizeForSingleBarrier(false);
     }
 }
 
@@ -168,7 +170,7 @@ inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForStallingPostSyncC
                                                                   false,
                                                                   true);
     } else {
-        return MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(peekHwInfo());
+        return MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(peekHwInfo(), false);
     }
 }
 

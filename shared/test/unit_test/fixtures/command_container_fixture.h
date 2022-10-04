@@ -20,58 +20,37 @@ class CommandEncodeStatesFixture : public DeviceFixture {
         using CommandContainer::dirtyHeaps;
     };
 
-    void setUp() {
-        DeviceFixture::setUp();
-        cmdContainer = std::make_unique<MyMockCommandContainer>();
-        cmdContainer->initialize(pDevice, nullptr, true);
-        cmdContainer->setDirtyStateForAllHeaps(false);
-    }
-    void tearDown() {
-        cmdContainer.reset();
-        DeviceFixture::tearDown();
-    }
-    std::unique_ptr<MyMockCommandContainer> cmdContainer;
-    KernelDescriptor descriptor;
+    void setUp();
+    void tearDown();
 
     EncodeDispatchKernelArgs createDefaultDispatchKernelArgs(Device *device,
                                                              DispatchKernelEncoderI *dispatchInterface,
                                                              const void *threadGroupDimensions,
-                                                             bool requiresUncachedMocs) {
-        EncodeDispatchKernelArgs args{
-            0,                        // eventAddress
-            device,                   // device
-            dispatchInterface,        // dispatchInterface
-            threadGroupDimensions,    // threadGroupDimensions
-            PreemptionMode::Disabled, // preemptionMode
-            1,                        // partitionCount
-            false,                    // isIndirect
-            false,                    // isPredicate
-            false,                    // isTimestampEvent
-            requiresUncachedMocs,     // requiresUncachedMocs
-            false,                    // useGlobalAtomics
-            false,                    // isInternal
-            false,                    // isCooperative
-            false,                    // isHostScopeSignalEvent
-            false,                    // isKernelUsingSystemAllocation
-            false                     // isKernelDispatchedFromImmediateCmdList
-        };
+                                                             bool requiresUncachedMocs);
 
+    template <typename FamilyType>
+    EncodeStateBaseAddressArgs<FamilyType> createDefaultEncodeStateBaseAddressArgs(
+        CommandContainer *container,
+        typename FamilyType::STATE_BASE_ADDRESS &sbaCmd,
+        uint32_t statelessMocs) {
+        EncodeStateBaseAddressArgs<FamilyType> args = {
+            container,
+            sbaCmd,
+            statelessMocs,
+            false,
+            false,
+            false};
         return args;
     }
+
+    KernelDescriptor descriptor;
+    std::unique_ptr<MyMockCommandContainer> cmdContainer;
 };
 
 } // namespace NEO
 
 struct WalkerThreadFixture {
-    void setUp() {
-        startWorkGroup[0] = startWorkGroup[1] = startWorkGroup[2] = 0u;
-        numWorkGroups[0] = numWorkGroups[1] = numWorkGroups[2] = 1u;
-        workGroupSizes[0] = 32u;
-        workGroupSizes[1] = workGroupSizes[2] = 1u;
-        simd = 32u;
-        localIdDimensions = 3u;
-        requiredWorkGroupOrder = 0u;
-    }
+    void setUp();
     void tearDown() {}
 
     uint32_t startWorkGroup[3];

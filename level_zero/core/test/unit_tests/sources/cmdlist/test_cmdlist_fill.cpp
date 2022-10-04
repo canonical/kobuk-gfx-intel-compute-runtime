@@ -12,7 +12,7 @@
 
 #include "level_zero/core/source/builtin/builtin_functions_lib_impl.h"
 #include "level_zero/core/source/kernel/kernel_imp.h"
-#include "level_zero/core/test/unit_tests/fixtures/cmdlist_fixture.h"
+#include "level_zero/core/test/unit_tests/fixtures/cmdlist_fixture.inl"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_built_ins.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
@@ -53,14 +53,18 @@ class AppendFillFixture : public DeviceFixture {
             if (numberOfCallsToAppendLaunchKernelWithParams == thresholdOfCallsToAppendLaunchKernelWithParamsToFail) {
                 return ZE_RESULT_ERROR_UNKNOWN;
             }
-
+            if (numberOfCallsToAppendLaunchKernelWithParams < 3) {
+                threadGroupDimensions[numberOfCallsToAppendLaunchKernelWithParams] = *pThreadGroupDimensions;
+                xGroupSizes[numberOfCallsToAppendLaunchKernelWithParams] = kernel->getGroupSize()[0];
+            }
             numberOfCallsToAppendLaunchKernelWithParams++;
             return CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(kernel,
                                                                                       pThreadGroupDimensions,
                                                                                       event,
                                                                                       launchParams);
         }
-
+        ze_group_count_t threadGroupDimensions[3];
+        uint32_t xGroupSizes[3];
         uint32_t thresholdOfCallsToAppendLaunchKernelWithParamsToFail = std::numeric_limits<uint32_t>::max();
         uint32_t numberOfCallsToAppendLaunchKernelWithParams = 0;
     };
@@ -77,6 +81,7 @@ class AppendFillFixture : public DeviceFixture {
         driverHandle = std::make_unique<Mock<MockDriverFillHandle>>();
         driverHandle->initialize(std::move(devices));
         device = driverHandle->devices[0];
+        neoDevice->deviceInfo.maxWorkGroupSize = 256;
     }
 
     void tearDown() {
@@ -187,6 +192,149 @@ HWTEST2_F(AppendFillTest,
     size_t newPatternAllocationsVectorSize = commandList->patternAllocations.size();
 
     EXPECT_EQ(patternAllocationsVectorSize + 1u, newPatternAllocationsVectorSize);
+}
+
+HWTEST2_F(AppendFillTest,
+          givenAppendMemoryFillWhenPatternSizeIsOneThenDispatchOneKernel, IsAtLeastSkl) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+
+    auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
+    commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    int pattern = 0;
+    const size_t size = 1024 * 1024;
+    uint8_t *ptr = new uint8_t[size];
+    ze_result_t result = commandList->appendMemoryFill(ptr, &pattern, 1, size, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(1u, commandList->numberOfCallsToAppendLaunchKernelWithParams);
+    EXPECT_EQ(size, commandList->xGroupSizes[0] * commandList->threadGroupDimensions[0].groupCountX * 16);
+    delete[] ptr;
+}
+
+HWTEST2_F(AppendFillTest,
+          givenAppendMemoryFillWithUnalignedSizeWhenPatternSizeIsOneThenDispatchTwoKernels, IsAtLeastSkl) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+
+    auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
+    commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    int pattern = 0;
+    const size_t size = 1025;
+    uint8_t *ptr = new uint8_t[size];
+    ze_result_t result = commandList->appendMemoryFill(ptr, &pattern, 1, size, nullptr, 0, nullptr);
+    size_t filledSize = commandList->xGroupSizes[0] * commandList->threadGroupDimensions[0].groupCountX * 16;
+    filledSize += commandList->xGroupSizes[1] * commandList->threadGroupDimensions[1].groupCountX;
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(2u, commandList->numberOfCallsToAppendLaunchKernelWithParams);
+    EXPECT_EQ(size, filledSize);
+    delete[] ptr;
+}
+
+HWTEST2_F(AppendFillTest,
+          givenAppendMemoryFillWithSizeBelow16WhenPatternSizeIsOneThenDispatchTwoKernels, IsAtLeastSkl) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+
+    auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
+    commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    int pattern = 0;
+    const size_t size = 4;
+    uint8_t *ptr = new uint8_t[size];
+    ze_result_t result = commandList->appendMemoryFill(ptr, &pattern, 1, size, nullptr, 0, nullptr);
+    size_t filledSize = commandList->xGroupSizes[0] * commandList->threadGroupDimensions[0].groupCountX * 16;
+    filledSize += commandList->xGroupSizes[1] * commandList->threadGroupDimensions[1].groupCountX;
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(2u, commandList->numberOfCallsToAppendLaunchKernelWithParams);
+    EXPECT_EQ(size, filledSize);
+    delete[] ptr;
+}
+
+HWTEST2_F(AppendFillTest,
+          givenAppendMemoryFillWithSizeBelowMaxWorkgroupSizeWhenPatternSizeIsOneThenDispatchOneKernel, IsAtLeastSkl) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+
+    auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
+    commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    int pattern = 0;
+    const size_t size = neoDevice->getDeviceInfo().maxWorkGroupSize / 2;
+    uint8_t *ptr = new uint8_t[size];
+    ze_result_t result = commandList->appendMemoryFill(ptr, &pattern, 1, size, nullptr, 0, nullptr);
+    size_t filledSize = commandList->xGroupSizes[0] * commandList->threadGroupDimensions[0].groupCountX * 16;
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(1u, commandList->numberOfCallsToAppendLaunchKernelWithParams);
+    EXPECT_EQ(size, filledSize);
+    delete[] ptr;
+}
+
+HWTEST2_F(AppendFillTest,
+          givenAppendMemoryFillWhenPatternSizeIsOneThenGroupCountIsCorrect, IsAtLeastSkl) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+
+    auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
+    commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    int pattern = 0;
+    const size_t size = 1024 * 1024;
+    uint8_t *ptr = new uint8_t[size];
+    ze_result_t result = commandList->appendMemoryFill(ptr, &pattern, 1, size, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    auto groupSize = device->getDeviceInfo().maxWorkGroupSize;
+    auto dataTypeSize = sizeof(uint32_t) * 4;
+    auto expectedGroupCount = size / (dataTypeSize * groupSize);
+    EXPECT_EQ(expectedGroupCount, commandList->threadGroupDimensions[0].groupCountX);
+    delete[] ptr;
+}
+
+HWTEST2_F(AppendFillTest,
+          givenAppendMemoryFillWhenPtrWithOffsetAndPatternSizeIsOneThenThreeKernelsDispatched, IsAtLeastSkl) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+
+    auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
+    commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    int pattern = 0;
+    uint32_t offset = 1;
+    const size_t size = 1024;
+    uint8_t *ptr = new uint8_t[size];
+    ze_result_t result = commandList->appendMemoryFill(ptr + offset, &pattern, 1, size - offset, nullptr, 0, nullptr);
+    size_t filledSize = commandList->xGroupSizes[0] * commandList->threadGroupDimensions[0].groupCountX;
+    filledSize += commandList->xGroupSizes[1] * commandList->threadGroupDimensions[1].groupCountX * 16;
+    filledSize += commandList->xGroupSizes[2] * commandList->threadGroupDimensions[2].groupCountX;
+    EXPECT_EQ(sizeof(uint32_t) - offset, commandList->xGroupSizes[0]);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(3u, commandList->numberOfCallsToAppendLaunchKernelWithParams);
+    EXPECT_EQ(size - offset, filledSize);
+    delete[] ptr;
+}
+
+HWTEST2_F(AppendFillTest,
+          givenAppendMemoryFillWhenPtrWithOffsetAndSmallSizeAndPatternSizeIsOneThenTwoKernelsDispatched, IsAtLeastSkl) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+
+    auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
+    commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    int pattern = 0;
+    uint32_t offset = 1;
+    const size_t size = 2;
+    uint8_t *ptr = new uint8_t[size];
+    ze_result_t result = commandList->appendMemoryFill(ptr + offset, &pattern, 1, size - offset, nullptr, 0, nullptr);
+    size_t filledSize = commandList->xGroupSizes[0] * commandList->threadGroupDimensions[0].groupCountX * 16;
+    filledSize += commandList->xGroupSizes[1] * commandList->threadGroupDimensions[1].groupCountX;
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(2u, commandList->numberOfCallsToAppendLaunchKernelWithParams);
+    EXPECT_EQ(size - offset, filledSize);
+    delete[] ptr;
+}
+
+HWTEST2_F(AppendFillTest,
+          givenAppendMemoryFillWhenPtrWithOffsetAndFailAppendUnalignedFillKernelThenReturnError, IsAtLeastSkl) {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+
+    auto commandList = std::make_unique<WhiteBox<MockCommandList<gfxCoreFamily>>>();
+    commandList->thresholdOfCallsToAppendLaunchKernelWithParamsToFail = 0;
+    commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    int pattern = 0;
+    uint32_t offset = 1;
+    const size_t size = 1024;
+    uint8_t *ptr = new uint8_t[size];
+    ze_result_t result = commandList->appendMemoryFill(ptr + offset, &pattern, 1, size - offset, nullptr, 0, nullptr);
+    EXPECT_NE(ZE_RESULT_SUCCESS, result);
+    delete[] ptr;
 }
 
 HWTEST2_F(AppendFillTest,

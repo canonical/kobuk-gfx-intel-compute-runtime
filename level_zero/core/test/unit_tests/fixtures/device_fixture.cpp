@@ -8,9 +8,9 @@
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 
 #include "shared/source/os_interface/device_factory.h"
+#include "shared/test/common/mocks/mock_cpu_page_fault_manager.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
-#include "shared/test/unit_test/page_fault_manager/mock_cpu_page_fault_manager.h"
 
 #include "level_zero/core/test/unit_tests/mocks/mock_built_ins.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_context.h"
@@ -96,7 +96,7 @@ void MultiDeviceFixture::tearDown() {
 }
 
 void MultipleDevicesWithCustomHwInfo::setUp() {
-    NEO::MockCompilerEnableGuard mock(true);
+
     VariableBackup<bool> mockDeviceFlagBackup(&MockDevice::createSingleDevice, false);
 
     std::vector<std::unique_ptr<NEO::Device>> devices;
@@ -117,11 +117,15 @@ void MultipleDevicesWithCustomHwInfo::setUp() {
     hwInfo.gtSystemInfo.MaxSubSlicesSupported = sliceCount * subsliceCount;
     hwInfo.gtSystemInfo.MaxDualSubSlicesSupported = sliceCount * subsliceCount;
 
-    hwInfo.gtSystemInfo.MultiTileArchInfo.IsValid = 1;
+    ASSERT_FALSE(numSubDevices == 0 || numSubDevices > 4);
+
+    hwInfo.gtSystemInfo.MultiTileArchInfo.IsValid = numSubDevices > 0;
     hwInfo.gtSystemInfo.MultiTileArchInfo.TileCount = numSubDevices;
-    hwInfo.gtSystemInfo.MultiTileArchInfo.Tile0 = 1;
-    hwInfo.gtSystemInfo.MultiTileArchInfo.Tile1 = 1;
-    hwInfo.gtSystemInfo.MultiTileArchInfo.TileMask = 3;
+    hwInfo.gtSystemInfo.MultiTileArchInfo.Tile0 = numSubDevices >= 1;
+    hwInfo.gtSystemInfo.MultiTileArchInfo.Tile1 = numSubDevices >= 2;
+    hwInfo.gtSystemInfo.MultiTileArchInfo.Tile2 = numSubDevices >= 3;
+    hwInfo.gtSystemInfo.MultiTileArchInfo.Tile3 = numSubDevices == 4;
+    hwInfo.gtSystemInfo.MultiTileArchInfo.TileMask = static_cast<uint8_t>(maxNBitValue(numSubDevices));
 
     for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
         executionEnvironment->rootDeviceEnvironments[i]->setHwInfo(&hwInfo);
@@ -147,7 +151,6 @@ void SingleRootMultiSubDeviceFixture::setUp() {
     neoDevice = device->getNEODevice();
 }
 void SingleRootMultiSubDeviceFixtureWithImplicitScalingImpl::setUp() {
-    DebugManagerStateRestore restorer;
     DebugManager.flags.EnableImplicitScaling.set(implicitScaling);
     DebugManager.flags.CreateMultipleRootDevices.set(numRootDevices);
     DebugManager.flags.CreateMultipleSubDevices.set(numSubDevices);
@@ -212,7 +215,7 @@ void SingleRootMultiSubDeviceFixtureWithImplicitScalingImpl::tearDown() {
 }
 
 void GetMemHandlePtrTestFixture::setUp() {
-    NEO::MockCompilerEnableGuard mock(true);
+
     neoDevice =
         NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
     auto mockBuiltIns = new MockBuiltins();

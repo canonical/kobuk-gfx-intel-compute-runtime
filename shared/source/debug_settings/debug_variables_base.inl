@@ -79,11 +79,12 @@ DECLARE_DEBUG_VARIABLE(bool, DisableForceToStateless, false, "If platform requir
 DECLARE_DEBUG_VARIABLE(bool, DebuggerDisableSingleAddressSbaTracking, false, "Disable SBA Tracking command programming in single address space mode")
 DECLARE_DEBUG_VARIABLE(bool, ForceTheoreticalMaxWorkGroupCount, false, "Do not apply any limitation to max cooperative/concurrent work-group count queries")
 DECLARE_DEBUG_VARIABLE(bool, DisableScratchPages, false, "Disable scratch pages during VM creations")
-DECLARE_DEBUG_VARIABLE(std::string, ForceDeviceId, std::string("unk"), "DeviceId selected for testing")
+DECLARE_DEBUG_VARIABLE(std::string, ForceDeviceId, std::string("unk"), "Override device id in AUB/TBX mode")
 DECLARE_DEBUG_VARIABLE(std::string, FilterDeviceId, std::string("unk"), "Device id filter, adapter matching device id will be opened. Ignored when unk.")
 DECLARE_DEBUG_VARIABLE(std::string, FilterBdfPath, std::string("unk"), "Linux-only, BDF path filter, only matching paths will be opened. Ignored when unk.")
 DECLARE_DEBUG_VARIABLE(std::string, LoadBinarySipFromFile, std::string("unk"), "Select binary file to load SIP kernel raw binary. When file named *_header.* exists, it is used as header")
 DECLARE_DEBUG_VARIABLE(std::string, InjectInternalBuildOptions, std::string("unk"), "Appends internal build options string to user modules")
+DECLARE_DEBUG_VARIABLE(std::string, InjectApiBuildOptions, std::string("unk"), "Appends api build options string to user modules")
 DECLARE_DEBUG_VARIABLE(std::string, OverrideDeviceName, std::string("unk"), "Device name to override")
 DECLARE_DEBUG_VARIABLE(int64_t, OverrideMultiStoragePlacement, -1, "-1: disable, 0+: tile mask, each bit corresponds to tile")
 DECLARE_DEBUG_VARIABLE(int64_t, ForceCompressionDisabledForCompressedBlitCopies, -1, "-1: default, 0: disabled, 1: enabled. If compression is required, set AUX_CCS_E, but force CompressionEnable filed. 0 should result in uncompressed read/write")
@@ -213,9 +214,12 @@ DECLARE_DEBUG_VARIABLE(int32_t, UseContextEndOffsetForEventCompletion, -1, "Use 
 DECLARE_DEBUG_VARIABLE(int32_t, ForceWddmLowPriorityContextValue, -1, "Force scheduling priority value during Wddm low priority context creation. -1 - default.")
 DECLARE_DEBUG_VARIABLE(int32_t, FailBuildProgramWithStatefulAccess, -1, "-1: default, 0: disable, 1: enable, Fail build program/module creation whenever stateful access is discovered (except built in kernels).")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceImagesSupport, -1, "-1: default, 0: disable, 1: enable. Override support for Images.")
+DECLARE_DEBUG_VARIABLE(int32_t, RemoveUserFenceInCmdlistResetAndDestroy, -1, "-1: default - disabled, 0: disable, 1: enable. If enabled remove user fence during cmdlist reset and destroy.")
+DECLARE_DEBUG_VARIABLE(int32_t, OverrideCmdListCmdBufferSizeInKb, -1, "-1: default, 0: disable, >0: size in KB. Override cmd list command buffer size in KB.")
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideL1CachePolicyInSurfaceStateAndStateless, -1, "-1: default, >=0 : following policy will be programmed in render surface state (for regular buffers) and stateless L1 caching")
-DECLARE_DEBUG_VARIABLE(int32_t, PlaformSupportEvictWhenNecessaryFlag, -1, "-1: default - platform specific, 0: disable, 1: enable")
+DECLARE_DEBUG_VARIABLE(int32_t, PlaformSupportEvictIfNecessaryFlag, -1, "-1: default - platform specific, 0: disable, 1: enable")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceEvictOnlyIfNecessaryFlag, -1, "-1: default - driver selects when to use, 0: force never use this flag, 1: force always use this flag")
+DECLARE_DEBUG_VARIABLE(int32_t, ForceStatelessMocsEncryptionBit, -1, "-1: default - 1: set encryption bit")
 
 /*LOGGING FLAGS*/
 DECLARE_DEBUG_VARIABLE(int32_t, PrintDriverDiagnostics, -1, "prints driver diagnostics messages to standard output, value corresponds to hint level")
@@ -287,6 +291,8 @@ DECLARE_DEBUG_VARIABLE(int32_t, AssignBCSAtEnqueue, -1, "-1: default, 0:disabled
 DECLARE_DEBUG_VARIABLE(int32_t, DeferCmdQGpgpuInitialization, -1, "-1: default, 0:disabled, 1: enabled.")
 DECLARE_DEBUG_VARIABLE(int32_t, DeferCmdQBcsInitialization, -1, "-1: default, 0:disabled, 1: enabled.")
 DECLARE_DEBUG_VARIABLE(int32_t, PreferInternalBcsEngine, -1, "-1: default, 0:disabled, 1: enabled. When enabled use internal BCS engine for internal transfers, when disabled use regular engine")
+DECLARE_DEBUG_VARIABLE(int32_t, SplitBcsCopy, -1, "-1: default, 0:disabled, 1: enabled. When enqueues copy to main copy engine then split between even linked copy engines")
+DECLARE_DEBUG_VARIABLE(int32_t, SplitBcsMask, 0, "0: default, >0: bitmask: indicates bcs engines for split")
 DECLARE_DEBUG_VARIABLE(int32_t, ReuseKernelBinaries, -1, "-1: default, 0:disabled, 1: enabled. If enabled, driver reuses kernel binaries.")
 
 /*DIRECT SUBMISSION FLAGS*/
@@ -387,6 +393,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, OverrideNotifyEnableForTagUpdatePostSync, -1, "-
 DECLARE_DEBUG_VARIABLE(int32_t, EnableCmdQRoundRobindEngineAssign, -1, "-1: default, 0: disable, 1: enable")
 DECLARE_DEBUG_VARIABLE(int32_t, CmdQRoundRobindEngineAssignBitfield, -1, "-1: default, >0: bitfield with supported engines")
 DECLARE_DEBUG_VARIABLE(int32_t, CmdQRoundRobindEngineAssignNTo1, -1, "-1: default, >0: assign same engine to N queues")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableCopyEngineSelector, -1, "Do not choose only main copy engine, -1: default, 0: disable, 1: enable")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableCmdQRoundRobindBcsEngineAssign, -1, "-1: default, 0: disable, 1: enable")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableCmdQRoundRobindBcsEngineAssignLimit, -1, "-1: default, >=0: round robin limit")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableCmdQRoundRobindBcsEngineAssignStartingValue, -1, "-1: default, >=0: round robin starting point")
@@ -416,10 +423,10 @@ DECLARE_DEBUG_VARIABLE(int32_t, UsePipeControlAfterPartitionedWalker, -1, "-1: d
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalSetWalkerPartitionCount, 0, "Experimental implementation: Set number of COMPUTE_WALKERs for a given Partition Type, 0 - do not set the feature.")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalSetWalkerPartitionType, -1, "Experimental implementation: Set COMPUTE_WALKER Partition Type. Valid values for types from 1 to 3")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalEnableCustomLocalMemoryAlignment, 0, "Align local memory allocations to a given value. Works only with allocations at least as big as the value.  0: no effect, 2097152: 2 megabytes, 1073741824: 1 gigabyte")
+DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalEnableDeviceAllocationCache, -1, "Experimentally enable allocation cache.")
 DECLARE_DEBUG_VARIABLE(bool, ExperimentalEnableSourceLevelDebugger, false, "Experimentally enable source level debugger.")
 DECLARE_DEBUG_VARIABLE(bool, ExperimentalEnableL0DebuggerForOpenCL, false, "Experimentally enable debugging OCL with L0 Debug API.")
 DECLARE_DEBUG_VARIABLE(bool, ExperimentalEnableTileAttach, false, "Experimentally enable attaching to tiles (subdevices).")
-DECLARE_DEBUG_VARIABLE(bool, ExperimentalEnableDeviceAllocationCache, false, "Experimentally enable allocation cache.")
 
 /*DRIVER TOGGLES*/
 DECLARE_DEBUG_VARIABLE(bool, UseMaxSimdSizeToDeduceMaxWorkgroupSize, false, "With this flag on, max workgroup size is deduced using SIMD32 instead of SIMD8, this causes the max wkg size to be 4 times bigger")
@@ -433,6 +440,8 @@ DECLARE_DEBUG_VARIABLE(bool, AllowUnrestrictedSize, false, "Allow allocating mem
 DECLARE_DEBUG_VARIABLE(bool, ForceDefaultThreadArbitrationPolicyIfNotSpecified, false, "When executing kernel without thread arbitration hint specified, ensure the default setting is used")
 DECLARE_DEBUG_VARIABLE(bool, ForceAllResourcesUncached, false, "When set, all memory operations for all resources are forced to UC. This overrides all caching-related debug variables and globally disables all caches")
 DECLARE_DEBUG_VARIABLE(bool, EnableDebuggerMmapMemoryAccess, false, "Mmap used to access memory by debug api, valid only on Linux OS")
+DECLARE_DEBUG_VARIABLE(bool, ForceDefaultGrfCompilationMode, false, "Adds build option -cl-intel-128-GRF-per-thread to force kernel compilation in Default-GRF mode")
+DECLARE_DEBUG_VARIABLE(bool, ForceLargeGrfCompilationMode, false, "Adds build option -cl-intel-256-GRF-per-thread to force kernel compilation in Large-GRF mode")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceOCLVersion, 0, "Force specific OpenCL API version")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceOCL21FeaturesSupport, -1, "-1: default, 0: disable, 1:enable. Force support of OpenCL 2.0 and OpenCL 2.1 API features")
 DECLARE_DEBUG_VARIABLE(int32_t, ForcePreemptionMode, -1, "Keep this variable in sync with PreemptionMode enum. -1 - devices default mode, 1 - disable, 2 - midBatch, 3 - threadGroup, 4 - midThread")
@@ -465,6 +474,8 @@ DECLARE_DEBUG_VARIABLE(int32_t, UsmInitialPlacement, -1, "-1: default, 0: optimi
 DECLARE_DEBUG_VARIABLE(int32_t, ForceHostPointerImport, -1, "-1: default, 0: disable, 1: enable, Forces the driver to import every host pointer coming into driver, WARNING this is not spec compliant.")
 DECLARE_DEBUG_VARIABLE(int32_t, ProgramExtendedPipeControlPriorToNonPipelinedStateCommand, -1, "-1: default, 0: disable, 1: enable, Program additional extended version of PIPE CONTROL command before non pipelined state command")
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideDrmRegion, -1, "-1: disable, 0+: override to given memory region for all allocations")
+DECLARE_DEBUG_VARIABLE(int32_t, MultiReturnPointCommandList, -1, "-1: default: disabled, 0: disabled, 1: enabled. This flag creates multiple return point from List to Queue for Front End reconfiguration on Queue buffer for single List")
+DECLARE_DEBUG_VARIABLE(int32_t, EnablePipelineSelectTracking, -1, "-1: default: disabled, 0: disabled, 1: enabled. This flag enables optimization that limits number of pipeline select dispatched by command lists")
 
 /* Binary Cache */
 DECLARE_DEBUG_VARIABLE(bool, BinaryCacheTrace, false, "enable cl_cache to produce .trace files with information about hash computation")

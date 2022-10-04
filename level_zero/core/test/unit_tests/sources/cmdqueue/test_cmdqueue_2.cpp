@@ -445,7 +445,7 @@ HWTEST_F(CommandQueueSynchronizeTest, givenSynchronousCommandQueueWhenTagUpdateF
     } else {
         expectedSize += sizeof(MI_BATCH_BUFFER_END);
     }
-    expectedSize += NEO::MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(neoDevice->getHardwareInfo());
+    expectedSize += NEO::MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(neoDevice->getHardwareInfo(), false);
     expectedSize = alignUp(expectedSize, 8);
 
     const ze_command_queue_desc_t desc{ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC, nullptr, 0, 0, 0, ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS, ZE_COMMAND_QUEUE_PRIORITY_NORMAL};
@@ -470,12 +470,12 @@ HWTEST_F(CommandQueueSynchronizeTest, givenSynchronousCommandQueueWhenTagUpdateF
     returnValue = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, false);
     EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
 
-    auto usedSpaceBefore = commandQueue->commandStream->getUsed();
+    auto usedSpaceBefore = commandQueue->commandStream.getUsed();
 
     returnValue = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, false);
     EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
 
-    auto usedSpaceAfter = commandQueue->commandStream->getUsed();
+    auto usedSpaceAfter = commandQueue->commandStream.getUsed();
     ASSERT_GT(usedSpaceAfter, usedSpaceBefore);
 
     size_t executionConsumedSize = usedSpaceAfter - usedSpaceBefore;
@@ -484,7 +484,7 @@ HWTEST_F(CommandQueueSynchronizeTest, givenSynchronousCommandQueueWhenTagUpdateF
 
     GenCmdList cmdList;
     ASSERT_TRUE(PARSE::parseCommandBuffer(cmdList,
-                                          ptrOffset(commandQueue->commandStream->getCpuBase(), usedSpaceBefore),
+                                          ptrOffset(commandQueue->commandStream.getCpuBase(), usedSpaceBefore),
                                           executionConsumedSize));
 
     auto pipeControls = findAll<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
@@ -628,9 +628,7 @@ struct CommandQueueInitTests : public ::testing::Test {
     void SetUp() override {
         DebugManager.flags.CreateMultipleSubDevices.set(numSubDevices);
 
-        auto executionEnvironment = new NEO::ExecutionEnvironment();
-        executionEnvironment->prepareRootDeviceEnvironments(numRootDevices);
-        executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+        auto executionEnvironment = new NEO::MockExecutionEnvironment(defaultHwInfo.get(), true, numRootDevices);
         executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
         memoryManager = new MyMemoryManager(*executionEnvironment);
@@ -700,7 +698,7 @@ TEST_F(CommandQueueInitTests, whenDestroyCommandQueueThenStoreCommandBuffersAsRe
 
 struct DeviceWithDualStorage : Test<DeviceFixture> {
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
+
         DebugManager.flags.EnableLocalMemory.set(1);
         DebugManager.flags.AllocateSharedAllocationsWithCpuAndGpuStorage.set(1);
         DeviceFixture::setUp();
@@ -745,28 +743,28 @@ HWTEST2_F(DeviceWithDualStorage, givenCmdListWithAppendedKernelAndUsmTransferAnd
     auto gpuAlloc = device->getDriverHandle()->getSvmAllocsManager()->getSVMAllocs()->get(ptr)->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
     kernel.residencyContainer.push_back(gpuAlloc);
 
-    ze_group_count_t dispatchFunctionArguments{1, 1, 1};
+    ze_group_count_t dispatchKernelArguments{1, 1, 1};
     CmdListKernelLaunchParams launchParams = {};
-    commandList->appendLaunchKernel(kernel.toHandle(), &dispatchFunctionArguments, nullptr, 0, nullptr, launchParams);
+    commandList->appendLaunchKernel(kernel.toHandle(), &dispatchKernelArguments, nullptr, 0, nullptr, launchParams);
     auto deviceImp = static_cast<DeviceImp *>(device);
     auto pageFaultCmdQueue = whiteboxCast(deviceImp->pageFaultCommandList->cmdQImmediate);
 
-    auto sizeBefore = commandQueue->commandStream->getUsed();
-    auto pageFaultSizeBefore = pageFaultCmdQueue->commandStream->getUsed();
+    auto sizeBefore = commandQueue->commandStream.getUsed();
+    auto pageFaultSizeBefore = pageFaultCmdQueue->commandStream.getUsed();
     auto handle = commandList->toHandle();
     commandQueue->executeCommandLists(1, &handle, nullptr, true);
-    auto sizeAfter = commandQueue->commandStream->getUsed();
-    auto pageFaultSizeAfter = pageFaultCmdQueue->commandStream->getUsed();
+    auto sizeAfter = commandQueue->commandStream.getUsed();
+    auto pageFaultSizeAfter = pageFaultCmdQueue->commandStream.getUsed();
     EXPECT_LT(sizeBefore, sizeAfter);
     EXPECT_LT(pageFaultSizeBefore, pageFaultSizeAfter);
 
     GenCmdList commands;
-    CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(commandQueue->commandStream->getCpuBase(), 0),
+    CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(commandQueue->commandStream.getCpuBase(), 0),
                                              sizeAfter);
     auto count = findAll<CFE_STATE *>(commands.begin(), commands.end()).size();
     EXPECT_EQ(0u, count);
 
-    CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(pageFaultCmdQueue->commandStream->getCpuBase(), 0),
+    CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(pageFaultCmdQueue->commandStream.getCpuBase(), 0),
                                              pageFaultSizeAfter);
     count = findAll<CFE_STATE *>(commands.begin(), commands.end()).size();
     EXPECT_EQ(1u, count);
@@ -1003,6 +1001,33 @@ HWTEST2_F(CommandQueueScratchTests, whenPatchCommandsIsCalledThenCommandsAreCorr
         EXPECT_EQ(destinationCfeStates[i].getMaximumNumberOfThreads(), sourceCfeState.getMaximumNumberOfThreads());
         EXPECT_EQ(destinationCfeStates[i].getScratchSpaceBuffer(), sourceCfeState.getScratchSpaceBuffer());
     }
+}
+
+using IsWithinNotSupported = IsWithinGfxCore<IGFX_GEN9_CORE, IGFX_GEN12LP_CORE>;
+
+HWTEST2_F(CommandQueueScratchTests, givenCommandsToPatchToNotSupportedPlatformWhenPatchCommandsIsCalledThenAbortIsThrown, IsWithinNotSupported) {
+    ze_command_queue_desc_t desc = {};
+    NEO::CommandStreamReceiver *csr = nullptr;
+    device->getCsrForOrdinalAndIndex(&csr, 0u, 0u);
+    auto commandQueue = std::make_unique<MockCommandQueueHw<gfxCoreFamily>>(device, csr, &desc);
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+
+    EXPECT_NO_THROW(commandQueue->patchCommands(*commandList, 0));
+    commandList->commandsToPatch.push_back({});
+    EXPECT_ANY_THROW(commandQueue->patchCommands(*commandList, 0));
+    commandList->commandsToPatch.clear();
+
+    CommandList::CommandToPatch commandToPatch;
+
+    commandToPatch.type = CommandList::CommandToPatch::FrontEndState;
+    commandList->commandsToPatch.push_back(commandToPatch);
+    EXPECT_ANY_THROW(commandQueue->patchCommands(*commandList, 0));
+    commandList->commandsToPatch.clear();
+
+    commandToPatch.type = CommandList::CommandToPatch::Invalid;
+    commandList->commandsToPatch.push_back(commandToPatch);
+    EXPECT_ANY_THROW(commandQueue->patchCommands(*commandList, 0));
+    commandList->commandsToPatch.clear();
 }
 
 } // namespace ult

@@ -18,7 +18,7 @@
 
 namespace NEO {
 
-static constexpr NEO::Elf::ZebinKernelMetadata::Types::Version zeInfoDecoderVersion{1, 9};
+constexpr NEO::Elf::ZebinKernelMetadata::Types::Version zeInfoDecoderVersion{1, 15};
 
 struct ZebinSections {
     using SectionHeaderData = NEO::Elf::Elf<Elf::EI_CLASS_64>::SectionHeaderAndData;
@@ -35,6 +35,7 @@ struct ZebinSections {
 
 using UniqueNode = StackVec<const NEO::Yaml::Node *, 1>;
 struct ZeInfoKernelSections {
+    UniqueNode attributesNd;
     UniqueNode nameNd;
     UniqueNode executionEnvNd;
     UniqueNode debugEnvNd;
@@ -56,6 +57,9 @@ DecodeError validateZeInfoKernelSectionsCount(const ZeInfoKernelSections &outZeI
 DecodeError readZeInfoExecutionEnvironment(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node,
                                            NEO::Elf::ZebinKernelMetadata::Types::Kernel::ExecutionEnv::ExecutionEnvBaseT &outExecEnv,
                                            ConstStringRef context, std::string &outErrReason, std::string &outWarning);
+DecodeError readZeInfoAttributes(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node,
+                                 NEO::Elf::ZebinKernelMetadata::Types::Kernel::Attributes::AttributesBaseT &outAttributes,
+                                 ConstStringRef context, std::string &outErrReason, std::string &outWarning);
 DecodeError readZeInfoDebugEnvironment(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node,
                                        NEO::Elf::ZebinKernelMetadata::Types::Kernel::DebugEnv::DebugEnvBaseT &outDebugEnv,
                                        ConstStringRef context,
@@ -115,4 +119,8 @@ NEO::DecodeError readZeInfoVersionFromZeInfo(NEO::Elf::ZebinKernelMetadata::Type
 NEO::DecodeError populateZeInfoVersion(NEO::Elf::ZebinKernelMetadata::Types::Version &dst, ConstStringRef &versionStr, std::string &outErrReason);
 
 NEO::DecodeError populateExternalFunctionsMetadata(NEO::ProgramInfo &dst, NEO::Yaml::YamlParser &yamlParser, const NEO::Yaml::Node &functionNd, std::string &outErrReason, std::string &outWarning);
+
+NEO::DecodeError populateKernelSourceAttributes(NEO::KernelDescriptor &dst, NEO::Elf::ZebinKernelMetadata::Types::Kernel::Attributes::AttributesBaseT &attributes);
+
+NEO::DecodeError decodeZebin(ProgramInfo &dst, NEO::Elf::Elf<NEO::Elf::EI_CLASS_64> &elf, std::string &outErrReason, std::string &outWarning);
 } // namespace NEO

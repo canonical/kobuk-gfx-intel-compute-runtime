@@ -25,9 +25,10 @@ using Family = NEO::Gen12LpFamily;
 namespace NEO {
 
 template <>
-size_t EncodeWA<Family>::getAdditionalPipelineSelectSize(Device &device) {
+size_t EncodeWA<Family>::getAdditionalPipelineSelectSize(Device &device, bool isRcs) {
     size_t size = 0;
-    if (device.getDefaultEngine().commandStreamReceiver->isRcs()) {
+    const auto &hwInfoConfig = *HwInfoConfig::get(device.getHardwareInfo().platform.eProductFamily);
+    if (isRcs && hwInfoConfig.is3DPipelineSelectWARequired()) {
         size += 2 * PreambleHelper<Family>::getCmdSizeForPipelineSelect(device.getHardwareInfo());
     }
     return size;
@@ -82,7 +83,7 @@ void EncodeSurfaceState<Family>::encodeExtraBufferParams(EncodeSurfaceStateArgs 
 }
 
 template <>
-bool EncodeSurfaceState<Family>::doBindingTablePrefetch() {
+bool EncodeSurfaceState<Family>::isBindingTablePrefetchPreferred() {
     return false;
 }
 
@@ -93,6 +94,19 @@ void EncodeL3State<Family>::encode(CommandContainer &container, bool enableSLM) 
 template <>
 void EncodeStoreMMIO<Family>::appendFlags(MI_STORE_REGISTER_MEM *storeRegMem, bool workloadPartition) {
     storeRegMem->setMmioRemapEnable(true);
+}
+
+template <>
+void EncodeComputeMode<Family>::adjustPipelineSelect(CommandContainer &container, const NEO::KernelDescriptor &kernelDescriptor) {
+    auto &hwInfo = container.getDevice()->getHardwareInfo();
+
+    PipelineSelectArgs pipelineSelectArgs;
+    pipelineSelectArgs.systolicPipelineSelectMode = kernelDescriptor.kernelAttributes.flags.usesSystolicPipelineSelectMode;
+    pipelineSelectArgs.systolicPipelineSelectSupport = container.systolicModeSupport;
+
+    PreambleHelper<Family>::programPipelineSelect(container.getCommandStream(),
+                                                  pipelineSelectArgs,
+                                                  hwInfo);
 }
 
 template struct EncodeDispatchKernel<Family>;

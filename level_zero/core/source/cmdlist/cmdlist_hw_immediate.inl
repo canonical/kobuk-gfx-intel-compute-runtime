@@ -15,6 +15,7 @@
 #include "shared/source/memory_manager/prefetch_manager.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
+#include "level_zero/core/source/device/bcs_split.h"
 
 namespace L0 {
 
@@ -91,7 +92,10 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::executeCommandListImm
 
     auto lockCSR = this->csr->obtainUniqueOwnership();
 
-    this->handleIndirectAllocationResidency();
+    std::unique_lock<std::mutex> lockForIndirect;
+    if (this->hasIndirectAllocationsAllowed()) {
+        this->cmdQImmediate->handleIndirectAllocationResidency(this->getUnifiedMemoryControls(), lockForIndirect);
+    }
 
     this->csr->setRequiredScratchSizes(this->getCommandListPerThreadScratchSize(), this->getCommandListPerThreadPrivateScratchSize());
 
@@ -162,7 +166,7 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::executeCommandListImm
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendLaunchKernel(
-    ze_kernel_handle_t hKernel, const ze_group_count_t *threadGroupDimensions,
+    ze_kernel_handle_t kernelHandle, const ze_group_count_t *threadGroupDimensions,
     ze_event_handle_t hSignalEvent, uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents,
     const CmdListKernelLaunchParams &launchParams) {
 
@@ -170,7 +174,7 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendLaunchKernel(
         checkAvailableSpace();
     }
 
-    auto ret = CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernel(hKernel, threadGroupDimensions,
+    auto ret = CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernel(kernelHandle, threadGroupDimensions,
                                                                         hSignalEvent, numWaitEvents, phWaitEvents,
                                                                         launchParams);
     return flushImmediate(ret, true);
@@ -178,13 +182,13 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendLaunchKernel(
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendLaunchKernelIndirect(
-    ze_kernel_handle_t hKernel, const ze_group_count_t *pDispatchArgumentsBuffer,
+    ze_kernel_handle_t kernelHandle, const ze_group_count_t *pDispatchArgumentsBuffer,
     ze_event_handle_t hSignalEvent, uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) {
 
     if (this->isFlushTaskSubmissionEnabled) {
         checkAvailableSpace();
     }
-    auto ret = CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelIndirect(hKernel, pDispatchArgumentsBuffer,
+    auto ret = CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelIndirect(kernelHandle, pDispatchArgumentsBuffer,
                                                                                 hSignalEvent, numWaitEvents, phWaitEvents);
     return flushImmediate(ret, true);
 }
@@ -215,8 +219,17 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendMemoryCopy(
     if (this->isFlushTaskSubmissionEnabled) {
         checkAvailableSpace();
     }
-    auto ret = CommandListCoreFamily<gfxCoreFamily>::appendMemoryCopy(dstptr, srcptr, size, hSignalEvent,
-                                                                      numWaitEvents, phWaitEvents);
+
+    ze_result_t ret;
+
+    if (this->isAppendSplitNeeded(dstptr, srcptr, size)) {
+        ret = static_cast<DeviceImp *>(this->device)->bcsSplit.appendSplitCall<gfxCoreFamily, void *, const void *>(this, dstptr, srcptr, size, hSignalEvent, [&](void *dstptrParam, const void *srcptrParam, size_t sizeParam, ze_event_handle_t hSignalEventParam) {
+            return CommandListCoreFamily<gfxCoreFamily>::appendMemoryCopy(dstptrParam, srcptrParam, sizeParam, hSignalEventParam, numWaitEvents, phWaitEvents);
+        });
+    } else {
+        ret = CommandListCoreFamily<gfxCoreFamily>::appendMemoryCopy(dstptr, srcptr, size, hSignalEvent,
+                                                                     numWaitEvents, phWaitEvents);
+    }
     return flushImmediate(ret, true);
 }
 
@@ -237,9 +250,28 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendMemoryCopyRegio
     if (this->isFlushTaskSubmissionEnabled) {
         checkAvailableSpace();
     }
-    auto ret = CommandListCoreFamily<gfxCoreFamily>::appendMemoryCopyRegion(dstPtr, dstRegion, dstPitch, dstSlicePitch,
-                                                                            srcPtr, srcRegion, srcPitch, srcSlicePitch,
-                                                                            hSignalEvent, numWaitEvents, phWaitEvents);
+
+    ze_result_t ret;
+
+    if (this->isAppendSplitNeeded(dstPtr, srcPtr, this->getTotalSizeForCopyRegion(dstRegion, dstPitch, dstSlicePitch))) {
+        ret = static_cast<DeviceImp *>(this->device)->bcsSplit.appendSplitCall<gfxCoreFamily, uint32_t, uint32_t>(this, dstRegion->originX, srcRegion->originX, dstRegion->width, hSignalEvent, [&](uint32_t dstOriginXParam, uint32_t srcOriginXParam, size_t sizeParam, ze_event_handle_t hSignalEventParam) {
+            ze_copy_region_t dstRegionLocal = {};
+            ze_copy_region_t srcRegionLocal = {};
+            memcpy(&dstRegionLocal, dstRegion, sizeof(ze_copy_region_t));
+            memcpy(&srcRegionLocal, srcRegion, sizeof(ze_copy_region_t));
+            dstRegionLocal.originX = dstOriginXParam;
+            dstRegionLocal.width = static_cast<uint32_t>(sizeParam);
+            srcRegionLocal.originX = srcOriginXParam;
+            srcRegionLocal.width = static_cast<uint32_t>(sizeParam);
+            return CommandListCoreFamily<gfxCoreFamily>::appendMemoryCopyRegion(dstPtr, &dstRegionLocal, dstPitch, dstSlicePitch,
+                                                                                srcPtr, &srcRegionLocal, srcPitch, srcSlicePitch,
+                                                                                hSignalEventParam, numWaitEvents, phWaitEvents);
+        });
+    } else {
+        ret = CommandListCoreFamily<gfxCoreFamily>::appendMemoryCopyRegion(dstPtr, dstRegion, dstPitch, dstSlicePitch,
+                                                                           srcPtr, srcRegion, srcPitch, srcSlicePitch,
+                                                                           hSignalEvent, numWaitEvents, phWaitEvents);
+    }
     return flushImmediate(ret, true);
 }
 
@@ -290,7 +322,20 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendPageFaultCopy(N
         checkAvailableSpace();
     }
 
-    auto ret = CommandListCoreFamily<gfxCoreFamily>::appendPageFaultCopy(dstAllocation, srcAllocation, size, flushHost);
+    ze_result_t ret;
+
+    if (this->isAppendSplitNeeded(dstAllocation->getMemoryPool(), srcAllocation->getMemoryPool(), size)) {
+        uintptr_t dstAddress = static_cast<uintptr_t>(dstAllocation->getGpuAddress());
+        uintptr_t srcAddress = static_cast<uintptr_t>(srcAllocation->getGpuAddress());
+        ret = static_cast<DeviceImp *>(this->device)->bcsSplit.appendSplitCall<gfxCoreFamily, uintptr_t, uintptr_t>(this, dstAddress, srcAddress, size, nullptr, [&](uintptr_t dstAddressParam, uintptr_t srcAddressParam, size_t sizeParam, ze_event_handle_t hSignalEventParam) {
+            this->appendMemoryCopyBlit(dstAddressParam, dstAllocation, 0u,
+                                       srcAddressParam, srcAllocation, 0u,
+                                       sizeParam);
+            return this->appendSignalEvent(hSignalEventParam);
+        });
+    } else {
+        ret = CommandListCoreFamily<gfxCoreFamily>::appendPageFaultCopy(dstAllocation, srcAllocation, size, flushHost);
+    }
     return flushImmediate(ret, false);
 }
 

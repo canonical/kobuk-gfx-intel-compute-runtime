@@ -5,7 +5,9 @@
  *
  */
 
+#include "shared/source/compiler_interface/compiler_options.h"
 #include "shared/source/device_binary_format/patchtokens_decoder.h"
+#include "shared/test/common/device_binary_format/elf/elf_tests_data.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/kernel_binary_helper.h"
@@ -13,14 +15,12 @@
 #include "shared/test/common/libult/global_environment.h"
 #include "shared/test/common/mocks/mock_source_level_debugger.h"
 #include "shared/test/common/test_macros/test.h"
-#include "shared/test/unit_test/device_binary_format/elf/elf_tests_data.h"
 
 #include "opencl/test/unit_test/fixtures/program_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_program.h"
 #include "opencl/test/unit_test/program/program_from_binary.h"
 #include "opencl/test/unit_test/program/program_tests.h"
 
-#include "compiler_options.h"
 #include "gtest/gtest.h"
 #include "program_debug_data.h"
 
@@ -40,26 +40,6 @@ TEST_F(ProgramTests, givenProgramObjectWhenEnableKernelDebugIsCalledThenProgramH
     MockProgram program(pContext, false, toClDeviceVector(*pClDevice));
     program.enableKernelDebug();
     EXPECT_TRUE(program.isKernelDebugEnabled());
-}
-
-TEST(ProgramFromBinary, givenBinaryWithDebugDataWhenCreatingProgramFromBinaryThenDebugDataIsAvailable) {
-    if (!defaultHwInfo->capabilityTable.debuggerSupported) {
-        GTEST_SKIP();
-    }
-    std::string filePath;
-    retrieveBinaryKernelFilename(filePath, "-cl-kernel-debug-enable_", ".bin");
-
-    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
-    auto program = std::make_unique<MockProgram>(toClDeviceVector(*device));
-    program->enableKernelDebug();
-
-    size_t binarySize = 0;
-    auto pBinary = loadDataFromFile(filePath.c_str(), binarySize);
-    cl_int retVal = program->createProgramFromBinary(pBinary.get(), binarySize, *device);
-
-    EXPECT_EQ(CL_SUCCESS, retVal);
-    EXPECT_NE(nullptr, program->getDebugData(device->getRootDeviceIndex()));
-    EXPECT_NE(0u, program->getDebugDataSize(device->getRootDeviceIndex()));
 }
 
 class ProgramWithKernelDebuggingTest : public ProgramFixture,
@@ -303,11 +283,12 @@ TEST_F(ProgramWithKernelDebuggingTest, givenEnabledKernelDebugWhenProgramIsLinke
 }
 
 TEST_F(ProgramWithKernelDebuggingTest, givenProgramWithKernelDebugEnabledWhenBuiltThenPatchTokenAllocateSipSurfaceHasSizeGreaterThanZero) {
-    auto &refBin = pProgram->buildInfos[pDevice->getRootDeviceIndex()].unpackedDeviceBinary;
-    auto refBinSize = pProgram->buildInfos[pDevice->getRootDeviceIndex()].unpackedDeviceBinarySize;
-    if (NEO::isDeviceBinaryFormat<NEO::DeviceBinaryFormat::Zebin>(ArrayRef<const uint8_t>::fromAny(refBin.get(), refBinSize))) {
+    auto &devBinary = pProgram->buildInfos[pDevice->getRootDeviceIndex()].packedDeviceBinary;
+    auto devBinarySize = pProgram->buildInfos[pDevice->getRootDeviceIndex()].packedDeviceBinarySize;
+    if (NEO::isDeviceBinaryFormat<NEO::DeviceBinaryFormat::Zebin>(ArrayRef<const uint8_t>::fromAny(devBinary.get(), devBinarySize))) {
         GTEST_SKIP();
     }
+
     auto retVal = pProgram->build(pProgram->getDevices(), CompilerOptions::debugKernelEnable.data(), false);
     EXPECT_EQ(CL_SUCCESS, retVal);
 

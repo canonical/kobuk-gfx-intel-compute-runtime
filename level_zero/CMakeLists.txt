@@ -194,7 +194,6 @@ if(BUILD_WITH_L0)
     include_directories(${LevelZero_INCLUDE_DIRS})
   endif()
   include_directories(${NEO_SOURCE_DIR}/level_zero/api/experimental${BRANCH_DIR_SUFFIX})
-  include_directories(${NEO_SOURCE_DIR}/shared/source/compiler_interface/compiler_options${BRANCH_DIR_SUFFIX})
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/core/source/hw_helpers${BRANCH_DIR_SUFFIX})
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/core/source/cmdlist/cmdlist_extended${BRANCH_DIR_SUFFIX})
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/core/source/cmdqueue/cmdqueue_extended${BRANCH_DIR_SUFFIX})
@@ -210,6 +209,7 @@ if(BUILD_WITH_L0)
               SHARED
               ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
               ${NEO_SHARED_DIRECTORY}/dll/create_command_stream.cpp
+              ${NEO_SHARED_DIRECTORY}/dll/device_dll.cpp
               ${NEO_SHARED_DIRECTORY}/dll/direct_submission_controller_enabled.cpp
               ${NEO_SHARED_DIRECTORY}/dll/options_dll.cpp
               ${NEO_SHARED_DIRECTORY}/gmm_helper/page_table_mngr.cpp
@@ -292,6 +292,7 @@ if(BUILD_WITH_L0)
     message(STATUS "Prebuilt kernels are linked to Level Zero.")
     target_sources(${TARGET_NAME_L0}
                    PRIVATE
+                   $<TARGET_OBJECTS:${BUILTINS_BINARIES_STATELESS_LIB_NAME}>
                    $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDFUL_LIB_NAME}>
                    $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDLESS_LIB_NAME}>
     )
@@ -317,7 +318,6 @@ if(BUILD_WITH_L0)
   if(UNIX)
     target_include_directories(${TARGET_NAME_L0} PUBLIC
                                ${L0_ROOT_DIR}/core/source/os_interface/linux
-                               ${I915_INCLUDES_DIR}
     )
     target_include_directories(${TARGET_NAME_L0} PRIVATE
                                ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}
@@ -435,7 +435,6 @@ if(BUILD_WITH_L0)
       )
     else()
       target_include_directories(${LIB_NAME} PUBLIC
-                                 ${I915_INCLUDES_DIR}
                                  ${CMAKE_CURRENT_SOURCE_DIR}/os_interface/linux
       )
     endif()
@@ -534,7 +533,7 @@ if(BUILD_WITH_L0)
     add_subdirectory_unique(core/test/unit_tests)
     add_subdirectory_unique(core/test/aub_tests)
     add_subdirectory_unique(tools/test/unit_tests)
-    add_subdirectory_unique(experimental/test/unit_tests)
+
   else()
     hide_subdir(core/test/common)
     hide_subdir(core/test/unit_tests)

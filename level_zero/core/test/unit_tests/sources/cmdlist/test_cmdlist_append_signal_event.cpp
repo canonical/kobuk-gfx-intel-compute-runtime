@@ -11,7 +11,7 @@
 #include "shared/test/common/test_macros/hw_test.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
-#include "level_zero/core/test/unit_tests/fixtures/cmdlist_fixture.h"
+#include "level_zero/core/test/unit_tests/fixtures/cmdlist_fixture.inl"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdqueue.h"
@@ -214,7 +214,7 @@ HWTEST2_F(CommandListAppendSignalEvent,
     auto gpuAddress = event->getGpuAddress(device) + event->getContextEndOffset();
     auto &hwInfo = device->getNEODevice()->getHardwareInfo();
 
-    size_t expectedSize = NEO::MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(hwInfo);
+    size_t expectedSize = NEO::MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(hwInfo, false);
     size_t usedSize = cmdStream->getUsed();
     EXPECT_EQ(expectedSize, usedSize);
 
@@ -327,7 +327,7 @@ HWTEST2_F(CommandListAppendSignalEvent,
     }
     auto &hwInfo = device->getNEODevice()->getHardwareInfo();
 
-    size_t expectedSize = NEO::MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(hwInfo);
+    size_t expectedSize = NEO::MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(hwInfo, false);
     size_t usedSize = cmdStream->getUsed();
     EXPECT_EQ(expectedSize, usedSize);
 

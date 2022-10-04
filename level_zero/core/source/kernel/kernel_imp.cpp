@@ -44,6 +44,7 @@
 #include <memory>
 
 namespace L0 {
+#include "level_zero/core/source/kernel/patch_with_implicit_surface.inl"
 
 KernelImmutableData::KernelImmutableData(L0::Device *l0device) : device(l0device) {}
 
@@ -55,38 +56,6 @@ KernelImmutableData::~KernelImmutableData() {
     crossThreadDataTemplate.reset();
     surfaceStateHeapTemplate.reset();
     dynamicStateHeapTemplate.reset();
-}
-
-inline void patchWithImplicitSurface(ArrayRef<uint8_t> crossThreadData, ArrayRef<uint8_t> surfaceStateHeap,
-                                     uintptr_t ptrToPatchInCrossThreadData, NEO::GraphicsAllocation &allocation,
-                                     const NEO::ArgDescPointer &ptr, const NEO::Device &device, bool useGlobalAtomics,
-                                     bool implicitScaling) {
-    if (false == crossThreadData.empty()) {
-        NEO::patchPointer(crossThreadData, ptr, ptrToPatchInCrossThreadData);
-    }
-
-    if ((false == surfaceStateHeap.empty()) && (NEO::isValidOffset(ptr.bindful))) {
-        auto surfaceState = surfaceStateHeap.begin() + ptr.bindful;
-        auto addressToPatch = allocation.getGpuAddress();
-        size_t sizeToPatch = allocation.getUnderlyingBufferSize();
-
-        auto &hwInfo = device.getHardwareInfo();
-        auto &hwHelper = NEO::HwHelper::get(hwInfo.platform.eRenderCoreFamily);
-
-        NEO::EncodeSurfaceStateArgs args;
-        args.outMemory = surfaceState;
-        args.size = sizeToPatch;
-        args.graphicsAddress = addressToPatch;
-        args.gmmHelper = device.getGmmHelper();
-        args.allocation = &allocation;
-        args.useGlobalAtomics = useGlobalAtomics;
-        args.numAvailableDevices = device.getNumGenericSubDevices();
-        args.areMultipleSubDevicesInContext = args.numAvailableDevices > 1;
-        args.mocs = hwHelper.getMocsIndex(*args.gmmHelper, true, false) << 1;
-        args.implicitScaling = implicitScaling;
-
-        hwHelper.encodeBufferSurfaceState(args);
-    }
 }
 
 void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, Device *device,
@@ -119,7 +88,7 @@ void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, Device *device
 
     this->crossThreadDataSize = this->kernelDescriptor->kernelAttributes.crossThreadDataSize;
 
-    ArrayRef<uint8_t> crossThredDataArrayRef;
+    ArrayRef<uint8_t> crossThreadDataArrayRef;
     if (crossThreadDataSize != 0) {
         crossThreadDataTemplate.reset(new uint8_t[crossThreadDataSize]);
 
@@ -130,9 +99,9 @@ void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, Device *device
             memset(crossThreadDataTemplate.get(), 0x00, crossThreadDataSize);
         }
 
-        crossThredDataArrayRef = ArrayRef<uint8_t>(this->crossThreadDataTemplate.get(), this->crossThreadDataSize);
+        crossThreadDataArrayRef = ArrayRef<uint8_t>(this->crossThreadDataTemplate.get(), this->crossThreadDataSize);
 
-        NEO::patchNonPointer<uint32_t>(crossThredDataArrayRef,
+        NEO::patchNonPointer<uint32_t>(crossThreadDataArrayRef,
                                        kernelDescriptor->payloadMappings.implicitArgs.simdSize, kernelDescriptor->kernelAttributes.simdSize);
     }
 
@@ -157,7 +126,7 @@ void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, Device *device
     if (NEO::isValidOffset(kernelDescriptor->payloadMappings.implicitArgs.globalConstantsSurfaceAddress.stateless)) {
         UNRECOVERABLE_IF(nullptr == globalConstBuffer);
 
-        patchWithImplicitSurface(crossThredDataArrayRef, surfaceStateHeapArrayRef,
+        patchWithImplicitSurface(crossThreadDataArrayRef, surfaceStateHeapArrayRef,
                                  static_cast<uintptr_t>(globalConstBuffer->getGpuAddressToPatch()),
                                  *globalConstBuffer, kernelDescriptor->payloadMappings.implicitArgs.globalConstantsSurfaceAddress,
                                  *neoDevice, kernelDescriptor->kernelAttributes.flags.useGlobalAtomics, deviceImp->isImplicitScalingCapable());
@@ -169,7 +138,7 @@ void KernelImmutableData::initialize(NEO::KernelInfo *kernelInfo, Device *device
     if (NEO::isValidOffset(kernelDescriptor->payloadMappings.implicitArgs.globalVariablesSurfaceAddress.stateless)) {
         UNRECOVERABLE_IF(globalVarBuffer == nullptr);
 
-        patchWithImplicitSurface(crossThredDataArrayRef, surfaceStateHeapArrayRef,
+        patchWithImplicitSurface(crossThreadDataArrayRef, surfaceStateHeapArrayRef,
                                  static_cast<uintptr_t>(globalVarBuffer->getGpuAddressToPatch()),
                                  *globalVarBuffer, kernelDescriptor->payloadMappings.implicitArgs.globalVariablesSurfaceAddress,
                                  *neoDevice, kernelDescriptor->kernelAttributes.flags.useGlobalAtomics, deviceImp->isImplicitScalingCapable());
@@ -474,9 +443,9 @@ ze_result_t KernelImp::getSourceAttributes(uint32_t *pSize, char **pString) {
     if (pString == nullptr) {
         *pSize = (uint32_t)desc.kernelMetadata.kernelLanguageAttributes.length() + 1;
     } else {
-        strncpy_s(*pString, desc.kernelMetadata.kernelLanguageAttributes.length() + 1,
+        strncpy_s(*pString, *pSize,
                   desc.kernelMetadata.kernelLanguageAttributes.c_str(),
-                  desc.kernelMetadata.kernelLanguageAttributes.length() + 1);
+                  desc.kernelMetadata.kernelLanguageAttributes.length());
     }
     return ZE_RESULT_SUCCESS;
 }
@@ -721,7 +690,8 @@ ze_result_t KernelImp::getKernelName(size_t *pSize, char *pName) {
 
     *pSize = std::min(*pSize, kernelNameSize);
     strncpy_s(pName, *pSize,
-              this->kernelImmData->getDescriptor().kernelMetadata.kernelName.c_str(), kernelNameSize);
+              this->kernelImmData->getDescriptor().kernelMetadata.kernelName.c_str(),
+              this->kernelImmData->getDescriptor().kernelMetadata.kernelName.size());
 
     return ZE_RESULT_SUCCESS;
 }
@@ -783,10 +753,10 @@ void KernelImp::patchCrossthreadDataWithPrivateAllocation(NEO::GraphicsAllocatio
     auto &kernelAttributes = kernelImmData->getDescriptor().kernelAttributes;
     auto device = module->getDevice();
 
-    ArrayRef<uint8_t> crossThredDataArrayRef = ArrayRef<uint8_t>(this->crossThreadData.get(), this->crossThreadDataSize);
+    ArrayRef<uint8_t> crossThreadDataArrayRef = ArrayRef<uint8_t>(this->crossThreadData.get(), this->crossThreadDataSize);
     ArrayRef<uint8_t> surfaceStateHeapArrayRef = ArrayRef<uint8_t>(this->surfaceStateHeapData.get(), this->surfaceStateHeapDataSize);
 
-    patchWithImplicitSurface(crossThredDataArrayRef, surfaceStateHeapArrayRef,
+    patchWithImplicitSurface(crossThreadDataArrayRef, surfaceStateHeapArrayRef,
                              static_cast<uintptr_t>(privateAllocation->getGpuAddressToPatch()),
                              *privateAllocation, kernelImmData->getDescriptor().payloadMappings.implicitArgs.privateMemoryAddress,
                              *device->getNEODevice(), kernelAttributes.flags.useGlobalAtomics, device->isImplicitScalingCapable());
@@ -1065,18 +1035,14 @@ NEO::GraphicsAllocation *KernelImp::getIsaAllocation() const {
 }
 
 ze_result_t KernelImp::setSchedulingHintExp(ze_scheduling_hint_exp_desc_t *pHint) {
-
+    auto &threadArbitrationPolicy = const_cast<NEO::ThreadArbitrationPolicy &>(getKernelDescriptor().kernelAttributes.threadArbitrationPolicy);
     if (pHint->flags == ZE_SCHEDULING_HINT_EXP_FLAG_OLDEST_FIRST) {
-        this->schedulingHintExpFlag = NEO::ThreadArbitrationPolicy::AgeBased;
+        threadArbitrationPolicy = NEO::ThreadArbitrationPolicy::AgeBased;
     } else if (pHint->flags == ZE_SCHEDULING_HINT_EXP_FLAG_ROUND_ROBIN) {
-        this->schedulingHintExpFlag = NEO::ThreadArbitrationPolicy::RoundRobin;
+        threadArbitrationPolicy = NEO::ThreadArbitrationPolicy::RoundRobin;
     } else {
-        this->schedulingHintExpFlag = NEO::ThreadArbitrationPolicy::RoundRobinAfterDependency;
+        threadArbitrationPolicy = NEO::ThreadArbitrationPolicy::RoundRobinAfterDependency;
     }
     return ZE_RESULT_SUCCESS;
-}
-
-int32_t KernelImp::getSchedulingHintExp() const {
-    return this->schedulingHintExpFlag;
-}
+} // namespace L0
 } // namespace L0

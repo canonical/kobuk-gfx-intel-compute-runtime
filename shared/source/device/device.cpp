@@ -14,6 +14,7 @@
 #include "shared/source/debugger/debugger_l0.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
+#include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/ray_tracing_helper.h"
 #include "shared/source/memory_manager/memory_manager.h"
@@ -363,6 +364,10 @@ bool Device::createEngine(uint32_t deviceCsrIndex, EngineTypeUsage engineTypeUsa
 
     if (isDefaultEngine) {
         defaultEngineIndex = deviceCsrIndex;
+
+        if (osContext->isDebuggableContext()) {
+            commandStreamReceiver->initializeDeviceWithFirstSubmission();
+        }
     }
 
     if (preemptionMode == PreemptionMode::MidThread && !commandStreamReceiver->createPreemptionAllocation()) {
@@ -394,20 +399,16 @@ uint64_t Device::getProfilingTimerClock() {
     return getOSTime()->getDynamicDeviceTimerClock(getHardwareInfo());
 }
 
-bool Device::isSimulation() const {
-    auto &hwInfo = getHardwareInfo();
+bool Device::isBcsSplitSupported() {
+    auto bcsSplit = HwInfoConfig::get(getHardwareInfo().platform.eProductFamily)->isBlitSplitEnqueueWARequired(getHardwareInfo()) &&
+                    ApiSpecificConfig::isBcsSplitWaSupported() &&
+                    Device::isBlitSplitEnabled();
 
-    bool simulation = hwInfo.capabilityTable.isSimulation(hwInfo.platform.usDeviceID);
-    for (const auto &engine : allEngines) {
-        if (engine.commandStreamReceiver->getType() != CommandStreamReceiverType::CSR_HW) {
-            simulation = true;
-        }
+    if (DebugManager.flags.SplitBcsCopy.get() != -1) {
+        bcsSplit = DebugManager.flags.SplitBcsCopy.get();
     }
 
-    if (hwInfo.featureTable.flags.ftrSimulationMode) {
-        simulation = true;
-    }
-    return simulation;
+    return bcsSplit;
 }
 
 double Device::getPlatformHostTimerResolution() const {
@@ -498,17 +499,17 @@ Device *Device::getSubDevice(uint32_t deviceId) const {
 
 Device *Device::getNearestGenericSubDevice(uint32_t deviceId) {
     /*
-    * EngineInstanced: Upper level
-    * Generic SubDevice: 'this'
-    * RootCsr Device: Next level SubDevice (generic)
-    */
+     * EngineInstanced: Upper level
+     * Generic SubDevice: 'this'
+     * RootCsr Device: Next level SubDevice (generic)
+     */
 
     if (engineInstanced) {
         return getRootDevice()->getNearestGenericSubDevice(Math::log2(static_cast<uint32_t>(deviceBitfield.to_ulong())));
     }
 
     if (subdevices.empty() || !hasRootCsr()) {
-        return const_cast<Device *>(this);
+        return this;
     }
     UNRECOVERABLE_IF(deviceId >= subdevices.size());
     return subdevices[deviceId];

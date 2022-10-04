@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/helpers/api_specific_config.h"
+#include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/compression_selector.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
@@ -32,12 +33,20 @@ TEST(ApiSpecificConfigOclTests, WhenCheckingIfStatelessCompressionIsSupportedThe
     EXPECT_TRUE(ApiSpecificConfig::isStatelessCompressionSupported());
 }
 
+TEST(ApiSpecificConfigOclTests, WhenCheckingIfBcsSplitWaIsSupportedThenReturnTrue) {
+    EXPECT_TRUE(ApiSpecificConfig::isBcsSplitWaSupported());
+}
+
 TEST(ApiSpecificConfigOclTests, givenMaxAllocSizeWhenGettingReducedMaxAllocSizeThenReturnHalfOfThat) {
     EXPECT_EQ(512u, ApiSpecificConfig::getReducedMaxAllocSize(1024));
 }
 
 TEST(ApiSpecificConfigOclTests, WhenGettingRegistryPathThenOclRegistryPathIsReturned) {
     EXPECT_STREQ(oclRegPath, ApiSpecificConfig::getRegistryPath());
+}
+
+TEST(ApiSpecificConfigOclTests, WhenCheckingIfDeviceAllocationCacheIsEnabledThenReturnFalse) {
+    EXPECT_FALSE(ApiSpecificConfig::isDeviceAllocationCacheEnabled());
 }
 
 TEST(ApiSpecificConfigOclTests, givenEnableStatelessCompressionWhenProvidingSvmGpuAllocationThenPreferCompressedBuffer) {

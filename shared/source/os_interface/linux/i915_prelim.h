@@ -5,11 +5,13 @@
  *
  */
 
+#pragma once
+
 #include <linux/types.h>
 #include <sys/ioctl.h>
 namespace NEO {
 namespace PrelimI915 {
-#include "third_party/uapi/prelim/drm/i915_drm.h"
+#include "drm/i915_drm_prelim.h"
 }
 } // namespace NEO
 using NEO::PrelimI915::drm_gem_close;

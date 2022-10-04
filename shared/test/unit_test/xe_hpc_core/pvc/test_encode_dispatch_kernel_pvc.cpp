@@ -60,7 +60,7 @@ PVCTEST_F(EncodeKernelPvcTest, givenRevisionBAndAboveWhenSpecialModeRequiredThen
 
     uint32_t dims[] = {1, 1, 1};
     std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
-    dispatchInterface->kernelDescriptor.kernelAttributes.flags.usesSpecialPipelineSelectMode = true;
+    dispatchInterface->kernelDescriptor.kernelAttributes.flags.usesSystolicPipelineSelectMode = true;
 
     struct {
         unsigned short revId;
@@ -73,10 +73,12 @@ PVCTEST_F(EncodeKernelPvcTest, givenRevisionBAndAboveWhenSpecialModeRequiredThen
         {0x6, false},
         {0x7, false},
     };
+    auto hwInfoConfig = HwInfoConfig::get(hwInfo->platform.eProductFamily);
     for (const auto &testInput : testInputs) {
         for (const auto &deviceId : pvcXlDeviceIds) {
             hwInfo->platform.usDeviceID = deviceId;
             hwInfo->platform.usRevId = testInput.revId;
+            cmdContainer->systolicModeSupport = hwInfoConfig->isSystolicModeConfigurable(*hwInfo);
             cmdContainer->lastPipelineSelectModeRequired = false;
 
             EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
@@ -93,7 +95,7 @@ PVCTEST_F(EncodeKernelPvcTest, givenRevisionBAndAboveWhenSpecialModeRequiredAndA
     auto hwInfo = pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
 
     std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
-    dispatchInterface->kernelDescriptor.kernelAttributes.flags.usesSpecialPipelineSelectMode = true;
+    dispatchInterface->kernelDescriptor.kernelAttributes.flags.usesSystolicPipelineSelectMode = true;
 
     struct {
         unsigned short revId;
@@ -106,10 +108,12 @@ PVCTEST_F(EncodeKernelPvcTest, givenRevisionBAndAboveWhenSpecialModeRequiredAndA
         {0x6, false},
         {0x7, false},
     };
+    auto hwInfoConfig = HwInfoConfig::get(hwInfo->platform.eProductFamily);
     for (const auto &testInput : testInputs) {
         for (const auto &deviceId : pvcXlDeviceIds) {
             hwInfo->platform.usDeviceID = deviceId;
             hwInfo->platform.usRevId = testInput.revId;
+            cmdContainer->systolicModeSupport = hwInfoConfig->isSystolicModeConfigurable(*hwInfo);
             EncodeComputeMode<FamilyType>::adjustPipelineSelect(*cmdContainer.get(), dispatchInterface->kernelDescriptor);
             GenCmdList commands;
             CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());

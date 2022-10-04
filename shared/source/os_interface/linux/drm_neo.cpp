@@ -108,7 +108,7 @@ int Drm::ioctl(DrmIoctl request, void *arg) {
             }
         }
 
-    } while (ret == -1 && (returnedErrno == EINTR || returnedErrno == EAGAIN || returnedErrno == EBUSY));
+    } while (ret == -1 && (returnedErrno == EINTR || returnedErrno == EAGAIN || returnedErrno == EBUSY || returnedErrno == -EBUSY));
     SYSTEM_LEAVE(request);
     return ret;
 }
@@ -526,11 +526,6 @@ std::vector<std::unique_ptr<HwDeviceId>> Drm::discoverDevices(ExecutionEnvironme
                     continue;
                 }
             }
-            if (DebugManager.flags.ForceDeviceId.get() != "unk") {
-                if (devicePathView.find(DebugManager.flags.ForceDeviceId.get().c_str()) == std::string::npos) {
-                    continue;
-                }
-            }
             int fileDescriptor = SysCalls::open(file->c_str(), O_RDWR);
             appendHwDeviceId(hwDeviceIds, fileDescriptor, pciPath.c_str());
             if (!hwDeviceIds.empty() && hwDeviceIds.size() == numRootDevices) {
@@ -636,7 +631,7 @@ void Drm::setNewResourceBoundToVM(uint32_t vmHandleId) {
             auto osContextLinux = static_cast<OsContextLinux *>(engine.osContext);
 
             if (&osContextLinux->getDrm() == this) {
-                osContextLinux->setNewResourceBound(true);
+                osContextLinux->setNewResourceBound();
             }
         }
     }
@@ -797,7 +792,7 @@ bool Drm::isDebugAttachAvailable() {
 
 int getMaxGpuFrequencyOfDevice(Drm &drm, std::string &sysFsPciPath, int &maxGpuFrequency) {
     maxGpuFrequency = 0;
-    std::string clockSysFsPath = sysFsPciPath + "/gt_max_freq_mhz";
+    std::string clockSysFsPath = sysFsPciPath + drm.getIoctlHelper()->getFileForMaxGpuFrequency();
 
     std::ifstream ifs(clockSysFsPath.c_str(), std::ifstream::in);
     if (ifs.fail()) {
@@ -811,7 +806,7 @@ int getMaxGpuFrequencyOfDevice(Drm &drm, std::string &sysFsPciPath, int &maxGpuF
 
 int getMaxGpuFrequencyOfSubDevice(Drm &drm, std::string &sysFsPciPath, int subDeviceId, int &maxGpuFrequency) {
     maxGpuFrequency = 0;
-    std::string clockSysFsPath = sysFsPciPath + "/gt/gt" + std::to_string(subDeviceId) + "/rps_max_freq_mhz";
+    std::string clockSysFsPath = sysFsPciPath + drm.getIoctlHelper()->getFileForMaxGpuFrequencyOfSubDevice(subDeviceId);
 
     std::ifstream ifs(clockSysFsPath.c_str(), std::ifstream::in);
     if (ifs.fail()) {
@@ -842,7 +837,7 @@ int Drm::getMaxGpuFrequency(HardwareInfo &hwInfo, int &maxGpuFrequency) {
 }
 
 bool Drm::getDeviceMemoryMaxClockRateInMhz(uint32_t tileId, uint32_t &clkRate) {
-    const std::string relativefilePath = "/gt/gt" + std::to_string(tileId) + "/mem_RP0_freq_mhz";
+    const std::string relativefilePath = ioctlHelper->getFileForMaxMemoryFrequencyOfSubDevice(tileId);
     std::string readString(64, '\0');
     errno = 0;
     if (readSysFsAsString(relativefilePath, readString) == false) {
@@ -898,6 +893,10 @@ void Drm::setupSystemInfo(HardwareInfo *hwInfo, SystemInfo *sysInfo) {
     gtSysInfo->MaxSlicesSupported = sysInfo->getMaxSlicesSupported();
     gtSysInfo->MaxSubSlicesSupported = sysInfo->getMaxDualSubSlicesSupported();
     gtSysInfo->MaxDualSubSlicesSupported = sysInfo->getMaxDualSubSlicesSupported();
+
+    uint32_t bankCount = (hwInfo->gtSystemInfo.L3BankCount > 0) ? hwInfo->gtSystemInfo.L3BankCount : hwInfo->gtSystemInfo.DualSubSliceCount;
+
+    gtSysInfo->L3CacheSizeInKb = sysInfo->getL3BankSizeInKb() * bankCount;
 }
 
 void Drm::setupCacheInfo(const HardwareInfo &hwInfo) {
@@ -1030,7 +1029,7 @@ bool Drm::queryEngineInfo(bool isSysmanEnabled) {
 
     memInfo->assignRegionsFromDistances(distanceInfos);
 
-    auto &multiTileArchInfo = const_cast<GT_MULTI_TILE_ARCH_INFO &>(hwInfo->gtSystemInfo.MultiTileArchInfo);
+    auto &multiTileArchInfo = hwInfo->gtSystemInfo.MultiTileArchInfo;
     multiTileArchInfo.IsValid = true;
     multiTileArchInfo.TileCount = tileCount;
     multiTileArchInfo.TileMask = static_cast<uint8_t>(maxNBitValue(tileCount));
@@ -1059,6 +1058,7 @@ void Drm::setupIoctlHelper(const PRODUCT_FAMILY productFamily) {
         getPrelimVersion(prelimVersion);
         auto drmVersion = Drm::getDrmVersion(getFileDescriptor());
         this->ioctlHelper = IoctlHelper::get(productFamily, prelimVersion, drmVersion, *this);
+        this->ioctlHelper->initialize();
     }
 }
 

@@ -5,7 +5,7 @@
  *
  */
 
-#include "shared/source/compiler_interface/compiler_options/compiler_options.h"
+#include "shared/source/compiler_interface/compiler_options.h"
 #include "shared/source/compiler_interface/compiler_warnings/compiler_warnings.h"
 #include "shared/source/device_binary_format/ar/ar_decoder.h"
 #include "shared/source/device_binary_format/ar/ar_encoder.h"
@@ -106,7 +106,7 @@ HWTEST_F(ModuleTest, givenBuiltinModuleWhenCreatedThenCorrectAllocationTypeIsUse
 }
 
 HWTEST_F(ModuleTest, givenBlitterAvailableWhenCopyingPatchedSegmentsThenIsaIsTransferredToAllocationWithBlitter) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     auto hwInfo = *NEO::defaultHwInfo;
     hwInfo.featureTable.flags.ftrLocalMemory = true;
     auto executionEnvironment = MockDevice::prepareExecutionEnvironment(&hwInfo, 0u);
@@ -529,7 +529,7 @@ HWTEST_F(ModuleTest, GivenIncorrectNameWhenCreatingKernelThenResultErrorInvalidA
     ze_kernel_handle_t kernelHandle;
 
     ze_kernel_desc_t kernelDesc = {};
-    kernelDesc.pKernelName = "nonexistent_function";
+    kernelDesc.pKernelName = "nonexistent_kernel";
 
     ze_result_t res = module->createKernel(&kernelDesc, &kernelHandle);
 
@@ -553,19 +553,17 @@ struct ModuleSpecConstantsFixture : public DeviceFixture {
     }
 
     void runTest() {
-        std::string testFile;
-        retrieveBinaryKernelFilenameApiSpecific(testFile, binaryFilename + "_", ".spv");
+        auto additionalSections = {ZebinTestData::appendElfAdditionalSection::SPIRV};
+        zebinData = std::make_unique<ZebinTestData::ZebinWithL0TestCommonModule>(device->getHwInfo(), additionalSections);
+        const auto &src = zebinData->storage;
 
-        size_t size = 0;
-        auto src = loadDataFromFile(testFile.c_str(), size);
-
-        ASSERT_NE(0u, size);
-        ASSERT_NE(nullptr, src);
+        ASSERT_NE(nullptr, src.data());
+        ASSERT_NE(0u, src.size());
 
         ze_module_desc_t moduleDesc = {};
         moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
-        moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(src.get());
-        moduleDesc.inputSize = size;
+        moduleDesc.pInputModule = src.data();
+        moduleDesc.inputSize = src.size();
 
         specConstants.numConstants = mockCompiler->moduleNumSpecConstants;
         for (uint32_t i = mockCompiler->moduleNumSpecConstants / 2; i > 0; i--) {
@@ -592,13 +590,14 @@ struct ModuleSpecConstantsFixture : public DeviceFixture {
     }
 
     void runTestStatic() {
-        std::string testFile;
-        retrieveBinaryKernelFilenameApiSpecific(testFile, binaryFilename + "_", ".spv");
+        auto additionalSections = {ZebinTestData::appendElfAdditionalSection::SPIRV};
+        zebinData = std::make_unique<ZebinTestData::ZebinWithL0TestCommonModule>(device->getHwInfo(), additionalSections);
+        const auto &src = zebinData->storage;
 
-        size_t sizeModule1, sizeModule2 = 0;
-        auto srcModule1 = loadDataFromFile(testFile.c_str(), sizeModule1);
-        auto srcModule2 = loadDataFromFile(testFile.c_str(), sizeModule2);
-
+        auto srcModule1 = src.data();
+        auto srcModule2 = src.data();
+        auto sizeModule1 = src.size();
+        auto sizeModule2 = src.size();
         ASSERT_NE(0u, sizeModule1);
         ASSERT_NE(0u, sizeModule2);
         ASSERT_NE(nullptr, srcModule1);
@@ -608,7 +607,7 @@ struct ModuleSpecConstantsFixture : public DeviceFixture {
         ze_module_program_exp_desc_t staticLinkModuleDesc = {ZE_STRUCTURE_TYPE_MODULE_PROGRAM_EXP_DESC};
         std::vector<const uint8_t *> inputSpirVs;
         std::vector<size_t> inputSizes;
-        std::vector<ze_module_constants_t *> specConstantsArray;
+        std::vector<const ze_module_constants_t *> specConstantsArray;
         combinedModuleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
         combinedModuleDesc.pNext = &staticLinkModuleDesc;
 
@@ -626,14 +625,14 @@ struct ModuleSpecConstantsFixture : public DeviceFixture {
         specConstantsArray.push_back(&specConstants);
 
         inputSizes.push_back(sizeModule1);
-        inputSpirVs.push_back(reinterpret_cast<const uint8_t *>(srcModule1.get()));
+        inputSpirVs.push_back(srcModule1);
         inputSizes.push_back(sizeModule2);
-        inputSpirVs.push_back(reinterpret_cast<const uint8_t *>(srcModule2.get()));
+        inputSpirVs.push_back(srcModule2);
 
         staticLinkModuleDesc.count = 2;
         staticLinkModuleDesc.inputSizes = inputSizes.data();
         staticLinkModuleDesc.pInputModules = inputSpirVs.data();
-        staticLinkModuleDesc.pConstants = const_cast<const ze_module_constants_t **>(specConstantsArray.data());
+        staticLinkModuleDesc.pConstants = specConstantsArray.data();
 
         auto module = new Module(device, nullptr, ModuleType::User);
         module->translationUnit.reset(mockTranslationUnit);
@@ -652,7 +651,7 @@ struct ModuleSpecConstantsFixture : public DeviceFixture {
     std::vector<const void *> specConstantsPointerValues;
     std::vector<uint32_t> specConstantsPointerIds;
 
-    const std::string binaryFilename = "test_kernel";
+    std::unique_ptr<ZebinTestData::ZebinWithL0TestCommonModule> zebinData;
     const std::string kernelName = "test";
     MockCompilerInterfaceWithSpecConstants<T1, T2> *mockCompiler;
     MockModuleTranslationUnit *mockTranslationUnit;
@@ -682,19 +681,17 @@ TEST_F(ModuleSpecConstantsLongTests, givenSpecializationConstantsSetWhenCompiler
     mockCompiler = new FailingMockCompilerInterfaceWithSpecConstants(moduleNumSpecConstants);
     auto rootDeviceEnvironment = neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[0].get();
     rootDeviceEnvironment->compilerInterface.reset(mockCompiler);
-    std::string testFile;
-    retrieveBinaryKernelFilenameApiSpecific(testFile, binaryFilename + "_", ".spv");
+    auto additionalSections = {ZebinTestData::appendElfAdditionalSection::SPIRV};
+    auto zebinData = std::make_unique<ZebinTestData::ZebinWithL0TestCommonModule>(device->getHwInfo(), additionalSections);
+    const auto &src = zebinData->storage;
 
-    size_t size = 0;
-    auto src = loadDataFromFile(testFile.c_str(), size);
-
-    ASSERT_NE(0u, size);
-    ASSERT_NE(nullptr, src);
+    ASSERT_NE(nullptr, src.data());
+    ASSERT_NE(0u, src.size());
 
     ze_module_desc_t moduleDesc = {};
     moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
-    moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(src.get());
-    moduleDesc.inputSize = size;
+    moduleDesc.pInputModule = src.data();
+    moduleDesc.inputSize = src.size();
 
     specConstants.numConstants = mockCompiler->moduleNumSpecConstants;
     for (uint32_t i = 0; i < mockCompiler->moduleNumSpecConstants / 2; i++) {
@@ -715,19 +712,17 @@ TEST_F(ModuleSpecConstantsLongTests, givenSpecializationConstantsSetWhenCompiler
 }
 
 TEST_F(ModuleSpecConstantsLongTests, givenSpecializationConstantsSetWhenUserPassTooMuchConstsIdsThenModuleInitFails) {
-    std::string testFile;
-    retrieveBinaryKernelFilenameApiSpecific(testFile, binaryFilename + "_", ".spv");
+    auto additionalSections = {ZebinTestData::appendElfAdditionalSection::SPIRV};
+    auto zebinData = std::make_unique<ZebinTestData::ZebinWithL0TestCommonModule>(device->getHwInfo(), additionalSections);
+    const auto &src = zebinData->storage;
 
-    size_t size = 0;
-    auto src = loadDataFromFile(testFile.c_str(), size);
-
-    ASSERT_NE(0u, size);
-    ASSERT_NE(nullptr, src);
+    ASSERT_NE(nullptr, src.data());
+    ASSERT_NE(0u, src.size());
 
     ze_module_desc_t moduleDesc = {};
     moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
-    moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(src.get());
-    moduleDesc.inputSize = size;
+    moduleDesc.pInputModule = src.data();
+    moduleDesc.inputSize = src.size();
 
     specConstants.numConstants = mockCompiler->moduleNumSpecConstants;
     for (uint32_t i = mockCompiler->moduleNumSpecConstants / 2; i > 0; i--) {
@@ -773,12 +768,14 @@ TEST_F(ModuleSpecConstantsLongTests, givenSpecializationConstantsSetWhenCompiler
     mockCompiler = new FailingMockCompilerInterfaceWithSpecConstants(moduleNumSpecConstants);
     auto rootDeviceEnvironment = neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[0].get();
     rootDeviceEnvironment->compilerInterface.reset(mockCompiler);
-    std::string testFile;
-    retrieveBinaryKernelFilenameApiSpecific(testFile, binaryFilename + "_", ".spv");
+    auto additionalSections = {ZebinTestData::appendElfAdditionalSection::SPIRV};
+    auto zebinData = std::make_unique<ZebinTestData::ZebinWithL0TestCommonModule>(device->getHwInfo(), additionalSections);
+    const auto &src = zebinData->storage;
 
-    size_t sizeModule1, sizeModule2 = 0;
-    auto srcModule1 = loadDataFromFile(testFile.c_str(), sizeModule1);
-    auto srcModule2 = loadDataFromFile(testFile.c_str(), sizeModule2);
+    auto sizeModule1 = src.size();
+    auto sizeModule2 = src.size();
+    auto srcModule1 = src.data();
+    auto srcModule2 = src.data();
 
     ASSERT_NE(0u, sizeModule1);
     ASSERT_NE(0u, sizeModule2);
@@ -789,7 +786,7 @@ TEST_F(ModuleSpecConstantsLongTests, givenSpecializationConstantsSetWhenCompiler
     ze_module_program_exp_desc_t staticLinkModuleDesc = {ZE_STRUCTURE_TYPE_MODULE_PROGRAM_EXP_DESC};
     std::vector<const uint8_t *> inputSpirVs;
     std::vector<size_t> inputSizes;
-    std::vector<ze_module_constants_t *> specConstantsArray;
+    std::vector<const ze_module_constants_t *> specConstantsArray;
     combinedModuleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
     combinedModuleDesc.pNext = &staticLinkModuleDesc;
 
@@ -807,14 +804,14 @@ TEST_F(ModuleSpecConstantsLongTests, givenSpecializationConstantsSetWhenCompiler
     specConstantsArray.push_back(&specConstants);
 
     inputSizes.push_back(sizeModule1);
-    inputSpirVs.push_back(reinterpret_cast<const uint8_t *>(srcModule1.get()));
+    inputSpirVs.push_back(srcModule1);
     inputSizes.push_back(sizeModule2);
-    inputSpirVs.push_back(reinterpret_cast<const uint8_t *>(srcModule2.get()));
+    inputSpirVs.push_back(srcModule2);
 
     staticLinkModuleDesc.count = 2;
     staticLinkModuleDesc.inputSizes = inputSizes.data();
     staticLinkModuleDesc.pInputModules = inputSpirVs.data();
-    staticLinkModuleDesc.pConstants = const_cast<const ze_module_constants_t **>(specConstantsArray.data());
+    staticLinkModuleDesc.pConstants = specConstantsArray.data();
 
     auto module = new Module(device, nullptr, ModuleType::User);
     module->translationUnit.reset(mockTranslationUnit);
@@ -834,12 +831,15 @@ struct ModuleStaticLinkFixture : public DeviceFixture {
     }
 
     void loadModules(bool multiple) {
-        std::string testFile;
-        retrieveBinaryKernelFilenameApiSpecific(testFile, binaryFilename + "_", ".spv");
+        auto additionalSections = {ZebinTestData::appendElfAdditionalSection::SPIRV};
+        zebinData = std::make_unique<ZebinTestData::ZebinWithL0TestCommonModule>(device->getHwInfo(), additionalSections);
+        const auto &storage = zebinData->storage;
 
-        srcModule1 = loadDataFromFile(testFile.c_str(), sizeModule1);
+        srcModule1 = storage.data();
+        sizeModule1 = storage.size();
         if (multiple) {
-            srcModule2 = loadDataFromFile(testFile.c_str(), sizeModule2);
+            srcModule2 = storage.data();
+            sizeModule2 = storage.size();
         }
 
         ASSERT_NE(0u, sizeModule1);
@@ -855,11 +855,11 @@ struct ModuleStaticLinkFixture : public DeviceFixture {
         combinedModuleDesc.pNext = &staticLinkModuleDesc;
 
         inputSizes.push_back(sizeModule1);
-        inputSpirVs.push_back(reinterpret_cast<const uint8_t *>(srcModule1.get()));
+        inputSpirVs.push_back(srcModule1);
         staticLinkModuleDesc.count = 1;
         if (multiple) {
             inputSizes.push_back(sizeModule2);
-            inputSpirVs.push_back(reinterpret_cast<const uint8_t *>(srcModule2.get()));
+            inputSpirVs.push_back(srcModule2);
             staticLinkModuleDesc.count = 2;
         }
         staticLinkModuleDesc.inputSizes = inputSizes.data();
@@ -931,13 +931,13 @@ struct ModuleStaticLinkFixture : public DeviceFixture {
 
         setupExpProgramDesc(ZE_MODULE_FORMAT_IL_SPIRV, testMultiple);
 
-        std::vector<char *> buildFlags;
+        std::vector<const char *> buildFlags;
         std::string module1BuildFlags("-ze-opt-disable");
         std::string module2BuildFlags("-ze-opt-greater-than-4GB-buffer-required");
-        buildFlags.push_back(const_cast<char *>(module1BuildFlags.c_str()));
-        buildFlags.push_back(const_cast<char *>(module2BuildFlags.c_str()));
+        buildFlags.push_back(module1BuildFlags.c_str());
+        buildFlags.push_back(module2BuildFlags.c_str());
 
-        staticLinkModuleDesc.pBuildFlags = const_cast<const char **>(buildFlags.data());
+        staticLinkModuleDesc.pBuildFlags = buildFlags.data();
 
         auto module = new Module(device, nullptr, ModuleType::User);
         module->translationUnit.reset(mockTranslationUnit);
@@ -957,11 +957,11 @@ struct ModuleStaticLinkFixture : public DeviceFixture {
 
         setupExpProgramDesc(ZE_MODULE_FORMAT_IL_SPIRV, testSingle);
 
-        std::vector<char *> buildFlags;
+        std::vector<const char *> buildFlags;
         std::string module1BuildFlags("-ze-opt-disable");
-        buildFlags.push_back(const_cast<char *>(module1BuildFlags.c_str()));
+        buildFlags.push_back(module1BuildFlags.c_str());
 
-        staticLinkModuleDesc.pBuildFlags = const_cast<const char **>(buildFlags.data());
+        staticLinkModuleDesc.pBuildFlags = buildFlags.data();
 
         auto module = new Module(device, nullptr, ModuleType::User);
         module->translationUnit.reset(mockTranslationUnit);
@@ -970,11 +970,11 @@ struct ModuleStaticLinkFixture : public DeviceFixture {
         EXPECT_TRUE(success);
         module->destroy();
     }
-    const std::string binaryFilename = "test_kernel";
+    std::unique_ptr<ZebinTestData::ZebinWithL0TestCommonModule> zebinData;
     const std::string kernelName = "test";
     MockModuleTranslationUnit *mockTranslationUnit;
-    std::unique_ptr<char[]> srcModule1;
-    std::unique_ptr<char[]> srcModule2;
+    const uint8_t *srcModule1;
+    const uint8_t *srcModule2;
     size_t sizeModule1, sizeModule2 = 0;
     std::vector<const uint8_t *> inputSpirVs;
     std::vector<size_t> inputSizes;
@@ -1212,7 +1212,7 @@ TEST_F(ModuleDynamicLinkTests, givenModuleWithUnresolvedSymbolWhenTheOtherModule
     unresolvedExternal.unresolvedRelocation = unresolvedRelocation;
 
     NEO::SymbolInfo symbolInfo{};
-    NEO::Linker::RelocatedSymbol relocatedSymbol{symbolInfo, gpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> relocatedSymbol{symbolInfo, gpuAddress};
 
     char kernelHeap[MemoryConstants::pageSize] = {};
 
@@ -1258,7 +1258,7 @@ TEST_F(ModuleDynamicLinkTests, givenModuleWithUnresolvedSymbolWhenTheOtherModule
     unresolvedExternal.unresolvedRelocation = unresolvedRelocation;
 
     NEO::SymbolInfo symbolInfo{};
-    NEO::Linker::RelocatedSymbol relocatedSymbol{symbolInfo, gpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> relocatedSymbol{symbolInfo, gpuAddress};
 
     char kernelHeap[MemoryConstants::pageSize] = {};
 
@@ -1320,13 +1320,13 @@ TEST_F(ModuleDynamicLinkTests, givenMultipleModulesWithUnresolvedSymbolWhenTheEa
     unresolvedExternalChained.unresolvedRelocation = unresolvedRelocationChained;
 
     NEO::SymbolInfo module0SymbolInfo{};
-    NEO::Linker::RelocatedSymbol module0RelocatedSymbol{module0SymbolInfo, gpuAddress0};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> module0RelocatedSymbol{module0SymbolInfo, gpuAddress0};
 
     NEO::SymbolInfo module1SymbolInfo{};
-    NEO::Linker::RelocatedSymbol module1RelocatedSymbol{module1SymbolInfo, gpuAddress1};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> module1RelocatedSymbol{module1SymbolInfo, gpuAddress1};
 
     NEO::SymbolInfo module2SymbolInfo{};
-    NEO::Linker::RelocatedSymbol module2RelocatedSymbol{module2SymbolInfo, gpuAddress2};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> module2RelocatedSymbol{module2SymbolInfo, gpuAddress2};
 
     char kernelHeap[MemoryConstants::pageSize] = {};
 
@@ -1464,13 +1464,13 @@ TEST_F(ModuleDynamicLinkTests, givenMultipleModulesWithUnresolvedSymbolWhenTheEa
     unresolvedExternalChained.unresolvedRelocation = unresolvedRelocationChained;
 
     NEO::SymbolInfo module0SymbolInfo{};
-    NEO::Linker::RelocatedSymbol module0RelocatedSymbol{module0SymbolInfo, gpuAddress0};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> module0RelocatedSymbol{module0SymbolInfo, gpuAddress0};
 
     NEO::SymbolInfo module1SymbolInfo{};
-    NEO::Linker::RelocatedSymbol module1RelocatedSymbol{module1SymbolInfo, gpuAddress1};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> module1RelocatedSymbol{module1SymbolInfo, gpuAddress1};
 
     NEO::SymbolInfo module2SymbolInfo{};
-    NEO::Linker::RelocatedSymbol module2RelocatedSymbol{module2SymbolInfo, gpuAddress2};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> module2RelocatedSymbol{module2SymbolInfo, gpuAddress2};
 
     char kernelHeap[MemoryConstants::pageSize] = {};
 
@@ -1550,10 +1550,10 @@ TEST_F(ModuleDynamicLinkTests, givenModuleWithUnresolvedSymbolWhenTheOtherModule
     unresolvedExternal2.unresolvedRelocation = unresolvedRelocation2;
 
     NEO::SymbolInfo symbolInfo{};
-    NEO::Linker::RelocatedSymbol relocatedSymbol{symbolInfo, gpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> relocatedSymbol{symbolInfo, gpuAddress};
 
     NEO::SymbolInfo symbolInfo2{};
-    NEO::Linker::RelocatedSymbol relocatedSymbol2{symbolInfo2, gpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> relocatedSymbol2{symbolInfo2, gpuAddress};
 
     char kernelHeap[MemoryConstants::pageSize] = {};
 
@@ -1653,7 +1653,7 @@ TEST_F(ModuleDynamicLinkTests, givenModuleWithUnresolvedSymbolsNotPresentInAnoth
 
 using ModuleDynamicLinkTest = Test<ModuleFixture>;
 TEST_F(ModuleDynamicLinkTest, givenUnresolvedSymbolsWhenModuleIsCreatedThenIsaAllocationsAreNotCopied) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     auto cip = new NEO::MockCompilerInterfaceCaptureBuildOptions();
     neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[neoDevice->getRootDeviceIndex()]->compilerInterface.reset(cip);
 
@@ -1732,7 +1732,7 @@ TEST_F(ModuleFunctionPointerTests, givenModuleWithExportedSymbolThenGetFunctionP
 
     NEO::SymbolInfo symbolInfo{};
     symbolInfo.segment = NEO::SegmentType::Instructions;
-    NEO::Linker::RelocatedSymbol relocatedSymbol{symbolInfo, gpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> relocatedSymbol{symbolInfo, gpuAddress};
 
     char kernelHeap[MemoryConstants::pageSize] = {};
 
@@ -1762,7 +1762,7 @@ TEST_F(ModuleFunctionPointerTests, givenInvalidFunctionNameAndModuleWithExported
 
     NEO::SymbolInfo symbolInfo{};
     symbolInfo.segment = NEO::SegmentType::Instructions;
-    NEO::Linker::RelocatedSymbol relocatedSymbol{symbolInfo, gpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> relocatedSymbol{symbolInfo, gpuAddress};
 
     char kernelHeap[MemoryConstants::pageSize] = {};
 
@@ -1795,7 +1795,7 @@ TEST_F(ModuleFunctionPointerTests, givenModuleWithExportedSymbolThenGetFunctionP
 
     NEO::SymbolInfo symbolInfo{};
     symbolInfo.segment = NEO::SegmentType::Instructions;
-    NEO::Linker::RelocatedSymbol relocatedSymbol{symbolInfo, gpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> relocatedSymbol{symbolInfo, gpuAddress};
 
     char kernelHeap[MemoryConstants::pageSize] = {};
 
@@ -2259,7 +2259,7 @@ HWTEST_F(ModuleTranslationUnitTest, givenInternalOptionsThenLSCCachePolicyIsSet)
     auto ret = moduleTu.buildFromSpirV("", 0U, nullptr, "", nullptr);
     const auto &compilerHwInfoConfig = *CompilerHwInfoConfig::get(defaultHwInfo->platform.eProductFamily);
     EXPECT_TRUE(ret);
-    auto expectedPolicy = compilerHwInfoConfig.getCachingPolicyOptions();
+    auto expectedPolicy = compilerHwInfoConfig.getCachingPolicyOptions(false);
     if (expectedPolicy != nullptr) {
         EXPECT_NE(pMockCompilerInterface->inputInternalOptions.find(expectedPolicy), std::string::npos);
     } else {
@@ -2280,7 +2280,20 @@ HWTEST2_F(ModuleTranslationUnitTest, givenDebugFlagSetToWbWhenGetInternalOptions
     EXPECT_NE(pMockCompilerInterface->inputInternalOptions.find("-cl-store-cache-default=7 -cl-load-cache-default=4"), std::string::npos);
 }
 
-HWTEST2_F(ModuleTranslationUnitTest, givenAtLeastDG2WhenGetInternalOptionsThenCorrectBuildOptionIsSet, IsAtLeastXeHpgCore) {
+HWTEST2_F(ModuleTranslationUnitTest, givenDebugFlagSetForceAllResourcesUncachedWhenGetInternalOptionsThenCorrectBuildOptionIsSet, IsAtLeastXeHpgCore) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.OverrideL1CachePolicyInSurfaceStateAndStateless.set(2);
+    DebugManager.flags.ForceAllResourcesUncached.set(true);
+    auto pMockCompilerInterface = new MockCompilerInterface;
+    auto &rootDeviceEnvironment = this->neoDevice->executionEnvironment->rootDeviceEnvironments[this->neoDevice->getRootDeviceIndex()];
+    rootDeviceEnvironment->compilerInterface.reset(pMockCompilerInterface);
+    MockModuleTranslationUnit moduleTu(this->device);
+    auto ret = moduleTu.buildFromSpirV("", 0U, nullptr, "", nullptr);
+    EXPECT_TRUE(ret);
+    EXPECT_NE(pMockCompilerInterface->inputInternalOptions.find("-cl-store-cache-default=1 -cl-load-cache-default=1"), std::string::npos);
+}
+
+HWTEST2_F(ModuleTranslationUnitTest, givenAtLeastXeHpgCoreWhenGetInternalOptionsThenCorrectBuildOptionIsSet, IsAtLeastXeHpgCore) {
     auto pMockCompilerInterface = new MockCompilerInterface;
     auto &rootDeviceEnvironment = this->neoDevice->executionEnvironment->rootDeviceEnvironments[this->neoDevice->getRootDeviceIndex()];
     rootDeviceEnvironment->compilerInterface.reset(pMockCompilerInterface);
@@ -2501,7 +2514,6 @@ TEST_F(ModuleTest, GivenInjectInternalBuildOptionsWhenBuildingUserModuleThenInte
     DebugManagerStateRestore dbgRestorer;
     DebugManager.flags.InjectInternalBuildOptions.set(" -abc");
 
-    NEO::MockCompilerEnableGuard mock(true);
     auto cip = new NEO::MockCompilerInterfaceCaptureBuildOptions();
     device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]->compilerInterface.reset(cip);
 
@@ -2520,11 +2532,32 @@ TEST_F(ModuleTest, GivenInjectInternalBuildOptionsWhenBuildingUserModuleThenInte
     EXPECT_TRUE(CompilerOptions::contains(cip->buildInternalOptions, "-abc"));
 };
 
+TEST_F(ModuleTest, GivenInjectApiBuildOptionsWhenBuildingUserModuleThenApiOptionsAreAppended) {
+    DebugManagerStateRestore dbgRestorer;
+    DebugManager.flags.InjectApiBuildOptions.set(" -abc");
+
+    auto cip = new NEO::MockCompilerInterfaceCaptureBuildOptions();
+    device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]->compilerInterface.reset(cip);
+
+    uint8_t binary[10];
+    ze_module_desc_t moduleDesc = {};
+    moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+    moduleDesc.pInputModule = binary;
+    moduleDesc.inputSize = 10;
+
+    ModuleBuildLog *moduleBuildLog = nullptr;
+
+    auto module = std::unique_ptr<L0::ModuleImp>(new L0::ModuleImp(device, moduleBuildLog, ModuleType::User));
+    ASSERT_NE(nullptr, module.get());
+    module->initialize(&moduleDesc, device->getNEODevice());
+
+    EXPECT_TRUE(CompilerOptions::contains(cip->buildOptions, "-abc"));
+};
+
 TEST_F(ModuleTest, GivenInjectInternalBuildOptionsWhenBuildingBuiltinModuleThenInternalOptionsAreNotAppended) {
     DebugManagerStateRestore dbgRestorer;
     DebugManager.flags.InjectInternalBuildOptions.set(" -abc");
 
-    NEO::MockCompilerEnableGuard mock(true);
     auto cip = new NEO::MockCompilerInterfaceCaptureBuildOptions();
     device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]->compilerInterface.reset(cip);
 
@@ -2698,7 +2731,7 @@ TEST_F(ModuleTest, givenModuleWithSymbolWhenGettingGlobalPointerThenSizeAndPoint
     uint64_t gpuAddress = 0x12345000;
 
     NEO::SymbolInfo symbolInfo{0, 1024u, SegmentType::GlobalVariables};
-    NEO::Linker::RelocatedSymbol relocatedSymbol{symbolInfo, gpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> relocatedSymbol{symbolInfo, gpuAddress};
 
     auto module0 = std::make_unique<Module>(device, nullptr, ModuleType::User);
     module0->symbols["symbol"] = relocatedSymbol;
@@ -2716,7 +2749,7 @@ TEST_F(ModuleTest, givenModuleWithSymbolWhenGettingGlobalPointerWithNullptrInput
     uint64_t gpuAddress = 0x12345000;
 
     NEO::SymbolInfo symbolInfo{0, 1024u, SegmentType::GlobalVariables};
-    NEO::Linker::RelocatedSymbol relocatedSymbol{symbolInfo, gpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> relocatedSymbol{symbolInfo, gpuAddress};
 
     auto module0 = std::make_unique<Module>(device, nullptr, ModuleType::User);
     module0->symbols["symbol"] = relocatedSymbol;
@@ -2734,11 +2767,11 @@ TEST_F(ModuleTest, givenModuleWithGlobalSymbolMapWhenGettingGlobalPointerByHostS
     size_t symbolsSize = 1024u;
     uint64_t globalVarGpuAddress = 0x12345000;
     NEO::SymbolInfo globalVariablesSymbolInfo{0, static_cast<uint32_t>(symbolsSize), SegmentType::GlobalVariables};
-    NEO::Linker::RelocatedSymbol globalVariablesRelocatedSymbol{globalVariablesSymbolInfo, globalVarGpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> globalVariablesRelocatedSymbol{globalVariablesSymbolInfo, globalVarGpuAddress};
 
     uint64_t globalConstGpuAddress = 0x12347000;
     NEO::SymbolInfo globalConstantsSymbolInfo{0, static_cast<uint32_t>(symbolsSize), SegmentType::GlobalConstants};
-    NEO::Linker::RelocatedSymbol globalConstansRelocatedSymbol{globalConstantsSymbolInfo, globalConstGpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> globalConstansRelocatedSymbol{globalConstantsSymbolInfo, globalConstGpuAddress};
 
     auto module0 = std::make_unique<MockModule>(device, nullptr, ModuleType::User);
     module0->symbols["devSymbolOne"] = globalVariablesRelocatedSymbol;
@@ -2784,7 +2817,7 @@ TEST_F(ModuleTest, givenModuleWithGlobalSymbolsMapWhenPopulatingMapWithSymbolFro
     size_t symbolSize = 1024u;
     uint64_t gpuAddress = 0x12345000;
     NEO::SymbolInfo symbolInfo{0, static_cast<uint32_t>(symbolSize), SegmentType::Instructions};
-    NEO::Linker::RelocatedSymbol relocatedSymbol{symbolInfo, gpuAddress};
+    NEO::Linker::RelocatedSymbol<NEO::SymbolInfo> relocatedSymbol{symbolInfo, gpuAddress};
 
     auto module0 = std::make_unique<MockModule>(device, nullptr, ModuleType::User);
     module0->symbols[incorrectDevSymbolName] = relocatedSymbol;
@@ -2812,7 +2845,7 @@ TEST_F(ModuleTests, whenCopyingPatchedSegmentsThenAllocationsAreSetWritableForTb
     linkerInput->traits.requiresPatchingOfInstructionSegments = true;
     pModule->translationUnit->programInfo.linkerInput = std::move(linkerInput);
 
-    NEO::Linker::PatchableSegments segments{{data, 1}};
+    NEO::Linker::PatchableSegments segments{{data, 0u, 1, std::string{}}};
 
     auto allocation = pModule->kernelImmDatas[0]->getIsaGraphicsAllocation();
 
@@ -2853,6 +2886,46 @@ TEST_F(ModuleTests, givenConstDataStringSectionWhenLinkingModuleThenSegmentIsPat
     auto status = pModule->linkBinary();
     EXPECT_TRUE(status);
     EXPECT_EQ(static_cast<size_t>(stringsAddr), *reinterpret_cast<size_t *>(patchAddr));
+}
+
+TEST_F(ModuleTests, givenImplicitArgsRelocationAndStackCallsWhenLinkingBuiltinModuleThenSegmentIsNotPatchedAndImplicitArgsAreNotRequired) {
+    auto pModule = std::make_unique<WhiteBox<Module>>(device, nullptr, ModuleType::Builtin);
+
+    pModule->maxGroupSize = 32;
+
+    char data[64]{};
+    auto kernelInfo = new KernelInfo();
+    kernelInfo->heapInfo.KernelHeapSize = 64;
+    kernelInfo->heapInfo.pKernelHeap = data;
+
+    std::unique_ptr<WhiteBox<::L0::KernelImmutableData>> kernelImmData{new WhiteBox<::L0::KernelImmutableData>(this->device)};
+    kernelImmData->initialize(kernelInfo, device, 0, nullptr, nullptr, true);
+
+    kernelImmData->kernelDescriptor->kernelAttributes.flags.useStackCalls = true;
+    auto isaCpuPtr = reinterpret_cast<char *>(kernelImmData->isaGraphicsAllocation->getUnderlyingBuffer());
+    pModule->kernelImmDatas.push_back(std::move(kernelImmData));
+    pModule->translationUnit->programInfo.kernelInfos.push_back(kernelInfo);
+    auto linkerInput = std::make_unique<::WhiteBox<NEO::LinkerInput>>();
+    linkerInput->traits.requiresPatchingOfInstructionSegments = true;
+    linkerInput->textRelocations.push_back({{implicitArgsRelocationSymbolName, 0x8, LinkerInput::RelocationInfo::Type::AddressLow, SegmentType::Instructions}});
+    pModule->translationUnit->programInfo.linkerInput = std::move(linkerInput);
+
+    EXPECT_FALSE(kernelInfo->kernelDescriptor.kernelAttributes.flags.requiresImplicitArgs);
+    auto status = pModule->linkBinary();
+    EXPECT_TRUE(status);
+    EXPECT_FALSE(kernelInfo->kernelDescriptor.kernelAttributes.flags.requiresImplicitArgs);
+
+    ze_kernel_handle_t kernelHandle;
+
+    ze_kernel_desc_t kernelDesc = {};
+    kernelDesc.pKernelName = kernelInfo->kernelDescriptor.kernelMetadata.kernelName.c_str();
+
+    ze_result_t res = pModule->createKernel(&kernelDesc, &kernelHandle);
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    EXPECT_EQ(0u, *reinterpret_cast<uint32_t *>(ptrOffset(isaCpuPtr, 0x8)));
+    Kernel::fromHandle(kernelHandle)->destroy();
 }
 
 TEST_F(ModuleTests, givenImplicitArgsRelocationAndStackCallsWhenLinkingModuleThenSegmentIsPatchedAndImplicitArgsAreRequired) {

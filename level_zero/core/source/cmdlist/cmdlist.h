@@ -35,12 +35,18 @@ struct CmdListKernelLaunchParams {
     bool isDestinationAllocationInSystemMemory = false;
 };
 
+struct CmdListReturnPoint {
+    NEO::StreamProperties configSnapshot;
+    uint64_t gpuAddress = 0;
+    NEO::GraphicsAllocation *currentCmdBuffer = nullptr;
+};
+
 struct CommandList : _ze_command_list_handle_t {
     static constexpr uint32_t defaultNumIddsPerBlock = 64u;
     static constexpr uint32_t commandListimmediateIddsPerBlock = 1u;
 
     CommandList() = delete;
-    CommandList(uint32_t numIddsPerBlock) : commandContainer(numIddsPerBlock) {}
+    CommandList(uint32_t numIddsPerBlock);
 
     template <typename Type>
     struct Allocator {
@@ -50,6 +56,10 @@ struct CommandList : _ze_command_list_handle_t {
     struct CommandToPatch {
         enum CommandType {
             FrontEndState,
+            PauseOnEnqueueSemaphoreStart,
+            PauseOnEnqueueSemaphoreEnd,
+            PauseOnEnqueuePipeControlStart,
+            PauseOnEnqueuePipeControlEnd,
             Invalid
         };
         void *pDestination = nullptr;
@@ -83,19 +93,19 @@ struct CommandList : _ze_command_list_handle_t {
     virtual ze_result_t appendImageCopy(ze_image_handle_t hDstImage, ze_image_handle_t hSrcImage,
                                         ze_event_handle_t hEvent, uint32_t numWaitEvents,
                                         ze_event_handle_t *phWaitEvents) = 0;
-    virtual ze_result_t appendLaunchKernel(ze_kernel_handle_t hKernel, const ze_group_count_t *threadGroupDimensions,
+    virtual ze_result_t appendLaunchKernel(ze_kernel_handle_t kernelHandle, const ze_group_count_t *threadGroupDimensions,
                                            ze_event_handle_t hEvent, uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents,
                                            const CmdListKernelLaunchParams &launchParams) = 0;
-    virtual ze_result_t appendLaunchCooperativeKernel(ze_kernel_handle_t hKernel,
-                                                      const ze_group_count_t *pLaunchFuncArgs,
+    virtual ze_result_t appendLaunchCooperativeKernel(ze_kernel_handle_t kernelHandle,
+                                                      const ze_group_count_t *launchKernelArgs,
                                                       ze_event_handle_t hSignalEvent,
                                                       uint32_t numWaitEvents,
                                                       ze_event_handle_t *phWaitEvents) = 0;
-    virtual ze_result_t appendLaunchKernelIndirect(ze_kernel_handle_t hKernel,
+    virtual ze_result_t appendLaunchKernelIndirect(ze_kernel_handle_t kernelHandle,
                                                    const ze_group_count_t *pDispatchArgumentsBuffer,
                                                    ze_event_handle_t hEvent, uint32_t numWaitEvents,
                                                    ze_event_handle_t *phWaitEvents) = 0;
-    virtual ze_result_t appendLaunchMultipleKernelsIndirect(uint32_t numKernels, const ze_kernel_handle_t *phKernels,
+    virtual ze_result_t appendLaunchMultipleKernelsIndirect(uint32_t numKernels, const ze_kernel_handle_t *kernelHandles,
                                                             const uint32_t *pNumLaunchArguments,
                                                             const ze_group_count_t *pLaunchArgumentsBuffer, ze_event_handle_t hEvent,
                                                             uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) = 0;
@@ -207,15 +217,13 @@ struct CommandList : _ze_command_list_handle_t {
         return indirectAllocationsAllowed;
     }
 
-    void handleIndirectAllocationResidency();
+    NEO::PreemptionMode obtainKernelPreemptionMode(Kernel *kernel);
 
-    NEO::PreemptionMode obtainFunctionPreemptionMode(Kernel *kernel);
-
-    std::vector<Kernel *> &getPrintfFunctionContainer() {
-        return this->printfFunctionContainer;
+    std::vector<Kernel *> &getPrintfKernelContainer() {
+        return this->printfKernelContainer;
     }
 
-    void storePrintfFunction(Kernel *kernel);
+    void storePrintfKernel(Kernel *kernel);
     void removeDeallocationContainerData();
     void removeHostPtrAllocations();
     void eraseDeallocationContainerEntry(NEO::GraphicsAllocation *allocation);
@@ -257,10 +265,23 @@ struct CommandList : _ze_command_list_handle_t {
         return commandsToPatch;
     }
 
+    std::vector<CmdListReturnPoint> &getReturnPoints() {
+        return returnPoints;
+    }
+
+    uint32_t getReturnPointsSize() const {
+        return static_cast<uint32_t>(returnPoints.size());
+    }
+
     void makeResidentAndMigrate(bool);
     void migrateSharedAllocations();
 
-    std::vector<Kernel *> printfFunctionContainer;
+    bool getSystolicModeSupport() const {
+        return systolicModeSupport;
+    }
+
+    ze_context_handle_t hContext = nullptr;
+    std::vector<Kernel *> printfKernelContainer;
     CommandQueue *cmdQImmediate = nullptr;
     NEO::CommandStreamReceiver *csr = nullptr;
     Device *device = nullptr;
@@ -274,6 +295,7 @@ struct CommandList : _ze_command_list_handle_t {
     bool isTbxMode = false;
     bool commandListSLMEnabled = false;
     bool requiresQueueUncachedMocs = false;
+    bool isBcsSplitNeeded = false;
 
   protected:
     NEO::GraphicsAllocation *getAllocationFromHostPtrMap(const void *buffer, uint64_t bufferSize);
@@ -283,6 +305,7 @@ struct CommandList : _ze_command_list_handle_t {
     std::map<const void *, NEO::GraphicsAllocation *> hostPtrMap;
     std::vector<NEO::GraphicsAllocation *> ownedPrivateAllocations;
     std::vector<NEO::GraphicsAllocation *> patternAllocations;
+    std::vector<CmdListReturnPoint> returnPoints;
 
     NEO::StreamProperties requiredStreamState{};
     NEO::StreamProperties finalStreamState{};
@@ -297,6 +320,9 @@ struct CommandList : _ze_command_list_handle_t {
     bool containsCooperativeKernelsFlag = false;
     bool containsStatelessUncachedResource = false;
     bool performMemoryPrefetch = false;
+    bool multiReturnPointCommandList = false;
+    bool systolicModeSupport = false;
+    bool pipelineSelectStateTracking = false;
 };
 
 using CommandListAllocatorFn = CommandList *(*)(uint32_t);

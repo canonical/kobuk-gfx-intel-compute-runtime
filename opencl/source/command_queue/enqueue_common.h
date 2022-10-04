@@ -700,7 +700,7 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
 
     auto mediaSamplerRequired = false;
     uint32_t numGrfRequired = GrfConfig::DefaultGrfNumber;
-    auto specialPipelineSelectMode = false;
+    auto systolicPipelineSelectMode = false;
     Kernel *kernel = nullptr;
     bool auxTranslationRequired = false;
     bool useGlobalAtomics = false;
@@ -716,7 +716,7 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
         mediaSamplerRequired |= kernel->isVmeKernel();
         auto numGrfRequiredByKernel = static_cast<uint32_t>(kernel->getKernelInfo().kernelDescriptor.kernelAttributes.numGrfRequired);
         numGrfRequired = std::max(numGrfRequired, numGrfRequiredByKernel);
-        specialPipelineSelectMode |= kernel->requiresSpecialPipelineSelectMode();
+        systolicPipelineSelectMode |= kernel->requiresSystolicPipelineSelectMode();
         auxTranslationRequired |= kernel->isAuxTranslationRequired();
         if (kernel->hasUncacheableStatelessArgs()) {
             anyUncacheableArgs = true;
@@ -768,7 +768,7 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
         ClPreemptionHelper::taskPreemptionMode(getDevice(), multiDispatchInfo),                     // preemptionMode
         numGrfRequired,                                                                             // numGrfRequired
         L3CachingSettings::l3CacheOn,                                                               // l3CacheSettings
-        kernel->getThreadArbitrationPolicy(),                                                       // threadArbitrationPolicy
+        kernel->getDescriptor().kernelAttributes.threadArbitrationPolicy,                           // threadArbitrationPolicy
         kernel->getAdditionalKernelExecInfo(),                                                      // additionalKernelExecInfo
         kernel->getExecutionType(),                                                                 // kernelExecutionType
         memoryCompressionState,                                                                     // memoryCompressionState
@@ -791,7 +791,7 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
         isTextureCacheFlushNeeded(commandType));                                                    // textureCacheFlush
 
     dispatchFlags.pipelineSelectArgs.mediaSamplerRequired = mediaSamplerRequired;
-    dispatchFlags.pipelineSelectArgs.specialPipelineSelectMode = specialPipelineSelectMode;
+    dispatchFlags.pipelineSelectArgs.systolicPipelineSelectMode = systolicPipelineSelectMode;
 
     dispatchFlags.disableEUFusion = kernel->getKernelInfo().kernelDescriptor.kernelAttributes.flags.requiresDisabledEUFusion;
 
@@ -1104,6 +1104,100 @@ size_t CommandQueueHw<GfxFamily>::calculateHostPtrSizeForImage(const size_t *reg
 }
 
 template <typename GfxFamily>
+bool CommandQueueHw<GfxFamily>::isSplitEnqueueBlitNeeded(TransferDirection transferDirection, size_t transferSize, CommandStreamReceiver &csr) {
+    constexpr size_t minimalSizeForBcsSplit = 16 * MemoryConstants::megaByte;
+
+    auto bcsSplit = getDevice().isBcsSplitSupported() &&
+                    csr.getOsContext().getEngineType() == aub_stream::EngineType::ENGINE_BCS &&
+                    transferSize >= minimalSizeForBcsSplit &&
+                    (transferDirection == TransferDirection::HostToLocal ||
+                     transferDirection == TransferDirection::LocalToHost);
+
+    if (bcsSplit) {
+        this->constructBcsEnginesForSplit();
+    }
+
+    return bcsSplit;
+}
+
+template <typename GfxFamily>
+size_t CommandQueueHw<GfxFamily>::getTotalSizeFromRectRegion(const size_t *region) {
+    auto size = region[0];
+    size *= (region[1] == 0 ? 1 : region[1]);
+    size *= (region[2] == 0 ? 1 : region[2]);
+    return size;
+}
+
+template <typename GfxFamily>
+template <uint32_t cmdType>
+cl_int CommandQueueHw<GfxFamily>::enqueueBlitSplit(MultiDispatchInfo &dispatchInfo, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event, bool blocking, CommandStreamReceiver &csr) {
+    auto ret = CL_SUCCESS;
+    this->releaseMainCopyEngine();
+
+    StackVec<std::unique_lock<CommandStreamReceiver::MutexType>, 4u> locks;
+    StackVec<CommandStreamReceiver *, 4u> copyEngines;
+
+    for (uint32_t i = 0; i < bcsInfoMaskSize; i++) {
+        if (this->splitEngines.test(i)) {
+            auto engineType = EngineHelpers::mapBcsIndexToEngineType(i, true);
+            auto bcs = getBcsCommandStreamReceiver(engineType);
+            if (bcs) {
+                locks.push_back(std::move(bcs->obtainUniqueOwnership()));
+                copyEngines.push_back(bcs);
+            }
+        }
+    }
+
+    DEBUG_BREAK_IF(copyEngines.size() == 0);
+    TakeOwnershipWrapper<CommandQueueHw<GfxFamily>> queueOwnership(*this);
+
+    TimestampPacketContainer splitNodes;
+    TimestampPacketContainer previousEnqueueNode;
+    previousEnqueueNode.swapNodes(*this->timestampPacketContainer);
+
+    auto srcOffset = dispatchInfo.peekBuiltinOpParams().srcOffset.x;
+    auto dstOffset = dispatchInfo.peekBuiltinOpParams().dstOffset.x;
+    auto size = dispatchInfo.peekBuiltinOpParams().size.x;
+    auto remainingSize = size;
+
+    for (size_t i = 0; i < copyEngines.size(); i++) {
+        auto localSize = remainingSize / (copyEngines.size() - i);
+        auto localParams = dispatchInfo.peekBuiltinOpParams();
+        localParams.size.x = localSize;
+        localParams.srcOffset.x = (srcOffset + size - remainingSize);
+        localParams.dstOffset.x = (dstOffset + size - remainingSize);
+
+        dispatchInfo.setBuiltinOpParams(localParams);
+        remainingSize -= localSize;
+
+        this->timestampPacketContainer->assignAndIncrementNodesRefCounts(previousEnqueueNode);
+
+        ret = enqueueBlit<cmdType>(dispatchInfo, numEventsInWaitList, eventWaitList, remainingSize == 0 ? event : nullptr, false, *copyEngines[i]);
+        DEBUG_BREAK_IF(ret != CL_SUCCESS);
+
+        this->timestampPacketContainer->moveNodesToNewContainer(splitNodes);
+    }
+
+    if (event) {
+        auto e = castToObjectOrAbort<Event>(*event);
+        e->addTimestampPacketNodes(splitNodes);
+    }
+
+    this->timestampPacketContainer->swapNodes(splitNodes);
+
+    queueOwnership.unlock();
+    for (auto &lock : locks) {
+        lock.unlock();
+    }
+
+    if (blocking) {
+        ret = this->finish();
+    }
+
+    return ret;
+}
+
+template <typename GfxFamily>
 template <uint32_t cmdType>
 cl_int CommandQueueHw<GfxFamily>::enqueueBlit(const MultiDispatchInfo &multiDispatchInfo, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event, bool blocking, CommandStreamReceiver &bcsCsr) {
     auto bcsCommandStreamReceiverOwnership = bcsCsr.obtainUniqueOwnership();
@@ -1236,7 +1330,15 @@ cl_int CommandQueueHw<GfxFamily>::dispatchBcsOrGpgpuEnqueue(MultiDispatchInfo &d
     const bool blit = EngineHelpers::isBcs(csr.getOsContext().getEngineType());
 
     if (blit) {
-        return enqueueBlit<cmdType>(dispatchInfo, numEventsInWaitList, eventWaitList, event, blocking, csr);
+        cl_int ret = CL_SUCCESS;
+
+        if (dispatchInfo.peekBuiltinOpParams().bcsSplit) {
+            ret = enqueueBlitSplit<cmdType>(dispatchInfo, numEventsInWaitList, eventWaitList, event, blocking, csr);
+        } else {
+            ret = enqueueBlit<cmdType>(dispatchInfo, numEventsInWaitList, eventWaitList, event, blocking, csr);
+        }
+
+        return ret;
     } else {
         auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(builtInOperation,
                                                                                 this->getClDevice());

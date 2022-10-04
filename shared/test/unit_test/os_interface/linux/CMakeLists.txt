@@ -16,6 +16,7 @@ set(NEO_CORE_OS_INTERFACE_TESTS_LINUX
     ${CMAKE_CURRENT_SOURCE_DIR}/drm_buffer_object_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/drm_command_stream_mm_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/drm_command_stream_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/drm_command_stream_tests_1.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/drm_engine_info_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/drm_mapper_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/drm_memory_manager_tests.cpp
@@ -55,6 +56,7 @@ if(NEO_ENABLE_i915_PRELIM_DETECTION)
        ${CMAKE_CURRENT_SOURCE_DIR}/drm_with_prelim_tests.cpp
        ${CMAKE_CURRENT_SOURCE_DIR}/ioctl_helper_tests_prelim.cpp
        ${CMAKE_CURRENT_SOURCE_DIR}/prelim_helper_func.cpp
+       ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}ioctl_helper_prelim_init_tests.cpp
   )
   if(TESTS_DG1 AND "${BRANCH_TYPE}" STREQUAL "")
     list(APPEND NEO_CORE_OS_INTERFACE_TESTS_LINUX

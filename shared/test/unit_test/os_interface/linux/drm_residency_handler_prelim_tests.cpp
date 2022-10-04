@@ -26,6 +26,7 @@
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_gmm_client_context.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/test_macros/hw_test.h"
@@ -105,21 +106,25 @@ struct DrmMemoryOperationsHandlerBindFixture : public ::testing::Test {
 using DrmMemoryOperationsHandlerBindMultiRootDeviceTest = DrmMemoryOperationsHandlerBindFixture<2u>;
 
 TEST_F(DrmMemoryOperationsHandlerBindMultiRootDeviceTest, whenSetNewResourceBoundToVMThenAllContextsUsingThatVMHasSetNewResourceBound) {
+    struct MockOsContextLinux : OsContextLinux {
+        using OsContextLinux::lastFlushedTlbFlushCounter;
+    };
+
     mock->setNewResourceBoundToVM(1u);
 
     for (const auto &engine : device->getAllEngines()) {
-        auto osContexLinux = static_cast<OsContextLinux *>(engine.osContext);
+        auto osContexLinux = static_cast<MockOsContextLinux *>(engine.osContext);
         if (osContexLinux->getDeviceBitfield().test(1u)) {
-            EXPECT_TRUE(osContexLinux->getNewResourceBound());
+            EXPECT_TRUE(osContexLinux->isTlbFlushRequired());
         } else {
-            EXPECT_FALSE(osContexLinux->getNewResourceBound());
+            EXPECT_FALSE(osContexLinux->isTlbFlushRequired());
         }
 
-        osContexLinux->setNewResourceBound(false);
+        osContexLinux->lastFlushedTlbFlushCounter.store(osContexLinux->peekTlbFlushCounter());
     }
     for (const auto &engine : devices[1]->getAllEngines()) {
         auto osContexLinux = static_cast<OsContextLinux *>(engine.osContext);
-        EXPECT_FALSE(osContexLinux->getNewResourceBound());
+        EXPECT_FALSE(osContexLinux->isTlbFlushRequired());
     }
 
     auto mock2 = executionEnvironment->rootDeviceEnvironments[1u]->osInterface->getDriverModel()->as<DrmQueryMock>();
@@ -128,14 +133,14 @@ TEST_F(DrmMemoryOperationsHandlerBindMultiRootDeviceTest, whenSetNewResourceBoun
     for (const auto &engine : devices[1]->getAllEngines()) {
         auto osContexLinux = static_cast<OsContextLinux *>(engine.osContext);
         if (osContexLinux->getDeviceBitfield().test(0u)) {
-            EXPECT_TRUE(osContexLinux->getNewResourceBound());
+            EXPECT_TRUE(osContexLinux->isTlbFlushRequired());
         } else {
-            EXPECT_FALSE(osContexLinux->getNewResourceBound());
+            EXPECT_FALSE(osContexLinux->isTlbFlushRequired());
         }
     }
     for (const auto &engine : device->getAllEngines()) {
         auto osContexLinux = static_cast<OsContextLinux *>(engine.osContext);
-        EXPECT_FALSE(osContexLinux->getNewResourceBound());
+        EXPECT_FALSE(osContexLinux->isTlbFlushRequired());
     }
 }
 
@@ -398,6 +403,8 @@ TEST_F(DrmMemoryOperationsHandlerBindTest, givenMakeBOsResidentFailsThenMakeResi
 
     auto size = 1024u;
     BufferObjects bos;
+    BufferObject mockBo(mock, 3, 1, 0, 1);
+    bos.push_back(&mockBo);
 
     auto allocation = new MockDrmAllocationBOsResident(0, AllocationType::UNKNOWN, bos, nullptr, 0u, size, MemoryPool::LocalMemory);
     auto graphicsAllocation = static_cast<GraphicsAllocation *>(allocation);
@@ -989,8 +996,7 @@ TEST(DrmResidencyHandlerTests, givenSupportedVmBindAndDebugFlagUseVmBindWhenQuer
     DebugManagerStateRestore restorer;
     DebugManager.flags.UseVmBind.set(1);
 
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     drm.context.vmBindQueryValue = 1;
     EXPECT_FALSE(drm.bindAvailable);
@@ -1008,8 +1014,7 @@ TEST(DrmResidencyHandlerTests, givenDebugFlagUseVmBindWhenQueryingIsVmBindAvaila
     DebugManagerStateRestore restorer;
     DebugManager.flags.UseVmBind.set(1);
 
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     EXPECT_FALSE(drm.bindAvailable);
     drm.context.vmBindQueryReturn = -1;
@@ -1032,8 +1037,7 @@ TEST(DrmResidencyHandlerTests, givenDebugFlagUseVmBindSetDefaultAndBindAvailable
     DebugManager.flags.UseVmBind.set(-1);
     VariableBackup<bool> disableBindBackup(&disableBindDefaultInTests, false);
 
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     drm.context.vmBindQueryValue = 1;
     drm.context.vmBindQueryReturn = 0;
@@ -1053,8 +1057,7 @@ TEST(DrmResidencyHandlerTests, givenDebugFlagUseVmBindSetDefaultWhenQueryingIsVm
     DebugManager.flags.UseVmBind.set(-1);
     VariableBackup<bool> disableBindBackup(&disableBindDefaultInTests, false);
 
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     drm.context.vmBindQueryValue = 1;
     drm.context.vmBindQueryReturn = -1;
@@ -1071,8 +1074,7 @@ TEST(DrmResidencyHandlerTests, givenDebugFlagUseVmBindSetDefaultWhenQueryingIsVm
     DebugManager.flags.UseVmBind.set(-1);
     VariableBackup<bool> disableBindBackup(&disableBindDefaultInTests, false);
 
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmQueryMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     drm.context.vmBindQueryValue = 0;
     drm.context.vmBindQueryReturn = 0;

@@ -53,11 +53,18 @@ void StateBaseAddressHelper<Gen8Family>::programStateBaseAddress(
         args.stateBaseAddressCmd->setGeneralStateBufferSize(0xfffff);
     }
 
+    if (args.overrideSurfaceStateBaseAddress) {
+        args.stateBaseAddressCmd->setSurfaceStateBaseAddressModifyEnable(true);
+        args.stateBaseAddressCmd->setSurfaceStateBaseAddress(args.surfaceStateBaseAddress);
+    }
+
     if (DebugManager.flags.OverrideStatelessMocsIndex.get() != -1) {
         args.statelessMocsIndex = DebugManager.flags.OverrideStatelessMocsIndex.get();
     }
 
     args.statelessMocsIndex = args.statelessMocsIndex << 1;
+
+    GmmHelper::applyMocsEncryptionBit(args.statelessMocsIndex);
 
     args.stateBaseAddressCmd->setStatelessDataPortAccessMemoryObjectControlState(args.statelessMocsIndex);
 

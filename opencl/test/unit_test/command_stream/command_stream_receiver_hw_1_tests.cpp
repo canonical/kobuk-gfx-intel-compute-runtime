@@ -645,6 +645,7 @@ HWTEST2_F(CommandStreamReceiverHwTest, whenProgramVFEStateIsCalledThenCorrectCom
         pHwInfo->platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(revision, *pHwInfo);
 
         {
+            mockCsr->getStreamProperties().frontEndState = {};
             auto flags = DispatchFlagsHelper::createDefaultDispatchFlags();
             LinearStream commandStream{&memory, sizeof(memory)};
             mockCsr->mediaVfeStateDirty = true;
@@ -1502,7 +1503,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, UltCommandStreamReceiverTest, givenBarrierNodeSetWhe
     DispatchFlags dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
     dispatchFlags.barrierTimestampPacketNodes = &timestampPacketDependencies.barrierNodes;
 
-    size_t expectedCmdSize = MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hwInfo);
+    size_t expectedCmdSize = MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(hwInfo, false);
     size_t estimatedCmdSize = commandStreamReceiver->getCmdSizeForStallingCommands(dispatchFlags);
     EXPECT_EQ(expectedCmdSize, estimatedCmdSize);
 
@@ -1527,4 +1528,119 @@ HWCMDTEST_F(IGFX_GEN8_CORE, UltCommandStreamReceiverTest, givenBarrierNodeSetWhe
     EXPECT_TRUE(pipeControl->getCommandStreamerStallEnable());
     EXPECT_EQ(0u, pipeControl->getImmediateData());
     EXPECT_EQ(gpuAddress, UnitTestHelper<FamilyType>::getPipeControlPostSyncAddress(*pipeControl));
+}
+
+HWTEST_F(UltCommandStreamReceiverTest, givenFrontEndStateNotInitedWhenTransitionFrontEndPropertiesThenExpectCorrectValuesStored) {
+    auto dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    commandStreamReceiver.feSupportFlags.computeDispatchAllWalker = false;
+    commandStreamReceiver.feSupportFlags.disableEuFusion = false;
+    commandStreamReceiver.setMediaVFEStateDirty(false);
+
+    commandStreamReceiver.feSupportFlags.disableOverdispatch = true;
+    dispatchFlags.additionalKernelExecInfo = AdditionalKernelExecInfo::NotApplicable;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_FALSE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    dispatchFlags.additionalKernelExecInfo = AdditionalKernelExecInfo::NotSet;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_FALSE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    dispatchFlags.additionalKernelExecInfo = AdditionalKernelExecInfo::DisableOverdispatch;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_TRUE(commandStreamReceiver.getMediaVFEStateDirty());
+    commandStreamReceiver.setMediaVFEStateDirty(false);
+
+    commandStreamReceiver.feSupportFlags.disableOverdispatch = false;
+    commandStreamReceiver.lastAdditionalKernelExecInfo = AdditionalKernelExecInfo::NotSet;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_FALSE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    commandStreamReceiver.feSupportFlags.computeDispatchAllWalker = true;
+    dispatchFlags.kernelExecutionType = KernelExecutionType::NotApplicable;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_FALSE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    dispatchFlags.kernelExecutionType = KernelExecutionType::Default;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_FALSE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    dispatchFlags.kernelExecutionType = KernelExecutionType::Concurrent;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_TRUE(commandStreamReceiver.getMediaVFEStateDirty());
+    commandStreamReceiver.setMediaVFEStateDirty(false);
+
+    commandStreamReceiver.feSupportFlags.computeDispatchAllWalker = false;
+    commandStreamReceiver.lastKernelExecutionType = KernelExecutionType::Default;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_FALSE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    commandStreamReceiver.feSupportFlags.disableEuFusion = true;
+    dispatchFlags.disableEUFusion = false;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_TRUE(commandStreamReceiver.getMediaVFEStateDirty());
+    commandStreamReceiver.setMediaVFEStateDirty(false);
+
+    commandStreamReceiver.streamProperties.frontEndState.disableEUFusion.value = 0;
+    dispatchFlags.disableEUFusion = true;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_TRUE(commandStreamReceiver.getMediaVFEStateDirty());
+    commandStreamReceiver.setMediaVFEStateDirty(false);
+
+    dispatchFlags.disableEUFusion = false;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_FALSE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    commandStreamReceiver.feSupportFlags.disableEuFusion = false;
+    commandStreamReceiver.streamProperties.frontEndState.disableEUFusion.value = -1;
+    dispatchFlags.disableEUFusion = false;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_FALSE(commandStreamReceiver.getMediaVFEStateDirty());
+}
+
+HWTEST_F(UltCommandStreamReceiverTest, givenFrontEndStateInitedWhenTransitionFrontEndPropertiesThenExpectCorrectValuesStored) {
+    auto dispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();
+
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    commandStreamReceiver.feSupportFlags.computeDispatchAllWalker = false;
+    commandStreamReceiver.feSupportFlags.disableEuFusion = false;
+    commandStreamReceiver.setMediaVFEStateDirty(false);
+
+    commandStreamReceiver.feSupportFlags.disableOverdispatch = true;
+
+    commandStreamReceiver.streamProperties.frontEndState.disableOverdispatch.value = 0;
+    dispatchFlags.additionalKernelExecInfo = AdditionalKernelExecInfo::NotSet;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_FALSE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    dispatchFlags.additionalKernelExecInfo = AdditionalKernelExecInfo::DisableOverdispatch;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_TRUE(commandStreamReceiver.getMediaVFEStateDirty());
+    commandStreamReceiver.setMediaVFEStateDirty(false);
+
+    commandStreamReceiver.streamProperties.frontEndState.disableOverdispatch.value = 1;
+    dispatchFlags.additionalKernelExecInfo = AdditionalKernelExecInfo::NotSet;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_TRUE(commandStreamReceiver.getMediaVFEStateDirty());
+    commandStreamReceiver.setMediaVFEStateDirty(false);
+
+    commandStreamReceiver.feSupportFlags.disableOverdispatch = false;
+    commandStreamReceiver.feSupportFlags.computeDispatchAllWalker = true;
+
+    commandStreamReceiver.streamProperties.frontEndState.computeDispatchAllWalkerEnable.value = 0;
+    dispatchFlags.kernelExecutionType = KernelExecutionType::Default;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_FALSE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    dispatchFlags.kernelExecutionType = KernelExecutionType::Concurrent;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_TRUE(commandStreamReceiver.getMediaVFEStateDirty());
+    commandStreamReceiver.setMediaVFEStateDirty(false);
+
+    commandStreamReceiver.streamProperties.frontEndState.computeDispatchAllWalkerEnable.value = 1;
+    dispatchFlags.kernelExecutionType = KernelExecutionType::Default;
+    commandStreamReceiver.handleFrontEndStateTransition(dispatchFlags);
+    EXPECT_TRUE(commandStreamReceiver.getMediaVFEStateDirty());
+    commandStreamReceiver.setMediaVFEStateDirty(false);
 }

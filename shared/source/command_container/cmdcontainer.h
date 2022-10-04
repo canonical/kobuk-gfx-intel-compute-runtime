@@ -28,13 +28,13 @@ using CmdBufferContainer = std::vector<GraphicsAllocation *>;
 using HeapContainer = std::vector<GraphicsAllocation *>;
 using HeapType = IndirectHeapType;
 
-enum class ErrorCode {
-    SUCCESS = 0,
-    OUT_OF_DEVICE_MEMORY = 1
-};
-
 class CommandContainer : public NonCopyableOrMovableClass {
   public:
+    enum class ErrorCode {
+        SUCCESS = 0,
+        OUT_OF_DEVICE_MEMORY = 1
+    };
+
     static constexpr size_t defaultListCmdBufferSize = 1u * MemoryConstants ::megaByte;
     static constexpr size_t cmdBufferReservedSize = MemoryConstants::cacheLineSize +
                                                     CSRequirements::csOverfetchSize;
@@ -76,12 +76,6 @@ class CommandContainer : public NonCopyableOrMovableClass {
 
     virtual ~CommandContainer();
 
-    uint32_t slmSize = std::numeric_limits<uint32_t>::max();
-    uint32_t nextIddInBlock = 0;
-    bool lastPipelineSelectModeRequired = false;
-    bool lastSentUseGlobalAtomics = false;
-    uint64_t currentLinearStreamStartOffset = 0u;
-
     Device *getDevice() const { return device; }
 
     IndirectHeap *getHeapWithRequiredSizeAndAlignment(HeapType heapType, size_t sizeRequired, size_t alignment);
@@ -103,12 +97,21 @@ class CommandContainer : public NonCopyableOrMovableClass {
     void setReservedSshSize(size_t reserveSize) {
         reservedSshSize = reserveSize;
     }
-    HeapContainer sshAllocations;
 
     bool getFlushTaskUsedForImmediate() const { return isFlushTaskUsedForImmediate; }
     void setFlushTaskUsedForImmediate(bool flushTaskUsedForImmediate) { isFlushTaskUsedForImmediate = flushTaskUsedForImmediate; }
 
+    HeapContainer sshAllocations;
+    uint64_t currentLinearStreamStartOffset = 0u;
+    uint32_t slmSize = std::numeric_limits<uint32_t>::max();
+    uint32_t nextIddInBlock = 0;
+    bool lastPipelineSelectModeRequired = false;
+    bool lastSentUseGlobalAtomics = false;
+    bool systolicModeSupport = false;
+
   protected:
+    size_t getTotalCmdBufferSize();
+
     void *iddBlock = nullptr;
     Device *device = nullptr;
     AllocationsList *reusableAllocationList = nullptr;
@@ -128,6 +131,7 @@ class CommandContainer : public NonCopyableOrMovableClass {
     std::vector<GraphicsAllocation *> deallocationContainer;
 
     bool isFlushTaskUsedForImmediate = false;
+    bool isHandleFenceCompletionRequired = true;
 };
 
 } // namespace NEO

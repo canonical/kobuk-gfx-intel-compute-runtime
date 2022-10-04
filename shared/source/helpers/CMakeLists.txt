@@ -29,6 +29,7 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/cache_flush.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy_base.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy_bdw_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/casts.h
     ${CMAKE_CURRENT_SOURCE_DIR}/common_types.h
@@ -74,7 +75,6 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_base.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_bdw_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_bdw_to_icllp.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}${BRANCH_DIR_SUFFIX}hw_helper_extended.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_helper_tgllp_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_info.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw_info.h

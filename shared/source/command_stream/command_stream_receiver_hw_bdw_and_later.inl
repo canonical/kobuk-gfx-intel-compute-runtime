@@ -7,6 +7,7 @@
 
 #include "shared/source/command_stream/command_stream_receiver_hw_base.inl"
 #include "shared/source/helpers/address_patch.h"
+#include "shared/source/helpers/state_base_address_bdw_and_later.inl"
 
 namespace NEO {
 
@@ -58,11 +59,14 @@ inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForL3Config() const 
 
 template <typename GfxFamily>
 void CommandStreamReceiverHw<GfxFamily>::programPipelineSelect(LinearStream &commandStream, PipelineSelectArgs &pipelineSelectArgs) {
-    if (csrSizeRequestFlags.mediaSamplerConfigChanged || !isPreambleSent) {
+    if (csrSizeRequestFlags.mediaSamplerConfigChanged || csrSizeRequestFlags.systolicPipelineSelectMode || !isPreambleSent) {
+        auto &hwInfo = peekHwInfo();
         if (!isPipelineSelectAlreadyProgrammed()) {
-            PreambleHelper<GfxFamily>::programPipelineSelect(&commandStream, pipelineSelectArgs, peekHwInfo());
+            PreambleHelper<GfxFamily>::programPipelineSelect(&commandStream, pipelineSelectArgs, hwInfo);
         }
         this->lastMediaSamplerConfig = pipelineSelectArgs.mediaSamplerRequired;
+        this->lastSystolicPipelineSelectMode = pipelineSelectArgs.systolicPipelineSelectMode;
+        this->streamProperties.pipelineSelect.setProperties(true, this->lastMediaSamplerConfig, this->lastSystolicPipelineSelectMode, hwInfo);
     }
 }
 
@@ -141,7 +145,7 @@ inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForStallingNoPostSyn
 
 template <typename GfxFamily>
 inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForStallingPostSyncCommands() const {
-    return MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(peekHwInfo());
+    return MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(peekHwInfo(), false);
 }
 
 template <typename GfxFamily>

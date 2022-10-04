@@ -37,7 +37,14 @@ void DebugSession::createEuThreads() {
             const uint32_t numThreadsPerEu = (hwInfo.gtSystemInfo.ThreadCount / hwInfo.gtSystemInfo.EUCount);
             uint32_t subDeviceCount = std::max(1u, connectedDevice->getNEODevice()->getNumSubDevices());
 
+            UNRECOVERABLE_IF(isSubDevice && subDeviceCount > 1);
+
             for (uint32_t tileIndex = 0; tileIndex < subDeviceCount; tileIndex++) {
+
+                if (isSubDevice || subDeviceCount == 1) {
+                    tileIndex = Math::log2(static_cast<uint32_t>(connectedDevice->getNEODevice()->getDeviceBitfield().to_ulong()));
+                }
+
                 for (uint32_t sliceID = 0; sliceID < hwInfo.gtSystemInfo.MaxSlicesSupported; sliceID++) {
                     for (uint32_t subsliceID = 0; subsliceID < numSubslicesPerSlice; subsliceID++) {
                         for (uint32_t euID = 0; euID < numEuPerSubslice; euID++) {
@@ -51,16 +58,21 @@ void DebugSession::createEuThreads() {
                         }
                     }
                 }
+
+                if (isSubDevice || subDeviceCount == 1) {
+                    break;
+                }
             }
         }
     }
 }
 
 uint32_t DebugSession::getDeviceIndexFromApiThread(ze_device_thread_t thread) {
-    uint32_t deviceIndex = 0;
     auto &hwInfo = connectedDevice->getHwInfo();
     auto deviceCount = std::max(1u, connectedDevice->getNEODevice()->getNumSubDevices());
     auto deviceBitfield = connectedDevice->getNEODevice()->getDeviceBitfield();
+
+    uint32_t deviceIndex = Math::log2(static_cast<uint32_t>(deviceBitfield.to_ulong()));
 
     if (connectedDevice->getNEODevice()->isSubDevice()) {
         deviceIndex = Math::log2(static_cast<uint32_t>(deviceBitfield.to_ulong()));
@@ -176,18 +188,28 @@ bool DebugSession::areRequestedThreadsStopped(ze_device_thread_t thread) {
     auto deviceCount = std::max(1u, connectedDevice->getNEODevice()->getNumSubDevices());
     uint32_t deviceIndex = getDeviceIndexFromApiThread(thread);
 
-    for (uint32_t i = 0; i < deviceCount; i++) {
-        if (i == deviceIndex || deviceIndex == UINT32_MAX) {
-            auto physicalThread = convertToPhysicalWithinDevice(thread, i);
-            auto singleThreads = getSingleThreadsForDevice(i, physicalThread, hwInfo);
+    auto areAllThreadsStopped = [this, &hwInfo](uint32_t deviceIndex, const ze_device_thread_t &thread) -> bool {
+        auto physicalThread = convertToPhysicalWithinDevice(thread, deviceIndex);
+        auto singleThreads = getSingleThreadsForDevice(deviceIndex, physicalThread, hwInfo);
 
-            for (auto &threadId : singleThreads) {
+        for (auto &threadId : singleThreads) {
 
-                if (allThreads[threadId]->isStopped()) {
-                    continue;
-                }
-                return false;
+            if (allThreads[threadId]->isStopped()) {
+                continue;
             }
+            return false;
+        }
+        return true;
+    };
+
+    if (deviceIndex != UINT32_MAX) {
+        return areAllThreadsStopped(deviceIndex, thread);
+    }
+
+    for (uint32_t i = 0; i < deviceCount; i++) {
+
+        if (areAllThreadsStopped(i, thread) == false) {
+            return false;
         }
     }
 
@@ -280,8 +302,11 @@ DebugSession *DebugSessionImp::attachTileDebugSession(Device *device) {
     if (attached) {
         return nullptr;
     }
+
+    tileSessions[subDeviceIndex].first->attachTile();
     attached = true;
 
+    PRINT_DEBUGGER_INFO_LOG("TileDebugSession attached, deviceIndex = %lu\n", subDeviceIndex);
     return tileSession;
 }
 
@@ -289,7 +314,12 @@ void DebugSessionImp::detachTileDebugSession(DebugSession *tileSession) {
     std::unique_lock<std::mutex> lock(asyncThreadMutex);
 
     uint32_t subDeviceIndex = Math::log2(static_cast<uint32_t>(tileSession->getConnectedDevice()->getNEODevice()->getDeviceBitfield().to_ulong()));
+
     tileSessions[subDeviceIndex].second = false;
+    tileSessions[subDeviceIndex].first->detachTile();
+    cleanRootSessionAfterDetach(subDeviceIndex);
+
+    PRINT_DEBUGGER_INFO_LOG("TileDebugSession detached, deviceIndex = %lu\n", subDeviceIndex);
 }
 
 bool DebugSessionImp::areAllTileDebugSessionDetached() {
@@ -362,6 +392,24 @@ DebugSessionImp::Error DebugSessionImp::resumeThreadsWithinDevice(uint32_t devic
     }
 
     return retVal;
+}
+
+void DebugSessionImp::applyResumeWa(uint8_t *bitmask, size_t bitmaskSize) {
+
+    UNRECOVERABLE_IF(bitmaskSize % 8 != 0);
+
+    auto hwInfo = connectedDevice->getHwInfo();
+    auto &l0HwHelper = L0HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+
+    if (l0HwHelper.isResumeWARequired()) {
+
+        uint32_t *dwordBitmask = reinterpret_cast<uint32_t *>(bitmask);
+        for (uint32_t i = 0; i < bitmaskSize / sizeof(uint32_t) - 1; i = i + 2) {
+            dwordBitmask[i] = dwordBitmask[i] | dwordBitmask[i + 1];
+            dwordBitmask[i + 1] = dwordBitmask[i] | dwordBitmask[i + 1];
+        }
+    }
+    return;
 }
 
 bool DebugSessionImp::writeResumeCommand(const std::vector<EuThread::ThreadId> &threadIds) {
@@ -460,9 +508,14 @@ ze_result_t DebugSessionImp::resume(ze_device_thread_t thread) {
     ze_result_t retVal = ZE_RESULT_SUCCESS;
 
     if (singleDevice) {
-        uint32_t deviceIndex = 0;
-        if (thread.slice != UINT32_MAX) {
-            deviceIndex = getDeviceIndexFromApiThread(thread);
+        uint32_t deviceIndex = Math::log2(static_cast<uint32_t>(connectedDevice->getNEODevice()->getDeviceBitfield().to_ulong()));
+
+        if (connectedDevice->getNEODevice()->isSubDevice()) {
+            deviceIndex = Math::log2(static_cast<uint32_t>(connectedDevice->getNEODevice()->getDeviceBitfield().to_ulong()));
+        } else {
+            if (thread.slice != UINT32_MAX) {
+                deviceIndex = getDeviceIndexFromApiThread(thread);
+            }
         }
         auto physicalThread = convertToPhysicalWithinDevice(thread, deviceIndex);
         auto result = resumeThreadsWithinDevice(deviceIndex, physicalThread);
@@ -521,6 +574,11 @@ void DebugSessionImp::sendInterrupts() {
 
     if (deviceCount == 1) {
         uint32_t deviceIndex = 0;
+
+        if (connectedDevice->getNEODevice()->isSubDevice()) {
+            deviceIndex = Math::log2(static_cast<uint32_t>(connectedDevice->getNEODevice()->getDeviceBitfield().to_ulong()));
+        }
+
         ze_result_t result;
         {
             std::unique_lock<std::mutex> lock(threadStateMutex);
@@ -591,6 +649,25 @@ void DebugSessionImp::sendInterrupts() {
             interruptSent = true;
         }
     }
+}
+
+bool DebugSessionImp::readSystemRoutineIdent(EuThread *thread, uint64_t memoryHandle, SIP::sr_ident &srIdent) {
+    auto stateSaveAreaHeader = getStateSaveAreaHeader();
+    if (!stateSaveAreaHeader) {
+        return false;
+    }
+
+    auto gpuVa = getContextStateSaveAreaGpuVa(memoryHandle);
+    if (gpuVa == 0) {
+        return false;
+    }
+    auto threadSlotOffset = calculateThreadSlotOffset(thread->getThreadId());
+    auto srMagicOffset = threadSlotOffset + getStateSaveAreaHeader()->regHeader.sr_magic_offset;
+
+    if (ZE_RESULT_SUCCESS != readGpuMemory(memoryHandle, reinterpret_cast<char *>(&srIdent), sizeof(srIdent), gpuVa + srMagicOffset)) {
+        return false;
+    }
+    return true;
 }
 
 void DebugSessionImp::markPendingInterruptsOrAddToNewlyStoppedFromRaisedAttention(EuThread::ThreadId threadId, uint64_t memoryHandle) {

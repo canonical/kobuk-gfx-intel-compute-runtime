@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/cache_policy.h"
@@ -119,7 +120,7 @@ bool HwInfoConfigHw<gfxProduct>::getConcurrentAccessMemCapabilitiesSupported(Usm
     auto supported = false;
 
     if (DebugManager.flags.EnableUsmConcurrentAccessSupport.get() > 0) {
-        auto capabilityBitset = std::bitset<32>(DebugManager.flags.EnableUsmConcurrentAccessSupport.get());
+        auto capabilityBitset = std::bitset<4>(DebugManager.flags.EnableUsmConcurrentAccessSupport.get());
         supported = capabilityBitset.test(static_cast<uint32_t>(capability));
     }
 
@@ -206,9 +207,6 @@ uint32_t HwInfoConfigHw<gfxProduct>::getAubStreamSteppingFromHwRevId(const Hardw
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-void HwInfoConfigHw<gfxProduct>::setAdditionalPipelineSelectFields(void *pipelineSelectCmd, const PipelineSelectArgs &pipelineSelectArgs, const HardwareInfo &hwInfo) {}
-
-template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isDefaultEngineTypeAdjustmentRequired(const HardwareInfo &hwInfo) const {
     return false;
 }
@@ -220,7 +218,7 @@ std::string HwInfoConfigHw<gfxProduct>::getDeviceMemoryName() const {
 
 template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isDisableOverdispatchAvailable(const HardwareInfo &hwInfo) const {
-    return false;
+    return getFrontEndPropertyDisableOverDispatchSupport();
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -356,18 +354,18 @@ bool HwInfoConfigHw<gfxProduct>::programAllStateComputeCommandFields() const {
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-bool HwInfoConfigHw<gfxProduct>::isSpecialPipelineSelectModeChanged(const HardwareInfo &hwInfo) const {
-    return false;
-}
-
-template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isSystolicModeConfigurable(const HardwareInfo &hwInfo) const {
-    return false;
+    return getPipelineSelectPropertySystolicModeSupport();
 }
 
 template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isComputeDispatchAllWalkerEnableInComputeWalkerRequired(const HardwareInfo &hwInfo) const {
     return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isCopyEngineSelectorEnabled(const HardwareInfo &hwInfo) const {
+    return true;
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -392,7 +390,7 @@ uint32_t HwInfoConfigHw<gfxProduct>::getThreadEuRatioForScratch(const HardwareIn
 
 template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isComputeDispatchAllWalkerEnableInCfeStateRequired(const HardwareInfo &hwInfo) const {
-    return false;
+    return getFrontEndPropertyComputeDispatchAllWalkerSupport();
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -410,7 +408,7 @@ bool HwInfoConfigHw<gfxProduct>::isGrfNumReportedWithScm() const {
     if (DebugManager.flags.ForceGrfNumProgrammingWithScm.get() != -1) {
         return DebugManager.flags.ForceGrfNumProgrammingWithScm.get();
     }
-    return true;
+    return HwInfoConfigHw<gfxProduct>::getScmPropertyLargeGrfModeSupport();
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -418,7 +416,7 @@ bool HwInfoConfigHw<gfxProduct>::isThreadArbitrationPolicyReportedWithScm() cons
     if (DebugManager.flags.ForceThreadArbitrationPolicyProgrammingWithScm.get() != -1) {
         return DebugManager.flags.ForceThreadArbitrationPolicyProgrammingWithScm.get();
     }
-    return true;
+    return HwInfoConfigHw<gfxProduct>::getScmPropertyThreadArbitrationPolicySupport();
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -456,6 +454,11 @@ bool HwInfoConfigHw<gfxProduct>::isBcsReportWaRequired(const HardwareInfo &hwInf
 }
 
 template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isBlitSplitEnqueueWARequired(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo, const GraphicsAllocation &allocation) const {
     return allocation.isAllocatedInLocalMemoryPool() &&
            (HwInfoConfig::get(hwInfo.platform.eProductFamily)->getLocalMemoryAccessMode(hwInfo) == LocalMemoryAccessMode::CpuAccessDisallowed ||
@@ -476,8 +479,8 @@ template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isAdjustWalkOrderAvailable(const HardwareInfo &hwInfo) const { return false; }
 
 template <PRODUCT_FAMILY gfxProduct>
-uint32_t HwInfoConfigHw<gfxProduct>::getL1CachePolicy() const {
-    return L1CachePolicyHelper<gfxProduct>::getL1CachePolicy();
+uint32_t HwInfoConfigHw<gfxProduct>::getL1CachePolicy(bool isDebuggerActive) const {
+    return L1CachePolicyHelper<gfxProduct>::getL1CachePolicy(isDebuggerActive);
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -487,4 +490,165 @@ template <PRODUCT_FAMILY gfxProduct>
 bool HwInfoConfigHw<gfxProduct>::isPrefetcherDisablingInDirectSubmissionRequired() const {
     return true;
 }
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isStatefulAddressingModeSupported() const {
+    return true;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::isPlatformQuerySupported() const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+void HwInfoConfigHw<gfxProduct>::fillScmPropertiesSupportStructureBase(StateComputeModePropertiesSupport &propertiesSupport) {
+    propertiesSupport.coherencyRequired = getScmPropertyCoherencyRequiredSupport();
+    propertiesSupport.threadArbitrationPolicy = isThreadArbitrationPolicyReportedWithScm();
+    propertiesSupport.largeGrfMode = isGrfNumReportedWithScm();
+    propertiesSupport.zPassAsyncComputeThreadLimit = getScmPropertyZPassAsyncComputeThreadLimitSupport();
+    propertiesSupport.pixelAsyncComputeThreadLimit = getScmPropertyPixelAsyncComputeThreadLimitSupport();
+    propertiesSupport.devicePreemptionMode = getScmPropertyDevicePreemptionModeSupport();
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+void HwInfoConfigHw<gfxProduct>::fillScmPropertiesSupportStructure(StateComputeModePropertiesSupport &propertiesSupport) {
+    fillScmPropertiesSupportStructureBase(propertiesSupport);
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getScmPropertyThreadArbitrationPolicySupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::StateComputeModeStateSupport::threadArbitrationPolicy;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getScmPropertyCoherencyRequiredSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::StateComputeModeStateSupport::coherencyRequired;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getScmPropertyZPassAsyncComputeThreadLimitSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::StateComputeModeStateSupport::zPassAsyncComputeThreadLimit;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getScmPropertyPixelAsyncComputeThreadLimitSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::StateComputeModeStateSupport::pixelAsyncComputeThreadLimit;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getScmPropertyLargeGrfModeSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::StateComputeModeStateSupport::largeGrfMode;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getScmPropertyDevicePreemptionModeSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::StateComputeModeStateSupport::devicePreemptionMode;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getSbaPropertyGlobalAtomicsSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::StateBaseAddressStateSupport::globalAtomics;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getSbaPropertyStatelessMocsSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::StateBaseAddressStateSupport::statelessMocs;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getPreemptionDbgPropertyPreemptionModeSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::PreemptionDebugSupport::preemptionMode;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getPreemptionDbgPropertyStateSipSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::PreemptionDebugSupport::stateSip;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getPreemptionDbgPropertyCsrSurfaceSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::PreemptionDebugSupport::csrSurface;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getFrontEndPropertyScratchSizeSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::FrontEndStateSupport::scratchSize;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getFrontEndPropertyPrivateScratchSizeSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::FrontEndStateSupport::privateScratchSize;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getFrontEndPropertyComputeDispatchAllWalkerSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::FrontEndStateSupport::computeDispatchAllWalker;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getFrontEndPropertyDisableEuFusionSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::FrontEndStateSupport::disableEuFusion;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getFrontEndPropertyDisableOverDispatchSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::FrontEndStateSupport::disableOverdispatch;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getFrontEndPropertySingleSliceDispatchCcsModeSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::FrontEndStateSupport::singleSliceDispatchCcsMode;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+void HwInfoConfigHw<gfxProduct>::fillFrontEndPropertiesSupportStructure(FrontEndPropertiesSupport &propertiesSupport, const HardwareInfo &hwInfo) {
+    propertiesSupport.computeDispatchAllWalker = isComputeDispatchAllWalkerEnableInCfeStateRequired(hwInfo);
+    propertiesSupport.disableEuFusion = getFrontEndPropertyDisableEuFusionSupport();
+    propertiesSupport.disableOverdispatch = isDisableOverdispatchAvailable(hwInfo);
+    propertiesSupport.singleSliceDispatchCcsMode = getFrontEndPropertySingleSliceDispatchCcsModeSupport();
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getPipelineSelectPropertyModeSelectedSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::PipelineSelectStateSupport::modeSelected;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getPipelineSelectPropertyMediaSamplerDopClockGateSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::PipelineSelectStateSupport::mediaSamplerDopClockGate;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool HwInfoConfigHw<gfxProduct>::getPipelineSelectPropertySystolicModeSupport() const {
+    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
+    return GfxProduct::PipelineSelectStateSupport::systolicMode;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+void HwInfoConfigHw<gfxProduct>::fillPipelineSelectPropertiesSupportStructure(PipelineSelectPropertiesSupport &propertiesSupport, const HardwareInfo &hwInfo) {
+    propertiesSupport.modeSelected = getPipelineSelectPropertyModeSelectedSupport();
+    propertiesSupport.mediaSamplerDopClockGate = getPipelineSelectPropertyMediaSamplerDopClockGateSupport();
+    propertiesSupport.systolicMode = isSystolicModeConfigurable(hwInfo);
+}
+
 } // namespace NEO

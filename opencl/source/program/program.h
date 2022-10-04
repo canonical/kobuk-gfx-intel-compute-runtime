@@ -140,6 +140,7 @@ class Program : public BaseObject<_cl_program> {
     cl_int build(const ClDeviceVector &deviceVector, const char *buildOptions, bool enableCaching,
                  std::unordered_map<std::string, BuiltinDispatchInfoBuilder *> &builtinsMap);
 
+    cl_int processGenBinaries(const ClDeviceVector &clDevices, std::unordered_map<uint32_t, BuildPhase> &phaseReached);
     MOCKABLE_VIRTUAL cl_int processGenBinary(const ClDevice &clDevice);
     MOCKABLE_VIRTUAL cl_int processProgramInfo(ProgramInfo &dst, const ClDevice &clDevice);
 
@@ -304,7 +305,6 @@ class Program : public BaseObject<_cl_program> {
     void extractInternalOptions(const std::string &options, std::string &internalOptions);
     MOCKABLE_VIRTUAL bool isFlagOption(ConstStringRef option);
     MOCKABLE_VIRTUAL bool isOptionValueValid(ConstStringRef option, ConstStringRef value);
-    MOCKABLE_VIRTUAL void applyAdditionalOptions(std::string &internalOptions);
 
     MOCKABLE_VIRTUAL bool appendKernelDebugOptions(ClDevice &clDevice, std::string &internalOptions);
     void notifyDebuggerWithSourceCode(ClDevice &clDevice, std::string &filename);

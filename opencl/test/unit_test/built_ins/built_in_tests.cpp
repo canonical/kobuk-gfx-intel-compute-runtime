@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/built_ins/built_ins.h"
+#include "shared/source/compiler_interface/compiler_options.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
@@ -43,7 +44,6 @@
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 
-#include "compiler_options.h"
 #include "gtest/gtest.h"
 #include "os_inc.h"
 #include "test_traits_common.h"
@@ -1262,13 +1262,9 @@ TEST_F(BuiltInTests, WhenGettingBuilderInfoTwiceThenPointerIsSame) {
 }
 
 TEST_F(BuiltInTests, GivenUnknownBuiltInOpWhenGettingBuilderInfoThenExceptionThrown) {
-    bool caughtException = false;
-    try {
-        BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::COUNT, *pClDevice);
-    } catch (const std::runtime_error &) {
-        caughtException = true;
-    }
-    EXPECT_TRUE(caughtException);
+    EXPECT_THROW(
+        BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(EBuiltInOps::COUNT, *pClDevice),
+        std::runtime_error);
 }
 
 TEST_F(BuiltInTests, GivenUnsupportedBuildTypeWhenBuildingDispatchInfoThenFalseIsReturned) {
@@ -1483,21 +1479,6 @@ TEST_F(BuiltInTests, GivenBuiltinResourceWhenCreatingBuiltinResourceThenSizesAre
     EXPECT_NE(0u, br2.size());
 
     EXPECT_EQ(br1, br2);
-}
-
-TEST_F(BuiltInTests, WhenCreatingBuiltinResourceNameThenCorrectStringIsReturned) {
-    EBuiltInOps::Type builtin = EBuiltInOps::CopyBufferToBuffer;
-    const std::string extension = ".cl";
-    const std::string platformName = "skl";
-    const uint32_t deviceRevId = 9;
-
-    std::string resourceNameGeneric = createBuiltinResourceName(builtin, extension);
-    std::string resourceNameForPlatform = createBuiltinResourceName(builtin, extension, platformName);
-    std::string resourceNameForPlatformAndStepping = createBuiltinResourceName(builtin, extension, platformName, deviceRevId);
-
-    EXPECT_EQ(0, strcmp("copy_buffer_to_buffer.builtin_kernel.cl", resourceNameGeneric.c_str()));
-    EXPECT_EQ(0, strcmp("skl_0_copy_buffer_to_buffer.builtin_kernel.cl", resourceNameForPlatform.c_str()));
-    EXPECT_EQ(0, strcmp("skl_9_copy_buffer_to_buffer.builtin_kernel.cl", resourceNameForPlatformAndStepping.c_str()));
 }
 
 TEST_F(BuiltInTests, WhenJoiningPathThenPathsAreJoinedWithCorrectSeparator) {

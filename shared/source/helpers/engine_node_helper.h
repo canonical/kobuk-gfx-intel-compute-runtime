@@ -65,6 +65,7 @@ constexpr bool isLinkBcs(aub_stream::EngineType engineType) {
 }
 
 constexpr uint32_t numLinkedCopyEngines = 8u;
+constexpr size_t oddLinkedCopyEnginesMask = 0b010101010;
 
 bool linkCopyEnginesSupported(const HardwareInfo &hwInfo, const DeviceBitfield &deviceBitfield);
 

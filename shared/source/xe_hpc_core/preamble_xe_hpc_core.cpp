@@ -26,13 +26,8 @@ void PreambleHelper<Family>::appendProgramVFEState(const HardwareInfo &hwInfo, c
     command->setComputeOverdispatchDisable(streamProperties.frontEndState.disableOverdispatch.value == 1);
     command->setSingleSliceDispatchCcsMode(streamProperties.frontEndState.singleSliceDispatchCcsMode.value == 1);
 
-    const auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
-
-    if (hwInfoConfig.getSteppingFromHwRevId(hwInfo) >= REVISION_B) {
-        const auto programComputeDispatchAllWalkerEnableInCfeState = hwInfoConfig.isComputeDispatchAllWalkerEnableInCfeStateRequired(hwInfo);
-        if (programComputeDispatchAllWalkerEnableInCfeState && streamProperties.frontEndState.computeDispatchAllWalkerEnable.value > 0) {
-            command->setComputeDispatchAllWalkerEnable(true);
-        }
+    if (streamProperties.frontEndState.computeDispatchAllWalkerEnable.value > 0) {
+        command->setComputeDispatchAllWalkerEnable(true);
     }
 
     if (DebugManager.flags.CFEComputeDispatchAllWalkerEnable.get() != -1) {
@@ -50,20 +45,6 @@ void PreambleHelper<Family>::appendProgramVFEState(const HardwareInfo &hwInfo, c
     if (DebugManager.flags.CFENumberOfWalkers.get() != -1) {
         command->setNumberOfWalkers(DebugManager.flags.CFENumberOfWalkers.get());
     }
-}
-
-template <>
-bool PreambleHelper<Family>::isSystolicModeConfigurable(const HardwareInfo &hwInfo) {
-    const auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
-    return hwInfoConfig.isSystolicModeConfigurable(hwInfo);
-}
-
-template <>
-bool PreambleHelper<Family>::isSpecialPipelineSelectModeChanged(bool lastSpecialPipelineSelectMode, bool newSpecialPipelineSelectMode,
-                                                                const HardwareInfo &hwInfo) {
-
-    const auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
-    return (lastSpecialPipelineSelectMode != newSpecialPipelineSelectMode) && hwInfoConfig.isSpecialPipelineSelectModeChanged(hwInfo);
 }
 
 template struct PreambleHelper<Family>;

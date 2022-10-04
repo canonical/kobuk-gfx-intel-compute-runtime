@@ -6,8 +6,10 @@
  */
 
 #include "shared/test/common/cmd_parse/hw_parse.h"
+#include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/mocks/mock_builtins.h"
 #include "shared/test/common/mocks/mock_csr.h"
+#include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/utilities/base_object_utils.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
@@ -286,6 +288,226 @@ HWTEST_F(OOQueueHwTest, givenBlockedOutOfOrderCmdQueueAndAsynchronouslyCompleted
     //new virtual event is actually responsible for command delivery
     EXPECT_EQ(virtualEventTaskLevel + 1, cmdQHw->taskLevel);
     EXPECT_EQ(virtualEventTaskLevel + 1, mockCSR->lastTaskLevelToFlushTask);
+}
+
+HWTEST_F(IoqCommandQueueHwBlitTest, givenSplitBcsCopyWhenCheckIsSplitEnqueueBlitSupportedThenReturnProperValue) {
+    DebugManagerStateRestore restorer;
+    auto *cmdQHw = static_cast<CommandQueueHw<FamilyType> *>(this->pCmdQ);
+    {
+        DebugManager.flags.SplitBcsCopy.set(1);
+        EXPECT_TRUE(cmdQHw->getDevice().isBcsSplitSupported());
+    }
+    {
+        DebugManager.flags.SplitBcsCopy.set(0);
+        EXPECT_FALSE(cmdQHw->getDevice().isBcsSplitSupported());
+    }
+}
+
+HWTEST_F(IoqCommandQueueHwBlitTest, givenSplitBcsCopyWhenCheckIsSplitEnqueueBlitNeededThenReturnProperValue) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.SplitBcsCopy.set(1);
+    auto *cmdQHw = static_cast<CommandQueueHw<FamilyType> *>(this->pCmdQ);
+    VariableBackup<UltHwConfig> backup{&ultHwConfig};
+    ultHwConfig.useBlitSplit = true;
+    {
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::HostToHost, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::LocalToLocal, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_TRUE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::LocalToHost, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_TRUE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::HostToLocal, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+    }
+    {
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::HostToHost, 64 * MemoryConstants::megaByte, cmdQHw->getGpgpuCommandStreamReceiver()));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::LocalToLocal, 64 * MemoryConstants::megaByte, cmdQHw->getGpgpuCommandStreamReceiver()));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::LocalToHost, 64 * MemoryConstants::megaByte, cmdQHw->getGpgpuCommandStreamReceiver()));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::HostToLocal, 64 * MemoryConstants::megaByte, cmdQHw->getGpgpuCommandStreamReceiver()));
+    }
+    {
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::HostToHost, 4 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::LocalToLocal, 4 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::LocalToHost, 4 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::HostToLocal, 4 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+    }
+    {
+        DebugManager.flags.SplitBcsCopy.set(0);
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::HostToHost, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::LocalToLocal, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::LocalToHost, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::HostToLocal, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+    }
+    {
+        DebugManager.flags.SplitBcsCopy.set(-1);
+        ultHwConfig.useBlitSplit = false;
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::HostToHost, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::LocalToLocal, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::LocalToHost, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+        EXPECT_FALSE(cmdQHw->isSplitEnqueueBlitNeeded(TransferDirection::HostToLocal, 64 * MemoryConstants::megaByte, *cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)));
+    }
+}
+
+char hostPtr[16 * MemoryConstants::megaByte];
+struct BcsSplitBufferTraits {
+    enum { flags = CL_MEM_READ_WRITE };
+    static size_t sizeInBytes;
+    static void *hostPtr;
+    static NEO::Context *context;
+};
+
+void *BcsSplitBufferTraits::hostPtr = static_cast<void *>(&hostPtr);
+size_t BcsSplitBufferTraits::sizeInBytes = 16 * MemoryConstants::megaByte;
+Context *BcsSplitBufferTraits::context = nullptr;
+
+HWTEST_F(IoqCommandQueueHwBlitTest, givenSplitBcsCopyWhenEnqueueReadThenEnqueueBlitSplit) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.SplitBcsCopy.set(1);
+    DebugManager.flags.DoCpuCopyOnReadBuffer.set(0);
+    DebugManager.flags.UpdateTaskCountFromWait.set(3);
+    auto memoryManager = static_cast<MockMemoryManager *>(pDevice->getMemoryManager());
+    memoryManager->returnFakeAllocation = true;
+    auto cmdQHw = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pClDevice, nullptr);
+
+    auto csr1 = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    std::unique_ptr<OsContext> osContext1(OsContext::create(pDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(), 0,
+                                                            EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_BCS1, EngineUsage::Regular},
+                                                                                                         PreemptionMode::ThreadGroup, pDevice->getDeviceBitfield())));
+    csr1->setupContext(*osContext1);
+    csr1->initializeTagAllocation();
+    EngineControl control1(csr1.get(), osContext1.get());
+
+    auto csr2 = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    std::unique_ptr<OsContext> osContext2(OsContext::create(pDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(), 0,
+                                                            EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_BCS3, EngineUsage::Regular},
+                                                                                                         PreemptionMode::ThreadGroup, pDevice->getDeviceBitfield())));
+    csr2->setupContext(*osContext2);
+    csr2->initializeTagAllocation();
+    EngineControl control2(csr2.get(), osContext2.get());
+
+    cmdQHw->bcsEngines[1] = &control1;
+    cmdQHw->bcsEngines[3] = &control2;
+
+    BcsSplitBufferTraits::context = context;
+    auto buffer = clUniquePtr(BufferHelper<BcsSplitBufferTraits>::create());
+    static_cast<MockGraphicsAllocation *>(buffer->getGraphicsAllocation(0u))->memoryPool = MemoryPool::LocalMemory;
+    char ptr[1] = {};
+
+    EXPECT_EQ(csr1->peekTaskCount(), 0u);
+    EXPECT_EQ(csr2->peekTaskCount(), 0u);
+    EXPECT_EQ(cmdQHw->getGpgpuCommandStreamReceiver().peekTaskCount(), 0u);
+    EXPECT_EQ(cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)->peekTaskCount(), 0u);
+
+    EXPECT_EQ(CL_SUCCESS, cmdQHw->enqueueReadBuffer(buffer.get(), CL_FALSE, 0, 16 * MemoryConstants::megaByte, ptr, nullptr, 0, nullptr, nullptr));
+
+    EXPECT_EQ(csr1->peekTaskCount(), 1u);
+    EXPECT_EQ(csr2->peekTaskCount(), 1u);
+    EXPECT_EQ(cmdQHw->getGpgpuCommandStreamReceiver().peekTaskCount(), 0u);
+    EXPECT_EQ(cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)->peekTaskCount(), 0u);
+
+    EXPECT_EQ(cmdQHw->kernelParams.size.x, 8 * MemoryConstants::megaByte);
+
+    const_cast<StackVec<TagNodeBase *, 32u> &>(cmdQHw->timestampPacketContainer->peekNodes()).clear();
+}
+
+HWTEST_F(IoqCommandQueueHwBlitTest, givenSplitBcsCopyWhenEnqueueBlockingReadThenEnqueueBlitSplit) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.SplitBcsCopy.set(1);
+    DebugManager.flags.DoCpuCopyOnReadBuffer.set(0);
+    DebugManager.flags.UpdateTaskCountFromWait.set(3);
+    auto memoryManager = static_cast<MockMemoryManager *>(pDevice->getMemoryManager());
+    memoryManager->returnFakeAllocation = true;
+    auto cmdQHw = static_cast<MockCommandQueueHw<FamilyType> *>(this->pCmdQ);
+
+    auto csr1 = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    std::unique_ptr<OsContext> osContext1(OsContext::create(pDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(), 0,
+                                                            EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_BCS1, EngineUsage::Regular},
+                                                                                                         PreemptionMode::ThreadGroup, pDevice->getDeviceBitfield())));
+    csr1->setupContext(*osContext1);
+    csr1->initializeTagAllocation();
+    EngineControl control1(csr1.get(), osContext1.get());
+
+    auto csr2 = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    std::unique_ptr<OsContext> osContext2(OsContext::create(pDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(), 0,
+                                                            EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_BCS3, EngineUsage::Regular},
+                                                                                                         PreemptionMode::ThreadGroup, pDevice->getDeviceBitfield())));
+    csr2->setupContext(*osContext2);
+    csr2->initializeTagAllocation();
+    EngineControl control2(csr2.get(), osContext2.get());
+
+    cmdQHw->bcsEngines[1] = &control1;
+    cmdQHw->bcsEngines[3] = &control2;
+
+    BcsSplitBufferTraits::context = context;
+    auto buffer = clUniquePtr(BufferHelper<BcsSplitBufferTraits>::create());
+    static_cast<MockGraphicsAllocation *>(buffer->getGraphicsAllocation(0u))->memoryPool = MemoryPool::LocalMemory;
+    char ptr[1] = {};
+
+    EXPECT_EQ(csr1->peekTaskCount(), 0u);
+    EXPECT_EQ(csr2->peekTaskCount(), 0u);
+    EXPECT_EQ(cmdQHw->getGpgpuCommandStreamReceiver().peekTaskCount(), 0u);
+    EXPECT_EQ(cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)->peekTaskCount(), 0u);
+
+    EXPECT_EQ(CL_SUCCESS, cmdQHw->enqueueReadBuffer(buffer.get(), CL_TRUE, 0, 16 * MemoryConstants::megaByte, ptr, nullptr, 0, nullptr, nullptr));
+
+    EXPECT_EQ(csr1->peekTaskCount(), 2u);
+    EXPECT_EQ(csr2->peekTaskCount(), 2u);
+    EXPECT_EQ(cmdQHw->getGpgpuCommandStreamReceiver().peekTaskCount(), 0u);
+    EXPECT_EQ(cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)->peekTaskCount(), 0u);
+
+    pCmdQ->release();
+    pCmdQ = nullptr;
+}
+
+HWTEST_F(IoqCommandQueueHwBlitTest, givenSplitBcsCopyWhenEnqueueReadWithEventThenEnqueueBlitSplitAndAddBothTimestampsToEvent) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.SplitBcsCopy.set(1);
+    DebugManager.flags.DoCpuCopyOnReadBuffer.set(0);
+    DebugManager.flags.UpdateTaskCountFromWait.set(3);
+    auto memoryManager = static_cast<MockMemoryManager *>(pDevice->getMemoryManager());
+    memoryManager->returnFakeAllocation = true;
+    auto cmdQHw = static_cast<MockCommandQueueHw<FamilyType> *>(this->pCmdQ);
+
+    auto csr1 = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    std::unique_ptr<OsContext> osContext1(OsContext::create(pDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(), 0,
+                                                            EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_BCS1, EngineUsage::Regular},
+                                                                                                         PreemptionMode::ThreadGroup, pDevice->getDeviceBitfield())));
+    csr1->setupContext(*osContext1);
+    csr1->initializeTagAllocation();
+    EngineControl control1(csr1.get(), osContext1.get());
+
+    auto csr2 = std::make_unique<CommandStreamReceiverHw<FamilyType>>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
+    std::unique_ptr<OsContext> osContext2(OsContext::create(pDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(), 0,
+                                                            EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_BCS3, EngineUsage::Regular},
+                                                                                                         PreemptionMode::ThreadGroup, pDevice->getDeviceBitfield())));
+    csr2->setupContext(*osContext2);
+    csr2->initializeTagAllocation();
+    EngineControl control2(csr2.get(), osContext2.get());
+
+    cmdQHw->bcsEngines[1] = &control1;
+    cmdQHw->bcsEngines[3] = &control2;
+
+    BcsSplitBufferTraits::context = context;
+    auto buffer = clUniquePtr(BufferHelper<BcsSplitBufferTraits>::create());
+    static_cast<MockGraphicsAllocation *>(buffer->getGraphicsAllocation(0u))->memoryPool = MemoryPool::LocalMemory;
+    char ptr[1] = {};
+
+    EXPECT_EQ(csr1->peekTaskCount(), 0u);
+    EXPECT_EQ(csr2->peekTaskCount(), 0u);
+    EXPECT_EQ(cmdQHw->getGpgpuCommandStreamReceiver().peekTaskCount(), 0u);
+    EXPECT_EQ(cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)->peekTaskCount(), 0u);
+
+    cl_event event;
+    EXPECT_EQ(CL_SUCCESS, cmdQHw->enqueueReadBuffer(buffer.get(), CL_FALSE, 0, 16 * MemoryConstants::megaByte, ptr, nullptr, 0, nullptr, &event));
+
+    EXPECT_EQ(csr1->peekTaskCount(), 1u);
+    EXPECT_EQ(csr2->peekTaskCount(), 1u);
+    EXPECT_EQ(cmdQHw->getGpgpuCommandStreamReceiver().peekTaskCount(), 0u);
+    EXPECT_EQ(cmdQHw->getBcsCommandStreamReceiver(aub_stream::EngineType::ENGINE_BCS)->peekTaskCount(), 0u);
+
+    EXPECT_NE(event, nullptr);
+    auto pEvent = castToObject<Event>(event);
+    EXPECT_EQ(pEvent->getTimestampPacketNodes()->peekNodes().size(), 3u);
+    clReleaseEvent(event);
+
+    pCmdQ->release();
+    pCmdQ = nullptr;
 }
 
 HWTEST_F(IoqCommandQueueHwBlitTest, givenGpgpuCsrWhenEnqueueingSubsequentBlitsThenGpgpuCommandStreamIsNotObtained) {

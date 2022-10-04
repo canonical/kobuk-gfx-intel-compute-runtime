@@ -7,6 +7,8 @@
 
 #include "offline_compiler_tests.h"
 
+#include "shared/offline_compiler/source/ocloc_api.h"
+#include "shared/source/compiler_interface/compiler_options.h"
 #include "shared/source/compiler_interface/intermediate_representations.h"
 #include "shared/source/compiler_interface/oclc_extensions.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
@@ -23,7 +25,6 @@
 #include "shared/test/common/mocks/mock_modules_zebin.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
-#include "compiler_options.h"
 #include "environment.h"
 #include "gtest/gtest.h"
 #include "mock/mock_argument_helper.h"
@@ -126,6 +127,7 @@ TEST_F(MultiCommandTests, GivenOutputFileWhenBuildingMultiCommandThenSuccessIsRe
     };
 
     std::vector<std::string> singleArgs = {
+        "-gen_file",
         "-file",
         clFiles + "copybuffer.cl",
         "-device",
@@ -177,7 +179,7 @@ TEST_F(MultiCommandTests, GivenSpecifiedOutputDirWhenBuildingMultiCommandThenSuc
     for (int i = 0; i < numOfBuild; i++) {
         std::string outFileName = "offline_compiler_test/build_no_" + std::to_string(i + 1);
         EXPECT_TRUE(compilerOutputExists(outFileName, "bc") || compilerOutputExists(outFileName, "spv"));
-        EXPECT_TRUE(compilerOutputExists(outFileName, "gen"));
+        EXPECT_FALSE(compilerOutputExists(outFileName, "gen"));
         EXPECT_TRUE(compilerOutputExists(outFileName, "bin"));
     }
 
@@ -226,7 +228,7 @@ TEST_F(MultiCommandTests, GivenSpecifiedOutputDirWithProductConfigValueWhenBuild
     for (int i = 0; i < numOfBuild; i++) {
         std::string outFileName = "offline_compiler_test/build_no_" + std::to_string(i + 1);
         EXPECT_TRUE(compilerOutputExists(outFileName, "bc") || compilerOutputExists(outFileName, "spv"));
-        EXPECT_TRUE(compilerOutputExists(outFileName, "gen"));
+        EXPECT_FALSE(compilerOutputExists(outFileName, "gen"));
         EXPECT_TRUE(compilerOutputExists(outFileName, "bin"));
     }
 
@@ -309,7 +311,7 @@ TEST_F(MultiCommandTests, GivenOutputFileListFlagWhenBuildingMultiCommandThenSuc
     for (int i = 0; i < numOfBuild; i++) {
         std::string outFileName = pMultiCommand->outDirForBuilds + "/build_no_" + std::to_string(i + 1);
         EXPECT_TRUE(compilerOutputExists(outFileName, "bc") || compilerOutputExists(outFileName, "spv"));
-        EXPECT_TRUE(compilerOutputExists(outFileName, "gen"));
+        EXPECT_FALSE(compilerOutputExists(outFileName, "gen"));
         EXPECT_TRUE(compilerOutputExists(outFileName, "bin"));
     }
 
@@ -1370,7 +1372,9 @@ TEST_F(OfflineCompilerTests, givenExcludeIrArgumentWhenCompilingKernelThenIrShou
         clFiles + "copybuffer.cl",
         "-exclude_ir",
         "-device",
-        gEnvironment->devicePrefix.c_str()};
+        gEnvironment->devicePrefix.c_str(),
+        "--format",
+        "patchtokens"};
 
     MockOfflineCompiler mockOfflineCompiler{};
     mockOfflineCompiler.initialize(argv.size(), argv);
@@ -1602,7 +1606,9 @@ TEST_F(OfflineCompilerTests, GivenArgsWhenBuildingThenBuildSucceeds) {
         "-file",
         clFiles + "copybuffer.cl",
         "-device",
-        gEnvironment->devicePrefix.c_str()};
+        gEnvironment->devicePrefix.c_str(),
+        "--format",
+        "patchtokens"};
 
     pOfflineCompiler = OfflineCompiler::create(argv.size(), argv, true, retVal, oclocArgHelperWithoutInput.get());
 
@@ -1614,7 +1620,7 @@ TEST_F(OfflineCompilerTests, GivenArgsWhenBuildingThenBuildSucceeds) {
     std::string output = testing::internal::GetCapturedStdout();
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_TRUE(compilerOutputExists("copybuffer", "bc") || compilerOutputExists("copybuffer", "spv"));
-    EXPECT_TRUE(compilerOutputExists("copybuffer", "gen"));
+    EXPECT_FALSE(compilerOutputExists("copybuffer", "gen"));
     EXPECT_TRUE(compilerOutputExists("copybuffer", "bin"));
 
     std::string buildLog = pOfflineCompiler->getBuildLog();
@@ -1642,7 +1648,9 @@ TEST_F(OfflineCompilerTests, GivenArgsWhenBuildingWithDeviceConfigValueThenBuild
         "-file",
         clFiles + "copybuffer.cl",
         "-device",
-        configStr};
+        configStr,
+        "--format",
+        "patchtokens"};
 
     pOfflineCompiler = OfflineCompiler::create(argv.size(), argv, true, retVal, oclocArgHelperWithoutInput.get());
 
@@ -1654,7 +1662,7 @@ TEST_F(OfflineCompilerTests, GivenArgsWhenBuildingWithDeviceConfigValueThenBuild
     std::string output = testing::internal::GetCapturedStdout();
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_TRUE(compilerOutputExists("copybuffer", "bc") || compilerOutputExists("copybuffer", "spv"));
-    EXPECT_TRUE(compilerOutputExists("copybuffer", "gen"));
+    EXPECT_FALSE(compilerOutputExists("copybuffer", "gen"));
     EXPECT_TRUE(compilerOutputExists("copybuffer", "bin"));
 
     std::string buildLog = pOfflineCompiler->getBuildLog();
@@ -1670,7 +1678,9 @@ TEST_F(OfflineCompilerTests, GivenLlvmTextWhenBuildingThenBuildSucceeds) {
         clFiles + "copybuffer.cl",
         "-device",
         gEnvironment->devicePrefix.c_str(),
-        "-llvm_text"};
+        "-llvm_text",
+        "--format",
+        "patchtokens"};
 
     pOfflineCompiler = OfflineCompiler::create(argv.size(), argv, true, retVal, oclocArgHelperWithoutInput.get());
 
@@ -1680,10 +1690,103 @@ TEST_F(OfflineCompilerTests, GivenLlvmTextWhenBuildingThenBuildSucceeds) {
     retVal = pOfflineCompiler->build();
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_TRUE(compilerOutputExists("copybuffer", "ll"));
-    EXPECT_TRUE(compilerOutputExists("copybuffer", "gen"));
+    EXPECT_FALSE(compilerOutputExists("copybuffer", "gen"));
     EXPECT_TRUE(compilerOutputExists("copybuffer", "bin"));
 
     delete pOfflineCompiler;
+}
+
+TEST_F(OfflineCompilerTests, WhenGenFileFlagIsNotProvidedThenGenFileIsNotCreated) {
+    uint32_t numOutputs = 0u;
+    uint64_t *lenOutputs = nullptr;
+    uint8_t **dataOutputs = nullptr;
+    char **nameOutputs = nullptr;
+    std::string filePath = clFiles + "copybuffer.cl";
+
+    bool isSpvFile = false;
+    bool isGenFile = false;
+    bool isBinFile = false;
+
+    const char *argv[] = {
+        "ocloc",
+        "-q",
+        "-file",
+        filePath.c_str(),
+        "-device",
+        gEnvironment->devicePrefix.c_str()};
+
+    unsigned int argc = sizeof(argv) / sizeof(const char *);
+    int retVal = oclocInvoke(argc, argv,
+                             0, nullptr, nullptr, nullptr,
+                             0, nullptr, nullptr, nullptr,
+                             &numOutputs, &dataOutputs, &lenOutputs, &nameOutputs);
+
+    EXPECT_EQ(retVal, CL_SUCCESS);
+    EXPECT_EQ(numOutputs, 3u);
+
+    for (unsigned int i = 0; i < numOutputs; i++) {
+        std::string nameOutput(nameOutputs[i]);
+        if (nameOutput.find(".spv") != std::string::npos) {
+            isSpvFile = true;
+        }
+        if (nameOutput.find(".gen") != std::string::npos) {
+            isGenFile = true;
+        }
+        if (nameOutput.find(".bin") != std::string::npos) {
+            isBinFile = true;
+        }
+    }
+
+    EXPECT_TRUE(isSpvFile);
+    EXPECT_FALSE(isGenFile);
+    EXPECT_TRUE(isBinFile);
+}
+
+TEST_F(OfflineCompilerTests, WhenGenFileFlagIsProvidedThenGenFileIsCreated) {
+    uint32_t numOutputs = 0u;
+    uint64_t *lenOutputs = nullptr;
+    uint8_t **dataOutputs = nullptr;
+    char **nameOutputs = nullptr;
+    std::string filePath = clFiles + "copybuffer.cl";
+
+    bool isSpvFile = false;
+    bool isGenFile = false;
+    bool isBinFile = false;
+
+    const char *argv[] = {
+        "ocloc",
+        "-q",
+        "-gen_file",
+        "-file",
+        filePath.c_str(),
+        "-device",
+        gEnvironment->devicePrefix.c_str()};
+
+    unsigned int argc = sizeof(argv) / sizeof(const char *);
+    int retVal = oclocInvoke(argc, argv,
+                             0, nullptr, nullptr, nullptr,
+                             0, nullptr, nullptr, nullptr,
+                             &numOutputs, &dataOutputs, &lenOutputs, &nameOutputs);
+
+    EXPECT_EQ(retVal, CL_SUCCESS);
+    EXPECT_EQ(numOutputs, 4u);
+
+    for (unsigned int i = 0; i < numOutputs; i++) {
+        std::string nameOutput(nameOutputs[i]);
+        if (nameOutput.find(".spv") != std::string::npos) {
+            isSpvFile = true;
+        }
+        if (nameOutput.find(".gen") != std::string::npos) {
+            isGenFile = true;
+        }
+        if (nameOutput.find(".bin") != std::string::npos) {
+            isBinFile = true;
+        }
+    }
+
+    EXPECT_TRUE(isSpvFile);
+    EXPECT_TRUE(isGenFile);
+    EXPECT_TRUE(isBinFile);
 }
 
 TEST_F(OfflineCompilerTests, WhenFclNotNeededThenDontLoadIt) {
@@ -1753,7 +1856,9 @@ TEST_F(OfflineCompilerTests, GivenCppFileWhenBuildingThenBuildSucceeds) {
         clFiles + "copybuffer.cl",
         "-device",
         gEnvironment->devicePrefix.c_str(),
-        "-cpp_file"};
+        "-cpp_file",
+        "--format",
+        "patchtokens"};
 
     pOfflineCompiler = OfflineCompiler::create(argv.size(), argv, true, retVal, oclocArgHelperWithoutInput.get());
 
@@ -1764,7 +1869,7 @@ TEST_F(OfflineCompilerTests, GivenCppFileWhenBuildingThenBuildSucceeds) {
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_TRUE(compilerOutputExists("copybuffer", "cpp"));
     EXPECT_TRUE(compilerOutputExists("copybuffer", "bc") || compilerOutputExists("copybuffer", "spv"));
-    EXPECT_TRUE(compilerOutputExists("copybuffer", "gen"));
+    EXPECT_FALSE(compilerOutputExists("copybuffer", "gen"));
     EXPECT_TRUE(compilerOutputExists("copybuffer", "bin"));
 
     delete pOfflineCompiler;
@@ -1787,7 +1892,7 @@ TEST_F(OfflineCompilerTests, GivenOutputDirWhenBuildingThenBuildSucceeds) {
     retVal = pOfflineCompiler->build();
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_TRUE(compilerOutputExists("offline_compiler_test/copybuffer", "bc") || compilerOutputExists("offline_compiler_test/copybuffer", "spv"));
-    EXPECT_TRUE(compilerOutputExists("offline_compiler_test/copybuffer", "gen"));
+    EXPECT_FALSE(compilerOutputExists("offline_compiler_test/copybuffer", "gen"));
     EXPECT_TRUE(compilerOutputExists("offline_compiler_test/copybuffer", "bin"));
 
     delete pOfflineCompiler;
@@ -2485,7 +2590,7 @@ TEST(OfflineCompilerTest, givenOutputFileOptionWhenSourceIsCompiledThenOutputFil
 
     EXPECT_TRUE(compilerOutputExists("myOutputFileName", "bc") || compilerOutputExists("myOutputFileName", "spv"));
     EXPECT_TRUE(compilerOutputExists("myOutputFileName", "bin"));
-    EXPECT_TRUE(compilerOutputExists("myOutputFileName", "gen"));
+    EXPECT_FALSE(compilerOutputExists("myOutputFileName", "gen"));
 }
 
 TEST(OfflineCompilerTest, givenDebugDataAvailableWhenSourceIsBuiltThenDebugDataFileIsCreated) {
@@ -2521,7 +2626,7 @@ TEST(OfflineCompilerTest, givenDebugDataAvailableWhenSourceIsBuiltThenDebugDataF
 
     EXPECT_TRUE(compilerOutputExists("myOutputFileName", "bc") || compilerOutputExists("myOutputFileName", "spv"));
     EXPECT_TRUE(compilerOutputExists("myOutputFileName", "bin"));
-    EXPECT_TRUE(compilerOutputExists("myOutputFileName", "gen"));
+    EXPECT_FALSE(compilerOutputExists("myOutputFileName", "gen"));
     EXPECT_TRUE(compilerOutputExists("myOutputFileName", "dbg"));
 
     NEO::setIgcDebugVars(gEnvironment->igcDebugVars);
@@ -3107,7 +3212,7 @@ TEST(OclocCompile, givenSpirvInputThenDontGenerateSpirvFile) {
     ASSERT_EQ(0, retVal);
     retVal = ocloc.build();
     EXPECT_EQ(0, retVal);
-    EXPECT_TRUE(compilerOutputExists("offline_compiler_test/binary_with_zeroes", "gen"));
+    EXPECT_FALSE(compilerOutputExists("offline_compiler_test/binary_with_zeroes", "gen"));
     EXPECT_TRUE(compilerOutputExists("offline_compiler_test/binary_with_zeroes", "bin"));
     EXPECT_FALSE(compilerOutputExists("offline_compiler_test/binary_with_zeroes", "spv"));
 }
@@ -3140,7 +3245,7 @@ TEST(OclocCompile, givenFormatFlagWithKnownFormatPassedThenEnforceSpecifiedForma
     ocloc.internalOptions.clear();
     retVal = ocloc.initialize(argvEnforcedFormatPatchtokens.size(), argvEnforcedFormatPatchtokens);
     ASSERT_EQ(0, retVal);
-    EXPECT_FALSE(hasSubstr(ocloc.internalOptions, std::string{CompilerOptions::allowZebin}));
+    EXPECT_TRUE(hasSubstr(ocloc.internalOptions, std::string{CompilerOptions::disableZebin}));
 }
 
 TEST(OclocCompile, givenFormatFlagWithUnknownFormatPassedThenPrintWarning) {

@@ -34,6 +34,8 @@ set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/context/context.h
     ${CMAKE_CURRENT_SOURCE_DIR}/debug_manager/debug_manager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device${BRANCH_DIR_SUFFIX}device_imp_helper.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/device/bcs_split.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/device/bcs_split.h
     ${CMAKE_CURRENT_SOURCE_DIR}/device/device.h
     ${CMAKE_CURRENT_SOURCE_DIR}/device/device_imp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device/device_imp.h
@@ -50,6 +52,8 @@ set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/event/event.h
     ${CMAKE_CURRENT_SOURCE_DIR}/fence/fence.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fence/fence.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/fabric/fabric.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fabric/fabric.h
     ${CMAKE_CURRENT_SOURCE_DIR}/helpers/allocation_extensions.h
     ${CMAKE_CURRENT_SOURCE_DIR}/helpers/allocation_extensions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/helpers/api_specific_config_l0.cpp
@@ -81,7 +85,6 @@ set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/module/module.h
     ${CMAKE_CURRENT_SOURCE_DIR}/module/module_build_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/module/module_build_log.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/module${BRANCH_DIR_SUFFIX}module_extra_options.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/module/module_imp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/module/module_imp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/printf_handler/printf_handler.cpp

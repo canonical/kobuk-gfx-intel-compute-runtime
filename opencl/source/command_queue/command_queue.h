@@ -204,7 +204,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     bool isCompleted(uint32_t gpgpuTaskCount, CopyEngineState bcsState);
 
     bool isWaitForTimestampsEnabled() const;
-    virtual bool waitForTimestamps(Range<CopyEngineState> copyEnginesToWait, uint32_t taskCount) = 0;
+    virtual bool waitForTimestamps(Range<CopyEngineState> copyEnginesToWait, uint32_t taskCount, WaitStatus &status) = 0;
 
     MOCKABLE_VIRTUAL bool isQueueBlocked();
 
@@ -229,6 +229,10 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     MOCKABLE_VIRTUAL CommandStreamReceiver &selectCsrForBuiltinOperation(const CsrSelectionArgs &args);
     void constructBcsEngine(bool internalUsage);
     MOCKABLE_VIRTUAL void initializeBcsEngine(bool internalUsage);
+    void constructBcsEnginesForSplit();
+    void prepareHostPtrSurfaceForSplit(bool split, GraphicsAllocation &allocation);
+    CommandStreamReceiver &selectCsrForHostPtrAllocation(bool split, CommandStreamReceiver &csr);
+    void releaseMainCopyEngine();
     Device &getDevice() const noexcept;
     ClDevice &getClDevice() const { return *device; }
     Context &getContext() const { return *context; }
@@ -412,10 +416,13 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     std::array<CopyEngineState, bcsInfoMaskSize> bcsStates = {};
 
     bool perfCountersEnabled = false;
-
+    bool isInternalUsage = false;
     bool isCopyOnly = false;
     bool bcsAllowed = false;
     bool bcsInitialized = false;
+
+    bool bcsSplitInitialized = false;
+    BcsInfoMask splitEngines = EngineHelpers::oddLinkedCopyEnginesMask;
 
     LinearStream *commandStream = nullptr;
 

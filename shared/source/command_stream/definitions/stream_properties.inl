@@ -10,6 +10,15 @@
 
 namespace NEO {
 
+struct StateComputeModePropertiesSupport {
+    bool coherencyRequired = false;
+    bool largeGrfMode = false;
+    bool zPassAsyncComputeThreadLimit = false;
+    bool pixelAsyncComputeThreadLimit = false;
+    bool threadArbitrationPolicy = false;
+    bool devicePreemptionMode = false;
+};
+
 struct StateComputeModeProperties {
     StreamProperty isCoherencyRequired{};
     StreamProperty largeGrfMode{};
@@ -26,9 +35,19 @@ struct StateComputeModeProperties {
     void clearIsDirty();
 
     bool isDirtyExtra() const;
-    void setPropertiesExtra(bool reportNumGrf, bool reportThreadArbitrationPolicy);
+    void setPropertiesExtra();
     void setPropertiesExtra(const StateComputeModeProperties &properties);
     void clearIsDirtyExtra();
+
+    StateComputeModePropertiesSupport scmPropertiesSupport = {};
+    bool propertiesSupportLoaded = false;
+};
+
+struct FrontEndPropertiesSupport {
+    bool computeDispatchAllWalker = false;
+    bool disableEuFusion = false;
+    bool disableOverdispatch = false;
+    bool singleSliceDispatchCcsMode = false;
 };
 
 struct FrontEndProperties {
@@ -37,13 +56,38 @@ struct FrontEndProperties {
     StreamProperty disableOverdispatch{};
     StreamProperty singleSliceDispatchCcsMode{};
 
-    void setProperties(bool isCooperativeKernel, bool disableEUFusion, bool disableOverdispatch, int32_t engineInstancedDevice,
-                       const HardwareInfo &hwInfo);
+    void setProperties(bool isCooperativeKernel, bool disableEUFusion, bool disableOverdispatch, int32_t engineInstancedDevice, const HardwareInfo &hwInfo);
     void setProperties(const FrontEndProperties &properties);
+    void setPropertySingleSliceDispatchCcsMode(int32_t engineInstancedDevice, const HardwareInfo &hwInfo);
     bool isDirty() const;
 
   protected:
     void clearIsDirty();
+
+    FrontEndPropertiesSupport frontEndPropertiesSupport = {};
+    bool propertiesSupportLoaded = false;
+};
+
+struct PipelineSelectPropertiesSupport {
+    bool modeSelected = false;
+    bool mediaSamplerDopClockGate = false;
+    bool systolicMode = false;
+};
+
+struct PipelineSelectProperties {
+    StreamProperty modeSelected{};
+    StreamProperty mediaSamplerDopClockGate{};
+    StreamProperty systolicMode{};
+
+    void setProperties(bool modeSelected, bool mediaSamplerDopClockGate, bool systolicMode, const HardwareInfo &hwInfo);
+    void setProperties(const PipelineSelectProperties &properties);
+    bool isDirty() const;
+
+  protected:
+    void clearIsDirty();
+
+    PipelineSelectPropertiesSupport pipelineSelectPropertiesSupport = {};
+    bool propertiesSupportLoaded = false;
 };
 
 } // namespace NEO

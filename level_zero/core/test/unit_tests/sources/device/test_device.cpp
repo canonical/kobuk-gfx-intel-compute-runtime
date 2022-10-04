@@ -52,6 +52,27 @@ extern HwHelper *hwHelperFactory[IGFX_MAX_CORE];
 namespace L0 {
 namespace ult {
 
+TEST(L0DeviceTest, givenNonExistingFclWhenCreatingDeviceThenCompilerInterfaceIsCreated) {
+
+    VariableBackup<const char *> frontEndDllName(&Os::frontEndDllName);
+    Os::frontEndDllName = "_fake_fcl1_so";
+
+    ze_result_t returnValue = ZE_RESULT_SUCCESS;
+
+    std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
+    auto hwInfo = *NEO::defaultHwInfo;
+
+    auto neoDevice = std::unique_ptr<NEO::Device>(NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo, 0));
+    ASSERT_NE(nullptr, neoDevice);
+
+    auto device = std::unique_ptr<L0::Device>(Device::create(driverHandle.get(), neoDevice.release(), false, &returnValue));
+    ASSERT_NE(nullptr, device);
+    EXPECT_EQ(returnValue, ZE_RESULT_SUCCESS);
+
+    auto compilerInterface = device->getNEODevice()->getCompilerInterface();
+    ASSERT_NE(nullptr, compilerInterface);
+}
+
 TEST(L0DeviceTest, GivenCreatedDeviceHandleWhenCallingdeviceReinitThenNewDeviceHandleIsNotCreated) {
     ze_result_t returnValue = ZE_RESULT_SUCCESS;
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
@@ -142,7 +163,7 @@ TEST(L0DeviceTest, givenMultipleMaskedSubDevicesWhenCreatingL0DeviceThenDontAddD
 }
 
 TEST(L0DeviceTest, givenMidThreadPreemptionWhenCreatingDeviceThenSipKernelIsInitialized) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     ze_result_t returnValue = ZE_RESULT_SUCCESS;
     VariableBackup<bool> mockSipCalled(&NEO::MockSipData::called, false);
     VariableBackup<NEO::SipKernelType> mockSipCalledType(&NEO::MockSipData::calledType, NEO::SipKernelType::COUNT);
@@ -165,7 +186,7 @@ TEST(L0DeviceTest, givenMidThreadPreemptionWhenCreatingDeviceThenSipKernelIsInit
 }
 
 TEST(L0DeviceTest, givenDebuggerEnabledButIGCNotReturnsSSAHThenSSAHIsNotCopied) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     auto executionEnvironment = new NEO::ExecutionEnvironment();
     auto mockBuiltIns = new MockBuiltins();
     mockBuiltIns->stateSaveAreaHeader.clear();
@@ -212,24 +233,6 @@ TEST(L0DeviceTest, givenDisabledPreemptionWhenCreatingDeviceThenSipKernelIsNotIn
     EXPECT_FALSE(NEO::MockSipData::called);
 }
 
-TEST(L0DeviceTest, givenDeviceWithoutFCLCompilerLibraryThenInvalidDependencyReturned) {
-    ze_result_t returnValue = ZE_RESULT_SUCCESS;
-
-    std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
-    auto hwInfo = *NEO::defaultHwInfo;
-
-    auto neoDevice = std::unique_ptr<NEO::Device>(NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo, 0));
-
-    auto oldFclDllName = Os::frontEndDllName;
-    Os::frontEndDllName = "_invalidFCL";
-
-    auto device = std::unique_ptr<L0::Device>(Device::create(driverHandle.get(), neoDevice.release(), false, &returnValue));
-    ASSERT_NE(nullptr, device);
-    EXPECT_EQ(returnValue, ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE);
-
-    Os::frontEndDllName = oldFclDllName;
-}
-
 TEST(L0DeviceTest, givenDeviceWithoutIGCCompilerLibraryThenInvalidDependencyReturned) {
     ze_result_t returnValue = ZE_RESULT_SUCCESS;
 
@@ -270,7 +273,7 @@ TEST(L0DeviceTest, givenDeviceWithoutAnyCompilerLibraryThenInvalidDependencyRetu
 }
 
 TEST(L0DeviceTest, givenFilledTopologyWhenGettingApiSliceThenCorrectSliceIdIsReturned) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
     auto hwInfo = *NEO::defaultHwInfo;
 
@@ -315,7 +318,7 @@ TEST(L0DeviceTest, givenFilledTopologyWhenGettingApiSliceThenCorrectSliceIdIsRet
 }
 
 TEST(L0DeviceTest, givenFilledTopologyForZeroSubDeviceWhenGettingApiSliceForHigherSubDevicesThenFalseIsReturned) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
     auto hwInfo = *NEO::defaultHwInfo;
 
@@ -347,7 +350,7 @@ TEST(L0DeviceTest, givenFilledTopologyForZeroSubDeviceWhenGettingApiSliceForHigh
 }
 
 TEST(L0DeviceTest, givenInvalidPhysicalSliceIdWhenGettingApiSliceIdThenFalseIsReturned) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
     auto hwInfo = *NEO::defaultHwInfo;
 
@@ -379,7 +382,7 @@ TEST(L0DeviceTest, givenInvalidPhysicalSliceIdWhenGettingApiSliceIdThenFalseIsRe
 }
 
 TEST(L0DeviceTest, givenInvalidApiSliceIdWhenGettingPhysicalSliceIdThenFalseIsReturned) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
     auto hwInfo = *NEO::defaultHwInfo;
 
@@ -412,7 +415,7 @@ TEST(L0DeviceTest, givenInvalidApiSliceIdWhenGettingPhysicalSliceIdThenFalseIsRe
 }
 
 TEST(L0DeviceTest, givenEmptyTopologyWhenGettingApiSliceIdThenFalseIsReturned) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
     auto hwInfo = *NEO::defaultHwInfo;
 
@@ -431,7 +434,7 @@ TEST(L0DeviceTest, givenEmptyTopologyWhenGettingApiSliceIdThenFalseIsReturned) {
 }
 
 TEST(L0DeviceTest, givenDeviceWithoutSubDevicesWhenGettingPhysicalSliceIdThenCorrectValuesAreReturned) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
     auto hwInfo = *NEO::defaultHwInfo;
 
@@ -467,7 +470,7 @@ TEST(L0DeviceTest, givenDeviceWithoutSubDevicesWhenGettingPhysicalSliceIdThenCor
 }
 
 TEST(L0DeviceTest, givenTopologyNotAvaialbleWhenGettingPhysicalSliceIdThenFalseIsReturned) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
     auto hwInfo = *NEO::defaultHwInfo;
 
@@ -489,7 +492,7 @@ TEST(L0DeviceTest, givenTopologyNotAvaialbleWhenGettingPhysicalSliceIdThenFalseI
 }
 
 TEST(L0DeviceTest, givenSingleSliceTopologyWhenConvertingToApiIdsThenSubsliceIdsAreRemapped) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
     auto hwInfo = *NEO::defaultHwInfo;
 
@@ -541,7 +544,7 @@ TEST(L0DeviceTest, givenSingleSliceTopologyWhenConvertingToApiIdsThenSubsliceIds
 }
 
 TEST(L0DeviceTest, givenSingleSliceTopologyWhenConvertingToPhysicalIdsThenSubsliceIdsAreRemapped) {
-    NEO::MockCompilerEnableGuard mock(true);
+
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
     auto hwInfo = *NEO::defaultHwInfo;
 
@@ -597,7 +600,6 @@ TEST(L0DeviceTest, givenSingleSliceTopologyWhenConvertingToPhysicalIdsThenSubsli
 
 struct DeviceTest : public ::testing::Test {
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
         DebugManager.flags.CreateMultipleRootDevices.set(numRootDevices);
         neoDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get(), rootDeviceIndex);
         execEnv = neoDevice->getExecutionEnvironment();
@@ -1169,7 +1171,7 @@ struct DeviceHwInfoTest : public ::testing::Test {
     }
 
     void setDriverAndDevice() {
-        NEO::MockCompilerEnableGuard mock(true);
+
         std::vector<std::unique_ptr<NEO::Device>> devices;
         neoDevice = NEO::MockDevice::create<NEO::MockDevice>(executionEnvironment, 0);
         EXPECT_NE(neoDevice, nullptr);
@@ -1778,7 +1780,7 @@ struct MockMemoryManagerMultiDevice : public MemoryManagerMock {
 template <int32_t enablePartitionWalker>
 struct MultipleDevicesFixture : public ::testing::Test {
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
+
         DebugManager.flags.EnableWalkerPartition.set(enablePartitionWalker);
         DebugManager.flags.CreateMultipleSubDevices.set(numSubDevices);
         VariableBackup<bool> mockDeviceFlagBackup(&MockDevice::createSingleDevice, false);
@@ -2051,7 +2053,7 @@ TEST_F(DeviceTests, WhenGettingMemoryAccessPropertiesThenSuccessIsReturned) {
 template <bool p2pAccessDevice0, bool p2pAtomicAccessDevice0, bool p2pAccessDevice1, bool p2pAtomicAccessDevice1>
 struct MultipleDevicesP2PFixture : public ::testing::Test {
     void SetUp() override {
-        NEO::MockCompilerEnableGuard mock(true);
+
         VariableBackup<bool> mockDeviceFlagBackup(&MockDevice::createSingleDevice, false);
 
         std::vector<std::unique_ptr<NEO::Device>> devices;
@@ -2631,6 +2633,214 @@ TEST_F(MultipleDevicesTest, givenTopologyForTwoSubdevicesWhenGettingPhysicalSlic
     EXPECT_EQ(1u, deviceIndex);
 }
 
+struct MultipleDevicesAffinityTest : MultipleDevicesFixture<-1> {
+    void SetUp() override {
+        DebugManager.flags.ZE_AFFINITY_MASK.set("0.1,1.0");
+        MultipleDevicesFixture<-1>::SetUp();
+    }
+
+    void TearDown() override {
+        MultipleDevicesFixture<-1>::TearDown();
+    }
+
+    DebugManagerStateRestore restorer;
+};
+TEST_F(MultipleDevicesAffinityTest, givenAffinityMaskRootDeviceCorrespondingToTileWhenGettingPhysicalSliceIdThenCorrectSliceIdAndDeviceIndexIsReturned) {
+    ASSERT_EQ(2u, driverHandle->devices.size());
+
+    L0::Device *device0 = driverHandle->devices[0];
+    L0::Device *device1 = driverHandle->devices[1];
+    auto hwInfo = device0->getHwInfo();
+
+    uint32_t subDeviceCount = numSubDevices;
+    std::vector<ze_device_handle_t> subDevices0(subDeviceCount);
+    auto res = device0->getSubDevices(&subDeviceCount, subDevices0.data());
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    EXPECT_EQ(0u, subDeviceCount);
+
+    L0::DeviceImp *deviceImp0 = static_cast<DeviceImp *>(device0);
+    L0::DeviceImp *deviceImp1 = static_cast<DeviceImp *>(device1);
+
+    NEO::TopologyMap map;
+    TopologyMapping mapping;
+
+    mapping.sliceIndices.resize(hwInfo.gtSystemInfo.SliceCount);
+    for (uint32_t i = 0; i < hwInfo.gtSystemInfo.SliceCount; i++) {
+        mapping.sliceIndices[i] = i + 5;
+    }
+
+    mapping.subsliceIndices.resize(hwInfo.gtSystemInfo.SubSliceCount / hwInfo.gtSystemInfo.SliceCount);
+    for (uint32_t i = 0; i < hwInfo.gtSystemInfo.SubSliceCount / hwInfo.gtSystemInfo.SliceCount; i++) {
+        mapping.subsliceIndices[i] = i;
+    }
+
+    map[0] = mapping;
+
+    for (uint32_t i = 0; i < hwInfo.gtSystemInfo.SliceCount; i++) {
+        mapping.sliceIndices[i] = i + 10;
+    }
+    map[1] = mapping;
+
+    uint32_t sliceId = 0;
+    uint32_t subsliceId = 1;
+    uint32_t deviceIndex = 0;
+    auto ret = deviceImp0->toPhysicalSliceId(map, sliceId, subsliceId, deviceIndex);
+
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(10u, sliceId);
+    EXPECT_EQ(1u, subsliceId);
+    EXPECT_EQ(1u, deviceIndex);
+
+    sliceId = 0;
+    subsliceId = 1;
+    deviceIndex = 100;
+    ret = deviceImp1->toPhysicalSliceId(map, sliceId, subsliceId, deviceIndex);
+
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(5u, sliceId);
+    EXPECT_EQ(1u, subsliceId);
+    EXPECT_EQ(0u, deviceIndex);
+}
+
+TEST_F(MultipleDevicesAffinityTest, givenAffinityMaskRootDeviceCorrespondingToTileWhenGettingApiSliceIdThenCorrectSliceIdsReturned) {
+    ASSERT_EQ(2u, driverHandle->devices.size());
+
+    L0::Device *device0 = driverHandle->devices[0];
+    L0::Device *device1 = driverHandle->devices[1];
+    auto hwInfo = device0->getHwInfo();
+
+    uint32_t subDeviceCount = numSubDevices;
+    std::vector<ze_device_handle_t> subDevices0(subDeviceCount);
+    auto res = device0->getSubDevices(&subDeviceCount, subDevices0.data());
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    EXPECT_EQ(0u, subDeviceCount);
+
+    L0::DeviceImp *deviceImp0 = static_cast<DeviceImp *>(device0);
+    L0::DeviceImp *deviceImp1 = static_cast<DeviceImp *>(device1);
+
+    NEO::TopologyMap map;
+    TopologyMapping mapping;
+
+    mapping.sliceIndices.resize(hwInfo.gtSystemInfo.SliceCount);
+    for (uint32_t i = 0; i < hwInfo.gtSystemInfo.SliceCount; i++) {
+        mapping.sliceIndices[i] = i;
+    }
+
+    mapping.subsliceIndices.resize(hwInfo.gtSystemInfo.SubSliceCount / hwInfo.gtSystemInfo.SliceCount);
+    for (uint32_t i = 0; i < hwInfo.gtSystemInfo.SubSliceCount / hwInfo.gtSystemInfo.SliceCount; i++) {
+        mapping.subsliceIndices[i] = i;
+    }
+
+    map[0] = mapping;
+
+    for (uint32_t i = 0; i < hwInfo.gtSystemInfo.SliceCount; i++) {
+        mapping.sliceIndices[i] = i + 10;
+    }
+    map[1] = mapping;
+
+    uint32_t sliceId = 10;
+    uint32_t subsliceId = 0;
+    uint32_t tileIndex = 1;
+    auto ret = deviceImp0->toApiSliceId(map, sliceId, subsliceId, tileIndex);
+
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(0u, sliceId);
+
+    sliceId = 0;
+    tileIndex = 0;
+    ret = deviceImp1->toApiSliceId(map, sliceId, subsliceId, tileIndex);
+
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(0u, sliceId);
+}
+
+TEST_F(MultipleDevicesAffinityTest, givenAffinityMaskRootDeviceCorrespondingToTileWhenMappingToAndFromApiAndPhysicalSliceIdThenIdsAreMatching) {
+    ASSERT_EQ(2u, driverHandle->devices.size());
+
+    L0::Device *device0 = driverHandle->devices[0];
+    L0::Device *device1 = driverHandle->devices[1];
+    auto hwInfo = device0->getHwInfo();
+
+    uint32_t subDeviceCount = numSubDevices;
+    std::vector<ze_device_handle_t> subDevices0(subDeviceCount);
+    auto res = device0->getSubDevices(&subDeviceCount, subDevices0.data());
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    EXPECT_EQ(0u, subDeviceCount);
+
+    L0::DeviceImp *deviceImp0 = static_cast<DeviceImp *>(device0);
+    L0::DeviceImp *deviceImp1 = static_cast<DeviceImp *>(device1);
+
+    NEO::TopologyMap map;
+    TopologyMapping mapping;
+
+    mapping.sliceIndices.resize(hwInfo.gtSystemInfo.SliceCount);
+    for (uint32_t i = 0; i < hwInfo.gtSystemInfo.SliceCount; i++) {
+        mapping.sliceIndices[i] = i;
+    }
+
+    mapping.subsliceIndices.resize(hwInfo.gtSystemInfo.SubSliceCount / hwInfo.gtSystemInfo.SliceCount);
+    for (uint32_t i = 0; i < hwInfo.gtSystemInfo.SubSliceCount / hwInfo.gtSystemInfo.SliceCount; i++) {
+        mapping.subsliceIndices[i] = i + 10;
+    }
+    map[0] = mapping;
+
+    for (uint32_t i = 0; i < hwInfo.gtSystemInfo.SliceCount; i++) {
+        mapping.sliceIndices[i] = i + 1;
+    }
+    map[1] = mapping;
+
+    uint32_t tileIndex = 1;
+
+    ze_device_properties_t deviceProperties = {};
+    deviceImp0->getProperties(&deviceProperties);
+
+    for (uint32_t i = 0; i < deviceProperties.numSlices; i++) {
+        uint32_t sliceId = i;
+        uint32_t subsliceId = deviceProperties.numSubslicesPerSlice / 2;
+        auto ret = deviceImp0->toPhysicalSliceId(map, sliceId, subsliceId, tileIndex);
+
+        EXPECT_TRUE(ret);
+        EXPECT_EQ(i + 1, sliceId);
+        EXPECT_EQ(1u, tileIndex);
+        if (mapping.sliceIndices.size() == 1) {
+            EXPECT_EQ(deviceProperties.numSubslicesPerSlice / 2 + 10u, subsliceId);
+        } else {
+            EXPECT_EQ(deviceProperties.numSubslicesPerSlice / 2, subsliceId);
+        }
+
+        ret = deviceImp0->toApiSliceId(map, sliceId, subsliceId, tileIndex);
+
+        EXPECT_TRUE(ret);
+        EXPECT_EQ(i, sliceId);
+        EXPECT_EQ(deviceProperties.numSubslicesPerSlice / 2, subsliceId);
+    }
+
+    deviceImp1->getProperties(&deviceProperties);
+
+    tileIndex = 0;
+    for (uint32_t i = 0; i < deviceProperties.numSlices; i++) {
+        uint32_t sliceId = i;
+        uint32_t subsliceId = deviceProperties.numSubslicesPerSlice - 1;
+        auto ret = deviceImp1->toPhysicalSliceId(map, sliceId, subsliceId, tileIndex);
+
+        EXPECT_TRUE(ret);
+
+        EXPECT_EQ(i, sliceId);
+        EXPECT_EQ(0u, tileIndex);
+        if (mapping.sliceIndices.size() == 1) {
+            EXPECT_EQ(deviceProperties.numSubslicesPerSlice - 1 + 10u, subsliceId);
+        } else {
+            EXPECT_EQ(deviceProperties.numSubslicesPerSlice - 1, subsliceId);
+        }
+
+        ret = deviceImp1->toApiSliceId(map, sliceId, subsliceId, tileIndex);
+
+        EXPECT_TRUE(ret);
+        EXPECT_EQ(i, sliceId);
+        EXPECT_EQ(deviceProperties.numSubslicesPerSlice - 1, subsliceId);
+    }
+}
+
 TEST_F(MultipleDevicesTest, givenInvalidApiSliceIdWhenGettingPhysicalSliceIdThenFalseIsReturned) {
     L0::Device *device0 = driverHandle->devices[0];
     auto hwInfo = device0->getHwInfo();
@@ -3020,7 +3230,7 @@ TEST(zeDevice, givenValidImagePropertiesStructWhenGettingImagePropertiesThenSucc
 
 TEST(zeDevice, givenImagesSupportedWhenGettingImagePropertiesThenValidValuesAreReturned) {
     ze_result_t errorValue;
-    NEO::MockCompilerEnableGuard mock(true);
+
     DriverHandleImp driverHandle{};
     NEO::MockDevice *neoDevice = (NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get(), 0));
     auto device = std::unique_ptr<L0::Device>(Device::create(&driverHandle, neoDevice, false, &errorValue));
@@ -3051,7 +3261,7 @@ TEST(zeDevice, givenImagesSupportedWhenGettingImagePropertiesThenValidValuesAreR
 
 TEST(zeDevice, givenNoImagesSupportedWhenGettingImagePropertiesThenZeroValuesAreReturned) {
     ze_result_t errorValue;
-    NEO::MockCompilerEnableGuard mock(true);
+
     DriverHandleImp driverHandle{};
     NEO::MockDevice *neoDevice = (NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get(), 0));
     auto device = std::unique_ptr<L0::Device>(Device::create(&driverHandle, neoDevice, false, &errorValue));

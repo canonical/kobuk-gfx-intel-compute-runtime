@@ -167,15 +167,6 @@ TEST_F(ZesDiagnosticsFixture, GivenComponentCountZeroWhenCallingzesDeviceEnumDia
     }
 }
 
-TEST_F(ZesDiagnosticsFixture, GivenFailedFirmwareInitializationWhenInitializingDiagnosticsContextThenexpectNoHandles) {
-    pMockDiagFwInterface->mockFwInitResult = ZE_RESULT_ERROR_UNINITIALIZED;
-    clearAndReinitHandles();
-    pSysmanDeviceImp->pDiagnosticsHandleContext->init();
-
-    EXPECT_EQ(0u, pSysmanDeviceImp->pDiagnosticsHandleContext->handleList.size());
-    pMockDiagFwInterface->setFwInitRetVal(ZE_RESULT_SUCCESS);
-}
-
 TEST_F(ZesDiagnosticsFixture, GivenValidDiagnosticsHandleWhenGettingDiagnosticsPropertiesThenCallSucceeds) {
 
     clearAndReinitHandles();
@@ -628,6 +619,29 @@ TEST_F(ZesDiagnosticsFixture, GivenValidSysmanImpPointerWhenCallingReleaseResour
     pLinuxSysmanImp->diagnosticsReset = true;
     pLinuxSysmanImp->releaseDeviceResources();
     EXPECT_EQ(ZE_RESULT_SUCCESS, pLinuxSysmanImp->initDevice());
+}
+TEST_F(ZesDiagnosticsFixture, GivenValidDiagnosticsHandleAndHandleCountZeroWhenCallingReInitThenValidCountIsReturnedAndVerifyzesDeviceEnumDiagnosticTestSuitesSucceeds) {
+    uint32_t count = 0;
+    if (productFamily != IGFX_PVC) {
+        mockDiagHandleCount = 0;
+    }
+    ze_result_t result = zesDeviceEnumDiagnosticTestSuites(device->toHandle(), &count, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(count, mockDiagHandleCount);
+
+    for (const auto &handle : pSysmanDeviceImp->pDiagnosticsHandleContext->handleList) {
+        delete handle;
+    }
+    pSysmanDeviceImp->pDiagnosticsHandleContext->handleList.clear();
+    pSysmanDeviceImp->pDiagnosticsHandleContext->supportedDiagTests.clear();
+
+    pLinuxSysmanImp->diagnosticsReset = false;
+    pLinuxSysmanImp->reInitSysmanDeviceResources();
+
+    count = 0;
+    result = zesDeviceEnumDiagnosticTestSuites(device->toHandle(), &count, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(count, mockDiagHandleCount);
 }
 
 }; // namespace ult

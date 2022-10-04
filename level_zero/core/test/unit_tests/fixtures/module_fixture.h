@@ -110,7 +110,7 @@ struct ModuleImmutableDataFixture : public DeviceFixture {
         ~MockModule() override {
         }
 
-        const KernelImmutableData *getKernelImmutableData(const char *functionName) const override {
+        const KernelImmutableData *getKernelImmutableData(const char *kernelName) const override {
             return mockKernelImmData;
         }
 
@@ -190,7 +190,6 @@ struct ModuleImmutableDataFixture : public DeviceFixture {
         DeviceFixture::tearDown();
     }
 
-    const std::string binaryFilename = "test_kernel";
     const std::string kernelName = "test";
     const uint32_t numKernelArguments = 6;
     std::unique_ptr<MockModule> module;
@@ -200,7 +199,7 @@ struct ModuleImmutableDataFixture : public DeviceFixture {
 
 struct ModuleFixture : public DeviceFixture {
     void setUp() {
-        NEO::MockCompilerEnableGuard mock(true);
+
         DeviceFixture::setUp();
         createModuleFromMockBinary();
     }
@@ -372,7 +371,7 @@ struct ModuleWithZebinFixture : public DeviceFixture {
         const char strings[12] = "Hello olleH";
     };
     void setUp() {
-        NEO::MockCompilerEnableGuard mock(true);
+
         DeviceFixture::setUp();
         module = std::make_unique<MockModuleWithZebin>(device);
     }

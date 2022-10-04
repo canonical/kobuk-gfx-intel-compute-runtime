@@ -10,6 +10,7 @@
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/libult/linux/drm_mock.h"
+#include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/os_interface/linux/drm_mock_device_blob.h"
 
 #include "gtest/gtest.h"
@@ -17,14 +18,13 @@
 using namespace NEO;
 
 TEST(DrmSystemInfoTest, whenQueryingSystemInfoThenSystemInfoIsNotCreatedAndIoctlsAreCalledOnce) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmMock drm(*executionEnvironment->rootDeviceEnvironments[0]);
 
     EXPECT_FALSE(drm.querySystemInfo());
 
     EXPECT_EQ(nullptr, drm.getSystemInfo());
-    EXPECT_EQ(1u + drm.virtualMemoryIds.size(), drm.ioctlCallsCount);
+    EXPECT_EQ(1u + drm.getBaseIoctlCalls(), drm.ioctlCallsCount);
 }
 
 TEST(DrmSystemInfoTest, givenSystemInfoCreatedWhenQueryingSpecificAtrributesThenReturnZero) {
@@ -44,6 +44,7 @@ TEST(DrmSystemInfoTest, givenSystemInfoCreatedWhenQueryingSpecificAtrributesThen
     EXPECT_EQ(0u, systemInfo.getMaxDualSubSlicesSupported());
     EXPECT_EQ(0u, systemInfo.getMaxRCS());
     EXPECT_EQ(0u, systemInfo.getMaxCCS());
+    EXPECT_EQ(0u, systemInfo.getL3BankSizeInKb());
 }
 
 TEST(DrmSystemInfoTest, givenSetupHardwareInfoWhenQuerySystemInfoFalseThenSystemInfoIsNotCreatedAndDebugMessageIsNotPrinted) {
@@ -56,9 +57,7 @@ TEST(DrmSystemInfoTest, givenSetupHardwareInfoWhenQuerySystemInfoFalseThenSystem
     DebugManagerStateRestore restorer;
     DebugManager.flags.PrintDebugMessages.set(true);
 
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
     DrmMockToQuerySystemInfo drm(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -77,8 +76,7 @@ TEST(DrmSystemInfoTest, givenSetupHardwareInfoWhenQuerySystemInfoFalseThenSystem
 }
 
 TEST(DrmSystemInfoTest, whenQueryingSystemInfoThenSystemInfoIsCreatedAndReturnsNonZeros) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmMockEngine drm(*executionEnvironment->rootDeviceEnvironments[0]);
 
     EXPECT_TRUE(drm.querySystemInfo());
@@ -99,8 +97,9 @@ TEST(DrmSystemInfoTest, whenQueryingSystemInfoThenSystemInfoIsCreatedAndReturnsN
     EXPECT_NE(0u, systemInfo->getMaxDualSubSlicesSupported());
     EXPECT_NE(0u, systemInfo->getMaxRCS());
     EXPECT_NE(0u, systemInfo->getMaxCCS());
+    EXPECT_NE(0u, systemInfo->getL3BankSizeInKb());
 
-    EXPECT_EQ(2u + drm.virtualMemoryIds.size(), drm.ioctlCallsCount);
+    EXPECT_EQ(2u + drm.getBaseIoctlCalls(), drm.ioctlCallsCount);
 }
 
 TEST(DrmSystemInfoTest, givenSystemInfoCreatedFromDeviceBlobWhenQueryingSpecificAtrributesThenReturnCorrectValues) {
@@ -119,15 +118,14 @@ TEST(DrmSystemInfoTest, givenSystemInfoCreatedFromDeviceBlobWhenQueryingSpecific
     EXPECT_EQ(0x02u, systemInfo.getMaxDualSubSlicesSupported());
     EXPECT_EQ(0x17u, systemInfo.getMaxRCS());
     EXPECT_EQ(0x18u, systemInfo.getMaxCCS());
+    EXPECT_EQ(0x2Du, systemInfo.getL3BankSizeInKb());
 }
 
 TEST(DrmSystemInfoTest, givenSetupHardwareInfoWhenQuerySystemInfoFailsThenSystemInfoIsNotCreatedAndDebugMessageIsPrinted) {
     DebugManagerStateRestore restorer;
     DebugManager.flags.PrintDebugMessages.set(true);
 
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
     DrmMockEngine drm(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -148,9 +146,7 @@ TEST(DrmSystemInfoTest, givenSetupHardwareInfoWhenQuerySystemInfoFailsThenSystem
 }
 
 TEST(DrmSystemInfoTest, givenSetupHardwareInfoWhenQuerySystemInfoSucceedsThenSystemInfoIsCreatedAndUsedToSetHardwareInfoAttributes) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
     DrmMockEngine drm(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -176,4 +172,54 @@ TEST(DrmSystemInfoTest, givenSetupHardwareInfoWhenQuerySystemInfoSucceedsThenSys
     EXPECT_GT(gtSystemInfo.MaxSubSlicesSupported, 0u);
     EXPECT_GT(gtSystemInfo.MaxDualSubSlicesSupported, 0u);
     EXPECT_GT(gtSystemInfo.MemoryType, 0u);
+}
+
+TEST(DrmSystemInfoTest, givenZeroBankCountWhenCreatingSystemInfoThenUseDualSubslicesToCalculateL3Size) {
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+
+    DrmMockEngine drm(*executionEnvironment->rootDeviceEnvironments[0]);
+
+    HardwareInfo hwInfo = *defaultHwInfo;
+    hwInfo.gtSystemInfo.L3BankCount = 0;
+
+    auto setupHardwareInfo = [](HardwareInfo *, bool) {};
+    DeviceDescriptor device = {0, &hwInfo, setupHardwareInfo};
+
+    int ret = drm.setupHardwareInfo(&device, false);
+    EXPECT_EQ(ret, 0);
+    EXPECT_NE(nullptr, drm.getSystemInfo());
+    const auto &gtSystemInfo = executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo()->gtSystemInfo;
+
+    EXPECT_EQ(0u, gtSystemInfo.L3BankCount);
+
+    uint64_t expectedL3Size = gtSystemInfo.DualSubSliceCount * drm.getSystemInfo()->getL3BankSizeInKb();
+    uint64_t calculatedL3Size = gtSystemInfo.L3CacheSizeInKb;
+
+    EXPECT_EQ(expectedL3Size, calculatedL3Size);
+}
+
+TEST(DrmSystemInfoTest, givenNonZeroBankCountWhenCreatingSystemInfoThenUseDualSubslicesToCalculateL3Size) {
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+
+    DrmMockEngine drm(*executionEnvironment->rootDeviceEnvironments[0]);
+
+    HardwareInfo hwInfo = *defaultHwInfo;
+    hwInfo.gtSystemInfo.L3BankCount = 5;
+
+    auto setupHardwareInfo = [](HardwareInfo *, bool) {};
+    DeviceDescriptor device = {0, &hwInfo, setupHardwareInfo};
+
+    int ret = drm.setupHardwareInfo(&device, false);
+    EXPECT_EQ(ret, 0);
+    EXPECT_NE(nullptr, drm.getSystemInfo());
+    const auto &gtSystemInfo = executionEnvironment->rootDeviceEnvironments[0]->getHardwareInfo()->gtSystemInfo;
+
+    EXPECT_NE(0u, gtSystemInfo.L3BankCount);
+
+    uint64_t expectedL3Size = gtSystemInfo.L3BankCount * drm.getSystemInfo()->getL3BankSizeInKb();
+    uint64_t calculatedL3Size = gtSystemInfo.L3CacheSizeInKb;
+
+    EXPECT_EQ(expectedL3Size, calculatedL3Size);
 }

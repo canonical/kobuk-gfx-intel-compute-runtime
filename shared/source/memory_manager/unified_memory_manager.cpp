@@ -9,6 +9,7 @@
 
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/helpers/aligned_memory.h"
+#include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/memory_properties_helpers.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/hw_info_config.h"
@@ -137,9 +138,12 @@ void SVMAllocsManager::makeInternalAllocationsResident(CommandStreamReceiver &co
 
 SVMAllocsManager::SVMAllocsManager(MemoryManager *memoryManager, bool multiOsContextSupport)
     : memoryManager(memoryManager), multiOsContextSupport(multiOsContextSupport) {
-    if (DebugManager.flags.ExperimentalEnableDeviceAllocationCache.get()) {
+    this->usmDeviceAllocationsCacheEnabled = NEO::ApiSpecificConfig::isDeviceAllocationCacheEnabled();
+    if (DebugManager.flags.ExperimentalEnableDeviceAllocationCache.get() != -1) {
+        this->usmDeviceAllocationsCacheEnabled = !!DebugManager.flags.ExperimentalEnableDeviceAllocationCache.get();
+    }
+    if (this->usmDeviceAllocationsCacheEnabled) {
         this->initUsmDeviceAllocationsCache();
-        this->usmDeviceAllocationsCacheEnabled = true;
     }
 }
 
@@ -396,8 +400,7 @@ bool SVMAllocsManager::freeSVMAlloc(void *ptr, bool blocking) {
     if (svmData) {
         if (InternalMemoryType::DEVICE_UNIFIED_MEMORY == svmData->memoryType &&
             this->usmDeviceAllocationsCacheEnabled) {
-            size_t alignedSize = alignUp<size_t>(svmData->size, svmData->pageSizeForAlignment);
-            this->usmDeviceAllocationsCache.insert(alignedSize, ptr);
+            this->usmDeviceAllocationsCache.insert(svmData->size, ptr);
             return true;
         }
         this->freeSVMAllocImpl(ptr, blocking, svmData);
@@ -425,6 +428,7 @@ void SVMAllocsManager::freeSVMAllocImpl(void *ptr, bool blocking, SvmAllocationD
     if (pageFaultManager) {
         pageFaultManager->removeAllocation(ptr);
     }
+    std::unique_lock<std::mutex> lockForIndirect(mtxForIndirectAccess);
     std::unique_lock<std::shared_mutex> lock(mtx);
     if (svmData->gpuAllocations.getAllocationType() == AllocationType::SVM_ZERO_COPY) {
         freeZeroCopySvmAllocation(svmData);
@@ -682,5 +686,7 @@ void SVMAllocsManager::prefetchMemory(Device &device, SvmAllocationData &svmData
         memoryManager->setMemPrefetch(gfxAllocation, subDeviceId, device.getRootDeviceIndex());
     }
 }
-
+std::unique_lock<std::mutex> SVMAllocsManager::obtainOwnership() {
+    return std::unique_lock<std::mutex>(mtxForIndirectAccess);
+}
 } // namespace NEO

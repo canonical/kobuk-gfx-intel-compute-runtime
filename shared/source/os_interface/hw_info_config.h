@@ -19,13 +19,16 @@ enum PRODUCT_CONFIG : uint32_t;
 
 namespace NEO {
 
+struct FrontEndPropertiesSupport;
 struct HardwareInfo;
-struct StateComputeModeProperties;
 struct PipelineSelectArgs;
-class OSInterface;
+struct PipelineSelectPropertiesSupport;
+struct StateComputeModeProperties;
+struct StateComputeModePropertiesSupport;
 class HwInfoConfig;
 class GraphicsAllocation;
 class MemoryManager;
+class OSInterface;
 enum class DriverModelType;
 
 extern HwInfoConfig *hwInfoConfigFactory[IGFX_MAX_PRODUCT];
@@ -75,7 +78,6 @@ class HwInfoConfig {
     virtual uint32_t getHwRevIdFromStepping(uint32_t stepping, const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getSteppingFromHwRevId(const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getAubStreamSteppingFromHwRevId(const HardwareInfo &hwInfo) const = 0;
-    virtual void setAdditionalPipelineSelectFields(void *pipelineSelectCmd, const PipelineSelectArgs &pipelineSelectArgs, const HardwareInfo &hwInfo) = 0;
     virtual bool isDefaultEngineTypeAdjustmentRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool overrideGfxPartitionLayoutForWsl() const = 0;
     virtual std::string getDeviceMemoryName() const = 0;
@@ -106,11 +108,11 @@ class HwInfoConfig {
     virtual bool getUuid(Device *device, std::array<uint8_t, HwInfoConfig::uuidSize> &uuid) const = 0;
     virtual bool isFlushTaskAllowed() const = 0;
     virtual bool programAllStateComputeCommandFields() const = 0;
-    virtual bool isSpecialPipelineSelectModeChanged(const HardwareInfo &hwInfo) const = 0;
     virtual bool isSystolicModeConfigurable(const HardwareInfo &hwInfo) const = 0;
     virtual bool isGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isComputeDispatchAllWalkerEnableInComputeWalkerRequired(const HardwareInfo &hwInfo) const = 0;
+    virtual bool isCopyEngineSelectorEnabled(const HardwareInfo &hwInfo) const = 0;
     virtual bool isAdjustProgrammableIdPreferredSlmSizeRequired(const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getThreadEuRatioForScratch(const HardwareInfo &hwInfo) const = 0;
     virtual bool isComputeDispatchAllWalkerEnableInCfeStateRequired(const HardwareInfo &hwInfo) const = 0;
@@ -125,20 +127,53 @@ class HwInfoConfig {
     virtual bool isTilePlacementResourceWaRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool allowMemoryPrefetch(const HardwareInfo &hwInfo) const = 0;
     virtual bool isBcsReportWaRequired(const HardwareInfo &hwInfo) const = 0;
+    virtual bool isBlitSplitEnqueueWARequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo, const GraphicsAllocation &allocation) const = 0;
     virtual bool isImplicitScalingSupported(const HardwareInfo &hwInfo) const = 0;
     virtual bool isCpuCopyNecessary(const void *ptr, MemoryManager *memoryManager) const = 0;
     virtual bool isAdjustWalkOrderAvailable(const HardwareInfo &hwInfo) const = 0;
     virtual bool isAssignEngineRoundRobinSupported() const = 0;
-    virtual uint32_t getL1CachePolicy() const = 0;
-    virtual bool isEvictionWhenNecessaryFlagSupported() const = 0;
+    virtual uint32_t getL1CachePolicy(bool isDebuggerActive) const = 0;
+    virtual bool isEvictionIfNecessaryFlagSupported() const = 0;
     virtual void adjustNumberOfCcs(HardwareInfo &hwInfo) const = 0;
     virtual bool isPrefetcherDisablingInDirectSubmissionRequired() const = 0;
+    virtual bool isStatefulAddressingModeSupported() const = 0;
+    virtual bool isPlatformQuerySupported() const = 0;
+
+    virtual bool getFrontEndPropertyScratchSizeSupport() const = 0;
+    virtual bool getFrontEndPropertyPrivateScratchSizeSupport() const = 0;
+    virtual bool getFrontEndPropertyComputeDispatchAllWalkerSupport() const = 0;
+    virtual bool getFrontEndPropertyDisableEuFusionSupport() const = 0;
+    virtual bool getFrontEndPropertyDisableOverDispatchSupport() const = 0;
+    virtual bool getFrontEndPropertySingleSliceDispatchCcsModeSupport() const = 0;
+
+    virtual bool getScmPropertyThreadArbitrationPolicySupport() const = 0;
+    virtual bool getScmPropertyCoherencyRequiredSupport() const = 0;
+    virtual bool getScmPropertyZPassAsyncComputeThreadLimitSupport() const = 0;
+    virtual bool getScmPropertyPixelAsyncComputeThreadLimitSupport() const = 0;
+    virtual bool getScmPropertyLargeGrfModeSupport() const = 0;
+    virtual bool getScmPropertyDevicePreemptionModeSupport() const = 0;
+
+    virtual bool getSbaPropertyGlobalAtomicsSupport() const = 0;
+    virtual bool getSbaPropertyStatelessMocsSupport() const = 0;
+
+    virtual bool getPreemptionDbgPropertyPreemptionModeSupport() const = 0;
+    virtual bool getPreemptionDbgPropertyStateSipSupport() const = 0;
+    virtual bool getPreemptionDbgPropertyCsrSurfaceSupport() const = 0;
+
+    virtual bool getPipelineSelectPropertyModeSelectedSupport() const = 0;
+    virtual bool getPipelineSelectPropertyMediaSamplerDopClockGateSupport() const = 0;
+    virtual bool getPipelineSelectPropertySystolicModeSupport() const = 0;
+
+    virtual void fillScmPropertiesSupportStructure(StateComputeModePropertiesSupport &propertiesSupport) = 0;
+    virtual void fillFrontEndPropertiesSupportStructure(FrontEndPropertiesSupport &propertiesSupport, const HardwareInfo &hwInfo) = 0;
+    virtual void fillPipelineSelectPropertiesSupportStructure(PipelineSelectPropertiesSupport &propertiesSupport, const HardwareInfo &hwInfo) = 0;
 
     MOCKABLE_VIRTUAL ~HwInfoConfig() = default;
 
   protected:
     virtual LocalMemoryAccessMode getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const = 0;
+    virtual void fillScmPropertiesSupportStructureBase(StateComputeModePropertiesSupport &propertiesSupport) = 0;
 
   public:
     uint32_t threadsPerEu = 0u;
@@ -180,7 +215,6 @@ class HwInfoConfigHw : public HwInfoConfig {
     AOT::PRODUCT_CONFIG getProductConfigFromHwInfo(const HardwareInfo &hwInfo) const override;
     uint32_t getSteppingFromHwRevId(const HardwareInfo &hwInfo) const override;
     uint32_t getAubStreamSteppingFromHwRevId(const HardwareInfo &hwInfo) const override;
-    void setAdditionalPipelineSelectFields(void *pipelineSelectCmd, const PipelineSelectArgs &pipelineSelectArgs, const HardwareInfo &hwInfo) override;
     bool isDefaultEngineTypeAdjustmentRequired(const HardwareInfo &hwInfo) const override;
     std::string getDeviceMemoryName() const override;
     bool isDisableOverdispatchAvailable(const HardwareInfo &hwInfo) const override;
@@ -210,9 +244,9 @@ class HwInfoConfigHw : public HwInfoConfig {
     bool getUuid(Device *device, std::array<uint8_t, HwInfoConfig::uuidSize> &uuid) const override;
     bool isFlushTaskAllowed() const override;
     bool programAllStateComputeCommandFields() const override;
-    bool isSpecialPipelineSelectModeChanged(const HardwareInfo &hwInfo) const override;
     bool isSystolicModeConfigurable(const HardwareInfo &hwInfo) const override;
     bool isComputeDispatchAllWalkerEnableInComputeWalkerRequired(const HardwareInfo &hwInfo) const override;
+    bool isCopyEngineSelectorEnabled(const HardwareInfo &hwInfo) const override;
     bool isGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const override;
     bool isGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const override;
     bool isAdjustProgrammableIdPreferredSlmSizeRequired(const HardwareInfo &hwInfo) const override;
@@ -227,6 +261,7 @@ class HwInfoConfigHw : public HwInfoConfig {
     bool isCooperativeEngineSupported(const HardwareInfo &hwInfo) const override;
     bool isTimestampWaitSupportedForEvents() const override;
     bool isTilePlacementResourceWaRequired(const HardwareInfo &hwInfo) const override;
+    bool isBlitSplitEnqueueWARequired(const HardwareInfo &hwInfo) const override;
     bool allowMemoryPrefetch(const HardwareInfo &hwInfo) const override;
     bool isBcsReportWaRequired(const HardwareInfo &hwInfo) const override;
     bool isBlitCopyRequiredForLocalMemory(const HardwareInfo &hwInfo, const GraphicsAllocation &allocation) const override;
@@ -234,10 +269,40 @@ class HwInfoConfigHw : public HwInfoConfig {
     bool isCpuCopyNecessary(const void *ptr, MemoryManager *memoryManager) const override;
     bool isAdjustWalkOrderAvailable(const HardwareInfo &hwInfo) const override;
     bool isAssignEngineRoundRobinSupported() const override;
-    uint32_t getL1CachePolicy() const override;
-    bool isEvictionWhenNecessaryFlagSupported() const override;
+    uint32_t getL1CachePolicy(bool isDebuggerActive) const override;
+    bool isEvictionIfNecessaryFlagSupported() const override;
     void adjustNumberOfCcs(HardwareInfo &hwInfo) const override;
     bool isPrefetcherDisablingInDirectSubmissionRequired() const override;
+    bool isStatefulAddressingModeSupported() const override;
+    bool isPlatformQuerySupported() const override;
+
+    bool getFrontEndPropertyScratchSizeSupport() const override;
+    bool getFrontEndPropertyPrivateScratchSizeSupport() const override;
+    bool getFrontEndPropertyComputeDispatchAllWalkerSupport() const override;
+    bool getFrontEndPropertyDisableEuFusionSupport() const override;
+    bool getFrontEndPropertyDisableOverDispatchSupport() const override;
+    bool getFrontEndPropertySingleSliceDispatchCcsModeSupport() const override;
+
+    bool getScmPropertyThreadArbitrationPolicySupport() const override;
+    bool getScmPropertyCoherencyRequiredSupport() const override;
+    bool getScmPropertyZPassAsyncComputeThreadLimitSupport() const override;
+    bool getScmPropertyPixelAsyncComputeThreadLimitSupport() const override;
+    bool getScmPropertyLargeGrfModeSupport() const override;
+    bool getScmPropertyDevicePreemptionModeSupport() const override;
+
+    bool getSbaPropertyGlobalAtomicsSupport() const override;
+    bool getSbaPropertyStatelessMocsSupport() const override;
+
+    bool getPreemptionDbgPropertyPreemptionModeSupport() const override;
+    bool getPreemptionDbgPropertyStateSipSupport() const override;
+    bool getPreemptionDbgPropertyCsrSurfaceSupport() const override;
+
+    bool getPipelineSelectPropertyModeSelectedSupport() const override;
+    bool getPipelineSelectPropertyMediaSamplerDopClockGateSupport() const override;
+    bool getPipelineSelectPropertySystolicModeSupport() const override;
+
+    void fillScmPropertiesSupportStructure(StateComputeModePropertiesSupport &propertiesSupport) override;
+    void fillFrontEndPropertiesSupportStructure(FrontEndPropertiesSupport &propertiesSupport, const HardwareInfo &hwInfo) override;
 
   protected:
     HwInfoConfigHw() = default;
@@ -248,6 +313,8 @@ class HwInfoConfigHw : public HwInfoConfig {
     uint64_t getHostMemCapabilitiesValue();
     bool getHostMemCapabilitiesSupported(const HardwareInfo *hwInfo);
     LocalMemoryAccessMode getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const override;
+    void fillScmPropertiesSupportStructureBase(StateComputeModePropertiesSupport &propertiesSupport) override;
+    void fillPipelineSelectPropertiesSupportStructure(PipelineSelectPropertiesSupport &propertiesSupport, const HardwareInfo &hwInfo) override;
 };
 
 template <PRODUCT_FAMILY gfxProduct>

@@ -27,6 +27,7 @@ struct EngineClassInstance;
 } // namespace NEO
 
 namespace L0 {
+struct TileDebugSessionLinux;
 
 struct DebugSessionLinux : DebugSessionImp {
 
@@ -108,6 +109,7 @@ struct DebugSessionLinux : DebugSessionImp {
         uint64_t vmHandle;
         bool tileInstanced = false;
         bool perKernelModule = true;
+        NEO::DeviceBitfield deviceBitfield;
 
         uint64_t moduleBegin;
         uint64_t moduleEnd;
@@ -195,6 +197,9 @@ struct DebugSessionLinux : DebugSessionImp {
         apiEventCondition.notify_all();
     }
 
+    MOCKABLE_VIRTUAL void createTileSessionsIfEnabled();
+    MOCKABLE_VIRTUAL TileDebugSessionLinux *createTileSession(const zet_debug_config_t &config, Device *device, DebugSessionImp *rootDebugSession);
+
     static void *asyncThreadFunction(void *arg);
     static void *readInternalEventsThreadFunction(void *arg);
     void startAsyncThread() override;
@@ -207,6 +212,18 @@ struct DebugSessionLinux : DebugSessionImp {
         internalEventThread.close();
     }
 
+    bool closeFd();
+
+    virtual std::vector<uint64_t> getAllMemoryHandles() {
+        std::vector<uint64_t> allVms;
+        std::unique_lock<std::mutex> memLock(asyncThreadMutex);
+
+        auto &vmIds = clientHandleToConnection[clientHandle]->vmIds;
+        allVms.resize(vmIds.size());
+        std::copy(vmIds.begin(), vmIds.end(), allVms.begin());
+        return allVms;
+    }
+
     void handleEventsAsync();
     void readInternalEventsAsync();
     MOCKABLE_VIRTUAL std::unique_ptr<uint64_t[]> getInternalEvent();
@@ -215,7 +232,15 @@ struct DebugSessionLinux : DebugSessionImp {
     void handleContextParamEvent(prelim_drm_i915_debug_event_context_param *contextParam);
     void handleAttentionEvent(prelim_drm_i915_debug_event_eu_attention *attention);
     void handleEnginesEvent(prelim_drm_i915_debug_event_engines *engines);
-    bool ackIsaEvents(uint32_t deviceIndex, uint64_t isaVa);
+    virtual bool ackIsaEvents(uint32_t deviceIndex, uint64_t isaVa);
+
+    void attachTile() override {
+        UNRECOVERABLE_IF(true);
+    }
+    void detachTile() override {
+        UNRECOVERABLE_IF(true);
+    }
+    void cleanRootSessionAfterDetach(uint32_t deviceIndex) override;
 
     void extractUuidData(uint64_t client, const UuidData &uuidData);
     uint64_t extractVaFromUuidString(std::string &uuid);
@@ -224,28 +249,56 @@ struct DebugSessionLinux : DebugSessionImp {
     ze_result_t readSbaBuffer(EuThread::ThreadId, NEO::SbaTrackedAddresses &sbaBuffer) override;
     void readStateSaveAreaHeader() override;
 
-    void applyResumeWa(uint8_t *bitmask, size_t bitmaskSize);
-
     ze_result_t readGpuMemory(uint64_t vmHandle, char *output, size_t size, uint64_t gpuVa) override;
     ze_result_t writeGpuMemory(uint64_t vmHandle, const char *input, size_t size, uint64_t gpuVa) override;
-    ze_result_t getISAVMHandle(const zet_debug_memory_space_desc_t *desc, size_t size, uint64_t &vmHandle);
+    ze_result_t getISAVMHandle(uint32_t deviceIndex, const zet_debug_memory_space_desc_t *desc, size_t size, uint64_t &vmHandle);
+    bool getIsaInfoForAllInstances(NEO::DeviceBitfield deviceBitfield, const zet_debug_memory_space_desc_t *desc, size_t size, uint64_t vmHandles[], ze_result_t &status);
+
     ze_result_t getElfOffset(const zet_debug_memory_space_desc_t *desc, size_t size, const char *&elfData, uint64_t &offset);
     ze_result_t readElfSpace(const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer,
                              const char *&elfData, const uint64_t offset);
-    bool tryReadElf(const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, ze_result_t &status);
+    virtual bool tryReadElf(const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, ze_result_t &status);
 
-    bool tryWriteIsa(uint32_t deviceIndex, const zet_debug_memory_space_desc_t *desc, size_t size, const void *buffer, ze_result_t &status);
-    bool tryReadIsa(uint32_t deviceIndex, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, ze_result_t &status);
-    bool tryAccessIsa(uint32_t deviceIndex, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, bool write, ze_result_t &status);
+    bool tryWriteIsa(NEO::DeviceBitfield deviceBitfield, const zet_debug_memory_space_desc_t *desc, size_t size, const void *buffer, ze_result_t &status);
+    bool tryReadIsa(NEO::DeviceBitfield deviceBitfield, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, ze_result_t &status);
+    virtual bool tryAccessIsa(NEO::DeviceBitfield deviceBitfield, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, bool write, ze_result_t &status);
     ze_result_t accessDefaultMemForThreadAll(const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, bool write);
-
-    bool readSystemRoutineIdent(EuThread *thread, uint64_t vmHandle, SIP::sr_ident &srIdent) override;
 
     MOCKABLE_VIRTUAL int threadControl(const std::vector<EuThread::ThreadId> &threads, uint32_t tile, ThreadControlCmd threadCmd, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize);
 
     uint64_t getContextStateSaveAreaGpuVa(uint64_t memoryHandle) override;
-    uint64_t getSbaBufferGpuVa(uint64_t memoryHandle);
+    virtual uint64_t getSbaBufferGpuVa(uint64_t memoryHandle);
     void printContextVms();
+
+    bool isTileWithinDeviceBitfield(uint32_t tileIndex) {
+        return connectedDevice->getNEODevice()->getDeviceBitfield().test(tileIndex);
+    }
+
+    bool checkAllOtherTileIsaAllocationsPresent(uint32_t tileIndex, uint64_t isaVa) {
+        bool allInstancesPresent = true;
+        for (uint32_t i = 0; i < NEO::EngineLimits::maxHandleCount; i++) {
+            if (i != tileIndex && connectedDevice->getNEODevice()->getDeviceBitfield().test(i)) {
+                if (clientHandleToConnection[clientHandle]->isaMap[i].find(isaVa) == clientHandleToConnection[clientHandle]->isaMap[i].end()) {
+                    allInstancesPresent = false;
+                    break;
+                }
+            }
+        }
+        return allInstancesPresent;
+    }
+
+    bool checkAllOtherTileIsaAllocationsRemoved(uint32_t tileIndex, uint64_t isaVa) {
+        bool allInstancesRemoved = true;
+        for (uint32_t i = 0; i < NEO::EngineLimits::maxHandleCount; i++) {
+            if (i != tileIndex && connectedDevice->getNEODevice()->getDeviceBitfield().test(i)) {
+                if (clientHandleToConnection[clientHandle]->isaMap[i].find(isaVa) != clientHandleToConnection[clientHandle]->isaMap[i].end()) {
+                    allInstancesRemoved = false;
+                    break;
+                }
+            }
+        }
+        return allInstancesRemoved;
+    }
 
     ThreadHelper internalEventThread;
     std::mutex internalEventThreadMutex;
@@ -254,7 +307,7 @@ struct DebugSessionLinux : DebugSessionImp {
     std::vector<std::pair<zet_debug_event_t, prelim_drm_i915_debug_event_ack>> eventsToAck;
 
     int fd = 0;
-    int ioctl(unsigned long request, void *arg);
+    virtual int ioctl(unsigned long request, void *arg);
     std::unique_ptr<IoctlHandler> ioctlHandler;
     std::atomic<bool> detached{false};
 
@@ -268,44 +321,81 @@ struct DebugSessionLinux : DebugSessionImp {
 
 struct TileDebugSessionLinux : DebugSessionLinux {
     TileDebugSessionLinux(zet_debug_config_t config, Device *device, DebugSessionImp *rootDebugSession) : DebugSessionLinux(config, device, 0),
-                                                                                                          rootDebugSession(reinterpret_cast<DebugSessionLinux *>(rootDebugSession)){};
+                                                                                                          rootDebugSession(reinterpret_cast<DebugSessionLinux *>(rootDebugSession)) {
+        tileIndex = Math::log2(static_cast<uint32_t>(connectedDevice->getNEODevice()->getDeviceBitfield().to_ulong()));
+    }
+
     ~TileDebugSessionLinux() override = default;
 
-    bool closeConnection() override { return true; };
-    ze_result_t initialize() override { return ZE_RESULT_SUCCESS; };
+    bool closeConnection() override { return true; }
+    ze_result_t initialize() override { return ZE_RESULT_SUCCESS; }
 
-    ze_result_t interrupt(ze_device_thread_t thread) override;
-
-    ze_result_t resume(ze_device_thread_t thread) override;
-    ze_result_t readMemory(ze_device_thread_t thread, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer) override;
-    ze_result_t writeMemory(ze_device_thread_t thread, const zet_debug_memory_space_desc_t *desc, size_t size, const void *buffer) override;
-    ze_result_t acknowledgeEvent(const zet_debug_event_t *event) override;
-    ze_result_t readRegisters(ze_device_thread_t thread, uint32_t type, uint32_t start, uint32_t count, void *pRegisterValues) override;
-    ze_result_t writeRegisters(ze_device_thread_t thread, uint32_t type, uint32_t start, uint32_t count, void *pRegisterValues) override;
+    bool insertModule(zet_debug_event_info_module_t module);
+    bool removeModule(zet_debug_event_info_module_t module);
+    bool processEntry();
+    bool processExit();
+    void attachTile() override;
+    void detachTile() override;
 
   protected:
     void startAsyncThread() override { UNRECOVERABLE_IF(true); };
+    void cleanRootSessionAfterDetach(uint32_t deviceIndex) override { UNRECOVERABLE_IF(true); };
 
     bool readModuleDebugArea() override { return true; };
 
     uint64_t getContextStateSaveAreaGpuVa(uint64_t memoryHandle) override {
-        return 0;
+        return rootDebugSession->getContextStateSaveAreaGpuVa(memoryHandle);
     };
 
-    void readStateSaveAreaHeader() override{};
+    void readStateSaveAreaHeader() override;
+
+    uint64_t getSbaBufferGpuVa(uint64_t memoryHandle) override {
+        return rootDebugSession->getSbaBufferGpuVa(memoryHandle);
+    }
+
+    int ioctl(unsigned long request, void *arg) override {
+        return rootDebugSession->ioctl(request, arg);
+    }
+
+    std::vector<uint64_t> getAllMemoryHandles() override {
+        return rootDebugSession->getAllMemoryHandles();
+    }
+
+    bool tryReadElf(const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, ze_result_t &status) override {
+
+        return rootDebugSession->tryReadElf(desc, size, buffer, status);
+    }
+
+    bool tryAccessIsa(NEO::DeviceBitfield deviceBitfield, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, bool write, ze_result_t &status) override {
+        return rootDebugSession->tryAccessIsa(deviceBitfield, desc, size, buffer, write, status);
+    }
+
+    bool ackIsaEvents(uint32_t deviceIndex, uint64_t isaVa) override {
+        return rootDebugSession->ackIsaEvents(this->tileIndex, isaVa);
+    }
 
     ze_result_t readGpuMemory(uint64_t vmHandle, char *output, size_t size, uint64_t gpuVa) override {
-        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-    };
-    ze_result_t writeGpuMemory(uint64_t vmHandle, const char *input, size_t size, uint64_t gpuVa) override {
-        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-    };
+        return rootDebugSession->readGpuMemory(vmHandle, output, size, gpuVa);
+    }
 
-    ze_result_t readSbaBuffer(EuThread::ThreadId threadId, NEO::SbaTrackedAddresses &sbaBuffer) override {
-        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-    };
+    ze_result_t writeGpuMemory(uint64_t vmHandle, const char *input, size_t size, uint64_t gpuVa) override {
+        return rootDebugSession->writeGpuMemory(vmHandle, input, size, gpuVa);
+    }
+
+    ze_result_t resumeImp(const std::vector<EuThread::ThreadId> &threads, uint32_t deviceIndex) override {
+        return rootDebugSession->resumeImp(threads, this->tileIndex);
+    }
+
+    ze_result_t interruptImp(uint32_t deviceIndex) override {
+        return rootDebugSession->interruptImp(this->tileIndex);
+    }
 
     DebugSessionLinux *rootDebugSession = nullptr;
+    uint32_t tileIndex = std::numeric_limits<uint32_t>::max();
+    bool isAttached = false;
+    bool processEntryState = false;
+
+    std::unordered_map<uint64_t, zet_debug_event_info_module_t> modules;
 };
 
 } // namespace L0

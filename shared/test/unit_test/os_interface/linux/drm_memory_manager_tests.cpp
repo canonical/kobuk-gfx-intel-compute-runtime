@@ -18,6 +18,7 @@
 #include "shared/test/common/mocks/linux/mock_drm_command_stream_receiver.h"
 #include "shared/test/common/mocks/linux/mock_drm_memory_manager.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
+#include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_gfx_partition.h"
 #include "shared/test/common/mocks/mock_gmm.h"
 #include "shared/test/common/os_interface/linux/drm_memory_manager_fixture.h"
@@ -3311,8 +3312,6 @@ TEST_F(DrmAllocationTests, givenResourceRegistrationNotEnabledWhenRegisteringBin
 
 TEST(DrmMemoryManager, givenTrackedAllocationTypeAndDisabledRegistrationInDrmWhenAllocatingThenRegisterBoBindExtHandleIsNotCalled) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1u);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
     auto mockDrm = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -3334,8 +3333,6 @@ TEST(DrmMemoryManager, givenTrackedAllocationTypeAndDisabledRegistrationInDrmWhe
 
 TEST(DrmMemoryManager, givenResourceRegistrationEnabledAndAllocTypeToCaptureWhenRegisteringAllocationInOsThenItIsMarkedForCapture) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1u);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
     auto mockDrm = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -3362,8 +3359,6 @@ TEST(DrmMemoryManager, givenResourceRegistrationEnabledAndAllocTypeToCaptureWhen
 
 TEST(DrmMemoryManager, givenTrackedAllocationTypeWhenAllocatingThenAllocationIsRegistered) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1u);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
     auto mockDrm = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -3395,8 +3390,6 @@ TEST(DrmMemoryManager, givenTrackedAllocationTypeWhenAllocatingThenAllocationIsR
 
 TEST(DrmMemoryManager, givenTrackedAllocationTypeWhenFreeingThenRegisteredHandlesAreUnregistered) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1u);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
     auto mockDrm = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -3427,8 +3420,6 @@ TEST(DrmMemoryManager, givenTrackedAllocationTypeWhenFreeingThenRegisteredHandle
 
 TEST(DrmMemoryManager, givenEnabledResourceRegistrationWhenSshIsAllocatedThenItIsMarkedForCapture) {
     auto executionEnvironment = new MockExecutionEnvironment();
-    executionEnvironment->prepareRootDeviceEnvironments(1u);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
     auto mockDrm = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -3456,8 +3447,6 @@ TEST(DrmMemoryManager, givenEnabledResourceRegistrationWhenSshIsAllocatedThenItI
 
 TEST(DrmMemoryManager, givenNullBoWhenRegisteringBindExtHandleThenEarlyReturn) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1u);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(defaultHwInfo.get());
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
     auto mockDrm = std::make_unique<DrmMockResources>(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -3531,6 +3520,29 @@ TEST_F(DrmAllocationTests, givenResourceRegistrationEnabledAndSingleInstanceIsaW
 
     allocation.freeRegisteredBOBindExtHandles(&drm);
     EXPECT_EQ(1u, drm.unregisterCalledCount);
+}
+
+TEST_F(DrmAllocationTests, givenResourceRegistrationEnabledWhenIsaIsRegisteredThenDeviceBitfieldIsPassedAsPayload) {
+    DrmMockResources drm(*executionEnvironment->rootDeviceEnvironments[0]);
+
+    for (uint32_t i = 3; i < 3 + static_cast<uint32_t>(DrmResourceClass::MaxSize); i++) {
+        drm.classHandles.push_back(i);
+    }
+
+    drm.registeredClass = DrmResourceClass::MaxSize;
+
+    MockBufferObject bo(&drm, 3, 0, 0, 1);
+    MockDrmAllocation allocation(AllocationType::KERNEL_ISA, MemoryPool::LocalMemory);
+    allocation.storageInfo.subDeviceBitfield = 1 << 3;
+    allocation.bufferObjects[0] = &bo;
+    allocation.registerBOBindExtHandle(&drm);
+    EXPECT_EQ(1u, bo.bindExtHandles.size());
+
+    EXPECT_EQ(DrmMockResources::registerResourceReturnHandle, bo.bindExtHandles[0]);
+
+    EXPECT_EQ(sizeof(uint32_t), drm.registeredDataSize);
+    uint32_t *data = reinterpret_cast<uint32_t *>(drm.registeredData);
+    EXPECT_EQ(static_cast<uint32_t>(allocation.storageInfo.subDeviceBitfield.to_ulong()), *data);
 }
 
 TEST_F(DrmAllocationTests, givenDrmAllocationWhenSetCacheRegionIsCalledForDefaultRegionThenReturnTrue) {
@@ -3741,6 +3753,56 @@ TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenAllocateGraphicsMemory
 
     auto mem = debugSurface->getUnderlyingBuffer();
     ASSERT_NE(nullptr, mem);
+
+    EXPECT_EQ(3u, debugSurface->getNumGmms());
+
+    auto &bos = debugSurface->getBOs();
+
+    EXPECT_NE(nullptr, bos[0]);
+    EXPECT_NE(nullptr, bos[1]);
+    EXPECT_NE(nullptr, bos[3]);
+
+    EXPECT_EQ(debugSurface->getGpuAddress(), bos[0]->peekAddress());
+    EXPECT_EQ(debugSurface->getGpuAddress(), bos[1]->peekAddress());
+    EXPECT_EQ(debugSurface->getGpuAddress(), bos[3]->peekAddress());
+
+    auto sipType = SipKernel::getSipKernelType(*device);
+    SipKernel::initSipKernel(sipType, *device);
+
+    auto &stateSaveAreaHeader = NEO::SipKernel::getSipKernel(*device).getStateSaveAreaHeader();
+    mem = ptrOffset(mem, stateSaveAreaHeader.size());
+    auto size = debugSurface->getUnderlyingBufferSize() - stateSaveAreaHeader.size();
+
+    EXPECT_TRUE(memoryZeroed(mem, size));
+
+    memoryManager->freeGraphicsMemory(debugSurface);
+}
+
+TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenAffinityMaskDeviceWithBitfieldIndex1SetWhenAllocatingDebugSurfaceThenSingleAllocationWithOneBoIsCreated) {
+    NEO::DebugManager.flags.CreateMultipleSubDevices.set(2);
+
+    AffinityMaskHelper affinityMask;
+    affinityMask.enableGenericSubDevice(1);
+
+    executionEnvironment->rootDeviceEnvironments[0]->deviceAffinityMask = affinityMask;
+    AllocationProperties debugSurfaceProperties{0, true, MemoryConstants::pageSize, NEO::AllocationType::DEBUG_CONTEXT_SAVE_AREA, false, false, 0b0010};
+    auto debugSurface = static_cast<DrmAllocation *>(memoryManager->allocateGraphicsMemoryWithProperties(debugSurfaceProperties));
+
+    EXPECT_NE(nullptr, debugSurface);
+
+    auto mem = debugSurface->getUnderlyingBuffer();
+    ASSERT_NE(nullptr, mem);
+
+    EXPECT_EQ(1u, debugSurface->getNumGmms());
+
+    auto &bos = debugSurface->getBOs();
+    auto bo = debugSurface->getBO();
+
+    EXPECT_NE(nullptr, bos[0]);
+    EXPECT_EQ(nullptr, bos[1]);
+    EXPECT_EQ(bos[0], bo);
+
+    EXPECT_EQ(debugSurface->getGpuAddress(), bos[0]->peekAddress());
 
     auto sipType = SipKernel::getSipKernelType(*device);
     SipKernel::initSipKernel(sipType, *device);
@@ -4074,9 +4136,7 @@ TEST_F(DrmMemoryManagerTest, givenDrmMemoryManagerWhenSetMemPrefetchFailsToBindB
 }
 
 TEST_F(DrmMemoryManagerTest, givenPageFaultIsUnSupportedWhenCallingBindBoOnBufferAllocationThenAllocationShouldNotPageFaultAndExplicitResidencyIsNotRequired) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
 
@@ -4102,9 +4162,7 @@ TEST_F(DrmMemoryManagerTest, givenPageFaultIsSupportedAndKmdMigrationEnabledForB
     DebugManagerStateRestore restorer;
     DebugManager.flags.EnableRecoverablePageFaults.set(true);
 
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
 
@@ -4136,9 +4194,7 @@ TEST_F(DrmMemoryManagerTest, givenPageFaultIsSupportedAndKmdMigrationEnabledForB
 }
 
 TEST_F(DrmMemoryManagerTest, givenPageFaultIsSupportedWhenCallingBindBoOnAllocationThatShouldPageFaultThenExplicitResidencyIsNotRequired) {
-    auto executionEnvironment = std::make_unique<ExecutionEnvironment>();
-    executionEnvironment->prepareRootDeviceEnvironments(1);
-    executionEnvironment->rootDeviceEnvironments[0]->setHwInfo(NEO::defaultHwInfo.get());
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
     executionEnvironment->initializeMemoryManager();
 

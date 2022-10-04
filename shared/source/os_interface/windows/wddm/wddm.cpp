@@ -105,7 +105,7 @@ bool Wddm::init() {
     if (hwConfig->configureHwInfoWddm(hardwareInfo.get(), hardwareInfo.get(), nullptr)) {
         return false;
     }
-    setPlatformSupportEvictWhenNecessaryFlag(*hwConfig);
+    setPlatformSupportEvictIfNecessaryFlag(*hwConfig);
 
     auto preemptionMode = PreemptionHelper::getDefaultPreemptionMode(*hardwareInfo);
     rootDeviceEnvironment.setHwInfo(hardwareInfo.get());
@@ -140,12 +140,12 @@ bool Wddm::init() {
     return configureDeviceAddressSpace();
 }
 
-void Wddm::setPlatformSupportEvictWhenNecessaryFlag(const HwInfoConfig &hwInfoConfig) {
-    platformSupportsEvictWhenNecessary = hwInfoConfig.isEvictionWhenNecessaryFlagSupported();
-    int32_t overridePlatformSupportsEvictWhenNecessary =
-        DebugManager.flags.PlaformSupportEvictWhenNecessaryFlag.get();
-    if (overridePlatformSupportsEvictWhenNecessary != -1) {
-        platformSupportsEvictWhenNecessary = !!overridePlatformSupportsEvictWhenNecessary;
+void Wddm::setPlatformSupportEvictIfNecessaryFlag(const HwInfoConfig &hwInfoConfig) {
+    platformSupportsEvictIfNecessary = hwInfoConfig.isEvictionIfNecessaryFlagSupported();
+    int32_t overridePlatformSupportsEvictIfNecessary =
+        DebugManager.flags.PlaformSupportEvictIfNecessaryFlag.get();
+    if (overridePlatformSupportsEvictIfNecessary != -1) {
+        platformSupportsEvictIfNecessary = !!overridePlatformSupportsEvictIfNecessary;
     }
     forceEvictOnlyIfNecessary = DebugManager.flags.ForceEvictOnlyIfNecessaryFlag.get();
 }
@@ -153,28 +153,26 @@ void Wddm::setPlatformSupportEvictWhenNecessaryFlag(const HwInfoConfig &hwInfoCo
 bool Wddm::buildTopologyMapping() {
     auto hwInfo = rootDeviceEnvironment.getHardwareInfo();
 
-    bool ret = true;
     UNRECOVERABLE_IF(hwInfo->gtSystemInfo.MultiTileArchInfo.TileCount > 1);
     TopologyMapping mapping;
     if (!translateTopologyInfo(mapping)) {
-        ret = false;
-        return ret;
+        PRINT_DEBUGGER_ERROR_LOG("translateTopologyInfo Failed\n", "");
+        return false;
     }
     this->topologyMap[0] = mapping;
 
-    return ret;
+    return true;
 }
 
 bool Wddm::translateTopologyInfo(TopologyMapping &mapping) {
     int sliceCount = 0;
     int subSliceCount = 0;
-    uint32_t dualSubSliceCount = 0;
     int euCount = 0;
     std::vector<int> sliceIndices;
     auto gtSystemInfo = rootDeviceEnvironment.getHardwareInfo()->gtSystemInfo;
     sliceIndices.reserve(gtSystemInfo.SliceCount);
 
-    for (uint32_t x = 0; x < gtSystemInfo.MaxSlicesSupported; x++) {
+    for (uint32_t x = 0; x < GT_MAX_SLICE; x++) {
         if (!gtSystemInfo.SliceInfo[x].Enabled) {
             continue;
         }
@@ -191,7 +189,6 @@ bool Wddm::translateTopologyInfo(TopologyMapping &mapping) {
                 subSliceIndex += 2;
                 continue;
             }
-            dualSubSliceCount++;
 
             for (uint32_t y = 0; y < GT_MAX_SUBSLICE_PER_DSS; y++) {
                 subSliceIndex++;
@@ -218,7 +215,7 @@ bool Wddm::translateTopologyInfo(TopologyMapping &mapping) {
     if (sliceCount != 1) {
         mapping.subsliceIndices.clear();
     }
-
+    PRINT_DEBUGGER_INFO_LOG("Topology Mapping: sliceCount=%d subSliceCount=%d euCount=%d\n", sliceCount, subSliceCount, euCount);
     return (sliceCount && subSliceCount && euCount);
 }
 
@@ -485,7 +482,7 @@ bool Wddm::makeResident(const D3DKMT_HANDLE *handles, uint32_t count, bool cantT
     makeResident.NumAllocations = count;
     makeResident.PriorityList = &priority;
     makeResident.Flags.CantTrimFurther = cantTrimFurther ? 1 : 0;
-    makeResident.Flags.MustSucceed = cantTrimFurther ? 1 : 0;
+    makeResident.Flags.MustSucceed = 0;
 
     status = getGdi()->makeResident(&makeResident);
     if (status == STATUS_PENDING) {
@@ -498,9 +495,10 @@ bool Wddm::makeResident(const D3DKMT_HANDLE *handles, uint32_t count, bool cantT
     } else {
         DEBUG_BREAK_IF(true);
         perfLogResidencyTrimRequired(residencyLogger.get(), makeResident.NumBytesToTrim);
-        if (numberOfBytesToTrim != nullptr)
+        if (numberOfBytesToTrim != nullptr) {
             *numberOfBytesToTrim = makeResident.NumBytesToTrim;
-        UNRECOVERABLE_IF(cantTrimFurther);
+        }
+        return false;
     }
 
     kmDafListener->notifyMakeResident(featureTable->flags.ftrKmdDaf, getAdapter(), device, handles, count, getGdi()->escape);

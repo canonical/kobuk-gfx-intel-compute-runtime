@@ -59,7 +59,7 @@ void populateKernelDescriptor(KernelDescriptor &dst, const SPatchExecutionEnviro
     dst.kernelAttributes.flags.requiresSubgroupIndependentForwardProgress = (0 != execEnv.SubgroupIndependentForwardProgressRequired);
     dst.kernelAttributes.flags.useGlobalAtomics = (0 != execEnv.HasGlobalAtomics);
     dst.kernelAttributes.flags.usesFencesForReadWriteImages = (0 != execEnv.UsesFencesForReadWriteImages);
-    dst.kernelAttributes.flags.usesSpecialPipelineSelectMode = (0 != execEnv.HasDPAS);
+    dst.kernelAttributes.flags.usesSystolicPipelineSelectMode = (0 != execEnv.HasDPAS);
     dst.kernelAttributes.flags.usesStatelessWrites = (0 != execEnv.StatelessWritesCount);
     dst.kernelAttributes.flags.useStackCalls = (0 != execEnv.HasStackCalls);
     dst.kernelAttributes.flags.hasRTCalls = (0 != execEnv.HasRTCalls);
@@ -118,6 +118,9 @@ void populateKernelDescriptor(KernelDescriptor &dst, const SPatchKernelAttribute
             ++it;
         }
     }
+
+    constexpr ConstStringRef invalidKernelAttrBeg = "invalid_kernel(";
+    dst.kernelAttributes.flags.isInvalid = (attributes.find(invalidKernelAttrBeg.data()) != std::string::npos);
 }
 
 void populatePointerKernelArg(ArgDescPointer &dst,
@@ -188,6 +191,10 @@ void populateKernelDescriptor(KernelDescriptor &dst, const SPatchAllocateSystemT
 void populateKernelDescriptor(KernelDescriptor &dst, const SPatchAllocateSyncBuffer &token) {
     dst.kernelAttributes.flags.usesSyncBuffer = true;
     populatePointerKernelArg(dst.payloadMappings.implicitArgs.syncBufferAddress, token, dst.kernelAttributes.bufferAddressingMode);
+}
+
+void populateKernelDescriptor(KernelDescriptor &dst, const SPatchAllocateRTGlobalBuffer &token) {
+    populatePointerKernelArg(dst.payloadMappings.implicitArgs.rtDispatchGlobals, token, dst.kernelAttributes.bufferAddressingMode);
 }
 
 void populateKernelDescriptor(KernelDescriptor &dst, const SPatchString &token) {
@@ -467,23 +474,7 @@ void populateKernelDescriptor(KernelDescriptor &dst, const PatchTokenBinary::Ker
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateStatelessEventPoolSurface);
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateStatelessDefaultDeviceQueueSurface);
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateSyncBuffer);
-
-    {
-        uint32_t heapOffset = 0;
-        uint32_t paramOffset = 0;
-        uint32_t paramSize = 0;
-
-        if (src.tokens.allocateRTGlobalBuffer != nullptr) {
-            auto allocateRTGlobalBuffer = static_cast<const struct iOpenCL::SPatchAllocateRTGlobalBuffer *>(src.tokens.allocateRTGlobalBuffer);
-            heapOffset = allocateRTGlobalBuffer->SurfaceStateHeapOffset;
-            paramOffset = allocateRTGlobalBuffer->DataParamOffset;
-            paramSize = allocateRTGlobalBuffer->DataParamSize;
-        }
-
-        populatePointerKernelArg(dst.payloadMappings.implicitArgs.rtDispatchGlobals,
-                                 paramOffset, paramSize, heapOffset, heapOffset,
-                                 dst.kernelAttributes.bufferAddressingMode);
-    }
+    populateKernelDescriptorIfNotNull(dst, src.tokens.allocateRTGlobalBuffer);
 
     dst.payloadMappings.explicitArgs.resize(src.tokens.kernelArgs.size());
     dst.explicitArgsExtendedMetadata.resize(src.tokens.kernelArgs.size());

@@ -18,7 +18,7 @@ using namespace NEO;
 
 using PreambleHelperTestsAdlp = ::testing::Test;
 
-ADLPTEST_F(PreambleHelperTestsAdlp, givenSpecialPipelineSelectModeDisabledWhenProgrammingPipelineSelectThenDisableSystolicMode) {
+ADLPTEST_F(PreambleHelperTestsAdlp, givenSystolicPipelineSelectModeDisabledWhenProgrammingPipelineSelectThenDisableSystolicMode) {
     using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
     constexpr static auto bufferSize = sizeof(PIPELINE_SELECT);
 
@@ -26,7 +26,8 @@ ADLPTEST_F(PreambleHelperTestsAdlp, givenSpecialPipelineSelectModeDisabledWhenPr
     LinearStream stream{streamBuffer, sizeof(bufferSize)};
 
     DispatchFlags flags = DispatchFlagsHelper::createDefaultDispatchFlags();
-    flags.pipelineSelectArgs.specialPipelineSelectMode = false;
+    flags.pipelineSelectArgs.systolicPipelineSelectMode = false;
+    flags.pipelineSelectArgs.systolicPipelineSelectSupport = PreambleHelper<FamilyType>::isSystolicModeConfigurable(ADLP::hwInfo);
 
     auto *pCmd = static_cast<PIPELINE_SELECT *>(stream.getSpace(0));
     PreambleHelper<FamilyType>::programPipelineSelect(&stream, flags.pipelineSelectArgs, ADLP::hwInfo);
@@ -37,7 +38,7 @@ ADLPTEST_F(PreambleHelperTestsAdlp, givenSpecialPipelineSelectModeDisabledWhenPr
     EXPECT_EQ(PIPELINE_SELECT::PIPELINE_SELECTION_GPGPU, pCmd->getPipelineSelection());
 }
 
-ADLPTEST_F(PreambleHelperTestsAdlp, givenSpecialPipelineSelectModeEnabledWhenProgrammingPipelineSelectThenEnableSystolicMode) {
+ADLPTEST_F(PreambleHelperTestsAdlp, givenSystolicPipelineSelectModeEnabledWhenProgrammingPipelineSelectThenEnableSystolicMode) {
     using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
     constexpr static auto bufferSize = sizeof(PIPELINE_SELECT);
 
@@ -45,7 +46,8 @@ ADLPTEST_F(PreambleHelperTestsAdlp, givenSpecialPipelineSelectModeEnabledWhenPro
     LinearStream stream{streamBuffer, sizeof(bufferSize)};
 
     DispatchFlags flags = DispatchFlagsHelper::createDefaultDispatchFlags();
-    flags.pipelineSelectArgs.specialPipelineSelectMode = true;
+    flags.pipelineSelectArgs.systolicPipelineSelectMode = true;
+    flags.pipelineSelectArgs.systolicPipelineSelectSupport = PreambleHelper<FamilyType>::isSystolicModeConfigurable(ADLP::hwInfo);
 
     auto *pCmd = static_cast<PIPELINE_SELECT *>(stream.getSpace(0));
     PreambleHelper<FamilyType>::programPipelineSelect(&stream, flags.pipelineSelectArgs, ADLP::hwInfo);

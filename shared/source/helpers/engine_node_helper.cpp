@@ -106,12 +106,20 @@ aub_stream::EngineType getBcsEngineType(const HardwareInfo &hwInfo, const Device
             return DebugManager.flags.ForceBCSForInternalCopyEngine.get() == 0 ? aub_stream::EngineType::ENGINE_BCS
                                                                                : static_cast<aub_stream::EngineType>(aub_stream::EngineType::ENGINE_BCS1 + DebugManager.flags.ForceBCSForInternalCopyEngine.get() - 1);
         }
-        return aub_stream::ENGINE_BCS2;
+        return aub_stream::ENGINE_BCS3;
     }
 
-    const bool isMainCopyEngineAlreadyUsed = selectorCopyEngine.isMainUsed.exchange(true);
-    if (isMainCopyEngineAlreadyUsed) {
-        return selectLinkCopyEngine(hwInfo, deviceBitfield, selectorCopyEngine.selector);
+    auto enableSelector = HwInfoConfig::get(hwInfo.platform.eProductFamily)->isCopyEngineSelectorEnabled(hwInfo);
+
+    if (DebugManager.flags.EnableCopyEngineSelector.get() != -1) {
+        enableSelector = DebugManager.flags.EnableCopyEngineSelector.get();
+    }
+
+    if (enableSelector) {
+        const bool isMainCopyEngineAlreadyUsed = selectorCopyEngine.isMainUsed.exchange(true);
+        if (isMainCopyEngineAlreadyUsed) {
+            return selectLinkCopyEngine(hwInfo, deviceBitfield, selectorCopyEngine.selector);
+        }
     }
 
     return aub_stream::ENGINE_BCS;

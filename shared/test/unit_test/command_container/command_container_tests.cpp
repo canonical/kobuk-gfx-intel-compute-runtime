@@ -123,7 +123,7 @@ TEST_F(CommandContainerTest, givenCmdContainerWhenAllocatingHeapsThenSetCorrectA
 TEST_F(CommandContainerTest, givenCommandContainerWhenInitializeThenEverythingIsInitialized) {
     CommandContainer cmdContainer;
     auto status = cmdContainer.initialize(pDevice, nullptr, true);
-    EXPECT_EQ(ErrorCode::SUCCESS, status);
+    EXPECT_EQ(CommandContainer::ErrorCode::SUCCESS, status);
 
     EXPECT_EQ(pDevice, cmdContainer.getDevice());
     EXPECT_NE(cmdContainer.getHeapHelper(), nullptr);
@@ -153,7 +153,7 @@ TEST_F(CommandContainerTest, givenCommandContainerWhenInitializeThenEverythingIs
 TEST_F(CommandContainerTest, givenCommandContainerWhenHeapNotRequiredThenHeapIsNotInitialized) {
     CommandContainer cmdContainer;
     auto status = cmdContainer.initialize(pDevice, nullptr, false);
-    EXPECT_EQ(ErrorCode::SUCCESS, status);
+    EXPECT_EQ(CommandContainer::ErrorCode::SUCCESS, status);
 
     EXPECT_EQ(pDevice, cmdContainer.getDevice());
     EXPECT_EQ(cmdContainer.getHeapHelper(), nullptr);
@@ -190,7 +190,7 @@ TEST_F(CommandContainerTest, givenEnabledLocalMemoryAndIsaInSystemMemoryWhenCmdC
 
     CommandContainer cmdContainer;
     auto status = cmdContainer.initialize(device.get(), nullptr, true);
-    EXPECT_EQ(ErrorCode::SUCCESS, status);
+    EXPECT_EQ(CommandContainer::ErrorCode::SUCCESS, status);
 
     EXPECT_EQ(instructionHeapBaseAddress, cmdContainer.getInstructionHeapBaseAddress());
 }
@@ -199,7 +199,7 @@ TEST_F(CommandContainerTest, givenCommandContainerDuringInitWhenAllocateGfxMemor
     CommandContainer cmdContainer;
     pDevice->executionEnvironment->memoryManager.reset(new FailMemoryManager(0, *pDevice->executionEnvironment));
     auto status = cmdContainer.initialize(pDevice, nullptr, true);
-    EXPECT_EQ(ErrorCode::OUT_OF_DEVICE_MEMORY, status);
+    EXPECT_EQ(CommandContainer::ErrorCode::OUT_OF_DEVICE_MEMORY, status);
 }
 
 TEST_F(CommandContainerTest, givenCmdContainerWithAllocsListWhenAllocateAndResetThenCmdBufferAllocIsReused) {
@@ -219,7 +219,7 @@ TEST_F(CommandContainerTest, givenCmdContainerWithAllocsListWhenAllocateAndReset
     auto cmdBuffer1 = cmdBufferAllocs[1];
 
     cmdContainer->reset();
-    EXPECT_EQ(memoryManager->handleFenceCompletionCalled, 0u);
+    EXPECT_EQ(memoryManager->handleFenceCompletionCalled, 1u);
     EXPECT_EQ(cmdBufferAllocs.size(), 1u);
     EXPECT_EQ(cmdBufferAllocs[0], cmdBuffer0);
     EXPECT_FALSE(allocList.peekIsEmpty());
@@ -231,8 +231,32 @@ TEST_F(CommandContainerTest, givenCmdContainerWithAllocsListWhenAllocateAndReset
     EXPECT_TRUE(allocList.peekIsEmpty());
 
     cmdContainer.reset();
-    EXPECT_EQ(memoryManager->handleFenceCompletionCalled, 0u);
+    EXPECT_EQ(memoryManager->handleFenceCompletionCalled, 3u);
     EXPECT_FALSE(allocList.peekIsEmpty());
+    allocList.freeAllGraphicsAllocations(pDevice);
+}
+
+TEST_F(CommandContainerTest, givenReusableAllocationsAndRemoveUserFenceInCmdlistResetAndDestroyFlagWhenAllocateAndResetThenHandleFenceCompletionIsNotCalled) {
+    DebugManagerStateRestore restore;
+    DebugManager.flags.RemoveUserFenceInCmdlistResetAndDestroy.set(1);
+
+    AllocationsList allocList;
+    auto cmdContainer = std::make_unique<CommandContainer>();
+    cmdContainer->initialize(pDevice, &allocList, true);
+    auto &cmdBufferAllocs = cmdContainer->getCmdBufferAllocations();
+    auto memoryManager = static_cast<MockMemoryManager *>(pDevice->getMemoryManager());
+    EXPECT_EQ(0u, memoryManager->handleFenceCompletionCalled);
+    EXPECT_EQ(cmdBufferAllocs.size(), 1u);
+    cmdContainer->allocateNextCommandBuffer();
+    EXPECT_EQ(cmdBufferAllocs.size(), 2u);
+
+    cmdContainer->reset();
+    EXPECT_EQ(0u, memoryManager->handleFenceCompletionCalled);
+    cmdContainer->allocateNextCommandBuffer();
+    EXPECT_EQ(cmdBufferAllocs.size(), 2u);
+
+    cmdContainer.reset();
+    EXPECT_EQ(0u, memoryManager->handleFenceCompletionCalled);
     allocList.freeAllGraphicsAllocations(pDevice);
 }
 
@@ -241,7 +265,7 @@ TEST_F(CommandContainerTest, givenCommandContainerDuringInitWhenAllocateHeapMemo
     auto tempMemoryManager = pDevice->executionEnvironment->memoryManager.release();
     pDevice->executionEnvironment->memoryManager.reset(new FailMemoryManager(1, *pDevice->executionEnvironment));
     auto status = cmdContainer.initialize(pDevice, nullptr, true);
-    EXPECT_EQ(ErrorCode::OUT_OF_DEVICE_MEMORY, status);
+    EXPECT_EQ(CommandContainer::ErrorCode::OUT_OF_DEVICE_MEMORY, status);
     delete tempMemoryManager;
 }
 
@@ -768,6 +792,28 @@ TEST_F(CommandContainerTest, givenCmdContainerWhenContainerIsInitializedThenStre
     EXPECT_EQ(cmdContainer.getCommandStream()->getMaxAvailableSpace(), alignedSize - CommandContainer::cmdBufferReservedSize);
 }
 
+TEST_F(CommandContainerTest, GivenCmdContainerAndDebugFlagWhenContainerIsInitializedThenStreamSizeEqualsAlignedTotalCmdBuffSizeDecreasedOfReservedSize) {
+    DebugManagerStateRestore restorer;
+
+    class MyCommandContainer : public CommandContainer {
+      public:
+        using CommandContainer::getTotalCmdBufferSize;
+    };
+
+    DebugManager.flags.OverrideCmdListCmdBufferSizeInKb.set(0);
+    MyCommandContainer cmdContainer;
+    cmdContainer.initialize(pDevice, nullptr, true);
+    size_t alignedSize = alignUp<size_t>(cmdContainer.getTotalCmdBufferSize(), MemoryConstants::pageSize64k);
+    EXPECT_EQ(cmdContainer.getCommandStream()->getMaxAvailableSpace(), alignedSize - MyCommandContainer::cmdBufferReservedSize);
+
+    auto newSizeInKB = 512;
+    DebugManager.flags.OverrideCmdListCmdBufferSizeInKb.set(newSizeInKB);
+    MyCommandContainer cmdContainer2;
+    cmdContainer2.initialize(pDevice, nullptr, true);
+    alignedSize = alignUp<size_t>(cmdContainer.getTotalCmdBufferSize(), MemoryConstants::pageSize64k);
+    EXPECT_EQ(cmdContainer2.getCommandStream()->getMaxAvailableSpace(), alignedSize - MyCommandContainer::cmdBufferReservedSize);
+}
+
 TEST_F(CommandContainerTest, givenCmdContainerWhenAlocatingNextCmdBufferThenStreamSizeEqualAlignedTotalCmdBuffSizeDecreasedOfReservedSize) {
     CommandContainer cmdContainer;
     cmdContainer.initialize(pDevice, nullptr, true);
@@ -792,4 +838,18 @@ TEST_F(CommandContainerTest, givenCmdContainerWhenCloseAndAllocateNextCommandBuf
     EXPECT_EQ(cmdContainer.getCmdBufferAllocations().size(), 1u);
     cmdContainer.closeAndAllocateNextCommandBuffer();
     EXPECT_EQ(cmdContainer.getCmdBufferAllocations().size(), 2u);
+}
+
+TEST_F(CommandContainerTest, GivenCmdContainerWhenContainerIsInitializedThenSurfaceStateIndirectHeapSizeIsCorrect) {
+
+    class MyCommandContainer : public CommandContainer {
+      public:
+        using CommandContainer::allocationIndirectHeaps;
+    };
+
+    MyCommandContainer cmdContainer;
+    cmdContainer.initialize(pDevice, nullptr, true);
+    auto size = cmdContainer.allocationIndirectHeaps[IndirectHeap::Type::SURFACE_STATE]->getUnderlyingBufferSize();
+    constexpr size_t expectedHeapSize = MemoryConstants::pageSize64k;
+    EXPECT_EQ(expectedHeapSize, size);
 }

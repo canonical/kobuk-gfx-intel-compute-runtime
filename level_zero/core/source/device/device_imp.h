@@ -12,6 +12,7 @@
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/page_fault_manager/cpu_page_fault_manager.h"
 
+#include "level_zero/core/source/device/bcs_split.h"
 #include "level_zero/core/source/device/device.h"
 
 #include <map>
@@ -24,6 +25,7 @@ class DriverInfo;
 
 namespace L0 {
 struct SysmanDevice;
+struct FabricVertex;
 class CacheReservation;
 
 struct DeviceImp : public Device {
@@ -117,6 +119,8 @@ struct DeviceImp : public Device {
     CommandList *pageFaultCommandList = nullptr;
     ze_pci_speed_ext_t pciMaxSpeed = {-1, -1, -1};
 
+    BcsSplit bcsSplit;
+
     bool resourcesReleased = false;
     void releaseResources();
 
@@ -126,15 +130,16 @@ struct DeviceImp : public Device {
     std::unique_ptr<NEO::AllocationsList> allocationsForReuse;
     std::unique_ptr<NEO::DriverInfo> driverInfo;
     void createSysmanHandle(bool isSubDevice);
-    NEO::EngineGroupsT &getSubDeviceCopyEngineGroups();
     void populateSubDeviceCopyEngineGroups();
     bool isQueueGroupOrdinalValid(uint32_t ordinal);
 
     using CmdListCreateFunPtrT = L0::CommandList *(*)(uint32_t, Device *, NEO::EngineGroupType, ze_command_list_flags_t, ze_result_t &);
     CmdListCreateFunPtrT getCmdListCreateFunc(const ze_command_list_desc_t *desc);
+    std::unique_ptr<FabricVertex> fabricVertex;
 
   protected:
     void adjustCommandQueueDesc(uint32_t &ordinal, uint32_t &index);
+    NEO::EngineGroupType getEngineGroupTypeForOrdinal(uint32_t ordinal) const;
     NEO::EngineGroupsT subDeviceCopyEngineGroups{};
 
     NEO::GraphicsAllocation *debugSurface = nullptr;

@@ -22,7 +22,6 @@ PVCTEST_F(PreambleCfeState, givenXeHpcAndKernelExecutionTypeAndRevisionWhenCalli
 
     const auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo->platform.eProductFamily);
     auto pVfeCmd = PreambleHelper<FamilyType>::getSpaceForVfeState(&linearStream, *hwInfo, EngineGroupType::RenderCompute);
-    StreamProperties streamProperties{};
     std::array<std::pair<uint32_t, bool>, 4> revisions = {
         {{REVISION_A0, false},
          {REVISION_A0, true},
@@ -30,6 +29,7 @@ PVCTEST_F(PreambleCfeState, givenXeHpcAndKernelExecutionTypeAndRevisionWhenCalli
          {REVISION_B, true}}};
 
     for (const auto &[revision, kernelExecutionType] : revisions) {
+        StreamProperties streamProperties{};
         hwInfo->platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(revision, *hwInfo);
         streamProperties.frontEndState.setProperties(kernelExecutionType, false, false, false, *hwInfo);
 
@@ -39,8 +39,7 @@ PVCTEST_F(PreambleCfeState, givenXeHpcAndKernelExecutionTypeAndRevisionWhenCalli
         ASSERT_NE(cmdList.end(), cfeStateIt);
         auto cfeState = reinterpret_cast<CFE_STATE *>(*cfeStateIt);
 
-        auto expectedValue = (HwInfoConfig::get(hwInfo->platform.eProductFamily)->getSteppingFromHwRevId(*hwInfo) >= REVISION_B) &&
-                             kernelExecutionType;
+        auto expectedValue = (revision >= REVISION_B) && kernelExecutionType;
         EXPECT_EQ(expectedValue, cfeState->getComputeDispatchAllWalkerEnable());
         EXPECT_FALSE(cfeState->getSingleSliceDispatchCcsMode());
         EXPECT_FALSE(cfeState->getComputeOverdispatchDisable());
@@ -53,7 +52,7 @@ PVCTEST_F(PreamblePipelineSelectState, givenRevisionBAndAboveWhenCallingProgramP
     auto hwInfo = pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
 
     PipelineSelectArgs pipelineArgs;
-    pipelineArgs.specialPipelineSelectMode = true;
+    pipelineArgs.systolicPipelineSelectMode = true;
 
     struct {
         unsigned short revId;
@@ -66,9 +65,12 @@ PVCTEST_F(PreamblePipelineSelectState, givenRevisionBAndAboveWhenCallingProgramP
         {0x6, false},
         {0x7, false},
     };
+    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo->platform.eProductFamily);
     for (auto &testInput : testInputs) {
         LinearStream linearStream(&gfxAllocation);
         hwInfo->platform.usRevId = testInput.revId;
+        pipelineArgs.systolicPipelineSelectSupport = hwInfoConfig.isSystolicModeConfigurable(*hwInfo);
+
         PreambleHelper<FamilyType>::programPipelineSelect(&linearStream, pipelineArgs, *hwInfo);
         parseCommands<FamilyType>(linearStream);
 

@@ -48,6 +48,10 @@ struct DebugSessionImp : DebugSession {
     void detachTileDebugSession(DebugSession *tileSession) override;
     bool areAllTileDebugSessionDetached() override;
 
+    virtual void attachTile() = 0;
+    virtual void detachTile() = 0;
+    virtual void cleanRootSessionAfterDetach(uint32_t deviceIndex) = 0;
+
     static const SIP::regset_desc *getSbaRegsetDesc();
     static uint32_t typeToRegsetFlags(uint32_t type);
     constexpr static int64_t interruptTimeout = 2000;
@@ -59,6 +63,7 @@ struct DebugSessionImp : DebugSession {
     MOCKABLE_VIRTUAL ze_result_t writeRegistersImp(EuThread::ThreadId thread, uint32_t type, uint32_t start, uint32_t count, void *pRegisterValues);
     Error resumeThreadsWithinDevice(uint32_t deviceIndex, ze_device_thread_t physicalThread);
     MOCKABLE_VIRTUAL bool writeResumeCommand(const std::vector<EuThread::ThreadId> &threadIds);
+    void applyResumeWa(uint8_t *bitmask, size_t bitmaskSize);
     MOCKABLE_VIRTUAL bool checkThreadIsResumed(const EuThread::ThreadId &threadID);
 
     virtual ze_result_t resumeImp(const std::vector<EuThread::ThreadId> &threads, uint32_t deviceIndex) = 0;
@@ -69,7 +74,7 @@ struct DebugSessionImp : DebugSession {
     ze_result_t validateThreadAndDescForMemoryAccess(ze_device_thread_t thread, const zet_debug_memory_space_desc_t *desc);
 
     virtual void enqueueApiEvent(zet_debug_event_t &debugEvent) = 0;
-    virtual bool readSystemRoutineIdent(EuThread *thread, uint64_t vmHandle, SIP::sr_ident &srMagic) = 0;
+    MOCKABLE_VIRTUAL bool readSystemRoutineIdent(EuThread *thread, uint64_t vmHandle, SIP::sr_ident &srMagic);
 
     ze_result_t readSbaRegisters(EuThread::ThreadId thread, uint32_t start, uint32_t count, void *pRegisterValues);
     MOCKABLE_VIRTUAL bool isForceExceptionOrForceExternalHaltOnlyExceptionReason(uint32_t *cr0);
@@ -85,9 +90,7 @@ struct DebugSessionImp : DebugSession {
     void validateAndSetStateSaveAreaHeader(const std::vector<char> &data);
     virtual void readStateSaveAreaHeader(){};
 
-    virtual uint64_t getContextStateSaveAreaGpuVa(uint64_t memoryHandle) {
-        return 0;
-    };
+    virtual uint64_t getContextStateSaveAreaGpuVa(uint64_t memoryHandle) = 0;
 
     ze_result_t registersAccessHelper(const EuThread *thread, const SIP::regset_desc *regdesc,
                                       uint32_t start, uint32_t count, void *pRegisterValues, bool write);
@@ -133,8 +136,9 @@ struct DebugSessionImp : DebugSession {
     std::vector<EuThread::ThreadId> newlyStoppedThreads;
     std::vector<char> stateSaveAreaHeader;
 
-    std::vector<std::pair<DebugSession *, bool>> tileSessions; // DebugSession, attached
+    std::vector<std::pair<DebugSessionImp *, bool>> tileSessions; // DebugSession, attached
     bool tileAttachEnabled = false;
+    bool tileSessionsEnabled = false;
 
     ThreadHelper asyncThread;
     std::mutex asyncThreadMutex;

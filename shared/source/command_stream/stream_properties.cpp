@@ -16,16 +16,23 @@ using namespace NEO;
 
 void StateComputeModeProperties::setProperties(bool requiresCoherency, uint32_t numGrfRequired, int32_t threadArbitrationPolicy, PreemptionMode devicePreemptionMode,
                                                const HardwareInfo &hwInfo) {
-    auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
-    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
 
+    if (this->propertiesSupportLoaded == false) {
+        auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+        hwInfoConfig.fillScmPropertiesSupportStructure(this->scmPropertiesSupport);
+        this->propertiesSupportLoaded = true;
+    }
+
+    auto &hwHelper = HwHelper::get(hwInfo.platform.eRenderCoreFamily);
     clearIsDirty();
 
-    int32_t isCoherencyRequired = (requiresCoherency ? 1 : 0);
-    this->isCoherencyRequired.set(isCoherencyRequired);
+    if (this->scmPropertiesSupport.coherencyRequired) {
+        int32_t isCoherencyRequired = (requiresCoherency ? 1 : 0);
+        this->isCoherencyRequired.set(isCoherencyRequired);
+    }
 
-    bool reportNumGrf = hwInfoConfig.isGrfNumReportedWithScm();
-    if (reportNumGrf && (this->largeGrfMode.value == -1 || numGrfRequired != GrfConfig::NotApplicable)) {
+    if (this->scmPropertiesSupport.largeGrfMode &&
+        (this->largeGrfMode.value == -1 || numGrfRequired != GrfConfig::NotApplicable)) {
         int32_t largeGrfMode = (numGrfRequired == GrfConfig::LargeGrfNumber ? 1 : 0);
         this->largeGrfMode.set(largeGrfMode);
     }
@@ -34,13 +41,17 @@ void StateComputeModeProperties::setProperties(bool requiresCoherency, uint32_t 
     if (DebugManager.flags.ForceZPassAsyncComputeThreadLimit.get() != -1) {
         zPassAsyncComputeThreadLimit = DebugManager.flags.ForceZPassAsyncComputeThreadLimit.get();
     }
-    this->zPassAsyncComputeThreadLimit.set(zPassAsyncComputeThreadLimit);
+    if (zPassAsyncComputeThreadLimit != -1 && this->scmPropertiesSupport.zPassAsyncComputeThreadLimit) {
+        this->zPassAsyncComputeThreadLimit.set(zPassAsyncComputeThreadLimit);
+    }
 
     int32_t pixelAsyncComputeThreadLimit = -1;
     if (DebugManager.flags.ForcePixelAsyncComputeThreadLimit.get() != -1) {
         pixelAsyncComputeThreadLimit = DebugManager.flags.ForcePixelAsyncComputeThreadLimit.get();
     }
-    this->pixelAsyncComputeThreadLimit.set(pixelAsyncComputeThreadLimit);
+    if (pixelAsyncComputeThreadLimit != -1 && this->scmPropertiesSupport.pixelAsyncComputeThreadLimit) {
+        this->pixelAsyncComputeThreadLimit.set(pixelAsyncComputeThreadLimit);
+    }
 
     bool setDefaultThreadArbitrationPolicy = (threadArbitrationPolicy == ThreadArbitrationPolicy::NotPresent) &&
                                              (NEO::DebugManager.flags.ForceDefaultThreadArbitrationPolicyIfNotSpecified.get() ||
@@ -51,16 +62,15 @@ void StateComputeModeProperties::setProperties(bool requiresCoherency, uint32_t 
     if (DebugManager.flags.OverrideThreadArbitrationPolicy.get() != -1) {
         threadArbitrationPolicy = DebugManager.flags.OverrideThreadArbitrationPolicy.get();
     }
-    bool reportThreadArbitrationPolicy = hwInfoConfig.isThreadArbitrationPolicyReportedWithScm();
-    if (reportThreadArbitrationPolicy) {
+    if (this->scmPropertiesSupport.threadArbitrationPolicy) {
         this->threadArbitrationPolicy.set(threadArbitrationPolicy);
     }
 
-    if (hwHelper.isDevicePreemptionModeTrackedInScm()) {
+    if (this->scmPropertiesSupport.devicePreemptionMode) {
         this->devicePreemptionMode.set(static_cast<int32_t>(devicePreemptionMode));
     }
 
-    setPropertiesExtra(reportNumGrf, reportThreadArbitrationPolicy);
+    setPropertiesExtra();
 }
 
 void StateComputeModeProperties::setProperties(const StateComputeModeProperties &properties) {
@@ -92,14 +102,42 @@ void StateComputeModeProperties::clearIsDirty() {
     clearIsDirtyExtra();
 }
 
-void FrontEndProperties::setProperties(bool isCooperativeKernel, bool disableEUFusion, bool disableOverdispatch,
-                                       int32_t engineInstancedDevice, const HardwareInfo &hwInfo) {
+void FrontEndProperties::setProperties(bool isCooperativeKernel, bool disableEUFusion, bool disableOverdispatch, int32_t engineInstancedDevice, const HardwareInfo &hwInfo) {
+    if (this->propertiesSupportLoaded == false) {
+        auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+        hwInfoConfig.fillFrontEndPropertiesSupportStructure(this->frontEndPropertiesSupport, hwInfo);
+        this->propertiesSupportLoaded = true;
+    }
+
     clearIsDirty();
 
-    this->computeDispatchAllWalkerEnable.set(isCooperativeKernel);
-    this->disableEUFusion.set(disableEUFusion);
-    this->disableOverdispatch.set(disableOverdispatch);
-    this->singleSliceDispatchCcsMode.set(engineInstancedDevice);
+    if (this->frontEndPropertiesSupport.computeDispatchAllWalker) {
+        this->computeDispatchAllWalkerEnable.set(isCooperativeKernel);
+    }
+
+    if (this->frontEndPropertiesSupport.disableEuFusion) {
+        this->disableEUFusion.set(disableEUFusion);
+    }
+
+    if (this->frontEndPropertiesSupport.disableOverdispatch) {
+        this->disableOverdispatch.set(disableOverdispatch);
+    }
+
+    if (this->frontEndPropertiesSupport.singleSliceDispatchCcsMode) {
+        this->singleSliceDispatchCcsMode.set(engineInstancedDevice);
+    }
+}
+
+void FrontEndProperties::setPropertySingleSliceDispatchCcsMode(int32_t engineInstancedDevice, const HardwareInfo &hwInfo) {
+    if (this->propertiesSupportLoaded == false) {
+        auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+        hwInfoConfig.fillFrontEndPropertiesSupportStructure(this->frontEndPropertiesSupport, hwInfo);
+        this->propertiesSupportLoaded = true;
+    }
+    this->singleSliceDispatchCcsMode.isDirty = false;
+    if (this->frontEndPropertiesSupport.singleSliceDispatchCcsMode) {
+        this->singleSliceDispatchCcsMode.set(engineInstancedDevice);
+    }
 }
 
 void FrontEndProperties::setProperties(const FrontEndProperties &properties) {
@@ -121,4 +159,44 @@ void FrontEndProperties::clearIsDirty() {
     disableOverdispatch.isDirty = false;
     singleSliceDispatchCcsMode.isDirty = false;
     computeDispatchAllWalkerEnable.isDirty = false;
+}
+
+void PipelineSelectProperties::setProperties(bool modeSelected, bool mediaSamplerDopClockGate, bool systolicMode, const HardwareInfo &hwInfo) {
+    if (this->propertiesSupportLoaded == false) {
+        auto &hwInfoConfig = *HwInfoConfig::get(hwInfo.platform.eProductFamily);
+        hwInfoConfig.fillPipelineSelectPropertiesSupportStructure(this->pipelineSelectPropertiesSupport, hwInfo);
+        this->propertiesSupportLoaded = true;
+    }
+
+    clearIsDirty();
+
+    if (this->pipelineSelectPropertiesSupport.modeSelected) {
+        this->modeSelected.set(modeSelected);
+    }
+
+    if (this->pipelineSelectPropertiesSupport.mediaSamplerDopClockGate) {
+        this->mediaSamplerDopClockGate.set(mediaSamplerDopClockGate);
+    }
+
+    if (this->pipelineSelectPropertiesSupport.systolicMode) {
+        this->systolicMode.set(systolicMode);
+    }
+}
+
+void PipelineSelectProperties::setProperties(const PipelineSelectProperties &properties) {
+    clearIsDirty();
+
+    modeSelected.set(properties.modeSelected.value);
+    mediaSamplerDopClockGate.set(properties.mediaSamplerDopClockGate.value);
+    systolicMode.set(properties.systolicMode.value);
+}
+
+bool PipelineSelectProperties::isDirty() const {
+    return modeSelected.isDirty || mediaSamplerDopClockGate.isDirty || systolicMode.isDirty;
+}
+
+void PipelineSelectProperties::clearIsDirty() {
+    modeSelected.isDirty = false;
+    mediaSamplerDopClockGate.isDirty = false;
+    systolicMode.isDirty = false;
 }

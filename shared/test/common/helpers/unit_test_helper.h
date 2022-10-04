@@ -87,6 +87,10 @@ struct UnitTestHelper {
     static GenCmdList::iterator findMidThreadPreemptionAllocationCommand(GenCmdList::iterator begin, GenCmdList::iterator end);
 
     static std::vector<GenCmdList::iterator> findAllMidThreadPreemptionAllocationCommand(GenCmdList::iterator begin, GenCmdList::iterator end);
+
+    static bool getDisableFusionStateFromFrontEndCommand(const typename GfxFamily::VFE_STATE_TYPE &feCmd);
+    static bool getComputeDispatchAllWalkerFromFrontEndCommand(const typename GfxFamily::VFE_STATE_TYPE &feCmd);
+    static bool getSystolicFlagValueFromPipelineSelectCommand(const typename GfxFamily::PIPELINE_SELECT &pipelineSelectCmd);
 };
 
 } // namespace NEO

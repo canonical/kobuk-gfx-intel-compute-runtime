@@ -10,6 +10,7 @@
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
 #include "shared/source/os_interface/os_context.h"
+#include "shared/source/os_interface/os_inc_base.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/helpers/raii_hw_helper.h"
@@ -178,22 +179,22 @@ HWTEST_F(DeviceTest, WhenDeviceIsCreatedThenActualEngineTypeIsSameAsDefault) {
     EXPECT_EQ(defaultCounter, 1);
 }
 
-HWTEST_F(DeviceTest, givenNoHwCsrTypeAndModifiedDefaultEngineIndexWhenIsSimulationIsCalledThenTrueIsReturned) {
-    EXPECT_FALSE(pDevice->isSimulation());
-    auto csr = TbxCommandStreamReceiver::create("", false, *pDevice->executionEnvironment, 0, 1);
-    pDevice->defaultEngineIndex = 1;
-    pDevice->resetCommandStreamReceiver(csr);
+TEST_F(DeviceTest, givenDeviceWithThreadsPerEUConfigsWhenQueryingEuThreadCountsThenConfigsAreReturned) {
+    cl_int retVal = CL_SUCCESS;
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(NEO::defaultHwInfo.get(), 0));
+    const StackVec<uint32_t, 6> configs = {123U, 456U};
+    device->sharedDeviceInfo.threadsPerEUConfigs = configs;
 
-    EXPECT_TRUE(pDevice->isSimulation());
+    size_t paramRetSize;
+    retVal = device->getDeviceInfo(CL_DEVICE_EU_THREAD_COUNTS_INTEL, 0, nullptr, &paramRetSize);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(configs.size() * sizeof(cl_uint), paramRetSize);
 
-    std::array<CommandStreamReceiverType, 3> exptectedEngineTypes = {CommandStreamReceiverType::CSR_HW,
-                                                                     CommandStreamReceiverType::CSR_TBX,
-                                                                     CommandStreamReceiverType::CSR_HW};
-
-    for (uint32_t i = 0u; i < 3u; ++i) {
-        auto engineType = pDevice->allEngines[i].commandStreamReceiver->getType();
-        EXPECT_EQ(exptectedEngineTypes[i], engineType);
-    }
+    auto euThreadCounts = std::make_unique<uint32_t[]>(paramRetSize / sizeof(cl_uint));
+    retVal = device->getDeviceInfo(CL_DEVICE_EU_THREAD_COUNTS_INTEL, paramRetSize, euThreadCounts.get(), nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(123U, euThreadCounts[0]);
+    EXPECT_EQ(456U, euThreadCounts[1]);
 }
 
 TEST_F(DeviceTest, givenRootDeviceWithSubDevicesWhenCreatingThenRootDeviceContextIsInitialized) {
@@ -251,47 +252,15 @@ TEST(DeviceCleanup, givenDeviceWhenItIsDestroyedThenFlushBatchedSubmissionsIsCal
     EXPECT_EQ(1, flushedBatchedSubmissionsCalledCount);
 }
 
-TEST(DeviceCreation, givenSelectedAubCsrInDebugVarsWhenDeviceIsCreatedThenIsSimulationReturnsTrue) {
-    DebugManagerStateRestore dbgRestorer;
-    DebugManager.flags.SetCommandStreamReceiver.set(CommandStreamReceiverType::CSR_AUB);
+TEST(DeviceCreation, GiveNonExistingFclWhenCreatingDeviceThenCompilerInterfaceIsNotCreated) {
+    VariableBackup<const char *> frontEndDllName(&Os::frontEndDllName);
+    Os::frontEndDllName = "_fake_fcl1_so";
 
-    VariableBackup<UltHwConfig> backup(&ultHwConfig);
-    ultHwConfig.useHwCsr = true;
     auto mockDevice = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<Device>(nullptr));
-    EXPECT_TRUE(mockDevice->isSimulation());
-}
+    ASSERT_NE(nullptr, mockDevice);
 
-TEST(DeviceCreation, givenSelectedTbxCsrInDebugVarsWhenDeviceIsCreatedThenIsSimulationReturnsTrue) {
-    DebugManagerStateRestore dbgRestorer;
-    DebugManager.flags.SetCommandStreamReceiver.set(CommandStreamReceiverType::CSR_TBX);
-
-    VariableBackup<UltHwConfig> backup(&ultHwConfig);
-    ultHwConfig.useHwCsr = true;
-    auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<Device>(nullptr));
-    EXPECT_TRUE(device->isSimulation());
-}
-
-TEST(DeviceCreation, givenSelectedTbxWithAubCsrInDebugVarsWhenDeviceIsCreatedThenIsSimulationReturnsTrue) {
-    DebugManagerStateRestore dbgRestorer;
-    DebugManager.flags.SetCommandStreamReceiver.set(CommandStreamReceiverType::CSR_TBX_WITH_AUB);
-
-    VariableBackup<UltHwConfig> backup(&ultHwConfig);
-    ultHwConfig.useHwCsr = true;
-    auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<Device>(nullptr));
-    EXPECT_TRUE(device->isSimulation());
-}
-
-TEST(DeviceCreation, givenHwWithAubCsrInDebugVarsWhenDeviceIsCreatedThenIsSimulationReturnsFalse) {
-    DebugManagerStateRestore dbgRestorer;
-    DebugManager.flags.SetCommandStreamReceiver.set(CommandStreamReceiverType::CSR_HW_WITH_AUB);
-
-    auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<Device>(nullptr));
-    EXPECT_FALSE(device->isSimulation());
-}
-
-TEST(DeviceCreation, givenDefaultHwCsrInDebugVarsWhenDeviceIsCreatedThenIsSimulationReturnsFalse) {
-    auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<Device>(nullptr));
-    EXPECT_FALSE(device->isSimulation());
+    auto compilerInterface = mockDevice->getCompilerInterface();
+    ASSERT_EQ(nullptr, compilerInterface);
 }
 
 TEST(DeviceCreation, givenDeviceWhenItIsCreatedThenOsContextIsRegistredInMemoryManager) {
@@ -477,17 +446,6 @@ HWTEST_F(DeviceTest, givenDebugFlagWhenCreatingRootDeviceWithoutSubDevicesThenWo
         UltDeviceFactory deviceFactory{1, 1};
         EXPECT_EQ(nullptr, deviceFactory.rootDevices[0]->getDefaultEngine().commandStreamReceiver->getWorkPartitionAllocation());
     }
-}
-
-TEST(DeviceCreation, givenFtrSimulationModeFlagTrueWhenNoOtherSimulationFlagsArePresentThenIsSimulationReturnsTrue) {
-    HardwareInfo hwInfo = *defaultHwInfo;
-    hwInfo.featureTable.flags.ftrSimulationMode = true;
-
-    bool simulationFromDeviceId = hwInfo.capabilityTable.isSimulation(hwInfo.platform.usDeviceID);
-    EXPECT_FALSE(simulationFromDeviceId);
-
-    auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<Device>(&hwInfo));
-    EXPECT_TRUE(device->isSimulation());
 }
 
 TEST(DeviceCreation, givenDeviceWhenCheckingGpgpuEnginesCountThenNumberGreaterThanZeroIsReturned) {

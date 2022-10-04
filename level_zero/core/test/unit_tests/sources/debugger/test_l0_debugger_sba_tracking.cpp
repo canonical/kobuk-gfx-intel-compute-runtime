@@ -133,7 +133,7 @@ HWTEST2_F(L0DebuggerPerContextAddressSpaceTest, givenDebuggingEnabledAndRequired
         GTEST_SKIP();
     }
 
-    auto usedSpaceBefore = commandQueue->commandStream->getUsed();
+    auto usedSpaceBefore = commandQueue->commandStream.getUsed();
 
     ze_command_list_handle_t commandLists[] = {
         CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)->toHandle()};
@@ -144,12 +144,12 @@ HWTEST2_F(L0DebuggerPerContextAddressSpaceTest, givenDebuggingEnabledAndRequired
     auto result = commandQueue->executeCommandLists(numCommandLists, commandLists, nullptr, true);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
-    auto usedSpaceAfter = commandQueue->commandStream->getUsed();
+    auto usedSpaceAfter = commandQueue->commandStream.getUsed();
     ASSERT_GT(usedSpaceAfter, usedSpaceBefore);
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
-        cmdList, ptrOffset(commandQueue->commandStream->getCpuBase(), 0), usedSpaceAfter));
+        cmdList, ptrOffset(commandQueue->commandStream.getCpuBase(), 0), usedSpaceAfter));
 
     auto sbaItor = find<STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
     ASSERT_NE(cmdList.end(), sbaItor);
@@ -184,7 +184,7 @@ HWTEST2_F(L0DebuggerTest, givenDebuggingEnabledAndDebuggerLogsWhenCommandQueueIs
     ze_command_queue_desc_t queueDesc = {};
     ze_result_t returnValue;
     auto commandQueue = whiteboxCast(CommandQueue::create(productFamily, device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
-    ASSERT_NE(nullptr, commandQueue->commandStream);
+    ASSERT_NE(nullptr, commandQueue);
 
     ze_command_list_handle_t commandLists[] = {
         CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)->toHandle()};
@@ -220,7 +220,7 @@ HWTEST2_F(L0DebuggerSimpleTest, givenNullL0DebuggerAndDebuggerLogsWhenCommandQue
     ze_command_queue_desc_t queueDesc = {};
     ze_result_t returnValue;
     auto commandQueue = whiteboxCast(CommandQueue::create(productFamily, device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
-    ASSERT_NE(nullptr, commandQueue->commandStream);
+    ASSERT_NE(nullptr, commandQueue);
 
     ze_command_list_handle_t commandLists[] = {
         CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)->toHandle()};
@@ -251,7 +251,7 @@ HWTEST2_F(L0DebuggerTest, givenL0DebuggerAndDebuggerLogsDisabledWhenCommandQueue
     ze_command_queue_desc_t queueDesc = {};
     ze_result_t returnValue;
     auto commandQueue = whiteboxCast(CommandQueue::create(productFamily, device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
-    ASSERT_NE(nullptr, commandQueue->commandStream);
+    ASSERT_NE(nullptr, commandQueue);
 
     ze_command_list_handle_t commandLists[] = {
         CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)->toHandle()};
@@ -330,6 +330,35 @@ HWTEST2_F(L0DebuggerTest, givenDebuggingEnabledWhenCommandListIsExecutedThenSbaB
     commandList->destroy();
 }
 
+HWTEST2_F(L0DebuggerTest, givenDebugerEnabledWhenPrepareAndSubmitBatchBufferThenLeftoverIsZeroed, Gen12Plus) {
+    ze_command_queue_desc_t queueDesc = {};
+    std::unique_ptr<MockCommandQueueHw<gfxCoreFamily>, Deleter> commandQueue(new MockCommandQueueHw<gfxCoreFamily>(device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc));
+    commandQueue->initialize(false, false);
+
+    auto &commandStream = commandQueue->commandStream;
+    auto estimatedSize = 4096u;
+    NEO::LinearStream linearStream(commandStream.getSpace(estimatedSize), estimatedSize);
+    // fill with random data
+    memset(commandStream.getCpuBase(), 0xD, estimatedSize);
+
+    typename MockCommandQueueHw<gfxCoreFamily>::CommandListExecutionContext ctx{};
+    ctx.isDebugEnabled = true;
+
+    commandQueue->prepareAndSubmitBatchBuffer(ctx, linearStream);
+
+    // MI_BATCH_BUFFER END is added during prepareAndSubmitBatchBuffer
+    auto offsetInBytes = sizeof(typename FamilyType::MI_BATCH_BUFFER_END);
+    auto isLeftoverZeroed = true;
+    for (auto i = offsetInBytes; i < estimatedSize; i++) {
+        uint8_t *data = reinterpret_cast<uint8_t *>(commandStream.getCpuBase());
+        if (data[i] != 0) {
+            isLeftoverZeroed = false;
+            break;
+        }
+    }
+    EXPECT_TRUE(isLeftoverZeroed);
+}
+
 INSTANTIATE_TEST_CASE_P(SBAModesForDebugger, L0DebuggerParameterizedTests, ::testing::Values(0, 1));
 
 struct L0DebuggerSingleAddressSpace : public Test<L0DebuggerHwFixture> {
@@ -352,9 +381,9 @@ HWTEST2_F(L0DebuggerSingleAddressSpace, givenDebuggingEnabledWhenCommandListIsEx
     ze_command_queue_desc_t queueDesc = {};
     ze_result_t returnValue;
     auto commandQueue = whiteboxCast(CommandQueue::create(productFamily, device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc, false, false, returnValue));
-    ASSERT_NE(nullptr, commandQueue->commandStream);
+    ASSERT_NE(nullptr, commandQueue);
 
-    auto usedSpaceBefore = commandQueue->commandStream->getUsed();
+    auto usedSpaceBefore = commandQueue->commandStream.getUsed();
 
     ze_command_list_handle_t commandLists[] = {
         CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)->toHandle()};
@@ -363,12 +392,12 @@ HWTEST2_F(L0DebuggerSingleAddressSpace, givenDebuggingEnabledWhenCommandListIsEx
     auto result = commandQueue->executeCommandLists(numCommandLists, commandLists, nullptr, true);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
-    auto usedSpaceAfter = commandQueue->commandStream->getUsed();
+    auto usedSpaceAfter = commandQueue->commandStream.getUsed();
     ASSERT_GT(usedSpaceAfter, usedSpaceBefore);
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
-        cmdList, ptrOffset(commandQueue->commandStream->getCpuBase(), 0), usedSpaceAfter));
+        cmdList, ptrOffset(commandQueue->commandStream.getCpuBase(), 0), usedSpaceAfter));
 
     auto miLoadImm = findAll<MI_LOAD_REGISTER_IMM *>(cmdList.begin(), cmdList.end());
 

@@ -19,6 +19,8 @@
 
 #include "encode_surface_state_args.h"
 
+#include <list>
+
 namespace NEO {
 
 class BindlessHeapsHelper;
@@ -35,6 +37,7 @@ struct EncodeDispatchKernelArgs {
     Device *device = nullptr;
     DispatchKernelEncoderI *dispatchInterface = nullptr;
     const void *threadGroupDimensions = nullptr;
+    std::list<void *> *additionalCommands = nullptr;
     PreemptionMode preemptionMode = PreemptionMode::Initial;
     uint32_t partitionCount = 0u;
     bool isIndirect = false;
@@ -47,6 +50,7 @@ struct EncodeDispatchKernelArgs {
     bool isHostScopeSignalEvent = false;
     bool isKernelUsingSystemAllocation = false;
     bool isKernelDispatchedFromImmediateCmdList = false;
+    bool isRcs = false;
 };
 
 struct EncodeWalkerArgs {
@@ -241,12 +245,31 @@ struct EncodeMediaInterfaceDescriptorLoad {
 };
 
 template <typename GfxFamily>
+struct EncodeStateBaseAddressArgs {
+    using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
+
+    CommandContainer *container = nullptr;
+    STATE_BASE_ADDRESS &sbaCmd;
+
+    uint32_t statelessMocsIndex = 0;
+
+    bool useGlobalAtomics = false;
+    bool multiOsContextCapable = false;
+    bool isRcs = false;
+};
+
+template <typename GfxFamily>
 struct EncodeStateBaseAddress {
     using STATE_BASE_ADDRESS = typename GfxFamily::STATE_BASE_ADDRESS;
-    static void encode(CommandContainer &container, STATE_BASE_ADDRESS &sbaCmd, bool multiOsContextCapable);
-    static void encode(CommandContainer &container, STATE_BASE_ADDRESS &sbaCmd, uint32_t statelessMocsIndex, bool useGlobalAtomics, bool multiOsContextCapable);
+    static void encode(EncodeStateBaseAddressArgs<GfxFamily> &args);
+    static size_t getRequiredSizeForStateBaseAddress(Device &device, CommandContainer &container, bool isRcs);
+    static void setSbaTrackingForL0DebuggerIfEnabled(bool trackingEnabled,
+                                                     Device &device,
+                                                     LinearStream &commandStream,
+                                                     STATE_BASE_ADDRESS &sbaCmd);
+
+  protected:
     static void setSbaAddressesForDebugger(NEO::Debugger::SbaAddresses &sbaAddress, const STATE_BASE_ADDRESS &sbaCmd);
-    static size_t getRequiredSizeForStateBaseAddress(Device &device, CommandContainer &container);
 };
 
 template <typename GfxFamily>
@@ -269,7 +292,7 @@ struct EncodeSurfaceState {
     static void encodeBuffer(EncodeSurfaceStateArgs &args);
     static void encodeExtraBufferParams(EncodeSurfaceStateArgs &args);
     static void encodeImplicitScalingParams(const EncodeSurfaceStateArgs &args);
-    static void encodeExtraCacheSettings(R_SURFACE_STATE *surfaceState, const HardwareInfo &hwInfo);
+    static void encodeExtraCacheSettings(R_SURFACE_STATE *surfaceState, const EncodeSurfaceStateArgs &args);
     static void appendBufferSurfaceState(EncodeSurfaceStateArgs &args);
 
     static constexpr uintptr_t getSurfaceBaseAddressAlignmentMask() {
@@ -280,6 +303,7 @@ struct EncodeSurfaceState {
 
     static void getSshAlignedPointer(uintptr_t &ptr, size_t &offset);
     static bool doBindingTablePrefetch();
+    static bool isBindingTablePrefetchPreferred();
 
     static size_t pushBindingTableAndSurfaceStates(IndirectHeap &dstHeap, size_t bindingTableCount,
                                                    const void *srcKernelSsh, size_t srcKernelSshSize,
@@ -313,7 +337,7 @@ template <typename GfxFamily>
 struct EncodeWA {
     static void encodeAdditionalPipelineSelect(LinearStream &stream, const PipelineSelectArgs &args, bool is3DPipeline,
                                                const HardwareInfo &hwInfo, bool isRcs);
-    static size_t getAdditionalPipelineSelectSize(Device &device);
+    static size_t getAdditionalPipelineSelectSize(Device &device, bool isRcs);
 
     static void addPipeControlPriorToNonPipelinedStateCommand(LinearStream &commandStream, PipeControlArgs args,
                                                               const HardwareInfo &hwInfo, bool isRcs);
@@ -383,10 +407,19 @@ struct EncodeBatchBufferStartOrEnd {
     using MI_BATCH_BUFFER_START = typename GfxFamily::MI_BATCH_BUFFER_START;
     using MI_BATCH_BUFFER_END = typename GfxFamily::MI_BATCH_BUFFER_END;
 
+    static constexpr size_t getBatchBufferStartSize() {
+        return sizeof(MI_BATCH_BUFFER_START);
+    }
+
+    static constexpr size_t getBatchBufferEndSize() {
+        return sizeof(MI_BATCH_BUFFER_END);
+    }
+
     static void programBatchBufferStart(LinearStream *commandStream,
                                         uint64_t address,
                                         bool secondLevel);
     static void programBatchBufferEnd(CommandContainer &container);
+    static void programBatchBufferEnd(LinearStream &commandStream);
 };
 
 template <typename GfxFamily>

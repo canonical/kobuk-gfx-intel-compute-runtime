@@ -13,6 +13,8 @@
 
 #include "level_zero/core/source/module/module.h"
 
+#include "igfxfmid.h"
+
 #include <list>
 #include <memory>
 #include <string>
@@ -31,6 +33,8 @@ extern NEO::ConstStringRef greaterThan4GbRequired;
 extern NEO::ConstStringRef hasBufferOffsetArg;
 extern NEO::ConstStringRef debugKernelEnable;
 extern NEO::ConstStringRef profileFlags;
+extern NEO::ConstStringRef optLargeRegisterFile;
+
 } // namespace BuildOptions
 
 struct ModuleTranslationUnit {
@@ -85,7 +89,7 @@ struct ModuleImp : public Module {
     ze_result_t destroy() override;
 
     ze_result_t createKernel(const ze_kernel_desc_t *desc,
-                             ze_kernel_handle_t *phFunction) override;
+                             ze_kernel_handle_t *kernelHandle) override;
 
     ze_result_t getNativeBinary(size_t *pSize, uint8_t *pModuleNativeBinary) override;
 
@@ -103,14 +107,13 @@ struct ModuleImp : public Module {
 
     ze_result_t getDebugInfo(size_t *pDebugDataSize, uint8_t *pDebugData) override;
 
-    const KernelImmutableData *getKernelImmutableData(const char *functionName) const override;
+    const KernelImmutableData *getKernelImmutableData(const char *kernelName) const override;
 
     const std::vector<std::unique_ptr<KernelImmutableData>> &getKernelImmutableDataVector() const override { return kernelImmDatas; }
 
     uint32_t getMaxGroupSize() const override { return maxGroupSize; }
 
     void createBuildOptions(const char *pBuildFlags, std::string &buildOptions, std::string &internalBuildOptions);
-    void createBuildExtraOptions(std::string &buildOptions, std::string &internalBuildOptions);
     bool moveOptLevelOption(std::string &dstOptionsSet, std::string &srcOptionSet);
     bool moveProfileFlagsOption(std::string &dstOptionsSet, std::string &srcOptionSet);
     void updateBuildLog(NEO::Device *neoDevice);

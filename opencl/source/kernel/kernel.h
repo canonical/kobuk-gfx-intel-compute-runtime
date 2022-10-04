@@ -156,8 +156,6 @@ class Kernel : public ReferenceTrackedObject<Kernel> {
 
     cl_int getInfo(cl_kernel_info paramName, size_t paramValueSize,
                    void *paramValue, size_t *paramValueSizeRet) const;
-    void getAdditionalInfo(cl_kernel_info paramName, const void *&paramValue, size_t &paramValueSizeRet) const;
-    void getAdditionalWorkGroupInfo(cl_kernel_work_group_info paramName, const void *&paramValue, size_t &paramValueSizeRet) const;
 
     cl_int getArgInfo(cl_uint argIndx, cl_kernel_arg_info paramName,
                       size_t paramValueSize, void *paramValue, size_t *paramValueSizeRet) const;
@@ -285,7 +283,7 @@ class Kernel : public ReferenceTrackedObject<Kernel> {
 
     bool getAllowNonUniform() const { return program->getAllowNonUniform(); }
     bool isVmeKernel() const { return kernelInfo.kernelDescriptor.kernelAttributes.flags.usesVme; }
-    bool requiresSpecialPipelineSelectMode() const { return specialPipelineSelectMode; }
+    bool requiresSystolicPipelineSelectMode() const { return systolicPipelineSelectMode; }
 
     void performKernelTuning(CommandStreamReceiver &commandStreamReceiver, const Vec3<size_t> &lws, const Vec3<size_t> &gws, const Vec3<size_t> &offsets, TimestampPacketContainer *timestampContainer);
     MOCKABLE_VIRTUAL bool isSingleSubdevicePreferred() const;
@@ -310,9 +308,6 @@ class Kernel : public ReferenceTrackedObject<Kernel> {
 
     bool isBuiltIn = false;
 
-    int32_t getThreadArbitrationPolicy() const {
-        return threadArbitrationPolicy;
-    }
     KernelExecutionType getExecutionType() const {
         return executionType;
     }
@@ -353,9 +348,6 @@ class Kernel : public ReferenceTrackedObject<Kernel> {
     bool areStatelessWritesUsed() { return containsStatelessWrites; }
     int setKernelThreadArbitrationPolicy(uint32_t propertyValue);
     cl_int setKernelExecutionType(cl_execution_info_kernel_type_intel executionType);
-    void setThreadArbitrationPolicy(int32_t policy) {
-        this->threadArbitrationPolicy = policy;
-    }
     void getSuggestedLocalWorkSize(const cl_uint workDim, const size_t *globalWorkSize, const size_t *globalWorkOffset,
                                    size_t *localWorkSize);
     uint32_t getMaxWorkGroupCount(const cl_uint workDim, const size_t *localWorkSize, const CommandQueue *commandQueue) const;
@@ -521,8 +513,6 @@ class Kernel : public ReferenceTrackedObject<Kernel> {
     AuxTranslationDirection auxTranslationDirection = AuxTranslationDirection::None;
     KernelExecutionType executionType = KernelExecutionType::Default;
 
-    int32_t threadArbitrationPolicy = ThreadArbitrationPolicy::NotPresent;
-
     uint32_t patchedArgumentsNum = 0;
     uint32_t startOffset = 0;
     uint32_t statelessUncacheableArgsCount = 0;
@@ -537,7 +527,7 @@ class Kernel : public ReferenceTrackedObject<Kernel> {
     bool usingImages = false;
     bool usingImagesOnly = false;
     bool auxTranslationRequired = false;
-    bool specialPipelineSelectMode = false;
+    bool systolicPipelineSelectMode = false;
     bool svmAllocationsRequireCacheFlush = false;
     bool isUnifiedMemorySyncRequired = true;
     bool debugEnabled = false;

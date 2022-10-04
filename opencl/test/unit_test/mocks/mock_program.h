@@ -28,7 +28,6 @@ ClDeviceVector toClDeviceVector(ClDevice &clDevice);
 class MockProgram : public Program {
   public:
     using Program::allowNonUniform;
-    using Program::applyAdditionalOptions;
     using Program::areSpecializationConstantsInitialized;
     using Program::buildInfos;
     using Program::context;
@@ -47,6 +46,7 @@ class MockProgram : public Program {
     using Program::linkBinary;
     using Program::options;
     using Program::packDeviceBinary;
+    using Program::processGenBinaries;
     using Program::Program;
     using Program::requiresRebuild;
     using Program::setBuildStatus;

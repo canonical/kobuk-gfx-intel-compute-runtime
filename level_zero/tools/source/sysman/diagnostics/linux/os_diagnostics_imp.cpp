@@ -23,12 +23,10 @@ const std::string LinuxDiagnosticsImp::invalidateLmemFile("invalidate_lmem_mmaps
 const std::string LinuxDiagnosticsImp::quiescentGpuFile("quiesce_gpu");
 void OsDiagnostics::getSupportedDiagTestsFromFW(void *pOsSysman, std::vector<std::string> &supportedDiagTests) {
     LinuxSysmanImp *pLinuxSysmanImp = static_cast<LinuxSysmanImp *>(pOsSysman);
-    if (IGFX_PVC == pLinuxSysmanImp->getProductFamily()) {
+    if (IGFX_PVC == SysmanDeviceImp::getProductFamily(pLinuxSysmanImp->getDeviceHandle())) {
         FirmwareUtil *pFwInterface = pLinuxSysmanImp->getFwUtilInterface();
         if (pFwInterface != nullptr) {
-            if (ZE_RESULT_SUCCESS == static_cast<FirmwareUtil *>(pFwInterface)->fwDeviceInit()) {
-                static_cast<FirmwareUtil *>(pFwInterface)->fwSupportedDiagTests(supportedDiagTests);
-            }
+            static_cast<FirmwareUtil *>(pFwInterface)->fwSupportedDiagTests(supportedDiagTests);
         }
     }
 }

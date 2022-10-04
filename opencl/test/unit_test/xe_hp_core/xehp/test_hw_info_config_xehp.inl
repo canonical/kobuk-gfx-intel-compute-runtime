@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/hw_helper_tests.h"
@@ -20,19 +21,6 @@
 using namespace NEO;
 
 using XeHPHwInfoConfig = ::testing::Test;
-
-XEHPTEST_F(XeHPHwInfoConfig, givenConfigStringWhenSettingUpHardwareThenThrow) {
-    HardwareInfo hwInfo = *defaultHwInfo;
-    GT_SYSTEM_INFO &gtSystemInfo = hwInfo.gtSystemInfo;
-
-    uint64_t config = 0xdeadbeef;
-    gtSystemInfo = {0};
-    EXPECT_ANY_THROW(hardwareInfoSetup[productFamily](&hwInfo, false, config));
-    EXPECT_EQ(0u, gtSystemInfo.SliceCount);
-    EXPECT_EQ(0u, gtSystemInfo.SubSliceCount);
-    EXPECT_EQ(0u, gtSystemInfo.DualSubSliceCount);
-    EXPECT_EQ(0u, gtSystemInfo.EUCount);
-}
 
 XEHPTEST_F(XeHPHwInfoConfig, givenXeHPMultiConfigWhenConfigureHardwareCustomIsCalledThenCapabilityTableIsSetProperly) {
     auto hwInfoConfig = HwInfoConfig::get(productFamily);
@@ -107,13 +95,20 @@ XEHPTEST_F(XeHPHwHelperTest, givenXeHPMultiConfigWhenAllowCompressionIsCalledThe
 }
 
 XEHPTEST_F(XeHPHwInfoConfig, givenHwInfoConfigWhenAdditionalKernelExecInfoSupportCheckedThenCorrectValueIsReturned) {
-    const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
+    auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
     auto hwInfo = *defaultHwInfo;
     hwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_A0, hwInfo);
     EXPECT_FALSE(hwInfoConfig.isDisableOverdispatchAvailable(hwInfo));
 
+    FrontEndPropertiesSupport fePropertiesSupport{};
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, hwInfo);
+    EXPECT_FALSE(fePropertiesSupport.disableOverdispatch);
+
     hwInfo.platform.usRevId = hwInfoConfig.getHwRevIdFromStepping(REVISION_B, hwInfo);
     EXPECT_TRUE(hwInfoConfig.isDisableOverdispatchAvailable(hwInfo));
+
+    hwInfoConfig.fillFrontEndPropertiesSupportStructure(fePropertiesSupport, hwInfo);
+    EXPECT_TRUE(fePropertiesSupport.disableOverdispatch);
 }
 
 XEHPTEST_F(XeHPHwInfoConfig, givenHwInfoConfigWithMultipleCSSWhenIsPipeControlPriorToNonPipelinedStateCommandsWARequiredIsCalledThenTrueIsReturned) {

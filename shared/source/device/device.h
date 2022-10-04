@@ -89,7 +89,6 @@ class Device : public ReferenceTrackedObject<Device> {
     double getProfilingTimerResolution();
     uint64_t getProfilingTimerClock();
     double getPlatformHostTimerResolution() const;
-    bool isSimulation() const;
     GFXCORE_FAMILY getRenderCoreFamily() const;
     PerformanceCounters *getPerformanceCounters() { return performanceCounters.get(); }
     PreemptionMode getPreemptionMode() const { return preemptionMode; }
@@ -106,6 +105,8 @@ class Device : public ReferenceTrackedObject<Device> {
     bool isFullRangeSvm() const {
         return getRootDeviceEnvironment().isFullRangeSvm();
     }
+    static bool isBlitSplitEnabled();
+    bool isBcsSplitSupported();
     bool areSharedSystemAllocationsAllowed() const;
     template <typename SpecializedDeviceT>
     void setSpecializedDevice(SpecializedDeviceT *specializedDevice) {
@@ -149,6 +150,8 @@ class Device : public ReferenceTrackedObject<Device> {
     void getAdapterLuid(std::array<uint8_t, HwInfoConfig::luidSize> &luid);
     MOCKABLE_VIRTUAL bool verifyAdapterLuid();
     void getAdapterMask(uint32_t &nodeMask);
+
+    std::atomic<uint32_t> debugExecutionCounter = 0;
 
   protected:
     Device() = delete;

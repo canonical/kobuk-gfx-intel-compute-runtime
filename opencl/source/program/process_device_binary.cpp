@@ -16,6 +16,7 @@
 #include "shared/source/program/program_info.h"
 #include "shared/source/program/program_initialization.h"
 #include "shared/source/source_level_debugger/source_level_debugger.h"
+#include "shared/source/utilities/time_measure_wrapper.h"
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/context/context.h"
@@ -100,7 +101,8 @@ cl_int Program::linkBinary(Device *pDevice, const void *constantsInitData, const
             auto &kernHeapInfo = kernelInfo->heapInfo;
             const char *originalIsa = reinterpret_cast<const char *>(kernHeapInfo.pKernelHeap);
             patchedIsaTempStorage.push_back(std::vector<char>(originalIsa, originalIsa + kernHeapInfo.KernelHeapSize));
-            isaSegmentsForPatching.push_back(Linker::PatchableSegment{patchedIsaTempStorage.rbegin()->data(), kernHeapInfo.KernelHeapSize});
+            DEBUG_BREAK_IF(nullptr == kernelInfo->getGraphicsAllocation());
+            isaSegmentsForPatching.push_back(Linker::PatchableSegment{patchedIsaTempStorage.rbegin()->data(), static_cast<uintptr_t>(kernelInfo->getGraphicsAllocation()->getGpuAddressToPatch()), kernHeapInfo.KernelHeapSize, kernelInfo->kernelDescriptor.kernelMetadata.kernelName});
             kernelDescriptors.push_back(&kernelInfo->kernelDescriptor);
         }
     }
@@ -123,9 +125,6 @@ cl_int Program::linkBinary(Device *pDevice, const void *constantsInitData, const
     } else if (linkerInput->getTraits().requiresPatchingOfInstructionSegments) {
         for (auto kernelId = 0u; kernelId < kernelInfoArray.size(); kernelId++) {
             const auto &kernelInfo = kernelInfoArray[kernelId];
-            if (nullptr == kernelInfo->getGraphicsAllocation()) {
-                continue;
-            }
             auto &kernHeapInfo = kernelInfo->heapInfo;
             auto segmentId = &kernelInfo - &kernelInfoArray[0];
             auto &hwInfo = pDevice->getHardwareInfo();
@@ -137,6 +136,26 @@ cl_int Program::linkBinary(Device *pDevice, const void *constantsInitData, const
     }
     DBG_LOG(PrintRelocations, NEO::constructRelocationsDebugMessage(this->getSymbols(pDevice->getRootDeviceIndex())));
     return CL_SUCCESS;
+}
+
+cl_int Program::processGenBinaries(const ClDeviceVector &clDevices, std::unordered_map<uint32_t, BuildPhase> &phaseReached) {
+    cl_int retVal = CL_SUCCESS;
+    for (auto &clDevice : clDevices) {
+        if (BuildPhase::BinaryProcessing == phaseReached[clDevice->getRootDeviceIndex()]) {
+            continue;
+        }
+        if (DebugManager.flags.PrintProgramBinaryProcessingTime.get()) {
+            retVal = TimeMeasureWrapper::functionExecution(*this, &Program::processGenBinary, *clDevice);
+        } else {
+            retVal = processGenBinary(*clDevice);
+        }
+
+        if (retVal != CL_SUCCESS) {
+            break;
+        }
+        phaseReached[clDevice->getRootDeviceIndex()] = BuildPhase::BinaryProcessing;
+    }
+    return retVal;
 }
 
 cl_int Program::processGenBinary(const ClDevice &clDevice) {
@@ -166,18 +185,6 @@ cl_int Program::processGenBinary(const ClDevice &clDevice) {
     DecodeError decodeError;
     DeviceBinaryFormat singleDeviceBinaryFormat;
     std::tie(decodeError, singleDeviceBinaryFormat) = NEO::decodeSingleDeviceBinary(programInfo, binary, decodeErrors, decodeWarnings);
-
-    if (isDeviceBinaryFormat<DeviceBinaryFormat::Zebin>(binary.deviceBinary)) {
-        NEO::LinkerInput::SectionNameToSegmentIdMap nameToKernelId;
-
-        uint32_t id = 0;
-        for (auto &kernelInfo : programInfo.kernelInfos) {
-            nameToKernelId[kernelInfo->kernelDescriptor.kernelMetadata.kernelName] = id;
-            id++;
-        }
-        programInfo.prepareLinkerInputStorage();
-        programInfo.linkerInput->decodeElfSymbolTableAndRelocations(programInfo.decodedElf, nameToKernelId);
-    }
 
     if (decodeWarnings.empty() == false) {
         PRINT_DEBUG_STRING(DebugManager.flags.PrintDebugMessages.get(), stderr, "%s\n", decodeWarnings.c_str());

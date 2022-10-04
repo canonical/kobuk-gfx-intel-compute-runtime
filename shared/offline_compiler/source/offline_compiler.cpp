@@ -10,6 +10,7 @@
 #include "shared/offline_compiler/source/ocloc_error_code.h"
 #include "shared/offline_compiler/source/queries.h"
 #include "shared/offline_compiler/source/utilities/get_git_version_info.h"
+#include "shared/source/compiler_interface/compiler_options.h"
 #include "shared/source/compiler_interface/intermediate_representations.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device_binary_format/device_binary_formats.h"
@@ -30,7 +31,6 @@
 #include "cif/common/cif_main.h"
 #include "cif/helpers/error.h"
 #include "cif/import/library_api.h"
-#include "compiler_options.h"
 #include "igfxfmid.h"
 #include "ocl_igc_interface/fcl_ocl_device_ctx.h"
 #include "ocl_igc_interface/igc_ocl_device_ctx.h"
@@ -779,7 +779,7 @@ void OfflineCompiler::appendExtraInternalOptions(std::string &internalOptions) {
     if (compilerHwInfoConfig.isForceEmuInt32DivRemSPRequired()) {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::forceEmuInt32DivRemSP);
     }
-    CompilerOptions::concatenateAppend(internalOptions, compilerHwInfoConfig.getCachingPolicyOptions());
+    CompilerOptions::concatenateAppend(internalOptions, compilerHwInfoConfig.getCachingPolicyOptions(false));
 }
 
 void OfflineCompiler::parseDebugSettings() {
@@ -1100,9 +1100,10 @@ void OfflineCompiler::writeOutAllFiles() {
     }
 
     if (genBinary) {
-        std::string genOutputFile = generateFilePath(outputDirectory, fileBase, ".gen") + generateOptsSuffix();
-
-        argHelper->saveOutput(genOutputFile, genBinary, genBinarySize);
+        if (useGenFile) {
+            std::string genOutputFile = generateFilePath(outputDirectory, fileBase, ".gen") + generateOptsSuffix();
+            argHelper->saveOutput(genOutputFile, genBinary, genBinarySize);
+        }
 
         if (useCppFile) {
             std::string cppOutputFile = generateFilePath(outputDirectory, fileBase, ".cpp");
@@ -1169,6 +1170,7 @@ void OfflineCompiler::enforceFormat(std::string &format) {
     if (format == "zebin") {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::allowZebin);
     } else if (format == "patchtokens") {
+        CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::disableZebin);
     } else {
         argHelper->printf("Invalid format passed: %s. Ignoring.\n", format.c_str());
     }

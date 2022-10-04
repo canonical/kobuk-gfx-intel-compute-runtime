@@ -12,7 +12,7 @@
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
 #include "level_zero/core/source/event/event.h"
-#include "level_zero/core/test/unit_tests/fixtures/cmdlist_fixture.h"
+#include "level_zero/core/test/unit_tests/fixtures/cmdlist_fixture.inl"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 
 namespace L0 {
@@ -341,7 +341,7 @@ HWTEST2_F(MultiTileCommandListAppendBarrier,
                                   sizeof(MI_STORE_DATA_IMM) +
                                   sizeof(MI_ATOMIC) + sizeof(MI_SEMAPHORE_WAIT);
 
-    size_t postSyncSize = NEO::MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(device->getHwInfo());
+    size_t postSyncSize = NEO::MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(device->getHwInfo(), false);
 
     auto useSizeBefore = cmdListStream->getUsed();
     auto result = commandList->appendBarrier(eventHandle, 0, nullptr);
@@ -450,7 +450,7 @@ HWTEST2_F(MultiTileCommandListAppendBarrier,
     size_t timestampRegisters = 2 * (sizeof(MI_LOAD_REGISTER_REG) + sizeof(MI_LOAD_REGISTER_IMM) +
                                      NEO::EncodeMath<FamilyType>::streamCommandSize + sizeof(MI_STORE_REGISTER_MEM));
 
-    size_t postBarrierSynchronization = NEO::MemorySynchronizationCommands<FamilyType>::getSizeForSingleBarrier() +
+    size_t postBarrierSynchronization = NEO::MemorySynchronizationCommands<FamilyType>::getSizeForSingleBarrier(false) +
                                         NEO::MemorySynchronizationCommands<FamilyType>::getSizeForSingleAdditionalSynchronization(device->getHwInfo());
     size_t stopRegisters = timestampRegisters + postBarrierSynchronization;
 

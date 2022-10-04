@@ -296,9 +296,9 @@ GraphicsAllocation *DrmMemoryManager::createGraphicsAllocation(OsHandleStorage &
 }
 
 GraphicsAllocation *DrmMemoryManager::allocateGraphicsMemoryWithAlignment(const AllocationData &allocationData) {
-    if (allocationData.type == NEO::AllocationType::DEBUG_CONTEXT_SAVE_AREA ||
-        (allocationData.type == NEO::AllocationType::DEBUG_SBA_TRACKING_BUFFER &&
-         allocationData.storageInfo.subDeviceBitfield.count() > 1)) {
+    if ((allocationData.type == NEO::AllocationType::DEBUG_CONTEXT_SAVE_AREA ||
+         allocationData.type == NEO::AllocationType::DEBUG_SBA_TRACKING_BUFFER) &&
+        allocationData.storageInfo.subDeviceBitfield.count() > 1) {
         return createMultiHostAllocation(allocationData);
     }
 
@@ -1331,7 +1331,13 @@ uint64_t getGpuAddress(const AlignmentSelector &alignmentSelector, HeapAssigner 
     case AllocationType::INTERNAL_HEAP:
     case AllocationType::DEBUG_MODULE_AREA: {
         auto heap = heapAssigner.get32BitHeapIndex(allocType, true, hwInfo, useFrontWindow);
-        gpuAddress = gmmHelper.canonize(gfxPartition->heapAllocate(heap, sizeAllocated));
+        size_t alignment = 0;
+
+        if (DebugManager.flags.ExperimentalEnableCustomLocalMemoryAlignment.get() != -1) {
+            alignment = static_cast<size_t>(DebugManager.flags.ExperimentalEnableCustomLocalMemoryAlignment.get());
+        }
+
+        gpuAddress = gmmHelper.canonize(gfxPartition->heapAllocateWithCustomAlignment(heap, sizeAllocated, alignment));
     } break;
     case AllocationType::WRITE_COMBINED:
         sizeAllocated = 0;
@@ -1489,7 +1495,7 @@ BufferObject *DrmMemoryManager::createBufferObjectInMemoryRegion(Drm *drm, Gmm *
     uint32_t handle = 0;
     uint32_t ret = 0;
 
-    auto banks = std::bitset<32>(memoryBanks);
+    auto banks = std::bitset<4>(memoryBanks);
     if (banks.count() > 1) {
         ret = memoryInfo->createGemExtWithMultipleRegions(memoryBanks, size, handle);
     } else {
@@ -1744,12 +1750,12 @@ void createMemoryRegionsForSharedAllocation(const HardwareInfo &hwInfo, MemoryIn
     auto memoryBanks = allocationData.storageInfo.memoryBanks;
 
     if (allocationData.usmInitialPlacement == GraphicsAllocation::UsmInitialPlacement::CPU) {
-        //System memory region
+        // System memory region
         auto regionClassAndInstance = memoryInfo.getMemoryRegionClassAndInstance(0u, hwInfo);
         memRegions.push_back(regionClassAndInstance);
     }
 
-    //All local memory regions
+    // All local memory regions
     size_t currentBank = 0;
     size_t i = 0;
 
@@ -1763,7 +1769,7 @@ void createMemoryRegionsForSharedAllocation(const HardwareInfo &hwInfo, MemoryIn
     }
 
     if (allocationData.usmInitialPlacement == GraphicsAllocation::UsmInitialPlacement::GPU) {
-        //System memory region
+        // System memory region
         auto regionClassAndInstance = memoryInfo.getMemoryRegionClassAndInstance(0u, hwInfo);
         memRegions.push_back(regionClassAndInstance);
     }

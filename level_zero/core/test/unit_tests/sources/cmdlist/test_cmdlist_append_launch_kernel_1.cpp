@@ -66,7 +66,7 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithOldestFirstThreadArbitrat
     ze_scheduling_hint_exp_desc_t pHint{};
     pHint.flags = ZE_SCHEDULING_HINT_EXP_FLAG_OLDEST_FIRST;
     kernel->setSchedulingHintExp(&pHint);
-    ASSERT_EQ(kernel->getSchedulingHintExp(), NEO::ThreadArbitrationPolicy::AgeBased);
+    ASSERT_EQ(kernel->getKernelDescriptor().kernelAttributes.threadArbitrationPolicy, NEO::ThreadArbitrationPolicy::AgeBased);
 }
 
 HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithRRThreadArbitrationPolicySetUsingSchedulingHintExtensionThenCorrectInternalPolicyIsReturned) {
@@ -74,7 +74,7 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithRRThreadArbitrationPolicy
     ze_scheduling_hint_exp_desc_t pHint{};
     pHint.flags = ZE_SCHEDULING_HINT_EXP_FLAG_ROUND_ROBIN;
     kernel->setSchedulingHintExp(&pHint);
-    ASSERT_EQ(kernel->getSchedulingHintExp(), NEO::ThreadArbitrationPolicy::RoundRobin);
+    ASSERT_EQ(kernel->getKernelDescriptor().kernelAttributes.threadArbitrationPolicy, NEO::ThreadArbitrationPolicy::RoundRobin);
 }
 
 HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithStallRRThreadArbitrationPolicySetUsingSchedulingHintExtensionThenCorrectInternalPolicyIsReturned) {
@@ -82,7 +82,7 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithStallRRThreadArbitrationP
     ze_scheduling_hint_exp_desc_t pHint{};
     pHint.flags = ZE_SCHEDULING_HINT_EXP_FLAG_STALL_BASED_ROUND_ROBIN;
     kernel->setSchedulingHintExp(&pHint);
-    ASSERT_EQ(kernel->getSchedulingHintExp(), NEO::ThreadArbitrationPolicy::RoundRobinAfterDependency);
+    ASSERT_EQ(kernel->getKernelDescriptor().kernelAttributes.threadArbitrationPolicy, NEO::ThreadArbitrationPolicy::RoundRobinAfterDependency);
 }
 
 HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithThreadArbitrationPolicySetUsingSchedulingHintExtensionTheSameFlagIsUsedToSetCmdListThreadArbitrationPolicy) {
@@ -152,8 +152,10 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenNotEnoughSpaceInCommandStreamWhenA
         device->getNEODevice(),
         kernel.get(),
         threadGroupDimensions,
+        nullptr,
         PreemptionMode::MidBatch,
         0,
+        false,
         false,
         false,
         false,
@@ -191,8 +193,8 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithPrintfUsedWhenAppendedToC
     auto result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr, launchParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
-    EXPECT_EQ(1u, commandList->getPrintfFunctionContainer().size());
-    EXPECT_EQ(kernel.get(), commandList->getPrintfFunctionContainer()[0]);
+    EXPECT_EQ(1u, commandList->getPrintfKernelContainer().size());
+    EXPECT_EQ(kernel.get(), commandList->getPrintfKernelContainer()[0]);
 }
 
 HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithPrintfUsedWhenAppendedToCommandListMultipleTimesThenKernelIsStoredOnce) {
@@ -206,12 +208,12 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithPrintfUsedWhenAppendedToC
     auto result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr, launchParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
-    EXPECT_EQ(1u, commandList->getPrintfFunctionContainer().size());
-    EXPECT_EQ(kernel.get(), commandList->getPrintfFunctionContainer()[0]);
+    EXPECT_EQ(1u, commandList->getPrintfKernelContainer().size());
+    EXPECT_EQ(kernel.get(), commandList->getPrintfKernelContainer()[0]);
 
     result = commandList->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr, launchParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    EXPECT_EQ(1u, commandList->getPrintfFunctionContainer().size());
+    EXPECT_EQ(1u, commandList->getPrintfKernelContainer().size());
 }
 
 HWTEST_F(CommandListAppendLaunchKernel, WhenAppendingMultipleTimesThenSshIsNotDepletedButReallocated) {
@@ -615,8 +617,8 @@ HWTEST_F(CommandListAppendLaunchKernel, givenCommandListWhenResetCalledThenState
               commandList->commandContainer.getResidencyContainer().size());
     ASSERT_EQ(commandListControl->commandContainer.getDeallocationContainer().size(),
               commandList->commandContainer.getDeallocationContainer().size());
-    ASSERT_EQ(commandListControl->getPrintfFunctionContainer().size(),
-              commandList->getPrintfFunctionContainer().size());
+    ASSERT_EQ(commandListControl->getPrintfKernelContainer().size(),
+              commandList->getPrintfKernelContainer().size());
     ASSERT_EQ(commandListControl->commandContainer.getCommandStream()->getUsed(), commandList->commandContainer.getCommandStream()->getUsed());
     ASSERT_EQ(commandListControl->commandContainer.slmSize, commandList->commandContainer.slmSize);
 

@@ -357,6 +357,12 @@ class CommandQueueHw : public CommandQueue {
     template <uint32_t cmdType>
     cl_int enqueueBlit(const MultiDispatchInfo &multiDispatchInfo, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event, bool blocking, CommandStreamReceiver &bcsCsr);
 
+    bool isSplitEnqueueBlitNeeded(TransferDirection transferDirection, size_t transferSize, CommandStreamReceiver &csr);
+    size_t getTotalSizeFromRectRegion(const size_t *region);
+
+    template <uint32_t cmdType>
+    cl_int enqueueBlitSplit(MultiDispatchInfo &dispatchInfo, cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event, bool blocking, CommandStreamReceiver &csr);
+
     template <uint32_t commandType>
     CompletionStamp enqueueNonBlocked(Surface **surfacesForResidency,
                                       size_t surfaceCount,
@@ -421,7 +427,7 @@ class CommandQueueHw : public CommandQueue {
 
     bool isCacheFlushCommand(uint32_t commandType) const override;
 
-    bool waitForTimestamps(Range<CopyEngineState> copyEnginesToWait, uint32_t taskCount) override;
+    bool waitForTimestamps(Range<CopyEngineState> copyEnginesToWait, uint32_t taskCount, WaitStatus &status) override;
 
     MOCKABLE_VIRTUAL bool isCacheFlushForBcsRequired() const;
 

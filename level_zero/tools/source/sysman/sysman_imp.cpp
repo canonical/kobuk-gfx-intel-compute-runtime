@@ -89,6 +89,10 @@ void SysmanDeviceImp::getSysmanDeviceInfo(zes_device_handle_t hDevice, uint32_t 
     }
 }
 
+PRODUCT_FAMILY SysmanDeviceImp::getProductFamily(Device *pDevice) {
+    return pDevice->getNEODevice()->getHardwareInfo().platform.eProductFamily;
+}
+
 ze_result_t SysmanDeviceImp::init() {
     // We received a device handle. Check for subdevices in this device
     updateSubDeviceHandlesLocally();
@@ -96,9 +100,6 @@ ze_result_t SysmanDeviceImp::init() {
     auto result = pOsSysman->init();
     if (ZE_RESULT_SUCCESS != result) {
         return result;
-    }
-    if (pEngineHandleContext) {
-        pEngineHandleContext->init();
     }
     return result;
 }

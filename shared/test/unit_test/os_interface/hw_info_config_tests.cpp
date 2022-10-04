@@ -52,14 +52,19 @@ HWTEST_F(HwInfoConfigTest, givenHwInfoConfigWhenGettingSharedSystemMemCapabiliti
     }
 }
 
+HWTEST_F(HwInfoConfigTest, givenHwInfoConfigWhenAskedIfIsBlitSplitEnqueueWARequiredThenReturnFalse) {
+    auto hwInfoConfig = HwInfoConfig::get(productFamily);
+    EXPECT_FALSE(hwInfoConfig->isBlitSplitEnqueueWARequired(pInHwInfo));
+}
+
 HWTEST_F(HwInfoConfigTest, givenHwInfoConfigWhenGettingMemoryCapabilitiesThenCorrectValueIsReturned) {
     DebugManagerStateRestore restore;
 
     auto hwInfoConfig = HwInfoConfig::get(pInHwInfo.platform.eProductFamily);
 
-    for (auto capabilityBitmask : {0, 0b0001, 0b0010, 0b0100, 0b1000, 0b1111, 0b10000}) {
+    for (auto capabilityBitmask : {0, 0b0001, 0b0010, 0b0100, 0b1000, 0b1111}) {
         DebugManager.flags.EnableUsmConcurrentAccessSupport.set(capabilityBitmask);
-        std::bitset<32> capabilityBitset(capabilityBitmask);
+        std::bitset<4> capabilityBitset(capabilityBitmask);
 
         auto hostMemCapabilities = hwInfoConfig->getHostMemCapabilities(&pInHwInfo);
         if (hostMemCapabilities > 0) {
@@ -499,4 +504,42 @@ HWTEST_F(HwInfoConfigTest, givenSamplerStateWhenAdjustSamplerStateThenNothingIsC
     hwInfoConfig->adjustSamplerState(&state, pInHwInfo);
 
     EXPECT_EQ(0, memcmp(&initialState, &state, sizeof(SAMPLER_STATE)));
+}
+
+HWTEST_F(HwInfoConfigTest, WhenFillingScmPropertiesSupportThenExpectUseCorrectGetters) {
+    StateComputeModePropertiesSupport scmPropertiesSupport = {};
+
+    auto hwInfoConfig = HwInfoConfig::get(pInHwInfo.platform.eProductFamily);
+
+    hwInfoConfig->fillScmPropertiesSupportStructure(scmPropertiesSupport);
+
+    EXPECT_EQ(hwInfoConfig->isThreadArbitrationPolicyReportedWithScm(), scmPropertiesSupport.threadArbitrationPolicy);
+    EXPECT_EQ(hwInfoConfig->getScmPropertyCoherencyRequiredSupport(), scmPropertiesSupport.coherencyRequired);
+    EXPECT_EQ(hwInfoConfig->getScmPropertyZPassAsyncComputeThreadLimitSupport(), scmPropertiesSupport.zPassAsyncComputeThreadLimit);
+    EXPECT_EQ(hwInfoConfig->getScmPropertyPixelAsyncComputeThreadLimitSupport(), scmPropertiesSupport.pixelAsyncComputeThreadLimit);
+    EXPECT_EQ(hwInfoConfig->isGrfNumReportedWithScm(), scmPropertiesSupport.largeGrfMode);
+    EXPECT_EQ(hwInfoConfig->getScmPropertyDevicePreemptionModeSupport(), scmPropertiesSupport.devicePreemptionMode);
+}
+
+HWTEST_F(HwInfoConfigTest, WhenFillingFrontEndPropertiesSupportThenExpectUseCorrectGetters) {
+    FrontEndPropertiesSupport frontEndPropertiesSupport = {};
+
+    auto hwInfoConfig = HwInfoConfig::get(pInHwInfo.platform.eProductFamily);
+
+    hwInfoConfig->fillFrontEndPropertiesSupportStructure(frontEndPropertiesSupport, pInHwInfo);
+    EXPECT_EQ(hwInfoConfig->isComputeDispatchAllWalkerEnableInCfeStateRequired(pInHwInfo), frontEndPropertiesSupport.computeDispatchAllWalker);
+    EXPECT_EQ(hwInfoConfig->getFrontEndPropertyDisableEuFusionSupport(), frontEndPropertiesSupport.disableEuFusion);
+    EXPECT_EQ(hwInfoConfig->isDisableOverdispatchAvailable(pInHwInfo), frontEndPropertiesSupport.disableOverdispatch);
+    EXPECT_EQ(hwInfoConfig->getFrontEndPropertySingleSliceDispatchCcsModeSupport(), frontEndPropertiesSupport.singleSliceDispatchCcsMode);
+}
+
+HWTEST_F(HwInfoConfigTest, WhenFillingPipelineSelectPropertiesSupportThenExpectUseCorrectGetters) {
+    PipelineSelectPropertiesSupport pipelineSelectPropertiesSupport = {};
+
+    auto hwInfoConfig = HwInfoConfig::get(pInHwInfo.platform.eProductFamily);
+
+    hwInfoConfig->fillPipelineSelectPropertiesSupportStructure(pipelineSelectPropertiesSupport, pInHwInfo);
+    EXPECT_EQ(hwInfoConfig->getPipelineSelectPropertyModeSelectedSupport(), pipelineSelectPropertiesSupport.modeSelected);
+    EXPECT_EQ(hwInfoConfig->getPipelineSelectPropertyMediaSamplerDopClockGateSupport(), pipelineSelectPropertiesSupport.mediaSamplerDopClockGate);
+    EXPECT_EQ(hwInfoConfig->isSystolicModeConfigurable(pInHwInfo), pipelineSelectPropertiesSupport.systolicMode);
 }

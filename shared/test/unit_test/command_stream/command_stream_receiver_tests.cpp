@@ -17,6 +17,7 @@
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/utilities/tag_allocator.h"
+#include "shared/test/common/fixtures/command_stream_receiver_fixture.inl"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
@@ -402,6 +403,11 @@ TEST_F(CommandStreamReceiverTest, GivenNoParamatersWhenMakingResidentThenResiden
     commandStreamReceiver->processResidency(commandStreamReceiver->getResidencyAllocations(), 0u);
     auto &residencyAllocations = commandStreamReceiver->getResidencyAllocations();
     EXPECT_EQ(0u, residencyAllocations.size());
+}
+
+TEST_F(CommandStreamReceiverTest, WhenDebugSurfaceIsAllocatedThenCorrectTypeIsSet) {
+    auto allocation = commandStreamReceiver->allocateDebugSurface(1024);
+    EXPECT_EQ(AllocationType::DEBUG_CONTEXT_SAVE_AREA, allocation->getAllocationType());
 }
 
 TEST_F(CommandStreamReceiverTest, givenForced32BitAddressingWhenDebugSurfaceIsAllocatedThenRegularAllocationIsReturned) {
@@ -2110,4 +2116,11 @@ TEST_F(CommandStreamReceiverTest, givenPreemptionSentIsInitialWhenSettingPreempt
     mode = PreemptionMode::ThreadGroup;
     commandStreamReceiver->setPreemptionMode(mode);
     EXPECT_EQ(mode, commandStreamReceiver->getPreemptionMode());
+}
+
+using CommandStreamReceiverSystolicTests = Test<CommandStreamReceiverSystolicFixture>;
+using SystolicSupport = IsAnyProducts<IGFX_ALDERLAKE_P, IGFX_XE_HP_SDV, IGFX_DG2, IGFX_PVC>;
+
+HWTEST2_F(CommandStreamReceiverSystolicTests, givenSystolicModeChangedWhenFlushTaskCalledThenSystolicStateIsUpdated, SystolicSupport) {
+    testBody<FamilyType>();
 }

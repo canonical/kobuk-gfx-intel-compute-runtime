@@ -67,6 +67,9 @@ append_sources_from_properties(neo_libult_common_SRCS_ENABLE_TESTED_HW NEO_SRCS_
 
 set(neo_libult_common_SRCS_LIB_ULT
     ${NEO_SHARED_TEST_DIRECTORY}/common/fixtures/aub_command_stream_receiver_fixture.h
+    ${NEO_SHARED_TEST_DIRECTORY}/common/fixtures/command_stream_receiver_fixture.cpp
+    ${NEO_SHARED_TEST_DIRECTORY}/common/fixtures/command_stream_receiver_fixture.inl
+    ${NEO_SHARED_TEST_DIRECTORY}/common/fixtures/command_stream_receiver_fixture.h
     ${NEO_SHARED_TEST_DIRECTORY}/common/fixtures/device_fixture.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/fixtures/device_fixture.h
     ${NEO_SHARED_TEST_DIRECTORY}/common/fixtures/gmm_callbacks_fixture.h
@@ -115,10 +118,10 @@ set(neo_libult_common_SRCS_LIB_ULT
     ${NEO_SHARED_TEST_DIRECTORY}/common/mocks/mock_gmm_page_table_mngr.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/test_macros/test_excludes.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/test_macros/test_excludes.h
-    ${NEO_SHARED_TEST_DIRECTORY}/unit_test/base_ult_config_listener.cpp
-    ${NEO_SHARED_TEST_DIRECTORY}/unit_test/base_ult_config_listener.h
-    ${NEO_SHARED_TEST_DIRECTORY}/unit_test/helpers/debug_helpers.cpp
-    ${NEO_SHARED_TEST_DIRECTORY}/unit_test/utilities/cpuintrinsics.cpp
+    ${NEO_SHARED_TEST_DIRECTORY}/common/base_ult_config_listener.cpp
+    ${NEO_SHARED_TEST_DIRECTORY}/common/base_ult_config_listener.h
+    ${NEO_SHARED_TEST_DIRECTORY}/common/helpers/debug_helpers.cpp
+    ${NEO_SHARED_TEST_DIRECTORY}/common/utilities/cpuintrinsics.cpp
     ${NEO_SHARED_DIRECTORY}/gmm_helper/resource_info_impl.cpp
 )
 
@@ -175,6 +178,7 @@ set(neo_libult_SRCS_LINUX
     ${NEO_SHARED_TEST_DIRECTORY}/common/libult/os_interface.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/mocks/linux/mock_drm_memory_manager.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/mocks/linux/mock_drm_memory_manager.h
+    ${NEO_SHARED_TEST_DIRECTORY}/common/mocks/device_ult.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/mocks/mock_direct_submission_controller_enabled.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/os_interface/linux/create_drm_memory_manager.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/os_interface/linux/drm_memory_manager_fixture.cpp
@@ -186,6 +190,7 @@ set(neo_libult_SRCS_LINUX
 set_property(GLOBAL APPEND PROPERTY neo_libult_SRCS_LINUX ${neo_libult_SRCS_LINUX})
 set(neo_libult_SRCS_WINDOWS
     ${NEO_SHARED_TEST_DIRECTORY}/common/libult/os_interface.cpp
+    ${NEO_SHARED_TEST_DIRECTORY}/common/mocks/device_ult.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/mocks/mock_direct_submission_controller_enabled.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/mocks/mock_wddm.cpp
     ${NEO_SHARED_TEST_DIRECTORY}/common/os_interface/windows/create_wddm_memory_manager.cpp

@@ -698,6 +698,38 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandEncodeStatesTest, giveNextIddInBlockZeorWhenD
     ASSERT_NE(itorPC, commands.end());
 }
 
+HWTEST_F(CommandEncodeStatesTest, givenPauseOnEnqueueSetToNeverWhenEncodingWalkerThenCommandsToPatchAreNotPresent) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.PauseOnEnqueue.set(-1);
+
+    std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
+
+    uint32_t dims[] = {1, 1, 1};
+    bool requiresUncachedMocs = false;
+    std::list<void *> cmdsToPatch;
+    EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
+    dispatchArgs.additionalCommands = &cmdsToPatch;
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
+
+    EXPECT_EQ(cmdsToPatch.size(), 0u);
+}
+
+HWTEST_F(CommandEncodeStatesTest, givenPauseOnEnqueueSetToAlwaysWhenEncodingWalkerThenCommandsToPatchAreFilled) {
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.PauseOnEnqueue.set(-2);
+
+    std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
+
+    uint32_t dims[] = {1, 1, 1};
+    bool requiresUncachedMocs = false;
+    std::list<void *> cmdsToPatch;
+    EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
+    dispatchArgs.additionalCommands = &cmdsToPatch;
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
+
+    EXPECT_EQ(cmdsToPatch.size(), 4u);
+}
+
 using EncodeDispatchKernelTest = Test<CommandEncodeStatesFixture>;
 
 HWTEST2_F(EncodeDispatchKernelTest, givenBindfulKernelWhenDispatchingKernelThenSshFromContainerIsUsed, IsAtLeastSkl) {
@@ -1227,12 +1259,14 @@ HWTEST_F(BindlessCommandEncodeStatesTest, givenGlobalBindlessHeapsWhenDispatchin
         pDevice,
         dispatchInterface.get(),
         dims,
+        nullptr,
         NEO::PreemptionMode::Disabled,
         0,
         false,
         false,
         false,
         requiresUncachedMocs,
+        false,
         false,
         false,
         false,
@@ -1273,12 +1307,14 @@ HWTEST_F(BindlessCommandEncodeStatesTest, givenBindlessModeDisabledelWithSampler
         pDevice,
         dispatchInterface.get(),
         dims,
+        nullptr,
         NEO::PreemptionMode::Disabled,
         0,
         false,
         false,
         false,
         requiresUncachedMocs,
+        false,
         false,
         false,
         false,

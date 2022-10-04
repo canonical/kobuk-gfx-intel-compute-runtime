@@ -27,7 +27,7 @@ function(compile_kernels_gen platform_name_with_type revision_id platform_name s
 
       add_custom_command(
                          OUTPUT ${output_files}
-                         COMMAND ${ocloc_cmd_prefix} -file ${absolute_filepath} -device ${platform_name} -${NEO_BITS} -out_dir ${outputdir} -revision_id ${revision_id}
+                         COMMAND ${ocloc_cmd_prefix} -gen_file -file ${absolute_filepath} -device ${platform_name} -${NEO_BITS} -out_dir ${outputdir} -revision_id ${revision_id}
                          WORKING_DIRECTORY ${workdir}
                          DEPENDS ${filepath} ocloc copy_compiler_files
       )
@@ -52,6 +52,7 @@ endfunction()
 file(GLOB_RECURSE TEST_KERNELS *.cl)
 file(GLOB_RECURSE TEST_KERNELS_IMAGES *_images.cl)
 add_custom_target(prepare_test_kernels_for_shared)
+add_dependencies(prepare_test_kernels_for_shared ${BUILTINS_BINARIES_STATELESS_LIB_NAME})
 add_dependencies(prepare_test_kernels_for_shared ${BUILTINS_BINARIES_BINDFUL_LIB_NAME})
 add_dependencies(prepare_test_kernels_for_shared ${BUILTINS_BINARIES_BINDLESS_LIB_NAME})
 if(TARGET ${BUILTINS_SPIRV_LIB_NAME})

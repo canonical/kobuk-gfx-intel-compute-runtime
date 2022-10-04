@@ -135,7 +135,6 @@ class HwHelper {
     virtual bool isEngineTypeRemappingToHwSpecificRequired() const = 0;
 
     static uint32_t getSubDevicesCount(const HardwareInfo *pHwInfo);
-    static uint32_t getCopyEnginesCount(const HardwareInfo &hwInfo);
 
     virtual bool isSipKernelAsHexadecimalArrayPreferred() const = 0;
     virtual void setSipKernelData(uint32_t *&sipKernelBinary, size_t &kernelBinarySize) const = 0;
@@ -158,7 +157,7 @@ class HwHelper {
     virtual const void *getBatchBufferEndReference() const = 0;
     virtual bool isPlatformFlushTaskEnabled(const NEO::HardwareInfo &hwInfo) const = 0;
     virtual bool isPatIndexFallbackWaRequired() const = 0;
-    virtual bool isDevicePreemptionModeTrackedInScm() const = 0;
+    virtual uint32_t getMinimalScratchSpaceSize() const = 0;
 
   protected:
     HwHelper() = default;
@@ -399,7 +398,7 @@ class HwHelperHw : public HwHelper {
     const void *getBatchBufferEndReference() const override;
     bool isPlatformFlushTaskEnabled(const NEO::HardwareInfo &hwInfo) const override;
     bool isPatIndexFallbackWaRequired() const override;
-    bool isDevicePreemptionModeTrackedInScm() const override;
+    uint32_t getMinimalScratchSpaceSize() const override;
 
   protected:
     static const AuxTranslationMode defaultAuxTranslationMode;
@@ -452,9 +451,9 @@ struct MemorySynchronizationCommands {
     static void addFullCacheFlush(LinearStream &commandStream, const HardwareInfo &hwInfo);
     static void setCacheFlushExtraProperties(PipeControlArgs &args);
 
-    static size_t getSizeForBarrierWithPostSyncOperation(const HardwareInfo &hwInfo);
+    static size_t getSizeForBarrierWithPostSyncOperation(const HardwareInfo &hwInfo, bool tlbInvalidationRequired);
     static size_t getSizeForBarrierWa(const HardwareInfo &hwInfo);
-    static size_t getSizeForSingleBarrier();
+    static size_t getSizeForSingleBarrier(bool tlbInvalidationRequired);
     static size_t getSizeForSingleAdditionalSynchronizationForDirectSubmission(const HardwareInfo &hwInfo);
     static size_t getSizeForSingleAdditionalSynchronization(const HardwareInfo &hwInfo);
     static size_t getSizeForAdditonalSynchronization(const HardwareInfo &hwInfo);
@@ -462,8 +461,6 @@ struct MemorySynchronizationCommands {
 
     static bool isBarrierWaRequired(const HardwareInfo &hwInfo);
     static bool isBarrierlPriorToPipelineSelectWaRequired(const HardwareInfo &hwInfo);
-
-  protected:
     static void setBarrierExtraProperties(void *barrierCmd, PipeControlArgs &args);
 };
 

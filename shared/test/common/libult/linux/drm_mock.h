@@ -137,6 +137,10 @@ class DrmMock : public Drm {
         return bindAvailable;
     }
 
+    uint32_t getBaseIoctlCalls() {
+        return ioctlCallsForHelperInitialization + static_cast<uint32_t>(virtualMemoryIds.size());
+    }
+
     static const int mockFd = 33;
 
     bool failRetTopology = false;
@@ -229,7 +233,7 @@ class DrmMock : public Drm {
     bool expectIoctlCallsOnDestruction = false;
     uint32_t expectedIoctlCallsOnDestruction = 0u;
 
-    virtual int handleRemainingRequests(DrmIoctl request, void *arg) { return -1; }
+    virtual int handleRemainingRequests(DrmIoctl request, void *arg);
 
     struct WaitUserFenceParams {
         uint32_t ctxId;
@@ -267,6 +271,7 @@ class DrmMock : public Drm {
         }
         return storedGetDeviceMemoryPhysicalSizeInBytesStatus;
     }
+    static uint32_t ioctlCallsForHelperInitialization;
 };
 
 class DrmMockNonFailing : public DrmMock {
@@ -336,6 +341,9 @@ class DrmMockResources : public DrmMock {
 
     uint32_t notifyFirstCommandQueueCreated(const void *data, size_t size) override {
         ioctlCallsCount++;
+        capturedCmdQData = std::make_unique<uint64_t[]>((size + sizeof(uint64_t) - 1) / sizeof(uint64_t));
+        capturedCmdQSize = size;
+        memcpy(capturedCmdQData.get(), data, size);
         return 4;
     }
 
@@ -352,4 +360,6 @@ class DrmMockResources : public DrmMock {
     uint64_t registeredData[128];
     size_t registeredDataSize;
     uint32_t currentCookie = 2;
+    std::unique_ptr<uint64_t[]> capturedCmdQData = nullptr;
+    size_t capturedCmdQSize = 0;
 };

@@ -212,7 +212,7 @@ class MockCommandQueue : public CommandQueue {
 
     bool obtainTimestampPacketForCacheFlush(bool isCacheFlushRequired) const override { return isCacheFlushRequired; }
 
-    bool waitForTimestamps(Range<CopyEngineState> copyEnginesToWait, uint32_t taskCount) override { return false; };
+    bool waitForTimestamps(Range<CopyEngineState> copyEnginesToWait, uint32_t taskCount, WaitStatus &status) override { return false; };
 
     bool releaseIndirectHeapCalled = false;
 
@@ -256,7 +256,11 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
 
     MockCommandQueueHw(Context *context,
                        ClDevice *device,
-                       cl_queue_properties *properties) : BaseClass(context, device, properties, false) {
+                       cl_queue_properties *properties) : MockCommandQueueHw(context, device, properties, false) {}
+
+    MockCommandQueueHw(Context *context,
+                       ClDevice *device,
+                       cl_queue_properties *properties, bool isInternal) : BaseClass(context, device, properties, isInternal) {
         this->constructBcsEngine(false);
     }
 

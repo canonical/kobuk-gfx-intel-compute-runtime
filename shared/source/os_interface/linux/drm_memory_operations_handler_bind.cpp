@@ -35,21 +35,33 @@ MemoryOperationsStatus DrmMemoryOperationsHandlerBind::makeResident(Device *devi
 }
 
 MemoryOperationsStatus DrmMemoryOperationsHandlerBind::makeResidentWithinOsContext(OsContext *osContext, ArrayRef<GraphicsAllocation *> gfxAllocations, bool evictable) {
+    auto deviceBitfield = osContext->getDeviceBitfield();
+
     std::lock_guard<std::mutex> lock(mutex);
-    for (auto gfxAllocation = gfxAllocations.begin(); gfxAllocation != gfxAllocations.end(); gfxAllocation++) {
-        auto drmAllocation = static_cast<DrmAllocation *>(*gfxAllocation);
-        for (auto drmIterator = 0u; drmIterator < osContext->getDeviceBitfield().size(); drmIterator++) {
-            if (osContext->getDeviceBitfield().test(drmIterator)) {
+    auto devicesDone = 0u;
+    for (auto drmIterator = 0u; devicesDone < deviceBitfield.count(); drmIterator++) {
+        if (!deviceBitfield.test(drmIterator)) {
+            continue;
+        }
+        devicesDone++;
+
+        for (auto gfxAllocation = gfxAllocations.begin(); gfxAllocation != gfxAllocations.end(); gfxAllocation++) {
+            auto drmAllocation = static_cast<DrmAllocation *>(*gfxAllocation);
+            auto bo = drmAllocation->storageInfo.getNumBanks() > 1 ? drmAllocation->getBOs()[drmIterator] : drmAllocation->getBO();
+
+            if (!bo->bindInfo[bo->getOsContextId(osContext)][drmIterator]) {
                 int result = drmAllocation->makeBOsResident(osContext, drmIterator, nullptr, true);
                 if (result) {
                     return MemoryOperationsStatus::OUT_OF_MEMORY;
                 }
             }
-        }
-        if (!evictable) {
-            drmAllocation->updateResidencyTaskCount(GraphicsAllocation::objectAlwaysResident, osContext->getContextId());
+
+            if (!evictable) {
+                drmAllocation->updateResidencyTaskCount(GraphicsAllocation::objectAlwaysResident, osContext->getContextId());
+            }
         }
     }
+
     return MemoryOperationsStatus::SUCCESS;
 }
 

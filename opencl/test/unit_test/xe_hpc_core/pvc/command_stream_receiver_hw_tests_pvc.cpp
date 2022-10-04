@@ -65,11 +65,11 @@ PVCTEST_F(PvcCommandStreamReceiverFlushTaskTests, givenNotExistPolicyWhenFlushin
     EXPECT_EQ(notExistPolicy, commandStreamReceiver.streamProperties.stateComputeMode.threadArbitrationPolicy.value);
 }
 
-PVCTEST_F(PvcCommandStreamReceiverFlushTaskTests, givenRevisionBAndAboveWhenLastSpecialPipelineSelectModeIsTrueAndFlushTaskIsCalledThenDontReprogramPipelineSelect) {
+PVCTEST_F(PvcCommandStreamReceiverFlushTaskTests, givenRevisionBAndAboveWhenLastSystolicPipelineSelectModeIsTrueAndFlushTaskIsCalledThenDontReprogramPipelineSelect) {
     auto hwInfo = pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
 
-    flushTaskFlags.pipelineSelectArgs.specialPipelineSelectMode = true;
+    flushTaskFlags.pipelineSelectArgs.systolicPipelineSelectMode = true;
     flushTaskFlags.pipelineSelectArgs.mediaSamplerRequired = false;
 
     struct {
@@ -83,15 +83,17 @@ PVCTEST_F(PvcCommandStreamReceiverFlushTaskTests, givenRevisionBAndAboveWhenLast
         {0x6, false},
         {0x7, false},
     };
+    auto hwInfoConfig = HwInfoConfig::get(hwInfo->platform.eProductFamily);
     for (auto &testInput : testInputs) {
         hwInfo->platform.usRevId = testInput.revId;
+        commandStreamReceiver.systolicModeConfigurable = hwInfoConfig->isSystolicModeConfigurable(*hwInfo);
         commandStreamReceiver.isPreambleSent = true;
         commandStreamReceiver.lastMediaSamplerConfig = false;
 
         flushTask(commandStreamReceiver);
 
-        EXPECT_EQ(testInput.expectedValue, commandStreamReceiver.lastSpecialPipelineSelectMode);
-        commandStreamReceiver.lastSpecialPipelineSelectMode = false;
+        EXPECT_EQ(testInput.expectedValue, commandStreamReceiver.lastSystolicPipelineSelectMode);
+        commandStreamReceiver.lastSystolicPipelineSelectMode = false;
     }
 }
 

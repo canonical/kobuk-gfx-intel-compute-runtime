@@ -114,6 +114,10 @@ struct Event : _ze_event_handle_t {
         l3FlushAppliedOnKernel.set(kernelCount - 1);
     }
 
+    void resetCompletion() {
+        this->isCompleted = false;
+    }
+
     uint64_t globalStartTS;
     uint64_t globalEndTS;
     uint64_t contextStartTS;
@@ -143,6 +147,7 @@ struct Event : _ze_event_handle_t {
 
     bool isTimestampEvent = false;
     bool usingContextEndOffset = false;
+    std::atomic<bool> isCompleted{false};
 };
 
 template <typename TagSizeT>
@@ -200,9 +205,9 @@ struct EventImp : public Event {
   protected:
     ze_result_t calculateProfilingData();
     ze_result_t queryStatusEventPackets();
-    ze_result_t hostEventSetValue(TagSizeT eventValue);
+    MOCKABLE_VIRTUAL ze_result_t hostEventSetValue(TagSizeT eventValue);
     ze_result_t hostEventSetValueTimestamps(TagSizeT eventVal);
-    void assignKernelEventCompletionData(void *address);
+    MOCKABLE_VIRTUAL void assignKernelEventCompletionData(void *address);
 };
 
 struct EventPool : _ze_event_pool_handle_t {

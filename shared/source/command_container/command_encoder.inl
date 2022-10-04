@@ -8,6 +8,7 @@
 #pragma once
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/linear_stream.h"
+#include "shared/source/debugger/debugger_l0.h"
 #include "shared/source/device/device.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/gmm_helper/gmm.h"
@@ -323,6 +324,20 @@ inline void EncodeSetMMIO<Family>::encodeIMM(LinearStream &cmdStream, uint32_t o
 }
 
 template <typename Family>
+inline void EncodeStateBaseAddress<Family>::setSbaTrackingForL0DebuggerIfEnabled(bool trackingEnabled,
+                                                                                 Device &device,
+                                                                                 LinearStream &commandStream,
+                                                                                 STATE_BASE_ADDRESS &sbaCmd) {
+    if (!trackingEnabled) {
+        return;
+    }
+
+    NEO::Debugger::SbaAddresses sbaAddresses = {};
+    NEO::EncodeStateBaseAddress<Family>::setSbaAddressesForDebugger(sbaAddresses, sbaCmd);
+    device.getL0Debugger()->captureStateBaseAddress(commandStream, sbaAddresses);
+}
+
+template <typename Family>
 void EncodeSetMMIO<Family>::encodeMEM(LinearStream &cmdStream, uint32_t offset, uint64_t address) {
     MI_LOAD_REGISTER_MEM cmd = Family::cmdInitLoadRegisterMem;
     cmd.setRegisterAddress(offset);
@@ -467,7 +482,7 @@ size_t EncodeSurfaceState<Family>::pushBindingTableAndSurfaceStates(IndirectHeap
 }
 
 template <typename Family>
-inline void EncodeSurfaceState<Family>::encodeExtraCacheSettings(R_SURFACE_STATE *surfaceState, const HardwareInfo &hwInfo) {}
+inline void EncodeSurfaceState<Family>::encodeExtraCacheSettings(R_SURFACE_STATE *surfaceState, const EncodeSurfaceStateArgs &args) {}
 
 template <typename Family>
 void EncodeSurfaceState<Family>::setImageAuxParamsForCCS(R_SURFACE_STATE *surfaceState, Gmm *gmm) {
@@ -656,11 +671,17 @@ void EncodeIndirectParams<Family>::setWorkDimIndirect(CommandContainer &containe
 }
 
 template <typename Family>
+bool EncodeSurfaceState<Family>::doBindingTablePrefetch() {
+    auto enableBindingTablePrefetech = isBindingTablePrefetchPreferred();
+    if (DebugManager.flags.ForceBtpPrefetchMode.get() != -1) {
+        enableBindingTablePrefetech = static_cast<bool>(DebugManager.flags.ForceBtpPrefetchMode.get());
+    }
+    return enableBindingTablePrefetech;
+}
+
+template <typename Family>
 void EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t samplerCount, uint32_t bindingTableEntryCount) {
     auto enablePrefetch = EncodeSurfaceState<Family>::doBindingTablePrefetch();
-    if (DebugManager.flags.ForceBtpPrefetchMode.get() != -1) {
-        enablePrefetch = static_cast<bool>(DebugManager.flags.ForceBtpPrefetchMode.get());
-    }
 
     if (enablePrefetch) {
         interfaceDescriptor.setSamplerCount(static_cast<typename INTERFACE_DESCRIPTOR_DATA::SAMPLER_COUNT>((samplerCount + 3) / 4));
@@ -787,10 +808,15 @@ void EncodeBatchBufferStartOrEnd<Family>::programBatchBufferStart(LinearStream *
 }
 
 template <typename Family>
-void EncodeBatchBufferStartOrEnd<Family>::programBatchBufferEnd(CommandContainer &container) {
+void EncodeBatchBufferStartOrEnd<Family>::programBatchBufferEnd(LinearStream &commandStream) {
     MI_BATCH_BUFFER_END cmd = Family::cmdInitBatchBufferEnd;
-    auto buffer = container.getCommandStream()->getSpaceForCmd<MI_BATCH_BUFFER_END>();
+    auto buffer = commandStream.getSpaceForCmd<MI_BATCH_BUFFER_END>();
     *buffer = cmd;
+}
+
+template <typename Family>
+void EncodeBatchBufferStartOrEnd<Family>::programBatchBufferEnd(CommandContainer &container) {
+    programBatchBufferEnd(*container.getCommandStream());
 }
 
 template <typename Family>

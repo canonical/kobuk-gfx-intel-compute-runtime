@@ -27,8 +27,8 @@ bool HwInfoConfigHw<gfxProduct>::isFlushTaskAllowed() const {
 
 template <>
 std::pair<bool, bool> HwInfoConfigHw<gfxProduct>::isPipeControlPriorToNonPipelinedStateCommandsWARequired(const HardwareInfo &hwInfo, bool isRcs) const {
-    auto isBasicWARequired = true;
-    auto isExtendedWARequired = hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled > 1;
+    auto isBasicWARequired = false;
+    auto isExtendedWARequired = false;
 
     if (DebugManager.flags.ProgramExtendedPipeControlPriorToNonPipelinedStateCommand.get() != -1) {
         isExtendedWARequired = DebugManager.flags.ProgramExtendedPipeControlPriorToNonPipelinedStateCommand.get();
