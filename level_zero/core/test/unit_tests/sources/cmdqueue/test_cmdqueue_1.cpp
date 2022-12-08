@@ -15,6 +15,7 @@
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
+#include "level_zero/core/source/hw_helpers/l0_hw_helper.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 #include "level_zero/core/test/unit_tests/fixtures/module_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
@@ -283,7 +284,7 @@ HWTEST_F(CommandQueueCreate, given100CmdListsWhenExecutingThenCommandStreamIsNot
     commandQueue->destroy();
 }
 
-HWTEST_F(CommandQueueCreate, givenLogicalStateHelperWhenExecutingThenMergeStates) {
+HWTEST2_F(CommandQueueCreate, givenLogicalStateHelperWhenExecutingThenMergeStates, IsAtMostGen12lp) {
     const ze_command_queue_desc_t desc = {};
     ze_result_t returnValue;
 
@@ -321,7 +322,7 @@ HWTEST_F(CommandQueueCreate, givenLogicalStateHelperWhenExecutingThenMergeStates
     commandQueue->destroy();
 }
 
-HWTEST_F(CommandQueueCreate, givenLogicalStateHelperAndImmediateCmdListWhenExecutingThenMergeStates) {
+HWTEST2_F(CommandQueueCreate, givenLogicalStateHelperAndImmediateCmdListWhenExecutingThenMergeStates, IsAtMostGen12lp) {
     const ze_command_queue_desc_t desc = {};
     ze_result_t returnValue;
 
@@ -353,6 +354,30 @@ HWTEST_F(CommandQueueCreate, givenLogicalStateHelperAndImmediateCmdListWhenExecu
     EXPECT_EQ(0u, mockCsrLogicalStateHelper->mergePipelinedStateCounter);
     EXPECT_EQ(nullptr, mockCsrLogicalStateHelper->latestInputLogicalStateHelperForMerge);
 
+    commandQueue->destroy();
+}
+
+HWTEST2_F(CommandQueueCreate, givenOutOfHostMemoryErrorFromSubmitBatchBufferWhenExecutingCommandListsThenOutOfHostMemoryIsReturned, IsAtLeastSkl) {
+    const ze_command_queue_desc_t desc = {};
+    auto commandQueue = new MockCommandQueueHw<gfxCoreFamily>(device, neoDevice->getDefaultEngine().commandStreamReceiver, &desc);
+    commandQueue->initialize(false, false);
+    commandQueue->submitBatchBufferReturnValue = NEO::SubmissionStatus::OUT_OF_HOST_MEMORY;
+
+    Mock<Kernel> kernel;
+    kernel.immutableData.device = device;
+
+    ze_result_t returnValue;
+    auto commandList = std::unique_ptr<CommandList>(whiteboxCast(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)));
+    ASSERT_NE(nullptr, commandList);
+
+    ze_group_count_t dispatchFunctionArguments{1, 1, 1};
+    CmdListKernelLaunchParams launchParams = {};
+    commandList->appendLaunchKernel(kernel.toHandle(), &dispatchFunctionArguments, nullptr, 0, nullptr, launchParams);
+
+    ze_command_list_handle_t cmdListHandles[1] = {commandList->toHandle()};
+
+    const auto result = commandQueue->executeCommandLists(1, cmdListHandles, nullptr, false);
+    EXPECT_EQ(ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY, result);
     commandQueue->destroy();
 }
 
@@ -1798,7 +1823,9 @@ TEST_F(CommandQueueCreate, givenOverrideCmdQueueSyncModeToSynchronousWhenCommand
     commandQueue->destroy();
 }
 
-TEST_F(CommandQueueCreate, givenCreatedCommandQueueWhenGettingMultiReturnPointFlagThenDefaultValuseIsFalse) {
+TEST_F(CommandQueueCreate, givenCreatedCommandQueueWhenGettingTrackingFlagsThenDefaultValuseIsHwSupported) {
+    auto &hwInfo = device->getHwInfo();
+    auto &l0HwHelper = L0HwHelper::get(hwInfo.platform.eRenderCoreFamily);
     const ze_command_queue_desc_t desc{};
     ze_result_t returnValue;
     auto commandQueue = whiteboxCast(CommandQueue::create(productFamily,
@@ -1811,7 +1838,15 @@ TEST_F(CommandQueueCreate, givenCreatedCommandQueueWhenGettingMultiReturnPointFl
 
     EXPECT_EQ(returnValue, ZE_RESULT_SUCCESS);
     ASSERT_NE(nullptr, commandQueue);
-    EXPECT_FALSE(commandQueue->multiReturnPointCommandList);
+
+    bool expectedStateComputeModeTracking = l0HwHelper.platformSupportsStateComputeModeTracking(hwInfo);
+    EXPECT_EQ(expectedStateComputeModeTracking, commandQueue->stateComputeModeTracking);
+
+    bool expectedPipelineSelectTracking = l0HwHelper.platformSupportsPipelineSelectTracking(hwInfo);
+    EXPECT_EQ(expectedPipelineSelectTracking, commandQueue->pipelineSelectStateTracking);
+
+    bool expectedFrontEndTracking = l0HwHelper.platformSupportsFrontEndTracking(hwInfo);
+    EXPECT_EQ(expectedFrontEndTracking, commandQueue->frontEndStateTracking);
 
     commandQueue->destroy();
 }

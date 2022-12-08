@@ -268,7 +268,7 @@ TEST_F(DeviceGetCapsTest, whenDriverModelHasLimitationForMaxMemoryAllocationSize
         size_t getMaxMemAllocSize() const override {
             return maxAllocSize;
         }
-        PhyicalDevicePciSpeedInfo getPciSpeedInfo() const override { return {}; }
+        PhysicalDevicePciSpeedInfo getPciSpeedInfo() const override { return {}; }
     };
 
     DebugManagerStateRestore dbgRestorer;
@@ -320,7 +320,7 @@ TEST_F(DeviceGetCapsTest, givenFlagEnabled64kbPagesWhenCallConstructorMemoryMana
         MockMemoryManager(ExecutionEnvironment &executionEnvironment) : MemoryManager(executionEnvironment) {}
         void addAllocationToHostPtrManager(GraphicsAllocation *memory) override{};
         void removeAllocationFromHostPtrManager(GraphicsAllocation *memory) override{};
-        GraphicsAllocation *createGraphicsAllocationFromMultipleSharedHandles(std::vector<osHandle> handles, AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override { return nullptr; }
+        GraphicsAllocation *createGraphicsAllocationFromMultipleSharedHandles(const std::vector<osHandle> &handles, AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override { return nullptr; }
         GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override { return nullptr; };
         GraphicsAllocation *createGraphicsAllocationFromNTHandle(void *handle, uint32_t rootDeviceIndex, AllocationType allocType) override { return nullptr; };
         AllocationStatus populateOsHandles(OsHandleStorage &handleStorage, uint32_t rootDeviceIndex) override { return AllocationStatus::Success; };
@@ -430,7 +430,6 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, DeviceTests, givenZexNumberOfCssEnvVariableDefinedW
 
     MockExecutionEnvironment executionEnvironment(&hwInfo, false, 4);
     executionEnvironment.incRefInternal();
-
     UltDeviceFactory deviceFactory{4, 0, executionEnvironment};
 
     {
@@ -462,6 +461,67 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, DeviceTests, givenZexNumberOfCssEnvVariableDefinedW
         auto computeEngineGroupIndex = device->getEngineGroupIndexFromEngineGroupType(EngineGroupType::Compute);
         auto computeEngineGroup = device->getRegularEngineGroups()[computeEngineGroupIndex];
         EXPECT_EQ(1u, computeEngineGroup.engines.size());
+    }
+}
+
+HWCMDTEST_F(IGFX_XE_HP_CORE, DeviceTests, givenDeviceIsCreatedWithZexNumberOfCssEnvVariableDefinedAndHwInfoCcsCountIsSetToDefaultWhenAdjustCcsCountForSpecificRootDeviceIsInvokedThenVerifyHwInfoCcsCountIsRestored) {
+    VariableBackup<UltHwConfig> backup(&ultHwConfig);
+    ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc = false;
+    DebugManagerStateRestore restorer;
+
+    DebugManager.flags.ZEX_NUMBER_OF_CCS.set("0:1,1:2");
+    DebugManager.flags.SetCommandStreamReceiver.set(1);
+
+    auto hwInfo = *defaultHwInfo;
+
+    MockExecutionEnvironment executionEnvironment(&hwInfo, false, 2);
+    executionEnvironment.incRefInternal();
+
+    UltDeviceFactory deviceFactory{1, 0, executionEnvironment};
+    {
+        auto hardwareInfo = executionEnvironment.rootDeviceEnvironments[0]->getMutableHardwareInfo();
+        hardwareInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled = defaultHwInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
+
+        executionEnvironment.adjustCcsCount(0);
+        EXPECT_EQ(1u, hardwareInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled);
+    }
+
+    {
+        auto hardwareInfo = executionEnvironment.rootDeviceEnvironments[1]->getMutableHardwareInfo();
+        hardwareInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled = defaultHwInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
+
+        executionEnvironment.adjustCcsCount(1);
+        EXPECT_EQ(std::min(2u, defaultHwInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled), hardwareInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled);
+    }
+}
+
+HWTEST2_F(DeviceTests, givenDeviceIsCreatedWithAmbiguousZexNumberOfCssEnvVariableAndHwInfoCcsCountIsModifiedWhenAdjustCcsCountForSpecificDeviceIsInvokedThenVerifyCcsCountIsAdjustedToOne, IsPVC) {
+    VariableBackup<UltHwConfig> backup(&ultHwConfig);
+    ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc = false;
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.SetCommandStreamReceiver.set(1);
+
+    for (const auto &numberOfCcsString : {"default", "", "0"}) {
+        DebugManager.flags.ZEX_NUMBER_OF_CCS.set(numberOfCcsString);
+
+        auto hwInfo = *defaultHwInfo;
+
+        MockExecutionEnvironment executionEnvironment(&hwInfo);
+        executionEnvironment.incRefInternal();
+
+        UltDeviceFactory deviceFactory{1, 0, executionEnvironment};
+
+        auto device = deviceFactory.rootDevices[0];
+
+        auto computeEngineGroupIndex = device->getEngineGroupIndexFromEngineGroupType(EngineGroupType::Compute);
+        auto computeEngineGroup = device->getRegularEngineGroups()[computeEngineGroupIndex];
+        EXPECT_EQ(1u, computeEngineGroup.engines.size());
+
+        auto hardwareInfo = executionEnvironment.rootDeviceEnvironments[0]->getMutableHardwareInfo();
+        hardwareInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled = defaultHwInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
+
+        executionEnvironment.adjustCcsCount(0);
+        EXPECT_EQ(1u, hardwareInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled);
     }
 }
 

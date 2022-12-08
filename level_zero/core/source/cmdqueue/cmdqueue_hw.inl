@@ -182,14 +182,17 @@ ze_result_t CommandQueueHw<gfxCoreFamily>::executeCommandListsRegular(
         auto &finalStreamState = commandList->getFinalStreamState();
 
         this->updateOneCmdListPreemptionModeAndCtxStatePreemption(ctx, commandList->getCommandListPreemptionMode(), child);
+
         this->programOneCmdListPipelineSelect(commandList, child, csrStateProperties, requiredStreamState, finalStreamState);
         this->programOneCmdListFrontEndIfDirty(ctx, child, csrStateProperties, requiredStreamState, finalStreamState);
+        this->programRequiredStateComputeModeForCommandList(commandList, child, csrStateProperties, requiredStreamState, finalStreamState);
 
         this->patchCommands(*commandList, this->csr->getScratchSpaceController()->getScratchPatchAddress());
         this->programOneCmdListBatchBufferStart(commandList, child, ctx);
         this->mergeOneCmdListPipelinedState(commandList);
     }
 
+    this->updateBaseAddressState(CommandList::fromHandle(phCommandLists[numCommandLists - 1]));
     this->collectPrintfContentsFromAllCommandsLists(phCommandLists, numCommandLists);
     this->migrateSharedAllocationsIfRequested(ctx.isMigrationRequested, phCommandLists[0]);
     this->prefetchMemoryIfRequested(ctx.performMemoryPrefetch);
@@ -389,7 +392,7 @@ size_t CommandQueueHw<gfxCoreFamily>::estimateFrontEndCmdSizeForMultipleCommandL
         estimatedSize += singleFrontEndCmdSize;
         isFrontEndStateDirty = false;
     }
-    if (this->multiReturnPointCommandList) {
+    if (this->frontEndStateTracking) {
         uint32_t frontEndChanges = commandList->getReturnPointsSize();
         estimatedSize += (frontEndChanges * singleFrontEndCmdSize);
         estimatedSize += (frontEndChanges * NEO::EncodeBatchBufferStartOrEnd<GfxFamily>::getBatchBufferStartSize());
@@ -655,7 +658,7 @@ size_t CommandQueueHw<gfxCoreFamily>::estimateLinearStreamSizeComplementary(
     linearStreamSizeEstimate += estimateFrontEndCmdSize(ctx.frontEndStateDirty);
     linearStreamSizeEstimate += estimatePipelineSelectCmdSize();
 
-    if (this->pipelineSelectStateTracking || frontEndTrackingEnabled()) {
+    if (this->stateComputeModeTracking || this->pipelineSelectStateTracking || frontEndTrackingEnabled()) {
         bool frontEndStateDirtyCopy = ctx.frontEndStateDirty;
         auto streamPropertiesCopy = csr->getStreamProperties();
         bool gpgpuEnabledCopy = csr->getPreambleSetFlag();
@@ -667,6 +670,7 @@ size_t CommandQueueHw<gfxCoreFamily>::estimateLinearStreamSizeComplementary(
             linearStreamSizeEstimate += estimateFrontEndCmdSizeForMultipleCommandLists(frontEndStateDirtyCopy, ctx.engineInstanced, cmdList,
                                                                                        streamPropertiesCopy, requiredStreamState, finalStreamState);
             linearStreamSizeEstimate += estimatePipelineSelectCmdSizeForMultipleCommandLists(streamPropertiesCopy, requiredStreamState, finalStreamState, gpgpuEnabledCopy);
+            linearStreamSizeEstimate += estimateScmCmdSizeForMultipleCommandLists(streamPropertiesCopy, requiredStreamState, finalStreamState);
         }
     }
 
@@ -1002,7 +1006,7 @@ void CommandQueueHw<gfxCoreFamily>::dispatchTaskCountPostSyncRegular(
     const auto &hwInfo = this->device->getHwInfo();
 
     NEO::PipeControlArgs args;
-    args.dcFlushEnable = NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo);
+    args.dcFlushEnable = this->csr->getDcFlushSupport();
     args.workloadPartitionOffset = this->partitionCount > 1;
     args.notifyEnable = this->csr->isUsedNotifyEnableForPostSync();
     NEO::MemorySynchronizationCommands<GfxFamily>::addBarrierWithPostSyncOperation(
@@ -1043,7 +1047,7 @@ NEO::SubmissionStatus CommandQueueHw<gfxCoreFamily>::prepareAndSubmitBatchBuffer
         *(MI_BATCH_BUFFER_END *)buffer = GfxFamily::cmdInitBatchBufferEnd;
     }
 
-    if (ctx.isNEODebuggerActive(this->device) || NEO::DebugManager.flags.EnableSWTags.get() || isCleanLeftoverMemoryRequired()) {
+    if (ctx.isNEODebuggerActive(this->device) || NEO::DebugManager.flags.EnableSWTags.get() || csr->getLogicalStateHelper()) {
         cleanLeftoverMemory(outerCommandStream, innerCommandStream);
     } else if (this->alignedChildStreamPadding) {
         void *paddingPtr = innerCommandStream.getSpace(this->alignedChildStreamPadding);
@@ -1113,6 +1117,9 @@ ze_result_t CommandQueueHw<gfxCoreFamily>::handleSubmissionAndCompletionResults(
         if (submitRet == NEO::SubmissionStatus::OUT_OF_MEMORY) {
             completionRet = ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY;
         }
+        if (submitRet == NEO::SubmissionStatus::OUT_OF_HOST_MEMORY) {
+            completionRet = ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
+        }
     }
 
     return completionRet;
@@ -1161,8 +1168,9 @@ void CommandQueueHw<gfxCoreFamily>::programOneCmdListPipelineSelect(CommandList 
     csrState.pipelineSelect.setProperties(cmdListRequired.pipelineSelect);
 
     if (!preambleSet || csrState.pipelineSelect.isDirty()) {
+        bool systolic = csrState.pipelineSelect.systolicMode.value == 1 ? true : false;
         NEO::PipelineSelectArgs args = {
-            !!csrState.pipelineSelect.systolicMode.value,
+            systolic,
             false,
             false,
             commandList->getSystolicModeSupport()};
@@ -1175,8 +1183,65 @@ void CommandQueueHw<gfxCoreFamily>::programOneCmdListPipelineSelect(CommandList 
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
-bool CommandQueueHw<gfxCoreFamily>::isCleanLeftoverMemoryRequired() {
-    return false;
+size_t CommandQueueHw<gfxCoreFamily>::estimateScmCmdSizeForMultipleCommandLists(NEO::StreamProperties &csrStateCopy,
+                                                                                const NEO::StreamProperties &cmdListRequired,
+                                                                                const NEO::StreamProperties &cmdListFinal) {
+    if (!this->stateComputeModeTracking) {
+        return 0;
+    }
+
+    size_t estimatedSize = 0;
+
+    bool isRcs = this->getCsr()->isRcs();
+    size_t singleScmCmdSize = NEO::EncodeComputeMode<GfxFamily>::getCmdSizeForComputeMode(device->getHwInfo(), false, isRcs);
+
+    csrStateCopy.stateComputeMode.setProperties(cmdListRequired.stateComputeMode);
+    if (csrStateCopy.stateComputeMode.isDirty()) {
+        estimatedSize += singleScmCmdSize;
+    }
+    csrStateCopy.stateComputeMode.setProperties(cmdListFinal.stateComputeMode);
+
+    return estimatedSize;
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+void CommandQueueHw<gfxCoreFamily>::programRequiredStateComputeModeForCommandList(CommandList *commandList,
+                                                                                  NEO::LinearStream &commandStream,
+                                                                                  NEO::StreamProperties &csrState,
+                                                                                  const NEO::StreamProperties &cmdListRequired,
+                                                                                  const NEO::StreamProperties &cmdListFinal) {
+    if (!this->stateComputeModeTracking) {
+        return;
+    }
+
+    csrState.stateComputeMode.setProperties(cmdListRequired.stateComputeMode);
+
+    if (csrState.stateComputeMode.isDirty()) {
+        NEO::PipelineSelectArgs pipelineSelectArgs = {
+            !!csrState.pipelineSelect.systolicMode.value,
+            false,
+            false,
+            commandList->getSystolicModeSupport()};
+
+        bool isRcs = this->getCsr()->isRcs();
+        NEO::EncodeComputeMode<GfxFamily>::programComputeModeCommandWithSynchronization(commandStream, csrState.stateComputeMode, pipelineSelectArgs,
+                                                                                        false, device->getHwInfo(), isRcs, this->getCsr()->getDcFlushSupport(), nullptr);
+    }
+    csrState.stateComputeMode.setProperties(cmdListFinal.stateComputeMode);
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+void CommandQueueHw<gfxCoreFamily>::updateBaseAddressState(CommandList *lastCommandList) {
+    auto csrHw = static_cast<NEO::CommandStreamReceiverHw<GfxFamily> *>(csr);
+    auto dsh = lastCommandList->commandContainer.getIndirectHeap(NEO::HeapType::DYNAMIC_STATE);
+    if (dsh != nullptr) {
+        csrHw->getDshState().updateAndCheck(dsh);
+    }
+
+    auto ssh = lastCommandList->commandContainer.getIndirectHeap(NEO::HeapType::SURFACE_STATE);
+    if (ssh != nullptr) {
+        csrHw->getSshState().updateAndCheck(ssh);
+    }
 }
 
 } // namespace L0

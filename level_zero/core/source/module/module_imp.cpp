@@ -173,9 +173,11 @@ bool ModuleTranslationUnit::processSpecConstantInfo(NEO::CompilerInterface *comp
     return true;
 }
 
-bool ModuleTranslationUnit::compileGenBinary(NEO::TranslationInput inputArgs, bool staticLink) {
+ze_result_t ModuleTranslationUnit::compileGenBinary(NEO::TranslationInput inputArgs, bool staticLink) {
     auto compilerInterface = device->getNEODevice()->getCompilerInterface();
-    UNRECOVERABLE_IF(nullptr == compilerInterface);
+    if (!compilerInterface) {
+        return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
+    }
 
     inputArgs.specializedValues = this->specConstantsValues;
 
@@ -192,7 +194,7 @@ bool ModuleTranslationUnit::compileGenBinary(NEO::TranslationInput inputArgs, bo
     this->updateBuildLog(compilerOuput.backendCompilerLog);
 
     if (NEO::TranslationOutput::ErrorCode::Success != compilerErr) {
-        return false;
+        return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     }
 
     this->irBinary = std::move(compilerOuput.intermediateRepresentation.mem);
@@ -205,17 +207,19 @@ bool ModuleTranslationUnit::compileGenBinary(NEO::TranslationInput inputArgs, bo
     return processUnpackedBinary();
 }
 
-bool ModuleTranslationUnit::staticLinkSpirV(std::vector<const char *> inputSpirVs, std::vector<uint32_t> inputModuleSizes, const char *buildOptions, const char *internalBuildOptions,
-                                            std::vector<const ze_module_constants_t *> specConstants) {
+ze_result_t ModuleTranslationUnit::staticLinkSpirV(std::vector<const char *> inputSpirVs, std::vector<uint32_t> inputModuleSizes, const char *buildOptions, const char *internalBuildOptions,
+                                                   std::vector<const ze_module_constants_t *> specConstants) {
     auto compilerInterface = device->getNEODevice()->getCompilerInterface();
-    UNRECOVERABLE_IF(nullptr == compilerInterface);
+    if (!compilerInterface) {
+        return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
+    }
 
     std::string internalOptions = this->generateCompilerOptions(buildOptions, internalBuildOptions);
 
     for (uint32_t i = 0; i < static_cast<uint32_t>(specConstants.size()); i++) {
         auto specConstantResult = this->processSpecConstantInfo(compilerInterface, specConstants[i], inputSpirVs[i], inputModuleSizes[i]);
         if (!specConstantResult) {
-            return false;
+            return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
         }
     }
 
@@ -229,33 +233,34 @@ bool ModuleTranslationUnit::staticLinkSpirV(std::vector<const char *> inputSpirV
     return this->compileGenBinary(linkInputArgs, true);
 }
 
-bool ModuleTranslationUnit::buildFromSpirV(const char *input, uint32_t inputSize, const char *buildOptions, const char *internalBuildOptions,
-                                           const ze_module_constants_t *pConstants) {
+ze_result_t ModuleTranslationUnit::buildFromSpirV(const char *input, uint32_t inputSize, const char *buildOptions, const char *internalBuildOptions,
+                                                  const ze_module_constants_t *pConstants) {
     auto compilerInterface = device->getNEODevice()->getCompilerInterface();
-    UNRECOVERABLE_IF(nullptr == compilerInterface);
+    if (!compilerInterface) {
+        return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
+    }
 
     std::string internalOptions = this->generateCompilerOptions(buildOptions, internalBuildOptions);
 
     auto specConstantResult = this->processSpecConstantInfo(compilerInterface, pConstants, input, inputSize);
-    if (!specConstantResult)
-        return false;
+    if (!specConstantResult) {
+        return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+    }
 
     NEO::TranslationInput inputArgs = {IGC::CodeType::spirV, IGC::CodeType::oclGenBin};
 
     inputArgs.src = ArrayRef<const char>(input, inputSize);
     inputArgs.apiOptions = ArrayRef<const char>(options.c_str(), options.length());
     inputArgs.internalOptions = ArrayRef<const char>(internalOptions.c_str(), internalOptions.length());
+    inputArgs.allowCaching = true;
     return this->compileGenBinary(inputArgs, false);
 }
 
-bool ModuleTranslationUnit::createFromNativeBinary(const char *input, size_t inputSize) {
+ze_result_t ModuleTranslationUnit::createFromNativeBinary(const char *input, size_t inputSize) {
     UNRECOVERABLE_IF((nullptr == device) || (nullptr == device->getNEODevice()));
     auto productAbbreviation = NEO::hardwarePrefix[device->getNEODevice()->getHardwareInfo().platform.eProductFamily];
 
-    auto copyHwInfo = device->getNEODevice()->getHardwareInfo();
-    NEO::CompilerHwInfoConfig::get(copyHwInfo.platform.eProductFamily)->adjustHwInfoForIgc(copyHwInfo);
-
-    NEO::TargetDevice targetDevice = NEO::targetDeviceFromHwInfo(copyHwInfo);
+    NEO::TargetDevice targetDevice = NEO::targetDeviceFromHwInfo(device->getNEODevice()->getHardwareInfo());
     std::string decodeErrors;
     std::string decodeWarnings;
     ArrayRef<const uint8_t> archive(reinterpret_cast<const uint8_t *>(input), inputSize);
@@ -264,10 +269,9 @@ bool ModuleTranslationUnit::createFromNativeBinary(const char *input, size_t inp
     if (decodeWarnings.empty() == false) {
         PRINT_DEBUG_STRING(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "%s\n", decodeWarnings.c_str());
     }
-
     if (singleDeviceBinary.intermediateRepresentation.empty() && singleDeviceBinary.deviceBinary.empty()) {
         PRINT_DEBUG_STRING(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "%s\n", decodeErrors.c_str());
-        return false;
+        return ZE_RESULT_ERROR_INVALID_NATIVE_BINARY;
     } else {
         this->irBinary = makeCopy(reinterpret_cast<const char *>(singleDeviceBinary.intermediateRepresentation.begin()), singleDeviceBinary.intermediateRepresentation.size());
         this->irBinarySize = singleDeviceBinary.intermediateRepresentation.size();
@@ -282,6 +286,10 @@ bool ModuleTranslationUnit::createFromNativeBinary(const char *input, size_t inp
         }
 
         bool rebuild = NEO::DebugManager.flags.RebuildPrecompiledKernels.get() && irBinarySize != 0;
+        rebuild |= NEO::isRebuiltToPatchtokensRequired(device->getNEODevice(), archive, this->options, this->isBuiltIn);
+        if (rebuild && irBinarySize == 0) {
+            return ZE_RESULT_ERROR_INVALID_NATIVE_BINARY;
+        }
         if ((false == singleDeviceBinary.deviceBinary.empty()) && (false == rebuild)) {
             this->unpackedDeviceBinary = makeCopy<char>(reinterpret_cast<const char *>(singleDeviceBinary.deviceBinary.begin()), singleDeviceBinary.deviceBinary.size());
             this->unpackedDeviceBinarySize = singleDeviceBinary.deviceBinary.size();
@@ -303,13 +311,16 @@ bool ModuleTranslationUnit::createFromNativeBinary(const char *input, size_t inp
 
         return buildFromSpirV(this->irBinary.get(), static_cast<uint32_t>(this->irBinarySize), this->options.c_str(), "", nullptr);
     } else {
-        return processUnpackedBinary();
+        if (processUnpackedBinary() != ZE_RESULT_SUCCESS) {
+            return ZE_RESULT_ERROR_INVALID_NATIVE_BINARY;
+        }
+        return ZE_RESULT_SUCCESS;
     }
 }
 
-bool ModuleTranslationUnit::processUnpackedBinary() {
+ze_result_t ModuleTranslationUnit::processUnpackedBinary() {
     if (0 == unpackedDeviceBinarySize) {
-        return false;
+        return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     }
     auto blob = ArrayRef<const uint8_t>(reinterpret_cast<const uint8_t *>(this->unpackedDeviceBinary.get()), this->unpackedDeviceBinarySize);
     NEO::SingleDeviceBinary binary = {};
@@ -327,7 +338,7 @@ bool ModuleTranslationUnit::processUnpackedBinary() {
 
     if (NEO::DecodeError::Success != decodeError) {
         PRINT_DEBUG_STRING(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "%s\n", decodeErrors.c_str());
-        return false;
+        return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     }
 
     processDebugData();
@@ -344,7 +355,9 @@ bool ModuleTranslationUnit::processUnpackedBinary() {
     }
 
     if (slmNeeded > slmAvailable) {
-        return false;
+        PRINT_DEBUG_STRING(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "Size of SLM (%u) larger than available (%u)\n",
+                           static_cast<uint32_t>(slmNeeded), static_cast<uint32_t>(slmAvailable));
+        return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     }
 
     auto svmAllocsManager = device->getDriverHandle()->getSvmAllocsManager();
@@ -361,7 +374,7 @@ bool ModuleTranslationUnit::processUnpackedBinary() {
     }
 
     if (this->packedDeviceBinary != nullptr) {
-        return true;
+        return ZE_RESULT_SUCCESS;
     }
 
     NEO::SingleDeviceBinary singleDeviceBinary = {};
@@ -375,12 +388,12 @@ bool ModuleTranslationUnit::processUnpackedBinary() {
     auto packedDeviceBinary = NEO::packDeviceBinary(singleDeviceBinary, packErrors, packWarnings);
     if (packedDeviceBinary.empty()) {
         DEBUG_BREAK_IF(true);
-        return false;
+        return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     }
     this->packedDeviceBinary = makeCopy(packedDeviceBinary.data(), packedDeviceBinary.size());
     this->packedDeviceBinarySize = packedDeviceBinary.size();
 
-    return true;
+    return ZE_RESULT_SUCCESS;
 }
 
 void ModuleTranslationUnit::updateBuildLog(const std::string &newLogEntry) {
@@ -450,8 +463,9 @@ NEO::Debug::Segments ModuleImp::getZebinSegments() {
     return NEO::Debug::Segments(translationUnit->globalVarBuffer, translationUnit->globalConstBuffer, strings, kernels);
 }
 
-bool ModuleImp::initialize(const ze_module_desc_t *desc, NEO::Device *neoDevice) {
-    bool success = true;
+ze_result_t ModuleImp::initialize(const ze_module_desc_t *desc, NEO::Device *neoDevice) {
+    bool linkageSuccessful = true;
+    ze_result_t result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
 
     std::string buildOptions;
     std::string internalBuildOptions;
@@ -460,7 +474,7 @@ bool ModuleImp::initialize(const ze_module_desc_t *desc, NEO::Device *neoDevice)
         const ze_base_desc_t *expDesc = reinterpret_cast<const ze_base_desc_t *>(desc->pNext);
         if (expDesc->stype == ZE_STRUCTURE_TYPE_MODULE_PROGRAM_EXP_DESC) {
             if (desc->format != ZE_MODULE_FORMAT_IL_SPIRV) {
-                return false;
+                return ZE_RESULT_ERROR_INVALID_ENUMERATION;
             }
             this->builtFromSPIRv = true;
             const ze_module_program_exp_desc_t *programExpDesc =
@@ -493,24 +507,25 @@ bool ModuleImp::initialize(const ze_module_desc_t *desc, NEO::Device *neoDevice)
             }
             // If the user passed in only 1 SPIRV, then fallback to standard build
             if (inputSpirVs.size() > 1) {
-                success = this->translationUnit->staticLinkSpirV(inputSpirVs,
-                                                                 inputModuleSizes,
-                                                                 buildOptions.c_str(),
-                                                                 internalBuildOptions.c_str(),
-                                                                 specConstants);
-            } else {
-                success = this->translationUnit->buildFromSpirV(reinterpret_cast<const char *>(programExpDesc->pInputModules[0]),
-                                                                inputModuleSizes[0],
+                result = this->translationUnit->staticLinkSpirV(inputSpirVs,
+                                                                inputModuleSizes,
                                                                 buildOptions.c_str(),
                                                                 internalBuildOptions.c_str(),
-                                                                firstSpecConstants);
+                                                                specConstants);
+            } else {
+                result = this->translationUnit->buildFromSpirV(reinterpret_cast<const char *>(programExpDesc->pInputModules[0]),
+                                                               inputModuleSizes[0],
+                                                               buildOptions.c_str(),
+                                                               internalBuildOptions.c_str(),
+                                                               firstSpecConstants);
             }
         } else {
-            return false;
+            return ZE_RESULT_ERROR_INVALID_ARGUMENT;
         }
     } else {
         std::string buildFlagsInput{desc->pBuildFlags != nullptr ? desc->pBuildFlags : ""};
         this->translationUnit->shouldSuppressRebuildWarning = NEO::CompilerOptions::extract(NEO::CompilerOptions::noRecompiledFromIr, buildFlagsInput);
+        this->translationUnit->isBuiltIn = this->type == ModuleType::Builtin ? true : false;
         this->createBuildOptions(buildFlagsInput.c_str(), buildOptions, internalBuildOptions);
 
         if (type == ModuleType::User) {
@@ -524,17 +539,17 @@ bool ModuleImp::initialize(const ze_module_desc_t *desc, NEO::Device *neoDevice)
         }
 
         if (desc->format == ZE_MODULE_FORMAT_NATIVE) {
-            success = this->translationUnit->createFromNativeBinary(
+            result = this->translationUnit->createFromNativeBinary(
                 reinterpret_cast<const char *>(desc->pInputModule), desc->inputSize);
         } else if (desc->format == ZE_MODULE_FORMAT_IL_SPIRV) {
             this->builtFromSPIRv = true;
-            success = this->translationUnit->buildFromSpirV(reinterpret_cast<const char *>(desc->pInputModule),
-                                                            static_cast<uint32_t>(desc->inputSize),
-                                                            buildOptions.c_str(),
-                                                            internalBuildOptions.c_str(),
-                                                            desc->pConstants);
+            result = this->translationUnit->buildFromSpirV(reinterpret_cast<const char *>(desc->pInputModule),
+                                                           static_cast<uint32_t>(desc->inputSize),
+                                                           buildOptions.c_str(),
+                                                           internalBuildOptions.c_str(),
+                                                           desc->pConstants);
         } else {
-            return false;
+            return ZE_RESULT_ERROR_INVALID_ENUMERATION;
         }
     }
 
@@ -550,11 +565,11 @@ bool ModuleImp::initialize(const ze_module_desc_t *desc, NEO::Device *neoDevice)
                             NEO::AddressingModeHelper::failBuildProgramWithStatefulAccess(hwInfo);
 
     if (failBuildProgram) {
-        success = false;
+        result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     }
 
-    if (false == success) {
-        return false;
+    if (result != ZE_RESULT_SUCCESS) {
+        return result;
     }
 
     kernelImmDatas.reserve(this->translationUnit->programInfo.kernelInfos.size());
@@ -582,9 +597,9 @@ bool ModuleImp::initialize(const ze_module_desc_t *desc, NEO::Device *neoDevice)
 
     checkIfPrivateMemoryPerDispatchIsNeeded();
 
-    success = this->linkBinary();
+    linkageSuccessful = this->linkBinary();
 
-    success &= populateHostGlobalSymbolsMap(this->translationUnit->programInfo.globalsDeviceToHostNameMap);
+    linkageSuccessful &= populateHostGlobalSymbolsMap(this->translationUnit->programInfo.globalsDeviceToHostNameMap);
     this->updateBuildLog(neoDevice);
 
     if (debugEnabled) {
@@ -612,7 +627,10 @@ bool ModuleImp::initialize(const ze_module_desc_t *desc, NEO::Device *neoDevice)
             notifyModuleCreate();
         }
     }
-    return success;
+    if (linkageSuccessful == false) {
+        result = ZE_RESULT_ERROR_MODULE_LINK_FAILURE;
+    }
+    return result;
 }
 
 void ModuleImp::createDebugZebin() {
@@ -747,6 +765,17 @@ ze_result_t ModuleImp::createKernel(const ze_kernel_desc_t *desc,
 
     if (res == ZE_RESULT_SUCCESS) {
         *kernelHandle = kernel->toHandle();
+    }
+
+    auto localMemSize = static_cast<uint32_t>(this->getDevice()->getNEODevice()->getDeviceInfo().localMemSize);
+
+    for (const auto &kernelImmutableData : this->getKernelImmutableDataVector()) {
+        auto slmInlineSize = kernelImmutableData->getDescriptor().kernelAttributes.slmInlineSize;
+        if (slmInlineSize > 0 && localMemSize < slmInlineSize) {
+            PRINT_DEBUG_STRING(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "Size of SLM (%u) larger than available (%u)\n", slmInlineSize, localMemSize);
+            res = ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY;
+            break;
+        }
     }
 
     return res;
@@ -960,11 +989,11 @@ ze_result_t ModuleImp::getGlobalPointer(const char *pGlobalName, size_t *pSize, 
 }
 
 Module *Module::create(Device *device, const ze_module_desc_t *desc,
-                       ModuleBuildLog *moduleBuildLog, ModuleType type) {
+                       ModuleBuildLog *moduleBuildLog, ModuleType type, ze_result_t *result) {
     auto module = new ModuleImp(device, moduleBuildLog, type);
 
-    bool success = module->initialize(desc, device->getNEODevice());
-    if (success == false) {
+    *result = module->initialize(desc, device->getNEODevice());
+    if (*result != ZE_RESULT_SUCCESS) {
         module->destroy();
         return nullptr;
     }

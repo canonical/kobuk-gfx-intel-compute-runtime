@@ -18,9 +18,10 @@
 namespace L0 {
 namespace ult {
 
-std::unique_ptr<NEO::UltDeviceFactory> PciSpeedInfoTest::createDevices(uint32_t numSubDevices, const NEO::PhyicalDevicePciSpeedInfo &pciSpeedInfo) {
+std::unique_ptr<NEO::UltDeviceFactory> PciSpeedInfoTest::createDevices(uint32_t numSubDevices, const NEO::PhysicalDevicePciSpeedInfo &pciSpeedInfo) {
 
     DebugManager.flags.CreateMultipleSubDevices.set(numSubDevices);
+    DebugManager.flags.EnableChipsetUniqueUUID.set(0);
     NEO::ExecutionEnvironment *executionEnvironment = new MockExecutionEnvironment(defaultHwInfo.get(), false, 1);
     executionEnvironment->rootDeviceEnvironments[0]->osInterface.reset(new OSInterface);
     executionEnvironment->memoryManager.reset(new MockMemoryManagerOsAgnosticContext(*executionEnvironment));
@@ -30,7 +31,7 @@ std::unique_ptr<NEO::UltDeviceFactory> PciSpeedInfoTest::createDevices(uint32_t 
 
 TEST_F(PciSpeedInfoTest, givenSuccessfulReadingOfSpeedValuesCorrectValuesAreReturned) {
 
-    NEO::PhyicalDevicePciSpeedInfo expectedSpeedInfo;
+    NEO::PhysicalDevicePciSpeedInfo expectedSpeedInfo;
     expectedSpeedInfo.genVersion = 4;
     expectedSpeedInfo.width = 1024;
     expectedSpeedInfo.maxBandwidth = 4096;

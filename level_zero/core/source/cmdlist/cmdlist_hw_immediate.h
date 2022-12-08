@@ -9,6 +9,10 @@
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw.h"
 
+namespace NEO {
+struct SvmAllocationData;
+}
+
 namespace L0 {
 
 struct EventPool;
@@ -17,10 +21,10 @@ constexpr size_t maxImmediateCommandSize = 4 * MemoryConstants::kiloByte;
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 struct CommandListCoreFamilyImmediate : public CommandListCoreFamily<gfxCoreFamily> {
+    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using BaseClass = CommandListCoreFamily<gfxCoreFamily>;
-    using BaseClass::executeCommandListImmediate;
-
     using BaseClass::BaseClass;
+    using BaseClass::executeCommandListImmediate;
 
     ze_result_t appendLaunchKernel(ze_kernel_handle_t kernelHandle,
                                    const ze_group_count_t *threadGroupDimensions,
@@ -114,15 +118,30 @@ struct CommandListCoreFamilyImmediate : public CommandListCoreFamily<gfxCoreFami
                                           uint32_t numWaitEvents,
                                           ze_event_handle_t *phWaitEvents) override;
 
+    ze_result_t appendLaunchCooperativeKernel(ze_kernel_handle_t kernelHandle,
+                                              const ze_group_count_t *launchKernelArgs,
+                                              ze_event_handle_t signalEvent,
+                                              uint32_t numWaitEvents,
+                                              ze_event_handle_t *waitEventHandles) override;
+
     MOCKABLE_VIRTUAL ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration);
 
     void checkAvailableSpace();
     void updateDispatchFlagsWithRequiredStreamState(NEO::DispatchFlags &dispatchFlags);
 
-    ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration);
+    ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration, ze_event_handle_t signalEvent);
 
     void createLogicalStateHelper() override {}
     NEO::LogicalStateHelper *getLogicalStateHelper() const override;
+
+    bool preferCopyThroughLockedPtr(NEO::SvmAllocationData *dstAlloc, bool dstFound, NEO::SvmAllocationData *srcAlloc, bool srcFound, size_t size);
+    bool isSuitableUSMDeviceAlloc(NEO::SvmAllocationData *alloc, bool allocFound);
+    ze_result_t performCpuMemcpy(void *dstptr, const void *srcptr, size_t size, bool isDstDeviceMemory, ze_event_handle_t hSignalEvent, uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents);
+    void *obtainLockedPtrFromDevice(void *ptr, size_t size);
+    bool waitForEventsFromHost();
+
+  protected:
+    std::atomic<bool> dependenciesPresent{false};
 };
 
 template <PRODUCT_FAMILY gfxProductFamily>

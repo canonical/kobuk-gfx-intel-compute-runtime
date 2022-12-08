@@ -8,6 +8,7 @@
 #pragma once
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/kernel/kernel_descriptor.h"
+#include "shared/source/program/kernel_info.h"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
@@ -18,6 +19,12 @@ class CommandEncodeStatesFixture : public DeviceFixture {
     class MyMockCommandContainer : public CommandContainer {
       public:
         using CommandContainer::dirtyHeaps;
+
+        IndirectHeap *getHeapWithRequiredSizeAndAlignment(HeapType heapType, size_t sizeRequired, size_t alignment) override {
+            getHeapWithRequiredSizeAndAlignmentCalled++;
+            return CommandContainer::getHeapWithRequiredSizeAndAlignment(heapType, sizeRequired, alignment);
+        }
+        uint32_t getHeapWithRequiredSizeAndAlignmentCalled = 0u;
     };
 
     void setUp();
@@ -44,6 +51,7 @@ class CommandEncodeStatesFixture : public DeviceFixture {
     }
 
     KernelDescriptor descriptor;
+    KernelInfo kernelInfo;
     std::unique_ptr<MyMockCommandContainer> cmdContainer;
 };
 

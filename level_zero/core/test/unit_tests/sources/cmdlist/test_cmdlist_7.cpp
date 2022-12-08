@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/os_interface/hw_info_config.h"
+#include "shared/source/os_interface/sys_calls_common.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
@@ -22,6 +23,12 @@
 #include "level_zero/core/test/unit_tests/mocks/mock_module.h"
 
 #include "test_traits_common.h"
+
+namespace NEO {
+namespace SysCalls {
+extern bool getNumThreadsCalled;
+}
+} // namespace NEO
 
 namespace L0 {
 namespace ult {
@@ -327,19 +334,24 @@ HWTEST2_F(CommandListAppendLaunchKernel, GivenComputeModePropertiesWhenUpdateStr
     auto pMockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
     kernel.module = pMockModule.get();
 
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto result = commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
     const_cast<NEO::KernelDescriptor *>(&kernel.getKernelDescriptor())->kernelAttributes.numGrfRequired = 0x100;
-    pCommandList->updateStreamProperties(kernel, false);
-    EXPECT_EQ(hwInfoConfig.getScmPropertyCoherencyRequiredSupport(), pCommandList->finalStreamState.stateComputeMode.isCoherencyRequired.isDirty);
-    EXPECT_EQ(hwInfoConfig.isGrfNumReportedWithScm(), pCommandList->finalStreamState.stateComputeMode.largeGrfMode.isDirty);
+    commandList->updateStreamProperties(kernel, false);
+    if (commandList->stateComputeModeTracking) {
+        EXPECT_FALSE(commandList->finalStreamState.stateComputeMode.isCoherencyRequired.isDirty);
+        EXPECT_FALSE(commandList->finalStreamState.stateComputeMode.largeGrfMode.isDirty);
+    } else {
+        EXPECT_EQ(hwInfoConfig.getScmPropertyCoherencyRequiredSupport(), commandList->finalStreamState.stateComputeMode.isCoherencyRequired.isDirty);
+        EXPECT_EQ(hwInfoConfig.isGrfNumReportedWithScm(), commandList->finalStreamState.stateComputeMode.largeGrfMode.isDirty);
+    }
 
     const_cast<NEO::KernelDescriptor *>(&kernel.getKernelDescriptor())->kernelAttributes.numGrfRequired = 0x80;
-    pCommandList->updateStreamProperties(kernel, false);
-    EXPECT_EQ(hwInfoConfig.isGrfNumReportedWithScm(), pCommandList->finalStreamState.stateComputeMode.largeGrfMode.isDirty);
-    EXPECT_FALSE(pCommandList->finalStreamState.stateComputeMode.isCoherencyRequired.isDirty);
+    commandList->updateStreamProperties(kernel, false);
+    EXPECT_EQ(hwInfoConfig.isGrfNumReportedWithScm(), commandList->finalStreamState.stateComputeMode.largeGrfMode.isDirty);
+    EXPECT_FALSE(commandList->finalStreamState.stateComputeMode.isCoherencyRequired.isDirty);
 }
 
 struct ProgramAllFieldsInComputeMode {
@@ -380,18 +392,23 @@ HWTEST2_F(CommandListAppendLaunchKernel, GivenComputeModePropertiesWhenPropertes
     auto pMockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
     kernel.module = pMockModule.get();
 
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    auto result = pCommandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto result = commandList->initialize(device, NEO::EngineGroupType::Compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
     const_cast<NEO::KernelDescriptor *>(&kernel.getKernelDescriptor())->kernelAttributes.numGrfRequired = 0x100;
-    pCommandList->updateStreamProperties(kernel, false);
-    EXPECT_EQ(hwInfoConfig.getScmPropertyCoherencyRequiredSupport(), pCommandList->finalStreamState.stateComputeMode.isCoherencyRequired.isDirty);
-    EXPECT_EQ(hwInfoConfig.isGrfNumReportedWithScm(), pCommandList->finalStreamState.stateComputeMode.largeGrfMode.isDirty);
+    commandList->updateStreamProperties(kernel, false);
+    if (commandList->stateComputeModeTracking) {
+        EXPECT_FALSE(commandList->finalStreamState.stateComputeMode.isCoherencyRequired.isDirty);
+        EXPECT_FALSE(commandList->finalStreamState.stateComputeMode.largeGrfMode.isDirty);
+    } else {
+        EXPECT_EQ(hwInfoConfig.getScmPropertyCoherencyRequiredSupport(), commandList->finalStreamState.stateComputeMode.isCoherencyRequired.isDirty);
+        EXPECT_EQ(hwInfoConfig.isGrfNumReportedWithScm(), commandList->finalStreamState.stateComputeMode.largeGrfMode.isDirty);
+    }
 
-    pCommandList->updateStreamProperties(kernel, false);
-    EXPECT_FALSE(pCommandList->finalStreamState.stateComputeMode.isCoherencyRequired.isDirty);
-    EXPECT_FALSE(pCommandList->finalStreamState.stateComputeMode.largeGrfMode.isDirty);
+    commandList->updateStreamProperties(kernel, false);
+    EXPECT_FALSE(commandList->finalStreamState.stateComputeMode.isCoherencyRequired.isDirty);
+    EXPECT_FALSE(commandList->finalStreamState.stateComputeMode.largeGrfMode.isDirty);
 }
 
 HWTEST2_F(CommandListCreate, givenImmediateCommandListWhenAppendingMemoryCopyThenSuccessIsReturned, IsAtLeastSkl) {
@@ -443,7 +460,7 @@ HWTEST2_F(CommandListCreate, givenImmediateCommandListWhenAppendingMemoryCopyWit
 HWTEST2_F(CommandListCreate, givenCommandListAndHostPointersWhenMemoryCopyCalledThenPipeControlWithDcFlushAdded, IsAtLeastSkl) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
-    ze_result_t result;
+    ze_result_t result = ZE_RESULT_SUCCESS;
     std::unique_ptr<L0::CommandList> commandList0(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, result));
     ASSERT_NE(nullptr, commandList0);
 
@@ -490,7 +507,7 @@ HWTEST2_F(CmdlistAppendLaunchKernelTests,
     kernel->setGlobalOffsetExp(1, 2, 3);
     kernel->patchGlobalOffset();
 
-    ze_result_t result;
+    ze_result_t result = ZE_RESULT_SUCCESS;
     auto commandList = std::make_unique<WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>();
     ASSERT_NE(nullptr, commandList);
     commandList->isFlushTaskSubmissionEnabled = true;
@@ -509,6 +526,146 @@ HWTEST2_F(CmdlistAppendLaunchKernelTests,
 
     auto ultCsr = reinterpret_cast<NEO::UltCommandStreamReceiver<FamilyType> *>(device->getNEODevice()->getDefaultEngine().commandStreamReceiver);
     EXPECT_EQ(scratchPerThreadSize, ultCsr->requiredScratchSize);
+}
+
+HWTEST2_F(CmdlistAppendLaunchKernelTests,
+          givenEventWaitOnHostWhenAppendLaunchKernelWithEventWaitListThenHostSynchronize, IsAtLeastXeHpCore) {
+    DebugManagerStateRestore restorer;
+    NEO::DebugManager.flags.EventWaitOnHost.set(1);
+    NEO::DebugManager.flags.EventWaitOnHostNumClients.set(0);
+    NEO::DebugManager.flags.EventWaitOnHostNumThreads.set(0);
+
+    constexpr uint32_t scratchPerThreadSize = 0x200;
+    constexpr uint32_t privateScratchPerThreadSize = 0x100;
+
+    std::unique_ptr<MockImmutableData> mockKernelImmData = std::make_unique<MockImmutableData>(0u);
+    auto kernelDescriptor = mockKernelImmData->kernelDescriptor;
+    kernelDescriptor->kernelAttributes.flags.requiresImplicitArgs = false;
+    kernelDescriptor->kernelAttributes.perThreadScratchSize[0] = scratchPerThreadSize;
+    kernelDescriptor->kernelAttributes.perThreadScratchSize[1] = privateScratchPerThreadSize;
+    createModuleFromMockBinary(0u, false, mockKernelImmData.get());
+
+    auto kernel = std::make_unique<MockKernel>(module.get());
+
+    ze_kernel_desc_t kernelDesc{ZE_STRUCTURE_TYPE_KERNEL_DESC};
+    kernel->initialize(&kernelDesc);
+
+    kernel->setGroupSize(4, 5, 6);
+    kernel->setGroupCount(3, 2, 1);
+    kernel->setGlobalOffsetExp(1, 2, 3);
+    kernel->patchGlobalOffset();
+
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE;
+    eventPoolDesc.count = 2;
+
+    ze_event_desc_t eventDesc = {};
+    eventDesc.index = 0;
+    eventDesc.wait = 0;
+    eventDesc.signal = 0;
+
+    struct MockEvent : public EventImp<uint32_t> {
+        using EventImp<uint32_t>::hostEventSetValueTimestamps;
+        using EventImp<uint32_t>::isCompleted;
+    };
+    ze_result_t returnValue;
+    std::unique_ptr<EventPool> eventPool = std::unique_ptr<EventPool>(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, returnValue));
+    std::unique_ptr<Event> event = std::unique_ptr<Event>(Event::create<uint32_t>(eventPool.get(), &eventDesc, device));
+
+    std::array<uint32_t, 8u> timestampData;
+    timestampData.fill(std::numeric_limits<uint32_t>::max());
+    static_cast<MockEvent *>(event.get())->hostEventSetValueTimestamps(0u);
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    ze_command_list_handle_t cmdListHandle;
+    ze_command_queue_desc_t queueDesc = {ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
+    queueDesc.ordinal = 0;
+    queueDesc.index = 0;
+    device->createCommandListImmediate(&queueDesc, &cmdListHandle);
+
+    ze_group_count_t groupCount = {3, 2, 1};
+    CmdListKernelLaunchParams launchParams = {};
+    ze_event_handle_t eventHandles[1] = {event->toHandle()};
+    EXPECT_FALSE(static_cast<MockEvent *>(event.get())->isCompleted);
+
+    result = CommandList::fromHandle(cmdListHandle)->appendLaunchKernel(kernel->toHandle(), &groupCount, nullptr, 1, eventHandles, launchParams);
+
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    EXPECT_TRUE(static_cast<MockEvent *>(event.get())->isCompleted);
+
+    CommandList::fromHandle(cmdListHandle)->destroy();
+}
+
+HWTEST2_F(CmdlistAppendLaunchKernelTests,
+          givenEventWaitOnHostNumThreadsHigherThanNumThreadsWhenWaitForEventsFromHostThenReturnFalse, IsAtLeastXeHpCore) {
+    DebugManagerStateRestore restorer;
+    NEO::DebugManager.flags.EventWaitOnHost.set(1);
+    NEO::DebugManager.flags.EventWaitOnHostNumClients.set(0);
+    NEO::DebugManager.flags.EventWaitOnHostNumThreads.set(2);
+    EXPECT_EQ(NEO::SysCalls::getNumThreads(), 1u);
+
+    ze_command_list_handle_t cmdListHandle;
+    ze_command_queue_desc_t queueDesc = {ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
+    queueDesc.ordinal = 0;
+    queueDesc.index = 0;
+    device->createCommandListImmediate(&queueDesc, &cmdListHandle);
+
+    EXPECT_FALSE(static_cast<L0::CommandListCoreFamilyImmediate<gfxCoreFamily> *>(CommandList::fromHandle(cmdListHandle))->waitForEventsFromHost());
+
+    CommandList::fromHandle(cmdListHandle)->destroy();
+}
+
+HWTEST2_F(CmdlistAppendLaunchKernelTests,
+          givenEventWaitOnHostNumThreadsNotSetWhenWaitForEventsFromHostThenReturnFalse, IsAtLeastXeHpCore) {
+    DebugManagerStateRestore restorer;
+    NEO::DebugManager.flags.EventWaitOnHost.set(1);
+    NEO::DebugManager.flags.EventWaitOnHostNumClients.set(0);
+    EXPECT_EQ(NEO::SysCalls::getNumThreads(), 1u);
+
+    ze_command_list_handle_t cmdListHandle;
+    ze_command_queue_desc_t queueDesc = {ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
+    queueDesc.ordinal = 0;
+    queueDesc.index = 0;
+    device->createCommandListImmediate(&queueDesc, &cmdListHandle);
+
+    EXPECT_FALSE(static_cast<L0::CommandListCoreFamilyImmediate<gfxCoreFamily> *>(CommandList::fromHandle(cmdListHandle))->waitForEventsFromHost());
+
+    CommandList::fromHandle(cmdListHandle)->destroy();
+}
+
+HWTEST2_F(CmdlistAppendLaunchKernelTests,
+          givenEventWaitOnHostNumClientsNotSetWhenWaitForEventsFromHostThenReturnFalse, IsAtLeastXeHpCore) {
+    DebugManagerStateRestore restorer;
+    NEO::DebugManager.flags.EventWaitOnHost.set(1);
+    EXPECT_EQ(NEO::SysCalls::getNumThreads(), 1u);
+
+    ze_command_list_handle_t cmdListHandle;
+    ze_command_queue_desc_t queueDesc = {ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
+    queueDesc.ordinal = 0;
+    queueDesc.index = 0;
+    device->createCommandListImmediate(&queueDesc, &cmdListHandle);
+    EXPECT_EQ(static_cast<CommandQueueImp *>(CommandList::fromHandle(cmdListHandle)->cmdQImmediate)->getCsr()->getNumClients(), 1u);
+
+    EXPECT_FALSE(static_cast<L0::CommandListCoreFamilyImmediate<gfxCoreFamily> *>(CommandList::fromHandle(cmdListHandle))->waitForEventsFromHost());
+
+    CommandList::fromHandle(cmdListHandle)->destroy();
+}
+
+HWTEST2_F(CmdlistAppendLaunchKernelTests,
+          givenEventWaitOnHostDisabledWhenCreateImmediateCmdListThenDoNotObtainThreadCount, IsAtLeastXeHpCore) {
+    DebugManagerStateRestore restorer;
+    NEO::DebugManager.flags.EventWaitOnHost.set(0);
+    NEO::SysCalls::getNumThreadsCalled = false;
+
+    ze_command_list_handle_t cmdListHandle;
+    ze_command_queue_desc_t queueDesc = {ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
+    queueDesc.ordinal = 0;
+    queueDesc.index = 0;
+    device->createCommandListImmediate(&queueDesc, &cmdListHandle);
+
+    EXPECT_FALSE(NEO::SysCalls::getNumThreadsCalled);
+
+    CommandList::fromHandle(cmdListHandle)->destroy();
 }
 
 HWTEST2_F(CmdlistAppendLaunchKernelTests,
@@ -533,7 +690,7 @@ HWTEST2_F(CmdlistAppendLaunchKernelTests,
     kernel->setGlobalOffsetExp(1, 2, 3);
     kernel->patchGlobalOffset();
 
-    ze_result_t result;
+    ze_result_t result = ZE_RESULT_SUCCESS;
     auto commandList = std::make_unique<WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>();
     ASSERT_NE(nullptr, commandList);
     commandList->isFlushTaskSubmissionEnabled = true;
@@ -558,12 +715,12 @@ HWTEST2_F(CmdlistAppendLaunchKernelTests,
 
 using MultiReturnCommandListTest = Test<MultiReturnCommandListFixture>;
 
-HWTEST2_F(MultiReturnCommandListTest, givenMultiReturnIsUsedWhenPropertyDisableEuFusionSupportedThenExpectReturnPointsAndBbEndProgramming, IsAtLeastSkl) {
+HWTEST2_F(MultiReturnCommandListTest, givenFrontEndTrackingIsUsedWhenPropertyDisableEuFusionSupportedThenExpectReturnPointsAndBbEndProgramming, IsAtLeastSkl) {
     using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
     NEO::FrontEndPropertiesSupport fePropertiesSupport = {};
     NEO::HwInfoConfig::get(productFamily)->fillFrontEndPropertiesSupportStructure(fePropertiesSupport, device->getHwInfo());
 
-    EXPECT_TRUE(commandList->multiReturnPointCommandList);
+    EXPECT_TRUE(commandList->frontEndStateTracking);
 
     auto &cmdStream = *commandList->commandContainer.getCommandStream();
     auto &cmdBuffers = commandList->commandContainer.getCmdBufferAllocations();
@@ -724,12 +881,12 @@ HWTEST2_F(MultiReturnCommandListTest, givenMultiReturnIsUsedWhenPropertyDisableE
     }
 }
 
-HWTEST2_F(MultiReturnCommandListTest, givenMultiReturnIsUsedWhenPropertyComputeDispatchAllWalkerSupportedThenExpectReturnPointsAndBbEndProgramming, IsAtLeastSkl) {
+HWTEST2_F(MultiReturnCommandListTest, givenFrontEndTrackingIsUsedWhenPropertyComputeDispatchAllWalkerSupportedThenExpectReturnPointsAndBbEndProgramming, IsAtLeastSkl) {
     using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
     NEO::FrontEndPropertiesSupport fePropertiesSupport = {};
     NEO::HwInfoConfig::get(productFamily)->fillFrontEndPropertiesSupportStructure(fePropertiesSupport, device->getHwInfo());
 
-    EXPECT_TRUE(commandList->multiReturnPointCommandList);
+    EXPECT_TRUE(commandList->frontEndStateTracking);
 
     NEO::DebugManager.flags.AllowMixingRegularAndCooperativeKernels.set(1);
 
@@ -886,7 +1043,7 @@ HWTEST2_F(MultiReturnCommandListTest, givenMultiReturnIsUsedWhenPropertyComputeD
 }
 
 HWTEST2_F(MultiReturnCommandListTest,
-          givenMultiReturnCmdListIsExecutedWhenPropertyDisableEuFusionSupportedThenExpectFrontEndProgrammingInCmdQueue, IsAtLeastSkl) {
+          givenFrontEndTrackingCmdListIsExecutedWhenPropertyDisableEuFusionSupportedThenExpectFrontEndProgrammingInCmdQueue, IsAtLeastSkl) {
     using VFE_STATE_TYPE = typename FamilyType::VFE_STATE_TYPE;
     using MI_BATCH_BUFFER_START = typename FamilyType::MI_BATCH_BUFFER_START;
     using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
@@ -894,8 +1051,8 @@ HWTEST2_F(MultiReturnCommandListTest,
     NEO::FrontEndPropertiesSupport fePropertiesSupport = {};
     NEO::HwInfoConfig::get(productFamily)->fillFrontEndPropertiesSupportStructure(fePropertiesSupport, device->getHwInfo());
 
-    EXPECT_TRUE(commandList->multiReturnPointCommandList);
-    EXPECT_TRUE(commandQueue->multiReturnPointCommandList);
+    EXPECT_TRUE(commandList->frontEndStateTracking);
+    EXPECT_TRUE(commandQueue->frontEndStateTracking);
 
     auto &cmdListStream = *commandList->commandContainer.getCommandStream();
     auto &cmdListBuffers = commandList->commandContainer.getCmdBufferAllocations();
@@ -1135,7 +1292,7 @@ HWTEST2_F(MultiReturnCommandListTest,
 }
 
 HWTEST2_F(MultiReturnCommandListTest,
-          givenMultiReturnCmdListIsExecutedWhenPropertyComputeDispatchAllWalkerSupportedThenExpectFrontEndProgrammingInCmdQueue, IsAtLeastSkl) {
+          givenFrontEndTrackingCmdListIsExecutedWhenPropertyComputeDispatchAllWalkerSupportedThenExpectFrontEndProgrammingInCmdQueue, IsAtLeastSkl) {
     using VFE_STATE_TYPE = typename FamilyType::VFE_STATE_TYPE;
     using MI_BATCH_BUFFER_START = typename FamilyType::MI_BATCH_BUFFER_START;
     using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
@@ -1145,8 +1302,8 @@ HWTEST2_F(MultiReturnCommandListTest,
 
     NEO::DebugManager.flags.AllowMixingRegularAndCooperativeKernels.set(1);
 
-    EXPECT_TRUE(commandList->multiReturnPointCommandList);
-    EXPECT_TRUE(commandQueue->multiReturnPointCommandList);
+    EXPECT_TRUE(commandList->frontEndStateTracking);
+    EXPECT_TRUE(commandQueue->frontEndStateTracking);
 
     auto &cmdListStream = *commandList->commandContainer.getCommandStream();
     auto &cmdListBuffers = commandList->commandContainer.getCmdBufferAllocations();
@@ -1389,8 +1546,8 @@ HWTEST2_F(MultiReturnCommandListTest, givenCmdQueueAndImmediateCmdListUseSameCsr
     NEO::FrontEndPropertiesSupport fePropertiesSupport = {};
     NEO::HwInfoConfig::get(productFamily)->fillFrontEndPropertiesSupportStructure(fePropertiesSupport, device->getHwInfo());
 
-    EXPECT_TRUE(commandList->multiReturnPointCommandList);
-    EXPECT_TRUE(commandListImmediate->multiReturnPointCommandList);
+    EXPECT_TRUE(commandList->frontEndStateTracking);
+    EXPECT_TRUE(commandListImmediate->frontEndStateTracking);
 
     auto &regularCmdListStream = *commandList->commandContainer.getCommandStream();
 
@@ -1413,6 +1570,8 @@ HWTEST2_F(MultiReturnCommandListTest, givenCmdQueueAndImmediateCmdListUseSameCsr
         EXPECT_EQ(-1, regularCmdListRequiredState.frontEndState.disableEUFusion.value);
         EXPECT_EQ(-1, regularCmdListFinalState.frontEndState.disableEUFusion.value);
     }
+
+    commandList->close();
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
@@ -1512,8 +1671,8 @@ HWTEST2_F(MultiReturnCommandListTest, givenCmdQueueAndImmediateCmdListUseSameCsr
     NEO::FrontEndPropertiesSupport fePropertiesSupport = {};
     NEO::HwInfoConfig::get(productFamily)->fillFrontEndPropertiesSupportStructure(fePropertiesSupport, device->getHwInfo());
 
-    EXPECT_TRUE(commandList->multiReturnPointCommandList);
-    EXPECT_TRUE(commandListImmediate->multiReturnPointCommandList);
+    EXPECT_TRUE(commandList->frontEndStateTracking);
+    EXPECT_TRUE(commandListImmediate->frontEndStateTracking);
 
     auto cmdQueueCsr = commandQueue->getCsr();
     auto &csrProperties = cmdQueueCsr->getStreamProperties();
@@ -1597,6 +1756,7 @@ HWTEST2_F(MultiReturnCommandListTest, givenCmdQueueAndImmediateCmdListUseSameCsr
 
     cmdList.clear();
     feStateCmds.clear();
+    commandList->close();
 
     ASSERT_TRUE(FamilyType::PARSE::parseCommandBuffer(
         cmdList,
@@ -1628,6 +1788,45 @@ HWTEST2_F(MultiReturnCommandListTest, givenCmdQueueAndImmediateCmdListUseSameCsr
         (usedAfter - usedBefore)));
     feStateCmds = findAll<VFE_STATE_TYPE *>(cmdList.begin(), cmdList.end());
     EXPECT_EQ(0u, feStateCmds.size());
+}
+
+HWTEST2_F(CommandListCreate, givenImmediateCommandListWhenThereIsNoEnoughSpaceForImmediateCommandAndAllocationListNotEmptyThenReuseCommandBuffer, IsAtLeastSkl) {
+    ze_command_queue_desc_t desc = {};
+    desc.mode = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::createImmediate(productFamily, device, &desc, false, NEO::EngineGroupType::RenderCompute, returnValue));
+    ASSERT_NE(nullptr, commandList);
+
+    size_t useSize = commandList->commandContainer.getCommandStream()->getMaxAvailableSpace() - maxImmediateCommandSize + 1;
+    EXPECT_EQ(1U, commandList->commandContainer.getCmdBufferAllocations().size());
+
+    commandList->commandContainer.getCommandStream()->getGraphicsAllocation()->updateTaskCount(0u, 0u);
+    commandList->commandContainer.getCommandStream()->getSpace(useSize);
+    reinterpret_cast<CommandListCoreFamilyImmediate<gfxCoreFamily> *>(commandList.get())->checkAvailableSpace();
+    EXPECT_EQ(1U, commandList->commandContainer.getCmdBufferAllocations().size());
+
+    commandList->commandContainer.getCommandStream()->getSpace(useSize);
+    auto latestFlushedTaskCount = commandList->csr->peekLatestFlushedTaskCount();
+    reinterpret_cast<CommandListCoreFamilyImmediate<gfxCoreFamily> *>(commandList.get())->checkAvailableSpace();
+    EXPECT_EQ(1U, commandList->commandContainer.getCmdBufferAllocations().size());
+    EXPECT_EQ(latestFlushedTaskCount + 1, commandList->csr->peekLatestFlushedTaskCount());
+}
+
+HWTEST_F(CommandListCreate, givenCommandListWhenRemoveDeallocationContainerDataThenHeapNotErased) {
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily,
+                                                                     device,
+                                                                     NEO::EngineGroupType::Compute,
+                                                                     0u,
+                                                                     returnValue));
+    auto &cmdContainer = commandList->commandContainer;
+    auto heapAlloc = cmdContainer.getIndirectHeapAllocation(HeapType::INDIRECT_OBJECT);
+    cmdContainer.getDeallocationContainer().push_back(heapAlloc);
+    EXPECT_EQ(cmdContainer.getDeallocationContainer().size(), 1u);
+    commandList->removeDeallocationContainerData();
+    EXPECT_EQ(cmdContainer.getDeallocationContainer().size(), 1u);
+
+    cmdContainer.getDeallocationContainer().clear();
 }
 
 } // namespace ult

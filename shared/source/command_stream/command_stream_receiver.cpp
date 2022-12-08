@@ -63,7 +63,6 @@ CommandStreamReceiver::CommandStreamReceiver(ExecutionEnvironment &executionEnvi
         indirectHeap[i] = nullptr;
     }
     internalAllocationStorage = std::make_unique<InternalAllocationStorage>(*this);
-
     const auto &hwInfo = peekHwInfo();
     uint32_t subDeviceCount = static_cast<uint32_t>(deviceBitfield.count());
     bool platformImplicitScaling = HwHelper::get(hwInfo.platform.eRenderCoreFamily).platformSupportsImplicitScaling(hwInfo);
@@ -75,8 +74,8 @@ CommandStreamReceiver::CommandStreamReceiver(ExecutionEnvironment &executionEnvi
     }
 
     auto hwInfoConfig = HwInfoConfig::get(hwInfo.platform.eProductFamily);
-    this->systolicModeConfigurable = hwInfoConfig->isSystolicModeConfigurable(hwInfo);
     hwInfoConfig->fillFrontEndPropertiesSupportStructure(feSupportFlags, hwInfo);
+    hwInfoConfig->fillPipelineSelectPropertiesSupportStructure(pipelineSupportFlags, hwInfo);
 }
 
 CommandStreamReceiver::~CommandStreamReceiver() {
@@ -138,10 +137,12 @@ void CommandStreamReceiver::makeResident(GraphicsAllocation &gfxAllocation) {
             this->getResidencyAllocations().push_back(&gfxAllocation);
         }
 
-        checkForNewResources(submissionTaskCount, gfxAllocation.getTaskCount(osContext->getContextId()), gfxAllocation);
         gfxAllocation.updateTaskCount(submissionTaskCount, osContext->getContextId());
-        if (!gfxAllocation.isResident(osContext->getContextId())) {
-            this->totalMemoryUsed += gfxAllocation.getUnderlyingBufferSize();
+        if (this->dispatchMode == DispatchMode::BatchedDispatch) {
+            checkForNewResources(submissionTaskCount, gfxAllocation.getTaskCount(osContext->getContextId()), gfxAllocation);
+            if (!gfxAllocation.isResident(osContext->getContextId())) {
+                this->totalMemoryUsed += gfxAllocation.getUnderlyingBufferSize();
+            }
         }
     }
     gfxAllocation.updateResidencyTaskCount(submissionTaskCount, osContext->getContextId());
@@ -231,6 +232,17 @@ void CommandStreamReceiver::ensureCommandBufferAllocation(LinearStream &commandS
 
     commandStream.replaceBuffer(allocation->getUnderlyingBuffer(), allocationSize - additionalAllocationSize);
     commandStream.replaceGraphicsAllocation(allocation);
+}
+
+void CommandStreamReceiver::fillReusableAllocationsList() {
+    auto amountToFill = HwHelper::get(peekHwInfo().platform.eRenderCoreFamily).getAmountOfAllocationsToFill();
+    for (auto i = 0u; i < amountToFill; i++) {
+        const AllocationProperties commandStreamAllocationProperties{rootDeviceIndex, true, MemoryConstants::pageSize64k, AllocationType::COMMAND_BUFFER,
+                                                                     isMultiOsContextCapable(), false, osContext->getDeviceBitfield()};
+        auto allocation = this->getMemoryManager()->allocateGraphicsMemoryWithProperties(commandStreamAllocationProperties);
+        getInternalAllocationStorage()->storeAllocation(std::unique_ptr<GraphicsAllocation>(allocation), REUSABLE_ALLOCATION);
+        this->makeResident(*allocation);
+    }
 }
 
 MemoryManager *CommandStreamReceiver::getMemoryManager() const {
@@ -528,6 +540,7 @@ IndirectHeap &CommandStreamReceiver::getIndirectHeap(IndirectHeap::Type heapType
     if (heap && heap->getAvailableSpace() < minRequiredSize && heapMemory) {
         internalAllocationStorage->storeAllocation(std::unique_ptr<GraphicsAllocation>(heapMemory), REUSABLE_ALLOCATION);
         heapMemory = nullptr;
+        this->heapStorageReqiuresRecyclingTag = true;
     }
 
     if (!heapMemory) {

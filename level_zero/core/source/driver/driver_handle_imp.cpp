@@ -159,6 +159,17 @@ DriverHandleImp::~DriverHandleImp() {
     for (auto &device : this->devices) {
         delete device;
     }
+
+    for (auto &fabricVertex : this->fabricVertices) {
+        delete fabricVertex;
+    }
+    this->fabricVertices.clear();
+
+    for (auto &edge : this->fabricEdges) {
+        delete edge;
+    }
+    this->fabricEdges.clear();
+
     if (this->svmAllocsManager) {
         delete this->svmAllocsManager;
         this->svmAllocsManager = nullptr;
@@ -489,7 +500,7 @@ void *DriverHandleImp::importFdHandle(NEO::Device *neoDevice, ze_ipc_memory_flag
     return reinterpret_cast<void *>(alloc->getGpuAddress());
 }
 
-void *DriverHandleImp::importFdHandles(NEO::Device *neoDevice, ze_ipc_memory_flags_t flags, std::vector<NEO::osHandle> handles, NEO::GraphicsAllocation **pAlloc) {
+void *DriverHandleImp::importFdHandles(NEO::Device *neoDevice, ze_ipc_memory_flags_t flags, const std::vector<NEO::osHandle> &handles, NEO::GraphicsAllocation **pAlloc) {
     NEO::AllocationProperties unifiedMemoryProperties{neoDevice->getRootDeviceIndex(),
                                                       MemoryConstants::pageSize,
                                                       NEO::AllocationType::BUFFER,
@@ -619,27 +630,77 @@ ze_result_t DriverHandleImp::checkMemoryAccessFromDevice(Device *device, const v
     return ZE_RESULT_ERROR_INVALID_ARGUMENT;
 }
 
+void DriverHandleImp::initializeVertexes() {
+    for (auto &device : this->devices) {
+        auto deviceImpl = static_cast<DeviceImp *>(device);
+        auto fabricVertex = FabricVertex::createFromDevice(device);
+        if (fabricVertex == nullptr) {
+            continue;
+        }
+        deviceImpl->setFabricVertex(fabricVertex);
+        this->fabricVertices.push_back(fabricVertex);
+    }
+
+    FabricEdge::createEdgesFromVertices(this->fabricVertices, this->fabricEdges);
+}
+
 ze_result_t DriverHandleImp::fabricVertexGetExp(uint32_t *pCount, ze_fabric_vertex_handle_t *phVertices) {
 
-    uint32_t deviceCount = 0;
-    getDevice(&deviceCount, nullptr);
+    if (fabricVertices.empty()) {
+        this->initializeVertexes();
+    }
 
+    uint32_t fabricVertexCount = static_cast<uint32_t>(this->fabricVertices.size());
     if (*pCount == 0) {
-        *pCount = deviceCount;
+        *pCount = fabricVertexCount;
         return ZE_RESULT_SUCCESS;
     }
 
-    std::vector<ze_device_handle_t> deviceHandles;
-    deviceHandles.resize(deviceCount);
-    getDevice(&deviceCount, deviceHandles.data());
-
-    *pCount = std::min(deviceCount, *pCount);
+    *pCount = std::min(fabricVertexCount, *pCount);
 
     for (uint32_t index = 0; index < *pCount; index++) {
-        auto deviceImp = static_cast<DeviceImp *>(deviceHandles[index]);
-        phVertices[index] = deviceImp->fabricVertex->toHandle();
+        phVertices[index] = this->fabricVertices[index]->toHandle();
     }
 
+    return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t DriverHandleImp::fabricEdgeGetExp(ze_fabric_vertex_handle_t hVertexA, ze_fabric_vertex_handle_t hVertexB,
+                                              uint32_t *pCount, ze_fabric_edge_handle_t *phEdges) {
+
+    FabricVertex *queryVertexA = FabricVertex::fromHandle(hVertexA);
+    FabricVertex *queryVertexB = FabricVertex::fromHandle(hVertexB);
+    uint32_t maxEdges = 0, edgeUpdateIndex = 0;
+    bool updateEdges = false;
+
+    if (*pCount == 0) {
+        maxEdges = static_cast<uint32_t>(fabricEdges.size());
+    } else {
+        maxEdges = std::min<uint32_t>(*pCount, static_cast<uint32_t>(fabricEdges.size()));
+    }
+
+    if (phEdges != nullptr) {
+        updateEdges = true;
+    }
+
+    for (const auto &edge : fabricEdges) {
+        // Fabric Connections are bi-directional
+        if ((edge->vertexA == queryVertexA && edge->vertexB == queryVertexB) ||
+            (edge->vertexA == queryVertexB && edge->vertexB == queryVertexA)) {
+
+            if (updateEdges == true) {
+                phEdges[edgeUpdateIndex] = edge->toHandle();
+            }
+            ++edgeUpdateIndex;
+        }
+
+        // Stop if the edges overflow the count
+        if (edgeUpdateIndex >= maxEdges) {
+            break;
+        }
+    }
+
+    *pCount = edgeUpdateIndex;
     return ZE_RESULT_SUCCESS;
 }
 

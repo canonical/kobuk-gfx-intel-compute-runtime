@@ -1715,13 +1715,16 @@ TEST_F(DrmMemoryManagerTest, givenTwoGraphicsAllocationsThatShareTheSameBufferOb
     auto graphicsAllocation = memoryManager->createGraphicsAllocationFromSharedHandle(sharedHandle, properties, false, false);
     auto graphicsAllocation2 = memoryManager->createGraphicsAllocationFromSharedHandle(sharedHandle, properties, false, false);
 
+    auto currentResidentSize = testedCsr->getResidencyAllocations().size();
     testedCsr->makeResident(*graphicsAllocation);
     testedCsr->makeResident(*graphicsAllocation2);
-    EXPECT_EQ(2u, testedCsr->getResidencyAllocations().size());
+
+    EXPECT_EQ(currentResidentSize + 2, testedCsr->getResidencyAllocations().size());
+    currentResidentSize = testedCsr->getResidencyAllocations().size();
 
     testedCsr->processResidency(testedCsr->getResidencyAllocations(), 0u);
 
-    EXPECT_EQ(1u, testedCsr->residency.size());
+    EXPECT_EQ(currentResidentSize - 1, testedCsr->residency.size());
 
     memoryManager->freeGraphicsMemory(graphicsAllocation);
     memoryManager->freeGraphicsMemory(graphicsAllocation2);
@@ -1739,13 +1742,15 @@ TEST_F(DrmMemoryManagerTest, givenTwoGraphicsAllocationsThatDoesnShareTheSameBuf
     mock->outputHandle++;
     auto graphicsAllocation2 = memoryManager->createGraphicsAllocationFromSharedHandle(sharedHandle, properties, false, false);
 
+    auto currentResidentSize = testedCsr->getResidencyAllocations().size();
     testedCsr->makeResident(*graphicsAllocation);
     testedCsr->makeResident(*graphicsAllocation2);
-    EXPECT_EQ(2u, testedCsr->getResidencyAllocations().size());
+
+    EXPECT_EQ(currentResidentSize + 2u, testedCsr->getResidencyAllocations().size());
 
     testedCsr->processResidency(testedCsr->getResidencyAllocations(), 0u);
 
-    EXPECT_EQ(2u, testedCsr->residency.size());
+    EXPECT_EQ(currentResidentSize + 2u, testedCsr->residency.size());
 
     memoryManager->freeGraphicsMemory(graphicsAllocation);
     memoryManager->freeGraphicsMemory(graphicsAllocation2);
@@ -4143,7 +4148,7 @@ TEST_F(DrmMemoryManagerTest, givenPageFaultIsUnSupportedWhenCallingBindBoOnBuffe
     DrmMock drm(*executionEnvironment->rootDeviceEnvironments[0]);
     EXPECT_FALSE(drm.pageFaultSupported);
 
-    OsContextLinux osContext(drm, 0u, EngineDescriptorHelper::getDefaultDescriptor());
+    OsContextLinux osContext(drm, 0, 0u, EngineDescriptorHelper::getDefaultDescriptor());
     osContext.ensureContextInitialized();
     uint32_t vmHandleId = 0;
 
@@ -4169,7 +4174,7 @@ TEST_F(DrmMemoryManagerTest, givenPageFaultIsSupportedAndKmdMigrationEnabledForB
     DrmMock drm(*executionEnvironment->rootDeviceEnvironments[0]);
     EXPECT_FALSE(drm.pageFaultSupported);
 
-    OsContextLinux osContext(drm, 0u, EngineDescriptorHelper::getDefaultDescriptor());
+    OsContextLinux osContext(drm, 0, 0u, EngineDescriptorHelper::getDefaultDescriptor());
     osContext.ensureContextInitialized();
     uint32_t vmHandleId = 0;
 
@@ -4201,7 +4206,7 @@ TEST_F(DrmMemoryManagerTest, givenPageFaultIsSupportedWhenCallingBindBoOnAllocat
     DrmMock drm(*executionEnvironment->rootDeviceEnvironments[0]);
     drm.pageFaultSupported = true;
 
-    OsContextLinux osContext(drm, 0u, EngineDescriptorHelper::getDefaultDescriptor());
+    OsContextLinux osContext(drm, 0, 0u, EngineDescriptorHelper::getDefaultDescriptor());
     osContext.ensureContextInitialized();
     uint32_t vmHandleId = 0;
 
@@ -4233,7 +4238,7 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenDrmMemor
     auto gpuAddress = 0x1234u;
     auto size = MemoryConstants::pageSize;
 
-    auto bo = std::unique_ptr<BufferObject>(memoryManager->createBufferObjectInMemoryRegion(&memoryManager->getDrm(0), nullptr, AllocationType::BUFFER, gpuAddress, size, MemoryBanks::MainBank, 1));
+    auto bo = std::unique_ptr<BufferObject>(memoryManager->createBufferObjectInMemoryRegion(&memoryManager->getDrm(0), nullptr, AllocationType::BUFFER, gpuAddress, size, MemoryBanks::MainBank, 1, -1));
     EXPECT_EQ(nullptr, bo);
 }
 
@@ -4241,7 +4246,7 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenDrmMemor
     auto gpuAddress = 0x1234u;
     auto size = 0u;
 
-    auto bo = std::unique_ptr<BufferObject>(memoryManager->createBufferObjectInMemoryRegion(&memoryManager->getDrm(0), nullptr, AllocationType::BUFFER, gpuAddress, size, MemoryBanks::MainBank, 1));
+    auto bo = std::unique_ptr<BufferObject>(memoryManager->createBufferObjectInMemoryRegion(&memoryManager->getDrm(0), nullptr, AllocationType::BUFFER, gpuAddress, size, MemoryBanks::MainBank, 1, -1));
     EXPECT_EQ(nullptr, bo);
 }
 
@@ -4261,6 +4266,90 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenUseKmdMi
     EXPECT_EQ(MemoryManager::AllocationStatus::Success, status);
 
     EXPECT_EQ(allocData.storageInfo.memoryBanks, static_cast<MockedMemoryInfo *>(mock->getMemoryInfo())->banks);
+
+    memoryManager->freeGraphicsMemory(allocation);
+}
+
+TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenMemoryAllocationWithNoSetPairAndOneHandleAndCommandBufferTypeThenNoPairHandleIsPassed) {
+    VariableBackup<bool> backupSetPairCallParent{&mock->getSetPairAvailableCall.callParent, false};
+    VariableBackup<bool> backupSetPairReturnValue{&mock->getSetPairAvailableCall.returnValue, true};
+
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Success;
+    AllocationData allocData;
+    allocData.allFlags = 0;
+    allocData.size = MemoryConstants::pageSize;
+    allocData.type = AllocationType::COMMAND_BUFFER;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    allocData.storageInfo.memoryBanks = 0b01;
+
+    auto allocation = memoryManager->allocateGraphicsMemoryInDevicePool(allocData, status);
+    EXPECT_NE(nullptr, allocation);
+    EXPECT_EQ(MemoryManager::AllocationStatus::Success, status);
+
+    EXPECT_EQ(-1, static_cast<MockedMemoryInfo *>(mock->getMemoryInfo())->pairHandlePassed);
+
+    memoryManager->freeGraphicsMemory(allocation);
+}
+
+TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenMemoryAllocationWithSetPairAndOneHandleThenThenNoPairHandleIsPassed) {
+    VariableBackup<bool> backupSetPairCallParent{&mock->getSetPairAvailableCall.callParent, false};
+    VariableBackup<bool> backupSetPairReturnValue{&mock->getSetPairAvailableCall.returnValue, true};
+
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Success;
+    AllocationData allocData;
+    allocData.allFlags = 0;
+    allocData.size = MemoryConstants::pageSize;
+    allocData.type = AllocationType::BUFFER;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    allocData.storageInfo.memoryBanks = 0b01;
+
+    auto allocation = memoryManager->allocateGraphicsMemoryInDevicePool(allocData, status);
+    EXPECT_NE(nullptr, allocation);
+    EXPECT_EQ(MemoryManager::AllocationStatus::Success, status);
+
+    EXPECT_EQ(-1, static_cast<MockedMemoryInfo *>(mock->getMemoryInfo())->pairHandlePassed);
+
+    memoryManager->freeGraphicsMemory(allocation);
+}
+
+TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenMemoryAllocationWithSetPairAndTwoHandlesThenPairHandleIsPassed) {
+    VariableBackup<bool> backupSetPairCallParent{&mock->getSetPairAvailableCall.callParent, false};
+    VariableBackup<bool> backupSetPairReturnValue{&mock->getSetPairAvailableCall.returnValue, true};
+
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Success;
+    AllocationData allocData;
+    allocData.allFlags = 0;
+    allocData.size = MemoryConstants::pageSize;
+    allocData.type = AllocationType::BUFFER;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    allocData.storageInfo.memoryBanks = 0b11;
+
+    auto allocation = memoryManager->allocateGraphicsMemoryInDevicePool(allocData, status);
+    EXPECT_NE(nullptr, allocation);
+    EXPECT_EQ(MemoryManager::AllocationStatus::Success, status);
+
+    EXPECT_NE(-1, static_cast<MockedMemoryInfo *>(mock->getMemoryInfo())->pairHandlePassed);
+
+    memoryManager->freeGraphicsMemory(allocation);
+}
+
+TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenMemoryAllocationWithNoSetPairAndTwoHandlesThenPairHandleIsPassed) {
+    VariableBackup<bool> backupSetPairCallParent{&mock->getSetPairAvailableCall.callParent, false};
+    VariableBackup<bool> backupSetPairReturnValue{&mock->getSetPairAvailableCall.returnValue, false};
+
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Success;
+    AllocationData allocData;
+    allocData.allFlags = 0;
+    allocData.size = MemoryConstants::pageSize;
+    allocData.type = AllocationType::BUFFER;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    allocData.storageInfo.memoryBanks = 0b11;
+
+    auto allocation = memoryManager->allocateGraphicsMemoryInDevicePool(allocData, status);
+    EXPECT_NE(nullptr, allocation);
+    EXPECT_EQ(MemoryManager::AllocationStatus::Success, status);
+
+    EXPECT_EQ(-1, static_cast<MockedMemoryInfo *>(mock->getMemoryInfo())->pairHandlePassed);
 
     memoryManager->freeGraphicsMemory(allocation);
 }
@@ -4895,6 +4984,72 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenOversize
     EXPECT_EQ(allocData.size, allocation->getUnderlyingBufferSize());
     EXPECT_EQ(allocData.size, static_cast<DrmAllocation *>(allocation)->getBO()->peekSize());
     memoryManager->freeGraphicsMemory(allocation);
+}
+
+TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenAllocationsThatAreAlignedToPowerOf2InSizeAndAreGreaterThen8GBThenTheyAreAlignedToPreviousPowerOfTwoForGpuVirtualAddress) {
+    if (!memoryManager->getGfxPartition(rootDeviceIndex)->getHeapLimit(HeapIndex::HEAP_EXTENDED)) {
+        GTEST_SKIP();
+    }
+
+    auto size = 8 * MemoryConstants::gigaByte;
+
+    auto status = MemoryManager::AllocationStatus::Error;
+    AllocationData allocData;
+    allocData.size = size;
+    allocData.type = AllocationType::BUFFER;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    auto allocation = memoryManager->allocateGraphicsMemoryInDevicePool(allocData, status);
+    EXPECT_EQ(MemoryManager::AllocationStatus::Success, status);
+    ASSERT_NE(nullptr, allocation);
+    EXPECT_EQ(allocData.size, allocation->getUnderlyingBufferSize());
+    EXPECT_EQ(allocData.size, static_cast<DrmAllocation *>(allocation)->getBO()->peekSize());
+    EXPECT_TRUE(allocation->getGpuAddress() % size == 0u);
+
+    size = 8 * MemoryConstants::gigaByte + MemoryConstants::pageSize64k;
+    allocData.size = size;
+    auto allocation2 = memoryManager->allocateGraphicsMemoryInDevicePool(allocData, status);
+    EXPECT_EQ(MemoryManager::AllocationStatus::Success, status);
+    ASSERT_NE(nullptr, allocation2);
+    EXPECT_EQ(allocData.size, allocation2->getUnderlyingBufferSize());
+    EXPECT_EQ(allocData.size, static_cast<DrmAllocation *>(allocation2)->getBO()->peekSize());
+    EXPECT_TRUE(allocation2->getGpuAddress() % MemoryConstants::pageSize2Mb == 0u);
+
+    memoryManager->freeGraphicsMemory(allocation);
+    memoryManager->freeGraphicsMemory(allocation2);
+}
+
+TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenDebugVariableToDisableAddressAlignmentWhenAllocationsAreMadeTheyAreAlignedTo2MB) {
+    if (!memoryManager->getGfxPartition(rootDeviceIndex)->getHeapLimit(HeapIndex::HEAP_EXTENDED)) {
+        GTEST_SKIP();
+    }
+    DebugManagerStateRestore restorer;
+    DebugManager.flags.UseHighAlignmentForHeapExtended.set(0);
+
+    auto size = 16 * MemoryConstants::megaByte;
+
+    auto status = MemoryManager::AllocationStatus::Error;
+    AllocationData allocData;
+    allocData.size = size;
+    allocData.type = AllocationType::BUFFER;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    auto allocation = memoryManager->allocateGraphicsMemoryInDevicePool(allocData, status);
+    EXPECT_EQ(MemoryManager::AllocationStatus::Success, status);
+    ASSERT_NE(nullptr, allocation);
+    EXPECT_EQ(allocData.size, allocation->getUnderlyingBufferSize());
+    EXPECT_EQ(allocData.size, static_cast<DrmAllocation *>(allocation)->getBO()->peekSize());
+    EXPECT_TRUE(allocation->getGpuAddress() % MemoryConstants::pageSize2Mb == 0u);
+
+    size = 32 * MemoryConstants::megaByte;
+    allocData.size = size;
+    auto allocation2 = memoryManager->allocateGraphicsMemoryInDevicePool(allocData, status);
+    EXPECT_EQ(MemoryManager::AllocationStatus::Success, status);
+    ASSERT_NE(nullptr, allocation2);
+    EXPECT_EQ(allocData.size, allocation2->getUnderlyingBufferSize());
+    EXPECT_EQ(allocData.size, static_cast<DrmAllocation *>(allocation2)->getBO()->peekSize());
+    EXPECT_TRUE(allocation2->getGpuAddress() % MemoryConstants::pageSize2Mb == 0u);
+
+    memoryManager->freeGraphicsMemory(allocation);
+    memoryManager->freeGraphicsMemory(allocation2);
 }
 
 struct DrmMemoryManagerToTestCopyMemoryToAllocationBanks : public DrmMemoryManager {

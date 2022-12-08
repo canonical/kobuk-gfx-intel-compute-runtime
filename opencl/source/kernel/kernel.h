@@ -101,6 +101,14 @@ class Kernel : public ReferenceTrackedObject<Kernel> {
             pKernel = nullptr;
         }
 
+        auto localMemSize = static_cast<uint32_t>(clDevice.getDevice().getDeviceInfo().localMemSize);
+        auto slmInlineSize = kernelInfo.kernelDescriptor.kernelAttributes.slmInlineSize;
+
+        if (slmInlineSize > 0 && localMemSize < slmInlineSize) {
+            PRINT_DEBUG_STRING(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "Size of SLM (%u) larger than available (%u)\n", slmInlineSize, localMemSize);
+            retVal = CL_OUT_OF_RESOURCES;
+        }
+
         if (errcodeRet) {
             *errcodeRet = retVal;
         }
@@ -287,6 +295,7 @@ class Kernel : public ReferenceTrackedObject<Kernel> {
 
     void performKernelTuning(CommandStreamReceiver &commandStreamReceiver, const Vec3<size_t> &lws, const Vec3<size_t> &gws, const Vec3<size_t> &offsets, TimestampPacketContainer *timestampContainer);
     MOCKABLE_VIRTUAL bool isSingleSubdevicePreferred() const;
+    void setInlineSamplers();
 
     // residency for kernel surfaces
     MOCKABLE_VIRTUAL void makeResident(CommandStreamReceiver &commandStreamReceiver);
@@ -355,7 +364,6 @@ class Kernel : public ReferenceTrackedObject<Kernel> {
     uint64_t getKernelStartAddress(const bool localIdsGenerationByRuntime, const bool kernelUsesLocalIds, const bool isCssUsed, const bool returnFullAddress) const;
 
     bool isKernelDebugEnabled() const { return debugEnabled; }
-    int32_t setAdditionalKernelExecInfoWithParam(uint32_t paramName, size_t paramValueSize, const void *paramValue);
     void setAdditionalKernelExecInfo(uint32_t additionalKernelExecInfo);
     uint32_t getAdditionalKernelExecInfo() const;
     MOCKABLE_VIRTUAL bool requiresWaDisableRccRhwoOptimization() const;

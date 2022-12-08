@@ -718,4 +718,24 @@ bool HwHelperHw<GfxFamily>::isPatIndexFallbackWaRequired() const {
     return false;
 }
 
+template <typename gfxProduct>
+bool HwHelperHw<gfxProduct>::copyThroughLockedPtrEnabled() const {
+    if (DebugManager.flags.ExperimentalCopyThroughLock.get() != -1) {
+        return DebugManager.flags.ExperimentalCopyThroughLock.get() == 1;
+    }
+    return false;
+}
+
+template <typename gfxProduct>
+uint32_t HwHelperHw<gfxProduct>::getAmountOfAllocationsToFill() const {
+    if (DebugManager.flags.SetAmountOfReusableAllocations.get() != -1) {
+        return DebugManager.flags.SetAmountOfReusableAllocations.get();
+    }
+    return 0u;
+}
+
+template <typename gfxProduct>
+bool HwHelperHw<gfxProduct>::isChipsetUniqueUUIDSupported() const {
+    return false;
+}
 } // namespace NEO

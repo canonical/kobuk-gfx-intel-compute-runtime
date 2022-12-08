@@ -94,6 +94,21 @@ cl_int CommandQueueHw<GfxFamily>::enqueueHandler(Surface *(&surfaces)[surfaceCou
         }
     }
 
+    if (commandType == CL_COMMAND_NDRANGE_KERNEL) {
+        if (!multiDispatchInfo.empty()) {
+            for (auto &dispatchInfo : multiDispatchInfo) {
+                auto nwgs = dispatchInfo.getNumberOfWorkgroups();
+
+                for (auto i = 0u; i < workDim; i++) {
+                    uint64_t dimension = static_cast<uint64_t>(nwgs[i]);
+                    if (dimension > std::numeric_limits<uint32_t>::max()) {
+                        return CL_INVALID_GLOBAL_WORK_SIZE;
+                    }
+                }
+            }
+        }
+    }
+
     if (AuxTranslationMode::Builtin == auxTranslationMode) {
         dispatchAuxTranslationBuiltin(multiDispatchInfo, AuxTranslationDirection::NonAuxToAux);
     }
@@ -408,7 +423,7 @@ void CommandQueueHw<GfxFamily>::processDispatchForKernels(const MultiDispatchInf
     TagNodeBase *hwPerfCounter = nullptr;
     getClFileLogger().dumpKernelArgs(&multiDispatchInfo);
 
-    printfHandler.reset(PrintfHandler::create(multiDispatchInfo, *device));
+    printfHandler.reset(PrintfHandler::create(multiDispatchInfo, device->getDevice()));
     if (printfHandler) {
         printfHandler->prepareDispatch(multiDispatchInfo);
     }
@@ -760,35 +775,35 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
     auto memoryCompressionState = getGpgpuCommandStreamReceiver().getMemoryCompressionState(auxTranslationRequired, device->getHardwareInfo());
 
     DispatchFlags dispatchFlags(
-        {},                                                                                         // csrDependencies
-        &timestampPacketDependencies.barrierNodes,                                                  // barrierTimestampPacketNodes
-        {},                                                                                         // pipelineSelectArgs
-        this->flushStamp->getStampReference(),                                                      // flushStampReference
-        getThrottle(),                                                                              // throttle
-        ClPreemptionHelper::taskPreemptionMode(getDevice(), multiDispatchInfo),                     // preemptionMode
-        numGrfRequired,                                                                             // numGrfRequired
-        L3CachingSettings::l3CacheOn,                                                               // l3CacheSettings
-        kernel->getDescriptor().kernelAttributes.threadArbitrationPolicy,                           // threadArbitrationPolicy
-        kernel->getAdditionalKernelExecInfo(),                                                      // additionalKernelExecInfo
-        kernel->getExecutionType(),                                                                 // kernelExecutionType
-        memoryCompressionState,                                                                     // memoryCompressionState
-        getSliceCount(),                                                                            // sliceCount
-        blocking,                                                                                   // blocking
-        shouldFlushDC(commandType, printfHandler) || allocNeedsFlushDC,                             // dcFlush
-        multiDispatchInfo.usesSlm(),                                                                // useSLM
-        !getGpgpuCommandStreamReceiver().isUpdateTagFromWaitEnabled(),                              // guardCommandBufferWithPipeControl
-        commandType == CL_COMMAND_NDRANGE_KERNEL,                                                   // GSBA32BitRequired
-        requiresCoherency,                                                                          // requiresCoherency
-        (QueuePriority::LOW == priority),                                                           // lowPriority
-        implicitFlush,                                                                              // implicitFlush
-        !eventBuilder.getEvent() || getGpgpuCommandStreamReceiver().isNTo1SubmissionModelEnabled(), // outOfOrderExecutionAllowed
-        false,                                                                                      // epilogueRequired
-        false,                                                                                      // usePerDssBackedBuffer
-        kernel->isSingleSubdevicePreferred(),                                                       // useSingleSubdevice
-        useGlobalAtomics,                                                                           // useGlobalAtomics
-        kernel->areMultipleSubDevicesInContext(),                                                   // areMultipleSubDevicesInContext
-        kernel->requiresMemoryMigration(),                                                          // memoryMigrationRequired
-        isTextureCacheFlushNeeded(commandType));                                                    // textureCacheFlush
+        {},                                                                                                     // csrDependencies
+        &timestampPacketDependencies.barrierNodes,                                                              // barrierTimestampPacketNodes
+        {},                                                                                                     // pipelineSelectArgs
+        this->flushStamp->getStampReference(),                                                                  // flushStampReference
+        getThrottle(),                                                                                          // throttle
+        ClPreemptionHelper::taskPreemptionMode(getDevice(), multiDispatchInfo),                                 // preemptionMode
+        numGrfRequired,                                                                                         // numGrfRequired
+        L3CachingSettings::l3CacheOn,                                                                           // l3CacheSettings
+        kernel->getDescriptor().kernelAttributes.threadArbitrationPolicy,                                       // threadArbitrationPolicy
+        kernel->getAdditionalKernelExecInfo(),                                                                  // additionalKernelExecInfo
+        kernel->getExecutionType(),                                                                             // kernelExecutionType
+        memoryCompressionState,                                                                                 // memoryCompressionState
+        getSliceCount(),                                                                                        // sliceCount
+        blocking,                                                                                               // blocking
+        shouldFlushDC(commandType, printfHandler) || allocNeedsFlushDC,                                         // dcFlush
+        multiDispatchInfo.usesSlm(),                                                                            // useSLM
+        !getGpgpuCommandStreamReceiver().isUpdateTagFromWaitEnabled() || commandType == CL_COMMAND_FILL_BUFFER, // guardCommandBufferWithPipeControl
+        commandType == CL_COMMAND_NDRANGE_KERNEL,                                                               // GSBA32BitRequired
+        requiresCoherency,                                                                                      // requiresCoherency
+        (QueuePriority::LOW == priority),                                                                       // lowPriority
+        implicitFlush,                                                                                          // implicitFlush
+        !eventBuilder.getEvent() || getGpgpuCommandStreamReceiver().isNTo1SubmissionModelEnabled(),             // outOfOrderExecutionAllowed
+        false,                                                                                                  // epilogueRequired
+        false,                                                                                                  // usePerDssBackedBuffer
+        kernel->isSingleSubdevicePreferred(),                                                                   // useSingleSubdevice
+        useGlobalAtomics,                                                                                       // useGlobalAtomics
+        kernel->areMultipleSubDevicesInContext(),                                                               // areMultipleSubDevicesInContext
+        kernel->requiresMemoryMigration(),                                                                      // memoryMigrationRequired
+        isTextureCacheFlushNeeded(commandType));                                                                // textureCacheFlush
 
     dispatchFlags.pipelineSelectArgs.mediaSamplerRequired = mediaSamplerRequired;
     dispatchFlags.pipelineSelectArgs.systolicPipelineSelectMode = systolicPipelineSelectMode;

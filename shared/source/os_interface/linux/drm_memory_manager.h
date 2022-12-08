@@ -36,7 +36,7 @@ class DrmMemoryManager : public MemoryManager {
     void freeGraphicsMemoryImpl(GraphicsAllocation *gfxAllocation, bool isImportedAllocation) override;
     void handleFenceCompletion(GraphicsAllocation *allocation) override;
     GraphicsAllocation *createGraphicsAllocationFromExistingStorage(AllocationProperties &properties, void *ptr, MultiGraphicsAllocation &multiGraphicsAllocation) override;
-    GraphicsAllocation *createGraphicsAllocationFromMultipleSharedHandles(std::vector<osHandle> handles, AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override;
+    GraphicsAllocation *createGraphicsAllocationFromMultipleSharedHandles(const std::vector<osHandle> &handles, AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override;
     GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override;
     void closeSharedHandle(GraphicsAllocation *gfxAllocation) override;
 
@@ -65,7 +65,7 @@ class DrmMemoryManager : public MemoryManager {
     AddressRange reserveGpuAddress(size_t size, uint32_t rootDeviceIndex) override;
     void freeGpuAddress(AddressRange addressRange, uint32_t rootDeviceIndex) override;
     MOCKABLE_VIRTUAL BufferObject *createBufferObjectInMemoryRegion(Drm *drm, Gmm *gmm, AllocationType allocationType, uint64_t gpuAddress, size_t size,
-                                                                    uint32_t memoryBanks, size_t maxOsContextCount);
+                                                                    uint32_t memoryBanks, size_t maxOsContextCount, int32_t pairHandle);
 
     bool isKmdMigrationAvailable(uint32_t rootDeviceIndex) override;
 
@@ -112,6 +112,7 @@ class DrmMemoryManager : public MemoryManager {
     GraphicsAllocation *allocateMemoryByKMD(const AllocationData &allocationData) override;
     GraphicsAllocation *allocateGraphicsMemoryForImageImpl(const AllocationData &allocationData, std::unique_ptr<Gmm> gmm) override;
     GraphicsAllocation *allocateGraphicsMemoryWithGpuVa(const AllocationData &allocationData) override;
+    GraphicsAllocation *createSharedUnifiedMemoryAllocationLegacy(const AllocationData &allocationData);
     GraphicsAllocation *createSharedUnifiedMemoryAllocation(const AllocationData &allocationData);
 
     void *lockResourceImpl(GraphicsAllocation &graphicsAllocation) override;

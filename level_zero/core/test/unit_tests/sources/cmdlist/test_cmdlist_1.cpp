@@ -16,6 +16,7 @@
 
 #include "level_zero/core/source/cmdqueue/cmdqueue_imp.h"
 #include "level_zero/core/source/event/event.h"
+#include "level_zero/core/source/hw_helpers/l0_hw_helper.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdqueue.h"
@@ -1127,7 +1128,7 @@ TEST_F(CommandListCreate, givenImmediateCommandListWhenThereIsNoEnoughSpaceForIm
 
     auto result = commandList->appendMemoryCopy(dstPtr, srcPtr, 8, nullptr, 0, nullptr);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
-    EXPECT_EQ(2U, commandList->commandContainer.getCmdBufferAllocations().size());
+    EXPECT_EQ(1U, commandList->commandContainer.getCmdBufferAllocations().size());
 }
 
 HWTEST2_F(CommandListCreate, GivenGpuHangOnSynchronizingWhenCreatingImmediateCommandListAndWaitingOnEventsThenDeviceLostIsReturned, IsSKL) {
@@ -2001,11 +2002,22 @@ HWTEST2_F(CommandListCreate, givenNullEventWhenAppendEventAfterWalkerThenNothing
     EXPECT_EQ(commandList->commandContainer.getCommandStream()->getUsed(), usedBefore);
 }
 
-TEST_F(CommandListCreate, givenCreatedCommandListWhenGettingMultiReturnPointFlagThenDefaultValuseIsFalse) {
+TEST_F(CommandListCreate, givenCreatedCommandListWhenGettingTrackingFlagsThenDefaultValuseIsHwSupported) {
+    auto &hwInfo = device->getHwInfo();
+    auto &l0HwHelper = L0HwHelper::get(hwInfo.platform.eRenderCoreFamily);
+
     ze_result_t returnValue;
     std::unique_ptr<L0::ult::CommandList> commandList(whiteboxCast(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)));
     ASSERT_NE(nullptr, commandList.get());
-    EXPECT_FALSE(commandList->multiReturnPointCommandList);
+
+    bool expectedStateComputeModeTracking = l0HwHelper.platformSupportsStateComputeModeTracking(hwInfo);
+    EXPECT_EQ(expectedStateComputeModeTracking, commandList->stateComputeModeTracking);
+
+    bool expectedPipelineSelectTracking = l0HwHelper.platformSupportsPipelineSelectTracking(hwInfo);
+    EXPECT_EQ(expectedPipelineSelectTracking, commandList->pipelineSelectStateTracking);
+
+    bool expectedFrontEndTracking = l0HwHelper.platformSupportsFrontEndTracking(hwInfo);
+    EXPECT_EQ(expectedFrontEndTracking, commandList->frontEndStateTracking);
 }
 
 } // namespace ult

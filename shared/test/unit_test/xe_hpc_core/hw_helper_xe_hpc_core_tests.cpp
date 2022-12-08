@@ -73,3 +73,13 @@ XE_HPC_CORETEST_F(HwHelperXeHpcCoreTest, givenXeHPCPlatformWhenCheckAssignEngine
     auto &hwHelper = HwHelperHw<FamilyType>::get();
     EXPECT_EQ(hwHelper.isAssignEngineRoundRobinSupported(hwInfo), HwInfoConfig::get(hwInfo.platform.eProductFamily)->isAssignEngineRoundRobinSupported());
 }
+
+XE_HPC_CORETEST_F(HwHelperTest, givenHwHelperWhenCallCopyThroughLockedPtrEnabledThenReturnTrue) {
+    auto &hwHelper = HwHelperHw<FamilyType>::get();
+    EXPECT_TRUE(hwHelper.copyThroughLockedPtrEnabled());
+}
+
+XE_HPC_CORETEST_F(HwHelperTest, givenHwHelperWhenCallGetAmountOfAllocationsToFillThenReturnTrue) {
+    auto &hwHelper = HwHelperHw<FamilyType>::get();
+    EXPECT_EQ(hwHelper.getAmountOfAllocationsToFill(), 1u);
+}

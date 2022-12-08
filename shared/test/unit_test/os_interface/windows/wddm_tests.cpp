@@ -6,11 +6,13 @@
  */
 
 #include "shared/source/gmm_helper/gmm.h"
+#include "shared/source/helpers/string.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/os_interface/windows/wddm_fixture.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
 namespace NEO {
+std::unique_ptr<HwDeviceIdWddm> createHwDeviceIdFromAdapterLuid(OsEnvironmentWin &osEnvironment, LUID adapterLuid);
 
 using WddmTests = WddmTestWithMockGdiDll;
 
@@ -73,7 +75,7 @@ TEST_F(WddmTests, givenWddmWhenPassesIncorrectHandleToVerifyNTHandleThenReturnFa
 TEST_F(WddmTests, whenCheckedIfResourcesCleanupCanBeSkippedThenReturnsFalse) {
     init();
     EXPECT_FALSE(wddm->skipResourceCleanup());
-    EXPECT_TRUE(wddm->isDriverAvaliable());
+    EXPECT_TRUE(wddm->isDriverAvailable());
 }
 
 TEST_F(WddmTests, whenCheckedIfDebugAttachAvailableThenReturnsFalse) {
@@ -98,7 +100,7 @@ TEST_F(WddmTests, whenftrEuDebugIsFalseThenDebuggingEnabledReturnsFalse) {
 TEST_F(WddmTests, whenProgramDebugIsEnabledAndCreatingContextWithInternalEngineThenDebuggableContextReturnsFalse) {
     executionEnvironment->setDebuggingEnabled();
     wddm->init();
-    OsContextWin osContext(*wddm, 5u, EngineDescriptorHelper::getDefaultDescriptor({aub_stream::EngineType::ENGINE_RCS, EngineUsage::Internal}));
+    OsContextWin osContext(*wddm, 0, 5u, EngineDescriptorHelper::getDefaultDescriptor({aub_stream::EngineType::ENGINE_RCS, EngineUsage::Internal}));
     osContext.ensureContextInitialized();
     EXPECT_FALSE(osContext.isDebuggableContext());
 }
@@ -162,6 +164,7 @@ TEST_F(WddmTests, givenDebugFlagForceEvictOnlyIfNecessaryAllValuesThenForceSetti
 TEST_F(WddmTests, GivengtSystemInfoSliceInfoHasEnabledSlicesAtHigherIndicesThenExpectTopologyMapCreateAndReturnTrue) {
     VariableBackup<HardwareInfo> backupHwInfo(defaultHwInfo.get());
     defaultHwInfo.get()->gtSystemInfo.MaxSlicesSupported = 2;
+    defaultHwInfo.get()->gtSystemInfo.IsDynamicallyPopulated = true;
     defaultHwInfo.get()->gtSystemInfo.SliceCount = 1; // Only one slice enabled
 
     defaultHwInfo.get()->gtSystemInfo.SliceInfo[0].Enabled = false;
@@ -189,6 +192,7 @@ TEST_F(WddmTests, GivengtSystemInfoSliceInfoHasEnabledSlicesAtHigherIndicesThenE
 TEST_F(WddmTests, GivenProperTopologyDataAndDebugFlagsEnabledWhenInitializingWddmThenExpectTopologyMapCreateAndReturnTrue) {
     VariableBackup<HardwareInfo> backupHwInfo(defaultHwInfo.get());
     defaultHwInfo.get()->gtSystemInfo.MaxSlicesSupported = 10;
+    defaultHwInfo.get()->gtSystemInfo.IsDynamicallyPopulated = true;
     defaultHwInfo.get()->gtSystemInfo.SliceCount = 1; // Only one slice enabled
 
     defaultHwInfo.get()->gtSystemInfo.SliceInfo[0].Enabled = true;
@@ -214,6 +218,7 @@ TEST_F(WddmTests, GivenNoSubsliceEnabledAndDebugFlagsEnabledWhenInitializingWddm
     VariableBackup<HardwareInfo> backupHwInfo(defaultHwInfo.get());
     defaultHwInfo.get()->gtSystemInfo.MaxSlicesSupported = 10;
     defaultHwInfo.get()->gtSystemInfo.SliceCount = 1; // Only one slice enabled
+    defaultHwInfo.get()->gtSystemInfo.IsDynamicallyPopulated = true;
     defaultHwInfo.get()->gtSystemInfo.SliceInfo[0].DualSubSliceEnabledCount = 1;
     defaultHwInfo.get()->gtSystemInfo.SliceInfo[0].DSSInfo[0].Enabled = true;
     defaultHwInfo.get()->gtSystemInfo.SliceInfo[0].DSSInfo[0].SubSlice[0].Enabled = false;
@@ -234,6 +239,7 @@ TEST_F(WddmTests, GivenProperTopologyDataWhenQueryingTopologyThenExpectTrue) {
     VariableBackup<HardwareInfo> backupHwInfo(defaultHwInfo.get());
     defaultHwInfo.get()->gtSystemInfo.MultiTileArchInfo.TileCount = 1;
     defaultHwInfo.get()->gtSystemInfo.MaxSlicesSupported = 10;
+    defaultHwInfo.get()->gtSystemInfo.IsDynamicallyPopulated = true;
     defaultHwInfo.get()->gtSystemInfo.SliceCount = 1; // Only one slice enabled
 
     defaultHwInfo.get()->gtSystemInfo.SliceInfo[0].Enabled = true;
@@ -270,6 +276,7 @@ TEST_F(WddmTests, GivenMoreThanOneEnabledSliceWhenQueryingTopologyThenExpectTrue
     defaultHwInfo.get()->gtSystemInfo.MaxSlicesSupported = 10;
     defaultHwInfo.get()->gtSystemInfo.SliceCount = 2;
     defaultHwInfo.get()->gtSystemInfo.SliceInfo[0].Enabled = false;
+    defaultHwInfo.get()->gtSystemInfo.IsDynamicallyPopulated = true;
 
     uint32_t index = 1;
     for (uint32_t enabledSliceCount = 0; enabledSliceCount < defaultHwInfo.get()->gtSystemInfo.SliceCount; enabledSliceCount++) {
@@ -301,6 +308,7 @@ TEST_F(WddmTests, GivenNoSubsliceEnabledWhenQueryingTopologyThenExpectFalse) {
     defaultHwInfo.get()->gtSystemInfo.MultiTileArchInfo.TileCount = 1;
     defaultHwInfo.get()->gtSystemInfo.MaxSlicesSupported = 10;
     defaultHwInfo.get()->gtSystemInfo.SliceCount = 1;
+    defaultHwInfo.get()->gtSystemInfo.IsDynamicallyPopulated = true;
 
     defaultHwInfo.get()->gtSystemInfo.SliceInfo[0].DualSubSliceEnabledCount = 1;
     // Lets say, DSS 0 is disabled and dss 1 is enabled, thus overall DSS enable count is 1
@@ -318,6 +326,7 @@ TEST_F(WddmTests, GivenNoEuThreadsEnabledWhenQueryingTopologyThenExpectFalse) {
     defaultHwInfo.get()->gtSystemInfo.MultiTileArchInfo.TileCount = 1;
     defaultHwInfo.get()->gtSystemInfo.MaxSlicesSupported = 10;
     defaultHwInfo.get()->gtSystemInfo.SliceCount = 1;
+    defaultHwInfo.get()->gtSystemInfo.IsDynamicallyPopulated = true;
 
     defaultHwInfo.get()->gtSystemInfo.SliceInfo[0].DualSubSliceEnabledCount = 1;
     defaultHwInfo.get()->gtSystemInfo.SliceInfo[0].DSSInfo[0].Enabled = true;
@@ -379,6 +388,17 @@ TEST_F(WddmTests, GivenPlatformNotSupportEvictIfNecessaryWhenAdjustingEvictNeede
     bool value = wddm->adjustEvictNeededParameter(false);
     EXPECT_TRUE(value);
 }
+using WddmOsContextDeviceLuidTests = WddmFixtureLuid;
+TEST_F(WddmFixtureLuid, givenValidOsContextAndLuidDataRequestThenValidDataReturned) {
+    LUID adapterLuid = {0x12, 0x1234};
+    wddm->hwDeviceId = NEO::createHwDeviceIdFromAdapterLuid(*osEnvironment, adapterLuid);
+    std::vector<uint8_t> luidData;
+    size_t arraySize = 8;
+    osContext->getDeviceLuidArray(luidData, arraySize);
+    uint64_t luid = 0;
+    memcpy_s(&luid, sizeof(uint64_t), luidData.data(), sizeof(uint8_t) * luidData.size());
+    EXPECT_NE(luid, (uint64_t)0);
+}
 
 uint64_t waitForSynchronizationObjectFromCpuCounter = 0u;
 
@@ -414,7 +434,7 @@ struct WddmSkipResourceCleanupFixtureWithMockGdiDll : public GdiDllFixture, publ
 
         auto hwInfo = rootDeviceEnvironment->getHardwareInfo();
         auto engine = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*hwInfo)[0];
-        osContext = std::make_unique<OsContextWin>(*osInterface->getDriverModel()->as<Wddm>(), 0u, EngineDescriptorHelper::getDefaultDescriptor(engine, preemptionMode));
+        osContext = std::make_unique<OsContextWin>(*osInterface->getDriverModel()->as<Wddm>(), 0, 0u, EngineDescriptorHelper::getDefaultDescriptor(engine, preemptionMode));
         osContext->ensureContextInitialized();
     }
 

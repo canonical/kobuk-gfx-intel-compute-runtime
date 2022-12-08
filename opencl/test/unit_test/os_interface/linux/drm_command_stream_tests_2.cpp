@@ -1400,70 +1400,6 @@ struct MockMergeResidencyContainerMemoryOperationsHandler : public DrmMemoryOper
                      (OsContext * osContext, ArrayRef<GraphicsAllocation *> gfxAllocations, bool evictable));
 };
 
-HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenMakeResidentWithinOsContextFailsThenFlushReturnsError) {
-    struct MockDrmCsr : public DrmCommandStreamReceiver<FamilyType> {
-        using DrmCommandStreamReceiver<FamilyType>::DrmCommandStreamReceiver;
-        SubmissionStatus flushInternal(const BatchBuffer &batchBuffer, const ResidencyContainer &allocationsForResidency) override {
-            return SubmissionStatus::SUCCESS;
-        }
-    };
-
-    mock->bindAvailable = true;
-    executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface.reset(new MockMergeResidencyContainerMemoryOperationsHandler());
-    auto operationHandler = static_cast<MockMergeResidencyContainerMemoryOperationsHandler *>(executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface.get());
-    operationHandler->makeResidentWithinOsContextResult = NEO::MemoryOperationsStatus::FAILED;
-
-    auto osContext = std::make_unique<OsContextLinux>(*mock, 0u,
-                                                      EngineDescriptorHelper::getDefaultDescriptor(HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*defaultHwInfo)[0],
-                                                                                                   PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo)));
-
-    auto commandBuffer = mm->allocateGraphicsMemoryWithProperties(MockAllocationProperties{csr->getRootDeviceIndex(), MemoryConstants::pageSize});
-    LinearStream cs(commandBuffer);
-    CommandStreamReceiverHw<FamilyType>::addBatchBufferEnd(cs, nullptr);
-    EncodeNoop<FamilyType>::alignToCacheLine(cs);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
-
-    MockDrmCsr mockCsr(*executionEnvironment, rootDeviceIndex, 1, gemCloseWorkerMode::gemCloseWorkerInactive);
-    mockCsr.setupContext(*osContext.get());
-    auto res = mockCsr.flush(batchBuffer, mockCsr.getResidencyAllocations());
-    EXPECT_GT(operationHandler->makeResidentWithinOsContextCalled, 0u);
-    EXPECT_EQ(NEO::SubmissionStatus::FAILED, res);
-
-    mm->freeGraphicsMemory(commandBuffer);
-}
-
-HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenMakeResidentWithinOsContextOutOfMemoryThenFlushReturnsError) {
-    struct MockDrmCsr : public DrmCommandStreamReceiver<FamilyType> {
-        using DrmCommandStreamReceiver<FamilyType>::DrmCommandStreamReceiver;
-        SubmissionStatus flushInternal(const BatchBuffer &batchBuffer, const ResidencyContainer &allocationsForResidency) override {
-            return SubmissionStatus::SUCCESS;
-        }
-    };
-
-    mock->bindAvailable = true;
-    executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface.reset(new MockMergeResidencyContainerMemoryOperationsHandler());
-    auto operationHandler = static_cast<MockMergeResidencyContainerMemoryOperationsHandler *>(executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface.get());
-    operationHandler->makeResidentWithinOsContextResult = NEO::MemoryOperationsStatus::OUT_OF_MEMORY;
-
-    auto osContext = std::make_unique<OsContextLinux>(*mock, 0u,
-                                                      EngineDescriptorHelper::getDefaultDescriptor(HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*defaultHwInfo)[0],
-                                                                                                   PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo)));
-
-    auto commandBuffer = mm->allocateGraphicsMemoryWithProperties(MockAllocationProperties{csr->getRootDeviceIndex(), MemoryConstants::pageSize});
-    LinearStream cs(commandBuffer);
-    CommandStreamReceiverHw<FamilyType>::addBatchBufferEnd(cs, nullptr);
-    EncodeNoop<FamilyType>::alignToCacheLine(cs);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 0, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
-
-    MockDrmCsr mockCsr(*executionEnvironment, rootDeviceIndex, 1, gemCloseWorkerMode::gemCloseWorkerInactive);
-    mockCsr.setupContext(*osContext.get());
-    auto res = mockCsr.flush(batchBuffer, mockCsr.getResidencyAllocations());
-    EXPECT_GT(operationHandler->makeResidentWithinOsContextCalled, 0u);
-    EXPECT_EQ(NEO::SubmissionStatus::OUT_OF_MEMORY, res);
-
-    mm->freeGraphicsMemory(commandBuffer);
-}
-
 HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenMergeWithResidencyContainerFailsThenFlushReturnsError) {
     struct MockDrmCsr : public DrmCommandStreamReceiver<FamilyType> {
         using DrmCommandStreamReceiver<FamilyType>::DrmCommandStreamReceiver;
@@ -1476,7 +1412,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenMergeWithResidencyContaine
     auto operationHandler = static_cast<MockMergeResidencyContainerMemoryOperationsHandler *>(executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface.get());
     operationHandler->mergeWithResidencyContainerResult = NEO::MemoryOperationsStatus::FAILED;
 
-    auto osContext = std::make_unique<OsContextLinux>(*mock, 0u,
+    auto osContext = std::make_unique<OsContextLinux>(*mock, rootDeviceIndex, 0u,
                                                       EngineDescriptorHelper::getDefaultDescriptor(HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*defaultHwInfo)[0],
                                                                                                    PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo)));
 
@@ -1507,7 +1443,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenMergeWithResidencyContaine
     auto operationHandler = static_cast<MockMergeResidencyContainerMemoryOperationsHandler *>(executionEnvironment->rootDeviceEnvironments[0]->memoryOperationsInterface.get());
     operationHandler->mergeWithResidencyContainerResult = NEO::MemoryOperationsStatus::OUT_OF_MEMORY;
 
-    auto osContext = std::make_unique<OsContextLinux>(*mock, 0u,
+    auto osContext = std::make_unique<OsContextLinux>(*mock, rootDeviceIndex, 0u,
                                                       EngineDescriptorHelper::getDefaultDescriptor(HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*defaultHwInfo)[0],
                                                                                                    PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo)));
 
@@ -1541,7 +1477,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenNoAllocsInMemoryOperationH
         }
     };
 
-    auto osContext = std::make_unique<OsContextLinux>(*mock, 0u,
+    auto osContext = std::make_unique<OsContextLinux>(*mock, rootDeviceIndex, 0u,
                                                       EngineDescriptorHelper::getDefaultDescriptor(HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*defaultHwInfo)[0],
                                                                                                    PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo)));
 
@@ -1572,7 +1508,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenAllocsInMemoryOperationHan
         }
     };
 
-    auto osContext = std::make_unique<OsContextLinux>(*mock, 0u,
+    auto osContext = std::make_unique<OsContextLinux>(*mock, rootDeviceIndex, 0u,
                                                       EngineDescriptorHelper::getDefaultDescriptor(HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*defaultHwInfo)[0],
                                                                                                    PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo)));
 

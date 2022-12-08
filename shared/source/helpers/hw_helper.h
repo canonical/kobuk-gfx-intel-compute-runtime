@@ -62,6 +62,7 @@ class HwHelper {
     static bool compressedBuffersSupported(const HardwareInfo &hwInfo);
     static bool compressedImagesSupported(const HardwareInfo &hwInfo);
     static bool cacheFlushAfterWalkerSupported(const HardwareInfo &hwInfo);
+    static uint32_t getHighestEnabledSlice(const HardwareInfo &hwInfo);
     virtual bool timestampPacketWriteSupported() const = 0;
     virtual bool isTimestampWaitSupportedForQueues() const = 0;
     virtual bool isTimestampWaitSupportedForEvents(const HardwareInfo &hwInfo) const = 0;
@@ -158,6 +159,9 @@ class HwHelper {
     virtual bool isPlatformFlushTaskEnabled(const NEO::HardwareInfo &hwInfo) const = 0;
     virtual bool isPatIndexFallbackWaRequired() const = 0;
     virtual uint32_t getMinimalScratchSpaceSize() const = 0;
+    virtual bool copyThroughLockedPtrEnabled() const = 0;
+    virtual uint32_t getAmountOfAllocationsToFill() const = 0;
+    virtual bool isChipsetUniqueUUIDSupported() const = 0;
 
   protected:
     HwHelper() = default;
@@ -399,6 +403,9 @@ class HwHelperHw : public HwHelper {
     bool isPlatformFlushTaskEnabled(const NEO::HardwareInfo &hwInfo) const override;
     bool isPatIndexFallbackWaRequired() const override;
     uint32_t getMinimalScratchSpaceSize() const override;
+    bool copyThroughLockedPtrEnabled() const override;
+    uint32_t getAmountOfAllocationsToFill() const override;
+    bool isChipsetUniqueUUIDSupported() const override;
 
   protected:
     static const AuxTranslationMode defaultAuxTranslationMode;

@@ -136,6 +136,13 @@ struct DebugApiWindowsFixture : public DeviceFixture {
     void tearDown() {
         DeviceFixture::tearDown();
     }
+
+    void copyBitmaskToEventParams(READ_EVENT_PARAMS_BUFFER *params, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize) {
+        auto bitsetParams = reinterpret_cast<DBGUMD_READ_EVENT_EU_ATTN_BIT_SET_PARAMS *>(params);
+        auto bitmapDst = reinterpret_cast<uint8_t *>(&bitsetParams->BitmaskArrayPtr);
+        bitsetParams->BitMaskSizeInBytes = static_cast<uint32_t>(bitmaskSize);
+        memcpy_s(bitmapDst, bitmaskSize, bitmask.get(), bitmaskSize);
+    }
     static constexpr uint8_t bufferSize = 16;
     WddmEuDebugInterfaceMock *mockWddm = nullptr;
 };
@@ -169,8 +176,7 @@ TEST_F(DebugApiWindowsAttentionTest, GivenEuAttentionEventForThreadsWhenHandling
     l0HwHelper.getAttentionBitmaskForSingleThreads(threads, hwInfo, bitmask, bitmaskSize);
     mockWddm->numEvents = 1;
     mockWddm->eventQueue[0].readEventType = DBGUMD_READ_EVENT_EU_ATTN_BIT_SET;
-    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.EuBitSetEventParams.BitMaskSizeInBytes = static_cast<uint32_t>(bitmaskSize);
-    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.EuBitSetEventParams.BitmaskArrayPtr = reinterpret_cast<uint64_t>(bitmask.get());
+    copyBitmaskToEventParams(&mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer, bitmask, bitmaskSize);
     sessionMock->wddm = mockWddm;
     sessionMock->debugHandle = MockDebugSessionWindows::mockDebugHandle;
 
@@ -206,8 +212,7 @@ TEST_F(DebugApiWindowsAttentionTest, GivenNoContextWhenHandlingAttentionEventThe
     l0HwHelper.getAttentionBitmaskForSingleThreads(threads, hwInfo, bitmask, bitmaskSize);
     mockWddm->numEvents = 1;
     mockWddm->eventQueue[0].readEventType = DBGUMD_READ_EVENT_EU_ATTN_BIT_SET;
-    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.EuBitSetEventParams.BitMaskSizeInBytes = static_cast<uint32_t>(bitmaskSize);
-    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.EuBitSetEventParams.BitmaskArrayPtr = reinterpret_cast<uint64_t>(bitmask.get());
+    copyBitmaskToEventParams(&mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer, bitmask, bitmaskSize);
     sessionMock->wddm = mockWddm;
     sessionMock->debugHandle = MockDebugSessionWindows::mockDebugHandle;
 
@@ -228,8 +233,7 @@ TEST_F(DebugApiWindowsAttentionTest, GivenEuAttentionEventEmptyBitmaskWhenHandli
 
     mockWddm->numEvents = 1;
     mockWddm->eventQueue[0].readEventType = DBGUMD_READ_EVENT_EU_ATTN_BIT_SET;
-    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.EuBitSetEventParams.BitMaskSizeInBytes = static_cast<uint32_t>(bitmaskSize);
-    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.EuBitSetEventParams.BitmaskArrayPtr = reinterpret_cast<uint64_t>(bitmask.get());
+    copyBitmaskToEventParams(&mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer, bitmask, bitmaskSize);
     sessionMock->wddm = mockWddm;
     sessionMock->debugHandle = MockDebugSessionWindows::mockDebugHandle;
 
@@ -254,10 +258,6 @@ TEST_F(DebugApiWindowsAttentionTest, GivenInterruptedThreadsWhenOnlySomeThreadsR
 
     auto sessionMock = std::make_unique<MockDebugSessionWindows>(config, device);
     sessionMock->stoppedThreads[threads[0].packed] = 1;
-    if (hwInfo.gtSystemInfo.MaxEuPerSubSlice > 8) {
-        sessionMock->allThreads[EuThread::ThreadId(0, 0, 0, 4, 0)]->stopThread(1u);
-    }
-
     sessionMock->allContexts.insert(0x12345);
 
     l0HwHelper.getAttentionBitmaskForSingleThreads(threads, hwInfo, bitmask, bitmaskSize);
@@ -269,8 +269,7 @@ TEST_F(DebugApiWindowsAttentionTest, GivenInterruptedThreadsWhenOnlySomeThreadsR
 
     mockWddm->numEvents = 1;
     mockWddm->eventQueue[0].readEventType = DBGUMD_READ_EVENT_EU_ATTN_BIT_SET;
-    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.EuBitSetEventParams.BitMaskSizeInBytes = static_cast<uint32_t>(bitmaskSize);
-    mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer.EuBitSetEventParams.BitmaskArrayPtr = reinterpret_cast<uint64_t>(bitmask.get());
+    copyBitmaskToEventParams(&mockWddm->eventQueue[0].eventParamsBuffer.eventParamsBuffer, bitmask, bitmaskSize);
     sessionMock->wddm = mockWddm;
     sessionMock->debugHandle = MockDebugSessionWindows::mockDebugHandle;
 
@@ -300,7 +299,7 @@ TEST_F(DebugApiWindowsAttentionTest, GivenThreadWhenReadingSystemRoutineIdentThe
     mockWddm->srcReadBuffer = session->stateSaveAreaHeader.data();
     mockWddm->srcReadBufferBaseAddress = session->stateSaveAreaVA.load();
 
-    SIP::sr_ident srIdent = {};
+    SIP::sr_ident srIdent = {{0}};
     auto vmHandle = *session->allContexts.begin();
     auto result = session->readSystemRoutineIdent(&thread, vmHandle, srIdent);
 
@@ -343,7 +342,7 @@ TEST_F(DebugApiWindowsAttentionTest, GivenThreadWhenReadingSystemRoutineIdentAnd
     mockWddm->srcReadBuffer = session->stateSaveAreaHeader.data();
     mockWddm->srcReadBufferBaseAddress = session->stateSaveAreaVA.load();
 
-    SIP::sr_ident srIdent = {};
+    SIP::sr_ident srIdent = {{0}};
     auto vmHandle = *session->allContexts.begin();
     auto result = session->readSystemRoutineIdent(&thread, vmHandle, srIdent);
 
@@ -369,7 +368,7 @@ TEST_F(DebugApiWindowsAttentionTest, GivenThreadWhenReadingSystemRoutineIdentAnd
     mockWddm->srcReadBuffer = session->stateSaveAreaHeader.data();
     mockWddm->srcReadBufferBaseAddress = session->stateSaveAreaVA.load();
 
-    SIP::sr_ident srIdent = {};
+    SIP::sr_ident srIdent = {{0}};
     auto vmHandle = *session->allContexts.begin();
     auto result = session->readSystemRoutineIdent(&thread, vmHandle, srIdent);
 
@@ -461,17 +460,42 @@ TEST_F(DebugApiWindowsTest, givenDebugAttachIsNotAvailableWhenGetDebugProperties
     EXPECT_EQ(0u, debugProperties.flags);
 }
 
+TEST_F(DebugApiWindowsTest, givenSubDeviceWhenDebugAttachCalledThenUnsupportedErrorIsReturned) {
+    zet_debug_config_t config = {};
+    config.pid = 0x1234;
+
+    NEO::Device *neoDevice(NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get(), 0));
+    Mock<L0::DeviceImp> deviceImp(neoDevice, neoDevice->getExecutionEnvironment());
+    deviceImp.isSubdevice = true;
+
+    auto mockWddm = new WddmEuDebugInterfaceMock(*neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]);
+    mockWddm->debugAttachAvailable = false;
+    neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.reset(new NEO::OSInterface);
+    neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface->setDriverModel(std::unique_ptr<DriverModel>(mockWddm));
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    auto session = DebugSession::create(config, &deviceImp, result, false);
+    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, result);
+    EXPECT_EQ(nullptr, session);
+
+    result = ZE_RESULT_SUCCESS;
+    mockWddm->debugAttachAvailable = true;
+    session = DebugSession::create(config, &deviceImp, result, false);
+    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, result);
+    EXPECT_EQ(nullptr, session);
+}
+
 TEST_F(DebugApiWindowsTest, GivenRootDeviceWhenDebugSessionIsCreatedForTheSecondTimeThenSuccessIsReturned) {
     zet_debug_config_t config = {};
     config.pid = 0x1234;
 
     ze_result_t result = ZE_RESULT_SUCCESS;
-    auto sessionMock = device->createDebugSession(config, result);
+    auto sessionMock = device->createDebugSession(config, result, true);
     ASSERT_NE(nullptr, sessionMock);
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
-    auto sessionMock2 = device->createDebugSession(config, result);
+    auto sessionMock2 = device->createDebugSession(config, result, true);
     EXPECT_EQ(sessionMock, sessionMock2);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
@@ -707,6 +731,20 @@ TEST_F(DebugApiWindowsTest, givenEscapeReturnStatusFailedWhenReadAndHandleEventC
     mockWddm->numEvents = 1;
     mockWddm->eventQueue[0].escapeReturnStatus = DBGUMD_RETURN_EU_DEBUG_NOT_SUPPORTED;
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, session->readAndHandleEvent(100));
+}
+
+TEST_F(DebugApiWindowsTest, givenEscapeReturnTimeoutWhenReadAndHandleEventCalledThenNothingIsLogged) {
+    zet_debug_config_t config = {};
+    config.pid = 0x1234;
+
+    auto session = std::make_unique<MockDebugSessionWindows>(config, device);
+    session->wddm = mockWddm;
+    ::testing::internal::CaptureStdout();
+    mockWddm->numEvents = 1;
+    mockWddm->eventQueue[0].escapeReturnStatus = DBGUMD_RETURN_READ_EVENT_TIMEOUT_EXPIRED;
+    EXPECT_EQ(ZE_RESULT_ERROR_NOT_AVAILABLE, session->readAndHandleEvent(100));
+    auto errorMessage = ::testing::internal::GetCapturedStdout();
+    EXPECT_EQ(std::string(""), errorMessage);
 }
 
 TEST_F(DebugApiWindowsTest, givenUnknownEventTypeWhenReadAndHandleEventCalledThenResultUnknownIsReturned) {
@@ -1256,7 +1294,7 @@ TEST_F(DebugApiWindowsTest, GivenInvalidAddressWhenCallingReadMemoryThenErrorIsR
     desc.address = 0xf0ffffff00000000;
     desc.type = ZET_DEBUG_MEMORY_SPACE_TYPE_DEFAULT;
 
-    EXPECT_FALSE(session->isValidGpuAddress(desc.address));
+    EXPECT_FALSE(session->isValidGpuAddress(&desc));
 
     char output[bufferSize] = {};
     auto retVal = session->readMemory(thread, &desc, bufferSize, output);
@@ -1275,7 +1313,7 @@ TEST_F(DebugApiWindowsTest, GivenInvalidAddressWhenCallingWriteMemoryThenErrorIs
     desc.address = 0xf0ffffff00000000;
     desc.type = ZET_DEBUG_MEMORY_SPACE_TYPE_DEFAULT;
 
-    EXPECT_FALSE(session->isValidGpuAddress(desc.address));
+    EXPECT_FALSE(session->isValidGpuAddress(&desc));
 
     char output[bufferSize] = {};
     auto retVal = session->writeMemory(thread, &desc, bufferSize, output);
@@ -1465,7 +1503,7 @@ TEST_F(DebugApiWindowsTest, WhenCallingWriteMemoryForExpectedFailureCasesThenErr
 
     desc.type = ZET_DEBUG_MEMORY_SPACE_TYPE_SLM;
     auto retVal = session->writeMemory(thread, &desc, size, output);
-    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, retVal);
+    EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, retVal);
 
     desc.type = ZET_DEBUG_MEMORY_SPACE_TYPE_DEFAULT;
 
@@ -1528,7 +1566,7 @@ TEST_F(DebugApiWindowsTest, WhenCallingReadMemoryForExpectedFailureCasesThenErro
 
     desc.type = ZET_DEBUG_MEMORY_SPACE_TYPE_SLM;
     auto retVal = session->readMemory(thread, &desc, size, output);
-    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, retVal);
+    EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, retVal);
 
     desc.type = ZET_DEBUG_MEMORY_SPACE_TYPE_DEFAULT;
 

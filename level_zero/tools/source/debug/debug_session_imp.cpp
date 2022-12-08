@@ -10,118 +10,131 @@
 #include "shared/source/built_ins/sip.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/hw_helper.h"
+#include "shared/source/helpers/sleep.h"
 #include "shared/source/helpers/string.h"
 
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/core/source/hw_helpers/l0_hw_helper.h"
 #include "level_zero/include/zet_intel_gpu_debug.h"
 
-#include "common/StateSaveAreaHeader.h"
-
 namespace L0 {
 
 DebugSession::DebugSession(const zet_debug_config_t &config, Device *device) : connectedDevice(device) {
 }
 
+const NEO::TopologyMap &DebugSession::getTopologyMap() {
+    return connectedDevice->getOsInterface().getDriverModel()->getTopologyMap();
+};
+
 void DebugSession::createEuThreads() {
     if (connectedDevice) {
 
-        bool isRootDevice = !connectedDevice->getNEODevice()->isSubDevice();
         bool isSubDevice = connectedDevice->getNEODevice()->isSubDevice();
 
-        if ((isRootDevice && NEO::DebugManager.flags.ExperimentalEnableTileAttach.get() == 0) ||
-            (isSubDevice && NEO::DebugManager.flags.ExperimentalEnableTileAttach.get() == 1)) {
-            auto &hwInfo = connectedDevice->getHwInfo();
-            const uint32_t numSubslicesPerSlice = hwInfo.gtSystemInfo.MaxSubSlicesSupported / hwInfo.gtSystemInfo.MaxSlicesSupported;
-            const uint32_t numEuPerSubslice = hwInfo.gtSystemInfo.MaxEuPerSubSlice;
-            const uint32_t numThreadsPerEu = (hwInfo.gtSystemInfo.ThreadCount / hwInfo.gtSystemInfo.EUCount);
-            uint32_t subDeviceCount = std::max(1u, connectedDevice->getNEODevice()->getNumSubDevices());
+        auto &hwInfo = connectedDevice->getHwInfo();
+        const uint32_t numSubslicesPerSlice = hwInfo.gtSystemInfo.MaxSubSlicesSupported / hwInfo.gtSystemInfo.MaxSlicesSupported;
+        const uint32_t numEuPerSubslice = hwInfo.gtSystemInfo.MaxEuPerSubSlice;
+        const uint32_t numThreadsPerEu = (hwInfo.gtSystemInfo.ThreadCount / hwInfo.gtSystemInfo.EUCount);
+        uint32_t subDeviceCount = std::max(1u, connectedDevice->getNEODevice()->getNumSubDevices());
 
-            UNRECOVERABLE_IF(isSubDevice && subDeviceCount > 1);
+        UNRECOVERABLE_IF(isSubDevice && subDeviceCount > 1);
 
-            for (uint32_t tileIndex = 0; tileIndex < subDeviceCount; tileIndex++) {
+        for (uint32_t tileIndex = 0; tileIndex < subDeviceCount; tileIndex++) {
 
-                if (isSubDevice || subDeviceCount == 1) {
-                    tileIndex = Math::log2(static_cast<uint32_t>(connectedDevice->getNEODevice()->getDeviceBitfield().to_ulong()));
-                }
+            if (isSubDevice || subDeviceCount == 1) {
+                tileIndex = Math::log2(static_cast<uint32_t>(connectedDevice->getNEODevice()->getDeviceBitfield().to_ulong()));
+            }
 
-                for (uint32_t sliceID = 0; sliceID < hwInfo.gtSystemInfo.MaxSlicesSupported; sliceID++) {
-                    for (uint32_t subsliceID = 0; subsliceID < numSubslicesPerSlice; subsliceID++) {
-                        for (uint32_t euID = 0; euID < numEuPerSubslice; euID++) {
+            for (uint32_t sliceID = 0; sliceID < hwInfo.gtSystemInfo.MaxSlicesSupported; sliceID++) {
+                for (uint32_t subsliceID = 0; subsliceID < numSubslicesPerSlice; subsliceID++) {
+                    for (uint32_t euID = 0; euID < numEuPerSubslice; euID++) {
 
-                            for (uint32_t threadID = 0; threadID < numThreadsPerEu; threadID++) {
+                        for (uint32_t threadID = 0; threadID < numThreadsPerEu; threadID++) {
 
-                                EuThread::ThreadId thread = {tileIndex, sliceID, subsliceID, euID, threadID};
+                            EuThread::ThreadId thread = {tileIndex, sliceID, subsliceID, euID, threadID};
 
-                                allThreads[uint64_t(thread)] = std::make_unique<EuThread>(thread);
-                            }
+                            allThreads[uint64_t(thread)] = std::make_unique<EuThread>(thread);
                         }
                     }
                 }
+            }
 
-                if (isSubDevice || subDeviceCount == 1) {
-                    break;
-                }
+            if (isSubDevice || subDeviceCount == 1) {
+                break;
             }
         }
     }
 }
 
 uint32_t DebugSession::getDeviceIndexFromApiThread(ze_device_thread_t thread) {
-    auto &hwInfo = connectedDevice->getHwInfo();
-    auto deviceCount = std::max(1u, connectedDevice->getNEODevice()->getNumSubDevices());
     auto deviceBitfield = connectedDevice->getNEODevice()->getDeviceBitfield();
-
     uint32_t deviceIndex = Math::log2(static_cast<uint32_t>(deviceBitfield.to_ulong()));
+    auto deviceCount = std::max(1u, connectedDevice->getNEODevice()->getNumSubDevices());
+    const auto &topologyMap = getTopologyMap();
 
     if (connectedDevice->getNEODevice()->isSubDevice()) {
-        deviceIndex = Math::log2(static_cast<uint32_t>(deviceBitfield.to_ulong()));
-    } else {
-        if (thread.slice != UINT32_MAX) {
-            deviceIndex = thread.slice / hwInfo.gtSystemInfo.SliceCount;
-        } else if (deviceCount > 1) {
+        return deviceIndex;
+    }
+
+    if (deviceCount > 1) {
+
+        if (thread.slice == UINT32_MAX) {
             deviceIndex = UINT32_MAX;
+        } else {
+            uint32_t sliceId = thread.slice;
+            for (uint32_t i = 0; i < topologyMap.size(); i++) {
+                if (deviceBitfield.test(i)) {
+                    if (sliceId < topologyMap.at(i).sliceIndices.size()) {
+                        deviceIndex = i;
+                    }
+                    sliceId = sliceId - static_cast<uint32_t>(topologyMap.at(i).sliceIndices.size());
+                }
+            }
         }
     }
+
     return deviceIndex;
 }
 
 ze_device_thread_t DebugSession::convertToPhysicalWithinDevice(ze_device_thread_t thread, uint32_t deviceIndex) {
-    auto &hwInfo = connectedDevice->getHwInfo();
+    auto deviceImp = static_cast<DeviceImp *>(connectedDevice);
+    const auto &topologyMap = getTopologyMap();
+
+    // set slice for single slice config to allow subslice remapping
+    auto mapping = topologyMap.find(deviceIndex);
+    if (thread.slice == UINT32_MAX && mapping != topologyMap.end() && mapping->second.sliceIndices.size() == 1) {
+        thread.slice = 0;
+    }
 
     if (thread.slice != UINT32_MAX) {
-        thread.slice = thread.slice % hwInfo.gtSystemInfo.SliceCount;
+        if (thread.subslice != UINT32_MAX) {
+            deviceImp->toPhysicalSliceId(topologyMap, thread.slice, thread.subslice, deviceIndex);
+        } else {
+            uint32_t dummy = 0;
+            deviceImp->toPhysicalSliceId(topologyMap, thread.slice, dummy, deviceIndex);
+        }
     }
 
     return thread;
 }
 
 EuThread::ThreadId DebugSession::convertToThreadId(ze_device_thread_t thread) {
-    auto &hwInfo = connectedDevice->getHwInfo();
-    auto deviceBitfield = connectedDevice->getNEODevice()->getDeviceBitfield();
-
-    UNRECOVERABLE_IF(!isSingleThread(thread));
+    auto deviceImp = static_cast<DeviceImp *>(connectedDevice);
+    UNRECOVERABLE_IF(!DebugSession::isSingleThread(thread));
 
     uint32_t deviceIndex = 0;
-    if (connectedDevice->getNEODevice()->isSubDevice()) {
-        deviceIndex = Math::log2(static_cast<uint32_t>(deviceBitfield.to_ulong()));
-    } else {
-        deviceIndex = thread.slice / hwInfo.gtSystemInfo.SliceCount;
-        thread.slice = thread.slice % hwInfo.gtSystemInfo.SliceCount;
-    }
+    deviceImp->toPhysicalSliceId(getTopologyMap(), thread.slice, thread.subslice, deviceIndex);
 
     EuThread::ThreadId threadId(deviceIndex, thread.slice, thread.subslice, thread.eu, thread.thread);
     return threadId;
 }
 
 ze_device_thread_t DebugSession::convertToApi(EuThread::ThreadId threadId) {
-    auto &hwInfo = connectedDevice->getHwInfo();
+    auto deviceImp = static_cast<DeviceImp *>(connectedDevice);
 
     ze_device_thread_t thread = {static_cast<uint32_t>(threadId.slice), static_cast<uint32_t>(threadId.subslice), static_cast<uint32_t>(threadId.eu), static_cast<uint32_t>(threadId.thread)};
+    deviceImp->toApiSliceId(getTopologyMap(), thread.slice, thread.subslice, threadId.tileIndex);
 
-    if (!connectedDevice->getNEODevice()->isSubDevice()) {
-        thread.slice = thread.slice + static_cast<uint32_t>(threadId.tileIndex * hwInfo.gtSystemInfo.SliceCount);
-    }
     return thread;
 }
 
@@ -224,10 +237,6 @@ ze_result_t DebugSession::sanityMemAccessThreadCheck(ze_device_thread_t thread, 
             return ZE_RESULT_SUCCESS;
         }
     } else if (DebugSession::isSingleThread(thread)) {
-        if (desc->type != ZET_DEBUG_MEMORY_SPACE_TYPE_DEFAULT) {
-            return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-        }
-
         if (!areRequestedThreadsStopped(thread)) {
             return ZE_RESULT_ERROR_NOT_AVAILABLE;
         } else {
@@ -269,12 +278,12 @@ size_t DebugSession::getPerThreadScratchOffset(size_t ptss, EuThread::ThreadId t
 
     const auto &hwInfoConfig = *NEO::HwInfoConfig::get(hwInfo.platform.eProductFamily);
     uint32_t threadEuRatio = hwInfoConfig.getThreadEuRatioForScratch(hwInfo);
-
+    uint32_t multiplyFactor = 1;
     if (threadEuRatio / numThreadsPerEu > 1) {
-        ptss *= threadEuRatio / numThreadsPerEu;
+        multiplyFactor = threadEuRatio / numThreadsPerEu;
     }
 
-    auto threadOffset = (((threadId.slice * numSubslicesPerSlice + threadId.subslice) * numEuPerSubslice + threadId.eu) * numThreadsPerEu + threadId.thread) * ptss;
+    auto threadOffset = (((threadId.slice * numSubslicesPerSlice + threadId.subslice) * numEuPerSubslice + threadId.eu) * numThreadsPerEu * multiplyFactor + threadId.thread) * ptss;
     return threadOffset;
 }
 
@@ -359,7 +368,6 @@ DebugSessionImp::Error DebugSessionImp::resumeThreadsWithinDevice(uint32_t devic
 
     std::vector<ze_device_thread_t> resumeThreads;
     std::vector<EuThread::ThreadId> resumeThreadIds;
-
     for (auto &threadId : singleThreads) {
         if (allThreads[threadId]->isRunning()) {
             continue;
@@ -450,16 +458,13 @@ bool DebugSessionImp::writeResumeCommand(const std::vector<EuThread::ThreadId> &
         }
     } else // >= 2u
     {
-        auto *regdesc = &stateSaveAreaHeader->regHeader.cmd;
         SIP::sip_command resumeCommand = {0};
         resumeCommand.command = static_cast<uint32_t>(NEO::SipKernel::COMMAND::RESUME);
 
         for (auto &threadID : threadIds) {
-            PRINT_DEBUGGER_INFO_LOG("Write RESUME for %s\n", EuThread::toString(threadID).c_str());
-            auto result = registersAccessHelper(allThreads[threadID].get(), regdesc, 0, 1, &resumeCommand, true);
+            ze_result_t result = cmdRegisterAccessHelper(threadID, resumeCommand, true);
             if (result != ZE_RESULT_SUCCESS) {
                 success = false;
-                PRINT_DEBUGGER_ERROR_LOG("Failed to write RESUME command for thread %s\n", EuThread::toString(threadID).c_str());
             }
         }
     }
@@ -471,23 +476,10 @@ bool DebugSessionImp::checkThreadIsResumed(const EuThread::ThreadId &threadID) {
     bool resumed = true;
 
     if (stateSaveAreaHeader->versionHeader.version.major >= 2u) {
+        SIP::sr_ident srMagic = {{0}};
         const auto thread = allThreads[threadID].get();
-        auto gpuVa = getContextStateSaveAreaGpuVa(thread->getMemoryHandle());
-        if (gpuVa == 0) {
-            PRINT_DEBUGGER_ERROR_LOG("Failed to get Context State Save Area GPU Virtual Address\n", "");
-            return resumed;
-        }
 
-        auto threadSlotOffset = calculateThreadSlotOffset(thread->getThreadId());
-        auto srMagicOffset = threadSlotOffset + getStateSaveAreaHeader()->regHeader.sr_magic_offset;
-        SIP::sr_ident srMagic;
-        memset(srMagic.magic, 0, sizeof(SIP::sr_ident::magic));
-
-        auto status = readGpuMemory(thread->getMemoryHandle(), reinterpret_cast<char *>(&srMagic), sizeof(srMagic), gpuVa + srMagicOffset);
-        DEBUG_BREAK_IF(status != ZE_RESULT_SUCCESS);
-
-        if (status != ZE_RESULT_SUCCESS || 0 != strcmp(srMagic.magic, "srmagic")) {
-            PRINT_DEBUGGER_ERROR_LOG("checkThreadIsResumed - Failed to read srMagic for thread %s\n", EuThread::toString(threadID).c_str());
+        if (!readSystemRoutineIdent(thread, thread->getMemoryHandle(), srMagic)) {
             return resumed;
         }
 
@@ -573,11 +565,7 @@ void DebugSessionImp::sendInterrupts() {
     auto deviceCount = std::max(1u, connectedDevice->getNEODevice()->getNumSubDevices());
 
     if (deviceCount == 1) {
-        uint32_t deviceIndex = 0;
-
-        if (connectedDevice->getNEODevice()->isSubDevice()) {
-            deviceIndex = Math::log2(static_cast<uint32_t>(connectedDevice->getNEODevice()->getDeviceBitfield().to_ulong()));
-        }
+        uint32_t deviceIndex = Math::log2(static_cast<uint32_t>(connectedDevice->getNEODevice()->getDeviceBitfield().to_ulong()));
 
         ze_result_t result;
         {
@@ -661,18 +649,25 @@ bool DebugSessionImp::readSystemRoutineIdent(EuThread *thread, uint64_t memoryHa
     if (gpuVa == 0) {
         return false;
     }
+
     auto threadSlotOffset = calculateThreadSlotOffset(thread->getThreadId());
-    auto srMagicOffset = threadSlotOffset + getStateSaveAreaHeader()->regHeader.sr_magic_offset;
+    auto srMagicOffset = threadSlotOffset + stateSaveAreaHeader->regHeader.sr_magic_offset;
 
     if (ZE_RESULT_SUCCESS != readGpuMemory(memoryHandle, reinterpret_cast<char *>(&srIdent), sizeof(srIdent), gpuVa + srMagicOffset)) {
         return false;
     }
+
+    if (0 != strcmp(srIdent.magic, "srmagic")) {
+        PRINT_DEBUGGER_ERROR_LOG("readSystemRoutineIdent - Failed to read srMagic for thread %s\n", EuThread::toString(thread->getThreadId()).c_str());
+        return false;
+    }
+
     return true;
 }
 
 void DebugSessionImp::markPendingInterruptsOrAddToNewlyStoppedFromRaisedAttention(EuThread::ThreadId threadId, uint64_t memoryHandle) {
 
-    SIP::sr_ident srMagic = {};
+    SIP::sr_ident srMagic = {{0}};
     srMagic.count = 0;
 
     bool wasStopped = false;
@@ -887,8 +882,8 @@ const SIP::regset_desc *DebugSessionImp::getSbaRegsetDesc() {
 const SIP::regset_desc *DebugSessionImp::typeToRegsetDesc(uint32_t type) {
     auto pStateSaveAreaHeader = getStateSaveAreaHeader();
 
-    DEBUG_BREAK_IF(pStateSaveAreaHeader == nullptr);
     if (pStateSaveAreaHeader == nullptr) {
+        DEBUG_BREAK_IF(pStateSaveAreaHeader == nullptr);
         return nullptr;
     }
 
@@ -1127,10 +1122,9 @@ ze_result_t DebugSessionImp::registersAccessHelper(const EuThread *thread, const
 
     auto threadSlotOffset = calculateThreadSlotOffset(thread->getThreadId());
 
-    auto srMagicOffset = threadSlotOffset + getStateSaveAreaHeader()->regHeader.sr_magic_offset;
-    SIP::sr_ident srMagic;
-    memset(srMagic.magic, 0, sizeof(SIP::sr_ident::magic));
+    SIP::sr_ident srMagic = {{0}};
 
+    auto srMagicOffset = threadSlotOffset + getStateSaveAreaHeader()->regHeader.sr_magic_offset;
     readGpuMemory(thread->getMemoryHandle(), reinterpret_cast<char *>(&srMagic), sizeof(srMagic), gpuVa + srMagicOffset);
     if (0 != strcmp(srMagic.magic, "srmagic")) {
         return ZE_RESULT_ERROR_UNKNOWN;
@@ -1146,6 +1140,20 @@ ze_result_t DebugSessionImp::registersAccessHelper(const EuThread *thread, const
     }
 
     return ret == 0 ? ZE_RESULT_SUCCESS : ZE_RESULT_ERROR_UNKNOWN;
+}
+
+ze_result_t DebugSessionImp::cmdRegisterAccessHelper(const EuThread::ThreadId &threadId, SIP::sip_command &command, bool write) {
+    auto stateSaveAreaHeader = getStateSaveAreaHeader();
+    auto *regdesc = &stateSaveAreaHeader->regHeader.cmd;
+
+    PRINT_DEBUGGER_INFO_LOG("Access CMD %d for thread %s\n", command.command, EuThread::toString(threadId).c_str());
+
+    ze_result_t result = registersAccessHelper(allThreads[threadId].get(), regdesc, 0, 1, &command, write);
+    if (result != ZE_RESULT_SUCCESS) {
+        PRINT_DEBUGGER_ERROR_LOG("Failed to access CMD for thread %s\n", EuThread::toString(threadId).c_str());
+    }
+
+    return result;
 }
 
 ze_result_t DebugSessionImp::readRegisters(ze_device_thread_t thread, uint32_t type, uint32_t start, uint32_t count, void *pRegisterValues) {
@@ -1210,19 +1218,27 @@ ze_result_t DebugSessionImp::writeRegistersImp(EuThread::ThreadId threadId, uint
     return registersAccessHelper(allThreads[threadId].get(), regdesc, start, count, pRegisterValues, true);
 }
 
-bool DebugSessionImp::isValidGpuAddress(uint64_t address) const {
-    auto gmmHelper = connectedDevice->getNEODevice()->getGmmHelper();
-    auto decanonizedAddress = gmmHelper->decanonize(address);
-    bool validAddress = gmmHelper->isValidCanonicalGpuAddress(address);
+bool DebugSessionImp::isValidGpuAddress(const zet_debug_memory_space_desc_t *desc) const {
 
-    if (address == decanonizedAddress || validAddress) {
-        return true;
+    if (desc->type == ZET_DEBUG_MEMORY_SPACE_TYPE_DEFAULT) {
+        auto gmmHelper = connectedDevice->getNEODevice()->getGmmHelper();
+        auto decanonizedAddress = gmmHelper->decanonize(desc->address);
+        bool validAddress = gmmHelper->isValidCanonicalGpuAddress(desc->address);
+
+        if (desc->address == decanonizedAddress || validAddress) {
+            return true;
+        }
+    } else if (desc->type == ZET_DEBUG_MEMORY_SPACE_TYPE_SLM) {
+        if (desc->address & (1 << slmAddressSpaceTag)) { // IGC sets bit 28 to identify SLM address
+            return true;
+        }
     }
+
     return false;
 }
 
 ze_result_t DebugSessionImp::validateThreadAndDescForMemoryAccess(ze_device_thread_t thread, const zet_debug_memory_space_desc_t *desc) {
-    if (!isValidGpuAddress(desc->address)) {
+    if (!isValidGpuAddress(desc)) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
@@ -1230,6 +1246,178 @@ ze_result_t DebugSessionImp::validateThreadAndDescForMemoryAccess(ze_device_thre
     if (status != ZE_RESULT_SUCCESS) {
         return status;
     }
+    return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t DebugSessionImp::waitForCmdReady(EuThread::ThreadId threadId, uint16_t retryCount) {
+    ze_result_t status;
+    SIP::sip_command sipCommand = {0};
+
+    for (uint16_t attempts = 0; attempts < retryCount; attempts++) {
+        status = cmdRegisterAccessHelper(threadId, sipCommand, false);
+        if (status != ZE_RESULT_SUCCESS) {
+            return status;
+        }
+
+        if (sipCommand.command == static_cast<uint32_t>(NEO::SipKernel::COMMAND::READY)) {
+            break;
+        }
+        NEO::sleep(std::chrono::microseconds(100));
+    }
+
+    if (sipCommand.command != static_cast<uint32_t>(NEO::SipKernel::COMMAND::READY)) {
+        return ZE_RESULT_ERROR_NOT_AVAILABLE;
+    }
+
+    return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t DebugSessionImp::readSLMMemory(EuThread::ThreadId threadId, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer) {
+    ze_result_t status;
+    SIP::sip_command sipCommand = {0};
+
+    status = waitForCmdReady(threadId, sipRetryCount);
+    if (status != ZE_RESULT_SUCCESS) {
+        return status;
+    }
+
+    uint64_t offset = desc->address & maxNBitValue(slmAddressSpaceTag);
+
+    // SIP accesses SLM in units of slmSendBytesSize at offset allignment of slmSendBytesSize
+    uint32_t frontPadding = offset % slmSendBytesSize;
+    uint64_t alignedOffset = offset - frontPadding;
+    uint32_t remainingSlmSendUnits = static_cast<uint32_t>(std::ceil(static_cast<float>(size) / slmSendBytesSize));
+
+    if ((size + frontPadding) > (remainingSlmSendUnits * slmSendBytesSize)) {
+        remainingSlmSendUnits++;
+    }
+
+    uint32_t loops = static_cast<uint32_t>(std::ceil(static_cast<float>(remainingSlmSendUnits) / maxUnitsPerLoop));
+
+    std::unique_ptr<char[]> tmpBuffer(new char[remainingSlmSendUnits * slmSendBytesSize]);
+    uint32_t readUnits = 0;
+    uint32_t bytesAlreadyRead = 0;
+
+    sipCommand.offset = alignedOffset;
+
+    for (uint32_t loop = 0; loop < loops; loop++) {
+
+        if (remainingSlmSendUnits >= maxUnitsPerLoop) {
+            readUnits = maxUnitsPerLoop;
+        } else {
+            readUnits = remainingSlmSendUnits;
+        }
+
+        sipCommand.command = static_cast<uint32_t>(NEO::SipKernel::COMMAND::SLM_READ);
+        sipCommand.size = static_cast<uint32_t>(readUnits);
+
+        status = cmdRegisterAccessHelper(threadId, sipCommand, true);
+        if (status != ZE_RESULT_SUCCESS) {
+            return status;
+        }
+
+        status = resumeImp(std::vector<EuThread::ThreadId>{threadId}, threadId.tileIndex);
+        if (status != ZE_RESULT_SUCCESS) {
+            return status;
+        }
+
+        status = waitForCmdReady(threadId, sipRetryCount);
+        if (status != ZE_RESULT_SUCCESS) {
+            return status;
+        }
+
+        status = cmdRegisterAccessHelper(threadId, sipCommand, false);
+        if (status != ZE_RESULT_SUCCESS) {
+            return status;
+        }
+
+        memcpy_s(tmpBuffer.get() + bytesAlreadyRead, readUnits * slmSendBytesSize, sipCommand.buffer, readUnits * slmSendBytesSize);
+
+        remainingSlmSendUnits -= readUnits;
+        bytesAlreadyRead += readUnits * slmSendBytesSize;
+        sipCommand.offset += readUnits * slmSendBytesSize;
+    }
+
+    memcpy_s(buffer, size, tmpBuffer.get() + frontPadding, size);
+
+    return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t DebugSessionImp::writeSLMMemory(EuThread::ThreadId threadId, const zet_debug_memory_space_desc_t *desc, size_t size, const void *buffer) {
+    ze_result_t status;
+    SIP::sip_command sipCommand = {0};
+
+    uint64_t offset = desc->address & maxNBitValue(slmAddressSpaceTag);
+    // SIP accesses SLM in units of slmSendBytesSize at offset allignment of slmSendBytesSize
+    uint32_t frontPadding = offset % slmSendBytesSize;
+    uint64_t alignedOffset = offset - frontPadding;
+    uint32_t remainingSlmSendUnits = static_cast<uint32_t>(std::ceil(static_cast<float>(size) / slmSendBytesSize));
+    size_t tailPadding = (size % slmSendBytesSize) ? slmSendBytesSize - (size % slmSendBytesSize) : 0;
+
+    if ((size + frontPadding) > (remainingSlmSendUnits * slmSendBytesSize)) {
+        remainingSlmSendUnits++;
+    }
+
+    std::unique_ptr<char[]> tmpBuffer(new char[remainingSlmSendUnits * slmSendBytesSize]);
+
+    if ((frontPadding || tailPadding)) {
+
+        zet_debug_memory_space_desc_t alignedDesc = *desc;
+        alignedDesc.address = desc->address - frontPadding;
+        size_t alignedSize = remainingSlmSendUnits * slmSendBytesSize;
+
+        status = readSLMMemory(threadId, &alignedDesc, alignedSize, tmpBuffer.get());
+        if (status != ZE_RESULT_SUCCESS) {
+            return status;
+        }
+    }
+
+    memcpy_s(tmpBuffer.get() + frontPadding, size, buffer, size);
+
+    status = waitForCmdReady(threadId, sipRetryCount);
+    if (status != ZE_RESULT_SUCCESS) {
+        return status;
+    }
+
+    uint32_t loops = static_cast<uint32_t>(std::ceil(static_cast<float>(remainingSlmSendUnits) / maxUnitsPerLoop));
+
+    uint32_t writeUnits = 0;
+    uint32_t bytesAlreadyWritten = 0;
+
+    sipCommand.offset = alignedOffset;
+
+    for (uint32_t loop = 0; loop < loops; loop++) {
+
+        if (remainingSlmSendUnits >= maxUnitsPerLoop) {
+            writeUnits = maxUnitsPerLoop;
+        } else {
+            writeUnits = remainingSlmSendUnits;
+        }
+
+        sipCommand.command = static_cast<uint32_t>(NEO::SipKernel::COMMAND::SLM_WRITE);
+        sipCommand.size = static_cast<uint32_t>(writeUnits);
+        memcpy_s(sipCommand.buffer, writeUnits * slmSendBytesSize, tmpBuffer.get() + bytesAlreadyWritten, writeUnits * slmSendBytesSize);
+
+        status = cmdRegisterAccessHelper(threadId, sipCommand, true);
+        if (status != ZE_RESULT_SUCCESS) {
+            return status;
+        }
+
+        status = resumeImp(std::vector<EuThread::ThreadId>{threadId}, threadId.tileIndex);
+        if (status != ZE_RESULT_SUCCESS) {
+            return status;
+        }
+
+        status = waitForCmdReady(threadId, sipRetryCount);
+        if (status != ZE_RESULT_SUCCESS) {
+            return status;
+        }
+
+        remainingSlmSendUnits -= writeUnits;
+        bytesAlreadyWritten += writeUnits * slmSendBytesSize;
+        sipCommand.offset += writeUnits * slmSendBytesSize;
+    }
+
     return ZE_RESULT_SUCCESS;
 }
 

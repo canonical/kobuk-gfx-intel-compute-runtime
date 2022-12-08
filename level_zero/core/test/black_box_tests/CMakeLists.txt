@@ -54,6 +54,7 @@ set(TEST_TARGETS
     zello_world_gpu
     zello_world_jitc_ocloc
     zello_world_usm
+    zello_fabric
 )
 
 include_directories(common)
@@ -64,6 +65,9 @@ foreach(TEST_NAME ${TEST_TARGETS})
       continue()
     endif()
     if(${TEST_NAME} STREQUAL "zello_ipc_copy_dma_buf_p2p")
+      continue()
+    endif()
+    if(${TEST_NAME} STREQUAL "zello_export_import_memory")
       continue()
     endif()
   endif()

@@ -2977,7 +2977,8 @@ TEST_F(KernelMultiRootDeviceTest, givenKernelWithPrivateSurfaceWhenInitializeThe
     }
 }
 
-TEST(KernelCreateTest, whenInitFailedThenReturnNull) {
+class KernelCreateTest : public ::testing::Test {
+  protected:
     struct MockProgram {
         ClDeviceVector getDevices() {
             ClDeviceVector deviceVector;
@@ -2986,17 +2987,64 @@ TEST(KernelCreateTest, whenInitFailedThenReturnNull) {
         }
         void getSource(std::string &) {}
         MockClDevice mDevice{new MockDevice};
-    } mockProgram;
+    };
+
     struct MockKernel {
         MockKernel(MockProgram *, const KernelInfo &, ClDevice &) {}
         int initialize() { return -1; };
     };
 
-    KernelInfo info;
+    MockProgram mockProgram{};
+};
+
+TEST_F(KernelCreateTest, whenInitFailedThenReturnNull) {
+    KernelInfo info{};
     info.kernelDescriptor.kernelAttributes.gpuPointerSize = 8;
 
     auto ret = Kernel::create<MockKernel>(&mockProgram, info, mockProgram.mDevice, nullptr);
     EXPECT_EQ(nullptr, ret);
+}
+
+TEST_F(KernelCreateTest, whenSlmSizeExceedsLocalMemorySizeThenDebugMsgErrIsPrintedAndOutOfResourcesIsReturned) {
+    DebugManagerStateRestore dbgRestorer;
+    DebugManager.flags.PrintDebugMessages.set(true);
+
+    KernelInfo info{};
+    cl_int retVal{};
+
+    ::testing::internal::CaptureStderr();
+
+    auto localMemSize = static_cast<uint32_t>(mockProgram.mDevice.getDevice().getDeviceInfo().localMemSize);
+
+    info.kernelDescriptor.kernelAttributes.slmInlineSize = localMemSize - 10u;
+    auto ret = Kernel::create<MockKernel>(&mockProgram, info, mockProgram.mDevice, &retVal);
+    EXPECT_EQ(nullptr, ret);
+    EXPECT_NE(CL_OUT_OF_RESOURCES, retVal);
+
+    std::string output = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(std::string(""), output);
+
+    ::testing::internal::CaptureStderr();
+
+    retVal = 0;
+
+    info.kernelDescriptor.kernelAttributes.slmInlineSize = localMemSize + 10u;
+    ret = Kernel::create<MockKernel>(&mockProgram, info, mockProgram.mDevice, &retVal);
+    EXPECT_EQ(nullptr, ret);
+    EXPECT_EQ(CL_OUT_OF_RESOURCES, retVal);
+
+    output = testing::internal::GetCapturedStderr();
+    const auto &slmInlineSize = info.kernelDescriptor.kernelAttributes.slmInlineSize;
+    std::string expectedOutput = "Size of SLM (" + std::to_string(slmInlineSize) + ") larger than available (" + std::to_string(localMemSize) + ")\n";
+    EXPECT_EQ(expectedOutput, output);
+
+    ::testing::internal::CaptureStderr();
+
+    ret = Kernel::create<MockKernel>(&mockProgram, info, mockProgram.mDevice, nullptr);
+    EXPECT_EQ(nullptr, ret);
+
+    output = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(expectedOutput, output);
 }
 
 TEST(MultiDeviceKernelCreateTest, whenInitFailedThenReturnNullAndPropagateErrorCode) {
@@ -3300,4 +3348,28 @@ TEST(KernelTest, givenKernelWithNumThreadsRequiredPatchTokenWhenQueryingEuThread
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(sizeof(cl_uint), paramRetSize);
     EXPECT_EQ(123U, euThreadCount);
+}
+
+HWTEST2_F(KernelTest, GivenInlineSamplersWhenSettingInlineSamplerThenDshIsPatched, SupportsSampler) {
+    auto device = clUniquePtr(new MockClDevice(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get())));
+    MockKernelWithInternals kernel(*device);
+
+    auto &inlineSampler = kernel.kernelInfo.kernelDescriptor.inlineSamplers.emplace_back();
+    inlineSampler.addrMode = NEO::KernelDescriptor::InlineSampler::AddrMode::Repeat;
+    inlineSampler.filterMode = NEO::KernelDescriptor::InlineSampler::FilterMode::Nearest;
+    inlineSampler.isNormalized = false;
+
+    std::array<uint8_t, 64 + 16> dsh = {0};
+    kernel.kernelInfo.heapInfo.pDsh = dsh.data();
+    kernel.kernelInfo.heapInfo.DynamicStateHeapSize = static_cast<uint32_t>(dsh.size());
+    kernel.mockKernel->setInlineSamplers();
+
+    using SamplerState = typename FamilyType::SAMPLER_STATE;
+    auto samplerState = reinterpret_cast<const SamplerState *>(dsh.data() + 64U);
+    EXPECT_TRUE(samplerState->getNonNormalizedCoordinateEnable());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_WRAP, samplerState->getTcxAddressControlMode());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_WRAP, samplerState->getTcyAddressControlMode());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_WRAP, samplerState->getTczAddressControlMode());
+    EXPECT_EQ(SamplerState::MIN_MODE_FILTER_NEAREST, samplerState->getMinModeFilter());
+    EXPECT_EQ(SamplerState::MAG_MODE_FILTER_NEAREST, samplerState->getMagModeFilter());
 }

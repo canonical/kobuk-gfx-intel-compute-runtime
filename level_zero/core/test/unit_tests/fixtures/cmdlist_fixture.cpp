@@ -94,7 +94,7 @@ void ModuleMutableCommandListFixture::setUp(uint32_t revision) {
                                                      false,
                                                      returnValue));
 
-    NEO::EngineGroupType engineGroupType = NEO::HwHelper::get(device->getHwInfo().platform.eRenderCoreFamily).getEngineGroupType(neoDevice->getDefaultEngine().getEngineType(), neoDevice->getDefaultEngine().getEngineUsage(), device->getHwInfo());
+    engineGroupType = NEO::HwHelper::get(device->getHwInfo().platform.eRenderCoreFamily).getEngineGroupType(neoDevice->getDefaultEngine().getEngineType(), neoDevice->getDefaultEngine().getEngineUsage(), device->getHwInfo());
 
     commandList.reset(whiteboxCast(CommandList::create(productFamily, device, engineGroupType, 0u, returnValue)));
     commandListImmediate.reset(whiteboxCast(CommandList::createImmediate(productFamily, device, &queueDesc, false, engineGroupType, returnValue)));
@@ -117,12 +117,23 @@ void ModuleMutableCommandListFixture::tearDown() {
 }
 
 void MultiReturnCommandListFixture::setUp() {
-    DebugManager.flags.MultiReturnPointCommandList.set(1);
+    DebugManager.flags.EnableFrontEndTracking.set(1);
     ModuleMutableCommandListFixture::setUp(REVISION_B);
 }
 
 void CmdListPipelineSelectStateFixture::setUp() {
     DebugManager.flags.EnablePipelineSelectTracking.set(1);
+    ModuleMutableCommandListFixture::setUp();
+}
+
+void CmdListStateComputeModeStateFixture::setUp() {
+    DebugManager.flags.EnableStateComputeModeTracking.set(1);
+    ModuleMutableCommandListFixture::setUp();
+}
+
+void ImmediateCmdListSharedHeapsFixture::setUp() {
+    DebugManager.flags.EnableFlushTaskSubmission.set(1);
+    DebugManager.flags.EnableImmediateCmdListHeapSharing.set(1);
     ModuleMutableCommandListFixture::setUp();
 }
 

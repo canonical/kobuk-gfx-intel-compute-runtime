@@ -7,6 +7,7 @@
 
 #pragma once
 #include "shared/source/debugger/debugger_l0.h"
+#include "shared/source/helpers/topology_map.h"
 #include "shared/source/os_interface/os_thread.h"
 
 #include "level_zero/tools/source/debug/eu_thread.h"
@@ -25,12 +26,11 @@ struct DebugSession : _zet_debug_session_handle_t {
     virtual ~DebugSession() = default;
     DebugSession() = delete;
 
-    static DebugSession *create(const zet_debug_config_t &config, Device *device, ze_result_t &result);
+    static DebugSession *create(const zet_debug_config_t &config, Device *device, ze_result_t &result, bool isRootAttach);
 
     static DebugSession *fromHandle(zet_debug_session_handle_t handle) { return static_cast<DebugSession *>(handle); }
     inline zet_debug_session_handle_t toHandle() { return this; }
 
-    void createEuThreads();
     virtual bool closeConnection() = 0;
     virtual ze_result_t initialize() = 0;
 
@@ -74,6 +74,8 @@ struct DebugSession : _zet_debug_session_handle_t {
 
     static void printBitmask(uint8_t *bitmask, size_t bitmaskSize);
 
+    MOCKABLE_VIRTUAL const NEO::TopologyMap &getTopologyMap();
+
     virtual uint32_t getDeviceIndexFromApiThread(ze_device_thread_t thread);
     virtual ze_device_thread_t convertToPhysicalWithinDevice(ze_device_thread_t thread, uint32_t deviceIndex);
     virtual EuThread::ThreadId convertToThreadId(ze_device_thread_t thread);
@@ -84,6 +86,11 @@ struct DebugSession : _zet_debug_session_handle_t {
     virtual DebugSession *attachTileDebugSession(Device *device) = 0;
     virtual void detachTileDebugSession(DebugSession *tileSession) = 0;
     virtual bool areAllTileDebugSessionDetached() = 0;
+
+    virtual void setAttachMode(bool isRootAttach) = 0;
+    void setAttached() { attached = true; }
+    void setDetached() { attached = false; }
+    bool isAttached() { return attached; }
 
     struct ThreadHelper {
         void close() {
@@ -105,6 +112,8 @@ struct DebugSession : _zet_debug_session_handle_t {
 
   protected:
     DebugSession(const zet_debug_config_t &config, Device *device);
+    void createEuThreads();
+
     virtual void startAsyncThread() = 0;
 
     virtual bool isBindlessSystemRoutine();
@@ -121,6 +130,7 @@ struct DebugSession : _zet_debug_session_handle_t {
 
     Device *connectedDevice = nullptr;
     std::map<uint64_t, std::unique_ptr<EuThread>> allThreads;
+    bool attached = false;
 };
 
 } // namespace L0

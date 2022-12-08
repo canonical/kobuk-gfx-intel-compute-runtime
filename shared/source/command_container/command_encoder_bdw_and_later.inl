@@ -17,7 +17,6 @@
 #include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/helpers/simd_helper.h"
 #include "shared/source/helpers/state_base_address.h"
-#include "shared/source/helpers/state_base_address_bdw_and_later.inl"
 #include "shared/source/kernel/dispatch_kernel_encoder_interface.h"
 #include "shared/source/kernel/implicit_args.h"
 
@@ -105,13 +104,13 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
 
     PreemptionHelper::programInterfaceDescriptorDataPreemption<Family>(&idd, args.preemptionMode);
 
-    auto heap = ApiSpecificConfig::getBindlessConfiguration() ? args.device->getBindlessHeapsHelper()->getHeap(BindlessHeapsHelper::GLOBAL_DSH) : container.getIndirectHeap(HeapType::DYNAMIC_STATE);
-    UNRECOVERABLE_IF(!heap);
-
     uint32_t samplerStateOffset = 0;
     uint32_t samplerCount = 0;
 
     if (kernelDescriptor.payloadMappings.samplerTable.numSamplers > 0) {
+        auto heap = ApiSpecificConfig::getBindlessConfiguration() ? args.device->getBindlessHeapsHelper()->getHeap(BindlessHeapsHelper::GLOBAL_DSH) : container.getIndirectHeap(HeapType::DYNAMIC_STATE);
+        UNRECOVERABLE_IF(!heap);
+
         samplerCount = kernelDescriptor.payloadMappings.samplerTable.numSamplers;
         samplerStateOffset = EncodeStates<Family>::copySamplerState(heap, kernelDescriptor.payloadMappings.samplerTable.tableOffset,
                                                                     kernelDescriptor.payloadMappings.samplerTable.numSamplers,
@@ -136,8 +135,12 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
         auto heapIndirect = container.getIndirectHeap(HeapType::INDIRECT_OBJECT);
         UNRECOVERABLE_IF(!(heapIndirect));
         heapIndirect->align(WALKER_TYPE::INDIRECTDATASTARTADDRESS_ALIGN_SIZE);
-
-        auto ptr = container.getHeapSpaceAllowGrow(HeapType::INDIRECT_OBJECT, iohRequiredSize);
+        void *ptr = nullptr;
+        if (args.isKernelDispatchedFromImmediateCmdList) {
+            ptr = container.getHeapWithRequiredSizeAndAlignment(HeapType::INDIRECT_OBJECT, iohRequiredSize, WALKER_TYPE::INDIRECTDATASTARTADDRESS_ALIGN_SIZE)->getSpace(iohRequiredSize);
+        } else {
+            ptr = container.getHeapSpaceAllowGrow(HeapType::INDIRECT_OBJECT, iohRequiredSize);
+        }
         UNRECOVERABLE_IF(!(ptr));
         offsetThreadData = heapIndirect->getHeapGpuStartOffset() + static_cast<uint64_t>(heapIndirect->getUsed() - sizeThreadData);
 
@@ -169,7 +172,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
 
     if (flush) {
         PipeControlArgs syncArgs;
-        syncArgs.dcFlushEnable = MemorySynchronizationCommands<Family>::getDcFlushEnable(true, hwInfo);
+        syncArgs.dcFlushEnable = args.dcFlushEnable;
         if (dirtyHeaps) {
             syncArgs.hdcPipelineFlush = true;
         }
@@ -204,8 +207,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
     }
 
     uint32_t numIDD = 0u;
-    void *ptr = getInterfaceDescriptor(container, numIDD);
-    memcpy_s(ptr, sizeof(idd), &idd, sizeof(idd));
+    void *iddPtr = getInterfaceDescriptor(container, numIDD, hwInfo);
 
     cmd.setIndirectDataStartAddress(static_cast<uint32_t>(offsetThreadData));
     cmd.setIndirectDataLength(sizeThreadData);
@@ -233,6 +235,8 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
 
     auto threadGroupCount = cmd.getThreadGroupIdXDimension() * cmd.getThreadGroupIdYDimension() * cmd.getThreadGroupIdZDimension();
     EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(idd, hwInfo, threadGroupCount, kernelDescriptor.kernelAttributes.numGrfRequired);
+
+    memcpy_s(iddPtr, sizeof(idd), &idd, sizeof(idd));
 
     if (NEO::PauseOnGpuProperties::pauseModeAllowed(NEO::DebugManager.flags.PauseOnEnqueue.get(), args.device->debugExecutionCounter.load(), NEO::PauseOnGpuProperties::PauseMode::BeforeWorkload)) {
         void *commandBuffer = listCmdBufferStream->getSpace(MemorySynchronizationCommands<Family>::getSizeForBarrierWithPostSyncOperation(hwInfo, false));
@@ -463,9 +467,9 @@ inline void EncodeWA<GfxFamily>::addPipeControlPriorToNonPipelinedStateCommand(L
 
 template <typename GfxFamily>
 inline void EncodeWA<GfxFamily>::addPipeControlBeforeStateBaseAddress(LinearStream &commandStream,
-                                                                      const HardwareInfo &hwInfo, bool isRcs) {
+                                                                      const HardwareInfo &hwInfo, bool isRcs, bool dcFlushRequired) {
     PipeControlArgs args;
-    args.dcFlushEnable = MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo);
+    args.dcFlushEnable = dcFlushRequired;
     args.textureCacheInvalidationEnable = true;
 
     NEO::EncodeWA<GfxFamily>::addPipeControlPriorToNonPipelinedStateCommand(commandStream, args, hwInfo, isRcs);
@@ -535,9 +539,14 @@ inline void EncodeMiArbCheck<Family>::adjust(MI_ARB_CHECK &miArbCheck) {
 }
 
 template <typename Family>
-void EncodeDispatchKernel<Family>::setupPostSyncMocs(WALKER_TYPE &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment) {}
+void EncodeDispatchKernel<Family>::setupPostSyncMocs(WALKER_TYPE &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment, bool dcFlush) {}
 
 template <typename Family>
 void EncodeDispatchKernel<Family>::adjustWalkOrder(WALKER_TYPE &walkerCmd, uint32_t requiredWorkGroupOrder, const HardwareInfo &hwInfo) {}
+
+template <typename Family>
+uint32_t EncodeDispatchKernel<Family>::additionalSizeRequiredDsh() {
+    return sizeof(typename Family::INTERFACE_DESCRIPTOR_DATA);
+}
 
 } // namespace NEO

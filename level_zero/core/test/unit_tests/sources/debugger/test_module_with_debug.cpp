@@ -197,8 +197,9 @@ TEST_F(ModuleWithSLDTest, GivenNoDebugDataWhenInitializingModuleThenRelocatedDeb
     module->translationUnit->programInfo.kernelInfos.push_back(kernelInfo);
 
     EXPECT_EQ(nullptr, module->translationUnit->debugData.get());
-    auto result = module->initialize(&moduleDesc, neoDevice);
-    EXPECT_TRUE(result);
+    ze_result_t result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+    result = module->initialize(&moduleDesc, neoDevice);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
 
     EXPECT_EQ(nullptr, kernelInfo->kernelDescriptor.external.relocatedDebugData);
 }
@@ -245,8 +246,9 @@ TEST_F(ModuleWithSLDTest, GivenDebugDataWithSingleRelocationWhenInitializingModu
     kernelInfo->kernelDescriptor.external.debugData->genIsa = nullptr;
     kernelInfo->kernelDescriptor.external.debugData->genIsaSize = 0;
 
-    auto result = moduleMock->initialize(&moduleDesc, neoDevice);
-    EXPECT_TRUE(result);
+    ze_result_t result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+    result = moduleMock->initialize(&moduleDesc, neoDevice);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
 
     EXPECT_EQ(nullptr, kernelInfo->kernelDescriptor.external.relocatedDebugData);
 }
@@ -290,9 +292,9 @@ TEST_F(ModuleWithSLDTest, GivenDebugDataWithMultipleRelocationsWhenInitializingM
     kernelInfo->kernelDescriptor.external.debugData->genIsaSize = 0;
 
     EXPECT_EQ(nullptr, kernelInfo->kernelDescriptor.external.relocatedDebugData);
-
-    auto result = moduleMock->initialize(&moduleDesc, neoDevice);
-    EXPECT_TRUE(result);
+    ze_result_t result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+    result = moduleMock->initialize(&moduleDesc, neoDevice);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
 
     EXPECT_NE(nullptr, kernelInfo->kernelDescriptor.external.relocatedDebugData);
 }
@@ -461,8 +463,7 @@ HWTEST_F(ModuleWithDebuggerL0MultiTileTest, GivenSubDeviceWhenCreatingModuleThen
     kernelInfo->kernelDescriptor.external.debugData->vIsa = reinterpret_cast<char *>(debugData.data());
     kernelInfo->kernelDescriptor.external.debugData->genIsa = nullptr;
     kernelInfo->kernelDescriptor.external.debugData->genIsaSize = 0;
-
-    EXPECT_TRUE(moduleMock->initialize(&moduleDesc, subDevice0->getNEODevice()));
+    EXPECT_EQ(moduleMock->initialize(&moduleDesc, subDevice0->getNEODevice()), ZE_RESULT_SUCCESS);
 
     auto debuggerL0Hw = static_cast<MockDebuggerL0Hw<FamilyType> *>(device->getL0Debugger());
     EXPECT_EQ(1u, debuggerL0Hw->notifyModuleCreateCount);
@@ -508,7 +509,7 @@ HWTEST_F(ModuleWithDebuggerL0Test, GivenDebugDataWithRelocationsWhenInitializing
     kernelInfo->kernelDescriptor.external.debugData->genIsaSize = 0;
 
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
-    EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
+    EXPECT_EQ(moduleMock->initialize(&moduleDesc, neoDevice), ZE_RESULT_SUCCESS);
     EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
     EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleCreateCount);
 
@@ -559,7 +560,7 @@ HWTEST_F(ModuleWithDebuggerL0Test, GivenDebugDataWithoutRelocationsWhenInitializ
     kernelInfo->kernelDescriptor.external.debugData->genIsaSize = 0;
 
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
-    EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
+    EXPECT_EQ(moduleMock->initialize(&moduleDesc, neoDevice), ZE_RESULT_SUCCESS);
     EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
     EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleCreateCount);
 
@@ -596,7 +597,7 @@ HWTEST_F(ModuleWithDebuggerL0Test, GivenNoDebugDataWhenInitializingModuleThenDoN
     moduleMock->translationUnit->programInfo.kernelInfos.push_back(kernelInfo);
 
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
-    EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
+    EXPECT_EQ(moduleMock->initialize(&moduleDesc, neoDevice), ZE_RESULT_SUCCESS);
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
     EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleCreateCount);
 }
@@ -617,7 +618,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinDebugDataWhenInitializingMo
     auto kernelInfo = std::make_unique<KernelInfo>();
     kernelInfo->heapInfo.KernelHeapSize = 1;
     kernelInfo->heapInfo.pKernelHeap = &kernelHeap;
-    kernelInfo->kernelDescriptor.kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram::kernelName;
+    kernelInfo->kernelDescriptor.kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram<>::kernelName;
 
     auto kernelImmutableData = ::std::make_unique<KernelImmutableData>(device);
     kernelImmutableData->initialize(kernelInfo.get(), device, 0, nullptr, nullptr, false);
@@ -629,14 +630,14 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinDebugDataWhenInitializingMo
     kernelImmutableData->initialize(kernelInfo.get(), device, 0, nullptr, nullptr, false);
     moduleMock->kernelImmDatas.push_back(std::move(kernelImmutableData));
 
-    auto zebin = ZebinTestData::ValidEmptyProgram();
+    auto zebin = ZebinTestData::ValidEmptyProgram<>();
     moduleMock->translationUnit = std::make_unique<MockModuleTranslationUnit>(device);
     moduleMock->translationUnit->unpackedDeviceBinarySize = zebin.storage.size();
     moduleMock->translationUnit->unpackedDeviceBinary.reset(new char[zebin.storage.size()]);
     memcpy_s(moduleMock->translationUnit->unpackedDeviceBinary.get(), moduleMock->translationUnit->unpackedDeviceBinarySize,
              zebin.storage.data(), zebin.storage.size());
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
-    EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
+    EXPECT_EQ(moduleMock->initialize(&moduleDesc, neoDevice), ZE_RESULT_SUCCESS);
     EXPECT_EQ(2u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
     EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleCreateCount);
 }
@@ -656,7 +657,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinNoDebugDataWhenInitializing
     moduleMock->translationUnit = std::make_unique<MockModuleTranslationUnit>(device);
 
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
-    EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
+    EXPECT_EQ(moduleMock->initialize(&moduleDesc, neoDevice), ZE_RESULT_SUCCESS);
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->registerElfCount);
     EXPECT_EQ(0u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleCreateCount);
 }
@@ -675,7 +676,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinWhenModuleIsInitializedAndD
     auto kernelInfo = std::make_unique<KernelInfo>();
     kernelInfo->heapInfo.KernelHeapSize = 1;
     kernelInfo->heapInfo.pKernelHeap = &kernelHeap;
-    kernelInfo->kernelDescriptor.kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram::kernelName;
+    kernelInfo->kernelDescriptor.kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram<>::kernelName;
 
     auto kernelImmutableData = ::std::make_unique<KernelImmutableData>(device);
     kernelImmutableData->initialize(kernelInfo.get(), device, 0, nullptr, nullptr, false);
@@ -683,7 +684,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinWhenModuleIsInitializedAndD
     moduleMock->translationUnit = std::make_unique<MockModuleTranslationUnit>(device);
     moduleMock->kernelImmDatas.push_back(std::move(kernelImmutableData));
 
-    auto zebin = ZebinTestData::ValidEmptyProgram();
+    auto zebin = ZebinTestData::ValidEmptyProgram<>();
     moduleMock->translationUnit = std::make_unique<MockModuleTranslationUnit>(device);
     moduleMock->translationUnit->unpackedDeviceBinarySize = zebin.storage.size();
     moduleMock->translationUnit->unpackedDeviceBinary.reset(new char[zebin.storage.size()]);
@@ -691,7 +692,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenZebinWhenModuleIsInitializedAndD
              zebin.storage.data(), zebin.storage.size());
 
     getMockDebuggerL0Hw<FamilyType>()->moduleHandleToReturn = 6;
-    EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
+    EXPECT_EQ(moduleMock->initialize(&moduleDesc, neoDevice), ZE_RESULT_SUCCESS);
 
     auto expectedSegmentAllocationCount = 1u;
     expectedSegmentAllocationCount += moduleMock->translationUnit->globalConstBuffer != nullptr ? 1 : 0;
@@ -749,7 +750,7 @@ HWTEST_F(ModuleWithDebuggerL0Test, GivenNonZebinBinaryWhenDestroyModuleThenModul
     kernelInfo->kernelDescriptor.external.debugData->genIsa = nullptr;
     kernelInfo->kernelDescriptor.external.debugData->genIsaSize = 0;
 
-    EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
+    EXPECT_EQ(moduleMock->initialize(&moduleDesc, neoDevice), ZE_RESULT_SUCCESS);
     moduleMock->destroy();
     moduleMock.release();
     EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleDestroyCount);
@@ -783,7 +784,7 @@ HWTEST_F(ModuleWithDebuggerL0Test, GivenNoDebugDataWhenDestroyingModuleThenNotif
     moduleMock->kernelImmData = &kernelMock.immutableData;
     moduleMock->translationUnit->programInfo.kernelInfos.push_back(kernelInfo);
 
-    EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
+    EXPECT_EQ(moduleMock->initialize(&moduleDesc, neoDevice), ZE_RESULT_SUCCESS);
     moduleMock->destroy();
     moduleMock.release();
     EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->notifyModuleDestroyCount);
@@ -803,7 +804,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenModuleDebugHandleZeroWhenInitial
     auto kernelInfo = std::make_unique<KernelInfo>();
     kernelInfo->heapInfo.KernelHeapSize = 1;
     kernelInfo->heapInfo.pKernelHeap = &kernelHeap;
-    kernelInfo->kernelDescriptor.kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram::kernelName;
+    kernelInfo->kernelDescriptor.kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram<>::kernelName;
 
     auto kernelImmutableData = ::std::make_unique<KernelImmutableData>(device);
     kernelImmutableData->initialize(kernelInfo.get(), device, 0, nullptr, nullptr, false);
@@ -811,7 +812,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenModuleDebugHandleZeroWhenInitial
     moduleMock->translationUnit = std::make_unique<MockModuleTranslationUnit>(device);
     moduleMock->kernelImmDatas.push_back(std::move(kernelImmutableData));
 
-    auto zebin = ZebinTestData::ValidEmptyProgram();
+    auto zebin = ZebinTestData::ValidEmptyProgram<>();
     moduleMock->translationUnit = std::make_unique<MockModuleTranslationUnit>(device);
     moduleMock->translationUnit->unpackedDeviceBinarySize = zebin.storage.size();
     moduleMock->translationUnit->unpackedDeviceBinary.reset(new char[zebin.storage.size()]);
@@ -819,7 +820,7 @@ HWTEST_F(ModuleWithZebinAndL0DebuggerTest, GivenModuleDebugHandleZeroWhenInitial
              zebin.storage.data(), zebin.storage.size());
 
     getMockDebuggerL0Hw<FamilyType>()->moduleHandleToReturn = 0u;
-    EXPECT_TRUE(moduleMock->initialize(&moduleDesc, neoDevice));
+    EXPECT_EQ(moduleMock->initialize(&moduleDesc, neoDevice), ZE_RESULT_SUCCESS);
 
     EXPECT_EQ(1u, getMockDebuggerL0Hw<FamilyType>()->segmentCountWithAttachedModuleHandle);
     EXPECT_EQ(getMockDebuggerL0Hw<FamilyType>()->moduleHandleToReturn, moduleMock->debugModuleHandle);

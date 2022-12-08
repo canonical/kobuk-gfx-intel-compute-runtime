@@ -126,7 +126,6 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
                                                                                Event *event,
                                                                                const CmdListKernelLaunchParams &launchParams) {
 
-    const auto &hwInfo = this->device->getHwInfo();
     if (NEO::DebugManager.flags.ForcePipeControlPriorToWalker.get()) {
         NEO::PipeControlArgs args;
         NEO::MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(*commandContainer.getCommandStream(), args);
@@ -138,6 +137,16 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     auto &kernelDescriptor = kernel->getKernelDescriptor();
     if (kernelDescriptor.kernelAttributes.flags.isInvalid) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+    if (this->immediateCmdListHeapSharing) {
+        auto kernelInfo = kernelImmutableData->getKernelInfo();
+        size_t dshSize = 0;
+        if constexpr (GfxFamily::supportsSampler) {
+            dshSize = NEO::EncodeDispatchKernel<GfxFamily>::getSizeRequiredDsh(*kernelInfo);
+        }
+        commandContainer.ensureHeapSizePrepared(
+            NEO::EncodeDispatchKernel<GfxFamily>::getSizeRequiredSsh(*kernelInfo),
+            dshSize);
     }
     commandListPerThreadScratchSize = std::max<uint32_t>(commandListPerThreadScratchSize, kernelDescriptor.kernelAttributes.perThreadScratchSize[0]);
     commandListPerThreadPrivateScratchSize = std::max<uint32_t>(commandListPerThreadPrivateScratchSize, kernelDescriptor.kernelAttributes.perThreadScratchSize[1]);
@@ -164,7 +173,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         commandContainer.addToResidencyContainer(eventAlloc);
         bool flushRequired = !!event->signalScope &&
                              !launchParams.isKernelSplitOperation;
-        l3FlushEnable = NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(flushRequired, hwInfo);
+        l3FlushEnable = getDcFlushRequired(flushRequired);
         isTimestampEvent = event->isUsingContextEndOffset();
         eventAddress = event->getPacketAddress(this->device);
         isHostSignalScopeEvent = !!(event->signalScope & ZE_EVENT_SCOPE_FLAG_HOST);
@@ -231,6 +240,13 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     this->containsStatelessUncachedResource |= kernelImp->getKernelRequiresUncachedMocs();
     this->requiresQueueUncachedMocs |= kernelImp->getKernelRequiresQueueUncachedMocs();
 
+    auto localMemSize = static_cast<uint32_t>(neoDevice->getDeviceInfo().localMemSize);
+    auto slmTotalSize = kernelImp->getSlmTotalSize();
+    if (slmTotalSize > 0 && localMemSize < slmTotalSize) {
+        PRINT_DEBUG_STRING(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "Size of SLM (%u) larger than available (%u)\n", slmTotalSize, localMemSize);
+        return ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY;
+    }
+
     std::list<void *> additionalCommands;
 
     NEO::EncodeDispatchKernelArgs dispatchKernelArgs{
@@ -251,7 +267,8 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         isHostSignalScopeEvent,                                   // isHostScopeSignalEvent
         isKernelUsingSystemAllocation,                            // isKernelUsingSystemAllocation
         cmdListType == CommandListType::TYPE_IMMEDIATE,           // isKernelDispatchedFromImmediateCmdList
-        engineGroupType == NEO::EngineGroupType::RenderCompute    // isRcs
+        engineGroupType == NEO::EngineGroupType::RenderCompute,   // isRcs
+        this->dcFlushSupport                                      // dcFlushEnable
     };
     NEO::EncodeDispatchKernel<GfxFamily>::encode(commandContainer, dispatchKernelArgs, getLogicalStateHelper());
     this->containsStatelessUncachedResource = dispatchKernelArgs.requiresUncachedMocs;
@@ -265,7 +282,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         }
     }
 
-    if (neoDevice->getDebugger()) {
+    if (neoDevice->getDebugger() && !this->immediateCmdListHeapSharing) {
         auto *ssh = commandContainer.getIndirectHeap(NEO::HeapType::SURFACE_STATE);
         auto surfaceStateSpace = neoDevice->getDebugger()->getDebugSurfaceReservedSurfaceState(*ssh);
         auto surfaceState = GfxFamily::cmdInitRenderSurfaceState;
@@ -405,8 +422,7 @@ void CommandListCoreFamily<gfxCoreFamily>::appendEventForProfilingAllWalkers(Eve
             if (beforeWalker) {
                 event->zeroKernelCount();
             } else {
-                const auto &hwInfo = this->device->getHwInfo();
-                if (NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(!!event->signalScope, hwInfo)) {
+                if (getDcFlushRequired(!!event->signalScope)) {
                     programEventL3Flush<gfxCoreFamily>(event, this->device, this->partitionCount, this->commandContainer);
                 }
             }

@@ -74,6 +74,8 @@ DirectSubmissionHw<GfxFamily, Dispatcher>::DirectSubmissionHw(const DirectSubmis
 
     createDiagnostic();
     setPostSyncOffset();
+
+    dcFlushRequired = MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, *hwInfo);
 }
 
 template <typename GfxFamily, typename Dispatcher>
@@ -155,6 +157,19 @@ bool DirectSubmissionHw<GfxFamily, Dispatcher>::makeResourcesResident(DirectSubm
     auto ret = memoryOperationHandler->makeResidentWithinOsContext(&this->osContext, ArrayRef<GraphicsAllocation *>(allocations), false) == MemoryOperationsStatus::SUCCESS;
 
     return ret;
+}
+
+template <typename GfxFamily, typename Dispatcher>
+inline void DirectSubmissionHw<GfxFamily, Dispatcher>::unblockGpu() {
+    if (sfenceMode >= DirectSubmissionSfenceMode::BeforeSemaphoreOnly) {
+        CpuIntrinsics::sfence();
+    }
+
+    semaphoreData->QueueWorkCount = currentQueueWorkCount;
+
+    if (sfenceMode == DirectSubmissionSfenceMode::BeforeAndAfterSemaphore) {
+        CpuIntrinsics::sfence();
+    }
 }
 
 template <typename GfxFamily, typename Dispatcher>
@@ -261,7 +276,8 @@ bool DirectSubmissionHw<GfxFamily, Dispatcher>::stopRingBuffer() {
     if (disableMonitorFence) {
         TagData currentTagData = {};
         getTagAddressValue(currentTagData);
-        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, *hwInfo, this->useNotifyForPostSync, this->partitionedMode);
+        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, *hwInfo,
+                                         this->useNotifyForPostSync, this->partitionedMode, this->dcFlushRequired);
     }
     Dispatcher::dispatchStopCommandBuffer(ringCommandStream);
 
@@ -270,8 +286,7 @@ bool DirectSubmissionHw<GfxFamily, Dispatcher>::stopRingBuffer() {
     EncodeNoop<GfxFamily>::alignToCacheLine(ringCommandStream);
 
     cpuCachelineFlush(flushPtr, getSizeEnd());
-
-    semaphoreData->QueueWorkCount = currentQueueWorkCount;
+    this->unblockGpu();
     cpuCachelineFlush(semaphorePtr, MemoryConstants::cacheLineSize);
 
     this->handleStopRingBuffer();
@@ -330,7 +345,8 @@ inline void DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchSwitchRingBufferS
     if (disableMonitorFence) {
         TagData currentTagData = {};
         getTagAddressValue(currentTagData);
-        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, *hwInfo, this->useNotifyForPostSync, this->partitionedMode);
+        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, *hwInfo,
+                                         this->useNotifyForPostSync, this->partitionedMode, this->dcFlushRequired);
     }
     Dispatcher::dispatchStartCommandBuffer(ringCommandStream, nextBufferGpuAddress);
 }
@@ -428,7 +444,8 @@ void *DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchWorkloadSection(BatchBu
     if (!disableMonitorFence) {
         TagData currentTagData = {};
         getTagAddressValue(currentTagData);
-        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, *hwInfo, this->useNotifyForPostSync, this->partitionedMode);
+        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, *hwInfo,
+                                         this->useNotifyForPostSync, this->partitionedMode, this->dcFlushRequired);
     }
 
     dispatchSemaphoreSection(currentQueueWorkCount + 1);
@@ -473,16 +490,7 @@ bool DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchCommandBuffer(BatchBuffe
         reserved = *ringBufferStart;
     }
 
-    if (sfenceMode >= DirectSubmissionSfenceMode::BeforeSemaphoreOnly) {
-        CpuIntrinsics::sfence();
-    }
-
-    //unblock GPU
-    semaphoreData->QueueWorkCount = currentQueueWorkCount;
-
-    if (sfenceMode == DirectSubmissionSfenceMode::BeforeAndAfterSemaphore) {
-        CpuIntrinsics::sfence();
-    }
+    this->unblockGpu();
 
     cpuCachelineFlush(semaphorePtr, MemoryConstants::cacheLineSize);
     currentQueueWorkCount++;

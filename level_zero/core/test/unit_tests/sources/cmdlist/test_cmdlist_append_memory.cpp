@@ -171,13 +171,14 @@ HWTEST2_F(AppendMemoryCopy, givenAsyncImmediateCommandListWhenAppendingMemoryCop
     commandList->device = device;
     commandList->cmdQImmediate = &cmdQueue;
     commandList->cmdListType = CommandList::CommandListType::TYPE_IMMEDIATE;
+    commandList->csr = device->getNEODevice()->getDefaultEngine().commandStreamReceiver;
 
     auto result = commandList->appendMemoryCopy(dstPtr, srcPtr, 8, nullptr, 0, nullptr);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
     EXPECT_EQ(1u, cmdQueue.executeCommandListsCalled);
     EXPECT_EQ(0u, cmdQueue.synchronizeCalled);
-
+    EXPECT_EQ(0u, commandList->commandContainer.getResidencyContainer().size());
     commandList->cmdQImmediate = nullptr;
 }
 
@@ -194,6 +195,7 @@ HWTEST2_F(AppendMemoryCopy, givenSyncModeImmediateCommandListWhenAppendingMemory
     commandList->cmdQImmediate = &cmdQueue;
     commandList->cmdListType = CommandList::CommandListType::TYPE_IMMEDIATE;
     commandList->isSyncModeQueue = true;
+    commandList->csr = device->getNEODevice()->getDefaultEngine().commandStreamReceiver;
 
     auto result = commandList->appendMemoryCopy(dstPtr, srcPtr, 8, nullptr, 0, nullptr);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);

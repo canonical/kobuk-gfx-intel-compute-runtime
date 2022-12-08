@@ -86,7 +86,8 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
         const LinearStream *dsh,
         const LinearStream *ioh,
         const LinearStream *ssh,
-        uint64_t generalStateBase);
+        uint64_t generalStateBase,
+        bool imagesSupported);
 
     void collectStateBaseAddresIohPatchInfo(uint64_t commandBufferAddress, uint64_t commandOffset, const LinearStream &ioh);
 
@@ -140,6 +141,13 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     }
     void initializeDeviceWithFirstSubmission() override;
 
+    HeapDirtyState &getDshState() {
+        return dshState;
+    }
+    HeapDirtyState &getSshState() {
+        return sshState;
+    }
+
   protected:
     void programPreemption(LinearStream &csr, DispatchFlags &dispatchFlags);
     void programL3(LinearStream &csr, uint32_t &newL3Config);
@@ -178,6 +186,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     constexpr bool isGlobalAtomicsProgrammingRequired(bool currentValue) const;
     void createKernelArgsBufferAllocation() override;
     void handleFrontEndStateTransition(DispatchFlags &dispatchFlags);
+    void handlePipelineSelectStateTransition(DispatchFlags &dispatchFlags);
 
     HeapDirtyState dshState;
     HeapDirtyState iohState;

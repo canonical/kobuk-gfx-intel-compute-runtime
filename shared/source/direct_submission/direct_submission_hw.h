@@ -107,6 +107,7 @@ class DirectSubmissionHw {
     GraphicsAllocation *switchRingBuffersAllocations();
     virtual uint64_t updateTagValue() = 0;
     virtual void getTagAddressValue(TagData &tagData) = 0;
+    void unblockGpu();
 
     void cpuCachelineFlush(void *ptr, size_t size);
 
@@ -203,5 +204,6 @@ class DirectSubmissionHw {
     bool systemMemoryFenceAddressSet = false;
     bool completionFenceSupported = false;
     bool isDisablePrefetcherRequired = false;
+    bool dcFlushRequired = false;
 };
 } // namespace NEO

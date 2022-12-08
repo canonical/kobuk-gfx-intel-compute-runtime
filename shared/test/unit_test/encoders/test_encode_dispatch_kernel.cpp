@@ -17,6 +17,7 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
+#include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/fixtures/command_container_fixture.h"
@@ -624,6 +625,7 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandEncodeStatesTest, givenDirtyHeapsWhenDispatch
 
     bool requiresUncachedMocs = false;
     EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
+    dispatchArgs.dcFlushEnable = MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, pDevice->getHardwareInfo());
 
     EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
@@ -675,9 +677,10 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandEncodeStatesTest, givenCleanHeapsAndSlmChange
     EXPECT_EQ(slmSizeBefore + 1, cmdContainer->slmSize);
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, CommandEncodeStatesTest, giveNextIddInBlockZeorWhenDispatchKernelThenMediaInterfaceDescriptorEncoded) {
+HWCMDTEST_F(IGFX_GEN8_CORE, CommandEncodeStatesTest, giveNextIddInBlockZeroWhenDispatchKernelThenMediaInterfaceDescriptorEncoded) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
     using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
+    using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
     using MEDIA_INTERFACE_DESCRIPTOR_LOAD = typename FamilyType::MEDIA_INTERFACE_DESCRIPTOR_LOAD;
     uint32_t dims[] = {2, 1, 1};
     std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
@@ -694,7 +697,39 @@ HWCMDTEST_F(IGFX_GEN8_CORE, CommandEncodeStatesTest, giveNextIddInBlockZeorWhenD
     GenCmdList commands;
     CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
 
+    auto itorSBA = find<STATE_BASE_ADDRESS *>(commands.begin(), commands.end());
     auto itorPC = find<MEDIA_INTERFACE_DESCRIPTOR_LOAD *>(commands.begin(), commands.end());
+    ASSERT_EQ(itorSBA, commands.end()); // no flush needed
+    ASSERT_NE(itorPC, commands.end());
+}
+
+HWCMDTEST_F(IGFX_GEN8_CORE, CommandEncodeStatesTest, giveNextIddInBlockZeroWhenDispatchKernelAndDynamicStateHeapDirtyThenStateBaseAddressEncodedAndMediaInterfaceDescriptorEncoded) {
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+    using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
+    using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
+    using MEDIA_INTERFACE_DESCRIPTOR_LOAD = typename FamilyType::MEDIA_INTERFACE_DESCRIPTOR_LOAD;
+    uint32_t dims[] = {2, 1, 1};
+    std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
+
+    cmdContainer->getIndirectHeap(HeapType::DYNAMIC_STATE)->align(EncodeStates<FamilyType>::alignInterfaceDescriptorData);
+    cmdContainer->setIddBlock(cmdContainer->getHeapSpaceAllowGrow(HeapType::DYNAMIC_STATE, sizeof(INTERFACE_DESCRIPTOR_DATA) * cmdContainer->getNumIddPerBlock()));
+    cmdContainer->nextIddInBlock = cmdContainer->getNumIddPerBlock();
+
+    // ensure heap has no available space left so that it will be reallocated and set to dirty
+    auto heap = cmdContainer->getIndirectHeap(HeapType::DYNAMIC_STATE);
+    heap->getSpace(heap->getAvailableSpace());
+
+    bool requiresUncachedMocs = false;
+    EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
+
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
+
+    GenCmdList commands;
+    CmdParse<FamilyType>::parseCommandBuffer(commands, ptrOffset(cmdContainer->getCommandStream()->getCpuBase(), 0), cmdContainer->getCommandStream()->getUsed());
+
+    auto itorSBA = find<STATE_BASE_ADDRESS *>(commands.begin(), commands.end());
+    auto itorPC = find<MEDIA_INTERFACE_DESCRIPTOR_LOAD *>(commands.begin(), commands.end());
+    ASSERT_NE(itorSBA, commands.end()); // flush needed
     ASSERT_NE(itorPC, commands.end());
 }
 
@@ -1270,6 +1305,7 @@ HWTEST_F(BindlessCommandEncodeStatesTest, givenGlobalBindlessHeapsWhenDispatchin
         false,
         false,
         false,
+        false,
         false};
 
     EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
@@ -1318,9 +1354,85 @@ HWTEST_F(BindlessCommandEncodeStatesTest, givenBindlessModeDisabledelWithSampler
         false,
         false,
         false,
+        false,
         false};
 
     EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
 
     EXPECT_EQ(std::find(cmdContainer->getResidencyContainer().begin(), cmdContainer->getResidencyContainer().end(), pDevice->getBindlessHeapsHelper()->getHeap(BindlessHeapsHelper::GLOBAL_DSH)->getGraphicsAllocation()), cmdContainer->getResidencyContainer().end());
+}
+
+HWTEST_F(CommandEncodeStatesTest, givenKernelInfoWhenGettingRequiredDshSpaceThenReturnCorrectValues) {
+    using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
+    using SAMPLER_STATE = typename FamilyType::SAMPLER_STATE;
+
+    size_t additionalSize = UnitTestHelper<FamilyType>::getAdditionalDshSize();
+    size_t expectedSize = alignUp(additionalSize, EncodeStates<FamilyType>::alignInterfaceDescriptorData);
+
+    // no samplers
+    kernelInfo.kernelDescriptor.payloadMappings.samplerTable.numSamplers = 0;
+    size_t size = EncodeDispatchKernel<FamilyType>::getSizeRequiredDsh(kernelInfo);
+    EXPECT_EQ(expectedSize, size);
+
+    // two samplers, no border color state
+    kernelInfo.kernelDescriptor.payloadMappings.samplerTable.numSamplers = 2;
+    kernelInfo.kernelDescriptor.payloadMappings.samplerTable.tableOffset = 0;
+    kernelInfo.kernelDescriptor.payloadMappings.samplerTable.borderColor = 0;
+
+    // align samplers
+    size_t alignedSamplers = alignUp(2 * sizeof(SAMPLER_STATE), INTERFACE_DESCRIPTOR_DATA::SAMPLERSTATEPOINTER_ALIGN_SIZE);
+
+    // additional IDD for requiring platforms
+    if (additionalSize > 0) {
+        expectedSize = alignUp(alignedSamplers + additionalSize, EncodeStates<FamilyType>::alignInterfaceDescriptorData);
+    } else {
+        expectedSize = alignedSamplers;
+    }
+
+    size = EncodeDispatchKernel<FamilyType>::getSizeRequiredDsh(kernelInfo);
+    EXPECT_EQ(expectedSize, size);
+
+    // three samplers, border color state
+    kernelInfo.kernelDescriptor.payloadMappings.samplerTable.numSamplers = 3;
+    kernelInfo.kernelDescriptor.payloadMappings.samplerTable.tableOffset = 32;
+
+    // align border color state and samplers
+    alignedSamplers = alignUp(alignUp(32, EncodeStates<FamilyType>::alignIndirectStatePointer) + 3 * sizeof(SAMPLER_STATE), INTERFACE_DESCRIPTOR_DATA::SAMPLERSTATEPOINTER_ALIGN_SIZE);
+
+    // additional IDD for requiring platforms
+    if (additionalSize > 0) {
+        expectedSize = alignUp(alignedSamplers + additionalSize, EncodeStates<FamilyType>::alignInterfaceDescriptorData);
+    } else {
+        expectedSize = alignedSamplers;
+    }
+    size = EncodeDispatchKernel<FamilyType>::getSizeRequiredDsh(kernelInfo);
+    EXPECT_EQ(expectedSize, size);
+}
+
+HWTEST_F(CommandEncodeStatesTest, givenKernelInfoWhenGettingRequiredSshSpaceThenReturnCorrectValues) {
+    using BINDING_TABLE_STATE = typename FamilyType::BINDING_TABLE_STATE;
+    using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
+
+    // no surface states
+    kernelInfo.heapInfo.SurfaceStateHeapSize = 0;
+    size_t size = EncodeDispatchKernel<FamilyType>::getSizeRequiredSsh(kernelInfo);
+    EXPECT_EQ(0u, size);
+
+    // two surface states and BTI indices
+    kernelInfo.heapInfo.SurfaceStateHeapSize = 2 * sizeof(RENDER_SURFACE_STATE) + 2 * sizeof(uint32_t);
+    size_t expectedSize = alignUp(kernelInfo.heapInfo.SurfaceStateHeapSize, BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE);
+
+    size = EncodeDispatchKernel<FamilyType>::getSizeRequiredSsh(kernelInfo);
+    EXPECT_EQ(expectedSize, size);
+}
+
+HWTEST_F(CommandEncodeStatesTest, givenCommandContainerWhenIsKernelDispatchedFromImmediateCmdListTrueThenGetHeapWithRequiredSizeAndAlignmentCalled) {
+    std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
+
+    uint32_t dims[] = {1, 1, 1};
+    bool requiresUncachedMocs = false;
+    EncodeDispatchKernelArgs dispatchArgs = createDefaultDispatchKernelArgs(pDevice, dispatchInterface.get(), dims, requiresUncachedMocs);
+    dispatchArgs.isKernelDispatchedFromImmediateCmdList = true;
+    EncodeDispatchKernel<FamilyType>::encode(*cmdContainer.get(), dispatchArgs, nullptr);
+    EXPECT_NE(0u, cmdContainer->getHeapWithRequiredSizeAndAlignmentCalled);
 }

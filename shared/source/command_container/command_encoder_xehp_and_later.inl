@@ -26,7 +26,6 @@
 #include "shared/source/helpers/ray_tracing_helper.h"
 #include "shared/source/helpers/simd_helper.h"
 #include "shared/source/helpers/state_base_address.h"
-#include "shared/source/helpers/state_base_address_xehp_and_later.inl"
 #include "shared/source/kernel/dispatch_kernel_encoder_interface.h"
 #include "shared/source/kernel/implicit_args.h"
 #include "shared/source/kernel/kernel_descriptor.h"
@@ -127,30 +126,32 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
 
     PreemptionHelper::programInterfaceDescriptorDataPreemption<Family>(&idd, args.preemptionMode);
 
-    if constexpr (Family::supportsSampler) {
-        auto heap = ApiSpecificConfig::getBindlessConfiguration() ? args.device->getBindlessHeapsHelper()->getHeap(BindlessHeapsHelper::GLOBAL_DSH) : container.getIndirectHeap(HeapType::DYNAMIC_STATE);
-        UNRECOVERABLE_IF(!heap);
+    uint32_t samplerCount = 0;
 
-        uint32_t samplerStateOffset = 0;
-        uint32_t samplerCount = 0;
+    if (args.device->getDeviceInfo().imageSupport) {
+        if constexpr (Family::supportsSampler) {
+            uint32_t samplerStateOffset = 0;
 
-        if (kernelDescriptor.payloadMappings.samplerTable.numSamplers > 0) {
-            samplerCount = kernelDescriptor.payloadMappings.samplerTable.numSamplers;
-            samplerStateOffset = EncodeStates<Family>::copySamplerState(
-                heap, kernelDescriptor.payloadMappings.samplerTable.tableOffset,
-                kernelDescriptor.payloadMappings.samplerTable.numSamplers, kernelDescriptor.payloadMappings.samplerTable.borderColor,
-                args.dispatchInterface->getDynamicStateHeapData(),
-                args.device->getBindlessHeapsHelper(), hwInfo);
-            if (ApiSpecificConfig::getBindlessConfiguration()) {
-                container.getResidencyContainer().push_back(args.device->getBindlessHeapsHelper()->getHeap(NEO::BindlessHeapsHelper::BindlesHeapType::GLOBAL_DSH)->getGraphicsAllocation());
+            if (kernelDescriptor.payloadMappings.samplerTable.numSamplers > 0) {
+                auto heap = ApiSpecificConfig::getBindlessConfiguration() ? args.device->getBindlessHeapsHelper()->getHeap(BindlessHeapsHelper::GLOBAL_DSH) : container.getIndirectHeap(HeapType::DYNAMIC_STATE);
+                UNRECOVERABLE_IF(!heap);
+
+                samplerCount = kernelDescriptor.payloadMappings.samplerTable.numSamplers;
+                samplerStateOffset = EncodeStates<Family>::copySamplerState(
+                    heap, kernelDescriptor.payloadMappings.samplerTable.tableOffset,
+                    kernelDescriptor.payloadMappings.samplerTable.numSamplers, kernelDescriptor.payloadMappings.samplerTable.borderColor,
+                    args.dispatchInterface->getDynamicStateHeapData(),
+                    args.device->getBindlessHeapsHelper(), hwInfo);
+                if (ApiSpecificConfig::getBindlessConfiguration()) {
+                    container.getResidencyContainer().push_back(args.device->getBindlessHeapsHelper()->getHeap(NEO::BindlessHeapsHelper::BindlesHeapType::GLOBAL_DSH)->getGraphicsAllocation());
+                }
             }
-        }
 
-        idd.setSamplerStatePointer(samplerStateOffset);
-        EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(idd, samplerCount, bindingTableStateCount);
-    } else {
-        EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(idd, 0u, bindingTableStateCount);
+            idd.setSamplerStatePointer(samplerStateOffset);
+        }
     }
+
+    EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(idd, samplerCount, bindingTableStateCount);
 
     uint64_t offsetThreadData = 0u;
     const uint32_t inlineDataSize = sizeof(INLINE_DATA);
@@ -174,8 +175,12 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
         auto heap = container.getIndirectHeap(HeapType::INDIRECT_OBJECT);
         UNRECOVERABLE_IF(!heap);
         heap->align(WALKER_TYPE::INDIRECTDATASTARTADDRESS_ALIGN_SIZE);
-
-        auto ptr = container.getHeapSpaceAllowGrow(HeapType::INDIRECT_OBJECT, iohRequiredSize);
+        void *ptr = nullptr;
+        if (args.isKernelDispatchedFromImmediateCmdList) {
+            ptr = container.getHeapWithRequiredSizeAndAlignment(HeapType::INDIRECT_OBJECT, iohRequiredSize, WALKER_TYPE::INDIRECTDATASTARTADDRESS_ALIGN_SIZE)->getSpace(iohRequiredSize);
+        } else {
+            ptr = container.getHeapSpaceAllowGrow(HeapType::INDIRECT_OBJECT, iohRequiredSize);
+        }
         UNRECOVERABLE_IF(!ptr);
         offsetThreadData = (is64bit ? heap->getHeapGpuStartOffset() : heap->getHeapGpuBase()) + static_cast<uint64_t>(heap->getUsed() - sizeThreadData);
 
@@ -211,7 +216,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
         args.requiresUncachedMocs) {
 
         PipeControlArgs syncArgs;
-        syncArgs.dcFlushEnable = MemorySynchronizationCommands<Family>::getDcFlushEnable(true, hwInfo);
+        syncArgs.dcFlushEnable = args.dcFlushEnable;
         MemorySynchronizationCommands<Family>::addSingleBarrier(*container.getCommandStream(), syncArgs);
         STATE_BASE_ADDRESS sbaCmd;
         auto gmmHelper = container.getDevice()->getGmmHelper();
@@ -270,7 +275,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
         UNRECOVERABLE_IF(!(isAligned<TimestampDestinationAddressAlignment>(args.eventAddress)));
         postSync.setDestinationAddress(args.eventAddress);
 
-        EncodeDispatchKernel<Family>::setupPostSyncMocs(walkerCmd, args.device->getRootDeviceEnvironment());
+        EncodeDispatchKernel<Family>::setupPostSyncMocs(walkerCmd, args.device->getRootDeviceEnvironment(), args.dcFlushEnable);
         EncodeDispatchKernel<Family>::adjustTimestampPacket(walkerCmd, hwInfo);
     }
 
@@ -303,6 +308,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
                                                           !container.getFlushTaskUsedForImmediate(),
                                                           !args.isKernelDispatchedFromImmediateCmdList,
                                                           false,
+                                                          args.dcFlushEnable,
                                                           workPartitionAllocationGpuVa,
                                                           hwInfo);
     } else {
@@ -324,12 +330,11 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
 }
 
 template <typename Family>
-inline void EncodeDispatchKernel<Family>::setupPostSyncMocs(WALKER_TYPE &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment) {
+inline void EncodeDispatchKernel<Family>::setupPostSyncMocs(WALKER_TYPE &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment, bool dcFlush) {
     auto &postSyncData = walkerCmd.getPostSync();
     auto gmmHelper = rootDeviceEnvironment.getGmmHelper();
 
-    const auto &hwInfo = *rootDeviceEnvironment.getHardwareInfo();
-    if (MemorySynchronizationCommands<Family>::getDcFlushEnable(true, hwInfo)) {
+    if (dcFlush) {
         postSyncData.setMocs(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED));
     } else {
         postSyncData.setMocs(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER));
@@ -528,7 +533,7 @@ void EncodeStateBaseAddress<Family>::encode(EncodeStateBaseAddressArgs<Family> &
     StateBaseAddressHelper<Family>::programStateBaseAddressIntoCommandStream(stateBaseAddressHelperArgs,
                                                                              *args.container->getCommandStream());
 
-    if (args.container->isHeapDirty(HeapType::SURFACE_STATE)) {
+    if (args.container->isHeapDirty(HeapType::SURFACE_STATE) && ssh != nullptr) {
         auto heap = args.container->getIndirectHeap(HeapType::SURFACE_STATE);
         StateBaseAddressHelper<Family>::programBindingTableBaseAddress(*args.container->getCommandStream(),
                                                                        *heap,
@@ -768,5 +773,10 @@ inline void EncodeStoreMMIO<Family>::appendFlags(MI_STORE_REGISTER_MEM *storeReg
 
 template <typename Family>
 void EncodeDispatchKernel<Family>::adjustWalkOrder(WALKER_TYPE &walkerCmd, uint32_t requiredWorkGroupOrder, const HardwareInfo &hwInfo) {}
+
+template <typename Family>
+uint32_t EncodeDispatchKernel<Family>::additionalSizeRequiredDsh() {
+    return 0u;
+}
 
 } // namespace NEO

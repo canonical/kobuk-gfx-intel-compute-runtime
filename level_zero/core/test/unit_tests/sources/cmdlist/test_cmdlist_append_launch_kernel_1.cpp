@@ -128,12 +128,12 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithThreadArbitrationPolicySe
     delete (pHint);
 }
 
-HWTEST2_F(CommandListAppendLaunchKernel, givenNotEnoughSpaceInCommandStreamWhenAppendingKernelThenBbEndIsAddedAndNewCmdBufferAllocated, MatchAny) {
+HWTEST2_F(CommandListAppendLaunchKernel, givenNotEnoughSpaceInCommandStreamWhenAppendingKernelThenBbEndIsAddedAndNewCmdBufferAllocated, IsAtLeastSkl) {
     using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
     createKernel();
 
     ze_result_t returnValue;
-    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue));
+    std::unique_ptr<L0::ult::CommandList> commandList(whiteboxCast(CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, returnValue)));
 
     auto &commandContainer = commandList->commandContainer;
     const auto stream = commandContainer.getCommandStream();
@@ -163,8 +163,9 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenNotEnoughSpaceInCommandStreamWhenA
         false,
         false,
         false,
-        false};
-    NEO::EncodeDispatchKernel<FamilyType>::encode(commandContainer, dispatchKernelArgs, static_cast<CommandListCoreFamily<gfxCoreFamily> *>(commandList.get())->getLogicalStateHelper());
+        false,
+        commandList->getDcFlushRequired(true)};
+    NEO::EncodeDispatchKernel<FamilyType>::encode(commandContainer, dispatchKernelArgs, commandList->getLogicalStateHelper());
 
     auto usedSpaceAfter = commandContainer.getCommandStream()->getUsed();
     ASSERT_GT(usedSpaceAfter, 0u);
@@ -386,7 +387,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenForcePipeControlPriorToWalkerKeyTh
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
     Mock<::L0::Kernel> kernel;
-    ze_result_t result;
+    ze_result_t result = ZE_RESULT_SUCCESS;
     std::unique_ptr<L0::CommandList> commandListBase(L0::CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, result));
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     auto usedSpaceBefore = commandListBase->commandContainer.getCommandStream()->getUsed();
@@ -438,7 +439,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenForcePipeControlPriorToWalkerKeyAn
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
     Mock<::L0::Kernel> kernel;
-    ze_result_t result;
+    ze_result_t result = ZE_RESULT_SUCCESS;
     std::unique_ptr<L0::CommandList> commandList(L0::CommandList::create(productFamily, device, NEO::EngineGroupType::RenderCompute, 0u, result));
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -782,6 +783,36 @@ HWTEST_F(CommandListAppendLaunchKernel, givenInvalidEventListWhenAppendLaunchCoo
     returnValue = commandList->appendLaunchCooperativeKernel(kernel->toHandle(), &groupCount, nullptr, 1, nullptr);
 
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, returnValue);
+}
+
+HWTEST2_F(CommandListAppendLaunchKernel, givenImmediateCommandListWhenAppendLaunchCooperativeKernelUsingFlushTaskThenExpectCorrectExecuteCall, IsAtLeastSkl) {
+    createKernel();
+    MockCommandListImmediateHw<gfxCoreFamily> cmdList;
+    cmdList.isFlushTaskSubmissionEnabled = true;
+    cmdList.cmdListType = CommandList::CommandListType::TYPE_IMMEDIATE;
+    cmdList.csr = device->getNEODevice()->getDefaultEngine().commandStreamReceiver;
+    cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
+    ze_group_count_t groupCount{1, 1, 1};
+    ze_result_t returnValue;
+    returnValue = cmdList.appendLaunchCooperativeKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr);
+    EXPECT_EQ(0u, cmdList.executeCommandListImmediateCalledCount);
+    EXPECT_EQ(1u, cmdList.executeCommandListImmediateWithFlushTaskCalledCount);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+}
+
+HWTEST2_F(CommandListAppendLaunchKernel, givenImmediateCommandListWhenAppendLaunchCooperativeKernelNotUsingFlushTaskThenExpectCorrectExecuteCall, IsAtLeastSkl) {
+    createKernel();
+    MockCommandListImmediateHw<gfxCoreFamily> cmdList;
+    cmdList.isFlushTaskSubmissionEnabled = false;
+    cmdList.cmdListType = CommandList::CommandListType::TYPE_IMMEDIATE;
+    cmdList.csr = device->getNEODevice()->getDefaultEngine().commandStreamReceiver;
+    cmdList.initialize(device, NEO::EngineGroupType::RenderCompute, 0u);
+    ze_group_count_t groupCount{1, 1, 1};
+    ze_result_t returnValue;
+    returnValue = cmdList.appendLaunchCooperativeKernel(kernel->toHandle(), &groupCount, nullptr, 0, nullptr);
+    EXPECT_EQ(1u, cmdList.executeCommandListImmediateCalledCount);
+    EXPECT_EQ(0u, cmdList.executeCommandListImmediateWithFlushTaskCalledCount);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
 }
 
 } // namespace ult

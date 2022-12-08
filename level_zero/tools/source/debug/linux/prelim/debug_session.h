@@ -43,18 +43,25 @@ struct DebugSessionLinux : DebugSessionImp {
     ze_result_t writeMemory(ze_device_thread_t thread, const zet_debug_memory_space_desc_t *desc, size_t size, const void *buffer) override;
     ze_result_t acknowledgeEvent(const zet_debug_event_t *event) override;
 
-    uint32_t getDeviceIndexFromApiThread(ze_device_thread_t thread) override;
-    ze_device_thread_t convertToPhysicalWithinDevice(ze_device_thread_t thread, uint32_t deviceIndex) override;
-    EuThread::ThreadId convertToThreadId(ze_device_thread_t thread) override;
-    ze_device_thread_t convertToApi(EuThread::ThreadId threadId) override;
-
     struct IoctlHandler {
         MOCKABLE_VIRTUAL ~IoctlHandler() = default;
         MOCKABLE_VIRTUAL int ioctl(int fd, unsigned long request, void *arg) {
             int ret = 0;
+            int error = 0;
+            bool shouldRetryIoctl = false;
             do {
+                shouldRetryIoctl = false;
                 ret = NEO::SysCalls::ioctl(fd, request, arg);
-            } while (ret == -1 && (errno == EINTR || errno == EAGAIN || errno == EBUSY));
+                error = errno;
+
+                if (ret == -1) {
+                    shouldRetryIoctl = (error == EINTR || error == EAGAIN || error == EBUSY);
+
+                    if (request == PRELIM_I915_DEBUG_IOCTL_EU_CONTROL) {
+                        shouldRetryIoctl = (error == EINTR || error == EAGAIN);
+                    }
+                }
+            } while (shouldRetryIoctl);
             return ret;
         }
 
@@ -124,6 +131,7 @@ struct DebugSessionLinux : DebugSessionImp {
         std::unordered_set<uint64_t> loadAddresses[NEO::EngineLimits::maxHandleCount];
         uint64_t elfUuidHandle;
         uint32_t segmentCount;
+        NEO::DeviceBitfield deviceBitfield;
         int segmentVmBindCounter[NEO::EngineLimits::maxHandleCount];
     };
 
@@ -205,7 +213,7 @@ struct DebugSessionLinux : DebugSessionImp {
     void startAsyncThread() override;
     void closeAsyncThread();
 
-    void startInternalEventsThread() {
+    MOCKABLE_VIRTUAL void startInternalEventsThread() {
         internalEventThread.thread = NEO::Thread::create(readInternalEventsThreadFunction, reinterpret_cast<void *>(this));
     }
     void closeInternalEventsThread() {
@@ -228,11 +236,12 @@ struct DebugSessionLinux : DebugSessionImp {
     void readInternalEventsAsync();
     MOCKABLE_VIRTUAL std::unique_ptr<uint64_t[]> getInternalEvent();
 
-    void handleVmBindEvent(prelim_drm_i915_debug_event_vm_bind *vmBind);
+    bool handleVmBindEvent(prelim_drm_i915_debug_event_vm_bind *vmBind);
     void handleContextParamEvent(prelim_drm_i915_debug_event_context_param *contextParam);
     void handleAttentionEvent(prelim_drm_i915_debug_event_eu_attention *attention);
     void handleEnginesEvent(prelim_drm_i915_debug_event_engines *engines);
     virtual bool ackIsaEvents(uint32_t deviceIndex, uint64_t isaVa);
+    MOCKABLE_VIRTUAL void processPendingVmBindEvents();
 
     void attachTile() override {
         UNRECOVERABLE_IF(true);
@@ -263,6 +272,10 @@ struct DebugSessionLinux : DebugSessionImp {
     bool tryReadIsa(NEO::DeviceBitfield deviceBitfield, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, ze_result_t &status);
     virtual bool tryAccessIsa(NEO::DeviceBitfield deviceBitfield, const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, bool write, ze_result_t &status);
     ze_result_t accessDefaultMemForThreadAll(const zet_debug_memory_space_desc_t *desc, size_t size, void *buffer, bool write);
+    ze_result_t readDefaultMemory(ze_device_thread_t thread, const zet_debug_memory_space_desc_t *desc,
+                                  size_t size, void *buffer);
+    ze_result_t writeDefaultMemory(ze_device_thread_t thread, const zet_debug_memory_space_desc_t *desc,
+                                   size_t size, const void *buffer);
 
     MOCKABLE_VIRTUAL int threadControl(const std::vector<EuThread::ThreadId> &threads, uint32_t tile, ThreadControlCmd threadCmd, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize);
 
@@ -300,11 +313,38 @@ struct DebugSessionLinux : DebugSessionImp {
         return allInstancesRemoved;
     }
 
+    bool checkAllOtherTileModuleSegmentsPresent(uint32_t tileIndex, const Module &module) {
+        bool allInstancesPresent = true;
+        for (uint32_t i = 0; i < NEO::EngineLimits::maxHandleCount; i++) {
+            if (i != tileIndex && connectedDevice->getNEODevice()->getDeviceBitfield().test(i)) {
+                if (module.loadAddresses[i].size() != module.segmentCount) {
+                    allInstancesPresent = false;
+                    break;
+                }
+            }
+        }
+        return allInstancesPresent;
+    }
+
+    bool checkAllOtherTileModuleSegmentsRemoved(uint32_t tileIndex, const Module &module) {
+        bool allInstancesRemoved = true;
+        for (uint32_t i = 0; i < NEO::EngineLimits::maxHandleCount; i++) {
+            if (i != tileIndex && connectedDevice->getNEODevice()->getDeviceBitfield().test(i)) {
+                if (module.loadAddresses[i].size() != 0) {
+                    allInstancesRemoved = false;
+                    break;
+                }
+            }
+        }
+        return allInstancesRemoved;
+    }
+
     ThreadHelper internalEventThread;
     std::mutex internalEventThreadMutex;
     std::condition_variable internalEventCondition;
     std::queue<std::unique_ptr<uint64_t[]>> internalEventQueue;
     std::vector<std::pair<zet_debug_event_t, prelim_drm_i915_debug_event_ack>> eventsToAck;
+    std::vector<std::unique_ptr<uint64_t[]>> pendingVmBindEvents;
 
     int fd = 0;
     virtual int ioctl(unsigned long request, void *arg);
@@ -317,6 +357,7 @@ struct DebugSessionLinux : DebugSessionImp {
     uint64_t euControlInterruptSeqno[NEO::EngineLimits::maxHandleCount];
 
     std::unordered_map<uint64_t, std::unique_ptr<ClientConnection>> clientHandleToConnection;
+    std::atomic<bool> internalThreadHasStarted{false};
 };
 
 struct TileDebugSessionLinux : DebugSessionLinux {
@@ -328,7 +369,10 @@ struct TileDebugSessionLinux : DebugSessionLinux {
     ~TileDebugSessionLinux() override = default;
 
     bool closeConnection() override { return true; }
-    ze_result_t initialize() override { return ZE_RESULT_SUCCESS; }
+    ze_result_t initialize() override {
+        createEuThreads();
+        return ZE_RESULT_SUCCESS;
+    }
 
     bool insertModule(zet_debug_event_info_module_t module);
     bool removeModule(zet_debug_event_info_module_t module);

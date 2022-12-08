@@ -23,13 +23,14 @@ DebugSessionWindows::~DebugSessionWindows() {
     closeAsyncThread();
 }
 
-DebugSession *DebugSession::create(const zet_debug_config_t &config, Device *device, ze_result_t &result) {
-    if (!device->getOsInterface().isDebugAttachAvailable()) {
+DebugSession *DebugSession::create(const zet_debug_config_t &config, Device *device, ze_result_t &result, bool isRootAttach) {
+    if (!device->getOsInterface().isDebugAttachAvailable() || !isRootAttach) {
         result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
         return nullptr;
     }
 
     auto debugSession = createDebugSessionHelper(config, device, 0);
+    debugSession->setAttachMode(isRootAttach);
     result = debugSession->initialize();
     if (result != ZE_RESULT_SUCCESS) {
         debugSession->closeConnection();
@@ -149,7 +150,7 @@ ze_result_t DebugSessionWindows::readAndHandleEvent(uint64_t timeoutMs) {
 
     union {
         READ_EVENT_PARAMS_BUFFER eventParamsBuffer;
-        uint8_t rawBytes[READ_EVENT_PARAMS_BUFFER_MIN_SIZE_BYTES] = {0};
+        uint8_t rawBytes[2 * READ_EVENT_PARAMS_BUFFER_MIN_SIZE_BYTES] = {0};
     } eventParamsBuffer;
 
     escapeInfo.KmEuDbgL0EscapeInfo.EscapeActionType = DBGUMD_ACTION_READ_EVENT;
@@ -164,7 +165,9 @@ ze_result_t DebugSessionWindows::readAndHandleEvent(uint64_t timeoutMs) {
     }
 
     if (DBGUMD_RETURN_ESCAPE_SUCCESS != escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus) {
-        PRINT_DEBUGGER_ERROR_LOG("DBGUMD_ACTION_READ_EVENT: Failed - Status: 0x%llX EscapeReturnStatus: %d\n", status, escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus);
+        if (DBGUMD_RETURN_READ_EVENT_TIMEOUT_EXPIRED != escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus) {
+            PRINT_DEBUGGER_ERROR_LOG("DBGUMD_ACTION_READ_EVENT: Failed - Status: 0x%llX EscapeReturnStatus: %d\n", status, escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus);
+        }
         return DebugSessionWindows::translateEscapeReturnStatusToZeResult(escapeInfo.KmEuDbgL0EscapeInfo.EscapeReturnStatus);
     }
 
@@ -227,16 +230,16 @@ ze_result_t DebugSessionWindows::handleModuleCreateEvent(uint32_t seqNo, DBGUMD_
 ze_result_t DebugSessionWindows::handleEuAttentionBitsEvent(DBGUMD_READ_EVENT_EU_ATTN_BIT_SET_PARAMS &euAttentionBitsParams) {
     PRINT_DEBUGGER_INFO_LOG("DBGUMD_READ_EVENT_EU_ATTN_BIT_SET_PARAMS: hContextHandle=0x%llX LRCA=%d BitMaskSizeInBytes=%d BitmaskArrayPtr=0x%llX\n",
                             euAttentionBitsParams.hContextHandle, euAttentionBitsParams.LRCA,
-                            euAttentionBitsParams.BitMaskSizeInBytes, euAttentionBitsParams.BitmaskArrayPtr);
+                            euAttentionBitsParams.BitMaskSizeInBytes, &euAttentionBitsParams.BitmaskArrayPtr);
 
     auto hwInfo = connectedDevice->getHwInfo();
     auto &l0HwHelper = L0HwHelper::get(hwInfo.platform.eRenderCoreFamily);
 
     auto threadsWithAttention = l0HwHelper.getThreadsFromAttentionBitmask(hwInfo, 0u,
-                                                                          reinterpret_cast<uint8_t *>(euAttentionBitsParams.BitmaskArrayPtr),
+                                                                          reinterpret_cast<uint8_t *>(&euAttentionBitsParams.BitmaskArrayPtr),
                                                                           euAttentionBitsParams.BitMaskSizeInBytes);
 
-    printBitmask(reinterpret_cast<uint8_t *>(euAttentionBitsParams.BitmaskArrayPtr), euAttentionBitsParams.BitMaskSizeInBytes);
+    printBitmask(reinterpret_cast<uint8_t *>(&euAttentionBitsParams.BitmaskArrayPtr), euAttentionBitsParams.BitMaskSizeInBytes);
 
     PRINT_DEBUGGER_THREAD_LOG("ATTENTION received for thread count = %d\n", (int)threadsWithAttention.size());
 
@@ -453,6 +456,10 @@ ze_result_t DebugSessionWindows::readMemory(ze_device_thread_t thread, const zet
         return status;
     }
 
+    if (desc->type != ZET_DEBUG_MEMORY_SPACE_TYPE_DEFAULT) {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    }
+
     if (isVAElf(desc, size)) {
         return readElfSpace(desc, size, buffer);
     }
@@ -484,6 +491,10 @@ ze_result_t DebugSessionWindows::writeMemory(ze_device_thread_t thread, const ze
     ze_result_t status = validateThreadAndDescForMemoryAccess(thread, desc);
     if (status != ZE_RESULT_SUCCESS) {
         return status;
+    }
+
+    if (desc->type != ZET_DEBUG_MEMORY_SPACE_TYPE_DEFAULT) {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
     uint64_t memoryHandle = DebugSessionWindows::invalidHandle;

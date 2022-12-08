@@ -212,6 +212,7 @@ class CommandStreamReceiver {
     InternalAllocationStorage *getInternalAllocationStorage() const { return internalAllocationStorage.get(); }
     MOCKABLE_VIRTUAL bool createAllocationForHostSurface(HostPtrSurface &surface, bool requiresL3Flush);
     virtual size_t getPreferredTagPoolSize() const;
+    virtual void fillReusableAllocationsList();
     virtual void setupContext(OsContext &osContext) { this->osContext = &osContext; }
     OsContext &getOsContext() const { return *osContext; }
 
@@ -362,6 +363,24 @@ class CommandStreamReceiver {
 
     virtual void initializeDeviceWithFirstSubmission() = 0;
 
+    uint32_t getNumClients() {
+        return this->numClients.load();
+    }
+    void registerClient() {
+        this->numClients++;
+    }
+    void unregisterClient() {
+        this->numClients--;
+    }
+
+    bool getDcFlushSupport() const {
+        return dcFlushSupport;
+    }
+
+    bool getDcFlushRequired(bool externalCondition) const {
+        return externalCondition ? dcFlushSupport : false;
+    }
+
   protected:
     void cleanupResources();
     void printDeviceIndex();
@@ -393,6 +412,7 @@ class CommandStreamReceiver {
     LinearStream commandStream;
     StreamProperties streamProperties{};
     FrontEndPropertiesSupport feSupportFlags{};
+    PipelineSelectPropertiesSupport pipelineSupportFlags{};
 
     // offset for debug state is 1kbyte, tag writes can use multiple offsets for multiple partitions and each offset can vary per platform
     const uint64_t debugPauseStateAddressOffset = MemoryConstants::kiloByte;
@@ -427,6 +447,8 @@ class CommandStreamReceiver {
     // taskCount - # of tasks submitted
     std::atomic<uint32_t> taskCount{0};
 
+    std::atomic<uint32_t> numClients = 0u;
+
     DispatchMode dispatchMode = DispatchMode::ImmediateDispatch;
     SamplerCacheFlushState samplerCacheFlushRequired = SamplerCacheFlushState::samplerCacheFlushNotRequired;
     PreemptionMode lastPreemptionMode = PreemptionMode::Initial;
@@ -459,6 +481,7 @@ class CommandStreamReceiver {
     bool GSBAFor32BitProgrammed = false;
     bool GSBAStateDirty = true;
     bool bindingTableBaseAddressRequired = false;
+    bool heapStorageReqiuresRecyclingTag = false;
     bool mediaVfeStateDirty = true;
     bool lastVmeSubslicesConfig = false;
     bool stallingCommandsOnNextFlushRequired = false;
@@ -476,7 +499,7 @@ class CommandStreamReceiver {
     bool useGpuIdleImplicitFlush = false;
     bool lastSentUseGlobalAtomics = false;
     bool useNotifyEnableForPostSync = false;
-    bool systolicModeConfigurable = false;
+    bool dcFlushSupport = false;
 };
 
 typedef CommandStreamReceiver *(*CommandStreamReceiverCreateFunc)(bool withAubDump,

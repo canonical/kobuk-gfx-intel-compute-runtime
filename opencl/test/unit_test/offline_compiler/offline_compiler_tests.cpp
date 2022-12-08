@@ -21,6 +21,7 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/variable_backup.h"
+#include "shared/test/common/mocks/mock_compiler_cache.h"
 #include "shared/test/common/mocks/mock_compilers.h"
 #include "shared/test/common/mocks/mock_modules_zebin.h"
 #include "shared/test/common/test_macros/hw_test.h"
@@ -833,8 +834,8 @@ TEST_F(OfflineCompilerTests, givenProductAcronymWhenIdsCommandIsInvokeThenSucces
 }
 
 TEST_F(OfflineCompilerTests, GivenFlagsWhichRequireMoreArgsWithoutThemWhenParsingThenErrorIsReported) {
-    const std::array<std::string, 8> flagsToTest = {
-        "-file", "-output", "-device", "-options", "-internal_options", "-out_dir", "-revision_id", "-config"};
+    const std::array<std::string, 9> flagsToTest = {
+        "-file", "-output", "-device", "-options", "-internal_options", "-out_dir", "-cache_dir", "-revision_id", "-config"};
 
     for (const auto &flag : flagsToTest) {
         const std::vector<std::string> argv = {
@@ -1221,7 +1222,7 @@ TEST_F(OfflineCompilerTests, givenIncorrectDeviceIdWithIncorrectHexPatternThenIn
     EXPECT_EQ(CL_INVALID_DEVICE, retVal);
 }
 
-TEST_F(OfflineCompilerTests, givenDebugOptionThenInternalOptionShouldContainKernelDebugEnable) {
+TEST_F(OfflineCompilerTests, givenDebugOptionThenInternalOptionShouldNotContainKernelDebugEnable) {
     if (gEnvironment->devicePrefix == "bdw") {
         GTEST_SKIP();
     }
@@ -1240,7 +1241,124 @@ TEST_F(OfflineCompilerTests, givenDebugOptionThenInternalOptionShouldContainKern
     mockOfflineCompiler->initialize(argv.size(), argv);
 
     std::string internalOptions = mockOfflineCompiler->internalOptions;
-    EXPECT_TRUE(hasSubstr(internalOptions, "-cl-kernel-debug-enable"));
+    EXPECT_FALSE(hasSubstr(internalOptions, "-cl-kernel-debug-enable"));
+}
+
+TEST_F(OfflineCompilerTests, givenDebugOptionAndNonSpirvInputThenOptionsShouldContainDashSOptionAppendedAutomatically) {
+    auto mockOfflineCompiler = std::unique_ptr<MockOfflineCompiler>(new MockOfflineCompiler());
+    mockOfflineCompiler->uniqueHelper->callBaseFileExists = false;
+    mockOfflineCompiler->uniqueHelper->callBaseLoadDataFromFile = false;
+    mockOfflineCompiler->uniqueHelper->filesMap["some_input.cl"] = "";
+
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-q",
+        "-options",
+        "-g",
+        "-file",
+        "some_input.cl",
+        "-device",
+        gEnvironment->devicePrefix.c_str()};
+
+    mockOfflineCompiler->initialize(argv.size(), argv);
+    const auto &options = mockOfflineCompiler->options;
+    std::string appendedOption{"-s \"some_input.cl\""};
+    EXPECT_TRUE(hasSubstr(options, appendedOption));
+}
+
+TEST_F(OfflineCompilerTests, givenDebugOptionAndNonSpirvInputWhenFilenameIsSeparatedWithSpacesThenAppendedSourcePathIsSetCorrectly) {
+    auto mockOfflineCompiler = std::unique_ptr<MockOfflineCompiler>(new MockOfflineCompiler());
+    mockOfflineCompiler->uniqueHelper->callBaseFileExists = false;
+    mockOfflineCompiler->uniqueHelper->callBaseLoadDataFromFile = false;
+    mockOfflineCompiler->uniqueHelper->filesMap["filename with spaces.cl"] = "";
+
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-q",
+        "-options",
+        "-g",
+        "-file",
+        "filename with spaces.cl",
+        "-device",
+        gEnvironment->devicePrefix.c_str()};
+
+    const auto result = mockOfflineCompiler->initialize(argv.size(), argv);
+    EXPECT_EQ(OclocErrorCode::SUCCESS, result);
+    const auto &options = mockOfflineCompiler->options;
+    std::string appendedOption{"-s \"filename with spaces.cl\""};
+    EXPECT_TRUE(hasSubstr(options, appendedOption));
+}
+
+TEST_F(OfflineCompilerTests, givenDebugOptionAndSpirvInputThenDoNotAppendDashSOptionAutomatically) {
+    auto mockOfflineCompiler = std::unique_ptr<MockOfflineCompiler>(new MockOfflineCompiler());
+    mockOfflineCompiler->uniqueHelper->callBaseFileExists = false;
+    mockOfflineCompiler->uniqueHelper->callBaseLoadDataFromFile = false;
+    mockOfflineCompiler->uniqueHelper->filesMap["some_input.spirv"] = "";
+
+    std::vector<std::string> argvSpirvInput = {
+        "ocloc",
+        "-q",
+        "-spirv_input",
+        "-options",
+        "-g",
+        "-file",
+        "some_input.spirv",
+        "-device",
+        gEnvironment->devicePrefix.c_str()};
+
+    mockOfflineCompiler->initialize(argvSpirvInput.size(), argvSpirvInput);
+    const auto &options = mockOfflineCompiler->options;
+    std::string notAppendedOption{"-s \"some_input.spirv\""};
+    EXPECT_FALSE(hasSubstr(options, notAppendedOption));
+}
+
+TEST_F(OfflineCompilerTests, givenDebugOptionWhenCompilerIsCMCThenDoNotAppendDashSOptionAutomatically) {
+    auto mockOfflineCompiler = std::unique_ptr<MockOfflineCompiler>(new MockOfflineCompiler());
+    mockOfflineCompiler->uniqueHelper->callBaseFileExists = false;
+    mockOfflineCompiler->uniqueHelper->callBaseLoadDataFromFile = false;
+    mockOfflineCompiler->uniqueHelper->filesMap["some_input.cl"] = "";
+
+    std::vector<std::string> argvSpirvInput = {
+        "ocloc",
+        "-q",
+        "-options",
+        "-g -cmc",
+        "-file",
+        "some_input.cl",
+        "-device",
+        gEnvironment->devicePrefix.c_str()};
+
+    mockOfflineCompiler->initialize(argvSpirvInput.size(), argvSpirvInput);
+    const auto &options = mockOfflineCompiler->options;
+    std::string notAppendedOption{"-s \"some_input.spirv\""};
+    EXPECT_FALSE(hasSubstr(options, notAppendedOption));
+}
+
+TEST_F(OfflineCompilerTests, givenDebugOptionAndDashSOptionPassedManuallyThenDoNotAppendDashSOptionAutomatically) {
+    auto mockOfflineCompiler = std::unique_ptr<MockOfflineCompiler>(new MockOfflineCompiler());
+    mockOfflineCompiler->uniqueHelper->callBaseFileExists = false;
+    mockOfflineCompiler->uniqueHelper->callBaseLoadDataFromFile = false;
+    mockOfflineCompiler->uniqueHelper->filesMap["some_input.cl"] = "";
+    std::vector<std::string> argvDashSPassed = {
+        "ocloc",
+        "-q",
+        "-options",
+        "-g -s \"mockPath/some_input.cl\"",
+        "-file",
+        "some_input.cl",
+        "-device",
+        gEnvironment->devicePrefix.c_str()};
+
+    mockOfflineCompiler->initialize(argvDashSPassed.size(), argvDashSPassed);
+    const auto &options = mockOfflineCompiler->options;
+    std::string appendedOption{"-s"};
+    auto occurrences = 0u;
+    size_t pos = 0u;
+    while ((pos = options.find(appendedOption, pos)) != std::string::npos) {
+        occurrences++;
+        pos++;
+    }
+    EXPECT_EQ(1u, occurrences);
 }
 
 TEST_F(OfflineCompilerTests, givenDashGInBiggerOptionStringWhenInitializingThenInternalOptionsShouldNotContainKernelDebugEnable) {
@@ -1365,7 +1483,7 @@ TEST_F(OfflineCompilerTests, givenExcludeIrArgumentAndExcludeIrFromZebinInternal
     EXPECT_EQ(firstExcludeIrFromZebin, lastExcludeIrFromZebin);
 }
 
-TEST_F(OfflineCompilerTests, givenExcludeIrArgumentWhenCompilingKernelThenIrShouldBeExcluded) {
+TEST_F(OfflineCompilerTests, givenExcludeIrArgumentWhenGeneratingElfBinaryFromPatchtokensThenIrSectionIsNotPresent) {
     std::vector<std::string> argv = {
         "ocloc",
         "-file",
@@ -1379,8 +1497,17 @@ TEST_F(OfflineCompilerTests, givenExcludeIrArgumentWhenCompilingKernelThenIrShou
     MockOfflineCompiler mockOfflineCompiler{};
     mockOfflineCompiler.initialize(argv.size(), argv);
 
-    const auto buildResult{mockOfflineCompiler.build()};
-    ASSERT_EQ(OclocErrorCode::SUCCESS, buildResult);
+    std::vector<uint8_t> storage;
+    iOpenCL::SProgramBinaryHeader headerTok = {};
+    headerTok.Magic = iOpenCL::MAGIC_CL;
+    headerTok.Version = iOpenCL::CURRENT_ICBE_VERSION;
+    headerTok.GPUPointerSizeInBytes = sizeof(uintptr_t);
+
+    storage.insert(storage.end(), reinterpret_cast<uint8_t *>(&headerTok), reinterpret_cast<uint8_t *>(&headerTok) + sizeof(iOpenCL::SProgramBinaryHeader));
+    mockOfflineCompiler.genBinary = new char[storage.size()];
+    mockOfflineCompiler.genBinarySize = storage.size();
+    memcpy_s(mockOfflineCompiler.genBinary, mockOfflineCompiler.genBinarySize, storage.data(), storage.size());
+    mockOfflineCompiler.generateElfBinary();
 
     std::string errorReason{};
     std::string warning{};
@@ -2022,6 +2149,121 @@ TEST_F(OfflineCompilerTests, GivenInvalidKernelWhenBuildingThenBuildProgramFailu
     gEnvironment->SetInputFileName("copybuffer");
 
     delete pOfflineCompiler;
+}
+
+TEST(OfflineCompilerTest, GivenAllowCachingWhenBuildingThenBinaryIsCached) {
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        clFiles + "copybuffer.cl",
+        "-device",
+        gEnvironment->devicePrefix.c_str(),
+        "-allow_caching",
+        "-cache_dir",
+        "cache_dir"};
+
+    auto mockOfflineCompiler = std::unique_ptr<MockOfflineCompiler>(new MockOfflineCompiler());
+    ASSERT_NE(nullptr, mockOfflineCompiler);
+    mockOfflineCompiler->interceptCreatedDirs = true;
+    auto retVal = mockOfflineCompiler->initialize(argv.size(), argv);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    auto cacheMock = new CompilerCacheMock();
+    mockOfflineCompiler->cache.reset(cacheMock);
+    retVal = mockOfflineCompiler->build();
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(cacheMock->cacheInvoked, 0u);
+}
+
+TEST(OfflineCompilerTest, GivenCachedBinaryWhenBuildIrBinaryThenIrBinaryIsLoaded) {
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        clFiles + "copybuffer.cl",
+        "-device",
+        gEnvironment->devicePrefix.c_str(),
+        "-allow_caching"};
+
+    auto mockOfflineCompiler = std::unique_ptr<MockOfflineCompiler>(new MockOfflineCompiler());
+    ASSERT_NE(nullptr, mockOfflineCompiler);
+    mockOfflineCompiler->interceptCreatedDirs = true;
+    auto retVal = mockOfflineCompiler->initialize(argv.size(), argv);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    auto cacheMock = new CompilerCacheMock();
+    cacheMock->loadResult = true;
+    mockOfflineCompiler->cache.reset(cacheMock);
+    retVal = mockOfflineCompiler->buildIrBinary();
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    ASSERT_NE(nullptr, mockOfflineCompiler->irBinary);
+    EXPECT_NE(0u, static_cast<uint32_t>(mockOfflineCompiler->irBinarySize));
+}
+
+TEST(OfflineCompilerTest, GivenCachedBinaryWhenBuildSourceCodeThenSuccessIsReturned) {
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        clFiles + "copybuffer.cl",
+        "-device",
+        gEnvironment->devicePrefix.c_str(),
+        "-allow_caching"};
+
+    auto mockOfflineCompiler = std::unique_ptr<MockOfflineCompiler>(new MockOfflineCompiler());
+    ASSERT_NE(nullptr, mockOfflineCompiler);
+    mockOfflineCompiler->interceptCreatedDirs = true;
+    auto retVal = mockOfflineCompiler->initialize(argv.size(), argv);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    auto cacheMock = new CompilerCacheMock();
+    mockOfflineCompiler->cache.reset(cacheMock);
+    cacheMock->numberOfLoadResult = 1u;
+    retVal = mockOfflineCompiler->buildSourceCode();
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, mockOfflineCompiler->genBinary);
+    EXPECT_NE(0u, static_cast<uint32_t>(mockOfflineCompiler->genBinarySize));
+
+    cacheMock->numberOfLoadResult = 2u;
+    retVal = mockOfflineCompiler->buildSourceCode();
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    argv.push_back("-options");
+    argv.push_back("-g");
+    retVal = mockOfflineCompiler->initialize(argv.size(), argv);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    cacheMock = new CompilerCacheMock();
+    mockOfflineCompiler->cache.reset(cacheMock);
+    cacheMock->numberOfLoadResult = 3u;
+    retVal = mockOfflineCompiler->buildSourceCode();
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, mockOfflineCompiler->debugDataBinary);
+    EXPECT_NE(0u, static_cast<uint32_t>(mockOfflineCompiler->debugDataBinarySize));
+}
+
+TEST(OfflineCompilerTest, GivenGenBinaryWhenGenerateElfBinaryThenElfIsLoaded) {
+    std::vector<std::string> argv = {
+        "ocloc",
+        "-file",
+        clFiles + "copybuffer.cl",
+        "-device",
+        gEnvironment->devicePrefix.c_str(),
+        "-allow_caching"};
+
+    auto mockOfflineCompiler = std::unique_ptr<MockOfflineCompiler>(new MockOfflineCompiler());
+    ASSERT_NE(nullptr, mockOfflineCompiler);
+    mockOfflineCompiler->interceptCreatedDirs = true;
+    auto retVal = mockOfflineCompiler->initialize(argv.size(), argv);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    auto cacheMock = new CompilerCacheMock();
+    cacheMock->loadResult = true;
+    mockOfflineCompiler->cache.reset(cacheMock);
+    mockOfflineCompiler->genBinary = new char[1];
+    mockOfflineCompiler->genBinarySize = sizeof(char);
+    retVal = mockOfflineCompiler->generateElfBinary();
+    EXPECT_TRUE(retVal);
+    EXPECT_FALSE(mockOfflineCompiler->elfBinary.empty());
+    EXPECT_NE(0u, static_cast<uint32_t>(mockOfflineCompiler->elfBinarySize));
 }
 
 TEST(OfflineCompilerTest, WhenParsingCmdLineThenOptionsAreReadCorrectly) {

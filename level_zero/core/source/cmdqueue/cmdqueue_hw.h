@@ -70,6 +70,16 @@ struct CommandQueueHw : public CommandQueueImp {
 
         inline bool isNEODebuggerActive(Device *device);
 
+        NEO::StreamProperties cmdListBeginState{};
+
+        size_t spaceForResidency = 0;
+        NEO::PreemptionMode preemptionMode{};
+        NEO::PreemptionMode statePreemption{};
+        uint32_t perThreadScratchSpaceSize = 0;
+        uint32_t perThreadPrivateScratchSize = 0;
+        int32_t engineInstanced = -1;
+        UnifiedMemoryControls unifiedMemoryControls{};
+
         bool anyCommandListWithCooperativeKernels = false;
         bool anyCommandListWithoutCooperativeKernels = false;
         bool anyCommandListRequiresDisabledEUFusion = false;
@@ -78,13 +88,6 @@ struct CommandQueueHw : public CommandQueueImp {
         bool containsAnyRegularCmdList = false;
         bool gsbaStateDirty = false;
         bool frontEndStateDirty = false;
-        size_t spaceForResidency = 0;
-        NEO::StreamProperties cmdListBeginState{};
-        NEO::PreemptionMode preemptionMode{};
-        NEO::PreemptionMode statePreemption{};
-        uint32_t perThreadScratchSpaceSize = 0;
-        uint32_t perThreadPrivateScratchSize = 0;
-        int32_t engineInstanced = -1;
         const bool isPreemptionModeInitial{false};
         bool isDevicePreemptionModeMidThread{};
         bool isDebugEnabled{};
@@ -94,7 +97,6 @@ struct CommandQueueHw : public CommandQueueImp {
         bool isDirectSubmissionEnabled{};
         bool isDispatchTaskCountPostSyncRequired{};
         bool hasIndirectAccess{};
-        UnifiedMemoryControls unifiedMemoryControls;
     };
 
     ze_result_t validateCommandListsParams(CommandListExecutionContext &ctx,
@@ -165,7 +167,6 @@ struct CommandQueueHw : public CommandQueueImp {
     inline void dispatchTaskCountPostSyncByMiFlushDw(bool isDispatchTaskCountPostSyncRequired, NEO::LinearStream &commandStream);
     NEO::SubmissionStatus prepareAndSubmitBatchBuffer(CommandListExecutionContext &ctx, NEO::LinearStream &innerCommandStream);
 
-    inline bool isCleanLeftoverMemoryRequired();
     inline void cleanLeftoverMemory(NEO::LinearStream &outerCommandStream, NEO::LinearStream &innerCommandStream);
     inline void updateTaskCountAndPostSync(bool isDispatchTaskCountPostSyncRequired);
     inline ze_result_t waitForCommandQueueCompletionAndCleanHeapContainer();
@@ -180,6 +181,17 @@ struct CommandQueueHw : public CommandQueueImp {
                                                 NEO::StreamProperties &csrState,
                                                 const NEO::StreamProperties &cmdListRequired,
                                                 const NEO::StreamProperties &cmdListFinal);
+
+    inline size_t estimateScmCmdSizeForMultipleCommandLists(NEO::StreamProperties &csrStateCopy,
+                                                            const NEO::StreamProperties &cmdListRequired,
+                                                            const NEO::StreamProperties &cmdListFinal);
+    inline void programRequiredStateComputeModeForCommandList(CommandList *commandList,
+                                                              NEO::LinearStream &commandStream,
+                                                              NEO::StreamProperties &csrState,
+                                                              const NEO::StreamProperties &cmdListRequired,
+                                                              const NEO::StreamProperties &cmdListFinal);
+
+    inline void updateBaseAddressState(CommandList *lastCommandList);
 
     size_t alignedChildStreamPadding{};
 };

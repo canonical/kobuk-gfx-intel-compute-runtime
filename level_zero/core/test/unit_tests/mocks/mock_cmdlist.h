@@ -54,17 +54,20 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::estimateBufferSizeMultiTileBarrier;
     using BaseClass::finalStreamState;
     using BaseClass::flags;
+    using BaseClass::frontEndStateTracking;
     using BaseClass::getAlignedAllocation;
     using BaseClass::getAllocationFromHostPtrMap;
+    using BaseClass::getDcFlushRequired;
     using BaseClass::getHostPtrAlloc;
     using BaseClass::hostPtrMap;
+    using BaseClass::immediateCmdListHeapSharing;
     using BaseClass::indirectAllocationsAllowed;
     using BaseClass::initialize;
-    using BaseClass::multiReturnPointCommandList;
     using BaseClass::partitionCount;
     using BaseClass::patternAllocations;
     using BaseClass::pipelineSelectStateTracking;
     using BaseClass::requiredStreamState;
+    using BaseClass::stateComputeModeTracking;
     using BaseClass::unifiedMemoryControls;
     using BaseClass::updateStreamProperties;
 
@@ -121,20 +124,26 @@ struct WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>
     using BaseClass::commandsToPatch;
     using BaseClass::csr;
     using BaseClass::finalStreamState;
+    using BaseClass::frontEndStateTracking;
+    using BaseClass::getDcFlushRequired;
+    using BaseClass::getHostPtrAlloc;
+    using BaseClass::immediateCmdListHeapSharing;
     using BaseClass::isFlushTaskSubmissionEnabled;
-    using BaseClass::multiReturnPointCommandList;
     using BaseClass::partitionCount;
     using BaseClass::pipelineSelectStateTracking;
     using BaseClass::requiredStreamState;
+    using BaseClass::stateComputeModeTracking;
 
     WhiteBox() : BaseClass(BaseClass::defaultNumIddsPerBlock) {}
 };
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 struct MockCommandListImmediate : public CommandListCoreFamilyImmediate<gfxCoreFamily> {
-    using CommandListCoreFamilyImmediate<gfxCoreFamily>::requiredStreamState;
-    using CommandListCoreFamilyImmediate<gfxCoreFamily>::containsAnyKernel;
-    using CommandListCoreFamilyImmediate<gfxCoreFamily>::indirectAllocationsAllowed;
+    using BaseClass = CommandListCoreFamilyImmediate<gfxCoreFamily>;
+    using BaseClass::containsAnyKernel;
+    using BaseClass::immediateCmdListHeapSharing;
+    using BaseClass::indirectAllocationsAllowed;
+    using BaseClass::requiredStreamState;
 };
 
 template <>
@@ -145,12 +154,15 @@ struct WhiteBox<::L0::CommandList> : public ::L0::CommandListImp {
     using BaseClass::commandContainer;
     using BaseClass::commandListPreemptionMode;
     using BaseClass::csr;
+    using BaseClass::frontEndStateTracking;
+    using BaseClass::getDcFlushRequired;
+    using BaseClass::immediateCmdListHeapSharing;
     using BaseClass::initialize;
     using BaseClass::isFlushTaskSubmissionEnabled;
-    using BaseClass::multiReturnPointCommandList;
     using BaseClass::nonImmediateLogicalStateHelper;
     using BaseClass::partitionCount;
     using BaseClass::pipelineSelectStateTracking;
+    using BaseClass::stateComputeModeTracking;
 
     WhiteBox(Device *device);
     ~WhiteBox() override;
@@ -177,9 +189,9 @@ struct MockCommandList : public CommandList {
     ADDMETHOD_NOBASE(appendLaunchCooperativeKernel, ze_result_t, ZE_RESULT_SUCCESS,
                      (ze_kernel_handle_t kernelHandle,
                       const ze_group_count_t *launchKernelArgs,
-                      ze_event_handle_t hSignalEvent,
+                      ze_event_handle_t signalEvent,
                       uint32_t numWaitEvents,
-                      ze_event_handle_t *phWaitEvents));
+                      ze_event_handle_t *waitEventHandles));
 
     ADDMETHOD_NOBASE(appendLaunchKernelIndirect, ze_result_t, ZE_RESULT_SUCCESS,
                      (ze_kernel_handle_t kernelHandle,
@@ -475,6 +487,7 @@ class MockCommandListImmediateHw : public WhiteBox<::L0::CommandListCoreFamilyIm
     using BaseClass = WhiteBox<::L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>;
     MockCommandListImmediateHw() : BaseClass() {}
     using BaseClass::applyMemoryRangesBarrier;
+    using BaseClass::dependenciesPresent;
     using BaseClass::isFlushTaskSubmissionEnabled;
     using BaseClass::isSyncModeQueue;
 

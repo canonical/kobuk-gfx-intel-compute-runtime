@@ -786,13 +786,15 @@ cl_mem CL_API_CALL clCreateSubBuffer(cl_mem buffer,
             break;
         }
 
+        if (parentBuffer->isSubBuffer() == true) {
+            if (!parentBuffer->getContext()->getBufferPoolAllocator().isPoolBuffer(parentBuffer->getAssociatedMemObject()) || parentBuffer->isSubBufferFromPool) {
+                retVal = CL_INVALID_MEM_OBJECT;
+                break;
+            }
+        }
+
         cl_mem_flags parentFlags = parentBuffer->getFlags();
         cl_mem_flags_intel parentFlagsIntel = parentBuffer->getFlagsIntel();
-
-        if (parentBuffer->isSubBuffer() == true) {
-            retVal = CL_INVALID_MEM_OBJECT;
-            break;
-        }
 
         /* Check whether flag is valid. */
         if (((flags & CL_MEM_HOST_READ_ONLY) && (flags & CL_MEM_HOST_NO_ACCESS)) ||
@@ -3507,6 +3509,17 @@ cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue commandQueue,
     }
 
     Kernel *pKernel = pMultiDeviceKernel->getKernel(pCommandQueue->getDevice().getRootDeviceIndex());
+
+    auto localMemSize = static_cast<uint32_t>(pCommandQueue->getDevice().getDeviceInfo().localMemSize);
+    auto slmInlineSize = pKernel->getDescriptor().kernelAttributes.slmInlineSize;
+
+    if (slmInlineSize > 0 && localMemSize < slmInlineSize) {
+        PRINT_DEBUG_STRING(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "Size of SLM (%u) larger than available (%u)\n", slmInlineSize, localMemSize);
+        retVal = CL_OUT_OF_RESOURCES;
+        TRACING_EXIT(ClEnqueueNdRangeKernel, &retVal);
+        return retVal;
+    }
+
     if ((pKernel->getExecutionType() != KernelExecutionType::Default) ||
         pKernel->usesSyncBuffer()) {
         retVal = CL_INVALID_KERNEL;
@@ -5097,9 +5110,8 @@ cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel kernel,
         return retVal;
     }
     default: {
-        retVal = pMultiDeviceKernel->setAdditionalKernelExecInfoWithParam(paramName, paramValueSize, paramValue);
-        TRACING_EXIT(ClSetKernelExecInfo, &retVal);
-        return retVal;
+        retVal = CL_INVALID_VALUE;
+        break;
     }
     }
 

@@ -56,6 +56,7 @@ class LinuxSysmanImp : public OsSysman, NEO::NonCopyableOrMovableClass {
     ze_device_handle_t getCoreDeviceHandle() override;
     SysmanDeviceImp *getSysmanDeviceImp();
     std::string getPciCardBusDirectoryPath(std::string realPciPath);
+    static std::string getPciRootPortDirectoryPath(std::string realPciPath);
     void releasePmtObject();
     ze_result_t createPmtHandles();
     void createFwUtilInterface();
@@ -73,7 +74,6 @@ class LinuxSysmanImp : public OsSysman, NEO::NonCopyableOrMovableClass {
     decltype(&NEO::SysCalls::close) closeFunction = NEO::SysCalls::close;
     decltype(&NEO::SysCalls::pread) preadFunction = NEO::SysCalls::pread;
     decltype(&NEO::SysCalls::pwrite) pwriteFunction = NEO::SysCalls::pwrite;
-    decltype(&L0::SysmanUtils::sleep) pSleepFunctionSecs = L0::SysmanUtils::sleep;
     std::string devicePciBdf = "";
     uint32_t rootDeviceIndex = 0u;
     NEO::ExecutionEnvironment *executionEnvironment = nullptr;
@@ -95,6 +95,7 @@ class LinuxSysmanImp : public OsSysman, NEO::NonCopyableOrMovableClass {
     LinuxSysmanImp() = delete;
     SysmanDeviceImp *pParentSysmanDeviceImp = nullptr;
     static const std::string deviceDir;
+    void clearHPIE(int fd);
 };
 
 } // namespace L0

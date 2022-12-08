@@ -275,6 +275,7 @@ struct MockDebugSessionLinux : public L0::DebugSessionLinux {
     using L0::DebugSessionLinux::ioctlHandler;
     using L0::DebugSessionLinux::newlyStoppedThreads;
     using L0::DebugSessionLinux::pendingInterrupts;
+    using L0::DebugSessionLinux::pendingVmBindEvents;
     using L0::DebugSessionLinux::printContextVms;
     using L0::DebugSessionLinux::pushApiEvent;
     using L0::DebugSessionLinux::readEventImp;
@@ -294,6 +295,21 @@ struct MockDebugSessionLinux : public L0::DebugSessionLinux {
     MockDebugSessionLinux(const zet_debug_config_t &config, L0::Device *device, int debugFd) : DebugSessionLinux(config, device, debugFd) {
         clientHandleToConnection[mockClientHandle].reset(new ClientConnection);
         clientHandle = mockClientHandle;
+        createEuThreads();
+    }
+
+    ze_result_t initialize() override {
+        if (initializeRetVal != ZE_RESULT_FORCE_UINT32) {
+            bool isRootDevice = !connectedDevice->getNEODevice()->isSubDevice();
+            if (isRootDevice && !tileAttachEnabled) {
+                createEuThreads();
+            }
+            createTileSessionsIfEnabled();
+
+            clientHandle = mockClientHandle;
+            return initializeRetVal;
+        }
+        return DebugSessionLinux::initialize();
     }
 
     std::unordered_map<uint64_t, std::pair<std::string, uint32_t>> &getClassHandleToIndex() {
@@ -382,6 +398,14 @@ struct MockDebugSessionLinux : public L0::DebugSessionLinux {
         return L0::DebugSessionLinux::checkThreadIsResumed(threadID);
     }
 
+    void startInternalEventsThread() override {
+        if (synchronousInternalEventRead) {
+            internalThreadHasStarted = true;
+            return;
+        }
+        return DebugSessionLinux::startInternalEventsThread();
+    }
+
     std::unique_ptr<uint64_t[]> getInternalEvent() override {
         getInternalEventCounter++;
         if (synchronousInternalEventRead) {
@@ -390,8 +414,14 @@ struct MockDebugSessionLinux : public L0::DebugSessionLinux {
         return DebugSessionLinux::getInternalEvent();
     }
 
+    void processPendingVmBindEvents() override {
+        processPendingVmBindEventsCalled++;
+        return DebugSessionLinux::processPendingVmBindEvents();
+    }
+
     TileDebugSessionLinux *createTileSession(const zet_debug_config_t &config, L0::Device *device, L0::DebugSessionImp *rootDebugSession) override;
 
+    ze_result_t initializeRetVal = ZE_RESULT_FORCE_UINT32;
     bool allThreadsStopped = false;
     int64_t returnTimeDiff = -1;
     static constexpr uint64_t mockClientHandle = 1;
@@ -406,6 +436,7 @@ struct MockDebugSessionLinux : public L0::DebugSessionLinux {
     bool skipcheckThreadIsResumed = true;
     uint32_t checkThreadIsResumedCalled = 0;
     uint32_t interruptedDevice = std::numeric_limits<uint32_t>::max();
+    uint32_t processPendingVmBindEventsCalled = 0;
 
     std::vector<uint32_t> resumedDevices;
     std::vector<std::vector<EuThread::ThreadId>> resumedThreads;
@@ -584,7 +615,7 @@ struct MockDebugSessionLinuxHelper {
     }
 
     void addIsaVmBindEvent(MockDebugSessionLinux *session, uint64_t vm, bool ack, bool create) {
-        uint64_t vmBindIsaData[sizeof(prelim_drm_i915_debug_event_vm_bind) / sizeof(uint64_t) + 3 * sizeof(typeOfUUID)];
+        uint64_t vmBindIsaData[(sizeof(prelim_drm_i915_debug_event_vm_bind) + 3 * sizeof(typeOfUUID) + sizeof(uint64_t)) / sizeof(uint64_t)];
         prelim_drm_i915_debug_event_vm_bind *vmBindIsa = reinterpret_cast<prelim_drm_i915_debug_event_vm_bind *>(&vmBindIsaData);
 
         vmBindIsa->base.type = PRELIM_DRM_I915_DEBUG_EVENT_VM_BIND;
@@ -614,6 +645,39 @@ struct MockDebugSessionLinuxHelper {
 
         memcpy(uuids, uuidsTemp, sizeof(uuidsTemp));
 
+        session->handleEvent(&vmBindIsa->base);
+    }
+
+    void addZebinVmBindEvent(MockDebugSessionLinux *session, uint64_t vm, bool ack, bool create, uint64_t kernelIndex) {
+        uint64_t vmBindIsaData[(sizeof(prelim_drm_i915_debug_event_vm_bind) + 4 * sizeof(typeOfUUID) + sizeof(uint64_t)) / sizeof(uint64_t)];
+        prelim_drm_i915_debug_event_vm_bind *vmBindIsa = reinterpret_cast<prelim_drm_i915_debug_event_vm_bind *>(&vmBindIsaData);
+
+        vmBindIsa->base.type = PRELIM_DRM_I915_DEBUG_EVENT_VM_BIND;
+        if (create) {
+            vmBindIsa->base.flags = PRELIM_DRM_I915_DEBUG_EVENT_CREATE;
+        } else {
+            vmBindIsa->base.flags = PRELIM_DRM_I915_DEBUG_EVENT_DESTROY;
+        }
+
+        if (ack) {
+            vmBindIsa->base.flags |= PRELIM_DRM_I915_DEBUG_EVENT_NEED_ACK;
+        }
+
+        vmBindIsa->base.size = sizeof(prelim_drm_i915_debug_event_vm_bind) + 4 * sizeof(typeOfUUID);
+        vmBindIsa->base.seqno = 10;
+        vmBindIsa->client_handle = MockDebugSessionLinux::mockClientHandle;
+        vmBindIsa->va_start = kernelIndex == 0 ? isaGpuVa : isaGpuVa + isaSize;
+        vmBindIsa->va_length = isaSize;
+        vmBindIsa->vm_handle = vm;
+        vmBindIsa->num_uuids = 4;
+        auto *uuids = reinterpret_cast<typeOfUUID *>(ptrOffset(vmBindIsaData, sizeof(prelim_drm_i915_debug_event_vm_bind)));
+        typeOfUUID uuidsTemp[4];
+        uuidsTemp[0] = static_cast<typeOfUUID>(isaUUID);
+        uuidsTemp[1] = static_cast<typeOfUUID>(cookieUUID);
+        uuidsTemp[2] = static_cast<typeOfUUID>(elfUUID);
+        uuidsTemp[3] = static_cast<typeOfUUID>(zebinModuleUUID);
+
+        memcpy_s(uuids, 4 * sizeof(typeOfUUID), uuidsTemp, sizeof(uuidsTemp));
         session->handleEvent(&vmBindIsa->base);
     }
 

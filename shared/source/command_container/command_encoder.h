@@ -30,6 +30,7 @@ class IndirectHeap;
 class LogicalStateHelper;
 class Gmm;
 struct HardwareInfo;
+struct KernelInfo;
 struct StateComputeModeProperties;
 
 struct EncodeDispatchKernelArgs {
@@ -51,6 +52,7 @@ struct EncodeDispatchKernelArgs {
     bool isKernelUsingSystemAllocation = false;
     bool isKernelDispatchedFromImmediateCmdList = false;
     bool isRcs = false;
+    bool dcFlushEnable = false;
 };
 
 struct EncodeWalkerArgs {
@@ -74,7 +76,7 @@ struct EncodeDispatchKernel {
     static void setGrfInfo(INTERFACE_DESCRIPTOR_DATA *pInterfaceDescriptor, uint32_t numGrf, const size_t &sizeCrossThreadData,
                            const size_t &sizePerThreadData, const HardwareInfo &hwInfo);
 
-    static void *getInterfaceDescriptor(CommandContainer &container, uint32_t &iddOffset);
+    static void *getInterfaceDescriptor(CommandContainer &container, uint32_t &iddOffset, const HardwareInfo &hwInfo);
 
     static bool isRuntimeLocalIdsGenerationRequired(uint32_t activeChannels,
                                                     const size_t *lws,
@@ -107,11 +109,15 @@ struct EncodeDispatchKernel {
 
     static void adjustTimestampPacket(WALKER_TYPE &walkerCmd, const HardwareInfo &hwInfo);
 
-    static void setupPostSyncMocs(WALKER_TYPE &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment);
+    static void setupPostSyncMocs(WALKER_TYPE &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment, bool dcFlush);
 
     static void adjustWalkOrder(WALKER_TYPE &walkerCmd, uint32_t requiredWorkGroupOrder, const HardwareInfo &hwInfo);
 
     static constexpr bool shouldUpdateGlobalAtomics(bool &currentVal, bool refVal, bool updateCurrent);
+
+    static size_t getSizeRequiredDsh(const KernelInfo &kernelInfo);
+    static size_t getSizeRequiredSsh(const KernelInfo &kernelInfo);
+    inline static uint32_t additionalSizeRequiredDsh();
 };
 
 template <typename GfxFamily>
@@ -121,8 +127,8 @@ struct EncodeStates {
     using SAMPLER_STATE = typename GfxFamily::SAMPLER_STATE;
     using SAMPLER_BORDER_COLOR_STATE = typename GfxFamily::SAMPLER_BORDER_COLOR_STATE;
 
-    static const uint32_t alignIndirectStatePointer = MemoryConstants::cacheLineSize;
-    static const size_t alignInterfaceDescriptorData = MemoryConstants::cacheLineSize;
+    static constexpr uint32_t alignIndirectStatePointer = MemoryConstants::cacheLineSize;
+    static constexpr size_t alignInterfaceDescriptorData = MemoryConstants::cacheLineSize;
 
     static uint32_t copySamplerState(IndirectHeap *dsh,
                                      uint32_t samplerStateOffset,
@@ -327,7 +333,7 @@ struct EncodeComputeMode {
     static size_t getCmdSizeForComputeMode(const HardwareInfo &hwInfo, bool hasSharedHandles, bool isRcs);
     static void programComputeModeCommandWithSynchronization(LinearStream &csr, StateComputeModeProperties &properties,
                                                              const PipelineSelectArgs &args, bool hasSharedHandles,
-                                                             const HardwareInfo &hwInfo, bool isRcs, LogicalStateHelper *logicalStateHelper);
+                                                             const HardwareInfo &hwInfo, bool isRcs, bool dcFlush, LogicalStateHelper *logicalStateHelper);
     static void programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const HardwareInfo &hwInfo, LogicalStateHelper *logicalStateHelper);
 
     static void adjustPipelineSelect(CommandContainer &container, const NEO::KernelDescriptor &kernelDescriptor);
@@ -343,7 +349,7 @@ struct EncodeWA {
                                                               const HardwareInfo &hwInfo, bool isRcs);
     static void setAdditionalPipeControlFlagsForNonPipelineStateCommand(PipeControlArgs &args);
 
-    static void addPipeControlBeforeStateBaseAddress(LinearStream &commandStream, const HardwareInfo &hwInfo, bool isRcs);
+    static void addPipeControlBeforeStateBaseAddress(LinearStream &commandStream, const HardwareInfo &hwInfo, bool isRcs, bool dcFlushRequired);
 
     static void adjustCompressionFormatForPlanarImage(uint32_t &compressionFormat, GMM_YUV_PLANE_ENUM plane);
 };

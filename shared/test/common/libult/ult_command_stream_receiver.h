@@ -33,12 +33,14 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::checkPlatformSupportsGpuIdleImplicitFlush;
     using BaseClass::checkPlatformSupportsNewResourceImplicitFlush;
     using BaseClass::createKernelArgsBufferAllocation;
+    using BaseClass::csrSizeRequestFlags;
     using BaseClass::directSubmission;
     using BaseClass::dshState;
     using BaseClass::getCmdSizeForPrologue;
     using BaseClass::getScratchPatchAddress;
     using BaseClass::getScratchSpaceController;
     using BaseClass::handleFrontEndStateTransition;
+    using BaseClass::handlePipelineSelectStateTransition;
     using BaseClass::indirectHeap;
     using BaseClass::iohState;
     using BaseClass::isBlitterDirectSubmissionEnabled;
@@ -110,6 +112,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::osContext;
     using BaseClass::CommandStreamReceiver::ownershipMutex;
     using BaseClass::CommandStreamReceiver::perfCounterAllocator;
+    using BaseClass::CommandStreamReceiver::pipelineSupportFlags;
     using BaseClass::CommandStreamReceiver::postSyncWriteOffset;
     using BaseClass::CommandStreamReceiver::profilingTimeStampAllocator;
     using BaseClass::CommandStreamReceiver::requiredPrivateScratchSize;
@@ -118,7 +121,6 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::CommandStreamReceiver::scratchSpaceController;
     using BaseClass::CommandStreamReceiver::stallingCommandsOnNextFlushRequired;
     using BaseClass::CommandStreamReceiver::submissionAggregator;
-    using BaseClass::CommandStreamReceiver::systolicModeConfigurable;
     using BaseClass::CommandStreamReceiver::tagAddress;
     using BaseClass::CommandStreamReceiver::taskCount;
     using BaseClass::CommandStreamReceiver::taskLevel;
@@ -197,6 +199,13 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
             return BaseClass::waitForCompletionWithTimeout(params, taskCountToWait);
         }
         return returnWaitForCompletionWithTimeout;
+    }
+
+    void fillReusableAllocationsList() override {
+        fillReusableAllocationsListCalled++;
+        if (callBaseFillReusableAllocationsList) {
+            return BaseClass::fillReusableAllocationsList();
+        }
     }
 
     WaitStatus waitForCompletionWithTimeout(bool enableTimeout, int64_t timeoutMicroseconds, uint32_t taskCountToWait) {
@@ -356,6 +365,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     uint32_t blitBufferCalled = 0;
     uint32_t createPerDssBackedBufferCalled = 0;
     uint32_t initDirectSubmissionCalled = 0;
+    uint32_t fillReusableAllocationsListCalled = 0;
     int ensureCommandBufferAllocationCalled = 0;
     DispatchFlags recordedDispatchFlags;
     BlitPropertiesContainer receivedBlitProperties = {};
@@ -378,6 +388,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     bool callBaseWaitForCompletionWithTimeout = true;
     bool shouldFailFlushBatchedSubmissions = false;
     bool shouldFlushBatchedSubmissionsReturnSuccess = false;
+    bool callBaseFillReusableAllocationsList = false;
     WaitStatus returnWaitForCompletionWithTimeout = WaitStatus::Ready;
     std::optional<WaitStatus> waitForTaskCountWithKmdNotifyFallbackReturnValue{};
     bool callBaseFlushBcsTask{true};

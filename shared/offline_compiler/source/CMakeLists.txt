@@ -12,6 +12,8 @@ set(OCLOC_FOLDER_NAME "offline_compiler")
 set(CLOC_LIB_SRCS_LIB
     ${NEO_SHARED_DIRECTORY}/compiler_interface/compiler_options.cpp
     ${NEO_SHARED_DIRECTORY}/compiler_interface/compiler_options.h
+    ${NEO_SHARED_DIRECTORY}/compiler_interface/compiler_cache.cpp
+    ${NEO_SHARED_DIRECTORY}/compiler_interface/compiler_cache.h
     ${NEO_SHARED_DIRECTORY}/compiler_interface/create_main.cpp
     ${NEO_SHARED_DIRECTORY}/compiler_interface/oclc_extensions.cpp
     ${NEO_SHARED_DIRECTORY}/compiler_interface/oclc_extensions.h
@@ -56,6 +58,10 @@ set(CLOC_LIB_SRCS_LIB
     ${NEO_SHARED_DIRECTORY}/helpers/product_config_helper.cpp
     ${NEO_SHARED_DIRECTORY}/helpers/product_config_helper.h
     ${NEO_SHARED_DIRECTORY}/os_interface/os_library.h
+    ${NEO_SHARED_DIRECTORY}/utilities/directory.h
+    ${NEO_SHARED_DIRECTORY}/utilities/io_functions.cpp
+    ${NEO_SHARED_DIRECTORY}/utilities/io_functions.h
+    ${OCLOC_DIRECTORY}/source/default_cache_config.cpp
     ${OCLOC_DIRECTORY}/source/decoder/binary_decoder.cpp
     ${OCLOC_DIRECTORY}/source/decoder/binary_decoder.h
     ${OCLOC_DIRECTORY}/source/decoder/binary_encoder.cpp
@@ -64,6 +70,8 @@ set(CLOC_LIB_SRCS_LIB
     ${OCLOC_DIRECTORY}/source/decoder/helper.h
     ${OCLOC_DIRECTORY}/source/decoder/iga_wrapper.h
     ${OCLOC_DIRECTORY}/source/decoder/translate_platform_base.h
+    ${OCLOC_DIRECTORY}/source/decoder/zebin_manipulator.cpp
+    ${OCLOC_DIRECTORY}/source/decoder/zebin_manipulator.h
     ${OCLOC_DIRECTORY}/source/multi_command.cpp
     ${OCLOC_DIRECTORY}/source/multi_command.h
     ${OCLOC_DIRECTORY}/source/ocloc_api.cpp
@@ -81,6 +89,8 @@ set(CLOC_LIB_SRCS_LIB
     ${OCLOC_DIRECTORY}/source/ocloc_fcl_facade.h
     ${OCLOC_DIRECTORY}/source/ocloc_igc_facade.cpp
     ${OCLOC_DIRECTORY}/source/ocloc_igc_facade.h
+    ${OCLOC_DIRECTORY}/source/ocloc_interface.cpp
+    ${OCLOC_DIRECTORY}/source/ocloc_interface.h
     ${OCLOC_DIRECTORY}/source/ocloc_validator.cpp
     ${OCLOC_DIRECTORY}/source/ocloc_validator.h
     ${OCLOC_DIRECTORY}/source/offline_compiler.cpp
@@ -109,16 +119,20 @@ endif()
 if(WIN32)
   list(APPEND CLOC_LIB_SRCS_LIB
        ${NEO_SHARED_DIRECTORY}/dll/windows/options_windows.cpp
+       ${NEO_SHARED_DIRECTORY}/os_interface/windows/os_inc.h
        ${NEO_SHARED_DIRECTORY}/os_interface/windows/os_library_win.cpp
        ${NEO_SHARED_DIRECTORY}/os_interface/windows/os_library_win.h
+       ${NEO_SOURCE_DIR}/shared/source/utilities/windows/directory.cpp
   )
 else()
   list(APPEND CLOC_LIB_SRCS_LIB
        ${NEO_SHARED_DIRECTORY}/dll/linux/options_linux.cpp
+       ${NEO_SHARED_DIRECTORY}/os_interface/linux/os_inc.h
        ${NEO_SHARED_DIRECTORY}/os_interface/linux/os_library_linux.cpp
        ${NEO_SHARED_DIRECTORY}/os_interface/linux/os_library_linux.h
        ${NEO_SHARED_DIRECTORY}/os_interface/linux/sys_calls_linux.cpp
        ${OCLOC_DIRECTORY}/source/linux/os_library_ocloc_helper.cpp
+       ${NEO_SOURCE_DIR}/shared/source/utilities/linux/directory.cpp
   )
 endif()
 
@@ -197,6 +211,16 @@ set(CLOC_LIB_INCLUDES
     ${KHRONOS_HEADERS_DIR}
     ${NEO__IGC_INCLUDE_DIR}
 )
+
+if(WIN32)
+  list(APPEND CLOC_LIB_INCLUDES
+       ${NEO_SHARED_DIRECTORY}/os_interface/windows
+  )
+else()
+  list(APPEND CLOC_LIB_INCLUDES
+       ${NEO_SHARED_DIRECTORY}/os_interface/linux
+  )
+endif()
 
 target_include_directories(${OCLOC_NAME}_lib BEFORE PRIVATE ${CLOC_LIB_INCLUDES})
 target_include_directories(${OCLOC_NAME}_lib BEFORE PRIVATE ${IGA_INCLUDE_DIR})

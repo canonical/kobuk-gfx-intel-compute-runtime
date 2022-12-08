@@ -7,6 +7,7 @@
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
+#include "shared/source/os_interface/os_time.h"
 
 #include "level_zero/core/source/event/event.h"
 #include "level_zero/core/source/hw_helpers/l0_hw_helper.h"
@@ -42,7 +43,7 @@ Event *Event::create(EventPool *eventPool, const ze_event_desc_t *desc, Device *
     // do not reset even if it has been imported, since event pool
     // might have been imported after events being already signaled
     if (eventPoolImp->isImportedIpcPool == false) {
-        event->reset();
+        event->resetDeviceCompletionData();
     }
 
     return event;
@@ -167,18 +168,24 @@ template <typename TagSizeT>
 ze_result_t EventImp<TagSizeT>::hostEventSetValueTimestamps(TagSizeT eventVal) {
 
     auto baseAddr = castToUint64(hostAddress);
-
-    auto eventTsSetFunc = [&eventVal](auto tsAddr) {
+    auto eventTsSetFunc = [](auto tsAddr, TagSizeT value) {
         auto tsptr = reinterpret_cast<void *>(tsAddr);
-        memcpy_s(tsptr, sizeof(TagSizeT), static_cast<void *>(&eventVal), sizeof(TagSizeT));
+        memcpy_s(tsptr, sizeof(TagSizeT), static_cast<void *>(&value), sizeof(TagSizeT));
     };
+
+    TagSizeT timestampStart = eventVal;
+    TagSizeT timestampEnd = eventVal;
+    if (eventVal == Event::STATE_SIGNALED) {
+        timestampStart = static_cast<TagSizeT>(this->gpuStartTimestamp);
+        timestampEnd = static_cast<TagSizeT>(this->gpuEndTimestamp);
+    }
     for (uint32_t i = 0; i < kernelCount; i++) {
         uint32_t packetsToSet = kernelEventCompletionData[i].getPacketsUsed();
         for (uint32_t j = 0; j < packetsToSet; j++) {
-            eventTsSetFunc(baseAddr + contextStartOffset);
-            eventTsSetFunc(baseAddr + globalStartOffset);
-            eventTsSetFunc(baseAddr + contextEndOffset);
-            eventTsSetFunc(baseAddr + globalEndOffset);
+            eventTsSetFunc(baseAddr + contextStartOffset, timestampStart);
+            eventTsSetFunc(baseAddr + globalStartOffset, timestampStart);
+            eventTsSetFunc(baseAddr + contextEndOffset, timestampEnd);
+            eventTsSetFunc(baseAddr + globalEndOffset, timestampEnd);
             baseAddr += singlePacketSize;
         }
     }
@@ -278,15 +285,20 @@ ze_result_t EventImp<TagSizeT>::hostSynchronize(uint64_t timeout) {
 
 template <typename TagSizeT>
 ze_result_t EventImp<TagSizeT>::reset() {
-    kernelCount = EventPacketsCount::maxKernelSplit;
-    for (uint32_t i = 0; i < kernelCount; i++) {
-        kernelEventCompletionData[i].setPacketsUsed(NEO::TimestampPacketSizeControl::preferredPacketCount);
-    }
-    hostEventSetValue(Event::STATE_INITIAL);
-    resetPackets();
-    resetCompletion();
+    this->resetCompletion();
+    this->resetDeviceCompletionData();
     this->l3FlushAppliedOnKernel.reset();
     return ZE_RESULT_SUCCESS;
+}
+
+template <typename TagSizeT>
+void EventImp<TagSizeT>::resetDeviceCompletionData() {
+    this->kernelCount = EventPacketsCount::maxKernelSplit;
+    for (uint32_t i = 0; i < kernelCount; i++) {
+        this->kernelEventCompletionData[i].setPacketsUsed(NEO::TimestampPacketSizeControl::preferredPacketCount);
+    }
+    this->hostEventSetValue(Event::STATE_INITIAL);
+    this->resetPackets();
 }
 
 template <typename TagSizeT>
@@ -316,7 +328,6 @@ ze_result_t EventImp<TagSizeT>::queryKernelTimestamp(ze_kernel_timestamp_result_
         eventTsSetFunc(globalEndTS, result.context.kernelEnd);
         eventTsSetFunc(globalEndTS, result.global.kernelEnd);
     }
-
     return ZE_RESULT_SUCCESS;
 }
 
@@ -379,6 +390,10 @@ void EventImp<TagSizeT>::resetPackets() {
         kernelEventCompletionData[i].setPacketsUsed(1);
     }
     kernelCount = 1;
+    cpuStartTimestamp = 0;
+    gpuStartTimestamp = 0;
+    gpuEndTimestamp = 0;
+    this->csr = this->device->getNEODevice()->getDefaultEngine().commandStreamReceiver;
 }
 
 template <typename TagSizeT>
@@ -408,6 +423,23 @@ uint64_t EventImp<TagSizeT>::getPacketAddress(Device *device) {
                    singlePacketSize;
     }
     return address;
+}
+
+template <typename TagSizeT>
+void EventImp<TagSizeT>::setGpuStartTimestamp() {
+    if (isEventTimestampFlagSet()) {
+        this->device->getGlobalTimestamps(&cpuStartTimestamp, &gpuStartTimestamp);
+        cpuStartTimestamp = cpuStartTimestamp / this->device->getNEODevice()->getDeviceInfo().outProfilingTimerResolution;
+    }
+}
+
+template <typename TagSizeT>
+void EventImp<TagSizeT>::setGpuEndTimestamp() {
+    if (isEventTimestampFlagSet()) {
+        auto resolution = this->device->getNEODevice()->getDeviceInfo().outProfilingTimerResolution;
+        auto cpuEndTimestamp = this->device->getNEODevice()->getOSTime()->getCpuRawTimestamp() / resolution;
+        this->gpuEndTimestamp = gpuStartTimestamp + (cpuEndTimestamp - cpuStartTimestamp);
+    }
 }
 
 } // namespace L0

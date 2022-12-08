@@ -7,6 +7,7 @@
 
 #include "level_zero/tools/source/sysman/linux/os_sysman_imp.h"
 
+#include "shared/source/helpers/sleep.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/device_factory.h"
 
@@ -146,7 +147,7 @@ static std::string modifyPathOnLevel(std::string realPciPath, uint8_t nLevel) {
     }
     return realPciPath;
 }
-std::string getPciRootPortDirectoryPath(std::string realPciPath) {
+std::string LinuxSysmanImp::getPciRootPortDirectoryPath(std::string realPciPath) {
     // the rootport is always the first pci folder after the pcie slot.
     //    +-[0000:89]-+-00.0
     // |           +-00.1
@@ -314,6 +315,22 @@ ze_result_t LinuxSysmanImp::initDevice() {
 
     return ZE_RESULT_SUCCESS;
 }
+// function to clear Hot-Plug interrupt enable bit in the slot control register
+// this is required to prevent interrupts from being raised in the warm reset path.
+void LinuxSysmanImp::clearHPIE(int fd) {
+    uint8_t value = 0x00;
+    uint8_t resetValue = 0x00;
+    uint8_t offset = 0x0;
+    this->preadFunction(fd, &offset, 0x01, PCI_CAPABILITY_LIST);
+    // Bottom two bits of capability pointer register are reserved and
+    // software should mask these bits to get pointer to capability list.
+    // PCI_EXP_SLTCTL - offset for slot control register.
+    offset = (offset & 0xfc) + PCI_EXP_SLTCTL;
+    this->preadFunction(fd, &value, 0x01, offset);
+    resetValue = value & (~PCI_EXP_SLTCTL_HPIE);
+    this->pwriteFunction(fd, &resetValue, 0x01, offset);
+    NEO::sleep(std::chrono::seconds(10)); // Sleep for 10seconds just to make sure the change is propagated.
+}
 
 // A 'warm reset' is a conventional reset that is triggered across a PCI express link.
 // A warm reset is triggered either when a link is forced into electrical idle or
@@ -322,40 +339,54 @@ ze_result_t LinuxSysmanImp::initDevice() {
 // in the bridge control register in the PCI configuration space of the bridge port upstream of the device.
 ze_result_t LinuxSysmanImp::osWarmReset() {
     std::string rootPortPath;
-    std::string cardBusPath = getPciCardBusDirectoryPath(gtDevicePath);
-    ze_result_t result = pFsAccess->write(cardBusPath + '/' + "remove", "1");
-    if (ZE_RESULT_SUCCESS != result) {
-        return result;
-    }
-
-    this->pSleepFunctionSecs(10); // Sleep for 10seconds to make sure that the config spaces of all devices are saved correctly
     rootPortPath = getPciRootPortDirectoryPath(gtDevicePath);
 
-    int fd, ret = 0;
-    unsigned int offset = PCI_BRIDGE_CONTROL; // Bridge control offset in Header of PCI config space
-    unsigned int value = 0x00;
-    unsigned int resetValue = 0x00;
+    int fd = 0;
     std::string configFilePath = rootPortPath + '/' + "config";
     fd = this->openFunction(configFilePath.c_str(), O_RDWR);
     if (fd < 0) {
         return ZE_RESULT_ERROR_UNKNOWN;
     }
+
+    std::string cardBusPath = getPciCardBusDirectoryPath(gtDevicePath);
+    ze_result_t result = pFsAccess->write(cardBusPath + '/' + "remove", "1");
+    if (ZE_RESULT_SUCCESS != result) {
+        return result;
+    }
+    if (diagnosticsReset) {
+        NEO::sleep(std::chrono::seconds(30)); // Sleep for 30seconds to make sure that the config spaces of all devices are saved correctly after IFR
+    } else {
+        NEO::sleep(std::chrono::seconds(10)); // Sleep for 10seconds to make sure that the config spaces of all devices are saved correctly
+    }
+
+    clearHPIE(fd);
+
+    uint8_t offset = PCI_BRIDGE_CONTROL; // Bridge control offset in Header of PCI config space
+    uint8_t value = 0x00;
+    uint8_t resetValue = 0x00;
+
     this->preadFunction(fd, &value, 0x01, offset);
     resetValue = value | PCI_BRIDGE_CTL_BUS_RESET;
     this->pwriteFunction(fd, &resetValue, 0x01, offset);
-    this->pSleepFunctionSecs(10); // Sleep for 10seconds just to make sure the change is propagated.
+    NEO::sleep(std::chrono::seconds(10)); // Sleep for 10seconds just to make sure the change is propagated.
     this->pwriteFunction(fd, &value, 0x01, offset);
-    this->pSleepFunctionSecs(10); // Sleep for 10seconds to make sure the change is propagated. before rescan is done.
-    ret = this->closeFunction(fd);
-    if (ret < 0) {
-        return ZE_RESULT_ERROR_UNKNOWN;
-    }
+    NEO::sleep(std::chrono::seconds(10)); // Sleep for 10seconds to make sure the change is propagated. before rescan is done.
 
     result = pFsAccess->write(rootPortPath + '/' + "rescan", "1");
     if (ZE_RESULT_SUCCESS != result) {
         return result;
     }
-    this->pSleepFunctionSecs(10); // Sleep for 10seconds, allows the rescan to complete on all devices attached to the root port.
+    if (diagnosticsReset) {
+        NEO::sleep(std::chrono::seconds(30)); // Sleep for 30seconds to make sure that the config spaces of all devices are saved correctly after IFR
+    } else {
+        NEO::sleep(std::chrono::seconds(10)); // Sleep for 10seconds, allows the rescan to complete on all devices attached to the root port.
+    }
+
+    int ret = this->closeFunction(fd);
+    if (ret < 0) {
+        return ZE_RESULT_ERROR_UNKNOWN;
+    }
+
     return result;
 }
 
@@ -388,7 +419,7 @@ ze_result_t LinuxSysmanImp::osColdReset() {
             if (ZE_RESULT_SUCCESS != result) {
                 return result;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Sleep for 100 milliseconds just to make sure, 1 ms is defined as part of spec
+            NEO::sleep(std::chrono::milliseconds(100));                   // Sleep for 100 milliseconds just to make sure, 1 ms is defined as part of spec
             result = pFsAccess->write((slotPath + slot + "/power"), "1"); // turn on power
             if (ZE_RESULT_SUCCESS != result) {
                 return result;

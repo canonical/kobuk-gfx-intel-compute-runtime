@@ -166,10 +166,7 @@ cl_int Program::createProgramFromBinary(
         auto hwInfo = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->getHardwareInfo();
         auto productAbbreviation = hardwarePrefix[hwInfo->platform.eProductFamily];
 
-        auto copyHwInfo = *hwInfo;
-        CompilerHwInfoConfig::get(copyHwInfo.platform.eProductFamily)->adjustHwInfoForIgc(copyHwInfo);
-
-        TargetDevice targetDevice = targetDeviceFromHwInfo(copyHwInfo);
+        TargetDevice targetDevice = targetDeviceFromHwInfo(*hwInfo);
         std::string decodeErrors;
         std::string decodeWarnings;
         auto singleDeviceBinary = unpackSingleDeviceBinary(archive, ConstStringRef(productAbbreviation, strlen(productAbbreviation)), targetDevice,
@@ -195,8 +192,12 @@ cl_int Program::createProgramFromBinary(
             this->buildInfos[rootDeviceIndex].debugData = makeCopy(reinterpret_cast<const char *>(singleDeviceBinary.debugData.begin()), singleDeviceBinary.debugData.size());
             this->buildInfos[rootDeviceIndex].debugDataSize = singleDeviceBinary.debugData.size();
 
-            bool forceRebuildBuiltInFromIr = isBuiltIn && DebugManager.flags.RebuildPrecompiledKernels.get();
-            if ((false == singleDeviceBinary.deviceBinary.empty()) && (false == forceRebuildBuiltInFromIr)) {
+            bool rebuild = isRebuiltToPatchtokensRequired(&clDevice.getDevice(), archive, this->options, this->isBuiltIn);
+            rebuild |= isBuiltIn && DebugManager.flags.RebuildPrecompiledKernels.get();
+            if (rebuild && 0u == this->irBinarySize) {
+                return CL_INVALID_BINARY;
+            }
+            if ((false == singleDeviceBinary.deviceBinary.empty()) && (false == rebuild)) {
                 this->buildInfos[rootDeviceIndex].unpackedDeviceBinary = makeCopy<char>(reinterpret_cast<const char *>(singleDeviceBinary.deviceBinary.begin()), singleDeviceBinary.deviceBinary.size());
                 this->buildInfos[rootDeviceIndex].unpackedDeviceBinarySize = singleDeviceBinary.deviceBinary.size();
                 this->buildInfos[rootDeviceIndex].packedDeviceBinary = makeCopy<char>(reinterpret_cast<const char *>(archive.begin()), archive.size());
@@ -491,10 +492,10 @@ cl_int Program::processInputDevices(ClDeviceVector *&deviceVectorPtr, cl_uint nu
 }
 
 void Program::prependFilePathToOptions(const std::string &filename) {
-    ConstStringRef cmcOption = "-cmc";
-    if (!filename.empty() && options.compare(0, cmcOption.size(), cmcOption.data())) {
+    auto isCMCOptionUsed = CompilerOptions::contains(options, CompilerOptions::useCMCompiler);
+    if (!filename.empty() && false == isCMCOptionUsed) {
         // Add "-s" flag first so it will be ignored by clang in case the options already have this flag set.
-        options = std::string("-s ") + filename + " " + options;
+        options = CompilerOptions::generateSourcePath.str() + " " + CompilerOptions::wrapInQuotes(filename) + " " + options;
     }
 }
 

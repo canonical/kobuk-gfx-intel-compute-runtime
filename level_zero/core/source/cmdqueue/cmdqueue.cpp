@@ -29,7 +29,7 @@ namespace L0 {
 CommandQueueAllocatorFn commandQueueFactory[IGFX_MAX_PRODUCT] = {};
 
 bool CommandQueue::frontEndTrackingEnabled() const {
-    return NEO::DebugManager.flags.AllowPatchingVfeStateInCommandLists.get() || this->multiReturnPointCommandList;
+    return NEO::DebugManager.flags.AllowPatchingVfeStateInCommandLists.get() || this->frontEndStateTracking;
 }
 
 CommandQueueImp::CommandQueueImp(Device *device, NEO::CommandStreamReceiver *csr, const ze_command_queue_desc_t *desc)
@@ -43,12 +43,10 @@ CommandQueueImp::CommandQueueImp(Device *device, NEO::CommandStreamReceiver *csr
     if (overrideUseKmdWaitFunction != -1) {
         useKmdWaitFunction = !!(overrideUseKmdWaitFunction);
     }
-
-    multiReturnPointCommandList = L0HwHelper::enableMultiReturnPointCommandList();
-    pipelineSelectStateTracking = L0HwHelper::enablePipelineSelectStateTracking();
 }
 
 ze_result_t CommandQueueImp::destroy() {
+    this->csr->unregisterClient();
     delete this;
     return ZE_RESULT_SUCCESS;
 }
@@ -72,6 +70,10 @@ ze_result_t CommandQueueImp::initialize(bool copyOnly, bool isInternal) {
         if (NEO::Debugger::isDebugEnabled(internalUsage) && device->getL0Debugger()) {
             device->getL0Debugger()->notifyCommandQueueCreated(device->getNEODevice());
         }
+        auto &hwInfo = device->getHwInfo();
+        this->stateComputeModeTracking = L0HwHelper::enableStateComputeModeTracking(hwInfo);
+        this->frontEndStateTracking = L0HwHelper::enableFrontEndStateTracking(hwInfo);
+        this->pipelineSelectStateTracking = L0HwHelper::enablePipelineSelectStateTracking(hwInfo);
     }
     return returnValue;
 }
@@ -196,6 +198,7 @@ CommandQueue *CommandQueue::create(uint32_t productFamily, Device *device, NEO::
     }
     osContext.ensureContextInitialized();
     csr->initDirectSubmission();
+    csr->registerClient();
     return commandQueue;
 }
 

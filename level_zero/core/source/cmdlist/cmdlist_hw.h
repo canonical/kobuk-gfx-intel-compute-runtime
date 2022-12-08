@@ -88,9 +88,9 @@ struct CommandListCoreFamily : CommandListImp {
                                    const CmdListKernelLaunchParams &launchParams) override;
     ze_result_t appendLaunchCooperativeKernel(ze_kernel_handle_t kernelHandle,
                                               const ze_group_count_t *launchKernelArgs,
-                                              ze_event_handle_t hSignalEvent,
+                                              ze_event_handle_t signalEvent,
                                               uint32_t numWaitEvents,
-                                              ze_event_handle_t *phWaitEvents) override;
+                                              ze_event_handle_t *waitEventHandles) override;
     ze_result_t appendLaunchKernelIndirect(ze_kernel_handle_t kernelHandle,
                                            const ze_group_count_t *pDispatchArgumentsBuffer,
                                            ze_event_handle_t hEvent, uint32_t numWaitEvents,
@@ -265,7 +265,9 @@ struct CommandListCoreFamily : CommandListImp {
     size_t estimateBufferSizeMultiTileBarrier(const NEO::HardwareInfo &hwInfo);
     uint64_t getInputBufferSize(NEO::ImageType imageType, uint64_t bytesPerPixel, const ze_image_region_t *region);
     MOCKABLE_VIRTUAL AlignedAllocationData getAlignedAllocation(Device *device, const void *buffer, uint64_t bufferSize, bool hostCopyAllowed);
+    size_t getAllocationOffsetForAppendBlitFill(void *ptr, NEO::GraphicsAllocation &gpuAllocation);
     void addFlushRequiredCommand(bool flushOperationRequired, Event *signalEvent);
+    void handlePostSubmissionState();
 
     virtual void createLogicalStateHelper();
 

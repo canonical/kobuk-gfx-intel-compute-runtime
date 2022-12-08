@@ -114,58 +114,90 @@ TEST_F(SetKernelArgCacheTest, givenValidBufferArgumentWhenSetMultipleTimesThenSe
     auto svmAllocsManager = device->getDriverHandle()->getSvmAllocsManager();
     auto allocationProperties = NEO::SVMAllocsManager::SvmAllocationProperties{};
     auto svmAllocation = svmAllocsManager->createSVMAlloc(4096, allocationProperties, context->rootDeviceIndices, context->deviceBitfields);
+    auto allocData = svmAllocsManager->getSVMAlloc(svmAllocation);
 
     size_t callCounter = 0u;
 
-    //first setArg - called
+    // first setArg - called
     EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(svmAllocation), &svmAllocation));
     EXPECT_EQ(++callCounter, mockKernel.setArgBufferWithAllocCalled);
 
-    //same setArg but allocationCounter == 0 - called
+    // same setArg but allocationCounter == 0 - called
+    ASSERT_EQ(svmAllocsManager->allocationsCounter, 0u);
     EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(svmAllocation), &svmAllocation));
     EXPECT_EQ(++callCounter, mockKernel.setArgBufferWithAllocCalled);
 
-    //same setArg - not called and argInfo.allocationCounter is updated
+    // update allocationsCounter to 1
     ++svmAllocsManager->allocationsCounter;
-    EXPECT_EQ(0u, mockKernel.kernelArgInfos[0].allocIdMemoryManagerCounter);
+    ASSERT_EQ(mockKernel.kernelArgInfos[0].allocIdMemoryManagerCounter, 0u);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(svmAllocation), &svmAllocation));
+    EXPECT_EQ(++callCounter, mockKernel.setArgBufferWithAllocCalled);
+    EXPECT_EQ(mockKernel.kernelArgInfos[0].allocIdMemoryManagerCounter, 1u);
+
+    allocData->setAllocId(1u);
+    // same setArg but allocId is uninitialized - called
+    ASSERT_EQ(mockKernel.kernelArgInfos[0].allocId, SvmAllocationData::uninitializedAllocId);
+    ASSERT_EQ(mockKernel.kernelArgInfos[0].allocIdMemoryManagerCounter, svmAllocsManager->allocationsCounter);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(svmAllocation), &svmAllocation));
+    EXPECT_EQ(++callCounter, mockKernel.setArgBufferWithAllocCalled);
+    EXPECT_EQ(mockKernel.kernelArgInfos[0].allocId, 1u);
+
+    ++svmAllocsManager->allocationsCounter;
+    // same setArg - not called and argInfo.allocationCounter is updated
+    EXPECT_EQ(1u, mockKernel.kernelArgInfos[0].allocIdMemoryManagerCounter);
     EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(svmAllocation), &svmAllocation));
     EXPECT_EQ(callCounter, mockKernel.setArgBufferWithAllocCalled);
     EXPECT_EQ(svmAllocsManager->allocationsCounter, mockKernel.kernelArgInfos[0].allocIdMemoryManagerCounter);
 
-    //same setArg and allocationCounter - not called
+    // same setArg and allocationCounter - not called
     EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(svmAllocation), &svmAllocation));
     EXPECT_EQ(callCounter, mockKernel.setArgBufferWithAllocCalled);
 
-    //same setArg but different allocId - called
-    svmAllocsManager->getSVMAlloc(svmAllocation)->setAllocId(1u);
+    // same setArg but different allocId - called
+    allocData->setAllocId(2u);
     ++svmAllocsManager->allocationsCounter;
+    ASSERT_NE(mockKernel.kernelArgInfos[0].allocIdMemoryManagerCounter, svmAllocsManager->allocationsCounter);
+    ASSERT_NE(mockKernel.kernelArgInfos[0].allocId, allocData->getAllocId());
     EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(svmAllocation), &svmAllocation));
     EXPECT_EQ(++callCounter, mockKernel.setArgBufferWithAllocCalled);
+    EXPECT_EQ(mockKernel.kernelArgInfos[0].allocIdMemoryManagerCounter, svmAllocsManager->allocationsCounter);
+    EXPECT_EQ(mockKernel.kernelArgInfos[0].allocId, allocData->getAllocId());
 
-    //different value - called
+    // different value - called
     auto secondSvmAllocation = svmAllocsManager->createSVMAlloc(4096, allocationProperties, context->rootDeviceIndices, context->deviceBitfields);
+    svmAllocsManager->getSVMAlloc(secondSvmAllocation)->setAllocId(3u);
     EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(secondSvmAllocation), &secondSvmAllocation));
     EXPECT_EQ(++callCounter, mockKernel.setArgBufferWithAllocCalled);
 
-    //nullptr - not called, argInfo is updated
+    // nullptr - not called, argInfo is updated
     EXPECT_FALSE(mockKernel.kernelArgInfos[0].isSetToNullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(nullptr), nullptr));
     EXPECT_EQ(callCounter, mockKernel.setArgBufferWithAllocCalled);
     EXPECT_TRUE(mockKernel.kernelArgInfos[0].isSetToNullptr);
 
-    //nullptr again - not called
+    // nullptr again - not called
     EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(nullptr), nullptr));
     EXPECT_EQ(callCounter, mockKernel.setArgBufferWithAllocCalled);
     EXPECT_TRUE(mockKernel.kernelArgInfos[0].isSetToNullptr);
 
-    //same value as before nullptr - called, argInfo is updated
+    // same value as before nullptr - called, argInfo is updated
     EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(secondSvmAllocation), &secondSvmAllocation));
     EXPECT_EQ(++callCounter, mockKernel.setArgBufferWithAllocCalled);
     EXPECT_FALSE(mockKernel.kernelArgInfos[0].isSetToNullptr);
+
+    // allocations counter == 0 called
+    svmAllocsManager->allocationsCounter = 0;
+    EXPECT_EQ(ZE_RESULT_SUCCESS, mockKernel.setArgBuffer(0, sizeof(secondSvmAllocation), &secondSvmAllocation));
+    EXPECT_EQ(++callCounter, mockKernel.setArgBufferWithAllocCalled);
 
     // same value but no svmData - ZE_RESULT_ERROR_INVALID_ARGUMENT
     svmAllocsManager->freeSVMAlloc(secondSvmAllocation);
     ++svmAllocsManager->allocationsCounter;
+    ASSERT_GT(mockKernel.kernelArgInfos[0].allocId, 0u);
+    ASSERT_LT(mockKernel.kernelArgInfos[0].allocId, SvmAllocationData::uninitializedAllocId);
+    ASSERT_EQ(mockKernel.kernelArgInfos[0].value, secondSvmAllocation);
+    ASSERT_GT(svmAllocsManager->allocationsCounter, 0u);
+    ASSERT_NE(mockKernel.kernelArgInfos[0].allocIdMemoryManagerCounter, svmAllocsManager->allocationsCounter);
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, mockKernel.setArgBuffer(0, sizeof(secondSvmAllocation), &secondSvmAllocation));
     EXPECT_EQ(callCounter, mockKernel.setArgBufferWithAllocCalled);
 
@@ -669,8 +701,9 @@ TEST_F(KernelImmutableDataTests, givenInternalModuleWhenKernelIsCreatedIsaIsNotC
     moduleMock->kernelImmData = &kernelMock.immutableData;
 
     size_t previouscopyMemoryToAllocationCalledTimes = mockMemoryManager->copyMemoryToAllocationCalledTimes;
-    auto result = moduleMock->initialize(&moduleDesc, neoDevice);
-    EXPECT_TRUE(result);
+    ze_result_t result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+    result = moduleMock->initialize(&moduleDesc, neoDevice);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
     size_t expectedPreviouscopyMemoryToAllocationCalledTimes = previouscopyMemoryToAllocationCalledTimes;
 
     EXPECT_EQ(expectedPreviouscopyMemoryToAllocationCalledTimes, mockMemoryManager->copyMemoryToAllocationCalledTimes);
@@ -708,8 +741,9 @@ TEST_F(KernelImmutableDataTests, givenKernelInitializedWithPrivateMemoryThenCont
                                                                                        ModuleType::User,
                                                                                        perHwThreadPrivateMemorySizeRequested,
                                                                                        mockKernelImmData.get());
-    bool result = moduleWithPrivateMemory->initialize(&moduleDesc, device->getNEODevice());
-    EXPECT_TRUE(result);
+    ze_result_t result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+    result = moduleWithPrivateMemory->initialize(&moduleDesc, device->getNEODevice());
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
 
     std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernelWithPrivateMemory;
     kernelWithPrivateMemory = std::make_unique<ModuleImmutableDataFixture::MockKernel>(moduleWithPrivateMemory.get());
@@ -727,7 +761,7 @@ TEST_F(KernelImmutableDataTests, givenKernelInitializedWithPrivateMemoryThenCont
                                                                                           perHwThreadPrivateMemorySizeRequested,
                                                                                           mockKernelImmDataForModuleWithoutPrivateMemory.get());
     result = moduleWithoutPrivateMemory->initialize(&moduleDesc, device->getNEODevice());
-    EXPECT_TRUE(result);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
 
     std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernelWithoutPrivateMemory;
     kernelWithoutPrivateMemory = std::make_unique<ModuleImmutableDataFixture::MockKernel>(moduleWithoutPrivateMemory.get());
@@ -748,6 +782,7 @@ TEST_F(KernelImmutableDataTests, givenKernelWithPrivateMemoryBiggerThanGlobalMem
     moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(src.data());
     moduleDesc.inputSize = src.size();
     ModuleBuildLog *moduleBuildLog = nullptr;
+    ze_result_t result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
 
     uint32_t perHwThreadPrivateMemorySizeRequested = std::numeric_limits<uint32_t>::max();
     std::unique_ptr<MockImmutableData> mockKernelImmData = std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
@@ -756,8 +791,8 @@ TEST_F(KernelImmutableDataTests, givenKernelWithPrivateMemoryBiggerThanGlobalMem
                                                                       ModuleType::User,
                                                                       perHwThreadPrivateMemorySizeRequested,
                                                                       mockKernelImmData.get());
-    bool result = module->initialize(&moduleDesc, device->getNEODevice());
-    EXPECT_TRUE(result);
+    result = module->initialize(&moduleDesc, device->getNEODevice());
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
     EXPECT_TRUE(module->shouldAllocatePrivateMemoryPerDispatch());
 
     std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
@@ -1583,7 +1618,7 @@ struct KernelIsaTests : Test<ModuleFixture> {
 
         if (createBcsEngine) {
             auto &engine = device->getNEODevice()->getEngine(0);
-            bcsOsContext.reset(OsContext::create(nullptr, 0,
+            bcsOsContext.reset(OsContext::create(nullptr, device->getNEODevice()->getRootDeviceIndex(), 0,
                                                  EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_BCS, EngineUsage::Regular}, device->getNEODevice()->getDeviceBitfield())));
             engine.osContext = bcsOsContext.get();
             engine.commandStreamReceiver->setupContext(*bcsOsContext);

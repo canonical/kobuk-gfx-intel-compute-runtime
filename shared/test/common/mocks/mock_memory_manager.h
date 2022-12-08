@@ -6,6 +6,7 @@
  */
 
 #pragma once
+#include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
 #include "shared/test/common/helpers/default_hw_info.h"
@@ -306,7 +307,7 @@ class FailMemoryManager : public MockMemoryManager {
         return nullptr;
     }
 
-    GraphicsAllocation *createGraphicsAllocationFromMultipleSharedHandles(std::vector<osHandle> handles, AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override {
+    GraphicsAllocation *createGraphicsAllocationFromMultipleSharedHandles(const std::vector<osHandle> &handles, AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override {
         return nullptr;
     }
 
@@ -386,7 +387,7 @@ class MockMemoryManagerOsAgnosticContext : public MockMemoryManager {
     MockMemoryManagerOsAgnosticContext(NEO::ExecutionEnvironment &executionEnvironment) : MockMemoryManager(executionEnvironment) {}
     OsContext *createAndRegisterOsContext(CommandStreamReceiver *commandStreamReceiver,
                                           const EngineDescriptor &engineDescriptor) override {
-        auto osContext = new OsContext(0, engineDescriptor);
+        auto osContext = new OsContext(commandStreamReceiver->getRootDeviceIndex(), 0, engineDescriptor);
         osContext->incRefInternal();
         registeredEngines.emplace_back(commandStreamReceiver, osContext);
         return osContext;
@@ -409,12 +410,16 @@ class MockMemoryManagerWithDebuggableOsContext : public MockMemoryManager {
 class MockMemoryManagerWithCapacity : public MockMemoryManager {
   public:
     MockMemoryManagerWithCapacity(NEO::ExecutionEnvironment &executionEnvironment) : MockMemoryManager(executionEnvironment) {}
-    GraphicsAllocation *allocateGraphicsMemoryWithProperties(const AllocationProperties &properties) override {
+    GraphicsAllocation *allocateGraphicsMemoryWithProperties(const AllocationProperties &properties, const void *ptr) override {
         if (this->capacity >= properties.size) {
             this->capacity -= properties.size;
-            return MockMemoryManager::allocateGraphicsMemoryWithProperties(properties);
+            return MockMemoryManager::allocateGraphicsMemoryWithProperties(properties, ptr);
         }
         return nullptr;
+    }
+
+    GraphicsAllocation *allocateGraphicsMemoryWithProperties(const AllocationProperties &properties) override {
+        return this->allocateGraphicsMemoryWithProperties(properties, nullptr);
     }
 
     void freeGraphicsMemoryImpl(GraphicsAllocation *gfxAllocation) override {

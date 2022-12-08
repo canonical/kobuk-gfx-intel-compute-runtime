@@ -10,6 +10,7 @@
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/source/kernel/kernel_descriptor_from_patchtokens.h"
 #include "shared/source/memory_manager/memory_manager.h"
+#include "shared/source/program/kernel_info.h"
 #include "shared/test/common/test_macros/mock_method_macros.h"
 
 #include "level_zero/core/source/kernel/kernel_hw.h"
@@ -45,6 +46,8 @@ struct WhiteBox<::L0::Kernel> : public ::L0::KernelImp {
     using ::L0::KernelImp::createPrintfBuffer;
     using ::L0::KernelImp::crossThreadData;
     using ::L0::KernelImp::crossThreadDataSize;
+    using ::L0::KernelImp::dynamicStateHeapData;
+    using ::L0::KernelImp::dynamicStateHeapDataSize;
     using ::L0::KernelImp::groupSize;
     using ::L0::KernelImp::kernelImmData;
     using ::L0::KernelImp::kernelRequiresGenerationOfLocalIdsByRuntime;
@@ -76,6 +79,8 @@ struct WhiteBoxKernelHw : public KernelHw<gfxCoreFamily> {
     using ::L0::KernelImp::createPrintfBuffer;
     using ::L0::KernelImp::crossThreadData;
     using ::L0::KernelImp::crossThreadDataSize;
+    using ::L0::KernelImp::dynamicStateHeapData;
+    using ::L0::KernelImp::dynamicStateHeapDataSize;
     using ::L0::KernelImp::groupSize;
     using ::L0::KernelImp::kernelImmData;
     using ::L0::KernelImp::kernelRequiresGenerationOfLocalIdsByRuntime;
@@ -130,6 +135,7 @@ struct Mock<::L0::Kernel> : public WhiteBox<::L0::Kernel> {
 
         NEO::populateKernelDescriptor(descriptor, kernelTokens, 8);
         immutableData.kernelDescriptor = &descriptor;
+        immutableData.kernelInfo = &info;
         crossThreadData.reset(new uint8_t[100]);
     }
     ~Mock() override {
@@ -148,6 +154,7 @@ struct Mock<::L0::Kernel> : public WhiteBox<::L0::Kernel> {
 
     WhiteBox<::L0::KernelImmutableData> immutableData;
     NEO::KernelDescriptor descriptor;
+    NEO::KernelInfo info;
     uint32_t printPrintfOutputCalledTimes = 0;
 };
 

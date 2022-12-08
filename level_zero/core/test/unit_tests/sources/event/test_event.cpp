@@ -50,7 +50,7 @@ class MemoryManagerEventPoolFailMock : public NEO::MemoryManager {
     void *createMultiGraphicsAllocationInSystemMemoryPool(RootDeviceIndicesContainer &rootDeviceIndices, AllocationProperties &properties, NEO::MultiGraphicsAllocation &multiGraphicsAllocation) override {
         return nullptr;
     };
-    GraphicsAllocation *createGraphicsAllocationFromMultipleSharedHandles(std::vector<osHandle> handles, AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override { return nullptr; }
+    GraphicsAllocation *createGraphicsAllocationFromMultipleSharedHandles(const std::vector<osHandle> &handles, AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override { return nullptr; }
     NEO::GraphicsAllocation *createGraphicsAllocationFromSharedHandle(osHandle handle, const AllocationProperties &properties, bool requireSpecificBitness, bool isHostIpcAllocation) override { return nullptr; }
     void addAllocationToHostPtrManager(NEO::GraphicsAllocation *memory) override{};
     void removeAllocationFromHostPtrManager(NEO::GraphicsAllocation *memory) override{};
@@ -2202,6 +2202,9 @@ HWTEST_F(EventTests,
 }
 
 struct MockEventCompletion : public EventImp<uint32_t> {
+    using EventImp<uint32_t>::gpuStartTimestamp;
+    using EventImp<uint32_t>::gpuEndTimestamp;
+
     MockEventCompletion(L0::EventPool *eventPool, int index, L0::Device *device) : EventImp(eventPool, index, device) {
         auto neoDevice = device->getNEODevice();
         kernelEventCompletionData = std::make_unique<KernelEventCompletionData<uint32_t>[]>(EventPacketsCount::maxKernelSplit);
@@ -2258,6 +2261,27 @@ TEST_F(EventTests, WhenQueryingStatusAfterResetThenAccessMemory) {
     EXPECT_EQ(event->reset(), ZE_RESULT_SUCCESS);
     EXPECT_EQ(event->queryStatus(), ZE_RESULT_SUCCESS);
     EXPECT_EQ(event->assignKernelEventCompletionDataCounter, 2u);
+}
+
+TEST_F(EventTests, WhenResetEventThenZeroCpuTimestamps) {
+    auto event = std::make_unique<MockEventCompletion>(eventPool, 1u, device);
+    event->gpuStartTimestamp = 10u;
+    event->gpuEndTimestamp = 20u;
+    EXPECT_EQ(event->reset(), ZE_RESULT_SUCCESS);
+    EXPECT_EQ(event->gpuStartTimestamp, 0u);
+    EXPECT_EQ(event->gpuEndTimestamp, 0u);
+}
+
+TEST_F(EventSynchronizeTest, whenEventSetCsrThenCorrectCsrSet) {
+    auto defaultCsr = neoDevice->getDefaultEngine().commandStreamReceiver;
+    const auto mockCsr = std::make_unique<MockCommandStreamReceiver>(*neoDevice->getExecutionEnvironment(), 0, neoDevice->getDeviceBitfield());
+
+    EXPECT_EQ(event->csr, defaultCsr);
+    event->setCsr(mockCsr.get());
+    EXPECT_EQ(event->csr, mockCsr.get());
+
+    event->reset();
+    EXPECT_EQ(event->csr, defaultCsr);
 }
 
 } // namespace ult

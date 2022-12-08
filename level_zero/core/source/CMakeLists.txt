@@ -28,7 +28,7 @@ set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/cmdqueue/cmdqueue_hw_base.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/cmdqueue/cmdqueue_imp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cmdqueue/cmdqueue_extended${BRANCH_DIR_SUFFIX}cmdqueue_extended.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/context/context_imp_${DRIVER_MODEL}/context_imp.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/context/context_imp_${DRIVER_MODEL}.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/context/context_imp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/context/context_imp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/context/context.h
@@ -37,6 +37,7 @@ set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/device/bcs_split.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device/bcs_split.h
     ${CMAKE_CURRENT_SOURCE_DIR}/device/device.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/device/device_imp_${DRIVER_MODEL}/device_imp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device/device_imp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device/device_imp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/driver/driver_handle.h
@@ -52,8 +53,6 @@ set(L0_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/event/event.h
     ${CMAKE_CURRENT_SOURCE_DIR}/fence/fence.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fence/fence.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/fabric/fabric.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fabric/fabric.h
     ${CMAKE_CURRENT_SOURCE_DIR}/helpers/allocation_extensions.h
     ${CMAKE_CURRENT_SOURCE_DIR}/helpers/allocation_extensions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/helpers/api_specific_config_l0.cpp

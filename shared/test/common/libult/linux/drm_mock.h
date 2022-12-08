@@ -46,6 +46,7 @@ class DrmMock : public Drm {
     using Drm::queryAndSetVmBindPatIndexProgrammingSupport;
     using Drm::queryDeviceIdAndRevision;
     using Drm::requirePerContextVM;
+    using Drm::setPairAvailable;
     using Drm::setupIoctlHelper;
     using Drm::sliceCountChangeSupported;
     using Drm::systemInfo;
@@ -137,6 +138,20 @@ class DrmMock : public Drm {
         return bindAvailable;
     }
 
+    bool isSetPairAvailable() override {
+        if (callBaseIsSetPairAvailable) {
+            return Drm::isSetPairAvailable();
+        }
+        return setPairAvailable;
+    }
+
+    bool getSetPairAvailable() override {
+        if (callBaseGetSetPairAvailable) {
+            return Drm::getSetPairAvailable();
+        }
+        return setPairAvailable;
+    }
+
     uint32_t getBaseIoctlCalls() {
         return ioctlCallsForHelperInitialization + static_cast<uint32_t>(virtualMemoryIds.size());
     }
@@ -175,8 +190,11 @@ class DrmMock : public Drm {
     bool allowDebugAttachCallBase = false;
     bool callBaseCreateDrmContext = true;
     bool callBaseIsVmBindAvailable = false;
+    bool callBaseIsSetPairAvailable = false;
+    bool callBaseGetSetPairAvailable = false;
 
     bool capturedCooperativeContextRequest = false;
+    bool incrementVmId = false;
 
     uint32_t passedContextDebugId = std::numeric_limits<uint32_t>::max();
     std::vector<ResetStats> resetStatsToReturn{};
@@ -195,6 +213,7 @@ class DrmMock : public Drm {
     //DRM_IOCTL_I915_GEM_EXECBUFFER2
     std::vector<MockExecBuffer> execBuffers{};
     std::vector<MockExecObject> receivedBos{};
+    int execBufferResult = 0;
     //DRM_IOCTL_I915_GEM_CREATE
     uint64_t createParamsSize = 0;
     uint32_t createParamsHandle = 0;

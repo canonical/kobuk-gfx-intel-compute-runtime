@@ -536,8 +536,35 @@ HWTEST_F(PauseOnGpuTests, givenPauseModeSetToBeforeAndAfterWhenDispatchingThenIn
 using CmdListPipelineSelectStateTest = Test<CmdListPipelineSelectStateFixture>;
 
 using SystolicSupport = IsAnyProducts<IGFX_ALDERLAKE_P, IGFX_XE_HP_SDV, IGFX_DG2, IGFX_PVC>;
+
 HWTEST2_F(CmdListPipelineSelectStateTest,
           givenAppendSystolicKernelToCommandListWhenExecutingCommandListThenPipelineSelectStateIsTrackedCorrectly, SystolicSupport) {
+    testBody<FamilyType>();
+}
+
+HWTEST2_F(CmdListPipelineSelectStateTest,
+          givenCmdQueueAndImmediateCmdListUseSameCsrWhenAppendingSystolicKernelOnBothRegularFirstThenPipelineSelectStateIsNotChanged, SystolicSupport) {
+    testBodyShareStateRegularImmediate<FamilyType>();
+}
+
+HWTEST2_F(CmdListPipelineSelectStateTest,
+          givenCmdQueueAndImmediateCmdListUseSameCsrWhenAppendingSystolicKernelOnBothImmediateFirstThenPipelineSelectStateIsNotChanged, SystolicSupport) {
+    testBodyShareStateImmediateRegular<FamilyType>();
+}
+
+using CmdListThreadArbitrationTest = Test<CmdListThreadArbitrationFixture>;
+
+using ThreadArbitrationSupport = IsProduct<IGFX_PVC>;
+HWTEST2_F(CmdListThreadArbitrationTest,
+          givenAppendThreadArbitrationKernelToCommandListWhenExecutingCommandListThenStateComputeModeStateIsTrackedCorrectly, ThreadArbitrationSupport) {
+    testBody<FamilyType>();
+}
+
+using CmdListLargeGrfTest = Test<CmdListLargeGrfFixture>;
+
+using LargeGrfSupport = IsAnyProducts<IGFX_XE_HP_SDV, IGFX_DG2, IGFX_PVC>;
+HWTEST2_F(CmdListLargeGrfTest,
+          givenAppendLargeGrfKernelToCommandListWhenExecutingCommandListThenStateComputeModeStateIsTrackedCorrectly, LargeGrfSupport) {
     testBody<FamilyType>();
 }
 

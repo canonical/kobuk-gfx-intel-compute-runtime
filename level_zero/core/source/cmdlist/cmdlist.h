@@ -67,6 +67,7 @@ struct CommandList : _ze_command_list_handle_t {
         CommandType type = Invalid;
     };
     using CommandsToPatch = StackVec<CommandToPatch, 16>;
+    using CmdListReturnPoints = StackVec<CmdListReturnPoint, 32>;
 
     virtual ze_result_t close() = 0;
     virtual ze_result_t destroy() = 0;
@@ -98,9 +99,9 @@ struct CommandList : _ze_command_list_handle_t {
                                            const CmdListKernelLaunchParams &launchParams) = 0;
     virtual ze_result_t appendLaunchCooperativeKernel(ze_kernel_handle_t kernelHandle,
                                                       const ze_group_count_t *launchKernelArgs,
-                                                      ze_event_handle_t hSignalEvent,
+                                                      ze_event_handle_t signalEvent,
                                                       uint32_t numWaitEvents,
-                                                      ze_event_handle_t *phWaitEvents) = 0;
+                                                      ze_event_handle_t *waitEventHandles) = 0;
     virtual ze_result_t appendLaunchKernelIndirect(ze_kernel_handle_t kernelHandle,
                                                    const ze_group_count_t *pDispatchArgumentsBuffer,
                                                    ze_event_handle_t hEvent, uint32_t numWaitEvents,
@@ -240,6 +241,10 @@ struct CommandList : _ze_command_list_handle_t {
     bool isMemoryPrefetchRequested() const {
         return performMemoryPrefetch;
     }
+    bool storeExternalPtrAsTemporary() const {
+        return this->cmdListType == CommandListType::TYPE_IMMEDIATE && (this->isFlushTaskSubmissionEnabled || isCopyOnly());
+    }
+    bool isWaitForEventsFromHostEnabled();
 
     enum CommandListType : uint32_t {
         TYPE_REGULAR = 0u,
@@ -265,7 +270,7 @@ struct CommandList : _ze_command_list_handle_t {
         return commandsToPatch;
     }
 
-    std::vector<CmdListReturnPoint> &getReturnPoints() {
+    CmdListReturnPoints &getReturnPoints() {
         return returnPoints;
     }
 
@@ -286,6 +291,7 @@ struct CommandList : _ze_command_list_handle_t {
     NEO::CommandStreamReceiver *csr = nullptr;
     Device *device = nullptr;
     NEO::PreemptionMode commandListPreemptionMode = NEO::PreemptionMode::Initial;
+    unsigned long numThreads = 1u;
     uint32_t cmdListType = CommandListType::TYPE_REGULAR;
     uint32_t commandListPerThreadScratchSize = 0u;
     uint32_t commandListPerThreadPrivateScratchSize = 0u;
@@ -296,16 +302,20 @@ struct CommandList : _ze_command_list_handle_t {
     bool commandListSLMEnabled = false;
     bool requiresQueueUncachedMocs = false;
     bool isBcsSplitNeeded = false;
+    bool immediateCmdListHeapSharing = false;
 
   protected:
     NEO::GraphicsAllocation *getAllocationFromHostPtrMap(const void *buffer, uint64_t bufferSize);
     NEO::GraphicsAllocation *getHostPtrAlloc(const void *buffer, uint64_t bufferSize, bool hostCopyAllowed);
     bool setupTimestampEventForMultiTile(Event *signalEvent);
+    bool getDcFlushRequired(bool externalCondition) const {
+        return externalCondition ? dcFlushSupport : false;
+    }
 
     std::map<const void *, NEO::GraphicsAllocation *> hostPtrMap;
     std::vector<NEO::GraphicsAllocation *> ownedPrivateAllocations;
     std::vector<NEO::GraphicsAllocation *> patternAllocations;
-    std::vector<CmdListReturnPoint> returnPoints;
+    CmdListReturnPoints returnPoints;
 
     NEO::StreamProperties requiredStreamState{};
     NEO::StreamProperties finalStreamState{};
@@ -320,9 +330,11 @@ struct CommandList : _ze_command_list_handle_t {
     bool containsCooperativeKernelsFlag = false;
     bool containsStatelessUncachedResource = false;
     bool performMemoryPrefetch = false;
-    bool multiReturnPointCommandList = false;
+    bool frontEndStateTracking = false;
+    bool dcFlushSupport = false;
     bool systolicModeSupport = false;
     bool pipelineSelectStateTracking = false;
+    bool stateComputeModeTracking = false;
 };
 
 using CommandListAllocatorFn = CommandList *(*)(uint32_t);

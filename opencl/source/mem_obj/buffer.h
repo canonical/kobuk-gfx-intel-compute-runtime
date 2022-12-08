@@ -58,9 +58,11 @@ extern ValidateInputAndCreateBufferFunc validateInputAndCreateBuffer;
 class Buffer : public MemObj {
   public:
     constexpr static size_t maxBufferSizeForReadWriteOnCpu = 10 * MB;
+    constexpr static size_t maxBufferSizeForCopyOnCpu = 64 * KB;
     constexpr static cl_ulong maskMagic = 0xFFFFFFFFFFFFFFFFLL;
     constexpr static cl_ulong objectMagic = MemObj::objectMagic | 0x02;
     bool forceDisallowCPUCopy = false;
+    bool isSubBufferFromPool = false;
 
     ~Buffer() override;
 

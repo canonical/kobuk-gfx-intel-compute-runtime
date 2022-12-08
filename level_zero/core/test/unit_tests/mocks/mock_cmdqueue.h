@@ -33,10 +33,11 @@ struct WhiteBox<::L0::CommandQueue> : public ::L0::CommandQueueImp {
     using BaseClass::synchronizeByPollingForTaskCount;
     using BaseClass::taskCount;
     using CommandQueue::activeSubDevices;
+    using CommandQueue::frontEndStateTracking;
     using CommandQueue::internalUsage;
-    using CommandQueue::multiReturnPointCommandList;
     using CommandQueue::partitionCount;
     using CommandQueue::pipelineSelectStateTracking;
+    using CommandQueue::stateComputeModeTracking;
 
     WhiteBox(Device *device, NEO::CommandStreamReceiver *csr,
              const ze_command_queue_desc_t *desc);
@@ -65,11 +66,12 @@ struct MockCommandQueueHw : public L0::CommandQueueHw<gfxCoreFamily> {
     using BaseClass::prepareAndSubmitBatchBuffer;
     using BaseClass::printfKernelContainer;
     using L0::CommandQueue::activeSubDevices;
+    using L0::CommandQueue::frontEndStateTracking;
     using L0::CommandQueue::internalUsage;
-    using L0::CommandQueue::multiReturnPointCommandList;
     using L0::CommandQueue::partitionCount;
     using L0::CommandQueue::pipelineSelectStateTracking;
     using L0::CommandQueue::preemptionCmdSyncProgramming;
+    using L0::CommandQueue::stateComputeModeTracking;
     using L0::CommandQueueImp::csr;
     using typename BaseClass::CommandListExecutionContext;
 
@@ -90,6 +92,9 @@ struct MockCommandQueueHw : public L0::CommandQueueHw<gfxCoreFamily> {
 
     NEO::SubmissionStatus submitBatchBuffer(size_t offset, NEO::ResidencyContainer &residencyContainer, void *endingCmdPtr, bool isCooperative) override {
         residencyContainerSnapshot = residencyContainer;
+        if (submitBatchBufferReturnValue.has_value()) {
+            return *submitBatchBufferReturnValue;
+        }
         return BaseClass::submitBatchBuffer(offset, residencyContainer, endingCmdPtr, isCooperative);
     }
 
@@ -97,6 +102,7 @@ struct MockCommandQueueHw : public L0::CommandQueueHw<gfxCoreFamily> {
     NEO::ResidencyContainer residencyContainerSnapshot;
     ze_result_t synchronizeReturnValue{ZE_RESULT_SUCCESS};
     std::optional<NEO::WaitStatus> reserveLinearStreamSizeReturnValue{};
+    std::optional<NEO::SubmissionStatus> submitBatchBufferReturnValue{};
 };
 
 struct Deleter {

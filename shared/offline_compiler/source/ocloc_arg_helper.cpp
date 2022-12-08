@@ -22,8 +22,9 @@
 void Source::toVectorOfStrings(std::vector<std::string> &lines, bool replaceTabs) {
     std::string line;
     const char *file = reinterpret_cast<const char *>(data);
+    const char *end = file + length;
 
-    while (*file != '\0') {
+    while (file != end && *file != '\0') {
         if (replaceTabs && *file == '\t') {
             line += ' ';
         } else if (*file == '\n') {
@@ -198,10 +199,6 @@ void OclocArgHelper::saveOutput(const std::string &filename, const std::ostream 
         std::ofstream file(filename);
         file << ss.str();
     }
-}
-
-bool OclocArgHelper::areQuotesRequired(const std::string_view &argName) {
-    return argName == "-options" || argName == "-internal_options";
 }
 
 bool OclocArgHelper::setAcronymForDeviceId(std::string &device) {

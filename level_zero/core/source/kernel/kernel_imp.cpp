@@ -352,6 +352,11 @@ ze_result_t KernelImp::suggestGroupSize(uint32_t globalSizeX, uint32_t globalSiz
         uint32_t numThreadsPerSubSlice = (uint32_t)deviceInfo.maxNumEUsPerSubSlice * deviceInfo.numThreadsPerEU;
         uint32_t localMemSize = (uint32_t)deviceInfo.localMemSize;
 
+        if (this->getSlmTotalSize() > 0 && localMemSize < this->getSlmTotalSize()) {
+            PRINT_DEBUG_STRING(NEO::DebugManager.flags.PrintDebugMessages.get(), stderr, "Size of SLM (%u) larger than available (%u)\n", this->getSlmTotalSize(), localMemSize);
+            return ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY;
+        }
+
         NEO::WorkSizeInfo wsInfo(maxWorkGroupSize, kernelImmData->getDescriptor().kernelAttributes.usesBarriers(), simd, this->getSlmTotalSize(),
                                  hwInfo, numThreadsPerSubSlice, localMemSize,
                                  usesImages, false, kernelImmData->getDescriptor().kernelAttributes.flags.requiresDisabledEUFusion);
@@ -531,7 +536,9 @@ ze_result_t KernelImp::setArgBuffer(uint32_t argIndex, size_t argSize, const voi
     NEO::SvmAllocationData *allocData = nullptr;
     if (argVal != nullptr) {
         const auto requestedAddress = *reinterpret_cast<void *const *>(argVal);
-        if (argInfo.allocId > 0 && requestedAddress == argInfo.value) {
+        if (argInfo.allocId > 0 &&
+            argInfo.allocId < NEO::SvmAllocationData::uninitializedAllocId &&
+            requestedAddress == argInfo.value) {
             bool reuseFromCache = false;
             if (allocationsCounter > 0) {
                 if (allocationsCounter == argInfo.allocIdMemoryManagerCounter) {
@@ -762,6 +769,21 @@ void KernelImp::patchCrossthreadDataWithPrivateAllocation(NEO::GraphicsAllocatio
                              *device->getNEODevice(), kernelAttributes.flags.useGlobalAtomics, device->isImplicitScalingCapable());
 }
 
+void KernelImp::setInlineSamplers() {
+    auto device = module->getDevice();
+    const auto productFamily = device->getNEODevice()->getHardwareInfo().platform.eProductFamily;
+    for (auto &inlineSampler : getKernelDescriptor().inlineSamplers) {
+        ze_sampler_desc_t samplerDesc = {};
+        samplerDesc.addressMode = static_cast<ze_sampler_address_mode_t>(inlineSampler.addrMode);
+        samplerDesc.filterMode = static_cast<ze_sampler_filter_mode_t>(inlineSampler.filterMode);
+        samplerDesc.isNormalized = inlineSampler.isNormalized;
+
+        auto sampler = std::unique_ptr<L0::Sampler>(L0::Sampler::create(productFamily, device, &samplerDesc));
+        UNRECOVERABLE_IF(sampler.get() == nullptr);
+        sampler->copySamplerStateToDSH(dynamicStateHeapData.get(), dynamicStateHeapDataSize, inlineSampler.getSamplerBindfulOffset());
+    }
+}
+
 ze_result_t KernelImp::initialize(const ze_kernel_desc_t *desc) {
     this->kernelImmData = module->getKernelImmutableData(desc->pKernelName);
     if (this->kernelImmData == nullptr) {
@@ -871,6 +893,8 @@ ze_result_t KernelImp::initialize(const ze_kernel_desc_t *desc) {
     this->createPrintfBuffer();
 
     this->setDebugSurface();
+
+    this->setInlineSamplers();
 
     residencyContainer.insert(residencyContainer.end(), kernelImmData->getResidencyContainer().begin(),
                               kernelImmData->getResidencyContainer().end());

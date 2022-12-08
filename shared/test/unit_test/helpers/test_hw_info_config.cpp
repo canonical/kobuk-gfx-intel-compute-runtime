@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/helpers/compiler_hw_info_config.h"
+#include "shared/source/helpers/hw_helper.h"
 #include "shared/source/os_interface/hw_info_config.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/test_macros/test.h"
@@ -195,4 +196,34 @@ HWTEST2_F(HwInfoConfigTest, givenHwInfoConfigWhenIsStatefulAddressingModeSupport
 HWTEST2_F(HwInfoConfigTest, givenHwInfoConfigWhenIsPlatformQueryNotSupportedThenReturnFalse, IsAtMostDg2) {
     const auto &hwInfoConfig = *HwInfoConfig::get(productFamily);
     EXPECT_FALSE(hwInfoConfig.isPlatformQuerySupported());
+}
+
+HWTEST2_F(HwInfoConfigTest, givenHwHelperWhenCallCopyThroughLockedPtrEnabledThenReturnFalse, IsNotXeHpcCore) {
+    HwHelper &hwHelper = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
+    EXPECT_FALSE(hwHelper.copyThroughLockedPtrEnabled());
+}
+
+HWTEST_F(HwInfoConfigTest, givenHwHelperWhenFlagSetAndCallCopyThroughLockedPtrEnabledThenReturnCorrectValue) {
+    DebugManagerStateRestore restorer;
+    HwHelper &hwHelper = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
+    DebugManager.flags.ExperimentalCopyThroughLock.set(0);
+    EXPECT_FALSE(hwHelper.copyThroughLockedPtrEnabled());
+
+    DebugManager.flags.ExperimentalCopyThroughLock.set(1);
+    EXPECT_TRUE(hwHelper.copyThroughLockedPtrEnabled());
+}
+
+HWTEST2_F(HwInfoConfigTest, givenHwHelperWhenCallGetAmountOfAllocationsToFillThenReturnFalse, IsNotXeHpcCore) {
+    HwHelper &hwHelper = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
+    EXPECT_EQ(hwHelper.getAmountOfAllocationsToFill(), 0u);
+}
+
+HWTEST_F(HwInfoConfigTest, givenHwHelperWhenFlagSetAndCallGetAmountOfAllocationsToFillThenReturnCorrectValue) {
+    DebugManagerStateRestore restorer;
+    HwHelper &hwHelper = HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily);
+    DebugManager.flags.SetAmountOfReusableAllocations.set(0);
+    EXPECT_EQ(hwHelper.getAmountOfAllocationsToFill(), 0u);
+
+    DebugManager.flags.SetAmountOfReusableAllocations.set(1);
+    EXPECT_EQ(hwHelper.getAmountOfAllocationsToFill(), 1u);
 }

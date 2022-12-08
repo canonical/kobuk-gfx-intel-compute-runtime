@@ -47,7 +47,6 @@ struct BcsSplit {
         void releaseResources();
 
         Events(BcsSplit &bcsSplit) : bcsSplit(bcsSplit){};
-        ~Events();
     } events;
 
     std::vector<CommandQueue *> cmdQs;
@@ -87,7 +86,7 @@ struct BcsSplit {
         }
 
         cmdList->addEventsToCmdList(static_cast<uint32_t>(this->cmdQs.size()), eventHandles.data());
-        cmdList->appendSignalEvent(this->events.marker[markerEventIndex]->toHandle());
+        cmdList->appendEventForProfilingAllWalkers(this->events.marker[markerEventIndex], false);
 
         if (hSignalEvent) {
             cmdList->appendEventForProfilingAllWalkers(Event::fromHandle(hSignalEvent), false);

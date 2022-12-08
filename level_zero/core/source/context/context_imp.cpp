@@ -177,6 +177,10 @@ ze_result_t ContextImp::allocDeviceMem(ze_device_handle_t hDevice,
         unifiedMemoryProperties.allocationFlags.flags.locallyUncachedResource = 1;
     }
 
+    if (lookupTable.rayTracingMemory == true) {
+        unifiedMemoryProperties.allocationFlags.flags.resource48Bit = 1;
+    }
+
     void *usmPtr =
         this->driverHandle->svmAllocsManager->createUnifiedMemoryAllocation(size, unifiedMemoryProperties);
     if (usmPtr == nullptr) {
@@ -204,6 +208,8 @@ ze_result_t ContextImp::allocSharedMem(ze_device_handle_t hDevice,
     auto neoDevice = device->getNEODevice();
 
     bool relaxedSizeAllowed = NEO::DebugManager.flags.AllowUnrestrictedSize.get();
+    bool rayTracingAllocation = false;
+
     if (deviceDesc->pNext) {
         const ze_base_desc_t *extendedDesc = reinterpret_cast<const ze_base_desc_t *>(deviceDesc->pNext);
         if (extendedDesc->stype == ZE_STRUCTURE_TYPE_RELAXED_ALLOCATION_LIMITS_EXP_DESC) {
@@ -213,6 +219,8 @@ ze_result_t ContextImp::allocSharedMem(ze_device_handle_t hDevice,
                 return ZE_RESULT_ERROR_INVALID_ARGUMENT;
             }
             relaxedSizeAllowed = true;
+        } else if (extendedDesc->stype == ZE_STRUCTURE_TYPE_RAYTRACING_MEM_ALLOC_EXT_DESC) {
+            rayTracingAllocation = true;
         }
     }
 
@@ -263,6 +271,10 @@ ze_result_t ContextImp::allocSharedMem(ze_device_handle_t hDevice,
 
     if (hostDesc->flags & ZE_HOST_MEM_ALLOC_FLAG_BIAS_INITIAL_PLACEMENT) {
         unifiedMemoryProperties.allocationFlags.allocFlags.usmInitialPlacementCpu = 1;
+    }
+
+    if (rayTracingAllocation) {
+        unifiedMemoryProperties.allocationFlags.flags.resource48Bit = 1;
     }
 
     void *usmPtr = nullptr;
@@ -473,13 +485,13 @@ ze_result_t ContextImp::getIpcMemHandles(const void *ptr,
 }
 
 ze_result_t ContextImp::openIpcMemHandle(ze_device_handle_t hDevice,
-                                         ze_ipc_mem_handle_t pIpcHandle,
+                                         const ze_ipc_mem_handle_t &pIpcHandle,
                                          ze_ipc_memory_flags_t flags,
                                          void **ptr) {
     uint64_t handle = 0u;
     memcpy_s(&handle,
              sizeof(handle),
-             reinterpret_cast<void *>(pIpcHandle.data),
+             pIpcHandle.data,
              sizeof(handle));
 
     *ptr = getMemHandlePtr(hDevice, handle, flags);
@@ -496,6 +508,8 @@ ze_result_t ContextImp::openIpcMemHandles(ze_device_handle_t hDevice,
                                           ze_ipc_memory_flags_t flags,
                                           void **pptr) {
     std::vector<NEO::osHandle> handles;
+    handles.reserve(numIpcHandles);
+
     for (uint32_t i = 0; i < numIpcHandles; i++) {
         uint64_t handle = 0;
         memcpy_s(&handle,
@@ -544,7 +558,7 @@ ze_result_t EventPoolImp::getIpcHandle(ze_ipc_event_pool_handle_t *pIpcHandle) {
     return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t ContextImp::openEventPoolIpcHandle(ze_ipc_event_pool_handle_t hIpc,
+ze_result_t ContextImp::openEventPoolIpcHandle(const ze_ipc_event_pool_handle_t &hIpc,
                                                ze_event_pool_handle_t *phEventPool) {
     uint64_t handle = 0u;
     memcpy_s(&handle, sizeof(int), hIpc.data, sizeof(int));

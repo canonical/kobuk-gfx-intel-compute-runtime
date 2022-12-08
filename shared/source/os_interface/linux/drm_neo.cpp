@@ -60,7 +60,7 @@ void Drm::queryAndSetVmBindPatIndexProgrammingSupport() {
 int Drm::ioctl(DrmIoctl request, void *arg) {
     auto requestValue = getIoctlRequestValue(request, ioctlHelper.get());
     int ret;
-    int returnedErrno;
+    int returnedErrno = 0;
     SYSTEM_ENTER();
     do {
         auto measureTime = DebugManager.flags.PrintIoctlTimes.get();
@@ -78,7 +78,9 @@ int Drm::ioctl(DrmIoctl request, void *arg) {
         }
         ret = SysCalls::ioctl(getFileDescriptor(), requestValue, arg);
 
-        returnedErrno = errno;
+        if (ret != 0) {
+            returnedErrno = getErrno();
+        }
 
         if (measureTime) {
             end = std::chrono::steady_clock::now();
@@ -108,7 +110,7 @@ int Drm::ioctl(DrmIoctl request, void *arg) {
             }
         }
 
-    } while (ret == -1 && (returnedErrno == EINTR || returnedErrno == EAGAIN || returnedErrno == EBUSY || returnedErrno == -EBUSY));
+    } while (ret == -1 && checkIfIoctlReinvokeRequired(returnedErrno, request, ioctlHelper.get()));
     SYSTEM_LEAVE(request);
     return ret;
 }
@@ -352,14 +354,14 @@ void Drm::destroyDrmContext(uint32_t drmContextId) {
     GemContextDestroy destroy{};
     destroy.contextId = drmContextId;
     auto retVal = ioctlHelper->ioctl(DrmIoctl::GemContextDestroy, &destroy);
-    UNRECOVERABLE_IF(retVal != 0);
+    UNRECOVERABLE_IF((retVal != 0) && (errno != ENODEV));
 }
 
 void Drm::destroyDrmVirtualMemory(uint32_t drmVmId) {
     GemVmControl ctl = {};
     ctl.vmId = drmVmId;
     auto ret = ioctlHelper->ioctl(DrmIoctl::GemVmDestroy, &ctl);
-    UNRECOVERABLE_IF(ret != 0);
+    UNRECOVERABLE_IF((ret != 0) && (errno != ENODEV));
 }
 
 int Drm::queryVmId(uint32_t drmContextId, uint32_t &vmId) {
@@ -431,11 +433,20 @@ int Drm::setupHardwareInfo(const DeviceDescriptor *device, bool setupFeatureTabl
     hwInfo->gtSystemInfo.SubSliceCount = static_cast<uint32_t>(topologyData.subSliceCount);
     hwInfo->gtSystemInfo.DualSubSliceCount = static_cast<uint32_t>(topologyData.subSliceCount);
     hwInfo->gtSystemInfo.EUCount = static_cast<uint32_t>(topologyData.euCount);
+    if (topologyData.maxSubSliceCount > 0) {
+        hwInfo->gtSystemInfo.MaxSubSlicesSupported = static_cast<uint32_t>(topologyData.maxSubSliceCount);
+        hwInfo->gtSystemInfo.MaxDualSubSlicesSupported = static_cast<uint32_t>(topologyData.maxSubSliceCount);
+    }
 
     status = querySystemInfo();
     if (status) {
         setupSystemInfo(hwInfo, systemInfo.get());
+
+        uint32_t bankCount = (hwInfo->gtSystemInfo.L3BankCount > 0) ? hwInfo->gtSystemInfo.L3BankCount : hwInfo->gtSystemInfo.MaxDualSubSlicesSupported;
+
+        hwInfo->gtSystemInfo.L3CacheSizeInKb = systemInfo->getL3BankSizeInKb() * bankCount;
     }
+
     device->setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable);
 
     if (systemInfo) {
@@ -753,10 +764,6 @@ const std::vector<int> &Drm::getSliceMappings(uint32_t deviceIndex) {
     return topologyMap[deviceIndex].sliceIndices;
 }
 
-const TopologyMap &Drm::getTopologyMap() {
-    return topologyMap;
-}
-
 int Drm::waitHandle(uint32_t waitHandle, int64_t timeout) {
     UNRECOVERABLE_IF(isVmBindAvailable());
 
@@ -891,12 +898,10 @@ void Drm::setupSystemInfo(HardwareInfo *hwInfo, SystemInfo *sysInfo) {
     gtSysInfo->TotalPsThreadsWindowerRange = sysInfo->getTotalPsThreads();
     gtSysInfo->MaxEuPerSubSlice = sysInfo->getMaxEuPerDualSubSlice();
     gtSysInfo->MaxSlicesSupported = sysInfo->getMaxSlicesSupported();
-    gtSysInfo->MaxSubSlicesSupported = sysInfo->getMaxDualSubSlicesSupported();
-    gtSysInfo->MaxDualSubSlicesSupported = sysInfo->getMaxDualSubSlicesSupported();
-
-    uint32_t bankCount = (hwInfo->gtSystemInfo.L3BankCount > 0) ? hwInfo->gtSystemInfo.L3BankCount : hwInfo->gtSystemInfo.DualSubSliceCount;
-
-    gtSysInfo->L3CacheSizeInKb = sysInfo->getL3BankSizeInKb() * bankCount;
+    if (sysInfo->getMaxDualSubSlicesSupported() > 0) {
+        gtSysInfo->MaxSubSlicesSupported = sysInfo->getMaxDualSubSlicesSupported();
+        gtSysInfo->MaxDualSubSlicesSupported = sysInfo->getMaxDualSubSlicesSupported();
+    }
 }
 
 void Drm::setupCacheInfo(const HardwareInfo &hwInfo) {
@@ -1048,6 +1053,9 @@ bool Drm::completionFenceSupport() {
         }
 
         completionFenceSupported = support;
+        if (DebugManager.flags.PrintCompletionFenceUsage.get()) {
+            std::cout << "Completion fence supported: " << completionFenceSupported << std::endl;
+        }
     });
     return completionFenceSupported;
 }
@@ -1263,6 +1271,18 @@ void Drm::waitForBind(uint32_t vmHandleId) {
     waitUserFence(0u, castToUint64(&this->pagingFence[vmHandleId]), this->fenceVal[vmHandleId], ValueWidth::U64, -1, ioctlHelper->getWaitUserFenceSoftFlag());
 }
 
+bool Drm::isSetPairAvailable() {
+    if (DebugManager.flags.EnableSetPair.get() == 0) {
+        return static_cast<bool>(DebugManager.flags.EnableSetPair.get());
+    }
+    std::call_once(checkSetPairOnce, [this]() {
+        int ret = ioctlHelper->isSetPairAvailable();
+        setPairAvailable = ret;
+    });
+
+    return setPairAvailable;
+}
+
 bool Drm::isVmBindAvailable() {
     std::call_once(checkBindOnce, [this]() {
         int ret = ioctlHelper->isVmBindAvailable();
@@ -1470,9 +1490,9 @@ int Drm::createDrmVirtualMemory(uint32_t &drmVmId) {
     return ret;
 }
 
-PhyicalDevicePciSpeedInfo Drm::getPciSpeedInfo() const {
+PhysicalDevicePciSpeedInfo Drm::getPciSpeedInfo() const {
 
-    PhyicalDevicePciSpeedInfo pciSpeedInfo = {};
+    PhysicalDevicePciSpeedInfo pciSpeedInfo = {};
 
     std::string pathPrefix{};
     bool isIntegratedDevice = rootDeviceEnvironment.getHardwareInfo()->capabilityTable.isIntegratedDevice;
@@ -1501,7 +1521,7 @@ PhyicalDevicePciSpeedInfo Drm::getPciSpeedInfo() const {
         linkWidthStream << pathPrefix << fileName;
 
         int fd = NEO::SysCalls::open(linkWidthStream.str().c_str(), O_RDONLY);
-        if (fd == 0) {
+        if (fd < 0) {
             return false;
         }
         ssize_t bytesRead = NEO::SysCalls::pread(fd, readString.data(), readString.size() - 1, 0);
@@ -1565,7 +1585,20 @@ void Drm::waitOnUserFences(const OsContextLinux &osContext, uint64_t address, ui
         if (*reinterpret_cast<uint32_t *>(completionFenceCpuAddress) < value) {
             constexpr int64_t timeout = -1;
             constexpr uint16_t flags = 0;
-            waitUserFence(drmContextIds[drmIterator], completionFenceCpuAddress, value, Drm::ValueWidth::U32, timeout, flags);
+            int retVal = waitUserFence(drmContextIds[drmIterator], completionFenceCpuAddress, value, Drm::ValueWidth::U32, timeout, flags);
+
+            if (DebugManager.flags.PrintCompletionFenceUsage.get()) {
+                std::cout << "Completion fence waited."
+                          << " Status: " << retVal
+                          << ", CPU address: " << std::hex << completionFenceCpuAddress << std::dec
+                          << ", current value: " << *reinterpret_cast<uint32_t *>(completionFenceCpuAddress)
+                          << ", wait value: " << value << std::endl;
+            }
+        } else if (DebugManager.flags.PrintCompletionFenceUsage.get()) {
+            std::cout << "Completion fence already completed."
+                      << " CPU address: " << std::hex << completionFenceCpuAddress << std::dec
+                      << ", current value: " << *reinterpret_cast<uint32_t *>(completionFenceCpuAddress)
+                      << ", wait value: " << value << std::endl;
         }
         completionFenceCpuAddress = ptrOffset(completionFenceCpuAddress, postSyncOffset);
     }

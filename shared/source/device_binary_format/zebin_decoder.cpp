@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 Intel Corporation
+ * Copyright (C) 2022 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -26,18 +26,26 @@
 
 namespace NEO {
 
-template <>
-bool isDeviceBinaryFormat<NEO::DeviceBinaryFormat::Zebin>(const ArrayRef<const uint8_t> binary) {
-    auto header = Elf::decodeElfFileHeader<Elf::EI_CLASS_64>(binary);
-    if (nullptr == header) {
-        return false;
-    }
-
-    return header->type == NEO::Elf::ET_REL ||
-           header->type == NEO::Elf::ET_ZEBIN_EXE;
+void setKernelMiscInfoPosition(ConstStringRef metadata, NEO::ProgramInfo &dst) {
+    dst.kernelMiscInfoPos = metadata.str().find(Elf::ZebinKernelMetadata::Tags::kernelMiscInfo.str());
 }
 
-bool validateTargetDevice(const Elf::Elf<Elf::EI_CLASS_64> &elf, const TargetDevice &targetDevice, std::string &outErrReason, std::string &outWarning) {
+template <>
+bool isDeviceBinaryFormat<NEO::DeviceBinaryFormat::Zebin>(const ArrayRef<const uint8_t> binary) {
+    auto isValidZebinHeader = [](auto header) {
+        return header != nullptr &&
+               (header->type == NEO::Elf::ET_REL ||
+                header->type == NEO::Elf::ET_ZEBIN_EXE);
+    };
+    return Elf::isElf<Elf::EI_CLASS_32>(binary)
+               ? isValidZebinHeader(Elf::decodeElfFileHeader<Elf::EI_CLASS_32>(binary))
+               : isValidZebinHeader(Elf::decodeElfFileHeader<Elf::EI_CLASS_64>(binary));
+}
+
+template bool validateTargetDevice<Elf::EI_CLASS_32>(const Elf::Elf<Elf::EI_CLASS_32> &elf, const TargetDevice &targetDevice, std::string &outErrReason, std::string &outWarning);
+template bool validateTargetDevice<Elf::EI_CLASS_64>(const Elf::Elf<Elf::EI_CLASS_64> &elf, const TargetDevice &targetDevice, std::string &outErrReason, std::string &outWarning);
+template <Elf::ELF_IDENTIFIER_CLASS numBits>
+bool validateTargetDevice(const Elf::Elf<numBits> &elf, const TargetDevice &targetDevice, std::string &outErrReason, std::string &outWarning) {
     GFXCORE_FAMILY gfxCore = IGFX_UNKNOWN_CORE;
     PRODUCT_FAMILY productFamily = IGFX_UNKNOWN;
     Elf::ZebinTargetFlags targetMetadata = {};
@@ -89,7 +97,7 @@ bool validateTargetDevice(const Elf::Elf<Elf::EI_CLASS_64> &elf, const TargetDev
     validForTarget &= (gfxCore != IGFX_UNKNOWN_CORE) ? targetDevice.coreFamily == gfxCore : true;
     validForTarget &= (productFamily != IGFX_UNKNOWN) ? targetDevice.productFamily == productFamily : true;
     validForTarget &= (0 == targetMetadata.validateRevisionId) | ((targetDevice.stepping >= targetMetadata.minHwRevisionId) & (targetDevice.stepping <= targetMetadata.maxHwRevisionId));
-    validForTarget &= (8U == targetDevice.maxPointerSizeInBytes);
+    validForTarget &= (targetDevice.maxPointerSizeInBytes >= static_cast<uint32_t>(numBits == Elf::EI_CLASS_32 ? 4 : 8));
     return validForTarget;
 }
 
@@ -104,51 +112,65 @@ DecodeError validateZeInfoVersion(const Elf::ZebinKernelMetadata::Types::Version
     return DecodeError::Success;
 }
 
-DecodeError getIntelGTNotes(const Elf::Elf<Elf::EI_CLASS_64> &elf, std::vector<Elf::IntelGTNote> &intelGTNotes, std::string &outErrReason, std::string &outWarning) {
+template <Elf::ELF_IDENTIFIER_CLASS numBits>
+DecodeError decodeIntelGTNoteSection(ArrayRef<const uint8_t> intelGTNotesSection, std::vector<Elf::IntelGTNote> &intelGTNotes, std::string &outErrReason, std::string &outWarning) {
+    uint64_t currentPos = 0;
+    auto sectionSize = intelGTNotesSection.size();
+    while (currentPos < sectionSize) {
+        auto intelGTNote = reinterpret_cast<const Elf::ElfNoteSection *>(intelGTNotesSection.begin() + currentPos);
+        auto nameSz = intelGTNote->nameSize;
+        auto descSz = intelGTNote->descSize;
+
+        auto currOffset = sizeof(Elf::ElfNoteSection) + alignUp(nameSz, 4) + alignUp(descSz, 4);
+        if (currentPos + currOffset > sectionSize) {
+            intelGTNotes.clear();
+            outErrReason.append("DeviceBinaryFormat::Zebin : Offseting will cause out-of-bound memory read! Section size: " + std::to_string(sectionSize) +
+                                ", current section data offset: " + std::to_string(currentPos) + ", next offset : " + std::to_string(currOffset) + "\n");
+            return DecodeError::InvalidBinary;
+        }
+        currentPos += currOffset;
+
+        auto ownerName = reinterpret_cast<const char *>(ptrOffset(intelGTNote, sizeof(Elf::ElfNoteSection)));
+        bool isValidGTNote = Elf::IntelGtNoteOwnerName.size() + 1 == nameSz;
+        isValidGTNote &= Elf::IntelGtNoteOwnerName == ConstStringRef(ownerName, nameSz - 1);
+        if (false == isValidGTNote) {
+            if (0u == nameSz) {
+                outWarning.append("DeviceBinaryFormat::Zebin : Empty owner name.\n");
+            } else {
+                std::string invalidOwnerName{ownerName, nameSz};
+                invalidOwnerName.erase(std::remove_if(invalidOwnerName.begin(),
+                                                      invalidOwnerName.end(),
+                                                      [](unsigned char c) { return '\0' == c; }));
+                outWarning.append("DeviceBinaryFormat::Zebin : Invalid owner name : " + invalidOwnerName + " for IntelGTNote - note will not be used.\n");
+            }
+            continue;
+        }
+        auto notesData = ArrayRef<const uint8_t>(reinterpret_cast<const uint8_t *>(ptrOffset(ownerName, nameSz)), descSz);
+        if (intelGTNote->type == Elf::IntelGTSectionType::ZebinVersion) {
+            isValidGTNote &= notesData[descSz - 1] == '\0';
+            if (false == isValidGTNote) {
+                outWarning.append("DeviceBinaryFormat::Zebin :  Versioning string is not null-terminated: " + ConstStringRef(reinterpret_cast<const char *>(notesData.begin()), descSz).str() + " - note will not be used.\n");
+                continue;
+            }
+        }
+        intelGTNotes.push_back(Elf::IntelGTNote{static_cast<Elf::IntelGTSectionType>(intelGTNote->type), notesData});
+    }
+    return DecodeError::Success;
+}
+
+template <Elf::ELF_IDENTIFIER_CLASS numBits>
+DecodeError getIntelGTNotes(const Elf::Elf<numBits> &elf, std::vector<Elf::IntelGTNote> &intelGTNotes, std::string &outErrReason, std::string &outWarning) {
     for (size_t i = 0; i < elf.sectionHeaders.size(); i++) {
         auto section = elf.sectionHeaders[i];
         if (Elf::SHT_NOTE == section.header->type && Elf::SectionsNamesZebin::noteIntelGT == elf.getSectionName(static_cast<uint32_t>(i))) {
-            uint64_t currentPos = 0;
-            auto sectionSize = section.header->size;
-            while (currentPos < sectionSize) {
-                auto intelGTNote = reinterpret_cast<const Elf::ElfNoteSection *>(section.data.begin() + currentPos);
-                auto nameSz = intelGTNote->nameSize;
-                auto descSz = intelGTNote->descSize;
-
-                auto currOffset = sizeof(Elf::ElfNoteSection) + alignUp(nameSz, 4) + alignUp(descSz, 4);
-                if (currentPos + currOffset > sectionSize) {
-                    intelGTNotes.clear();
-                    outErrReason.append("DeviceBinaryFormat::Zebin : Offseting will cause out-of-bound memory read! Section size: " + std::to_string(sectionSize) +
-                                        ", current section data offset: " + std::to_string(currentPos) + ", next offset : " + std::to_string(currOffset) + "\n");
-                    return DecodeError::InvalidBinary;
-                }
-                currentPos += currOffset;
-
-                auto ownerName = reinterpret_cast<const char *>(ptrOffset(intelGTNote, sizeof(Elf::ElfNoteSection)));
-                bool isValidGTNote = Elf::IntelGtNoteOwnerName.size() + 1 == nameSz;
-                isValidGTNote &= Elf::IntelGtNoteOwnerName == ConstStringRef(ownerName, nameSz - 1);
-                if (false == isValidGTNote) {
-                    outWarning.append("DeviceBinaryFormat::Zebin : Invalid owner name : ");
-                    ownerName[nameSz - 1] == '\0' ? outWarning.append(std::string{ownerName, nameSz - 1}) : outWarning.append(ownerName, nameSz);
-                    outWarning.append(" for IntelGTNote - note will not be used.\n");
-                    continue;
-                }
-                auto notesData = ArrayRef<const uint8_t>(reinterpret_cast<const uint8_t *>(ptrOffset(ownerName, nameSz)), descSz);
-                if (intelGTNote->type == Elf::IntelGTSectionType::ZebinVersion) {
-                    isValidGTNote &= notesData[descSz - 1] == '\0';
-                    if (false == isValidGTNote) {
-                        outWarning.append("DeviceBinaryFormat::Zebin :  Versioning string is not null-terminated: " + ConstStringRef(reinterpret_cast<const char *>(notesData.begin()), descSz).str() + " - note will not be used.\n");
-                        continue;
-                    }
-                }
-                intelGTNotes.push_back(Elf::IntelGTNote{static_cast<Elf::IntelGTSectionType>(intelGTNote->type), notesData});
-            }
+            return decodeIntelGTNoteSection<numBits>(section.data, intelGTNotes, outErrReason, outWarning);
         }
     }
     return DecodeError::Success;
 }
 
-DecodeError extractZebinSections(NEO::Elf::Elf<Elf::EI_CLASS_64> &elf, ZebinSections &out, std::string &outErrReason, std::string &outWarning) {
+template <Elf::ELF_IDENTIFIER_CLASS numBits>
+DecodeError extractZebinSections(NEO::Elf::Elf<numBits> &elf, ZebinSections<numBits> &out, std::string &outErrReason, std::string &outWarning) {
     if ((elf.elfFileHeader->shStrNdx >= elf.sectionHeaders.size()) || (NEO::Elf::SHN_UNDEF == elf.elfFileHeader->shStrNdx)) {
         outErrReason.append("DeviceBinaryFormat::Zebin : Invalid or missing shStrNdx in elf header\n");
         return DecodeError::InvalidBinary;
@@ -247,7 +269,10 @@ bool validateZebinSectionsCountExactly(const ContainerT &sectionsContainer, Cons
     return false;
 }
 
-DecodeError validateZebinSectionsCount(const ZebinSections &sections, std::string &outErrReason, std::string &outWarning) {
+template DecodeError validateZebinSectionsCount<Elf::EI_CLASS_32>(const ZebinSections<Elf::EI_CLASS_32> &sections, std::string &outErrReason, std::string &outWarning);
+template DecodeError validateZebinSectionsCount<Elf::EI_CLASS_64>(const ZebinSections<Elf::EI_CLASS_64> &sections, std::string &outErrReason, std::string &outWarning);
+template <Elf::ELF_IDENTIFIER_CLASS numBits>
+DecodeError validateZebinSectionsCount(const ZebinSections<numBits> &sections, std::string &outErrReason, std::string &outWarning) {
     bool valid = validateZebinSectionsCountAtMost(sections.zeInfoSections, NEO::Elf::SectionsNamesZebin::zeInfo, 1U, outErrReason, outWarning);
     valid &= validateZebinSectionsCountAtMost(sections.globalDataSections, NEO::Elf::SectionsNamesZebin::dataGlobal, 1U, outErrReason, outWarning);
     valid &= validateZebinSectionsCountAtMost(sections.constDataSections, NEO::Elf::SectionsNamesZebin::dataConst, 1U, outErrReason, outWarning);
@@ -279,6 +304,8 @@ void extractZeInfoKernelSections(const NEO::Yaml::YamlParser &parser, const NEO:
             outZeInfoKernelSections.perThreadMemoryBuffersNd.push_back(&kernelMetadataNd);
         } else if (NEO::Elf::ZebinKernelMetadata::Tags::Kernel::experimentalProperties == key) {
             outZeInfoKernelSections.experimentalPropertiesNd.push_back(&kernelMetadataNd);
+        } else if (NEO::Elf::ZebinKernelMetadata::Tags::Kernel::inlineSamplers == key) {
+            outZeInfoKernelSections.inlineSamplersNd.push_back(&kernelMetadataNd);
         } else {
             outWarning.append("DeviceBinaryFormat::Zebin::" + NEO::Elf::SectionsNamesZebin::zeInfo.str() + " : Unknown entry \"" + parser.readKey(kernelMetadataNd).str() + "\" in context of : " + context.str() + "\n");
         }
@@ -295,6 +322,7 @@ DecodeError validateZeInfoKernelSectionsCount(const ZeInfoKernelSections &outZeI
     valid &= validateZebinSectionsCountAtMost(outZeInfoKernelSections.bindingTableIndicesNd, NEO::Elf::ZebinKernelMetadata::Tags::Kernel::bindingTableIndices, 1U, outErrReason, outWarning);
     valid &= validateZebinSectionsCountAtMost(outZeInfoKernelSections.perThreadMemoryBuffersNd, NEO::Elf::ZebinKernelMetadata::Tags::Kernel::perThreadMemoryBuffers, 1U, outErrReason, outWarning);
     valid &= validateZebinSectionsCountAtMost(outZeInfoKernelSections.experimentalPropertiesNd, NEO::Elf::ZebinKernelMetadata::Tags::Kernel::experimentalProperties, 1U, outErrReason, outWarning);
+    valid &= validateZebinSectionsCountAtMost(outZeInfoKernelSections.inlineSamplersNd, NEO::Elf::ZebinKernelMetadata::Tags::Kernel::inlineSamplers, 1U, outErrReason, outWarning);
 
     return valid ? DecodeError::Success : DecodeError::InvalidBinary;
 }
@@ -382,6 +410,8 @@ DecodeError readZeInfoExecutionEnvironment(const NEO::Yaml::YamlParser &parser, 
             validExecEnv = validExecEnv & readZeInfoValueCollectionChecked(outExecEnv.workgroupWalkOrderDimensions, parser, execEnvMetadataNd, context, outErrReason);
         } else if (NEO::Elf::ZebinKernelMetadata::Tags::Kernel::ExecutionEnv::threadSchedulingMode == key) {
             validExecEnv &= readZeInfoEnumChecked(parser, execEnvMetadataNd, outExecEnv.threadSchedulingMode, context, outErrReason);
+        } else if (NEO::Elf::ZebinKernelMetadata::Tags::Kernel::ExecutionEnv::indirectStatelessCount == key) {
+            validExecEnv &= readZeInfoValueChecked(parser, execEnvMetadataNd, outExecEnv.indirectStatelessCount, context, outErrReason);
         } else {
             outWarning.append("DeviceBinaryFormat::Zebin::" + NEO::Elf::SectionsNamesZebin::zeInfo.str() + " : Unknown entry \"" + key.str() + "\" in context of " + context.str() + "\n");
         }
@@ -564,6 +594,32 @@ DecodeError readZeInfoPayloadArguments(const NEO::Yaml::YamlParser &parser, cons
         }
     }
     return validPayload ? DecodeError::Success : DecodeError::InvalidBinary;
+}
+
+DecodeError readZeInfoInlineSamplers(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node, ZeInfoInlineSamplers &outInlineSamplers, int32_t &outMaxSamplerIndex, ConstStringRef context, std::string &outErrReason, std::string &outWarning) {
+    bool validInlineSamplers = true;
+    for (const auto &inlineSamplerNd : parser.createChildrenRange(node)) {
+        outInlineSamplers.resize(outInlineSamplers.size() + 1);
+        auto &inlineSampler = *outInlineSamplers.rbegin();
+        for (const auto &inlineSamplerMemberNd : parser.createChildrenRange(inlineSamplerNd)) {
+            namespace Tags = NEO::Elf::ZebinKernelMetadata::Tags::Kernel::InlineSamplers;
+            auto key = parser.readKey(inlineSamplerMemberNd);
+            if (Tags::samplerIndex == key) {
+                validInlineSamplers &= readZeInfoValueChecked(parser, inlineSamplerMemberNd, inlineSampler.samplerIndex, context, outErrReason);
+                outMaxSamplerIndex = std::max<int32_t>(outMaxSamplerIndex, inlineSampler.samplerIndex);
+            } else if (Tags::addrMode == key) {
+                validInlineSamplers &= readZeInfoEnumChecked(parser, inlineSamplerMemberNd, inlineSampler.addrMode, context, outErrReason);
+            } else if (Tags::filterMode == key) {
+                validInlineSamplers &= readZeInfoEnumChecked(parser, inlineSamplerMemberNd, inlineSampler.filterMode, context, outErrReason);
+            } else if (Tags::normalized == key) {
+                validInlineSamplers &= readZeInfoValueChecked(parser, inlineSamplerMemberNd, inlineSampler.normalized, context, outErrReason);
+            } else {
+                outWarning.append("DeviceBinaryFormat::Zebin::" + NEO::Elf::SectionsNamesZebin::zeInfo.str() + " : Unknown entry \"" + key.str() + "\" for inline sampler in context of " + context.str() + "\n");
+            }
+        }
+    }
+
+    return validInlineSamplers ? DecodeError::Success : DecodeError::InvalidBinary;
 }
 
 DecodeError readZeInfoBindingTableIndices(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node,
@@ -1030,6 +1086,47 @@ NEO::DecodeError populateArgDescriptor(const NEO::Elf::ZebinKernelMetadata::Type
     return DecodeError::Success;
 }
 
+NEO::DecodeError populateInlineSamplers(const NEO::Elf::ZebinKernelMetadata::Types::Kernel::InlineSamplers::InlineSamplerBaseT &src, NEO::KernelDescriptor &dst, std::string &outErrReason, std::string &outWarning) {
+    NEO::KernelDescriptor::InlineSampler inlineSampler = {};
+
+    if (src.samplerIndex == -1) {
+        outErrReason.append("DeviceBinaryFormat::Zebin : Invalid inline sampler index (must be >= 0) in context of : " + dst.kernelMetadata.kernelName + ".\n");
+        return DecodeError::InvalidBinary;
+    }
+    inlineSampler.samplerIndex = src.samplerIndex;
+
+    using AddrModeZeInfo = NEO::Elf::ZebinKernelMetadata::Types::Kernel::InlineSamplers::AddrModeT;
+    using AddrModeDescriptor = NEO::KernelDescriptor::InlineSampler::AddrMode;
+    constexpr LookupArray<AddrModeZeInfo, AddrModeDescriptor, 5> addrModes({{{AddrModeZeInfo::None, AddrModeDescriptor::None},
+                                                                             {AddrModeZeInfo::Repeat, AddrModeDescriptor::Repeat},
+                                                                             {AddrModeZeInfo::ClampEdge, AddrModeDescriptor::ClampEdge},
+                                                                             {AddrModeZeInfo::ClampBorder, AddrModeDescriptor::ClampBorder},
+                                                                             {AddrModeZeInfo::Mirror, AddrModeDescriptor::Mirror}}});
+    auto addrMode = addrModes.find(src.addrMode);
+    if (addrMode.has_value() == false) {
+        outErrReason.append("DeviceBinaryFormat::Zebin : Invalid inline sampler addressing mode in context of : " + dst.kernelMetadata.kernelName + "\n");
+        return DecodeError::InvalidBinary;
+    }
+    inlineSampler.addrMode = *addrMode;
+
+    using FilterModeZeInfo = NEO::Elf::ZebinKernelMetadata::Types::Kernel::InlineSamplers::FilterModeT;
+    using FilterModeDescriptor = NEO::KernelDescriptor::InlineSampler::FilterMode;
+    constexpr LookupArray<FilterModeZeInfo, FilterModeDescriptor, 2> filterModes({{{FilterModeZeInfo::Nearest, FilterModeDescriptor::Nearest},
+                                                                                   {FilterModeZeInfo::Linear, FilterModeDescriptor::Linear}}});
+    auto filterMode = filterModes.find(src.filterMode);
+    if (filterMode.has_value() == false) {
+        outErrReason.append("DeviceBinaryFormat::Zebin : Invalid inline sampler filterMode mode in context of : " + dst.kernelMetadata.kernelName + "\n");
+        return DecodeError::InvalidBinary;
+    }
+    inlineSampler.filterMode = *filterMode;
+
+    inlineSampler.isNormalized = src.normalized;
+
+    dst.inlineSamplers.push_back(inlineSampler);
+
+    return DecodeError::Success;
+}
+
 NEO::DecodeError populateKernelDescriptor(const NEO::Elf::ZebinKernelMetadata::Types::Kernel::PerThreadMemoryBuffer::PerThreadMemoryBufferBaseT &src, NEO::KernelDescriptor &dst, uint32_t minScratchSpaceSize,
                                           std::string &outErrReason, std::string &outWarning) {
     using namespace NEO::Elf::ZebinKernelMetadata::Types::Kernel::PerThreadMemoryBuffer;
@@ -1073,7 +1170,8 @@ NEO::DecodeError populateKernelDescriptor(const NEO::Elf::ZebinKernelMetadata::T
     return DecodeError::Success;
 }
 
-NEO::DecodeError populateKernelDescriptor(NEO::ProgramInfo &dst, NEO::Elf::Elf<NEO::Elf::EI_CLASS_64> &elf, NEO::ZebinSections &zebinSections,
+template <Elf::ELF_IDENTIFIER_CLASS numBits>
+NEO::DecodeError populateKernelDescriptor(NEO::ProgramInfo &dst, NEO::Elf::Elf<numBits> &elf, NEO::ZebinSections<numBits> &zebinSections,
                                           NEO::Yaml::YamlParser &yamlParser, const NEO::Yaml::Node &kernelNd, std::string &outErrReason, std::string &outWarning) {
     auto kernelInfo = std::make_unique<NEO::KernelInfo>();
     auto &kernelDescriptor = kernelInfo->kernelDescriptor;
@@ -1134,6 +1232,15 @@ NEO::DecodeError populateKernelDescriptor(NEO::ProgramInfo &dst, NEO::Elf::Elf<N
         }
     }
 
+    ZeInfoInlineSamplers inlineSamplers;
+    if (false == zeInfokernelSections.inlineSamplersNd.empty()) {
+        auto decodeErr = readZeInfoInlineSamplers(yamlParser, *zeInfokernelSections.inlineSamplersNd[0], inlineSamplers, maxSamplerIndex,
+                                                  kernelDescriptor.kernelMetadata.kernelName, outErrReason, outWarning);
+        if (DecodeError::Success != decodeErr) {
+            return decodeErr;
+        }
+    }
+
     ZeInfoPerThreadMemoryBuffers perThreadMemoryBuffers;
     if (false == zeInfokernelSections.perThreadMemoryBuffersNd.empty()) {
         auto perThreadMemoryBuffersErr = readZeInfoPerThreadMemoryBuffers(yamlParser, *zeInfokernelSections.perThreadMemoryBuffersNd[0], perThreadMemoryBuffers,
@@ -1180,6 +1287,7 @@ NEO::DecodeError populateKernelDescriptor(NEO::ProgramInfo &dst, NEO::Elf::Elf<N
     kernelDescriptor.kernelAttributes.workgroupWalkOrder[0] = static_cast<uint8_t>(execEnv.workgroupWalkOrderDimensions[0]);
     kernelDescriptor.kernelAttributes.workgroupWalkOrder[1] = static_cast<uint8_t>(execEnv.workgroupWalkOrderDimensions[1]);
     kernelDescriptor.kernelAttributes.workgroupWalkOrder[2] = static_cast<uint8_t>(execEnv.workgroupWalkOrderDimensions[2]);
+    kernelDescriptor.kernelAttributes.hasIndirectStatelessAccess = (execEnv.indirectStatelessCount > 0);
     kernelDescriptor.kernelMetadata.requiredSubGroupSize = execEnv.requiredSubGroupSize;
 
     using ThreadSchedulingMode = NEO::Elf::ZebinKernelMetadata::Types::Kernel::ExecutionEnv::ThreadSchedulingMode;
@@ -1212,13 +1320,19 @@ NEO::DecodeError populateKernelDescriptor(NEO::ProgramInfo &dst, NEO::Elf::Elf<N
 
     if (!payloadArguments.empty()) {
         kernelDescriptor.payloadMappings.explicitArgs.resize(maxArgumentIndex + 1);
-        kernelDescriptor.explicitArgsExtendedMetadata.resize(maxArgumentIndex + 1);
         kernelDescriptor.kernelAttributes.numArgsToPatch = maxArgumentIndex + 1;
     }
 
     uint32_t crossThreadDataSize = 0;
     for (const auto &arg : payloadArguments) {
         auto decodeErr = populateArgDescriptor(arg, kernelDescriptor, crossThreadDataSize, outErrReason, outWarning);
+        if (DecodeError::Success != decodeErr) {
+            return decodeErr;
+        }
+    }
+
+    for (const auto &inlineSampler : inlineSamplers) {
+        auto decodeErr = populateInlineSamplers(inlineSampler, kernelDescriptor, outErrReason, outWarning);
         if (DecodeError::Success != decodeErr) {
             return decodeErr;
         }
@@ -1312,7 +1426,7 @@ NEO::DecodeError populateKernelDescriptor(NEO::ProgramInfo &dst, NEO::Elf::Elf<N
         kernelDescriptor.generatedHeaps.resize(kernelDescriptor.generatedHeaps.size() + generatedDshSize);
     }
 
-    ZebinSections::SectionHeaderData *correspondingTextSegment = nullptr;
+    typename ZebinSections<numBits>::SectionHeaderData *correspondingTextSegment = nullptr;
     auto sectionHeaderNamesData = elf.sectionHeaders[elf.elfFileHeader->shStrNdx].data;
     ConstStringRef sectionHeaderNamesString(reinterpret_cast<const char *>(sectionHeaderNamesData.begin()), sectionHeaderNamesData.size());
     for (auto *textSection : zebinSections.textKernelSections) {
@@ -1438,8 +1552,117 @@ NEO::DecodeError populateKernelSourceAttributes(NEO::KernelDescriptor &dst, NEO:
     return DecodeError::Success;
 }
 
-NEO::DecodeError decodeZebin(ProgramInfo &dst, NEO::Elf::Elf<NEO::Elf::EI_CLASS_64> &elf, std::string &outErrReason, std::string &outWarning) {
-    ZebinSections zebinSections;
+NEO::DecodeError readKernelMiscArgumentInfos(const NEO::Yaml::YamlParser &parser, const NEO::Yaml::Node &node, KernelMiscArgInfos &kernelMiscArgInfosVec, std::string &outErrReason, std::string &outWarning) {
+    bool validArgInfo = true;
+    for (const auto &argInfoMemberNode : parser.createChildrenRange(node)) {
+        kernelMiscArgInfosVec.resize(kernelMiscArgInfosVec.size() + 1);
+        auto &metadataExtended = *kernelMiscArgInfosVec.rbegin();
+        for (const auto &singleArgInfoMember : parser.createChildrenRange(argInfoMemberNode)) {
+            auto key = parser.readKey(singleArgInfoMember);
+            if (key == Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::ArgsInfo::name) {
+                validArgInfo &= readZeInfoValueChecked(parser, singleArgInfoMember, metadataExtended.argName, Elf::ZebinKernelMetadata::Tags::kernelMiscInfo, outErrReason);
+            } else if (key == Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::ArgsInfo::accessQualifier) {
+                validArgInfo &= readZeInfoValueChecked(parser, singleArgInfoMember, metadataExtended.accessQualifier, Elf::ZebinKernelMetadata::Tags::kernelMiscInfo, outErrReason);
+            } else if (key == Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::ArgsInfo::addressQualifier) {
+                validArgInfo &= readZeInfoValueChecked(parser, singleArgInfoMember, metadataExtended.addressQualifier, Elf::ZebinKernelMetadata::Tags::kernelMiscInfo, outErrReason);
+            } else if (key == Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::ArgsInfo::index) {
+                validArgInfo &= parser.readValueChecked(singleArgInfoMember, metadataExtended.index);
+            } else if (key == Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::ArgsInfo::typeName) {
+                validArgInfo &= readZeInfoValueChecked(parser, singleArgInfoMember, metadataExtended.typeName, Elf::ZebinKernelMetadata::Tags::kernelMiscInfo, outErrReason);
+            } else if (key == Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::ArgsInfo::typeQualifiers) {
+                validArgInfo &= readZeInfoValueChecked(parser, singleArgInfoMember, metadataExtended.typeQualifiers, Elf::ZebinKernelMetadata::Tags::kernelMiscInfo, outErrReason);
+            } else {
+                outWarning.append("DeviceBinaryFormat::Zebin : KernelMiscInfo : Unrecognized argsInfo member " + key.str() + "\n");
+            }
+        }
+    }
+    return validArgInfo ? DecodeError::Success : DecodeError::InvalidBinary;
+}
+
+void populateKernelMiscInfo(KernelDescriptor &dst, KernelMiscArgInfos &kernelMiscArgInfosVec, std::string &outErrReason, std::string &outWarning) {
+    auto populateIfNotEmpty = [](std::string &src, std::string &dst, ConstStringRef context, std::string &warnings) {
+        if (false == src.empty()) {
+            dst = std::move(src);
+        } else {
+            warnings.append("DeviceBinaryFormat::Zebin : KernelMiscInfo : ArgInfo member \"" + context.str() + "\" missing. Ignoring.\n");
+        }
+    };
+
+    dst.explicitArgsExtendedMetadata.resize(kernelMiscArgInfosVec.size());
+    for (auto &srcMetadata : kernelMiscArgInfosVec) {
+        ArgTypeMetadataExtended dstMetadata;
+        populateIfNotEmpty(srcMetadata.argName, dstMetadata.argName, Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::ArgsInfo::name, outWarning);
+        populateIfNotEmpty(srcMetadata.accessQualifier, dstMetadata.accessQualifier, Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::ArgsInfo::accessQualifier, outWarning);
+        populateIfNotEmpty(srcMetadata.addressQualifier, dstMetadata.addressQualifier, Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::ArgsInfo::addressQualifier, outWarning);
+        populateIfNotEmpty(srcMetadata.typeName, dstMetadata.type, Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::ArgsInfo::typeName, outWarning);
+        populateIfNotEmpty(srcMetadata.typeQualifiers, dstMetadata.typeQualifiers, Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::ArgsInfo::typeQualifiers, outWarning);
+
+        dst.explicitArgsExtendedMetadata.at(srcMetadata.index) = std::move(dstMetadata);
+    }
+}
+
+NEO::DecodeError decodeAndPopulateKernelMiscInfo(ProgramInfo &dst, ConstStringRef metadataString, std::string &outErrReason, std::string &outWarning) {
+    if (std::string::npos == dst.kernelMiscInfoPos) {
+        outErrReason.append("DeviceBinaryFormat::Zebin : Position of " + Elf::ZebinKernelMetadata::Tags::kernelMiscInfo.str() + " not set - may be missing in zeInfo.\n");
+        return DecodeError::InvalidBinary;
+    }
+    ConstStringRef kernelMiscInfoString(reinterpret_cast<const char *>(metadataString.begin() + dst.kernelMiscInfoPos), metadataString.size() - dst.kernelMiscInfoPos);
+    NEO::KernelInfo *kernelInfo = nullptr;
+
+    NEO::Yaml::YamlParser parser;
+    bool parseSuccess = parser.parse(kernelMiscInfoString, outErrReason, outWarning);
+    if (false == parseSuccess) {
+        return DecodeError::InvalidBinary;
+    }
+
+    auto kernelMiscInfoSectionNode = parser.createChildrenRange(*parser.getRoot());
+    auto validMetadata = true;
+    using KernelArgsMiscInfoVec = std::vector<std::pair<std::string, KernelMiscArgInfos>>;
+    KernelArgsMiscInfoVec kernelArgsMiscInfoVec;
+
+    for (const auto &kernelMiscInfoNode : parser.createChildrenRange(*kernelMiscInfoSectionNode.begin())) {
+        std::string kernelName{};
+        KernelMiscArgInfos miscArgInfosVec;
+        for (const auto &kernelMiscInfoNodeMetadata : parser.createChildrenRange(kernelMiscInfoNode)) {
+            auto key = parser.readKey(kernelMiscInfoNodeMetadata);
+            if (key == Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::name) {
+                validMetadata &= readZeInfoValueChecked(parser, kernelMiscInfoNodeMetadata, kernelName, Elf::ZebinKernelMetadata::Tags::kernelMiscInfo, outErrReason);
+            } else if (key == Elf::ZebinKernelMetadata::Tags::KernelMiscInfo::argsInfo) {
+                validMetadata &= (DecodeError::Success == readKernelMiscArgumentInfos(parser, kernelMiscInfoNodeMetadata, miscArgInfosVec, outErrReason, outWarning));
+            } else {
+                outWarning.append("DeviceBinaryFormat::Zebin : Unrecognized entry: " + key.str() + " in " + Elf::ZebinKernelMetadata::Tags::kernelMiscInfo.str() + " zeInfo's section.\n");
+            }
+        }
+        if (kernelName.empty()) {
+            outErrReason.append("DeviceBinaryFormat::Zebin : Error : Missing kernel name in " + Elf::ZebinKernelMetadata::Tags::kernelMiscInfo.str() + " section.\n");
+            validMetadata = false;
+        }
+        kernelArgsMiscInfoVec.emplace_back(std::make_pair(std::move(kernelName), miscArgInfosVec));
+    }
+    if (false == validMetadata) {
+        return DecodeError::InvalidBinary;
+    }
+    for (auto &[kName, miscInfos] : kernelArgsMiscInfoVec) {
+        for (auto dstKernelInfo : dst.kernelInfos) {
+            if (dstKernelInfo->kernelDescriptor.kernelMetadata.kernelName == kName) {
+                kernelInfo = dstKernelInfo;
+                break;
+            }
+        }
+        if (nullptr == kernelInfo) {
+            outErrReason.append("DeviceBinaryFormat::Zebin : Error : Cannot find kernel info for kernel " + kName + ".\n");
+            return DecodeError::InvalidBinary;
+        }
+        populateKernelMiscInfo(kernelInfo->kernelDescriptor, miscInfos, outErrReason, outWarning);
+    }
+    return DecodeError::Success;
+}
+
+template NEO::DecodeError decodeZebin<Elf::EI_CLASS_32>(ProgramInfo &dst, NEO::Elf::Elf<Elf::EI_CLASS_32> &elf, std::string &outErrReason, std::string &outWarning);
+template NEO::DecodeError decodeZebin<Elf::EI_CLASS_64>(ProgramInfo &dst, NEO::Elf::Elf<Elf::EI_CLASS_64> &elf, std::string &outErrReason, std::string &outWarning);
+template <Elf::ELF_IDENTIFIER_CLASS numBits>
+NEO::DecodeError decodeZebin(ProgramInfo &dst, NEO::Elf::Elf<numBits> &elf, std::string &outErrReason, std::string &outWarning) {
+    ZebinSections<numBits> zebinSections;
     auto extractError = extractZebinSections(elf, zebinSections, outErrReason, outWarning);
     if (DecodeError::Success != extractError) {
         return extractError;
@@ -1475,7 +1698,13 @@ NEO::DecodeError decodeZebin(ProgramInfo &dst, NEO::Elf::Elf<NEO::Elf::EI_CLASS_
     }
 
     auto metadataSectionData = zebinSections.zeInfoSections[0]->data;
+
     ConstStringRef metadataString(reinterpret_cast<const char *>(metadataSectionData.begin()), metadataSectionData.size());
+    setKernelMiscInfoPosition(metadataString, dst);
+    if (std::string::npos != dst.kernelMiscInfoPos) {
+        metadataString = metadataString.substr(static_cast<size_t>(0), dst.kernelMiscInfoPos);
+    }
+
     NEO::Yaml::YamlParser yamlParser;
     bool parseSuccess = yamlParser.parse(metadataString, outErrReason, outWarning);
     if (false == parseSuccess) {

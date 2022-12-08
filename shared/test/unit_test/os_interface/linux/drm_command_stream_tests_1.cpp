@@ -29,6 +29,7 @@
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/helpers/execution_environment_helper.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
+#include "shared/test/common/libult/linux/drm_mock.h"
 #include "shared/test/common/mocks/linux/mock_drm_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_gmm.h"
@@ -171,7 +172,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenDrmContextIdWhenFlushingThenSetIdT
 
     mock->storedDrmContextId = expectedDrmContextId;
 
-    osContext = std::make_unique<OsContextLinux>(*mock, 1,
+    osContext = std::make_unique<OsContextLinux>(*mock, csr->getRootDeviceIndex(), 1,
                                                  EngineDescriptorHelper::getDefaultDescriptor(HwHelper::get(defaultHwInfo->platform.eRenderCoreFamily).getGpgpuEngineInstances(*defaultHwInfo)[0],
                                                                                               PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo)));
     osContext->ensureContextInitialized();
@@ -609,11 +610,14 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenFailingProcessResidencyWhe
     auto allocation = mm->allocateGraphicsMemoryWithProperties(MockAllocationProperties{csr->getRootDeviceIndex(), MemoryConstants::pageSize});
     executionEnvironment->rootDeviceEnvironments[csr->getRootDeviceIndex()]->memoryOperationsInterface->makeResident(device.get(), ArrayRef<GraphicsAllocation *>(&allocation, 1));
 
-    static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->callBaseProcessResidency = false;
-    static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->processResidencyResult = false;
+    auto testedCsr = static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr);
+    testedCsr->processResidencyCallBase = false;
+    testedCsr->processResidencyResult = false;
 
     SubmissionStatus ret = csr->flush(batchBuffer, csr->getResidencyAllocations());
     EXPECT_EQ(SubmissionStatus::OUT_OF_MEMORY, ret);
+    EXPECT_EQ(testedCsr->flushInternalCalled, 1u);
+    EXPECT_EQ(testedCsr->processResidencyCalled, 1u);
     mm->freeGraphicsMemory(allocation);
     mm->freeGraphicsMemory(commandBuffer);
 }
@@ -628,11 +632,17 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenFailingExecWhenFlushingThe
     auto allocation = mm->allocateGraphicsMemoryWithProperties(MockAllocationProperties{csr->getRootDeviceIndex(), MemoryConstants::pageSize});
     executionEnvironment->rootDeviceEnvironments[csr->getRootDeviceIndex()]->memoryOperationsInterface->makeResident(device.get(), ArrayRef<GraphicsAllocation *>(&allocation, 1));
 
-    static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->callBaseExec = false;
-    static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->execResult = -1;
+    auto testedCsr = static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr);
+    testedCsr->processResidencyCallBase = true;
+    testedCsr->processResidencyResult = true;
+    testedCsr->execCallBase = false;
+    testedCsr->execResult = -1;
 
     SubmissionStatus ret = csr->flush(batchBuffer, csr->getResidencyAllocations());
     EXPECT_EQ(SubmissionStatus::FAILED, ret);
+    EXPECT_EQ(testedCsr->flushInternalCalled, 1u);
+    EXPECT_EQ(testedCsr->processResidencyCalled, 1u);
+    EXPECT_EQ(testedCsr->execCalled, 1u);
     mm->freeGraphicsMemory(allocation);
     mm->freeGraphicsMemory(commandBuffer);
 }
@@ -668,7 +678,7 @@ struct DrmCommandStreamBlitterDirectSubmissionTest : public DrmCommandStreamDire
         DrmCommandStreamDirectSubmissionTest::setUpT<GfxFamily>();
         executionEnvironment->incRefInternal();
 
-        osContext.reset(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(), 0,
+        osContext.reset(OsContext::create(device->getExecutionEnvironment()->rootDeviceEnvironments[0]->osInterface.get(), 0, 0,
                                           EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_BCS, EngineUsage::Regular}, PreemptionMode::ThreadGroup, device->getDeviceBitfield())));
         osContext->ensureContextInitialized();
 
@@ -835,7 +845,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmi
     static_cast<MockDrmDirectSubmission<FamilyType> *>(directSubmission)->currentTagData.tagValue = 0u;
 }
 
-HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmissionWhenFlushThenCommandBufferAllocationIsResident) {
+HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmissionWhenFlushThenCommandBufferAllocationIsNotAddedToHandlerResidencySet) {
     mock->bindAvailable = true;
     auto &cs = csr->getCS();
     CommandStreamReceiverHw<FamilyType>::addBatchBufferEnd(cs, nullptr);
@@ -847,7 +857,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmi
     csr->flush(batchBuffer, csr->getResidencyAllocations());
 
     auto memoryOperationsInterface = executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface.get();
-    EXPECT_EQ(memoryOperationsInterface->isResident(device.get(), *batchBuffer.commandBufferAllocation), MemoryOperationsStatus::SUCCESS);
+    EXPECT_NE(memoryOperationsInterface->isResident(device.get(), *batchBuffer.commandBufferAllocation), MemoryOperationsStatus::SUCCESS);
 
     auto directSubmission = static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->directSubmission.get();
     ASSERT_NE(nullptr, directSubmission);
@@ -873,33 +883,6 @@ HWTEST_TEMPLATED_F(DrmCommandStreamBlitterDirectSubmissionTest, givenEnabledDire
 
     EXPECT_EQ(nullptr, static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->directSubmission.get());
 }
-
-HWTEST_TEMPLATED_F(DrmCommandStreamBlitterDirectSubmissionTest, givenEnabledDirectSubmissionOnBlitterWhenFlushThenCommandBufferAllocationIsResident) {
-    mock->bindAvailable = true;
-    auto &cs = csr->getCS();
-    CommandStreamReceiverHw<FamilyType>::addBatchBufferEnd(cs, nullptr);
-    EncodeNoop<FamilyType>::alignToCacheLine(cs);
-    BatchBuffer batchBuffer{cs.getGraphicsAllocation(), 4, 0, nullptr, false, false, QueueThrottle::MEDIUM, QueueSliceCount::defaultSliceCount, cs.getUsed(), &cs, nullptr, false};
-    uint8_t bbStart[64];
-    batchBuffer.endCmdPtr = &bbStart[0];
-
-    csr->flush(batchBuffer, csr->getResidencyAllocations());
-
-    auto memoryOperationsInterface = executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface.get();
-    EXPECT_EQ(memoryOperationsInterface->isResident(device.get(), *batchBuffer.commandBufferAllocation), MemoryOperationsStatus::SUCCESS);
-
-    auto directSubmission = static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->blitterDirectSubmission.get();
-    ASSERT_NE(nullptr, directSubmission);
-    static_cast<MockDrmBlitterDirectSubmission<FamilyType> *>(directSubmission)->currentTagData.tagValue = 0u;
-
-    EXPECT_EQ(nullptr, static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->directSubmission.get());
-}
-
-template <typename GfxFamily>
-struct MockDrmCsr : public DrmCommandStreamReceiver<GfxFamily> {
-    using DrmCommandStreamReceiver<GfxFamily>::DrmCommandStreamReceiver;
-    using DrmCommandStreamReceiver<GfxFamily>::dispatchMode;
-};
 
 HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenDrmCommandStreamReceiverWhenCreatePageTableManagerIsCalledThenCreatePageTableManager) {
     executionEnvironment.prepareRootDeviceEnvironments(2);

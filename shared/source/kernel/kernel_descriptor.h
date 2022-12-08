@@ -157,6 +157,7 @@ struct KernelDescriptor {
         bool hasNonKernelArgLoad = true;
         bool hasNonKernelArgStore = true;
         bool hasNonKernelArgAtomic = true;
+        bool hasIndirectStatelessAccess = false;
 
         AddressingMode bufferAddressingMode = BindfulAndStateless;
         AddressingMode imageAddressingMode = Bindful;
@@ -277,6 +278,31 @@ struct KernelDescriptor {
     } payloadMappings;
 
     std::vector<ArgTypeMetadataExtended> explicitArgsExtendedMetadata;
+
+    struct InlineSampler {
+        enum class AddrMode : uint8_t {
+            None,
+            Repeat,
+            ClampEdge,
+            ClampBorder,
+            Mirror
+        };
+        enum class FilterMode : uint8_t {
+            Nearest,
+            Linear
+        };
+        static constexpr size_t borderColorStateSize = 64U;
+        static constexpr size_t samplerStateSize = 16U;
+
+        uint32_t samplerIndex;
+        bool isNormalized;
+        AddrMode addrMode;
+        FilterMode filterMode;
+        constexpr uint32_t getSamplerBindfulOffset() const {
+            return borderColorStateSize + samplerStateSize * samplerIndex;
+        }
+    };
+    std::vector<InlineSampler> inlineSamplers;
 
     struct {
         std::string kernelName;

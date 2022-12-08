@@ -171,8 +171,10 @@ bool Wddm::translateTopologyInfo(TopologyMapping &mapping) {
     std::vector<int> sliceIndices;
     auto gtSystemInfo = rootDeviceEnvironment.getHardwareInfo()->gtSystemInfo;
     sliceIndices.reserve(gtSystemInfo.SliceCount);
+    auto hwInfo = rootDeviceEnvironment.getHardwareInfo();
+    const uint32_t highestEnabledSlice = NEO::HwHelper::getHighestEnabledSlice(*hwInfo);
 
-    for (uint32_t x = 0; x < GT_MAX_SLICE; x++) {
+    for (uint32_t x = 0; x < std::max(highestEnabledSlice, hwInfo->gtSystemInfo.MaxSlicesSupported); x++) {
         if (!gtSystemInfo.SliceInfo[x].Enabled) {
             continue;
         }
@@ -217,10 +219,6 @@ bool Wddm::translateTopologyInfo(TopologyMapping &mapping) {
     }
     PRINT_DEBUGGER_INFO_LOG("Topology Mapping: sliceCount=%d subSliceCount=%d euCount=%d\n", sliceCount, subSliceCount, euCount);
     return (sliceCount && subSliceCount && euCount);
-}
-
-const TopologyMap &Wddm::getTopologyMap() {
-    return topologyMap;
 }
 
 bool Wddm::queryAdapterInfo() {
@@ -1202,8 +1200,8 @@ PhysicalDevicePciBusInfo Wddm::getPciBusInfo() const {
     return PhysicalDevicePciBusInfo(0, adapterBDF.Bus, adapterBDF.Device, adapterBDF.Function);
 }
 
-PhyicalDevicePciSpeedInfo Wddm::getPciSpeedInfo() const {
-    PhyicalDevicePciSpeedInfo speedInfo{};
+PhysicalDevicePciSpeedInfo Wddm::getPciSpeedInfo() const {
+    PhysicalDevicePciSpeedInfo speedInfo{};
     return speedInfo;
 }
 

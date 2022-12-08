@@ -17,6 +17,7 @@
 #include <vector>
 
 namespace NEO {
+class CommandStreamReceiver;
 class Device;
 class GraphicsAllocation;
 class LinearStream;
@@ -78,7 +79,7 @@ class CommandContainer : public NonCopyableOrMovableClass {
 
     Device *getDevice() const { return device; }
 
-    IndirectHeap *getHeapWithRequiredSizeAndAlignment(HeapType heapType, size_t sizeRequired, size_t alignment);
+    MOCKABLE_VIRTUAL IndirectHeap *getHeapWithRequiredSizeAndAlignment(HeapType heapType, size_t sizeRequired, size_t alignment);
     void allocateNextCommandBuffer();
     void closeAndAllocateNextCommandBuffer();
 
@@ -94,12 +95,29 @@ class CommandContainer : public NonCopyableOrMovableClass {
     void setIddBlock(void *iddBlock) { this->iddBlock = iddBlock; }
     void *getIddBlock() { return iddBlock; }
     uint32_t getNumIddPerBlock() const { return numIddsPerBlock; }
+    void setNumIddPerBlock(uint32_t value) { numIddsPerBlock = value; }
     void setReservedSshSize(size_t reserveSize) {
         reservedSshSize = reserveSize;
     }
 
     bool getFlushTaskUsedForImmediate() const { return isFlushTaskUsedForImmediate; }
     void setFlushTaskUsedForImmediate(bool flushTaskUsedForImmediate) { isFlushTaskUsedForImmediate = flushTaskUsedForImmediate; }
+    void setImmediateCmdListCsr(CommandStreamReceiver *newValue) {
+        this->immediateCmdListCsr = newValue;
+    }
+    void enableHeapSharing() { heapSharingEnabled = true; }
+    bool immediateCmdListSharedHeap(HeapType heapType) {
+        return (heapSharingEnabled && (heapType == HeapType::DYNAMIC_STATE || heapType == HeapType::SURFACE_STATE));
+    }
+    void ensureHeapSizePrepared(size_t sshRequiredSize, size_t dshRequiredSize);
+
+    GraphicsAllocation *reuseExistingCmdBuffer();
+    GraphicsAllocation *allocateCommandBuffer();
+    void setCmdBuffer(GraphicsAllocation *cmdBuffer);
+    void addCurrentCommandBufferToReusableAllocationList();
+
+    void fillReusableAllocationLists();
+    void storeAllocationAndFlushTagUpdate(GraphicsAllocation *allocation);
 
     HeapContainer sshAllocations;
     uint64_t currentLinearStreamStartOffset = 0u;
@@ -111,27 +129,34 @@ class CommandContainer : public NonCopyableOrMovableClass {
 
   protected:
     size_t getTotalCmdBufferSize();
+    void createAndAssignNewHeap(HeapType heapType, size_t size);
+    GraphicsAllocation *allocationIndirectHeaps[HeapType::NUM_TYPES] = {};
+    std::unique_ptr<IndirectHeap> indirectHeaps[HeapType::NUM_TYPES];
+
+    CmdBufferContainer cmdBufferAllocations;
+    ResidencyContainer residencyContainer;
+    std::vector<GraphicsAllocation *> deallocationContainer;
+
+    std::unique_ptr<HeapHelper> heapHelper;
+    std::unique_ptr<LinearStream> commandStream;
+
+    uint64_t instructionHeapBaseAddress = 0u;
+    uint64_t indirectObjectHeapBaseAddress = 0u;
 
     void *iddBlock = nullptr;
     Device *device = nullptr;
     AllocationsList *reusableAllocationList = nullptr;
-    std::unique_ptr<HeapHelper> heapHelper;
+    size_t reservedSshSize = 0;
+    CommandStreamReceiver *immediateCmdListCsr = nullptr;
+    IndirectHeap *sharedSshCsrHeap = nullptr;
+    IndirectHeap *sharedDshCsrHeap = nullptr;
 
-    CmdBufferContainer cmdBufferAllocations;
-    GraphicsAllocation *allocationIndirectHeaps[HeapType::NUM_TYPES] = {};
-    uint64_t instructionHeapBaseAddress = 0u;
-    uint64_t indirectObjectHeapBaseAddress = 0u;
     uint32_t dirtyHeaps = std::numeric_limits<uint32_t>::max();
     uint32_t numIddsPerBlock = 64;
-    size_t reservedSshSize = 0;
-
-    std::unique_ptr<LinearStream> commandStream;
-    std::unique_ptr<IndirectHeap> indirectHeaps[HeapType::NUM_TYPES];
-    ResidencyContainer residencyContainer;
-    std::vector<GraphicsAllocation *> deallocationContainer;
 
     bool isFlushTaskUsedForImmediate = false;
-    bool isHandleFenceCompletionRequired = true;
+    bool isHandleFenceCompletionRequired = false;
+    bool heapSharingEnabled = false;
 };
 
 } // namespace NEO

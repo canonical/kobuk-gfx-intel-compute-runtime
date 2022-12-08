@@ -14,7 +14,6 @@
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/pipe_control_args.h"
 #include "shared/source/helpers/state_base_address.h"
-#include "shared/source/helpers/state_base_address_xehp_and_later.inl"
 #include "shared/source/os_interface/hw_info_config.h"
 
 #include "level_zero/core/source/cmdqueue/cmdqueue_hw.h"
@@ -41,7 +40,7 @@ void CommandQueueHw<gfxCoreFamily>::programStateBaseAddress(uint64_t gsba, bool 
 
         bool isRcs = this->getCsr()->isRcs();
 
-        NEO::EncodeWA<GfxFamily>::addPipeControlBeforeStateBaseAddress(commandStream, hwInfo, isRcs);
+        NEO::EncodeWA<GfxFamily>::addPipeControlBeforeStateBaseAddress(commandStream, hwInfo, isRcs, this->getCsr()->getDcFlushSupport());
         auto isDebuggerActive = neoDevice->isDebuggerActive() || neoDevice->getDebugger() != nullptr;
 
         STATE_BASE_ADDRESS sbaCmd;
@@ -176,7 +175,7 @@ void CommandQueueHw<gfxCoreFamily>::patchCommands(CommandList &commandList, uint
             auto &hwInfo = device->getNEODevice()->getHardwareInfo();
 
             NEO::PipeControlArgs args;
-            args.dcFlushEnable = NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo);
+            args.dcFlushEnable = this->csr->getDcFlushSupport();
 
             auto command = reinterpret_cast<void *>(commandToPatch.pCommand);
             NEO::MemorySynchronizationCommands<GfxFamily>::setBarrierWithPostSyncOperation(
@@ -192,7 +191,7 @@ void CommandQueueHw<gfxCoreFamily>::patchCommands(CommandList &commandList, uint
             auto &hwInfo = device->getNEODevice()->getHardwareInfo();
 
             NEO::PipeControlArgs args;
-            args.dcFlushEnable = NEO::MemorySynchronizationCommands<GfxFamily>::getDcFlushEnable(true, hwInfo);
+            args.dcFlushEnable = this->csr->getDcFlushSupport();
 
             auto command = reinterpret_cast<void *>(commandToPatch.pCommand);
             NEO::MemorySynchronizationCommands<GfxFamily>::setBarrierWithPostSyncOperation(

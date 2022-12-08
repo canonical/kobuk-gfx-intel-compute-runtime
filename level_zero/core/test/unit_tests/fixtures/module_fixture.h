@@ -126,11 +126,15 @@ struct ModuleImmutableDataFixture : public DeviceFixture {
       public:
         using KernelImp::crossThreadData;
         using KernelImp::crossThreadDataSize;
+        using KernelImp::dynamicStateHeapData;
+        using KernelImp::dynamicStateHeapDataSize;
         using KernelImp::kernelArgHandlers;
         using KernelImp::kernelHasIndirectAccess;
         using KernelImp::kernelRequiresGenerationOfLocalIdsByRuntime;
         using KernelImp::privateMemoryGraphicsAllocation;
         using KernelImp::requiredWorkgroupOrder;
+        using KernelImp::surfaceStateHeapData;
+        using KernelImp::surfaceStateHeapDataSize;
 
         MockKernel(MockModule *mockModule) : WhiteBox<L0::KernelImp>(mockModule) {
         }
@@ -175,8 +179,9 @@ struct ModuleImmutableDataFixture : public DeviceFixture {
                                               mockKernelImmData);
 
         module->type = isInternal ? ModuleType::Builtin : ModuleType::User;
-        bool result = module->initialize(&moduleDesc, device->getNEODevice());
-        EXPECT_TRUE(result);
+        ze_result_t result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+        result = module->initialize(&moduleDesc, device->getNEODevice());
+        EXPECT_EQ(result, ZE_RESULT_SUCCESS);
     }
 
     void createKernel(MockKernel *kernel) {
@@ -214,8 +219,8 @@ struct ModuleFixture : public DeviceFixture {
         moduleDesc.inputSize = src.size();
 
         ModuleBuildLog *moduleBuildLog = nullptr;
-
-        module.reset(Module::create(device, &moduleDesc, moduleBuildLog, type));
+        ze_result_t result = ZE_RESULT_SUCCESS;
+        module.reset(Module::create(device, &moduleDesc, moduleBuildLog, type, &result));
     }
 
     void createKernel() {
@@ -257,10 +262,11 @@ struct MultiDeviceModuleFixture : public MultiDeviceFixture {
         moduleDesc.inputSize = src.size();
 
         ModuleBuildLog *moduleBuildLog = nullptr;
+        ze_result_t result = ZE_RESULT_SUCCESS;
 
         modules[rootDeviceIndex].reset(Module::create(device,
                                                       &moduleDesc,
-                                                      moduleBuildLog, ModuleType::User));
+                                                      moduleBuildLog, ModuleType::User, &result));
     }
 
     void createKernel(uint32_t rootDeviceIndex) {
@@ -295,7 +301,7 @@ struct ModuleWithZebinFixture : public DeviceFixture {
         MockImmutableData(L0::Device *device) {
 
             auto mockKernelDescriptor = new NEO::KernelDescriptor;
-            mockKernelDescriptor->kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram::kernelName;
+            mockKernelDescriptor->kernelMetadata.kernelName = ZebinTestData::ValidEmptyProgram<>::kernelName;
             kernelDescriptor = mockKernelDescriptor;
             this->device = device;
             auto ptr = reinterpret_cast<void *>(0x1234);
@@ -357,7 +363,7 @@ struct ModuleWithZebinFixture : public DeviceFixture {
         }
 
         void addEmptyZebin() {
-            auto zebin = ZebinTestData::ValidEmptyProgram();
+            auto zebin = ZebinTestData::ValidEmptyProgram<>();
 
             translationUnit->unpackedDeviceBinarySize = zebin.storage.size();
             translationUnit->unpackedDeviceBinary.reset(new char[zebin.storage.size()]);

@@ -18,4 +18,24 @@ bool L0HwHelperHw<Family>::multiTileCapablePlatform() const {
     return false;
 }
 
+template <typename Family>
+bool L0HwHelperHw<Family>::platformSupportsCmdListHeapSharing(const NEO::HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <typename Family>
+bool L0HwHelperHw<Family>::platformSupportsStateComputeModeTracking(const NEO::HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <typename Family>
+bool L0HwHelperHw<Family>::platformSupportsFrontEndTracking(const NEO::HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <typename Family>
+bool L0HwHelperHw<Family>::platformSupportsPipelineSelectTracking(const NEO::HardwareInfo &hwInfo) const {
+    return false;
+}
+
 } // namespace L0

@@ -6,23 +6,49 @@
  */
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/hw_helper.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/helpers/string.h"
+#include "shared/source/os_interface/hw_info_config.h"
 #include "shared/source/os_interface/linux/cache_info.h"
+#include "shared/source/os_interface/linux/drm_neo.h"
 #include "shared/source/os_interface/linux/drm_wrappers.h"
 #include "shared/source/os_interface/linux/i915_prelim.h"
 #include "shared/source/os_interface/linux/ioctl_helper.h"
+#include "shared/source/os_interface/linux/sys_calls.h"
 
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <iostream>
 #include <new>
 #include <sys/ioctl.h>
 
 namespace NEO {
+
+IoctlHelperPrelim20::IoctlHelperPrelim20(Drm &drmArg) : IoctlHelper(drmArg) {
+    auto hwHelper = HwInfoConfig::get(this->drm.getRootDeviceEnvironment().getHardwareInfo()->platform.eProductFamily);
+    if (hwHelper && hwHelper->isNonBlockingGpuSubmissionSupported()) {
+        handleExecBufferInNonBlockMode = true;
+        auto fileDescriptor = this->drm.getFileDescriptor();
+        SysCalls::fcntl(fileDescriptor, F_SETFL, SysCalls::fcntl(fileDescriptor, F_GETFL) | O_NONBLOCK);
+    }
+};
+
+bool IoctlHelperPrelim20::isSetPairAvailable() {
+    int setPairSupported = 0;
+    GetParam getParam{};
+    getParam.param = PRELIM_I915_PARAM_HAS_SET_PAIR;
+    getParam.value = &setPairSupported;
+    int retVal = IoctlHelper::ioctl(DrmIoctl::Getparam, &getParam);
+    if (retVal) {
+        return false;
+    }
+    return setPairSupported;
+}
 
 bool IoctlHelperPrelim20::isVmBindAvailable() {
     int vmBindSupported = 0;
@@ -36,7 +62,7 @@ bool IoctlHelperPrelim20::isVmBindAvailable() {
     return vmBindSupported;
 }
 
-uint32_t IoctlHelperPrelim20::createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, std::optional<uint32_t> vmId) {
+uint32_t IoctlHelperPrelim20::createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, std::optional<uint32_t> vmId, int32_t pairHandle) {
     uint32_t regionsSize = static_cast<uint32_t>(memClassInstances.size());
     std::vector<prelim_drm_i915_gem_memory_class_instance> regions(regionsSize);
     for (uint32_t i = 0; i < regionsSize; i++) {
@@ -53,10 +79,24 @@ uint32_t IoctlHelperPrelim20::createGemExt(const MemRegionsVec &memClassInstance
     setparamRegion.param = regionParam;
 
     prelim_drm_i915_gem_create_ext_vm_private vmPrivate{};
+    prelim_drm_i915_gem_create_ext_setparam pairSetparamRegion{};
+
     if (vmId != std::nullopt) {
         vmPrivate.base.name = PRELIM_I915_GEM_CREATE_EXT_VM_PRIVATE;
         vmPrivate.vm_id = vmId.value();
+    }
+
+    if (pairHandle != -1) {
+        pairSetparamRegion.base.name = PRELIM_I915_GEM_CREATE_EXT_SETPARAM;
+        pairSetparamRegion.param.param = PRELIM_I915_OBJECT_PARAM | PRELIM_I915_PARAM_SET_PAIR;
+        pairSetparamRegion.param.data = pairHandle;
+    }
+
+    if (vmId != std::nullopt) {
+        vmPrivate.base.next_extension = reinterpret_cast<uintptr_t>(&pairSetparamRegion);
         setparamRegion.base.next_extension = reinterpret_cast<uintptr_t>(&vmPrivate);
+    } else if (pairHandle != -1) {
+        setparamRegion.base.next_extension = reinterpret_cast<uintptr_t>(&pairSetparamRegion);
     }
 
     prelim_drm_i915_gem_create_ext createExt{};
@@ -222,6 +262,12 @@ int IoctlHelperPrelim20::execBuffer(ExecBuffer *execBuffer, uint64_t completionG
         drmExecBuffer.flags |= I915_EXEC_USE_EXTENSIONS;
         drmExecBuffer.num_cliprects = 0;
         drmExecBuffer.cliprects_ptr = castToUint64(&fenceObject);
+
+        if (DebugManager.flags.PrintCompletionFenceUsage.get()) {
+            std::cout << "Completion fence submitted."
+                      << " GPU address: " << std::hex << completionGpuAddress << std::dec
+                      << ", value: " << counterValue << std::endl;
+        }
     }
 
     return IoctlHelper::ioctl(DrmIoctl::GemExecbuffer2, execBuffer);
@@ -610,6 +656,51 @@ std::string IoctlHelperPrelim20::getIoctlString(DrmIoctl ioctlRequest) const {
     default:
         return getIoctlStringBase(ioctlRequest);
     }
+}
+
+bool IoctlHelperPrelim20::checkIfIoctlReinvokeRequired(int error, DrmIoctl ioctlRequest) const {
+    switch (ioctlRequest) {
+    case DrmIoctl::DebuggerOpen:
+        return (error == EINTR || error == EAGAIN);
+    case DrmIoctl::GemExecbuffer2:
+        if (handleExecBufferInNonBlockMode) {
+            return (error == EINTR || error == EBUSY || error == -EBUSY);
+        } else {
+            return IoctlHelper::checkIfIoctlReinvokeRequired(error, ioctlRequest);
+        }
+    default:
+        break;
+    }
+    return IoctlHelper::checkIfIoctlReinvokeRequired(error, ioctlRequest);
+}
+
+bool IoctlHelperPrelim20::getFabricLatency(uint32_t fabricId, uint32_t &latency, uint32_t &bandwidth) {
+    Query query = {};
+    QueryItem queryItem = {};
+    PrelimI915::prelim_drm_i915_query_fabric_info info = {};
+    info.fabric_id = fabricId;
+
+    queryItem.queryId = PRELIM_DRM_I915_QUERY_FABRIC_INFO;
+    queryItem.length = static_cast<int32_t>(sizeof(info));
+    queryItem.dataPtr = reinterpret_cast<uint64_t>(&info);
+    queryItem.flags = 0;
+
+    query.itemsPtr = reinterpret_cast<uint64_t>(&queryItem);
+    query.numItems = 1;
+    auto ret = IoctlHelper::ioctl(DrmIoctl::Query, &query);
+    if (ret != 0) {
+        return false;
+    }
+
+    if (info.latency < 10 || info.bandwidth == 0) {
+        return false;
+    }
+
+    // Latency is in tenths of path length. 10 == 1 fabric link between src and dst
+    // 1 link = zero hops
+    latency = (info.latency / 10) - 1;
+    bandwidth = info.bandwidth;
+    return true;
 }
 
 static_assert(sizeof(MemoryClassInstance) == sizeof(prelim_drm_i915_gem_memory_class_instance));

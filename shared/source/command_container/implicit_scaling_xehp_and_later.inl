@@ -21,7 +21,8 @@ WalkerPartition::WalkerPartitionArgs prepareWalkerPartitionArgs(uint64_t workPar
                                                                 bool emitSelfCleanup,
                                                                 bool preferStaticPartitioning,
                                                                 bool staticPartitioning,
-                                                                bool useSecondaryBatchBuffer) {
+                                                                bool useSecondaryBatchBuffer,
+                                                                bool dcFlush) {
     WalkerPartition::WalkerPartitionArgs args = {};
 
     args.workPartitionAllocationGpuVa = workPartitionAllocationGpuVa;
@@ -42,6 +43,10 @@ WalkerPartition::WalkerPartitionArgs prepareWalkerPartitionArgs(uint64_t workPar
     args.emitSelfCleanup = ImplicitScalingHelper::isSelfCleanupRequired(args, emitSelfCleanup);
     args.emitBatchBufferEnd = false;
     args.secondaryBatchBuffer = useSecondaryBatchBuffer;
+
+    args.dcFlushEnable = dcFlush;
+
+    args.pipeControlBeforeCleanupCrossTileSync = ImplicitScalingHelper::pipeControlBeforeCleanupAtomicSyncRequired();
 
     return args;
 }
@@ -70,6 +75,7 @@ size_t ImplicitScalingDispatch<GfxFamily>::getSize(bool apiSelfCleanup,
                                                                                       apiSelfCleanup,
                                                                                       preferStaticPartitioning,
                                                                                       staticPartitioning,
+                                                                                      false,
                                                                                       false);
 
     return static_cast<size_t>(WalkerPartition::estimateSpaceRequiredInCommandBuffer<GfxFamily>(args));
@@ -83,6 +89,7 @@ void ImplicitScalingDispatch<GfxFamily>::dispatchCommands(LinearStream &commandS
                                                           bool useSecondaryBatchBuffer,
                                                           bool apiSelfCleanup,
                                                           bool usesImages,
+                                                          bool dcFlush,
                                                           uint64_t workPartitionAllocationGpuVa,
                                                           const HardwareInfo &hwInfo) {
     uint32_t totalProgrammedSize = 0u;
@@ -98,7 +105,8 @@ void ImplicitScalingDispatch<GfxFamily>::dispatchCommands(LinearStream &commandS
                                                                                       apiSelfCleanup,
                                                                                       preferStaticPartitioning,
                                                                                       staticPartitioning,
-                                                                                      useSecondaryBatchBuffer);
+                                                                                      useSecondaryBatchBuffer,
+                                                                                      dcFlush);
 
     auto dispatchCommandsSize = getSize(apiSelfCleanup, preferStaticPartitioning, devices, {walkerCmd.getThreadGroupIdStartingX(), walkerCmd.getThreadGroupIdStartingY(), walkerCmd.getThreadGroupIdStartingZ()}, {walkerCmd.getThreadGroupIdXDimension(), walkerCmd.getThreadGroupIdYDimension(), walkerCmd.getThreadGroupIdZDimension()});
     void *commandBuffer = commandStream.getSpace(dispatchCommandsSize);
@@ -137,13 +145,24 @@ bool &ImplicitScalingDispatch<GfxFamily>::getPipeControlStallRequired() {
 }
 
 template <typename GfxFamily>
+WalkerPartition::WalkerPartitionArgs prepareBarrierWalkerPartitionArgs(bool emitSelfCleanup,
+                                                                       bool usePostSync) {
+    WalkerPartition::WalkerPartitionArgs args = {};
+    args.crossTileAtomicSynchronization = true;
+    args.useAtomicsForSelfCleanup = ImplicitScalingHelper::isAtomicsUsedForSelfCleanup();
+    args.usePostSync = usePostSync;
+
+    args.emitSelfCleanup = ImplicitScalingHelper::isSelfCleanupRequired(args, emitSelfCleanup);
+    args.pipeControlBeforeCleanupCrossTileSync = ImplicitScalingHelper::pipeControlBeforeCleanupAtomicSyncRequired();
+
+    return args;
+}
+
+template <typename GfxFamily>
 size_t ImplicitScalingDispatch<GfxFamily>::getBarrierSize(const HardwareInfo &hwInfo,
                                                           bool apiSelfCleanup,
                                                           bool usePostSync) {
-    WalkerPartition::WalkerPartitionArgs args = {};
-    args.emitSelfCleanup = apiSelfCleanup;
-    args.useAtomicsForSelfCleanup = ImplicitScalingHelper::isAtomicsUsedForSelfCleanup();
-    args.usePostSync = usePostSync;
+    WalkerPartition::WalkerPartitionArgs args = prepareBarrierWalkerPartitionArgs<GfxFamily>(apiSelfCleanup, usePostSync);
 
     return static_cast<size_t>(WalkerPartition::estimateBarrierSpaceRequiredInCommandBuffer<GfxFamily>(args, hwInfo));
 }
@@ -159,16 +178,13 @@ void ImplicitScalingDispatch<GfxFamily>::dispatchBarrierCommands(LinearStream &c
                                                                  bool useSecondaryBatchBuffer) {
     uint32_t totalProgrammedSize = 0u;
 
-    WalkerPartition::WalkerPartitionArgs args = {};
-    args.emitSelfCleanup = apiSelfCleanup;
-    args.useAtomicsForSelfCleanup = ImplicitScalingHelper::isAtomicsUsedForSelfCleanup();
+    WalkerPartition::WalkerPartitionArgs args = prepareBarrierWalkerPartitionArgs<GfxFamily>(apiSelfCleanup, gpuAddress > 0);
     args.tileCount = static_cast<uint32_t>(devices.count());
     args.secondaryBatchBuffer = useSecondaryBatchBuffer;
-    args.usePostSync = gpuAddress > 0;
     args.postSyncGpuAddress = gpuAddress;
     args.postSyncImmediateValue = immediateData;
 
-    auto barrierCommandsSize = getBarrierSize(hwInfo, apiSelfCleanup, args.usePostSync);
+    auto barrierCommandsSize = getBarrierSize(hwInfo, args.emitSelfCleanup, args.usePostSync);
     void *commandBuffer = commandStream.getSpace(barrierCommandsSize);
     uint64_t cmdBufferGpuAddress = commandStream.getGraphicsAllocation()->getGpuAddress() + commandStream.getUsed() - barrierCommandsSize;
 

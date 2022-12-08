@@ -179,6 +179,45 @@ TEST_P(KernelImpSuggestGroupSize, WhenSuggestingGroupThenProperGroupSizeChosen) 
     EXPECT_EQ(0U, size % groupSize[2]);
 }
 
+TEST_P(KernelImpSuggestGroupSize, WhenSlmSizeExceedsLocalMemorySizeAndSuggestingGroupSizeThenDebugMsgErrIsPrintedAndOutOfDeviceMemoryIsReturned) {
+    DebugManagerStateRestore dbgRestorer;
+    DebugManager.flags.PrintDebugMessages.set(true);
+
+    WhiteBox<KernelImmutableData> funcInfo = {};
+    NEO::KernelDescriptor descriptor;
+    funcInfo.kernelDescriptor = &descriptor;
+
+    Mock<Module> module(device, nullptr);
+
+    uint32_t size = GetParam();
+
+    Mock<Kernel> function;
+    function.kernelImmData = &funcInfo;
+    function.module = &module;
+    uint32_t groupSize[3];
+    EXPECT_EQ(ZE_RESULT_SUCCESS, function.KernelImp::suggestGroupSize(size, 1, 1, groupSize, groupSize + 1, groupSize + 2));
+
+    auto localMemSize = static_cast<uint32_t>(device->getNEODevice()->getDeviceInfo().localMemSize);
+
+    ::testing::internal::CaptureStderr();
+
+    funcInfo.kernelDescriptor->kernelAttributes.slmInlineSize = localMemSize - 10u;
+    EXPECT_EQ(ZE_RESULT_SUCCESS, function.KernelImp::suggestGroupSize(size, 1, 1, groupSize, groupSize + 1, groupSize + 2));
+
+    std::string output = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(std::string(""), output);
+
+    ::testing::internal::CaptureStderr();
+
+    funcInfo.kernelDescriptor->kernelAttributes.slmInlineSize = localMemSize + 10u;
+    EXPECT_EQ(ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY, function.KernelImp::suggestGroupSize(size, 1, 1, groupSize, groupSize + 1, groupSize + 2));
+
+    output = testing::internal::GetCapturedStderr();
+    const auto &slmInlineSize = funcInfo.kernelDescriptor->kernelAttributes.slmInlineSize;
+    std::string expectedOutput = "Size of SLM (" + std::to_string(slmInlineSize) + ") larger than available (" + std::to_string(localMemSize) + ")\n";
+    EXPECT_EQ(expectedOutput, output);
+}
+
 TEST_F(KernelImp, GivenInvalidValuesWhenSettingGroupSizeThenInvalidArgumentErrorIsReturned) {
     Mock<Kernel> kernel;
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, kernel.KernelImp::setGroupSize(0U, 1U, 1U));
@@ -374,6 +413,36 @@ TEST_F(KernelImpSuggestMaxCooperativeGroupCountTests, GivenUsedSlmSizeWhenCalcul
     usedSlm = 64 * KB;
     auto expected = availableSlm / usedSlm;
     EXPECT_EQ(expected, getMaxWorkGroupCount());
+}
+
+using KernelTest = Test<DeviceFixture>;
+HWTEST2_F(KernelTest, GivenInlineSamplersWhenSettingInlineSamplerThenDshIsPatched, SupportsSampler) {
+    WhiteBox<::L0::KernelImmutableData> kernelImmData = {};
+    NEO::KernelDescriptor descriptor;
+    kernelImmData.kernelDescriptor = &descriptor;
+
+    auto &inlineSampler = descriptor.inlineSamplers.emplace_back();
+    inlineSampler.addrMode = NEO::KernelDescriptor::InlineSampler::AddrMode::Repeat;
+    inlineSampler.filterMode = NEO::KernelDescriptor::InlineSampler::FilterMode::Nearest;
+    inlineSampler.isNormalized = false;
+
+    Mock<Module> module(device, nullptr);
+    Mock<Kernel> kernel;
+    kernel.module = &module;
+    kernel.kernelImmData = &kernelImmData;
+    kernel.dynamicStateHeapData.reset(new uint8_t[64 + 16]);
+    kernel.dynamicStateHeapDataSize = 64 + 16;
+
+    kernel.setInlineSamplers();
+
+    using SamplerState = typename FamilyType::SAMPLER_STATE;
+    auto samplerState = reinterpret_cast<const SamplerState *>(kernel.dynamicStateHeapData.get() + 64U);
+    EXPECT_TRUE(samplerState->getNonNormalizedCoordinateEnable());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_WRAP, samplerState->getTcxAddressControlMode());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_WRAP, samplerState->getTcyAddressControlMode());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_WRAP, samplerState->getTczAddressControlMode());
+    EXPECT_EQ(SamplerState::MIN_MODE_FILTER_NEAREST, samplerState->getMinModeFilter());
+    EXPECT_EQ(SamplerState::MAG_MODE_FILTER_NEAREST, samplerState->getMagModeFilter());
 }
 
 } // namespace ult

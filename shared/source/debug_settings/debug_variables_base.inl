@@ -220,6 +220,9 @@ DECLARE_DEBUG_VARIABLE(int32_t, OverrideL1CachePolicyInSurfaceStateAndStateless,
 DECLARE_DEBUG_VARIABLE(int32_t, PlaformSupportEvictIfNecessaryFlag, -1, "-1: default - platform specific, 0: disable, 1: enable")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceEvictOnlyIfNecessaryFlag, -1, "-1: default - driver selects when to use, 0: force never use this flag, 1: force always use this flag")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceStatelessMocsEncryptionBit, -1, "-1: default - 1: set encryption bit")
+DECLARE_DEBUG_VARIABLE(int32_t, CopyHostPtrOnCpu, -1, "-1: default, 0: disable, 1:enable, In clCreateBuffer with CL_MEM_COPY_HOST_PTR, copy memory using locked ptr on cpu")
+DECLARE_DEBUG_VARIABLE(int32_t, ForceZeDeviceCanAccessPerReturnValue, -1, "-1: default, 0: zeDeviceCanAccessPeer always return false 1: zeDeviceCanAccessPeer always return true")
+DECLARE_DEBUG_VARIABLE(int32_t, AdjustThreadGroupDispatchSize, -1, "-1: default, 0: do not adjust thread group dispatch size 1: adjust thread group dispatch size (PVC)")
 
 /*LOGGING FLAGS*/
 DECLARE_DEBUG_VARIABLE(int32_t, PrintDriverDiagnostics, -1, "prints driver diagnostics messages to standard output, value corresponds to hint level")
@@ -258,6 +261,7 @@ DECLARE_DEBUG_VARIABLE(bool, PrintIoctlTimes, false, "Print ioctl times")
 DECLARE_DEBUG_VARIABLE(bool, PrintIoctlEntries, false, "Print ioctl being called")
 DECLARE_DEBUG_VARIABLE(bool, PrintUmdSharedMigration, false, "Print log message when shared allocation is being migrated by UMD")
 DECLARE_DEBUG_VARIABLE(bool, PrintImageBlitBlockCopyCmdDetails, false, "Prints XY_BLOCK_COPY_BLT command details")
+DECLARE_DEBUG_VARIABLE(bool, PrintCompletionFenceUsage, false, "Prints all usages of DRM completion fences")
 DECLARE_DEBUG_VARIABLE(bool, LogGdiCalls, false, "Log GDI calls")
 DECLARE_DEBUG_VARIABLE(bool, LogGdiCallsToFile, false, "Log GDI calls to file")
 
@@ -281,6 +285,9 @@ DECLARE_DEBUG_VARIABLE(int32_t, MinHwThreadsUnoccupied, 0, "If not zero then max
 DECLARE_DEBUG_VARIABLE(int32_t, PerformImplicitFlushEveryEnqueueCount, -1, "If greater than 0, driver performs implicit flush every N submissions.")
 DECLARE_DEBUG_VARIABLE(int32_t, PerformImplicitFlushForNewResource, -1, "-1: platform specific, 0: force disable, 1: force enable")
 DECLARE_DEBUG_VARIABLE(int32_t, PerformImplicitFlushForIdleGpu, -1, "-1: platform specific, 0: force disable, 1: force enable")
+DECLARE_DEBUG_VARIABLE(int32_t, EventWaitOnHost, -1, "Wait for events on host instead of program semaphores for them, works for append kernel launch with immediate command list, -1: default, 0: disable, 1: enable")
+DECLARE_DEBUG_VARIABLE(int32_t, EventWaitOnHostNumClients, -1, "Number of command queues created within csr from which event wait on host will be applied, -1: default=2, >=0: client count")
+DECLARE_DEBUG_VARIABLE(int32_t, EventWaitOnHostNumThreads, -1, "Thread count from which event wait on host will be applied, -1: default=2, >=0: thread count")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableCacheFlushAfterWalkerForAllQueues, -1, "Enable cache flush after walker even if queue doesn't require it")
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideKernelSizeLimitForSmallDispatch, -1, "-1: default, >=0: on XEHP+ changes the threshold for treating kernel as small during NULL LWS selection")
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideUseKmdWaitFunction, -1, "-1: default (L0: disabled), 0: disabled, 1: enabled. It uses only busy loop to wait or busy loop with KMD wait function, when KMD fallback is enabled")
@@ -294,6 +301,8 @@ DECLARE_DEBUG_VARIABLE(int32_t, PreferInternalBcsEngine, -1, "-1: default, 0:dis
 DECLARE_DEBUG_VARIABLE(int32_t, SplitBcsCopy, -1, "-1: default, 0:disabled, 1: enabled. When enqueues copy to main copy engine then split between even linked copy engines")
 DECLARE_DEBUG_VARIABLE(int32_t, SplitBcsMask, 0, "0: default, >0: bitmask: indicates bcs engines for split")
 DECLARE_DEBUG_VARIABLE(int32_t, ReuseKernelBinaries, -1, "-1: default, 0:disabled, 1: enabled. If enabled, driver reuses kernel binaries.")
+DECLARE_DEBUG_VARIABLE(int32_t, SetAmountOfReusableAllocations, -1, "-1: default, 0:disabled, > 1: enabled. If enabled, driver will fill reusable allocation lists with given amount of command buffers and heaps at initialization of immediate command list.")
+DECLARE_DEBUG_VARIABLE(int32_t, UseHighAlignmentForHeapExtended, -1, "-1: default, 0:disabled, > 1: enabled. If enabled, driver aligns HEAP_EXTENDED allocations to GPU VA that is next power of 2 for a given size, if disables GPU VA is using 2MB/64KB alignment.")
 
 /*DIRECT SUBMISSION FLAGS*/
 DECLARE_DEBUG_VARIABLE(int32_t, EnableDirectSubmission, -1, "-1: default (disabled), 0: disable, 1:enable. Enables direct submission of command buffers bypassing KMD")
@@ -325,6 +334,8 @@ DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionDisablePrefetcher, -1, "-1: defa
 DECLARE_DEBUG_VARIABLE(bool, DirectSubmissionPrintBuffers, false, "Print address of submitted command buffers")
 
 /*FEATURE FLAGS*/
+DECLARE_DEBUG_VARIABLE(bool, EnableL0ReadLUIDExtension, false, "Enables Support for L0 Extension for reading the LUID from WDDM.")
+DECLARE_DEBUG_VARIABLE(bool, EnableL0EuCount, false, "Enables Support for L0 Extension for querying total nubmer of EUs.")
 DECLARE_DEBUG_VARIABLE(bool, USMEvictAfterMigration, false, "Evict USM allocation after implicit migration to GPU")
 DECLARE_DEBUG_VARIABLE(bool, EnableNV12, true, "Enables NV12 extension")
 DECLARE_DEBUG_VARIABLE(bool, EnablePackedYuv, true, "Enables cl_packed_yuv extension")
@@ -404,8 +415,9 @@ DECLARE_DEBUG_VARIABLE(int32_t, OverrideSystolicInComputeWalker, -1, "set SYSTOL
 DECLARE_DEBUG_VARIABLE(int32_t, AddStatePrefetchCmdToMemoryPrefetchAPI, -1, "Add STATE_PREFETCH to zeCommandListAppendMemoryPrefetch, -1:default, 0:disable, 1:enable")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableDrmCompletionFence, -1, "Enables DRM completion fence, -1:default (disabled), 0:disable, 1:enable")
 DECLARE_DEBUG_VARIABLE(int32_t, UseDrmCompletionFenceForAllAllocations, -1, "Uses DRM completion fence for all allocations, -1:default (disabled), 0:disable, 1:enable")
-DECLARE_DEBUG_VARIABLE(int32_t, EnableChipsetUniqueUUID, -1, "Enables retrieving chipset unique UUID using telemetry, -1:default (disabled), 0:disable, 1:enable")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableChipsetUniqueUUID, -1, "Enables retrieving chipset unique UUID using telemetry, -1:default (enabled), 0:disable, 1:enable")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableFlushTaskSubmission, -1, "Driver uses csr flushTask for immediate commandlist submissions, -1:default (enabled), 0:disabled, 1:enabled")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableImmediateCmdListHeapSharing, -1, "Immediate command lists using flush task use current csr heap instead private cmd list heap, -1:default (disabled), 0:disabled, 1:enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableBcsSwControlWa, -1, "Enable BCS WA via BCSSWCONTROL MMIO. -1: default, 0: disabled, 1: if src in system mem, 2: if dst in system mem, 3: if src and dst in system mem, 4: always")
 
 /* IMPLICIT SCALING */
@@ -416,6 +428,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, SynchronizeWithSemaphores, -1, "-1: default (dis
 DECLARE_DEBUG_VARIABLE(int32_t, UseCrossAtomicSynchronization, -1, "-1: default (enabled), 1: Cross Tile Atomic Synchronization present 0: Cross tile atomic synchronization disabled")
 DECLARE_DEBUG_VARIABLE(int32_t, UseAtomicsForSelfCleanupSection, -1, "-1: default (disabled), 0: use store data op, 1: use atomic op")
 DECLARE_DEBUG_VARIABLE(int32_t, ProgramWalkerPartitionSelfCleanup, -1, "-1: default (API dependent), 0: Do not program self cleanup, 1: program self cleanup")
+DECLARE_DEBUG_VARIABLE(int32_t, ProgramStallCommandForSelfCleanup, -1, "-1: default (disabled), 0: Do not add extra PIPE_CONTROL for each self cleanup x-tile sync, 1: Add extra PIPE_CONTROL for each self cleanup x-tile sync")
 DECLARE_DEBUG_VARIABLE(int32_t, WparidRegisterProgramming, -1, "-1: default (enabled), 0: do not program wparid register, 1: programming wparid register")
 DECLARE_DEBUG_VARIABLE(int32_t, UsePipeControlAfterPartitionedWalker, -1, "-1: default (enabled), 0: do not add PipeControl, 1: add PipeControl")
 
@@ -424,9 +437,13 @@ DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalSetWalkerPartitionCount, 0, "Experim
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalSetWalkerPartitionType, -1, "Experimental implementation: Set COMPUTE_WALKER Partition Type. Valid values for types from 1 to 3")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalEnableCustomLocalMemoryAlignment, 0, "Align local memory allocations to a given value. Works only with allocations at least as big as the value.  0: no effect, 2097152: 2 megabytes, 1073741824: 1 gigabyte")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalEnableDeviceAllocationCache, -1, "Experimentally enable allocation cache.")
+DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalH2DCpuCopyThreshold, -1, "Override default treshold (in bytes) for H2D CPU copy.")
+DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalD2HCpuCopyThreshold, -1, "Override default treshold (in bytes) for D2H CPU copy.")
+DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalCopyThroughLock, -1, "Experimentally copy memory through locked ptr. -1: default 0: disable 1: enable ")
+DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalSmallBufferPoolAllocator, -1, "Experimentally enable pool allocator for clCreateBuffer under 4KB.")
 DECLARE_DEBUG_VARIABLE(bool, ExperimentalEnableSourceLevelDebugger, false, "Experimentally enable source level debugger.")
 DECLARE_DEBUG_VARIABLE(bool, ExperimentalEnableL0DebuggerForOpenCL, false, "Experimentally enable debugging OCL with L0 Debug API.")
-DECLARE_DEBUG_VARIABLE(bool, ExperimentalEnableTileAttach, false, "Experimentally enable attaching to tiles (subdevices).")
+DECLARE_DEBUG_VARIABLE(bool, ExperimentalEnableTileAttach, true, "Experimentally enable attaching to tiles (subdevices).")
 
 /*DRIVER TOGGLES*/
 DECLARE_DEBUG_VARIABLE(bool, UseMaxSimdSizeToDeduceMaxWorkgroupSize, false, "With this flag on, max workgroup size is deduced using SIMD32 instead of SIMD8, this causes the max wkg size to be 4 times bigger")
@@ -452,6 +469,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, OverrideAubDeviceId, -1, "-1 don't override, any
 DECLARE_DEBUG_VARIABLE(int32_t, EnableTimestampPacket, -1, "-1: default, 0: disable, 1:enable. Write Timestamp Packet for each set of gpu walkers")
 DECLARE_DEBUG_VARIABLE(int32_t, AllocateSharedAllocationsWithCpuAndGpuStorage, -1, "When enabled driver creates cpu & gpu storage for shared unified memory allocations. (-1 - devices default mode, 0 - disable, 1 - enable)")
 DECLARE_DEBUG_VARIABLE(int32_t, UseKmdMigration, -1, "-1: devices default mode, 0: disable - pagefault handling by UMD using handler for SIGSEGV, 1: enable - pagefault handling by KMD, GEM objects migrated by KMD upon access)")
+DECLARE_DEBUG_VARIABLE(int32_t, CreateKmdMigratedSharedAllocationWithMultipleBOs, -1, "-1: default, 0: disable - create kmd-migrated shared allocation with single BO, 1: enable - create kmd-migrated shared allocation with multiple BOs)")
 DECLARE_DEBUG_VARIABLE(int32_t, UseKmdMigrationForBuffers, -1, "-1: default mode of kmd migration for buffers (disable), 0: disable, 1: enable")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceSemaphoreDelayBetweenWaits, -1, "Specifies the minimum number of microseconds allowed for command streamer to wait before re-fetching the data. 0 - poll interval will be equal to the memory latency of the read completion")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceLocalMemoryAccessMode, -1, "-1: don't override, 0: default rules apply, 1: CPU can access local memory, 3: CPU never accesses local memory")
@@ -464,7 +482,6 @@ DECLARE_DEBUG_VARIABLE(int64_t, ForceNonSystemMemoryPlacement, 0, "0: default,  
 DECLARE_DEBUG_VARIABLE(int64_t, ForceUncachedGmmUsageType, 0, "0: default,  >0: (bitmask) for given Graphics Allocation Type, force uncached gmm resource type")
 DECLARE_DEBUG_VARIABLE(int64_t, DisableIndirectAccess, -1, "0: default,  0: Use indirect access settings provided by application, 1: Disable indirect access and ignore settings provided by application")
 DECLARE_DEBUG_VARIABLE(int32_t, UseVmBind, -1, "Use new residency model on Linux (requires kernel support), -1: default, 0: disabled, 1: enabled")
-DECLARE_DEBUG_VARIABLE(int32_t, PassBoundBOToExec, -1, "Pass bound BOs to exec call to keep dependencies")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableStaticPartitioning, -1, "Divide workload into partitions during dispatch, -1: default, 0: disabled, 1: enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, UpdateTaskCountFromWait, -1, " Do not update task count after each enqueue, but send update request while wait, -1: default(disabled), 0: disabled, 1: enabled on gpgpu engine with direct submission, 2: enabled on any direct submission, 3: enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableTimestampWaitForQueues, -1, "Wait on queues using timestamps, -1: default(disabled), 0: disabled, 1: enabled where UpdateTaskCountFromWait enabled, 2: enabled on gpgpu engine with direct submission, 3: enabled on any direct submission, 4: enabled")
@@ -474,8 +491,9 @@ DECLARE_DEBUG_VARIABLE(int32_t, UsmInitialPlacement, -1, "-1: default, 0: optimi
 DECLARE_DEBUG_VARIABLE(int32_t, ForceHostPointerImport, -1, "-1: default, 0: disable, 1: enable, Forces the driver to import every host pointer coming into driver, WARNING this is not spec compliant.")
 DECLARE_DEBUG_VARIABLE(int32_t, ProgramExtendedPipeControlPriorToNonPipelinedStateCommand, -1, "-1: default, 0: disable, 1: enable, Program additional extended version of PIPE CONTROL command before non pipelined state command")
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideDrmRegion, -1, "-1: disable, 0+: override to given memory region for all allocations")
-DECLARE_DEBUG_VARIABLE(int32_t, MultiReturnPointCommandList, -1, "-1: default: disabled, 0: disabled, 1: enabled. This flag creates multiple return point from List to Queue for Front End reconfiguration on Queue buffer for single List")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableFrontEndTracking, -1, "-1: default: disabled, 0: disabled, 1: enabled. This flag creates multiple return point from List to Queue for Front End reconfiguration on Queue buffer for single List")
 DECLARE_DEBUG_VARIABLE(int32_t, EnablePipelineSelectTracking, -1, "-1: default: disabled, 0: disabled, 1: enabled. This flag enables optimization that limits number of pipeline select dispatched by command lists")
-
+DECLARE_DEBUG_VARIABLE(int32_t, EnableStateComputeModeTracking, -1, "-1: default: disabled, 0: disabled, 1: enabled. This flag enables tracking state compute mode changes in command lists")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableSetPair, -1, "Use SET_PAIR to pair two buffer objects behind the same file descriptor, -1: default, 0: disabled, 1: enabled")
 /* Binary Cache */
 DECLARE_DEBUG_VARIABLE(bool, BinaryCacheTrace, false, "enable cl_cache to produce .trace files with information about hash computation")

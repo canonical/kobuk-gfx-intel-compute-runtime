@@ -75,7 +75,7 @@ struct DeviceImp : public Device {
     MetricDeviceContext &getMetricDeviceContext() override;
     DebugSession *getDebugSession(const zet_debug_config_t &config) override;
     void setDebugSession(DebugSession *session);
-    DebugSession *createDebugSession(const zet_debug_config_t &config, ze_result_t &result) override;
+    DebugSession *createDebugSession(const zet_debug_config_t &config, ze_result_t &result, bool isRootAttach) override;
     void removeDebugSession() override;
 
     uint32_t getMaxNumHwThreads() const override;
@@ -116,6 +116,7 @@ struct DeviceImp : public Device {
     std::vector<Device *> subDevices;
     std::unordered_map<uint32_t, bool> crossAccessEnabledDevices;
     DriverHandle *driverHandle = nullptr;
+    FabricVertex *fabricVertex = nullptr;
     CommandList *pageFaultCommandList = nullptr;
     ze_pci_speed_ext_t pciMaxSpeed = {-1, -1, -1};
 
@@ -132,10 +133,14 @@ struct DeviceImp : public Device {
     void createSysmanHandle(bool isSubDevice);
     void populateSubDeviceCopyEngineGroups();
     bool isQueueGroupOrdinalValid(uint32_t ordinal);
+    void setFabricVertex(FabricVertex *inFabricVertex) { fabricVertex = inFabricVertex; }
 
     using CmdListCreateFunPtrT = L0::CommandList *(*)(uint32_t, Device *, NEO::EngineGroupType, ze_command_list_flags_t, ze_result_t &);
     CmdListCreateFunPtrT getCmdListCreateFunc(const ze_command_list_desc_t *desc);
-    std::unique_ptr<FabricVertex> fabricVertex;
+    ze_result_t getFabricVertex(ze_fabric_vertex_handle_t *phVertex) override;
+
+    ze_result_t queryDeviceLuid(ze_device_luid_ext_properties_t *deviceLuidProperties);
+    ze_result_t setDeviceLuid(ze_device_luid_ext_properties_t *deviceLuidProperties);
 
   protected:
     void adjustCommandQueueDesc(uint32_t &ordinal, uint32_t &index);

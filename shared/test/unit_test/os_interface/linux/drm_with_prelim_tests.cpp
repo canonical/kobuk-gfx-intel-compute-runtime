@@ -112,7 +112,7 @@ TEST_F(IoctlHelperPrelimFixture, givenPrelimsWhenCreateGemExtThenReturnSuccess) 
     auto ioctlHelper = drm->getIoctlHelper();
     uint32_t handle = 0;
     MemRegionsVec memClassInstance = {{drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 0}};
-    auto ret = ioctlHelper->createGemExt(memClassInstance, 1024, handle, {});
+    auto ret = ioctlHelper->createGemExt(memClassInstance, 1024, handle, {}, -1);
 
     EXPECT_EQ(1u, handle);
     EXPECT_EQ(0u, ret);
@@ -127,7 +127,7 @@ TEST_F(IoctlHelperPrelimFixture, givenPrelimsWhenCreateGemExtWithDebugFlagThenPr
     auto ioctlHelper = drm->getIoctlHelper();
     uint32_t handle = 0;
     MemRegionsVec memClassInstance = {{drm_i915_gem_memory_class::I915_MEMORY_CLASS_DEVICE, 0}};
-    ioctlHelper->createGemExt(memClassInstance, 1024, handle, {});
+    ioctlHelper->createGemExt(memClassInstance, 1024, handle, {}, -1);
 
     std::string output = testing::internal::GetCapturedStdout();
     std::string expectedOutput("Performing GEM_CREATE_EXT with { size: 1024, param: 0x1000000010001, memory class: 1, memory instance: 0 }\nGEM_CREATE_EXT has returned: 0 BO-1 with size: 1024\n");
@@ -477,7 +477,7 @@ TEST_F(IoctlHelperPrelimFixture, givenProgramDebuggingAndContextDebugSupportedWh
 
     executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo()->platform.eProductFamily = defaultHwInfo->platform.eProductFamily;
 
-    OsContextLinux osContext(*drm, 5u, EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Regular}));
+    OsContextLinux osContext(*drm, 0, 5u, EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Regular}));
     osContext.ensureContextInitialized();
 
     EXPECT_NE(static_cast<uint32_t>(-1), drm->passedContextDebugId);
@@ -487,7 +487,7 @@ TEST_F(IoctlHelperPrelimFixture, givenProgramDebuggingAndContextDebugSupportedWh
         EXPECT_FALSE(drm->capturedCooperativeContextRequest);
     }
 
-    OsContextLinux osContext2(*drm, 5u, EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Cooperative}));
+    OsContextLinux osContext2(*drm, 0, 5u, EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::Cooperative}));
     osContext2.ensureContextInitialized();
 
     EXPECT_NE(static_cast<uint32_t>(-1), drm->passedContextDebugId);

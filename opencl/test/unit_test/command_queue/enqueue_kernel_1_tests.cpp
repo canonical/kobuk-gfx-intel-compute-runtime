@@ -1502,6 +1502,97 @@ TEST_F(EnqueueKernelTest, givenEnqueueCommandWithWorkDimLargerThanAllowedWhenEnq
     EXPECT_EQ(CL_INVALID_WORK_DIMENSION, status);
 }
 
+TEST_F(EnqueueKernelTest, givenEnqueueCommandWithWorkDimsResultingInMoreThan32BitMaxGroupsWhenEnqueueNDRangeKernelIsCalledThenInvalidGlobalSizeIsReturned) {
+
+    if (sizeof(size_t) < 8) {
+        GTEST_SKIP();
+    }
+
+    size_t max32Bit = std::numeric_limits<uint32_t>::max();
+    size_t globalWorkSize[3] = {max32Bit * 4, 4, 4};
+    size_t localWorkSize[3] = {4, 4, 4};
+    MockKernelWithInternals mockKernel(*pClDevice);
+    auto testedWorkDim = 3;
+
+    auto status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, status);
+
+    globalWorkSize[0] = max32Bit * 4 + 4;
+    status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_INVALID_GLOBAL_WORK_SIZE, status);
+
+    globalWorkSize[0] = 4;
+    globalWorkSize[1] = max32Bit * 4 + 4;
+
+    status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_INVALID_GLOBAL_WORK_SIZE, status);
+
+    globalWorkSize[1] = 4;
+    globalWorkSize[2] = max32Bit * 4 + 4;
+
+    status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, localWorkSize, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_INVALID_GLOBAL_WORK_SIZE, status);
+}
+
+TEST_F(EnqueueKernelTest, givenEnqueueCommandWithNullLwsAndWorkDimsResultingInMoreThan32BitMaxGroupsWhenEnqueueNDRangeKernelIsCalledThenInvalidGlobalSizeIsReturned) {
+
+    if (sizeof(size_t) < 8) {
+        GTEST_SKIP();
+    }
+
+    auto maxWgSize = static_cast<uint32_t>(pClDevice->getDevice().getDeviceInfo().maxWorkGroupSize);
+
+    size_t max32Bit = std::numeric_limits<uint32_t>::max();
+    size_t globalWorkSize[3] = {(max32Bit + 1) * maxWgSize, 3, 4};
+    MockKernelWithInternals mockKernel(*pClDevice);
+    auto testedWorkDim = 3;
+
+    auto status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_INVALID_GLOBAL_WORK_SIZE, status);
+
+    globalWorkSize[0] = (max32Bit + 1) * maxWgSize + 3;
+    status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_INVALID_GLOBAL_WORK_SIZE, status);
+
+    globalWorkSize[0] = 4;
+    globalWorkSize[1] = (max32Bit + 1) * maxWgSize;
+
+    status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_INVALID_GLOBAL_WORK_SIZE, status);
+
+    globalWorkSize[1] = 4;
+    globalWorkSize[2] = (max32Bit + 1) * maxWgSize * 2 + 3;
+
+    status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_INVALID_GLOBAL_WORK_SIZE, status);
+}
+
+TEST_F(EnqueueKernelTest, givenEnqueueCommandWithNullLwsAndWorkDimsResultingInLessThan32BitMaxGroupsWhenEnqueueNDRangeKernelIsCalledThenSuccessIsReturned) {
+
+    if (sizeof(size_t) < 8) {
+        GTEST_SKIP();
+    }
+
+    size_t max32Bit = std::numeric_limits<uint32_t>::max();
+    size_t globalWorkSize[3] = {(max32Bit + 1) * 4, 1, 1};
+    MockKernelWithInternals mockKernel(*pClDevice);
+    auto testedWorkDim = 3;
+
+    auto status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, status);
+
+    globalWorkSize[0] = 1;
+    globalWorkSize[1] = (max32Bit + 1) * 4;
+    status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, status);
+
+    globalWorkSize[1] = 1;
+    globalWorkSize[2] = (max32Bit + 1) * 4;
+
+    status = clEnqueueNDRangeKernel(pCmdQ, mockKernel.mockMultiDeviceKernel, testedWorkDim, nullptr, globalWorkSize, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, status);
+}
+
 HWTEST_F(EnqueueKernelTest, givenVMEKernelWhenEnqueueKernelThenDispatchFlagsHaveMediaSamplerRequired) {
     auto mockCsr = new MockCsrHw2<FamilyType>(*pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
     mockCsr->overrideDispatchPolicy(DispatchMode::BatchedDispatch);

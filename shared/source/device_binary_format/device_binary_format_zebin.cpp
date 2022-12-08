@@ -18,10 +18,11 @@
 
 namespace NEO {
 
-template <>
-SingleDeviceBinary unpackSingleDeviceBinary<NEO::DeviceBinaryFormat::Zebin>(const ArrayRef<const uint8_t> archive, const ConstStringRef requestedProductAbbreviation, const TargetDevice &requestedTargetDevice,
-                                                                            std::string &outErrReason, std::string &outWarning) {
-    auto elf = Elf::decodeElf<Elf::EI_CLASS_64>(archive, outErrReason, outWarning);
+template <Elf::ELF_IDENTIFIER_CLASS numBits>
+SingleDeviceBinary unpackSingleZebin(const ArrayRef<const uint8_t> archive, const ConstStringRef requestedProductAbbreviation, const TargetDevice &requestedTargetDevice,
+                                     std::string &outErrReason, std::string &outWarning) {
+
+    auto elf = Elf::decodeElf<numBits>(archive, outErrReason, outWarning);
     if (nullptr == elf.elfFileHeader) {
         return {};
     }
@@ -60,7 +61,7 @@ SingleDeviceBinary unpackSingleDeviceBinary<NEO::DeviceBinaryFormat::Zebin>(cons
                               ? (requestedTargetDevice.coreFamily == static_cast<GFXCORE_FAMILY>(elf.elfFileHeader->machine))
                               : (requestedTargetDevice.productFamily == static_cast<PRODUCT_FAMILY>(elf.elfFileHeader->machine));
         validForTarget &= (0 == flags.validateRevisionId) | ((requestedTargetDevice.stepping >= flags.minHwRevisionId) & (requestedTargetDevice.stepping <= flags.maxHwRevisionId));
-        validForTarget &= (8U == requestedTargetDevice.maxPointerSizeInBytes);
+        validForTarget &= (requestedTargetDevice.maxPointerSizeInBytes >= static_cast<uint32_t>(numBits == Elf::EI_CLASS_32 ? 4 : 8));
     }
 
     if (false == validForTarget) {
@@ -76,7 +77,16 @@ SingleDeviceBinary unpackSingleDeviceBinary<NEO::DeviceBinaryFormat::Zebin>(cons
     return ret;
 }
 
-void prepareLinkerInputForZebin(ProgramInfo &programInfo, Elf::Elf<Elf::EI_CLASS_64> &elf) {
+template <>
+SingleDeviceBinary unpackSingleDeviceBinary<NEO::DeviceBinaryFormat::Zebin>(const ArrayRef<const uint8_t> archive, const ConstStringRef requestedProductAbbreviation, const TargetDevice &requestedTargetDevice,
+                                                                            std::string &outErrReason, std::string &outWarning) {
+    return Elf::isElf<Elf::EI_CLASS_32>(archive)
+               ? unpackSingleZebin<Elf::EI_CLASS_32>(archive, requestedProductAbbreviation, requestedTargetDevice, outErrReason, outWarning)
+               : unpackSingleZebin<Elf::EI_CLASS_64>(archive, requestedProductAbbreviation, requestedTargetDevice, outErrReason, outWarning);
+}
+
+template <Elf::ELF_IDENTIFIER_CLASS numBits>
+void prepareLinkerInputForZebin(ProgramInfo &programInfo, Elf::Elf<numBits> &elf) {
     programInfo.prepareLinkerInputStorage();
 
     LinkerInput::SectionNameToSegmentIdMap nameToKernelId;
@@ -86,19 +96,25 @@ void prepareLinkerInputForZebin(ProgramInfo &programInfo, Elf::Elf<Elf::EI_CLASS
     programInfo.linkerInput->decodeElfSymbolTableAndRelocations(elf, nameToKernelId);
 }
 
-template <>
-DecodeError decodeSingleDeviceBinary<NEO::DeviceBinaryFormat::Zebin>(ProgramInfo &dst, const SingleDeviceBinary &src, std::string &outErrReason, std::string &outWarning) {
-    auto elf = Elf::decodeElf<Elf::EI_CLASS_64>(src.deviceBinary, outErrReason, outWarning);
+template <Elf::ELF_IDENTIFIER_CLASS numBits>
+DecodeError decodeSingleZebin(ProgramInfo &dst, const SingleDeviceBinary &src, std::string &outErrReason, std::string &outWarning) {
+    auto elf = Elf::decodeElf<numBits>(src.deviceBinary, outErrReason, outWarning);
     if (nullptr == elf.elfFileHeader) {
         return DecodeError::InvalidBinary;
     }
 
     dst.grfSize = src.targetDevice.grfSize;
     dst.minScratchSpaceSize = src.targetDevice.minScratchSpaceSize;
-    auto decodeError = decodeZebin(dst, elf, outErrReason, outWarning);
-    prepareLinkerInputForZebin(dst, elf);
-
+    auto decodeError = decodeZebin<numBits>(dst, elf, outErrReason, outWarning);
+    prepareLinkerInputForZebin<numBits>(dst, elf);
     return decodeError;
+}
+
+template <>
+DecodeError decodeSingleDeviceBinary<NEO::DeviceBinaryFormat::Zebin>(ProgramInfo &dst, const SingleDeviceBinary &src, std::string &outErrReason, std::string &outWarning) {
+    return Elf::isElf<Elf::EI_CLASS_32>(src.deviceBinary)
+               ? decodeSingleZebin<Elf::EI_CLASS_32>(dst, src, outErrReason, outWarning)
+               : decodeSingleZebin<Elf::EI_CLASS_64>(dst, src, outErrReason, outWarning);
 }
 
 } // namespace NEO

@@ -69,8 +69,9 @@ class IoctlHelper {
     virtual uint32_t ioctl(DrmIoctl request, void *arg);
 
     virtual bool initialize() = 0;
+    virtual bool isSetPairAvailable() = 0;
     virtual bool isVmBindAvailable() = 0;
-    virtual uint32_t createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, std::optional<uint32_t> vmId) = 0;
+    virtual uint32_t createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, std::optional<uint32_t> vmId, int32_t pairHandle) = 0;
     virtual CacheRegion closAlloc() = 0;
     virtual uint16_t closAllocWays(CacheRegion closIndex, uint16_t cacheLevel, uint16_t numWays) = 0;
     virtual CacheRegion closFree(CacheRegion closIndex) = 0;
@@ -113,6 +114,7 @@ class IoctlHelper {
     virtual std::string getDrmParamString(DrmParam param) const = 0;
     virtual std::string getIoctlString(DrmIoctl ioctlRequest) const = 0;
 
+    virtual bool checkIfIoctlReinvokeRequired(int error, DrmIoctl ioctlRequest) const;
     virtual std::vector<MemoryRegion> translateToMemoryRegions(const std::vector<uint8_t> &regionInfo);
 
     virtual uint32_t createDrmContext(Drm &drm, OsContextLinux &osContext, uint32_t drmVmId, uint32_t deviceIndex);
@@ -132,6 +134,7 @@ class IoctlHelper {
     virtual std::string getFileForMaxGpuFrequency() const;
     virtual std::string getFileForMaxGpuFrequencyOfSubDevice(int subDeviceId) const;
     virtual std::string getFileForMaxMemoryFrequencyOfSubDevice(int subDeviceId) const;
+    virtual bool getFabricLatency(uint32_t fabricId, uint32_t &latency, uint32_t &bandwidth) = 0;
 
     uint32_t getFlagsForPrimeHandleToFd() const;
 
@@ -144,8 +147,9 @@ class IoctlHelperUpstream : public IoctlHelper {
     using IoctlHelper::IoctlHelper;
 
     bool initialize() override;
+    bool isSetPairAvailable() override;
     bool isVmBindAvailable() override;
-    uint32_t createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, std::optional<uint32_t> vmId) override;
+    uint32_t createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, std::optional<uint32_t> vmId, int32_t pairHandle) override;
     CacheRegion closAlloc() override;
     uint16_t closAllocWays(CacheRegion closIndex, uint16_t cacheLevel, uint16_t numWays) override;
     CacheRegion closFree(CacheRegion closIndex) override;
@@ -187,6 +191,7 @@ class IoctlHelperUpstream : public IoctlHelper {
     int getDrmParamValue(DrmParam drmParam) const override;
     std::string getDrmParamString(DrmParam param) const override;
     std::string getIoctlString(DrmIoctl ioctlRequest) const override;
+    bool getFabricLatency(uint32_t fabricId, uint32_t &latency, uint32_t &bandwidth) override;
 };
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -197,7 +202,7 @@ class IoctlHelperImpl : public IoctlHelperUpstream {
         return std::make_unique<IoctlHelperImpl<gfxProduct>>(drm);
     }
 
-    uint32_t createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, std::optional<uint32_t> vmId) override;
+    uint32_t createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, std::optional<uint32_t> vmId, int32_t pairHandle) override;
     std::vector<MemoryRegion> translateToMemoryRegions(const std::vector<uint8_t> &regionInfo) override;
     unsigned int getIoctlRequestValue(DrmIoctl ioctlRequest) const override;
     std::string getIoctlString(DrmIoctl ioctlRequest) const override;
@@ -205,11 +210,12 @@ class IoctlHelperImpl : public IoctlHelperUpstream {
 
 class IoctlHelperPrelim20 : public IoctlHelper {
   public:
-    using IoctlHelper::IoctlHelper;
+    IoctlHelperPrelim20(Drm &drmArg);
 
     bool initialize() override;
+    bool isSetPairAvailable() override;
     bool isVmBindAvailable() override;
-    uint32_t createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, std::optional<uint32_t> vmId) override;
+    uint32_t createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, std::optional<uint32_t> vmId, int32_t pairHandle) override;
     CacheRegion closAlloc() override;
     uint16_t closAllocWays(CacheRegion closIndex, uint16_t cacheLevel, uint16_t numWays) override;
     CacheRegion closFree(CacheRegion closIndex) override;
@@ -251,6 +257,11 @@ class IoctlHelperPrelim20 : public IoctlHelper {
     int getDrmParamValue(DrmParam drmParam) const override;
     std::string getDrmParamString(DrmParam param) const override;
     std::string getIoctlString(DrmIoctl ioctlRequest) const override;
+    bool checkIfIoctlReinvokeRequired(int error, DrmIoctl ioctlRequest) const override;
+    bool getFabricLatency(uint32_t fabricId, uint32_t &latency, uint32_t &bandwidth) override;
+
+  protected:
+    bool handleExecBufferInNonBlockMode = false;
 };
 
 } // namespace NEO

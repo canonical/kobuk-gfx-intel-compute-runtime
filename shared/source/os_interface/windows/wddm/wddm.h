@@ -199,7 +199,7 @@ class Wddm : public DriverModel {
     PhysicalDevicePciBusInfo getPciBusInfo() const override;
 
     size_t getMaxMemAllocSize() const override;
-    bool isDriverAvaliable() override;
+    bool isDriverAvailable() override;
 
     static std::vector<std::unique_ptr<HwDeviceId>> discoverDevices(ExecutionEnvironment &executionEnvironment);
 
@@ -207,16 +207,14 @@ class Wddm : public DriverModel {
         return adapterBDF;
     }
 
-    PhyicalDevicePciSpeedInfo getPciSpeedInfo() const override;
+    PhysicalDevicePciSpeedInfo getPciSpeedInfo() const override;
     bool buildTopologyMapping();
-    const TopologyMap &getTopologyMap();
 
     uint32_t getAdditionalAdapterInfoOptions() const {
         return additionalAdapterInfoOptions;
     }
 
   protected:
-    TopologyMap topologyMap;
     bool translateTopologyInfo(TopologyMapping &mapping);
 
     Wddm(std::unique_ptr<HwDeviceIdWddm> &&hwDeviceId, RootDeviceEnvironment &rootDeviceEnvironment);

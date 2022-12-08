@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 
@@ -23,6 +24,26 @@ XE_HPC_CORETEST_F(L0HwHelperTestXeHpc, GivenXeHpcWhenCheckingL0HelperForMultiTil
 
 XE_HPC_CORETEST_F(L0HwHelperTestXeHpc, GivenHpcPlatformsWhenAlwaysAllocateEventInLocalMemCalledThenReturnTrue) {
     EXPECT_TRUE(L0::L0HwHelperHw<FamilyType>::get().alwaysAllocateEventInLocalMem());
+}
+
+XE_HPC_CORETEST_F(L0HwHelperTestXeHpc, GivenXeHpcWhenCheckingL0HelperForCmdListHeapSharingSupportThenReturnTrue) {
+    NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo;
+    EXPECT_TRUE(L0::L0HwHelperHw<FamilyType>::get().platformSupportsCmdListHeapSharing(hwInfo));
+}
+
+XE_HPC_CORETEST_F(L0HwHelperTestXeHpc, GivenXeHpcWhenCheckingL0HelperForStateComputeModeTrackingSupportThenReturnTrue) {
+    NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo;
+    EXPECT_TRUE(L0::L0HwHelperHw<FamilyType>::get().platformSupportsStateComputeModeTracking(hwInfo));
+}
+
+XE_HPC_CORETEST_F(L0HwHelperTestXeHpc, GivenXeHpcWhenCheckingL0HelperForFrontEndTrackingSupportThenReturnTrue) {
+    NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo;
+    EXPECT_TRUE(L0::L0HwHelperHw<FamilyType>::get().platformSupportsFrontEndTracking(hwInfo));
+}
+
+XE_HPC_CORETEST_F(L0HwHelperTestXeHpc, GivenXeHpcWhenCheckingL0HelperForPipelineSelectTrackingSupportThenReturnTrue) {
+    NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo;
+    EXPECT_TRUE(L0::L0HwHelperHw<FamilyType>::get().platformSupportsPipelineSelectTracking(hwInfo));
 }
 
 } // namespace ult

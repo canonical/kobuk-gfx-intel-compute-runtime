@@ -9,7 +9,6 @@
 #include "shared/source/gmm_helper/gmm_lib.h"
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/common_types.h"
-#include "shared/source/helpers/topology_map.h"
 #include "shared/source/memory_manager/definitions/engine_limits.h"
 #include "shared/source/os_interface/driver_info.h"
 #include "shared/source/os_interface/linux/cache_info.h"
@@ -85,7 +84,7 @@ class Drm : public DriverModel {
     unsigned int getDeviceHandle() const override {
         return 0;
     }
-    PhyicalDevicePciSpeedInfo getPciSpeedInfo() const override;
+    PhysicalDevicePciSpeedInfo getPciSpeedInfo() const override;
     int getExecSoftPin(int &execSoftPin);
     int enableTurboBoost();
     int getEuTotal(int &euTotal);
@@ -155,6 +154,9 @@ class Drm : public DriverModel {
 
     void setDirectSubmissionActive(bool value) { this->directSubmissionActive = value; }
     bool isDirectSubmissionActive() const { return this->directSubmissionActive; }
+
+    MOCKABLE_VIRTUAL bool isSetPairAvailable();
+    MOCKABLE_VIRTUAL bool getSetPairAvailable() { return setPairAvailable; }
 
     bool useVMBindImmediate() const;
 
@@ -226,7 +228,6 @@ class Drm : public DriverModel {
     void setNewResourceBoundToVM(uint32_t vmHandleId);
 
     const std::vector<int> &getSliceMappings(uint32_t deviceIndex);
-    const TopologyMap &getTopologyMap();
 
     static std::vector<std::unique_ptr<HwDeviceId>> discoverDevices(ExecutionEnvironment &executionEnvironment);
     static std::vector<std::unique_ptr<HwDeviceId>> discoverDevice(ExecutionEnvironment &executionEnvironment, std::string &osPciPath);
@@ -303,7 +304,6 @@ class Drm : public DriverModel {
     ADAPTER_BDF adapterBDF{};
     uint32_t pciDomain = 0;
 
-    TopologyMap topologyMap;
     struct IoctlStatisticsEntry {
         long long totalTime = 0;
         uint64_t count = 0;
@@ -326,6 +326,7 @@ class Drm : public DriverModel {
     std::unique_ptr<MemoryInfo> memoryInfo;
 
     std::once_flag checkBindOnce;
+    std::once_flag checkSetPairOnce;
     std::once_flag checkCompletionFenceOnce;
 
     RootDeviceEnvironment &rootDeviceEnvironment;
@@ -337,6 +338,7 @@ class Drm : public DriverModel {
     bool requirePerContextVM = false;
     bool bindAvailable = false;
     bool directSubmissionActive = false;
+    bool setPairAvailable = false;
     bool contextDebugSupported = false;
     bool pageFaultSupported = false;
     bool completionFenceSupported = false;
