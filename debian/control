@@ -12,6 +12,7 @@ Build-Depends:
  libigdfcl-dev (>= 1.0.11702.4),
  libigdgmm-dev (>= 21.2.1),
  libva-dev,
+ libze-dev,
  pkg-config,
 Rules-Requires-Root: no
 Standards-Version: 4.6.1
