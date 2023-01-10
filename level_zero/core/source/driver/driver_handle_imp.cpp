@@ -471,6 +471,7 @@ void *DriverHandleImp::importFdHandle(NEO::Device *neoDevice, ze_ipc_memory_flag
         this->getMemoryManager()->createGraphicsAllocationFromSharedHandle(osHandle,
                                                                            unifiedMemoryProperties,
                                                                            false,
+                                                                           false,
                                                                            false);
     if (alloc == nullptr) {
         return nullptr;
@@ -510,6 +511,7 @@ void *DriverHandleImp::importFdHandles(NEO::Device *neoDevice, ze_ipc_memory_fla
     NEO::GraphicsAllocation *alloc =
         this->getMemoryManager()->createGraphicsAllocationFromMultipleSharedHandles(handles,
                                                                                     unifiedMemoryProperties,
+                                                                                    false,
                                                                                     false,
                                                                                     false);
     if (alloc == nullptr) {
@@ -567,13 +569,21 @@ NEO::GraphicsAllocation *DriverHandleImp::getPeerAllocation(Device *device,
             UNRECOVERABLE_IF(numHandles == 0);
             std::vector<NEO::osHandle> handles;
             for (uint32_t i = 0; i < numHandles; i++) {
-                int handle = static_cast<int>(alloc->peekInternalHandle(this->getMemoryManager(), i));
-                handles.push_back(handle);
+                uint64_t handle = 0;
+                int ret = alloc->peekInternalHandle(this->getMemoryManager(), i, handle);
+                if (ret < 0) {
+                    return nullptr;
+                }
+                handles.push_back(static_cast<NEO::osHandle>(handle));
             }
             auto neoDevice = device->getNEODevice()->getRootDevice();
             peerPtr = this->importFdHandles(neoDevice, flags, handles, &alloc);
         } else {
-            uint64_t handle = alloc->peekInternalHandle(this->getMemoryManager());
+            uint64_t handle = 0;
+            int ret = alloc->peekInternalHandle(this->getMemoryManager(), handle);
+            if (ret < 0) {
+                return nullptr;
+            }
             peerPtr = this->importFdHandle(device->getNEODevice(), flags, handle, &alloc);
         }
 

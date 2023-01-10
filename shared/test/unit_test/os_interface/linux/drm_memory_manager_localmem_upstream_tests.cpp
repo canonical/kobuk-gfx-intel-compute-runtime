@@ -228,7 +228,7 @@ TEST_F(DrmMemoryManagerUsmSharedHandleTest, givenDrmMemoryManagerAndOsHandleWhen
     size_t size = 4096u;
     AllocationProperties properties(rootDeviceIndex, false, size, AllocationType::BUFFER_HOST_MEMORY, false, {});
 
-    auto graphicsAllocation = memoryManager->createGraphicsAllocationFromSharedHandle(handle, properties, false, true);
+    auto graphicsAllocation = memoryManager->createGraphicsAllocationFromSharedHandle(handle, properties, false, true, true);
     ASSERT_NE(nullptr, graphicsAllocation);
 
     EXPECT_EQ(this->mock->inputFd, (int)handle);
@@ -272,7 +272,7 @@ TEST_F(DrmMemoryManagerUsmSharedHandleTest, givenMultiRootDeviceEnvironmentAndMe
     size_t size = 4096u;
     AllocationProperties properties(rootDeviceIndex, true, size, AllocationType::BUFFER_HOST_MEMORY, false, {});
 
-    auto ptr = memoryManager->createUSMHostAllocationFromSharedHandle(1, properties, false);
+    auto ptr = memoryManager->createUSMHostAllocationFromSharedHandle(1, properties, false, true);
 
     EXPECT_EQ(ptr, nullptr);
 
