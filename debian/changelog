@@ -1,9 +1,9 @@
-intel-compute-runtime (22.43.24595.41-1) UNRELEASED; urgency=medium
+intel-compute-runtime (22.43.24595.41-1) unstable; urgency=medium
 
   * New upstream release.
   * control: Enable level-zero, add libze-dev to build-depends.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Tue, 10 Jan 2023 16:21:02 +0200
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 10 Jan 2023 16:49:25 +0200
 
 intel-compute-runtime (22.43.24595.35-1) unstable; urgency=medium
 
