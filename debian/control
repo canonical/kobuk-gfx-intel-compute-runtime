@@ -1,0 +1,56 @@
+Source: intel-compute-runtime
+Section: libs
+Priority: optional
+Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alioth.debian.org>
+Uploaders:
+ Timo Aaltonen <tjaalton@debian.org>,
+ Andreas Beckmann <anbe@debian.org>,
+Build-Depends:
+ debhelper-compat (= 13),
+ cmake,
+ libigc1 (>= 1.0.11702.4),
+ libigdfcl-dev (>= 1.0.11702.4),
+ libigdgmm-dev (>= 21.2.1),
+ libva-dev,
+ libze-dev,
+ pkg-config,
+Rules-Requires-Root: no
+Standards-Version: 4.6.1
+Homepage: https://github.com/intel/compute-runtime
+Vcs-Browser: https://salsa.debian.org/opencl-team/intel-compute-runtime
+Vcs-Git: https://salsa.debian.org/opencl-team/intel-compute-runtime.git
+
+Package: intel-opencl-icd
+Architecture: any-amd64
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ libigc1 (>= ${igc:Upstream-Version}),
+ libigc1 (<< ${igc:Upstream-Version}+~),
+ libigc1+llvm${igc:LLVM-Version},
+ libigdfcl1 (>= ${igc:Upstream-Version}),
+ libigdfcl1 (<< ${igc:Upstream-Version}+~),
+ libigdfcl1+llvm${igc:LLVM-Version},
+ ocl-icd-libopencl1,
+Breaks:
+ intel-opencl
+Replaces:
+ intel-opencl
+Provides:
+ opencl-icd
+Description: Intel graphics compute runtime for OpenCL
+ The Intel(R) Graphics Compute Runtime for OpenCL(TM) is an open source
+ project to converge Intel's development efforts on OpenCL(TM) compute
+ stacks supporting the GEN graphics hardware architecture.
+ .
+ Supported platforms - OpenCL 3.0, Production:
+  - DG1
+  - Intel Core Processors with Gen9 GPU (Skylake)
+  - Intel Core Processors with Gen9.5 GPU (Kaby Lake, Coffee Lake)
+  - Intel Core Processors with Gen11 GPU (Ice Lake)
+  - Intel Core Processors with Xe LP (Gen12) GPU (Tiger Lake, Rocket Lake)
+  - Intel Core Processors with Xe (Gen12.2) GPU (Alder Lake)
+  - Intel Atom Processors with Gen11 GPU (Elkhart Lake)
+ Supported platforms - OpenCL 3.0, Maintenance:
+  - Intel Core Processors with Gen8 GPU (Broadwell)
+  - Intel Atom Processors with Gen9 GPU (Apollo Lake, Gemini Lake)

@@ -1,0 +1,16 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS	 = hardening=+all
+
+%:
+	dh $@ --builddir build/
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-DCMAKE_BUILD_TYPE=Release \
+		-Wno-dev
+
+override_dh_gencontrol:
+	dh_gencontrol -- \
+		-V"igc:LLVM-Version=$(shell dpkg-query -f '$${Provides}' -W libigc1 | sed -rn 's/.*libigc1\+llvm([0-9]+).*/\1/p')" \
+		-V"igc:Upstream-Version=$(shell dpkg-query -f '$${source:Upstream-Version}' -W libigc1)"
