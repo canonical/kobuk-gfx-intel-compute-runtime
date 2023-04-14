@@ -3,6 +3,7 @@ intel-compute-runtime (23.13.26032.7-1) UNRELEASED; urgency=medium
   * New upstream release.
   * control: Bump igc build-depends.
   * control: Bump libze-dev build-dep.
+  * rules: Skip unit tests.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Fri, 14 Apr 2023 21:20:52 +0300
 

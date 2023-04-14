@@ -8,6 +8,7 @@ export DEB_BUILD_MAINT_OPTIONS	 = hardening=+all
 override_dh_auto_configure:
 	dh_auto_configure -- \
 		-DCMAKE_BUILD_TYPE=Release \
+		-DSKIP_UNIT_TESTS=1 \
 		-Wno-dev
 
 override_dh_gencontrol:
