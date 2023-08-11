@@ -54,3 +54,50 @@ Description: Intel graphics compute runtime for OpenCL
  Supported platforms - OpenCL 3.0, Maintenance:
   - Intel Core Processors with Gen8 GPU (Broadwell)
   - Intel Atom Processors with Gen9 GPU (Apollo Lake, Gemini Lake)
+
+Package: intel-ocloc
+Architecture: any-amd64
+Depends: ${shlibs:Depends}, ${misc:Depends},
+Breaks: intel-opencl-icd (<< 23.22.26516.8-1)
+Replaces: intel-opencl-icd (<< 23.22.26516.8-1)
+Description: Tool for managing Intel Compute GPU device binary format
+ ocloc is a tool for managing Intel Compute GPU device binary format.
+ It can be used for generation as well as manipulation of such binary files.
+
+Package: intel-ocloc-dev
+Architecture: any-amd64
+Depends: ${shlibs:Depends}, ${misc:Depends},
+Breaks: intel-opencl-icd (<< 23.22.26516.8-1)
+Replaces: intel-opencl-icd (<< 23.22.26516.8-1)
+Description: Tool for managing Intel Compute GPU device binary format -- devel files
+ ocloc is a tool for managing Intel Compute GPU device binary format.
+ It can be used for generation as well as manipulation of such binary files.
+ .
+ This package includes the development headers for intel-ocloc.
+
+Package: libze-intel-gpu1
+Architecture: any-amd64
+Depends: ${shlibs:Depends}, ${misc:Depends},
+Breaks: intel-opencl-icd (<< 23.22.26516.8-1)
+Replaces: intel-opencl-icd (<< 23.22.26516.8-1)
+Description: Intel oneAPI L0 support implementation for Intel GPUs -- shared library
+ Implementation for the Intel GPUs of the oneAPI L0 specification - which
+ provides direct-to-metal interfaces to offload accelerator devices. Its
+ programming interface can be tailored to any device needs and can be
+ adapted to support broader set of languages features such as function
+ pointers, virtual functions, unified memory, and I/O capabilities.
+ .
+ This package contains the shared library.
+
+Package: libze-intel-gpu-dev
+Architecture: any-amd64
+Depends: ${shlibs:Depends}, ${misc:Depends},
+ libze-intel-gpu1 (= ${binary:Version}),
+Description: Intel oneAPI L0 support implementation for Intel GPUs -- shared library
+ Implementation for the Intel GPUs of the oneAPI L0 specification - which
+ provides direct-to-metal interfaces to offload accelerator devices. Its
+ programming interface can be tailored to any device needs and can be
+ adapted to support broader set of languages features such as function
+ pointers, virtual functions, unified memory, and I/O capabilities.
+ .
+ This package contains the shared library.
