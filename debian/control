@@ -58,8 +58,8 @@ Description: Intel graphics compute runtime for OpenCL
 Package: intel-ocloc
 Architecture: any-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends},
-Breaks: intel-opencl-icd (<< 23.22.26516.8-1)
-Replaces: intel-opencl-icd (<< 23.22.26516.8-1)
+Breaks: intel-opencl-icd (<< 23.26.26690.22-1)
+Replaces: intel-opencl-icd (<< 23.26.26690.22-1)
 Description: Tool for managing Intel Compute GPU device binary format
  ocloc is a tool for managing Intel Compute GPU device binary format.
  It can be used for generation as well as manipulation of such binary files.
@@ -67,8 +67,8 @@ Description: Tool for managing Intel Compute GPU device binary format
 Package: intel-ocloc-dev
 Architecture: any-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends},
-Breaks: intel-opencl-icd (<< 23.22.26516.8-1)
-Replaces: intel-opencl-icd (<< 23.22.26516.8-1)
+Breaks: intel-opencl-icd (<< 23.26.26690.22-1)
+Replaces: intel-opencl-icd (<< 23.26.26690.22-1)
 Description: Tool for managing Intel Compute GPU device binary format -- devel files
  ocloc is a tool for managing Intel Compute GPU device binary format.
  It can be used for generation as well as manipulation of such binary files.
@@ -78,8 +78,8 @@ Description: Tool for managing Intel Compute GPU device binary format -- devel f
 Package: libze-intel-gpu1
 Architecture: any-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends},
-Breaks: intel-opencl-icd (<< 23.22.26516.8-1)
-Replaces: intel-opencl-icd (<< 23.22.26516.8-1)
+Breaks: intel-opencl-icd (<< 23.26.26690.22-1)
+Replaces: intel-opencl-icd (<< 23.26.26690.22-1)
 Description: Intel oneAPI L0 support implementation for Intel GPUs -- shared library
  Implementation for the Intel GPUs of the oneAPI L0 specification - which
  provides direct-to-metal interfaces to offload accelerator devices. Its

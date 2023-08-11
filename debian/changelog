@@ -1,4 +1,4 @@
-intel-compute-runtime (23.22.26516.8-1) UNRELEASED; urgency=medium
+intel-compute-runtime (23.26.26690.22-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * Split packaging so ocloc and level zero files are in their own
