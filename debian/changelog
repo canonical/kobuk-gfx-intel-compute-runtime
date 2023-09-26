@@ -3,6 +3,7 @@ intel-compute-runtime (23.35~git20230926-1) UNRELEASED; urgency=medium
   * New upstream release. (Closes: #1051189, #1052513)
   * Split packaging so ocloc and level zero files are in their own
     packages.
+  * rules: Add get-orig-source target.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Mon, 19 Jun 2023 15:57:33 +0300
 
