@@ -1,11 +1,11 @@
-intel-compute-runtime (23.35~git20230926-1) UNRELEASED; urgency=medium
+intel-compute-runtime (23.35~git20230926-1) unstable; urgency=medium
 
   * New upstream release. (Closes: #1051189, #1052513)
   * Split packaging so ocloc and level zero files are in their own
     packages.
   * rules: Add get-orig-source target.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Mon, 19 Jun 2023 15:57:33 +0300
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 27 Sep 2023 11:28:03 +0300
 
 intel-compute-runtime (23.13.26032.7-1) experimental; urgency=medium
 
