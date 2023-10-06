@@ -1,8 +1,8 @@
-intel-compute-runtime (23.35.27191.9-1) UNRELEASED; urgency=medium
+intel-compute-runtime (23.35.27191.9-1) unstable; urgency=medium
 
   * New upstream release.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Tue, 03 Oct 2023 20:22:40 +0300
+ -- Timo Aaltonen <tjaalton@debian.org>  Fri, 06 Oct 2023 13:06:45 +0300
 
 intel-compute-runtime (23.35~git20230926-1) unstable; urgency=medium
 
