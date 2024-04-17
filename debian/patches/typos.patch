@@ -40,20 +40,20 @@ Description: fix typos found by Lintian
      default:
 -        return "UNKOWN";
 +        return "UNKNOWN";
-     case SegmentType::GlobalConstants:
+     case SegmentType::globalConstants:
          return "GLOBAL_CONSTANTS";
-     case SegmentType::GlobalVariables:
+     case SegmentType::globalVariables:
 --- a/shared/test/unit_test/compiler_interface/linker_tests.cpp
 +++ b/shared/test/unit_test/compiler_interface/linker_tests.cpp
 @@ -32,7 +32,7 @@
  #include <string>
  
  TEST(SegmentTypeTests, givenSegmentTypeWhenAsStringIsCalledThenProperRepresentationIsReturned) {
--    EXPECT_STREQ("UNKOWN", NEO::asString(NEO::SegmentType::Unknown));
-+    EXPECT_STREQ("UNKNOWN", NEO::asString(NEO::SegmentType::Unknown));
-     EXPECT_STREQ("GLOBAL_CONSTANTS", NEO::asString(NEO::SegmentType::GlobalConstants));
-     EXPECT_STREQ("GLOBAL_VARIABLES", NEO::asString(NEO::SegmentType::GlobalVariables));
-     EXPECT_STREQ("INSTRUCTIONS", NEO::asString(NEO::SegmentType::Instructions));
+-    EXPECT_STREQ("UNKOWN", NEO::asString(NEO::SegmentType::unknown));
++    EXPECT_STREQ("UNKNOWN", NEO::asString(NEO::SegmentType::unknown));
+     EXPECT_STREQ("GLOBAL_CONSTANTS", NEO::asString(NEO::SegmentType::globalConstants));
+     EXPECT_STREQ("GLOBAL_VARIABLES", NEO::asString(NEO::SegmentType::globalVariables));
+     EXPECT_STREQ("INSTRUCTIONS", NEO::asString(NEO::SegmentType::instructions));
 @@ -1763,7 +1763,7 @@ TEST(RelocationsDebugMessageTests, given
      auto message = NEO::constructRelocationsDebugMessage(symbols);
  
