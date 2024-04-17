@@ -8,8 +8,8 @@ Uploaders:
 Build-Depends:
  debhelper-compat (= 13),
  cmake,
- libigc1 (>= 1.0.15468.25~),
- libigdfcl-dev (>= 1.0.15468.25~),
+ libigc1 (>= 1.0.16510.0~),
+ libigdfcl-dev (>= 1.0.16510.0~),
  libigdgmm-dev (>= 21.2.1),
  libva-dev,
  libze-dev (>= 1.10.0),

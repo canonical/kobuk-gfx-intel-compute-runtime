@@ -2,6 +2,7 @@ intel-compute-runtime (23.52.28202.50-1) UNRELEASED; urgency=medium
 
   * New upstream release.
   * typos.patch: Refreshed.
+  * control: Bump igc build-deps.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Wed, 17 Apr 2024 10:01:57 +0300
 
