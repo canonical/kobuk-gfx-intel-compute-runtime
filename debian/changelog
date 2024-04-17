@@ -1,8 +1,13 @@
 intel-compute-runtime (23.52.28202.50-1) UNRELEASED; urgency=medium
 
+  [ Timo Aaltonen ]
   * New upstream release.
   * typos.patch: Refreshed.
   * control: Bump igc build-deps.
+
+  [ Steve Langasek ]
+  * Exclude _FORTIFY_SOURCE from dpkg-builflags to avoid a redefinition and
+    a build failure.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Wed, 17 Apr 2024 10:01:57 +0300
 
