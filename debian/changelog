@@ -1,4 +1,4 @@
-intel-compute-runtime (24.13.29138.7-1) UNRELEASED; urgency=medium
+intel-compute-runtime (24.13.29138.7-1) unstable; urgency=medium
 
   [ Timo Aaltonen ]
   * New upstream release.
@@ -9,7 +9,7 @@ intel-compute-runtime (24.13.29138.7-1) UNRELEASED; urgency=medium
   * Exclude _FORTIFY_SOURCE from dpkg-builflags to avoid a redefinition and
     a build failure.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Wed, 17 Apr 2024 10:01:57 +0300
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 17 Apr 2024 15:43:28 +0300
 
 intel-compute-runtime (23.43.27642.40-1) unstable; urgency=medium
 
