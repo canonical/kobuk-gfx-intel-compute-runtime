@@ -8,11 +8,11 @@ Uploaders:
 Build-Depends:
  debhelper-compat (= 13),
  cmake,
- libigc1 (>= 1.0.16510.0~),
- libigdfcl-dev (>= 1.0.16510.0~),
+ libigc1 (>= 1.0.17193.2),
+ libigdfcl-dev (>= 1.0.17193.2),
  libigdgmm-dev (>= 21.2.1),
  libva-dev,
- libze-dev (>= 1.10.0),
+ libze-dev (>= 1.17.6),
  pkgconf,
 Rules-Requires-Root: no
 Standards-Version: 4.6.1
