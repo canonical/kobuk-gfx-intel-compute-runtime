@@ -1,6 +1,7 @@
 intel-compute-runtime (24.22.29735.21-1) UNRELEASED; urgency=medium
 
   * New upstream release.
+  * typos.patch: Dropped, upstream.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Thu, 27 Jun 2024 11:40:23 +0300
 
