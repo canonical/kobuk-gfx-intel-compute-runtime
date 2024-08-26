@@ -1,10 +1,10 @@
-intel-compute-runtime (24.31.30508.7-1) UNRELEASED; urgency=medium
+intel-compute-runtime (24.31.30508.7-1) unstable; urgency=medium
 
   * New upstream release.
   * patches: Add fixes to build with gcc 14. (Closes: #1077948)
   * install: bin/ocloc has a version suffix now.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Tue, 06 Aug 2024 09:41:11 +0300
+ -- Timo Aaltonen <tjaalton@debian.org>  Mon, 26 Aug 2024 16:32:42 +0300
 
 intel-compute-runtime (24.22.29735.21-1) unstable; urgency=medium
 
