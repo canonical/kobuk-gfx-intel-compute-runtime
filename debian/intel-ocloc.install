@@ -1,2 +1,2 @@
-usr/bin/ocloc
+usr/bin/ocloc*
 usr/lib/*/libocloc.so
