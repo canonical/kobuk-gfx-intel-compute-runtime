@@ -1,6 +1,7 @@
-intel-compute-runtime (24.35.30872.14-2) UNRELEASED; urgency=medium
+intel-compute-runtime (24.35.30872.18-1) UNRELEASED; urgency=medium
 
   * Add libze-intel-gpu1.symbols.
+  * New upstream release.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Wed, 11 Sep 2024 13:59:40 +0300
 
