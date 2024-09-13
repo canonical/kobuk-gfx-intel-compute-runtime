@@ -1,8 +1,10 @@
-intel-compute-runtime (24.35.30872.18-1002~24.04) UNRELEASED; urgency=medium
+intel-compute-runtime (24.35.30872.24-1018~24.10~ppa1) oracular; urgency=medium
 
-  * build dev-build
+  * bump version to 24.35.30872.24-1018
+  * remove intel-igc-cm as dependency
+  * add DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
- -- piandro-mobl2 <pavel.androniychuk@intel.com>  Thu, 12 Sep 2024 14:45:40 -0700
+ -- piandro-mobl2 <pavel.androniychuk@intel.com>  Wed, 25 Sep 2024 02:13:55 -0700
 
 intel-compute-runtime (24.35.30872.24-1) unstable; urgency=medium
 
@@ -11,12 +13,17 @@ intel-compute-runtime (24.35.30872.24-1) unstable; urgency=medium
 
  -- Timo Aaltonen <tjaalton@debian.org>  Wed, 25 Sep 2024 12:04:36 +0300
 
+intel-compute-runtime (24.35.30872.18-1002~24.04) unstable; urgency=medium
+
+  * bump version to 24.35.30872.18-1002
+
+ -- piandro-mobl2 <pavel.androniychuk@intel.com>  Thu, 12 Sep 2024 14:45:40 -0700
+
 intel-compute-runtime (24.35.30872.18-1) unstable; urgency=medium
 
-  * Add libze-intel-gpu1.symbols.
-  * New upstream release.
+  * build dev-build
 
- -- Timo Aaltonen <tjaalton@debian.org>  Thu, 12 Sep 2024 18:29:57 +0300
+ -- piandro-mobl2 <pavel.androniychuk@intel.com>  Thu, 12 Sep 2024 14:45:40 -0700
 
 intel-compute-runtime (24.35.30872.17-1) unstable; urgency=medium
 
