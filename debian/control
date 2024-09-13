@@ -1,37 +1,63 @@
 Source: intel-compute-runtime
 Section: libs
 Priority: optional
-Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alioth.debian.org>
-Uploaders:
- Timo Aaltonen <tjaalton@debian.org>,
- Andreas Beckmann <anbe@debian.org>,
-Build-Depends:
- debhelper-compat (= 13),
+Maintainer: Intel Graphics Team <linux-graphics@intel.com>
+XSBC-Original-Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alioth.debian.org>
+Build-Depends: debhelper (>= 11),
  cmake,
- libigc1 (>= 1.0.17193.2),
- libigdfcl-dev (>= 1.0.17193.2),
- libigdgmm-dev (>= 21.2.1),
+ intel-gsc-dev (>= 0.9.3),
+ intel-igc-cm (>= 1.0.176),
+ libigc-dev (>= 1.0.17537.20),
+ libigdfcl-dev (>= 1.0.17537.20),
+ libigdgmm-dev (>= 22.5.1),
  libva-dev,
- libze-dev (>= 1.17.6),
- pkgconf,
-Rules-Requires-Root: no
-Standards-Version: 4.6.1
+ libze-dev (>= 1.17.42),
+ libnl-3-dev,
+ libnl-route-3-dev,
+ libudev-dev,
+ pkg-config
+Standards-Version: 4.3.0
 Homepage: https://github.com/intel/compute-runtime
-Vcs-Browser: https://salsa.debian.org/opencl-team/intel-compute-runtime
-Vcs-Git: https://salsa.debian.org/opencl-team/intel-compute-runtime.git
 
-Package: intel-opencl-icd
-Architecture: any-amd64
+Package: libze-intel-gpu1
+Architecture: amd64
+Breaks: intel-level-zero-gpu
+Replaces: intel-level-zero-gpu
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
- libigc1 (>= ${igc:Upstream-Version}),
- libigc1 (<< ${igc:Upstream-Version}+~),
- libigc1+llvm${igc:LLVM-Version},
- libigdfcl1 (>= ${igc:Upstream-Version}),
- libigdfcl1 (<< ${igc:Upstream-Version}+~),
- libigdfcl1+llvm${igc:LLVM-Version},
+ libigc1 (>= 1.0.17537.20),
+ libigdfcl1 (>= 1.0.17537.20),
+ libnl-3-200,
+ libnl-route-3-200,
+ libze1
+Description: Intel(R) Graphics Compute Runtime for oneAPI Level Zero.
+ Level Zero is the primary low-level interface for language and runtime
+ libraries. Level Zero offers fine-grain control over accelerators
+ capabilities, delivering a simplified and low-latency interface to
+ hardware, and efficiently exposing hardware capabilities to applications.
+
+Package: libze-intel-gpu-dev
+Architecture: amd64
+Breaks: intel-level-zero-gpu-dev
+Replaces: intel-level-zero-gpu-dev
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ libze-intel-gpu1
+Description: Intel(R) Graphics Compute Runtime for oneAPI Level Zero
+ This package containes the development headers
+
+Package: intel-opencl-icd
+Architecture: amd64
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
  ocl-icd-libopencl1,
+ libigc1 (>= 1.0.17537.20),
+ libigdfcl1 (>= 1.0.17537.20),
+Recommends:
+ intel-igc-cm (>= 1.0.176)
 Breaks:
  intel-opencl
 Replaces:
@@ -39,27 +65,27 @@ Replaces:
 Provides:
  opencl-icd
 Description: Intel graphics compute runtime for OpenCL
- The Intel(R) Graphics Compute Runtime for OpenCL(TM) is an open source
+ The Intel(R) Graphics Compute Runtime for OpenCL(TM) is a open source
  project to converge Intel's development efforts on OpenCL(TM) compute
  stacks supporting the GEN graphics hardware architecture.
  .
  Supported platforms - OpenCL 3.0, Production:
-  - DG1
-  - Intel Core Processors with Gen9 GPU (Skylake)
-  - Intel Core Processors with Gen9.5 GPU (Kaby Lake, Coffee Lake)
-  - Intel Core Processors with Gen11 GPU (Ice Lake)
-  - Intel Core Processors with Xe LP (Gen12) GPU (Tiger Lake, Rocket Lake)
-  - Intel Core Processors with Xe (Gen12.2) GPU (Alder Lake)
-  - Intel Atom Processors with Gen11 GPU (Elkhart Lake)
+ - DG1
+ - Intel Core Processors with Gen9 GPU (Skylake)
+ - Intel Core Processors with Gen9.5 GPU (Kaby Lake, Coffee Lake)
+ - Intel Core Processors with Gen11 GPU (Ice Lake)
+ - Intel Core Processors with Xe LP (Gen12) GPU (Tiger Lake, Rocket Lake)
+ - Intel Core Processors with Xe (Gen12.2) GPU (Alder Lake)
+ - Intel Atom Processors with Gen11 GPU (Elkhart Lake)
  Supported platforms - OpenCL 3.0, Maintenance:
-  - Intel Core Processors with Gen8 GPU (Broadwell)
-  - Intel Atom Processors with Gen9 GPU (Apollo Lake, Gemini Lake)
+ - Intel Core Processors with Gen8 GPU (Broadwell)
+ - Intel Atom Processors with Gen9 GPU (Apollo Lake, Gemini Lake)
 
 Package: intel-ocloc
 Architecture: any-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends},
-Breaks: intel-opencl-icd (<< 23.26.26690.22-1)
-Replaces: intel-opencl-icd (<< 23.26.26690.22-1)
+Breaks: intel-opencl-icd (<< 24.31.30508.14)
+Replaces: intel-opencl-icd (<< 24.31.30508.14)
 Description: Tool for managing Intel Compute GPU device binary format
  ocloc is a tool for managing Intel Compute GPU device binary format.
  It can be used for generation as well as manipulation of such binary files.
@@ -67,37 +93,10 @@ Description: Tool for managing Intel Compute GPU device binary format
 Package: intel-ocloc-dev
 Architecture: any-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends},
-Breaks: intel-opencl-icd (<< 23.26.26690.22-1)
-Replaces: intel-opencl-icd (<< 23.26.26690.22-1)
+Breaks: intel-opencl-icd (<< 24.31.30508.14)
+Replaces: intel-opencl-icd (<< 24.31.30508.14)
 Description: Tool for managing Intel Compute GPU device binary format -- devel files
  ocloc is a tool for managing Intel Compute GPU device binary format.
  It can be used for generation as well as manipulation of such binary files.
  .
  This package includes the development headers for intel-ocloc.
-
-Package: libze-intel-gpu1
-Architecture: any-amd64
-Depends: ${shlibs:Depends}, ${misc:Depends},
-Breaks: intel-opencl-icd (<< 23.26.26690.22-1)
-Replaces: intel-opencl-icd (<< 23.26.26690.22-1)
-Description: Intel oneAPI L0 support implementation for Intel GPUs -- shared library
- Implementation for the Intel GPUs of the oneAPI L0 specification - which
- provides direct-to-metal interfaces to offload accelerator devices. Its
- programming interface can be tailored to any device needs and can be
- adapted to support broader set of languages features such as function
- pointers, virtual functions, unified memory, and I/O capabilities.
- .
- This package contains the shared library.
-
-Package: libze-intel-gpu-dev
-Architecture: any-amd64
-Depends: ${shlibs:Depends}, ${misc:Depends},
- libze-intel-gpu1 (= ${binary:Version}),
-Description: Intel oneAPI L0 support implementation for Intel GPUs -- shared library
- Implementation for the Intel GPUs of the oneAPI L0 specification - which
- provides direct-to-metal interfaces to offload accelerator devices. Its
- programming interface can be tailored to any device needs and can be
- adapted to support broader set of languages features such as function
- pointers, virtual functions, unified memory, and I/O capabilities.
- .
- This package contains the shared library.
