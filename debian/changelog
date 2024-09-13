@@ -1,3 +1,9 @@
+intel-compute-runtime (24.35.30872.18-1002~24.04) UNRELEASED; urgency=medium
+
+  * build dev-build
+
+ -- piandro-mobl2 <pavel.androniychuk@intel.com>  Thu, 12 Sep 2024 14:45:40 -0700
+
 intel-compute-runtime (24.35.30872.24-1) unstable; urgency=medium
 
   * New upstream release.
@@ -12,12 +18,17 @@ intel-compute-runtime (24.35.30872.18-1) unstable; urgency=medium
 
  -- Timo Aaltonen <tjaalton@debian.org>  Thu, 12 Sep 2024 18:29:57 +0300
 
-intel-compute-runtime (24.35.30872.14-1) unstable; urgency=medium
+intel-compute-runtime (24.35.30872.17-1) unstable; urgency=medium
 
-  * New upstream release.
-  * patches: Drop all patches, upstream.
+  * Add level-zero-gpu to opencl debian files
 
- -- Timo Aaltonen <tjaalton@debian.org>  Wed, 11 Sep 2024 11:17:09 +0300
+ -- piandro-mobl2 <pavel.androniychuk@intel.com>  Thu, 12 Sep 2024 13:59:31 -0700
+
+intel-compute-runtime (24.31.30508.14-1) unstable; urgency=medium
+
+  * Line up packaging files with distro
+
+ -- piandro-mobl2 <pavel.androniychuk@intel.com>  Wed, 04 Sep 2024 13:59:31 -0700
 
 intel-compute-runtime (24.31.30508.7-1) unstable; urgency=medium
 
