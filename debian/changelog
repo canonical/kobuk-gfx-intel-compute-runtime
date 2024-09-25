@@ -1,3 +1,9 @@
+intel-compute-runtime (24.35.30872.24-1) UNRELEASED; urgency=medium
+
+  * New upstream release.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 25 Sep 2024 11:22:36 +0300
+
 intel-compute-runtime (24.35.30872.18-1) unstable; urgency=medium
 
   * Add libze-intel-gpu1.symbols.
