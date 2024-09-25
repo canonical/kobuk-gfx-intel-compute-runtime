@@ -5,8 +5,7 @@ Maintainer: Intel Graphics Team <linux-graphics@intel.com>
 XSBC-Original-Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alioth.debian.org>
 Build-Depends: debhelper (>= 11),
  cmake,
- intel-gsc-dev (>= 0.9.3),
- intel-igc-cm (>= 1.0.176),
+ libigsc-dev (>= 0.9.3),
  libigc-dev (>= 1.0.17537.20),
  libigdfcl-dev (>= 1.0.17537.20),
  libigdgmm-dev (>= 22.5.1),
@@ -21,6 +20,7 @@ Homepage: https://github.com/intel/compute-runtime
 
 Package: libze-intel-gpu1
 Architecture: amd64
+Provides: intel-level-zero-gpu
 Breaks: intel-level-zero-gpu
 Replaces: intel-level-zero-gpu
 Depends:
@@ -39,6 +39,7 @@ Description: Intel(R) Graphics Compute Runtime for oneAPI Level Zero.
 
 Package: libze-intel-gpu-dev
 Architecture: amd64
+Provides: intel-level-zero-gpu-dev
 Breaks: intel-level-zero-gpu-dev
 Replaces: intel-level-zero-gpu-dev
 Depends:
@@ -56,8 +57,6 @@ Depends:
  ocl-icd-libopencl1,
  libigc1 (>= 1.0.17537.20),
  libigdfcl1 (>= 1.0.17537.20),
-Recommends:
- intel-igc-cm (>= 1.0.176)
 Breaks:
  intel-opencl
 Replaces:
@@ -83,7 +82,7 @@ Description: Intel graphics compute runtime for OpenCL
 
 Package: intel-ocloc
 Architecture: any-amd64
-Depends: ${shlibs:Depends}, ${misc:Depends},
+Depends: ${shlibs:Depends}, ${misc:Depends}
 Breaks: intel-opencl-icd (<< 24.31.30508.14)
 Replaces: intel-opencl-icd (<< 24.31.30508.14)
 Description: Tool for managing Intel Compute GPU device binary format
