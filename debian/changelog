@@ -19,12 +19,6 @@ intel-compute-runtime (24.35.30872.18-1002~24.04) unstable; urgency=medium
 
  -- piandro-mobl2 <pavel.androniychuk@intel.com>  Thu, 12 Sep 2024 14:45:40 -0700
 
-intel-compute-runtime (24.35.30872.18-1) unstable; urgency=medium
-
-  * build dev-build
-
- -- piandro-mobl2 <pavel.androniychuk@intel.com>  Thu, 12 Sep 2024 14:45:40 -0700
-
 intel-compute-runtime (24.35.30872.17-1) unstable; urgency=medium
 
   * Add level-zero-gpu to opencl debian files

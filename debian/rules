@@ -1,10 +1,12 @@
 #!/usr/bin/make -f
 NEO_MAJOR = 24
 NEO_MINOR = 35
-NEO_BUILD = 30872.18
+NEO_BUILD = 30872.24
 build_id = 30872
-build_hf_id = 18
+build_hf_id = 24
 
+
+export DEB_BUILD_MAINT_OPTIONS	= hardening=+all
 export DEB_CPPFLAGS_MAINT_STRIP = -D_FORTIFY_SOURCE=3
 
 %:
