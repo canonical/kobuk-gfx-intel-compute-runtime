@@ -1,3 +1,9 @@
+intel-compute-runtime (24.35.30872.29-1~24.10~ppa1) oracular; urgency=medium
+
+  * bump version to 24.35.30872.29
+
+ -- piandro-mobl2 <pavel.androniychuk@intel.com>  Wed, 02 Oct 2024 16:33:42 -0700
+
 intel-compute-runtime (24.35.30872.27-1~24.10~ppa2) oracular; urgency=medium
 
   * bump version to 24.35.30872.27
