@@ -6,8 +6,8 @@ XSBC-Original-Maintainer: Debian OpenCL Maintainers <pkg-opencl-devel@lists.alio
 Build-Depends: debhelper (>= 11),
  cmake,
  libigsc-dev (>= 0.9.3),
- libigc-dev (>= 1.0.17537.20),
- libigdfcl-dev (>= 1.0.17537.20),
+ libigc-dev (>= 1.0.17537.24),
+ libigdfcl-dev (>= 1.0.17537.24),
  libigdgmm-dev (>= 22.5.1),
  libva-dev,
  libze-dev (>= 1.17.42),
@@ -26,8 +26,8 @@ Replaces: intel-level-zero-gpu
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
- libigc1 (>= 1.0.17537.20),
- libigdfcl1 (>= 1.0.17537.20),
+ libigc1 (>= 1.0.17537.24),
+ libigdfcl1 (>= 1.0.17537.24),
  libnl-3-200,
  libnl-route-3-200,
  libze1
@@ -55,8 +55,8 @@ Depends:
  ${shlibs:Depends},
  ${misc:Depends},
  ocl-icd-libopencl1,
- libigc1 (>= 1.0.17537.20),
- libigdfcl1 (>= 1.0.17537.20),
+ libigc1 (>= 1.0.17537.24),
+ libigdfcl1 (>= 1.0.17537.24),
 Breaks:
  intel-opencl
 Replaces:
