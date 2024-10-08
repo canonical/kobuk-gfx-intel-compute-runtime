@@ -563,6 +563,7 @@ TEST_F(WddmMemoryManagerTests, givenTypeWhenCallIsStatelessAccessRequiredThenPro
                       AllocationType::svmCpu,
                       AllocationType::svmGpu,
                       AllocationType::svmZeroCopy,
+                      AllocationType::syncBuffer,
                       AllocationType::tagBuffer,
                       AllocationType::globalFence,
                       AllocationType::timestampPacketTagBuffer,
@@ -1598,7 +1599,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenIsaTypeAnd32BitFrontWindowWhenFrontWind
     EXPECT_EQ(gpuAddress, gfxPartition->heapFreePtr);
 }
 
-HWTEST2_F(WddmMemoryManagerSimpleTest, givenLocalMemoryIsaTypeAnd32BitFrontWindowWhenFrontWindowMemoryAllocatedAndFreedThenFrontWindowHeapAllocatorIsUsed, IsAtLeastGen12lp) {
+HWTEST2_F(WddmMemoryManagerSimpleTest, givenLocalMemoryIsaTypeAnd32BitFrontWindowWhenFrontWindowMemoryAllocatedAndFreedThenFrontWindowHeapAllocatorIsUsed, MatchAny) {
     DebugManagerStateRestore restore{};
     debugManager.flags.ForceLocalMemoryAccessMode.set(0);
 
@@ -1660,7 +1661,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenDebugModuleAreaTypeWhenCreatingAllocati
     memoryManager->freeGraphicsMemory(moduleDebugArea);
 }
 
-HWTEST2_F(WddmMemoryManagerSimpleTest, givenEnabledLocalMemoryWhenAllocatingDebugAreaThenHeapInternalDeviceFrontWindowIsUsed, IsAtLeastGen12lp) {
+HWTEST2_F(WddmMemoryManagerSimpleTest, givenEnabledLocalMemoryWhenAllocatingDebugAreaThenHeapInternalDeviceFrontWindowIsUsed, MatchAny) {
     DebugManagerStateRestore restore{};
     debugManager.flags.ForceLocalMemoryAccessMode.set(0);
     const auto size = MemoryConstants::pageSize64k;
@@ -4033,14 +4034,14 @@ struct WddmMemoryManagerWithAsyncDeleterTest : public ::testing::Test {
 
 TEST_F(WddmMemoryManagerWithAsyncDeleterTest, givenWddmWhenAsyncDeleterIsEnabledThenCanDeferDeletions) {
     EXPECT_EQ(0, deleter->deferDeletionCalled);
-    memoryManager->tryDeferDeletions(nullptr, 0, 0, 0);
+    memoryManager->tryDeferDeletions(nullptr, 0, 0, 0, AllocationType::unknown);
     EXPECT_EQ(1, deleter->deferDeletionCalled);
     EXPECT_EQ(1u, wddm->destroyAllocationResult.called);
 }
 
 TEST_F(WddmMemoryManagerWithAsyncDeleterTest, givenWddmWhenAsyncDeleterIsDisabledThenCannotDeferDeletions) {
     memoryManager->setDeferredDeleter(nullptr);
-    memoryManager->tryDeferDeletions(nullptr, 0, 0, 0);
+    memoryManager->tryDeferDeletions(nullptr, 0, 0, 0, AllocationType::unknown);
     EXPECT_EQ(1u, wddm->destroyAllocationResult.called);
 }
 

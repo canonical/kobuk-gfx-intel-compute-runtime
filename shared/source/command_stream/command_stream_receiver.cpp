@@ -659,6 +659,13 @@ bool CommandStreamReceiver::enqueueWaitForPagingFence(uint64_t pagingFenceValue)
     return false;
 }
 
+void CommandStreamReceiver::drainPagingFenceQueue() {
+    auto controller = this->executionEnvironment.directSubmissionController.get();
+    if (this->isAnyDirectSubmissionEnabled() && controller) {
+        controller->drainPagingFenceQueue();
+    }
+}
+
 GraphicsAllocation *CommandStreamReceiver::allocateDebugSurface(size_t size) {
     UNRECOVERABLE_IF(debugSurface != nullptr);
     if (primaryCsr) {
@@ -689,6 +696,10 @@ IndirectHeap &CommandStreamReceiver::getIndirectHeap(IndirectHeap::Type heapType
         internalAllocationStorage->storeAllocation(std::unique_ptr<GraphicsAllocation>(heapMemory), REUSABLE_ALLOCATION);
         heapMemory = nullptr;
         this->heapStorageRequiresRecyclingTag = true;
+
+        if (this->peekRootDeviceEnvironment().getProductHelper().isDcFlushMitigated()) {
+            this->registerDcFlushForDcMitigation();
+        }
     }
 
     if (!heapMemory) {
@@ -705,7 +716,7 @@ void CommandStreamReceiver::allocateHeapMemory(IndirectHeap::Type heapType,
     if (IndirectHeap::Type::surfaceState == heapType) {
         finalHeapSize = defaultSshSize;
     }
-    bool requireInternalHeap = IndirectHeap::Type::indirectObject == heapType ? canUse4GbHeaps : false;
+    bool requireInternalHeap = IndirectHeap::Type::indirectObject == heapType ? canUse4GbHeaps() : false;
 
     if (debugManager.flags.AddPatchInfoCommentsForAUBDump.get()) {
         requireInternalHeap = false;

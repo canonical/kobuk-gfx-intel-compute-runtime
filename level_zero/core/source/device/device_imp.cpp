@@ -252,6 +252,7 @@ ze_result_t DeviceImp::createCommandList(const ze_command_list_desc_t *desc,
     }
 
     auto cmdList = static_cast<L0::CommandListImp *>(CommandList::fromHandle(*commandList));
+    UNRECOVERABLE_IF(cmdList == nullptr);
 
     cmdList->setOrdinal(desc->commandQueueGroupOrdinal);
 
@@ -263,7 +264,7 @@ ze_result_t DeviceImp::createCommandList(const ze_command_list_desc_t *desc,
         }
     }
 
-    if (returnValue != ZE_RESULT_SUCCESS && cmdList) {
+    if (returnValue != ZE_RESULT_SUCCESS) {
         cmdList->destroy();
         cmdList = nullptr;
         *commandList = nullptr;
@@ -1166,7 +1167,8 @@ ze_result_t DeviceImp::getCacheProperties(uint32_t *pCount, ze_device_cache_prop
 }
 
 ze_result_t DeviceImp::reserveCache(size_t cacheLevel, size_t cacheReservationSize) {
-    if (getOsInterface().getDriverModel()->getDriverModelType() != NEO::DriverModelType::drm) {
+    auto osInterface = neoDevice->getRootDeviceEnvironment().osInterface.get();
+    if (!osInterface || osInterface->getDriverModel()->getDriverModelType() != NEO::DriverModelType::drm) {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
@@ -1187,7 +1189,8 @@ ze_result_t DeviceImp::reserveCache(size_t cacheLevel, size_t cacheReservationSi
 }
 
 ze_result_t DeviceImp::setCacheAdvice(void *ptr, size_t regionSize, ze_cache_ext_region_t cacheRegion) {
-    if (getOsInterface().getDriverModel()->getDriverModelType() != NEO::DriverModelType::drm) {
+    auto osInterface = neoDevice->getRootDeviceEnvironment().osInterface.get();
+    if (!osInterface || osInterface->getDriverModel()->getDriverModelType() != NEO::DriverModelType::drm) {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
@@ -1786,10 +1789,11 @@ ze_result_t DeviceImp::getCsrForLowPriority(NEO::CommandStreamReceiver **csr, bo
     return ZE_RESULT_ERROR_UNKNOWN;
 }
 ze_result_t DeviceImp::getCsrForHighPriority(NEO::CommandStreamReceiver **csr, bool copyOnly) {
-    for (auto &it : getActiveDevice()->getAllEngines()) {
-        bool engineTypeMatch = NEO::EngineHelpers::isBcs(it.osContext->getEngineType()) == copyOnly;
-        if (it.osContext->isHighPriority() && engineTypeMatch) {
-            *csr = it.commandStreamReceiver;
+
+    if (copyOnly) {
+        auto engine = getActiveDevice()->getHpCopyEngine();
+        if (engine) {
+            *csr = engine->commandStreamReceiver;
             return ZE_RESULT_SUCCESS;
         }
     }

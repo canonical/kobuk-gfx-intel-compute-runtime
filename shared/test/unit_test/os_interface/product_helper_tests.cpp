@@ -8,6 +8,7 @@
 #include "shared/test/unit_test/os_interface/product_helper_tests.h"
 
 #include "shared/source/aub_mem_dump/aub_mem_dump.h"
+#include "shared/source/helpers/definitions/indirect_detection_versions.h"
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/local_memory_access_modes.h"
 #include "shared/source/kernel/kernel_descriptor.h"
@@ -28,9 +29,12 @@
 #include "shared/test/common/mocks/mock_product_helper.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
+#include "clos_matchers.h"
 #include "gtest/gtest.h"
+#include "ocl_igc_shared/indirect_access_detection/version.h"
 #include "test_traits_common.h"
 
+#include <limits>
 using namespace NEO;
 
 ProductHelperTest::ProductHelperTest() {
@@ -310,12 +314,12 @@ HWTEST_F(ProductHelperTest, givenVariousValuesWhenGettingAubStreamSteppingFromHw
     EXPECT_EQ(AubMemDump::SteppingValues::A, mockProductHelper.getAubStreamSteppingFromHwRevId(pInHwInfo));
 }
 
-HWTEST_F(ProductHelperTest, givenDcFlushMitigationWhenOverridePatAndUsageForDcFlushMitigationThenReturnCorrectValue) {
+HWTEST_F(ProductHelperTest, givenDcFlushMitigationWhenOverridePatToUCAndTwoWayCohForDcFlushMitigationThenReturnCorrectValue) {
     DebugManagerStateRestore restorer;
     if (!productHelper->isDcFlushMitigated()) {
         for (auto i = 0; i < static_cast<int>(AllocationType::count); ++i) {
             auto allocationType = static_cast<AllocationType>(i);
-            EXPECT_FALSE(productHelper->overridePatAndUsageForDcFlushMitigation(allocationType));
+            EXPECT_FALSE(productHelper->overridePatToUCAndTwoWayCohForDcFlushMitigation(allocationType));
         }
     }
     debugManager.flags.AllowDcFlush.set(0);
@@ -333,9 +337,9 @@ HWTEST_F(ProductHelperTest, givenDcFlushMitigationWhenOverridePatAndUsageForDcFl
             allocationType == AllocationType::linearStream ||
             allocationType == AllocationType::internalHeap ||
             allocationType == AllocationType::printfSurface) {
-            EXPECT_EQ(productHelper->overridePatAndUsageForDcFlushMitigation(allocationType), productHelper->isDcFlushMitigated());
+            EXPECT_EQ(productHelper->overrideUsageForDcFlushMitigation(allocationType), productHelper->isDcFlushMitigated());
         } else {
-            EXPECT_FALSE(productHelper->overridePatAndUsageForDcFlushMitigation(allocationType));
+            EXPECT_FALSE(productHelper->overridePatToUCAndTwoWayCohForDcFlushMitigation(allocationType));
         }
     }
 }
@@ -351,7 +355,7 @@ HWTEST_F(ProductHelperTest, whenCallingGetDeviceMemoryNameThenDdrIsReturned) {
     EXPECT_TRUE(hasSubstr(deviceMemoryName, std::string("DDR")));
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, ProductHelperTest, givenProductHelperWhenAdditionalKernelExecInfoSupportCheckedThenCorrectValueIsReturned) {
+HWCMDTEST_F(IGFX_GEN12LP_CORE, ProductHelperTest, givenProductHelperWhenAdditionalKernelExecInfoSupportCheckedThenCorrectValueIsReturned) {
 
     EXPECT_FALSE(productHelper->isDisableOverdispatchAvailable(pInHwInfo));
 }
@@ -390,7 +394,7 @@ HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfPipeControlPriorToNonP
     EXPECT_FALSE(isBasicWARequired);
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfHeapInLocalMemThenFalseIsReturned, IsAtMostGen12lp) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfHeapInLocalMemThenFalseIsReturned, IsGen12LP) {
 
     EXPECT_FALSE(productHelper->heapInLocalMem(pInHwInfo));
 }
@@ -403,13 +407,6 @@ HWTEST2_F(ProductHelperTest, givenProductHelperWhenIsSkippingStatefulInformation
 
     kernelDescriptor.kernelMetadata.isGeneratedByIgc = false;
     EXPECT_FALSE(productHelper->isSkippingStatefulInformationRequired(kernelDescriptor));
-}
-
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenSettingCapabilityCoherencyFlagThenFlagIsSet, IsAtMostGen11) {
-
-    bool coherency = false;
-    productHelper->setCapabilityCoherencyFlag(pInHwInfo, coherency);
-    EXPECT_TRUE(coherency);
 }
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfAdditionalMediaSamplerProgrammingIsRequiredThenFalseIsReturned) {
@@ -593,16 +590,6 @@ HWTEST_F(ProductHelperTest, givenNotLockableAllocationWhenGettingIsBlitCopyRequi
     EXPECT_FALSE(productHelper->isBlitCopyRequiredForLocalMemory(rootDeviceEnvironment, graphicsAllocation));
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenGettingIsBlitCopyRequiredForLocalMemoryThenFalseIsReturned, IsAtMostGen11) {
-    auto &rootDeviceEnvironment = *executionEnvironment->rootDeviceEnvironments[0];
-
-    MockGraphicsAllocation graphicsAllocation;
-    graphicsAllocation.overrideMemoryPool(MemoryPool::localMemory);
-    graphicsAllocation.setAllocationType(AllocationType::bufferHostMemory);
-
-    EXPECT_FALSE(productHelper->isBlitCopyRequiredForLocalMemory(rootDeviceEnvironment, graphicsAllocation));
-}
-
 HWTEST_F(ProductHelperTest, givenSamplerStateWhenAdjustSamplerStateThenNothingIsChanged) {
     using SAMPLER_STATE = typename FamilyType::SAMPLER_STATE;
 
@@ -613,11 +600,15 @@ HWTEST_F(ProductHelperTest, givenSamplerStateWhenAdjustSamplerStateThenNothingIs
     EXPECT_EQ(0, memcmp(&initialState, &state, sizeof(SAMPLER_STATE)));
 }
 
-HWTEST_F(ProductHelperTest, whenGettingNumberOfCacheRegionsThenReturnZero) {
+HWTEST2_F(ProductHelperTest, whenGettingNumberOfCacheRegionsThenReturnZero, IsClosUnsupported) {
     EXPECT_EQ(0u, productHelper->getNumCacheRegions());
 }
 
-HWTEST2_F(ProductHelperTest, WhenFillingScmPropertiesSupportThenExpectUseCorrectGetters, IsAtLeastGen12lp) {
+HWTEST2_F(ProductHelperTest, whenGettingNumberOfCacheRegionsThenReturnNonZero, IsClosSupported) {
+    EXPECT_NE(0u, productHelper->getNumCacheRegions());
+}
+
+HWTEST2_F(ProductHelperTest, WhenFillingScmPropertiesSupportThenExpectUseCorrectGetters, MatchAny) {
     StateComputeModePropertiesSupport scmPropertiesSupport = {};
 
     productHelper->fillScmPropertiesSupportStructure(scmPropertiesSupport);
@@ -876,39 +867,83 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenCheckDummyBlitWaRequiredThenRe
 
 HWTEST_F(ProductHelperTest, givenProductHelperAndKernelBinaryFormatsWhenCheckingIsDetectIndirectAccessInKernelSupportedThenCorrectValueIsReturned) {
     KernelDescriptor kernelDescriptor;
-    const uint32_t notAcceptedIndirectDetectionVersion = 2u;
-    const uint32_t acceptedIndirectDetectionVersion = 3u;
+    const auto igcDetectIndirectVersion = INDIRECT_ACCESS_DETECTION_VERSION;
     {
-        kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::patchtokens;
-        kernelDescriptor.kernelAttributes.simdSize = 8u;
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, notAcceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, notAcceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, acceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, acceptedIndirectDetectionVersion));
+        const auto minimalRequiredDetectIndirectVersion = productHelper->getRequiredDetectIndirectVersion();
+        EXPECT_GT(minimalRequiredDetectIndirectVersion, 0u);
+        const bool detectionEnabled = IndirectDetectionVersions::disabled != minimalRequiredDetectIndirectVersion;
+        if (detectionEnabled) {
+            const uint32_t notAcceptedIndirectDetectionVersion = minimalRequiredDetectIndirectVersion - 1;
+            const bool enabledForJit = igcDetectIndirectVersion >= minimalRequiredDetectIndirectVersion;
+            {
+                kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::patchtokens;
+                kernelDescriptor.kernelAttributes.simdSize = 8u;
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, notAcceptedIndirectDetectionVersion));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, notAcceptedIndirectDetectionVersion));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, minimalRequiredDetectIndirectVersion));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, minimalRequiredDetectIndirectVersion));
+            }
+            {
+                kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::zebin;
+                kernelDescriptor.kernelAttributes.simdSize = 8u;
+                EXPECT_EQ(enabledForJit, productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, notAcceptedIndirectDetectionVersion));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, notAcceptedIndirectDetectionVersion));
+                EXPECT_EQ(enabledForJit, productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, minimalRequiredDetectIndirectVersion));
+                EXPECT_TRUE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, minimalRequiredDetectIndirectVersion));
+            }
+        } else { // detection disabled
+            {
+                kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::patchtokens;
+                kernelDescriptor.kernelAttributes.simdSize = 8u;
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, minimalRequiredDetectIndirectVersion));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, minimalRequiredDetectIndirectVersion));
+            }
+            {
+                kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::zebin;
+                kernelDescriptor.kernelAttributes.simdSize = 8u;
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, minimalRequiredDetectIndirectVersion));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, minimalRequiredDetectIndirectVersion));
+            }
+        }
     }
+
     {
-        kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::patchtokens;
-        kernelDescriptor.kernelAttributes.simdSize = 1u;
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, notAcceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, notAcceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, acceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, acceptedIndirectDetectionVersion));
-    }
-    {
-        kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::zebin;
-        kernelDescriptor.kernelAttributes.simdSize = 1u;
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, notAcceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, notAcceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, acceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, acceptedIndirectDetectionVersion));
-    }
-    {
-        kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::zebin;
-        kernelDescriptor.kernelAttributes.simdSize = 8u;
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, notAcceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, notAcceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, acceptedIndirectDetectionVersion));
-        EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, acceptedIndirectDetectionVersion));
+        const auto minimalRequiredDetectIndirectVersionVC = productHelper->getRequiredDetectIndirectVersionVC();
+        EXPECT_GT(minimalRequiredDetectIndirectVersionVC, 0u);
+        const bool detectionEnabledVC = IndirectDetectionVersions::disabled != minimalRequiredDetectIndirectVersionVC;
+        if (detectionEnabledVC) {
+            const uint32_t notAcceptedIndirectDetectionVersionVC = minimalRequiredDetectIndirectVersionVC - 1;
+            const bool enabledForJitVC = igcDetectIndirectVersion >= minimalRequiredDetectIndirectVersionVC;
+            {
+                kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::patchtokens;
+                kernelDescriptor.kernelAttributes.simdSize = 1u;
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, notAcceptedIndirectDetectionVersionVC));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, notAcceptedIndirectDetectionVersionVC));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, minimalRequiredDetectIndirectVersionVC));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, minimalRequiredDetectIndirectVersionVC));
+            }
+            {
+                kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::zebin;
+                kernelDescriptor.kernelAttributes.simdSize = 1u;
+                EXPECT_EQ(enabledForJitVC, productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, notAcceptedIndirectDetectionVersionVC));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, notAcceptedIndirectDetectionVersionVC));
+                EXPECT_EQ(enabledForJitVC, productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, minimalRequiredDetectIndirectVersionVC));
+                EXPECT_TRUE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, minimalRequiredDetectIndirectVersionVC));
+            }
+        } else { // detection disabled for VC
+            {
+                kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::patchtokens;
+                kernelDescriptor.kernelAttributes.simdSize = 1u;
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, minimalRequiredDetectIndirectVersionVC));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, minimalRequiredDetectIndirectVersionVC));
+            }
+            {
+                kernelDescriptor.kernelAttributes.binaryFormat = DeviceBinaryFormat::zebin;
+                kernelDescriptor.kernelAttributes.simdSize = 1u;
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, false, minimalRequiredDetectIndirectVersionVC));
+                EXPECT_FALSE(productHelper->isDetectIndirectAccessInKernelSupported(kernelDescriptor, true, minimalRequiredDetectIndirectVersionVC));
+            }
+        }
     }
 }
 

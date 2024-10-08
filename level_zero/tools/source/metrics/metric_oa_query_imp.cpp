@@ -190,7 +190,7 @@ bool MetricsLibrary::load() {
     }
 
     if (contextCreateFunction == nullptr || contextDeleteFunction == nullptr) {
-        PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "cannot load %s exported functions\n", MetricsLibrary::getFilename());
+        METRICS_LOG_ERR("cannot load %s exported functions", MetricsLibrary::getFilename());
         return false;
     }
 
@@ -819,7 +819,7 @@ ze_result_t OaMetricQueryImp::writeMetricQuery(CommandList &commandList, ze_even
     commandList.getCmdContainer().addToResidencyContainer(pool.pAllocation);
 
     // Wait for events before executing query.
-    commandList.appendWaitOnEvents(numWaitEvents, phWaitEvents, nullptr, false, true, false, false, false);
+    commandList.appendWaitOnEvents(numWaitEvents, phWaitEvents, nullptr, false, true, false, false, false, false);
 
     if (metricQueriesSize) {
 

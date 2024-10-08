@@ -29,6 +29,13 @@ RootDevice::RootDevice(ExecutionEnvironment *executionEnvironment, uint32_t root
 
 RootDevice::~RootDevice() {
     if (getDebugSurface()) {
+
+        for (auto *subDevice : this->getSubDevices()) {
+            if (subDevice) {
+                subDevice->setDebugSurface(nullptr);
+            }
+        }
+
         getMemoryManager()->freeGraphicsMemory(debugSurface);
         debugSurface = nullptr;
     }
@@ -43,7 +50,7 @@ Device *RootDevice::getRootDevice() const {
 
 void RootDevice::createBindlessHeapsHelper() {
 
-    if (ApiSpecificConfig::getGlobalBindlessHeapConfiguration(this->getReleaseHelper()) && ApiSpecificConfig::getBindlessMode(this->getReleaseHelper())) {
+    if (ApiSpecificConfig::getGlobalBindlessHeapConfiguration(this->getReleaseHelper()) && ApiSpecificConfig::getBindlessMode(*this)) {
         this->executionEnvironment->rootDeviceEnvironments[getRootDeviceIndex()]->createBindlessHeapsHelper(this, getNumGenericSubDevices() > 1);
     }
 }

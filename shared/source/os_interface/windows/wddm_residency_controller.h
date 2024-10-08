@@ -45,7 +45,7 @@ class WddmResidencyController {
     void registerCallback();
 
     void trimResidency(const D3DDDI_TRIMRESIDENCYSET_FLAGS &flags, uint64_t bytes);
-    bool trimResidencyToBudget(uint64_t bytes, std::unique_lock<std::mutex> &lock);
+    bool trimResidencyToBudget(uint64_t bytes);
 
     bool isMemoryBudgetExhausted() const { return memoryBudgetExhausted; }
     void setMemoryBudgetExhausted() { memoryBudgetExhausted = true; }
@@ -56,10 +56,12 @@ class WddmResidencyController {
 
     void setCommandStreamReceiver(CommandStreamReceiver *csr);
 
-  protected:
-    MonitoredFence monitoredFence = {};
+    void removeAllocation(ResidencyContainer &container, GraphicsAllocation *gfxAllocation);
 
-    std::vector<D3DKMT_HANDLE> handlesToEvict;
+  protected:
+    size_t fillHandlesContainer(const ResidencyContainer &allocationsForResidency, bool &requiresBlockingResidencyHandling);
+
+    MonitoredFence monitoredFence = {};
 
     SpinLock lock;
     SpinLock trimCallbackLock;
@@ -73,6 +75,9 @@ class WddmResidencyController {
 
     bool memoryBudgetExhausted = false;
 
-    CommandStreamReceiver *csr;
+    CommandStreamReceiver *csr = nullptr;
+
+    ResidencyContainer filteredResidencyContainer;  // Stores allocations which are not yet resident
+    std::vector<D3DKMT_HANDLE> handlesForResidency; // Stores D3DKMT handles of allocations which are not yet resident
 };
 } // namespace NEO

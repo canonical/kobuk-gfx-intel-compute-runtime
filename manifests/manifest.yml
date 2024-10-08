@@ -3,21 +3,21 @@ components:
     branch: master
     dest_dir: aub_stream
     repository: https://github.com/intel/aubstream
-    revision: 158bd042aa2c59cf264c5a8b71fe7ef66ea3de8f
+    revision: 3985030d02d96af3d80579f4772e503522d4e313
     type: git
   gmmlib:
     asset_name: gmmlib
     dest_dir: gmmlib
     type: git
     branch: master
-    revision: intel-gmmlib-22.5.0
+    revision: intel-gmmlib-22.5.2
     repository: https://github.com/intel/gmmlib.git
   igc:
     asset_name: igc
     dest_dir: igc
     type: git
-    branch: releases/igc-1.0.17537
-    revision: igc-1.0.17537.24
+    branch: releases/igc-1.0.17791
+    revision: igc-1.0.17791.9
     repository: https://github.com/intel/intelgraphicscompiler
   igsc:
     asset_name: igsc
@@ -26,12 +26,12 @@ components:
     branch: master
     revision: V0.9.3
     repository: https://github.com/intel/igsc.git
-    component_version: 266
+    component_version: 279
   infra:
-    branch: neo/releases/24.35
+    branch: neo/releases/24.39
     dest_dir: infra
     fetch_tags: true
-    revision: v6213.2347.1
+    revision: v6340.2464.0
     type: git
   internal:
     branch: master
@@ -42,7 +42,7 @@ components:
     dest_dir: kernels_bin
     type: git
     branch: kernels_bin
-    revision: 3000-2480
+    revision: 3081-2489
   kmdaf:
     branch: kmdaf
     dest_dir: kmdaf
@@ -85,11 +85,11 @@ components:
     dest_dir: wdk
     type: git
     branch: wdk
-    revision: c3d298f0de956bbd2130a7694c87b0b31d54372f-2997
+    revision: 65d6d372547c08a274badc252c7bf4748ff85fb1-3043
   wsl:
     branch: wsl
     dest_dir: wsl
     revision: 56430997dac34ca0e9e18c177636234cac26ad54
     type: git
-converter: M-3000
+converter: M-3081
 version: '1'

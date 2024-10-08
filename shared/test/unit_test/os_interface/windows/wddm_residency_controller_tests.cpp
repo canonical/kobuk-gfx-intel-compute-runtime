@@ -21,6 +21,7 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/libult/create_command_stream.h"
+#include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_io_functions.h"
@@ -417,11 +418,12 @@ TEST_F(WddmResidencyControllerWithGdiTest, givenRestartPeriodicTrimWhenTrimCallb
     EXPECT_EQ(20u, residencyController->lastTrimFenceValue);
 }
 
-TEST_F(WddmResidencyControllerWithGdiTest, GivenZeroWhenTrimmingToBudgetThenTrueIsReturned) {
-    std::mutex mtx;
-    std::unique_lock<std::mutex> lock(mtx);
-    bool status = residencyController->trimResidencyToBudget(0, lock);
+HWTEST_F(WddmResidencyControllerWithGdiTest, GivenZeroWhenTrimmingToBudgetThenTrueIsReturnedAndDrainPagingFenceQueueCalled) {
+    auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(csr.get());
+    EXPECT_EQ(0u, ultCsr->drainPagingFenceQueueCalled);
+    bool status = residencyController->trimResidencyToBudget(0);
     EXPECT_TRUE(status);
+    EXPECT_EQ(1u, ultCsr->drainPagingFenceQueueCalled);
 }
 
 TEST_F(WddmResidencyControllerWithGdiTest, WhenTrimmingToBudgetThenAllDoneAllocationsAreTrimmed) {
@@ -451,9 +453,7 @@ TEST_F(WddmResidencyControllerWithGdiTest, WhenTrimmingToBudgetThenAllDoneAlloca
     csr->getEvictionAllocations().push_back(&allocation2);
     csr->getEvictionAllocations().push_back(&allocation3);
 
-    std::mutex mtx;
-    std::unique_lock<std::mutex> lock(mtx);
-    residencyController->trimResidencyToBudget(3 * 4096, lock);
+    residencyController->trimResidencyToBudget(3 * 4096);
 
     EXPECT_EQ(1u, wddm->evictResult.called);
     EXPECT_EQ(0u, gdi->getEvictArg().Flags.EvictOnlyIfNecessary);
@@ -478,9 +478,7 @@ TEST_F(WddmResidencyControllerWithGdiTest, GivenNumBytesToTrimIsNotZeroWhenTrimm
 
     csr->getEvictionAllocations().push_back(&allocation1);
 
-    std::mutex mtx;
-    std::unique_lock<std::mutex> lock(mtx);
-    bool status = residencyController->trimResidencyToBudget(3 * 4096, lock);
+    bool status = residencyController->trimResidencyToBudget(3 * 4096);
 
     EXPECT_EQ(1u, wddm->evictResult.called);
     EXPECT_TRUE(csr->getEvictionAllocations().empty());
@@ -515,9 +513,7 @@ TEST_F(WddmResidencyControllerWithGdiTest, GivenNumBytesToTrimIsZeroWhenTrimming
     csr->getEvictionAllocations().push_back(&allocation2);
     csr->getEvictionAllocations().push_back(&allocation3);
 
-    std::mutex mtx;
-    std::unique_lock<std::mutex> lock(mtx);
-    bool status = residencyController->trimResidencyToBudget(3 * 4096, lock);
+    bool status = residencyController->trimResidencyToBudget(3 * 4096);
 
     EXPECT_TRUE(status);
     EXPECT_EQ(1u, wddm->evictResult.called);
@@ -552,9 +548,7 @@ TEST_F(WddmResidencyControllerWithGdiTest, WhenTrimmingToBudgetThenEvictedAlloca
     csr->getEvictionAllocations().push_back(&allocation2);
     csr->getEvictionAllocations().push_back(&allocation3);
 
-    std::mutex mtx;
-    std::unique_lock<std::mutex> lock(mtx);
-    residencyController->trimResidencyToBudget(3 * 4096, lock);
+    residencyController->trimResidencyToBudget(3 * 4096);
 
     EXPECT_FALSE(allocation1.getResidencyData().resident[osContextId]);
     EXPECT_FALSE(allocation2.getResidencyData().resident[osContextId]);
@@ -578,9 +572,7 @@ TEST_F(WddmResidencyControllerWithGdiTest, givenAlwaysResidentAllocationWhenTrim
     csr->getEvictionAllocations().push_back(&allocation);
     allocation.updateResidencyTaskCount(GraphicsAllocation::objectAlwaysResident, osContextId);
 
-    std::mutex mtx;
-    std::unique_lock<std::mutex> lock(mtx);
-    residencyController->trimResidencyToBudget(3 * 4096, lock);
+    residencyController->trimResidencyToBudget(3 * 4096);
 
     EXPECT_TRUE(allocation.getResidencyData().resident[osContextId]);
 }
@@ -628,9 +620,7 @@ TEST_F(WddmResidencyControllerWithGdiTest, GivenLastFenceIsGreaterThanMonitoredW
     csr->getEvictionAllocations().push_back(&allocation1);
 
     gdi->getWaitFromCpuArg().hDevice = 0;
-    std::mutex mtx;
-    std::unique_lock<std::mutex> lock(mtx);
-    residencyController->trimResidencyToBudget(3 * 4096, lock);
+    residencyController->trimResidencyToBudget(3 * 4096);
 
     EXPECT_EQ(1u, wddm->evictResult.called);
     EXPECT_FALSE(allocation1.getResidencyData().resident[osContextId]);
@@ -682,9 +672,7 @@ TEST_F(WddmResidencyControllerWithGdiAndMemoryManagerTest, WhenTrimmingToBudgetT
     wddm->evictResult.called = 0;
     wddm->callBaseEvict = true;
 
-    std::mutex mtx;
-    std::unique_lock<std::mutex> lock(mtx);
-    residencyController->trimResidencyToBudget(3 * 4096, lock);
+    residencyController->trimResidencyToBudget(3 * 4096);
 
     EXPECT_EQ(1u, wddm->evictResult.called);
     EXPECT_EQ(0u, gdi->getEvictArg().Flags.EvictOnlyIfNecessary);
@@ -732,9 +720,7 @@ TEST_F(WddmResidencyControllerWithGdiTest, givenThreeAllocationsAlignedSizeBigge
     csr->getEvictionAllocations().push_back(&allocation2);
     csr->getEvictionAllocations().push_back(&allocation3);
 
-    std::mutex mtx;
-    std::unique_lock<std::mutex> lock(mtx);
-    bool status = residencyController->trimResidencyToBudget(budget, lock);
+    bool status = residencyController->trimResidencyToBudget(budget);
     EXPECT_TRUE(status);
 
     EXPECT_FALSE(allocation1.getResidencyData().resident[osContextId]);
@@ -894,6 +880,8 @@ TEST_F(WddmResidencyControllerWithMockWddmTest, givenMakeResidentFailsWhenCallin
 
 TEST_F(WddmResidencyControllerWithMockWddmTest, givenMakeResidentFailsWhenCallingMakeResidentResidencyAllocationsThenCallItAgainWithCantTrimFurtherSetToTrue) {
     MockWddmAllocation allocation1(gmmHelper);
+    allocation1.getResidencyData().updateCompletionData(0, osContextId);
+    residencyController->getMonitoredFence().currentFenceValue = 10;
 
     wddm->makeResidentNumberOfBytesToTrim = 4 * 4096;
     wddm->makeResidentStatus = false;
@@ -905,6 +893,7 @@ TEST_F(WddmResidencyControllerWithMockWddmTest, givenMakeResidentFailsWhenCallin
     EXPECT_FALSE(result);
     EXPECT_NE(wddm->makeResidentParamsPassed[0].cantTrimFurther, wddm->makeResidentParamsPassed[1].cantTrimFurther);
     EXPECT_EQ(2u, wddm->makeResidentResult.called);
+    EXPECT_EQ(0u, allocation1.getResidencyData().getFenceValueForContextId(osContextId));
 }
 
 TEST_F(WddmResidencyControllerWithMockWddmTest, givenAllocationPackPassedWhenCallingMakeResidentResidencyAllocationsThenItIsUsed) {
@@ -930,8 +919,10 @@ TEST_F(WddmResidencyControllerWithMockWddmTest, givenMakeResidentFailsAndTrimToB
     auto canonizedAddress = gmmHelper->canonize(castToUint64(const_cast<void *>(cpuPtr)));
     WddmAllocation allocationToTrim(0, 1u /*num gmms*/, AllocationType::unknown, cpuPtr, canonizedAddress, allocationSize, nullptr, MemoryPool::memoryNull, 0u, 1u);
 
-    allocationToTrim.getResidencyData().updateCompletionData(residencyController->getMonitoredFence().lastSubmittedFence, osContext->getContextId());
+    allocationToTrim.getResidencyData().updateCompletionData(residencyController->getMonitoredFence().lastSubmittedFence, osContextId);
+    allocationToTrim.getResidencyData().resident[osContextId] = true;
 
+    csr->getEvictionAllocations().push_back(&allocationToTrim);
     wddm->makeResidentNumberOfBytesToTrim = allocationSize;
     wddm->makeResidentResults = {false, true};
 
@@ -942,7 +933,36 @@ TEST_F(WddmResidencyControllerWithMockWddmTest, givenMakeResidentFailsAndTrimToB
     EXPECT_TRUE(result);
 
     EXPECT_TRUE(allocation1.getResidencyData().resident[osContextId]);
+    EXPECT_FALSE(allocationToTrim.getResidencyData().resident[osContextId]);
     EXPECT_EQ(2u, wddm->makeResidentResult.called);
+    EXPECT_EQ(0u, csr->getEvictionAllocations().size());
+}
+
+TEST_F(WddmResidencyControllerWithMockWddmTest, givenMakeResidentFailsAndTrimToBudgetSuceedsWhenCallingMakeResidentWithTrimmedAllocationThenSucceed) {
+    MockWddmAllocation allocation1(gmmHelper);
+    void *cpuPtr = reinterpret_cast<void *>(wddm->getWddmMinAddress() + 0x1000);
+    size_t allocationSize = 0x1000;
+    auto canonizedAddress = gmmHelper->canonize(castToUint64(const_cast<void *>(cpuPtr)));
+    WddmAllocation allocationAlreadyResident(0, 1u /*num gmms*/, AllocationType::unknown, cpuPtr, canonizedAddress, allocationSize, nullptr, MemoryPool::memoryNull, 0u, 1u);
+
+    allocationAlreadyResident.getResidencyData().updateCompletionData(residencyController->getMonitoredFence().lastSubmittedFence, osContextId);
+    allocationAlreadyResident.getResidencyData().resident[osContextId] = true;
+
+    csr->getEvictionAllocations().push_back(&allocationAlreadyResident);
+    wddm->makeResidentNumberOfBytesToTrim = allocationSize;
+    wddm->makeResidentResults = {false, true};
+
+    ResidencyContainer residencyPack{&allocation1, &allocationAlreadyResident};
+    bool requiresBlockingResidencyHandling = true;
+    bool result = residencyController->makeResidentResidencyAllocations(residencyPack, requiresBlockingResidencyHandling);
+
+    EXPECT_TRUE(result);
+
+    EXPECT_TRUE(allocation1.getResidencyData().resident[osContextId]);
+    EXPECT_TRUE(allocationAlreadyResident.getResidencyData().resident[osContextId]);
+    EXPECT_EQ(2u, wddm->makeResidentResult.called);
+    EXPECT_EQ(0u, csr->getEvictionAllocations().size());
+    EXPECT_EQ(2u, residencyPack.size());
 }
 
 TEST_F(WddmResidencyControllerWithMockWddmTest, givenMakeResidentFailsWhenCallingMakeResidentResidencyAllocationsThenMemoryBudgetExhaustedIsSetToTrue) {
@@ -1086,10 +1106,8 @@ TEST_F(WddmResidencyControllerWithGdiTest, GivenResidencyLoggingEnabledWhenTrimm
     csr->getEvictionAllocations().push_back(&allocation2);
     csr->getEvictionAllocations().push_back(&allocation3);
 
-    std::mutex mtx;
-    std::unique_lock<std::mutex> lock(mtx);
     constexpr uint64_t trimBudgetSize = 3 * 4096;
-    residencyController->trimResidencyToBudget(trimBudgetSize, lock);
+    residencyController->trimResidencyToBudget(trimBudgetSize);
 
     EXPECT_EQ(trimBudgetSize, logger->numBytesToTrimSave);
     EXPECT_EQ(residencyController, logger->controllerObjectSave);

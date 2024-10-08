@@ -12,6 +12,7 @@
 #include "shared/source/command_stream/scratch_space_controller_base.h"
 #include "shared/source/command_stream/tag_allocation_layout.h"
 #include "shared/source/command_stream/wait_status.h"
+#include "shared/source/debugger/debugger_l0.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/gmm_helper/page_table_mngr.h"
 #include "shared/source/helpers/api_specific_config.h"
@@ -43,6 +44,7 @@
 #include "shared/test/common/mocks/mock_bindless_heaps_helper.h"
 #include "shared/test/common/mocks/mock_csr.h"
 #include "shared/test/common/mocks/mock_device.h"
+#include "shared/test/common/mocks/mock_direct_submission_hw.h"
 #include "shared/test/common/mocks/mock_driver_model.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_internal_allocation_storage.h"
@@ -3388,11 +3390,7 @@ HWTEST_F(CommandStreamReceiverTest, givenL1CachePolicyInitializedInCsrWhenGettin
 
 HWTEST_F(CommandStreamReceiverHwTest, givenCreateGlobalStatelessHeapAllocationWhenGettingIndirectHeapObjectThenHeapAndAllocationAreInitialized) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
-    if (commandStreamReceiver.heaplessStateInitialized) {
-        EXPECT_NE(nullptr, commandStreamReceiver.getGlobalStatelessHeap());
-    } else {
-        EXPECT_EQ(nullptr, commandStreamReceiver.getGlobalStatelessHeap());
-    }
+    EXPECT_EQ(nullptr, commandStreamReceiver.getGlobalStatelessHeap());
 
     commandStreamReceiver.createGlobalStatelessHeap();
     auto heap = commandStreamReceiver.getGlobalStatelessHeap();
@@ -3600,7 +3598,7 @@ HWTEST2_F(CommandStreamReceiverHwTest,
 
 HWTEST2_F(CommandStreamReceiverHwTest,
           givenPlatformNotSupportingRayTracingWhenDispatchingCommandThenNothingDispatched,
-          IsAtMostGen12lp) {
+          IsGen12LP) {
     pDevice->initializeRayTracing(8);
 
     constexpr size_t size = 64;
@@ -4751,6 +4749,7 @@ HWTEST2_F(CommandStreamReceiverHwTest,
     using STATE_SIP = typename FamilyType::STATE_SIP;
 
     pDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->initDebuggerL0(pDevice);
+    pDevice->getL0Debugger()->initialize();
 
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     if (commandStreamReceiver.heaplessStateInitialized) {
@@ -4809,6 +4808,7 @@ HWTEST2_F(CommandStreamReceiverHwTest,
     using STATE_SIP = typename FamilyType::STATE_SIP;
 
     pDevice->getExecutionEnvironment()->rootDeviceEnvironments[0]->initDebuggerL0(pDevice);
+    pDevice->getL0Debugger()->initialize();
     pDevice->getExecutionEnvironment()->setDebuggingMode(DebuggingMode::offline);
     auto &compilerProductHelper = pDevice->getCompilerProductHelper();
 
@@ -5699,6 +5699,60 @@ HWTEST_F(CommandStreamReceiverContextGroupTest, givenSecondaryCsrWhenGettingInte
     }
 }
 
+HWTEST_F(CommandStreamReceiverContextGroupTest, givenSecondaryRootCsrWhenGettingInternalAllocationsThenAllocationFromPrimnaryCsrAreReturned) {
+    HardwareInfo hwInfo = *defaultHwInfo;
+    if (hwInfo.capabilityTable.defaultEngineType != aub_stream::EngineType::ENGINE_CCS) {
+        GTEST_SKIP();
+    }
+
+    DebugManagerStateRestore dbgRestorer;
+    debugManager.flags.ContextGroupSize.set(5);
+
+    hwInfo.featureTable.flags.ftrCCSNode = true;
+    hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
+    hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 1;
+    hwInfo.capabilityTable.defaultPreemptionMode = PreemptionMode::MidThread;
+
+    UltDeviceFactory deviceFactory{1, 2};
+    auto device = deviceFactory.rootDevices[0];
+    const auto &gfxCoreHelper = device->getRootDeviceEnvironment().getHelper<GfxCoreHelper>();
+
+    const auto ccsIndex = 0;
+    auto &secondaryEngines = device->secondaryEngines[EngineHelpers::mapCcsIndexToEngineType(ccsIndex)];
+    auto secondaryEnginesCount = secondaryEngines.engines.size();
+    ASSERT_EQ(5u, secondaryEnginesCount);
+
+    EXPECT_TRUE(secondaryEngines.engines[0].commandStreamReceiver->isInitialized());
+
+    auto primaryCsr = secondaryEngines.engines[0].commandStreamReceiver;
+    primaryCsr->createGlobalStatelessHeap();
+
+    for (uint32_t secondaryIndex = 1; secondaryIndex < secondaryEnginesCount; secondaryIndex++) {
+        device->getSecondaryEngineCsr({EngineHelpers::mapCcsIndexToEngineType(ccsIndex), EngineUsage::regular}, false);
+    }
+
+    for (uint32_t i = 0; i < secondaryEngines.highPriorityEnginesTotal; i++) {
+        device->getSecondaryEngineCsr({EngineHelpers::mapCcsIndexToEngineType(ccsIndex), EngineUsage::highPriority}, false);
+    }
+
+    for (uint32_t secondaryIndex = 0; secondaryIndex < secondaryEnginesCount; secondaryIndex++) {
+
+        if (secondaryIndex > 0) {
+            EXPECT_NE(primaryCsr->getTagAllocation(), secondaryEngines.engines[secondaryIndex].commandStreamReceiver->getTagAllocation());
+        }
+
+        if (gfxCoreHelper.isFenceAllocationRequired(hwInfo)) {
+            EXPECT_EQ(primaryCsr->getGlobalFenceAllocation(), secondaryEngines.engines[secondaryIndex].commandStreamReceiver->getGlobalFenceAllocation());
+        }
+
+        EXPECT_EQ(primaryCsr->getPreemptionAllocation(), secondaryEngines.engines[secondaryIndex].commandStreamReceiver->getPreemptionAllocation());
+        EXPECT_EQ(primaryCsr->getGlobalStatelessHeapAllocation(), secondaryEngines.engines[secondaryIndex].commandStreamReceiver->getGlobalStatelessHeapAllocation());
+        EXPECT_EQ(primaryCsr->getGlobalStatelessHeap(), secondaryEngines.engines[secondaryIndex].commandStreamReceiver->getGlobalStatelessHeap());
+        EXPECT_EQ(primaryCsr->getPrimaryScratchSpaceController(), secondaryEngines.engines[secondaryIndex].commandStreamReceiver->getPrimaryScratchSpaceController());
+        EXPECT_EQ(primaryCsr->getWorkPartitionAllocation(), secondaryEngines.engines[secondaryIndex].commandStreamReceiver->getWorkPartitionAllocation());
+    }
+}
+
 HWTEST_F(CommandStreamReceiverContextGroupTest, givenContextGroupWhenCreatingEnginesThenSetCorrectMaxOsContextCount) {
 
     HardwareInfo hwInfo = *defaultHwInfo;
@@ -5859,5 +5913,38 @@ HWTEST_F(CommandStreamReceiverTest, givenCommandStreamReceiverWhenEnqueueWaitFor
     std::unique_lock<std::mutex> lock(mtx);
     csr.directSubmissionAvailable = false;
     controller->handlePagingFenceRequests(lock, false);
+    EXPECT_EQ(10u, csr.pagingFenceValueToUnblock);
+}
+
+HWTEST_F(CommandStreamReceiverTest, givenCommandStreamReceiverWhenDrainPagingFenceQueueThenQueueDrained) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableDirectSubmissionController.set(1);
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto directSubmission = new MockDirectSubmissionHw<FamilyType, RenderDispatcher<FamilyType>>(csr);
+    csr.directSubmission.reset(directSubmission);
+
+    auto executionEnvironment = pDevice->getExecutionEnvironment();
+    auto pagingFenceValue = 10u;
+    EXPECT_FALSE(csr.enqueueWaitForPagingFence(pagingFenceValue));
+
+    VariableBackup<decltype(NEO::Thread::createFunc)> funcBackup{&NEO::Thread::createFunc, [](void *(*func)(void *), void *arg) -> std::unique_ptr<Thread> { return nullptr; }};
+
+    csr.drainPagingFenceQueue();
+    EXPECT_EQ(0u, csr.pagingFenceValueToUnblock);
+
+    auto controller = static_cast<DirectSubmissionControllerMock *>(executionEnvironment->initializeDirectSubmissionController());
+    controller->stopThread();
+    csr.directSubmissionAvailable = true;
+    EXPECT_TRUE(csr.enqueueWaitForPagingFence(pagingFenceValue));
+    EXPECT_EQ(0u, csr.pagingFenceValueToUnblock);
+
+    std::mutex mtx;
+    std::unique_lock<std::mutex> lock(mtx);
+    csr.directSubmissionAvailable = false;
+    csr.drainPagingFenceQueue();
+    EXPECT_EQ(0u, csr.pagingFenceValueToUnblock);
+
+    csr.directSubmissionAvailable = true;
+    csr.drainPagingFenceQueue();
     EXPECT_EQ(10u, csr.pagingFenceValueToUnblock);
 }

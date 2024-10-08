@@ -41,6 +41,10 @@ template Event *Event::create<uint32_t>(EventPool *, const ze_event_desc_t *, De
 template Event *Event::create<uint64_t>(const EventDescriptor &, const ze_event_desc_t *, Device *);
 template Event *Event::create<uint32_t>(const EventDescriptor &, const ze_event_desc_t *, Device *);
 
+bool Event::standaloneInOrderTimestampAllocationEnabled() {
+    return (NEO::debugManager.flags.StandaloneInOrderTimestampAllocationEnabled.get() == 1);
+}
+
 ze_result_t EventPool::initialize(DriverHandle *driver, Context *context, uint32_t numDevices, ze_device_handle_t *deviceHandles) {
     this->context = static_cast<ContextImp *>(context);
 
@@ -407,11 +411,27 @@ void Event::disableImplicitCounterBasedMode() {
 }
 
 uint64_t Event::getGpuAddress(Device *device) const {
-    return getPoolAllocation(device)->getGpuAddress() + this->eventPoolOffset;
+    return getAllocation(device)->getGpuAddress() + this->eventPoolOffset;
 }
 
-NEO::GraphicsAllocation *Event::getPoolAllocation(Device *device) const {
-    return this->eventPoolAllocation ? this->eventPoolAllocation->getGraphicsAllocation(device->getNEODevice()->getRootDeviceIndex()) : nullptr;
+void *Event::getHostAddress() const {
+    if (inOrderTimestampNode) {
+        return inOrderTimestampNode->getCpuBase();
+    }
+
+    return this->hostAddressFromPool;
+}
+
+NEO::GraphicsAllocation *Event::getAllocation(Device *device) const {
+    auto rootDeviceIndex = device->getNEODevice()->getRootDeviceIndex();
+
+    if (inOrderTimestampNode) {
+        return inOrderTimestampNode->getBaseGraphicsAllocation()->getGraphicsAllocation(rootDeviceIndex);
+    } else if (eventPoolAllocation) {
+        return eventPoolAllocation->getGraphicsAllocation(rootDeviceIndex);
+    }
+
+    return nullptr;
 }
 
 void Event::setGpuStartTimestamp() {

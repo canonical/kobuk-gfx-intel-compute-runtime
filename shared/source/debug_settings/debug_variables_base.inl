@@ -71,7 +71,6 @@ DECLARE_DEBUG_VARIABLE(bool, GlobalSequencerFlushOnCopyEngine, false, "Add globa
 DECLARE_DEBUG_VARIABLE(bool, UseImmDataWriteModeOnPostSyncOperation, false, "Use IMM data write mode as post sync operation in Compute Walker")
 DECLARE_DEBUG_VARIABLE(bool, EnableResourceTags, false, "Enable resource tagging in GmmLib")
 DECLARE_DEBUG_VARIABLE(bool, DoNotFreeResources, false, "Do not free resources")
-DECLARE_DEBUG_VARIABLE(bool, AllowMixingRegularAndCooperativeKernels, false, "Allow mixing regular and cooperative kernels in a single command list and in a single execute")
 DECLARE_DEBUG_VARIABLE(bool, AllowPatchingVfeStateInCommandLists, false, "Allow programming MEDIA_VFE_STATE in a command list")
 DECLARE_DEBUG_VARIABLE(bool, PrintMemoryRegionSizes, false, "Print memory bank: type, instance, size")
 DECLARE_DEBUG_VARIABLE(bool, UpdateCrossThreadDataSize, false, "Turn on cross thread data size calculation for PATCH TOKEN binary")
@@ -292,6 +291,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, CFEStackIDControl, -1, "Set Stack ID Control in 
 DECLARE_DEBUG_VARIABLE(int32_t, StandaloneInOrderTimestampAllocationEnabled, -1, "-1: default, 0: disabled, 1: enabled. If enabled, use internal allocations, instead of Event pool for timestamps")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceComputeWalkerPostSyncFlushWithWrite, -1, "-1: ignore. >=0: Force PostSync cache flush and override postSync immediate write address to given value")
 DECLARE_DEBUG_VARIABLE(int32_t, DeferStateInitSubmissionToFirstRegularUsage, -1, "-1: ignore, 0: disabled, 1: enabled. If set, instead of initializing at Device creation, submit initial state during first usage (eg. kernel submission)")
+DECLARE_DEBUG_VARIABLE(int32_t, ForceNonWalkerSplitMemoryCopy, -1, "-1: default, 0: disabled, 1: enabled. If set, memory copy will be executed as single byte copy Walker without performance optimizations")
 
 /*LOGGING FLAGS*/
 DECLARE_DEBUG_VARIABLE(int32_t, PrintDriverDiagnostics, -1, "prints driver diagnostics messages to standard output, value corresponds to hint level")
@@ -358,6 +358,7 @@ DECLARE_DEBUG_VARIABLE(bool, DisableStatelessToStatefulOptimization, false, "Dis
 DECLARE_DEBUG_VARIABLE(bool, DisableConcurrentBlockExecution, false, "disables concurrent block kernel execution")
 DECLARE_DEBUG_VARIABLE(bool, UseNoRingFlushesKmdMode, true, "Windows only, passes flag to KMD that informs KMD to not emit any ring buffer flushes.")
 DECLARE_DEBUG_VARIABLE(bool, DisableZeroCopyForUseHostPtr, false, "When active all buffer allocations created with CL_MEM_USE_HOST_PTR flag will not share memory with CPU.")
+DECLARE_DEBUG_VARIABLE(bool, ForceNonCoherentModeForTimestamps, false, "When active timestamp buffers are allocated in non coherent memory.")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableReusingGpuTimestamps, -1, "Reuse GPU timestamp for next device time requests. -1: os-specific, 0: disable, 1: enable")
 DECLARE_DEBUG_VARIABLE(int32_t, AllowZeroCopyWithoutCoherency, -1, "Use cacheline flush instead of memory copy for map/unmap mem object")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableHostPtrTracking, -1, "Enable host ptr tracking: -1 - default platform setting, 0 - disabled, 1 - enabled")
@@ -555,6 +556,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalSetWalkerPartitionType, -1, "Experim
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalEnableCustomLocalMemoryAlignment, 0, "Align local memory allocations to a given value. Works only with allocations at least as big as the value.  0: no effect, 2097152: 2 megabytes, 1073741824: 1 gigabyte")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalEnableDeviceAllocationCache, -1, "Experimentally enable device usm allocation cache. Use X% of device memory.")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalEnableHostAllocationCache, -1, "Experimentally enable host usm allocation cache. Use X% of shared system memory.")
+DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalUSMAllocationReuseVersion, -1, "Version of mechanism to use for usm allocation reuse.")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalH2DCpuCopyThreshold, -1, "Override default threshold (in bytes) for H2D CPU copy.")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalD2HCpuCopyThreshold, -1, "Override default threshold (in bytes) for D2H CPU copy.")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalCopyThroughLock, -1, "Experimentally copy memory through locked ptr. -1: default 0: disable 1: enable ")

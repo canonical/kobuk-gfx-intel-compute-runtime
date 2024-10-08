@@ -25,7 +25,6 @@
 #include "opencl/source/accelerators/intel_motion_estimation.h"
 #include "opencl/source/api/additional_extensions.h"
 #include "opencl/source/api/api_enter.h"
-#include "opencl/source/built_ins/vme_builtin.h"
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/context/context.h"
@@ -1506,36 +1505,12 @@ cl_program CL_API_CALL clCreateProgramWithBuiltInKernels(cl_context context,
     TRACING_ENTER(ClCreateProgramWithBuiltInKernels, &context, &numDevices, &deviceList, &kernelNames, &errcodeRet);
     cl_int retVal = CL_SUCCESS;
     API_ENTER(&retVal);
+    cl_program program = nullptr;
     DBG_LOG_INPUTS("context", context,
                    "numDevices", numDevices,
                    "deviceList", deviceList,
                    "kernelNames", kernelNames);
-    cl_program program = nullptr;
-    Context *pContext = nullptr;
-
-    retVal = validateObjects(withCastToInternal(context, &pContext), numDevices,
-                             deviceList, kernelNames, errcodeRet);
-
-    if (retVal == CL_SUCCESS) {
-        ClDeviceVector deviceVector;
-        for (auto i = 0u; i < numDevices; i++) {
-            auto device = castToObject<ClDevice>(deviceList[i]);
-            if (!device || !pContext->isDeviceAssociated(*device)) {
-                retVal = CL_INVALID_DEVICE;
-                break;
-            }
-            deviceVector.push_back(device);
-        }
-        if (retVal == CL_SUCCESS) {
-
-            program = Vme::createBuiltInProgram(
-                *pContext,
-                deviceVector,
-                kernelNames,
-                retVal);
-        }
-    }
-
+    retVal = CL_INVALID_VALUE;
     if (errcodeRet) {
         *errcodeRet = retVal;
     }
@@ -6252,7 +6227,7 @@ cl_int CL_API_CALL clGetKernelMaxConcurrentWorkGroupCountINTEL(cl_command_queue 
     }
 
     withCastToInternal(commandQueue, &pCommandQueue);
-    *suggestedWorkGroupCount = pKernel->getMaxWorkGroupCount(workDim, localWorkSize, pCommandQueue);
+    *suggestedWorkGroupCount = pKernel->getMaxWorkGroupCount(workDim, localWorkSize, pCommandQueue, false);
 
     TRACING_EXIT(ClGetKernelMaxConcurrentWorkGroupCountINTEL, &retVal);
     return retVal;
@@ -6332,7 +6307,7 @@ cl_int CL_API_CALL clEnqueueNDCountKernelINTEL(cl_command_queue commandQueue,
         for (size_t i = 0; i < workDim; i++) {
             requestedNumberOfWorkgroups *= workgroupCount[i];
         }
-        size_t maximalNumberOfWorkgroupsAllowed = pKernel->getMaxWorkGroupCount(workDim, localWorkSize, pCommandQueue);
+        size_t maximalNumberOfWorkgroupsAllowed = pKernel->getMaxWorkGroupCount(workDim, localWorkSize, pCommandQueue, false);
         if (requestedNumberOfWorkgroups > maximalNumberOfWorkgroupsAllowed) {
             retVal = CL_INVALID_VALUE;
             TRACING_EXIT(ClEnqueueNDCountKernelINTEL, &retVal);

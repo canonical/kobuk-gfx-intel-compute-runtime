@@ -23,6 +23,7 @@
 #include "shared/source/helpers/ray_tracing_helper.h"
 #include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/memory_manager.h"
+#include "shared/source/memory_manager/unified_memory_pooling.h"
 #include "shared/source/os_interface/driver_info.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/os_interface/os_interface.h"
@@ -66,6 +67,9 @@ Device::~Device() {
 
     syncBufferHandler.reset();
     isaPoolAllocator.releasePools();
+    if (deviceUsmMemAllocPoolsManager) {
+        deviceUsmMemAllocPoolsManager->cleanup();
+    }
     secondaryCsrs.clear();
     executionEnvironment->memoryManager->releaseSecondaryOsContexts(this->getRootDeviceIndex());
     commandStreamReceivers.clear();
@@ -213,6 +217,12 @@ bool Device::createDeviceImpl() {
         return false;
     }
 
+    preemptionMode = PreemptionHelper::getDefaultPreemptionMode(getHardwareInfo());
+    if (!isSubDevice()) {
+        // initialize common resources once
+        initializeCommonResources();
+    }
+
     // create engines
     if (!initDeviceWithEngines()) {
         return false;
@@ -223,8 +233,9 @@ bool Device::createDeviceImpl() {
         return true;
     }
 
-    // initialize common resources once
-    initializeCommonResources();
+    if (getL0Debugger()) {
+        getL0Debugger()->initialize();
+    }
 
     // continue proper init for all devices
     return initDeviceFully();
@@ -233,11 +244,8 @@ bool Device::createDeviceImpl() {
 bool Device::initDeviceWithEngines() {
     setAsEngineInstanced();
 
-    auto &hwInfo = getHardwareInfo();
-    preemptionMode = PreemptionHelper::getDefaultPreemptionMode(hwInfo);
-
     auto &productHelper = getProductHelper();
-    if (getDebugger() && productHelper.disableL3CacheForDebug(hwInfo)) {
+    if (getDebugger() && productHelper.disableL3CacheForDebug(getHardwareInfo())) {
         getGmmHelper()->forceAllResourcesUncached();
     }
 
@@ -256,6 +264,7 @@ void Device::initializeCommonResources() {
         if (rootDeviceEnvironment->debugger == nullptr) {
             NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr,
                                   "Debug mode is not enabled in the system.\n");
+            getExecutionEnvironment()->setDebuggingMode(DebuggingMode::disabled);
         }
     }
 
@@ -268,15 +277,20 @@ void Device::initializeCommonResources() {
         debugSurfaceSize = NEO::SipKernel::getSipKernel(*this, nullptr).getStateSaveAreaSize(this);
     }
 
-    const bool allocateDebugSurface = getL0Debugger();
-    if (allocateDebugSurface) {
-        debugSurface = getMemoryManager()->allocateGraphicsMemoryWithProperties(
-            {getRootDeviceIndex(), true,
-             debugSurfaceSize,
-             NEO::AllocationType::debugContextSaveArea,
-             false,
-             false,
-             getDeviceBitfield()});
+    const bool isDebugSurfaceRequired = getL0Debugger();
+    if (isDebugSurfaceRequired) {
+        allocateDebugSurface(debugSurfaceSize);
+    }
+
+    if (ApiSpecificConfig::isDeviceUsmPoolingEnabled() &&
+        getProductHelper().isUsmPoolAllocatorSupported() &&
+        NEO::debugManager.flags.ExperimentalUSMAllocationReuseVersion.get() == 2) {
+
+        RootDeviceIndicesContainer rootDeviceIndices;
+        rootDeviceIndices.pushUnique(getRootDeviceIndex());
+        std::map<uint32_t, DeviceBitfield> deviceBitfields;
+        deviceBitfields.emplace(getRootDeviceIndex(), getDeviceBitfield());
+        deviceUsmMemAllocPoolsManager.reset(new UsmMemAllocPoolsManager(getMemoryManager(), rootDeviceIndices, deviceBitfields, this, InternalMemoryType::deviceUnifiedMemory));
     }
 }
 
@@ -364,6 +378,7 @@ bool Device::createEngines() {
     }
 
     if (gfxCoreHelper.areSecondaryContextsSupported()) {
+        auto &hwInfo = this->getHardwareInfo();
 
         auto hpCopyEngine = getHpCopyEngine();
 
@@ -385,6 +400,15 @@ bool Device::createEngines() {
 
             if (debugManager.flags.OverrideNumHighPriorityContexts.get() != -1) {
                 highPriorityContextCount = static_cast<uint32_t>(debugManager.flags.OverrideNumHighPriorityContexts.get());
+            }
+
+            if (engineGroupType == EngineGroupType::compute && hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled > 1) {
+                contextCount = contextCount / hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
+                highPriorityContextCount = highPriorityContextCount / hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
+            }
+
+            if (engineGroupType == EngineGroupType::copy || engineGroupType == EngineGroupType::linkedCopy) {
+                gfxCoreHelper.adjustCopyEngineRegularContextCount(engineGroup->engines.size(), contextCount);
             }
 
             for (uint32_t engineIndex = 0; engineIndex < static_cast<uint32_t>(engineGroup->engines.size()); engineIndex++) {
@@ -446,7 +470,23 @@ void Device::createSecondaryContexts(const EngineControl &primaryEngine, Seconda
     }
 
     primaryEngine.osContext->setContextGroup(true);
-};
+}
+
+void Device::allocateDebugSurface(size_t debugSurfaceSize) {
+    this->debugSurface = getMemoryManager()->allocateGraphicsMemoryWithProperties(
+        {getRootDeviceIndex(), true,
+         debugSurfaceSize,
+         NEO::AllocationType::debugContextSaveArea,
+         false,
+         false,
+         getDeviceBitfield()});
+
+    for (auto &subdevice : this->subdevices) {
+        if (subdevice) {
+            subdevice->debugSurface = this->debugSurface;
+        }
+    }
+}
 
 void Device::addEngineToEngineGroup(EngineControl &engine) {
     auto &hardwareInfo = this->getHardwareInfo();
@@ -548,6 +588,10 @@ bool Device::createEngine(EngineTypeUsage engineTypeUsage) {
     allEngines.push_back(engine);
     if (engineUsage == EngineUsage::regular) {
         addEngineToEngineGroup(engine);
+    }
+
+    if (NEO::EngineHelpers::isBcs(engine.osContext->getEngineType()) && engine.osContext->isHighPriority()) {
+        hpCopyEngine = &allEngines[allEngines.size() - 1];
     }
 
     commandStreamReceivers.push_back(std::move(commandStreamReceiver));
@@ -655,10 +699,6 @@ EngineControl *Device::getSecondaryEngineCsr(EngineTypeUsage engineTypeUsage, bo
             }
 
             if (!commandStreamReceiver->initializeTagAllocation()) {
-                return nullptr;
-            }
-
-            if (preemptionMode == PreemptionMode::MidThread && !commandStreamReceiver->createPreemptionAllocation()) {
                 return nullptr;
             }
         }
@@ -914,16 +954,7 @@ EngineControl *Device::getInternalCopyEngine() {
 }
 
 EngineControl *Device::getHpCopyEngine() {
-    if (!getHardwareInfo().capabilityTable.blitterOperationsSupported) {
-        return nullptr;
-    }
-    for (auto &engine : allEngines) {
-        if (NEO::EngineHelpers::isBcs(engine.osContext->getEngineType()) &&
-            engine.osContext->isHighPriority()) {
-            return &engine;
-        }
-    }
-    return nullptr;
+    return hpCopyEngine;
 }
 
 RTDispatchGlobalsInfo *Device::getRTDispatchGlobals(uint32_t maxBvhLevels) {
@@ -1110,6 +1141,10 @@ const CompilerProductHelper &Device::getCompilerProductHelper() const {
 
 ReleaseHelper *Device::getReleaseHelper() const {
     return getRootDeviceEnvironment().getReleaseHelper();
+}
+
+AILConfiguration *Device::getAilConfigurationHelper() const {
+    return getRootDeviceEnvironment().getAILConfigurationHelper();
 }
 
 void Device::stopDirectSubmissionAndWaitForCompletion() {

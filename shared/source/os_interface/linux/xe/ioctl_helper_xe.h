@@ -113,8 +113,6 @@ class IoctlHelperXe : public IoctlHelper {
     std::unique_ptr<MemoryInfo> createMemoryInfo() override;
     size_t getLocalMemoryRegionsSize(const MemoryInfo *memoryInfo, uint32_t subDevicesCount, uint32_t deviceBitfield) const override;
     void setupIpVersion() override;
-    void getTopologyData(size_t nTiles, std::vector<std::bitset<8>> *geomDss, std::vector<std::bitset<8>> *computeDss, std::vector<std::bitset<8>> *euDss, DrmQueryTopologyData &topologyData, bool &isComputeDssEmpty);
-    void getTopologyMap(size_t nTiles, std::vector<std::bitset<8>> *dssInfo, TopologyMap &topologyMap);
 
     bool setGpuCpuTimes(TimeStampData *pGpuCpuTime, OSTime *osTime) override;
     void fillBindInfoForIpcHandle(uint32_t handle, size_t size) override;
@@ -133,6 +131,7 @@ class IoctlHelperXe : public IoctlHelper {
     void registerBOBindHandle(Drm *drm, DrmAllocation *drmAllocation) override;
     bool resourceRegistrationEnabled() override { return true; }
     bool isPreemptionSupported() override { return true; }
+    virtual bool isEuPerDssTopologyType(uint16_t topologyType) const;
 
   protected:
     static constexpr uint32_t maxContextSetProperties = 4;
@@ -151,7 +150,7 @@ class IoctlHelperXe : public IoctlHelper {
     int debuggerOpenIoctl(DrmIoctl request, void *arg);
     int debuggerMetadataCreateIoctl(DrmIoctl request, void *arg);
     int debuggerMetadataDestroyIoctl(DrmIoctl request, void *arg);
-    int getRunaloneExtProperty();
+    int getEudebugExtProperty();
     virtual bool isExtraEngineClassAllowed(uint16_t engineClass) const { return false; }
     virtual std::optional<uint32_t> getCxlType() { return {}; }
     virtual uint32_t getNumEngines(uint64_t *enginesData) const;
@@ -174,10 +173,10 @@ class IoctlHelperXe : public IoctlHelper {
         uint16_t revision;
     };
     bool queryHwIpVersion(GtIpVersion &gtIpVersion);
-    static bool isEuPerDssTopologyType(uint16_t topologyType);
 
     int maxExecQueuePriority = 0;
     std::mutex xeLock;
+    std::mutex gemCloseLock;
     std::vector<BindInfo> bindInfo;
     std::vector<uint32_t> hwconfig;
     std::vector<XeDrm::drm_xe_engine_class_instance> contextParamEngine;
@@ -213,10 +212,8 @@ class IoctlHelperXe : public IoctlHelper {
     struct SupportedFeatures {
         union {
             struct {
-                uint32_t vmBindReadOnly : 1;
-                uint32_t vmBindImmediate : 1;
                 uint32_t pageFault : 1;
-                uint32_t reserved : 29;
+                uint32_t reserved : 31;
             } flags;
             uint32_t allFlags = 0;
         };

@@ -119,9 +119,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
 
     EncodeDispatchKernel<Family>::encodeEuSchedulingPolicy(&idd, kernelDescriptor, args.defaultPipelinedThreadArbitrationPolicy);
 
-    auto &gfxCoreHelper = args.device->getGfxCoreHelper();
-    auto slmSize = static_cast<uint32_t>(
-        gfxCoreHelper.computeSlmValues(hwInfo, args.dispatchInterface->getSlmTotalSize()));
+    auto slmSize = EncodeDispatchKernel<Family>::computeSlmValues(hwInfo, args.dispatchInterface->getSlmTotalSize());
 
     if (debugManager.flags.OverrideSlmAllocationSize.get() != -1) {
         slmSize = static_cast<uint32_t>(debugManager.flags.OverrideSlmAllocationSize.get());
@@ -262,7 +260,6 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
             }
 
             offsetThreadData = (is64bit ? heap->getHeapGpuStartOffset() : heap->getHeapGpuBase()) + static_cast<uint64_t>(heap->getUsed() - sizeThreadData - args.reserveExtraPayloadSpace);
-            auto &rootDeviceEnvironment = args.device->getRootDeviceEnvironment();
             if (pImplicitArgs) {
                 offsetThreadData -= sizeForImplicitArgsStruct;
                 pImplicitArgs->localIdTablePtr = heap->getGraphicsAllocation()->getGpuAddress() + heap->getUsed() - iohRequiredSize;
@@ -413,22 +410,25 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
         args.device->getDeviceInfo().maxFrontEndThreads};
     EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(rootDeviceEnvironment, walkerCmd, walkerArgs);
 
-    PreemptionHelper::applyPreemptionWaCmdsBegin<Family>(listCmdBufferStream, *args.device);
-
+    uint32_t workgroupSize = args.dispatchInterface->getGroupSize()[0] * args.dispatchInterface->getGroupSize()[1] * args.dispatchInterface->getGroupSize()[2];
+    bool isRequiredWorkGroupOrder = args.requiredDispatchWalkOrder != NEO::RequiredDispatchWalkOrder::none;
     if (args.partitionCount > 1 && !args.isInternal) {
         const uint64_t workPartitionAllocationGpuVa = args.device->getDefaultEngine().commandStreamReceiver->getWorkPartitionAllocationGpuAddress();
 
         ImplicitScalingDispatchCommandArgs implicitScalingArgs{
-            workPartitionAllocationGpuVa,                                                    // workPartitionAllocationGpuVa
-            &hwInfo,                                                                         // hwInfo
-            &args.outWalkerPtr,                                                              // outWalkerPtr
-            args.requiredPartitionDim,                                                       // requiredPartitionDim
-            args.partitionCount,                                                             // partitionCount
-            !(container.getFlushTaskUsedForImmediate() || container.isUsingPrimaryBuffer()), // useSecondaryBatchBuffer
-            !args.isKernelDispatchedFromImmediateCmdList,                                    // apiSelfCleanup
-            args.dcFlushEnable,                                                              // dcFlush
-            gfxCoreHelper.singleTileExecImplicitScalingRequired(args.isCooperative),         // forceExecutionOnSingleTile
-            args.makeCommandView};                                                           // blockDispatchToCommandBuffer
+            workPartitionAllocationGpuVa,                                                            // workPartitionAllocationGpuVa
+            &hwInfo,                                                                                 // hwInfo
+            &args.outWalkerPtr,                                                                      // outWalkerPtr
+            args.requiredPartitionDim,                                                               // requiredPartitionDim
+            args.partitionCount,                                                                     // partitionCount
+            workgroupSize,                                                                           // workgroupSize
+            args.maxWgCountPerTile,                                                                  // maxWgCountPerTile
+            !(container.getFlushTaskUsedForImmediate() || container.isUsingPrimaryBuffer()),         // useSecondaryBatchBuffer
+            !args.isKernelDispatchedFromImmediateCmdList,                                            // apiSelfCleanup
+            args.dcFlushEnable,                                                                      // dcFlush
+            EncodeDispatchKernel<Family>::singleTileExecImplicitScalingRequired(args.isCooperative), // forceExecutionOnSingleTile
+            args.makeCommandView,                                                                    // blockDispatchToCommandBuffer
+            isRequiredWorkGroupOrder};                                                               // isRequiredWorkGroupOrder
 
         ImplicitScalingDispatch<Family>::dispatchCommands(*listCmdBufferStream,
                                                           walkerCmd,
@@ -437,6 +437,8 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
         args.partitionCount = implicitScalingArgs.partitionCount;
     } else {
         args.partitionCount = 1;
+        EncodeDispatchKernel<Family>::setWalkerRegionSettings(walkerCmd, hwInfo, args.partitionCount, workgroupSize, args.maxWgCountPerTile, isRequiredWorkGroupOrder);
+
         if (!args.makeCommandView) {
             auto buffer = listCmdBufferStream->getSpaceForCmd<WalkerType>();
             args.outWalkerPtr = buffer;
@@ -449,7 +451,6 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
     }
 
     if (!args.makeCommandView) {
-        PreemptionHelper::applyPreemptionWaCmdsEnd<Family>(listCmdBufferStream, *args.device);
 
         if (NEO::PauseOnGpuProperties::pauseModeAllowed(NEO::debugManager.flags.PauseOnEnqueue.get(), args.device->debugExecutionCounter.load(), NEO::PauseOnGpuProperties::PauseMode::AfterWorkload)) {
             void *commandBuffer = listCmdBufferStream->getSpace(MemorySynchronizationCommands<Family>::getSizeForBarrierWithPostSyncOperation(rootDeviceEnvironment, false));
@@ -983,6 +984,82 @@ void EncodeDispatchKernel<Family>::forceComputeWalkerPostSyncFlushWithWrite(Walk
 }
 
 template <typename Family>
+uint32_t EncodeDispatchKernel<Family>::alignSlmSize(uint32_t slmSize) {
+    const uint32_t alignedSlmSizes[] = {
+        0u,
+        1u * MemoryConstants::kiloByte,
+        2u * MemoryConstants::kiloByte,
+        4u * MemoryConstants::kiloByte,
+        8u * MemoryConstants::kiloByte,
+        16u * MemoryConstants::kiloByte,
+        24u * MemoryConstants::kiloByte,
+        32u * MemoryConstants::kiloByte,
+        48u * MemoryConstants::kiloByte,
+        64u * MemoryConstants::kiloByte,
+        96u * MemoryConstants::kiloByte,
+        128u * MemoryConstants::kiloByte,
+    };
+
+    for (auto &alignedSlmSize : alignedSlmSizes) {
+        if (slmSize <= alignedSlmSize) {
+            return alignedSlmSize;
+        }
+    }
+
+    UNRECOVERABLE_IF(true);
+    return 0;
+}
+
+template <typename Family>
+uint32_t EncodeDispatchKernel<Family>::computeSlmValues(const HardwareInfo &hwInfo, uint32_t slmSize) {
+    using SHARED_LOCAL_MEMORY_SIZE = typename Family::INTERFACE_DESCRIPTOR_DATA::SHARED_LOCAL_MEMORY_SIZE;
+    auto alignedSlmSize = EncodeDispatchKernel<Family>::alignSlmSize(slmSize);
+
+    if (alignedSlmSize == 0u) {
+        return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_0K;
+    }
+
+    UNRECOVERABLE_IF(slmSize > 128u * MemoryConstants::kiloByte);
+
+    if (alignedSlmSize > 96u * MemoryConstants::kiloByte) {
+        return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_128K;
+    }
+    if (alignedSlmSize > 64u * MemoryConstants::kiloByte) {
+        return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_96K;
+    }
+    if (alignedSlmSize > 48u * MemoryConstants::kiloByte) {
+        return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_64K;
+    }
+    if (alignedSlmSize > 32u * MemoryConstants::kiloByte) {
+        return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_48K;
+    }
+    if (alignedSlmSize > 24u * MemoryConstants::kiloByte) {
+        return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_32K;
+    }
+    if (alignedSlmSize > 16u * MemoryConstants::kiloByte) {
+        return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_24K;
+    }
+    if (alignedSlmSize > 8u * MemoryConstants::kiloByte) {
+        return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_16K;
+    }
+    if (alignedSlmSize > 4u * MemoryConstants::kiloByte) {
+        return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_8K;
+    }
+    if (alignedSlmSize > 2u * MemoryConstants::kiloByte) {
+        return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_4K;
+    }
+    if (alignedSlmSize > 1u * MemoryConstants::kiloByte) {
+        return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_2K;
+    }
+    return SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_1K;
+}
+
+template <typename Family>
+bool EncodeDispatchKernel<Family>::singleTileExecImplicitScalingRequired(bool cooperativeKernel) {
+    return cooperativeKernel;
+}
+
+template <typename Family>
 size_t EncodeStates<Family>::getSshHeapSize() {
     return 2 * MemoryConstants::megaByte;
 }
@@ -993,5 +1070,4 @@ void InOrderPatchCommandHelpers::PatchCmd<Family>::patchComputeWalker(uint64_t a
     auto &postSync = walkerCmd->getPostSync();
     postSync.setImmediateData(baseCounterValue + appendCounterValue);
 }
-
 } // namespace NEO

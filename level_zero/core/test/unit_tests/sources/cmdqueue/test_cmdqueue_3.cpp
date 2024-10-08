@@ -789,7 +789,7 @@ HWTEST2_F(EngineInstancedDeviceExecuteTests, givenEngineInstancedDeviceWithFabri
     commandQueue->destroy();
 }
 
-HWTEST2_F(CommandQueueIndirectAllocations, givenCtxWithIndirectAccessWhenExecutingCommandListImmediateWithFlushTaskThenHandleIndirectAccessCalled, IsAtLeastSkl) {
+HWTEST2_F(CommandQueueIndirectAllocations, givenCtxWithIndirectAccessWhenExecutingCommandListImmediateWithFlushTaskThenHandleIndirectAccessCalled, MatchAny) {
     ze_command_queue_desc_t desc = {};
     auto csr = neoDevice->getDefaultEngine().commandStreamReceiver;
     auto commandQueue = new MockCommandQueueHandleIndirectAllocs<gfxCoreFamily>(device, csr, &desc);
@@ -817,7 +817,7 @@ HWTEST2_F(CommandQueueIndirectAllocations, givenCtxWithIndirectAccessWhenExecuti
     commandQueue->destroy();
 }
 
-HWTEST2_F(CommandQueueIndirectAllocations, givenCtxWitNohIndirectAccessWhenExecutingCommandListImmediateWithFlushTaskThenHandleIndirectAccessNotCalled, IsAtLeastSkl) {
+HWTEST2_F(CommandQueueIndirectAllocations, givenCtxWitNohIndirectAccessWhenExecutingCommandListImmediateWithFlushTaskThenHandleIndirectAccessNotCalled, MatchAny) {
     ze_command_queue_desc_t desc = {};
     auto csr = neoDevice->getDefaultEngine().commandStreamReceiver;
     auto commandQueue = new MockCommandQueueHandleIndirectAllocs<gfxCoreFamily>(device, csr, &desc);
@@ -845,7 +845,7 @@ HWTEST2_F(CommandQueueIndirectAllocations, givenCtxWitNohIndirectAccessWhenExecu
     commandQueue->destroy();
 }
 
-HWTEST2_F(CommandQueueIndirectAllocations, givenCommandQueueWhenHandleIndirectAllocationResidencyCalledAndSubmitPackDiasabledThenMakeResidentAndMigrateCalled, IsAtLeastSkl) {
+HWTEST2_F(CommandQueueIndirectAllocations, givenCommandQueueWhenHandleIndirectAllocationResidencyCalledAndSubmitPackDiasabledThenMakeResidentAndMigrateCalled, MatchAny) {
     DebugManagerStateRestore restore;
     debugManager.flags.MakeIndirectAllocationsResidentAsPack.set(0);
 
@@ -1057,7 +1057,7 @@ size_t estimateAllCommmandLists(MockCommandQueueHw<gfxCoreFamily> *commandQueue,
 
 HWTEST2_F(CommandQueueTest, whenExecuteCommandListsIsCalledThenCorrectSizeOfFrontEndCmdsIsCalculatedAndCorrectStateIsSet, IsAtLeastXeHpCore) {
     DebugManagerStateRestore restorer;
-    debugManager.flags.AllowMixingRegularAndCooperativeKernels.set(1);
+
     debugManager.flags.AllowPatchingVfeStateInCommandLists.set(1);
     ze_command_queue_desc_t desc = {};
     NEO::CommandStreamReceiver *csr = nullptr;

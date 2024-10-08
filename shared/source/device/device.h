@@ -21,23 +21,25 @@
 #include <mutex>
 
 namespace NEO {
+class AILConfiguration;
 class BindlessHeapsHelper;
 class BuiltIns;
 class CompilerInterface;
-class ExecutionEnvironment;
+class CompilerProductHelper;
 class Debugger;
+class DebuggerL0;
+class ExecutionEnvironment;
+class GfxCoreHelper;
 class GmmClientContext;
 class GmmHelper;
-class SyncBufferHandler;
-enum class EngineGroupType : uint32_t;
-class DebuggerL0;
 class OSTime;
-class SubDevice;
-struct PhysicalDevicePciBusInfo;
-class GfxCoreHelper;
 class ProductHelper;
-class CompilerProductHelper;
 class ReleaseHelper;
+class SubDevice;
+class SyncBufferHandler;
+class UsmMemAllocPoolsManager;
+enum class EngineGroupType : uint32_t;
+struct PhysicalDevicePciBusInfo;
 
 struct SelectorCopyEngine : NonCopyableOrMovableClass {
     std::atomic<bool> isMainUsed = false;
@@ -190,9 +192,13 @@ class Device : public ReferenceTrackedObject<Device> {
     const GfxCoreHelper &getGfxCoreHelper() const;
     const ProductHelper &getProductHelper() const;
     const CompilerProductHelper &getCompilerProductHelper() const;
-    ReleaseHelper *getReleaseHelper() const;
+    MOCKABLE_VIRTUAL ReleaseHelper *getReleaseHelper() const;
+    MOCKABLE_VIRTUAL AILConfiguration *getAilConfigurationHelper() const;
     ISAPoolAllocator &getIsaPoolAllocator() {
         return isaPoolAllocator;
+    }
+    UsmMemAllocPoolsManager *getUsmMemAllocPoolsManager() {
+        return deviceUsmMemAllocPoolsManager.get();
     }
     MOCKABLE_VIRTUAL void stopDirectSubmissionAndWaitForCompletion();
     bool isAnyDirectSubmissionEnabled();
@@ -251,6 +257,7 @@ class Device : public ReferenceTrackedObject<Device> {
     void setAsEngineInstanced();
     void finalizeRayTracing();
     void createSecondaryContexts(const EngineControl &primaryEngine, SecondaryContexts &secondaryEnginesForType, uint32_t contextCount, uint32_t regularPriorityCount, uint32_t highPriorityContextCount);
+    void allocateDebugSurface(size_t debugSurfaceSize);
 
     DeviceInfo deviceInfo = {};
 
@@ -280,6 +287,7 @@ class Device : public ReferenceTrackedObject<Device> {
     GraphicsAllocation *debugSurface = nullptr;
 
     SelectorCopyEngine selectorCopyEngine = {};
+    EngineControl *hpCopyEngine = nullptr;
 
     DeviceBitfield deviceBitfield = 1;
 
@@ -289,6 +297,7 @@ class Device : public ReferenceTrackedObject<Device> {
     std::vector<RTDispatchGlobalsInfo *> rtDispatchGlobalsInfos;
 
     ISAPoolAllocator isaPoolAllocator;
+    std::unique_ptr<UsmMemAllocPoolsManager> deviceUsmMemAllocPoolsManager;
 
     struct {
         bool isValid = false;

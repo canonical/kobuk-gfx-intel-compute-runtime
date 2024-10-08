@@ -38,6 +38,7 @@
 #include "shared/test/common/os_interface/linux/sys_calls_linux_ult.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
+#include "clos_matchers.h"
 #include "gtest/gtest.h"
 
 #include <array>
@@ -5011,7 +5012,7 @@ TEST_F(DrmMemoryManagerTest, givenDrmAllocationWithHostPtrWhenItIsCreatedWithCac
     memoryManager->cleanOsHandles(storage, rootDeviceIndex);
 }
 
-HWTEST2_F(DrmMemoryManagerTest, givenDrmAllocationWithHostPtrWhenItIsCreatedWithIncorrectCacheRegionThenReturnNull, IsNotPVC) {
+HWTEST2_F(DrmMemoryManagerTest, givenDrmAllocationWithHostPtrWhenItIsCreatedWithIncorrectCacheRegionThenReturnNull, IsClosUnsupported) {
     mock->ioctlExpected.total = -1;
     auto drm = static_cast<DrmMockCustom *>(executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->osInterface->getDriverModel()->as<Drm>());
     drm->setupCacheInfo(*defaultHwInfo.get());
@@ -5027,7 +5028,7 @@ HWTEST2_F(DrmMemoryManagerTest, givenDrmAllocationWithHostPtrWhenItIsCreatedWith
     EXPECT_EQ(allocation, nullptr);
 }
 
-HWTEST2_F(DrmMemoryManagerTest, givenDrmAllocationWithWithAlignmentFromUserptrWhenItIsCreatedWithIncorrectCacheRegionThenReturnNull, IsNotPVC) {
+HWTEST2_F(DrmMemoryManagerTest, givenDrmAllocationWithWithAlignmentFromUserptrWhenItIsCreatedWithIncorrectCacheRegionThenReturnNull, IsClosUnsupported) {
     mock->ioctlExpected.total = -1;
     auto drm = static_cast<DrmMockCustom *>(executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->osInterface->getDriverModel()->as<Drm>());
     drm->setupCacheInfo(*defaultHwInfo.get());
@@ -7375,6 +7376,28 @@ TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenDrmWhenRetrieveMmapOffsetForBuf
 
     uint64_t offset = 0;
     auto ret = memoryManager->retrieveMmapOffsetForBufferObject(rootDeviceIndex, bo, 0, offset);
+
+    EXPECT_FALSE(ret);
+}
+
+TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenDrmWhenRetrieveMmapOffsetForBufferObjectFailsThenReturnFalseTestErrorDescription) {
+    mock->ioctlExpected.gemMmapOffset = 2;
+    BufferObject bo(rootDeviceIndex, mock, 3, 1, 1024, 0);
+    mock->failOnMmapOffset = true;
+
+    // To set the error value used to create the debug string in retrieveMmapOffsetForBufferObject()
+    mock->errnoValue = -2;
+
+    uint64_t offset = 0;
+    auto ret = memoryManager->retrieveMmapOffsetForBufferObject(rootDeviceIndex, bo, 0, offset);
+
+    const char *systemErrorDescription = nullptr;
+    executionEnvironment->getErrorDescription(&systemErrorDescription);
+
+    char expectedErrorDescription[256];
+    snprintf(expectedErrorDescription, 256, "ioctl(DRM_IOCTL_I915_GEM_MMAP_OFFSET) failed with %d. errno=%d(%s)\n", -1, mock->getErrno(), strerror(mock->getErrno()));
+
+    EXPECT_STREQ(expectedErrorDescription, systemErrorDescription);
 
     EXPECT_FALSE(ret);
 }

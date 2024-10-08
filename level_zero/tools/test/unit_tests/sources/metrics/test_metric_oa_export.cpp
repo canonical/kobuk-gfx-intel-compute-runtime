@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023 Intel Corporation
+ * Copyright (C) 2023-2024 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,7 +9,7 @@
 
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_driver.h"
-#include "level_zero/include/zet_intel_gpu_metric.h"
+#include "level_zero/include/zet_intel_gpu_metric_export.h"
 #include "level_zero/tools/source/metrics/metric_oa_source.h"
 #include "level_zero/tools/test/unit_tests/sources/metrics/mock_metric_oa.h"
 
@@ -44,7 +44,7 @@ class MetricExportDataOaTest : public Test<MetricMultiDeviceFixture> {
     template <typename T>
     T readUnaligned(T *unaligned) {
         T returnVal{};
-        memcpy(&returnVal, unaligned, sizeof(T));
+        memcpy(reinterpret_cast<uint8_t *>(&returnVal), reinterpret_cast<uint8_t *>(unaligned), sizeof(T));
         return returnVal;
     }
 

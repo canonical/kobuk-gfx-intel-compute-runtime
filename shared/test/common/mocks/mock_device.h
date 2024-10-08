@@ -17,6 +17,8 @@
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/mocks/mock_memory_operations_handler.h"
 
+#include "gtest/gtest.h"
+
 namespace NEO {
 class CommandStreamReceiver;
 class DriverInfo;
@@ -37,6 +39,10 @@ struct MockSubDevice : public SubDevice {
     using SubDevice::getGlobalMemorySize;
     using SubDevice::SubDevice;
 
+    ~MockSubDevice() override {
+        EXPECT_EQ(nullptr, this->getDebugSurface());
+    }
+
     std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const override {
         return std::unique_ptr<CommandStreamReceiver>(createCommandStreamReceiverFunc(*executionEnvironment, getRootDeviceIndex(), getDeviceBitfield()));
     }
@@ -50,6 +56,7 @@ class MockDevice : public RootDevice {
   public:
     using Device::addEngineToEngineGroup;
     using Device::allEngines;
+    using Device::allocateDebugSurface;
     using Device::commandStreamReceivers;
     using Device::createDeviceInternals;
     using Device::createEngine;
@@ -127,6 +134,8 @@ class MockDevice : public RootDevice {
         if (!executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface) {
             executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface = std::make_unique<MockMemoryOperations>();
         }
+
+        executionEnvironment->calculateMaxOsContextCount();
         T *device = new T(executionEnvironment, rootDeviceIndex);
         return createDeviceInternals(device);
     }
@@ -155,6 +164,9 @@ class MockDevice : public RootDevice {
 
     void finalizeRayTracing();
 
+    ReleaseHelper *getReleaseHelper() const override;
+    AILConfiguration *getAilConfigurationHelper() const override;
+
     void setRTDispatchGlobalsForceAllocation() {
         rtDispatchGlobalsForceAllocation = true;
     }
@@ -172,6 +184,8 @@ class MockDevice : public RootDevice {
     size_t maxParameterSizeFromIGC = 0u;
     bool rtDispatchGlobalsForceAllocation = true;
     bool stopDirectSubmissionCalled = false;
+    ReleaseHelper *mockReleaseHelper = nullptr;
+    AILConfiguration *mockAilConfigurationHelper = nullptr;
 };
 
 template <>

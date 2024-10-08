@@ -22,6 +22,7 @@
 
 struct _ze_kernel_handle_t {
     const uint64_t objMagic = objMagicValue;
+    static const zel_handle_type_t handleType = ZEL_HANDLE_KERNEL;
 };
 
 namespace NEO {
@@ -122,6 +123,7 @@ struct Kernel : _ze_kernel_handle_t, virtual NEO::DispatchKernelEncoderI {
 
     virtual ze_result_t destroy() = 0;
     virtual ze_result_t getBaseAddress(uint64_t *baseAddress) = 0;
+    virtual ze_result_t getKernelProgramBinary(size_t *kernelSize, char *pKernelBinary) = 0;
     virtual ze_result_t setIndirectAccess(ze_kernel_indirect_access_flags_t flags) = 0;
     virtual ze_result_t getIndirectAccess(ze_kernel_indirect_access_flags_t *flags) = 0;
     virtual ze_result_t getSourceAttributes(uint32_t *pSize, char **pString) = 0;
@@ -143,8 +145,7 @@ struct Kernel : _ze_kernel_handle_t, virtual NEO::DispatchKernelEncoderI {
     virtual void patchGlobalOffset() = 0;
     virtual void patchRegionParams(const CmdListKernelLaunchParams &launchParams) = 0;
 
-    virtual ze_result_t suggestMaxCooperativeGroupCount(uint32_t *totalGroupCount, NEO::EngineGroupType engineGroupType,
-                                                        bool isEngineInstanced) = 0;
+    virtual uint32_t suggestMaxCooperativeGroupCount(NEO::EngineGroupType engineGroupType, bool isEngineInstanced, bool forceSingleTileQuery) = 0;
     virtual ze_result_t setCacheConfig(ze_cache_config_flags_t flags) = 0;
 
     virtual ze_result_t getProfileInfo(zet_profile_properties_t *pProfileProperties) = 0;
@@ -187,8 +188,26 @@ struct Kernel : _ze_kernel_handle_t, virtual NEO::DispatchKernelEncoderI {
         return midThreadPreemptionDisallowedForRayTracingKernels;
     }
 
+    uint32_t getMaxWgCountPerTile(NEO::EngineGroupType engineGroupType) const {
+        auto value = maxWgCountPerTileCcs;
+        if (engineGroupType == NEO::EngineGroupType::renderCompute) {
+            value = maxWgCountPerTileRcs;
+        } else if (engineGroupType == NEO::EngineGroupType::cooperativeCompute) {
+            value = maxWgCountPerTileCooperative;
+        }
+        return value;
+    }
+
   protected:
+    uint32_t maxWgCountPerTileCcs = 0;
+    uint32_t maxWgCountPerTileRcs = 0;
+    uint32_t maxWgCountPerTileCooperative = 0;
     bool midThreadPreemptionDisallowedForRayTracingKernels = false;
+    bool heaplessEnabled = false;
+    bool implicitScalingEnabled = false;
+    bool localDispatchSupport = false;
+    bool rcsAvailable = false;
+    bool cooperativeSupport = false;
 };
 
 using KernelAllocatorFn = Kernel *(*)(Module *module);

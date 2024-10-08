@@ -12,10 +12,12 @@
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/cache_policy.h"
 #include "shared/source/helpers/constants.h"
+#include "shared/source/helpers/definitions/indirect_detection_versions.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/hw_mapper.h"
 #include "shared/source/helpers/local_memory_access_modes.h"
 #include "shared/source/helpers/preamble.h"
+#include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/source/kernel/kernel_properties.h"
 #include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
@@ -26,8 +28,10 @@
 #include "shared/source/unified_memory/usm_memory_support.h"
 
 #include "aubstream/engine_node.h"
+#include "ocl_igc_shared/indirect_access_detection/version.h"
 
 #include <bitset>
+#include <limits>
 
 namespace NEO {
 
@@ -67,9 +71,33 @@ bool ProductHelperHw<gfxProduct>::isTlbFlushRequired() const {
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-bool ProductHelperHw<gfxProduct>::isDetectIndirectAccessInKernelSupported(const KernelDescriptor &kernelDescriptor, const bool isPrecompiled, const uint32_t kernelIndirectDetectionVersion) const {
-    constexpr bool enabled = false;
-    return enabled;
+bool ProductHelperHw<gfxProduct>::isDetectIndirectAccessInKernelSupported(const KernelDescriptor &kernelDescriptor, const bool isPrecompiled, const uint32_t precompiledKernelIndirectDetectionVersion) const {
+    const bool isCMKernelHeuristic = kernelDescriptor.kernelAttributes.simdSize == 1;
+    const bool isZebin = kernelDescriptor.kernelAttributes.binaryFormat == DeviceBinaryFormat::zebin;
+    const auto currentIndirectDetectionVersion = isPrecompiled ? precompiledKernelIndirectDetectionVersion : INDIRECT_ACCESS_DETECTION_VERSION;
+    bool indirectDetectionValid = false;
+    if (isCMKernelHeuristic) {
+        if (IndirectDetectionVersions::disabled == getRequiredDetectIndirectVersionVC()) {
+            return false;
+        }
+        indirectDetectionValid = currentIndirectDetectionVersion >= getRequiredDetectIndirectVersionVC();
+    } else {
+        if (IndirectDetectionVersions::disabled == getRequiredDetectIndirectVersion()) {
+            return false;
+        }
+        indirectDetectionValid = currentIndirectDetectionVersion >= getRequiredDetectIndirectVersion();
+    }
+    return isZebin && indirectDetectionValid;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+uint32_t ProductHelperHw<gfxProduct>::getRequiredDetectIndirectVersion() const {
+    return IndirectDetectionVersions::disabled;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+uint32_t ProductHelperHw<gfxProduct>::getRequiredDetectIndirectVersionVC() const {
+    return IndirectDetectionVersions::disabled;
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -416,12 +444,24 @@ bool ProductHelperHw<gfxProduct>::isDcFlushMitigated() const {
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-bool ProductHelperHw<gfxProduct>::overridePatAndUsageForDcFlushMitigation(AllocationType allocationType) const {
+bool ProductHelperHw<gfxProduct>::overrideUsageForDcFlushMitigation(AllocationType allocationType) const {
+    return this->isDcFlushMitigated() && (this->overridePatToUCAndTwoWayCohForDcFlushMitigation(allocationType) || overridePatToUCAndOneWayCohForDcFlushMitigation(allocationType));
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::overridePatToUCAndTwoWayCohForDcFlushMitigation(AllocationType allocationType) const {
     return this->isDcFlushMitigated() &&
            (this->overrideCacheableForDcFlushMitigation(allocationType) ||
             allocationType == AllocationType::timestampPacketTagBuffer ||
             allocationType == AllocationType::tagBuffer ||
             allocationType == AllocationType::gpuTimestampDeviceBuffer);
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::overridePatToUCAndOneWayCohForDcFlushMitigation(AllocationType allocationType) const {
+    return this->isDcFlushMitigated() &&
+           (allocationType == AllocationType::internalHeap ||
+            allocationType == AllocationType::linearStream);
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -433,8 +473,6 @@ bool ProductHelperHw<gfxProduct>::overrideCacheableForDcFlushMitigation(Allocati
             allocationType == AllocationType::svmCpu ||
             allocationType == AllocationType::svmZeroCopy ||
             allocationType == AllocationType::internalHostMemory ||
-            allocationType == AllocationType::internalHeap ||
-            allocationType == AllocationType::linearStream ||
             allocationType == AllocationType::printfSurface);
 }
 
@@ -933,6 +971,11 @@ template <PRODUCT_FAMILY gfxProduct>
 uint64_t ProductHelperHw<gfxProduct>::getPatIndex(CacheRegion cacheRegion, CachePolicy cachePolicy) const {
     UNRECOVERABLE_IF(true);
     return -1;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isEvictionIfNecessaryFlagSupported() const {
+    return true;
 }
 
 } // namespace NEO

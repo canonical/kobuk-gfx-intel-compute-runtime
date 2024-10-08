@@ -140,7 +140,6 @@ class GfxCoreHelper {
     virtual size_t getTimestampPacketAllocatorAlignment() const = 0;
     virtual size_t getSingleTimestampPacketSize() const = 0;
     virtual void applyAdditionalCompressionSettings(Gmm &gmm, bool isNotCompressed) const = 0;
-    virtual bool isRunaloneModeRequired(DebuggingMode debuggingMode) const = 0;
     virtual void applyRenderCompressionFlag(Gmm &gmm, uint32_t isCompressed) const = 0;
     virtual bool unTypedDataPortCacheFlushRequired() const = 0;
     virtual bool isEngineTypeRemappingToHwSpecificRequired() const = 0;
@@ -180,7 +179,9 @@ class GfxCoreHelper {
     virtual bool areSecondaryContextsSupported() const = 0;
     virtual uint32_t getContextGroupContextsCount() const = 0;
     virtual uint32_t getContextGroupHpContextsCount(EngineGroupType type, bool hpEngineAvailable) const = 0;
+    virtual void adjustCopyEngineRegularContextCount(const size_t enginesCount, uint32_t &contextCount) const = 0;
     virtual aub_stream::EngineType getDefaultHpCopyEngine(const HardwareInfo &hwInfo) const = 0;
+    virtual void initializeDefaultHpCopyEngine(const HardwareInfo &hwInfo) = 0;
 
     virtual bool is48ResourceNeededForCmdBuffer() const = 0;
     virtual uint32_t getKernelPrivateMemSize(const KernelDescriptor &kernelDescriptor) const = 0;
@@ -376,8 +377,6 @@ class GfxCoreHelperHw : public GfxCoreHelper {
 
     void applyAdditionalCompressionSettings(Gmm &gmm, bool isNotCompressed) const override;
 
-    bool isRunaloneModeRequired(DebuggingMode debuggingMode) const override;
-
     void applyRenderCompressionFlag(Gmm &gmm, uint32_t isCompressed) const override;
 
     bool unTypedDataPortCacheFlushRequired() const override;
@@ -414,7 +413,9 @@ class GfxCoreHelperHw : public GfxCoreHelper {
     bool areSecondaryContextsSupported() const override;
     uint32_t getContextGroupContextsCount() const override;
     uint32_t getContextGroupHpContextsCount(EngineGroupType type, bool hpEngineAvailable) const override;
+    void adjustCopyEngineRegularContextCount(const size_t enginesCount, uint32_t &contextCount) const override;
     aub_stream::EngineType getDefaultHpCopyEngine(const HardwareInfo &hwInfo) const override;
+    void initializeDefaultHpCopyEngine(const HardwareInfo &hwInfo) override;
 
     bool is48ResourceNeededForCmdBuffer() const override;
 
@@ -438,6 +439,8 @@ class GfxCoreHelperHw : public GfxCoreHelper {
     ~GfxCoreHelperHw() override = default;
 
   protected:
+    aub_stream::EngineType hpCopyEngineType = aub_stream::EngineType::NUM_ENGINES;
+
     static const AuxTranslationMode defaultAuxTranslationMode;
     GfxCoreHelperHw() = default;
 };
@@ -504,7 +507,7 @@ struct MemorySynchronizationCommands {
     static bool isBarrierPriorToPipelineSelectWaRequired(const RootDeviceEnvironment &rootDeviceEnvironment);
     static void setBarrierExtraProperties(void *barrierCmd, PipeControlArgs &args);
 
-    static void encodeAdditionalTimestampOffsets(LinearStream &commandStream, uint64_t contextAddress, uint64_t globalAddress);
+    static void encodeAdditionalTimestampOffsets(LinearStream &commandStream, uint64_t contextAddress, uint64_t globalAddress, bool isBcs);
 };
 
 } // namespace NEO

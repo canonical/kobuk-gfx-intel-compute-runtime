@@ -62,7 +62,7 @@ void WddmResidencyController::trimResidency(const D3DDDI_TRIMRESIDENCYSET_FLAGS 
         auto lock = this->acquireLock();
         WddmAllocation *wddmAllocation = nullptr;
         auto &allocations = csr->getEvictionAllocations();
-        handlesToEvict.clear();
+        std::vector<D3DKMT_HANDLE> handlesToEvict;
         handlesToEvict.reserve(allocations.size());
         for (auto allocationIter = allocations.begin(); allocationIter != allocations.end();) {
             wddmAllocation = reinterpret_cast<WddmAllocation *>(*allocationIter);
@@ -102,13 +102,12 @@ void WddmResidencyController::trimResidency(const D3DDDI_TRIMRESIDENCYSET_FLAGS 
             allocationIter = allocations.erase(allocationIter);
         }
 
-        lock.unlock();
         this->wddm.evict(handlesToEvict.data(), static_cast<uint32_t>(handlesToEvict.size()), sizeToTrim, false);
     }
 
     if (flags.TrimToBudget) {
         auto lock = this->acquireLock();
-        trimResidencyToBudget(bytes, lock);
+        trimResidencyToBudget(bytes);
     }
 
     if (flags.PeriodicTrim || flags.RestartPeriodicTrim) {
@@ -119,7 +118,8 @@ void WddmResidencyController::trimResidency(const D3DDDI_TRIMRESIDENCYSET_FLAGS 
     perfLogResidencyTrimCallbackEnd(wddm.getResidencyLogger(), flags.Value, this, callbackStart);
 }
 
-bool WddmResidencyController::trimResidencyToBudget(uint64_t bytes, std::unique_lock<std::mutex> &lock) {
+bool WddmResidencyController::trimResidencyToBudget(uint64_t bytes) {
+    this->csr->drainPagingFenceQueue();
     uint64_t sizeToTrim = 0;
     uint64_t numberOfBytesToTrim = bytes;
     WddmAllocation *wddmAllocation = nullptr;
@@ -127,7 +127,7 @@ bool WddmResidencyController::trimResidencyToBudget(uint64_t bytes, std::unique_
 
     auto &allocations = csr->getEvictionAllocations();
     auto allocationIter = allocations.begin();
-    handlesToEvict.clear();
+    std::vector<D3DKMT_HANDLE> handlesToEvict;
     handlesToEvict.reserve(allocations.size());
     while (numberOfBytesToTrim > 0 && allocationIter != allocations.end()) {
         wddmAllocation = reinterpret_cast<WddmAllocation *>(*allocationIter);
@@ -177,10 +177,7 @@ bool WddmResidencyController::trimResidencyToBudget(uint64_t bytes, std::unique_
         allocationIter = allocations.erase(allocationIter);
     }
 
-    lock.unlock();
     this->wddm.evict(handlesToEvict.data(), static_cast<uint32_t>(handlesToEvict.size()), sizeToTrim, true);
-    lock.lock();
-
     return numberOfBytesToTrim == 0;
 }
 

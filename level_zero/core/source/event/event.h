@@ -25,6 +25,7 @@
 
 struct _ze_event_handle_t {
     const uint64_t objMagic = objMagicValue;
+    static const zel_handle_type_t handleType = ZEL_HANDLE_EVENT;
 };
 
 struct _ze_event_pool_handle_t {};
@@ -111,6 +112,8 @@ struct Event : _ze_event_handle_t {
         implicitlyDisabled
     };
 
+    static bool standaloneInOrderTimestampAllocationEnabled();
+
     template <typename TagSizeT>
     static Event *create(EventPool *eventPool, const ze_event_desc_t *desc, Device *device);
 
@@ -121,7 +124,7 @@ struct Event : _ze_event_handle_t {
 
     inline ze_event_handle_t toHandle() { return this; }
 
-    MOCKABLE_VIRTUAL NEO::GraphicsAllocation *getPoolAllocation(Device *device) const;
+    MOCKABLE_VIRTUAL NEO::GraphicsAllocation *getAllocation(Device *device) const;
 
     void setEventPool(EventPool *eventPool) { this->eventPool = eventPool; }
     EventPool *peekEventPool() { return this->eventPool; }
@@ -132,7 +135,7 @@ struct Event : _ze_event_handle_t {
     virtual uint64_t getPacketAddress(Device *device) = 0;
     MOCKABLE_VIRTUAL void resetPackets(bool resetAllPackets);
     virtual void resetKernelCountAndPacketUsedCount() = 0;
-    void *getHostAddress() const { return hostAddress; }
+    void *getHostAddress() const;
     virtual void setPacketsInUse(uint32_t value) = 0;
     uint32_t getCurrKernelDataIndex() const { return kernelCount - 1; }
     MOCKABLE_VIRTUAL void setGpuStartTimestamp();
@@ -332,7 +335,7 @@ struct Event : _ze_event_handle_t {
     MetricCollectorEventNotify *metricNotification = nullptr;
     NEO::MultiGraphicsAllocation *eventPoolAllocation = nullptr;
     StackVec<NEO::CommandStreamReceiver *, 1> csrs;
-    void *hostAddress = nullptr;
+    void *hostAddressFromPool = nullptr;
     Device *device = nullptr;
     std::weak_ptr<Kernel> kernelWithPrintf = std::weak_ptr<Kernel>{};
     std::mutex *kernelWithPrintfDeviceMutex = nullptr;

@@ -51,7 +51,7 @@ Event *Event::create(const EventDescriptor &eventDescriptor, const ze_event_desc
 
     event->totalEventSize = eventDescriptor.totalEventSize;
     event->eventPoolOffset = desc->index * event->totalEventSize;
-    event->hostAddress = ptrOffset(baseHostAddress, event->eventPoolOffset);
+    event->hostAddressFromPool = ptrOffset(baseHostAddress, event->eventPoolOffset);
     event->signalScope = desc->signal;
     event->waitScope = desc->wait;
     event->csrs.push_back(csr);
@@ -71,12 +71,6 @@ Event *Event::create(const EventDescriptor &eventDescriptor, const ze_event_desc
     }
     event->setUsingContextEndOffset(useContextEndOffset);
 
-    // do not reset even if it has been imported, since event pool
-    // might have been imported after events being already signaled
-    if (event->isFromIpcPool == false) {
-        event->resetDeviceCompletionData(true);
-    }
-
     const auto frequency = device->getNEODevice()->getDeviceInfo().profilingTimerResolution;
     const auto maxKernelTsValue = maxNBitValue(hwInfo.capabilityTable.kernelTimestampValidBits);
     if (hwInfo.capabilityTable.kernelTimestampValidBits < 64u) {
@@ -92,6 +86,12 @@ Event *Event::create(const EventDescriptor &eventDescriptor, const ze_event_desc
 
     if (eventDescriptor.counterBasedFlags != 0 || NEO::debugManager.flags.ForceInOrderEvents.get() == 1) {
         event->enableCounterBasedMode(true, eventDescriptor.counterBasedFlags);
+    }
+
+    // do not reset even if it has been imported, since event pool
+    // might have been imported after events being already signaled
+    if (event->isFromIpcPool == false) {
+        event->resetDeviceCompletionData(true);
     }
 
     auto extendedDesc = reinterpret_cast<const ze_base_desc_t *>(desc->pNext);
@@ -139,6 +139,10 @@ Event *Event::create(EventPool *eventPool, const ze_event_desc_t *desc, Device *
         eventPool->getImportedIpcPool(),              // importedIpcPool
         eventPool->isIpcPoolFlagSet(),                // ipcPool
     };
+
+    if (eventPool->getCounterBasedFlags() != 0 && standaloneInOrderTimestampAllocationEnabled()) {
+        eventDescriptor.eventPoolAllocation = nullptr;
+    }
 
     Event *event = Event::create<TagSizeT>(eventDescriptor, desc, device);
     UNRECOVERABLE_IF(event == nullptr);
@@ -254,7 +258,7 @@ template <typename TagSizeT>
 TaskCountType EventImp<TagSizeT>::getTaskCount(const NEO::CommandStreamReceiver &csr) const {
     auto contextId = csr.getOsContext().getContextId();
 
-    TaskCountType taskCount = getPoolAllocation(this->device) ? getPoolAllocation(this->device)->getTaskCount(contextId) : 0;
+    TaskCountType taskCount = getAllocation(this->device) ? getAllocation(this->device)->getTaskCount(contextId) : 0;
 
     if (inOrderExecInfo) {
         if (inOrderExecInfo->getDeviceCounterAllocation()) {
@@ -277,13 +281,14 @@ void EventImp<TagSizeT>::downloadAllTbxAllocations() {
         csr->downloadAllocations(true, taskCount);
     }
 
-    for (auto &subDevice : this->device->getNEODevice()->getRootDevice()->getSubDevices()) {
-        for (auto const &engine : subDevice->getAllEngines()) {
-            auto taskCount = getTaskCount(*engine.commandStreamReceiver);
+    for (auto &engine : this->device->getNEODevice()->getMemoryManager()->getRegisteredEngines()[this->device->getRootDeviceIndex()]) {
+        if (!engine.commandStreamReceiver->isInitialized()) {
+            continue;
+        }
+        auto taskCount = getTaskCount(*engine.commandStreamReceiver);
 
-            if (taskCount != NEO::GraphicsAllocation::objectNotUsed) {
-                engine.commandStreamReceiver->downloadAllocations(false, taskCount);
-            }
+        if (taskCount != NEO::GraphicsAllocation::objectNotUsed) {
+            engine.commandStreamReceiver->downloadAllocations(false, taskCount);
         }
     }
 }
@@ -312,7 +317,7 @@ void EventImp<TagSizeT>::handleSuccessfulHostSynchronization() {
 
 template <typename TagSizeT>
 ze_result_t EventImp<TagSizeT>::queryStatusEventPackets() {
-    assignKernelEventCompletionData(this->hostAddress);
+    assignKernelEventCompletionData(getHostAddress());
     uint32_t queryVal = Event::STATE_CLEARED;
     uint32_t packets = 0;
     for (uint32_t i = 0; i < this->kernelCount; i++) {
@@ -333,7 +338,7 @@ ze_result_t EventImp<TagSizeT>::queryStatusEventPackets() {
     if (this->signalAllEventPackets) {
         if (packets < getMaxPacketsCount()) {
             uint32_t remainingPackets = getMaxPacketsCount() - packets;
-            auto remainingPacketSyncAddress = ptrOffset(this->hostAddress, packets * this->singlePacketSize);
+            auto remainingPacketSyncAddress = ptrOffset(getHostAddress(), packets * this->singlePacketSize);
             remainingPacketSyncAddress = ptrOffset(remainingPacketSyncAddress, this->getCompletionFieldOffset());
             for (uint32_t i = 0; i < remainingPackets; i++) {
                 void const *queryAddress = remainingPacketSyncAddress;
@@ -357,7 +362,7 @@ ze_result_t EventImp<TagSizeT>::queryStatusEventPackets() {
 template <typename TagSizeT>
 bool EventImp<TagSizeT>::tbxDownload(NEO::CommandStreamReceiver &csr, bool &downloadedAllocation, bool &downloadedInOrdedAllocation) {
     if (!downloadedAllocation) {
-        if (auto &alloc = *this->getPoolAllocation(this->device); alloc.isUsedByOsContext(csr.getOsContext().getContextId())) {
+        if (auto &alloc = *this->getAllocation(this->device); alloc.isUsedByOsContext(csr.getOsContext().getContextId())) {
             csr.downloadAllocation(alloc);
             downloadedAllocation = true;
         }
@@ -382,12 +387,18 @@ bool EventImp<TagSizeT>::tbxDownload(NEO::CommandStreamReceiver &csr, bool &down
 template <typename TagSizeT>
 void EventImp<TagSizeT>::tbxDownload(NEO::Device &device, bool &downloadedAllocation, bool &downloadedInOrdedAllocation) {
     for (auto const &engine : device.getAllEngines()) {
+        if (!engine.commandStreamReceiver->isInitialized()) {
+            continue;
+        }
         if (!tbxDownload(*engine.commandStreamReceiver, downloadedAllocation, downloadedInOrdedAllocation)) {
             break;
         }
     }
 
     for (auto &csr : device.getSecondaryCsrs()) {
+        if (!csr->isInitialized()) {
+            continue;
+        }
         if (!tbxDownload(*csr, downloadedAllocation, downloadedInOrdedAllocation)) {
             break;
         }
@@ -396,25 +407,24 @@ void EventImp<TagSizeT>::tbxDownload(NEO::Device &device, bool &downloadedAlloca
 
 template <typename TagSizeT>
 bool EventImp<TagSizeT>::handlePreQueryStatusOperationsAndCheckCompletion() {
-    if (this->eventPoolAllocation) {
-        if (metricNotification != nullptr) {
-            hostEventSetValue(metricNotification->getNotificationState());
+    if (metricNotification != nullptr && eventPoolAllocation) {
+        hostEventSetValue(metricNotification->getNotificationState());
+    }
+    if (this->tbxMode) {
+        bool downloadedAllocation = (eventPoolAllocation == nullptr);
+        bool downloadedInOrdedAllocation = (inOrderExecInfo.get() == nullptr);
+        if (inOrderExecInfo && inOrderExecInfo->isExternalMemoryExecInfo()) {
+            downloadedInOrdedAllocation = true;
+            DEBUG_BREAK_IF(true); //  external allocation - not able to download
         }
-        if (this->tbxMode) {
 
-            bool downloadedAllocation = (eventPoolAllocation == nullptr);
-            bool downloadedInOrdedAllocation = (inOrderExecInfo.get() == nullptr);
+        tbxDownload(*this->device->getNEODevice(), downloadedAllocation, downloadedInOrdedAllocation);
 
-            tbxDownload(*this->device->getNEODevice(), downloadedAllocation, downloadedInOrdedAllocation);
-
-            if (!downloadedAllocation || !downloadedInOrdedAllocation) {
-                for (auto &subDevice : this->device->getNEODevice()->getRootDevice()->getSubDevices()) {
-                    tbxDownload(*subDevice, downloadedAllocation, downloadedInOrdedAllocation);
-                }
+        if (!downloadedAllocation || !downloadedInOrdedAllocation) {
+            for (auto &subDevice : this->device->getNEODevice()->getRootDevice()->getSubDevices()) {
+                tbxDownload(*subDevice, downloadedAllocation, downloadedInOrdedAllocation);
             }
         }
-    } else {
-        DEBUG_BREAK_IF(this->tbxMode); // external allocation - not able to download
     }
 
     if (!this->isFromIpcPool && isAlreadyCompleted()) {
@@ -439,8 +449,11 @@ ze_result_t EventImp<TagSizeT>::queryStatus() {
 
 template <typename TagSizeT>
 ze_result_t EventImp<TagSizeT>::hostEventSetValueTimestamps(TagSizeT eventVal) {
+    if (isCounterBased() && !getAllocation(this->device)) {
+        return ZE_RESULT_SUCCESS;
+    }
 
-    auto baseHostAddr = this->hostAddress;
+    auto baseHostAddr = getHostAddress();
     auto baseGpuAddr = getGpuAddress(device);
 
     uint64_t timestampStart = static_cast<uint64_t>(eventVal);
@@ -458,7 +471,7 @@ ze_result_t EventImp<TagSizeT>::hostEventSetValueTimestamps(TagSizeT eventVal) {
     for (uint32_t i = 0; i < this->kernelCount; i++) {
         uint32_t packetsToSet = kernelEventCompletionData[i].getPacketsUsed();
         for (uint32_t j = 0; j < packetsToSet; j++, packets++) {
-            if (castToUint64(baseHostAddr) >= castToUint64(ptrOffset(this->hostAddress, totalEventSize))) {
+            if (castToUint64(baseHostAddr) >= castToUint64(ptrOffset(getHostAddress(), totalEventSize))) {
                 break;
             }
             copyDataToEventAlloc(ptrOffset(baseHostAddr, contextStartOffset), baseGpuAddr + contextStartOffset, sizeof(TagSizeT), timestampStart);
@@ -490,7 +503,7 @@ ze_result_t EventImp<TagSizeT>::hostEventSetValueTimestamps(TagSizeT eventVal) {
 
 template <typename TagSizeT>
 void EventImp<TagSizeT>::copyTbxData(uint64_t dstGpuVa, size_t copySize) {
-    auto alloc = getPoolAllocation(device);
+    auto alloc = getAllocation(device);
     if (!alloc) {
         DEBUG_BREAK_IF(true);
         return;
@@ -523,12 +536,16 @@ void EventImp<TagSizeT>::copyDataToEventAlloc(void *dstHostAddr, uint64_t dstGpu
 
 template <typename TagSizeT>
 ze_result_t EventImp<TagSizeT>::hostEventSetValue(TagSizeT eventVal) {
-    if (!hostAddress) {
+    if (!hostAddressFromPool && !this->inOrderTimestampNode) {
         return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
     }
 
     if (isEventTimestampFlagSet()) {
         return hostEventSetValueTimestamps(eventVal);
+    }
+
+    if (isCounterBased()) {
+        return ZE_RESULT_SUCCESS;
     }
 
     auto basePacketHostAddr = getCompletionFieldHostAddress();
@@ -546,7 +563,7 @@ ze_result_t EventImp<TagSizeT>::hostEventSetValue(TagSizeT eventVal) {
     for (uint32_t i = 0; i < kernelCount; i++) {
         uint32_t packetsToSet = kernelEventCompletionData[i].getPacketsUsed();
         for (uint32_t j = 0; j < packetsToSet; j++, packets++) {
-            if (castToUint64(packetHostAddr) >= castToUint64(ptrOffset(this->hostAddress, totalEventSize))) {
+            if (castToUint64(packetHostAddr) >= castToUint64(ptrOffset(getHostAddress(), totalEventSize))) {
                 break;
             }
 
@@ -729,7 +746,7 @@ void EventImp<TagSizeT>::synchronizeCounterBasedTimestampCompletionWithTimeout()
     uint64_t timeDiff = 0;
 
     do {
-        assignKernelEventCompletionData(hostAddress);
+        assignKernelEventCompletionData(getHostAddress());
         calculateProfilingData();
 
         timeDiff = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
@@ -744,7 +761,7 @@ ze_result_t EventImp<TagSizeT>::queryKernelTimestamp(ze_kernel_timestamp_result_
         return ZE_RESULT_NOT_READY;
     }
 
-    assignKernelEventCompletionData(hostAddress);
+    assignKernelEventCompletionData(getHostAddress());
     calculateProfilingData();
 
     if (isCounterBased() && contextEndTS == Event::STATE_CLEARED) {

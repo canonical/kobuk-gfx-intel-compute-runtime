@@ -41,6 +41,7 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
     using CommandStreamReceiver::CommandStreamReceiver;
     using CommandStreamReceiver::globalFenceAllocation;
     using CommandStreamReceiver::gpuHangCheckPeriod;
+    using CommandStreamReceiver::heaplessStateInitialized;
     using CommandStreamReceiver::immWritePostSyncWriteOffset;
     using CommandStreamReceiver::internalAllocationStorage;
     using CommandStreamReceiver::latestFlushedTaskCount;
@@ -51,6 +52,7 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
     using CommandStreamReceiver::osContext;
     using CommandStreamReceiver::ownershipMutex;
     using CommandStreamReceiver::preemptionAllocation;
+    using CommandStreamReceiver::primaryCsr;
     using CommandStreamReceiver::requiresInstructionCacheFlush;
     using CommandStreamReceiver::tagAddress;
     using CommandStreamReceiver::tagsMultiAllocation;
@@ -326,6 +328,7 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
     using CommandStreamReceiver::dispatchMode;
     using CommandStreamReceiver::feSupportFlags;
     using CommandStreamReceiver::globalFenceAllocation;
+    using CommandStreamReceiver::heaplessStateInitialized;
     using CommandStreamReceiver::heapStorageRequiresRecyclingTag;
     using CommandStreamReceiver::immWritePostSyncWriteOffset;
     using CommandStreamReceiver::isPreambleSent;
@@ -429,7 +432,7 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
     std::unique_ptr<uint8_t[]> storedTaskStream;
     size_t storedTaskStreamSize = 0;
 
-    int flushCalledCount = 0;
+    uint32_t flushCalledCount = 0;
     std::unique_ptr<CommandBuffer> recordedCommandBuffer = nullptr;
     ResidencyContainer copyOfAllocations;
     DispatchFlags passedDispatchFlags = DispatchFlagsHelper::createDefaultDispatchFlags();

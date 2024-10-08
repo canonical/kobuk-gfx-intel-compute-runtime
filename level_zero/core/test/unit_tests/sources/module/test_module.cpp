@@ -4612,9 +4612,7 @@ TEST_F(ModuleTests, givenFullyLinkedModuleAndSlmSizeExceedingLocalMemorySizeWhen
 
     std::string output = testing::internal::GetCapturedStderr();
     const std::string expectedPart = "Size of SLM (" + std::to_string(slmInlineSizeCopy) + ") larger than available (" + std::to_string(localMemSize) + ")\n";
-    EXPECT_TRUE(output.find(expectedPart));
-
-    Kernel::fromHandle(kernelHandle)->destroy();
+    EXPECT_NE(std::string::npos, output.find(expectedPart));
 }
 
 TEST_F(ModuleTests, givenFullyLinkedModuleWhenCreatingKernelThenDebugMsgOnPrivateAndScratchUsageIsPrinted) {
@@ -4968,7 +4966,7 @@ TEST_F(ModuleKernelImmDatasTest, givenDeviceOOMWhenMemoryManagerFailsToAllocateM
 };
 
 using MultiTileModuleTest = Test<MultiTileModuleFixture>;
-HWTEST2_F(MultiTileModuleTest, givenTwoKernelPrivateAllocsWhichExceedGlobalMemSizeOfSingleTileButNotEntireGlobalMemSizeThenPrivateMemoryShouldBeAllocatedPerDispatch, IsAtLeastSkl) {
+HWTEST2_F(MultiTileModuleTest, givenTwoKernelPrivateAllocsWhichExceedGlobalMemSizeOfSingleTileButNotEntireGlobalMemSizeThenPrivateMemoryShouldBeAllocatedPerDispatch, MatchAny) {
     auto devInfo = device->getNEODevice()->getDeviceInfo();
     auto kernelsNb = 2u;
     uint32_t margin128KB = 131072u;

@@ -909,7 +909,7 @@ void ModuleImp::createBuildOptions(const char *pBuildFlags, std::string &apiOpti
 
         createBuildExtraOptions(apiOptions, internalBuildOptions);
     }
-    if (NEO::ApiSpecificConfig::getBindlessMode(device->getNEODevice()->getReleaseHelper())) {
+    if (NEO::ApiSpecificConfig::getBindlessMode(*device->getNEODevice())) {
         NEO::CompilerOptions::concatenateAppend(internalBuildOptions, NEO::CompilerOptions::bindlessMode.str());
     }
 }
@@ -981,18 +981,6 @@ ze_result_t ModuleImp::createKernel(const ze_kernel_desc_t *desc,
         }
     } else {
         driverHandle->clearErrorDescription();
-    }
-
-    auto localMemSize = static_cast<uint32_t>(this->getDevice()->getNEODevice()->getDeviceInfo().localMemSize);
-    for (const auto &kernelImmutableData : this->getKernelImmutableDataVector()) {
-        auto slmInlineSize = kernelImmutableData->getDescriptor().kernelAttributes.slmInlineSize;
-        if (slmInlineSize > 0 && localMemSize < slmInlineSize) {
-            CREATE_DEBUG_STRING(str, "Size of SLM (%u) larger than available (%u)\n", slmInlineSize, localMemSize);
-            driverHandle->setErrorDescription(std::string(str.get()));
-            PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Size of SLM (%u) larger than available (%u)\n", slmInlineSize, localMemSize);
-            res = ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY;
-            break;
-        }
     }
 
     return res;

@@ -7,6 +7,7 @@
 
 #include "shared/source/command_container/implicit_scaling.h"
 #include "shared/source/command_stream/wait_status.h"
+#include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/bit_helpers.h"
 #include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/gfx_core_helper.h"
@@ -840,6 +841,12 @@ TEST_F(DeviceTest, givenNonEmptyAllocationsListAndUnproperAllocationTypeWhenRequ
     EXPECT_FALSE(deviceImp->allocationsForReuse->peekIsEmpty());
 }
 
+TEST_F(DeviceTest, givenNoOsInterfaceWhenUseCacheReservationApiThenUnsupportedFeatureErrorIsReturned) {
+    EXPECT_EQ(nullptr, neoDevice->getRootDeviceEnvironment().osInterface.get());
+    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, device->reserveCache(0, 0));
+    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, device->setCacheAdvice(nullptr, 0, ze_cache_ext_region_t::ZE_CACHE_EXT_REGION_ZE_CACHE_REGION_DEFAULT));
+}
+
 struct DeviceHostPointerTest : public ::testing::Test {
     void SetUp() override {
         executionEnvironment = new NEO::ExecutionEnvironment();
@@ -1423,12 +1430,18 @@ TEST_F(DeviceTest, givenCallToDevicePropertiesThenMaximumMemoryToBeAllocatedIsCo
     device->getProperties(&deviceProperties);
     EXPECT_EQ(deviceProperties.maxMemAllocSize, this->neoDevice->getDeviceInfo().maxMemAllocSize);
 
-    auto &gfxCoreHelper = neoDevice->getGfxCoreHelper();
     auto expectedSize = this->neoDevice->getDeviceInfo().globalMemSize;
-    if (!this->neoDevice->areSharedSystemAllocationsAllowed()) {
-        expectedSize = std::min(expectedSize, gfxCoreHelper.getMaxMemAllocSize());
+
+    auto &rootDeviceEnvironment = this->neoDevice->getRootDeviceEnvironment();
+    const auto &compilerProductHelper = rootDeviceEnvironment.getHelper<NEO::CompilerProductHelper>();
+    auto &gfxCoreHelper = rootDeviceEnvironment.getHelper<NEO::GfxCoreHelper>();
+
+    if (compilerProductHelper.isForceToStatelessRequired()) {
+        EXPECT_EQ(deviceProperties.maxMemAllocSize, expectedSize);
+    } else {
+        EXPECT_EQ(deviceProperties.maxMemAllocSize,
+                  std::min(ApiSpecificConfig::getReducedMaxAllocSize(expectedSize), gfxCoreHelper.getMaxMemAllocSize()));
     }
-    EXPECT_EQ(deviceProperties.maxMemAllocSize, expectedSize);
 }
 
 TEST_F(DeviceTest, givenNodeOrdinalFlagWhenCallAdjustCommandQueueDescThenDescOrdinalProperlySet) {
@@ -4613,7 +4626,7 @@ HWTEST_F(DeviceTest, givenContextGroupSupportedWhenGettingLowPriorityCsrThenCorr
     auto hwInfo = *NEO::defaultHwInfo;
     hwInfo.featureTable.flags.ftrCCSNode = true;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
-    hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 2;
+    hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 1;
 
     MockExecutionEnvironment mockExecutionEnvironment{&hwInfo};
     RAIIGfxCoreHelperFactory<MockGfxCoreHelper> raii(*mockExecutionEnvironment.rootDeviceEnvironments[rootDeviceIndex]);
@@ -4734,7 +4747,7 @@ HWTEST_F(DeviceTest, givenContextGroupSupportedWhenGettingHighPriorityCsrThenCor
 
         auto &secondaryEngines = neoMockDevice->secondaryEngines[EngineHelpers::mapCcsIndexToEngineType(index)];
 
-        ASSERT_EQ(8u, secondaryEngines.engines.size());
+        ASSERT_EQ(8u / hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled, secondaryEngines.engines.size());
 
         auto highPriorityIndex = secondaryEngines.regularEnginesTotal;
         ASSERT_LT(highPriorityIndex, static_cast<uint32_t>(secondaryEngines.engines.size()));

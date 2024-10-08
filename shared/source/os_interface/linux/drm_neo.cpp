@@ -16,6 +16,7 @@
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/gmm_helper/resource_info.h"
 #include "shared/source/helpers/basic_math.h"
+#include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/gfx_core_helper.h"
@@ -494,6 +495,8 @@ int Drm::setupHardwareInfo(const DeviceDescriptor *device, bool setupFeatureTabl
     if (systemInfo) {
         systemInfo->checkSysInfoMismatch(hwInfo);
         setupSystemInfo(hwInfo, systemInfo.get());
+        auto &compilerProductHelper = rootDeviceEnvironment.getHelper<CompilerProductHelper>();
+        compilerProductHelper.applyDeviceBlobFixesOnHwInfo(*hwInfo);
     }
     if (!queryMemoryInfo()) {
         setPerContextVMRequired(true);
@@ -613,6 +616,8 @@ int Drm::setupHardwareInfo(const DeviceDescriptor *device, bool setupFeatureTabl
 
     setupCacheInfo(*hwInfo);
     hwInfo->capabilityTable.deviceName = device->devName;
+
+    rootDeviceEnvironment.initializeGfxCoreHelperFromHwInfo();
 
     return 0;
 }
@@ -1267,11 +1272,11 @@ unsigned int Drm::bindDrmContext(uint32_t drmContextId, uint32_t deviceIndex, au
 }
 
 void Drm::waitForBind(uint32_t vmHandleId) {
-    if (pagingFence[vmHandleId] >= fenceVal[vmHandleId]) {
+    if (*ioctlHelper->getPagingFenceAddress(vmHandleId, nullptr) >= fenceVal[vmHandleId]) {
         return;
     }
     auto lock = this->lockBindFenceMutex();
-    auto fenceAddress = castToUint64(&this->pagingFence[vmHandleId]);
+    auto fenceAddress = castToUint64(ioctlHelper->getPagingFenceAddress(vmHandleId, nullptr));
     auto fenceValue = this->fenceVal[vmHandleId];
     lock.unlock();
 
@@ -1396,10 +1401,10 @@ void programUserFence(Drm *drm, OsContext *osContext, BufferObject *bo, VmBindEx
 
     if (drm->isPerContextVMRequired()) {
         auto osContextLinux = static_cast<OsContextLinux *>(osContext);
-        address = castToUint64(osContextLinux->getFenceAddr(vmHandleId));
+        address = castToUint64(ioctlHelper->getPagingFenceAddress(vmHandleId, osContextLinux));
         value = osContextLinux->getNextFenceVal(vmHandleId);
     } else {
-        address = castToUint64(drm->getFenceAddr(vmHandleId));
+        address = castToUint64(ioctlHelper->getPagingFenceAddress(vmHandleId, nullptr));
         value = drm->getNextFenceVal(vmHandleId);
     }
 
@@ -1530,7 +1535,7 @@ int Drm::bindBufferObject(OsContext *osContext, uint32_t vmHandleId, BufferObjec
         errno = 0;
         static_cast<DrmMemoryOperationsHandlerBind *>(this->rootDeviceEnvironment.memoryOperationsInterface.get())->evictUnusedAllocations(false, false);
         ret = changeBufferObjectBinding(this, osContext, vmHandleId, bo, true);
-        if ((getErrno() == ENOMEM) && ioctlHelper->isPageFaultSupported()) {
+        if ((getErrno() == ENOMEM) && pageFaultSupported) {
             DEBUG_BREAK_IF(true);
             bo->setIsLockable(false);
             ret = changeBufferObjectBinding(this, osContext, vmHandleId, bo, true);

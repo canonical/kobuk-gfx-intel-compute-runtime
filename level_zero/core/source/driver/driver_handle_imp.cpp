@@ -110,7 +110,7 @@ NEO::SVMAllocsManager *DriverHandleImp::getSvmAllocsManager() {
 }
 
 ze_result_t DriverHandleImp::getApiVersion(ze_api_version_t *version) {
-    *version = ZE_API_VERSION_1_5;
+    *version = ZE_API_VERSION_1_6;
     return ZE_RESULT_SUCCESS;
 }
 
@@ -404,7 +404,7 @@ void DriverHandleImp::initHostUsmAllocPool() {
     if (usmHostAllocPoolingEnabled) {
         NEO::SVMAllocsManager::UnifiedMemoryProperties memoryProperties(InternalMemoryType::hostUnifiedMemory, MemoryConstants::pageSize2M,
                                                                         rootDeviceIndices, deviceBitfields);
-        usmHostMemAllocPool.initialize(svmAllocsManager, memoryProperties, poolSize);
+        usmHostMemAllocPool.initialize(svmAllocsManager, memoryProperties, poolSize, 0u, 1 * MemoryConstants::megaByte);
     }
 }
 

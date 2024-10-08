@@ -402,23 +402,12 @@ uint32_t GfxCoreHelperHw<GfxFamily>::getMetricsLibraryGenId() const {
 
 template <typename GfxFamily>
 uint32_t GfxCoreHelperHw<GfxFamily>::alignSlmSize(uint32_t slmSize) const {
-    if (slmSize == 0u) {
-        return 0u;
-    }
-    slmSize = std::max(slmSize, 1024u);
-    slmSize = Math::nextPowerOfTwo(slmSize);
-    UNRECOVERABLE_IF(slmSize > 64u * MemoryConstants::kiloByte);
-    return slmSize;
+    return EncodeDispatchKernel<GfxFamily>::alignSlmSize(slmSize);
 }
 
 template <typename GfxFamily>
 uint32_t GfxCoreHelperHw<GfxFamily>::computeSlmValues(const HardwareInfo &hwInfo, uint32_t slmSize) const {
-    auto value = std::max(slmSize, 1024u);
-    value = Math::nextPowerOfTwo(value);
-    value = Math::getMinLsbSet(value);
-    value = value - 9;
-    DEBUG_BREAK_IF(value > 7);
-    return value * !!slmSize;
+    return EncodeDispatchKernel<GfxFamily>::computeSlmValues(hwInfo, slmSize);
 }
 
 template <typename GfxFamily>
@@ -550,9 +539,6 @@ const StackVec<size_t, 3> GfxCoreHelperHw<GfxFamily>::getDeviceSubGroupSizes() c
 }
 
 template <typename GfxFamily>
-void GfxCoreHelperHw<GfxFamily>::setExtraAllocationData(AllocationData &allocationData, const AllocationProperties &properties, const RootDeviceEnvironment &rootDeviceEnvironment) const {}
-
-template <typename GfxFamily>
 bool GfxCoreHelperHw<GfxFamily>::isBankOverrideRequired(const HardwareInfo &hwInfo, const ProductHelper &productHelper) const {
     return false;
 }
@@ -594,11 +580,6 @@ size_t GfxCoreHelperHw<GfxFamily>::getPreemptionAllocationAlignment() const {
 
 template <typename GfxFamily>
 void GfxCoreHelperHw<GfxFamily>::applyAdditionalCompressionSettings(Gmm &gmm, bool isNotCompressed) const {}
-
-template <typename GfxFamily>
-bool GfxCoreHelperHw<GfxFamily>::isRunaloneModeRequired(DebuggingMode debuggingMode) const {
-    return false;
-}
 
 template <typename GfxFamily>
 void GfxCoreHelperHw<GfxFamily>::applyRenderCompressionFlag(Gmm &gmm, uint32_t isCompressed) const {
@@ -740,9 +721,17 @@ uint32_t GfxCoreHelperHw<GfxFamily>::getContextGroupHpContextsCount(EngineGroupT
 }
 
 template <typename GfxFamily>
-aub_stream::EngineType GfxCoreHelperHw<GfxFamily>::getDefaultHpCopyEngine(const HardwareInfo &hwInfo) const {
+void GfxCoreHelperHw<GfxFamily>::adjustCopyEngineRegularContextCount(const size_t enginesCount, uint32_t &contextCount) const {
+}
 
-    return aub_stream::EngineType::NUM_ENGINES;
+template <typename GfxFamily>
+aub_stream::EngineType GfxCoreHelperHw<GfxFamily>::getDefaultHpCopyEngine(const HardwareInfo &hwInfo) const {
+    return hpCopyEngineType;
+}
+
+template <typename GfxFamily>
+void GfxCoreHelperHw<GfxFamily>::initializeDefaultHpCopyEngine(const HardwareInfo &hwInfo) {
+    hpCopyEngineType = aub_stream::EngineType::NUM_ENGINES;
 }
 
 template <typename GfxFamily>
@@ -752,7 +741,7 @@ bool GfxCoreHelperHw<GfxFamily>::is48ResourceNeededForCmdBuffer() const {
 
 template <typename GfxFamily>
 bool GfxCoreHelperHw<GfxFamily>::singleTileExecImplicitScalingRequired(bool cooperativeKernel) const {
-    return cooperativeKernel;
+    return EncodeDispatchKernel<GfxFamily>::singleTileExecImplicitScalingRequired(cooperativeKernel);
 }
 
 template <typename GfxFamily>
@@ -804,7 +793,7 @@ void *LriHelper<GfxFamily>::program(LinearStream *cmdStream, uint32_t address, u
 }
 
 template <typename GfxFamily>
-void MemorySynchronizationCommands<GfxFamily>::encodeAdditionalTimestampOffsets(LinearStream &commandStream, uint64_t contextAddress, uint64_t globalAddress) {
+void MemorySynchronizationCommands<GfxFamily>::encodeAdditionalTimestampOffsets(LinearStream &commandStream, uint64_t contextAddress, uint64_t globalAddress, bool isBcs) {
 }
 
 template <typename GfxFamily>

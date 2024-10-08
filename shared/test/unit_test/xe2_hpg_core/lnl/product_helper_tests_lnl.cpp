@@ -20,6 +20,7 @@
 
 #include "aubstream/product_family.h"
 #include "platforms.h"
+#include "wmtp_setup_lnl.inl"
 
 using namespace NEO;
 
@@ -87,6 +88,14 @@ LNLTEST_F(LnlProductHelper, givenCompilerProductHelperWhenGetDefaultHwIpVersionT
     EXPECT_EQ(compilerProductHelper->getDefaultHwIpVersion(), AOT::LNL_B0);
 }
 
+LNLTEST_F(LnlProductHelper, givenCompilerProductHelperWhenGetMidThreadPreemptionSupportThenCorrectValueIsSet) {
+    auto hwInfo = *defaultHwInfo;
+    hwInfo.featureTable.flags.ftrWalkerMTP = false;
+    EXPECT_FALSE(compilerProductHelper->isMidThreadPreemptionSupported(hwInfo));
+    hwInfo.featureTable.flags.ftrWalkerMTP = true;
+    EXPECT_EQ(wmtpSupported, compilerProductHelper->isMidThreadPreemptionSupported(hwInfo));
+}
+
 LNLTEST_F(LnlProductHelper, whenCheckPreferredAllocationMethodThenAllocateByKmdIsReturnedExceptTagBufferAndTimestampPacketTagBuffer) {
     DebugManagerStateRestore restorer;
     debugManager.flags.AllowDcFlush.set(1);
@@ -146,8 +155,6 @@ LNLTEST_F(LnlProductHelper, givenExternalHostPtrWhenMitigateDcFlushThenOverrideC
             allocationType == AllocationType::svmZeroCopy ||
             allocationType == AllocationType::internalHostMemory ||
             allocationType == AllocationType::commandBuffer ||
-            allocationType == AllocationType::internalHeap ||
-            allocationType == AllocationType::linearStream ||
             allocationType == AllocationType::printfSurface) {
             EXPECT_TRUE(productHelper->overrideAllocationCacheable(allocationData));
         } else {

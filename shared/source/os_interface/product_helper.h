@@ -135,7 +135,9 @@ class ProductHelper {
     virtual bool isDcFlushAllowed() const = 0;
     virtual bool isDcFlushMitigated() const = 0;
     virtual bool mitigateDcFlush() const = 0;
-    virtual bool overridePatAndUsageForDcFlushMitigation(AllocationType allocationType) const = 0;
+    virtual bool overrideUsageForDcFlushMitigation(AllocationType allocationType) const = 0;
+    virtual bool overridePatToUCAndTwoWayCohForDcFlushMitigation(AllocationType allocationType) const = 0;
+    virtual bool overridePatToUCAndOneWayCohForDcFlushMitigation(AllocationType allocationType) const = 0;
     virtual bool overrideCacheableForDcFlushMitigation(AllocationType allocationType) const = 0;
     virtual uint32_t computeMaxNeededSubSliceSpace(const HardwareInfo &hwInfo) const = 0;
     virtual bool getUuid(NEO::DriverModel *driverModel, const uint32_t subDeviceCount, const uint32_t deviceIndex, std::array<uint8_t, ProductHelper::uuidSize> &uuid) const = 0;
@@ -185,7 +187,9 @@ class ProductHelper {
     virtual bool useGemCreateExtInAllocateMemoryByKMD() const = 0;
     virtual bool isTlbFlushRequired() const = 0;
     virtual bool isDummyBlitWaRequired() const = 0;
-    virtual bool isDetectIndirectAccessInKernelSupported(const KernelDescriptor &kernelDescriptor, const bool isPrecompiled, const uint32_t kernelIndirectDetectionVersion) const = 0;
+    virtual bool isDetectIndirectAccessInKernelSupported(const KernelDescriptor &kernelDescriptor, const bool isPrecompiled, const uint32_t precompiledKernelIndirectDetectionVersion) const = 0;
+    virtual uint32_t getRequiredDetectIndirectVersion() const = 0;
+    virtual uint32_t getRequiredDetectIndirectVersionVC() const = 0;
     virtual bool isLinearStoragePreferred(bool isImage1d, bool forceLinearStorage) const = 0;
     virtual bool isTranslationExceptionSupported() const = 0;
     virtual uint32_t getMaxNumSamplers() const = 0;

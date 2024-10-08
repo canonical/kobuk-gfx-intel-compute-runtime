@@ -150,13 +150,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         this->indirectAllocationsAllowed = true;
     }
 
-    bool isMixingRegularAndCooperativeKernelsAllowed = NEO::debugManager.flags.AllowMixingRegularAndCooperativeKernels.get();
-    if ((!containsAnyKernel) || isMixingRegularAndCooperativeKernelsAllowed) {
-        containsCooperativeKernelsFlag = (containsCooperativeKernelsFlag || launchParams.isCooperative);
-    } else if (containsCooperativeKernelsFlag != launchParams.isCooperative) {
-        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-
+    containsCooperativeKernelsFlag = (containsCooperativeKernelsFlag || launchParams.isCooperative);
     if (kernel->usesSyncBuffer()) {
         auto retVal = (launchParams.isCooperative
                            ? programSyncBuffer(*kernel, *device->getNEODevice(), threadGroupDimensions)
@@ -191,6 +185,9 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     std::list<void *> additionalCommands;
 
     updateStreamProperties(*kernel, launchParams.isCooperative, threadGroupDimensions, launchParams.isIndirect);
+
+    auto maxWgCountPerTile = kernel->getMaxWgCountPerTile(this->engineGroupType);
+
     NEO::EncodeDispatchKernelArgs dispatchKernelArgs{
         0,                                                      // eventAddress
         static_cast<uint64_t>(Event::STATE_SIGNALED),           // postSyncImmValue
@@ -212,6 +209,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         launchParams.additionalSizeParam,                       // additionalSizeParam
         0,                                                      // partitionCount
         launchParams.reserveExtraPayloadSpace,                  // reserveExtraPayloadSpace
+        maxWgCountPerTile,                                      // maxWgCountPerTile
         NEO::ThreadArbitrationPolicy::NotPresent,               // defaultPipelinedThreadArbitrationPolicy
         launchParams.isIndirect,                                // isIndirect
         launchParams.isPredicate,                               // isPredicate

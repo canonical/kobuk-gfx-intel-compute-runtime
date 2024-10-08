@@ -296,6 +296,7 @@ TEST(DeviceCreation, givenMultiRootDeviceWhenTheyAreCreatedThenEachOsContextHasU
         executionEnvironment->rootDeviceEnvironments[i]->initGmm();
         executionEnvironment->rootDeviceEnvironments[i]->getMutableHardwareInfo()->capabilityTable.blitterOperationsSupported = true;
     }
+    executionEnvironment->calculateMaxOsContextCount();
 
     auto device1 = std::unique_ptr<MockDevice>(Device::create<MockDevice>(executionEnvironment, 0u));
     auto device2 = std::unique_ptr<MockDevice>(Device::create<MockDevice>(executionEnvironment, 1u));
@@ -355,8 +356,12 @@ TEST(DeviceCreation, givenMultiRootDeviceWhenTheyAreCreatedThenEachDeviceHasSepe
     executionEnvironment->prepareRootDeviceEnvironments(numDevices);
     for (auto i = 0u; i < executionEnvironment->rootDeviceEnvironments.size(); i++) {
         executionEnvironment->rootDeviceEnvironments[i]->setHwInfoAndInitHelpers(defaultHwInfo.get());
+
         executionEnvironment->rootDeviceEnvironments[i]->initGmm();
     }
+
+    executionEnvironment->calculateMaxOsContextCount();
+
     auto device = std::unique_ptr<MockDevice>(Device::create<MockDevice>(executionEnvironment, 0u));
     auto device2 = std::unique_ptr<MockDevice>(Device::create<MockDevice>(executionEnvironment, 1u));
 
@@ -373,6 +378,7 @@ TEST(DeviceCreation, givenMultiRootDeviceWhenTheyAreCreatedThenEachDeviceHasSepe
         executionEnvironment->rootDeviceEnvironments[i]->initGmm();
         executionEnvironment->rootDeviceEnvironments[i]->getMutableHardwareInfo()->capabilityTable.blitterOperationsSupported = true;
     }
+    executionEnvironment->calculateMaxOsContextCount();
 
     auto &gfxCoreHelper = executionEnvironment->rootDeviceEnvironments[0]->getHelper<GfxCoreHelper>();
     const auto &numGpgpuEngines = gfxCoreHelper.getGpgpuEngineInstances(*executionEnvironment->rootDeviceEnvironments[0]).size();
@@ -714,7 +720,7 @@ HWTEST_F(QueueFamiliesTests, givenComputeQueueWhenGettingQueueFamilyCapabilities
     EXPECT_EQ(static_cast<uint64_t>(CL_QUEUE_DEFAULT_CAPABILITIES_INTEL), device->getQueueFamilyCapabilities(NEO::EngineGroupType::renderCompute));
 }
 
-HWCMDTEST_F(IGFX_GEN8_CORE, QueueFamiliesTests, givenCopyQueueWhenGettingQueueFamilyCapabilitiesThenDoNotReturnUnsupportedOperations) {
+HWCMDTEST_F(IGFX_GEN12LP_CORE, QueueFamiliesTests, givenCopyQueueWhenGettingQueueFamilyCapabilitiesThenDoNotReturnUnsupportedOperations) {
     const cl_command_queue_capabilities_intel capabilitiesNotSupportedOnBlitter = CL_QUEUE_CAPABILITY_KERNEL_INTEL |
                                                                                   CL_QUEUE_CAPABILITY_FILL_BUFFER_INTEL |
                                                                                   CL_QUEUE_CAPABILITY_TRANSFER_IMAGE_INTEL |

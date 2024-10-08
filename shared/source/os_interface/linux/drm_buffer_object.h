@@ -83,7 +83,7 @@ class BufferObjectHandleWrapper {
     int boHandle{};
     uint32_t rootDeviceIndex{UINT32_MAX};
     Ownership ownership{Ownership::strong};
-    ControlBlock *controlBlock{};
+    ControlBlock *controlBlock{nullptr};
 };
 
 class BufferObject {
