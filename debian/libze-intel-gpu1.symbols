@@ -227,6 +227,7 @@ libze_intel_gpu.so.1 libze-intel-gpu1 #MINVER#
  zeInit@Base 24.35.30872.14
  zeInitTracing@Base 24.35.30872.14
  zeIntelGetDriverVersionString@Base 24.35.30872.14
+ zeIntelKernelGetBinaryExp@Base 24.39.31294.10
  zeKernelCreate@Base 24.35.30872.14
  zeKernelCreateTracing@Base 24.35.30872.14
  zeKernelDestroy@Base 24.35.30872.14
@@ -519,6 +520,7 @@ libze_intel_gpu.so.1 libze-intel-gpu1 #MINVER#
  zetGetMetricStreamerProcAddrTable@Base 24.35.30872.14
  zetGetModuleProcAddrTable@Base 24.35.30872.14
  zetGetTracerExpProcAddrTable@Base 24.35.30872.14
+ zetIntelDeviceGetConcurrentMetricGroupsExp@Base 24.39.31294.10
  zetKernelGetProfileInfo@Base 24.35.30872.14
  zetMetricCreateFromProgrammableExp@Base 24.35.30872.14
  zetMetricDestroyExp@Base 24.35.30872.14
@@ -554,7 +556,6 @@ libze_intel_gpu.so.1 libze-intel-gpu1 #MINVER#
  zetTracerExpSetEnabled@Base 24.35.30872.14
  zetTracerExpSetEpilogues@Base 24.35.30872.14
  zetTracerExpSetPrologues@Base 24.35.30872.14
- zexDeviceGetConcurrentMetricGroups@Base 24.35.30872.14
  zexDriverGetHostPointerBaseAddress@Base 24.35.30872.14
  zexDriverImportExternalPointer@Base 24.35.30872.14
  zexDriverReleaseImportedPointer@Base 24.35.30872.14
