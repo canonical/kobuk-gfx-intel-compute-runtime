@@ -1,4 +1,11 @@
-intel-compute-runtime (24.35.31294.9-1~24.10~ppa1) oracular; urgency=medium
+intel-compute-runtime (24.39.31294.10-1~24.10~ppa1) oracular; urgency=medium
+
+  * bump version to 24.39.31294.10
+  * update build flags to include eudebug and xe preliminary support
+
+ -- Pavel Androniychuk <pavel.androniychuk@intel.com>  Wed, 09 Oct 2024 08:45:17 -0700
+
+intel-compute-runtime (24.39.31294.9-1~24.10~ppa1) oracular; urgency=medium
 
   * bump version to 24.39.31294.9
 
