@@ -1,6 +1,10 @@
-intel-compute-runtime (24.39.31294.12-1~24.10~ppa1) oracular; urgency=medium
+intel-compute-runtime (24.39.31294.12-1~24.04~ppa1) noble; urgency=medium
 
+  [ Pavel Androniychuk ]
   * bump version to 24.39.31294.12
+
+  [ Shane McKee ]
+  * Create Noble version
 
  -- Pavel Androniychuk <pavel.androniychuk@intel.com>  Wed, 16 Oct 2024 16:29:13 -0700
 
