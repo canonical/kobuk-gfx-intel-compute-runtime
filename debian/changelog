@@ -1,3 +1,9 @@
+intel-compute-runtime (24.39.31294.12-1~24.10~ppa1) oracular; urgency=medium
+
+  * bump version to 24.39.31294.12
+
+ -- Pavel Androniychuk <pavel.androniychuk@intel.com>  Wed, 16 Oct 2024 16:29:13 -0700
+
 intel-compute-runtime (24.39.31294.10-1~24.10~ppa2) oracular; urgency=medium
 
   * Update libze-intel-gpu1 symbols file
