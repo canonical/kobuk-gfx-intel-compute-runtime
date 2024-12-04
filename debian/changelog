@@ -1,3 +1,9 @@
+intel-compute-runtime (24.45.31740.11-1~24.10~ppa1) oracular; urgency=medium
+
+  * Update version to 24.45.31740.11 
+
+ -- Pavel Androniychuk <pavel.androniychuk@intel.com>  Tue, 03 Dec 2024 16:51:45 -0800
+
 intel-compute-runtime (24.39.31294.20-1~24.10~ppa1) oracular; urgency=medium
 
   * bump version to 24.39.31294.20
